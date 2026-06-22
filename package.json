@@ -1,9 +1,15 @@
 {
-  "name": "parallix",
+  "name": "@magnus/parallix",
   "version": "1.0.0",
-  "description": "Parallix — AI mission workflow toolkit (provisional px runner, unpublished)",
+  "description": "parallix — AI mission workflow toolkit with a px CLI, distributed as a local npm tarball",
   "license": "AGPL-3.0-or-later",
-  "private": true,
+  "private": false,
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "restricted"
+  },
   "bin": {
     "px": "px.js"
   },

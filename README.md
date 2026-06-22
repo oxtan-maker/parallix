@@ -1,6 +1,6 @@
 # parallix Authority Reference
 
-Consolidated parallix workflow authority for the visualBoard AI mission lifecycle. The executable authority is the `parallix/` code; this file is its canonical markdown companion.
+Consolidated parallix workflow authority for the parallix AI mission lifecycle. The executable authority is the `parallix/` code; this file is its canonical markdown companion.
 
 Conflict resolution: `AGENTS.md` wins on hard rules and verification entrypoints; locked `MISSION.md` wins on mission-specific scope and stop rules; `parallix/` runtime code wins over this file.
 
@@ -232,12 +232,19 @@ Telemetry capture contract (task-1285):
 
 ---
 
-## Canonical packaging and install
+## Public distribution (canonical packaging and install)
 
-parallix is a Node.js toolkit that coordinates AI-assisted software missions
-through the lifecycle `backlog → draft → active → review → approved → done`.
-The packaged artifact is a local npm tarball, not a registry publish or a
-container image. The shortest supported path is:
+This is the one authoritative public distribution story for parallix. It is the
+near-term supported model; the architectural decision behind it is recorded in
+ADR 0044 (`docs/adr/0044-workflow-distribution-model.md`).
+
+**Supported acquisition/install path.** parallix is a Node.js toolkit (package
+name `@magnus/parallix`) that coordinates AI-assisted software missions through
+the lifecycle `backlog → draft → active → review → approved → done`. The
+supported artifact is a **local npm tarball built from this repository** — not a
+public registry install and not a container image. The package name is scoped so
+the unscoped `px` / `parallix` npm names are not relied upon. The shortest
+supported path is:
 
 ```sh
 npm pack ./parallix
@@ -259,16 +266,26 @@ PATCH bumps are the release discipline: bump before each `px integrate`, then
 reinstall from the new tarball after the integrate succeeds. That policy is
 documented release practice, not automatic CLI behavior.
 
-`px` still has two execution modes:
+**How the operator invokes `px`.** After the global install, `px <command>` is
+the installed runner; use `px shell-init` in your shell rc if you want mission
+transitions to `cd` your terminal into the next worktree. `px --version`
+identifies the executing `px.js` path so an accidental PATH collision with an
+unrelated `px` is visible.
 
-- `node parallix <command>` runs directly from source and never changes the
-  caller's shell directory.
-- `px <command>` is the globally installed runner; use `px shell-init` in your
-  shell rc if you want mission transitions to `cd` your terminal into the next
-  worktree.
+**What stays source-compatible for local development.** Running directly from a
+checkout is unchanged: `node parallix <command>` (equivalently `node index.js
+<command>`) runs from source, requires no install step, and never changes the
+caller's shell directory. The tarball install and the source run are the same
+code; the tarball only adds a versioned, globally linked `px`.
 
-The old enterprise walkthrough has been removed. The canonical packaging and
-install commands are the three shell lines above.
+**What is not yet supported.** The following are explicitly out of the near-term
+model and are not claimed to work today: publishing to the public npm registry
+(or any other registry), Homebrew, Docker images, standalone single-file
+binaries, and CI/release automation or signing. Distribution stays a manual
+`npm pack` + global install until a follow-up decision changes that.
+
+The old enterprise walkthrough has been removed. The supported packaging and
+install path is the three shell lines above.
 
 ## References
 

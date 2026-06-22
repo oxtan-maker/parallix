@@ -1,12 +1,12 @@
 ---
 name: review
-description: Use when the user explicitly asks for the visualBoard review workflow, including `/review` invocations. This is a thin launcher only; load and follow AGENTS.md, parallix/README.md, and docs/agent-prompts/review.md.
+description: Use when the user explicitly asks for the parallix review workflow, including `/review` invocations. This is a thin launcher only; load and follow AGENTS.md, parallix/README.md, and docs/agent-prompts/review.md.
 user-invocable: true
 ---
 
 # Review
 
-This skill is a thin entrypoint for the visualBoard review workflow.
+This skill is a thin entrypoint for the parallix review workflow.
 
 Load and follow:
 1. `AGENTS.md`

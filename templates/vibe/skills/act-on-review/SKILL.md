@@ -1,12 +1,12 @@
 ---
 name: act-on-review
-description: Use when the user explicitly asks to process review feedback for a visualBoard mission, including `/act-on-review` invocations. This is a thin launcher only; load and follow AGENTS.md, the locked MISSION.md, and docs/agent-prompts/act-on-review.md.
+description: Use when the user explicitly asks to process review feedback for a parallix mission, including `/act-on-review` invocations. This is a thin launcher only; load and follow AGENTS.md, the locked MISSION.md, and docs/agent-prompts/act-on-review.md.
 user-invocable: true
 ---
 
 # Act On Review
 
-This skill is a thin entrypoint for the visualBoard act-on-review workflow.
+This skill is a thin entrypoint for the parallix act-on-review workflow.
 
 Load and follow:
 1. `AGENTS.md`

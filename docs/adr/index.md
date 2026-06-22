@@ -12,7 +12,7 @@ ADR 0023 remains in WrGroceries and is cross-referenced here instead of copied.
 - `docs/adr/0041-integration-pipeline-gates.md` — Integration-time pipeline gates + per-area gate dehallucination: add staging-deploy + e2e gates before squash-merge, driven by repo-side config; remove hallucinated stage-e2e from `gate_web`
 - `docs/adr/0042-workflow-cli-color-rendering-approach.md` — Replace hand-rolled ANSI palette and buggy `useColor()` with Node.js built-in `util.styleText`; zero-dep color detection that handles NO_COLOR/FORCE_COLOR/TERM/TTY correctly
 - `docs/adr/0043-git-target-resolution-strategy.md` — Local-first git target resolution for workflow branch ancestry, with explicit invariants that keep rebase and integrate aligned
-- `docs/adr/0044-workflow-distribution-model.md` — parallix productization path with `px` naming, runtime/target-state boundary, and a 5-alternative decision matrix
+- `docs/adr/0044-workflow-distribution-model.md` — parallix productization path with `px` naming, runtime/target-state boundary, and a 5-alternative decision matrix; Accepted (2026-06-22, task-1331) on the near-term local npm tarball / global `px` install stance
 - `docs/adr/0045-parallax-branch-model.md` — Two integration modes (trunk-based and feature-branch), Forgejo as PR viewer only, `review` remote wiring, and branch naming conventions
 
 ## Cross-reference

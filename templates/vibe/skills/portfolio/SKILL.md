@@ -1,12 +1,12 @@
 ---
 name: portfolio
-description: Use when the user explicitly asks for the visualBoard portfolio workflow, including `/portfolio` invocations. This is a thin launcher only; load and follow AGENTS.md, parallix/README.md, and docs/agent-prompts/portfolio.md rather than inventing a parallel workflow.
+description: Use when the user explicitly asks for the parallix portfolio workflow, including `/portfolio` invocations. This is a thin launcher only; load and follow AGENTS.md, parallix/README.md, and docs/agent-prompts/portfolio.md rather than inventing a parallel workflow.
 user-invocable: true
 ---
 
 # Portfolio
 
-This skill is a thin entrypoint for the visualBoard portfolio workflow.
+This skill is a thin entrypoint for the parallix portfolio workflow.
 
 Load and follow:
 1. `AGENTS.md`

@@ -1,12 +1,12 @@
 ---
 name: integrate
-description: Use when the user explicitly asks for the visualBoard integration workflow, including `/integrate` invocations. This is a thin launcher only; load and follow AGENTS.md, parallix/README.md, and docs/agent-prompts/integrate.md.
+description: Use when the user explicitly asks for the parallix integration workflow, including `/integrate` invocations. This is a thin launcher only; load and follow AGENTS.md, parallix/README.md, and docs/agent-prompts/integrate.md.
 user-invocable: true
 ---
 
 # Integrate
 
-This skill is a thin entrypoint for the visualBoard integration workflow.
+This skill is a thin entrypoint for the parallix integration workflow.
 
 Load and follow:
 1. `AGENTS.md`

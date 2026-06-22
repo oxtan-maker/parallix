@@ -1,7 +1,42 @@
 # ADR 0044: Workflow Distribution Model for parallix
 
-Status: Proposed
+Status: Accepted
 Date: 2026-06-02
+Last updated: 2026-06-22 (task-1331 — public distribution stance locked)
+
+## 2026-06-22 Update: Public distribution stance (task-1331)
+
+parallix was pushed to public GitHub on 2026-06-22. This ADR is moved from
+`Proposed` to `Accepted` with one concrete near-term public distribution stance,
+so the public repo has a single authoritative answer for contributors and
+operators. The original Context/Decision/analysis below is preserved as the
+reasoning that produced this stance.
+
+**Accepted near-term model: local npm tarball, globally installed `px` CLI — no
+registry publish.** This is Alternative A (external runner / package boundary)
+realized as the simplest credible delivery for a freshly public repo:
+
+- The published package name is the scoped `@magnus/parallix`, resolving the
+  `px` namespace risk (this ADR, "`px` Namespace Risk", items 1–4). The unscoped
+  `px` / `parallix` npm names are not relied upon.
+- Acquisition is `npm pack` from this repo followed by a single global
+  `npm install -g <tarball>` (a user-writable `--prefix` is supported for
+  no-sudo installs). Reinstall replaces rather than accumulates runtimes.
+- `node parallix <command>` (source run) remains the compatibility baseline and
+  the local-development path; the tarball install is the same code with a
+  versioned global `px`.
+- `package.json` reflects this: `"private": false`, `"name": "@magnus/parallix"`,
+  `bin.px`, and a `files` allowlist. The operator-facing install/invoke/source-dev
+  story lives in `README.md` ("Public distribution (canonical packaging and
+  install)").
+
+**Still deferred (not accepted by this stance):** publishing to the public npm
+registry or any registry, standalone single-file binaries, Homebrew, Docker, and
+CI/release automation or signing. The enterprise no-source-copied artifact path
+(acceptance gate 6) and the per-command logging/dry-run audit (gate 7) remain
+open follow-up work; the accepted stance is the manual local-tarball path that is
+proven by the existing `px.js` runner, `files` allowlist, and Node test suite,
+not those still-open enterprise gates.
 
 ## Context
 

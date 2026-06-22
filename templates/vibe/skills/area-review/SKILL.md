@@ -1,12 +1,12 @@
 ---
 name: area-review
-description: Use when the user explicitly asks for the visualBoard per-area review flow, including `/area-review` invocations. This is a thin launcher only; load and follow AGENTS.md, parallix/README.md, and docs/agent-prompts/area-review.md.
+description: Use when the user explicitly asks for the parallix per-area review flow, including `/area-review` invocations. This is a thin launcher only; load and follow AGENTS.md, parallix/README.md, and docs/agent-prompts/area-review.md.
 user-invocable: true
 ---
 
 # Area Review
 
-This skill is a thin entrypoint for the visualBoard per-area review workflow.
+This skill is a thin entrypoint for the parallix per-area review workflow.
 
 Load and follow:
 1. `AGENTS.md`
