@@ -3,14 +3,13 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { execFileSync } = require('child_process');
 
 const config = require('../lib/commands/config');
 
-function withTempDir(fn) {
+async function withTempDir(fn) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-config-command-'));
   try {
-    fn(root);
+    await fn(root);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -29,43 +28,42 @@ function runConfig(root) {
 }
 
 test('config reports malformed JSON as fallback defaults and exits non-zero', async () => {
-  await new Promise((resolve, reject) => withTempDir(root => {
+  await withTempDir(async root => {
     fs.writeFileSync(path.join(root, 'workflow.config.json'), '{ invalid');
-    runConfig(root).then(result => {
-      assert.equal(result.exitCode, 1);
-      assert.match(result.errors.join('\n'), /invalid JSON/);
-      assert.match(result.errors.join('\n'), /fallback built-in defaults/);
-      resolve();
-    }, reject);
-  }));
+    const result = await runConfig(root);
+    assert.equal(result.exitCode, 1);
+    assert.match(result.errors.join('\n'), /invalid JSON/);
+    assert.match(result.errors.join('\n'), /fallback built-in defaults/);
+  });
 });
 
 test('config reports structurally invalid overrides as fallback defaults and exits non-zero', async () => {
-  await new Promise((resolve, reject) => withTempDir(root => {
+  await withTempDir(async root => {
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: [] }));
-    runConfig(root).then(result => {
-      assert.equal(result.exitCode, 1);
-      assert.match(result.errors.join('\n'), /structurally invalid/);
-      assert.match(result.errors.join('\n'), /adapters must be an object/);
-      assert.doesNotMatch(result.logs.join('\n'), /built-in defaults \+/);
-      resolve();
-    }, reject);
-  }));
+    const result = await runConfig(root);
+    assert.equal(result.exitCode, 1);
+    assert.match(result.errors.join('\n'), /structurally invalid/);
+    assert.match(result.errors.join('\n'), /adapters must be an object/);
+    assert.doesNotMatch(result.logs.join('\n'), /built-in defaults \+/);
+  });
 });
 
 test('config leaves a non-git standalone directory unchanged', () => {
-  withTempDir(root => {
+  return withTempDir(async root => {
     fs.mkdirSync(path.join(root, 'workflow'));
     fs.writeFileSync(path.join(root, 'workflow', 'index.js'), '// standalone marker\n');
     fs.writeFileSync(path.join(root, 'workflow.config.json'), '{}\n');
     fs.writeFileSync(path.join(root, 'existing.txt'), 'unrelated adopter content\n');
 
-    execFileSync(process.execPath, [path.join(__dirname, '..', 'index.js'), 'config'], {
-      cwd: root,
-      stdio: 'pipe',
+    const result = await config([], {
+      rootDir: root,
+      logFn: () => {},
+      errorFn: () => {},
+      exitFn: () => {},
     });
 
     assert.equal(fs.existsSync(path.join(root, '.git')), false);
     assert.equal(fs.readFileSync(path.join(root, 'existing.txt'), 'utf8'), 'unrelated adopter content\n');
+    assert.equal(result, undefined);
   });
 });

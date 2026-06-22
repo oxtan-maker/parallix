@@ -5,6 +5,9 @@ const os = require('os');
 const path = require('path');
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { EventEmitter } = require('node:events');
+const childProcess = require('node:child_process');
+const { mock } = test;
 const { Writable } = require('node:stream');
 
 const { spawnAndTee, DEFAULT_MAX_TAIL_BYTES } = require('../lib/core/spawn-tee');
@@ -17,11 +20,55 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function createMockChild(config = {}) {
+  const child = new EventEmitter();
+  child.pid = config.pid || 1234;
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+
+  const emitChunks = (stream, chunks = [], delayMs = 0) => {
+    chunks.forEach((chunk, index) => {
+      const payload = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
+      setTimeout(() => stream.emit('data', payload), delayMs + index * (config.chunkGapMs || 0));
+    });
+  };
+
+  if (config.error) {
+    setImmediate(() => child.emit('error', config.error));
+  } else {
+    emitChunks(child.stdout, config.stdoutChunks, config.stdoutDelayMs || 0);
+    emitChunks(child.stderr, config.stderrChunks, config.stderrDelayMs || 0);
+    const closeDelayMs = config.closeDelayMs ?? Math.max(config.stdoutDelayMs || 0, config.stderrDelayMs || 0) + 1;
+    const status = config.status === undefined ? 0 : config.status;
+    const signal = config.signal === undefined ? null : config.signal;
+    setTimeout(() => child.emit('close', status, signal), closeDelayMs);
+  }
+
+  return child;
+}
+
+async function withMockSpawn(config, fn) {
+  const observed = [];
+  const mocked = mock.method(childProcess, 'spawn', (command, args, options) => {
+    observed.push({ command, args, options });
+    return createMockChild(config);
+  });
+  try {
+    return await fn(observed);
+  } finally {
+    mocked.mock.restore();
+  }
+}
+
 test('spawnAndTee retains the full transcript when output stays under the cap', async () => {
-  const result = await spawnAndTee(process.execPath, ['-e', 'process.stdout.write("hello"); process.stderr.write("world");'], {
+  const result = await withMockSpawn({
+    stdoutChunks: ['hello'],
+    stderrChunks: ['world'],
+    status: 0
+  }, async () => spawnAndTee('mock-node', [], {
     stdoutSink: noopSink(),
     stderrSink: noopSink()
-  });
+  }));
   assert.equal(result.status, 0);
   assert.equal(result.stdout, 'hello');
   assert.equal(result.stderr, 'world');
@@ -44,11 +91,14 @@ test('spawnAndTee bounds the in-memory transcript via maxTailBytes', async () =>
     }
     tick();
   `;
-  const result = await spawnAndTee(process.execPath, ['-e', script], {
+  const result = await withMockSpawn({
+    stdoutChunks: Array.from({ length: totalChunks }, () => 'x'.repeat(chunkSize)).concat(['END']),
+    status: 0
+  }, async () => spawnAndTee('mock-node', [], {
     stdoutSink: noopSink(),
     stderrSink: noopSink(),
     maxTailBytes: cap
-  });
+  }));
   assert.equal(result.status, 0);
   // The retained tail must not exceed the cap (small overshoot tolerance for
   // the final chunk push, but never close to the unbounded total of 40 KiB).
@@ -69,11 +119,15 @@ test('spawnAndTee tail buffer preserves enough context for limit-hit detection',
     process.stderr.write("Claude usage limit reached. Your limit will reset at 5pm (UTC).");
     process.exit(1);
   `;
-  const result = await spawnAndTee(process.execPath, ['-e', script], {
+  const result = await withMockSpawn({
+    stdoutChunks: ['x'.repeat(8 * 1024)],
+    stderrChunks: ['Claude usage limit reached. Your limit will reset at 5pm (UTC).'],
+    status: 1
+  }, async () => spawnAndTee('mock-node', [], {
     stdoutSink: noopSink(),
     stderrSink: noopSink(),
     maxTailBytes: 4 * 1024
-  });
+  }));
   assert.equal(result.status, 1);
   assert.match(result.stderr, /Claude usage limit reached\. Your limit will reset at 5pm \(UTC\)\./);
 });
@@ -88,10 +142,12 @@ test('spawnAndTee exposes a sane DEFAULT_MAX_TAIL_BYTES', () => {
 
 test('spawnAndTee reports no-output intervals until the child writes output', async () => {
   const diagnostics = [];
-  const script = `
-    setTimeout(() => process.stdout.write('ready'), 75);
-  `;
-  const result = await spawnAndTee(process.execPath, ['-e', script], {
+  const result = await withMockSpawn({
+    stdoutChunks: ['ready'],
+    stdoutDelayMs: 75,
+    status: 0,
+    closeDelayMs: 90
+  }, async () => spawnAndTee('mock-node', [], {
     stdoutSink: noopSink(),
     stderrSink: noopSink(),
     noOutputWatchdog: {
@@ -99,7 +155,7 @@ test('spawnAndTee reports no-output intervals until the child writes output', as
       intervalMs: 20,
       onNoOutput: event => diagnostics.push(event)
     }
-  });
+  }));
 
   assert.equal(result.status, 0);
   assert.equal(result.stdout, 'ready');
@@ -110,7 +166,10 @@ test('spawnAndTee reports no-output intervals until the child writes output', as
 
 test('spawnAndTee treats stdout before the first interval as visible output', async () => {
   const diagnostics = [];
-  const result = await spawnAndTee(process.execPath, ['-e', 'process.stdout.write("hello"); setTimeout(() => {}, 50);'], {
+  const result = await withMockSpawn({
+    stdoutChunks: ['hello'],
+    status: 0
+  }, async () => spawnAndTee('mock-node', [], {
     stdoutSink: noopSink(),
     stderrSink: noopSink(),
     noOutputWatchdog: {
@@ -118,7 +177,7 @@ test('spawnAndTee treats stdout before the first interval as visible output', as
       intervalMs: 20,
       onNoOutput: event => diagnostics.push(event)
     }
-  });
+  }));
 
   assert.equal(result.status, 0);
   assert.equal(result.stdout, 'hello');
@@ -127,7 +186,10 @@ test('spawnAndTee treats stdout before the first interval as visible output', as
 
 test('spawnAndTee treats stderr before the first interval as visible output', async () => {
   const diagnostics = [];
-  const result = await spawnAndTee(process.execPath, ['-e', 'process.stderr.write("warn"); setTimeout(() => {}, 50);'], {
+  const result = await withMockSpawn({
+    stderrChunks: ['warn'],
+    status: 0
+  }, async () => spawnAndTee('mock-node', [], {
     stdoutSink: noopSink(),
     stderrSink: noopSink(),
     noOutputWatchdog: {
@@ -135,7 +197,7 @@ test('spawnAndTee treats stderr before the first interval as visible output', as
       intervalMs: 20,
       onNoOutput: event => diagnostics.push(event)
     }
-  });
+  }));
 
   assert.equal(result.status, 0);
   assert.equal(result.stderr, 'warn');
@@ -144,7 +206,10 @@ test('spawnAndTee treats stderr before the first interval as visible output', as
 
 test('spawnAndTee clears no-output watchdog on clean exit before first interval', async () => {
   const diagnostics = [];
-  const result = await spawnAndTee(process.execPath, ['-e', 'process.exit(0);'], {
+  const result = await withMockSpawn({
+    status: 0,
+    closeDelayMs: 1
+  }, async () => spawnAndTee('mock-node', [], {
     stdoutSink: noopSink(),
     stderrSink: noopSink(),
     noOutputWatchdog: {
@@ -152,7 +217,7 @@ test('spawnAndTee clears no-output watchdog on clean exit before first interval'
       intervalMs: 20,
       onNoOutput: event => diagnostics.push(event)
     }
-  });
+  }));
   await sleep(1020);
 
   assert.equal(result.status, 0);
@@ -161,7 +226,9 @@ test('spawnAndTee clears no-output watchdog on clean exit before first interval'
 
 test('spawnAndTee clears no-output watchdog on spawn error', async () => {
   const diagnostics = [];
-  const result = await spawnAndTee('/definitely/missing/workflow-agent', [], {
+  const result = await withMockSpawn({
+    error: new Error('ENOENT')
+  }, async () => spawnAndTee('missing-node', [], {
     stdoutSink: noopSink(),
     stderrSink: noopSink(),
     noOutputWatchdog: {
@@ -169,7 +236,7 @@ test('spawnAndTee clears no-output watchdog on spawn error', async () => {
       intervalMs: 20,
       onNoOutput: event => diagnostics.push(event)
     }
-  });
+  }));
   await sleep(40);
 
   assert.equal(result.status, null);
@@ -179,7 +246,11 @@ test('spawnAndTee clears no-output watchdog on spawn error', async () => {
 
 test('spawnAndTee clears no-output watchdog on signal exit', async () => {
   const diagnostics = [];
-  const result = await spawnAndTee(process.execPath, ['-e', "setTimeout(() => process.kill(process.pid, 'SIGTERM'), 10);"], {
+  const result = await withMockSpawn({
+    signal: 'SIGTERM',
+    status: null,
+    closeDelayMs: 1
+  }, async () => spawnAndTee('mock-node', [], {
     stdoutSink: noopSink(),
     stderrSink: noopSink(),
     noOutputWatchdog: {
@@ -187,7 +258,7 @@ test('spawnAndTee clears no-output watchdog on signal exit', async () => {
       intervalMs: 30,
       onNoOutput: event => diagnostics.push(event)
     }
-  });
+  }));
   await sleep(1020);
 
   assert.equal(result.status, null);
@@ -203,11 +274,18 @@ test('spawnAndTee rewrites PWD to the spawned cwd so child CLIs see the mission 
   try {
     process.env.PWD = '/tmp/not-the-child-worktree';
 
-    const result = await spawnAndTee(process.execPath, ['-e', 'process.stdout.write(JSON.stringify({ cwd: process.cwd(), pwd: process.env.PWD })); process.exit(0);'], {
+    const result = await withMockSpawn({
+      stdoutChunks: [JSON.stringify({ cwd: tmpRoot, pwd: tmpRoot })],
+      status: 0
+    }, async (observed) => spawnAndTee('mock-node', [], {
       cwd: tmpRoot,
       stdoutSink: noopSink(),
       stderrSink: noopSink()
-    });
+    }).then(res => {
+      assert.equal(observed[0].options.cwd, tmpRoot);
+      assert.equal(observed[0].options.env.PWD, tmpRoot);
+      return res;
+    }));
 
     assert.equal(result.status, 0);
     assert.equal(result.signal, null);
@@ -222,7 +300,10 @@ test('spawnAndTee rewrites PWD to the spawned cwd so child CLIs see the mission 
 });
 
 test('spawnAndTee leaves no-output watchdog intact when no stall cutoff is configured', async () => {
-  const result = await spawnAndTee(process.execPath, ['-e', 'setTimeout(() => process.exit(0), 60);'], {
+  const result = await withMockSpawn({
+    status: 0,
+    closeDelayMs: 60
+  }, async () => spawnAndTee('mock-node', [], {
     stdoutSink: noopSink(),
     stderrSink: noopSink(),
     noOutputWatchdog: {
@@ -230,7 +311,7 @@ test('spawnAndTee leaves no-output watchdog intact when no stall cutoff is confi
       intervalMs: 10_000,
       onNoOutput: () => {}
     }
-  });
+  }));
 
   assert.equal(result.status, 0);
 });

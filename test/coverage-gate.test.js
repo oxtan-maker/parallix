@@ -1,12 +1,12 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { spawnSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const fmt = require('../lib/core/fmt');
 
-const GATE_SCRIPT = path.join(__dirname, '..', 'lib', 'commands', 'coverage-gate.js');
 const REPO_ROOT = path.join(__dirname, '..');
+const coverageGate = require('../lib/commands/coverage-gate');
 const {
   buildCoverageArgs,
   cleanupNewTempDirs,
@@ -24,17 +24,18 @@ const {
 } = require('../lib/commands/coverage-gate');
 
 function runGate(args = []) {
-  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'coverage-gate-run-'));
+  const logs = [];
+  const errors = [];
+  let exitCode = null;
+  const previousLogger = fmt.setLogger({
+    log: message => logs.push(fmt.stripAnsi(message)),
+    error: message => errors.push(fmt.stripAnsi(message)),
+  });
   try {
-    return spawnSync(process.execPath, [GATE_SCRIPT, ...args], {
-      encoding: 'utf8',
-      cwd: REPO_ROOT,
-      env: { ...process.env, NODE_V8_COVERAGE: '', COVERAGE_GATE_RUN: '1', TMPDIR: tmpRoot },
-      timeout: 360000,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+    coverageGate(args, { exitFn: code => { exitCode = code; } });
+    return { status: exitCode, stdout: logs.join('\n'), stderr: errors.join('\n') };
   } finally {
-    fs.rmSync(tmpRoot, { recursive: true, force: true });
+    fmt.setLogger(previousLogger);
   }
 }
 
