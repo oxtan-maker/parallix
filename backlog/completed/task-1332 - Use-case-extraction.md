@@ -1,11 +1,13 @@
 ---
 id: TASK-1332
 title: Use case extraction
-status: backlog
+status: done
 assignee: []
 created_date: '2026-06-22 16:11'
-labels: []
+updated_date: '2026-06-22 23:30'
+labels: [ai_sdlc]
 dependencies: []
+ordinal: 1000
 ---
 
 ## Description
