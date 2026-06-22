@@ -90,6 +90,56 @@ assignee: [qwen]
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
+test('consumeArtifacts leaves no untracked review-events files after a successful transition', async () => {
+  const { execFileSync } = require('node:child_process');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1327-consume-clean-'));
+  const missionDir = path.join(root, 'missions', 'task-2200');
+  const artifactDir = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1327-consume-artifacts-'));
+  const taskFile = path.join(root, 'backlog', 'tasks', 'task-2200 - consume-clean.md');
+
+  try {
+    fs.mkdirSync(missionDir, { recursive: true });
+    fs.mkdirSync(path.dirname(taskFile), { recursive: true });
+    fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Mission\n');
+    fs.writeFileSync(taskFile, [
+      '---',
+      'id: TASK-2200',
+      'title: consume clean',
+      'status: active',
+      'assignee: [qwen]',
+      '---',
+      '',
+      'Status: ○ active',
+      ''
+    ].join('\n'));
+    fs.writeFileSync(path.join(artifactDir, 'task-2200-review-findings.md'), '## Findings\nLooks good.');
+    fs.writeFileSync(path.join(artifactDir, 'task-2200-review-outcome.md'), 'Verdict: approve');
+    fs.writeFileSync(path.join(artifactDir, 'task-2200-review-verdict.txt'), 'approve');
+
+    execFileSync('git', ['init'], { cwd: root });
+    execFileSync('git', ['config', 'user.email', 'task-1327@example.com'], { cwd: root });
+    execFileSync('git', ['config', 'user.name', 'Task 1327'], { cwd: root });
+    execFileSync('git', ['add', '.'], { cwd: root });
+    execFileSync('git', ['commit', '-m', 'fixture'], { cwd: root });
+
+    const result = await consumeArtifacts('task-2200', {
+      log: () => {},
+      error: msg => { throw new Error(msg); },
+      exit: code => { throw new Error(`exit ${code}`); },
+      resolveWorktreeFn: () => root,
+      resolveArtifactDirFn: () => artifactDir,
+      getTaskAssigneeFn: () => 'qwen',
+    });
+
+    assert.equal(result.ok, true);
+    const status = execFileSync('git', ['status', '--short'], { cwd: root, encoding: 'utf8' });
+    assert.equal(status.trim(), '');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(artifactDir, { recursive: true, force: true });
+  }
+});
+
 // ============================================================================
 // SC5: consumeReviewerArtifacts distinguishes "no artifacts" from "artifacts but no verdict"
 // ============================================================================

@@ -3004,6 +3004,101 @@ test('submitReviewRound persists state with APPROVED disposition after approve',
   assert.equal(stateWritten.phase, 'approved');
 });
 
+test('submitReviewRound promotes an active backlog task to review after provider-backed approval', () => {
+  const { submitReviewRound } = require('../lib/review/review');
+  const { ReviewState } = require('../lib/review/review-state');
+  let transitioned = null;
+  const prev = process.env.FORGEJO_USER;
+  process.env.FORGEJO_USER = 'codex';
+
+  try {
+    submitReviewRound('task-2197', 'approve', 'LGTM', {
+      isForgejoReviewEnabledFn: () => true,
+      readTokenFn: () => 'token',
+      postReviewFn: () => ({ ok: true }),
+      buildMetadataFooterFn: () => '',
+      readReviewStateFn: () => new ReviewState('task-2197', {
+        reviewer: 'codex', implementer: 'claude', round: 1, phase: 'reviewing'
+      }),
+      resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-2197.md' }),
+      getTaskStatusFn: () => 'active',
+      transitionTaskFn: (slug, status) => {
+        transitioned = { slug, status };
+        return true;
+      },
+      worktree: '/tmp/visualBoard-task-2197',
+      log: () => {},
+      error: () => {},
+      exit: () => {}
+    });
+  } finally {
+    if (prev === undefined) delete process.env.FORGEJO_USER;
+    else process.env.FORGEJO_USER = prev;
+  }
+
+  assert.deepEqual(transitioned, {
+    slug: 'task-2197',
+    status: 'review'
+  });
+});
+
+test('submitReviewRound keeps YAML and rendered task status aligned when provider-backed approval repairs active', () => {
+  const { execFileSync } = require('node:child_process');
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const { submitReviewRound } = require('../lib/review/review');
+  const { ReviewState } = require('../lib/review/review-state');
+
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1327-review-round-'));
+  const taskFile = path.join(root, 'backlog', 'tasks', 'task-2198 - stale-active.md');
+  const prev = process.env.FORGEJO_USER;
+  process.env.FORGEJO_USER = 'codex';
+
+  try {
+    fs.mkdirSync(path.dirname(taskFile), { recursive: true });
+    fs.writeFileSync(taskFile, [
+      '---',
+      'id: TASK-2198',
+      'title: stale active',
+      'status: active',
+      'assignee: [claude]',
+      '---',
+      '',
+      'Status: ○ active',
+      ''
+    ].join('\n'));
+
+    execFileSync('git', ['init'], { cwd: root });
+    execFileSync('git', ['config', 'user.email', 'task-1327@example.com'], { cwd: root });
+    execFileSync('git', ['config', 'user.name', 'Task 1327'], { cwd: root });
+    execFileSync('git', ['add', '.'], { cwd: root });
+    execFileSync('git', ['commit', '-m', 'fixture'], { cwd: root });
+
+    submitReviewRound('task-2198', 'approve', 'LGTM', {
+      isForgejoReviewEnabledFn: () => true,
+      readTokenFn: () => 'token',
+      postReviewFn: () => ({ ok: true }),
+      buildMetadataFooterFn: () => '',
+      readReviewStateFn: () => new ReviewState('task-2198', {
+        reviewer: 'codex', implementer: 'claude', round: 1, phase: 'reviewing'
+      }),
+      worktree: root,
+      log: () => {},
+      error: () => {},
+      exit: () => {}
+    });
+
+    const content = fs.readFileSync(taskFile, 'utf8');
+    assert.match(content, /^status:\s*review$/m);
+    assert.match(content, /^Status:\s*○ review$/m);
+  } finally {
+    if (prev === undefined) delete process.env.FORGEJO_USER;
+    else process.env.FORGEJO_USER = prev;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('submitReviewRound skips Forgejo and updates review-state only when provider=none', () => {
   const { submitReviewRound } = require('../lib/review/review');
   const { ReviewState } = require('../lib/review/review-state');

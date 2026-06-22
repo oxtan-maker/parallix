@@ -465,6 +465,65 @@ test('evaluateTaskStatusForIntegration accepts review when the latest formal rev
   assert.match(result.message, /APPROVED/);
 });
 
+test('provider-backed approval repair leaves integration preflight with review instead of stale active', () => {
+  const { execFileSync } = require('node:child_process');
+  const { submitReviewRound } = require('../lib/review/review');
+  const { ReviewState } = require('../lib/review/review-state');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1327-integrate-preflight-'));
+  const taskFile = path.join(root, 'backlog', 'tasks', 'task-2199 - stale-active.md');
+  const previousUser = process.env.FORGEJO_USER;
+  process.env.FORGEJO_USER = 'codex';
+
+  try {
+    fs.mkdirSync(path.dirname(taskFile), { recursive: true });
+    fs.writeFileSync(taskFile, [
+      '---',
+      'id: TASK-2199',
+      'title: stale active',
+      'status: active',
+      'assignee: [claude]',
+      '---',
+      '',
+      'Status: ○ active',
+      ''
+    ].join('\n'));
+
+    execFileSync('git', ['init'], { cwd: root });
+    execFileSync('git', ['config', 'user.email', 'task-1327@example.com'], { cwd: root });
+    execFileSync('git', ['config', 'user.name', 'Task 1327'], { cwd: root });
+    execFileSync('git', ['add', '.'], { cwd: root });
+    execFileSync('git', ['commit', '-m', 'fixture'], { cwd: root });
+
+    submitReviewRound('task-2199', 'approve', 'LGTM', {
+      isForgejoReviewEnabledFn: () => true,
+      readTokenFn: () => 'token',
+      postReviewFn: () => ({ ok: true }),
+      buildMetadataFooterFn: () => '',
+      readReviewStateFn: () => new ReviewState('task-2199', {
+        reviewer: 'codex', implementer: 'claude', round: 1, phase: 'reviewing'
+      }),
+      worktree: root,
+      log: () => {},
+      error: () => {},
+      exit: () => {}
+    });
+
+    const result = evaluateTaskStatusForIntegration({
+      taskStatus: backlog.getTaskStatus(taskFile),
+      pr: { merged: false },
+      approval: { ok: true, reviewState: 'APPROVED' }
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.level, 'warn');
+    assert.match(result.message, /review accepted for integration/i);
+  } finally {
+    if (previousUser === undefined) delete process.env.FORGEJO_USER;
+    else process.env.FORGEJO_USER = previousUser;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('evaluateTaskStatusForIntegration accepts review when the Forgejo PR is already merged', () => {
   const result = evaluateTaskStatusForIntegration({
     taskStatus: 'review',

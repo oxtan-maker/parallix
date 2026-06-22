@@ -1,11 +1,11 @@
 ---
 id: TASK-1327
 title: sometimes the backlog.md task is in the wrong state
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-06-22 03:28'
 updated_date: '2026-06-22 04:49'
-labels: []
+labels: [ai_sdlc]
 dependencies: []
 ---
 
