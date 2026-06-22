@@ -1,0 +1,25 @@
+{
+  "_comment": "Per-step agent eligibility policy. Modify to change which agents are eligible for each workflow step.",
+  "_weights_comment": "Weights are relative integers (not percentages). Agent is selected by weighted random draw from eligible-and-supported set. Omit weights to use equal probability.",
+  "steps": {
+    "draft": {
+      "eligible": ["codex", "qwen", "mistral"],
+      "selection": "random"
+    },
+    "active": {
+      "eligible": ["codex", "claude",  "qwen", "mistral"],
+      "selection": "random"
+    },
+    "conflict-resolution": {
+      "eligible": ["claude", "codex", "mistral"],
+      "selection": "random"
+    },
+    "review": {
+      "eligible": ["codex", "claude", "qwen", "mistral"],
+      "selection": "random"
+    }
+  },
+  "overrides": {
+    "_comment": "CLI parameters are the preferred override mechanism: use --agent <family> with 'draft', --implementer <family> with 'active', or --implementer/--reviewer with 'review'. The WORKFLOW_AGENT env var remains available as a fallback for backward compatibility."
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "_comment": "Maps virtual workflow states to your board's actual state names. Remove this _comment key before use.",
+
+  "_virtual_states": "draft → ready → active → review → approved → done",
+
+  "_examples": {
+    "3-state board (Backlog.md defaults: To Do / In Progress / Done)": {
+      "draft": "To Do",
+      "ready": "To Do",
+      "active": "In Progress",
+      "review": "In Progress",
+      "approved": "In Progress",
+      "done": "Done"
+    },
+    "4-state board (backlog / in-progress / review / done)": {
+      "draft": "backlog",
+      "ready": "backlog",
+      "active": "in-progress",
+      "review": "review",
+      "approved": "review",
+      "done": "done"
+    },
+    "Backlog.md defaults (no mapping needed — identity)": {}
+  },
+
+  "_instructions": [
+    "1. Copy only the block that matches your board into a new workflow/config/state-map.json.",
+    "2. Remove the _comment, _virtual_states, _examples, and _instructions keys.",
+    "3. If your board uses the default Backlog.md state names (draft, active, done, etc.), no state-map.json is needed."
+  ]
+}

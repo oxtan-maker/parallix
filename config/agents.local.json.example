@@ -1,0 +1,8 @@
+{
+  "_comment": "Example only. The effective operator blocklist is <PARALLIX_HOME>/agents.local.json. On first use, legacy workflow/config, repo-root, and main-worktree files migrate in that order without deletion. Automatic usage-limit blocks are written to PARALLIX_HOME and apply across target repositories. Use `YYYY-MM-DD HH` for `until`.",
+  "blocklist": {
+    "gemini": { "until": "2026-05-01 12" },
+    "claude": { "until": "2026-05-02 09" },
+    "glm": { "until": "2026-04-30 18" }
+  }
+}

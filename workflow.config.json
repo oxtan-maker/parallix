@@ -1,0 +1,17 @@
+{
+  "product": {
+    "name": "parallix",
+    "targetUser": "parallix — the standalone AI-SDLC workflow tool, self-hosting (parallix develops itself with px)"
+  },
+  "adapters": {
+    "tasks": { "provider": "backlog-md", "storage": "backlog", "stateMap": "config/state-map.json" },
+    "agents": { "models": { "codex": "gpt-5.4" } },
+    "missions": {
+      "baseDir": "missions",
+      "branchPrefix": "mission/",
+      "worktreePattern": "../<repo>-<slug>"
+    },
+    "verification": { "command": "npm test", "defaultArea": "all" },
+    "review": { "provider": "forgejo", "baseUrl": "http://localhost:3300", "remote": "review", "repo": "magnus/parallix" }
+  }
+}

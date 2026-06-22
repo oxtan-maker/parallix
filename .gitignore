@@ -1,0 +1,12 @@
+node_modules/
+coverage/
+graphify-out/
+.forgejo-local/
+.session/
+.workflow/
+
+.sessions/
+workflow/.cache/
+workflow/.sessions/
+workflow/config/agents.local.json
+agents.local.json

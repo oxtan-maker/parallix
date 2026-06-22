@@ -1,0 +1,32 @@
+{
+  "name": "parallix",
+  "version": "1.0.0",
+  "description": "Parallix — AI mission workflow toolkit (provisional px runner, unpublished)",
+  "license": "AGPL-3.0-or-later",
+  "private": true,
+  "bin": {
+    "px": "px.js"
+  },
+  "files": [
+    "index.js",
+    "px.js",
+    "LICENSE",
+    "README.md",
+    "CHANGELOG.md",
+    "config/",
+    "data/",
+    "docs/",
+    "examples/",
+    "lib/",
+    "prompts/",
+    "templates/",
+    "tools/setup-forgejo-docker.sh"
+  ],
+  "scripts": {
+    "test": "FORCE_COLOR=0 node --test test/*.test.js",
+    "test:coverage": "FORCE_COLOR=0 node lib/commands/coverage-gate.js --lcov"
+  },
+  "devDependencies": {
+    "sonarqube-scanner": "^4.0.1"
+  }
+}

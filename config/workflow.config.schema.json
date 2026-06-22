@@ -1,0 +1,98 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/magnus/parallix/workflow.config.schema.json",
+  "title": "Workflow (parallix) optional override config",
+  "description": "Optional per-repository override for the workflow runtime. The tool ships code-owned defaults and runs with no config file; create workflow.config.json only to override a default. Every section and field is optional and is merged over the built-in defaults. Run `px config` to print the effective configuration.",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "product": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "name": { "type": "string" },
+        "targetUser": { "type": "string" }
+      }
+    },
+    "adapters": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "tasks": {
+          "type": "object",
+          "description": "Task tracker and on-disk task storage.",
+          "additionalProperties": true,
+          "properties": {
+            "provider": { "type": "string", "description": "Task tracker provider, e.g. backlog-md." },
+            "stateMap": { "type": "string", "description": "Repo-relative path to the virtual-to-actual Backlog state map." },
+            "storage": {
+              "description": "Task storage directory (string) or an object with tasksDir/completedDir.",
+              "oneOf": [
+                { "type": "string" },
+                {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "tasksDir": { "type": "string" },
+                    "completedDir": { "type": "string" }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "missions": {
+          "type": "object",
+          "description": "Mission document layout and branch/worktree conventions.",
+          "additionalProperties": true,
+          "properties": {
+            "baseDir": { "type": "string", "description": "Base directory for mission documents." },
+            "branchPrefix": { "type": "string", "description": "Branch name prefix for missions, e.g. mission/." },
+            "worktreePattern": { "type": "string", "description": "Worktree path pattern, e.g. ../<repo>-<slug>." },
+            "primaryBranch": { "type": "string", "description": "Primary branch override if not auto-detected." }
+          }
+        },
+        "verification": {
+          "type": "object",
+          "description": "Repository gate command.",
+          "additionalProperties": true,
+          "properties": {
+            "command": { "type": "string", "description": "Gate command; supports {{area}} substitution." },
+            "defaultArea": { "type": "string", "description": "Default verification area." }
+          }
+        },
+        "stats": {
+          "type": "object",
+          "description": "Repository mission statistics data.",
+          "additionalProperties": true,
+          "properties": {
+            "path": { "type": "string", "description": "Repo-relative path to the workflow stats CSV." }
+          }
+        },
+        "review": {
+          "type": "object",
+          "description": "Review surface. An unset provider keeps the lifecycle running without a mirrored review provider; set provider to 'forgejo' (with baseUrl, remote, repo) to enable Forgejo, or 'none' to run without one.",
+          "additionalProperties": true,
+          "properties": {
+            "provider": { "type": ["string", "null"], "enum": ["forgejo", "none", null] },
+            "baseUrl": { "type": "string" },
+            "remote": { "type": "string" },
+            "repo": { "type": "string" }
+          }
+        },
+        "agents": {
+          "type": "object",
+          "description": "Agent adapter settings. Agent launcher commands are resolved from PATH and configured via operator-local environment, not this file.",
+          "additionalProperties": true,
+          "properties": {
+            "models": {
+              "type": "object",
+              "description": "Optional per-agent-family LLM model override, keyed by agent family name (e.g. codex, claude, gemini, glm, mistral, qwen). Each value is the model identifier passed to that agent's CLI. A family that is not listed sends no model parameter, so the agent uses its own default. There is no 'default' key.",
+              "additionalProperties": { "type": "string" }
+            }
+          }
+        }
+      }
+    }
+  }
+}
