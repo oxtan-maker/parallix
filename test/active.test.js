@@ -1382,3 +1382,128 @@ test('enforceExecuteCommitSafety decodes octal-escaped UTF-8 and C escapes from 
   assert.ok(addCall.includes('docs/a\tb.md'),
     `expected \\t decoded to a real tab: ${JSON.stringify(addCall)}`);
 });
+
+// ---------- TASK-1324: relaunch success must not escape without review transition ----------
+
+test('runHandoffAndReview: relaunch success triggers post-relaunch handoff instead of bare return', async () => {
+  // Pre-fix bug shape: performHandoff was called only once (initial call),
+  // and startReviewLoop was never called. After the fix, performHandoff is
+  // re-invoked after a successful relaunch.
+  let handoffAttempts = 0;
+  let reviewLoopStarted = false;
+  let relaunchAttempts = 0;
+
+  const result = await runHandoffAndReview('task-1324', '/tmp/project-task-1324', 'codex', {
+    validateCheckpointsBeforeHandoffFn: () => ({ ok: true }),
+    performHandoff: async (slug, opts) => {
+      handoffAttempts++;
+      // First call fails with relaunchable error; second call (post-fix) would succeed
+      if (handoffAttempts === 1) {
+        return { ok: false, error: 'The final checkpoint at docs/missions/2026/task-1324/CP-1.md has a "## Goal Check" section but no evidence rows. A goal-check table with real evidence is required before handoff.' };
+      }
+      return { ok: true };
+    },
+    repairHandoffFn: async () => ({ repaired: false, blocker: null }),
+    attemptAgentRelaunchFn: async () => {
+      relaunchAttempts++;
+      return { relaunched: true };
+    },
+    startReviewLoop: () => { reviewLoopStarted = true; },
+    log: () => {},
+    error: () => {}
+  });
+
+  // Post-fix: performHandoff must be re-invoked after relaunch, and review loop must start
+  assert.ok(result, 'runHandoffAndReview returns true after successful post-relaunch handoff');
+  assert.equal(handoffAttempts, 2, 'performHandoff must be re-invoked after relaunch');
+  assert.equal(reviewLoopStarted, true, 'startReviewLoop must be called after successful post-relaunch handoff');
+  assert.equal(relaunchAttempts, 1, 'attemptAgentRelaunch was called once');
+});
+
+test('runHandoffAndReview: relaunch success must trigger post-relaunch handoff and review loop', async () => {
+  // Post-fix expectation: after a successful relaunch, the code must re-invoke
+  // performHandoff() to verify the handoff-to-review transition actually happened,
+  // matching the contract of the repair-success path.
+  let handoffAttempts = 0;
+  let reviewLoopStarted = false;
+  let relaunchAttempts = 0;
+
+  const result = await runHandoffAndReview('task-1324', '/tmp/project-task-1324', 'codex', {
+    validateCheckpointsBeforeHandoffFn: () => ({ ok: true }),
+    performHandoff: async (slug, opts) => {
+      handoffAttempts++;
+      if (handoffAttempts === 1) {
+        return { ok: false, error: 'The final checkpoint at docs/missions/2026/task-1324/CP-1.md has a "## Goal Check" section but no evidence rows. A goal-check table with real evidence is required before handoff.' };
+      }
+      return { ok: true };
+    },
+    repairHandoffFn: async () => ({ repaired: false, blocker: null }),
+    attemptAgentRelaunchFn: async () => {
+      relaunchAttempts++;
+      return { relaunched: true };
+    },
+    startReviewLoop: (slug, opts) => { reviewLoopStarted = true; },
+    log: () => {},
+    error: () => {}
+  });
+
+  // After fix: performHandoff must be re-invoked after relaunch, and review loop must start
+  assert.ok(result, 'runHandoffAndReview should return true after successful post-relaunch handoff');
+  assert.equal(handoffAttempts, 2, 'performHandoff must be re-invoked after relaunch');
+  assert.equal(reviewLoopStarted, true, 'startReviewLoop must be called after successful post-relaunch handoff');
+  assert.equal(relaunchAttempts, 1, 'attemptAgentRelaunch was called once');
+});
+
+test('runHandoffAndReview: relaunch success with post-relaunch handoff failure must not report success', async () => {
+  // Edge case: relaunch succeeds but the post-relaunch handoff still fails.
+  // The function must return false, not true.
+  let handoffAttempts = 0;
+  let reviewLoopStarted = false;
+
+  const result = await runHandoffAndReview('task-1324', '/tmp/project-task-1324', 'codex', {
+    validateCheckpointsBeforeHandoffFn: () => ({ ok: true }),
+    performHandoff: async () => {
+      handoffAttempts++;
+      // Both attempts fail with a relaunchable-style error (simulating the agent
+      // couldn't fix the checkpoint issue)
+      return { ok: false, error: 'The final checkpoint at docs/missions/2026/task-1324/CP-1.md has a "## Goal Check" section but no evidence rows. A goal-check table with real evidence is required before handoff.' };
+    },
+    repairHandoffFn: async () => ({ repaired: false, blocker: null }),
+    attemptAgentRelaunchFn: async () => ({ relaunched: true }),
+    startReviewLoop: () => { reviewLoopStarted = true; },
+    log: () => {},
+    error: () => {}
+  });
+
+  assert.equal(result, false, 'must return false when post-relaunch handoff fails');
+  assert.equal(handoffAttempts, 2, 'performHandoff called twice: initial + post-relaunch');
+  assert.equal(reviewLoopStarted, false, 'startReviewLoop must NOT be called when handoff fails');
+});
+
+test('runHandoffAndReview: relaunch failure must not trigger post-relaunch handoff', async () => {
+  // If relaunch itself fails, the code should fall through to the manual handoff message.
+  let handoffAttempts = 0;
+  let reviewLoopStarted = false;
+  let relaunchAttempts = 0;
+
+  const result = await runHandoffAndReview('task-1324', '/tmp/project-task-1324', 'codex', {
+    validateCheckpointsBeforeHandoffFn: () => ({ ok: true }),
+    performHandoff: async () => {
+      handoffAttempts++;
+      return { ok: false, error: 'The final checkpoint at docs/missions/2026/task-1324/CP-1.md has a "## Goal Check" section but no evidence rows. A goal-check table with real evidence is required before handoff.' };
+    },
+    repairHandoffFn: async () => ({ repaired: false, blocker: null }),
+    attemptAgentRelaunchFn: async () => {
+      relaunchAttempts++;
+      return { relaunched: false, error: 'relaunch failed' };
+    },
+    startReviewLoop: () => { reviewLoopStarted = true; },
+    log: () => {},
+    error: () => {}
+  });
+
+  assert.equal(result, false, 'must return false when relaunch fails');
+  assert.equal(handoffAttempts, 1, 'performHandoff called only once (no post-relaunch retry)');
+  assert.equal(reviewLoopStarted, false, 'startReviewLoop must NOT be called');
+  assert.equal(relaunchAttempts, 1, 'attemptAgentRelaunch was called once');
+});

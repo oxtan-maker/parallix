@@ -1,17 +1,19 @@
 ---
 id: TASK-1324
 title: transition to review after active also on the retry path (assuming successful)
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-06-17 04:29'
-labels: []
+labels: [ai_sdlc]
 dependencies: []
 ---
 
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-When this mission was in active phase it stopped like this:
+TASK-1322 exposed a workflow bug in the `active` command's relaunch retry path. The active-phase handoff encountered a repairable checkpoint/handoff error, the workflow relaunched the implementer, and both the relaunch logs and the agent transcript indicated success. But control returned to the console without a visible error or guaranteed continuation, which strongly suggests the task can be left in `active` even after a nominally successful retry path. This task is to make the retry path obey the same durable "transition to review after successful handoff" contract as the normal active path.
+
+Evidence from the original incident:
 
 {"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"urring.\n\nThe underlying fix (stale-session detection → marker clear → fresh retry across opencode/"}},"session_id":"82255ba9-e74a-47c6-9234-eb4dcb61df2e","parent_tool_use_id":null,"uuid":"d2473f29-d628-4f65-be2e-422216906f03"}
 {"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"claude/codex launchers) was unchanged by me; I only repaired the checkpoint documentation needed to"}},"session_id":"82255ba9-e74a-47c6-9234-eb4dcb61df2e","parent_tool_use_id":null,"uuid":"37c16a02-7f2f-4784-b3a3-0aa7ba99cca6"}
