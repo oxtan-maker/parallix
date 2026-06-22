@@ -1,18 +1,43 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('fs');
+const path = require('path');
 
 // We test the pure validation logic that runs before any agent is launched.
 // The actual loop body (agent launch, Forgejo polling) requires runtime-dependent
 // launchers and a live Forgejo; those are covered by manual proof artifacts (PROOF.md).
 //
-// All tests use non-existent slugs ('task-test-validation-noop') so they never
-// read real mission files and are resilient to accumulated review-state.json from
-// actual mission runs.
+// All tests derive a unique mission slug from the shared base 'task-test-review'
+// appended with the process PID so parallel test runs (e.g. multiple agents
+// running the suite simultaneously) do not collide on shared /tmp artifact files.
+//
+// IMPORTANT: AI agents (Codex, Claude, etc.) often leave artifact files behind in
+// /tmp when they run the review loop. These cause consumeReviewerArtifacts and
+// consumeImplementerArtifacts to detect "incomplete artifacts" (partial files exist
+// so hasAny=true but required pairs are missing) and exit early with exit(1).
+//
+// The test.beforeEach hook cleans up these artifacts. If you ever need to manually
+// inspect what an agent left behind, temporarily comment out the cleanup below.
 
-// Slug that is guaranteed not to have a real mission directory or persisted state.
-const TEST_SLUG = 'task-test-validation-noop';
+// Base mission slug — append process.pid for isolation between parallel runs.
+const TEST_SLUG = `task-test-review-${process.pid}`;
 
 const fmt = require('../lib/core/fmt');
+
+// Artifact files that consumeReviewerArtifacts / consumeImplementerArtifacts look for.
+// Partial sets (e.g. only review-findings.md without review-outcome.md) cause the
+// consumer to return { consumed: true, ok: false } which triggers exit(1).
+const ARTIFACT_NAMES = [
+  'review-findings.md', 'review-outcome.md', 'review-verdict.txt',
+  'round-resolution.md', 'review-disposition.txt',
+];
+function cleanupArtifacts() {
+  const tmpDir = '/tmp';
+  for (const name of ARTIFACT_NAMES) {
+    try { fs.unlinkSync(path.join(tmpDir, `${TEST_SLUG}-${name}`)); } catch (_) { /* ignore */ }
+  }
+}
+test.beforeEach(() => { cleanupArtifacts(); });
 
 async function captureExit(fn) {
   const originalExit = process.exit;
@@ -3757,7 +3782,7 @@ test('startReviewLoop hard-fails when task cannot be resolved and no PR exists',
 
   // Should exit with code 1 when task resolution fails
   assert.equal(exitCode, 1);
-  assert.ok(errors.some(e => e.includes('FAIL') && e.includes('Backlog task for task-test-validation-noop not found')));
+  assert.ok(errors.some(e => e.includes('FAIL') && e.includes(`Backlog task for ${TEST_SLUG} not found`)));
 });
 
 test('createEventHandler allows non-mirrored event types without FORGEJO_USER', async () => {
