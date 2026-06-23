@@ -1,309 +1,194 @@
-# parallix Authority Reference
+# Parallix
 
-Consolidated parallix workflow authority for the parallix AI mission lifecycle. The executable authority is the `parallix/` code; this file is its canonical markdown companion.
+**Parallix is a CLI for a local-first, human-in-the-loop developer workflow that runs several supported AI coding agents against one repository as isolated, resumable, reviewable missions — instead of one agent improvising in your working tree.**
 
-Conflict resolution: `AGENTS.md` wins on hard rules and verification entrypoints; locked `MISSION.md` wins on mission-specific scope and stop rules; `parallix/` runtime code wins over this file.
+It is built for solo maintainers and small-team leads who already drive AI coding agents such as Claude Code, Codex, OpenCode/Qwen, and Vibe/Mistral and have hit the real problems: two agents fighting over one checkout, a run dying when a provider hits its usage cap, no clean way to resume a long task where it stopped, and the agent that wrote the code also being the one that declares it done.
 
-## 1. Workflow Modes
+It wraps your AI coding workflow without replacing it: Parallix turns each piece of work into a *mission* with its own branch and its own git worktree, fails over to another agent family when one hits its usage limit, checkpoints long runs so they resume deterministically, and forces a second coding agent review step plus your own repo-configured verification gates before anything is integrated. A human still chooses the task, launches each phase, reads the review, and decides whether the work should land.
 
-Mission flow: `backlog → draft → ready → active → review → approved → done`. Blocking review findings loop `review → active → review` on the same branch and PR. One machine, one branch (`mission/<slug>`), one worktree (`../<project>-<slug>`), one implementer. Primary checkout stays on the primary branch (`main` or `master`, detected at runtime) for human integration only.
+**Why not just use Claude Code, Codex, or OpenCode directly?** Those are the agents — Parallix is the harness around them. It does not replace your agent or your model. It coordinates several of them as one multi-agent coding workflow with isolation, automatic failover, deterministic checkpoints, and a forced review pass that a single agent session does not give you.
 
-`AGENTS.md` and the mode's agent-prompt are always in scope. `execute`, `review`, `act-on-review`, and `integrate` also always include locked `MISSION.md` and relevant source files. Expand beyond baseline only on a clear trigger (checkpoint transition, restricted-area entry, failed verification, blocked evidence, review feedback, or material mission-shape change); state what was loaded, why triggered, and why baseline was insufficient.
+**The first concrete thing you can do** is build the local tarball, run setup, create one Backlog.md-style task, and draft it:
 
-## Entrypoints
-
-- `parallix/index.js` is the dispatcher for `node parallix <command>`.
-- `parallix/px.js` is the `px` binary wrapper and shell-init helper.
-
-## Config Boundary
-
-- `parallix/config/` is tool-owned defaults and launcher policy.
-- The target repository's `config/` directory is repo state, not parallix code.
-- Operator-local overlays live in `.local.json` and `.example` files; they are machine-specific and must not be conflated with repo config.
-
-| Mode | Description | Mode-specific context |
-|---|---|---|
-| `portfolio` | Brainstorm and filter candidate missions | REALITY_PROBE.md, docs/index.md, docs/adr/index.md, Backlog state, active branches/worktrees, strategic framework |
-| `draft` | Build one mission spec in detail | REALITY_PROBE.md, selected mission candidate, relevant ADRs/mission history |
-| `execute` | Implement steps for a locked mission | current `git status` |
-| `review` | Code quality review | `git diff <primary-branch>..HEAD` |
-| `act-on-review` | Resolve live review findings on the current mission branch | live PR comments |
-| `area-review` | Review one repo area outside a mission execution flow | REALITY_PROBE.md, focused area source files |
-| `integrate` | Land a reviewed mission and complete cleanup | integration checkout state |
-
-## 2. Authority Stack
-
-| Layer | Owns | Must not do |
-|---|---|---|
-| `AGENTS.md` | Hard rules, restricted actions, verification entrypoints, autonomy boundaries | Re-specify mission-specific scope or phase procedures |
-| `parallix/README.md` | Workflow modes, lifecycle, context packets, authority model, validation model | Override runtime code or mission-specific scope |
-| `missions/<slug>/MISSION.md` | Mission contract, scoped checkpoints, risks, gates, success criteria, stop rules | Override repo-wide hard rules |
-| `docs/agent-prompts/*.md` | Mode-specific procedures and entry/exit obligations | Re-teach the full workflow or become a second policy layer |
-| `parallix/` code | Executable workflow behavior | Depend on markdown duplication for correctness |
-
-## 3. Agent Selection
-
-Four families: `codex`, `claude`, `mistral`, `qwen`. Step eligibility is in `parallix/config/agents.json`. Launchers are resolved from `PATH` by bare executable name.
-
-`WORKFLOW_AGENT=<name>` overrides random selection only when that agent is eligible and unblocked. The effective blocklist is operator-owned at `<PARALLIX_HOME>/agents.local.json`; on first use parallix non-destructively migrates the legacy runtime-config, repo-root, and main-worktree files in that precedence order. Per-agent values: `true` (permanent block), `{ "until": "YYYY-MM-DD HH" }` (timed), `{ "blocked": false }` (unblock).
-
-Usage-limit failures: harness writes a timed block to the local blocklist and retries with the next eligible unblocked agent. All exhausted → fail clearly.
-
-## 4. Validation Model
-
-Validation is layered. One prompt declaring work complete is never sufficient.
-
-### 4.1 Primary gate runner
-
-The primary gate is **configured per repo**, not hardcoded. Declare it under
-`adapters.verification` in `workflow.config.json`:
-
-```json
-{
-  "adapters": {
-    "verification": { "command": "./scripts/verify-local.sh {{area}}", "defaultArea": "docs" }
-  }
-}
+```sh
+npm pack                                  # builds magnus-parallix-<version>.tgz
+npm install -g ./magnus-parallix-*.tgz
+px setup
+px draft task-001
 ```
 
-- **`command`** — the shell command the workflow runs as the primary gate. The `{{area}}` token
-  is substituted with the mission's detected area before the command runs. A command with no
-  `{{area}}` token runs verbatim for every area.
-- **`defaultArea`** — the area used when none can be detected from the mission (defaults to `docs`).
-- **No-op default:** when `adapters.verification` is absent, verification is a no-op pass — the
-  workflow does not invent a gate for repos that have not declared one.
+`px draft` does not accept free-text slugs like `my-first-task`, and it does not create the task for you. It expects an existing Backlog.md-style task key such as `task-001`.
 
-The area is detected from the gate-runner invocation written in `MISSION.md` (the `Gates` lines).
-Detection recognizes any verification script referenced as a `./` or `../`-prefixed path
-(e.g. `./scripts/ci.sh <area>`, `../tools/gate.sh <area>`), so it is not tied to the
-`./scripts/verify-local.sh` name. The relative-path prefix is required, so a bare filename in
-prose is not mistaken for a gate.
+Everything below is the longer version, with the proof and the caveats kept honest.
 
-Default is `./scripts/verify-local.sh {{area}}` .
-Repos **without** `verify-local.sh` declare their own command, for example:
+## Why Parallix?
 
-```json
-// Make target per area: make verify-docs, make verify-server, ...
-{ "adapters": { "verification": { "command": "make verify-{{area}}", "defaultArea": "docs" } } }
+Running AI coding agents one session at a time hits a ceiling fast:
+
+- **One working tree, many agents.** Point two agents at the same checkout and they fight over the index, the branch, and uncommitted files. You either serialize them — one idle while the other runs — or hand-manage `git worktree` and branch names yourself.
+- **Runs die on usage caps.** An agent prints "usage limit reached", the run stops, and you babysit it: restart later, or hand-switch to a different model.
+- **Long tasks lose their place.** A crashed or context-exhausted agent leaves you reconstructing what was already done by re-reading diffs.
+- **The author grades its own homework.** The agent that wrote the change also declares it done. Nobody independent looks before it lands.
+
+Parallix is a mission-based development workflow that addresses each of these directly, with the mechanics living in tested code rather than in prompts. It is not another agent or model — it is the operator-owned layer around the agents you already use.
+
+## What it does
+
+Each capability below is tied to a use case in [`docs/use-cases.md`](docs/use-cases.md), with the confidence level (Confirmed / Partial) carried through honestly.
+
+- **Run several AI coding agents on one repo without clobbering each other** *(UC-1 — Confirmed mechanic).* Every mission gets its own `mission/<slug>` branch and its own sibling git worktree (`../<repo>-<slug>`) automatically, so N agents make progress independently and each lands by squash-merge.
+- **Fail over automatically when an agent hits its usage limit** *(UC-2 — Confirmed).* Per-family limit messages are pattern-detected; the agent family is written to a timed blocklist and the run retries with the next eligible, unblocked family. Only when all are exhausted does it fail loudly. Agent usage limits stop a single session; they don't have to stop the mission.
+- **Resume a long mission deterministically** *(UC-3 — Confirmed).* Every checkpoint runs the gate, commits a checkpoint document with a literal `Next action:` line, and pushes it — so a later session or a different agent resumes from a written instruction, not a guess.
+- **Force a second, preferentially-different coding agent review before merge** *(UC-4 — Partial).* Review is a separate step whose reviewer selection excludes the implementer to prefer a different agent family, and a self-approval is code-blocked at the provider. It falls back to the same family when no other agent is runnable, so this forces a second review *attempt* — it does not guarantee a different reviewer.
+- **Publish work to a Forgejo reviewer surface without making Forgejo your branch authority** *(Confirmed mechanic).* When the review provider is enabled, Parallix syncs the local baseline to a dedicated `review` remote and opens or updates the PR there; if Forgejo is disabled, the branch/worktree flow still runs locally.
+- **Use a repo-local Graphify knowledge graph for smaller codebase context pulls** *(Confirmed mechanic, optional, unproven payoff).* In repositories where the operator has already installed the Graphify skill, the workflow keeps `graphify-out/` isolated per worktree and refreshes it during review/integration, while the installed agent guidance steers codebase questions toward `graphify query` / `path` / `explain` before full reports or raw grep. That should reduce context bloat, but this repo does not currently claim a measured token-usage reduction.
+- **Keep your existing verification gate instead of agent self-reporting** *(UC-5 — Confirmed).* The gate is a configured shell command with a no-op default: declare your existing `make` / `npm` / script command in `workflow.config.json` and it runs verbatim; declare nothing and verification is a documented no-op pass, not an invented gate.
+- **See which agent family actually pays off across every repo one runtime drives** *(UC-6 — Partial).* A single operator-owned `stats.csv` accumulates per-agent telemetry across repositories. Token-cost comparison is complete today only for the families with structured telemetry (codex, claude); two families record honest zeros by design.
+
+## The core workflow
+
+A mission moves through a fixed lifecycle, one branch and one worktree at a time:
+
+```
+backlog → draft → active → review → approved → done
+            │        │        │         │
+         worktree  agent     second   squash-
+         + branch   run +    review +  merge +
+                  checkpoints  gates   cleanup
 ```
 
-```json
-// npm script forwarding the area as an argument
-{ "adapters": { "verification": { "command": "npm run verify -- {{area}}", "defaultArea": "docs" } } }
+In practice: a human drafts a mission, Parallix creates the branch and worktree, an agent runs and writes checkpoints, a verification gate runs, a second (preferentially different) agent reviews the diff, and only then is the work integrated back to your primary branch by squash-merge. Blocking review findings loop back to `active` on the same branch and PR.
+
+## Quick start
+
+Parallix is distributed as a **local npm tarball built from this repository** — not a public registry install and not a container image (see [Current status](#current-status)). The shortest supported path:
+
+```sh
+# 1. Build the tarball from the repo root (produces magnus-parallix-<version>.tgz)
+npm pack
+
+# 2. Install the px CLI globally (use --prefix "$HOME/.local" if you lack sudo)
+npm install -g ./magnus-parallix-*.tgz
+
+# 3. Run the setup wizard for workflow.config.json, review wiring, and the
+#    standard Backlog.md-style layout under backlog/ and missions/
+px setup
+
+# 4. Confirm which px is on PATH
+px --version
 ```
 
-The detected area maps from the changed surface as follows (this table reflects visualBoard's
-areas; the area names a repo uses are whatever its configured `command` accepts):
+If you want the hosted review surface, `px setup` can also create or update the Forgejo review repo, token files, and the `review` remote. Forgejo is the PR viewer and publication surface here, not the authority for local branch ancestry or integration.
 
-| Changed surface | Gate |
-|---|---|
-| `docs/`, `*.md` only | `docs` |
-| `parallix/` or mixed parallix code | `workflow` or `all` |
-| `web-client/` | `web` |
-| `server/` | `server` |
-| `auth-server/` | `auth` |
-| `android/`, `wearos/` | `android` |
-| `kubernetes/` | `k8s` |
-| Multiple functional areas | `all` |
+Before `px draft`, create a task first. If you already use Backlog.md, create it there. If you do not, create the markdown file yourself under `backlog/tasks/`:
 
-### 4.2 Mission-specific gates
-
-Each locked mission may add gates (staging validation, manual QA, ADR creation, C2 review). These add to the baseline; they do not replace it.
-
-### 4.3 Review gate
-
-External review by a different agent is mandatory before integration. Valid review: surface exists; reviewer inspects `<primary-branch>..HEAD`; findings cite file references; zero-finding reviews for non-trivial missions include explicit searched-and-found-none evidence.
-
-### 4.4 Integration gate
-
-Complete when: mission reviewed, landing from the correct integration checkout, Backlog state updated, mission branch and worktree cleanup done.
-
-#### 4.4.1 Integration-time pipeline gates (ADR 0041)
-
-`px integrate` runs integration-time gates before the squash-merge lands. These gates are configured via a repo-side config file and invoked per changed top-level area.
-
-- **Config location:** `config/integration-pipelines.json`
-- **Schema:** `{"gates": {"<area>": {"command": "<shell-command>", "order": <number>, "run_last": <boolean>}}}`
-- **Supported areas:** `server`, `auth-server`, `web-client`, `web-e2e`
-- **Ordering:** Gates are executed in ascending `order` value; `run_last: true` ensures the gate runs after all others (regardless of order value)
-- **Change detection:** Gates are only invoked for areas with changed files in the mission branch vs the primary branch
-- **Opt-out:** `px integrate <slug> --no-integration-gates` skips all integration gates
-- **Dry-run:** `px integrate <slug> --dry-run` prints the resolved gate plan without executing
-
-Example config:
-```json
-{
-  "gates": {
-    "server": {"command": "./server/updateStaging.sh", "order": 1, "run_last": false},
-    "auth-server": {"command": "./auth-server/updateStaging.sh", "order": 2, "run_last": false},
-    "web-client": {"command": "SKIP_E2E=1 ./web-client/updateStaging.sh", "order": 3, "run_last": false},
-    "web-e2e": {"command": "./web-client/scripts/run-playwright-stage.sh", "order": 4, "run_last": true}
-  }
-}
-```
-
-If the config file is missing or empty, `px integrate` logs `integration-gates: no config present, skipping` and proceeds without error.
-
-## 5. Checkpoint Model
-
-Each completed checkpoint must produce: (1) checkpoint doc under the configured mission base dir for the repo (`missions/<slug>/` in this repo), (2) non-generic `Next action:`, (3) passing relevant gate, (4) commit on `mission/<slug>`. Checkpoint docs make resume and handoff deterministic.
-
-## 6. State Map and Command Aliases
-
-### Virtual vs. actual state names
-
-The workflow uses virtual state names (`backlog | ready | active | review | approved | done`). Each project's `parallix/config/state-map.json` maps virtual names to the actual backlog.md state names used by the board:
-
-```json
-{ "ready": "refined", "approved": "ready-for-integration" }
-```
-
-Rules:
-- When a virtual state has a non-null mapping, the corresponding backlog.md write happens with the actual name.
-- When a virtual state maps to `null` or is absent from the map, the workflow step advances but makes no backlog.md write (useful for sparse boards with fewer states).
-- States that match in both worlds (e.g. `active`, `review`, `done`) need not appear in the map.
-
-### Command aliases
-
-Command aliases are derived automatically from `state-map.json` — no second config file to maintain. The derivation rules are:
-
-- `ready` and its actual backlog.md name (if any) → `draft`
-- `approved` and its actual backlog.md name (if any) → `integrate`
-- `done` → `integrate` (always)
-
-With the default state-map above, the effective alias table is:
-
-| alias | canonical |
-|-------|-----------|
-| `approved` | `integrate` |
-| `done` | `integrate` |
-| `ready` | `draft` |
-| `ready-for-integration` | `integrate` |
-| `refined` | `draft` |
-
-When `px <alias>` is invoked, the CLI logs `[INFO] Resolving alias <alias> → <canonical>` and delegates to the canonical command.
-
-View the current alias table: `px aliases`
-
-## 7. Stats Preview
-
-Use `px stats` before integration when you want to validate the weekly tables from committed workflow data, or add `--from` and `--to` to inspect one larger inclusive date range.
-
-**Classification:** `<PARALLIX_HOME>/stats.csv` is **parallix-owned cross-repository agent telemetry** — one statistic about how agent families perform across every repo a single parallix runtime drives. It is operator-owned and independent of both the installed package and selected consuming repo, so one runtime working in several repositories accumulates one shared statistic rather than a split per-repo file. The five-column schema (`date,mission,classification,implementer,pr_fix_rounds`) carries no repository identity by design.
-
-## Persistent operator data
-
-`PARALLIX_HOME` overrides the whole persistent-data root. Without it, parallix
-uses `~/.local/state/parallix` on Linux,
-`~/Library/Application Support/parallix` on macOS, and
-`%LOCALAPPDATA%\parallix` on Windows. If the platform-specific base cannot be
-resolved, it falls back to `~/.parallix`.
-
-The root contains `stats.csv` and `agents.local.json`. Missing directories and
-files are created on first write; read-only paths tolerate absence. The first
-default access migrates the repo-root legacy `stats.csv` and the three legacy
-blocklist locations without deleting them. Statistics rows are
-deduplicated by all five columns. Blocklist precedence remains
-runtime-config, repo-root, main-worktree; conflicts are logged with both values
-and their sources. Malformed legacy blocklists are reported and skipped, while
-a malformed effective file is a hard failure and is never overwritten.
-
-Back up `PARALLIX_HOME` separately. It is not target-repository state and is not
-inside, restored by, or removed with the globally installed npm package.
-
-- Default preview: `px stats`
-- Freeze the reporting window for reproducible checks: `px stats --today 2026-05-18`
-- Preview one inclusive workflow-owned range: `px stats --from 2026-05-01 --to 2026-05-31`
-- Be explicit about the source file: `px stats --csv-file stats.csv --today 2026-05-18`
-- Write the output to a file for inspection or sharing: `px stats --from 2026-05-01 --to 2026-05-31 --output /tmp/workflow-stats.txt`
-- Break one mission down by phase: `px stats task-1285` (or `px stats --mission task-1285`)
-- Show command help and examples: `px stats --help`
-
-Behavior:
-- Workflow-owned stats datasets (`stats.csv` schema) print the current-week and previous-week mission tables plus the two agent-performance tables.
-- With `--from YYYY-MM-DD --to YYYY-MM-DD`, workflow-owned stats datasets instead print one mission table and one agent-performance table for rows whose `date` is within the inclusive range.
-- With a mission slug (`px stats task-1285`) or `--mission <slug>`, the command prints one mission broken down by phase — `draft`, `execute` (stored as the `active` stage), and `review` are always shown, plus any `follow-up`/extra recorded stages, with per-phase provider, model, implementer, token, tool-call, and duration columns and a totals row. The output is a pure function of the stored rows, so re-running it does not change the data.
-
-Telemetry capture contract (task-1285):
-- Stage rows are keyed by `(mission, stage)`; `draft.js`, `active.js`, and the review loop each record their phase via `recordStageStats`/`recordActiveStats`/`recordReviewStats`.
-- Structured sources: Codex (`codex-telemetry.js`, rollout JSONL) and Claude (`claude-telemetry.js`, stdout SSE) populate real token/usage fields.
-- `opencode` (local Qwen) exposes no structured usage source, so `opencode-telemetry.js` records honest zeros with provider/model falling back to the agent family — never fabricated numbers.
-- `vibe`/`mistral` telemetry is **blocked** in this environment; `mistral-telemetry.js` records honest zeros and the verification is tracked as follow-up task-1288.
-
+```md
+backlog/tasks/task-001 - my-first-task.md
 ---
-
-## Public distribution (canonical packaging and install)
-
-This is the one authoritative public distribution story for parallix. It is the
-near-term supported model; the architectural decision behind it is recorded in
-ADR 0044 (`docs/adr/0044-workflow-distribution-model.md`).
-
-**Supported acquisition/install path.** parallix is a Node.js toolkit (package
-name `@magnus/parallix`) that coordinates AI-assisted software missions through
-the lifecycle `backlog → draft → active → review → approved → done`. The
-supported artifact is a **local npm tarball built from this repository** — not a
-public registry install and not a container image. The package name is scoped so
-the unscoped `px` / `parallix` npm names are not relied upon. The shortest
-supported path is:
-
-```sh
-npm pack ./parallix
+id: TASK-001
+title: my first task
+status: backlog
+assignee: []
+labels: ["user_value"]
+dependencies: []
+---
 ```
 
-```sh
-npm install -g ./parallix-*.tgz
-```
+Then draft and run it with the actual workflow command:
 
 ```sh
-npm install -g --prefix "$HOME/.local" ./parallix-*.tgz
+px draft task-001
+px active task-001
 ```
 
-Use the user-writable prefix when you do not have `sudo` access. If your shell
-does not already place `$HOME/.local/bin` on `PATH`, add it once.
+Optional but useful: install the Graphify skill once per supported agent family if you want graph-backed codebase navigation in long missions and reviews. This is not a hard requirement like having a task file for `px draft`; when Graphify is not installed, Parallix skips graph updates and continues the workflow. The operator setup is documented separately because it is a workstation capability, not a minimum install step.
 
-`CHANGELOG.md` is the versioning authority. Until the first public release,
-PATCH bumps are the release discipline: bump before each `px integrate`, then
-reinstall from the new tarball after the integrate succeeds. That policy is
-documented release practice, not automatic CLI behavior.
+Optionally add `px shell-init` to your shell rc so mission transitions can `cd` your terminal into the next worktree.
 
-**How the operator invokes `px`.** After the global install, `px <command>` is
-the installed runner; use `px shell-init` in your shell rc if you want mission
-transitions to `cd` your terminal into the next worktree. `px --version`
-identifies the executing `px.js` path so an accidental PATH collision with an
-unrelated `px` is visible.
+## Example
 
-**What stays source-compatible for local development.** Running directly from a
-checkout is unchanged: `node parallix <command>` (equivalently `node index.js
-<command>`) runs from source, requires no install step, and never changes the
-caller's shell directory. The tarball install and the source run are the same
-code; the tarball only adds a versioned, globally linked `px`.
+A realistic human-in-the-loop pass — mission → worktree → agent run → checkpoint → review → integrate:
 
-**What is not yet supported.** The following are explicitly out of the near-term
-model and are not claimed to work today: publishing to the public npm registry
-(or any other registry), Homebrew, Docker images, standalone single-file
-binaries, and CI/release automation or signing. Distribution stays a manual
-`npm pack` + global install until a follow-up decision changes that.
+```sh
+# Start from a real Backlog task key. Draft creates branch mission/task-042
+# and a sibling worktree ../myrepo-task-042
+px draft task-042
 
-The old enterprise walkthrough has been removed. The supported packaging and
-install path is the three shell lines above.
+# Run the implementer in that isolated worktree. If the chosen family
+# hits its usage cap mid-run, Parallix blocks it and retries on
+# the next eligible family. Each checkpoint commits a doc with a
+# literal "Next action:" line, so the work is resumable.
+px active task-042
 
-## References
+# A second, preferentially-different agent reviews <main>..HEAD.
+# If Forgejo review is enabled, the PR is published to the dedicated
+# review surface; a self-approval by the implementing agent is blocked.
+px review task-042
 
-- ADR 0044 — Workflow Distribution Model for parallix:
-  `docs/adr/0044-workflow-distribution-model.md` (candidate consumption modes,
-  Interface Boundary, Enterprise Safety Model).
-- Phase 1–4 extraction evidence: `docs/missions/2026/task-1231` … `task-1234`.
+# Land it: runs configured integration gates, squash-merges to
+# the primary branch, updates board state, removes the branch
+# and worktree.
+px integrate task-042
+```
+
+The verification gate that runs at each checkpoint is whatever you declare in `workflow.config.json` (this repo declares `npm test`), so the workflow adopts your existing CI rather than replacing it.
+
+## Use cases
+
+The full evidence-backed inventory is in [`docs/use-cases.md`](docs/use-cases.md). The README focuses on the three claims that are best supported by the current code and retrospective data:
+
+1. **Parallel multi-agent execution (UC-1).** The isolated worktree-per-mission model is the *specific* mechanic an internal retrospective measured as the only configuration to beat a human baseline. Depending on whether you frame output as direct user-value missions or total completed missions in an already-productized setup, the observed gain ranges from roughly **+57%** to about **+1,280%**.
+2. **Usage-limit auto-failover (UC-2).** Family-specific limit detection → timed blocklist → retry-next-eligible is a tested control loop, not a retry button.
+3. **Second review gate (UC-4, Partial).** A self-approval is code-blocked and reviewer selection excludes the implementer family — forcing a second review *attempt* by a preferentially different agent, with an honest same-family fallback.
+
+## What Parallix is not
+
+- **Not a model and not an AI coding agent.** It does not generate code itself. It coordinates the agents and models you already use (Claude Code, Codex, OpenCode/Qwen, and Vibe/Mistral).
+- **Not an IDE or an editor plugin.** It is a CLI workflow harness around Git and your existing toolchain — there is no UI, no autocomplete, no inline suggestions.
+- **Not a magic autonomous engineer.** This is a human-in-the-loop workflow. Nothing merges itself, and the safe operating model is that a human decides what to queue, when to run `px active`, how to respond to review findings, and whether `px integrate` should happen at all.
+- **Not a guaranteed throughput multiplier.** The observed gain varies with context. In the data we have, it ranges from roughly **+57%** on strict user-value output to about **+1,280%** on total completed-mission throughput in a later productized setup. Those are both real observations, but they are different mission-output measures and should be labeled that way.
+
+## Current status
+
+**Alpha, local-first, and best suited to operators comfortable with Git and CLI workflows.**
+
+- **Distribution:** local `npm pack` + global install only. There is **no** public npm registry publish, no Homebrew, no Docker image, no standalone binary, and no CI/release automation today. This is a deliberate near-term model (ADR 0044), not an oversight.
+- **Review surface:** Forgejo is supported as the hosted PR viewer/publication surface, but the workflow remains local-first and can run without Forgejo when that provider is disabled.
+- **Versioning:** `CHANGELOG.md` is the versioning authority; PATCH bumps are the release discipline until a first public release.
+- **Telemetry:** structured token/usage telemetry exists for the codex and claude families; the local-Qwen and mistral paths record honest zeros by design rather than fabricated numbers.
+- **Graphify:** the knowledge-graph path is supported for codex, claude, and qwen/opencode after one-time operator setup. It is optional, not a workflow prerequisite. The credible claim today is better-scoped context retrieval, not a proven token-savings benchmark.
+- **Review coverage** is best-effort, not guaranteed — see UC-4's caveats in [`docs/use-cases.md`](docs/use-cases.md).
+
+This is a tool for a local-first developer workflow on one machine, driven by an operator who reads the caveats.
+
+## Documentation
+
+- [`docs/use-cases.md`](docs/use-cases.md) — evidence-backed use-case inventory with confidence levels and red-team analysis (primary source of truth for what Parallix actually does today).
+- [`docs/authority-reference.md`](docs/authority-reference.md) — the internal operator reference: workflow modes, the authority model, agent selection, the layered validation model, checkpoint model, state mapping, command aliases, stats, persistent operator data, and the full public-distribution story.
+- [`docs/forgejo-setup.md`](docs/forgejo-setup.md) — how the Forgejo review surface, tokens, and `review` remote are bootstrapped.
+- [`docs/operator-setup.md`](docs/operator-setup.md) — one-time Graphify skill installation for codex, claude, and qwen/opencode.
+- [`docs/readme-rewrite-benchmark.md`](docs/readme-rewrite-benchmark.md) — how comparable developer-tool READMEs are structured, and the decisions behind this one.
+- [`AGENTS.md`](AGENTS.md) — hard rules, restricted actions, and verification entrypoints.
+- `docs/adr/` — architecture decision records, including ADR 0044 (distribution model).
+
+## Development
+
+```sh
+npm test     # FORCE_COLOR=0 node --test test/*.test.js
+```
+
+The test suite is the verification gate this repo declares in `workflow.config.json`. Run it before integrating any change. Contributions follow the same mission lifecycle the tool itself runs: branch, worktree, checkpoints, a second review, and a passing gate before integration.
+
+If you are developing Parallix itself from a checkout, the repo-root dispatcher is:
+
+```sh
+node index.js <command>
+```
 
 ## License
 
 Copyright (C) 2026 Magnus Ekdahl.
 
-parallix is free software: you can redistribute it and/or modify it under the
-terms of the **GNU Affero General Public License** as published by the Free
-Software Foundation, either version 3 of the License, or (at your option) any
-later version. See [`LICENSE`](LICENSE) for the full text.
+Parallix is free software: you can redistribute it and/or modify it under the terms of the **GNU Affero General Public License** as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version. See [`LICENSE`](LICENSE) for the full text.
 
-The AGPL covers parallix itself and any modified or network-hosted fork of it.
-Running `px` as a tool inside your own repository does **not** make your project
-a derivative work — your code remains entirely yours under whatever terms you
-choose.
+The AGPL covers Parallix itself and any modified or network-hosted fork of it. Running `px` as a tool inside your own repository does **not** make your project a derivative work — your code remains entirely yours under whatever terms you choose.

@@ -1,11 +1,15 @@
 ---
 id: TASK-1336
 title: Rewrite README.md as a credible GitHub landing page
-status: backlog
-assignee: []
+status: done
+assignee:
+  - qwen
 created_date: '2026-06-23 05:04'
-labels: []
+updated_date: '2026-06-23 16:15'
+labels:
+  - user_value
 dependencies: []
+ordinal: 1000
 ---
 
 ## Description
