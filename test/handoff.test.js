@@ -150,11 +150,13 @@ test('performHandoff refreshes the review tracking ref before a forced Forgejo s
   fs.writeFileSync(missionMdPath, '# MISSION.md\n\nTest mission.\n');
   fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | test | PASS |\n');
 
+  const mockRebase = async () => ({ ok: true, sharedFileConflicts: false });
   const result = await performHandoff(slug, {
     worktree,
     skipGate: true,
     force: true,
     isForgejoReviewEnabledFn: () => true,
+    rebaseFn: mockRebase,
   });
   assert.strictEqual(result.ok, true);
   assert.ok(gitCalls.some(args => args.includes('fetch') && args.includes('http://fake-url')));
@@ -220,10 +222,12 @@ test('performHandoff falls back to magnus and persists bootstrap failure summary
   writeReviewState(missionDir, 'qwen', 'qwen');
 
   try {
+    const mockRebase = async () => ({ ok: true, sharedFileConflicts: false });
     const result = await performHandoff(slug, {
       worktree,
       skipGate: true,
       isForgejoReviewEnabledFn: () => true,
+      rebaseFn: mockRebase,
     });
 
     assert.equal(result.ok, true);
@@ -621,4 +625,214 @@ test('handoffCommand normalizes uppercase explicit slugs', async (t) => {
 
   assert.strictEqual(inferSlugMock.mock.calls[0].arguments[0], 'TASK-1022');
   assert.strictEqual(exitMock.mock.calls.length, 0, 'Should not exit on success');
+});
+
+test('performHandoff calls rebaseBeforeReviewRound before Forgejo PR creation', async (t) => {
+  const { mock } = t;
+  const slug = 'task-rebase-order';
+  const worktree = fs.mkdtempSync(path.join('/tmp', 'handoff-rebase-order-'));
+  const missionDir = path.join(worktree, 'docs/missions/2026', slug);
+  const cpPath = path.join(missionDir, 'CP-1.md');
+  const taskFile = path.join(worktree, 'backlog/tasks', `${slug} - rebase order.md`);
+  const prCallOrder = [];
+
+  fs.mkdirSync(missionDir, { recursive: true });
+  fs.mkdirSync(path.dirname(taskFile), { recursive: true });
+  fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# MISSION.md\n\nTest mission.\n');
+  fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | test | PASS |\n');
+  fs.writeFileSync(taskFile, '---\nstatus: active\n---\n\n# rebase order\n');
+
+  let rebaseCalled = false;
+  let rebaseCalledBeforePr = false;
+  const mockRebase = async (slugArg, opts) => {
+    rebaseCalled = true;
+    rebaseCalledBeforePr = prCallOrder.length === 0;
+    return { ok: true, sharedFileConflicts: false };
+  };
+
+  mock.method(missionUtils, 'findMissionDir', () => missionDir);
+  mock.method(missionUtils, 'findMissionArea', () => 'workflow');
+  mock.method(missionUtils, 'findCheckpoints', () => [cpPath]);
+  mock.method(git, 'getCurrentBranch', () => `mission/${slug}`);
+  mock.method(git, 'getWorktreeStatus', () => []);
+  mock.method(git, 'run', () => ({ status: 0 }));
+  mock.method(git, 'git', (args) => {
+    if (args.includes('origin')) prCallOrder.push('git-origin');
+    return { status: 0, stdout: '', stderr: '' };
+  });
+  mock.method(forgejo, 'readToken', () => 'fake-token');
+  mock.method(forgejo, 'createPr', (branch, user, token, opts) => {
+    prCallOrder.push('forgejo-createPr');
+    return { ok: true, url: 'http://fake-pr' };
+  });
+  mock.method(forgejo, 'authenticatedReviewUrl', () => 'http://fake-url');
+  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile }));
+  mock.method(backlog, 'transitionTask', () => true);
+  mock.method(gatekeeper, 'runGatekeeper', () => ({ ok: true, missing: [], skipped: false, posted: false }));
+  writeReviewState(missionDir, 'qwen', 'qwen');
+
+  try {
+    const result = await performHandoff(slug, {
+      worktree,
+      skipGate: true,
+      isForgejoReviewEnabledFn: () => true,
+      rebaseFn: mockRebase,
+    });
+
+    assert.strictEqual(result.ok, true);
+    assert.ok(rebaseCalled, 'rebaseFn should have been called');
+    assert.ok(rebaseCalledBeforePr, 'rebaseFn must be called before forgejo.createPr');
+    assert.ok(prCallOrder.includes('forgejo-createPr'), 'Forgejo PR should have been created');
+  } finally {
+    fs.rmSync(worktree, { recursive: true, force: true });
+  }
+});
+
+test('performHandoff fails when rebase returns ok=false with no shared-file conflicts', async (t) => {
+  const { mock } = t;
+  const slug = 'task-rebase-fail';
+  const worktree = fs.mkdtempSync(path.join('/tmp', 'handoff-rebase-fail-'));
+  const missionDir = path.join(worktree, 'docs/missions/2026', slug);
+  const cpPath = path.join(missionDir, 'CP-1.md');
+  const taskFile = path.join(worktree, 'backlog/tasks', `${slug} - rebase fail.md`);
+
+  fs.mkdirSync(missionDir, { recursive: true });
+  fs.mkdirSync(path.dirname(taskFile), { recursive: true });
+  fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# MISSION.md\n\nTest mission.\n');
+  fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | test | PASS |\n');
+  fs.writeFileSync(taskFile, '---\nstatus: active\n---\n\n# rebase fail\n');
+
+  const mockRebase = async () => ({ ok: false, sharedFileConflicts: false });
+
+  mock.method(missionUtils, 'findMissionDir', () => missionDir);
+  mock.method(missionUtils, 'findMissionArea', () => 'workflow');
+  mock.method(missionUtils, 'findCheckpoints', () => [cpPath]);
+  mock.method(git, 'getCurrentBranch', () => `mission/${slug}`);
+  mock.method(git, 'getWorktreeStatus', () => []);
+  mock.method(git, 'run', () => ({ status: 0 }));
+  mock.method(git, 'git', () => ({ status: 0, stdout: '', stderr: '' }));
+  mock.method(forgejo, 'readToken', () => 'fake-token');
+  mock.method(forgejo, 'createPr', () => {
+    assert.fail('createPr should NOT be called when rebase fails');
+    return { ok: true, url: 'http://fake-pr' };
+  });
+  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile }));
+  mock.method(backlog, 'transitionTask', () => {
+    assert.fail('transitionTask should NOT be called when rebase fails');
+    return true;
+  });
+  writeReviewState(missionDir, 'qwen', 'qwen');
+
+  try {
+    const result = await performHandoff(slug, {
+      worktree,
+      skipGate: true,
+      isForgejoReviewEnabledFn: () => true,
+      rebaseFn: mockRebase,
+    });
+
+    assert.strictEqual(result.ok, false);
+    assert.match(result.error, /Rebase failed before handoff/);
+  } finally {
+    fs.rmSync(worktree, { recursive: true, force: true });
+  }
+});
+
+test('performHandoff fails when rebase returns sharedFileConflicts=true', async (t) => {
+  const { mock } = t;
+  const slug = 'task-rebase-shared-conflict';
+  const worktree = fs.mkdtempSync(path.join('/tmp', 'handoff-shared-conflict-'));
+  const missionDir = path.join(worktree, 'docs/missions/2026', slug);
+  const cpPath = path.join(missionDir, 'CP-1.md');
+  const taskFile = path.join(worktree, 'backlog/tasks', `${slug} - shared conflict.md`);
+
+  fs.mkdirSync(missionDir, { recursive: true });
+  fs.mkdirSync(path.dirname(taskFile), { recursive: true });
+  fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# MISSION.md\n\nTest mission.\n');
+  fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | test | PASS |\n');
+  fs.writeFileSync(taskFile, '---\nstatus: active\n---\n\n# shared conflict\n');
+
+  const mockRebase = async () => ({ ok: false, sharedFileConflicts: true });
+
+  mock.method(missionUtils, 'findMissionDir', () => missionDir);
+  mock.method(missionUtils, 'findMissionArea', () => 'workflow');
+  mock.method(missionUtils, 'findCheckpoints', () => [cpPath]);
+  mock.method(git, 'getCurrentBranch', () => `mission/${slug}`);
+  mock.method(git, 'getWorktreeStatus', () => []);
+  mock.method(git, 'run', () => ({ status: 0 }));
+  mock.method(git, 'git', () => ({ status: 0, stdout: '', stderr: '' }));
+  mock.method(forgejo, 'readToken', () => 'fake-token');
+  mock.method(forgejo, 'createPr', () => {
+    assert.fail('createPr should NOT be called when rebase has shared-file conflicts');
+    return { ok: true, url: 'http://fake-pr' };
+  });
+  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile }));
+  mock.method(backlog, 'transitionTask', () => {
+    assert.fail('transitionTask should NOT be called when rebase has shared-file conflicts');
+    return true;
+  });
+  writeReviewState(missionDir, 'qwen', 'qwen');
+
+  try {
+    const result = await performHandoff(slug, {
+      worktree,
+      skipGate: true,
+      isForgejoReviewEnabledFn: () => true,
+      rebaseFn: mockRebase,
+    });
+
+    assert.strictEqual(result.ok, false);
+    assert.match(result.error, /shared-file conflicts/);
+  } finally {
+    fs.rmSync(worktree, { recursive: true, force: true });
+  }
+});
+
+test('performHandoff proceeds normally when rebase is a no-op (branch already up-to-date)', async (t) => {
+  const { mock } = t;
+  const slug = 'task-rebase-uptodate';
+  const worktree = fs.mkdtempSync(path.join('/tmp', 'handoff-rebase-uptodate-'));
+  const missionDir = path.join(worktree, 'docs/missions/2026', slug);
+  const cpPath = path.join(missionDir, 'CP-1.md');
+  const taskFile = path.join(worktree, 'backlog/tasks', `${slug} - rebase uptodate.md`);
+
+  fs.mkdirSync(missionDir, { recursive: true });
+  fs.mkdirSync(path.dirname(taskFile), { recursive: true });
+  fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# MISSION.md\n\nTest mission.\n');
+  fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | test | PASS |\n');
+  fs.writeFileSync(taskFile, '---\nstatus: active\n---\n\n# rebase uptodate\n');
+
+  const mockRebase = async () => ({ ok: true, sharedFileConflicts: false });
+
+  mock.method(missionUtils, 'findMissionDir', () => missionDir);
+  mock.method(missionUtils, 'findMissionArea', () => 'workflow');
+  mock.method(missionUtils, 'findCheckpoints', () => [cpPath]);
+  mock.method(git, 'getCurrentBranch', () => `mission/${slug}`);
+  mock.method(git, 'getWorktreeStatus', () => []);
+  mock.method(git, 'run', () => ({ status: 0 }));
+  mock.method(git, 'git', (args) => {
+    if (args.includes('origin')) assert.fail('Should not push to origin');
+    if (args.includes('--cached') && args.includes('--quiet')) return { status: 0 };
+    return { status: 0, stdout: '', stderr: '' };
+  });
+  mock.method(forgejo, 'readToken', () => 'fake-token');
+  mock.method(forgejo, 'createPr', () => ({ ok: true, url: 'http://fake-pr' }));
+  mock.method(forgejo, 'authenticatedReviewUrl', () => 'http://fake-url');
+  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile }));
+  mock.method(backlog, 'transitionTask', () => true);
+  mock.method(gatekeeper, 'runGatekeeper', () => ({ ok: true, missing: [], skipped: false, posted: false }));
+  writeReviewState(missionDir, 'qwen', 'qwen');
+
+  try {
+    const result = await performHandoff(slug, {
+      worktree,
+      skipGate: true,
+      isForgejoReviewEnabledFn: () => true,
+      rebaseFn: mockRebase,
+    });
+
+    assert.strictEqual(result.ok, true);
+  } finally {
+    fs.rmSync(worktree, { recursive: true, force: true });
+  }
 });

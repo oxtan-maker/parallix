@@ -1,10 +1,10 @@
 ---
 id: TASK-1323
 title: Autotranision to review does not rebase to main
-status: backlog
-assignee: []
+status: done
+assignee: [qwen]
 created_date: '2026-06-17 04:24'
-labels: []
+labels: ["ai_sdlc"]
 dependencies: []
 ---
 

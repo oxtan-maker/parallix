@@ -40,6 +40,8 @@ function setupMocks() {
   fs.writeFileSync(path.join(missionDir, 'CP-1.md'), '## Goal Check\n\n| a | b | c |\n|---|---|---|\n| 1 | 2 | 3 |');
 }
 
+const mockRebase = async () => ({ ok: true, sharedFileConflicts: false });
+
 function cleanup() {
   fs.rmSync(WORKTREE, { recursive: true, force: true });
   mock.reset();
@@ -57,7 +59,7 @@ test('verifyHandoff fails when not on mission branch', (t) => {
 test('performHandoff handles gatekeeper pushback', async (t) => {
   setupMocks();
   mock.method(gatekeeper, 'runGatekeeper', () => ({ ok: false, posted: true, missing: ['A'] }));
-  const result = await performHandoff(TEST_SLUG, { worktree: WORKTREE, skipGate: true });
+  const result = await performHandoff(TEST_SLUG, { worktree: WORKTREE, skipGate: true, rebaseFn: mockRebase });
   assert.strictEqual(result.ok, true);
   assert.strictEqual(result.gatekeeperPushedBack, true);
   cleanup();
@@ -66,7 +68,7 @@ test('performHandoff handles gatekeeper pushback', async (t) => {
 test('performHandoff handles gatekeeper block', async (t) => {
   setupMocks();
   mock.method(gatekeeper, 'runGatekeeper', () => ({ ok: false, posted: false, skipped: false, missing: ['A'] }));
-  const result = await performHandoff(TEST_SLUG, { worktree: WORKTREE, skipGate: true, error: () => {} });
+  const result = await performHandoff(TEST_SLUG, { worktree: WORKTREE, skipGate: true, error: () => {}, rebaseFn: mockRebase });
   assert.strictEqual(result.ok, false);
   assert.match(result.error, /Gatekeeper detected missing artifacts/);
   cleanup();
@@ -77,7 +79,7 @@ test('performHandoff fails when forgejoUser is missing', async (t) => {
   mock.method(backlog, 'getTaskImplementer', () => null);
   const originalEnv = process.env.FORGEJO_USER;
   delete process.env.FORGEJO_USER;
-  const result = await performHandoff(TEST_SLUG, { worktree: WORKTREE, skipGate: true, error: () => {} });
+  const result = await performHandoff(TEST_SLUG, { worktree: WORKTREE, skipGate: true, error: () => {}, rebaseFn: mockRebase });
   assert.strictEqual(result.ok, false);
   assert.strictEqual(result.error, 'forgejoUser is required');
   process.env.FORGEJO_USER = originalEnv;
@@ -92,7 +94,7 @@ test('performHandoff fails when final verification gate fails', async (t) => {
     JSON.stringify({ adapters: { verification: { command: 'npm test' } } })
   );
   mock.method(git, 'run', () => ({ status: 1 }));
-  const result = await performHandoff(TEST_SLUG, { worktree: WORKTREE, error: () => {} });
+  const result = await performHandoff(TEST_SLUG, { worktree: WORKTREE, error: () => {}, rebaseFn: mockRebase });
   assert.strictEqual(result.ok, false);
   assert.match(result.error, /Final verification gate failed/);
   cleanup();
@@ -101,7 +103,7 @@ test('performHandoff fails when final verification gate fails', async (t) => {
 test('performHandoff fails when PR creation fails', async (t) => {
   setupMocks();
   mock.method(forgejo, 'createPr', () => ({ ok: false, error: 'API Error' }));
-  const result = await performHandoff(TEST_SLUG, { worktree: WORKTREE, skipGate: true, error: () => {} });
+  const result = await performHandoff(TEST_SLUG, { worktree: WORKTREE, skipGate: true, error: () => {}, rebaseFn: mockRebase });
   assert.strictEqual(result.ok, false);
   assert.match(result.error, /Forgejo PR creation\/update failed/);
   cleanup();
@@ -110,7 +112,7 @@ test('performHandoff fails when PR creation fails', async (t) => {
 test('performHandoff fails when Backlog transition fails (assignee)', async (t) => {
   setupMocks();
   mock.method(backlog, 'transitionTask', () => false);
-  const result = await performHandoff(TEST_SLUG, { worktree: WORKTREE, skipGate: true, error: () => {} });
+  const result = await performHandoff(TEST_SLUG, { worktree: WORKTREE, skipGate: true, error: () => {}, rebaseFn: mockRebase });
   assert.strictEqual(result.ok, false);
   assert.match(result.error, /Could not transition task task-handoff-test to review/);
   cleanup();
@@ -119,7 +121,7 @@ test('performHandoff fails when Backlog transition fails (assignee)', async (t) 
 test('performHandoff fails when Backlog transition fails (status)', async (t) => {
   setupMocks();
   mock.method(backlog, 'transitionTask', () => false);
-  const result = await performHandoff(TEST_SLUG, { worktree: WORKTREE, skipGate: true, error: () => {} });
+  const result = await performHandoff(TEST_SLUG, { worktree: WORKTREE, skipGate: true, error: () => {}, rebaseFn: mockRebase });
   assert.strictEqual(result.ok, false);
   assert.match(result.error, /Could not transition task task-handoff-test to review/);
   cleanup();
@@ -129,7 +131,7 @@ test('performHandoff fails when git add fails', async (t) => {
   setupMocks();
   // transitionTask now handles git add/commit, so we mock it to fail
   mock.method(backlog, 'transitionTask', () => false);
-  const result = await performHandoff(TEST_SLUG, { worktree: WORKTREE, skipGate: true, error: () => {} });
+  const result = await performHandoff(TEST_SLUG, { worktree: WORKTREE, skipGate: true, error: () => {}, rebaseFn: mockRebase });
   assert.strictEqual(result.ok, false);
   assert.match(result.error, /Could not transition task task-handoff-test to review/);
   cleanup();
@@ -139,7 +141,7 @@ test('performHandoff fails when git push fails', async (t) => {
   setupMocks();
   mock.method(git, 'git', (args) => args.includes('push') ? { status: 1 } : { status: 0 });
   mock.method(forgejo, 'authenticatedReviewUrl', () => 'url');
-  const result = await performHandoff(TEST_SLUG, { worktree: WORKTREE, skipGate: true, error: () => {} });
+  const result = await performHandoff(TEST_SLUG, { worktree: WORKTREE, skipGate: true, error: () => {}, rebaseFn: mockRebase });
   assert.strictEqual(result.ok, false);
   assert.match(result.error, /Failed to push Backlog transition/);
   cleanup();

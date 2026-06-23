@@ -183,11 +183,13 @@ test('performHandoff follows the sequence: createPr -> gatekeeper -> transitionT
       return { ok: true };
     }),
     mock.method(fs, 'readFileSync', () => '## Goal Check\n| Goal | Evidence | Status |\n| :--- | :--- | :--- |\n| test | evidence | PASS |\n'),
-    mock.method(fs, 'existsSync', () => true)
+    mock.method(fs, 'existsSync', () => true),
+    mock.method(git, 'getCurrentBranch', () => `mission/${slug}`)
   ];
 
   try {
-    await performHandoff(slug, { skipGate: true, isForgejoReviewEnabledFn: () => true });
+    const mockRebase = async () => ({ ok: true, sharedFileConflicts: false });
+    await performHandoff(slug, { skipGate: true, isForgejoReviewEnabledFn: () => true, rebaseFn: mockRebase });
 
     const relevantEvents = events.filter(e => e.type === 'createPr' || e.type === 'gatekeeper' || e.type === 'transition' || e.type === 'push');
     

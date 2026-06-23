@@ -180,7 +180,7 @@ test('buildCompactActOnReviewPrompt reads from template and substitutes all vari
   assert.match(prompt, /Latest reviewer outcome was: REQUEST_CHANGES/);
   assert.match(prompt, /task-089/);      // slug substituted
   assert.match(prompt, /\/act-on-review/); // claude entrypoint substituted
-  assert.match(prompt, /Read the review outcome from local review state or the reviewer artifacts/);
+  assert.match(prompt, /Read the review outcome and findings from `missions\/task-089\/review-events\//);
   assert.doesNotMatch(prompt, /px review [^\n]*--comments/); // standalone: no Forgejo CLI
   assert.ok(prompt.includes(`${resolveArtifactDir('/tmp/project-task-089')}/task-089-round-resolution.md`));
   assert.match(prompt, /CHANGES_MADE\|PUSHBACK_ALL\|PARKED\|BLOCKED/);
