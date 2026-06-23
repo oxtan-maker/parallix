@@ -6,6 +6,7 @@ title: >-
 status: backlog
 assignee: []
 created_date: '2026-06-22 16:38'
+updated_date: '2026-06-23 16:37'
 labels:
   - workflow
   - review
@@ -13,6 +14,7 @@ labels:
   - self-hosting
 dependencies: []
 priority: high
+ordinal: 46000
 ---
 
 ## Description
