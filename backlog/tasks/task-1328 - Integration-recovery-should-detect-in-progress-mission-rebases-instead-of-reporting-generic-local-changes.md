@@ -16,7 +16,7 @@ references:
     backlog/tasks/task-1327 -
     sometimes-the-backlog.md-task-is-in-the-wrong-state.md
 priority: high
-ordinal: 44000
+ordinal: 37750
 ---
 
 ## Description
