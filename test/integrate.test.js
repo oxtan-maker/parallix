@@ -7,7 +7,26 @@ const path = require('path');
 
 const stats = require('../lib/commands/stats');
 const backlog = require('../lib/tools/backlog');
+const verification = require('../lib/core/verification');
 mock.method(backlog, 'getTaskClassification', () => 'ai_sdlc');
+mock.method(verification, 'captureVerifiedTreeProof', (area, rootDir) => ({
+  ok: true,
+  proof: {
+    rootDir: path.resolve(rootDir),
+    area,
+    command: 'mock-verification',
+    commit: 'abc123',
+    tree: 'tree123',
+    verifiedAt: '2026-01-01T00:00:00.000Z'
+  }
+}));
+mock.method(verification, 'assertVerifiedTreeProof', (proof, rootDir) => {
+  const resolvedRoot = path.resolve(rootDir);
+  if (!proof || proof.rootDir !== resolvedRoot) {
+    return { ok: false, error: 'verification proof does not match the tree being published' };
+  }
+  return { ok: true, proof };
+});
 
 process.env.PRIMARY_WORKTREE = '/tmp/mission';
 const FAKE_ROOT = '/tmp/mission';
@@ -1032,6 +1051,63 @@ test('finalizeVariantACloseout performs housekeeping then commits and pushes mai
         ['-C', root, 'push', 'review', 'main']
       ]
     );
+  } finally {
+    process.chdir(previous);
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('finalizeVariantACloseout rejects a stale verification proof before pushing main closeout', () => {
+  const previous = process.cwd();
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-integrate-variant-a-proof-'));
+  process.chdir(root);
+
+  try {
+    const taskFile = path.join(root, 'backlog', 'tasks', 'task-097 - cleanup.md');
+    fs.mkdirSync(path.dirname(taskFile), { recursive: true });
+    fs.writeFileSync(taskFile, 'Status: ○ ready-for-integration\n');
+
+    const gitCalls = [];
+    const result = finalizeVariantACloseout({
+      slug: 'task-097',
+      summary: 'Clean up integrate workflow',
+      mainTaskFile: taskFile,
+      rootDir: root,
+      gitRunner(args) {
+        gitCalls.push(args);
+        if (args.includes('rev-parse') && args.includes('HEAD')) {
+          return { status: 0, stdout: 'dummy-sha\n', stderr: '' };
+        }
+        if (args.slice(-3).join(' ') === 'diff --cached --quiet') {
+          return { status: 1, stdout: '', stderr: '' };
+        }
+        if (args[2] === 'commit') {
+          return { status: 0, stdout: '', stderr: '' };
+        }
+        if (args[2] === 'push') {
+          throw new Error('push should not run when verification proof is stale');
+        }
+        return { status: 0, stdout: '', stderr: '' };
+      },
+      captureVerifiedTreeProofFn: () => ({
+        ok: true,
+        proof: {
+          rootDir: '/tmp/different-checkout',
+          area: 'integrate',
+          command: 'mock-verification',
+          commit: 'stale-commit',
+          tree: 'stale-tree',
+          verifiedAt: '2026-01-01T00:00:00.000Z'
+        }
+      })
+    });
+
+    assert.deepEqual(result, {
+      ok: false,
+      error: 'verification-proof-mismatch',
+      detail: 'verification proof does not match the tree being published'
+    });
+    assert.equal(gitCalls.some(args => args[2] === 'push'), false);
   } finally {
     process.chdir(previous);
     fs.rmSync(root, { recursive: true, force: true });

@@ -1491,7 +1491,7 @@ test('startAgent launch failure includes stderr snippet in log', async () => {
       const log = [];
 
       const result = await withPathLaunchers({
-        opencode: 'if (process.argv.includes("--help")) process.exit(0); console.error("Error: Model not found"); process.exit(1);',
+        opencode: 'if (process.argv.includes("--help")) process.exit(0); require("fs").writeSync(2, "Error: Model not found\\n"); process.exit(1);',
         vibe: 'if (process.argv.includes("--help")) process.exit(0); process.exit(0);'
       }, () => startAgent('draft', {
         prompt: 'Execute.',
@@ -1660,7 +1660,7 @@ test('draft launch preserves the mission worktree in cwd and PWD for child CLIs'
     const launcherPath = path.join(binDir, 'opencode');
     fs.writeFileSync(launcherPath, `#!${process.execPath}
 if (process.argv.includes('--help')) process.exit(0);
-process.stdout.write(JSON.stringify({ cwd: process.cwd(), pwd: process.env.PWD }));
+require('fs').writeSync(1, JSON.stringify({ cwd: process.cwd(), pwd: process.env.PWD }));
 process.exit(0);
 `);
     fs.chmodSync(launcherPath, 0o755);

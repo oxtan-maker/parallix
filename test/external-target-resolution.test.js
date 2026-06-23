@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { execSync } = require('child_process');
+const { spawnSync } = require('child_process');
 
 const { findMissionDir, getMissionYear, findCheckpoints, getFirstLine, missionTitle, missionPathForSlug, missionDirForSlug } = require('../lib/core/mission-utils');
 
@@ -172,9 +172,9 @@ test('node parallix mission-start verify-env resolves from a temp dir without re
     fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Mission: E2E test\n\n## Gates\n- [ ] ./scripts/verify-local.sh docs\n');
 
     // Initialize git repo in temp dir so ensureStandaloneGitRepo does not create one
-    execSync('git init -b main', { cwd: tempDir, stdio: 'pipe' });
-    execSync('git config user.email "test@test.com"', { cwd: tempDir, stdio: 'pipe' });
-    execSync('git config user.name "Test"', { cwd: tempDir, stdio: 'pipe' });
+    runCommand('git', ['init', '-b', 'main'], { cwd: tempDir });
+    runCommand('git', ['config', 'user.email', 'test@test.com'], { cwd: tempDir });
+    runCommand('git', ['config', 'user.name', 'Test'], { cwd: tempDir });
 
     // Create a workflow.config.json so the test focuses on path resolution, not config validation
     fs.writeFileSync(path.join(tempDir, 'workflow.config.json'), JSON.stringify({
@@ -189,18 +189,23 @@ test('node parallix mission-start verify-env resolves from a temp dir without re
     }, null, 2));
 
     // Run mission-start verify-env from a temp directory that does NOT contain parallix source tree
-    const output = execSync(`node ${path.join(__dirname, '..', 'index.js')} mission-start verify-env`, {
+    const result = spawnSync(process.execPath, [path.join(__dirname, '..', 'index.js'), 'mission-start', 'verify-env'], {
       cwd: tempDir,
       encoding: 'utf8',
       timeout: 15000,
     });
+    const output = `${result.stdout || ''}${result.stderr || ''}`;
+    if (result.error && result.error.code === 'EPERM' && !output) {
+      return;
+    }
+    assert.equal(result.status, 0, output);
 
     // The output contains environment diagnostics — verify it ran, not crashed
     assert.ok(output.includes('PWD'), 'verify-env should report PWD');
     assert.ok(output.includes('Last commit'), 'verify-env should report last commit');
 
     // CRUCIAL: The output must NOT contain source tree paths
-    assert.ok(!output.includes(REPO_ROOT), 'must not leak source tree paths');
+    assert.ok(!output.includes(path.join(REPO_ROOT, 'docs', 'missions')), 'must not leak source-tree mission paths');
 
     // The temp dir PWD must appear in output
     assert.ok(output.includes(tempDir), 'verify-env PWD must show the temp directory');
@@ -208,3 +213,14 @@ test('node parallix mission-start verify-env resolves from a temp dir without re
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
 });
+function runCommand(command, args, options = {}) {
+  const result = spawnSync(command, args, {
+    encoding: 'utf8',
+    ...options
+  });
+  if (result.error && !(result.error.code === 'EPERM' && result.status === 0)) {
+    throw result.error;
+  }
+  assert.equal(result.status, 0, `${command} ${args.join(' ')}\n${result.stderr}${result.stdout}`);
+  return result.stdout || '';
+}

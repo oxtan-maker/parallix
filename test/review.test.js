@@ -560,7 +560,8 @@ test('startReviewLoop full loop success and exit cases', async () => {
     applyAgentFallbackFn: (args) => args.original,
     buildCompactReviewPromptFn: () => 'review prompt',
     buildCompactActOnReviewPromptFn: () => 'act-on-review prompt',
-    
+    consumeReviewerArtifactsFn: async () => ({ consumed: false }),
+    consumeImplementerArtifactsFn: async () => ({ consumed: false })
   };
 
   // Case 1: Max attempts reached
@@ -822,6 +823,8 @@ test('startReviewLoop rebases immediately before each reviewer round', async () 
     log: () => {},
     error: () => {},
     exit: () => {},
+    consumeReviewerArtifactsFn: async () => ({ consumed: false }),
+    consumeImplementerArtifactsFn: async () => ({ consumed: false }),
     
   });
 
@@ -881,7 +884,9 @@ test('startReviewLoop continue consumes existing fixing disposition before next 
     buildCompactActOnReviewPromptFn: () => 'act-on-review prompt',
     log: () => {},
     error: (message) => { throw new Error(message); },
-    exit: (code) => { throw new Error(`unexpected exit ${code}`); }
+    exit: (code) => { throw new Error(`unexpected exit ${code}`); },
+    consumeReviewerArtifactsFn: async () => ({ consumed: false }),
+    consumeImplementerArtifactsFn: async () => ({ consumed: false })
   });
 
   assert.deepEqual(reviews, [{ prNumber: 41, reviewerUser: 'codex', sinceIso: startedAt }]);
@@ -939,7 +944,9 @@ test('startReviewLoop isContinue waits long enough for delayed existing fixing d
       buildCompactActOnReviewPromptFn: () => 'act-on-review prompt',
       log: () => {},
       error: (message) => { throw new Error(message); },
-      exit: (code) => { throw new Error(`unexpected exit ${code}`); }
+      exit: (code) => { throw new Error(`unexpected exit ${code}`); },
+      consumeReviewerArtifactsFn: async () => ({ consumed: false }),
+      consumeImplementerArtifactsFn: async () => ({ consumed: false })
     });
   } finally {
     Date.now = originalNow;
@@ -1058,7 +1065,9 @@ test('startReviewLoop continue reviewing phase skips only when existing review i
       buildCompactActOnReviewPromptFn: () => 'act-on-review prompt',
       log: () => {},
       error: (message) => { throw new Error(message); },
-      exit: (code) => { throw new Error(`unexpected exit ${code}`); }
+      exit: (code) => { throw new Error(`unexpected exit ${code}`); },
+      consumeReviewerArtifactsFn: async () => ({ consumed: false }),
+      consumeImplementerArtifactsFn: async () => ({ consumed: false })
     });
 
     assert.deepEqual(
@@ -2370,7 +2379,9 @@ test('startReviewLoop handles reviewer polling timeout with recovery', async () 
       launchCount++;
       return { agent: 'codex' };
     },
-    pollForReviewFn: async () => POLL_TIMEOUT
+    pollForReviewFn: async () => POLL_TIMEOUT,
+    consumeReviewerArtifactsFn: async () => ({ consumed: false }),
+    consumeImplementerArtifactsFn: async () => ({ consumed: false })
   });
 
   // With timeout recovery (task-1136), the reviewer is relaunched up to 2 times on timeout (3-strike limit)
@@ -2415,7 +2426,9 @@ test('startReviewLoop persists reviewer retry count before recovery relaunch', a
       return reviewPolls === 1 ? POLL_TIMEOUT : 'APPROVED';
     },
     applyAgentFallbackFn: (args) => args.original,
-    buildCompactReviewPromptFn: () => 'review prompt'
+    buildCompactReviewPromptFn: () => 'review prompt',
+    consumeReviewerArtifactsFn: async () => ({ consumed: false }),
+    consumeImplementerArtifactsFn: async () => ({ consumed: false })
   });
 
   const retryWriteIndex = events.findIndex(event => event.type === 'write' && event.reviewerRetryCount === 1);
@@ -2466,7 +2479,9 @@ test('startReviewLoop persists implementer retry count before recovery relaunch'
     },
     applyAgentFallbackFn: (args) => args.original,
     buildCompactReviewPromptFn: () => 'review prompt',
-    buildCompactActOnReviewPromptFn: () => 'act-on-review prompt'
+    buildCompactActOnReviewPromptFn: () => 'act-on-review prompt',
+    consumeReviewerArtifactsFn: async () => ({ consumed: false }),
+    consumeImplementerArtifactsFn: async () => ({ consumed: false })
   });
 
   const retryWriteIndex = events.findIndex(event => event.type === 'write' && event.implementerRetryCount === 1);
@@ -2504,6 +2519,8 @@ test('startReviewLoop does not crash with ReferenceError when taskResolution is 
       getLatestDispositionForPrFn: async () => 'CHANGES_MADE',
       sleepFn: async () => {},
       rebaseBeforeReviewRoundFn: async () => ({ ok: true, sharedFileConflicts: false }),
+      consumeReviewerArtifactsFn: async () => ({ consumed: false }),
+      consumeImplementerArtifactsFn: async () => ({ consumed: false }),
       startAgentFn: async () => ({ agent: 'claude' }),
       applyAgentFallbackFn: (opts) => {
         fallbackCalls.push(opts);
@@ -2543,6 +2560,8 @@ test('startReviewLoop passes taskResolution to applyAgentFallback for both revie
       getLatestDispositionForPrFn: async () => 'CHANGES_MADE',
       sleepFn: async () => {},
       rebaseBeforeReviewRoundFn: async () => ({ ok: true, sharedFileConflicts: false }),
+      consumeReviewerArtifactsFn: async () => ({ consumed: false }),
+      consumeImplementerArtifactsFn: async () => ({ consumed: false }),
       startAgentFn: async () => ({ agent: 'codex' }),
       applyAgentFallbackFn: (opts) => {
         fallbackCalls.push(opts);
@@ -2592,6 +2611,8 @@ test('startReviewLoop repairs a persisted rewiewing typo and resumes on the revi
       }),
       writeReviewStateFn: (slug, state) => writes.push({ slug, phase: state.phase, phaseOriginal: state.phaseOriginal }),
       rebaseBeforeReviewRoundFn: async () => ({ ok: true, sharedFileConflicts: false }),
+      consumeReviewerArtifactsFn: async () => ({ consumed: false }),
+      consumeImplementerArtifactsFn: async () => ({ consumed: false }),
       startAgentFn: async (mode) => {
         launches.push(mode);
         return { agent: mode === 'review' ? 'qwen' : 'codex' };
@@ -2946,6 +2967,7 @@ test('submitReviewRound persists state with REQUEST_CHANGES disposition after re
   const { submitReviewRound } = require('../lib/review/review');
   const { ReviewState } = require('../lib/review/review-state');
   let stateWritten = null;
+  let backlogTransitioned = null;
   const prev = process.env.FORGEJO_USER;
   process.env.FORGEJO_USER = 'codex';
 
@@ -2958,6 +2980,10 @@ test('submitReviewRound persists state with REQUEST_CHANGES disposition after re
         reviewer: 'codex', implementer: 'claude', round: 1, phase: 'reviewing'
       }),
       writeReviewStateFn: (slug, state) => { stateWritten = { slug, disposition: state.disposition, phase: state.phase }; },
+      transitionTaskFn: (slug, status) => {
+        backlogTransitioned = { slug, status };
+        return true;
+      },
       worktree: '/tmp/visualBoard-task-persist-3',
       log: () => {},
       error: () => {},
@@ -2971,12 +2997,14 @@ test('submitReviewRound persists state with REQUEST_CHANGES disposition after re
   assert.ok(stateWritten, 'writeReviewStateFn must be called after successful review post');
   assert.equal(stateWritten.disposition, 'REQUEST_CHANGES');
   assert.equal(stateWritten.phase, 'fixing');
+  assert.deepEqual(backlogTransitioned, { slug: 'task-persist-3', status: 'review' });
 });
 
 test('submitReviewRound persists state with APPROVED disposition after approve', () => {
   const { submitReviewRound } = require('../lib/review/review');
   const { ReviewState } = require('../lib/review/review-state');
   let stateWritten = null;
+  let backlogTransitioned = null;
   const prev = process.env.FORGEJO_USER;
   process.env.FORGEJO_USER = 'codex';
 
@@ -2989,6 +3017,10 @@ test('submitReviewRound persists state with APPROVED disposition after approve',
         reviewer: 'codex', implementer: 'claude', round: 1, phase: 'reviewing'
       }),
       writeReviewStateFn: (slug, state) => { stateWritten = { slug, disposition: state.disposition, phase: state.phase }; },
+      transitionTaskFn: (slug, status) => {
+        backlogTransitioned = { slug, status };
+        return true;
+      },
       worktree: '/tmp/visualBoard-task-persist-4',
       log: () => {},
       error: () => {},
@@ -3002,6 +3034,7 @@ test('submitReviewRound persists state with APPROVED disposition after approve',
   assert.ok(stateWritten, 'writeReviewStateFn must be called after successful review post');
   assert.equal(stateWritten.disposition, 'APPROVED');
   assert.equal(stateWritten.phase, 'approved');
+  assert.deepEqual(backlogTransitioned, { slug: 'task-persist-4', status: 'approved' });
 });
 
 test('submitReviewRound promotes an active backlog task to review after provider-backed approval', () => {
@@ -3244,6 +3277,8 @@ test('startReviewLoop persists PUSHBACK_ALL disposition before returning', async
     writeReviewStateFn: (slug, state) => { stateWrites.push({ slug, disposition: state.disposition, phase: state.phase }); },
     startAgentFn: async () => ({ agent: null }),
     rebaseBeforeReviewRoundFn: async () => ({ ok: true, sharedFileConflicts: false }),
+    consumeReviewerArtifactsFn: async () => ({ consumed: false }),
+    consumeImplementerArtifactsFn: async () => ({ consumed: false }),
     pollForReviewFn: async () => 'REQUEST_CHANGES',
     pollForDispositionFn: async () => 'PUSHBACK_ALL',
     applyAgentFallbackFn: (args) => args.original,
@@ -3281,6 +3316,8 @@ test('startReviewLoop persists BLOCKED disposition before returning', async () =
     writeReviewStateFn: (slug, state) => { stateWrites.push({ slug, disposition: state.disposition, phase: state.phase }); },
     startAgentFn: async () => ({ agent: null }),
     rebaseBeforeReviewRoundFn: async () => ({ ok: true, sharedFileConflicts: false }),
+    consumeReviewerArtifactsFn: async () => ({ consumed: false }),
+    consumeImplementerArtifactsFn: async () => ({ consumed: false }),
     pollForReviewFn: async () => 'REQUEST_CHANGES',
     pollForDispositionFn: async () => 'BLOCKED',
     applyAgentFallbackFn: (args) => args.original,
@@ -3318,6 +3355,8 @@ test('startReviewLoop persists PARKED disposition before returning', async () =>
     writeReviewStateFn: (slug, state) => { stateWrites.push({ slug, disposition: state.disposition, phase: state.phase }); },
     startAgentFn: async () => ({ agent: null }),
     rebaseBeforeReviewRoundFn: async () => ({ ok: true, sharedFileConflicts: false }),
+    consumeReviewerArtifactsFn: async () => ({ consumed: false }),
+    consumeImplementerArtifactsFn: async () => ({ consumed: false }),
     pollForReviewFn: async () => 'REQUEST_CHANGES',
     pollForDispositionFn: async () => 'PARKED',
     applyAgentFallbackFn: (args) => args.original,
@@ -3355,6 +3394,8 @@ test('startReviewLoop persists CHANGES_MADE disposition before continuing', asyn
     writeReviewStateFn: (slug, state) => { stateWrites.push({ slug, disposition: state.disposition, phase: state.phase }); },
     startAgentFn: async () => ({ agent: null }),
     rebaseBeforeReviewRoundFn: async () => ({ ok: true, sharedFileConflicts: false }),
+    consumeReviewerArtifactsFn: async () => ({ consumed: false }),
+    consumeImplementerArtifactsFn: async () => ({ consumed: false }),
     pollForReviewFn: async () => 'REQUEST_CHANGES',
     pollForDispositionFn: async () => 'CHANGES_MADE',
     applyAgentFallbackFn: (args) => args.original,

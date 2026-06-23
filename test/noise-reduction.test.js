@@ -3,17 +3,26 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { spawnSync } = require('child_process');
 const { findLastNonNoiseCommit } = require('../lib/core/mission-utils');
+
+function git(args, cwd) {
+  const result = spawnSync('git', args, { cwd, encoding: 'utf8' });
+  if (result.error && !(result.error.code === 'EPERM' && result.status === 0)) {
+    throw result.error;
+  }
+  assert.equal(result.status, 0, `git ${args.join(' ')}\n${result.stderr}${result.stdout}`);
+  return result.stdout || '';
+}
 
 function withTempRepo(fn) {
   const previous = process.cwd();
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'noise-reduction-test-'));
 
   // Initialize git repo
-  const { execSync } = require('child_process');
-  execSync('git init', { cwd: root });
-  execSync('git config user.email "test@example.com"', { cwd: root });
-  execSync('git config user.name "Test User"', { cwd: root });
+  git(['init'], root);
+  git(['config', 'user.email', 'test@example.com'], root);
+  git(['config', 'user.name', 'Test User'], root);
 
   process.chdir(root);
 
@@ -27,115 +36,108 @@ function withTempRepo(fn) {
 
 test('findLastNonNoiseCommit identifies non-noise commits correctly', () => {
   withTempRepo(root => {
-    const { execSync } = require('child_process');
-
     // 1. Initial commit (non-noise)
     fs.writeFileSync('README.md', '# Project\n');
-    execSync('git add README.md', { cwd: root });
-    execSync('git commit -m "initial commit"', { cwd: root });
-    const initialSha = execSync('git rev-parse HEAD', { cwd: root }).toString().trim();
+    git(['add', 'README.md'], root);
+    git(['commit', '-m', 'initial commit'], root);
+    const initialSha = git(['rev-parse', 'HEAD'], root).trim();
 
     // 2. Real work (non-noise)
     fs.writeFileSync('app.js', 'console.log("hello");\n');
-    execSync('git add app.js', { cwd: root });
-    execSync('git commit -m "mission: implement app"', { cwd: root });
-    const workSha = execSync('git rev-parse HEAD', { cwd: root }).toString().trim();
+    git(['add', 'app.js'], root);
+    git(['commit', '-m', 'mission: implement app'], root);
+    const workSha = git(['rev-parse', 'HEAD'], root).trim();
 
     // 3. Backlog noise (noise)
     fs.mkdirSync('backlog/tasks', { recursive: true });
     fs.writeFileSync('backlog/tasks/task-1.md', 'status: backlog\n');
-    execSync('git add backlog/', { cwd: root });
-    execSync('git commit -m "backlog: add task 1"', { cwd: root });
+    git(['add', 'backlog/'], root);
+    git(['commit', '-m', 'backlog: add task 1'], root);
 
     // 4. More backlog noise (noise)
     fs.writeFileSync('backlog/tasks/task-1.md', 'status: active\n');
-    execSync('git add backlog/', { cwd: root });
-    execSync('git commit -m "fixes"', { cwd: root });
+    git(['add', 'backlog/'], root);
+    git(['commit', '-m', 'fixes'], root);
 
     // HEAD should point to trailing noise, findLastNonNoiseCommit should return workSha
     const result = findLastNonNoiseCommit(root);
-    assert.equal(execSync(`git rev-parse ${result}`, { cwd: root }).toString().trim(), workSha);
+    assert.equal(git(['rev-parse', result], root).trim(), workSha);
   });
 });
 
 test('findLastNonNoiseCommit identifies generic noise messages as noise when only touching backlog', () => {
   withTempRepo(root => {
-    const { execSync } = require('child_process');
-
     fs.writeFileSync('README.md', '# Project\n');
-    execSync('git add README.md', { cwd: root });
-    execSync('git commit -m "initial commit"', { cwd: root });
+    git(['add', 'README.md'], root);
+    git(['commit', '-m', 'initial commit'], root);
 
     fs.writeFileSync('app.js', 'console.log("hello");\n');
-    execSync('git add app.js', { cwd: root });
-    execSync('git commit -m "mission: work"', { cwd: root });
-    const workSha = execSync('git rev-parse HEAD', { cwd: root }).toString().trim();
+    git(['add', 'app.js'], root);
+    git(['commit', '-m', 'mission: work'], root);
+    const workSha = git(['rev-parse', 'HEAD'], root).trim();
 
     const noiseMessages = ['mission changes', 'random changes', 'new/updated mission', 'housekeeping', 'fixes'];
     for (const msg of noiseMessages) {
       fs.mkdirSync('backlog/tasks', { recursive: true });
       fs.writeFileSync(`backlog/tasks/task-${msg.replace(/\//g, '-')}.md`, 'status: backlog\n');
-      execSync('git add backlog/', { cwd: root });
-      execSync(`git commit -m "${msg}"`, { cwd: root });
+      git(['add', 'backlog/'], root);
+      git(['commit', '-m', msg], root);
     }
 
     const result = findLastNonNoiseCommit(root);
-    assert.equal(execSync(`git rev-parse ${result}`, { cwd: root }).toString().trim(), workSha);
+    assert.equal(git(['rev-parse', result], root).trim(), workSha);
   });
 });
 
 test('findLastNonNoiseCommit identifies "fixes" with mission files as non-noise', () => {
   withTempRepo(root => {
-    const { execSync } = require('child_process');
-
     fs.writeFileSync('README.md', '# Project\n');
-    execSync('git add README.md', { cwd: root });
-    execSync('git commit -m "initial commit"', { cwd: root });
+    git(['add', 'README.md'], root);
+    git(['commit', '-m', 'initial commit'], root);
 
     // Mixed commit (mission + backlog) with generic message "fixes"
     fs.writeFileSync('app.js', 'console.log("hello");\n');
     fs.mkdirSync('backlog/tasks', { recursive: true });
     fs.writeFileSync('backlog/tasks/task-1.md', 'status: active\n');
-    execSync('git add .', { cwd: root });
-    execSync('git commit -m "fixes"', { cwd: root });
-    const mixedSha = execSync('git rev-parse HEAD', { cwd: root }).toString().trim();
+    git(['add', '.'], root);
+    git(['commit', '-m', 'fixes'], root);
+    const mixedSha = git(['rev-parse', 'HEAD'], root).trim();
 
     const result = findLastNonNoiseCommit(root);
-    assert.equal(execSync(`git rev-parse ${result}`, { cwd: root }).toString().trim(), mixedSha);
+    assert.equal(git(['rev-parse', result], root).trim(), mixedSha);
   });
 });
 
 test('findLastNonNoiseCommit stops at branch-off points even if they are noise', () => {
   withTempRepo(root => {
-    const { execSync } = require('child_process');
-    const currentBranch = execSync('git symbolic-ref --short HEAD', { cwd: root }).toString().trim();
+    const currentBranch = git(['symbolic-ref', '--short', 'HEAD'], root).trim();
 
     // 1. Initial commit
     fs.writeFileSync('README.md', '# Project\n');
-    execSync('git add README.md', { cwd: root });
-    execSync('git commit -m "initial commit"', { cwd: root });
+    git(['add', 'README.md'], root);
+    git(['commit', '-m', 'initial commit'], root);
 
     // 2. Backlog noise (this will be our branch-off point)
     fs.mkdirSync('backlog/tasks', { recursive: true });
     fs.writeFileSync('backlog/tasks/task-1.md', 'status: backlog\n');
-    execSync('git add backlog/', { cwd: root });
-    execSync('git commit -m "backlog: add task 1"', { cwd: root });
-    const noiseBranchOffSha = execSync('git rev-parse HEAD', { cwd: root }).toString().trim();
+    git(['add', 'backlog/'], root);
+    git(['commit', '-m', 'backlog: add task 1'], root);
+    const noiseBranchOffSha = git(['rev-parse', 'HEAD'], root).trim();
 
     // 3. Create a sibling branch at this noise commit
-    execSync(`git branch sibling-branch ${noiseBranchOffSha}`, { cwd: root });
+    git(['branch', 'sibling-branch', noiseBranchOffSha], root);
 
     // 4. Add more noise on current branch
     fs.writeFileSync('backlog/tasks/task-2.md', 'status: backlog\n');
-    execSync('git add backlog/', { cwd: root });
-    execSync('git commit -m "backlog: task 2"', { cwd: root });
+    git(['add', 'backlog/'], root);
+    git(['commit', '-m', 'backlog: task 2'], root);
 
     // 5. Advance sibling-branch so it is not just a tip at the branch-off point
-    execSync('git checkout sibling-branch', { cwd: root });
+    git(['checkout', 'sibling-branch'], root);
     fs.writeFileSync('other.js', 'console.log("other");\n');
-    execSync('git add other.js', { cwd: root });
-    execSync('git commit -m "work on other branch"', { cwd: root });
-    execSync(`git checkout ${currentBranch}`, { cwd: root });
+    git(['add', 'other.js'], root);
+    git(['commit', '-m', 'work on other branch'], root);
+    git(['checkout', currentBranch], root);
 
     // findLastNonNoiseCommit must return null because noiseBranchOffSha is a branch-off
     // point that sibling-branch depends on — returning it would allow the squash path to
@@ -147,21 +149,19 @@ test('findLastNonNoiseCommit stops at branch-off points even if they are noise',
 
 test('findLastNonNoiseCommit returns null if the non-noise commit is shared', () => {
   withTempRepo(root => {
-    const { execSync } = require('child_process');
-
     // 1. Initial commit (pushed/shared)
     fs.writeFileSync('README.md', '# Project\n');
-    execSync('git add README.md', { cwd: root });
-    execSync('git commit -m "initial commit"', { cwd: root });
-    const sharedSha = execSync('git rev-parse HEAD', { cwd: root }).toString().trim();
+    git(['add', 'README.md'], root);
+    git(['commit', '-m', 'initial commit'], root);
+    const sharedSha = git(['rev-parse', 'HEAD'], root).trim();
     // Simulate it being pushed
-    execSync(`git update-ref refs/remotes/origin/main ${sharedSha}`, { cwd: root });
+    git(['update-ref', 'refs/remotes/origin/main', sharedSha], root);
 
     // 2. Backlog noise (local)
     fs.mkdirSync('backlog/tasks', { recursive: true });
     fs.writeFileSync('backlog/tasks/task-1.md', 'status: backlog\n');
-    execSync('git add backlog/', { cwd: root });
-    execSync('git commit -m "backlog: add task 1"', { cwd: root });
+    git(['add', 'backlog/'], root);
+    git(['commit', '-m', 'backlog: add task 1'], root);
 
     // findLastNonNoiseCommit would normally return sharedSha, but because it is shared, it should return null
     const result = findLastNonNoiseCommit(root);
@@ -173,19 +173,17 @@ const { squashTrailingBacklogNoiseIntoPreviousMission, softResetTrailingBacklogN
 
 test('squashTrailingBacklogNoiseIntoPreviousMission skips when worktree is dirty', () => {
   withTempRepo(root => {
-    const { execSync } = require('child_process');
-
     // 1. Initial commit
     fs.writeFileSync('README.md', '# Project\n');
-    execSync('git add README.md', { cwd: root });
-    execSync('git commit -m "initial commit"', { cwd: root });
-    const initialSha = execSync('git rev-parse HEAD', { cwd: root }).toString().trim();
+    git(['add', 'README.md'], root);
+    git(['commit', '-m', 'initial commit'], root);
+    const initialSha = git(['rev-parse', 'HEAD'], root).trim();
 
     // 2. Backlog noise
     fs.mkdirSync('backlog/tasks', { recursive: true });
     fs.writeFileSync('backlog/tasks/task-1.md', 'status: backlog\n');
-    execSync('git add backlog/', { cwd: root });
-    execSync('git commit -m "backlog: add task 1"', { cwd: root });
+    git(['add', 'backlog/'], root);
+    git(['commit', '-m', 'backlog: add task 1'], root);
 
     // 3. Make worktree dirty
     fs.writeFileSync('README.md', '# Project updated\n');
@@ -195,29 +193,27 @@ test('squashTrailingBacklogNoiseIntoPreviousMission skips when worktree is dirty
     assert.equal(result, false);
 
     // HEAD should still be the noise commit
-    const headSha = execSync('git rev-parse HEAD', { cwd: root }).toString().trim();
+    const headSha = git(['rev-parse', 'HEAD'], root).trim();
     assert.notEqual(headSha, initialSha);
   });
 });
 
 test('squashTrailingBacklogNoiseIntoPreviousMission skips when index is dirty', () => {
   withTempRepo(root => {
-    const { execSync } = require('child_process');
-
     // 1. Initial commit
     fs.writeFileSync('README.md', '# Project\n');
-    execSync('git add README.md', { cwd: root });
-    execSync('git commit -m "initial commit"', { cwd: root });
+    git(['add', 'README.md'], root);
+    git(['commit', '-m', 'initial commit'], root);
 
     // 2. Backlog noise
     fs.mkdirSync('backlog/tasks', { recursive: true });
     fs.writeFileSync('backlog/tasks/task-1.md', 'status: backlog\n');
-    execSync('git add backlog/', { cwd: root });
-    execSync('git commit -m "backlog: add task 1"', { cwd: root });
+    git(['add', 'backlog/'], root);
+    git(['commit', '-m', 'backlog: add task 1'], root);
 
     // 3. Stage an unrelated change
     fs.writeFileSync('unrelated.txt', 'dirty\n');
-    execSync('git add unrelated.txt', { cwd: root });
+    git(['add', 'unrelated.txt'], root);
 
     // Should skip squash
     const result = squashTrailingBacklogNoiseIntoPreviousMission(root);
@@ -227,18 +223,16 @@ test('squashTrailingBacklogNoiseIntoPreviousMission skips when index is dirty', 
 
 test('softResetTrailingBacklogNoise skips when worktree is dirty', () => {
   withTempRepo(root => {
-    const { execSync } = require('child_process');
-
     // 1. Initial commit
     fs.writeFileSync('README.md', '# Project\n');
-    execSync('git add README.md', { cwd: root });
-    execSync('git commit -m "initial commit"', { cwd: root });
+    git(['add', 'README.md'], root);
+    git(['commit', '-m', 'initial commit'], root);
 
     // 2. Backlog noise
     fs.mkdirSync('backlog/tasks', { recursive: true });
     fs.writeFileSync('backlog/tasks/task-1.md', 'status: backlog\n');
-    execSync('git add backlog/', { cwd: root });
-    execSync('git commit -m "backlog: add task 1"', { cwd: root });
+    git(['add', 'backlog/'], root);
+    git(['commit', '-m', 'backlog: add task 1'], root);
 
     // 3. Make worktree dirty
     fs.writeFileSync('README.md', '# Project updated\n');
@@ -251,29 +245,27 @@ test('softResetTrailingBacklogNoise skips when worktree is dirty', () => {
 
 test('squashTrailingBacklogNoiseIntoPreviousMission succeeds when clean', () => {
   withTempRepo(root => {
-    const { execSync } = require('child_process');
-
     // 1. Initial commit
     fs.writeFileSync('README.md', '# Project\n');
-    execSync('git add README.md', { cwd: root });
-    execSync('git commit -m "initial commit"', { cwd: root });
-    const initialSha = execSync('git rev-parse HEAD', { cwd: root }).toString().trim();
+    git(['add', 'README.md'], root);
+    git(['commit', '-m', 'initial commit'], root);
+    const initialSha = git(['rev-parse', 'HEAD'], root).trim();
 
     // 2. Backlog noise
     fs.mkdirSync('backlog/tasks', { recursive: true });
     fs.writeFileSync('backlog/tasks/task-1.md', 'status: backlog\n');
-    execSync('git add backlog/', { cwd: root });
-    execSync('git commit -m "backlog: add task 1"', { cwd: root });
+    git(['add', 'backlog/'], root);
+    git(['commit', '-m', 'backlog: add task 1'], root);
 
     // Should succeed
     const result = squashTrailingBacklogNoiseIntoPreviousMission(root);
     assert.equal(result, true);
 
     // HEAD should now be a NEW commit that is an amendment of initial commit (so not equal to initialSha but containing its work)
-    const headSha = execSync('git rev-parse HEAD', { cwd: root }).toString().trim();
+    const headSha = git(['rev-parse', 'HEAD'], root).trim();
     assert.notEqual(headSha, initialSha);
     // The amended commit should contain the backlog noise file in its index (staged)
-    const filesInCommit = execSync('git ls-tree -r HEAD --name-only', { cwd: root }).toString();
+    const filesInCommit = git(['ls-tree', '-r', 'HEAD', '--name-only'], root);
     assert.ok(filesInCommit.includes('backlog/tasks/task-1.md'));
   });
 });

@@ -9,6 +9,7 @@ const missionUtils = require('../lib/core/mission-utils');
 const backlog = require('../lib/tools/backlog');
 const forgejo = require('../lib/tools/forgejo');
 const stats = require('../lib/commands/stats');
+const verification = require('../lib/core/verification');
 
 const TEST_SLUG = 'task-integrate-test';
 const FAKE_ROOT = '/tmp/integrate-test-root';
@@ -38,6 +39,24 @@ function setupMocks() {
   mock.method(forgejo, 'readToken', () => 'token');
   mock.method(forgejo, 'resolveTokenFile', () => 'token-file');
   mock.method(forgejo, 'syncMerged', () => ({ ok: true }));
+  mock.method(verification, 'captureVerifiedTreeProof', (area, rootDir) => ({
+    ok: true,
+    proof: {
+      rootDir: path.resolve(rootDir),
+      area,
+      command: 'mock-verification',
+      commit: 'abc123',
+      tree: 'tree123',
+      verifiedAt: '2026-01-01T00:00:00.000Z'
+    }
+  }));
+  mock.method(verification, 'assertVerifiedTreeProof', (proof, rootDir) => {
+    const resolvedRoot = path.resolve(rootDir);
+    if (!proof || proof.rootDir !== resolvedRoot) {
+      return { ok: false, error: 'verification proof does not match the tree being published' };
+    }
+    return { ok: true, proof };
+  });
   mock.method(stats, 'resolveMissionClassification', () => ({ classification: 'ai_sdlc' }));
   mock.method(process, 'cwd', () => FAKE_ROOT);
   mock.method(process, 'exit', () => {});

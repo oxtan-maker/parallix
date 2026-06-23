@@ -1,9 +1,40 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const path = require('path');
 const { createPr, pushReviewRef } = require('../lib/tools/forgejo.js');
 const git = require('../lib/core/git.js');
 const { mock } = test;
 const serialTest = (name, fn) => test(name, { concurrency: false }, fn);
+
+// task-1335 added a tree-verification proof to the createPr publish path. These
+// tests exercise push-arg/force-with-lease behaviour against a synthetic rootDir
+// that does not exist on disk, so the real proof capture would hit
+// fs.realpathSync(rootDir) and throw ENOENT. Inject per-call stubs instead of
+// mocking the shared verification module globally — module-level mocks plus the
+// restoreAll() below churn global state that leaks into other test files during
+// the bulk `node --test test/*.test.js` run. These stubs keep the createPr
+// publish-guard regression coverage where it belongs (forgejo.test.js,
+// integrate.test.js) untouched.
+const stubVerifiedTreeProof = {
+  captureVerifiedTreeProofFn: (area, rootDir) => ({
+    ok: true,
+    proof: {
+      rootDir: path.resolve(rootDir),
+      area,
+      command: 'mock-verification',
+      commit: 'abc123',
+      tree: 'tree123',
+      verifiedAt: '2026-01-01T00:00:00.000Z'
+    }
+  }),
+  assertVerifiedTreeProofFn: (proof, rootDir) => {
+    const resolvedRoot = path.resolve(rootDir);
+    if (!proof || proof.rootDir !== resolvedRoot) {
+      return { ok: false, error: 'verification proof does not match the tree being published' };
+    }
+    return { ok: true, proof };
+  }
+};
 
 test.afterEach(() => {
   mock.restoreAll();
@@ -43,7 +74,7 @@ serialTest('createPr includes explicit force-with-lease sha when forceWithLease 
     return { ok: false };
   });
 
-  const result = createPr(branch, user, token, { rootDir, apiCall, log: () => {}, forceWithLease: true });
+  const result = createPr(branch, user, token, { rootDir, apiCall, log: () => {}, forceWithLease: true, ...stubVerifiedTreeProof });
   assert.strictEqual(result.ok, true);
   assert.ok(
     pushArgs.includes(`--force-with-lease=refs/heads/${branch}:lease-sha`),
@@ -79,7 +110,7 @@ serialTest('createPr does NOT include --force-with-lease when forceWithLease is 
     return { ok: false };
   });
 
-  const result = createPr(branch, user, token, { rootDir, apiCall, log: () => {}, forceWithLease: false });
+  const result = createPr(branch, user, token, { rootDir, apiCall, log: () => {}, forceWithLease: false, ...stubVerifiedTreeProof });
   assert.strictEqual(result.ok, true);
   assert.ok(!pushArgs.includes('--force-with-lease'), 'git push should NOT include --force-with-lease');
 });
@@ -375,7 +406,7 @@ serialTest('createPr fails cleanly (no --force fallback) when stale push persist
   mock.method(process.stderr, 'write', () => {});
   mock.method(process.stdout, 'write', () => {});
 
-  const result = createPr(branch, user, token, { rootDir, apiCall: () => ({ ok: false }), log: () => {}, forceWithLease: true });
+  const result = createPr(branch, user, token, { rootDir, apiCall: () => ({ ok: false }), log: () => {}, forceWithLease: true, ...stubVerifiedTreeProof });
   assert.strictEqual(result.ok, false, 'Should fail cleanly after two stale rejections');
   assert.strictEqual(pushCallCount, 2, 'Should attempt push exactly twice (no --force fallback)');
   assert.strictEqual(sawForcePush, false, 'Should never attempt a bare --force push');

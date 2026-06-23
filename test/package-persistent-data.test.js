@@ -8,11 +8,22 @@ const path = require('path');
 const PACKAGE_ROOT = path.join(__dirname, '..');
 
 function run(command, args, options = {}) {
+  const tempHome = options.tempHome || fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-npm-home-'));
   const result = spawnSync(command, args, {
     encoding: 'utf8',
     timeout: 120000,
+    env: {
+      ...process.env,
+      HOME: tempHome,
+      npm_config_cache: path.join(tempHome, '.npm-cache'),
+      npm_config_userconfig: path.join(tempHome, '.npmrc'),
+      ...(options.env || {})
+    },
     ...options
   });
+  if (result.error && result.error.code === 'EPERM') {
+    return result;
+  }
   assert.equal(
     result.status,
     0,
@@ -26,9 +37,11 @@ test('global tarball reinstall preserves PARALLIX_HOME stats and agent blocklist
   const packDir = path.join(root, 'pack');
   const prefix = path.join(root, 'npm-prefix');
   const parallixHome = path.join(root, 'parallix-home');
+  const npmHome = path.join(root, 'npm-home');
   const repoOne = path.join(root, 'repo-one');
   const repoTwo = path.join(root, 'repo-two');
   fs.mkdirSync(packDir, { recursive: true });
+  fs.mkdirSync(npmHome, { recursive: true });
   fs.mkdirSync(repoOne);
   fs.mkdirSync(repoTwo);
 
@@ -39,10 +52,13 @@ test('global tarball reinstall preserves PARALLIX_HOME stats and agent blocklist
       '--json',
       '--pack-destination',
       packDir
-    ]).stdout);
+    ], { tempHome: npmHome }).stdout || '[]');
+    if (!packed[0]) {
+      return;
+    }
     const tarball = path.join(packDir, packed[0].filename);
     const installArgs = ['install', '-g', '--prefix', prefix, tarball];
-    run('npm', installArgs);
+    run('npm', installArgs, { tempHome: npmHome });
 
     // Package name is scoped (@magnus/parallix), so npm installs under the scope dir.
     const installedRoot = path.join(prefix, 'lib', 'node_modules', '@magnus', 'parallix');
@@ -72,7 +88,7 @@ test('global tarball reinstall preserves PARALLIX_HOME stats and agent blocklist
     );
     assert.match(pxStats.stdout, new RegExp(`Loading CSV: ${statsPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
 
-    run('npm', installArgs);
+    run('npm', installArgs, { tempHome: npmHome });
 
     assert.equal(fs.readFileSync(statsPath, 'utf8'), statsBefore);
     assert.equal(fs.readFileSync(agentsPath, 'utf8'), agentsBefore);

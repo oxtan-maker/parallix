@@ -186,34 +186,40 @@ test('submitReviewRound exits on invalid outcome', () => {
 
 test('submitReviewRound handles approve for forgejo', () => {
   let disp = null;
+  let transitioned = null;
   const state = { round: 1, phase: 'reviewing', reviewer: 'rev', implementer: 'impl', transitionTo: () => {} };
   submitReviewRound(mockSlug, 'approve', 'msg', {
     worktree: mockWorktree,
     isForgejoReviewEnabledFn: () => true,
     readReviewStateFn: () => state,
     writeReviewStateFn: (s, st) => { disp = st.disposition; },
+    transitionTaskFn: (slug, status) => { transitioned = { slug, status }; return true; },
     readTokenFn: () => 'token',
     postReviewFn: () => ({ ok: true }),
     log: () => {},
     error: () => {}
   });
   assert.equal(disp, 'APPROVED');
+  assert.deepEqual(transitioned, { slug: mockSlug, status: 'approved' });
 });
 
 test('submitReviewRound handles request-changes for forgejo', () => {
   let disp = null;
+  let transitioned = null;
   const state = { round: 1, phase: 'reviewing', reviewer: 'rev', implementer: 'impl', transitionTo: () => {} };
   submitReviewRound(mockSlug, 'request-changes', 'msg', {
     worktree: mockWorktree,
     isForgejoReviewEnabledFn: () => true,
     readReviewStateFn: () => state,
     writeReviewStateFn: (s, st) => { disp = st.disposition; },
+    transitionTaskFn: (slug, status) => { transitioned = { slug, status }; return true; },
     readTokenFn: () => 'token',
     postReviewFn: () => ({ ok: true }),
     log: () => {},
     error: () => {}
   });
   assert.equal(disp, 'REQUEST_CHANGES');
+  assert.deepEqual(transitioned, { slug: mockSlug, status: 'review' });
 });
 
 test('submitReviewRound handles provider=none', () => {

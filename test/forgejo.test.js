@@ -9,7 +9,27 @@ const { getPrStatus, getPrNumber, getPrAuthor, getLatestReviewDecision, syncMerg
 const git = require('../lib/core/git.js');
 const backlog = require('../lib/tools/backlog.js');
 const missionUtils = require('../lib/core/mission-utils.js');
+const verification = require('../lib/core/verification');
 const { mock } = test;
+
+mock.method(verification, 'captureVerifiedTreeProof', (area, rootDir) => ({
+  ok: true,
+  proof: {
+    rootDir: path.resolve(rootDir),
+    area,
+    command: 'mock-verification',
+    commit: 'abc123',
+    tree: 'tree123',
+    verifiedAt: '2026-01-01T00:00:00.000Z'
+  }
+}));
+mock.method(verification, 'assertVerifiedTreeProof', (proof, rootDir) => {
+  const resolvedRoot = path.resolve(rootDir);
+  if (!proof || proof.rootDir !== resolvedRoot) {
+    return { ok: false, error: 'verification proof does not match the tree being published' };
+  }
+  return { ok: true, proof };
+});
 
 test('authenticatedReviewUrl uses the configured standalone review repo', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'forgejo-config-url-'));
@@ -74,6 +94,104 @@ test('createPr uses configured primaryBranch and configured Forgejo repo', () =>
     assert.ok(gitCalls.some(args => args.includes('http://claude:token-123@localhost:3300/magnus/testproj.git')));
     assert.ok(apiCalls.some(call => call.method === 'POST' && call.body && call.body.base === 'main'));
     assert.ok(apiCalls.every(call => call.options.rootDir === root));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('createPr rejects a verification proof from a different checkout before syncing primary baseline', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'forgejo-proof-mismatch-'));
+  try {
+    fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
+      product: { name: 'Test Project' },
+      adapters: {
+        tasks: { provider: 'backlog-md', storage: 'backlog' },
+        missions: { baseDir: 'docs/missions', branchPrefix: 'mission/', primaryBranch: 'main', worktreePattern: '../<repo>-<slug>' },
+        verification: { command: 'npm test' },
+        review: { provider: 'forgejo', baseUrl: 'http://localhost:3300', remote: 'review', repo: 'magnus/testproj' },
+        agents: { commandEnvPrefix: 'AUTONOMOUS_REVIEW_' },
+      },
+    }, null, 2), 'utf8');
+
+    mock.method(git, 'git', (args) => {
+      if (args.includes('show-ref')) return { status: 0, stdout: '', stderr: '' };
+      if (args.includes('push')) throw new Error('push should not run when proof is stale');
+      if (args.includes('rev-parse')) return { status: 0, stdout: 'abc123\n', stderr: '' };
+      return { status: 0, stdout: '', stderr: '' };
+    });
+
+    const apiCall = mock.fn((method, apiPath) => {
+      if (method === 'GET' && apiPath.includes('/pulls?state=open')) return { ok: true, data: [] };
+      if (method === 'GET' && apiPath.includes('/pulls?state=all')) return { ok: true, data: [] };
+      return { ok: false, data: null };
+    });
+
+    const result = createPr('mission/task-200', 'claude', 'token-123', {
+      rootDir: root,
+      apiCall,
+      log: () => {},
+      captureVerifiedTreeProofFn: () => ({
+        ok: true,
+        proof: {
+          rootDir: path.resolve('/tmp/different-checkout'),
+          area: 'integrate',
+          command: 'mock-verification',
+          commit: 'stale-commit',
+          tree: 'stale-tree',
+          verifiedAt: '2026-01-01T00:00:00.000Z'
+        }
+      })
+    });
+
+    assert.equal(result.ok, false);
+    assert.match(result.error, /verification proof/i);
+    assert.match(result.error, /tree being published/i);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('standalone createPr refuses to publish when the configured verification gate fails', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'forgejo-proof-failed-gate-'));
+  try {
+    fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
+      product: { name: 'Test Project' },
+      adapters: {
+        tasks: { provider: 'backlog-md', storage: 'backlog' },
+        missions: { baseDir: 'docs/missions', branchPrefix: 'mission/', primaryBranch: 'main', worktreePattern: '../<repo>-<slug>' },
+        verification: { command: 'npm test' },
+        review: { provider: 'forgejo', baseUrl: 'http://localhost:3300', remote: 'review', repo: 'magnus/testproj' },
+        agents: { commandEnvPrefix: 'AUTONOMOUS_REVIEW_' },
+      },
+    }, null, 2), 'utf8');
+
+    const gitCalls = [];
+    mock.method(git, 'git', (args) => {
+      gitCalls.push(args);
+      if (args.includes('push')) {
+        throw new Error('push should not run when verification gate fails');
+      }
+      return { status: 0, stdout: '', stderr: '' };
+    });
+
+    const apiCall = mock.fn(() => {
+      throw new Error('Forgejo API should not be called when verification gate fails');
+    });
+
+    const result = createPr('mission/task-200', 'claude', 'token-123', {
+      rootDir: root,
+      apiCall,
+      log: () => {},
+      captureVerifiedTreeProofFn: () => ({
+        ok: false,
+        error: 'verification gate failed for /tmp/fake-root with exit code 1'
+      })
+    });
+
+    assert.equal(result.ok, false);
+    assert.match(result.error, /verification gate failed/i);
+    assert.equal(apiCall.mock.calls.length, 0);
+    assert.equal(gitCalls.some(args => args.includes('push')), false);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
