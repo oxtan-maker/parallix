@@ -116,11 +116,38 @@ Each locked mission may add gates (staging validation, manual QA, ADR creation, 
 
 External review by a different agent is mandatory before integration. Valid review: surface exists; reviewer inspects `<primary-branch>..HEAD`; findings cite file references; zero-finding reviews for non-trivial missions include explicit searched-and-found-none evidence.
 
-### 4.4 Integration gate
+### 4.4 Backlog integrity gate (completed/archive-aware board mutations)
+
+A task that has been integrated and moved to `backlog/completed/` (status `done`)
+must not reappear in `backlog/tasks/` with `status: backlog`. Board mutations that
+enumerate and rewrite tasks — notably the reorder / ordinal write path that
+produces the recurring "Reorder tasks in backlog" commits — can otherwise
+regenerate a `backlog/tasks/` copy for a task id whose canonical record now lives
+in `completed/` (or `backlog/archive/`), so the board shows shipped work as
+un-started and `task_list` surfaces the stale backlog copy (TASK-1343).
+
+Parallix enforces the invariant **"never keep a `backlog/tasks/` file for a task
+id that already exists in `backlog/completed/` or `backlog/archive/`"** in two
+places, both in `lib/tools/backlog.js`:
+
+- **Guard / gate:** `checkBacklogIntegrity()` emits a `duplicate-completed` issue
+  for any task id present in both `backlog/tasks/` and a canonical
+  (`completed/` or `archive/`) location. The gate is exercised by
+  `test/backlog_gate.test.js` (fails when a recurrence ships) and by the `px draft`
+  preflight (`lib/commands/draft.js`), which refuses to draft while the duplicate
+  exists. This is in addition to the existing filename-vs-frontmatter id check.
+- **Mutation hygiene:** `pruneStaleBacklogDuplicates()` treats the completed/archive
+  copy as canonical and removes the stale `backlog/tasks/` copy, so a board
+  mutation does not leave a recreated `status: backlog` duplicate behind.
+
+Regression coverage for the reorder-recreates-completed-task scenario lives in
+`test/backlog_reorder_completed_duplicate.test.js`.
+
+### 4.5 Integration gate
 
 Complete when: mission reviewed, landing from the correct integration checkout, Backlog state updated, mission branch and worktree cleanup done.
 
-#### 4.4.1 Integration-time pipeline gates (ADR 0041)
+#### 4.5.1 Integration-time pipeline gates (ADR 0041)
 
 `px integrate` runs integration-time gates before the squash-merge lands. These gates are configured via a repo-side config file and invoked per changed top-level area.
 

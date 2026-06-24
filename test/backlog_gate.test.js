@@ -11,7 +11,11 @@ test('Backlog integrity check passes', () => {
   if (issues.length > 0) {
     console.error('[FAIL] Backlog integrity issues found:');
     issues.forEach(issue => {
-      console.error(`  - ${issue.file}: filename ID (${issue.filenameId}) does not match frontmatter ID (${issue.frontmatterId})`);
+      if (issue.type === 'duplicate-completed') {
+        console.error(`  - ${issue.file}: task ${issue.taskId} duplicates canonical copy ${issue.canonicalFile}`);
+      } else {
+        console.error(`  - ${issue.file}: filename ID (${issue.filenameId}) does not match frontmatter ID (${issue.frontmatterId})`);
+      }
     });
   }
   
