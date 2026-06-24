@@ -4,7 +4,7 @@ title: stats bug
 status: backlog
 assignee: [codex]
 created_date: '2026-06-24 05:31'
-labels: []
+labels: [user_value]
 dependencies: []
 ---
 
