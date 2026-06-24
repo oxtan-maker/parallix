@@ -1,5 +1,14 @@
 # CP-4: Final verification
 
+## Goal Check
+
+| Criterion | Status | Notes |
+|-----------|--------|-------|
+| All 7 success criteria met | PASS | Criteria 1-7 verified in table below with code-level evidence |
+| `npm test` passes with no new failures | PASS | 1618 pass, 0 fail, 22 skipped (pre-existing) |
+| No uncommitted changes blocking handoff | PASS | All changes committed; 4 checkpoint docs written |
+| Both bug classes have regression tests | PASS | 4 new tests at `test/stats.test.js:1435-1553` |
+
 ## Success Criteria Verification
 
 | # | Criterion | Status | Evidence |
