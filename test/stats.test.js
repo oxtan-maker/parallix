@@ -1552,3 +1552,36 @@ test('task-1342: phase report row for claude implementer does not show OpenAI Us
   const usageCol = parts[parts.length - 2]; // second-to-last column is Usage %
   assert.equal(usageCol, '—', 'Usage % should be — for claude implementer');
 });
+
+test('task-1342: review row with OpenAI reviewer shows Usage % even when claude is implementer', () => {
+  // Mixed-agent scenario: Claude started execution, got usage-capped, codex reviewed
+  // with OpenAI tokens. The review row has reviewer_agent=codex, implementer=claude.
+  // The Usage % for the review row should show the reviewer's OpenAI usage, not —.
+  const rows = [
+    {
+      mission: 'task-1339', stage: 'active', provider: 'openai', model: 'gpt-5.4',
+      implementer_agent: 'claude', implementer: 'claude',
+      input_tokens: '4526019', output_tokens: '21427', cached_tokens: '4072064',
+      tool_calls: '76', duration_minutes: '3', cost_usd: '0',
+      openai_usage_after: '29',
+    },
+    {
+      mission: 'task-1339', stage: 'review', provider: 'openai', model: 'gpt-5.4',
+      reviewer_agent: 'codex', implementer: 'claude',
+      input_tokens: '4526019', output_tokens: '21427', cached_tokens: '4072064',
+      tool_calls: '76', duration_minutes: '2', cost_usd: '0',
+      openai_usage_after: '37',
+    },
+  ].map(stats.normalizeStatsRow);
+
+  const report = stats.renderMissionPhaseReport(rows, 'task-1339');
+  const lines = report.split('\n');
+  const reviewLine = lines.find(l => /\breview\b/.test(l));
+  assert.ok(reviewLine, 'review line present');
+
+  // The review row has reviewer_agent=codex (an OpenAI agent), so Usage % should
+  // show the reviewer's actual openai_usage_after value, not —.
+  const parts = reviewLine.split(/\s+/).filter(Boolean);
+  const usageCol = parts[parts.length - 2]; // second-to-last column is Usage %
+  assert.equal(usageCol, '37', 'Usage % should be 37 for review row with OpenAI reviewer');
+});
