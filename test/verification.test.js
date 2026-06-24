@@ -1,13 +1,16 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const childProcess = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
 const {
+  captureVerifiedTreeProof,
   NO_GATE_NOTICE,
   formatVerificationCommand,
   resolveVerificationAdapter,
+  readPublishedTreeState,
   runVerificationGate,
 } = require('../lib/core/verification');
 
@@ -18,6 +21,19 @@ function withTempDir(fn) {
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+}
+
+function initCommittedGitRepo(root) {
+  const runGit = (args) => {
+    const result = childProcess.spawnSync('git', ['-C', root, ...args], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr || result.stdout || `git ${args.join(' ')} failed`);
+  };
+  runGit(['init', '-b', 'main']);
+  runGit(['config', 'user.name', 'Test User']);
+  runGit(['config', 'user.email', 'test@example.com']);
+  fs.writeFileSync(path.join(root, 'README.md'), '# temp repo\n', 'utf8');
+  runGit(['add', 'README.md']);
+  runGit(['commit', '-m', 'init']);
 }
 
 test('resolveVerificationAdapter defaults to no validation (no command)', () => {
@@ -117,5 +133,50 @@ test('runVerificationGate executes the configured command via bash', () => {
       args: ['-lc', 'npm test'],
       options: { cwd: root, stdio: 'inherit' },
     }]);
+  });
+});
+
+test('readPublishedTreeState uses the git-style runner by default', () => {
+  withTempDir(root => {
+    const realpathRoot = fs.realpathSync(root);
+    const state = readPublishedTreeState(root, {
+      gitRunner(args) {
+        assert.ok(Array.isArray(args), 'expected git-style argv array');
+        if (args.includes('HEAD^{tree}')) {
+          return { status: 0, stdout: 'tree123\n', stderr: '' };
+        }
+        if (args.includes('HEAD')) {
+          return { status: 0, stdout: 'abc123\n', stderr: '' };
+        }
+        throw new Error(`Unexpected git args: ${args.join(' ')}`);
+      }
+    });
+
+    assert.deepEqual(state, {
+      ok: true,
+      rootDir: realpathRoot,
+      commit: 'abc123',
+      tree: 'tree123',
+    });
+  });
+});
+
+test('captureVerifiedTreeProof uses the git-style runner by default', () => {
+  withTempDir(root => {
+    initCommittedGitRepo(root);
+    const proofResult = captureVerifiedTreeProof('docs', root, {
+      runFn() {
+        return { status: 0 };
+      },
+      stdio: 'pipe',
+    });
+
+    assert.equal(proofResult.ok, true);
+    assert.equal(proofResult.proof.rootDir, fs.realpathSync(root));
+    assert.equal(proofResult.proof.area, 'docs');
+    assert.equal(typeof proofResult.proof.commit, 'string');
+    assert.equal(typeof proofResult.proof.tree, 'string');
+    assert.ok(proofResult.proof.commit.length > 0);
+    assert.ok(proofResult.proof.tree.length > 0);
   });
 });
