@@ -91,9 +91,10 @@ test('mission phase report Cost ($) column preserves fractional dollar costs (ta
   const executeLine = lines.find(l => /\bexecute\b/.test(l));
   assert.ok(executeLine, 'execute line present');
   assert.match(executeLine, /1\.42/, 'fractional cost rendered with decimals, not truncated to 1');
-  // Total = 1.4226295 + 0.46433 + 0.46433 = 2.35 (rounded)
+  // Total is computed from rounded individual costs so it equals the
+  // sum of displayed values: 0.46 + 1.42 + 0.46 = 2.34
   const totalLine = lines.find(l => /\btotal\b/i.test(l));
-  assert.match(totalLine, /2\.35/, 'total sums fractional costs');
+  assert.match(totalLine, /2\.34/, 'total equals sum of displayed phase costs');
 });
 
 test('mission phase report Cost ($) column shows 0 for rows without cost_usd', () => {

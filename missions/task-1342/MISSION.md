@@ -1,7 +1,7 @@
 # Mission: Repair incorrect mission stats classification and phase telemetry display (task-1342)
 
 ## Goal
-Fix the stats pipeline so `px stats` reports internally consistent mission counts and `px stats <mission>` no longer attributes OpenAI token telemetry to Claude phases that cannot provide token usage. The mission must cover the specific mixed-agent scenario described in the backlog task, where one mission is touched by Claude, qwen/opencode, and Codex across phases or retries, and the final tables still remain numerically correct and semantically accurate.
+Fix the stats pipeline so `px stats` reports internally consistent mission counts and `px stats <mission>` no longer attributes OpenAI token telemetry to Claude phases that cannot provide token usage. The mission must cover the specific mixed-agent scenario described in the backlog task, where Claude starts execution, qwen/opencode retries mid-mission, Claude later resumes or finishes after the usage cap clears, and Codex appears only as reviewer in the sample output; the final tables must keep those roles and their telemetry numerically correct and semantically accurate.
 
 ## Why Now
 The current stats output is misleading in two user-visible ways. First, the weekly mission totals do not reconcile with the displayed classification subtotals, which makes the headline numbers untrustworthy. Second, mission phase telemetry can show Claude as the implementer while also showing OpenAI token usage that actually belongs to another agent or retry path. This undermines confidence in `px stats` as an operational tool for reviewing mission throughput, agent usage, and cost/usage attribution.
@@ -15,7 +15,7 @@ The current stats output is misleading in two user-visible ways. First, the week
 ## Scope
 - Trace how mission classification is written and how weekly totals are aggregated for `px stats`.
 - Identify why `# missions` can exceed `# user value missions + # AI SDLC missions` in the weekly summary.
-- Trace how per-phase telemetry is written, merged, and rendered for `px stats <mission>`, including missions where one agent starts, another retries, and a third completes or reviews.
+- Trace how per-phase telemetry is written, merged, and rendered for `px stats <mission>`, including missions where Claude starts, qwen/opencode retries, Claude later resumes or completes, and Codex reviews.
 - Fix the smallest set of stats-writing, stats-reading, or presentation code needed so classification counts reconcile and phase rows do not misattribute unsupported token telemetry to Claude.
 - Add or update automated tests that reproduce:
   - a weekly summary case where total mission count and classified subtotals previously diverged
