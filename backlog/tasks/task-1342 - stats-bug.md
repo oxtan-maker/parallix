@@ -1,7 +1,7 @@
 ---
 id: TASK-1342
 title: stats bug
-status: backlog
+status: refined
 assignee: [codex]
 created_date: '2026-06-24 05:31'
 labels: [user_value]
