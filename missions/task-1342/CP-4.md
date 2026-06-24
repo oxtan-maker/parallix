@@ -43,7 +43,7 @@
 9. **Lines 1555-1590**: Added regression test for review-row Usage % — asserts `reviewer_agent=codex` row with `implementer=claude` and `provider=openai` renders `Usage %` as `37`
 
 ### backlog/tasks/task-1342 - stats-bug.md
-9. **Line 5**: Restored `assignee: []` to comply with mission restricted area (do not edit assignee)
+9. **Line 5**: Assignee reverted to `[]` — workflow transition changed it to `[qwen]` during review loop; mission restricted area requires `assignee` unchanged from original `[]`.
 
 ## Gates
 
@@ -52,5 +52,5 @@
 - [x] Automated regression coverage exists for both behaviors (execute row, review row, claude implementer)
 - [x] `npm test` passes (1619 pass, 0 fail)
 - [x] Backlog labels remain exactly `["user_value"]`
-- [x] Backlog assignee restored to `[]` (mission constraint)
+- [x] Backlog assignee is `[]` (mission constraint; workflow transition temporarily set to `[qwen]`)
 - [x] Review rows use reviewer_agent for Usage % claude guard (with regression test)
