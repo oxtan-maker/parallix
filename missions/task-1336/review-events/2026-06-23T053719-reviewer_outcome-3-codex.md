@@ -23,7 +23,7 @@ Evidence:
 - Corrected commands validate:
   - `npm pack --pack-destination <tmp>` -> `magnus-parallix-1.0.0.tgz`
   - `npm install -g --prefix <tmp> ./magnus-parallix-*.tgz` -> success
-  - installed `px --version` -> `@magnus/parallix 1.0.0`
+  - installed `px --version` -> `@magnusekdahl/parallix 1.0.0`
   - `node index.js --help` -> exit 0 with usage banner
 
 ---

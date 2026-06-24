@@ -28,7 +28,7 @@ This is a workflow-state inconsistency rather than a README/content bug. The bra
 - Re-validated the previously broken documentation commands after round 2 fixes:
   - `npm pack --pack-destination <tmp>` produces `magnus-parallix-1.0.0.tgz`.
   - `npm install -g --prefix <tmp> ./magnus-parallix-*.tgz` succeeds.
-  - installed `px --version` prints `@magnus/parallix 1.0.0`.
+  - installed `px --version` prints `@magnusekdahl/parallix 1.0.0`.
   - `node index.js --help` exits 0 and prints the usage banner.
 
 ## No content findings on the branch

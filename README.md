@@ -8,12 +8,10 @@ It wraps your AI coding workflow without replacing it: Parallix turns each piece
 
 **Why not just use Claude Code, Codex, or OpenCode directly?** Those are the agents — Parallix is the harness around them. It does not replace your agent or your model. It coordinates several of them as one multi-agent coding workflow with isolation, automatic failover, deterministic checkpoints, and a forced review pass that a single agent session does not give you.
 
-**The first concrete thing you can do** is build the local tarball, run setup, create one Backlog.md-style task, and draft it:
+**The first concrete thing you can do** is install the px CLI, create one Backlog.md-style task, and draft it:
 
 ```sh
-npm pack                                  # builds magnus-parallix-<version>.tgz
-npm install -g ./magnus-parallix-*.tgz
-px setup
+npm install -g @magnusekdahl/parallix
 px draft task-001
 ```
 
@@ -61,24 +59,29 @@ In practice: a human drafts a mission, Parallix creates the branch and worktree,
 
 ## Quick start
 
-Parallix is distributed as a **local npm tarball built from this repository** — not a public registry install and not a container image (see [Current status](#current-status)). The shortest supported path:
+Install from the public npm registry:
 
 ```sh
-# 1. Build the tarball from the repo root (produces magnus-parallix-<version>.tgz)
-npm pack
+npm install -g @magnusekdahl/parallix
 
-# 2. Install the px CLI globally (use --prefix "$HOME/.local" if you lack sudo)
-npm install -g ./magnus-parallix-*.tgz
-
-# 3. Run the setup wizard for workflow.config.json, review wiring, and the
-#    standard Backlog.md-style layout under backlog/ and missions/
-px setup
-
-# 4. Confirm which px is on PATH
+# Confirm which px is on PATH
 px --version
 ```
 
-If you want the hosted review surface, `px setup` can also create or update the Forgejo review repo, token files, and the `review` remote. Forgejo is the PR viewer and publication surface here, not the authority for local branch ancestry or integration.
+Optional but useful: add `px shell-init` to your shell rc so mission transitions can `cd` your terminal into the next worktree:
+
+```sh
+echo 'eval "$(px shell-init bash)"' >> ~/.bashrc
+```
+
+Alternatively, install from a local tarball (useful for development or when offline):
+
+```sh
+npm pack
+npm install -g ./magnusekdahl-parallix-*.tgz
+```
+
+`px setup` is an optional convenience wizard that writes `workflow.config.json` and appends workflow entries to `.gitignore`. Parallix runs on built-in defaults without it — `px setup` becomes useful when you want to configure your verification command, customize the mission layout, or bootstrap the Forgejo review surface (repo, token files, and `review` remote). Forgejo is the PR viewer and publication surface here, not the authority for local branch ancestry or integration.
 
 Before `px draft`, create a task first. If you already use Backlog.md, create it there. If you do not, create the markdown file yourself under `backlog/tasks/`:
 
@@ -102,8 +105,6 @@ px active task-001
 ```
 
 Optional but useful: install the Graphify skill once per supported agent family if you want graph-backed codebase navigation in long missions and reviews. This is not a hard requirement like having a task file for `px draft`; when Graphify is not installed, Parallix skips graph updates and continues the workflow. The operator setup is documented separately because it is a workstation capability, not a minimum install step.
-
-Optionally add `px shell-init` to your shell rc so mission transitions can `cd` your terminal into the next worktree.
 
 ## Example
 
@@ -152,9 +153,9 @@ The full evidence-backed inventory is in [`docs/use-cases.md`](docs/use-cases.md
 
 **Alpha, local-first, and best suited to operators comfortable with Git and CLI workflows.**
 
-- **Distribution:** local `npm pack` + global install only. There is **no** public npm registry publish, no Homebrew, no Docker image, no standalone binary, and no CI/release automation today. This is a deliberate near-term model (ADR 0044), not an oversight.
+- **Distribution:** Published to the public npm registry as `@magnusekdahl/parallix`. Local tarball install (`npm pack`) is also supported. No Homebrew, no Docker image, no standalone binary, and no CI/release automation today.
 - **Review surface:** Forgejo is supported as the hosted PR viewer/publication surface, but the workflow remains local-first and can run without Forgejo when that provider is disabled.
-- **Versioning:** `CHANGELOG.md` is the versioning authority; PATCH bumps are the release discipline until a first public release.
+- **Versioning:** `CHANGELOG.md` is the versioning authority; PATCH bumps are the release discipline.
 - **Telemetry:** structured token/usage telemetry exists for the codex and claude families; the local-Qwen and mistral paths record honest zeros by design rather than fabricated numbers.
 - **Graphify:** the knowledge-graph path is supported for codex, claude, and qwen/opencode after one-time operator setup. It is optional, not a workflow prerequisite. The credible claim today is better-scoped context retrieval, not a proven token-savings benchmark.
 - **Review coverage** is best-effort, not guaranteed — see UC-4's caveats in [`docs/use-cases.md`](docs/use-cases.md).

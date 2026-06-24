@@ -66,12 +66,12 @@ hostTest('installer with command-name parallix puts shim inside the parallix dir
   }
 });
 
-hostTest('installer copies agents.local.json.example but not agents.local.json', () => {
+hostTest('installer copies agents.local.json.template but not agents.local.json', () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'install-wf-'));
   try {
     const result = runInstaller([tmpDir, 'wf']);
     assert.equal(result.status, 0);
-    assert.ok(fs.existsSync(path.join(tmpDir, 'parallix', 'config', 'agents.local.json.example')), 'agents.local.json.example included');
+    assert.ok(fs.existsSync(path.join(tmpDir, 'parallix', 'config', 'agents.local.json.template')), 'agents.local.json.template included');
     assert.ok(!fs.existsSync(path.join(tmpDir, 'parallix', 'config', 'agents.local.json')), 'agents.local.json excluded');
   } finally {
     cleanup(tmpDir);

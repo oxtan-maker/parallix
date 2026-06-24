@@ -16,7 +16,7 @@ reasoning that produced this stance.
 registry publish.** This is Alternative A (external runner / package boundary)
 realized as the simplest credible delivery for a freshly public repo:
 
-- The published package name is the scoped `@magnus/parallix`, resolving the
+- The published package name is the scoped `@magnusekdahl/parallix`, resolving the
   `px` namespace risk (this ADR, "`px` Namespace Risk", items 1–4). The unscoped
   `px` / `parallix` npm names are not relied upon.
 - Acquisition is `npm pack` from this repo followed by a single global
@@ -25,7 +25,7 @@ realized as the simplest credible delivery for a freshly public repo:
 - `node parallix <command>` (source run) remains the compatibility baseline and
   the local-development path; the tarball install is the same code with a
   versioned global `px`.
-- `package.json` reflects this: `"private": false`, `"name": "@magnus/parallix"`,
+- `package.json` reflects this: `"private": false`, `"name": "@magnusekdahl/parallix"`,
   `bin.px`, and a `files` allowlist. The operator-facing install/invoke/source-dev
   story lives in `README.md` ("Public distribution (canonical packaging and
   install)").
@@ -106,7 +106,7 @@ ADR 0044 accepts `px` as the intended short binary name for external distributio
 
 The practical risk is local PATH collision, not conceptual naming failure. parallix can still use `px` if follow-up packaging work proves:
 
-1. The published package name is scoped, for example `@magnus/parallix`, rather than relying on the unscoped `px` package name.
+1. The published package name is scoped, for example `@magnusekdahl/parallix`, rather than relying on the unscoped `px` package name.
 2. Install is a single global install (`npm install -g <tarball>`) that replaces on reinstall rather than accumulating runtimes, and is never blind: `px --version` identifies the executing `px.js` path, operators check for a pre-existing `px` on PATH (item 4), and a user-writable prefix (`npm config set prefix`) can control the location. (Resolved by TASK-1236; see `parallix/README.md`.)
 3. `px` startup/help output clearly identifies parallix so accidental collisions are obvious.
 4. Enterprise and dogfood validation check whether `px` is already present on PATH and document the selected invocation form.

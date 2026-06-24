@@ -1,2 +1,9 @@
 *.local.json
 test/
+coverage/
+graphify-out/
+.forgejo-local/
+.session/
+.sessions/
+workflow/.cache/
+workflow/.sessions/

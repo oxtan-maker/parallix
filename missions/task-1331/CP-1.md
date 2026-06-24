@@ -26,7 +26,7 @@ Concrete public story to align all surfaces to:
   from source, unchanged.
 - **Not yet supported:** registry (npm) publish, standalone binary, Homebrew, Docker, CI
   release automation.
-- **Package name:** scoped `@magnus/parallix` per ADR 0044 `px`-namespace-risk resolution
+- **Package name:** scoped `@magnusekdahl/parallix` per ADR 0044 `px`-namespace-risk resolution
   (`docs/adr/0044-workflow-distribution-model.md:72-77`), so the unscoped `px`/`parallix` npm
   names are not relied upon.
 
@@ -71,7 +71,7 @@ expected to require test changes.
 
 ## Next action
 
-In CP-2, edit `package.json` (set `private:false`, scoped `name:"@magnus/parallix"`, rewrite
+In CP-2, edit `package.json` (set `private:false`, scoped `name:"@magnusekdahl/parallix"`, rewrite
 `description` to drop "unpublished", add `publishConfig`/`engines` as consistency metadata),
 rewrite the `README.md:3` opener and add/clarify one explicit public-distribution section
 answering install/invoke/source-dev/not-yet-supported, and move

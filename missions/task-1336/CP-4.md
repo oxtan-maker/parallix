@@ -92,7 +92,7 @@ before fixing. **Both findings accepted and fixed (no pushback).**
 **End-to-end verification (real, not asserted):**
 - `npm pack` → `magnus-parallix-1.0.0.tgz`.
 - `npm install -g --prefix <tmp> ./magnus-parallix-*.tgz` → installed `px`; `px --version`
-  prints `@magnus/parallix 1.0.0`.
+  prints `@magnusekdahl/parallix 1.0.0`.
 - `node index.js --help` → prints the `px` usage banner (exit 0).
 - Re-checked all criteria: SEO 9/9, nine sections in order, banned-terms 0 in first 500
   words, `npm test` → 1603 pass / 0 fail / exit 0. No restricted areas touched.

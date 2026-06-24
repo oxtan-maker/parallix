@@ -241,7 +241,7 @@ near-term supported model; the architectural decision behind it is recorded in
 ADR 0044 (`docs/adr/0044-workflow-distribution-model.md`).
 
 **Supported acquisition/install path.** parallix is a Node.js toolkit (package
-name `@magnus/parallix`) that coordinates AI-assisted software missions through
+name `@magnusekdahl/parallix`) that coordinates AI-assisted software missions through
 the lifecycle `backlog → draft → active → review → approved → done`. The
 supported artifact is a **local npm tarball built from this repository** — not a
 public registry install and not a container image. The package name is scoped so
@@ -282,8 +282,10 @@ code; the tarball only adds a versioned, globally linked `px`.
 **What is not yet supported.** The following are explicitly out of the near-term
 model and are not claimed to work today: publishing to the public npm registry
 (or any other registry), Homebrew, Docker images, standalone single-file
-binaries, and CI/release automation or signing. Distribution stays a manual
-`npm pack` + global install until a follow-up decision changes that.
+binaries, and CI/release automation or npm provenance (Sigstore). ECDSA registry
+signatures are automatic on the public npm registry and require no publisher action.
+Distribution stays a manual `npm pack` + global install until a follow-up decision
+changes that.
 
 The old enterprise walkthrough has been removed. The supported packaging and
 install path is the three shell lines above.

@@ -1,18 +1,36 @@
 {
-  "name": "@magnus/parallix",
+  "name": "@magnusekdahl/parallix",
   "version": "1.0.0",
-  "description": "parallix — AI mission workflow toolkit with a px CLI, distributed as a local npm tarball",
+  "description": "AI mission workflow toolkit with a px CLI — local-first, human-in-the-loop multi-agent development",
   "license": "AGPL-3.0-or-later",
   "private": false,
+  "main": "index.js",
+  "bin": {
+    "px": "px.js"
+  },
   "engines": {
     "node": ">=20"
   },
   "publishConfig": {
-    "access": "restricted"
+    "access": "public"
   },
-  "bin": {
-    "px": "px.js"
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/magnusekdahl/parallix.git"
   },
+  "keywords": [
+    "parallix",
+    "workflow",
+    "ai",
+    "coding-agents",
+    "multi-agent",
+    "mission",
+    "cli"
+  ],
+  "bugs": {
+    "url": "https://github.com/magnusekdahl/parallix/issues"
+  },
+  "homepage": "https://github.com/magnusekdahl/parallix#readme",
   "files": [
     "index.js",
     "px.js",

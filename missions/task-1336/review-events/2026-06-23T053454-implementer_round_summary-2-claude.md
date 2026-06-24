@@ -33,7 +33,7 @@ directly before fixing. **Both fixed, no pushback.**
   ./magnus-parallix-*.tgz`, at both the opening call-to-action (`README.md:14`–`:15`) and the
   Quick start section (`README.md:63`,`:66`). End-to-end verified: `npm pack` →
   `npm install -g --prefix <tmp> ./magnus-parallix-*.tgz` → `px --version` prints
-  `@magnus/parallix 1.0.0`.
+  `@magnusekdahl/parallix 1.0.0`.
 
 - **Finding 2 (medium) — broken no-install entrypoint.** The README documented `node parallix
   <command>`, which fails with `MODULE_NOT_FOUND` (there is no `parallix` module/dir at the
