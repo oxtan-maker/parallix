@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 // We test the pure validation logic that runs before any agent is launched.
@@ -21,6 +22,22 @@ const path = require('path');
 
 // Base mission slug — append process.pid for isolation between parallel runs.
 const TEST_SLUG = `task-test-review-${process.pid}`;
+
+// Isolate stats writes to a temp PARALLIX_HOME so test runs never pollute
+// the real operator stats.csv (recordStageStatsSafe writes there via
+// recordStageStats/recordReviewStats/recordActiveStats).
+let _prevParallixHome;
+let _tmpHome;
+test.beforeEach(() => {
+  _tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'review-test-home-'));
+  _prevParallixHome = process.env.PARALLIX_HOME;
+  process.env.PARALLIX_HOME = _tmpHome;
+});
+test.afterEach(() => {
+  if (_prevParallixHome === undefined) delete process.env.PARALLIX_HOME;
+  else process.env.PARALLIX_HOME = _prevParallixHome;
+  fs.rmSync(_tmpHome, { recursive: true, force: true });
+});
 
 const fmt = require('../lib/core/fmt');
 
