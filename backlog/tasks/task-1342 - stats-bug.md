@@ -1,8 +1,8 @@
 ---
 id: TASK-1342
 title: stats bug
-status: refined
-assignee: [codex]
+status: active
+assignee: [mistral]
 created_date: '2026-06-24 05:31'
 labels: [user_value]
 dependencies: []
