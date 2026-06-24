@@ -1,6 +1,6 @@
 {
   "name": "@magnusekdahl/parallix",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "AI mission workflow toolkit with a px CLI — local-first, human-in-the-loop multi-agent development",
   "license": "AGPL-3.0-or-later",
   "private": false,
