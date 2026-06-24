@@ -2,7 +2,7 @@
 id: TASK-1342
 title: stats bug
 status: active
-assignee: [mistral]
+assignee: [qwen]
 created_date: '2026-06-24 05:31'
 labels: [user_value]
 dependencies: []
