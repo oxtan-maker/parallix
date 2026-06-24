@@ -70,18 +70,16 @@ test('checkMandatoryFiles flags missing checkpoint documents', () => {
   });
 });
 
-test('checkMandatoryFiles flags missing backlog task file', () => {
+test('checkMandatoryFiles accepts missing backlog task file when mission artifacts exist', () => {
   withTempRoot(rootDir => {
     const missionDir = path.join(rootDir, 'docs', 'missions', '2026', 'task-gk-004');
     fs.mkdirSync(missionDir, { recursive: true });
     fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Task GK 004');
     fs.writeFileSync(path.join(missionDir, 'CP-1.md'), '# CP-1');
 
-    // No backlog task file created
-
     const result = gatekeeper.checkMandatoryFiles('task-gk-004', { rootDir });
-    assert.strictEqual(result.ok, false);
-    assert.ok(result.missing.some(m => m.includes('backlog/tasks')));
+    assert.strictEqual(result.ok, true);
+    assert.deepStrictEqual(result.missing, []);
   });
 });
 

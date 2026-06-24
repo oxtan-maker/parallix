@@ -318,7 +318,7 @@ test('collectWizardAnswers uses default layout answers and bootstrap defaults', 
     assert.equal(result.reviewRepo, `human/${path.basename(root)}`);
     assert.equal(result.bootstrapReview, true);
     assert.deepEqual(result.agentPasswords, [{ user: 'codex', password: 'agent-password' }]);
-    assert.ok(prompts.some(entry => entry.prompt.includes('Backlog.md-style workflow layout')));
+    assert.ok(prompts.some(entry => entry.prompt.includes('markdown task workflow layout')));
     assert.ok(prompts.some(entry => entry.prompt.includes('repo-owner password and optional agent passwords')));
     assert.ok(logs.some(message => message.includes('Standard workflow layout:')));
     assert.ok(logs.some(message => message.includes('Hidden password prompts are next')));

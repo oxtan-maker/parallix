@@ -77,14 +77,14 @@ test('printIntegrationPreflight task failures', (t) => {
   });
   assert.ok(res1.failures.includes('task-ambiguity'));
 
-  // Case 2: Missing task
-  const context2 = { ...context1, task: { ok: false, reason: 'not-found' } };
+  // Case 2: Missing task warns and falls back to unknown classification
+  const context2 = { ...context1, task: { ok: false, reason: 'missing' } };
   const res2 = printIntegrationPreflight(context2, {
     readTokenFn: () => 'token',
     resolveTokenFileFn: () => 'file',
     getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
   });
-  assert.ok(res2.failures.includes('task-missing'));
+  assert.ok(!res2.failures.includes('task-missing'));
 });
 
 test('printIntegrationPreflight PR approval failures', (t) => {

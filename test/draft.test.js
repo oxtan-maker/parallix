@@ -118,6 +118,33 @@ test('buildDraftPrompt uses absolute worktree paths and emits no docs/agent-prom
   assert.doesNotMatch(prompt, /\{\{[^}]+\}\}/);
 });
 
+test('buildDraftPrompt preserves unknown classification instructions for synthetic tasks', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'draft-synth-prompt-'));
+  try {
+    const tasksDir = path.join(tempRoot, 'backlog', 'tasks');
+    fs.mkdirSync(tasksDir, { recursive: true });
+    fs.writeFileSync(path.join(tasksDir, 'task-synth - example.md'), [
+      '---',
+      'id: TASK-SYNTH-1234',
+      'title: example',
+      'status: ready',
+      'assignee: []',
+      'labels: [unknown]',
+      'dependencies: []',
+      'source: synthetic',
+      '---',
+      '',
+      'Synthetic intent',
+    ].join('\n'));
+
+    const prompt = buildDraftPrompt('task-synth', { rootDir: tempRoot });
+    assert.match(prompt, /preserve the `unknown` label/);
+    assert.doesNotMatch(prompt, /set exactly one of `ai_sdlc` or `user_value`/);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test('post-draft mission type validation is label-only', () => {
   const okResult = verifyMissionType('task-test', '/tmp/worktree', {
     resolveMissionClassificationFn: () => ({ [typeKey]: 'user_value' }),
@@ -626,6 +653,35 @@ test('bootstrapBacklogTask returns false when task missing in main repo', () => 
   });
 
   assert.equal(result, false);
+});
+
+test('bootstrapBacklogTask creates a synthetic unknown-classification task when requested', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'draft-synthetic-task-'));
+  const worktree = path.join(root, 'wt');
+  fs.mkdirSync(worktree, { recursive: true });
+
+  try {
+    const ok = bootstrapBacklogTask(worktree, '/tmp/repo', 'adhoc-sample', {
+      resolveTaskFileFn: () => ({ ok: false, reason: 'missing' }),
+      gitFn: () => ({ status: 0, stdout: '', stderr: '' }),
+      syntheticTask: {
+        id: 'ADHOC-SAMPLE-1234ABCD',
+        title: 'Sample task',
+        intent: 'create sample output',
+        source: 'synthetic-free-text',
+      },
+      logFn: () => {},
+      errorFn: () => {}
+    });
+
+    const created = fs.readdirSync(path.join(worktree, 'backlog', 'tasks'))[0];
+    const content = fs.readFileSync(path.join(worktree, 'backlog', 'tasks', created), 'utf8');
+    assert.equal(ok, true);
+    assert.match(content, /labels: \[unknown\]/);
+    assert.match(content, /source: synthetic/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 // ---------- classifyDraftEntries ----------

@@ -367,6 +367,43 @@ test('runDraftCommand top-level flows are covered with injected dependencies', a
   }
 });
 
+test('runDraftCommand accepts free-text intent and synthesizes a task slug', async () => {
+  const calls = [];
+  await runDraftCommand(['create a hello world program'], {
+    detectLaunchBaseBranchFn: () => null,
+    resolveMainRepoFn: () => '/tmp/main',
+    conventionalWorktreePathFn: (slug) => `/tmp/${slug}`,
+    ensureRepoExistsFn: () => true,
+    ensureStandaloneMissionBaselineFn: () => ({ committed: false }),
+    ensureDraftRepoConfigCommittedFn: () => true,
+    resolveTaskFileFn: () => ({ ok: false, reason: 'missing' }),
+    ensureMissionBranchFn: () => {},
+    ensureWorktreeFn: () => {},
+    ensureGraphifyWorkspaceFn: () => {},
+    ensureGraphifyIgnoreFn: () => {},
+    ensureMissionFileFn: () => '/tmp/adhoc-create-a-hello-world-program/MISSION.md',
+    bootstrapBacklogTaskFn: (_wt, _repo, slug, options) => {
+      calls.push({ slug, syntheticTask: options.syntheticTask });
+      return true;
+    },
+    validateDraftClassificationFn: () => ({ ok: true, classification: 'unknown' }),
+    transitionTaskFn: () => true,
+    readAgentConfigOrExitFn: () => ({}),
+    selectAgentFn: () => 'codex',
+    startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
+    recordDraftImplementerFn: () => {},
+    normalizeDraftClassificationFn: () => ({ ok: true, classification: 'unknown' }),
+    enforceDraftCommitSafetyFn: () => {},
+    exitFn: (code) => { throw new Error(`unexpected exit ${code}`); },
+    logFn: () => {},
+    errorFn: (msg) => { throw new Error(`unexpected error ${msg}`); }
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].slug, 'adhoc-create-a-hello-world-program');
+  assert.equal(calls[0].syntheticTask.source, 'synthetic-free-text');
+});
+
 test('ensureDraftRepoConfigCommitted blocks dirty mission-layout config before worktree creation', () => {
   const errors = [];
   const ok = ensureDraftRepoConfigCommitted('/tmp/main', {

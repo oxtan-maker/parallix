@@ -9,7 +9,7 @@ Drafting requirements:
 - fill every scaffolded section in `{{missionPath}}` with concrete, non-generic content (no placeholders, no "TBD")
 - include a Goal, Why now, Scope, Out of scope, Success criteria, Risks/assumptions, Checkpoints, Gates, Restricted areas, and Stop rules
 - success criteria must be specific enough to derive a goal-check table during execution
-- set exactly one of `ai_sdlc` or `user_value` in the Backlog task labels — no other value. Use `ai_sdlc` for workflow, prompt, or agent-fix work; use `user_value` for everything else (including code tech debt). Do not add a separate frontmatter field for mission type.
+- {{classificationInstructions}}
 - preserve `{{taskPath}}`: update content as needed but do not delete, rename, or move the file
 - do not edit the backlog `assignee` field; the workflow records ownership itself
 

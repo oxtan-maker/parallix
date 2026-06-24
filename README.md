@@ -1,30 +1,29 @@
 # Parallix
 
-**Parallix is a CLI for a local-first, human-in-the-loop developer workflow that runs several supported AI coding agents against one repository as isolated, resumable, reviewable missions — instead of one agent improvising in your working tree.**
+**Parallix is a local-first Git workflow CLI for running AI coding agents in isolated, reviewable missions instead of letting one long-lived agent session mutate your main checkout.**
 
-It is built for solo maintainers and small-team leads who already drive AI coding agents such as Claude Code, Codex, OpenCode/Qwen, and Vibe/Mistral and have hit the real problems: two agents fighting over one checkout, a run dying when a provider hits its usage cap, no clean way to resume a long task where it stopped, and the agent that wrote the code also being the one that declares it done.
+It is for engineers who already use Git and terminal-first coding agents such as Claude Code, Codex, OpenCode/Qwen, and Vibe/Mistral, and want branch isolation, resumable checkpoints, agent-family failover, and a forced review step without building that harness by hand.
 
-It wraps your AI coding workflow without replacing it: Parallix turns each piece of work into a *mission* with its own branch and its own git worktree, fails over to another agent family when one hits its usage limit, checkpoints long runs so they resume deterministically, and forces a second coding agent review step plus your own repo-configured verification gates before anything is integrated. A human still chooses the task, launches each phase, reads the review, and decides whether the work should land.
+It wraps your existing AI coding workflow without replacing it: each mission gets its own branch and worktree, long runs checkpoint to markdown, review is a separate phase, and integration still goes through your repo's own verification command. A human still chooses the mission, launches each phase, reads the output, and decides what lands.
 
-**Why not just use Claude Code, Codex, or OpenCode directly?** Those are the agents — Parallix is the harness around them. It does not replace your agent or your model. It coordinates several of them as one multi-agent coding workflow with isolation, automatic failover, deterministic checkpoints, and a forced review pass that a single agent session does not give you.
-
-**The first concrete thing you can do** is install the px CLI, create one Backlog.md-style task, and draft it:
+**The first concrete thing you can do** is install the CLI and run one complete mission:
 
 ```sh
 npm install -g @magnusekdahl/parallix
-px draft task-001
+px draft "create a hello world program"
+px active
+px review
+px integrate
 ```
 
-`px draft` does not accept free-text slugs like `my-first-task`, and it does not create the task for you. It expects an existing Backlog.md-style task key such as `task-001`.
-
-Everything below is the longer version, with the proof and the caveats kept honest.
+That path shows the whole value: isolate the work on its own branch and worktree, let an agent execute it with checkpoints, run a separate review phase, and only then integrate it back.
 
 ## Why Parallix?
 
 Running AI coding agents one session at a time hits a ceiling fast:
 
 - **One working tree, many agents.** Point two agents at the same checkout and they fight over the index, the branch, and uncommitted files. You either serialize them — one idle while the other runs — or hand-manage `git worktree` and branch names yourself.
-- **Runs die on usage caps.** An agent prints "usage limit reached", the run stops, and you babysit it: restart later, or hand-switch to a different model.
+- **Runs die on usage caps.** An agent prints "usage limit reached", the run stops, and you babysit it: restart later or hand-switch to a different model.
 - **Long tasks lose their place.** A crashed or context-exhausted agent leaves you reconstructing what was already done by re-reading diffs.
 - **The author grades its own homework.** The agent that wrote the change also declares it done. Nobody independent looks before it lands.
 
@@ -59,14 +58,30 @@ In practice: a human drafts a mission, Parallix creates the branch and worktree,
 
 ## Quick start
 
-Install from the public npm registry:
+Install from the public npm registry and run a complete mission:
 
 ```sh
 npm install -g @magnusekdahl/parallix
-
-# Confirm which px is on PATH
 px --version
+px draft "hello world"
+px active
+px review
+px integrate
 ```
+
+`px draft` creates the mission branch, sibling worktree, mission file, and task record. Then `cd` into the mission worktree and run `px active`, `px review`, and `px integrate` there with no slug; the CLI infers the mission from the current branch/worktree.
+
+Other draft entry points are available when you need them:
+
+```sh
+# Draft from the current repository directory name
+px draft .
+
+# Draft from an existing structured task file
+px draft task-001
+```
+
+Optional but useful: run `px setup` if you want help creating `workflow.config.json`, appending workflow entries to `.gitignore`, or bootstrapping Forgejo review wiring.
 
 Optional but useful: add `px shell-init` to your shell rc so mission transitions can `cd` your terminal into the next worktree:
 
@@ -78,12 +93,18 @@ Alternatively, install from a local tarball (useful for development or when offl
 
 ```sh
 npm pack
-npm install -g ./magnusekdahl-parallix-*.tgz
+npm install -g ./magnus-parallix-*.tgz
 ```
 
-`px setup` is an optional convenience wizard that writes `workflow.config.json` and appends workflow entries to `.gitignore`. Parallix runs on built-in defaults without it — `px setup` becomes useful when you want to configure your verification command, customize the mission layout, or bootstrap the Forgejo review surface (repo, token files, and `review` remote). Forgejo is the PR viewer and publication surface here, not the authority for local branch ancestry or integration.
+Parallix runs on built-in defaults without setup. `px setup` becomes useful when you want to configure your verification command, customize the mission layout, or bootstrap the Forgejo review surface (repo, token files, and `review` remote). Forgejo is the PR viewer and publication surface here, not the authority for local branch ancestry or integration.
 
-Before `px draft`, create a task first. If you already use Backlog.md, create it there. If you do not, create the markdown file yourself under `backlog/tasks/`:
+`px draft` now works without a pre-existing task file. If the input is free text or a directory path, Parallix creates a synthetic markdown task with classification `unknown` so the later phases, stats, and preflight checks still have a consistent record to work from.
+
+If you already use Backlog.md-style task files, that still works. `px draft task-001` remains valid, and Parallix will use the existing task metadata and classification when it is present.
+
+## Optional task files
+
+Structured markdown task files are now optional. They are still useful when you want stable IDs, explicit labels, or an external task-management flow.
 
 ```md
 backlog/tasks/task-001 - my-first-task.md
@@ -97,7 +118,7 @@ dependencies: []
 ---
 ```
 
-Then draft and run it with the actual workflow command:
+Then run the mission by slug:
 
 ```sh
 px draft task-001

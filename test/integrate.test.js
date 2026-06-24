@@ -396,6 +396,46 @@ test('recordPostIntegrationStats logs the persisted stats row including pr_fix_r
   assert.match(logs.join('\n'), /weekly report/);
 });
 
+test('recordPostIntegrationStats records an unknown classification row for a missing-task mission', () => {
+  const logs = [];
+  const originalLog = console.log;
+  console.log = message => logs.push(message);
+  try {
+    const outcome = recordPostIntegrationStats('task-unknown', {
+      rootDir: FAKE_ROOT,
+      gitRunner(args) {
+        if (args.join(' ') === `-C ${FAKE_ROOT} log -1 --format=%cs`) {
+          return { status: 0, stdout: '2026-06-24\n', stderr: '' };
+        }
+        throw new Error(`unexpected git args: ${JSON.stringify(args)}`);
+      },
+      recordIntegrationStatsFn({ slug, rootDir, filePath, date }) {
+        assert.equal(slug, 'task-unknown');
+        assert.equal(rootDir, FAKE_ROOT);
+        assert.ok(filePath.includes('stats.csv'));
+        assert.equal(date, '2026-06-24');
+        return {
+          changed: true,
+          row: {
+            mission: 'task-unknown',
+            implementer: 'unknown',
+            pr_fix_rounds: '0',
+            classification: 'unknown',
+            date: '2026-06-24',
+          },
+          report: 'weekly report',
+        };
+      },
+    });
+
+    assert.equal(outcome.row.classification, 'unknown');
+  } finally {
+    console.log = originalLog;
+  }
+
+  assert.match(logs.join('\n'), /\[INFO\] Workflow stats recorded: task-unknown: implementer=unknown, pr_fix_rounds=0, classification=unknown, date=2026-06-24/);
+});
+
 test('recordPostIntegrationStats routes stats through PARALLIX_HOME, not a consuming-repo path', () => {
   const runtimeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'px-runtime-root-'));
   const parallixHome = fs.mkdtempSync(path.join(os.tmpdir(), 'px-stats-home-'));
@@ -684,6 +724,43 @@ test('printIntegrationPreflight fails when no Forgejo token is available', () =>
     assert.ok(result.failures.includes('forgejo-token'));
     const output = lines.join('\n');
     assert.match(output, /Forgejo token: no token file found for codex/);
+  } finally {
+    console.log = originalLog;
+  }
+});
+
+test('printIntegrationPreflight tolerates a missing task file and reports unknown classification', () => {
+  const lines = [];
+  const originalLog = console.log;
+  console.log = line => lines.push(line);
+
+  try {
+    const result = printIntegrationPreflight({
+      slug: 'task-unknown',
+      branch: 'mission/task-unknown',
+      currentBranch: 'mission/task-unknown',
+      missionDir: '/tmp/docs/missions/2026/task-unknown',
+      task: { ok: false, reason: 'missing' },
+      taskStatus: null,
+      taskAssignee: null,
+      forgejoUser: 'codex',
+      taskAssigneeWarning: null,
+      pr: { exists: false, raw: 'no PR found' },
+      approval: { ok: false, error: 'pr-missing', reviewState: null },
+      mainBranch: 'main',
+      mainDirty: false,
+      mainDirtyEntries: []
+    }, {
+      readTokenFn: () => 'secret-token',
+      resolveTokenFileFn: () => '/tmp/tokens/codex',
+      isForgejoReviewEnabledFn: () => false,
+      getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
+    });
+
+    const output = lines.join('\n');
+    assert.ok(!result.failures.includes('task-missing'));
+    assert.match(output, /no task file found for task-unknown/);
+    assert.match(output, /Backlog classification: unknown/);
   } finally {
     console.log = originalLog;
   }

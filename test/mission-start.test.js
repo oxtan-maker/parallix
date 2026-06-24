@@ -62,6 +62,35 @@ test('missionStart passes if the backlog task has classification', () => {
   assert.ok(output.includes('[PASS] Backlog classification: ai_sdlc'));
 });
 
+test('missionStart passes when the task file is missing and classification falls back to unknown', () => {
+  const lines = [];
+  const errors = [];
+
+  const result = missionStart(['task-free-text'], {
+    returnResult: true,
+    cwdFn: () => '/tmp/project-task-free-text',
+    getCurrentBranchFn: () => 'mission/task-free-text',
+    resolveTaskFileFn: () => ({ ok: false, reason: 'missing' }),
+    resolveMissionClassificationFn: () => ({ classification: 'unknown', taskFile: null }),
+    getTaskStatusFn: () => 'ready',
+    toVirtualFn: (s) => s,
+    findMissionDirFn: () => '/tmp/docs/missions/2026/task-free-text',
+    fsExistsSync: () => true,
+    findCheckpointsFn: () => [],
+    getMissionYearFn: () => '2026',
+    conventionalWorktreePathFn: () => '/tmp/project-task-free-text',
+    getLastCommitFn: () => ({ sha: 'abcdef123456', subject: 'Initial', date: '2026-04-30' }),
+    getPrStatusFn: () => ({ exists: false }),
+    log: line => lines.push(line),
+    error: line => errors.push(line)
+  });
+
+  assert.deepEqual(result, { pass: true });
+  const output = lines.join('\n').replace(/\x1B\[\d+m/g, '');
+  assert.ok(output.includes('[WARN] Backlog task: no task file found for task-free-text; continuing with classification unknown.'));
+  assert.ok(output.includes('[PASS] Backlog classification: unknown'));
+});
+
 test('missionStart verify-env reports standalone adapter readiness once', () => {
   const lines = [];
   const result = missionStart([], {
@@ -397,4 +426,3 @@ test('verify-env blocked path prints NOT USABLE verdict with remediation', () =>
   assert.match(errorOutput, /remediation/);
   assert.match(errorOutput, /workflow\.config\.json/);
 });
-

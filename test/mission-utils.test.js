@@ -84,6 +84,7 @@ test('inferSlug identifies slug from explicit arg, current branch, directory nam
     // 1. Explicit arg wins
     assert.equal(inferSlug('task-081'), 'task-081');
     assert.equal(inferSlug('TASK-081'), 'task-081');
+    assert.equal(inferSlug('adhoc-hello-world'), 'adhoc-hello-world');
 
     // 2. Inference from mission branch
     git.getCurrentBranch = () => 'mission/task-118';
@@ -93,6 +94,10 @@ test('inferSlug identifies slug from explicit arg, current branch, directory nam
     git.getCurrentBranch = () => 'main';
     process.cwd = () => `/tmp/anyProject-task-119`;
     assert.equal(inferSlug(), 'task-119');
+
+    git.getCurrentBranch = () => 'main';
+    process.cwd = () => `/tmp/anyProject-adhoc-hello-world`;
+    assert.equal(inferSlug(), 'adhoc-hello-world');
 
     // 4. Inference from worktree registry
     git.getCurrentBranch = () => 'detached';

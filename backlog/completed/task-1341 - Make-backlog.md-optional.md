@@ -1,10 +1,10 @@
 ---
 id: TASK-1341
 title: Make backlog.md optional
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-06-23 16:55'
-labels: []
+labels: [ai_sdlc]
 dependencies: []
 ---
 

@@ -143,6 +143,33 @@ test('task-1314: upsertStatsRow keys on (repo, mission, stage) so same mission i
   assert.equal(parallixRow.input_tokens, '200');
 });
 
+test('resolveMissionClassification returns unknown when no task file exists', () => {
+  const root = createRepoFixture();
+  try {
+    const result = stats.resolveMissionClassification('task-missing', root);
+    assert.deepEqual(result, { classification: 'unknown', taskFile: null });
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('upsertStatsRow accepts unknown classification rows and weekly report counts them', () => {
+  const csvFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-stats-unknown-')), 'stats.csv');
+  stats.upsertStatsRow({
+    date: '2026-06-23',
+    repo: 'parallix',
+    mission: 'task-unknown',
+    classification: 'unknown',
+    implementer: 'unknown',
+    pr_fix_rounds: 0,
+  }, { filePath: csvFile });
+
+  const rows = stats.loadStatsCsv(csvFile).rows;
+  const report = stats.renderWeeklyStatsReport(rows, { today: '2026-06-23' });
+  assert.match(report, /# unknown missions/);
+  assert.match(report, /\b1\b/);
+});
+
 test('resolveStatsCsvPath resolves configured stats CSV from target repo root', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-stats-resolve-'));
   const csv = path.join(root, 'metrics', 'missions.csv');
