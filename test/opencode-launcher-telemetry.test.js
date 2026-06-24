@@ -45,6 +45,33 @@ test('startOpencodeAgent attaches telemetry from the captured export', async () 
   assert.equal(result.telemetry.toolCalls, 59);
 });
 
+test('startOpencodeAgent recovers the session id from opencode v2.0.0 JSON stdout', async () => {
+  // Regression for task-1339: opencode v2.0.0 `run` no longer prints the
+  // "Continue  opencode -s ses_..." footer, so the launcher must recover the
+  // session id from the streamed `--format json` events (each line carries a
+  // "sessionID":"ses_..." field). Without that recovery telemetry is dropped
+  // and every qwen stats row is zero.
+  const exportJson = fs.readFileSync(FIXTURE, 'utf8');
+  const jsonStdout = [
+    '{"type":"step_start","timestamp":1,"sessionID":"ses_132f470d8ffexge85esdX0nzCs","part":{"type":"step-start"}}',
+    '{"type":"text","timestamp":2,"sessionID":"ses_132f470d8ffexge85esdX0nzCs","part":{"type":"text","text":"Hi"}}',
+    '{"type":"step_finish","timestamp":3,"sessionID":"ses_132f470d8ffexge85esdX0nzCs","part":{"type":"step-finish"}}',
+    '',
+  ].join('\n');
+  let exportedSessionId = null;
+  opencode.__setSpawnAndTeeForTest(async () => ({ status: 0, stdout: jsonStdout, stderr: '' }));
+  opencode.__setExportCaptureForTest(async (sessionId) => { exportedSessionId = sessionId; return exportJson; });
+
+  const { resultPromise } = opencode.startOpencodeAgent({ prompt: 'p', worktree: '/tmp' });
+  const result = await resultPromise;
+
+  assert.equal(result.sessionId, 'ses_132f470d8ffexge85esdX0nzCs');
+  assert.equal(exportedSessionId, 'ses_132f470d8ffexge85esdX0nzCs', 'export must be called with the recovered id');
+  assert.ok(result.telemetry, 'telemetry must be attached from JSON-stdout session id');
+  assert.ok(result.telemetry.inputTokens > 0);
+  assert.ok(result.telemetry.outputTokens > 0);
+});
+
 test('startOpencodeAgent leaves telemetry unset when no session id is found', async () => {
   opencode.__setSpawnAndTeeForTest(async () => ({ status: 0, stdout: 'no marker here', stderr: '' }));
   let exportCalled = false;

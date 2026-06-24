@@ -1,10 +1,10 @@
 ---
 id: TASK-1339
 title: qwen statistics are not captured
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-06-23 13:14'
-labels: []
+labels: ["ai_sdlc"]
 dependencies: []
 ---
 

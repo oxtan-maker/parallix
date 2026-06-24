@@ -28,7 +28,7 @@ const {
 const { buildClaudeInvocation, resolveClaudeCommand, extractClaudeSessionId } = require('../lib/agents/claude');
 const { buildCodexDraftInvocation, resolveCodexCommand, extractCodexSessionId } = require('../lib/agents/codex');
 const { buildMistralInvocation, resolveMistralCommand, extractMistralSessionId } = require('../lib/agents/mistral');
-const { buildOpencodeInvocation, resolveOpencodeCommand, extractOpencodeSessionId } = require('../lib/agents/opencode');
+const { buildOpencodeInvocation, resolveOpencodeCommand, extractOpencodeSessionId, __setJsonFormatSupportForTest } = require('../lib/agents/opencode');
 
 
 function formatBlockUntil(date) {
@@ -1036,6 +1036,7 @@ test('resolveCodexCommand returns bare codex', () => {
 // ---------- Opencode (qwen) launcher ----------
 
 test('buildOpencodeInvocation omits --continue when resume is false', () => {
+  __setJsonFormatSupportForTest(true);
   const invocation = buildOpencodeInvocation({
     prompt: 'Execute the mission.',
     worktree: '/tmp/visualBoard-task-1010'
@@ -1045,6 +1046,8 @@ test('buildOpencodeInvocation omits --continue when resume is false', () => {
     'run',
     '--pure',
     '--dangerously-skip-permissions',
+    '--format',
+    'json',
     'Execute the mission.'
   ]);
   assert.equal(invocation.options.cwd, '/tmp/visualBoard-task-1010');
@@ -1052,6 +1055,7 @@ test('buildOpencodeInvocation omits --continue when resume is false', () => {
 });
 
 test('buildOpencodeInvocation uses --continue when resume is true and no sessionId', () => {
+  __setJsonFormatSupportForTest(true);
   const invocation = buildOpencodeInvocation({
     prompt: 'Continue the mission.',
     worktree: '/tmp/visualBoard-task-1010',
@@ -1062,12 +1066,15 @@ test('buildOpencodeInvocation uses --continue when resume is true and no session
     'run',
     '--pure',
     '--dangerously-skip-permissions',
+    '--format',
+    'json',
     '--continue',
     'Continue the mission.'
   ]);
 });
 
 test('buildOpencodeInvocation uses -s <sessionId> when resume is true and sessionId is provided', () => {
+  __setJsonFormatSupportForTest(true);
   const invocation = buildOpencodeInvocation({
     prompt: 'Resume the mission.',
     worktree: '/tmp/visualBoard-task-1010',
@@ -1079,6 +1086,8 @@ test('buildOpencodeInvocation uses -s <sessionId> when resume is true and sessio
     'run',
     '--pure',
     '--dangerously-skip-permissions',
+    '--format',
+    'json',
     '-s',
     'ses_abc123',
     'Resume the mission.'
@@ -1086,6 +1095,7 @@ test('buildOpencodeInvocation uses -s <sessionId> when resume is true and sessio
 });
 
 test('buildOpencodeInvocation ignores sessionId when resume is false (cross-family isolation)', () => {
+  __setJsonFormatSupportForTest(true);
   const invocation = buildOpencodeInvocation({
     prompt: 'Fresh launch.',
     worktree: '/tmp/visualBoard-task-1010',
@@ -1097,6 +1107,8 @@ test('buildOpencodeInvocation ignores sessionId when resume is false (cross-fami
     'run',
     '--pure',
     '--dangerously-skip-permissions',
+    '--format',
+    'json',
     'Fresh launch.'
   ]);
 });
