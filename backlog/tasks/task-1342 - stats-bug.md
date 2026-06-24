@@ -2,7 +2,7 @@
 id: TASK-1342
 title: stats bug
 status: backlog
-assignee: []
+assignee: [codex]
 created_date: '2026-06-24 05:31'
 labels: []
 dependencies: []
