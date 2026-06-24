@@ -4,6 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { ReviewState, readReviewState, normalizeReviewPhase } = require('../lib/review/review-state');
+const { stageLaunchSinceMs } = require('../lib/review/review-loop');
 const fmt = require('../lib/core/fmt');
 
 function withTempMissionDir(slug, fn) {
@@ -165,6 +166,39 @@ test('advanceRound increments round and resets phase/disposition/retries', () =>
   assert.equal(state.reviewerRetryCount, 0);
   assert.equal(state.implementerRetryCount, 0);
   assert.notEqual(state.startedAt, oldTimestamp);
+});
+
+test('advanceRound preserves metadata used for per-launch stage telemetry dedup', () => {
+  const state = new ReviewState('task-adv-meta', {
+    reviewer: 'a',
+    implementer: 'b',
+    round: 2,
+    metadata: {
+      recordedStageLaunches: {
+        'review:codex': ['codex|sess-1|2026-06-24T10:00:00.000Z||0'],
+      }
+    }
+  });
+  state.advanceRound();
+  assert.deepEqual(state.metadata, {
+    recordedStageLaunches: {
+      'review:codex': ['codex|sess-1|2026-06-24T10:00:00.000Z||0'],
+    }
+  });
+});
+
+test('stageLaunchSinceMs windows the read to the current launch start (per-round, not cumulative)', () => {
+  // Each round must read only its own rollouts so accumulateStageStats sums
+  // per-round deltas instead of re-summing a cumulative-since-first-launch
+  // window. The since-ms therefore tracks THIS launch's startedAt.
+  assert.equal(
+    stageLaunchSinceMs({ startedAt: '2026-06-24T12:00:00.000Z' }),
+    Date.parse('2026-06-24T12:00:00.000Z')
+  );
+  // Missing/invalid timestamps fall back to 0 (read whatever exists).
+  assert.equal(stageLaunchSinceMs({}), 0);
+  assert.equal(stageLaunchSinceMs(null), 0);
+  assert.equal(stageLaunchSinceMs({ startedAt: 'not-a-date' }), 0);
 });
 
 test('ReviewState save treats unchanged state as a successful no-op', () => {

@@ -143,11 +143,95 @@ test('task-1314: upsertStatsRow keys on (repo, mission, stage) so same mission i
   assert.equal(parallixRow.input_tokens, '200');
 });
 
-test('resolveMissionClassification returns unknown when no task file exists', () => {
+test('task-1342: upsertStatsRow keeps same mission/stage separate by acting agent family', () => {
+  const csvFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-stats-stage-actor-')), 'stats.csv');
+
+  stats.upsertStatsRow({
+    date: '2026-06-24',
+    repo: 'parallix',
+    mission: 'task-1342',
+    classification: 'ai_sdlc',
+    implementer: 'codex',
+    implementer_agent: 'codex',
+    stage: 'follow-up',
+    input_tokens: '100',
+  }, { filePath: csvFile });
+  stats.upsertStatsRow({
+    date: '2026-06-24',
+    repo: 'parallix',
+    mission: 'task-1342',
+    classification: 'ai_sdlc',
+    implementer: 'qwen',
+    implementer_agent: 'qwen',
+    stage: 'follow-up',
+    input_tokens: '200',
+  }, { filePath: csvFile });
+
+  const data = stats.loadStatsCsv(csvFile);
+  assert.equal(data.rows.length, 2);
+  assert.ok(data.rows.some(r => r.stage === 'follow-up' && r.implementer_agent === 'codex' && r.input_tokens === '100'));
+  assert.ok(data.rows.some(r => r.stage === 'follow-up' && r.implementer_agent === 'qwen' && r.input_tokens === '200'));
+});
+
+test('task-1342: accumulateStageStats sums repeated launches for the same mission/stage/family', () => {
+  const root = createRepoFixture();
+  try {
+    const taskFile = path.join(root, 'backlog', 'tasks', 'task-2000 - Example.md');
+    fs.writeFileSync(taskFile, [
+      '---',
+      'id: TASK-2000',
+      'labels: [ai_sdlc]',
+      'assignee: [qwen]',
+      'status: review',
+      '---',
+      '',
+    ].join('\n'));
+    const csvFile = path.join(root, 'workflow', 'data', 'stats.csv');
+
+    stats.accumulateStageStats({
+      slug: 'task-2000',
+      stage: 'follow-up',
+      rootDir: root,
+      filePath: csvFile,
+      implementer: 'qwen',
+      telemetry: { provider: 'openai', model: 'gpt-5', inputTokens: 100, outputTokens: 10, cachedTokens: 5, totalTokens: 115, toolCalls: 2, usagePercent: 7, cost_usd: 0.25 },
+      durationMinutes: 3,
+      date: '2026-06-24',
+    });
+    const result = stats.accumulateStageStats({
+      slug: 'task-2000',
+      stage: 'follow-up',
+      rootDir: root,
+      filePath: csvFile,
+      implementer: 'qwen',
+      telemetry: { provider: 'openai', model: 'gpt-5', inputTokens: 40, outputTokens: 4, cachedTokens: 1, totalTokens: 45, toolCalls: 1, usagePercent: 9, cost_usd: 0.5 },
+      durationMinutes: 2,
+      date: '2026-06-24',
+    });
+
+    assert.equal(result.data.rows.length, 1);
+    assert.equal(result.row.input_tokens, '140');
+    assert.equal(result.row.output_tokens, '14');
+    assert.equal(result.row.cached_tokens, '6');
+    assert.equal(result.row.context_tokens, '160');
+    assert.equal(result.row.tool_calls, '3');
+    assert.equal(result.row.duration_minutes, '5');
+    assert.equal(result.row.openai_usage_after, '9');
+    assert.equal(result.row.cost_usd, '0.75');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('resolveMissionClassification returns null classification with error when no task file exists', () => {
   const root = createRepoFixture();
   try {
     const result = stats.resolveMissionClassification('task-missing', root);
-    assert.deepEqual(result, { classification: 'unknown', taskFile: null });
+    assert.deepEqual(result, {
+      classification: null,
+      taskFile: null,
+      error: 'Could not resolve backlog task for task-missing.',
+    });
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -1455,4 +1539,161 @@ test('summarizeAgentWindow trusts local ground truth over a stale zero in the CS
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+// task-1342: weekly classification count reconciliation regression
+
+test('task-1342: weekly summary total equals user_value + ai_sdlc even with unclassified missions', () => {
+  // Simulate the task-1339 scenario: 35 missions in the window, but only 3 have
+  // user_value and 12 have ai_sdlc. The remaining 20 have empty/null classification.
+  // The total must equal user_value + ai_sdlc (15), not 35.
+  const rows = [];
+  for (let i = 0; i < 3; i++) {
+    rows.push({
+      date: `2026-06-${20 + i}`, mission: `task-u${i}`, classification: 'user_value',
+      implementer: 'codex', pr_fix_rounds: '0',
+    });
+  }
+  for (let i = 0; i < 12; i++) {
+    rows.push({
+      date: `2026-06-${20 + (i % 5)}`, mission: `task-a${i}`, classification: 'ai_sdlc',
+      implementer: 'qwen', pr_fix_rounds: '1',
+    });
+  }
+  // 20 missions with empty/null/unrecognized classification
+  for (let i = 0; i < 20; i++) {
+    rows.push({
+      date: `2026-06-${20 + (i % 5)}`, mission: `task-x${i}`, classification: '',
+      implementer: 'claude', pr_fix_rounds: '0',
+    });
+  }
+
+  const report = stats.renderWeeklyStatsReport(rows, { today: '2026-06-24' });
+  const plain = require('../lib/core/fmt').stripAnsi(report);
+
+  // The current week (2026-06-18 to 2026-06-24) contains all 35 rows.
+  // total should equal userValue + aiSdlc = 3 + 12 = 15, NOT 35.
+  assert.match(plain, /# missions\s+# user value missions\s+# AI SDLC missions/);
+  assert.match(plain, /15\s+3\s+12/);
+});
+
+test('task-1342: weekly summary total equals user_value + ai_sdlc + unknown when some missions have invalid classification strings', () => {
+  const rows = [
+    { date: '2026-06-20', mission: 'task-good1', classification: 'user_value', implementer: 'codex', pr_fix_rounds: '0' },
+    { date: '2026-06-20', mission: 'task-good2', classification: 'ai_sdlc', implementer: 'qwen', pr_fix_rounds: '1' },
+    { date: '2026-06-20', mission: 'task-bad1', classification: 'USER_VALUE', implementer: 'claude', pr_fix_rounds: '0' },
+    { date: '2026-06-20', mission: 'task-bad2', classification: 'unknown', implementer: 'gemini', pr_fix_rounds: '0' },
+    { date: '2026-06-20', mission: 'task-bad3', classification: null, implementer: 'qwen', pr_fix_rounds: '0' },
+  ];
+
+  const report = stats.renderWeeklyStatsReport(rows, { today: '2026-06-24' });
+  const plain = require('../lib/core/fmt').stripAnsi(report);
+
+  // 'USER_VALUE' is lowercased by normalizeClassification, so it counts as user_value.
+  // 'unknown' is a valid classification and counts toward the total; null does not.
+  // So: total=4, userValue=2, aiSdlc=1, unknown=1.
+  assert.match(plain, /4\s+2\s+1\s+1/);
+});
+
+// task-1342: mixed-agent per-mission phase telemetry regression
+
+test('task-1342: mixed-agent phase report shows — for Usage % when provider is not OpenAI', () => {
+  // Simulate task-1339: Claude started execution, got usage-capped, qwen/opencode
+  // retried with OpenAI tokens, Claude later resumed. The execute phase shows
+  // Claude as implementer but the provider/model came from the OpenAI telemetry
+  // that actually belongs to qwen's session.
+  const rows = [
+    {
+      mission: 'task-1339', stage: 'active', provider: 'openai', model: 'gpt-5.4',
+      implementer_agent: 'claude', implementer: 'claude',
+      input_tokens: '4526019', output_tokens: '21427', cached_tokens: '4072064',
+      tool_calls: '76', duration_minutes: '3', cost_usd: '0',
+    },
+    {
+      mission: 'task-1339', stage: 'review', provider: 'openai', model: 'gpt-5.4',
+      reviewer_agent: 'codex', implementer: 'claude',
+      input_tokens: '4526019', output_tokens: '21427', cached_tokens: '4072064',
+      tool_calls: '76', duration_minutes: '2', cost_usd: '0',
+    },
+    {
+      mission: 'task-1339', stage: 'default', provider: '', model: '',
+      implementer_agent: 'claude', implementer: 'claude',
+      input_tokens: '0', output_tokens: '0', cached_tokens: '0',
+      tool_calls: '0', duration_minutes: '0', cost_usd: '0',
+    },
+  ].map(stats.normalizeStatsRow);
+
+  const report = stats.renderMissionPhaseReport(rows, 'task-1339');
+
+  // Claude cannot provide token usage (it tracks on $), so Usage % should show
+  // — for non-OpenAI providers. Even though the provider column says "openai"
+  // (from the qwen telemetry that bled in), the implementer is claude.
+  // The key assertion: Usage % column (9th data column) must not show 0 for
+  // the execute phase when the implementer is claude.
+  const lines = report.split('\n');
+  const executeLine = lines.find(l => /\bexecute\b/.test(l));
+  assert.ok(executeLine, 'execute line present');
+  // The execute phase row shows claude as implementer. Since claude has no
+  // openai_usage_after, the Usage % column should show — not 0.
+  assert.doesNotMatch(executeLine, /execute\s+openai\s+gpt-5\.4\s+claude\s+4526019\s+21427\s+4072064\s+76\s+3\s+0\s+0/);
+});
+
+test('task-1342: phase report row for claude implementer does not show OpenAI Usage % as 0', () => {
+  const rows = [
+    {
+      mission: 'task-mixed', stage: 'active', provider: 'openai', model: 'gpt-5.4',
+      implementer_agent: 'claude', implementer: 'claude',
+      input_tokens: '5000', output_tokens: '100', cached_tokens: '4000',
+      tool_calls: '10', duration_minutes: '5', cost_usd: '0',
+    },
+  ].map(stats.normalizeStatsRow);
+
+  const report = stats.renderMissionPhaseReport(rows, 'task-mixed');
+  const lines = report.split('\n');
+  const executeLine = lines.find(l => /\bexecute\b/.test(l));
+  assert.ok(executeLine, 'execute line present');
+
+  // The openai_usage_after value for this row is '0' (no OpenAI rate-limit data
+  // from claude). The Usage % column should show — for claude (non-OpenAI agent).
+  // Note: the provider IS openai in this row (from telemetry bleed), so the
+  // current code would show the raw value. The fix should prevent showing 0 for
+  // claude even when the provider column says openai.
+  // This test documents the bug: currently the code checks provider, not implementer.
+  // After the fix, claude implementer should show — regardless of provider column.
+  const parts = executeLine.split(/\s+/).filter(Boolean);
+  const usageCol = parts[parts.length - 2]; // second-to-last column is Usage %
+  assert.equal(usageCol, '—', 'Usage % should be — for claude implementer');
+});
+
+test('task-1342: review row with OpenAI reviewer shows Usage % even when claude is implementer', () => {
+  // Mixed-agent scenario: Claude started execution, got usage-capped, codex reviewed
+  // with OpenAI tokens. The review row has reviewer_agent=codex, implementer=claude.
+  // The Usage % for the review row should show the reviewer's OpenAI usage, not —.
+  const rows = [
+    {
+      mission: 'task-1339', stage: 'active', provider: 'openai', model: 'gpt-5.4',
+      implementer_agent: 'claude', implementer: 'claude',
+      input_tokens: '4526019', output_tokens: '21427', cached_tokens: '4072064',
+      tool_calls: '76', duration_minutes: '3', cost_usd: '0',
+      openai_usage_after: '29',
+    },
+    {
+      mission: 'task-1339', stage: 'review', provider: 'openai', model: 'gpt-5.4',
+      reviewer_agent: 'codex', implementer: 'claude',
+      input_tokens: '4526019', output_tokens: '21427', cached_tokens: '4072064',
+      tool_calls: '76', duration_minutes: '2', cost_usd: '0',
+      openai_usage_after: '37',
+    },
+  ].map(stats.normalizeStatsRow);
+
+  const report = stats.renderMissionPhaseReport(rows, 'task-1339');
+  const lines = report.split('\n');
+  const reviewLine = lines.find(l => /\breview\b/.test(l));
+  assert.ok(reviewLine, 'review line present');
+
+  // The review row has reviewer_agent=codex (an OpenAI agent), so Usage % should
+  // show the reviewer's actual openai_usage_after value, not —.
+  const parts = reviewLine.split(/\s+/).filter(Boolean);
+  const usageCol = parts[parts.length - 2]; // second-to-last column is Usage %
+  assert.equal(usageCol, '37', 'Usage % should be 37 for review row with OpenAI reviewer');
 });

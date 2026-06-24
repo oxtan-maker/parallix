@@ -58,7 +58,8 @@ test('TASK-1048: startReviewLoop does not crash when taskResolution is needed fo
     },
     transitionTaskFn: () => true,
     buildCompactReviewPromptFn: () => 'prompt',
-    buildCompactActOnReviewPromptFn: () => 'prompt'
+    buildCompactActOnReviewPromptFn: () => 'prompt',
+    recordStageStatsSafeFn: () => {}
   });
 
   // Verify the fallback was exercised: disposition was polled for the

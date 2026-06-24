@@ -91,9 +91,10 @@ test('mission phase report Cost ($) column preserves fractional dollar costs (ta
   const executeLine = lines.find(l => /\bexecute\b/.test(l));
   assert.ok(executeLine, 'execute line present');
   assert.match(executeLine, /1\.42/, 'fractional cost rendered with decimals, not truncated to 1');
-  // Total = 1.4226295 + 0.46433 + 0.46433 = 2.35 (rounded)
+  // Total is computed from rounded individual costs so it equals the
+  // sum of displayed values: 0.46 + 1.42 + 0.46 = 2.34
   const totalLine = lines.find(l => /\btotal\b/i.test(l));
-  assert.match(totalLine, /2\.35/, 'total sums fractional costs');
+  assert.match(totalLine, /2\.34/, 'total equals sum of displayed phase costs');
 });
 
 test('mission phase report Cost ($) column shows 0 for rows without cost_usd', () => {
@@ -127,4 +128,15 @@ test('mission phase report execute phase shows implementer_agent when set', () =
   const execLine = report.split('\n').find(line => /\bexecute\b/.test(line));
   assert.ok(execLine, 'execute line present');
   assert.match(execLine, /codex/);
+});
+
+test('mission phase report shows multiple follow-up rows when different agent families acted in that phase', () => {
+  const report = renderMissionPhaseReport([
+    { mission: 'task-1342', stage: 'follow-up', provider: 'openai', model: 'gpt-5', implementer_agent: 'codex', input_tokens: '100', output_tokens: '10' },
+    { mission: 'task-1342', stage: 'follow-up', provider: 'openai', model: 'gpt-5', implementer_agent: 'qwen', input_tokens: '200', output_tokens: '20' },
+  ].map(normalizeStatsRow), 'task-1342');
+  const followUpLines = report.split('\n').filter(line => /\bfollow-up\b/.test(line));
+  assert.equal(followUpLines.length, 2);
+  assert.ok(followUpLines.some(line => /\bcodex\b/.test(line)));
+  assert.ok(followUpLines.some(line => /\bqwen\b/.test(line)));
 });

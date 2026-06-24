@@ -1176,6 +1176,7 @@ test('runDraftCommand does not transition to refined when safety harness throws'
     selectAgentFn: () => 'codex',
     startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
     recordDraftImplementerFn: () => {},
+    normalizeDraftClassificationFn: () => ({ ok: true, classification: 'user_value' }),
     enforceDraftCommitSafetyFn: () => { throw new Error('shared-file conflicts: lib/common.js'); },
     exitFn: (code) => { exitCode = code; },
     logFn: () => {},

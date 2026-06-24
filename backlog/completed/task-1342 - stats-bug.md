@@ -1,10 +1,10 @@
 ---
 id: TASK-1342
 title: stats bug
-status: backlog
-assignee: []
+status: done
+assignee: [qwen]
 created_date: '2026-06-24 05:31'
-labels: []
+labels: [user_value]
 dependencies: []
 ---
 
