@@ -1,10 +1,10 @@
 ---
 id: TASK-1345
 title: continue the diagnosing of missing qwen telemetry
-status: backlog
-assignee: []
+status: done
+assignee: [qwen]
 created_date: '2026-06-24 18:33'
-labels: []
+labels: [ai_sdlc]
 dependencies: []
 ---
 
