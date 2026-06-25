@@ -1,7 +1,7 @@
 ---
 id: TASK-1287
 title: test qwen 9B
-status: backlog
+status: review
 assignee: []
 created_date: '2026-06-13 17:56'
 updated_date: '2026-06-25 22:19'
