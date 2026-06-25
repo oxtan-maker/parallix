@@ -36,7 +36,7 @@ Changed regression tests to use `mistral`/`qwen` instead of `codex`:
 ### 4. Test Suite Results
 
 ```
-1648 pass, 0 fail, 22 skipped
+1650 pass, 0 fail, 22 skipped
 ```
 
 Full suite passes with zero regressions.
@@ -45,7 +45,7 @@ Full suite passes with zero regressions.
 
 | Success Criterion | Evidence |
 |-------------------|----------|
-| SC1: Zero regressions in existing test suite | 1648 pass, 0 fail, 22 skipped |
+| SC1: Zero regressions in existing test suite | 1650 pass, 0 fail, 22 skipped |
 | SC2: Regression test for non-limit block behavior added | `test/agents.test.js:1816` — "non-limit launch failure triggers updateAgentBlockFn with 1-hour block" |
 | SC3: Regression test for qwen exclusion added | `test/agents.test.js:1847` — "qwen is excluded from non-limit block logic" |
 | SC4: Test isolation verified — global blocklist does not affect tests | `test/agents.test.js:1725` — `isAgentBlockedFn: () => false` override |

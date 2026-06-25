@@ -78,7 +78,7 @@ This means any mission where all reviewers fail with non-limit API errors will h
 
 ## Gates
 
-- [ ] ./scripts/verify-local.sh docs
+- [x] ./scripts/verify-local.sh docs
 - [ ] npm test (all tests pass, zero regressions)
 
 ## Restricted Areas
