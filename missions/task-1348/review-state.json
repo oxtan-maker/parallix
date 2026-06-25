@@ -3,8 +3,8 @@
   "implementer": "qwen",
   "round": 1,
   "startedAt": "2026-06-25T17:42:31.214Z",
-  "phase": "reviewing",
-  "disposition": null,
+  "phase": "fixing",
+  "disposition": "REQUEST_CHANGES",
   "metadata": {
     "recordedStageLaunches": {
       "review:qwen": [
