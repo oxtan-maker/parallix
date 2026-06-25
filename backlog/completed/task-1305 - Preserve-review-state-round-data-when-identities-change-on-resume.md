@@ -1,15 +1,12 @@
 ---
 id: TASK-1305
 title: Preserve review-state round data when identities change on resume
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-06-14 15:00'
 updated_date: '2026-06-15 20:39'
 labels:
-  - workflow
-  - parallix
-  - review
-  - bug
+  - user_value
 dependencies: []
 references:
   - /home/magnus/code/visualBoard-task-1299/parallix/lib/review/review-loop.js

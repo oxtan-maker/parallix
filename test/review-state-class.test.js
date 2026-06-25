@@ -248,3 +248,78 @@ test('ReviewState save warns when commit fails and state file remains changed', 
     assert.ok(warnings.some(message => message.includes('Failed to commit review state update: commit failed')));
   });
 });
+
+// Regression for task-1305: resuming a mission whose persisted reviewer differs
+// from the identity selected for this launch must NOT reset the accumulated round
+// state. Previously the identity-mismatch branch in startReviewLoop rebuilt
+// ReviewState from scratch, dropping round/startedAt/phase/disposition back to
+// fresh-start defaults instead of carrying the persisted round data forward.
+test('startReviewLoop preserves persisted round data when the reviewer identity changes on resume', async () => {
+  const { startReviewLoop } = require('../lib/review/review');
+  const writes = [];
+
+  // Drive the real loop with injected mocks (no live provider / agents) and capture
+  // every persisted snapshot via writeReviewStateFn. process.exit is trapped so an
+  // unexpected hard-fail surfaces as a thrown error rather than killing the runner.
+  const originalExit = process.exit;
+  let exitCode = null;
+  process.exit = (code) => { exitCode = code; throw new Error(`process.exit(${code})`); };
+  const previousLogger = fmt.setLogger({ log: () => {}, error: () => {} });
+
+  try {
+    await startReviewLoop('task-1305-resume', {
+      dryRun: false,
+      isContinue: true,
+      implementer: 'claude',
+      reviewer: 'gemini', // differs from the persisted reviewer 'codex'
+      resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
+      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'qwen'],
+      getPrStatusFn: () => ({ exists: true, state: 'open', number: 188 }),
+      workflowLauncherStatusFn: () => ({ supported: true }),
+      isForgejoReviewEnabledFn: () => false, // workflow-owned surfaces; no live provider
+      maybeUpdateGraphifyBeforeReviewFn: () => {},
+      readTokenFn: () => null,
+      readReviewStateFn: () => ({
+        reviewer: 'codex',
+        implementer: 'claude',
+        round: 3,
+        startedAt: '2026-01-01T00:00:00.000Z',
+        phase: 'fixing',
+        disposition: 'REQUEST_CHANGES'
+      }),
+      writeReviewStateFn: (slug, state) => writes.push({
+        round: state.round,
+        startedAt: state.startedAt,
+        phase: state.phase,
+        disposition: state.disposition,
+        reviewer: state.reviewer,
+        implementer: state.implementer
+      }),
+      consumeReviewerArtifactsFn: async () => ({ consumed: false }),
+      consumeImplementerArtifactsFn: async () => ({ consumed: true, ok: true, disposition: 'PUSHBACK_ALL' }),
+      startAgentFn: async () => ({ agent: 'claude' }),
+      transitionTaskFn: () => {},
+      transitionVirtualFn: () => {},
+      applyAgentFallbackFn: ({ original }) => original
+    });
+  } catch (err) {
+    if (!err.message.startsWith('process.exit(')) throw err;
+  } finally {
+    process.exit = originalExit;
+    fmt.setLogger(previousLogger);
+  }
+
+  assert.equal(exitCode, null);
+  assert.ok(writes.length > 0, 'expected the resumed state to be persisted at least once');
+
+  // The first persisted snapshot reflects the freshly constructed state, before the
+  // loop advances any rounds. It must carry the persisted round data forward while
+  // adopting the newly selected reviewer identity.
+  const resumed = writes[0];
+  assert.equal(resumed.round, 3, 'persisted round must be preserved, not reset to 1');
+  assert.equal(resumed.startedAt, '2026-01-01T00:00:00.000Z', 'persisted startedAt must be preserved');
+  assert.equal(resumed.phase, 'fixing', 'persisted phase must be preserved');
+  assert.equal(resumed.disposition, 'REQUEST_CHANGES', 'persisted disposition must be preserved');
+  assert.equal(resumed.reviewer, 'gemini', 'reviewer identity must update to the launch selection');
+  assert.equal(resumed.implementer, 'claude', 'implementer identity is carried through');
+});
