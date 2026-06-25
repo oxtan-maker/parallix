@@ -3,8 +3,8 @@ id: TASK-1328
 title: >-
   Integration recovery should detect in-progress mission rebases instead of
   reporting generic local changes
-status: backlog
-assignee: []
+status: done
+assignee: [qwen]
 created_date: '2026-06-22 03:47'
 updated_date: '2026-06-23 16:37'
 labels:

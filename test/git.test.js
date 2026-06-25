@@ -72,6 +72,115 @@ test('getUncommittedCount counts lines and returns zero when clean', () => {
   assert.equal(git.getUncommittedCount('/tmp/repo'), 0);
 });
 
+test('detectRebaseState reports active rebase with detached head and unmerged files', () => {
+  const fsModule = {
+    existsSync(target) {
+      return target === '/tmp/repo/.git/rebase-merge';
+    }
+  };
+  const pathModule = require('path');
+  const calls = [];
+
+  const result = git.detectRebaseState('/tmp/repo', {
+    fsModule,
+    pathModule,
+    gitRunner(args) {
+      calls.push(args);
+      if (args.includes('rev-parse')) {
+        return { status: 0, stdout: '.git\n', stderr: '' };
+      }
+      if (args.includes('symbolic-ref')) {
+        return { status: 1, stdout: '', stderr: 'fatal: ref HEAD is not a symbolic ref' };
+      }
+      if (args.includes('rebase') && args.includes('--show-current')) {
+        return { status: 0, stdout: 'abc123def456\n', stderr: '' };
+      }
+      if (args.includes('ls-files') && args.includes('-u')) {
+        return {
+          status: 0,
+          stdout: [
+            '100644 aaaaa 1\tbacklog/tasks/task-1322 - prevent-backlog-task-id-recycling-collision.md',
+            '100644 bbbbb 2\tmissions/task-1322/review-state.json',
+            '100644 ccccc 3\tmissions/task-1322/CP-4.md'
+          ].join('\n'),
+          stderr: ''
+        };
+      }
+      throw new Error(`Unexpected git args: ${args.join(' ')}`);
+    }
+  });
+
+  assert.deepEqual(result, {
+    inProgress: true,
+    rebaseHead: 'abc123def456',
+    detached: true,
+    unmergedFiles: [
+      'backlog/tasks/task-1322 - prevent-backlog-task-id-recycling-collision.md',
+      'missions/task-1322/review-state.json',
+      'missions/task-1322/CP-4.md'
+    ],
+    rebaseDir: '/tmp/repo/.git/rebase-merge'
+  });
+  assert.equal(calls.length, 4);
+});
+
+test('detectRebaseState reports false for a clean worktree with no rebase activity', () => {
+  const result = git.detectRebaseState('/tmp/repo', {
+    fsModule: { existsSync: () => false },
+    pathModule: require('path'),
+    gitRunner(args) {
+      if (args.includes('rev-parse')) {
+        return { status: 0, stdout: '.git\n', stderr: '' };
+      }
+      if (args.includes('symbolic-ref')) {
+        return { status: 0, stdout: 'mission/task-1328\n', stderr: '' };
+      }
+      if (args.includes('rebase') && args.includes('--show-current')) {
+        return { status: 0, stdout: '\n', stderr: '' };
+      }
+      if (args.includes('ls-files') && args.includes('-u')) {
+        return { status: 0, stdout: '', stderr: '' };
+      }
+      throw new Error(`Unexpected git args: ${args.join(' ')}`);
+    }
+  });
+
+  assert.deepEqual(result, {
+    inProgress: false,
+    rebaseHead: '',
+    detached: false,
+    unmergedFiles: [],
+    rebaseDir: null
+  });
+});
+
+test('detectRebaseState reports false once rebase metadata is gone and head is attached', () => {
+  const result = git.detectRebaseState('/tmp/repo', {
+    fsModule: { existsSync: () => false },
+    pathModule: require('path'),
+    gitRunner(args) {
+      if (args.includes('rev-parse')) {
+        return { status: 0, stdout: '.git\n', stderr: '' };
+      }
+      if (args.includes('symbolic-ref')) {
+        return { status: 0, stdout: 'mission/task-1328\n', stderr: '' };
+      }
+      if (args.includes('rebase') && args.includes('--show-current')) {
+        return { status: 0, stdout: '', stderr: '' };
+      }
+      if (args.includes('ls-files') && args.includes('-u')) {
+        return { status: 0, stdout: '', stderr: '' };
+      }
+      throw new Error(`Unexpected git args: ${args.join(' ')}`);
+    }
+  });
+
+  assert.equal(result.inProgress, false);
+  assert.equal(result.detached, false);
+  assert.equal(result.rebaseDir, null);
+  assert.deepEqual(result.unmergedFiles, []);
+});
+
 test('getLastCommit parses sha, date, and subject', () => {
   mock.method(childProcess, 'spawnSync', () => ({
     status: 0,

@@ -1,0 +1,17 @@
+# CP-6
+
+Completed the mission scope end-to-end: added structured rebase-state detection, surfaced that state through `px status`, `px rebase`, and `px integrate --dry-run`, and locked the behavior with targeted command tests plus a TASK-1322 regression covering all three operator paths. Full repository tests and the docs verification gate both passed. A post-change `graphify update .` attempt could not run because `graphify` is not installed in this environment.
+
+## Goal Check
+
+| Goal Check description | Evidence | Status |
+| --- | --- | --- |
+| `detectRebaseState(dir)` identifies active rebase metadata, detached HEAD, current rebase commit, and unmerged mission-local paths | [lib/core/git.js](/home/magnus/code/parallix-task-1328/lib/core/git.js:64), test `detectRebaseState reports active rebase with detached head and unmerged files` in [test/git.test.js](/home/magnus/code/parallix-task-1328/test/git.test.js:75) | PASS |
+| `detectRebaseState(dir)` returns `{ inProgress: false }` for clean and completed rebase states | [lib/core/git.js](/home/magnus/code/parallix-task-1328/lib/core/git.js:87), tests `detectRebaseState reports false for a clean worktree with no rebase activity` and `detectRebaseState reports false once rebase metadata is gone and head is attached` in [test/git.test.js](/home/magnus/code/parallix-task-1328/test/git.test.js:127) | PASS |
+| `px status` reports detached-head rebase state and conflicted file paths for the current mission worktree and stale mission worktrees | [lib/commands/status.js](/home/magnus/code/parallix-task-1328/lib/commands/status.js:130), [lib/commands/status.js](/home/magnus/code/parallix-task-1328/lib/commands/status.js:169), tests `status reports detached-head rebase diagnostics for the current worktree` and `status reports stale worktree rebase diagnostics instead of only cleanup hints` in [test/status.test.js](/home/magnus/code/parallix-task-1328/test/status.test.js:229) | PASS |
+| `px rebase <slug>` exits 1 before a fresh rebase when a mission rebase is already in progress, printing the rebase head, conflicted paths, and recovery commands | [lib/commands/rebase.js](/home/magnus/code/parallix-task-1328/lib/commands/rebase.js:51), test `rebase exits 1 with recovery guidance when a rebase is already in progress` in [test/rebase.test.js](/home/magnus/code/parallix-task-1328/test/rebase.test.js:113) | PASS |
+| `px integrate <slug> --dry-run` fails preflight with `rebase-in-progress` and recovery guidance instead of continuing toward the dry merge | [lib/commands/integrate.js](/home/magnus/code/parallix-task-1328/lib/commands/integrate.js:1092), test `printIntegrationPreflight fails fast on an in-progress rebase in the integration checkout` in [test/integrate.test.js](/home/magnus/code/parallix-task-1328/test/integrate.test.js:835) | PASS |
+| TASK-1322 regression covers `px status`, `px rebase`, and `px integrate --dry-run` together against the detached-head, `.git/rebase-merge`, three-file conflict scenario | test `task-1322 recovery diagnostics report an in-progress rebase across status, rebase, and integrate preflight` in [test/rebase_diagnostics.test.js](/home/magnus/code/parallix-task-1328/test/rebase_diagnostics.test.js:100) | PASS |
+| Full mission gates passed | `npm test` passed (`1669` tests, `0` failures); `./scripts/verify-local.sh docs` passed with `PASS: all required documentation present` | PASS |
+
+Next action: commit the mission artifacts and checkpoint documents, then proceed to review handoff once the workspace owner is ready.

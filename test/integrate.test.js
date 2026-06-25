@@ -832,6 +832,62 @@ test('printIntegrationPreflight reports unresolved index conflicts with recovery
   }
 });
 
+test('printIntegrationPreflight fails fast on an in-progress rebase in the integration checkout', () => {
+  const lines = [];
+  const originalLog = console.log;
+  console.log = line => lines.push(line);
+
+  try {
+    const result = printIntegrationPreflight({
+      slug: 'task-1322',
+      branch: 'mission/task-1322',
+      currentBranch: 'mission/task-1322',
+      missionDir: '/tmp/docs/missions/2026/task-1322',
+      task: { ok: true, taskFile: '/tmp/task-1322.md' },
+      taskStatus: 'ready-for-integration',
+      taskAssignee: 'codex',
+      forgejoUser: 'codex',
+      taskAssigneeWarning: null,
+      pr: { exists: true, state: 'open', merged: false, number: 1322 },
+      approval: { ok: true, reviewState: 'APPROVED' },
+      mainBranch: 'main',
+      mainAheadCount: 0,
+      mainDirty: false,
+      mainDirtyEntries: []
+    }, {
+      readTokenFn: () => 'secret-token',
+      resolveTokenFileFn: () => '/tmp/tokens/codex',
+      isForgejoReviewEnabledFn: () => true,
+      detectRebaseStateFn: target => {
+        assert.equal(target, FAKE_ROOT);
+        return {
+          inProgress: true,
+          detached: true,
+          rebaseHead: 'abc123def456',
+          unmergedFiles: [
+            'backlog/tasks/task-1322 - prevent-backlog-task-id-recycling-collision.md',
+            'missions/task-1322/review-state.json',
+            'missions/task-1322/CP-4.md'
+          ]
+        };
+      },
+      getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
+    });
+
+    assert.ok(result.failures.includes('rebase-in-progress'));
+    const output = lines.join('\n');
+    assert.match(output, /Integration checkout rebase: rebase in progress/i);
+    assert.match(output, /Current rebase head: abc123def456/);
+    assert.match(output, /backlog\/tasks\/task-1322 - prevent-backlog-task-id-recycling-collision\.md/);
+    assert.match(output, new RegExp(`git -C ${FAKE_ROOT} rebase --continue`));
+    assert.match(output, new RegExp(`git -C ${FAKE_ROOT} rebase --abort`));
+    assert.match(output, new RegExp(`git -C ${FAKE_ROOT} rebase --skip`));
+    assert.match(output, /Retry with: px integrate task-1322 --dry-run/);
+  } finally {
+    console.log = originalLog;
+  }
+});
+
 test('maybeUpdateGraphifyOnPrimary skips cleanly when graphify is missing', () => {
   const { maybeUpdateGraphifyOnPrimary } = require('../lib/commands/integrate');
   const logs = [];

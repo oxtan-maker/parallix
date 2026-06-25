@@ -158,6 +158,7 @@ test('status prints mission details and agent matrix for inferred slug', () => {
     workflowLauncherStatusFn: agent => ({ supported: agent !== 'gemini' }),
     getLastThreeCommitsFn: () => ['c1', 'c2', 'c3'],
     getUncommittedCountFn: () => 2,
+    detectRebaseStateFn: () => ({ inProgress: false, detached: false, unmergedFiles: [] }),
     log: line => lines.push(line),
     exit: code => { exitCode = code; }
   });
@@ -189,6 +190,7 @@ test('status agent matrix includes every workflow launcher even when not step-el
     workflowLauncherStatusFn: agent => ({ supported: agent === 'future-agent' }),
     getLastThreeCommitsFn: () => [],
     getUncommittedCountFn: () => 0,
+    detectRebaseStateFn: () => ({ inProgress: false, detached: false, unmergedFiles: [] }),
     log: line => lines.push(line),
     exit: () => {}
   });
@@ -213,6 +215,7 @@ test('status prints stale worktrees only when no explicit slug is provided', () 
     workflowLauncherStatusFn: () => ({ supported: false }),
     getLastThreeCommitsFn: () => [],
     getUncommittedCountFn: () => 0,
+    detectRebaseStateFn: () => ({ inProgress: false, detached: false, unmergedFiles: [] }),
     log: line => lines.push(line),
     exit: code => { exitCode = code; }
   });
@@ -221,4 +224,86 @@ test('status prints stale worktrees only when no explicit slug is provided', () 
   assert.equal(lines.some(line => line.includes('Stale worktree')), false);
   assert.ok(lines.includes('Last checkpoint: unknown'));
   assert.ok(lines.includes('Forgejo PR: none'));
+});
+
+test('status reports detached-head rebase diagnostics for the current worktree', () => {
+  const lines = [];
+
+  status(['task-1322'], {
+    inferSlugFn: () => 'task-1322',
+    getCurrentBranchFn: () => '',
+    findTaskFileFn: () => '/tmp/task-1322.md',
+    getTaskStatusFn: () => 'active',
+    findMissionDirFn: () => null,
+    getPrStatusFn: () => ({ exists: false }),
+    readAgentConfigOrExitFn: () => ({}),
+    eligibleAgentsForStepFn: () => [],
+    workflowLauncherStatusFn: () => ({ supported: false }),
+    getLastThreeCommitsFn: () => [],
+    getUncommittedCountFn: () => 3,
+    detectRebaseStateFn: target => {
+      assert.equal(target, process.cwd());
+      return {
+        inProgress: true,
+        detached: true,
+        rebaseHead: 'abc123',
+        unmergedFiles: [
+          'backlog/tasks/task-1322 - prevent-backlog-task-id-recycling-collision.md',
+          'missions/task-1322/review-state.json',
+          'missions/task-1322/CP-4.md'
+        ]
+      };
+    },
+    log: line => lines.push(line),
+    exit: () => {}
+  });
+
+  const output = lines.join('\n');
+  assert.match(output, /Detached HEAD: rebase in progress: detached HEAD, 3 unmerged file\(s\)/);
+  assert.match(output, /backlog\/tasks\/task-1322 - prevent-backlog-task-id-recycling-collision\.md/);
+  assert.match(output, /missions\/task-1322\/review-state\.json/);
+  assert.match(output, /missions\/task-1322\/CP-4\.md/);
+});
+
+test('status reports stale worktree rebase diagnostics instead of only cleanup hints', () => {
+  const lines = [];
+
+  status([], {
+    inferSlugFn: () => null,
+    getCurrentBranchFn: () => 'main',
+    readAgentConfigOrExitFn: () => ({}),
+    eligibleAgentsForStepFn: () => [],
+    workflowLauncherStatusFn: () => ({ supported: false }),
+    getLastThreeCommitsFn: () => [],
+    getUncommittedCountFn: () => 0,
+    findStaleMissionWorktreesFn: () => [{
+      path: '/tmp/task-1322',
+      branch: 'refs/heads/mission/task-1322',
+      taskStatus: 'done',
+      cleanupCommand: 'cleanup it'
+    }],
+    detectRebaseStateFn: target => {
+      if (target === process.cwd()) {
+        return { inProgress: false, detached: false, unmergedFiles: [] };
+      }
+      assert.equal(target, '/tmp/task-1322');
+      return {
+        inProgress: true,
+        detached: true,
+        rebaseHead: 'abc123',
+        unmergedFiles: [
+          'backlog/tasks/task-1322 - prevent-backlog-task-id-recycling-collision.md',
+          'missions/task-1322/review-state.json',
+          'missions/task-1322/CP-4.md'
+        ]
+      };
+    },
+    log: line => lines.push(line),
+    exit: () => {}
+  });
+
+  const output = lines.join('\n');
+  assert.match(output, /Rebase in progress on mission\/task-1322: detached HEAD, 3 unmerged file\(s\)/);
+  assert.match(output, /missions\/task-1322\/CP-4\.md/);
+  assert.match(output, /Cleanup: cleanup it/);
 });

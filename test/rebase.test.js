@@ -103,10 +103,66 @@ test('rebase exits 1 when not on the correct branch', async () => {
   await rebase(['task-1018'], {
     isForgejoReviewEnabledFn: () => false,
     inferSlugFn: () => 'task-1018',
+    detectRebaseStateFn: () => ({ inProgress: false, detached: false, unmergedFiles: [] }),
     getCurrentBranchFn: () => 'feature/foo',
     exitFn: code => { exitCode = code; },
   });
   assert.equal(exitCode, 1);
+});
+
+test('rebase exits 1 with recovery guidance when a rebase is already in progress', async () => {
+  const capturedStdout = [];
+  const capturedStderr = [];
+  const originalLog = console.log;
+  const originalError = console.error;
+  console.log = (...args) => { capturedStdout.push(args.join(' ')); };
+  console.error = (...args) => { capturedStderr.push(args.join(' ')); };
+
+  let exitCode = null;
+  let attemptedFreshRebase = false;
+
+  try {
+    await rebase(['task-1322'], {
+      isForgejoReviewEnabledFn: () => false,
+      inferSlugFn: () => 'task-1322',
+      findMissionDirFn: () => '/tmp/docs/missions/2026/task-1322',
+      findMissionAreaFn: () => 'docs',
+      detectRebaseStateFn: target => {
+        assert.equal(target, process.cwd());
+        return {
+          inProgress: true,
+          detached: true,
+          rebaseHead: 'abc123def456',
+          unmergedFiles: [
+            'backlog/tasks/task-1322 - prevent-backlog-task-id-recycling-collision.md',
+            'missions/task-1322/review-state.json',
+            'missions/task-1322/CP-4.md'
+          ]
+        };
+      },
+      getCurrentBranchFn: () => 'mission/task-1322',
+      gitFn: args => {
+        if (args.includes('rebase') && args.includes('main')) {
+          attemptedFreshRebase = true;
+        }
+        return { status: 0, stdout: '', stderr: '' };
+      },
+      exitFn: code => { exitCode = code; },
+    });
+  } finally {
+    console.log = originalLog;
+    console.error = originalError;
+  }
+
+  const output = [...capturedStderr, ...capturedStdout].join('\n');
+  assert.equal(exitCode, 1);
+  assert.equal(attemptedFreshRebase, false);
+  assert.match(output, /Rebase already in progress for mission\/task-1322/);
+  assert.match(output, /Current rebase head: abc123def456/);
+  assert.match(output, /backlog\/tasks\/task-1322 - prevent-backlog-task-id-recycling-collision\.md/);
+  assert.match(output, /git rebase --continue/);
+  assert.match(output, /git rebase --abort/);
+  assert.match(output, /git rebase --skip/);
 });
 
 test('rebase exits 0 on clean rebase', async () => {
@@ -115,6 +171,7 @@ test('rebase exits 0 on clean rebase', async () => {
     inferSlugFn: () => 'task-1018',
     findMissionDirFn: () => '/tmp/docs/missions/2026/task-1018',
     findMissionAreaFn: () => 'docs',
+    detectRebaseStateFn: () => ({ inProgress: false, detached: false, unmergedFiles: [] }),
     getCurrentBranchFn: () => 'mission/task-1018',
     isForgejoReviewEnabledFn: () => true,
     gitFn: args => {
@@ -139,6 +196,7 @@ test('rebase uses local main and does not fetch Forgejo even when review is enab
     inferSlugFn: () => 'task-1018',
     findMissionDirFn: () => '/tmp/docs/missions/2026/task-1018',
     findMissionAreaFn: () => 'docs',
+    detectRebaseStateFn: () => ({ inProgress: false, detached: false, unmergedFiles: [] }),
     getCurrentBranchFn: () => 'mission/task-1018',
     isForgejoReviewEnabledFn: () => true,
     fetchReviewBranchFn: () => {
@@ -168,6 +226,7 @@ test('rebase detects non-conflict rebase failure', async () => {
     inferSlugFn: () => 'task-1018',
     findMissionDirFn: () => '/tmp/docs/missions/2026/task-1018',
     findMissionAreaFn: () => 'docs',
+    detectRebaseStateFn: () => ({ inProgress: false, detached: false, unmergedFiles: [] }),
     getCurrentBranchFn: () => 'mission/task-1018',
     gitFn: args => {
       if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n', stderr: '' };
@@ -189,6 +248,7 @@ test('rebase detects localized KONFLIKT in rebase output', async () => {
     inferSlugFn: () => 'task-1018',
     findMissionDirFn: () => '/tmp/docs/missions/2026/task-1018',
     findMissionAreaFn: () => 'docs',
+    detectRebaseStateFn: () => ({ inProgress: false, detached: false, unmergedFiles: [] }),
     getCurrentBranchFn: () => 'mission/task-1018',
     resolveConflictsFn: () => ({
       ok: true,
