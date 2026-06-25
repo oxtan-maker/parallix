@@ -1726,6 +1726,8 @@ setTimeout(() => process.exit(0), 200);
         agent: 'mistral',
         prompt: 'Execute.',
         worktree: tmpRoot,
+        isAgentBlockedFn: () => false,
+        updateAgentBlockFn: () => ({}),
         log: msg => log.push(msg)
       });
 
@@ -1809,4 +1811,67 @@ test('startAgent omits the model flag when resolveAgentModel returns null', asyn
   });
 
   assert.ok(!result.invocation.args.includes('-m'));
+});
+
+test('non-limit launch failure triggers updateAgentBlockFn with 1-hour block', async () => {
+  let blockCalls = [];
+  const fakeBlockFn = (agent, until) => {
+    blockCalls.push({ agent, until });
+    return { path: '/fake/agents.local.json', blocklist: {} };
+  };
+
+  const error = await withPathLaunchers({
+    opencode: 'if (process.argv.includes("--help")) process.exit(0); process.exit(1);',
+    vibe: 'if (process.argv.includes("--help")) process.exit(0); process.exit(1);'
+  }, () => startAgent('draft', {
+    prompt: 'Execute.',
+    selectAgentFn: (step, opts) => {
+      if (!opts.exclude.has('mistral')) return 'mistral';
+      if (!opts.exclude.has('qwen')) return 'qwen';
+      throw new Error('All eligible agents exhausted');
+    },
+    detectLimitHitFn: () => null,
+    updateAgentBlockFn: fakeBlockFn,
+    log: () => {}
+  }).catch(err => err));
+
+  assert.ok(error instanceof Error);
+  assert.ok(error.message.includes('All eligible agents exhausted'));
+  assert.equal(blockCalls.length, 1, 'expected exactly one block call for the failed non-qwen agent');
+  assert.equal(blockCalls[0].agent, 'mistral', 'expected mistral to be blocked');
+  // Block until should be ~1 hour from now — validate the format matches YYYY-MM-DD HH
+  assert.ok(/^\d{4}-\d{2}-\d{2} \d{2}$/.test(blockCalls[0].until),
+    `block until timestamp should be "YYYY-MM-DD HH" format; got: ${blockCalls[0].until}`);
+});
+
+test('qwen is excluded from non-limit block logic', async () => {
+  let blockCalls = [];
+  const fakeBlockFn = (agent, until) => {
+    blockCalls.push({ agent, until });
+    return { path: '/fake/agents.local.json', blocklist: {} };
+  };
+
+  const error = await withPathLaunchers({
+    opencode: 'if (process.argv.includes("--help")) process.exit(0); process.exit(1);',
+    vibe: 'if (process.argv.includes("--help")) process.exit(0); process.exit(1);'
+  }, () => startAgent('draft', {
+    prompt: 'Execute.',
+    selectAgentFn: (step, opts) => {
+      if (!opts.exclude.has('qwen')) return 'qwen';
+      if (!opts.exclude.has('mistral')) return 'mistral';
+      throw new Error('All eligible agents exhausted');
+    },
+    detectLimitHitFn: () => null,
+    updateAgentBlockFn: fakeBlockFn,
+    log: () => {}
+  }).catch(err => err));
+
+  assert.ok(error instanceof Error);
+  assert.ok(error.message.includes('All eligible agents exhausted'));
+  // qwen should NOT be in blockCalls — it is excluded from non-limit blocking
+  const qwenBlocked = blockCalls.some(c => c.agent === 'qwen');
+  assert.ok(!qwenBlocked, 'expected qwen to NOT be blocked; got blocks: ' + JSON.stringify(blockCalls));
+  // mistral should be blocked (non-qwen agent that failed)
+  const mistralBlocked = blockCalls.some(c => c.agent === 'mistral');
+  assert.ok(mistralBlocked, 'expected mistral to be blocked');
 });
