@@ -1,10 +1,10 @@
 ---
 id: TASK-1344
 title: codex 5.4 cannot draft
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-06-24 17:51'
-labels: []
+labels: ["ai_sdlc"]
 dependencies: []
 ---
 

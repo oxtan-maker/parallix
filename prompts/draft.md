@@ -1,9 +1,21 @@
-Mode: draft. No execution.
+Mode: draft. Do not implement the mission — produce the mission contract document only.
 Mission slug: {{slug}}
 Mission path: {{missionPath}}
 Backlog task: {{taskPath}}
 
 The harness has already created the mission branch, worktree, scaffolded `{{missionPath}}`, and ensured the backlog task exists. Your job is to read the user's intent from `{{taskPath}}` and fill `{{missionPath}}` with a real mission contract.
+
+Allowed actions:
+- read files (backlog task, MISSION.md scaffold, graphify index if present)
+- write/edit files (MISSION.md, backlog task labels)
+- run graphify queries and updates
+- run `{{verifyCmd}}` to verify the draft
+
+Forbidden actions:
+- implement any feature or fix described in the mission
+- modify source code outside MISSION.md and the backlog task file
+- run tests beyond the single `{{verifyCmd}}` gate
+- start a review, execute, or integrate phase
 
 Drafting requirements:
 - fill every scaffolded section in `{{missionPath}}` with concrete, non-generic content (no placeholders, no "TBD")
