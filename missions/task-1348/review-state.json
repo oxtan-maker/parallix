@@ -4,5 +4,12 @@
   "round": 1,
   "startedAt": "2026-06-25T17:42:31.214Z",
   "phase": "reviewing",
-  "disposition": null
+  "disposition": null,
+  "metadata": {
+    "recordedStageLaunches": {
+      "review:qwen": [
+        "qwen|ses_1001fa80affeLxuqgYQHY1ro0n|2026-06-25T17:42:32.368Z|2026-06-25T17:44:32.987Z|0"
+      ]
+    }
+  }
 }
