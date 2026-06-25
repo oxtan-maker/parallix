@@ -1,7 +1,7 @@
 ---
 id: TASK-1348
 title: local blocklist does not get updated
-status: review
+status: active
 assignee: [qwen]
 created_date: '2026-06-25 16:54'
 labels: [ai_sdlc]
