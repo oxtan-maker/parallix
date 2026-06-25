@@ -32,12 +32,13 @@ This is feasible but external to the code change scope. The unit tests provide s
 
 ## Goal Check
 
-| Success Criterion | Evidence |
-|-------------------|----------|
-| SC1: Blocked agent excluded on retry via selectAgent | agents.js:396 — `pool.filter(agent => !excluded.has(agent))` where `excluded` includes blocklist entries (agents.js:385-389) |
-| SC2: Fallback agent (qwen) serves as fallback when primary blocked | agents.js:826 — `if (chosen !== 'qwen')` guard ensures qwen is available for fallback |
-| SC3: Review loop receives fallback agent via applyAgentFallback | review-loop.js:701-704 — `applyAgentFallbackFn` updates `state.reviewer` with fallback from launchResult |
-| SC4: Regression tests cover blocking mechanism | test/agents.test.js:1816-1879 — 2 regression tests, both passing |
-| SC5: Full test suite passes with zero regressions | 1648 pass, 0 fail, 22 skipped |
+| Goal Check | Evidence | Status |
+|---|---|---|
+| Blocked agent excluded on retry via selectAgent | `lib/agents/agents.js:396` — `pool.filter(agent => !excluded.has(agent))` filters out blocklisted agents; `lib/agents/agents.js:385-389` — blocklist entries added to `excluded` set | PASS |
+| Fallback agent (qwen) available when primary blocked | `lib/agents/agents.js:826` — `if (chosen !== 'qwen')` guard ensures qwen is never blocked on non-limit failures, preserving it as fallback | PASS |
+| Review loop receives fallback agent via applyAgentFallback | `lib/review/review-loop.js:701-704` — `applyAgentFallbackFn` updates `state.reviewer` with fallback agent from `launchResult.agent` | PASS |
+| Regression test: non-limit block triggers updateAgentBlockFn | `test/agents.test.js:1816` — "non-limit launch failure triggers updateAgentBlockFn with 1-hour block" verifies block call count, agent, and YYYY-MM-DD HH format | PASS |
+| Regression test: qwen excluded from non-limit block | `test/agents.test.js:1847` — "qwen is excluded from non-limit block logic" verifies qwen NOT blocked while mistral IS blocked | PASS |
+| Full test suite passes with zero regressions | `npm test` — 1648 pass, 0 fail, 22 skipped | PASS |
 
 ## Next action: Commit all changes and checkpoint documents
