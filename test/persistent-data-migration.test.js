@@ -74,6 +74,25 @@ test('migrateStats imports source rows into fresh install (destination does not 
   });
 });
 
+test('migrateStats does not write a header-only file when no source data is available', () => {
+  withTempRoot(root => {
+    const destinationPath = path.join(root, 'parallix', 'stats.csv');
+    fs.mkdirSync(path.dirname(destinationPath), { recursive: true });
+    const missingSource = path.join(root, 'workflow', 'data', 'stats.csv');
+    const emptySource = path.join(root, 'empty.csv');
+    fs.writeFileSync(emptySource, '');
+
+    assert.ok(!fs.existsSync(missingSource));
+
+    const result = migrateStats({ sourcePaths: [missingSource, emptySource], destinationPath });
+
+    assert.equal(result.imported, 0);
+    assert.equal(result.rows, 0);
+    assert.equal(result.warn, 'no source data available');
+    assert.ok(!fs.existsSync(destinationPath), 'destination must not be created when no source data exists');
+  });
+});
+
 test('migrateStats merges sources into existing header-only destination', () => {
   withTempRoot(root => {
     const sourcePath = path.join(root, 'workflow', 'data', 'stats.csv');
