@@ -1,8 +1,8 @@
 ---
 id: TASK-1352
 title: Draft stats recording fails for feature-branch missions (wrong rootDir)
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-06-26 16:03'
 labels:
   - ai_sdlc
@@ -32,7 +32,7 @@ Impact: best-effort only — the draft still completes and the task still transi
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 px draft of a feature-branch mission records draft stage stats (logs 'Draft stats recorded: ...') instead of the 'Could not resolve backlog task' WARN
-- [ ] #2 Primary-branch missions still record stats with no regression
-- [ ] #3 A regression test covers draft stats recording for a feature-branch mission where the task exists only in the mission worktree
+- [x] #1 px draft of a feature-branch mission records draft stage stats (logs 'Draft stats recorded: ...') instead of the 'Could not resolve backlog task' WARN
+- [x] #2 Primary-branch missions still record stats with no regression
+- [x] #3 A regression test covers draft stats recording for a feature-branch mission where the task exists only in the mission worktree
 <!-- AC:END -->
