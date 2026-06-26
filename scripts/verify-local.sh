@@ -2,12 +2,45 @@
 # verify-local.sh — local development verification gate
 # Usage: ./scripts/verify-local.sh <subcommand>
 # Subcommands:
-#   docs    — verify documentation completeness
-#   (none)  — no-op (default gate behavior)
+#   docs             — verify documentation completeness
+#   static-analysis  — run ESLint, tsc --checkJs, and test-hygiene checks
+#   (none)           — no-op (default gate behavior)
 
 set -euo pipefail
 
 subcommand="${1:-}"
+
+# Static-analysis gate: runs ESLint, tsc --checkJs, and test-hygiene sequentially
+gate_static_analysis() {
+  echo "=== Static Analysis Gate ==="
+
+  # Stage 1: ESLint on lib/**/*.js with --max-warnings 0
+  echo "[1/3] Running ESLint on lib/**/*.js..."
+  if ! npx --yes eslint --ext .js --max-warnings 0 lib/ 2>&1; then
+    echo "FAIL: ESLint reported errors"
+    return 1
+  fi
+  echo "PASS: ESLint clean"
+
+  # Stage 2: TypeScript checkJs on lib/core and lib/commands
+  echo "[2/3] Running tsc --checkJs --noEmit..."
+  if ! npx --yes tsc --checkJs --noEmit 2>&1; then
+    echo "FAIL: tsc --checkJs reported type errors"
+    return 1
+  fi
+  echo "PASS: tsc --checkJs clean"
+
+  # Stage 3: Test-hygiene scanner
+  echo "[3/3] Running test-hygiene check..."
+  if ! bash scripts/test-hygiene.sh; then
+    echo "FAIL: test-hygiene scanner found violations"
+    return 1
+  fi
+  echo "PASS: test-hygiene clean"
+
+  echo "=== Static Analysis Gate: ALL STAGES PASSED ==="
+  return 0
+}
 
 case "$subcommand" in
   docs)
@@ -28,6 +61,10 @@ case "$subcommand" in
       exit 1
     fi
     echo "PASS: all required documentation present"
+    exit 0
+    ;;
+  static-analysis)
+    gate_static_analysis || exit 1
     exit 0
     ;;
   *)

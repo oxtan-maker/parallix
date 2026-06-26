@@ -51,6 +51,8 @@
     "test:coverage": "FORCE_COLOR=0 node lib/commands/coverage-gate.js --lcov"
   },
   "devDependencies": {
-    "sonarqube-scanner": "^4.0.1"
+    "eslint": "^8.57.0",
+    "sonarqube-scanner": "^4.0.1",
+    "typescript": "^5.4.0"
   }
 }
