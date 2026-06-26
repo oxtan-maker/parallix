@@ -288,6 +288,15 @@ test('buildConflictResolutionPrompt gives explicit rebase-first guidance', () =>
   assert.match(prompt, /px integrate task-097 --dry-run/);
 });
 
+test('buildConflictResolutionPrompt targets the recorded feature base branch', () => {
+  const prompt = buildConflictResolutionPrompt('task-097', 'docs', { rootDir: FAKE_ROOT, baseBranch: 'feature/foo' }).join('\n');
+  assert.match(prompt, /Rebase the mission branch onto the local feature\/foo branch/i);
+  assert.match(prompt, /git fetch review feature\/foo/);
+  assert.match(prompt, /git rebase feature\/foo/);
+  // The primary branch must not leak into feature-branch mission guidance.
+  assert.doesNotMatch(prompt, new RegExp(`git rebase ${PRIMARY}\\b`));
+});
+
 test('variant B automation summary stays explicit about automated closeout steps', () => {
   assert.match(VARIANT_B_AUTOMATION_SUMMARY, /squash commit/i);
   assert.match(VARIANT_B_AUTOMATION_SUMMARY, /Forgejo sync-merged/);

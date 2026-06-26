@@ -2242,7 +2242,59 @@ test('createPr targets the recorded feature-branch base when MISSION.md has Base
     assert.equal(result.ok, true);
     // The PR base should be the recorded feature-branch, not 'main'
     assert.ok(apiCalls.some(call => call.method === 'POST' && call.body && call.body.base === 'feat/x'), `Expected PR base 'feat/x', found: ${JSON.stringify(apiCalls.find(c => c.method === 'POST' && c.body)?.body)}`);
+    // The feature base branch must be mirrored to the review remote so the PR
+    // base resolves server-side; otherwise PR creation fails.
+    assert.ok(
+      gitCalls.some(args => args.includes('push') && args.includes('feat/x:feat/x')),
+      `Expected feature base branch 'feat/x' to be pushed, got pushes: ${JSON.stringify(gitCalls.filter(a => a.includes('push')))}`
+    );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('ensureRemoteBaseBranch mirrors an existing local base branch with a force push', () => {
+  const { ensureRemoteBaseBranch } = require('../lib/tools/forgejo.js');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'forgejo-base-mirror-'));
+  try {
+    fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
+      product: { name: 'Test Project' },
+      adapters: {
+        tasks: { provider: 'backlog-md', storage: 'backlog' },
+        missions: { baseDir: 'docs/missions', branchPrefix: 'mission/', primaryBranch: 'main' },
+        verification: { command: 'npm test' },
+        review: { provider: 'forgejo', baseUrl: 'http://localhost:3300', remote: 'review', repo: 'magnus/testproj' },
+      },
+    }, null, 2), 'utf8');
+
+    const calls = [];
+    // Fully injected runner — no real git process is spawned and nothing is pushed.
+    const gitRunner = (args) => {
+      calls.push(args);
+      if (args.includes('show-ref')) return { status: 0, stdout: '', stderr: '' };
+      return { status: 0, stdout: '', stderr: '' };
+    };
+
+    const result = ensureRemoteBaseBranch('feat/x', 'mistral', 'token-456', root, { gitRunner });
+    assert.equal(result.ok, true);
+    assert.ok(calls.some(args => args.includes('push') && args.includes('--force') && args.includes('feat/x:feat/x')),
+      `Expected a force push of 'feat/x', got: ${JSON.stringify(calls)}`);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('ensureRemoteBaseBranch fails when the base branch is absent locally', () => {
+  const { ensureRemoteBaseBranch } = require('../lib/tools/forgejo.js');
+  const calls = [];
+  const gitRunner = (args) => {
+    calls.push(args);
+    if (args.includes('show-ref')) return { status: 1, stdout: '', stderr: '' };
+    return { status: 0, stdout: '', stderr: '' };
+  };
+  const result = ensureRemoteBaseBranch('feat/missing', 'mistral', 'token-456', process.cwd(), { gitRunner });
+  assert.equal(result.ok, false);
+  assert.match(result.error, /does not exist locally/);
+  // It must never attempt a push when the local base branch is missing.
+  assert.ok(!calls.some(args => args.includes('push')), 'Should not push when base branch is absent');
 });
