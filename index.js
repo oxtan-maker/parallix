@@ -223,6 +223,13 @@ ${fmt.bold('Core Commands:')}
   rebase [<slug>] [--push]          Rebase mission branch onto the primary integration branch (main) with auto-resolution of mission-specific conflicts.
   diff [<slug>]                Launch the primary local diff tool for branch-vs-main review.
   stats [<csv_file>|--csv-file <path>] [--today YYYY-MM-DD|--from YYYY-MM-DD --to YYYY-MM-DD] [--output <file>]  Print parallix weekly or range tables from <PARALLIX_HOME>/stats.csv; legacy retrospective CSVs remain supported.
+  config                Print the effective configuration (built-in defaults merged with workflow.config.json). Read-only.
+  aliases               Print the derived command-alias table (state-map virtual states → canonical commands).
+
+${fmt.bold('Utility Commands:')}
+  version, --version, -v  Print the package version, px path, package root, and Node version.
+  shell-init [bash|zsh]   Print the shell integration snippet that cds your terminal into the next mission worktree on transitions.
+  review-event <slug> --type <type> --actor <actor> --content <text> [--timestamp <stamp>] [--skip-git]  Append a review-thread event for a mission.
 
 ${fmt.bold('Notes:')}
   - <slug> is optional if it can be inferred from the current branch, directory name, or git worktree.

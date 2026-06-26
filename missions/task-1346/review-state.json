@@ -1,0 +1,20 @@
+{
+  "reviewer": "qwen",
+  "implementer": "claude",
+  "round": 2,
+  "startedAt": "2026-06-26T09:42:29.541Z",
+  "phase": "approved",
+  "disposition": "APPROVED",
+  "metadata": {
+    "recordedStageLaunches": {
+      "review:qwen": [
+        "qwen|ses_<id>\\\",\\n|2026-06-26T09:39:24.581Z|2026-06-26T09:40:41.898Z|0",
+        "qwen|ses_0fcb0c519ffesVfqyHWzID1p6N|2026-06-26T09:42:31.079Z|2026-06-26T09:43:15.322Z|0"
+      ],
+      "follow-up:claude": [
+        "claude|08dda413-ec32-4184-b4fe-871bd723fa3c|2026-06-26T09:40:43.558Z|2026-06-26T09:42:29.177Z|0",
+        "claude|08dda413-ec32-4184-b4fe-871bd723fa3c|2026-06-26T09:46:17.914Z|2026-06-26T09:47:39.365Z|0"
+      ]
+    }
+  }
+}

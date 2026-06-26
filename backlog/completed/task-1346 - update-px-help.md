@@ -1,10 +1,10 @@
 ---
 id: TASK-1346
 title: update px --help
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-06-25 14:56'
-labels: []
+labels: [ai_sdlc]
 dependencies: []
 ---
 

@@ -222,6 +222,27 @@ test('printUsage prints the command help text', () => {
   assert.match(all, /Usage: px <command> \[args\]/);
   assert.match(all, /mission-start/);
   assert.match(all, /No npm dependencies/);
+  // Help must document every dispatchable command so px --help stays current.
+  assert.match(all, /\bconfig\b/);
+  assert.match(all, /\baliases\b/);
+  assert.match(all, /shell-init/);
+  assert.match(all, /review-event/);
+  assert.match(all, /--version/);
+});
+
+test('printUsage documents every KNOWN_COMMANDS entry', () => {
+  const previousLog = console.log;
+  const lines = [];
+  console.log = (msg) => lines.push(msg);
+  try {
+    printUsage();
+  } finally {
+    console.log = previousLog;
+  }
+  const all = lines.join('\n');
+  for (const command of KNOWN_COMMANDS) {
+    assert.match(all, new RegExp(`\\b${command}\\b`), `printUsage should document the '${command}' command`);
+  }
 });
 
 // ---------- alias system ----------
