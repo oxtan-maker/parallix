@@ -3,9 +3,10 @@ id: TASK-1356
 title: >-
   Evaluate investing in e2e happy-path tests backed by a cheap local-AI agent
   only
-status: backlog
+status: done
 assignee: []
 created_date: '2026-06-26 18:00'
+updated_date: '2026-06-26 18:06'
 labels:
   - quality
   - testing
@@ -38,3 +39,15 @@ Deliverable: a go/no-go recommendation with a proposed first e2e scenario, agent
 - [ ] #4 Specifies where e2e runs in the lifecycle (gate / pre-integrate / nightly) consistent with the TASK-1133 runtime budget
 - [ ] #5 Estimates maintenance cost vs bug-cluster coverage
 <!-- AC:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Evaluation complete. Recommendation: invest in e2e, but lead with a deterministic stubbed-agent run; treat a real-local-model run as a separate non-blocking smoke test.
+
+Reasoning: the bug-catching value of e2e is in exercising the real lifecycle composition over real git/worktrees/backlog (the #2 cluster: TASK-1317/1352/1327/1275), which a stub covers deterministically and cheaply. A real local model adds realism only to the launcher/telemetry surface, while contributing non-determinism, flakiness, runtime cost, and an environment dependency — so it must never sit in a blocking gate, and the local families have failed independently of parallix (TASK-1115/1273).
+
+Split into implementation tasks:
+- TASK-1358 — Tier 1: deterministic stubbed-agent e2e (high ROI, do first, runs pre-integrate).
+- TASK-1359 — Tier 2: non-blocking real-local-model smoke test for the launcher surface (optional, only if launcher bugs persist).
+<!-- SECTION:FINAL_SUMMARY:END -->
