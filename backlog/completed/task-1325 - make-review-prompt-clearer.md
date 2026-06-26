@@ -1,10 +1,11 @@
 ---
 id: TASK-1325
 title: make review prompt clearer
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-06-17 04:35'
-labels: []
+labels:
+  - ai_sdlc
 dependencies: []
 ---
 

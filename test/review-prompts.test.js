@@ -151,6 +151,46 @@ test('buildCompactReviewPrompt inlines the contract instead of redirecting to do
   assert.doesNotMatch(prompt, /docs\/agent-prompts/);
 });
 
+test('buildCompactReviewPrompt enumerates separation-of-duties constraints keeping reviewer out of implementer mode (task-1325)', () => {
+  const prompt = buildCompactReviewPrompt({
+    reviewer: 'codex',
+    branch: 'mission/task-089',
+    implementer: 'claude',
+    focus: 'all',
+    attempt: 1
+  });
+  assert.match(prompt, /Separation of duties/i);
+  assert.match(prompt, /reviewer, not the implementer/i);
+  // The required "MUST NOT" categories: code edits, branch ops, PR/merge ops, workflow state.
+  assert.match(prompt, /Edit, create, or delete any repo source/i);
+  assert.match(prompt, /no rebase, squash, amend/i);
+  assert.match(prompt, /no merge, push/i);
+  assert.match(prompt, /Mutate workflow state/i);
+  // The only permitted writes: artifact dir and /tmp.
+  const artifactDir = resolveArtifactDir(process.cwd());
+  assert.ok(prompt.includes(`Write to the artifact directory \`${artifactDir}\``));
+  assert.match(prompt, /temporary diagnostic files under `\/tmp`/);
+});
+
+test('buildReviewPrompt (verbose) enumerates the same separation-of-duties constraints (task-1325)', () => {
+  const prompt = buildReviewPrompt({
+    reviewer: 'codex',
+    branch: 'mission/task-089',
+    implementer: 'claude',
+    focus: 'all',
+    attempt: 1
+  });
+  assert.match(prompt, /Separation of duties/i);
+  assert.match(prompt, /reviewer, not the implementer/i);
+  assert.match(prompt, /edit, create, or delete any repo source/i);
+  assert.match(prompt, /no rebase, squash, amend/i);
+  assert.match(prompt, /no merge, push/i);
+  assert.match(prompt, /mutate workflow state/i);
+  const artifactDir = resolveArtifactDir(process.cwd());
+  assert.ok(prompt.includes(`write to the artifact directory \`${artifactDir}\``));
+  assert.match(prompt, /temporary diagnostic files under `\/tmp`/);
+});
+
 test('buildCompactReviewPrompt substitutes missionPath and primaryBranch (no <primary-branch>)', () => {
   const prompt = buildCompactReviewPrompt({
     reviewer: 'codex',
