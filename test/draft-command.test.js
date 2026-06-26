@@ -60,6 +60,7 @@ test('runDraftCommand top-level flows are covered with injected dependencies', a
         },
         resolveTaskFileFn: () => ({ ok: true, taskFile }),
         recordDraftImplementerFn: (opts) => calls.push(['record', opts.slug, opts.actual]),
+        recordDraftStatsFn: (opts) => calls.push(['stats', opts.slug, opts.rootDir]),
         [normalizeKey]: () => ({ ok: true, [typeKey]: 'ai_sdlc' }),
         enforceDraftCommitSafetyFn: (opts) => calls.push(['safety', opts.slug, opts.worktree]),
         transitionTaskFn: (slug, status) => calls.push(['transition', slug, status]),
@@ -82,6 +83,9 @@ test('runDraftCommand top-level flows are covered with injected dependencies', a
       ['transition', 'task-1038', 'backlog'],
       ['launch', true, worktree, 'codex'],
       ['record', 'task-1038', 'codex'],
+      // Stats must be recorded from the mission worktree (where the task lives),
+      // not mainRepo — otherwise feature-branch tasks fail classification (TASK-1352).
+      ['stats', 'task-1038', worktree],
       ['safety', 'task-1038', worktree],
       ['transition', 'task-1038', 'refined']
     ]);
@@ -252,6 +256,7 @@ test('runDraftCommand top-level flows are covered with injected dependencies', a
       transitionTaskFn: () => true,
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       recordDraftImplementerFn: () => {},
+      recordDraftStatsFn: () => {},
       [normalizeKey]: () => ({ ok: true, [typeKey]: 'ai_sdlc' }),
       enforceDraftCommitSafetyFn: () => { throw new Error('fallback commit failed'); },
       validateDraftClassificationFn: () => ({ ok: true }),
@@ -286,6 +291,7 @@ test('runDraftCommand top-level flows are covered with injected dependencies', a
       startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
       transitionTaskFn: () => true,
       recordDraftImplementerFn: () => {},
+      recordDraftStatsFn: () => {},
       validateDraftClassificationFn: () => ({ ok: true }),
       [normalizeKey]: (() => {
         let calls = 0;
@@ -332,6 +338,7 @@ test('runDraftCommand top-level flows are covered with injected dependencies', a
       startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
       transitionTaskFn: () => true,
       recordDraftImplementerFn: () => {},
+      recordDraftStatsFn: () => {},
       validateDraftClassificationFn: () => ({ ok: true }),
       [normalizeKey]: () => ({ ok: false, reason: 'missing-labels' }),
       restartDraftAgentFn: async () => true,
