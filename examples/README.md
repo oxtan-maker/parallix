@@ -1,4 +1,4 @@
-# parallix examples
+# Parallix Examples
 
 These examples use the provisional `px` runner from inside a **caller-supplied**
 target repository. They contain no fixed workstation paths, no sibling worktree

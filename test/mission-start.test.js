@@ -282,7 +282,7 @@ test('missionStart fails when recorded base branch does not exist locally', () =
     resolveMissionBaseBranchFn: () => 'gone-branch',
     getPrimaryBranchFn: () => 'main',
     // simulates git show-ref returning non-zero (branch missing)
-    runFn: () => ({ status: 1, stdout: '', stderr: '' }),
+    gitFn: () => ({ status: 1, stdout: '', stderr: '' }),
     log: line => lines.push(line),
     error: line => errors.push(line)
   });
@@ -316,7 +316,7 @@ test('missionStart passes when recorded base branch exists locally', () => {
     resolveMissionBaseBranchFn: () => 'feat/some-feature',
     getPrimaryBranchFn: () => 'main',
     // simulates git show-ref returning zero (branch exists)
-    runFn: () => ({ status: 0, stdout: '', stderr: '' }),
+    gitFn: () => ({ status: 0, stdout: '', stderr: '' }),
     log: line => lines.push(line),
     error: line => errors.push(line)
   });
@@ -350,7 +350,7 @@ test('missionStart skips base branch check when recorded base equals primary', (
     // resolveMissionBaseBranchFn returns 'main' == primary, so base check should be skipped
     resolveMissionBaseBranchFn: () => 'main',
     getPrimaryBranchFn: () => 'main',
-    runFn: () => { runCalled = true; return { status: 0, stdout: '', stderr: '' }; },
+    gitFn: () => { runCalled = true; return { status: 0, stdout: '', stderr: '' }; },
     log: line => lines.push(line),
     error: line => errors.push(line)
   });

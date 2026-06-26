@@ -1,0 +1,18 @@
+{
+  "reviewer": "claude",
+  "implementer": "custom",
+  "round": 1,
+  "startedAt": "2026-06-26T16:38:32.291Z",
+  "phase": "fixing",
+  "disposition": "APPROVED",
+  "metadata": {
+    "recordedStageLaunches": {
+      "review:claude": [
+        "claude|b8337c45-26a2-4f8b-893e-05f65fdfc22c|2026-06-26T16:38:32.671Z|2026-06-26T16:43:41.691Z|0"
+      ],
+      "follow-up:custom": [
+        "custom|ses_0fb43238fffeELlTPJcedpiuJU|2026-06-26T16:43:43.257Z|2026-06-26T16:46:28.795Z|0"
+      ]
+    }
+  }
+}

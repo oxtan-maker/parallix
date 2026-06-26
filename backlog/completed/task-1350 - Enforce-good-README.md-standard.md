@@ -1,12 +1,17 @@
 ---
 id: TASK-1350
 title: Enforce good README.md standard
-status: backlog
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-06-26 10:24'
-labels: []
+labels: ["user_value"]
 dependencies: []
 ---
+
+## Fallback: PR submitted as human
+
+Original user: [33mcustom[39m
+Bootstrap failure reason: No owner token found for human at /home/magnus/code/parallix-task-1350/.forgejo-local/tokens/human. A token file for an existing user (typically human) is required to bootstrap new agent tokens.
 
 ## Description
 

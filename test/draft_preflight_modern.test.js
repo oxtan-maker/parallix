@@ -13,6 +13,7 @@ test('runDraftCommand bails early if backlog task resolution is not ok', async (
     inferSlugFn: (s) => s,
     resolveMainRepoFn: () => '/tmp/main-repo',
     ensureRepoExistsFn: () => true,
+    detectLaunchBaseBranchFn: () => null,
     resolveTaskFileFn: () => ({ ok: false, reason: 'missing' }),
     reportTaskResolutionFn: (res, slug, log) => {
       errors.push(`Reported: ${res.reason} for ${slug}`);
@@ -41,6 +42,7 @@ test('runDraftCommand bails early if backlog integrity issues detected for the s
     inferSlugFn: (s) => s,
     resolveMainRepoFn: () => '/tmp/main-repo',
     ensureRepoExistsFn: () => true,
+    detectLaunchBaseBranchFn: () => null,
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-093.md' }),
     checkBacklogIntegrityFn: () => [
       { file: 'backlog/tasks/task-093.md', type: 'id-mismatch', filenameId: 'TASK-093', frontmatterId: 'TASK-099' }

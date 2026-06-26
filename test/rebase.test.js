@@ -189,6 +189,34 @@ test('rebase exits 0 on clean rebase', async () => {
   assert.equal(exitCode, 0);
 });
 
+test('rebase targets the mission recorded base branch, not the primary branch', async () => {
+  let exitCode = null;
+  let rebaseTarget = null;
+  await rebase(['task-1350'], {
+    inferSlugFn: () => 'task-1350',
+    findMissionDirFn: () => '/tmp/docs/missions/2026/task-1350',
+    findMissionAreaFn: () => 'docs',
+    detectRebaseStateFn: () => ({ inProgress: false, detached: false, unmergedFiles: [] }),
+    getCurrentBranchFn: () => 'mission/task-1350',
+    isForgejoReviewEnabledFn: () => true,
+    resolveMissionBaseBranchFn: () => 'skunkworks',
+    gitFn: args => {
+      const rebaseIdx = args.indexOf('rebase');
+      if (rebaseIdx !== -1 && args[rebaseIdx + 1] && !args[rebaseIdx + 1].startsWith('--')) {
+        rebaseTarget = args[rebaseIdx + 1];
+        return { status: 0, stdout: '', stderr: '' };
+      }
+      if (args[0] === 'rebase' && args[1] === '--show-current') {
+        return { status: 0, stdout: '', stderr: '' };
+      }
+      return { status: 0, stdout: '', stderr: '' };
+    },
+    exitFn: code => { exitCode = code; },
+  });
+  assert.equal(exitCode, 0);
+  assert.equal(rebaseTarget, 'skunkworks');
+});
+
 test('rebase uses local main and does not fetch Forgejo even when review is enabled', async () => {
   let exitCode = null;
   let fetchCalled = false;

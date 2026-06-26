@@ -927,6 +927,46 @@ test('syncMerged pushes landed commit, marks PR merged, and deletes the remote b
   );
 });
 
+test('syncMerged pushes the landed commit to the recorded base branch for feature-branch missions', () => {
+  const calls = [];
+  const result = syncMerged('mission/task-097', 'abc123', {
+    token: 'test-token',
+    baseBranch: 'skunkworks',
+    resolvePrNumber() {
+      return 97;
+    },
+    apiCall(method, apiPath) {
+      if (method === 'POST' && apiPath === '/pulls/97/merge') {
+        return { ok: true, data: { merged: true }, status: 0 };
+      }
+      return { ok: false, data: null, status: 1 };
+    },
+    verifyCommit() {
+      return { status: 0 };
+    },
+    gitPush(sourceRef, destinationRef, rootDir) {
+      calls.push({ type: 'push', sourceRef, destinationRef, rootDir });
+      return { status: 0 };
+    },
+    gitFetch() {
+      return { status: 0 };
+    },
+    gitDelete() {
+      return { status: 0 };
+    },
+    log() {}
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(
+    calls.filter(call => call.type === 'push').map(call => [call.sourceRef, call.destinationRef]),
+    [
+      ['abc123', 'refs/heads/skunkworks'],
+      ['abc123', 'refs/heads/mission/task-097']
+    ]
+  );
+});
+
 test('syncMerged continues when main push fails but review main already contains landed commit', () => {
   const calls = [];
   const result = syncMerged('mission/task-1062', 'abc123', {
