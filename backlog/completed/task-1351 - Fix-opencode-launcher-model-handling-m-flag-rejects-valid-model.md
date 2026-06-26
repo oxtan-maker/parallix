@@ -1,11 +1,11 @@
 ---
 id: TASK-1351
 title: Fix opencode launcher model handling (-m flag rejects valid model)
-status: backlog
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-06-26 11:18'
 labels:
-  - ai_sdlc
+  - user_value
 dependencies: []
 references:
   - 'lib/agents/opencode.js:115'
@@ -31,7 +31,7 @@ Investigate:
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 px draft with adapters.agents.models.custom set to cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit launches opencode and the agent runs (no 'Model not found')
-- [ ] #2 The custom model override is restored in workflow.config.json once -m handling works
-- [ ] #3 A regression test covers the opencode -m model identifier handling
+- [x] #1 px draft with adapters.agents.models.custom set to cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit launches opencode and the agent runs (no 'Model not found')
+- [x] #2 The custom model override is restored in workflow.config.json once -m handling works
+- [x] #3 A regression test covers the opencode -m model identifier handling
 <!-- AC:END -->
