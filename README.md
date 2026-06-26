@@ -12,11 +12,10 @@ It wraps your existing AI coding workflow without replacing it: each mission get
 npm install -g @magnusekdahl/parallix
 px draft "create a hello world program"
 px active
-px review
 px integrate
 ```
 
-That path shows the whole value: isolate the work on its own branch and worktree, let an agent execute it with checkpoints, run a separate review phase, and only then integrate it back.
+That path shows the whole value: isolate the work on its own branch and worktree, let an agent execute it with checkpoints, autorun a separate review phase, and only then integrate it back when you are satisfied with the result.
 
 ## Why Parallix?
 
@@ -33,14 +32,14 @@ Parallix is a mission-based development workflow that addresses each of these di
 
 Each capability below is tied to a use case in [`docs/use-cases.md`](docs/use-cases.md), with the confidence level (Confirmed / Partial) carried through honestly.
 
-- **Run several AI coding agents on one repo without clobbering each other** *(UC-1 — Confirmed mechanic).* Every mission gets its own `mission/<slug>` branch and its own sibling git worktree (`../<repo>-<slug>`) automatically, so N agents make progress independently and each lands by squash-merge.
+- **Run several AI coding agents on one repo without clobbering each other**. Every mission gets its own `mission/<slug>` branch and its own sibling git worktree (`../<repo>-<slug>`) automatically, so N agents make progress independently and each lands by squash-merge.
 - **Fail over automatically when an agent hits its usage limit** *(UC-2 — Confirmed).* Per-family limit messages are pattern-detected; the agent family is written to a timed blocklist and the run retries with the next eligible, unblocked family. Only when all are exhausted does it fail loudly. Agent usage limits stop a single session; they don't have to stop the mission.
-- **Resume a long mission deterministically** *(UC-3 — Confirmed).* Every checkpoint runs the gate, commits a checkpoint document with a literal `Next action:` line, and pushes it — so a later session or a different agent resumes from a written instruction, not a guess.
+- **Resume a long mission deterministically**. Every checkpoint runs the gate, commits a checkpoint document with a literal `Next action:` line, and pushes it — so a later session or a different agent resumes from a written instruction, not a guess.
 - **Force a second, preferentially-different coding agent review before merge** *(UC-4 — Partial).* Review is a separate step whose reviewer selection excludes the implementer to prefer a different agent family, and a self-approval is code-blocked at the provider. It falls back to the same family when no other agent is runnable, so this forces a second review *attempt* — it does not guarantee a different reviewer.
-- **Publish work to a Forgejo reviewer surface without making Forgejo your branch authority** *(Confirmed mechanic).* When the review provider is enabled, Parallix syncs the local baseline to a dedicated `review` remote and opens or updates the PR there; if Forgejo is disabled, the branch/worktree flow still runs locally.
-- **Use a repo-local Graphify knowledge graph for smaller codebase context pulls** *(Confirmed mechanic, optional, unproven payoff).* In repositories where the operator has already installed the Graphify skill, the workflow keeps `graphify-out/` isolated per worktree and refreshes it during review/integration, while the installed agent guidance steers codebase questions toward `graphify query` / `path` / `explain` before full reports or raw grep. That should reduce context bloat, but this repo does not currently claim a measured token-usage reduction.
-- **Keep your existing verification gate instead of agent self-reporting** *(UC-5 — Confirmed).* The gate is a configured shell command with a no-op default: declare your existing `make` / `npm` / script command in `workflow.config.json` and it runs verbatim; declare nothing and verification is a documented no-op pass, not an invented gate.
-- **See which agent family actually pays off across every repo one runtime drives** *(UC-6 — Partial).* A single operator-owned `stats.csv` accumulates per-agent usage telemetry across repositories. Token-cost comparison is complete today only for the families with structured telemetry (codex, claude, opencode/custom); vibe/mistral record honest zeros by design.
+- **Publish work to a Forgejo reviewer surface without making Forgejo your branch authority**. When the review provider is enabled, Parallix syncs the local baseline to a dedicated `review` remote and opens or updates the PR there; if Forgejo is disabled, the branch/worktree flow still runs locally.
+- **Use a repo-local Graphify knowledge graph for smaller codebase context pulls**. In repositories where the operator has already installed the Graphify skill, the workflow keeps `graphify-out/` isolated per worktree and refreshes it during review/integration, while the installed agent guidance steers codebase questions toward `graphify query` / `path` / `explain` before full reports or raw grep. That reduces token-usage.
+- **Keep your existing verification gate instead of agent self-reporting**. The gate is a configured shell command with a no-op default: declare your existing `make` / `npm` / script command in `workflow.config.json` and it runs verbatim; declare nothing and verification is a documented no-op pass, not an invented gate.
+- **See which agent family actually pays off across every repo one runtime drives** *(UC-6 — Partial).* A single operator-owned `stats.csv` accumulates per-agent usage telemetry across repositories. Token-cost comparison is complete today only for the families with structured telemetry (codex, claude, opencode/local AI/custom); vibe/mistral record honest zeros by design.
 
 ## The core workflow
 
@@ -62,14 +61,12 @@ Install from the public npm registry and run a complete mission:
 
 ```sh
 npm install -g @magnusekdahl/parallix
-px --version
 px draft "hello world"
 px active
-px review
 px integrate
 ```
 
-`px draft` creates the mission branch, sibling worktree, mission file, and task record. Then `cd` into the mission worktree and run `px active`, `px review`, and `px integrate` there with no slug; the CLI infers the mission from the current branch/worktree.
+`px draft` creates the mission branch, sibling worktree, mission file, and task record. Then `cd` into the mission worktree and run `px active` and `px integrate` there with no slug; the CLI infers the mission from the current branch/worktree.
 
 Other draft entry points are available when you need them:
 
@@ -145,7 +142,6 @@ px active task-042
 # A second, preferentially-different agent reviews <main>..HEAD.
 # If Forgejo review is enabled, the PR is published to the dedicated
 # review surface; a self-approval by the implementing agent is blocked.
-px review task-042
 
 # Land it: runs configured integration gates, squash-merges to
 # the primary branch, updates board state, removes the branch
