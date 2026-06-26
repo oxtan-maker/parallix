@@ -34,7 +34,7 @@ test('consumeArtifacts persists events and transitions backlog to review status 
 id: TASK-999
 title: test
 status: active
-assignee: [qwen]
+assignee: [custom]
 ---
 `);
 
@@ -77,7 +77,7 @@ assignee: [qwen]
       fs.writeFileSync(taskFile, updated);
       return true;
     },
-    getTaskAssigneeFn: () => 'qwen',
+    getTaskAssigneeFn: () => 'custom',
   });
 
   assert.equal(result.consumed, true, 'should have consumed artifacts');
@@ -106,7 +106,7 @@ test('consumeArtifacts leaves no untracked review-events files after a successfu
       'id: TASK-2200',
       'title: consume clean',
       'status: active',
-      'assignee: [qwen]',
+      'assignee: [custom]',
       '---',
       '',
       'Status: ○ active',
@@ -128,7 +128,7 @@ test('consumeArtifacts leaves no untracked review-events files after a successfu
       exit: code => { throw new Error(`exit ${code}`); },
       resolveWorktreeFn: () => root,
       resolveArtifactDirFn: () => artifactDir,
-      getTaskAssigneeFn: () => 'qwen',
+      getTaskAssigneeFn: () => 'custom',
     });
 
     assert.equal(result.ok, true);

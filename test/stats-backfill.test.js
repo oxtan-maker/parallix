@@ -31,11 +31,11 @@ function withFixture(fn) {
       codex: { families: ['codex'] },
       claude: { families: ['claude'] },
       gemini: { families: ['gemini'] },
-      qwen: { families: ['qwen'] },
+      custom: { families: ['custom'] },
     },
     steps: {
-      active: { agents: ['codex', 'claude', 'gemini', 'qwen'] },
-      review: { agents: ['codex', 'claude', 'gemini', 'qwen'] },
+      active: { agents: ['codex', 'claude', 'gemini', 'custom'] },
+      review: { agents: ['codex', 'claude', 'gemini', 'custom'] },
     },
   }));
   fs.writeFileSync(path.join(root, 'workflow', 'data', 'stats.csv'), 'date,repo,mission,classification,implementer,pr_fix_rounds\n', 'utf8');
@@ -234,7 +234,7 @@ test('collectHistoricalStatsBackfill reports unresolved task resolution and lega
     fs.writeFileSync(path.join(root, 'backlog', 'completed', 'task-2007 - Legacy classification.md'), [
       '---',
       'id: TASK-2007',
-      'assignee: [qwen]',
+      'assignee: [custom]',
       "updated_date: '2026-05-04 08:00'",
       'status: done',
       'labels: []',

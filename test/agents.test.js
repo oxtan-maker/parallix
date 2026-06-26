@@ -362,12 +362,12 @@ test('readAgentConfig can merge local blocklists when caller passes the default 
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-explicit-default-'));
   try {
     const targetPath = path.join(tmpRoot, 'agents.local.json');
-    fs.writeFileSync(targetPath, JSON.stringify({ blocklist: { qwen: true } }));
+    fs.writeFileSync(targetPath, JSON.stringify({ blocklist: { custom: true } }));
     const explicitPath = path.join(__dirname, '..', 'config', 'agents.json');
     const config = readAgentConfig(explicitPath, { mainWorktreePath: null, targetPath });
     assert.ok(config);
     assert.ok(config.blocklist);
-    assert.equal(config.blocklist.qwen, true);
+    assert.equal(config.blocklist.custom, true);
   } finally {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
   }
@@ -802,7 +802,7 @@ setTimeout(() => process.exit(0), 75);
     try {
       const log = [];
       const result = await startAgent('active', {
-        agent: 'qwen',
+        agent: 'custom',
         prompt: 'Execute.',
         worktree: tmpRoot,
         log: msg => log.push(msg),
@@ -813,9 +813,9 @@ setTimeout(() => process.exit(0), 75);
         }
       });
 
-      assert.equal(result.agent, 'qwen');
+      assert.equal(result.agent, 'custom');
       assert.equal(result.result.status, 0);
-      const diagnostic = log.find(message => /No output yet from qwen.*for step "active"/.test(message));
+      const diagnostic = log.find(message => /No output yet from custom.*for step "active"/.test(message));
       assert.ok(diagnostic, `expected no-output diagnostic in logs: ${log.join(' | ')}`);
       assert.match(diagnostic, /pid \d+/);
       assert.match(diagnostic, /stdout\/stderr have not produced visible output/);
@@ -1033,7 +1033,7 @@ test('resolveCodexCommand returns bare codex', () => {
   assert.equal(resolveCodexCommand(), 'codex');
 });
 
-// ---------- Opencode (qwen) launcher ----------
+// ---------- Opencode (custom) launcher ----------
 
 test('buildOpencodeInvocation omits --continue when resume is false', () => {
   __setJsonFormatSupportForTest(true);
@@ -1233,13 +1233,13 @@ test('startAgent does not pass --continue to non-resume-capable launchers even w
   }
 });
 
-test('qwen is registered in LAUNCHERS and RESOLVERS', () => {
+test('custom is registered in LAUNCHERS and RESOLVERS', () => {
   const agents = require('../lib/agents/agents');
-  // LAUNCHERS and RESOLVERS are module-private; verify qwen is known by checking KNOWN_AGENT_NAMES
-  assert.ok(agents.KNOWN_AGENT_NAMES.includes('qwen'), 'qwen should be in KNOWN_AGENT_NAMES');
-  // Verify qwen registration via workflowLauncherStatus
-  const status = agents.workflowLauncherStatus('qwen');
-  assert.equal(status.agent, 'qwen');
+  // LAUNCHERS and RESOLVERS are module-private; verify custom is known by checking KNOWN_AGENT_NAMES
+  assert.ok(agents.KNOWN_AGENT_NAMES.includes('custom'), 'custom should be in KNOWN_AGENT_NAMES');
+  // Verify custom registration via workflowLauncherStatus
+  const status = agents.workflowLauncherStatus('custom');
+  assert.equal(status.agent, 'custom');
 });
 
 // ---------- Codex resume threading with specific session ID ----------
@@ -1392,7 +1392,7 @@ test('startAgent retries with next agent when first agent exits non-zero (launch
         prompt: 'Execute the mission.',
         worktree: tmpRoot,
         selectAgentFn: (step, opts) => {
-          if (!opts.exclude.has('qwen')) return 'qwen';
+          if (!opts.exclude.has('custom')) return 'custom';
           return 'claude';
         },
         detectLimitHitFn: () => null,
@@ -1400,7 +1400,7 @@ test('startAgent retries with next agent when first agent exits non-zero (launch
       }));
 
       assert.equal(result.agent, 'claude');
-      assert.ok(log.some(m => m.includes('qwen') && m.includes('failed to complete')));
+      assert.ok(log.some(m => m.includes('custom') && m.includes('failed to complete')));
       assert.ok(log.some(m => m.includes('claude') && m.includes('attempt 2')));
     } finally {
       if (previousAgent !== undefined) process.env.WORKFLOW_AGENT = previousAgent;
@@ -1427,7 +1427,7 @@ test('startAgent attempts at least 3 eligible agents before giving up (SC 3)', a
         prompt: 'Execute.',
         worktree: tmpRoot,
         selectAgentFn: (step, opts) => {
-          if (!opts.exclude.has('qwen')) return 'qwen';
+          if (!opts.exclude.has('custom')) return 'custom';
           if (!opts.exclude.has('mistral')) return 'mistral';
           if (!opts.exclude.has('codex')) return 'codex';
           throw new Error('No agents available');
@@ -1438,13 +1438,13 @@ test('startAgent attempts at least 3 eligible agents before giving up (SC 3)', a
 
       assert.ok(error instanceof Error);
       assert.ok(error.message.includes('All eligible agents exhausted'));
-      assert.ok(error.message.includes('qwen'));
+      assert.ok(error.message.includes('custom'));
       assert.ok(error.message.includes('mistral'));
       assert.ok(error.message.includes('codex'));
       // Each agent should have its own error details
       assert.ok(error.message.includes('exit 1'));
       // Verify all three agents were attempted
-      assert.ok(log.some(m => m.includes('qwen')));
+      assert.ok(log.some(m => m.includes('custom')));
       assert.ok(log.some(m => m.includes('mistral')));
       assert.ok(log.some(m => m.includes('codex')));
     } finally {
@@ -1462,7 +1462,7 @@ test('startAgent retries when first agent fails with non-zero exit code', async 
     delete process.env.WORKFLOW_AGENT;
 
     try {
-      let qwenAttempted = false;
+      let customAttempted = false;
       let mistralAttempted = false;
 
       const result = await withPathLaunchers({
@@ -1472,7 +1472,7 @@ test('startAgent retries when first agent fails with non-zero exit code', async 
         prompt: 'Execute.',
         worktree: tmpRoot,
         selectAgentFn: (step, opts) => {
-          if (!opts.exclude.has('qwen')) { qwenAttempted = true; return 'qwen'; }
+          if (!opts.exclude.has('custom')) { customAttempted = true; return 'custom'; }
           mistralAttempted = true;
           return 'mistral';
         },
@@ -1481,7 +1481,7 @@ test('startAgent retries when first agent fails with non-zero exit code', async 
       }));
 
       // Both agents should have been tried
-      assert.ok(qwenAttempted, 'qwen should have been attempted');
+      assert.ok(customAttempted, 'custom should have been attempted');
       assert.ok(mistralAttempted, 'mistral should have been attempted');
       // Result should be mistral (second agent, exited 0)
       assert.equal(result.agent, 'mistral');
@@ -1509,7 +1509,7 @@ test('startAgent launch failure includes stderr snippet in log', async () => {
         prompt: 'Execute.',
         worktree: tmpRoot,
         selectAgentFn: (step, opts) => {
-          if (!opts.exclude.has('qwen')) return 'qwen';
+          if (!opts.exclude.has('custom')) return 'custom';
           return 'mistral';
         },
         detectLimitHitFn: () => null,
@@ -1540,11 +1540,11 @@ test('startAgent launch failure does not retry when limit-hit is detected', asyn
         prompt: 'Execute.',
         worktree: tmpRoot,
         selectAgentFn: (step, opts) => {
-          if (!opts.exclude.has('qwen')) return 'qwen';
+          if (!opts.exclude.has('custom')) return 'custom';
           return 'mistral';
         },
         detectLimitHitFn: ({ agent }) => {
-          if (agent === 'qwen') { limitHitCount++; return { until: '2026-05-01 18', source: 'test' }; }
+          if (agent === 'custom') { limitHitCount++; return { until: '2026-05-01 18', source: 'test' }; }
           return null;
         },
         updateAgentBlockFn: () => ({ path: 'noop' }),
@@ -1579,7 +1579,7 @@ test('startAgent launch failure with signal retries next agent', async () => {
         prompt: 'Execute.',
         worktree: tmpRoot,
         selectAgentFn: (step, opts) => {
-          if (!opts.exclude.has('qwen')) return 'qwen';
+          if (!opts.exclude.has('custom')) return 'custom';
           return 'mistral';
         },
         detectLimitHitFn: () => null,
@@ -1587,7 +1587,7 @@ test('startAgent launch failure with signal retries next agent', async () => {
       }));
 
       assert.equal(result.agent, 'mistral');
-      assert.ok(log.some(m => m.includes('qwen') && m.includes('signal')));
+      assert.ok(log.some(m => m.includes('custom') && m.includes('signal')));
     } finally {
       if (previousAgent !== undefined) process.env.WORKFLOW_AGENT = previousAgent;
     }
@@ -1639,16 +1639,16 @@ setTimeout(() => process.exit(0), 200);
     try {
       const log = [];
       const result = await startAgent('draft', {
-        agent: 'qwen',
+        agent: 'custom',
         prompt: 'Execute.',
         worktree: tmpRoot,
         log: msg => log.push(msg),
         isAgentBlockedFn: () => false
       });
 
-      assert.equal(result.agent, 'qwen');
+      assert.equal(result.agent, 'custom');
       assert.equal(result.result.status, 0);
-      const diagnostic = log.find(message => /No output yet from qwen.*for step "draft"/.test(message));
+      const diagnostic = log.find(message => /No output yet from custom.*for step "draft"/.test(message));
       assert.ok(diagnostic, `expected draft no-output diagnostic in logs: ${log.join(' | ')}`);
       assert.ok(diagnostic.includes('starting up') || diagnostic.includes('running'),
         `diagnostic must include agent stage; got: ${diagnostic}`);
@@ -1681,13 +1681,13 @@ process.exit(0);
 
     try {
       const result = await startAgent('draft', {
-        agent: 'qwen',
+        agent: 'custom',
         prompt: 'Execute.',
         worktree: tmpRoot,
         isAgentBlockedFn: () => false
       });
 
-      assert.equal(result.agent, 'qwen');
+      assert.equal(result.agent, 'custom');
       assert.equal(result.result.status, 0);
       const parsed = JSON.parse(result.result.stdout);
       assert.equal(parsed.cwd, tmpRoot);
@@ -1765,7 +1765,7 @@ test('startAgent throws with clear error when all agents exhausted', async () =>
         prompt: 'Execute.',
         worktree: tmpRoot,
         selectAgentFn: (step, opts) => {
-          if (!opts.exclude.has('qwen')) return 'qwen';
+          if (!opts.exclude.has('custom')) return 'custom';
           if (!opts.exclude.has('mistral')) return 'mistral';
           throw new Error('No agents available');
         },
@@ -1775,7 +1775,7 @@ test('startAgent throws with clear error when all agents exhausted', async () =>
 
       assert.ok(error instanceof Error);
       assert.ok(error.message.includes('All eligible agents exhausted'));
-      assert.ok(error.message.includes('qwen'));
+      assert.ok(error.message.includes('custom'));
       assert.ok(error.message.includes('mistral'));
       assert.ok(error.message.includes('exit 1'));
     } finally {
@@ -1792,8 +1792,8 @@ test('startAgent passes the resolved model to the launcher invocation', async ()
   const log = [];
   const result = await startAgent('review', {
     prompt: 'test',
-    selectAgentFn: () => 'qwen',
-    resolveAgentModelFn: (agent) => (agent === 'qwen' ? 'qwen3.5:9b' : null),
+    selectAgentFn: () => 'custom',
+    resolveAgentModelFn: (agent) => (agent === 'custom' ? 'qwen3.5:9b' : null),
     log: msg => log.push(msg)
   });
 
@@ -1806,7 +1806,7 @@ test('startAgent passes the resolved model to the launcher invocation', async ()
 test('startAgent omits the model flag when resolveAgentModel returns null', async () => {
   const result = await startAgent('review', {
     prompt: 'test',
-    selectAgentFn: () => 'qwen',
+    selectAgentFn: () => 'custom',
     resolveAgentModelFn: () => null
   });
 
@@ -1827,7 +1827,7 @@ test('non-limit launch failure triggers updateAgentBlockFn with 1-hour block', a
     prompt: 'Execute.',
     selectAgentFn: (step, opts) => {
       if (!opts.exclude.has('mistral')) return 'mistral';
-      if (!opts.exclude.has('qwen')) return 'qwen';
+      if (!opts.exclude.has('custom')) return 'custom';
       throw new Error('All eligible agents exhausted');
     },
     detectLimitHitFn: () => null,
@@ -1837,14 +1837,14 @@ test('non-limit launch failure triggers updateAgentBlockFn with 1-hour block', a
 
   assert.ok(error instanceof Error);
   assert.ok(error.message.includes('All eligible agents exhausted'));
-  assert.equal(blockCalls.length, 1, 'expected exactly one block call for the failed non-qwen agent');
+  assert.equal(blockCalls.length, 1, 'expected exactly one block call for the failed non-custom agent');
   assert.equal(blockCalls[0].agent, 'mistral', 'expected mistral to be blocked');
   // Block until should be ~1 hour from now — validate the format matches YYYY-MM-DD HH
   assert.ok(/^\d{4}-\d{2}-\d{2} \d{2}$/.test(blockCalls[0].until),
     `block until timestamp should be "YYYY-MM-DD HH" format; got: ${blockCalls[0].until}`);
 });
 
-test('qwen is excluded from non-limit block logic', async () => {
+test('custom is excluded from non-limit block logic', async () => {
   let blockCalls = [];
   const fakeBlockFn = (agent, until) => {
     blockCalls.push({ agent, until });
@@ -1857,7 +1857,7 @@ test('qwen is excluded from non-limit block logic', async () => {
   }, () => startAgent('draft', {
     prompt: 'Execute.',
     selectAgentFn: (step, opts) => {
-      if (!opts.exclude.has('qwen')) return 'qwen';
+      if (!opts.exclude.has('custom')) return 'custom';
       if (!opts.exclude.has('mistral')) return 'mistral';
       throw new Error('All eligible agents exhausted');
     },
@@ -1868,10 +1868,10 @@ test('qwen is excluded from non-limit block logic', async () => {
 
   assert.ok(error instanceof Error);
   assert.ok(error.message.includes('All eligible agents exhausted'));
-  // qwen should NOT be in blockCalls — it is excluded from non-limit blocking
-  const qwenBlocked = blockCalls.some(c => c.agent === 'qwen');
-  assert.ok(!qwenBlocked, 'expected qwen to NOT be blocked; got blocks: ' + JSON.stringify(blockCalls));
-  // mistral should be blocked (non-qwen agent that failed)
+  // custom should NOT be in blockCalls — it is excluded from non-limit blocking
+  const customBlocked = blockCalls.some(c => c.agent === 'custom');
+  assert.ok(!customBlocked, 'expected custom to NOT be blocked; got blocks: ' + JSON.stringify(blockCalls));
+  // mistral should be blocked (non-custom agent that failed)
   const mistralBlocked = blockCalls.some(c => c.agent === 'mistral');
   assert.ok(mistralBlocked, 'expected mistral to be blocked');
 });

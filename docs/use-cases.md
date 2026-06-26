@@ -24,7 +24,7 @@ Each use case carries the four required parts: **(P) persona/buyer**, **(B) befo
 
 ### UC-2 — Don't lose a run when one AI provider hits its usage cap
 
-- **(P)** Anyone driving agents on metered/rate-limited LLM subscriptions (Claude, Codex/GPT, Mistral, local Qwen).
+- **(P)** Anyone driving agents on metered/rate-limited LLM subscriptions (Claude, Codex/GPT, Mistral, local custom).
 - **(B)** *Before:* the agent prints "usage limit reached", the run dies, and you babysit it — manually restarting later or hand-switching to a different model. *After:* the limit message is pattern-detected, that agent family is written to a timed blocklist, and the run retries with the next eligible, unblocked family; only when all are exhausted does it fail loudly.
 - **(E)** Per-family limit regexes: `lib/agents/limit-hit.js:8-36`; selection honoring eligibility + blocklist + env override: `lib/agents/agents.js:382` (`selectAgent`), `:340-348` (`isAgentBlocked` for permanent/timed/`blocked:false`). Tested: `test/agents-limit-hit.test.js` — `startAgent persists a block via updateAgentBlock when limit-hit detector fires`, `startAgent throws when every eligible agent hits the limit`, `startAgent does not loop forever when WORKFLOW_AGENT is pinned and that agent hits limit`.
 - **(C)** **Confirmed** — detection, timed-block persistence, and next-agent retry are each covered by named passing tests.
@@ -55,7 +55,7 @@ Each use case carries the four required parts: **(P) persona/buyer**, **(B) befo
 - **(P)** Operator/buyer deciding which paid agent subscriptions to keep or cut.
 - **(B)** *Before:* no durable, cross-repo record of how each agent performs, so the keep/cut decision is a hunch. *After:* a single parallix-owned `stats.csv` accumulates per-agent telemetry (`classification, implementer, pr_fix_rounds`, plus an extended 21-column schema) across every repository one runtime drives, keyed so the same mission in different repos stays distinct.
 - **(E)** `lib/commands/stats.js:14` (legacy 5-col schema), `:21-30` (extended schema). Tested: `test/stats.test.js` — `upsertStatsRow writes the workflow stats schema and updates existing missions idempotently`, `task-1314: upsertStatsRow keys on (repo, mission, stage) so same mission in different repos stays distinct`. The kind of agent-comparison this enables is demonstrated in `../visualBoard/docs/missions/2026/task-1023/RETROSPECTIVE_P5.md:198-243` (per-family PRs, reviews/PR, durations).
-- **(C)** **Partial.** Schema and CSV upsert are tested, but the value is bounded: the richest per-agent comparison in the evidence came from Forgejo PR data, not `stats.csv`, and two of four families record honest zeros for token usage (`opencode`/local Qwen and `mistral`/vibe telemetry are zeroed by design, per `README.md:230-231` describing `opencode-telemetry.js`/`mistral-telemetry.js`). So cross-agent *cost/value* comparison is complete only for `codex` and `claude` today.
+- **(C)** **Partial.** Schema and CSV upsert are tested, but the value is bounded: the richest per-agent comparison in the evidence came from Forgejo PR data, not `stats.csv`, and two of four families record honest zeros for token usage (`opencode`/local custom and `mistral`/vibe telemetry are zeroed by design, per `README.md:230-231` describing `opencode-telemetry.js`/`mistral-telemetry.js`). So cross-agent *cost/value* comparison is complete only for `codex` and `claude` today.
 
 ---
 

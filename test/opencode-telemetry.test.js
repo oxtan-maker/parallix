@@ -267,7 +267,7 @@ test('extractOpencodeTelemetryFromExport derives totalTokens from input+output w
   assert.equal(result.totalTokens, 600);
 });
 
-test('extractOpencodeTelemetryFromExport defaults model to qwen when not in JSON', () => {
+test('extractOpencodeTelemetryFromExport defaults model to custom when not in JSON', () => {
   const json = JSON.stringify({
     session_id: 'ses_default_model',
     total_token_usage: {
@@ -277,7 +277,34 @@ test('extractOpencodeTelemetryFromExport defaults model to qwen when not in JSON
   });
   const result = extractOpencodeTelemetryFromExport(json);
   assert.ok(result);
-  assert.equal(result.model, 'qwen');
+  assert.equal(result.model, 'custom');
+});
+
+test('extractOpencodeTelemetryFromExport uses configured fallback model when JSON omits model', () => {
+  const json = JSON.stringify({
+    session_id: 'ses_configured_model',
+    total_token_usage: {
+      input_tokens: 100,
+      output_tokens: 50,
+    },
+  });
+  const result = extractOpencodeTelemetryFromExport(json, 'qwen3.5:9b');
+  assert.ok(result);
+  assert.equal(result.model, 'qwen3.5:9b');
+});
+
+test('extractOpencodeTelemetryFromExport prefers export model over configured fallback', () => {
+  const json = JSON.stringify({
+    session_id: 'ses_export_model',
+    model: 'qwen-plus',
+    total_token_usage: {
+      input_tokens: 100,
+      output_tokens: 50,
+    },
+  });
+  const result = extractOpencodeTelemetryFromExport(json, 'qwen3.5:9b');
+  assert.ok(result);
+  assert.equal(result.model, 'qwen-plus');
 });
 
 test('extractOpencodeTelemetryFromExport verifies telemetry shape matches telemetryToStatsFields expectations', () => {
@@ -383,5 +410,5 @@ test('extractOpencodeTelemetry prefers exportJson over telemetry', () => {
 test('getOpencodeProviderModel returns correct fallback identity', () => {
   const pm = getOpencodeProviderModel();
   assert.equal(pm.provider, 'opencode');
-  assert.equal(pm.model, 'qwen');
+  assert.equal(pm.model, 'custom');
 });

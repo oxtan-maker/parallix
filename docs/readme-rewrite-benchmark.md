@@ -73,7 +73,7 @@ line-by-line transcription. The decisions column is the actionable output.
   caveats are light.
 - **Borrow:** Naming the audience inside the positioning ("for operators comfortable with
   Git and CLI"); stating provider-agnosticism (Parallix's multi-family support is a
-  genuine parallel — codex/claude/mistral/qwen).
+  genuine parallel — codex/claude/mistral/custom).
 - **Avoid:** The screenshot-first above-the-fold — Parallix's mission is explicitly *out
   of scope* for screenshots/demos (task-1336 Out of Scope), and a CLI workflow harness is
   better shown by a command-flow block than a TUI image. Lead with text and a fenced

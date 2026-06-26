@@ -41,12 +41,12 @@ function withTempRepo(fn) {
       claude: { families: ['claude'] },
       gemini: { families: ['gemini'] },
 
-      qwen: { families: ['qwen'] }
+      custom: { families: ['custom'] }
     },
     steps: {
       draft: { agents: ['codex', 'claude', 'gemini'] },
       active: { agents: ['codex', 'claude', 'gemini'] },
-      review: { agents: ['codex', 'claude', 'gemini', 'qwen'] }
+      review: { agents: ['codex', 'claude', 'gemini', 'custom'] }
     }
   };
   fs.writeFileSync(path.join(root, 'workflow', 'config', 'agents.json'), JSON.stringify(agentsConfig));
@@ -447,20 +447,20 @@ test('setTaskAssignee updates simple inline form and promotes to first', () => {
 test('getTaskImplementer handles simple inline form without brackets', () => {
   withTempRepo(root => {
     const taskPath = path.join(root, 'backlog', 'tasks', 'task-112 - test.md');
-    fs.writeFileSync(taskPath, '---\nid: TASK-112\nassignee: qwen\n---\n');
+    fs.writeFileSync(taskPath, '---\nid: TASK-112\nassignee: custom\n---\n');
 
     const implementer = getTaskImplementer(taskPath);
-    assert.equal(implementer, 'qwen');
+    assert.equal(implementer, 'custom');
   });
 });
 
 test('getTaskImplementer handles YAML block format', () => {
   withTempRepo(root => {
     const taskPath = path.join(root, 'backlog', 'tasks', 'task-112 - test.md');
-    fs.writeFileSync(taskPath, '---\nid: TASK-112\nassignee:\n  - magnus\n  - qwen\n---\n');
+    fs.writeFileSync(taskPath, '---\nid: TASK-112\nassignee:\n  - magnus\n  - custom\n---\n');
 
     const implementer = getTaskImplementer(taskPath);
-    assert.equal(implementer, 'qwen');
+    assert.equal(implementer, 'custom');
   });
 });
 
@@ -473,8 +473,8 @@ test('getTaskImplementer handles quoted and @-prefixed values', () => {
     assert.equal(getTaskImplementer(inlineQuotedTask), 'claude');
 
     const blockQuotedTask = path.join(taskDir, 'task-112-block-quoted.md');
-    fs.writeFileSync(blockQuotedTask, "assignee:\n  - '@qwen'\n");
-    assert.equal(getTaskImplementer(blockQuotedTask), 'qwen');
+    fs.writeFileSync(blockQuotedTask, "assignee:\n  - '@custom'\n");
+    assert.equal(getTaskImplementer(blockQuotedTask), 'custom');
   });
 });
 
@@ -493,7 +493,7 @@ test('getTaskImplementer recognizes every workflow launcher and skips human assi
 test('setTaskImplementer replaces prior workflow agents and promotes to the front', () => {
   withTempRepo(root => {
     const taskPath = path.join(root, 'backlog', 'tasks', 'task-112 - test.md');
-    fs.writeFileSync(taskPath, '---\nid: TASK-112\nassignee: [magnus, qwen]\n---\n');
+    fs.writeFileSync(taskPath, '---\nid: TASK-112\nassignee: [magnus, custom]\n---\n');
 
     const result = setTaskImplementer(taskPath, 'codex');
     assert.equal(result, true);

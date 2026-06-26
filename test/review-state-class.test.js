@@ -273,7 +273,7 @@ test('startReviewLoop preserves persisted round data when the reviewer identity 
       implementer: 'claude',
       reviewer: 'gemini', // differs from the persisted reviewer 'codex'
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
-      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'qwen'],
+      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
       getPrStatusFn: () => ({ exists: true, state: 'open', number: 188 }),
       workflowLauncherStatusFn: () => ({ supported: true }),
       isForgejoReviewEnabledFn: () => false, // workflow-owned surfaces; no live provider

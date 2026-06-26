@@ -25,7 +25,7 @@ Run the installer once per agent family. It copies a platform-specific skill (an
 |--------|---------|-----------------|
 | claude | `graphify install --platform claude` | `~/.claude/skills/graphify/` + `CLAUDE.md` directive |
 | codex | `graphify install --platform codex` | `~/.agents/skills/graphify/` |
-| qwen/opencode | `graphify install --platform opencode` | `~/.config/opencode/skills/graphify/` |
+| custom/opencode | `graphify install --platform opencode` | `~/.config/opencode/skills/graphify/` |
 
 Each command produces a `SKILL.md` file in the target directory. After running all three, verify:
 

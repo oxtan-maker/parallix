@@ -30,7 +30,7 @@ test('startReviewLoop follows the transition contract: review before reviewer, a
 
   const baseOpts = {
     isForgejoReviewEnabledFn: () => true,
-    eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'qwen'],
+    eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     implementer: 'claude',
     reviewer: 'codex',

@@ -292,9 +292,9 @@ test('postWorkflowReview skips the Forgejo POST when reviewer is the PR author',
   const warnings = [];
   const result = postWorkflowReview('test-slug', 'approve', 'looks good', {
     readTokenFn: () => 'mock-token',
-    getPrAuthorFn: () => 'qwen', // reviewer == PR author
+    getPrAuthorFn: () => 'custom', // reviewer == PR author
     postReviewFn: () => { postCalled = true; return { ok: true }; },
-    readReviewStateFn: () => ({ mission: 'test-slug', reviewer: 'qwen', implementer: 'qwen' }),
+    readReviewStateFn: () => ({ mission: 'test-slug', reviewer: 'custom', implementer: 'custom' }),
     writeReviewStateFn: (slug, state) => { writtenState = state; },
     createEventFn: (slug, type, params) => { recordedEvent = { slug, type, params }; return { ok: true, path: '/mock' }; },
     buildMetadataFooterFn: () => '',

@@ -14,7 +14,7 @@ function rows() {
     { mission: 'task-1285', stage: 'active', provider: 'anthropic', model: 'claude-opus-4-8', implementer_agent: 'claude', input_tokens: '4000', output_tokens: '900', cached_tokens: '300', tool_calls: '18', duration_minutes: '22' },
     { mission: 'task-1285', stage: 'review', provider: 'openai', model: 'gpt-5.4', reviewer_agent: 'codex', input_tokens: '800', output_tokens: '150', cached_tokens: '20', tool_calls: '3', duration_minutes: '6' },
     // Unrelated mission must not leak into the task-1285 breakdown.
-    { mission: 'task-1248', stage: 'active', provider: 'opencode', model: 'qwen', implementer_agent: 'qwen', input_tokens: '0', output_tokens: '0' },
+    { mission: 'task-1248', stage: 'active', provider: 'opencode', model: 'custom', implementer_agent: 'custom', input_tokens: '0', output_tokens: '0' },
   ].map(normalizeStatsRow);
 }
 
@@ -133,10 +133,10 @@ test('mission phase report execute phase shows implementer_agent when set', () =
 test('mission phase report shows multiple follow-up rows when different agent families acted in that phase', () => {
   const report = renderMissionPhaseReport([
     { mission: 'task-1342', stage: 'follow-up', provider: 'openai', model: 'gpt-5', implementer_agent: 'codex', input_tokens: '100', output_tokens: '10' },
-    { mission: 'task-1342', stage: 'follow-up', provider: 'openai', model: 'gpt-5', implementer_agent: 'qwen', input_tokens: '200', output_tokens: '20' },
+    { mission: 'task-1342', stage: 'follow-up', provider: 'openai', model: 'gpt-5', implementer_agent: 'custom', input_tokens: '200', output_tokens: '20' },
   ].map(normalizeStatsRow), 'task-1342');
   const followUpLines = report.split('\n').filter(line => /\bfollow-up\b/.test(line));
   assert.equal(followUpLines.length, 2);
   assert.ok(followUpLines.some(line => /\bcodex\b/.test(line)));
-  assert.ok(followUpLines.some(line => /\bqwen\b/.test(line)));
+  assert.ok(followUpLines.some(line => /\bcustom\b/.test(line)));
 });

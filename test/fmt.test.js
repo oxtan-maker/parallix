@@ -18,13 +18,13 @@ test('fmt.status returns plain text for unknown type', () => {
   assert.equal(fmt.status('CUSTOM', 'text'), '[CUSTOM] text');
 });
 
-test('fmt.agent returns colored agent name and handles qwen/opencode', () => {
+test('fmt.agent returns colored agent name and handles custom/opencode', () => {
   assert.equal(fmt.agent('gemini'), '\x1b[36mgemini\x1b[39m');
   assert.equal(fmt.agent('codex'), '\x1b[35mcodex\x1b[39m');
   assert.equal(fmt.agent('claude'), '\x1b[34mclaude\x1b[39m');
-  assert.equal(fmt.agent('qwen'), '\x1b[33mqwen (opencode)\x1b[39m');
+  assert.equal(fmt.agent('custom'), '\x1b[33mcustom\x1b[39m');
 
-  assert.equal(fmt.agent('qwen', 'custom'), '\x1b[33mcustom\x1b[39m');
+  assert.equal(fmt.agent('custom', 'custom'), '\x1b[33mcustom\x1b[39m');
 });
 
 test('fmt.agent returns plain text for unknown family', () => {

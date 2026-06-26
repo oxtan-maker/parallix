@@ -32,7 +32,7 @@ test('migrateStats merges repo and shared sources, deduplicates full rows, and i
     fs.writeFileSync(destinationPath,
       'date,mission,classification,implementer,pr_fix_rounds\n' +
       '2026-06-01,task-1,ai_sdlc,codex,0\n' +
-      '2026-06-03,task-3,ai_sdlc,qwen,2\n'
+      '2026-06-03,task-3,ai_sdlc,custom,2\n'
     );
 
     migrateStats({ sourcePaths: [sourcePath], destinationPath });
@@ -113,7 +113,7 @@ test('migrateAgentBlocklists covers all three legacy sources and preserves schem
     }
     fs.writeFileSync(workflowPath, JSON.stringify({ blocklist: { codex: true, claude: false } }));
     fs.writeFileSync(repoPath, JSON.stringify({ blocklist: { gemini: { blocked: true } } }));
-    fs.writeFileSync(mainPath, JSON.stringify({ blocklist: { qwen: { until: '2026-07-01 12' } } }));
+    fs.writeFileSync(mainPath, JSON.stringify({ blocklist: { custom: { until: '2026-07-01 12' } } }));
 
     migrateAgentBlocklists({
       sourcePaths: [workflowPath, repoPath, mainPath],
@@ -124,7 +124,7 @@ test('migrateAgentBlocklists covers all three legacy sources and preserves schem
     assert.equal(payload.blocklist.codex, true);
     assert.equal(payload.blocklist.claude, false);
     assert.deepEqual(payload.blocklist.gemini, { blocked: true });
-    assert.deepEqual(payload.blocklist.qwen, { until: '2026-07-01 12' });
+    assert.deepEqual(payload.blocklist.custom, { until: '2026-07-01 12' });
     assert.ok([workflowPath, repoPath, mainPath].every(filePath => fs.existsSync(filePath)));
   });
 });

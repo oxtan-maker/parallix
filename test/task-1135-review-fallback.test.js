@@ -53,7 +53,7 @@ test('CP-1: blocked auto-derived reviewer falls back via selectAgent without mut
   // The while loop enters, calls selectAgentFn('review', { exclude: ['mistral', 'codex'] })
   // which returns 'claude'. 
   await startReviewLoop(TEST_SLUG, {
-    eligibleAgentsForStepFn: () => ['codex', 'claude', 'qwen', 'mistral'],
+    eligibleAgentsForStepFn: () => ['codex', 'claude', 'custom', 'mistral'],
     resolveTaskFileFn: () => ({ ok: true, taskFile: TASK_FILE }),
     implementer: 'mistral',
     dryRun: true,
@@ -64,14 +64,14 @@ test('CP-1: blocked auto-derived reviewer falls back via selectAgent without mut
       const exclude = opts.exclude instanceof Set ? opts.exclude : new Set(opts.exclude || []);
       if (!exclude.has('codex')) return 'codex';
       if (!exclude.has('claude')) return 'claude';
-      return 'qwen';
+      return 'custom';
     },
     workflowLauncherStatusFn: (agent) => ({
       supported: agent !== 'codex',
       detail: agent
     }),
     formatMatrixSummaryFn: () => [],
-    buildAutonomousReviewMatrixFn: () => ({ agents: ['codex', 'claude', 'qwen', 'mistral'] })
+    buildAutonomousReviewMatrixFn: () => ({ agents: ['codex', 'claude', 'custom', 'mistral'] })
   });
 
   // The loop should have succeeded by falling back to claude
@@ -118,10 +118,10 @@ test('CP-1: usage-limit on auto-derived reviewer triggers fallback with blocklis
   const exitCodes = [];
   let blocklistWrites = [];
 
-  // implementer=claude. selectAgent picks qwen.
+  // implementer=claude. selectAgent picks custom.
   // In the real code, startAgent writes the blocklist entry and returns a fallback.
   await startReviewLoop(TEST_SLUG, {
-    eligibleAgentsForStepFn: () => ['codex', 'claude', 'mistral', 'qwen'],
+    eligibleAgentsForStepFn: () => ['codex', 'claude', 'mistral', 'custom'],
     resolveTaskFileFn: () => ({ ok: true, taskFile: TASK_FILE }),
     implementer: 'claude',
     dryRun: true,
@@ -130,7 +130,7 @@ test('CP-1: usage-limit on auto-derived reviewer triggers fallback with blocklis
     exit: c => exitCodes.push(c),
     selectAgentFn: (step, opts) => {
       const exclude = opts.exclude instanceof Set ? opts.exclude : new Set(opts.exclude || []);
-      if (!exclude.has('qwen')) return 'qwen';
+      if (!exclude.has('custom')) return 'custom';
       return 'mistral';
     },
     workflowLauncherStatusFn: (agent) => ({
@@ -138,12 +138,12 @@ test('CP-1: usage-limit on auto-derived reviewer triggers fallback with blocklis
       detail: agent
     }),
     formatMatrixSummaryFn: () => [],
-    buildAutonomousReviewMatrixFn: () => ({ agents: ['codex', 'claude', 'mistral', 'qwen'] }),
+    buildAutonomousReviewMatrixFn: () => ({ agents: ['codex', 'claude', 'mistral', 'custom'] }),
     startAgentFn: async (step, opts) => {
-      // Simulate: first attempt picks qwen, hits limit -> writes blocklist
-      const original = opts.agent || 'qwen';
-      if (original === 'qwen') {
-        blocklistWrites.push({ agent: 'qwen', until: '2026-06-01 12' });
+      // Simulate: first attempt picks custom, hits limit -> writes blocklist
+      const original = opts.agent || 'custom';
+      if (original === 'custom') {
+        blocklistWrites.push({ agent: 'custom', until: '2026-06-01 12' });
         // startAgent returns the fallback agent it actually launched
         return { agent: 'mistral', original };
       }
@@ -158,10 +158,10 @@ test('CP-1: usage-limit on auto-derived reviewer triggers fallback with blocklis
     `startReviewLoop must not exit on usage-limit; errors: ${errors.join(' | ')}`
   );
 
-  // Verify the reviewer was selected (in dry-run mode startAgentFn is not called, so reviewer stays as qwen)
+  // Verify the reviewer was selected (in dry-run mode startAgentFn is not called, so reviewer stays as custom)
   assert.ok(
-    logs.some(l => l.includes('Selected reviewer: qwen')),
-    `Expected selected-reviewer=qwen (dry-run); got: ${logs.join(' | ')}`
+    logs.some(l => l.includes('Selected reviewer: custom')),
+    `Expected selected-reviewer=custom (dry-run); got: ${logs.join(' | ')}`
   );
 
   // Verify no Backlog assignee mutation (CP-2 removed this - SC 5)
@@ -183,12 +183,12 @@ test('CP-1: persisted blocked reviewer falls back via selectAgent without mutati
   const exitCodes = [];
 
   // Persisted reviewer=codex (from review-state.json), but codex is unsupported.
-  // The while loop enters with reviewerSource='persisted', calls selectAgentFn('review', { exclude: ['qwen', 'codex'] })
+  // The while loop enters with reviewerSource='persisted', calls selectAgentFn('review', { exclude: ['custom', 'codex'] })
   // which returns 'mistral'.
   await startReviewLoop(TEST_SLUG, {
-    eligibleAgentsForStepFn: () => ['codex', 'claude', 'mistral', 'qwen'],
+    eligibleAgentsForStepFn: () => ['codex', 'claude', 'mistral', 'custom'],
     resolveTaskFileFn: () => ({ ok: true, taskFile: TASK_FILE }),
-    implementer: 'qwen',
+    implementer: 'custom',
     dryRun: true,
     readReviewStateFn: () => ({ reviewer: 'codex', round: 1, startedAt: '2026-01-01', phase: 'reviewing' }),
     log: m => logs.push(m),
@@ -204,7 +204,7 @@ test('CP-1: persisted blocked reviewer falls back via selectAgent without mutati
       detail: agent
     }),
     formatMatrixSummaryFn: () => [],
-    buildAutonomousReviewMatrixFn: () => ({ agents: ['codex', 'claude', 'mistral', 'qwen'] }),
+    buildAutonomousReviewMatrixFn: () => ({ agents: ['codex', 'claude', 'mistral', 'custom'] }),
     startAgentFn: async (step, opts) => {
       return { agent: opts.agent };
     }
@@ -256,7 +256,7 @@ test('CP-1: reviewer fallback with no Backlog assignee mutation (regression)', a
   // implementer=mistral. selectAgent picks codex (unsupported).
   // Next selectAgent call returns 'claude'.
   await startReviewLoop(TEST_SLUG, {
-    eligibleAgentsForStepFn: () => ['codex', 'claude', 'qwen', 'mistral'],
+    eligibleAgentsForStepFn: () => ['codex', 'claude', 'custom', 'mistral'],
     resolveTaskFileFn: () => ({ ok: true, taskFile: TASK_FILE }),
     implementer: 'mistral',
     dryRun: true,
@@ -273,7 +273,7 @@ test('CP-1: reviewer fallback with no Backlog assignee mutation (regression)', a
       detail: agent
     }),
     formatMatrixSummaryFn: () => [],
-    buildAutonomousReviewMatrixFn: () => ({ agents: ['codex', 'claude', 'qwen', 'mistral'] })
+    buildAutonomousReviewMatrixFn: () => ({ agents: ['codex', 'claude', 'custom', 'mistral'] })
   });
 
   // Verify no Backlog assignee mutation (CP-2 removed this - SC 5)
@@ -294,12 +294,12 @@ test('CP-1: explicit blocked reviewer fails fast without fallback (unchanged beh
   const errors = [];
   const exitCodes = [];
 
-  // implementer=qwen, explicit reviewer=codex (unsupported)
+  // implementer=custom, explicit reviewer=codex (unsupported)
   // Current code: explicit reviewer never enters fallback loop, hard-fails
   await startReviewLoop(TEST_SLUG, {
-    eligibleAgentsForStepFn: () => ['claude', 'mistral', 'qwen', 'codex'], 
+    eligibleAgentsForStepFn: () => ['claude', 'mistral', 'custom', 'codex'], 
     resolveTaskFileFn: () => ({ ok: true, taskFile: TASK_FILE }),
-    implementer: 'qwen',
+    implementer: 'custom',
     reviewer: 'codex', // explicit
     dryRun: true,
     log: m => logs.push(m),
@@ -310,7 +310,7 @@ test('CP-1: explicit blocked reviewer fails fast without fallback (unchanged beh
       detail: agent
     }),
     formatMatrixSummaryFn: () => [],
-    buildAutonomousReviewMatrixFn: () => ({ agents: ['claude', 'mistral', 'qwen', 'codex'] })
+    buildAutonomousReviewMatrixFn: () => ({ agents: ['claude', 'mistral', 'custom', 'codex'] })
   });
 
   // Explicit blocked reviewer should fail fast
@@ -334,13 +334,13 @@ test('CP-1: multi-hop fallback scans remaining eligible agents when deterministi
   const errors = [];
   const exitCodes = [];
 
-  // implementer=qwen. selectAgent picks codex (unsupported).
+  // implementer=custom. selectAgent picks codex (unsupported).
   // Next selectAgent call returns mistral (unsupported).
   // Next selectAgent call returns claude (supported).
   await startReviewLoop(TEST_SLUG, {
-    eligibleAgentsForStepFn: () => ['claude', 'qwen', 'codex', 'mistral'],
+    eligibleAgentsForStepFn: () => ['claude', 'custom', 'codex', 'mistral'],
     resolveTaskFileFn: () => ({ ok: true, taskFile: TASK_FILE }),
-    implementer: 'qwen',
+    implementer: 'custom',
     dryRun: true,
     log: m => logs.push(m),
     error: m => errors.push(m),
@@ -352,11 +352,11 @@ test('CP-1: multi-hop fallback scans remaining eligible agents when deterministi
       return 'claude';
     },
     workflowLauncherStatusFn: (agent) => ({
-      supported: agent === 'claude' || agent === 'qwen',
+      supported: agent === 'claude' || agent === 'custom',
       detail: agent
     }),
     formatMatrixSummaryFn: () => [],
-    buildAutonomousReviewMatrixFn: () => ({ agents: ['claude', 'qwen', 'codex', 'mistral'] })
+    buildAutonomousReviewMatrixFn: () => ({ agents: ['claude', 'custom', 'codex', 'mistral'] })
   });
 
   // Should succeed by scanning remaining eligible agents

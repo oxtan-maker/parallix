@@ -67,7 +67,7 @@ test('global tarball reinstall preserves PARALLIX_HOME stats and agent blocklist
       `const stats = require(${JSON.stringify(path.join(installedRoot, 'lib', 'commands', 'stats.js'))});`,
       `const agents = require(${JSON.stringify(path.join(installedRoot, 'lib', 'agents', 'agents.js'))});`,
       "stats.upsertStatsRow({date:'2026-06-06',mission:'task-reinstall-proof',classification:'ai_sdlc',implementer:'codex',pr_fix_rounds:'2'});",
-      "agents.updateAgentBlock('qwen', '2026-07-01 12');"
+      "agents.updateAgentBlock('custom', '2026-07-01 12');"
     ].join('');
     run(process.execPath, ['-e', writeScript], { cwd: repoOne, env });
 
@@ -94,7 +94,7 @@ test('global tarball reinstall preserves PARALLIX_HOME stats and agent blocklist
     assert.equal(fs.readFileSync(agentsPath, 'utf8'), agentsBefore);
     assert.match(statsBefore, /task-reinstall-proof,ai_sdlc,codex,2/);
     assert.deepEqual(
-      JSON.parse(agentsBefore).blocklist.qwen,
+      JSON.parse(agentsBefore).blocklist.custom,
       { until: '2026-07-01 12' }
     );
     assert.equal(fs.existsSync(path.join(installedRoot, 'data', 'stats.seed.csv')), false);

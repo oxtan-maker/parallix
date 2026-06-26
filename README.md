@@ -2,7 +2,7 @@
 
 **Parallix is a local-first Git workflow CLI for running AI coding agents in isolated, reviewable missions instead of letting one long-lived agent session mutate your main checkout.**
 
-It is for engineers who already use Git and terminal-first coding agents such as Claude Code, Codex, OpenCode/Qwen, and Vibe/Mistral, and want branch isolation, resumable checkpoints, agent-family failover, and a forced review step without building that harness by hand.
+It is for engineers who already use Git and terminal-first coding agents such as Claude Code, Codex, OpenCode/custom, and Vibe/Mistral, and want branch isolation, resumable checkpoints, agent-family failover, and a forced review step without building that harness by hand.
 
 It wraps your existing AI coding workflow without replacing it: each mission gets its own branch and worktree, long runs checkpoint to markdown, review is a separate phase, and integration still goes through your repo's own verification command. A human still chooses the mission, launches each phase, reads the output, and decides what lands.
 
@@ -40,7 +40,7 @@ Each capability below is tied to a use case in [`docs/use-cases.md`](docs/use-ca
 - **Publish work to a Forgejo reviewer surface without making Forgejo your branch authority** *(Confirmed mechanic).* When the review provider is enabled, Parallix syncs the local baseline to a dedicated `review` remote and opens or updates the PR there; if Forgejo is disabled, the branch/worktree flow still runs locally.
 - **Use a repo-local Graphify knowledge graph for smaller codebase context pulls** *(Confirmed mechanic, optional, unproven payoff).* In repositories where the operator has already installed the Graphify skill, the workflow keeps `graphify-out/` isolated per worktree and refreshes it during review/integration, while the installed agent guidance steers codebase questions toward `graphify query` / `path` / `explain` before full reports or raw grep. That should reduce context bloat, but this repo does not currently claim a measured token-usage reduction.
 - **Keep your existing verification gate instead of agent self-reporting** *(UC-5 — Confirmed).* The gate is a configured shell command with a no-op default: declare your existing `make` / `npm` / script command in `workflow.config.json` and it runs verbatim; declare nothing and verification is a documented no-op pass, not an invented gate.
-- **See which agent family actually pays off across every repo one runtime drives** *(UC-6 — Partial).* A single operator-owned `stats.csv` accumulates per-agent usage telemetry across repositories. Token-cost comparison is complete today only for the families with structured telemetry (codex, claude, opencode/qwen); vibe/mistral record honest zeros by design.
+- **See which agent family actually pays off across every repo one runtime drives** *(UC-6 — Partial).* A single operator-owned `stats.csv` accumulates per-agent usage telemetry across repositories. Token-cost comparison is complete today only for the families with structured telemetry (codex, claude, opencode/custom); vibe/mistral record honest zeros by design.
 
 ## The core workflow
 
@@ -165,7 +165,7 @@ The full evidence-backed inventory is in [`docs/use-cases.md`](docs/use-cases.md
 
 ## What Parallix is not
 
-- **Not a model and not an AI coding agent.** It does not generate code itself. It coordinates the agents and models you already use (Claude Code, Codex, OpenCode/Qwen, and Vibe/Mistral).
+- **Not a model and not an AI coding agent.** It does not generate code itself. It coordinates the agents and models you already use (Claude Code, Codex, OpenCode/custom, and Vibe/Mistral).
 - **Not an IDE or an editor plugin.** It is a CLI workflow harness around Git and your existing toolchain — there is no UI, no autocomplete, no inline suggestions.
 - **Not a magic autonomous engineer.** This is a human-in-the-loop workflow. Nothing merges itself, and the safe operating model is that a human decides what to queue, when to run `px active`, how to respond to review findings, and whether `px integrate` should happen at all.
 - **Not a guaranteed throughput multiplier.** The observed gain varies with context. In the data we have, it ranges from roughly **+57%** on strict user-value output to about **+1,280%** on total completed-mission throughput in a later productized setup. Those are both real observations, but they are different mission-output measures and should be labeled that way.
@@ -177,8 +177,8 @@ The full evidence-backed inventory is in [`docs/use-cases.md`](docs/use-cases.md
 - **Distribution:** Published to the public npm registry as `@magnusekdahl/parallix`. Local tarball install (`npm pack`) is also supported. No Homebrew, no Docker image, no standalone binary, and no CI/release automation today.
 - **Review surface:** Forgejo is supported as the hosted PR viewer/publication surface, but the workflow remains local-first and can run without Forgejo when that provider is disabled.
 - **Versioning:** `CHANGELOG.md` is the versioning authority; PATCH bumps are the release discipline.
-- **Telemetry:** structured token/usage telemetry exists for the codex and claude families; the local-Qwen and mistral paths record honest zeros by design rather than fabricated numbers.
-- **Graphify:** the knowledge-graph path is supported for codex, claude, and qwen/opencode after one-time operator setup. It is optional, not a workflow prerequisite. The credible claim today is better-scoped context retrieval, not a proven token-savings benchmark.
+- **Telemetry:** structured token/usage telemetry exists for the codex and claude families; the local-custom and mistral paths record honest zeros by design rather than fabricated numbers.
+- **Graphify:** the knowledge-graph path is supported for codex, claude, and custom/opencode after one-time operator setup. It is optional, not a workflow prerequisite. The credible claim today is better-scoped context retrieval, not a proven token-savings benchmark.
 - **Review coverage** is best-effort, not guaranteed — see UC-4's caveats in [`docs/use-cases.md`](docs/use-cases.md).
 
 This is a tool for a local-first developer workflow on one machine, driven by an operator who reads the caveats.
@@ -188,7 +188,7 @@ This is a tool for a local-first developer workflow on one machine, driven by an
 - [`docs/use-cases.md`](docs/use-cases.md) — evidence-backed use-case inventory with confidence levels and red-team analysis (primary source of truth for what Parallix actually does today).
 - [`docs/authority-reference.md`](docs/authority-reference.md) — the internal operator reference: workflow modes, the authority model, agent selection, the layered validation model, checkpoint model, state mapping, command aliases, stats, persistent operator data, and the full public-distribution story.
 - [`docs/forgejo-setup.md`](docs/forgejo-setup.md) — how the Forgejo review surface, tokens, and `review` remote are bootstrapped.
-- [`docs/operator-setup.md`](docs/operator-setup.md) — one-time Graphify skill installation for codex, claude, and qwen/opencode.
+- [`docs/operator-setup.md`](docs/operator-setup.md) — one-time Graphify skill installation for codex, claude, and custom/opencode.
 - [`docs/readme-rewrite-benchmark.md`](docs/readme-rewrite-benchmark.md) — how comparable developer-tool READMEs are structured, and the decisions behind this one.
 - [`AGENTS.md`](AGENTS.md) — hard rules, restricted actions, and verification entrypoints.
 - `docs/adr/` — architecture decision records, including ADR 0044 (distribution model).

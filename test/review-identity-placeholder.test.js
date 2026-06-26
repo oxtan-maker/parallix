@@ -19,7 +19,7 @@ test('buildCompactReviewPrompt uses actualReviewer when provided', () => {
 
 test('buildCompactActOnReviewPrompt uses actualImplementer when provided', () => {
   const prompt = buildCompactActOnReviewPrompt({
-    implementer: 'qwen',
+    implementer: 'custom',
     branch: 'mission/task-1051',
     attempt: 1,
     actualImplementer: 'codex'
@@ -27,5 +27,5 @@ test('buildCompactActOnReviewPrompt uses actualImplementer when provided', () =>
 
   assert.match(prompt, /You are the implementer agent family: `codex`/);
   assert.match(prompt, /task-1051-round-resolution\.md/);
-  assert.ok(!prompt.includes('agent family: `qwen`'), 'Should not contain the original implementer in identity spot');
+  assert.ok(!prompt.includes('agent family: `custom`'), 'Should not contain the original implementer in identity spot');
 });

@@ -89,8 +89,8 @@ function withPrimaryAndMissionWorktrees(run) {
       path.join(primaryWorktree, 'workflow', 'config', 'agents.json'),
       JSON.stringify({
         steps: {
-          active: { eligible: ['qwen', 'codex'], selection: 'first' },
-          review: { eligible: ['qwen', 'codex'], selection: 'first' }
+          active: { eligible: ['custom', 'codex'], selection: 'first' },
+          review: { eligible: ['custom', 'codex'], selection: 'first' }
         }
       }, null, 2)
     );
@@ -348,12 +348,12 @@ test('updateAgentBlock from a mission worktree writes PARALLIX_HOME agents.local
     }, null, 2));
 
     process.chdir(missionWorktree);
-    const result = updateAgentBlock('qwen', '2030-01-02 03', { targetPath });
+    const result = updateAgentBlock('custom', '2030-01-02 03', { targetPath });
 
     assert.equal(result.path, targetPath);
     assert.equal(fs.existsSync(missionLocalPath), false, 'mission worktree must not receive the automatic block');
     const written = JSON.parse(fs.readFileSync(targetPath, 'utf8'));
-    assert.deepEqual(written.blocklist.qwen, { until: '2030-01-02 03' });
+    assert.deepEqual(written.blocklist.custom, { until: '2030-01-02 03' });
     assert.ok(fs.existsSync(primaryLocalPath), 'legacy source remains present');
   });
 });
@@ -361,13 +361,13 @@ test('updateAgentBlock from a mission worktree writes PARALLIX_HOME agents.local
 test('readAgentConfig in a sibling worktree migrates blocks from the primary worktree', () => {
   withPrimaryAndMissionWorktrees(({ missionConfigPath, primaryLocalPath, targetPath }) => {
     fs.writeFileSync(primaryLocalPath, JSON.stringify({
-      blocklist: { qwen: { until: '2030-01-02 03' } }
+      blocklist: { custom: { until: '2030-01-02 03' } }
     }, null, 2));
 
     const config = readAgentConfig(missionConfigPath, { mergeLocal: true, targetPath });
 
-    assert.deepEqual(config.blocklist.qwen, { until: '2030-01-02 03' });
-    assert.equal(isAgentBlocked('qwen', config), true);
+    assert.deepEqual(config.blocklist.custom, { until: '2030-01-02 03' });
+    assert.equal(isAgentBlocked('custom', config), true);
   });
 });
 
@@ -378,7 +378,7 @@ test('selectAgent excludes a family migrated from primary worktree agents.local.
   withPrimaryAndMissionWorktrees(({ tmpRoot, missionConfigPath, primaryLocalPath, targetPath }) => {
     installPathLaunchers(tmpRoot);
     fs.writeFileSync(primaryLocalPath, JSON.stringify({
-      blocklist: { qwen: { until: '2030-01-02 03' } }
+      blocklist: { custom: { until: '2030-01-02 03' } }
     }, null, 2));
 
     try {
@@ -393,13 +393,13 @@ test('selectAgent excludes a family migrated from primary worktree agents.local.
 
 test('updateAgentBlock preserves malformed PARALLIX_HOME agents.local.json', () => {
   withPrimaryAndMissionWorktrees(({ primaryLocalPath, missionLocalPath, missionWorktree, targetPath }) => {
-    const corrupt = '{ "blocklist": { "qwen": true, } }\n';
+    const corrupt = '{ "blocklist": { "custom": true, } }\n';
     fs.mkdirSync(path.dirname(targetPath), { recursive: true });
     fs.writeFileSync(targetPath, corrupt);
 
     process.chdir(missionWorktree);
     assert.throws(
-      () => updateAgentBlock('qwen', '2030-01-02 03', { targetPath }),
+      () => updateAgentBlock('custom', '2030-01-02 03', { targetPath }),
       (err) => err && err.code === 'WORKFLOW_AGENT_CONFIG_INVALID' && err.configPath === targetPath
     );
 
@@ -413,23 +413,23 @@ test('existing PARALLIX_HOME blocklist is authoritative and legacy sources remai
   withPrimaryAndMissionWorktrees(({ missionConfigPath, primaryLocalPath, missionLocalPath, missionWorktree, targetPath }) => {
     fs.writeFileSync(
       path.join(missionWorktree, 'workflow', 'config', 'agents.local.json'),
-      JSON.stringify({ blocklist: { qwen: false } }, null, 2)
+      JSON.stringify({ blocklist: { custom: false } }, null, 2)
     );
-    fs.writeFileSync(missionLocalPath, JSON.stringify({ blocklist: { qwen: { blocked: false } } }, null, 2));
+    fs.writeFileSync(missionLocalPath, JSON.stringify({ blocklist: { custom: { blocked: false } } }, null, 2));
     fs.writeFileSync(primaryLocalPath, JSON.stringify({
-      blocklist: { qwen: { until: '2030-01-02 03' } }
+      blocklist: { custom: { until: '2030-01-02 03' } }
     }, null, 2));
     fs.mkdirSync(path.dirname(targetPath), { recursive: true });
     fs.writeFileSync(targetPath, JSON.stringify({
-      blocklist: { qwen: true }
+      blocklist: { custom: true }
     }, null, 2));
 
     const config = readAgentConfig(missionConfigPath, {
       mergeLocal: true, targetPath
     });
 
-    assert.equal(config.blocklist.qwen, true);
-    assert.equal(isAgentBlocked('qwen', config), true);
+    assert.equal(config.blocklist.custom, true);
+    assert.equal(isAgentBlocked('custom', config), true);
     assert.ok(fs.existsSync(primaryLocalPath));
     assert.ok(fs.existsSync(missionLocalPath));
   });

@@ -86,9 +86,9 @@ test('shouldRetryOpencodeFailure does NOT retry plain 429 (classified as limit-h
   );
 });
 
-test('detectLimitHit classifies plain 429 as a limit-hit for qwen', () => {
+test('detectLimitHit classifies plain 429 as a limit-hit for custom', () => {
   const { detectLimitHit } = require('../lib/agents/limit-hit');
-  const result = detectLimitHit({ agent: 'qwen', status: 1, stderr: '429 Too Many Requests' });
+  const result = detectLimitHit({ agent: 'custom', status: 1, stderr: '429 Too Many Requests' });
   assert.ok(result, 'plain 429 should be detected as a limit-hit');
   assert.equal(result.source, 'fallback', 'no reset-time info in plain 429, uses fallback block');
 });
@@ -152,9 +152,9 @@ test('shouldRetryOpencodeFailure does NOT retry hard errors (model-not-found / E
 });
 
 test('shouldRetryOpencodeFailure does NOT retry a recognized limit-hit', () => {
-  // qwen limit pattern: "insufficient_quota" — owned by detectLimitHit, not the retry path.
+  // custom limit pattern: "insufficient_quota" — owned by detectLimitHit, not the retry path.
   assert.equal(opencode.shouldRetryOpencodeFailure({ status: 1, stderr: 'insufficient_quota: usage limit reached' }), false);
-  // plain 429 is also a limit-hit for qwen, not a transient error
+  // plain 429 is also a limit-hit for custom, not a transient error
   assert.equal(opencode.shouldRetryOpencodeFailure({ status: 1, stderr: '429 Too Many Requests' }), false);
 });
 
@@ -265,4 +265,35 @@ test('startOpencodeAgent: persistent 429 surfaces after limit-hit detection for 
   assert.equal(result.status, 1, 'persistent 429 must surface for agents.js launchFailed');
   assert.equal(result.transientRetries, 0, 'no transient retry — classified as limit-hit');
   assert.equal(calls, 1, 'single invocation, then agents.js can apply local cooldown');
+});
+
+// ---------- spurious exit 1 (criterion 5) ----------
+
+test('isSpuriousOpencodeExit returns true for exit 1 with stop event and no error', () => {
+  const ndjson = '{"type":"step_finish","reason":"stop","sessionID":"ses_ok"}';
+  assert.equal(opencode.isSpuriousOpencodeExit({ status: 1, stdout: ndjson, stderr: '' }), true);
+});
+
+test('isSpuriousOpencodeExit returns false when status is 0', () => {
+  const ndjson = '{"type":"step_finish","reason":"stop","sessionID":"ses_ok"}';
+  assert.equal(opencode.isSpuriousOpencodeExit({ status: 0, stdout: ndjson, stderr: '' }), false);
+});
+
+test('isSpuriousOpencodeExit returns false for null/undefined', () => {
+  assert.equal(opencode.isSpuriousOpencodeExit(null), false);
+  assert.equal(opencode.isSpuriousOpencodeExit(undefined), false);
+});
+
+test('isSpuriousOpencodeExit returns false when status is 1 but no stop event', () => {
+  assert.equal(opencode.isSpuriousOpencodeExit({ status: 1, stdout: '', stderr: 'some error' }), false);
+});
+
+test('isSpuriousOpencodeExit returns false when stop event coexists with error event', () => {
+  const ndjson = '{"type":"step_finish","reason":"stop"}\n{"type":"error","message":"boom"}';
+  assert.equal(opencode.isSpuriousOpencodeExit({ status: 1, stdout: ndjson, stderr: '' }), false);
+});
+
+test('isSpuriousOpencodeExit handles stop in stderr as well as stdout', () => {
+  const ndjson = '{"type":"step_finish","reason":"stop"}';
+  assert.equal(opencode.isSpuriousOpencodeExit({ status: 1, stdout: '', stderr: ndjson }), true);
 });

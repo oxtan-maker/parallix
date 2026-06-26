@@ -264,12 +264,12 @@ test('submitReviewRound does not exit when reviewer is the PR author (self-autho
   let recordedDisposition = null;
   let recordedVerdict = null;
   const warnings = [];
-  // Force forgejoUser to resolve from state.reviewer (= 'qwen') regardless of
+  // Force forgejoUser to resolve from state.reviewer (= 'custom') regardless of
   // the ambient FORGEJO_USER env so the reviewer==author case is exercised.
   const prevEnv = process.env.FORGEJO_USER;
   delete process.env.FORGEJO_USER;
   try {
-    const state = { round: 1, phase: 'reviewing', reviewer: 'qwen', implementer: 'qwen', transitionTo: () => {} };
+    const state = { round: 1, phase: 'reviewing', reviewer: 'custom', implementer: 'custom', transitionTo: () => {} };
     submitReviewRound(mockSlug, 'approve', 'msg', {
       worktree: mockWorktree,
       isForgejoReviewEnabledFn: () => true,
@@ -277,7 +277,7 @@ test('submitReviewRound does not exit when reviewer is the PR author (self-autho
       writeReviewStateFn: (s, st) => { recordedDisposition = st.disposition; },
       createEventFn: (slug, type, params) => { recordedVerdict = params.verdict; return { ok: true, path: '/mock' }; },
       readTokenFn: () => 'token',
-      getPrAuthorFn: () => 'qwen', // reviewer == PR author
+      getPrAuthorFn: () => 'custom', // reviewer == PR author
       postReviewFn: () => { postCalled = true; return { ok: true }; },
       log: (msg) => { if (/WARN/.test(msg)) warnings.push(msg); },
       error: () => {},

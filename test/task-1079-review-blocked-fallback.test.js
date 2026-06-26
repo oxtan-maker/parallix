@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 //
 // Original bug: when the auto-derived reviewer is blocked (eligibleAgentsForStep
 // excludes it because of a usage-limit hit), startReviewLoop crashed with
-//   [FAIL] Unsupported reviewer: "codex". Supported for review: claude, mistral, qwen
+//   [FAIL] Unsupported reviewer: "codex". Supported for review: claude, mistral, custom
 // even though mistral and claude were available as fallbacks.
 //
 // The fix: the launcher-availability `while` loop in workflow/lib/review/review.js
@@ -20,13 +20,13 @@ test('startReviewLoop falls back when the auto-derived reviewer is blocked but a
   const errors = [];
   const exitCodes = [];
 
-  // implementer=qwen. selectAgent picks mistral (unblocked).
-  // Pre-refactor: reviewerFor(qwen) -> codex (blocked), which triggered while loop.
+  // implementer=custom. selectAgent picks mistral (unblocked).
+  // Pre-refactor: reviewerFor(custom) -> codex (blocked), which triggered while loop.
   // Post-refactor: selectAgent skips codex and picks mistral directly.
   await startReviewLoop(TEST_SLUG, {
-    eligibleAgentsForStepFn: () => ['claude', 'mistral', 'qwen'], // codex blocked
+    eligibleAgentsForStepFn: () => ['claude', 'mistral', 'custom'], // codex blocked
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
-    implementer: 'qwen',
+    implementer: 'custom',
     dryRun: true,
     log: m => logs.push(m),
     error: m => errors.push(m),
@@ -37,7 +37,7 @@ test('startReviewLoop falls back when the auto-derived reviewer is blocked but a
     },
     workflowLauncherStatusFn: () => ({ supported: true, detail: 'mock' }),
     formatMatrixSummaryFn: () => [],
-    buildAutonomousReviewMatrixFn: () => ({ agents: ['claude', 'mistral', 'qwen'] })
+    buildAutonomousReviewMatrixFn: () => ({ agents: ['claude', 'mistral', 'custom'] })
   });
 
   assert.equal(
@@ -57,12 +57,12 @@ test('startReviewLoop iterates past a blocked deterministic fallback to a third 
   const errors = [];
   const exitCodes = [];
 
-  // implementer=qwen. To test the while loop multi-hop, we make selectAgent pick
+  // implementer=custom. To test the while loop multi-hop, we make selectAgent pick
   // codex first (unsupported), then mistral (unsupported), then claude (supported).
   await startReviewLoop(TEST_SLUG, {
-    eligibleAgentsForStepFn: () => ['claude', 'qwen', 'codex', 'mistral'],
+    eligibleAgentsForStepFn: () => ['claude', 'custom', 'codex', 'mistral'],
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
-    implementer: 'qwen',
+    implementer: 'custom',
     dryRun: true,
     log: m => logs.push(m),
     error: m => errors.push(m),
@@ -73,11 +73,11 @@ test('startReviewLoop iterates past a blocked deterministic fallback to a third 
       return 'claude';
     },
     workflowLauncherStatusFn: (agent) => ({
-      supported: agent === 'claude' || agent === 'qwen',
+      supported: agent === 'claude' || agent === 'custom',
       detail: agent
     }),
     formatMatrixSummaryFn: () => [],
-    buildAutonomousReviewMatrixFn: () => ({ agents: ['claude', 'qwen', 'codex', 'mistral'] })
+    buildAutonomousReviewMatrixFn: () => ({ agents: ['claude', 'custom', 'codex', 'mistral'] })
   });
 
   assert.equal(
@@ -97,9 +97,9 @@ test('startReviewLoop still rejects with a clear error when the explicit reviewe
   const exitCodes = [];
 
   await startReviewLoop(TEST_SLUG, {
-    eligibleAgentsForStepFn: () => ['claude', 'gemini', 'qwen', 'codex'], 
+    eligibleAgentsForStepFn: () => ['claude', 'gemini', 'custom', 'codex'], 
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
-    implementer: 'qwen',
+    implementer: 'custom',
     reviewer: 'codex',
     dryRun: true,
     log: () => {},
@@ -107,7 +107,7 @@ test('startReviewLoop still rejects with a clear error when the explicit reviewe
     exit: c => exitCodes.push(c),
     workflowLauncherStatusFn: (agent) => ({ supported: agent !== 'codex', detail: 'mock' }),
     formatMatrixSummaryFn: () => [],
-    buildAutonomousReviewMatrixFn: () => ({ agents: ['claude', 'mistral', 'qwen', 'codex'] })
+    buildAutonomousReviewMatrixFn: () => ({ agents: ['claude', 'mistral', 'custom', 'codex'] })
   });
 
   assert.ok(exitCodes.includes(1), `Expected exit(1) when explicit reviewer is blocked; exitCodes: ${exitCodes.join(',')}`);

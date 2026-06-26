@@ -161,8 +161,8 @@ test('task-1342: upsertStatsRow keeps same mission/stage separate by acting agen
     repo: 'parallix',
     mission: 'task-1342',
     classification: 'ai_sdlc',
-    implementer: 'qwen',
-    implementer_agent: 'qwen',
+    implementer: 'custom',
+    implementer_agent: 'custom',
     stage: 'follow-up',
     input_tokens: '200',
   }, { filePath: csvFile });
@@ -170,7 +170,7 @@ test('task-1342: upsertStatsRow keeps same mission/stage separate by acting agen
   const data = stats.loadStatsCsv(csvFile);
   assert.equal(data.rows.length, 2);
   assert.ok(data.rows.some(r => r.stage === 'follow-up' && r.implementer_agent === 'codex' && r.input_tokens === '100'));
-  assert.ok(data.rows.some(r => r.stage === 'follow-up' && r.implementer_agent === 'qwen' && r.input_tokens === '200'));
+  assert.ok(data.rows.some(r => r.stage === 'follow-up' && r.implementer_agent === 'custom' && r.input_tokens === '200'));
 });
 
 test('task-1342: accumulateStageStats sums repeated launches for the same mission/stage/family', () => {
@@ -181,7 +181,7 @@ test('task-1342: accumulateStageStats sums repeated launches for the same missio
       '---',
       'id: TASK-2000',
       'labels: [ai_sdlc]',
-      'assignee: [qwen]',
+      'assignee: [custom]',
       'status: review',
       '---',
       '',
@@ -193,7 +193,7 @@ test('task-1342: accumulateStageStats sums repeated launches for the same missio
       stage: 'follow-up',
       rootDir: root,
       filePath: csvFile,
-      implementer: 'qwen',
+      implementer: 'custom',
       telemetry: { provider: 'openai', model: 'gpt-5', inputTokens: 100, outputTokens: 10, cachedTokens: 5, totalTokens: 115, toolCalls: 2, usagePercent: 7, cost_usd: 0.25 },
       durationMinutes: 3,
       date: '2026-06-24',
@@ -203,7 +203,7 @@ test('task-1342: accumulateStageStats sums repeated launches for the same missio
       stage: 'follow-up',
       rootDir: root,
       filePath: csvFile,
-      implementer: 'qwen',
+      implementer: 'custom',
       telemetry: { provider: 'openai', model: 'gpt-5', inputTokens: 40, outputTokens: 4, cachedTokens: 1, totalTokens: 45, toolCalls: 1, usagePercent: 9, cost_usd: 0.5 },
       durationMinutes: 2,
       date: '2026-06-24',
@@ -384,7 +384,7 @@ test('renderWeeklyStatsReport calculates current and previous seven-day windows 
     { date: '2026-05-18', mission: 'task-a', classification: 'ai_sdlc', implementer: 'codex', pr_fix_rounds: '2' },
     { date: '2026-05-12', mission: 'task-b', classification: 'user_value', implementer: 'gemini', pr_fix_rounds: '1' },
     { date: '2026-05-11', mission: 'task-c', classification: 'ai_sdlc', implementer: 'claude', pr_fix_rounds: '4' },
-    { date: '2026-05-05', mission: 'task-d', classification: 'user_value', implementer: 'qwen', pr_fix_rounds: '0' },
+    { date: '2026-05-05', mission: 'task-d', classification: 'user_value', implementer: 'custom', pr_fix_rounds: '0' },
   ], { today: '2026-05-18' });
 
   assert.match(report, /Current week \(2026-05-12 → 2026-05-18\)/);
@@ -397,7 +397,7 @@ test('renderWeeklyStatsReport calculates current and previous seven-day windows 
   assert.match(report, /gemini\s+1\s+1\.00/);
   assert.match(report, /Agent performance previous week \(2026-05-05 → 2026-05-11\)/);
   assert.match(report, /claude\s+1\s+4\.00/);
-  assert.match(report, /qwen \(opencode\)\s+1\s+0\.00/);
+  assert.match(report, /\bcustom\s+1\s+0\.00/);
 });
 
 test('renderRangeStatsReport filters inclusive boundary dates and summarizes mission counts', () => {
@@ -541,7 +541,7 @@ test('stats command prints workflow arbitrary range tables from the integration 
     '2026-05-01,task-start,ai_sdlc,codex,2',
     '2026-05-20,task-mid,user_value,gemini,1',
     '2026-05-31,task-end,user_value,codex,4',
-    '2026-06-01,task-after,ai_sdlc,qwen,0',
+    '2026-06-01,task-after,ai_sdlc,custom,0',
   ].join('\n'));
   const logs = [];
 
@@ -910,7 +910,7 @@ test('recordIntegrationStats prefers branch-history implementer when review-stat
         status: 0,
         stdout: [
           'mission/task-2000: task-2000',
-          'review-state(task-2000): round 1 (codex reviewing qwen)',
+          'review-state(task-2000): round 1 (codex reviewing custom)',
           'backlog(task-2000): transition to review and implementer=claude',
           'backlog(task-2000): transition to active and implementer=claude',
         ].join('\n'),
@@ -934,7 +934,7 @@ test('recordIntegrationStats prefers branch-history implementer when review-stat
 
     fs.writeFileSync(
       path.join(root, 'docs', 'missions', '2026', 'task-2000', 'review-state.json'),
-      JSON.stringify({ reviewer: 'codex', implementer: 'qwen', round: 1, startedAt: '2026-05-18T10:00:00Z' }, null, 2)
+      JSON.stringify({ reviewer: 'codex', implementer: 'custom', round: 1, startedAt: '2026-05-18T10:00:00Z' }, null, 2)
     );
 
     const csvFile = path.join(root, 'workflow', 'data', 'stats.csv');
@@ -962,8 +962,8 @@ test('recordIntegrationStats prefers PR round-resolution comments for final impl
     assert.equal(branch, 'mission/task-2000');
     assert.equal(token, 'token');
     return [
-      { kind: 'issue-comment', user: 'qwen', body: '## Round 1 Resolution Summary' },
-      { kind: 'issue-comment', user: 'qwen', body: '## Round 2 Resolution Summary' },
+      { kind: 'issue-comment', user: 'custom', body: '## Round 1 Resolution Summary' },
+      { kind: 'issue-comment', user: 'custom', body: '## Round 2 Resolution Summary' },
       { kind: 'issue-comment', user: 'claude', body: '## Round 3 Resolution Summary' },
     ];
   });
@@ -975,7 +975,7 @@ test('recordIntegrationStats prefers PR round-resolution comments for final impl
       '---',
       'id: TASK-2000',
       'labels: [ai_sdlc]',
-      'assignee: [qwen]',
+      'assignee: [custom]',
       'status: review',
       '---',
       '',
@@ -983,7 +983,7 @@ test('recordIntegrationStats prefers PR round-resolution comments for final impl
 
     fs.writeFileSync(
       path.join(root, 'docs', 'missions', '2026', 'task-2000', 'review-state.json'),
-      JSON.stringify({ reviewer: 'codex', implementer: 'qwen', round: 3, startedAt: '2026-05-18T10:00:00Z' }, null, 2)
+      JSON.stringify({ reviewer: 'codex', implementer: 'custom', round: 3, startedAt: '2026-05-18T10:00:00Z' }, null, 2)
     );
 
     const csvFile = path.join(root, 'workflow', 'data', 'stats.csv');
@@ -1206,7 +1206,7 @@ test('recordIntegrationStats prefers PR comments over branch history for final i
         status: 0,
         stdout: [
           'mission/task-2000: task-2000',
-          'backlog(task-2000): transition to active and implementer=qwen',
+          'backlog(task-2000): transition to active and implementer=custom',
         ].join('\n'),
         stderr: '',
       };
@@ -1220,7 +1220,7 @@ test('recordIntegrationStats prefers PR comments over branch history for final i
       '---',
       'id: TASK-2000',
       'labels: [ai_sdlc]',
-      'assignee: [qwen]',
+      'assignee: [custom]',
       'status: review',
       '---',
       '',
@@ -1234,7 +1234,7 @@ test('recordIntegrationStats prefers PR comments over branch history for final i
       date: '2026-05-18',
     });
 
-    // PR comments (claude) should take precedence over branch history (qwen)
+    // PR comments (claude) should take precedence over branch history (custom)
     assert.equal(result.row.implementer, 'claude');
     assert.equal(result.metadataSource.implementer, 'pr-comments');
   } finally {
@@ -1335,9 +1335,9 @@ test('task-1301: renderRangeStatsReport counts unique missions when a mission ha
   // task-alpha has 3 stage rows (draft, active, review) — should count as 1 mission
   // task-beta has 2 stage rows (active, review) — should count as 1 mission
   const rows = [
-    { date: '2026-06-10', mission: 'task-alpha', classification: 'ai_sdlc', implementer: 'qwen', pr_fix_rounds: '0', stage: 'draft' },
-    { date: '2026-06-10', mission: 'task-alpha', classification: 'ai_sdlc', implementer: 'qwen', pr_fix_rounds: '0', stage: 'active' },
-    { date: '2026-06-10', mission: 'task-alpha', classification: 'ai_sdlc', implementer: 'qwen', pr_fix_rounds: '1', stage: 'review' },
+    { date: '2026-06-10', mission: 'task-alpha', classification: 'ai_sdlc', implementer: 'custom', pr_fix_rounds: '0', stage: 'draft' },
+    { date: '2026-06-10', mission: 'task-alpha', classification: 'ai_sdlc', implementer: 'custom', pr_fix_rounds: '0', stage: 'active' },
+    { date: '2026-06-10', mission: 'task-alpha', classification: 'ai_sdlc', implementer: 'custom', pr_fix_rounds: '1', stage: 'review' },
     { date: '2026-06-10', mission: 'task-beta', classification: 'user_value', implementer: 'codex', pr_fix_rounds: '0', stage: 'active' },
     { date: '2026-06-10', mission: 'task-beta', classification: 'user_value', implementer: 'codex', pr_fix_rounds: '2', stage: 'review' },
   ];
@@ -1345,21 +1345,21 @@ test('task-1301: renderRangeStatsReport counts unique missions when a mission ha
   const plain = require('../lib/core/fmt').stripAnsi(report);
   assert.match(plain, /2\s+1\s+1/); // 2 missions total, 1 user_value, 1 ai_sdlc
   assert.match(plain, /codex\s+1\s+2\.00/); // 1 unique codex mission with pr_fix_rounds=2
-  assert.match(plain, /qwen \(opencode\)\s+1\s+1\.00/); // 1 unique qwen mission with highest pr_fix_rounds=1
+  assert.match(plain, /\bcustom\s+1\s+1\.00/); // 1 unique custom mission with highest pr_fix_rounds=1
 });
 
 test('task-1314: renderRangeStatsReport counts same mission separately across repos', () => {
   const rows = [
-    { date: '2026-06-10', repo: 'visualboard', mission: 'task-alpha', classification: 'ai_sdlc', implementer: 'qwen', pr_fix_rounds: '0', stage: 'draft' },
-    { date: '2026-06-10', repo: 'visualboard', mission: 'task-alpha', classification: 'ai_sdlc', implementer: 'qwen', pr_fix_rounds: '1', stage: 'review' },
+    { date: '2026-06-10', repo: 'visualboard', mission: 'task-alpha', classification: 'ai_sdlc', implementer: 'custom', pr_fix_rounds: '0', stage: 'draft' },
+    { date: '2026-06-10', repo: 'visualboard', mission: 'task-alpha', classification: 'ai_sdlc', implementer: 'custom', pr_fix_rounds: '1', stage: 'review' },
     { date: '2026-06-10', repo: 'parallix', mission: 'task-alpha', classification: 'user_value', implementer: 'codex', pr_fix_rounds: '2', stage: 'draft' },
     { date: '2026-06-10', repo: 'parallix', mission: 'task-alpha', classification: 'user_value', implementer: 'codex', pr_fix_rounds: '3', stage: 'review' },
   ];
   const report = stats.renderRangeStatsReport(rows, { from: '2026-06-10', to: '2026-06-10' });
   const plain = require('../lib/core/fmt').stripAnsi(report);
   assert.match(plain, /2\s+1\s+1/); // two repo-distinct missions with the same slug
-  assert.match(plain, /codex\s+1\s+3\.00/); // repo-distinct qwen/codex rows stay separate
-  assert.match(plain, /qwen \(opencode\)\s+1\s+1\.00/);
+  assert.match(plain, /codex\s+1\s+3\.00/); // repo-distinct custom/codex rows stay separate
+  assert.match(plain, /\bcustom\s+1\s+1\.00/);
 });
 
 // task-1318: review rows keep the MISSION implementer for grouping while
@@ -1456,11 +1456,11 @@ function writeReviewEvent(root, slug, { type, round, actor, verdict, timestamp, 
 test('deriveFixRoundsFromReviewEvents counts request-changes rounds resolved by the final implementer (task-1318)', () => {
   const root = createRepoFixture();
   try {
-    writeReviewEvent(root, 'task-3000', { type: 'reviewer_outcome', round: 1, actor: 'qwen', verdict: 'request-changes' });
+    writeReviewEvent(root, 'task-3000', { type: 'reviewer_outcome', round: 1, actor: 'custom', verdict: 'request-changes' });
     writeReviewEvent(root, 'task-3000', { type: 'implementer_disposition', round: 1, actor: 'codex' });
     writeReviewEvent(root, 'task-3000', { type: 'reviewer_outcome', round: 2, actor: 'claude', verdict: 'request-changes' });
     writeReviewEvent(root, 'task-3000', { type: 'implementer_disposition', round: 2, actor: 'codex' });
-    writeReviewEvent(root, 'task-3000', { type: 'reviewer_outcome', round: 3, actor: 'qwen', verdict: 'approve' });
+    writeReviewEvent(root, 'task-3000', { type: 'reviewer_outcome', round: 3, actor: 'custom', verdict: 'approve' });
 
     const derived = stats._internals.deriveFixRoundsFromReviewEvents('task-3000', root);
     assert.ok(derived);
@@ -1475,20 +1475,20 @@ test('deriveFixRoundsFromReviewEvents counts request-changes rounds resolved by 
 test('deriveFixRoundsFromReviewEvents attributes a mid-round handoff to the LATEST disposition (task-1318)', () => {
   const root = createRepoFixture();
   try {
-    // Round 2 has a mid-round handoff: qwen responds first, then claude takes
+    // Round 2 has a mid-round handoff: custom responds first, then claude takes
     // over and actually resolves the round. The round must be owned by claude
-    // (latest disposition), not qwen — otherwise the fix-round count and final
+    // (latest disposition), not custom — otherwise the fix-round count and final
     // implementer are both wrong.
     writeReviewEvent(root, 'task-3002', { type: 'reviewer_outcome', round: 1, actor: 'codex', verdict: 'request-changes' });
-    writeReviewEvent(root, 'task-3002', { type: 'implementer_disposition', round: 1, actor: 'qwen', timestamp: '2026-06-16T01:00:00.000Z' });
+    writeReviewEvent(root, 'task-3002', { type: 'implementer_disposition', round: 1, actor: 'custom', timestamp: '2026-06-16T01:00:00.000Z' });
     writeReviewEvent(root, 'task-3002', { type: 'reviewer_outcome', round: 2, actor: 'codex', verdict: 'request-changes' });
-    writeReviewEvent(root, 'task-3002', { type: 'implementer_disposition', round: 2, actor: 'qwen', timestamp: '2026-06-16T02:00:00.000Z', seq: 1 });
+    writeReviewEvent(root, 'task-3002', { type: 'implementer_disposition', round: 2, actor: 'custom', timestamp: '2026-06-16T02:00:00.000Z', seq: 1 });
     writeReviewEvent(root, 'task-3002', { type: 'implementer_disposition', round: 2, actor: 'claude', timestamp: '2026-06-16T02:30:00.000Z', seq: 2 });
     writeReviewEvent(root, 'task-3002', { type: 'reviewer_outcome', round: 3, actor: 'codex', verdict: 'approve' });
 
     const derived = stats._internals.deriveFixRoundsFromReviewEvents('task-3002', root);
     assert.equal(derived.implementer, 'claude', 'final implementer is the latest round-2 responder');
-    // claude owns round 2 (its request-changes counts); round 1 was qwen's and is
+    // claude owns round 2 (its request-changes counts); round 1 was custom's and is
     // excluded from claude's count.
     assert.equal(derived.prFixRounds, 1);
   } finally {
@@ -1501,9 +1501,9 @@ test('deriveImplementerAndFixRounds prefers the review event store over other so
   try {
     const taskFile = path.join(root, 'backlog', 'tasks', 'task-3000 - Example.md');
     fs.writeFileSync(taskFile, ['---', 'id: TASK-3000', 'labels: [ai_sdlc]', 'assignee: [codex]', 'status: review', '---', ''].join('\n'));
-    writeReviewEvent(root, 'task-3000', { type: 'reviewer_outcome', round: 1, actor: 'qwen', verdict: 'request-changes' });
+    writeReviewEvent(root, 'task-3000', { type: 'reviewer_outcome', round: 1, actor: 'custom', verdict: 'request-changes' });
     writeReviewEvent(root, 'task-3000', { type: 'implementer_disposition', round: 1, actor: 'codex' });
-    writeReviewEvent(root, 'task-3000', { type: 'reviewer_outcome', round: 2, actor: 'qwen', verdict: 'approve' });
+    writeReviewEvent(root, 'task-3000', { type: 'reviewer_outcome', round: 2, actor: 'custom', verdict: 'approve' });
 
     const info = stats._internals.deriveImplementerAndFixRounds('task-3000', root);
     assert.equal(info.source, 'review-events');
@@ -1517,11 +1517,11 @@ test('deriveImplementerAndFixRounds prefers the review event store over other so
 test('summarizeAgentWindow trusts local ground truth over a stale zero in the CSV (task-1318)', () => {
   const root = createRepoFixture();
   try {
-    writeReviewEvent(root, 'task-3000', { type: 'reviewer_outcome', round: 1, actor: 'qwen', verdict: 'request-changes' });
+    writeReviewEvent(root, 'task-3000', { type: 'reviewer_outcome', round: 1, actor: 'custom', verdict: 'request-changes' });
     writeReviewEvent(root, 'task-3000', { type: 'implementer_disposition', round: 1, actor: 'codex' });
-    writeReviewEvent(root, 'task-3000', { type: 'reviewer_outcome', round: 2, actor: 'qwen', verdict: 'request-changes' });
+    writeReviewEvent(root, 'task-3000', { type: 'reviewer_outcome', round: 2, actor: 'custom', verdict: 'request-changes' });
     writeReviewEvent(root, 'task-3000', { type: 'implementer_disposition', round: 2, actor: 'codex' });
-    writeReviewEvent(root, 'task-3000', { type: 'reviewer_outcome', round: 3, actor: 'qwen', verdict: 'approve' });
+    writeReviewEvent(root, 'task-3000', { type: 'reviewer_outcome', round: 3, actor: 'custom', verdict: 'approve' });
 
     const window = { start: new Date('2026-06-10T00:00:00Z'), end: new Date('2026-06-16T00:00:00Z') };
     const rows = [
@@ -1557,7 +1557,7 @@ test('task-1342: weekly summary total equals user_value + ai_sdlc even with uncl
   for (let i = 0; i < 12; i++) {
     rows.push({
       date: `2026-06-${20 + (i % 5)}`, mission: `task-a${i}`, classification: 'ai_sdlc',
-      implementer: 'qwen', pr_fix_rounds: '1',
+      implementer: 'custom', pr_fix_rounds: '1',
     });
   }
   // 20 missions with empty/null/unrecognized classification
@@ -1580,10 +1580,10 @@ test('task-1342: weekly summary total equals user_value + ai_sdlc even with uncl
 test('task-1342: weekly summary total equals user_value + ai_sdlc + unknown when some missions have invalid classification strings', () => {
   const rows = [
     { date: '2026-06-20', mission: 'task-good1', classification: 'user_value', implementer: 'codex', pr_fix_rounds: '0' },
-    { date: '2026-06-20', mission: 'task-good2', classification: 'ai_sdlc', implementer: 'qwen', pr_fix_rounds: '1' },
+    { date: '2026-06-20', mission: 'task-good2', classification: 'ai_sdlc', implementer: 'custom', pr_fix_rounds: '1' },
     { date: '2026-06-20', mission: 'task-bad1', classification: 'USER_VALUE', implementer: 'claude', pr_fix_rounds: '0' },
     { date: '2026-06-20', mission: 'task-bad2', classification: 'unknown', implementer: 'gemini', pr_fix_rounds: '0' },
-    { date: '2026-06-20', mission: 'task-bad3', classification: null, implementer: 'qwen', pr_fix_rounds: '0' },
+    { date: '2026-06-20', mission: 'task-bad3', classification: null, implementer: 'custom', pr_fix_rounds: '0' },
   ];
 
   const report = stats.renderWeeklyStatsReport(rows, { today: '2026-06-24' });
@@ -1598,10 +1598,10 @@ test('task-1342: weekly summary total equals user_value + ai_sdlc + unknown when
 // task-1342: mixed-agent per-mission phase telemetry regression
 
 test('task-1342: mixed-agent phase report shows — for Usage % when provider is not OpenAI', () => {
-  // Simulate task-1339: Claude started execution, got usage-capped, qwen/opencode
-  // retried with OpenAI tokens, Claude later resumed. The execute phase shows
-  // Claude as implementer but the provider/model came from the OpenAI telemetry
-  // that actually belongs to qwen's session.
+// Simulate task-1339: Claude started execution, got usage-capped, custom/opencode
+    // retried with OpenAI tokens, Claude later resumed. The execute phase shows
+    // Claude as implementer but the provider/model came from the OpenAI telemetry
+    // that actually belongs to custom's session.
   const rows = [
     {
       mission: 'task-1339', stage: 'active', provider: 'openai', model: 'gpt-5.4',
@@ -1627,7 +1627,7 @@ test('task-1342: mixed-agent phase report shows — for Usage % when provider is
 
   // Claude cannot provide token usage (it tracks on $), so Usage % should show
   // — for non-OpenAI providers. Even though the provider column says "openai"
-  // (from the qwen telemetry that bled in), the implementer is claude.
+  // (from the custom telemetry that bled in), the implementer is claude.
   // The key assertion: Usage % column (9th data column) must not show 0 for
   // the execute phase when the implementer is claude.
   const lines = report.split('\n');

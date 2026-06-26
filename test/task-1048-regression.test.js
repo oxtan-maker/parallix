@@ -21,7 +21,7 @@ test('TASK-1048: startReviewLoop does not crash when taskResolution is needed fo
     implementer: 'gemini',
     reviewer: 'codex',
     maxAttempts: 1,
-    eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'qwen'],
+    eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
     dryRun: false,
     log: () => {},
     error: (m) => { throw new Error(m); },
@@ -41,11 +41,11 @@ test('TASK-1048: startReviewLoop does not crash when taskResolution is needed fo
       if (step === 'review') {
         return { agent: 'codex', result: { status: 0 } };
       }
-      // Implementer fallback: gemini -> qwen
+      // Implementer fallback: gemini -> custom
       assert.equal(step, 'act-on-review');
       assert.equal(options.agent, 'gemini');
       assert.deepEqual(options.exclude, ['codex']);
-      return { agent: 'qwen', result: { status: 0 } };
+      return { agent: 'custom', result: { status: 0 } };
     },
     pollForReviewFn: async () => 'CHANGES_REQUESTED',
     pollForDispositionFn: async (prNumber, implementerUser) => {
@@ -63,16 +63,16 @@ test('TASK-1048: startReviewLoop does not crash when taskResolution is needed fo
   });
 
   // Verify the fallback was exercised: disposition was polled for the
-  // fallback agent (qwen), proving taskResolution was in scope at
+  // fallback agent (custom), proving taskResolution was in scope at
   // applyAgentFallbackFn(review.js:959).
-  assert.deepEqual(dispositionPolls, [{ prNumber: 42, implementerUser: 'qwen' }],
+  assert.deepEqual(dispositionPolls, [{ prNumber: 42, implementerUser: 'custom' }],
     'disposition should have been polled for the fallback agent');
   assert.ok(
-    writes.some(w => w.state.implementer === 'qwen'),
+    writes.some(w => w.state.implementer === 'custom'),
     'review state should have been rewritten to the fallback agent'
   );
   assert.ok(
-    assigneeWrites.some(a => a.agent === 'qwen'),
+    assigneeWrites.some(a => a.agent === 'custom'),
     'backlog assignee should have been enforced to the fallback agent'
   );
 

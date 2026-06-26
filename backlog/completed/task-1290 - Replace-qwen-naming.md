@@ -1,14 +1,19 @@
 ---
 id: TASK-1290
 title: Replace qwen naming
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-06-13 18:19'
 updated_date: '2026-06-25 16:47'
-labels: []
+labels: [ai_sdlc]
 dependencies: []
 ordinal: 7750
 ---
+
+## Fallback: PR submitted as human
+
+Original user: custom
+Bootstrap failure reason: No owner token found for human at /home/magnus/code/parallix/.forgejo-local/tokens/human. A token file for an existing user (typically human) is required to bootstrap new agent tokens.
 
 ## Description
 

@@ -23,7 +23,7 @@ test('extractOpencodeTelemetry passes through result.telemetry when present', ()
 test('getOpencodeProviderModel returns correct fallback identity', () => {
   const pm = getOpencodeProviderModel();
   assert.equal(pm.provider, 'opencode');
-  assert.equal(pm.model, 'qwen');
+  assert.equal(pm.model, 'custom');
 });
 
 // Mistral telemetry stub tests (task-1285)

@@ -196,7 +196,7 @@ test('buildIntegrationContext returns local-review-state approval when token mis
   const stateFile = path.join(missionDir, 'review-state.json');
   fs.writeFileSync(stateFile, JSON.stringify({
     reviewer: 'claude',
-    implementer: 'qwen',
+    implementer: 'custom',
     round: 1,
     startedAt: '2026-06-02T13:00:00.000Z',
     phase: 'approved',
@@ -256,7 +256,7 @@ test('buildIntegrationContext requires disposition=APPROVED not just phase=appro
   fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Mission: task-1219\n');
   const stateFile = path.join(missionDir, 'review-state.json');
   fs.writeFileSync(stateFile, JSON.stringify({
-    reviewer: 'claude', implementer: 'qwen', round: 1,
+    reviewer: 'claude', implementer: 'custom', round: 1,
     phase: 'approved', disposition: 'REQUEST_CHANGES'
   }), 'utf8');
   const taskFile = path.join(missionDir, 'tasks', 'task-1219.md');
@@ -291,8 +291,8 @@ test('printIntegrationPreflight accepts buildIntegrationContext local-review-sta
       missionDir: '/tmp/docs/missions/2026/task-1219',
       task: { ok: true, taskFile: '/tmp/task-1219.md' },
       taskStatus: 'review',
-      taskAssignee: 'qwen',
-      forgejoUser: 'qwen',
+      taskAssignee: 'custom',
+      forgejoUser: 'custom',
       taskAssigneeWarning: null,
       pr: { exists: true, state: 'open', merged: false, number: 1219 },
       // This is exactly what buildIntegrationContext sets when local fallback succeeds

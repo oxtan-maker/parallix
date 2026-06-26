@@ -1,0 +1,22 @@
+{
+  "reviewer": "qwen",
+  "implementer": "claude",
+  "round": 4,
+  "startedAt": "2026-06-26T06:46:34.275Z",
+  "phase": "approved",
+  "disposition": "PUSHBACK_ALL",
+  "metadata": {
+    "recordedStageLaunches": {
+      "review:qwen": [
+        "qwen|ses_<id>\\\",\\n|2026-06-26T06:37:13.214Z|2026-06-26T06:39:14.083Z|0",
+        "qwen|ses_...\\\"|2026-06-26T06:41:44.722Z|2026-06-26T06:42:57.147Z|0",
+        "qwen|ses_0fd51d48bffeC9lW82fPW7UIXG|2026-06-26T06:46:35.843Z|2026-06-26T06:48:34.930Z|0"
+      ],
+      "follow-up:claude": [
+        "claude|d8605907-6e82-4f73-92c9-8202f79a6c8d|2026-06-26T06:39:15.741Z|2026-06-26T06:41:42.725Z|0",
+        "claude|d8605907-6e82-4f73-92c9-8202f79a6c8d|2026-06-26T06:42:58.715Z|2026-06-26T06:46:33.824Z|0",
+        "claude|d8605907-6e82-4f73-92c9-8202f79a6c8d|2026-06-26T06:52:04.295Z|2026-06-26T06:54:38.548Z|0"
+      ]
+    }
+  }
+}

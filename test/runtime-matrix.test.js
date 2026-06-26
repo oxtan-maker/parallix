@@ -189,7 +189,7 @@ test('reviewer selection for a codex implementer is unbiased: drawn from remaini
   }, () => {
     const config = {
       steps: {
-        review: { eligible: ['codex', 'claude', 'gemini', 'qwen', 'mistral'], selection: 'random' }
+        review: { eligible: ['codex', 'claude', 'gemini', 'custom', 'mistral'], selection: 'random' }
       }
     };
     const seen = new Set();
@@ -201,7 +201,7 @@ test('reviewer selection for a codex implementer is unbiased: drawn from remaini
     // Unbiased random selection must reach more than one of the remaining agents,
     // and must not be hardwired to claude.
     assert.ok(seen.size > 1, `expected the reviewer to vary across remaining agents, saw: ${[...seen].join(', ')}`);
-    assert.ok(seen.has('gemini') || seen.has('qwen') || seen.has('mistral'),
+    assert.ok(seen.has('gemini') || seen.has('custom') || seen.has('mistral'),
       `expected a non-claude reviewer to be selectable, saw: ${[...seen].join(', ')}`);
   });
   if (previousAgent === undefined) delete process.env.WORKFLOW_AGENT;

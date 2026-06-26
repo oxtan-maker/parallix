@@ -95,7 +95,7 @@ test('startReviewLoop allows explicit same-family reviewer after rejection block
 
   const { exitCode, errors, logs } = await captureExit(() => {
     return startReviewLoop(TEST_SLUG, {
-      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'qwen'],
+      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       implementer: 'claude',
       reviewer: 'claude',
@@ -116,7 +116,7 @@ test('startReviewLoop allows implementer not in eligible agents with explicit re
 
   const { exitCode, errors } = await captureExit(() => {
     return startReviewLoop(TEST_SLUG, {
-      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'qwen'],
+      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       implementer: 'gpt4',
       reviewer: 'codex',
@@ -144,7 +144,7 @@ test('startReviewLoop fails for unsupported reviewer', async () => {
 
   const { exitCode, errors } = await captureExit(() => {
     return startReviewLoop(TEST_SLUG, {
-      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'qwen'],
+      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       implementer: 'claude',
       reviewer: 'gpt4',
@@ -194,7 +194,7 @@ test('startReviewLoop defaults to autonomous when no implementer and no persiste
 
   const { exitCode, errors, logs } = await captureExit(() => {
     return startReviewLoop(TEST_SLUG, {
-      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'qwen'],
+      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       readReviewStateFn: () => null,
       writeReviewStateFn: () => {},
@@ -202,8 +202,8 @@ test('startReviewLoop defaults to autonomous when no implementer and no persiste
       dryRun: true,
       workflowLauncherStatusFn: () => ({ supported: true }),
       buildAutonomousReviewMatrixFn: () => ({
-        agents: ['codex', 'claude', 'gemini', 'qwen'],
-        launchers: { codex: { supported: true }, claude: { supported: true }, gemini: { supported: true }, qwen: { supported: true } }
+        agents: ['codex', 'claude', 'gemini', 'custom'],
+        launchers: { codex: { supported: true }, claude: { supported: true }, gemini: { supported: true }, custom: { supported: true } }
       }),
       selectAgentFn: () => { throw new Error('no reviewer available'); },
       buildReviewPromptFn: () => 'review prompt',
@@ -228,7 +228,7 @@ test('startReviewLoop reset path removes state file', async () => {
 
   const { exitCode } = await captureExit(() => {
     return startReviewLoop(TEST_SLUG, {
-      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'qwen'],
+      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       implementer: 'claude',
       reviewer: 'codex',
@@ -251,7 +251,7 @@ test('startReviewLoop dryRun path skips agent launch', async () => {
 
   const { exitCode } = await captureExit(() => {
     return startReviewLoop(TEST_SLUG, {
-      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'qwen'],
+      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       implementer: 'claude',
       reviewer: 'codex',
@@ -433,7 +433,7 @@ test('startReviewLoop handles reviewer launcher fallback', async () => {
 
   // Case 1: auto-derived reviewer blocked, falls back successfully
   await startReviewLoop(TEST_SLUG, {
-      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'qwen'],
+      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     implementer: 'claude',
     dryRun: true,
@@ -451,7 +451,7 @@ test('startReviewLoop handles reviewer launcher fallback', async () => {
     },
     formatMatrixSummaryFn: () => [],
     buildAutonomousReviewMatrixFn: () => ({
-      agents: ['codex', 'claude', 'gemini', 'qwen'],
+      agents: ['codex', 'claude', 'gemini', 'custom'],
       launchers: { codex: { supported: false, detail: 'mock' }, gemini: { supported: true, detail: 'mock' } }
     }),
     buildReviewPromptFn: () => 'review prompt',
@@ -464,7 +464,7 @@ test('startReviewLoop handles reviewer launcher fallback', async () => {
   logs.length = 0;
   errors.length = 0;
   await startReviewLoop(TEST_SLUG, {
-      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'qwen'],
+      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     implementer: 'claude',
     dryRun: true,
@@ -481,7 +481,7 @@ test('startReviewLoop handles reviewer launcher fallback', async () => {
     },
     formatMatrixSummaryFn: () => [],
     buildAutonomousReviewMatrixFn: () => ({
-      agents: ['codex', 'claude', 'gemini', 'qwen'],
+      agents: ['codex', 'claude', 'gemini', 'custom'],
       launchers: { codex: { supported: false, detail: 'mock' } }
     }),
     buildReviewPromptFn: () => 'review prompt',
@@ -500,7 +500,7 @@ test('startReviewLoop handles Forgejo bootstrap failure', async () => {
   const exitCodes = [];
 
   await startReviewLoop(TEST_SLUG, {
-      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'qwen'],
+      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     implementer: 'claude',
     reviewer: 'codex',
@@ -523,7 +523,7 @@ test('startReviewLoop handles missing PR', async () => {
   const exitCodes = [];
 
   await startReviewLoop(TEST_SLUG, {
-      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'qwen'],
+      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     implementer: 'claude',
     reviewer: 'codex',
@@ -583,7 +583,7 @@ test('startReviewLoop full loop success and exit cases', async () => {
 
   // Case 1: Max attempts reached
   await startReviewLoop(TEST_SLUG, {
-      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'qwen'],
+      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }), ...baseOpts });
   assert.ok(logs.some(l => l.includes('reached 5 attempts')), 'Should stop at max attempts');
   assert.equal(rebaseCalls.length, 5, 'Should rebase before each review round');
@@ -591,7 +591,7 @@ test('startReviewLoop full loop success and exit cases', async () => {
   // Case 2: Reviewer approves
   logs.length = 0;
   await startReviewLoop(TEST_SLUG, {
-      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'qwen'],
+      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     ...baseOpts,
     pollForReviewFn: async () => 'APPROVED'
@@ -601,7 +601,7 @@ test('startReviewLoop full loop success and exit cases', async () => {
   // Case 3: Implementer pushes back
   logs.length = 0;
   await startReviewLoop(TEST_SLUG, {
-      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'qwen'],
+      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     ...baseOpts,
     pollForDispositionFn: async () => 'PUSHBACK_ALL'
@@ -611,7 +611,7 @@ test('startReviewLoop full loop success and exit cases', async () => {
   // Case 4: Implementer blocked
   logs.length = 0;
   await startReviewLoop(TEST_SLUG, {
-      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'qwen'],
+      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     ...baseOpts,
     pollForDispositionFn: async () => 'BLOCKED'
@@ -710,7 +710,7 @@ test('polling configuration logic', async () => {
   
   const logs = [];
   await startReviewLoop(TEST_SLUG, {
-      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'qwen'],
+      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     implementer: 'claude',
     reviewer: 'codex',
@@ -732,7 +732,7 @@ test('polling configuration logic', async () => {
   // Test explicit poll timeout
   logs.length = 0;
   await startReviewLoop(TEST_SLUG, {
-      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'qwen'],
+      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     implementer: 'claude',
     reviewer: 'codex',
@@ -754,7 +754,7 @@ test('startReviewLoop explicit same-family path covers all four families', async
   for (const agent of ['codex', 'claude', 'gemini']) {
     const { exitCode, errors, logs } = await captureExit(() => {
       return startReviewLoop(TEST_SLUG, {
-      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'qwen'],
+      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
         implementer: agent,
         reviewer: agent,
@@ -781,7 +781,7 @@ test('startReviewLoop same-family explicit reviewer logs the agent name', async 
 
   const { exitCode, errors, logs } = await captureExit(() => {
     return startReviewLoop(TEST_SLUG, {
-      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'qwen'],
+      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       readReviewStateFn: () => null,
       writeReviewStateFn: () => {},
@@ -809,7 +809,7 @@ test('startReviewLoop rebases immediately before each reviewer round', async () 
   const dispositions = ['CHANGES_MADE'];
 
   await startReviewLoop(TEST_SLUG, {
-    eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'qwen'],
+    eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     implementer: 'claude',
     reviewer: 'codex',
@@ -863,7 +863,7 @@ test('startReviewLoop continue consumes existing fixing disposition before next 
 
   await startReviewLoop(TEST_SLUG, {
     continue: true,
-    eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'qwen'],
+    eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     dryRun: false,
     workflowLauncherStatusFn: () => ({ supported: true }),
@@ -925,7 +925,7 @@ test('startReviewLoop isContinue waits long enough for delayed existing fixing d
   try {
     await startReviewLoop(TEST_SLUG, {
       isContinue: true,
-      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'qwen'],
+      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       dryRun: false,
       workflowLauncherStatusFn: () => ({ supported: true }),
@@ -985,7 +985,7 @@ test('startReviewLoop continue stops on terminal existing fixing dispositions', 
 
     await startReviewLoop(TEST_SLUG, {
       continue: true,
-      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'qwen'],
+      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       dryRun: false,
       workflowLauncherStatusFn: () => ({ supported: true }),
@@ -1046,7 +1046,7 @@ test('startReviewLoop continue reviewing phase skips only when existing review i
 
     await startReviewLoop(TEST_SLUG, {
       continue: true,
-      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'qwen'],
+      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       dryRun: false,
       workflowLauncherStatusFn: () => ({ supported: true }),
@@ -1176,7 +1176,7 @@ test('startReviewLoop aborts on shared-file rebase conflicts before reviewer lau
   let reviewerLaunched = false;
 
   await startReviewLoop(TEST_SLUG, {
-    eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'qwen'],
+    eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     implementer: 'claude',
     reviewer: 'codex',
@@ -1227,7 +1227,7 @@ test('startReviewLoop aborts on non-shared-file rebase failure (e.g. push stale 
   let exitCode = null;
 
   await startReviewLoop(TEST_SLUG, {
-    eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'qwen'],
+    eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     implementer: 'claude',
     reviewer: 'codex',
@@ -1786,7 +1786,7 @@ test('applyAgentFallback returns the original agent when startAgent did not fall
   const enforceTaskAssigneeFn = () => { throw new Error('enforceTaskAssignee should not run when no fallback'); };
 
   const { ReviewState } = require('../lib/review/review-state');
-  const state = new ReviewState('task-test-fallback', { reviewer: 'codex', implementer: 'qwen', round: 1 });
+  const state = new ReviewState('task-test-fallback', { reviewer: 'codex', implementer: 'custom', round: 1 });
 
   const next = applyAgentFallback({
     role: 'reviewer',
@@ -1808,7 +1808,7 @@ test('applyAgentFallback rewrites reviewer identity and persists state but does 
   const { applyAgentFallback } = require('../lib/review/review');
   const { ReviewState } = require('../lib/review/review-state');
   const writes = [];
-  const state = new ReviewState('task-test-fallback', { reviewer: 'claude', implementer: 'qwen', round: 2 });
+  const state = new ReviewState('task-test-fallback', { reviewer: 'claude', implementer: 'custom', round: 2 });
 
   const next = applyAgentFallback({
     role: 'reviewer',
@@ -1828,7 +1828,7 @@ test('applyAgentFallback rewrites reviewer identity and persists state but does 
   assert.equal(writes[0].slug, 'task-test-fallback');
   assert.equal(writes[0].worktree, '/tmp/visualBoard-task-test-fallback');
   assert.equal(writes[0].state.reviewer, 'codex', 'persisted reviewer must be the fallback family');
-  assert.equal(writes[0].state.implementer, 'qwen', 'implementer must be unchanged');
+  assert.equal(writes[0].state.implementer, 'custom', 'implementer must be unchanged');
   assert.equal(writes[0].state.round, 2);
 });
 
@@ -1836,11 +1836,11 @@ test('applyAgentFallback rewrites implementer identity on fallback without touch
   const { applyAgentFallback } = require('../lib/review/review');
   const { ReviewState } = require('../lib/review/review-state');
   const writes = [];
-  const state = new ReviewState('task-test-fallback', { reviewer: 'codex', implementer: 'qwen', round: 3 });
+  const state = new ReviewState('task-test-fallback', { reviewer: 'codex', implementer: 'custom', round: 3 });
 
   const next = applyAgentFallback({
     role: 'implementer',
-    original: 'qwen',
+    original: 'custom',
     launchResult: { agent: 'gemini' },
     state,
     slug: 'task-test-fallback',
@@ -1861,7 +1861,7 @@ test('applyAgentFallback enforces implementer in backlog when implementer falls 
   const { ReviewState } = require('../lib/review/review-state');
   const writes = [];
   const enforced = [];
-  const state = new ReviewState('task-test-fallback', { reviewer: 'qwen', implementer: 'claude', round: 2 });
+  const state = new ReviewState('task-test-fallback', { reviewer: 'custom', implementer: 'claude', round: 2 });
 
   const next = applyAgentFallback({
     role: 'implementer',
@@ -1883,7 +1883,7 @@ test('applyAgentFallback enforces implementer in backlog when implementer falls 
 test('applyAgentFallback handles a missing launchResult gracefully (catastrophic launch failure)', () => {
   const { applyAgentFallback } = require('../lib/review/review');
   const { ReviewState } = require('../lib/review/review-state');
-  const state = new ReviewState('task-test-fallback', { reviewer: 'codex', implementer: 'qwen', round: 1 });
+  const state = new ReviewState('task-test-fallback', { reviewer: 'codex', implementer: 'custom', round: 1 });
   const next = applyAgentFallback({
     role: 'reviewer',
     original: 'codex',
@@ -1907,7 +1907,7 @@ test('applyAgentFallback preserves the original roundStartedAt when rewriting st
   const { ReviewState } = require('../lib/review/review-state');
   const writes = [];
   const roundStartedAt = '2026-04-27T17:00:00.000Z';
-  const state = new ReviewState('task-test-fallback', { reviewer: 'claude', implementer: 'qwen', round: 4, startedAt: roundStartedAt });
+  const state = new ReviewState('task-test-fallback', { reviewer: 'claude', implementer: 'custom', round: 4, startedAt: roundStartedAt });
 
   const next = applyAgentFallback({
     role: 'reviewer',
@@ -1938,10 +1938,10 @@ test('startReviewLoop polls for the fallback reviewer identity after a limit-hit
 
   await startReviewLoop('task-1028-review-fallback', {
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
-    implementer: 'qwen',
+    implementer: 'custom',
     reviewer: 'claude',
     maxAttempts: 1,
-    eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'qwen'],
+    eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
     worktree: '/tmp/visualBoard-task-1028',
     maybeUpdateGraphifyBeforeReviewFn: () => ({ updated: false, skipped: true }),
     workflowLauncherStatusFn: () => ({ supported: true, detail: process.execPath }),
@@ -1958,13 +1958,13 @@ test('startReviewLoop polls for the fallback reviewer identity after a limit-hit
     startAgentFn: async (step, options) => {
       if (step === 'review') {
         assert.equal(options.agent, 'claude');
-        assert.deepEqual(options.exclude, ['qwen']);
+        assert.deepEqual(options.exclude, ['custom']);
         return { agent: 'codex', result: { status: 0 } };
       }
       assert.equal(step, 'act-on-review');
-      assert.equal(options.agent, 'qwen');
+      assert.equal(options.agent, 'custom');
       assert.deepEqual(options.exclude, ['codex']);
-      return { agent: 'qwen', result: { status: 0 } };
+      return { agent: 'custom', result: { status: 0 } };
     },
     pollForReviewFn: async (prNumber, reviewerUser) => {
       reviewPolls.push({ prNumber, reviewerUser });
@@ -1994,7 +1994,7 @@ test('startReviewLoop polls for the fallback implementer identity after a limit-
     implementer: 'claude',
     reviewer: 'codex',
     maxAttempts: 1,
-    eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'qwen'],
+    eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
     worktree: '/tmp/visualBoard-task-1028',
     maybeUpdateGraphifyBeforeReviewFn: () => ({ updated: false, skipped: true }),
     workflowLauncherStatusFn: () => ({ supported: true, detail: process.execPath }),
@@ -2346,7 +2346,7 @@ test('startReviewLoop handles reviewer launch failure', async () => {
   const exitCodes = [];
 
   await startReviewLoop(TEST_SLUG, {
-      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'qwen'],
+      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     implementer: 'claude',
     reviewer: 'codex',
@@ -2376,7 +2376,7 @@ test('startReviewLoop handles reviewer polling timeout with recovery', async () 
   let launchCount = 0;
 
   await startReviewLoop(TEST_SLUG, {
-      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'qwen'],
+      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     implementer: 'claude',
     reviewer: 'codex',
@@ -2414,7 +2414,7 @@ test('startReviewLoop persists reviewer retry count before recovery relaunch', a
   let reviewPolls = 0;
 
   await startReviewLoop(TEST_SLUG, {
-    eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'qwen'],
+    eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     implementer: 'claude',
     reviewer: 'codex',
@@ -2464,7 +2464,7 @@ test('startReviewLoop persists implementer retry count before recovery relaunch'
   let dispositionPolls = 0;
 
   await startReviewLoop(TEST_SLUG, {
-    eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'qwen'],
+    eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     implementer: 'claude',
     reviewer: 'codex',
@@ -2520,7 +2520,7 @@ test('startReviewLoop does not crash with ReferenceError when taskResolution is 
 
   const { exitCode } = await captureExit(() => {
     return startReviewLoop(TEST_SLUG, {
-      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'qwen'],
+      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
       implementer: 'codex',
       reviewer: 'claude',
       dryRun: false,
@@ -2561,7 +2561,7 @@ test('startReviewLoop passes taskResolution to applyAgentFallback for both revie
 
   const { exitCode } = await captureExit(() => {
     return startReviewLoop(TEST_SLUG, {
-      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'qwen'],
+      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
       implementer: 'codex',
       reviewer: 'claude',
       dryRun: false,
@@ -2609,9 +2609,9 @@ test('startReviewLoop repairs a persisted rewiewing typo and resumes on the revi
       dryRun: false,
       isContinue: true,
       implementer: 'codex',
-      reviewer: 'qwen',
+      reviewer: 'custom',
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
-      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'qwen'],
+      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
       getPrStatusFn: () => ({ exists: true, state: 'open', number: 188 }),
       forgejoAvailableFn: async () => true,
       workflowLauncherStatusFn: () => ({ supported: true }),
@@ -2619,7 +2619,7 @@ test('startReviewLoop repairs a persisted rewiewing typo and resumes on the revi
       maybeUpdateGraphifyBeforeReviewFn: () => {},
       readTokenFn: () => 'fake-token',
       readReviewStateFn: () => ({
-        reviewer: 'qwen',
+        reviewer: 'custom',
         implementer: 'codex',
         round: 1,
         startedAt: '2026-05-25T11:07:58.617Z',
@@ -2632,7 +2632,7 @@ test('startReviewLoop repairs a persisted rewiewing typo and resumes on the revi
       consumeImplementerArtifactsFn: async () => ({ consumed: false }),
       startAgentFn: async (mode) => {
         launches.push(mode);
-        return { agent: mode === 'review' ? 'qwen' : 'codex' };
+        return { agent: mode === 'review' ? 'custom' : 'codex' };
       },
       pollForReviewFn: async () => {
         reviewPolls += 1;
@@ -2655,7 +2655,7 @@ test('startReviewLoop does not crash with ReferenceError in dry-run mode', async
 
   const { exitCode } = await captureExit(() => {
     return startReviewLoop(TEST_SLUG, {
-      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'qwen'],
+      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
       implementer: 'codex',
       reviewer: 'claude',
       dryRun: true,
@@ -2789,7 +2789,7 @@ test('startReviewLoop resolves task file from the mission worktree (regression)'
   let resolvedWorktree = null;
 
   await startReviewLoop(TEST_SLUG, {
-      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'qwen'],
+      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
     implementer: 'claude',
     reviewer: 'codex',
     dryRun: false,
@@ -3177,7 +3177,7 @@ test('submitReviewRound skips Forgejo and updates review-state only when provide
   const prevForgejo = process.env.FORGEJO_USER;
   const prevAgent = process.env.WORKFLOW_AGENT;
   process.env.FORGEJO_USER = 'codex';
-  process.env.WORKFLOW_AGENT = 'qwen';
+  process.env.WORKFLOW_AGENT = 'custom';
 
   try {
     submitReviewRound('task-test', 'approve', 'Test approval', {
@@ -3208,7 +3208,7 @@ test('submitReviewRound skips Forgejo and updates review-state only when provide
   assert.ok(stateWritten, 'writeReviewStateFn must be called');
   assert.equal(stateWritten.disposition, 'APPROVED');
   assert.equal(stateWritten.phase, 'approved');
-  assert.equal(stateWritten.implementer, 'qwen');
+  assert.equal(stateWritten.implementer, 'custom');
 
   // Verify backlog task was transitioned
   assert.ok(backlogTransitioned, 'transitionTaskFn must be called');
@@ -3301,7 +3301,7 @@ test('startReviewLoop persists PUSHBACK_ALL disposition before returning', async
     applyAgentFallbackFn: (args) => args.original,
     buildCompactReviewPromptFn: () => 'review prompt',
     buildCompactActOnReviewPromptFn: () => 'act-on-review prompt',
-    eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'qwen'],
+    eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
   });
 
   const terminalWrite = stateWrites[stateWrites.length - 1];
@@ -3340,7 +3340,7 @@ test('startReviewLoop persists BLOCKED disposition before returning', async () =
     applyAgentFallbackFn: (args) => args.original,
     buildCompactReviewPromptFn: () => 'review prompt',
     buildCompactActOnReviewPromptFn: () => 'act-on-review prompt',
-    eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'qwen'],
+    eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
   });
 
   const terminalWrite = stateWrites[stateWrites.length - 1];
@@ -3379,7 +3379,7 @@ test('startReviewLoop persists PARKED disposition before returning', async () =>
     applyAgentFallbackFn: (args) => args.original,
     buildCompactReviewPromptFn: () => 'review prompt',
     buildCompactActOnReviewPromptFn: () => 'act-on-review prompt',
-    eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'qwen'],
+    eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
   });
 
   const terminalWrite = stateWrites[stateWrites.length - 1];
@@ -3418,7 +3418,7 @@ test('startReviewLoop persists CHANGES_MADE disposition before continuing', asyn
     applyAgentFallbackFn: (args) => args.original,
     buildCompactReviewPromptFn: () => 'review prompt',
     buildCompactActOnReviewPromptFn: () => 'act-on-review prompt',
-    eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'qwen'],
+    eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
   });
 
   const lastWrite = stateWrites[stateWrites.length - 1];
@@ -3458,7 +3458,7 @@ test('startReviewLoop consumes reviewer and implementer artifacts before polling
     applyAgentFallbackFn: (args) => args.original,
     buildCompactReviewPromptFn: () => 'review prompt',
     buildCompactActOnReviewPromptFn: () => 'act-on-review prompt',
-    eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'qwen'],
+    eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
   });
 
   assert.equal(reviewPolls, 0, 'review polling should be skipped when reviewer artifacts are present');
@@ -3512,7 +3512,7 @@ test('consumeReviewerArtifacts deletes artifacts only after successful comment a
     ['/tmp/task-089-review-verdict.txt', 'approve\n'],
   ]);
 
-  const result = await consumeReviewerArtifacts('task-089', 'qwen', {
+  const result = await consumeReviewerArtifacts('task-089', 'custom', {
     forgejoEnabled: true,
     tmpDir: '/tmp',
     readArtifactFn: (filePath) => artifactMap.has(filePath) ? artifactMap.get(filePath) : null,
@@ -3574,7 +3574,7 @@ test('consumeReviewerArtifacts proves persist-before-mirror ordering', async () 
     ['/tmp/task-089-review-verdict.txt', 'approve\n'],
   ]);
 
-  const result = await consumeReviewerArtifacts('task-089', 'qwen', {
+  const result = await consumeReviewerArtifacts('task-089', 'custom', {
     forgejoEnabled: true,
     tmpDir: '/tmp',
     readArtifactFn: (filePath) => artifactMap.has(filePath) ? artifactMap.get(filePath) : null,
@@ -3711,7 +3711,7 @@ test('startReviewLoop returns early with guidance when task is active and no PR 
   let handoffCalled = false;
   const { exitCode, errors, logs } = await captureExit(() => {
     return startReviewLoop(TEST_SLUG, {
-      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'qwen'],
+      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       getTaskStatusFn: () => 'active',
       getTaskImplementerFn: () => 'codex',
@@ -3740,7 +3740,7 @@ test('startReviewLoop returns early with guidance when task maps to virtual acti
 
   const { exitCode, logs } = await captureExit(() => {
     return startReviewLoop(TEST_SLUG, {
-      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'qwen'],
+      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       getTaskStatusFn: () => 'in-progress',
       toVirtualFn: (status) => status === 'in-progress' ? 'active' : status,
@@ -3771,7 +3771,7 @@ test('startReviewLoop self-heals via handoff and recovers when task is review an
   let prCalls = 0;
   const { exitCode, errors, logs } = await captureExit(() => {
     return startReviewLoop(TEST_SLUG, {
-      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'qwen'],
+      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       getTaskStatusFn: () => 'review',
       getTaskImplementerFn: () => 'codex',
@@ -3812,7 +3812,7 @@ test('startReviewLoop emits --push fallback (not --submit) when handoff fails fo
 
   const { exitCode, errors } = await captureExit(() => {
     return startReviewLoop(TEST_SLUG, {
-      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'qwen'],
+      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       getTaskStatusFn: () => 'review',
       getTaskImplementerFn: () => 'codex',
@@ -3839,7 +3839,7 @@ test('startReviewLoop emits --push fallback when handoff ok but no PR appears (c
 
   const { exitCode, errors } = await captureExit(() => {
     return startReviewLoop(TEST_SLUG, {
-      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'qwen'],
+      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       getTaskStatusFn: () => 'approved',
       getTaskImplementerFn: () => 'codex',
@@ -3867,7 +3867,7 @@ test('startReviewLoop short-circuits on gatekeeper pushback without launching re
   let reviewerLaunched = false;
   const { exitCode, errors } = await captureExit(() => {
     return startReviewLoop(TEST_SLUG, {
-      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'qwen'],
+      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       getTaskStatusFn: () => 'review',
       getTaskImplementerFn: () => 'codex',
@@ -3894,7 +3894,7 @@ test('startReviewLoop never self-heals in dry-run (crit. 7)', async () => {
   let handoffCalled = false;
   const { logs } = await captureExit(() => {
     return startReviewLoop(TEST_SLUG, {
-      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'qwen'],
+      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       getTaskStatusFn: () => 'review',
       getTaskImplementerFn: () => 'codex',
@@ -3919,7 +3919,7 @@ test('startReviewLoop hard-fails when task cannot be resolved and no PR exists',
 
   const { exitCode, errors, logs } = await captureExit(() => {
     return startReviewLoop(TEST_SLUG, {
-      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'qwen'],
+      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
       resolveTaskFileFn: () => ({ ok: false }),
       getTaskStatusFn: () => null,
       getTaskImplementerFn: () => 'codex',

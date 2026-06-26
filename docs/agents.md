@@ -7,13 +7,13 @@
 | codex   | `codex` |
 | claude  | `claude` |
 | mistral | `vibe` |
-| qwen    | `opencode` |
+| custom    | `opencode` |
 
 All four listed launchers are supported on this workstation. Step eligibility for all workflow steps (`draft`, `active`, `conflict-resolution`, `review`) is controlled by `parallix/config/agents.json`. If a launcher is missing from `PATH`, the harness fails loudly with the exact blocker before launching.
 
-## Tool Calling Workaround (qwen/opencode)
+## Tool Calling Workaround (custom/opencode)
 
-Opencode (qwen agent family) may encounter issues with concurrent tool calls or tool call timeouts during long-running workflow sessions. When working with opencode:
+Opencode (custom agent family) may encounter issues with concurrent tool calls or tool call timeouts during long-running workflow sessions. When working with opencode:
 
 - **Prefer sequential tool calls** over parallel calls for dependent operations — if tool B needs output from tool A, call them separately.
 - **Use `workdir` parameter instead of `cd` chains** — avoid `cd <dir> && command` patterns; always use `workdir` for directory changes.
@@ -27,7 +27,7 @@ Opencode (qwen agent family) may encounter issues with concurrent tool calls or 
 | codex   | `codex exec --sandbox danger-full-access --cd <worktree> <prompt>` with a worktree-local `HOME` under `.workflow/codex-home`; resume uses `codex exec resume <session-id-or---last> <prompt>`; the launcher also seeds `.workflow/codex-home/.codex/config.toml` with the repo-standard trusted posture and copies `.codex/auth.json` so headless review commands can start and keep localhost Forgejo access |
 | claude  | `claude --dangerously-skip-permissions --output-format stream-json --verbose --include-partial-messages -p <prompt>` (cwd=worktree) — uses `--output-format stream-json --verbose --include-partial-messages` to stream real-time JSONL events (tool calls, assistant text chunks) to the operator's terminal via the spawn-tee mechanism. `--include-partial-messages` is required: without it, the assistant event contains the full response at once and no intermediate progress is emitted. Session-id extraction parses the `result` event from stream-json output, falling back to the `claude --resume <id>` regex on plain text. |
 | mistral | `vibe --prompt <prompt> --trust --output text` (cwd=worktree) — **Note: NOT resume-capable in current Vibe version**; session management uses internal state in `~/.vibe/logs/session/` but does not emit a parseable resume hint to stdout/stderr. |
-| qwen    | `opencode run --pure --dangerously-skip-permissions <prompt>` (cwd=worktree); resume uses `-s <session>` when a session id is known or `--continue` when only the family marker is known |
+| custom    | `opencode run --pure --dangerously-skip-permissions <prompt>` (cwd=worktree); resume uses `-s <session>` when a session id is known or `--continue` when only the family marker is known |
 
 ## Launch output watchdog
 
@@ -74,10 +74,10 @@ Eligibility is controlled by `parallix/config/agents.json`. The default config c
 ```json
 {
   "steps": {
-    "draft": { "eligible": ["codex", "qwen", "mistral"], "selection": "random" },
-    "active": { "eligible": ["codex", "claude", "qwen", "mistral"], "selection": "random" },
+    "draft": { "eligible": ["codex", "custom", "mistral"], "selection": "random" },
+    "active": { "eligible": ["codex", "claude", "custom", "mistral"], "selection": "random" },
     "conflict-resolution": { "eligible": ["claude", "codex", "mistral"], "selection": "random" },
-    "review": { "eligible": ["codex", "claude", "qwen", "mistral"], "selection": "random" }
+    "review": { "eligible": ["codex", "claude", "custom", "mistral"], "selection": "random" }
   }
 }
 ```
@@ -141,7 +141,7 @@ The workflow detects limit-hit messages in agent stdout/stderr and automatically
 
 ### Detection
 
-`parallix/lib/limit-hit.js` ships a regex catalog per agent family (`claude`, `codex`, `qwen`, `mistral`) covering the common shapes:
+`parallix/lib/limit-hit.js` ships a regex catalog per agent family (`claude`, `codex`, `custom`, `mistral`) covering the common shapes:
 - explicit phrases like `Claude usage limit reached`, `weekly limit`, `Quota exceeded`, `RESOURCE_EXHAUSTED`
 - HTTP signals (`429 Too Many Requests`, `rate_limit_exceeded`, `Retry-After: ...`)
 

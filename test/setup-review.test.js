@@ -942,7 +942,7 @@ test('bootstrapReviewSurface non-interactive mode creates agent token via owner 
         repo: 'test-org/test-repo',
         ownerLogin: 'magnus',
         ownerPassword: '',
-        agentPasswords: [{ user: 'qwen', password: '' }],
+        agentPasswords: [{ user: 'custom', password: '' }],
       }, {
         interactive: false,
         requestFn(method, url, requestOptions = {}) {
@@ -953,12 +953,12 @@ test('bootstrapReviewSurface non-interactive mode creates agent token via owner 
             repoCreated = true;
             return { ok: true, statusCode: 201, data: { full_name: 'test-org/test-repo' } };
           }
-          if (method === 'PUT' && url.endsWith('/api/v1/repos/test-org/test-repo/collaborators/qwen')) {
+          if (method === 'PUT' && url.endsWith('/api/v1/repos/test-org/test-repo/collaborators/custom')) {
             return { ok: true, statusCode: 204, data: {} };
           }
-          if (method === 'POST' && url.endsWith('/api/v1/users/qwen/tokens') && requestOptions.token) {
+          if (method === 'POST' && url.endsWith('/api/v1/users/custom/tokens') && requestOptions.token) {
             assert.equal(requestOptions.token, 'owner-pat');
-            return { ok: true, statusCode: 201, data: { sha1: 'qwen-bootstrap-token' } };
+            return { ok: true, statusCode: 201, data: { sha1: 'custom-bootstrap-token' } };
           }
           return { ok: false, statusCode: 500, data: {} };
         },
@@ -968,8 +968,8 @@ test('bootstrapReviewSurface non-interactive mode creates agent token via owner 
 
       assert.equal(result.ok, true, JSON.stringify(result));
       assert.equal(repoCreated, true);
-      assert.equal(fs.readFileSync(path.join(forgejoHome, 'tokens', 'qwen'), 'utf8').trim(), 'qwen-bootstrap-token');
-      assert.ok(logs.some(m => m.includes('Wrote Forgejo token for qwen')));
+      assert.equal(fs.readFileSync(path.join(forgejoHome, 'tokens', 'custom'), 'utf8').trim(), 'custom-bootstrap-token');
+      assert.ok(logs.some(m => m.includes('Wrote Forgejo token for custom')));
       assert.ok(fs.readFileSync(path.join(forgejoHome, 'tokens', 'magnus'), 'utf8').trim() === 'owner-pat');
     } finally {
       if (previousForgejoHome) {
@@ -994,7 +994,7 @@ test('bootstrapReviewSurface non-interactive returns error when no owner token e
         repo: 'test-org/test-repo',
         ownerLogin: 'magnus',
         ownerPassword: '',
-        agentPasswords: [{ user: 'qwen', password: '' }],
+        agentPasswords: [{ user: 'custom', password: '' }],
       }, {
         interactive: false,
       });
@@ -1026,7 +1026,7 @@ test('bootstrapReviewSurface non-interactive reports agent token failure via war
         repo: 'test-org/test-repo',
         ownerLogin: 'magnus',
         ownerPassword: '',
-        agentPasswords: [{ user: 'qwen', password: '' }],
+        agentPasswords: [{ user: 'custom', password: '' }],
       }, {
         interactive: false,
         requestFn(method, url) {
@@ -1036,10 +1036,10 @@ test('bootstrapReviewSurface non-interactive reports agent token failure via war
           if (method === 'POST' && url.endsWith('/api/v1/orgs/test-org/repos')) {
             return { ok: true, statusCode: 201, data: { full_name: 'test-org/test-repo' } };
           }
-          if (method === 'PUT' && url.endsWith('/api/v1/repos/test-org/test-repo/collaborators/qwen')) {
+          if (method === 'PUT' && url.endsWith('/api/v1/repos/test-org/test-repo/collaborators/custom')) {
             return { ok: true, statusCode: 204, data: {} };
           }
-          if (method === 'POST' && url.endsWith('/api/v1/users/qwen/tokens')) {
+          if (method === 'POST' && url.endsWith('/api/v1/users/custom/tokens')) {
             return { ok: false, statusCode: 403, data: { message: 'forbidden' } };
           }
           return { ok: false, statusCode: 500, data: {} };
@@ -1049,8 +1049,8 @@ test('bootstrapReviewSurface non-interactive reports agent token failure via war
 
       assert.equal(result.ok, false);
       assert.equal(result.warnings.length, 1);
-      assert.equal(result.warnings[0].user, 'qwen');
-      assert.match(result.error, /qwen: token creation via owner token failed/);
+      assert.equal(result.warnings[0].user, 'custom');
+      assert.match(result.error, /custom: token creation via owner token failed/);
     } finally {
       if (previousForgejoHome) {
         process.env.FORGEJO_HOME = previousForgejoHome;

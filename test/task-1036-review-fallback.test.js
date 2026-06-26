@@ -61,8 +61,8 @@ test('eligibleAgentsForStep returns all current launchers when review step is mi
   // Object.keys(LAUNCHERS), which now reflects the current supported families.
   const configWithoutReview = {
     steps: {
-      draft: { eligible: ['mistral', 'codex', 'qwen'], selection: 'random' },
-      active: { eligible: ['codex', 'claude', 'mistral', 'qwen'], selection: 'random' }
+      draft: { eligible: ['mistral', 'codex', 'custom'], selection: 'random' },
+      active: { eligible: ['codex', 'claude', 'mistral', 'custom'], selection: 'random' }
     }
   };
   const eligible = eligibleAgentsForStep('review', { config: configWithoutReview });
@@ -74,8 +74,8 @@ test('eligibleAgentsForStep returns all current launchers when review step is mi
 test('eligibleAgentsForStep returns all current launchers when act-on-review step is missing from config (TASK-1036)', () => {
   const configWithoutActOnReview = {
     steps: {
-      draft: { eligible: ['mistral', 'codex', 'qwen'], selection: 'random' },
-      active: { eligible: ['codex', 'claude', 'mistral', 'qwen'], selection: 'random' }
+      draft: { eligible: ['mistral', 'codex', 'custom'], selection: 'random' },
+      active: { eligible: ['codex', 'claude', 'mistral', 'custom'], selection: 'random' }
     }
   };
   const eligible = eligibleAgentsForStep('act-on-review', { config: configWithoutActOnReview });
@@ -112,8 +112,8 @@ test('startAgent review fallback selects mistral when claude hits limit and revi
       // Config without review step — gemini is in the fallback pool
       const configWithoutReview = {
         steps: {
-          draft: { eligible: ['mistral', 'codex', 'qwen'], selection: 'random' },
-          active: { eligible: ['codex', 'claude', 'mistral', 'qwen'], selection: 'random' }
+          draft: { eligible: ['mistral', 'codex', 'custom'], selection: 'random' },
+          active: { eligible: ['codex', 'claude', 'mistral', 'custom'], selection: 'random' }
         }
       };
 
@@ -148,14 +148,14 @@ test('startAgent review fallback selects mistral when claude hits limit and revi
 test('startAgent act-on-review fallback selects mistral when implementer hits limit and act-on-review step is missing (TASK-1036)', async () => {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1036-act-on-review-fallback-'));
   try {
-    const order = ['qwen', 'mistral'];
+    const order = ['custom', 'mistral'];
     const selectAgentFn = (step, opts = {}) => {
       const exclude = opts.exclude instanceof Set ? opts.exclude : new Set();
       return order.find(a => !exclude.has(a));
     };
 
     const detectLimitHitFn = ({ agent }) => {
-      if (agent === 'qwen') return { until: '2026-05-01 18', source: 'parsed' };
+      if (agent === 'custom') return { until: '2026-05-01 18', source: 'parsed' };
       return null;
     };
 
@@ -172,15 +172,15 @@ test('startAgent act-on-review fallback selects mistral when implementer hits li
     try {
       const configWithoutActOnReview = {
         steps: {
-          draft: { eligible: ['mistral', 'codex', 'qwen'], selection: 'random' },
-          active: { eligible: ['codex', 'claude', 'mistral', 'qwen'], selection: 'random' }
+          draft: { eligible: ['mistral', 'codex', 'custom'], selection: 'random' },
+          active: { eligible: ['codex', 'claude', 'mistral', 'custom'], selection: 'random' }
         }
       };
 
       const result = await startAgent('act-on-review', {
         prompt: 'Address review.',
         worktree: tmpRoot,
-        agent: 'qwen',
+        agent: 'custom',
         exclude: ['claude'], // reviewer excluded for family separation
         isAgentBlockedFn: () => false,
         detectLimitHitFn,
@@ -191,7 +191,7 @@ test('startAgent act-on-review fallback selects mistral when implementer hits li
         log: () => {}
       });
 
-      assert.equal(result.agent, 'mistral', 'mistral should be selected as fallback in act-on-review when qwen hits limit and step is missing');
+      assert.equal(result.agent, 'mistral', 'mistral should be selected as fallback in act-on-review when custom hits limit and step is missing');
       assert.equal(blocks.length, 1);
     } finally {
       if (previousAgent !== undefined) process.env.WORKFLOW_AGENT = previousAgent;

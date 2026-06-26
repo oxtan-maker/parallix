@@ -50,7 +50,7 @@ test('startOpencodeAgent recovers the session id from opencode v2.0.0 JSON stdou
   // "Continue  opencode -s ses_..." footer, so the launcher must recover the
   // session id from the streamed `--format json` events (each line carries a
   // "sessionID":"ses_..." field). Without that recovery telemetry is dropped
-  // and every qwen stats row is zero.
+  // and every custom stats row is zero.
   const exportJson = fs.readFileSync(FIXTURE, 'utf8');
   const jsonStdout = [
     '{"type":"step_start","timestamp":1,"sessionID":"ses_132f470d8ffexge85esdX0nzCs","part":{"type":"step-start"}}',
@@ -124,7 +124,7 @@ test('startOpencodeAgent telemetry flows through to a non-zero stats CSV row', a
   const csv = path.join(dir, 'stats.csv');
   try {
     const fields = stats.telemetryToStatsFields(result.telemetry, {
-      agentFamily: 'qwen',
+      agentFamily: 'custom',
       durationMinutes: 5,
     });
     stats.upsertStatsRow(
@@ -133,7 +133,7 @@ test('startOpencodeAgent telemetry flows through to a non-zero stats CSV row', a
         mission: 'task-1316',
         classification: 'ai_sdlc',
         stage: 'active',
-        implementer: 'qwen',
+        implementer: 'custom',
         ...fields,
       },
       { filePath: csv, rootDir: dir },

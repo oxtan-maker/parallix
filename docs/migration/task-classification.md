@@ -15,7 +15,7 @@
 | `TASK-1275` | move | workflow/parallix subject from title and mission context |
 | `TASK-1277` | stay | model-capacity tuning note for GPT family selection; not the parallix workflow tool itself |
 | `TASK-1281` | move | workflow/parallix subject from title and mission context |
-| `TASK-1287` | stay | qwen-9B benchmark note; a model-evaluation task, not a parallix workflow change |
+| `TASK-1287` | stay | custom-9B benchmark note; a model-evaluation task, not a parallix workflow change |
 | `TASK-1288` | move | workflow/parallix subject from title and mission context |
 | `TASK-1290` | move | workflow/parallix subject from title and mission context |
 | `TASK-1294` | move | workflow/parallix subject from title and mission context |

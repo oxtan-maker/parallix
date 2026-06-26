@@ -87,7 +87,7 @@
           "properties": {
             "models": {
               "type": "object",
-              "description": "Optional per-agent-family LLM model override, keyed by agent family name (e.g. codex, claude, gemini, glm, mistral, qwen). Each value is the model identifier passed to that agent's CLI. A family that is not listed sends no model parameter, so the agent uses its own default. There is no 'default' key.",
+              "description": "Optional per-agent-family LLM model override, keyed by agent family name (e.g. codex, claude, gemini, glm, mistral, custom). Each value is the model identifier passed to that agent's CLI. A family that is not listed sends no model parameter, so the agent uses its own default. There is no 'default' key.",
               "additionalProperties": { "type": "string" }
             }
           }

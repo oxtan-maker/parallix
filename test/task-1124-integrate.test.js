@@ -50,7 +50,7 @@ test('SC 6: resume-capable agents use session persistence via startAgent', () =>
   const activeSource = fs.readFileSync(path.join(__dirname, '../lib/commands/active.js'), 'utf8');
   
   // Verify RESUME_CAPABLE matches the current resume-capable families
-  assert.ok(agentsSource.includes("RESUME_CAPABLE = new Set(['claude', 'codex', 'qwen'])"), 'RESUME_CAPABLE should include the current resume-capable agents');
+  assert.ok(agentsSource.includes("RESUME_CAPABLE = new Set(['claude', 'codex', 'custom'])"), 'RESUME_CAPABLE should include the current resume-capable agents');
   
   // Verify attemptAgentRelaunch calls startAgent which handles resume
   assert.ok(activeSource.includes("startAgentFn('active'"), 'Should call startAgent');

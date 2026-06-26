@@ -16,7 +16,7 @@ const {
 const { resolveArtifactDir } = require('../lib/review/review-artifacts');
 
 test('PROMPT_ENTRYPOINTS covers all supported agent families', () => {
-  for (const agent of ['codex', 'claude', 'mistral', 'qwen', 'autonomous']) {
+  for (const agent of ['codex', 'claude', 'mistral', 'custom', 'autonomous']) {
     assert.ok(PROMPT_ENTRYPOINTS[agent], `missing entry for ${agent}`);
     assert.ok(PROMPT_ENTRYPOINTS[agent].review, `missing review entrypoint for ${agent}`);
     assert.ok(PROMPT_ENTRYPOINTS[agent].actOnReview, `missing actOnReview entrypoint for ${agent}`);

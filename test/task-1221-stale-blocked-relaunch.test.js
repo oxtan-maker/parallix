@@ -29,7 +29,7 @@ test('SC1: --continue skip-check BLOCKED re-launches implementer instead of skip
   try {
     const state = new ReviewState('task-1221-sc1', {
       reviewer: 'codex',
-      implementer: 'qwen',
+      implementer: 'custom',
       phase: 'fixing',
       round: 1
     });
@@ -44,14 +44,14 @@ test('SC1: --continue skip-check BLOCKED re-launches implementer instead of skip
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-1221-sc1.md' }),
       getTaskImplementerFn: () => null,
       readReviewStateFn: () => state,
-      eligibleAgentsForStepFn: () => ['codex', 'qwen'],
+      eligibleAgentsForStepFn: () => ['codex', 'custom'],
       selectAgentFn: () => 'codex',
       forgejoAvailableFn: () => true,
       getPrStatusFn: () => ({ exists: true, state: 'open', number: 208 }),
       rebaseBeforeReviewRoundFn: async () => ({ ok: true }),
       startAgentFn: async (mode) => {
         launches.push(mode);
-        return { agent: 'qwen' };
+        return { agent: 'custom' };
       },
       consumeImplementerArtifactsFn: async () => ({ consumed: true, ok: true, disposition: 'CHANGES_MADE' }),
       transitionTaskFn: () => true,
@@ -98,7 +98,7 @@ test('SC2: Re-launched implementer posts CHANGES_MADE → loop continues to next
   try {
     const state = new ReviewState('task-1221-sc2', {
       reviewer: 'codex',
-      implementer: 'qwen',
+      implementer: 'custom',
       phase: 'fixing',
       round: 1
     });
@@ -113,14 +113,14 @@ test('SC2: Re-launched implementer posts CHANGES_MADE → loop continues to next
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-1221-sc2.md' }),
       getTaskImplementerFn: () => null,
       readReviewStateFn: () => state,
-      eligibleAgentsForStepFn: () => ['codex', 'qwen'],
+      eligibleAgentsForStepFn: () => ['codex', 'custom'],
       selectAgentFn: () => 'codex',
       forgejoAvailableFn: () => true,
       getPrStatusFn: () => ({ exists: true, state: 'open', number: 208 }),
       rebaseBeforeReviewRoundFn: async () => ({ ok: true }),
       startAgentFn: async (mode) => {
         launches.push(mode);
-        return { agent: 'qwen' };
+        return { agent: 'custom' };
       },
       consumeImplementerArtifactsFn: async () => ({ consumed: true, ok: true, disposition: 'CHANGES_MADE' }),
       consumeReviewerArtifactsFn: async () => ({ consumed: true, ok: true, reviewState: 'REQUEST_CHANGES' }),
@@ -168,7 +168,7 @@ test('SC3: Re-launched implementer still BLOCKED → loop stops with handoff', a
   try {
     const state = new ReviewState('task-1221-sc3', {
       reviewer: 'codex',
-      implementer: 'qwen',
+      implementer: 'custom',
       phase: 'fixing',
       round: 1
     });
@@ -185,14 +185,14 @@ test('SC3: Re-launched implementer still BLOCKED → loop stops with handoff', a
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-1221-sc3.md' }),
       getTaskImplementerFn: () => null,
       readReviewStateFn: () => state,
-      eligibleAgentsForStepFn: () => ['codex', 'qwen'],
+      eligibleAgentsForStepFn: () => ['codex', 'custom'],
       selectAgentFn: () => 'codex',
       forgejoAvailableFn: () => true,
       getPrStatusFn: () => ({ exists: true, state: 'open', number: 208 }),
       rebaseBeforeReviewRoundFn: async () => ({ ok: true }),
       startAgentFn: async (mode) => {
         launches.push(mode);
-        return { agent: 'qwen' };
+        return { agent: 'custom' };
       },
       consumeImplementerArtifactsFn: async () => {
         const disp = dispositions[consumeCall] || 'BLOCKED';
@@ -249,12 +249,12 @@ test('SC4: Non-continue (fresh start) path is unaffected', async () => {
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-1221-sc4.md' }),
       getTaskImplementerFn: () => null,
       readReviewStateFn: () => null,
-      eligibleAgentsForStepFn: () => ['codex', 'qwen'],
+      eligibleAgentsForStepFn: () => ['codex', 'custom'],
       selectAgentFn: () => 'codex',
       forgejoAvailableFn: () => true,
       getPrStatusFn: () => ({ exists: true, state: 'open' }),
       rebaseBeforeReviewRoundFn: async () => ({ ok: true }),
-      startAgentFn: async () => ({ agent: 'qwen' }),
+      startAgentFn: async () => ({ agent: 'custom' }),
       getLatestReviewForPrFn: () => ({ state: 'REQUEST_CHANGES' }),
       pollForReviewFn: async () => 'REQUEST_CHANGES',
       log: (msg) => logs.push(msg),
@@ -280,7 +280,7 @@ test('SC5: PARKED disposition also triggers re-launch (not just BLOCKED)', async
   try {
     const state = new ReviewState('task-1221-sc5', {
       reviewer: 'codex',
-      implementer: 'qwen',
+      implementer: 'custom',
       phase: 'fixing',
       round: 1
     });
@@ -295,14 +295,14 @@ test('SC5: PARKED disposition also triggers re-launch (not just BLOCKED)', async
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-1221-sc5.md' }),
       getTaskImplementerFn: () => null,
       readReviewStateFn: () => state,
-      eligibleAgentsForStepFn: () => ['codex', 'qwen'],
+      eligibleAgentsForStepFn: () => ['codex', 'custom'],
       selectAgentFn: () => 'codex',
       forgejoAvailableFn: () => true,
       getPrStatusFn: () => ({ exists: true, state: 'open', number: 208 }),
       rebaseBeforeReviewRoundFn: async () => ({ ok: true }),
       startAgentFn: async (mode) => {
         launches.push(mode);
-        return { agent: 'qwen' };
+        return { agent: 'custom' };
       },
       consumeImplementerArtifactsFn: async () => ({ consumed: true, ok: true, disposition: 'CHANGES_MADE' }),
       transitionTaskFn: () => true,
@@ -345,7 +345,7 @@ test('Skip-check non-BLOCKED/PARKED disposition still skips (existing behaviour 
   try {
     const state = new ReviewState('task-1221-skip-normal', {
       reviewer: 'codex',
-      implementer: 'qwen',
+      implementer: 'custom',
       phase: 'fixing',
       round: 1
     });
@@ -360,12 +360,12 @@ test('Skip-check non-BLOCKED/PARKED disposition still skips (existing behaviour 
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-1221-skip-normal.md' }),
       getTaskImplementerFn: () => null,
       readReviewStateFn: () => state,
-      eligibleAgentsForStepFn: () => ['codex', 'qwen'],
+      eligibleAgentsForStepFn: () => ['codex', 'custom'],
       selectAgentFn: () => 'codex',
       forgejoAvailableFn: () => true,
       getPrStatusFn: () => ({ exists: true, state: 'open', number: 208 }),
       rebaseBeforeReviewRoundFn: async () => ({ ok: true }),
-      startAgentFn: async () => ({ agent: 'qwen' }),
+      startAgentFn: async () => ({ agent: 'custom' }),
       consumeImplementerArtifactsFn: async () => ({ consumed: true, ok: true, disposition: 'CHANGES_MADE' }),
       transitionTaskFn: () => true,
       transitionVirtualFn: () => true,
@@ -399,7 +399,7 @@ test('SC1-Fix: Post-relaunch poll uses updated sinceIso, not stale state.started
   try {
     const state = new ReviewState('task-1221-sc1-forge-race', {
       reviewer: 'codex',
-      implementer: 'qwen',
+      implementer: 'custom',
       phase: 'fixing',
       round: 1
     });
@@ -416,14 +416,14 @@ test('SC1-Fix: Post-relaunch poll uses updated sinceIso, not stale state.started
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-1221-sc1-forge-race.md' }),
       getTaskImplementerFn: () => null,
       readReviewStateFn: () => state,
-      eligibleAgentsForStepFn: () => ['codex', 'qwen'],
+      eligibleAgentsForStepFn: () => ['codex', 'custom'],
       selectAgentFn: () => 'codex',
       forgejoAvailableFn: () => true,
       getPrStatusFn: () => ({ exists: true, state: 'open', number: 208 }),
       rebaseBeforeReviewRoundFn: async () => ({ ok: true }),
       startAgentFn: async (mode) => {
         launches.push(mode);
-        return { agent: 'qwen' };
+        return { agent: 'custom' };
       },
       consumeImplementerArtifactsFn: async () => {
         consumeCall++;

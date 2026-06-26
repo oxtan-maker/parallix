@@ -630,7 +630,7 @@ test('getComments keeps using the fallback token after PR lookup succeeds', asyn
   process.env.FORGEJO_USER = 'codex';
   process.env.FORGEJO_HOME = tmpRoot;
   fs.mkdirSync(path.join(tmpRoot, 'tokens'), { recursive: true });
-  fs.writeFileSync(path.join(tmpRoot, 'tokens', 'qwen'), 'qwen-token\n', 'utf8');
+  fs.writeFileSync(path.join(tmpRoot, 'tokens', 'custom'), 'custom-token\n', 'utf8');
 
   const taskFile = path.join(process.cwd(), 'backlog', 'tasks', 'task-204 - comments fallback test.md');
   fs.mkdirSync(path.dirname(taskFile), { recursive: true });
@@ -638,7 +638,7 @@ test('getComments keeps using the fallback token after PR lookup succeeds', asyn
 id: TASK-204
 title: test
 status: review
-assignee: [qwen]
+assignee: [custom]
 ---
 `, 'utf8');
 
@@ -649,20 +649,20 @@ assignee: [qwen]
         calls.push({ method, apiPath, token });
         if (method === 'GET' && apiPath.includes('/pulls?state=open')) {
           if (token === 'codex-token') return { ok: true, data: [], status: 0 };
-          if (token === 'qwen-token') {
+          if (token === 'custom-token') {
             return { ok: true, data: [{ number: 204, head: { ref: 'mission/task-204' } }], status: 0 };
           }
         }
         if (method === 'GET' && apiPath === '/issues/204/comments') {
-          if (token !== 'qwen-token') return { ok: false, data: null, status: 401 };
+          if (token !== 'custom-token') return { ok: false, data: null, status: 401 };
           return {
             ok: true,
-            data: [{ user: { login: 'qwen' }, created_at: '2026-05-22T10:00:00Z', body: 'resolved' }],
+            data: [{ user: { login: 'custom' }, created_at: '2026-05-22T10:00:00Z', body: 'resolved' }],
             status: 0
           };
         }
         if (method === 'GET' && apiPath === '/pulls/204/reviews') {
-          if (token !== 'qwen-token') return { ok: false, data: null, status: 401 };
+          if (token !== 'custom-token') return { ok: false, data: null, status: 401 };
           return { ok: true, data: [], status: 0 };
         }
         return { ok: false, data: null, status: 404 };
@@ -670,9 +670,9 @@ assignee: [qwen]
     });
 
     assert.equal(comments.length, 1);
-    assert.equal(comments[0].user, 'qwen');
-    assert.ok(calls.some(call => call.apiPath === '/issues/204/comments' && call.token === 'qwen-token'));
-    assert.ok(calls.some(call => call.apiPath === '/pulls/204/reviews' && call.token === 'qwen-token'));
+    assert.equal(comments[0].user, 'custom');
+    assert.ok(calls.some(call => call.apiPath === '/issues/204/comments' && call.token === 'custom-token'));
+    assert.ok(calls.some(call => call.apiPath === '/pulls/204/reviews' && call.token === 'custom-token'));
   } finally {
     fs.rmSync(taskFile, { force: true });
     fs.rmSync(tmpRoot, { recursive: true, force: true });
@@ -702,7 +702,7 @@ test('getLatestReviewDecision keeps using the fallback token after PR lookup suc
   process.env.FORGEJO_USER = 'codex';
   process.env.FORGEJO_HOME = tmpRoot;
   fs.mkdirSync(path.join(tmpRoot, 'tokens'), { recursive: true });
-  fs.writeFileSync(path.join(tmpRoot, 'tokens', 'qwen'), 'qwen-token\n', 'utf8');
+  fs.writeFileSync(path.join(tmpRoot, 'tokens', 'custom'), 'custom-token\n', 'utf8');
 
   const taskFile = path.join(process.cwd(), 'backlog', 'tasks', 'task-205 - review fallback test.md');
   fs.mkdirSync(path.dirname(taskFile), { recursive: true });
@@ -710,7 +710,7 @@ test('getLatestReviewDecision keeps using the fallback token after PR lookup suc
 id: TASK-205
 title: test
 status: review
-assignee: [qwen]
+assignee: [custom]
 ---
 `, 'utf8');
 
@@ -722,15 +722,15 @@ assignee: [qwen]
         calls.push({ method, apiPath, token });
         if (method === 'GET' && apiPath.includes('/pulls?state=open')) {
           if (token === 'codex-token') return { ok: true, data: [], status: 0 };
-          if (token === 'qwen-token') {
+          if (token === 'custom-token') {
             return { ok: true, data: [{ number: 205, head: { ref: 'mission/task-205' } }], status: 0 };
           }
         }
         if (method === 'GET' && apiPath === '/pulls/205/reviews') {
-          if (token !== 'qwen-token') return { ok: false, data: null, status: 401 };
+          if (token !== 'custom-token') return { ok: false, data: null, status: 401 };
           return {
             ok: true,
-            data: [{ state: 'APPROVED', submitted_at: '2026-05-22T10:00:00Z', user: { login: 'qwen' } }],
+            data: [{ state: 'APPROVED', submitted_at: '2026-05-22T10:00:00Z', user: { login: 'custom' } }],
             status: 0
           };
         }
@@ -744,7 +744,7 @@ assignee: [qwen]
       reviewState: 'APPROVED',
       defaultUserApproved: false
     });
-    assert.ok(calls.some(call => call.apiPath === '/pulls/205/reviews' && call.token === 'qwen-token'));
+    assert.ok(calls.some(call => call.apiPath === '/pulls/205/reviews' && call.token === 'custom-token'));
   } finally {
     fs.rmSync(taskFile, { force: true });
     fs.rmSync(tmpRoot, { recursive: true, force: true });
@@ -1221,10 +1221,10 @@ test('getPrAuthor returns the PR author login from GET /pulls/{n}', () => {
     apiCall(method, apiPath) {
       assert.equal(method, 'GET');
       assert.equal(apiPath, '/pulls/214');
-      return { ok: true, status: 0, statusCode: 200, data: { user: { login: 'qwen' } } };
+      return { ok: true, status: 0, statusCode: 200, data: { user: { login: 'custom' } } };
     }
   });
-  assert.equal(author, 'qwen');
+  assert.equal(author, 'custom');
 });
 
 test('getPrAuthor degrades to null when the PR cannot be resolved', () => {
@@ -1810,7 +1810,7 @@ test('getLatestReviewDecision returns api-failed when getPrNumber returns _apiEr
   });
 
   const result = getLatestReviewDecision('mission/task-200', {
-    forgejoUser: 'qwen',
+    forgejoUser: 'custom',
     token: 'fake-token',
     apiCall
   });

@@ -194,7 +194,7 @@ test('performHandoff falls back to magnus and persists bootstrap failure summary
   mock.method(backlog, 'transitionTask', (taskSlug, status, options) => {
     assert.equal(taskSlug, slug);
     assert.equal(status, 'review');
-    assert.equal(options.implementer, 'qwen');
+    assert.equal(options.implementer, 'custom');
     return true;
   });
   mock.method(forgejo, 'readToken', (user) => (user === 'human' ? 'human-token' : null));
@@ -219,7 +219,7 @@ test('performHandoff falls back to magnus and persists bootstrap failure summary
     return 'http://fake-url';
   });
   mock.method(gatekeeper, 'runGatekeeper', () => ({ ok: true, missing: [], skipped: false, posted: false }));
-  writeReviewState(missionDir, 'qwen', 'qwen');
+  writeReviewState(missionDir, 'custom', 'custom');
 
   try {
     const mockRebase = async () => ({ ok: true, sharedFileConflicts: false });
@@ -233,7 +233,7 @@ test('performHandoff falls back to magnus and persists bootstrap failure summary
     assert.equal(result.ok, true);
     const taskContent = fs.readFileSync(taskFile, 'utf8');
     assert.match(taskContent, /## Fallback: PR submitted as human/);
-    assert.match(taskContent, /Original user: qwen/);
+    assert.match(taskContent, /Original user: custom/);
     assert.match(taskContent, /Bootstrap failure reason: No owner token found for human at \/tmp\/no-token/);
     assert.ok(gitCalls.some(args => args.includes('commit') && args.includes(`backlog(${slug}): set fallback summary`)));
   } finally {
@@ -669,7 +669,7 @@ test('performHandoff calls rebaseBeforeReviewRound before Forgejo PR creation', 
   mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile }));
   mock.method(backlog, 'transitionTask', () => true);
   mock.method(gatekeeper, 'runGatekeeper', () => ({ ok: true, missing: [], skipped: false, posted: false }));
-  writeReviewState(missionDir, 'qwen', 'qwen');
+  writeReviewState(missionDir, 'custom', 'custom');
 
   try {
     const result = await performHandoff(slug, {
@@ -721,7 +721,7 @@ test('performHandoff fails when rebase returns ok=false with no shared-file conf
     assert.fail('transitionTask should NOT be called when rebase fails');
     return true;
   });
-  writeReviewState(missionDir, 'qwen', 'qwen');
+  writeReviewState(missionDir, 'custom', 'custom');
 
   try {
     const result = await performHandoff(slug, {
@@ -771,7 +771,7 @@ test('performHandoff fails when rebase returns sharedFileConflicts=true', async 
     assert.fail('transitionTask should NOT be called when rebase has shared-file conflicts');
     return true;
   });
-  writeReviewState(missionDir, 'qwen', 'qwen');
+  writeReviewState(missionDir, 'custom', 'custom');
 
   try {
     const result = await performHandoff(slug, {
@@ -821,7 +821,7 @@ test('performHandoff proceeds normally when rebase is a no-op (branch already up
   mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile }));
   mock.method(backlog, 'transitionTask', () => true);
   mock.method(gatekeeper, 'runGatekeeper', () => ({ ok: true, missing: [], skipped: false, posted: false }));
-  writeReviewState(missionDir, 'qwen', 'qwen');
+  writeReviewState(missionDir, 'custom', 'custom');
 
   try {
     const result = await performHandoff(slug, {
