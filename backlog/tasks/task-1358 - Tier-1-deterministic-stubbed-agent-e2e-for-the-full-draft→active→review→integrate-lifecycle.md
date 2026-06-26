@@ -6,6 +6,7 @@ title: >-
 status: backlog
 assignee: []
 created_date: '2026-06-26 18:05'
+updated_date: '2026-06-26 21:03'
 labels:
   - quality
   - testing
@@ -22,6 +23,8 @@ Bug-reduction initiative #6, Tier 1 (the high-ROI half). Build an end-to-end tes
 Why stub instead of a real model: all the bug-catching power is in exercising the real lifecycle composition (where the #2 cluster lives), not in the agent's content. A stub makes the test deterministic, dependency-free, and fast enough to run pre-integrate — without the flakiness/runtime/environment cost a real model would add (see Tier 2, the separate smoke task).
 
 Targets the largest uncovered cluster — state-machine/id/path composition bugs that unit tests miss because mocks encode the same wrong assumption as the code: TASK-1317 (id minted twice), TASK-1352 (wrong rootDir on feature-branch missions), TASK-1327 (wrong board state), TASK-1275 (slug↔task-id mismatch).
+
+this needs to be a configurable gate in parallix (default to no-op for the product). And then we configure parallix to use the gate in configured mode with the e2e test.
 
 Assertions the happy path should make:
 - mission branch + sibling worktree created with the expected shape
