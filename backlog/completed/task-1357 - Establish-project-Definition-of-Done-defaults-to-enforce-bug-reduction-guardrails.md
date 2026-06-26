@@ -3,13 +3,12 @@ id: TASK-1357
 title: >-
   Establish project Definition-of-Done defaults to enforce bug-reduction
   guardrails
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-06-26 18:01'
+updated_date: '2026-06-26 21:02'
 labels:
-  - quality
-  - guardrail
-  - bug-reduction
+  - ai_sdlc
 dependencies:
   - TASK-1268
   - TASK-1353
@@ -20,7 +19,9 @@ priority: medium
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-The project currently has ZERO Definition-of-Done defaults (verified via definition_of_done_defaults_get → "none"), so every mission's DoD is whatever the agent improvises. Several bug-reduction guardrails belong as enforced, project-wide DoD defaults rather than per-mission prose — this is the cheapest way to make them non-optional.
+Parallix ships with a no-op Definition-of-Done default (`definition_of_done: []` in `backlog/config.yml`) so that when parallix is used to configure other products, it does not leak parallix's own quality expectations into those products. Parallix itself is the exception: when configuring itself, it should use DoD defaults.
+
+The project currently has ZERO DoD defaults (verified via `definition_of_done_defaults_get` → "none"), so every mission's DoD is whatever the agent improvises. Several bug-reduction guardrails belong as enforced, project-wide DoD defaults rather than per-mission prose — this is the cheapest way to make them non-optional.
 
 Define and commit a baseline DoD default set via `definition_of_done_defaults_upsert`. Proposed items (refine before committing):
 - Verification gate actually ran and passed on the final tree (proof-backed, not claimed) — see TASK-1268.

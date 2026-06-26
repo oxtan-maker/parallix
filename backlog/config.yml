@@ -2,7 +2,7 @@ project_name: "parallix"
 default_status: "backlog"
 statuses: ["backlog", "refined", "active", "review", "ready-for-integration", "done"]
 labels: []
-definition_of_done: []
+definition_of_done: ["Verification gate ran and passed on the final tree with captured proof rather than an unverified claim", "Lint and static analysis report clean on every changed file", "No focused or unannotated skipped tests were introduced (no .only and no bare .skip)", "Final checkpoint Goal Check table cites real evidence using file:line references and test names", "Docs updated to reflect any workflow or user-facing behavior change", "Bug-labeled missions include a red-to-green reproduction test that fails before the fix and passes after"]
 date_format: yyyy-mm-dd
 max_column_width: 20
 default_editor: "code --wait"
