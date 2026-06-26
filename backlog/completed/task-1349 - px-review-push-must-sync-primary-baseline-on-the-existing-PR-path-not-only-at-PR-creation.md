@@ -3,11 +3,11 @@ id: TASK-1349
 title: >-
   px review --push must sync primary baseline on the existing-PR path, not only
   at PR creation
-status: backlog
-assignee: []
+status: done
+assignee: [qwen]
 created_date: '2026-06-25 21:27'
 labels:
-  - ai_sdlc
+  - user_value
   - bug
   - forgejo
 dependencies: []
@@ -28,9 +28,17 @@ Workaround used manually: force-push local `main` -> `review/main` via the authe
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 px review --push runs syncPrimaryBaseline (force-push local primary -> Forgejo primary) on the existing-PR update path, not only at PR creation
-- [ ] #2 After --push on an existing PR, Forgejo's primary branch SHA equals the local authoritative primary SHA
-- [ ] #3 Both push paths share a single baseline-sync code path so they cannot drift again
-- [ ] #4 A regression test asserts the existing-PR push path triggers syncPrimaryBaseline (e.g. via the gitRunner/push spy) and fails on the current branch-only behavior
-- [ ] #5 Verification proof gating from syncPrimaryBaseline is preserved on the new path
+- [x] #1 px review --push runs syncPrimaryBaseline (force-push local primary -> Forgejo primary) on the existing-PR update path, not only at PR creation
+- [x] #2 After --push on an existing PR, Forgejo's primary branch SHA equals the local authoritative primary SHA
+- [x] #3 Both push paths share a single baseline-sync code path so they cannot drift again
+- [x] #4 A regression test asserts the existing-PR push path triggers syncPrimaryBaseline (e.g. via the gitRunner/push spy) and fails on the current branch-only behavior
+- [x] #5 Verification proof gating from syncPrimaryBaseline is preserved on the new path
 <!-- AC:END -->
+
+## Resolution
+
+Task-1349 was created (2026-06-25) **after** the fix was already in main. The `syncPrimaryBaseline` call at `forgejo.js:435` and the regression test at `forgejo.test.js:301` were both introduced in Initial commit `17e0b1c7` (2026-06-22), which is an ancestor of `main`. 
+
+The stale-baseline bug described in the mission premise does not exist in the current `createPr` control flow — `syncPrimaryBaseline` runs unconditionally before the existing-PR check. All 5 success criteria are satisfied by pre-existing code.
+
+Closed as **already-satisfied / no-op**. See CP-2.md and CP-3.md for full reconciliation and falsifiability demonstration.
