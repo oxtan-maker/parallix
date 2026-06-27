@@ -716,7 +716,12 @@ test('importAllLegacyArtifacts with only review-verdict.txt creates standalone o
 
 // Run with cleanup
 test.before(() => {
-  // Setup already done
+  // Remove stale /tmp/ task-test-events-* files from interrupted previous runs
+  // These are created by importAllLegacyArtifacts tests and persist if a run is killed
+  const tmpFiles = fs.readdirSync(os.tmpdir()).filter(f => f.startsWith('task-test-events-'));
+  for (const f of tmpFiles) {
+    try { fs.unlinkSync(path.join(os.tmpdir(), f)); } catch (_) {}
+  }
 });
 
 test.after(() => {
