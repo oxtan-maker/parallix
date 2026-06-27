@@ -4,5 +4,12 @@
   "round": 1,
   "startedAt": "2026-06-27T10:54:48.341Z",
   "phase": "reviewing",
-  "disposition": null
+  "disposition": null,
+  "metadata": {
+    "recordedStageLaunches": {
+      "review:custom": [
+        "custom|ses_0f74837f3ffediO45rQNSU6G5V|2026-06-27T10:54:49.007Z|2026-06-27T10:56:32.562Z|0"
+      ]
+    }
+  }
 }
