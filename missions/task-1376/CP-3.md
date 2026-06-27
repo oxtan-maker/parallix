@@ -43,6 +43,6 @@ All mission-declared success criteria verified:
 | verify-local.sh docs gate passes | `./scripts/verify-local.sh docs`: output "PASS: all required documentation present" | PASS |
 | summarizeAgentWindow grouping logic | stats.js:895 — `displayKey = (row.model && String(row.model).trim()) || (row.implementer || 'unknown')` | PASS |
 | Sorting by display key | stats.js:941 — `.sort((a, b) => a.implementer.localeCompare(b.implementer))` | PASS |
-| groupBy function preserved for generateMarkdownReport | stats.js:526 — still used by generateMarkdownReport at stats.js:595 | PASS |
+| groupBy function preserved for generateMarkdownReport | stats.js:526 — function definition; call-site at stats.js:608 (`groupBy(rows, 'implementer')`) | PASS |
 
 ## Next action: Handoff to review — all gates pass, all success criteria verified with real evidence.
