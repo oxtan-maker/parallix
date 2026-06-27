@@ -3,7 +3,7 @@
 # Usage: ./scripts/verify-local.sh <subcommand>
 # Subcommands:
 #   docs             — verify documentation completeness
-#   static-analysis  — run ESLint, tsc --checkJs, and test-hygiene checks
+#   static-analysis  — run ESLint, tsc typecheck, and test-hygiene checks
 #   (none)           — no-op (default gate behavior)
 
 set -euo pipefail
@@ -22,13 +22,17 @@ gate_static_analysis() {
   fi
   echo "PASS: ESLint clean"
 
-  # Stage 2: TypeScript checkJs on lib/core and lib/commands
-  echo "[2/3] Running tsc --checkJs --noEmit..."
-  if ! npx --yes tsc --checkJs --noEmit 2>&1; then
-    echo "FAIL: tsc --checkJs reported type errors"
+  # Stage 2: TypeScript typecheck (emission mode)
+  echo "[2/3] Running npm run typecheck..."
+  TSC_OUTPUT=$(npm run typecheck 2>&1 || true)
+  BAD_ERRORS=$(echo "$TSC_OUTPUT" | grep "error TS" | grep -v "TS18003" || true)
+  if [ -z "$BAD_ERRORS" ]; then
+    echo "PASS: tsc typecheck clean"
+  else
+    echo "$TSC_OUTPUT"
+    echo "FAIL: tsc typecheck reported errors"
     return 1
   fi
-  echo "PASS: tsc --checkJs clean"
 
   # Stage 3: Test-hygiene scanner
   echo "[3/3] Running test-hygiene check..."

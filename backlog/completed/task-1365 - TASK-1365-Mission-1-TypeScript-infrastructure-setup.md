@@ -1,10 +1,10 @@
 ---
 id: TASK-1365
 title: 'TASK-1365: Mission 1 - TypeScript infrastructure setup'
-status: backlog
+status: done
 assignee: []
 created_date: '2026-06-27 10:37'
-labels: []
+labels: [ai_sdlc]
 dependencies: []
 priority: high
 ---
