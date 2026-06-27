@@ -1,11 +1,11 @@
 ---
 id: TASK-1378
 title: update use case document
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-06-27 11:24'
 updated_date: '2026-06-27 11:29'
-labels: []
+labels: ["user_value"]
 dependencies: []
 ---
 
