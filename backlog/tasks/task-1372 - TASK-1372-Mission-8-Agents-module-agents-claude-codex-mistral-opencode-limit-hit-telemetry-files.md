@@ -1,0 +1,51 @@
+---
+id: TASK-1372
+title: >-
+  TASK-1372: Mission 8 - Agents module (agents, claude, codex, mistral,
+  opencode, limit-hit, + telemetry files)
+status: backlog
+assignee: []
+created_date: '2026-06-27 10:37'
+labels: []
+dependencies: []
+priority: high
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+Convert the 12 agent launcher and telemetry modules. These handle launching AI coding agents (Claude, Codex, Mistral, OpenCode) with session management and limit detection.
+
+**Files renamed `.js` → `.ts`:**
+- `lib/agents/agents.js` — agent aggregator. Imports: claude, codex, limit-hit, mistral, opencode, core/fmt, core/persistent-data-migration, core/product-config, core/storage, tools/sessions
+- `lib/agents/claude.js` (imports claude-telemetry, core/spawn-tee, tools/sessions)
+- `lib/agents/codex.js` (imports codex-telemetry, core/spawn-tee, tools/sessions)
+- `lib/agents/mistral.js` (imports core/spawn-tee)
+- `lib/agents/opencode.js` (imports core/spawn-tee, limit-hit, opencode-export, opencode-telemetry, tools/sessions)
+- `lib/agents/limit-hit.js` — limit detection
+- `lib/agents/claude-telemetry.js` — Claude usage telemetry
+- `lib/agents/codex-telemetry.js` — Codex usage telemetry
+- `lib/agents/mistral-telemetry.js` — Mistral usage telemetry
+- `lib/agents/opencode-export.js` — OpenCode export helper
+- `lib/agents/opencode-telemetry.js` — OpenCode usage telemetry
+- `lib/agents/stage-telemetry.js` (imports codex) — stage-level telemetry
+
+**Conversion details:**
+- Replace `require()` with ES `import` from converted modules
+- Replace `module.exports` with ES `export`
+- Preserve JSDoc annotations (good coverage in these files)
+- Telemetry files have internal deps (`stage-telemetry` → `codex`) — handle within this mission
+- `agents.js` is the aggregator — it imports most other agent files
+
+**Dependency:** Depends on TASK-1365 (infrastructure), TASK-1366 (core foundation), TASK-1367 (core config), TASK-1368 (core utilities).
+<!-- SECTION:DESCRIPTION:END -->
+
+## Definition of Done
+<!-- DOD:BEGIN -->
+- [ ] #1 Verification gate ran and passed on the final tree with captured proof rather than an unverified claim
+- [ ] #2 Lint and static analysis report clean on every changed file
+- [ ] #3 No focused or unannotated skipped tests were introduced (no .only and no bare .skip)
+- [ ] #4 Final checkpoint Goal Check table cites real evidence using file:line references and test names
+- [ ] #5 Docs updated to reflect any workflow or user-facing behavior change
+- [ ] #6 Bug-labeled missions include a red-to-green reproduction test that fails before the fix and passes after
+<!-- DOD:END -->
