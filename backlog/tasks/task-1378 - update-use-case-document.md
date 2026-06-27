@@ -4,6 +4,7 @@ title: update use case document
 status: backlog
 assignee: []
 created_date: '2026-06-27 11:24'
+updated_date: '2026-06-27 11:29'
 labels: []
 dependencies: []
 ---
@@ -20,6 +21,8 @@ Except from the agent reviewing meaning I will have to call out less bugs, there
 use case: on velocity enhancments is a bit to hesitant. For several weeks now I have been clockin in around the order of 30 missions/week.
 
 Use case: As an engineer I want to be able to run agent submission off a feature branch.
+
+Use case: As an engineer I want to reduce the agent errors by hooking parallalix into standard and agent best practice QA automated practices.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Definition of Done
