@@ -34,12 +34,15 @@ All mission-declared success criteria verified:
 
 | Goal Check | Evidence | Status |
 |---|---|---|
-| Model grouping replaces agent-family grouping for local AI | test/stats.test.js:1705 — `summarizeAgentWindow groups local AI rows by model name, not by custom`: asserts `result.length === 2` with keys `qwen3.5` and `llama3` | PASS |
+| Model grouping replaces agent-family grouping for local AI | test/stats.test.js:1703 — `summarizeAgentWindow groups local AI rows by model name, not by custom`: asserts `result.length === 2` with keys `qwen3.5` and `llama3` | PASS |
 | Empty model falls back to implementer | test/stats.test.js:1724 — `summarizeAgentWindow empty model falls back to implementer`: asserts `result.length === 1` with key `claude`, missions=2, averageFixRounds='2.00' | PASS |
-| Weekly report displays model values in Agent family column | test/stats.test.js:1744 — `renderWeeklyStatsReport displays model names in Agent family column`: output matches `/qwen3\.5\s+1\s+2\.00/` and `/gpt-5\s+1\s+1\.00/` | PASS |
-| Range report displays model values in Agent family column | test/stats.test.js:1755 — `renderRangeStatsReport displays model names in Agent family column`: output matches `/qwen3\.5\s+1\s+2\.00/` and `/llama3\s+1\s+0\.00/` | PASS |
-| Cloud-agent rows unaffected | test/stats.test.js:1732 — `summarizeAgentWindow handles mixed cloud + local AI rows together`: asserts `gptEntry`, `qwenEntry`, `geminiEntry`, `llamaEntry`, `claudeEntry` all exist | PASS |
+| Weekly report displays model values in Agent family column | test/stats.test.js:1770 — `renderWeeklyStatsReport displays model names in Agent family column`: output matches `/qwen3\.5\s+1\s+2\.00/` and `/gpt-5\s+1\s+1\.00/` | PASS |
+| Range report displays model values in Agent family column | test/stats.test.js:1781 — `renderRangeStatsReport displays model names in Agent family column`: output matches `/qwen3\.5\s+1\s+2\.00/` and `/llama3\s+1\s+0\.00/` | PASS |
+| Cloud-agent rows unaffected | test/stats.test.js:1740 — `summarizeAgentWindow handles mixed cloud + local AI rows together`: asserts `gptEntry`, `qwenEntry`, `geminiEntry`, `llamaEntry`, `claudeEntry` all exist | PASS |
 | All existing tests pass with zero failures | npm test: 1692 pass, 0 fail — `renderWeeklyStatsReport calculates current and previous seven-day windows from injected today` (test/stats.test.js:382), `renderRangeStatsReport filters inclusive boundary dates` (test/stats.test.js:403), `renderWeeklyStatsReport sorts agent tables alphabetically by family name` (test/stats.test.js:441), `stats command prints workflow weekly tables` (test/stats.test.js:489), `stats command prints workflow arbitrary range tables` (test/stats.test.js:537) | PASS |
 | verify-local.sh docs gate passes | `./scripts/verify-local.sh docs`: output "PASS: all required documentation present" | PASS |
+| summarizeAgentWindow grouping logic | stats.js:895 — `displayKey = (row.model && String(row.model).trim()) || (row.implementer || 'unknown')` | PASS |
+| Sorting by display key | stats.js:941 — `.sort((a, b) => a.implementer.localeCompare(b.implementer))` | PASS |
+| groupBy function preserved for generateMarkdownReport | stats.js:526 — still used by generateMarkdownReport at stats.js:595 | PASS |
 
 ## Next action: Handoff to review — all gates pass, all success criteria verified with real evidence.
