@@ -6,8 +6,14 @@ title: >-
 status: backlog
 assignee: []
 created_date: '2026-06-27 10:38'
+updated_date: '2026-06-27 10:38'
 labels: []
-dependencies: []
+dependencies:
+  - TASK-1366
+  - TASK-1367
+  - TASK-1368
+  - TASK-1372
+  - TASK-1374
 priority: high
 ---
 
