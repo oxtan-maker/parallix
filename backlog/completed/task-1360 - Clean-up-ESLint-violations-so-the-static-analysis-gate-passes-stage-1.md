@@ -1,14 +1,12 @@
 ---
 id: TASK-1360
 title: Clean up ESLint violations so the static-analysis gate passes stage 1
-status: backlog
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-06-26 21:42'
 updated_date: '2026-06-26 21:44'
 labels:
-  - tech-debt
-  - static-analysis
-  - gate
+  - user_value
 dependencies:
   - TASK-1353
 priority: high
@@ -32,13 +30,13 @@ Do not change the 8 configured rules or `.eslintrc.cjs`; this is a code-cleanup 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 `./scripts/verify-local.sh static-analysis` passes the ESLint stage (stage 1 prints PASS and proceeds past ESLint)
-- [ ] #2 `npx eslint --ext .js --max-warnings 0 lib/` exits 0 with zero errors and zero warnings
-- [ ] #3 No `eslint-disable` comments are added to suppress violations; each error is fixed at the source
-- [ ] #4 The 2 `no-undef` findings are root-caused (real bug fixed, or shown to be a genuine global) rather than silenced
-- [ ] #5 `== null` / `!= null` null-ish idioms are preserved or converted deliberately; the `eqeqeq` fixes do not change runtime null/undefined semantics
-- [ ] #6 `.eslintrc.cjs` rule set is unchanged (still the 8 rules at error)
-- [ ] #7 `npm test` passes after the cleanup
+- [x] #1 `./scripts/verify-local.sh static-analysis` passes the ESLint stage (stage 1 prints PASS and proceeds past ESLint)
+- [x] #2 `npx eslint --ext .js --max-warnings 0 lib/` exits 0 with zero errors and zero warnings
+- [x] #3 No `eslint-disable` comments are added to suppress violations; each error is fixed at the source
+- [x] #4 The 2 `no-undef` findings are root-caused (real bug fixed, or shown to be a genuine global) rather than silenced
+- [x] #5 `== null` / `!= null` null-ish idioms are preserved or converted deliberately; the `eqeqeq` fixes do not change runtime null/undefined semantics
+- [x] #6 `.eslintrc.cjs` rule set is unchanged (still the 8 rules at error)
+- [x] #7 `npm test` passes after the cleanup
 <!-- AC:END -->
 
 ## Implementation Notes
