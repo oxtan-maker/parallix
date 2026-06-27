@@ -4,8 +4,17 @@ title: 'TASK-1370: Mission 6 - Workflow commands (draft, active, checkpoint, han
 status: backlog
 assignee: []
 created_date: '2026-06-27 10:37'
+updated_date: '2026-06-27 10:38'
 labels: []
-dependencies: []
+dependencies:
+  - TASK-1369
+  - TASK-1371
+  - TASK-1366
+  - TASK-1367
+  - TASK-1368
+  - TASK-1372
+  - TASK-1373
+  - TASK-1374
 priority: high
 ---
 
