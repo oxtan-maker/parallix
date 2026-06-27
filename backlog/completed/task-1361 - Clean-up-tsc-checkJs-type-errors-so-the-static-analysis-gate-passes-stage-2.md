@@ -1,13 +1,11 @@
 ---
 id: TASK-1361
 title: Clean up tsc --checkJs type errors so the static-analysis gate passes stage 2
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-06-26 21:43'
 labels:
-  - tech-debt
-  - static-analysis
-  - gate
+  - user_value
 dependencies:
   - TASK-1353
   - TASK-1360
