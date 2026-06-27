@@ -1,10 +1,10 @@
 {
   "reviewer": "custom",
   "implementer": "custom",
-  "round": 1,
-  "startedAt": "2026-06-27T10:54:48.341Z",
-  "phase": "approved",
-  "disposition": "CHANGES_MADE",
+  "round": 2,
+  "startedAt": "2026-06-27T13:36:21.114Z",
+  "phase": "reviewing",
+  "disposition": null,
   "metadata": {
     "recordedStageLaunches": {
       "review:custom": [
