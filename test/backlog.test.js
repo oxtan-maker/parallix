@@ -25,6 +25,8 @@ const {
    transitionTask,
    parseAssigneeFamilies,
    clearTaskAgentAssignee,
+   hasBugLabel,
+   getTaskLabels,
 } = require('../lib/tools/backlog');
 const { [`getTask${typeKey[0].toUpperCase()}${typeKey.slice(1)}`]: getTaskMissionType } = require('../lib/tools/backlog');
 
@@ -855,5 +857,102 @@ test('transitionTask permits exact slug match (no suffix)', () => {
 
     const lastSubject = childProcess.spawnSync('git', ['log', '-1', '--format=%s'], { cwd: root, encoding: 'utf8' }).stdout.trim();
     assert.equal(lastSubject, 'backlog(task-1048): transition to active', 'commit must use the exact slug');
+  });
+});
+
+test('getTaskClassification ignores non-classification labels like bug — inline format', () => {
+  withTempRepo(root => {
+    const taskDir = path.join(root, 'backlog', 'tasks');
+
+    const pathAiBug = path.join(taskDir, 'task-classify-ai-bug.md');
+    fs.writeFileSync(pathAiBug, '---\nlabels: [ai_sdlc, bug]\n---\n');
+    assert.equal(getTaskMissionType(pathAiBug), 'ai_sdlc');
+
+    const pathUserBug = path.join(taskDir, 'task-classify-user-bug.md');
+    fs.writeFileSync(pathUserBug, '---\nlabels: [user_value, bug]\n---\n');
+    assert.equal(getTaskMissionType(pathUserBug), 'user_value');
+
+    const pathBugOnly = path.join(taskDir, 'task-classify-bug-only.md');
+    fs.writeFileSync(pathBugOnly, '---\nlabels: [bug]\n---\n');
+    assert.equal(getTaskMissionType(pathBugOnly), null);
+
+    const pathUnknownBug = path.join(taskDir, 'task-classify-unknown-bug.md');
+    fs.writeFileSync(pathUnknownBug, '---\nlabels: [unknown, bug]\n---\n');
+    assert.equal(getTaskMissionType(pathUnknownBug), 'unknown');
+  });
+});
+
+test('getTaskClassification ignores non-classification labels like bug — block format', () => {
+  withTempRepo(root => {
+    const taskDir = path.join(root, 'backlog', 'tasks');
+
+    const pathAiBug = path.join(taskDir, 'task-classify-block-ai-bug.md');
+    fs.writeFileSync(pathAiBug, '---\nlabels:\n  - ai_sdlc\n  - bug\n---\n');
+    assert.equal(getTaskMissionType(pathAiBug), 'ai_sdlc');
+
+    const pathUserBug = path.join(taskDir, 'task-classify-block-user-bug.md');
+    fs.writeFileSync(pathUserBug, '---\nlabels:\n  - user_value\n  - bug\n---\n');
+    assert.equal(getTaskMissionType(pathUserBug), 'user_value');
+
+    const pathBugOnly = path.join(taskDir, 'task-classify-block-bug-only.md');
+    fs.writeFileSync(pathBugOnly, '---\nlabels:\n  - bug\n---\n');
+    assert.equal(getTaskMissionType(pathBugOnly), null);
+  });
+});
+
+test('hasBugLabel detects bug in inline and block label formats', () => {
+  withTempRepo(root => {
+    const taskDir = path.join(root, 'backlog', 'tasks');
+
+    const inlineTask = path.join(taskDir, 'task-bug-inline.md');
+    fs.writeFileSync(inlineTask, '---\nlabels: [ai_sdlc, bug]\n---\n');
+    assert.equal(hasBugLabel(inlineTask), true);
+
+    const blockTask = path.join(taskDir, 'task-bug-block.md');
+    fs.writeFileSync(blockTask, '---\nlabels:\n  - ai_sdlc\n  - bug\n---\n');
+    assert.equal(hasBugLabel(blockTask), true);
+
+    const noBugInline = path.join(taskDir, 'task-nobug-inline.md');
+    fs.writeFileSync(noBugInline, '---\nlabels: [ai_sdlc]\n---\n');
+    assert.equal(hasBugLabel(noBugInline), false);
+
+    const noBugBlock = path.join(taskDir, 'task-nobug-block.md');
+    fs.writeFileSync(noBugBlock, '---\nlabels:\n  - user_value\n---\n');
+    assert.equal(hasBugLabel(noBugBlock), false);
+
+    const nonexistent = path.join(taskDir, 'task-nonexistent.md');
+    assert.equal(hasBugLabel(nonexistent), false);
+  });
+});
+
+test('getTaskLabels extracts all labels from inline and block formats', () => {
+  withTempRepo(root => {
+    const taskDir = path.join(root, 'backlog', 'tasks');
+
+    const inlineTask = path.join(taskDir, 'task-labels-inline.md');
+    fs.writeFileSync(inlineTask, '---\nlabels: [ai_sdlc, bug, feature]\n---\n');
+    assert.deepEqual(getTaskLabels(inlineTask), ['ai_sdlc', 'bug', 'feature']);
+
+    const blockTask = path.join(taskDir, 'task-labels-block.md');
+    fs.writeFileSync(blockTask, '---\nlabels:\n  - user_value\n  - bug\n---\n');
+    assert.deepEqual(getTaskLabels(blockTask), ['user_value', 'bug']);
+
+    const noLabels = path.join(taskDir, 'task-labels-none.md');
+    fs.writeFileSync(noLabels, '---\nid: TASK-000\n---\n');
+    assert.deepEqual(getTaskLabels(noLabels), []);
+
+    const nonexistent = path.join(taskDir, 'task-labels-missing.md');
+    assert.deepEqual(getTaskLabels(nonexistent), []);
+  });
+});
+
+test('getTaskLabels block format takes precedence over inline when both present', () => {
+  withTempRepo(root => {
+    const taskDir = path.join(root, 'backlog', 'tasks');
+    const taskPath = path.join(taskDir, 'task-labels-precedence.md');
+    fs.writeFileSync(taskPath, '---\nlabels: [inline-label]\nlabels:\n  - block-label\n---\n');
+    // Block format is parsed first and returned; inline is fallback
+    const labels = getTaskLabels(taskPath);
+    assert.ok(labels.includes('block-label'));
   });
 });

@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { verifyHandoff, performHandoff } = require('../lib/commands/handoff');
 const { mock } = test;
@@ -834,5 +835,82 @@ test('performHandoff proceeds normally when rebase is a no-op (branch already up
     assert.strictEqual(result.ok, true);
   } finally {
     fs.rmSync(worktree, { recursive: true, force: true });
+  }
+});
+
+// ---------- runDeclaredGates (generic ## Gates runner) ----------
+
+const { runDeclaredGates } = require('../lib/commands/handoff');
+
+test('runDeclaredGates returns skipped when no ## Gates section exists', () => {
+  const missionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gates-test-'));
+  fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Mission\n\nNo gates here.\n');
+  try {
+    const result = runDeclaredGates(missionDir, '/tmp/fake', { log: () => {}, error: () => {} });
+    assert.strictEqual(result.ok, true);
+    assert.strictEqual(result.skipped, true);
+    assert.strictEqual(result.reason, 'no-gates-section');
+  } finally {
+    fs.rmSync(missionDir, { recursive: true, force: true });
+  }
+});
+
+test('runDeclaredGates returns skipped when ## Gates section is empty', () => {
+  const missionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gates-test-'));
+  fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Mission\n\n## Gates\n\n');
+  try {
+    const result = runDeclaredGates(missionDir, '/tmp/fake', { log: () => {}, error: () => {} });
+    assert.strictEqual(result.ok, true);
+    assert.strictEqual(result.skipped, true);
+    assert.strictEqual(result.reason, 'no-gates-declared');
+  } finally {
+    fs.rmSync(missionDir, { recursive: true, force: true });
+  }
+});
+
+test('runDeclaredGates executes passing gates and reports count', () => {
+  const missionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gates-test-'));
+  fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Mission\n\n## Gates\n\n- [ ] echo hello\n- [ ] true\n');
+  try {
+    const result = runDeclaredGates(missionDir, missionDir, { log: () => {}, error: () => {} });
+    assert.strictEqual(result.ok, true);
+    assert.strictEqual(result.skipped, false);
+    assert.strictEqual(result.count, 2);
+    assert.strictEqual(result.reason, 'all-gates-passed');
+  } finally {
+    fs.rmSync(missionDir, { recursive: true, force: true });
+  }
+});
+
+test('runDeclaredGates fails when a gate command exits non-zero', () => {
+  const missionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gates-test-'));
+  fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Mission\n\n## Gates\n\n- [ ] false\n');
+  try {
+    const result = runDeclaredGates(missionDir, missionDir, { log: () => {}, error: () => {} });
+    assert.strictEqual(result.ok, false);
+    assert.strictEqual(result.reason, 'gate-failed');
+    assert.strictEqual(result.gate, 'false');
+  } finally {
+    fs.rmSync(missionDir, { recursive: true, force: true });
+  }
+});
+
+test('runDeclaredGates skips when mission directory does not exist', () => {
+  const result = runDeclaredGates('/nonexistent/dir', '/tmp/fake', { log: () => {}, error: () => {} });
+  assert.strictEqual(result.ok, true);
+  assert.strictEqual(result.skipped, true);
+  assert.strictEqual(result.reason, 'no-mission-file');
+});
+
+test('runDeclaredGates handles checkbox prefixes [- [ ] and - [x])', () => {
+  const missionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gates-test-'));
+  fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Mission\n\n## Gates\n\n- [ ] echo step1\n- [x] true\n');
+  try {
+    const result = runDeclaredGates(missionDir, missionDir, { log: () => {}, error: () => {} });
+    assert.strictEqual(result.ok, true);
+    assert.strictEqual(result.skipped, false);
+    assert.strictEqual(result.count, 2);
+  } finally {
+    fs.rmSync(missionDir, { recursive: true, force: true });
   }
 });

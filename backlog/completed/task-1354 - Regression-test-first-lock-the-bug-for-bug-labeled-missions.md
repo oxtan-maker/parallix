@@ -1,13 +1,11 @@
 ---
 id: TASK-1354
 title: Regression-test-first ("lock the bug") for bug-labeled missions
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-06-26 17:59'
 labels:
-  - quality
-  - guardrail
-  - bug-reduction
+  - ai_sdlc
 dependencies: []
 references:
   - prompts/draft.md
