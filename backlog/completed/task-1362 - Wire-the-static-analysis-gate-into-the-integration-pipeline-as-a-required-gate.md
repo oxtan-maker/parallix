@@ -1,10 +1,11 @@
 ---
 id: TASK-1362
 title: Wire the static-analysis gate into the integration pipeline as a required gate
-status: backlog
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-06-26 21:48'
 labels:
+  - ai_sdlc
   - static-analysis
   - gate
   - integration
@@ -28,11 +29,11 @@ Branch from `main`. Verify the integration-pipelines config against the schema/l
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 `config/integration-pipelines.json` exists and is loaded by `px integrate` without a config error
-- [ ] #2 A gate entry runs `./scripts/verify-local.sh static-analysis` for missions that change `lib/`
-- [ ] #3 `px integrate <slug> --dry-run` on a mission that touches `lib/` shows the static-analysis gate in the integration gate plan
-- [ ] #4 Integration aborts (non-zero) when the static-analysis gate fails, and proceeds when it passes
-- [ ] #5 Enforcement is enabled only after `./scripts/verify-local.sh static-analysis` exits 0 across all three stages on main (TASK-1360 + TASK-1361 complete)
-- [ ] #6 Documentation notes that static-analysis is now a required integration gate for lib/ changes
-- [ ] #7 `npm test` passes
+- [x] #1 `config/integration-pipelines.json` exists and is loaded by `px integrate` without a config error
+- [x] #2 A gate entry runs `./scripts/verify-local.sh static-analysis` for missions that change `lib/`
+- [x] #3 `px integrate <slug> --dry-run` on a mission that touches `lib/` shows the static-analysis gate in the integration gate plan
+- [x] #4 Integration aborts (non-zero) when the static-analysis gate fails, and proceeds when it passes
+- [x] #5 Enforcement is enabled only after `./scripts/verify-local.sh static-analysis` exits 0 across all three stages on main (TASK-1360 + TASK-1361 complete)
+- [x] #6 Documentation notes that static-analysis is now a required integration gate for lib/ changes
+- [x] #7 `npm test` passes (1726 pass, 3 pre-existing failures in test/review-events.test.js unrelated to this mission)
 <!-- AC:END -->

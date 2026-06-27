@@ -13,3 +13,7 @@ Rules:
 
 Before editing any `.md` file in the repo root or `docs/` directory, consult `docs/doc-standards.md` for the full standard.
 
+## Integration Gates
+
+Static-analysis (`./scripts/verify-local.sh static-analysis`: ESLint + tsc --checkJs + test-hygiene) is a required integration gate for any mission that modifies files under `lib/`. The gate configuration lives in `config/integration-pipelines.json` and is enforced by `px integrate` before the squash-merge step. Missions touching `lib/` cannot merge while the static-analysis gate fails. Use `--no-integration-gates` to opt out in emergencies.
+

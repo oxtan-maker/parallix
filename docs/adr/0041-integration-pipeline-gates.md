@@ -145,7 +145,7 @@ Option B (Forgejo Actions) would require runner credentials for docker push and 
 
 ## Deliverables
 
-1. **Repo-side config:** `config/integration-pipelines.json` with entries for `server`, `auth-server`, `web-client`, `web-e2e`; `web-e2e` carries `run_last: true`
+1. **Repo-side config:** `config/integration-pipelines.json` with entries for `server`, `auth-server`, `web-client`, `web-e2e`; `web-e2e` carries `run_last: true`. Task-1362 added a `lib` entry mapping to `./scripts/verify-local.sh static-analysis` as a required gate for `lib/` changes.
 2. **Change detection:** Compute the set of top-level dirs touched by `mission/<slug>` vs the primary branch
 3. **Dispatch in `scripts/verify-local.sh`:** New `gate_integrate()` function and `integrate` area in the case statement
 4. **`node workflow integrate` preflight:** Calls the new `integrate` area as part of `printIntegrationPreflight`

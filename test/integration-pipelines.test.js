@@ -443,6 +443,110 @@ test('script integrate area: web-e2e special case works', () => {
   assert.ok(filtered.some(g => g.key === 'web-e2e'));
 });
 
+// task-1362: Unit tests for lib area detection and static-analysis gate wiring
+
+test('parseFilesToAreas detects lib as a known area (task-1362)', () => {
+  const files = `lib/commands/integrate.js
+lib/core/mission-utils.js`;
+
+  const areas = parseFilesToAreas(files);
+
+  assert.ok(areas.includes('lib'), 'lib should be detected as a known area');
+  assert.equal(areas.length, 1);
+});
+
+test('getIntegrationGatePlan returns lib gate for lib-touching mission (task-1362)', () => {
+  const config = {
+    gates: {
+      lib: { command: './scripts/verify-local.sh static-analysis', order: 1, run_last: false }
+    }
+  };
+
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-lib-gate-'));
+  const tmpConfigPath = path.join(tmpDir, 'integration-pipelines.json');
+  fs.writeFileSync(tmpConfigPath, JSON.stringify(config, null, 2));
+
+  const changedFiles = `lib/commands/integrate.js
+lib/core/nels.js`;
+
+  const plan = getIntegrationGatePlan('task-1362', {
+    runIntegrationGates: true,
+    gitRunner: createMockGitRunner(changedFiles),
+    dryRun: false,
+    configPath: tmpConfigPath
+  });
+
+  fs.unlinkSync(tmpConfigPath);
+  fs.rmdirSync(tmpDir);
+
+  assert.equal(plan.gates.length, 1);
+  assert.equal(plan.gates[0].key, 'lib');
+  assert.equal(plan.gates[0].command, './scripts/verify-local.sh static-analysis');
+  assert.deepEqual(plan.changedAreas, ['lib']);
+});
+
+test('getIntegrationGatePlan excludes lib gate for docs-only mission (task-1362)', () => {
+  const config = {
+    gates: {
+      lib: { command: './scripts/verify-local.sh static-analysis', order: 1, run_last: false },
+      docs: { command: 'echo docs', order: 1, run_last: false }
+    }
+  };
+
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-lib-gate-docs-'));
+  const tmpConfigPath = path.join(tmpDir, 'integration-pipelines.json');
+  fs.writeFileSync(tmpConfigPath, JSON.stringify(config, null, 2));
+
+  const changedFiles = `docs/README.md
+docs/adr/0041-integration-pipeline-gates.md`;
+
+  const plan = getIntegrationGatePlan('task-1362', {
+    runIntegrationGates: true,
+    gitRunner: createMockGitRunner(changedFiles),
+    dryRun: false,
+    configPath: tmpConfigPath
+  });
+
+  fs.unlinkSync(tmpConfigPath);
+  fs.rmdirSync(tmpDir);
+
+  assert.equal(plan.gates.length, 1);
+  assert.equal(plan.gates[0].key, 'docs');
+  assert.ok(!plan.gates.some(g => g.key === 'lib'), 'lib gate should NOT appear for docs-only changes');
+});
+
+test('executeIntegrationGates aborts when lib gate command fails (task-1362)', async () => {
+  const gates = [
+    { key: 'lib', command: './scripts/verify-local.sh static-analysis', order: 1, run_last: false }
+  ];
+
+  const mockRunner = () => ({ status: 1, stdout: '', stderr: 'static analysis failed' });
+
+  const result = await executeIntegrationGates(gates, {
+    commandRunner: mockRunner,
+    rootDir: '/tmp/test'
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.failedGate, 'lib');
+});
+
+test('executeIntegrationGates succeeds when lib gate command passes (task-1362)', async () => {
+  const gates = [
+    { key: 'lib', command: './scripts/verify-local.sh static-analysis', order: 1, run_last: false }
+  ];
+
+  const mockRunner = () => ({ status: 0, stdout: '', stderr: '' });
+
+  const result = await executeIntegrationGates(gates, {
+    commandRunner: mockRunner,
+    rootDir: '/tmp/test'
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.failedGate, null);
+});
+
 // Integration tests that actually invoke scripts/verify-local.sh integrate
 // Note: The script resolves REPO_ROOT from its own location and cd's to it,
 // so these tests use test fixtures via INTEGRATION_CONFIG_PATH env var to avoid

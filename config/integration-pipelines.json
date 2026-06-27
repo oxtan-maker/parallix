@@ -1,0 +1,9 @@
+{
+  "gates": {
+    "lib": {
+      "command": "./scripts/verify-local.sh static-analysis",
+      "order": 1,
+      "run_last": false
+    }
+  }
+}
