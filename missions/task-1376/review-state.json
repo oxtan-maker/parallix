@@ -3,8 +3,8 @@
   "implementer": "custom",
   "round": 3,
   "startedAt": "2026-06-27T13:56:27.160Z",
-  "phase": "reviewing",
-  "disposition": null,
+  "phase": "approved",
+  "disposition": "APPROVED",
   "metadata": {
     "recordedStageLaunches": {
       "review:custom": [
