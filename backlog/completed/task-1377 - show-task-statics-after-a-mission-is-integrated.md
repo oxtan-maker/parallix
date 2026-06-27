@@ -1,10 +1,10 @@
 ---
 id: TASK-1377
 title: show task statics after a mission is integrated
-status: backlog
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-06-27 10:43'
-labels: []
+labels: [ai_sdlc]
 dependencies: []
 ---
 

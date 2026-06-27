@@ -391,6 +391,7 @@ test('recordPostIntegrationStats logs the persisted stats row including pr_fix_r
             date: '2026-05-18',
           },
           report: 'weekly report',
+          data: { rows: [] },
         };
       },
     });
@@ -403,6 +404,7 @@ test('recordPostIntegrationStats logs the persisted stats row including pr_fix_r
   assert.match(logs.join('\n'), /\[INFO\] Workflow stats recorded: task-2000: implementer=claude, pr_fix_rounds=8, classification=ai_sdlc, date=2026-05-18/);
   assert.match(logs.join('\n'), /\[INFO\] Workflow stats updated:/);
   assert.match(logs.join('\n'), /weekly report/);
+  assert.match(logs.join('\n'), /\[INFO\] Mission telemetry by phase: task-2000/);
 });
 
 test('recordPostIntegrationStats records an unknown classification row for a missing-task mission', () => {
@@ -433,6 +435,7 @@ test('recordPostIntegrationStats records an unknown classification row for a mis
             date: '2026-06-24',
           },
           report: 'weekly report',
+          data: { rows: [] },
         };
       },
     });
@@ -478,6 +481,7 @@ test('recordPostIntegrationStats routes stats through PARALLIX_HOME, not a consu
             date: '2026-05-18',
           },
           report: 'weekly report',
+          data: { rows: [] },
         };
       },
     });
@@ -502,6 +506,89 @@ test('recordPostIntegrationStats routes stats through PARALLIX_HOME, not a consu
     else process.env.PARALLIX_HOME = previousHome;
     fs.rmSync(runtimeRoot, { recursive: true, force: true });
     fs.rmSync(parallixHome, { recursive: true, force: true });
+  }
+});
+
+test('recordPostIntegrationStats prints mission-phase telemetry after weekly stats', () => {
+  const logs = [];
+  const originalLog = console.log;
+  console.log = message => logs.push(message);
+  try {
+    const missionPhaseRows = [
+      { mission: 'task-3000', stage: 'draft', provider: 'openai', model: 'gpt-4', implementer: 'claude', input_tokens: '1000', output_tokens: '500', cached_tokens: '100', tool_calls: '50', duration_minutes: '10', cost_usd: '1.50' },
+      { mission: 'task-3000', stage: 'execute', provider: 'openai', model: 'gpt-4', implementer: 'claude', input_tokens: '2000', output_tokens: '1000', cached_tokens: '200', tool_calls: '100', duration_minutes: '20', cost_usd: '3.00' },
+    ];
+    recordPostIntegrationStats('task-3000', {
+      rootDir: FAKE_ROOT,
+      gitRunner(args) {
+        if (args.join(' ') === `-C ${FAKE_ROOT} log -1 --format=%cs`) {
+          return { status: 0, stdout: '2026-05-18\n', stderr: '' };
+        }
+        throw new Error(`unexpected git args: ${JSON.stringify(args)}`);
+      },
+      recordIntegrationStatsFn() {
+        return {
+          changed: true,
+          row: {
+            mission: 'task-3000',
+            implementer: 'claude',
+            pr_fix_rounds: '2',
+            classification: 'ai_sdlc',
+            date: '2026-05-18',
+          },
+          report: 'weekly report',
+          data: { rows: missionPhaseRows },
+        };
+      },
+    });
+
+    const combined = logs.join('\n');
+    assert.match(combined, /\[INFO\] Workflow stats updated:/);
+    assert.match(combined, /weekly report/);
+    assert.match(combined, /\[INFO\] Mission telemetry by phase: task-3000/);
+    assert.match(combined, /draft/);
+    assert.match(combined, /execute/);
+  } finally {
+    console.log = originalLog;
+  }
+});
+
+test('recordPostIntegrationStats handles empty mission-phase rows gracefully', () => {
+  const logs = [];
+  const originalLog = console.log;
+  console.log = message => logs.push(message);
+  try {
+    recordPostIntegrationStats('task-4000', {
+      rootDir: FAKE_ROOT,
+      gitRunner(args) {
+        if (args.join(' ') === `-C ${FAKE_ROOT} log -1 --format=%cs`) {
+          return { status: 0, stdout: '2026-05-18\n', stderr: '' };
+        }
+        throw new Error(`unexpected git args: ${JSON.stringify(args)}`);
+      },
+      recordIntegrationStatsFn() {
+        return {
+          changed: false,
+          row: {
+            mission: 'task-4000',
+            implementer: 'claude',
+            pr_fix_rounds: '0',
+            classification: 'ai_sdlc',
+            date: '2026-05-18',
+          },
+          report: 'weekly report',
+          data: { rows: [] },
+        };
+      },
+    });
+
+    const combined = logs.join('\n');
+    assert.match(combined, /\[INFO\] Workflow stats updated:/);
+    assert.match(combined, /weekly report/);
+    assert.match(combined, /\[INFO\] Mission telemetry by phase: task-4000/);
+    assert.match(combined, /No telemetry rows recorded for mission "task-4000"/);
+  } finally {
+    console.log = originalLog;
   }
 });
 
