@@ -7,7 +7,7 @@
 <Why Now>
 
 ## Refinement Signals
-- Estimated agent % usage limit: 25-50%
+- Predicted NEL bucket: Small (0–80) / Medium (81–235) / Large (235+)
 - Confidence: High
 - Selection note: activate as-is
 - Main drivers: <drivers>

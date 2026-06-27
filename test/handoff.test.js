@@ -914,3 +914,125 @@ test('runDeclaredGates handles checkbox prefixes [- [ ] and - [x])', () => {
     fs.rmSync(missionDir, { recursive: true, force: true });
   }
 });
+
+// ---------- captureNelAtHandoff ----------
+
+const { captureNelAtHandoff } = require('../lib/commands/handoff');
+
+test('captureNelAtHandoff returns error when primary branch not detected', () => {
+  const origGetPrimaryBranch = require('../lib/core/mission-utils').getPrimaryBranch;
+  const { mock } = test;
+
+  const mockFn = mock.method(require('../lib/core/mission-utils'), 'getPrimaryBranch', () => {
+    throw new Error('no branch');
+  });
+
+  try {
+    const result = captureNelAtHandoff('task-fake', {
+      rootDir: '/tmp/fake',
+      missionDir: '/tmp/fake/missions/task-fake',
+      log: () => {},
+      error: () => {},
+    });
+    assert.strictEqual(result.ok, false);
+    assert.match(result.error, /primary branch/);
+  } finally {
+    mockFn.mock.restore();
+  }
+});
+
+test('captureNelAtHandoff writes nel-record.json with predicted bucket, actual NEL, actual bucket, review rounds', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nel-capture-'));
+  const missionDir = path.join(tmpDir, 'missions/task-nel-test');
+  const nelRecordPath = path.join(missionDir, 'nel-record.json');
+
+  try {
+    fs.mkdirSync(missionDir, { recursive: true });
+
+    // Create MISSION.md with predicted NEL bucket
+    fs.writeFileSync(path.join(missionDir, 'MISSION.md'), [
+      '# Mission',
+      '',
+      '## Refinement Signals',
+      '',
+      '- Predicted NEL bucket: Small (0–80) / Medium (81–235) / Large (235+)',
+      '- Confidence: High',
+    ].join('\n'));
+
+    // Create review-state.json with round info
+    fs.writeFileSync(path.join(missionDir, 'review-state.json'), JSON.stringify({
+      reviewer: 'claude',
+      implementer: 'claude',
+      round: 3,
+      phase: 'reviewing',
+    }, null, 2));
+
+    // Mock getPrimaryBranch to return 'main'
+    const { mock } = test;
+    const mockFn = mock.method(require('../lib/core/mission-utils'), 'getPrimaryBranch', () => 'main');
+
+    try {
+      const result = captureNelAtHandoff('task-nel-test', {
+        rootDir: tmpDir,
+        missionDir,
+        log: () => {},
+        error: () => {},
+      });
+
+      assert.strictEqual(result.ok, true);
+      assert.ok(typeof result.nel === 'number', 'nel should be a number');
+      assert.ok(['Small', 'Medium', 'Large'].includes(result.bucket), `bucket should be valid, got ${result.bucket}`);
+
+      // Verify nel-record.json was written
+      assert.ok(fs.existsSync(nelRecordPath), 'nel-record.json should exist');
+      const record = JSON.parse(fs.readFileSync(nelRecordPath, 'utf8'));
+      assert.strictEqual(record.slug, 'task-nel-test');
+      assert.strictEqual(record.predictedBucket, 'Small');
+      assert.strictEqual(record.actualBucket, result.bucket);
+      assert.strictEqual(record.reviewRounds, 3);
+      assert.ok(record.capturedAt, 'should have capturedAt timestamp');
+    } finally {
+      mockFn.mock.restore();
+    }
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('captureNelAtHandoff reads predicted bucket from MISSION.md Refinement Signals', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nel-capture-bucket-'));
+  const missionDir = path.join(tmpDir, 'missions/task-nel-bucket');
+  const nelRecordPath = path.join(missionDir, 'nel-record.json');
+
+  try {
+    fs.mkdirSync(missionDir, { recursive: true });
+
+    // Create MISSION.md with Medium predicted bucket
+    fs.writeFileSync(path.join(missionDir, 'MISSION.md'), [
+      '# Mission',
+      '',
+      '## Refinement Signals',
+      '',
+      '- Predicted NEL bucket: Medium (81–235)',
+    ].join('\n'));
+
+    const { mock } = test;
+    const mockFn = mock.method(require('../lib/core/mission-utils'), 'getPrimaryBranch', () => 'main');
+
+    try {
+      captureNelAtHandoff('task-nel-bucket', {
+        rootDir: tmpDir,
+        missionDir,
+        log: () => {},
+        error: () => {},
+      });
+
+      const record = JSON.parse(fs.readFileSync(nelRecordPath, 'utf8'));
+      assert.strictEqual(record.predictedBucket, 'Medium');
+    } finally {
+      mockFn.mock.restore();
+    }
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});

@@ -3,8 +3,8 @@ id: TASK-1379
 title: >-
   Replace agent-usage % size signal with Net Engineering Lines (NEL) bucket +
   capture actual at handoff
-status: backlog
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-06-27 13:44'
 labels:
   - ai_sdlc

@@ -18,21 +18,21 @@ Introduce three sizing tracks and a dependency-wave planning heuristic.
 
 ### 1. Sizing Tracks
 
-| Track | Scope | Process | Agent Budget |
-|-------|-------|---------|--------------|
-| **Quick Flow** | < 3 files, < 2h estimated, or docs-only. | Minimal `MISSION.md` (Goal, Why Now, Refinement Signals, Gates). Skip detailed checkpoints if straightforward. | < 10% of agent limit |
-| **Full Method** | > 3 files, complex logic, or > 2h. | Standard `MISSION.md` with all sections. Detailed checkpoints. Mandatory external review (C2 review remains required for sensitive scopes per AGENTS.md). | 10-50% of agent limit |
-| **Multi-Wave** | Very large, high risk, or complex dependencies. | Split into multiple `Full Method` missions (waves). | Total > 50% (requiring split) |
+| Track | Scope | Process | NEL Budget |
+|-------|-------|---------|------------|
+| **Quick Flow** | < 3 files, < 2h estimated, or docs-only. | Minimal `MISSION.md` (Goal, Why Now, Refinement Signals, Gates). Skip detailed checkpoints if straightforward. | 0–80 NEL (Small) |
+| **Full Method** | > 3 files, complex logic, or > 2h. | Standard `MISSION.md` with all sections. Detailed checkpoints. Mandatory external review (C2 review remains required for sensitive scopes per AGENTS.md). | 81–235 NEL (Medium) |
+| **Multi-Wave** | Very large, high risk, or complex dependencies. | Split into multiple `Full Method` missions (waves). | 235+ NEL (Large) |
 
-### 2. "Too Large" Thresholds by Agent
+### 2. "Too Large" Thresholds
 
-A mission is "Too Large" if its `Estimated agent % usage limit` exceeds the following thresholds per session/work-unit:
+A mission is "Too Large" for single-wave execution when its predicted NEL bucket exceeds the following thresholds:
 
-- **Claude**: > 50% of daily limit.
-- **Codex**: > 25% of weekly limit.
-- **Gemini**: > 50% of the reasonable session/context budget (approx. 50k-100k tokens for execution).
+- **Small (0–80 NEL)**: suitable for Quick Flow; no decomposition needed.
+- **Medium (81–235 NEL)**: suitable for Full Method; consider splitting if dependencies are complex.
+- **Large (235+ NEL)**: MUST be split into dependency waves before activation.
 
-Missions exceeding these thresholds MUST be split into dependency waves before activation.
+These thresholds are derived from empirical terciles in task-1355 data (n=29 missions) as documented in ADR 0047. Missions exceeding these thresholds MUST be split into dependency waves before activation.
 
 ### 3. Dependency-Wave Heuristic
 
@@ -70,10 +70,12 @@ Agents MUST assign themselves to a task in `Backlog.md` before beginning work in
 - Improved visibility of parallel work via mandatory assignment.
 
 ### Negative
+
 - Requires upfront estimation effort during the `draft` phase.
-- Agents must learn to judge their own usage limits accurately.
+- Agents must estimate NEL buckets, which requires understanding the exclusion rules from ADR 0047.
 
 ## Links
 - [ADR 0032](0032-mission-refinement-state-and-usage-budget-signals.md)
+- [ADR 0047: Per-Mission Change Size Budget](0047-per-mission-change-size-budget.md) — NEL bucket definitions and exclusion globs
 - [MISSION_FLOW.md](../../MISSION_FLOW.md)
 - [AGENTS.md](../../AGENTS.md)

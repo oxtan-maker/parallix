@@ -55,22 +55,23 @@ Also adopt one explicit place for selection metadata:
 
 `## Refinement Signals` must contain:
 
-- `Estimated agent % usage limit`: one of `0-25%`, `25-50%`, `50-75%`, `75-100%`, `100%+`
+- `Predicted NEL bucket`: one of `Small (0–80)`, `Medium (81–235)`, `Large (235+)` per ADR 0047
 - `Confidence`: `High`, `Medium`, or `Low`
 - `Selection note`: `activate as-is`, `split first`, or `defer`, with one short reason
 - `Main drivers`: the 2-4 factors driving the estimate
 
-Interpretation rule for `% usage limit`:
+Interpretation rule for NEL bucket:
 
-- it is an approximate share of a meaningful AI-assisted execution budget under the current repo workflow
+- it is an approximate measure of engineering change volume (insertions + deletions, whitespace-ignored) for the mission's merge diff against the primary branch
 - it may reflect scope breadth, trust-tier sensitivity, validation burden, review/handoff overhead, context churn, and cross-surface coupling
 - it is a selection aid, not a delivery promise or pseudo-scientific schedule estimate
+- NEL is computed by the reusable `nels` module (`lib/core/nels.js`) which excludes workflow/bookkeeping files per ADR 0047
 
 Default activation guidance:
 
-- `0-25%` or `25-50%`: normally safe to activate as-is when confidence is not low
-- `50-75%`: split first unless the mission is unusually high leverage and already sharply bounded
-- `75-100%` or `100%+`: defer or split before activation under normal conditions
+- `Small (0–80)`: normally safe to activate as-is when confidence is not low
+- `Medium (81–235)`: split first unless the mission is unusually high leverage and already sharply bounded
+- `Large (235+)`: defer or split before activation under normal conditions
 - if confidence is `Low`, keep refining instead of treating the estimate as reliable enough for pickup
 
 Current rollout blocker:
@@ -84,14 +85,14 @@ Current rollout blocker:
 
 - The workflow now distinguishes "not ready yet" from "ready, but not yet started."
 - Mission comparison becomes more deliberate because shovel-ready candidates can be compared without immediately activating them.
-- The `% usage limit` signal is lightweight enough to aid selection without creating a second planning system.
+- The NEL bucket signal is lightweight enough to aid selection without creating a second planning system.
 - `MISSION.md` remains the detailed execution contract while Backlog stays the current-state surface.
 
 ### Negative
 
 - The lifecycle gains one more state conceptually, so operators must learn one more transition.
 - Some older workflow docs and historical artifacts will continue to mention the earlier five-state model.
-- `% usage limit` still depends on judgment and may drift if agents stop recording the main drivers behind the estimate.
+- NEL bucket estimates still depend on judgment and may drift if agents stop recording the main drivers behind the estimate.
 
 ## Alternatives Considered
 
@@ -132,4 +133,5 @@ Negative:
 ## Links
 
 - [ADR 0026](0026-ai-task-state-and-agent-recovery-surface.md)
+- [ADR 0047: Per-Mission Change Size Budget](0047-per-mission-change-size-budget.md) — NEL bucket definitions and exclusion globs
 - [Mission](../missions/2026/task-024-mission-complexity-estimation/MISSION.md)
