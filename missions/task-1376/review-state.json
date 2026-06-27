@@ -4,7 +4,7 @@
   "round": 2,
   "startedAt": "2026-06-27T13:36:21.114Z",
   "phase": "approved",
-  "disposition": "APPROVED",
+  "disposition": "REQUEST_CHANGES",
   "metadata": {
     "recordedStageLaunches": {
       "review:custom": [
