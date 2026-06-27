@@ -15,6 +15,7 @@ ADR 0023 remains in WrGroceries and is cross-referenced here instead of copied.
 - `docs/adr/0044-workflow-distribution-model.md` — parallix productization path with `px` naming, runtime/target-state boundary, and a 5-alternative decision matrix; Accepted (2026-06-22, task-1331) on the near-term local npm tarball / global `px` install stance
 - `docs/adr/0045-parallax-branch-model.md` — Two integration modes (trunk-based and feature-branch), Forgejo as PR viewer only, `review` remote wiring, and branch naming conventions
 - `docs/adr/0046-npm-publish-process-and-security.md` — Adopt public npm registry publication for `@magnusekdahl/parallix` alongside the local tarball path; zero-dependency security posture, manual publish process, and rollback considerations
+- `docs/adr/0047-per-mission-change-size-budget.md` — Change the mission size-estimation basis from agent-usage % to **Net Engineering Lines (NEL)** — code+test diff, excluding docs and workflow/admin bookkeeping (the +0.65 reverse-causation confound). Draft estimate becomes a NEL bucket (0–80 / 81–235 / 235+, the empirical risk terciles); capture actual NEL at handoff to calibrate the estimate. No enforcement until the draft bucket is shown reliable.
 
 ## Cross-reference
 - `docs/adr/0023-ai-sdlc-configuration.md` remains in WrGroceries at `/home/magnus/code/visualBoard-task-1302/docs/adr/0023-ai-sdlc-configuration.md`.

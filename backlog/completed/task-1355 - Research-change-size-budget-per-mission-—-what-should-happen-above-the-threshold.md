@@ -3,13 +3,11 @@ id: TASK-1355
 title: >-
   Research: change-size budget per mission — what should happen above the
   threshold
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-06-26 17:59'
 labels:
-  - research
-  - quality
-  - bug-reduction
+  - ai_sdlc
 dependencies:
   - TASK-1267
 priority: low
