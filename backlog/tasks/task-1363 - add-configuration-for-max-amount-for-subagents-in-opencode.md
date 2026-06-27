@@ -1,7 +1,7 @@
 ---
 id: TASK-1363
 title: add configuration for max amount for subagents in opencode
-status: refined
+status: active
 assignee: [custom]
 created_date: '2026-06-27 07:16'
 labels: ["ai_sdlc"]
