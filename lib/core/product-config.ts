@@ -1,13 +1,9 @@
-const fs = require('fs');
-const path = require('path');
-const { spawnSync } = require('child_process');
+import fs from 'node:fs';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 
-const REQUIRED_ADAPTER_KEYS = ['tasks', 'missions', 'verification', 'review', 'agents'];
+const REQUIRED_ADAPTER_KEYS = ['tasks', 'missions', 'verification', 'review', 'agents'] as const;
 
-// Code-owned defaults. An absent workflow.config.json yields a working tool;
-// the optional override file overrides only the keys it sets. These defaults
-// are the single source of truth — there is no shipped example config, so there
-// is no second source to drift from (see task-1233 Scope Amendment).
 const DEFAULT_CONFIG = Object.freeze({
   product: {
     name: 'Workflow',
@@ -20,66 +16,63 @@ const DEFAULT_CONFIG = Object.freeze({
       branchPrefix: 'mission/',
       worktreePattern: '../<repo>-<slug>',
     },
-    // No universal cross-repo gate exists, so the default is no validation
-    // (no command). A repository opts into a gate by declaring
-    // adapters.verification.command in workflow.config.json.
     verification: { defaultArea: 'docs' },
     stats: { path: 'stats.csv' },
-    // Unset provider currently keeps Forgejo enabled (isForgejoReviewEnabled
-    // treats null as enabled) — a WrGroceries-ism. Flipping review off-by-default
-    // for external repos has a large review-subsystem blast radius and is deferred
-    // to TASK-1244; WrGroceries already declares review.provider in its own config.
     review: {},
     agents: {},
   },
 });
 
-/** @param {unknown} value */
-function isPlainObject(value) {
+type PlainObject = Record<string, unknown>;
+
+export function isPlainObject(value: unknown): value is PlainObject {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
-/** @param {Record<string, unknown>} base @param {Record<string, unknown>} override */
-function deepMerge(base, override) {
+export function deepMerge(base: PlainObject, override: PlainObject): PlainObject {
   if (!isPlainObject(override)) {return base;}
   const out = { ...base };
   for (const [key, value] of Object.entries(override)) {
-    const val = /** @type {Record<string, unknown>} */(/** @type {unknown} */(out[key]));
+    const val = out[key] as PlainObject | undefined;
     out[key] = isPlainObject(value) && isPlainObject(val)
-      ? deepMerge(val, /** @type {Record<string, unknown>} */(value))
+      ? deepMerge(val, value)
       : value;
   }
   return out;
 }
 
-// A fresh deep clone of the defaults so callers can never mutate the frozen
-// source.
-function defaultConfig() {
+export function defaultConfig(): typeof DEFAULT_CONFIG {
   return JSON.parse(JSON.stringify(DEFAULT_CONFIG));
 }
 
-function configCandidates(rootDir = process.cwd()) {
+export function configCandidates(rootDir: string = process.cwd()): string[] {
   return [path.join(rootDir, 'workflow.config.json')];
 }
 
-function findWorkflowConfig(rootDir = process.cwd()) {
+export function findWorkflowConfig(rootDir: string = process.cwd()): string | null {
   return configCandidates(rootDir).find(candidate => fs.existsSync(candidate)) || null;
 }
 
-function loadWorkflowConfig(rootDir = process.cwd()) {
+interface LoadedConfigResult {
+  found: boolean;
+  configPath: string | null;
+  config: unknown;
+  parseError: Error | null;
+}
+
+export function loadWorkflowConfig(rootDir: string = process.cwd()): LoadedConfigResult {
   const configPath = findWorkflowConfig(rootDir);
   if (!configPath) {
-    return { found: false, configPath: null, config: null };
+    return { found: false, configPath: null, config: null, parseError: null };
   }
 
-  let raw;
+  let raw: string;
   try {
     raw = fs.readFileSync(configPath, 'utf8');
-  } catch (error) {
-    /** @type {Error & {code?: string}} */
-    const e = /** @type {Error & {code?: string}} */(error);
+  } catch (error: unknown) {
+    const e = error as Error & { code?: string };
     if (e && e.code === 'ENOENT') {
-      return { found: false, configPath: null, config: null };
+      return { found: false, configPath: null, config: null, parseError: null };
     }
     throw error;
   }
@@ -90,48 +83,39 @@ function loadWorkflowConfig(rootDir = process.cwd()) {
       config: JSON.parse(raw),
       parseError: null,
     };
-  } catch (error) {
+  } catch (error: unknown) {
     return {
       found: true,
       configPath,
       config: null,
-      parseError: error,
+      parseError: error as Error,
     };
   }
 }
 
-// The effective config a command sees: code-owned defaults with any override
-// file merged on top. A missing or malformed override falls back to defaults.
-function loadEffectiveConfig(rootDir = process.cwd()) {
+export function loadEffectiveConfig(rootDir: string = process.cwd()): typeof DEFAULT_CONFIG {
   const loaded = loadWorkflowConfig(rootDir);
   if (!loaded.found || loaded.parseError || !isPlainObject(loaded.config)) {
     return defaultConfig();
   }
-  // A structurally invalid override (e.g. adapters not an object) falls back to
-  // defaults rather than merging a bad shape into the effective config.
   if (validateWorkflowConfig(loaded.config).length > 0) {
     return defaultConfig();
   }
-  return deepMerge(defaultConfig(), loaded.config);
+  return deepMerge(defaultConfig(), loaded.config as PlainObject) as typeof DEFAULT_CONFIG;
 }
 
-// The override file is optional and partial: validate only the shape of what it
-// provides. Missing sections are filled by code-owned defaults, so absent
-// sections are not errors (and there are no placeholder sentinels to detect).
-/** @param {unknown} config */
-function validateWorkflowConfig(config) {
+export function validateWorkflowConfig(config: unknown): string[] {
   if (!isPlainObject(config)) {
     return ['top-level JSON object is required'];
   }
 
-  const cfg = /** @type {Record<string, unknown>} */(config);
-  const issues = [];
-  if ('product' in /** @type{Record<string,unknown>} */(cfg) && !isPlainObject(/** @type{Record<string,unknown>} */(cfg).product)) {
+  const cfg = config as PlainObject;
+  const issues: string[] = [];
+  if ('product' in cfg && !isPlainObject(cfg.product)) {
     issues.push('product must be an object');
   }
-  if ('adapters' in /** @type{Record<string,unknown>} */(cfg)) {
-    /** @type {Record<string, unknown>} */
-    const adapters = /** @type {Record<string, unknown>} */(/** @type{Record<string,unknown>} */(cfg).adapters);
+  if ('adapters' in cfg) {
+    const adapters = cfg.adapters as PlainObject | undefined;
     if (!isPlainObject(adapters)) {
       issues.push('adapters must be an object');
     } else {
@@ -145,7 +129,7 @@ function validateWorkflowConfig(config) {
   return issues;
 }
 
-function detectLegacyRepoLayout(rootDir = process.cwd()) {
+export function detectLegacyRepoLayout(rootDir: string = process.cwd()): boolean {
   const backlogDir = path.join(rootDir, 'backlog');
   const missionDocsDir = path.join(rootDir, 'docs', 'missions');
   const verifyScript = path.join(rootDir, 'scripts', 'verify-local.sh');
@@ -153,20 +137,22 @@ function detectLegacyRepoLayout(rootDir = process.cwd()) {
   return fs.existsSync(backlogDir) && fs.existsSync(missionDocsDir) && fs.existsSync(verifyScript);
 }
 
-function isStandaloneWorkflowLayout(rootDir = process.cwd()) {
+export function isStandaloneWorkflowLayout(rootDir: string = process.cwd()): boolean {
   const workflowIndex = path.join(rootDir, 'workflow', 'index.js');
   const workflowConfig = path.join(rootDir, 'workflow.config.json');
 
   return fs.existsSync(workflowIndex) && fs.existsSync(workflowConfig);
 }
 
-function hasGitRepository(rootDir = process.cwd()) {
+export function hasGitRepository(rootDir: string = process.cwd()): boolean {
   return fs.existsSync(path.join(rootDir, '.git'));
 }
 
-/** @param {string} [rootDir] @param {{spawnSyncFn?: typeof spawnSync}} [options] */
-function initializeGitRepository(rootDir = process.cwd(), options = {}) {
-  /** @type {typeof spawnSync} */
+interface InitializeGitOptions {
+  spawnSyncFn?: typeof spawnSync;
+}
+
+export function initializeGitRepository(rootDir: string = process.cwd(), options: InitializeGitOptions = {}): { ok: boolean; branch: string; mode: string } | { ok: boolean; message: string } {
   const spawnSyncFn = options.spawnSyncFn || spawnSync;
   const initMain = spawnSyncFn('git', ['init', '-b', 'main'], {
     cwd: rootDir,
@@ -194,24 +180,22 @@ function initializeGitRepository(rootDir = process.cwd(), options = {}) {
   return { ok: true, branch: 'main', mode: 'init-fallback' };
 }
 
-// Commits the workflow files and any config that exists so the freshly
-// initialized repo has a baseline commit. Without this, mission worktrees
-// created via `git worktree add` would not have workflow/ or
-// workflow.config.json checked out and could not run any workflow command.
-function gitIdentityEnv() {
+export function gitIdentityEnv(): NodeJS.ProcessEnv {
   const env = { ...process.env };
   if (!env.GIT_AUTHOR_NAME) {env.GIT_AUTHOR_NAME = 'Workflow Setup';}
   if (!env.GIT_AUTHOR_EMAIL) {env.GIT_AUTHOR_EMAIL = 'workflow@example.invalid';}
-  if (!env.GIT_COMMITTER_NAME) {env.GIT_COMMITTER_NAME = env.GIT_AUTHOR_NAME;}
-  if (!env.GIT_COMMITTER_EMAIL) {env.GIT_COMMITTER_EMAIL = env.GIT_AUTHOR_EMAIL;}
+  if (!env.GIT_COMMITTER_NAME) {env.GIT_COMMITTER_NAME = env.GIT_AUTHOR_NAME!;}
+  if (!env.GIT_COMMITTER_EMAIL) {env.GIT_COMMITTER_EMAIL = env.GIT_AUTHOR_EMAIL!;}
   return env;
 }
 
-/** @param {string} rootDir @param {{spawnSyncFn?: typeof spawnSync, existsSyncFn?: typeof fs.existsSync}} [options] */
-function commitWorkflowBaseline(rootDir, options = {}) {
-  /** @type {typeof spawnSync} */
+interface CommitWorkflowOptions {
+  spawnSyncFn?: typeof spawnSync;
+  existsSyncFn?: typeof fs.existsSync;
+}
+
+export function commitWorkflowBaseline(rootDir: string, options: CommitWorkflowOptions = {}): { ok: boolean; committed: boolean; files?: string[]; message?: string; reason?: string } {
   const spawnSyncFn = options.spawnSyncFn || spawnSync;
-  /** @type {typeof fs.existsSync} */
   const existsSyncFn = options.existsSyncFn || fs.existsSync;
   const candidates = ['workflow', 'workflow.config.json'];
   const present = candidates.filter(name => existsSyncFn(path.join(rootDir, name)));
@@ -247,7 +231,11 @@ function commitWorkflowBaseline(rootDir, options = {}) {
   return { ok: true, committed: true, files: present };
 }
 
-function ensureStandaloneMissionBaseline(rootDir = process.cwd(), { spawnSyncFn = spawnSync } = {}) {
+interface StandaloneBaselineOptions {
+  spawnSyncFn?: typeof spawnSync;
+}
+
+export function ensureStandaloneMissionBaseline(rootDir: string = process.cwd(), { spawnSyncFn = spawnSync }: StandaloneBaselineOptions = {}): { changed: boolean; committed: boolean; skipped?: boolean; failed?: boolean; message?: string; entries?: string[] } {
   if (!isStandaloneWorkflowLayout(rootDir) || !hasGitRepository(rootDir)) {
     return { changed: false, committed: false, skipped: true };
   }
@@ -325,9 +313,14 @@ function ensureStandaloneMissionBaseline(rootDir = process.cwd(), { spawnSyncFn 
   };
 }
 
-/** @param {string} [rootDir] @param {{isStandaloneWorkflowLayoutFn?: Function, hasGitRepositoryFn?: Function, initializeGitRepositoryFn?: Function, commitWorkflowBaselineFn?: Function}} [options] */
-function ensureStandaloneGitRepo(rootDir = process.cwd(), options = {}) {
-  /** @type {{isStandaloneWorkflowLayoutFn?: Function, hasGitRepositoryFn?: Function, initializeGitRepositoryFn?: Function, commitWorkflowBaselineFn?: Function}} */
+interface EnsureStandaloneGitRepoOptions {
+  isStandaloneWorkflowLayoutFn?: typeof isStandaloneWorkflowLayout;
+  hasGitRepositoryFn?: typeof hasGitRepository;
+  initializeGitRepositoryFn?: typeof initializeGitRepository;
+  commitWorkflowBaselineFn?: typeof commitWorkflowBaseline;
+}
+
+export function ensureStandaloneGitRepo(rootDir: string = process.cwd(), options: EnsureStandaloneGitRepoOptions = {}): { changed: boolean; initialized: boolean; branch?: string; mode?: string; baselineCommit?: { ok: boolean; committed: boolean; files?: string[]; message?: string; reason?: string }; failed?: boolean; message?: string } {
   const opts = options;
   const isStandaloneWorkflowLayoutFn = opts.isStandaloneWorkflowLayoutFn || isStandaloneWorkflowLayout;
   const hasGitRepositoryFn = opts.hasGitRepositoryFn || hasGitRepository;
@@ -338,28 +331,30 @@ function ensureStandaloneGitRepo(rootDir = process.cwd(), options = {}) {
     return { changed: false, initialized: false };
   }
 
-  const result = initializeGitRepositoryFn(rootDir, options);
+  const initOpts = { spawnSyncFn: (options as unknown as InitializeGitOptions).spawnSyncFn };
+  const result = initializeGitRepositoryFn(rootDir, initOpts);
   if (!result.ok) {
     return {
       changed: false,
       initialized: false,
       failed: true,
-      message: result.message || 'git init failed',
+      message: (result as { message: string }).message || 'git init failed',
     };
   }
 
-  const commit = commitWorkflowBaselineFn(rootDir, options);
+  const commitOpts = { spawnSyncFn: (options as unknown as CommitWorkflowOptions).spawnSyncFn, existsSyncFn: (options as unknown as CommitWorkflowOptions).existsSyncFn };
+  const commit = commitWorkflowBaselineFn(rootDir, commitOpts);
 
   return {
     changed: true,
     initialized: true,
-    branch: result.branch || 'main',
-    mode: result.mode || 'init-main',
+    branch: (result as { branch: string }).branch || 'main',
+    mode: (result as { mode: string }).mode || 'init-main',
     baselineCommit: commit,
   };
 }
 
-function adapterChecklist() {
+export function adapterChecklist(): string[] {
   return [
     'Workflow runs on built-in defaults; no config file is required to start',
     'Create workflow.config.json only to override a default (schema: workflow/config/workflow.config.schema.json)',
@@ -371,23 +366,25 @@ function adapterChecklist() {
   ];
 }
 
-// Returns the override file's adapters object, or {} when there is no override.
-// Each resolver (resolveTaskStorage, resolveVerificationAdapter, …) applies its
-// own code-owned fallback on top of this, so an absent config still yields a
-// fully working tool. loadEffectiveConfig (used by `node parallix config`) is
-// the document-level view; the per-resolver fallbacks remain the runtime source
-// of truth so this change does not shadow them.
-function loadAdapterConfig(rootDir = process.cwd()) {
+export function loadAdapterConfig(rootDir: string = process.cwd()): PlainObject {
   const explicit = loadWorkflowConfig(rootDir);
   if (!explicit.found || explicit.parseError || !isPlainObject(explicit.config)) {
     return {};
   }
-  return isPlainObject(explicit.config.adapters) ? explicit.config.adapters : {};
+  return isPlainObject(explicit.config.adapters) ? explicit.config.adapters as PlainObject : {};
 }
 
-function resolveTaskStorage(rootDir = process.cwd()) {
+interface TaskStorageResult {
+  baseDir: string;
+  tasksDir: string;
+  completedDir: string;
+  archiveTasksDir: string;
+  draftsDir: string;
+}
+
+export function resolveTaskStorage(rootDir: string = process.cwd()): TaskStorageResult {
   const fallbackBaseDir = path.join(rootDir, 'backlog');
-  const fallback = {
+  const fallback: TaskStorageResult = {
     baseDir: fallbackBaseDir,
     tasksDir: path.join(fallbackBaseDir, 'tasks'),
     completedDir: path.join(fallbackBaseDir, 'completed'),
@@ -395,8 +392,8 @@ function resolveTaskStorage(rootDir = process.cwd()) {
     draftsDir: path.join(fallbackBaseDir, 'drafts'),
   };
 
-  const tasksAdapter = loadAdapterConfig(rootDir).tasks || {};
-  const storage = tasksAdapter.storagePath || tasksAdapter.storage;
+  const tasksAdapter = loadAdapterConfig(rootDir).tasks as PlainObject | undefined || {};
+  const storage = (tasksAdapter.storagePath as string) || (tasksAdapter.storage as string);
   if (!storage) {
     return fallback;
   }
@@ -425,11 +422,12 @@ function resolveTaskStorage(rootDir = process.cwd()) {
   }
 
   if (typeof storage === 'object' && !Array.isArray(storage)) {
-    const tasksDir = storage.tasksDir
-      ? path.resolve(rootDir, storage.tasksDir)
+    const storageObj = storage as PlainObject;
+    const tasksDir = storageObj.tasksDir
+      ? path.resolve(rootDir, storageObj.tasksDir as string)
       : fallback.tasksDir;
-    const completedDir = storage.completedDir
-      ? path.resolve(rootDir, storage.completedDir)
+    const completedDir = storageObj.completedDir
+      ? path.resolve(rootDir, storageObj.completedDir as string)
       : path.join(path.dirname(tasksDir), 'completed');
     const baseDir = path.dirname(tasksDir);
 
@@ -437,8 +435,8 @@ function resolveTaskStorage(rootDir = process.cwd()) {
       baseDir,
       tasksDir,
       completedDir,
-      archiveTasksDir: storage.archiveTasksDir
-        ? path.resolve(rootDir, storage.archiveTasksDir)
+      archiveTasksDir: storageObj.archiveTasksDir
+        ? path.resolve(rootDir, storageObj.archiveTasksDir as string)
         : path.join(baseDir, 'archive', 'tasks'),
       draftsDir: path.join(baseDir, 'drafts'),
     };
@@ -447,43 +445,52 @@ function resolveTaskStorage(rootDir = process.cwd()) {
   return fallback;
 }
 
-function resolveReviewAdapter(rootDir = process.cwd()) {
-  const review = loadAdapterConfig(rootDir).review || {};
+interface ReviewAdapterResult {
+  provider: string | null;
+  remote: string | null;
+  baseUrl: string | null;
+  repo: string | null;
+}
+
+export function resolveReviewAdapter(rootDir: string = process.cwd()): ReviewAdapterResult {
+  const review = loadAdapterConfig(rootDir).review as PlainObject | undefined || {};
   return {
-    provider: review.provider || null,
-    remote: review.remote || null,
-    baseUrl: review.baseUrl || null,
-    repo: review.repo || null,
+    provider: (review.provider as string) || null,
+    remote: (review.remote as string) || null,
+    baseUrl: (review.baseUrl as string) || null,
+    repo: (review.repo as string) || null,
   };
 }
 
-function isForgejoReviewEnabled(rootDir = process.cwd()) {
+export function isForgejoReviewEnabled(rootDir: string = process.cwd()): boolean {
   const review = resolveReviewAdapter(rootDir);
   if (review.provider === null) {return false;}
   return review.provider === 'forgejo';
 }
 
-function resolveAgentAdapter() {
+export function resolveAgentAdapter(): PlainObject {
   return {};
 }
 
-// Returns the configured LLM model string for an agent family, or null when the
-// family is not listed under adapters.agents.models. A null return means the
-// launcher omits the model parameter entirely so the agent uses its own default.
-/** @param {string} agentFamily @param {string} [rootDir] */
-function resolveAgentModel(agentFamily, rootDir = process.cwd()) {
+export function resolveAgentModel(agentFamily: string, rootDir: string = process.cwd()): string | null {
   if (!agentFamily || typeof agentFamily !== 'string') {return null;}
-  const agents = loadEffectiveConfig(rootDir).adapters.agents;
-  if (!isPlainObject(agents) || !isPlainObject(agents.models)) {return null;}
-  const model = agents.models[agentFamily];
+  const agents = loadEffectiveConfig(rootDir).adapters.agents as PlainObject | undefined;
+  if (!isPlainObject(agents)) {return null;}
+  const models = agents.models as PlainObject | undefined;
+  if (!isPlainObject(models)) {return null;}
+  const model = models[agentFamily];
   return typeof model === 'string' && model.length > 0 ? model : null;
 }
 
-function evaluateRepositoryReadiness(rootDir = process.cwd()) {
+interface RepositoryReadinessResult {
+  mode: string;
+  configPath: string | null;
+  issues: string[];
+}
+
+export function evaluateRepositoryReadiness(rootDir: string = process.cwd()): RepositoryReadinessResult {
   const explicit = loadWorkflowConfig(rootDir);
 
-  // No override file: the tool runs on code-owned defaults. This is a ready
-  // state, not an "unconfigured" failure — an absent config is valid.
   if (!explicit.found) {
     return {
       mode: 'default',
@@ -496,7 +503,7 @@ function evaluateRepositoryReadiness(rootDir = process.cwd()) {
     return {
       mode: 'invalid',
       configPath: explicit.configPath,
-      issues: [`invalid JSON: ${/** @type{Error} */(explicit.parseError).message}`],
+      issues: [`invalid JSON: ${(explicit.parseError as Error).message}`],
     };
   }
 
@@ -508,29 +515,4 @@ function evaluateRepositoryReadiness(rootDir = process.cwd()) {
   };
 }
 
-module.exports = {
-  REQUIRED_ADAPTER_KEYS,
-  DEFAULT_CONFIG,
-  defaultConfig,
-  adapterChecklist,
-  commitWorkflowBaseline,
-  configCandidates,
-  deepMerge,
-  detectLegacyRepoLayout,
-  evaluateRepositoryReadiness,
-  findWorkflowConfig,
-  hasGitRepository,
-  initializeGitRepository,
-  isForgejoReviewEnabled,
-  isStandaloneWorkflowLayout,
-  loadWorkflowConfig,
-  loadEffectiveConfig,
-  loadAdapterConfig,
-  resolveAgentAdapter,
-  resolveAgentModel,
-  resolveReviewAdapter,
-  resolveTaskStorage,
-  ensureStandaloneMissionBaseline,
-  ensureStandaloneGitRepo,
-  validateWorkflowConfig,
-};
+export { REQUIRED_ADAPTER_KEYS, DEFAULT_CONFIG };

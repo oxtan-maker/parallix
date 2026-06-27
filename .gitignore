@@ -10,3 +10,7 @@ workflow/.cache/
 workflow/.sessions/
 workflow/config/agents.local.json
 agents.local.json
+missions/*/review-events/
+# Compiled output
+dist/
+lib/core/*.js

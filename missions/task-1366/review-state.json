@@ -1,0 +1,21 @@
+{
+  "reviewer": "custom",
+  "implementer": "custom",
+  "round": 1,
+  "startedAt": "2026-06-27T15:23:34.957Z",
+  "phase": "approved",
+  "disposition": "APPROVED",
+  "metadata": {
+    "recordedStageLaunches": {
+      "review:custom": [
+        "custom|ses_0f652258cffe279SsJtzUt5a6U|2026-06-27T15:23:35.589Z|2026-06-27T15:25:38.184Z|0",
+        "custom|ses_0f652258cffe279SsJtzUt5a6U|2026-06-27T18:48:48.324Z|2026-06-27T18:49:02.440Z|0",
+        "custom|ses_0f652258cffe279SsJtzUt5a6U|2026-06-27T19:04:52.152Z|2026-06-27T19:08:01.039Z|0"
+      ],
+      "follow-up:custom": [
+        "custom|ses_0f67ac640ffeH6ubggE10cz3Al|2026-06-27T15:25:40.123Z|2026-06-27T15:38:44.286Z|0",
+        "custom|ses_0f67ac640ffeH6ubggE10cz3Al|2026-06-27T18:17:25.643Z|2026-06-27T18:36:55.924Z|0"
+      ]
+    }
+  }
+}

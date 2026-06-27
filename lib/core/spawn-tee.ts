@@ -1,30 +1,49 @@
-'use strict';
+import childProcess from 'node:child_process';
+import type { SpawnOptions, ChildProcess } from 'node:child_process';
+import path from 'node:path';
 
-const childProcess = require('child_process');
-const path = require('path');
+export const DEFAULT_MAX_TAIL_BYTES = 64 * 1024;
 
-// Bound the in-memory transcript so a noisy or long-running agent cannot
-// turn the harness into an O(total-output) memory hog. Detection only needs
-// a recent window to find limit-hit phrases (limit-hit.js clips ~200 chars
-// around the match), so a tail buffer is sufficient. The cap is generous
-// enough that a real limit-hit message and its surrounding reset-time
-// context land in the buffer even if the agent printed a lot before exiting.
-const DEFAULT_MAX_TAIL_BYTES = 64 * 1024;
+type ChunkType = Buffer | string;
 
-/** @typedef {Buffer|string} ChunkType */
-class TailBuffer {
-  /** @param {number} maxBytes */
-  constructor(maxBytes) {
-    /** @type {number} */
+interface SpawnTeeResult {
+  status: number | null;
+  signal: string | null;
+  stdout: string;
+  stderr: string;
+  error: unknown | null;
+  startedAt: string;
+  endedAt: string;
+}
+
+interface NoOutputWatchdog {
+  onNoOutput?: (event: { command: string; args: string[]; pid: number | undefined; elapsedMs: number }) => void;
+  initialDelayMs?: number;
+  intervalMs?: number;
+}
+
+interface SpawnTeeOptions {
+  stdoutSink?: NodeJS.WriteStream;
+  stderrSink?: NodeJS.WriteStream;
+  maxTailBytes?: number;
+  noOutputWatchdog?: NoOutputWatchdog | null;
+  cwd?: string;
+  env?: Record<string, string>;
+  [key: string]: unknown;
+}
+
+export class TailBuffer {
+  maxBytes: number;
+  chunks: ChunkType[];
+  size: number;
+
+  constructor(maxBytes: number) {
     this.maxBytes = maxBytes;
-    /** @type {ChunkType[]} */
     this.chunks = [];
-    /** @type {number} */
     this.size = 0;
   }
 
-  /** @param {ChunkType} chunk */
-  push(chunk) {
+  push(chunk: ChunkType): void {
     this.chunks.push(chunk);
     this.size += chunk.length;
     while (this.size > this.maxBytes && this.chunks.length > 0) {
@@ -45,29 +64,23 @@ class TailBuffer {
     }
   }
 
-  toString() {
+  toString(): string {
     if (this.chunks.length === 0) {return '';}
-    return Buffer.concat(/** @type {Buffer[]} */(this.chunks)).toString('utf8');
+    return Buffer.concat(this.chunks as Buffer[]).toString('utf8');
   }
 }
 
-/**
- * Spawn a child process and tee its stdout/stderr to the parent's streams
- * while keeping a bounded tail of the output in memory. Returns a Promise
- * resolving with a result shaped like `spawnSync` (status, signal, stdout,
- * stderr, error) but with stdout/stderr as utf-8 strings populated even
- * when stdio:'inherit' is requested. Forces stdio to ['inherit', 'pipe',
- * 'pipe'] internally so the parent's stdin is preserved while child output
- * remains capturable.
- *
- * Pure I/O wrapper: no policy, no retry, no agent knowledge.
- */
-/**
- * @param {string} command
- * @param {string[]} args
- * @param {{stdoutSink?: NodeJS.WriteStream, stderrSink?: NodeJS.WriteStream, maxTailBytes?: number, noOutputWatchdog?: {onNoOutput?: Function, initialDelayMs?: number, intervalMs?: number}, cwd?: string, env?: Record<string, string>, [key: string]: any}} [options]
- */
-function spawnAndTee(command, args, options = {}) {
+interface FinishPayload {
+  status: number | null;
+  signal: string | null;
+  stdout: string;
+  stderr: string;
+  error: unknown | null;
+  startedAt?: string;
+  endedAt?: string;
+}
+
+export function spawnAndTee(command: string, args: string[], options: SpawnTeeOptions = {}): Promise<SpawnTeeResult> {
   const {
     stdoutSink = process.stdout,
     stderrSink = process.stderr,
@@ -79,27 +92,24 @@ function spawnAndTee(command, args, options = {}) {
   return new Promise((resolve) => {
     const stdoutTail = new TailBuffer(maxTailBytes);
     const stderrTail = new TailBuffer(maxTailBytes);
-    /** @type {boolean} */
     let settled = false;
-    /** @type {boolean} */
     let sawOutput = false;
-    /** @type {ReturnType<typeof setTimeout> | null} */
-    let watchdogTimer = null;
+    let watchdogTimer: ReturnType<typeof setTimeout> | null = null;
     const startTime = Date.now();
-    const resolvedCwd = path.resolve(spawnOptions.cwd || process.cwd());
-    const env = {
+    const resolvedCwd = path.resolve((spawnOptions.cwd as string) || process.cwd());
+    const env: Record<string, string> = {
       ...process.env,
       ...(spawnOptions.env || {}),
       PWD: resolvedCwd
     };
 
-    let child;
+    let child: ChildProcess;
     try {
       child = childProcess.spawn(command, args, {
         ...spawnOptions,
         env,
         stdio: ['inherit', 'pipe', 'pipe']
-      });
+      } as SpawnOptions);
     } catch (err) {
       resolve({
         status: null, signal: null, stdout: '', stderr: '', error: err,
@@ -108,25 +118,23 @@ function spawnAndTee(command, args, options = {}) {
       return;
     }
 
-    const clearWatchdog = () => {
+    const clearWatchdog = (): void => {
       if (watchdogTimer) {
         clearTimeout(watchdogTimer);
         watchdogTimer = null;
       }
     };
 
-    /** @param {{status: number|null, signal: string|null, stdout: string, stderr: string, error: any, startedAt: string, endedAt: string}} payload */
-    const finish = (payload) => {
+    const finish = (payload: FinishPayload): void => {
       if (settled) {return;}
       settled = true;
       clearWatchdog();
       payload.startedAt = new Date(startTime).toISOString();
       payload.endedAt = new Date().toISOString();
-      resolve(payload);
+      resolve(payload as SpawnTeeResult);
     };
 
-    /** @param {number} delayMs */
-    const scheduleWatchdog = (delayMs) => {
+    const scheduleWatchdog = (delayMs: number): void => {
       if (!noOutputWatchdog || typeof noOutputWatchdog.onNoOutput !== 'function') {return;}
       const delay = Number.isFinite(delayMs) && delayMs >= 0 ? delayMs : 0;
       watchdogTimer = setTimeout(() => {
@@ -134,12 +142,12 @@ function spawnAndTee(command, args, options = {}) {
         if (settled || sawOutput) {return;}
         if (typeof noOutputWatchdog.onNoOutput === 'function') {
           noOutputWatchdog.onNoOutput({
-          command,
-          args,
-          pid: child.pid,
-          elapsedMs: Date.now() - startTime
-        });
-      }
+            command,
+            args,
+            pid: child.pid,
+            elapsedMs: Date.now() - startTime
+          });
+        }
         scheduleWatchdog(noOutputWatchdog.intervalMs ?? 0);
       }, delay);
       if (typeof watchdogTimer.unref === 'function') {
@@ -147,7 +155,7 @@ function spawnAndTee(command, args, options = {}) {
       }
     };
 
-    const noteOutput = () => {
+    const noteOutput = (): void => {
       sawOutput = true;
       clearWatchdog();
     };
@@ -156,14 +164,14 @@ function spawnAndTee(command, args, options = {}) {
       scheduleWatchdog(noOutputWatchdog.initialDelayMs ?? 0);
     }
 
-    child.stdout.on('data', (chunk) => {
+    child.stdout?.on('data', (chunk: Buffer) => {
       noteOutput();
       stdoutTail.push(chunk);
       if (stdoutSink && typeof stdoutSink.write === 'function') {
         stdoutSink.write(chunk);
       }
     });
-    child.stderr.on('data', (chunk) => {
+    child.stderr?.on('data', (chunk: Buffer) => {
       noteOutput();
       stderrTail.push(chunk);
       if (stderrSink && typeof stderrSink.write === 'function') {
@@ -171,30 +179,24 @@ function spawnAndTee(command, args, options = {}) {
       }
     });
 
-    child.on('error', (/** @type {Error} */ err) => {
+    child.on('error', (err: Error) => {
       finish({
         status: null,
         signal: null,
         stdout: stdoutTail.toString(),
         stderr: stderrTail.toString(),
         error: err,
-        startedAt: new Date(startTime).toISOString(),
-        endedAt: new Date().toISOString()
       });
     });
 
-    child.on('close', (/** @type {number|null} */ code, /** @type {string|null} */ signal) => {
+    child.on('close', (code: number | null, signal: string | null) => {
       finish({
         status: code,
         signal,
         stdout: stdoutTail.toString(),
         stderr: stderrTail.toString(),
         error: null,
-        startedAt: new Date(startTime).toISOString(),
-        endedAt: new Date().toISOString()
       });
     });
   });
 }
-
-module.exports = { spawnAndTee, DEFAULT_MAX_TAIL_BYTES };

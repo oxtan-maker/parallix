@@ -3,15 +3,20 @@
     "allowJs": false,
     "checkJs": false,
     "noEmit": false,
-    "outDir": ".",
+    "outDir": "dist",
+    "rootDir": "lib",
     "strict": true,
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "target": "ES2024"
   },
+  "include": [
+    "lib/**/*.ts"
+  ],
   "exclude": [
     "test/",
     "graphify-out/",
-    ".forgejo-local/"
+    ".forgejo-local/",
+    "dist/"
   ]
 }

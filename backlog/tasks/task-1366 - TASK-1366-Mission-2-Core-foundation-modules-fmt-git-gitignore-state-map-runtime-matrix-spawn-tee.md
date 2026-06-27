@@ -3,8 +3,8 @@ id: TASK-1366
 title: >-
   TASK-1366: Mission 2 - Core foundation modules (fmt, git, gitignore,
   state-map, runtime-matrix, spawn-tee)
-status: backlog
-assignee: []
+status: review
+assignee: [custom]
 created_date: '2026-06-27 10:37'
 labels: []
 dependencies: []

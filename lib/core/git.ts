@@ -1,39 +1,57 @@
-const childProcess = require('child_process');
+import childProcess, { spawnSync } from 'node:child_process';
+import type { SpawnSyncOptions } from 'node:child_process';
+import * as fsMod from 'node:fs';
+import * as pathMod from 'node:path';
 
-/** @param {string[]} args @param {object} options */
-function git(args, options = {}) {
-  const spawnOptions = {
+interface GitOptions {
+  encoding?: BufferEncoding;
+  stdio?: import('node:child_process').StdioOptions;
+  cwd?: string;
+  env?: NodeJS.ProcessEnv;
+  maxBuffer?: number;
+  [key: string]: unknown;
+}
+
+interface GitResult {
+  status: number | null;
+  signal: string | null;
+  stdout: string;
+  stderr: string;
+  error?: Error | null;
+}
+
+export function git(args: string[], options: GitOptions = {}): GitResult {
+  const spawnOptions: SpawnSyncOptions = {
     encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: ['ignore', 'pipe', 'pipe'] as const,
     ...options
   };
-  const result = childProcess.spawnSync('git', args, /** @type {import('child_process').SpawnSyncOptionsWithStringEncoding} */(spawnOptions));
+  const result = spawnSync('git', args, spawnOptions);
   if (result.error && result.status === null) {
     throw result.error;
   }
-  return result;
+  return { status: result.status, signal: result.signal, stdout: String(result.stdout ?? ''), stderr: String(result.stderr ?? ''), error: result.error };
 }
 
-/** @param {string} command @param {string[]} args @param {object} options */
-function run(command, args, options = {}) {
-  const spawnOptions = {
+export function run(command: string, args: string[], options: GitOptions = {}): GitResult {
+  const spawnOptions: SpawnSyncOptions = {
     encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: ['ignore', 'pipe', 'pipe'] as const,
     ...options
   };
-  const result = childProcess.spawnSync(command, args, /** @type {import('child_process').SpawnSyncOptionsWithStringEncoding} */(spawnOptions));
+  const result = spawnSync(command, args, spawnOptions);
   if (result.error && result.status === null) {
     throw result.error;
   }
-  return result;
+  return { status: result.status, signal: result.signal, stdout: String(result.stdout ?? ''), stderr: String(result.stderr ?? ''), error: result.error };
 }
 
-function getCurrentBranch(cwd = process.cwd()) {
+export function getCurrentBranch(cwd: string = process.cwd()): string {
   const result = git(['-C', cwd, 'branch', '--show-current']);
   return result.stdout.trim();
 }
 
-function getWorktreeStatus(cwd = process.cwd()) {
+export function getWorktreeStatus(cwd: string = process.cwd()): string[] {
   const result = git(['-C', cwd, 'status', '--porcelain']);
   return result.stdout
     .split('\n')
@@ -41,18 +59,18 @@ function getWorktreeStatus(cwd = process.cwd()) {
     .filter(Boolean);
 }
 
-function isDirty(cwd = process.cwd()) {
+export function isDirty(cwd: string = process.cwd()): boolean {
   const result = git(['-C', cwd, 'status', '--porcelain']);
   return result.stdout.trim().length > 0;
 }
 
-function getUncommittedCount(cwd = process.cwd()) {
+export function getUncommittedCount(cwd: string = process.cwd()): number {
   const result = git(['-C', cwd, 'status', '--porcelain']);
   if (!result.stdout.trim()) {return 0;}
   return result.stdout.trim().split('\n').length;
 }
 
-function parseUnmergedFiles(output = '') {
+export function parseUnmergedFiles(output: string = ''): string[] {
   return Array.from(new Set(
     output
       .split('\n')
@@ -63,7 +81,26 @@ function parseUnmergedFiles(output = '') {
   ));
 }
 
-function detectRebaseState(cwd = process.cwd(), { gitRunner = git, fsModule = require('fs'), pathModule = require('path') } = {}) {
+interface RebaseStateResult {
+  inProgress: boolean;
+  rebaseHead: string;
+  detached: boolean;
+  unmergedFiles: string[];
+  rebaseDir: string | null;
+}
+
+interface GitRunner {
+  (args: string[]): GitResult;
+}
+
+interface DetectRebaseOptions {
+  gitRunner?: GitRunner;
+  fsModule?: typeof fsMod;
+  pathModule?: typeof pathMod;
+}
+
+export function detectRebaseState(cwd: string = process.cwd(), options: DetectRebaseOptions = {}): RebaseStateResult {
+  const { gitRunner = git, fsModule = fsMod, pathModule = pathMod } = options;
   const gitDirResult = gitRunner(['-C', cwd, 'rev-parse', '--git-dir']);
   const resolvedGitDir = gitDirResult.status === 0
     ? gitDirResult.stdout.trim()
@@ -97,25 +134,13 @@ function detectRebaseState(cwd = process.cwd(), { gitRunner = git, fsModule = re
   };
 }
 
-function getLastCommit() {
+export function getLastCommit(): { sha: string; date: string; subject: string } {
   const result = git(['log', '-1', '--format=%H|%ad|%s']);
   const [sha, date, subject] = result.stdout.trim().split('|');
   return { sha, date, subject };
 }
 
-function getLastThreeCommits() {
+export function getLastThreeCommits(): string[] {
   const result = git(['log', '-3', '--format=%s']);
   return result.stdout.trim().split('\n');
 }
-
-module.exports = {
-  git,
-  run,
-  getCurrentBranch,
-  getWorktreeStatus,
-  isDirty,
-  getUncommittedCount,
-  detectRebaseState,
-  getLastCommit,
-  getLastThreeCommits
-};
