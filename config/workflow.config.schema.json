@@ -89,6 +89,18 @@
               "type": "object",
               "description": "Optional per-agent-family LLM model override, keyed by agent family name (e.g. codex, claude, gemini, glm, mistral, custom). Each value is the model identifier passed to that agent's CLI. A family that is not listed sends no model parameter, so the agent uses its own default. There is no 'default' key.",
               "additionalProperties": { "type": "string" }
+            },
+            "subagents": {
+              "type": "object",
+              "description": "Operational limits for subagent spawning within an agent.",
+              "additionalProperties": false,
+              "properties": {
+                "maxParallel": {
+                  "type": ["integer", "null"],
+                  "minimum": 0,
+                  "description": "Maximum number of parallel subagent forks. When unset, null, or zero, no limit is applied."
+                }
+              }
             }
           }
         }
