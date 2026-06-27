@@ -1,0 +1,25 @@
+{
+  "reviewer": "custom",
+  "implementer": "custom",
+  "round": 5,
+  "startedAt": "2026-06-27T14:24:41.998Z",
+  "phase": "approved",
+  "disposition": "APPROVED",
+  "metadata": {
+    "recordedStageLaunches": {
+      "review:custom": [
+        "custom|ses_0f74837f3ffediO45rQNSU6G5V|2026-06-27T10:54:49.007Z|2026-06-27T10:56:32.562Z|0",
+        "custom|ses_0f74837f3ffediO45rQNSU6G5V|2026-06-27T13:36:21.774Z|2026-06-27T13:38:21.733Z|0",
+        "custom|ses_0f74837f3ffediO45rQNSU6G5V|2026-06-27T13:56:27.850Z|2026-06-27T13:57:55.212Z|0",
+        "custom|ses_0f74837f3ffediO45rQNSU6G5V|2026-06-27T14:06:08.340Z|2026-06-27T14:08:21.016Z|0",
+        "custom|ses_0f74837f3ffediO45rQNSU6G5V|2026-06-27T14:24:42.669Z|2026-06-27T14:27:09.423Z|0"
+      ],
+      "follow-up:custom": [
+        "custom|ses_0f7505bd3ffeJOTnZnVV41xn3Z|2026-06-27T13:33:04.104Z|2026-06-27T13:36:19.740Z|0",
+        "custom|ses_0f7505bd3ffeJOTnZnVV41xn3Z|2026-06-27T13:54:38.357Z|2026-06-27T13:56:25.714Z|0",
+        "custom|ses_0f7505bd3ffeJOTnZnVV41xn3Z|2026-06-27T14:05:04.746Z|2026-06-27T14:06:06.252Z|0",
+        "custom|ses_0f7505bd3ffeJOTnZnVV41xn3Z|2026-06-27T14:23:28.419Z|2026-06-27T14:24:40.631Z|0"
+      ]
+    }
+  }
+}
