@@ -1,15 +1,17 @@
 {
   "compilerOptions": {
-    "allowJs": true,
-    "checkJs": true,
-    "noEmit": true,
+    "allowJs": false,
+    "checkJs": false,
+    "noEmit": false,
+    "outDir": ".",
     "strict": true,
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "target": "ES2024"
   },
-  "include": [
-    "lib/core/**/*.js",
-    "lib/commands/**/*.js"
+  "exclude": [
+    "test/",
+    "graphify-out/",
+    ".forgejo-local/"
   ]
 }
