@@ -1,7 +1,7 @@
 ---
 id: TASK-1376
 title: stats improvments
-status: review
+status: ready-for-integration
 assignee: [custom]
 created_date: '2026-06-27 10:42'
 labels: [user_value]
