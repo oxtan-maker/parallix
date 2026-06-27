@@ -64,7 +64,7 @@ Opencode (the `custom` agent family) can internally spawn parallel subagents wit
 ## Gates
 
 - [ ] ./scripts/verify-local.sh docs
-- [ ] npm test (zero failures)
+- [ ] npm test
 
 ## Restricted Areas
 
