@@ -1,0 +1,21 @@
+{
+  "reviewer": "custom",
+  "implementer": "custom",
+  "round": 2,
+  "startedAt": "2026-06-27T16:00:00.000Z",
+  "phase": "fixing",
+  "disposition": null,
+  "metadata": {
+    "previousRound": {
+      "round": 1,
+      "reviewer": "custom",
+      "disposition": "REQUEST_CHANGES",
+      "issues": [
+        "Scope violations: lib/, test/, docs/ modified; 3 mission directories deleted; backlog files deleted/renamed",
+        "CP-4 evidence referenced package.json:52 as test output (it is the test command)",
+        "CP-3 missing concrete npm pack --dry-run output evidence",
+        "CP-4 missing gate script output evidence"
+      ]
+    }
+  }
+}
