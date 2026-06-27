@@ -2,9 +2,9 @@
 id: TASK-1376
 title: stats improvments
 status: backlog
-assignee: []
+assignee: [custom]
 created_date: '2026-06-27 10:42'
-labels: []
+labels: [user_value]
 dependencies: []
 ---
 
