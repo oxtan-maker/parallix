@@ -1525,8 +1525,8 @@ test('summarizeAgentWindow trusts local ground truth over a stale zero in the CS
 
     const window = { start: new Date('2026-06-10T00:00:00Z'), end: new Date('2026-06-16T00:00:00Z') };
     const rows = [
-      { date: '2026-06-13', repo: '', mission: 'task-3000', implementer: 'codex', stage: 'active', pr_fix_rounds: '0' },
-      { date: '2026-06-13', repo: '', mission: 'task-3000', implementer: 'codex', stage: 'review', pr_fix_rounds: '0' },
+      { date: '2026-06-13', repo: '', mission: 'task-3000', implementer: 'codex', stage: 'active', classification: 'ai_sdlc', pr_fix_rounds: '0' },
+      { date: '2026-06-13', repo: '', mission: 'task-3000', implementer: 'codex', stage: 'review', classification: 'ai_sdlc', pr_fix_rounds: '0' },
     ];
 
     const stored = stats._internals.summarizeAgentWindow(rows, window);
@@ -1703,9 +1703,9 @@ test('task-1342: review row with OpenAI reviewer shows Usage % even when claude 
 test('task-1376: summarizeAgentWindow groups local AI rows by model name, not by custom', () => {
   const window = { start: new Date('2026-06-10T00:00:00Z'), end: new Date('2026-06-20T00:00:00Z') };
   const rows = [
-    { date: '2026-06-12', mission: 'task-1001', implementer: 'custom', model: 'qwen3.5', pr_fix_rounds: '1' },
-    { date: '2026-06-13', mission: 'task-1002', implementer: 'custom', model: 'qwen3.5', pr_fix_rounds: '2' },
-    { date: '2026-06-14', mission: 'task-1003', implementer: 'custom', model: 'llama3', pr_fix_rounds: '0' },
+    { date: '2026-06-12', mission: 'task-1001', implementer: 'custom', model: 'qwen3.5', classification: 'ai_sdlc', pr_fix_rounds: '1' },
+    { date: '2026-06-13', mission: 'task-1002', implementer: 'custom', model: 'qwen3.5', classification: 'ai_sdlc', pr_fix_rounds: '2' },
+    { date: '2026-06-14', mission: 'task-1003', implementer: 'custom', model: 'llama3', classification: 'ai_sdlc', pr_fix_rounds: '0' },
   ];
 
   const result = stats._internals.summarizeAgentWindow(rows, window);
@@ -1724,8 +1724,8 @@ test('task-1376: summarizeAgentWindow groups local AI rows by model name, not by
 test('task-1376: summarizeAgentWindow empty model falls back to implementer', () => {
   const window = { start: new Date('2026-06-10T00:00:00Z'), end: new Date('2026-06-20T00:00:00Z') };
   const rows = [
-    { date: '2026-06-12', mission: 'task-2001', implementer: 'claude', model: '', pr_fix_rounds: '3' },
-    { date: '2026-06-13', mission: 'task-2002', implementer: 'claude', model: '', pr_fix_rounds: '1' },
+    { date: '2026-06-12', mission: 'task-2001', implementer: 'claude', model: '', classification: 'user_value', pr_fix_rounds: '3' },
+    { date: '2026-06-13', mission: 'task-2002', implementer: 'claude', model: '', classification: 'user_value', pr_fix_rounds: '1' },
   ];
 
   const result = stats._internals.summarizeAgentWindow(rows, window);
@@ -1740,11 +1740,11 @@ test('task-1376: summarizeAgentWindow empty model falls back to implementer', ()
 test('task-1376: summarizeAgentWindow handles mixed cloud + local AI rows together', () => {
   const window = { start: new Date('2026-06-10T00:00:00Z'), end: new Date('2026-06-20T00:00:00Z') };
   const rows = [
-    { date: '2026-06-12', mission: 'task-3001', implementer: 'codex', model: 'gpt-5', pr_fix_rounds: '1' },
-    { date: '2026-06-13', mission: 'task-3002', implementer: 'custom', model: 'qwen3.5', pr_fix_rounds: '2' },
-    { date: '2026-06-14', mission: 'task-3003', implementer: 'gemini', model: 'gemini-2.5-pro', pr_fix_rounds: '0' },
-    { date: '2026-06-15', mission: 'task-3004', implementer: 'custom', model: 'llama3', pr_fix_rounds: '1' },
-    { date: '2026-06-16', mission: 'task-3005', implementer: 'claude', model: '', pr_fix_rounds: '3' },
+    { date: '2026-06-12', mission: 'task-3001', implementer: 'codex', model: 'gpt-5', classification: 'ai_sdlc', pr_fix_rounds: '1' },
+    { date: '2026-06-13', mission: 'task-3002', implementer: 'custom', model: 'qwen3.5', classification: 'ai_sdlc', pr_fix_rounds: '2' },
+    { date: '2026-06-14', mission: 'task-3003', implementer: 'gemini', model: 'gemini-2.5-pro', classification: 'ai_sdlc', pr_fix_rounds: '0' },
+    { date: '2026-06-15', mission: 'task-3004', implementer: 'custom', model: 'llama3', classification: 'ai_sdlc', pr_fix_rounds: '1' },
+    { date: '2026-06-16', mission: 'task-3005', implementer: 'claude', model: '', classification: 'user_value', pr_fix_rounds: '3' },
   ];
 
   const result = stats._internals.summarizeAgentWindow(rows, window);
