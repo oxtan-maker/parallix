@@ -1,9 +1,8 @@
 ---
 id: TASK-1368
 title: 'TASK-1368: Mission 4 - Core utilities (mission-utils, verification)'
-status: active
-assignee:
-  - custom
+status: review
+assignee: [claude]
 created_date: '2026-06-27 10:37'
 updated_date: '2026-06-27 22:56'
 labels:
