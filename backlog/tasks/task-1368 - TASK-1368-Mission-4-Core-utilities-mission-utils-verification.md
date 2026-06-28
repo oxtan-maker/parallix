@@ -1,7 +1,7 @@
 ---
 id: TASK-1368
 title: 'TASK-1368: Mission 4 - Core utilities (mission-utils, verification)'
-status: done
+status: active
 assignee:
   - custom
 created_date: '2026-06-27 10:37'
@@ -55,29 +55,3 @@ Convert the 2 core utility modules that handle mission lifecycle operations and 
 - [ ] #6 Bug-labeled missions include a red-to-green reproduction test that fails before the fix and passes after
 <!-- DOD:END -->
 
-## Final Summary
-
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
-## Conversion Summary
-
-Converted 2 core utility modules from CJS to ESM/TypeScript:
-
-### verification.js → verification.ts (166 → 200 lines)
-- All `require()` replaced with `import` statements
-- Dual export pattern (`module.exports = fn` + named exports) converted to `export default` + named exports
-- TypeScript interfaces added: GitFn, VerificationAdapterConfig, VerificationProof, PublishedTreeStateOk, PublishedTreeStateFail
-- All 8 verification tests pass
-
-### mission-utils.js → mission-utils.ts (1100 → 912 lines)
-- All ~15 dynamic `require('./git')` calls replaced with static `import { git, run, getCurrentBranch } from './git.js'`
-- `module.exports = {...}` (43 named exports) replaced with individual `export` statements
-- TypeScript interfaces added: GitOptions, GitResult
-- All 41 mission-utils tests pass
-- Preserved injectable-dependency patterns (gitRunner, commandRunner, gitFn)
-
-### Verification
-- `npm test`: 1715 pass, 14 fail (pre-existing), 22 skipped — no new failures
-- `tsc --noEmit`: zero errors
-- Zero `require()` and `module.exports` in converted files
-- `scripts/verify-local.sh docs`: PASS
-<!-- SECTION:FINAL_SUMMARY:END -->
