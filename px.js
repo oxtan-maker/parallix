@@ -61,8 +61,6 @@ function shellInit(shell = 'bash') {
     '      if [ "$_px_current" != "$(cd "$_px_target" && pwd -P)" ]; then',
     '        cd "$_px_target" && echo "[px] Switched terminal context to: $(pwd)"',
     '      fi',
-    '    else',
-    '      echo "[px] ERROR: target directory \'$_px_target\' not found." >&2',
     '    fi',
     '  fi',
     '  return $_px_exit',

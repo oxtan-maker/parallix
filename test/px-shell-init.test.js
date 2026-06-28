@@ -122,3 +122,63 @@ test('px function preserves the runner exit code', () => {
   fs.rmSync(fakeBin, { recursive: true, force: true });
   fs.rmSync(target, { recursive: true, force: true });
 });
+
+// Reproduction test for task-1381: the px shell function must not emit an error
+// when the integrate command's transition signal points to a directory that does
+// not exist. Before the fix, the shell function writes
+// `[px] ERROR: target directory '<path>' not found.` to stderr and the test
+// fails. After the fix, the function skips the cd silently, writes nothing to
+// stderr, and exits with the runner's original exit code (0).
+test('px function silently skips cd when target directory is missing (task-1381)', () => {
+  // Use a path that definitely does not exist — do NOT create the directory.
+  const missingTarget = path.join(os.tmpdir(), `px-shell-init-missing-${Date.now()}`);
+  assert.ok(!fs.existsSync(missingTarget), 'test setup: target must not exist');
+
+  const fakeBin = makeFakePx({ signalPath: missingTarget });
+
+  const result = runBash(
+    [
+      `eval "$(node ${JSON.stringify(pxJs)} shell-init bash)"`,
+      'px integrate task-1 >/dev/null',
+      'printf "STATUS=%s\\n" "$?"',
+    ],
+    fakeBin,
+  );
+
+  // The shell function must NOT print an error to stderr when the directory is
+  // missing. Before the fix, stderr contains "ERROR: target directory".
+  const stderrOutput = result.stderr || '';
+  assert.doesNotMatch(stderrOutput, /ERROR: target directory/, 'shell function must not emit error for missing directory');
+
+  // Exit code should reflect the runner's exit code (0), not an error from the
+  // shell function's directory check.
+  assert.equal(result.status, 0, `expected exit code 0, got ${result.status}. stderr was: ${stderrOutput}`);
+
+  fs.rmSync(fakeBin, { recursive: true, force: true });
+});
+
+// Companion test for task-1381: the `Working directory:` signal path must also
+// silently skip the cd when the target directory does not exist. Both signal
+// types share the same _px_target extraction and [ -d ] check in the shell
+// function template, but success criterion #1 explicitly covers both.
+test('px function silently skips cd for Working directory signal when target missing (task-1381)', () => {
+  const missingTarget = path.join(os.tmpdir(), `px-shell-init-wd-missing-${Date.now()}`);
+  assert.ok(!fs.existsSync(missingTarget), 'test setup: target must not exist');
+
+  const fakeBin = makeFakePx({ signalPath: missingTarget, signal: 'working-directory' });
+
+  const result = runBash(
+    [
+      `eval "$(node ${JSON.stringify(pxJs)} shell-init bash)"`,
+      'px integrate task-1 >/dev/null',
+      'printf "STATUS=%s\\n" "$?"',
+    ],
+    fakeBin,
+  );
+
+  const stderrOutput = result.stderr || '';
+  assert.doesNotMatch(stderrOutput, /ERROR: target directory/, 'shell function must not emit error for missing directory via Working directory signal');
+  assert.equal(result.status, 0, `expected exit code 0, got ${result.status}. stderr was: ${stderrOutput}`);
+
+  fs.rmSync(fakeBin, { recursive: true, force: true });
+});
