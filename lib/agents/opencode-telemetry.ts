@@ -19,8 +19,7 @@
 const PROVIDER = 'opencode';
 const MODEL = 'custom';
 
-/** @param {*} value */
-function num(value) {
+function num(value: any) {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0;
 }
 
@@ -28,7 +27,7 @@ function num(value) {
  * @param {{[key: string]: any}} obj
  * @returns {{input_tokens?: number, output_tokens?: number, cached_input_tokens?: number, total_tokens?: number}|null}
  */
-function findTokenUsage(obj) {
+function findTokenUsage(obj: {[key: string]: any}): {input_tokens?: number, output_tokens?: number, cached_input_tokens?: number, total_tokens?: number} | null {
   if (!obj || typeof obj !== 'object') {return null;}
 
   // Direct token usage fields at top level
@@ -126,7 +125,7 @@ function findTokenUsage(obj) {
  * @param {{[key: string]: any}} parsed
  * @returns {string|null}
  */
-function extractSessionId(parsed) {
+function extractSessionId(parsed: {[key: string]: any}) {
   if (!parsed || typeof parsed !== 'object') {return null;}
 
   // Direct session_id
@@ -159,7 +158,7 @@ function extractSessionId(parsed) {
  * @param {{[key: string]: any}} parsed
  * @returns {string|null}
  */
-function extractModelName(parsed) {
+function extractModelName(parsed: {[key: string]: any}) {
   if (!parsed || typeof parsed !== 'object') {return null;}
 
   // Direct model fields
@@ -191,7 +190,7 @@ function extractModelName(parsed) {
  * @param {{[key: string]: any}} parsed
  * @returns {number}
  */
-function countToolCalls(parsed) {
+function countToolCalls(parsed: {[key: string]: any}) {
   if (!parsed || typeof parsed !== 'object') {return 0;}
 
   let count = 0;
@@ -255,7 +254,7 @@ function countToolCalls(parsed) {
  *   when the export JSON omits the model field
  * @returns {object|null} Normalized telemetry object or null
  */
-function extractOpencodeTelemetryFromExport(jsonString, fallbackModel) {
+function extractOpencodeTelemetryFromExport(jsonString: string, fallbackModel?: string) {
   if (!jsonString || typeof jsonString !== 'string' || !jsonString.trim()) {
     return null;
   }
@@ -321,7 +320,7 @@ function extractOpencodeTelemetryFromExport(jsonString, fallbackModel) {
  * @param {{exportJson?: string, telemetry?: object}} result
  * @returns {object|null}
  */
-function extractOpencodeTelemetry(result) {
+function extractOpencodeTelemetry(result: {exportJson?: string, telemetry?: any}) {
   if (result && result.exportJson && typeof result.exportJson === 'string') {
     return extractOpencodeTelemetryFromExport(result.exportJson);
   }
@@ -339,13 +338,13 @@ function extractOpencodeTelemetry(result) {
  *   to the generic family label when absent.
  * @returns {{provider: string, model: string}}
  */
-function getOpencodeProviderModel(defaultModel) {
+function getOpencodeProviderModel(defaultModel?: string) {
   return { provider: PROVIDER, model: defaultModel || MODEL };
 }
 
-module.exports = {
+export {
   extractOpencodeTelemetryFromExport,
   extractOpencodeTelemetry,
   getOpencodeProviderModel,
-  parseOpencodeExport: extractOpencodeTelemetryFromExport,
+  extractOpencodeTelemetryFromExport as parseOpencodeExport,
 };

@@ -39,13 +39,11 @@ const PATTERN_SETS = Object.freeze({
   ]
 });
 
-/** @param {string} agent */
-function getPatternsForAgent(agent) {
-  return PATTERN_SETS[/** @type {keyof typeof PATTERN_SETS} */(agent)] || [];
+function getPatternsForAgent(agent: string) {
+  return PATTERN_SETS[agent as keyof typeof PATTERN_SETS] || [];
 }
 
-/** @param {string} agent @param {string} text */
-function findLimitHitMatch(agent, text) {
+function findLimitHitMatch(agent: string, text: string) {
   const patterns = getPatternsForAgent(agent);
   for (const pattern of patterns) {
     const match = pattern.exec(text);
@@ -56,8 +54,7 @@ function findLimitHitMatch(agent, text) {
   return null;
 }
 
-/** @param {string} text @param {number} index @param {number} length */
-function clipContext(text, index, length) {
+function clipContext(text: string, index: number, length: number) {
   const before = Math.max(0, index - 200);
   const after = Math.min(text.length, index + length + 200);
   return text.slice(before, after);
@@ -70,8 +67,7 @@ const RELATIVE_PATTERN = /\bin\s+(\d+)\s+(hour|hours|minute|minutes|second|secon
 const RETRY_AFTER_PATTERN = /retry[- ]?after[:\s]+(\d+)\s*(seconds?|s|minutes?|m)?/i;
 const RETRY_AT_DATE_PATTERN = /(?:retry|reset|try again|reset(?:s)? at)[^\n]{0,40}?(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)/i;
 
-/** @param {string | undefined} value */
-function parseIsoOffset(value) {
+function parseIsoOffset(value: string | undefined) {
   if (!value) {return null;}
   if (value === 'Z') {return 0;}
   const m = /([+-])(\d{2}):?(\d{2})/.exec(value);
@@ -80,8 +76,7 @@ function parseIsoOffset(value) {
   return sign * (Number(m[2]) * 60 + Number(m[3]));
 }
 
-/** @param {string} text */
-function parseIso(text) {
+function parseIso(text: string) {
   const m = ISO_PATTERN.exec(text);
   if (!m) {return null;}
   const [, year, month, day, hour, minute, second, offset] = m;
@@ -93,8 +88,7 @@ function parseIso(text) {
   return new Date(utcMs - offsetMinutes * 60 * 1000);
 }
 
-/** @param {string} text @param {Date} now */
-function parseTwelveHour(text, now) {
+function parseTwelveHour(text: string, now: Date) {
   const m = TWELVE_HOUR_PATTERN.exec(text);
   if (!m) {return null;}
   let hour = Number(m[1]);
@@ -106,8 +100,7 @@ function parseTwelveHour(text, now) {
   return projectClockTime(now, hour, minute);
 }
 
-/** @param {string} text @param {Date} now */
-function parseTwentyFourHour(text, now) {
+function parseTwentyFourHour(text: string, now: Date) {
   const m = TWENTY_FOUR_HOUR_PATTERN.exec(text);
   if (!m) {return null;}
   const hour = Number(m[1]);
@@ -115,8 +108,7 @@ function parseTwentyFourHour(text, now) {
   return projectClockTime(now, hour, minute);
 }
 
-/** @param {string} text @param {Date} now */
-function parseRelative(text, now) {
+function parseRelative(text: string, now: Date) {
   const m = RELATIVE_PATTERN.exec(text);
   if (!m) {return null;}
   const amount = Number(m[1]);
@@ -128,8 +120,7 @@ function parseRelative(text, now) {
   return new Date(now.getTime() + ms);
 }
 
-/** @param {string} text @param {Date} now */
-function parseRetryAfter(text, now) {
+function parseRetryAfter(text: string, now: Date) {
   const m = RETRY_AFTER_PATTERN.exec(text);
   if (!m) {return null;}
   const amount = Number(m[1]);
@@ -140,15 +131,13 @@ function parseRetryAfter(text, now) {
   return new Date(now.getTime() + ms);
 }
 
-/** @param {string} text */
-function parseRetryAtDate(text) {
+function parseRetryAtDate(text: string) {
   const m = RETRY_AT_DATE_PATTERN.exec(text);
   if (!m) {return null;}
   return parseIso(m[1]);
 }
 
-/** @param {Date} now @param {number} hour @param {number} minute */
-function projectClockTime(now, hour, minute) {
+function projectClockTime(now: Date, hour: number, minute: number) {
   const candidate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hour, minute, 0, 0);
   if (candidate.getTime() <= now.getTime()) {
     candidate.setDate(candidate.getDate() + 1);
@@ -156,8 +145,7 @@ function projectClockTime(now, hour, minute) {
   return candidate;
 }
 
-/** @param {string} text @param {Date} [now] */
-function parseResetTime(text, now = new Date()) {
+function parseResetTime(text: string, now: Date = new Date()) {
   if (!text) {return null;}
   return (
     parseRetryAtDate(text) ||
@@ -169,8 +157,7 @@ function parseResetTime(text, now = new Date()) {
   );
 }
 
-/** @param {Date} date */
-function formatBlockUntil(date) {
+function formatBlockUntil(date: Date) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
@@ -178,8 +165,7 @@ function formatBlockUntil(date) {
   return `${year}-${month}-${day} ${hour}`;
 }
 
-/** @param {Date} date */
-function ceilToNextHour(date) {
+function ceilToNextHour(date: Date) {
   const ceil = new Date(date.getTime());
   if (ceil.getMinutes() === 0 && ceil.getSeconds() === 0 && ceil.getMilliseconds() === 0) {
     return ceil;
@@ -189,9 +175,16 @@ function ceilToNextHour(date) {
   return ceil;
 }
 
-/**
- * @param {{ agent: string, stdout?: string, stderr?: string, status?: number, signal?: string | null, error?: { code?: string } | null, now?: Date }} [opts]
- */
+interface DetectLimitHitOptions {
+  agent: string;
+  stdout?: string;
+  stderr?: string;
+  status?: number;
+  signal?: string | null;
+  error?: { code?: string } | null;
+  now?: Date;
+}
+
 function detectLimitHit({
   agent,
   stdout = '',
@@ -200,7 +193,7 @@ function detectLimitHit({
   signal,
   error,
   now = new Date()
-} = /** @type {{ agent: string, stdout?: string, stderr?: string, status?: number, signal?: string | null, error?: { code?: string } | null, now?: Date }} */({})) {
+}: DetectLimitHitOptions = {} as DetectLimitHitOptions) {
   if (!agent) {return null;}
   // Gate detection on a failed launcher invocation. A successful child (exit 0,
   // no signal, no spawn error) means any limit-hit phrases in the transcript
@@ -247,7 +240,7 @@ function detectLimitHit({
   return { until: formatBlockUntil(ceiled), source };
 }
 
-module.exports = {
+export {
   detectLimitHit,
   parseResetTime,
   formatBlockUntil,

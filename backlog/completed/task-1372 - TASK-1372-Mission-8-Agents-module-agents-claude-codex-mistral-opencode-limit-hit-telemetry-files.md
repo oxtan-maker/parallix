@@ -3,11 +3,11 @@ id: TASK-1372
 title: >-
   TASK-1372: Mission 8 - Agents module (agents, claude, codex, mistral,
   opencode, limit-hit, + telemetry files)
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-06-27 10:37'
 updated_date: '2026-06-27 10:38'
-labels: []
+labels: [ai_sdlc]
 dependencies:
   - TASK-1365
   - TASK-1366
@@ -53,10 +53,10 @@ Convert the 12 agent launcher and telemetry modules. These handle launching AI c
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Verification gate ran and passed on the final tree with captured proof rather than an unverified claim
-- [ ] #2 Lint and static analysis report clean on every changed file
-- [ ] #3 No focused or unannotated skipped tests were introduced (no .only and no bare .skip)
-- [ ] #4 Final checkpoint Goal Check table cites real evidence using file:line references and test names
-- [ ] #5 Docs updated to reflect any workflow or user-facing behavior change
-- [ ] #6 Bug-labeled missions include a red-to-green reproduction test that fails before the fix and passes after
+- [x] #1 Verification gate ran and passed on the final tree with captured proof rather than an unverified claim — `./scripts/verify-local.sh static-analysis` "ALL STAGES PASSED" (proof in CP-3.md)
+- [x] #2 Lint and static analysis report clean on every changed file — ESLint clean, `tsc --noEmit` exit 0
+- [x] #3 No focused or unannotated skipped tests were introduced (no .only and no bare .skip) — no new tests written; skipped count unchanged at 22
+- [x] #4 Final checkpoint Goal Check table cites real evidence using file:line references and test names — CP-3.md `## Goal Check`
+- [x] #5 Docs updated to reflect any workflow or user-facing behavior change — N/A: pure CJS→ESM/TS refactor, no user-facing or workflow behavior change
+- [x] #6 Bug-labeled missions include a red-to-green reproduction test that fails before the fix and passes after — N/A: not a bug-labeled mission (label: ai_sdlc)
 <!-- DOD:END -->

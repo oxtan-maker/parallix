@@ -38,7 +38,7 @@ function getMistralProviderModel() {
   return { provider: 'mistral', model: 'mistral' };
 }
 
-module.exports = {
+export {
   extractMistralTelemetry,
   getMistralProviderModel,
 };

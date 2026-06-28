@@ -36,8 +36,7 @@
 
 const PROVIDER = 'anthropic';
 
-/** @param {*} value */
-function num(value) {
+function num(value: any) {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0;
 }
 
@@ -46,8 +45,7 @@ function num(value) {
  * `--include-partial-messages` form nests the real event under `stream_event`;
  * the bare form has it at the top level. Returns the inner event object.
  */
-/** @param {any} evt */
-function unwrapEvent(evt) {
+function unwrapEvent(evt: any) {
   if (evt && evt.type === 'stream_event' && evt.event && typeof evt.event === 'object') {
     return evt.event;
   }
@@ -68,8 +66,7 @@ function unwrapEvent(evt) {
  *     resultUsage: { inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens } | null
  *   }
  */
-/** @param {string} content */
-function parseClaudeStreamJson(content) {
+function parseClaudeStreamJson(content: string) {
   if (!content) {return null;}
 
   let sessionId = null;
@@ -177,8 +174,7 @@ function parseClaudeStreamJson(content) {
  *
  * Returns null when the stream yields no usable token signal.
  */
-/** @param {string} stdout */
-function extractClaudeTelemetryFromStdout(stdout) {
+function extractClaudeTelemetryFromStdout(stdout: string) {
   const parsed = parseClaudeStreamJson(stdout);
   if (!parsed) {return null;}
 
@@ -231,7 +227,7 @@ function extractClaudeTelemetryFromStdout(stdout) {
   };
 }
 
-module.exports = {
+export {
   parseClaudeStreamJson,
   extractClaudeTelemetryFromStdout,
 };

@@ -1,29 +1,42 @@
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const { spawnAndTee } = require('../core/spawn-tee');
-const { extractCodexTelemetry } = require('./codex-telemetry');
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { spawnAndTee } from '../core/spawn-tee.js';
+import { extractCodexTelemetry } from './codex-telemetry.js';
+// tools/sessions is still CJS (not converted in this wave); require keeps it
+// untyped (any) without pulling a non-included .js into the typecheck program.
 const sessions = require('../tools/sessions');
 
+interface CodexInvocationOptions {
+  prompt: string;
+  worktree: string;
+  interactive?: boolean;
+  env?: {[key: string]: string};
+  resume?: boolean;
+  sessionId?: string | null;
+  model?: string | null;
+}
+
+interface StartCodexAgentOptions extends CodexInvocationOptions {
+  teeOptions?: object;
+  slug?: string | null;
+  role?: string | null;
+}
+
 // Injectable I/O for tests. Production uses the real spawn-tee / export capture.
-/** @type {Function} */
-let _spawnAndTee = spawnAndTee;
-/** @type {object} */
-let _sessions = sessions;
+let _spawnAndTee: any = spawnAndTee;
+let _sessions: any = sessions;
 
 // Test hooks: override the launcher's I/O without touching the public signature.
-/** @param {Function} fn */
-function __setSpawnAndTeeForTest(fn) { _spawnAndTee = fn || spawnAndTee; }
-/** @param {object} mod */
-function __setSessionsForTest(mod) { _sessions = mod || sessions; }
+function __setSpawnAndTeeForTest(fn: any) { _spawnAndTee = fn || spawnAndTee; }
+function __setSessionsForTest(mod: any) { _sessions = mod || sessions; }
 
 // Codex outputs "To continue this session, run codex resume <id>" at the end.
 // Also captures the session ID from the "Interaction Summary" block.
 const CODEX_SESSION_ID_RE = /codex\s+resume\s+([0-9a-f-]+)/i;
 const CODEX_SESSION_ID_ALT_RE = /Session ID:\s*([0-9a-f-]+)/i;
 
-/** @param {string} stdout */
-function extractCodexSessionId(stdout) {
+function extractCodexSessionId(stdout: string) {
   if (!stdout) {return null;}
   const m = CODEX_SESSION_ID_RE.exec(stdout);
   if (m) {return m[1];}
@@ -40,10 +53,7 @@ function hasLiveTty() {
   return Boolean(process.stdin.isTTY && process.stdout.isTTY);
 }
 
-/**
- * @param {{ prompt: string, worktree: string, interactive?: boolean, env?: {[key: string]: string}, resume?: boolean, sessionId?: string | null, model?: string | null }} opts
- */
-function buildCodexDraftInvocation({ prompt, worktree, interactive = hasLiveTty(), env = {}, resume = false, sessionId = null, model = null }) {
+function buildCodexDraftInvocation({ prompt, worktree, interactive = hasLiveTty(), env = {}, resume = false, sessionId = null, model = null }: CodexInvocationOptions) {
   if (resume) {
     const args = ['exec', 'resume'];
     if (sessionId) {
@@ -85,30 +95,21 @@ function buildCodexDraftInvocation({ prompt, worktree, interactive = hasLiveTty(
   };
 }
 
-/**
- * @param {{ prompt: string, worktree: string, env?: {[key: string]: string}, resume?: boolean, sessionId?: string | null, model?: string | null, teeOptions?: object, slug?: string | null, role?: string | null }} opts
- */
-function startCodexDraftAgent({ prompt, worktree, env = {}, resume = false, sessionId = null, model = null, teeOptions = {}, slug = null, role = null }) {
+function startCodexDraftAgent({ prompt, worktree, env = {}, resume = false, sessionId = null, model = null, teeOptions = {}, slug = null, role = null }: StartCodexAgentOptions) {
   // The launcher always tees through spawnAndTee for limit-hit detection, which
   // forces child stdio to ['inherit', 'pipe', 'pipe']. Codex's `--full-auto`
   // interactive UI requires a TTY on stdout, so we always use the headless
   // `exec` path here regardless of whether the parent has a TTY.
   ensureCodexHome(worktree);
 
-  /**
-   * @param {{stdout?: string, stderr?: string}} result
-   */
-  function isStaleSessionResult(result) {
+  function isStaleSessionResult(result: any) {
     if (!result) {return false;}
     const stderr = result.stderr || '';
     const stdout = result.stdout || '';
     return (stderr.includes('Session not found') || stdout.includes('Session not found'));
   }
 
-  /**
-   * @param {{stdout?: string, sessionId?: string, telemetry?: object, model?: string, provider?: string}} result
-   */
-  function processResult(result) {
+  function processResult(result: any) {
     if (result && result.stdout) {
       result.sessionId = extractCodexSessionId(result.stdout) || undefined;
     }
@@ -129,15 +130,12 @@ function startCodexDraftAgent({ prompt, worktree, env = {}, resume = false, sess
     return result;
   }
 
-  /**
-   * @param {{command: string, args: string[], options?: object}} invocation
-   */
-  function staleSessionHandler(invocation) {
+  function staleSessionHandler(invocation: any) {
     return _spawnAndTee(invocation.command, invocation.args, { ...invocation.options, ...teeOptions })
-      .then(/** @param {object} result */ (result) => {
+      .then((result: any) => {
         if (isStaleSessionResult(result) && worktree && resume) {
           try {
-            /** @type {any} */(_sessions).clearSession(worktree, slug, role);
+            _sessions.clearSession(worktree, slug, role);
           } catch (_) { /* best-effort */ }
           const freshInv = buildCodexDraftInvocation({ prompt, worktree, interactive: false, env, resume: false, sessionId: null, model });
           return _spawnAndTee(freshInv.command, freshInv.args, { ...freshInv.options, ...teeOptions });
@@ -153,18 +151,15 @@ function startCodexDraftAgent({ prompt, worktree, env = {}, resume = false, sess
   return { invocation, resultPromise };
 }
 
-/** @param {string} worktree */
-function codexHomeRoot(worktree) {
+function codexHomeRoot(worktree: string) {
   return path.join(worktree, '.workflow', 'codex-home');
 }
 
-/** @param {string} worktree */
-function codexConfigPath(worktree) {
+function codexConfigPath(worktree: string) {
   return path.join(codexHomeRoot(worktree), '.codex', 'config.toml');
 }
 
-/** @param {string} worktree */
-function codexAuthPath(worktree) {
+function codexAuthPath(worktree: string) {
   return path.join(codexHomeRoot(worktree), '.codex', 'auth.json');
 }
 
@@ -172,16 +167,14 @@ function userCodexAuthPath() {
   return path.join(os.homedir(), '.codex', 'auth.json');
 }
 
-/** @param {*} value */
-function tomlString(value) {
+function tomlString(value: any) {
   return `"${String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
 // Graphify's Codex skill requires multi_agent = true for spawn_agent subagent
 // dispatch (skill-codex.md line 233). Without this, the copied Graphify skill
 // cannot launch semantic extraction subagents and parallel graph building fails.
-/** @param {string} worktree */
-function headlessCodexConfig(worktree) {
+function headlessCodexConfig(worktree: string) {
   const worktreeParent = path.dirname(path.resolve(worktree));
   return [
     'sandbox_mode = "danger-full-access"',
@@ -200,8 +193,7 @@ function headlessCodexConfig(worktree) {
   ].join('\n');
 }
 
-/** @param {string} worktree */
-function ensureCodexHome(worktree) {
+function ensureCodexHome(worktree: string) {
   fs.mkdirSync(codexHomeRoot(worktree), { recursive: true });
   fs.mkdirSync(path.dirname(codexConfigPath(worktree)), { recursive: true });
   fs.writeFileSync(codexConfigPath(worktree), headlessCodexConfig(worktree), 'utf8');
@@ -228,7 +220,7 @@ function ensureCodexHome(worktree) {
   }
 }
 
-module.exports = {
+export {
   codexAuthPath,
   buildCodexDraftInvocation,
   codexConfigPath,

@@ -1,6 +1,5 @@
 import fs from 'node:fs';
 import path from 'node:path';
-// @ts-expect-error agents.js is CJS without type declarations
 import { eligibleAgentsForStep, workflowLauncherStatus } from '../agents/agents.js';
 
 const CONFIG_PATH = path.join(__dirname, '..', '..', 'config', 'agents.json');

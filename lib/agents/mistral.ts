@@ -1,4 +1,17 @@
-const { spawnAndTee } = require('../core/spawn-tee');
+import { spawnAndTee } from '../core/spawn-tee.js';
+
+interface MistralInvocationOptions {
+  prompt: string;
+  worktree: string;
+  env?: Record<string, string>;
+  resume?: boolean;
+  sessionId?: string | null;
+  model?: string | null;
+}
+
+interface StartMistralAgentOptions extends MistralInvocationOptions {
+  teeOptions?: object;
+}
 
 // Mistral Vibe in programmatic mode (-p/--prompt) does NOT output a resume
 // hint to stdout/stderr like other agents do. Session IDs are stored in
@@ -14,8 +27,7 @@ const { spawnAndTee } = require('../core/spawn-tee');
 // recordStageStats which defaults to '0' for tokens when telemetry is null.
 
 
-/** @param {string} stdout */
-function extractMistralSessionId(stdout) {
+function extractMistralSessionId(stdout: string) {
   void stdout;
   // Vibe does not currently emit a resume hint in programmatic mode.
   // Return null to indicate no resume capability via stdout parsing.
@@ -26,10 +38,7 @@ function resolveMistralCommand() {
   return 'vibe';
 }
 
-/**
- * @param {{ prompt: string, worktree: string, env?: object, resume?: boolean, sessionId?: string | null, model?: string | null }} opts
- */
-function buildMistralInvocation({ prompt, worktree, env, resume, sessionId, model = null }) {
+function buildMistralInvocation({ prompt, worktree, env, resume, sessionId, model = null }: MistralInvocationOptions) {
   void resume;
   void sessionId;
   const args = ['--prompt', prompt, '--trust', '--output', 'text'];
@@ -55,12 +64,9 @@ function buildMistralInvocation({ prompt, worktree, env, resume, sessionId, mode
   };
 }
 
-/**
- * @param {{ prompt: string, worktree: string, env?: object, resume?: boolean, sessionId?: string | null, model?: string | null, teeOptions?: object }} opts
- */
-function startMistralAgent({ prompt, worktree, env, resume = false, sessionId = null, model = null, teeOptions = {} }) {
+function startMistralAgent({ prompt, worktree, env, resume = false, sessionId = null, model = null, teeOptions = {} }: StartMistralAgentOptions) {
   const invocation = buildMistralInvocation({ prompt, worktree, env, resume, sessionId, model });
-  const resultPromise = spawnAndTee(invocation.command, invocation.args, /** @type {any} */({ ...invocation.options, ...teeOptions })).then(result => {
+  const resultPromise = spawnAndTee(invocation.command, invocation.args, { ...invocation.options, ...teeOptions } as any).then((result: any) => {
     if (result && result.stdout) {
       result.sessionId = extractMistralSessionId(result.stdout);
     }
@@ -70,7 +76,7 @@ function startMistralAgent({ prompt, worktree, env, resume = false, sessionId = 
   return { invocation, resultPromise };
 }
 
-module.exports = {
+export {
   buildMistralInvocation,
   extractMistralSessionId,
   resolveMistralCommand,

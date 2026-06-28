@@ -1,9 +1,15 @@
-'use strict';
+import childProcess from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
-const childProcess = require('child_process');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
+interface CaptureOpencodeExportOptions {
+  worktree?: string;
+  env?: Record<string, string>;
+  timeoutMs?: number;
+  maxBytes?: number;
+  spawn?: typeof childProcess.spawn;
+}
 
 /**
  * Capture the complete `opencode export <sessionId>` JSON document.
@@ -34,7 +40,7 @@ const path = require('path');
  * @param {Function} [opts.spawn] - injectable spawn (defaults to child_process.spawn)
  * @returns {Promise<string|null>} Full JSON string, or null on failure
  */
-function captureOpencodeExport(sessionId, opts = {}) {
+function captureOpencodeExport(sessionId: string, opts: CaptureOpencodeExportOptions = {}) {
   const {
     worktree,
     env,
@@ -43,23 +49,19 @@ function captureOpencodeExport(sessionId, opts = {}) {
     spawn = childProcess.spawn,
   } = opts;
 
-  return new Promise((resolve) => {
+  return new Promise<string | null>((resolve) => {
     if (!sessionId) {
       resolve(null);
       return;
     }
 
     let settled = false;
-    /** @type {NodeJS.Timeout | null} */
-    let timer = null;
+    let timer: NodeJS.Timeout | null = null;
     let size = 0;
-    /** @type {number | null} */
-    let tmpFd = null;
-    /** @type {string | null} */
-    let tmpPath = null;
+    let tmpFd: number | null = null;
+    let tmpPath: string | null = null;
 
-    /** @param {string | null} value */
-    const finish = (value) => {
+    const finish = (value: string | null) => {
       if (settled) {return;}
       settled = true;
       if (timer) {clearTimeout(timer);}
@@ -73,8 +75,7 @@ function captureOpencodeExport(sessionId, opts = {}) {
       resolve(value);
     };
 
-    /** @param {import('child_process').ChildProcess | undefined} child */
-    const killChild = (child) => {
+    const killChild = (child: childProcess.ChildProcess | undefined) => {
       try { if (child) { child.kill('SIGKILL'); } } catch (_) { /* already gone */ }
     };
 
@@ -156,4 +157,4 @@ function captureOpencodeExport(sessionId, opts = {}) {
   });
 }
 
-module.exports = { captureOpencodeExport };
+export { captureOpencodeExport };

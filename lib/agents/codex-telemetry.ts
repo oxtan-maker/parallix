@@ -13,11 +13,10 @@
 //   {"type":"response_item","payload":{"type":"function_call",...}}
 //   {"type":"event_msg","payload":{"type":"token_count","info":{...},"rate_limits":{...}}}
 
-const fs = require('fs');
-const path = require('path');
+import fs from 'node:fs';
+import path from 'node:path';
 
-/** @param {string} codexHome */
-function codexSessionsDir(codexHome) {
+function codexSessionsDir(codexHome: string) {
   return path.join(codexHome, '.codex', 'sessions');
 }
 
@@ -25,8 +24,7 @@ function codexSessionsDir(codexHome) {
  * Parse a rollout JSONL string into a telemetry object. Returns null when the
  * content yields no usable signal (e.g. a failed turn with no token_count).
  */
-/** @param {string} content */
-function parseCodexRollout(content) {
+function parseCodexRollout(content: string) {
   if (!content) {return null;}
 
   let sessionId = null;
@@ -109,11 +107,7 @@ function parseCodexRollout(content) {
  * `total_token_usage` counter, so a multi-round stage produces several files
  * whose totals must be summed to get the stage's real quota consumption.
  */
-/**
- * @param {string} sessionsDir
- * @param {{ sinceMs?: number }} [opts]
- */
-function collectRolloutFiles(sessionsDir, { sinceMs = 0 } = {}) {
+function collectRolloutFiles(sessionsDir: string, { sinceMs = 0 }: { sinceMs?: number } = {}) {
   if (!sessionsDir || !fs.existsSync(sessionsDir)) {return [];}
 
   const found = [];
@@ -122,13 +116,13 @@ function collectRolloutFiles(sessionsDir, { sinceMs = 0 } = {}) {
     const dir = stack.pop();
     let entries;
     try {
-      entries = /** @type {Array<import('fs').Dirent>} */(/** @type {any} */(fs).readdirSync(dir, { withFileTypes: true }));
+      entries = (fs as any).readdirSync(dir, { withFileTypes: true });
     } catch (_) {
       continue;
     }
-    for (const entry of /** @type {Array<{name: string, isDirectory: () => boolean, isFile: () => boolean}>} */(entries)) {
+    for (const entry of entries as Array<{name: string, isDirectory: () => boolean, isFile: () => boolean}>) {
       if (!entry.name) {continue;}
-      const /** @type {string} */ name = entry.name ?? '';
+      const name: string = entry.name ?? '';
       const full = path.join(dir || '', name);
       if (entry.isDirectory()) {
         stack.push(full);
@@ -160,11 +154,7 @@ function collectRolloutFiles(sessionsDir, { sinceMs = 0 } = {}) {
  * re-running a stage (e.g. after the workflow process is resumed mid-mission)
  * yields the same total rather than double-counting.
  */
-/**
- * @param {string} codexHome
- * @param {{ sinceMs?: number }} [opts]
- */
-function extractCodexTelemetry(codexHome, { sinceMs = 0 } = {}) {
+function extractCodexTelemetry(codexHome: string, { sinceMs = 0 }: { sinceMs?: number } = {}) {
   const files = collectRolloutFiles(codexSessionsDir(codexHome), { sinceMs });
   if (files.length === 0) {return null;}
 
@@ -207,7 +197,7 @@ function extractCodexTelemetry(codexHome, { sinceMs = 0 } = {}) {
   };
 }
 
-module.exports = {
+export {
   codexSessionsDir,
   parseCodexRollout,
   collectRolloutFiles,

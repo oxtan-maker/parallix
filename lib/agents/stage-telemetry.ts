@@ -14,13 +14,18 @@
 // cumulative Codex usage for the execute phase instead of the windowed delta
 // (task-1285 review F1/F6).
 
-const { codexHomeRoot, extractCodexTelemetry } = require('./codex');
+import { codexHomeRoot, extractCodexTelemetry } from './codex.js';
+
+interface StageTelemetryOptions {
+  worktree: string;
+  result: { telemetry?: { provider?: string } & Record<string, any> };
+  sinceMs?: number;
+}
 
 /**
- * @param {{ worktree: string, result: { telemetry?: { provider?: string } & object }, sinceMs?: number }} opts
- * @returns {object|null} normalized telemetry, or null when none is available.
+ * @returns normalized telemetry, or null when none is available.
  */
-function resolveStageTelemetry({ worktree, result, sinceMs = 0 } = /** @type {{ worktree: string, result: { telemetry?: { provider?: string } & object }, sinceMs?: number }} */({})) {
+function resolveStageTelemetry({ worktree, result, sinceMs = 0 }: StageTelemetryOptions = {} as StageTelemetryOptions) {
   if (!result || !result.telemetry) {return null;}
   try {
     const codexT = extractCodexTelemetry(codexHomeRoot(worktree), { sinceMs: sinceMs || 0 });
@@ -39,4 +44,4 @@ function resolveStageTelemetry({ worktree, result, sinceMs = 0 } = /** @type {{ 
   }
 }
 
-module.exports = { resolveStageTelemetry };
+export { resolveStageTelemetry };

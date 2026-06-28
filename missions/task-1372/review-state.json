@@ -1,0 +1,15 @@
+{
+  "reviewer": "custom",
+  "implementer": "claude",
+  "round": 1,
+  "startedAt": "2026-06-28T11:59:08.264Z",
+  "phase": "approved",
+  "disposition": "APPROVED",
+  "metadata": {
+    "recordedStageLaunches": {
+      "review:custom": [
+        "custom|ses_<id>\\\",\\n+//|2026-06-28T11:59:09.401Z|2026-06-28T12:00:58.091Z|0"
+      ]
+    }
+  }
+}

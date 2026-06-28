@@ -1,18 +1,31 @@
-const { spawnAndTee } = require('../core/spawn-tee');
-const { extractClaudeTelemetryFromStdout } = require('./claude-telemetry');
+import { spawnAndTee } from '../core/spawn-tee.js';
+import { extractClaudeTelemetryFromStdout } from './claude-telemetry.js';
+// tools/sessions is still CJS (not converted in this wave); require keeps it
+// untyped (any) without pulling a non-included .js into the typecheck program.
 const sessions = require('../tools/sessions');
 
+interface ClaudeInvocationOptions {
+  prompt: string;
+  worktree: string;
+  env?: object;
+  resume?: boolean;
+  sessionId?: string | null;
+  model?: string | null;
+}
+
+interface StartClaudeAgentOptions extends ClaudeInvocationOptions {
+  teeOptions?: object;
+  slug?: string | null;
+  role?: string | null;
+}
+
 // Injectable I/O for tests. Production uses the real spawn-tee / export capture.
-/** @type {Function} */
-let _spawnAndTee = spawnAndTee;
-/** @type {object} */
-let _sessions = sessions;
+let _spawnAndTee: any = spawnAndTee;
+let _sessions: any = sessions;
 
 // Test hooks: override the launcher's I/O without touching the public signature.
-/** @param {Function} fn */
-function __setSpawnAndTeeForTest(fn) { _spawnAndTee = fn || spawnAndTee; }
-/** @param {object} mod */
-function __setSessionsForTest(mod) { _sessions = mod || sessions; }
+function __setSpawnAndTeeForTest(fn: any) { _spawnAndTee = fn || spawnAndTee; }
+function __setSessionsForTest(mod: any) { _sessions = mod || sessions; }
 
 // Claude usage telemetry is parsed from the `stream-json` stdout stream, which
 // carries `message_start` (input) and `message_delta` (output) usage events. The
@@ -24,8 +37,7 @@ const CLAUDE_TELEMETRY_TAIL_BYTES = 8 * 1024 * 1024;
 // Claude outputs "Resume this session with: claude --resume <id>" at the end.
 const CLAUDE_SESSION_ID_RE = /claude\s+--resume\s+([0-9a-f-]+)/i;
 
-/** @param {string} stdout */
-function extractClaudeSessionIdFromStreamJson(stdout) {
+function extractClaudeSessionIdFromStreamJson(stdout: string) {
   if (!stdout) {return null;}
   const lines = stdout.split('\n');
   for (const line of lines) {
@@ -42,8 +54,7 @@ function extractClaudeSessionIdFromStreamJson(stdout) {
   return null;
 }
 
-/** @param {string} stdout */
-function extractClaudeSessionId(stdout) {
+function extractClaudeSessionId(stdout: string) {
   if (!stdout) {return null;}
   // Try stream-json result event first (new default format).
   const fromStream = extractClaudeSessionIdFromStreamJson(stdout);
@@ -57,10 +68,7 @@ function resolveClaudeCommand() {
   return 'claude';
 }
 
-/**
- * @param {{ prompt: string, worktree: string, env?: object, resume?: boolean, sessionId?: string | null, model?: string | null }} opts
- */
-function buildClaudeInvocation({ prompt, worktree, env, resume = false, sessionId = null, model = null }) {
+function buildClaudeInvocation({ prompt, worktree, env, resume = false, sessionId = null, model = null }: ClaudeInvocationOptions) {
   const args = ['--dangerously-skip-permissions'];
   if (model) {args.push('--model', model);}
   // Only resume when the marker explicitly says so (resume=true).
@@ -89,24 +97,15 @@ function buildClaudeInvocation({ prompt, worktree, env, resume = false, sessionI
   };
 }
 
-/**
- * @param {{ prompt: string, worktree: string, env?: object, resume?: boolean, sessionId?: string | null, model?: string | null, teeOptions?: object, slug?: string | null, role?: string | null }} opts
- */
-function startClaudeAgent({ prompt, worktree, env, resume = false, sessionId = null, model = null, teeOptions = {}, slug = null, role = null }) {
-  /**
-   * @param {{stdout?: string, stderr?: string}} result
-   */
-  function isStaleSessionResult(result) {
+function startClaudeAgent({ prompt, worktree, env, resume = false, sessionId = null, model = null, teeOptions = {}, slug = null, role = null }: StartClaudeAgentOptions) {
+  function isStaleSessionResult(result: any) {
     if (!result) {return false;}
     const stderr = result.stderr || '';
     const stdout = result.stdout || '';
     return (stderr.includes('Session not found') || stdout.includes('Session not found'));
   }
 
-  /**
-   * @param {{stdout?: string, sessionId?: string, telemetry?: object, model?: string, provider?: string}} result
-   */
-  function processResult(result) {
+  function processResult(result: any) {
     if (result && result.stdout) {
       result.sessionId = extractClaudeSessionId(result.stdout);
       try {
@@ -123,16 +122,13 @@ function startClaudeAgent({ prompt, worktree, env, resume = false, sessionId = n
     return result;
   }
 
-  /**
-   * @param {{command: string, args: string[], options?: object}} invocation
-   */
-  function staleSessionHandler(invocation) {
+  function staleSessionHandler(invocation: any) {
     const teeWithTail = { maxTailBytes: CLAUDE_TELEMETRY_TAIL_BYTES, ...invocation.options, ...teeOptions };
     return _spawnAndTee(invocation.command, invocation.args, teeWithTail)
-      .then(/** @param {object} result */ (result) => {
+      .then((result: any) => {
         if (isStaleSessionResult(result) && worktree && resume) {
           try {
-            /** @type {any} */(_sessions).clearSession(worktree, slug, role);
+            _sessions.clearSession(worktree, slug, role);
           } catch (_) { /* best-effort */ }
           const freshInv = buildClaudeInvocation({ prompt, worktree, env, resume: false, sessionId: null, model });
           const freshTee = { maxTailBytes: CLAUDE_TELEMETRY_TAIL_BYTES, ...freshInv.options, ...teeOptions };
@@ -149,7 +145,7 @@ function startClaudeAgent({ prompt, worktree, env, resume = false, sessionId = n
   return { invocation, resultPromise };
 }
 
-module.exports = {
+export {
   buildClaudeInvocation,
   extractClaudeSessionId,
   extractClaudeTelemetryFromStdout,

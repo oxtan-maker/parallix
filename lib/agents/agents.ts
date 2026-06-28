@@ -1,16 +1,58 @@
-const fs = require('fs');
-const path = require('path');
-const { spawnSync } = require('child_process');
-const fmt = require('../core/fmt');
-const { startCodexDraftAgent, resolveCodexCommand } = require('./codex');
-const { startClaudeAgent, resolveClaudeCommand } = require('./claude');
-const { startMistralAgent, resolveMistralCommand } = require('./mistral');
-const { startOpencodeAgent, resolveOpencodeCommand, isSpuriousOpencodeExit } = require('./opencode');
-const { detectLimitHit, formatBlockUntil, DEFAULT_FALLBACK_HOURS } = require('./limit-hit');
+import fs from 'node:fs';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import * as fmt from '../core/fmt.js';
+import { startCodexDraftAgent, resolveCodexCommand } from './codex.js';
+import { startClaudeAgent, resolveClaudeCommand } from './claude.js';
+import { startMistralAgent, resolveMistralCommand } from './mistral.js';
+import { startOpencodeAgent, resolveOpencodeCommand, isSpuriousOpencodeExit } from './opencode.js';
+import { detectLimitHit, formatBlockUntil, DEFAULT_FALLBACK_HOURS } from './limit-hit.js';
+import * as storage from '../core/storage.js';
+import { resolveAgentModel } from '../core/product-config.js';
+import { migrateAgentBlocklists } from '../core/persistent-data-migration.js';
+// tools/sessions is still CJS (not converted in this wave); require keeps it
+// untyped (any) without pulling a non-included .js into the typecheck program.
 const sessions = require('../tools/sessions');
-const storage = require('../core/storage');
-const { resolveAgentModel } = require('../core/product-config');
-const { migrateAgentBlocklists } = require('../core/persistent-data-migration');
+
+interface LauncherStatus {
+  agent: string;
+  supported: boolean;
+  detail: string;
+  health?: string;
+  reason?: string;
+}
+
+type AgentConfig = { blocklist?: {[key: string]: any}, steps?: {[key: string]: any} };
+
+interface StartAgentOptions {
+  prompt: string | Function;
+  worktree?: string;
+  agent?: string;
+  env?: {[key: string]: string};
+  exclude?: any;
+  onLimitHit?: Function;
+  onLaunch?: Function;
+  slug?: string | null;
+  role?: string | null;
+  detectLimitHitFn?: Function;
+  updateAgentBlockFn?: Function;
+  selectAgentFn?: Function;
+  resolveAgentModelFn?: Function;
+  isAgentBlockedFn?: Function;
+  sessionsModule?: any;
+  log?: Function;
+  noOutputWatchdog?: {initialDelayMs?: number, intervalMs?: number} | boolean;
+}
+
+type ReadAgentConfigOptions = {
+  mergeLocal?: boolean;
+  mainWorktreePath?: string | null;
+  warn?: Function;
+  targetPath?: string;
+  config?: AgentConfig | null;
+  configPath?: string;
+  exclude?: any;
+};
 
 // Launchers whose CLI accepts a per-call resume flag threaded by startAgent.
 // Each launcher outputs a session resume hint at the end of its run (e.g.
@@ -24,27 +66,23 @@ const RESUME_CAPABLE = new Set(['claude', 'codex', 'custom']);
 const CONFIG_PATH = path.join(__dirname, '..', '..', 'config', 'agents.json');
 
 // Test hook: when set, used instead of spawning `command -v` to check PATH.
-/** @type {((name: string) => string | null) | null} */
-let _commandPathProbe = null;
+let _commandPathProbe: ((name: string) => string | null) | null = null;
 
-/** @type {{[key: string]: Function}} */
-const LAUNCHERS = {
+const LAUNCHERS: {[key: string]: Function} = {
   codex: startCodexDraftAgent,
   claude: startClaudeAgent,
   mistral: startMistralAgent,
   custom: startOpencodeAgent
 };
 
-/** @type {{[key: string]: () => string}} */
-const RESOLVERS = {
+const RESOLVERS: {[key: string]: () => string} = {
   codex: resolveCodexCommand,
   claude: resolveClaudeCommand,
   mistral: resolveMistralCommand,
   custom: resolveOpencodeCommand
 };
 
-/** @type {{[key: string]: string[]}} */
-const HEALTH_PROBE_ARGS = Object.freeze({
+const HEALTH_PROBE_ARGS: {[key: string]: string[]} = Object.freeze({
   codex: ['--help'],
   claude: ['--help'],
   mistral: ['--help'],
@@ -62,8 +100,7 @@ const KNOWN_AGENT_NAMES = Object.freeze([
   'human'
 ]);
 
-/** @param {string} agent */
-function workflowLauncherStatus(agent) {
+function workflowLauncherStatus(agent: string): LauncherStatus {
   const resolver = RESOLVERS[agent];
   if (!resolver) {
     return { agent, supported: false, detail: `unknown agent: ${agent}` };
@@ -82,8 +119,7 @@ function workflowLauncherStatus(agent) {
   });
 
   if (probe.error || probe.status !== 0) {
-    /** @type {Error & {code?: string}} */
-    const pErr = probe.error || new Error('');
+    const pErr: Error & {code?: string} = probe.error || new Error('');
     const reason = probe.error
       ? (pErr.code || pErr.message)
       : `exit ${probe.status}`;
@@ -99,8 +135,7 @@ function workflowLauncherStatus(agent) {
   return { agent, supported: true, detail: `${command} ${probeArgs.join(' ')}`.trim(), health: 'ok' };
 }
 
-/** @param {string} name */
-function commandInPath(name) {
+function commandInPath(name: string) {
   if (_commandPathProbe) {
     return _commandPathProbe(name) || false;
   }
@@ -111,12 +146,10 @@ function commandInPath(name) {
   return result.status === 0 && result.stdout.trim().length > 0;
 }
 
-/** @param {string} configPath @param {string} scope @param {{message?: string} | null} originalError */
-function buildInvalidAgentConfigError(configPath, scope, originalError) {
+function buildInvalidAgentConfigError(configPath: string, scope: string, originalError: {message?: string} | null) {
   const location = path.resolve(configPath);
   const detail = originalError && originalError.message ? originalError.message : 'invalid JSON';
-  /** @type {any} */
-  const error = new Error(
+  const error: any = new Error(
     `Invalid ${scope} agent config at ${location}: ${detail}. ` +
     'Fix or remove the malformed file before running workflow commands so agent blocking is applied deterministically.'
   );
@@ -126,41 +159,37 @@ function buildInvalidAgentConfigError(configPath, scope, originalError) {
   return error;
 }
 
-/** @param {{code?: string}} error */
-function isInvalidAgentConfigError(error) {
+function isInvalidAgentConfigError(error: {code?: string}) {
   return Boolean(error && error.code === 'WORKFLOW_AGENT_CONFIG_INVALID');
 }
 
-function readAgentConfigOrExit(configPath = CONFIG_PATH, options = {}) {
+function readAgentConfigOrExit(configPath: string = CONFIG_PATH, options: ReadAgentConfigOptions = {}) {
   try {
     return readAgentConfig(configPath, options);
-  } catch (/** @type {unknown} */ error) {
-    if (isInvalidAgentConfigError(/** @type {any} */ (error))) {
-      fmt.log.fail(/** @type {any} */ (error).message);
+  } catch (error) {
+    if (isInvalidAgentConfigError((error as any))) {
+      fmt.log.fail((error as any).message);
       process.exit(1);
     }
     throw error;
   }
 }
 
-/** @param {string} configPath @param {string} scope */
-function parseAgentConfigFile(configPath, scope) {
+function parseAgentConfigFile(configPath: string, scope: string) {
   try {
     return JSON.parse(fs.readFileSync(configPath, 'utf8'));
-  } catch (/** @type {unknown} */ err) {
-    throw buildInvalidAgentConfigError(configPath, scope, /** @type {{message?: string}} */ (err));
+  } catch (err) {
+    throw buildInvalidAgentConfigError(configPath, scope, (err as {message?: string}));
   }
 }
 
-/** @param {{mergeLocal?: boolean, mainWorktreePath?: string | null, warn?: Function, targetPath?: string}} options */
-function readAgentConfig(configPath = CONFIG_PATH, options = {}) {
+function readAgentConfig(configPath: string = CONFIG_PATH, options: ReadAgentConfigOptions = {}) {
   const {
     mergeLocal = path.resolve(configPath) === path.resolve(CONFIG_PATH),
     mainWorktreePath,
     warn = fmt.log.warn
   } = options;
-  /** @type {{blocklist?: {[key: string]: any}, steps?: {[key: string]: any}}} */
-  let config = {};
+  let config: AgentConfig = {};
   if (fs.existsSync(configPath)) {
     config = parseAgentConfigFile(configPath, 'workflow');
   }
@@ -182,16 +211,16 @@ function readAgentConfig(configPath = CONFIG_PATH, options = {}) {
         migrateAgentBlocklists({
           sourcePaths: legacyPaths,
           destinationPath: targetPath,
-          warn
+          warn: warn as any
         });
-      } catch (/** @type {unknown} */ error) {
-        throw buildInvalidAgentConfigError(targetPath, 'local', /** @type {any} */ (error));
+      } catch (error) {
+        throw buildInvalidAgentConfigError(targetPath, 'local', (error as any));
       }
     }
     if (fs.existsSync(targetPath)) {
       const localConfig = parseAgentConfigFile(targetPath, 'local');
       if (localConfig && localConfig.blocklist) {
-        /** @type {{blocklist?: {[key: string]: any}}} */ (config).blocklist = Object.assign(/** @type {{blocklist?: {[key: string]: any}}} */ (config).blocklist || {}, localConfig.blocklist);
+        (config as {blocklist?: {[key: string]: any}}).blocklist = Object.assign((config as {blocklist?: {[key: string]: any}}).blocklist || {}, localConfig.blocklist);
       }
     }
   }
@@ -199,8 +228,7 @@ function readAgentConfig(configPath = CONFIG_PATH, options = {}) {
   return config;
 }
 
-/** @param {{cwd?: string, warn?: Function}} options */
-function getMainWorktreePath(options = {}) {
+function getMainWorktreePath(options: {cwd?: string, warn?: Function} = {}) {
   const { cwd = process.cwd(), warn = fmt.log.warn } = options;
   try {
     const commonDir = getGitPath(cwd, ['rev-parse', '--path-format=absolute', '--git-common-dir']);
@@ -252,9 +280,8 @@ function getMainWorktreePath(options = {}) {
         }
       }
     }
-  } catch (/** @type {unknown} */ err) {
-    /** @type {Error & {code?: string}} */
-    const e = /** @type {any} */ (err);
+  } catch (err) {
+    const e: Error & {code?: string} = (err as any);
     const detail = e && (e.code || e.message) ? (e.code || e.message) : 'unknown error';
     warn(
       `Could not inspect git worktrees while looking for main-worktree agents.local.json; ` +
@@ -275,11 +302,10 @@ function getMainWorktreePath(options = {}) {
 // Cached per git common directory to avoid repeated subprocess calls without
 // leaking a temp-repo answer into later tests or nested workflow invocations.
 const MainWorktreeDetector = {
-  byCommonDir: new Map()
+  byCommonDir: new Map<string, string>()
 };
 
-/** @param {string} cwd @param {string[]} args */
-function getGitPath(cwd, args) {
+function getGitPath(cwd: string, args: string[]) {
   const result = spawnSync('git', ['-C', cwd, ...args], {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'ignore'],
@@ -291,16 +317,14 @@ function getGitPath(cwd, args) {
   return result.stdout.trim() || null;
 }
 
-/** @param {string[]} lines */
-function parseWorktreePaths(lines) {
+function parseWorktreePaths(lines: string[]) {
   return lines
     .filter(/** @param {string} line */ (line) => line.startsWith('worktree '))
     .map(/** @param {string} line */ (line) => line.slice('worktree '.length).trim())
     .filter(Boolean);
 }
 
-/** @param {string[]} lines @param {string} cwd @param {string | null} commonDir */
-function detectMainWorktreePath(lines, cwd, commonDir) {
+function detectMainWorktreePath(lines: string[], cwd: string, commonDir: string | null) {
   const worktrees = parseWorktreePaths(lines);
   if (worktrees.length === 0) {
     return null;
@@ -327,8 +351,7 @@ function detectMainWorktreePath(lines, cwd, commonDir) {
   return null;
 }
 
-/** @param {string | number} value */
-function parseBlockUntil(value) {
+function parseBlockUntil(value: string | number) {
   if (typeof value !== 'string') {
     return NaN;
   }
@@ -357,11 +380,7 @@ function parseBlockUntil(value) {
   return parsed.getTime();
 }
 
-/**
- * @param {string} agent
- * @param {{blocklist?: {[key: string]: any}, steps?: {[key: string]: any}} | null} config
- */
-function isAgentBlocked(agent, config) {
+function isAgentBlocked(agent: string, config: AgentConfig | null) {
   if (!config || !config.blocklist || config.blocklist[agent] === undefined) {
     return false;
   }
@@ -381,15 +400,11 @@ function isAgentBlocked(agent, config) {
   return false;
 }
 
-/**
- * @param {string} step
- * @param {{config?: {blocklist?: {[key: string]: any}, steps?: {[key: string]: any}}, configPath?: string}} options
- */
-function eligibleAgentsForStep(step, options = {}) {
+function eligibleAgentsForStep(step: string, options: ReadAgentConfigOptions = {}) {
   const /** @type {{blocklist?: {[key: string]: any}, steps?: {[key: string]: any}} | null} */ config = options.config !== undefined
     ? options.config
-    : readAgentConfig(options.configPath || CONFIG_PATH, /** @type {{mergeLocal?: boolean, mainWorktreePath?: string | null, warn?: Function, targetPath?: string}} */ (options));
-  let eligible;
+    : readAgentConfig(options.configPath || CONFIG_PATH, (options as {mergeLocal?: boolean, mainWorktreePath?: string | null, warn?: Function, targetPath?: string}));
+  let eligible: string[];
   if (!config || !config.steps || !config.steps[step]) {
     eligible = Object.keys(LAUNCHERS);
   } else {
@@ -398,8 +413,7 @@ function eligibleAgentsForStep(step, options = {}) {
   return eligible.filter(/** @param {string} agent */ (agent) => !isAgentBlocked(agent, config));
 }
 
-/** @param {string[]} agents @param {{[key: string]: number}} weights */
-function weightedRandom(agents, weights) {
+function weightedRandom(agents: string[], weights: {[key: string]: number}) {
   const total = agents.reduce(/** @param {number} sum @param {string} a */ (sum, a) => sum + (weights[a] || 1), 0);
   let r = Math.random() * total;
   for (const agent of agents) {
@@ -409,11 +423,7 @@ function weightedRandom(agents, weights) {
   return agents[agents.length - 1];
 }
 
-/**
- * @param {string} step
- * @param {{exclude?: Set<string>, config?: {blocklist?: {[key: string]: any}, steps?: {[key: string]: any}}, configPath?: string}} options
- */
-function selectAgent(step, options = {}) {
+function selectAgent(step: string, options: ReadAgentConfigOptions = {}) {
   const envOverride = process.env.WORKFLOW_AGENT;
   const excluded = options.exclude instanceof Set ? options.exclude : new Set();
   const eligible = eligibleAgentsForStep(step, options);
@@ -442,7 +452,7 @@ function selectAgent(step, options = {}) {
   const statuses = new Map(
     pool
       .filter(/** @param {string} agent */ (agent) => LAUNCHERS[agent])
-      .map(/** @param {string} agent */ (agent) => [agent, workflowLauncherStatus(agent)])
+      .map(/** @param {string} agent */ (agent) => [agent, workflowLauncherStatus(agent)] as [string, LauncherStatus])
   );
   const available = pool.filter(/** @param {string} agent */ (agent) => {
     const status = statuses.get(agent);
@@ -463,7 +473,7 @@ function selectAgent(step, options = {}) {
 
   const /** @type {{blocklist?: {[key: string]: any}, steps?: {[key: string]: any}} | null} */ config = options.config !== undefined
     ? options.config
-    : readAgentConfig(options.configPath || CONFIG_PATH, /** @type {{mergeLocal?: boolean, mainWorktreePath?: string | null, warn?: Function, targetPath?: string}} */ (options));
+    : readAgentConfig(options.configPath || CONFIG_PATH, (options as {mergeLocal?: boolean, mainWorktreePath?: string | null, warn?: Function, targetPath?: string}));
   const stepConfig = config && config.steps && config.steps[step] ? config.steps[step] : {};
   const selection = stepConfig.selection || 'random';
 
@@ -479,11 +489,9 @@ function selectAgent(step, options = {}) {
   return available[0];
 }
 
-/** @param {string} agent */
-function assertAgentSupported(agent) {
+function assertAgentSupported(agent: string) {
   if (!LAUNCHERS[agent]) {
-    /** @type {any} */
-    const error = new Error(
+    const error: any = new Error(
       `Unknown agent: "${fmt.agent(agent)}". Supported agents: ${Object.keys(LAUNCHERS).join(', ')}.`
     );
     error.code = 'UNKNOWN_AGENT';
@@ -494,8 +502,7 @@ function assertAgentSupported(agent) {
   if (!status.supported) {
     const health = status.health ? ` (${status.health})` : '';
     const reason = status.reason ? `; reason: ${status.reason}` : '';
-    /** @type {any} */
-    const error = new Error(
+    const error: any = new Error(
       `Agent "${fmt.agent(agent)}" launcher is not available on this workstation${health}. ` +
       `Looked for: ${fmt.path(status.detail)}${reason}. ` +
       `Ensure ${fmt.agent(agent)} is on your PATH and retry.`
@@ -505,14 +512,12 @@ function assertAgentSupported(agent) {
   }
 }
 
-/** @param {{targetPath?: string}} options */
-function resolveBlocklistTargetPath(options = {}) {
+function resolveBlocklistTargetPath(options: {targetPath?: string} = {}) {
   if (options.targetPath) {return options.targetPath;}
   return storage.resolveAgentsLocalPath({ ensureDir: true });
 }
 
-/** @param {string} agent @param {string} until @param {{targetPath?: string}} options */
-function updateAgentBlock(agent, until, options = {}) {
+function updateAgentBlock(agent: string, until: string, options: {targetPath?: string} = {}) {
   if (!agent || typeof agent !== 'string') {
     throw new Error('updateAgentBlock requires an agent name');
   }
@@ -522,16 +527,15 @@ function updateAgentBlock(agent, until, options = {}) {
 
   const targetPath = resolveBlocklistTargetPath(options);
 
-  /** @type {{blocklist?: {[key: string]: any}}} */
-  let payload = {};
+  let payload: {blocklist?: {[key: string]: any}} = {};
   if (fs.existsSync(targetPath)) {
     // Match the read-path contract (parseAgentConfigFile): malformed local agent
     // JSON is a hard failure, not a silent overwrite. Otherwise a limit hit on a
     // corrupted agents.local.json would destroy whatever was on disk.
     try {
       payload = JSON.parse(fs.readFileSync(targetPath, 'utf8')) || {};
-    } catch (/** @type {unknown} */ err) {
-      throw buildInvalidAgentConfigError(targetPath, 'local', /** @type {{message?: string}} */ (err));
+    } catch (err) {
+      throw buildInvalidAgentConfigError(targetPath, 'local', (err as {message?: string}));
     }
     if (typeof payload !== 'object' || Array.isArray(payload)) {
       throw buildInvalidAgentConfigError(
@@ -550,12 +554,11 @@ function updateAgentBlock(agent, until, options = {}) {
   return { path: targetPath, blocklist: payload.blocklist };
 }
 
-/** @param {string} agent */
-function defaultIsAgentBlockedNow(agent) {
+function defaultIsAgentBlockedNow(agent: string) {
   try {
     const config = readAgentConfig(CONFIG_PATH, {});
     return isAgentBlocked(agent, config);
-  } catch (/** @type {unknown} */ err) {
+  } catch (err) {
     // If the config is malformed, surface that through the launcher path
     // (assertAgentSupported / launch) instead of silently rerouting. Treat as
     // not-blocked here so the existing error path runs.
@@ -563,20 +566,18 @@ function defaultIsAgentBlockedNow(agent) {
   }
 }
 
-/** @param {string} name */
-function readPositiveMsEnv(name) {
+function readPositiveMsEnv(name: string) {
   const raw = process.env[name];
   if (raw === undefined || raw === '') {return null;}
   const value = Number(raw);
   return Number.isFinite(value) && value >= 0 ? value : null;
 }
 
-/** @param {{initialDelayMs?: number, intervalMs?: number}|boolean} config @param {string | null} step */
-function resolveNoOutputWatchdogConfig(config, step = null) {
+function resolveNoOutputWatchdogConfig(config: {initialDelayMs?: number, intervalMs?: number} | boolean, step: string | null = null) {
   if (config === false || process.env.WORKFLOW_AGENT_NO_OUTPUT_WATCHDOG === '0') {
     return null;
   }
-  const /** @type {{initialDelayMs?: number, intervalMs?: number}} */ explicit = config && typeof config === 'object' ? config : {};
+  const explicit: {initialDelayMs?: number, intervalMs?: number} = config && typeof config === 'object' ? config : {};
   // Draft gets a shorter default watchdog to surface agent-launch visibility
   // quickly; the generic default (60s) is too slow for the draft entrypoint
   // where an operator cannot tell launch from hang.
@@ -600,8 +601,7 @@ function resolveNoOutputWatchdogConfig(config, step = null) {
   return { initialDelayMs, intervalMs };
 }
 
-/** @param {number} elapsedMs */
-function formatElapsed(elapsedMs) {
+function formatElapsed(elapsedMs: number) {
   const seconds = Math.max(0, Math.round(elapsedMs / 1000));
   if (seconds < 60) {return `${seconds}s`;}
   const minutes = Math.floor(seconds / 60);
@@ -609,11 +609,7 @@ function formatElapsed(elapsedMs) {
   return remainder === 0 ? `${minutes}m` : `${minutes}m ${remainder}s`;
 }
 
-/**
- * @param {string} step
- * @param {{prompt: string | Function, worktree?: string, agent?: string, env?: {[key: string]: string}, exclude?: (string|null|Set<string>)[], onLimitHit?: Function, onLaunch?: Function, slug?: string | null, role?: string | null, detectLimitHitFn?: Function, updateAgentBlockFn?: Function, selectAgentFn?: Function, resolveAgentModelFn?: Function, isAgentBlockedFn?: Function, sessionsModule?: object, log?: Function, noOutputWatchdog?: {initialDelayMs?: number, intervalMs?: number}}} opts
- */
-async function startAgent(step, opts = { prompt: '' }) {
+async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }) {
   const {
     prompt,
     worktree,
@@ -650,15 +646,15 @@ async function startAgent(step, opts = { prompt: '' }) {
     if (!chosen) {
       try {
         chosen = selectAgentFn(step, { exclude: tried });
-      } catch (/** @type {unknown} */ err) {
+      } catch (err) {
         // Only catch pool exhaustion errors from selectAgent.
         // Configuration errors (no eligible agents, no working launcher) must
         // propagate unchanged to preserve diagnostics (SC 3).
         // Exhaustion is indicated by:
         // - "exhausted" from real selectAgent pool exhaustion ("are exhausted")
         // - "No agents available" from test mocks simulating exhaustion
-        if (!(/** @type {any} */ (err).message || '').includes('exhausted') &&
-          !(/** @type {any} */ (err).message || '').includes('No agents available')
+        if (!((err as any).message || '').includes('exhausted') &&
+          !((err as any).message || '').includes('No agents available')
         ) {
           throw err;
         }
@@ -692,13 +688,13 @@ async function startAgent(step, opts = { prompt: '' }) {
 
     try {
       assertAgentSupported(chosen || '');
-    } catch (/** @type {unknown} */ err) {
+    } catch (err) {
       /** @type {Error & {code?: string}} */
-      const e = /** @type {any} */ (err);
+      const e = (err as any);
       if (e.code !== 'LAUNCHER_UNAVAILABLE') {
         throw err;
       }
-      log(fmt.status('WARN', /** @type {any} */ (err).message));
+      log(fmt.status('WARN', (err as any).message));
       // Only reroute for launcher-availability failures (missing or probe-failed).
       tried.add(chosen || '');
       // If the caller pinned a specific agent, allow one retry that ignores
@@ -728,9 +724,9 @@ async function startAgent(step, opts = { prompt: '' }) {
     const resume = Boolean(
       worktree && slug && role &&
       RESUME_CAPABLE.has(chosen || '') &&
-      (/** @type {any} */ (sessionsModule)).shouldResume(worktree, slug, role, chosen || '')
+      ((sessionsModule as any)).shouldResume(worktree, slug, role, chosen || '')
     );
-    const sessionId = (/** @type {any} */ (sessionsModule)).getSessionId(worktree, slug, role);
+    const sessionId = ((sessionsModule as any)).getSessionId(worktree, slug, role);
     if (slug && role) {
       if (resume) {
         log(fmt.status('INFO', `Resuming ${fmt.agent(chosen || '')} session for ${fmt.slug(slug)} (${role}).${sessionId ? ` Session: ${sessionId}` : ''}`));
@@ -766,7 +762,7 @@ async function startAgent(step, opts = { prompt: '' }) {
       teeOptions: watchdogConfig ? {
         noOutputWatchdog: {
           ...watchdogConfig,
-          onNoOutput: (/** @type {{pid: number, elapsedMs: number}} */ evt) => {
+          onNoOutput: (evt: {pid: number, elapsedMs: number}) => {
             const stage = evt.elapsedMs < (step === 'draft' ? DRAFT_NO_OUTPUT_INITIAL_DELAY_MS : DEFAULT_NO_OUTPUT_INITIAL_DELAY_MS)
               ? 'starting up'
               : 'running';
@@ -813,8 +809,8 @@ async function startAgent(step, opts = { prompt: '' }) {
       try {
         const blockResult = updateAgentBlockFn(chosen || '', limitHit.until);
         log(fmt.status('INFO', `Wrote blocklist entry for ${fmt.agent(chosen || '')} -> ${fmt.path(blockResult.path)}`));
-      } catch (/** @type {unknown} */ err) {
-        log(fmt.status('WARN', `Could not persist blocklist entry for ${fmt.agent(chosen || '')}: ${/** @type {any} */ (err).message}`));
+      } catch (err) {
+        log(fmt.status('WARN', `Could not persist blocklist entry for ${fmt.agent(chosen || '')}: ${(err as any).message}`));
       }
       if (typeof onLimitHit === 'function') {
         onLimitHit({ agent: chosen, until: limitHit.until, source: limitHit.source });
@@ -881,8 +877,8 @@ async function startAgent(step, opts = { prompt: '' }) {
         try {
           const blockResult = updateAgentBlockFn(chosen || '', blockUntil);
           log(fmt.status('INFO', `Wrote blocklist entry for ${fmt.agent(chosen || '')} -> ${fmt.path(blockResult.path)} (${DEFAULT_FALLBACK_HOURS}h block)`));
-        } catch (/** @type {unknown} */ err) {
-          log(fmt.status('WARN', `Could not persist blocklist entry for ${fmt.agent(chosen || '')}: ${/** @type {any} */ (err).message}`));
+        } catch (err) {
+          log(fmt.status('WARN', `Could not persist blocklist entry for ${fmt.agent(chosen || '')}: ${(err as any).message}`));
         }
       }
       chosen = undefined;
@@ -895,9 +891,9 @@ async function startAgent(step, opts = { prompt: '' }) {
     if (worktree && slug && role && result && result.status === 0 && !result.error) {
       try {
         const sessionId = result && result.sessionId ? result.sessionId : null;
-        (/** @type {any} */ (sessionsModule)).writeSession(worktree, slug, role, { agent: chosen || '', sessionId });
-      } catch (/** @type {unknown} */ err) {
-        log(fmt.status('WARN', `Could not persist session marker for ${fmt.slug(slug)} (${role}): ${/** @type {any} */ (err).message}`));
+        ((sessionsModule as any)).writeSession(worktree, slug, role, { agent: chosen || '', sessionId });
+      } catch (err) {
+        log(fmt.status('WARN', `Could not persist session marker for ${fmt.slug(slug)} (${role}): ${(err as any).message}`));
       }
     }
 
@@ -907,11 +903,13 @@ async function startAgent(step, opts = { prompt: '' }) {
 
 // Legacy alias kept for backwards compatibility — draft.js calls this directly.
 // Returns { agent, invocation, result } so callers can log which agent ran.
-async function startDraftAgent(opts = { prompt: '' }) {
+async function startDraftAgent(opts: StartAgentOptions = { prompt: '' }) {
   return startAgent('draft', opts);
 }
 
-module.exports = {
+const setCommandPathProbe = (fn: (name: string) => string | null) => { _commandPathProbe = fn; };
+
+export {
   KNOWN_AGENT_NAMES,
   WORKFLOW_AGENT_NAMES,
   startAgent,
@@ -922,7 +920,7 @@ module.exports = {
   readAgentConfigOrExit,
   assertAgentSupported,
   workflowLauncherStatus,
-  setCommandPathProbe: (/** @type {(name: string) => string | null} */ fn) => { _commandPathProbe = fn; },
+  setCommandPathProbe,
   isAgentBlocked,
   parseBlockUntil,
   isInvalidAgentConfigError,

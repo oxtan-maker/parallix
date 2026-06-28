@@ -1,39 +1,57 @@
-const { spawnAndTee } = require('../core/spawn-tee');
-const { extractOpencodeTelemetryFromExport } = require('./opencode-telemetry');
-const { captureOpencodeExport } = require('./opencode-export');
+import { spawnAndTee } from '../core/spawn-tee.js';
+import { extractOpencodeTelemetryFromExport } from './opencode-telemetry.js';
+import { captureOpencodeExport } from './opencode-export.js';
+import { detectLimitHit } from './limit-hit.js';
+// tools/sessions and core/subagent-limit are still CJS (not converted in this
+// wave); require keeps them untyped (any) without pulling non-included .js into
+// the typecheck program.
 const sessions = require('../tools/sessions');
-const { detectLimitHit } = require('./limit-hit');
 const { buildSubagentLimitPrefix } = require('../core/subagent-limit');
 
+interface BuildOpencodeInvocationOptions {
+  prompt: string;
+  worktree: string;
+  env?: object;
+  resume?: boolean;
+  sessionId?: string | null;
+  model?: string | null;
+  preferJson?: boolean;
+}
+
+interface StartOpencodeAgentOptions {
+  prompt: string;
+  worktree: string;
+  env?: object;
+  resume?: boolean;
+  sessionId?: string | null;
+  model?: string | null;
+  teeOptions?: object;
+  slug?: string | null;
+  role?: string | null;
+  maxTransientRetries?: number;
+}
+
 // Injectable I/O for tests. Production uses the real spawn-tee / export capture.
-/** @type {Function} */
-let _spawnAndTee = spawnAndTee;
-/** @type {Function} */
-let _captureExport = captureOpencodeExport;
-/** @type {object} */
-let _sessions = sessions;
+let _spawnAndTee: any = spawnAndTee;
+let _captureExport: any = captureOpencodeExport;
+let _sessions: any = sessions;
 
 // Test hooks: override the launcher's I/O without touching the public signature.
-/** @param {Function} fn */
-function __setSpawnAndTeeForTest(fn) { _spawnAndTee = fn || spawnAndTee; }
-/** @param {Function} fn */
-function __setExportCaptureForTest(fn) { _captureExport = fn || captureOpencodeExport; }
-/** @param {object} mod */
-function __setSessionsForTest(mod) { _sessions = mod || sessions; }
+function __setSpawnAndTeeForTest(fn: any) { _spawnAndTee = fn || spawnAndTee; }
+function __setExportCaptureForTest(fn: any) { _captureExport = fn || captureOpencodeExport; }
+function __setSessionsForTest(mod: any) { _sessions = mod || sessions; }
 
 // Test hook: override the cached feature-detect for `--format json` support.
 // Set to true/false to force inclusion/exclusion of the flag regardless of
 // the real binary.  Pass null to reset to the live detect.
-/** @param {boolean|null} val */
-function __setJsonFormatSupportForTest(val) {
+function __setJsonFormatSupportForTest(val: boolean | null) {
   _jsonFormatSupported = val;
   _jsonFormatDetectFn = null;
 }
 
 // Test hook: inject a feature-detect function for tests.  This replaces the
 // live shell-out with a stubbed function, making tests hermetic.
-/** @param {Function} fn */
-function __setJsonFormatDetectForTest(fn) {
+function __setJsonFormatDetectForTest(fn: any) {
   _jsonFormatDetectFn = fn;
   _jsonFormatSupported = null;  // invalidate cache so the detect fn runs
 }
@@ -54,8 +72,7 @@ function __setJsonFormatDetectForTest(fn) {
 const OPENCODE_SESSION_ID_RE = /opencode\s+-s\s+(ses_\S+)/i;
 const OPENCODE_JSON_SESSION_ID_RE = /"sessionID"\s*:\s*"(ses_[^"]+)"/;
 
-/** @param {string} stdout */
-function extractOpencodeSessionId(stdout) {
+function extractOpencodeSessionId(stdout: string) {
   if (!stdout) {return null;}
   const footer = OPENCODE_SESSION_ID_RE.exec(stdout);
   if (footer) {return footer[1];}
@@ -66,13 +83,11 @@ function extractOpencodeSessionId(stdout) {
 // Cached feature-detect for `--format json` support. Set to `false` only when
 // a real invocation proves the flag is rejected (older opencode versions).
 // Tests can inject a canned result via __setJsonFormatSupportForTest.
-/** @type {boolean | null} */
-let _jsonFormatSupported = null;
+let _jsonFormatSupported: boolean | null = null;
 
 // Injectable feature-detect function for tests.  When set, checkJsonFormatSupport()
 // calls this function instead of shelling out, making tests hermetic.
-/** @type {Function | null} */
-let _jsonFormatDetectFn = null;
+let _jsonFormatDetectFn: (() => any) | null = null;
 
 function resolveOpencodeCommand() {
   return 'opencode';
@@ -111,10 +126,7 @@ function checkJsonFormatSupport() {
   }
 }
 
-/**
- * @param {{ prompt: string, worktree: string, env?: object, resume?: boolean, sessionId?: string | null, model?: string | null, preferJson?: boolean }} opts
- */
-function buildOpencodeInvocation({ prompt, worktree, env, resume = false, sessionId = null, model = null, preferJson = true }) {
+function buildOpencodeInvocation({ prompt, worktree, env, resume = false, sessionId = null, model = null, preferJson = true }: BuildOpencodeInvocationOptions) {
   // `--format json` makes opencode stream NDJSON events that each carry a
   // "sessionID":"ses_..." field. opencode v2.0.0's default `run` output no
   // longer prints the "Continue  opencode -s ses_..." footer, so JSON is the
@@ -185,17 +197,11 @@ const HARD_OPENCODE_PATTERNS = [
   /\bauthentication (?:failed|error)\b/i,
 ];
 
-/**
- * @param {{stdout?: string, stderr?: string}} result
- */
-function failureText(result) {
+function failureText(result: any) {
   return `${(result && result.stdout) || ''}\n${(result && result.stderr) || ''}`;
 }
 
-/**
- * @param {{stdout?: string, stderr?: string, error?: {code?: string}}} result
- */
-function isHardOpencodeFailure(result) {
+function isHardOpencodeFailure(result: any) {
   if (!result) {return false;}
   if (result.error && (result.error.code === 'ENOENT' || result.error.code === 'EACCES')) {return true;}
   const text = failureText(result);
@@ -207,10 +213,7 @@ function isHardOpencodeFailure(result) {
 // When the transcript contains a valid "reason":"stop" completion event and
 // no "type":"error" event, the exit is spurious – the agent actually
 // completed successfully. See opencode issues #31446 and #33653.
-/**
- * @param {{status?: number, stdout?: string, stderr?: string}} result
- */
-function isSpuriousOpencodeExit(result) {
+function isSpuriousOpencodeExit(result: any) {
   if (!result || result.status !== 1) {return false;}
   const text = failureText(result);
   const hasStop = /"reason"\s*:\s*"stop"/.test(text);
@@ -218,10 +221,7 @@ function isSpuriousOpencodeExit(result) {
   return hasStop && !hasError;
 }
 
-/**
- * @param {{stdout?: string, stderr?: string, error?: {code?: string}, signal?: string, status?: number}} result
- */
-function isTransientOpencodeFailure(result) {
+function isTransientOpencodeFailure(result: any) {
   if (!result) {return false;}
   const text = failureText(result);
   return TRANSIENT_OPENCODE_PATTERNS.some((re) => re.test(text));
@@ -231,8 +231,7 @@ function isTransientOpencodeFailure(result) {
 // Only genuine non-zero exits carrying a transient backend signature qualify;
 // clean exits, spawn errors (ENOENT/EACCES), killing signals, limit-hits, and
 // hard errors never retry — so real failures still surface to the reroute loop.
-/** @param {{stdout?: string, stderr?: string, status?: number | null, signal?: string | null, error?: {code?: string}, sessionId?: string | null}} result */
-function shouldRetryOpencodeFailure(result) {
+function shouldRetryOpencodeFailure(result: any) {
   if (!result) {return false;}
   if (result.error && (result.error.code === 'ENOENT' || result.error.code === 'EACCES')) {return false;}
   if (result.signal) {return false;}
@@ -246,12 +245,9 @@ function shouldRetryOpencodeFailure(result) {
     error: result.error,
   })) {return false;}
   if (isHardOpencodeFailure(result)) {return false;}
-  return isTransientOpencodeFailure(/** @type {any} */(result));
+  return isTransientOpencodeFailure(result);
 }
 
-/**
- * @param {{ prompt: string, worktree: string, env?: object, resume?: boolean, sessionId?: string | null, model?: string | null, teeOptions?: object, slug?: string | null, role?: string | null, maxTransientRetries?: number }} opts
- */
 function startOpencodeAgent({
   prompt,
   worktree,
@@ -263,34 +259,25 @@ function startOpencodeAgent({
   slug = null,
   role = null,
   maxTransientRetries = 1
-}) {
+}: StartOpencodeAgentOptions) {
   // Prepend the subagent-limit advisory prefix to the prompt.
   // When maxParallel is unset/null/zero the prefix is empty (no-op).
   const subagentPrefix = buildSubagentLimitPrefix();
   const injectedPrompt = subagentPrefix + prompt;
 
-  /**
-   * @param {{stdout?: string, stderr?: string}} result
-   */
-  function isStaleSessionResult(result) {
+  function isStaleSessionResult(result: any) {
     if (!result) {return false;}
     const stderr = result.stderr || '';
     const stdout = result.stdout || '';
     return stderr.includes('Session not found') || stdout.includes('Session not found');
   }
 
-  /**
-   * @param {{command: string, args: string[], options?: object}} invocation
-   */
-  function runInvocation(invocation) {
+  function runInvocation(invocation: any) {
     const spawnOptions = { ...invocation.options, ...teeOptions };
     return _spawnAndTee(invocation.command, invocation.args, spawnOptions);
   }
 
-  /**
-   * @param {{command: string, args: string[], options?: object}} invocation
-   */
-  async function runInvocationWithRetry(invocation) {
+  async function runInvocationWithRetry(invocation: any) {
     let attempts = 0;
     let result = await runInvocation(invocation);
     while (attempts < maxTransientRetries && shouldRetryOpencodeFailure(result)) {
@@ -305,19 +292,13 @@ function startOpencodeAgent({
   // that wasn't caught by the feature-detect).  If so, retry the invocation
   // without the flag so the prompt still runs (telemetry will be lost but the
   // agent won't fail outright).
-  /**
-   * @param {{stdout?: string, stderr?: string}} result
-   */
-  function isJsonFlagError(result) {
+  function isJsonFlagError(result: any) {
     if (!result) {return false;}
     const text = failureText(result);
     return (/\bunrecognized option\b|\bunknown option\b|\bno such option\b|\binvalid option\b|\bunrecognized flag\b|\bunknown flag\b/i).test(text);
   }
 
-  /**
-   * @param {{stdout?: string, sessionId?: string, telemetry?: object, model?: string, provider?: string, transientRetries?: number, _jsonFallback?: boolean}} result
-   */
-  async function processResult(result) {
+  async function processResult(result: any) {
     if (result && result.stdout) {
       result.sessionId = extractOpencodeSessionId(result.stdout) || undefined;
     }
@@ -327,9 +308,9 @@ function startOpencodeAgent({
         if (exportJson) {
           const telemetry = extractOpencodeTelemetryFromExport(exportJson, model || undefined);
           if (telemetry) {
-            /** @type {any} */(result).telemetry = telemetry;
-            if (/** @type {any} */(telemetry).model) {/** @type {any} */(result).model = /** @type {any} */(telemetry).model;}
-            if (/** @type {any} */(telemetry).provider) {/** @type {any} */(result).provider = /** @type {any} */(telemetry).provider;}
+            result.telemetry = telemetry;
+            if ((telemetry as any).model) {result.model = (telemetry as any).model;}
+            if ((telemetry as any).provider) {result.provider = (telemetry as any).provider;}
           }
         }
       } catch (_) {
@@ -339,10 +320,7 @@ function startOpencodeAgent({
     return result;
   }
 
-  /**
-   * @param {{command: string, args: string[], options?: object}} invocation
-   */
-  async function runWithJsonFallback(invocation) {
+  async function runWithJsonFallback(invocation: any) {
     let result = await runInvocationWithRetry(invocation);
     // Runtime fallback: if the first invocation used --format json but the
     // binary rejected it, retry without the flag so the prompt still executes.
@@ -357,14 +335,11 @@ function startOpencodeAgent({
     return result;
   }
 
-  /**
-   * @param {{command: string, args: string[], options?: object}} invocation
-   */
-  async function staleSessionHandler(invocation) {
+  async function staleSessionHandler(invocation: any) {
     let result = await runWithJsonFallback(invocation);
     if (isStaleSessionResult(result) && worktree && resume) {
       try {
-        /** @type {any} */(_sessions).clearSession(worktree, slug || '', role || '');
+        _sessions.clearSession(worktree, slug || '', role || '');
       } catch (_) { /* best-effort */ }
       const freshInv = buildOpencodeInvocation({ prompt: injectedPrompt, worktree, env, resume: false, sessionId: null, model });
       result = await runWithJsonFallback(freshInv);
@@ -378,7 +353,7 @@ function startOpencodeAgent({
   return { invocation, resultPromise };
 }
 
-module.exports = {
+export {
   buildOpencodeInvocation,
   extractOpencodeSessionId,
   resolveOpencodeCommand,
