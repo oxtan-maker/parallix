@@ -4,10 +4,11 @@ title: >-
   TASK-1374: Mission 10 - Tools module (backlog, forgejo, gatekeeper, redgreen,
   sessions, setup-review)
 status: backlog
-assignee: []
+assignee: [custom]
 created_date: '2026-06-27 10:38'
 updated_date: '2026-06-27 10:38'
-labels: []
+labels:
+  - user_value
 dependencies:
   - TASK-1366
   - TASK-1367
