@@ -1,13 +1,13 @@
-const fs = require('fs');
-const http = require('http');
-const https = require('https');
-const path = require('path');
-const { spawnSync } = require('child_process');
-const git = require('../core/git');
-const { getPrimaryBranch, resolveMissionBaseBranch } = require('../core/mission-utils');
-const { resolveReviewAdapter } = require('../core/product-config');
-const verification = require('../core/verification');
-const fmt = require('../core/fmt');
+import fs from 'fs';
+import http from 'http';
+import https from 'https';
+import path from 'path';
+import { spawnSync } from 'child_process';
+import { git } from '../core/git.js';
+import { getPrimaryBranch, resolveMissionBaseBranch } from '../core/mission-utils.js';
+import { resolveReviewAdapter } from '../core/product-config.js';
+import * as verification from '../core/verification.js';
+import * as fmt from '../core/fmt.js';
 
 const DISPOSITION_PATTERN = /Autonomous review disposition:\s*(CHANGES_MADE|PUSHBACK_ALL|PARKED|BLOCKED)/;
 
@@ -19,11 +19,11 @@ function codexSandboxHint() {
   return 'Codex runtime cannot reach local Forgejo from Node subprocesses. Use the repo-local Codex config/profile that allows the workflow network path.';
 }
 /** @param {string} rootDir @param {string} remoteName @returns {string} */
-function cacheKey(rootDir, remoteName) {
+function cacheKey(rootDir: string, remoteName: string): string {
   return `${rootDir}::${remoteName}`;
 }
 /** @param {string} rootDir @param {string} remoteName @returns {string|null} */
-function deriveRepoFromGitRemote(rootDir, remoteName) {
+function deriveRepoFromGitRemote(rootDir: string, remoteName: string): string | null {
   if (derivedRepoCache.has(cacheKey(rootDir, remoteName))) {
     return derivedRepoCache.get(cacheKey(rootDir, remoteName));
   }
@@ -49,7 +49,7 @@ function deriveRepoFromGitRemote(rootDir, remoteName) {
 }
 
 /** @param {string} [explicitUser] @returns {string} */
-function resolveForgejoUser(explicitUser) {
+function resolveForgejoUser(explicitUser): string {
   return explicitUser || process.env.FORGEJO_USER || DEFAULT_FORGEJO_USER;
 }
 
@@ -87,7 +87,7 @@ function resolveForgejoHome() {
 }
 
 /** @param {string} targetPath @returns {string|null} */
-function normalizePathForComparison(targetPath) {
+function normalizePathForComparison(targetPath: string): string | null {
   if (!targetPath) {return null;}
   try {
     return fs.realpathSync.native(targetPath);
@@ -101,7 +101,7 @@ function normalizePathForComparison(targetPath) {
  * @param {{forgejoHome?: string}} [options]
  * @returns {boolean}
  */
-function isForgejoPath(targetPath, options = {}) {
+function isForgejoPath(targetPath: string, options = {}): boolean {
   const forgejoHome = options.forgejoHome || resolveForgejoHome();
   const normalizedTarget = normalizePathForComparison(targetPath);
   const normalizedForgejoHome = normalizePathForComparison(forgejoHome);
@@ -122,7 +122,7 @@ function resolveForgejoSettings(rootDir = process.cwd()) {
  * @param {{forgejoUser?: string, token?: string}} options
  * @returns {{forgejoUser: string, token: string|null}}
  */
-function resolveForgejoAuth(options = {}) {
+function resolveForgejoAuth(options: { forgejoUser?: string, token?: string } = {} as any): { forgejoUser: string, token: string | null } {
   const forgejoUser = resolveForgejoUser(options.forgejoUser);
   const token = options.token || readToken(forgejoUser);
   return { forgejoUser, token };
@@ -133,7 +133,7 @@ function resolveForgejoAuth(options = {}) {
  * @param {{status?: number, statusCode?: number}} [apiErr]
  * @returns {string}
  */
-function formatPrLookupFailure(branch, apiErr = {}) {
+function formatPrLookupFailure(branch: string, apiErr = {}): string {
   const sandboxNote = apiErr.status === 7 ? ` (${codexSandboxHint()})` : '';
   if (apiErr.statusCode === 401 || apiErr.statusCode === 403) {
     return `failed to resolve PR for ${branch}: Forgejo authentication failed (${apiErr.statusCode})${sandboxNote}`;
@@ -212,7 +212,7 @@ function getPrStatus(branch, rootDir = process.cwd(), options = {}) {
  * @param {string} user  - Forgejo login (e.g. 'claude', 'codex', 'human')
  * @returns {string|null}
  */
-function resolveTokenFile(user) {
+function resolveTokenFile(user: string): string | null {
   const resolvedUser = resolveForgejoUser(user);
   const isCurrentUser = resolvedUser === resolveForgejoUser();
   const canUseDefaultTokenFile = isCurrentUser || resolvedUser === DEFAULT_FORGEJO_USER;
@@ -235,7 +235,7 @@ function resolveTokenFile(user) {
  * @param {string} user
  * @returns {string|null}
  */
-function readToken(user) {
+function readToken(user: string): string | null {
   const resolvedUser = resolveForgejoUser(user);
   if (resolvedUser === resolveForgejoUser() && process.env.FORGEJO_TOKEN) {
     return process.env.FORGEJO_TOKEN;
@@ -262,7 +262,7 @@ function readToken(user) {
  * @param {{rootDir?: string}} [options]
  * @returns {{ok: boolean, data: any, status: number|null, statusCode: number|null, stderr: string|null, error: string|null}}
  */
-function forgejoApi(method, apiPath, token, body, options = {}) {
+function forgejoApi(method: string, apiPath: string, token: string, body, options = {}): { ok: boolean, data: any, status: number | null, statusCode: number | null, stderr: string | null, error: string | null } {
   const { rootDir = process.cwd() } = options;
   const { url: forgejoUrl, repo: forgejoRepo } = resolveForgejoSettings(rootDir);
   const url = `${forgejoUrl}/api/v1/repos/${forgejoRepo}${apiPath}`;
@@ -327,7 +327,7 @@ function forgejoApi(method, apiPath, token, body, options = {}) {
  * @param {{rootDir?: string, timeout?: number}} [options]
  * @returns {Promise<{ok: boolean, data: any, status: number|null, statusCode: number|null, stderr: string|null, error: string|null}>}
  */
-async function forgejoApiAsync(method, apiPath, token, body, options = {}) {
+async function forgejoApiAsync(method: string, apiPath: string, token: string, body, options = {}): Promise< { ok: boolean, data: any, status: number | null, statusCode: number | null, stderr: string | null, error: string | null } > {
   /** @type {{rootDir?: string, timeout?: number}} */
   const {
     rootDir = process.cwd(),
@@ -388,7 +388,7 @@ async function forgejoApiAsync(method, apiPath, token, body, options = {}) {
         status: null,
         statusCode: null,
         stderr: error.message || null,
-        error: ['ECONNREFUSED', 'ENOTFOUND', 'EHOSTUNREACH'].includes(error.code || '') ? codexSandboxHint() : null
+        error: ['ECONNREFUSED', 'ENOTFOUND', 'EHOSTUNREACH'].includes((error as { code?: string }).code || '') ? codexSandboxHint() : null
       });
     });
 
@@ -428,7 +428,7 @@ async function forgejoApiAsync(method, apiPath, token, body, options = {}) {
  * @param {{rootDir?: string, apiCall?: Function, log?: Function, force?: boolean, forceWithLease?: boolean, verificationArea?: string, captureVerifiedTreeProofFn?: Function, assertVerifiedTreeProofFn?: Function}} [options]
  * @returns {{ok: boolean, url?: string|null, error?: string|null, prNumber?: number}}
  */
-function createPr(branch, user, token, options = {}) {
+function createPr(branch: string, user: string, token: string, options = {}): { ok: boolean, url?: string | null, error?: string | null, prNumber?: number } {
   const {
     rootDir = process.cwd(),
     apiCall = forgejoApi,
@@ -487,7 +487,7 @@ function createPr(branch, user, token, options = {}) {
   const syncResult = syncPrimaryBaseline(gitUser, gitToken, rootDir, {
     verificationProof: proofResult.proof,
     assertVerifiedTreeProofFn,
-    gitRunner: git.git
+    gitRunner: git
   });
   if (!syncResult.ok) {
     return { ok: false, error: `failed to sync primary baseline: ${syncResult.error || syncResult.stderr}` };
@@ -516,7 +516,7 @@ function createPr(branch, user, token, options = {}) {
     return { ok: false, error: pushArgsResult.error };
   }
   let pushArgs = pushArgsResult.pushArgs || [];
-  let pushResult = git.git(pushArgs, { stdio: ['ignore', 'pipe', 'pipe'], env: cLocaleEnv() });
+  let pushResult = git(pushArgs, { stdio: ['ignore', 'pipe', 'pipe'], env: cLocaleEnv() });
   if (pushResult.stdout) {process.stdout.write(pushResult.stdout);}
   if (pushResult.stderr) {process.stderr.write(pushResult.stderr);}
 
@@ -533,7 +533,7 @@ function createPr(branch, user, token, options = {}) {
         return { ok: false, error: pushArgsResult.error };
       }
       pushArgs = pushArgsResult.pushArgs || [];
-      pushResult = git.git(pushArgs, { stdio: ['ignore', 'pipe', 'pipe'], env: cLocaleEnv() });
+      pushResult = git(pushArgs, { stdio: ['ignore', 'pipe', 'pipe'], env: cLocaleEnv() });
       if (pushResult.stdout) {process.stdout.write(pushResult.stdout);}
       if (pushResult.stderr) {process.stderr.write(pushResult.stderr);}
     }
@@ -584,7 +584,7 @@ function createPr(branch, user, token, options = {}) {
  * @param {{apiCall?: Function, slug?: string|null, onlyOpen?: boolean, forgejoUser?: string, rootDir?: string}} [options]
  * @returns {number|null|{_apiError?: object, _notFound?: boolean}}
  */
-function getPrNumber(branch, token, options = {}) {
+function getPrNumber(branch: string, token: string | null, options = {}): number | null | { _apiError?: object, _notFound?: boolean } {
   const resolved = resolvePrAccess(branch, token, options);
   if (!resolved || isApiErrorResult(resolved)) {
     return resolved;
@@ -614,7 +614,7 @@ function getPrNumber(branch, token, options = {}) {
  * @param {{apiCall?: Function, resolvePrNumber?: Function, forgejoUser?: string, rootDir?: string}} [options]
  * @returns {string|null}
  */
-function getPrAuthor(branch, token, options = {}) {
+function getPrAuthor(branch: string, token: string, options = {}): string | null {
   /** @type {{apiCall?: Function, resolvePrNumber?: Function, forgejoUser?: string, rootDir?: string}} */
   const {
     apiCall = forgejoApi,
@@ -638,7 +638,7 @@ function getPrAuthor(branch, token, options = {}) {
  * @param {{apiCall?: Function, pageSize?: number, maxPages?: number, slug?: string|null, onlyOpen?: boolean, forgejoUser?: string, rootDir?: string, reportNotFound?: boolean}} [options]
  * @returns {{prNumber?: number, token?: string, _apiError?: object, _notFound?: boolean}|null}
  */
-function resolvePrAccess(branch, token, options = {}) {
+function resolvePrAccess(branch: string, token: string | null, options = {}): { prNumber?: number, token?: string, _apiError?: object, _notFound?: boolean } {
   const {
     apiCall = forgejoApi,
     pageSize = 50,
@@ -754,7 +754,7 @@ function resolvePrAccess(branch, token, options = {}) {
  * @param {{apiCall?: Function, pageSize?: number, maxPages?: number}} [options]
  * @returns {Array<{number: number, title: string, html_url: string, head: string}>}
  */
-function listOpenPrsForSlug(baseSlug, token, options = {}) {
+function listOpenPrsForSlug(baseSlug: string, token: string, options = {}): Array< { number: number, title: string, html_url: string, head: string } > {
   /** @type {{apiCall?: Function, pageSize?: number, maxPages?: number}} */
   const {
     apiCall = forgejoApi,
@@ -798,7 +798,7 @@ function listOpenPrsForSlug(baseSlug, token, options = {}) {
 }
 
 /** @param {{_apiError?: object, _notFound?: boolean}} result @returns {boolean} */
-function isApiErrorResult(result) {
+function isApiErrorResult(result): boolean {
   return Boolean(result && typeof result === 'object' && result._apiError && result._notFound === true);
 }
 
@@ -835,7 +835,7 @@ function reviewRemoteUrl(rootDir = process.cwd()) {
 function syncPrimaryBaseline(user, token, rootDir = process.cwd(), {
   verificationProof = null,
   assertVerifiedTreeProofFn = verification.assertVerifiedTreeProof,
-  gitRunner = git.git
+  gitRunner = git
 } = {}) {
   let primaryBranchName = 'main';
   try {
@@ -879,7 +879,7 @@ function syncPrimaryBaseline(user, token, rootDir = process.cwd(), {
  * @returns {{ok: boolean, status?: number, stderr?: string, error?: string|null}}
  */
 function ensureRemoteBaseBranch(baseBranch, user, token, rootDir = process.cwd(), {
-  gitRunner = git.git
+  gitRunner = git
 } = {}) {
   // A feature-branch mission opens its PR against a non-primary base branch.
   // syncPrimaryBaseline only mirrors the primary branch, so the PR base would
@@ -931,7 +931,7 @@ function pushReviewRef(sourceRef, destinationRef, rootDir = process.cwd(), {
     pushArgs.push('--force');
   }
   pushArgs.push(`${sourceRef}:${destinationRef}`);
-  const result = git.git(pushArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
+  const result = git(pushArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
   if (result.stdout) {process.stdout.write(result.stdout);}
   if (result.stderr) {process.stderr.write(result.stderr);}
   return result;
@@ -948,7 +948,7 @@ function fetchReviewBranch(branch, rootDir = process.cwd(), options = {}) {
   const source = token
     ? authenticatedReviewUrl(user || resolveForgejoUser(), token, rootDir)
     : 'review';
-  return git.git(['-C', rootDir, 'fetch', source, `+refs/heads/${branch}:refs/remotes/review/${branch}`], {
+  return git(['-C', rootDir, 'fetch', source, `+refs/heads/${branch}:refs/remotes/review/${branch}`], {
     stdio: ['ignore', 'pipe', 'pipe'],
     // Force a stable C locale so git emits its diagnostics in English. Without
     // this, a non-English operator locale (e.g. Swedish "kunde inte hitta
@@ -962,7 +962,7 @@ function fetchReviewBranch(branch, rootDir = process.cwd(), options = {}) {
 function resolveTrackingBranchSha(branch, rootDir = process.cwd()) {
   const candidateRefs = [`refs/remotes/review/${branch}`, `refs/remotes/origin/${branch}`];
   for (const ref of candidateRefs) {
-    const result = git.git(['-C', rootDir, 'rev-parse', '--verify', `${ref}^{commit}`], {
+    const result = git(['-C', rootDir, 'rev-parse', '--verify', `${ref}^{commit}`], {
       stdio: ['ignore', 'pipe', 'pipe']
     });
     const sha = (result.stdout || '').trim();
@@ -1049,7 +1049,7 @@ function deleteReviewRef(branch, rootDir = process.cwd(), { user, token } = {}) 
   const remote = token
     ? authenticatedReviewUrl(user || resolveForgejoUser(), token, rootDir)
     : 'review';
-  const result = git.git(['-C', rootDir, 'push', remote, '--delete', branch], {
+  const result = git(['-C', rootDir, 'push', remote, '--delete', branch], {
     stdio: ['ignore', 'pipe', 'pipe']
   });
   if (result.stdout) {process.stdout.write(result.stdout);}
@@ -1059,14 +1059,14 @@ function deleteReviewRef(branch, rootDir = process.cwd(), { user, token } = {}) 
 
 /** @param {string} commit @param {string} rootDir @returns {*} */
 function verifyCommitExists(commit, rootDir = process.cwd()) {
-  return git.git(['-C', rootDir, 'rev-parse', '--verify', `${commit}^{commit}`], {
+  return git(['-C', rootDir, 'rev-parse', '--verify', `${commit}^{commit}`], {
     stdio: ['ignore', 'pipe', 'pipe']
   });
 }
 
 /** @param {string} commit @param {string} [remoteRef] @param {string} rootDir @returns {*} */
 function remoteRefContainsCommit(commit, remoteRef = `refs/remotes/review/${getPrimaryBranch(process.cwd())}`, rootDir = process.cwd()) {
-  return git.git(['-C', rootDir, 'merge-base', '--is-ancestor', commit, remoteRef], {
+  return git(['-C', rootDir, 'merge-base', '--is-ancestor', commit, remoteRef], {
     stdio: ['ignore', 'pipe', 'pipe']
   });
 }
@@ -1076,12 +1076,12 @@ function remoteRefContainsCommit(commit, remoteRef = `refs/remotes/review/${getP
 // control flow, so force a stable C locale on git calls whose stderr we
 // inspect, keeping detection language-independent.
 /** @returns {Record<string, string>} */
-function cLocaleEnv() {
+function cLocaleEnv(): Record<string, string> {
   return { ...process.env, LC_ALL: 'C', LANG: 'C' };
 }
 
 /** @param {{stderr?: string, stdout?: string}} result @returns {string} */
-function pushOutput(result) {
+function pushOutput(result): string {
   return [result && result.stderr, result && result.stdout]
     .filter(Boolean)
     .join('\n')
@@ -1094,14 +1094,14 @@ function pushOutput(result) {
 // distinguished from real fetch failures (auth/network), which also exit
 // non-zero but do not carry this message and should still abort.
 /** @param {{stderr?: string, stdout?: string}} result @returns {boolean} */
-function isMissingRemoteRef(result) {
+function isMissingRemoteRef(result): boolean {
   const output = pushOutput(result).toLowerCase();
   return output.includes('could not find remote ref')
     || output.includes("couldn't find remote ref");
 }
 
 /** @param {{status?: number, stderr?: string, stdout?: string}} result @returns {boolean} */
-function isStaleInfoPushRejection(result) {
+function isStaleInfoPushRejection(result): boolean {
   return result && result.status !== 0 && /\bstale info\b|\bstale ref\b|fetch first/i.test(pushOutput(result));
 }
 
@@ -1124,7 +1124,7 @@ function isStaleInfoPushRejection(result) {
  * @param {{apiCall?: Function, forgejoUser?: string, rootDir?: string}} [options]
  * @returns {{state: string, submittedAt: string}|null}
  */
-function getLatestReview(branch, reviewerUser, sinceIso, token, options = {}) {
+function getLatestReview(branch: string, reviewerUser: string, sinceIso: string, token: string, options = {}): { state: string, submittedAt: string } {
   const {
     apiCall = forgejoApi,
     forgejoUser,
@@ -1159,7 +1159,7 @@ function getLatestReview(branch, reviewerUser, sinceIso, token, options = {}) {
  * @param {{forgejoUser?: string, token?: string, apiCall?: Function, rootDir?: string}} [options]
  * @returns {{ok: boolean, error?: string, reviewState?: string|null, prNumber?: number, defaultUserApproved?: boolean, raw?: string}}
  */
-function getLatestReviewDecision(branch, options = {}) {
+function getLatestReviewDecision(branch: string, options = {}): { ok: boolean, error?: string, reviewState?: string | null, prNumber?: number, defaultUserApproved?: boolean, raw?: string } {
   /** @type {{forgejoUser?: string, token?: string, apiCall?: Function, rootDir?: string}} */
   const {
     forgejoUser,
@@ -1241,7 +1241,7 @@ function getLatestReviewDecision(branch, options = {}) {
  * @param {object} [options]       - Optional overrides
  * @returns {string|null}  Disposition value (CHANGES_MADE|PUSHBACK_ALL|PARKED|BLOCKED) or null
  */
-function getLatestDisposition(branch, implementerUser, sinceIso, token, options = {}) {
+function getLatestDisposition(branch: string, implementerUser: string, sinceIso: string, token: string, options = {}): string | null {
   /** @type {{apiCall?: Function, forgejoUser?: string, rootDir?: string}} */
   const {
     apiCall = forgejoApi,
@@ -1340,7 +1340,7 @@ async function getLatestDispositionForPr(/** @type {number} */ prNumber, /** @ty
  * @param {string} body    - Comment body (markdown)
  * @returns {{ ok: boolean, data: any, status: number|null, error?: string, raw?: string }}
  */
-function postComment(branch, token, body, options = {}) {
+function postComment(branch: string, token: string, body: string, options = {}): { ok: boolean, data: any, status: number | null, error?: string, raw?: string } {
   /** @type {{apiCall?: Function, resolvePrNumber?: Function, forgejoUser?: string}} */
   const {
     apiCall = forgejoApi,
@@ -1373,7 +1373,7 @@ const REVIEW_OUTCOME_MAP = {
  * @param {string} summary  - Review summary text
  * @returns {{ ok: boolean, data: any, status: number|null, error?: string, raw?: string }}
  */
-function postReview(branch, token, outcome, summary, options = {}) {
+function postReview(branch: string, token: string, outcome: string, summary: string, options = {}): { ok: boolean, data: any, status: number | null, error?: string, raw?: string } {
   /** @type {{apiCall?: Function, resolvePrNumber?: Function, forgejoUser?: string}} */
   const {
     apiCall = forgejoApi,
@@ -1419,7 +1419,7 @@ function postReview(branch, token, outcome, summary, options = {}) {
  * @param {number} [options.timeout=HTTP_REQUEST_TIMEOUT]
  * @returns {Promise<boolean>} True if Forgejo is reachable, false otherwise
  */
-function forgejoAvailable(url = process.env.FORGEJO_URL || 'http://localhost:3300', options = {}) {
+function forgejoAvailable(url = process.env.FORGEJO_URL || 'http://localhost:3300', options = {}): Promise<boolean> {
   /** @type {{request?: Function, timeout?: number}} */
   const {
     request = http.request,
@@ -1613,7 +1613,7 @@ function syncMerged(/** @type {string} */ branch, /** @type {string} */ mergedCo
  * @param {Function} [options.log]     - Logger, injectable for tests
  * @returns {any[]|null} - Array of comment objects sorted by creation time, or null if comments could not be fetched
  */
-function getCommentsSync(branch, token, options = {}) {
+function getCommentsSync(branch: string, token: string, options = {}): any[] | null {
   /** @type {{apiCall?: Function, forgejoUser?: string, rootDir?: string, log?: Function}} */
   const {
     apiCall = forgejoApi,
@@ -1709,7 +1709,7 @@ async function getComments(/** @type {string} */ branch, /** @type {string} */ t
  * @param {string} token   - Forgejo PAT
  * @returns {Promise<Object>} - { ok: boolean, error: string }
  */
-async function closePr(branch, token) {
+async function closePr(branch: string, token: string): Promise<Object> {
   const slugMatch = branch.match(/^mission\/(task-\d+)/);
   const slug = slugMatch ? slugMatch[1] : null;
   const rootDir = process.cwd();
@@ -1752,43 +1752,43 @@ async function closePr(branch, token) {
   return { ok: true };
 }
 
-module.exports = {
-  getPrStatus,
-  resolveForgejoUser,
-  resolveForgejoHome,
-  isForgejoPath,
-  resolveTokenFile,
-  readToken,
-  forgejoApi,
-  forgejoApiAsync,
-  getPrNumber,
-  getPrAuthor,
-  listOpenPrsForSlug,
-  isApiErrorResult,
-  getLatestReview,
-  getLatestReviewForPr,
-  getLatestReviewDecision,
-  getLatestDisposition,
-  getLatestDispositionForPr,
-  postComment,
-  forgejoAvailable,
-  postReview,
-  syncMerged,
-  pushReviewRef,
-  isStaleInfoPushRejection,
-  fetchReviewBranch,
-  deleteReviewRef,
-  verifyCommitExists,
-  remoteRefContainsCommit,
-  resolveTrackingBranchSha,
-  deriveRepoFromGitRemote,
-  resolveForgejoSettings,
-  reviewRemoteUrl,
-  authenticatedReviewUrl,
-  syncPrimaryBaseline,
-  ensureRemoteBaseBranch,
-  createPr,
-  getCommentsSync,
-  getComments,
-  closePr
-};
+
+export { getPrStatus };
+export { resolveForgejoUser };
+export { resolveForgejoHome };
+export { isForgejoPath };
+export { resolveTokenFile };
+export { readToken };
+export { forgejoApi };
+export { forgejoApiAsync };
+export { getPrNumber };
+export { getPrAuthor };
+export { listOpenPrsForSlug };
+export { isApiErrorResult };
+export { getLatestReview };
+export { getLatestReviewForPr };
+export { getLatestReviewDecision };
+export { getLatestDisposition };
+export { getLatestDispositionForPr };
+export { postComment };
+export { forgejoAvailable };
+export { postReview };
+export { syncMerged };
+export { pushReviewRef };
+export { isStaleInfoPushRejection };
+export { fetchReviewBranch };
+export { deleteReviewRef };
+export { verifyCommitExists };
+export { remoteRefContainsCommit };
+export { resolveTrackingBranchSha };
+export { deriveRepoFromGitRemote };
+export { resolveForgejoSettings };
+export { reviewRemoteUrl };
+export { authenticatedReviewUrl };
+export { syncPrimaryBaseline };
+export { ensureRemoteBaseBranch };
+export { createPr };
+export { getCommentsSync };
+export { getComments };
+export { closePr };
+;

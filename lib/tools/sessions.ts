@@ -1,5 +1,5 @@
-const fs = require('fs');
-const path = require('path');
+import fs from 'fs';
+import path from 'path';
 
 // Per-worktree session markers used by startAgent to decide whether to launch
 // an agent fresh or with its family-specific resume flag. Stored under
@@ -7,17 +7,17 @@ const path = require('path');
 // mission worktree and survive harness restarts but never travel through git.
 
 /** @param {string} worktree */
-function sessionsDir(worktree) {
+function sessionsDir(worktree: string) {
   return path.join(worktree, '.workflow', 'sessions');
 }
 
 /** @param {string} worktree @param {string} slug @param {string} role */
-function sessionFile(worktree, slug, role) {
+function sessionFile(worktree: string, slug: string, role: string) {
   return path.join(sessionsDir(worktree), `${slug}-${role}.json`);
 }
 
 /** @param {string} worktree @param {string} slug @param {string} role */
-function readSession(worktree, slug, role) {
+function readSession(worktree: string, slug: string, role: string) {
   if (!worktree || !slug || !role) {return null;}
   const file = sessionFile(worktree, slug, role);
   if (!fs.existsSync(file)) {return null;}
@@ -31,7 +31,7 @@ function readSession(worktree, slug, role) {
 }
 
 /** @param {string} worktree @param {string} slug @param {string} role @param {{agent: string, lastLaunched?: string, sessionId?: string|null}} payload */
-function writeSession(worktree, slug, role, payload) {
+function writeSession(worktree: string, slug: string, role: string, payload: {agent: string, lastLaunched?: string, sessionId?: string | null}) {
   if (!worktree || !slug || !role || !payload || typeof payload.agent !== 'string') {
     return false;
   }
@@ -49,20 +49,20 @@ function writeSession(worktree, slug, role, payload) {
 // agent family. A fallback to a different family invalidates the marker —
 // the new family has no prior session to continue.
 /** @param {string} worktree @param {string} slug @param {string} role @param {string} agent */
-function shouldResume(worktree, slug, role, agent) {
+function shouldResume(worktree: string, slug: string, role: string, agent: string) {
   const prev = readSession(worktree, slug, role);
   return Boolean(prev && prev.agent === agent);
 }
 
 // Return the session ID from the marker, if one was persisted.
 /** @param {string} worktree @param {string} slug @param {string} role */
-function getSessionId(worktree, slug, role) {
+function getSessionId(worktree: string, slug: string, role: string) {
   const prev = readSession(worktree, slug, role);
   return prev && prev.sessionId ? prev.sessionId : null;
 }
 
 /** @param {string} worktree @param {string} slug @param {string} role */
-function clearSession(worktree, slug, role) {
+function clearSession(worktree: string, slug: string, role: string) {
   if (!worktree || !slug || !role) {return false;}
   const file = sessionFile(worktree, slug, role);
   if (!fs.existsSync(file)) {return false;}
@@ -70,12 +70,12 @@ function clearSession(worktree, slug, role) {
   return true;
 }
 
-module.exports = {
-  sessionsDir,
-  sessionFile,
-  readSession,
-  writeSession,
-  shouldResume,
-  getSessionId,
-  clearSession
-};
+
+export { sessionsDir };
+export { sessionFile };
+export { readSession };
+export { writeSession };
+export { shouldResume };
+export { getSessionId };
+export { clearSession };
+;

@@ -1,9 +1,9 @@
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const fmt = require('../core/fmt');
-const { findMissionDir, findCheckpoints, missionBranchName, resolveMissionBaseBranch } = require('../core/mission-utils');
-const { git, run } = require('../core/git');
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import * as fmt from '../core/fmt.js';
+import { findMissionDir, findCheckpoints, missionBranchName, resolveMissionBaseBranch } from '../core/mission-utils.js';
+import { git, run } from '../core/git.js';
 
 const REPRO_TEST_MARKER = /^Reproduction-Test:\s*(.+?)\s*$/m;
 
@@ -11,7 +11,7 @@ const REPRO_TEST_MARKER = /^Reproduction-Test:\s*(.+?)\s*$/m;
  * Locate the reproduction test path from a `Reproduction-Test: <path>` line in
  * MISSION.md or any checkpoint document. Returns null when none is declared.
  */
-function findReproTestPath(slug, rootDir, options = {}) {
+function findReproTestPath(slug: string, rootDir: string, options: { findMissionDirFn?: Function, findCheckpointsFn?: Function } = {} as any) {
   const {
     findMissionDirFn = findMissionDir,
     findCheckpointsFn = findCheckpoints
@@ -39,7 +39,7 @@ function findReproTestPath(slug, rootDir, options = {}) {
  * Resolve the commit where the mission branch diverged from its base branch.
  * Uses merge-base so a rebased/advanced base still yields the true fork point.
  */
-function resolveMissionParentCommit(slug, rootDir, options = {}) {
+function resolveMissionParentCommit(slug: string, rootDir: string, options: { gitFn?: Function | null, branch?: string } = {} as any) {
   const { gitFn = null } = options;
   const runner = gitFn || git;
   const branch = options.branch || missionBranchName(slug, rootDir);
@@ -60,7 +60,7 @@ function resolveMissionParentCommit(slug, rootDir, options = {}) {
  * yet authored). Runs inside a throwaway detached worktree so the live
  * worktree is never mutated.
  */
-function runReproAtRef(ref, testPath, options = {}) {
+function runReproAtRef(ref: string, testPath: string, options: { rootDir?: string, headRef?: string, gitFn?: Function | null, runCommandFn?: Function | null } = {} as any) {
   const {
     rootDir = process.cwd(),
     headRef = 'HEAD',
@@ -102,7 +102,7 @@ function runReproAtRef(ref, testPath, options = {}) {
  *   { ok: true, skipped: false } — repro failed at parent and passed at HEAD
  *   { ok: false, ... , error }   — repro missing, passed at parent, or failed at HEAD
  */
-function verifyRedGreenProof(slug, options = {}) {
+function verifyRedGreenProof(slug: string, options: { rootDir?: string, log?: Function, headRef?: string, findReproTestPathFn?: Function, resolveMissionParentCommitFn?: Function, runReproAtRefFn?: Function, branch?: string, testPath?: string } = {} as any) {
   const {
     rootDir = process.cwd(),
     log = fmt.log.plain,
@@ -208,13 +208,14 @@ function main() {
   process.exit(0);
 }
 
-if (require.main === module) {
+// CLI entry point when run directly
+if (typeof require !== 'undefined' && (require as { main?: unknown }).main === module) {
   main();
 }
 
-module.exports = {
-  findReproTestPath,
-  resolveMissionParentCommit,
-  runReproAtRef,
-  verifyRedGreenProof
-};
+
+export { findReproTestPath };
+export { resolveMissionParentCommit };
+export { runReproAtRef };
+export { verifyRedGreenProof };
+;
