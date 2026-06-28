@@ -4,7 +4,6 @@ import * as fmt from '../core/fmt.js';
 
 import { findMissionDir, findCheckpoints, missionDirForSlug, missionBranchName } from '../core/mission-utils.js';
 import { resolveTaskFile, getTaskStorage } from './backlog.js';
-// @ts-expect-error forgejo.js not yet converted to .ts
 import { readToken, postReview } from './forgejo.js';
 
 const DEFAULT_GATEKEEPER_USER = 'forgejo-gatekeeper';
