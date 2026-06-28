@@ -188,6 +188,11 @@ export function conventionalWorktreePath(slug: string, mainRepo: string = getPri
 
 /**
  * Conventional path for an auto-created *base* feature-branch worktree.
+ *
+ * Reuses the same mission `worktreePattern` so the path is discoverable and
+ * removable with the existing tooling. The base branch name is slug-sanitised
+ * (`/` → `-`) and prefixed with `base-` so it never collides with a mission
+ * worktree (`mission/<slug>` → `<repo>-<slug>`).
  */
 /** @param {string} baseBranch @param {string} [mainRepo] */
 export function conventionalBaseWorktreePath(baseBranch: string, mainRepo: string = getPrimaryWorktree()): string {
@@ -195,6 +200,18 @@ export function conventionalBaseWorktreePath(baseBranch: string, mainRepo: strin
   return conventionalWorktreePath(`base-${safeName}`, mainRepo);
 }
 
+/**
+ * Detect the branch HEAD is on at draft time, to be used as the mission base.
+ *
+ * Returns the current branch name. Returns `null` when HEAD is detached so the
+ * caller falls back to `getPrimaryBranch()`. Throws when the current branch is
+ * itself a mission branch (the `mission/*` prefix is reserved; nesting a mission
+ * on a mission is refused).
+ *
+ * @param {string} [cwd]
+ * @param {{ gitFn?: Function }} [options]
+ * @returns {string|null}
+ */
 /** @param {string} [cwd] @param {{gitFn?: Function}} [options] */
 export function detectLaunchBaseBranch(cwd: string = process.cwd(), options: { gitFn?: Function } = {}): string | null {
   /** @type {Function} */
@@ -221,6 +238,14 @@ export function parseBaseBranchLine(content: string): string | null {
   return match ? match[1].trim() : null;
 }
 
+/**
+ * Read the `Base-Branch:` line recorded in the mission's MISSION.md.
+ *
+ * Reads the on-disk MISSION.md first (present in the mission worktree); when it
+ * is not on disk, falls back to reading it from the mission branch via
+ * `git show <branch>:<path>`. Returns `null` when no `Base-Branch:` line exists
+ * (every pre-existing mission), so callers fall back to the primary branch.
+ */
 /** @param {string} slug @param {string} [rootDir] @param {{gitFn?: Function}} [options] */
 export function readRecordedBaseBranch(slug: string, rootDir: string = process.cwd(), options: { gitFn?: Function | null } = {}): string | null {
   /** @type {Function | null} */
@@ -261,6 +286,12 @@ export function readRecordedBaseBranch(slug: string, rootDir: string = process.c
   return null;
 }
 
+/**
+ * Resolve the base branch a mission was drafted from.
+ *
+ * Returns the recorded `Base-Branch:` when present, otherwise `getPrimaryBranch()`
+ * (the byte-identical legacy behaviour for every pre-existing mission).
+ */
 /** @param {string} slug @param {string} [rootDir] @param {{gitFn?: Function}} [options] */
 export function resolveMissionBaseBranch(slug: string, rootDir: string = process.cwd(), options: { gitFn?: Function | null } = {}): string {
   /** @type {Function | null} */
@@ -291,6 +322,15 @@ function findWorktreeForBranch(branchRef: string, runner: Function, mainRepo: st
   return null;
 }
 
+/**
+ * Resolve the worktree the mission integrates back into.
+ *
+ * When the resolved base equals the primary branch, delegates to
+ * `getPrimaryWorktree()` (untouched legacy behaviour). Otherwise returns the
+ * live worktree checked out on the base branch, auto-creating one at the
+ * conventional pattern path when none exists. Throws a `base branch`-bearing
+ * error when the recorded base does not exist locally.
+ */
 /** @param {string} slug @param {{rootDir?: string, gitFn?: Function}} [options] */
 export function resolveBaseWorktree(slug: string, options: { rootDir?: string; gitFn?: Function | null } = {}): string {
   const rootDir = options.rootDir || process.cwd();
@@ -585,6 +625,9 @@ export function probeGraphifyAvailability(options: { commandRunner?: Function | 
   return { available: false, reason: 'missing-command' };
 }
 
+/**
+ * @param {{rootDir?: string, commandRunner?: Function, log?: Function, startMessage?: string, failureHint?: string}} [options]
+ */
 /** @param {{rootDir?: string, commandRunner?: Function, log?: Function, startMessage?: string, failureHint?: string}} [options] */
 export function updateGraphifyKnowledgeGraph(options: { rootDir?: string; commandRunner?: Function; log?: Function; startMessage?: string; failureHint?: string } = {}): { updated: boolean; skipped: boolean; reason?: string; status?: number } {
   const rootDir = options.rootDir || process.cwd();
@@ -634,6 +677,16 @@ export function missionDirForSlug(rootDir: string, slug: string): string {
   return path.join(...parts);
 }
 
+/**
+ * Infer mission slug from current context:
+ * 1. Explicit slugCandidate (task-NNN)
+ * 2. Current branch (mission/slug)
+ * 3. Current directory name (mission-task-slug)
+ * 4. Registered worktree branch for current directory
+ *
+ * @param {string} [slugCandidate]
+ * @returns {string|null}
+ */
 /** @param {string} [slugCandidate] */
 export function inferSlug(slugCandidate: string | undefined): string | null {
   if (slugCandidate && isMissionSlugCandidate(slugCandidate)) {
@@ -681,6 +734,16 @@ export function inferSlug(slugCandidate: string | undefined): string | null {
   return null;
 }
 
+/**
+ * Parse files with merge conflicts from the output of `git merge --no-commit --no-ff`.
+ *
+ * Git emits lines of the form:
+ *   CONFLICT (content): Merge conflict in path/to/file
+ *   CONFLICT (modify/delete): path/to/file deleted in HEAD.
+ *   CONFLICT (add/add): Merge conflict in path/to/file
+ *
+ * Returns an array of relative file paths (deduped).
+ */
 /** @param {string} output */
 export function parseConflictFilesFromMergeOutput(output: string): string[] {
   const seen = new Set<string>();
@@ -703,6 +766,17 @@ export function parseConflictFilesFromMergeOutput(output: string): string[] {
   return files;
 }
 
+/**
+ * Identify files that would have merge conflicts when merging `branch` into `rootDir`.
+ *
+ * Performs a dry `git merge --no-commit --no-ff` in `rootDir`, collects conflict
+ * file paths from the output, aborts the in-progress merge, and returns the list.
+ *
+ * @param {string} rootDir - Absolute path to the git worktree to test in.
+ * @param {string} branch  - Branch (or ref) to attempt merging.
+ * @param {{ gitRunner?: Function }} [options]
+ * @returns {string[]} Relative paths of conflicting files (empty if no conflicts).
+ */
 /** @param {string} rootDir @param {string} branch @param {{gitRunner?: Function}} [options] */
 export function getConflictFiles(rootDir: string, branch: string, options: { gitRunner?: Function } = {}): string[] {
   const runner = options.gitRunner || git;
@@ -881,6 +955,18 @@ export function findMissionDocInBranches(slug: string, rootDir: string = process
   return candidates;
 }
 
+/**
+ * Check if a file path is a mission artifact for a specific slug.
+ * Mission artifacts include:
+ * - missions/<slug>/* by default, or the adapter-configured legacy path
+ * - the adapter-configured task storage path for active tasks
+ * - the adapter-configured task storage path for completed tasks
+ *
+ * @param {string} file - Relative file path
+ * @param {string} slug - Mission slug (e.g. task-1107)
+ * @param {string} rootDir - Workspace root
+ * @returns {boolean}
+ */
 /** @param {string} file @param {string} slug @param {string} [rootDir] */
 export function isMissionArtifact(file: string, slug: string, rootDir: string = process.cwd()): boolean {
   if (!file || !slug) {return false;}
