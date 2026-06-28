@@ -25,6 +25,7 @@ test('missionStart fails if the backlog task is missing classification', () => {
     conventionalWorktreePathFn: () => '/tmp/project-task-test',
     getLastCommitFn: () => ({ sha: 'abcdef123456', subject: 'Initial', date: '2026-04-30' }),
     getPrStatusFn: () => ({ exists: false }),
+    getPrimaryBranchFn: () => 'main',
     log: line => lines.push(line),
     error: line => errors.push(line)
   });
@@ -53,6 +54,7 @@ test('missionStart passes if the backlog task has classification', () => {
     conventionalWorktreePathFn: () => '/tmp/project-task-test',
     getLastCommitFn: () => ({ sha: 'abcdef123456', subject: 'Initial', date: '2026-04-30' }),
     getPrStatusFn: () => ({ exists: false }),
+    getPrimaryBranchFn: () => 'main',
     log: line => lines.push(line),
     error: line => errors.push(line)
   });
@@ -81,6 +83,7 @@ test('missionStart passes when the task file is missing and classification falls
     conventionalWorktreePathFn: () => '/tmp/project-task-free-text',
     getLastCommitFn: () => ({ sha: 'abcdef123456', subject: 'Initial', date: '2026-04-30' }),
     getPrStatusFn: () => ({ exists: false }),
+    getPrimaryBranchFn: () => 'main',
     log: line => lines.push(line),
     error: line => errors.push(line)
   });
@@ -181,6 +184,7 @@ test('missionStart passes if classification is provided via labels', () => {
     findMissionDirFn: () => 'd',
     findCheckpointsFn: () => [],
     fsExistsSync: () => true,
+    getPrimaryBranchFn: () => 'main',
     log: line => lines.push(line)
   });
 
@@ -205,6 +209,7 @@ test('missionStart fails if the mission is already complete', () => {
     conventionalWorktreePathFn: () => '/tmp/project-task-done',
     getLastCommitFn: () => ({ sha: '123', subject: 'x', date: 'y' }),
     getPrStatusFn: () => ({ exists: false }),
+    getPrimaryBranchFn: () => 'main',
     log: line => lines.push(line)
   });
 
@@ -226,6 +231,7 @@ test('missionStart verify-env with slug checks classification', () => {
     },
     getTaskStatusFn: () => 'ready',
     toVirtualFn: (s) => s,
+    getPrimaryBranchFn: () => 'main',
     log: line => lines.push(line)
   });
 
@@ -251,6 +257,7 @@ test('missionStart fails if MISSION.md is missing', () => {
     conventionalWorktreePathFn: () => '/tmp/project-task-test',
     getLastCommitFn: () => ({ sha: '123', subject: 'x', date: 'y' }),
     getPrStatusFn: () => ({ exists: false }),
+    getPrimaryBranchFn: () => 'main',
     log: line => lines.push(line)
   });
 

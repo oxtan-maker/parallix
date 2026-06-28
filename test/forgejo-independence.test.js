@@ -93,6 +93,7 @@ test('mission-start accepts isForgejoReviewEnabledFn option and skips PR check w
     evaluateReviewSetupFn: () => ({ required: false, ok: true, issues: [], steps: [] }),
     adapterChecklistFn: () => [],
     isForgejoReviewEnabledFn: () => false,
+    getPrimaryBranchFn: () => 'main',
     log: line => lines.push(line),
     error: line => lines.push(line),
   });
@@ -401,6 +402,8 @@ test('printIntegrationPreflight does not call Forgejo API helpers when context i
   const lines = [];
   fresh(context, {
     log: (line) => lines.push(line),
+    getPrimaryBranchFn: () => 'main',
+    getPrimaryWorktreeFn: () => '/tmp',
   });
   
   assert.equal(getPrStatusCalled, false, 'getPrStatus should NOT be called');
