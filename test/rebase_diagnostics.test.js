@@ -190,9 +190,7 @@ test('task-1322 recovery diagnostics report an in-progress rebase across status,
       resolveTokenFileFn: () => '/tmp/tokens/codex',
       isForgejoReviewEnabledFn: () => true,
       detectRebaseStateFn: () => task1322RebaseState(),
-      getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] }),
-      getPrimaryBranchFn: () => 'main',
-      getPrimaryWorktreeFn: () => '/tmp'
+      getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
     });
 
     assert.ok(result.failures.includes('rebase-in-progress'));

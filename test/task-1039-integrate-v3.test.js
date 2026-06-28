@@ -25,9 +25,7 @@ test('printIntegrationPreflight branch failure', (t) => {
   const result = printIntegrationPreflight(context, {
     readTokenFn: () => 'token',
     resolveTokenFileFn: () => 'file',
-    getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] }),
-    getPrimaryBranchFn: () => 'main',
-    getPrimaryWorktreeFn: () => '/tmp'
+    getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
   });
   
   assert.ok(result.failures.includes('branch'));
@@ -51,9 +49,7 @@ test('printIntegrationPreflight mission-doc failure', (t) => {
   const result = printIntegrationPreflight(context, {
     readTokenFn: () => 'token',
     resolveTokenFileFn: () => 'file',
-    getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] }),
-    getPrimaryBranchFn: () => 'main',
-    getPrimaryWorktreeFn: () => '/tmp'
+    getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
   });
   
   assert.ok(result.failures.includes('mission-doc'));
@@ -77,9 +73,7 @@ test('printIntegrationPreflight task failures', (t) => {
   const res1 = printIntegrationPreflight(context1, {
     readTokenFn: () => 'token',
     resolveTokenFileFn: () => 'file',
-    getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] }),
-    getPrimaryBranchFn: () => 'main',
-    getPrimaryWorktreeFn: () => '/tmp'
+    getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
   });
   assert.ok(res1.failures.includes('task-ambiguity'));
 
@@ -88,9 +82,7 @@ test('printIntegrationPreflight task failures', (t) => {
   const res2 = printIntegrationPreflight(context2, {
     readTokenFn: () => 'token',
     resolveTokenFileFn: () => 'file',
-    getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] }),
-    getPrimaryBranchFn: () => 'main',
-    getPrimaryWorktreeFn: () => '/tmp'
+    getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
   });
   assert.ok(!res2.failures.includes('task-missing'));
 });
@@ -114,10 +106,7 @@ test('printIntegrationPreflight PR approval failures', (t) => {
   const res1 = printIntegrationPreflight(context1, {
     readTokenFn: () => 'token',
     resolveTokenFileFn: () => 'file',
-    getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] }),
-    getPrimaryBranchFn: () => 'main',
-    getPrimaryWorktreeFn: () => '/tmp',
-    isForgejoReviewEnabledFn: () => true
+    getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
   });
   assert.ok(res1.failures.includes('pr-approval'));
 
@@ -126,10 +115,7 @@ test('printIntegrationPreflight PR approval failures', (t) => {
   const res2 = printIntegrationPreflight(context2, {
     readTokenFn: () => 'token',
     resolveTokenFileFn: () => 'file',
-    getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] }),
-    getPrimaryBranchFn: () => 'main',
-    getPrimaryWorktreeFn: () => '/tmp',
-    isForgejoReviewEnabledFn: () => true
+    getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
   });
   assert.ok(res2.failures.includes('pr-approval'));
 });
@@ -152,9 +138,7 @@ test('printIntegrationPreflight main-index-conflict-check failure', (t) => {
   const result = printIntegrationPreflight(context, {
     readTokenFn: () => 'token',
     resolveTokenFileFn: () => 'file',
-    getUnresolvedIndexConflictsFn: () => ({ ok: false, error: 'git error' }),
-    getPrimaryBranchFn: () => 'main',
-    getPrimaryWorktreeFn: () => '/tmp'
+    getUnresolvedIndexConflictsFn: () => ({ ok: false, error: 'git error' })
   });
   
   assert.ok(result.failures.includes('main-index-conflict-check'));
@@ -178,9 +162,7 @@ test('printIntegrationPreflight main-dirty warning', (t) => {
   const result = printIntegrationPreflight(context, {
     readTokenFn: () => 'token',
     resolveTokenFileFn: () => 'file',
-    getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] }),
-    getPrimaryBranchFn: () => 'main',
-    getPrimaryWorktreeFn: () => '/tmp'
+    getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
   });
   
   assert.ok(result.warnings.includes('main-dirty'));
