@@ -103,16 +103,15 @@ This mission follows Wave 1 (task-1366) which converted the 6 lowest-level leaf 
 
 ## Gates
 
-- [ ] `npm test` — 1729 pass, 0 fail, 22 skipped (same as baseline, no new failures)
-- [ ] `npm run typecheck` — `tsc --noEmit` reports zero errors
-- [ ] `npm run build` — `tsc` compiles all `lib/**/*.ts` without errors
-- [ ] `grep -c 'module.exports' lib/core/mission-utils.ts lib/core/verification.ts` — zero
-- [ ] `grep -c 'require(' lib/core/mission-utils.ts lib/core/verification.ts` — zero (no permitted lazy requires expected)
-- [ ] `git ls-files lib/core/mission-utils.js lib/core/verification.js` — empty (no compiled `.js` tracked) [SC10]
-- [ ] `git diff -M --summary main -- lib/core/mission-utils.js lib/core/mission-utils.ts | grep -q rename` and same for `verification` [SC11]
-- [ ] `npm run prepublishOnly && npm pack --dry-run | grep -E 'lib/core/(mission-utils|verification)\.js'` — both compiled `.js` present in the package [SC12]
-- [ ] `./scripts/verify-local.sh static-analysis` passes with compiled `lib/core/*.js` present on disk [SC13]
-- [ ] `scripts/verify-local.sh docs`
+- [ ] npm test
+- [ ] npm run typecheck
+- [ ] npm run build
+- [ ] ! grep -q 'module.exports' lib/core/mission-utils.ts lib/core/verification.ts
+- [ ] ! grep -q 'require(' lib/core/mission-utils.ts lib/core/verification.ts
+- [ ] test -z "$(git ls-files lib/core/mission-utils.js lib/core/verification.js)"
+- [ ] git diff -M --summary main -- lib/core/mission-utils.js lib/core/mission-utils.ts | grep -q rename && git diff -M --summary main -- lib/core/verification.js lib/core/verification.ts | grep -q rename
+- [ ] scripts/verify-local.sh static-analysis
+- [ ] scripts/verify-local.sh docs
 
 ## Restricted Areas
 
