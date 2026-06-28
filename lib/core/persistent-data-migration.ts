@@ -1,22 +1,31 @@
-const fs = require('fs');
-const path = require('path');
-const storage = require('./storage');
+import fs from 'node:fs';
+import path from 'node:path';
+import * as storage from './storage.js';
 
-/** @type {any} */
-let _stats = null;
-function getStats() {
-  if (!_stats) {_stats = require('../commands/stats');}
+/** Cached stats module — loaded lazily to break circular dependency with `../commands/stats.js`. */
+let _stats: any = null;
+
+/** Lazily load the stats module to break the circular dependency. */
+function getStats(): any {
+  if (!_stats) {_stats = require('../commands/stats.js');}
   return _stats;
 }
 
-function getStatsHeaders() {
+/** Resolve the canonical stats CSV headers. */
+function getStatsHeaders(): string[] {
   return getStats().STATS_HEADERS;
 }
 
 const ESSENTIAL_STATS_COLUMNS = ['date', 'mission', 'classification', 'implementer', 'pr_fix_rounds'];
 
-/** @param {Record<string, unknown>} row @param {number} rowIndex @param {string} filePath */
-function validateStatsRow(row, rowIndex, filePath) {
+/**
+ * Validate that a stats row has all essential columns populated.
+ * Throws on the first missing column found.
+ * @param row - Row object to validate
+ * @param rowIndex - Zero-based row index (for error messages)
+ * @param filePath - Source file path (for error messages)
+ */
+function validateStatsRow(row: Record<string, unknown>, rowIndex: number, filePath: string): void {
   const missing = ESSENTIAL_STATS_COLUMNS.filter(col => !(col in row) || row[col] === '');
   if (missing.length > 0) {
     throw new Error(
@@ -26,9 +35,13 @@ function validateStatsRow(row, rowIndex, filePath) {
   }
 }
 
-/** @param {string} line */
-function parseCsvLine(line) {
-  const values = [];
+/**
+ * Parse a single CSV line, respecting quoted fields and escaped quotes.
+ * @param line - Raw CSV line string
+ * @returns Array of parsed field values
+ */
+function parseCsvLine(line: string): string[] {
+  const values: string[] = [];
   let value = '';
   let quoted = false;
   for (let index = 0; index < line.length; index += 1) {
@@ -51,8 +64,12 @@ function parseCsvLine(line) {
   return values;
 }
 
-/** @param {unknown} value */
-function escapeCsvValue(value) {
+/**
+ * Escape a single CSV value — wraps in quotes if it contains commas, double-quotes, or newlines.
+ * @param value - Value to escape
+ * @returns Escaped CSV-safe string
+ */
+function escapeCsvValue(value: unknown): string {
   const text = String(value ?? '');
   return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
@@ -62,8 +79,7 @@ function escapeCsvValue(value) {
  * imports this module at the top). Defined locally so `migrateStats()` can
  * read any schema without triggering a require-cycle.
  */
-/** @param {string} filePath */
-function loadCsv(filePath) {
+function loadCsv(filePath: string): { headers: string[]; rows: Record<string, unknown>[] } {
   if (!fs.existsSync(filePath)) {
     return { headers: [], rows: [] };
   }
@@ -73,15 +89,12 @@ function loadCsv(filePath) {
     return { headers: [], rows: [] };
   }
   const headers = parseCsvLine(lines[0]);
-  const rows = [];
+  const rows: Record<string, unknown>[] = [];
   for (let i = 1; i < lines.length; i += 1) {
     const values = parseCsvLine(lines[i]);
-    const row = {};
-    /** @param {string} header @param {number} idx */
+    const row: Record<string, unknown> = {};
     headers.forEach((header, idx) => {
-      /** @type {Record<string, unknown>} */
-      const r = /** @type {Record<string, unknown>} */(row);
-      r[header] = values[idx] || '';
+      row[header] = values[idx] || '';
     });
     rows.push(row);
   }
@@ -93,27 +106,27 @@ function loadCsv(filePath) {
  * Returns rows as arrays keyed by the 21-column STATS_HEADERS, with missing
  * columns filled by normalizeStatsRow defaults.
  */
-/** @param {string} filePath @param {{defaultRepo?: string}} [options] */
-function readStatsRows(filePath, options = {}) {
+function readStatsRows(filePath: string, options: { defaultRepo?: string } = {}): string[][] {
   if (!filePath || !fs.existsSync(filePath)) {return [];}
   const data = loadCsv(filePath);
   if (data.headers.length === 0) {return [];}
   const headers = getStatsHeaders();
-  /** @type {{defaultRepo?: string}} */
   const opts = options;
-  /** @type {Record<string, unknown>[]} */
-  const validated = /** @type {Record<string, unknown>[]} */(data.rows).map((/** @type {Record<string, unknown>} */ row, idx) => {
+  const validated = data.rows.map((row, idx) => {
     validateStatsRow(row, idx, filePath);
     return row;
   });
-  /** @param {string} h */
   return validated
     .map(row => getStats().normalizeStatsRow(row, { repo: opts.defaultRepo }))
-    .map(row => headers.map((/** @type {string} */ h) => row[h] || ''));
+    .map((row: Record<string, unknown>) => headers.map((h: string) => String(row[h] || '')));
 }
 
-/** @param {string[][]} rows */
-function serializeStatsRows(rows) {
+/**
+ * Serialize an array of stats rows back to CSV format with canonical headers.
+ * @param rows - Array of row arrays (each row is an array of string values)
+ * @returns CSV string with headers and data rows
+ */
+function serializeStatsRows(rows: string[][]): string {
   const headers = getStatsHeaders();
   return `${[
     headers.join(','),
@@ -121,14 +134,18 @@ function serializeStatsRows(rows) {
   ].join('\n')}\n`;
 }
 
-/** @param {{sourcePaths?: string[], sourcePath?: string, destinationPath?: string}} [options] */
-function migrateStats(options = {}) {
-  /** @type {{sourcePaths?: string[], sourcePath?: string, destinationPath?: string}} */
+/**
+ * Merge stats from one or more source CSV files into the destination file.
+ * Deduplicates full rows. Creates the destination directory if needed.
+ * When no source data is available, returns early without writing a header-only file.
+ * @param options - Migration configuration (sourcePaths, sourcePath, destinationPath)
+ * @returns Result with destination path, import counts, and optional warning
+ */
+function migrateStats(options: { sourcePaths?: string[]; sourcePath?: string; destinationPath?: string } = {}): { destinationPath: string; imported: number; rows: number; warn?: string } {
   const opts = options;
-  const sourcePaths = /** @type {string[]} */(opts.sourcePaths || [opts.sourcePath].filter(Boolean));
+  const sourcePaths = (opts.sourcePaths || [opts.sourcePath].filter(Boolean)) as string[];
   const destinationPath = opts.destinationPath || storage.resolveStatsPath({ ensureDir: true });
-  /** @param {string} sourcePath */
-  const sourceRows = sourcePaths.flatMap((/** @type {string} */ sourcePath) => readStatsRows(sourcePath, /** @type {{defaultRepo?: string}} */({})));
+  const sourceRows = sourcePaths.flatMap((sourcePath: string) => readStatsRows(sourcePath, {}));
 
   // Fresh-install guard: when no source file exists or all sources are empty,
   // there is no telemetry to import. Returning early prevents writing a
@@ -137,9 +154,9 @@ function migrateStats(options = {}) {
     return { destinationPath, imported: 0, rows: 0, warn: 'no source data available' };
   }
 
-  const destinationRows = readStatsRows(destinationPath, /** @type {{defaultRepo?: string}} */({}));
-  const rows = [];
-  const seen = new Set();
+  const destinationRows = readStatsRows(destinationPath, {});
+  const rows: string[][] = [];
+  const seen = new Set<string>();
 
   for (const row of [...destinationRows, ...sourceRows]) {
     const key = JSON.stringify(row);
@@ -155,11 +172,12 @@ function migrateStats(options = {}) {
   return { destinationPath, imported: rows.length - destinationRows.length, rows: rows.length };
 }
 
-/** @param {string} filePath @param {Function} warn @param {boolean} [hardFailure] */
-function readBlocklistSource(filePath, warn, hardFailure = false) {
+interface BlocklistSource { filePath: string; payload: Record<string, unknown>; blocklist: Record<string, unknown>; }
+
+function readBlocklistSource(filePath: string, warn: (...args: unknown[]) => void, hardFailure = false): BlocklistSource | null {
   if (!filePath || !fs.existsSync(filePath)) {return null;}
   try {
-    const payload = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    const payload = JSON.parse(fs.readFileSync(filePath, 'utf8')) as Record<string, unknown>;
     if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
       throw new Error('expected a JSON object at the file root');
     }
@@ -169,42 +187,39 @@ function readBlocklistSource(filePath, warn, hardFailure = false) {
     ) {
       throw new Error('expected blocklist to be a JSON object');
     }
-    return { filePath, payload, blocklist: payload.blocklist || {} };
+    return { filePath, payload, blocklist: (payload.blocklist as Record<string, unknown>) || {} };
   } catch (error) {
     if (hardFailure) {throw error;}
-    /** @type {Error} */
-    const e = /** @type {Error} */(error);
-    warn(`Skipping malformed legacy agent blocklist ${path.resolve(filePath)}: ${e.message}`);
+    warn(`Skipping malformed legacy agent blocklist ${path.resolve(filePath)}: ${(error as Error).message}`);
     return null;
   }
 }
 
-/** @param {unknown} left @param {unknown} right */
-function sameValue(left, right) {
+function sameValue(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
-/** @param {{warn?: Function, destinationPath?: string, sourcePaths?: string[]}} [options] */
-function migrateAgentBlocklists(options = {}) {
-  /** @type {{warn?: Function, destinationPath?: string, sourcePaths?: string[]}} */
+/**
+ * Merge agent blocklists from legacy sources into the destination file.
+ * Reports conflicts via `warn` when the same agent appears in multiple sources
+ * with different values. Existing destination entries take lowest precedence.
+ * @param options - Migration configuration (warn callback, destinationPath, sourcePaths)
+ * @returns Result with destination path, merged blocklist, and conflict details
+ */
+function migrateAgentBlocklists(options: { warn?: (...args: unknown[]) => void; destinationPath?: string; sourcePaths?: string[] } = {}): { destinationPath: string; blocklist: Record<string, unknown>; conflicts: unknown[] } {
   const opts = options;
   const warn = opts.warn || (() => {});
   const destinationPath = opts.destinationPath || storage.resolveAgentsLocalPath({ ensureDir: true });
-  /** @param {string} filePath */
   const sources = (opts.sourcePaths || [])
     .map(filePath => readBlocklistSource(filePath, warn))
-    .filter(Boolean);
+    .filter(Boolean) as BlocklistSource[];
   const destination = readBlocklistSource(destinationPath, warn, true);
-  /** @type {Record<string, unknown>} */
-  const selected = {};
-  /** @type {Record<string, string>} */
-  const selectedFrom = {};
-  const conflicts = [];
+  const selected: Record<string, unknown> = {};
+  const selectedFrom: Record<string, string> = {};
+  const conflicts: unknown[] = [];
 
-  for (const source of [...sources, ...(destination ? [destination] : [])]) {
-    if (!source) {continue;}
-    /** @type {{filePath: string, blocklist: Record<string,unknown>}} */
-    const s = source;
+  for (const s of [...sources, ...(destination ? [destination] : [])]) {
+    if (!s) {continue;}
     for (const [agent, value] of Object.entries(s.blocklist)) {
       if (Object.prototype.hasOwnProperty.call(selected, agent) && !sameValue(selected[agent], value)) {
         const conflict = {
@@ -225,8 +240,7 @@ function migrateAgentBlocklists(options = {}) {
     }
   }
 
-  /** @type{Record<string,unknown>} */
-  const payload = destination ? { ...destination.payload } : {};
+  const payload: Record<string, unknown> = destination ? { ...destination.payload } : {};
   payload.blocklist = selected;
   const content = `${JSON.stringify(payload, null, 2)}\n`;
   const current = fs.existsSync(destinationPath) ? fs.readFileSync(destinationPath, 'utf8') : null;
@@ -234,8 +248,8 @@ function migrateAgentBlocklists(options = {}) {
   return { destinationPath, blocklist: selected, conflicts };
 }
 
-module.exports = {
+export {
   migrateStats,
-  migrateAgentBlocklists,
-  _internals: { parseCsvLine, readStatsRows, serializeStatsRows }
+  migrateAgentBlocklists
 };
+export const _internals = { parseCsvLine, readStatsRows, serializeStatsRows };

@@ -48,8 +48,9 @@
   ],
   "scripts": {
     "build": "tsc",
-    "prepublishOnly": "tsc",
-    "pretest": "tsc --rootDir . --outDir . --module CommonJS --moduleResolution Node --esModuleInterop",
+    "build:cjs": "tsc --rootDir . --outDir . --module CommonJS --moduleResolution Node --esModuleInterop",
+    "prepublishOnly": "npm run build:cjs",
+    "pretest": "npm run build:cjs",
     "test": "FORCE_COLOR=0 node --test test/*.test.js",
     "test:coverage": "FORCE_COLOR=0 node lib/commands/coverage-gate.js --lcov",
     "typecheck": "tsc --noEmit"

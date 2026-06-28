@@ -3,10 +3,12 @@ id: TASK-1367
 title: >-
   TASK-1367: Mission 3 - Core configuration & storage
   (persistent-data-migration, product-config, storage)
-status: backlog
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-06-27 10:37'
-labels: []
+updated_date: '2026-06-27 22:34'
+labels:
+  - user_value
 dependencies: []
 priority: high
 ---

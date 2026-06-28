@@ -1,6 +1,23 @@
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+export interface ResolveParallixHomeOptions {
+  ensureDir?: boolean;
+  platform?: string;
+  env?: Record<string, string>;
+  homedir?: () => string;
+}
+
+export interface ReadJsonResult<T = unknown> {
+  ok: boolean;
+  error: unknown;
+  data: T | null;
+}
+
+export interface IsInitializedResult {
+  isInitialized: boolean;
+}
 
 /**
  * Resolve the parallix-owned persistent-data root.
@@ -17,17 +34,15 @@ const path = require('path');
  * call with `ensureDir: true`). Read-side callers may omit ensureDir so they
  * fail gracefully when PARALLIX_HOME has never been initialized.
  */
-/**
- * @param {{ensureDir?: boolean, platform?: string, env?: Record<string,string>, homedir?: Function} | boolean | string} [options]
- */
-function resolveParallixHome(options = {}) {
+export function resolveParallixHome(
+  options: ResolveParallixHomeOptions | boolean | string = {}
+): string {
   if (typeof options === 'boolean' || typeof options === 'string') {
     // Legacy shim: resolveParallixHome(true) === { ensureDir: true }
     options = { ensureDir: Boolean(options) };
   }
 
-  /** @type {{ensureDir?: boolean, platform?: string, env?: Record<string,string>, homedir?: Function}} */
-  const opts = /** @type {{ensureDir?: boolean, platform?: string, env?: Record<string,string>, homedir?: Function}} */(options);
+  const opts = options as ResolveParallixHomeOptions;
   const {
     ensureDir = false,
     platform = process.platform,
@@ -35,7 +50,7 @@ function resolveParallixHome(options = {}) {
     homedir = os.homedir
   } = opts;
 
-  let home;
+  let home: string;
 
   // --- env override (highest precedence) ---
   if (env.PARALLIX_HOME && typeof env.PARALLIX_HOME === 'string' && env.PARALLIX_HOME.trim().length > 0) {
@@ -72,10 +87,13 @@ function resolveParallixHome(options = {}) {
  * is true). Callers that pass an explicit `--csv-file` path bypass this
  * resolver entirely — the caller supplies the path before calling here.
  */
-/** @param {{ensureDir?: boolean, warn?: Function}} [options] */
-function resolveStatsPath(options = {}) {
-  /** @type {{ensureDir?: boolean, warn?: Function}} */
-  const opts = options;
+export interface ResolveStatsOptions {
+  ensureDir?: boolean;
+  warn?: (...args: unknown[]) => void;
+}
+
+export function resolveStatsPath(options: ResolveStatsOptions = {}): string {
+  const opts = options as ResolveStatsOptions;
   const home = resolveParallixHome({ ensureDir: opts.ensureDir !== false });
   return path.join(home, 'stats.csv');
 }
@@ -86,14 +104,12 @@ function resolveStatsPath(options = {}) {
  * Returns `<PARALLIX_HOME>/agents.local.json`.  Callers that pass an
  * explicit `targetPath` bypass this resolver.
  */
-/** @param {{ensureDir?: boolean} | string} [options] */
-function resolveAgentsLocalPath(options = {}) {
+export function resolveAgentsLocalPath(options?: ResolveParallixHomeOptions | string): string {
   if (typeof options === 'string') {
     return path.resolve(options);
   }
-  /** @type {{ensureDir?: boolean}} */
-  const opts = options;
-  const home = resolveParallixHome({ ensureDir: opts.ensureDir !== false });
+  const opts = options as ResolveParallixHomeOptions | undefined;
+  const home = resolveParallixHome({ ensureDir: opts?.ensureDir !== false });
   return path.join(home, 'agents.local.json');
 }
 
@@ -105,9 +121,8 @@ function resolveAgentsLocalPath(options = {}) {
  * Malformed JSON returns `{ ok: false, error }` rather than throwing so
  * callers can decide whether this is a hard failure.
  */
-/** @param {string | (() => string)} pathOrResolution */
-function readJson(pathOrResolution) {
-  let filePath;
+export function readJson<T = unknown>(pathOrResolution: string | (() => string)): ReadJsonResult<T> {
+  let filePath: string;
   if (typeof pathOrResolution === 'function') {
     filePath = pathOrResolution();
   } else {
@@ -120,7 +135,7 @@ function readJson(pathOrResolution) {
 
   try {
     const raw = fs.readFileSync(filePath, 'utf8');
-    const data = JSON.parse(raw);
+    const data = JSON.parse(raw) as T;
     return { ok: true, error: null, data };
   } catch (err) {
     return { ok: false, error: err, data: null };
@@ -131,8 +146,7 @@ function readJson(pathOrResolution) {
  * Write JSON to a path under PARALLIX_HOME (or an explicit path).
  * Creates parent directories as needed.
  */
-/** @param {string | (() => string)} filePath @param {any} data */
-function writeJson(filePath, data) {
+export function writeJson(filePath: string | (() => string), data: unknown): string {
   if (typeof filePath === 'function') {
     filePath = filePath();
   }
@@ -140,8 +154,7 @@ function writeJson(filePath, data) {
   return filePath;
 }
 
-/** @param {string} filePath @param {string} content */
-function writeFileAtomic(filePath, content) {
+export function writeFileAtomic(filePath: string, content: string): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   const tempPath = path.join(
     path.dirname(filePath),
@@ -159,7 +172,7 @@ function writeFileAtomic(filePath, content) {
  * Check whether PARALLIX_HOME has been initialized (directory exists).
  * Does NOT create the directory.
  */
-function isInitialized() {
+export function isInitialized(): boolean {
   const home = resolveParallixHome({ ensureDir: false });
   try {
     return fs.statSync(home).isDirectory();
@@ -167,13 +180,3 @@ function isInitialized() {
     return false;
   }
 }
-
-module.exports = {
-  resolveParallixHome,
-  resolveStatsPath,
-  resolveAgentsLocalPath,
-  readJson,
-  writeJson,
-  writeFileAtomic,
-  isInitialized,
-};
