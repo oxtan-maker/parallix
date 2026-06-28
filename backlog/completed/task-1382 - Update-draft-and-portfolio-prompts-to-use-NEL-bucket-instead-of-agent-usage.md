@@ -1,7 +1,7 @@
 ---
 id: TASK-1382
 title: Update draft and portfolio prompts to use NEL bucket instead of agent-usage %
-status: backlog
+status: done
 assignee: []
 created_date: '2026-06-27 19:09'
 labels:
@@ -32,19 +32,19 @@ Two root causes:
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 prompts/portfolio.md references NEL bucket (not agent-usage %) in its output specification
-- [ ] #2 prompts/draft.md instructs the draft agent to write NEL bucket format in the Refinement Signals section
-- [ ] #3 grep "Estimated agent % usage limit" prompts/ returns 0 matches
-- [ ] #4 Existing missions (e.g. task-1381 in worktree) are not affected — this fix only applies to new drafts going forward
+- [x] #1 prompts/portfolio.md references NEL bucket (not agent-usage %) in its output specification
+- [x] #2 prompts/draft.md instructs the draft agent to write NEL bucket format in the Refinement Signals section
+- [x] #3 grep "Estimated agent % usage limit" prompts/ returns 0 matches
+- [x] #4 Existing missions (e.g. task-1381 in worktree) are not affected — this fix only applies to new drafts going forward
 <!-- SECTION:DESCRIPTION:END -->
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Verification gate ran and passed on the final tree with captured proof rather than an unverified claim
-- [ ] #2 Lint and static analysis report clean on every changed file
-- [ ] #3 No focused or unannotated skipped tests were introduced (no .only and no bare .skip)
-- [ ] #4 Final checkpoint Goal Check table cites real evidence using file:line references and test names
-- [ ] #5 Docs updated to reflect any workflow or user-facing behavior change
-- [ ] #6 Bug-labeled missions include a red-to-green reproduction test that fails before the fix and passes after
+- [x] #1 Verification gate ran and passed on the final tree with captured proof rather than an unverified claim
+- [x] #2 Lint and static analysis report clean on every changed file
+- [x] #3 No focused or unannotated skipped tests were introduced (no .only and no bare .skip)
+- [x] #4 Final checkpoint Goal Check table cites real evidence using file:line references and test names
+- [x] #5 Docs updated to reflect any workflow or user-facing behavior change
+- [x] #6 Bug-labeled missions include a red-to-green reproduction test that fails before the fix and passes after
 <!-- DOD:END -->

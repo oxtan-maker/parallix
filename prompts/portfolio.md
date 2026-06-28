@@ -14,7 +14,7 @@ Output: propose exactly 10 candidate missions. For each, provide:
 - Primary leverage (confidence / credibility / promotion signal)
 - Primary skill domains (BE / Web / Android / iOS / Ops / Security)
 - Estimated scope rank (1–10, 1 = largest)
-- Estimated agent % usage limit (`n/a` if not ready)
+- Predicted NEL bucket (`n/a` if not ready)
 - Selection note (`activate as-is` | `split first` | `defer` | `n/a`)
 - Main risk mitigated (skill rot / credibility gap / system weakness)
 - Duplicate check: none, or follow-up of <existing mission>

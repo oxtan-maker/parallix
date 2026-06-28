@@ -24,6 +24,7 @@ Drafting requirements:
 - {{classificationInstructions}}
 - preserve `{{taskPath}}`: update content as needed but do not delete, rename, or move the file
 - do not edit the backlog `assignee` field; the workflow records ownership itself
+- Refinement Signals section must use net engineering lines (NEL) bucket format (`Predicted NEL bucket: Small (0–80) / Medium (81–235) / Large (235+)`) and must NOT use the old agent-percentage-usage format
 
 Bug-labeled missions (regression-test-first / "lock the bug"):
 - this section applies only when the backlog task at `{{taskPath}}` carries a `bug` label (in addition to its `ai_sdlc` or `user_value` classification). If there is no `bug` label, ignore this section entirely.
