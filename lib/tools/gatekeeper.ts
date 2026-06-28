@@ -1,10 +1,10 @@
-const fs = require('fs');
-const path = require('path');
-const fmt = require('../core/fmt');
+import fs from 'fs';
+import path from 'path';
+import * as fmt from '../core/fmt.js';
 
-const { findMissionDir, findCheckpoints, missionDirForSlug, missionBranchName } = require('../core/mission-utils');
-const { resolveTaskFile, getTaskStorage } = require('./backlog');
-const { readToken, postReview } = require('./forgejo');
+import { findMissionDir, findCheckpoints, missionDirForSlug, missionBranchName } from '../core/mission-utils.js';
+import { resolveTaskFile, getTaskStorage } from './backlog.js';
+import { readToken, postReview } from './forgejo.js';
 
 const DEFAULT_GATEKEEPER_USER = 'forgejo-gatekeeper';
 
@@ -19,7 +19,7 @@ const DEFAULT_GATEKEEPER_USER = 'forgejo-gatekeeper';
  * @param {{rootDir?: string, findMissionDirFn?: Function, findCheckpointsFn?: Function, resolveTaskFileFn?: Function}} [options]
  * @returns {{ok: boolean, missing: string[]}}
  */
-function checkMandatoryFiles(slug, options = {}) {
+function checkMandatoryFiles(slug: string, options: { rootDir?: string, findMissionDirFn?: Function, findCheckpointsFn?: Function, resolveTaskFileFn?: Function } = {} as any) {
   const {
     rootDir = process.cwd(),
     findMissionDirFn = findMissionDir,
@@ -62,7 +62,7 @@ function checkMandatoryFiles(slug, options = {}) {
  * @param {string[]} missing
  * @returns {string}
  */
-function buildPushbackBody(slug, missing) {
+function buildPushbackBody(slug: string, missing: string[]): string {
   const bullets = missing.map(item => `- ${item}`).join('\n');
   return [
     `**Pre-review gatekeeper: missing mandatory artifacts for \`${slug}\`.**`,
@@ -80,7 +80,7 @@ function buildPushbackBody(slug, missing) {
  * @param {{rootDir?: string, branch?: string, user?: string, log?: Function, readTokenFn?: Function, postReviewFn?: Function, checkFn?: Function}} [options]
  * @returns {{ok: boolean, missing: string[], skipped: boolean, posted: boolean}}
  */
-function runGatekeeper(slug, options = {}) {
+function runGatekeeper(slug: string, options: { rootDir?: string, branch?: string, user?: string, log?: Function, readTokenFn?: Function, postReviewFn?: Function, checkFn?: Function } = {} as any) {
   const {
     rootDir = process.cwd(),
     user = process.env.FORGEJO_GATEKEEPER_USER || DEFAULT_GATEKEEPER_USER,
@@ -116,9 +116,9 @@ function runGatekeeper(slug, options = {}) {
   return { ok: false, missing: check.missing, skipped: false, posted: true };
 }
 
-module.exports = {
-  DEFAULT_GATEKEEPER_USER,
-  checkMandatoryFiles,
-  buildPushbackBody,
-  runGatekeeper
-};
+
+export { DEFAULT_GATEKEEPER_USER };
+export { checkMandatoryFiles };
+export { buildPushbackBody };
+export { runGatekeeper };
+;

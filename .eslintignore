@@ -9,3 +9,4 @@ lib/core/*.js
 !lib/core/nels.js
 !lib/core/subagent-limit.js
 lib/agents/*.js
+lib/tools/*.js

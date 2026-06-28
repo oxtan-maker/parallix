@@ -1,9 +1,9 @@
-const fs = require('fs');
-const path = require('path');
-const { git } = require('../core/git');
-const { WORKFLOW_AGENT_NAMES } = require('../agents/agents');
-const fmt = require('../core/fmt');
-const { resolveTaskStorage } = require('../core/product-config');
+import fs from 'fs';
+import path from 'path';
+import { git } from '../core/git.js';
+import { WORKFLOW_AGENT_NAMES } from '../agents/agents.js';
+import * as fmt from '../core/fmt.js';
+import { resolveTaskStorage } from '../core/product-config.js';
 
 /** @returns {readonly string[]} */
 function getSupportedAgents() {
@@ -20,9 +20,9 @@ function getTaskStorage(rootDir = process.cwd()) {
  * @param {string} [rootDir]
  * @returns {string[]}
  */
-function findTaskFiles(slug, rootDir = process.cwd()) {
+function findTaskFiles(slug: string, rootDir: string = process.cwd()): string[] {
   const { tasksDir, completedDir, archiveTasksDir: archivedDir } = getTaskStorage(rootDir);
-  const sortByBacklogState = /** @param {string} filePath */ (filePath) => {
+  const sortByBacklogState = (filePath: string) => {
     if (filePath.startsWith(tasksDir + path.sep)) {return 0;}
     if (filePath.startsWith(completedDir + path.sep)) {return 1;}
     if (filePath.startsWith(archivedDir + path.sep)) {return 2;}
@@ -30,13 +30,13 @@ function findTaskFiles(slug, rootDir = process.cwd()) {
   };
 
   /** @param {string} dir */
-  const scan = (dir) => {
+  const scan = (dir: string) => {
     if (!fs.existsSync(dir)) {return [];}
     const files = fs.readdirSync(dir);
     const normalizedSlug = slug.toLowerCase();
     return files
-      .filter(/** @param {string} f */ f => f.toLowerCase().startsWith(normalizedSlug))
-      .map(/** @param {string} f */ f => path.join(dir, f));
+      .filter((f: string) => f.toLowerCase().startsWith(normalizedSlug))
+      .map((f: string) => path.join(dir, f));
   };
 
   const matches = [...scan(tasksDir), ...scan(completedDir), ...scan(archivedDir)];
@@ -48,20 +48,20 @@ function findTaskFiles(slug, rootDir = process.cwd()) {
  * @param {string} [rootDir]
  * @returns {{ok: boolean, taskFile?: string, matches: string[], reason?: string}}
  */
-function resolveTaskFile(slug, rootDir = process.cwd()) {
+function resolveTaskFile(slug: string, rootDir: string = process.cwd()) {
   let matches = findTaskFiles(slug, rootDir);
   const normalizedId = slug.toUpperCase();
   const { tasksDir, completedDir, archiveTasksDir: archivedDir } = getTaskStorage(rootDir);
   /** @param {string[]} candidateMatches */
-  const preferSameTaskInHigherPriorityDir = (candidateMatches) => {
+  const preferSameTaskInHigherPriorityDir = (candidateMatches: string[]) => {
     if (candidateMatches.length < 2) {return null;}
     const [preferred, ...rest] = candidateMatches;
-    return rest.every(/** @param {string} match */ match => path.basename(match) === path.basename(preferred)) ? preferred : null;
+    return rest.every((match: string) => path.basename(match) === path.basename(preferred)) ? preferred : null;
   };
 
   /** @param {string[]} candidateFiles @param {string} targetId */
-  const findById = (candidateFiles, targetId) => {
-    return candidateFiles.filter(/** @param {string} f */ f => {
+  const findById = (candidateFiles: string[], targetId: string) => {
+    return candidateFiles.filter((f: string) => {
       try {
         const content = fs.readFileSync(f, 'utf8');
         const idMatch = content.match(/^id:\s*([^\r\n]+)/m);
@@ -135,7 +135,7 @@ function resolveTaskFile(slug, rootDir = process.cwd()) {
  * @param {string} [rootDir]
  * @returns {string|undefined|null}
  */
-function findTaskFile(slug, rootDir = process.cwd()) {
+function findTaskFile(slug: string, rootDir: string = process.cwd()) {
   const result = resolveTaskFile(slug, rootDir);
   return result.ok ? result.taskFile : null;
 }
@@ -145,7 +145,7 @@ function findTaskFile(slug, rootDir = process.cwd()) {
  * @param {string} slug
  * @param {Function} [log]
  */
-function reportTaskResolution(result, slug, log = fmt.log.plain) {
+function reportTaskResolution(result: {ok: boolean, taskFile?: string, matches: string[], reason?: string}, slug: string, log: Function = fmt.log.plain) {
   if (result.ok) {return;}
   const { tasksDir, completedDir } = getTaskStorage(process.cwd());
   const taskHint = path.relative(process.cwd(), tasksDir).split(path.sep).join('/');
@@ -154,7 +154,7 @@ function reportTaskResolution(result, slug, log = fmt.log.plain) {
   if (result.reason === 'ambiguous') {
     log(fmt.status('FAIL', `Backlog task resolution is ambiguous for slug: ${fmt.slug(slug)}`));
     log(fmt.status('INFO', 'Multiple candidates found:'));
-    result.matches.forEach(m => log(`  - ${m}`));
+    result.matches.forEach((m: string) => log(`  - ${m}`));
     log(fmt.status('INFO', 'Repair: Ensure only one task has the filename prefix or matching "id:" frontmatter.'));
   } else {
     log(fmt.status('FAIL', `Backlog task for ${fmt.slug(slug)} not found in ${fmt.path(taskHint)}/ or ${fmt.path(completedHint)}/.`));
@@ -165,7 +165,7 @@ function reportTaskResolution(result, slug, log = fmt.log.plain) {
 }
 
 /** @param {string} file @returns {string|null} */
-function taskIdFromFilename(file) {
+function taskIdFromFilename(file: string) {
   // Extract ID from filename prefix (e.g., task-093 or task-093.01)
   const filenameMatch = file.match(/^(task-\d+(?:\.\d+)?)/i);
   return filenameMatch ? filenameMatch[1].toUpperCase() : null;
@@ -176,7 +176,7 @@ function taskIdFromFilename(file) {
  * @param {string} [slug]
  * @returns {{file: string, type: string, taskId?: string, canonicalFile?: string}[]}
  */
-function checkBacklogIntegrity(rootDir = process.cwd(), /** @type {string|null} */ slug = null) {
+function checkBacklogIntegrity(rootDir: string = process.cwd(), slug: string | null = null) {
   const { tasksDir, completedDir, archiveTasksDir: archivedDir } = getTaskStorage(rootDir);
   const issues = [];
   const normalizedSlug = slug ? slug.toLowerCase() : null;
@@ -189,9 +189,9 @@ function checkBacklogIntegrity(rootDir = process.cwd(), /** @type {string|null} 
   const canonicalLocations = new Map();  // id -> rel path in completed|archive
 
   /** @param {string} dir @param {{canonical?: boolean}} [opts] */
-  const scan = (dir, { canonical = false } = {}) => {
+  const scan = (dir: string, { canonical = false }: { canonical?: boolean } = {}) => {
     if (!fs.existsSync(dir)) {return;}
-    const files = fs.readdirSync(dir).filter(/** @param {string} f */ f => f.endsWith('.md'));
+    const files = fs.readdirSync(dir).filter((f: string) => f.endsWith('.md'));
     for (const file of files) {
       if (normalizedSlug && !file.toLowerCase().startsWith(normalizedSlug)) {
         continue;
@@ -276,7 +276,7 @@ function pruneStaleBacklogDuplicates(rootDir = process.cwd()) {
 }
 
 /** @param {string} taskFilePath @returns {string|null} */
-function getTaskStatus(taskFilePath) {
+function getTaskStatus(taskFilePath: string) {
   if (!taskFilePath || !fs.existsSync(taskFilePath)) {return null;}
   const content = fs.readFileSync(taskFilePath, 'utf8');
 
@@ -296,7 +296,7 @@ function getTaskStatus(taskFilePath) {
 }
 
 /** @param {string} taskFilePath @param {string} newStatus @returns {boolean} */
-function setTaskStatus(taskFilePath, newStatus) {
+function setTaskStatus(taskFilePath: string, newStatus: string) {
   if (!taskFilePath || !fs.existsSync(taskFilePath)) {return false;}
   let content = fs.readFileSync(taskFilePath, 'utf8');
 
@@ -326,11 +326,12 @@ function setTaskStatus(taskFilePath, newStatus) {
  * @param {string} [rootDir]
  * @returns {boolean}
  */
-function completeTask(slug, rootDir = process.cwd()) {
+function completeTask(slug: string, rootDir: string = process.cwd()): boolean {
   const resolution = resolveTaskFile(slug, rootDir);
   if (!resolution.ok) {return false;}
 
   const taskFilePath = /** @type {string} */ (resolution.taskFile);
+  if (!taskFilePath) {return false;}
   const fileName = path.basename(taskFilePath);
   const { tasksDir, completedDir } = getTaskStorage(rootDir);
 
@@ -361,8 +362,8 @@ function completeTask(slug, rootDir = process.cwd()) {
  * @param {string} content
  * @returns {{matched: boolean, families: string[]}}
  */
-function parseAssigneeFamilies(content) {
-  let families = /** @type {string[]} */ ([]);
+function parseAssigneeFamilies(content: string) {
+  let families: string[] = /** @type {string[]} */ ([]);
   let matched = false;
 
   const lineMatch = content.match(/^assignee:[ \t]*(.*)$/m);
@@ -376,8 +377,8 @@ function parseAssigneeFamilies(content) {
         : rest;
 
       families = rawValues.split(',')
-        .map(/** @param {string} s */ s => s.trim().replace(/^['"]|['"]$/g, '').replace(/^@/, ''))
-        .filter(/** @param {string} s */ s => s.length > 0);
+        .map((s: string) => s.trim().replace(/^['"]|['"]$/g, '').replace(/^@/, ''))
+        .filter((s: string) => s.length > 0);
     }
   }
 
@@ -387,10 +388,10 @@ function parseAssigneeFamilies(content) {
     if (blockMatch) {
       matched = true;
       families = blockMatch[1].split(/[\r\n]+/)
-        .map(/** @param {string} line */ line => line.trim())
-        .filter(/** @param {string} line */ line => line.startsWith('-'))
-        .map(/** @param {string} line */ line => line.substring(1).trim().replace(/^['"]|['"]$/g, '').replace(/^@/, ''))
-        .filter(/** @param {string} s */ s => s.length > 0);
+        .map((line: string) => line.trim())
+        .filter((line: string) => line.startsWith('-'))
+        .map((line: string) => line.substring(1).trim().replace(/^['"]|['"]$/g, '').replace(/^@/, ''))
+        .filter((s: string) => s.length > 0);
     }
   }
 
@@ -403,7 +404,7 @@ function parseAssigneeFamilies(content) {
  * @param {string} [rootDir]
  * @returns {boolean|null|void}
  */
-function commitTaskFileUpdate(taskFilePath, message, rootDir = process.cwd()) {
+function commitTaskFileUpdate(taskFilePath: string, message: string, rootDir: string = process.cwd()) {
   if (!taskFilePath || !fs.existsSync(taskFilePath)) {return;}
   // Run `git add/commit` against the worktree the caller intended (rootDir),
   // not whichever branch process.cwd() happens to have checked out. All
@@ -430,13 +431,13 @@ function commitTaskFileUpdate(taskFilePath, message, rootDir = process.cwd()) {
     }
     return true;
   } catch (/** @type {unknown} */ e) {
-    fmt.log.fail(`Git error during task update: ${(/** @type {Error} */ (e)).message}`);
+    fmt.log.fail(`Git error during task update: ${(e as Error).message}`);
     return false;
   }
 }
 
 /** @param {string} taskFilePath @returns {boolean} */
-function clearTaskAgentAssignee(taskFilePath) {
+function clearTaskAgentAssignee(taskFilePath: string) {
   if (!taskFilePath || !fs.existsSync(taskFilePath)) {return false;}
   let content = fs.readFileSync(taskFilePath, 'utf8');
   if (!content.match(/^assignee:/m)) {return false;}
@@ -445,8 +446,8 @@ function clearTaskAgentAssignee(taskFilePath) {
   const supportedAgents = getSupportedAgents();
 
   // Separate agent families from human assignees
-  const agentFamilies = families.filter(/** @param {string} f */ f => supportedAgents.includes(f.toLowerCase()));
-  const humanFamilies = families.filter(/** @param {string} f */ f => !supportedAgents.includes(f.toLowerCase()));
+  const agentFamilies = families.filter((f: string) => supportedAgents.includes(f.toLowerCase()));
+  const humanFamilies = families.filter((f: string) => !supportedAgents.includes(f.toLowerCase()));
 
   // If there are no agent families to clear, nothing to do — preserve human assignees
   if (agentFamilies.length === 0) {
@@ -460,7 +461,7 @@ function clearTaskAgentAssignee(taskFilePath) {
       // Remove agent families and write back human-only
       let newAssigneeLine;
       if (hasBlockForm) {
-        newAssigneeLine = 'assignee:\n' + humanFamilies.map(/** @param {string} f */ f => `  - ${f}`).join('\n') + '\n';
+        newAssigneeLine = 'assignee:\n' + humanFamilies.map((f: string) => `  - ${f}`).join('\n') + '\n';
       } else {
         newAssigneeLine = `assignee: [${humanFamilies.join(', ')}]`;
       }
@@ -521,14 +522,14 @@ function clearTaskAgentAssignee(taskFilePath) {
  * @param {{implementer?: string|null, clearAssignee?: boolean, rootDir?: string, log?: Function}} [opts]
  * @returns {boolean}
  */
-function transitionTask(slug, newStatus, { implementer = null, clearAssignee = false, rootDir = process.cwd(), log = fmt.log.plain } = {}) {
+function transitionTask(slug: string, newStatus: string, { implementer = null, clearAssignee = false, rootDir = process.cwd(), log = fmt.log.plain }: { implementer?: string | null | undefined, clearAssignee?: boolean, rootDir?: string, log?: Function } = {} as any) {
   const resolution = resolveTaskFile(slug, rootDir);
   if (!resolution.ok) {
     log(fmt.status('WARN', `Could not transition task ${fmt.slug(slug)}: ${resolution.reason}`));
     return false;
   }
 
-  const taskFile = /** @type {string} */ (resolution.taskFile);
+  const taskFile = resolution.taskFile as string;
 
   // Guard: reject suffixed slugs (e.g. "task-1048-regress") to prevent
   // resolveTaskFile's base-ID fallback from silently committing to the
@@ -576,7 +577,7 @@ function transitionTask(slug, newStatus, { implementer = null, clearAssignee = f
 }
 
 /** @param {string} taskFilePath @returns {string|null} */
-function getTaskAssignee(taskFilePath) {
+function getTaskAssignee(taskFilePath: string) {
   if (!taskFilePath || !fs.existsSync(taskFilePath)) {return null;}
   const content = fs.readFileSync(taskFilePath, 'utf8');
   const { families } = parseAssigneeFamilies(content);
@@ -584,18 +585,18 @@ function getTaskAssignee(taskFilePath) {
 }
 
 /** @param {string} taskFilePath @returns {string|null} */
-function getTaskImplementer(taskFilePath) {
+function getTaskImplementer(taskFilePath: string) {
   if (!taskFilePath || !fs.existsSync(taskFilePath)) {return null;}
   const content = fs.readFileSync(taskFilePath, 'utf8');
   const { families } = parseAssigneeFamilies(content);
 
-  const normalizedFamilies = families.map(/** @param {string} f */ f => f.toLowerCase());
+  const normalizedFamilies = families.map((f: string) => f.toLowerCase());
   const supportedAgents = getSupportedAgents();
-  return normalizedFamilies.find(/** @param {string} f */ f => supportedAgents.includes(f)) || null;
+  return normalizedFamilies.find((f: string) => supportedAgents.includes(f)) || null;
 }
 
 /** @param {string} taskFilePath @param {string} field @returns {string|null} */
-function getTaskFrontmatterValue(taskFilePath, field) {
+function getTaskFrontmatterValue(taskFilePath: string, field: string) {
   if (!taskFilePath || !fs.existsSync(taskFilePath)) {return null;}
   const content = fs.readFileSync(taskFilePath, 'utf8');
   const pattern = new RegExp(`^${field}:\\s*([^\\r\\n]+)`, 'mi');
@@ -614,7 +615,7 @@ const CLASSIFICATION_LABELS = new Set(['ai_sdlc', 'user_value', 'unknown']);
  * treated as a fallback when no block labels are found).
  */
 /** @param {string} taskFilePath */
-function getTaskLabels(taskFilePath) {
+function getTaskLabels(taskFilePath: string) {
   if (!taskFilePath || !fs.existsSync(taskFilePath)) {return [];}
   const content = fs.readFileSync(taskFilePath, 'utf8');
 
@@ -640,7 +641,7 @@ function getTaskLabels(taskFilePath) {
 }
 
 /** @param {string} taskFilePath */
-function getTaskClassification(taskFilePath) {
+function getTaskClassification(taskFilePath: string) {
   if (!taskFilePath || !fs.existsSync(taskFilePath)) {return null;}
   const labels = getTaskLabels(taskFilePath);
   const matches = new Set();
@@ -651,7 +652,7 @@ function getTaskClassification(taskFilePath) {
 }
 
 /** @param {string} taskFilePath */
-function hasBugLabel(taskFilePath) {
+function hasBugLabel(taskFilePath: string) {
   const labels = getTaskLabels(taskFilePath);
   return labels.includes('bug');
 }
@@ -663,7 +664,7 @@ function hasBugLabel(taskFilePath) {
  * @param {{promote?: boolean}} [opts]
  * @returns {boolean}
  */
-function setTaskAssignee(taskFilePath, agentFamily, { promote = true } = {}) {
+function setTaskAssignee(taskFilePath: string, agentFamily: string, { promote = true }: { promote?: boolean } = {} as any) {
   if (!taskFilePath || !fs.existsSync(taskFilePath)) {return false;}
   let content = fs.readFileSync(taskFilePath, 'utf8');
 
@@ -671,7 +672,7 @@ function setTaskAssignee(taskFilePath, agentFamily, { promote = true } = {}) {
 
   if (matched) {
     const lowerAgentFamily = agentFamily.toLowerCase();
-    const existingIndex = families.findIndex(/** @param {string} f */ f => f.toLowerCase() === lowerAgentFamily);
+    const existingIndex = families.findIndex((f: string) => f.toLowerCase() === lowerAgentFamily);
 
     if (existingIndex !== 0) {
       if (existingIndex !== -1) {
@@ -718,7 +719,7 @@ function setTaskAssignee(taskFilePath, agentFamily, { promote = true } = {}) {
 }
 
 /** @param {string} taskFilePath @param {string} agentFamily @returns {boolean} */
-function setTaskImplementer(taskFilePath, agentFamily) {
+function setTaskImplementer(taskFilePath: string, agentFamily: string) {
   if (!taskFilePath || !fs.existsSync(taskFilePath)) {return false;}
   let content = fs.readFileSync(taskFilePath, 'utf8');
 
@@ -731,8 +732,8 @@ function setTaskImplementer(taskFilePath, agentFamily) {
   const nextFamilies = [agentFamily, ...preservedFamilies];
 
   if (matched) {
-    const normalizedCurrent = families.map(/** @param {string} f */ f => f.toLowerCase());
-    const normalizedNext = nextFamilies.map(/** @param {string} f */ f => f.toLowerCase());
+    const normalizedCurrent = families.map((f: string) => f.toLowerCase());
+    const normalizedNext = nextFamilies.map((f: string) => f.toLowerCase());
     // Check if the first agent is already the one we want to set
     if (normalizedCurrent.length > 0 && normalizedCurrent[0] === agentFamily.toLowerCase()) {
       // If the rest of the list is also the same, it's a no-op
@@ -769,7 +770,7 @@ function setTaskImplementer(taskFilePath, agentFamily) {
 }
 
 /** @param {string} taskFilePath @param {string} agentFamily @returns {boolean} */
-function enforceTaskAssignee(taskFilePath, agentFamily) {
+function enforceTaskAssignee(taskFilePath: string, agentFamily: string) {
   if (!taskFilePath || !fs.existsSync(taskFilePath)) {return false;}
   let content = fs.readFileSync(taskFilePath, 'utf8');
 
@@ -794,7 +795,7 @@ function enforceTaskAssignee(taskFilePath, agentFamily) {
 }
 
 /** @param {string} taskFilePath @returns {string[]} */
-function getAcceptanceCriteria(taskFilePath) {
+function getAcceptanceCriteria(taskFilePath: string) {
   if (!taskFilePath || !fs.existsSync(taskFilePath)) {return [];}
   const content = fs.readFileSync(taskFilePath, 'utf8');
   const sectionMatch = content.match(/## Acceptance Criteria\s*\n([\s\S]*?)(?:\n## |\nDefinition of Done:|\n---\n|$)/);
@@ -806,29 +807,29 @@ function getAcceptanceCriteria(taskFilePath) {
     .filter(line => /^- \[[ xX]\]/.test(line));
 }
 
-module.exports = {
-  findTaskFiles,
-  findTaskFile,
-  resolveTaskFile,
-  reportTaskResolution,
-  checkBacklogIntegrity,
-  pruneStaleBacklogDuplicates,
-  getTaskStorage,
-  getTaskStatus,
-  setTaskStatus,
-  transitionTask,
-  commitTaskFileUpdate,
-  completeTask,
-  getTaskAssignee,
-  getTaskImplementer,
-  getTaskFrontmatterValue,
-  getTaskClassification,
-  getTaskLabels,
-  hasBugLabel,
-  setTaskAssignee,
-  setTaskImplementer,
-  enforceTaskAssignee,
-  getAcceptanceCriteria,
-   parseAssigneeFamilies,
-   clearTaskAgentAssignee
-};
+
+export { findTaskFiles };
+export { findTaskFile };
+export { resolveTaskFile };
+export { reportTaskResolution };
+export { checkBacklogIntegrity };
+export { pruneStaleBacklogDuplicates };
+export { getTaskStorage };
+export { getTaskStatus };
+export { setTaskStatus };
+export { transitionTask };
+export { commitTaskFileUpdate };
+export { completeTask };
+export { getTaskAssignee };
+export { getTaskImplementer };
+export { getTaskFrontmatterValue };
+export { getTaskClassification };
+export { getTaskLabels };
+export { hasBugLabel };
+export { setTaskAssignee };
+export { setTaskImplementer };
+export { enforceTaskAssignee };
+export { getAcceptanceCriteria };
+export { parseAssigneeFamilies };
+export { clearTaskAgentAssignee };
+;

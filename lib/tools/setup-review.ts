@@ -1,24 +1,25 @@
-const fs = require('fs');
-const path = require('path');
-const readline = require('readline');
-const { spawnSync } = require('child_process');
-const fmt = require('../core/fmt');
-const { eligibleAgentsForStep } = require('../agents/agents');
-const { resolveReviewAdapter } = require('../core/product-config');
-const {
+import * as fs from 'fs';
+import * as path from 'path';
+import * as readline from 'readline';
+import _cp = require('child_process');
+const { spawnSync } = _cp;
+import * as fmt from '../core/fmt';
+import { eligibleAgentsForStep } from '../agents/agents';
+import { resolveReviewAdapter } from '../core/product-config';
+import {
   resolveForgejoHome,
   resolveForgejoSettings,
   reviewRemoteUrl,
-} = require('./forgejo');
-const { loadWorkflowConfig } = require('../core/product-config');
-const { ensureWorkflowGitignore } = require('../core/gitignore');
+} from './forgejo';
+import { loadWorkflowConfig } from '../core/product-config';
+import ensureWorkflowGitignore = require('../core/gitignore');
 
 let tokenNameCounter = 0;
 const REVIEW_TOKEN_SCOPES = ['write:user', 'write:repository', 'write:issue', 'write:organization'];
 const PASSWORD_PROMPT_OPTIONS = { hidden: false };
 
 /** @param {string} repo @returns {{owner: string, repo: string}|null} */
-function parseRepoSlug(repo) {
+function parseRepoSlug(repo: string): { owner: string; repo: string } | null {
   if (typeof repo !== 'string') {return null;}
   const match = repo.trim().match(/^([^/\s]+)\/([^/\s]+)$/);
   if (!match) {return null;}
@@ -26,22 +27,22 @@ function parseRepoSlug(repo) {
 }
 
 /** @param {string[]} values @returns {string[]} */
-function unique(values) {
+function unique(values: string[]): string[] {
   return [...new Set(values.filter(Boolean))];
 }
 
 /** @param {string|undefined} baseUrl @returns {string|undefined} */
-function normalizeBaseUrl(baseUrl) {
+function normalizeBaseUrl(baseUrl: string | undefined): string | undefined {
   return typeof baseUrl === 'string' ? baseUrl.replace(/\/+$/, '') : baseUrl;
 }
 
 /** @param {string} repoName @param {string} user @param {string} [suffix] @returns {string} */
-function buildTokenName(repoName, user, suffix = `${Date.now()}-${++tokenNameCounter}`) {
+function buildTokenName(repoName: string, user: string, suffix: string = `${Date.now()}-${++tokenNameCounter}`): string {
   return `workflow-${repoName}-${user}-${suffix}`;
 }
 
 /** @param {string} user @param {{allowBlank?: boolean}} [options] @returns {string} */
-function passwordPrompt(user, options = {}) {
+function passwordPrompt(user: string, options: { allowBlank?: boolean } = {}): string {
   const { allowBlank = false } = options;
   return allowBlank
     ? `Password for ${user} (input visible, leave blank to skip token creation): `
@@ -49,22 +50,22 @@ function passwordPrompt(user, options = {}) {
 }
 
 /** @param {string|undefined} value @param {boolean} [defaultValue] @returns {boolean} */
-function parseYesNo(value, defaultValue = true) {
-  if (typeof value !== 'string' || value.trim() === '') {return defaultValue;}
+function parseYesNo(value: string | undefined, defaultValue?: boolean): boolean {
+  if (typeof value !== 'string' || value.trim() === '') {return defaultValue ?? true;}
   const normalized = value.trim().toLowerCase();
   if (['y', 'yes'].includes(normalized)) {return true;}
   if (['n', 'no'].includes(normalized)) {return false;}
-  return defaultValue;
+  return defaultValue ?? true;
 }
 
 /** @param {string} [rootDir] @returns {string} */
-function defaultProductName(rootDir = process.cwd()) {
-  return path.basename(rootDir) || 'Workflow Project';
+function defaultProductName(rootDir?: string): string {
+  return path.basename(rootDir || process.cwd()) || 'Workflow Project';
 }
 
 /** @param {string} [rootDir] @param {string} [ownerLogin] @returns {string} */
-function defaultRepoSlug(rootDir = process.cwd(), ownerLogin = 'human') {
-  return `${ownerLogin}/${path.basename(rootDir) || 'project'}`;
+function defaultRepoSlug(rootDir?: string, ownerLogin?: string): string {
+  return `${ownerLogin || 'human'}/${path.basename(rootDir || process.cwd()) || 'project'}`;
 }
 
 /**
@@ -72,7 +73,7 @@ function defaultRepoSlug(rootDir = process.cwd(), ownerLogin = 'human') {
  * @param {{spawnSyncFn?: Function, configuredPrimaryBranch?: string|null}} [options]
  * @returns {string}
  */
-function detectPrimaryBranchDefault(rootDir = process.cwd(), options = {}) {
+function detectPrimaryBranchDefault(rootDir?: string, options: { spawnSyncFn?: Function; configuredPrimaryBranch?: string | null } = {}): string {
   const { spawnSyncFn = spawnSync, configuredPrimaryBranch = null } = options;
   const listResult = spawnSyncFn(
     'git',
@@ -80,7 +81,7 @@ function detectPrimaryBranchDefault(rootDir = process.cwd(), options = {}) {
     { encoding: 'utf8' }
   );
   const branches = listResult.status === 0
-    ? (listResult.stdout || '').split('\n').map(/** @param {string} value */ value => value.trim()).filter(Boolean)
+    ? (listResult.stdout || '').split('\n').map(/** @param {string} value */ (value: string) => value.trim()).filter(Boolean)
     : [];
 
   if (configuredPrimaryBranch && branches.includes(configuredPrimaryBranch)) {
@@ -101,7 +102,7 @@ function detectPrimaryBranchDefault(rootDir = process.cwd(), options = {}) {
   return 'main';
 }
 
-function standardLayoutDescription() {
+export function standardLayoutDescription(): string {
   return [
     'standard = markdown task storage in `backlog/`',
     'missions in `docs/missions/`',
@@ -112,7 +113,7 @@ function standardLayoutDescription() {
 }
 
 /** @param {{reviewProvider?: string, baseUrl?: string, reviewRemote?: string, reviewRepo?: string}} answers @returns {{provider: string, baseUrl?: string, remote?: string, repo?: string}} */
-function buildReviewAdapterConfig(answers) {
+function buildReviewAdapterConfig(answers: { reviewProvider?: string; baseUrl?: string; reviewRemote?: string; reviewRepo?: string }) {
   const provider = answers.reviewProvider || 'forgejo';
   if (provider !== 'forgejo') {
     return { provider };
@@ -126,12 +127,12 @@ function buildReviewAdapterConfig(answers) {
 }
 
 /** @param {{missionsBaseDir?: string, branchPrefix?: string, worktreePattern?: string, primaryBranch?: string, productName?: string, tasksProvider?: string, tasksStorage?: string, verificationCommand?: string, verificationDefaultArea?: string, reviewProvider?: string, baseUrl?: string, reviewRemote?: string, reviewRepo?: string}} answers @returns {{product: {name: string, targetUser: string}, adapters: {tasks: {provider: string, storage: string}, missions: {baseDir: string, branchPrefix: string, worktreePattern: string, primaryBranch?: string}, verification: {command: string, defaultArea: string}, review: {provider: string, baseUrl?: string, remote?: string, repo?: string}, agents: {}}}} */
-function buildWorkflowConfig(answers) {
+function buildWorkflowConfig(answers: any) {
   /** @type {{baseDir: string, branchPrefix: string, worktreePattern: string, primaryBranch?: string}} */
-  const missions = {
-    baseDir: /** @type {string} */ (answers.missionsBaseDir),
-    branchPrefix: /** @type {string} */ (answers.branchPrefix),
-    worktreePattern: /** @type {string} */ (answers.worktreePattern),
+  const missions: { baseDir: string; branchPrefix: string; worktreePattern: string; primaryBranch?: string } = {
+    baseDir: /** @type {string} */ (answers.missionsBaseDir || ''),
+    branchPrefix: /** @type {string} */ (answers.branchPrefix || ''),
+    worktreePattern: /** @type {string} */ (answers.worktreePattern || ''),
   };
   if (
     typeof answers.primaryBranch === 'string' &&
@@ -143,18 +144,18 @@ function buildWorkflowConfig(answers) {
 
   return {
     product: {
-      name: /** @type {string} */ (answers.productName),
+      name: /** @type {string} */ (answers.productName || ''),
       targetUser: 'Engineering teams using git, task tracking, and code review',
     },
     adapters: {
       tasks: {
-        provider: /** @type {string} */ (answers.tasksProvider),
-        storage: /** @type {string} */ (answers.tasksStorage),
+        provider: /** @type {string} */ (answers.tasksProvider || ''),
+        storage: /** @type {string} */ (answers.tasksStorage || ''),
       },
       missions,
       verification: {
-        command: /** @type {string} */ (answers.verificationCommand),
-        defaultArea: /** @type {string} */ (answers.verificationDefaultArea),
+        command: /** @type {string} */ (answers.verificationCommand || ''),
+        defaultArea: /** @type {string} */ (answers.verificationDefaultArea || ''),
       },
       review: buildReviewAdapterConfig(answers),
       agents: {},
@@ -163,14 +164,14 @@ function buildWorkflowConfig(answers) {
 }
 
 /** @param {string} rootDir @param {{[key: string]: any}} config @returns {string} */
-function writeWorkflowConfig(rootDir, config) {
+function writeWorkflowConfig(rootDir: string, config: { [key: string]: any }): string {
   const configPath = path.join(rootDir, 'workflow.config.json');
   fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
   return configPath;
 }
 
 /** @returns {string[]} */
-function suggestedForgejoUsers() {
+export function suggestedForgejoUsers(): string[] {
   return unique([
     ...eligibleAgentsForStep('active'),
     ...eligibleAgentsForStep('review'),
@@ -178,25 +179,25 @@ function suggestedForgejoUsers() {
 }
 
 /** @param {string} user @param {string} [forgejoHome] @returns {string} */
-function tokenFilePath(user, forgejoHome = resolveForgejoHome()) {
-  return path.join(forgejoHome, 'tokens', user);
+function tokenFilePath(user: string, forgejoHome?: string): string {
+  return path.join(forgejoHome || resolveForgejoHome(), 'tokens', user);
 }
 
 /** @param {string} [forgejoHome] @returns {string} */
-function ensureTokenDir(forgejoHome = resolveForgejoHome()) {
-  const dir = path.join(forgejoHome, 'tokens');
+function ensureTokenDir(forgejoHome?: string): string {
+  const dir = path.join(forgejoHome || resolveForgejoHome(), 'tokens');
   fs.mkdirSync(dir, { recursive: true });
   return dir;
 }
 
 /** @param {string} [rootDir] @param {string} [explicitForgejoHome] @returns {string} */
-function resolveBootstrapForgejoHome(rootDir = process.cwd(), explicitForgejoHome) {
+function resolveBootstrapForgejoHome(rootDir?: string, explicitForgejoHome?: string): string {
   if (explicitForgejoHome) {return explicitForgejoHome;}
-  return path.join(rootDir, '.forgejo-local');
+  return path.join(rootDir || process.cwd(), '.forgejo-local');
 }
 
-function readConfiguredReviewRemote(rootDir = process.cwd(), remoteName = 'review') {
-  const result = spawnSync('git', ['-C', rootDir, 'remote', 'get-url', remoteName], {
+export function readConfiguredReviewRemote(rootDir?: string, remoteName?: string): string | null {
+  const result = spawnSync('git', ['-C', rootDir || process.cwd(), 'remote', 'get-url', remoteName || 'review'], {
     encoding: 'utf8',
   });
   if (result.status !== 0) {return null;}
@@ -208,7 +209,7 @@ function readConfiguredReviewRemote(rootDir = process.cwd(), remoteName = 'revie
  * @param {{users?: string[], remoteName?: string, remoteUrlFn?: Function, getRemoteUrlFn?: Function, tokenPathFn?: Function, requestFn?: Function}} [options]
  * @returns {{required: boolean, ok: boolean, issues: string[], steps: string[]}}
  */
-function evaluateReviewSetup(rootDir = process.cwd(), options = {}) {
+function evaluateReviewSetup(rootDir?: string, options: any = {}) {
   const {
     users = suggestedForgejoUsers(),
     remoteName,
@@ -240,7 +241,7 @@ function evaluateReviewSetup(rootDir = process.cwd(), options = {}) {
   const configuredRemoteName = remoteName || reviewAdapter.remote || 'review';
   const issues = [];
   const steps = [];
-  const missingUsers = users.filter(/** @param {string} user */ user => !fs.existsSync(tokenPathFn(user)));
+  const missingUsers = users.filter(/** @param {string} user */ (user: string) => !fs.existsSync(tokenPathFn(user)));
 
   if (missingUsers.length > 0) {
     issues.push(`missing Forgejo tokens for: ${missingUsers.join(', ')}`);
@@ -293,7 +294,7 @@ function evaluateReviewSetup(rootDir = process.cwd(), options = {}) {
  * @param {{basicAuth?: {user: string, password: string}, token?: string, body?: {[key: string]: any}}} [options]
  * @returns {{ok: boolean, statusCode: number|null, data: any, error: string|null}}
  */
-function apiRequest(method, requestUrl, options = {}) {
+function apiRequest(method: string, requestUrl: string, options: any = {}) {
   const args = [
     '-s',
     '-X', method,
@@ -348,7 +349,7 @@ function apiRequest(method, requestUrl, options = {}) {
 }
 
 /** @param {string} baseUrl @param {string} user @param {string} password @param {string} tokenName @param {Function} [requestFn] @param {string[]} [scopes] @returns {{ok: boolean, token?: string, error?: string, statusCode?: number|null, response?: any}} */
-function createToken(baseUrl, user, password, tokenName, requestFn = apiRequest, scopes = REVIEW_TOKEN_SCOPES) {
+function createToken(baseUrl: string, user: string, password: string, tokenName: string, requestFn: Function = apiRequest, scopes: string[] = REVIEW_TOKEN_SCOPES) {
   const normalizedBaseUrl = normalizeBaseUrl(baseUrl);
   const result = requestFn('POST', `${normalizedBaseUrl}/api/v1/users/${encodeURIComponent(user)}/tokens`, {
     basicAuth: { user, password },
@@ -375,7 +376,7 @@ function createToken(baseUrl, user, password, tokenName, requestFn = apiRequest,
 }
 
 /** @param {string} baseUrl @param {string} repoSlug @param {string} ownerLogin @param {string} ownerToken @param {Function} [requestFn] @returns {{ok: boolean, created?: boolean, error?: string, response?: any}} */
-function ensureRepo(baseUrl, repoSlug, ownerLogin, ownerToken, requestFn = apiRequest) {
+function ensureRepo(baseUrl: string, repoSlug: string, ownerLogin: string, ownerToken: string, requestFn: Function = apiRequest) {
   const repoInfo = parseRepoSlug(repoSlug);
   if (!repoInfo) {
     return { ok: false, error: `invalid review repo slug: ${repoSlug}` };
@@ -415,7 +416,7 @@ function ensureRepo(baseUrl, repoSlug, ownerLogin, ownerToken, requestFn = apiRe
 }
 
 /** @param {string} baseUrl @param {string} repoSlug @param {string} ownerToken @param {string} collaborator @param {string} [permission] @param {Function} [requestFn] @returns {{ok: boolean, created?: boolean, skipped?: boolean, error?: string, response?: any}} */
-function ensureRepoCollaborator(baseUrl, repoSlug, ownerToken, collaborator, permission = 'write', requestFn = apiRequest) {
+function ensureRepoCollaborator(baseUrl: string, repoSlug: string, ownerToken: string, collaborator: string, permission: string = 'write', requestFn: Function = apiRequest) {
   const repoInfo = parseRepoSlug(repoSlug);
   if (!repoInfo) {
     return { ok: false, error: `invalid review repo slug: ${repoSlug}` };
@@ -440,8 +441,8 @@ function ensureRepoCollaborator(baseUrl, repoSlug, ownerToken, collaborator, per
 }
 
 /** @param {string} baseUrl @param {string} repoSlug @param {string} ownerToken @param {string[]} [collaborators] @param {string} [permission] @param {Function} [requestFn] @returns {{ok: boolean, created: string[]}} */
-function ensureRepoCollaborators(baseUrl, repoSlug, ownerToken, collaborators = [], permission = 'write', requestFn = apiRequest) {
-  const uniqueCollaborators = unique(collaborators.map(/** @param {string|boolean} user */ user => (typeof user === 'string' ? user.trim() : '')).filter(Boolean));
+function ensureRepoCollaborators(baseUrl: string, repoSlug: string, ownerToken: string, collaborators: string[] = [], permission: string = 'write', requestFn: Function = apiRequest) {
+  const uniqueCollaborators = unique(collaborators.map(/** @param {string|boolean} user */ (user: string | boolean) => (typeof user === 'string' ? user.trim() : '')).filter(Boolean));
   const created = [];
   for (const collaborator of uniqueCollaborators) {
     const result = ensureRepoCollaborator(baseUrl, repoSlug, ownerToken, collaborator, permission, requestFn);
@@ -456,7 +457,7 @@ function ensureRepoCollaborators(baseUrl, repoSlug, ownerToken, collaborators = 
 }
 
 /** @param {string} rootDir @param {string} remoteName @param {string} remoteUrl @returns {{ok: boolean, created?: boolean, updated?: boolean, error?: string}} */
-function ensureReviewRemote(rootDir, remoteName, remoteUrl) {
+function ensureReviewRemote(rootDir: string, remoteName: string, remoteUrl: string): { ok: boolean; created?: boolean; updated?: boolean; error?: string } {
   const current = readConfiguredReviewRemote(rootDir, remoteName);
   const args = current
     ? ['-C', rootDir, 'remote', 'set-url', remoteName, remoteUrl]
@@ -476,7 +477,7 @@ function ensureReviewRemote(rootDir, remoteName, remoteUrl) {
  * @param {{hidden?: boolean, input?: NodeJS.ReadStream, output?: NodeJS.WriteStream}} [options]
  * @returns {Promise<string>}
  */
-async function promptLine(prompt, options = {}) {
+async function promptLine(prompt: string, options: { hidden?: boolean; input?: NodeJS.ReadStream; output?: NodeJS.WriteStream } = {}): Promise<string> {
   const { hidden = false, input = process.stdin, output = process.stdout } = options;
   return await new Promise((resolve) => {
     const rl = readline.createInterface({ input, output, terminal: true });
@@ -489,7 +490,7 @@ async function promptLine(prompt, options = {}) {
     }
 
     const originalWrite = output.write.bind(output);
-    const maskChunk = /** @param {string|Buffer} chunk */ (chunk) => {
+    const maskChunk = /** @param {string|Buffer} chunk */ (chunk: string | Buffer) => {
       const value = typeof chunk === 'string' ? chunk : String(chunk);
       let masked = '';
       for (const character of value) {
@@ -507,11 +508,11 @@ async function promptLine(prompt, options = {}) {
       }
       return masked;
     };
-    /** @type {import('readline').Interface & {stdoutMuted?: boolean}} */
-    const rlAny = rl;
+    const rlAny = /** @type {any} */ (rl);
     /** @type {Function} */
     // @ts-expect-error overriding Writable.write with custom signature
-    output.write = /** @type {any} */ ((chunk, encoding, cb) => {
+    output.write = /** @type {any} */ ((chunk: string | Buffer, encoding: BufferEncoding | undefined, cb: (() => void) | undefined) => {
+      // @ts-expect-error stdoutMuted is dynamically added
       if (rlAny.stdoutMuted) {
         const masked = maskChunk(/** @type {string | Buffer} */ (chunk));
         if (masked) {
@@ -522,6 +523,7 @@ async function promptLine(prompt, options = {}) {
       }
       return /** @type {Function} */ (originalWrite)(chunk, encoding, cb);
     });
+    // @ts-expect-error stdoutMuted is dynamically added
     rlAny.stdoutMuted = true;
     originalWrite(prompt);
     rl.question('', answer => {
@@ -534,7 +536,7 @@ async function promptLine(prompt, options = {}) {
 }
 
 /** @param {{statusCode?: number}} result @returns {boolean} */
-function isAuthFailure(result) {
+function isAuthFailure(result: { statusCode?: number }): boolean {
   return Boolean(result && (result.statusCode === 401 || result.statusCode === 403));
 }
 
@@ -545,7 +547,7 @@ function isAuthFailure(result) {
  * @param {{allowBlank?: boolean, log?: Function, promptFn?: Function, maxAttempts?: number, requestFn?: Function, scopes?: string[]}} [options]
  * @returns {Promise<{ok: boolean, token?: string, error?: string, skipped?: boolean, statusCode?: number|null, response?: any}>}
  */
-async function createTokenWithRetries(setup, user, initialPassword, options = {}) {
+async function createTokenWithRetries(setup: any, user: string, initialPassword: string, options: any = {}) {
   const {
     allowBlank = false,
     log = fmt.log.info,
@@ -610,7 +612,7 @@ async function createTokenWithRetries(setup, user, initialPassword, options = {}
  * @param {{promptFn?: Function, log?: Function, users?: string[]}} [options]
  * @returns {Promise<{baseUrl: string, repo: string, ownerLogin: string, ownerPassword: string, agentPasswords: Array<{user: string, password: string}>, agentUsers: string[]}>}
  */
-async function collectSetupAnswers(rootDir = process.cwd(), options = {}) {
+async function collectSetupAnswers(rootDir?: string, options: any = {}) {
   const {
     promptFn = promptLine,
     log = fmt.log.info,
@@ -628,7 +630,7 @@ async function collectSetupAnswers(rootDir = process.cwd(), options = {}) {
   const ownerLogin = (await promptFn(`Forgejo login with repo-create access [${defaultOwnerLogin}]: `)) || defaultOwnerLogin;
   const ownerPassword = await promptFn(passwordPrompt(ownerLogin), PASSWORD_PROMPT_OPTIONS);
   const userList = (await promptFn(`Agent Forgejo users [${defaultUsers}]: `)) || defaultUsers;
-  const agentUsers = unique(userList.split(',').map(/** @param {string} value */ value => value.trim()).filter(Boolean));
+  const agentUsers = unique(userList.split(',').map(/** @param {string} value */ (value: string) => value.trim()).filter(Boolean));
   const agentPasswords = [];
 
   for (const user of agentUsers) {
@@ -653,7 +655,7 @@ async function collectSetupAnswers(rootDir = process.cwd(), options = {}) {
  * @param {{promptFn?: Function, log?: Function, users?: string[], loadWorkflowConfigFn?: Function, detectPrimaryBranchDefaultFn?: Function}} [options]
  * @returns {Promise<{productName: string, ownerLogin: string, baseUrl: string, reviewRepo: string, reviewRemote: string, bootstrapReview: boolean, ownerPassword: string, agentPasswords: Array<{user: string, password: string}>, agentUsers: string[], tasksProvider: string, tasksStorage: string, missionsBaseDir: string, branchPrefix: string, primaryBranch: string, worktreePattern: string, verificationCommand: string, verificationDefaultArea: string}>}
  */
-async function collectWizardAnswers(rootDir = process.cwd(), options = {}) {
+async function collectWizardAnswers(rootDir?: string, options: any = {}) {
   const {
     promptFn = promptLine,
     log = fmt.log.info,
@@ -733,7 +735,7 @@ async function collectWizardAnswers(rootDir = process.cwd(), options = {}) {
     log(fmt.status('INFO', 'Forgejo bootstrap is enabled. Hidden password prompts are next: first for the repo-creating login, then once per listed agent user.'));
     ownerPassword = await promptFn(passwordPrompt(ownerLogin), PASSWORD_PROMPT_OPTIONS);
     const userList = (await promptFn(`Agent Forgejo users [${defaultUsers}]: `)) || defaultUsers;
-    agentUsers = unique(userList.split(',').map(/** @param {string} value */ value => value.trim()).filter(Boolean));
+    agentUsers = unique(userList.split(',').map(/** @param {string} value */ (value: string) => value.trim()).filter(Boolean));
     for (const user of agentUsers) {
       const password = await promptFn(passwordPrompt(user, { allowBlank: true }), PASSWORD_PROMPT_OPTIONS);
       if (password) {
@@ -757,7 +759,7 @@ async function collectWizardAnswers(rootDir = process.cwd(), options = {}) {
 }
 
 /** @param {string} user @param {string} token @param {string} [forgejoHome] @returns {string} */
-function writeToken(user, token, forgejoHome = resolveForgejoHome()) {
+function writeToken(user: string, token: string, forgejoHome?: string): string {
   ensureTokenDir(forgejoHome);
   const file = tokenFilePath(user, forgejoHome);
   fs.writeFileSync(file, `${token}\n`, { mode: 0o600 });
@@ -786,7 +788,7 @@ function writeToken(user, token, forgejoHome = resolveForgejoHome()) {
  * @param {{requestFn?: Function, writeTokenFn?: Function, buildTokenNameFn?: Function, forgejoHome?: string}} [options]
  * @returns {{ok: boolean, createdTokens: Array<{user: string, path: string}>, warnings?: Array<{user: string, error: string, response?: any}>, error?: string}}
  */
-function tokenCreateViaOwnerToken(baseUrl, repoSlug, ownerToken, agentPasswords, repoInfo, options = {}) {
+function tokenCreateViaOwnerToken(baseUrl: string, repoSlug: string, ownerToken: string, agentPasswords: Array<{ user: string; password: string }>, repoInfo: { owner: string; repo: string }, options: any = {}) {
   const { requestFn = apiRequest, writeTokenFn = writeToken, buildTokenNameFn = buildTokenName, forgejoHome: injectedForgejoHome } = options;
   const normalizedBaseUrl = normalizeBaseUrl(baseUrl);
   const forgejoHome = typeof injectedForgejoHome === 'string' ? injectedForgejoHome : resolveForgejoHome();
@@ -838,7 +840,7 @@ function tokenCreateViaOwnerToken(baseUrl, repoSlug, ownerToken, agentPasswords,
  * @param {{log?: Function, promptFn?: Function, requestFn?: Function, maxPasswordAttempts?: number, interactive?: boolean, forgejoHome?: string}} [options]
  * @returns {Promise<{ok: boolean, warnings?: Array<{user: string, error: string, response?: any}>, createdTokens?: Array<{user: string, path: string}>, error?: string, response?: any}>}
  */
-async function bootstrapReviewSurface(rootDir = process.cwd(), setup, options = {}) {
+async function bootstrapReviewSurface(rootDir: string, setup: any, options: any = {}) {
   const {
     log = fmt.log.info,
     promptFn,
@@ -855,7 +857,7 @@ async function bootstrapReviewSurface(rootDir = process.cwd(), setup, options = 
   const baseUrl = normalizeBaseUrl(setup.baseUrl);
   const collaboratorUsers = unique([
     ...(Array.isArray(setup.agentUsers) ? setup.agentUsers : []),
-    ...(Array.isArray(setup.agentPasswords) ? setup.agentPasswords.map(agent => agent.user) : []),
+    ...(Array.isArray(setup.agentPasswords) ? setup.agentPasswords.map((agent: any) => agent.user) : []),
   ].filter(Boolean));
 
   if (interactive) {
@@ -871,14 +873,14 @@ async function bootstrapReviewSurface(rootDir = process.cwd(), setup, options = 
       requestFn,
     });
     if (!ownerTokenResult.ok) {return ownerTokenResult;}
-    const ownerToken = /** @type {string} */ (ownerTokenResult.token);
+    const ownerToken = /** @type {string} */ ((ownerTokenResult as any).token);
 
     const ownerTokenPath = writeToken(setup.ownerLogin, ownerToken, forgejoHome);
-    // @ts-expect-error repo may be undefined
+    // @ts-expect-error setup.repo may be undefined at runtime
     const repoResult = ensureRepo(baseUrl, setup.repo, setup.ownerLogin, ownerToken, requestFn);
     if (!repoResult.ok) {return repoResult;}
 
-    // @ts-expect-error repo may be undefined
+    // @ts-expect-error setup.repo may be undefined at runtime
     const collaboratorResult = ensureRepoCollaborators(baseUrl, setup.repo, ownerToken, collaboratorUsers, 'write', requestFn);
     if (!collaboratorResult.ok) {return collaboratorResult;}
     if (collaboratorResult.created.length > 0) {
@@ -901,13 +903,13 @@ async function bootstrapReviewSurface(rootDir = process.cwd(), setup, options = 
       if (!tokenResult.ok) {
         warnings.push({
           user: agent.user,
-          error: /** @type {string} */ (tokenResult.error),
-          response: tokenResult.response,
+          error: /** @type {string} */ ((tokenResult as any).error),
+          response: (tokenResult as any).response,
         });
         continue;
       }
-      if (tokenResult.skipped) {continue;}
-      createdTokens.push({ user: agent.user, path: writeToken(agent.user, /** @type {string} */ (tokenResult.token), forgejoHome) });
+      if ((tokenResult as any).skipped) {continue;}
+      createdTokens.push({ user: agent.user, path: writeToken(agent.user, /** @type {string} */ ((tokenResult as any).token), forgejoHome) });
     }
 
     const remoteUrl = reviewRemoteUrl(rootDir);
@@ -943,18 +945,18 @@ async function bootstrapReviewSurface(rootDir = process.cwd(), setup, options = 
     return { ok: false, error: `No owner token found for ${/** @type {string} */ (setup.ownerLogin)} at ${ownerTokenPath}. A token file for an existing user (typically human) is required to bootstrap new agent tokens.` };
   }
 
-  // @ts-expect-error repo may be undefined
+  // @ts-expect-error setup.repo may be undefined at runtime
   const repoResult = ensureRepo(baseUrl, setup.repo, setup.ownerLogin, ownerToken, requestFn);
   if (!repoResult.ok) {return repoResult;}
 
-  // @ts-expect-error repo may be undefined
+  // @ts-expect-error setup.repo may be undefined at runtime
   const collaboratorResult = ensureRepoCollaborators(baseUrl, setup.repo, ownerToken, collaboratorUsers, 'write', requestFn);
   if (!collaboratorResult.ok) {return collaboratorResult;}
   if (collaboratorResult.created.length > 0) {
     log(fmt.status('PASS', `Granted write access on ${setup.repo} to ${collaboratorResult.created.join(', ')}`));
   }
 
-  // @ts-expect-error repo may be undefined
+  // @ts-expect-error setup.repo may be undefined at runtime
   const tokensResult = tokenCreateViaOwnerToken(baseUrl, setup.repo, ownerToken, setup.agentPasswords, repoInfo, { requestFn, writeTokenFn: writeToken, forgejoHome, log });
   if (!tokensResult.ok) {return tokensResult;}
 
@@ -985,7 +987,7 @@ async function bootstrapReviewSurface(rootDir = process.cwd(), setup, options = 
  * @param {{rootDir?: string, log?: Function, error?: Function, exit?: Function, promptFn?: Function, forgejoHome?: string}} [options]
  * @returns {Promise<void>}
  */
-async function setupReview(_args, options = {}) {
+async function setupReview(_args: any[], options: any = {}) {
   const rootDir = options.rootDir || process.cwd();
   const log = options.log || fmt.log.plain;
   const error = options.error || fmt.log.plainError;
@@ -997,9 +999,9 @@ async function setupReview(_args, options = {}) {
     forgejoHome: resolveBootstrapForgejoHome(rootDir, options.forgejoHome),
   });
   if (!result.ok) {
-    error(fmt.status('FAIL', /** @type {string} */ (result.error || '')));
-    if (result.response) {
-      error(fmt.status('INFO', `Forgejo response: ${JSON.stringify(result.response)}`));
+    error(fmt.status('FAIL', /** @type {string} */ ((result as any).error || '')));
+    if ((result as any).response) {
+      error(fmt.status('INFO', `Forgejo response: ${JSON.stringify((result as any).response)}`));
     }
     exit(1);
     return;
@@ -1007,8 +1009,8 @@ async function setupReview(_args, options = {}) {
 }
 
 /** @param {string} rootDir @param {{verifyFn?: Function}} [options] @returns {Promise<{status: number}>} */
-async function runVerifyEnv(rootDir, options = {}) {
-  const verifyFn = options.verifyFn || /** @param {string} cwd @returns {{status: number}} */ ((/** @type {string} */ cwd) => spawnSync('node', ['workflow', 'verify-env'], {
+async function runVerifyEnv(rootDir: string, options: { verifyFn?: Function } = {}) {
+  const verifyFn = options.verifyFn || /** @param {string} cwd @returns {{status: number}} */ ((/** @type {string} */ cwd: string) => spawnSync('node', ['workflow', 'verify-env'], {
     cwd,
     stdio: 'inherit',
     encoding: 'utf8',
@@ -1017,7 +1019,7 @@ async function runVerifyEnv(rootDir, options = {}) {
 }
 
 /** @param {string} rootDir @param {{log?: Function}} [options] @returns {{productName: string, reviewProvider: string, tasksProvider: string, tasksStorage: string, missionsBaseDir: string, branchPrefix: string, primaryBranch: string, worktreePattern: string, verificationCommand: string, verificationDefaultArea: string, bootstrapReview: boolean, ownerLogin?: string, baseUrl?: string, reviewRepo?: string, reviewRemote?: string, ownerPassword?: string, agentPasswords?: Array<{user: string, password: string}>, agentUsers?: string[]}} */
-function buildNonInteractiveAnswers(rootDir, options = {}) {
+function buildNonInteractiveAnswers(rootDir: string, options: any = {}) {
   const log = options.log || fmt.log.plain;
   const env = process.env;
   const productName = env.WORKFLOW_SETUP_PRODUCT_NAME || defaultProductName(rootDir);
@@ -1069,7 +1071,7 @@ function buildNonInteractiveAnswers(rootDir, options = {}) {
  * @param {{rootDir?: string, log?: Function, error?: Function, exit?: Function, promptFn?: Function, forgejoHome?: string}} [options]
  * @returns {Promise<void>}
  */
-async function setupWizard(_args, options = {}) {
+async function setupWizard(_args: any[], options: any = {}) {
   const rootDir = options.rootDir || process.cwd();
   const log = options.log || fmt.log.plain;
   const error = options.error || fmt.log.plainError;
@@ -1079,8 +1081,8 @@ async function setupWizard(_args, options = {}) {
 
   const nonInteractive = (_args && _args.includes('--non-interactive')) || process.env.WORKFLOW_SETUP_NON_INTERACTIVE === '1';
   /** @type {{productName: string, ownerLogin: string, baseUrl: string, reviewRepo: string, reviewRemote: string, bootstrapReview: boolean, ownerPassword: string, agentPasswords: Array<{user: string, password: string}>, agentUsers: string[], tasksProvider: string, tasksStorage: string, missionsBaseDir: string, branchPrefix: string, primaryBranch: string, worktreePattern: string, verificationCommand: string, verificationDefaultArea: string}} */
-  const answers = nonInteractive
-    ? /** @type {{productName: string, ownerLogin: string, baseUrl: string, reviewRepo: string, reviewRemote: string, bootstrapReview: boolean, ownerPassword: string, agentPasswords: Array<{user: string, password: string}>, agentUsers: string[], tasksProvider: string, tasksStorage: string, missionsBaseDir: string, branchPrefix: string, primaryBranch: string, worktreePattern: string, verificationCommand: string, verificationDefaultArea: string}} */ (buildNonInteractiveAnswers(rootDir, { log }))
+  const answers: any = nonInteractive
+    ? /** @type {any} */ (buildNonInteractiveAnswers(rootDir, { log }))
     : await collectWizardAnswers(rootDir, { ...options, promptFn, log });
   const configPath = writeWorkflowConfig(rootDir, buildWorkflowConfig(answers));
   log(fmt.status('PASS', `Wrote ${configPath}`));
@@ -1109,9 +1111,9 @@ async function setupWizard(_args, options = {}) {
       forgejoHome,
     });
     if (!result.ok) {
-      error(fmt.status('FAIL', /** @type {string} */ (result.error || '')));
-      if (result.response) {
-        error(fmt.status('INFO', `Forgejo response: ${JSON.stringify(result.response)}`));
+      error(fmt.status('FAIL', /** @type {string} */ ((result as any).error || '')));
+      if ((result as any).response) {
+        error(fmt.status('INFO', `Forgejo response: ${JSON.stringify((result as any).response)}`));
       }
       exit(1);
       return;
@@ -1126,28 +1128,25 @@ async function setupWizard(_args, options = {}) {
   }
 }
 
-module.exports = setupReview;
-module.exports.setupReview = setupReview;
-module.exports.setupWizard = setupWizard;
-module.exports.apiRequest = apiRequest;
-module.exports.buildWorkflowConfig = buildWorkflowConfig;
-module.exports.collectWizardAnswers = collectWizardAnswers;
-module.exports.defaultProductName = defaultProductName;
-module.exports.defaultRepoSlug = defaultRepoSlug;
-module.exports.parseYesNo = parseYesNo;
-module.exports.runVerifyEnv = runVerifyEnv;
-module.exports.bootstrapReviewSurface = bootstrapReviewSurface;
-module.exports.collectSetupAnswers = collectSetupAnswers;
-module.exports.createToken = createToken;
-module.exports.ensureRepo = ensureRepo;
-module.exports.ensureReviewRemote = ensureReviewRemote;
-module.exports.evaluateReviewSetup = evaluateReviewSetup;
-module.exports.parseRepoSlug = parseRepoSlug;
-module.exports.promptLine = promptLine;
-module.exports.readConfiguredReviewRemote = readConfiguredReviewRemote;
-module.exports.suggestedForgejoUsers = suggestedForgejoUsers;
-module.exports.tokenFilePath = tokenFilePath;
-module.exports.writeToken = writeToken;
-module.exports.writeWorkflowConfig = writeWorkflowConfig;
-module.exports.resolveBootstrapForgejoHome = resolveBootstrapForgejoHome;
-module.exports.buildNonInteractiveAnswers = buildNonInteractiveAnswers;
+export { setupReview };
+export { setupWizard };
+export { apiRequest };
+export { buildWorkflowConfig };
+export { collectWizardAnswers };
+export { defaultProductName };
+export { defaultRepoSlug };
+export { parseYesNo };
+export { runVerifyEnv };
+export { bootstrapReviewSurface };
+export { collectSetupAnswers };
+export { createToken };
+export { ensureRepo };
+export { ensureReviewRemote };
+export { evaluateReviewSetup };
+export { parseRepoSlug };
+export { promptLine };
+export { tokenFilePath };
+export { writeToken };
+export { writeWorkflowConfig };
+export { resolveBootstrapForgejoHome };
+export { buildNonInteractiveAnswers };
