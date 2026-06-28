@@ -1,10 +1,12 @@
 ---
 id: TASK-1368
 title: 'TASK-1368: Mission 4 - Core utilities (mission-utils, verification)'
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-06-27 10:37'
-labels: []
+updated_date: '2026-06-27 22:56'
+labels:
+  - user_value
 dependencies: []
 priority: high
 ---
@@ -51,3 +53,4 @@ Convert the 2 core utility modules that handle mission lifecycle operations and 
 - [ ] #5 Docs updated to reflect any workflow or user-facing behavior change
 - [ ] #6 Bug-labeled missions include a red-to-green reproduction test that fails before the fix and passes after
 <!-- DOD:END -->
+

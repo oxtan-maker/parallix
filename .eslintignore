@@ -6,7 +6,5 @@
 # Per conversion: when you convert `<dir>/X.js` -> `<dir>/X.ts`, DELETE its
 # `!<dir>/X.js` line below (its compiled output must now be ignored, not linted).
 lib/core/*.js
-!lib/core/mission-utils.js
 !lib/core/nels.js
 !lib/core/subagent-limit.js
-!lib/core/verification.js

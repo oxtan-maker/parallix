@@ -1,15 +1,16 @@
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const fmt = require('./fmt');
-const { loadAdapterConfig, resolveTaskStorage } = require('./product-config');
+import * as fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import * as fmt from './fmt.js';
+import { loadAdapterConfig, resolveTaskStorage, isStandaloneWorkflowLayout } from './product-config.js';
+import * as gitModule from './git.js';
 
 /** @param {string} prefix */
-function normalizeBranchPrefix(prefix) {
+function normalizeBranchPrefix(prefix: string): string {
   if (typeof prefix !== 'string' || !prefix.trim()) {
     return 'mission/';
   }
-  return prefix.endsWith('/') ? prefix : `${prefix}/`;
+  return prefix.endsWith('/') ? prefix : prefix + '/';
 }
 
 function missionAdapterDefaults() {
@@ -20,68 +21,68 @@ function missionAdapterDefaults() {
   };
 }
 
-function resolveMissionAdapter(rootDir = process.cwd()) {
+function resolveMissionAdapter(rootDir: string = process.cwd()) {
   const adapters = loadAdapterConfig(rootDir);
-  const missions = adapters.missions || {};
+  const missions = (adapters.missions as Record<string, unknown>) || {};
   const defaults = missionAdapterDefaults();
   return {
     baseDir: typeof missions.baseDir === 'string' && missions.baseDir.trim()
       ? missions.baseDir
       : defaults.baseDir,
-    branchPrefix: normalizeBranchPrefix(missions.branchPrefix || defaults.branchPrefix),
+    branchPrefix: normalizeBranchPrefix(missions.branchPrefix as string || defaults.branchPrefix),
     worktreePattern: typeof missions.worktreePattern === 'string' && missions.worktreePattern.trim()
       ? missions.worktreePattern
       : defaults.worktreePattern,
   };
 }
 
-function missionBaseDir(rootDir = process.cwd()) {
+export function missionBaseDir(rootDir: string = process.cwd()): string {
   return path.resolve(rootDir, resolveMissionAdapter(rootDir).baseDir);
 }
 
-function missionUsesYearTier(rootDir = process.cwd()) {
+export function missionUsesYearTier(rootDir: string = process.cwd()): boolean {
   return resolveMissionAdapter(rootDir).baseDir !== missionAdapterDefaults().baseDir;
 }
 
-function missionBranchPrefix(rootDir = process.cwd()) {
+export function missionBranchPrefix(rootDir: string = process.cwd()): string {
   return resolveMissionAdapter(rootDir).branchPrefix;
 }
 
 /** @param {string} slug @param {string} [rootDir] */
-function missionBranchName(slug, rootDir = process.cwd()) {
-  return `${missionBranchPrefix(rootDir)}${slug}`;
+export function missionBranchName(slug: string, rootDir: string = process.cwd()): string {
+  return missionBranchPrefix(rootDir) + slug;
 }
 
 /** @param {string} slug @param {string} [rootDir] */
-function missionBranchRef(slug, rootDir = process.cwd()) {
-  return `refs/heads/${missionBranchName(slug, rootDir)}`;
+export function missionBranchRef(slug: string, rootDir: string = process.cwd()): string {
+  return 'refs/heads/' + missionBranchName(slug, rootDir);
 }
 
 /** @param {unknown} value */
-function isMissionSlugCandidate(value) {
+export function isMissionSlugCandidate(value: unknown): boolean {
   return typeof value === 'string' && /^(task|adhoc)-[a-z0-9][a-z0-9-]*$/i.test(value.trim());
 }
 
 /** @param {string} branch @param {string} [rootDir] */
-function extractSlugFromBranch(branch, rootDir = process.cwd()) {
+export function extractSlugFromBranch(branch: string, rootDir: string = process.cwd()): string | null {
   const prefix = missionBranchPrefix(rootDir);
   if (!branch || !branch.startsWith(prefix)) {return null;}
   return branch.slice(prefix.length).toLowerCase();
 }
 
 /** @param {string|Function} rootDirOrGitFn @param {Function|null} [maybeGitFn] */
-function getPrimaryBranch(rootDirOrGitFn = process.cwd(), maybeGitFn = null) {
-  const { git } = require('./git');
+export function getPrimaryBranch(rootDirOrGitFn: string | Function = process.cwd(), maybeGitFn: Function | null = null): string {
   const rootDir = typeof rootDirOrGitFn === 'function' ? process.cwd() : rootDirOrGitFn;
   /** @type {Function} */
-  const runner = typeof rootDirOrGitFn === 'function' ? rootDirOrGitFn : (maybeGitFn || git);
+  const runner = typeof rootDirOrGitFn === 'function' ? rootDirOrGitFn : (maybeGitFn || gitModule.git);
   const listLocalBranches = () => {
     const result = runner(['-C', rootDir, 'branch', '--list', '--format=%(refname:short)', 'main', 'master']);
-    return (result.stdout || '').split('\n').map((/** @type {string} */ b) => b.trim()).filter(Boolean);
+    return (result.stdout || '').split('\n').map((b: string) => b.trim()).filter(Boolean);
   };
 
   try {
-    const missions = loadAdapterConfig(rootDir).missions || {};
+    const config = loadAdapterConfig(rootDir);
+    const missions = (config.missions as Record<string, unknown>) || {};
     if (typeof missions.primaryBranch === 'string' && missions.primaryBranch.trim()) {
       const configured = missions.primaryBranch.trim();
       const branches = listLocalBranches();
@@ -107,22 +108,20 @@ function getPrimaryBranch(rootDirOrGitFn = process.cwd(), maybeGitFn = null) {
   );
 }
 
-function resolveMainRepo() {
+export function resolveMainRepo(): string {
   if (process.env.PRIMARY_WORKTREE) {return process.env.PRIMARY_WORKTREE;}
 
-  const { git, getCurrentBranch } = require('./git');
-  const { isStandaloneWorkflowLayout } = require('./product-config');
   const cwd = process.cwd();
-  const primaryBranch = getPrimaryBranch(process.cwd(), git);
+  const primaryBranch = getPrimaryBranch(process.cwd(), gitModule.git);
   try {
-    const lines = git(['worktree', 'list', '--porcelain']).stdout.split('\n');
-    const worktrees = [];
-    let current = null;
+    const lines = gitModule.git(['worktree', 'list', '--porcelain']).stdout.split('\n');
+    const worktrees: Array<{path: string; branch: string|null; bare: boolean}> = [];
+    let current: {path: string; branch: string|null; bare: boolean} | null = null;
 
     for (const line of lines) {
       if (line.startsWith('worktree ')) {
         if (current) {worktrees.push(current);}
-        current = { path: line.slice('worktree '.length).trim(), branch: /** @type {string|null} */(null), bare: false };
+        current = { path: line.slice('worktree '.length).trim(), branch: null, bare: false };
         continue;
       }
 
@@ -140,25 +139,21 @@ function resolveMainRepo() {
 
     if (current) {worktrees.push(current);}
 
-    const primaryWorktree = worktrees.find(worktree => !worktree.bare && worktree.branch === `refs/heads/${primaryBranch}`);
+    const primaryWorktree = worktrees.find(wt => !wt.bare && wt.branch === `refs/heads/${primaryBranch}`);
     if (primaryWorktree) {return primaryWorktree.path;}
-  } catch (error) {
+  } catch (_) {
     // ignore git errors, fall through to error
   }
 
   try {
-    const currentBranch = getCurrentBranch(cwd);
-    const toplevel = git(['-C', cwd, 'rev-parse', '--show-toplevel']);
+    const currentBranch = gitModule.getCurrentBranch(cwd);
+    const toplevel = gitModule.git(['-C', cwd, 'rev-parse', '--show-toplevel']);
     const repoRoot = (toplevel.stdout || '').trim();
     if (toplevel.status === 0 && repoRoot) {
       if (currentBranch === primaryBranch) {
         return repoRoot;
       }
 
-      // Fresh exported repos can already have a `.git` directory but still lack
-      // stable worktree metadata or a readable current branch. When draft runs
-      // from that standalone repo root, treat the current checkout as the
-      // primary repository so draft can create the first mission worktree.
       if (
         path.resolve(repoRoot) === path.resolve(cwd) &&
         isStandaloneWorkflowLayout(repoRoot) &&
@@ -177,12 +172,12 @@ function resolveMainRepo() {
   );
 }
 
-function getPrimaryWorktree() {
+export function getPrimaryWorktree(): string {
   return resolveMainRepo();
 }
 
 /** @param {string} slug @param {string} [mainRepo] */
-function conventionalWorktreePath(slug, mainRepo = getPrimaryWorktree()) {
+export function conventionalWorktreePath(slug: string, mainRepo: string = getPrimaryWorktree()): string {
   const projectName = path.basename(mainRepo);
   const pattern = resolveMissionAdapter(mainRepo).worktreePattern;
   const rendered = pattern
@@ -200,7 +195,7 @@ function conventionalWorktreePath(slug, mainRepo = getPrimaryWorktree()) {
  * worktree (`mission/<slug>` → `<repo>-<slug>`).
  */
 /** @param {string} baseBranch @param {string} [mainRepo] */
-function conventionalBaseWorktreePath(baseBranch, mainRepo = getPrimaryWorktree()) {
+export function conventionalBaseWorktreePath(baseBranch: string, mainRepo: string = getPrimaryWorktree()): string {
   const safeName = String(baseBranch).replace(/[\\/]+/g, '-');
   return conventionalWorktreePath(`base-${safeName}`, mainRepo);
 }
@@ -218,10 +213,9 @@ function conventionalBaseWorktreePath(baseBranch, mainRepo = getPrimaryWorktree(
  * @returns {string|null}
  */
 /** @param {string} [cwd] @param {{gitFn?: Function}} [options] */
-function detectLaunchBaseBranch(cwd = process.cwd(), options = {}) {
-  const { git } = require('./git');
+export function detectLaunchBaseBranch(cwd: string = process.cwd(), options: { gitFn?: Function } = {}): string | null {
   /** @type {Function} */
-  const runner = options.gitFn || git;
+  const runner = options.gitFn || gitModule.git;
   const result = runner(['-C', cwd, 'branch', '--show-current']);
   const branch = ((result && result.stdout) || '').trim();
   if (!branch) {
@@ -238,7 +232,7 @@ function detectLaunchBaseBranch(cwd = process.cwd(), options = {}) {
 }
 
 /** @param {string} content */
-function parseBaseBranchLine(content) {
+export function parseBaseBranchLine(content: string): string | null {
   if (!content) {return null;}
   const match = content.match(/^Base-Branch:\s*(\S+)\s*$/m);
   return match ? match[1].trim() : null;
@@ -251,9 +245,9 @@ function parseBaseBranchLine(content) {
  * is not on disk, falls back to reading it from the mission branch via
  * `git show <branch>:<path>`. Returns `null` when no `Base-Branch:` line exists
  * (every pre-existing mission), so callers fall back to the primary branch.
-  */
+ */
 /** @param {string} slug @param {string} [rootDir] @param {{gitFn?: Function}} [options] */
-function readRecordedBaseBranch(slug, rootDir = process.cwd(), options = {}) {
+export function readRecordedBaseBranch(slug: string, rootDir: string = process.cwd(), options: { gitFn?: Function | null } = {}): string | null {
   /** @type {Function | null} */
   const gitFn = options.gitFn ?? null;
   if (!slug) {return null;}
@@ -266,21 +260,20 @@ function readRecordedBaseBranch(slug, rootDir = process.cwd(), options = {}) {
     }
   }
 
-  const { git } = require('./git');
-  const runner = gitFn || git;
+  const runner = gitFn || gitModule.git;
   const branch = missionBranchName(slug, rootDir);
   const baseSlugMatch = slug.match(/^(task-\d+)/i);
   const baseSlug = baseSlugMatch ? baseSlugMatch[1].toLowerCase() : slug;
   const year = getMissionYear(slug, rootDir);
   const adapterBaseDir = (path.relative(rootDir, missionBaseDir(rootDir)) || '.').split(path.sep).join('/');
-  const paths = Array.from(new Set([
+  const files = Array.from(new Set([
     path.posix.join(adapterBaseDir, year, slug, 'MISSION.md'),
     path.posix.join(adapterBaseDir, year, baseSlug, 'MISSION.md')
   ]));
 
-  for (const p of paths) {
+  for (const f of files) {
     try {
-      const res = runner(['-C', rootDir, 'show', `${branch}:${p}`]);
+      const res = runner(['-C', rootDir, 'show', `${branch}:${f}`]);
       if (res && res.status === 0) {
         const parsed = parseBaseBranchLine(res.stdout);
         if (parsed) {return parsed;}
@@ -300,19 +293,19 @@ function readRecordedBaseBranch(slug, rootDir = process.cwd(), options = {}) {
  * (the byte-identical legacy behaviour for every pre-existing mission).
  */
 /** @param {string} slug @param {string} [rootDir] @param {{gitFn?: Function}} [options] */
-function resolveMissionBaseBranch(slug, rootDir = process.cwd(), options = {}) {
+export function resolveMissionBaseBranch(slug: string, rootDir: string = process.cwd(), options: { gitFn?: Function | null } = {}): string {
   /** @type {Function | null} */
   const gitFn = options.gitFn ?? null;
-  const recorded = readRecordedBaseBranch(slug, rootDir, { gitFn: /** @type {Function|undefined} */(gitFn) });
+  const recorded = readRecordedBaseBranch(slug, rootDir, { gitFn: gitFn as Function | undefined });
   if (recorded) {return recorded;}
-  return gitFn ? getPrimaryBranch(rootDir, gitFn) : getPrimaryBranch(rootDir);
+  return gitFn ? getPrimaryBranch(rootDir, gitFn as Function) : getPrimaryBranch(rootDir);
 }
 
 /** @param {string} branchRef @param {Function} runner @param {string} mainRepo */
-function findWorktreeForBranch(branchRef, runner, mainRepo) {
+function findWorktreeForBranch(branchRef: string, runner: Function, mainRepo: string): string | null {
   const result = runner(['-C', mainRepo, 'worktree', 'list', '--porcelain']);
   const lines = ((result && result.stdout) || '').split('\n');
-  let current = null;
+  let current: { path: string; branch: string | null } | null = null;
   for (const line of lines) {
     if (line.startsWith('worktree ')) {
       current = { path: line.slice('worktree '.length).trim(), branch: null };
@@ -339,15 +332,13 @@ function findWorktreeForBranch(branchRef, runner, mainRepo) {
  * error when the recorded base does not exist locally.
  */
 /** @param {string} slug @param {{rootDir?: string, gitFn?: Function}} [options] */
-function resolveBaseWorktree(slug, options = {}) {
-  /** @type {string} */
+export function resolveBaseWorktree(slug: string, options: { rootDir?: string; gitFn?: Function | null } = {}): string {
   const rootDir = options.rootDir || process.cwd();
   /** @type {Function | null} */
   const gitFn = options.gitFn ?? null;
-  const { git } = require('./git');
-  const runner = gitFn || git;
-  const base = resolveMissionBaseBranch(slug, rootDir, { gitFn: /** @type {Function|undefined} */(gitFn) });
-  const primary = gitFn ? getPrimaryBranch(rootDir, gitFn) : getPrimaryBranch(rootDir);
+  const runner = gitFn || gitModule.git;
+  const base = resolveMissionBaseBranch(slug, rootDir, { gitFn: gitFn as Function | undefined });
+  const primary = gitFn ? getPrimaryBranch(rootDir, gitFn as Function) : getPrimaryBranch(rootDir);
   if (base === primary) {
     return getPrimaryWorktree();
   }
@@ -371,20 +362,18 @@ function resolveBaseWorktree(slug, options = {}) {
   if (!addResult || addResult.status !== 0) {
     const detail = addResult ? [addResult.stdout, addResult.stderr].filter(Boolean).join('\n').trim() : '';
     throw new Error(
-      `Could not create base worktree for base branch '${base}' at ${worktreePath}${detail ? `: ${detail}` : '.'}`
+      `Could not create base worktree for base branch '${base}' at ${worktreePath}${detail ? ': ' + detail : '.'}`
     );
   }
   return worktreePath;
 }
 
 /** @param {string|undefined} [slug] @param {string} [rootDir] */
-function getMissionYear(slug = undefined, rootDir = process.cwd()) {
+export function getMissionYear(slug: string | undefined = undefined, rootDir: string = process.cwd()): string {
   if (process.env.MISSION_YEAR_OVERRIDE) {
     return process.env.MISSION_YEAR_OVERRIDE;
   }
 
-  // Flat default layout has no year tier. Keep returning the current year for
-  // callers that use it as metadata, but do not scan it as a path component.
   const hasExplicitConfig = fs.existsSync(path.join(rootDir, 'workflow.config.json'));
   if (slug && (missionUsesYearTier(rootDir) || (!hasExplicitConfig && fs.existsSync(path.join(rootDir, 'docs', 'missions'))))) {
     const baseDir = missionUsesYearTier(rootDir)
@@ -401,9 +390,8 @@ function getMissionYear(slug = undefined, rootDir = process.cwd()) {
       }
       const years = fs.readdirSync(baseDir)
         .filter(d => /^\d{4}$/.test(d))
-        .sort((/** @type {string} */ a, /** @type {string} */ b) => b.localeCompare(a)); // Descending order (newest first)
+        .sort((a: string, b: string) => b.localeCompare(a));
 
-      /** @type {string} */
       const slugStr = slug;
       const candidateSlugs = [slugStr.toLowerCase()];
       const baseTaskMatch = slugStr.match(/^(task-\d+)/i);
@@ -426,8 +414,7 @@ function getMissionYear(slug = undefined, rootDir = process.cwd()) {
 }
 
 /** @param {string} slug @param {string} [rootDir] @param {{missionPath?: string}} options */
-function findMissionDir(slug, rootDir = process.cwd(), options = {}) {
-  /** @type {{missionPath?: string}} */
+export function findMissionDir(slug: string, rootDir: string = process.cwd(), options: { missionPath?: string } = {}): string | null {
   const opts = options;
   if (opts.missionPath && fs.existsSync(opts.missionPath)) {
     return fs.statSync(opts.missionPath).isDirectory() ? opts.missionPath : path.dirname(opts.missionPath);
@@ -436,7 +423,6 @@ function findMissionDir(slug, rootDir = process.cwd(), options = {}) {
   const missionDir = missionDirForSlug(rootDir, slug);
   if (fs.existsSync(missionDir)) {return missionDir;}
 
-  // Hardening: Try base task ID if slug has a suffix (e.g., task-1004-modern -> task-1004)
   const baseTaskMatch = slug.match(/^(task-\d+)/i);
   if (baseTaskMatch) {
     const baseSlug = baseTaskMatch[1].toLowerCase();
@@ -444,8 +430,6 @@ function findMissionDir(slug, rootDir = process.cwd(), options = {}) {
     if (fs.existsSync(baseMissionDir)) {return baseMissionDir;}
   }
 
-  // Read compatibility during the TASK-1243 migration window. New no-config
-  // missions are created flat, but existing year-tier history remains readable.
   const legacyBaseDir = path.join(rootDir, 'docs', 'missions');
   if (!missionUsesYearTier(rootDir) && !fs.existsSync(path.join(rootDir, 'workflow.config.json')) && fs.existsSync(legacyBaseDir)) {
     const year = getMissionYear(slug, rootDir);
@@ -461,19 +445,17 @@ function findMissionDir(slug, rootDir = process.cwd(), options = {}) {
 }
 
 /** @param {string} slug @param {{cwd?: string, gitFn?: Function}} [options] */
-function resolveWorktree(slug, options = {}) {
-  /** @type {string} */
+export function resolveWorktree(slug: string, options: { cwd?: string; gitFn?: Function | null } = {}): string | null {
   const cwd = options.cwd || process.cwd();
   /** @type {Function | null} */
   const gitFn = options.gitFn ?? null;
-  const { git, getCurrentBranch } = require('./git');
-  const runGit = gitFn || git;
+  const runGit = gitFn || gitModule.git;
   const branchRef = missionBranchRef(slug, cwd);
 
   try {
     const lines = runGit(['worktree', 'list', '--porcelain']).stdout.split('\n');
-    const matches = [];
-    let current = null;
+    const matches: Array<{ path: string; branch: string | null; prunable: boolean }> = [];
+    let current: { path: string; branch: string | null; prunable: boolean } | null = null;
 
     for (const line of lines) {
       if (line.startsWith('worktree ')) {
@@ -493,9 +475,9 @@ function resolveWorktree(slug, options = {}) {
 
     if (current && current.branch === branchRef) {matches.push(current);}
 
-    const liveMatches = matches.filter(match => !match.prunable);
+    const liveMatches = matches.filter(m => !m.prunable);
     if (liveMatches.length > 0) {
-      const cwdMatch = liveMatches.find(match => cwd === match.path || cwd.startsWith(`${match.path}/`));
+      const cwdMatch = liveMatches.find(m => cwd === m.path || cwd.startsWith(m.path + '/'));
       if (cwdMatch) {return cwdMatch.path;}
       return liveMatches[0].path;
     }
@@ -504,7 +486,7 @@ function resolveWorktree(slug, options = {}) {
   }
 
   try {
-    if (getCurrentBranch(cwd) === missionBranchName(slug, cwd)) {
+    if (gitModule.getCurrentBranch(cwd) === missionBranchName(slug, cwd)) {
       return cwd;
     }
   } catch (_) {
@@ -515,7 +497,7 @@ function resolveWorktree(slug, options = {}) {
 }
 
 /** @param {string} missionDir */
-function findCheckpoints(missionDir) {
+export function findCheckpoints(missionDir: string): string[] {
   const files = fs.readdirSync(missionDir);
   return files
     .filter(f => /^(CHECKPOINT_|CP-\d+).*\.md$/i.test(f))
@@ -524,7 +506,7 @@ function findCheckpoints(missionDir) {
 }
 
 /** @param {string} a @param {string} b */
-function compareCheckpointFiles(a, b) {
+export function compareCheckpointFiles(a: string, b: string): number {
   const aOrder = checkpointOrder(a);
   const bOrder = checkpointOrder(b);
 
@@ -536,7 +518,7 @@ function compareCheckpointFiles(a, b) {
 }
 
 /** @param {string} filename */
-function checkpointOrder(filename) {
+export function checkpointOrder(filename: string): number {
   const numericMatch = filename.match(/(?:CP-|CHECKPOINT_)(\d+)/i);
   if (numericMatch) {
     return Number(numericMatch[1]);
@@ -546,13 +528,13 @@ function checkpointOrder(filename) {
 }
 
 /** @param {string} filePath */
-function getFirstLine(filePath) {
+export function getFirstLine(filePath: string): string {
   const content = fs.readFileSync(filePath, 'utf8');
   return content.split('\n')[0].replace(/^#+\s*/, '').trim();
 }
 
 /** @param {string} [slug] */
-function missionTitle(slug) {
+export function missionTitle(slug: string | undefined): string | null {
   if (!slug) {return null;}
   const missionDir = findMissionDir(slug);
   if (!missionDir) {return null;}
@@ -564,29 +546,24 @@ function missionTitle(slug) {
   return firstLine.replace(/^#\s*Mission:\s*/i, '').trim() || null;
 }
 
-const SUPPORTED_VERIFY_AREAS = new Set(['docs', 'workflow', 'web', 'server', 'auth', 'android', 'k8s', 'deps', 'all']);
+export const SUPPORTED_VERIFY_AREAS = new Set(['docs', 'workflow', 'web', 'server', 'auth', 'android', 'k8s', 'deps', 'all']);
 
 /** @param {string} [area] */
-function normalizeVerifyArea(area) {
+export function normalizeVerifyArea(area: string | undefined): string {
   if (!area) {return 'docs';}
   if (area === 'auth-server') {return 'auth';}
   return SUPPORTED_VERIFY_AREAS.has(area) ? area : area;
 }
 
 /** @param {string} content */
-function detectMissionAreaFromContent(content) {
-  // Capture the area argument after a verification-script invocation. Matches only
-  // scripts with recognized extensions (.sh, .bash, .py, .rb) or bare executables
-  // (no dots) referenced via `./` or `../`. The area argument must sit at end-of-line
-  // to prevent prose-matched paths (e.g. "run ./scripts/deploy.sh server before merge")
-  // from being mistaken for gate invocations. Falls back to `docs` when none found.
+export function detectMissionAreaFromContent(content: string): string {
   const gateMatch = content.match(
     /(?:^|\s)(?:\.{1,2}\/[\w.\/-]+\.(?:sh|bash|py|rb)|\.{1,2}\/[a-z][\w-]*)\s+([a-zA-Z0-9_-]+)\s*(?:$|\n)/m
   );
   return normalizeVerifyArea(gateMatch ? gateMatch[1] : 'docs');
 }
 
-function findMissionArea(/** @type {string} */ missionDir) {
+export function findMissionArea(missionDir: string): string {
   const missionPath = path.join(missionDir, 'MISSION.md');
   if (!fs.existsSync(missionPath)) {return 'docs';}
 
@@ -595,21 +572,18 @@ function findMissionArea(/** @type {string} */ missionDir) {
 }
 
 /** @param {{commandRunner?: Function}} [options] */
-function graphifyAvailable(options = {}) {
-  /** @type {Function | null} */
+export function graphifyAvailable(options: { commandRunner?: Function | null } = {}): boolean {
   const commandRunner = options.commandRunner ?? null;
-  const run = commandRunner || require('./git').run;
-  return probeGraphifyAvailability({ commandRunner: run }).available;
+  const cmdRunner = commandRunner || gitModule.run;
+  return probeGraphifyAvailability({ commandRunner: cmdRunner }).available;
 }
 
 /** @returns {string[]} */
-function graphifyCommandCandidates() {
-  /** @type {string[]} */
-  const candidates = [];
-  const seen = new Set();
+export function graphifyCommandCandidates(): string[] {
+  const candidates: string[] = [];
+  const seen = new Set<string>();
 
-  /** @param {string} candidate */
-  const pushCandidate = candidate => {
+  const pushCandidate = (candidate: string) => {
     if (!candidate || seen.has(candidate)) {return;}
     seen.add(candidate);
     candidates.push(candidate);
@@ -623,21 +597,19 @@ function graphifyCommandCandidates() {
 }
 
 /** @param {{commandRunner?: Function}} [options] */
-function probeGraphifyAvailability(options = {}) {
-  /** @type {Function | null} */
+export function probeGraphifyAvailability(options: { commandRunner?: Function | null } = {}): { available: boolean; command?: string; status?: number | null; reason?: string; error?: unknown } {
   const commandRunner = options.commandRunner ?? null;
-  const run = commandRunner || require('./git').run;
+  const cmdRunner = commandRunner || gitModule.run;
   for (const command of graphifyCommandCandidates()) {
     try {
-      const result = run(command, ['--help']);
+      const result = cmdRunner(command, ['--help']);
       return {
         available: result.status !== null && result.status !== undefined,
         command,
         status: result.status ?? null
       };
-    } catch (/** @type {unknown} */ error) {
-      /** @type {Error & {code?: string}} */
-      const e = /** @type {Error & {code?: string}} */(error);
+    } catch (error: unknown) {
+      const e = error as Error & { code?: string };
       if (e && e.code === 'ENOENT') {
         continue;
       }
@@ -656,39 +628,34 @@ function probeGraphifyAvailability(options = {}) {
 /**
  * @param {{rootDir?: string, commandRunner?: Function, log?: Function, startMessage?: string, failureHint?: string}} [options]
  */
-function updateGraphifyKnowledgeGraph(options = {}) {
-  /** @type {string} */
+/** @param {{rootDir?: string, commandRunner?: Function, log?: Function, startMessage?: string, failureHint?: string}} [options] */
+export function updateGraphifyKnowledgeGraph(options: { rootDir?: string; commandRunner?: Function; log?: Function; startMessage?: string; failureHint?: string } = {}): { updated: boolean; skipped: boolean; reason?: string; status?: number } {
   const rootDir = options.rootDir || process.cwd();
-  /** @type {Function | undefined} */
   const commandRunner = options.commandRunner;
-  /** @type {Function} */
-  const log = options.log || fmt.log.plain;
-  /** @type {string} */
+  const logFn = options.log || fmt.log.plain;
   const startMessage = options.startMessage || 'Updating graphify knowledge graph...';
-  /** @type {string} */
   const failureHint = options.failureHint || 'Continuing without blocking workflow.';
-  /** @param {string} command @param {string[]} args @param {{stdio?: string}} [opts] */
-  const run = commandRunner || ((/** @type {string} */ command, /** @type {string[]} */ args, /** @type {{stdio?: string}} */ opts) => require('./git').run(command, args, opts));
-  const probe = probeGraphifyAvailability({ commandRunner: run });
+  const cmdRunner = commandRunner || gitModule.run;
+  const probe = probeGraphifyAvailability({ commandRunner: cmdRunner });
   if (!probe.available) {
     if (probe.reason === 'missing-command') {
-      log(fmt.status('WARN', 'graphify not found in PATH. Skipping knowledge graph update.'));
+      logFn(fmt.status('WARN', 'graphify not found in PATH. Skipping knowledge graph update.'));
       return { updated: false, skipped: true, reason: 'missing-command' };
     }
 
-    const probeError = probe.error && typeof probe.error === 'object' && 'message' in probe.error ? /** @type{{message:string}} */(probe.error).message : 'unknown probe failure';
-    log(fmt.status('WARN', `graphify probe failed (${probeError}). Skipping knowledge graph update.`));
+    const probeError = probe.error && typeof probe.error === 'object' && 'message' in probe.error ? (probe.error as {message:string}).message : 'unknown probe failure';
+    logFn(fmt.status('WARN', `graphify probe failed (${probeError}). Skipping knowledge graph update.`));
     return { updated: false, skipped: true, reason: 'probe-failed' };
   }
 
-  log(fmt.status('INFO', startMessage));
-  const result = run(probe.command, ['update', '.'], {
+  logFn(fmt.status('INFO', startMessage));
+  const result = cmdRunner(probe.command!, ['update', '.'], {
     cwd: rootDir,
     stdio: 'inherit'
   });
 
   if (result.status !== 0) {
-    log(fmt.status('WARN', `graphify update failed with status ${result.status}. ${failureHint}`));
+    logFn(fmt.status('WARN', `graphify update failed with status ${result.status}. ${failureHint}`));
     return { updated: false, skipped: true, reason: 'update-failed', status: result.status };
   }
 
@@ -696,13 +663,13 @@ function updateGraphifyKnowledgeGraph(options = {}) {
 }
 
 /** @param {string} rootDir @param {string} slug */
-function missionPathForSlug(rootDir, slug) {
+export function missionPathForSlug(rootDir: string, slug: string): string {
   return path.join(missionDirForSlug(rootDir, slug), 'MISSION.md');
 }
 
 /** @param {string} rootDir @param {string} slug */
-function missionDirForSlug(rootDir, slug) {
-  const parts = [missionBaseDir(rootDir)];
+export function missionDirForSlug(rootDir: string, slug: string): string {
+  const parts: string[] = [missionBaseDir(rootDir)];
   if (missionUsesYearTier(rootDir)) {
     parts.push(getMissionYear(slug, rootDir));
   }
@@ -721,16 +688,14 @@ function missionDirForSlug(rootDir, slug) {
  * @returns {string|null}
  */
 /** @param {string} [slugCandidate] */
-function inferSlug(slugCandidate) {
-  if (isMissionSlugCandidate(slugCandidate)) {
-    return /** @type{string} */(slugCandidate).toLowerCase();
+export function inferSlug(slugCandidate: string | undefined): string | null {
+  if (slugCandidate && isMissionSlugCandidate(slugCandidate)) {
+    return slugCandidate.toLowerCase();
   }
-
-  const { git, getCurrentBranch } = require('./git');
 
   // 1. Check branch
   try {
-    const branch = getCurrentBranch();
+    const branch = gitModule.getCurrentBranch();
     const fromBranch = extractSlugFromBranch(branch);
     if (fromBranch) {return fromBranch;}
   } catch (_) {
@@ -748,8 +713,8 @@ function inferSlug(slugCandidate) {
 
   // 3. Check worktree registry
   try {
-    const lines = git(['worktree', 'list', '--porcelain']).stdout.split('\n');
-    let currentPath = null;
+    const lines = gitModule.git(['worktree', 'list', '--porcelain']).stdout.split('\n');
+    let currentPath: string | null = null;
     for (const line of lines) {
       if (line.startsWith('worktree ')) {
         currentPath = line.slice('worktree '.length).trim();
@@ -780,19 +745,17 @@ function inferSlug(slugCandidate) {
  * Returns an array of relative file paths (deduped).
  */
 /** @param {string} output */
-function parseConflictFilesFromMergeOutput(output) {
-  const seen = new Set();
-  const files = [];
+export function parseConflictFilesFromMergeOutput(output: string): string[] {
+  const seen = new Set<string>();
+  const files: string[] = [];
   for (const line of output.split('\n')) {
     if (!line.startsWith('CONFLICT')) {continue;}
-    // "Merge conflict in <file>" pattern (content, add/add, rename/rename, etc.)
     const inMatch = line.match(/Merge conflict in (.+)$/);
     if (inMatch) {
       const f = inMatch[1].trim();
       if (f && !seen.has(f)) { seen.add(f); files.push(f); }
       continue;
     }
-    // "CONFLICT (modify/delete): <file> deleted in ..." — file is right after the colon
     const colonIdx = line.indexOf(':');
     if (colonIdx !== -1) {
       const rest = line.slice(colonIdx + 1).trim();
@@ -814,12 +777,11 @@ function parseConflictFilesFromMergeOutput(output) {
  * @param {{ gitRunner?: Function }} [options]
  * @returns {string[]} Relative paths of conflicting files (empty if no conflicts).
  */
-function getConflictFiles(rootDir, branch, { gitRunner } = {}) {
-  const { git: defaultGit } = require('./git');
-  const runner = gitRunner || defaultGit;
+/** @param {string} rootDir @param {string} branch @param {{gitRunner?: Function}} [options] */
+export function getConflictFiles(rootDir: string, branch: string, options: { gitRunner?: Function } = {}): string[] {
+  const runner = options.gitRunner || gitModule.git;
 
   const merge = runner(['-C', rootDir, 'merge', '--no-commit', '--no-ff', branch]);
-  // Always clean up the in-progress merge (ignore abort errors for clean merges)
   runner(['-C', rootDir, 'merge', '--abort']);
 
   if (merge.status === 0) {return [];}
@@ -828,9 +790,6 @@ function getConflictFiles(rootDir, branch, { gitRunner } = {}) {
   const conflictFiles = parseConflictFilesFromMergeOutput(output);
 
   if (conflictFiles.length === 0) {
-    // Merge failed but no CONFLICT lines found — a non-conflict failure (dirty worktree,
-    // unfinished rebase, locked index, etc.). Surface the raw failure rather than returning
-    // an empty list, which callers would interpret as "no conflicts / merge was clean".
     const summary = output.slice(0, 500) || '(no output)';
     throw new Error(`git merge exited ${merge.status} with no CONFLICT lines — raw output:\n${summary}`);
   }
@@ -839,43 +798,36 @@ function getConflictFiles(rootDir, branch, { gitRunner } = {}) {
 }
 
 /** @param {string} rootDir @param {Function} [gitRunner] */
-function findLastNonNoiseCommit(rootDir, gitRunner) {
-  if (!gitRunner) {gitRunner = require('./git').git;}
+export function findLastNonNoiseCommit(rootDir: string, gitRunner?: Function): string | null {
+  const runner = gitRunner || gitModule.git;
 
-  const currentFullRef = gitRunner(['-C', rootDir, 'rev-parse', '--symbolic-full-name', 'HEAD'], { stdio: 'pipe' }).stdout.trim();
+  const currentFullRef = runner(['-C', rootDir, 'rev-parse', '--symbolic-full-name', 'HEAD'], { stdio: 'pipe' }).stdout.trim();
 
   let commit = 'HEAD';
-  // safety break after 100 commits
   for (let i = 0; i < 100; i++) {
-    const commitSha = gitRunner(['-C', rootDir, 'rev-parse', commit], { stdio: 'pipe' }).stdout.trim();
+    const commitSha = runner(['-C', rootDir, 'rev-parse', commit], { stdio: 'pipe' }).stdout.trim();
 
-    // Safety: If any OTHER branch (local or remote) contains this commit, it's a branch-off point.
-    // We must stop here to avoid rewriting history that other branches depend on.
-    const branchesContaining = gitRunner(['-C', rootDir, 'branch', '-a', '--contains', commitSha, '--format=%(refname)'], { stdio: 'pipe' })
+    const branchesContaining = runner(['-C', rootDir, 'branch', '-a', '--contains', commitSha, '--format=%(refname)'], { stdio: 'pipe' })
       .stdout.trim().split('\n').filter(Boolean);
 
-    // Safety: If this commit is already published to ANY remote, we MUST NOT amend it.
-    const isShared = branchesContaining.some((/** @type {string} */ b) => b.startsWith('refs/remotes/'));
+    const isShared = branchesContaining.some((b: string) => b.startsWith('refs/remotes/'));
     if (isShared) {
       return null;
     }
 
-    // Safety: If any OTHER local branch contains this commit, it's the branch-off point.
-    // We must return null (not the commit) so the caller does not amend a commit another
-    // branch depends on — returning the commit here caused squash to rewrite it.
-    const otherLocalBranches = branchesContaining.filter((/** @type {string} */ b) => b !== currentFullRef && b.startsWith('refs/heads/'));
+    const otherLocalBranches = branchesContaining.filter((b: string) => b !== currentFullRef && b.startsWith('refs/heads/'));
     if (otherLocalBranches.length > 0) {
       return null;
     }
 
-    const log = gitRunner(['-C', rootDir, 'log', '-1', '--format=%s', commit], { stdio: 'pipe' });
-    if (log.status !== 0) {return null;}
-    const msg = log.stdout.trim();
+    const logResult = runner(['-C', rootDir, 'log', '-1', '--format=%s', commit], { stdio: 'pipe' });
+    if (logResult.status !== 0) {return null;}
+    const msg = logResult.stdout.trim();
 
-    const diff = gitRunner(['-C', rootDir, 'diff-tree', '--no-commit-id', '--name-only', '-r', commit], { stdio: 'pipe' });
-    if (diff.status !== 0) {return null;}
+    const diffResult = runner(['-C', rootDir, 'diff-tree', '--no-commit-id', '--name-only', '-r', commit], { stdio: 'pipe' });
+    if (diffResult.status !== 0) {return null;}
 
-    const files = diff.stdout.trim().split('\n').filter(Boolean);
+    const files = diffResult.stdout.trim().split('\n').filter(Boolean);
     if (files.length > 0) {
       let isNoiseFiles = true;
       for (const file of files) {
@@ -885,14 +837,12 @@ function findLastNonNoiseCommit(rootDir, gitRunner) {
         }
       }
 
-      // Learnings from manual cleanup: check for automated/grooming message patterns
       const isNoiseMsg = /^(Create task|Update task|backlog|assign|fixes|backlig|housekeeping|Archive task|fixing tasks|new mission|added new backlog task|docs: move|mission changes|random changes|new\/updated mission|task updates)/i.test(msg);
 
       if (!isNoiseFiles || !isNoiseMsg) {
         return commit;
       }
     } else {
-      // Empty commit (e.g. from a merge or manual empty commit) - stop here
       return commit;
     }
     commit = `${commit}^`;
@@ -901,32 +851,30 @@ function findLastNonNoiseCommit(rootDir, gitRunner) {
 }
 
 /** @param {string} rootDir @param {Function} [gitRunner] */
-function squashTrailingBacklogNoiseIntoPreviousMission(rootDir, gitRunner) {
-  if (!gitRunner) {gitRunner = require('./git').git;}
+export function squashTrailingBacklogNoiseIntoPreviousMission(rootDir: string, gitRunner?: Function): boolean {
+  const runner = gitRunner || gitModule.git;
 
-  // Pattern violation fix: destructive history rewrite without a cleanliness gate.
-  // Refuse to squash if the index or worktree is dirty to avoid absorbing unrelated changes.
-  const status = gitRunner(['-C', rootDir, 'status', '--porcelain']).stdout.trim();
+  const status = runner(['-C', rootDir, 'status', '--porcelain']).stdout.trim();
   if (status) {
     fmt.log.warn(`Skipping noise squash in ${rootDir}: worktree is not clean.`);
     return false;
   }
 
-  const nonNoiseCommit = findLastNonNoiseCommit(rootDir, gitRunner);
+  const nonNoiseCommit = findLastNonNoiseCommit(rootDir, runner);
   if (!nonNoiseCommit) {return false;}
 
-  const headSha = gitRunner(['-C', rootDir, 'rev-parse', 'HEAD']).stdout.trim();
-  const baseSha = gitRunner(['-C', rootDir, 'rev-parse', nonNoiseCommit]).stdout.trim();
+  const headSha = runner(['-C', rootDir, 'rev-parse', 'HEAD']).stdout.trim();
+  const baseSha = runner(['-C', rootDir, 'rev-parse', nonNoiseCommit]).stdout.trim();
 
   if (headSha !== baseSha) {
     fmt.log.info(`Squashing trailing backlog noise into ${baseSha.substring(0, 7)}...`);
-    const date = gitRunner(['-C', rootDir, 'log', '-1', '--format=%aD', baseSha]).stdout.trim();
-    const resetResult = gitRunner(['-C', rootDir, 'reset', '--soft', baseSha]);
+    const date = runner(['-C', rootDir, 'log', '-1', '--format=%aD', baseSha]).stdout.trim();
+    const resetResult = runner(['-C', rootDir, 'reset', '--soft', baseSha]);
     if (resetResult.status !== 0) {
       fmt.log.fail(`Failed to reset to ${baseSha}: ${resetResult.stderr}`);
       return false;
     }
-    const commitResult = gitRunner(['-C', rootDir, 'commit', '--amend', '--no-edit', '--date', date]);
+    const commitResult = runner(['-C', rootDir, 'commit', '--amend', '--no-edit', '--date', date]);
     if (commitResult.status !== 0) {
       fmt.log.fail(`Failed to amend commit: ${commitResult.stderr}`);
       return false;
@@ -937,25 +885,24 @@ function squashTrailingBacklogNoiseIntoPreviousMission(rootDir, gitRunner) {
 }
 
 /** @param {string} rootDir @param {Function} [gitRunner] */
-function softResetTrailingBacklogNoise(rootDir, gitRunner) {
-  if (!gitRunner) {gitRunner = require('./git').git;}
+export function softResetTrailingBacklogNoise(rootDir: string, gitRunner?: Function): boolean {
+  const runner = gitRunner || gitModule.git;
 
-  // Refuse to reset if the index or worktree is dirty.
-  const status = gitRunner(['-C', rootDir, 'status', '--porcelain']).stdout.trim();
+  const status = runner(['-C', rootDir, 'status', '--porcelain']).stdout.trim();
   if (status) {
     fmt.log.warn(`Skipping noise reset in ${rootDir}: worktree is not clean.`);
     return false;
   }
 
-  const nonNoiseCommit = findLastNonNoiseCommit(rootDir, gitRunner);
+  const nonNoiseCommit = findLastNonNoiseCommit(rootDir, runner);
   if (!nonNoiseCommit) {return false;}
 
-  const headSha = gitRunner(['-C', rootDir, 'rev-parse', 'HEAD']).stdout.trim();
-  const baseSha = gitRunner(['-C', rootDir, 'rev-parse', nonNoiseCommit]).stdout.trim();
+  const headSha = runner(['-C', rootDir, 'rev-parse', 'HEAD']).stdout.trim();
+  const baseSha = runner(['-C', rootDir, 'rev-parse', nonNoiseCommit]).stdout.trim();
 
   if (headSha !== baseSha) {
     fmt.log.info(`Resetting trailing backlog noise back to ${baseSha.substring(0, 7)} to include in the integration...`);
-    const resetResult = gitRunner(['-C', rootDir, 'reset', '--soft', baseSha]);
+    const resetResult = runner(['-C', rootDir, 'reset', '--soft', baseSha]);
     if (resetResult.status !== 0) {
       fmt.log.fail(`Failed to reset to ${baseSha}: ${resetResult.stderr}`);
       return false;
@@ -966,40 +913,38 @@ function softResetTrailingBacklogNoise(rootDir, gitRunner) {
 }
 
 /** @param {string} slug @param {string} [rootDir] @param {Function|null} [gitRunner] */
-function findMissionDocInBranches(/** @type {string} */ slug, /** @type {string} */ rootDir = process.cwd(), /** @type {Function|null} */ gitRunner = null) {
-  if (!gitRunner) {gitRunner = require('./git').git;}
-  /** @type {{branch: string, path: string}[]} */
-  const candidates = [];
+export function findMissionDocInBranches(slug: string, rootDir: string = process.cwd(), gitRunner?: Function): Array<{ branch: string; path: string }> {
+  const runner = gitRunner || gitModule.git;
+  const candidates: Array<{ branch: string; path: string }> = [];
 
   const baseSlugMatch = slug.match(/^(task-\d+)/i);
   const baseSlug = baseSlugMatch ? baseSlugMatch[1].toLowerCase() : slug;
-  const paths = [
+  const files = [
     path.relative(rootDir, missionPathForSlug(rootDir, slug)).split(path.sep).join('/'),
     path.relative(rootDir, missionPathForSlug(rootDir, baseSlug)).split(path.sep).join('/')
   ];
-  const uniquePaths = Array.from(new Set(paths));
+  const uniquePaths = Array.from(new Set(files));
 
   let branchResult;
   try {
-    branchResult = gitRunner(['-C', rootDir, 'branch', '-a', '--format=%(refname:short)']);
+    branchResult = runner(['-C', rootDir, 'branch', '-a', '--format=%(refname:short)']);
     if (branchResult.status !== 0) {return candidates;}
   } catch (e) {
     return candidates;
   }
 
-  /** @param {string} b */
   const branches = branchResult.stdout.trim().split('\n')
     .filter(Boolean)
-    .filter((/** @type {string} */ b) => !b.includes('HEAD'))
-    .filter((/** @type {string} */ b) => b.endsWith(baseSlug) || b.includes(`/${baseSlug}-`) || b.includes(`/${baseSlug}/`));
+    .filter((b: string) => !b.includes('HEAD'))
+    .filter((b: string) => b.endsWith(baseSlug) || b.includes(`/${baseSlug}-`) || b.includes(`/${baseSlug}/`));
 
   for (const branch of branches) {
-    for (const p of uniquePaths) {
+    for (const f of uniquePaths) {
       try {
-        const lsResult = gitRunner(['-C', rootDir, 'ls-tree', '--name-only', branch, p]);
-        if (lsResult.status === 0 && lsResult.stdout.trim() === p) {
-          candidates.push({ branch, path: p });
-          break; // Next branch
+        const lsResult = runner(['-C', rootDir, 'ls-tree', '--name-only', branch, f]);
+        if (lsResult.status === 0 && lsResult.stdout.trim() === f) {
+          candidates.push({ branch, path: f });
+          break;
         }
       } catch (err) {
         // ignore
@@ -1023,7 +968,7 @@ function findMissionDocInBranches(/** @type {string} */ slug, /** @type {string}
  * @returns {boolean}
  */
 /** @param {string} file @param {string} slug @param {string} [rootDir] */
-function isMissionArtifact(file, slug, rootDir = process.cwd()) {
+export function isMissionArtifact(file: string, slug: string, rootDir: string = process.cwd()): boolean {
   if (!file || !slug) {return false;}
 
   const missionDir = `${path.relative(rootDir, missionDirForSlug(rootDir, slug)).split(path.sep).join('/')}/`;
@@ -1031,7 +976,6 @@ function isMissionArtifact(file, slug, rootDir = process.cwd()) {
   const legacyMissionDir = `docs/missions/${getMissionYear(slug, rootDir)}/${slug}/`;
   if (file.startsWith(legacyMissionDir)) {return true;}
 
-  // Task files: task-NNN - title.md or task-NNN.md in the configured storage.
   const escapedSlug = slug.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const taskStorage = resolveTaskStorage(rootDir);
   const taskDirs = [taskStorage.tasksDir, taskStorage.completedDir]
@@ -1044,7 +988,7 @@ function isMissionArtifact(file, slug, rootDir = process.cwd()) {
 }
 
 /** @param {string} [file] */
-function isWorkflowGeneratedArtifact(file) {
+export function isWorkflowGeneratedArtifact(file: string | undefined): boolean {
   if (!file) {return false;}
   return file.startsWith('.workflow/')
     || file.startsWith('.sessions/')
@@ -1052,49 +996,3 @@ function isWorkflowGeneratedArtifact(file) {
     || file === 'graphify-out'
     || file.startsWith('graphify-out/');
 }
-
-module.exports = {
-  resolveMissionAdapter,
-  missionBaseDir,
-  missionUsesYearTier,
-  missionBranchPrefix,
-  missionBranchName,
-  missionBranchRef,
-  extractSlugFromBranch,
-  isMissionSlugCandidate,
-  getPrimaryBranch,
-  getPrimaryWorktree,
-  resolveMainRepo,
-  conventionalWorktreePath,
-  conventionalBaseWorktreePath,
-  detectLaunchBaseBranch,
-  parseBaseBranchLine,
-  readRecordedBaseBranch,
-  resolveMissionBaseBranch,
-  resolveBaseWorktree,
-  getMissionYear,
-  findMissionDir,
-  resolveWorktree,
-  findCheckpoints,
-  compareCheckpointFiles,
-  checkpointOrder,
-  getFirstLine,
-  findMissionArea,
-  graphifyAvailable,
-  probeGraphifyAvailability,
-  updateGraphifyKnowledgeGraph,
-  missionTitle,
-  normalizeVerifyArea,
-  detectMissionAreaFromContent,
-  missionPathForSlug,
-  missionDirForSlug,
-  inferSlug,
-  parseConflictFilesFromMergeOutput,
-  getConflictFiles,
-  findLastNonNoiseCommit,
-  squashTrailingBacklogNoiseIntoPreviousMission,
-  softResetTrailingBacklogNoise,
-  findMissionDocInBranches,
-  isMissionArtifact,
-  isWorkflowGeneratedArtifact
-};

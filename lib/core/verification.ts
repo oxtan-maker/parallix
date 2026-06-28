@@ -1,20 +1,68 @@
-const { git, run } = require('./git');
+import { git, run } from './git.js';
+import type { SpawnSyncOptions } from 'node:child_process';
+import { loadAdapterConfig } from './product-config.js';
+import { log } from './fmt.js';
+import * as fsMod from 'node:fs';
 
-/** @typedef {(args: string[], options?: object) => import('child_process').SpawnSyncReturns<string>} GitFn */
-const { loadAdapterConfig } = require('./product-config');
-const fs = require('fs');
+interface GitOptions {
+  encoding?: BufferEncoding;
+  stdio?: SpawnSyncOptions['stdio'];
+  cwd?: string;
+  env?: NodeJS.ProcessEnv;
+  maxBuffer?: number;
+  [key: string]: unknown;
+}
+
+interface GitResult {
+  status: number | null;
+  signal: string | null;
+  stdout: string;
+  stderr: string;
+  error?: Error | null;
+}
+
+export type GitFn = (args: string[], options?: GitOptions) => GitResult;
+
+export interface VerificationAdapterConfig {
+  command: string | null;
+  defaultArea: string;
+}
+
+export interface VerificationProof {
+  rootDir: string;
+  area: string;
+  command: string | null;
+  commit: string;
+  tree: string;
+  verifiedAt: string;
+}
+
+export interface PublishedTreeStateOk {
+  ok: true;
+  rootDir: string;
+  commit: string;
+  tree: string;
+}
+
+export interface PublishedTreeStateFail {
+  ok: false;
+  error: string;
+}
+
+export type PublishedTreeState = PublishedTreeStateOk | PublishedTreeStateFail;
 
 // parallix targets arbitrary repositories, so there is no universal gate
 // command. When adapters.verification.command is not configured, verification
 // is a no-op pass ("no validation"). A repository opts into a real gate by
 // declaring the command in workflow.config.json.
-const DEFAULT_AREA = 'docs';
+export const DEFAULT_AREA = 'docs';
 // Shell-safe no-op so this is harmless if pasted into a command sequence: `:` is
 // the bash null command and `#` comments the explanation.
-const NO_GATE_NOTICE = ': # no verification gate configured (set adapters.verification.command)';
+export const NO_GATE_NOTICE = ': # no verification gate configured (set adapters.verification.command)';
 
-function resolveVerificationAdapter(rootDir = process.cwd()) {
-  const verification = loadAdapterConfig(rootDir).verification || {};
+export function resolveVerificationAdapter(rootDir: string = process.cwd()): VerificationAdapterConfig {
+  const config = loadAdapterConfig(rootDir);
+  const verification = (config.verification as { command?: unknown; defaultArea?: unknown }) || {};
   const command = typeof verification.command === 'string' && verification.command.trim()
     ? verification.command.trim()
     : null;
@@ -26,7 +74,7 @@ function resolveVerificationAdapter(rootDir = process.cwd()) {
 }
 
 /** @param {string} [area] @param {string} [rootDir] */
-function formatVerificationCommand(area, rootDir = process.cwd()) {
+export function formatVerificationCommand(area: string | undefined, rootDir: string = process.cwd()): string {
   const { command, defaultArea } = resolveVerificationAdapter(rootDir);
   const effectiveArea = area || defaultArea;
   if (!command) {
@@ -36,18 +84,17 @@ function formatVerificationCommand(area, rootDir = process.cwd()) {
 }
 
 /** @param {string} [area] @param {{rootDir?: string, log?: Function, stdio?: string, runFn?: Function}} [options] */
-function runVerificationGate(area, options = {}) {
-  /** @type {{rootDir?: string, log?: Function, stdio?: string, runFn?: Function}} */
+export function runVerificationGate(area: string | undefined, options: { rootDir?: string; log?: Function; stdio?: string; runFn?: Function } = {}): import('child_process').SpawnSyncReturns<string> {
   const opts = options;
   const rootDir = opts.rootDir || process.cwd();
   const { command, defaultArea } = resolveVerificationAdapter(rootDir);
   const effectiveArea = area || defaultArea;
 
   if (!command) {
-    const info = opts.log || require('./fmt').log.info;
+    const info = opts.log || log.info;
     info(`No verification gate configured for area: ${effectiveArea}; default is no validation. `
       + 'Set adapters.verification.command in workflow.config.json to enforce one.');
-    return { status: 0 };
+    return { status: 0 } as import('child_process').SpawnSyncReturns<string>;
   }
 
   const stdio = opts.stdio || 'inherit';
@@ -56,10 +103,9 @@ function runVerificationGate(area, options = {}) {
 }
 
 /** @param {string} rootDir @param {{gitRunner?: GitFn}} [options] */
-function readPublishedTreeState(rootDir, options = {}) {
-  /** @type {GitFn} */
+export function readPublishedTreeState(rootDir: string, options: { gitRunner?: GitFn } = {}): PublishedTreeState {
   const gitRunner = options.gitRunner || git;
-  const resolvedRoot = fs.realpathSync(rootDir);
+  const resolvedRoot = fsMod.realpathSync(rootDir);
   const commitResult = gitRunner(['-C', resolvedRoot, 'rev-parse', 'HEAD']);
   const treeResult = gitRunner(['-C', resolvedRoot, 'rev-parse', 'HEAD^{tree}']);
 
@@ -76,7 +122,7 @@ function readPublishedTreeState(rootDir, options = {}) {
 }
 
 /** @param {string} [area] @param {string} [rootDir] @param {{gitRunner?: GitFn, runFn?: Function, stdio?: string}} [options] */
-function captureVerifiedTreeProof(area, rootDir = process.cwd(), options = {}) {
+export function captureVerifiedTreeProof(area: string | undefined, rootDir: string = process.cwd(), options: { gitRunner?: GitFn; runFn?: Function; stdio?: string } = {}): { ok: boolean; proof?: VerificationProof; error?: string } {
   const {
     gitRunner = git,
     runFn = run,
@@ -98,7 +144,7 @@ function captureVerifiedTreeProof(area, rootDir = process.cwd(), options = {}) {
     };
   }
 
-  const after = readPublishedTreeState(/** @type {string} */(before.rootDir), { gitRunner });
+  const after = readPublishedTreeState(before.rootDir!, { gitRunner });
   if (!after.ok) {return after;}
   if (after.commit !== before.commit || after.tree !== before.tree) {
     return {
@@ -107,13 +153,13 @@ function captureVerifiedTreeProof(area, rootDir = process.cwd(), options = {}) {
     };
   }
 
-  const { command, defaultArea } = resolveVerificationAdapter(before.rootDir);
+  const { command, defaultArea } = resolveVerificationAdapter(before.rootDir!);
   const effectiveArea = area || defaultArea;
 
   return {
     ok: true,
     proof: {
-      rootDir: before.rootDir,
+      rootDir: before.rootDir!,
       area: effectiveArea,
       command: command || null,
       commit: after.commit,
@@ -124,12 +170,11 @@ function captureVerifiedTreeProof(area, rootDir = process.cwd(), options = {}) {
 }
 
 /** @param {{rootDir?: string, commit?: string, tree?: string}} proof @param {string} [rootDir] @param {{gitRunner?: GitFn}} [opts] */
-function assertVerifiedTreeProof(proof, rootDir = process.cwd(), opts = {}) {
+export function assertVerifiedTreeProof(proof: { rootDir?: string; commit?: string; tree?: string }, rootDir: string = process.cwd(), opts: { gitRunner?: GitFn } = {}): { ok: boolean; proof?: PublishedTreeState; error?: string } {
   if (!proof || typeof proof !== 'object') {
     return { ok: false, error: 'missing verification proof' };
   }
 
-  /** @type {{gitRunner?: GitFn}} */
   const o = opts;
   const gitRunner = o.gitRunner || git;
   const current = readPublishedTreeState(rootDir, { gitRunner });
@@ -146,21 +191,10 @@ function assertVerifiedTreeProof(proof, rootDir = process.cwd(), opts = {}) {
 }
 
 /** @param {string[]} args @param {{log?: Function}} [options] */
-function runWorkflow(args, options = {}) {
-  /** @type {{log?: Function}} */
+export default function runWorkflow(args: string[], options: { log?: Function } = {}): import('child_process').SpawnSyncReturns<string> {
   const opts = options;
-  const log = opts.log || require('./fmt').log.plain;
+  const logFn = opts.log || log.plain;
   const area = args[0] || process.env.VERIFY_AREA || DEFAULT_AREA;
-  log(`Running verification gate for area: ${area}...`);
+  logFn(`Running verification gate for area: ${area}...`);
   return runVerificationGate(area, { stdio: 'inherit' });
 }
-
-module.exports = runWorkflow;
-module.exports.DEFAULT_AREA = DEFAULT_AREA;
-module.exports.NO_GATE_NOTICE = NO_GATE_NOTICE;
-module.exports.formatVerificationCommand = formatVerificationCommand;
-module.exports.resolveVerificationAdapter = resolveVerificationAdapter;
-module.exports.runVerificationGate = runVerificationGate;
-module.exports.readPublishedTreeState = readPublishedTreeState;
-module.exports.captureVerifiedTreeProof = captureVerifiedTreeProof;
-module.exports.assertVerifiedTreeProof = assertVerifiedTreeProof;
