@@ -10,7 +10,7 @@
 - Ran `scripts/verify-local.sh docs` — PASS: all required documentation present
 - Fixed `.eslintignore`: removed `!lib/core/mission-utils.js` and `!lib/core/verification.js` negation lines so compiled output is ignored by ESLint
 - Restored stripped JSDoc blocks for: `conventionalBaseWorktreePath`, `detectLaunchBaseBranch`, `readRecordedBaseBranch`, `resolveMissionBaseBranch`, `resolveBaseWorktree`, `updateGraphifyKnowledgeGraph`, `inferSlug`, `parseConflictFilesFromMergeOutput`, `getConflictFiles`, `isMissionArtifact`
-- Reverted out-of-scope changes to `lib/commands/integrate.js` and 4 test files (scope creep from earlier attempt)
+- Reverted out-of-scope changes to `lib/commands/integrate.js` and 4 test files (commit 9fb2edca, B2 fix)
 
 ## Goal Check
 
