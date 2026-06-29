@@ -1,16 +1,16 @@
-const { resolveConflictsForMission } = require('./integrate');
-const { findMissionDir, findMissionArea, inferSlug, getPrimaryBranch } = require('../core/mission-utils');
-const { startAgent } = require('../agents/agents');
-const fmt = require('../core/fmt');
-const { formatVerificationCommand } = require('../core/verification');
+import integrate from './integrate.js';
+import { findMissionDir, findMissionArea, inferSlug, getPrimaryBranch } from '../core/mission-utils.js';
+import { startAgent } from '../agents/agents.js';
+import * as fmt from '../core/fmt.js';
+import { formatVerificationCommand } from '../core/verification.js';
 
 /** @param {string} value */
-function shellQuote(value) {
+function shellQuote(value: string) {
   return `"${String(value).replace(/(["\\$`])/g, '\\$1')}"`;
 }
 
 /** @param {{slug: string, area: string, worktreePath: string, missionSpecificFiles: string[]}} opts */
-function buildAgentResolutionPrompt({ slug, area, worktreePath, missionSpecificFiles }) {
+function buildAgentResolutionPrompt({ slug, area, worktreePath, missionSpecificFiles }: {slug: string, area: string, worktreePath: string, missionSpecificFiles: string[]}) {
   const fileCommands = missionSpecificFiles
     .map(f => `  git checkout --theirs "${f}" && git add "${f}"`)
     .join('\n');
@@ -44,11 +44,11 @@ function buildAgentResolutionPrompt({ slug, area, worktreePath, missionSpecificF
 }
 
 /** @param {string[]} args @param {{resolveConflictsFn?: Function, startAgentFn?: Function, exitFn?: Function}} opts */
-async function resolveConflict(args, {
-  resolveConflictsFn = resolveConflictsForMission,
+async function resolveConflict(args: string[], {
+  resolveConflictsFn = /** @type {import('./integrate.js').IntegrateFn} */ (integrate).resolveConflictsForMission,
   startAgentFn = startAgent,
-  exitFn = /** @type {(code: number) => void} */ ((code) => process.exit(code)),
-} = {}) {
+  exitFn = ((code: number) => process.exit(code)) as (code: number) => void,
+}: {resolveConflictsFn?: Function, startAgentFn?: Function, exitFn?: (code: number) => void} = {}) {
   const explicitSlug = args[0];
   const slug = inferSlug(explicitSlug);
   if (!slug) {
@@ -72,7 +72,7 @@ async function resolveConflict(args, {
   // Stop and require human intervention.
   if (!result.ok && result.error === 'shared-file-conflicts') {
     fmt.log.fail('Shared-file conflicts require human resolution. Agent cannot guess the correct merge outcome.');
-    fmt.log.info(`Shared files: ${result.sharedFiles.map(/** @param {string} f */ (f) => fmt.path(f)).join(', ')}`);
+    fmt.log.info(`Shared files: ${result.sharedFiles.map((f: string) => fmt.path(f)).join(', ')}`);
     fmt.log.info(`Resolve manually, then re-run: ${fmt.command(`px integrate ${slug} --dry-run`)}`);
     exitFn(1);
     return;
@@ -108,5 +108,5 @@ async function resolveConflict(args, {
   exitFn(0);
 }
 
-module.exports = resolveConflict;
-module.exports.buildAgentResolutionPrompt = buildAgentResolutionPrompt;
+(resolveConflict as any).buildAgentResolutionPrompt = buildAgentResolutionPrompt;
+export = resolveConflict;

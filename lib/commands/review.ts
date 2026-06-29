@@ -1,4 +1,4 @@
-const review = require('../review/review-commands').review;
+import { review } from '../review/review-commands.js';
 
 /**
  * Workflow command entry point for `review`.
@@ -7,8 +7,8 @@ const review = require('../review/review-commands').review;
  * Usage: node parallix review [<slug>] [--verify] [--submit] [--push] ...
  */
 /** @param {string[]} args */
-async function reviewCommand(args) {
+async function reviewCommand(args: string[]) {
   await review(args);
 }
 
-module.exports = reviewCommand;
+export = reviewCommand;

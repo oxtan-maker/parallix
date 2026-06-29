@@ -11,3 +11,4 @@ lib/core/*.js
 lib/agents/*.js
 lib/tools/*.js
 lib/review/*.js
+lib/commands/*.js

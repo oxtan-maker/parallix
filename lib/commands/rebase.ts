@@ -1,14 +1,14 @@
-const path = require('path');
-const { detectRebaseState, git, getCurrentBranch } = require('../core/git');
-const { resolveConflictsForMission } = require('./integrate');
-const { findMissionDir, findMissionArea, inferSlug, resolveWorktree, conventionalWorktreePath, getPrimaryWorktree, getPrimaryBranch, resolveMissionBaseBranch, missionBranchName, missionDirForSlug } = require('../core/mission-utils');
-const { startAgent } = require('../agents/agents');
-  const { createPr, readToken, resolveForgejoUser, fetchReviewBranch } = require('../tools/forgejo');
-const { resolveTaskFile, getTaskImplementer } = require('../tools/backlog');
-const { resolveReviewIdentity } = require('../review/review-state');
-const { isForgejoReviewEnabled } = require('../core/product-config');
-const fmt = require('../core/fmt');
-const { formatVerificationCommand } = require('../core/verification');
+import path from 'node:path';
+import { detectRebaseState, git, getCurrentBranch } from '../core/git.js';
+import integrate from './integrate.js';
+import { findMissionDir, findMissionArea, inferSlug, resolveWorktree, conventionalWorktreePath, getPrimaryWorktree, getPrimaryBranch, resolveMissionBaseBranch, missionBranchName, missionDirForSlug } from '../core/mission-utils.js';
+import { startAgent } from '../agents/agents.js';
+import { createPr, readToken, resolveForgejoUser, fetchReviewBranch } from '../tools/forgejo.js';
+import { resolveTaskFile, getTaskImplementer } from '../tools/backlog.js';
+import { resolveReviewIdentity } from '../review/review-state.js';
+import { isForgejoReviewEnabled } from '../core/product-config.js';
+import * as fmt from '../core/fmt.js';
+import { formatVerificationCommand } from '../core/verification.js';
 
 /**
  * Rebase a mission branch onto local master, auto-resolving mission-specific
@@ -17,12 +17,12 @@ const { formatVerificationCommand } = require('../core/verification');
  * Usage: px rebase [<slug>] [--push]
  */
 /** @param {string[]} args @param {{inferSlugFn?: Function, findMissionDirFn?: Function, findMissionAreaFn?: Function, getCurrentBranchFn?: Function, resolveConflictsFn?: Function, startAgentFn?: Function, createPrFn?: Function, readTokenFn?: Function, resolveForgejoUserFn?: Function, resolveTaskFileFn?: Function, getTaskImplementerFn?: Function, detectRebaseStateFn?: Function, resolveMissionBaseBranchFn?: Function, gitFn?: Function, exitFn?: Function, isForgejoReviewEnabledFn?: Function, fetchReviewBranchFn?: Function}} opts */
-async function rebase(args, {
+async function rebase(args: string[], {
   inferSlugFn = inferSlug,
   findMissionDirFn = findMissionDir,
   findMissionAreaFn = findMissionArea,
   getCurrentBranchFn = getCurrentBranch,
-  resolveConflictsFn = resolveConflictsForMission,
+  resolveConflictsFn = /** @type {import('./integrate.js').IntegrateFn} */ (integrate).resolveConflictsForMission,
   startAgentFn = startAgent,
   createPrFn = createPr,
   readTokenFn = readToken,
@@ -32,10 +32,10 @@ async function rebase(args, {
   detectRebaseStateFn = detectRebaseState,
   resolveMissionBaseBranchFn = resolveMissionBaseBranch,
   gitFn = git,
-  exitFn = (/** @type{number} */ code) => process.exit(code),
+  exitFn = ((code: number) => process.exit(code)) as (code: number) => void,
   isForgejoReviewEnabledFn = isForgejoReviewEnabled,
   fetchReviewBranchFn = fetchReviewBranch,
-} = {}) {
+}: {inferSlugFn?: Function, findMissionDirFn?: Function, findMissionAreaFn?: Function, getCurrentBranchFn?: Function, resolveConflictsFn?: Function, startAgentFn?: Function, createPrFn?: Function, readTokenFn?: Function, resolveForgejoUserFn?: Function, resolveTaskFileFn?: Function, getTaskImplementerFn?: Function, detectRebaseStateFn?: Function, resolveMissionBaseBranchFn?: Function, gitFn?: Function, exitFn?: (code: number) => void, isForgejoReviewEnabledFn?: Function, fetchReviewBranchFn?: Function} = {}) {
   const flags = args.filter(a => a.startsWith('--'));
   const params = args.filter(a => !a.startsWith('--'));
   const isPush = flags.includes('--push');
@@ -59,7 +59,7 @@ async function rebase(args, {
     }
     if (existingRebase.unmergedFiles.length > 0) {
       fmt.log.info('Unmerged files:');
-      existingRebase.unmergedFiles.forEach((/** @type {string} */ file) => fmt.log.info(`  - ${file}`));
+      existingRebase.unmergedFiles.forEach((file: string) => fmt.log.info(`  - ${file}`));
     }
     fmt.log.info('Recovery commands:');
     fmt.log.info(`  ${fmt.command('git rebase --continue')}`);
@@ -172,7 +172,7 @@ async function rebase(args, {
   const worktreePath = resolveWorktree(slug) || conventionalWorktreePath(slug, rootDir);
 
   /** @type{{worktreePathOverride?: string}} */
-  const conflictOpts = { worktreePathOverride: worktreePath };
+  const conflictOpts: {worktreePathOverride?: string} = { worktreePathOverride: worktreePath };
   const conflictResult = resolveConflictsFn(slug, area, conflictOpts);
 
   // When rebase is in progress in the worktree, dry merge may fail.
@@ -189,13 +189,13 @@ async function rebase(args, {
     // Classify using mission-specific patterns
     const missionAbsDir = findMissionDir(slug, worktreePath);
     const missionDocPrefix = missionAbsDir
-      ? (require('path').relative(worktreePath, missionAbsDir) + '/')
+      ? (path.relative(worktreePath, missionAbsDir) + '/')
       : path.relative(worktreePath, missionDirForSlug(worktreePath, slug)).split(path.sep).join('/') + '/';
     const taskPattern = new RegExp(`backlog/(?:tasks|completed)/[^/]*${slug}`);
-    const missionSpecificFiles = conflictFiles.filter(f =>
+    const missionSpecificFiles = conflictFiles.filter((f: string) =>
       f.startsWith(missionDocPrefix) || taskPattern.test(f)
     );
-    const sharedFiles = conflictFiles.filter(f => !missionSpecificFiles.includes(f));
+    const sharedFiles = conflictFiles.filter((f: string) => !missionSpecificFiles.includes(f));
 
     Object.assign(conflictResult, {
       ok: true,
@@ -205,7 +205,7 @@ async function rebase(args, {
     });
   } else if (!conflictResult.ok) {
     /** @type{{error?: string}} */
-    const cr = conflictResult;
+    const cr: {error?: string} = conflictResult;
     if (cr.error === 'worktree-missing') {
       fmt.log.fail(`Mission worktree not found: ${fmt.path(worktreePath)}`);
       fmt.log.info(`Ensure the worktree is registered: ${fmt.command(`git worktree add ${conventionalWorktreePath(slug, getPrimaryWorktree())} ${branch}`)}`);
@@ -227,7 +227,7 @@ async function rebase(args, {
   // Only treat unclassified conflict files as shared-file conflicts
   if (conflictResult.sharedFiles.length === 0 && conflictFiles.length > 0) {
     const classified = new Set([...conflictResult.missionSpecificFiles]);
-    const unclassified = conflictFiles.filter((/** @type {string} */ f) => !classified.has(f));
+    const unclassified = conflictFiles.filter((f: string) => !classified.has(f));
     if (unclassified.length > 0) {
       conflictResult.sharedFiles = unclassified;
     }
@@ -239,12 +239,12 @@ async function rebase(args, {
     const maxContinueAttempts = 3;
     let continueAttempts = 0;
     /** @param {{stdio?: string}} opts */
-    const continueRebase = (/** @type {{stdio?: string}} */ opts = {}) => {
+    const continueRebase = (opts: {stdio?: string} = {}) => {
       continueAttempts += 1;
       return gitFn(['-c', 'core.editor=true', '-c', 'merge.autoedit=no', 'rebase', '--continue'], opts);
     };
     /** @param {{stdout: string, stderr: string, status: number}} result */
-    const reportContinueFailure = (result) => {
+    const reportContinueFailure = (result: {stdout: string, stderr: string, status: number}) => {
       const output = [result.stdout, result.stderr].filter(Boolean).join('\n').trim();
       fmt.log.fail(`git rebase --continue failed (status ${result.status}).`);
       if (output) {
@@ -260,7 +260,7 @@ async function rebase(args, {
     };
 
     /** @param {string} branchName */
-    const failContinueBudget = (branchName) => {
+    const failContinueBudget = (branchName: string) => {
       fmt.log.fail(`Rebase still in progress on branch ${fmt.branch(branchName || slug)} after ${continueAttempts} failed --continue attempt(s).`);
       fmt.log.fail(`Check rebase state: ${fmt.command('git status')}`);
       fmt.log.fail(`Next: ${fmt.command('git rebase --continue')}`);
@@ -424,7 +424,7 @@ async function rebase(args, {
 
   // Shared-file conflicts exist — launch agent to resolve them
   fmt.log.info(`${conflictResult.sharedFiles.length} shared file(s) require agent-assisted resolution:`);
-  conflictResult.sharedFiles.forEach((/** @type {string} */ f) => fmt.log.info(`  - ${fmt.path(f)}`));
+  conflictResult.sharedFiles.forEach((f: string) => fmt.log.info(`  - ${fmt.path(f)}`));
 
   const prompt = buildRebasePrompt({
     slug,
@@ -432,7 +432,7 @@ async function rebase(args, {
     worktreePath,
     missionSpecificFiles: conflictResult.missionSpecificFiles,
     sharedFiles: conflictResult.sharedFiles,
-    gitFn: /** @type{Function} */(gitFn),
+    gitFn: gitFn as Function,
   });
 
   fmt.log.info('Launching agent for conflict resolution...');
@@ -471,9 +471,9 @@ async function rebase(args, {
  * UU (unmerged), DU/UD (modify/delete), AU/UA (add/add), AA (add/add).
  */
 /** @param {string} worktreePath @param {Function} gitFn */
-function parseConflictFilesFromGitStatus(worktreePath, gitFn) {
+function parseConflictFilesFromGitStatus(worktreePath: string, gitFn: Function) {
   const statusResult = gitFn(['-C', worktreePath, 'status', '--porcelain']);
-  const files = [];
+  const files: string[] = [];
   const unmergedStates = new Set(['UU', 'DU', 'UD', 'AU', 'UA', 'AA']);
   for (const line of (statusResult.stdout || '').split('\n')) {
     const trimmed = line.trim();
@@ -498,9 +498,9 @@ function parseConflictFilesFromGitStatus(worktreePath, gitFn) {
  * Similar to parseConflictFilesFromMergeOutput but handles rebase-specific output.
  */
 /** @param {string} output */
-function parseConflictFilesFromRebaseOutput(output) {
-  const seen = new Set();
-  const files = [];
+function parseConflictFilesFromRebaseOutput(output: string) {
+  const seen = new Set<string>();
+  const files: string[] = [];
   for ( const line of output.split('\n')) {
     if (!/CONFLICT|KONFLIKT/i.test(line)) {continue;}
     // English: "Merge conflict in <file>"
@@ -578,7 +578,7 @@ function parseConflictFilesFromRebaseOutput(output) {
  * Build the prompt for the agent during shared-file conflict resolution.
  */
 /** @param {{slug: string, area: string, worktreePath: string, missionSpecificFiles: string[], sharedFiles: string[], gitFn?: Function}} opts */
-function buildRebasePrompt({ slug, area, worktreePath, missionSpecificFiles, sharedFiles, gitFn = /** @type {Function | undefined} */ (undefined) }) {
+function buildRebasePrompt({ slug, area, worktreePath, missionSpecificFiles, sharedFiles, gitFn = undefined as Function | undefined }: {slug: string, area: string, worktreePath: string, missionSpecificFiles: string[], sharedFiles: string[], gitFn?: Function}) {
   const missionFileCommands = missionSpecificFiles
     .map(f => `  git checkout --theirs "${f}" && git add "${f}"`)
     .join('\n');
@@ -629,7 +629,7 @@ function buildRebasePrompt({ slug, area, worktreePath, missionSpecificFiles, sha
   ].join('\n');
 }
 
-module.exports = rebase;
-module.exports.buildRebasePrompt = buildRebasePrompt;
-module.exports.parseConflictFilesFromRebaseOutput = parseConflictFilesFromRebaseOutput;
-module.exports.parseConflictFilesFromGitStatus = parseConflictFilesFromGitStatus;
+(rebase as any).buildRebasePrompt = buildRebasePrompt;
+(rebase as any).parseConflictFilesFromRebaseOutput = parseConflictFilesFromRebaseOutput;
+(rebase as any).parseConflictFilesFromGitStatus = parseConflictFilesFromGitStatus;
+export = rebase;

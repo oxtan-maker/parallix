@@ -1,20 +1,21 @@
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const child_process = require('child_process');
-const { detectRebaseState, git, getCurrentBranch } = require('../core/git');
-const { resolveTaskFile, getTaskStatus, setTaskStatus, completeTask, getTaskAssignee } = require('../tools/backlog');
-const { toVirtual, toActual } = require('../core/state-map');
-const { getPrStatus, getLatestReviewDecision, syncMerged, readToken, resolveTokenFile, resolveForgejoUser, resolveForgejoHome, isForgejoPath, listOpenPrsForSlug } = require('../tools/forgejo');
-const fmt = require('../core/fmt');
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import child_process from 'node:child_process';
+import { detectRebaseState, git, getCurrentBranch, run } from '../core/git.js';
+import { resolveTaskFile, getTaskStatus, setTaskStatus, completeTask, getTaskAssignee } from '../tools/backlog.js';
+import { toVirtual, toActual } from '../core/state-map.js';
+import { getPrStatus, getLatestReviewDecision, syncMerged, readToken, resolveTokenFile, resolveForgejoUser, resolveForgejoHome, isForgejoPath, listOpenPrsForSlug } from '../tools/forgejo.js';
+import * as fmt from '../core/fmt.js';
 
-const { buildAutonomousReviewMatrix, formatMatrixSummary } = require('../core/runtime-matrix');
-const { findMissionDir, resolveWorktree, findMissionArea, missionTitle, parseConflictFilesFromMergeOutput, getConflictFiles, inferSlug, updateGraphifyKnowledgeGraph, getPrimaryWorktree, getPrimaryBranch, conventionalWorktreePath, softResetTrailingBacklogNoise, findMissionDocInBranches, missionBranchName, missionDirForSlug, isMissionArtifact, resolveMissionBaseBranch, resolveBaseWorktree } = require('../core/mission-utils');
-const stats = require('./stats');
-const verification = require('../core/verification');
+import { buildAutonomousReviewMatrix, formatMatrixSummary } from '../core/runtime-matrix.js';
+import { findMissionDir, resolveWorktree, findMissionArea, missionTitle, parseConflictFilesFromMergeOutput, getConflictFiles, inferSlug, updateGraphifyKnowledgeGraph, getPrimaryWorktree, getPrimaryBranch, conventionalWorktreePath, softResetTrailingBacklogNoise, findMissionDocInBranches, missionBranchName, missionDirForSlug, isMissionArtifact, resolveMissionBaseBranch, resolveBaseWorktree } from '../core/mission-utils.js';
+// @ts-expect-error stats.js is still CJS, no declarations available
+import stats from './stats.js';
+import * as verification from '../core/verification.js';
 const { formatVerificationCommand } = verification;
-const { isForgejoReviewEnabled } = require('../core/product-config');
-const { readReviewState } = require('../review/review-state');
+import { isForgejoReviewEnabled } from '../core/product-config.js';
+import { readReviewState } from '../review/review-state.js';
 
 const VARIANT_B_AUTOMATION_SUMMARY = 'Variant B automation: Backlog task closeout, worktree-path rewrite, squash commit with hook-enforced validation, Forgejo sync-merged, and mission worktree cleanup.';
 
@@ -31,20 +32,20 @@ const SYNC_MERGED_DIAGNOSTICS = [
 class IntegrationAbort extends Error {}
 
 /** @param {{mission: string, implementer: string, pr_fix_rounds: string, classification: string, date: string}} row */
-function formatRecordedStatsRow(row) {
+function formatRecordedStatsRow(row: any) {
   return `${row.mission}: implementer=${row.implementer}, pr_fix_rounds=${row.pr_fix_rounds}, classification=${row.classification}, date=${row.date}`;
 }
 
 /** @param {string} value */
-function shellQuote(value) {
+function shellQuote(value: string) {
   return `"${String(value).replace(/(["\\$`])/g, '\\$1')}"`;
 }
 
 /** @param {string} rootDir @param {{commandRunner?: Function, log?: Function}} opts */
-function maybeUpdateGraphifyOnPrimary(rootDir = getPrimaryWorktree(), opts = {}) {
+function maybeUpdateGraphifyOnPrimary(rootDir = getPrimaryWorktree(), opts: {commandRunner?: Function, log?: Function} = {}) {
   return updateGraphifyKnowledgeGraph({
     rootDir,
-    commandRunner: opts.commandRunner || ((/** @type{string} */ command, /** @type{string[]} */ args, /** @type{object} */ options) => require('../core/git').run(command, args, options)),
+    commandRunner: opts.commandRunner || ((/** @type{string} */ command: string, /** @type{string[]} */ args: string[], /** @type{object} */ options: any) => run(command, args, options)),
     log: opts.log,
     startMessage: `Updating graphify knowledge graph on ${getPrimaryBranch()}...`,
     failureHint: 'Continuing without blocking integration.'
@@ -52,8 +53,8 @@ function maybeUpdateGraphifyOnPrimary(rootDir = getPrimaryWorktree(), opts = {})
 }
 
 /** @param {string} rootDir @param {{gitRunner?: Function}} opts */
-function prepareNoisePatchForSquash(rootDir, opts = {}) {
-  const runner = opts.gitRunner || git;
+function prepareNoisePatchForSquash(rootDir: string, opts: {gitRunner?: Function} = {}) {
+  const runner = (opts.gitRunner || git) as Function;
   const diffResult = runner(['-C', rootDir, 'diff', '--cached', '--binary']);
   if (diffResult.status !== 0) {
     return {
@@ -88,9 +89,9 @@ function prepareNoisePatchForSquash(rootDir, opts = {}) {
 }
 
 /** @param {string} rootDir @param {string|null} patchPath @param {{gitRunner?: Function}} opts */
-function restoreNoisePatchAfterSquash(rootDir, patchPath, opts = {}) {
+function restoreNoisePatchAfterSquash(rootDir: string, patchPath: string | null, opts: {gitRunner?: Function} = {}) {
   if (!patchPath) {return { ok: true };}
-  const runner = opts.gitRunner || git;
+  const runner = (opts.gitRunner || git) as Function;
   const applyResult = runner(['-C', rootDir, 'apply', '--index', patchPath]);
   if (applyResult.status !== 0) {
     return {
@@ -102,7 +103,7 @@ function restoreNoisePatchAfterSquash(rootDir, patchPath, opts = {}) {
 }
 
 /** @param {string|null} taskAssignee */
-function resolveForgejoUserForIntegration(taskAssignee) {
+function resolveForgejoUserForIntegration(taskAssignee: string | null) {
   // If taskAssignee is set, use it directly as the Forgejo user identity.
   // This ensures that even non-agent assignees (e.g., human users) have their
   // identity properly propagated through all Forgejo operations.
@@ -121,8 +122,8 @@ function resolveForgejoUserForIntegration(taskAssignee) {
 }
 
 /** @param {string} rootDir @param {{gitRunner?: Function}} opts */
-function getUnresolvedIndexConflicts(rootDir = getPrimaryWorktree(), opts = {}) {
-  const runner = opts.gitRunner || git;
+function getUnresolvedIndexConflicts(rootDir = getPrimaryWorktree(), opts: {gitRunner?: Function} = {}) {
+  const runner = (opts.gitRunner || git) as Function;
   const result = runner(['-C', rootDir, 'ls-files', '-u']);
   if (result.status !== 0) {
     return {
@@ -135,9 +136,9 @@ function getUnresolvedIndexConflicts(rootDir = getPrimaryWorktree(), opts = {}) 
   const files = Array.from(new Set(
     result.stdout
       .split('\n')
-      .map((/** @type{string} */ line) => line.trim())
+      .map((line: string) => line.trim())
       .filter(Boolean)
-      .map((/** @type{string} */ line) => line.split('\t')[1])
+      .map((line: string) => line.split('\t')[1])
       .filter(Boolean)
   ));
 
@@ -160,9 +161,9 @@ function parseStashPopCollisionFiles(output = '') {
  * @param {{stdout: string, stderr: string, status: number}} restoreResult
  * @param {{rootDir?: string, gitRunner?: Function, getUnresolvedIndexConflictsFn?: Function}} opts
  */
-function reportStashPopFailure(slug, restoreResult, opts = {}) {
+function reportStashPopFailure(slug: string, restoreResult: any, opts: {rootDir?: string, gitRunner?: Function, getUnresolvedIndexConflictsFn?: Function} = {}) {
   const output = [restoreResult.stdout, restoreResult.stderr].filter(Boolean).join('\n').trim();
-  const runner = opts.gitRunner || git;
+  const runner = (opts.gitRunner || git) as Function;
   const rootDir = opts.rootDir || getPrimaryWorktree();
   const headResult = runner(['-C', rootDir, 'log', '-1', '--oneline']);
   const headLine = headResult.status === 0 ? headResult.stdout.trim() : '(unavailable)';
@@ -179,10 +180,10 @@ function reportStashPopFailure(slug, restoreResult, opts = {}) {
 
   if (indexConflicts.ok && indexConflicts.files.length > 0) {
     fmt.log.fail('Stash restore failure type: merge-conflict');
-    indexConflicts.files.forEach((/** @type{string} */ file) => fmt.log.fail(`  - ${file}`));
+    indexConflicts.files.forEach((file: string) => fmt.log.fail(`  - ${file}`));
     fmt.log.fail('Recovery steps:');
     fmt.log.fail(`  1. cd ${rootDir}`);
-    indexConflicts.files.forEach((/** @type{string} */ file) => {
+    indexConflicts.files.forEach((file: string) => {
       fmt.log.fail(`  2. Resolve ${file}, then run git add "${file}" or git rm "${file}"`);
     });
     fmt.log.fail('  3. git status --short');
@@ -190,12 +191,12 @@ function reportStashPopFailure(slug, restoreResult, opts = {}) {
   } else {
     fmt.log.fail('Stash restore failure type: file-collision');
     if (collisionFiles.length > 0) {
-      collisionFiles.forEach((/** @type{string} */ file) => fmt.log.fail(`  - ${file}`));
+      collisionFiles.forEach((file: string) => fmt.log.fail(`  - ${file}`));
     }
     fmt.log.fail('Recovery steps:');
     fmt.log.fail(`  1. git -C ${rootDir} stash show --name-only stash@{0}`);
     if (collisionFiles.length > 0) {
-      collisionFiles.forEach((/** @type{string} */ file) => {
+      collisionFiles.forEach((file: string) => {
         fmt.log.fail(`  2. mv ${path.join(rootDir, file)} ${path.join(rootDir, `${file}.pre-stash-pop`)}`);
       });
       fmt.log.fail(`  3. git -C ${rootDir} stash pop`);
@@ -222,7 +223,7 @@ function printDiagnosticTable() {
 }
 
 /** @param {{statusCode?: number, error: string, raw?: string}} syncResult */
-function reportSyncMergedFailure(syncResult) {
+function reportSyncMergedFailure(syncResult: any) {
   const detail = syncResult.statusCode ? ` (${syncResult.error}: ${syncResult.statusCode})` : ` (${syncResult.error})`;
   fmt.log.fail(`Forgejo sync-merged failed${detail}.`);
   if (syncResult.raw) {
@@ -240,11 +241,11 @@ const INTEGRATION_CONFIG_PATH = path.join(getPrimaryWorktree(), 'config', 'integ
  * Returns an array of area names (e.g., ['server', 'auth-server', 'web-client'])
  */
 /** @param {string} slug @param {{gitRunner?: Function, rootDir?: string, baseBranch?: string|null}} opts */
-function detectChangedAreas(slug, opts = {}) {
+function detectChangedAreas(slug: string, opts: {gitRunner?: Function, rootDir?: string, baseBranch?: string | null} = {}) {
   const primaryBranch = opts.baseBranch || getPrimaryBranch();
   const branch = `mission/${slug}`;
-  const runner = opts.gitRunner || git;
-  
+  const runner = (opts.gitRunner || git) as Function;
+
   // Get changed files between primary branch and mission branch
   const diffResult = runner(['-C', opts.rootDir || getPrimaryWorktree(), 'diff', '--name-only', primaryBranch, branch, '--']);
   
@@ -267,11 +268,11 @@ function detectChangedAreas(slug, opts = {}) {
  * Parse a list of files (one per line) and extract the top-level area directories
  */
 /** @param {string} filesOutput */
-function parseFilesToAreas(filesOutput) {
+function parseFilesToAreas(filesOutput: string) {
   const areas = new Set();
   const knownAreas = ['lib', 'server', 'auth-server', 'web-client', 'docs', 'workflow', 'android', 'kubernetes'];
   
-  filesOutput.split('\n').forEach((/** @type{string} */ file) => {
+  filesOutput.split('\n').forEach((file: string) => {
     file = file.trim();
     if (!file) {return;}
     const topDir = file.split('/')[0];
@@ -287,7 +288,7 @@ function parseFilesToAreas(filesOutput) {
  * Load integration pipelines config from repo-side file
  */
 /** @param {{configPath?: string}} opts */
-function loadIntegrationConfig(opts = {}) {
+function loadIntegrationConfig(opts: {configPath?: string} = {}) {
   const configPath = opts.configPath || INTEGRATION_CONFIG_PATH;
   if (!fs.existsSync(configPath) || !fs.statSync(configPath).size) {
     return { ok: false, error: 'no config present' };
@@ -297,7 +298,7 @@ function loadIntegrationConfig(opts = {}) {
     const content = fs.readFileSync(configPath, 'utf8');
     const config = JSON.parse(content);
     return { ok: true, config };
-  } catch (/** @type{any} */ error) {
+  } catch (/** @type{any} */ error: any) {
     return { ok: false, error: `invalid JSON: ${error.message}` };
   }
 }
@@ -307,7 +308,7 @@ function loadIntegrationConfig(opts = {}) {
  * Returns { gates: [{key, command, run_last}], changedAreas: [...] }
  */
 /** @param {string} slug @param {{runIntegrationGates?: boolean, gitRunner?: Function, dryRun?: boolean, configPath?: string}} opts */
-function getIntegrationGatePlan(slug, opts = {}) {
+function getIntegrationGatePlan(slug: string, opts: {runIntegrationGates?: boolean, gitRunner?: Function, dryRun?: boolean, configPath?: string} = {}) {
   // Check config
   const configResult = loadIntegrationConfig(opts);
   if (!configResult.ok) {
@@ -336,7 +337,7 @@ function getIntegrationGatePlan(slug, opts = {}) {
   // Build list of gates to run, preserving order with run_last handling
   const gateEntries = Object.entries(config.gates);
   const gates = gateEntries
-    .map(([key, value]) => ({
+    .map(([key, value]: [string, any]) => ({
       key,
       command: value.command,
       order: value.order || 0,
@@ -370,7 +371,7 @@ function getIntegrationGatePlan(slug, opts = {}) {
  * Print the integration gate plan (for --dry-run)
  */
 /** @param{{key: string, command: string, order: number, run_last: boolean}[]} gates */
-function printIntegrationGatePlan(gates) {
+function printIntegrationGatePlan(gates: any) {
   fmt.log.info('Integration gate plan:');
   for (const gate of gates) {
     fmt.log.info(`  ${gate.key}: ${gate.command}`);
@@ -381,7 +382,7 @@ function printIntegrationGatePlan(gates) {
  * @param {string} slug
  * @param {{dryRun?: boolean, processEnv?: NodeJS.ProcessEnv, gitRunner?: Function, baseBranch?: string|null, baseWorktree?: string|null}} opts
  */
-function buildIntegrationGateEnv(slug, opts = {}) {
+function buildIntegrationGateEnv(slug: string, opts: {dryRun?: boolean, processEnv?: NodeJS.ProcessEnv, gitRunner?: Function, baseBranch?: string | null, baseWorktree?: string | null} = {}) {
   /** @type {{[key: string]: string | undefined}} */
   const env = /** @type {{[key: string]: string | undefined}} */ ({
     ...opts.processEnv,
@@ -395,7 +396,7 @@ function buildIntegrationGateEnv(slug, opts = {}) {
 
   // Integration must always use the repo-side config, but the changed-area set
   // should be the one resolved for this mission branch, not rediscovered later.
-  delete env.INTEGRATION_CONFIG_PATH;
+  delete (env as any).INTEGRATION_CONFIG_PATH;
   return env;
 }
 
@@ -403,9 +404,9 @@ function buildIntegrationGateEnv(slug, opts = {}) {
  * @param {string} slug
  * @param {{baseWorktree?: string, resolveWorktreeFn?: Function, conventionalWorktreePathFn?: Function}} opts
  */
-function resolveIntegrationVerificationWorktree(slug, opts = {}) {
-  const resolveFn = opts.resolveWorktreeFn || resolveWorktree;
-  const convFn = opts.conventionalWorktreePathFn || conventionalWorktreePath;
+function resolveIntegrationVerificationWorktree(slug: string, opts: {baseWorktree?: string, resolveWorktreeFn?: Function, conventionalWorktreePathFn?: Function} = {}) {
+  const resolveFn = (opts.resolveWorktreeFn || resolveWorktree) as Function;
+  const convFn = (opts.conventionalWorktreePathFn || conventionalWorktreePath) as Function;
   return resolveFn(slug, { cwd: opts.baseWorktree })
     || convFn(slug, opts.baseWorktree);
 }
@@ -414,9 +415,9 @@ function resolveIntegrationVerificationWorktree(slug, opts = {}) {
  * @param {string} slug
  * @param {{baseWorktree?: string, resolveWorktreeFn?: Function, conventionalWorktreePathFn?: Function, formatVerificationCommandFn?: Function}} opts
  */
-function buildIntegrationVerificationInvocation(slug, opts = {}) {
+function buildIntegrationVerificationInvocation(slug: string, opts: {baseWorktree?: string, resolveWorktreeFn?: Function, conventionalWorktreePathFn?: Function, formatVerificationCommandFn?: Function} = {}) {
   const cwd = resolveIntegrationVerificationWorktree(slug, opts);
-  const fmtFn = opts.formatVerificationCommandFn || formatVerificationCommand;
+  const fmtFn = (opts.formatVerificationCommandFn || formatVerificationCommand) as Function;
   return {
     command: fmtFn('integrate', cwd),
     cwd
@@ -431,12 +432,12 @@ function buildIntegrationVerificationInvocation(slug, opts = {}) {
  * @param {{key: string, command: string, order: number, run_last: boolean}[]} gates
  * @param {{commandRunner?: Function, rootDir?: string}} opts
  */
-async function executeIntegrationGates(gates, opts = {}) {
-  const runner = opts.commandRunner || ((/** @type{string} */ cmd) => require('child_process').spawnSync(cmd, {
+async function executeIntegrationGates(gates: any, opts: {commandRunner?: Function, rootDir?: string} = {}) {
+  const runner = (opts.commandRunner || ((/** @type{string} */ cmd: string) => child_process.spawnSync(cmd, {
       shell: true,
       cwd: opts.rootDir || getPrimaryWorktree(),
       stdio: 'inherit'
-    }));
+    }))) as Function;
   
   for (const gate of gates) {
     fmt.log.info(`Running integration gate: ${gate.key}...`);
@@ -458,14 +459,52 @@ async function executeIntegrationGates(gates, opts = {}) {
   return { ok: true, failedGate: null, error: null };
 }
 
+interface IntegrateFn extends Function {
+  resolveConflictsForMission: typeof resolveConflictsForMission;
+  cleanupMissionWorktree: typeof cleanupMissionWorktree;
+  rewriteWorktreePaths: typeof rewriteWorktreePaths;
+  finalizeVariantACloseout: typeof finalizeVariantACloseout;
+  isNoMergeToAbortResult: typeof isNoMergeToAbortResult;
+  buildConflictResolutionPrompt: typeof buildConflictResolutionPrompt;
+  VARIANT_B_AUTOMATION_SUMMARY: typeof VARIANT_B_AUTOMATION_SUMMARY;
+  stashMainCheckoutIfNeeded: typeof stashMainCheckoutIfNeeded;
+  restoreMainCheckoutStash: typeof restoreMainCheckoutStash;
+  evaluateTaskStatusForIntegration: typeof evaluateTaskStatusForIntegration;
+  promoteTaskForIntegrationIfNeeded: typeof promoteTaskForIntegrationIfNeeded;
+  findExistingSquashCommit: typeof findExistingSquashCommit;
+  printIntegrationPreflight: typeof printIntegrationPreflight;
+  resolveForgejoUserForIntegration: typeof resolveForgejoUserForIntegration;
+  getUnresolvedIndexConflicts: typeof getUnresolvedIndexConflicts;
+  parseStashPopCollisionFiles: typeof parseStashPopCollisionFiles;
+  reportStashPopFailure: typeof reportStashPopFailure;
+  maybeUpdateGraphifyOnPrimary: typeof maybeUpdateGraphifyOnPrimary;
+  SYNC_MERGED_DIAGNOSTICS: typeof SYNC_MERGED_DIAGNOSTICS;
+  printDiagnosticTable: typeof printDiagnosticTable;
+  reportSyncMergedFailure: typeof reportSyncMergedFailure;
+  recordPostIntegrationStats: typeof recordPostIntegrationStats;
+  recordPostIntegrationStatsOrAbort: typeof recordPostIntegrationStatsOrAbort;
+  formatRecordedStatsRow: typeof formatRecordedStatsRow;
+  detectChangedAreas: typeof detectChangedAreas;
+  parseFilesToAreas: typeof parseFilesToAreas;
+  loadIntegrationConfig: typeof loadIntegrationConfig;
+  getIntegrationGatePlan: typeof getIntegrationGatePlan;
+  printIntegrationGatePlan: typeof printIntegrationGatePlan;
+  buildIntegrationGateEnv: typeof buildIntegrationGateEnv;
+  resolveIntegrationVerificationWorktree: typeof resolveIntegrationVerificationWorktree;
+  buildIntegrationVerificationInvocation: typeof buildIntegrationVerificationInvocation;
+  executeIntegrationGates: typeof executeIntegrationGates;
+  buildIntegrationContext: typeof buildIntegrationContext;
+  getPrimaryWorktree: typeof getPrimaryWorktree;
+}
+
 /** @param {string[]} args */
-async function integrate(args) {
+async function integrate(args: string[]) {
   let exitCode = 0;
   /** @type{{created?: boolean, message?: string, rootDir?: string}|null} */
   let temporaryStash = null;
   let nextActionMessage = null;
-  const flags = args.filter((/** @type{string} */ arg) => arg.startsWith('--'));
-  const params = args.filter((/** @type{string} */ arg) => !arg.startsWith('--'));
+  const flags = args.filter((arg: string) => arg.startsWith('--'));
+  const params = args.filter((arg: string) => !arg.startsWith('--'));
   const explicitSlug = params[0];
   const slug = inferSlug(explicitSlug);
   const dryRun = flags.includes('--dry-run');
@@ -490,7 +529,6 @@ async function integrate(args) {
 
     try {
       const executionDir = process.cwd();
-      // @ts-expect-error buildIntegrationContext return type mismatch
       context = buildIntegrationContext(slug);
       // The integration target is the mission's recorded base worktree/branch.
       // For legacy missions these resolve to the primary worktree/branch, keeping
@@ -543,8 +581,8 @@ async function integrate(args) {
 
       temporaryStash = stashMainCheckoutIfNeeded({
         slug,
-        dirtyEntries: context.mainDirtyEntries,
-        rootDir: /** @type{string} */(baseWorktree)
+        dirtyEntries: context.mainDirtyEntries as string[],
+        rootDir: /** @type{string} */(baseWorktree) as string
       });
 
       if (dryRun) {
@@ -557,8 +595,8 @@ async function integrate(args) {
 
     temporaryStash = stashMainCheckoutIfNeeded({
       slug,
-      dirtyEntries: context.mainDirtyEntries,
-      rootDir: baseWorktree
+      dirtyEntries: context.mainDirtyEntries as string[],
+      rootDir: baseWorktree as string
     });
 
     // End-context check: if we are in the worktree that is about to be deleted,
@@ -566,16 +604,14 @@ async function integrate(args) {
     const missionWorktree = conventionalWorktreePath(slug);
     if (process.cwd() === missionWorktree || process.cwd().startsWith(missionWorktree + '/')) {
       fmt.log.info(`Moving process directory to ${baseWorktree} before mission worktree deletion.`);
-      // @ts-expect-error baseWorktree may be undefined
-      process.chdir(baseWorktree);
+      process.chdir(baseWorktree as string);
     }
 
     // Variant Selection
     const branch = missionBranchName(slug, baseWorktree);
     const mainTitle = missionTitle(slug) || slug;
     const summary = mainTitle.replace(/\s+/g, ' ').trim();
-    // @ts-expect-error context.task.taskFile may be undefined
-    const mainTaskFile = context.task.taskFile.replace(executionDir, baseWorktree);
+    const mainTaskFile = (context.task.taskFile as string).replace(executionDir, baseWorktree as string);
     const useVariantA = context.pr.merged;
     fmt.log.info(`Selecting integration variant: ${useVariantA ? 'Variant A (fast-path)' : 'Variant B (full squash-merge)'}`);
 
@@ -613,11 +649,8 @@ async function integrate(args) {
       fmt.log.info(`\nStep 1: Using base worktree ${baseWorktree} on ${baseBranch} as the squash-merge target...`);
 
       fmt.log.info(`Step 2: Checking merge conflicts against local ${baseBranch} in the base worktree...`);
-      // @ts-expect-error baseWorktree may be undefined
       const dryMerge = git(['-C', baseWorktree, 'merge', '--no-commit', '--no-ff', branch]);
-      // @ts-expect-error baseWorktree may be undefined
       const abortResult = git(['-C', baseWorktree, 'merge', '--abort']);
-      // @ts-expect-error dryMerge/abortResult type mismatch
       if (abortResult.status !== 0 && !isNoMergeToAbortResult(abortResult)) {
         fmt.log.fail('Dry-run merge could not be aborted cleanly. Inspect the local integration checkout before retrying integrate.');
         throw new IntegrationAbort();
@@ -625,7 +658,6 @@ async function integrate(args) {
       if (dryMerge.status !== 0) {
         // Before failing, check if a squash commit for this mission already landed on the primary branch
         // from a previous partial integration run (e.g. sync-merged failed after the commit was created).
-        // @ts-expect-error baseWorktree may be undefined
         const existingSquash = findExistingSquashCommit(baseWorktree, slug);
         if (existingSquash) {
           fmt.log.warn(`Squash commit already exists on local ${baseBranch} from a previous partial integration (${existingSquash.slice(0, 12)}). Resuming from sync-merged step.`);
@@ -639,7 +671,6 @@ async function integrate(args) {
               baseBranch: context.baseBranch
             });
             if (!syncResult.ok) {
-              // @ts-expect-error reportSyncMergedFailure expects {statusCode, error}
               reportSyncMergedFailure(syncResult);
               throw new IntegrationAbort();
             }
@@ -677,9 +708,7 @@ async function integrate(args) {
       } else {
         fmt.log.info('Step 3: Squash-merging the mission branch...');
         let noisePatchState = null;
-        // @ts-expect-error baseWorktree may be undefined
         if (softResetTrailingBacklogNoise(baseWorktree, git)) {
-          // @ts-expect-error baseWorktree may be undefined
           noisePatchState = prepareNoisePatchForSquash(baseWorktree, { gitRunner: git });
           if (!noisePatchState.ok) {
             fmt.log.fail('Could not preserve trailing backlog noise before squash merge.');
@@ -689,7 +718,6 @@ async function integrate(args) {
             throw new IntegrationAbort();
           }
         }
-        // @ts-expect-error baseWorktree may be undefined
         const squashResult = git(['-C', baseWorktree, 'merge', '--squash', branch]);
         if (squashResult.status !== 0) {
           noisePatchState?.cleanup?.();
@@ -698,7 +726,7 @@ async function integrate(args) {
         }
         if (noisePatchState?.patchPath) {
           const restoreNoiseResult = restoreNoisePatchAfterSquash(/** @type {string} */ (baseWorktree), noisePatchState.patchPath, { gitRunner: git });
-          /** @type {Function} */ (noisePatchState.cleanup)();
+          (noisePatchState.cleanup as Function)();
           if (!restoreNoiseResult.ok) {
             fmt.log.fail('Could not restore trailing backlog noise after squash merge.');
             if (restoreNoiseResult.error) {
@@ -714,12 +742,10 @@ async function integrate(args) {
           // Re-resolve because it moved
           const updatedResolution = resolveTaskFile(slug, baseWorktree);
           if (updatedResolution.ok) {
-            // @ts-expect-error baseWorktree may be undefined
-            rewriteWorktreePaths(updatedResolution.taskFile, slug, { rootDir: baseWorktree });
+            rewriteWorktreePaths(updatedResolution.taskFile as string, slug, { rootDir: baseWorktree });
           }
         }
 
-        // @ts-expect-error baseWorktree may be undefined
         git(['-C', baseWorktree, 'add', '-A']);
         fmt.log.info('Step 5: Creating the landed squash commit in the local integration checkout...');
         const commitResult = git([
@@ -748,9 +774,8 @@ async function integrate(args) {
           throw new IntegrationAbort();
         }
         const proof = /** @type {any} */ (proofResult).proof;
-        // @ts-expect-error baseWorktree may be undefined
         const mergedCommit = git(['-C', baseWorktree, 'rev-parse', 'HEAD']).stdout.trim();
-        const proofCheck = verification.assertVerifiedTreeProof(proof, baseWorktree, { gitRunner: git });
+        const proofCheck = verification.assertVerifiedTreeProof(proof!, baseWorktree, { gitRunner: git });
         if (!proofCheck.ok) {
           fmt.log.fail(`Verification proof is stale for the publish tree: ${/** @type {any} */ (proofCheck).error}`);
           throw new IntegrationAbort();
@@ -765,7 +790,6 @@ async function integrate(args) {
             baseBranch: context.baseBranch
           });
           if (!syncResult.ok) {
-            // @ts-expect-error reportSyncMergedFailure expects {statusCode, error}
             reportSyncMergedFailure(syncResult);
             throw new IntegrationAbort();
           }
@@ -795,7 +819,7 @@ async function integrate(args) {
     }
   } finally {
     if (temporaryStash?.created) {
-        const restoreResult = restoreMainCheckoutStash(/** @type {any} */ (temporaryStash));
+        const restoreResult = restoreMainCheckoutStash(temporaryStash as any);
       if (restoreResult.status !== 0) {
         reportStashPopFailure(slug, restoreResult, { rootDir: /** @type {any} */ (temporaryStash).rootDir });
         exitCode = 1;
@@ -810,11 +834,11 @@ async function integrate(args) {
 }
 
 /** @param {string} slug @param{{baseBranch?: string|null, baseWorktree?: string|null, isForgejoReviewEnabledFn?: Function}} opts */
-function buildIntegrationContext(slug, {
+function buildIntegrationContext(slug: string, {
   baseBranch = null,
   baseWorktree = null,
   isForgejoReviewEnabledFn = isForgejoReviewEnabled
-} = {}) {
+}: {baseBranch?: string | null, baseWorktree?: string | null, isForgejoReviewEnabledFn?: Function} = {}) {
   const branch = `mission/${slug}`;
   const currentBranch = getCurrentBranch();
   const missionDir = findMissionDir(slug);
@@ -823,11 +847,11 @@ function buildIntegrationContext(slug, {
   // The mission integrates back into its recorded base branch/worktree. When no
   // base was recorded (every legacy mission) these resolve to the primary
   // branch/worktree, so the rest of integration is byte-identical to today.
-  let resolvedBaseBranch = baseBranch;
+  let resolvedBaseBranch: string | null = baseBranch;
   if (!resolvedBaseBranch) {
     try { resolvedBaseBranch = resolveMissionBaseBranch(slug, process.cwd()); } catch (_) { resolvedBaseBranch = getPrimaryBranch(); }
   }
-  let resolvedBaseWorktree = baseWorktree;
+  let resolvedBaseWorktree: string | null = baseWorktree;
   if (!resolvedBaseWorktree) {
     try { resolvedBaseWorktree = resolveBaseWorktree(slug, { rootDir: process.cwd() }); } catch (_) { resolvedBaseWorktree = getPrimaryWorktree(); }
   }
@@ -836,13 +860,13 @@ function buildIntegrationContext(slug, {
     const worktree = resolveWorktree(slug);
     if (worktree) {task = resolveTaskFile(slug, worktree);}
   }
-  let taskStatus = task.ok ? getTaskStatus(/** @type {string} */ (task.taskFile)) : null;
+  let taskStatus = task.ok ? getTaskStatus(task.taskFile as string) : null;
   if (task.ok && taskStatus === 'backlog') {
     const worktree = resolveWorktree(slug);
     if (worktree) {
       const wtTask = resolveTaskFile(slug, worktree);
       if (wtTask.ok) {
-        const wtStatus = getTaskStatus(/** @type {string} */ (wtTask.taskFile));
+        const wtStatus = getTaskStatus(wtTask.taskFile as string);
         if (wtStatus && wtStatus !== 'backlog') {
           task = wtTask;
           taskStatus = wtStatus;
@@ -850,22 +874,20 @@ function buildIntegrationContext(slug, {
       }
     }
   }
-  const taskAssignee = task.ok ? getTaskAssignee(/** @type {string} */ (task.taskFile)) : null;
+  const taskAssignee = task.ok ? getTaskAssignee(task.taskFile as string) : null;
   const forgejoEnabled = isForgejoReviewEnabledFn(/** @type {string} */ (resolvedBaseWorktree));
   
-  let forgejoIdentity = { forgejoUser: null, warning: null };
-  let forgejoToken = null;
-  let pr = { exists: false };
-  /** @type{any[]} */ let siblingPrs = [];
-  let approval = { ok: false, error: 'forgejo-off', reviewState: null };
+  let forgejoIdentity: {forgejoUser: string | null, warning: string | null} = { forgejoUser: null, warning: null };
+  let forgejoToken: string | null = null;
+  let pr: any = { exists: false };
+  /** @type{any[]} */ let siblingPrs: any[] = [];
+  let approval: any = { ok: false, error: 'forgejo-off', reviewState: null };
 
   if (forgejoEnabled) {
-    // @ts-expect-error forgejoIdentity.forgejoUser type mismatch
     forgejoIdentity = resolveForgejoUserForIntegration(taskAssignee);
-    forgejoToken = readToken(/** @type {any} */ (forgejoIdentity.forgejoUser));
+    forgejoToken = readToken(/** @type {any} */ (forgejoIdentity.forgejoUser || 'default'));
     pr = /** @type {any} */ (getPrStatus(branch, process.cwd(), {
       forgejoUser: /** @type {any} */ (forgejoIdentity.forgejoUser),
-      // @ts-expect-error forgejoToken may be null
       token: forgejoToken
     }));
     
@@ -925,9 +947,8 @@ function buildIntegrationContext(slug, {
 }
 
 /** @param {{slug: string, branch: string, currentBranch: string, missionDir?: string, area: string, task: {ok: boolean, taskFile?: string, reason?: string, matches?: string[]}, taskStatus?: string, taskAssignee?: string|null, forgejoUser?: string|null, forgejoToken?: string|null, taskAssigneeWarning?: string|null, pr: {exists?: boolean, state?: string, number?: number, merged?: boolean, raw?: string}, siblingPrs: any[], approval: {ok?: boolean, error?: string, reviewState?: string, defaultUserApproved?: boolean, source?: string}, baseBranch?: string, baseWorktree?: string, mainBranch: string, mainDirtyEntries: string[], mainDirty: boolean}} context */
-function evaluateTaskStatusForIntegration(context) {
+function evaluateTaskStatusForIntegration(context: any) {
   const stateMapOptions = { rootDir: /** @type {string} */ (context.baseWorktree) };
-  // @ts-expect-error context.taskStatus may be undefined
   if (toVirtual(context.taskStatus, /** @type {any} */ (stateMapOptions)) === 'approved') {
     return {
       ok: true,
@@ -969,13 +990,12 @@ function evaluateTaskStatusForIntegration(context) {
   return {
     ok: false,
     level: 'fail',
-    // @ts-expect-error stateMapOptions type mismatch
     message: `Backlog status: expected approved, or review with an approved/merged Forgejo PR; found ${toVirtual(context.taskStatus, stateMapOptions)}`
   };
 }
 
 /** @param {{slug: string, branch: string, currentBranch: string, missionDir?: string, area: string, task: {ok: boolean, taskFile?: string, reason?: string, matches?: string[]}, taskStatus?: string, taskAssignee?: string|null, forgejoUser?: string|null, forgejoToken?: string|null, taskAssigneeWarning?: string|null, pr: {exists?: boolean, state?: string, number?: number, merged?: boolean, raw?: string}, siblingPrs: any[], approval: {ok?: boolean, error?: string, reviewState?: string, defaultUserApproved?: boolean, source?: string}, baseBranch?: string, baseWorktree?: string, mainBranch: string, mainDirtyEntries: string[], mainDirty: boolean}} context */
-function promoteTaskForIntegrationIfNeeded(context, { dryRun = false } = {}) {
+function promoteTaskForIntegrationIfNeeded(context: any, { dryRun = false } = {}) {
   const taskStatusCheck = evaluateTaskStatusForIntegration(context);
   const needsPromotion = context.task?.ok && context.taskStatus === 'review' && taskStatusCheck.ok;
 
@@ -989,7 +1009,8 @@ function promoteTaskForIntegrationIfNeeded(context, { dryRun = false } = {}) {
   }
 
   const stateMapOptions = { rootDir: /** @type {string} */ (context.baseWorktree) };
-  if (!setTaskStatus(/** @type {string} */ (context.task.taskFile), toActual('approved', stateMapOptions))) {
+  const approvedStatus = toActual('approved', stateMapOptions) || 'approved';
+  if (!setTaskStatus(/** @type {string} */ (context.task.taskFile || ''), approvedStatus)) {
     fmt.log.fail('Could not promote the Backlog task to approved before integration.');
     throw new IntegrationAbort();
   }
@@ -1003,7 +1024,7 @@ function promoteTaskForIntegrationIfNeeded(context, { dryRun = false } = {}) {
  * @param{{slug: string, branch: string, missionDir?: string, area: string, task: {ok: boolean, taskFile?: string, reason?: string, matches?: string[]}, taskStatus?: string, taskAssignee?: string|null, forgejoUser?: string|null, forgejoToken?: string|null, taskAssigneeWarning?: string|null, pr: {exists?: boolean, state?: string, number?: number, merged?: boolean, raw?: string}, siblingPrs: any[], approval: {ok?: boolean, error?: string, reviewState?: string, defaultUserApproved?: boolean, source?: string}, baseBranch?: string, baseWorktree?: string, mainBranch: string, mainDirtyEntries: string[], mainDirty: boolean}} context
  */
 function printIntegrationPreflight(
-  context,
+  context: any,
   {
     readTokenFn = readToken,
     resolveTokenFileFn = resolveTokenFile,
@@ -1026,13 +1047,10 @@ function printIntegrationPreflight(
   log(fmt.status('INFO', `Integration preflight for ${context.slug}`));
 
   const branchPrefix = missionBranchName(context.slug, baseWorktree);
-  // @ts-expect-error context.currentBranch doesn't exist on type
   if ((/** @type {any} */ context).currentBranch === context.branch || (/** @type {any} */ context).currentBranch.startsWith(`${branchPrefix}-`)) {
-    // @ts-expect-error context.currentBranch doesn't exist on type
     log(fmt.status('PASS', `Mission branch: ${(/** @type {any} */ context).currentBranch}`));
   } else {
     failures.push('branch');
-    // @ts-expect-error context.currentBranch doesn't exist on type
     log(fmt.status('FAIL', `Mission branch: current branch is ${(/** @type {any} */ context).currentBranch}, expected ${context.branch} (or a branch with a suffix)`));
   }
 
@@ -1072,10 +1090,9 @@ function printIntegrationPreflight(
       }
     } catch (/** @type{any} */ error) {
       failures.push('classification');
-      log(fmt.status('FAIL', `Backlog classification: ${error.message}`));
+      log(fmt.status('FAIL', `Backlog classification: ${(error as Error).message || String(error)}`));
     }
 
-    // @ts-expect-error context type mismatch (missing currentBranch)
     const taskStatusCheck = evaluateTaskStatusForIntegration(context);
     if (!taskStatusCheck.ok) {
       failures.push('task-status');
@@ -1132,7 +1149,7 @@ function printIntegrationPreflight(
       const baseSlugMatch = context.slug.match(/^(task-\d+)/i);
       const baseSlug = baseSlugMatch ? baseSlugMatch[1].toLowerCase() : context.slug;
       log(fmt.status('WARN', `Multiple open PRs detected for ${baseSlug}. Close stale PRs before integrating:`));
-      context.siblingPrs.forEach((/** @type{{number: number, head: string, html_url: string}} */ p) => {
+      context.siblingPrs.forEach((p: any) => {
         log(fmt.status('INFO', `  - PR #${p.number} (${p.head}): ${p.html_url}`));
       });
     }
@@ -1205,7 +1222,7 @@ function printIntegrationPreflight(
   if (context.mainDirty) {
     warnings.push('main-dirty');
     log(fmt.status('WARN', `Integration checkout dirty: ${baseWorktree} has uncommitted changes that will be stashed temporarily`));
-    context.mainDirtyEntries.forEach((/** @type{string} */ entry) => log(fmt.status('INFO', `  - ${entry}`)));
+    context.mainDirtyEntries.forEach((entry: string) => log(fmt.status('INFO', `  - ${entry}`)));
   } else {
     log(fmt.status('PASS', 'Integration checkout dirty state: clean'));
   }
@@ -1232,7 +1249,7 @@ function printIntegrationPreflight(
 }
 
 /** @param {string} taskFilePath @param {string} slug @param{{rootDir?: string}} options */
-function rewriteWorktreePaths(taskFilePath, slug, options = {}) {
+function rewriteWorktreePaths(taskFilePath: string, slug: string, options: {rootDir?: string} = {}) {
   const rootDir = options.rootDir || getPrimaryWorktree();
   const before = fs.readFileSync(taskFilePath, 'utf8');
   const updated = before.replace(
@@ -1251,7 +1268,7 @@ function stashMainCheckoutIfNeeded({
   dirtyEntries = [],
   rootDir = getPrimaryWorktree(),
   gitRunner = git
-}) {
+}: {slug: string, dirtyEntries?: string[], rootDir?: string, gitRunner?: Function}) {
   if (dirtyEntries.length === 0) {
     return { created: false };
   }
@@ -1281,7 +1298,7 @@ function stashMainCheckoutIfNeeded({
 }
 
 /** @param{{message: string, rootDir?: string, gitRunner?: Function}} params */
-function restoreMainCheckoutStash({ message, rootDir = getPrimaryWorktree(), gitRunner = git }) {
+function restoreMainCheckoutStash({ message, rootDir = getPrimaryWorktree(), gitRunner = git }: {message: string, rootDir?: string, gitRunner?: Function}) {
   fmt.log.info(`Restoring temporarily stashed local integration checkout changes: ${message}`);
   // Pass cwd explicitly so spawnSync does not inherit the process cwd, which may have been
   // deleted by worktree cleanup earlier in the same integrate run.
@@ -1289,7 +1306,7 @@ function restoreMainCheckoutStash({ message, rootDir = getPrimaryWorktree(), git
 }
 
 /** @param{{stdout: string, stderr: string, status: number}} result */
-function isNoMergeToAbortResult(result) {
+function isNoMergeToAbortResult(result: any) {
   const output = [result.stdout, result.stderr].filter(Boolean).join('\n');
   return /MERGE_HEAD missing|There is no merge to abort/i.test(output);
 }
@@ -1299,7 +1316,7 @@ function isNoMergeToAbortResult(result) {
  * @param{{rootDir?: string, gitRunner?: Function, recordIntegrationStatsFn?: Function}} options
  */
 function recordPostIntegrationStats(
-  slug,
+  slug: string,
   {
     rootDir = getPrimaryWorktree(),
     gitRunner = git,
@@ -1334,10 +1351,10 @@ function recordPostIntegrationStats(
 }
 
 /** @param {string} slug @param{{rootDir?: string}} options */
-function recordPostIntegrationStatsOrAbort(slug, options = {}) {
+function recordPostIntegrationStatsOrAbort(slug: string, options: {rootDir?: string} = {}) {
   try {
     return recordPostIntegrationStats(slug, options);
-  } catch (/** @type{any} */ error) {
+  } catch (error: any) {
     const detail = error && error.message ? error.message : String(error);
     fmt.log.fail(`Post-integration workflow stats failed for ${slug}: ${detail}`);
     throw new IntegrationAbort();
@@ -1355,7 +1372,7 @@ function finalizeVariantACloseout({
   verificationArea = null,
   captureVerifiedTreeProofFn = verification.captureVerifiedTreeProof,
   assertVerifiedTreeProofFn = verification.assertVerifiedTreeProof
-}) {
+}: {slug: string, summary: string, mainTaskFile?: string, rootDir?: string, gitRunner?: Function, baseBranch?: string|null, verificationArea?: string|null, captureVerifiedTreeProofFn?: Function, assertVerifiedTreeProofFn?: Function}) {
   softResetTrailingBacklogNoise(rootDir, gitRunner);
 
   if (mainTaskFile && fs.existsSync(mainTaskFile)) {
@@ -1363,7 +1380,7 @@ function finalizeVariantACloseout({
     // Re-resolve because it moved
     const updatedResolution = resolveTaskFile(slug, rootDir);
     if (updatedResolution.ok) {
-      rewriteWorktreePaths(/** @type {string} */ (updatedResolution.taskFile), slug, { rootDir });
+      rewriteWorktreePaths(updatedResolution.taskFile || '', slug, { rootDir });
     }
   }
 
@@ -1429,18 +1446,18 @@ function finalizeVariantACloseout({
  * @param{{rootDir?: string, gitRunner?: Function, removeDir?: Function, existsSync?: Function}} options
  */
 function cleanupMissionWorktree(
-  slug,
+  slug: string,
   {
     rootDir = getPrimaryWorktree(),
     gitRunner = git,
-    removeDir = (/** @type{string} */ target) => {
+    removeDir = (target: string) => {
       if (isForgejoPath(target, { forgejoHome: resolveForgejoHome() })) {
         throw new Error(`CRITICAL SAFETY VIOLATION: cleanupMissionWorktree attempted to delete Forgejo home: ${target}`);
       }
       return fs.rmSync(target, { recursive: true, force: true });
     },
     existsSync = fs.existsSync
-  } = {}
+  }: {rootDir?: string, gitRunner?: Function, removeDir?: Function, existsSync?: Function} = {}
 ) {
   const branch = missionBranchName(slug, rootDir);
   const worktreePath = `${conventionalWorktreePath(slug, rootDir)}`;
@@ -1455,8 +1472,7 @@ function cleanupMissionWorktree(
   }
 
   const worktreeList = gitRunner(['-C', rootDir, 'worktree', 'list', '--porcelain']).stdout;
-  // @ts-expect-error line implicitly any
-  const isRegistered = worktreeList.split('\n').some(line => line.trim() === `worktree ${worktreePath}`);
+  const isRegistered = worktreeList.split('\n').some((line: string) => line.trim() === `worktree ${worktreePath}`);
 
   if (existsSync(worktreePath) && isRegistered) {
     let removeResult = gitRunner(['-C', rootDir, 'worktree', 'remove', worktreePath]);
@@ -1487,7 +1503,7 @@ function cleanupMissionWorktree(
 }
 
 /** @param {string} rootDir @param {string} slug */
-function findExistingSquashCommit(rootDir, slug) {
+function findExistingSquashCommit(rootDir: string, slug: string) {
   const result = git(['-C', rootDir, 'log', '--format=%H %s', '-50']);
   if (result.status !== 0) {return null;}
   const prefix = `${missionBranchName(slug, rootDir)}:`;
@@ -1533,12 +1549,12 @@ function resolveConflictsForMission(slug, area, { getConflictFilesFn, resolveWor
   // Conflicts must be detected against the branch the mission integrates back
   // into. For a feature-branch mission that is the recorded base branch, not the
   // primary branch; for legacy missions resolveMissionBaseBranch returns primary.
-  let targetBranch = baseBranch;
+  /** @type {string} */
+  let targetBranch = /** @type {string} */ (baseBranch || getPrimaryBranch());
   if (!targetBranch) {
     try { targetBranch = resolveMissionBaseBranch(slug, rootDir); } catch (_) { targetBranch = getPrimaryBranch(); }
   }
 
-  // @ts-expect-error getConflictFilesFn may be undefined
   const detectFn = getConflictFilesFn || (() => getConflictFiles(worktreePath, targetBranch));
 
   if (!fs.existsSync(worktreePath)) {
@@ -1551,7 +1567,7 @@ function resolveConflictsForMission(slug, area, { getConflictFilesFn, resolveWor
   let conflictFiles;
   try {
     conflictFiles = detectFn(worktreePath, targetBranch);
-  } catch (/** @type{any} */ err) {
+  } catch (err: any) {
     fmt.log.fail('Merge check failed with a non-conflict error:');
     fmt.log.fail(err.message);
     return { ok: false, error: 'merge-failed', conflictFiles: [], sharedFiles: [], missionSpecificFiles: [], worktreePath };
@@ -1564,20 +1580,20 @@ function resolveConflictsForMission(slug, area, { getConflictFilesFn, resolveWor
   }
 
   fmt.log.info(`Conflicting files (${conflictFiles.length}):`);
-  conflictFiles.forEach((/** @type{string} */ f) => fmt.log.info(`  - ${f}`));
+  conflictFiles.forEach((f: string) => fmt.log.info(`  - ${f}`));
 
   // Derive the mission-doc directory prefix from the actual located mission dir
   // so the classification works for non-standard doc paths (e.g. renamed year dir).
   const taskPattern = new RegExp(`backlog/(?:tasks|completed)/[^/]*${slug}`);
-  const missionSpecificFiles = conflictFiles.filter((/** @type{string} */ f) =>
+  const missionSpecificFiles = conflictFiles.filter((f: string) =>
     isMissionArtifact(f, slug, worktreePath) || taskPattern.test(f)
   );
-  const sharedFiles = conflictFiles.filter((/** @type{string} */ f) => !missionSpecificFiles.includes(f));
+  const sharedFiles = conflictFiles.filter((f: string) => !missionSpecificFiles.includes(f));
   const quotedWorktreePath = shellQuote(worktreePath);
 
   if (sharedFiles.length > 0) {
     fmt.log.warn(`Conflicts in ${sharedFiles.length} shared file(s) require manual resolution:`);
-    sharedFiles.forEach((/** @type{string} */ f) => fmt.log.plain(`  - ${f}`));
+    sharedFiles.forEach((f: string) => fmt.log.plain(`  - ${f}`));
     fmt.log.info('Manual resolution path:');
     fmt.log.info(`  cd ${quotedWorktreePath}`);
     fmt.log.info(`  git rebase ${targetBranch}`);
@@ -1594,7 +1610,7 @@ function resolveConflictsForMission(slug, area, { getConflictFilesFn, resolveWor
   fmt.log.info(`  cd ${quotedWorktreePath}`);
   fmt.log.info(`  git rebase ${targetBranch}`);
   fmt.log.info('  # after the rebase pauses on conflicts:');
-  missionSpecificFiles.forEach((/** @type{string} */ f) => fmt.log.info(`  git checkout --theirs "${f}" && git add "${f}"`));
+  missionSpecificFiles.forEach((f: string) => fmt.log.info(`  git checkout --theirs "${f}" && git add "${f}"`));
   fmt.log.info('  git rebase --continue');
   fmt.log.info(`  ${formatVerificationCommand(area, worktreePath)}`);
   fmt.log.info(`  px integrate ${slug} --dry-run`);
@@ -1603,7 +1619,7 @@ function resolveConflictsForMission(slug, area, { getConflictFilesFn, resolveWor
 }
 
 /** @param{string} slug @param{string} area @param{{rootDir?: string, worktreePath?: string, baseBranch?: string|null}} options */
-function buildConflictResolutionPrompt(slug = '<slug>', area = '<area>', options = {}) {
+function buildConflictResolutionPrompt(slug: string = '<slug>', area: string = '<area>', options: {rootDir?: string, worktreePath?: string, baseBranch?: string|null} = {}) {
   const rootDir = options.rootDir || getPrimaryWorktree();
   const worktreePath = options.worktreePath || resolveWorktree(slug) || conventionalWorktreePath(slug, rootDir);
   const quotedWorktreePath = shellQuote(worktreePath);
@@ -1633,41 +1649,41 @@ function buildConflictResolutionPrompt(slug = '<slug>', area = '<area>', options
   ];
 }
 
-module.exports = integrate;
-module.exports.resolveConflictsForMission = resolveConflictsForMission;
-module.exports.cleanupMissionWorktree = cleanupMissionWorktree;
-module.exports.rewriteWorktreePaths = rewriteWorktreePaths;
-module.exports.finalizeVariantACloseout = finalizeVariantACloseout;
-module.exports.isNoMergeToAbortResult = isNoMergeToAbortResult;
-module.exports.buildConflictResolutionPrompt = buildConflictResolutionPrompt;
-module.exports.VARIANT_B_AUTOMATION_SUMMARY = VARIANT_B_AUTOMATION_SUMMARY;
-module.exports.stashMainCheckoutIfNeeded = stashMainCheckoutIfNeeded;
-module.exports.restoreMainCheckoutStash = restoreMainCheckoutStash;
-module.exports.getPrimaryWorktree = getPrimaryWorktree;
-module.exports.evaluateTaskStatusForIntegration = evaluateTaskStatusForIntegration;
-module.exports.promoteTaskForIntegrationIfNeeded = promoteTaskForIntegrationIfNeeded;
-module.exports.findExistingSquashCommit = findExistingSquashCommit;
-module.exports.printIntegrationPreflight = printIntegrationPreflight;
-module.exports.resolveForgejoUserForIntegration = resolveForgejoUserForIntegration;
-module.exports.getUnresolvedIndexConflicts = getUnresolvedIndexConflicts;
-module.exports.parseStashPopCollisionFiles = parseStashPopCollisionFiles;
-module.exports.reportStashPopFailure = reportStashPopFailure;
-module.exports.maybeUpdateGraphifyOnPrimary = maybeUpdateGraphifyOnPrimary;
-module.exports.SYNC_MERGED_DIAGNOSTICS = SYNC_MERGED_DIAGNOSTICS;
-module.exports.printDiagnosticTable = printDiagnosticTable;
-module.exports.reportSyncMergedFailure = reportSyncMergedFailure;
-module.exports.recordPostIntegrationStats = recordPostIntegrationStats;
-module.exports.recordPostIntegrationStatsOrAbort = recordPostIntegrationStatsOrAbort;
-module.exports.formatRecordedStatsRow = formatRecordedStatsRow;
-
-// Integration gates exports
-module.exports.detectChangedAreas = detectChangedAreas;
-module.exports.parseFilesToAreas = parseFilesToAreas;
-module.exports.loadIntegrationConfig = loadIntegrationConfig;
-module.exports.getIntegrationGatePlan = getIntegrationGatePlan;
-module.exports.printIntegrationGatePlan = printIntegrationGatePlan;
-module.exports.buildIntegrationGateEnv = buildIntegrationGateEnv;
-module.exports.resolveIntegrationVerificationWorktree = resolveIntegrationVerificationWorktree;
-module.exports.buildIntegrationVerificationInvocation = buildIntegrationVerificationInvocation;
-module.exports.executeIntegrationGates = executeIntegrationGates;
-module.exports.buildIntegrationContext = buildIntegrationContext;
+// Attach all named exports as properties of the default export (mirrors original CJS shape for CommonJS require compatibility)
+(integrate as any).resolveConflictsForMission = resolveConflictsForMission;
+(integrate as any).cleanupMissionWorktree = cleanupMissionWorktree;
+(integrate as any).rewriteWorktreePaths = rewriteWorktreePaths;
+(integrate as any).finalizeVariantACloseout = finalizeVariantACloseout;
+(integrate as any).isNoMergeToAbortResult = isNoMergeToAbortResult;
+(integrate as any).buildConflictResolutionPrompt = buildConflictResolutionPrompt;
+(integrate as any).VARIANT_B_AUTOMATION_SUMMARY = VARIANT_B_AUTOMATION_SUMMARY;
+(integrate as any).stashMainCheckoutIfNeeded = stashMainCheckoutIfNeeded;
+(integrate as any).restoreMainCheckoutStash = restoreMainCheckoutStash;
+(integrate as any).evaluateTaskStatusForIntegration = evaluateTaskStatusForIntegration;
+(integrate as any).promoteTaskForIntegrationIfNeeded = promoteTaskForIntegrationIfNeeded;
+(integrate as any).findExistingSquashCommit = findExistingSquashCommit;
+(integrate as any).printIntegrationPreflight = printIntegrationPreflight;
+(integrate as any).resolveForgejoUserForIntegration = resolveForgejoUserForIntegration;
+(integrate as any).getUnresolvedIndexConflicts = getUnresolvedIndexConflicts;
+(integrate as any).parseStashPopCollisionFiles = parseStashPopCollisionFiles;
+(integrate as any).reportStashPopFailure = reportStashPopFailure;
+(integrate as any).maybeUpdateGraphifyOnPrimary = maybeUpdateGraphifyOnPrimary;
+(integrate as any).SYNC_MERGED_DIAGNOSTICS = SYNC_MERGED_DIAGNOSTICS;
+(integrate as any).printDiagnosticTable = printDiagnosticTable;
+(integrate as any).reportSyncMergedFailure = reportSyncMergedFailure;
+(integrate as any).recordPostIntegrationStats = recordPostIntegrationStats;
+(integrate as any).recordPostIntegrationStatsOrAbort = recordPostIntegrationStatsOrAbort;
+(integrate as any).formatRecordedStatsRow = formatRecordedStatsRow;
+(integrate as any).detectChangedAreas = detectChangedAreas;
+(integrate as any).parseFilesToAreas = parseFilesToAreas;
+(integrate as any).loadIntegrationConfig = loadIntegrationConfig;
+(integrate as any).getIntegrationGatePlan = getIntegrationGatePlan;
+(integrate as any).printIntegrationGatePlan = printIntegrationGatePlan;
+(integrate as any).buildIntegrationGateEnv = buildIntegrationGateEnv;
+(integrate as any).resolveIntegrationVerificationWorktree = resolveIntegrationVerificationWorktree;
+(integrate as any).buildIntegrationVerificationInvocation = buildIntegrationVerificationInvocation;
+(integrate as any).executeIntegrationGates = executeIntegrationGates;
+(integrate as any).buildIntegrationContext = buildIntegrationContext;
+// Re-export getPrimaryWorktree from mission-utils
+(integrate as any).getPrimaryWorktree = getPrimaryWorktree;
+export = /** @type {any} */ (integrate) as unknown as IntegrateFn;
