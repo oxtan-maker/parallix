@@ -15,7 +15,7 @@ dependencies:
   - TASK-1368
   - TASK-1372
   - TASK-1373
-  - TASK-1374
+  - TASK-1375
 priority: high
 ---
 
