@@ -1,11 +1,13 @@
 ---
 id: TASK-1375
 title: 'TASK-1373: Mission 9 - Review subsystem (10 files)'
-status: backlog
-assignee: []
+status: done
+assignee:
+  - custom
 created_date: '2026-06-27 10:38'
-updated_date: '2026-06-27 10:39'
-labels: []
+updated_date: '2026-06-29 05:07'
+labels:
+  - user_value
 dependencies:
   - TASK-1366
   - TASK-1367
@@ -57,3 +59,22 @@ Convert the 10-file review subsystem. This handles the second-agent review phase
 - [ ] #5 Docs updated to reflect any workflow or user-facing behavior change
 - [ ] #6 Bug-labeled missions include a red-to-green reproduction test that fails before the fix and passes after
 <!-- DOD:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Converted the final 3 JS files in lib/review/ to TypeScript:
+
+- **review-commands.ts** (~1600 lines): Full command dispatcher with all strict-mode fixes (non-null assertions on optional chaining, removed extra options keys like `rootDir` from `consumeReviewerArtifacts`, removed `log`/`error` from `readAllEvents`, added missing `postReview` import, exported `consumeArtifacts` for test access).
+
+- **review-loop.ts** (~1170 lines): Autonomous review loop orchestrator with strict-mode fixes (lazy require for `commands/handoff.js` and `commands/stats.js`, `as any` casts for `buildReviewPromptFn`/`buildActOnReviewPromptFn`/`buildCompactReviewPromptFn`/`buildCompactActOnReviewPromptFn` calls with extra props, `runFn as any` in rebase options, `getCommentsFn as any`, `healedPr.number as number | null`, exported `stageLaunchSinceMs` for test access).
+
+- **review.ts** (barrel): CJS-compat barrel using `export =` pattern so `require('./review')` returns the `review` function directly (historic backward-compat behavior), with all named exports attached as properties.
+
+**Verification results:**
+- `tsc --noEmit`: clean
+- `npm test`: 1731 pass, 0 fail, 22 skipped
+- `./scripts/verify-local.sh static-analysis`: ALL STAGES PASSED
+- `git ls-files lib/review/*.js`: empty
+- `node -e "require('./lib/review/review')"`: CJS load OK
+<!-- SECTION:FINAL_SUMMARY:END -->

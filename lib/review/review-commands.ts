@@ -4,28 +4,34 @@
  * Handles command dispatching and CLI command implementations.
  */
 
-const fs = require('fs');
-const path = require('path');
-const os = require('os');
-const fmt = require('../core/fmt');
-const { run, getCurrentBranch } = require('../core/git');
-const { findMissionDir, findMissionArea, resolveWorktree, inferSlug, findCheckpoints, missionBranchName, missionBaseDir } = require('../core/mission-utils');
-const { resolveTaskFile, getTaskStatus, getAcceptanceCriteria, getTaskAssignee, getTaskImplementer, reportTaskResolution, transitionTask } = require('../tools/backlog');
-const { toVirtual } = require('../core/state-map');
-const { getPrStatus, readToken, postComment, createPr, getComments, closePr, resolveReviewUser, isProviderEnabled } = require('./review-adapter');
-const { buildAutonomousReviewMatrix, formatMatrixSummary } = require('../core/runtime-matrix');
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
+import * as fmt from '../core/fmt.js';
+import { run, getCurrentBranch } from '../core/git.js';
+import { findMissionDir, findMissionArea, resolveWorktree, inferSlug, findCheckpoints, missionBranchName, missionBaseDir, getPrimaryBranch } from '../core/mission-utils.js';
+import { resolveTaskFile, getTaskStatus, getAcceptanceCriteria, getTaskAssignee, getTaskImplementer, reportTaskResolution, transitionTask } from '../tools/backlog.js';
+import { toVirtual } from '../core/state-map.js';
+import { getPrStatus, readToken, postComment, postReview, createPr, getComments, closePr, resolveReviewUser, isProviderEnabled } from './review-adapter.js';
+import { buildAutonomousReviewMatrix, formatMatrixSummary } from '../core/runtime-matrix.js';
+import { readReviewState, writeReviewState, resolveReviewIdentity, ReviewState } from './review-state.js';
+import { createEvent, importAllLegacyArtifacts, ALL_EVENT_TYPES, isValidEventType, shouldMirrorToProvider, readAllEvents } from './review-events.js';
+import { startAgent } from '../agents/agents.js';
+import { formatVerificationCommand, runVerificationGate } from '../core/verification.js';
+import { bootstrapReviewSurface } from '../tools/setup-review.js';
+import { resolveReviewAdapter } from '../core/product-config.js';
+import { buildMetadataFooter, reviewArtifactPath, postWorkflowComment, postWorkflowReview, consumeReviewerArtifacts, resolveArtifactDir } from './review-artifacts.js';
+import { startReviewLoop, recordStageStatsSafe, commitSafeMissionArtifacts } from './review-loop.js';
 
-const { readReviewState, writeReviewState, resolveReviewIdentity } = require('./review-state');
-const { createEvent, importAllLegacyArtifacts, ALL_EVENT_TYPES,
-        isValidEventType, shouldMirrorToProvider, readAllEvents } = require('./review-events');
-const { startAgent } = require('../agents/agents');
-const { performHandoff } = require('../commands/handoff');
-const { formatVerificationCommand, runVerificationGate } = require('../core/verification');
-const { bootstrapReviewSurface } = require('../tools/setup-review');
-const { resolveReviewAdapter } = require('../core/product-config');
-
-// Import from review-artifacts module
-const { buildMetadataFooter, reviewArtifactPath, postWorkflowComment, postWorkflowReview, consumeReviewerArtifacts } = require('./review-artifacts');
+/** Lazily loaded handoff module — not yet converted to TS. */
+let _handoff: any = null;
+async function getHandoff(): Promise<any> {
+  if (!_handoff) {
+    // @ts-expect-error handoff.js not converted to TS yet
+    _handoff = await import('../commands/handoff.js');
+  }
+  return _handoff as any;
+}
 
 const DEFAULT_MAX_ATTEMPTS = 5;
 
@@ -33,33 +39,30 @@ const DEFAULT_MAX_ATTEMPTS = 5;
 // Internal Helpers
 // ============================================================================
 
-/** @param {string[]} args @param {string} flag */
-function flagValue(args, flag) {
+export function flagValue(args: string[], flag: string): string | null {
   const idx = args.indexOf(flag);
-  if (idx === -1) {return null;}
+  if (idx === -1) { return null; }
   const val = args[idx + 1];
-  if (!val || val.startsWith('--')) {return null;}
+  if (!val || val.startsWith('--')) { return null; }
   return val;
 }
 
-/**
- * @param {string[]} args
- * @param {string} inlineFlag
- * @param {string} fileFlag
- * @param {string} label
- * @param {{readFileSync?: Function, error?: Function, exit?: Function}} [options]
- * @returns {string|null}
- */
-function readTextFlag(args, inlineFlag, fileFlag, label, options = {}) {
+export function readTextFlag(
+  args: string[],
+  inlineFlag: string,
+  fileFlag: string,
+  label: string,
+  options: { readFileSync?: typeof fs.readFileSync; error?: (msg: string) => void; exit?: (code: number) => never } = {}
+): string | null {
   const readFileSync = options.readFileSync || fs.readFileSync;
   const error = options.error || fmt.log.plainError;
   const exit = options.exit || process.exit;
   const filePath = flagValue(args, fileFlag);
   if (filePath) {
     try {
-      return readFileSync(filePath, 'utf8').trimEnd();
+      return (readFileSync(filePath, 'utf8') as string).trimEnd();
     } catch (err) {
-      error(`Could not read ${label} from ${fmt.path(filePath)}: ${/** @type {Error} */(err).message}`);
+      error(`Could not read ${label} from ${fmt.path(filePath)}: ${(err as Error).message}`);
       exit(1);
       return null;
     }
@@ -68,8 +71,7 @@ function readTextFlag(args, inlineFlag, fileFlag, label, options = {}) {
   return flagValue(args, inlineFlag);
 }
 
-/** @param {string[]} findings */
-function formatStaticReviewFindings(findings) {
+export function formatStaticReviewFindings(findings: string[]): string {
   const lines = [
     'Static review found the following issue(s) before autonomous review:',
     ''
@@ -81,8 +83,7 @@ function formatStaticReviewFindings(findings) {
   return lines.join('\n');
 }
 
-/** @param {string} slug */
-function formatStaticReviewSuccess(slug) {
+export function formatStaticReviewSuccess(slug: string): string {
   return [
     `Static review for ${slug} found zero issues.`,
     '',
@@ -95,12 +96,17 @@ function formatStaticReviewSuccess(slug) {
   ].join('\n');
 }
 
-/**
- * @param {string} slug
- * @param {{log?: Function, error?: Function, getTaskStatusFn?: Function, resolveTaskFileFn?: Function, transitionTaskFn?: Function, rootDir?: string}} [options]
- * @returns {{repaired: boolean, skipped?: boolean, currentStatus?: string}}
- */
-function repairStaleActiveTaskAfterReview(slug, options = {}) {
+function repairStaleActiveTaskAfterReview(
+  slug: string,
+  options: {
+    log?: (msg: string) => void;
+    error?: (msg: string) => void;
+    getTaskStatusFn?: typeof getTaskStatus;
+    resolveTaskFileFn?: typeof resolveTaskFile;
+    transitionTaskFn?: typeof transitionTask;
+    rootDir?: string;
+  } = {}
+): { repaired: boolean; skipped?: boolean; currentStatus?: string } {
   const log = options.log || fmt.log.plain;
   const error = options.error || fmt.log.plainError;
   const getTaskStatusFn = options.getTaskStatusFn || getTaskStatus;
@@ -113,26 +119,23 @@ function repairStaleActiveTaskAfterReview(slug, options = {}) {
     return { repaired: false, skipped: true };
   }
 
-  const currentStatus = getTaskStatusFn(taskResolution.taskFile);
-  if (toVirtual(currentStatus) !== 'active') {
-    return { repaired: false, skipped: true, currentStatus };
+  const currentStatus = getTaskStatusFn(taskResolution.taskFile!);
+  if (toVirtual(currentStatus || '') !== 'active') {
+    return { repaired: false, skipped: true, currentStatus: currentStatus ?? undefined };
   }
 
   if (!transitionTaskFn(slug, 'review', { rootDir, log })) {
     error(fmt.status('WARN', `Could not transition backlog task ${slug} to review after recording the review outcome.`));
-    return { repaired: false, skipped: false, currentStatus };
+    return { repaired: false, skipped: false, currentStatus: currentStatus ?? undefined };
   }
 
-  return { repaired: true, currentStatus };
+  return { repaired: true, currentStatus: currentStatus ?? undefined };
 }
 
-/**
- * @param {string} slug
- * @param {{worktree?: string, taskFile?: string|null, log?: Function, error?: Function}} options
- * @returns {Promise<{ok: boolean, dirty?: boolean, unsafe?: boolean}>}
- */
-async function commitPersistedReviewOutputs(slug, options = {}) {
-  const { commitSafeMissionArtifacts } = require('./review-loop');
+async function commitPersistedReviewOutputs(
+  slug: string,
+  options: { worktree?: string; taskFile?: string | null; log?: (msg: string) => void; error?: (msg: string) => void } = {}
+): Promise<{ ok: boolean; dirty?: boolean; unsafe?: boolean }> {
   return commitSafeMissionArtifacts(slug, options.worktree || process.cwd(), {
     taskFile: options.taskFile || null,
     log: options.log || fmt.log.plain,
@@ -140,13 +143,24 @@ async function commitPersistedReviewOutputs(slug, options = {}) {
   });
 }
 
-/**
- * @param {string} slug
- * @param {string} message
- * @param {{log?: Function, error?: Function, resolveTaskFileFn?: Function, getTaskImplementerFn?: Function, resolveWorktreeFn?: Function, readTokenFn?: Function, postCommentFn?: Function, resolveReviewUserFn?: Function, resolveForgejoUserFn?: Function, readReviewStateFn?: Function, buildMetadataFooterFn?: Function, rootDir?: string}} [options]
- * @returns {{ok: boolean, error?: string}}
- */
-function postStaticReviewComment(slug, message, options = {}) {
+export function postStaticReviewComment(
+  slug: string,
+  message: string,
+  options: {
+    log?: (msg: string) => void;
+    error?: (msg: string) => void;
+    resolveTaskFileFn?: typeof resolveTaskFile;
+    getTaskImplementerFn?: typeof getTaskImplementer;
+    resolveWorktreeFn?: typeof resolveWorktree;
+    readTokenFn?: typeof readToken;
+    postCommentFn?: typeof postComment;
+    resolveReviewUserFn?: typeof resolveReviewUser;
+    resolveForgejoUserFn?: typeof resolveReviewUser;
+    readReviewStateFn?: typeof readReviewState;
+    buildMetadataFooterFn?: typeof buildMetadataFooter;
+    rootDir?: string;
+  } = {}
+): { ok: boolean; error?: string } {
   const log = options.log || fmt.log.plain;
   const error = options.error || fmt.log.plainError;
   const resolveTaskFileFn = options.resolveTaskFileFn || resolveTaskFile;
@@ -168,15 +182,15 @@ function postStaticReviewComment(slug, message, options = {}) {
   if (!resolvedUser) {
     const taskResolution = resolveTaskFileFn(slug, rootDir);
     if (taskResolution.ok) {
-      resolvedUser = getTaskImplementerFn(taskResolution.taskFile);
+      resolvedUser = getTaskImplementerFn(taskResolution.taskFile!);
     }
   }
   if (!resolvedUser) {
     error('Cannot determine review identity. Set FORGEJO_USER, persist review-state.json, or assign the task implementer.');
     return { ok: false, error: 'missing-user' };
   }
-  resolvedUser = resolveReviewUserFn(resolvedUser);
-  const token = readTokenFn(resolvedUser, { rootDir });
+  resolvedUser = resolveReviewUserFn(resolvedUser!);
+  const token = readTokenFn(resolvedUser!, { rootDir });
   if (!token) {
     error(`No Forgejo token found for user "${resolvedUser}". Cannot post static review comment.`);
     return { ok: false, error: 'missing-token' };
@@ -184,7 +198,7 @@ function postStaticReviewComment(slug, message, options = {}) {
 
   const taggedMessage = message + buildMetadataFooterFn(slug, rootDir);
   log(`Posting static review comment on ${fmt.branch(branch)} as ${resolvedUser}...`);
-  const result = postCommentFn(branch, token, taggedMessage, { reviewIdentity: resolvedUser, forgejoUser: resolvedUser });
+  const result = postCommentFn(branch, token, taggedMessage, { reviewIdentity: resolvedUser, forgejoUser: resolvedUser }) as { ok: boolean; error?: string };
 
   if (!result.ok) {
     error(`Could not post static review comment: ${result.error || 'API error'}`);
@@ -199,24 +213,26 @@ function postStaticReviewComment(slug, message, options = {}) {
 // Command: performStaticReview
 // ============================================================================
 
-/**
- * Perform a static review of the mission branch when no PR exists.
- * Inspects git diff for changed files, checks the final checkpoint for
- * a Goal Check table, and returns findings.
- */
-/**
- * @param {string} slug
- * @param {{log?: Function, findMissionDir?: Function, findCheckpoints?: Function, readFileSync?: Function, run?: Function, resolveWorktree?: Function, missionPath?: string, rootDir?: string}} [options]
- * @returns {{ok: boolean, findings: string[]}}
- */
-function performStaticReview(slug, options = {}) {
+export function performStaticReview(
+  slug: string,
+  options: {
+    log?: (msg: string) => void;
+    findMissionDir?: typeof findMissionDir;
+    findCheckpoints?: typeof findCheckpoints;
+    readFileSync?: typeof fs.readFileSync;
+    run?: typeof run;
+    resolveWorktree?: typeof resolveWorktree;
+    missionPath?: string;
+    rootDir?: string;
+  } = {}
+): { ok: boolean; findings: string[] } {
   const log = options.log || fmt.log.plain;
   const findMissionDirFn = options.findMissionDir || findMissionDir;
   const findCheckpointsFn = options.findCheckpoints || findCheckpoints;
   const readFileSyncFn = options.readFileSync || fs.readFileSync;
   const runFn = options.run || run;
   const resolveWorktreeFn = options.resolveWorktree || resolveWorktree;
-  const findings = [];
+  const findings: string[] = [];
 
   log(`Performing static review for mission: ${fmt.slug(slug)}`);
 
@@ -243,7 +259,7 @@ function performStaticReview(slug, options = {}) {
   // Check the final checkpoint for a Goal Check table
   const finalCheckpoint = checkpoints[checkpoints.length - 1];
   try {
-    const checkpointContent = readFileSyncFn(finalCheckpoint, 'utf8');
+    const checkpointContent = readFileSyncFn(finalCheckpoint, 'utf8') as string;
     const goalCheckMatch = checkpointContent.match(/^## Goal Check(?: Table)?\s*$/m);
     if (!goalCheckMatch) {
       findings.push(`Final checkpoint ${path.basename(finalCheckpoint)} is missing a "## Goal Check" section.`);
@@ -251,7 +267,7 @@ function performStaticReview(slug, options = {}) {
       log(fmt.status('PASS', 'Final checkpoint contains "## Goal Check" section.'));
 
       // Verify goal-check table has at least one evidence row
-      const afterHeader = checkpointContent.slice(goalCheckMatch.index + goalCheckMatch[0].length);
+      const afterHeader = checkpointContent.slice(goalCheckMatch.index! + goalCheckMatch[0].length);
       const separatorPattern = /^\|\s*:?-+:?\s*\|/;
       const headerPattern = /^\| .+\| .+\| .+\|$/;
       const evidenceLinePattern = /^\| .+\| .+\| .+\|$/;
@@ -260,12 +276,12 @@ function performStaticReview(slug, options = {}) {
       let pastHeader = false;
       for (const line of linesAfterHeader) {
         const trimmed = line.trim();
-        if (trimmed === '') {continue;}
+        if (trimmed === '') { continue; }
         if (!pastHeader && headerPattern.test(trimmed)) {
           pastHeader = true;
           continue;
         }
-        if (separatorPattern.test(trimmed)) {continue;}
+        if (separatorPattern.test(trimmed)) { continue; }
         if (pastHeader && evidenceLinePattern.test(trimmed)) {
           foundEvidence = true;
           break;
@@ -279,14 +295,14 @@ function performStaticReview(slug, options = {}) {
       }
     }
   } catch (err) {
-    findings.push(`Could not read final checkpoint ${path.basename(finalCheckpoint)}: ${/** @type {Error} */(err).message}`);
+    findings.push(`Could not read final checkpoint ${path.basename(finalCheckpoint)}: ${(err as Error).message}`);
   }
 
   // Inspect git diff for changed files
-  const baseBranch = require('../core/mission-utils').getPrimaryBranch(rootDir);
+  const baseBranch = getPrimaryBranch(rootDir);
   const diffResult = runFn('git', ['diff', `${baseBranch}..HEAD`, '--name-only'], { cwd: rootDir });
   if (diffResult.status === 0 && diffResult.stdout) {
-    const changedFiles = diffResult.stdout.trim().split('\n').filter((/** @type {string} */ f) => f.trim());
+    const changedFiles = (diffResult.stdout as string).trim().split('\n').filter((f: string) => f.trim());
     const missionDirPrefix = path.relative(rootDir, missionBaseDir(rootDir)).split(path.sep).join('/') + '/';
     log(`Changed files in branch: ${changedFiles.join(', ')}`);
     // Check for unexpected areas — missions may legitimately touch many surfaces.
@@ -297,11 +313,11 @@ function performStaticReview(slug, options = {}) {
       '.agents/', '.github/', '.vscode/', '.graphifyignore',
     ];
     const knownExtensions = ['.sh', '.csv', '.json', '.yaml', '.yml', '.toml', '.lock', '.cfg', '.ini', '.env', '.txt', '.properties', '.sql', '.css', '.html', '.xml', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.pdf', '.tar', '.gz', '.zip'];
-      const unexpectedFiles = changedFiles.filter((/** @type {string} */ f) =>
-      !knownAreas.some((/** @type {string} */ area) => f.startsWith(area)) &&
+    const unexpectedFiles = changedFiles.filter((f: string) =>
+      !knownAreas.some((area: string) => f.startsWith(area)) &&
       !f.startsWith(missionDirPrefix) &&
       !f.endsWith('.md') &&
-      !knownExtensions.some((/** @type {string} */ ext) => f.toLowerCase().endsWith(ext))
+      !knownExtensions.some((ext: string) => f.toLowerCase().endsWith(ext))
     );
     if (unexpectedFiles.length > 0) {
       log(fmt.status('WARN', `Changed files outside known areas (may be intentional): ${unexpectedFiles.join(', ')}`));
@@ -319,13 +335,33 @@ function performStaticReview(slug, options = {}) {
 // Command: verifyReview
 // ============================================================================
 
-/**
- * @param {string} slug
- * @param {boolean|string} skipGate
- * @param {{log?: Function, error?: Function, exit?: Function, resolveWorktreeFn?: Function, findMissionDirFn?: Function, getCurrentBranchFn?: Function, resolveTaskFileFn?: Function, getPrStatusFn?: Function, getTaskStatusFn?: Function, toVirtualFn?: Function, findMissionAreaFn?: Function, runFn?: Function, getAcceptanceCriteriaFn?: Function, formatMatrixSummaryFn?: Function, buildAutonomousReviewMatrixFn?: Function, readReviewStateFn?: Function, isReviewProviderEnabledFn?: Function, isForgejoReviewEnabledFn?: Function, cwdFn?: Function, missionPath?: string, skipGate?: boolean}} [options]
- * @returns {void}
- */
-function verifyReview(slug, skipGate, options = {}) {
+export function verifyReview(
+  slug: string,
+  skipGate: boolean | string,
+  options: {
+    log?: (msg: string) => void;
+    error?: (msg: string) => void;
+    exit?: (code: number) => never;
+    resolveWorktreeFn?: typeof resolveWorktree;
+    findMissionDirFn?: typeof findMissionDir;
+    getCurrentBranchFn?: typeof getCurrentBranch;
+    resolveTaskFileFn?: typeof resolveTaskFile;
+    getPrStatusFn?: typeof getPrStatus;
+    getTaskStatusFn?: typeof getTaskStatus;
+    toVirtualFn?: typeof toVirtual;
+    findMissionAreaFn?: typeof findMissionArea;
+    runFn?: typeof run;
+    getAcceptanceCriteriaFn?: typeof getAcceptanceCriteria;
+    formatMatrixSummaryFn?: typeof formatMatrixSummary;
+    buildAutonomousReviewMatrixFn?: typeof buildAutonomousReviewMatrix;
+    readReviewStateFn?: typeof readReviewState;
+    isReviewProviderEnabledFn?: typeof isProviderEnabled;
+    isForgejoReviewEnabledFn?: typeof isProviderEnabled;
+    cwdFn?: () => string;
+    missionPath?: string;
+    skipGate?: boolean;
+  } = {}
+): void {
   const log = options.log || fmt.log.plain;
   const error = options.error || fmt.log.plainError;
   const exit = options.exit || process.exit;
@@ -354,8 +390,8 @@ function verifyReview(slug, skipGate, options = {}) {
   const taskResolution = resolveTaskFileFn(slug, rootDir);
   const providerEnabled = isReviewProviderEnabledFn(rootDir);
   const pr = providerEnabled ? getPrStatusFn(branch, rootDir) : { exists: false };
-  const failures = [];
-  const warnings = [];
+  const failures: string[] = [];
+  const warnings: string[] = [];
 
   log(`Reviewer verification for mission: ${fmt.slug(slug)}`);
   if (worktree) {
@@ -378,34 +414,35 @@ function verifyReview(slug, skipGate, options = {}) {
     log(fmt.status('PASS', `Branch: ${fmt.branch(current)}`));
   }
 
-  let taskStatus = null;
-  let virtualStatus = null;
+  let taskStatus: string | null = null;
+  let virtualStatus: string | null = null;
   if (!taskResolution.ok) {
     failures.push('task');
     reportTaskResolution(taskResolution, slug, log);
   } else {
-    taskStatus = getTaskStatusFn(taskResolution.taskFile);
-    virtualStatus = toVirtualFn(taskStatus);
+    taskStatus = getTaskStatusFn(taskResolution.taskFile!);
+    virtualStatus = toVirtualFn(taskStatus || '');
     if (taskStatus === 'review' || virtualStatus === 'approved') {
-      log(fmt.status('PASS', `Backlog task: ${path.basename(taskResolution.taskFile)} (${taskStatus})`));
+      log(fmt.status('PASS', `Backlog task: ${path.basename(taskResolution.taskFile!)} (${taskStatus})`));
     } else if (taskStatus === 'done') {
       failures.push('task-status');
       log(fmt.status('FAIL', 'Backlog task: task is already done/integrated'));
     } else if (taskStatus === 'active' || virtualStatus === 'active') {
       warnings.push('task-still-active');
-      log(fmt.status('WARN', `Backlog task: ${path.basename(taskResolution.taskFile)} is still ${taskStatus}`));
+      log(fmt.status('WARN', `Backlog task: ${path.basename(taskResolution.taskFile!)} is still ${taskStatus}`));
     } else {
       failures.push('task-status');
       log(fmt.status('FAIL', `Backlog task: unexpected status ${taskStatus}`));
     }
   }
 
+  const prAny = pr as Record<string, unknown>;
   if (providerEnabled) {
-    if (pr.exists && pr.state === 'open' && !pr.merged) {
-      log(fmt.status('PASS', `Review PR: PR #${pr.number} is open`));
-    } else if (pr.exists) {
+    if (prAny.exists && prAny.state === 'open' && !prAny.merged) {
+      log(fmt.status('PASS', `Review PR: PR #${prAny.number} is open`));
+    } else if (prAny.exists) {
       failures.push('pr-state');
-      log(fmt.status('FAIL', `Review PR: expected an open PR, got state=${pr.state} merged=${pr.merged}`));
+      log(fmt.status('FAIL', `Review PR: expected an open PR, got state=${prAny.state} merged=${prAny.merged}`));
     } else {
       // No PR exists - check if task is in implementation phase
       if (taskResolution.ok) {
@@ -417,12 +454,12 @@ function verifyReview(slug, skipGate, options = {}) {
         } else {
           // Task is in post-implementation state or ambiguous - hard fail
           failures.push('pr-missing');
-          log(fmt.status('FAIL', `Review PR: ${pr.raw || 'no PR found'}`));
+          log(fmt.status('FAIL', `Review PR: ${prAny.raw || 'no PR found'}`));
         }
       } else {
         // Cannot determine task status - safe default to hard fail
         failures.push('pr-missing');
-        log(fmt.status('FAIL', `Review PR: ${pr.raw || 'no PR found'}`));
+        log(fmt.status('FAIL', `Review PR: ${prAny.raw || 'no PR found'}`));
       }
     }
   } else {
@@ -447,22 +484,22 @@ function verifyReview(slug, skipGate, options = {}) {
   }
 
   if (taskResolution.ok) {
-    const acceptanceCriteria = getAcceptanceCriteriaFn(taskResolution.taskFile);
+    const acceptanceCriteria = getAcceptanceCriteriaFn(taskResolution.taskFile!);
     log(fmt.status('INFO', 'Acceptance evidence checklist:'));
     if (acceptanceCriteria.length === 0) {
       log('  - No Acceptance Criteria found on the Backlog task.');
     } else {
-      acceptanceCriteria.forEach((/** @type {string} */ line) => log(`  ${line}`));
+      acceptanceCriteria.forEach((line: string) => log(`  ${line}`));
     }
   }
 
   log(fmt.status('INFO', 'Autonomous review runtime matrix:'));
-    formatMatrixSummaryFn(buildAutonomousReviewMatrixFn()).forEach((/** @type {string} */ line) => log(line));
+  formatMatrixSummaryFn(buildAutonomousReviewMatrixFn()).forEach((line: string) => log(line));
 
   // Show persisted reviewer state if present
   const persisted = readReviewStateFn(slug);
   if (persisted) {
-    log(`Persisted reviewer state: reviewer=${fmt.agent(persisted.reviewer)} implementer=${fmt.agent(persisted.implementer)} round=${persisted.round} startedAt=${persisted.startedAt}`);
+    log(`Persisted reviewer state: reviewer=${fmt.agent(persisted.reviewer ?? '')} implementer=${fmt.agent(persisted.implementer ?? '')} round=${persisted.round} startedAt=${persisted.startedAt}`);
   }
 
   if (warnings.length > 0) {
@@ -482,18 +519,26 @@ function verifyReview(slug, skipGate, options = {}) {
 // Command: submitForReview
 // ============================================================================
 
-/**
- * @param {string} slug
- * @param {boolean|string} skipGate
- * @param {{exit?: Function, resolveTaskFileFn?: Function, getTaskImplementerFn?: Function, resolveWorktreeFn?: Function, performHandoffFn?: Function, readReviewStateFn?: Function, isReviewProviderEnabledFn?: Function, isForgejoReviewEnabledFn?: Function, log?: Function}} [options]
- * @returns {Promise<void>}
- */
-async function submitForReview(slug, skipGate, options = {}) {
+export async function submitForReview(
+  slug: string,
+  skipGate: boolean | string,
+  options: {
+    exit?: (code: number) => never;
+    resolveTaskFileFn?: typeof resolveTaskFile;
+    getTaskImplementerFn?: typeof getTaskImplementer;
+    resolveWorktreeFn?: typeof resolveWorktree;
+    performHandoffFn?: (slug: string, opts?: Record<string, unknown>) => Promise<Record<string, unknown>>;
+    readReviewStateFn?: typeof readReviewState;
+    isReviewProviderEnabledFn?: typeof isProviderEnabled;
+    isForgejoReviewEnabledFn?: typeof isProviderEnabled;
+    log?: (msg: string) => void;
+  } = {}
+): Promise<void> {
   const exit = options.exit || process.exit;
   const resolveTaskFileFn = options.resolveTaskFileFn || resolveTaskFile;
   const getTaskImplementerFn = options.getTaskImplementerFn || getTaskImplementer;
   const resolveWorktreeFn = options.resolveWorktreeFn || resolveWorktree;
-  const performHandoffFn = options.performHandoffFn || performHandoff;
+  const performHandoffFn = options.performHandoffFn || (await getHandoff()).performHandoff;
   const readReviewStateFn = options.readReviewStateFn || readReviewState;
   const isReviewProviderEnabledFn = options.isReviewProviderEnabledFn || options.isForgejoReviewEnabledFn || isProviderEnabled;
   const log = options.log || fmt.log.plain;
@@ -510,7 +555,7 @@ async function submitForReview(slug, skipGate, options = {}) {
   if (!reviewIdentity) {
     const taskResolution = resolveTaskFileFn(slug, worktree);
     if (taskResolution.ok) {
-      reviewIdentity = getTaskImplementerFn(taskResolution.taskFile);
+      reviewIdentity = getTaskImplementerFn(taskResolution.taskFile!);
     }
   }
 
@@ -536,12 +581,23 @@ async function submitForReview(slug, skipGate, options = {}) {
 // Command: readComments
 // ============================================================================
 
-/**
- * @param {string} slug
- * @param {{log?: Function, error?: Function, exit?: Function, readTokenFn?: Function, readReviewStateFn?: Function, resolveReviewUserFn?: Function, resolveForgejoUserFn?: Function, getCommentsFn?: Function, readAllEventsFn?: Function, isReviewProviderEnabledFn?: Function, isForgejoReviewEnabledFn?: Function, worktree?: string}} [options]
- * @returns {Promise<void>}
- */
-async function readComments(slug, options = {}) {
+export async function readComments(
+  slug: string,
+  options: {
+    log?: (msg: string) => void;
+    error?: (msg: string) => void;
+    exit?: (code: number) => never;
+    readTokenFn?: typeof readToken;
+    readReviewStateFn?: typeof readReviewState;
+    resolveReviewUserFn?: typeof resolveReviewUser;
+    resolveForgejoUserFn?: typeof resolveReviewUser;
+    getCommentsFn?: typeof getComments;
+    readAllEventsFn?: typeof readAllEvents;
+    isReviewProviderEnabledFn?: typeof isProviderEnabled;
+    isForgejoReviewEnabledFn?: typeof isProviderEnabled;
+    worktree?: string;
+  } = {}
+): Promise<void> {
   const log = options.log || fmt.log.plain;
   const error = options.error || fmt.log.plainError;
   const exit = options.exit || process.exit;
@@ -558,16 +614,16 @@ async function readComments(slug, options = {}) {
   // Avoids resolving a provider token (which would FAIL/exit) when the provider is off.
   if (!isReviewProviderEnabledFn(worktree)) {
     log(fmt.status('INFO', `Review provider disabled; reading local review events for ${slug}...`));
-    const events = readAllEventsFn(slug, { rootDir: worktree, log, error });
+    const events = readAllEventsFn(slug, { rootDir: worktree, error });
     if (!events || events.length === 0) {
       log('no comments');
       return;
     }
-    for (const e of events) {
-      let label = e.event_type || 'event';
-      if (e.round !== null) {label += ` round ${e.round}`;}
-      log(`--- ${label} | ${e.actor || 'unknown'} (${e.timestamp || e.fileCreated || ''}) ---`);
-      log(e.content || '(no body)');
+    for (const e of events as Record<string, unknown>[]) {
+      let label = (e.event_type as string) || 'event';
+      if (e.round !== null) { label += ` round ${e.round}`; }
+      log(`--- ${label} | ${(e.actor as string) || 'unknown'} (${(e.timestamp as string) || (e.fileCreated as string) || ''}) ---`);
+      log((e.content as string) || '(no body)');
       log('');
     }
     return;
@@ -584,7 +640,7 @@ async function readComments(slug, options = {}) {
   }
   reviewIdentity = resolveReviewUserFn(reviewIdentity);
 
-  const token = readTokenFn(reviewIdentity, { rootDir: worktree });
+  const token = readTokenFn(reviewIdentity!, { rootDir: worktree });
   if (!token) {
     error(fmt.status('FAIL', `No Forgejo token found for user "${reviewIdentity}".`));
     exit(1);
@@ -592,7 +648,7 @@ async function readComments(slug, options = {}) {
   }
 
   log(fmt.status('INFO', `Reading PR comments on ${branch} as ${reviewIdentity}...`));
-  const comments = await getCommentsFn(branch, token);
+  const comments = await getCommentsFn(branch, token) as unknown[] | null;
 
   if (comments === null) {
     error(fmt.status('FAIL', `Could not fetch PR comments for ${branch}. The review provider may be unreachable or the PR is missing.`));
@@ -605,11 +661,11 @@ async function readComments(slug, options = {}) {
     return;
   }
 
-  for (const c of comments) {
-    let label = c.kind;
-    if (c.location) {label += ` ${c.location}`;}
+  for (const c of comments as Record<string, unknown>[]) {
+    let label = c.kind as string;
+    if (c.location) { label += ` ${c.location}`; }
     log(`--- ${label} | ${c.user} (${c.created}) ---`);
-    log(c.body || '(no body)');
+    log((c.body as string) || '(no body)');
     log('');
   }
 }
@@ -618,12 +674,29 @@ async function readComments(slug, options = {}) {
 // Command: pushRound
 // ============================================================================
 
-/**
- * @param {string} slug
- * @param {{log?: Function, error?: Function, exit?: Function, resolveWorktreeFn?: Function, resolveTaskFileFn?: Function, getTaskImplementerFn?: Function, transitionTaskFn?: Function, resolveReviewUserFn?: Function, resolveForgejoUserFn?: Function, isReviewProviderEnabledFn?: Function, isForgejoReviewEnabledFn?: Function, readTokenFn?: Function, readReviewStateFn?: Function, createPrFn?: Function, bootstrapReviewSurfaceFn?: Function, resolveReviewAdapterFn?: Function, cwdFn?: Function, force?: boolean}} [options]
- * @returns {Promise<void>}
- */
-async function pushRound(slug, options = {}) {
+export async function pushRound(
+  slug: string,
+  options: {
+    log?: (msg: string) => void;
+    error?: (msg: string) => void;
+    exit?: (code: number) => never;
+    resolveWorktreeFn?: typeof resolveWorktree;
+    resolveTaskFileFn?: typeof resolveTaskFile;
+    getTaskImplementerFn?: typeof getTaskImplementer;
+    transitionTaskFn?: typeof transitionTask;
+    resolveReviewUserFn?: typeof resolveReviewUser;
+    resolveForgejoUserFn?: typeof resolveReviewUser;
+    isReviewProviderEnabledFn?: typeof isProviderEnabled;
+    isForgejoReviewEnabledFn?: typeof isProviderEnabled;
+    readTokenFn?: typeof readToken;
+    readReviewStateFn?: typeof readReviewState;
+    createPrFn?: typeof createPr;
+    bootstrapReviewSurfaceFn?: typeof bootstrapReviewSurface;
+    resolveReviewAdapterFn?: typeof resolveReviewAdapter;
+    cwdFn?: () => string;
+    force?: boolean;
+  } = {}
+): Promise<void> {
   const log = options.log || fmt.log.plain;
   const error = options.error || fmt.log.plainError;
   const exit = options.exit || process.exit;
@@ -654,7 +727,7 @@ async function pushRound(slug, options = {}) {
     // 1. Check backlog task assignee
     const taskResolution = resolveTaskFileFn(slug, rootDir);
     if (taskResolution.ok) {
-      reviewIdentity = getTaskImplementerFn(taskResolution.taskFile);
+      reviewIdentity = getTaskImplementerFn(taskResolution.taskFile!);
     }
   }
 
@@ -677,7 +750,7 @@ async function pushRound(slug, options = {}) {
   }
 
   reviewIdentity = resolveReviewUserFn(reviewIdentity);
-  const token = readTokenFn(reviewIdentity, { rootDir: worktree });
+  const token = readTokenFn(reviewIdentity!, { rootDir: worktree || undefined });
   if (!token) {
     error(fmt.status('FAIL', `No Forgejo token found for user "${reviewIdentity}".`));
     exit(1);
@@ -692,9 +765,9 @@ async function pushRound(slug, options = {}) {
     log(fmt.status('INFO', `Found dedicated worktree: ${worktree}`));
   }
 
-  let result = createPrFn(branch, reviewIdentity, token, { rootDir, forceWithLease: true });
-  if (!result.ok && /Repository not found/i.test(result.error || '')) {
-    const reviewAdapter = resolveReviewAdapterFn(rootDir);
+  let result = createPrFn(branch, reviewIdentity!, token, { rootDir, forceWithLease: true }) as Record<string, unknown>;
+  if (!result.ok && /Repository not found/i.test((result.error as string) || '')) {
+    const reviewAdapter = resolveReviewAdapterFn(rootDir) as Record<string, any>;
     const ownerLogin = (reviewAdapter.repo && reviewAdapter.repo.split('/')[0]) || 'magnus';
     const bootstrap = await bootstrapReviewSurfaceFn(rootDir, {
       baseUrl: reviewAdapter.baseUrl,
@@ -707,8 +780,8 @@ async function pushRound(slug, options = {}) {
       log,
       error,
     });
-    if (bootstrap.ok) {
-      result = createPrFn(branch, reviewIdentity, token, { rootDir, forceWithLease: true });
+    if ((bootstrap as Record<string, unknown>).ok) {
+      result = createPrFn(branch, reviewIdentity!, token, { rootDir, forceWithLease: true }) as Record<string, unknown>;
     }
   }
 
@@ -725,12 +798,14 @@ async function pushRound(slug, options = {}) {
 // Command: showReviewStatus
 // ============================================================================
 
-/**
- * @param {string} slug
- * @param {{log?: Function, readReviewStateFn?: Function, resolveWorktreeFn?: Function}} [options]
- * @returns {void}
- */
-function showReviewStatus(slug, options = {}) {
+export function showReviewStatus(
+  slug: string,
+  options: {
+    log?: (msg: string) => void;
+    readReviewStateFn?: typeof readReviewState;
+    resolveWorktreeFn?: typeof resolveWorktree;
+  } = {}
+): void {
   const log = options.log || fmt.log.plain;
   const readReviewStateFn = options.readReviewStateFn || readReviewState;
   const resolveWorktreeFn = options.resolveWorktreeFn || resolveWorktree;
@@ -747,8 +822,8 @@ function showReviewStatus(slug, options = {}) {
 
   log(`  Round:       ${state.round}`);
   log(`  Phase:       ${state.phase}`);
-  log(`  Reviewer:    ${fmt.agent(state.reviewer)}`);
-  log(`  Implementer: ${fmt.agent(state.implementer)}`);
+  log(`  Reviewer:    ${fmt.agent(state.reviewer ?? '')}`);
+  log(`  Implementer: ${fmt.agent(state.implementer ?? '')}`);
   log(`  Started at:  ${state.startedAt}`);
   if (state.disposition) {
     log(`  Disposition: ${state.disposition}`);
@@ -765,13 +840,23 @@ function showReviewStatus(slug, options = {}) {
 // Command: commentRound
 // ============================================================================
 
-/**
- * @param {string} slug
- * @param {string} message
- * @param {{log?: Function, error?: Function, exit?: Function, readReviewStateFn?: Function, writeReviewStateFn?: Function, resolveReviewUserFn?: Function, resolveForgejoUserFn?: Function, rootDir?: string, readTokenFn?: Function, postCommentFn?: Function, buildMetadataFooterFn?: Function}} [options]
- * @returns {void}
- */
-function commentRound(slug, message, options = {}) {
+export function commentRound(
+  slug: string,
+  message: string,
+  options: {
+    log?: (msg: string) => void;
+    error?: (msg: string) => void;
+    exit?: (code: number) => never;
+    readReviewStateFn?: typeof readReviewState;
+    writeReviewStateFn?: typeof writeReviewState;
+    resolveReviewUserFn?: typeof resolveReviewUser;
+    resolveForgejoUserFn?: typeof resolveReviewUser;
+    rootDir?: string;
+    readTokenFn?: typeof readToken;
+    postCommentFn?: typeof postComment;
+    buildMetadataFooterFn?: typeof buildMetadataFooter;
+  } = {}
+): void {
   const log = options.log || fmt.log.plain;
   const error = options.error || fmt.log.plainError;
   const exit = options.exit || process.exit;
@@ -779,7 +864,7 @@ function commentRound(slug, message, options = {}) {
   const writeReviewStateFn = options.writeReviewStateFn || writeReviewState;
   const resolveReviewUserFn = options.resolveReviewUserFn || options.resolveForgejoUserFn || resolveReviewUser;
   const rootDir = options.rootDir || resolveWorktree(slug) || process.cwd();
-  
+
   let reviewIdentity = resolveReviewIdentity(slug, rootDir, {
     readReviewStateFn,
   }).identityUser;
@@ -815,12 +900,24 @@ function commentRound(slug, message, options = {}) {
 // Command: consumeArtifacts
 // ============================================================================
 
-/**
- * @param {string} slug
- * @param {{log?: Function, error?: Function, resolveWorktreeFn?: Function, transitionTaskFn?: Function, consumeReviewerArtifactsFn?: Function, resolveTaskFileFn?: Function, getTaskAssigneeFn?: Function, getTaskStatusFn?: Function, resolveArtifactDirFn?: Function, readReviewStateFn?: Function, createEventFn?: Function, readArtifactFn?: Function, deleteArtifactFn?: Function}} [options]
- * @returns {Promise<{ok: boolean, consumed: boolean, reviewState?: string|null}>}
- */
-async function consumeArtifacts(slug, options = {}) {
+export async function consumeArtifacts(
+  slug: string,
+  options: {
+    log?: (msg: string) => void;
+    error?: (msg: string) => void;
+    resolveWorktreeFn?: typeof resolveWorktree;
+    transitionTaskFn?: typeof transitionTask;
+    consumeReviewerArtifactsFn?: typeof consumeReviewerArtifacts;
+    resolveTaskFileFn?: typeof resolveTaskFile;
+    getTaskAssigneeFn?: typeof getTaskAssignee;
+    getTaskStatusFn?: typeof getTaskStatus;
+    resolveArtifactDirFn?: typeof resolveArtifactDir;
+    readReviewStateFn?: typeof readReviewState;
+    createEventFn?: typeof createEvent;
+    readArtifactFn?: unknown;
+    deleteArtifactFn?: unknown;
+  } = {}
+): Promise<{ ok: boolean; consumed: boolean; reviewState?: string | null }> {
   const log = options.log || fmt.log.plain;
   const error = options.error || fmt.log.plainError;
   const resolveWorktreeFn = options.resolveWorktreeFn || resolveWorktree;
@@ -829,7 +926,7 @@ async function consumeArtifacts(slug, options = {}) {
   const resolveTaskFileFn = options.resolveTaskFileFn || resolveTaskFile;
   const getTaskAssigneeFn = options.getTaskAssigneeFn || getTaskAssignee;
   const getTaskStatusFn = options.getTaskStatusFn || getTaskStatus;
-  const resolveArtifactDirFn = options.resolveArtifactDirFn || require('./review-artifacts').resolveArtifactDir;
+  const resolveArtifactDirFn = options.resolveArtifactDirFn || resolveArtifactDir;
 
   const worktree = resolveWorktreeFn(slug) || process.cwd();
   const rootDir = worktree;
@@ -845,7 +942,7 @@ async function consumeArtifacts(slug, options = {}) {
   });
   let reviewer = stateReviewer;
   if (!reviewer && taskResolution.ok) {
-    reviewer = getTaskAssigneeFn(taskResolution.taskFile);
+    reviewer = getTaskAssigneeFn(taskResolution.taskFile!);
   }
   if (!reviewer) {
     reviewer = 'autonomous';
@@ -854,15 +951,14 @@ async function consumeArtifacts(slug, options = {}) {
 
   // Consume artifacts - this will create reviewer_findings and reviewer_outcome events
   const result = await consumeReviewerArtifactsFn(slug, reviewer, {
-    rootDir,
     worktree,
     tmpDir: artifactDir,
     log,
     error,
     providerEnabled: false,
-    createEventFn: options.createEventFn,
-    readArtifactFn: options.readArtifactFn,
-    deleteArtifactFn: options.deleteArtifactFn,
+    createEventFn: options.createEventFn as any,
+    readArtifactFn: options.readArtifactFn as any,
+    deleteArtifactFn: options.deleteArtifactFn as any,
   });
 
   if (!result.consumed) {
@@ -878,7 +974,6 @@ async function consumeArtifacts(slug, options = {}) {
   // Persist the artifact location to review-state.json if it doesn't exist yet
   const persisted = readReviewState(slug, worktree);
   if (!persisted) {
-    const { ReviewState } = require('./review-state');
     writeReviewState(slug, new ReviewState(slug, {
       reviewer,
       round: 1,
@@ -889,7 +984,7 @@ async function consumeArtifacts(slug, options = {}) {
 
   // Transition backlog task to review status
   if (taskResolution.ok) {
-    const currentStatus = getTaskStatusFn ? getTaskStatusFn(taskResolution.taskFile) : null;
+    const currentStatus = getTaskStatusFn ? getTaskStatusFn(taskResolution.taskFile!) : null;
     if (!currentStatus || currentStatus !== 'review') {
       transitionTaskFn(slug, 'review', { rootDir, log });
     } else {
@@ -916,14 +1011,31 @@ async function consumeArtifacts(slug, options = {}) {
 // Command: submitReviewRound
 // ============================================================================
 
-/**
- * @param {string} slug
- * @param {string} outcome
- * @param {string} message
- * @param {{log?: Function, error?: Function, exit?: Function, transitionTaskFn?: Function, readReviewStateFn?: Function, writeReviewStateFn?: Function, isReviewProviderEnabledFn?: Function, isForgejoReviewEnabledFn?: Function, resolveReviewUserFn?: Function, resolveForgejoUserFn?: Function, resolveTaskFileFn?: Function, getTaskStatusFn?: Function, worktree?: string, readTokenFn?: Function, postReviewFn?: Function, getPrAuthorFn?: Function, createEventFn?: Function, buildMetadataFooterFn?: Function}} [options]
- * @returns {void}
- */
-function submitReviewRound(slug, outcome, message, options = {}) {
+export function submitReviewRound(
+  slug: string,
+  outcome: string,
+  message: string,
+  options: {
+    log?: (msg: string) => void;
+    error?: (msg: string) => void;
+    exit?: (code: number) => never;
+    transitionTaskFn?: typeof transitionTask;
+    readReviewStateFn?: typeof readReviewState;
+    writeReviewStateFn?: typeof writeReviewState;
+    isReviewProviderEnabledFn?: typeof isProviderEnabled;
+    isForgejoReviewEnabledFn?: typeof isProviderEnabled;
+    resolveReviewUserFn?: typeof resolveReviewUser;
+    resolveForgejoUserFn?: typeof resolveReviewUser;
+    resolveTaskFileFn?: typeof resolveTaskFile;
+    getTaskStatusFn?: typeof getTaskStatus;
+    worktree?: string;
+    readTokenFn?: typeof readToken;
+    postReviewFn?: typeof postReview;
+    getPrAuthorFn?: unknown;
+    createEventFn?: typeof createEvent;
+    buildMetadataFooterFn?: typeof buildMetadataFooter;
+  } = {}
+): void {
   const log = options.log || fmt.log.plain;
   const error = options.error || fmt.log.plainError;
   const exit = options.exit || process.exit;
@@ -947,19 +1059,17 @@ function submitReviewRound(slug, outcome, message, options = {}) {
   // For provider=none (standalone), skip provider posting and only update review-state
   if (!providerEnabled) {
     log(fmt.status('INFO', `Review provider is none — skipping provider posting, updating review-state only for ${slug}.`));
-    const { ReviewState } = require('./review-state');
-    const transitionTaskFn = options.transitionTaskFn || transitionTask;
     const currentState = readReviewStateFn(slug, worktree);
 
-    let stateToWrite;
+    let stateToWrite: ReviewState;
     if (currentState) {
       stateToWrite = currentState;
       if (outcome === 'approve') {
         stateToWrite.disposition = 'APPROVED';
-        try { stateToWrite.transitionTo('approved'); } catch (_) {}
+        try { stateToWrite.transitionTo('approved'); } catch (_) { /* ignore */ }
       } else if (outcome === 'request-changes') {
         stateToWrite.disposition = 'REQUEST_CHANGES';
-        try { stateToWrite.transitionTo('fixing'); } catch (_) {}
+        try { stateToWrite.transitionTo('fixing'); } catch (_) { /* ignore */ }
       }
     } else {
       // No existing state, create minimal state for tracking
@@ -975,25 +1085,25 @@ function submitReviewRound(slug, outcome, message, options = {}) {
     writeReviewStateFn(slug, stateToWrite, worktree);
 
     // Also transition the backlog task for provider=none so integrate preflight passes
-    const backlogStatusMap = {
+    const backlogStatusMap: Record<string, string> = {
       'approve': 'approved',
       'request-changes': 'review',
       'comment': 'review'
     };
-    const backlogStatus = backlogStatusMap[/** @type {keyof typeof backlogStatusMap} */ (outcome)];
+    const backlogStatus = backlogStatusMap[outcome];
     if (backlogStatus && !transitionTaskFn(slug, backlogStatus, { rootDir: worktree, log })) {
       log(fmt.status('WARN', `Could not transition backlog task ${slug} to ${backlogStatus}.`));
     }
-    
+
     log(fmt.status('PASS', `Review outcome "${outcome}" recorded locally for ${slug}.`));
     return;
   }
-  
+
   // For provider-backed reviews, post through the adapter. Review-state is the normal source.
   let reviewIdentity = resolveReviewIdentity(slug, worktree, {
     readReviewStateFn,
   }).identityUser;
-  
+
   if (!reviewIdentity) {
     error(fmt.status('FAIL', `Cannot determine review identity for ${slug}. Persist review-state.json or set FORGEJO_USER.`));
     exit(1);
@@ -1005,9 +1115,9 @@ function submitReviewRound(slug, outcome, message, options = {}) {
     reviewIdentity: reviewIdentity || undefined,
     readTokenFn: options.readTokenFn,
     postReviewFn: options.postReviewFn,
-    getPrAuthorFn: options.getPrAuthorFn,
+    getPrAuthorFn: options.getPrAuthorFn as any,
     writeReviewStateFn: options.writeReviewStateFn,
-    createEventFn: options.createEventFn,
+    createEventFn: options.createEventFn as any,
     readReviewStateFn: options.readReviewStateFn,
     buildMetadataFooterFn: options.buildMetadataFooterFn,
     log,
@@ -1039,17 +1149,17 @@ function submitReviewRound(slug, outcome, message, options = {}) {
   if (currentState) {
     if (outcome === 'approve') {
       currentState.disposition = 'APPROVED';
-      try { currentState.transitionTo('approved'); } catch (_) {}
+      try { currentState.transitionTo('approved'); } catch (_) { /* ignore */ }
     } else if (outcome === 'request-changes') {
       currentState.disposition = 'REQUEST_CHANGES';
-      try { currentState.transitionTo('fixing'); } catch (_) {}
+      try { currentState.transitionTo('fixing'); } catch (_) { /* ignore */ }
     }
     writeReviewStateFn(slug, currentState, worktree);
   }
 
   const taskResolution = resolveTaskFileFn(slug, worktree);
-  const currentStatus = taskResolution.ok ? getTaskStatusFn(taskResolution.taskFile) : null;
-  let backlogStatus = null;
+  const currentStatus = taskResolution.ok ? getTaskStatusFn(taskResolution.taskFile!) : null;
+  let backlogStatus: string | null = null;
 
   if (outcome === 'approve') {
     backlogStatus = currentStatus === 'active' ? 'review' : 'approved';
@@ -1066,12 +1176,20 @@ function submitReviewRound(slug, outcome, message, options = {}) {
 // Command: closeMissionPr
 // ============================================================================
 
-/**
- * @param {string} slug
- * @param {{log?: Function, error?: Function, exit?: Function, readTokenFn?: Function, readReviewStateFn?: Function, resolveReviewUserFn?: Function, resolveForgejoUserFn?: Function, closePrFn?: Function, worktree?: string}} [options]
- * @returns {Promise<void>}
- */
-async function closeMissionPr(slug, options = {}) {
+export async function closeMissionPr(
+  slug: string,
+  options: {
+    log?: (msg: string) => void;
+    error?: (msg: string) => void;
+    exit?: (code: number) => never;
+    readTokenFn?: typeof readToken;
+    readReviewStateFn?: typeof readReviewState;
+    resolveReviewUserFn?: typeof resolveReviewUser;
+    resolveForgejoUserFn?: typeof resolveReviewUser;
+    closePrFn?: typeof closePr;
+    worktree?: string;
+  } = {}
+): Promise<void> {
   const log = options.log || fmt.log.plain;
   const error = options.error || fmt.log.plainError;
   const exit = options.exit || process.exit;
@@ -1081,7 +1199,7 @@ async function closeMissionPr(slug, options = {}) {
   const closePrFn = options.closePrFn || closePr;
   const worktree = options.worktree || resolveWorktree(slug) || process.cwd();
   const branch = missionBranchName(slug, worktree);
-  
+
   let reviewIdentity = resolveReviewIdentity(slug, worktree, {
     readReviewStateFn,
   }).identityUser;
@@ -1093,7 +1211,7 @@ async function closeMissionPr(slug, options = {}) {
   }
   reviewIdentity = resolveReviewUserFn(reviewIdentity);
 
-  const token = readTokenFn(reviewIdentity, { rootDir: worktree });
+  const token = readTokenFn(reviewIdentity!, { rootDir: worktree });
   if (!token) {
     error(fmt.status('FAIL', `No Forgejo token found for user "${reviewIdentity}".`));
     exit(1);
@@ -1101,8 +1219,8 @@ async function closeMissionPr(slug, options = {}) {
   }
 
   log(fmt.status('INFO', `Closing PR for ${branch} as ${reviewIdentity}...`));
-  const result = await closePrFn(branch, token, reviewIdentity);
-  
+  const result = await closePrFn(branch, token, reviewIdentity!) as Record<string, unknown>;
+
   if (!result.ok) {
     exit(1);
   }
@@ -1112,13 +1230,17 @@ async function closeMissionPr(slug, options = {}) {
 // Event CLI Handlers
 // ============================================================================
 
-/**
- * @param {string} slug
- * @param {string[]} args
- * @param {{log?: Function, error?: Function, exit?: Function, resolveWorktreeFn?: Function, readReviewStateFn?: Function}} [options]
- * @returns {void}
- */
-function createEventHandler(slug, args, options = {}) {
+export function createEventHandler(
+  slug: string,
+  args: string[],
+  options: {
+    log?: (msg: string) => void;
+    error?: (msg: string) => void;
+    exit?: (code: number) => never;
+    resolveWorktreeFn?: typeof resolveWorktree;
+    readReviewStateFn?: typeof readReviewState;
+  } = {}
+): void {
   const log = options.log || fmt.log.plain;
   const error = options.error || fmt.log.plainError;
   const exit = options.exit || process.exit;
@@ -1140,7 +1262,7 @@ function createEventHandler(slug, args, options = {}) {
 
   // Validate event type first
   if (!isValidEventType(eventType)) {
-    error(fmt.status('FAIL', `Invalid event type "${eventType}". Valid: ${ALL_EVENT_TYPES.join(', ')}`));
+    error(fmt.status('FAIL', `Invalid event type "${eventType}". Valid: ${(ALL_EVENT_TYPES as unknown as string[]).join(', ')}`));
     exit(1);
     return;
   }
@@ -1152,14 +1274,14 @@ function createEventHandler(slug, args, options = {}) {
       content = fs.readFileSync(inputFile, 'utf8');
       log(fmt.status('INFO', `Read event content from: ${inputFile}`));
     } catch (err) {
-      error(fmt.status('FAIL', `Failed to read input file: ${/** @type {Error} */(err).message}`));
+      error(fmt.status('FAIL', `Failed to read input file: ${(err as Error).message}`));
       exit(1);
       return;
     }
   }
 
   const round = roundRaw ? parseInt(roundRaw, 10) : undefined;
-  if (roundRaw && (isNaN(/** @type {number} */ (round))) ) {
+  if (roundRaw && isNaN(round!)) {
     error(fmt.status('FAIL', `--round must be a number, got "${roundRaw}"`));
     exit(1);
     return;
@@ -1167,14 +1289,12 @@ function createEventHandler(slug, args, options = {}) {
 
   const worktree = resolveWorktreeFn(slug) || process.cwd();
 
-  // Build params
-  /** @type {{content: string, round?: number, phase?: string, actor?: string, disposition?: string, verdict?: string, fixedItems?: string[], pushedBackItems?: string[], parkedItems?: string[], blockedReason?: string}} */
-  const params = { content };
-  if (round !== undefined) {params.round = round;}
-  if (phase) {params.phase = phase;}
-  if (actor) {params.actor = actor;}
-  if (disposition) {params.disposition = disposition;}
-  if (verdict) {params.verdict = verdict;}
+  const params: Record<string, unknown> = { content };
+  if (round !== undefined) { params.round = round; }
+  if (phase) { params.phase = phase; }
+  if (actor) { params.actor = actor; }
+  if (disposition) { params.disposition = disposition; }
+  if (verdict) { params.verdict = verdict; }
 
   const readReviewStateFn = options.readReviewStateFn || readReviewState;
   const { identityUser: stateReviewIdentity } = resolveReviewIdentity(slug, worktree, {
@@ -1193,32 +1313,24 @@ function createEventHandler(slug, args, options = {}) {
   if (content.includes('fixed_items:') || content.includes('fixedItems:')) {
     try {
       const frontmatterMatch = content.match(/fixed_items:\s*(\[[^\]]*\])/i);
-      if (frontmatterMatch) {
-        params.fixedItems = JSON.parse(frontmatterMatch[1]);
-      }
-    } catch (_) {}
+      if (frontmatterMatch) { params.fixedItems = JSON.parse(frontmatterMatch[1]); }
+    } catch (_) { /* ignore */ }
     try {
       const frontmatterMatch = content.match(/pushed_back_items:\s*(\[[^\]]*\])/i);
-      if (frontmatterMatch) {
-        params.pushedBackItems = JSON.parse(frontmatterMatch[1]);
-      }
-    } catch (_) {}
+      if (frontmatterMatch) { params.pushedBackItems = JSON.parse(frontmatterMatch[1]); }
+    } catch (_) { /* ignore */ }
     try {
       const frontmatterMatch = content.match(/parked_items:\s*(\[[^\]]*\])/i);
-      if (frontmatterMatch) {
-        params.parkedItems = JSON.parse(frontmatterMatch[1]);
-      }
-    } catch (_) {}
+      if (frontmatterMatch) { params.parkedItems = JSON.parse(frontmatterMatch[1]); }
+    } catch (_) { /* ignore */ }
     try {
       const frontmatterMatch = content.match(/blocked_reason:\s*"([^"]*)"/i);
-      if (frontmatterMatch) {
-        params.blockedReason = frontmatterMatch[1];
-      }
-    } catch (_) {}
+      if (frontmatterMatch) { params.blockedReason = frontmatterMatch[1]; }
+    } catch (_) { /* ignore */ }
   }
 
   // Create the event
-  const result = createEvent(slug, eventType, params, {
+  const result = createEvent(slug, eventType, params as any, {
     worktree,
     skipGit: false,
     log,
@@ -1234,13 +1346,16 @@ function createEventHandler(slug, args, options = {}) {
   log(fmt.status('PASS', `Created review event at: ${result.path}`));
 }
 
-/**
- * @param {string} slug
- * @param {string[]} args
- * @param {{log?: Function, error?: Function, exit?: Function, resolveWorktreeFn?: Function}} [options]
- * @returns {void}
- */
-function importLegacyHandler(slug, args, options = {}) {
+export function importLegacyHandler(
+  slug: string,
+  args: string[],
+  options: {
+    log?: (msg: string) => void;
+    error?: (msg: string) => void;
+    exit?: (code: number) => never;
+    resolveWorktreeFn?: typeof resolveWorktree;
+  } = {}
+): void {
   const log = options.log || fmt.log.plain;
   const error = options.error || fmt.log.plainError;
   const exit = options.exit || process.exit;
@@ -1249,28 +1364,51 @@ function importLegacyHandler(slug, args, options = {}) {
   const tmpDir = flagValue(args, '--tmp-dir') || process.env.WORKFLOW_TMP_DIR || os.tmpdir();
   const worktree = resolveWorktreeFn(slug) || process.cwd();
 
-  const result = importAllLegacyArtifacts(slug, { tmpDir, worktree, log, error });
-  
-  const errors = result.errors || [];
+  const result = importAllLegacyArtifacts(slug, { tmpDir, worktree, log, error }) as unknown as Record<string, unknown>;
+
+  const errors = (result.errors as string[]) || [];
   if (!result.ok) {
     error(fmt.status('FAIL', `Legacy import failed: ${errors.join(', ')}`));
     exit(1);
     return;
   }
 
-  log(fmt.status('PASS', `Imported ${result.imported ? result.imported.length : 0} legacy artifacts for ${slug}`));
+  log(fmt.status('PASS', `Imported ${result.imported ? (result.imported as unknown[]).length : 0} legacy artifacts for ${slug}`));
 }
 
 // ============================================================================
 // Main Dispatcher
 // ============================================================================
 
-/**
- * @param {string[]} args
- * @param {{inferSlugFn?: Function, log?: Function, error?: Function, exit?: Function, verifyReviewFn?: Function, submitForReviewFn?: Function, consumeArtifactsFn?: Function, pushRoundFn?: Function, readCommentsFn?: Function, commentRoundFn?: Function, submitReviewRoundFn?: Function, closeMissionPrFn?: Function, startReviewLoopFn?: Function, recordStageStatsSafeFn?: Function, startAgentFn?: Function, resolveTaskFileFn?: Function, getTaskImplementerFn?: Function, getPrStatusFn?: Function, readReviewStateFn?: Function, performStaticReviewFn?: Function, postStaticReviewCommentFn?: Function, resolveWorktreeFn?: Function, run?: Function, missionPath?: string}} [options]
- * @returns {Promise<void>}
- */
-async function review(args, options = {}) {
+export async function review(
+  args: string[],
+  options: {
+    inferSlugFn?: typeof inferSlug;
+    log?: (msg: string) => void;
+    error?: (msg: string) => void;
+    exit?: (code: number) => never;
+    verifyReviewFn?: typeof verifyReview;
+    submitForReviewFn?: typeof submitForReview;
+    consumeArtifactsFn?: typeof consumeArtifacts;
+    pushRoundFn?: typeof pushRound;
+    readCommentsFn?: typeof readComments;
+    commentRoundFn?: typeof commentRound;
+    submitReviewRoundFn?: typeof submitReviewRound;
+    closeMissionPrFn?: typeof closeMissionPr;
+    startReviewLoopFn?: typeof startReviewLoop;
+    recordStageStatsSafeFn?: typeof recordStageStatsSafe;
+    startAgentFn?: typeof startAgent;
+    resolveTaskFileFn?: typeof resolveTaskFile;
+    getTaskImplementerFn?: typeof getTaskImplementer;
+    getPrStatusFn?: typeof getPrStatus;
+    readReviewStateFn?: typeof readReviewState;
+    performStaticReviewFn?: typeof performStaticReview;
+    postStaticReviewCommentFn?: typeof postStaticReviewComment;
+    resolveWorktreeFn?: typeof resolveWorktree;
+    run?: typeof run;
+    missionPath?: string;
+  } = {}
+): Promise<void> {
   const inferSlugFn = options.inferSlugFn || inferSlug;
   const log = options.log || fmt.log.plain;
   const error = options.error || fmt.log.plainError;
@@ -1283,8 +1421,8 @@ async function review(args, options = {}) {
   const commentRoundFn = options.commentRoundFn || commentRound;
   const submitReviewRoundFn = options.submitReviewRoundFn || submitReviewRound;
   const closeMissionPrFn = options.closeMissionPrFn || closeMissionPr;
-  const startReviewLoopFn = options.startReviewLoopFn || require('./review-loop').startReviewLoop;
-const recordStageStatsSafeFn = options.recordStageStatsSafeFn || require('./review-loop').recordStageStatsSafe;
+  const startReviewLoopFn = options.startReviewLoopFn || startReviewLoop;
+  const recordStageStatsSafeFn = options.recordStageStatsSafeFn || recordStageStatsSafe;
   const startAgentFn = options.startAgentFn || startAgent;
   const resolveTaskFileFn = options.resolveTaskFileFn || resolveTaskFile;
   const getTaskImplementerFn = options.getTaskImplementerFn || getTaskImplementer;
@@ -1329,11 +1467,11 @@ const recordStageStatsSafeFn = options.recordStageStatsSafeFn || require('./revi
     showReviewStatus(slug, { ...options, readReviewStateFn });
     return;
   } else if (isVerify) {
-    verifyReviewFn(slug, skipGate, { ...options, missionPath });
+    verifyReviewFn(slug, skipGate, { ...options, missionPath: missionPath || undefined });
   } else if (isSubmit) {
     // Pre-check: inspect the configured artifact directory for unprocessed files
     // and emit a warning if artifacts are found but --submit-review was not used.
-    const artifactDir = require('./review-artifacts').resolveArtifactDir(resolveWorktreeFn(slug) || process.cwd());
+    const artifactDir = resolveArtifactDir(resolveWorktreeFn(slug) || process.cwd());
     const findingsPath = reviewArtifactPath(slug, 'review-findings.md', artifactDir);
     const outcomePath = reviewArtifactPath(slug, 'review-outcome.md', artifactDir);
     const verdictPath = reviewArtifactPath(slug, 'review-verdict.txt', artifactDir);
@@ -1381,8 +1519,8 @@ const recordStageStatsSafeFn = options.recordStageStatsSafeFn || require('./revi
     const pollTimeoutRaw = flagValue(args, '--poll-timeout-seconds');
     const pollTimeoutSeconds = pollTimeoutRaw ? parseInt(pollTimeoutRaw, 10) : null;
     await startReviewLoopFn(slug, {
-      implementer,
-      reviewer,
+      implementer: implementer || undefined,
+      reviewer: reviewer || undefined,
       focus,
       maxAttempts,
       dryRun: isDryRun,
@@ -1390,20 +1528,20 @@ const recordStageStatsSafeFn = options.recordStageStatsSafeFn || require('./revi
       isContinue,
       verbose,
       pollTimeoutSeconds,
-      missionPath,
+      missionPath: missionPath || undefined,
       recordStageStatsSafeFn
     });
   } else {
     const pr = getPrStatusFn(missionBranchName(slug, process.cwd()), process.cwd());
     log(fmt.status('INFO', `Review status for mission: ${fmt.slug(slug)}`));
-    if (pr.exists) {
-      log(pr.raw);
+    if ((pr as Record<string, unknown>).exists) {
+      log((pr as Record<string, unknown>).raw as string);
     } else {
       log(fmt.status('INFO', 'No active PR found for this mission.'));
       // Static review: when branch exists but no PR is open, inspect the diff
       // and check checkpoint evidence. Auto-trigger review loop if findings exist.
       const worktreeForStatic = resolveWorktreeFn(slug) || process.cwd();
-      const staticResult = performStaticReviewFn(slug, { log, error, findMissionDir: findMissionDir, findCheckpoints: findCheckpoints, readFileSync: fs.readFileSync, run: runFn, resolveWorktree: resolveWorktreeFn, rootDir: worktreeForStatic, missionPath });
+      const staticResult = performStaticReviewFn(slug, { log, findMissionDir, findCheckpoints, readFileSync: fs.readFileSync, run: runFn, resolveWorktree: resolveWorktreeFn, rootDir: worktreeForStatic, missionPath: missionPath || undefined });
       if (staticResult.findings && staticResult.findings.length > 0) {
         // Trivial structural findings (missing Goal Check, no evidence rows, mission
         // dir absent) are self-fixable, so re-launch the implementer with a targeted
@@ -1416,14 +1554,14 @@ const recordStageStatsSafeFn = options.recordStageStatsSafeFn || require('./revi
           log(fmt.status('WARN', `Static review found ${staticResult.findings.length} finding(s) but the implementer could not be resolved for ${fmt.slug(slug)} — not re-launching the implementer and not starting the review loop.`));
         } else {
           log(`\nStatic review found ${staticResult.findings.length} finding(s). Re-launching implementer (${fmt.agent(implementer)}) with a targeted fix prompt...`);
-          const findingLines = staticResult.findings.map((/** @type {string} */ f) => `- ${f}`).join('\n');
+          const findingLines = staticResult.findings.map((f: string) => `- ${f}`).join('\n');
           const prompt = `Static review of your mission branch found the following issue(s). Fix them and commit, then stop:\n${findingLines}`;
           await startAgentFn('active', { prompt, worktree: worktreeForStatic, agent: implementer, slug });
         }
       } else if (staticResult.ok) {
         log(fmt.status('INFO', 'Static review passed — no findings. Mission branch is clean.'));
         const prStatus = getPrStatusFn(missionBranchName(slug, process.cwd()), process.cwd());
-        if (!prStatus.exists || prStatus.state !== 'open') {
+        if (!(prStatus as Record<string, unknown>).exists || (prStatus as Record<string, unknown>).state !== 'open') {
           log(fmt.status('INFO', 'No open PR found — submitting for review before finalizing static review...'));
           await submitForReviewFn(slug, true, options);
         }
@@ -1436,36 +1574,7 @@ const recordStageStatsSafeFn = options.recordStageStatsSafeFn || require('./revi
     }
     const persisted = readReviewStateFn(slug);
     if (persisted) {
-      log(fmt.status('INFO', `Persisted reviewer state: reviewer=${fmt.agent(persisted.reviewer)} implementer=${fmt.agent(persisted.implementer)} round=${persisted.round}`));
+      log(fmt.status('INFO', `Persisted reviewer state: reviewer=${fmt.agent(persisted.reviewer ?? '')} implementer=${fmt.agent(persisted.implementer ?? '')} round=${persisted.round}`));
     }
   }
 }
-
-// ============================================================================
-// Module Exports
-// ============================================================================
-
-module.exports = {
-  // Internal helpers
-  flagValue,
-  readTextFlag,
-  formatStaticReviewFindings,
-  formatStaticReviewSuccess,
-  postStaticReviewComment,
-  performStaticReview,
-  // Commands
-  verifyReview,
-  submitForReview,
-  consumeArtifacts,
-  readComments,
-  pushRound,
-  showReviewStatus,
-  commentRound,
-  submitReviewRound,
-  closeMissionPr,
-  // Event handlers
-  createEventHandler,
-  importLegacyHandler,
-  // Main dispatcher
-  review
-};

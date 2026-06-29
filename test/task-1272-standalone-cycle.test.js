@@ -21,7 +21,7 @@ const childProcess = require('child_process');
 const { startReviewLoop } = require('../lib/review/review');
 const { findMissionDir, missionDirForSlug, missionPathForSlug } = require('../lib/core/mission-utils');
 
-function withTempGitRepo(fn) {
+async function withTempGitRepo(fn) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-test-1272-cycle-'));
   try {
     childProcess.spawnSync('git', ['init', '-b', 'master'], { cwd: root });
@@ -30,7 +30,11 @@ function withTempGitRepo(fn) {
     fs.writeFileSync(path.join(root, 'README.md'), '# repo');
     childProcess.spawnSync('git', ['add', '.'], { cwd: root });
     childProcess.spawnSync('git', ['commit', '-m', 'initial'], { cwd: root });
-    return fn(root);
+    const result = fn(root);
+    if (result && typeof result.then === 'function') {
+      await result;
+    }
+    return result;
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

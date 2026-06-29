@@ -3,11 +3,19 @@ id: TASK-1373
 title: >-
   TASK-1374: Mission 10 - Tools module (backlog, forgejo, gatekeeper, redgreen,
   sessions, setup-review)
+<<<<<<< Updated upstream:backlog/completed/task-1373 - TASK-1374-Mission-10-Tools-module-backlog-forgejo-gatekeeper-redgreen-sessions-setup-review.md
 status: done
 assignee: [custom]
 created_date: '2026-06-27 10:38'
 updated_date: '2026-06-27 10:38'
 labels: [ai_sdlc]
+=======
+status: backlog
+assignee: []
+created_date: '2026-06-27 10:38'
+updated_date: '2026-06-27 10:38'
+labels: []
+>>>>>>> Stashed changes:backlog/tasks/task-1373 - TASK-1374-Mission-10-Tools-module-backlog-forgejo-gatekeeper-redgreen-sessions-setup-review.md
 dependencies:
   - TASK-1366
   - TASK-1367

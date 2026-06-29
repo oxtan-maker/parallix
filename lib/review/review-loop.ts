@@ -4,29 +4,43 @@
  * Handles autonomous review loop orchestration.
  */
 
-const fs = require('fs');
-const path = require('path');
-const fmt = require('../core/fmt');
-const { git, run } = require('../core/git');
-const { findMissionDir, resolveWorktree, missionBranchName } = require('../core/mission-utils');
-const { resolveTaskFile, getTaskImplementer, getTaskStatus, enforceTaskAssignee, transitionTask, reportTaskResolution } = require('../tools/backlog');
-const { toVirtual, transitionVirtual } = require('../core/state-map');
-const { getPrStatus, readToken, getLatestReviewForPr, getLatestDispositionForPr, providerAvailable, getComments, postComment, postReview, resolveReviewUser, isProviderEnabled } = require('./review-adapter');
-const { buildAutonomousReviewMatrix, formatMatrixSummary } = require('../core/runtime-matrix');
-const { buildReviewPrompt, buildActOnReviewPrompt, buildCompactReviewPrompt, buildCompactActOnReviewPrompt } = require('./review-prompts');
-const { ReviewState, readReviewState, writeReviewState, resetReviewState, VALID_PHASES } = require('./review-state');
+import * as fs from 'fs';
+import * as path from 'path';
+import * as fmt from '../core/fmt.js';
+import { git, run } from '../core/git.js';
+import { findMissionDir, resolveWorktree, missionBranchName } from '../core/mission-utils.js';
+import { resolveTaskFile, getTaskImplementer, getTaskStatus, enforceTaskAssignee, transitionTask, reportTaskResolution } from '../tools/backlog.js';
+import { toVirtual, transitionVirtual } from '../core/state-map.js';
+import { getPrStatus, readToken, getLatestReviewForPr, getLatestDispositionForPr, providerAvailable, getComments, postComment, postReview, resolveReviewUser, isProviderEnabled } from './review-adapter.js';
+import { buildAutonomousReviewMatrix, formatMatrixSummary } from '../core/runtime-matrix.js';
+import { buildReviewPrompt, buildActOnReviewPrompt, buildCompactReviewPrompt, buildCompactActOnReviewPrompt } from './review-prompts.js';
+import { ReviewState, readReviewState, writeReviewState, resetReviewState, VALID_PHASES } from './review-state.js';
+import { workflowLauncherStatus, startAgent, eligibleAgentsForStep, selectAgent } from '../agents/agents.js';
+import { commitSafeMissionArtifacts, rebaseBeforeReviewRound } from './rebase.js';
+import { resolveAgentModel } from '../core/product-config.js';
+import { delay, resolvePollIntervalMs, resolvePollTimeoutMs, formatElapsed, isPollTimeout, pollForReview, pollForDisposition } from './review-polling.js';
+import { buildMetadataFooter, resolveArtifactDir, consumeReviewerArtifacts, consumeImplementerArtifacts } from './review-artifacts.js';
+import { resolveStageTelemetry } from '../agents/stage-telemetry.js';
 
-const { workflowLauncherStatus, startAgent, eligibleAgentsForStep, selectAgent } = require('../agents/agents');
-const { performHandoff } = require('../commands/handoff');
-const { commitSafeMissionArtifacts, rebaseBeforeReviewRound } = require('./rebase');
-const { resolveAgentModel } = require('../core/product-config');
+/** Lazily loaded stats module — loaded on first use to avoid circular dependency. */
+let _stats: any = null;
+async function getStats(): Promise<any> {
+  if (!_stats) {
+    // @ts-expect-error stats.js not converted to TS yet
+    _stats = await import('../commands/stats.js');
+  }
+  return _stats as any;
+}
 
-// Import from review-polling module
-const { delay, resolvePollIntervalMs, resolvePollTimeoutMs, formatElapsed, isPollTimeout, pollForReview, pollForDisposition } = require('./review-polling');
-// Import from review-artifacts module
-const { buildMetadataFooter, resolveArtifactDir, consumeReviewerArtifacts, consumeImplementerArtifacts } = require('./review-artifacts');
-const stats = require('../commands/stats');
-const { resolveStageTelemetry } = require('../agents/stage-telemetry');
+/** Lazily loaded handoff module — not yet converted to TS. */
+let _handoff: any = null;
+async function getHandoff(): Promise<any> {
+  if (!_handoff) {
+    // @ts-expect-error handoff.js not converted to TS yet
+    _handoff = await import('../commands/handoff.js');
+  }
+  return _handoff as any;
+}
 
 // Stage telemetry recording is best-effort: a failure must never break the
 // review loop. Token columns are populated only for the codex role (the C2 rule
@@ -39,12 +53,7 @@ const { resolveStageTelemetry } = require('../agents/stage-telemetry');
 // one launch at a time, de-duped via review-state metadata, so Claude/custom rows
 // are cumulative too. A family switch creates a separate row instead of mixing
 // agents in one record.
-/**
- * @param {string} agentFamily
- * @param {{sessionId?: string, startedAt?: string, endedAt?: string, status?: number}} result
- * @returns {string}
- */
-function stageLaunchFingerprint(agentFamily, result) {
+function stageLaunchFingerprint(agentFamily: string, result: { sessionId?: string; startedAt?: string; endedAt?: string; status?: number } | null): string {
   return [
     String(agentFamily || '').trim().toLowerCase(),
     result && result.sessionId ? String(result.sessionId) : '',
@@ -54,52 +63,56 @@ function stageLaunchFingerprint(agentFamily, result) {
   ].join('|');
 }
 
-/**
- * @param {Object|null} state
- * @param {{stage: string, agentFamily: string, result?: {[key: string]: any}, slug: string, worktree?: string, writeReviewStateFn?: Function}} opts
- * @returns {boolean}
- */
-function markStageLaunchRecorded(state, /** @type {{stage: string, agentFamily: string, result?: {[key: string]: any}, slug: string, worktree?: string, writeReviewStateFn?: Function}} */ opts) {
+function markStageLaunchRecorded(
+  state: Record<string, any> | null,
+  opts: { stage: string; agentFamily: string; result?: Record<string, any>; slug: string; worktree?: string; writeReviewStateFn?: typeof writeReviewState }
+): boolean {
   const { stage, agentFamily, result, slug, worktree, writeReviewStateFn = writeReviewState } = opts || {};
-  if (!state || !agentFamily) {return true;}
+  if (!state || !agentFamily) { return true; }
   const key = stageWindowKey(stage, agentFamily);
-  const fingerprint = stageLaunchFingerprint(agentFamily, /** @type {{sessionId?: string, startedAt?: string, endedAt?: string, status?: number}} */ (result));
-  /** @type {{[key: string]: any}} */
-  const stateObj = /** @type {{[key: string]: any}} */ (state);
-  const recordedStageLaunches = stateObj.metadata && typeof stateObj.metadata === 'object'
-    ? (stateObj.metadata.recordedStageLaunches || {})
+  const fingerprint = stageLaunchFingerprint(agentFamily, result || null);
+  const recordedStageLaunches = state.metadata && typeof state.metadata === 'object'
+    ? (state.metadata.recordedStageLaunches || {})
     : {};
-  const recorded = Array.isArray(recordedStageLaunches[key]) ? recordedStageLaunches[key] : [];
+  const recorded: string[] = Array.isArray(recordedStageLaunches[key]) ? recordedStageLaunches[key] : [];
   if (recorded.includes(fingerprint)) {
     return false;
   }
-  if (!stateObj.metadata || typeof stateObj.metadata !== 'object') {
-    stateObj.metadata = {};
+  if (!state.metadata || typeof state.metadata !== 'object') {
+    state.metadata = {};
   }
-  stateObj.metadata.recordedStageLaunches = {
-    ...(stateObj.metadata.recordedStageLaunches || {}),
+  state.metadata.recordedStageLaunches = {
+    ...(state.metadata.recordedStageLaunches || {}),
     [key]: [...recorded, fingerprint].slice(-20),
   };
-  writeReviewStateFn(slug, state, worktree);
+  writeReviewStateFn(slug, state as ReviewState, worktree || process.cwd());
   return true;
 }
 
-/**
- * @param {'review'|'active'} kind
- * @param {{stage: string, slug: string, rootDir?: string, worktree?: string, implementer?: string, reviewer?: string, result?: {[key: string]: any}, sinceMs?: number, log?: Function, state?: {[key: string]: any}, writeReviewStateFn?: Function, model?: string|null}} opts
- * @returns {void}
- */
-function recordStageStatsSafe(kind, { stage, slug, rootDir, worktree, implementer, reviewer, result, sinceMs, log, state, writeReviewStateFn = writeReviewState, model = null }) {
-  /** @type {number} */
+export function recordStageStatsSafe(
+  kind: 'review' | 'active',
+  opts: {
+    stage: string;
+    slug: string;
+    rootDir?: string;
+    worktree?: string;
+    implementer?: string;
+    reviewer?: string;
+    result?: Record<string, any>;
+    sinceMs?: number;
+    log?: (msg: string) => void;
+    error?: (msg: string) => void;
+    state?: Record<string, any>;
+    writeReviewStateFn?: typeof writeReviewState;
+    model?: string | null;
+  }
+): void {
+  const { stage, slug, rootDir, worktree, implementer, reviewer, result, sinceMs, log, state, writeReviewStateFn = writeReviewState, model = null } = opts;
   let durationMinutes = 0;
   if (result && result.startedAt && result.endedAt) {
     durationMinutes = (Date.parse(result.endedAt) - Date.parse(result.startedAt)) / 60000;
   }
-  // Shared with the execute hook (commands/active.js) via stage-telemetry.js:
-  // prefer the windowed Codex rollout, else the launcher-attached telemetry so
-  // Claude active/review stages record real tokens instead of all-zeros
-  // (task-1274), bounded to this stage by sinceMs (task-1285 F6).
-  const telemetry = resolveStageTelemetry({ worktree: /** @type {string} */ (worktree || ''), result: /** @type {{[key: string]: any}} */ (result || {}), sinceMs: (/** @type {number | undefined} */ (sinceMs)) || 0 });
+  const telemetry = resolveStageTelemetry({ worktree: worktree || '', result: result || {}, sinceMs: sinceMs || 0 });
   try {
     const actorFamily = kind === 'review' ? reviewer : implementer;
     if (state && actorFamily && !markStageLaunchRecorded(state, {
@@ -112,18 +125,16 @@ function recordStageStatsSafe(kind, { stage, slug, rootDir, worktree, implemente
     })) {
       return;
     }
-    /** @type {any} */ (stats).accumulateStageStats({ stage, slug, rootDir, implementer, reviewer, telemetry, durationMinutes, model });
-  } catch (/** @type {unknown} */ err) {
-    // Best-effort: never escalate to the fatal `error` channel.
-    log?.(fmt.status('WARN', `Could not record ${kind} stats for ${slug}: ${/** @type {Error} */(err).message}`));
+    getStats().then(s => s.accumulateStageStats({ stage, slug, rootDir, implementer, reviewer, telemetry, durationMinutes, model })).catch(() => {});
+  } catch (err: unknown) {
+    log?.(fmt.status('WARN', `Could not record ${kind} stats for ${slug}: ${(err as Error).message}`));
   }
 }
 
 const DEFAULT_MAX_ATTEMPTS = 5;
 const CONTINUE_SKIP_CHECK_TIMEOUT_MS = 10_000;
 
-/** @param {string} earlierIso @param {number} [nowMs] */
-function strictlyLaterIso(earlierIso, nowMs = Date.now()) {
+function strictlyLaterIso(earlierIso: string, nowMs = Date.now()): string {
   const earlierMs = Date.parse(earlierIso);
   if (!Number.isFinite(earlierMs)) {
     return new Date(nowMs).toISOString();
@@ -135,9 +146,13 @@ function strictlyLaterIso(earlierIso, nowMs = Date.now()) {
 // Pre-review Setup Functions
 // ============================================================================
 
-/** @param {string} rootDir @param {{commandRunner?: Function, log?: Function}} [options] */
-function maybeUpdateGraphifyBeforeReview(rootDir, { commandRunner = run, log = fmt.log.plain } = {}) {
-  const updateGraphifyKnowledgeGraph = require('../core/mission-utils').updateGraphifyKnowledgeGraph;
+export function maybeUpdateGraphifyBeforeReview(
+  rootDir: string,
+  { commandRunner = run, log = fmt.log.plain }: { commandRunner?: typeof run; log?: (msg: string) => void } = {}
+): unknown {
+  // Lazy require to break circular dependency with core/mission-utils
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { updateGraphifyKnowledgeGraph } = require('../core/mission-utils.js');
   return updateGraphifyKnowledgeGraph({
     rootDir,
     commandRunner,
@@ -157,11 +172,18 @@ function maybeUpdateGraphifyBeforeReview(rootDir, { commandRunner = run, log = f
 // fallback identity selected by the launcher.
 // This helper detects the fallback, persists the new identity to review state
 // and the Backlog assignee, and returns the identity that should be polled for.
-/**
- * @param {{role: string, original: string, launchResult?: {[key: string]: any}, state: {[key: string]: any}, slug: string, worktree?: string, taskResolution?: {[key: string]: any}, log?: Function, writeReviewStateFn?: Function, enforceTaskAssigneeFn?: Function}} opts
- * @returns {string}
- */
-function applyAgentFallback(/** @type {{role: string, original: string, launchResult?: {[key: string]: any}, state: {[key: string]: any}, slug: string, worktree?: string, taskResolution?: {[key: string]: any}, log?: Function, writeReviewStateFn?: Function, enforceTaskAssigneeFn?: Function}} */ opts) {
+export function applyAgentFallback(opts: {
+  role: string;
+  original: string;
+  launchResult?: Record<string, any>;
+  state: Record<string, any>;
+  slug: string;
+  worktree?: string;
+  taskResolution?: Record<string, any>;
+  log?: (msg: string) => void;
+  writeReviewStateFn?: typeof writeReviewState;
+  enforceTaskAssigneeFn?: typeof enforceTaskAssignee;
+}): string {
   const { role, original, launchResult, state, slug, worktree, taskResolution, log = fmt.log.plain, writeReviewStateFn = writeReviewState, enforceTaskAssigneeFn } = opts;
   if (!launchResult || !launchResult.agent || launchResult.agent === original) {
     return original;
@@ -173,7 +195,7 @@ function applyAgentFallback(/** @type {{role: string, original: string, launchRe
   } else {
     state.implementer = fallback;
   }
-  writeReviewStateFn(slug, state, worktree);
+  writeReviewStateFn(slug, state as ReviewState, worktree || process.cwd());
   if (role === 'implementer' && taskResolution && taskResolution.ok) {
     if (enforceTaskAssigneeFn && !enforceTaskAssigneeFn(taskResolution.taskFile, fallback)) {
       log(fmt.status('WARN', `Could not enforce fallback implementer ${fallback} in backlog task.`));
@@ -182,15 +204,13 @@ function applyAgentFallback(/** @type {{role: string, original: string, launchRe
   return fallback;
 }
 
-/**
- * @param {string} slug
- * @param {{[key: string]: any}} state
- * @param {string} worktree
- * @param {{log?: Function, writeReviewStateFn?: Function}} [options]
- * @returns {void}
- */
-function persistNormalizedPhaseRepair(slug, state, worktree, { log = fmt.log.plain, writeReviewStateFn = writeReviewState } = {}) {
-  if (!state || !state.phaseOriginal || VALID_PHASES.includes(state.phaseOriginal)) {
+export function persistNormalizedPhaseRepair(
+  slug: string,
+  state: ReviewState,
+  worktree: string,
+  { log = fmt.log.plain, writeReviewStateFn = writeReviewState }: { log?: (msg: string) => void; writeReviewStateFn?: typeof writeReviewState } = {}
+): void {
+  if (!state || !state.phaseOriginal || (VALID_PHASES as readonly string[]).includes(state.phaseOriginal)) {
     return;
   }
   log(fmt.status('WARN', `Persisted review phase "${state.phaseOriginal}" is invalid. Repairing to "${state.phase}".`));
@@ -198,8 +218,7 @@ function persistNormalizedPhaseRepair(slug, state, worktree, { log = fmt.log.pla
   state.phaseOriginal = null;
 }
 
-/** @param {string} stage @param {string} agentFamily */
-function stageWindowKey(stage, agentFamily) {
+function stageWindowKey(stage: string, agentFamily: string): string {
   const normalizedStage = String(stage || 'default').trim().toLowerCase() || 'default';
   const normalizedAgent = String(agentFamily || '').trim().toLowerCase();
   return `${normalizedStage}:${normalizedAgent}`;
@@ -212,8 +231,7 @@ function stageWindowKey(stage, agentFamily) {
 // instead of re-summing a cumulative-since-first-launch window every round.
 // Resume-idempotency is provided separately by the launch fingerprint in
 // markStageLaunchRecorded, so the window itself does not need to persist.
-/** @param {{startedAt?: string}} result */
-function stageLaunchSinceMs(result) {
+export function stageLaunchSinceMs(result: { startedAt?: string } | null | undefined): number {
   const startedAt = result && result.startedAt ? String(result.startedAt) : '';
   const startedMs = startedAt ? Date.parse(startedAt) : NaN;
   return Number.isFinite(startedMs) ? startedMs : 0;
@@ -223,12 +241,69 @@ function stageLaunchSinceMs(result) {
 // Main Review Loop
 // ============================================================================
 
-/**
- * @param {string} slug
- * @param {{implementer?: string, reviewer?: string, focus?: string, maxAttempts?: number, dryRun?: boolean, reset?: boolean, continue?: boolean, isContinue?: boolean, verbose?: boolean, pollTimeoutSeconds?: number|null, worktree?: string, missionPath?: string, resetReviewStateFn?: Function, maybeUpdateGraphifyBeforeReviewFn?: Function, readReviewStateFn?: Function, resolveTaskFileFn?: Function, getTaskImplementerFn?: Function, getTaskStatusFn?: Function, transitionTaskFn?: Function, toVirtualFn?: Function, transitionVirtualFn?: Function, workflowLauncherStatusFn?: Function, buildAutonomousReviewMatrixFn?: Function, formatMatrixSummaryFn?: Function, selectAgentFn?: Function, providerAvailableFn?: Function, runFn?: Function, getPrStatusFn?: Function, enforceTaskAssigneeFn?: Function, resolveReviewUserFn?: Function, forgejoAvailableFn?: Function, resolveForgejoUserFn?: Function, readTokenFn?: Function, getCommentsFn?: Function, postCommentFn?: Function, postReviewFn?: Function, writeReviewStateFn?: Function, startAgentFn?: Function, pollForReviewFn?: Function, pollForDispositionFn?: Function, applyAgentFallbackFn?: Function, buildReviewPromptFn?: Function, buildActOnReviewPromptFn?: Function, buildCompactReviewPromptFn?: Function, buildCompactActOnReviewPromptFn?: Function, consumeReviewerArtifactsFn?: Function, consumeImplementerArtifactsFn?: Function, rebaseBeforeReviewRoundFn?: Function, eligibleAgentsForStepFn?: Function, performHandoffFn?: Function, log?: Function, error?: Function, getLatestReviewForPrFn?: Function, getLatestDispositionForPrFn?: Function, sleepFn?: Function, exit?: Function, gitFn?: Function, isReviewProviderEnabledFn?: Function, legacyIsForgejoReviewEnabledFn?: Function, isForgejoReviewEnabledFn?: Function, recordStageStatsSafeFn?: Function}} [opts]
- * @returns {Promise<void>}
- */
-async function startReviewLoop(slug, opts = {}) {
+export async function startReviewLoop(slug: string, opts: {
+  implementer?: string;
+  reviewer?: string;
+  focus?: string;
+  maxAttempts?: number;
+  dryRun?: boolean;
+  reset?: boolean;
+  continue?: boolean;
+  isContinue?: boolean;
+  verbose?: boolean;
+  pollTimeoutSeconds?: number | null;
+  worktree?: string;
+  missionPath?: string;
+  resetReviewStateFn?: typeof resetReviewState;
+  maybeUpdateGraphifyBeforeReviewFn?: typeof maybeUpdateGraphifyBeforeReview;
+  readReviewStateFn?: typeof readReviewState;
+  resolveTaskFileFn?: typeof resolveTaskFile;
+  getTaskImplementerFn?: typeof getTaskImplementer;
+  getTaskStatusFn?: typeof getTaskStatus;
+  transitionTaskFn?: typeof transitionTask;
+  toVirtualFn?: typeof toVirtual;
+  transitionVirtualFn?: typeof transitionVirtual;
+  workflowLauncherStatusFn?: typeof workflowLauncherStatus;
+  buildAutonomousReviewMatrixFn?: typeof buildAutonomousReviewMatrix;
+  formatMatrixSummaryFn?: typeof formatMatrixSummary;
+  selectAgentFn?: typeof selectAgent;
+  providerAvailableFn?: ((url: string) => Promise<boolean>) | null | undefined;
+  runFn?: typeof run;
+  getPrStatusFn?: typeof getPrStatus;
+  enforceTaskAssigneeFn?: typeof enforceTaskAssignee;
+  resolveReviewUserFn?: (() => string) | null | undefined;
+  forgejoAvailableFn?: ((url: string) => Promise<boolean>) | null;
+  resolveForgejoUserFn?: (() => string) | null;
+  readTokenFn?: typeof readToken;
+  getCommentsFn?: typeof getComments;
+  postCommentFn?: typeof postComment;
+  postReviewFn?: typeof postReview;
+  writeReviewStateFn?: typeof writeReviewState;
+  startAgentFn?: typeof startAgent;
+  pollForReviewFn?: typeof pollForReview;
+  pollForDispositionFn?: typeof pollForDisposition;
+  applyAgentFallbackFn?: typeof applyAgentFallback;
+  buildReviewPromptFn?: typeof buildReviewPrompt;
+  buildActOnReviewPromptFn?: typeof buildActOnReviewPrompt;
+  buildCompactReviewPromptFn?: typeof buildCompactReviewPrompt;
+  buildCompactActOnReviewPromptFn?: typeof buildCompactActOnReviewPrompt;
+  consumeReviewerArtifactsFn?: typeof consumeReviewerArtifacts;
+  consumeImplementerArtifactsFn?: typeof consumeImplementerArtifacts;
+  rebaseBeforeReviewRoundFn?: typeof rebaseBeforeReviewRound;
+  eligibleAgentsForStepFn?: typeof eligibleAgentsForStep;
+  performHandoffFn?: (slug: string, opts?: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  log?: (msg: string) => void;
+  error?: (msg: string) => void;
+  getLatestReviewForPrFn?: typeof getLatestReviewForPr;
+  getLatestDispositionForPrFn?: typeof getLatestDispositionForPr;
+  sleepFn?: typeof delay;
+  exit?: (code: number) => never;
+  gitFn?: typeof git;
+  isReviewProviderEnabledFn?: ((rootDir?: string) => boolean) | null | undefined;
+  legacyIsForgejoReviewEnabledFn?: ((rootDir?: string) => boolean) | null;
+  isForgejoReviewEnabledFn?: ((rootDir?: string) => boolean) | null;
+  recordStageStatsSafeFn?: (...args: any[]) => void;
+} = {}): Promise<void> {
   let {
     implementer,
     reviewer,
@@ -279,7 +354,6 @@ async function startReviewLoop(slug, opts = {}) {
     consumeImplementerArtifactsFn = consumeImplementerArtifacts,
     rebaseBeforeReviewRoundFn = rebaseBeforeReviewRound,
     eligibleAgentsForStepFn = eligibleAgentsForStep,
-    performHandoffFn = performHandoff,
     log = fmt.log.plain,
     error = fmt.log.plainError,
     getLatestReviewForPrFn = getLatestReviewForPr,
@@ -292,11 +366,14 @@ async function startReviewLoop(slug, opts = {}) {
     isForgejoReviewEnabledFn = null,
     recordStageStatsSafeFn = () => {}
   } = opts;
-  let prNumber = null;
+
+  const performHandoffFn = opts.performHandoffFn || (await getHandoff()).performHandoff;
+
+  let prNumber: number | null = null;
   isContinue = Boolean(isContinue || continueFlag);
 
   const pollIntervalMs = resolvePollIntervalMs();
-  const pollTimeoutMs = resolvePollTimeoutMs(/** @type {number} */ (pollTimeoutSeconds || 0));
+  const pollTimeoutMs = resolvePollTimeoutMs(pollTimeoutSeconds || 0);
 
   const worktree = callerWorktree || resolveWorktree(slug) || process.cwd();
   const resolvedProviderAvailableFn = providerAvailableFn || forgejoAvailableFn || providerAvailable;
@@ -313,7 +390,7 @@ async function startReviewLoop(slug, opts = {}) {
   // slug-derived default). Absent the flag, `effectiveMissionPath` stays
   // undefined and the prompts fall back to the standard slug-derived path.
   const missionDir = findMissionDir(slug, worktree, { missionPath });
-  let effectiveMissionPath = /** @type {string|null} */ (null);
+  let effectiveMissionPath: string | null = null;
   if (missionPath && fs.existsSync(missionPath)) {
     effectiveMissionPath = fs.statSync(missionPath).isDirectory()
       ? path.join(missionPath, 'MISSION.md')
@@ -348,7 +425,7 @@ async function startReviewLoop(slug, opts = {}) {
     } else {
       // Try to resolve from backlog task
       if (taskResolution.ok) {
-        implementer = getTaskImplementerFn(taskResolution.taskFile);
+        implementer = (getTaskImplementerFn(taskResolution.taskFile!) || undefined);
         if (implementer) {
           log(fmt.status('INFO', `Auto-derived implementer from backlog task: ${implementer}`));
         }
@@ -380,7 +457,7 @@ async function startReviewLoop(slug, opts = {}) {
     if (!await resolvedProviderAvailableFn(forgejoUrl)) {
       error(fmt.status('FAIL', `Review provider not reachable at ${forgejoUrl}`));
       error('       Attempting to bootstrap provider containers...');
-      const bootstrapResult = runFn('bash', [bootstrapScript], { stdio: 'inherit' });
+      const bootstrapResult = (runFn as any)('bash', [bootstrapScript], { stdio: 'inherit' });
       if (bootstrapResult.status === 0) {
         log(fmt.status('INFO', 'Bootstrap succeeded. Continuing with review loop.'));
       } else {
@@ -391,10 +468,10 @@ async function startReviewLoop(slug, opts = {}) {
     } else {
       log(fmt.status('INFO', `Review provider is running and reachable at ${forgejoUrl}.`));
     }
-    const pr = getPrStatusFn(branch, worktree);
+    const pr = getPrStatusFn(branch, worktree) as Record<string, unknown>;
     if (!pr.exists || pr.state !== 'open') {
       // Check task status to detect pre-review (implementation) phase
-      const taskStatus = taskResolution.ok ? getTaskStatusFn(taskResolution.taskFile) : null;
+      const taskStatus = taskResolution.ok ? getTaskStatusFn(taskResolution.taskFile!) : null;
       const virtualStatus = taskStatus ? toVirtualFn(taskStatus) : null;
 
       // Implementation phase states: 'active' or any virtual state mapping to it
@@ -413,9 +490,9 @@ async function startReviewLoop(slug, opts = {}) {
       // PR exists. Only fall back to guidance when self-heal cannot yield an open PR.
       // Emits `--push` (the command self-heal attempts and the correct manual
       // equivalent) — never the old, frequently-wrong `--submit`.
-      const fallbackGuidance = (/** @type {string|null} */ reason) => {
+      const fallbackGuidance = (reason: string | null) => {
         error(fmt.status('FAIL', `No open review PR found for ${branch}. Create the PR before starting the review loop.`));
-        if (reason) {error(`       Handoff failure: ${reason}`);}
+        if (reason) { error(`       Handoff failure: ${reason}`); }
         error(`       Run: px review ${slug} --push`);
       };
 
@@ -438,13 +515,13 @@ async function startReviewLoop(slug, opts = {}) {
       }
 
       if (!handoff || !handoff.ok) {
-        fallbackGuidance(handoff && handoff.error ? handoff.error : null);
+        fallbackGuidance(handoff && handoff.error ? String(handoff.error) : null);
         exit(1);
         return;
       }
 
       // Handoff succeeded — re-check whether an open PR now exists.
-      const healedPr = getPrStatusFn(branch, worktree);
+      const healedPr = getPrStatusFn(branch, worktree) as Record<string, unknown>;
       if (!healedPr.exists || healedPr.state !== 'open') {
         fallbackGuidance(null);
         exit(1);
@@ -452,11 +529,11 @@ async function startReviewLoop(slug, opts = {}) {
       }
 
       log(fmt.status('INFO', `Self-heal succeeded: review PR #${healedPr.number} confirmed open for ${branch}. Continuing review loop.`));
-      prNumber = healedPr.number;
+      prNumber = healedPr.number as number | null;
       // Fall through into the normal loop with the recovered PR number.
     } else {
       log(fmt.status('INFO', `Review PR #${pr.number} confirmed open for ${branch}.`));
-      prNumber = pr.number;
+      prNumber = pr.number as number | null;
     }
   } else if (!dryRun && !forgejoEnabled) {
     log(fmt.status('INFO', 'Forgejo validation skipped (review provider is not forgejo). Using workflow-owned review surfaces.'));
@@ -469,7 +546,7 @@ async function startReviewLoop(slug, opts = {}) {
   // Resolve reviewer after the no-PR/self-heal gate so implementation-phase
   // guidance does not depend on workstation launcher availability.
   let reviewerSource = 'explicit';
-  /** @type {Error|null} */ let selectErr = null;
+  let selectErr: Error | null = null;
   if (!reviewer) {
     if (persisted && persisted.reviewer) {
       reviewer = persisted.reviewer;
@@ -478,8 +555,8 @@ async function startReviewLoop(slug, opts = {}) {
     } else {
       try {
         reviewer = selectAgentFn('review', { exclude: new Set([implementer]) });
-      } catch (/** @type {unknown} */ err) {
-        selectErr = /** @type {Error} */ (err);
+      } catch (err: unknown) {
+        selectErr = err as Error;
         reviewer = undefined;
       }
       reviewerSource = 'auto-derived';
@@ -487,7 +564,7 @@ async function startReviewLoop(slug, opts = {}) {
   }
 
   if (!reviewer) {
-    const anyDifferentFamilyRunnable = agents.some((/** @type {string} */ a) => a !== implementer && workflowLauncherStatusFn(a).supported);
+    const anyDifferentFamilyRunnable = agents.some((a: string) => a !== implementer && workflowLauncherStatusFn(a).supported);
     const implementerRunnable = agents.includes(implementer) && workflowLauncherStatusFn(implementer).supported;
     if (!anyDifferentFamilyRunnable && implementerRunnable) {
       log(fmt.status('WARN', `No supported different-family reviewer found for implementer "${implementer}".`));
@@ -496,7 +573,7 @@ async function startReviewLoop(slug, opts = {}) {
       reviewerSource = 'single-family-fallback';
     } else if (!anyDifferentFamilyRunnable) {
       if (!forgejoEnabled) {
-const detail = selectErr ? `: ${(/** @type {Error} */ (selectErr)).message}` : '';
+        const detail = selectErr ? `: ${selectErr.message}` : '';
         reviewer = 'autonomous';
         reviewerSource = 'fallback';
         log(fmt.status('WARN', `No reviewer could be auto-derived${detail}; defaulting to "autonomous"`));
@@ -507,7 +584,7 @@ const detail = selectErr ? `: ${(/** @type {Error} */ (selectErr)).message}` : '
         const reason = selectErr ? `: ${selectErr.message}` : '';
         error(fmt.status('FAIL', `No reviewer could be auto-derived${reason}.`));
         error('\n' + fmt.status('INFO', 'Full runtime matrix:'));
-        formatMatrixSummaryFn(buildAutonomousReviewMatrixFn()).forEach((/** @type {string} */ line) => error(`  ${line}`));
+        formatMatrixSummaryFn(buildAutonomousReviewMatrixFn()).forEach((line: string) => error(`  ${line}`));
         error('\n' + fmt.status('FAIL', `No runnable reviewer route for implementer "${implementer}".`));
         exit(1);
         return;
@@ -540,7 +617,7 @@ const detail = selectErr ? `: ${(/** @type {Error} */ (selectErr)).message}` : '
         error(`       Looked for: ${reviewerStatus.detail}`);
       }
       error('\n' + fmt.status('INFO', 'Full runtime matrix:'));
-      formatMatrixSummaryFn(buildAutonomousReviewMatrixFn()).forEach((/** @type {string} */ line) => error(`  ${line}`));
+      formatMatrixSummaryFn(buildAutonomousReviewMatrixFn()).forEach((line: string) => error(`  ${line}`));
       error('\n' + fmt.status('FAIL', `No runnable reviewer route for implementer "${implementer}".`));
       exit(1);
       return;
@@ -549,45 +626,45 @@ const detail = selectErr ? `: ${(/** @type {Error} */ (selectErr)).message}` : '
     if (!agents.includes(reviewer)) {
       error(fmt.status('FAIL', `Unsupported reviewer: "${reviewer}" (blocked or unsupported).`));
       error('\n' + fmt.status('INFO', 'Full runtime matrix:'));
-      formatMatrixSummaryFn(buildAutonomousReviewMatrixFn()).forEach((/** @type {string} */ line) => error(`  ${line}`));
+      formatMatrixSummaryFn(buildAutonomousReviewMatrixFn()).forEach((line: string) => error(`  ${line}`));
       error('\n' + fmt.status('FAIL', `No runnable reviewer route for implementer "${implementer}".`));
       exit(1);
       return;
     }
   } else {
     let reviewerStatus = workflowLauncherStatusFn(reviewer);
-    const triedReviewers = new Set();
+    const triedReviewers = new Set<string>();
     while (!agents.includes(reviewer) || !reviewerStatus.supported) {
       triedReviewers.add(reviewer);
       if (reviewerSource === 'explicit') {
         const reason = !agents.includes(reviewer) ? 'blocked or unsupported' : 'launcher is not available';
         error(fmt.status('FAIL', `Unsupported reviewer: "${reviewer}" (${reason}).`));
-        if (reviewerStatus.detail) {error(`       Looked for: ${reviewerStatus.detail}`);}
+        if (reviewerStatus.detail) { error(`       Looked for: ${reviewerStatus.detail}`); }
         error('\n' + fmt.status('INFO', 'Full runtime matrix:'));
-        formatMatrixSummaryFn(buildAutonomousReviewMatrixFn()).forEach((/** @type {string} */ line) => error(`  ${line}`));
+        formatMatrixSummaryFn(buildAutonomousReviewMatrixFn()).forEach((line: string) => error(`  ${line}`));
         error('\n' + fmt.status('FAIL', `No runnable reviewer route for implementer "${implementer}".`));
         exit(1);
         return;
       }
 
       const excludeSet = new Set([...triedReviewers, implementer]);
-      let fallback;
-      let fallbackStatus;
+      let fallback: string | undefined;
+      let fallbackStatus: { agent: string; supported: boolean; detail: string } | null;
       try {
         fallback = selectAgentFn('review', { exclude: excludeSet });
-        if (excludeSet.has(fallback)) {
-          fallback = null;
+        if (excludeSet.has(fallback!)) {
+          fallback = undefined;
           fallbackStatus = null;
         } else {
-          fallbackStatus = workflowLauncherStatusFn(fallback);
+          fallbackStatus = workflowLauncherStatusFn(fallback!);
         }
-      } catch (/** @type {unknown} */ err) {
-        fallback = null;
+      } catch {
+        fallback = undefined;
         fallbackStatus = null;
       }
 
       if (!fallback) {
-    const anyDifferentFamilyRunnable = agents.some((/** @type {string} */ a) => a !== implementer && workflowLauncherStatusFn(a).supported);
+        const anyDifferentFamilyRunnable = agents.some((a: string) => a !== implementer && workflowLauncherStatusFn(a).supported);
         const implementerRunnable = agents.includes(implementer) && workflowLauncherStatusFn(implementer).supported;
         if (!anyDifferentFamilyRunnable && implementerRunnable) {
           log(fmt.status('WARN', `No supported different-family reviewer found for implementer "${implementer}".`));
@@ -604,9 +681,9 @@ const detail = selectErr ? `: ${(/** @type {Error} */ (selectErr)).message}` : '
         }
         const reason = !agents.includes(reviewer) ? 'blocked or unsupported' : 'launcher is not available';
         error(fmt.status('FAIL', `Unsupported reviewer: "${reviewer}" (${reason}) and no unblocked different-family fallback is available.`));
-        if (reviewerStatus.detail) {error(`       Looked for: ${reviewerStatus.detail}`);}
+        if (reviewerStatus.detail) { error(`       Looked for: ${reviewerStatus.detail}`); }
         error('\n' + fmt.status('INFO', 'Full runtime matrix:'));
-        formatMatrixSummaryFn(buildAutonomousReviewMatrixFn()).forEach((/** @type {string} */ line) => error(`  ${line}`));
+        formatMatrixSummaryFn(buildAutonomousReviewMatrixFn()).forEach((line: string) => error(`  ${line}`));
         error('\n' + fmt.status('FAIL', `No runnable reviewer route for implementer "${implementer}".`));
         exit(1);
         return;
@@ -615,7 +692,7 @@ const detail = selectErr ? `: ${(/** @type {Error} */ (selectErr)).message}` : '
       const reason = !agents.includes(reviewer) ? 'blocked or unsupported' : 'launcher is not available';
       log(fmt.status('WARN', `Unsupported reviewer: "${reviewer}" (${reason}); trying fallback "${fallback}".`));
       reviewer = fallback;
-      reviewerStatus = fallbackStatus;
+      reviewerStatus = fallbackStatus!;
       reviewerSource = reviewerSource === 'persisted' ? 'persisted-fallback' : 'auto-derived-fallback';
     }
   }
@@ -627,7 +704,7 @@ const detail = selectErr ? `: ${(/** @type {Error} */ (selectErr)).message}` : '
   // counts, and metadata — and only overwrite the identities with the ones
   // selected for this launch (which may differ after a reviewer/implementer
   // fallback). Constructing fresh would silently reset all persisted progress.
-  let state;
+  let state: ReviewState;
   if (persisted) {
     state = ReviewState.from(slug, persisted);
     state.reviewer = reviewer;
@@ -652,8 +729,8 @@ const detail = selectErr ? `: ${(/** @type {Error} */ (selectErr)).message}` : '
   }
 
   // Only resolve a provider identity and read a token when a provider is enabled.
-  const pollingUser = forgejoEnabled ? resolvedReviewUserFn() : null;
-  const token = dryRun || !forgejoEnabled ? null : readTokenFn(pollingUser, { rootDir: worktree });
+  const pollingUser = forgejoEnabled ? (resolvedReviewUserFn as () => string | null)() : null;
+  const token = dryRun || !forgejoEnabled ? null : readTokenFn(pollingUser!, { rootDir: worktree });
   const initialRound = state.round;
 
   for (let attempt = initialRound; attempt <= maxAttempts; attempt++) {
@@ -664,15 +741,15 @@ const detail = selectErr ? `: ${(/** @type {Error} */ (selectErr)).message}` : '
       state.advanceRound();
     }
 
-    let reviewState;
+    let reviewState: unknown;
 
     if (state.phase === 'reviewing') {
       // Check if we can skip reviewer launch
       if (isContinue && attempt === initialRound) {
-        if (!dryRun) {transitionTaskFn(slug, 'review', { rootDir: worktree, log });}
+        if (!dryRun) { transitionTaskFn(slug, 'review', { rootDir: worktree, log }); }
         if (forgejoEnabled) {
           log(fmt.status('INFO', `Round ${attempt}: checking for existing review by ${reviewer} since ${state.startedAt}...`));
-          reviewState = await pollForReviewFn(prNumber, reviewer, state.startedAt, token, {
+          reviewState = await pollForReviewFn(prNumber as number, reviewer!, state.startedAt, token!, {
             getLatestReviewForPrFn, sleepFn, intervalMs: 1000, timeoutMs: 2000, retryCount: state.reviewerRetryCount, verbose, label: `round ${attempt} skip-check`, log
           });
           // Skip-check timeout means no existing review - treat as null to proceed with initial launch
@@ -693,21 +770,21 @@ const detail = selectErr ? `: ${(/** @type {Error} */ (selectErr)).message}` : '
             log(fmt.status('INFO', `Round ${attempt}: reviewer identity is autonomous; skipping dry-run reviewer prompt and using local review artifacts only.`));
           } else {
             log(`\n--- DRY-RUN: reviewer (${reviewer}) prompt ---`);
-            log(buildReviewPromptFn({ reviewer, branch, implementer, focus, attempt, repoRoot: worktree, missionPath: effectiveMissionPath, actualReviewer: '{{AGENT_NAME}}' }));
+            log((buildReviewPromptFn as any)({ reviewer: reviewer!, branch, implementer: implementer!, focus, attempt, repoRoot: worktree, missionPath: effectiveMissionPath || undefined, actualReviewer: '{{AGENT_NAME}}' }));
           }
         }
       } else {
         if (!reviewState) {
           // First launch or hard failure (null)
           const rebaseResult = await rebaseBeforeReviewRoundFn(slug, {
-            worktree, runFn, log, error,
+            worktree, runFn: runFn as any, log, error,
             taskFile: taskResolution.taskFile,
             gitFn,
             isReviewProviderEnabledFn: forgejoEnabledFn
           });
           if (!rebaseResult.ok) { exit(1); return; }
 
-          if (!dryRun) {transitionTaskFn(slug, 'review', { rootDir: worktree, log });}
+          if (!dryRun) { transitionTaskFn(slug, 'review', { rootDir: worktree, log }); }
           state.phase = 'reviewing';
           writeReviewStateFn(slug, state, worktree);
           if (reviewer === 'autonomous' && !forgejoEnabled) {
@@ -715,21 +792,21 @@ const detail = selectErr ? `: ${(/** @type {Error} */ (selectErr)).message}` : '
           } else {
             log(fmt.status('INFO', `Round ${attempt}: launching reviewer (${reviewer})...`));
 
-            let reviewerLaunchResult;
+            let reviewerLaunchResult: any;
             try {
               reviewerLaunchResult = await startAgentFn('review', {
                 agent: reviewer,
-                prompt: (/** @type {string} */ actualReviewer) => buildCompactReviewPromptFn({ reviewer, branch, implementer, focus, attempt, repoRoot: worktree, missionPath: effectiveMissionPath, actualReviewer }),
+                prompt: (actualReviewer: string) => (buildCompactReviewPromptFn as any)({ reviewer: reviewer!, branch, implementer: implementer!, focus, attempt, repoRoot: worktree, missionPath: effectiveMissionPath || undefined, actualReviewer }),
                 worktree, slug, role: 'reviewer', exclude: [implementer]
               });
-            } catch (/** @type {unknown} */ err) {
-              error(fmt.status('FAIL', `Could not launch reviewer agent (${reviewer}): ${/** @type {Error} */(err).message}`));
+            } catch (err: unknown) {
+              error(fmt.status('FAIL', `Could not launch reviewer agent (${reviewer}): ${(err as Error).message}`));
               exit(1); return;
             }
 
             reviewer = applyAgentFallbackFn({
-              role: 'reviewer', original: reviewer, launchResult: reviewerLaunchResult,
-              state, slug, worktree, taskResolution, log, writeReviewStateFn, enforceTaskAssigneeFn
+              role: 'reviewer', original: reviewer!, launchResult: reviewerLaunchResult,
+              state: state as unknown as Record<string, any>, slug, worktree, taskResolution, log, writeReviewStateFn, enforceTaskAssigneeFn
             });
 
             // Record review-stage telemetry immediately after the reviewer runs,
@@ -737,21 +814,21 @@ const detail = selectErr ? `: ${(/** @type {Error} */ (selectErr)).message}` : '
             // The window is bounded to this round's launch so each round adds
             // only its own usage; accumulateStageStats sums the rounds into one
             // cumulative row per reviewer family.
-            const reviewSinceMs = stageLaunchSinceMs((/** @type {{[key: string]: any}} */ (reviewerLaunchResult))?.result);
+            const reviewSinceMs = stageLaunchSinceMs(reviewerLaunchResult?.result);
             recordStageStatsSafeFn('review', {
-              stage: 'review', slug, rootDir: worktree, worktree, reviewer: /** @type {string} */ (reviewer), implementer,
-              result: (/** @type {{[key: string]: any}} */ (reviewerLaunchResult))?.result,
-              sinceMs: /** @type {number} */ (reviewSinceMs || 0), log, error, state, writeReviewStateFn,
-              model: resolveAgentModel(/** @type {string} */ (reviewer), /** @type {string} */ (worktree)),
+              stage: 'review', slug, rootDir: worktree, worktree, reviewer, implementer,
+              result: reviewerLaunchResult?.result,
+              sinceMs: reviewSinceMs || 0, log, error, state, writeReviewStateFn,
+              model: resolveAgentModel(reviewer!, worktree),
             });
           }
 
-          const reviewerArtifacts = await consumeReviewerArtifactsFn(slug, reviewer, {
+          const reviewerArtifacts = await consumeReviewerArtifactsFn(slug, reviewer!, {
             worktree,
             tmpDir: artifactDir,
             fallbackToTmp: true,
             readTokenFn,
-            getCommentsFn,
+            getCommentsFn: getCommentsFn as any,
             postCommentFn,
             postReviewFn,
             buildMetadataFooterFn: buildMetadataFooter,
@@ -764,7 +841,7 @@ const detail = selectErr ? `: ${(/** @type {Error} */ (selectErr)).message}` : '
             reviewState = reviewerArtifacts.reviewState;
           }
           if (!reviewState && forgejoEnabled) {
-            reviewState = await pollForReviewFn(prNumber, reviewer, state.startedAt, token, {
+            reviewState = await pollForReviewFn(prNumber as number, reviewer!, state.startedAt, token!, {
               getLatestReviewForPrFn, sleepFn, intervalMs: pollIntervalMs, timeoutMs: pollTimeoutMs, retryCount: 0, verbose, label: `round ${attempt} review`, log
             });
           }
@@ -772,37 +849,37 @@ const detail = selectErr ? `: ${(/** @type {Error} */ (selectErr)).message}` : '
 
         if (isPollTimeout(reviewState)) {
           // Timeout recovery loop for reviewer
-          const stateAny = /** @type {{[key: string]: any}} */ (state);
+          const stateAny = state as unknown as Record<string, any>;
           while ((stateAny['reviewerRetryCount'] || 0) < 2) {
             stateAny['reviewerRetryCount'] = (stateAny['reviewerRetryCount'] || 0) + 1;
             writeReviewStateFn(slug, state, worktree);
-const elapsedStr = formatElapsed(Date.now() - Date.parse(/** @type {string} */ (stateAny['startedAt'])));
+            const elapsedStr = formatElapsed(Date.now() - Date.parse(stateAny['startedAt'] as string));
             const recoveryPrompt = `RECOVERY: Reviewer timeout after ${elapsedStr}. Please complete the review for ${branch}.`;
             log(fmt.status('INFO', `Round ${attempt}: relaunching reviewer (${reviewer}) with recovery prompt (retry ${stateAny['reviewerRetryCount']}/3)...`));
 
-            let relaunchResult;
+            let relaunchResult: any;
             try {
               relaunchResult = await startAgentFn('review', {
                 agent: reviewer,
-                prompt: (/** @type {string} */ actualReviewer) => buildCompactReviewPromptFn({ reviewer, branch, implementer, focus, attempt, repoRoot: worktree, missionPath: effectiveMissionPath, actualReviewer }) + '\n\n' + recoveryPrompt,
+                prompt: (actualReviewer: string) => (buildCompactReviewPromptFn as any)({ reviewer: reviewer!, branch, implementer: implementer!, focus, attempt, repoRoot: worktree, missionPath: effectiveMissionPath || undefined, actualReviewer }) + '\n\n' + recoveryPrompt,
                 worktree, slug, role: 'reviewer', exclude: [implementer]
               });
-            } catch (/** @type {unknown} */ err) {
-              error(fmt.status('FAIL', `Could not relaunch reviewer agent (${reviewer}): ${/** @type {Error} */(err).message}`));
+            } catch (err: unknown) {
+              error(fmt.status('FAIL', `Could not relaunch reviewer agent (${reviewer}): ${(err as Error).message}`));
               exit(1); return;
             }
 
             reviewer = applyAgentFallbackFn({
-              role: 'reviewer', original: reviewer, launchResult: relaunchResult,
-              state, slug, worktree, taskResolution, log, writeReviewStateFn, enforceTaskAssigneeFn
+              role: 'reviewer', original: reviewer!, launchResult: relaunchResult,
+              state: state as unknown as Record<string, any>, slug, worktree, taskResolution, log, writeReviewStateFn, enforceTaskAssigneeFn
             });
 
-            const retryArtifacts = await consumeReviewerArtifactsFn(slug, reviewer, {
+            const retryArtifacts = await consumeReviewerArtifactsFn(slug, reviewer!, {
               worktree,
               tmpDir: artifactDir,
               fallbackToTmp: true,
               readTokenFn,
-              getCommentsFn,
+              getCommentsFn: getCommentsFn as any,
               postCommentFn,
               postReviewFn,
               buildMetadataFooterFn: buildMetadataFooter,
@@ -815,12 +892,12 @@ const elapsedStr = formatElapsed(Date.now() - Date.parse(/** @type {string} */ (
               reviewState = retryArtifacts.reviewState;
             }
             if (!reviewState && forgejoEnabled) {
-              reviewState = await pollForReviewFn(prNumber, reviewer, state.startedAt, token, {
+              reviewState = await pollForReviewFn(prNumber as number, reviewer!, state.startedAt, token!, {
                 getLatestReviewForPrFn, sleepFn, intervalMs: pollIntervalMs, timeoutMs: pollTimeoutMs, retryCount: state.reviewerRetryCount, verbose, label: `round ${attempt} review retry ${state.reviewerRetryCount}`, log
               });
             }
 
-            if (!isPollTimeout(reviewState)) {break;}
+            if (!isPollTimeout(reviewState)) { break; }
           }
 
           if (isPollTimeout(reviewState)) {
@@ -834,7 +911,7 @@ const elapsedStr = formatElapsed(Date.now() - Date.parse(/** @type {string} */ (
         }
       }
 
-      if (dryRun) {return;}
+      if (dryRun) { return; }
 
       if (!reviewState) {
         error(fmt.status('FAIL', `Reviewer ${reviewer} did not submit a formal review outcome for ${branch}.`));
@@ -851,19 +928,19 @@ const elapsedStr = formatElapsed(Date.now() - Date.parse(/** @type {string} */ (
 
       if (reviewState === 'APPROVED') {
         state.transitionTo('approved');
-        state.disposition = reviewState;
+        state.disposition = reviewState as string;
         writeReviewStateFn(slug, state, worktree);
         log(fmt.status('PASS', 'Autonomous review stopped: reviewer approved the PR. Hand off to human review/integration.'));
-        transitionVirtualFn(transitionTaskFn, slug, 'approved', { rootDir: worktree, log });
+        transitionVirtualFn(transitionTaskFn, slug, 'approved', { log });
         return;
       }
       state.transitionTo('fixing');
-      state.disposition = reviewState;
+      state.disposition = reviewState as string;
     } else {
       // Resume in fixing phase, need reviewState
       if (forgejoEnabled) {
-        const latestReview = await getLatestReviewForPrFn(prNumber, reviewer, state.startedAt, token);
-        reviewState = latestReview ? latestReview.state : null;
+        const latestReview = await getLatestReviewForPrFn(prNumber as number, reviewer!, state.startedAt, token!);
+        reviewState = latestReview ? (latestReview as Record<string, unknown>).state : null;
         if (!reviewState) {
           // Restore retry path: missing review on resume is recoverable
           // (e.g., reviewer identity changed, state is stale, or artifact not yet
@@ -886,13 +963,13 @@ const elapsedStr = formatElapsed(Date.now() - Date.parse(/** @type {string} */ (
     }
 
     // Fixing phase
-    let disposition;
-    let reLaunch;
+    let disposition: unknown;
+    let reLaunch: boolean | null;
     let sinceIso = state.startedAt;
     if (isContinue && attempt === state.round) {
       if (forgejoEnabled) {
         log(fmt.status('INFO', `Round ${attempt}: checking for existing disposition by ${implementer} since ${state.startedAt}...`));
-        disposition = await pollForDispositionFn(prNumber, implementer, state.startedAt, token, {
+        disposition = await pollForDispositionFn(prNumber as number, implementer!, state.startedAt, token!, {
           getLatestDispositionForPrFn, sleepFn, intervalMs: 1000, timeoutMs: CONTINUE_SKIP_CHECK_TIMEOUT_MS, verbose, label: `round ${attempt} skip-check`, log
         });
         // Skip-check timeout means no existing disposition - treat as null to proceed with initial launch
@@ -921,8 +998,8 @@ const elapsedStr = formatElapsed(Date.now() - Date.parse(/** @type {string} */ (
       // First launch or re-launch after stale BLOCKED/PARKED
       if (dryRun) {
         log(`\n--- DRY-RUN: implementer (${implementer}) act-on-review prompt ---`);
-        log(buildActOnReviewPromptFn({ implementer, branch, attempt, repoRoot: worktree, missionPath: effectiveMissionPath, actualImplementer: '{{AGENT_NAME}}' }));
-        if (reLaunch) {
+        log((buildActOnReviewPromptFn as any)({ implementer: implementer!, branch, attempt, repoRoot: worktree, missionPath: effectiveMissionPath || undefined, actualImplementer: '{{AGENT_NAME}}' }));
+        if (reLaunch!) {
           log(fmt.status('INFO', `Round ${attempt}: stale BLOCKED/PARKED disposition replaced by fresh implementer action.`));
         }
         return;
@@ -935,42 +1012,42 @@ const elapsedStr = formatElapsed(Date.now() - Date.parse(/** @type {string} */ (
       } else {
         log(fmt.status('INFO', `Round ${attempt}: launching implementer (${implementer}) for act-on-review...`));
 
-        let implementerLaunchResult;
+        let implementerLaunchResult: any;
         try {
           implementerLaunchResult = await startAgentFn('act-on-review', {
             agent: implementer,
-            prompt: (/** @type {string} */ actualImplementer) => buildCompactActOnReviewPromptFn({ implementer, branch, attempt, reviewOutcome: reviewState, repoRoot: worktree, missionPath: effectiveMissionPath, actualImplementer }),
+            prompt: (actualImplementer: string) => (buildCompactActOnReviewPromptFn as any)({ implementer: implementer!, branch, attempt, reviewOutcome: reviewState, repoRoot: worktree, missionPath: effectiveMissionPath || undefined, actualImplementer }),
             worktree, slug, role: 'implementer', exclude: [reviewer]
           });
-        } catch (/** @type {unknown} */ err) {
-          error(fmt.status('FAIL', `Could not launch implementer agent (${implementer}): ${/** @type {Error} */(err).message}`));
+        } catch (err: unknown) {
+          error(fmt.status('FAIL', `Could not launch implementer agent (${implementer}): ${(err as Error).message}`));
           exit(1); return;
         }
 
         implementer = applyAgentFallbackFn({
-          role: 'implementer', original: implementer, launchResult: implementerLaunchResult,
-          state, slug, worktree, taskResolution, log, writeReviewStateFn, enforceTaskAssigneeFn
+          role: 'implementer', original: implementer!, launchResult: implementerLaunchResult,
+          state: state as unknown as Record<string, any>, slug, worktree, taskResolution, log, writeReviewStateFn, enforceTaskAssigneeFn
         });
 
         // Record follow-up telemetry immediately after the implementer runs.
         // This is intentionally a separate stored phase from the initial
         // execute/active launch. The window is bounded to this round's launch
         // so each act-on-review round adds only its own usage.
-        const followUpSinceMs = stageLaunchSinceMs((/** @type {{[key: string]: any}} */ (implementerLaunchResult))?.result);
+        const followUpSinceMs = stageLaunchSinceMs(implementerLaunchResult?.result);
         recordStageStatsSafeFn('active', {
           stage: 'follow-up', slug, rootDir: worktree, worktree, implementer, reviewer,
-          result: (/** @type {{[key: string]: any}} */ (implementerLaunchResult))?.result,
-          sinceMs: /** @type {number} */ (followUpSinceMs || 0), log, error, state, writeReviewStateFn,
-          model: resolveAgentModel(/** @type {string} */ (implementer), /** @type {string} */ (worktree)),
+          result: implementerLaunchResult?.result,
+          sinceMs: followUpSinceMs || 0, log, error, state, writeReviewStateFn,
+          model: resolveAgentModel(implementer!, worktree),
         });
       }
 
-      const implementerArtifacts = await consumeImplementerArtifactsFn(slug, implementer, {
+      const implementerArtifacts = await consumeImplementerArtifactsFn(slug, implementer!, {
         worktree,
         tmpDir: artifactDir,
         fallbackToTmp: true,
         readTokenFn,
-        getCommentsFn,
+        getCommentsFn: getCommentsFn as any,
         postCommentFn,
         buildMetadataFooterFn: buildMetadataFooter,
         forgejoEnabled,
@@ -982,44 +1059,44 @@ const elapsedStr = formatElapsed(Date.now() - Date.parse(/** @type {string} */ (
         disposition = implementerArtifacts.disposition;
       }
       if (!disposition && forgejoEnabled) {
-        disposition = await pollForDispositionFn(prNumber, implementer, sinceIso, token, {
+        disposition = await pollForDispositionFn(prNumber as number, implementer!, sinceIso, token!, {
           getLatestDispositionForPrFn, sleepFn, intervalMs: pollIntervalMs, timeoutMs: pollTimeoutMs, retryCount: 0, verbose, label: `round ${attempt} disposition`, log
         });
       }
 
       if (isPollTimeout(disposition)) {
         // Timeout recovery loop for implementer
-        const stateAny = /** @type {{[key: string]: any}} */ (state);
+        const stateAny = state as unknown as Record<string, any>;
         while ((stateAny['implementerRetryCount'] || 0) < 2) {
           stateAny['implementerRetryCount'] = (stateAny['implementerRetryCount'] || 0) + 1;
           writeReviewStateFn(slug, state, worktree);
-const elapsedStr = formatElapsed(Date.now() - Date.parse(/** @type {string} */ (stateAny['startedAt'])));
-            const recoveryPrompt = `RECOVERY: Implementer disposition timeout after ${elapsedStr}. Please provide a disposition (PUSHBACK_ALL, BLOCKED, PARKED, or continue with fixes) for ${branch}.`;
+          const elapsedStr = formatElapsed(Date.now() - Date.parse(stateAny['startedAt'] as string));
+          const recoveryPrompt = `RECOVERY: Implementer disposition timeout after ${elapsedStr}. Please provide a disposition (PUSHBACK_ALL, BLOCKED, PARKED, or continue with fixes) for ${branch}.`;
           log(fmt.status('INFO', `Round ${attempt}: relaunching implementer (${implementer}) with recovery prompt (retry ${stateAny['implementerRetryCount']}/3)...`));
 
-          let relaunchResult;
+          let relaunchResult: any;
           try {
             relaunchResult = await startAgentFn('act-on-review', {
               agent: implementer,
-              prompt: (/** @type {string} */ actualImplementer) => buildCompactActOnReviewPromptFn({ implementer, branch, attempt, reviewOutcome: reviewState, repoRoot: worktree, missionPath: effectiveMissionPath, actualImplementer }) + '\n\n' + recoveryPrompt,
+              prompt: (actualImplementer: string) => (buildCompactActOnReviewPromptFn as any)({ implementer: implementer!, branch, attempt, reviewOutcome: reviewState, repoRoot: worktree, missionPath: effectiveMissionPath || undefined, actualImplementer }) + '\n\n' + recoveryPrompt,
               worktree, slug, role: 'implementer', exclude: [reviewer]
             });
-          } catch (/** @type {unknown} */ err) {
-            error(fmt.status('FAIL', `Could not relaunch implementer agent (${implementer}): ${/** @type {Error} */(err).message}`));
+          } catch (err: unknown) {
+            error(fmt.status('FAIL', `Could not relaunch implementer agent (${implementer}): ${(err as Error).message}`));
             exit(1); return;
           }
 
           implementer = applyAgentFallbackFn({
-            role: 'implementer', original: implementer, launchResult: relaunchResult,
-            state, slug, worktree, taskResolution, log, writeReviewStateFn, enforceTaskAssigneeFn
+            role: 'implementer', original: implementer!, launchResult: relaunchResult,
+            state: state as unknown as Record<string, any>, slug, worktree, taskResolution, log, writeReviewStateFn, enforceTaskAssigneeFn
           });
 
-          const retryArtifacts = await consumeImplementerArtifactsFn(slug, implementer, {
+          const retryArtifacts = await consumeImplementerArtifactsFn(slug, implementer!, {
             worktree,
             tmpDir: artifactDir,
             fallbackToTmp: true,
             readTokenFn,
-            getCommentsFn,
+            getCommentsFn: getCommentsFn as any,
             postCommentFn,
             buildMetadataFooterFn: buildMetadataFooter,
             forgejoEnabled,
@@ -1031,12 +1108,12 @@ const elapsedStr = formatElapsed(Date.now() - Date.parse(/** @type {string} */ (
             disposition = retryArtifacts.disposition;
           }
           if (!disposition && forgejoEnabled) {
-            disposition = await pollForDispositionFn(prNumber, implementer, sinceIso, token, {
+            disposition = await pollForDispositionFn(prNumber as number, implementer!, sinceIso, token!, {
               getLatestDispositionForPrFn, sleepFn, intervalMs: pollIntervalMs, timeoutMs: pollTimeoutMs, retryCount: state.implementerRetryCount, verbose, label: `round ${attempt} disposition retry ${state.implementerRetryCount}`, log
             });
           }
 
-          if (!isPollTimeout(disposition)) {break;}
+          if (!isPollTimeout(disposition)) { break; }
         }
 
         if (isPollTimeout(disposition)) {
@@ -1051,7 +1128,7 @@ const elapsedStr = formatElapsed(Date.now() - Date.parse(/** @type {string} */ (
 
       // Suppress the duplicate message after re-launch
       reLaunch = null;
-    } else if (reLaunch) {
+    } else if (reLaunch!) {
       // Re-launch path: stale BLOCKED/PARKED was replaced by fresh implementation.
       // The disposition was set by the re-launch above (lines 767-785).
       // Fall through to disposition handling below.
@@ -1074,21 +1151,21 @@ const elapsedStr = formatElapsed(Date.now() - Date.parse(/** @type {string} */ (
     log(fmt.status('INFO', `Round ${attempt}: implementer disposition = ${disposition}`));
 
     if (disposition === 'PUSHBACK_ALL') {
-      state.disposition = disposition;
+      state.disposition = disposition as string;
       writeReviewStateFn(slug, state, worktree);
       log(fmt.status('INFO', 'Autonomous review stopped: implementer pushed back on all remaining comments. Hand off to human review.'));
       return;
     }
 
     if (disposition === 'BLOCKED' || disposition === 'PARKED') {
-      state.disposition = disposition;
+      state.disposition = disposition as string;
       writeReviewStateFn(slug, state, worktree);
       log(fmt.status('INFO', `Autonomous review stopped: implementer reported ${disposition}. Hand off to human review.`));
       return;
     }
 
-    state.disposition = disposition;
-    try { state.transitionTo('reviewing'); } catch (_) {}
+    state.disposition = disposition as string;
+    try { state.transitionTo('reviewing'); } catch (_) { /* ignore */ }
     writeReviewStateFn(slug, state, worktree);
     log(fmt.status('INFO', `Round ${attempt}: implementer made changes. Continuing to round ${attempt + 1}.`));
   }
@@ -1096,17 +1173,5 @@ const elapsedStr = formatElapsed(Date.now() - Date.parse(/** @type {string} */ (
   log(fmt.status('INFO', `Autonomous review stopped: reached ${maxAttempts} attempts. Hand off to human review.`));
 }
 
-// ============================================================================
-// Module Exports
-// ============================================================================
-
-module.exports = {
-  maybeUpdateGraphifyBeforeReview,
-  commitSafeMissionArtifacts,
-  rebaseBeforeReviewRound,
-  applyAgentFallback,
-  persistNormalizedPhaseRepair,
-  stageLaunchSinceMs,
-  startReviewLoop,
-  recordStageStatsSafe
-};
+// Re-export from rebase module so callers that import from review-loop still work
+export { commitSafeMissionArtifacts, rebaseBeforeReviewRound };

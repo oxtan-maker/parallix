@@ -5,41 +5,40 @@
  * this adapter instead of importing Forgejo or product-config directly.
  */
 
-const os = require('os');
-const path = require('path');
-const { resolveReviewAdapter, isForgejoReviewEnabled } = require('../core/product-config');
-const { loadAdapterConfig } = require('../core/product-config');
-const forgejo = require('../tools/forgejo');
+import * as os from 'os';
+import * as path from 'path';
+import { resolveReviewAdapter, isForgejoReviewEnabled, loadAdapterConfig } from '../core/product-config.js';
+import * as forgejo from '../tools/forgejo.js';
 
 const NOOP_PR_STATUS = Object.freeze({
   exists: false,
   raw: 'Forgejo PR: skipped (review provider is not forgejo).',
 });
 
-function getReviewProvider(rootDir = process.cwd()) {
+export function getReviewProvider(rootDir = process.cwd()): string | null {
   return resolveReviewAdapter(rootDir).provider || null;
 }
 
-function isEnabled(rootDir = process.cwd()) {
+export function isEnabled(rootDir = process.cwd()): boolean {
   return isForgejoReviewEnabled(rootDir);
 }
 
-function isProviderEnabled(rootDir = process.cwd()) {
+export function isProviderEnabled(rootDir = process.cwd()): boolean {
   return isEnabled(rootDir);
 }
 
-function isNoop(rootDir = process.cwd()) {
+export function isNoop(rootDir = process.cwd()): boolean {
   const provider = getReviewProvider(rootDir);
   return provider === null || provider === 'none';
 }
 
-function isForgejoProvider(rootDir = process.cwd()) {
+export function isForgejoProvider(rootDir = process.cwd()): boolean {
   return isEnabled(rootDir);
 }
 
 /** @param {string} [rootDir] */
-function resolveArtifactDir(rootDir = process.cwd()) {
-  const review = loadAdapterConfig(rootDir).review || {};
+export function resolveArtifactDir(rootDir = process.cwd()): string {
+  const review = (loadAdapterConfig(rootDir).review || {}) as { tmpDir?: string };
   const configured = typeof review.tmpDir === 'string' && review.tmpDir.trim()
     ? review.tmpDir.trim()
     : null;
@@ -55,7 +54,8 @@ function resolveArtifactDir(rootDir = process.cwd()) {
  * @param {*} noopValue
  * @returns {*}
  */
-function withForgejo(rootDir, liveFn, noopValue) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function withForgejo(rootDir: string, liveFn: () => any, noopValue: any): any {
   return isEnabled(rootDir) ? liveFn() : noopValue;
 }
 
@@ -65,7 +65,7 @@ function withForgejo(rootDir, liveFn, noopValue) {
  * @param {{[key: string]: any}} [options]
  * @returns {*}
  */
-function getPrStatus(branch, rootDir = process.cwd(), options = {}) {
+export function getPrStatus(branch: string, rootDir = process.cwd(), options: { [key: string]: any } = {}) {
   return withForgejo(rootDir, () => forgejo.getPrStatus(branch, rootDir, options), NOOP_PR_STATUS);
 }
 
@@ -74,7 +74,7 @@ function getPrStatus(branch, rootDir = process.cwd(), options = {}) {
  * @param {{rootDir?: string}} [options]
  * @returns {string|null}
  */
-function readToken(user, options = {}) {
+export function readToken(user: string, options: { rootDir?: string } = {}): string | null {
   const rootDir = options.rootDir || process.cwd();
   return isEnabled(rootDir) ? forgejo.readToken(user) : null;
 }
@@ -87,7 +87,7 @@ function readToken(user, options = {}) {
  * @param {{rootDir?: string, [key: string]: any}} [options]
  * @returns {Promise<*|null>}
  */
-async function getLatestReviewForPr(prNumber, reviewerUser, sinceIso, token, options = {}) {
+export async function getLatestReviewForPr(prNumber: number, reviewerUser: string, sinceIso: string, token: string, options: { rootDir?: string; [key: string]: any } = {}) {
   if (!token) {return null;}
   return withForgejo(options.rootDir || process.cwd(), () => forgejo.getLatestReviewForPr(prNumber, reviewerUser, sinceIso, token, options), null);
 }
@@ -100,7 +100,7 @@ async function getLatestReviewForPr(prNumber, reviewerUser, sinceIso, token, opt
  * @param {{rootDir?: string, [key: string]: any}} [options]
  * @returns {Promise<*|null>}
  */
-async function getLatestDispositionForPr(prNumber, implementerUser, sinceIso, token, options = {}) {
+export async function getLatestDispositionForPr(prNumber: number, implementerUser: string, sinceIso: string, token: string, options: { rootDir?: string; [key: string]: any } = {}) {
   if (!token) {return null;}
   return withForgejo(options.rootDir || process.cwd(), () => forgejo.getLatestDispositionForPr(prNumber, implementerUser, sinceIso, token, options), null);
 }
@@ -112,7 +112,7 @@ async function getLatestDispositionForPr(prNumber, implementerUser, sinceIso, to
  * @param {{rootDir?: string, [key: string]: any}} [options]
  * @returns {*}
  */
-function postComment(branch, token, body, options = {}) {
+export function postComment(branch: string, token: string, body: string, options: { rootDir?: string; [key: string]: any } = {}) {
   return withForgejo(options.rootDir || process.cwd(), () => forgejo.postComment(branch, token, body, options), { ok: true, skipped: true, reason: 'review-provider-disabled' });
 }
 
@@ -124,7 +124,7 @@ function postComment(branch, token, body, options = {}) {
  * @param {{rootDir?: string, [key: string]: any}} [options]
  * @returns {*}
  */
-function postReview(branch, token, outcome, summary, options = {}) {
+export function postReview(branch: string, token: string, outcome: string, summary: string, options: { rootDir?: string; [key: string]: any } = {}) {
   return withForgejo(options.rootDir || process.cwd(), () => forgejo.postReview(branch, token, outcome, summary, options), { ok: true, skipped: true, reason: 'review-provider-disabled' });
 }
 
@@ -135,7 +135,7 @@ function postReview(branch, token, outcome, summary, options = {}) {
  * @param {{rootDir?: string, [key: string]: any}} [options]
  * @returns {*}
  */
-function createPr(branch, user, token, options = {}) {
+export function createPr(branch: string, user: string, token: string, options: { rootDir?: string; [key: string]: any } = {}) {
   return withForgejo(options.rootDir || process.cwd(), () => forgejo.createPr(branch, user, token, options), { ok: true, skipped: true, url: null });
 }
 
@@ -144,8 +144,8 @@ function createPr(branch, user, token, options = {}) {
  * @param {{rootDir?: string, [key: string]: any}} [options]
  * @returns {*}
  */
-function forgejoAvailable(url = process.env.FORGEJO_URL || 'http://localhost:3300', /** @type {{rootDir?: string, [key: string]: any}} */ options = {}) {
-  return withForgejo(options.rootDir || process.cwd(), () => forgejo.forgejoAvailable(url, /** @type {{request?: Function, timeout?: number}} */ (options)), false);
+export function forgejoAvailable(url = process.env.FORGEJO_URL || 'http://localhost:3300', /** @type {{rootDir?: string, [key: string]: any}} */ options: { rootDir?: string; [key: string]: any } = {}) {
+  return withForgejo(options.rootDir || process.cwd(), () => forgejo.forgejoAvailable(url, options as { request?: Function; timeout?: number }), false);
 }
 
 /**
@@ -153,7 +153,7 @@ function forgejoAvailable(url = process.env.FORGEJO_URL || 'http://localhost:330
  * @param {{rootDir?: string, [key: string]: any}} [options]
  * @returns {*}
  */
-function providerAvailable(url = process.env.FORGEJO_URL || 'http://localhost:3300', options = {}) {
+export function providerAvailable(url = process.env.FORGEJO_URL || 'http://localhost:3300', options: { rootDir?: string; [key: string]: any } = {}) {
   return forgejoAvailable(url, options);
 }
 
@@ -163,7 +163,7 @@ function providerAvailable(url = process.env.FORGEJO_URL || 'http://localhost:33
  * @param {{rootDir?: string, [key: string]: any}} [options]
  * @returns {Promise<*>}
  */
-async function getComments(branch, token, options = {}) {
+export async function getComments(branch: string, token: string, options: { rootDir?: string; [key: string]: unknown } = {}) {
   return withForgejo(options.rootDir || process.cwd(), () => forgejo.getComments(branch, token, options), []);
 }
 
@@ -174,17 +174,17 @@ async function getComments(branch, token, options = {}) {
  * @param {{rootDir?: string, [key: string]: any}} [options]
  * @returns {*}
  */
-function closePr(branch, token, user, /** @type {{rootDir?: string, [key: string]: any}} */ options = {}) {
-  return withForgejo(options.rootDir || process.cwd(), () => (/** @type {any} */ (forgejo).closePr)(branch, token, user, options), { ok: true, skipped: true, reason: 'review-provider-disabled' });
+export function closePr(branch: string, token: string, user: string, /** @type {{rootDir?: string, [key: string]: any}} */ options: { rootDir?: string; [key: string]: any } = {}) {
+  return withForgejo(options.rootDir || process.cwd(), () => ((forgejo as any).closePr as Function)(branch, token, user, options), { ok: true, skipped: true, reason: 'review-provider-disabled' });
 }
 
 /** @param {string} explicitUser */
-function resolveForgejoUser(explicitUser) {
+export function resolveForgejoUser(explicitUser: string): string | null {
   return explicitUser || process.env.FORGEJO_USER || null;
 }
 
 /** @param {string} explicitUser */
-function resolveReviewUser(explicitUser) {
+export function resolveReviewUser(explicitUser: string): string | null {
   return resolveForgejoUser(explicitUser);
 }
 
@@ -194,29 +194,6 @@ function resolveReviewUser(explicitUser) {
  * @param {{rootDir?: string, [key: string]: any}} [options]
  * @returns {*|null}
  */
-function getPrAuthor(branch, token, options = {}) {
+export function getPrAuthor(branch: string, token: string, options: { rootDir?: string; [key: string]: any } = {}) {
   return withForgejo(options.rootDir || process.cwd(), () => forgejo.getPrAuthor(branch, token, options), null);
 }
-
-module.exports = {
-  getReviewProvider,
-  isEnabled,
-  isProviderEnabled,
-  isNoop,
-  isForgejoProvider,
-  resolveArtifactDir,
-  getPrStatus,
-  readToken,
-  getLatestReviewForPr,
-  getLatestDispositionForPr,
-  postComment,
-  postReview,
-  createPr,
-  forgejoAvailable,
-  providerAvailable,
-  getComments,
-  closePr,
-  resolveForgejoUser,
-  resolveReviewUser,
-  getPrAuthor,
-};

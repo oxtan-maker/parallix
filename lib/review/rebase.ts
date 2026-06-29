@@ -7,11 +7,16 @@
  * Both handoff.js and review-loop.js import from this module instead.
  */
 
-const path = require('path');
-const fmt = require('../core/fmt');
-const { git } = require('../core/git');
-const { resolveWorktree } = require('../core/mission-utils');
-const { isProviderEnabled } = require('./review-adapter');
+import * as path from 'path';
+import * as fmt from '../core/fmt.js';
+import { git } from '../core/git.js';
+import { resolveWorktree, isMissionArtifact, isWorkflowGeneratedArtifact } from '../core/mission-utils.js';
+import { isProviderEnabled } from './review-adapter.js';
+import { spawnSync } from 'child_process';
+
+type RunFn = (cmd: string, args: string[], opts: { cwd?: string; encoding?: string; stdio?: unknown[] }) => { status: number | null; stdout?: string; stderr?: string };
+
+const _spawnSync = spawnSync as unknown as RunFn;
 
 const SHARED_FILE_REBASE_CONFLICT_RE = /shared file(?:\(s\))? require agent-assisted resolution|shared-file-conflicts/i;
 
@@ -23,30 +28,37 @@ const SHARED_FILE_REBASE_CONFLICT_RE = /shared file(?:\(s\))? require agent-assi
  * @param {{taskFile?: string|null, gitFn?: Function, log?: Function, error?: Function, isMissionArtifactFn?: Function, isWorkflowGeneratedArtifactFn?: Function, resolveStatsRelPathFn?: Function}} [options]
  * @returns {Promise<{ok: boolean, dirty: boolean, unsafe?: boolean}>}
  */
-async function commitSafeMissionArtifacts(slug, worktree, {
+export async function commitSafeMissionArtifacts(slug: string, worktree: string, {
   taskFile = null,
   gitFn = git,
   log = fmt.log.plain,
   error = fmt.log.plainError,
-  isMissionArtifactFn = require('../core/mission-utils').isMissionArtifact,
-  isWorkflowGeneratedArtifactFn = require('../core/mission-utils').isWorkflowGeneratedArtifact,
+  isMissionArtifactFn = isMissionArtifact,
+  isWorkflowGeneratedArtifactFn = isWorkflowGeneratedArtifact,
   resolveStatsRelPathFn = () => null
-} = {}) {
+}: {
+  taskFile?: string | null;
+  gitFn?: typeof git;
+  log?: (msg: string) => void;
+  error?: (msg: string) => void;
+  isMissionArtifactFn?: (file: string, slug: string, rootDir: string) => boolean;
+  isWorkflowGeneratedArtifactFn?: (file: string) => boolean;
+  resolveStatsRelPathFn?: (rootDir: string) => string | null;
+} = {}): Promise<{ ok: boolean; dirty: boolean; unsafe?: boolean }> {
   const rootDir = worktree || process.cwd();
   const statusResult = gitFn(['-C', rootDir, 'status', '--porcelain=v1', '-z']);
   if (statusResult.status !== 0 || !statusResult.stdout) {
     return { ok: true, dirty: false };
   }
 
-  const parsePorcelainZ = (/** @type {string|Buffer} */ stdout) => {
+  const parsePorcelainZ = (stdout: string | Buffer) => {
     const entries = String(stdout).split('\0').filter(Boolean);
-    const dirty = [];
+    const dirty: { xy: string; file: string; paths: string[]; source?: string }[] = [];
     for (let i = 0; i < entries.length; i += 1) {
       const entry = entries[i];
       const xy = entry.slice(0, 2);
       const file = entry.slice(3);
-      /** @type {{xy: string, file: string, paths: string[], source?: string}} */
-      const record = { xy, file, paths: [file] };
+      const record: { xy: string; file: string; paths: string[]; source?: string } = { xy, file, paths: [file] };
       if ((xy[0] === 'R' || xy[0] === 'C') && i + 1 < entries.length) {
         const source = entries[i + 1];
         record.source = source;
@@ -62,29 +74,29 @@ async function commitSafeMissionArtifacts(slug, worktree, {
 
   const unmerged = dirtyFiles.filter(f => ['DD', 'AU', 'UD', 'UA', 'DU', 'AA', 'UU'].includes(f.xy));
   if (unmerged.length > 0) {
-    error(fmt.status('FAIL', `Cannot auto-commit: unmerged/conflicting files detected:\n${unmerged.map(f => `       - ${f.file}`).join('\n')}`));
+    error(fmt.status('FAIL', `Cannot auto-commit: unmerged/conflicting files detected:\n${unmerged.map((f: { file: string }) => `       - ${f.file}`).join('\n')}`));
     return { ok: false, dirty: true, unsafe: true };
   }
 
   const resolvedTaskFile = taskFile ? path.relative(rootDir, taskFile) : null;
   const statsRelPath = resolveStatsRelPathFn(rootDir);
-  const isSafeToCommit = (/** @type {string} */ file) =>
+  const isSafeToCommit = (file: string) =>
     isWorkflowGeneratedArtifactFn(file)
     || isMissionArtifactFn(file, slug, rootDir)
-    || (resolvedTaskFile && file === resolvedTaskFile)
-    || (statsRelPath && file === statsRelPath);
+    || !!(resolvedTaskFile && file === resolvedTaskFile)
+    || !!(statsRelPath && file === statsRelPath);
 
   const unsafeFiles = dirtyFiles
-    .flatMap(f => f.paths)
-    .filter((/** @type {string} */ file) => !isSafeToCommit(file));
+    .flatMap((f: { paths: string[] }) => f.paths)
+    .filter((file: string) => !isSafeToCommit(file));
   if (unsafeFiles.length > 0) {
     error(fmt.status('FAIL', `Cannot auto-commit: dirty files include non-mission paths:`));
-    unsafeFiles.forEach(file => error(`       - ${file}`));
+    unsafeFiles.forEach((file: string) => error(`       - ${file}`));
     return { ok: false, dirty: true, unsafe: true };
   }
 
   log(`Auto-committing safe mission artifacts for ${fmt.branch(`mission/${slug}`)} before rebase...`);
-  dirtyFiles.forEach(f => {
+  dirtyFiles.forEach((f: { file: string }) => {
     log(`       - ${f.file}`);
     gitFn(['-C', rootDir, 'add', '--', f.file]);
   });
@@ -100,17 +112,16 @@ async function commitSafeMissionArtifacts(slug, worktree, {
   }
 }
 
+/** @typedef {{ok: boolean, sharedFileConflicts: boolean}} RebaseResult */
+
 /**
  * Rebase the mission branch onto the latest primary/main branch before launching a reviewer.
- *
- * Always commits safe worktree state first, then rebases via the workflow CLI.
- * In standalone (provider-disabled) mode, skips the rebase after committing.
  * @param {string} slug
  * @param {{runFn?: Function, gitFn?: Function, taskFile?: string|null, worktree?: string, log?: Function, error?: Function, isReviewProviderEnabledFn?: Function|null, legacyIsForgejoReviewEnabledFn?: Function|null, isForgejoReviewEnabledFn?: Function|null}} [options]
  * @returns {Promise<{ok: boolean, sharedFileConflicts: boolean}>}
  */
-async function rebaseBeforeReviewRound(slug, {
-  runFn = require('child_process').spawnSync,
+export async function rebaseBeforeReviewRound(slug: string, {
+  runFn = _spawnSync,
   gitFn = git,
   taskFile = null,
   worktree = resolveWorktree(slug) || process.cwd(),
@@ -119,7 +130,17 @@ async function rebaseBeforeReviewRound(slug, {
   isReviewProviderEnabledFn = undefined,
   legacyIsForgejoReviewEnabledFn = null,
   isForgejoReviewEnabledFn = null
-} = {}) {
+}: {
+  runFn?: (cmd: string, args: string[], opts: { cwd?: string; encoding?: string; stdio?: unknown[] }) => { status: number | null; stdout?: string; stderr?: string };
+  gitFn?: typeof git;
+  taskFile?: string | null;
+  worktree?: string;
+  log?: (msg: string) => void;
+  error?: (msg: string) => void;
+  isReviewProviderEnabledFn?: ((wt: string) => boolean) | undefined | null;
+  legacyIsForgejoReviewEnabledFn?: ((wt: string) => boolean) | null;
+  isForgejoReviewEnabledFn?: ((wt: string) => boolean) | null;
+} = {}): Promise<{ ok: boolean; sharedFileConflicts: boolean }> {
   const cleanup = await commitSafeMissionArtifacts(slug, worktree, { taskFile, gitFn, log, error });
   if (!cleanup.ok) {
     error(fmt.status('WARN', 'Worktree is dirty with unsafe or conflicted files. Rebase may fail.'));
@@ -165,7 +186,3 @@ async function rebaseBeforeReviewRound(slug, {
   return { ok: false, sharedFileConflicts };
 }
 
-module.exports = {
-  commitSafeMissionArtifacts,
-  rebaseBeforeReviewRound,
-};

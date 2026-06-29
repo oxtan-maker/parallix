@@ -4,27 +4,24 @@
  * Handles artifact path resolution, file I/O, and normalization.
  */
 
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const fmt = require('../core/fmt');
-const { missionBranchName, resolveWorktree } = require('../core/mission-utils');
-const { readReviewState, writeReviewState, reviewStateFile, ReviewState, resolveReviewIdentity } = require('./review-state');
-const { readToken, postComment, postReview, getPrAuthor, isEnabled, resolveArtifactDir: resolveConfiguredArtifactDir } = require('./review-adapter');
-const { createEvent, consumeHumanNotes, VALID_EVENT_TYPES } = require('./review-events');
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import * as fmt from '../core/fmt.js';
+import { missionBranchName, resolveWorktree } from '../core/mission-utils.js';
+import { readReviewState, writeReviewState, reviewStateFile, ReviewState, resolveReviewIdentity } from './review-state.js';
+import { readToken, postComment, postReview, getPrAuthor, isEnabled, resolveArtifactDir as resolveConfiguredArtifactDir } from './review-adapter.js';
+import { createEvent, consumeHumanNotes, VALID_EVENT_TYPES, CreateEventParams, CreateEventOptions, CreateEventResult } from './review-events.js';
+
+type CreateResult = { ok: boolean; path: string | null; error?: string | null; event?: Record<string, unknown> };
 
 // ============================================================================
 // Metadata Footer
 // ============================================================================
 
-/**
- * @param {string} slug
- * @param {string} [rootDir]
- * @returns {string}
- */
-function buildMetadataFooter(slug, rootDir) {
+function buildMetadataFooter(slug: string, rootDir = process.cwd()): string {
   const state = readReviewState(slug, rootDir);
-  if (!state) {return '';}
+  if (!state) { return ''; }
   return `\n\n---\n\`[workflow-round:${state.round}, workflow-phase:${state.phase}]\``;
 }
 
@@ -32,36 +29,19 @@ function buildMetadataFooter(slug, rootDir) {
 // Artifact Path Utilities
 // ============================================================================
 
-/**
- * @param {string} slug
- * @param {string} artifactName
- * @param {string} [tmpDir]
- * @returns {string}
- */
-function reviewArtifactPath(slug, artifactName, tmpDir = os.tmpdir()) {
+function reviewArtifactPath(slug: string, artifactName: string, tmpDir = os.tmpdir()): string {
   return path.join(tmpDir, `${slug}-${artifactName}`);
 }
 
-// Agents are instructed by parallix/prompts/*.md to write review/act-on-review
-// artifacts to the resolved artifact dir ({{artifactDir}}). The consumers read
-// from os.tmpdir() by default, which diverges from /tmp whenever TMPDIR is set
-// (CI runners, sandboxes); under the OLD prompts that hardcoded /tmp this left
-// artifacts unseen and the review loop reported "no formal review outcome".
-// Resolve from the configured tmpDir first, then fall back to the /tmp path the
-// old prompts advertised. The fallback is normally skipped when a caller passes
-// an explicit tmpDir, so unit tests that point at their own scratch dir are
-// unaffected — but the review loop opts back in via `fallbackToTmp: true` so the
-// /tmp safety net still protects pre-existing/old-prompt artifacts even though
-// the loop passes the resolved default dir explicitly. This is defense-in-depth:
-// once the prompts substitute {{artifactDir}}, producer and consumer share one
-// dir by construction and this fallback is rarely exercised.
 /**
- * @param {string} slug
- * @param {string} artifactName
- * @param {{tmpDir: string, explicitTmpDir?: boolean, fallbackToTmp?: boolean, readArtifactFn: Function}} opts
- * @returns {{path: string, value: string|null}}
+ * Resolve artifact read path with optional /tmp fallback.
  */
-function resolveArtifactRead(slug, artifactName, { tmpDir, explicitTmpDir, fallbackToTmp, readArtifactFn }) {
+function resolveArtifactRead(
+  slug: string,
+  artifactName: string,
+  opts: { tmpDir: string; explicitTmpDir?: boolean; fallbackToTmp?: boolean; readArtifactFn: typeof readArtifactFile }
+): { path: string; value: string | null } {
+  const { tmpDir, explicitTmpDir, fallbackToTmp, readArtifactFn } = opts;
   const primaryPath = reviewArtifactPath(slug, artifactName, tmpDir);
   const primaryValue = readArtifactFn(primaryPath);
   const allowTmpFallback = (!explicitTmpDir || fallbackToTmp) && tmpDir !== '/tmp';
@@ -77,46 +57,25 @@ function resolveArtifactRead(slug, artifactName, { tmpDir, explicitTmpDir, fallb
 }
 
 /**
- * Resolve the directory where review artifacts (review-findings.md,
- * review-outcome.md, review-verdict.txt, round-resolution.md,
- * review-disposition.txt) are written and consumed.
- *
- * Reads `adapters.review.tmpDir` from workflow.config.json when present so a
- * downstream repo can pin a single, portable artifact location that the review
- * prompt and the consumer agree on. A relative configured value is resolved
- * against the repo root. Falls back to `os.tmpdir()` when unconfigured, which
- * preserves the historical default for every existing caller.
- *
- * @param {string} [rootDir]
- * @returns {string} absolute artifact directory
+ * Resolve the directory where review artifacts are written and consumed.
  */
-function resolveArtifactDir(rootDir = process.cwd()) {
+function resolveArtifactDir(rootDir = process.cwd()): string {
   return resolveConfiguredArtifactDir(rootDir);
 }
 
-/**
- * @param {string} filePath
- * @param {Function} [readFileSync]
- * @returns {string|null}
- */
-function readArtifactFile(filePath, readFileSync = fs.readFileSync) {
+function readArtifactFile(filePath: string, readFileSync = fs.readFileSync): string | null {
   try {
     const value = readFileSync(filePath, 'utf8');
     return typeof value === 'string' ? value.trim() : '';
-  } catch (_) {
+  } catch {
     return null;
   }
 }
 
-/**
- * @param {string} filePath
- * @param {Function} [unlinkSync]
- * @returns {void}
- */
-function deleteArtifactFile(filePath, unlinkSync = fs.unlinkSync) {
+function deleteArtifactFile(filePath: string, unlinkSync = fs.unlinkSync): void {
   try {
     unlinkSync(filePath);
-  } catch (_) {
+  } catch {
     // Best-effort cleanup only.
   }
 }
@@ -125,19 +84,12 @@ function deleteArtifactFile(filePath, unlinkSync = fs.unlinkSync) {
 // Normalization Utilities
 // ============================================================================
 
-/**
- * @param {string} value
- * @returns {string|null}
- */
-function normalizeReviewVerdict(value) {
+function normalizeReviewVerdict(value: string): string | null {
   const normalized = String(value || '').trim().toLowerCase();
   return ['approve', 'request-changes', 'comment'].includes(normalized) ? normalized : null;
 }
 
-/** @param {string} value
- * @returns {string|null}
- */
-function normalizeDisposition(value) {
+function normalizeDisposition(value: string): string | null {
   const normalized = String(value || '').trim().toUpperCase();
   return ['CHANGES_MADE', 'PUSHBACK_ALL', 'PARKED', 'BLOCKED'].includes(normalized) ? normalized : null;
 }
@@ -146,13 +98,21 @@ function normalizeDisposition(value) {
 // Workflow Comment/Review Posting
 // ============================================================================
 
-/**
- * @param {string} slug
- * @param {string} message
- * @param {{log?: Function, error?: Function, readTokenFn?: Function, postCommentFn?: Function, buildMetadataFooterFn?: Function, readReviewStateFn?: Function, rootDir?: string, reviewIdentity?: string, forgejoUser?: string}} [options]
- * @returns {{ok: boolean, error?: string}}
- */
-function postWorkflowComment(slug, message, options = {}) {
+function postWorkflowComment(
+  slug: string,
+  message: string,
+  options: {
+    log?: (msg: string) => void;
+    error?: (msg: string) => void;
+    readTokenFn?: (user: string, opts: { rootDir?: string }) => string | null;
+    postCommentFn?: (branch: string, token: string, body: string, opts?: Record<string, unknown>) => unknown;
+    buildMetadataFooterFn?: (s: string, r?: string) => string;
+    readReviewStateFn?: (s: string, r?: string) => any;
+    rootDir?: string;
+    reviewIdentity?: string;
+    forgejoUser?: string;
+  } = {}
+): { ok: boolean; error?: string } {
   const log = options.log || fmt.log.plain;
   const error = options.error || fmt.log.plainError;
   const readTokenFn = options.readTokenFn || readToken;
@@ -174,49 +134,52 @@ function postWorkflowComment(slug, message, options = {}) {
   const taggedMessage = message + buildMetadataFooterFn(slug, rootDir);
   log(fmt.status('INFO', `Posting PR comment on ${branch} as ${reviewIdentity}...`));
   const result = postCommentFn(branch, token, taggedMessage, { forgejoUser: reviewIdentity, reviewIdentity });
-  if (!result.ok) {
-    error(fmt.status('FAIL', `Could not post comment: ${result.error || 'API error'}`));
-    return { ok: false, error: result.error || 'API error' };
+  const r = result as Record<string, unknown>;
+  if (!r.ok) {
+    error(fmt.status('FAIL', `Could not post comment: ${(r.error as string) || 'API error'}`));
+    return { ok: false, error: (r.error as string) || 'API error' };
   }
 
   log(fmt.status('PASS', `Comment posted on PR for ${branch}.`));
   return { ok: true };
 }
 
-// Build a diagnosable error string from a failed provider API result, surfacing
-// the real HTTP status and response body (e.g. `422 approve your own pull is not
-// allowed`) instead of masking it behind a generic "API error". Falls back to
-// the result's own error/raw fields, then "API error" when nothing is present.
 /** @param {*} result */
-function describeProviderFailure(result) {
-  if (!result || typeof result !== 'object') {return 'API error';}
-  // Prefer the HTTP status code (statusCode) over curl's process status.
-  const httpStatus = (result.statusCode !== null && Number(result.statusCode) > 0)
-    ? result.statusCode
-    : (result.status !== null && Number(result.status) >= 100 ? result.status : null);
-  let body = null;
-  if (result.data && typeof result.data === 'object') {
-    body = result.data.message || JSON.stringify(result.data);
-  } else if (typeof result.data === 'string' && result.data) {
-    body = result.data;
+function describeProviderFailure(result: unknown): string {
+  if (!result || typeof result !== 'object') { return 'API error'; }
+  const r = result as Record<string, unknown>;
+  const httpStatus = (r.statusCode !== null && Number(r.statusCode) > 0)
+    ? r.statusCode
+    : (r.status !== null && Number(r.status) >= 100 ? r.status : null);
+  let body: string | null = null;
+  if (r.data && typeof r.data === 'object') {
+    body = (r.data as { message?: string }).message || JSON.stringify(r.data);
+  } else if (typeof r.data === 'string' && r.data) {
+    body = r.data as string;
   }
-  const parts = [];
-  if (httpStatus !== null) {parts.push(String(httpStatus));}
-  if (body) {parts.push(body);}
-  if (parts.length) {return parts.join(' ');}
-  return result.error || result.raw || 'API error';
+  const parts: string[] = [];
+  if (httpStatus !== null) { parts.push(String(httpStatus)); }
+  if (body) { parts.push(body); }
+  if (parts.length) { return parts.join(' '); }
+  return (r.error as string) || (r.raw as string) || 'API error';
 }
 
-// Record a review verdict in local review-state.json / review-events without
-// posting to the review provider. Used by the self-author skip path so the verdict is still
-// captured even though the formal provider approval is intentionally not posted.
 /**
- * @param {string} slug
- * @param {string} outcome
- * @param {{worktree?: string, writeReviewStateFn?: Function, createEventFn?: Function, readReviewStateFn?: Function, log?: Function, error?: Function, reviewer?: string}} [options]
- * @returns {void}
+ * Record a review verdict in local review-state.json / review-events.
  */
-function recordLocalReviewVerdict(slug, outcome, options = {}) {
+function recordLocalReviewVerdict(
+  slug: string,
+  outcome: string,
+  options: {
+    worktree?: string;
+    writeReviewStateFn?: (s: string, st: any, w: string) => boolean;
+    createEventFn?: (s: string, t: string, p: Record<string, unknown>, o: Record<string, unknown>) => CreateResult;
+    readReviewStateFn?: (s: string, r?: string) => any;
+    log?: (msg: string) => void;
+    error?: (msg: string) => void;
+    reviewer?: string;
+  } = {}
+): void {
   const worktree = options.worktree || resolveWorktree(slug) || process.cwd();
   const writeReviewStateFn = options.writeReviewStateFn || writeReviewState;
   const createEventFn = options.createEventFn || createEvent;
@@ -235,25 +198,38 @@ function recordLocalReviewVerdict(slug, outcome, options = {}) {
       });
   if (outcome === 'approve') {
     state.disposition = 'APPROVED';
-    try { state.transitionTo('approved'); } catch (_) {}
+    try { state.transitionTo('approved'); } catch { /* ignore */ }
   } else if (outcome === 'request-changes') {
     state.disposition = 'REQUEST_CHANGES';
-    try { state.transitionTo('fixing'); } catch (_) {}
+    try { state.transitionTo('fixing'); } catch { /* ignore */ }
   }
   writeReviewStateFn(slug, state, worktree);
 
-  // Verdict values (approve/request-changes/comment) map 1:1 to outcome values.
-  createEventFn(slug, VALID_EVENT_TYPES.REVIEWER_OUTCOME, { verdict: outcome }, { worktree, log, error });
+  createEventFn(slug, VALID_EVENT_TYPES.REVIEWER_OUTCOME, { verdict: outcome, content: `Review verdict: ${outcome}` }, { worktree, log: log, error });
 }
 
 /**
- * @param {string} slug
- * @param {string} outcome
- * @param {string} message
- * @param {{log?: Function, error?: Function, readTokenFn?: Function, postReviewFn?: Function, buildMetadataFooterFn?: Function, readReviewStateFn?: Function, worktree?: string, reviewIdentity?: string, forgejoUser?: string, getPrAuthorFn?: Function, writeReviewStateFn?: Function, createEventFn?: Function}} [options]
- * @returns {{ok: boolean, error?: string, skipped?: boolean, reason?: string, prAuthor?: string}}
+ * Submit a review outcome to the provider.
  */
-function postWorkflowReview(slug, outcome, message, options = {}) {
+function postWorkflowReview(
+  slug: string,
+  outcome: string,
+  message: string,
+  options: {
+    log?: (msg: string) => void;
+    error?: (msg: string) => void;
+    readTokenFn?: (user: string, opts: { rootDir?: string }) => string | null;
+    postReviewFn?: (branch: string, token: string, outcome: string, body: string, opts?: Record<string, unknown>) => unknown;
+    buildMetadataFooterFn?: (s: string, r?: string) => string;
+    readReviewStateFn?: (s: string, r?: string) => any;
+    worktree?: string;
+    reviewIdentity?: string;
+    forgejoUser?: string;
+    getPrAuthorFn?: (branch: string, token: string, opts?: Record<string, unknown>) => unknown;
+    writeReviewStateFn?: (s: string, st: any, w: string) => boolean;
+    createEventFn?: (s: string, t: string, p: Record<string, unknown>, o: Record<string, unknown>) => CreateResult;
+  } = {}
+): { ok: boolean; error?: string; skipped?: boolean; reason?: string; prAuthor?: unknown } {
   const log = options.log || fmt.log.plain;
   const error = options.error || fmt.log.plainError;
   const readTokenFn = options.readTokenFn || readToken;
@@ -272,17 +248,11 @@ function postWorkflowReview(slug, outcome, message, options = {}) {
     return { ok: false };
   }
 
-  // Self-approval guard: Forgejo rejects a formal review when the reviewer is
-  // also the PR author (HTTP 422 "approve your own pull is not allowed"). This
-  // arises under the legitimate same-agent-reviewer fallback. Detect it up front
-  // and skip the POST — recording the verdict locally instead of 422-ing — and
-  // WARN that a different agent or human must post the formal approval. Degrade
-  // safely: if the author cannot be resolved, treat it as "not self" and POST.
   const getPrAuthorFn = options.getPrAuthorFn || getPrAuthor;
-  let prAuthor = null;
+  let prAuthor: unknown = null;
   try {
     prAuthor = getPrAuthorFn(branch, token, { forgejoUser: reviewIdentity, reviewIdentity, rootDir: worktree });
-  } catch (_) {
+  } catch {
     prAuthor = null;
   }
   if (prAuthor && prAuthor === reviewIdentity) {
@@ -293,7 +263,7 @@ function postWorkflowReview(slug, outcome, message, options = {}) {
       writeReviewStateFn: options.writeReviewStateFn,
       createEventFn: options.createEventFn,
       readReviewStateFn,
-      log,
+      log: log,
       error,
     });
     return { ok: true, skipped: true, reason: 'self-author', prAuthor };
@@ -302,7 +272,8 @@ function postWorkflowReview(slug, outcome, message, options = {}) {
   const taggedMessage = message + buildMetadataFooterFn(slug, worktree);
   log(fmt.status('INFO', `Submitting review outcome "${outcome}" on ${branch} as ${reviewIdentity}...`));
   const result = postReviewFn(branch, token, outcome, taggedMessage, { forgejoUser: reviewIdentity, reviewIdentity });
-  if (!result.ok) {
+  const r = result as Record<string, unknown>;
+  if (!r.ok) {
     const failureDetail = describeProviderFailure(result);
     error(fmt.status('FAIL', `Could not submit review: ${failureDetail}`));
     return { ok: false, error: failureDetail };
@@ -316,13 +287,28 @@ function postWorkflowReview(slug, outcome, message, options = {}) {
 // Artifact Consumption
 // ============================================================================
 
-/**
- * @param {string} slug
- * @param {string} reviewer
- * @param {{log?: Function, error?: Function, readArtifactFn?: Function, deleteArtifactFn?: Function, tmpDir?: string|null, fallbackToTmp?: boolean, worktree?: string, providerEnabled?: boolean|null, forgejoEnabled?: boolean|null, readTokenFn?: Function, getCommentsFn?: Function, postCommentFn?: Function, postReviewFn?: Function, buildMetadataFooterFn?: Function, createEventFn?: Function}} [options]
- * @returns {Promise<{consumed: boolean, ok?: boolean, reviewState?: string|null}>}
- */
-async function consumeReviewerArtifacts(slug, reviewer, options = {}) {
+
+async function consumeReviewerArtifacts(
+  slug: string,
+  reviewer: string,
+  options: {
+    log?: (msg: string) => void;
+    error?: (msg: string) => void;
+    readArtifactFn?: typeof readArtifactFile;
+    deleteArtifactFn?: typeof deleteArtifactFile;
+    tmpDir?: string | null;
+    fallbackToTmp?: boolean;
+    worktree?: string;
+    providerEnabled?: boolean | null;
+    forgejoEnabled?: boolean | null;
+    readTokenFn?: (user: string, opts?: Record<string, unknown>) => string | null;
+    getCommentsFn?: (branch: string, token: string) => Promise<unknown[]>;
+    postCommentFn?: (branch: string, token: string, body: string, opts?: Record<string, unknown>) => unknown;
+    postReviewFn?: (branch: string, token: string, outcome: string, body: string, opts?: Record<string, unknown>) => unknown;
+    buildMetadataFooterFn?: (s: string, r?: string) => string;
+    createEventFn?: (s: string, t: string, p: CreateEventParams, o: CreateEventOptions) => CreateEventResult;
+  } = {}
+): Promise<{ consumed: boolean; ok?: boolean; reviewState?: string | null }> {
   const log = options.log || fmt.log.plain;
   const error = options.error || fmt.log.plainError;
   const readArtifactFn = options.readArtifactFn || readArtifactFile;
@@ -346,19 +332,16 @@ async function consumeReviewerArtifacts(slug, reviewer, options = {}) {
   const findings = findingsResolved.value;
   const outcomeMessage = outcomeResolved.value;
   const verdictRaw = verdictResolved.value;
-  
-  // Extract verdict from outcome message if review-verdict.txt is not provided
-  // This allows a single review-outcome.md file to contain both the outcome and verdict
-  let verdict = normalizeReviewVerdict(/** @type {string} */ (verdictRaw || ''));
+
+  let verdict = normalizeReviewVerdict(verdictRaw || '');
   if (!verdict && outcomeMessage) {
-    // Try to extract verdict from outcome content (e.g., "Verdict: approve" or frontmatter)
     const outcomeVerdictMatch = outcomeMessage.match(/^verdict:\s*(approve|request-changes|comment)/im) ||
                                outcomeMessage.match(/Verdict:\s*(approve|request-changes|comment)/i);
     if (outcomeVerdictMatch) {
       verdict = normalizeReviewVerdict(outcomeVerdictMatch[1]);
     }
   }
-  
+
   const hasAny = findings !== null || outcomeMessage !== null || verdictRaw !== null;
 
   if (!hasAny) {
@@ -383,75 +366,51 @@ async function consumeReviewerArtifacts(slug, reviewer, options = {}) {
     return { consumed: true, ok: false };
   }
 
-  // Get current review state for round/phase metadata
   const currentState = readReviewState(slug, worktree);
   const round = currentState ? currentState.round : 1;
   const phase = currentState ? currentState.phase : 'reviewing';
 
-  // SC 2: Persist to repo-owned store BEFORE provider mirroring
-  // This ensures durable storage even if provider publication fails
   const createEventFn = options.createEventFn || createEvent;
   const findingsEventResult = createEventFn(slug, VALID_EVENT_TYPES.REVIEWER_FINDINGS, {
-    content: findings,
-    round,
-    phase,
-    actor: reviewer
-  }, {
-    worktree,
-    skipGit: true,  // Let the caller handle git; we just need the file persisted
-    log,
-    error
-  });
+    content: findings, round, phase, actor: reviewer
+  }, { worktree, skipGit: true, log: log, error });
 
   if (!findingsEventResult.ok) {
-    error(fmt.status('FAIL', `Failed to persist reviewer findings to repo store: ${findingsEventResult.error}`));
+    error(fmt.status('FAIL', `Failed to persist reviewer findings to repo store: ${(findingsEventResult as { error?: string }).error}`));
     return { consumed: true, ok: false };
   }
 
   const outcomeEventResult = createEventFn(slug, VALID_EVENT_TYPES.REVIEWER_OUTCOME, {
-    content: outcomeMessage,
-    round,
-    phase,
-    actor: reviewer,
-    verdict
-  }, {
-    worktree,
-    skipGit: true,
-    log,
-    error
-  });
+    content: outcomeMessage, round, phase, actor: reviewer, verdict
+  }, { worktree, skipGit: true, log: log, error });
 
   if (!outcomeEventResult.ok) {
-    error(fmt.status('FAIL', `Failed to persist reviewer outcome to repo store: ${outcomeEventResult.error}`));
+    error(fmt.status('FAIL', `Failed to persist reviewer outcome to repo store: ${(outcomeEventResult as { error?: string }).error}`));
     return { consumed: true, ok: false };
   }
 
-  log(fmt.status('INFO', `Persisted reviewer artifacts to repo store: ${findingsEventResult.path}, ${outcomeEventResult.path}`));
+  log(fmt.status('INFO', `Persisted reviewer artifacts to repo store: ${(findingsEventResult as { path?: string }).path}, ${(outcomeEventResult as { path?: string }).path}`));
 
-  // SC 6: Classify human comments before mirroring (best-effort)
-  // Only read provider comments when a provider is enabled.
   if (providerEnabled && options.readTokenFn && options.getCommentsFn) {
     await consumeHumanNotes(slug, reviewer, {
       getCommentsFn: options.getCommentsFn,
-      createEventFn,
+      createEventFn: createEventFn as any,
       readTokenFn: options.readTokenFn,
       reviewIdentity: reviewer,
       worktree,
-      log,
+      log: log,
       error
     });
   }
 
-  // Mirror to the configured review provider (SC 4) when enabled.
   if (providerEnabled) {
-    // Both reviewer_findings and reviewer_outcome are mirrored
     const commentResult = postWorkflowComment(slug, findings, {
       rootDir: worktree,
       reviewIdentity: reviewer,
       readTokenFn: options.readTokenFn,
       postCommentFn: options.postCommentFn,
       buildMetadataFooterFn: options.buildMetadataFooterFn,
-      log,
+      log: log,
       error
     });
     if (!commentResult.ok) {
@@ -464,7 +423,7 @@ async function consumeReviewerArtifacts(slug, reviewer, options = {}) {
       readTokenFn: options.readTokenFn,
       postReviewFn: options.postReviewFn,
       buildMetadataFooterFn: options.buildMetadataFooterFn,
-      log,
+      log: log,
       error
     });
     if (!reviewResult.ok) {
@@ -478,11 +437,8 @@ async function consumeReviewerArtifacts(slug, reviewer, options = {}) {
   deleteArtifactFn(outcomePath);
   deleteArtifactFn(verdictPath);
 
-  if (verdict === 'approve') {return { consumed: true, ok: true, reviewState: 'APPROVED' };}
-  if (verdict === 'request-changes') {return { consumed: true, ok: true, reviewState: 'REQUEST_CHANGES' };}
-  // Defensive fallback: a stray `comment` verdict (prompts no longer offer it) cannot be
-  // resolved via provider polling when the provider is disabled, so normalize it to the
-  // disposition format and pass it through. inferPhaseFromDisposition() maps COMMENT -> fixing.
+  if (verdict === 'approve') { return { consumed: true, ok: true, reviewState: 'APPROVED' }; }
+  if (verdict === 'request-changes') { return { consumed: true, ok: true, reviewState: 'REQUEST_CHANGES' }; }
   if (!providerEnabled) {
     const reviewState = verdict.toUpperCase().replace(/-/g, '_');
     log(fmt.status('INFO', `Reviewer ${reviewer} produced verdict "${verdict}" with the provider disabled; normalizing to ${reviewState} for loop control.`));
@@ -492,13 +448,26 @@ async function consumeReviewerArtifacts(slug, reviewer, options = {}) {
   return { consumed: true, ok: true, reviewState: null };
 }
 
-/**
- * @param {string} slug
- * @param {string} implementer
- * @param {{log?: Function, error?: Function, readArtifactFn?: Function, deleteArtifactFn?: Function, tmpDir?: string|null, fallbackToTmp?: boolean, worktree?: string, providerEnabled?: boolean|null, forgejoEnabled?: boolean|null, readTokenFn?: Function, getCommentsFn?: Function, postCommentFn?: Function, buildMetadataFooterFn?: Function, createEventFn?: Function}} [options]
- * @returns {Promise<{consumed: boolean, ok?: boolean, disposition?: string|null}>}
- */
-async function consumeImplementerArtifacts(slug, implementer, options = {}) {
+async function consumeImplementerArtifacts(
+  slug: string,
+  implementer: string,
+  options: {
+    log?: (msg: string) => void;
+    error?: (msg: string) => void;
+    readArtifactFn?: typeof readArtifactFile;
+    deleteArtifactFn?: typeof deleteArtifactFile;
+    tmpDir?: string | null;
+    fallbackToTmp?: boolean;
+    worktree?: string;
+    providerEnabled?: boolean | null;
+    forgejoEnabled?: boolean | null;
+    readTokenFn?: (user: string, opts?: Record<string, unknown>) => string | null;
+    getCommentsFn?: (branch: string, token: string) => Promise<unknown[]>;
+    postCommentFn?: (branch: string, token: string, body: string, opts?: Record<string, unknown>) => unknown;
+    buildMetadataFooterFn?: (s: string, r?: string) => string;
+    createEventFn?: (s: string, t: string, p: CreateEventParams, o: CreateEventOptions) => CreateEventResult;
+  } = {}
+): Promise<{ consumed: boolean; ok?: boolean; disposition?: string | null }> {
   const log = options.log || fmt.log.plain;
   const error = options.error || fmt.log.plainError;
   const readArtifactFn = options.readArtifactFn || readArtifactFile;
@@ -519,7 +488,7 @@ async function consumeImplementerArtifacts(slug, implementer, options = {}) {
 
   const resolution = resolutionResolved.value;
   const dispositionRaw = dispositionResolved.value;
-  const disposition = normalizeDisposition(/** @type {string} */ (dispositionRaw || ''));
+  const disposition = normalizeDisposition(dispositionRaw || '');
   const hasAny = resolution !== null || dispositionRaw !== null;
 
   if (!hasAny) {
@@ -535,112 +504,80 @@ async function consumeImplementerArtifacts(slug, implementer, options = {}) {
     return { consumed: true, ok: false };
   }
 
-  // Get current review state for round/phase metadata
   const currentState = readReviewState(slug, worktree);
   const round = currentState ? currentState.round : 1;
   const phase = currentState ? currentState.phase : 'fixing';
 
-  // SC 2: Persist to repo-owned store BEFORE provider mirroring
-  // This ensures durable storage even if provider publication fails
   const createEventFn = options.createEventFn || createEvent;
-  
-  // Parse resolution content to extract structured fields if present
-  // SC 5: Validate mirrored content includes required fields
-  let fixedItems = [];
-  let pushedBackItems = [];
-  let parkedItems = [];
-  let blockedReason = null;
-  
+
+  let fixedItems: unknown[] = [];
+  let pushedBackItems: unknown[] = [];
+  let parkedItems: unknown[] = [];
+  let blockedReason: string | null = null;
+
   try {
-    // Try to extract from frontmatter or structured content
     const fixedMatch = resolution.match(/fixed_items:\s*(\[[^\]]*\])/i);
     const pushedMatch = resolution.match(/pushed_back_items:\s*(\[[^\]]*\])/i);
     const parkedMatch = resolution.match(/parked_items:\s*(\[[^\]]*\])/i);
     const blockedMatch = resolution.match(/blocked_reason:\s*"([^"]*)"/i);
-    
-    if (fixedMatch) {fixedItems = JSON.parse(fixedMatch[1]);}
-    if (pushedMatch) {pushedBackItems = JSON.parse(pushedMatch[1]);}
-    if (parkedMatch) {parkedItems = JSON.parse(parkedMatch[1]);}
-    if (blockedMatch) {blockedReason = blockedMatch[1];}
-  } catch (_) {
-    // If parsing fails, use empty arrays
+
+    if (fixedMatch) { fixedItems = JSON.parse(fixedMatch[1]); }
+    if (pushedMatch) { pushedBackItems = JSON.parse(pushedMatch[1]); }
+    if (parkedMatch) { parkedItems = JSON.parse(parkedMatch[1]); }
+    if (blockedMatch) { blockedReason = blockedMatch[1]; }
+  } catch {
     fixedItems = [];
     pushedBackItems = [];
     parkedItems = [];
   }
 
-  // For BLOCKED disposition, blockedReason is required
   if (disposition === 'BLOCKED' && !blockedReason) {
-    // Check if it's in the resolution content
     const match = resolution.match(/blocked.*?:\s*(.+)/i);
-    if (match) {blockedReason = match[1].trim();}
+    if (match) { blockedReason = match[1].trim(); }
   }
 
   const summaryEventResult = createEventFn(slug, VALID_EVENT_TYPES.IMPLEMENTER_ROUND_SUMMARY, {
-    content: resolution,
-    round,
-    phase,
-    actor: implementer,
-    fixedItems,
-    pushedBackItems,
-    parkedItems,
+    content: resolution, round, phase, actor: implementer,
+    fixedItems, pushedBackItems, parkedItems,
     ...(disposition === 'BLOCKED' && blockedReason ? { blockedReason } : {})
-  }, {
-    worktree,
-    skipGit: true,
-    log,
-    error
-  });
+  }, { worktree, skipGit: true, log: log, error });
 
   if (!summaryEventResult.ok) {
-    error(fmt.status('FAIL', `Failed to persist implementer round summary to repo store: ${summaryEventResult.error}`));
+    error(fmt.status('FAIL', `Failed to persist implementer round summary to repo store: ${(summaryEventResult as { error?: string }).error}`));
     return { consumed: true, ok: false };
   }
 
   const dispositionEventResult = createEventFn(slug, VALID_EVENT_TYPES.IMPLEMENTER_DISPOSITION, {
-    content: `Autonomous review disposition: ${disposition}`,
-    round,
-    phase,
-    actor: implementer,
-    disposition
-  }, {
-    worktree,
-    skipGit: true,
-    log,
-    error
-  });
+    content: `Autonomous review disposition: ${disposition}`, round, phase, actor: implementer, disposition
+  }, { worktree, skipGit: true, log: log, error });
 
   if (!dispositionEventResult.ok) {
-    error(fmt.status('FAIL', `Failed to persist implementer disposition to repo store: ${dispositionEventResult.error}`));
+    error(fmt.status('FAIL', `Failed to persist implementer disposition to repo store: ${(dispositionEventResult as { error?: string }).error}`));
     return { consumed: true, ok: false };
   }
 
-  log(fmt.status('INFO', `Persisted implementer artifacts to repo store: ${summaryEventResult.path}, ${dispositionEventResult.path}`));
+  log(fmt.status('INFO', `Persisted implementer artifacts to repo store: ${(summaryEventResult as { path?: string }).path}, ${(dispositionEventResult as { path?: string }).path}`));
 
-  // SC 6: Classify human comments before mirroring (best-effort)
-  // Only read provider comments when a provider is enabled.
   if (providerEnabled && options.readTokenFn && options.getCommentsFn) {
     await consumeHumanNotes(slug, implementer, {
       getCommentsFn: options.getCommentsFn,
-      createEventFn,
+      createEventFn: createEventFn as any,
       readTokenFn: options.readTokenFn,
       reviewIdentity: implementer,
       worktree,
-      log,
+      log: log,
       error
     });
   }
 
-  // Mirror to the configured review provider (SC 4) when enabled.
   if (providerEnabled) {
-    // Both implementer_round_summary and implementer_disposition are mirrored
     const resolutionResult = postWorkflowComment(slug, resolution, {
       rootDir: worktree,
       reviewIdentity: implementer,
       readTokenFn: options.readTokenFn,
       postCommentFn: options.postCommentFn,
       buildMetadataFooterFn: options.buildMetadataFooterFn,
-      log,
+      log: log,
       error
     });
     if (!resolutionResult.ok) {
@@ -653,7 +590,7 @@ async function consumeImplementerArtifacts(slug, implementer, options = {}) {
       readTokenFn: options.readTokenFn,
       postCommentFn: options.postCommentFn,
       buildMetadataFooterFn: options.buildMetadataFooterFn,
-      log,
+      log: log,
       error
     });
     if (!dispositionResult.ok) {
@@ -670,7 +607,7 @@ async function consumeImplementerArtifacts(slug, implementer, options = {}) {
 }
 
 // Module exports
-module.exports = {
+export {
   buildMetadataFooter,
   reviewArtifactPath,
   resolveArtifactDir,
