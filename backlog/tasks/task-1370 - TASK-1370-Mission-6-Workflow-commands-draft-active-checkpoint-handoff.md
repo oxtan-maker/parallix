@@ -2,10 +2,11 @@
 id: TASK-1370
 title: 'TASK-1370: Mission 6 - Workflow commands (draft, active, checkpoint, handoff)'
 status: backlog
-assignee: []
+assignee: [custom]
 created_date: '2026-06-27 10:37'
 updated_date: '2026-06-27 10:38'
-labels: []
+labels:
+  - ai_sdlc
 dependencies:
   - TASK-1369
   - TASK-1371
