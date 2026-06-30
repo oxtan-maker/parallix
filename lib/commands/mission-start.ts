@@ -1,18 +1,18 @@
-const fs = require('fs');
-const path = require('path');
-const fmt = require('../core/fmt');
-const { getCurrentBranch, getLastCommit, git } = require('../core/git');
-const { resolveTaskFile, getTaskStatus, reportTaskResolution } = require('../tools/backlog');
-const { adapterChecklist, evaluateRepositoryReadiness } = require('../core/product-config');
-const { evaluateReviewSetup } = require('../tools/setup-review');
-const { toVirtual } = require('../core/state-map');
-const { findMissionDir, findCheckpoints, getFirstLine, inferSlug, getMissionYear, conventionalWorktreePath, resolveMissionBaseBranch, getPrimaryBranch } = require('../core/mission-utils');
-const { getPrStatus } = require('../tools/forgejo');
-const { isForgejoReviewEnabled } = require('../core/product-config');
-const stats = require('./stats');
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import * as fmt from '../core/fmt.js';
+import { getCurrentBranch, getLastCommit, git } from '../core/git.js';
+import { resolveTaskFile, getTaskStatus, reportTaskResolution } from '../tools/backlog.js';
+import { adapterChecklist, evaluateRepositoryReadiness } from '../core/product-config.js';
+import { evaluateReviewSetup } from '../tools/setup-review.js';
+import { toVirtual } from '../core/state-map.js';
+import { findMissionDir, findCheckpoints, getFirstLine, inferSlug, getMissionYear, conventionalWorktreePath, resolveMissionBaseBranch, getPrimaryBranch } from '../core/mission-utils.js';
+import { getPrStatus } from '../tools/forgejo.js';
+import { isForgejoReviewEnabled } from '../core/product-config.js';
+import stats = require('./stats.js');
 
 /** @param {string[]} args @param {{log?: Function, error?: Function, cwdFn?: Function, getCurrentBranchFn?: Function, resolveTaskFileFn?: Function, getTaskStatusFn?: Function, toVirtualFn?: Function, findMissionDirFn?: Function, findCheckpointsFn?: Function, getFirstLineFn?: Function, inferSlugFn?: Function, getMissionYearFn?: Function, conventionalWorktreePathFn?: Function, getLastCommitFn?: Function, getPrStatusFn?: Function, evaluateRepositoryReadinessFn?: Function, evaluateReviewSetupFn?: Function, adapterChecklistFn?: Function, resolveMissionClassificationFn?: Function, isForgejoReviewEnabledFn?: Function, fsExistsSync?: Function, resolveMissionBaseBranchFn?: Function, getPrimaryBranchFn?: Function, gitFn?: Function, command?: string, returnResult?: boolean}} opts */
-function missionStart(args, opts = {}) {
+function missionStart(args: string[], opts: { log?: Function, error?: Function, cwdFn?: Function, getCurrentBranchFn?: Function, resolveTaskFileFn?: Function, getTaskStatusFn?: Function, toVirtualFn?: Function, findMissionDirFn?: Function, findCheckpointsFn?: Function, getFirstLineFn?: Function, inferSlugFn?: Function, getMissionYearFn?: Function, conventionalWorktreePathFn?: Function, getLastCommitFn?: Function, getPrStatusFn?: Function, evaluateRepositoryReadinessFn?: Function, evaluateReviewSetupFn?: Function, adapterChecklistFn?: Function, resolveMissionClassificationFn?: Function, isForgejoReviewEnabledFn?: Function, fsExistsSync?: Function, resolveMissionBaseBranchFn?: Function, getPrimaryBranchFn?: Function, gitFn?: Function, command?: string, returnResult?: boolean } = {}) {
   const log = opts.log || fmt.log.plain;
   const error = opts.error || fmt.log.plainError;
   const cwdFn = opts.cwdFn || (() => process.cwd());
@@ -31,7 +31,7 @@ function missionStart(args, opts = {}) {
   const evaluateRepositoryReadinessFn = opts.evaluateRepositoryReadinessFn || evaluateRepositoryReadiness;
   const evaluateReviewSetupFn = opts.evaluateReviewSetupFn || evaluateReviewSetup;
   const adapterChecklistFn = opts.adapterChecklistFn || adapterChecklist;
-  const resolveMissionClassificationFn = opts.resolveMissionClassificationFn || stats.resolveMissionClassification;
+  const resolveMissionClassificationFn = opts.resolveMissionClassificationFn || (stats as any).resolveMissionClassification;
   const isForgejoReviewEnabledFn = opts.isForgejoReviewEnabledFn || isForgejoReviewEnabled;
   const fsExistsSync = opts.fsExistsSync || fs.existsSync;
   const resolveMissionBaseBranchFn = opts.resolveMissionBaseBranchFn || resolveMissionBaseBranch;
@@ -51,7 +51,7 @@ function missionStart(args, opts = {}) {
 
   let overallFail = false;
   /** @type{string[]} */
-  const remediationSteps = [];
+  const remediationSteps: string[] = [];
 
   // Check 1: PWD
   const cwd = cwdFn();
@@ -152,8 +152,8 @@ function missionStart(args, opts = {}) {
         } else {
           log(fmt.status('PASS', `Backlog classification: ${classification}`));
         }
-      } catch (/** @type {unknown} */ error) {
-        log(fmt.status('FAIL', `Backlog classification: ${/** @type {any} */(error).message}`));
+      } catch (error) {
+        log(fmt.status('FAIL', `Backlog classification: ${(error as Error).message}`));
         overallFail = true;
       }
     } else {
@@ -186,7 +186,7 @@ function missionStart(args, opts = {}) {
           // Base branch validation: when a mission records a non-primary base,
           // verify the base branch exists locally so integrate won't fail silently.
           const primaryBranch = getPrimaryBranchFn();
-          let recordedBase;
+          let recordedBase: string | null;
           try {
             recordedBase = resolveMissionBaseBranchFn(slug, process.cwd());
           } catch (_) {
@@ -232,7 +232,7 @@ function missionStart(args, opts = {}) {
 
 // Extracted so callers can test the returnResult path without live git dependencies.
 /** @param {boolean} overallFail @param {boolean} returnResult @param {{error?: Function, log?: Function, remediationSteps?: string[]}} options */
-function completePreflightOrExit(overallFail, returnResult, options = {}) {
+function completePreflightOrExit(overallFail: boolean, returnResult: boolean, options: { error?: Function, log?: Function, remediationSteps?: string[] } = {}) {
   /** @type{{error?: Function, log?: Function, remediationSteps?: string[]}} */
   const opts = options;
   const error = opts.error || fmt.log.plainError;
@@ -258,5 +258,6 @@ function completePreflightOrExit(overallFail, returnResult, options = {}) {
   }
 }
 
-module.exports = missionStart;
-module.exports.completePreflightOrExit = completePreflightOrExit;
+(missionStart as any).completePreflightOrExit = completePreflightOrExit;
+
+export = missionStart;

@@ -77,54 +77,6 @@ export default [
       '@typescript-eslint/no-require-imports': 'off',
     },
   },
-  // Negation override: re-lint hand-written JS files excluded by compiled-js ignores.
-  // The old `.eslintignore` used `!lib/core/nels.js` and `!lib/core/subagent-limit.js` negations;
-  // flat config ignores do not support `!` so we use explicit `files:` blocks instead.
-  {
-    files: ['lib/core/nels.js', 'lib/core/subagent-limit.js'],
-    ignores: [],
-    languageOptions: {
-      parser: tsParser,
-      parserOptions: {
-        ecmaVersion: 2024,
-        sourceType: 'module',
-      },
-      globals: {
-        console: 'readonly',
-        process: 'readonly',
-        __filename: 'readonly',
-        __dirname: 'readonly',
-        require: 'readonly',
-        module: 'readonly',
-        exports: 'readonly',
-        Buffer: 'readonly',
-        BufferEncoding: 'readonly',
-        NodeJS: 'readonly',
-        setTimeout: 'readonly',
-        clearTimeout: 'readonly',
-        setInterval: 'readonly',
-        clearInterval: 'readonly',
-        URL: 'readonly',
-        Headers: 'readonly',
-        Request: 'readonly',
-        Response: 'readonly',
-        fetch: 'readonly',
-      },
-    },
-    plugins: {
-      '@typescript-eslint': tsPlugin,
-    },
-    rules: {
-      'no-undef': 'error',
-      'no-unused-vars': ['warn', { argsIgnorePattern, varsIgnorePattern, caughtErrorsIgnorePattern }],
-      'valid-typeof': 'error',
-      'no-unreachable': 'error',
-      'no-async-promise-executor': 'error',
-      'eqeqeq': 'error',
-      'curly': 'error',
-      'no-var': 'error',
-    },
-  },
   // Lint remaining .js files (not covered by compiled-js ignores), ignoring compiled .js per-directory globs
   {
     files: ['**/*.js'],

@@ -1,4 +1,4 @@
-const { loadEffectiveConfig } = require('./product-config');
+import { loadEffectiveConfig } from './product-config.js';
 
 // Build a prompt-injection prefix that instructs the agent to limit
 // concurrent subagent forks. Returns a non-empty advisory string when
@@ -10,11 +10,12 @@ const { loadEffectiveConfig } = require('./product-config');
 // @param {number | null | undefined} [maxParallel] — explicit value override;
 //   when omitted the function reads from the effective workflow config.
 /** @param {number | null | undefined} [maxParallel] */
-function buildSubagentLimitPrefix(maxParallel) {
+export function buildSubagentLimitPrefix(maxParallel: number | null | undefined) {
   let value = maxParallel;
   if (value === undefined || value === null) {
     const cfg = loadEffectiveConfig();
-    const sub = cfg.adapters?.agents?.subagents;
+    const agents = cfg.adapters?.agents as { [key: string]: unknown } | undefined;
+    const sub = agents?.subagents as { maxParallel?: number } | undefined;
     value = sub && typeof sub.maxParallel === 'number' ? sub.maxParallel : null;
   }
   if (typeof value !== 'number' || value < 1) {
@@ -22,7 +23,3 @@ function buildSubagentLimitPrefix(maxParallel) {
   }
   return `Do not spawn more than ${value} parallel subagents. If you need more, pause and wait.\n`;
 }
-
-module.exports = {
-  buildSubagentLimitPrefix,
-};

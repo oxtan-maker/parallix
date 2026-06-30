@@ -34,18 +34,14 @@ import diff = require('./commands/diff.js');
 import draft = require('./commands/draft.js');
 import handoff = require('./commands/handoff.js');
 import integrate = require('./commands/integrate.js');
-// @ts-expect-error — CJS module not yet converted to TS (out of scope)
 import missionStart = require('./commands/mission-start.js');
 import rebase = require('./commands/rebase.js');
-// @ts-expect-error — CJS module not yet converted to TS (out of scope)
 import repairHandoff = require('./commands/repair-handoff.js');
 import resolveConflict = require('./commands/resolve-conflict.js');
-// @ts-expect-error — CJS module not yet converted to TS (out of scope)
 import setup = require('./commands/setup.js');
 import stats = require('./commands/stats.js');
 import statsBackfill = require('./commands/stats-backfill.js');
 import status = require('./commands/status.js');
-// @ts-expect-error — CJS module not yet converted to TS (out of scope)
 import verify = require('./commands/verify.js');
 
 // core/ — mixed export styles

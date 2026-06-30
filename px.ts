@@ -3,7 +3,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import * as fmt from './lib/core/fmt.js';
-// @ts-expect-error — CJS module not yet converted to TS (out of scope)
 import missionStart = require('./lib/commands/mission-start.js');
 import { createEvent } from './lib/review/review-events.js';
 import * as workflow from './index.js';

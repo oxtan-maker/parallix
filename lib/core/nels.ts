@@ -15,13 +15,13 @@
  * @module lib/core/nels
  */
 
-const { spawnSync } = require('child_process');
+import { spawnSync } from 'node:child_process';
 
 // ---------- exclusion globs (ADR 0047) ----------
 // Each entry is a minimatch-compatible pattern. Patterns are checked in order;
 // the first match wins.
 
-const EXCLUSION_PATTERNS = [
+export const EXCLUSION_PATTERNS = [
   'missions/**',        // workflow/process bookkeeping
   'backlog/**',         // workflow/process bookkeeping
   'review-*',           // workflow/process bookkeeping
@@ -37,8 +37,8 @@ const EXCLUSION_PATTERNS = [
 /**
  * Bucket constants derived from ADR 0047 empirical terciles.
  */
-const BUCKET_SMALL_MAX = 80;
-const BUCKET_MEDIUM_MAX = 235;
+export const BUCKET_SMALL_MAX = 80;
+export const BUCKET_MEDIUM_MAX = 235;
 
 /**
  * Classify NEL count into a bucket label.
@@ -46,7 +46,7 @@ const BUCKET_MEDIUM_MAX = 235;
  * @param {number} nel
  * @returns {{ label: 'Small' | 'Medium' | 'Large', min: number, max: number }}
  */
-function classifyBucket(nel) {
+export function classifyBucket(nel: number) {
   if (nel <= BUCKET_SMALL_MAX) {
     return { label: 'Small', min: 0, max: BUCKET_SMALL_MAX };
   }
@@ -62,7 +62,7 @@ function classifyBucket(nel) {
  * @param {string} filePath - Relative file path from repo root
  * @returns {boolean}
  */
-function isExcluded(filePath) {
+export function isExcluded(filePath: string) {
   // Normalize to forward slashes
   const normalized = filePath.replace(/\\/g, '/');
 
@@ -82,7 +82,7 @@ function isExcluded(filePath) {
  * @param {string} pattern
  * @returns {boolean}
  */
-function patternMatches(str, pattern) {
+function patternMatches(str: string, pattern: string) {
   // Convert minimatch-style glob to regex
   // Escape regex special chars except * and ?
   let regexStr = '';
@@ -132,7 +132,7 @@ function patternMatches(str, pattern) {
  * @param {{ cwd?: string }} [options]
  * @returns {number} Total NEL count (insertions + deletions, whitespace-ignored)
  */
-function computeNEL(range, options = {}) {
+export function computeNEL(range: string, options: { cwd?: string } = {}) {
   const cwd = options.cwd || process.cwd();
 
   const result = spawnSync('git', ['diff', '--numstat', '-w', range], {
@@ -183,17 +183,7 @@ function computeNEL(range, options = {}) {
  * @param {{ cwd?: string }} [options]
  * @returns {{ nel: number, bucket: { label: string, min: number, max: number } }}
  */
-function computeNELRecord(range, options) {
+export function computeNELRecord(range: string, options: { cwd?: string } = {}) {
   const nel = computeNEL(range, options);
   return { nel, bucket: classifyBucket(nel) };
 }
-
-module.exports = {
-  computeNEL,
-  computeNELRecord,
-  classifyBucket,
-  isExcluded,
-  EXCLUSION_PATTERNS,
-  BUCKET_SMALL_MAX,
-  BUCKET_MEDIUM_MAX,
-};

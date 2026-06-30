@@ -1,7 +1,7 @@
-const { git } = require('../core/git');
-const missionUtils = require('../core/mission-utils');
-const rebase = require('./rebase');
-const fmt = require('../core/fmt');
+import { git, getCurrentBranch } from '../core/git.js';
+import * as missionUtils from '../core/mission-utils.js';
+import rebase = require('./rebase.js');
+import * as fmt from '../core/fmt.js';
 
 /**
  * Check if an error message indicates a relaunchable content error (missing/empty goal-check table).
@@ -9,7 +9,7 @@ const fmt = require('../core/fmt');
  * @param {string} errorMsg - The error message to check
  * @returns {boolean} True if the error is relaunchable
  */
-function isRelaunchableError(errorMsg) {
+function isRelaunchableError(errorMsg: string) {
   if (!errorMsg || typeof errorMsg !== 'string') {
     return false;
   }
@@ -25,9 +25,8 @@ function isRelaunchableError(errorMsg) {
  * @param {string} slug - Mission slug
  * @param {string} worktree - Path to the mission worktree
  * @returns {string} The relaunch prompt
- */
-/** @param {string} errorMsg @param {string} slug @param {string} worktree */
-function buildRelaunchPrompt(errorMsg, slug, worktree) {
+  */
+function buildRelaunchPrompt(errorMsg: string, slug: string, worktree: string) {
   const year = missionUtils.getMissionYear(slug, worktree);
   const missionDir = missionUtils.findMissionDir(slug, worktree) || missionUtils.missionDirForSlug(worktree, slug);
   
@@ -77,9 +76,8 @@ function buildRelaunchPrompt(errorMsg, slug, worktree) {
  * @param {string} errorMsg - The error message from the failed handoff
  * @param {object} [options]
  * @returns {Promise<{repaired: boolean, blocker: string|null}>} Result and optional blocker reason
- */
-/** @param {string} slug @param {string} worktree @param {string} errorMsg @param {{gitFn?: Function, rebaseFn?: Function, log?: Function, error?: Function}} options */
-async function repairHandoff(slug, worktree, errorMsg, options = {}) {
+  */
+async function repairHandoff(slug: string, worktree: string, errorMsg: string, options: { gitFn?: Function, rebaseFn?: Function, log?: Function, error?: Function } = {}) {
   /** @type {{gitFn?: Function, rebaseFn?: Function, log?: Function, error?: Function}} */
   const opts = options;
   const {
@@ -91,10 +89,10 @@ async function repairHandoff(slug, worktree, errorMsg, options = {}) {
 
   const rootDir = worktree || process.cwd();
   let repaired = false;
-  let blocker = null;
+  let blocker: string | null = null;
 
   /** @param {string} line */
-  function parsePorcelainPath(line) {
+  function parsePorcelainPath(line: string) {
     const xy = line.slice(0, 2);
     const rawPath = line.slice(3).trim();
     const pathPart = rawPath.includes('->') ? (rawPath.split('->').pop() || '').trim() : rawPath;
@@ -131,38 +129,38 @@ async function repairHandoff(slug, worktree, errorMsg, options = {}) {
     const statusResult = gitFn(['-C', rootDir, 'status', '--porcelain']);
     if (statusResult.status === 0 && statusResult.stdout) {
       const dirtyLines = statusResult.stdout.split('\n')
-        .filter(/** @param {string} line */ (line) => line.trim().length > 0);
+        .filter((line: string) => line.trim().length > 0);
 
       const dirtyFilesWithStatus = dirtyLines.map(parsePorcelainPath);
 
-      const unmerged = dirtyFilesWithStatus.filter((/** @param {{xy: string, file: string}} f */ f =>
+      const unmerged = dirtyFilesWithStatus.filter((f: { xy: string; file: string }) =>
         ['DD', 'AU', 'UD', 'UA', 'DU', 'AA', 'UU'].includes(f.xy)
-      ));
+      );
 
       if (unmerged.length > 0) {
-        blocker = `Conflicted files detected:\n${unmerged.map((/** @param {{xy: string, file: string}} f */ f => `       - ${f.file}`)).join('\n')}`;
+        blocker = `Conflicted files detected:\n${unmerged.map((f: { xy: string; file: string }) => `       - ${f.file}`).join('\n')}`;
         log(`Cannot auto-commit: ${blocker}`);
         return { repaired: false, blocker };
       }
 
-      const dirtyFiles = dirtyFilesWithStatus.map((/** @param {{xy: string, file: string}} f */ f => f.file));
+      const dirtyFiles = dirtyFilesWithStatus.map((f: { xy: string; file: string }) => f.file);
 
-      const isSafeToCommit = (/** @type{string} */ file) =>
+      const isSafeToCommit = (/** @type{string} */ file: string) =>
         missionUtils.isWorkflowGeneratedArtifact(file)
         || missionUtils.isMissionArtifact(file, slug, rootDir);
 
       const safeFiles = dirtyFiles.filter(isSafeToCommit);
-      const unsafeFiles = dirtyFiles.filter((/** @param {string} f */ f => !isSafeToCommit(f)));
+      const unsafeFiles = dirtyFiles.filter((f: string) => !isSafeToCommit(f));
 
       if (unsafeFiles.length > 0) {
         log(`Cannot auto-commit: dirty files include non-mission paths:`);
-        unsafeFiles.forEach((/** @type {string} */ f) => log(`       - ${f}`));
+        unsafeFiles.forEach((f: string) => log(`       - ${f}`));
         blocker = `dirty files include non-mission paths: ${unsafeFiles.join(', ')}`;
         return { repaired: false, blocker };
       } else if (safeFiles.length > 0) {
         log(`Auto-committing mission artifacts:`);
-        const stageFailures = /** @type {string[]} */ ([]);
-        safeFiles.forEach((/** @type {string} */ f) => {
+        const stageFailures: string[] = [];
+        safeFiles.forEach((f: string) => {
           log(`       - ${f}`);
           const addResult = gitFn(['-C', rootDir, 'add', '--', f]);
           if (addResult.status === 0) {
@@ -194,13 +192,12 @@ async function repairHandoff(slug, worktree, errorMsg, options = {}) {
   if (isBehind) {
     log('Branch appears behind primary branch. Calling rebase...');
     let rebaseSuccess = false;
-    let rebaseError = null;
+    let rebaseError: string | null = null;
     try {
-      const { getCurrentBranch } = require('../core/git');
       await rebaseFn([slug], {
-        gitFn: (/** @type {string[]} */ args, /** @type {{cwd?: string}} */ opts) => gitFn(args, { ...opts, cwd: rootDir }),
+        gitFn: (args: string[], opts: { cwd?: string }) => gitFn(args, { ...opts, cwd: rootDir }),
         getCurrentBranchFn: () => getCurrentBranch(rootDir),
-        exitFn: (/** @type {number} */ code) => {
+        exitFn: (code: number) => {
           if (code === 0) {
             rebaseSuccess = true;
           } else {
@@ -208,8 +205,8 @@ async function repairHandoff(slug, worktree, errorMsg, options = {}) {
           }
         }
       });
-    } catch (/** @type {unknown} */ err) {
-      rebaseError = /** @type{Error} */(err).message;
+    } catch (err) {
+      rebaseError = (err instanceof Error) ? err.message : String(err);
     }
 
     if (!rebaseSuccess) {
@@ -225,6 +222,7 @@ async function repairHandoff(slug, worktree, errorMsg, options = {}) {
   return { repaired, blocker };
 }
 
-module.exports = repairHandoff;
-module.exports.isRelaunchableError = isRelaunchableError;
-module.exports.buildRelaunchPrompt = buildRelaunchPrompt;
+(repairHandoff as any).isRelaunchableError = isRelaunchableError;
+(repairHandoff as any).buildRelaunchPrompt = buildRelaunchPrompt;
+
+export = repairHandoff;

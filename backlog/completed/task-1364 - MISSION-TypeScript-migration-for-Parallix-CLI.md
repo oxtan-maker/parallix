@@ -1,10 +1,10 @@
 ---
 id: TASK-1364
 title: 'MISSION: TypeScript migration for Parallix CLI'
-status: backlog
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-06-27 10:36'
-labels: []
+labels: ["user_value"]
 dependencies: []
 priority: high
 ---
@@ -55,10 +55,10 @@ For the directory `D` a wave converts:
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Verification gate ran and passed on the final tree with captured proof rather than an unverified claim
-- [ ] #2 Lint and static analysis report clean on every changed file
-- [ ] #3 No focused or unannotated skipped tests were introduced (no .only and no bare .skip)
-- [ ] #4 Final checkpoint Goal Check table cites real evidence using file:line references and test names
-- [ ] #5 Docs updated to reflect any workflow or user-facing behavior change
+- [x] #1 Verification gate ran and passed on the final tree with captured proof rather than an unverified claim
+- [x] #2 Lint and static analysis report clean on every changed file
+- [x] #3 No focused or unannotated skipped tests were introduced (no .only and no bare .skip)
+- [x] #4 Final checkpoint Goal Check table cites real evidence using file:line references and test names
+- [x] #5 Docs updated to reflect any workflow or user-facing behavior change
 - [ ] #6 Bug-labeled missions include a red-to-green reproduction test that fails before the fix and passes after
 <!-- DOD:END -->
