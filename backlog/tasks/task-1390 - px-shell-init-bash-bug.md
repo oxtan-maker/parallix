@@ -2,9 +2,11 @@
 id: TASK-1390
 title: px shell-init bash bug
 status: backlog
-assignee: []
+assignee: [custom]
 created_date: '2026-06-30 15:42'
-labels: []
+labels:
+  - user_value
+  - bug
 dependencies: []
 ---
 
