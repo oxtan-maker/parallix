@@ -1,18 +1,31 @@
-const fs = require('fs');
-const path = require('path');
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 
-const fmt = require('../core/fmt');
-const stats = require('./stats');
-const gitLib = require('../core/git');
-const {
+import * as fmt from '../core/fmt.js';
+import stats = require('./stats.js');
+import { git } from '../core/git.js';
+import {
   getTaskFrontmatterValue,
   getTaskStatus,
   resolveTaskFile,
-} = require('../tools/backlog');
-const { findMissionDir } = require('../core/mission-utils');
+} from '../tools/backlog.js';
+import { findMissionDir } from '../core/mission-utils.js';
 
-/** @param {string} missionDir */
-function hasCheckpointFiles(missionDir) {
+interface StatsAugmented {
+  resolveMissionClassification: (slug: string, rootDir?: string) => { classification?: string; source?: string };
+  _internals: Record<string, (...args: unknown[]) => unknown>;
+  resolveStatsPath: (options?: { ensureDir?: boolean }) => string;
+  resolveStatsRepoName: (rootDir: string) => string;
+  loadStatsCsv: (filePath: string, options?: { rootDir?: string }) => { rows: Record<string, string>[] };
+  deriveImplementerAndFixRounds: (slug: string, rootDir?: string) => { implementer: string; prFixRounds: number; source: string };
+  upsertStatsRow: (row: Record<string, string>, options: { filePath: string; rootDir?: string }) => { changed: boolean };
+}
+
+function getStats(): StatsAugmented {
+  return stats as unknown as StatsAugmented;
+}
+
+function hasCheckpointFiles(missionDir: string) {
   if (!missionDir || !fs.existsSync(missionDir)) {return false;}
   return fs.readdirSync(missionDir).some(file => /^CP-\d+\.md$/i.test(file) || /^CHECKPOINT_FINAL\.md$/i.test(file));
 }
@@ -36,14 +49,12 @@ function listHistoricalMissionSlugs(rootDir = process.cwd()) {
   return slugs;
 }
 
-/** @param {*} value */
-function extractDateOnly(value) {
+function extractDateOnly(value: unknown) {
   const match = String(value || '').match(/^(\d{4}-\d{2}-\d{2})/);
   return match ? match[1] : null;
 }
 
-/** @param {*} value */
-function normalizeHistoricalImplementer(value) {
+function normalizeHistoricalImplementer(value: unknown) {
   const normalized = String(value || '').trim().toLowerCase();
   if (!normalized) {return null;}
   if (/(^|[^a-z])codex([^a-z]|$)/.test(normalized)) {return 'codex';}
@@ -56,15 +67,15 @@ function normalizeHistoricalImplementer(value) {
   return null;
 }
 
-function deriveImplementerFromGitHistory(/** @type {string} */ slug, /** @type {string} */ taskFile, rootDir = process.cwd()) {
+function deriveImplementerFromGitHistory(slug: string, taskFile: string, rootDir = process.cwd()) {
   const missionDir = findMissionDir(slug, rootDir);
-  const targets = [missionDir, taskFile].filter(Boolean);
+  const targets: string[] = [missionDir, taskFile].filter((x): x is string => Boolean(x));
   if (targets.length === 0) {return null;}
 
-  const result = gitLib.git(['-C', rootDir, 'log', '--all', '--format=%an|%ae', '--', ...(/** @type {string[]} */ (targets))]);
+  const result = git(['-C', rootDir, 'log', '--all', '--format=%an|%ae', '--', ...targets]);
   if (result.status !== 0) {return null;}
 
-  const authors = result.stdout
+  const authors: string[] = result.stdout
     .split('\n')
     .map(line => line.trim())
     .filter(Boolean)
@@ -72,24 +83,24 @@ function deriveImplementerFromGitHistory(/** @type {string} */ slug, /** @type {
       const [name = '', email = ''] = line.split('|');
       return normalizeHistoricalImplementer(email) || normalizeHistoricalImplementer(name);
     })
-    .filter(Boolean);
+    .filter(Boolean) as string[];
 
   if (authors.length === 0) {return null;}
   const uniqueAuthors = [...new Set(authors)];
   return uniqueAuthors.length === 1 ? uniqueAuthors[0] : uniqueAuthors[0];
 }
 
-function deriveDateFromGitHistory(/** @type {string} */ slug, /** @type {string} */ taskFile, rootDir = process.cwd()) {
+function deriveDateFromGitHistory(slug: string, taskFile: string, rootDir = process.cwd()) {
   const missionDir = findMissionDir(slug, rootDir);
-  const targets = [missionDir, taskFile].filter(Boolean);
+  const targets: string[] = [missionDir, taskFile].filter((x): x is string => Boolean(x));
   if (targets.length === 0) {return null;}
 
-  const result = gitLib.git(['-C', rootDir, 'log', '--all', '-1', '--format=%cs', '--', ...(/** @type {string[]} */ (targets))]);
+  const result = git(['-C', rootDir, 'log', '--all', '-1', '--format=%cs', '--', ...targets]);
   if (result.status !== 0) {return null;}
   return extractDateOnly(result.stdout.trim());
 }
 
-function inferHistoricalClassificationFromMissionDoc(/** @type {string} */ slug, rootDir = process.cwd()) {
+function inferHistoricalClassificationFromMissionDoc(slug: string, rootDir = process.cwd()) {
   const missionDir = findMissionDir(slug, rootDir);
   if (!missionDir) {return null;}
 
@@ -137,7 +148,7 @@ function inferHistoricalClassificationFromMissionDoc(/** @type {string} */ slug,
     /\bverification\b/g,
   ];
 
-  const score = (/** @type {RegExp[]} */ patterns) => patterns.reduce((/** @type {number} */ sum, /** @type {RegExp} */ pattern) => sum + ((text.match(pattern) || []).length), 0);
+  const score = (patterns: RegExp[]) => patterns.reduce((sum: number, pattern: RegExp) => sum + ((text.match(pattern) || []).length), 0);
   const productScore = score(productSurfacePatterns);
   const workflowScore = score(workflowPatterns);
 
@@ -156,14 +167,15 @@ function inferHistoricalClassificationFromMissionDoc(/** @type {string} */ slug,
   return null;
 }
 
-/** @param {string} slug @param {string} taskFile @param {string} [rootDir] */
-function resolveHistoricalClassification(slug, taskFile, rootDir = process.cwd()) {
-  const resolution = stats.resolveMissionClassification(slug, rootDir);
+function resolveHistoricalClassification(slug: string, taskFile: string, rootDir = process.cwd()) {
+  const s = getStats();
+  const resolution = s.resolveMissionClassification(slug, rootDir);
   if (resolution.classification) {
     return { value: resolution.classification, source: 'backlog-label' };
   }
   // Classification missing or invalid — fall through to fallbacks.
-  const legacy = stats._internals.normalizeClassification(getTaskFrontmatterValue(taskFile, 'classification'));
+  const classificationValue = getTaskFrontmatterValue(taskFile, 'classification');
+  const legacy = (s._internals as Record<string, (v: string) => string | null>).normalizeClassification(classificationValue ?? '');
   if (legacy) {
     return { value: legacy, source: 'backlog-classification' };
   }
@@ -174,14 +186,14 @@ function resolveHistoricalClassification(slug, taskFile, rootDir = process.cwd()
   return { value: null, source: null };
 }
 
-/** @param {string} [rootDir] @param {string|null} [filePath] */
-function collectHistoricalStatsBackfill(rootDir = process.cwd(), filePath = null) {
-  filePath = filePath || stats.resolveStatsPath();
-  const repoName = stats.resolveStatsRepoName(rootDir);
+function collectHistoricalStatsBackfill(rootDir = process.cwd(), filePath: string | null = null) {
+  const s = getStats();
+  filePath = filePath || s.resolveStatsPath();
+  const repoName = s.resolveStatsRepoName(rootDir);
   const existingMissions = new Set(
-    stats.loadStatsCsv(filePath, { rootDir }).rows
-      .filter(row => String(row.repo || '').trim() === repoName)
-      .map(row => row.mission)
+    s.loadStatsCsv(filePath, { rootDir }).rows
+      .filter((row: Record<string, string>) => String(row.repo || '').trim() === repoName)
+      .map((row: Record<string, string>) => row.mission)
   );
   const rows = [];
   const unresolved = [];
@@ -200,22 +212,22 @@ function collectHistoricalStatsBackfill(rootDir = process.cwd(), filePath = null
       continue;
     }
 
-    const taskFile = /** @type {string} */ (taskResolution.taskFile);
+    const taskFile = taskResolution.taskFile!;
     const status = getTaskStatus(taskFile);
     if (status !== 'done') {
       skipped.push({ slug, reason: `status=${status || 'unknown'}` });
       continue;
     }
 
-    const date = extractDateOnly(getTaskFrontmatterValue(taskFile, 'updated_date')) || deriveDateFromGitHistory(slug, taskFile, rootDir);
+    const date = extractDateOnly(getTaskFrontmatterValue(taskFile, 'updated_date') ?? '') || deriveDateFromGitHistory(slug, taskFile, rootDir);
     const classification = resolveHistoricalClassification(slug, taskFile, rootDir);
 
-    let implementerInfo = null;
-    let implementerError = null;
+    let implementerInfo: { implementer: string; prFixRounds: number; source: string } | null = null;
+    let implementerError: string | null = null;
     try {
-      implementerInfo = stats.deriveImplementerAndFixRounds(slug, rootDir);
-    } catch (/** @type {unknown} */ error) {
-      implementerError = /** @type{Error} */(error).message;
+      implementerInfo = s.deriveImplementerAndFixRounds(slug, rootDir);
+    } catch (error) {
+      implementerError = error instanceof Error ? error.message : String(error);
     }
 
     if (!implementerInfo?.implementer || implementerInfo.implementer === 'unknown') {
@@ -273,8 +285,7 @@ function collectHistoricalStatsBackfill(rootDir = process.cwd(), filePath = null
   return { rows, unresolved, skipped };
 }
 
-/** @param {{rows: any[], unresolved: any[], skipped: any[]}} report */
-function renderBackfillSummary(report) {
+function renderBackfillSummary(report: { rows: any[]; unresolved: any[]; skipped: any[] }) {
   const lines = [];
   lines.push(`Resolved rows: ${report.rows.length}`);
   lines.push(`Unresolved missions: ${report.unresolved.length}`);
@@ -309,12 +320,12 @@ function renderBackfillSummary(report) {
   return lines.join('\n');
 }
 
-/** @param {any[]} rows @param {string|null} [filePath] @param {string} [rootDir] */
-function applyBackfillRows(rows, filePath = null, rootDir = process.cwd()) {
-  filePath = filePath || stats.resolveStatsPath({ ensureDir: true });
+function applyBackfillRows(rows: any[], filePath: string | null = null, rootDir = process.cwd()) {
+  const s = getStats();
+  filePath = filePath || s.resolveStatsPath({ ensureDir: true });
   let changed = 0;
   for (const row of rows) {
-    const result = stats.upsertStatsRow(row, { filePath, rootDir });
+    const result = s.upsertStatsRow(row, { filePath, rootDir });
     if (result.changed) {changed += 1;}
   }
   return changed;
@@ -335,9 +346,13 @@ Notes:
   - Non-done missions are skipped and unresolved missions are reported without being written.`);
 }
 
-/** @param {string[]} args @param {{log?: Function, error?: Function, rootDir?: string}} options */
-function statsBackfill(args, options = {}) {
-  /** @type{{log?: Function, error?: Function, rootDir?: string}} */
+interface BackfillOptions {
+  log?: (msg: string) => string | null;
+  error?: (msg: string) => string | null;
+  rootDir?: string;
+}
+
+function statsBackfill(args: string[], options: BackfillOptions = {}) {
   const opts = options;
   const log = opts.log || fmt.log.plain;
   const error = opts.error || fmt.log.plainError;
@@ -367,7 +382,8 @@ function statsBackfill(args, options = {}) {
       i += 1;
     }
   }
-  filePath = filePath || stats.resolveStatsPath({ ensureDir: apply });
+  const s = getStats();
+  filePath = filePath || s.resolveStatsPath({ ensureDir: apply });
 
     const report = collectHistoricalStatsBackfill(rootDir, filePath);
     const changed = apply ? applyBackfillRows(report.rows, filePath, rootDir) : 0;
@@ -396,7 +412,7 @@ function statsBackfill(args, options = {}) {
   }
 }
 
-module.exports = statsBackfill;
-module.exports.collectHistoricalStatsBackfill = collectHistoricalStatsBackfill;
-module.exports.inferHistoricalClassificationFromMissionDoc = inferHistoricalClassificationFromMissionDoc;
-module.exports.extractDateOnly = extractDateOnly;
+(statsBackfill as any).collectHistoricalStatsBackfill = collectHistoricalStatsBackfill;
+(statsBackfill as any).inferHistoricalClassificationFromMissionDoc = inferHistoricalClassificationFromMissionDoc;
+(statsBackfill as any).extractDateOnly = extractDateOnly;
+export = statsBackfill;

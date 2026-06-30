@@ -1,19 +1,25 @@
 #!/usr/bin/env node
 
-const fmt = require('../core/fmt');
-const { loadEffectiveConfig, loadWorkflowConfig, validateWorkflowConfig } = require('../core/product-config');
+import * as fmt from '../core/fmt.js';
+import { loadEffectiveConfig, loadWorkflowConfig, validateWorkflowConfig } from '../core/product-config.js';
+
+interface ConfigOptions {
+  logFn?: (msg: string) => void;
+  errorFn?: (msg: string) => void;
+  exitFn?: (code: number) => void;
+  rootDir?: string;
+}
 
 // `node parallix config` — read-only. Prints the effective configuration:
 // code-owned defaults merged with the optional workflow.config.json override.
 // This replaces the deleted workflow.config.json.example as the way to discover
 // the configurable surface, with no copy-paste footgun and no second source of
 // truth to drift from (task-1233 Scope Amendment).
-/** @param {string[]} _args @param {{logFn?: Function, errorFn?: Function, exitFn?: Function, rootDir?: string}} opts */
-async function config(_args = [], opts = {}) {
+async function config(_args: string[] = [], opts: ConfigOptions = {}) {
   void _args; // intentionally unused — part of public API signature
   const logFn = opts.logFn || fmt.log.plain;
   const errorFn = opts.errorFn || fmt.log.plainError;
-  const exitFn = opts.exitFn || /** @type{(code: number) => void} */ ((code) => { process.exitCode = code; });
+  const exitFn = opts.exitFn || ((code: number) => { process.exitCode = code; });
   const rootDir = opts.rootDir || process.cwd();
 
   const loaded = loadWorkflowConfig(rootDir);
@@ -38,4 +44,4 @@ async function config(_args = [], opts = {}) {
   logFn(JSON.stringify(loadEffectiveConfig(rootDir), null, 2));
 }
 
-module.exports = config;
+export = config;

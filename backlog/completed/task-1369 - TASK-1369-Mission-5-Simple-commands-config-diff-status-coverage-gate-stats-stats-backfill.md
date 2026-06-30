@@ -3,11 +3,12 @@ id: TASK-1369
 title: >-
   TASK-1369: Mission 5 - Simple commands (config, diff, status, coverage-gate,
   stats, stats-backfill)
-status: backlog
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-06-27 10:37'
 updated_date: '2026-06-27 10:38'
-labels: []
+labels:
+  - ai_sdlc
 dependencies:
   - TASK-1366
   - TASK-1367

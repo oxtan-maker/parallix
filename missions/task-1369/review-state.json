@@ -1,0 +1,19 @@
+{
+  "reviewer": "claude",
+  "implementer": "custom",
+  "round": 2,
+  "startedAt": "2026-06-30T02:42:00.062Z",
+  "phase": "approved",
+  "disposition": "APPROVED",
+  "metadata": {
+    "recordedStageLaunches": {
+      "review:claude": [
+        "claude|c5be76a8-f70c-49bd-8e8b-9d6cec3f83de|2026-06-30T02:27:59.816Z|2026-06-30T02:32:17.551Z|0",
+        "claude|c5be76a8-f70c-49bd-8e8b-9d6cec3f83de|2026-06-30T02:42:00.475Z|2026-06-30T02:46:25.362Z|0"
+      ],
+      "follow-up:custom": [
+        "custom|ses_0eb34fdf3ffelDwEr84MEn8Z1y|2026-06-30T02:32:19.403Z|2026-06-30T02:41:58.602Z|0"
+      ]
+    }
+  }
+}

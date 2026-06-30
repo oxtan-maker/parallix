@@ -10,7 +10,6 @@ import * as fmt from '../core/fmt.js';
 
 import { buildAutonomousReviewMatrix, formatMatrixSummary } from '../core/runtime-matrix.js';
 import { findMissionDir, resolveWorktree, findMissionArea, missionTitle, parseConflictFilesFromMergeOutput, getConflictFiles, inferSlug, updateGraphifyKnowledgeGraph, getPrimaryWorktree, getPrimaryBranch, conventionalWorktreePath, softResetTrailingBacklogNoise, findMissionDocInBranches, missionBranchName, missionDirForSlug, isMissionArtifact, resolveMissionBaseBranch, resolveBaseWorktree } from '../core/mission-utils.js';
-// @ts-expect-error stats.js is still CJS, no declarations available
 import stats from './stats.js';
 import * as verification from '../core/verification.js';
 const { formatVerificationCommand } = verification;
@@ -638,7 +637,7 @@ async function integrate(args: string[]) {
       if (fs.existsSync(baseWorktree)) {
         nextActionMessage = `Next: cd ${baseWorktree}`;
       }
-      recordPostIntegrationStatsOrAbort(slug, { rootDir: baseWorktree });
+      (recordPostIntegrationStatsOrAbort as any)(slug, { rootDir: baseWorktree });
       if (!cleanupMissionWorktree(slug)) {
         fmt.log.fail('Mission worktree cleanup failed for Variant A.');
         throw new IntegrationAbort();
@@ -680,7 +679,7 @@ async function integrate(args: string[]) {
           if (fs.existsSync(baseWorktree)) {
             nextActionMessage = `Next: cd ${baseWorktree}`;
           }
-          recordPostIntegrationStatsOrAbort(slug, { rootDir: baseWorktree });
+          (recordPostIntegrationStatsOrAbort as any)(slug, { rootDir: baseWorktree });
           fmt.log.info('Step 7 (resume): Cleaning up the local mission worktree...');
           if (!cleanupMissionWorktree(slug)) {
             fmt.log.fail('Mission worktree cleanup failed.');
@@ -800,7 +799,7 @@ async function integrate(args: string[]) {
         if (fs.existsSync(baseWorktree)) {
           nextActionMessage = `Next: cd ${baseWorktree}`;
         }
-        recordPostIntegrationStatsOrAbort(slug, { rootDir: baseWorktree });
+        (recordPostIntegrationStatsOrAbort as any)(slug, { rootDir: baseWorktree });
         fmt.log.info('Step 7: Cleaning up the local mission worktree...');
         if (!cleanupMissionWorktree(slug)) {
           fmt.log.fail('Mission worktree cleanup failed.');
@@ -1081,7 +1080,7 @@ function printIntegrationPreflight(
     log(fmt.status('PASS', `Backlog task: ${path.basename(/** @type {string} */ (context.task.taskFile))} (${context.taskStatus})`));
     
     try {
-      const { classification, error: classificationError } = stats.resolveMissionClassification(context.slug);
+      const { classification, error: classificationError } = (stats as any).resolveMissionClassification(context.slug);
       if (!classification) {
         failures.push('classification');
         log(fmt.status('FAIL', `Backlog classification: ${classificationError || 'missing'}`));
@@ -1320,7 +1319,7 @@ function recordPostIntegrationStats(
   {
     rootDir = getPrimaryWorktree(),
     gitRunner = git,
-    recordIntegrationStatsFn = stats.recordIntegrationStats,
+    recordIntegrationStatsFn = (stats as any).recordIntegrationStats,
   } = {}
 ) {
   const dateResult = gitRunner(['-C', rootDir, 'log', '-1', '--format=%cs']);
@@ -1328,7 +1327,7 @@ function recordPostIntegrationStats(
     throw new Error(`Could not determine integration date for ${slug}.`);
   }
 
-  const statsCsvPath = stats.resolveStatsFilePath(rootDir);
+  const statsCsvPath = (stats as any).resolveStatsFilePath(rootDir);
 
   const outcome = recordIntegrationStatsFn({
     slug,
@@ -1342,7 +1341,7 @@ function recordPostIntegrationStats(
   fmt.log.plain(outcome.report);
 
   const missionRows = outcome.data?.rows || [];
-  const missionReport = stats.renderMissionPhaseReport(missionRows, slug);
+  const missionReport = (stats as any).renderMissionPhaseReport(missionRows, slug);
   const firstLine = missionReport.split('\n')[0];
   fmt.log.info(firstLine);
   fmt.log.plain(missionReport.split('\n').slice(1).join('\n'));

@@ -1,16 +1,16 @@
-const { detectRebaseState, getCurrentBranch, getUncommittedCount, getLastThreeCommits, run } = require('../core/git');
-const { findTaskFile, getTaskStatus } = require('../tools/backlog');
-const { findMissionDir, findCheckpoints, getFirstLine, inferSlug, missionBranchPrefix, missionBranchName } = require('../core/mission-utils');
-const { WORKFLOW_AGENT_NAMES, eligibleAgentsForStep, readAgentConfigOrExit, workflowLauncherStatus } = require('../agents/agents');
-const { getPrStatus } = require('../tools/forgejo');
-const path = require('path');
-const fmt = require('../core/fmt');
+import { detectRebaseState, getCurrentBranch, getUncommittedCount, getLastThreeCommits, run } from '../core/git.js';
+import { findTaskFile, getTaskStatus } from '../tools/backlog.js';
+import { findMissionDir, findCheckpoints, getFirstLine, inferSlug, missionBranchPrefix, missionBranchName, getPrimaryWorktree } from '../core/mission-utils.js';
+import { WORKFLOW_AGENT_NAMES, eligibleAgentsForStep, readAgentConfigOrExit, workflowLauncherStatus } from '../agents/agents.js';
+import { getPrStatus } from '../tools/forgejo.js';
+import * as path from 'node:path';
+import * as fmt from '../core/fmt.js';
 
 /** @param {string} porcelain */
-function parseWorktreeList(porcelain) {
+function parseWorktreeList(porcelain: string) {
   const entries = [];
   /** @type{{path: string, branch: string | null} | null} */
-  let current = null;
+  let current: { path: string; branch: string | null } | null = null;
 
   for (const line of porcelain.split('\n')) {
     if (!line.trim()) {
@@ -28,7 +28,7 @@ function parseWorktreeList(porcelain) {
     }
 
     if (line.startsWith('branch ') && current) {
-      current.branch = line.slice('branch '.length).trim();
+      current.branch = line.slice('branch '.length).trim() as string;
     }
   }
 
@@ -48,10 +48,9 @@ function findStaleMissionWorktrees({
   }
 
   /** @type {string | null} */
-  let resolvedPrimary = primaryWorktree;
+  let resolvedPrimary: string | null = primaryWorktree;
   if (!resolvedPrimary) {
     try {
-      const { getPrimaryWorktree } = require('../core/mission-utils');
       resolvedPrimary = getPrimaryWorktree();
     } catch (_) {
       resolvedPrimary = null;
@@ -90,13 +89,13 @@ function findStaleMissionWorktrees({
 }
 
 /** @param {string} ref */
-function formatWorktreeBranch(ref) {
+function formatWorktreeBranch(ref: string) {
   if (!ref) {return '(detached HEAD)';}
   return ref.replace(/^refs\/heads\//, '');
 }
 
 /** @param {Function} log @param {string} label @param {{detached?: boolean, unmergedFiles: string[]}} rebaseState */
-function logRebaseDiagnostics(log, label, rebaseState) {
+function logRebaseDiagnostics(log: Function, label: string, rebaseState: {detached?: boolean, unmergedFiles: string[]}) {
   const detachedText = rebaseState.detached ? 'detached HEAD, ' : '';
   log(`${label}: ${detachedText}${rebaseState.unmergedFiles.length} unmerged file(s)`);
   rebaseState.unmergedFiles.forEach(file => {
@@ -105,7 +104,7 @@ function logRebaseDiagnostics(log, label, rebaseState) {
 }
 
 /** @param {string[]} args @param {{exit?: Function, log?: Function, inferSlugFn?: Function, getCurrentBranchFn?: Function, findTaskFileFn?: Function, getTaskStatusFn?: Function, findMissionDirFn?: Function, findCheckpointsFn?: Function, getFirstLineFn?: Function, getPrStatusFn?: Function, findStaleMissionWorktreesFn?: Function, readAgentConfigOrExitFn?: Function, eligibleAgentsForStepFn?: Function, allWorkflowAgentNamesFn?: Function, workflowLauncherStatusFn?: Function, getLastThreeCommitsFn?: Function, getUncommittedCountFn?: Function, detectRebaseStateFn?: Function}} opts */
-function status(args, opts = {}) {
+function status(args: string[], opts: {exit?: Function, log?: Function, inferSlugFn?: Function, getCurrentBranchFn?: Function, findTaskFileFn?: Function, getTaskStatusFn?: Function, findMissionDirFn?: Function, findCheckpointsFn?: Function, getFirstLineFn?: Function, getPrStatusFn?: Function, findStaleMissionWorktreesFn?: Function, readAgentConfigOrExitFn?: Function, eligibleAgentsForStepFn?: Function, allWorkflowAgentNamesFn?: Function, workflowLauncherStatusFn?: Function, getLastThreeCommitsFn?: Function, getUncommittedCountFn?: Function, detectRebaseStateFn?: Function}) {
   const exit = opts.exit || process.exit;
   const log = opts.log || fmt.log.plain;
   const inferSlugFn = opts.inferSlugFn || inferSlug;
@@ -173,7 +172,7 @@ function status(args, opts = {}) {
 
   if (!explicitSlug) {
     const staleWorktrees = findStaleMissionWorktreesFn();
-    staleWorktrees.forEach(/** @param {{path: string, branch: string | null, taskStatus: string | null, cleanupCommand?: string}} entry */ (entry) => {
+    staleWorktrees.forEach((entry: { path: string; branch: string | null; taskStatus: string | null; cleanupCommand?: string }) => {
       log(`Stale worktree: ${fmt.path(entry.path)} (task: ${entry.taskStatus})`);
       try {
         const rebaseState = detectRebaseStateFn(entry.path);
@@ -208,13 +207,13 @@ function status(args, opts = {}) {
 
   const lastThree = getLastThreeCommitsFn();
   log('Last 3 commits:');
-  lastThree.forEach(/** @param {string} c */ (c) => log(`  - ${c}`));
+  lastThree.forEach((c: string) => log(`  - ${c}`));
 
   log(`Uncommitted files: ${getUncommittedCountFn()}`);
   log(fmt.bold('----------------------'));
   exit(0);
 }
 
-module.exports = status;
-module.exports.parseWorktreeList = parseWorktreeList;
-module.exports.findStaleMissionWorktrees = findStaleMissionWorktrees;
+(status as any).parseWorktreeList = parseWorktreeList;
+(status as any).findStaleMissionWorktrees = findStaleMissionWorktrees;
+export = status;

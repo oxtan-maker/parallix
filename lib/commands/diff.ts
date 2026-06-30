@@ -1,11 +1,11 @@
-const childProcess = require('child_process');
-const path = require('path');
-const { git } = require('../core/git');
-const { getPrimaryBranch, missionBranchName, inferSlug, resolveWorktree } = require('../core/mission-utils');
-const fmt = require('../core/fmt');
+import childProcess from 'node:child_process';
+import path from 'node:path';
+import { git } from '../core/git.js';
+import { getPrimaryBranch, missionBranchName, inferSlug, resolveWorktree } from '../core/mission-utils.js';
+import * as fmt from '../core/fmt.js';
 
 /** @param {string[]} args @param {{gitFn?: Function, spawnSyncFn?: Function, getPrimaryBranchFn?: Function, missionBranchNameFn?: Function, inferSlugFn?: Function, resolveWorktreeFn?: Function, exitFn?: Function, failFn?: Function}} opts */
-async function diff(args, {
+async function diff(args: any, {
   gitFn = git,
   spawnSyncFn = childProcess.spawnSync,
   getPrimaryBranchFn = getPrimaryBranch,
@@ -16,7 +16,7 @@ async function diff(args, {
   failFn = fmt.log.fail,
 } = {}) {
   /** @param {string} a */
-  const explicitSlug = args.filter(a => !a.startsWith('--'))[0];
+  const explicitSlug = args.filter((a: string) => !a.startsWith('--'))[0];
   const slug = inferSlugFn(explicitSlug);
 
   if (!slug) {
@@ -36,7 +36,7 @@ async function diff(args, {
   try {
     primary = getPrimaryBranchFn(worktree);
   } catch (err) {
-    failFn(/** @type{Error} */(err).message);
+    failFn((err as Error).message);
     exitFn(1);
     return;
   }
@@ -46,18 +46,18 @@ async function diff(args, {
 
   // Detect configured diff tool/pager
   /** @param {string} key */
-  const getGitConfig = (key) => {
+  const getGitConfig = (key: string) => {
     const result = gitFn(['-C', worktree, 'config', '--get', key]);
     return result.status === 0 ? result.stdout.trim() : null;
   };
 
   /** @param {string} cmd */
-  const isSpecializedTool = (cmd) => {
+  const isSpecializedTool = (cmd: string) => {
     if (!cmd) {return false;}
     const parts = cmd.split(/\s+/);
     // Handle cases like "LESS=FRX less" or "/usr/bin/delta"
     /** @param {string} p */
-    const exePart = parts.find(p => !p.includes('='));
+    const exePart = parts.find((p: string) => !p.includes('='));
     if (!exePart) {return false;}
     const exe = path.basename(exePart).toLowerCase();
     
@@ -73,7 +73,7 @@ async function diff(args, {
   };
 
   /** @param {childProcess.SpawnSyncReturns<string>} result @param {string} toolName */
-  const handleLaunchResult = (result, toolName) => {
+  const handleLaunchResult = (result: any, toolName: string) => {
     if (result.error) {
       failFn(`Failed to launch ${toolName}: ${result.error.message}`);
       exitFn(1);
@@ -101,16 +101,16 @@ async function diff(args, {
   }
 
   const pagerDiff = getGitConfig('pager.diff');
-  if (isSpecializedTool(pagerDiff)) {
-    fmt.log.info(`Launching ${fmt.command('git diff')} for ${fmt.branch(branch)} (pager: ${fmt.bold(pagerDiff)})...`);
+  if (isSpecializedTool(pagerDiff || '')) {
+    fmt.log.info(`Launching ${fmt.command('git diff')} for ${fmt.branch(branch)} (pager: ${fmt.bold(pagerDiff || "")})...`);
     const result = spawnSyncFn('git', ['diff', target], { cwd: worktree, stdio: 'inherit' });
     handleLaunchResult(result, 'git diff');
     return;
   }
 
   const corePager = getGitConfig('core.pager');
-  if (isSpecializedTool(corePager)) {
-    fmt.log.info(`Launching ${fmt.command('git diff')} for ${fmt.branch(branch)} (core.pager: ${fmt.bold(corePager)})...`);
+  if (isSpecializedTool(corePager || '')) {
+    fmt.log.info(`Launching ${fmt.command('git diff')} for ${fmt.branch(branch)} (core.pager: ${fmt.bold(corePager || "")})...`);
     const result = spawnSyncFn('git', ['diff', target], { cwd: worktree, stdio: 'inherit' });
     handleLaunchResult(result, 'git diff');
     return;
@@ -122,4 +122,4 @@ async function diff(args, {
   exitFn(1);
 }
 
-module.exports = diff;
+export = diff;

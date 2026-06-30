@@ -48,11 +48,11 @@
  * handlers (lines 131-141) that remove only tracked dirs. No blanket rm -rf.
  */
 
-const { spawnSync } = require('child_process');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const fmt = require('../core/fmt');
+import { spawnSync } from 'node:child_process';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import * as fmt from '../core/fmt.js';
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 const SELF_TEST_FILE = 'coverage-gate.test.js';
@@ -89,8 +89,7 @@ const COVERAGE_EXCLUDES = [
 // under cold caches. Keep the gate generous so it can finish without a manual
 // override while still failing on real hangs.
 const DEFAULT_TEST_TIMEOUT_MS = 3_600_000;
-/** @type {string[]} */
-const PER_RUN_SCRATCH = [];
+const PER_RUN_SCRATCH: string[] = [];
 let threshold = 90;
 let dryRun = false;
 let lcov = false;
@@ -117,18 +116,16 @@ function discoverTestFiles() {
     .sort();
 }
 
-function listTempEntries(tmpRoot = os.tmpdir()) {
-  if (!fs.existsSync(tmpRoot)) {return new Set();}
+function listTempEntries(tmpRoot: string = os.tmpdir()) {
+  if (!fs.existsSync(tmpRoot)) {return new Set<string>();}
   return new Set(fs.readdirSync(tmpRoot));
 }
 
-/** @param {string} name */
-function shouldCleanTempDir(name) {
+function shouldCleanTempDir(name: string) {
   return TEMP_DIR_PREFIXES.some(prefix => name.startsWith(prefix));
 }
 
-/** @param {Set<string>} beforeEntries @param {string} tmpRoot */
-function cleanupNewTempDirs(beforeEntries, tmpRoot = os.tmpdir()) {
+function cleanupNewTempDirs(beforeEntries: Set<string>, tmpRoot: string = os.tmpdir()) {
   if (!fs.existsSync(tmpRoot)) {return;}
   for (const name of fs.readdirSync(tmpRoot)) {
     if (beforeEntries.has(name) || !shouldCleanTempDir(name)) {continue;}
@@ -211,8 +208,7 @@ function resetPerRunScratchState() {
   cleanupDone = false;
 }
 
-/** @param {string[]} testFiles @param {number} coverageThreshold @param {boolean} useLcov */
-function buildCoverageArgs(testFiles, coverageThreshold = threshold, useLcov = lcov) {
+function buildCoverageArgs(testFiles: string[], coverageThreshold = threshold, useLcov = lcov) {
   const args = [
     '--test',
     '--experimental-test-coverage',
@@ -243,8 +239,7 @@ function resolveTestTimeoutMs(env = process.env) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_TEST_TIMEOUT_MS;
 }
 
-/** @param {string[]} testFiles @param {number} coverageThreshold @param {Function} _spawnSync */
-function runTests(testFiles, coverageThreshold = threshold, _spawnSync = spawnSync) {
+function runTests(testFiles: string[], coverageThreshold = threshold, _spawnSync = spawnSync) {
   const tmpRoot = createPerRunTmpRoot();
   const tmpEntriesBefore = listTempEntries(tmpRoot);
   const nodeCoverageDir = createPerRunScratchDirs();
@@ -301,13 +296,15 @@ function main() {
   process.exit(runTests(testFiles, threshold));
 }
 
-if (require.main === module) {
+if (typeof require !== 'undefined' && require.main === module) {
   main();
 }
 
-/** @param {string[]} args @param {{exitFn?: Function}} options */
-function run(args, options = {}) {
-  /** @type{Function} */
+interface CoverageGateOptions {
+  exitFn?: (code: number) => void;
+}
+
+function run(args: string[], options: CoverageGateOptions = {}) {
   const exitFn = options.exitFn || process.exit;
   let threshold_ = 90;
   let dryRun_ = false;
@@ -348,18 +345,18 @@ function run(args, options = {}) {
   }
 }
 
-module.exports = run;
-module.exports.buildCoverageArgs = buildCoverageArgs;
-module.exports.cleanupNewTempDirs = cleanupNewTempDirs;
-module.exports.cleanupPerRunScratch = cleanupPerRunScratch;
-module.exports.createPerRunScratchDirs = createPerRunScratchDirs;
-module.exports.COVERAGE_EXCLUDES = COVERAGE_EXCLUDES;
-module.exports.COVERAGE_INCLUDES = COVERAGE_INCLUDES;
-module.exports.DEFAULT_TEST_TIMEOUT_MS = DEFAULT_TEST_TIMEOUT_MS;
-module.exports.discoverTestFiles = discoverTestFiles;
-module.exports.listTempEntries = listTempEntries;
-module.exports.registerExitHandlers = registerExitHandlers;
-module.exports.resetPerRunScratchState = resetPerRunScratchState;
-module.exports.resolveTestTimeoutMs = resolveTestTimeoutMs;
-module.exports.runTests = runTests;
-module.exports.shouldCleanTempDir = shouldCleanTempDir;
+(run as any).buildCoverageArgs = buildCoverageArgs;
+(run as any).cleanupNewTempDirs = cleanupNewTempDirs;
+(run as any).cleanupPerRunScratch = cleanupPerRunScratch;
+(run as any).createPerRunScratchDirs = createPerRunScratchDirs;
+(run as any).COVERAGE_EXCLUDES = COVERAGE_EXCLUDES;
+(run as any).COVERAGE_INCLUDES = COVERAGE_INCLUDES;
+(run as any).DEFAULT_TEST_TIMEOUT_MS = DEFAULT_TEST_TIMEOUT_MS;
+(run as any).discoverTestFiles = discoverTestFiles;
+(run as any).listTempEntries = listTempEntries;
+(run as any).registerExitHandlers = registerExitHandlers;
+(run as any).resetPerRunScratchState = resetPerRunScratchState;
+(run as any).resolveTestTimeoutMs = resolveTestTimeoutMs;
+(run as any).runTests = runTests;
+(run as any).shouldCleanTempDir = shouldCleanTempDir;
+export = run;

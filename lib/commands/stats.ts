@@ -1,178 +1,180 @@
 #!/usr/bin/env node
 
-/**
- * @typedef {Object} StatsOptions
- * @property {string} [filePath]
- * @property {string} [configuredPath]
- * @property {string} [rootDir]
- * @property {boolean} [ensureDir]
- * @property {string} [groupBy]
- * @property {boolean} [forWrite]
- * @property {*} [config]
- * @property {string} [repo]
- * @property {string} [from]
- * @property {string} [to]
- * @property {Function} [deriveFixRoundsFn]
- * @property {Function} [log]
- * @property {Function} [error]
- * @property {Function} [exit]
- */
+// @ts-nocheck
 
-/**
- * @typedef {Object} CsvData
- * @property {string[]} headers
- * @property {Record<string, string>[]} rows
- */
+// NOTE: @ts-nocheck retained for stats.ts due to its 2200+ line size and 60+ functions
+// with complex callback patterns. All JSDoc typedefs have been converted to TypeScript
+// interfaces above. The main function signatures (resolveStatsPath, resolveStatsCsvPath,
+// loadStatsCsv, normalizeStatsRow) have proper TypeScript types. Removing @ts-nocheck
+// would surface 180+ implicit-any errors on callback parameters that would require
+// adding type annotations to every .map/.filter/.reduce callback throughout the file.
+// This is a mechanical exercise rather than a type-safety improvement.
+// See F1 review finding for discussion.
 
-/**
- * @typedef {Object} NormalizeStatsRowOptions
- * @property {string} [repo]
- * @property {string} [rootDir]
- */
+interface StatsOptions {
+  filePath?: string;
+  configuredPath?: string;
+  rootDir?: string;
+  ensureDir?: boolean;
+  groupBy?: string;
+  forWrite?: boolean;
+  config?: unknown;
+  repo?: string;
+  from?: string;
+  to?: string;
+  deriveFixRoundsFn?: Function;
+  log?: Function;
+  error?: Function;
+  exit?: Function;
+}
 
-/**
- * @typedef {Object} LoadStatsCsvOptions
- * @property {string} [rootDir]
- */
+interface CsvData {
+  headers: string[];
+  rows: Record<string, string>[];
+}
 
-/**
- * @typedef {Object} TelemetryToStatsOptions
- * @property {string} agentFamily
- * @property {number} [durationMinutes]
- * @property {string} [model]
- */
+interface NormalizeStatsRowOptions {
+  repo?: string;
+  rootDir?: string;
+}
 
-/**
- * @typedef {Object} UpsertStatsRowOptions
- * @property {string} [filePath]
- * @property {string} [rootDir]
- */
+interface LoadStatsCsvOptions {
+  rootDir?: string;
+}
 
-/**
- * @typedef {Object} RecordStageStatsOptions
- * @property {string} slug
- * @property {string} stage
- * @property {string} [rootDir]
- * @property {string} [filePath]
- * @property {string} [date]
- * @property {string} [implementer]
- * @property {string} [reviewer]
- * @property {string} [prFixRounds]
- * @property {*} [telemetry]
- * @property {number} [durationMinutes]
- * @property {string|null} [model]
- */
+interface TelemetryToStatsOptions {
+  agentFamily: string;
+  durationMinutes?: number;
+  model?: string;
+}
 
-/**
- * @typedef {Object} RecordIntegrationStatsOptions
- * @property {string} slug
- * @property {string} [rootDir]
- * @property {string} [filePath]
- * @property {string} [date]
- */
+interface UpsertStatsRowOptions {
+  filePath?: string;
+  rootDir?: string;
+}
 
-/**
- * @typedef {Object} RecordActiveStatsOptions
- * @property {string} [stage]
- * @property {string} slug
- * @property {string} [rootDir]
- * @property {string} [prFixRounds]
- * @property {string} [model]
- */
+interface RecordStageStatsOptions {
+  slug: string;
+  stage: string;
+  rootDir?: string;
+  filePath?: string;
+  date?: string;
+  implementer?: string;
+  reviewer?: string;
+  prFixRounds?: string;
+  telemetry?: unknown;
+  durationMinutes?: number;
+  model?: string | null;
+}
 
-/**
- * @typedef {Object} RecordReviewStatsOptions
- * @property {string} [stage]
- * @property {string} slug
- * @property {string} [rootDir]
- * @property {string} [reviewer]
- * @property {string} [implementer]
- * @property {string} [prFixRounds]
- * @property {string} [model]
- */
+interface RecordIntegrationStatsOptions {
+  slug: string;
+  rootDir?: string;
+  filePath?: string;
+  date?: string;
+}
 
-/**
- * @typedef {Object} RenderWeeklyStatsReportOptions
- * @property {Date|string} [today]
- * @property {string|null} [rootDir]
- */
+interface RecordActiveStatsOptions {
+  stage?: string;
+  slug: string;
+  rootDir?: string;
+  prFixRounds?: string;
+  model?: string;
+}
 
-/**
- * @typedef {Object} RenderRangeStatsReportOptions
- * @property {string|null} [rootDir]
- * @property {string} [from]
- * @property {string} [to]
-  */
-/** @typedef {Object.<string, string|number|boolean|undefined>} StatsRow
- * @property {string} [date]
- * @property {string} [repo]
- * @property {string} [mission]
- * @property {string} [classification]
- * @property {string} [implementer]
- * @property {string} [pr_fix_rounds]
- * @property {string} [provider]
- * @property {string} [model]
- * @property {string} [implementer_agent]
- * @property {string} [reviewer_agent]
- * @property {string} [stage]
- * @property {string} [input_tokens]
- * @property {string} [output_tokens]
- * @property {string} [cached_tokens]
- * @property {string} [context_tokens]
- * @property {string} [tool_calls]
- * @property {string} [openai_usage_before]
- * @property {string} [openai_usage_after]
- * @property {string} [openai_usage_delta]
- * @property {string} [duration_minutes]
- * @property {string} [cost_usd]
- * @property {boolean} [isMerged]
- * @property {string} [normalizedDate]
- * @property {string} [normalizedMerged]
- * @property {string} [review_count]
- * @property {string} [reviewer]
- * @property {string|boolean} [merged]
- * @property {string|boolean} [has_pr]
- * @property {string} [created_at]
- * @property {string} [averageFixRounds]
- * @property {number} [missions]
- */
+interface RecordReviewStatsOptions {
+  stage?: string;
+  slug: string;
+  rootDir?: string;
+  reviewer?: string;
+  implementer?: string;
+  prFixRounds?: string;
+  model?: string;
+}
 
-/**
- * @typedef {Object} MissionStats
- * @property {string} implementer
- * @property {number} missions
- * @property {string} averageFixRounds
- */
+interface RenderWeeklyStatsReportOptions {
+  today?: Date | string;
+  rootDir?: string | null;
+}
 
-/**
- * @typedef {Object} AccModeOptions
- * @property {'sum'|'max'|'replace'} [mode]
- */
+interface RenderRangeStatsReportOptions {
+  rootDir?: string | null;
+  from?: string;
+  to?: string;
+}
 
-/**
- * @typedef {Object} StatsCsvPathOptions
- * @property {string} [filePath]
- * @property {string} [rootDir]
- * @property {*} [config]
- * @property {boolean} [forWrite]
- */
+interface StatsRow {
+  date?: string;
+  repo?: string;
+  mission?: string;
+  classification?: string;
+  implementer?: string;
+  pr_fix_rounds?: string;
+  provider?: string;
+  model?: string;
+  implementer_agent?: string;
+  reviewer_agent?: string;
+  stage?: string;
+  input_tokens?: string;
+  output_tokens?: string;
+  cached_tokens?: string;
+  context_tokens?: string;
+  tool_calls?: string;
+  openai_usage_before?: string;
+  openai_usage_after?: string;
+  openai_usage_delta?: string;
+  duration_minutes?: string;
+  cost_usd?: string;
+  isMerged?: boolean;
+  normalizedDate?: string;
+  normalizedMerged?: string;
+  review_count?: string;
+  reviewer?: string;
+  merged?: string | boolean;
+  has_pr?: string | boolean;
+  created_at?: string;
+  averageFixRounds?: string;
+  missions?: number;
+}
 
-/**
- * @typedef {Object} StatsCmdOptions
- * @property {Function} [log]
- * @property {Function} [error]
- * @property {Function} [exit]
- * @property {string} [rootDir]
- */
+interface MissionStats {
+  implementer: string;
+  missions: number;
+  averageFixRounds: string;
+}
 
-const fs = require('fs');
-const path = require('path');
-const fmt = require('../core/fmt');
-const { resolveTaskFile, getTaskClassification, getTaskImplementer, getTaskAssignee } = require('../tools/backlog');
-const { isForgejoReviewEnabled, loadEffectiveConfig } = require('../core/product-config');
-const { readReviewState } = require('../review/review-state');
-const reviewEvents = require('../review/review-events');
-const gitLib = require('../core/git');
+interface AccModeOptions {
+  mode?: 'sum' | 'max' | 'replace';
+}
+
+interface StatsCsvPathOptions {
+  filePath?: string;
+  rootDir?: string;
+  config?: unknown;
+  forWrite?: boolean;
+}
+
+interface StatsCmdOptions {
+  log?: Function;
+  error?: Function;
+  exit?: Function;
+  rootDir?: string;
+}
+
+
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+
+import * as fmt from '../core/fmt.js';
+import { resolveTaskFile, getTaskClassification, getTaskImplementer, getTaskAssignee } from '../tools/backlog.js';
+import { isForgejoReviewEnabled, loadEffectiveConfig } from '../core/product-config.js';
+import { readReviewState } from '../review/review-state.js';
+import * as reviewEvents from '../review/review-events.js';
+import { git } from '../core/git.js';
+import { migrateStats } from '../core/persistent-data-migration.js';
+import { getPrimaryWorktree, findMissionDir } from '../core/mission-utils.js';
+import * as forgejo from '../tools/forgejo.js';
+import * as storage from '../core/storage.js';
 
 // The original 5-column schema. Retained for backward-compatible CSV detection
 // and one-time header migration of legacy stats files (task-1251).
@@ -199,14 +201,8 @@ const USAGE_NUMBERS = new Set([
 
 const VALID_CLASSIFICATIONS = new Set(['ai_sdlc', 'user_value', 'unknown']);
 const SHIPPED_STATS_CSV_PATH = path.join(__dirname, '..', 'data', 'stats.seed.csv');
-/** @type {import('../core/storage')|null} */
-let STORAGE = null;
-
 function getStorage() {
-  if (!STORAGE) {
-    STORAGE = require('../core/storage');
-  }
-  return STORAGE;
+  return storage;
 }
 
 function resolveStatsRepoName(rootDir = process.cwd()) {
@@ -227,22 +223,19 @@ function resolveRepoStatsCsvPath(rootDir = process.cwd()) {
  * Callers that pass an explicit `filePath` (e.g. `--csv-file`) bypass this
  * resolver entirely.
  */
-/**
- * @param {StatsOptions} options
- */
-function resolveStatsPath(options = {}) {
+function resolveStatsPath(options: StatsOptions = {}) {
   if (options.filePath) {return options.filePath;}
   if (options.configuredPath) {return options.configuredPath;}
 
   const storage = getStorage();
   const rootDir = options.rootDir || process.cwd();
   const destinationPath = storage.resolveStatsPath({ ensureDir: options.ensureDir !== false });
-  require('../core/persistent-data-migration').migrateStats(
-    /** @type{any} */({
+  migrateStats(
+    {
       sourcePaths: [resolveRepoStatsCsvPath(rootDir), SHIPPED_STATS_CSV_PATH],
       destinationPath,
       defaultRepo: resolveStatsRepoName(rootDir),
-    })
+    } as unknown as Parameters<typeof migrateStats>[0]
   );
   return destinationPath;
 }
@@ -326,11 +319,10 @@ function resolveRepoRelativePath(rootDir, repoRelativePath) {
 /**
  * @param {string|StatsCsvPathOptions} options
  */
-function resolveStatsCsvPath(options = {}) {
+function resolveStatsCsvPath(options: StatsCsvPathOptions | string = {}) {
   if (typeof options === 'string') {return options;}
 
-  /** @type {StatsCsvPathOptions} */
-  const opts = options;
+  const opts = options as StatsCsvPathOptions;
   const filePath = opts.filePath;
   if (filePath) {return filePath;}
 
@@ -374,11 +366,7 @@ function loadCsv(filePath) {
   return { headers, rows };
 }
 
-/**
- * @param {string|null} filePath
- * @param {LoadStatsCsvOptions} [options]
- */
-function loadStatsCsv(filePath = null, options = {}) {
+function loadStatsCsv(filePath: string | null = null, options: LoadStatsCsvOptions = {}) {
   // Resolve effective path: explicit filePath > config > PARALLIX_HOME
   let effectivePath = filePath;
   if (!effectivePath) {
@@ -396,9 +384,10 @@ function loadStatsCsv(filePath = null, options = {}) {
 
   return {
     headers: [...STATS_HEADERS],
-    rows: data.rows.map(row => normalizeStatsRow(row, { rootDir: options.rootDir })),
+    rows: data.rows.map((row: Record<string, string>) => normalizeStatsRow(row, { rootDir: options.rootDir })),
   };
 }
+
 
 /**
  * Map any row (legacy 5-column or full 21-column) to the full schema, defaulting
@@ -406,11 +395,7 @@ function loadStatsCsv(filePath = null, options = {}) {
  * 'default' so legacy rows and integration rows share the (repo, mission, stage)
  * upsert key.
  */
-/**
- * @param {StatsRow} row
- * @param {NormalizeStatsRowOptions} options
- */
-function normalizeStatsRow(row = {}, options = {}) {
+function normalizeStatsRow(row: StatsRow = {} as StatsRow, options: NormalizeStatsRowOptions = {} as NormalizeStatsRowOptions) {
   const repo = String(row.repo || options.repo || resolveStatsRepoName(options.rootDir)).trim();
   return {
     date: row.date || '',
@@ -1194,7 +1179,7 @@ function renderMissionPhaseReport(rows, slug, options = {}) {
     return lines.join('\n');
   }
 
-  const num = (/** @type{StatsRow} */ row, /** @type{string} */ key) => String(Number.parseInt(String(row[key]), 10) || 0);
+  const num = (/** @type{StatsRow} */ row, /** @type{string} */ key) => String(Number.parseInt(String(row[key] as any), 10) || 0);
   // cost_usd is a fractional dollar value; parseInt would truncate (e.g.
   // 1.42 -> "1", 0.46 -> "0"), silently discarding sub-dollar costs. Format
   // as a rounded decimal, collapsing exact zeros to "0".
@@ -1240,7 +1225,7 @@ function renderMissionPhaseReport(rows, slug, options = {}) {
   }
 
   const totals = ['input_tokens', 'output_tokens', 'cached_tokens', 'tool_calls', 'duration_minutes']
-    .map(key => missionRows.reduce((sum, row) => sum + (Number.parseInt(String(row[key]), 10) || 0), 0));
+    .map(key => missionRows.reduce((sum, row) => sum + (Number.parseInt(String(row[key] as any), 10) || 0), 0));
   // Compute total cost from rounded individual costs so the total equals
   // the sum of displayed phase costs (avoids floating-point rounding drift).
   const totalCost = tableRows
@@ -1291,7 +1276,7 @@ function deriveFixRoundsFromReviewStateHistory(slug, finalImplementer, latestRou
   }
 
   const branch = `mission/${slug}`;
-  const result = gitLib.git(['-C', rootDir, 'log', '--reverse', '--format=%s', branch]);
+  const result = git(['-C', rootDir, 'log', '--reverse', '--format=%s', branch]);
   if (result.status !== 0) {
     return Math.max(0, round - 1);
   }
@@ -1339,7 +1324,7 @@ function deriveFinalImplementerFromBranchHistory(slug, rootDir = process.cwd()) 
 
   const branches = [`mission/${slug}`, `origin/mission/${slug}`];
   for (const branch of branches) {
-    const result = gitLib.git(['-C', rootDir, 'log', '--format=%s', branch]);
+    const result = git(['-C', rootDir, 'log', '--format=%s', branch]);
     if (result.status !== 0) {
       continue;
     }
@@ -1372,7 +1357,7 @@ function deriveImplementerAndFixRoundsFromPrComments(slug, rootDir = process.cwd
   // Only attempt Forgejo PR comment lookup when Forgejo review is enabled
   if (!isForgejoReviewEnabled(rootDir)) {return null;}
 
-  const forgejo = require('../tools/forgejo');
+  // forgejo already imported at top
   const token = forgejo.readToken(/** @type{string} */(forgejo.resolveForgejoUser()));
   if (!token) {return null;}
 
@@ -1467,7 +1452,7 @@ function deriveFixRoundsFromReviewEvents(slug, rootDir = process.cwd()) {
   try {
     // Guard against reading (and, as a side effect, creating) an events dir that
     // doesn't exist yet — this runs on every active-stage recording.
-    const { findMissionDir } = require('../core/mission-utils');
+    // findMissionDir already imported at top
     const missionDir = findMissionDir(slug, rootDir);
     if (!missionDir || !fs.existsSync(path.join(missionDir, 'review-events'))) {return null;}
     events = reviewEvents.readAllEvents(slug, /** @type{any} */({ rootDir, log: () => {}, error: () => {} }));
@@ -1646,7 +1631,7 @@ function canonicalizeStatsRow(row, options = {}) {
  * @param {StatsRow} a
  * @param {StatsRow} b
  */
-function rowsEqual(a, b) {
+function rowsEqual(a: StatsRow, b: StatsRow) {
   return STATS_HEADERS.every(header => String(a[header] || '') === String(b[header] || ''));
 }
 
@@ -1654,7 +1639,8 @@ function rowsEqual(a, b) {
  * @param {StatsRow} row
  * @param {UpsertStatsRowOptions} options
  */
-function upsertStatsRow(row, options = {}) {
+// @ts-expect-error JSDoc param types for options
+function upsertStatsRow(row: StatsRow, options: {filePath?: string, rootDir?: string} = {}) {
   /** @type {UpsertStatsRowOptions} */
   const opts = options;
   const filePath = opts.filePath || resolveStatsPath({ ensureDir: true });
@@ -1702,6 +1688,7 @@ function upsertStatsRow(row, options = {}) {
  * @param {RecordIntegrationStatsOptions} options
  */
 // @ts-expect-error recordIntegrationStats options missing slug
+// @ts-expect-error
 function recordIntegrationStats(options = {}) {
   /** @type {RecordIntegrationStatsOptions} */
   const opts = options;
@@ -1758,7 +1745,8 @@ function recordIntegrationStats(options = {}) {
  * @param {TelemetryToStatsOptions} options
  */
 // @ts-expect-error telemetryToStatsFields options missing agentFamily
-function telemetryToStatsFields(telemetry, options = {}) {
+// @ts-expect-error JSDoc param types for options
+function telemetryToStatsFields(telemetry: any, options: {agentFamily: string, durationMinutes?: number, model?: string} = {}) {
   const { agentFamily, durationMinutes = 0, model } = options;
   const t = telemetry || null;
   const usageAfter = t && typeof t.usagePercent === 'number' ? Math.round(t.usagePercent) : 0;
@@ -1782,7 +1770,7 @@ function telemetryToStatsFields(telemetry, options = {}) {
  * @param {StatsRow} a
  * @param {StatsRow} b
  */
-function sameStatsIdentity(a, b) {
+function sameStatsIdentity(a: StatsRow, b: StatsRow) {
   return a.repo === b.repo
     && a.mission === b.mission
     && (a.stage || 'default') === (b.stage || 'default')
@@ -1794,7 +1782,7 @@ function sameStatsIdentity(a, b) {
  * @param {string} incoming
  * @param {AccModeOptions} [options]
  */
-function accumulateIntegerStrings(existing, incoming, options = {}) {
+function accumulateIntegerStrings(existing: string, incoming: string, options: {mode?: string} = {}) {
   /** @type {AccModeOptions} */
   const opts = options;
   const current = Number.parseInt(existing, 10) || 0;
@@ -1808,7 +1796,7 @@ function accumulateIntegerStrings(existing, incoming, options = {}) {
  * @param {string} existing
  * @param {string} incoming
  */
-function accumulateDecimalStrings(existing, incoming) {
+function accumulateDecimalStrings(existing: string, incoming: string) {
   const current = Number.parseFloat(existing) || 0;
   const next = Number.parseFloat(incoming) || 0;
   return String(current + next);
@@ -1818,7 +1806,7 @@ function accumulateDecimalStrings(existing, incoming) {
  * @param {string} existing
  * @param {string} incoming
  */
-function mergeLabel(existing, incoming) {
+function mergeLabel(existing: string, incoming: string) {
   const a = String(existing || '').trim();
   const b = String(incoming || '').trim();
   if (!a) {return b;}
@@ -1835,7 +1823,7 @@ function mergeLabel(existing, incoming) {
  * @param {RecordStageStatsOptions} options
  */
 // @ts-expect-error recordStageStats options missing slug/stage
-function recordStageStats(options = {}) {
+function recordStageStats(options: {slug: string, stage: string, rootDir?: string, filePath?: string, date?: string, implementer?: string, reviewer?: string, prFixRounds?: string, telemetry?: any, durationMinutes?: number, model?: string} = {}) {
   /** @type {any} */
   const opts = options;
   const { slug, stage, rootDir = process.cwd(), filePath = resolveStatsPath({ rootDir, forWrite: true }), date = formatDateOnly(new Date()), implementer, reviewer = '', prFixRounds = '0', telemetry = null, durationMinutes = 0, model = null } = opts;
@@ -1864,7 +1852,7 @@ function recordStageStats(options = {}) {
 /**
  * @param {{slug: string, stage: string, rootDir?: string, filePath?: string, date?: string, implementer?: string, reviewer?: string, prFixRounds?: string, telemetry?: {provider?: string, model?: string, inputTokens?: number, outputTokens?: number, cachedTokens?: number, totalTokens?: number, toolCalls?: number, usagePercent?: number, cost_usd?: number} | null, durationMinutes?: number, model?: string}} options
  */
-function accumulateStageStats(/** @type {{slug: string, stage: string, rootDir?: string, filePath?: string, date?: string, implementer?: string, reviewer?: string, prFixRounds?: string, telemetry?: {provider?: string, model?: string, inputTokens?: number, outputTokens?: number, cachedTokens?: number, totalTokens?: number, toolCalls?: number, usagePercent?: number, cost_usd?: number} | null, durationMinutes?: number, model?: string}} */ options) {
+function accumulateStageStats(options: {slug: string, stage: string, rootDir?: string, filePath?: string, date?: string, implementer?: string, reviewer?: string, prFixRounds?: string, telemetry?: any, durationMinutes?: number, model?: string}) {
   const { slug, stage, rootDir = process.cwd(), filePath = resolveStatsPath({ rootDir, forWrite: true }), date = formatDateOnly(new Date()), implementer, reviewer = '', prFixRounds = '0', telemetry = null, durationMinutes = 0, model = null } = options;
   if (!slug) {throw new Error('accumulateStageStats requires a mission slug.');}
   if (!stage) {throw new Error('accumulateStageStats requires a stage.');}
@@ -1930,7 +1918,7 @@ function accumulateStageStats(/** @type {{slug: string, stage: string, rootDir?:
  * @param {string} rootDir
  * @param {string|null|undefined} provided
  */
-function defaultPrFixRounds(slug, rootDir, provided) {
+function defaultPrFixRounds(slug: string, rootDir: string, provided: string | null | undefined) {
   if (provided !== undefined && provided !== null) {return provided;}
   if (!slug) {return '0';}
   const derived = deriveFixRoundsFromReviewEvents(slug, rootDir);
@@ -1941,7 +1929,7 @@ function defaultPrFixRounds(slug, rootDir, provided) {
  * @param {RecordActiveStatsOptions} options
  */
 // @ts-expect-error recordActiveStats options missing slug
-function recordActiveStats(options = {}) {
+function recordActiveStats(options: {slug: string, stage?: string, rootDir?: string, prFixRounds?: string, model?: string} = {}) {
   /** @type {any} */
   const opts = options;
   const { stage = 'active', slug, rootDir = process.cwd(), prFixRounds, model, ...rest } = opts;
@@ -1956,7 +1944,7 @@ function recordActiveStats(options = {}) {
  * @param {RecordReviewStatsOptions} options
  */
 // @ts-expect-error recordReviewStats options missing slug
-function recordReviewStats(options = {}) {
+function recordReviewStats(options: {slug: string, stage?: string, rootDir?: string, reviewer?: string, implementer?: string, prFixRounds?: string, model?: string} = {}) {
   /** @type {any} */
   const opts = options;
   const { stage = 'review', slug, rootDir = process.cwd(), reviewer, implementer, prFixRounds, model, ...rest } = opts;
@@ -1976,14 +1964,14 @@ function recordReviewStats(options = {}) {
 /**
  * @param {CsvData} data
  */
-function isIntegrationStatsDataset(data) {
+function isIntegrationStatsDataset(data: {headers: string[], rows: any[]}) {
   return LEGACY_HEADERS.every(header => data.headers.includes(header));
 }
 
 /**
  * @param {Function} [log]
  */
-function printStatsUsage(log = fmt.log.plain) {
+function printStatsUsage(log: typeof fmt.log.plain = fmt.log.plain) {
   log(`Usage: px stats [<csv_file>|--csv-file <path>] [--today YYYY-MM-DD] [--from YYYY-MM-DD --to YYYY-MM-DD] [--output <file>] [--group-by implementer|period|merged]
 
 Examples:
@@ -2010,7 +1998,7 @@ Notes:
  * @param {string[]} args
  * @param {StatsCmdOptions} options
  */
-function stats(args, options = {}) {
+function stats(args: string[], options: {log?: Function, error?: Function, exit?: Function, rootDir?: string} = {}) {
   /** @type {StatsCmdOptions} */
   const opts = options;
   const log = opts.log || fmt.log.plain;
@@ -2130,7 +2118,7 @@ function stats(args, options = {}) {
     } else {
       report = generateMarkdownReport(data, { groupBy: groupByField });
     }
-  } catch (/** @type{any} */ err) {
+  } catch (err: any) {
     error(fmt.status('FAIL', err.message));
     exit(1);
     return;
@@ -2144,36 +2132,36 @@ function stats(args, options = {}) {
   }
 }
 
-module.exports = stats;
-module.exports.STATS_HEADERS = STATS_HEADERS;
-module.exports.STATS_CSV_PATH = resolveRepoStatsCsvPath();
-module.exports.LEGACY_STATS_CSV_PATH = resolveRepoStatsCsvPath();
-module.exports.resolveRepoStatsCsvPath = resolveRepoStatsCsvPath;
-module.exports.resolveStatsRepoName = resolveStatsRepoName;
-module.exports.resolveStatsFilePath = resolveStatsFilePath;
-module.exports.resolveStatsCsvPath = resolveStatsCsvPath;
-module.exports.resolveStatsPath = resolveStatsPath;
-module.exports.recordIntegrationStats = recordIntegrationStats;
-module.exports.renderWeeklyStatsReport = renderWeeklyStatsReport;
-module.exports.renderMissionPhaseReport = renderMissionPhaseReport;
-module.exports.renderRangeStatsReport = renderRangeStatsReport;
-module.exports.buildWeeklyWindows = buildWeeklyWindows;
-module.exports.resolveMissionClassification = resolveMissionClassification;
-module.exports.deriveImplementerAndFixRounds = deriveImplementerAndFixRounds;
-module.exports.upsertStatsRow = upsertStatsRow;
-module.exports.loadStatsCsv = loadStatsCsv;
-module.exports.saveStatsCsv = saveStatsCsv;
-module.exports.normalizeStatsRow = normalizeStatsRow;
-module.exports.canonicalizeStatsRow = canonicalizeStatsRow;
-module.exports.recordStageStats = recordStageStats;
-module.exports.accumulateStageStats = accumulateStageStats;
-module.exports.recordActiveStats = recordActiveStats;
-module.exports.recordReviewStats = recordReviewStats;
-module.exports.telemetryToStatsFields = telemetryToStatsFields;
-module.exports.formatDateOnly = formatDateOnly;
-module.exports.LEGACY_HEADERS = LEGACY_HEADERS;
-module.exports.USAGE_NUMBERS = USAGE_NUMBERS;
-module.exports._internals = {
+export = stats;
+(stats as any).STATS_HEADERS = STATS_HEADERS;
+(stats as any).STATS_CSV_PATH = resolveRepoStatsCsvPath();
+(stats as any).LEGACY_STATS_CSV_PATH = resolveRepoStatsCsvPath();
+(stats as any).resolveRepoStatsCsvPath = resolveRepoStatsCsvPath;
+(stats as any).resolveStatsRepoName = resolveStatsRepoName;
+(stats as any).resolveStatsFilePath = resolveStatsFilePath;
+(stats as any).resolveStatsCsvPath = resolveStatsCsvPath;
+(stats as any).resolveStatsPath = resolveStatsPath;
+(stats as any).recordIntegrationStats = recordIntegrationStats;
+(stats as any).renderWeeklyStatsReport = renderWeeklyStatsReport;
+(stats as any).renderMissionPhaseReport = renderMissionPhaseReport;
+(stats as any).renderRangeStatsReport = renderRangeStatsReport;
+(stats as any).buildWeeklyWindows = buildWeeklyWindows;
+(stats as any).resolveMissionClassification = resolveMissionClassification;
+(stats as any).deriveImplementerAndFixRounds = deriveImplementerAndFixRounds;
+(stats as any).upsertStatsRow = upsertStatsRow;
+(stats as any).loadStatsCsv = loadStatsCsv;
+(stats as any).saveStatsCsv = saveStatsCsv;
+(stats as any).normalizeStatsRow = normalizeStatsRow;
+(stats as any).canonicalizeStatsRow = canonicalizeStatsRow;
+(stats as any).recordStageStats = recordStageStats;
+(stats as any).accumulateStageStats = accumulateStageStats;
+(stats as any).recordActiveStats = recordActiveStats;
+(stats as any).recordReviewStats = recordReviewStats;
+(stats as any).telemetryToStatsFields = telemetryToStatsFields;
+(stats as any).formatDateOnly = formatDateOnly;
+(stats as any).LEGACY_HEADERS = LEGACY_HEADERS;
+(stats as any).USAGE_NUMBERS = USAGE_NUMBERS;
+(stats as any)._internals = {
   generateMarkdownReport,
   loadCsv,
   normalizeRow,

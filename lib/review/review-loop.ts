@@ -26,7 +26,6 @@ import { resolveStageTelemetry } from '../agents/stage-telemetry.js';
 let _stats: any = null;
 async function getStats(): Promise<any> {
   if (!_stats) {
-    // @ts-expect-error stats.js not converted to TS yet
     _stats = await import('../commands/stats.js');
   }
   return _stats as any;
