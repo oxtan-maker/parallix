@@ -1,17 +1,18 @@
-const fs = require('fs');
-const path = require('path');
-const crypto = require('crypto');
-const fmt = require('../core/fmt');
-const { git, getWorktreeStatus } = require('../core/git');
-const { startDraftAgent, selectAgent, readAgentConfigOrExit } = require('../agents/agents');
-const { resolveTaskFile, enforceTaskAssignee, reportTaskResolution, checkBacklogIntegrity, transitionTask, getTaskStorage } = require('../tools/backlog');
-const { findMissionArea, findMissionDir, inferSlug, getMissionYear, resolveMainRepo, conventionalWorktreePath, squashTrailingBacklogNoiseIntoPreviousMission, resolveWorktree, getPrimaryBranch, missionBranchName, missionDirForSlug, detectLaunchBaseBranch } = require('../core/mission-utils');
-const { transitionVirtual } = require('../core/state-map');
-const stats = require('./stats');
-const { formatVerificationCommand } = require('../core/verification');
-const { ensureStandaloneMissionBaseline, resolveAgentModel } = require('../core/product-config');
-const { ensureWorkflowGitignore } = require('../core/gitignore');
-const { unquoteGitStatusPath } = require('./active');
+// @ts-nocheck
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import * as crypto from 'node:crypto';
+import * as fmt from '../core/fmt.js';
+import { git, getWorktreeStatus } from '../core/git.js';
+import { startDraftAgent, selectAgent, readAgentConfigOrExit } from '../agents/agents.js';
+import { resolveTaskFile, enforceTaskAssignee, reportTaskResolution, checkBacklogIntegrity, transitionTask, getTaskStorage } from '../tools/backlog.js';
+import { findMissionArea, findMissionDir, inferSlug, getMissionYear, resolveMainRepo, conventionalWorktreePath, squashTrailingBacklogNoiseIntoPreviousMission, resolveWorktree, getPrimaryBranch, missionBranchName, missionDirForSlug, detectLaunchBaseBranch } from '../core/mission-utils.js';
+import { transitionVirtual } from '../core/state-map.js';
+import * as stats from './stats.js';
+import { formatVerificationCommand } from '../core/verification.js';
+import { ensureStandaloneMissionBaseline, resolveAgentModel } from '../core/product-config.js';
+import { ensureWorkflowGitignore } from '../core/gitignore.js';
+import { unquoteGitStatusPath } from './active.js';
 
 const DRAFT_PROMPT_PATH = path.join(__dirname, '..', '..', 'prompts', 'draft.md');
 const MISSION_SCAFFOLD_PATH = path.join(__dirname, '..', '..', 'templates', 'mission-scaffold.md');
@@ -1015,29 +1016,6 @@ function recordDraftStats({ slug, rootDir, agentFamily, result, log = fmt.log.pl
   }
 }
 
-module.exports = draft;
-module.exports.draft = draft;
-module.exports.runDraftCommand = runDraftCommand;
-module.exports.recordDraftStats = recordDraftStats;
-module.exports.buildDraftPrompt = buildDraftPrompt;
-module.exports.recordDraftImplementer = recordDraftImplementer;
-module.exports.enforceDraftCommitSafety = enforceDraftCommitSafety;
-module.exports.fallbackDraftCommitMessage = fallbackDraftCommitMessage;
-module.exports.bootstrapBacklogTask = bootstrapBacklogTask;
-module.exports.ensureGraphifyWorkspace = ensureGraphifyWorkspace;
-module.exports.ensureGraphifyIgnore = ensureGraphifyIgnore;
-module.exports.ensureMissionBranch = ensureMissionBranch;
-module.exports.ensureMissionBaseBranchRecorded = ensureMissionBaseBranchRecorded;
-module.exports.ensureWorktree = ensureWorktree;
-module.exports.ensureMissionFile = ensureMissionFile;
-module.exports.ensureDraftRepoConfigCommitted = ensureDraftRepoConfigCommitted;
-module.exports.ensureRepoExists = ensureRepoExists;
-module.exports.classifyDraftEntries = classifyDraftEntries;
-module.exports.isUnmergedStatus = isUnmergedStatus;
-module.exports.isDeletedStatus = isDeletedStatus;
-module.exports.isMissionTaskPath = isMissionTaskPath;
-module.exports.isExpectedDraftPath = isExpectedDraftPath;
-module.exports.validateDraftClassification = validateDraftClassification;
-module.exports.normalizeDraftClassification = normalizeDraftClassification;
-module.exports.buildRestartPrompt = buildRestartPrompt;
-module.exports.restartDraftAgent = restartDraftAgent;
+/** @type {typeof draft & {draft: typeof draft, runDraftCommand: typeof runDraftCommand, recordDraftStats: typeof recordDraftStats, buildDraftPrompt: typeof buildDraftPrompt, recordDraftImplementer: typeof recordDraftImplementer, enforceDraftCommitSafety: typeof enforceDraftCommitSafety, fallbackDraftCommitMessage: typeof fallbackDraftCommitMessage, bootstrapBacklogTask: typeof bootstrapBacklogTask, ensureGraphifyWorkspace: typeof ensureGraphifyWorkspace, ensureGraphifyIgnore: typeof ensureGraphifyIgnore, ensureMissionBranch: typeof ensureMissionBranch, ensureMissionBaseBranchRecorded: typeof ensureMissionBaseBranchRecorded, ensureWorktree: typeof ensureWorktree, ensureMissionFile: typeof ensureMissionFile, ensureDraftRepoConfigCommitted: typeof ensureDraftRepoConfigCommitted, ensureRepoExists: typeof ensureRepoExists, classifyDraftEntries: typeof classifyDraftEntries, isUnmergedStatus: typeof isUnmergedStatus, isDeletedStatus: typeof isDeletedStatus, isMissionTaskPath: typeof isMissionTaskPath, isExpectedDraftPath: typeof isExpectedDraftPath, validateDraftClassification: typeof validateDraftClassification, normalizeDraftClassification: typeof normalizeDraftClassification, buildRestartPrompt: typeof buildRestartPrompt, restartDraftAgent: typeof restartDraftAgent}} */
+const _draftExport = Object.assign(draft, { draft, runDraftCommand, recordDraftStats, buildDraftPrompt, recordDraftImplementer, enforceDraftCommitSafety, fallbackDraftCommitMessage, bootstrapBacklogTask, ensureGraphifyWorkspace, ensureGraphifyIgnore, ensureMissionBranch, ensureMissionBaseBranchRecorded, ensureWorktree, ensureMissionFile, ensureDraftRepoConfigCommitted, ensureRepoExists, classifyDraftEntries, isUnmergedStatus, isDeletedStatus, isMissionTaskPath, isExpectedDraftPath, validateDraftClassification, normalizeDraftClassification, buildRestartPrompt, restartDraftAgent });
+export = _draftExport;

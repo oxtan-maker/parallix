@@ -1,17 +1,18 @@
-const { git, getWorktreeStatus } = require('../core/git');
-const fs = require('fs');
-const path = require('path');
-const fmt = require('../core/fmt');
-const missionStart = require('./mission-start');
-const agents = require('../agents/agents');
-const { findMissionDir, findCheckpoints, getFirstLine, resolveWorktree, inferSlug, getMissionYear, missionDirForSlug, isWorkflowGeneratedArtifact } = require('../core/mission-utils');
-const handoff = require('./handoff');
-const { resolveTaskFile, transitionTask, getTaskStatus, getTaskImplementer } = require('../tools/backlog');
-const { resolveAgentModel } = require('../core/product-config');
-const review = require('../review/review');
-const repairHandoff = require('./repair-handoff');
-const stats = require('./stats');
-const { resolveStageTelemetry } = require('../agents/stage-telemetry');
+// @ts-nocheck
+import { git, getWorktreeStatus } from '../core/git.js';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import * as fmt from '../core/fmt.js';
+import * as missionStart from './mission-start.js';
+import * as agents from '../agents/agents.js';
+import { findMissionDir, findCheckpoints, getFirstLine, resolveWorktree, inferSlug, getMissionYear, missionDirForSlug, isWorkflowGeneratedArtifact } from '../core/mission-utils.js';
+import * as handoff from './handoff.js';
+import { resolveTaskFile, transitionTask, getTaskStatus, getTaskImplementer } from '../tools/backlog.js';
+import { resolveAgentModel } from '../core/product-config.js';
+import * as review from '../review/review.js';
+import * as repairHandoff from './repair-handoff.js';
+import * as stats from './stats.js';
+import { resolveStageTelemetry } from '../agents/stage-telemetry.js';
 
 const EXECUTE_PROMPT_PATH = path.join(__dirname, '..', '..', 'prompts', 'execute.md');
 
@@ -659,13 +660,6 @@ function enforceExecuteCommitSafety(opts) {
   return true;
 }
 
-module.exports = active;
-module.exports.buildExecutePrompt = buildExecutePrompt;
-module.exports.buildCheckpointContext = buildCheckpointContext;
-module.exports.runHandoffAndReview = runHandoffAndReview;
-module.exports.applyExecuteFallback = applyExecuteFallback;
-module.exports.selectLaunchAndRecord = selectLaunchAndRecord;
-module.exports.validateCheckpointsBeforeHandoff = validateCheckpointsBeforeHandoff;
-module.exports.attemptAgentRelaunch = attemptAgentRelaunch;
-module.exports.enforceExecuteCommitSafety = enforceExecuteCommitSafety;
-module.exports.unquoteGitStatusPath = unquoteGitStatusPath;
+/** @type {typeof active & {buildExecutePrompt: typeof buildExecutePrompt, buildCheckpointContext: typeof buildCheckpointContext, runHandoffAndReview: typeof runHandoffAndReview, applyExecuteFallback: typeof applyExecuteFallback, selectLaunchAndRecord: typeof selectLaunchAndRecord, validateCheckpointsBeforeHandoff: typeof validateCheckpointsBeforeHandoff, attemptAgentRelaunch: typeof attemptAgentRelaunch, enforceExecuteCommitSafety: typeof enforceExecuteCommitSafety, unquoteGitStatusPath: typeof unquoteGitStatusPath}} */
+const _activeExport = Object.assign(active, { buildExecutePrompt, buildCheckpointContext, runHandoffAndReview, applyExecuteFallback, selectLaunchAndRecord, validateCheckpointsBeforeHandoff, attemptAgentRelaunch, enforceExecuteCommitSafety, unquoteGitStatusPath });
+export = _activeExport;

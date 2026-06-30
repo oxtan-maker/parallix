@@ -1,7 +1,8 @@
-const { git, run, getCurrentBranch } = require('../core/git');
-const { findMissionDir, findMissionArea, inferSlug } = require('../core/mission-utils');
-const fmt = require('../core/fmt');
-const { formatVerificationCommand, runVerificationGate } = require('../core/verification');
+// @ts-nocheck
+import { git, run, getCurrentBranch } from '../core/git.js';
+import { findMissionDir, findMissionArea, inferSlug } from '../core/mission-utils.js';
+import * as fmt from '../core/fmt.js';
+import { formatVerificationCommand, runVerificationGate } from '../core/verification.js';
 
 /** @param {string[]} args */
 function checkpoint(args) {
@@ -9,7 +10,7 @@ function checkpoint(args) {
   const flags = args.filter(a => a.startsWith('--'));
   /** @param {string} a */
   const params = args.filter(a => !a.startsWith('--'));
-  
+
   let [explicitSlug, cpName, nextAction] = params;
 
   // Shift if slug is inferred
@@ -75,4 +76,4 @@ function checkpoint(args) {
   fmt.log.pass('Checkpoint complete and pushed.');
 }
 
-module.exports = checkpoint;
+export default checkpoint;

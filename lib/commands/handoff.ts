@@ -1,18 +1,19 @@
-const fs = require('fs');
-const path = require('path');
-const { spawnSync } = require('child_process');
-const git = require('../core/git');
-const missionUtils = require('../core/mission-utils');
-const backlog = require('../tools/backlog');
-const forgejo = require('../tools/forgejo');
-const { resolveReviewIdentity } = require('../review/review-state');
-const setupReview = require('../tools/setup-review');
-const gatekeeper = require('../tools/gatekeeper');
-const fmt = require('../core/fmt');
-const { runVerificationGate } = require('../core/verification');
-const { isForgejoReviewEnabled } = require('../core/product-config');
-const { rebaseBeforeReviewRound } = require('../review/rebase');
-const nels = require('../core/nels');
+// @ts-nocheck
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import * as git from '../core/git.js';
+import * as missionUtils from '../core/mission-utils.js';
+import * as backlog from '../tools/backlog.js';
+import * as forgejo from '../tools/forgejo.js';
+import { resolveReviewIdentity } from '../review/review-state.js';
+import * as setupReview from '../tools/setup-review.js';
+import * as gatekeeper from '../tools/gatekeeper.js';
+import * as fmt from '../core/fmt.js';
+import { runVerificationGate } from '../core/verification.js';
+import { isForgejoReviewEnabled } from '../core/product-config.js';
+import { rebaseBeforeReviewRound } from '../review/rebase.js';
+import * as nels from '../core/nels.js';
 
 /**
   * Verifies that the current environment is ready for handoff.
@@ -675,15 +676,19 @@ async function handoffCommand(args) {
     process.exit(1);
   }
 
-  const result = await module.exports.performHandoff(slug, { skipGate, force });
+  const result = await _exports.performHandoff(slug, { skipGate, force });
   if (!result.ok) {
     process.exit(1);
   }
 }
 
-module.exports = handoffCommand;
-module.exports.verifyHandoff = verifyHandoff;
-module.exports.performHandoff = performHandoff;
-module.exports.gatekeeper = gatekeeper;
-module.exports.runDeclaredGates = runDeclaredGates;
-module.exports.captureNelAtHandoff = captureNelAtHandoff;
+/** @type {{performHandoff: Function}} */
+const _exports = {
+  /** @returns {...} */
+  get performHandoff() { return _handoffExport.performHandoff; }
+};
+/** @type {{verifyHandoff: typeof verifyHandoff, performHandoff: typeof performHandoff, gatekeeper: typeof gatekeeper, runDeclaredGates: typeof runDeclaredGates, captureNelAtHandoff: typeof captureNelAtHandoff}} */
+const _namedExports = { verifyHandoff, performHandoff, gatekeeper, runDeclaredGates, captureNelAtHandoff };
+/** @type {typeof handoffCommand & {verifyHandoff: typeof verifyHandoff, performHandoff: typeof performHandoff, gatekeeper: typeof gatekeeper, runDeclaredGates: typeof runDeclaredGates, captureNelAtHandoff: typeof captureNelAtHandoff}} */
+const _handoffExport = Object.assign(handoffCommand, _namedExports);
+export = _handoffExport;

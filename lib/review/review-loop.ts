@@ -31,11 +31,10 @@ async function getStats(): Promise<any> {
   return _stats as any;
 }
 
-/** Lazily loaded handoff module — not yet converted to TS. */
+/** Lazily loaded handoff module. */
 let _handoff: any = null;
 async function getHandoff(): Promise<any> {
   if (!_handoff) {
-    // @ts-expect-error handoff.js not converted to TS yet
     _handoff = await import('../commands/handoff.js');
   }
   return _handoff as any;
