@@ -1813,7 +1813,7 @@ test('startAgent omits the model flag when resolveAgentModel returns null', asyn
   assert.ok(!result.invocation.args.includes('-m'));
 });
 
-test('non-limit launch failure triggers updateAgentBlockFn with 1-hour block', async () => {
+test('non-limit launch failure with transient error retries and persists a block for non-custom agents', async () => {
   let blockCalls = [];
   const fakeBlockFn = (agent, until) => {
     blockCalls.push({ agent, until });
@@ -1837,14 +1837,11 @@ test('non-limit launch failure triggers updateAgentBlockFn with 1-hour block', a
 
   assert.ok(error instanceof Error);
   assert.ok(error.message.includes('All eligible agents exhausted'));
-  assert.equal(blockCalls.length, 1, 'expected exactly one block call for the failed non-custom agent');
-  assert.equal(blockCalls[0].agent, 'mistral', 'expected mistral to be blocked');
-  // Block until should be ~1 hour from now — validate the format matches YYYY-MM-DD HH
-  assert.ok(/^\d{4}-\d{2}-\d{2} \d{2}$/.test(blockCalls[0].until),
-    `block until timestamp should be "YYYY-MM-DD HH" format; got: ${blockCalls[0].until}`);
+  assert.equal(blockCalls.length, 1, `transient non-limit failures should persist one block for mistral; got ${JSON.stringify(blockCalls)}`);
+  assert.equal(blockCalls[0].agent, 'mistral');
 });
 
-test('custom is excluded from non-limit block logic', async () => {
+test('custom agent is never blocklisted on non-limit launch failures', async () => {
   let blockCalls = [];
   const fakeBlockFn = (agent, until) => {
     blockCalls.push({ agent, until });
@@ -1868,10 +1865,33 @@ test('custom is excluded from non-limit block logic', async () => {
 
   assert.ok(error instanceof Error);
   assert.ok(error.message.includes('All eligible agents exhausted'));
-  // custom should NOT be in blockCalls — it is excluded from non-limit blocking
-  const customBlocked = blockCalls.some(c => c.agent === 'custom');
-  assert.ok(!customBlocked, 'expected custom to NOT be blocked; got blocks: ' + JSON.stringify(blockCalls));
-  // mistral should be blocked (non-custom agent that failed)
-  const mistralBlocked = blockCalls.some(c => c.agent === 'mistral');
-  assert.ok(mistralBlocked, 'expected mistral to be blocked');
+  assert.equal(blockCalls.length, 1, `only non-custom agents should be blocklisted on transient failures; got ${JSON.stringify(blockCalls)}`);
+  assert.equal(blockCalls[0].agent, 'mistral', 'mistral should be blocked, not custom');
+});
+
+test('hard launch failure (model not found) does not blocklist agent family', async () => {
+  let blockCalls = [];
+  const fakeBlockFn = (agent, until) => {
+    blockCalls.push({ agent, until });
+    return { path: '/fake/agents.local.json', blocklist: {} };
+  };
+
+  const error = await withPathLaunchers({
+    opencode: 'if (process.argv.includes("--help")) process.exit(0); console.error("Error: model not found"); process.exit(1);',
+    vibe: 'if (process.argv.includes("--help")) process.exit(0); console.error("Error: model not found"); process.exit(1);'
+  }, () => startAgent('draft', {
+    prompt: 'Execute.',
+    selectAgentFn: (step, opts) => {
+      if (!opts.exclude.has('mistral')) return 'mistral';
+      if (!opts.exclude.has('custom')) return 'custom';
+      throw new Error('All eligible agents exhausted');
+    },
+    detectLimitHitFn: () => null,
+    updateAgentBlockFn: fakeBlockFn,
+    log: () => {}
+  }).catch(err => err));
+
+  assert.ok(error instanceof Error);
+  assert.ok(error.message.includes('All eligible agents exhausted'));
+  assert.equal(blockCalls.length, 0, `hard failures must not persist blocklist entries; got ${JSON.stringify(blockCalls)}`);
 });

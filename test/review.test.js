@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const childProcess = require('node:child_process');
 
 // We test the pure validation logic that runs before any agent is launched.
 // The actual loop body (agent launch, Forgejo polling) requires runtime-dependent
@@ -55,6 +56,22 @@ function cleanupArtifacts() {
   }
 }
 test.beforeEach(() => { cleanupArtifacts(); });
+
+function runGitOrThrow(args, options = {}) {
+  const result = childProcess.spawnSync('git', args, {
+    encoding: 'utf8',
+    ...options
+  });
+  if (result.error && result.status !== 0) {
+    throw result.error;
+  }
+  if (typeof result.status === 'number' && result.status !== 0) {
+    const error = new Error((result.stderr || result.stdout || `git ${args.join(' ')} failed`).trim());
+    error.result = result;
+    throw error;
+  }
+  return result.stdout || '';
+}
 
 async function captureExit(fn) {
   const originalExit = process.exit;
@@ -3093,7 +3110,6 @@ test('submitReviewRound promotes an active backlog task to review after provider
 });
 
 test('submitReviewRound keeps YAML and rendered task status aligned when provider-backed approval repairs active', () => {
-  const { execFileSync } = require('node:child_process');
   const fs = require('node:fs');
   const os = require('node:os');
   const path = require('node:path');
@@ -3119,11 +3135,11 @@ test('submitReviewRound keeps YAML and rendered task status aligned when provide
       ''
     ].join('\n'));
 
-    execFileSync('git', ['init'], { cwd: root });
-    execFileSync('git', ['config', 'user.email', 'task-1327@example.com'], { cwd: root });
-    execFileSync('git', ['config', 'user.name', 'Task 1327'], { cwd: root });
-    execFileSync('git', ['add', '.'], { cwd: root });
-    execFileSync('git', ['commit', '-m', 'fixture'], { cwd: root });
+    runGitOrThrow(['init'], { cwd: root });
+    runGitOrThrow(['config', 'user.email', 'task-1327@example.com'], { cwd: root });
+    runGitOrThrow(['config', 'user.name', 'Task 1327'], { cwd: root });
+    runGitOrThrow(['add', '.'], { cwd: root });
+    runGitOrThrow(['commit', '-m', 'fixture'], { cwd: root });
 
     submitReviewRound('task-2198', 'approve', 'LGTM', {
       isForgejoReviewEnabledFn: () => true,

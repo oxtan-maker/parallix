@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const childProcess = require('node:child_process');
 
 const stats = require('../lib/commands/stats');
 const backlog = require('../lib/tools/backlog');
@@ -34,6 +35,22 @@ const FAKE_ROOT = '/tmp/mission';
 // Mock getPrimaryBranch BEFORE requiring dependent modules to ensure they use the mock.
 const missionUtils = require('../lib/core/mission-utils');
 mock.method(missionUtils, 'getPrimaryBranch', () => 'main');
+
+function runGitOrThrow(args, options = {}) {
+  const result = childProcess.spawnSync('git', args, {
+    encoding: 'utf8',
+    ...options
+  });
+  if (result.error && result.status !== 0) {
+    throw result.error;
+  }
+  if (typeof result.status === 'number' && result.status !== 0) {
+    const error = new Error((result.stderr || result.stdout || `git ${args.join(' ')} failed`).trim());
+    error.result = result;
+    throw error;
+  }
+  return result.stdout || '';
+}
 
 const {
   cleanupMissionWorktree,
@@ -621,7 +638,6 @@ test('evaluateTaskStatusForIntegration accepts review when the latest formal rev
 });
 
 test('provider-backed approval repair leaves integration preflight with review instead of stale active', () => {
-  const { execFileSync } = require('node:child_process');
   const { submitReviewRound } = require('../lib/review/review');
   const { ReviewState } = require('../lib/review/review-state');
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1327-integrate-preflight-'));
@@ -643,11 +659,11 @@ test('provider-backed approval repair leaves integration preflight with review i
       ''
     ].join('\n'));
 
-    execFileSync('git', ['init'], { cwd: root });
-    execFileSync('git', ['config', 'user.email', 'task-1327@example.com'], { cwd: root });
-    execFileSync('git', ['config', 'user.name', 'Task 1327'], { cwd: root });
-    execFileSync('git', ['add', '.'], { cwd: root });
-    execFileSync('git', ['commit', '-m', 'fixture'], { cwd: root });
+    runGitOrThrow(['init'], { cwd: root });
+    runGitOrThrow(['config', 'user.email', 'task-1327@example.com'], { cwd: root });
+    runGitOrThrow(['config', 'user.name', 'Task 1327'], { cwd: root });
+    runGitOrThrow(['add', '.'], { cwd: root });
+    runGitOrThrow(['commit', '-m', 'fixture'], { cwd: root });
 
     submitReviewRound('task-2199', 'approve', 'LGTM', {
       isForgejoReviewEnabledFn: () => true,

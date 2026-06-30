@@ -3,12 +3,29 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const childProcess = require('node:child_process');
 
 // ============================================================================
 // SC4: --consume-artifacts integration test
 // ============================================================================
 
 const { consumeArtifacts } = require('../lib/review/review-commands');
+
+function runGitOrThrow(args, options = {}) {
+  const result = childProcess.spawnSync('git', args, {
+    encoding: 'utf8',
+    ...options
+  });
+  if (result.error && result.status !== 0) {
+    throw result.error;
+  }
+  if (typeof result.status === 'number' && result.status !== 0) {
+    const error = new Error((result.stderr || result.stdout || `git ${args.join(' ')} failed`).trim());
+    error.result = result;
+    throw error;
+  }
+  return result.stdout || '';
+}
 
 test('consumeArtifacts persists events and transitions backlog to review status (task-1209 SC4)', async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1209-consume-'));
@@ -91,7 +108,6 @@ assignee: [custom]
 });
 
 test('consumeArtifacts leaves no untracked review-events files after a successful transition', async () => {
-  const { execFileSync } = require('node:child_process');
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1327-consume-clean-'));
   const missionDir = path.join(root, 'missions', 'task-2200');
   const artifactDir = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1327-consume-artifacts-'));
@@ -116,11 +132,11 @@ test('consumeArtifacts leaves no untracked review-events files after a successfu
     fs.writeFileSync(path.join(artifactDir, 'task-2200-review-outcome.md'), 'Verdict: approve');
     fs.writeFileSync(path.join(artifactDir, 'task-2200-review-verdict.txt'), 'approve');
 
-    execFileSync('git', ['init'], { cwd: root });
-    execFileSync('git', ['config', 'user.email', 'task-1327@example.com'], { cwd: root });
-    execFileSync('git', ['config', 'user.name', 'Task 1327'], { cwd: root });
-    execFileSync('git', ['add', '.'], { cwd: root });
-    execFileSync('git', ['commit', '-m', 'fixture'], { cwd: root });
+    runGitOrThrow(['init'], { cwd: root });
+    runGitOrThrow(['config', 'user.email', 'task-1327@example.com'], { cwd: root });
+    runGitOrThrow(['config', 'user.name', 'Task 1327'], { cwd: root });
+    runGitOrThrow(['add', '.'], { cwd: root });
+    runGitOrThrow(['commit', '-m', 'fixture'], { cwd: root });
 
     const result = await consumeArtifacts('task-2200', {
       log: () => {},
@@ -132,7 +148,7 @@ test('consumeArtifacts leaves no untracked review-events files after a successfu
     });
 
     assert.equal(result.ok, true);
-    const status = execFileSync('git', ['status', '--short'], { cwd: root, encoding: 'utf8' });
+    const status = runGitOrThrow(['status', '--short'], { cwd: root });
     assert.equal(status.trim(), '');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

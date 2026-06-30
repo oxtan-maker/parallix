@@ -5,7 +5,7 @@ import * as fmt from '../core/fmt.js';
 import { startCodexDraftAgent, resolveCodexCommand } from './codex.js';
 import { startClaudeAgent, resolveClaudeCommand } from './claude.js';
 import { startMistralAgent, resolveMistralCommand } from './mistral.js';
-import { startOpencodeAgent, resolveOpencodeCommand, isSpuriousOpencodeExit } from './opencode.js';
+import { startOpencodeAgent, resolveOpencodeCommand, isSpuriousOpencodeExit, isHardOpencodeFailure } from './opencode.js';
 import { detectLimitHit, formatBlockUntil, DEFAULT_FALLBACK_HOURS } from './limit-hit.js';
 import * as storage from '../core/storage.js';
 import { resolveAgentModel } from '../core/product-config.js';
@@ -869,10 +869,14 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
       });
       tried.add(chosen || '');
       launched.add(chosen || '');
-      // Block non-custom agents on non-limit failures so selectAgent excludes them
-      // on the next retry iteration, and the review-loop fallback path can activate.
-      // custom (opencode/local AI) is excluded — exit 1 is a temporary local error.
-      if (chosen !== 'custom') {
+      // Only persist blocklist entries for non-custom agents on non-limit
+      // failures that are NOT deterministic/hard failures. Hard failures
+      // (bad model name, expired API key, unsupported CLI flags, ENOENT/EACCES)
+      // are configuration problems — the operator must fix them, not wait for
+      // a stale blocklist entry to expire. Transient failures (network errors,
+      // unexpected crashes) still get a timed block so selectAgent retries
+      // other families while the root cause is investigated.
+      if (chosen !== 'custom' && !isHardOpencodeFailure(result)) {
         const blockUntil = formatBlockUntil(new Date(Date.now() + DEFAULT_FALLBACK_HOURS * 60 * 60 * 1000));
         try {
           const blockResult = updateAgentBlockFn(chosen || '', blockUntil);
