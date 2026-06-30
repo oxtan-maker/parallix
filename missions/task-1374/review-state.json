@@ -3,5 +3,12 @@
   "implementer": "custom",
   "round": 1,
   "startedAt": "2026-06-30T04:17:31.857Z",
-  "phase": "reviewing"
+  "phase": "reviewing",
+  "metadata": {
+    "recordedStageLaunches": {
+      "review:claude": [
+        "claude|ea170bfc-f45c-4616-929b-39141f4afbfa|2026-06-30T04:17:32.274Z|2026-06-30T04:21:43.990Z|0"
+      ]
+    }
+  }
 }
