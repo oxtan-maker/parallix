@@ -450,7 +450,12 @@ function runDeclaredGates(missionDir, rootDir, options = {}) {
   // Strip the checkbox prefix to get the command
   const commands = gateLines.map(line => {
     // Remove "- [ ] ", "- [x] ", or "- " prefix
-    return line.replace(/^- \[[ x]\]\s*/, '').replace(/^- \s*/, '');
+    let cmd = line.replace(/^- \[[ x]\]\s*/, '').replace(/^- \s*/, '');
+    // Strip surrounding backticks (e.g. "`npm run typecheck` — zero errors")
+    cmd = cmd.replace(/^`(.+)`/, '$1');
+    // Strip trailing description after em-dash separator
+    cmd = cmd.replace(/\s*[—–-].*$/, '').trim();
+    return cmd;
   }).filter(cmd => cmd.length > 0);
 
   if (commands.length === 0) {
