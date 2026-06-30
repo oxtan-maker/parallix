@@ -12,3 +12,8 @@ lib/agents/*.js
 lib/tools/*.js
 lib/review/*.js
 lib/commands/*.js
+!lib/commands/mission-start.js
+!lib/commands/verify.js
+!lib/commands/setup.js
+!lib/commands/setup-review.js
+!lib/commands/repair-handoff.js
