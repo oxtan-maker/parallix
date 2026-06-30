@@ -1,7 +1,7 @@
 ---
 id: TASK-1370
 title: 'TASK-1370: Mission 6 - Workflow commands (draft, active, checkpoint, handoff)'
-status: refined
+status: active
 assignee: [custom]
 created_date: '2026-06-27 10:37'
 updated_date: '2026-06-27 10:38'
