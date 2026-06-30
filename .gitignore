@@ -18,3 +18,7 @@ lib/agents/*.js
 lib/tools/*.js
 lib/review/*.js
 lib/commands/*.js
+lib/*.js
+# Root entry point artifacts (compiled from .ts by build:cjs)
+/index.js
+/px.js

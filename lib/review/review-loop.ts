@@ -149,7 +149,6 @@ export function maybeUpdateGraphifyBeforeReview(
   { commandRunner = run, log = fmt.log.plain }: { commandRunner?: typeof run; log?: (msg: string) => void } = {}
 ): unknown {
   // Lazy require to break circular dependency with core/mission-utils
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { updateGraphifyKnowledgeGraph } = require('../core/mission-utils.js');
   return updateGraphifyKnowledgeGraph({
     rootDir,

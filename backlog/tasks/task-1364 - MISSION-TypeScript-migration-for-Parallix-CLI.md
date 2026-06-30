@@ -12,7 +12,7 @@ priority: high
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Convert the entire Parallix codebase from JavaScript to TypeScript. This is a 23K-line, 62-file migration across 5 subsystems (core, commands, agents, review, tools) with 107 existing tests.
+Convert the entire Parallix codebase from JavaScript to TypeScript. This is a 23K-line, 62-file migration across 5 subsystems (core, commands, agents, review, tools) with 107 existing tests. A lot of the conversion has already been done in submissions.
 
 **Outcome:** Zero runtime dependencies, fully typed TypeScript codebase with passing tests, ESLint integration, and npm-publishable output.
 

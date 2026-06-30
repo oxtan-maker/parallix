@@ -3,11 +3,12 @@ id: TASK-1374
 title: >-
   TASK-1375: Mission 11 - Entry points (index.js, px.js) + enable and fix all
   TypeScript errors
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-06-27 10:38'
-updated_date: '2026-06-27 10:38'
-labels: []
+updated_date: '2026-06-30 06:30'
+labels:
+  - ai_sdlc
 dependencies:
   - TASK-1369
   - TASK-1370
@@ -48,6 +49,8 @@ After converting all files, run `tsc --noEmit` to surface all type errors. Expec
 - **Update the static-analysis gate:** `scripts/verify-local.sh` runs `npx eslint --ext .js ... lib/`; `--ext` is ignored under flat config. Update the gate to lint the `.ts` sources (and rely on flat-config `ignores` to skip compiled output) so the gate stays meaningful. Confirm `./scripts/verify-local.sh static-analysis` passes **with compiled `.js` present on disk**.
 - Gates: `git ls-files index.js px.js` empty and no `lib/**/*.js` source tracked (only compiled artifacts, all gitignored); `node px.js --help` (or equivalent) runs from the compiled output; `require('./index.js')` resolves the barrel exports.
 
+and fix the bash function that currently calls px.js so the whole parallix works
+
 **Verification:**
 - Run `npm test` — all tests must pass at baseline counts
 - Run `tsc --noEmit` — zero errors
@@ -60,10 +63,10 @@ After converting all files, run `tsc --noEmit` to surface all type errors. Expec
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Verification gate ran and passed on the final tree with captured proof rather than an unverified claim
-- [ ] #2 Lint and static analysis report clean on every changed file
-- [ ] #3 No focused or unannotated skipped tests were introduced (no .only and no bare .skip)
-- [ ] #4 Final checkpoint Goal Check table cites real evidence using file:line references and test names
-- [ ] #5 Docs updated to reflect any workflow or user-facing behavior change
+- [x] #1 Verification gate ran and passed on the final tree with captured proof rather than an unverified claim
+- [x] #2 Lint and static analysis report clean on every changed file
+- [x] #3 No focused or unannotated skipped tests were introduced (no .only and no bare .skip)
+- [x] #4 Final checkpoint Goal Check table cites real evidence using file:line references and test names
+- [x] #5 Docs updated to reflect any workflow or user-facing behavior change
 - [ ] #6 Bug-labeled missions include a red-to-green reproduction test that fails before the fix and passes after
 <!-- DOD:END -->

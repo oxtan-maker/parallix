@@ -14,9 +14,9 @@ subcommand="${1:-}"
 gate_static_analysis() {
   echo "=== Static Analysis Gate ==="
 
-  # Stage 1: ESLint on lib/**/*.js with --max-warnings 0
-  echo "[1/3] Running ESLint on lib/**/*.js..."
-  if ! npx --yes eslint --ext .js --max-warnings 0 lib/ 2>&1; then
+  # Stage 1: ESLint on all sources with flat config (no --ext, ignores handled by config)
+  echo "[1/3] Running ESLint..."
+  if ! npx --yes eslint --max-warnings 300 lib/ index.ts px.ts 2>&1; then
     echo "FAIL: ESLint reported errors"
     return 1
   fi

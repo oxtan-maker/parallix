@@ -54,7 +54,6 @@ export function resolveArtifactDir(rootDir = process.cwd()): string {
  * @param {*} noopValue
  * @returns {*}
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function withForgejo(rootDir: string, liveFn: () => any, noopValue: any): any {
   return isEnabled(rootDir) ? liveFn() : noopValue;
 }
