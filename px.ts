@@ -1,14 +1,44 @@
 #!/usr/bin/env node
 
-const fs = require('fs');
-const path = require('path');
-const fmt = require('./lib/core/fmt');
-const missionStart = require('./lib/commands/mission-start');
-const { createEvent } = require('./lib/review/review-events');
-const workflow = require('./index');
-const packageJson = require('./package.json');
+import fs from 'node:fs';
+import path from 'node:path';
+import * as fmt from './lib/core/fmt.js';
+// @ts-expect-error — CJS module not yet converted to TS (out of scope)
+import missionStart = require('./lib/commands/mission-start.js');
+import { createEvent } from './lib/review/review-events.js';
+import * as workflow from './index.js';
+import packageJson from './package.json';
 
-function parseArgs(argv, baseCwd = process.cwd()) {
+interface ParsedArgs {
+  target: string;
+  command: string;
+  args: string[];
+}
+
+interface VersionInfo {
+  name: string;
+  version: string;
+  pxPath: string;
+  packageRoot: string;
+  node: string;
+}
+
+interface ReviewEventParsed {
+  slug: string;
+  type: string | null;
+  actor: string | null;
+  content: string;
+  timestamp: string | null;
+  skipGit: boolean;
+}
+
+interface RunOptions {
+  log?: typeof fmt.log.plain;
+  error?: typeof fmt.log.plainError;
+  baseCwd?: string;
+}
+
+export function parseArgs(argv: string[], baseCwd = process.cwd()): ParsedArgs {
   const args = [...argv];
   if (args[0] === '--version' || args[0] === '-v') {
     return { target: path.resolve(baseCwd), command: 'version', args: [] };
@@ -27,7 +57,7 @@ function parseArgs(argv, baseCwd = process.cwd()) {
 // when the runtime prints a transition signal. A shell function always runs in
 // the current shell, so it can `cd` the caller (an npm `bin` subprocess cannot).
 // Install with:  eval "$(px shell-init bash)"   (or zsh) in your shell rc.
-function shellInit(shell = 'bash') {
+export function shellInit(shell = 'bash'): string {
   const normalized = String(shell || 'bash').toLowerCase();
   if (normalized !== 'bash' && normalized !== 'zsh') {
     throw new Error(`Unsupported shell for shell-init: ${shell} (supported: bash, zsh)`);
@@ -48,9 +78,9 @@ function shellInit(shell = 'bash') {
     '  _px_log="$(mktemp)" || return 1',
     '  command px "$@" 2>&1 | tee "$_px_log"',
     `  ${exitCapture}`,
-    '  _px_signal="$(grep "\\[INFO\\] Next: cd " "$_px_log" | tail -n 1 | sed "s/.*\\[INFO\\] Next: cd //")"',
+    '  _px_signal="$(grep "\\\\[INFO\\\\] Next: cd " "$_px_log" | tail -n 1 | sed "s/.*\\\\[INFO\\\\] Next: cd //")"',
     '  if [ -z "$_px_signal" ]; then',
-    '    _px_signal="$(grep "\\[INFO\\] Working directory: " "$_px_log" | tail -n 1 | sed "s/.*\\[INFO\\] Working directory: //")"',
+    '    _px_signal="$(grep "\\\\[INFO\\\\] Working directory: " "$_px_log" | tail -n 1 | sed "s/.*\\\\[INFO\\\\] Working directory: //")"',
     '  fi',
     '  rm -f "$_px_log"',
     '  if [ -n "$_px_signal" ]; then',
@@ -69,7 +99,7 @@ function shellInit(shell = 'bash') {
   ].join('\n');
 }
 
-function versionInfo() {
+export function versionInfo(): VersionInfo {
   return {
     name: packageJson.name,
     version: packageJson.version,
@@ -79,7 +109,7 @@ function versionInfo() {
   };
 }
 
-function formatVersionInfo(info = versionInfo()) {
+export function formatVersionInfo(info: VersionInfo = versionInfo()): string {
   return [
     `${info.name} ${info.version}`,
     `px: ${info.pxPath}`,
@@ -88,13 +118,13 @@ function formatVersionInfo(info = versionInfo()) {
   ].join('\n');
 }
 
-function parseReviewEventArgs(args) {
+export function parseReviewEventArgs(args: string[]): ReviewEventParsed {
   const slug = args[0];
   if (!slug) {
     throw new Error('Usage: review-event <slug> --type <event-type> --actor <actor> --content <text> [--timestamp <stamp>] [--skip-git]');
   }
 
-  const parsed = {
+  const parsed: ReviewEventParsed = {
     slug,
     type: null,
     actor: null,
@@ -119,11 +149,11 @@ function parseReviewEventArgs(args) {
     }
     i += 1;
 
-    if (key === 'type') parsed.type = value;
-    else if (key === 'actor') parsed.actor = value;
-    else if (key === 'content') parsed.content = value;
-    else if (key === 'timestamp') parsed.timestamp = value;
-    else throw new Error(`Unknown review-event option: ${arg}`);
+    if (key === 'type') {parsed.type = value;}
+    else if (key === 'actor') {parsed.actor = value;}
+    else if (key === 'content') {parsed.content = value;}
+    else if (key === 'timestamp') {parsed.timestamp = value;}
+    else {throw new Error(`Unknown review-event option: ${arg}`);}
   }
 
   if (!parsed.type) {
@@ -133,16 +163,16 @@ function parseReviewEventArgs(args) {
   return parsed;
 }
 
-async function run(argv = process.argv.slice(2), options = {}) {
+export async function run(argv = process.argv.slice(2), options: RunOptions = {}): Promise<number> {
   const log = options.log || fmt.log.plain;
   const error = options.error || fmt.log.plainError;
   const baseCwd = options.baseCwd || process.cwd();
 
-  let parsed;
+  let parsed: ParsedArgs;
   try {
     parsed = parseArgs(argv, baseCwd);
   } catch (err) {
-    error(fmt.status('FAIL', err.message));
+    error(fmt.status('FAIL', (err as Error).message));
     return 1;
   }
 
@@ -153,7 +183,7 @@ async function run(argv = process.argv.slice(2), options = {}) {
       log(shellInit(parsed.args[0]));
       return 0;
     } catch (err) {
-      error(fmt.status('FAIL', err.message));
+      error(fmt.status('FAIL', (err as Error).message));
       return 1;
     }
   }
@@ -176,11 +206,11 @@ async function run(argv = process.argv.slice(2), options = {}) {
       const eventArgs = parseReviewEventArgs(parsed.args);
       const result = createEvent(
         eventArgs.slug,
-        eventArgs.type,
+        eventArgs.type || '',
         {
-          actor: eventArgs.actor,
+          actor: eventArgs.actor || '',
           content: eventArgs.content,
-          timestamp: eventArgs.timestamp,
+          timestamp: eventArgs.timestamp || undefined,
         },
         {
           worktree: parsed.target,
@@ -189,7 +219,7 @@ async function run(argv = process.argv.slice(2), options = {}) {
           error,
         },
       );
-      if (result.ok) {
+      if (result.ok && result.path) {
         log(fmt.status('PASS', `Review event path: ${path.relative(parsed.target, result.path)}`));
       }
       return result.ok ? 0 : 1;
@@ -197,38 +227,27 @@ async function run(argv = process.argv.slice(2), options = {}) {
 
     if (parsed.command === 'verify-env') {
       const result = missionStart([], { command: 'verify-env', returnResult: true, log, error });
-      return result && result.pass ? 0 : 1;
+      return result && (result as { pass?: boolean }).pass ? 0 : 1;
     }
 
     let exitCode = 0;
     await workflow.main([parsed.command, ...parsed.args], {
       cwdFn: () => parsed.target,
-      exitFn: code => {
-        exitCode = typeof code === 'number' ? code : 0;
-      },
+      exitFn: ((code?: number) => { exitCode = typeof code === 'number' ? code : 0; }) as (_code?: number) => never,
       logFn: log,
       errorFn: error,
     });
     return exitCode;
   } catch (err) {
-    error(fmt.status('FAIL', err.message));
+    error(fmt.status('FAIL', (err as Error).message));
     return 1;
   } finally {
     process.chdir(previousCwd);
   }
 }
 
-if (require.main === module) {
+if (typeof require !== 'undefined' && require.main === module) {
   run().then(code => {
     process.exitCode = code;
   });
 }
-
-module.exports = {
-  formatVersionInfo,
-  parseArgs,
-  parseReviewEventArgs,
-  run,
-  shellInit,
-  versionInfo,
-};

@@ -5,20 +5,20 @@
  * ADR 0037 — Wave 1
  */
 
-const fs = require('fs');
-const path = require('path');
-const fmt = require('./lib/core/fmt');
-const { ensureStandaloneGitRepo } = require('./lib/core/product-config');
-const { loadStateMap } = require('./lib/core/state-map');
+import fs from 'node:fs';
+import path from 'node:path';
+import * as fmt from './lib/core/fmt.js';
+import { ensureStandaloneGitRepo } from './lib/core/product-config.js';
+import { loadStateMap } from './lib/core/state-map.js';
 
 // Fixed virtual-state → canonical-command invariants for alias derivation.
-const STATE_COMMAND_MAP = {
+const STATE_COMMAND_MAP: Record<string, string> = {
   ready: 'draft',
   approved: 'integrate',
   done: 'integrate',
 };
 
-const KNOWN_COMMANDS = [
+export const KNOWN_COMMANDS: string[] = [
   'mission-start',
   'verify-env',
   'verify',
@@ -41,28 +41,28 @@ const KNOWN_COMMANDS = [
 
 const READ_ONLY_COMMANDS = new Set(['config']);
 
-function loadStateMapForAliases(options = {}) {
+function loadStateMapForAliases(options = {}): Record<string, unknown> {
   return loadStateMap(options);
 }
 
 // Derives the command-alias table from state-map.json and fixed parallix invariants.
 // Users only maintain state-map.json; aliases update automatically.
-function deriveAliases(options = {}) {
+export function deriveAliases(options = {}): Record<string, string> {
   const stateMap = loadStateMapForAliases(options);
   const aliases = { ...STATE_COMMAND_MAP };
   for (const [virtual, actual] of Object.entries(stateMap)) {
-    if (actual && actual !== virtual && STATE_COMMAND_MAP[virtual]) {
+    if (typeof actual === 'string' && actual !== virtual && STATE_COMMAND_MAP[virtual]) {
       aliases[actual] = STATE_COMMAND_MAP[virtual];
     }
   }
   return aliases;
 }
 
-function resolveAlias(command, aliases = deriveAliases()) {
+export function resolveAlias(command: string, aliases: Record<string, string> = deriveAliases()): string | null {
   return Object.prototype.hasOwnProperty.call(aliases, command) ? aliases[command] : null;
 }
 
-function printAliases(aliases, logFn = fmt.log.plain) {
+export function printAliases(aliases: Record<string, string>, logFn = fmt.log.plain): void {
   const entries = Object.entries(aliases).sort(([a], [b]) => a.localeCompare(b));
   if (entries.length === 0) {
     logFn('No aliases configured.');
@@ -75,17 +75,31 @@ function printAliases(aliases, logFn = fmt.log.plain) {
   }
 }
 
-async function main(args = process.argv.slice(2), {
-  existsSyncFn = fs.existsSync,
-  cwdFn = () => process.cwd(),
-  ensureStandaloneGitRepoFn = ensureStandaloneGitRepo,
-  requireFn = require,
-  printUsageFn = printUsage,
-  exitFn = process.exit,
-  errorFn = fmt.log.plainError,
-  logFn = fmt.log.plain,
-  loadAliasesFn = deriveAliases,
-} = {}) {
+interface MainOptions {
+  existsSyncFn?: typeof fs.existsSync;
+  cwdFn?: () => string;
+  ensureStandaloneGitRepoFn?: typeof ensureStandaloneGitRepo;
+  requireFn?: typeof require;
+  printUsageFn?: typeof printUsage;
+  exitFn?: (_code?: number) => never;
+  errorFn?: typeof fmt.log.plainError;
+  logFn?: typeof fmt.log.plain;
+  loadAliasesFn?: typeof deriveAliases;
+}
+
+async function main(args = process.argv.slice(2), options: MainOptions = {}) {
+  const {
+    existsSyncFn = fs.existsSync,
+    cwdFn = () => process.cwd(),
+    ensureStandaloneGitRepoFn = ensureStandaloneGitRepo,
+    requireFn = require,
+    printUsageFn = printUsage,
+    exitFn = process.exit,
+    errorFn = fmt.log.plainError,
+    logFn = fmt.log.plain,
+    loadAliasesFn = deriveAliases,
+  } = options;
+
   const command = args[0];
 
   if (command === '--version' || command === '-v') {
@@ -154,7 +168,7 @@ async function main(args = process.argv.slice(2), {
   }
 }
 
-function buildSuggestionSuffix(command) {
+export function buildSuggestionSuffix(command: string): string {
   if (command === 'diff' || command === 'resolve-conflict') {
     return ' <slug>';
   }
@@ -164,14 +178,14 @@ function buildSuggestionSuffix(command) {
   return '';
 }
 
-function suggestCommand(input) {
-  if (!input) return null;
+export function suggestCommand(input: string): string | null {
+  if (!input) {return null;}
   const normalizedInput = input.toLowerCase();
-  let best = null;
+  let best: { candidate: string; distance: number } | null = null;
 
   for (const candidate of KNOWN_COMMANDS) {
     const distance = levenshteinDistance(normalizedInput, candidate);
-    if (distance > 2) continue;
+    if (distance > 2) {continue;}
     if (!best || distance < best.distance) {
       best = { candidate, distance };
     }
@@ -180,13 +194,13 @@ function suggestCommand(input) {
   return best ? best.candidate : null;
 }
 
-function levenshteinDistance(a, b) {
+export function levenshteinDistance(a: string, b: string): number {
   const rows = a.length + 1;
   const cols = b.length + 1;
-  const dp = Array.from({ length: rows }, () => Array(cols).fill(0));
+  const dp: number[][] = Array.from({ length: rows }, () => Array(cols).fill(0));
 
-  for (let i = 0; i < rows; i += 1) dp[i][0] = i;
-  for (let j = 0; j < cols; j += 1) dp[0][j] = j;
+  for (let i = 0; i < rows; i += 1) {dp[i][0] = i;}
+  for (let j = 0; j < cols; j += 1) {dp[0][j] = j;}
 
   for (let i = 1; i < rows; i += 1) {
     for (let j = 1; j < cols; j += 1) {
@@ -202,7 +216,7 @@ function levenshteinDistance(a, b) {
   return dp[a.length][b.length];
 }
 
-function printUsage() {
+export function printUsage(): void {
   fmt.log.plain(`
 Usage: px <command> [args]
 
@@ -240,18 +254,9 @@ ${fmt.bold('Notes:')}
 `);
 }
 
-if (require.main === module) {
+// Run main when executed directly (compiled to CJS, require.main === module applies)
+if (typeof require !== 'undefined' && require.main === module) {
   main();
 }
 
-module.exports = {
-  KNOWN_COMMANDS,
-  main,
-  printUsage,
-  printAliases,
-  suggestCommand,
-  buildSuggestionSuffix,
-  levenshteinDistance,
-  deriveAliases,
-  resolveAlias,
-};
+export { main };

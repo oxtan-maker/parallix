@@ -4,13 +4,16 @@
     "checkJs": false,
     "noEmit": false,
     "outDir": "dist",
-    "rootDir": "lib",
+    "rootDir": ".",
     "strict": true,
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "target": "ES2024"
+    "target": "ES2024",
+    "resolveJsonModule": true
   },
   "include": [
+    "index.ts",
+    "px.ts",
     "lib/**/*.ts"
   ],
   "exclude": [
