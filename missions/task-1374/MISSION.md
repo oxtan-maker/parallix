@@ -77,7 +77,7 @@ This is Mission 11 of the Parallix TypeScript migration (TASK-1364). The `lib/` 
 
 - [ ] ./scripts/verify-local.sh docs
 - [ ] ./scripts/verify-local.sh static-analysis
-- [ ] npm test (all tests pass at baseline counts, no regressions)
+- [ ] npm test
 
 ## Restricted Areas
 
