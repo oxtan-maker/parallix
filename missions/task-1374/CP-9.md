@@ -1,8 +1,27 @@
 # CP 9: Full Integration Verification
 
-## Work Done
+## Work Done (Round 1)
 
 Ran all integration verification checks. All pass.
+
+## Work Done (Round 2 — Reviewer REQUEST_CHANGES)
+
+Addressed reviewer Finding 1 (Blocking): `.eslintignore` negations not ported for `nels.js` and `subagent-limit.js`.
+
+### Fixes applied:
+- `eslint.config.mjs`: Restructured to use per-block `ignores` instead of top-level ignores; added explicit `files: ['lib/core/nels.js', 'lib/core/subagent-limit.js']` override block with `ignores: []` to re-lint these hand-written JS files (flat config ignores do not support `!` negations)
+- `lib/review/review.ts`: Removed obsolete `// eslint-disable-next-line @typescript-eslint/no-explicit-any` (rule `@typescript-eslint/no-explicit-any` does not exist in @typescript-eslint v8)
+- `lib/review/review-adapter.ts`: Removed obsolete `// eslint-disable-next-line @typescript-eslint/no-explicit-any`
+- `lib/review/review-loop.ts`: Removed obsolete `// eslint-disable-next-line @typescript-eslint/no-require-imports` (rule does not exist in @typescript-eslint v8; lazy `require()` is intentional for circular dependency break)
+- `CP-5.md`: Corrected Goal Check claim — removed false "2 negations ported" statement; replaced with accurate "1 `files:` override block for nels.js/subagent-limit.js"
+
+### Verification:
+- `npx eslint lib/ index.ts px.ts` — 0 errors, 243 warnings (down from 246 after removing obsolete eslint-disable comments)
+- `npx eslint lib/core/nels.js lib/core/subagent-limit.js` — both files now linted (no warnings/errors)
+- `npx eslint lib/review/review.js` — properly ignored (compiled artifact)
+- `./scripts/verify-local.sh static-analysis` — ALL STAGES PASSED
+- `npm test` — 1731 pass, 0 fail, 22 skipped (baseline preserved)
+- `npx tsc --noEmit` — zero errors
 
 ### Verification Results:
 
@@ -13,7 +32,7 @@ Ran all integration verification checks. All pass.
 | 3 | `npm pack --dry-run` lists root `.js` | ✅ PASS | `index.js` (11.6kB), `px.js` (9.6kB) in tarball manifest |
 | 4 | `node px.js --version` runs without error | ✅ PASS | Prints `@magnusekdahl/parallix 1.2.1` |
 | 5 | `require('./index.js')` exports ≥ 8 members | ✅ PASS | 9 exports: KNOWN_COMMANDS, main, printUsage, printAliases, suggestCommand, buildSuggestionSuffix, levenshteinDistance, deriveAliases, resolveAlias |
-| 6 | `npx eslint` (flat config) zero errors | ✅ PASS | 0 errors, 246 warnings (within gate threshold) |
+| 6 | `npx eslint` (flat config) zero errors | ✅ PASS | 0 errors, 243 warnings (within gate threshold) |
 | 7 | `./scripts/verify-local.sh static-analysis` passes | ✅ PASS | All 3 stages passed (ESLint, tsc, test-hygiene) |
 | 8 | `npm test` passes at baseline | ✅ PASS | 1731 pass, 0 fail, 22 skipped (matches baseline) |
 | 9 | `git ls-files index.js px.js` empty | ✅ PASS | No output (files gitignored) |

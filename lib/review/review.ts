@@ -79,7 +79,6 @@ import {
 // Set the module exports to the main review function (for backward compatibility)
 // then add all other exports as properties
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const _review = review as any;
 
 // From review-polling

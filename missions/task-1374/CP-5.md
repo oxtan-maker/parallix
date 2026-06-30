@@ -11,7 +11,7 @@ Migrated ESLint from legacy `.eslintrc.cjs` + `.eslintignore` to flat config `es
   - Parser: `@typescript-eslint/parser`
   - Plugin: `@typescript-eslint/eslint-plugin`
   - Ported all 8 original rules: `no-undef`, `no-unused-vars`, `valid-typeof`, `no-unreachable`, `no-async-promise-executor`, `eqeqeq`, `curly`, `no-var`
-  - Ported `.eslintignore` entries into `ignores` array with `!` negations for hand-written `.js` files (`nels.js`, `subagent-limit.js`)
+  - Ported `.eslintignore` entries into `ignores` array; hand-written JS files (`nels.js`, `subagent-limit.js`) re-included via explicit `files:` override block (flat config ignores do not support `!` negations)
   - Configured Node.js globals: `console`, `process`, `__filename`, `__dirname`, `require`, `module`, `exports`, `Buffer`, `BufferEncoding`, `NodeJS`, `setTimeout`, `clearTimeout`, `setInterval`, `clearInterval`, `URL`, `Headers`, `Request`, `Response`, `fetch`
   - Configured `no-unused-vars` with ignore patterns for `_`-prefixed vars, `name` args, and catch clause vars
   - Disabled `@typescript-eslint/no-require-imports` (needed for `import X = require(...)` TypeScript interop)
@@ -34,7 +34,7 @@ Migrated ESLint from legacy `.eslintrc.cjs` + `.eslintignore` to flat config `es
 | .eslintrc.cjs removed | File deleted |
 | .eslintignore removed | File deleted |
 | All original rules ported | 8 rules present: no-undef, no-unused-vars, valid-typeof, no-unreachable, no-async-promise-executor, eqeqeq, curly, no-var |
-| .eslintignore entries ported | 5 compiled-output globs + 2 negations + 4 directories in ignores |
+| .eslintignore entries ported | 5 compiled-output globs + 1 `files:` override block for nels.js/subagent-limit.js + 4 directories in top-level ignores |
 | TypeScript parser configured | `@typescript-eslint/parser` as parser for .ts and .js files |
 | New files lint clean | `npx eslint lib/index.ts index.ts px.ts` — zero errors |
 
