@@ -4,10 +4,11 @@ title: >-
   TASK-1375: Mission 11 - Entry points (index.js, px.js) + enable and fix all
   TypeScript errors
 status: backlog
-assignee: []
+assignee: [custom]
 created_date: '2026-06-27 10:38'
 updated_date: '2026-06-27 10:38'
-labels: []
+labels:
+  - ai_sdlc
 dependencies:
   - TASK-1369
   - TASK-1370
