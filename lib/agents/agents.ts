@@ -22,6 +22,14 @@ interface LauncherStatus {
   reason?: string;
 }
 
+interface LaunchResultLike {
+  stdout?: string;
+  stderr?: string;
+  status?: number | null;
+  signal?: string | null;
+  error?: {code?: string, message?: string} | null;
+}
+
 type AgentConfig = { blocklist?: {[key: string]: any}, steps?: {[key: string]: any} };
 
 interface StartAgentOptions {
@@ -100,6 +108,18 @@ const KNOWN_AGENT_NAMES = Object.freeze([
   'human'
 ]);
 
+const NON_BLOCKING_LAUNCH_ERROR_PATTERNS = Object.freeze([
+  /\b(?:invalid|unknown|unsupported|unrecognized)\s+model\b/i,
+  /\bmodel\s+(?:identifier|id)\s+(?:is\s+)?invalid\b/i,
+  /\b(?:model\s+not\s+found|no\s+such\s+model)\b/i,
+  /\bunknown\s+option\b/i,
+  /\bauth(?:entication)?\b/i,
+  /\bunauthorized\b/i,
+  /\bforbidden\b/i,
+  /\bapi\s+key\b/i,
+  /\bread-only file system\b/i
+]);
+
 function workflowLauncherStatus(agent: string): LauncherStatus {
   const resolver = RESOLVERS[agent];
   if (!resolver) {
@@ -144,6 +164,18 @@ function commandInPath(name: string) {
     stdio: ['ignore', 'pipe', 'ignore']
   });
   return result.status === 0 && result.stdout.trim().length > 0;
+}
+
+function shouldPersistLaunchFailureBlock(agent: string, result: LaunchResultLike | null | undefined) {
+  if (!result || agent === 'custom') {return false;}
+  const combined = [
+    result.stderr || '',
+    result.stdout || '',
+    result.error?.message || '',
+    result.error?.code || ''
+  ].join('\n');
+  if (!combined.trim()) {return true;}
+  return !NON_BLOCKING_LAUNCH_ERROR_PATTERNS.some(pattern => pattern.test(combined));
 }
 
 function buildInvalidAgentConfigError(configPath: string, scope: string, originalError: {message?: string} | null) {
@@ -869,6 +901,7 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
       });
       tried.add(chosen || '');
       launched.add(chosen || '');
+<<<<<<< Updated upstream
       // Only persist blocklist entries for non-custom agents on non-limit
       // failures that are NOT deterministic/hard failures. Hard failures
       // (bad model name, expired API key, unsupported CLI flags, ENOENT/EACCES)
@@ -877,6 +910,12 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
       // unexpected crashes) still get a timed block so selectAgent retries
       // other families while the root cause is investigated.
       if (chosen !== 'custom' && !isHardOpencodeFailure(result)) {
+=======
+      // Block retry candidates only when the failure looks transient. Deterministic
+      // setup/config errors (invalid model id, auth failure, read-only HOME, etc.)
+      // should fall through to the next family without poisoning agents.local.json.
+      if (shouldPersistLaunchFailureBlock(chosen || '', result)) {
+>>>>>>> Stashed changes
         const blockUntil = formatBlockUntil(new Date(Date.now() + DEFAULT_FALLBACK_HOURS * 60 * 60 * 1000));
         try {
           const blockResult = updateAgentBlockFn(chosen || '', blockUntil);
@@ -884,6 +923,8 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
         } catch (err) {
           log(fmt.status('WARN', `Could not persist blocklist entry for ${fmt.agent(chosen || '')}: ${(err as any).message}`));
         }
+      } else {
+        log(fmt.status('INFO', `Skipping blocklist write for ${fmt.agent(chosen || '')}; launch failure looks like a deterministic config/setup error.`));
       }
       chosen = undefined;
       continue;
@@ -930,5 +971,6 @@ export {
   isInvalidAgentConfigError,
   updateAgentBlock,
   resolveBlocklistTargetPath,
-  resolveNoOutputWatchdogConfig
+  resolveNoOutputWatchdogConfig,
+  shouldPersistLaunchFailureBlock
 };

@@ -1841,7 +1841,42 @@ test('non-limit launch failure with transient error retries and persists a block
   assert.equal(blockCalls[0].agent, 'mistral');
 });
 
+<<<<<<< Updated upstream
 test('custom agent is never blocklisted on non-limit launch failures', async () => {
+=======
+test('invalid-model launch failure retries without persisting a blocklist entry', async () => {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-invalid-model-'));
+  try {
+    let blockCalls = [];
+    const fakeBlockFn = (agent, until) => {
+      blockCalls.push({ agent, until });
+      return { path: '/fake/agents.local.json', blocklist: {} };
+    };
+
+    const result = await withPathLaunchers({
+      codex: 'if (process.argv.includes("--help")) process.exit(0); require("fs").writeSync(2, "Error: invalid model \\"typo-model\\"\\n"); process.exit(1);',
+      vibe: 'if (process.argv.includes("--help")) process.exit(0); process.exit(0);'
+    }, () => startAgent('draft', {
+      prompt: 'Execute.',
+      worktree: tmpRoot,
+      selectAgentFn: (step, opts) => {
+        if (!opts.exclude.has('codex')) return 'codex';
+        return 'mistral';
+      },
+      detectLimitHitFn: () => null,
+      updateAgentBlockFn: fakeBlockFn,
+      log: () => {}
+    }));
+
+    assert.equal(result.agent, 'mistral');
+    assert.deepEqual(blockCalls, []);
+  } finally {
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test('custom is excluded from non-limit block logic', async () => {
+>>>>>>> Stashed changes
   let blockCalls = [];
   const fakeBlockFn = (agent, until) => {
     blockCalls.push({ agent, until });
