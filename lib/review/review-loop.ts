@@ -24,18 +24,18 @@ import { resolveStageTelemetry } from '../agents/stage-telemetry.js';
 
 /** Lazily loaded stats module — loaded on first use to avoid circular dependency. */
 let _stats: any = null;
-async function getStats(): Promise<any> {
+function getStats(): any {
   if (!_stats) {
-    _stats = await import('../commands/stats.js');
+    _stats = _require('../commands/stats.js');
   }
   return _stats as any;
 }
 
 /** Lazily loaded handoff module. */
 let _handoff: any = null;
-async function getHandoff(): Promise<any> {
+function getHandoff(): any {
   if (!_handoff) {
-    _handoff = await import('../commands/handoff.js');
+    _handoff = _require('../commands/handoff.js');
   }
   return _handoff as any;
 }
@@ -123,7 +123,7 @@ export function recordStageStatsSafe(
     })) {
       return;
     }
-    getStats().then(s => s.accumulateStageStats({ stage, slug, rootDir, implementer, reviewer, telemetry, durationMinutes, model })).catch(() => {});
+    try { getStats().accumulateStageStats({ stage, slug, rootDir, implementer, reviewer, telemetry, durationMinutes, model }); } catch { /* best-effort */ }
   } catch (err: unknown) {
     log?.(fmt.status('WARN', `Could not record ${kind} stats for ${slug}: ${(err as Error).message}`));
   }
@@ -144,12 +144,15 @@ function strictlyLaterIso(earlierIso: string, nowMs = Date.now()): string {
 // Pre-review Setup Functions
 // ============================================================================
 
+import { createRequire } from 'node:module';
+const _require = createRequire(__filename);
+
 export function maybeUpdateGraphifyBeforeReview(
   rootDir: string,
   { commandRunner = run, log = fmt.log.plain }: { commandRunner?: typeof run; log?: (msg: string) => void } = {}
 ): unknown {
   // Lazy require to break circular dependency with core/mission-utils
-  const { updateGraphifyKnowledgeGraph } = require('../core/mission-utils.js');
+  const { updateGraphifyKnowledgeGraph } = _require('../core/mission-utils.js');
   return updateGraphifyKnowledgeGraph({
     rootDir,
     commandRunner,
@@ -400,7 +403,7 @@ export async function startReviewLoop(slug: string, opts: {
   const taskResolution = resolveTaskFileFn(slug, worktree);
 
   if (!dryRun) {
-    maybeUpdateGraphifyBeforeReviewFn(worktree, { commandRunner: runFn, log });
+    await maybeUpdateGraphifyBeforeReviewFn(worktree, { commandRunner: runFn, log });
   }
 
   // --reset: clear persisted state before starting

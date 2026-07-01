@@ -1,10 +1,10 @@
 ---
 id: TASK-1391
 title: typescript conversion errors
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-06-30 15:46'
-labels: []
+labels: ["bug", "user_value"]
 dependencies: []
 ---
 

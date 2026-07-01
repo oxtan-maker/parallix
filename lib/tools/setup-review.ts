@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as readline from 'readline';
-import _cp = require('child_process');
+import _cp from 'child_process';
 const { spawnSync } = _cp;
 import * as fmt from '../core/fmt';
 import { eligibleAgentsForStep } from '../agents/agents';
@@ -12,7 +12,7 @@ import {
   reviewRemoteUrl,
 } from './forgejo';
 import { loadWorkflowConfig } from '../core/product-config';
-import ensureWorkflowGitignore = require('../core/gitignore');
+import ensureWorkflowGitignore from '../core/gitignore.js';
 
 let tokenNameCounter = 0;
 const REVIEW_TOKEN_SCOPES = ['write:user', 'write:repository', 'write:issue', 'write:organization'];

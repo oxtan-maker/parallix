@@ -10,9 +10,11 @@ import { detectLimitHit, formatBlockUntil, DEFAULT_FALLBACK_HOURS } from './limi
 import * as storage from '../core/storage.js';
 import { resolveAgentModel } from '../core/product-config.js';
 import { migrateAgentBlocklists } from '../core/persistent-data-migration.js';
+import { createRequire } from 'node:module';
 // tools/sessions is still CJS (not converted in this wave); require keeps it
 // untyped (any) without pulling a non-included .js into the typecheck program.
-const sessions = require('../tools/sessions');
+const _require = createRequire(__filename);
+const sessions = _require('../tools/sessions');
 
 interface LauncherStatus {
   agent: string;

@@ -44,4 +44,9 @@ async function config(_args: string[] = [], opts: ConfigOptions = {}) {
   logFn(JSON.stringify(loadEffectiveConfig(rootDir), null, 2));
 }
 
-export = config;
+export default config;
+export { config };
+
+// CJS compat: ensure require() returns the function directly
+declare const module: { exports: any } | undefined;
+if (typeof module !== 'undefined') { module.exports = config; }

@@ -1,4 +1,4 @@
-import setupReviewModule = require('../tools/setup-review.js');
+import { setupReview } from '../tools/setup-review.js';
 
 /**
  * Workflow command entry point for `setup-review`.
@@ -8,7 +8,12 @@ import setupReviewModule = require('../tools/setup-review.js');
  */
 /** @param {string[]} args @param {{[key: string]: any}} [options] */
 async function setupReviewCommand(args: string[], options?: {[key: string]: any}) {
-  await setupReviewModule.setupReview(args, options);
+  await setupReview(args, options);
 }
 
-export = setupReviewCommand;
+export default setupReviewCommand;
+export { setupReviewCommand };
+
+// CJS compat: ensure require() returns the function directly
+declare const module: { exports: any } | undefined;
+if (typeof module !== 'undefined') { module.exports = setupReviewCommand; }

@@ -1,8 +1,10 @@
 import { spawnAndTee } from '../core/spawn-tee.js';
 import { extractClaudeTelemetryFromStdout } from './claude-telemetry.js';
+import { createRequire } from 'node:module';
 // tools/sessions is still CJS (not converted in this wave); require keeps it
 // untyped (any) without pulling a non-included .js into the typecheck program.
-const sessions = require('../tools/sessions');
+const _require = createRequire(__filename);
+const sessions = _require('../tools/sessions');
 
 interface ClaudeInvocationOptions {
   prompt: string;

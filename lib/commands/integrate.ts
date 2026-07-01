@@ -458,7 +458,7 @@ async function executeIntegrationGates(gates: any, opts: {commandRunner?: Functi
   return { ok: true, failedGate: null, error: null };
 }
 
-interface IntegrateFn extends Function {
+export interface IntegrateFn extends Function {
   resolveConflictsForMission: typeof resolveConflictsForMission;
   cleanupMissionWorktree: typeof cleanupMissionWorktree;
   rewriteWorktreePaths: typeof rewriteWorktreePaths;
@@ -1685,4 +1685,8 @@ function buildConflictResolutionPrompt(slug: string = '<slug>', area: string = '
 (integrate as any).buildIntegrationContext = buildIntegrationContext;
 // Re-export getPrimaryWorktree from mission-utils
 (integrate as any).getPrimaryWorktree = getPrimaryWorktree;
-export = /** @type {any} */ (integrate) as unknown as IntegrateFn;
+export default integrate;
+export { integrate, formatRecordedStatsRow, detectChangedAreas, parseFilesToAreas, loadIntegrationConfig, getIntegrationGatePlan, printIntegrationGatePlan, buildIntegrationGateEnv, resolveIntegrationVerificationWorktree, buildIntegrationVerificationInvocation, executeIntegrationGates, buildIntegrationContext, getPrimaryWorktree, resolveConflictsForMission, cleanupMissionWorktree, rewriteWorktreePaths, finalizeVariantACloseout, isNoMergeToAbortResult, buildConflictResolutionPrompt, VARIANT_B_AUTOMATION_SUMMARY, stashMainCheckoutIfNeeded, restoreMainCheckoutStash, evaluateTaskStatusForIntegration, promoteTaskForIntegrationIfNeeded, findExistingSquashCommit, printIntegrationPreflight, resolveForgejoUserForIntegration, getUnresolvedIndexConflicts, parseStashPopCollisionFiles, reportStashPopFailure, maybeUpdateGraphifyOnPrimary, SYNC_MERGED_DIAGNOSTICS, printDiagnosticTable, recordPostIntegrationStats, recordPostIntegrationStatsOrAbort, reportSyncMergedFailure };
+// CJS compat: ensure require() returns the function directly
+declare const module: { exports: any } | undefined;
+if (typeof module !== 'undefined') { module.exports = integrate; }

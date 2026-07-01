@@ -2132,7 +2132,12 @@ function stats(args: string[], options: {log?: Function, error?: Function, exit?
   }
 }
 
-export = stats;
+export default stats;
+export { stats, STATS_HEADERS, resolveRepoStatsCsvPath, resolveStatsRepoName, resolveStatsFilePath, resolveStatsCsvPath, resolveStatsPath, recordIntegrationStats, renderWeeklyStatsReport, renderMissionPhaseReport, renderRangeStatsReport, buildWeeklyWindows, resolveMissionClassification, deriveImplementerAndFixRounds, upsertStatsRow, loadStatsCsv, saveStatsCsv, normalizeStatsRow, canonicalizeStatsRow, recordStageStats, accumulateStageStats, recordActiveStats, recordReviewStats, telemetryToStatsFields, formatDateOnly, LEGACY_HEADERS, USAGE_NUMBERS };
+
+// CJS compat: ensure require() returns the function directly
+declare const module: { exports: any } | undefined;
+if (typeof module !== 'undefined') { module.exports = stats; }
 (stats as any).STATS_HEADERS = STATS_HEADERS;
 (stats as any).STATS_CSV_PATH = resolveRepoStatsCsvPath();
 (stats as any).LEGACY_STATS_CSV_PATH = resolveRepoStatsCsvPath();

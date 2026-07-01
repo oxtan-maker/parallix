@@ -3,10 +3,25 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import * as fmt from './lib/core/fmt.js';
-import missionStart = require('./lib/commands/mission-start.js');
-import { createEvent } from './lib/review/review-events.js';
-import * as workflow from './index.js';
-import packageJson from './package.json';
+import { createRequire } from 'node:module';
+
+declare const __filename: string | undefined;
+declare const require: {
+  main?: unknown;
+  (id: string): any;
+} | undefined;
+declare const module: unknown;
+
+function resolveRuntimePath(): string {
+  if (typeof __filename === 'string' && __filename) { return __filename; }
+  if (typeof process.argv[1] === 'string' && path.isAbsolute(process.argv[1])) { return process.argv[1]; }
+  return path.resolve(process.cwd(), 'px.js');
+}
+
+const runtimePath = resolveRuntimePath();
+const _require = createRequire(runtimePath);
+const packageJson = _require('./package.json');
+const runtimeDir = path.dirname(runtimePath);
 
 interface ParsedArgs {
   target: string;
@@ -102,8 +117,8 @@ export function versionInfo(): VersionInfo {
   return {
     name: packageJson.name,
     version: packageJson.version,
-    pxPath: __filename,
-    packageRoot: __dirname,
+    pxPath: runtimePath,
+    packageRoot: runtimeDir,
     node: process.version,
   };
 }
@@ -198,9 +213,13 @@ export async function run(argv = process.argv.slice(2), options: RunOptions = {}
   }
 
   const previousCwd = process.cwd();
-  process.chdir(parsed.target);
-
   try {
+    const missionStartModule = _require('./lib/commands/mission-start.js');
+    const missionStart = missionStartModule.default || missionStartModule;
+    const { createEvent } = _require('./lib/review/review-events.js');
+    const workflow = _require('./index.js');
+    process.chdir(parsed.target);
+
     if (parsed.command === 'review-event') {
       const eventArgs = parseReviewEventArgs(parsed.args);
       const result = createEvent(
@@ -245,8 +264,6 @@ export async function run(argv = process.argv.slice(2), options: RunOptions = {}
   }
 }
 
-if (typeof require !== 'undefined' && require.main === module) {
-  run().then(code => {
-    process.exitCode = code;
-  });
+if (typeof require === 'undefined' || require.main === module) {
+  run().then(code => { process.exitCode = code; });
 }

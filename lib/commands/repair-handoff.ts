@@ -1,6 +1,6 @@
 import { git, getCurrentBranch } from '../core/git.js';
 import * as missionUtils from '../core/mission-utils.js';
-import rebase = require('./rebase.js');
+import rebase from './rebase.js';
 import * as fmt from '../core/fmt.js';
 
 /**
@@ -225,4 +225,9 @@ async function repairHandoff(slug: string, worktree: string, errorMsg: string, o
 (repairHandoff as any).isRelaunchableError = isRelaunchableError;
 (repairHandoff as any).buildRelaunchPrompt = buildRelaunchPrompt;
 
-export = repairHandoff;
+export default repairHandoff;
+export { repairHandoff, isRelaunchableError, buildRelaunchPrompt };
+
+// CJS compat: ensure require() returns the function directly
+declare const module: { exports: any } | undefined;
+if (typeof module !== 'undefined') { module.exports = repairHandoff; }

@@ -122,4 +122,9 @@ async function diff(args: any, {
   exitFn(1);
 }
 
-export = diff;
+export default diff;
+export { diff };
+
+// CJS compat: ensure require() returns the function directly
+declare const module: { exports: any } | undefined;
+if (typeof module !== 'undefined') { module.exports = diff; }

@@ -45,7 +45,7 @@ function buildAgentResolutionPrompt({ slug, area, worktreePath, missionSpecificF
 
 /** @param {string[]} args @param {{resolveConflictsFn?: Function, startAgentFn?: Function, exitFn?: Function}} opts */
 async function resolveConflict(args: string[], {
-  resolveConflictsFn = /** @type {import('./integrate.js').IntegrateFn} */ (integrate).resolveConflictsForMission,
+  resolveConflictsFn = (integrate as any).resolveConflictsForMission,
   startAgentFn = startAgent,
   exitFn = ((code: number) => process.exit(code)) as (code: number) => void,
 }: {resolveConflictsFn?: Function, startAgentFn?: Function, exitFn?: (code: number) => void} = {}) {
@@ -109,4 +109,9 @@ async function resolveConflict(args: string[], {
 }
 
 (resolveConflict as any).buildAgentResolutionPrompt = buildAgentResolutionPrompt;
-export = resolveConflict;
+export default resolveConflict;
+export { resolveConflict, buildAgentResolutionPrompt };
+
+// CJS compat: ensure require() returns the function directly
+declare const module: { exports: any } | undefined;
+if (typeof module !== 'undefined') { module.exports = resolveConflict; }

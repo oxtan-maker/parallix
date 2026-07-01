@@ -135,4 +135,9 @@ _review.reviewStateFile = reviewStateFile;
 _review.ReviewState = ReviewState;
 
 // Export the review function as the module exports (CJS-compatible)
-export = _review;
+export default _review;
+export { _review as review, POLL_TIMEOUT, delay, resolvePollIntervalMs, resolvePollTimeoutMs, formatElapsed, isPollTimeout, pollForReview, pollForDisposition, buildMetadataFooter, reviewArtifactPath, readArtifactFile, deleteArtifactFile, normalizeReviewVerdict, normalizeDisposition, postWorkflowComment, postWorkflowReview, consumeReviewerArtifacts, consumeImplementerArtifacts, recordStageStatsSafe, maybeUpdateGraphifyBeforeReview, commitSafeMissionArtifacts, rebaseBeforeReviewRound, applyAgentFallback, persistNormalizedPhaseRepair, startReviewLoop, flagValue, readTextFlag, formatStaticReviewFindings, formatStaticReviewSuccess, postStaticReviewComment, performStaticReview, verifyReview, submitForReview, readComments, pushRound, showReviewStatus, commentRound, submitReviewRound, closeMissionPr, createEventHandler, importLegacyHandler, reviewStateFile, ReviewState };
+
+// CJS compat: ensure require() returns the function directly
+declare const module: { exports: any } | undefined;
+if (typeof module !== 'undefined') { module.exports = _review; }

@@ -3,9 +3,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnAndTee } from '../core/spawn-tee.js';
 import { extractCodexTelemetry } from './codex-telemetry.js';
+import { createRequire } from 'node:module';
 // tools/sessions is still CJS (not converted in this wave); require keeps it
 // untyped (any) without pulling a non-included .js into the typecheck program.
-const sessions = require('../tools/sessions');
+const _require = createRequire(__filename);
+const sessions = _require('../tools/sessions');
 
 interface CodexInvocationOptions {
   prompt: string;

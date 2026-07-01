@@ -22,7 +22,7 @@ async function rebase(args: string[], {
   findMissionDirFn = findMissionDir,
   findMissionAreaFn = findMissionArea,
   getCurrentBranchFn = getCurrentBranch,
-  resolveConflictsFn = /** @type {import('./integrate.js').IntegrateFn} */ (integrate).resolveConflictsForMission,
+  resolveConflictsFn = (integrate as any).resolveConflictsForMission,
   startAgentFn = startAgent,
   createPrFn = createPr,
   readTokenFn = readToken,
@@ -632,4 +632,8 @@ function buildRebasePrompt({ slug, area, worktreePath, missionSpecificFiles, sha
 (rebase as any).buildRebasePrompt = buildRebasePrompt;
 (rebase as any).parseConflictFilesFromRebaseOutput = parseConflictFilesFromRebaseOutput;
 (rebase as any).parseConflictFilesFromGitStatus = parseConflictFilesFromGitStatus;
-export = rebase;
+export default rebase;
+export { rebase, buildRebasePrompt, parseConflictFilesFromRebaseOutput, parseConflictFilesFromGitStatus };
+// CJS compat: ensure require() returns the function directly
+declare const module: { exports: any } | undefined;
+if (typeof module !== 'undefined') { module.exports = rebase; }

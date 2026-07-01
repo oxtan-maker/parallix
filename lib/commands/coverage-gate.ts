@@ -359,4 +359,9 @@ function run(args: string[], options: CoverageGateOptions = {}) {
 (run as any).resolveTestTimeoutMs = resolveTestTimeoutMs;
 (run as any).runTests = runTests;
 (run as any).shouldCleanTempDir = shouldCleanTempDir;
-export = run;
+export default run;
+export { run, cleanupPerRunScratch, createPerRunScratchDirs, COVERAGE_EXCLUDES, COVERAGE_INCLUDES, DEFAULT_TEST_TIMEOUT_MS, discoverTestFiles, listTempEntries, registerExitHandlers, resetPerRunScratchState, resolveTestTimeoutMs, runTests, shouldCleanTempDir };
+
+// CJS compat: ensure require() returns the function directly
+declare const module: { exports: any } | undefined;
+if (typeof module !== 'undefined') { module.exports = run; }

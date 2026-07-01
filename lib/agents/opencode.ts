@@ -2,11 +2,13 @@ import { spawnAndTee } from '../core/spawn-tee.js';
 import { extractOpencodeTelemetryFromExport } from './opencode-telemetry.js';
 import { captureOpencodeExport } from './opencode-export.js';
 import { detectLimitHit } from './limit-hit.js';
+import { createRequire } from 'node:module';
 // tools/sessions and core/subagent-limit are still CJS (not converted in this
 // wave); require keeps them untyped (any) without pulling non-included .js into
 // the typecheck program.
-const sessions = require('../tools/sessions');
-const { buildSubagentLimitPrefix } = require('../core/subagent-limit');
+const _require = createRequire(__filename);
+const sessions = _require('../tools/sessions');
+const { buildSubagentLimitPrefix } = _require('../core/subagent-limit');
 
 interface BuildOpencodeInvocationOptions {
   prompt: string;
@@ -105,7 +107,7 @@ function checkJsonFormatSupport() {
     return _jsonFormatSupported;
   }
   try {
-    const { spawnSync } = require('node:child_process');
+    const { spawnSync } = _require('node:child_process');
     const result = spawnSync('opencode', ['--format', 'json', '--help'], {
       timeout: 3000,
       stdio: ['ignore', 'pipe', 'pipe'],

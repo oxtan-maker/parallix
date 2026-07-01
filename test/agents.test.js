@@ -1841,9 +1841,6 @@ test('non-limit launch failure with transient error retries and persists a block
   assert.equal(blockCalls[0].agent, 'mistral');
 });
 
-<<<<<<< Updated upstream
-test('custom agent is never blocklisted on non-limit launch failures', async () => {
-=======
 test('invalid-model launch failure retries without persisting a blocklist entry', async () => {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-invalid-model-'));
   try {
@@ -1876,7 +1873,6 @@ test('invalid-model launch failure retries without persisting a blocklist entry'
 });
 
 test('custom is excluded from non-limit block logic', async () => {
->>>>>>> Stashed changes
   let blockCalls = [];
   const fakeBlockFn = (agent, until) => {
     blockCalls.push({ agent, until });

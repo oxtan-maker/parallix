@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 import * as fmt from '../core/fmt.js';
-import stats = require('./stats.js');
+import stats from './stats.js';
 import { git } from '../core/git.js';
 import {
   getTaskFrontmatterValue,
@@ -415,4 +415,9 @@ function statsBackfill(args: string[], options: BackfillOptions = {}) {
 (statsBackfill as any).collectHistoricalStatsBackfill = collectHistoricalStatsBackfill;
 (statsBackfill as any).inferHistoricalClassificationFromMissionDoc = inferHistoricalClassificationFromMissionDoc;
 (statsBackfill as any).extractDateOnly = extractDateOnly;
-export = statsBackfill;
+export default statsBackfill;
+export { statsBackfill, collectHistoricalStatsBackfill, inferHistoricalClassificationFromMissionDoc, extractDateOnly };
+
+// CJS compat: ensure require() returns the function directly
+declare const module: { exports: any } | undefined;
+if (typeof module !== 'undefined') { module.exports = statsBackfill; }

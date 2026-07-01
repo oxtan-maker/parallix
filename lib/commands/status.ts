@@ -216,4 +216,9 @@ function status(args: string[], opts: {exit?: Function, log?: Function, inferSlu
 
 (status as any).parseWorktreeList = parseWorktreeList;
 (status as any).findStaleMissionWorktrees = findStaleMissionWorktrees;
-export = status;
+export default status;
+export { status, parseWorktreeList, findStaleMissionWorktrees };
+
+// CJS compat: ensure require() returns the function directly
+declare const module: { exports: any } | undefined;
+if (typeof module !== 'undefined') { module.exports = status; }

@@ -691,4 +691,9 @@ const _exports = {
 const _namedExports = { verifyHandoff, performHandoff, gatekeeper, runDeclaredGates, captureNelAtHandoff };
 /** @type {typeof handoffCommand & {verifyHandoff: typeof verifyHandoff, performHandoff: typeof performHandoff, gatekeeper: typeof gatekeeper, runDeclaredGates: typeof runDeclaredGates, captureNelAtHandoff: typeof captureNelAtHandoff}} */
 const _handoffExport = Object.assign(handoffCommand, _namedExports);
-export = _handoffExport;
+export default _handoffExport;
+export { _handoffExport as handoff, verifyHandoff, performHandoff, gatekeeper, runDeclaredGates, captureNelAtHandoff };
+
+// CJS compat: ensure require() returns the function directly
+declare const module: { exports: any } | undefined;
+if (typeof module !== 'undefined') { module.exports = _handoffExport; }

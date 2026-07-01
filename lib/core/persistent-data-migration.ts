@@ -1,13 +1,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import * as storage from './storage.js';
+import { createRequire } from 'node:module';
+const _require = createRequire(__filename);
 
 /** Cached stats module — loaded lazily to break circular dependency with `../commands/stats.js`. */
 let _stats: any = null;
 
 /** Lazily load the stats module to break the circular dependency. */
 function getStats(): any {
-  if (!_stats) {_stats = require('../commands/stats.js');}
+  if (!_stats) {_stats = _require('../commands/stats.js');}
   return _stats;
 }
 
@@ -145,7 +147,7 @@ function migrateStats(options: { sourcePaths?: string[]; sourcePath?: string; de
   const opts = options;
   const sourcePaths = (opts.sourcePaths || [opts.sourcePath].filter(Boolean)) as string[];
   const destinationPath = opts.destinationPath || storage.resolveStatsPath({ ensureDir: true });
-  const sourceRows = sourcePaths.flatMap((sourcePath: string) => readStatsRows(sourcePath, {}));
+  const sourceRows = sourcePaths.map((sourcePath: string) => readStatsRows(sourcePath, {})).flat();
 
   // Fresh-install guard: when no source file exists or all sources are empty,
   // there is no telemetry to import. Returning early prevents writing a

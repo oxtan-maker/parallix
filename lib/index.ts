@@ -26,28 +26,28 @@ import * as mistralMod from './agents/mistral.js';
 import * as opencodeMod from './agents/opencode.js';
 
 // commands/ — mixed export styles
-import active = require('./commands/active.js');
+import active from './commands/active.js';
 import checkpoint from './commands/checkpoint.js';
-import config = require('./commands/config.js');
-import coverageGate = require('./commands/coverage-gate.js');
-import diff = require('./commands/diff.js');
-import draft = require('./commands/draft.js');
-import handoff = require('./commands/handoff.js');
-import integrate = require('./commands/integrate.js');
-import missionStart = require('./commands/mission-start.js');
-import rebase = require('./commands/rebase.js');
-import repairHandoff = require('./commands/repair-handoff.js');
-import resolveConflict = require('./commands/resolve-conflict.js');
-import setup = require('./commands/setup.js');
-import stats = require('./commands/stats.js');
-import statsBackfill = require('./commands/stats-backfill.js');
-import status = require('./commands/status.js');
-import verify = require('./commands/verify.js');
+import config from './commands/config.js';
+import coverageGate from './commands/coverage-gate.js';
+import diff from './commands/diff.js';
+import draft from './commands/draft.js';
+import handoff from './commands/handoff.js';
+import integrate from './commands/integrate.js';
+import missionStart from './commands/mission-start.js';
+import rebase from './commands/rebase.js';
+import repairHandoff from './commands/repair-handoff.js';
+import resolveConflict from './commands/resolve-conflict.js';
+import setup from './commands/setup.js';
+import stats from './commands/stats.js';
+import statsBackfill from './commands/stats-backfill.js';
+import status from './commands/status.js';
+import verify from './commands/verify.js';
 
 // core/ — mixed export styles
 import * as fmtMod from './core/fmt.js';
 import * as gitMod from './core/git.js';
-import gitignore = require('./core/gitignore.js');
+import gitignore from './core/gitignore.js';
 import * as missionUtilsMod from './core/mission-utils.js';
 import * as persistentDataMigrationMod from './core/persistent-data-migration.js';
 import * as productConfigMod from './core/product-config.js';
@@ -58,7 +58,7 @@ import * as storageMod from './core/storage.js';
 import * as verificationMod from './core/verification.js';
 
 // review/ — mixed export styles
-import review = require('./review/review.js');
+import review from './review/review.js';
 import * as reviewArtifactsMod from './review/review-artifacts.js';
 import * as reviewCommandsMod from './review/review-commands.js';
 import * as reviewEventsMod from './review/review-events.js';
