@@ -153,7 +153,7 @@ Complete when: mission reviewed, landing from the correct integration checkout, 
 
 - **Config location:** `config/integration-pipelines.json`
 - **Schema:** `{"gates": {"<area>": {"command": "<shell-command>", "order": <number>, "run_last": <boolean>}}}`
-- **Supported areas:** `server`, `auth-server`, `web-client`, `web-e2e`
+- **Supported areas:** `lib`, `workflow`, `server`, `auth-server`, `web-client`, `web-e2e`, `docs`, `android`, `kubernetes`
 - **Ordering:** Gates are executed in ascending `order` value; `run_last: true` ensures the gate runs after all others (regardless of order value)
 - **Change detection:** Gates are only invoked for areas with changed files in the mission branch vs the primary branch
 - **Opt-out:** `px integrate <slug> --no-integration-gates` skips all integration gates
@@ -163,15 +163,18 @@ Example config:
 ```json
 {
   "gates": {
-    "server": {"command": "./server/updateStaging.sh", "order": 1, "run_last": false},
-    "auth-server": {"command": "./auth-server/updateStaging.sh", "order": 2, "run_last": false},
-    "web-client": {"command": "SKIP_E2E=1 ./web-client/updateStaging.sh", "order": 3, "run_last": false},
-    "web-e2e": {"command": "./web-client/scripts/run-playwright-stage.sh", "order": 4, "run_last": true}
+    "lib": {"command": "./scripts/verify-local.sh static-analysis", "order": 1, "run_last": false},
+    "workflow": {"command": "node test/e2e-mission-lifecycle.test.js", "order": 50, "run_last": true}
   }
 }
 ```
 
 If the config file is missing or empty, `px integrate` logs `integration-gates: no config present, skipping` and proceeds without error.
+
+In this repo, `workflow.config.json` points verification at `./scripts/verify-local.sh {{area}}`. That gives Parallix two validation layers:
+
+- earlier phases such as draft/active/review run the repo's fast general verifier (`all`, currently `npm test`)
+- `px integrate` invokes `verify-local.sh integrate`, which resolves the stricter integration gate plan from `config/integration-pipelines.json` after the target tree is exact
 
 ## 5. Checkpoint Model
 

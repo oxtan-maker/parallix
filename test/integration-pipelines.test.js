@@ -455,6 +455,19 @@ lib/core/mission-utils.js`;
   assert.equal(areas.length, 1);
 });
 
+test('parseFilesToAreas maps standalone workflow-owned directories and root files to workflow', () => {
+  const files = `test/e2e-mission-lifecycle.test.js
+scripts/verify-local.sh
+config/integration-pipelines.json
+prompts/review.md
+px.ts
+package.json`;
+
+  const areas = parseFilesToAreas(files).sort();
+
+  assert.deepEqual(areas, ['workflow']);
+});
+
 test('getIntegrationGatePlan returns lib gate for lib-touching mission (task-1362)', () => {
   const config = {
     gates: {
@@ -483,6 +496,63 @@ lib/core/nels.js`;
   assert.equal(plan.gates[0].key, 'lib');
   assert.equal(plan.gates[0].command, './scripts/verify-local.sh static-analysis');
   assert.deepEqual(plan.changedAreas, ['lib']);
+});
+
+test('getIntegrationGatePlan includes workflow e2e gate for lib-touching mission', () => {
+  const config = {
+    gates: {
+      lib: { command: './scripts/verify-local.sh static-analysis', order: 1, run_last: false },
+      workflow: { command: 'node test/e2e-mission-lifecycle.test.js', order: 50, run_last: true }
+    }
+  };
+
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-workflow-gate-lib-'));
+  const tmpConfigPath = path.join(tmpDir, 'integration-pipelines.json');
+  fs.writeFileSync(tmpConfigPath, JSON.stringify(config, null, 2));
+
+  const changedFiles = `lib/commands/integrate.js
+lib/core/nels.js`;
+
+  const plan = getIntegrationGatePlan('task-1397', {
+    runIntegrationGates: true,
+    gitRunner: createMockGitRunner(changedFiles),
+    dryRun: false,
+    configPath: tmpConfigPath
+  });
+
+  fs.unlinkSync(tmpConfigPath);
+  fs.rmdirSync(tmpDir);
+
+  assert.deepEqual(plan.gates.map(g => g.key), ['lib', 'workflow']);
+});
+
+test('getIntegrationGatePlan includes workflow e2e gate for workflow-owned repo surfaces', () => {
+  const config = {
+    gates: {
+      workflow: { command: 'node test/e2e-mission-lifecycle.test.js', order: 50, run_last: true }
+    }
+  };
+
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-workflow-gate-owned-'));
+  const tmpConfigPath = path.join(tmpDir, 'integration-pipelines.json');
+  fs.writeFileSync(tmpConfigPath, JSON.stringify(config, null, 2));
+
+  const changedFiles = `test/e2e-mission-lifecycle.test.js
+scripts/verify-local.sh
+px.ts`;
+
+  const plan = getIntegrationGatePlan('task-1397', {
+    runIntegrationGates: true,
+    gitRunner: createMockGitRunner(changedFiles),
+    dryRun: false,
+    configPath: tmpConfigPath
+  });
+
+  fs.unlinkSync(tmpConfigPath);
+  fs.rmdirSync(tmpDir);
+
+  assert.deepEqual(plan.changedAreas, ['workflow']);
+  assert.deepEqual(plan.gates.map(g => g.key), ['workflow']);
 });
 
 test('getIntegrationGatePlan excludes lib gate for docs-only mission (task-1362)', () => {

@@ -268,19 +268,73 @@ function detectChangedAreas(slug: string, opts: {gitRunner?: Function, rootDir?:
  */
 /** @param {string} filesOutput */
 function parseFilesToAreas(filesOutput: string) {
-  const areas = new Set();
+  const areas = new Set<string>();
   const knownAreas = ['lib', 'server', 'auth-server', 'web-client', 'docs', 'workflow', 'android', 'kubernetes'];
+  const workflowOwnedDirs = new Set(['test', 'scripts', 'config', 'prompts', 'data']);
+  const workflowRootFiles = new Set([
+    'px.ts',
+    'px.js',
+    'index.ts',
+    'index.js',
+    'package.json',
+    'package-lock.json',
+    'workflow.config.json',
+    'tsconfig.json',
+    'tsconfig.base.json',
+    'eslint.config.js',
+    'eslint.config.mjs',
+    'eslint.config.cjs'
+  ]);
   
   filesOutput.split('\n').forEach((file: string) => {
     file = file.trim();
     if (!file) {return;}
+    if (!file.includes('/')) {
+      if (workflowRootFiles.has(file)) {
+        areas.add('workflow');
+      }
+      return;
+    }
     const topDir = file.split('/')[0];
     if (knownAreas.includes(topDir)) {
       areas.add(topDir);
+      return;
+    }
+    if (workflowOwnedDirs.has(topDir)) {
+      areas.add('workflow');
     }
   });
   
   return Array.from(areas);
+}
+
+/** @param {{gates?: Record<string, any>}} config */
+function orderIntegrationGates(config: {gates?: Record<string, any>}) {
+  const gateEntries = Object.entries(config.gates || {});
+  const gates = gateEntries
+    .map(([key, value]: [string, any]) => ({
+      key,
+      command: value.command,
+      order: value.order || 0,
+      run_last: value.run_last || false
+    }));
+
+  const nonRunLast = gates.filter(g => !g.run_last).sort((a, b) => a.order - b.order);
+  const runLastGates = gates.filter(g => g.run_last).sort((a, b) => a.order - b.order);
+  return [...nonRunLast, ...runLastGates];
+}
+
+/** @param {string} gateKey @param {string[]} changedAreas */
+function gateMatchesChangedAreas(gateKey: string, changedAreas: string[]) {
+  if (changedAreas.length === 0) {return true;}
+  if (changedAreas.includes(gateKey)) {return true;}
+  if (gateKey === 'web-e2e') {
+    return changedAreas.includes('web-client');
+  }
+  if (gateKey === 'workflow') {
+    return changedAreas.includes('workflow') || changedAreas.includes('lib');
+  }
+  return false;
 }
 
 /**
@@ -334,34 +388,8 @@ function getIntegrationGatePlan(slug: string, opts: {runIntegrationGates?: boole
   }
   
   // Build list of gates to run, preserving order with run_last handling
-  const gateEntries = Object.entries(config.gates);
-  const gates = gateEntries
-    .map(([key, value]: [string, any]) => ({
-      key,
-      command: value.command,
-      order: value.order || 0,
-      run_last: value.run_last || false
-    }));
-  
-  // Separate into run_last and non-run_last, sort each by order
-  const nonRunLast = gates.filter(g => !g.run_last).sort((a, b) => a.order - b.order);
-  const runLastGates = gates.filter(g => g.run_last).sort((a, b) => a.order - b.order);
-  
-  // Combine: non-run_last first (by order), then run_last (by order)
-  const orderedGates = [...nonRunLast, ...runLastGates];
-  
-  // Filter to only relevant gates (based on changed areas)
-  const relevantGates = [];
-  for (const gate of orderedGates) {
-    // Always include web-e2e if web-client changed
-    if (gate.key === 'web-e2e') {
-      if (changedAreas.includes('web-client') || changedAreas.length === 0) {
-        relevantGates.push(gate);
-      }
-    } else if (changedAreas.includes(gate.key) || changedAreas.length === 0) {
-      relevantGates.push(gate);
-    }
-  }
+  const orderedGates = orderIntegrationGates(config);
+  const relevantGates = orderedGates.filter(gate => gateMatchesChangedAreas(gate.key, changedAreas));
   
   return { gates: relevantGates, changedAreas, configError: null };
 }
@@ -492,6 +520,8 @@ export interface IntegrateFn extends Function {
   resolveIntegrationVerificationWorktree: typeof resolveIntegrationVerificationWorktree;
   buildIntegrationVerificationInvocation: typeof buildIntegrationVerificationInvocation;
   executeIntegrationGates: typeof executeIntegrationGates;
+  orderIntegrationGates: typeof orderIntegrationGates;
+  gateMatchesChangedAreas: typeof gateMatchesChangedAreas;
   buildIntegrationContext: typeof buildIntegrationContext;
   getPrimaryWorktree: typeof getPrimaryWorktree;
 }
@@ -1682,11 +1712,13 @@ function buildConflictResolutionPrompt(slug: string = '<slug>', area: string = '
 (integrate as any).resolveIntegrationVerificationWorktree = resolveIntegrationVerificationWorktree;
 (integrate as any).buildIntegrationVerificationInvocation = buildIntegrationVerificationInvocation;
 (integrate as any).executeIntegrationGates = executeIntegrationGates;
+(integrate as any).orderIntegrationGates = orderIntegrationGates;
+(integrate as any).gateMatchesChangedAreas = gateMatchesChangedAreas;
 (integrate as any).buildIntegrationContext = buildIntegrationContext;
 // Re-export getPrimaryWorktree from mission-utils
 (integrate as any).getPrimaryWorktree = getPrimaryWorktree;
 export default integrate;
-export { integrate, formatRecordedStatsRow, detectChangedAreas, parseFilesToAreas, loadIntegrationConfig, getIntegrationGatePlan, printIntegrationGatePlan, buildIntegrationGateEnv, resolveIntegrationVerificationWorktree, buildIntegrationVerificationInvocation, executeIntegrationGates, buildIntegrationContext, getPrimaryWorktree, resolveConflictsForMission, cleanupMissionWorktree, rewriteWorktreePaths, finalizeVariantACloseout, isNoMergeToAbortResult, buildConflictResolutionPrompt, VARIANT_B_AUTOMATION_SUMMARY, stashMainCheckoutIfNeeded, restoreMainCheckoutStash, evaluateTaskStatusForIntegration, promoteTaskForIntegrationIfNeeded, findExistingSquashCommit, printIntegrationPreflight, resolveForgejoUserForIntegration, getUnresolvedIndexConflicts, parseStashPopCollisionFiles, reportStashPopFailure, maybeUpdateGraphifyOnPrimary, SYNC_MERGED_DIAGNOSTICS, printDiagnosticTable, recordPostIntegrationStats, recordPostIntegrationStatsOrAbort, reportSyncMergedFailure };
+export { integrate, formatRecordedStatsRow, detectChangedAreas, parseFilesToAreas, loadIntegrationConfig, getIntegrationGatePlan, printIntegrationGatePlan, buildIntegrationGateEnv, resolveIntegrationVerificationWorktree, buildIntegrationVerificationInvocation, executeIntegrationGates, orderIntegrationGates, gateMatchesChangedAreas, buildIntegrationContext, getPrimaryWorktree, resolveConflictsForMission, cleanupMissionWorktree, rewriteWorktreePaths, finalizeVariantACloseout, isNoMergeToAbortResult, buildConflictResolutionPrompt, VARIANT_B_AUTOMATION_SUMMARY, stashMainCheckoutIfNeeded, restoreMainCheckoutStash, evaluateTaskStatusForIntegration, promoteTaskForIntegrationIfNeeded, findExistingSquashCommit, printIntegrationPreflight, resolveForgejoUserForIntegration, getUnresolvedIndexConflicts, parseStashPopCollisionFiles, reportStashPopFailure, maybeUpdateGraphifyOnPrimary, SYNC_MERGED_DIAGNOSTICS, printDiagnosticTable, recordPostIntegrationStats, recordPostIntegrationStatsOrAbort, reportSyncMergedFailure };
 // CJS compat: ensure require() returns the function directly
 declare const module: { exports: any } | undefined;
 if (typeof module !== 'undefined') { module.exports = integrate; }

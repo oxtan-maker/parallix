@@ -4,6 +4,11 @@
       "command": "./scripts/verify-local.sh static-analysis",
       "order": 1,
       "run_last": false
+    },
+    "workflow": {
+      "command": "node test/e2e-mission-lifecycle.test.js",
+      "order": 50,
+      "run_last": true
     }
   }
 }

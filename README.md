@@ -145,11 +145,13 @@ px active task-042
 
 # Land it: runs configured integration gates, squash-merges to
 # the primary branch, updates board state, removes the branch
-# and worktree.
+# and worktree. In this repo that means a fast general verifier
+# during earlier phases and a stricter lifecycle E2E gate before
+# integrate lands.
 px integrate task-042
 ```
 
-The verification gate that runs at each checkpoint is whatever you declare in `workflow.config.json` (this repo declares `npm test`), so the workflow adopts your existing CI rather than replacing it.
+The verification gate that runs at each phase is whatever you declare in `workflow.config.json`. In this repo that dispatcher is `./scripts/verify-local.sh {{area}}`: earlier phases use the fast general suite, while `px integrate` calls `verify-local.sh integrate`, which resolves repo-side integration gates from `config/integration-pipelines.json` and runs the stricter pre-merge checks there.
 
 ## Use cases
 

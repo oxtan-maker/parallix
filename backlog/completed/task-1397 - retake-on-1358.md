@@ -1,10 +1,13 @@
 ---
 id: TASK-1397
 title: retake on 1358
-status: backlog
-assignee: []
+status: done
+assignee:
+  - codex
 created_date: '2026-07-01 16:55'
-labels: []
+updated_date: '2026-07-01 17:59'
+labels:
+  - ai_sdlc
 dependencies: []
 ---
 
@@ -32,6 +35,22 @@ Assertions the happy path should make:
 
 Placement: pre-integrate (or a dedicated e2e suite), NOT the per-checkpoint gate — keep the sub-30s checkpoint budget (TASK-1133) intact. First scenario should include the feature-branch mission path, since that is where TASK-1352 lived.
 <!-- SECTION:DESCRIPTION:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. Take over mission ownership from custom by updating the backlog assignee and noting there is no existing task-1397 review-state artifact to migrate.
+2. Audit the drafted `test/e2e-mission-lifecycle.test.js` against the real `draft`, `active`, and `integrate` command behavior, plus any existing e2e/task-setup helpers.
+3. Replace or repair the test so it exercises the real lifecycle with deterministic stubs and asserts the actual mission/backlog/worktree artifacts and state transitions.
+4. Run the mission-required verification for a test-only change, plus any additional targeted test commands needed to prove the new coverage.
+5. Update graphify output after code changes and leave the task record with verification evidence and completion notes.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+User approved a minimal harness-only escape hatch if the strict black-box lifecycle remains uncontrollable: either add reviewer/implementer forcing on `active` or a dedicated stub-agent path. Plan remains to prefer the stricter no-lib-change route first, with the fake `codex` as the only runnable agent in the temp repo.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

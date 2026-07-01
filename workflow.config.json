@@ -11,7 +11,7 @@
       "branchPrefix": "mission/",
       "worktreePattern": "../<repo>-<slug>"
     },
-    "verification": { "command": "npm test", "defaultArea": "all" },
+    "verification": { "command": "./scripts/verify-local.sh {{area}}", "defaultArea": "all" },
     "review": { "provider": "forgejo", "baseUrl": "http://localhost:3300", "remote": "review", "repo": "magnus/parallix" }
   }
 }
