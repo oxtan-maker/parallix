@@ -17,5 +17,7 @@ ADR 0023 remains in WrGroceries and is cross-referenced here instead of copied.
 - `docs/adr/0046-npm-publish-process-and-security.md` — Adopt public npm registry publication for `@magnusekdahl/parallix` alongside the local tarball path; zero-dependency security posture, manual publish process, and rollback considerations
 - `docs/adr/0047-per-mission-change-size-budget.md` — Change the mission size-estimation basis from agent-usage % to **Net Engineering Lines (NEL)** — code+test diff, excluding docs and workflow/admin bookkeeping (the +0.65 reverse-causation confound). Draft estimate becomes a NEL bucket (0–80 / 81–235 / 235+, the empirical risk terciles); capture actual NEL at handoff to calibrate the estimate. No enforcement until the draft bucket is shown reliable.
 
+- `docs/adr/0048-fail-closed-harness-defense-against-agent-hallucinations.md` — Fail-closed harness defense against agent hallucinations: error classification, auto-send-back policy, and prioritized implementation plan for closing fail-open paths in the handoff/review/integrate lifecycle
+
 ## Cross-reference
 - `docs/adr/0023-ai-sdlc-configuration.md` remains in WrGroceries at `/home/magnus/code/visualBoard-task-1302/docs/adr/0023-ai-sdlc-configuration.md`.
