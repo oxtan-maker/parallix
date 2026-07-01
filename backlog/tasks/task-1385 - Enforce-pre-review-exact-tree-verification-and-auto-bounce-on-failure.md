@@ -4,7 +4,7 @@ title: Enforce pre-review exact-tree verification and auto-bounce on failure
 status: backlog
 assignee: []
 created_date: '2026-06-28 11:30'
-updated_date: '2026-06-29 05:01'
+updated_date: '2026-07-01 20:13'
 labels:
   - harness
   - workflow
@@ -22,7 +22,7 @@ priority: high
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-ADR 0048 Control C1: Run the configured verification gate mechanically before each review round. On gate failure, auto-bounce to the implementer with the gate output as a fix prompt. No reviewer cycle consumed.
+ADR 0048 Control C1: Run the configured verification gate mechanically before each review round. On gate failure, auto-bounce to the implementer with the gate output as a fix prompt and asking the implementer to fix with max retry =2. No reviewer cycle consumed.
 
 This closes the fail-open path where an agent can hand off with a green gate, receive review feedback, "fix" the code, and re-submit without the gate re-running. The gate exit code on a pinned tree is the sole trusted signal — agent textual claims are never trusted.
 
