@@ -3,7 +3,7 @@ import { git, getWorktreeStatus } from '../core/git.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as fmt from '../core/fmt.js';
-import * as missionStart from './mission-start.js';
+import missionStart from './mission-start.js';
 import * as agents from '../agents/agents.js';
 import { findMissionDir, findCheckpoints, getFirstLine, resolveWorktree, inferSlug, getMissionYear, missionDirForSlug, isWorkflowGeneratedArtifact } from '../core/mission-utils.js';
 import * as handoff from './handoff.js';
