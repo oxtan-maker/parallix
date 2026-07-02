@@ -6,7 +6,7 @@ const { spawnSync } = require('node:child_process');
 const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..');
-const pxPath = path.join(repoRoot, 'px.js');
+const pxPath = path.join(repoRoot, 'px.ts');
 // Read the version from the manifest so version bumps do not break these tests.
 const pkgVersion = require('../package.json').version;
 const versionRe = new RegExp(`parallix ${pkgVersion.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`);
@@ -64,7 +64,7 @@ function makeTargetRepo({ slug = 'task-px-001' } = {}) {
 }
 
 function runPx(args, options = {}) {
-  return spawnSync(process.execPath, [pxPath, ...args], {
+  return spawnSync(process.execPath, ['--experimental-strip-types', pxPath, ...args], {
     cwd: options.cwd || repoRoot,
     encoding: 'utf8',
   });
@@ -75,12 +75,19 @@ function skipIfSandboxBlocked(result) {
   return Boolean(result.error && result.error.code === 'EPERM' && !output);
 }
 
+function stripNodeWarnings(output) {
+  return output
+    .split('\n')
+    .filter(line => !/^\(node:/.test(line) && !/^Reparsing as ES module/.test(line) && !/^To eliminate this warning/.test(line) && !/^\(Use `node --trace-warnings/.test(line))
+    .join('\n');
+}
+
 test('px verify-env reads repo state from the caller cwd', () => {
   const target = makeTargetRepo();
   try {
     const result = runPx(['verify-env'], { cwd: target.root });
     if (skipIfSandboxBlocked(result)) return;
-    const output = `${result.stdout}${result.stderr}`;
+    const output = stripNodeWarnings(`${result.stdout}${result.stderr}`);
 
     assert.equal(result.status, 0, output);
     assert.match(output, /Running environment diagnostics/);

@@ -14,8 +14,9 @@ declare const module: unknown;
 
 function resolveRuntimePath(): string {
   if (typeof __filename === 'string' && __filename) { return __filename; }
-  if (typeof process.argv[1] === 'string' && path.isAbsolute(process.argv[1])) { return process.argv[1]; }
-  return path.resolve(process.cwd(), 'px.js');
+  const arg1 = typeof process.argv[1] === 'string' ? process.argv[1] : '';
+  if (arg1.endsWith('/px.ts') || arg1.endsWith('/px.js')) { return arg1; }
+  return path.resolve(process.cwd(), 'px.ts');
 }
 
 const runtimePath = resolveRuntimePath();
@@ -264,6 +265,9 @@ export async function run(argv = process.argv.slice(2), options: RunOptions = {}
   }
 }
 
-if (typeof require === 'undefined' || require.main === module) {
+const _cjsMain = typeof require !== 'undefined' && require.main === module;
+const _arg1 = typeof process.argv[1] === 'string' && process.argv[1] ? process.argv[1] : undefined;
+const _esmMain = _arg1 && _arg1.endsWith('/px.ts');
+if (_esmMain || _cjsMain) {
   run().then(code => { process.exitCode = code; });
 }

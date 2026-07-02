@@ -8,16 +8,17 @@
  * These tests put a fake `px` on PATH so `command px` inside the function is
  * exercised without needing a global install.
  */
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
-const { spawnSync } = require('node:child_process');
-const test = require('node:test');
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
+import test from 'node:test';
+import { shellInit } from '../px.ts';
 
-const { shellInit } = require('../px.js');
-
-const pxJs = path.resolve(__dirname, '..', 'px.js');
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const pxTs = path.resolve(__dirname, '..', 'px.ts');
 
 // Builds a fake `px` executable that prints the given transition signal.
 function makeFakePx({ signalPath, exitCode = 0, signal = 'next' }) {
@@ -67,7 +68,7 @@ test('px function follows a Next: cd transition', () => {
 
   const result = runBash(
     [
-      `eval "$(node ${JSON.stringify(pxJs)} shell-init bash)"`,
+      `eval "$(node --experimental-strip-types ${JSON.stringify(pxTs)} shell-init bash)"`,
       'px draft task-1 >/dev/null',
       'printf "PWD_AFTER=%s\\n" "$(pwd -P)"',
     ],
@@ -88,7 +89,7 @@ test('px function follows a Working directory transition', () => {
 
   const result = runBash(
     [
-      `eval "$(node ${JSON.stringify(pxJs)} shell-init bash)"`,
+      `eval "$(node --experimental-strip-types ${JSON.stringify(pxTs)} shell-init bash)"`,
       'px active task-1 >/dev/null',
       'printf "PWD_AFTER=%s\\n" "$(pwd -P)"',
     ],
@@ -109,7 +110,7 @@ test('px function preserves the runner exit code', () => {
 
   const result = runBash(
     [
-      `eval "$(node ${JSON.stringify(pxJs)} shell-init bash)"`,
+      `eval "$(node --experimental-strip-types ${JSON.stringify(pxTs)} shell-init bash)"`,
       'px integrate task-1 >/dev/null',
       'printf "STATUS=%s\\n" "$?"',
     ],
@@ -138,7 +139,7 @@ test('px function silently skips cd when target directory is missing (task-1381)
 
   const result = runBash(
     [
-      `eval "$(node ${JSON.stringify(pxJs)} shell-init bash)"`,
+      `eval "$(node --experimental-strip-types ${JSON.stringify(pxTs)} shell-init bash)"`,
       'px integrate task-1 >/dev/null',
       'printf "STATUS=%s\\n" "$?"',
     ],
@@ -169,7 +170,7 @@ test('px function silently skips cd for Working directory signal when target mis
 
   const result = runBash(
     [
-      `eval "$(node ${JSON.stringify(pxJs)} shell-init bash)"`,
+      `eval "$(node --experimental-strip-types ${JSON.stringify(pxTs)} shell-init bash)"`,
       'px integrate task-1 >/dev/null',
       'printf "STATUS=%s\\n" "$?"',
     ],
