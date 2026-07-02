@@ -1926,3 +1926,44 @@ test('hard launch failure (model not found) does not blocklist agent family', as
   assert.ok(error.message.includes('All eligible agents exhausted'));
   assert.equal(blockCalls.length, 0, `hard failures must not persist blocklist entries; got ${JSON.stringify(blockCalls)}`);
 });
+
+// Reproduces the reported symptom: mistral/vibe repeatedly re-enters the
+// persistent blocklist after the usage-limit condition is gone. Real vibe
+// requires an explicit non-interactive tool-approval bypass (--auto-approve /
+// --yolo); claude and opencode already pass their equivalents
+// (--dangerously-skip-permissions). Without it, a non-interactive run whose
+// prompt needs a tool exits non-zero with a generic "no interactive session"
+// message that matches none of the limit-hit or NON_BLOCKING_LAUNCH_ERROR_PATTERNS
+// regexes, so shouldPersistLaunchFailureBlock (agents.ts:171-181) falls through
+// to its default `true` and writes a fresh blocklist entry every single launch.
+test('mistral without a non-interactive tool-approval bypass gets re-blocklisted on every launch', async () => {
+  let blockCalls = [];
+  const fakeBlockFn = (agent, until) => {
+    blockCalls.push({ agent, until });
+    return { path: '/fake/agents.local.json', blocklist: {} };
+  };
+
+  const vibeBody = `
+    const hasBypass = process.argv.includes('--yolo') || process.argv.includes('--auto-approve');
+    if (process.argv.includes('--help')) { process.exit(0); }
+    if (!hasBypass) {
+      process.stderr.write('Tool call requires approval but no interactive terminal is available.\\n');
+      process.exit(1);
+    }
+    process.exit(0);
+  `;
+
+  const result = await withPathLaunchers({ vibe: vibeBody }, () => startAgent('active', {
+    prompt: 'Execute.',
+    selectAgentFn: (step, opts) => {
+      if (!opts.exclude.has('mistral')) return 'mistral';
+      throw new Error('All eligible agents exhausted');
+    },
+    detectLimitHitFn: () => null,
+    updateAgentBlockFn: fakeBlockFn,
+    log: () => {}
+  }));
+
+  assert.equal(result.agent, 'mistral', 'mistral should complete successfully once it can approve its own tool calls non-interactively');
+  assert.deepEqual(blockCalls, [], `mistral should not be blocklisted for a genuine non-interactive tool-approval gap; got ${JSON.stringify(blockCalls)}`);
+});

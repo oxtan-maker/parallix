@@ -385,6 +385,32 @@ test('active() runs the execute safety harness before handoff', async () => {
 
 // ---------- runHandoffAndReview wiring ----------
 
+// Regression guard for the repairHandoffFn default in runHandoffAndReview
+// (lib/commands/active.ts:433). repair-handoff.ts is imported via
+// `import * as repairHandoff from './repair-handoff.js'`, but repair-handoff.ts
+// also does `module.exports = repairHandoff` for CJS compat, which makes
+// `require('./repair-handoff.js')` return the function directly (with
+// isRelaunchableError/buildRelaunchPrompt attached as properties, no
+// `.repairHandoff` property). Under the compiled CJS runtime that `bin.px`
+// actually ships, tsc's `__importStar` interop wraps that into
+// `{ isRelaunchableError, buildRelaunchPrompt, default: <fn> }` — so the
+// bare namespace object and `.repairHandoff` are both non-callable, and only
+// `.default` resolves to the function. This test fails loudly if that export
+// shape ever changes without updating active.ts's accessor to match.
+test('repair-handoff module exposes its default export as callable under CJS require+importStar interop', () => {
+  const repairHandoffModule = require('../lib/commands/repair-handoff');
+  assert.equal(typeof repairHandoffModule, 'function', 'require(repair-handoff) must return the function directly (CJS compat line)');
+
+  // Replicate tsc's __importStar interop exactly (module lacks __esModule
+  // since `module.exports = repairHandoff` overwrites it at runtime).
+  const ns = {};
+  for (const k of Object.keys(repairHandoffModule)) { ns[k] = repairHandoffModule[k]; }
+  ns.default = repairHandoffModule;
+
+  assert.equal(typeof ns.default, 'function', 'namespace.default must be callable — this is what active.ts:433 relies on');
+  assert.equal(typeof ns.repairHandoff, 'undefined', 'namespace.repairHandoff is NOT set by importStar interop under CJS — using it as the accessor silently breaks handoff repair');
+});
+
 test('runHandoffAndReview passes worktree and implementer to startReviewLoop', async () => {
   const reviewLoopCalls = [];
   const result = await runHandoffAndReview('task-test', '/tmp/project-task-test', 'codex', {

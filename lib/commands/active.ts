@@ -430,7 +430,7 @@ async function runHandoffAndReview(slug, worktree, agent, options = {}) {
     validateCheckpointsBeforeHandoffFn = validateCheckpointsBeforeHandoff,
     performHandoff: _performHandoff = (/** @type{string} */ s, /** @type{object} */ o) => handoff.performHandoff(s, o),
     startReviewLoop: _startReviewLoop = (/** @type{string} */ s, /** @type{object} */ o) => review.startReviewLoop(s, o),
-    repairHandoffFn = /** @type{(s: string, w: string, e: string, o: object) => Promise<{repaired: boolean, blocker?: string}>} */(repairHandoff),
+    repairHandoffFn = /** @type{(s: string, w: string, e: string, o: object) => Promise<{repaired: boolean, blocker?: string}>} */(repairHandoff.default),
     attemptAgentRelaunchFn = attemptAgentRelaunch,
     log = fmt.log.plain,
     error = fmt.log.plainError

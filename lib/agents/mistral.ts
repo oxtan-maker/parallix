@@ -41,7 +41,14 @@ function resolveMistralCommand() {
 function buildMistralInvocation({ prompt, worktree, env, resume, sessionId, model = null }: MistralInvocationOptions) {
   void resume;
   void sessionId;
-  const args = ['--prompt', prompt, '--trust', '--output', 'text'];
+  // --trust only bypasses the working-directory trust prompt; tool-call
+  // approval is a separate gate that vibe --help documents as controlled by
+  // --auto-approve/--yolo. Without it, any prompt that needs a tool call
+  // blocks on interactive approval outside a TTY and fails with a generic
+  // error, which then gets misread as a real launch failure and persisted
+  // to the blocklist (claude/opencode/codex all pass their own equivalent
+  // non-interactive bypass already).
+  const args = ['--prompt', prompt, '--trust', '--yolo', '--output', 'text'];
 
   // Vibe programmatic mode does not support --resume flag in the same way
   // as other agents. The --resume flag exists but requires interactive selection

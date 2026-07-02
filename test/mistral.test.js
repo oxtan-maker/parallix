@@ -70,6 +70,13 @@ test('buildMistralInvocation includes --trust flag', () => {
   assert.ok(inv.args.includes('--trust'));
 });
 
+test('buildMistralInvocation includes --yolo flag for non-interactive tool-call approval', () => {
+  const { buildMistralInvocation } = require('../lib/agents/mistral');
+  const inv = buildMistralInvocation({ prompt: 'test', worktree: '/tmp' });
+  assert.equal(inv.command, 'vibe');
+  assert.ok(inv.args.includes('--yolo'), `expected --yolo in args: ${inv.args.join(' ')}`);
+});
+
 test('buildMistralInvocation includes --output text flag', () => {
   const { buildMistralInvocation } = require('../lib/agents/mistral');
   const inv = buildMistralInvocation({ prompt: 'test', worktree: '/tmp' });
