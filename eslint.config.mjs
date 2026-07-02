@@ -67,7 +67,7 @@ export default [
     },
     rules: {
       'no-undef': 'error',
-      'no-unused-vars': ['warn', { argsIgnorePattern, varsIgnorePattern, caughtErrorsIgnorePattern }],
+      'no-unused-vars': ['error', { argsIgnorePattern, varsIgnorePattern, caughtErrorsIgnorePattern }],
       'valid-typeof': 'error',
       'no-unreachable': 'error',
       'no-async-promise-executor': 'error',
@@ -114,7 +114,7 @@ export default [
     },
     rules: {
       'no-undef': 'error',
-      'no-unused-vars': ['warn', { argsIgnorePattern, varsIgnorePattern, caughtErrorsIgnorePattern }],
+      'no-unused-vars': ['error', { argsIgnorePattern, varsIgnorePattern, caughtErrorsIgnorePattern }],
       'valid-typeof': 'error',
       'no-unreachable': 'error',
       'no-async-promise-executor': 'error',

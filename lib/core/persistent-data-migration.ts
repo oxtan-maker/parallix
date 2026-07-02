@@ -176,7 +176,7 @@ function migrateStats(options: { sourcePaths?: string[]; sourcePath?: string; de
 
 interface BlocklistSource { filePath: string; payload: Record<string, unknown>; blocklist: Record<string, unknown>; }
 
-function readBlocklistSource(filePath: string, warn: (...args: unknown[]) => void, hardFailure = false): BlocklistSource | null {
+function readBlocklistSource(filePath: string, warn: (..._args: unknown[]) => void, hardFailure = false): BlocklistSource | null {
   if (!filePath || !fs.existsSync(filePath)) {return null;}
   try {
     const payload = JSON.parse(fs.readFileSync(filePath, 'utf8')) as Record<string, unknown>;
@@ -208,7 +208,7 @@ function sameValue(left: unknown, right: unknown): boolean {
  * @param options - Migration configuration (warn callback, destinationPath, sourcePaths)
  * @returns Result with destination path, merged blocklist, and conflict details
  */
-function migrateAgentBlocklists(options: { warn?: (...args: unknown[]) => void; destinationPath?: string; sourcePaths?: string[] } = {}): { destinationPath: string; blocklist: Record<string, unknown>; conflicts: unknown[] } {
+function migrateAgentBlocklists(options: { warn?: (..._args: unknown[]) => void; destinationPath?: string; sourcePaths?: string[] } = {}): { destinationPath: string; blocklist: Record<string, unknown>; conflicts: unknown[] } {
   const opts = options;
   const warn = opts.warn || (() => {});
   const destinationPath = opts.destinationPath || storage.resolveAgentsLocalPath({ ensureDir: true });

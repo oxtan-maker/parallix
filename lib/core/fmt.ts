@@ -98,8 +98,8 @@ export function branch(text: string): string { return colorize('magenta', text);
 export function sha(text: string): string { return colorize('yellow', text); }
 export function command(text: string): string { return colorize('green', text); }
 
-type LogFn = (...args: unknown[]) => void;
-type LogFunc = (text: string) => string | null;
+type LogFn = (..._args: unknown[]) => void;
+type LogFunc = (_text: string) => string | null;
 
 type Logger = {
   log: LogFn;

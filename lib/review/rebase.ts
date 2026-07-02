@@ -14,7 +14,7 @@ import { resolveWorktree, isMissionArtifact, isWorkflowGeneratedArtifact } from 
 import { isProviderEnabled } from './review-adapter.js';
 import { spawnSync } from 'child_process';
 
-type RunFn = (cmd: string, args: string[], opts: { cwd?: string; encoding?: string; stdio?: unknown[] }) => { status: number | null; stdout?: string; stderr?: string };
+type RunFn = (_cmd: string, _args: string[], _opts: { cwd?: string; encoding?: string; stdio?: unknown[] }) => { status: number | null; stdout?: string; stderr?: string };
 
 const _spawnSync = spawnSync as unknown as RunFn;
 
@@ -39,11 +39,11 @@ export async function commitSafeMissionArtifacts(slug: string, worktree: string,
 }: {
   taskFile?: string | null;
   gitFn?: typeof git;
-  log?: (msg: string) => void;
-  error?: (msg: string) => void;
-  isMissionArtifactFn?: (file: string, slug: string, rootDir: string) => boolean;
-  isWorkflowGeneratedArtifactFn?: (file: string) => boolean;
-  resolveStatsRelPathFn?: (rootDir: string) => string | null;
+  log?: (_msg: string) => void;
+  error?: (_msg: string) => void;
+  isMissionArtifactFn?: (_file: string, _slug: string, _rootDir: string) => boolean;
+  isWorkflowGeneratedArtifactFn?: (_file: string) => boolean;
+  resolveStatsRelPathFn?: (_rootDir: string) => string | null;
 } = {}): Promise<{ ok: boolean; dirty: boolean; unsafe?: boolean }> {
   const rootDir = worktree || process.cwd();
   const statusResult = gitFn(['-C', rootDir, 'status', '--porcelain=v1', '-z']);
@@ -131,15 +131,15 @@ export async function rebaseBeforeReviewRound(slug: string, {
   legacyIsForgejoReviewEnabledFn = null,
   isForgejoReviewEnabledFn = null
 }: {
-  runFn?: (cmd: string, args: string[], opts: { cwd?: string; encoding?: string; stdio?: unknown[] }) => { status: number | null; stdout?: string; stderr?: string };
+  runFn?: (_cmd: string, _args: string[], _opts: { cwd?: string; encoding?: string; stdio?: unknown[] }) => { status: number | null; stdout?: string; stderr?: string };
   gitFn?: typeof git;
   taskFile?: string | null;
   worktree?: string;
-  log?: (msg: string) => void;
-  error?: (msg: string) => void;
-  isReviewProviderEnabledFn?: ((wt: string) => boolean) | undefined | null;
-  legacyIsForgejoReviewEnabledFn?: ((wt: string) => boolean) | null;
-  isForgejoReviewEnabledFn?: ((wt: string) => boolean) | null;
+  log?: (_msg: string) => void;
+  error?: (_msg: string) => void;
+  isReviewProviderEnabledFn?: ((_wt: string) => boolean) | undefined | null;
+  legacyIsForgejoReviewEnabledFn?: ((_wt: string) => boolean) | null;
+  isForgejoReviewEnabledFn?: ((_wt: string) => boolean) | null;
 } = {}): Promise<{ ok: boolean; sharedFileConflicts: boolean }> {
   const cleanup = await commitSafeMissionArtifacts(slug, worktree, { taskFile, gitFn, log, error });
   if (!cleanup.ok) {

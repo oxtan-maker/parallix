@@ -599,7 +599,7 @@ function defaultIsAgentBlockedNow(agent: string) {
   try {
     const config = readAgentConfig(CONFIG_PATH, {});
     return isAgentBlocked(agent, config);
-  } catch (err) {
+  } catch (_err) {
     // If the config is malformed, surface that through the launcher path
     // (assertAgentSupported / launch) instead of silently rerouting. Treat as
     // not-blocked here so the existing error path runs.

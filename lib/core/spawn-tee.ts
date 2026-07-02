@@ -17,7 +17,7 @@ interface SpawnTeeResult {
 }
 
 interface NoOutputWatchdog {
-  onNoOutput?: (event: { command: string; args: string[]; pid: number | undefined; elapsedMs: number }) => void;
+  onNoOutput?: (_event: { command: string; args: string[]; pid: number | undefined; elapsedMs: number }) => void;
   initialDelayMs?: number;
   intervalMs?: number;
 }

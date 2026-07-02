@@ -47,8 +47,8 @@ function buildAgentResolutionPrompt({ slug, area, worktreePath, missionSpecificF
 async function resolveConflict(args: string[], {
   resolveConflictsFn = (integrate as any).resolveConflictsForMission,
   startAgentFn = startAgent,
-  exitFn = ((code: number) => process.exit(code)) as (code: number) => void,
-}: {resolveConflictsFn?: Function, startAgentFn?: Function, exitFn?: (code: number) => void} = {}) {
+  exitFn = ((_code: number) => process.exit(_code)) as (_code: number) => void,
+}: {resolveConflictsFn?: Function, startAgentFn?: Function, exitFn?: (_code: number) => void} = {}) {
   const explicitSlug = args[0];
   const slug = inferSlug(explicitSlug);
   if (!slug) {

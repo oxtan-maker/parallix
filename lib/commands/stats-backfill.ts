@@ -12,13 +12,13 @@ import {
 import { findMissionDir } from '../core/mission-utils.js';
 
 interface StatsAugmented {
-  resolveMissionClassification: (slug: string, rootDir?: string) => { classification?: string; source?: string };
-  _internals: Record<string, (...args: unknown[]) => unknown>;
-  resolveStatsPath: (options?: { ensureDir?: boolean }) => string;
-  resolveStatsRepoName: (rootDir: string) => string;
-  loadStatsCsv: (filePath: string, options?: { rootDir?: string }) => { rows: Record<string, string>[] };
-  deriveImplementerAndFixRounds: (slug: string, rootDir?: string) => { implementer: string; prFixRounds: number; source: string };
-  upsertStatsRow: (row: Record<string, string>, options: { filePath: string; rootDir?: string }) => { changed: boolean };
+  resolveMissionClassification: (_slug: string, _rootDir?: string) => { classification?: string; source?: string };
+  _internals: Record<string, (..._args: unknown[]) => unknown>;
+  resolveStatsPath: (_options?: { ensureDir?: boolean }) => string;
+  resolveStatsRepoName: (_rootDir: string) => string;
+  loadStatsCsv: (_filePath: string, _options?: { rootDir?: string }) => { rows: Record<string, string>[] };
+  deriveImplementerAndFixRounds: (_slug: string, _rootDir?: string) => { implementer: string; prFixRounds: number; source: string };
+  upsertStatsRow: (_row: Record<string, string>, _options: { filePath: string; rootDir?: string }) => { changed: boolean };
 }
 
 function getStats(): StatsAugmented {
@@ -175,7 +175,7 @@ function resolveHistoricalClassification(slug: string, taskFile: string, rootDir
   }
   // Classification missing or invalid — fall through to fallbacks.
   const classificationValue = getTaskFrontmatterValue(taskFile, 'classification');
-  const legacy = (s._internals as Record<string, (v: string) => string | null>).normalizeClassification(classificationValue ?? '');
+  const legacy = (s._internals as Record<string, (_v: string) => string | null>).normalizeClassification(classificationValue ?? '');
   if (legacy) {
     return { value: legacy, source: 'backlog-classification' };
   }
@@ -347,8 +347,8 @@ Notes:
 }
 
 interface BackfillOptions {
-  log?: (msg: string) => string | null;
-  error?: (msg: string) => string | null;
+  log?: (_msg: string) => string | null;
+  error?: (_msg: string) => string | null;
   rootDir?: string;
 }
 

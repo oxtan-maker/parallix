@@ -21,7 +21,7 @@ interface GitResult {
   error?: Error | null;
 }
 
-export type GitFn = (args: string[], options?: GitOptions) => GitResult;
+export type GitFn = (_args: string[], _options?: GitOptions) => GitResult;
 
 export interface VerificationAdapterConfig {
   command: string | null;

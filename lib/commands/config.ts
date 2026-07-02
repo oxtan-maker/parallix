@@ -4,9 +4,9 @@ import * as fmt from '../core/fmt.js';
 import { loadEffectiveConfig, loadWorkflowConfig, validateWorkflowConfig } from '../core/product-config.js';
 
 interface ConfigOptions {
-  logFn?: (msg: string) => void;
-  errorFn?: (msg: string) => void;
-  exitFn?: (code: number) => void;
+  logFn?: (_msg: string) => void;
+  errorFn?: (_msg: string) => void;
+  exitFn?: (_code: number) => void;
   rootDir?: string;
 }
 

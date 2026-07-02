@@ -64,7 +64,7 @@ export function readReviewState(slug: string, rootDir = process.cwd()): ReviewSt
 export function resolveReviewIdentity(
   slug: string,
   rootDir = process.cwd(),
-  options: { readReviewStateFn?: (s: string, r: string) => ReviewState | null } = {}
+  options: { readReviewStateFn?: (_s: string, _r: string) => ReviewState | null } = {}
 ): {
   identityUser: string | null;
   commentIdentityUser: string | null;
@@ -287,7 +287,7 @@ export class ReviewState {
     fs.writeFileSync(statePath, JSON.stringify(payload, null, 2) + '\n', 'utf8');
 
     const relPath = path.relative(worktree, statePath);
-    const result = gitFn(['-C', worktree, 'add', relPath]);
+    const _result = gitFn(['-C', worktree, 'add', relPath]);
     const msg = `review-state(${this.slug}): round ${this.round} (${this.phase}) [${this.reviewer} -> ${this.implementer}]${this.disposition ? ` disposition=${this.disposition}` : ''}`;
     const commitResult = gitFn(['-C', worktree, 'commit', '-m', msg]);
 

@@ -28,11 +28,6 @@ interface StatsOptions {
   exit?: Function;
 }
 
-interface CsvData {
-  headers: string[];
-  rows: Record<string, string>[];
-}
-
 interface NormalizeStatsRowOptions {
   repo?: string;
   rootDir?: string;
@@ -40,67 +35,6 @@ interface NormalizeStatsRowOptions {
 
 interface LoadStatsCsvOptions {
   rootDir?: string;
-}
-
-interface TelemetryToStatsOptions {
-  agentFamily: string;
-  durationMinutes?: number;
-  model?: string;
-}
-
-interface UpsertStatsRowOptions {
-  filePath?: string;
-  rootDir?: string;
-}
-
-interface RecordStageStatsOptions {
-  slug: string;
-  stage: string;
-  rootDir?: string;
-  filePath?: string;
-  date?: string;
-  implementer?: string;
-  reviewer?: string;
-  prFixRounds?: string;
-  telemetry?: unknown;
-  durationMinutes?: number;
-  model?: string | null;
-}
-
-interface RecordIntegrationStatsOptions {
-  slug: string;
-  rootDir?: string;
-  filePath?: string;
-  date?: string;
-}
-
-interface RecordActiveStatsOptions {
-  stage?: string;
-  slug: string;
-  rootDir?: string;
-  prFixRounds?: string;
-  model?: string;
-}
-
-interface RecordReviewStatsOptions {
-  stage?: string;
-  slug: string;
-  rootDir?: string;
-  reviewer?: string;
-  implementer?: string;
-  prFixRounds?: string;
-  model?: string;
-}
-
-interface RenderWeeklyStatsReportOptions {
-  today?: Date | string;
-  rootDir?: string | null;
-}
-
-interface RenderRangeStatsReportOptions {
-  rootDir?: string | null;
-  from?: string;
-  to?: string;
 }
 
 interface StatsRow {
@@ -137,30 +71,12 @@ interface StatsRow {
   missions?: number;
 }
 
-interface MissionStats {
-  implementer: string;
-  missions: number;
-  averageFixRounds: string;
-}
-
-interface AccModeOptions {
-  mode?: 'sum' | 'max' | 'replace';
-}
-
 interface StatsCsvPathOptions {
   filePath?: string;
   rootDir?: string;
   config?: unknown;
   forWrite?: boolean;
 }
-
-interface StatsCmdOptions {
-  log?: Function;
-  error?: Function;
-  exit?: Function;
-  rootDir?: string;
-}
-
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -172,7 +88,7 @@ import { readReviewState } from '../review/review-state.js';
 import * as reviewEvents from '../review/review-events.js';
 import { git } from '../core/git.js';
 import { migrateStats } from '../core/persistent-data-migration.js';
-import { getPrimaryWorktree, findMissionDir } from '../core/mission-utils.js';
+import { findMissionDir } from '../core/mission-utils.js';
 import * as forgejo from '../tools/forgejo.js';
 import * as storage from '../core/storage.js';
 

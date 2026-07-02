@@ -102,12 +102,12 @@ function postWorkflowComment(
   slug: string,
   message: string,
   options: {
-    log?: (msg: string) => void;
-    error?: (msg: string) => void;
-    readTokenFn?: (user: string, opts: { rootDir?: string }) => string | null;
-    postCommentFn?: (branch: string, token: string, body: string, opts?: Record<string, unknown>) => unknown;
-    buildMetadataFooterFn?: (s: string, r?: string) => string;
-    readReviewStateFn?: (s: string, r?: string) => any;
+    log?: (_msg: string) => void;
+    error?: (_msg: string) => void;
+    readTokenFn?: (_user: string, _opts: { rootDir?: string }) => string | null;
+    postCommentFn?: (_branch: string, _token: string, _body: string, _opts?: Record<string, unknown>) => unknown;
+    buildMetadataFooterFn?: (_s: string, _r?: string) => string;
+    readReviewStateFn?: (_s: string, _r?: string) => any;
     rootDir?: string;
     reviewIdentity?: string;
     forgejoUser?: string;
@@ -172,11 +172,11 @@ function recordLocalReviewVerdict(
   outcome: string,
   options: {
     worktree?: string;
-    writeReviewStateFn?: (s: string, st: any, w: string) => boolean;
-    createEventFn?: (s: string, t: string, p: Record<string, unknown>, o: Record<string, unknown>) => CreateResult;
-    readReviewStateFn?: (s: string, r?: string) => any;
-    log?: (msg: string) => void;
-    error?: (msg: string) => void;
+    writeReviewStateFn?: (_s: string, _st: any, _w: string) => boolean;
+    createEventFn?: (_s: string, _t: string, _p: Record<string, unknown>, _o: Record<string, unknown>) => CreateResult;
+    readReviewStateFn?: (_s: string, _r?: string) => any;
+    log?: (_msg: string) => void;
+    error?: (_msg: string) => void;
     reviewer?: string;
   } = {}
 ): void {
@@ -216,18 +216,18 @@ function postWorkflowReview(
   outcome: string,
   message: string,
   options: {
-    log?: (msg: string) => void;
-    error?: (msg: string) => void;
-    readTokenFn?: (user: string, opts: { rootDir?: string }) => string | null;
-    postReviewFn?: (branch: string, token: string, outcome: string, body: string, opts?: Record<string, unknown>) => unknown;
-    buildMetadataFooterFn?: (s: string, r?: string) => string;
-    readReviewStateFn?: (s: string, r?: string) => any;
+    log?: (_msg: string) => void;
+    error?: (_msg: string) => void;
+    readTokenFn?: (_user: string, _opts: { rootDir?: string }) => string | null;
+    postReviewFn?: (_branch: string, _token: string, _outcome: string, _body: string, _opts?: Record<string, unknown>) => unknown;
+    buildMetadataFooterFn?: (_s: string, _r?: string) => string;
+    readReviewStateFn?: (_s: string, _r?: string) => any;
     worktree?: string;
     reviewIdentity?: string;
     forgejoUser?: string;
-    getPrAuthorFn?: (branch: string, token: string, opts?: Record<string, unknown>) => unknown;
-    writeReviewStateFn?: (s: string, st: any, w: string) => boolean;
-    createEventFn?: (s: string, t: string, p: Record<string, unknown>, o: Record<string, unknown>) => CreateResult;
+    getPrAuthorFn?: (_branch: string, _token: string, _opts?: Record<string, unknown>) => unknown;
+    writeReviewStateFn?: (_s: string, _st: any, _w: string) => boolean;
+    createEventFn?: (_s: string, _t: string, _p: Record<string, unknown>, _o: Record<string, unknown>) => CreateResult;
   } = {}
 ): { ok: boolean; error?: string; skipped?: boolean; reason?: string; prAuthor?: unknown } {
   const log = options.log || fmt.log.plain;
@@ -292,8 +292,8 @@ async function consumeReviewerArtifacts(
   slug: string,
   reviewer: string,
   options: {
-    log?: (msg: string) => void;
-    error?: (msg: string) => void;
+    log?: (_msg: string) => void;
+    error?: (_msg: string) => void;
     readArtifactFn?: typeof readArtifactFile;
     deleteArtifactFn?: typeof deleteArtifactFile;
     tmpDir?: string | null;
@@ -301,12 +301,12 @@ async function consumeReviewerArtifacts(
     worktree?: string;
     providerEnabled?: boolean | null;
     forgejoEnabled?: boolean | null;
-    readTokenFn?: (user: string, opts?: Record<string, unknown>) => string | null;
-    getCommentsFn?: (branch: string, token: string) => Promise<unknown[]>;
-    postCommentFn?: (branch: string, token: string, body: string, opts?: Record<string, unknown>) => unknown;
-    postReviewFn?: (branch: string, token: string, outcome: string, body: string, opts?: Record<string, unknown>) => unknown;
-    buildMetadataFooterFn?: (s: string, r?: string) => string;
-    createEventFn?: (s: string, t: string, p: CreateEventParams, o: CreateEventOptions) => CreateEventResult;
+    readTokenFn?: (_user: string, _opts?: Record<string, unknown>) => string | null;
+    getCommentsFn?: (_branch: string, _token: string) => Promise<unknown[]>;
+    postCommentFn?: (_branch: string, _token: string, _body: string, _opts?: Record<string, unknown>) => unknown;
+    postReviewFn?: (_branch: string, _token: string, _outcome: string, _body: string, _opts?: Record<string, unknown>) => unknown;
+    buildMetadataFooterFn?: (_s: string, _r?: string) => string;
+    createEventFn?: (_s: string, _t: string, _p: CreateEventParams, _o: CreateEventOptions) => CreateEventResult;
   } = {}
 ): Promise<{ consumed: boolean; ok?: boolean; reviewState?: string | null }> {
   const log = options.log || fmt.log.plain;
@@ -452,8 +452,8 @@ async function consumeImplementerArtifacts(
   slug: string,
   implementer: string,
   options: {
-    log?: (msg: string) => void;
-    error?: (msg: string) => void;
+    log?: (_msg: string) => void;
+    error?: (_msg: string) => void;
     readArtifactFn?: typeof readArtifactFile;
     deleteArtifactFn?: typeof deleteArtifactFile;
     tmpDir?: string | null;
@@ -461,11 +461,11 @@ async function consumeImplementerArtifacts(
     worktree?: string;
     providerEnabled?: boolean | null;
     forgejoEnabled?: boolean | null;
-    readTokenFn?: (user: string, opts?: Record<string, unknown>) => string | null;
-    getCommentsFn?: (branch: string, token: string) => Promise<unknown[]>;
-    postCommentFn?: (branch: string, token: string, body: string, opts?: Record<string, unknown>) => unknown;
-    buildMetadataFooterFn?: (s: string, r?: string) => string;
-    createEventFn?: (s: string, t: string, p: CreateEventParams, o: CreateEventOptions) => CreateEventResult;
+    readTokenFn?: (_user: string, _opts?: Record<string, unknown>) => string | null;
+    getCommentsFn?: (_branch: string, _token: string) => Promise<unknown[]>;
+    postCommentFn?: (_branch: string, _token: string, _body: string, _opts?: Record<string, unknown>) => unknown;
+    buildMetadataFooterFn?: (_s: string, _r?: string) => string;
+    createEventFn?: (_s: string, _t: string, _p: CreateEventParams, _o: CreateEventOptions) => CreateEventResult;
   } = {}
 ): Promise<{ consumed: boolean; ok?: boolean; disposition?: string | null }> {
   const log = options.log || fmt.log.plain;

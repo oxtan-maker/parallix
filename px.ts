@@ -8,7 +8,7 @@ import { createRequire } from 'node:module';
 declare const __filename: string | undefined;
 declare const require: {
   main?: unknown;
-  (id: string): any;
+  (_id: string): any;
 } | undefined;
 declare const module: unknown;
 

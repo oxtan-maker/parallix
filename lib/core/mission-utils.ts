@@ -929,7 +929,7 @@ export function findMissionDocInBranches(slug: string, rootDir: string = process
   try {
     branchResult = runner(['-C', rootDir, 'branch', '-a', '--format=%(refname:short)']);
     if (branchResult.status !== 0) {return candidates;}
-  } catch (e) {
+  } catch (_e) {
     return candidates;
   }
 
@@ -946,7 +946,7 @@ export function findMissionDocInBranches(slug: string, rootDir: string = process
           candidates.push({ branch, path: f });
           break;
         }
-      } catch (err) {
+      } catch (_err) {
         // ignore
       }
     }

@@ -24,11 +24,11 @@ interface EnsureOptions {
   lstatSyncFn?: typeof fs.lstatSync;
   readFileSyncFn?: typeof fs.readFileSync;
   writeFileSyncFn?: typeof fs.writeFileSync;
-  logFn?: (msg: string) => void;
+  logFn?: (_msg: string) => void;
 }
 
 type EnsureWorkflowGitignoreFn = {
-  (rootDir: string, options?: EnsureOptions): GitignoreResult;
+  (_rootDir: string, _options?: EnsureOptions): GitignoreResult;
   WORKFLOW_ENTRIES: typeof WORKFLOW_ENTRIES;
   ensureWorkflowGitignore: EnsureWorkflowGitignoreFn;
 };

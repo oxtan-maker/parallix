@@ -207,8 +207,8 @@ export interface CreateEventParams {
 export interface CreateEventOptions {
   skipGit?: boolean;
   gitFn?: typeof git;
-  log?: (msg: string) => void;
-  error?: (msg: string) => void;
+  log?: (_msg: string) => void;
+  error?: (_msg: string) => void;
   worktree?: string;
   allowMissingRequiredFields?: boolean;
 }
@@ -247,7 +247,7 @@ export interface ReadAllEventsOptions {
   rootDir?: string;
   readdirSync?: typeof fs.readdirSync;
   readFileSync?: typeof fs.readFileSync;
-  error?: (msg: string) => void;
+  error?: (_msg: string) => void;
 }
 
 export interface ParseEventResult {
@@ -352,14 +352,14 @@ function classifyComment(comment: { body?: string }): string | null {
 }
 
 export interface ConsumeHumanNotesOptions {
-  getCommentsFn?: (branch: string, token: string) => Promise<unknown[]>;
-  createEventFn?: typeof createEvent;
-  readTokenFn?: (user: string) => string | null;
+  getCommentsFn?: (_branch: string, _token: string) => Promise<unknown[]>;
+    createEventFn?: typeof createEvent;
+    readTokenFn?: (_user: string) => string | null;
   reviewIdentity?: string | null;
   forgejoUser?: string | null;
   worktree?: string;
-  log?: (msg: string) => void;
-  error?: (msg: string) => void;
+  log?: (_msg: string) => void;
+  error?: (_msg: string) => void;
 }
 
 /**
@@ -578,8 +578,8 @@ function createEvent(slug: string, eventType: string, params: CreateEventParams,
 
 export interface ImportLegacyArtifactOptions {
   tmpDir?: string;
-  log?: (msg: string) => void;
-  error?: (msg: string) => void;
+  log?: (_msg: string) => void;
+  error?: (_msg: string) => void;
   worktree?: string;
 }
 
@@ -650,9 +650,9 @@ const LEGACY_ARTIFACT_TO_EVENT_TYPE: Readonly<Record<string, string>> = Object.f
 
 export interface ImportAllLegacyOptions {
   tmpDir?: string;
-  error?: (msg: string) => void;
+  error?: (_msg: string) => void;
   worktree?: string;
-  log?: (msg: string) => void;
+  log?: (_msg: string) => void;
 }
 
 /**

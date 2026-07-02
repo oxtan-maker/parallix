@@ -51,7 +51,7 @@ export function readTextFlag(
   inlineFlag: string,
   fileFlag: string,
   label: string,
-  options: { readFileSync?: typeof fs.readFileSync; error?: (msg: string) => void; exit?: (code: number) => never } = {}
+  options: { readFileSync?: typeof fs.readFileSync; error?: (_msg: string) => void; exit?: (_code: number) => never } = {}
 ): string | null {
   const readFileSync = options.readFileSync || fs.readFileSync;
   const error = options.error || fmt.log.plainError;
@@ -98,8 +98,8 @@ export function formatStaticReviewSuccess(slug: string): string {
 function repairStaleActiveTaskAfterReview(
   slug: string,
   options: {
-    log?: (msg: string) => void;
-    error?: (msg: string) => void;
+    log?: (_msg: string) => void;
+    error?: (_msg: string) => void;
     getTaskStatusFn?: typeof getTaskStatus;
     resolveTaskFileFn?: typeof resolveTaskFile;
     transitionTaskFn?: typeof transitionTask;
@@ -133,7 +133,7 @@ function repairStaleActiveTaskAfterReview(
 
 async function commitPersistedReviewOutputs(
   slug: string,
-  options: { worktree?: string; taskFile?: string | null; log?: (msg: string) => void; error?: (msg: string) => void } = {}
+  options: { worktree?: string; taskFile?: string | null; log?: (_msg: string) => void; error?: (_msg: string) => void } = {}
 ): Promise<{ ok: boolean; dirty?: boolean; unsafe?: boolean }> {
   return commitSafeMissionArtifacts(slug, options.worktree || process.cwd(), {
     taskFile: options.taskFile || null,
@@ -146,8 +146,8 @@ export function postStaticReviewComment(
   slug: string,
   message: string,
   options: {
-    log?: (msg: string) => void;
-    error?: (msg: string) => void;
+    log?: (_msg: string) => void;
+    error?: (_msg: string) => void;
     resolveTaskFileFn?: typeof resolveTaskFile;
     getTaskImplementerFn?: typeof getTaskImplementer;
     resolveWorktreeFn?: typeof resolveWorktree;
@@ -215,7 +215,7 @@ export function postStaticReviewComment(
 export function performStaticReview(
   slug: string,
   options: {
-    log?: (msg: string) => void;
+    log?: (_msg: string) => void;
     findMissionDir?: typeof findMissionDir;
     findCheckpoints?: typeof findCheckpoints;
     readFileSync?: typeof fs.readFileSync;
@@ -338,9 +338,9 @@ export function verifyReview(
   slug: string,
   skipGate: boolean | string,
   options: {
-    log?: (msg: string) => void;
-    error?: (msg: string) => void;
-    exit?: (code: number) => never;
+    log?: (_msg: string) => void;
+    error?: (_msg: string) => void;
+    exit?: (_code: number) => never;
     resolveWorktreeFn?: typeof resolveWorktree;
     findMissionDirFn?: typeof findMissionDir;
     getCurrentBranchFn?: typeof getCurrentBranch;
@@ -522,15 +522,15 @@ export async function submitForReview(
   slug: string,
   skipGate: boolean | string,
   options: {
-    exit?: (code: number) => never;
+    exit?: (_code: number) => never;
     resolveTaskFileFn?: typeof resolveTaskFile;
     getTaskImplementerFn?: typeof getTaskImplementer;
     resolveWorktreeFn?: typeof resolveWorktree;
-    performHandoffFn?: (slug: string, opts?: Record<string, unknown>) => Promise<Record<string, unknown>>;
+    performHandoffFn?: (_slug: string, _opts?: Record<string, unknown>) => Promise<Record<string, unknown>>;
     readReviewStateFn?: typeof readReviewState;
     isReviewProviderEnabledFn?: typeof isProviderEnabled;
     isForgejoReviewEnabledFn?: typeof isProviderEnabled;
-    log?: (msg: string) => void;
+    log?: (_msg: string) => void;
   } = {}
 ): Promise<void> {
   const exit = options.exit || process.exit;
@@ -583,9 +583,9 @@ export async function submitForReview(
 export async function readComments(
   slug: string,
   options: {
-    log?: (msg: string) => void;
-    error?: (msg: string) => void;
-    exit?: (code: number) => never;
+    log?: (_msg: string) => void;
+    error?: (_msg: string) => void;
+    exit?: (_code: number) => never;
     readTokenFn?: typeof readToken;
     readReviewStateFn?: typeof readReviewState;
     resolveReviewUserFn?: typeof resolveReviewUser;
@@ -676,9 +676,9 @@ export async function readComments(
 export async function pushRound(
   slug: string,
   options: {
-    log?: (msg: string) => void;
-    error?: (msg: string) => void;
-    exit?: (code: number) => never;
+    log?: (_msg: string) => void;
+    error?: (_msg: string) => void;
+    exit?: (_code: number) => never;
     resolveWorktreeFn?: typeof resolveWorktree;
     resolveTaskFileFn?: typeof resolveTaskFile;
     getTaskImplementerFn?: typeof getTaskImplementer;
@@ -800,7 +800,7 @@ export async function pushRound(
 export function showReviewStatus(
   slug: string,
   options: {
-    log?: (msg: string) => void;
+    log?: (_msg: string) => void;
     readReviewStateFn?: typeof readReviewState;
     resolveWorktreeFn?: typeof resolveWorktree;
   } = {}
@@ -843,9 +843,9 @@ export function commentRound(
   slug: string,
   message: string,
   options: {
-    log?: (msg: string) => void;
-    error?: (msg: string) => void;
-    exit?: (code: number) => never;
+    log?: (_msg: string) => void;
+    error?: (_msg: string) => void;
+    exit?: (_code: number) => never;
     readReviewStateFn?: typeof readReviewState;
     writeReviewStateFn?: typeof writeReviewState;
     resolveReviewUserFn?: typeof resolveReviewUser;
@@ -902,8 +902,8 @@ export function commentRound(
 export async function consumeArtifacts(
   slug: string,
   options: {
-    log?: (msg: string) => void;
-    error?: (msg: string) => void;
+    log?: (_msg: string) => void;
+    error?: (_msg: string) => void;
     resolveWorktreeFn?: typeof resolveWorktree;
     transitionTaskFn?: typeof transitionTask;
     consumeReviewerArtifactsFn?: typeof consumeReviewerArtifacts;
@@ -1015,9 +1015,9 @@ export function submitReviewRound(
   outcome: string,
   message: string,
   options: {
-    log?: (msg: string) => void;
-    error?: (msg: string) => void;
-    exit?: (code: number) => never;
+    log?: (_msg: string) => void;
+    error?: (_msg: string) => void;
+    exit?: (_code: number) => never;
     transitionTaskFn?: typeof transitionTask;
     readReviewStateFn?: typeof readReviewState;
     writeReviewStateFn?: typeof writeReviewState;
@@ -1178,9 +1178,9 @@ export function submitReviewRound(
 export async function closeMissionPr(
   slug: string,
   options: {
-    log?: (msg: string) => void;
-    error?: (msg: string) => void;
-    exit?: (code: number) => never;
+    log?: (_msg: string) => void;
+    error?: (_msg: string) => void;
+    exit?: (_code: number) => never;
     readTokenFn?: typeof readToken;
     readReviewStateFn?: typeof readReviewState;
     resolveReviewUserFn?: typeof resolveReviewUser;
@@ -1233,9 +1233,9 @@ export function createEventHandler(
   slug: string,
   args: string[],
   options: {
-    log?: (msg: string) => void;
-    error?: (msg: string) => void;
-    exit?: (code: number) => never;
+    log?: (_msg: string) => void;
+    error?: (_msg: string) => void;
+    exit?: (_code: number) => never;
     resolveWorktreeFn?: typeof resolveWorktree;
     readReviewStateFn?: typeof readReviewState;
   } = {}
@@ -1349,9 +1349,9 @@ export function importLegacyHandler(
   slug: string,
   args: string[],
   options: {
-    log?: (msg: string) => void;
-    error?: (msg: string) => void;
-    exit?: (code: number) => never;
+    log?: (_msg: string) => void;
+    error?: (_msg: string) => void;
+    exit?: (_code: number) => never;
     resolveWorktreeFn?: typeof resolveWorktree;
   } = {}
 ): void {
@@ -1383,9 +1383,9 @@ export async function review(
   args: string[],
   options: {
     inferSlugFn?: typeof inferSlug;
-    log?: (msg: string) => void;
-    error?: (msg: string) => void;
-    exit?: (code: number) => never;
+    log?: (_msg: string) => void;
+    error?: (_msg: string) => void;
+    exit?: (_code: number) => never;
     verifyReviewFn?: typeof verifyReview;
     submitForReviewFn?: typeof submitForReview;
     consumeArtifactsFn?: typeof consumeArtifacts;

@@ -64,14 +64,14 @@ async function pollForReview(
   sinceIso: string,
   token: string,
   options: {
-    getLatestReviewForPrFn?: (prNumber: number, reviewerUser: string, sinceIso: string, token: string) => Promise<unknown>;
-    sleepFn?: (ms: number) => Promise<void>;
+    getLatestReviewForPrFn?: (_prNumber: number, _reviewerUser: string, _sinceIso: string, _token: string) => Promise<unknown>;
+    sleepFn?: (_ms: number) => Promise<void>;
     intervalMs?: number;
     timeoutMs?: number;
     verbose?: boolean;
     label?: string;
     retryCount?: number;
-    log?: (msg: string) => void;
+    log?: (_msg: string) => void;
   } = {}
 ): Promise<string | typeof POLL_TIMEOUT | null> {
   const {
@@ -131,14 +131,14 @@ async function pollForDisposition(
   sinceIso: string,
   token: string,
   options: {
-    getLatestDispositionForPrFn?: (prNumber: number, implementerUser: string, sinceIso: string, token: string) => Promise<unknown>;
-    sleepFn?: (ms: number) => Promise<void>;
+    getLatestDispositionForPrFn?: (_prNumber: number, _implementerUser: string, _sinceIso: string, _token: string) => Promise<unknown>;
+    sleepFn?: (_ms: number) => Promise<void>;
     intervalMs?: number;
     timeoutMs?: number;
     verbose?: boolean;
     label?: string;
     retryCount?: number;
-    log?: (msg: string) => void;
+    log?: (_msg: string) => void;
   } = {}
 ): Promise<string | typeof POLL_TIMEOUT | null> {
   const {

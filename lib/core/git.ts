@@ -1,4 +1,4 @@
-import childProcess, { spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import type { SpawnSyncOptions } from 'node:child_process';
 import * as fsMod from 'node:fs';
 import * as pathMod from 'node:path';
@@ -90,7 +90,7 @@ interface RebaseStateResult {
 }
 
 interface GitRunner {
-  (args: string[]): GitResult;
+  (_args: string[]): GitResult;
 }
 
 interface DetectRebaseOptions {

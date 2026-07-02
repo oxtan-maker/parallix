@@ -89,7 +89,7 @@ export function resolveParallixHome(
  */
 export interface ResolveStatsOptions {
   ensureDir?: boolean;
-  warn?: (...args: unknown[]) => void;
+  warn?: (..._args: unknown[]) => void;
 }
 
 export function resolveStatsPath(options: ResolveStatsOptions = {}): string {

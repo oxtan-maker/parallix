@@ -32,10 +32,10 @@ async function rebase(args: string[], {
   detectRebaseStateFn = detectRebaseState,
   resolveMissionBaseBranchFn = resolveMissionBaseBranch,
   gitFn = git,
-  exitFn = ((code: number) => process.exit(code)) as (code: number) => void,
+  exitFn = ((_code: number) => process.exit(_code)) as (_code: number) => void,
   isForgejoReviewEnabledFn = isForgejoReviewEnabled,
   fetchReviewBranchFn = fetchReviewBranch,
-}: {inferSlugFn?: Function, findMissionDirFn?: Function, findMissionAreaFn?: Function, getCurrentBranchFn?: Function, resolveConflictsFn?: Function, startAgentFn?: Function, createPrFn?: Function, readTokenFn?: Function, resolveForgejoUserFn?: Function, resolveTaskFileFn?: Function, getTaskImplementerFn?: Function, detectRebaseStateFn?: Function, resolveMissionBaseBranchFn?: Function, gitFn?: Function, exitFn?: (code: number) => void, isForgejoReviewEnabledFn?: Function, fetchReviewBranchFn?: Function} = {}) {
+}: {inferSlugFn?: Function, findMissionDirFn?: Function, findMissionAreaFn?: Function, getCurrentBranchFn?: Function, resolveConflictsFn?: Function, startAgentFn?: Function, createPrFn?: Function, readTokenFn?: Function, resolveForgejoUserFn?: Function, resolveTaskFileFn?: Function, getTaskImplementerFn?: Function, detectRebaseStateFn?: Function, resolveMissionBaseBranchFn?: Function, gitFn?: Function, exitFn?: (_code: number) => void, isForgejoReviewEnabledFn?: Function, fetchReviewBranchFn?: Function} = {}) {
   const flags = args.filter(a => a.startsWith('--'));
   const params = args.filter(a => !a.startsWith('--'));
   const isPush = flags.includes('--push');

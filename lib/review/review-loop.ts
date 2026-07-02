@@ -9,7 +9,7 @@ import * as path from 'path';
 import * as fmt from '../core/fmt.js';
 import { git, run } from '../core/git.js';
 import { findMissionDir, findMissionArea, resolveWorktree, missionBranchName } from '../core/mission-utils.js';
-import { runVerificationGate, formatVerificationCommand } from '../core/verification.js';
+import { formatVerificationCommand } from '../core/verification.js';
 import { resolveTaskFile, getTaskImplementer, getTaskStatus, enforceTaskAssignee, transitionTask, reportTaskResolution } from '../tools/backlog.js';
 import { toVirtual, transitionVirtual } from '../core/state-map.js';
 import { getPrStatus, readToken, getLatestReviewForPr, getLatestDispositionForPr, providerAvailable, getComments, postComment, postReview, resolveReviewUser, isProviderEnabled } from './review-adapter.js';
@@ -99,8 +99,8 @@ export function recordStageStatsSafe(
     reviewer?: string;
     result?: Record<string, any>;
     sinceMs?: number;
-    log?: (msg: string) => void;
-    error?: (msg: string) => void;
+    log?: (_msg: string) => void;
+    error?: (_msg: string) => void;
     state?: Record<string, any>;
     writeReviewStateFn?: typeof writeReviewState;
     model?: string | null;
@@ -150,7 +150,7 @@ const _require = createRequire(__filename);
 
 export function maybeUpdateGraphifyBeforeReview(
   rootDir: string,
-  { commandRunner = run, log = fmt.log.plain }: { commandRunner?: typeof run; log?: (msg: string) => void } = {}
+  { commandRunner = run, log = fmt.log.plain }: { commandRunner?: typeof run; log?: (_msg: string) => void } = {}
 ): unknown {
   // Lazy require to break circular dependency with core/mission-utils
   const { updateGraphifyKnowledgeGraph } = _require('../core/mission-utils.js');
@@ -181,7 +181,7 @@ export function applyAgentFallback(opts: {
   slug: string;
   worktree?: string;
   taskResolution?: Record<string, any>;
-  log?: (msg: string) => void;
+  log?: (_msg: string) => void;
   writeReviewStateFn?: typeof writeReviewState;
   enforceTaskAssigneeFn?: typeof enforceTaskAssignee;
 }): string {
@@ -209,7 +209,7 @@ export function persistNormalizedPhaseRepair(
   slug: string,
   state: ReviewState,
   worktree: string,
-  { log = fmt.log.plain, writeReviewStateFn = writeReviewState }: { log?: (msg: string) => void; writeReviewStateFn?: typeof writeReviewState } = {}
+  { log = fmt.log.plain, writeReviewStateFn = writeReviewState }: { log?: (_msg: string) => void; writeReviewStateFn?: typeof writeReviewState } = {}
 ): void {
   if (!state || !state.phaseOriginal || (VALID_PHASES as readonly string[]).includes(state.phaseOriginal)) {
     return;
@@ -248,7 +248,7 @@ export function stageLaunchSinceMs(result: { startedAt?: string } | null | undef
 const GATE_FAILURE_CLASS = 'class-6-genuine-gate-failure';
 const GATE_FAILURE_ACTION = 'auto-send-back';
 
-export function classifyGateFailure(output: string): { classification: string; action: string; isRelaunchable: boolean } {
+export function classifyGateFailure(_output: string): { classification: string; action: string; isRelaunchable: boolean } {
   // Gate failures are genuine code issues — always relaunchable via auto-send-back.
   // The full classifier (TASK-1389) will expand this to 8 classes with nuanced dispatch.
   return {
@@ -278,8 +278,8 @@ export async function runPreReviewGate(
   opts: {
     findMissionAreaFn?: typeof findMissionArea;
     runFn?: typeof run;
-    log?: (msg: string) => void;
-    error?: (msg: string) => void;
+    log?: (_msg: string) => void;
+    error?: (_msg: string) => void;
   } = {}
 ): Promise<PreReviewGateResult> {
   const {
@@ -351,14 +351,14 @@ export async function handleGateFailureAutoBounce(
     applyAgentFallbackFn?: typeof applyAgentFallback;
     taskResolution?: { ok: boolean; taskFile?: string };
     enforceTaskAssigneeFn?: typeof enforceTaskAssignee;
-    log?: (msg: string) => void;
-    error?: (msg: string) => void;
+    log?: (_msg: string) => void;
+    error?: (_msg: string) => void;
     sleepFn?: typeof delay;
     buildCompactActOnReviewPromptFn?: typeof buildCompactActOnReviewPrompt;
-    isForgejoReviewEnabledFn?: ((rootDir?: string) => boolean) | null;
-    isReviewProviderEnabledFn?: ((rootDir?: string) => boolean) | null;
-    legacyIsForgejoReviewEnabledFn?: ((rootDir?: string) => boolean) | null;
-    exit?: (code: number) => never;
+    isForgejoReviewEnabledFn?: ((_rootDir?: string) => boolean) | null;
+    isReviewProviderEnabledFn?: ((_rootDir?: string) => boolean) | null;
+    legacyIsForgejoReviewEnabledFn?: ((_rootDir?: string) => boolean) | null;
+    exit?: (_code: number) => never;
   } = {}
 ): Promise<{ bounced: boolean; stranded: boolean }> {
   const {
@@ -371,12 +371,12 @@ export async function handleGateFailureAutoBounce(
     enforceTaskAssigneeFn,
     log = fmt.log.plain,
     error = fmt.log.plainError,
-    sleepFn = delay,
-    buildCompactActOnReviewPromptFn = buildCompactActOnReviewPrompt,
-    isForgejoReviewEnabledFn,
-    isReviewProviderEnabledFn,
-    legacyIsForgejoReviewEnabledFn,
-    exit = process.exit,
+    sleepFn: _sleepFn = delay,
+    buildCompactActOnReviewPromptFn: _buildCompactActOnReviewPromptFn = buildCompactActOnReviewPrompt,
+    isForgejoReviewEnabledFn: _isForgejoReviewEnabledFn,
+    isReviewProviderEnabledFn: _isReviewProviderEnabledFn,
+    legacyIsForgejoReviewEnabledFn: _legacyIsForgejoReviewEnabledFn,
+    exit: _exit = process.exit,
   } = opts;
 
   const MAX_GATE_RETRY = 2;
@@ -448,7 +448,7 @@ export async function handleGateFailureAutoBounce(
   try {
     const launchResult = await startAgentFn('act-on-review', {
       agent: implementer,
-      prompt: (actualImplementer: string) => fixPrompt,
+      prompt: (_actualImplementer: string) => fixPrompt,
       worktree,
       slug,
       role: 'implementer',
@@ -507,12 +507,12 @@ export async function startReviewLoop(slug: string, opts: {
   buildAutonomousReviewMatrixFn?: typeof buildAutonomousReviewMatrix;
   formatMatrixSummaryFn?: typeof formatMatrixSummary;
   selectAgentFn?: typeof selectAgent;
-  providerAvailableFn?: ((url: string) => Promise<boolean>) | null | undefined;
+  providerAvailableFn?: ((_url: string) => Promise<boolean>) | null | undefined;
   runFn?: typeof run;
   getPrStatusFn?: typeof getPrStatus;
   enforceTaskAssigneeFn?: typeof enforceTaskAssignee;
   resolveReviewUserFn?: (() => string) | null | undefined;
-  forgejoAvailableFn?: ((url: string) => Promise<boolean>) | null;
+  forgejoAvailableFn?: ((_url: string) => Promise<boolean>) | null;
   resolveForgejoUserFn?: (() => string) | null;
   readTokenFn?: typeof readToken;
   getCommentsFn?: typeof getComments;
@@ -531,18 +531,18 @@ export async function startReviewLoop(slug: string, opts: {
   consumeImplementerArtifactsFn?: typeof consumeImplementerArtifacts;
   rebaseBeforeReviewRoundFn?: typeof rebaseBeforeReviewRound;
   eligibleAgentsForStepFn?: typeof eligibleAgentsForStep;
-  performHandoffFn?: (slug: string, opts?: Record<string, unknown>) => Promise<Record<string, unknown>>;
-  log?: (msg: string) => void;
-  error?: (msg: string) => void;
+  performHandoffFn?: (_slug: string, _opts?: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  log?: (_msg: string) => void;
+  error?: (_msg: string) => void;
   getLatestReviewForPrFn?: typeof getLatestReviewForPr;
   getLatestDispositionForPrFn?: typeof getLatestDispositionForPr;
   sleepFn?: typeof delay;
-  exit?: (code: number) => never;
+  exit?: (_code: number) => never;
   gitFn?: typeof git;
-  isReviewProviderEnabledFn?: ((rootDir?: string) => boolean) | null | undefined;
-  legacyIsForgejoReviewEnabledFn?: ((rootDir?: string) => boolean) | null;
-  isForgejoReviewEnabledFn?: ((rootDir?: string) => boolean) | null;
-  recordStageStatsSafeFn?: (...args: any[]) => void;
+  isReviewProviderEnabledFn?: ((_rootDir?: string) => boolean) | null | undefined;
+  legacyIsForgejoReviewEnabledFn?: ((_rootDir?: string) => boolean) | null;
+  isForgejoReviewEnabledFn?: ((_rootDir?: string) => boolean) | null;
+  recordStageStatsSafeFn?: (..._args: any[]) => void;
   runPreReviewGateFn?: typeof runPreReviewGate;
   handleGateFailureAutoBounceFn?: typeof handleGateFailureAutoBounce;
 } = {}): Promise<void> {

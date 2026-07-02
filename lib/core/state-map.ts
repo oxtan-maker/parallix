@@ -81,11 +81,11 @@ export function toVirtual(actualState: string, map: Record<string, unknown> = lo
 }
 
 interface TransitionVirtualOptions {
-  log?: (msg: string) => void;
+  log?: (_msg: string) => void;
 }
 
 interface TransitionTaskFn {
-  (slug: string, actual: string, options: TransitionVirtualOptions): boolean;
+  (_slug: string, _actual: string, _options: TransitionVirtualOptions): boolean;
 }
 
 export function transitionVirtual(transitionTaskFn: TransitionTaskFn, slug: string, virtualState: string, options: TransitionVirtualOptions = {}, mapParam?: Record<string, unknown>): boolean {

@@ -301,7 +301,7 @@ if (typeof require !== 'undefined' && require.main === module) {
 }
 
 interface CoverageGateOptions {
-  exitFn?: (code: number) => void;
+  exitFn?: (_code: number) => void;
 }
 
 function run(args: string[], options: CoverageGateOptions = {}) {

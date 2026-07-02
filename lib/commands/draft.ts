@@ -488,7 +488,7 @@ function ensureWorktree(mainRepo, targetWorktree, branchName, {
     logFn(fmt.status('PASS', `Worktree directory ${fmt.path(targetWorktree)} already exists.`));
     try {
       gitFn(['-C', mainRepo, 'worktree', 'add', targetWorktree, branchName]);
-    } catch (error) {
+    } catch (_error) {
       // Ignore "already exists" style failures; the directory is already usable.
     }
     return;
