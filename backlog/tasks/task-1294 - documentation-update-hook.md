@@ -4,7 +4,7 @@ title: documentation update hook
 status: backlog
 assignee: []
 created_date: '2026-06-13 18:24'
-updated_date: '2026-06-13 18:25'
+updated_date: '2026-07-02 18:12'
 labels: []
 dependencies: []
 ordinal: 27000
@@ -13,5 +13,5 @@ ordinal: 27000
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-add a documentation update prompt that ensures we have professional documentation if a parallix mission finished the active phase without updating documentation. If that phase finishes also without updating documentation skip (its ok if its for example a bug fixing mission that does not change functionality). Or research/think if this can be done better by adding labeling in the draft stage (if that path is choosen be vary that the guardrails for labels needs to be updated)
+Ensure the draft prompt does include updating the documentation as part of the mission production assuming the documentation needs to be updated (i.e. not bugfixes and/or black box changes to parallix)
 <!-- SECTION:DESCRIPTION:END -->
