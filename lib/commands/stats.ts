@@ -96,16 +96,19 @@ import * as storage from '../core/storage.js';
 // and one-time header migration of legacy stats files (task-1251).
 const LEGACY_HEADERS = ['date', 'mission', 'classification', 'implementer', 'pr_fix_rounds'];
 
-// Extended 21-column telemetry schema (task-1314 + task-1251). Legacy 5-column rows are
-// migrated in-memory on load: the legacy columns are preserved and the new
-// columns default to '' (text) or '0' (numeric). On the next write the file
-// header is upgraded and existing rows gain the new columns.
+// Extended 22-column telemetry schema (task-1314 + task-1251 + task-1380). Legacy
+// 5-column rows are migrated in-memory on load: the legacy columns are preserved
+// and the new columns default to '' (text) or '0' (numeric). On the next write the
+// file header is upgraded and existing rows gain the new columns. The `closed`
+// column (task-1380) stores 'yes' for closed/integrated missions and is empty for
+// in-progress stage rows; filtering by `closed === 'yes'` excludes in-progress
+// missions from weekly and range mission counts.
 const STATS_HEADERS = [
   'date', 'repo', 'mission', 'classification', 'implementer', 'pr_fix_rounds',
   'provider', 'model', 'implementer_agent', 'reviewer_agent', 'stage',
   'input_tokens', 'output_tokens', 'cached_tokens', 'context_tokens',
   'tool_calls', 'openai_usage_before', 'openai_usage_after',
-  'openai_usage_delta', 'duration_minutes', 'cost_usd'
+  'openai_usage_delta', 'duration_minutes', 'cost_usd', 'closed'
 ];
 
 // Columns coerced to non-negative integers on canonicalization.
@@ -298,9 +301,23 @@ function loadStatsCsv(filePath: string | null = null, options: LoadStatsCsvOptio
     return { headers: [...STATS_HEADERS], rows: [] };
   }
 
+  // Detect whether the loaded CSV already has the `closed` column (task-1380).
+  // Legacy CSVs (pre-closed) lack the column; their rows represent completed
+  // missions written at integration time, so default `closed` to 'yes' for
+  // backward compatibility. Modern CSVs already have the column set per-row.
+  const hasClosedColumn = data.headers.includes('closed');
+  const migratedRows = data.rows.map((row: Record<string, string>) => {
+    const normalized = normalizeStatsRow(row, { rootDir: options.rootDir });
+    if (!hasClosedColumn) {
+      // Legacy CSV: all rows are from integration time, treat as closed.
+      return { ...normalized, closed: 'yes' };
+    }
+    return { ...normalized, closed: row.closed || '' };
+  });
+
   return {
     headers: [...STATS_HEADERS],
-    rows: data.rows.map((row: Record<string, string>) => normalizeStatsRow(row, { rootDir: options.rootDir })),
+    rows: migratedRows,
   };
 }
 
@@ -309,7 +326,8 @@ function loadStatsCsv(filePath: string | null = null, options: LoadStatsCsvOptio
  * Map any row (legacy 5-column or full 21-column) to the full schema, defaulting
  * missing text columns to '' and numeric columns to '0'. `stage` defaults to
  * 'default' so legacy rows and integration rows share the (repo, mission, stage)
- * upsert key.
+ * upsert key. `closed` defaults to '' (unset) — the backward-compat default of
+ * 'yes' for legacy CSV rows is applied exclusively in `loadStatsCsv`.
  */
 function normalizeStatsRow(row: StatsRow = {} as StatsRow, options: NormalizeStatsRowOptions = {} as NormalizeStatsRowOptions) {
   const repo = String(row.repo || options.repo || resolveStatsRepoName(options.rootDir)).trim();
@@ -335,6 +353,7 @@ function normalizeStatsRow(row: StatsRow = {} as StatsRow, options: NormalizeSta
     openai_usage_delta: row.openai_usage_delta || '0',
     duration_minutes: row.duration_minutes || '0',
     cost_usd: row.cost_usd || '0',
+    closed: row.closed || '',
   };
 }
 
@@ -735,11 +754,14 @@ function rowInWindow(row, window) {
  */
 function summarizeMissionWindow(rows, window) {
   const windowRows = rows.filter(row => rowInWindow(row, window));
+  // Filter to only closed missions (task-1380): rows without closed:'yes' are
+  // in-progress stage rows and should not inflate mission counts.
+  const closedRows = windowRows.filter(row => row.closed === 'yes');
   // Deduplicate by mission so multi-stage telemetry rows don't inflate counts.
   // One row per unique repo+mission pair is kept (first occurrence is sufficient
   // since classification is stable across stages for the same mission in a repo).
   const seenMissions = new Set();
-  const uniqueMissions = windowRows.filter(row => {
+  const uniqueMissions = closedRows.filter(row => {
     const key = statsMissionKey(row);
     if (seenMissions.has(key)) {return false;}
     seenMissions.add(key);
@@ -750,7 +772,7 @@ function summarizeMissionWindow(rows, window) {
   const unknown = uniqueMissions.filter(row => normalizeClassification(row.classification) === 'unknown').length;
   const validMissions = uniqueMissions.filter(row => normalizeClassification(row.classification) !== null);
   return {
-    rows: windowRows,
+    rows: closedRows,
     total: validMissions.length,
     userValue,
     aiSdlc,
@@ -798,10 +820,12 @@ function summarizeAgentWindow(rows, window, options = {}) {
   const opts = options;
   const { rootDir = null, deriveFixRoundsFn = deriveFixRoundsLocalAuthoritative } = opts;
   const windowRows = rows.filter(row => rowInWindow(row, window));
+  // Filter to only closed missions (task-1380).
+  const closedWindowRows = windowRows.filter(row => row.closed === 'yes');
   // Only count missions with a valid classification so the agent table totals
   // align with the mission-count table (which also excludes null/invalid
   // classifications via summarizeMissionWindow → validMissions).
-  const validWindowRows = windowRows.filter(row => normalizeClassification(row.classification) !== null);
+  const validWindowRows = closedWindowRows.filter(row => normalizeClassification(row.classification) !== null);
   // Deduplicate globally by (repo, mission) first so each mission is counted
   // exactly once across all agent groups — matching the mission-count table.
   // Prefer the row where model === implementer (the implementer's own model),
@@ -1055,7 +1079,8 @@ function renderMissionPhaseReport(rows, slug, options = {}) {
   const wantedRepo = String(opts.repo || resolveStatsRepoName(opts.rootDir)).trim();
   const missionRows = (rows || []).filter(row =>
     String(row.mission || '').trim().toLowerCase() === wanted &&
-    String(row.repo || '').trim() === wantedRepo
+    String(row.repo || '').trim() === wantedRepo &&
+    row.closed === 'yes'
   );
 
   const byStage = new Map();
@@ -1536,6 +1561,7 @@ function canonicalizeStatsRow(row, options = {}) {
     classification: /** @type{string|number|boolean|undefined} */(normalizeClassification(row.classification)),
     implementer: /** @type{string|number|boolean|undefined} */(normalizeImplementer(row.implementer)),
     stage: String(row.stage || '').trim().toLowerCase() || 'default',
+    closed: row.closed || '',
   };
   for (const key of USAGE_NUMBERS) {
     canonical[key] = String(Math.max(0, Number.parseInt(String(/** @type{any} */(normalized)[key]), 10) || 0));
@@ -1625,6 +1651,7 @@ function recordIntegrationStats(options = {}) {
     classification,
     implementer: implementerInfo.implementer,
     pr_fix_rounds: implementerInfo.prFixRounds,
+    closed: 'yes',
   }, { filePath, rootDir });
 
   return {
@@ -2100,6 +2127,7 @@ if (typeof module !== 'undefined') { module.exports = stats; }
   deriveFinalImplementerFromBranchHistory,
   deriveImplementerAndFixRoundsFromPrComments,
   deriveImplementerAndFixRounds,
+  summarizeMissionWindow,
   summarizeAgentWindow,
   colorAverageFixRounds,
   colorMissionCounts,

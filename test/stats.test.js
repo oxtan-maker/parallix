@@ -246,6 +246,7 @@ test('upsertStatsRow accepts unknown classification rows and weekly report count
     classification: 'unknown',
     implementer: 'unknown',
     pr_fix_rounds: 0,
+    closed: 'yes',
   }, { filePath: csvFile });
 
   const rows = stats.loadStatsCsv(csvFile).rows;
@@ -379,13 +380,13 @@ test('stats command defaults to shared PARALLIX_HOME stats across target repos',
   }
 });
 
-test('renderWeeklyStatsReport calculates current and previous seven-day windows from injected today', () => {
-  const report = stats.renderWeeklyStatsReport([
-    { date: '2026-05-18', mission: 'task-a', classification: 'ai_sdlc', implementer: 'codex', pr_fix_rounds: '2' },
-    { date: '2026-05-12', mission: 'task-b', classification: 'user_value', implementer: 'gemini', pr_fix_rounds: '1' },
-    { date: '2026-05-11', mission: 'task-c', classification: 'ai_sdlc', implementer: 'claude', pr_fix_rounds: '4' },
-    { date: '2026-05-05', mission: 'task-d', classification: 'user_value', implementer: 'custom', pr_fix_rounds: '0' },
-  ], { today: '2026-05-18' });
+ test('renderWeeklyStatsReport calculates current and previous seven-day windows from injected today', () => {
+   const report = stats.renderWeeklyStatsReport([
+     { date: '2026-05-18', mission: 'task-a', classification: 'ai_sdlc', implementer: 'codex', pr_fix_rounds: '2', closed: 'yes' },
+     { date: '2026-05-12', mission: 'task-b', classification: 'user_value', implementer: 'gemini', pr_fix_rounds: '1', closed: 'yes' },
+     { date: '2026-05-11', mission: 'task-c', classification: 'ai_sdlc', implementer: 'claude', pr_fix_rounds: '4', closed: 'yes' },
+     { date: '2026-05-05', mission: 'task-d', classification: 'user_value', implementer: 'custom', pr_fix_rounds: '0', closed: 'yes' },
+   ], { today: '2026-05-18' });
 
   assert.match(report, /Current week \(2026-05-12 → 2026-05-18\)/);
   assert.match(report, /Previous week \(2026-05-05 → 2026-05-11\)/);
@@ -403,9 +404,9 @@ test('renderWeeklyStatsReport calculates current and previous seven-day windows 
 test('renderRangeStatsReport filters inclusive boundary dates and summarizes mission counts', () => {
   const report = stats.renderRangeStatsReport([
     { date: '2026-04-30', mission: 'task-before', classification: 'ai_sdlc', implementer: 'codex', pr_fix_rounds: '9' },
-    { date: '2026-05-01', mission: 'task-start', classification: 'ai_sdlc', implementer: 'codex', pr_fix_rounds: '2' },
-    { date: '2026-05-15', mission: 'task-middle', classification: 'user_value', implementer: 'gemini', pr_fix_rounds: '1' },
-    { date: '2026-05-31', mission: 'task-end', classification: 'user_value', implementer: 'codex', pr_fix_rounds: '4' },
+    { date: '2026-05-01', mission: 'task-start', classification: 'ai_sdlc', implementer: 'codex', pr_fix_rounds: '2', closed: 'yes' },
+    { date: '2026-05-15', mission: 'task-middle', classification: 'user_value', implementer: 'gemini', pr_fix_rounds: '1', closed: 'yes' },
+    { date: '2026-05-31', mission: 'task-end', classification: 'user_value', implementer: 'codex', pr_fix_rounds: '4', closed: 'yes' },
     { date: '2026-06-01', mission: 'task-after', classification: 'user_value', implementer: 'claude', pr_fix_rounds: '0' },
   ], { from: '2026-05-01', to: '2026-05-31' });
 
@@ -440,9 +441,9 @@ test('renderRangeStatsReport rejects missing, malformed, and inverted range argu
 
 test('renderWeeklyStatsReport sorts agent tables alphabetically by family name', () => {
   const report = stats.renderWeeklyStatsReport([
-    { date: '2026-05-18', mission: 'task-a', classification: 'ai_sdlc', implementer: 'gemini', pr_fix_rounds: '2' },
-    { date: '2026-05-17', mission: 'task-b', classification: 'ai_sdlc', implementer: 'claude', pr_fix_rounds: '1' },
-    { date: '2026-05-16', mission: 'task-c', classification: 'ai_sdlc', implementer: 'codex', pr_fix_rounds: '3' },
+    { date: '2026-05-18', mission: 'task-a', classification: 'ai_sdlc', implementer: 'gemini', pr_fix_rounds: '2', closed: 'yes' },
+    { date: '2026-05-17', mission: 'task-b', classification: 'ai_sdlc', implementer: 'claude', pr_fix_rounds: '1', closed: 'yes' },
+    { date: '2026-05-16', mission: 'task-c', classification: 'ai_sdlc', implementer: 'codex', pr_fix_rounds: '3', closed: 'yes' },
   ], { today: '2026-05-18' });
 
   const plain = require('../lib/core/fmt').stripAnsi(report);
@@ -460,9 +461,9 @@ test('renderWeeklyStatsReport sorts agent tables alphabetically by family name',
 test('renderWeeklyStatsReport colors best and worst average fix rounds', () => {
   process.env.FORCE_COLOR = '1';
   const report = stats.renderWeeklyStatsReport([
-    { date: '2026-05-18', mission: 'task-a', classification: 'ai_sdlc', implementer: 'claude', pr_fix_rounds: '4' },
-    { date: '2026-05-17', mission: 'task-b', classification: 'ai_sdlc', implementer: 'codex', pr_fix_rounds: '2' },
-    { date: '2026-05-16', mission: 'task-c', classification: 'ai_sdlc', implementer: 'gemini', pr_fix_rounds: '0' },
+    { date: '2026-05-18', mission: 'task-a', classification: 'ai_sdlc', implementer: 'claude', pr_fix_rounds: '4', closed: 'yes' },
+    { date: '2026-05-17', mission: 'task-b', classification: 'ai_sdlc', implementer: 'codex', pr_fix_rounds: '2', closed: 'yes' },
+    { date: '2026-05-16', mission: 'task-c', classification: 'ai_sdlc', implementer: 'gemini', pr_fix_rounds: '0', closed: 'yes' },
   ], { today: '2026-05-18' });
 
   assert.match(report, /\x1b\[31m4\.00\x1b\[39m/);
@@ -473,12 +474,12 @@ test('renderWeeklyStatsReport colors best and worst average fix rounds', () => {
 test('renderWeeklyStatsReport colors best and worst mission counts', () => {
   process.env.FORCE_COLOR = '1';
   const report = stats.renderWeeklyStatsReport([
-    { date: '2026-05-18', mission: 'task-a', classification: 'ai_sdlc', implementer: 'claude', pr_fix_rounds: '1' },
-    { date: '2026-05-17', mission: 'task-b', classification: 'ai_sdlc', implementer: 'codex', pr_fix_rounds: '1' },
-    { date: '2026-05-16', mission: 'task-c', classification: 'ai_sdlc', implementer: 'codex', pr_fix_rounds: '1' },
-    { date: '2026-05-15', mission: 'task-d', classification: 'ai_sdlc', implementer: 'gemini', pr_fix_rounds: '1' },
-    { date: '2026-05-14', mission: 'task-e', classification: 'ai_sdlc', implementer: 'gemini', pr_fix_rounds: '1' },
-    { date: '2026-05-13', mission: 'task-f', classification: 'ai_sdlc', implementer: 'gemini', pr_fix_rounds: '1' },
+    { date: '2026-05-18', mission: 'task-a', classification: 'ai_sdlc', implementer: 'claude', pr_fix_rounds: '1', closed: 'yes' },
+    { date: '2026-05-17', mission: 'task-b', classification: 'ai_sdlc', implementer: 'codex', pr_fix_rounds: '1', closed: 'yes' },
+    { date: '2026-05-16', mission: 'task-c', classification: 'ai_sdlc', implementer: 'codex', pr_fix_rounds: '1', closed: 'yes' },
+    { date: '2026-05-15', mission: 'task-d', classification: 'ai_sdlc', implementer: 'gemini', pr_fix_rounds: '1', closed: 'yes' },
+    { date: '2026-05-14', mission: 'task-e', classification: 'ai_sdlc', implementer: 'gemini', pr_fix_rounds: '1', closed: 'yes' },
+    { date: '2026-05-13', mission: 'task-f', classification: 'ai_sdlc', implementer: 'gemini', pr_fix_rounds: '1', closed: 'yes' },
   ], { today: '2026-05-18' });
 
   assert.match(report, /\x1b\[34mclaude\x1b\[39m\s+\x1b\[31m1\x1b\[39m/);
@@ -1264,12 +1265,12 @@ test('task-1314: stats mission reports filter to the active repo', () => {
     [
       '2026-06-10', 'visualboard', 'task-alpha', 'ai_sdlc', 'codex', '1',
       'openai', 'gpt-5.4-mini', 'codex', '', 'draft',
-      '11', '12', '13', '14', '15', '0', '1', '0', '2', '0'
+      '11', '12', '13', '14', '15', '0', '1', '0', '2', '0', 'yes'
     ],
     [
       '2026-06-10', 'parallix', 'task-alpha', 'user_value', 'gemini', '2',
       'google', 'gemini-2.5-pro', 'gemini', '', 'review',
-      '21', '22', '23', '24', '25', '0', '2', '0', '3', '0'
+      '21', '22', '23', '24', '25', '0', '2', '0', '3', '0', 'yes'
     ],
   ];
   fs.writeFileSync(csvFile, [
@@ -1335,11 +1336,11 @@ test('task-1301: renderRangeStatsReport counts unique missions when a mission ha
   // task-alpha has 3 stage rows (draft, active, review) — should count as 1 mission
   // task-beta has 2 stage rows (active, review) — should count as 1 mission
   const rows = [
-    { date: '2026-06-10', mission: 'task-alpha', classification: 'ai_sdlc', implementer: 'custom', pr_fix_rounds: '0', stage: 'draft' },
-    { date: '2026-06-10', mission: 'task-alpha', classification: 'ai_sdlc', implementer: 'custom', pr_fix_rounds: '0', stage: 'active' },
-    { date: '2026-06-10', mission: 'task-alpha', classification: 'ai_sdlc', implementer: 'custom', pr_fix_rounds: '1', stage: 'review' },
-    { date: '2026-06-10', mission: 'task-beta', classification: 'user_value', implementer: 'codex', pr_fix_rounds: '0', stage: 'active' },
-    { date: '2026-06-10', mission: 'task-beta', classification: 'user_value', implementer: 'codex', pr_fix_rounds: '2', stage: 'review' },
+    { date: '2026-06-10', mission: 'task-alpha', classification: 'ai_sdlc', implementer: 'custom', pr_fix_rounds: '0', stage: 'draft', closed: 'yes' },
+    { date: '2026-06-10', mission: 'task-alpha', classification: 'ai_sdlc', implementer: 'custom', pr_fix_rounds: '0', stage: 'active', closed: 'yes' },
+    { date: '2026-06-10', mission: 'task-alpha', classification: 'ai_sdlc', implementer: 'custom', pr_fix_rounds: '1', stage: 'review', closed: 'yes' },
+    { date: '2026-06-10', mission: 'task-beta', classification: 'user_value', implementer: 'codex', pr_fix_rounds: '0', stage: 'active', closed: 'yes' },
+    { date: '2026-06-10', mission: 'task-beta', classification: 'user_value', implementer: 'codex', pr_fix_rounds: '2', stage: 'review', closed: 'yes' },
   ];
   const report = stats.renderRangeStatsReport(rows, { from: '2026-06-10', to: '2026-06-10' });
   const plain = require('../lib/core/fmt').stripAnsi(report);
@@ -1350,10 +1351,10 @@ test('task-1301: renderRangeStatsReport counts unique missions when a mission ha
 
 test('task-1314: renderRangeStatsReport counts same mission separately across repos', () => {
   const rows = [
-    { date: '2026-06-10', repo: 'visualboard', mission: 'task-alpha', classification: 'ai_sdlc', implementer: 'custom', pr_fix_rounds: '0', stage: 'draft' },
-    { date: '2026-06-10', repo: 'visualboard', mission: 'task-alpha', classification: 'ai_sdlc', implementer: 'custom', pr_fix_rounds: '1', stage: 'review' },
-    { date: '2026-06-10', repo: 'parallix', mission: 'task-alpha', classification: 'user_value', implementer: 'codex', pr_fix_rounds: '2', stage: 'draft' },
-    { date: '2026-06-10', repo: 'parallix', mission: 'task-alpha', classification: 'user_value', implementer: 'codex', pr_fix_rounds: '3', stage: 'review' },
+    { date: '2026-06-10', repo: 'visualboard', mission: 'task-alpha', classification: 'ai_sdlc', implementer: 'custom', pr_fix_rounds: '0', stage: 'draft', closed: 'yes' },
+    { date: '2026-06-10', repo: 'visualboard', mission: 'task-alpha', classification: 'ai_sdlc', implementer: 'custom', pr_fix_rounds: '1', stage: 'review', closed: 'yes' },
+    { date: '2026-06-10', repo: 'parallix', mission: 'task-alpha', classification: 'user_value', implementer: 'codex', pr_fix_rounds: '2', stage: 'draft', closed: 'yes' },
+    { date: '2026-06-10', repo: 'parallix', mission: 'task-alpha', classification: 'user_value', implementer: 'codex', pr_fix_rounds: '3', stage: 'review', closed: 'yes' },
   ];
   const report = stats.renderRangeStatsReport(rows, { from: '2026-06-10', to: '2026-06-10' });
   const plain = require('../lib/core/fmt').stripAnsi(report);
@@ -1525,8 +1526,8 @@ test('summarizeAgentWindow trusts local ground truth over a stale zero in the CS
 
     const window = { start: new Date('2026-06-10T00:00:00Z'), end: new Date('2026-06-16T00:00:00Z') };
     const rows = [
-      { date: '2026-06-13', repo: '', mission: 'task-3000', implementer: 'codex', stage: 'active', classification: 'ai_sdlc', pr_fix_rounds: '0' },
-      { date: '2026-06-13', repo: '', mission: 'task-3000', implementer: 'codex', stage: 'review', classification: 'ai_sdlc', pr_fix_rounds: '0' },
+      { date: '2026-06-13', repo: '', mission: 'task-3000', implementer: 'codex', stage: 'active', classification: 'ai_sdlc', pr_fix_rounds: '0', closed: 'yes' },
+      { date: '2026-06-13', repo: '', mission: 'task-3000', implementer: 'codex', stage: 'review', classification: 'ai_sdlc', pr_fix_rounds: '0', closed: 'yes' },
     ];
 
     const stored = stats._internals.summarizeAgentWindow(rows, window);
@@ -1551,20 +1552,20 @@ test('task-1342: weekly summary total equals user_value + ai_sdlc even with uncl
   for (let i = 0; i < 3; i++) {
     rows.push({
       date: `2026-06-${20 + i}`, mission: `task-u${i}`, classification: 'user_value',
-      implementer: 'codex', pr_fix_rounds: '0',
+      implementer: 'codex', pr_fix_rounds: '0', closed: 'yes',
     });
   }
   for (let i = 0; i < 12; i++) {
     rows.push({
       date: `2026-06-${20 + (i % 5)}`, mission: `task-a${i}`, classification: 'ai_sdlc',
-      implementer: 'custom', pr_fix_rounds: '1',
+      implementer: 'custom', pr_fix_rounds: '1', closed: 'yes',
     });
   }
   // 20 missions with empty/null/unrecognized classification
   for (let i = 0; i < 20; i++) {
     rows.push({
       date: `2026-06-${20 + (i % 5)}`, mission: `task-x${i}`, classification: '',
-      implementer: 'claude', pr_fix_rounds: '0',
+      implementer: 'claude', pr_fix_rounds: '0', closed: 'yes',
     });
   }
 
@@ -1579,11 +1580,11 @@ test('task-1342: weekly summary total equals user_value + ai_sdlc even with uncl
 
 test('task-1342: weekly summary total equals user_value + ai_sdlc + unknown when some missions have invalid classification strings', () => {
   const rows = [
-    { date: '2026-06-20', mission: 'task-good1', classification: 'user_value', implementer: 'codex', pr_fix_rounds: '0' },
-    { date: '2026-06-20', mission: 'task-good2', classification: 'ai_sdlc', implementer: 'custom', pr_fix_rounds: '1' },
-    { date: '2026-06-20', mission: 'task-bad1', classification: 'USER_VALUE', implementer: 'claude', pr_fix_rounds: '0' },
-    { date: '2026-06-20', mission: 'task-bad2', classification: 'unknown', implementer: 'gemini', pr_fix_rounds: '0' },
-    { date: '2026-06-20', mission: 'task-bad3', classification: null, implementer: 'custom', pr_fix_rounds: '0' },
+    { date: '2026-06-20', mission: 'task-good1', classification: 'user_value', implementer: 'codex', pr_fix_rounds: '0', closed: 'yes' },
+    { date: '2026-06-20', mission: 'task-good2', classification: 'ai_sdlc', implementer: 'custom', pr_fix_rounds: '1', closed: 'yes' },
+    { date: '2026-06-20', mission: 'task-bad1', classification: 'USER_VALUE', implementer: 'claude', pr_fix_rounds: '0', closed: 'yes' },
+    { date: '2026-06-20', mission: 'task-bad2', classification: 'unknown', implementer: 'gemini', pr_fix_rounds: '0', closed: 'yes' },
+    { date: '2026-06-20', mission: 'task-bad3', classification: null, implementer: 'custom', pr_fix_rounds: '0', closed: 'yes' },
   ];
 
   const report = stats.renderWeeklyStatsReport(rows, { today: '2026-06-24' });
@@ -1675,14 +1676,14 @@ test('task-1342: review row with OpenAI reviewer shows Usage % even when claude 
       implementer_agent: 'claude', implementer: 'claude',
       input_tokens: '4526019', output_tokens: '21427', cached_tokens: '4072064',
       tool_calls: '76', duration_minutes: '3', cost_usd: '0',
-      openai_usage_after: '29',
+      openai_usage_after: '29', closed: 'yes',
     },
     {
       mission: 'task-1339', stage: 'review', provider: 'openai', model: 'gpt-5.4',
       reviewer_agent: 'codex', implementer: 'claude',
       input_tokens: '4526019', output_tokens: '21427', cached_tokens: '4072064',
       tool_calls: '76', duration_minutes: '2', cost_usd: '0',
-      openai_usage_after: '37',
+      openai_usage_after: '37', closed: 'yes',
     },
   ].map(stats.normalizeStatsRow);
 
@@ -1703,9 +1704,9 @@ test('task-1342: review row with OpenAI reviewer shows Usage % even when claude 
 test('task-1376: summarizeAgentWindow groups local AI rows by model name, not by custom', () => {
   const window = { start: new Date('2026-06-10T00:00:00Z'), end: new Date('2026-06-20T00:00:00Z') };
   const rows = [
-    { date: '2026-06-12', mission: 'task-1001', implementer: 'custom', model: 'qwen3.5', classification: 'ai_sdlc', pr_fix_rounds: '1' },
-    { date: '2026-06-13', mission: 'task-1002', implementer: 'custom', model: 'qwen3.5', classification: 'ai_sdlc', pr_fix_rounds: '2' },
-    { date: '2026-06-14', mission: 'task-1003', implementer: 'custom', model: 'llama3', classification: 'ai_sdlc', pr_fix_rounds: '0' },
+    { date: '2026-06-12', mission: 'task-1001', implementer: 'custom', model: 'qwen3.5', classification: 'ai_sdlc', pr_fix_rounds: '1', closed: 'yes' },
+    { date: '2026-06-13', mission: 'task-1002', implementer: 'custom', model: 'qwen3.5', classification: 'ai_sdlc', pr_fix_rounds: '2', closed: 'yes' },
+    { date: '2026-06-14', mission: 'task-1003', implementer: 'custom', model: 'llama3', classification: 'ai_sdlc', pr_fix_rounds: '0', closed: 'yes' },
   ];
 
   const result = stats._internals.summarizeAgentWindow(rows, window);
@@ -1724,8 +1725,8 @@ test('task-1376: summarizeAgentWindow groups local AI rows by model name, not by
 test('task-1376: summarizeAgentWindow empty model falls back to implementer', () => {
   const window = { start: new Date('2026-06-10T00:00:00Z'), end: new Date('2026-06-20T00:00:00Z') };
   const rows = [
-    { date: '2026-06-12', mission: 'task-2001', implementer: 'claude', model: '', classification: 'user_value', pr_fix_rounds: '3' },
-    { date: '2026-06-13', mission: 'task-2002', implementer: 'claude', model: '', classification: 'user_value', pr_fix_rounds: '1' },
+    { date: '2026-06-12', mission: 'task-2001', implementer: 'claude', model: '', classification: 'user_value', pr_fix_rounds: '3', closed: 'yes' },
+    { date: '2026-06-13', mission: 'task-2002', implementer: 'claude', model: '', classification: 'user_value', pr_fix_rounds: '1', closed: 'yes' },
   ];
 
   const result = stats._internals.summarizeAgentWindow(rows, window);
@@ -1740,11 +1741,11 @@ test('task-1376: summarizeAgentWindow empty model falls back to implementer', ()
 test('task-1376: summarizeAgentWindow handles mixed cloud + local AI rows together', () => {
   const window = { start: new Date('2026-06-10T00:00:00Z'), end: new Date('2026-06-20T00:00:00Z') };
   const rows = [
-    { date: '2026-06-12', mission: 'task-3001', implementer: 'codex', model: 'gpt-5', classification: 'ai_sdlc', pr_fix_rounds: '1' },
-    { date: '2026-06-13', mission: 'task-3002', implementer: 'custom', model: 'qwen3.5', classification: 'ai_sdlc', pr_fix_rounds: '2' },
-    { date: '2026-06-14', mission: 'task-3003', implementer: 'gemini', model: 'gemini-2.5-pro', classification: 'ai_sdlc', pr_fix_rounds: '0' },
-    { date: '2026-06-15', mission: 'task-3004', implementer: 'custom', model: 'llama3', classification: 'ai_sdlc', pr_fix_rounds: '1' },
-    { date: '2026-06-16', mission: 'task-3005', implementer: 'claude', model: '', classification: 'user_value', pr_fix_rounds: '3' },
+    { date: '2026-06-12', mission: 'task-3001', implementer: 'codex', model: 'gpt-5', classification: 'ai_sdlc', pr_fix_rounds: '1', closed: 'yes' },
+    { date: '2026-06-13', mission: 'task-3002', implementer: 'custom', model: 'qwen3.5', classification: 'ai_sdlc', pr_fix_rounds: '2', closed: 'yes' },
+    { date: '2026-06-14', mission: 'task-3003', implementer: 'gemini', model: 'gemini-2.5-pro', classification: 'ai_sdlc', pr_fix_rounds: '0', closed: 'yes' },
+    { date: '2026-06-15', mission: 'task-3004', implementer: 'custom', model: 'llama3', classification: 'ai_sdlc', pr_fix_rounds: '1', closed: 'yes' },
+    { date: '2026-06-16', mission: 'task-3005', implementer: 'claude', model: '', classification: 'user_value', pr_fix_rounds: '3', closed: 'yes' },
   ];
 
   const result = stats._internals.summarizeAgentWindow(rows, window);
@@ -1769,8 +1770,8 @@ test('task-1376: summarizeAgentWindow handles mixed cloud + local AI rows togeth
 
 test('task-1376: renderWeeklyStatsReport displays model names in Agent family column', () => {
   const report = stats.renderWeeklyStatsReport([
-    { date: '2026-05-18', mission: 'task-a', classification: 'ai_sdlc', implementer: 'custom', model: 'qwen3.5', pr_fix_rounds: '2' },
-    { date: '2026-05-17', mission: 'task-b', classification: 'user_value', implementer: 'codex', model: 'gpt-5', pr_fix_rounds: '1' },
+    { date: '2026-05-18', mission: 'task-a', classification: 'ai_sdlc', implementer: 'custom', model: 'qwen3.5', pr_fix_rounds: '2', closed: 'yes' },
+    { date: '2026-05-17', mission: 'task-b', classification: 'user_value', implementer: 'codex', model: 'gpt-5', pr_fix_rounds: '1', closed: 'yes' },
   ], { today: '2026-05-18' });
 
   const plain = require('../lib/core/fmt').stripAnsi(report);
@@ -1780,8 +1781,8 @@ test('task-1376: renderWeeklyStatsReport displays model names in Agent family co
 
 test('task-1376: renderRangeStatsReport displays model names in Agent family column', () => {
   const report = stats.renderRangeStatsReport([
-    { date: '2026-05-10', mission: 'task-a', classification: 'ai_sdlc', implementer: 'custom', model: 'qwen3.5', pr_fix_rounds: '2' },
-    { date: '2026-05-15', mission: 'task-b', classification: 'user_value', implementer: 'custom', model: 'llama3', pr_fix_rounds: '0' },
+    { date: '2026-05-10', mission: 'task-a', classification: 'ai_sdlc', implementer: 'custom', model: 'qwen3.5', pr_fix_rounds: '2', closed: 'yes' },
+    { date: '2026-05-15', mission: 'task-b', classification: 'user_value', implementer: 'custom', model: 'llama3', pr_fix_rounds: '0', closed: 'yes' },
   ], { from: '2026-05-01', to: '2026-05-31' });
 
   const plain = require('../lib/core/fmt').stripAnsi(report);

@@ -134,17 +134,21 @@ test('loadStatsCsv returns expected schema with cleaned data', () => {
 
   const data = stats.loadStatsCsv(csv);
 
-  // loadStatsCsv migrates legacy 5-column rows to the full 19-column schema
-  // (task-1251): legacy columns preserved, new columns defaulted.
+  // loadStatsCsv migrates legacy 5-column rows to the full 22-column schema
+  // (task-1251 + task-1380): legacy columns preserved, new columns defaulted.
+  // Legacy rows without a `closed` column default to 'yes' (task-1380).
   assert.deepEqual(data.headers, stats.STATS_HEADERS);
   assert.equal(data.rows.length, 2);
-  assert.deepEqual(data.rows[0], stats.normalizeStatsRow({
+  const expected = stats.normalizeStatsRow({
     date: '2026-05-06',
     mission: 'task-1054',
     classification: 'ai_sdlc',
     implementer: 'claude',
     pr_fix_rounds: '1',
-  }));
+  });
+  // Legacy CSV rows get closed: 'yes' from loadStatsCsv migration
+  expected.closed = 'yes';
+  assert.deepEqual(data.rows[0], expected);
 });
 
 test('loadStatsCsv handles missing file gracefully', () => {

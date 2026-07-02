@@ -4,6 +4,7 @@ title: mistral stats does not capture anythine else than duration
 status: backlog
 assignee: []
 created_date: '2026-07-02 18:13'
+updated_date: '2026-07-02 19:11'
 labels: []
 dependencies: []
 ---
@@ -19,6 +20,8 @@ execute    mistral    mistral                            mistral      0       0 
 review     anthropic  claude-sonnet-5                    claude       3071    15060   993544  27          3               —        0.82      
 follow-up  —          —                                  —            0       0       0       0           0               —        0         
 total                                                                 501433  26930   993544  50          29              —        0.82
+
+see also example worktree where mistral session should be found
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Definition of Done
