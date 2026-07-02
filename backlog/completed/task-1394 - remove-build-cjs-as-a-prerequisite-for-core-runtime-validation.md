@@ -1,8 +1,8 @@
 ---
 id: TASK-1394
 title: remove build cjs as a prerequisite for core runtime validation
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-07-01 07:15'
 labels: [tech_debt, ai_sdlc]
 dependencies: []
