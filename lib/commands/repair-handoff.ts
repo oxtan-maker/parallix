@@ -14,8 +14,16 @@ function isRelaunchableError(errorMsg: string) {
     return false;
   }
   // Match the exact error message from handoff.js when final checkpoint has no evidence rows
-  return errorMsg.includes('has a "## Goal Check" section but no evidence rows') &&
-         errorMsg.includes('A goal-check table with real evidence is required before handoff');
+  if (errorMsg.includes('has a "## Goal Check" section but no evidence rows') &&
+      errorMsg.includes('A goal-check table with real evidence is required before handoff')) {
+    return true;
+  }
+  // Genuine gate failures (task-1387): classification 6 from ADR 0048
+  if (/verification gate failed/i.test(errorMsg) ||
+      (/\bdeclared gate\b/i.test(errorMsg) && /\bfailed\b/i.test(errorMsg))) {
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -26,45 +34,57 @@ function isRelaunchableError(errorMsg: string) {
  * @param {string} worktree - Path to the mission worktree
  * @returns {string} The relaunch prompt
   */
-function buildRelaunchPrompt(errorMsg: string, slug: string, worktree: string) {
+function buildRelaunchPrompt(errorMsg: string, slug: string, worktree: string, gateOutput?: { stdout: string; stderr: string }) {
   const year = missionUtils.getMissionYear(slug, worktree);
   const missionDir = missionUtils.findMissionDir(slug, worktree) || missionUtils.missionDirForSlug(worktree, slug);
   
-  return `Automated handoff failed for mission ${slug} with a repairable error: ${errorMsg}
+  let prompt = `Automated handoff failed for mission ${slug} with a repairable error: ${errorMsg}
 
 ` +
-         `Please fix the final checkpoint document in ${missionDir} by adding a Goal Check table ` +
-         `with real evidence rows (file:line references, test names). The Goal Check table must have ` +
-         `a header row and at least one evidence row using pipe syntax (|).
+          `Please fix the final checkpoint document in ${missionDir} by adding a Goal Check table ` +
+          `with real evidence rows (file:line references, test names). The Goal Check table must have ` +
+          `a header row and at least one evidence row using pipe syntax (|).
 
 ` +
-         `Steps:
+          `Steps:
 ` +
-         `1. Open the final checkpoint document (CP-N.md) in ${missionDir}
+          `1. Open the final checkpoint document (CP-N.md) in ${missionDir}
 ` +
-         `2. Add or update the "## Goal Check" section
+          `2. Add or update the "## Goal Check" section
 ` +
-         `3. Create a markdown table with columns for: Goal Check description | Evidence | Status
+          `3. Create a markdown table with columns for: Goal Check description | Evidence | Status
 ` +
-         `4. Add at least one evidence row with real file:line or test name references
+          `4. Add at least one evidence row with real file:line or test name references
 ` +
-         `5. Commit the updated checkpoint with a descriptive commit message
+          `5. Commit the updated checkpoint with a descriptive commit message
 ` +
-         `6. Re-run: node parallix review ${slug} --submit
+          `6. Re-run: node parallix review ${slug} --submit
 
 ` +
-         `Example Goal Check table:
+          `Example Goal Check table:
 ` +
-         `| Goal Check | Evidence | Status |
+          `| Goal Check | Evidence | Status |
 ` +
-         `|---|---|---|
+          `|---|---|---|
 ` +
-         `| Final checkpoint has Goal Check section | docs/missions/${year}/${slug}/CP-1.md:15 | PASS |
+          `| Final checkpoint has Goal Check section | docs/missions/${year}/${slug}/CP-1.md:15 | PASS |
 ` +
-         `| Tests pass | npm test -- parallix/test/repair-handoff.test.js | PASS |
+          `| Tests pass | npm test -- parallix/test/repair-handoff.test.js | PASS |
 
 ` +
-         `Do NOT add placeholder or generic evidence. Each row must cite real, verifiable artifacts.`;
+          `Do NOT add placeholder or generic evidence. Each row must cite real, verifiable artifacts.`;
+
+  // Append captured gate output if available (task-1387)
+  if (gateOutput && (gateOutput.stdout || gateOutput.stderr)) {
+    const totalOutput = (gateOutput.stdout || '') + (gateOutput.stderr || '');
+    // Truncate if total output exceeds 16000 chars; keep last 8000 chars
+    const truncated = totalOutput.length > 16000
+      ? `[truncated — total ${totalOutput.length} chars, showing last 8000]\n` + totalOutput.slice(-8000)
+      : totalOutput;
+    prompt += `\n\n--- Captured Gate Output ---\n${truncated}`;
+  }
+
+  return prompt;
 }
 
 /**

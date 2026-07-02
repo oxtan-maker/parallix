@@ -302,36 +302,37 @@ function applyExecuteFallback(opts) {
  * @returns {Promise<{relaunched: boolean, error?: string}>} Result of relaunch attempt
  */
 /**
- * @param {string} slug
- * @param {string} worktree
- * @param {string} errorMsg
- * @param {string} agent
- * @param {{isRelaunchableErrorFn?: Function, buildRelaunchPromptFn?: Function, workflowLauncherStatusFn?: Function, startAgentFn?: Function, log?: Function, error?: Function}} [options]
- */
-async function attemptAgentRelaunch(slug, worktree, errorMsg, agent, options = {}) {
-  const {
-    isRelaunchableErrorFn = repairHandoff.isRelaunchableError,
-    buildRelaunchPromptFn = repairHandoff.buildRelaunchPrompt,
-    workflowLauncherStatusFn = agents.workflowLauncherStatus,
-    startAgentFn = agents.startAgent,
-    log = fmt.log.plain,
-    error = fmt.log.plainError
-  } = options;
-  // Check if this is a relaunchable error
-  if (!isRelaunchableErrorFn(errorMsg)) {
-    log(`Error is not relaunchable: ${errorMsg}`);
-    return { relaunched: false, error: 'Error is not relaunchable for agent relaunch' };
-  }
+  * @param {string} slug
+  * @param {string} worktree
+  * @param {string} errorMsg
+  * @param {string} agent
+  * @param {{isRelaunchableErrorFn?: Function, buildRelaunchPromptFn?: Function, workflowLauncherStatusFn?: Function, startAgentFn?: Function, log?: Function, error?: Function, gateOutput?: {stdout: string, stderr: string}}} [options]
+  */
+ async function attemptAgentRelaunch(slug, worktree, errorMsg, agent, options = {}) {
+   const {
+     isRelaunchableErrorFn = repairHandoff.isRelaunchableError,
+     buildRelaunchPromptFn = repairHandoff.buildRelaunchPrompt,
+     workflowLauncherStatusFn = agents.workflowLauncherStatus,
+     startAgentFn = agents.startAgent,
+     log = fmt.log.plain,
+     error = fmt.log.plainError,
+     gateOutput
+   } = options;
+   // Check if this is a relaunchable error
+   if (!isRelaunchableErrorFn(errorMsg)) {
+     log(`Error is not relaunchable: ${errorMsg}`);
+     return { relaunched: false, error: 'Error is not relaunchable for agent relaunch' };
+   }
 
-  // Check if the agent launcher is available
-  const status = workflowLauncherStatusFn(agent);
-  if (!status.supported) {
-    error(`Agent ${fmt.agent(agent)} is not available for relaunch: ${status.detail || status.reason || 'unknown'}`);
-    return { relaunched: false, error: `Agent ${agent} launcher is not available` };
-  }
+   // Check if the agent launcher is available
+   const status = workflowLauncherStatusFn(agent);
+   if (!status.supported) {
+     error(`Agent ${fmt.agent(agent)} is not available for relaunch: ${status.detail || status.reason || 'unknown'}`);
+     return { relaunched: false, error: `Agent ${agent} launcher is not available` };
+   }
 
-  // Build the relaunch prompt
-  const prompt = buildRelaunchPromptFn(errorMsg, slug, worktree);
+   // Build the relaunch prompt, passing captured gate output if available (task-1387)
+   const prompt = buildRelaunchPromptFn(errorMsg, slug, worktree, gateOutput);
 
   log(`Attempting to relaunch ${fmt.agent(agent)} to fix repairable handoff error...`);
   // startAgent handles resume flags internally for resume-capable agents (codex, claude, gemini, custom)
@@ -449,37 +450,73 @@ async function runHandoffAndReview(slug, worktree, agent, options = {}) {
   let handoffResult = await _performHandoff(slug, { forgejoUser: agent, worktree });
 
   if (!handoffResult.ok) {
-    // Attempt single repair for routine hygiene issues (dirty artifacts, rebase needed)
-    log(`\nAutomated handoff failed: ${handoffResult.error}`);
-    log(`Attempting post-execute repair...`);
-    const { repaired, blocker } = await /** @type{Function} */(repairHandoffFn)(slug, worktree, /** @type{string} */(handoffResult.error), { taskFile, log, error });
-    if (repaired) {
-      log(`Repair successful. Retrying automated handoff...`);
-      handoffResult = await _performHandoff(slug, { forgejoUser: agent, worktree, force: true });
-    } else if (blocker) {
-      // If repair failed but provided a specific blocker (e.g. rebase failure),
-      // report that blocker as the final error instead of the original handoff error.
-      handoffResult.error = blocker;
-    } else if (!repaired && repairHandoff.isRelaunchableError(handoffResult.error)) {
-      // Attempt agent relaunch for repairable content errors (missing goal-check table)
-      log(`Content error detected. Attempting agent relaunch to fix...`);
-      const { relaunched, error: relaunchError } = await attemptAgentRelaunchFn(
-        slug, worktree, /** @type{string} */(handoffResult.error), agent, { log, error }
-      );
-      if (relaunched) {
-        // Agent was relaunched successfully; re-invoke performHandoff to verify
-        // the handoff-to-review transition actually completed, matching the
-        // contract of the repair-success path above.
-        log(`Agent relaunched. It will fix the checkpoint and retry handoff.`);
-        handoffResult = await _performHandoff(slug, { forgejoUser: agent, worktree, force: true });
-        if (!handoffResult.ok) {
-          handoffResult.error = `Post-relaunch handoff failed: ${handoffResult.error || 'unknown'}`;
+    // Check for genuine gate failure (task-1387): automatic relaunch with captured output
+    const isGenuineGateFailure = handoffResult.gateOutput ||
+      (handoffResult.error && (
+        /verification gate failed/i.test(handoffResult.error) ||
+        (/\bdeclared gate\b/i.test(handoffResult.error) && /\bfailed\b/i.test(handoffResult.error))
+      ));
+
+    if (isGenuineGateFailure) {
+      // Automatic relaunch with captured gate output, bounded to max 2 attempts
+      let relaunchCount = 0;
+      const maxRelaunches = 2;
+
+      while (relaunchCount < maxRelaunches) {
+        relaunchCount++;
+        log(`\nGenuine gate failure detected. Relaunch attempt ${relaunchCount}/${maxRelaunches}...`);
+        const { relaunched, error: relaunchError } = await attemptAgentRelaunchFn(
+          slug, worktree, /** @type{string} */(handoffResult.error), agent,
+          { log, error, gateOutput: handoffResult.gateOutput }
+        );
+        if (relaunched) {
+          handoffResult = await _performHandoff(slug, { forgejoUser: agent, worktree, force: true });
+          if (handoffResult.ok) {
+            break; // Success — proceed to review loop
+          }
+          // Handoff still failed; continue loop for another relaunch attempt
+        } else {
+          log(`Agent relaunch failed: ${relaunchError || 'unknown error'}`);
+          break; // Relaunch itself failed; stop
         }
-        // Fall through to gatekeeper pushback / review loop / failure handling below.
-      } else {
-        // Relaunch failed or was not possible
-        log(`Agent relaunch failed: ${relaunchError || 'unknown error'}`);
-        // Fall through to manual handoff message
+      }
+
+      if (!handoffResult.ok && relaunchCount >= maxRelaunches) {
+        handoffResult.error = `Gate failure persisting after ${maxRelaunches} relaunch attempts. Manual intervention required.`;
+      }
+    } else {
+      // Original logic: attempt single repair for routine hygiene issues (dirty artifacts, rebase needed)
+      log(`\nAutomated handoff failed: ${handoffResult.error}`);
+      log(`Attempting post-execute repair...`);
+      const { repaired, blocker } = await /** @type{Function} */(repairHandoffFn)(slug, worktree, /** @type{string} */(handoffResult.error), { taskFile, log, error });
+      if (repaired) {
+        log(`Repair successful. Retrying automated handoff...`);
+        handoffResult = await _performHandoff(slug, { forgejoUser: agent, worktree, force: true });
+      } else if (blocker) {
+        // If repair failed but provided a specific blocker (e.g. rebase failure),
+        // report that blocker as the final error instead of the original handoff error.
+        handoffResult.error = blocker;
+      } else if (!repaired && repairHandoff.isRelaunchableError(handoffResult.error)) {
+        // Attempt agent relaunch for repairable content errors (missing goal-check table)
+        log(`Content error detected. Attempting agent relaunch to fix...`);
+        const { relaunched, error: relaunchError } = await attemptAgentRelaunchFn(
+          slug, worktree, /** @type{string} */(handoffResult.error), agent, { log, error }
+        );
+        if (relaunched) {
+          // Agent was relaunched successfully; re-invoke performHandoff to verify
+          // the handoff-to-review transition actually completed, matching the
+          // contract of the repair-success path above.
+          log(`Agent relaunched. It will fix the checkpoint and retry handoff.`);
+          handoffResult = await _performHandoff(slug, { forgejoUser: agent, worktree, force: true });
+          if (!handoffResult.ok) {
+            handoffResult.error = `Post-relaunch handoff failed: ${handoffResult.error || 'unknown'}`;
+          }
+          // Fall through to gatekeeper pushback / review loop / failure handling below.
+        } else {
+          // Relaunch failed or was not possible
+          log(`Agent relaunch failed: ${relaunchError || 'unknown error'}`);
+          // Fall through to manual handoff message
+        }
       }
     }
   }

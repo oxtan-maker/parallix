@@ -1036,3 +1036,88 @@ test('captureNelAtHandoff reads predicted bucket from MISSION.md Refinement Sign
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
+
+// ---------- Gate output capture (task-1387, SC1 & SC2) ----------
+
+test('performHandoff captures verification gate stdout/stderr on non-zero exit (SC1)', async (t) => {
+  const { mock } = t;
+  const slug = 'task-1387-sc1';
+  const worktree = fs.mkdtempSync(path.join('/tmp', 'handoff-sc1-'));
+  const missionDir = path.join(worktree, 'docs/missions/2026', slug);
+  const cpPath = path.join(missionDir, 'CP-1.md');
+  const taskFile = path.join(worktree, 'backlog/tasks', `${slug} - sc1.md`);
+
+  fs.mkdirSync(missionDir, { recursive: true });
+  fs.mkdirSync(path.dirname(taskFile), { recursive: true });
+  fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# MISSION.md\n\nTest mission.\n');
+  fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | test | PASS |\n');
+  fs.writeFileSync(taskFile, '---\nstatus: active\n---\n\n# sc1\n');
+
+  const mockRebase = async () => ({ ok: true, sharedFileConflicts: false });
+
+  // Provide a mock runVerificationGate that returns non-zero with known output
+  const mockVerifyGate = () => ({
+    status: 1,
+    stdout: 'lint: ERROR: unused import in foo.js',
+    stderr: 'TypeScript: error TS2345: type mismatch'
+  });
+
+  mock.method(missionUtils, 'findMissionDir', () => missionDir);
+  mock.method(missionUtils, 'findMissionArea', () => 'workflow');
+  mock.method(missionUtils, 'findCheckpoints', () => [cpPath]);
+  mock.method(git, 'getCurrentBranch', () => `mission/${slug}`);
+  mock.method(git, 'getWorktreeStatus', () => []);
+  mock.method(git, 'run', () => ({ status: 0 }));
+  mock.method(git, 'git', () => ({ status: 0, stdout: '', stderr: '' }));
+  mock.method(forgejo, 'readToken', () => 'fake-token');
+  mock.method(forgejo, 'createPr', () => ({ ok: true, url: 'http://fake-pr' }));
+  mock.method(forgejo, 'authenticatedReviewUrl', () => 'http://fake-url');
+  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile }));
+  mock.method(backlog, 'transitionTask', () => true);
+  mock.method(gatekeeper, 'runGatekeeper', () => ({ ok: true, missing: [], skipped: false, posted: false }));
+  writeReviewState(missionDir, 'custom', 'custom');
+
+  try {
+    const result = await performHandoff(slug, {
+      worktree,
+      isForgejoReviewEnabledFn: () => true,
+      rebaseFn: mockRebase,
+      runVerificationGateFn: mockVerifyGate,
+    });
+
+    assert.strictEqual(result.ok, false);
+    assert.ok(result.gateOutput, 'gateOutput should be present on gate failure');
+    assert.strictEqual(result.gateOutput.stdout, 'lint: ERROR: unused import in foo.js');
+    assert.strictEqual(result.gateOutput.stderr, 'TypeScript: error TS2345: type mismatch');
+  } finally {
+    fs.rmSync(worktree, { recursive: true, force: true });
+  }
+});
+
+test('runDeclaredGates captures stdout and stderr on gate failure (SC2)', async (t) => {
+  const { mock } = t;
+  const missionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gates-sc2-'));
+  // Gate that produces both stdout and stderr on failure
+  fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Mission\n\n## Gates\n\n- [ ] bash -c \'echo "out message"; echo "err message" >&2; exit 1\'\n');
+
+  // Mock spawnSync to capture the actual gate command
+  const childProcess = require('node:child_process');
+  const origSpawnSync = childProcess.spawnSync;
+  const mockSpawnSync = mock.method(childProcess, 'spawnSync', (...args) => {
+    // Let real spawnSync run, we just want to verify the result is captured
+    return origSpawnSync.apply(childProcess, args);
+  });
+
+  try {
+    const result = runDeclaredGates(missionDir, missionDir, { log: () => {}, error: () => {} });
+    assert.strictEqual(result.ok, false);
+    assert.strictEqual(result.reason, 'gate-failed');
+    assert.ok(result.stdout !== undefined, 'stdout should be captured');
+    assert.ok(result.stderr !== undefined, 'stderr should be captured');
+    assert.ok(result.stdout.includes('out message'), 'stdout should contain expected output');
+    assert.ok(result.stderr.includes('err message'), 'stderr should contain expected error');
+  } finally {
+    mockSpawnSync.mock.restore();
+    fs.rmSync(missionDir, { recursive: true, force: true });
+  }
+});

@@ -1533,3 +1533,152 @@ test('runHandoffAndReview: relaunch failure must not trigger post-relaunch hando
   assert.equal(reviewLoopStarted, false, 'startReviewLoop must NOT be called');
   assert.equal(relaunchAttempts, 1, 'attemptAgentRelaunch was called once');
 });
+
+// ---------- TASK-1387: gate output capture and automatic relaunch (SC3 & SC4) ----------
+
+test('runHandoffAndReview relaunches on verification gate failure with captured output (SC3)', async () => {
+  let handoffAttempts = 0;
+  let relaunchAttempts = 0;
+  let lastGateOutput = null;
+
+  const result = await runHandoffAndReview('task-1387-sc3', '/tmp/project-task-1387', 'codex', {
+    validateCheckpointsBeforeHandoffFn: () => ({ ok: true }),
+    performHandoff: async (slug, opts) => {
+      handoffAttempts++;
+      if (handoffAttempts === 1) {
+        return {
+          ok: false,
+          error: 'Final verification gate failed. Fix errors before submitting or use --no-gate if appropriate.',
+          gateOutput: {
+            stdout: 'lint: ERROR: unused import in foo.js',
+            stderr: 'TypeScript: error TS2345: type mismatch'
+          }
+        };
+      }
+      return { ok: true };
+    },
+    repairHandoffFn: async () => ({ repaired: false, blocker: null }),
+    attemptAgentRelaunchFn: async (slugArg, worktree, errorMsg, agent, opts) => {
+      relaunchAttempts++;
+      lastGateOutput = opts.gateOutput || null;
+      return { relaunched: true };
+    },
+    startReviewLoop: () => {},
+    log: () => {},
+    error: () => {}
+  });
+
+  assert.ok(result, 'should succeed after successful relaunch');
+  assert.equal(handoffAttempts, 2, 'performHandoff called twice: initial + post-relaunch');
+  assert.equal(relaunchAttempts, 1, 'attemptAgentRelaunch called once');
+  assert.ok(lastGateOutput, 'gateOutput should be passed to attemptAgentRelaunch');
+  assert.equal(lastGateOutput.stdout, 'lint: ERROR: unused import in foo.js');
+  assert.equal(lastGateOutput.stderr, 'TypeScript: error TS2345: type mismatch');
+});
+
+test('runHandoffAndReview relaunches on declared gate failure with captured output (SC3)', async () => {
+  let handoffAttempts = 0;
+  let relaunchAttempts = 0;
+  let lastGateOutput = null;
+
+  const result = await runHandoffAndReview('task-1387-sc3-declared', '/tmp/project-task-1387', 'codex', {
+    validateCheckpointsBeforeHandoffFn: () => ({ ok: true }),
+    performHandoff: async () => {
+      handoffAttempts++;
+      if (handoffAttempts === 1) {
+        return {
+          ok: false,
+          error: 'Declared gate "bash -c exit 1" failed for task-1387-sc3-declared: err output. Blocking handoff — task remains in active.',
+          gateOutput: {
+            stdout: 'declared gate stdout',
+            stderr: 'declared gate stderr'
+          }
+        };
+      }
+      return { ok: true };
+    },
+    repairHandoffFn: async () => ({ repaired: false, blocker: null }),
+    attemptAgentRelaunchFn: async (slugArg, worktree, errorMsg, agent, opts) => {
+      relaunchAttempts++;
+      lastGateOutput = opts.gateOutput || null;
+      return { relaunched: true };
+    },
+    startReviewLoop: () => {},
+    log: () => {},
+    error: () => {}
+  });
+
+  assert.ok(result, 'should succeed after successful relaunch on declared gate failure');
+  assert.equal(handoffAttempts, 2, 'performHandoff called twice');
+  assert.equal(relaunchAttempts, 1, 'attemptAgentRelaunch called once');
+  assert.ok(lastGateOutput, 'gateOutput should be passed to attemptAgentRelaunch for declared gate failures');
+  assert.equal(lastGateOutput.stdout, 'declared gate stdout');
+  assert.equal(lastGateOutput.stderr, 'declared gate stderr');
+});
+
+test('runHandoffAndReview limits gate-failure relaunches to 2 attempts (SC4)', async () => {
+  let handoffAttempts = 0;
+  let relaunchAttempts = 0;
+  let relaunchErrors = [];
+
+  const result = await runHandoffAndReview('task-1387-sc4', '/tmp/project-task-1387', 'codex', {
+    validateCheckpointsBeforeHandoffFn: () => ({ ok: true }),
+    performHandoff: async () => {
+      handoffAttempts++;
+      // Handoff keeps failing with gate failure
+      return {
+        ok: false,
+        error: 'Final verification gate failed. Fix errors before submitting or use --no-gate if appropriate.',
+        gateOutput: { stdout: 'gate error', stderr: 'gate stderr' }
+      };
+    },
+    repairHandoffFn: async () => ({ repaired: false, blocker: null }),
+    attemptAgentRelaunchFn: async () => {
+      relaunchAttempts++;
+      // Relaunch always succeeds but handoff keeps failing
+      return { relaunched: true };
+    },
+    startReviewLoop: () => {},
+    log: () => {},
+    error: (msg) => { relaunchErrors.push(msg); }
+  });
+
+  assert.equal(result, false, 'should return false after exhausting relaunch attempts');
+  assert.equal(handoffAttempts, 3, 'performHandoff: initial + 2 post-relaunch retries');
+  assert.equal(relaunchAttempts, 2, 'attemptAgentRelaunch called exactly 2 times (max limit)');
+  assert.ok(relaunchErrors.some(e => e.includes('Gate failure persisting after 2 relaunch attempts')),
+    'should report the 2-attempt limit in the error message');
+});
+
+test('runHandoffAndReview stops relaunching when agent relaunch itself fails (SC4)', async () => {
+  let handoffAttempts = 0;
+  let relaunchAttempts = 0;
+
+  const result = await runHandoffAndReview('task-1387-sc4-stop', '/tmp/project-task-1387', 'codex', {
+    validateCheckpointsBeforeHandoffFn: () => ({ ok: true }),
+    performHandoff: async () => {
+      handoffAttempts++;
+      return {
+        ok: false,
+        error: 'Final verification gate failed. Fix errors before submitting or use --no-gate if appropriate.',
+        gateOutput: { stdout: 'gate error', stderr: 'gate stderr' }
+      };
+    },
+    repairHandoffFn: async () => ({ repaired: false, blocker: null }),
+    attemptAgentRelaunchFn: async () => {
+      relaunchAttempts++;
+      // First relaunch succeeds, second fails
+      if (relaunchAttempts === 1) {
+        return { relaunched: true };
+      }
+      return { relaunched: false, error: 'launcher unavailable' };
+    },
+    startReviewLoop: () => {},
+    log: () => {},
+    error: () => {}
+  });
+
+  assert.equal(result, false, 'should return false when relaunch fails');
+  assert.equal(handoffAttempts, 2, 'performHandoff: initial + 1 post-relaunch (first relaunch succeeded)');
+  assert.equal(relaunchAttempts, 2, 'attemptAgentRelaunch called twice: first succeeds, second fails');
+});

@@ -58,18 +58,19 @@ import * as nels from '../core/nels.js';
   * @param {{skipGate?: boolean, worktree?: string|null, force?: boolean, forceWithLease?: boolean, log?: Function, error?: Function, rebaseFn?: Function, isForgejoReviewEnabledFn?: Function}} [options]
   * @returns {Promise<{ ok: boolean, error?: string, gatekeeperPushedBack?: boolean }>}
   */
- async function performHandoff(slug, options = {}) {
-   /** @type{{skipGate?: boolean, worktree?: string|null, force?: boolean, forceWithLease?: boolean, log?: Function, error?: Function, rebaseFn?: Function, isForgejoReviewEnabledFn?: Function}} */
-   const opts = options;
-   const {
-     skipGate = false,
-     worktree = null,
-     force = false,
-     forceWithLease = true,
-     log = fmt.log.info,
-     error = fmt.log.fail,
-     rebaseFn = rebaseBeforeReviewRound
-   } = opts;
+async function performHandoff(slug, options = {}) {
+   /** @type{{skipGate?: boolean, worktree?: string|null, force?: boolean, forceWithLease?: boolean, log?: Function, error?: Function, rebaseFn?: Function, isForgejoReviewEnabledFn?: Function, runVerificationGateFn?: Function}} */
+    const opts = options;
+    const {
+      skipGate = false,
+      worktree = null,
+      force = false,
+      forceWithLease = true,
+      log = fmt.log.info,
+      error = fmt.log.fail,
+      rebaseFn = rebaseBeforeReviewRound,
+      runVerificationGateFn = runVerificationGate
+    } = opts;
 
    const verification = verifyHandoff(slug, { worktree: worktree || undefined });
   if (!verification.ok) {
@@ -198,15 +199,17 @@ import * as nels from '../core/nels.js';
     fmt.log.warn('Step 1: Skipping final verification gate (--no-gate)');
   } else {
     log(`Step 1: Running final verification gate for area: ${fmt.bold(area || 'docs')}...`);
-    const verifyResult = runVerificationGate(area || 'docs', {
+    const verifyResult = runVerificationGateFn(area || 'docs', {
       rootDir,
-      stdio: 'inherit',
+      stdio: 'pipe',
       runFn: git.run
     });
     if (verifyResult.status !== 0) {
+      const stdout = (verifyResult.stdout || '').trim();
+      const stderr = (verifyResult.stderr || '').trim();
       const msg = 'Final verification gate failed. Fix errors before submitting or use --no-gate if appropriate.';
       error(msg);
-      return { ok: false, error: msg };
+      return { ok: false, error: msg, gateOutput: { stdout, stderr } };
     }
   }
 
@@ -346,7 +349,7 @@ import * as nels from '../core/nels.js';
   if (!gatesResult.ok) {
     const msg = `Declared gate "${gatesResult.gate}" failed for ${fmt.slug(slug)}: ${gatesResult.error || gatesResult.reason}. Blocking handoff — task remains in active.`;
     error(msg);
-    return { ok: false, error: msg };
+    return { ok: false, error: msg, gateOutput: { stdout: (gatesResult.stdout || ''), stderr: (gatesResult.stderr || '') } };
   }
   if (gatesResult.skipped) {
     log(`No declared gates for ${fmt.slug(slug)} (${gatesResult.reason}).`);
@@ -463,16 +466,19 @@ function runDeclaredGates(missionDir, rootDir, options = {}) {
     const result = spawnSync('bash', ['-c', cmd], {
       cwd: rootDir,
       encoding: 'utf8',
-      stdio: ['inherit', 'pipe', 'pipe']
+      stdio: 'pipe'
     });
 
     if (result.status !== 0) {
+      const stdout = (result.stdout || '').trim();
       const stderr = (result.stderr || '').trim();
       return {
         ok: false,
         gate: cmd,
         reason: 'gate-failed',
-        error: stderr || `Gate exited with status ${result.status}`
+        error: stderr || `Gate exited with status ${result.status}`,
+        stdout,
+        stderr
       };
     }
   }
