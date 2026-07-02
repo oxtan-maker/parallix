@@ -1,10 +1,10 @@
 ---
 id: TASK-1405
 title: fix blockers
-status: backlog
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-07-02 05:58'
-labels: []
+labels: ["user_value", "bug"]
 dependencies: []
 ---
 
@@ -31,10 +31,20 @@ change the blocking code and persistance to add why a block is added (comment or
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Verification gate ran and passed on the final tree with captured proof rather than an unverified claim
-- [ ] #2 Lint and static analysis report clean on every changed file
-- [ ] #3 No focused or unannotated skipped tests were introduced (no .only and no bare .skip)
-- [ ] #4 Final checkpoint Goal Check table cites real evidence using file:line references and test names
-- [ ] #5 Docs updated to reflect any workflow or user-facing behavior change
-- [ ] #6 Bug-labeled missions include a red-to-green reproduction test that fails before the fix and passes after
+- [x] #1 Verification gate ran and passed on the final tree with captured proof rather than an unverified claim
+- [x] #2 Lint and static analysis report clean on every changed file
+- [x] #3 No focused or unannotated skipped tests were introduced (no .only and no bare .skip)
+- [x] #4 Final checkpoint Goal Check table cites real evidence using file:line references and test names
+- [x] #5 Docs updated to reflect any workflow or user-facing behavior change
+- [x] #6 Bug-labeled missions include a red-to-green reproduction test that fails before the fix and passes after
 <!-- DOD:END -->
+
+## Execution Notes
+
+Checkpoint docs: CP-1.md through CP-5.md in missions/task-1405/.
+
+Changes: `lib/agents/agents.ts` — added 3 non-blocking patterns to `NON_BLOCKING_LAUNCH_ERROR_PATTERNS`, added rationale comment above `shouldPersistLaunchFailureBlock`, enhanced block-persistence log message with reason label.
+
+Tests: `test/agents-limit-hit.test.js` — 6 new reproduction tests for `shouldPersistLaunchFailureBlock` (all pass), total 22 tests pass.
+
+Verification: `./scripts/verify-local.sh all` — 1766 pass, 0 fail.

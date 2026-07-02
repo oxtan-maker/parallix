@@ -115,11 +115,14 @@ const NON_BLOCKING_LAUNCH_ERROR_PATTERNS = Object.freeze([
   /\bmodel\s+(?:identifier|id)\s+(?:is\s+)?invalid\b/i,
   /\b(?:model\s+not\s+found|no\s+such\s+model)\b/i,
   /\bunknown\s+option\b/i,
+  /\bunsupported\s+(flag|option)\b/i,
   /\bauth(?:entication)?\b/i,
   /\bunauthorized\b/i,
   /\bforbidden\b/i,
   /\bapi\s+key\b/i,
-  /\bread-only file system\b/i
+  /\bread-only file system\b/i,
+  /\b(home|bootstrap)\s+(error|failed|cannot|denied|not\s+found)\b/i,
+  /\bpermission\s+denied\b/i
 ]);
 
 function workflowLauncherStatus(agent: string): LauncherStatus {
@@ -168,6 +171,10 @@ function commandInPath(name: string) {
   return result.status === 0 && result.stdout.trim().length > 0;
 }
 
+// Deterministic config/setup errors (invalid model IDs, auth failures,
+// unsupported CLI flags, home/bootstrap failures) must not poison the
+// persistent blocklist — only transient failures (runtime crashes, network
+// errors) deserve a block. Custom agents are never blocked.
 function shouldPersistLaunchFailureBlock(agent: string, result: LaunchResultLike | null | undefined) {
   if (!result || agent === 'custom') {return false;}
   const combined = [
@@ -907,10 +914,14 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
       // setup/config errors (invalid model id, auth failure, read-only HOME, etc.)
       // should fall through to the next family without poisoning agents.local.json.
       if (shouldPersistLaunchFailureBlock(chosen || '', result)) {
+        let blockReason = 'transient crash';
+        if (result?.signal) { blockReason = `signal ${result.signal}`; }
+        else if (result?.error?.code) { blockReason = result.error.code; }
+        else if (result?.status !== null && result?.status !== 0) { blockReason = `exit ${result.status}`; }
         const blockUntil = formatBlockUntil(new Date(Date.now() + DEFAULT_FALLBACK_HOURS * 60 * 60 * 1000));
         try {
           const blockResult = updateAgentBlockFn(chosen || '', blockUntil);
-          log(fmt.status('INFO', `Wrote blocklist entry for ${fmt.agent(chosen || '')} -> ${fmt.path(blockResult.path)} (${DEFAULT_FALLBACK_HOURS}h block)`));
+          log(fmt.status('INFO', `Wrote blocklist entry for ${fmt.agent(chosen || '')} -> ${fmt.path(blockResult.path)} (${DEFAULT_FALLBACK_HOURS}h block, ${blockReason})`));
         } catch (err) {
           log(fmt.status('WARN', `Could not persist blocklist entry for ${fmt.agent(chosen || '')}: ${(err as any).message}`));
         }

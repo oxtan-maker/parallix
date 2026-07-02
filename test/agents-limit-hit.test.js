@@ -22,7 +22,8 @@ const {
   selectAgent,
   setCommandPathProbe,
   startAgent,
-  updateAgentBlock
+  updateAgentBlock,
+  shouldPersistLaunchFailureBlock
 } = require('../lib/agents/agents');
 
 function makeFakeLauncher(scriptedResults, recorder) {
@@ -595,4 +596,48 @@ test('startAgent honours opts.exclude as a seed for the tried set (family-separa
   } finally {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
   }
+});
+
+// Reproduction test for task-1405: deterministic config/setup failures must NOT
+// poison the persistent blocklist.  Before the fix these assertions return `true`
+// (incorrectly blocking); after the fix they return `false` (correctly allowing
+// reroute without blocklist poisoning).
+test('shouldPersistLaunchFailureBlock returns false for unsupported CLI flags', () => {
+  // Unsupported flag is a deterministic config error — the agent cannot run with
+  // the given invocation.  Blocking it wastes retries and poisons agents.local.json.
+  const result = { status: 1, stderr: 'Error: unsupported flag: --foobar\n', stdout: '' };
+  assert.equal(shouldPersistLaunchFailureBlock('codex', result), false);
+});
+
+test('shouldPersistLaunchFailureBlock returns false for home/bootstrap failures', () => {
+  // Home directory or bootstrap failures are deterministic setup errors.  Blocking
+  // the agent family for an hour does not help — the underlying config problem
+  // persists and the next retry hits the same failure.
+  const result = { status: 1, stderr: 'home bootstrap error: cannot create /tmp/test-home\n', stdout: '' };
+  assert.equal(shouldPersistLaunchFailureBlock('codex', result), false);
+});
+
+test('shouldPersistLaunchFailureBlock returns false for permission-denied on home dirs', () => {
+  const result = { status: 1, stderr: 'Error: permission denied accessing home directory\n', stdout: '' };
+  assert.equal(shouldPersistLaunchFailureBlock('codex', result), false);
+});
+
+test('shouldPersistLaunchFailureBlock returns true for transient crashes (ECONNRESET)', () => {
+  // Network-level transient failures are worth blocking briefly so the retry
+  // loop picks a different agent family rather than hammering the same broken
+  // backend.
+  const result = { status: 1, stderr: 'ECONNRESET: connection reset by peer\n', stdout: '' };
+  assert.equal(shouldPersistLaunchFailureBlock('codex', result), true);
+});
+
+test('shouldPersistLaunchFailureBlock returns true for signal kills (SIGKILL)', () => {
+  // Signal-based kills indicate a runtime crash worth blocking temporarily.
+  const result = { status: null, signal: 'SIGKILL', error: null };
+  assert.equal(shouldPersistLaunchFailureBlock('codex', result), true);
+});
+
+test('shouldPersistLaunchFailureBlock returns false for custom agent regardless of failure', () => {
+  // Custom agents (opencode) are never blocked via the persistent blocklist.
+  const result = { status: 1, stderr: 'anything goes wrong\n', stdout: '' };
+  assert.equal(shouldPersistLaunchFailureBlock('custom', result), false);
 });
