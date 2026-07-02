@@ -8,7 +8,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as fmt from '../core/fmt.js';
 import { git, run } from '../core/git.js';
-import { findMissionDir, resolveWorktree, missionBranchName } from '../core/mission-utils.js';
+import { findMissionDir, findMissionArea, resolveWorktree, missionBranchName } from '../core/mission-utils.js';
+import { runVerificationGate, formatVerificationCommand } from '../core/verification.js';
 import { resolveTaskFile, getTaskImplementer, getTaskStatus, enforceTaskAssignee, transitionTask, reportTaskResolution } from '../tools/backlog.js';
 import { toVirtual, transitionVirtual } from '../core/state-map.js';
 import { getPrStatus, readToken, getLatestReviewForPr, getLatestDispositionForPr, providerAvailable, getComments, postComment, postReview, resolveReviewUser, isProviderEnabled } from './review-adapter.js';
@@ -238,6 +239,245 @@ export function stageLaunchSinceMs(result: { startedAt?: string } | null | undef
 }
 
 // ============================================================================
+// Pre-review Gate Enforcement (ADR 0048 Control C1 / TASK-1385)
+// ============================================================================
+
+// Minimal error classifier stub for gate failures (TASK-1389 dependency).
+// Maps gate failures to Class 6: genuine gate failure — code issue, dispatch: auto-send-back.
+// TASK-1389 will replace this with the full 8-class dispatch table.
+const GATE_FAILURE_CLASS = 'class-6-genuine-gate-failure';
+const GATE_FAILURE_ACTION = 'auto-send-back';
+
+export function classifyGateFailure(output: string): { classification: string; action: string; isRelaunchable: boolean } {
+  // Gate failures are genuine code issues — always relaunchable via auto-send-back.
+  // The full classifier (TASK-1389) will expand this to 8 classes with nuanced dispatch.
+  return {
+    classification: GATE_FAILURE_CLASS,
+    action: GATE_FAILURE_ACTION,
+    isRelaunchable: true,
+  };
+}
+
+export interface PreReviewGateResult {
+  ok: boolean;
+  area: string;
+  command: string;
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  error?: string;
+}
+
+/**
+ * Run the verification gate with the mission area before a review round.
+ * Captures stdout/stderr for use in auto-bounce fix prompts.
+ */
+export async function runPreReviewGate(
+  slug: string,
+  worktree: string,
+  opts: {
+    findMissionAreaFn?: typeof findMissionArea;
+    runFn?: typeof run;
+    log?: (msg: string) => void;
+    error?: (msg: string) => void;
+  } = {}
+): Promise<PreReviewGateResult> {
+  const {
+    findMissionAreaFn = findMissionArea,
+    runFn: runFnOverride = run,
+    log = fmt.log.plain,
+    error = fmt.log.plainError,
+  } = opts;
+
+  const missionDir = findMissionDir(slug, worktree);
+  const area = missionDir ? findMissionAreaFn(missionDir) : 'docs';
+  const command = formatVerificationCommand(area, worktree);
+
+  if (command === NO_GATE_NOTICE_ALIAS) {
+    log(fmt.status('INFO', `No verification gate configured for area ${area}; skipping pre-review gate check.`));
+    return { ok: true, area, command, exitCode: 0, stdout: '', stderr: '' };
+  }
+
+  log(fmt.status('INFO', `Pre-review gate for area "${area}": ${fmt.command(command)}`));
+
+  // Run with pipe mode to capture output for auto-bounce fix prompts.
+  const result = runFnOverride('bash', ['-lc', command], {
+    cwd: worktree,
+    stdio: 'pipe',
+    maxBuffer: 10 * 1024 * 1024, // 10MB buffer
+  });
+
+  const stdout = typeof result.stdout === 'string' ? result.stdout : '';
+  const stderr = typeof result.stderr === 'string' ? result.stderr : '';
+
+  if (result.status !== 0) {
+    error(fmt.status('FAIL', `Pre-review gate failed for area "${area}" (exit ${result.status}).`));
+    if (stderr) {
+      error(`  stderr: ${stderr.split('\n').slice(0, 10).join('\n  ')}`);
+    }
+    return {
+      ok: false,
+      area,
+      command,
+      exitCode: result.status,
+      stdout,
+      stderr,
+      error: `verification gate failed with exit code ${result.status}`,
+    };
+  }
+
+  log(fmt.status('PASS', `Pre-review gate passed for area "${area}".`));
+  return { ok: true, area, command, exitCode: 0, stdout, stderr };
+}
+
+const NO_GATE_NOTICE_ALIAS = ': # no verification gate configured (set adapters.verification.command)';
+
+/**
+ * Handle a pre-review gate failure by auto-bouncing to the implementer.
+ * Does NOT consume a reviewer cycle or transition the task out of review status.
+ * Tracks retry count in review state metadata.
+ * Returns true if bounced, false if retry limit exceeded (mission strands).
+ */
+export async function handleGateFailureAutoBounce(
+  slug: string,
+  worktree: string,
+  gateResult: PreReviewGateResult,
+  implementer: string,
+  opts: {
+    startAgentFn?: typeof startAgent;
+    writeReviewStateFn?: typeof writeReviewState;
+    readReviewStateFn?: typeof readReviewState;
+    transitionTaskFn?: typeof transitionTask;
+    applyAgentFallbackFn?: typeof applyAgentFallback;
+    taskResolution?: { ok: boolean; taskFile?: string };
+    enforceTaskAssigneeFn?: typeof enforceTaskAssignee;
+    log?: (msg: string) => void;
+    error?: (msg: string) => void;
+    sleepFn?: typeof delay;
+    buildCompactActOnReviewPromptFn?: typeof buildCompactActOnReviewPrompt;
+    isForgejoReviewEnabledFn?: ((rootDir?: string) => boolean) | null;
+    isReviewProviderEnabledFn?: ((rootDir?: string) => boolean) | null;
+    legacyIsForgejoReviewEnabledFn?: ((rootDir?: string) => boolean) | null;
+    exit?: (code: number) => never;
+  } = {}
+): Promise<{ bounced: boolean; stranded: boolean }> {
+  const {
+    startAgentFn = startAgent,
+    writeReviewStateFn = writeReviewState,
+    readReviewStateFn = readReviewState,
+    transitionTaskFn = transitionTask,
+    applyAgentFallbackFn = applyAgentFallback,
+    taskResolution,
+    enforceTaskAssigneeFn,
+    log = fmt.log.plain,
+    error = fmt.log.plainError,
+    sleepFn = delay,
+    buildCompactActOnReviewPromptFn = buildCompactActOnReviewPrompt,
+    isForgejoReviewEnabledFn,
+    isReviewProviderEnabledFn,
+    legacyIsForgejoReviewEnabledFn,
+    exit = process.exit,
+  } = opts;
+
+  const MAX_GATE_RETRY = 2;
+
+  // Read persisted state to get current retry count
+  const persisted = readReviewStateFn(slug, worktree);
+  const retryCount = persisted && persisted.metadata && typeof persisted.metadata === 'object'
+    ? (Number((persisted.metadata as any).gateFailureRetryCount) || 0)
+    : 0;
+
+  if (retryCount >= MAX_GATE_RETRY) {
+    error(fmt.status('FAIL', `Pre-review gate failure: max retries exceeded (${MAX_GATE_RETRY}). Mission stranded for ${slug}.`));
+    error(fmt.status('FAIL', `Area "${gateResult.area}" verification failed ${retryCount} times. Human intervention required.`));
+    error(fmt.status('FAIL', `Gate output:\n${gateResult.stdout || gateResult.stderr || '(no output)'}\n`));
+    return { bounced: false, stranded: true };
+  }
+
+  // Classify the failure
+  const combinedOutput = gateResult.stderr || gateResult.stdout || 'Gate failed with exit code ' + gateResult.exitCode;
+  const classification = classifyGateFailure(combinedOutput);
+
+  log(fmt.status('WARN', `Pre-review gate failed for area "${gateResult.area}" (exit ${gateResult.exitCode}). Classification: ${classification.classification}.`));
+
+  // Build fix prompt with captured gate output
+  const fixPrompt = [
+    `PRE-REVIEW GATE FAILURE — FIX REQUIRED`,
+    ``,
+    `Mission: ${slug}`,
+    `Area: ${gateResult.area}`,
+    `Gate command: ${gateResult.command}`,
+    `Exit code: ${gateResult.exitCode}`,
+    ``,
+    `Gate output (use this to diagnose and fix):`,
+    `---`,
+    gateResult.stdout || '(no stdout)',
+    `---`,
+    gateResult.stderr || '(no stderr)',
+    `---`,
+    ``,
+    `Classification: ${classification.classification} — ${classification.action}`,
+    `Retry attempt: ${retryCount + 1}/${MAX_GATE_RETRY}`,
+    ``,
+    `Fix the underlying issue so the verification gate passes for area "${gateResult.area}".`,
+    `After fixing, the review loop will re-run the gate before the next review round.`,
+  ].join('\n');
+
+  // Increment retry count in metadata
+  if (!persisted || !persisted.metadata || typeof persisted.metadata !== 'object') {
+    // Create new metadata
+  }
+  const metadata = persisted && persisted.metadata && typeof persisted.metadata === 'object'
+    ? { ...persisted.metadata }
+    : {};
+  metadata.gateFailureRetryCount = retryCount + 1;
+
+  // Update review state with incremented retry count
+  if (persisted) {
+    const updatedState = { ...persisted, metadata };
+    writeReviewStateFn(slug, updatedState as any, worktree);
+  } else {
+    writeReviewStateFn(slug, { metadata } as any, worktree);
+  }
+
+  // Transition task back to active (implementer phase) without consuming reviewer cycle
+  transitionTaskFn(slug, 'active', { rootDir: worktree, log });
+  log(fmt.status('INFO', `Auto-bouncing to implementer (${implementer}) with fix prompt. Retry ${retryCount + 1}/${MAX_GATE_RETRY}.`));
+
+  // Launch implementer with the fix prompt
+  try {
+    const launchResult = await startAgentFn('act-on-review', {
+      agent: implementer,
+      prompt: (actualImplementer: string) => fixPrompt,
+      worktree,
+      slug,
+      role: 'implementer',
+      exclude: [],
+    });
+
+    // Apply any agent fallback if needed
+    implementer = applyAgentFallbackFn({
+      role: 'implementer',
+      original: implementer,
+      launchResult,
+      state: persisted || {},
+      slug,
+      worktree,
+      taskResolution,
+      log,
+      writeReviewStateFn,
+      enforceTaskAssigneeFn,
+    });
+  } catch (err: unknown) {
+    error(fmt.status('FAIL', `Could not relaunch implementer (${implementer}) for gate failure auto-bounce: ${(err as Error).message}`));
+    return { bounced: false, stranded: true };
+  }
+
+  log(fmt.status('INFO', `Implementer (${implementer}) relaunched with gate failure fix prompt.`));
+  return { bounced: true, stranded: false };
+}
+
+// ============================================================================
 // Main Review Loop
 // ============================================================================
 
@@ -303,6 +543,8 @@ export async function startReviewLoop(slug: string, opts: {
   legacyIsForgejoReviewEnabledFn?: ((rootDir?: string) => boolean) | null;
   isForgejoReviewEnabledFn?: ((rootDir?: string) => boolean) | null;
   recordStageStatsSafeFn?: (...args: any[]) => void;
+  runPreReviewGateFn?: typeof runPreReviewGate;
+  handleGateFailureAutoBounceFn?: typeof handleGateFailureAutoBounce;
 } = {}): Promise<void> {
   let {
     implementer,
@@ -317,6 +559,8 @@ export async function startReviewLoop(slug: string, opts: {
     pollTimeoutSeconds = null,
     worktree: callerWorktree,
     missionPath,
+    runPreReviewGateFn = runPreReviewGate,
+    handleGateFailureAutoBounceFn = handleGateFailureAutoBounce,
     resetReviewStateFn = resetReviewState,
     maybeUpdateGraphifyBeforeReviewFn = maybeUpdateGraphifyBeforeReview,
     readReviewStateFn = readReviewState,
@@ -787,6 +1031,49 @@ export async function startReviewLoop(slug: string, opts: {
           if (!dryRun) { transitionTaskFn(slug, 'review', { rootDir: worktree, log }); }
           state.phase = 'reviewing';
           writeReviewStateFn(slug, state, worktree);
+
+          // Pre-review gate enforcement (ADR 0048 Control C1 / TASK-1385):
+          // Run the verification gate before the reviewer launches. On failure,
+          // auto-bounce to the implementer with captured gate output as fix prompt.
+          // No reviewer cycle is consumed when the gate fails and auto-bounce occurs.
+          if (!dryRun) {
+            const preReviewGateResult = await runPreReviewGateFn(slug, worktree, {
+              runFn: runFn as any,
+              log,
+              error,
+            });
+            if (!preReviewGateResult.ok) {
+              log(fmt.status('WARN', `Pre-review gate failed for area "${preReviewGateResult.area}" (exit ${preReviewGateResult.exitCode}). Auto-bouncing to implementer.`));
+              const bounceResult = await handleGateFailureAutoBounceFn(slug, worktree, preReviewGateResult, implementer, {
+                startAgentFn: startAgentFn,
+                writeReviewStateFn: writeReviewStateFn,
+                readReviewStateFn: readReviewStateFn,
+                transitionTaskFn: transitionTaskFn,
+                applyAgentFallbackFn: applyAgentFallbackFn,
+                taskResolution,
+                enforceTaskAssigneeFn,
+                log,
+                error,
+                sleepFn,
+                buildCompactActOnReviewPromptFn,
+                isForgejoReviewEnabledFn,
+                isReviewProviderEnabledFn,
+                legacyIsForgejoReviewEnabledFn,
+                exit,
+              });
+              if (bounceResult.stranded) {
+                error(fmt.status('FAIL', `Pre-review gate failure stranded mission ${slug}. Exiting review loop.`));
+                exit(1); return;
+              }
+              if (bounceResult.bounced) {
+                log(fmt.status('INFO', `Auto-bounce succeeded. Continuing to next round.`));
+                continue;
+              }
+            } else {
+              log(fmt.status('PASS', `Pre-review gate passed for area "${preReviewGateResult.area}".`));
+            }
+          }
+
           if (reviewer === 'autonomous' && !forgejoEnabled) {
             log(fmt.status('INFO', `Round ${attempt}: reviewer identity is autonomous; skipping reviewer launch and using local review artifacts only.`));
           } else {

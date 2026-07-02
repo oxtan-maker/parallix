@@ -1,13 +1,14 @@
 ---
 id: TASK-1385
 title: Enforce pre-review exact-tree verification and auto-bounce on failure
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-06-28 11:30'
-updated_date: '2026-07-01 20:13'
+  updated_date: '2026-07-02 12:00'
 labels:
   - harness
   - workflow
+  - ai_sdlc
 dependencies:
   - TASK-1389
 references:
@@ -31,17 +32,17 @@ Depends on TASK-1389 (error classifier) for clean dispatch integration. Implemen
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The verification gate runs mechanically before each review round and its exit code is the sole trusted signal
-- [ ] #2 On gate failure the workflow auto-bounces to the implementer with captured gate output as a fix prompt without consuming a reviewer cycle
-- [ ] #3 Gate scope is selected from the mission area (diff-scoped) rather than always running 'all'
+  - [x] #1 The verification gate runs mechanically before each review round and its exit code is the sole trusted signal
+  - [x] #2 On gate failure the workflow auto-bounces to the implementer with captured gate output as a fix prompt without consuming a reviewer cycle
+  - [x] #3 Gate scope is selected from the mission area (diff-scoped) rather than always running 'all'
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Verification gate ran and passed on the final tree with captured proof rather than an unverified claim
-- [ ] #2 Lint and static analysis report clean on every changed file
-- [ ] #3 No focused or unannotated skipped tests were introduced (no .only and no bare .skip)
-- [ ] #4 Final checkpoint Goal Check table cites real evidence using file:line references and test names
-- [ ] #5 Docs updated to reflect any workflow or user-facing behavior change
+  - [x] #1 Verification gate ran and passed on the final tree with captured proof rather than an unverified claim
+  - [x] #2 Lint and static analysis report clean on every changed file
+  - [x] #3 No focused or unannotated skipped tests were introduced (no .only and no bare .skip)
+  - [x] #4 Final checkpoint Goal Check table cites real evidence using file:line references and test names
+  - [x] #5 Docs updated to reflect any workflow or user-facing behavior change
 - [ ] #6 Bug-labeled missions include a red-to-green reproduction test that fails before the fix and passes after
 <!-- DOD:END -->
