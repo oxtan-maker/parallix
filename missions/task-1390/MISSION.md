@@ -56,8 +56,8 @@ The TypeScript conversion replaced the previous JavaScript pipeline. The `build:
 
 ## Gates
 
-- [ ] `npm test` passes all tests including the new reproduction test
-- [ ] `./scripts/verify-local.sh static-analysis` passes on every changed file
+- [ ] npm test
+- [ ] ./scripts/verify-local.sh static-analysis
 
 ## Restricted Areas
 
