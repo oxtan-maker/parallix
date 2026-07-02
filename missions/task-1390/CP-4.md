@@ -6,12 +6,12 @@ Ran all existing `test/px-shell-init.test.js` tests to confirm no regression fro
 
 ## Goal Check
 
-| Criterion | Evidence |
-|-----------|----------|
-| All `px-shell-init.test.js` tests pass | `test/px-shell-init.test.js` — 8/8 tests pass (shellInit emits bash/zsh functions, rejects unsupported shell, follows Next: cd, follows Working directory, preserves exit code, silently skips missing dirs ×2) |
-| Full test suite passes | `npm test` — 1757 pass, 0 fail, 22 skipped |
-| Static analysis gate passes | `./scripts/verify-local.sh static-analysis` — ESLint: 0 errors, 244 warnings (pre-existing); tsc: clean; test-hygiene: clean |
-| No changes to restricted areas | Only `package.json` modified; `px.ts`, `tsconfig.json`, `lib/` untouched |
+| Criterion | Evidence | Status |
+|-----------|----------|--------|
+| All `px-shell-init.test.js` tests pass | `test/px-shell-init.test.js` — 8/8 tests pass (shellInit emits bash/zsh functions, rejects unsupported shell, follows Next: cd, follows Working directory, preserves exit code, silently skips missing dirs ×2) | PASS |
+| Full test suite passes | `npm test` — 1757 pass, 0 fail, 22 skipped | PASS |
+| Static analysis gate passes | `./scripts/verify-local.sh static-analysis` — ESLint: 0 errors, 244 warnings (pre-existing); tsc: clean; test-hygiene: clean | PASS |
+| No changes to restricted areas | Only `package.json` modified; `px.ts`, `tsconfig.json`, `lib/` untouched | PASS |
 
 ## Gates
 
