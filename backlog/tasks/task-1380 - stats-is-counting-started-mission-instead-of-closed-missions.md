@@ -4,6 +4,7 @@ title: stats is counting started mission instead of closed missions
 status: backlog
 assignee: []
 created_date: '2026-06-27 14:33'
+updated_date: '2026-07-02 04:55'
 labels: []
 dependencies: []
 ---
@@ -11,7 +12,7 @@ dependencies: []
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-We need to add a closed column to the stats file to ensure we are not counting started but not completed missions in stats
+We need to add a closed column to the stats file to ensure we are not counting started but not completed missions in stats. Also update the existing stats file in ~/.local/state/parallix so (most missions are marked as done, only the active are not and the active are not counted)
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Definition of Done
