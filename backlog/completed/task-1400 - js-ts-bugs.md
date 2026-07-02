@@ -1,10 +1,10 @@
 ---
 id: TASK-1400
 title: js->ts bugs
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-07-02 04:05'
-labels: []
+labels: ["user_value"]
 dependencies: []
 ---
 

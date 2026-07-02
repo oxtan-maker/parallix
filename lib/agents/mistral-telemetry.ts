@@ -1,8 +1,6 @@
-'use strict';
-
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 /**
  * Mistral (Vibe) Telemetry Parser
@@ -26,7 +24,7 @@ const path = require('path');
  * The default directory where Vibe writes its session meta files.
  * Overridden by tests via extractMistralTelemetry(basePath).
  */
-const DEFAULT_MISTRAL_LOG_DIR = path.join(os.homedir(), '.vibe', 'logs', 'session');
+export const DEFAULT_MISTRAL_LOG_DIR = path.join(os.homedir(), '.vibe', 'logs', 'session');
 
 interface TelemetryResult {
   inputTokens: number;
@@ -64,7 +62,7 @@ interface StatsBlock {
  * Returns null when the content yields no usable signal (missing stats,
  * empty object, or non-object stats).
  */
-function parseMistralMeta(meta: ParseableMeta | null | undefined): TelemetryResult | null {
+export function parseMistralMeta(meta: ParseableMeta | null | undefined): TelemetryResult | null {
   if (!meta || typeof meta !== 'object') {return null;}
 
   const stats = meta.stats;
@@ -100,7 +98,7 @@ function parseMistralMeta(meta: ParseableMeta | null | undefined): TelemetryResu
  * @param result - Legacy launcher result object (ignored; kept for API compat)
  * @param basePath - Override the default session log directory. Used by tests.
  */
-function extractMistralTelemetry(result: unknown, basePath?: string): TelemetryResult | null {
+export function extractMistralTelemetry(result: unknown, basePath?: string): TelemetryResult | null {
   void result; // legacy param, ignored — telemetry comes from on-disk meta.json
 
   const scanDir = basePath || DEFAULT_MISTRAL_LOG_DIR;
@@ -156,13 +154,6 @@ function extractMistralTelemetry(result: unknown, basePath?: string): TelemetryR
  * Return the provider/model pair for mistral tasks.
  * Used as fallback when telemetry is null.
  */
-function getMistralProviderModel(): { provider: string; model: string } {
+export function getMistralProviderModel(): { provider: string; model: string } {
   return { provider: 'mistral', model: 'mistral' };
 }
-
-module.exports = {
-  parseMistralMeta,
-  extractMistralTelemetry,
-  getMistralProviderModel,
-  DEFAULT_MISTRAL_LOG_DIR,
-};

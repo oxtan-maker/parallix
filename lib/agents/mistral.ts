@@ -22,7 +22,7 @@ interface StartMistralAgentOptions extends MistralInvocationOptions {
 // Current session ID format in meta.json: UUID like "a3dd3d4d-f97d-d57d-4942-a1f694e3a922"
 // Directory naming uses first 8 chars: session_20260521_162703_a3dd3d4d
 // No stdout marker detected in testing, so we leave this as null.
-// Telemetry: mistral/vibe does not expose token-usage data. See mistral-telemetry.js
+// Telemetry: mistral/vibe does not expose token-usage data. See mistral-telemetry.ts
 // for the honest-zero stub. Stats hooks in active.js and review-loop.js call
 // recordStageStats which defaults to '0' for tokens when telemetry is null.
 
