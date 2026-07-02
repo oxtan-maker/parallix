@@ -4,7 +4,7 @@ title: Validate declared mission gates are executable commands before handoff
 status: backlog
 assignee: []
 created_date: '2026-06-28 11:30'
-updated_date: '2026-07-01 19:24'
+updated_date: '2026-07-02 04:51'
 labels:
   - harness
   - workflow
@@ -22,6 +22,8 @@ priority: medium
 ADR 0048 Control C4: Validate that declared mission gate commands in the `## Gates` section of MISSION.md are syntactically valid and reference existing files before executing them. On validation failure, report the specific issue and auto-send-back with a fix instruction.
 
 Currently, `runDeclaredGates` (handoff.js:429-480) executes each gate line as a bash command. Invalid commands fail at execution time with a confusing shell error that is not classified differently from a genuine gate failure.
+
+Also ensure the prompt to the agent is clear so what we actually check is communicated as a requirement.
 
 This remains sequenced after TASK-1389/TASK-1387/TASK-1385 for ROI reasons, but it is explicitly in backlog and not treated as a deferred non-commitment.
 <!-- SECTION:DESCRIPTION:END -->
