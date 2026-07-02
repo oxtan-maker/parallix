@@ -4,7 +4,10 @@ title: deterministic launch failures should not blocklist agent families
 status: backlog
 assignee: []
 created_date: '2026-06-30 17:51'
-labels: [bug, ai_sdlc]
+updated_date: '2026-07-02 05:57'
+labels:
+  - bug
+  - ai_sdlc
 dependencies: []
 ---
 
@@ -27,6 +30,7 @@ Expected behavior:
 - genuine usage-limit hits should still persist a timed block and reroute
 - deterministic config/setup failures should reroute without poisoning the persistent blocklist
 - the distinction should be regression-tested with a red-to-green reproduction
+- change the blocking code and persistance to add why a block is added (comment or similar)
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Definition of Done
