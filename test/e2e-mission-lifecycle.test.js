@@ -221,7 +221,23 @@ function createTask(repoRoot, slug, title) {
   return taskPath;
 }
 
-function setupRepository({ slug, title }) {
+function postIntegrateHookMarkerPath(repoRoot) {
+  return path.join(repoRoot, 'post-integrate-hook.log');
+}
+
+function writePostIntegrateHookScript(repoRoot) {
+  const scriptPath = path.join(repoRoot, 'scripts', 'e2e-post-integrate-hook.sh');
+  const markerPath = postIntegrateHookMarkerPath(repoRoot);
+  writeExecutable(scriptPath, [
+    '#!/usr/bin/env bash',
+    'set -euo pipefail',
+    `printf 'slug=%s base_worktree=%s base_branch=%s variant=%s\\n' "$INTEGRATE_HOOK_SLUG" "$INTEGRATE_HOOK_BASE_WORKTREE" "$INTEGRATE_HOOK_BASE_BRANCH" "$INTEGRATE_HOOK_VARIANT" >> ${JSON.stringify(markerPath)}`,
+    ''
+  ].join('\n'));
+  return scriptPath;
+}
+
+function setupRepository({ slug, title, postIntegrateHook = false }) {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-e2e-'));
   const repoRoot = path.join(tmpRoot, 'repo');
   const binDir = path.join(repoRoot, 'bin');
@@ -244,18 +260,25 @@ function setupRepository({ slug, title }) {
     fs.symlinkSync(graphifyPath, path.join(binDir, 'graphify'));
   }
 
+  const adapters = {
+    tasks: { provider: 'backlog-md', storage: 'backlog', stateMap: 'config/state-map.json' },
+    agents: { models: { custom: 'stub/custom' } },
+    missions: { baseDir: 'missions', branchPrefix: 'mission/', worktreePattern: '../<repo>-<slug>' },
+    verification: { command: ':', defaultArea: 'all' },
+    review: { provider: 'none', tmpDir: reviewTmpDir }
+  };
+
+  if (postIntegrateHook) {
+    const scriptPath = writePostIntegrateHookScript(repoRoot);
+    adapters.integrate = { postIntegrateCommand: `./${path.relative(repoRoot, scriptPath)}` };
+  }
+
   fs.writeFileSync(path.join(repoRoot, 'workflow.config.json'), JSON.stringify({
     product: {
       name: 'e2e-probe',
       targetUser: 'tests'
     },
-    adapters: {
-      tasks: { provider: 'backlog-md', storage: 'backlog', stateMap: 'config/state-map.json' },
-      agents: { models: { custom: 'stub/custom' } },
-      missions: { baseDir: 'missions', branchPrefix: 'mission/', worktreePattern: '../<repo>-<slug>' },
-      verification: { command: ':', defaultArea: 'all' },
-      review: { provider: 'none', tmpDir: reviewTmpDir }
-    }
+    adapters
   }, null, 2));
 
   fs.writeFileSync(path.join(repoRoot, 'config', 'state-map.json'), JSON.stringify({
@@ -292,7 +315,7 @@ function workflowEnv(binDir, stateHome, repoRoot) {
   };
 }
 
-function runWorkflow(repoRoot, env, args, timeout = 60000) {
+function runWorkflow(repoRoot, env, args, timeout = 60000, { allowFailure = false } = {}) {
   const stdoutPath = path.join(os.tmpdir(), `parallix-e2e-stdout-${process.pid}-${Date.now()}.log`);
   const stderrPath = path.join(os.tmpdir(), `parallix-e2e-stderr-${process.pid}-${Date.now()}.log`);
   const stdoutFd = fs.openSync(stdoutPath, 'w');
@@ -316,7 +339,7 @@ function runWorkflow(repoRoot, env, args, timeout = 60000) {
   if (result.error && result.status === null) {
     throw result.error;
   }
-  if (result.status !== 0) {
+  if (!allowFailure && result.status !== 0) {
     throw new Error(
       `px ${args.join(' ')} failed (status=${result.status}, signal=${result.signal}, error=${result.error ? result.error.message : 'none'})\n` +
       `stdout:\n${result.stdout}\nstderr:\n${result.stderr}`
@@ -418,10 +441,10 @@ function assertCheckpointShape(rootDir, slug, expectedFiles) {
   }
 }
 
-function runScenario({ launchFromFeatureBranch = false, integrate = true }) {
+function runScenario({ launchFromFeatureBranch = false, integrate = true, postIntegrateHook = false, failIntegrationGate = false }) {
   const slug = launchFromFeatureBranch ? 'task-2001' : 'task-2002';
   const title = launchFromFeatureBranch ? 'Feature Branch Lifecycle' : 'Primary Branch Lifecycle';
-  const repo = setupRepository({ slug, title });
+  const repo = setupRepository({ slug, title, postIntegrateHook });
   const env = workflowEnv(repo.binDir, repo.stateHome, repo.repoRoot);
   const worktree = worktreePathFor(repo.repoRoot, slug);
   /** @type {any} */
@@ -484,6 +507,29 @@ function runScenario({ launchFromFeatureBranch = false, integrate = true }) {
       return summary;
     }
 
+    if (failIntegrationGate) {
+      // px integrate's own gate step reads adapters.verification.command from the
+      // mission worktree (not the base checkout), so flipping it to a failing
+      // command only here — after handoff/review already used the passing base
+      // config — makes integrate abort at its gate step, before any success seam
+      // that could invoke the post-integrate hook.
+      const worktreeConfigPath = path.join(worktree, 'workflow.config.json');
+      const worktreeConfig = JSON.parse(fs.readFileSync(worktreeConfigPath, 'utf8'));
+      worktreeConfig.adapters.verification.command = 'exit 7';
+      fs.writeFileSync(worktreeConfigPath, JSON.stringify(worktreeConfig, null, 2));
+
+      const gateResult = runWorkflow(worktree, env, ['integrate', slug], 60000, { allowFailure: true });
+      summary.integrate = {
+        gateFailed: true,
+        exitCode: gateResult.status,
+        worktreeStillExists: fs.existsSync(worktree),
+        postIntegrateHookLines: fs.existsSync(postIntegrateHookMarkerPath(repo.repoRoot))
+          ? fs.readFileSync(postIntegrateHookMarkerPath(repo.repoRoot), 'utf8').trim().split('\n').filter(Boolean)
+          : []
+      };
+      return summary;
+    }
+
     runWorkflow(worktree, env, ['integrate', slug, '--no-integration-gates']);
 
     const rootTask = taskFileIn(repo.repoRoot, slug);
@@ -508,6 +554,13 @@ function runScenario({ launchFromFeatureBranch = false, integrate = true }) {
     };
     if (launchFromFeatureBranch) {
       summary.integrate.featureHeadAfter = runGit(repo.repoRoot, ['rev-parse', 'feature/e2e-base']);
+    }
+
+    if (postIntegrateHook) {
+      const markerPath = postIntegrateHookMarkerPath(repo.repoRoot);
+      summary.integrate.postIntegrateHookLines = fs.existsSync(markerPath)
+        ? fs.readFileSync(markerPath, 'utf8').trim().split('\n').filter(Boolean)
+        : [];
     }
 
     return summary;
@@ -583,6 +636,29 @@ test('primary-branch lifecycle integrates cleanly to main and marks the task don
   assert.equal(summary.integrate.rootTaskStatus, 'done');
   assert.equal(summary.integrate.worktreeExistsAfter, false);
   assert.notEqual(summary.integrate.mainHeadAfter, summary.integrate.mainHeadBefore);
+});
+
+test('configured post-integrate hook runs exactly once with slug/base-worktree/base-branch/variant env vars (SC2/SC3)', () => {
+  const summary = runScenarioInChild({ launchFromFeatureBranch: false, integrate: true, postIntegrateHook: true });
+  assert.equal(summary.integrate.rootTaskStatus, 'done');
+  assert.equal(summary.integrate.postIntegrateHookLines.length, 1, 'hook must run exactly once for a successful integrate');
+  assert.match(
+    summary.integrate.postIntegrateHookLines[0],
+    /^slug=task-2002 base_worktree=\S+ base_branch=main variant=variant-b$/
+  );
+});
+
+test('a failed integration gate aborts before the post-integrate hook can run (SC4)', () => {
+  const summary = runScenarioInChild({ launchFromFeatureBranch: false, integrate: true, postIntegrateHook: true, failIntegrationGate: true });
+  assert.equal(summary.integrate.gateFailed, true);
+  assert.notEqual(summary.integrate.exitCode, 0);
+  assert.deepEqual(summary.integrate.postIntegrateHookLines, []);
+});
+
+test('a repo with no post-integrate hook configured runs px integrate with unchanged behavior (SC1)', () => {
+  const summary = runScenarioInChild({ launchFromFeatureBranch: false, integrate: true, postIntegrateHook: false });
+  assert.equal(summary.integrate.rootTaskStatus, 'done');
+  assert.equal(summary.integrate.postIntegrateHookLines, undefined);
 });
 
 test('artifact-focused run produces mission, checkpoint, milestone, and review artifacts with the expected structure', () => {

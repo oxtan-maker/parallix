@@ -69,6 +69,17 @@
             "path": { "type": "string", "description": "Repo-relative path to the workflow stats CSV." }
           }
         },
+        "integrate": {
+          "type": "object",
+          "description": "Optional post-integrate hook. When postIntegrateCommand is unset, `px integrate` behaves exactly as it does without this section.",
+          "additionalProperties": true,
+          "properties": {
+            "postIntegrateCommand": {
+              "type": "string",
+              "description": "Shell command run at most once, from the base checkout, after a successful non-dry-run `px integrate`. Receives INTEGRATE_HOOK_SLUG, INTEGRATE_HOOK_BASE_WORKTREE, INTEGRATE_HOOK_BASE_BRANCH, and INTEGRATE_HOOK_VARIANT as environment variables."
+            }
+          }
+        },
         "review": {
           "type": "object",
           "description": "Review surface. An unset provider keeps the lifecycle running without a mirrored review provider; set provider to 'forgejo' (with baseUrl, remote, repo) to enable Forgejo, or 'none' to run without one.",

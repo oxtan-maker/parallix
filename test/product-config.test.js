@@ -99,6 +99,26 @@ test('loadEffectiveConfig merges a partial override over the defaults', () => {
   });
 });
 
+test('loadEffectiveConfig has no post-integrate hook by default', () => {
+  withTempDir(root => {
+    const effective = loadEffectiveConfig(root);
+    assert.deepEqual(effective.adapters.integrate, {});
+  });
+});
+
+test('loadEffectiveConfig merges a repo-declared post-integrate hook command', () => {
+  withTempDir(root => {
+    fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
+      adapters: { integrate: { postIntegrateCommand: './scripts/refresh-px.sh' } },
+    }, null, 2));
+
+    const effective = loadEffectiveConfig(root);
+    assert.equal(effective.adapters.integrate.postIntegrateCommand, './scripts/refresh-px.sh');
+    // unrelated defaults are untouched by declaring the hook
+    assert.equal(effective.adapters.verification.defaultArea, 'docs');
+  });
+});
+
 test('validateWorkflowConfig accepts a partial override (missing sections filled by defaults)', () => {
   const issues = validateWorkflowConfig({
     product: { name: 'Example' },

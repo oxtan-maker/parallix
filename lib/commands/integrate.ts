@@ -13,6 +13,7 @@ import { findMissionDir, resolveWorktree, findMissionArea, missionTitle, parseCo
 import stats from './stats.js';
 import * as verification from '../core/verification.js';
 const { formatVerificationCommand } = verification;
+import * as postIntegrateHook from '../core/post-integrate-hook.js';
 import { isForgejoReviewEnabled } from '../core/product-config.js';
 import { readReviewState } from '../review/review-state.js';
 
@@ -510,6 +511,7 @@ export interface IntegrateFn extends Function {
   reportSyncMergedFailure: typeof reportSyncMergedFailure;
   recordPostIntegrationStats: typeof recordPostIntegrationStats;
   recordPostIntegrationStatsOrAbort: typeof recordPostIntegrationStatsOrAbort;
+  runPostIntegrateHookOrAbort: typeof runPostIntegrateHookOrAbort;
   formatRecordedStatsRow: typeof formatRecordedStatsRow;
   detectChangedAreas: typeof detectChangedAreas;
   parseFilesToAreas: typeof parseFilesToAreas;
@@ -673,6 +675,7 @@ async function integrate(args: string[]) {
         throw new IntegrationAbort();
       }
       maybeUpdateGraphifyOnPrimary(baseWorktree);
+      runPostIntegrateHookOrAbort(slug, { baseWorktree: baseWorktree as string, baseBranch: baseBranch as string, variant: 'variant-a' });
       fmt.log.pass('Variant A integration completed.');
     } else {
       fmt.log.info(`\nStep 1: Using base worktree ${baseWorktree} on ${baseBranch} as the squash-merge target...`);
@@ -716,6 +719,7 @@ async function integrate(args: string[]) {
             throw new IntegrationAbort();
           }
           maybeUpdateGraphifyOnPrimary(baseWorktree);
+          runPostIntegrateHookOrAbort(slug, { baseWorktree: baseWorktree as string, baseBranch: baseBranch as string, variant: 'variant-b-resumed' });
           fmt.log.pass('Integration completed successfully (resumed from partial state).');
         } else {
           fmt.log.fail('Merge conflicts detected. Rebase the mission branch before integrating.');
@@ -837,6 +841,7 @@ async function integrate(args: string[]) {
         }
 
         maybeUpdateGraphifyOnPrimary(baseWorktree);
+        runPostIntegrateHookOrAbort(slug, { baseWorktree: baseWorktree as string, baseBranch: baseBranch as string, variant: 'variant-b' });
         fmt.log.pass('Integration completed successfully.');
       }
     }
@@ -1390,6 +1395,39 @@ function recordPostIntegrationStatsOrAbort(slug: string, options: {rootDir?: str
   }
 }
 
+/**
+ * Runs the repo-configured post-integrate hook (adapters.integrate.postIntegrateCommand)
+ * exactly once from the base checkout, after a successful non-dry-run integrate closeout.
+ * A repo with no hook configured is a silent no-op, so integrate's behavior is unchanged.
+ * @param {string} slug
+ * @param{{baseWorktree: string, baseBranch: string, variant: string, runPostIntegrateHookFn?: Function}} opts
+ */
+function runPostIntegrateHookOrAbort(slug: string, {
+  baseWorktree,
+  baseBranch,
+  variant,
+  runPostIntegrateHookFn = postIntegrateHook.runPostIntegrateHook
+}: {baseWorktree: string, baseBranch: string, variant: string, runPostIntegrateHookFn?: Function}) {
+  const result = runPostIntegrateHookFn({ slug, baseWorktree, baseBranch, variant });
+  if (!result.ran) {
+    return result;
+  }
+
+  if (!result.ok) {
+    fmt.log.fail(`Post-integrate hook failed (exit code ${result.exitCode}): ${result.command}`);
+    if (result.output) {
+      fmt.log.fail(result.output);
+    }
+    throw new IntegrationAbort();
+  }
+
+  fmt.log.pass(`Post-integrate hook completed: ${result.command}`);
+  if (result.output) {
+    fmt.log.plain(result.output);
+  }
+  return result;
+}
+
 /** @param{{slug: string, summary: string, mainTaskFile?: string, rootDir?: string, gitRunner?: Function, baseBranch?: string|null, verificationArea?: string|null, captureVerifiedTreeProofFn?: Function, assertVerifiedTreeProofFn?: Function}} params */
 function finalizeVariantACloseout({
   slug,
@@ -1702,6 +1740,7 @@ function buildConflictResolutionPrompt(slug: string = '<slug>', area: string = '
 (integrate as any).reportSyncMergedFailure = reportSyncMergedFailure;
 (integrate as any).recordPostIntegrationStats = recordPostIntegrationStats;
 (integrate as any).recordPostIntegrationStatsOrAbort = recordPostIntegrationStatsOrAbort;
+(integrate as any).runPostIntegrateHookOrAbort = runPostIntegrateHookOrAbort;
 (integrate as any).formatRecordedStatsRow = formatRecordedStatsRow;
 (integrate as any).detectChangedAreas = detectChangedAreas;
 (integrate as any).parseFilesToAreas = parseFilesToAreas;
@@ -1718,7 +1757,7 @@ function buildConflictResolutionPrompt(slug: string = '<slug>', area: string = '
 // Re-export getPrimaryWorktree from mission-utils
 (integrate as any).getPrimaryWorktree = getPrimaryWorktree;
 export default integrate;
-export { integrate, formatRecordedStatsRow, detectChangedAreas, parseFilesToAreas, loadIntegrationConfig, getIntegrationGatePlan, printIntegrationGatePlan, buildIntegrationGateEnv, resolveIntegrationVerificationWorktree, buildIntegrationVerificationInvocation, executeIntegrationGates, orderIntegrationGates, gateMatchesChangedAreas, buildIntegrationContext, getPrimaryWorktree, resolveConflictsForMission, cleanupMissionWorktree, rewriteWorktreePaths, finalizeVariantACloseout, isNoMergeToAbortResult, buildConflictResolutionPrompt, VARIANT_B_AUTOMATION_SUMMARY, stashMainCheckoutIfNeeded, restoreMainCheckoutStash, evaluateTaskStatusForIntegration, promoteTaskForIntegrationIfNeeded, findExistingSquashCommit, printIntegrationPreflight, resolveForgejoUserForIntegration, getUnresolvedIndexConflicts, parseStashPopCollisionFiles, reportStashPopFailure, maybeUpdateGraphifyOnPrimary, SYNC_MERGED_DIAGNOSTICS, printDiagnosticTable, recordPostIntegrationStats, recordPostIntegrationStatsOrAbort, reportSyncMergedFailure };
+export { integrate, formatRecordedStatsRow, detectChangedAreas, parseFilesToAreas, loadIntegrationConfig, getIntegrationGatePlan, printIntegrationGatePlan, buildIntegrationGateEnv, resolveIntegrationVerificationWorktree, buildIntegrationVerificationInvocation, executeIntegrationGates, orderIntegrationGates, gateMatchesChangedAreas, buildIntegrationContext, getPrimaryWorktree, resolveConflictsForMission, cleanupMissionWorktree, rewriteWorktreePaths, finalizeVariantACloseout, isNoMergeToAbortResult, buildConflictResolutionPrompt, VARIANT_B_AUTOMATION_SUMMARY, stashMainCheckoutIfNeeded, restoreMainCheckoutStash, evaluateTaskStatusForIntegration, promoteTaskForIntegrationIfNeeded, findExistingSquashCommit, printIntegrationPreflight, resolveForgejoUserForIntegration, getUnresolvedIndexConflicts, parseStashPopCollisionFiles, reportStashPopFailure, maybeUpdateGraphifyOnPrimary, SYNC_MERGED_DIAGNOSTICS, printDiagnosticTable, recordPostIntegrationStats, recordPostIntegrationStatsOrAbort, reportSyncMergedFailure, runPostIntegrateHookOrAbort };
 // CJS compat: ensure require() returns the function directly
 declare const module: { exports: any } | undefined;
 if (typeof module !== 'undefined') { module.exports = integrate; }

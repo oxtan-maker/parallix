@@ -12,6 +12,7 @@
       "worktreePattern": "../<repo>-<slug>"
     },
     "verification": { "command": "./scripts/verify-local.sh {{area}}", "defaultArea": "all" },
-    "review": { "provider": "forgejo", "baseUrl": "http://localhost:3300", "remote": "review", "repo": "magnus/parallix" }
+    "review": { "provider": "forgejo", "baseUrl": "http://localhost:3300", "remote": "review", "repo": "magnus/parallix" },
+    "integrate": { "postIntegrateCommand": "./scripts/refresh-global-px.sh" }
   }
 }

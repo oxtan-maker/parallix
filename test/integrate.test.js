@@ -9,6 +9,7 @@ const childProcess = require('node:child_process');
 const stats = require('../lib/commands/stats');
 const backlog = require('../lib/tools/backlog');
 const verification = require('../lib/core/verification');
+const postIntegrateHookModule = require('../lib/core/post-integrate-hook');
 mock.method(backlog, 'getTaskClassification', () => 'ai_sdlc');
 mock.method(verification, 'captureVerifiedTreeProof', (area, rootDir) => ({
   ok: true,
@@ -75,8 +76,10 @@ const {
   recordPostIntegrationStats,
   formatRecordedStatsRow,
   resolveIntegrationVerificationWorktree,
-  buildIntegrationVerificationInvocation
+  buildIntegrationVerificationInvocation,
+  runPostIntegrateHookOrAbort
 } = require('../lib/commands/integrate');
+const integrateCommand = require('../lib/commands/integrate');
 const { conventionalWorktreePath, getPrimaryBranch } = missionUtils;
 
 const PRIMARY = getPrimaryBranch();
@@ -607,6 +610,140 @@ test('recordPostIntegrationStats handles empty mission-phase rows gracefully', (
   } finally {
     console.log = originalLog;
   }
+});
+
+test('runPostIntegrateHookOrAbort no-ops silently when no hook is configured (SC1: unchanged behavior)', () => {
+  const logs = [];
+  const errors = [];
+  const originalLog = console.log;
+  const originalError = console.error;
+  console.log = message => logs.push(message);
+  console.error = message => errors.push(message);
+  try {
+    const result = runPostIntegrateHookOrAbort('task-1402', {
+      baseWorktree: FAKE_ROOT,
+      baseBranch: 'main',
+      variant: 'variant-a',
+      runPostIntegrateHookFn: () => ({ ran: false, ok: true })
+    });
+
+    assert.deepEqual(result, { ran: false, ok: true });
+    assert.deepEqual(logs, []);
+    assert.deepEqual(errors, []);
+  } finally {
+    console.log = originalLog;
+    console.error = originalError;
+  }
+});
+
+test('runPostIntegrateHookOrAbort passes slug, base worktree/branch, and variant to the hook (SC2/SC3)', () => {
+  let received;
+  runPostIntegrateHookOrAbort('task-1402', {
+    baseWorktree: FAKE_ROOT,
+    baseBranch: 'main',
+    variant: 'variant-b',
+    runPostIntegrateHookFn: (params) => {
+      received = params;
+      return { ran: true, ok: true, command: './scripts/refresh-px.sh', output: 'ok', exitCode: 0 };
+    }
+  });
+
+  assert.deepEqual(received, {
+    slug: 'task-1402',
+    baseWorktree: FAKE_ROOT,
+    baseBranch: 'main',
+    variant: 'variant-b'
+  });
+});
+
+test('runPostIntegrateHookOrAbort logs a pass and the hook output on success', () => {
+  const logs = [];
+  const originalLog = console.log;
+  console.log = message => logs.push(message);
+  try {
+    runPostIntegrateHookOrAbort('task-1402', {
+      baseWorktree: FAKE_ROOT,
+      baseBranch: 'main',
+      variant: 'variant-a',
+      runPostIntegrateHookFn: () => ({ ran: true, ok: true, command: './scripts/refresh-px.sh', output: 'bumped to 1.3.5', exitCode: 0 })
+    });
+
+    const combined = logs.join('\n');
+    assert.match(combined, /\[PASS\] Post-integrate hook completed: \.\/scripts\/refresh-px\.sh/);
+    assert.match(combined, /bumped to 1\.3\.5/);
+  } finally {
+    console.log = originalLog;
+  }
+});
+
+test('runPostIntegrateHookOrAbort throws IntegrationAbort and surfaces a distinct failure with hook output (SC5)', () => {
+  const errors = [];
+  const originalError = console.error;
+  console.error = message => errors.push(message);
+  try {
+    assert.throws(() => {
+      runPostIntegrateHookOrAbort('task-1402', {
+        baseWorktree: FAKE_ROOT,
+        baseBranch: 'main',
+        variant: 'variant-a',
+        runPostIntegrateHookFn: () => ({ ran: true, ok: false, command: './scripts/refresh-px.sh', output: 'permission denied', exitCode: 3 })
+      });
+    });
+
+    const combined = errors.join('\n');
+    assert.match(combined, /\[FAIL\] Post-integrate hook failed \(exit code 3\): \.\/scripts\/refresh-px\.sh/);
+    assert.match(combined, /permission denied/);
+  } finally {
+    console.error = originalError;
+  }
+});
+
+test('px integrate --dry-run never invokes the post-integrate hook (SC4)', async () => {
+  const hookSpy = mock.method(postIntegrateHookModule, 'runPostIntegrateHook');
+  const originalExit = process.exit;
+  const originalError = console.error;
+  const originalLog = console.log;
+  process.exit = () => { throw new Error('process.exit called'); };
+  console.error = () => {};
+  console.log = () => {};
+  try {
+    try {
+      await integrateCommand(['task-integrate-hook-dry-run-does-not-exist', '--dry-run']);
+    } catch (err) {
+      if (err.message !== 'process.exit called') throw err;
+    }
+  } finally {
+    process.exit = originalExit;
+    console.error = originalError;
+    console.log = originalLog;
+    hookSpy.mock.restore();
+  }
+
+  assert.equal(hookSpy.mock.callCount(), 0);
+});
+
+test('px integrate never invokes the post-integrate hook when preflight fails (SC4)', async () => {
+  const hookSpy = mock.method(postIntegrateHookModule, 'runPostIntegrateHook');
+  const originalExit = process.exit;
+  const originalError = console.error;
+  const originalLog = console.log;
+  process.exit = () => { throw new Error('process.exit called'); };
+  console.error = () => {};
+  console.log = () => {};
+  try {
+    try {
+      await integrateCommand(['task-integrate-hook-preflight-fails-does-not-exist']);
+    } catch (err) {
+      if (err.message !== 'process.exit called') throw err;
+    }
+  } finally {
+    process.exit = originalExit;
+    console.error = originalError;
+    console.log = originalLog;
+    hookSpy.mock.restore();
+  }
+
+  assert.equal(hookSpy.mock.callCount(), 0);
 });
 
 test('evaluateTaskStatusForIntegration accepts approved (ready-for-integration) without extra conditions', () => {

@@ -176,6 +176,52 @@ In this repo, `workflow.config.json` points verification at `./scripts/verify-lo
 - earlier phases such as draft/active/review run the repo's fast general verifier (`all`, currently `npm test`)
 - `px integrate` invokes `verify-local.sh integrate`, which resolves the stricter integration gate plan from `config/integration-pipelines.json` after the target tree is exact
 
+#### 4.5.2 Post-integrate hook (generic, repo-configurable)
+
+Any repo may declare one post-integrate command via `adapters.integrate.postIntegrateCommand`
+in `workflow.config.json` (schema: `config/workflow.config.schema.json`). It is a generic
+extension seam, matching the existing `adapters.verification.command` opt-in pattern.
+
+```json
+{ "adapters": { "integrate": { "postIntegrateCommand": "./scripts/my-post-integrate-hook.sh" } } }
+```
+
+- **No-op default:** a repo that does not set `postIntegrateCommand` sees no behavior change —
+  `px integrate` runs exactly as it does today.
+- **When it runs:** at most once per successful, non-dry-run `px integrate` invocation, after
+  closeout success is established — after Variant A's closeout commit/push, after Variant B's
+  squash commit and (if configured) Forgejo sync, or after the equivalent resumed-from-existing-
+  squash-commit path. It never runs for `--dry-run`, a failed preflight, a failed integration
+  gate, or a failed closeout/squash/sync.
+- **Where it runs:** from the base checkout (the mission's recorded base worktree, or the primary
+  worktree for legacy missions) — never from the mission worktree, which has already been deleted
+  by the time the hook runs.
+- **Context passed via environment variables:**
+
+  | Variable | Meaning |
+  |---|---|
+  | `INTEGRATE_HOOK_SLUG` | The mission slug (e.g. `task-1402`) |
+  | `INTEGRATE_HOOK_BASE_WORKTREE` | Absolute path to the base checkout the hook runs from |
+  | `INTEGRATE_HOOK_BASE_BRANCH` | The branch the mission was integrated into |
+  | `INTEGRATE_HOOK_VARIANT` | `variant-a`, `variant-b`, or `variant-b-resumed` |
+
+- **Failure handling:** a non-zero exit is reported as a distinct post-integrate-hook failure
+  (`[FAIL] Post-integrate hook failed (exit code N): <command>`, followed by the hook's captured
+  output) instead of a generic merge/gate failure, and suppresses the normal integrate success
+  message. Because the hook runs after the integration has already landed locally, a hook failure
+  cannot roll back the integration — it surfaces clearly so the operator can rerun or fix the hook
+  manually, but the mission itself is already integrated.
+
+**parallix's own hook — keeping the global `px` runner current.** `workflow.config.json` wires
+`postIntegrateCommand` to `./scripts/refresh-global-px.sh`. Every successful `px integrate` in
+this repo now: bumps the patch version in `package.json`/`package-lock.json`, commits that bump,
+rebuilds the distributable (`npm run build:cjs`), packs a tarball of the just-integrated checkout,
+and reinstalls the global `px` runner from that tarball (`npm install -g ./<tarball>`) — the same
+local-tarball path documented in [Public distribution](#public-distribution-canonical-packaging-and-install)
+below. This automates what was previously a manual operator step ("bump before integrate,
+reinstall after") and closes the gap where the globally installed `px` drifts behind a source tree
+that missions actively modify.
+
 ## 5. Checkpoint Model
 
 Each completed checkpoint must produce: (1) checkpoint doc under the configured mission base dir for the repo (`missions/<slug>/` in this repo), (2) non-generic `Next action:`, (3) passing relevant gate, (4) commit on `mission/<slug>`. Checkpoint docs make resume and handoff deterministic.
@@ -295,8 +341,12 @@ does not already place `$HOME/.local/bin` on `PATH`, add it once.
 
 `CHANGELOG.md` is the versioning authority. Until the first public release,
 PATCH bumps are the release discipline: bump before each `px integrate`, then
-reinstall from the new tarball after the integrate succeeds. That policy is
-documented release practice, not automatic CLI behavior.
+reinstall from the new tarball after the integrate succeeds. That policy is not
+built into the `px integrate` CLI itself — it is opt-in per repo via the generic
+post-integrate hook (§4.5.2). In this repo it is automated: `workflow.config.json`
+wires the hook to `scripts/refresh-global-px.sh`, so every successful
+`px integrate` bumps the patch version and reinstalls the global `px` runner
+from this checkout without a separate manual step.
 
 **How the operator invokes `px`.** After the global install, `px <command>` is
 the installed runner; use `px shell-init` in your shell rc if you want mission

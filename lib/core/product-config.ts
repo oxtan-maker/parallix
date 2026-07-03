@@ -20,6 +20,7 @@ const DEFAULT_CONFIG = Object.freeze({
     stats: { path: 'stats.csv' },
     review: {},
     agents: {},
+    integrate: {},
   },
 });
 
