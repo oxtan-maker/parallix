@@ -820,21 +820,21 @@ function summarizeAgentWindow(rows, window, options = {}) {
   const opts = options;
   const { rootDir = null, deriveFixRoundsFn = deriveFixRoundsLocalAuthoritative } = opts;
   const windowRows = rows.filter(row => rowInWindow(row, window));
-  // Filter to only closed missions (task-1380).
-  const closedWindowRows = windowRows.filter(row => row.closed === 'yes');
-  // Only count missions with a valid classification so the agent table totals
-  // align with the mission-count table (which also excludes null/invalid
-  // classifications via summarizeMissionWindow → validMissions).
-  const validWindowRows = closedWindowRows.filter(row => normalizeClassification(row.classification) !== null);
+  // Agent performance must include active-stage rows so in-progress
+  // implementation work is visible (task-1409). Include all rows with a valid
+  // classification regardless of closed status.
+  const allValidWindowRows = windowRows.filter(row => normalizeClassification(row.classification) !== null);
   // Deduplicate globally by (repo, mission) first so each mission is counted
   // exactly once across all agent groups — matching the mission-count table.
-  // Prefer the row where model === implementer (the implementer's own model),
-  // since the implementer field is the last implementer who closed the mission.
-  // Among those, prefer the row with the highest fix rounds. Falls back to the
-  // row with the highest fix rounds when no implementer-row exists.
+  // Rollup rows (e.g. stage 'default') often carry a blank `model` alongside
+  // the mission's final pr_fix_rounds count; a row with a real model must
+  // always win over one without, or the mission gets bucketed under the
+  // generic implementer name (e.g. 'custom') instead of its actual model.
+  // Among rows that agree on having/lacking a model, prefer model===implementer
+  // (the implementer's own model), then the row with the highest fix rounds.
   /** @type {Record<string, StatsRow>} */
   const byMission = {};
-  for (const row of validWindowRows) {
+  for (const row of allValidWindowRows) {
     const key = statsMissionKey(row);
     const prev = byMission[key];
     const rounds = Number.parseInt(String(row.pr_fix_rounds), 10) || 0;
@@ -842,13 +842,26 @@ function summarizeAgentWindow(rows, window, options = {}) {
     const modelTrimmed = (row.model && String(row.model).trim()) || '';
     const implTrimmed = (row.implementer && String(row.implementer).trim()) || '';
     const isImplementerRow = modelTrimmed && implTrimmed && modelTrimmed.toLowerCase() === implTrimmed.toLowerCase();
+    const rowHasModel = Boolean(modelTrimmed);
     let prevIsImpl = false;
+    let prevHasModel = false;
     if (prev) {
       const prevModelTrimmed = (prev.model && String(prev.model).trim()) || '';
       const prevImplTrimmed = (prev.implementer && String(prev.implementer).trim()) || '';
       prevIsImpl = prevModelTrimmed && prevImplTrimmed && prevModelTrimmed.toLowerCase() === prevImplTrimmed.toLowerCase();
+      prevHasModel = Boolean(prevModelTrimmed);
     }
-    if (!prev || (isImplementerRow && !prevIsImpl) || (isImplementerRow && prevIsImpl && rounds > prevRounds) || (!isImplementerRow && !prevIsImpl && rounds > prevRounds)) {
+    let shouldReplace;
+    if (!prev) {
+      shouldReplace = true;
+    } else if (rowHasModel !== prevHasModel) {
+      shouldReplace = rowHasModel && !prevHasModel;
+    } else if (isImplementerRow !== prevIsImpl) {
+      shouldReplace = isImplementerRow && !prevIsImpl;
+    } else {
+      shouldReplace = rounds > prevRounds;
+    }
+    if (shouldReplace) {
       byMission[key] = row;
     }
   }
@@ -1079,8 +1092,7 @@ function renderMissionPhaseReport(rows, slug, options = {}) {
   const wantedRepo = String(opts.repo || resolveStatsRepoName(opts.rootDir)).trim();
   const missionRows = (rows || []).filter(row =>
     String(row.mission || '').trim().toLowerCase() === wanted &&
-    String(row.repo || '').trim() === wantedRepo &&
-    row.closed === 'yes'
+    String(row.repo || '').trim() === wantedRepo
   );
 
   const byStage = new Map();

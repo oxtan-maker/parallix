@@ -298,3 +298,53 @@ test('detectLimitHit returns reason field alongside until and source for limit-h
   assert.equal(typeof result.reason, 'string');
   assert.ok(result.reason.length > 0);
 });
+
+test('detectLimitHit returns reason for fallback source', () => {
+  const result = detectLimitHit({
+    agent: 'codex',
+    stdout: '',
+    stderr: 'you\'ve hit your weekly usage limit',
+    status: 1,
+    signal: null,
+    error: null
+  });
+
+  assert.ok(result);
+  assert.equal(result.source, 'fallback');
+  assert.ok(result.reason);
+  assert.ok(result.reason.includes('usage limit reached'));
+});
+
+test('detectLimitHit returns reason for sigint source', () => {
+  const result = detectLimitHit({
+    agent: 'mistral',
+    stdout: '',
+    stderr: '',
+    status: null,
+    signal: 'SIGINT',
+    error: null
+  });
+
+  assert.ok(result);
+  assert.equal(result.source, 'sigint');
+  assert.ok(result.reason);
+  assert.ok(result.reason.startsWith('sigint:'));
+  assert.ok(result.reason.includes('SIGINT'));
+});
+
+test('detectLimitHit returns reason field alongside until and source for limit-hit patterns', () => {
+  const result = detectLimitHit({
+    agent: 'claude',
+    stdout: 'Claude usage limit reached',
+    stderr: '',
+    status: 1,
+    signal: null,
+    error: null
+  });
+
+  assert.ok(result);
+  assert.equal(typeof result.until, 'string');
+  assert.equal(typeof result.source, 'string');
+  assert.equal(typeof result.reason, 'string');
+  assert.ok(result.reason.length > 0);
+});
