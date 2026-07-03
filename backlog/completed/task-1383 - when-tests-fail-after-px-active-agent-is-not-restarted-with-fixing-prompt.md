@@ -1,17 +1,21 @@
 ---
 id: TASK-1383
 title: when tests fail after px active agent is not restarted with fixing prompt
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-06-28 05:48'
-labels: []
+labels:
+  - ai_sdlc
+  - bug
 dependencies: []
 ---
 
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-add to use case: as an engineer I want parallix to automatically ask agents to fix states if parallix discovers that state is not properly implemented. Example: when tests fail after active 
+Close the remaining `px active` send-back gap for verification/test failures. Today the active-path handoff loop can relaunch the implementer after a genuine gate failure, but the repair prompt is still the generic Goal Check / checkpoint prompt from `lib/commands/repair-handoff.ts`. When the verification gate fails because product tests break, the agent is not restarted with a prompt that describes the failing tests and asks for a code fix; it gets checkpoint-editing instructions instead.
+
+Target behavior: when `px active` encounters a verification gate failure with captured failing-test output, Parallix should relaunch the implementer with a state-aware fixing prompt that points at the failing verification/tests and preserves the existing bounded retry behavior. This is workflow/agent-fix work (`ai_sdlc`), and it should be locked with a regression test before the implementation changes land.
 
 ass 1715
 ℹ fail 14
