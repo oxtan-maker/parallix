@@ -22,3 +22,6 @@ lib/*.js
 # Root entry point artifacts (compiled from .ts by build:cjs)
 /index.js
 /px.js
+# StrykerJS scratch/report output (mutation-gate.ts)
+.stryker-tmp*/
+reports/mutation/

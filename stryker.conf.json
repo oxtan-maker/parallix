@@ -1,0 +1,12 @@
+{
+  "_comment": "Minimal StrykerJS config template for Node.js built-in test runner. The mutation-gate CLI generates a per-run config dynamically (scopes mutate/testRunner to the mission diff). Use this file for manual Stryker runs: npx stryker run --config stryker.conf.json",
+  "packageManager": "npm",
+  "testRunner": "command",
+  "commandRunner": {
+    "command": "node --test"
+  },
+  "reporters": ["json"],
+  "coverageAnalysis": "off",
+  "tempDirName": ".stryker-tmp-mutation-gate",
+  "concurrency": 2
+}

@@ -5,6 +5,11 @@
       "order": 1,
       "run_last": false
     },
+    "mutation": {
+      "command": "./scripts/verify-local.sh mutation-gate",
+      "order": 40,
+      "run_last": false
+    },
     "workflow": {
       "command": "node test/e2e-mission-lifecycle.test.js",
       "order": 50,

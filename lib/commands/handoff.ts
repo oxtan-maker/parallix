@@ -453,7 +453,12 @@ function runDeclaredGates(missionDir, rootDir, options = {}) {
   // Strip the checkbox prefix to get the command
   const commands = gateLines.map(line => {
     // Remove "- [ ] ", "- [x] ", or "- " prefix
-    return line.replace(/^- \[[ x]\]\s*/, '').replace(/^- \s*/, '');
+    let cmd = line.replace(/^- \[[ x]\]\s*/, '').replace(/^- \s*/, '');
+    // Strip trailing description after em-dash or en-dash (e.g., "cmd — description")
+    cmd = cmd.replace(/\s+(—|-–)\s.*$/, '').trim();
+    // Strip surrounding backticks
+    cmd = cmd.replace(/^`(.+)`$/, '$1').trim();
+    return cmd;
   }).filter(cmd => cmd.length > 0);
 
   if (commands.length === 0) {

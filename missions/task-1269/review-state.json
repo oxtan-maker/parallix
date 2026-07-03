@@ -1,0 +1,25 @@
+{
+  "reviewer": "claude",
+  "implementer": "custom",
+  "round": 5,
+  "startedAt": "2026-07-03T04:30:07.413Z",
+  "phase": "approved",
+  "disposition": "APPROVED",
+  "metadata": {
+    "recordedStageLaunches": {
+      "review:claude": [
+        "claude|056ca97d-e27c-45c6-852a-cd5d8bfa4811|2026-07-03T03:53:21.079Z|2026-07-03T03:57:25.693Z|0",
+        "claude|056ca97d-e27c-45c6-852a-cd5d8bfa4811|2026-07-03T04:11:54.274Z|2026-07-03T04:14:14.756Z|0",
+        "claude|056ca97d-e27c-45c6-852a-cd5d8bfa4811|2026-07-03T04:16:27.362Z|2026-07-03T04:18:24.517Z|0",
+        "claude|056ca97d-e27c-45c6-852a-cd5d8bfa4811|2026-07-03T04:20:23.973Z|2026-07-03T04:22:00.476Z|0",
+        "claude|056ca97d-e27c-45c6-852a-cd5d8bfa4811|2026-07-03T04:30:08.340Z|2026-07-03T04:32:43.393Z|0"
+      ],
+      "follow-up:custom": [
+        "custom|ses_0dbeb6b0bffeexWi8Wy1RKuJxF|2026-07-03T03:57:28.152Z|2026-07-03T04:11:51.768Z|0",
+        "custom|ses_0dbeb6b0bffeexWi8Wy1RKuJxF|2026-07-03T04:14:16.354Z|2026-07-03T04:16:24.907Z|0",
+        "custom|ses_0dbeb6b0bffeexWi8Wy1RKuJxF|2026-07-03T04:18:26.034Z|2026-07-03T04:20:21.398Z|0",
+        "custom|ses_0dbeb6b0bffeexWi8Wy1RKuJxF|2026-07-03T04:26:37.458Z|2026-07-03T04:30:05.731Z|0"
+      ]
+    }
+  }
+}
