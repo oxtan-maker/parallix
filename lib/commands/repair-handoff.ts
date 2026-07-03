@@ -3,27 +3,155 @@ import * as missionUtils from '../core/mission-utils.js';
 import rebase from './rebase.js';
 import * as fmt from '../core/fmt.js';
 
+// ── FailureClass: 8 classes from ADR 0048 ────────────────────────────────────
+const FailureClass = {
+  UnverifiableClaims: 'UnverifiableClaims',
+  MalformedGates: 'MalformedGates',
+  MissingArtifacts: 'MissingArtifacts',
+  IncompleteEvidence: 'IncompleteEvidence',
+  GitBlockers: 'GitBlockers',
+  GateFailure: 'GateFailure',
+  InfraBlocker: 'InfraBlocker',
+  StateMachineViolation: 'StateMachineViolation',
+} as const;
+
+type FailureClassType = (typeof FailureClass)[keyof typeof FailureClass];
+
+// ── DispatchAction: 3 actions from ADR 0048 ──────────────────────────────────
+const DispatchAction = {
+  AutoRepair: 'AutoRepair',
+  AutoSendBack: 'AutoSendBack',
+  HumanOnly: 'HumanOnly',
+} as const;
+
+type DispatchActionType = (typeof DispatchAction)[keyof typeof DispatchAction];
+
+// ── Dispatch table: maps each failure class to its prescribed action (ADR 0048) ─
+const DISPATCH_TABLE: Record<FailureClassType, DispatchActionType> = {
+  [FailureClass.UnverifiableClaims]: DispatchAction.AutoSendBack,
+  [FailureClass.MalformedGates]: DispatchAction.AutoRepair,
+  [FailureClass.MissingArtifacts]: DispatchAction.AutoSendBack,
+  [FailureClass.IncompleteEvidence]: DispatchAction.AutoSendBack,
+  [FailureClass.GitBlockers]: DispatchAction.AutoRepair,
+  [FailureClass.GateFailure]: DispatchAction.AutoSendBack,
+  [FailureClass.InfraBlocker]: DispatchAction.HumanOnly,
+  [FailureClass.StateMachineViolation]: DispatchAction.HumanOnly,
+};
+
+/**
+ * Look up the dispatch action for a given failure class.
+ *
+ * @param failureClass - One of the 8 failure class values from ADR 0048
+ * @returns The prescribed dispatch action, or null if unknown
+ */
+export function getDispatchAction(failureClass: FailureClassType): DispatchActionType | null {
+  return DISPATCH_TABLE[failureClass] ?? null;
+}
+
+/**
+ * Sub-reason for GitBlockers classification: distinguishes dirty-artifact from behind-branch errors.
+ * Used by repairHandoff() to decide whether to auto-rebase (behind) vs auto-commit only (dirty).
+ */
+type GitBlockerReason = 'dirty' | 'behind' | 'other';
+
+/**
+ * Classify an error message into one of the 8 failure classes from ADR 0048
+ * and return the associated dispatch action.
+ *
+ * Patterns are checked in order of specificity to avoid collisions.
+ * Returns a `reason` field for GitBlockers to distinguish dirty-artifact from behind-branch errors,
+ * allowing callers to derive repair-strategy flags without duplicating pattern matching.
+ *
+ * @param errorMsg - The error message to classify
+ * @returns Object with failureClass, dispatchAction, and (for GitBlockers) reason
+ */
+export function classifyError(errorMsg: string): { failureClass: FailureClassType; dispatchAction: DispatchActionType; reason?: GitBlockerReason } {
+  if (!errorMsg || typeof errorMsg !== 'string') {
+    return { failureClass: FailureClass.InfraBlocker, dispatchAction: DispatchAction.HumanOnly };
+  }
+
+  // 1. IncompleteEvidence: goal-check table missing evidence rows (most specific — checked before generic gate patterns)
+  if (errorMsg.includes('has a "## Goal Check" section but no evidence rows') &&
+      errorMsg.includes('A goal-check table with real evidence is required before handoff')) {
+    return { failureClass: FailureClass.IncompleteEvidence, dispatchAction: DispatchAction.AutoSendBack };
+  }
+
+  // 2. GitBlockers: dirty/uncommitted mission artifacts (mechanical git blocker — auto-repairable)
+  if (errorMsg.includes('is modified but uncommitted') ||
+      errorMsg.includes('Commit the mission contract before handoff') ||
+      errorMsg.includes('Commit the implementation evidence before handoff')) {
+    return { failureClass: FailureClass.GitBlockers, dispatchAction: DispatchAction.AutoRepair, reason: 'dirty' };
+  }
+
+  // 3. GitBlockers: branch behind primary / push rejected (mechanical git blocker — auto-repairable via rebase)
+  if (errorMsg.includes('Updates were rejected') ||
+      errorMsg.includes('fetch first') ||
+      errorMsg.includes('non-fast-forward') ||
+      errorMsg.includes('behind its remote') ||
+      (errorMsg.includes('git push failed') && (
+        errorMsg.includes('rejected') ||
+        errorMsg.includes('remote contains work')
+      ))) {
+    return { failureClass: FailureClass.GitBlockers, dispatchAction: DispatchAction.AutoRepair, reason: 'behind' };
+  }
+
+  // 4. GateFailure: verification gate failed
+  if (/verification gate failed/i.test(errorMsg)) {
+    return { failureClass: FailureClass.GateFailure, dispatchAction: DispatchAction.AutoSendBack };
+  }
+
+  // 5. GateFailure: declared gate failed
+  if (/\bdeclared gate\b/i.test(errorMsg) && /\bfailed\b/i.test(errorMsg)) {
+    return { failureClass: FailureClass.GateFailure, dispatchAction: DispatchAction.AutoSendBack };
+  }
+
+  // 6. UnverifiableClaims: test claims that cannot be verified
+  if (/test(s?\s+)?passed/i.test(errorMsg) && /cannot\s+verify|unverifiable|proof\s+(not\s+)?found|stale\s+proof/i.test(errorMsg)) {
+    return { failureClass: FailureClass.UnverifiableClaims, dispatchAction: DispatchAction.AutoSendBack };
+  }
+
+  // 7. MalformedGates: malformed or non-runnable declared gates
+  if (/malformed\s+gate|invalid\s+gate\s+config|gate\s+command\s+(not\s+found|syntax\s+error|not\s+runnable)/i.test(errorMsg) ||
+      (/gate/i.test(errorMsg) && /syntax\s+error|not\s+found|missing\s+(file|command)/i.test(errorMsg))) {
+    return { failureClass: FailureClass.MalformedGates, dispatchAction: DispatchAction.AutoRepair };
+  }
+
+  // 8. MissingArtifacts: mandatory mission artifacts missing
+  if (/mandatory\s+(artifact|file|document)|missing\s+(mission\s+)?(artifact|file|document)|required\s+(artifact|file|document)\s+(not\s+)?found/i.test(errorMsg) ||
+      (/gatekeeper/i.test(errorMsg) && /missing\s+(artifact|file|document)/i.test(errorMsg))) {
+    return { failureClass: FailureClass.MissingArtifacts, dispatchAction: DispatchAction.AutoSendBack };
+  }
+
+  // 9. StateMachineViolation: task state machine violations
+  if (/state\s+violation|invalid\s+state|transition\s+not\s+allowed|cannot\s+(move|transition)\s+(from|to)\s+\w+\s+(to|from)/i.test(errorMsg) ||
+      (/task\s+state/i.test(errorMsg) && /invalid|violation|incorrect/i.test(errorMsg))) {
+    return { failureClass: FailureClass.StateMachineViolation, dispatchAction: DispatchAction.HumanOnly };
+  }
+
+  // 10. InfraBlocker: forgejo/infrastructure blockers
+  if (/forgejo|infrastructure|authentication\s+failed|token\s+(expired|invalid|missing)|forbidden|unauthorized\s+(access|request)|rate\s+limit|connection\s+(refused|timed?\s*out)|network\s+error/i.test(errorMsg)) {
+    return { failureClass: FailureClass.InfraBlocker, dispatchAction: DispatchAction.HumanOnly };
+  }
+
+  // Default: human-only for unrecognized errors
+  return { failureClass: FailureClass.InfraBlocker, dispatchAction: DispatchAction.HumanOnly };
+}
+
 /**
  * Check if an error message indicates a relaunchable content error (missing/empty goal-check table).
+ * Delegates to classifyError for backward-compatible classification.
  *
- * @param {string} errorMsg - The error message to check
- * @returns {boolean} True if the error is relaunchable
+ * @param errorMsg - The error message to check
+ * @returns True if the error is relaunchable (IncompleteEvidence or GateFailure)
  */
-function isRelaunchableError(errorMsg: string) {
+function isRelaunchableError(errorMsg: string): boolean {
   if (!errorMsg || typeof errorMsg !== 'string') {
     return false;
   }
-  // Match the exact error message from handoff.js when final checkpoint has no evidence rows
-  if (errorMsg.includes('has a "## Goal Check" section but no evidence rows') &&
-      errorMsg.includes('A goal-check table with real evidence is required before handoff')) {
-    return true;
-  }
-  // Genuine gate failures (task-1387): classification 6 from ADR 0048
-  if (/verification gate failed/i.test(errorMsg) ||
-      (/\bdeclared gate\b/i.test(errorMsg) && /\bfailed\b/i.test(errorMsg))) {
-    return true;
-  }
-  return false;
+  const { failureClass } = classifyError(errorMsg);
+  // IncompleteEvidence and GateFailure are the only classes that were relaunchable under the old logic
+  return failureClass === FailureClass.IncompleteEvidence
+    || failureClass === FailureClass.GateFailure;
 }
 
 /**
@@ -120,32 +248,19 @@ async function repairHandoff(slug: string, worktree: string, errorMsg: string, o
     return { xy, file: cleanPath };
   }
 
-  // 0. Check if error is repairable
-  const isDirtyError = errorMsg && (
-    errorMsg.includes('is modified but uncommitted') ||
-    errorMsg.includes('Commit the mission contract before handoff') ||
-    errorMsg.includes('Commit the implementation evidence before handoff')
-  );
+  // 0. Check if error is repairable via classifyError
+  const classification = classifyError(errorMsg);
+  const isGitBlocker = classification.failureClass === FailureClass.GitBlockers;
+  // Derive isBehind from classification result (avoids duplicating classifyError's behind-branch patterns)
+  const isBehind = classification.reason === 'behind';
 
-  const isBehind = errorMsg && (
-    errorMsg.includes('Updates were rejected') || 
-    errorMsg.includes('fetch first') || 
-    errorMsg.includes('non-fast-forward') ||
-    errorMsg.includes('behind its remote') ||
-    // Ensure we don't match generic git push failed unless it has non-fast-forward hints
-    (errorMsg.includes('git push failed') && (
-      errorMsg.includes('rejected') || 
-      errorMsg.includes('remote contains work')
-    ))
-  );
-
-  if (!isDirtyError && !isBehind) {
+  if (!isGitBlocker) {
     log(`Handoff error is not automatically repairable: ${errorMsg}`);
     return { repaired: false, blocker: null };
   }
 
   // 1. Auto-commit mission artifacts if uncommitted
-  if (isDirtyError || isBehind) {
+  if (isGitBlocker) {
     const statusResult = gitFn(['-C', rootDir, 'status', '--porcelain']);
     if (statusResult.status === 0 && statusResult.stdout) {
       const dirtyLines = statusResult.stdout.split('\n')
@@ -244,9 +359,14 @@ async function repairHandoff(slug: string, worktree: string, errorMsg: string, o
 
 (repairHandoff as any).isRelaunchableError = isRelaunchableError;
 (repairHandoff as any).buildRelaunchPrompt = buildRelaunchPrompt;
+(repairHandoff as any).classifyError = classifyError;
+(repairHandoff as any).getDispatchAction = getDispatchAction;
+(repairHandoff as any).FailureClass = FailureClass;
+(repairHandoff as any).DispatchAction = DispatchAction;
 
 export default repairHandoff;
 export { repairHandoff, isRelaunchableError, buildRelaunchPrompt };
+export { FailureClass, DispatchAction };
 
 // CJS compat: ensure require() returns the function directly
 declare const module: { exports: any } | undefined;

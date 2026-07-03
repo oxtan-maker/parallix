@@ -3,17 +3,19 @@ id: TASK-1389
 title: >-
   Replace generic not-automatically-repairable strand with an error-classifier
   and dispatch table
-status: backlog
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-06-28 11:30'
 updated_date: '2026-06-29 05:01'
 labels:
   - harness
   - auto-repair
+  - ai_sdlc
 dependencies: []
 references:
   - docs/adr/0048-fail-closed-harness-defense-against-agent-hallucinations.md
   - lib/commands/repair-handoff.js
+  - lib/commands/repair-handoff.ts
   - lib/commands/active.js
 parent_task_id: TASK-1384
 priority: high
