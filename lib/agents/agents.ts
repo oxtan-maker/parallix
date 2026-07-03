@@ -122,7 +122,18 @@ const NON_BLOCKING_LAUNCH_ERROR_PATTERNS = Object.freeze([
   /\bapi\s+key\b/i,
   /\bread-only file system\b/i,
   /\b(home|bootstrap)\s+(error|failed|cannot|denied|not\s+found)\b/i,
-  /\bpermission\s+denied\b/i
+  /\bpermission\s+denied\b/i,
+  // (a) websocket / connection failures — transient infrastructure issues
+  /failed to connect to websocket/i,
+  /\bconnection refused\b/i,
+  /\bECONNREFUSED\b/i,
+  /\bos error 1\b/i,
+  // (b) provider reachability errors — provider endpoints unreachable
+  /provider endpoints are unreachable/i,
+  /\breachability\b/i,
+  /\bendpoint unreachable\b/i,
+  // (c) generic os-error / transient runtime failures (non-quota)
+  /\bos error \d+\b/i
 ]);
 
 function workflowLauncherStatus(agent: string): LauncherStatus {
@@ -558,7 +569,7 @@ function resolveBlocklistTargetPath(options: {targetPath?: string} = {}) {
   return storage.resolveAgentsLocalPath({ ensureDir: true });
 }
 
-function updateAgentBlock(agent: string, until: string, options: {targetPath?: string} = {}) {
+function updateAgentBlock(agent: string, until: string, options: {targetPath?: string, reason?: string} = {}) {
   if (!agent || typeof agent !== 'string') {
     throw new Error('updateAgentBlock requires an agent name');
   }
@@ -589,7 +600,7 @@ function updateAgentBlock(agent: string, until: string, options: {targetPath?: s
   if (!payload.blocklist || typeof payload.blocklist !== 'object' || Array.isArray(payload.blocklist)) {
     payload.blocklist = {};
   }
-  payload.blocklist[agent] = { until };
+  payload.blocklist[agent] = { until, reason: options.reason };
 
   storage.writeJson(targetPath, payload);
   return { path: targetPath, blocklist: payload.blocklist };
@@ -848,7 +859,7 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
     if (limitHit) {
       log(fmt.status('WARN', `Limit hit detected for ${fmt.agent(chosen || '')}; reset estimate "${limitHit.until}" (${limitHit.source}). Blocking and retrying.`));
       try {
-        const blockResult = updateAgentBlockFn(chosen || '', limitHit.until);
+        const blockResult = updateAgentBlockFn(chosen || '', limitHit.until, { reason: limitHit.reason });
         log(fmt.status('INFO', `Wrote blocklist entry for ${fmt.agent(chosen || '')} -> ${fmt.path(blockResult.path)}`));
       } catch (err) {
         log(fmt.status('WARN', `Could not persist blocklist entry for ${fmt.agent(chosen || '')}: ${(err as any).message}`));
@@ -913,19 +924,19 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
       // Block retry candidates only when the failure looks transient. Deterministic
       // setup/config errors (invalid model id, auth failure, read-only HOME, etc.)
       // should fall through to the next family without poisoning agents.local.json.
-      if (shouldPersistLaunchFailureBlock(chosen || '', result)) {
-        let blockReason = 'transient crash';
-        if (result?.signal) { blockReason = `signal ${result.signal}`; }
-        else if (result?.error?.code) { blockReason = result.error.code; }
-        else if (result?.status !== null && result?.status !== 0) { blockReason = `exit ${result.status}`; }
-        const blockUntil = formatBlockUntil(new Date(Date.now() + DEFAULT_FALLBACK_HOURS * 60 * 60 * 1000));
-        try {
-          const blockResult = updateAgentBlockFn(chosen || '', blockUntil);
-          log(fmt.status('INFO', `Wrote blocklist entry for ${fmt.agent(chosen || '')} -> ${fmt.path(blockResult.path)} (${DEFAULT_FALLBACK_HOURS}h block, ${blockReason})`));
-        } catch (err) {
+       if (shouldPersistLaunchFailureBlock(chosen || '', result)) {
+         let blockReason = 'transient crash';
+         if (result?.signal) { blockReason = `signal ${result.signal}`; }
+         else if (result?.error?.code) { blockReason = result.error.code; }
+         else if (result?.status !== null && result?.status !== 0) { blockReason = `exit ${result.status}`; }
+         const blockUntil = formatBlockUntil(new Date(Date.now() + DEFAULT_FALLBACK_HOURS * 60 * 60 * 1000));
+         try {
+           const blockResult = updateAgentBlockFn(chosen || '', blockUntil, { reason: blockReason });
+           log(fmt.status('INFO', `Wrote blocklist entry for ${fmt.agent(chosen || '')} -> ${fmt.path(blockResult.path)} (${DEFAULT_FALLBACK_HOURS}h block, ${blockReason})`));
+         } catch (err) {
           log(fmt.status('WARN', `Could not persist blocklist entry for ${fmt.agent(chosen || '')}: ${(err as any).message}`));
-        }
-      } else {
+          }
+       } else {
         log(fmt.status('INFO', `Skipping blocklist write for ${fmt.agent(chosen || '')}; launch failure looks like a deterministic config/setup error.`));
       }
       chosen = undefined;

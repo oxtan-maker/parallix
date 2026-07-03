@@ -255,6 +255,36 @@ test('startAgent throws when every eligible agent hits the limit', async () => {
   }
 });
 
+test('updateAgentBlock writes { until, reason } to agents.local.json', () => {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-block-reason-'));
+  try {
+    const targetPath = path.join(tmpRoot, 'agents.local.json');
+    const result = updateAgentBlock('codex', '2026-06-01 14', { targetPath, reason: 'transient crash' });
+    assert.equal(result.blocklist.codex.until, '2026-06-01 14');
+    assert.equal(result.blocklist.codex.reason, 'transient crash');
+
+    const written = JSON.parse(fs.readFileSync(targetPath, 'utf8'));
+    assert.equal(written.blocklist.codex.until, '2026-06-01 14');
+    assert.equal(written.blocklist.codex.reason, 'transient crash');
+  } finally {
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test('updateAgentBlock persists reason with limit-hit source description', () => {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-block-limit-reason-'));
+  try {
+    const targetPath = path.join(tmpRoot, 'agents.local.json');
+    const result = updateAgentBlock('claude', '2026-07-01 10', { targetPath, reason: 'parsed: weekly usage limit reached' });
+    assert.equal(result.blocklist.claude.reason, 'parsed: weekly usage limit reached');
+
+    const written = JSON.parse(fs.readFileSync(targetPath, 'utf8'));
+    assert.ok(written.blocklist.claude.reason.includes('weekly usage limit reached'));
+  } finally {
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+  }
+});
+
 test('updateAgentBlock writes a YYYY-MM-DD HH timestamp to agents.local.json and preserves siblings', () => {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-block-write-'));
   try {
@@ -640,4 +670,34 @@ test('shouldPersistLaunchFailureBlock returns false for custom agent regardless 
   // Custom agents (opencode) are never blocked via the persistent blocklist.
   const result = { status: 1, stderr: 'anything goes wrong\n', stdout: '' };
   assert.equal(shouldPersistLaunchFailureBlock('custom', result), false);
+});
+
+// Reproduction tests for task-1404: websocket/connectivity and provider-reachability
+// errors must NOT poison the persistent blocklist. Before the fix these assertions
+// return `true` (incorrectly blocking); after the fix they return `false`.
+test('shouldPersistLaunchFailureBlock returns false for websocket connection failure (os error 1)', () => {
+  // Connectivity/runtime errors like websocket failures are transient infrastructure
+  // issues, not quota events. Blocking the agent wastes retries.
+  const result = { status: 1, stderr: 'failed to connect to websocket ... Operation not permitted (os error 1)\n', stdout: '' };
+  assert.equal(shouldPersistLaunchFailureBlock('codex', result), false);
+});
+
+test('shouldPersistLaunchFailureBlock returns false for connection refused', () => {
+  const result = { status: 1, stderr: 'Error: connection refused to localhost:3000\n', stdout: '' };
+  assert.equal(shouldPersistLaunchFailureBlock('codex', result), false);
+});
+
+test('shouldPersistLaunchFailureBlock returns false for ECONNREFUSED', () => {
+  const result = { status: 1, stderr: 'ECONNREFUSED 127.0.0.1:8080\n', stdout: '' };
+  assert.equal(shouldPersistLaunchFailureBlock('mistral', result), false);
+});
+
+test('shouldPersistLaunchFailureBlock returns false for provider endpoint unreachable', () => {
+  const result = { status: 1, stderr: 'reachability check failed: required provider endpoints are unreachable over HTTP\n', stdout: '' };
+  assert.equal(shouldPersistLaunchFailureBlock('mistral', result), false);
+});
+
+test('shouldPersistLaunchFailureBlock returns false for endpoint unreachable', () => {
+  const result = { status: 1, stderr: 'Error: endpoint unreachable: api.example.com\n', stdout: '' };
+  assert.equal(shouldPersistLaunchFailureBlock('codex', result), false);
 });

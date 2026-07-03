@@ -1,9 +1,10 @@
 ---
 id: TASK-1404
 title: stop false Codex/Mistral autoblocks and persist blocklist reasons
-status: backlog
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-07-02 05:44'
+completed_date: '2026-07-03'
 labels:
   - bug
   - ai_sdlc
@@ -45,19 +46,19 @@ The intent is not only to reduce false blocks now, but also to leave enough on-d
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Whenever the workflow writes a timed agent blocklist entry, the persisted entry includes a human-readable reason field that explains why the block was written, with enough detail to distinguish quota/limit hits from non-quota launch failures.
-- [ ] #2 A reproduced non-quota Codex failure path does not get persisted as a false usage-style autoblock, and a regression test covers the failing stderr/output shape.
-- [ ] #3 A reproduced non-quota Mistral failure path does not get persisted as a false usage-style autoblock, and a regression test covers the failing stderr/output shape.
-- [ ] #4 Real usage/quota-limit hits for Codex and Mistral still persist timed blocks after the change, with tests proving that the limit-hit path remains intact.
-- [ ] #5 Autoblock diagnostics exposed by logs and/or task evidence clearly show the persisted block reason so an operator can tell why Codex or Mistral is blocked without re-running the failing command.
+- [x] #1 Whenever the workflow writes a timed agent blocklist entry, the persisted entry includes a human-readable reason field that explains why the block was written, with enough detail to distinguish quota/limit hits from non-quota launch failures.
+- [x] #2 A reproduced non-quota Codex failure path does not get persisted as a false usage-style autoblock, and a regression test covers the failing stderr/output shape.
+- [x] #3 A reproduced non-quota Mistral failure path does not get persisted as a false usage-style autoblock, and a regression test covers the failing stderr/output shape.
+- [x] #4 Real usage/quota-limit hits for Codex and Mistral still persist timed blocks after the change, with tests proving that the limit-hit path remains intact.
+- [x] #5 Autoblock diagnostics exposed by logs and/or task evidence clearly show the persisted block reason so an operator can tell why Codex or Mistral is blocked without re-running the failing command.
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Verification gate ran and passed on the final tree with captured proof rather than an unverified claim
-- [ ] #2 Lint and static analysis report clean on every changed file
-- [ ] #3 No focused or unannotated skipped tests were introduced (no .only and no bare .skip)
-- [ ] #4 Final checkpoint Goal Check table cites real evidence using file:line references and test names
-- [ ] #5 Docs updated to reflect any workflow or user-facing behavior change
-- [ ] #6 Bug-labeled missions include a red-to-green reproduction test that fails before the fix and passes after
+- [x] #1 Verification gate ran and passed on the final tree with captured proof rather than an unverified claim
+- [x] #2 Lint and static analysis report clean on every changed file
+- [x] #3 No focused or unannotated skipped tests were introduced (no .only and no bare .skip)
+- [x] #4 Final checkpoint Goal Check table cites real evidence using file:line references and test names
+- [x] #5 Docs updated to reflect any workflow or user-facing behavior change
+- [x] #6 Bug-labeled missions include a red-to-green reproduction test that fails before the fix and passes after
 <!-- DOD:END -->

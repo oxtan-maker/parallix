@@ -214,6 +214,7 @@ function detectLimitHit({
 
   let target;
   let source;
+  let reason;
 
   if (match) {
     const context = clipContext(combined, match.index, match.length);
@@ -222,9 +223,11 @@ function detectLimitHit({
     if (parsed && !Number.isNaN(parsed.getTime()) && parsed.getTime() > now.getTime()) {
       target = parsed;
       source = 'parsed';
+      reason = `parsed: ${match.pattern.source}`;
     } else {
       target = new Date(now.getTime() + DEFAULT_FALLBACK_HOURS * 60 * 60 * 1000);
       source = 'fallback';
+      reason = 'fallback: usage limit reached';
     }
   } else if (signal !== null && signal !== undefined) {
     // Agent was killed by a signal (e.g. SIGINT/Ctrl-C) but no limit-hit
@@ -232,12 +235,13 @@ function detectLimitHit({
     // selects a different agent instead of re-picking the same one.
     target = new Date(now.getTime() + SIGINT_SHORT_BLOCK_MINUTES * 60 * 1000);
     source = 'sigint';
+    reason = `sigint: process terminated by ${signal}`;
   } else {
     return null;
   }
 
   const ceiled = ceilToNextHour(target);
-  return { until: formatBlockUntil(ceiled), source };
+  return { until: formatBlockUntil(ceiled), source, reason };
 }
 
 export {
