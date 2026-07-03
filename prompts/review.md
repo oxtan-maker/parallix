@@ -7,7 +7,7 @@ Load before reviewing:
 - `AGENTS.md`
 - locked mission at `{{missionPath}}`
 - final checkpoint document, if present
-- diff: `git diff {{primaryBranch}}..HEAD`
+- diff: `git diff {{reviewBaseline}}..HEAD`
 
 Minimum loop contract:
 - Load the locked mission at `{{missionPath}}` and `AGENTS.md` before reviewing.

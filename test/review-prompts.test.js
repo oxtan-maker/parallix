@@ -205,6 +205,36 @@ test('buildCompactReviewPrompt substitutes missionPath and primaryBranch (no <pr
   assert.match(prompt, /git diff \w+\.\.HEAD/);
 });
 
+// task-1407: prompts diff against the snapshotted primary-branch SHA
+// (reviewBaseline), not the live {{primaryBranch}} ref, so a concurrent
+// mission merge mid-review doesn't surface as spurious diff noise.
+test('buildCompactReviewPrompt substitutes {{reviewBaseline}} with the provided SHA and leaks no placeholder', () => {
+  const prompt = buildCompactReviewPrompt({
+    reviewer: 'codex',
+    branch: 'mission/task-089',
+    implementer: 'claude',
+    focus: 'all',
+    attempt: 1,
+    repoRoot: '/tmp/project-task-089',
+    reviewBaseline: 'abc1234deadbeef'
+  });
+  assert.match(prompt, /git diff abc1234deadbeef\.\.HEAD/);
+  assert.doesNotMatch(prompt, /\{\{reviewBaseline\}\}/);
+});
+
+test('buildReviewPrompt (verbose) substitutes {{reviewBaseline}} with the provided SHA and leaks no placeholder', () => {
+  const prompt = buildReviewPrompt({
+    reviewer: 'codex',
+    branch: 'mission/task-089',
+    implementer: 'claude',
+    focus: 'all',
+    attempt: 1,
+    reviewBaseline: 'abc1234deadbeef'
+  });
+  assert.match(prompt, /git diff abc1234deadbeef\.\.HEAD/);
+  assert.doesNotMatch(prompt, /\{\{reviewBaseline\}\}/);
+});
+
 
 test('buildCompactActOnReviewPrompt reads from template and substitutes all variables', () => {
   const prompt = buildCompactActOnReviewPrompt({

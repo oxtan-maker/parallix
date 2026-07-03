@@ -8,7 +8,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as fmt from '../core/fmt.js';
 import { git, run } from '../core/git.js';
-import { findMissionDir, findMissionArea, resolveWorktree, missionBranchName } from '../core/mission-utils.js';
+import { findMissionDir, findMissionArea, resolveWorktree, missionBranchName, getPrimaryBranch } from '../core/mission-utils.js';
 import { formatVerificationCommand } from '../core/verification.js';
 import { resolveTaskFile, getTaskImplementer, getTaskStatus, enforceTaskAssignee, transitionTask, reportTaskResolution } from '../tools/backlog.js';
 import { toVirtual, transitionVirtual } from '../core/state-map.js';
@@ -985,6 +985,30 @@ export async function startReviewLoop(slug: string, opts: {
       state.advanceRound();
     }
 
+    // Snapshot the primary branch's HEAD commit for this round. This is a
+    // fallback value only, used for paths that don't rebase this round (a
+    // dry run, or resuming with an existing reviewState): once
+    // rebaseBeforeReviewRoundFn runs below, HEAD is rebased onto primary's
+    // *current* tip, so the baseline is re-captured immediately after the
+    // rebase completes (see below). Capturing it here, before the rebase,
+    // would pin the diff to a stale pre-rebase SHA; since rebase replays
+    // primary's newer commits into HEAD's ancestry, diffing against that
+    // stale SHA would surface exactly the "not rebased to main" noise this
+    // baseline exists to suppress (task-1407).
+    // Falls back to undefined (letting the prompt builders resolve the live
+    // primary branch ref themselves) if the primary branch cannot be detected,
+    // e.g. in a repo with no main/master branch yet.
+    const captureReviewBaseline = (): string | undefined => {
+      try {
+        const primaryBranchName = getPrimaryBranch(worktree, gitFn);
+        const reviewBaselineResult = gitFn(['-C', worktree, 'rev-parse', primaryBranchName]);
+        return (reviewBaselineResult.stdout || '').trim() || primaryBranchName;
+      } catch {
+        return undefined;
+      }
+    };
+    let reviewBaseline: string | undefined = captureReviewBaseline();
+
     let reviewState: unknown;
 
     if (state.phase === 'reviewing') {
@@ -1014,7 +1038,7 @@ export async function startReviewLoop(slug: string, opts: {
             log(fmt.status('INFO', `Round ${attempt}: reviewer identity is autonomous; skipping dry-run reviewer prompt and using local review artifacts only.`));
           } else {
             log(`\n--- DRY-RUN: reviewer (${reviewer}) prompt ---`);
-            log((buildReviewPromptFn as any)({ reviewer: reviewer!, branch, implementer: implementer!, focus, attempt, repoRoot: worktree, missionPath: effectiveMissionPath || undefined, actualReviewer: '{{AGENT_NAME}}' }));
+            log((buildReviewPromptFn as any)({ reviewer: reviewer!, branch, implementer: implementer!, focus, attempt, repoRoot: worktree, missionPath: effectiveMissionPath || undefined, actualReviewer: '{{AGENT_NAME}}', reviewBaseline }));
           }
         }
       } else {
@@ -1027,6 +1051,11 @@ export async function startReviewLoop(slug: string, opts: {
             isReviewProviderEnabledFn: forgejoEnabledFn
           });
           if (!rebaseResult.ok) { exit(1); return; }
+
+          // Re-capture after rebase: HEAD is now rebased onto primary's tip,
+          // so the pre-rebase snapshot above is stale and must be replaced
+          // with the SHA that HEAD was actually rebased onto (task-1407).
+          reviewBaseline = captureReviewBaseline();
 
           if (!dryRun) { transitionTaskFn(slug, 'review', { rootDir: worktree, log }); }
           state.phase = 'reviewing';
@@ -1083,7 +1112,7 @@ export async function startReviewLoop(slug: string, opts: {
             try {
               reviewerLaunchResult = await startAgentFn('review', {
                 agent: reviewer,
-                prompt: (actualReviewer: string) => (buildCompactReviewPromptFn as any)({ reviewer: reviewer!, branch, implementer: implementer!, focus, attempt, repoRoot: worktree, missionPath: effectiveMissionPath || undefined, actualReviewer }),
+                prompt: (actualReviewer: string) => (buildCompactReviewPromptFn as any)({ reviewer: reviewer!, branch, implementer: implementer!, focus, attempt, repoRoot: worktree, missionPath: effectiveMissionPath || undefined, actualReviewer, reviewBaseline }),
                 worktree, slug, role: 'reviewer', exclude: [implementer]
               });
             } catch (err: unknown) {
@@ -1148,7 +1177,7 @@ export async function startReviewLoop(slug: string, opts: {
             try {
               relaunchResult = await startAgentFn('review', {
                 agent: reviewer,
-                prompt: (actualReviewer: string) => (buildCompactReviewPromptFn as any)({ reviewer: reviewer!, branch, implementer: implementer!, focus, attempt, repoRoot: worktree, missionPath: effectiveMissionPath || undefined, actualReviewer }) + '\n\n' + recoveryPrompt,
+                prompt: (actualReviewer: string) => (buildCompactReviewPromptFn as any)({ reviewer: reviewer!, branch, implementer: implementer!, focus, attempt, repoRoot: worktree, missionPath: effectiveMissionPath || undefined, actualReviewer, reviewBaseline }) + '\n\n' + recoveryPrompt,
                 worktree, slug, role: 'reviewer', exclude: [implementer]
               });
             } catch (err: unknown) {
@@ -1285,7 +1314,7 @@ export async function startReviewLoop(slug: string, opts: {
       // First launch or re-launch after stale BLOCKED/PARKED
       if (dryRun) {
         log(`\n--- DRY-RUN: implementer (${implementer}) act-on-review prompt ---`);
-        log((buildActOnReviewPromptFn as any)({ implementer: implementer!, branch, attempt, repoRoot: worktree, missionPath: effectiveMissionPath || undefined, actualImplementer: '{{AGENT_NAME}}' }));
+        log((buildActOnReviewPromptFn as any)({ implementer: implementer!, branch, attempt, repoRoot: worktree, missionPath: effectiveMissionPath || undefined, actualImplementer: '{{AGENT_NAME}}', reviewBaseline }));
         if (reLaunch!) {
           log(fmt.status('INFO', `Round ${attempt}: stale BLOCKED/PARKED disposition replaced by fresh implementer action.`));
         }
@@ -1303,7 +1332,7 @@ export async function startReviewLoop(slug: string, opts: {
         try {
           implementerLaunchResult = await startAgentFn('act-on-review', {
             agent: implementer,
-            prompt: (actualImplementer: string) => (buildCompactActOnReviewPromptFn as any)({ implementer: implementer!, branch, attempt, reviewOutcome: reviewState, repoRoot: worktree, missionPath: effectiveMissionPath || undefined, actualImplementer }),
+            prompt: (actualImplementer: string) => (buildCompactActOnReviewPromptFn as any)({ implementer: implementer!, branch, attempt, reviewOutcome: reviewState, repoRoot: worktree, missionPath: effectiveMissionPath || undefined, actualImplementer, reviewBaseline }),
             worktree, slug, role: 'implementer', exclude: [reviewer]
           });
         } catch (err: unknown) {
@@ -1365,7 +1394,7 @@ export async function startReviewLoop(slug: string, opts: {
           try {
             relaunchResult = await startAgentFn('act-on-review', {
               agent: implementer,
-              prompt: (actualImplementer: string) => (buildCompactActOnReviewPromptFn as any)({ implementer: implementer!, branch, attempt, reviewOutcome: reviewState, repoRoot: worktree, missionPath: effectiveMissionPath || undefined, actualImplementer }) + '\n\n' + recoveryPrompt,
+              prompt: (actualImplementer: string) => (buildCompactActOnReviewPromptFn as any)({ implementer: implementer!, branch, attempt, reviewOutcome: reviewState, repoRoot: worktree, missionPath: effectiveMissionPath || undefined, actualImplementer, reviewBaseline }) + '\n\n' + recoveryPrompt,
               worktree, slug, role: 'implementer', exclude: [reviewer]
             });
           } catch (err: unknown) {

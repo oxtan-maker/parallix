@@ -72,8 +72,8 @@ function resolvePrimaryBranch(repoRoot?: string): string {
  * @param {{reviewer: string, branch: string, implementer: string, focus?: string, attempt: number, repoRoot?: string, missionPath?: string}} opts
  * @returns {string}
  */
-export function buildReviewPrompt({ reviewer, branch, implementer, focus = 'all', attempt, repoRoot = '', missionPath: missionPathOverride }: {
-  reviewer: string; branch: string; implementer: string; focus?: string; attempt: number; repoRoot?: string; missionPath?: string;
+export function buildReviewPrompt({ reviewer, branch, implementer, focus = 'all', attempt, repoRoot = '', missionPath: missionPathOverride, reviewBaseline }: {
+  reviewer: string; branch: string; implementer: string; focus?: string; attempt: number; repoRoot?: string; missionPath?: string; reviewBaseline?: string;
 }): string {
   const entrypoint = reviewEntrypoint(reviewer);
   const repoLine = repoRoot ? `\noperate from repo root: ${repoRoot}` : '';
@@ -93,6 +93,7 @@ export function buildReviewPrompt({ reviewer, branch, implementer, focus = 'all'
     .replaceAll('{{missionPath}}',      missionPath)
     .replaceAll('{{artifactDir}}',      artifactDir)
     .replaceAll('{{primaryBranch}}',    resolvePrimaryBranch(repoRoot))
+    .replaceAll('{{reviewBaseline}}',   reviewBaseline || resolvePrimaryBranch(repoRoot))
     .replaceAll('{{review_entrypoint}}', entrypoint)
     .replaceAll('YYYY',                year)
     .replaceAll('{{repo_line}}',        repoLine ? repoLine.trim() + '\n- ' : '');
@@ -102,8 +103,8 @@ export function buildReviewPrompt({ reviewer, branch, implementer, focus = 'all'
  * @param {{implementer: string, branch: string, attempt: number, repoRoot?: string, missionPath?: string}} opts
  * @returns {string}
  */
-export function buildActOnReviewPrompt({ implementer, branch, attempt, repoRoot = '', missionPath: missionPathOverride }: {
-  implementer: string; branch: string; attempt: number; repoRoot?: string; missionPath?: string;
+export function buildActOnReviewPrompt({ implementer, branch, attempt, repoRoot = '', missionPath: missionPathOverride, reviewBaseline }: {
+  implementer: string; branch: string; attempt: number; repoRoot?: string; missionPath?: string; reviewBaseline?: string;
 }): string {
   const entrypoint = actOnReviewEntrypoint(implementer);
   const repoLine = repoRoot ? `\noperate from repo root: ${repoRoot}` : '';
@@ -121,6 +122,7 @@ export function buildActOnReviewPrompt({ implementer, branch, attempt, repoRoot 
     .replaceAll('{{missionPath}}',             missionPath)
     .replaceAll('{{artifactDir}}',             artifactDir)
     .replaceAll('{{primaryBranch}}',           resolvePrimaryBranch(repoRoot))
+    .replaceAll('{{reviewBaseline}}',          reviewBaseline || resolvePrimaryBranch(repoRoot))
     .replaceAll('{{act_on_review_entrypoint}}', entrypoint)
     .replaceAll('YYYY',                       year)
     .replaceAll('{{repo_line}}',               repoLine ? repoLine.trim() + '\n- ' : '');
@@ -130,8 +132,8 @@ export function buildActOnReviewPrompt({ implementer, branch, attempt, repoRoot 
  * @param {{reviewer: string, branch: string, implementer: string, focus?: string, attempt: number, actualReviewer?: string, repoRoot?: string, missionPath?: string}} opts
  * @returns {string}
  */
-export function buildCompactReviewPrompt({ reviewer, branch, implementer, focus = 'all', attempt, actualReviewer, repoRoot = '', missionPath: missionPathOverride }: {
-  reviewer: string; branch: string; implementer: string; focus?: string; attempt: number; actualReviewer?: string; repoRoot?: string; missionPath?: string;
+export function buildCompactReviewPrompt({ reviewer, branch, implementer, focus = 'all', attempt, actualReviewer, repoRoot = '', missionPath: missionPathOverride, reviewBaseline }: {
+  reviewer: string; branch: string; implementer: string; focus?: string; attempt: number; actualReviewer?: string; repoRoot?: string; missionPath?: string; reviewBaseline?: string;
 }): string {
   const slug = branch.replace(/^mission\//, '');
   const finalReviewer = actualReviewer || reviewer;
@@ -150,6 +152,7 @@ export function buildCompactReviewPrompt({ reviewer, branch, implementer, focus 
     .replaceAll('{{missionPath}}',      missionPath)
     .replaceAll('{{artifactDir}}',      artifactDir)
     .replaceAll('{{primaryBranch}}',    primaryBranch)
+    .replaceAll('{{reviewBaseline}}',   reviewBaseline || primaryBranch)
     .replaceAll('YYYY',                year)
     .replaceAll('{{review_entrypoint}}', reviewEntrypoint(finalReviewer));
 }
@@ -158,8 +161,8 @@ export function buildCompactReviewPrompt({ reviewer, branch, implementer, focus 
  * @param {{implementer: string, branch: string, attempt: number, reviewOutcome?: string, actualImplementer?: string, repoRoot?: string, missionPath?: string}} opts
  * @returns {string}
  */
-export function buildCompactActOnReviewPrompt({ implementer, branch, attempt, reviewOutcome = '?', actualImplementer, repoRoot = '', missionPath: missionPathOverride }: {
-  implementer: string; branch: string; attempt: number; reviewOutcome?: string; actualImplementer?: string; repoRoot?: string; missionPath?: string;
+export function buildCompactActOnReviewPrompt({ implementer, branch, attempt, reviewOutcome = '?', actualImplementer, repoRoot = '', missionPath: missionPathOverride, reviewBaseline }: {
+  implementer: string; branch: string; attempt: number; reviewOutcome?: string; actualImplementer?: string; repoRoot?: string; missionPath?: string; reviewBaseline?: string;
 }): string {
   const slug = branch.replace(/^mission\//, '');
   const finalImplementer = actualImplementer || implementer;
@@ -176,6 +179,7 @@ export function buildCompactActOnReviewPrompt({ implementer, branch, attempt, re
     .replaceAll('{{missionPath}}',             missionPath)
     .replaceAll('{{artifactDir}}',             artifactDir)
     .replaceAll('{{primaryBranch}}',           primaryBranch)
+    .replaceAll('{{reviewBaseline}}',          reviewBaseline || primaryBranch)
     .replaceAll('{{review_outcome}}',          reviewOutcome)
     .replaceAll('YYYY',                       year)
     .replaceAll('{{act_on_review_entrypoint}}', actOnReviewEntrypoint(finalImplementer));

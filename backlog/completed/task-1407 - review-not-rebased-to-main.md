@@ -1,10 +1,11 @@
 ---
 id: TASK-1407
 title: review not rebased to main
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-07-02 18:33'
-labels: []
+labels:
+  - ai_sdlc
 dependencies: []
 ---
 
