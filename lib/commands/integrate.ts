@@ -171,44 +171,44 @@ function reportStashPopFailure(slug: string, restoreResult: any, opts: {rootDir?
   const indexConflicts = (opts.getUnresolvedIndexConflictsFn || getUnresolvedIndexConflicts)(rootDir);
   const collisionFiles = parseStashPopCollisionFiles(output);
 
-  fmt.log.fail('Could not restore the temporarily stashed local integration checkout changes.');
+  fmt.log.fail('[RESTORE] Could not restore the temporarily stashed local integration checkout changes.');
   if (integrationLanded) {
-    fmt.log.fail(`Integration commit landed: ${headLine}`);
+    fmt.log.fail(`  Integration commit landed: ${headLine}`);
   } else {
-    fmt.log.fail(`Integration landing not confirmed by HEAD: ${headLine}`);
+    fmt.log.fail(`  Integration landing not confirmed by HEAD: ${headLine}`);
   }
 
   if (indexConflicts.ok && indexConflicts.files.length > 0) {
-    fmt.log.fail('Stash restore failure type: merge-conflict');
-    indexConflicts.files.forEach((file: string) => fmt.log.fail(`  - ${file}`));
-    fmt.log.fail('Recovery steps:');
-    fmt.log.fail(`  1. cd ${rootDir}`);
+    fmt.log.fail('  Stash restore failure type: merge-conflict (unmerged index entries)');
+    indexConflicts.files.forEach((file: string) => fmt.log.fail(`  Collision file: ${file}`));
+    fmt.log.fail('  Recovery steps:');
+    fmt.log.fail(`    1. cd ${rootDir}`);
     indexConflicts.files.forEach((file: string) => {
-      fmt.log.fail(`  2. Resolve ${file}, then run git add "${file}" or git rm "${file}"`);
+      fmt.log.fail(`    2. Resolve ${file}, then run git add "${file}" or git rm "${file}"`);
     });
-    fmt.log.fail('  3. git status --short');
-    fmt.log.fail('  4. git stash drop');
+    fmt.log.fail('    3. git status --short');
+    fmt.log.fail('    4. git stash drop');
   } else {
-    fmt.log.fail('Stash restore failure type: file-collision');
+    fmt.log.fail('  Stash restore failure type: file-collision');
     if (collisionFiles.length > 0) {
-      collisionFiles.forEach((file: string) => fmt.log.fail(`  - ${file}`));
+      collisionFiles.forEach((file: string) => fmt.log.fail(`  Collision file: ${file}`));
     }
-    fmt.log.fail('Recovery steps:');
-    fmt.log.fail(`  1. git -C ${rootDir} stash show --name-only stash@{0}`);
+    fmt.log.fail('  Recovery steps:');
+    fmt.log.fail(`    1. git -C ${rootDir} stash show --name-only stash@{0}`);
     if (collisionFiles.length > 0) {
       collisionFiles.forEach((file: string) => {
-        fmt.log.fail(`  2. mv ${path.join(rootDir, file)} ${path.join(rootDir, `${file}.pre-stash-pop`)}`);
+        fmt.log.fail(`    2. mv ${path.join(rootDir, file)} ${path.join(rootDir, `${file}.pre-stash-pop`)}`);
       });
-      fmt.log.fail(`  3. git -C ${rootDir} stash pop`);
+      fmt.log.fail(`    3. git -C ${rootDir} stash pop`);
     } else {
-      fmt.log.fail(`  2. Inspect the latest stash-pop output and move or remove the colliding files in ${rootDir}`);
-      fmt.log.fail(`  3. git -C ${rootDir} stash pop`);
+      fmt.log.fail(`    2. Inspect the latest stash-pop output and move or remove the colliding files in ${rootDir}`);
+      fmt.log.fail(`    3. git -C ${rootDir} stash pop`);
     }
   }
 
   if (output) {
-    fmt.log.fail('stash pop output:');
-    fmt.log.fail(output);
+    fmt.log.fail('  Raw stash pop output:');
+    output.split('\n').forEach((line: string) => fmt.log.fail(`    ${line}`));
   }
 }
 
@@ -1254,9 +1254,71 @@ function printIntegrationPreflight(
   }
 
   if (context.mainDirty) {
-    warnings.push('main-dirty');
-    log(fmt.status('WARN', `Integration checkout dirty: ${baseWorktree} has uncommitted changes that will be stashed temporarily`));
-    context.mainDirtyEntries.forEach((entry: string) => log(fmt.status('INFO', `  - ${entry}`)));
+    // Detect dirty paths that overlap with files integrate mutates during closeout.
+    // Broad overlap set: any dirty path under backlog/tasks/ or backlog/completed/
+    // triggers FAIL, because closeout logic (completeTask, reorder/ordinal writes)
+    // can touch backlog files beyond the current mission's own slug.
+    // Editor swap files, .env, etc. are excluded by the path prefix check.
+    // Mission doc paths remain scoped to the current mission's slug.
+    const overlapPaths: string[] = [];
+    if (context.missionDir) {
+      const relMissionPath = path.relative(baseWorktree, context.missionDir);
+      overlapPaths.push(relMissionPath);
+    }
+    overlapPaths.push(`missions/${context.slug}`);
+
+    const overlappingEntries: string[] = [];
+    const nonOverlappingEntries: string[] = [];
+
+    context.mainDirtyEntries.forEach((entry: string) => {
+      // Extract the file path from git status --porcelain format (columns 3+)
+      const filePath = entry.slice(3).trim();
+      if (!filePath) {
+        return;
+      }
+
+      let isOverlap = false;
+
+      // Any dirty path under backlog/tasks/ or backlog/completed/ overlaps
+      // with files integrate mutates during closeout (completeTask, reorder).
+      if (/^backlog\/(tasks|completed)\//.test(filePath)) {
+        isOverlap = true;
+      }
+
+      // Check against mission doc paths (scoped to current mission)
+      if (!isOverlap) {
+        for (const mp of overlapPaths) {
+          if (mp && (filePath === mp || filePath.startsWith(mp + path.sep) || filePath.startsWith(mp + '/'))) {
+            isOverlap = true;
+            break;
+          }
+        }
+      }
+
+      if (isOverlap) {
+        overlappingEntries.push(entry);
+      } else {
+        nonOverlappingEntries.push(entry);
+      }
+    });
+
+    if (overlappingEntries.length > 0) {
+      // Upgrade to FAIL — overlapping dirty paths will collide with closeout mutations
+      failures.push('main-dirty-overlap');
+      fmt.log.fail(`[STASH] Integration checkout dirty: overlapping paths detected that collide with integrate closeout.`);
+      overlappingEntries.forEach((entry: string) => log(fmt.status('WARN', `  - ${entry}`)));
+      fmt.log.fail('Recovery steps:');
+      fmt.log.fail(`  1. Commit or discard the overlapping changes in ${baseWorktree}`);
+      fmt.log.fail(`     git -C ${baseWorktree} add ${overlappingEntries.map(e => `"${e.slice(3).trim()}"`).join(' ')}`);
+      fmt.log.fail(`  2. Retry: px integrate ${context.slug} --dry-run`);
+    } else if (nonOverlappingEntries.length > 0) {
+      // Non-overlapping dirty paths are safe to stash and restore
+      warnings.push('main-dirty');
+      fmt.log.warn(`[STASH] Integration checkout dirty: ${baseWorktree} has uncommitted changes that will be stashed temporarily`);
+      nonOverlappingEntries.forEach((entry: string) => log(fmt.status('INFO', `  - ${entry}`)));
+    } else {
+      log(fmt.status('PASS', 'Integration checkout dirty state: clean'));
+    }
   } else {
     log(fmt.status('PASS', 'Integration checkout dirty state: clean'));
   }
@@ -1308,7 +1370,7 @@ function stashMainCheckoutIfNeeded({
   }
 
   const message = `integrate:${slug}: temporary integration checkout stash`;
-  fmt.log.info(`Stashing unrelated local integration checkout changes before integration: ${message}`);
+  fmt.log.info(`[STASH] Stashing unrelated local integration checkout changes before integration: ${message}`);
   const result = gitRunner([
     '-C',
     rootDir,
@@ -1320,7 +1382,7 @@ function stashMainCheckoutIfNeeded({
   ]);
 
   if (result.status !== 0) {
-    fmt.log.fail('Could not stash the unrelated local integration checkout changes.');
+    fmt.log.fail('[STASH] Could not stash the unrelated local integration checkout changes.');
     throw new IntegrationAbort();
   }
 
@@ -1333,10 +1395,13 @@ function stashMainCheckoutIfNeeded({
 
 /** @param{{message: string, rootDir?: string, gitRunner?: Function}} params */
 function restoreMainCheckoutStash({ message, rootDir = getPrimaryWorktree(), gitRunner = git }: {message: string, rootDir?: string, gitRunner?: Function}) {
-  fmt.log.info(`Restoring temporarily stashed local integration checkout changes: ${message}`);
+  fmt.log.info(`[RESTORE] Restoring temporarily stashed local integration checkout changes: ${message}`);
+  // Use --index for safer restore semantics: git attempts to reinstage the index
+  // changes from the stash alongside the working-tree changes. Collisions are
+  // left as merge conflicts rather than silently overwriting files.
   // Pass cwd explicitly so spawnSync does not inherit the process cwd, which may have been
   // deleted by worktree cleanup earlier in the same integrate run.
-  return gitRunner(['-C', rootDir, 'stash', 'pop'], { cwd: rootDir });
+  return gitRunner(['-C', rootDir, 'stash', 'pop', '--index'], { cwd: rootDir });
 }
 
 /** @param{{stdout: string, stderr: string, status: number}} result */

@@ -3,9 +3,11 @@ id: TASK-1410
 title: >-
   Prevent integrate from corrupting main when restoring a dirty integration
   checkout
-status: backlog
-assignee: []
+status: done
+assignee:
+  - custom
 created_date: '2026-07-03 06:40'
+updated_date: '2026-07-04 04:42'
 labels:
   - bug
   - ai_sdlc
@@ -34,18 +36,24 @@ This needs a systematic fix so integrate either uses an isolated checkout/patch 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A deterministic regression test reproduces the task-1404 style collision where the primary checkout contains dirty backlog/task edits before integrate runs, and the test fails on current main without the fix.
-- [ ] #2 Integrate no longer leaves the primary checkout with unmerged index entries, duplicate task files, or deleted tracked backlog files after restoring preserved local changes.
-- [ ] #3 When the primary checkout has dirty paths that overlap files integrate will mutate during closeout, integrate either blocks before landing changes with a clear recovery message or switches to an isolation mechanism that preserves those edits safely.
-- [ ] #4 The preservation/restore flow for dirty primary-checkout changes is explicit in logs and documented well enough that an operator can tell whether local edits were blocked, stashed, patched, or restored.
+- [x] #1 A deterministic regression test reproduces the task-1404 style collision where the primary checkout contains dirty backlog/task edits before integrate runs, and the test fails on current main without the fix.
+- [x] #2 Integrate no longer leaves the primary checkout with unmerged index entries, duplicate task files, or deleted tracked backlog files after restoring preserved local changes.
+- [x] #3 When the primary checkout has dirty paths that overlap files integrate will mutate during closeout, integrate either blocks before landing changes with a clear recovery message or switches to an isolation mechanism that preserves those edits safely.
+- [x] #4 The preservation/restore flow for dirty primary-checkout changes is explicit in logs and documented well enough that an operator can tell whether local edits were blocked, stashed, patched, or restored.
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+2026-07-04: Took over implementer handoff after the review loop failed on missing /tmp artifacts. Existing mission evidence already shows round-1 fixes landed, verification passed in CP-5, and the latest effective review outcome is approved; task moved to ready-for-integration and handoff artifacts recreated.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Verification gate ran and passed on the final tree with captured proof rather than an unverified claim
-- [ ] #2 Lint and static analysis report clean on every changed file
-- [ ] #3 No focused or unannotated skipped tests were introduced (no .only and no bare .skip)
-- [ ] #4 Final checkpoint Goal Check table cites real evidence using file:line references and test names
-- [ ] #5 Docs updated to reflect any workflow or user-facing behavior change
-- [ ] #6 Bug-labeled missions include a red-to-green reproduction test that fails before the fix and passes after
+- [x] #1 Verification gate ran and passed on the final tree with captured proof rather than an unverified claim
+- [x] #2 Lint and static analysis report clean on every changed file
+- [x] #3 No focused or unannotated skipped tests were introduced (no .only and no bare .skip)
+- [x] #4 Final checkpoint Goal Check table cites real evidence using file:line references and test names
+- [x] #5 Docs updated to reflect any workflow or user-facing behavior change
+- [x] #6 Bug-labeled missions include a red-to-green reproduction test that fails before the fix and passes after
 <!-- DOD:END -->

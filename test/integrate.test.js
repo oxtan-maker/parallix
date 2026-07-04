@@ -1366,7 +1366,8 @@ test('restoreMainCheckoutStash pops the temporary stash back onto the main check
     '-C',
     '/tmp/main-checkout',
     'stash',
-    'pop'
+    'pop',
+    '--index'
   ]]);
 });
 
