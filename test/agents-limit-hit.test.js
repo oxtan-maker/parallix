@@ -701,3 +701,228 @@ test('shouldPersistLaunchFailureBlock returns false for endpoint unreachable', (
   const result = { status: 1, stderr: 'Error: endpoint unreachable: api.example.com\n', stdout: '' };
   assert.equal(shouldPersistLaunchFailureBlock('codex', result), false);
 });
+
+// New non-blocking patterns for task-1412: timeout, sandbox, connectivity,
+// prompt rejection, argument errors, and resource exhaustion.
+
+// (d) Timeout errors
+test('shouldPersistLaunchFailureBlock returns false for timeout', () => {
+  const result = { status: 1, stderr: 'Error: timeout waiting for response\n', stdout: '' };
+  assert.equal(shouldPersistLaunchFailureBlock('codex', result), false);
+});
+
+test('shouldPersistLaunchFailureBlock returns false for timed out', () => {
+  const result = { status: 1, stderr: 'Request timed out: server did not respond in time\n', stdout: '' };
+  assert.equal(shouldPersistLaunchFailureBlock('mistral', result), false);
+});
+
+test('shouldPersistLaunchFailureBlock returns false for deadline exceeded', () => {
+  const result = { status: 1, stderr: 'Error: deadline exceeded\n', stdout: '' };
+  assert.equal(shouldPersistLaunchFailureBlock('codex', result), false);
+});
+
+test('shouldPersistLaunchFailureBlock returns false for request timed out', () => {
+  const result = { status: 1, stderr: 'HTTP request timed out after 30s\n', stdout: '' };
+  assert.equal(shouldPersistLaunchFailureBlock('mistral', result), false);
+});
+
+// (e) Sandbox / permission-denial errors (non-auth)
+test('shouldPersistLaunchFailureBlock returns false for sandbox violation', () => {
+  const result = { status: 1, stderr: 'Error: sandbox violation — access to host network denied\n', stdout: '' };
+  assert.equal(shouldPersistLaunchFailureBlock('codex', result), false);
+});
+
+test('shouldPersistLaunchFailureBlock returns false for sandbox denied', () => {
+  const result = { status: 1, stderr: 'Sandbox denied: container policy blocked execution\n', stdout: '' };
+  assert.equal(shouldPersistLaunchFailureBlock('codex', result), false);
+});
+
+test('shouldPersistLaunchFailureBlock returns false for tool call denied', () => {
+  const result = { status: 1, stderr: 'Tool call denied: file_write not permitted in sandbox\n', stdout: '' };
+  assert.equal(shouldPersistLaunchFailureBlock('codex', result), false);
+});
+
+test('shouldPersistLaunchFailureBlock returns false for action denied', () => {
+  const result = { status: 1, stderr: 'Action denied: network_request blocked by policy\n', stdout: '' };
+  assert.equal(shouldPersistLaunchFailureBlock('codex', result), false);
+});
+
+test('shouldPersistLaunchFailureBlock returns false for approval denied', () => {
+  const result = { status: 1, stderr: 'Approval denied: user did not approve the proposed action\n', stdout: '' };
+  assert.equal(shouldPersistLaunchFailureBlock('codex', result), false);
+});
+
+// (f) Provider connectivity errors
+test('shouldPersistLaunchFailureBlock returns false for EPIPE', () => {
+  const result = { status: 1, stderr: 'Error: EPIPE — broken pipe connecting to API\n', stdout: '' };
+  assert.equal(shouldPersistLaunchFailureBlock('mistral', result), false);
+});
+
+test('shouldPersistLaunchFailureBlock returns false for ETIMEDOUT', () => {
+  const result = { status: 1, stderr: 'Error: ETIMEDOUT connecting to provider\n', stdout: '' };
+  assert.equal(shouldPersistLaunchFailureBlock('mistral', result), false);
+});
+
+test('shouldPersistLaunchFailureBlock returns false for ENETUNREACH', () => {
+  const result = { status: 1, stderr: 'Error: ENETUNREACH — network unreachable\n', stdout: '' };
+  assert.equal(shouldPersistLaunchFailureBlock('mistral', result), false);
+});
+
+test('shouldPersistLaunchFailureBlock returns false for ENOTFOUND', () => {
+  const result = { status: 1, stderr: 'Error: ENOTFOUND api.mistral.ai\n', stdout: '' };
+  assert.equal(shouldPersistLaunchFailureBlock('mistral', result), false);
+});
+
+test('shouldPersistLaunchFailureBlock returns false for EAI_AGAIN', () => {
+  const result = { status: 1, stderr: 'Error: EAI_AGAIN: DNS resolution failed\n', stdout: '' };
+  assert.equal(shouldPersistLaunchFailureBlock('mistral', result), false);
+});
+
+test('shouldPersistLaunchFailureBlock returns false for socket hang up', () => {
+  const result = { status: 1, stderr: 'Error: socket hang up\n', stdout: '' };
+  assert.equal(shouldPersistLaunchFailureBlock('codex', result), false);
+});
+
+test('shouldPersistLaunchFailureBlock returns false for fetch failed', () => {
+  const result = { status: 1, stderr: 'TypeError: fetch failed\n', stdout: '' };
+  assert.equal(shouldPersistLaunchFailureBlock('mistral', result), false);
+});
+
+test('shouldPersistLaunchFailureBlock returns false for service unavailable', () => {
+  const result = { status: 1, stderr: 'Error: service unavailable\n', stdout: '' };
+  assert.equal(shouldPersistLaunchFailureBlock('mistral', result), false);
+});
+
+test('shouldPersistLaunchFailureBlock returns false for gateway timeout', () => {
+  const result = { status: 1, stderr: 'Error: gateway timeout (504)\n', stdout: '' };
+  assert.equal(shouldPersistLaunchFailureBlock('mistral', result), false);
+});
+
+test('shouldPersistLaunchFailureBlock returns false for overloaded', () => {
+  const result = { status: 1, stderr: 'Error: service overloaded\n', stdout: '' };
+  assert.equal(shouldPersistLaunchFailureBlock('codex', result), false);
+});
+
+test('shouldPersistLaunchFailureBlock returns false for temporarily unavailable', () => {
+  const result = { status: 1, stderr: 'Error: temporarily unavailable\n', stdout: '' };
+  assert.equal(shouldPersistLaunchFailureBlock('mistral', result), false);
+});
+
+test('shouldPersistLaunchFailureBlock returns false for please try again', () => {
+  const result = { status: 1, stderr: 'Error: please try again later\n', stdout: '' };
+  assert.equal(shouldPersistLaunchFailureBlock('mistral', result), false);
+});
+
+test('shouldPersistLaunchFailureBlock returns false for retry after', () => {
+  const result = { status: 1, stderr: 'Error: retry after 60 seconds\n', stdout: '' };
+  assert.equal(shouldPersistLaunchFailureBlock('mistral', result), false);
+});
+
+// (g) Prompt rejection errors
+test('shouldPersistLaunchFailureBlock returns false for prompt rejected', () => {
+  const result = { status: 1, stderr: 'Error: prompt rejected by content policy\n', stdout: '' };
+  assert.equal(shouldPersistLaunchFailureBlock('codex', result), false);
+});
+
+test('shouldPersistLaunchFailureBlock returns false for prompt blocked', () => {
+  const result = { status: 1, stderr: 'Error: prompt blocked\n', stdout: '' };
+  assert.equal(shouldPersistLaunchFailureBlock('codex', result), false);
+});
+
+test('shouldPersistLaunchFailureBlock returns false for content policy', () => {
+  const result = { status: 1, stderr: 'Error: content policy violation\n', stdout: '' };
+  assert.equal(shouldPersistLaunchFailureBlock('mistral', result), false);
+});
+
+test('shouldPersistLaunchFailureBlock returns false for content filter', () => {
+  const result = { status: 1, stderr: 'Error: content filter triggered\n', stdout: '' };
+  assert.equal(shouldPersistLaunchFailureBlock('mistral', result), false);
+});
+
+test('shouldPersistLaunchFailureBlock returns false for safety filter', () => {
+  const result = { status: 1, stderr: 'Error: safety filter blocked the request\n', stdout: '' };
+  assert.equal(shouldPersistLaunchFailureBlock('codex', result), false);
+});
+
+// (h) Invocation argument errors
+test('shouldPersistLaunchFailureBlock returns false for invalid argument', () => {
+  const result = { status: 1, stderr: 'Error: invalid argument: --workspace\n', stdout: '' };
+  assert.equal(shouldPersistLaunchFailureBlock('codex', result), false);
+});
+
+test('shouldPersistLaunchFailureBlock returns false for invalid option', () => {
+  const result = { status: 1, stderr: 'Error: invalid option: --yolo\n', stdout: '' };
+  assert.equal(shouldPersistLaunchFailureBlock('codex', result), false);
+});
+
+test('shouldPersistLaunchFailureBlock returns false for invalid parameter', () => {
+  const result = { status: 1, stderr: 'Error: invalid parameter: model="gpt-99"\n', stdout: '' };
+  assert.equal(shouldPersistLaunchFailureBlock('mistral', result), false);
+});
+
+test('shouldPersistLaunchFailureBlock returns false for missing required', () => {
+  const result = { status: 1, stderr: 'Error: missing required argument: --prompt\n', stdout: '' };
+  assert.equal(shouldPersistLaunchFailureBlock('codex', result), false);
+});
+
+test('shouldPersistLaunchFailureBlock returns false for argument error', () => {
+  const result = { status: 1, stderr: 'Error: argument error — expected integer\n', stdout: '' };
+  assert.equal(shouldPersistLaunchFailureBlock('codex', result), false);
+});
+
+// (i) Resource exhaustion errors
+test('shouldPersistLaunchFailureBlock returns false for out of memory', () => {
+  const result = { status: 1, stderr: 'Error: out of memory\n', stdout: '' };
+  assert.equal(shouldPersistLaunchFailureBlock('codex', result), false);
+});
+
+test('shouldPersistLaunchFailureBlock returns false for OOM', () => {
+  const result = { status: 1, stderr: 'Killed: OOM killer invoked\n', stdout: '' };
+  assert.equal(shouldPersistLaunchFailureBlock('codex', result), false);
+});
+
+test('shouldPersistLaunchFailureBlock returns false for memory limit', () => {
+  const result = { status: 1, stderr: 'Error: memory limit exceeded (2GB cap)\n', stdout: '' };
+  assert.equal(shouldPersistLaunchFailureBlock('codex', result), false);
+});
+
+test('shouldPersistLaunchFailureBlock returns false for context window exceeded', () => {
+  const result = { status: 1, stderr: 'Error: context window exceeded (max 128K tokens)\n', stdout: '' };
+  assert.equal(shouldPersistLaunchFailureBlock('mistral', result), false);
+});
+
+test('shouldPersistLaunchFailureBlock returns false for token limit exceeded', () => {
+  const result = { status: 1, stderr: 'Error: token limit exceeded\n', stdout: '' };
+  assert.equal(shouldPersistLaunchFailureBlock('mistral', result), false);
+});
+
+// (j) detectLimitHit guard for status === undefined
+const { detectLimitHit } = require('../lib/agents/limit-hit');
+
+test('detectLimitHit returns null when status is undefined (legacy caller)', () => {
+  // Legacy callers that don't pass exit metadata must not trigger false-positive
+  // limit-hit blocks. When status is undefined, the detector should return null.
+  const result = detectLimitHit({
+    agent: 'codex',
+    stdout: 'you\'ve hit your weekly limit',
+    stderr: '',
+    status: undefined,
+    signal: undefined,
+    error: undefined
+  });
+  assert.equal(result, null, 'detectLimitHit must return null when status is undefined');
+});
+
+test('detectLimitHit still fires when status is 1 (explicit failure)', () => {
+  // When status is explicitly 1 (failure), limit-hit detection should still work.
+  const result = detectLimitHit({
+    agent: 'codex',
+    stdout: 'you\'ve hit your weekly limit',
+    stderr: '',
+    status: 1,
+    signal: undefined,
+    error: undefined
+  });
+  assert.ok(result !== null, 'detectLimitHit must fire when status is 1');
+  assert.equal(result.source, 'fallback');
+});

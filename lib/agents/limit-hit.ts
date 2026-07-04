@@ -200,13 +200,12 @@ function detectLimitHit({
   // are quoted text — typically when the agent itself reviewed code, tests, or
   // logs containing those strings. Treating that as a real limit hit would
   // wrongly block a healthy agent in agents.local.json.
-  // `status === undefined` means the caller did not pass exit metadata; preserve
-  // the legacy behavior so callers that haven't been updated still get detection.
+  // `status === undefined` means the caller did not pass exit metadata; return
+  // null to avoid false-positive limit-hit blocks from legacy callers.
   const launcherFailed =
     error !== null && error !== undefined ||
     signal !== null && signal !== undefined ||
-    (typeof status === 'number' && status !== 0) ||
-    typeof status === 'undefined';
+    (typeof status === 'number' && status !== 0);
   if (!launcherFailed) {return null;}
 
   const combined = `${stdout || ''}\n${stderr || ''}`;

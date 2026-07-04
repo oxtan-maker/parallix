@@ -132,8 +132,50 @@ const NON_BLOCKING_LAUNCH_ERROR_PATTERNS = Object.freeze([
   /provider endpoints are unreachable/i,
   /\breachability\b/i,
   /\bendpoint unreachable\b/i,
-  // (c) generic os-error / transient runtime failures (non-quota)
-  /\bos error \d+\b/i
+    // (c) generic os-error / transient runtime failures (non-quota)
+    /\bos error \d+\b/i,
+    // (d) timeout errors — transient waits exceeded
+    /\btimeout\b/i,
+    /\btimed\s+out\b/i,
+    /\bdeadline\s+exceeded\b/i,
+    /\brequest\s+timed\s+out\b/i,
+    // (e) sandbox / permission-denial errors that are not auth-related
+    /\bsandbox\s+violation\b/i,
+    /\bsandbox\s+denied\b/i,
+    /\btool\s+call\s+denied\b/i,
+    /\baction\s+denied\b/i,
+    /\bapproval\s+denied\b/i,
+    // (f) provider reachability / connectivity errors not already covered
+    /\bEPIPE\b/i,
+    /\bETIMEDOUT\b/i,
+    /\bENETUNREACH\b/i,
+    /\bENOTFOUND\b/i,
+    /\bEAI_AGAIN\b/i,
+    /\bsocket\s+hang\s+up\b/i,
+    /\bfetch\s+failed\b/i,
+    /\bservice\s+unavailable\b/i,
+    /\bgateway\s+timeout\b/i,
+    /\boverloaded\b/i,
+    /\btemporarily\s+unavailable\b/i,
+    /\bplease\s+try\s+again\b/i,
+    /\bretry\s+after\b/i,
+    // (g) prompt rejection errors
+    /\bprompt\s+rejected\b/i,
+    /\bprompt\s+blocked\b/i,
+    /\bcontent\s+policy\b/i,
+    /\bcontent\s+filter\b/i,
+    /\bsafety\s+filter\b/i,
+    // (h) invocation argument errors
+    /\binvalid\s+argument\b/i,
+    /\binvalid\s+option\b/i,
+    /\binvalid\s+parameter\b/i,
+    /\bmissing\s+required\b/i,
+    /\bargument\s+error\b/i,
+    // (i) resource exhaustion not rate-limit related
+    /\b(out of memory|OOM)\b/i,
+    /\bmemory\s+limit\b/i,
+    /\bcontext\s+window\s+exceeded\b/i,
+    /\btoken\s+limit\s+exceeded\b/i
 ]);
 
 function workflowLauncherStatus(agent: string): LauncherStatus {
@@ -928,7 +970,11 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
          let blockReason = 'transient crash';
          if (result?.signal) { blockReason = `signal ${result.signal}`; }
          else if (result?.error?.code) { blockReason = result.error.code; }
-         else if (result?.status !== null && result?.status !== 0) { blockReason = `exit ${result.status}`; }
+          else if (result?.status !== null && result?.status !== 0) {
+            blockReason = result?.stderr
+              ? `exit ${result.status}: ${result.stderr.trim().split('\n')[0]}`
+              : `exit ${result.status}`;
+          }
          const blockUntil = formatBlockUntil(new Date(Date.now() + DEFAULT_FALLBACK_HOURS * 60 * 60 * 1000));
          try {
            const blockResult = updateAgentBlockFn(chosen || '', blockUntil, { reason: blockReason });
