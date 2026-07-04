@@ -1,9 +1,10 @@
 ---
 id: TASK-1420
 title: switch to nvidia p2p driver for 10-20% faster local ai
-status: backlog
+status: done
 assignee: []
 created_date: '2026-07-04 09:19'
+updated_date: '2026-07-04 12:32'
 labels: []
 dependencies: []
 ---
