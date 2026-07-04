@@ -3,6 +3,7 @@ import type { SpawnSyncOptions } from 'node:child_process';
 import { loadAdapterConfig } from './product-config.js';
 import { log } from './fmt.js';
 import * as fsMod from 'node:fs';
+import { getBuildFreshnessStatus } from './build-freshness.js';
 
 interface GitOptions {
   encoding?: BufferEncoding;
@@ -129,6 +130,14 @@ export function captureVerifiedTreeProof(area: string | undefined, rootDir: stri
     stdio = 'inherit'
   } = options;
 
+  const freshness = getBuildFreshnessStatus(rootDir);
+  if (!freshness.ok) {
+    return {
+      ok: false,
+      error: freshness.message || 'build freshness check failed'
+    };
+  }
+
   const before = readPublishedTreeState(rootDir, { gitRunner });
   if (!before.ok) {return before;}
 
@@ -177,6 +186,13 @@ export function assertVerifiedTreeProof(proof: { rootDir?: string; commit?: stri
 
   const o = opts;
   const gitRunner = o.gitRunner || git;
+  const freshness = getBuildFreshnessStatus(rootDir);
+  if (!freshness.ok) {
+    return {
+      ok: false,
+      error: freshness.message || 'build freshness check failed'
+    };
+  }
   const current = readPublishedTreeState(rootDir, { gitRunner });
   if (!current.ok) {return current;}
 

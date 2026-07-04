@@ -49,7 +49,9 @@
   "scripts": {
     "build": "tsc",
     "build:cjs": "tsc --rootDir . --outDir . --module CommonJS --moduleResolution Node --esModuleInterop && { head -1 px.js | grep -q '^#!' || sed -i '1i#!/usr/bin/env node' px.js; } && chmod +x px.js",
-    "prepublishOnly": "npm run build:cjs",
+    "publish:guard": "node -e \"require('./lib/core/build-freshness.js').assertBuildFreshness(process.cwd())\"",
+    "prepack": "npm run publish:guard",
+    "prepublishOnly": "npm run publish:guard",
     "pretest": "npm run build:cjs",
     "test": "FORCE_COLOR=0 node --require ./test/bootstrap-parallix-home.js --test test/*.test.js",
     "test:coverage": "FORCE_COLOR=0 node lib/commands/coverage-gate.js --lcov",

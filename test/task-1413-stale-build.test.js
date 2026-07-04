@@ -43,8 +43,20 @@ function spawnCli(...args) {
   });
 }
 
+function ensureStatsCsv() {
+  const statsPath = path.join(process.env.PARALLIX_HOME, 'stats.csv');
+  if (!fs.existsSync(statsPath)) {
+    fs.writeFileSync(
+      statsPath,
+      'date,repo,mission,classification,implementer,stage\n',
+      'utf8'
+    );
+  }
+}
+
 test('stale generated JS triggers preflight rejection with npm run build:cjs instruction', () => {
   buildProject();
+  ensureStatsCsv();
 
   const statsTs = path.resolve(__dirname, '..', 'lib', 'commands', 'stats.ts');
   const statsJs = path.resolve(__dirname, '..', 'lib', 'commands', 'stats.js');
@@ -85,6 +97,7 @@ test('stale generated JS triggers preflight rejection with npm run build:cjs ins
 
 test('fresh generated JS allows normal command dispatch', () => {
   buildProject();
+  ensureStatsCsv();
 
   const statsTs = path.resolve(__dirname, '..', 'lib', 'commands', 'stats.ts');
   const statsJs = path.resolve(__dirname, '..', 'lib', 'commands', 'stats.js');

@@ -180,3 +180,40 @@ test('captureVerifiedTreeProof uses the git-style runner by default', () => {
     assert.ok(proofResult.proof.tree.length > 0);
   });
 });
+
+test('captureVerifiedTreeProof fails when guarded compiled output is stale', () => {
+  withTempDir(root => {
+    initCommittedGitRepo(root);
+
+    const commandsDir = path.join(root, 'lib', 'commands');
+    fs.mkdirSync(commandsDir, { recursive: true });
+    const tsPath = path.join(commandsDir, 'stats.ts');
+    const jsPath = path.join(commandsDir, 'stats.js');
+    fs.writeFileSync(tsPath, 'export default function stats() { return 1; }\n', 'utf8');
+    fs.writeFileSync(jsPath, '"use strict";\nmodule.exports = function stats() { return 1; };\n', 'utf8');
+
+    const oldJsTime = new Date('2000-01-01T00:00:00.000Z');
+    const newTsTime = new Date('2030-01-01T00:00:00.000Z');
+    fs.utimesSync(jsPath, oldJsTime, oldJsTime);
+    fs.utimesSync(tsPath, newTsTime, newTsTime);
+
+    const runGit = (args) => {
+      const result = childProcess.spawnSync('git', ['-C', root, ...args], { encoding: 'utf8' });
+      assert.equal(result.status, 0, result.stderr || result.stdout || `git ${args.join(' ')} failed`);
+      return result;
+    };
+    runGit(['add', 'lib/commands/stats.ts', 'lib/commands/stats.js']);
+    runGit(['commit', '-m', 'add stale fixture']);
+
+    const proofResult = captureVerifiedTreeProof('docs', root, {
+      runFn() {
+        return { status: 0 };
+      },
+      stdio: 'pipe',
+    });
+
+    assert.equal(proofResult.ok, false);
+    assert.match(proofResult.error, /Stale build detected/);
+    assert.match(proofResult.error, /npm run build:cjs/);
+  });
+});

@@ -325,6 +325,7 @@ the unscoped `px` / `parallix` npm names are not relied upon. The shortest
 supported path is:
 
 ```sh
+npm run build:cjs
 npm pack
 ```
 
@@ -338,6 +339,13 @@ npm install -g --prefix "$HOME/.local" ./magnus-parallix-*.tgz
 
 Use the user-writable prefix when you do not have `sudo` access. If your shell
 does not already place `$HOME/.local/bin` on `PATH`, add it once.
+
+`npm pack` and `npm publish` now fail closed if any guarded runtime `.js` file
+is missing or older than its tracked `.ts` source (`px`, `index`, and every
+`lib/commands/*.ts` sibling pair). The release sequence is therefore: rebuild
+with `npm run build:cjs`, then run `npm pack` / `npm publish`. `px integrate`
+reuses the same freshness check when it captures the verification proof for the
+tree being published, so integration cannot bless a stale compiled runtime.
 
 `CHANGELOG.md` is the versioning authority. Until the first public release,
 PATCH bumps are the release discipline: bump before each `px integrate`, then

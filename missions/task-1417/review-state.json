@@ -1,0 +1,15 @@
+{
+  "reviewer": "custom",
+  "implementer": "mistral",
+  "round": 1,
+  "startedAt": "2026-07-04T14:15:04.213Z",
+  "phase": "approved",
+  "disposition": "APPROVED",
+  "metadata": {
+    "recordedStageLaunches": {
+      "review:custom": [
+        "custom|ses_0d27d052cffekoNOUcpaVs7M5d|2026-07-04T14:23:05.611Z|2026-07-04T14:34:32.256Z|0"
+      ]
+    }
+  }
+}

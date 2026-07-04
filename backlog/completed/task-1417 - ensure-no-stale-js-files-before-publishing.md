@@ -1,10 +1,10 @@
 ---
 id: TASK-1417
 title: ensure no stale js files before publishing
-status: backlog
-assignee: []
+status: done
+assignee: [mistral]
 created_date: '2026-07-04 08:53'
-labels: []
+labels: [user_value, bug]
 dependencies: []
 ---
 
@@ -60,6 +60,11 @@ Node.js v24.15.0
 
 so the publish after integration step does not work at the moment. Fix so we don't publish stale js files or if possible ensure that the published version only contain ts files (if that is runnable)
 <!-- SECTION:DESCRIPTION:END -->
+
+## Mission Notes
+
+- Retain the compiled-JS distribution; do not switch to a TS-only runtime path.
+- Guard both `npm pack` / `npm publish` and integrate-time verification with the same build-freshness check so stale `px`, `index`, or `lib/commands/*.js` artifacts fail closed instead of being silently repaired during publish.
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
