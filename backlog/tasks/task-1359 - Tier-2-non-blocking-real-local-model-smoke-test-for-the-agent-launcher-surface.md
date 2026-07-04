@@ -6,7 +6,7 @@ title: >-
 status: backlog
 assignee: []
 created_date: '2026-06-26 18:06'
-updated_date: '2026-07-02 04:53'
+updated_date: '2026-07-03 13:39'
 labels:
   - quality
   - testing
@@ -18,18 +18,18 @@ priority: low
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Bug-reduction initiative #6, Tier 2 (the smaller, optional half — do only if launcher-integration bugs keep recurring). A smoke test that runs a mission with a REAL cheap local-AI agent and asserts only that the launcher actually invokes the agent and a valid mission completes — NOT the agent's diff content.
+Create one e2e test using custom agent (local AI that is free) so that we get test coverage on stuff that is not covered in the 'e2e' tests that have simple mocked agent (prompts are actionable for example)
 
 Rationale: the real model adds realism only to the launcher/telemetry/limit-detection surface, which is exactly where TASK-1351 (opencode -m flag rejects valid model) and TASK-1273 (qwen draft bug) lived. Tier 1 (stubbed e2e) cannot catch those because it bypasses the real agent invocation.
-
-Hard constraint — keep it OUT of any blocking gate. Real models are non-deterministic and the local families have failed independently of parallix (TASK-1115 qwen tool_call, TASK-1273), so a model failure must never gate a merge. Run nightly or on-demand; report, don't block.
 
 Scope assertions to integration only:
 - the configured local-AI family is launched with valid args (would have caught TASK-1351)
 - the agent produces a parseable mission/checkpoint (would have caught TASK-1273)
 - telemetry/limit-detection records something sane
-
-Pin to a single cheap local family; tolerate model flakiness with retries + clear "model failure, not parallix failure" classification so a red smoke run is diagnosable.
+- force custom as reviewer on its own pr as well
+- make the test mission as simple as possible
+- steer away telemetry (config) to another location so that test do not corrupt the real telemetry
+- test the telemetry output
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
