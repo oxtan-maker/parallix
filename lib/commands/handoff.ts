@@ -425,6 +425,132 @@ async function performHandoff(slug, options = {}) {
 }
 
 /**
+ * Validate declared gate commands for file existence and basic syntax before execution.
+ * Checks that file paths in commands exist relative to rootDir, and detects obvious syntax errors.
+ * Returns { ok, reason, error?, gate? } - ok is false when validation fails with reason 'validation-failed'.
+ * @param {string[]} commands - Array of gate command strings
+ * @param {string} rootDir - Root directory for file existence checks
+ * @returns {{ ok: boolean, reason: string, error?: string, gate?: string }}
+ */
+function validateDeclaredGates(commands, rootDir) {
+  for (const cmd of commands) {
+    // Check for unclosed quotes — respect quote context so apostrophes
+    // inside double-quoted strings (and vice-versa) are not flagged.
+    // Only flag genuinely unmatched quotes (e.g. echo 'unclosed).
+    let inSingleQuote = false;
+    let inDoubleQuote = false;
+    for (let ci = 0; ci < cmd.length; ci++) {
+      const ch = cmd[ci];
+      if (ch === '\\' && inDoubleQuote) {
+        ci++; // skip escaped character inside double quotes
+        continue;
+      }
+      if (ch === '\'' && !inDoubleQuote) {
+        inSingleQuote = !inSingleQuote;
+        continue;
+      }
+      if (ch === '"' && !inSingleQuote) {
+        inDoubleQuote = !inDoubleQuote;
+        continue;
+      }
+    }
+    if (inSingleQuote || inDoubleQuote) {
+      const quoteType = inSingleQuote ? 'single' : 'double';
+      return {
+        ok: false,
+        reason: 'validation-failed',
+        error: `Gate command has unclosed ${quoteType} quotes: "${cmd}"`,
+        gate: cmd
+      };
+    }
+
+    // Check for unmatched parentheses
+    const openParens = (cmd.match(/\(/g) || []).length;
+    const closeParens = (cmd.match(/\)/g) || []).length;
+    if (openParens !== closeParens) {
+      return {
+        ok: false,
+        reason: 'validation-failed',
+        error: `Gate command has unmatched parentheses: "${cmd}"`,
+        gate: cmd
+      };
+    }
+
+    // Check for unmatched braces
+    const openBraces = (cmd.match(/\{/g) || []).length;
+    const closeBraces = (cmd.match(/\}/g) || []).length;
+    if (openBraces !== closeBraces) {
+      return {
+        ok: false,
+        reason: 'validation-failed',
+        error: `Gate command has unmatched braces: "${cmd}"`,
+        gate: cmd
+      };
+    }
+
+    // Check for unmatched brackets
+    const openBrackets = (cmd.match(/\[/g) || []).length;
+    const closeBrackets = (cmd.match(/\]/g) || []).length;
+    if (openBrackets !== closeBrackets) {
+      return {
+        ok: false,
+        reason: 'validation-failed',
+        error: `Gate command has unmatched brackets: "${cmd}"`,
+        gate: cmd
+      };
+    }
+
+    // Extract file paths from the command and check their existence.
+    // Split on whitespace first, then classify whole tokens — this avoids
+    // the regex matching mid-token (e.g. turning "lib/agents/" into "/agents/").
+    // Only check tokens that clearly look like file paths:
+    //   - start with ./ or ../  (relative paths)
+    //   - start with /           (absolute paths)
+    //   - contain /              (paths with intermediate segments)
+    // This avoids false positives on bare words, flags, URLs, and glob patterns.
+    const tokens = cmd.split(/\s+/);
+    for (const token of tokens) {
+      // Skip if it looks like a URL
+      if (/^https?:\/\//i.test(token) || token.includes('://')) {
+        continue;
+      }
+      // Skip flags
+      if (token.startsWith('-')) {
+        continue;
+      }
+      // Strip leading/trailing quote characters (', ", `) before checking
+      // so that 'lib/agents/' becomes lib/agents/ and `path` becomes path
+      let cleaned = token.replace(/^['"`]|['"`]$/g, '');
+      // Skip glob patterns (contain *, ?, [, ]) — not literal file paths
+      if (/[?*[\]]/.test(cleaned)) {
+        continue;
+      }
+      // Check if token looks like a file path
+      const looksLikePath =
+        cleaned.startsWith('./') ||
+        cleaned.startsWith('../') ||
+        cleaned.startsWith('/') ||
+        cleaned.includes('/');
+      if (!looksLikePath) {
+        continue;
+      }
+      // Resolve the path relative to rootDir and check existence
+      const absolutePath = path.resolve(rootDir, cleaned);
+      if (!fs.existsSync(absolutePath)) {
+        return {
+          ok: false,
+          reason: 'validation-failed',
+          error: `Gate command references non-existent file: "${token}" in command "${cmd}"`,
+          gate: cmd
+        };
+      }
+    }
+  }
+
+  return { ok: true, reason: 'all-gates-valid' };
+}
+
+/**
  * Parse and execute declared gates from a mission's MISSION.md `## Gates` section.
  * Each gate line is treated as a shell command to be executed via spawnSync.
  * Returns { ok, skipped, count, reason } on success or { ok: false, gate, error, reason } on failure.
@@ -456,13 +582,19 @@ function runDeclaredGates(missionDir, rootDir, options = {}) {
     let cmd = line.replace(/^- \[[ x]\]\s*/, '').replace(/^- \s*/, '');
     // Strip trailing description after em-dash or en-dash (e.g., "cmd — description")
     cmd = cmd.replace(/\s+(—|-–)\s.*$/, '').trim();
-    // Strip surrounding backticks
+    // Strip surrounding backticks (e.g., "`npm run typecheck` — zero errors")
     cmd = cmd.replace(/^`(.+)`$/, '$1').trim();
     return cmd;
   }).filter(cmd => cmd.length > 0);
 
   if (commands.length === 0) {
     return { ok: true, skipped: true, reason: 'no-gates-declared' };
+  }
+
+  // Pre-validate all gate commands before execution
+  const validationResult = validateDeclaredGates(commands, rootDir);
+  if (!validationResult.ok) {
+    return validationResult;
   }
 
   // Execute each gate command
@@ -698,12 +830,12 @@ const _exports = {
   /** @returns {...} */
   get performHandoff() { return _handoffExport.performHandoff; }
 };
-/** @type {{verifyHandoff: typeof verifyHandoff, performHandoff: typeof performHandoff, gatekeeper: typeof gatekeeper, runDeclaredGates: typeof runDeclaredGates, captureNelAtHandoff: typeof captureNelAtHandoff}} */
-const _namedExports = { verifyHandoff, performHandoff, gatekeeper, runDeclaredGates, captureNelAtHandoff };
-/** @type {typeof handoffCommand & {verifyHandoff: typeof verifyHandoff, performHandoff: typeof performHandoff, gatekeeper: typeof gatekeeper, runDeclaredGates: typeof runDeclaredGates, captureNelAtHandoff: typeof captureNelAtHandoff}} */
+/** @type {{verifyHandoff: typeof verifyHandoff, performHandoff: typeof performHandoff, gatekeeper: typeof gatekeeper, runDeclaredGates: typeof runDeclaredGates, captureNelAtHandoff: typeof captureNelAtHandoff, validateDeclaredGates: typeof validateDeclaredGates}} */
+const _namedExports = { verifyHandoff, performHandoff, gatekeeper, runDeclaredGates, captureNelAtHandoff, validateDeclaredGates };
+/** @type {typeof handoffCommand & {verifyHandoff: typeof verifyHandoff, performHandoff: typeof performHandoff, gatekeeper: typeof gatekeeper, runDeclaredGates: typeof runDeclaredGates, captureNelAtHandoff: typeof captureNelAtHandoff, validateDeclaredGates: typeof validateDeclaredGates}} */
 const _handoffExport = Object.assign(handoffCommand, _namedExports);
 export default _handoffExport;
-export { _handoffExport as handoff, verifyHandoff, performHandoff, gatekeeper, runDeclaredGates, captureNelAtHandoff };
+export { _handoffExport as handoff, verifyHandoff, performHandoff, gatekeeper, runDeclaredGates, captureNelAtHandoff, validateDeclaredGates };
 
 // CJS compat: ensure require() returns the function directly
 declare const module: { exports: any } | undefined;

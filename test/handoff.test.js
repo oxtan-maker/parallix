@@ -1121,3 +1121,319 @@ test('runDeclaredGates captures stdout and stderr on gate failure (SC2)', async 
     fs.rmSync(missionDir, { recursive: true, force: true });
   }
 });
+
+// ---------- validateDeclaredGates (pre-validation of gate commands) ----------
+
+const { validateDeclaredGates } = require('../lib/commands/handoff');
+
+test('validateDeclaredGates passes for valid commands with existing files', () => {
+  const rootDir = path.join(__dirname, '..');
+  const result = validateDeclaredGates(
+    ['./scripts/verify-local.sh docs', './scripts/verify-local.sh static-analysis'],
+    rootDir
+  );
+  assert.strictEqual(result.ok, true);
+  assert.strictEqual(result.reason, 'all-gates-valid');
+});
+
+test('validateDeclaredGates fails for non-existent file with validation-failed reason', () => {
+  const rootDir = path.join(__dirname, '..');
+  const result = validateDeclaredGates(['./scripts/nonexistent.sh'], rootDir);
+  assert.strictEqual(result.ok, false);
+  assert.strictEqual(result.reason, 'validation-failed');
+  assert.strictEqual(result.gate, './scripts/nonexistent.sh');
+  assert.ok(result.error.includes('non-existent file') || result.error.includes('nonexistent.sh'));
+});
+
+test('validateDeclaredGates fails for unclosed single quotes with validation-failed reason', () => {
+  const rootDir = path.join(__dirname, '..');
+  const result = validateDeclaredGates(['echo \'hello'], rootDir);
+  assert.strictEqual(result.ok, false);
+  assert.strictEqual(result.reason, 'validation-failed');
+  assert.strictEqual(result.gate, 'echo \'hello');
+  assert.ok(result.error.includes('unclosed single quotes'));
+});
+
+test('validateDeclaredGates fails for unclosed double quotes with validation-failed reason', () => {
+  const rootDir = path.join(__dirname, '..');
+  const result = validateDeclaredGates(['echo "hello'], rootDir);
+  assert.strictEqual(result.ok, false);
+  assert.strictEqual(result.reason, 'validation-failed');
+  assert.strictEqual(result.gate, 'echo "hello');
+  assert.ok(result.error.includes('unclosed double quotes'));
+});
+
+test('validateDeclaredGates fails for unmatched parentheses with validation-failed reason', () => {
+  const rootDir = path.join(__dirname, '..');
+  const result = validateDeclaredGates(['echo (hello'], rootDir);
+  assert.strictEqual(result.ok, false);
+  assert.strictEqual(result.reason, 'validation-failed');
+  assert.strictEqual(result.gate, 'echo (hello');
+  assert.ok(result.error.includes('unmatched parentheses'));
+});
+
+test('validateDeclaredGates fails for unmatched braces with validation-failed reason', () => {
+  const rootDir = path.join(__dirname, '..');
+  const result = validateDeclaredGates(['echo {hello'], rootDir);
+  assert.strictEqual(result.ok, false);
+  assert.strictEqual(result.reason, 'validation-failed');
+  assert.ok(result.error.includes('unmatched braces'));
+});
+
+test('validateDeclaredGates fails for unmatched brackets with validation-failed reason', () => {
+  const rootDir = path.join(__dirname, '..');
+  const result = validateDeclaredGates(['echo [hello'], rootDir);
+  assert.strictEqual(result.ok, false);
+  assert.strictEqual(result.reason, 'validation-failed');
+  assert.ok(result.error.includes('unmatched brackets'));
+});
+
+test('validateDeclaredGates fails on first invalid command in mixed valid/invalid set', () => {
+  const rootDir = path.join(__dirname, '..');
+  const result = validateDeclaredGates(
+    ['./scripts/verify-local.sh docs', './scripts/nonexistent.sh'],
+    rootDir
+  );
+  assert.strictEqual(result.ok, false);
+  assert.strictEqual(result.reason, 'validation-failed');
+  assert.strictEqual(result.gate, './scripts/nonexistent.sh');
+});
+
+test('validateDeclaredGates passes for shell builtins without file paths', () => {
+  const rootDir = path.join(__dirname, '..');
+  const result = validateDeclaredGates(['echo hello', 'true', 'false'], rootDir);
+  assert.strictEqual(result.ok, true);
+  assert.strictEqual(result.reason, 'all-gates-valid');
+});
+
+test('validateDeclaredGates skips URL patterns', () => {
+  const rootDir = path.join(__dirname, '..');
+  const result = validateDeclaredGates(['curl https://example.com'], rootDir);
+  assert.strictEqual(result.ok, true);
+  assert.strictEqual(result.reason, 'all-gates-valid');
+});
+
+test('validateDeclaredGates passes for commands with flags', () => {
+  const rootDir = path.join(__dirname, '..');
+  const result = validateDeclaredGates(['node --version', 'npm run test'], rootDir);
+  assert.strictEqual(result.ok, true);
+  assert.strictEqual(result.reason, 'all-gates-valid');
+});
+
+// ---------- runDeclaredGates integration with validation ----------
+
+test('runDeclaredGates fails with validation-failed before executing invalid file reference', () => {
+  const missionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gates-validation-test-'));
+  fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Mission\n\n## Gates\n\n- [ ] ./scripts/nonexistent.sh\n');
+  try {
+    const result = runDeclaredGates(missionDir, missionDir, { log: () => {}, error: () => {} });
+    assert.strictEqual(result.ok, false);
+    assert.strictEqual(result.reason, 'validation-failed');
+    assert.strictEqual(result.gate, './scripts/nonexistent.sh');
+  } finally {
+    fs.rmSync(missionDir, { recursive: true, force: true });
+  }
+});
+
+test('runDeclaredGates fails with validation-failed before executing syntax error', () => {
+  const missionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gates-validation-test-'));
+  fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Mission\n\n## Gates\n\n- [ ] echo \'unclosed\n');
+  try {
+    const result = runDeclaredGates(missionDir, missionDir, { log: () => {}, error: () => {} });
+    assert.strictEqual(result.ok, false);
+    assert.strictEqual(result.reason, 'validation-failed');
+  } finally {
+    fs.rmSync(missionDir, { recursive: true, force: true });
+  }
+});
+
+// ---------- Regression tests for realistic gate-command text (Finding 1 fix) ----------
+
+test('validateDeclaredGates passes glob patterns (no false positive on /*)', () => {
+  const rootDir = path.join(__dirname, '..');
+  const result = validateDeclaredGates(
+    ['All 108+ tests in `test/*.test.js` pass via `npm test`'],
+    rootDir
+  );
+  assert.strictEqual(result.ok, true);
+  assert.strictEqual(result.reason, 'all-gates-valid');
+});
+
+test('validateDeclaredGates passes directory references with trailing slash', () => {
+  const rootDir = path.join(__dirname, '..');
+  const result = validateDeclaredGates(
+    ["npm run prepublishOnly && npm pack --dry-run 2>&1 | grep -q 'lib/agents/'"],
+    rootDir
+  );
+  assert.strictEqual(result.ok, true);
+  assert.strictEqual(result.reason, 'all-gates-valid');
+});
+
+test('validateDeclaredGates passes apostrophe inside double-quoted string', () => {
+  const rootDir = path.join(__dirname, '..');
+  const result = validateDeclaredGates(
+    [`echo "it's a test"`],
+    rootDir
+  );
+  assert.strictEqual(result.ok, true);
+  assert.strictEqual(result.reason, 'all-gates-valid');
+});
+
+test('validateDeclaredGates passes double apostrophe inside double-quoted string', () => {
+  const rootDir = path.join(__dirname, '..');
+  const result = validateDeclaredGates(
+    [`echo "it's Bob's test"`],
+    rootDir
+  );
+  assert.strictEqual(result.ok, true);
+  assert.strictEqual(result.reason, 'all-gates-valid');
+});
+
+test('validateDeclaredGates passes mixed prose with embedded path', () => {
+  const rootDir = path.join(__dirname, '..');
+  const result = validateDeclaredGates(
+    ['./scripts/verify-local.sh static-analysis && echo "All checks passed"'],
+    rootDir
+  );
+  assert.strictEqual(result.ok, true);
+  assert.strictEqual(result.reason, 'all-gates-valid');
+});
+
+test('validateDeclaredGates passes command with valid ./ path and quoted arg', () => {
+  const rootDir = path.join(__dirname, '..');
+  const result = validateDeclaredGates(
+    ['./scripts/verify-local.sh docs --verbose'],
+    rootDir
+  );
+  assert.strictEqual(result.ok, true);
+  assert.strictEqual(result.reason, 'all-gates-valid');
+});
+
+test('validateDeclaredGates still catches genuinely unclosed single quote', () => {
+  const rootDir = path.join(__dirname, '..');
+  const result = validateDeclaredGates(["echo 'unclosed"], rootDir);
+  assert.strictEqual(result.ok, false);
+  assert.strictEqual(result.reason, 'validation-failed');
+  assert.ok(result.error.includes('unclosed single'));
+});
+
+test('validateDeclaredGates still catches genuinely unclosed double quote', () => {
+  const rootDir = path.join(__dirname, '..');
+  const result = validateDeclaredGates(['echo "unclosed'], rootDir);
+  assert.strictEqual(result.ok, false);
+  assert.strictEqual(result.reason, 'validation-failed');
+  assert.ok(result.error.includes('unclosed double'));
+});
+
+test('validateDeclaredGates passes escaped quote inside double-quoted string', () => {
+  const rootDir = path.join(__dirname, '..');
+  const result = validateDeclaredGates(['echo "say \\"hi\\" to me"'], rootDir);
+  assert.strictEqual(result.ok, true);
+  assert.strictEqual(result.reason, 'all-gates-valid');
+});
+
+test('validateDeclaredGates fails for non-existent file still works with tokenized paths', () => {
+  const rootDir = path.join(__dirname, '..');
+  const result = validateDeclaredGates(['node ./lib/commands/nonexistent.js'], rootDir);
+  assert.strictEqual(result.ok, false);
+  assert.strictEqual(result.reason, 'validation-failed');
+  assert.ok(result.error.includes('non-existent file'));
+  assert.ok(result.error.includes('nonexistent.js'));
+});
+
+test('validateDeclaredGates passes command with absolute path that exists', () => {
+  const rootDir = path.join(__dirname, '..');
+  const result = validateDeclaredGates(['cat /etc/hostname'], rootDir);
+  assert.strictEqual(result.ok, true);
+  assert.strictEqual(result.reason, 'all-gates-valid');
+});
+
+test('validateDeclaredGates fails for non-existent absolute path', () => {
+  const rootDir = path.join(__dirname, '..');
+  const result = validateDeclaredGates(['cat /nonexistent/path/file.txt'], rootDir);
+  assert.strictEqual(result.ok, false);
+  assert.strictEqual(result.reason, 'validation-failed');
+  assert.ok(result.error.includes('non-existent file'));
+});
+
+// ---------- Regression test for backtick/em-dash gate-line parsing (round-4 finding) ----------
+
+test('runDeclaredGates strips backticks and em-dash description from gate commands', () => {
+  const missionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gates-backtick-test-'));
+  fs.writeFileSync(path.join(missionDir, 'MISSION.md'), [
+    '# Mission',
+    '',
+    '## Gates',
+    '',
+    '- [ ] `npm run typecheck` — zero errors',
+    ''
+  ].join('\n'));
+  try {
+    const result = runDeclaredGates(missionDir, missionDir, { log: () => {}, error: () => {} });
+    // The gate should parse to "npm run typecheck" and execute (exit non-zero is fine,
+    // but it should NOT fail with a shell parsing error from backticks or em-dash)
+    assert.strictEqual(result.ok, false);
+    assert.strictEqual(result.reason, 'gate-failed');
+    // The error should NOT contain bash parsing errors about non-ascii dashes
+    assert.ok(!result.error.includes('rad 1') && !result.error.includes('non-ascii dash'));
+  } finally {
+    fs.rmSync(missionDir, { recursive: true, force: true });
+  }
+});
+
+test('runDeclaredGates strips em-dash without backticks', () => {
+  const missionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gates-emdash-test-'));
+  fs.writeFileSync(path.join(missionDir, 'MISSION.md'), [
+    '# Mission',
+    '',
+    '## Gates',
+    '',
+    '- [ ] true — some description',
+    ''
+  ].join('\n'));
+  try {
+    const result = runDeclaredGates(missionDir, missionDir, { log: () => {}, error: () => {} });
+    assert.strictEqual(result.ok, true);
+    assert.strictEqual(result.reason, 'all-gates-passed');
+  } finally {
+    fs.rmSync(missionDir, { recursive: true, force: true });
+  }
+});
+
+test('runDeclaredGates strips en-dash without backticks', () => {
+  const missionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gates-endash-test-'));
+  fs.writeFileSync(path.join(missionDir, 'MISSION.md'), [
+    '# Mission',
+    '',
+    '## Gates',
+    '',
+    '- [ ] echo hello -– brief note',
+    ''
+  ].join('\n'));
+  try {
+    const result = runDeclaredGates(missionDir, missionDir, { log: () => {}, error: () => {} });
+    assert.strictEqual(result.ok, true);
+    assert.strictEqual(result.reason, 'all-gates-passed');
+  } finally {
+    fs.rmSync(missionDir, { recursive: true, force: true });
+  }
+});
+
+test('runDeclaredGates with backtick and em-dash passes validation then executes', () => {
+  const missionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gates-backtick-val-test-'));
+  fs.writeFileSync(path.join(missionDir, 'MISSION.md'), [
+    '# Mission',
+    '',
+    '## Gates',
+    '',
+    '- [ ] `true` — all good',
+    ''
+  ].join('\n'));
+  try {
+    const result = runDeclaredGates(missionDir, missionDir, { log: () => {}, error: () => {} });
+    assert.strictEqual(result.ok, true);
+    assert.strictEqual(result.reason, 'all-gates-passed');
+  } finally {
+    fs.rmSync(missionDir, { recursive: true, force: true });
+  }
+});

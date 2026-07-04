@@ -1,13 +1,14 @@
 ---
 id: TASK-1386
 title: Validate declared mission gates are executable commands before handoff
-status: backlog
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-06-28 11:30'
 updated_date: '2026-07-02 04:51'
 labels:
   - harness
   - workflow
+  - ai_sdlc
 dependencies: []
 references:
   - docs/adr/0048-fail-closed-harness-defense-against-agent-hallucinations.md
