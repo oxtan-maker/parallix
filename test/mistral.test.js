@@ -85,6 +85,15 @@ test('buildMistralInvocation includes --output text flag', () => {
   assert.ok(inv.args.includes('text'));
 });
 
+test('buildMistralInvocation includes explicit workdir and temp-dir access', () => {
+  const { buildMistralInvocation } = require('../lib/agents/mistral');
+  const inv = buildMistralInvocation({ prompt: 'test', worktree: '/tmp/worktree' });
+  assert.ok(inv.args.includes('--workdir'));
+  assert.ok(inv.args.includes('/tmp/worktree'));
+  assert.ok(inv.args.includes('--add-dir'));
+  assert.ok(inv.args.includes('/tmp'));
+});
+
 test('buildMistralInvocation does not include resume flags', () => {
   const { buildMistralInvocation } = require('../lib/agents/mistral');
   const inv = buildMistralInvocation({ prompt: 'test', worktree: '/tmp', resume: true, sessionId: 'abc123' });
@@ -106,6 +115,7 @@ test('buildMistralInvocation merges env', () => {
   const inv = buildMistralInvocation({ prompt: 'test', worktree: '/tmp', env: { CUSTOM: 'value' } });
   assert.equal(inv.command, 'vibe');
   assert.equal(inv.options.env.CUSTOM, 'value');
+  assert.equal(inv.options.env.VIBE_HOME, '/tmp/.workflow/vibe-home');
   assert.equal(inv.options.env.PATH, process.env.PATH);
 });
 
@@ -121,6 +131,33 @@ test('startMistralAgent returns invocation and resultPromise with bare name', as
   assert.equal((await result.resultPromise).status, 0);
   // Verify the resolved command is bare "vibe"
   assert.equal(result.invocation.command, 'vibe');
+});
+
+test('ensureVibeHome copies config and rewrites session logging to the worktree', () => {
+  const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'mistral-home-'));
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'mistral-wt-'));
+  const previousHome = process.env.HOME;
+  try {
+    process.env.HOME = fakeHome;
+    fs.mkdirSync(path.join(fakeHome, '.vibe'), { recursive: true });
+    fs.writeFileSync(path.join(fakeHome, '.vibe', 'config.toml'), [
+      'active_model = "mistral-medium-3.5"',
+      '',
+      '[session_logging]',
+      'save_dir = "/home/example/.vibe/logs/session"',
+      'enabled = true',
+      ''
+    ].join('\n'));
+
+    const { ensureVibeHome, vibeConfigPath, vibeSessionLogDir } = require('../lib/agents/mistral');
+    ensureVibeHome(worktree);
+    const written = fs.readFileSync(vibeConfigPath(worktree), 'utf8');
+    assert.match(written, new RegExp(vibeSessionLogDir(worktree).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  } finally {
+    process.env.HOME = previousHome;
+    fs.rmSync(fakeHome, { recursive: true, force: true });
+    fs.rmSync(worktree, { recursive: true, force: true });
+  }
 });
 
 // ---------- module exports ----------

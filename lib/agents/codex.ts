@@ -104,6 +104,8 @@ function startCodexDraftAgent({ prompt, worktree, env = {}, resume = false, sess
   // `exec` path here regardless of whether the parent has a TTY.
   ensureCodexHome(worktree);
 
+  const invocationStartMs = Date.now();
+
   function isStaleSessionResult(result: any) {
     if (!result) {return false;}
     const stderr = result.stderr || '';
@@ -119,7 +121,7 @@ function startCodexDraftAgent({ prompt, worktree, env = {}, resume = false, sess
       // Real usage telemetry comes from the codex rollout JSONL written under the
       // worktree-scoped codex-home, not the stdout stream (see codex-telemetry.js).
       try {
-        const telemetry = extractCodexTelemetry(codexHomeRoot(worktree), { sinceMs: Date.now() });
+        const telemetry = extractCodexTelemetry(codexHomeRoot(worktree), { sinceMs: invocationStartMs });
         if (telemetry) {
           result.telemetry = telemetry;
           if (telemetry.model) {result.model = telemetry.model;}
@@ -222,6 +224,18 @@ function ensureCodexHome(worktree: string) {
   }
 }
 
+// Codex sometimes exits 1 after a turn that actually completed (e.g. a
+// cleanup-path crash once the model has already responded). The rollout
+// JSONL under codexHomeRoot is written directly by the Codex CLI as it
+// processes the turn, so a non-zero-usage token_count event there is
+// trustworthy evidence the run produced real work, independent of the
+// final exit code. Mirrors isSpuriousOpencodeExit() in opencode.ts.
+function isSpuriousCodexExit(result: any) {
+  if (!result || result.status !== 1 || result.signal || result.error) {return false;}
+  const t = result.telemetry;
+  return Boolean(t && ((t.totalTokens || 0) > 0 || (t.inputTokens || 0) > 0 || (t.outputTokens || 0) > 0));
+}
+
 export {
   codexAuthPath,
   buildCodexDraftInvocation,
@@ -231,6 +245,7 @@ export {
   extractCodexSessionId,
   extractCodexTelemetry,
   headlessCodexConfig,
+  isSpuriousCodexExit,
   resolveCodexCommand,
   startCodexDraftAgent,
   __setSpawnAndTeeForTest,

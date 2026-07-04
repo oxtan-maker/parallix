@@ -1,10 +1,12 @@
 ---
 id: TASK-1416
 title: codex and mistral blocked on exit 1
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-07-04 06:15'
-labels: []
+labels:
+  - bug
+  - ai_sdlc
 dependencies: []
 ---
 
