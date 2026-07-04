@@ -62,6 +62,25 @@ test('global tarball reinstall preserves PARALLIX_HOME stats and agent blocklist
 
     // Package name is scoped (@magnusekdahl/parallix), so npm installs under the scope dir.
     const installedRoot = path.join(prefix, 'lib', 'node_modules', '@magnusekdahl', 'parallix');
+    // Touch all .js files so the preflight check passes (packed tarball has stale mtimes
+    // and tsc is unavailable since devDependencies are not installed globally).
+    const commandsDir = path.join(installedRoot, 'lib', 'commands');
+    if (fs.existsSync(commandsDir)) {
+      for (const entry of fs.readdirSync(commandsDir)) {
+        if (!entry.endsWith('.ts')) { continue; }
+        const jsPath = path.join(commandsDir, entry.replace(/\.ts$/, '.js'));
+        if (fs.existsSync(jsPath)) {
+          fs.utimesSync(jsPath, new Date(), new Date());
+        }
+      }
+    }
+    for (const entry of ['px.ts', 'index.ts']) {
+      const jsPath = path.join(installedRoot, entry.replace(/\.ts$/, '.js'));
+      if (fs.existsSync(jsPath)) {
+        fs.utimesSync(jsPath, new Date(), new Date());
+      }
+    }
+
     const env = { ...process.env, PARALLIX_HOME: parallixHome };
     const writeScript = [
       `const stats = require(${JSON.stringify(path.join(installedRoot, 'lib', 'commands', 'stats.js'))});`,

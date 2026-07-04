@@ -10,6 +10,7 @@ import path from 'node:path';
 import * as fmt from './lib/core/fmt.js';
 import { ensureStandaloneGitRepo } from './lib/core/product-config.js';
 import { loadStateMap } from './lib/core/state-map.js';
+import { assertBuildFreshness } from './lib/core/build-freshness.js';
 
 // Fixed virtual-state → canonical-command invariants for alias derivation.
 const STATE_COMMAND_MAP: Record<string, string> = {
@@ -130,6 +131,8 @@ async function main(args = process.argv.slice(2), options: MainOptions = {}) {
   }
 
   if (existsSyncFn(targetLib)) {
+    assertBuildFreshness(__dirname, exitFn, errorFn);
+
     if (!READ_ONLY_COMMANDS.has(command)) {
       const initResult = ensureStandaloneGitRepoFn(cwdFn());
       if (initResult && initResult.failed) {

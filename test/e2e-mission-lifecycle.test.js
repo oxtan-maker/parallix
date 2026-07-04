@@ -316,6 +316,18 @@ function workflowEnv(binDir, stateHome, repoRoot) {
 }
 
 function runWorkflow(repoRoot, env, args, timeout = 60000, { allowFailure = false } = {}) {
+  // Rebuild before exercising the CLI to guard against stale artifacts.
+  const buildResult = childProcess.spawnSync('npm', ['run', 'build:cjs'], {
+    cwd: path.resolve(__dirname, '..'),
+    encoding: 'utf8',
+    stdio: ['pipe', 'pipe', 'pipe']
+  });
+  if (buildResult.status !== 0) {
+    throw new Error(
+      `npm run build:cjs failed (status=${buildResult.status})\nstdout:\n${buildResult.stdout}\nstderr:\n${buildResult.stderr}`
+    );
+  }
+
   const stdoutPath = path.join(os.tmpdir(), `parallix-e2e-stdout-${process.pid}-${Date.now()}.log`);
   const stderrPath = path.join(os.tmpdir(), `parallix-e2e-stderr-${process.pid}-${Date.now()}.log`);
   const stdoutFd = fs.openSync(stdoutPath, 'w');

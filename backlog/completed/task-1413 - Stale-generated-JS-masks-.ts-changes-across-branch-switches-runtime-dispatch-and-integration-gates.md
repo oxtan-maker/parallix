@@ -3,14 +3,12 @@ id: TASK-1413
 title: >-
   Stale generated JS masks .ts changes across branch switches, runtime dispatch,
   and integration gates
-status: backlog
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-07-03 19:11'
-updated_date: '2026-07-04 04:38'
+updated_date: '2026-07-04 09:00'
 labels:
   - bug
-  - workflow
-  - self-hosting
   - ai_sdlc
 dependencies: []
 ---
