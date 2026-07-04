@@ -15,6 +15,15 @@ async function withTempRepo(fn) {
   fs.mkdirSync(path.join(root, 'backlog', 'tasks'), { recursive: true });
   fs.mkdirSync(path.join(root, 'workflow', 'config'), { recursive: true });
 
+  // Initialize git repo with main branch so getPrimaryWorktree() works
+  const { execSync } = require('child_process');
+  execSync('git init -b main', { cwd: root, stdio: 'pipe' });
+  execSync('git config user.email "test@test.com"', { cwd: root, stdio: 'pipe' });
+  execSync('git config user.name "Test"', { cwd: root, stdio: 'pipe' });
+  fs.writeFileSync(path.join(root, 'README.md'), '# Test Repo');
+  execSync('git add .', { cwd: root, stdio: 'pipe' });
+  execSync('git commit -m "Initial commit"', { cwd: root, stdio: 'pipe' });
+
   // Provide a minimal agents.json so eligibleAgentsForStep works.
   const agentsConfig = {
     steps: {

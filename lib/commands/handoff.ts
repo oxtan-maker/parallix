@@ -14,6 +14,7 @@ import { runVerificationGate } from '../core/verification.js';
 import { isForgejoReviewEnabled } from '../core/product-config.js';
 import { rebaseBeforeReviewRound } from '../review/rebase.js';
 import * as nels from '../core/nels.js';
+import { attemptAgentRelaunch } from './active.js';
 
 /**
   * Verifies that the current environment is ready for handoff.
@@ -58,19 +59,36 @@ import * as nels from '../core/nels.js';
   * @param {{skipGate?: boolean, worktree?: string|null, force?: boolean, forceWithLease?: boolean, log?: Function, error?: Function, rebaseFn?: Function, isForgejoReviewEnabledFn?: Function}} [options]
   * @returns {Promise<{ ok: boolean, error?: string, gatekeeperPushedBack?: boolean }>}
   */
-async function performHandoff(slug, options = {}) {
-   /** @type{{skipGate?: boolean, worktree?: string|null, force?: boolean, forceWithLease?: boolean, log?: Function, error?: Function, rebaseFn?: Function, isForgejoReviewEnabledFn?: Function, runVerificationGateFn?: Function}} */
-    const opts = options;
-    const {
-      skipGate = false,
-      worktree = null,
-      force = false,
-      forceWithLease = true,
-      log = fmt.log.info,
-      error = fmt.log.fail,
-      rebaseFn = rebaseBeforeReviewRound,
-      runVerificationGateFn = runVerificationGate
-    } = opts;
+  async function performHandoff(slug, options = {}) {
+      /** @type{{skipGate?: boolean, worktree?: string|null, force?: boolean, forceWithLease?: boolean, log?: Function, error?: Function, rebaseFn?: Function, isForgejoReviewEnabledFn?: Function, runVerificationGateFn?: Function, maxAttempts?: number, attemptAgentRelaunchFn?: Function, remainingRetries?: number, runGatekeeperFn?: Function}} */
+       const opts = options;
+       const {
+         skipGate = false,
+         worktree = null,
+         force = false,
+         forceWithLease = true,
+         log = fmt.log.info,
+         error = fmt.log.fail,
+         rebaseFn = rebaseBeforeReviewRound,
+         runVerificationGateFn = runVerificationGate,
+         maxAttempts,
+         attemptAgentRelaunchFn = attemptAgentRelaunch,
+         remainingRetries,
+         runGatekeeperFn = gatekeeper.runGatekeeper
+       } = opts;
+
+    // Recursion guard: prevent infinite retry loops when gatekeeper pushback
+    // persists across relaunch attempts. Hard limit of 3 total handoff invocations.
+    const currentAttempt = maxAttempts || 1;
+    if (currentAttempt > 3) {
+      const msg = `Handoff exceeded maximum attempts (3). Manual intervention required.`;
+      error(msg);
+      return { ok: false, error: msg };
+    }
+
+    // Global retry budget: controls total relaunch attempts across all recursive calls.
+    // Default is 2 (one initial + one retry). Decremented with each relaunch.
+    let retriesLeft = remainingRetries !== undefined ? remainingRetries : 2;
 
    const verification = verifyHandoff(slug, { worktree: worktree || undefined });
   if (!verification.ok) {
@@ -324,7 +342,7 @@ async function performHandoff(slug, options = {}) {
   // Run before transitioning Backlog to 'review' so missing artifacts are
   // flagged as a request-changes review instead of consuming a reviewer cycle.
   log('Step 2.5: Running gatekeeper pre-review validation...');
-  const gatekeeperResult = gatekeeper.runGatekeeper(slug, { rootDir, log });
+  const gatekeeperResult = runGatekeeperFn(slug, { rootDir, log });
   let gatekeeperPushedBack = false;
   if (!gatekeeperResult.ok && gatekeeperResult.posted) {
     fmt.log.warn(`Gatekeeper posted pushback for ${fmt.slug(slug)}: missing ${gatekeeperResult.missing.join(', ')}.`);
@@ -339,8 +357,74 @@ async function performHandoff(slug, options = {}) {
   }
 
   if (gatekeeperPushedBack) {
-    log(`Gatekeeper pushback posted for ${fmt.slug(slug)} — skipping Backlog transition to review.`);
-    return /** @type{{ok: boolean, gatekeeperPushedBack: boolean}} */({ ok: true, gatekeeperPushedBack: true });
+    log(`Gatekeeper pushback posted for ${fmt.slug(slug)} — attempting automated artifact remediation...`);
+    // Build a prompt listing every missing artifact with explicit creation instructions
+    const missingItems = gatekeeperResult.missing;
+    const relaunchPrompt = [
+      `Gatekeeper pushback: missing mandatory artifacts for \`${slug}\`.`,
+      '',
+      'The following files are required before a reviewer engages:',
+      '',
+      ...missingItems.map(item => `- ${item}`),
+      '',
+      '**Action: create the missing artifacts so the handoff can proceed.**',
+      '',
+      ...missingItems
+        .filter(item => item.includes('MISSION.md'))
+        .map(() => '- **create** `MISSION.md` with the standard mission contract template (title, goal, scope, checkpoints, gates).'),
+      ...missingItems
+        .filter(item => item.includes('CP-'))
+        .map(() => '- **create** at least one checkpoint document (e.g. `CP-1.md`) with a `## Goal Check` table containing real evidence (file:line, test names).'),
+      ...missingItems
+        .filter(item => item.includes('backlog/tasks') || item.includes('backlog/task'))
+        .map(() => '- **create** a backlog task file at `backlog/tasks/<slug> - <title>.md` with YAML frontmatter (id, title, status, labels) and a description section.'),
+      '',
+      'After creating the missing artifacts, re-run the handoff (`px handoff ${slug}`).',
+    ].join('\n');
+
+    // Bounded retry: attempt agent relaunch using global retry budget
+    const initialBudget = retriesLeft;
+    while (retriesLeft > 0) {
+      log(`Attempting agent relaunch (${initialBudget - retriesLeft + 1}/${initialBudget}) to create missing artifacts...`);
+      const { relaunched, error: relaunchErr } = await attemptAgentRelaunchFn(
+        slug, rootDir, `Gatekeeper pushback: missing artifacts for ${slug}: ${missingItems.join(', ')}`, forgejoUser,
+        { log, error, promptOverride: relaunchPrompt }
+      );
+      if (relaunched) {
+        log('Agent relaunched successfully. Waiting for artifact creation...');
+        // Re-run handoff with decremented retry budget
+        const retryResult = await performHandoff(slug, {
+          worktree,
+          force: true,
+          isForgejoReviewEnabledFn: isForgejoReviewEnabledFn,
+          rebaseFn: rebaseFn,
+          runVerificationGateFn: runVerificationGateFn,
+          runGatekeeperFn: runGatekeeperFn,
+          attemptAgentRelaunchFn: attemptAgentRelaunchFn,
+          log,
+          error,
+          maxAttempts: currentAttempt + 1,
+          remainingRetries: retriesLeft - 1,
+        });
+        if (retryResult.ok) {
+          log('Handoff succeeded after agent relaunch.');
+          return { ...retryResult, gatekeeperPushedBack: true };
+        }
+        // Handoff still failed after relaunch — the recursive call already consumed
+        // one retry attempt (via remainingRetries), so we break here rather than
+        // continuing the parent's while loop.
+        log(`Handoff still failed after relaunch: ${retryResult.error || 'unknown'}`);
+        break;
+      } else {
+        log(`Agent relaunch failed: ${relaunchErr || 'unknown error'}`);
+        break;
+      }
+    }
+
+    // Retry budget exhausted
+    const msg = `Gatekeeper pushback persisted after ${initialBudget} relaunch attempts. Manual intervention required to create: ${missingItems.join(', ')}.`;
+    error(msg);
+    return /** @type{{ok: boolean, gatekeeperPushedBack: boolean, error: string}} */({ ok: false, gatekeeperPushedBack: true, error: msg });
   }
 
   // Step 2.6: Generic ## Gates runner — execute any gates declared in MISSION.md

@@ -146,6 +146,51 @@ test('buildPushbackBody handles empty missing list', () => {
   assert.ok(body.includes('task-gk-006'));
 });
 
+test('buildPushbackBody includes artifact-creation instructions for MISSION.md', () => {
+  const body = gatekeeper.buildPushbackBody('task-gk-012', [
+    'docs/missions/2026/task-gk-012/MISSION.md'
+  ]);
+  assert.ok(body.includes('create'));
+  assert.ok(body.includes('MISSION.md'));
+  assert.ok(body.includes('mission contract template'));
+  assert.ok(body.includes('Suggested artifact-creation steps'));
+});
+
+test('buildPushbackBody includes artifact-creation instructions for checkpoint documents', () => {
+  const body = gatekeeper.buildPushbackBody('task-gk-013', [
+    'docs/missions/2026/task-gk-013/CP-*.md (at least one checkpoint document)'
+  ]);
+  assert.ok(body.includes('create'));
+  assert.ok(body.includes('CP-1.md'));
+  assert.ok(body.includes('Goal Check'));
+  assert.ok(body.includes('Suggested artifact-creation steps'));
+});
+
+test('buildPushbackBody includes artifact-creation instructions for backlog task file', () => {
+  const body = gatekeeper.buildPushbackBody('task-gk-014', [
+    'backlog/tasks/task-gk-014 - *.md'
+  ]);
+  assert.ok(body.includes('create'));
+  assert.ok(body.includes('backlog/tasks'));
+  assert.ok(body.includes('frontmatter'));
+  assert.ok(body.includes('Suggested artifact-creation steps'));
+});
+
+test('buildPushbackBody includes all three artifact-creation instructions when all are missing', () => {
+  const body = gatekeeper.buildPushbackBody('task-gk-015', [
+    'docs/missions/2026/task-gk-015/MISSION.md',
+    'docs/missions/2026/task-gk-015/CP-*.md (at least one checkpoint document)',
+    'backlog/tasks/task-gk-015 - *.md'
+  ]);
+  assert.ok(body.includes('MISSION.md'));
+  assert.ok(body.includes('CP-1.md'));
+  assert.ok(body.includes('backlog/tasks'));
+  assert.ok(body.includes('Suggested artifact-creation steps'));
+  // Verify all three instruction lines are present
+  const instructionCount = (body.match(/- \*\*create\*\*/g) || []).length;
+  assert.strictEqual(instructionCount, 3);
+});
+
 // ---------- runGatekeeper ----------
 
 test('runGatekeeper returns ok=true when all artifacts present and does not post', async (t) => {

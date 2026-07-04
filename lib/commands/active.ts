@@ -306,7 +306,7 @@ function applyExecuteFallback(opts) {
   * @param {string} worktree
   * @param {string} errorMsg
   * @param {string} agent
-  * @param {{isRelaunchableErrorFn?: Function, buildRelaunchPromptFn?: Function, workflowLauncherStatusFn?: Function, startAgentFn?: Function, log?: Function, error?: Function, gateOutput?: {stdout: string, stderr: string}}} [options]
+  * @param {{isRelaunchableErrorFn?: Function, buildRelaunchPromptFn?: Function, workflowLauncherStatusFn?: Function, startAgentFn?: Function, log?: Function, error?: Function, gateOutput?: {stdout: string, stderr: string}, promptOverride?: string}} [options]
   */
  async function attemptAgentRelaunch(slug, worktree, errorMsg, agent, options = {}) {
    const {
@@ -316,10 +316,13 @@ function applyExecuteFallback(opts) {
      startAgentFn = agents.startAgent,
      log = fmt.log.plain,
      error = fmt.log.plainError,
-     gateOutput
+     gateOutput,
+     promptOverride
    } = options;
-   // Check if this is a relaunchable error
-   if (!isRelaunchableErrorFn(errorMsg)) {
+   // When a custom prompt is provided (e.g. gatekeeper pushback), bypass the
+   // relaunchability check so the agent can act on explicit artifact-creation
+   // instructions even when the error message doesn't match known patterns.
+   if (!promptOverride && !isRelaunchableErrorFn(errorMsg)) {
      log(`Error is not relaunchable: ${errorMsg}`);
      return { relaunched: false, error: 'Error is not relaunchable for agent relaunch' };
    }
@@ -331,8 +334,9 @@ function applyExecuteFallback(opts) {
      return { relaunched: false, error: `Agent ${agent} launcher is not available` };
    }
 
-   // Build the relaunch prompt, passing captured gate output if available (task-1387)
-   const prompt = buildRelaunchPromptFn(errorMsg, slug, worktree, gateOutput);
+   // Build the relaunch prompt, passing captured gate output if available (task-1387).
+   // promptOverride (e.g. gatekeeper pushback) takes precedence over the derived prompt.
+   const prompt = promptOverride || buildRelaunchPromptFn(errorMsg, slug, worktree, gateOutput);
 
   log(`Attempting to relaunch ${fmt.agent(agent)} to fix repairable handoff error...`);
   // startAgent handles resume flags internally for resume-capable agents (codex, claude, gemini, custom)

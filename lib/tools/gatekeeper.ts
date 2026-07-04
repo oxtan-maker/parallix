@@ -64,13 +64,34 @@ function checkMandatoryFiles(slug: string, options: { rootDir?: string, findMiss
  */
 function buildPushbackBody(slug: string, missing: string[]): string {
   const bullets = missing.map(item => `- ${item}`).join('\n');
+
+  // Detect artifact types and generate creation instructions
+  const hasMissionMd = missing.some(item => item.includes('MISSION.md'));
+  const hasCheckpoints = missing.some(item => item.includes('CP-'));
+  const hasTaskFile = missing.some(item => item.includes('backlog/tasks') || item.includes('backlog/task'));
+
+  const instructions = [];
+  if (hasMissionMd) {
+    instructions.push('- **create** `MISSION.md` with the standard mission contract template (title, goal, scope, checkpoints, gates).');
+  }
+  if (hasCheckpoints) {
+    instructions.push('- **create** at least one checkpoint document (e.g. `CP-1.md`) with a `## Goal Check` table containing real evidence (file:line, test names).');
+  }
+  if (hasTaskFile) {
+    instructions.push('- **create** a backlog task file at `backlog/tasks/<slug> - <title>.md` with YAML frontmatter (id, title, status, labels) and a description section.');
+  }
+
+  const instructionsBlock = instructions.length > 0
+    ? ['', '**Suggested artifact-creation steps:**', '', ...instructions, ''].join('\n')
+    : '';
+
   return [
     `**Pre-review gatekeeper: missing mandatory artifacts for \`${slug}\`.**`,
     '',
     'The following files are required before a reviewer engages but were not found on this branch:',
     '',
     bullets,
-    '',
+    instructionsBlock,
     'Push the missing artifacts and re-request review. This comment is automated; once the artifacts are present the gatekeeper will not block again.'
   ].join('\n');
 }

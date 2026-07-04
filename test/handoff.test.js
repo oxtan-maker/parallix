@@ -1437,3 +1437,325 @@ test('runDeclaredGates with backtick and em-dash passes validation then executes
     fs.rmSync(missionDir, { recursive: true, force: true });
   }
 });
+
+// ---------- Gatekeeper pushback relaunch (task-1388) ----------
+
+test('performHandoff attempts agent relaunch when gatekeeper posts pushback', async (t) => {
+  const { mock } = t;
+  const slug = 'task-1388-gk-pushback';
+  const worktree = fs.mkdtempSync(path.join('/tmp', 'handoff-gk-pushback-'));
+  const missionDir = path.join(worktree, 'docs/missions/2026', slug);
+  const cpPath = path.join(missionDir, 'CP-1.md');
+  const taskFile = path.join(worktree, 'backlog/tasks', `${slug} - gk pushback.md`);
+
+  fs.mkdirSync(missionDir, { recursive: true });
+  fs.mkdirSync(path.dirname(taskFile), { recursive: true });
+  fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# MISSION.md\n\nTest mission.\n');
+  fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | test | PASS |\n');
+  fs.writeFileSync(taskFile, '---\nstatus: active\n---\n\n# gk pushback\n');
+
+  const mockRebase = async () => ({ ok: true, sharedFileConflicts: false });
+  let relaunchCallCount = 0;
+  let relaunchPrompt = null;
+
+  mock.method(missionUtils, 'findMissionDir', () => missionDir);
+  mock.method(missionUtils, 'findMissionArea', () => 'workflow');
+  mock.method(missionUtils, 'findCheckpoints', () => [cpPath]);
+  mock.method(git, 'getCurrentBranch', () => `mission/${slug}`);
+  mock.method(git, 'getWorktreeStatus', () => []);
+  mock.method(git, 'run', () => ({ status: 0 }));
+  mock.method(git, 'git', () => ({ status: 0, stdout: '', stderr: '' }));
+  mock.method(forgejo, 'readToken', () => 'fake-token');
+  mock.method(forgejo, 'createPr', () => ({ ok: true, url: 'http://fake-pr' }));
+  mock.method(forgejo, 'authenticatedReviewUrl', () => 'http://fake-url');
+  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile }));
+  mock.method(backlog, 'transitionTask', () => true);
+  mock.method(gatekeeper, 'runGatekeeper', () => ({
+    ok: false, missing: ['docs/missions/2026/task-1388-gk-pushback/MISSION.md'], skipped: false, posted: true
+  }));
+
+  const mockRelaunch = async (s, w, msg, a, opts) => {
+    relaunchCallCount++;
+    relaunchPrompt = opts && opts.promptOverride ? opts.promptOverride : null;
+    return { relaunched: false, error: 'agent not available' };
+  };
+
+  writeReviewState(missionDir, 'custom', 'custom');
+
+  try {
+    const result = await performHandoff(slug, {
+      worktree,
+      skipGate: true,
+      isForgejoReviewEnabledFn: () => true,
+      rebaseFn: mockRebase,
+      attemptAgentRelaunchFn: mockRelaunch,
+    });
+
+    assert.strictEqual(result.ok, false);
+    assert.strictEqual(result.gatekeeperPushedBack, true);
+    assert.ok(result.error && result.error.includes('Manual intervention required'));
+    assert.strictEqual(relaunchCallCount, 1, 'attemptAgentRelaunch should have been called once');
+    assert.ok(relaunchPrompt, 'promptOverride should have been passed');
+    assert.ok(relaunchPrompt.includes('MISSION.md'), 'prompt should mention MISSION.md');
+    assert.ok(relaunchPrompt.includes('create'), 'prompt should contain creation instructions');
+  } finally {
+    fs.rmSync(worktree, { recursive: true, force: true });
+  }
+});
+
+test('performHandoff respects bounded retry limit of 2 for gatekeeper pushback', async (t) => {
+  const { mock } = t;
+  const slug = 'task-1388-retry-limit';
+  const worktree = fs.mkdtempSync(path.join('/tmp', 'handoff-retry-limit-'));
+  const missionDir = path.join(worktree, 'docs/missions/2026', slug);
+  const cpPath = path.join(missionDir, 'CP-1.md');
+  const taskFile = path.join(worktree, 'backlog/tasks', `${slug} - retry limit.md`);
+
+  fs.mkdirSync(missionDir, { recursive: true });
+  fs.mkdirSync(path.dirname(taskFile), { recursive: true });
+  fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# MISSION.md\n\nTest mission.\n');
+  fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | test | PASS |\n');
+  fs.writeFileSync(taskFile, '---\nstatus: active\n---\n\n# retry limit\n');
+
+  const mockRebase = async () => ({ ok: true, sharedFileConflicts: false });
+
+  mock.method(missionUtils, 'findMissionDir', () => missionDir);
+  mock.method(missionUtils, 'findMissionArea', () => 'workflow');
+  mock.method(missionUtils, 'findCheckpoints', () => [cpPath]);
+  mock.method(git, 'getCurrentBranch', () => `mission/${slug}`);
+  mock.method(git, 'getWorktreeStatus', () => []);
+  mock.method(git, 'run', () => ({ status: 0 }));
+  mock.method(git, 'git', () => ({ status: 0, stdout: '', stderr: '' }));
+  mock.method(forgejo, 'readToken', () => 'fake-token');
+  mock.method(forgejo, 'createPr', () => ({ ok: true, url: 'http://fake-pr' }));
+  mock.method(forgejo, 'authenticatedReviewUrl', () => 'http://fake-url');
+  mock.method(forgejo, 'resolveTrackingBranchSha', () => ({ ok: true, sha: 'fake-sha' }));
+  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile }));
+  mock.method(backlog, 'transitionTask', () => true);
+
+  // Gatekeeper always returns pushback (simulating artifacts never created)
+  const mockGK = () => ({
+    ok: false, missing: ['docs/missions/2026/task-1388-retry-limit/MISSION.md'], skipped: false, posted: true
+  });
+
+  // Mock relaunch always fails — loop should exit after 1 iteration
+  let relaunchCallCount = 0;
+  const mockRelaunch = async () => {
+    relaunchCallCount++;
+    return { relaunched: false, error: 'relaunch failed' };
+  };
+
+  writeReviewState(missionDir, 'custom', 'custom');
+
+  try {
+    const result = await performHandoff(slug, {
+      worktree,
+      skipGate: true,
+      isForgejoReviewEnabledFn: () => true,
+      rebaseFn: mockRebase,
+      attemptAgentRelaunchFn: mockRelaunch,
+      runGatekeeperFn: mockGK,
+    });
+
+    assert.strictEqual(result.ok, false);
+    assert.strictEqual(result.gatekeeperPushedBack, true);
+    assert.ok(result.error && result.error.includes('Manual intervention required'), 'should mention manual intervention');
+    // Loop exits after 1 call because relaunch failed (break in else branch)
+    assert.strictEqual(relaunchCallCount, 1, 'should have attempted relaunch exactly 1 time before exiting');
+  } finally {
+    fs.rmSync(worktree, { recursive: true, force: true });
+  }
+});
+
+test('performHandoff consumes full retry budget when relaunch succeeds but pushback persists', async (t) => {
+  const { mock } = t;
+  const slug = 'task-1388-retry-persists';
+  const worktree = fs.mkdtempSync(path.join('/tmp', 'handoff-retry-persists-'));
+  const missionDir = path.join(worktree, 'docs/missions/2026', slug);
+  const cpPath = path.join(missionDir, 'CP-1.md');
+  const taskFile = path.join(worktree, 'backlog/tasks', `${slug} - retry persists.md`);
+
+  fs.mkdirSync(missionDir, { recursive: true });
+  fs.mkdirSync(path.dirname(taskFile), { recursive: true });
+  fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# MISSION.md\n\nTest mission.\n');
+  fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | test | PASS |\n');
+  fs.writeFileSync(taskFile, '---\nstatus: active\n---\n\n# retry persists\n');
+
+  const mockRebase = async () => ({ ok: true, sharedFileConflicts: false });
+  let gkCallCount = 0;
+
+  mock.method(missionUtils, 'findMissionDir', () => missionDir);
+  mock.method(missionUtils, 'findMissionArea', () => 'workflow');
+  mock.method(missionUtils, 'findCheckpoints', () => [cpPath]);
+  mock.method(git, 'getCurrentBranch', () => `mission/${slug}`);
+  mock.method(git, 'getWorktreeStatus', () => []);
+  mock.method(git, 'run', () => ({ status: 0 }));
+  mock.method(git, 'git', () => ({ status: 0, stdout: '', stderr: '' }));
+  mock.method(forgejo, 'readToken', () => 'fake-token');
+  mock.method(forgejo, 'createPr', () => ({ ok: true, url: 'http://fake-pr' }));
+  mock.method(forgejo, 'authenticatedReviewUrl', () => 'http://fake-url');
+  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile }));
+  mock.method(backlog, 'transitionTask', () => true);
+
+  // Gatekeeper always returns pushback (simulating artifacts never created)
+  const mockGK = () => ({
+    ok: false, missing: ['docs/missions/2026/task-1388-retry-persists/MISSION.md'], skipped: false, posted: true
+  });
+
+  // Mock relaunch always succeeds but handoff still fails
+  let relaunchCallCount = 0;
+  const mockRelaunch = async () => {
+    relaunchCallCount++;
+    return { relaunched: true };
+  };
+
+  writeReviewState(missionDir, 'custom', 'custom');
+
+  try {
+    const result = await performHandoff(slug, {
+      worktree,
+      skipGate: true,
+      isForgejoReviewEnabledFn: () => true,
+      rebaseFn: mockRebase,
+      attemptAgentRelaunchFn: mockRelaunch,
+      runGatekeeperFn: mockGK,
+    });
+
+    assert.strictEqual(result.ok, false);
+    assert.strictEqual(result.gatekeeperPushedBack, true);
+    assert.ok(result.error && result.error.includes('Manual intervention required'), 'should mention manual intervention');
+    assert.strictEqual(relaunchCallCount, 2, 'should have attempted relaunch exactly 2 times (full budget)');
+  } finally {
+    fs.rmSync(worktree, { recursive: true, force: true });
+  }
+});
+
+test('performHandoff succeeds after successful agent relaunch', async (t) => {
+  const { mock } = t;
+  const slug = 'task-1388-relaunch-success';
+  const worktree = fs.mkdtempSync(path.join('/tmp', 'handoff-relaunch-success-'));
+  const missionDir = path.join(worktree, 'docs/missions/2026', slug);
+  const cpPath = path.join(missionDir, 'CP-1.md');
+  const taskFile = path.join(worktree, 'backlog/tasks', `${slug} - relaunch success.md`);
+
+  fs.mkdirSync(missionDir, { recursive: true });
+  fs.mkdirSync(path.dirname(taskFile), { recursive: true });
+  fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# MISSION.md\n\nTest mission.\n');
+  fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | test | PASS |\n');
+  fs.writeFileSync(taskFile, '---\nstatus: active\n---\n\n# relaunch success\n');
+
+  const mockRebase = async () => ({ ok: true, sharedFileConflicts: false });
+  let gkCallCount = 0;
+
+  mock.method(missionUtils, 'findMissionDir', () => missionDir);
+  mock.method(missionUtils, 'findMissionArea', () => 'workflow');
+  mock.method(missionUtils, 'findCheckpoints', () => [cpPath]);
+  mock.method(git, 'getCurrentBranch', () => `mission/${slug}`);
+  mock.method(git, 'getWorktreeStatus', () => []);
+  mock.method(git, 'run', () => ({ status: 0 }));
+  mock.method(git, 'git', () => ({ status: 0, stdout: '', stderr: '' }));
+  mock.method(forgejo, 'readToken', () => 'fake-token');
+  mock.method(forgejo, 'createPr', () => ({ ok: true, url: 'http://fake-pr' }));
+  mock.method(forgejo, 'authenticatedReviewUrl', () => 'http://fake-url');
+  mock.method(forgejo, 'resolveTrackingBranchSha', () => ({ ok: true, sha: 'fake-sha' }));
+  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile }));
+  mock.method(backlog, 'transitionTask', () => true);
+
+  // First call returns pushback, subsequent calls return ok
+  const mockGK = (slugArg, opts) => {
+    gkCallCount++;
+    if (gkCallCount === 1) {
+      return { ok: false, missing: ['docs/missions/2026/task-1388-relaunch-success/MISSION.md'], skipped: false, posted: true };
+    }
+    return { ok: true, missing: [], skipped: false, posted: false };
+  };
+  mock.method(gatekeeper, 'runGatekeeper', mockGK);
+
+  const mockRelaunch = async () => {
+    return { relaunched: true };
+  };
+
+  writeReviewState(missionDir, 'custom', 'custom');
+
+  try {
+    const result = await performHandoff(slug, {
+      worktree,
+      skipGate: true,
+      isForgejoReviewEnabledFn: () => true,
+      rebaseFn: mockRebase,
+      attemptAgentRelaunchFn: mockRelaunch,
+    });
+
+    assert.strictEqual(result.ok, true, 'handoff should succeed after successful relaunch');
+    assert.strictEqual(gkCallCount, 2, 'gatekeeper should have been called twice (initial + retry)');
+  } finally {
+    fs.rmSync(worktree, { recursive: true, force: true });
+  }
+});
+
+test('performHandoff relaunch prompt lists all missing artifact types', async (t) => {
+  const { mock } = t;
+  const slug = 'task-1388-prompt-content';
+  const worktree = fs.mkdtempSync(path.join('/tmp', 'handoff-prompt-'));
+  const missionDir = path.join(worktree, 'docs/missions/2026', slug);
+  const cpPath = path.join(missionDir, 'CP-1.md');
+  const taskFile = path.join(worktree, 'backlog/tasks', `${slug} - prompt content.md`);
+
+  fs.mkdirSync(missionDir, { recursive: true });
+  fs.mkdirSync(path.dirname(taskFile), { recursive: true });
+  fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# MISSION.md\n\nTest mission.\n');
+  fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | test | PASS |\n');
+  fs.writeFileSync(taskFile, '---\nstatus: active\n---\n\n# prompt content\n');
+
+  const mockRebase = async () => ({ ok: true, sharedFileConflicts: false });
+  let capturedPrompt = null;
+
+  mock.method(missionUtils, 'findMissionDir', () => missionDir);
+  mock.method(missionUtils, 'findMissionArea', () => 'workflow');
+  mock.method(missionUtils, 'findCheckpoints', () => [cpPath]);
+  mock.method(git, 'getCurrentBranch', () => `mission/${slug}`);
+  mock.method(git, 'getWorktreeStatus', () => []);
+  mock.method(git, 'run', () => ({ status: 0 }));
+  mock.method(git, 'git', () => ({ status: 0, stdout: '', stderr: '' }));
+  mock.method(forgejo, 'readToken', () => 'fake-token');
+  mock.method(forgejo, 'createPr', () => ({ ok: true, url: 'http://fake-pr' }));
+  mock.method(forgejo, 'authenticatedReviewUrl', () => 'http://fake-url');
+  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile }));
+  mock.method(backlog, 'transitionTask', () => true);
+  mock.method(gatekeeper, 'runGatekeeper', () => ({
+    ok: false,
+    missing: [
+      'docs/missions/2026/task-1388-prompt-content/MISSION.md',
+      'docs/missions/2026/task-1388-prompt-content/CP-*.md (at least one checkpoint document)',
+      'backlog/tasks/task-1388-prompt-content - *.md'
+    ],
+    skipped: false, posted: true
+  }));
+
+  const mockRelaunch = async (s, w, msg, a, opts) => {
+    capturedPrompt = opts && opts.promptOverride ? opts.promptOverride : null;
+    return { relaunched: false, error: 'not available' };
+  };
+
+  writeReviewState(missionDir, 'custom', 'custom');
+
+  try {
+    await performHandoff(slug, {
+      worktree,
+      skipGate: true,
+      isForgejoReviewEnabledFn: () => true,
+      rebaseFn: mockRebase,
+      attemptAgentRelaunchFn: mockRelaunch,
+    });
+
+    assert.ok(capturedPrompt, 'prompt should have been captured');
+    assert.ok(capturedPrompt.includes('MISSION.md'), 'prompt should list MISSION.md');
+    assert.ok(capturedPrompt.includes('CP-'), 'prompt should list CP-*.md');
+    assert.ok(capturedPrompt.includes('backlog/tasks'), 'prompt should list backlog task file');
+    assert.ok(capturedPrompt.includes('create'), 'prompt should contain creation keyword');
+    assert.ok(capturedPrompt.includes('frontmatter'), 'prompt should mention frontmatter for task file');
+    assert.ok(capturedPrompt.includes('Goal Check'), 'prompt should mention Goal Check for checkpoints');
+  } finally {
+    fs.rmSync(worktree, { recursive: true, force: true });
+  }
+});

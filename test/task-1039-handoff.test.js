@@ -27,6 +27,7 @@ function setupMocks() {
   mock.method(backlog, 'transitionTask', () => true);
   mock.method(forgejo, 'readToken', () => 'token');
   mock.method(forgejo, 'createPr', () => ({ ok: true }));
+  mock.method(forgejo, 'resolveTrackingBranchSha', () => ({ ok: true, sha: 'fake-sha' }));
   mock.method(gatekeeper, 'runGatekeeper', () => ({ ok: true }));
   
   const missionDir = path.join(WORKTREE, 'docs/missions/2026', TEST_SLUG);
@@ -58,8 +59,17 @@ test('verifyHandoff fails when not on mission branch', (t) => {
 
 test('performHandoff handles gatekeeper pushback', async (t) => {
   setupMocks();
-  mock.method(gatekeeper, 'runGatekeeper', () => ({ ok: false, posted: true, missing: ['A'] }));
-  const result = await performHandoff(TEST_SLUG, { worktree: WORKTREE, skipGate: true, rebaseFn: mockRebase });
+  let gkCallCount = 0;
+  const mockGK = () => {
+    gkCallCount++;
+    if (gkCallCount === 1) {
+      return { ok: false, posted: true, missing: ['A'] };
+    }
+    return { ok: true, missing: [] };
+  };
+  // Mock relaunch to succeed so the retry loop can proceed
+  const mockRelaunch = async () => ({ relaunched: true });
+  const result = await performHandoff(TEST_SLUG, { worktree: WORKTREE, skipGate: true, rebaseFn: mockRebase, attemptAgentRelaunchFn: mockRelaunch, runGatekeeperFn: mockGK });
   assert.strictEqual(result.ok, true);
   assert.strictEqual(result.gatekeeperPushedBack, true);
   cleanup();
