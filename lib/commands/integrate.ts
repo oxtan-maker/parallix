@@ -1412,28 +1412,30 @@ function isNoMergeToAbortResult(result: any) {
 
 /**
  * @param {string} slug
- * @param{{rootDir?: string, gitRunner?: Function, recordIntegrationStatsFn?: Function}} options
+ * @param{{rootDir?: string, recordIntegrationStatsFn?: Function}} options
  */
 function recordPostIntegrationStats(
   slug: string,
   {
     rootDir = getPrimaryWorktree(),
-    gitRunner = git,
     recordIntegrationStatsFn = (stats as any).recordIntegrationStats,
   } = {}
 ) {
-  const dateResult = gitRunner(['-C', rootDir, 'log', '-1', '--format=%cs']);
-  if (dateResult.status !== 0) {
-    throw new Error(`Could not determine integration date for ${slug}.`);
-  }
-
+  // Do NOT derive the closed row's date from `git log -1 --format=%cs`: on the
+  // Variant A fast-forward path, `finalizeVariantACloseout` may create no new
+  // commit, so the base worktree's tip commit is whatever the mission branch
+  // already carried — its committer date can be days older than the actual
+  // integration/close date, silently pushing the closed row out of both weekly
+  // report windows even though the mission just closed (task-1415). Every other
+  // stats writer (recordStageStats, recordActiveStats, ...) already defaults its
+  // `date` to "today"; omitting `date` here lets recordIntegrationStats use that
+  // same default instead of a stale commit timestamp.
   const statsCsvPath = (stats as any).resolveStatsFilePath(rootDir);
 
   const outcome = recordIntegrationStatsFn({
     slug,
     rootDir,
     filePath: statsCsvPath,
-    date: dateResult.stdout.trim(),
   });
 
   fmt.log.info(`Workflow stats recorded: ${formatRecordedStatsRow(outcome.row)}`);

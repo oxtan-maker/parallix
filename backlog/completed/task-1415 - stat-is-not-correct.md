@@ -1,10 +1,10 @@
 ---
 id: TASK-1415
 title: stat is not correct
-status: backlog
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-07-04 06:04'
-labels: []
+labels: [user_value, bug]
 dependencies: []
 ---
 

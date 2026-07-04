@@ -394,12 +394,6 @@ test('recordPostIntegrationStats logs the persisted stats row including pr_fix_r
   try {
     const outcome = recordPostIntegrationStats('task-2000', {
       rootDir: FAKE_ROOT,
-      gitRunner(args) {
-        if (args.slice(-2).join(' ') === 'log -1' || args.join(' ') === `-C ${FAKE_ROOT} log -1 --format=%cs`) {
-          return { status: 0, stdout: '2026-05-18\n', stderr: '' };
-        }
-        throw new Error(`unexpected git args: ${JSON.stringify(args)}`);
-      },
       recordIntegrationStatsFn() {
         return {
           changed: true,
@@ -434,17 +428,15 @@ test('recordPostIntegrationStats records an unknown classification row for a mis
   try {
     const outcome = recordPostIntegrationStats('task-unknown', {
       rootDir: FAKE_ROOT,
-      gitRunner(args) {
-        if (args.join(' ') === `-C ${FAKE_ROOT} log -1 --format=%cs`) {
-          return { status: 0, stdout: '2026-06-24\n', stderr: '' };
-        }
-        throw new Error(`unexpected git args: ${JSON.stringify(args)}`);
-      },
       recordIntegrationStatsFn({ slug, rootDir, filePath, date }) {
         assert.equal(slug, 'task-unknown');
         assert.equal(rootDir, FAKE_ROOT);
         assert.ok(filePath.includes('stats.csv'));
-        assert.equal(date, '2026-06-24');
+        // task-1415: no explicit date is passed anymore — recordIntegrationStats
+        // defaults it to "today" itself, rather than trusting a stale
+        // `git log -1 --format=%cs` committer date (which can predate the actual
+        // integration day on the Variant A fast-forward closeout path).
+        assert.equal(date, undefined);
         return {
           changed: true,
           row: {
@@ -483,12 +475,6 @@ test('recordPostIntegrationStats routes stats through PARALLIX_HOME, not a consu
     const capturedFilePaths = [];
     const runOnce = () => recordPostIntegrationStats('task-2046', {
       rootDir: runtimeRoot,
-      gitRunner(args) {
-        if (args.join(' ') === `-C ${runtimeRoot} log -1 --format=%cs`) {
-          return { status: 0, stdout: '2026-05-18\n', stderr: '' };
-        }
-        return { status: 0, stdout: '', stderr: '' };
-      },
       recordIntegrationStatsFn({ filePath }) {
         capturedFilePaths.push(filePath);
         return {
@@ -540,12 +526,6 @@ test('recordPostIntegrationStats prints mission-phase telemetry after weekly sta
     ];
     recordPostIntegrationStats('task-3000', {
       rootDir: FAKE_ROOT,
-      gitRunner(args) {
-        if (args.join(' ') === `-C ${FAKE_ROOT} log -1 --format=%cs`) {
-          return { status: 0, stdout: '2026-05-18\n', stderr: '' };
-        }
-        throw new Error(`unexpected git args: ${JSON.stringify(args)}`);
-      },
       recordIntegrationStatsFn() {
         return {
           changed: true,
@@ -580,12 +560,6 @@ test('recordPostIntegrationStats handles empty mission-phase rows gracefully', (
   try {
     recordPostIntegrationStats('task-4000', {
       rootDir: FAKE_ROOT,
-      gitRunner(args) {
-        if (args.join(' ') === `-C ${FAKE_ROOT} log -1 --format=%cs`) {
-          return { status: 0, stdout: '2026-05-18\n', stderr: '' };
-        }
-        throw new Error(`unexpected git args: ${JSON.stringify(args)}`);
-      },
       recordIntegrationStatsFn() {
         return {
           changed: false,

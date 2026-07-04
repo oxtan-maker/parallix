@@ -113,6 +113,16 @@ test('fresh generated JS allows normal command dispatch', () => {
     'fresh stats.js must have mtime >= stats.ts mtime'
   );
 
+  // Ensure PARALLIX_HOME has a stats.csv so px stats doesn't fail with
+  // "CSV file not found" during the full test suite (where bootstrap sets
+  // PARALLIX_HOME to a temp directory with no CSV).
+  const home = process.env.PARALLIX_HOME || path.join(require('os').homedir(), '.local', 'state', 'parallix');
+  fs.mkdirSync(home, { recursive: true });
+  const csvPath = path.join(home, 'stats.csv');
+  if (!fs.existsSync(csvPath)) {
+    fs.writeFileSync(csvPath, 'date,repo,mission,classification,implementer,pr_fix_rounds,provider,model,implementer_agent,reviewer_agent,stage,input_tokens,output_tokens,cached_tokens,context_tokens,tool_calls,openai_usage_before,openai_usage_after,openai_usage_delta,duration_minutes,cost_usd,closed\n', 'utf8');
+  }
+
   const result = spawnCli('stats');
 
   assert.strictEqual(result.status, 0, 'CLI must exit with code 0 for fresh build');
