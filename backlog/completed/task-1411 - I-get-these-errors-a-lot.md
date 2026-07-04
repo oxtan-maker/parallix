@@ -1,10 +1,10 @@
 ---
 id: TASK-1411
 title: I get these errors a lot
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-07-03 06:50'
-labels: []
+labels: [user_value, bug]
 dependencies: []
 ---
 

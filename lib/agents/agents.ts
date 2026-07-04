@@ -330,6 +330,13 @@ function getMainWorktreePath(options: {cwd?: string, warn?: Function} = {}) {
       return MainWorktreeDetector.byCommonDir.get(commonDir);
     }
 
+    if (!commonDir) {
+      // cwd isn't attached to a git repo at all (rev-parse already failed
+      // silently above), so `git worktree list` would fail for the same
+      // expected reason. Skip it quietly instead of warning.
+      return null;
+    }
+
     const result = spawnSync('git', ['-C', cwd, 'worktree', 'list', '--porcelain'], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],

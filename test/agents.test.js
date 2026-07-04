@@ -342,7 +342,7 @@ test('readAgentConfig reports and skips malformed main-worktree agents.local.jso
   });
 });
 
-test('readAgentConfig warns when main-worktree lookup cannot inspect git worktrees', () => {
+test('readAgentConfig does not warn when main-worktree lookup runs outside a git repo', () => {
   withTempAgentConfigTree(({ configPath, targetPath }) => {
     const warnings = [];
 
@@ -353,8 +353,7 @@ test('readAgentConfig warns when main-worktree lookup cannot inspect git worktre
     });
 
     assert.ok(config);
-    assert.equal(warnings.length, 1);
-    assert.match(warnings[0], /main-worktree agents\.local\.json/);
+    assert.deepEqual(warnings, []);
   });
 });
 
