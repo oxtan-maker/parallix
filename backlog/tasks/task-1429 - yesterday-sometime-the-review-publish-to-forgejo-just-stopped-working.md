@@ -4,6 +4,7 @@ title: yesterday sometime the review publish to forgejo just stopped working
 status: backlog
 assignee: []
 created_date: '2026-07-05 06:34'
+updated_date: '2026-07-05 06:36'
 labels: []
 dependencies: []
 ---
@@ -12,6 +13,8 @@ dependencies: []
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
 http://localhost:3300/magnus/parallix/pulls/106 reconcile this with its review state
+
+it seems to also be a problem that when using --max-attempts even the disk state does not get updated
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Definition of Done
