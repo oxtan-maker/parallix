@@ -14,6 +14,11 @@
       "command": "npm run build:cjs && node test/e2e-mission-lifecycle.test.js",
       "order": 50,
       "run_last": true
+    },
+    "custom-agent-smoke": {
+      "command": "node test/e2e-real-agent-smoke.test.js",
+      "order": 51,
+      "run_last": true
     }
   }
 }

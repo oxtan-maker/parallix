@@ -13,9 +13,61 @@ test.afterEach(() => {
 
 // ---------- resolveOpencodeCommand ----------
 
-test('resolveOpencodeCommand returns bare "opencode"', () => {
+test('resolveOpencodeCommand prefers OPENCODE_BIN when it points to an executable', () => {
   const { resolveOpencodeCommand } = opencode;
-  assert.equal(resolveOpencodeCommand(), 'opencode');
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-bin-'));
+  const customBin = path.join(tmpDir, 'opencode');
+  fs.writeFileSync(customBin, '#!/usr/bin/env bash\nexit 0\n', 'utf8');
+  fs.chmodSync(customBin, 0o755);
+  const original = process.env.OPENCODE_BIN;
+  process.env.OPENCODE_BIN = customBin;
+  try {
+    assert.equal(resolveOpencodeCommand(), customBin);
+  } finally {
+    if (original === undefined) {
+      delete process.env.OPENCODE_BIN;
+    } else {
+      process.env.OPENCODE_BIN = original;
+    }
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('resolveOpencodeCommand falls back to bare "opencode" when no candidate exists', () => {
+  const { resolveOpencodeCommand } = opencode;
+  const os = require('node:os');
+  const path = require('node:path');
+  const fs = require('node:fs');
+  const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-home-'));
+  const originalHome = process.env.HOME;
+  const originalPath = process.env.PATH;
+  const originalBin = process.env.OPENCODE_BIN;
+  delete process.env.OPENCODE_BIN;
+  process.env.HOME = tmpHome;
+  process.env.PATH = '';
+  try {
+    assert.equal(resolveOpencodeCommand(), 'opencode');
+  } finally {
+    if (originalHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = originalHome;
+    }
+    if (originalPath === undefined) {
+      delete process.env.PATH;
+    } else {
+      process.env.PATH = originalPath;
+    }
+    if (originalBin === undefined) {
+      delete process.env.OPENCODE_BIN;
+    } else {
+      process.env.OPENCODE_BIN = originalBin;
+    }
+    fs.rmSync(tmpHome, { recursive: true, force: true });
+  }
 });
 
 // ---------- extractOpencodeSessionId ----------
@@ -43,9 +95,9 @@ test('extractOpencodeSessionId reads the sessionID field from JSON stdout (task-
 
 test('buildOpencodeInvocation includes run --pure --dangerously-skip-permissions flags', () => {
   opencode.__setJsonFormatSupportForTest(true);
-  const { buildOpencodeInvocation } = opencode;
+  const { buildOpencodeInvocation, resolveOpencodeCommand } = opencode;
   const inv = buildOpencodeInvocation({ prompt: 'test', worktree: '/tmp' });
-  assert.equal(inv.command, 'opencode');
+  assert.equal(inv.command, resolveOpencodeCommand());
   assert.ok(inv.args.includes('run'));
   assert.ok(inv.args.includes('--pure'));
   assert.ok(inv.args.includes('--dangerously-skip-permissions'));
@@ -62,44 +114,44 @@ test('buildOpencodeInvocation requests JSON output so the session id is recovera
 
 test('buildOpencodeInvocation includes -s sessionId when resume and sessionId provided', () => {
   opencode.__setJsonFormatSupportForTest(true);
-  const { buildOpencodeInvocation } = opencode;
+  const { buildOpencodeInvocation, resolveOpencodeCommand } = opencode;
   const inv = buildOpencodeInvocation({ prompt: 'test', worktree: '/tmp', resume: true, sessionId: 'ses_abc' });
-  assert.equal(inv.command, 'opencode');
+  assert.equal(inv.command, resolveOpencodeCommand());
   assert.ok(inv.args.includes('-s'));
   assert.ok(inv.args.includes('ses_abc'));
 });
 
 test('buildOpencodeInvocation includes --continue when resume but no sessionId', () => {
   opencode.__setJsonFormatSupportForTest(true);
-  const { buildOpencodeInvocation } = opencode;
+  const { buildOpencodeInvocation, resolveOpencodeCommand } = opencode;
   const inv = buildOpencodeInvocation({ prompt: 'test', worktree: '/tmp', resume: true, sessionId: null });
-  assert.equal(inv.command, 'opencode');
+  assert.equal(inv.command, resolveOpencodeCommand());
   assert.ok(inv.args.includes('--continue'));
   assert.ok(!inv.args.includes('-s'));
 });
 
 test('buildOpencodeInvocation omits resume flags when resume is false', () => {
   opencode.__setJsonFormatSupportForTest(true);
-  const { buildOpencodeInvocation } = opencode;
+  const { buildOpencodeInvocation, resolveOpencodeCommand } = opencode;
   const inv = buildOpencodeInvocation({ prompt: 'test', worktree: '/tmp', resume: false });
-  assert.equal(inv.command, 'opencode');
+  assert.equal(inv.command, resolveOpencodeCommand());
   assert.ok(!inv.args.includes('--continue'));
   assert.ok(!inv.args.includes('-s'));
 });
 
 test('buildOpencodeInvocation passes prompt as last arg', () => {
   opencode.__setJsonFormatSupportForTest(true);
-  const { buildOpencodeInvocation } = opencode;
+  const { buildOpencodeInvocation, resolveOpencodeCommand } = opencode;
   const inv = buildOpencodeInvocation({ prompt: 'hello world', worktree: '/tmp' });
-  assert.equal(inv.command, 'opencode');
+  assert.equal(inv.command, resolveOpencodeCommand());
   assert.ok(inv.args.includes('hello world'));
 });
 
 test('buildOpencodeInvocation sets cwd to worktree', () => {
   opencode.__setJsonFormatSupportForTest(true);
-  const { buildOpencodeInvocation } = opencode;
+  const { buildOpencodeInvocation, resolveOpencodeCommand } = opencode;
   const inv = buildOpencodeInvocation({ prompt: 'test', worktree: '/custom/worktree' });
-  assert.equal(inv.command, 'opencode');
+  assert.equal(inv.command, resolveOpencodeCommand());
   assert.equal(inv.options.cwd, '/custom/worktree');
 });
 

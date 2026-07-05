@@ -194,7 +194,7 @@ This is a tool for a local-first developer workflow on one machine, driven by an
 ## Development
 
 ```sh
-npm test     # FORCE_COLOR=0 node --test test/*.test.js
+npm test     # FORCE_COLOR=0 node --test test/run-default-tests.js
 ```
 
 The test suite is the verification gate this repo declares in `workflow.config.json`. Run it before integrating any change. Contributions follow the same mission lifecycle the tool itself runs: branch, worktree, checkpoints, a second review, and a passing gate before integration.

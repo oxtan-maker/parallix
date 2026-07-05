@@ -332,7 +332,7 @@ function gateMatchesChangedAreas(gateKey: string, changedAreas: string[]) {
   if (gateKey === 'web-e2e') {
     return changedAreas.includes('web-client');
   }
-  if (gateKey === 'workflow') {
+  if (gateKey === 'workflow' || gateKey === 'custom-agent-smoke') {
     return changedAreas.includes('workflow') || changedAreas.includes('lib');
   }
   return false;

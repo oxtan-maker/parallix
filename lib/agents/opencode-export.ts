@@ -11,6 +11,54 @@ interface CaptureOpencodeExportOptions {
   spawn?: typeof childProcess.spawn;
 }
 
+function opencodeCommandCandidates() {
+  const candidates: string[] = [];
+  const seen = new Set<string>();
+  const pushCandidate = (candidate?: string | null) => {
+    if (!candidate || seen.has(candidate)) {return;}
+    seen.add(candidate);
+    candidates.push(candidate);
+  };
+
+  pushCandidate(process.env.OPENCODE_BIN);
+  pushCandidate('opencode');
+  pushCandidate(path.join(os.homedir(), '.opencode', 'bin', 'opencode'));
+  pushCandidate(path.join(os.homedir(), '.local', 'bin', 'opencode'));
+
+  return candidates;
+}
+
+function resolveExistingCommand(candidate: string) {
+  if (!candidate) {return null;}
+  if (candidate.includes(path.sep)) {
+    try {
+      fs.accessSync(candidate, fs.constants.X_OK);
+      return candidate;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  const dirs = (process.env.PATH || '').split(path.delimiter);
+  for (const dir of dirs) {
+    if (!dir) {continue;}
+    const commandPath = path.join(dir, candidate);
+    try {
+      fs.accessSync(commandPath, fs.constants.X_OK);
+      return candidate;
+    } catch (_) { /* keep looking */ }
+  }
+  return null;
+}
+
+function resolveOpencodeCommand() {
+  for (const candidate of opencodeCommandCandidates()) {
+    const resolved = resolveExistingCommand(candidate);
+    if (resolved) {return resolved;}
+  }
+  return 'opencode';
+}
+
 /**
  * Capture the complete `opencode export <sessionId>` JSON document.
  *
@@ -90,7 +138,7 @@ function captureOpencodeExport(sessionId: string, opts: CaptureOpencodeExportOpt
 
     let child;
     try {
-      child = spawn('opencode', ['export', sessionId], {
+      child = spawn(resolveOpencodeCommand(), ['export', sessionId], {
         cwd: worktree,
         env: { ...process.env, ...(env || {}) },
         stdio: ['ignore', tmpFd !== null ? tmpFd : 'pipe', 'pipe'],

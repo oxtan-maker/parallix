@@ -53,7 +53,7 @@
     "prepack": "npm run publish:guard",
     "prepublishOnly": "npm run publish:guard",
     "pretest": "npm run build:cjs",
-    "test": "FORCE_COLOR=0 node --require ./test/bootstrap-parallix-home.js --test test/*.test.js",
+    "test": "FORCE_COLOR=0 node --require ./test/bootstrap-parallix-home.js --test test/run-default-tests.js",
     "test:coverage": "FORCE_COLOR=0 node lib/commands/coverage-gate.js --lcov",
     "typecheck": "tsc --noEmit"
   },

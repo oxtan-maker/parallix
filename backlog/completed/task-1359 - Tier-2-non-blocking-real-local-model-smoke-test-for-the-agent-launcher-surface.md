@@ -3,18 +3,14 @@ id: TASK-1359
 title: >-
   Tier 2: non-blocking real-local-model smoke test for the agent-launcher
   surface
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-06-26 18:06'
-updated_date: '2026-07-03 13:39'
-labels:
-  - quality
-  - testing
-  - bug-reduction
+updated_date: '2026-07-05 06:24'
+labels: [ai_sdlc]
 dependencies: []
 priority: low
 ---
-
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->

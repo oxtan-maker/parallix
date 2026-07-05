@@ -3,6 +3,9 @@ import { extractOpencodeTelemetryFromExport } from './opencode-telemetry.js';
 import { captureOpencodeExport } from './opencode-export.js';
 import { detectLimitHit } from './limit-hit.js';
 import { createRequire } from 'node:module';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 // tools/sessions and core/subagent-limit are still CJS (not converted in this
 // wave); require keeps them untyped (any) without pulling non-included .js into
 // the typecheck program.
@@ -91,7 +94,51 @@ let _jsonFormatSupported: boolean | null = null;
 // calls this function instead of shelling out, making tests hermetic.
 let _jsonFormatDetectFn: (() => any) | null = null;
 
+function opencodeCommandCandidates() {
+  const candidates: string[] = [];
+  const seen = new Set<string>();
+  const pushCandidate = (candidate?: string | null) => {
+    if (!candidate || seen.has(candidate)) {return;}
+    seen.add(candidate);
+    candidates.push(candidate);
+  };
+
+  pushCandidate(process.env.OPENCODE_BIN);
+  pushCandidate('opencode');
+  pushCandidate(path.join(os.homedir(), '.opencode', 'bin', 'opencode'));
+  pushCandidate(path.join(os.homedir(), '.local', 'bin', 'opencode'));
+
+  return candidates;
+}
+
+function resolveExistingCommand(candidate: string) {
+  if (!candidate) {return null;}
+  if (candidate.includes(path.sep)) {
+    try {
+      fs.accessSync(candidate, fs.constants.X_OK);
+      return candidate;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  const dirs = (process.env.PATH || '').split(path.delimiter);
+  for (const dir of dirs) {
+    if (!dir) {continue;}
+    const commandPath = path.join(dir, candidate);
+    try {
+      fs.accessSync(commandPath, fs.constants.X_OK);
+      return candidate;
+    } catch (_) { /* keep looking */ }
+  }
+  return null;
+}
+
 function resolveOpencodeCommand() {
+  for (const candidate of opencodeCommandCandidates()) {
+    const resolved = resolveExistingCommand(candidate);
+    if (resolved) {return resolved;}
+  }
   return 'opencode';
 }
 
@@ -108,7 +155,7 @@ function checkJsonFormatSupport() {
   }
   try {
     const { spawnSync } = _require('node:child_process');
-    const result = spawnSync('opencode', ['--format', 'json', '--help'], {
+    const result = spawnSync(resolveOpencodeCommand(), ['--format', 'json', '--help'], {
       timeout: 3000,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
