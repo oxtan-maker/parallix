@@ -16,6 +16,7 @@ const {
   createToken,
   defaultProductName,
   defaultRepoSlug,
+  ensureForgejoUser,
   ensureRepo,
   ensureReviewRemote,
   evaluateReviewSetup,
@@ -198,6 +199,63 @@ test('bootstrapReviewSurface writes token files and configures the review remote
   });
 });
 
+test('bootstrapReviewSurface creates a missing Forgejo agent user before minting its token', async () => {
+  await withTempDir(async root => {
+    writeConfig(root);
+    const forgejoHome = path.join(root, '.forgejo-local');
+    spawnSync('git', ['init', '-b', 'main'], { cwd: root, encoding: 'utf8' });
+
+    const requests = [];
+    const requestFn = (method, url, requestOptions = {}) => {
+      requests.push({ method, url, requestOptions });
+      if (method === 'POST' && url.endsWith('/api/v1/users/magnus/tokens')) {
+        return { ok: true, statusCode: 201, data: { sha1: 'owner-token' } };
+      }
+      if (method === 'GET' && url.endsWith('/api/v1/repos/test-org/test-repo')) {
+        return { ok: true, statusCode: 200, data: {} };
+      }
+      if (method === 'PUT' && url.endsWith('/api/v1/repos/test-org/test-repo/collaborators/vibe')) {
+        return { ok: true, statusCode: 204, data: {} };
+      }
+      if (method === 'GET' && url.endsWith('/api/v1/users/vibe')) {
+        return { ok: false, statusCode: 404, data: {} };
+      }
+      if (method === 'POST' && url.endsWith('/api/v1/admin/users')) {
+        return { ok: true, statusCode: 201, data: {} };
+      }
+      if (method === 'POST' && url.endsWith('/api/v1/users/vibe/tokens')) {
+        return { ok: true, statusCode: 201, data: { sha1: 'vibe-token' } };
+      }
+      return { ok: false, statusCode: 500, data: { error: 'unexpected request' } };
+    };
+
+    const logs = [];
+    const result = await bootstrapReviewSurface(root, {
+      baseUrl: 'http://localhost:3300/',
+      repo: 'test-org/test-repo',
+      ownerLogin: 'magnus',
+      ownerPassword: 'secret',
+      agentPasswords: [{ user: 'vibe', password: 'vibe-secret' }],
+    }, {
+      requestFn,
+      forgejoHome,
+      log: message => logs.push(message),
+    });
+
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(fs.readFileSync(path.join(forgejoHome, 'tokens', 'vibe'), 'utf8').trim(), 'vibe-token');
+    const createUserRequest = requests.find(entry => entry.method === 'POST' && entry.url.endsWith('/api/v1/admin/users'));
+    assert.deepEqual(createUserRequest.requestOptions.basicAuth, { user: 'magnus', password: 'secret' });
+    assert.deepEqual(createUserRequest.requestOptions.body, {
+      username: 'vibe',
+      email: 'vibe@example.com',
+      password: 'vibe-secret',
+      must_change_password: false,
+    });
+    assert.ok(logs.some(message => message.includes('Created Forgejo user vibe')));
+  });
+});
+
 test('createToken reports API failures and missing token payloads', () => {
   let seenBody = null;
   let result = createToken('http://localhost:3300/', 'codex', 'pw', 'workflow-codex', (_method, _url, requestOptions = {}) => {
@@ -269,6 +327,56 @@ test('ensureRepo handles invalid slugs, existing repos, user repos, and creation
   });
   assert.equal(result.ok, false);
   assert.match(result.error, /failed to create review repo/);
+});
+
+test('ensureForgejoUser skips existing users, creates missing ones via basic auth, and reports scope failures', () => {
+  let seen = [];
+  let result = ensureForgejoUser('http://localhost:3300', 'vibe', 'magnus', 'owner-pw', 'vibe-pw', (method, url, requestOptions = {}) => {
+    seen.push({ method, url, requestOptions });
+    if (method === 'GET' && url.endsWith('/api/v1/users/vibe')) {
+      return { ok: true, statusCode: 200, data: {} };
+    }
+    return { ok: false, statusCode: 500, data: {} };
+  });
+  assert.deepEqual(result, { ok: true, created: false });
+  assert.equal(seen.length, 1);
+  assert.deepEqual(seen[0].requestOptions.basicAuth, { user: 'magnus', password: 'owner-pw' });
+
+  seen = [];
+  result = ensureForgejoUser('http://localhost:3300', 'vibe', 'magnus', 'owner-pw', 'vibe-pw', (method, url, requestOptions = {}) => {
+    seen.push({ method, url, requestOptions });
+    if (method === 'GET' && url.endsWith('/api/v1/users/vibe')) {
+      return { ok: false, statusCode: 404, data: {} };
+    }
+    if (method === 'POST' && url.endsWith('/api/v1/admin/users')) {
+      return { ok: true, statusCode: 201, data: {} };
+    }
+    return { ok: false, statusCode: 500, data: {} };
+  });
+  assert.deepEqual(result, { ok: true, created: true });
+  const createRequest = seen.find(entry => entry.method === 'POST');
+  assert.deepEqual(createRequest.requestOptions.basicAuth, { user: 'magnus', password: 'owner-pw' });
+  assert.deepEqual(createRequest.requestOptions.body, {
+    username: 'vibe',
+    email: 'vibe@example.com',
+    password: 'vibe-pw',
+    must_change_password: false,
+  });
+
+  result = ensureForgejoUser('http://localhost:3300', 'vibe', 'human', 'owner-pw', 'vibe-pw', (method) => {
+    if (method === 'GET') {
+      return { ok: false, statusCode: 404, data: {} };
+    }
+    return { ok: false, statusCode: 403, data: { message: 'nope' } };
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.error, /failed to create Forgejo user vibe/);
+  assert.match(result.error, /may not be a Forgejo site admin/);
+
+  result = ensureForgejoUser('http://localhost:3300', 'vibe', 'magnus', 'owner-pw', 'vibe-pw', () => ({
+    ok: false, statusCode: 500, data: {},
+  }));
+  assert.deepEqual(result, { ok: true, created: false });
 });
 
 test('collectSetupAnswers uses defaults and skips blank agent passwords', async () => {

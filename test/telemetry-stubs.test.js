@@ -7,12 +7,12 @@ const os = require('os');
 const path = require('path');
 
 const {
-  parseMistralMeta,
-  extractMistralTelemetry,
-  getMistralProviderModel,
-} = require('../lib/agents/mistral-telemetry');
+  parseVibeMeta,
+  extractVibeTelemetry,
+  getVibeProviderModel,
+} = require('../lib/agents/vibe-telemetry');
 
-// ---------- parseMistralMeta ----------
+// ---------- parseVibeMeta ----------
 
 // Sample meta.json content for fixture-backed tests.
 // Based on real session data from ~/.vibe/logs/session/session_20260701_171711_fbdc221c/meta.json (task-1288).
@@ -64,8 +64,8 @@ const EMPTY_STATS_META = {
   },
 };
 
-test('parseMistralMeta extracts telemetry from meta.json stats', () => {
-  const t = parseMistralMeta(SAMPLE_META);
+test('parseVibeMeta extracts telemetry from meta.json stats', () => {
+  const t = parseVibeMeta(SAMPLE_META);
   assert.ok(t);
   assert.equal(t.inputTokens, 9331);
   assert.equal(t.outputTokens, 62);
@@ -78,22 +78,22 @@ test('parseMistralMeta extracts telemetry from meta.json stats', () => {
   assert.equal(t.sessionCost, 0.014461500000000002);
 });
 
-test('parseMistralMeta returns null for missing stats block', () => {
-  assert.equal(parseMistralMeta({}), null);
-  assert.equal(parseMistralMeta({ session_id: 'x' }), null);
+test('parseVibeMeta returns null for missing stats block', () => {
+  assert.equal(parseVibeMeta({}), null);
+  assert.equal(parseVibeMeta({ session_id: 'x' }), null);
 });
 
-test('parseMistralMeta returns null for empty/garbage input', () => {
-  assert.equal(parseMistralMeta(null), null);
-  assert.equal(parseMistralMeta(undefined), null);
-  assert.equal(parseMistralMeta('not json'), null);
+test('parseVibeMeta returns null for empty/garbage input', () => {
+  assert.equal(parseVibeMeta(null), null);
+  assert.equal(parseVibeMeta(undefined), null);
+  assert.equal(parseVibeMeta('not json'), null);
 });
 
-test('parseMistralMeta returns null for all-zero stats (no usable signal)', () => {
-  assert.equal(parseMistralMeta(EMPTY_STATS_META), null);
+test('parseVibeMeta returns null for all-zero stats (no usable signal)', () => {
+  assert.equal(parseVibeMeta(EMPTY_STATS_META), null);
 });
 
-test('parseMistralMeta coerces string-like numbers gracefully', () => {
+test('parseVibeMeta coerces string-like numbers gracefully', () => {
   const meta = {
     stats: {
       session_prompt_tokens: '1000',
@@ -101,35 +101,35 @@ test('parseMistralMeta coerces string-like numbers gracefully', () => {
       session_total_llm_tokens: '1200',
     },
   };
-  const t = parseMistralMeta(meta);
+  const t = parseVibeMeta(meta);
   assert.ok(t);
   assert.equal(t.inputTokens, 1000);
   assert.equal(t.outputTokens, 200);
   assert.equal(t.totalTokens, 1200);
 });
 
-// ---------- extractMistralTelemetry ----------
+// ---------- extractVibeTelemetry ----------
 
-test('extractMistralTelemetry returns null for empty session directory', () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mistral-empty-'));
+test('extractVibeTelemetry returns null for empty session directory', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-empty-'));
   try {
-    assert.equal(extractMistralTelemetry(null, tmp), null);
+    assert.equal(extractVibeTelemetry(null, tmp), null);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
 
-test('extractMistralTelemetry returns null when no sessions exist', () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mistral-nosess-'));
+test('extractVibeTelemetry returns null when no sessions exist', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-nosess-'));
   try {
-    assert.equal(extractMistralTelemetry(null, tmp), null);
+    assert.equal(extractVibeTelemetry(null, tmp), null);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
 
-test('extractMistralTelemetry parses the most recent session meta.json', () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mistral-fix-'));
+test('extractVibeTelemetry parses the most recent session meta.json', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-fix-'));
   try {
     // Create two sessions; older one first.
     const oldDir = path.join(tmp, 'session_20260601_100000_aaaaaaaa');
@@ -151,7 +151,7 @@ test('extractMistralTelemetry parses the most recent session meta.json', () => {
     // New session meta.
     fs.writeFileSync(path.join(newDir, 'meta.json'), JSON.stringify(SAMPLE_META));
 
-    const result = extractMistralTelemetry(null, tmp);
+    const result = extractVibeTelemetry(null, tmp);
     assert.ok(result);
     assert.equal(result.inputTokens, 9331);
     assert.equal(result.outputTokens, 62);
@@ -162,49 +162,49 @@ test('extractMistralTelemetry parses the most recent session meta.json', () => {
   }
 });
 
-test('extractMistralTelemetry skips sessions without meta.json', () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mistral-nometa-'));
+test('extractVibeTelemetry skips sessions without meta.json', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-nometa-'));
   try {
     const dir = path.join(tmp, 'session_20260701_171711_ccdddddd');
     fs.mkdirSync(dir, { recursive: true });
     // Only write messages.jsonl, no meta.json.
     fs.writeFileSync(path.join(dir, 'messages.jsonl'), '');
 
-    assert.equal(extractMistralTelemetry(null, tmp), null);
+    assert.equal(extractVibeTelemetry(null, tmp), null);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
 
-test('extractMistralTelemetry skips corrupt meta.json', () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mistral-corrupt-'));
+test('extractVibeTelemetry skips corrupt meta.json', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-corrupt-'));
   try {
     const dir = path.join(tmp, 'session_20260701_171711_eefffff');
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, 'meta.json'), 'not valid json{{{');
 
-    assert.equal(extractMistralTelemetry(null, tmp), null);
+    assert.equal(extractVibeTelemetry(null, tmp), null);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
 
-test('extractMistralTelemetry skips session with all-zero stats', () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mistral-zero-'));
+test('extractVibeTelemetry skips session with all-zero stats', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-zero-'));
   try {
     const dir = path.join(tmp, 'session_20260701_171711_gggggggg');
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify(EMPTY_STATS_META));
 
     // All-zero stats should be skipped (no usable signal).
-    assert.equal(extractMistralTelemetry(null, tmp), null);
+    assert.equal(extractVibeTelemetry(null, tmp), null);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
 
-test('extractMistralTelemetry picks valid session when newer one has zero stats', () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mistral-zeronew-'));
+test('extractVibeTelemetry picks valid session when newer one has zero stats', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-zeronew-'));
   try {
     const oldDir = path.join(tmp, 'session_20260601_100000_hhhhhhhh');
     const newDir = path.join(tmp, 'session_20260701_171711_iiiiiiii');
@@ -214,7 +214,7 @@ test('extractMistralTelemetry picks valid session when newer one has zero stats'
     fs.writeFileSync(path.join(oldDir, 'meta.json'), JSON.stringify(SAMPLE_META));
     fs.writeFileSync(path.join(newDir, 'meta.json'), JSON.stringify(EMPTY_STATS_META));
 
-    const result = extractMistralTelemetry(null, tmp);
+    const result = extractVibeTelemetry(null, tmp);
     // Should fall back to the older session which has real stats.
     assert.ok(result);
     assert.equal(result.inputTokens, 9331);
@@ -224,10 +224,10 @@ test('extractMistralTelemetry picks valid session when newer one has zero stats'
   }
 });
 
-// ---------- getMistralProviderModel ----------
+// ---------- getVibeProviderModel ----------
 
-test('getMistralProviderModel returns correct fallback identity', () => {
-  const pm = getMistralProviderModel();
+test('getVibeProviderModel returns correct fallback identity', () => {
+  const pm = getVibeProviderModel();
   assert.equal(pm.provider, 'mistral');
   assert.equal(pm.model, 'mistral');
 });

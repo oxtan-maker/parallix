@@ -979,7 +979,7 @@ test('startReviewLoop isContinue waits long enough for delayed existing fixing d
       log: () => {},
       error: (message) => { throw new Error(message); },
       exit: (code) => { throw new Error(`unexpected exit ${code}`); },
-      consumeReviewerArtifactsFn: async () => ({ consumed: false }),
+      consumeReviewerArtifactsFn: async () => ({ consumed: true, ok: true, reviewState: 'APPROVED' }),
       consumeImplementerArtifactsFn: async () => ({ consumed: false })
     });
   } finally {
@@ -2799,6 +2799,56 @@ test('startReviewLoop keeps persisted same-family reviewer after re-derive block
     `Expected persisted codex reviewer log; got: ${logs.join(' | ')}`
   );
   assert.ok(!logs.some(l => l.includes('re-derived')), `Did not expect re-derive log; got: ${logs.join(' | ')}`);
+});
+
+test('startReviewLoop continue falls back to the persisted reviewer when an explicit override is unsupported', async () => {
+  const { startReviewLoop } = require('../lib/review/review');
+  const launches = [];
+
+  const { exitCode, errors, logs } = await captureExit(() => {
+    return startReviewLoop(TEST_SLUG, {
+      eligibleAgentsForStepFn: () => ['codex', 'claude', 'custom', 'vibe'],
+      resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
+      implementer: 'custom',
+      reviewer: 'vibe',
+      isContinue: true,
+      dryRun: false,
+      readReviewStateFn: () => ({
+        reviewer: 'codex',
+        implementer: 'custom',
+        round: 5,
+        startedAt: '2026-07-04T19:05:22.850Z',
+        phase: 'reviewing',
+        disposition: 'CHANGES_MADE'
+      }),
+      maybeUpdateGraphifyBeforeReviewFn: () => {},
+      isForgejoReviewEnabledFn: () => false,
+      workflowLauncherStatusFn: (agent) => ({ supported: agent !== 'vibe', detail: `${agent} --help` }),
+      rebaseBeforeReviewRoundFn: async () => ({ ok: true, sharedFileConflicts: false }),
+      consumeReviewerArtifactsFn: async () => ({ consumed: false }),
+      consumeImplementerArtifactsFn: async () => ({ consumed: false }),
+      startAgentFn: async (mode, opts) => {
+        launches.push({ mode, agent: opts.agent });
+        return { agent: opts.agent, result: { startedAt: '2026-07-04T19:20:00.000Z' } };
+      },
+      pollForReviewFn: async () => 'APPROVED',
+      transitionTaskFn: () => {},
+      transitionVirtualFn: () => {},
+      applyAgentFallbackFn: ({ original }) => original
+    });
+  });
+
+  assert.equal(exitCode, null);
+  assert.deepEqual(errors, []);
+  assert.deepEqual(launches, [{ mode: 'review', agent: 'codex' }]);
+  assert.ok(
+    logs.some(line => line.includes('falling back to persisted reviewer "codex"')),
+    `Expected persisted-reviewer fallback log; got: ${logs.join(' | ')}`
+  );
+  assert.ok(
+    logs.some(line => line.includes('Selected reviewer: codex (persisted-continue-fallback)')),
+    `Expected persisted continue fallback selection log; got: ${logs.join(' | ')}`
+  );
 });
 
 test('startReviewLoop resolves task file from the mission worktree (regression)', async () => {

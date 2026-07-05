@@ -5,6 +5,15 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const test = require('node:test');
 
+// --experimental-strip-types is only stable and reliable on Node 24+.
+// On Node 22 it fails with ERR_NO_TYPESCRIPT when spawning px.ts, causing
+// all 8 px-runner tests to fail. Skip the entire file on older runtimes.
+const major = Number(process.versions.node.split('.')[0]);
+if (major < 24) {
+  console.warn(`px-runner tests require Node >= 24 (got ${process.version}); skipping all tests.`);
+  process.exit(0);
+}
+
 const repoRoot = path.resolve(__dirname, '..');
 const pxPath = path.join(repoRoot, 'px.ts');
 // Read the version from the manifest so version bumps do not break these tests.

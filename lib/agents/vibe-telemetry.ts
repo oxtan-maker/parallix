@@ -3,9 +3,9 @@ import os from 'node:os';
 import path from 'node:path';
 
 /**
- * Mistral (Vibe) Telemetry Parser
+ * Vibe Telemetry Parser
  *
- * Mistral Vibe writes structured token-usage data to per-session meta files:
+ * Vibe writes structured token-usage data to per-session meta files:
  *   ~/.vibe/logs/session/<session_id>/meta.json
  *
  * Each meta.json contains a `stats` object with token counts:
@@ -22,9 +22,9 @@ import path from 'node:path';
 
 /**
  * The default directory where Vibe writes its session meta files.
- * Overridden by tests via extractMistralTelemetry(basePath).
+ * Overridden by tests via extractVibeTelemetry(basePath).
  */
-export const DEFAULT_MISTRAL_LOG_DIR = path.join(os.homedir(), '.vibe', 'logs', 'session');
+export const DEFAULT_VIBE_LOG_DIR = path.join(os.homedir(), '.vibe', 'logs', 'session');
 
 interface TelemetryResult {
   inputTokens: number;
@@ -62,7 +62,7 @@ interface StatsBlock {
  * Returns null when the content yields no usable signal (missing stats,
  * empty object, or non-object stats).
  */
-export function parseMistralMeta(meta: ParseableMeta | null | undefined): TelemetryResult | null {
+export function parseVibeMeta(meta: ParseableMeta | null | undefined): TelemetryResult | null {
   if (!meta || typeof meta !== 'object') {return null;}
 
   const stats = meta.stats;
@@ -98,10 +98,10 @@ export function parseMistralMeta(meta: ParseableMeta | null | undefined): Teleme
  * @param result - Legacy launcher result object (ignored; kept for API compat)
  * @param basePath - Override the default session log directory. Used by tests.
  */
-export function extractMistralTelemetry(result: unknown, basePath?: string): TelemetryResult | null {
+export function extractVibeTelemetry(result: unknown, basePath?: string): TelemetryResult | null {
   void result; // legacy param, ignored — telemetry comes from on-disk meta.json
 
-  const scanDir = basePath || DEFAULT_MISTRAL_LOG_DIR;
+  const scanDir = basePath || DEFAULT_VIBE_LOG_DIR;
 
   // Scan session subdirectories for the newest meta.json.
   // Basenames are session_<YYYYMMDD>_<HHMMSS>_<id>, so alphabetical sort = chronological.
@@ -141,7 +141,7 @@ export function extractMistralTelemetry(result: unknown, basePath?: string): Tel
       continue;
     }
 
-    const telemetry = parseMistralMeta(meta);
+    const telemetry = parseVibeMeta(meta);
     if (!telemetry) {continue;}
 
     return { ...telemetry, path: metaPath };
@@ -151,9 +151,9 @@ export function extractMistralTelemetry(result: unknown, basePath?: string): Tel
 }
 
 /**
- * Return the provider/model pair for mistral tasks.
+ * Return the provider/model pair for vibe tasks.
  * Used as fallback when telemetry is null.
  */
-export function getMistralProviderModel(): { provider: string; model: string } {
+export function getVibeProviderModel(): { provider: string; model: string } {
   return { provider: 'mistral', model: 'mistral' };
 }

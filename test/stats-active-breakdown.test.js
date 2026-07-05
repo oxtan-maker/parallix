@@ -133,8 +133,8 @@ test('task-1409: range agent performance table includes active-stage agents', ()
       date: '2026-06-15',
       mission: 'task-active1',
       classification: 'ai_sdlc',
-      implementer: 'mistral',
-      model: 'mistral',
+      implementer: 'vibe',
+      model: 'vibe',
       pr_fix_rounds: '0',
       stage: 'active',
     },
@@ -166,8 +166,8 @@ test('task-1409: range agent performance table includes active-stage agents', ()
     'range report should count 0 closed missions');
 
   // Active-stage agents should still appear in agent performance
-  assert.ok(plain.includes('mistral'),
-    'active-stage agent mistral should appear in range report');
+  assert.ok(plain.includes('vibe'),
+    'active-stage agent vibe should appear in range report');
   assert.ok(plain.includes('claude-sonnet-4-6'),
     'active-stage agent claude-sonnet-4-6 should appear in range report');
   assert.ok(plain.includes('claude-sonnet-5'),

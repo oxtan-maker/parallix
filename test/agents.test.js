@@ -27,7 +27,7 @@ const {
 
 const { buildClaudeInvocation, resolveClaudeCommand, extractClaudeSessionId } = require('../lib/agents/claude');
 const { buildCodexDraftInvocation, resolveCodexCommand, extractCodexSessionId } = require('../lib/agents/codex');
-const { buildMistralInvocation, resolveMistralCommand, extractMistralSessionId } = require('../lib/agents/mistral');
+const { buildVibeInvocation, resolveVibeCommand, extractVibeSessionId } = require('../lib/agents/vibe');
 const { buildOpencodeInvocation, resolveOpencodeCommand, extractOpencodeSessionId, __setJsonFormatSupportForTest } = require('../lib/agents/opencode');
 
 
@@ -115,7 +115,7 @@ test('isAgentBlocked handles permanent blocks', () => {
   assert.equal(isAgentBlocked('gemini', config), true);
   assert.equal(isAgentBlocked('claude', config), true);
   assert.equal(isAgentBlocked('codex', config), false);
-  assert.equal(isAgentBlocked('mistral', config), false);
+  assert.equal(isAgentBlocked('vibe', config), false);
   assert.equal(isAgentBlocked('unknown', config), false);
 });
 
@@ -155,7 +155,7 @@ test('isAgentBlocked degrades safely on malformed blocklist entries', () => {
   assert.equal(isAgentBlocked('gemini', config), false);
   assert.equal(isAgentBlocked('claude', config), false);
   assert.equal(isAgentBlocked('codex', config), false);
-  assert.equal(isAgentBlocked('mistral', config), false);
+  assert.equal(isAgentBlocked('vibe', config), false);
 });
 
 // ---------- readAgentConfig ----------
@@ -411,7 +411,7 @@ test('eligibleAgentsForStep falls back to all supported agents when config is ab
   const eligible = eligibleAgentsForStep('draft', { config: null });
   assert.ok(eligible.includes('codex'));
   assert.ok(eligible.includes('claude'));
-  assert.ok(eligible.includes('mistral'));
+  assert.ok(eligible.includes('vibe'));
 });
 
 test('eligibleAgentsForStep falls back when step is not in config', () => {
@@ -827,9 +827,9 @@ setTimeout(() => process.exit(0), 75);
 });
 
 // ---------- Mistral launcher ----------
+test('buildVibeInvocation uses --prompt --trust --output text in the worktree', () => {
 
-test('buildMistralInvocation uses --prompt --trust --output text in the worktree', () => {
-  const invocation = buildMistralInvocation({
+  const invocation = buildVibeInvocation({
     prompt: 'Execute the mission.',
     worktree: '/tmp/mission-task-1117'
   });
@@ -843,15 +843,15 @@ test('buildMistralInvocation uses --prompt --trust --output text in the worktree
   assert.equal(invocation.options.stdio, 'inherit');
 });
 
-test('resolveMistralCommand returns bare vibe', () => {
-  assert.equal(resolveMistralCommand(), 'vibe');
+test('resolveVibeCommand returns bare vibe', () => {
+  assert.equal(resolveVibeCommand(), 'vibe');
 });
 
-test('extractMistralSessionId returns null (vibe has no stdout resume hint)', () => {
-  assert.equal(extractMistralSessionId(null), null);
-  assert.equal(extractMistralSessionId(''), null);
-  assert.equal(extractMistralSessionId('Session completed successfully'), null);
-  assert.equal(extractMistralSessionId('vibe session abc123'), null);
+test('extractVibeSessionId returns null (vibe has no stdout resume hint)', () => {
+  assert.equal(extractVibeSessionId(null), null);
+  assert.equal(extractVibeSessionId(''), null);
+  assert.equal(extractVibeSessionId('Session completed successfully'), null);
+  assert.equal(extractVibeSessionId('vibe session abc123'), null);
 });
 
 // ---------- startAgent FORGEJO_USER propagation ----------
@@ -1427,7 +1427,7 @@ test('startAgent attempts at least 3 eligible agents before giving up (SC 3)', a
         worktree: tmpRoot,
         selectAgentFn: (step, opts) => {
           if (!opts.exclude.has('custom')) return 'custom';
-          if (!opts.exclude.has('mistral')) return 'mistral';
+          if (!opts.exclude.has('vibe')) return 'vibe';
           if (!opts.exclude.has('codex')) return 'codex';
           throw new Error('No agents available');
         },
@@ -1438,13 +1438,13 @@ test('startAgent attempts at least 3 eligible agents before giving up (SC 3)', a
       assert.ok(error instanceof Error);
       assert.ok(error.message.includes('All eligible agents exhausted'));
       assert.ok(error.message.includes('custom'));
-      assert.ok(error.message.includes('mistral'));
+      assert.ok(error.message.includes('vibe'));
       assert.ok(error.message.includes('codex'));
       // Each agent should have its own error details
       assert.ok(error.message.includes('exit 1'));
       // Verify all three agents were attempted
       assert.ok(log.some(m => m.includes('custom')));
-      assert.ok(log.some(m => m.includes('mistral')));
+      assert.ok(log.some(m => m.includes('vibe')));
       assert.ok(log.some(m => m.includes('codex')));
     } finally {
       if (previousAgent !== undefined) process.env.WORKFLOW_AGENT = previousAgent;
@@ -1473,7 +1473,7 @@ test('startAgent retries when first agent fails with non-zero exit code', async 
         selectAgentFn: (step, opts) => {
           if (!opts.exclude.has('custom')) { customAttempted = true; return 'custom'; }
           mistralAttempted = true;
-          return 'mistral';
+          return 'vibe';
         },
         detectLimitHitFn: () => null,
         log: () => {},
@@ -1483,7 +1483,7 @@ test('startAgent retries when first agent fails with non-zero exit code', async 
       assert.ok(customAttempted, 'custom should have been attempted');
       assert.ok(mistralAttempted, 'mistral should have been attempted');
       // Result should be mistral (second agent, exited 0)
-      assert.equal(result.agent, 'mistral');
+      assert.equal(result.agent, 'vibe');
     } finally {
       if (previousAgent !== undefined) process.env.WORKFLOW_AGENT = previousAgent;
     }
@@ -1509,13 +1509,13 @@ test('startAgent launch failure includes stderr snippet in log', async () => {
         worktree: tmpRoot,
         selectAgentFn: (step, opts) => {
           if (!opts.exclude.has('custom')) return 'custom';
-          return 'mistral';
+          return 'vibe';
         },
         detectLimitHitFn: () => null,
         log: msg => log.push(msg),
       }));
 
-      assert.equal(result.agent, 'mistral');
+      assert.equal(result.agent, 'vibe');
       assert.ok(log.some(m => m.includes('Model not found')));
     } finally {
       if (previousAgent !== undefined) process.env.WORKFLOW_AGENT = previousAgent;
@@ -1540,7 +1540,7 @@ test('startAgent launch failure does not retry when limit-hit is detected', asyn
         worktree: tmpRoot,
         selectAgentFn: (step, opts) => {
           if (!opts.exclude.has('custom')) return 'custom';
-          return 'mistral';
+          return 'vibe';
         },
         detectLimitHitFn: ({ agent }) => {
           if (agent === 'custom') { limitHitCount++; return { until: '2026-05-01 18', source: 'test' }; }
@@ -1551,7 +1551,7 @@ test('startAgent launch failure does not retry when limit-hit is detected', asyn
         
       });
 
-      assert.equal(result.agent, 'mistral');
+      assert.equal(result.agent, 'vibe');
       assert.equal(limitHitCount, 1, 'limit-hit should have been detected once');
       assert.ok(log.some(m => m.includes('Limit hit detected')));
     } finally {
@@ -1579,13 +1579,13 @@ test('startAgent launch failure with signal retries next agent', async () => {
         worktree: tmpRoot,
         selectAgentFn: (step, opts) => {
           if (!opts.exclude.has('custom')) return 'custom';
-          return 'mistral';
+          return 'vibe';
         },
         detectLimitHitFn: () => null,
         log: msg => log.push(msg),
       }));
 
-      assert.equal(result.agent, 'mistral');
+      assert.equal(result.agent, 'vibe');
       assert.ok(log.some(m => m.includes('custom') && m.includes('signal')));
     } finally {
       if (previousAgent !== undefined) process.env.WORKFLOW_AGENT = previousAgent;
@@ -1722,7 +1722,7 @@ setTimeout(() => process.exit(0), 200);
     try {
       const log = [];
       const result = await startAgent('active', {
-        agent: 'mistral',
+        agent: 'vibe',
         prompt: 'Execute.',
         worktree: tmpRoot,
         isAgentBlockedFn: () => false,
@@ -1730,9 +1730,9 @@ setTimeout(() => process.exit(0), 200);
         log: msg => log.push(msg)
       });
 
-      assert.equal(result.agent, 'mistral');
+      assert.equal(result.agent, 'vibe');
       assert.equal(result.result.status, 0);
-      const diagnostic = log.find(message => /No output yet from mistral.*for step "active"/.test(message));
+      const diagnostic = log.find(message => /No output yet from vibe.*for step "active"/.test(message));
       assert.ok(diagnostic, `expected active no-output diagnostic in logs: ${log.join(' | ')}`);
       assert.ok(diagnostic.includes('starting up') || diagnostic.includes('running'),
         `diagnostic must include agent stage; got: ${diagnostic}`);
@@ -1765,7 +1765,7 @@ test('startAgent throws with clear error when all agents exhausted', async () =>
         worktree: tmpRoot,
         selectAgentFn: (step, opts) => {
           if (!opts.exclude.has('custom')) return 'custom';
-          if (!opts.exclude.has('mistral')) return 'mistral';
+          if (!opts.exclude.has('vibe')) return 'vibe';
           throw new Error('No agents available');
         },
         detectLimitHitFn: () => null,
@@ -1775,7 +1775,7 @@ test('startAgent throws with clear error when all agents exhausted', async () =>
       assert.ok(error instanceof Error);
       assert.ok(error.message.includes('All eligible agents exhausted'));
       assert.ok(error.message.includes('custom'));
-      assert.ok(error.message.includes('mistral'));
+      assert.ok(error.message.includes('vibe'));
       assert.ok(error.message.includes('exit 1'));
     } finally {
       if (previousAgent !== undefined) process.env.WORKFLOW_AGENT = previousAgent;
@@ -1825,7 +1825,7 @@ test('non-limit launch failure with transient error retries and persists a block
   }, () => startAgent('draft', {
     prompt: 'Execute.',
     selectAgentFn: (step, opts) => {
-      if (!opts.exclude.has('mistral')) return 'mistral';
+      if (!opts.exclude.has('vibe')) return 'vibe';
       if (!opts.exclude.has('custom')) return 'custom';
       throw new Error('All eligible agents exhausted');
     },
@@ -1837,7 +1837,7 @@ test('non-limit launch failure with transient error retries and persists a block
   assert.ok(error instanceof Error);
   assert.ok(error.message.includes('All eligible agents exhausted'));
   assert.equal(blockCalls.length, 1, `transient non-limit failures should persist one block for mistral; got ${JSON.stringify(blockCalls)}`);
-  assert.equal(blockCalls[0].agent, 'mistral');
+  assert.equal(blockCalls[0].agent, 'vibe');
 });
 
 test('invalid-model launch failure retries without persisting a blocklist entry', async () => {
@@ -1857,14 +1857,14 @@ test('invalid-model launch failure retries without persisting a blocklist entry'
       worktree: tmpRoot,
       selectAgentFn: (step, opts) => {
         if (!opts.exclude.has('codex')) return 'codex';
-        return 'mistral';
+        return 'vibe';
       },
       detectLimitHitFn: () => null,
       updateAgentBlockFn: fakeBlockFn,
       log: () => {}
     }));
 
-    assert.equal(result.agent, 'mistral');
+    assert.equal(result.agent, 'vibe');
     assert.deepEqual(blockCalls, []);
   } finally {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
@@ -1885,7 +1885,7 @@ test('custom is excluded from non-limit block logic', async () => {
     prompt: 'Execute.',
     selectAgentFn: (step, opts) => {
       if (!opts.exclude.has('custom')) return 'custom';
-      if (!opts.exclude.has('mistral')) return 'mistral';
+      if (!opts.exclude.has('vibe')) return 'vibe';
       throw new Error('All eligible agents exhausted');
     },
     detectLimitHitFn: () => null,
@@ -1896,7 +1896,7 @@ test('custom is excluded from non-limit block logic', async () => {
   assert.ok(error instanceof Error);
   assert.ok(error.message.includes('All eligible agents exhausted'));
   assert.equal(blockCalls.length, 1, `only non-custom agents should be blocklisted on transient failures; got ${JSON.stringify(blockCalls)}`);
-  assert.equal(blockCalls[0].agent, 'mistral', 'mistral should be blocked, not custom');
+  assert.equal(blockCalls[0].agent, 'vibe', 'mistral should be blocked, not custom');
 });
 
 test('hard launch failure (model not found) does not blocklist agent family', async () => {
@@ -1912,7 +1912,7 @@ test('hard launch failure (model not found) does not blocklist agent family', as
   }, () => startAgent('draft', {
     prompt: 'Execute.',
     selectAgentFn: (step, opts) => {
-      if (!opts.exclude.has('mistral')) return 'mistral';
+      if (!opts.exclude.has('vibe')) return 'vibe';
       if (!opts.exclude.has('custom')) return 'custom';
       throw new Error('All eligible agents exhausted');
     },
@@ -1955,7 +1955,7 @@ test('mistral without a non-interactive tool-approval bypass gets re-blocklisted
   const result = await withPathLaunchers({ vibe: vibeBody }, () => startAgent('active', {
     prompt: 'Execute.',
     selectAgentFn: (step, opts) => {
-      if (!opts.exclude.has('mistral')) return 'mistral';
+      if (!opts.exclude.has('vibe')) return 'vibe';
       throw new Error('All eligible agents exhausted');
     },
     detectLimitHitFn: () => null,
@@ -1963,6 +1963,6 @@ test('mistral without a non-interactive tool-approval bypass gets re-blocklisted
     log: () => {}
   }));
 
-  assert.equal(result.agent, 'mistral', 'mistral should complete successfully once it can approve its own tool calls non-interactively');
+  assert.equal(result.agent, 'vibe', 'vibe should complete successfully once it can approve its own tool calls non-interactively');
   assert.deepEqual(blockCalls, [], `mistral should not be blocklisted for a genuine non-interactive tool-approval gap; got ${JSON.stringify(blockCalls)}`);
 });

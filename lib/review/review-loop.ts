@@ -790,6 +790,9 @@ export async function startReviewLoop(slug: string, opts: {
   // Resolve reviewer after the no-PR/self-heal gate so implementation-phase
   // guidance does not depend on workstation launcher availability.
   let reviewerSource = 'explicit';
+  const persistedContinueReviewer = isContinue && persisted && persisted.reviewer
+    ? persisted.reviewer
+    : null;
   let selectErr: Error | null = null;
   if (!reviewer) {
     if (persisted && persisted.reviewer) {
@@ -844,6 +847,14 @@ export async function startReviewLoop(slug: string, opts: {
   const willLaunchRounds = maxAttempts >= ((persisted && persisted.round) || 1);
   const resumesInFixingPhase = persisted && persisted.phase === 'fixing' && !dryRun;
 
+  const maybeFallbackToPersistedContinueReviewer = () => {
+    if (!persistedContinueReviewer || reviewer === persistedContinueReviewer) {return false;}
+    log(fmt.status('WARN', `Unsupported explicit reviewer "${reviewer}" while resuming ${slug}; falling back to persisted reviewer "${persistedContinueReviewer}" for the in-flight round.`));
+    reviewer = persistedContinueReviewer;
+    reviewerSource = 'persisted-continue-fallback';
+    return true;
+  };
+
   // Dry-run validates the reviewer identity but only explicit reviewers bypass
   // launcher support checks; auto-derived/persisted reviewers still exercise
   // fallback routing so dry-run logs reflect the real selection path.
@@ -855,25 +866,33 @@ export async function startReviewLoop(slug: string, opts: {
     const reviewerStatus = workflowLauncherStatusFn(reviewer);
     const hasInjectedLauncherStatus = workflowLauncherStatusFn !== workflowLauncherStatus;
     if (!agents.includes(reviewer) || (hasInjectedLauncherStatus && !reviewerStatus.supported)) {
-      const reason = !agents.includes(reviewer) ? 'blocked or unsupported' : 'launcher is not available';
-      error(fmt.status('FAIL', `Unsupported reviewer: "${reviewer}" (${reason}).`));
-      if (reason === 'launcher is not available' && reviewerStatus.detail) {
-        error(`       Looked for: ${reviewerStatus.detail}`);
+      if (maybeFallbackToPersistedContinueReviewer()) {
+        log(fmt.status('INFO', `Resuming persisted reviewer "${reviewer}" for continue-mode validation.`));
+      } else {
+        const reason = !agents.includes(reviewer) ? 'blocked or unsupported' : 'launcher is not available';
+        error(fmt.status('FAIL', `Unsupported reviewer: "${reviewer}" (${reason}).`));
+        if (reason === 'launcher is not available' && reviewerStatus.detail) {
+          error(`       Looked for: ${reviewerStatus.detail}`);
+        }
+        error('\n' + fmt.status('INFO', 'Full runtime matrix:'));
+        formatMatrixSummaryFn(buildAutonomousReviewMatrixFn()).forEach((line: string) => error(`  ${line}`));
+        error('\n' + fmt.status('FAIL', `No runnable reviewer route for implementer "${implementer}".`));
+        exit(1);
+        return;
       }
-      error('\n' + fmt.status('INFO', 'Full runtime matrix:'));
-      formatMatrixSummaryFn(buildAutonomousReviewMatrixFn()).forEach((line: string) => error(`  ${line}`));
-      error('\n' + fmt.status('FAIL', `No runnable reviewer route for implementer "${implementer}".`));
-      exit(1);
-      return;
     }
   } else if (!willLaunchRounds) {
     if (!agents.includes(reviewer)) {
-      error(fmt.status('FAIL', `Unsupported reviewer: "${reviewer}" (blocked or unsupported).`));
-      error('\n' + fmt.status('INFO', 'Full runtime matrix:'));
-      formatMatrixSummaryFn(buildAutonomousReviewMatrixFn()).forEach((line: string) => error(`  ${line}`));
-      error('\n' + fmt.status('FAIL', `No runnable reviewer route for implementer "${implementer}".`));
-      exit(1);
-      return;
+      if (maybeFallbackToPersistedContinueReviewer()) {
+        log(fmt.status('INFO', `Resuming persisted reviewer "${reviewer}" for continue-mode validation.`));
+      } else {
+        error(fmt.status('FAIL', `Unsupported reviewer: "${reviewer}" (blocked or unsupported).`));
+        error('\n' + fmt.status('INFO', 'Full runtime matrix:'));
+        formatMatrixSummaryFn(buildAutonomousReviewMatrixFn()).forEach((line: string) => error(`  ${line}`));
+        error('\n' + fmt.status('FAIL', `No runnable reviewer route for implementer "${implementer}".`));
+        exit(1);
+        return;
+      }
     }
   } else {
     let reviewerStatus = workflowLauncherStatusFn(reviewer);
@@ -881,6 +900,10 @@ export async function startReviewLoop(slug: string, opts: {
     while (!agents.includes(reviewer) || !reviewerStatus.supported) {
       triedReviewers.add(reviewer);
       if (reviewerSource === 'explicit') {
+        if (maybeFallbackToPersistedContinueReviewer()) {
+          reviewerStatus = workflowLauncherStatusFn(reviewer);
+          continue;
+        }
         const reason = !agents.includes(reviewer) ? 'blocked or unsupported' : 'launcher is not available';
         error(fmt.status('FAIL', `Unsupported reviewer: "${reviewer}" (${reason}).`));
         if (reviewerStatus.detail) { error(`       Looked for: ${reviewerStatus.detail}`); }

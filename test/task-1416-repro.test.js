@@ -157,7 +157,7 @@ test('mistral exit 1 with real session telemetry is misclassified as a launch fa
     sessionsModule: fakeSessions,
     selectAgentFn: (step, opts) => {
       attempts += 1;
-      if (!opts.exclude.has('mistral')) {return 'mistral';}
+      if (!opts.exclude.has('vibe')) {return 'vibe';}
       throw new Error('All eligible agents exhausted for step "draft"');
     },
     detectLimitHitFn: () => null,
@@ -169,10 +169,10 @@ test('mistral exit 1 with real session telemetry is misclassified as a launch fa
 
   // GREEN after the fix: the session meta.json proves the mistral/vibe turn
   // actually consumed tokens, so startAgent must accept the run instead of
-  // rerouting away from mistral or writing a blocklist entry (SC 3).
-  assert.equal(result.agent, 'mistral', 'mistral should be accepted as successful despite exit 1 given valid telemetry');
-  assert.equal(attempts, 1, 'mistral must not be rerouted away from');
-  assert.deepEqual(blockCalls, [], 'mistral must not be blocklisted for a spurious exit-1 with valid telemetry');
+  // rerouting away from vibe or writing a blocklist entry (SC 3).
+  assert.equal(result.agent, 'vibe', 'vibe should be accepted as successful despite exit 1 given valid telemetry');
+  assert.equal(attempts, 1, 'vibe must not be rerouted away from');
+  assert.deepEqual(blockCalls, [], 'vibe must not be blocklisted for a spurious exit-1 with valid telemetry');
 });
 
 // SC 4 (codex): a genuine codex failure — exit 1 with no rollout telemetry at
@@ -199,7 +199,7 @@ test('codex exit 1 with no telemetry still reroutes and blocklists (real-failure
     sessionsModule: fakeSessions,
     selectAgentFn: (step, opts) => {
       if (!opts.exclude.has('codex')) {return 'codex';}
-      return 'mistral';
+      return 'vibe';
     },
     detectLimitHitFn: () => null,
     updateAgentBlockFn: fakeBlockFn,
@@ -208,7 +208,7 @@ test('codex exit 1 with no telemetry still reroutes and blocklists (real-failure
 
   fs.rmSync(worktree, { recursive: true, force: true });
 
-  assert.equal(result.agent, 'mistral', 'a real codex failure (no telemetry) must still reroute to the next agent');
+  assert.equal(result.agent, 'vibe', 'a real codex failure (no telemetry) must still reroute to the next agent');
   assert.ok(blockCalls.some(c => c.agent === 'codex'), `expected a codex blocklist entry for a genuine failure; got ${JSON.stringify(blockCalls)}`);
 });
 
@@ -255,7 +255,7 @@ test('mistral exit 1 with only stale telemetry still reroutes and blocklists (re
     isAgentBlockedFn: () => false,
     sessionsModule: fakeSessions,
     selectAgentFn: (step, opts) => {
-      if (!opts.exclude.has('mistral')) {return 'mistral';}
+      if (!opts.exclude.has('vibe')) {return 'vibe';}
       return 'codex';
     },
     detectLimitHitFn: () => null,
@@ -265,6 +265,6 @@ test('mistral exit 1 with only stale telemetry still reroutes and blocklists (re
 
   fs.rmSync(worktree, { recursive: true, force: true });
 
-  assert.equal(result.agent, 'codex', 'a real mistral failure with only stale telemetry must still reroute');
-  assert.ok(blockCalls.some(c => c.agent === 'mistral'), `expected a mistral blocklist entry for a genuine failure; got ${JSON.stringify(blockCalls)}`);
+  assert.equal(result.agent, 'codex', 'a real vibe failure with only stale telemetry must still reroute');
+  assert.ok(blockCalls.some(c => c.agent === 'vibe'), `expected a vibe blocklist entry for a genuine failure; got ${JSON.stringify(blockCalls)}`);
 });

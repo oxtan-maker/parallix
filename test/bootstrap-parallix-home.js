@@ -4,13 +4,47 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-if (!process.env.PARALLIX_HOME) {
-  process.env.PARALLIX_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-test-home-'));
+const tempRoots = [];
+
+function makeTempDir(prefix) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  tempRoots.push(dir);
+  return dir;
 }
 
+// Tests must never touch the operator's real persistent state, even when the
+// caller already exported PARALLIX_HOME/HOME in their shell.
+process.env.PARALLIX_HOME = makeTempDir('parallix-test-home-');
+process.env.HOME = makeTempDir('parallix-test-user-home-');
+
 fs.mkdirSync(process.env.PARALLIX_HOME, { recursive: true });
+fs.mkdirSync(process.env.HOME, { recursive: true });
 
 const agentsLocalPath = path.join(process.env.PARALLIX_HOME, 'agents.local.json');
 if (!fs.existsSync(agentsLocalPath)) {
   fs.writeFileSync(agentsLocalPath, '{"blocklist":{}}\n');
 }
+
+// Safety net: if a test forgets to stub launcher discovery, these harmless
+// binaries prevent real Codex/Claude/Vibe/Opencode CLIs from consuming tokens
+// or mutating operator-local state on the workstation.
+const launcherBin = makeTempDir('parallix-test-launchers-');
+for (const name of ['codex', 'claude', 'opencode', 'vibe']) {
+  const launcherPath = path.join(launcherBin, name);
+  fs.writeFileSync(launcherPath, `#!${process.execPath}
+if (process.argv.includes('--help')) process.exit(0);
+process.exit(0);
+`);
+  fs.chmodSync(launcherPath, 0o755);
+}
+process.env.PATH = `${launcherBin}${path.delimiter}${process.env.PATH || ''}`;
+
+process.on('exit', () => {
+  for (const dir of tempRoots.reverse()) {
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+    } catch (_) {
+      // best-effort cleanup only
+    }
+  }
+});

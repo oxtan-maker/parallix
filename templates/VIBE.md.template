@@ -1,17 +1,17 @@
-# Mistral / Vibe — {{PROJECT}}
+# Vibe — {{PROJECT}}
 
-This is the Mistral-specific adapter. Workflow policy lives in:
+This is the Vibe-specific adapter. Workflow policy lives in:
 - `AGENTS.md`
 - `parallix/README.md`
 
-## Mistral-specific runtime rules
+## Vibe-specific runtime rules
 
 - Keep mission work in `../{{PROJECT}}-<slug>` (sibling of the primary repo), not the main checkout.
 - Preserve the backlog task file for the current slug. You may update mission-relevant content when required, but never delete, rename, or move it.
 - Do not edit backlog `assignee` bookkeeping. The workflow records agent ownership itself.
 - If a workflow helper is installed outside the default shell `PATH`, set the helper-specific override env var instead of depending on shell-local PATH changes.
 
-## Mistral mode mapping
+## Vibe mode mapping
 
 - Draft work maps onto repo `draft`
 - Execution work maps onto repo `execute`

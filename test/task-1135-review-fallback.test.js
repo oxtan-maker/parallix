@@ -50,12 +50,12 @@ test('CP-1: blocked auto-derived reviewer falls back via selectAgent without mut
   const exitCodes = [];
 
   // implementer=mistral. selectAgent picks codex (unsupported).
-  // The while loop enters, calls selectAgentFn('review', { exclude: ['mistral', 'codex'] })
+  // The while loop enters, calls selectAgentFn('review', { exclude: ['vibe', 'codex'] })
   // which returns 'claude'. 
   await startReviewLoop(TEST_SLUG, {
-    eligibleAgentsForStepFn: () => ['codex', 'claude', 'custom', 'mistral'],
+    eligibleAgentsForStepFn: () => ['codex', 'claude', 'custom', 'vibe'],
     resolveTaskFileFn: () => ({ ok: true, taskFile: TASK_FILE }),
-    implementer: 'mistral',
+    implementer: 'vibe',
     dryRun: true,
     log: m => logs.push(m),
     error: m => errors.push(m),
@@ -71,7 +71,7 @@ test('CP-1: blocked auto-derived reviewer falls back via selectAgent without mut
       detail: agent
     }),
     formatMatrixSummaryFn: () => [],
-    buildAutonomousReviewMatrixFn: () => ({ agents: ['codex', 'claude', 'custom', 'mistral'] })
+    buildAutonomousReviewMatrixFn: () => ({ agents: ['codex', 'claude', 'custom', 'vibe'] })
   });
 
   // The loop should have succeeded by falling back to claude
@@ -121,7 +121,7 @@ test('CP-1: usage-limit on auto-derived reviewer triggers fallback with blocklis
   // implementer=claude. selectAgent picks custom.
   // In the real code, startAgent writes the blocklist entry and returns a fallback.
   await startReviewLoop(TEST_SLUG, {
-    eligibleAgentsForStepFn: () => ['codex', 'claude', 'mistral', 'custom'],
+    eligibleAgentsForStepFn: () => ['codex', 'claude', 'vibe', 'custom'],
     resolveTaskFileFn: () => ({ ok: true, taskFile: TASK_FILE }),
     implementer: 'claude',
     dryRun: true,
@@ -131,21 +131,21 @@ test('CP-1: usage-limit on auto-derived reviewer triggers fallback with blocklis
     selectAgentFn: (step, opts) => {
       const exclude = opts.exclude instanceof Set ? opts.exclude : new Set(opts.exclude || []);
       if (!exclude.has('custom')) return 'custom';
-      return 'mistral';
+      return 'vibe';
     },
     workflowLauncherStatusFn: (agent) => ({
       supported: true,
       detail: agent
     }),
     formatMatrixSummaryFn: () => [],
-    buildAutonomousReviewMatrixFn: () => ({ agents: ['codex', 'claude', 'mistral', 'custom'] }),
+    buildAutonomousReviewMatrixFn: () => ({ agents: ['codex', 'claude', 'vibe', 'custom'] }),
     startAgentFn: async (step, opts) => {
       // Simulate: first attempt picks custom, hits limit -> writes blocklist
       const original = opts.agent || 'custom';
       if (original === 'custom') {
         blocklistWrites.push({ agent: 'custom', until: '2026-06-01 12' });
         // startAgent returns the fallback agent it actually launched
-        return { agent: 'mistral', original };
+        return { agent: 'vibe', original };
       }
       return { agent: original };
     }
@@ -184,9 +184,9 @@ test('CP-1: persisted blocked reviewer falls back via selectAgent without mutati
 
   // Persisted reviewer=codex (from review-state.json), but codex is unsupported.
   // The while loop enters with reviewerSource='persisted', calls selectAgentFn('review', { exclude: ['custom', 'codex'] })
-  // which returns 'mistral'.
+  // which returns 'vibe'.
   await startReviewLoop(TEST_SLUG, {
-    eligibleAgentsForStepFn: () => ['codex', 'claude', 'mistral', 'custom'],
+    eligibleAgentsForStepFn: () => ['codex', 'claude', 'vibe', 'custom'],
     resolveTaskFileFn: () => ({ ok: true, taskFile: TASK_FILE }),
     implementer: 'custom',
     dryRun: true,
@@ -196,7 +196,7 @@ test('CP-1: persisted blocked reviewer falls back via selectAgent without mutati
     exit: c => exitCodes.push(c),
     selectAgentFn: (step, opts) => {
       const exclude = opts.exclude instanceof Set ? opts.exclude : new Set(opts.exclude || []);
-      if (!exclude.has('mistral')) return 'mistral';
+      if (!exclude.has('vibe')) return 'vibe';
       return 'claude';
     },
     workflowLauncherStatusFn: (agent) => ({
@@ -204,7 +204,7 @@ test('CP-1: persisted blocked reviewer falls back via selectAgent without mutati
       detail: agent
     }),
     formatMatrixSummaryFn: () => [],
-    buildAutonomousReviewMatrixFn: () => ({ agents: ['codex', 'claude', 'mistral', 'custom'] }),
+    buildAutonomousReviewMatrixFn: () => ({ agents: ['codex', 'claude', 'vibe', 'custom'] }),
     startAgentFn: async (step, opts) => {
       return { agent: opts.agent };
     }
@@ -225,7 +225,7 @@ test('CP-1: persisted blocked reviewer falls back via selectAgent without mutati
 
   // Verify fallback was selected
   assert.ok(
-    logs.some(l => l.includes('trying fallback "mistral"')),
+    logs.some(l => l.includes('trying fallback "vibe"')),
     `Expected fallback-to-mistral log; got: ${logs.join(' | ')}`
   );
 
@@ -256,9 +256,9 @@ test('CP-1: reviewer fallback with no Backlog assignee mutation (regression)', a
   // implementer=mistral. selectAgent picks codex (unsupported).
   // Next selectAgent call returns 'claude'.
   await startReviewLoop(TEST_SLUG, {
-    eligibleAgentsForStepFn: () => ['codex', 'claude', 'custom', 'mistral'],
+    eligibleAgentsForStepFn: () => ['codex', 'claude', 'custom', 'vibe'],
     resolveTaskFileFn: () => ({ ok: true, taskFile: TASK_FILE }),
-    implementer: 'mistral',
+    implementer: 'vibe',
     dryRun: true,
     log: m => logs.push(m),
     error: m => errors.push(m),
@@ -273,7 +273,7 @@ test('CP-1: reviewer fallback with no Backlog assignee mutation (regression)', a
       detail: agent
     }),
     formatMatrixSummaryFn: () => [],
-    buildAutonomousReviewMatrixFn: () => ({ agents: ['codex', 'claude', 'custom', 'mistral'] })
+    buildAutonomousReviewMatrixFn: () => ({ agents: ['codex', 'claude', 'custom', 'vibe'] })
   });
 
   // Verify no Backlog assignee mutation (CP-2 removed this - SC 5)
@@ -297,7 +297,7 @@ test('CP-1: explicit blocked reviewer fails fast without fallback (unchanged beh
   // implementer=custom, explicit reviewer=codex (unsupported)
   // Current code: explicit reviewer never enters fallback loop, hard-fails
   await startReviewLoop(TEST_SLUG, {
-    eligibleAgentsForStepFn: () => ['claude', 'mistral', 'custom', 'codex'], 
+    eligibleAgentsForStepFn: () => ['claude', 'vibe', 'custom', 'codex'], 
     resolveTaskFileFn: () => ({ ok: true, taskFile: TASK_FILE }),
     implementer: 'custom',
     reviewer: 'codex', // explicit
@@ -310,7 +310,7 @@ test('CP-1: explicit blocked reviewer fails fast without fallback (unchanged beh
       detail: agent
     }),
     formatMatrixSummaryFn: () => [],
-    buildAutonomousReviewMatrixFn: () => ({ agents: ['claude', 'mistral', 'custom', 'codex'] })
+    buildAutonomousReviewMatrixFn: () => ({ agents: ['claude', 'vibe', 'custom', 'codex'] })
   });
 
   // Explicit blocked reviewer should fail fast
@@ -335,10 +335,10 @@ test('CP-1: multi-hop fallback scans remaining eligible agents when deterministi
   const exitCodes = [];
 
   // implementer=custom. selectAgent picks codex (unsupported).
-  // Next selectAgent call returns mistral (unsupported).
+  // Next selectAgent call returns vibe (unsupported).
   // Next selectAgent call returns claude (supported).
   await startReviewLoop(TEST_SLUG, {
-    eligibleAgentsForStepFn: () => ['claude', 'custom', 'codex', 'mistral'],
+    eligibleAgentsForStepFn: () => ['claude', 'custom', 'codex', 'vibe'],
     resolveTaskFileFn: () => ({ ok: true, taskFile: TASK_FILE }),
     implementer: 'custom',
     dryRun: true,
@@ -348,7 +348,7 @@ test('CP-1: multi-hop fallback scans remaining eligible agents when deterministi
     selectAgentFn: (step, opts) => {
       const exclude = opts.exclude instanceof Set ? opts.exclude : new Set(opts.exclude || []);
       if (!exclude.has('codex')) return 'codex';
-      if (!exclude.has('mistral')) return 'mistral';
+      if (!exclude.has('vibe')) return 'vibe';
       return 'claude';
     },
     workflowLauncherStatusFn: (agent) => ({
@@ -356,7 +356,7 @@ test('CP-1: multi-hop fallback scans remaining eligible agents when deterministi
       detail: agent
     }),
     formatMatrixSummaryFn: () => [],
-    buildAutonomousReviewMatrixFn: () => ({ agents: ['claude', 'custom', 'codex', 'mistral'] })
+    buildAutonomousReviewMatrixFn: () => ({ agents: ['claude', 'custom', 'codex', 'vibe'] })
   });
 
   // Should succeed by scanning remaining eligible agents
@@ -387,9 +387,9 @@ test('CP-1: no runnable reviewer exits with error and does not mutate Backlog as
   // Next call returns claude (unsupported).
   // Next call throws because no more agents.
   await startReviewLoop(TEST_SLUG, {
-    eligibleAgentsForStepFn: () => ['codex', 'claude', 'mistral'], 
+    eligibleAgentsForStepFn: () => ['codex', 'claude', 'vibe'], 
     resolveTaskFileFn: () => ({ ok: true, taskFile: TASK_FILE }),
-    implementer: 'mistral',
+    implementer: 'vibe',
     dryRun: true,
     log: m => logs.push(m),
     error: m => errors.push(m),
@@ -402,7 +402,7 @@ test('CP-1: no runnable reviewer exits with error and does not mutate Backlog as
     },
     workflowLauncherStatusFn: () => ({ supported: false, detail: 'blocked' }),
     formatMatrixSummaryFn: () => [],
-    buildAutonomousReviewMatrixFn: () => ({ agents: ['codex', 'claude', 'mistral'] })
+    buildAutonomousReviewMatrixFn: () => ({ agents: ['codex', 'claude', 'vibe'] })
   });
 
   // Should exit with error
@@ -431,7 +431,7 @@ test('CP-1: single-family fallback when no different-family reviewer is runnable
   // implementer=claude. Different-family agents are unsupported.
   // -> single-family fallback: claude reviews its own work
   await startReviewLoop(TEST_SLUG, {
-    eligibleAgentsForStepFn: () => ['codex', 'claude', 'mistral'],
+    eligibleAgentsForStepFn: () => ['codex', 'claude', 'vibe'],
     resolveTaskFileFn: () => ({ ok: true, taskFile: TASK_FILE }),
     implementer: 'claude',
     dryRun: true,
@@ -440,7 +440,7 @@ test('CP-1: single-family fallback when no different-family reviewer is runnable
     exit: c => exitCodes.push(c),
     selectAgentFn: (step, opts) => {
       const exclude = opts.exclude instanceof Set ? opts.exclude : new Set(opts.exclude || []);
-      const available = ['codex', 'mistral'].filter(a => !exclude.has(a));
+      const available = ['codex', 'vibe'].filter(a => !exclude.has(a));
       if (available.length === 0) throw new Error('No agents available');
       return available[0];
     },
@@ -449,7 +449,7 @@ test('CP-1: single-family fallback when no different-family reviewer is runnable
       detail: agent
     }),
     formatMatrixSummaryFn: () => [],
-    buildAutonomousReviewMatrixFn: () => ({ agents: ['codex', 'claude', 'mistral'] })
+    buildAutonomousReviewMatrixFn: () => ({ agents: ['codex', 'claude', 'vibe'] })
   });
 
   // Should succeed with single-family fallback

@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 import * as fmt from '../core/fmt.js';
 import { startCodexDraftAgent, resolveCodexCommand, isSpuriousCodexExit } from './codex.js';
 import { startClaudeAgent, resolveClaudeCommand } from './claude.js';
-import { startMistralAgent, resolveMistralCommand, isSpuriousMistralExit } from './mistral.js';
+import { startVibeAgent, resolveVibeCommand, isSpuriousVibeExit } from './vibe.js';
 import { startOpencodeAgent, resolveOpencodeCommand, isSpuriousOpencodeExit } from './opencode.js';
 import { detectLimitHit, formatBlockUntil, DEFAULT_FALLBACK_HOURS } from './limit-hit.js';
 import * as storage from '../core/storage.js';
@@ -81,21 +81,21 @@ let _commandPathProbe: ((name: string) => string | null) | null = null;
 const LAUNCHERS: {[key: string]: Function} = {
   codex: startCodexDraftAgent,
   claude: startClaudeAgent,
-  mistral: startMistralAgent,
+  vibe: startVibeAgent,
   custom: startOpencodeAgent
 };
 
 const RESOLVERS: {[key: string]: () => string} = {
   codex: resolveCodexCommand,
   claude: resolveClaudeCommand,
-  mistral: resolveMistralCommand,
+  vibe: resolveVibeCommand,
   custom: resolveOpencodeCommand
 };
 
 const HEALTH_PROBE_ARGS: {[key: string]: string[]} = Object.freeze({
   codex: ['--help'],
   claude: ['--help'],
-  mistral: ['--help'],
+  vibe: ['--help'],
   custom: ['--help']
 });
 const LAUNCHER_HEALTH_TIMEOUT_MS = 3000;
@@ -948,17 +948,17 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
     // (spawn-tee close event can emit null code) and should not trigger a retry.
     // Spurious opencode v2.0.0 JSON-mode exits (exit 1 after a valid
     // "reason":"stop" completion) are excluded — the agent completed, the
-    // non-zero code is a post-run cleanup race. Codex and Mistral get the
+    // non-zero code is a post-run cleanup race. Codex and Vibe get the
     // same treatment via their own family-specific telemetry evidence
     // (result.telemetry carrying real, non-zero token usage) rather than an
     // opencode-specific stdout pattern — see isSpuriousCodexExit (codex.ts)
-    // and isSpuriousMistralExit (mistral.ts).
+    // and isSpuriousVibeExit (vibe.ts).
     const launchFailed = result &&
       ((result.status !== null && result.status !== 0) || (result.signal && !result.error)) &&
       !limitHit &&
       !isSpuriousOpencodeExit(result) &&
       !(chosen === 'codex' && isSpuriousCodexExit(result)) &&
-      !(chosen === 'mistral' && isSpuriousMistralExit(result));
+      !(chosen === 'vibe' && isSpuriousVibeExit(result));
     if (launchFailed) {
       const exitInfo = result.signal
         ? `signal ${result.signal}`

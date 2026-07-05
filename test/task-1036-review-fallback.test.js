@@ -61,12 +61,12 @@ test('eligibleAgentsForStep returns all current launchers when review step is mi
   // Object.keys(LAUNCHERS), which now reflects the current supported families.
   const configWithoutReview = {
     steps: {
-      draft: { eligible: ['mistral', 'codex', 'custom'], selection: 'random' },
-      active: { eligible: ['codex', 'claude', 'mistral', 'custom'], selection: 'random' }
+      draft: { eligible: ['vibe', 'codex', 'custom'], selection: 'random' },
+      active: { eligible: ['codex', 'claude', 'vibe', 'custom'], selection: 'random' }
     }
   };
   const eligible = eligibleAgentsForStep('review', { config: configWithoutReview });
-  assert.ok(eligible.includes('mistral'), 'mistral must be in fallback pool when review step is absent');
+  assert.ok(eligible.includes('vibe'), 'mistral must be in fallback pool when review step is absent');
   assert.ok(eligible.includes('claude'), 'claude must also be present');
   assert.ok(eligible.includes('codex'), 'codex must also be present');
 });
@@ -74,20 +74,20 @@ test('eligibleAgentsForStep returns all current launchers when review step is mi
 test('eligibleAgentsForStep returns all current launchers when act-on-review step is missing from config (TASK-1036)', () => {
   const configWithoutActOnReview = {
     steps: {
-      draft: { eligible: ['mistral', 'codex', 'custom'], selection: 'random' },
-      active: { eligible: ['codex', 'claude', 'mistral', 'custom'], selection: 'random' }
+      draft: { eligible: ['vibe', 'codex', 'custom'], selection: 'random' },
+      active: { eligible: ['codex', 'claude', 'vibe', 'custom'], selection: 'random' }
     }
   };
   const eligible = eligibleAgentsForStep('act-on-review', { config: configWithoutActOnReview });
-  assert.ok(eligible.includes('mistral'), 'mistral must be in fallback pool when act-on-review step is absent');
+  assert.ok(eligible.includes('vibe'), 'mistral must be in fallback pool when act-on-review step is absent');
 });
 
-test('startAgent review fallback selects mistral when claude hits limit and review step is missing (TASK-1036 transcript)', async () => {
+test('startAgent review fallback selects vibe when claude hits limit and review step is missing (TASK-1036 transcript)', async () => {
   // Current behavior: pinned reviewer=claude, implementer=codex, claude limit-hit,
-  // fallback selects mistral because review step has no explicit eligibility config.
+  // fallback selects vibe because review step has no explicit eligibility config.
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1036-review-fallback-'));
   try {
-    const order = ['claude', 'mistral'];
+    const order = ['claude', 'vibe'];
     const selectAgentFn = (step, opts = {}) => {
       const exclude = opts.exclude instanceof Set ? opts.exclude : new Set();
       return order.find(a => !exclude.has(a));
@@ -112,8 +112,8 @@ test('startAgent review fallback selects mistral when claude hits limit and revi
       // Config without review step — gemini is in the fallback pool
       const configWithoutReview = {
         steps: {
-          draft: { eligible: ['mistral', 'codex', 'custom'], selection: 'random' },
-          active: { eligible: ['codex', 'claude', 'mistral', 'custom'], selection: 'random' }
+          draft: { eligible: ['vibe', 'codex', 'custom'], selection: 'random' },
+          active: { eligible: ['codex', 'claude', 'vibe', 'custom'], selection: 'random' }
         }
       };
 
@@ -131,7 +131,7 @@ test('startAgent review fallback selects mistral when claude hits limit and revi
         log: () => {}
       });
 
-      assert.equal(result.agent, 'mistral', 'mistral should be selected as fallback when claude hits limit and review step is missing');
+      assert.equal(result.agent, 'vibe', 'mistral should be selected as fallback when claude hits limit and review step is missing');
       assert.ok(blocks.length <= 1, `expected at most one block write, got ${blocks.length}`);
       if (blocks.length === 1) {
         assert.deepEqual(blocks[0], { agent: 'claude', until: '2026-05-01 18' });
@@ -145,10 +145,10 @@ test('startAgent review fallback selects mistral when claude hits limit and revi
   }
 });
 
-test('startAgent act-on-review fallback selects mistral when implementer hits limit and act-on-review step is missing (TASK-1036)', async () => {
+test('startAgent act-on-review fallback selects vibe when implementer hits limit and act-on-review step is missing (TASK-1036)', async () => {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1036-act-on-review-fallback-'));
   try {
-    const order = ['custom', 'mistral'];
+    const order = ['custom', 'vibe'];
     const selectAgentFn = (step, opts = {}) => {
       const exclude = opts.exclude instanceof Set ? opts.exclude : new Set();
       return order.find(a => !exclude.has(a));
@@ -172,8 +172,8 @@ test('startAgent act-on-review fallback selects mistral when implementer hits li
     try {
       const configWithoutActOnReview = {
         steps: {
-          draft: { eligible: ['mistral', 'codex', 'custom'], selection: 'random' },
-          active: { eligible: ['codex', 'claude', 'mistral', 'custom'], selection: 'random' }
+          draft: { eligible: ['vibe', 'codex', 'custom'], selection: 'random' },
+          active: { eligible: ['codex', 'claude', 'vibe', 'custom'], selection: 'random' }
         }
       };
 
@@ -191,7 +191,7 @@ test('startAgent act-on-review fallback selects mistral when implementer hits li
         log: () => {}
       });
 
-      assert.equal(result.agent, 'mistral', 'mistral should be selected as fallback in act-on-review when custom hits limit and step is missing');
+      assert.equal(result.agent, 'vibe', 'mistral should be selected as fallback in act-on-review when custom hits limit and step is missing');
       assert.equal(blocks.length, 1);
     } finally {
       if (previousAgent !== undefined) process.env.WORKFLOW_AGENT = previousAgent;

@@ -18,12 +18,12 @@ const REVIEW_VERBOSE_PROMPT_PATH = path.join(__dirname, '..', '..', 'prompts', '
 const ACT_ON_REVIEW_VERBOSE_PROMPT_PATH = path.join(__dirname, '..', '..', 'prompts', 'act-on-review-verbose.md');
 
 type PromptEntry = { review: string; actOnReview: string };
-type PromptEntrypoints = { codex: PromptEntry; claude: PromptEntry; mistral: PromptEntry; custom: PromptEntry; autonomous: PromptEntry };
+type PromptEntrypoints = { codex: PromptEntry; claude: PromptEntry; vibe: PromptEntry; custom: PromptEntry; autonomous: PromptEntry };
 
 export const PROMPT_ENTRYPOINTS: PromptEntrypoints = {
   codex:  { review: '$review all',                           actOnReview: '$act-on-review' },
   claude: { review: '/review all',                           actOnReview: '/act-on-review' },
-  mistral: { review: '$review all',                           actOnReview: '/act-on-review' },
+  vibe: { review: '$review all',                           actOnReview: '/act-on-review' },
   custom: { review: '$review all',                           actOnReview: '/act-on-review' },
   autonomous: { review: '$review all',                       actOnReview: '/act-on-review' }
 };

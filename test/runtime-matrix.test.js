@@ -81,8 +81,8 @@ test('launcherStatus reports an agent as blocked when its launcher is missing', 
 
 test('launcherStatus resolves bare agent names from PATH (SC 4)', () => {
   withPathLaunchers({ vibe: 'process.exit(0);' }, () => {
-    const status = launcherStatus('mistral');
-    assert.equal(status.agent, 'mistral');
+    const status = launcherStatus('vibe');
+    assert.equal(status.agent, 'vibe');
     assert.equal(status.supported, true);
     assert.match(status.detail, /^vibe\b/);
   });

@@ -22,7 +22,7 @@ import * as claudeTelemetryMod from './agents/claude-telemetry.js';
 import * as codexMod from './agents/codex.js';
 import * as codexTelemetryMod from './agents/codex-telemetry.js';
 import * as limitHitMod from './agents/limit-hit.js';
-import * as mistralMod from './agents/mistral.js';
+import * as vibeMod from './agents/vibe.js';
 import * as opencodeMod from './agents/opencode.js';
 
 // commands/ — mixed export styles
@@ -81,7 +81,7 @@ export const claudeTelemetry = claudeTelemetryMod;
 export const codex = codexMod;
 export const codexTelemetry = codexTelemetryMod;
 export const limitHit = limitHitMod;
-export const mistral = mistralMod;
+export const vibe = vibeMod;
 export const opencode = opencodeMod;
 
 // commands/

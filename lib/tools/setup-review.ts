@@ -456,6 +456,59 @@ function ensureRepoCollaborators(baseUrl: string, repoSlug: string, ownerToken: 
   return { ok: true, created };
 }
 
+/**
+ * Ensure a Forgejo user account exists, creating it via the admin API when missing.
+ * Requires basic auth (login + password) rather than a token: Forgejo scopes tokens
+ * away from admin endpoints by default, and the owner's stored token (created with
+ * REVIEW_TOKEN_SCOPES) won't have `write:admin`. Password auth is checked against the
+ * account's actual admin bit instead, so this works whenever the interactive operator
+ * is a Forgejo site admin - which is how new agent users (e.g. `vibe`) get provisioned
+ * for a fresh repo without a manual `forgejo admin user create` step.
+ *
+ * @param {string} baseUrl
+ * @param {string} user
+ * @param {string} ownerLogin
+ * @param {string} ownerPassword
+ * @param {string} password - password to set for the new account; reused immediately afterwards to mint its token
+ * @param {Function} [requestFn]
+ * @param {{email?: string}} [options]
+ * @returns {{ok: boolean, created?: boolean, error?: string, response?: any}}
+ */
+function ensureForgejoUser(baseUrl: string, user: string, ownerLogin: string, ownerPassword: string, password: string, requestFn: Function = apiRequest, options: any = {}) {
+  const normalizedBaseUrl = normalizeBaseUrl(baseUrl);
+  const existing = requestFn('GET', `${normalizedBaseUrl}/api/v1/users/${encodeURIComponent(user)}`, {
+    basicAuth: { user: ownerLogin, password: ownerPassword },
+  });
+  if (existing.ok) {
+    return { ok: true, created: false };
+  }
+  if (existing.statusCode !== 404) {
+    // Inconclusive (permission issue, network error, etc.) - don't block token creation below.
+    return { ok: true, created: false };
+  }
+
+  const created = requestFn('POST', `${normalizedBaseUrl}/api/v1/admin/users`, {
+    basicAuth: { user: ownerLogin, password: ownerPassword },
+    body: {
+      username: user,
+      email: options.email || `${user}@example.com`,
+      password,
+      must_change_password: false,
+    },
+  });
+  if (!created.ok) {
+    const scopeHint = created.statusCode === 403
+      ? ` "${ownerLogin}" may not be a Forgejo site admin; create the user manually (e.g. \`forgejo admin user create --username ${user} --email ${user}@example.com --password '<password>'\`) and re-run setup-review.`
+      : '';
+    return {
+      ok: false,
+      error: `failed to create Forgejo user ${user} (HTTP ${created.statusCode || 'n/a'}).${scopeHint}`,
+      response: created.data,
+    };
+  }
+  return { ok: true, created: true };
+}
+
 /** @param {string} rootDir @param {string} remoteName @param {string} remoteUrl @returns {{ok: boolean, created?: boolean, updated?: boolean, error?: string}} */
 function ensureReviewRemote(rootDir: string, remoteName: string, remoteUrl: string): { ok: boolean; created?: boolean; updated?: boolean; error?: string } {
   const current = readConfiguredReviewRemote(rootDir, remoteName);
@@ -890,6 +943,16 @@ async function bootstrapReviewSurface(rootDir: string, setup: any, options: any 
     const createdTokens = [{ user: setup.ownerLogin, path: ownerTokenPath }];
     const warnings = /** @type {Array<{user: string, error: string, response?: any}>} */ ([]);
     for (const agent of setup.agentPasswords) {
+      if (agent.password) {
+        const userResult = ensureForgejoUser(baseUrl as string, agent.user, setup.ownerLogin, setup.ownerPassword, agent.password, requestFn);
+        if (!userResult.ok) {
+          warnings.push({ user: agent.user, error: /** @type {string} */ (userResult.error), response: userResult.response });
+          continue;
+        }
+        if (userResult.created) {
+          log(fmt.status('PASS', `Created Forgejo user ${agent.user}.`));
+        }
+      }
       const tokenResult = await createTokenWithRetries({
         ...setup,
         baseUrl: /** @type {string} */ (baseUrl),
@@ -1140,6 +1203,7 @@ export { runVerifyEnv };
 export { bootstrapReviewSurface };
 export { collectSetupAnswers };
 export { createToken };
+export { ensureForgejoUser };
 export { ensureRepo };
 export { ensureReviewRemote };
 export { evaluateReviewSetup };

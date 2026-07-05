@@ -61,7 +61,7 @@ function normalizeHistoricalImplementer(value: unknown) {
   if (/(^|[^a-z])claude([^a-z]|$)/.test(normalized)) {return 'claude';}
   if (/(^|[^a-z])gemini([^a-z]|$)/.test(normalized)) {return 'gemini';}
   if (/(^|[^a-z])custom([^a-z]|$)/.test(normalized)) {return 'custom';}
-  if (/(^|[^a-z])mistral([^a-z]|$)/.test(normalized)) {return 'mistral';}
+  if (/(^|[^a-z])vibe([^a-z]|$)/.test(normalized)) {return 'vibe';}
   if (/(^|[^a-z])magnus([^a-z]|$)/.test(normalized)) {return 'magnus';}
   if (/(^|[^a-z])human([^a-z]|$)/.test(normalized)) {return 'human';}
   return null;

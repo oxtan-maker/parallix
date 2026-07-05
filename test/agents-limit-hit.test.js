@@ -590,8 +590,8 @@ test('startAgent honours opts.exclude as a seed for the tried set (family-separa
       // Reviewer "codex" hits a limit. Without the exclude seed, selectAgent could
       // legitimately pick "claude" (the implementer). With exclude=[claude], the
       // tried-set already has claude on the very first selectAgent call, so the
-      // fallback can only be "mistral".
-      const order = ['codex', 'claude', 'mistral'];
+      // fallback can only be "vibe".
+      const order = ['codex', 'claude', 'vibe'];
       const selectAgentFn = (step, opts = {}) => {
         const exclude = opts.exclude instanceof Set ? opts.exclude : new Set();
         seenExcludes.push([...exclude].sort());
@@ -615,8 +615,8 @@ test('startAgent honours opts.exclude as a seed for the tried set (family-separa
         log: () => {}
       });
 
-      // Fallback must be mistral (NOT claude — claude is the implementer).
-      assert.equal(result.agent, 'mistral');
+      // Fallback must be vibe (NOT claude — claude is the implementer).
+      assert.equal(result.agent, 'vibe');
       // The fallback selectAgent call must have been invoked with exclude
       // containing both claude (seed) and codex (already-tried original).
       assert.deepEqual(seenExcludes[0], ['claude', 'codex']);

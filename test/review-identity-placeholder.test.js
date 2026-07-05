@@ -8,13 +8,13 @@ test('buildCompactReviewPrompt uses actualReviewer when provided', () => {
     branch: 'mission/task-1051',
     implementer: 'codex',
     attempt: 1,
-    actualReviewer: 'mistral'
+    actualReviewer: 'vibe'
   });
 
   assert.match(prompt, /px review task-1051 --verify/);
   assert.match(prompt, /\$review all/);
   assert.doesNotMatch(prompt, /Reviewer: claude/);
-  assert.doesNotMatch(prompt, /Reviewer: mistral/);
+  assert.doesNotMatch(prompt, /Reviewer: vibe/);
 });
 
 test('buildCompactActOnReviewPrompt uses actualImplementer when provided', () => {
