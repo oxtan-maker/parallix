@@ -1,10 +1,12 @@
 ---
 id: TASK-1408
 title: more ts errors
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-07-02 19:22'
-labels: []
+labels:
+  - bug
+  - ai_sdlc
 dependencies: []
 ---
 
