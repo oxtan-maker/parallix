@@ -21,23 +21,8 @@ SCRIPT_DIR="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 cd "$REPO_ROOT"
 
-# Missions run in separate worktrees of the same repo, and each mission's
-# verification gate can be invoked concurrently by its own agent. `npm test`
-# is CPU-heavy; letting several full test runs stampede at once doesn't fail
-# anything, but it makes every one of them so slow under contention that the
-# gate step looks hung to whichever agent is waiting on it. Serialize full
-# test runs across all worktrees with a lock file in the shared .git dir
-# (git-common-dir resolves the same path from any worktree) so concurrent
-# gate runs queue up instead of thrashing.
-GIT_COMMON_DIR="$(git rev-parse --git-common-dir 2>/dev/null || echo "$REPO_ROOT/.git")"
-VERIFY_GATE_LOCK="${GIT_COMMON_DIR}/parallix-verify-all.lock"
-
 gate_all() {
-  if command -v flock >/dev/null 2>&1; then
-    flock "$VERIFY_GATE_LOCK" -c "npm test"
-  else
-    npm test
-  fi
+  npm test
 }
 
 # Static-analysis gate: runs ESLint, tsc --checkJs, and test-hygiene sequentially
