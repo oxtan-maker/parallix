@@ -815,17 +815,24 @@ function deriveFixRoundsLocalAuthoritative(slug, rootDir, repo) {
  * @param {{start: Date, end: Date}} window
  * @param {{rootDir?: string|null, deriveFixRoundsFn?: Function}} [options]
  */
-function summarizeAgentWindow(rows, window, options = {}) {
-  /** @type {{rootDir?: string|null, deriveFixRoundsFn?: Function}} */
-  const opts = options;
-  const { rootDir = null, deriveFixRoundsFn = deriveFixRoundsLocalAuthoritative } = opts;
+/**
+ * Shared mission-dedup + agent-grouping pass behind `Agent performance this
+ * week`. Deduplicates globally by (repo, mission) so each mission is counted
+ * exactly once across all agent groups, then groups the winning per-mission
+ * rows by display key (model name, falling back to implementer family).
+ * Also returns a mission-key -> displayKey map so other report sections
+ * (e.g. the stage-spend table) can fan back out over the *raw*, non-deduped
+ * window rows using the same row identity/grouping without re-deriving it.
+ *
+ * @param {StatsRow[]} rows
+ * @param {{start: Date, end: Date}} window
+ */
+function computeAgentMissionGroups(rows, window) {
   const windowRows = rows.filter(row => rowInWindow(row, window));
   // Agent performance must include active-stage rows so in-progress
   // implementation work is visible (task-1409). Include all rows with a valid
   // classification regardless of closed status.
   const allValidWindowRows = windowRows.filter(row => normalizeClassification(row.classification) !== null);
-  // Deduplicate globally by (repo, mission) first so each mission is counted
-  // exactly once across all agent groups — matching the mission-count table.
   // Rollup rows (e.g. stage 'default') often carry a blank `model` alongside
   // the mission's final pr_fix_rounds count; a row with a real model must
   // always win over one without, or the mission gets bucketed under the
@@ -868,11 +875,27 @@ function summarizeAgentWindow(rows, window, options = {}) {
   const uniqueMissions = Object.values(byMission);
   /** @type {Record<string, StatsRow[]>} */
   const groups = {};
+  /** @type {Record<string, string>} */
+  const missionKeyToDisplayKey = {};
   for (const row of uniqueMissions) {
     const displayKey = (row.model && String(row.model).trim()) || (row.implementer || 'unknown');
+    missionKeyToDisplayKey[statsMissionKey(row)] = displayKey;
     if (!groups[displayKey]) {groups[displayKey] = [];}
     groups[displayKey].push(row);
   }
+  return { allValidWindowRows, groups, missionKeyToDisplayKey };
+}
+
+/**
+ * @param {StatsRow[]} rows
+ * @param {{start: Date, end: Date}} window
+ * @param {{rootDir?: string|null, deriveFixRoundsFn?: Function}} [options]
+ */
+function summarizeAgentWindow(rows, window, options = {}) {
+  /** @type {{rootDir?: string|null, deriveFixRoundsFn?: Function}} */
+  const opts = options;
+  const { rootDir = null, deriveFixRoundsFn = deriveFixRoundsLocalAuthoritative } = opts;
+  const { groups } = computeAgentMissionGroups(rows, window);
   // Build agent groups from the globally deduplicated missions.
   // For each mission, trust local ground truth (events/branch history) over
   // the stored value when available — this is what makes the report reflect
@@ -897,6 +920,108 @@ function summarizeAgentWindow(rows, window, options = {}) {
       };
     })
     .sort((a, b) => a.implementer.localeCompare(b.implementer));
+}
+
+// Canonical report stages for the per-agent spend-by-stage table (task-1414).
+// Stored stage `active` is displayed as `execute`, matching the alias already
+// used by `MISSION_PHASE_ORDER` for the single-mission phase report. Unlike
+// `MISSION_PHASE_ORDER`, this table also carries an explicit `default` column
+// (rows with no stage recorded) because the backlog request names it directly.
+const AGENT_SPEND_STAGE_COLUMNS = [
+  { stage: 'draft', label: 'draft' },
+  { stage: 'active', label: 'execute' },
+  { stage: 'review', label: 'review' },
+  { stage: 'follow-up', label: 'follow-up' },
+  { stage: 'default', label: 'default' },
+];
+
+/**
+ * Classifies a grouped agent row into the spend metric family whose stored
+ * telemetry field is the right lens for that agent (task-1414):
+ *  - Codex / OpenAI-backed rows: `openai_usage_after` (usage % snapshot)
+ *  - Claude and Mistral rows: `cost_usd` (dollar spend)
+ *  - Custom/local-model rows (and anything else unrecognized, since custom/
+ *    local is the safe default per the backlog request): `duration_minutes`
+ *
+ * @param {string} displayKey
+ * @param {StatsRow[]} groupRows
+ */
+function classifyAgentSpendFamily(displayKey, groupRows) {
+  const probe = [displayKey, ...groupRows.flatMap(row => [row.model, row.implementer, row.provider])]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  if (/codex|openai/.test(probe)) {return 'usage';}
+  if (/claude|anthropic/.test(probe)) {return 'cost';}
+  if (/mistral/.test(probe)) {return 'cost';}
+  return 'duration';
+}
+
+/**
+ * Builds the current-week per-agent stage-spend breakdown behind the new
+ * weekly stats table (task-1414). Reuses the exact same mission dedup and
+ * display-key grouping as `summarizeAgentWindow()` (so rows/ordering match
+ * `Agent performance this week`), then fans back out over every raw window
+ * row (not just the deduped mission winner) to sum each stage's spend metric,
+ * since draft/execute/review/follow-up/default are stored as separate rows
+ * per mission.
+ *
+ * @param {StatsRow[]} rows
+ * @param {{start: Date, end: Date}} window
+ */
+function summarizeAgentStageSpend(rows, window) {
+  const { allValidWindowRows, groups, missionKeyToDisplayKey } = computeAgentMissionGroups(rows, window);
+
+  /** @type {Record<string, StatsRow[]>} */
+  const rawRowsByDisplayKey = {};
+  for (const row of allValidWindowRows) {
+    const displayKey = missionKeyToDisplayKey[statsMissionKey(row)];
+    if (!displayKey) {continue;}
+    if (!rawRowsByDisplayKey[displayKey]) {rawRowsByDisplayKey[displayKey] = [];}
+    rawRowsByDisplayKey[displayKey].push(row);
+  }
+
+  const knownStages = new Set(AGENT_SPEND_STAGE_COLUMNS.map(entry => entry.stage));
+
+  return Object.keys(groups)
+    .sort((a, b) => a.localeCompare(b))
+    .map(displayKey => {
+      const family = classifyAgentSpendFamily(displayKey, groups[displayKey]);
+      /** @type {Record<string, number>} */
+      const byStage = {};
+      for (const { stage } of AGENT_SPEND_STAGE_COLUMNS) {byStage[stage] = 0;}
+      for (const row of (rawRowsByDisplayKey[displayKey] || [])) {
+        const rawStage = String(row.stage || 'default').trim().toLowerCase() || 'default';
+        const bucket = knownStages.has(rawStage) ? rawStage : 'default';
+        const value = family === 'usage' ? (Number.parseInt(String(row.openai_usage_after), 10) || 0)
+          : family === 'cost' ? (Number.parseFloat(String(row.cost_usd)) || 0)
+          : (Number.parseInt(String(row.duration_minutes), 10) || 0);
+        byStage[bucket] += value;
+      }
+      const total = AGENT_SPEND_STAGE_COLUMNS.reduce((sum, { stage }) => sum + byStage[stage], 0);
+      return { implementer: displayKey, family, byStage, total };
+    });
+}
+
+/**
+ * Formats one spend-table cell as `<metric> (<share %>)`, matching the
+ * backlog request's example (`1$ (10%)`). Renders a stable empty-state value
+ * instead of misleading `0%` share math when the row has no non-zero spend
+ * for its metric family (task-1414, SC-6).
+ *
+ * @param {number} value
+ * @param {number} total
+ * @param {'usage'|'cost'|'duration'} family
+ */
+function formatAgentSpendCell(value, total, family) {
+  if (!total) {return '—';}
+  const pct = Math.round((value / total) * 100);
+  if (family === 'usage') {return `${value}% (${pct}%)`;}
+  if (family === 'cost') {
+    const rounded = Math.round(value * 100) / 100;
+    return `$${rounded} (${pct}%)`;
+  }
+  return `${value}m (${pct}%)`;
 }
 
 /**
@@ -1016,6 +1141,19 @@ function renderWeeklyStatsReport(rows, options = {}) {
     currentAgentStats.length > 0
       ? currentAgentStats.map((row, index) => [row.implementer, currentMissionColors[index], currentAgentColors[index]])
       : [['none', '0', '0.00']]
+  ));
+  lines.push('');
+  const currentAgentSpend = summarizeAgentStageSpend(rows, windows.current);
+  lines.push(fmt.bold(`Agent spend by stage this week (${windows.current.label})`));
+  lines.push(formatStatsTable(
+    ['Agent family', ...AGENT_SPEND_STAGE_COLUMNS.map(entry => entry.label), 'total'],
+    currentAgentSpend.length > 0
+      ? currentAgentSpend.map(row => [
+        row.implementer,
+        ...AGENT_SPEND_STAGE_COLUMNS.map(entry => formatAgentSpendCell(row.byStage[entry.stage], row.total, row.family)),
+        formatAgentSpendCell(row.total, row.total, row.family),
+      ])
+      : [['none', ...AGENT_SPEND_STAGE_COLUMNS.map(() => '—'), '—']]
   ));
   lines.push('');
   lines.push(fmt.bold(`Agent performance previous week (${windows.previous.label})`));
@@ -2141,6 +2279,9 @@ if (typeof module !== 'undefined') { module.exports = stats; }
   deriveImplementerAndFixRounds,
   summarizeMissionWindow,
   summarizeAgentWindow,
+  summarizeAgentStageSpend,
+  classifyAgentSpendFamily,
+  formatAgentSpendCell,
   colorAverageFixRounds,
   colorMissionCounts,
   printStatsUsage,

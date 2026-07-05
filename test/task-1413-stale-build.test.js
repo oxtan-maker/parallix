@@ -44,7 +44,9 @@ function spawnCli(...args) {
 }
 
 function ensureStatsCsv() {
-  const statsPath = path.join(process.env.PARALLIX_HOME, 'stats.csv');
+  const home = process.env.PARALLIX_HOME || path.join(require('os').homedir(), '.local', 'state', 'parallix');
+  fs.mkdirSync(home, { recursive: true });
+  const statsPath = path.join(home, 'stats.csv');
   if (!fs.existsSync(statsPath)) {
     fs.writeFileSync(
       statsPath,
@@ -113,17 +115,11 @@ test('fresh generated JS allows normal command dispatch', () => {
     'fresh stats.js must have mtime >= stats.ts mtime'
   );
 
-  // Ensure PARALLIX_HOME has a stats.csv so px stats doesn't fail with
-  // "CSV file not found" during the full test suite (where bootstrap sets
-  // PARALLIX_HOME to a temp directory with no CSV).
-  const home = process.env.PARALLIX_HOME || path.join(require('os').homedir(), '.local', 'state', 'parallix');
-  fs.mkdirSync(home, { recursive: true });
-  const csvPath = path.join(home, 'stats.csv');
-  if (!fs.existsSync(csvPath)) {
-    fs.writeFileSync(csvPath, 'date,repo,mission,classification,implementer,pr_fix_rounds,provider,model,implementer_agent,reviewer_agent,stage,input_tokens,output_tokens,cached_tokens,context_tokens,tool_calls,openai_usage_before,openai_usage_after,openai_usage_delta,duration_minutes,cost_usd,closed\n', 'utf8');
-  }
-
-  const result = spawnCli('stats');
+  // Uses `stats --help` rather than a bare `stats` invocation because the
+  // latter reads <PARALLIX_HOME>/stats.csv, whose presence depends on
+  // fixtures other test files create/remove in the shared PARALLIX_HOME
+  // directory; `--help` dispatches without touching that shared state.
+  const result = spawnCli('stats', '--help');
 
   assert.strictEqual(result.status, 0, 'CLI must exit with code 0 for fresh build');
 

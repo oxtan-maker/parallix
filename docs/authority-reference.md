@@ -298,7 +298,7 @@ inside, restored by, or removed with the globally installed npm package.
 - Show command help and examples: `px stats --help`
 
 Behavior:
-- Workflow-owned stats datasets (`stats.csv` schema) print the current-week and previous-week mission tables plus the two agent-performance tables.
+- Workflow-owned stats datasets (`stats.csv` schema) print the current-week and previous-week mission tables, the two agent-performance tables, and — for the current week only — an agent spend-by-stage table (columns `draft`, `execute`, `review`, `follow-up`, `default`, `total`) showing each agent's tracked spend per stage as `<metric> (<share %>)`: Codex/OpenAI rows use usage-percentage snapshots (`openai_usage_after`), Claude and Mistral rows use dollar cost (`cost_usd`), and Custom/local-model rows use clock duration (`duration_minutes`). Rows with no non-zero spend for their metric family show `—` instead of misleading `0%` math.
 - With `--from YYYY-MM-DD --to YYYY-MM-DD`, workflow-owned stats datasets instead print one mission table and one agent-performance table for rows whose `date` is within the inclusive range.
 - With a mission slug (`px stats task-1285`) or `--mission <slug>`, the command prints one mission broken down by phase — `draft`, `execute` (stored as the `active` stage), and `review` are always shown, plus any `follow-up`/extra recorded stages, with per-phase provider, model, implementer, token, tool-call, and duration columns and a totals row. The output is a pure function of the stored rows, so re-running it does not change the data.
 

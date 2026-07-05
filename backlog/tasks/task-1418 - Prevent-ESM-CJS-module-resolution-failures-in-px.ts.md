@@ -1,28 +1,30 @@
 ---
-id: TASK-1414
-title: extend stats to include where agents spend their usage
+id: TASK-1418
+title: Prevent ESM/CJS module resolution failures in px.ts
 status: backlog
 assignee: []
-created_date: '2026-07-04 05:49'
-labels: []
+created_date: '2026-07-04 08:57'
+labels:
+  - guardrail
+  - esm
+  - ci-cd
 dependencies: []
+priority: high
 ---
 
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-To get better usage of the agents we need to increase the visibility on where they spend their quotas. Make a table with columns draft, execute, review, follow-up, default, total
-
-rows are this weeks agents having stats (models, same as in Agent performance this week table)
-
-for custom we should calculate duration since its assumed to be a local model and clock time is what is costing us
-for codex we should calculate usage
-for claude we should calulate $
-
-then write in each cells the metric for each agent and in parentis (X %). Example
-
-claude 1$ (10%)  3$ (30%) 7$ (70%)
+Add guardrails to prevent module resolution failures
 <!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [ ] #1 px.ts imports use .ts extensions for local modules so tsx/esm resolver finds them
+- [ ] #2 Running `node px.ts active` succeeds without ERR_MODULE_NOT_FOUND
+- [ ] #3 CI/lint step validates that .ts files import with .ts extensions (not .js) for local relative imports
+- [ ] #4 package.json has "type": "module" OR all local imports use explicit extensions consistent with runtime
+<!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

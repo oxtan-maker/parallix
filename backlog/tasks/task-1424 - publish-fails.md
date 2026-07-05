@@ -4,6 +4,7 @@ title: publish fails
 status: backlog
 assignee: []
 created_date: '2026-07-04 15:59'
+updated_date: '2026-07-05 06:20'
 labels: []
 dependencies: []
 ---
@@ -41,6 +42,17 @@ Tip: set GEMINI_API_KEY or GOOGLE_API_KEY to use Gemini for semantic extraction.
 [FAIL] npm notice 7.9kB CHANGELOG.md
 
 after integrating task-1417
+
+after another integration I get:
+
+[FAIL] Could not verify the exact tree being published: [parallix] Stale build detected. One or more compiled artifacts are older than their TypeScript source:
+[FAIL]   - /home/magnus/code/parallix/lib/commands/stats.js (mtime 1783182124653.8125 < /home/magnus/code/parallix/lib/commands/stats.ts mtime 1783232195547.9404)
+[FAIL] Run `npm run build:cjs` to regenerate, or set PARALLIX_SKIP_BUILD_CHECK=1 to bypass.
+[FAIL] 
+
+which also indicates perhaps another problem
+
+also integration leaves stray tgz files that is not cleaned up
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Definition of Done

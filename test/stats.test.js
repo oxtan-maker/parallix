@@ -487,6 +487,82 @@ test('renderWeeklyStatsReport colors best and worst mission counts', () => {
   assert.match(report, /\x1b\[36mgemini\x1b\[39m\s+\x1b\[32m3\x1b\[39m/);
 });
 
+test('task-1414: renderWeeklyStatsReport adds an agent spend-by-stage table with the contracted columns', () => {
+  const report = stats.renderWeeklyStatsReport([
+    { date: '2026-05-18', repo: 'r', mission: 'task-codex', classification: 'ai_sdlc', implementer: 'codex', provider: 'openai', stage: 'draft', pr_fix_rounds: '0', openai_usage_after: '0' },
+  ], { today: '2026-05-18' });
+
+  const plain = require('../lib/core/fmt').stripAnsi(report);
+  assert.match(plain, /Agent spend by stage this week/);
+  assert.match(plain, /Agent family\s+draft\s+execute\s+review\s+follow-up\s+default\s+total/);
+});
+
+test('task-1414: renderWeeklyStatsReport aggregates a Codex row from openai_usage_after with stage active shown as execute', () => {
+  const report = stats.renderWeeklyStatsReport([
+    { date: '2026-05-16', repo: 'r', mission: 'task-codex', classification: 'ai_sdlc', implementer: 'codex', provider: 'openai', stage: 'draft', pr_fix_rounds: '0', openai_usage_after: '20', cost_usd: '0', duration_minutes: '0' },
+    { date: '2026-05-17', repo: 'r', mission: 'task-codex', classification: 'ai_sdlc', implementer: 'codex', provider: 'openai', stage: 'active', pr_fix_rounds: '0', openai_usage_after: '30', cost_usd: '0', duration_minutes: '0' },
+    { date: '2026-05-18', repo: 'r', mission: 'task-codex', classification: 'ai_sdlc', implementer: 'codex', provider: 'openai', stage: 'review', pr_fix_rounds: '0', openai_usage_after: '50', cost_usd: '0', duration_minutes: '0' },
+  ], { today: '2026-05-18' });
+
+  const plain = require('../lib/core/fmt').stripAnsi(report);
+  const spendSection = plain.slice(plain.indexOf('Agent spend by stage this week'));
+  assert.match(spendSection, /codex\s+20% \(20%\)\s+30% \(30%\)\s+50% \(50%\)\s+0% \(0%\)\s+0% \(0%\)\s+100% \(100%\)/);
+  // Not fed by cost_usd or duration_minutes for a Codex/OpenAI row.
+  assert.doesNotMatch(spendSection, /\$/);
+  assert.doesNotMatch(spendSection, /\dm \(/);
+});
+
+test('task-1414: renderWeeklyStatsReport aggregates a Claude row from cost_usd, not tokens/duration/usage', () => {
+  const report = stats.renderWeeklyStatsReport([
+    { date: '2026-05-16', repo: 'r', mission: 'task-claude', classification: 'ai_sdlc', implementer: 'claude', stage: 'draft', pr_fix_rounds: '0', openai_usage_after: '999', cost_usd: '1', duration_minutes: '999' },
+    { date: '2026-05-17', repo: 'r', mission: 'task-claude', classification: 'ai_sdlc', implementer: 'claude', stage: 'active', pr_fix_rounds: '0', openai_usage_after: '999', cost_usd: '3', duration_minutes: '999' },
+    { date: '2026-05-18', repo: 'r', mission: 'task-claude', classification: 'ai_sdlc', implementer: 'claude', stage: 'review', pr_fix_rounds: '0', openai_usage_after: '999', cost_usd: '6', duration_minutes: '999' },
+  ], { today: '2026-05-18' });
+
+  const plain = require('../lib/core/fmt').stripAnsi(report);
+  const spendSection = plain.slice(plain.indexOf('Agent spend by stage this week'));
+  assert.match(spendSection, /claude\s+\$1 \(10%\)\s+\$3 \(30%\)\s+\$6 \(60%\)\s+\$0 \(0%\)\s+\$0 \(0%\)\s+\$10 \(100%\)/);
+  assert.doesNotMatch(spendSection, /999/);
+});
+
+test('task-1414: renderWeeklyStatsReport aggregates a Custom/local row from duration_minutes, not cost or usage', () => {
+  const report = stats.renderWeeklyStatsReport([
+    { date: '2026-05-16', repo: 'r', mission: 'task-custom', classification: 'ai_sdlc', implementer: 'custom', stage: 'draft', pr_fix_rounds: '0', openai_usage_after: '999', cost_usd: '999', duration_minutes: '5' },
+    { date: '2026-05-17', repo: 'r', mission: 'task-custom', classification: 'ai_sdlc', implementer: 'custom', stage: 'active', pr_fix_rounds: '0', openai_usage_after: '999', cost_usd: '999', duration_minutes: '15' },
+    { date: '2026-05-18', repo: 'r', mission: 'task-custom', classification: 'ai_sdlc', implementer: 'custom', stage: 'review', pr_fix_rounds: '0', openai_usage_after: '999', cost_usd: '999', duration_minutes: '30' },
+  ], { today: '2026-05-18' });
+
+  const plain = require('../lib/core/fmt').stripAnsi(report);
+  const spendSection = plain.slice(plain.indexOf('Agent spend by stage this week'));
+  assert.match(spendSection, /custom\s+5m \(10%\)\s+15m \(30%\)\s+30m \(60%\)\s+0m \(0%\)\s+0m \(0%\)\s+50m \(100%\)/);
+  assert.doesNotMatch(spendSection, /999/);
+});
+
+test('task-1414: renderWeeklyStatsReport spend table groups a local model row by model name, matching Agent performance this week', () => {
+  const rows = [
+    { date: '2026-05-17', repo: 'r', mission: 'task-model', classification: 'ai_sdlc', implementer: 'custom', model: 'qwen3.5', stage: 'draft', pr_fix_rounds: '0', duration_minutes: '10' },
+    { date: '2026-05-18', repo: 'r', mission: 'task-model', classification: 'ai_sdlc', implementer: 'custom', model: 'qwen3.5', stage: 'active', pr_fix_rounds: '0', duration_minutes: '10' },
+  ];
+  const report = stats.renderWeeklyStatsReport(rows, { today: '2026-05-18' });
+  const plain = require('../lib/core/fmt').stripAnsi(report);
+
+  assert.match(plain, /Agent performance this week[\s\S]*qwen3\.5/);
+  const spendSection = plain.slice(plain.indexOf('Agent spend by stage this week'));
+  assert.match(spendSection, /qwen3\.5\s+10m \(50%\)\s+10m \(50%\)/);
+  assert.doesNotMatch(spendSection, /\bcustom\b/);
+});
+
+test('task-1414: renderWeeklyStatsReport spend table renders a stable empty state instead of misleading 0% for a row with no spend', () => {
+  const report = stats.renderWeeklyStatsReport([
+    { date: '2026-05-18', repo: 'r', mission: 'task-none', classification: 'ai_sdlc', implementer: 'custom', stage: 'draft', pr_fix_rounds: '0', openai_usage_after: '0', cost_usd: '0', duration_minutes: '0' },
+  ], { today: '2026-05-18' });
+
+  const plain = require('../lib/core/fmt').stripAnsi(report);
+  const spendSection = plain.slice(plain.indexOf('Agent spend by stage this week'));
+  assert.match(spendSection, /custom\s+—\s+—\s+—\s+—\s+—\s+—/);
+  assert.doesNotMatch(spendSection, /0%/);
+});
+
 test('stats command prints workflow weekly tables from the integration stats schema', () => {
   const csv = writeCsv([
     'date,mission,classification,implementer,pr_fix_rounds',
