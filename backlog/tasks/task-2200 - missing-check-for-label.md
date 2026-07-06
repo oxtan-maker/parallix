@@ -4,6 +4,7 @@ title: missing check for label
 status: backlog
 assignee: []
 created_date: '2026-07-06 15:10'
+updated_date: '2026-07-06 15:12'
 labels: []
 dependencies: []
 ---
@@ -18,7 +19,7 @@ this control should have been updated to be relaxed when the optional bug label 
 -ai_sdlc
 -bug
 
-type of label sections are accepted
+type of label sections are accepted. Its also horribly wrong in that it checks primarybranch instead of the worktree since all changes on label are in the worktree
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Definition of Done
