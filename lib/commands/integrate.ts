@@ -547,11 +547,13 @@ async function integrate(args: string[]) {
   if (process.env.FORGEJO_USER === 'gemini' || process.env.WORKFLOW_AGENT === 'gemini') {
     fmt.log.fail('Gemini is not authorized to run integrate. Post a handoff comment on the PR and stop.');
     process.exit(1);
+    return;
   }
 
   if (!slug) {
     fmt.log.fail('Usage: px integrate [<slug>] [--dry-run] [--no-integration-gates]');
     process.exit(1);
+    return;
   }
 
     if (flags.includes('--no-gate')) {
@@ -873,6 +875,10 @@ function buildIntegrationContext(slug: string, {
   baseWorktree = null,
   isForgejoReviewEnabledFn = isForgejoReviewEnabled
 }: {baseBranch?: string | null, baseWorktree?: string | null, isForgejoReviewEnabledFn?: Function} = {}) {
+  if (!slug) {
+    throw new Error('buildIntegrationContext requires a non-null mission slug.');
+  }
+
   const branch = `mission/${slug}`;
   const currentBranch = getCurrentBranch();
   const missionDir = findMissionDir(slug);
@@ -889,7 +895,11 @@ function buildIntegrationContext(slug: string, {
   if (!resolvedBaseWorktree) {
     try { resolvedBaseWorktree = resolveBaseWorktree(slug, { rootDir: process.cwd() }); } catch (_) { resolvedBaseWorktree = getPrimaryWorktree(); }
   }
-  let task = resolveTaskFile(slug);
+  // Resolve the backlog task from the mission's base-worktree context (the
+  // root where its classification will also be resolved), not process.cwd(),
+  // since integrate typically runs from the mission worktree while the
+  // backlog task lives in the recorded base worktree.
+  let task = resolveTaskFile(slug, /** @type {string} */ (resolvedBaseWorktree));
   if (!task.ok) {
     const worktree = resolveWorktree(slug);
     if (worktree) {task = resolveTaskFile(slug, worktree);}
@@ -1066,9 +1076,17 @@ function printIntegrationPreflight(
     getUnresolvedIndexConflictsFn = getUnresolvedIndexConflicts,
     findMissionDocInBranchesFn = findMissionDocInBranches,
     isForgejoReviewEnabledFn = isForgejoReviewEnabled,
+    resolveMissionClassificationFn = (stats as any).resolveMissionClassification,
     log = fmt.log.plain
   } = {}
 ) {
+  // A null/undefined slug means the caller failed to resolve a real mission
+  // before building preflight context. Fail loudly here instead of letting
+  // "null" leak into operator-facing branch/path expectations below.
+  if (!context.slug) {
+    throw new Error('printIntegrationPreflight requires a context with a non-null mission slug.');
+  }
+
   const failures = [];
   const warnings = [];
 
@@ -1115,7 +1133,11 @@ function printIntegrationPreflight(
     log(fmt.status('PASS', `Backlog task: ${path.basename(/** @type {string} */ (context.task.taskFile))} (${context.taskStatus})`));
     
     try {
-      const { classification, error: classificationError } = (stats as any).resolveMissionClassification(context.slug);
+      // Resolve classification from the same base-worktree root that resolved
+      // context.task above, not the process's cwd — those can differ when
+      // integrate runs from a mission worktree while the backlog task lives
+      // in the mission's recorded base worktree.
+      const { classification, error: classificationError } = resolveMissionClassificationFn(context.slug, baseWorktree);
       if (!classification) {
         failures.push('classification');
         log(fmt.status('FAIL', `Backlog classification: ${classificationError || 'missing'}`));

@@ -555,6 +555,16 @@ px.ts`;
   assert.deepEqual(plan.gates.map(g => g.key), ['workflow']);
 });
 
+test('repo integration config keeps workflow gate on the targeted mission-lifecycle suite', () => {
+  const configPath = path.join(__dirname, '..', 'config', 'integration-pipelines.json');
+  const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+
+  assert.equal(
+    config?.gates?.workflow?.command,
+    'node test/e2e-mission-lifecycle.test.js'
+  );
+});
+
 test('getIntegrationGatePlan excludes lib gate for docs-only mission (task-1362)', () => {
   const config = {
     gates: {

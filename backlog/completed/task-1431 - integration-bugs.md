@@ -1,8 +1,8 @@
 ---
 id: TASK-1431
 title: integration bugs
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-07-05 10:26'
 labels: [ai_sdlc]
 dependencies: []
@@ -11,6 +11,14 @@ dependencies: []
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
+This task captures integration preflight regressions in the workflow layer rather than product-code defects. The transcript below shows three operator-facing bug classes that the mission must lock with regression coverage:
+
+- false backlog classification failure even when the mission/task context is otherwise valid
+- ambiguous-slug and missing-task paths that must remain distinct
+- invalid `null` slug leakage into preflight output and expected branch naming
+
+Raw failure transcript:
+
 INFO] Integration preflight for task-preflight-test
 [FAIL] Mission branch: current branch is main, expected mission/task-preflight-test (or a branch with a suffix)
 [PASS] Mission doc: /tmp/dir/MISSION.md
