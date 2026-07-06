@@ -4,7 +4,7 @@ title: integration bugs
 status: backlog
 assignee: []
 created_date: '2026-07-05 10:26'
-labels: []
+labels: [ai_sdlc]
 dependencies: []
 ---
 
