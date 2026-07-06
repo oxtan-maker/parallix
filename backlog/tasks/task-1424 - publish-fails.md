@@ -5,7 +5,7 @@ status: backlog
 assignee: []
 created_date: '2026-07-04 15:59'
 updated_date: '2026-07-05 06:20'
-labels: []
+labels: [ai_sdlc]
 dependencies: []
 ---
 
