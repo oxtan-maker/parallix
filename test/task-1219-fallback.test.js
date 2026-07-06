@@ -10,8 +10,8 @@ const backlog = require('../lib/tools/backlog');
 mock.method(backlog, 'getTaskClassification', () => 'ai_sdlc');
 const missionUtils = require('../lib/core/mission-utils');
 
-process.env.PRIMARY_WORKTREE = '/tmp/mission';
-const FAKE_ROOT = '/tmp/mission';
+const FAKE_ROOT = `/tmp/mission-${process.pid}`;
+process.env.PRIMARY_WORKTREE = FAKE_ROOT;
 mock.method(missionUtils, 'getPrimaryBranch', () => 'main');
 
 const { evaluateTaskStatusForIntegration, printIntegrationPreflight, buildIntegrationContext } = require('../lib/commands/integrate');

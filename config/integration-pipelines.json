@@ -11,7 +11,7 @@
       "run_last": false
     },
     "workflow": {
-      "command": "npm run build:cjs && node test/e2e-mission-lifecycle.test.js",
+      "command": "node test/e2e-mission-lifecycle.test.js",
       "order": 50,
       "run_last": true
     },

@@ -6,6 +6,8 @@ const git = require('../lib/core/git.js');
 const { mock } = test;
 const serialTest = (name, fn) => test(name, { concurrency: false }, fn);
 
+const FAKE_ROOT = `/tmp/fake-root-${process.pid}`;
+
 // task-1335 added a tree-verification proof to the createPr publish path. These
 // tests exercise push-arg/force-with-lease behaviour against a synthetic rootDir
 // that does not exist on disk, so the real proof capture would hit
@@ -41,13 +43,13 @@ test.afterEach(() => {
 });
 
 // Set env var before requiring modules that might use it at top level or during execution
-process.env.PRIMARY_WORKTREE = '/tmp/fake-root';
+process.env.PRIMARY_WORKTREE = FAKE_ROOT;
 
 serialTest('createPr includes explicit force-with-lease sha when forceWithLease is true', (t) => {
   const branch = 'mission/task-1049';
   const user = 'gemini';
   const token = 'fake-token';
-  const rootDir = '/tmp/fake-root';
+  const rootDir = FAKE_ROOT;
 
   let pushArgs = [];
   mock.method(git, 'git', (args) => {
@@ -86,7 +88,7 @@ serialTest('createPr does NOT include --force-with-lease when forceWithLease is 
   const branch = 'mission/task-1049';
   const user = 'gemini';
   const token = 'fake-token';
-  const rootDir = '/tmp/fake-root';
+  const rootDir = FAKE_ROOT;
 
   let pushArgs = [];
   mock.method(git, 'git', (args) => {
@@ -187,7 +189,7 @@ serialTest('rebase --push calls createPrFn with forceWithLease:true on success',
   const options = {
     inferSlugFn: (s) => s || 'task-1049',
     getCurrentBranchFn: () => 'mission/task-1049',
-    findMissionDirFn: () => '/tmp/fake-root/docs/missions/2026/task-1049',
+    findMissionDirFn: () => `${FAKE_ROOT}/docs/missions/2026/task-1049`,
     findMissionAreaFn: () => 'workflow',
     gitFn: (args) => {
       if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n', stderr: '' };
@@ -223,7 +225,7 @@ serialTest('rebase without --push does NOT call createPrFn', async (t) => {
   const options = {
     inferSlugFn: (s) => s || 'task-1049',
     getCurrentBranchFn: () => 'mission/task-1049',
-    findMissionDirFn: () => '/tmp/fake-root/docs/missions/2026/task-1049',
+    findMissionDirFn: () => `${FAKE_ROOT}/docs/missions/2026/task-1049`,
     findMissionAreaFn: () => 'workflow',
     gitFn: (args) => {
       if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n', stderr: '' };
@@ -258,7 +260,7 @@ serialTest('rebase --push preserves push and dependencies in recursive calls (ch
   const options = {
     inferSlugFn: (s) => s || 'task-1049',
     getCurrentBranchFn: () => 'mission/task-1049',
-    findMissionDirFn: () => '/tmp/fake-root/docs/missions/2026/task-1049',
+    findMissionDirFn: () => `${FAKE_ROOT}/docs/missions/2026/task-1049`,
     findMissionAreaFn: () => 'workflow',
     gitFn: (args) => {
       if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n', stderr: '' };
@@ -321,7 +323,7 @@ serialTest('rebase --push does NOT push if agent returns success but rebase is s
   const options = {
     inferSlugFn: (s) => s || 'task-1049',
     getCurrentBranchFn: () => 'mission/task-1049',
-    findMissionDirFn: () => '/tmp/fake-root/docs/missions/2026/task-1049',
+    findMissionDirFn: () => `${FAKE_ROOT}/docs/missions/2026/task-1049`,
     findMissionAreaFn: () => 'workflow',
     gitFn: (args) => {
       if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n', stderr: '' };
@@ -357,7 +359,7 @@ serialTest('rebase --push does NOT push if git rebase returns 0 but --show-curre
   const options = {
     inferSlugFn: (s) => s || 'task-1049',
     getCurrentBranchFn: () => 'mission/task-1049',
-    findMissionDirFn: () => '/tmp/fake-root/docs/missions/2026/task-1049',
+    findMissionDirFn: () => `${FAKE_ROOT}/docs/missions/2026/task-1049`,
     findMissionAreaFn: () => 'workflow',
     gitFn: (args) => {
       if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n', stderr: '' };
@@ -385,7 +387,7 @@ serialTest('createPr fails cleanly (no --force fallback) when stale push persist
   const branch = 'mission/task-1089';
   const user = 'magnus';
   const token = 'fake-token';
-  const rootDir = '/tmp/fake-root';
+  const rootDir = FAKE_ROOT;
 
   let pushCallCount = 0;
   let sawForcePush = false;
@@ -422,7 +424,7 @@ serialTest('rebase --push ignores FORGEJO_USER and falls back to task identity',
     const options = {
       inferSlugFn: (s) => s || 'task-1049',
       getCurrentBranchFn: () => 'mission/task-1049',
-      findMissionDirFn: () => '/tmp/fake-root/docs/missions/2026/task-1049',
+      findMissionDirFn: () => `${FAKE_ROOT}/docs/missions/2026/task-1049`,
       findMissionAreaFn: () => 'workflow',
       gitFn: (args) => {
         if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n', stderr: '' };

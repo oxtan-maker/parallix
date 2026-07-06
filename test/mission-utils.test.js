@@ -262,10 +262,10 @@ test('resolveMainRepo finds the master worktree', () => {
 
 test('resolveMainRepo honors PRIMARY_WORKTREE override', () => {
   const previous = process.env.PRIMARY_WORKTREE;
-  process.env.PRIMARY_WORKTREE = '/tmp/override';
+  process.env.PRIMARY_WORKTREE = `/tmp/override-${process.pid}`;
   try {
-    assert.equal(resolveMainRepo(), '/tmp/override');
-    assert.equal(getPrimaryWorktree(), '/tmp/override');
+    assert.equal(resolveMainRepo(), `/tmp/override-${process.pid}`);
+    assert.equal(getPrimaryWorktree(), `/tmp/override-${process.pid}`);
   } finally {
     if (previous === undefined) delete process.env.PRIMARY_WORKTREE;
     else process.env.PRIMARY_WORKTREE = previous;
@@ -798,7 +798,7 @@ test('resolveMissionBaseBranch falls back to the primary branch when no base is 
 
 test('resolveBaseWorktree delegates to the primary worktree when base equals primary', () => {
   const previousPrimary = process.env.PRIMARY_WORKTREE;
-  process.env.PRIMARY_WORKTREE = '/tmp/primary-main';
+  process.env.PRIMARY_WORKTREE = `/tmp/primary-main-${process.pid}`;
   withTempRepo(root => {
     const year = new Date().getFullYear().toString();
     const missionDir = path.join(root, 'docs', 'missions', year, 'task-203');
@@ -816,7 +816,7 @@ test('resolveBaseWorktree delegates to the primary worktree when base equals pri
           return { status: 0, stdout: '', stderr: '' };
         }
       });
-      assert.equal(worktree, '/tmp/primary-main');
+      assert.equal(worktree, `/tmp/primary-main-${process.pid}`);
     } finally {
       if (previousPrimary === undefined) delete process.env.PRIMARY_WORKTREE;
       else process.env.PRIMARY_WORKTREE = previousPrimary;
@@ -826,7 +826,7 @@ test('resolveBaseWorktree delegates to the primary worktree when base equals pri
 
 test('resolveBaseWorktree auto-creates a worktree on the base branch when none is checked out', () => {
   const previousPrimary = process.env.PRIMARY_WORKTREE;
-  process.env.PRIMARY_WORKTREE = '/tmp/primary-main';
+  process.env.PRIMARY_WORKTREE = `/tmp/primary-main-${process.pid}`;
   withTempRepo(root => {
     const year = new Date().getFullYear().toString();
     const missionDir = path.join(root, 'docs', 'missions', year, 'task-204');
@@ -844,7 +844,7 @@ test('resolveBaseWorktree auto-creates a worktree on the base branch when none i
           }
           if (args.includes('worktree') && args.includes('list')) {
             // No worktree on feat/x yet — only the primary.
-            return { status: 0, stdout: 'worktree /tmp/primary-main\nbranch refs/heads/main\n\n', stderr: '' };
+            return { status: 0, stdout: `worktree /tmp/primary-main-${process.pid}\nbranch refs/heads/main\n\n`, stderr: '' };
           }
           if (args.includes('show-ref')) {
             return { status: 0, stdout: '', stderr: '' };
@@ -855,7 +855,7 @@ test('resolveBaseWorktree auto-creates a worktree on the base branch when none i
           return { status: 0, stdout: '', stderr: '' };
         }
       });
-      const expected = conventionalBaseWorktreePath('feat/x', '/tmp/primary-main');
+      const expected = conventionalBaseWorktreePath('feat/x', `/tmp/primary-main-${process.pid}`);
       assert.equal(worktree, expected);
       assert.ok(calls.some(c => c.includes('worktree add') && c.includes(expected) && c.endsWith('feat/x')));
     } finally {
@@ -867,7 +867,7 @@ test('resolveBaseWorktree auto-creates a worktree on the base branch when none i
 
 test('resolveBaseWorktree returns an existing worktree already checked out on the base branch', () => {
   const previousPrimary = process.env.PRIMARY_WORKTREE;
-  process.env.PRIMARY_WORKTREE = '/tmp/primary-main';
+  process.env.PRIMARY_WORKTREE = `/tmp/primary-main-${process.pid}`;
   withTempRepo(root => {
     const year = new Date().getFullYear().toString();
     const missionDir = path.join(root, 'docs', 'missions', year, 'task-205');
@@ -884,7 +884,7 @@ test('resolveBaseWorktree returns an existing worktree already checked out on th
           if (args.includes('worktree') && args.includes('list')) {
             return {
               status: 0,
-              stdout: 'worktree /tmp/primary-main\nbranch refs/heads/main\n\nworktree /tmp/feat-y\nbranch refs/heads/feat/y\n\n',
+              stdout: `worktree /tmp/primary-main-${process.pid}\nbranch refs/heads/main\n\nworktree /tmp/feat-y\nbranch refs/heads/feat/y\n\n`,
               stderr: ''
             };
           }
@@ -901,7 +901,7 @@ test('resolveBaseWorktree returns an existing worktree already checked out on th
 
 test('resolveBaseWorktree fails fast with a base-branch message when the base does not exist locally', () => {
   const previousPrimary = process.env.PRIMARY_WORKTREE;
-  process.env.PRIMARY_WORKTREE = '/tmp/primary-main';
+  process.env.PRIMARY_WORKTREE = `/tmp/primary-main-${process.pid}`;
   withTempRepo(root => {
     const year = new Date().getFullYear().toString();
     const missionDir = path.join(root, 'docs', 'missions', year, 'task-206');
@@ -917,7 +917,7 @@ test('resolveBaseWorktree fails fast with a base-branch message when the base do
               return { status: 0, stdout: 'main\n', stderr: '' };
             }
             if (args.includes('worktree') && args.includes('list')) {
-              return { status: 0, stdout: 'worktree /tmp/primary-main\nbranch refs/heads/main\n\n', stderr: '' };
+              return { status: 0, stdout: `worktree /tmp/primary-main-${process.pid}\nbranch refs/heads/main\n\n`, stderr: '' };
             }
             if (args.includes('show-ref')) {
               return { status: 1, stdout: '', stderr: '' };

@@ -30,8 +30,8 @@ mock.method(verification, 'assertVerifiedTreeProof', (proof, rootDir) => {
   return { ok: true, proof };
 });
 
-process.env.PRIMARY_WORKTREE = '/tmp/mission';
-const FAKE_ROOT = '/tmp/mission';
+const FAKE_ROOT = `/tmp/mission-${process.pid}`;
+process.env.PRIMARY_WORKTREE = FAKE_ROOT;
 
 // Mock getPrimaryBranch BEFORE requiring dependent modules to ensure they use the mock.
 const missionUtils = require('../lib/core/mission-utils');
