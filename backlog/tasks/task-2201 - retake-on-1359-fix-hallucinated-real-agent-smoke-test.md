@@ -4,7 +4,7 @@ title: 'retake on 1359: fix hallucinated real-agent smoke test'
 status: backlog
 assignee: []
 created_date: '2026-07-06 15:46'
-updated_date: '2026-07-06 15:48'
+updated_date: '2026-07-06 15:51'
 labels:
   - ai_sdlc
 dependencies: []
@@ -28,13 +28,19 @@ Confirmed problems (verified against the current tree):
 
 Original task for reference: TASK-1359 (backlog/completed/task-1359 - Tier-2-non-blocking-real-local-model-smoke-test-for-the-agent-launcher-surface.md), implemented in missions/task-1359/.
 
+Required mechanism for the retake (specified by user, replaces the current symlink-to-installed-opencode/CLI_ENTRY approach):
+- Copy the *whole current Parallix mission's code* (the actual source tree under test, not a symlink to an installed/global px) into the throwaway repo used by the test.
+- Manually compile the JS files from that copied source (i.e. actually build it, the same way this repo's own build step would) rather than relying on a prebuilt/installed artifact.
+- Run `node px.js draft` (the compiled entry point) from the throwaway repo to draft the mission.
+- `cd` into the resulting worktree — which must also contain the compiled JS files — and from there run `node px.js active`, then after completed review rounds run `node px.js integrate`.
+This directly fixes the "unclear whether it exercises the mission-branch's own code" problem (the code is physically copied+compiled from the branch under test, not resolved via PATH/package.json) and extends coverage from draft-only to the full draft → active → integrate lifecycle with the real agent.
+
 Ask for this retake:
 1. Re-read the original TASK-1359 description/AC and its mission history, and treat the delivered implementation as needing a rewrite, not incremental fixes — except keep it a blocking gate (see note above).
-2. Decide and document how much of the lifecycle it should cover — at minimum, justify why stopping at `draft` is sufficient, or extend it to cover more of draft→active→review→integrate with the real agent.
-3. Verify and pin down that the CLI under test is unambiguously the mission-branch's own code.
-4. Replace the fabricated throwaway task/prompt with something that reflects a real Parallix-shaped prompt/workflow, kept as small as possible.
-5. Verify telemetry isolation end-to-end (prove no writes land outside the tmp dirs) and assert on the actual stats file content, not just a stdout line.
-6. Implement or explicitly drop the "force custom as reviewer on its own PR" requirement, with a stated reason if dropped.
+2. Implement the copy-current-mission-code + manually-compile + `node px.js draft`/`active`/`integrate` mechanism described above, run from the throwaway repo and then its worktree, driving the full lifecycle through completed review rounds.
+3. Replace the fabricated throwaway task/prompt with something that reflects a real Parallix-shaped prompt/workflow, kept as small as possible.
+4. Verify telemetry isolation end-to-end (prove no writes land outside the tmp dirs) and assert on the actual stats file content, not just a stdout line.
+5. Implement or explicitly drop the "force custom as reviewer on its own PR" requirement, with a stated reason if dropped.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Definition of Done
