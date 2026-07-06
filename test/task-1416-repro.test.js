@@ -21,8 +21,9 @@ const os = require('os');
 const fs = require('fs');
 const path = require('path');
 
+const originalHome = process.env.HOME;
+const originalPath = process.env.PATH;
 const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1416-home-'));
-process.env.HOME = tmpHome;
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -36,8 +37,20 @@ for (const name of ['codex', 'claude', 'opencode', 'vibe']) {
   fs.writeFileSync(launcherPath, `#!${process.execPath}\nprocess.exit(0);\n`);
   fs.chmodSync(launcherPath, 0o755);
 }
-process.env.PATH = `${sharedLauncherBin}${path.delimiter}${process.env.PATH}`;
-setCommandPathProbe(name => fs.existsSync(path.join(sharedLauncherBin, name)));
+
+test.before(() => {
+  process.env.HOME = tmpHome;
+  process.env.PATH = `${sharedLauncherBin}${path.delimiter}${originalPath}`;
+  setCommandPathProbe(name => fs.existsSync(path.join(sharedLauncherBin, name)));
+});
+
+test.after(() => {
+  process.env.HOME = originalHome;
+  process.env.PATH = originalPath;
+  setCommandPathProbe(null);
+  fs.rmSync(sharedLauncherBin, { recursive: true, force: true });
+  fs.rmSync(tmpHome, { recursive: true, force: true });
+});
 
 function withPathLaunchers(entries, run) {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1416-path-'));

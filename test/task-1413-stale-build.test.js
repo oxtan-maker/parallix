@@ -91,7 +91,9 @@ test('stale generated JS triggers preflight rejection with npm run build:cjs ins
     );
   } finally {
     fs.writeFileSync(statsJs, originalContent, 'utf8');
-    fs.utimesSync(statsJs, originalStat.atime, originalStat.mtime);
+    // Leave the real repo in a definitely fresh state for later tests that
+    // spawn the CLI and re-check build freshness from a child process.
+    fs.utimesSync(statsJs, new Date(), new Date());
   }
 });
 
