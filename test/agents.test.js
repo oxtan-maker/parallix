@@ -4,6 +4,7 @@ process.env.NO_COLOR = '1';
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const originalPath = process.env.PATH;
 
 if (process.env.PARALLIX_HOME) {
   fs.mkdirSync(process.env.PARALLIX_HOME, { recursive: true });
@@ -45,8 +46,17 @@ for (const name of ['codex', 'claude', 'opencode', 'vibe']) {
   fs.writeFileSync(launcherPath, `#!${process.execPath}\nprocess.exit(0);\n`);
   fs.chmodSync(launcherPath, 0o755);
 }
-process.env.PATH = `${sharedLauncherBin}${path.delimiter}${process.env.PATH}`;
-setCommandPathProbe(name => fs.existsSync(path.join(sharedLauncherBin, name)));
+
+test.before(() => {
+  process.env.PATH = `${sharedLauncherBin}${path.delimiter}${originalPath}`;
+  setCommandPathProbe(name => fs.existsSync(path.join(sharedLauncherBin, name)));
+});
+
+test.after(() => {
+  process.env.PATH = originalPath;
+  setCommandPathProbe(null);
+  fs.rmSync(sharedLauncherBin, { recursive: true, force: true });
+});
 
 function withPathLaunchers(entries, run) {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-test-path-'));

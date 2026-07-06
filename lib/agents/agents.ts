@@ -1024,7 +1024,9 @@ async function startDraftAgent(opts: StartAgentOptions = { prompt: '' }) {
   return startAgent('draft', opts);
 }
 
-const setCommandPathProbe = (fn: (name: string) => string | null) => { _commandPathProbe = fn; };
+const setCommandPathProbe = (fn: ((name: string) => string | null) | null) => {
+  _commandPathProbe = typeof fn === 'function' ? fn : null;
+};
 
 export {
   KNOWN_AGENT_NAMES,

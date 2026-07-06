@@ -3,6 +3,8 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const originalPath = process.env.PATH;
+const originalCodexHome = process.env.CODEX_HOME;
 
 const {
   eligibleAgentsForStep,
@@ -53,6 +55,13 @@ function installPathLaunchers(tmpRoot) {
   process.env.CODEX_HOME ||= path.join(tmpRoot, 'codex-home');
   setCommandPathProbe(name => fs.existsSync(path.join(binDir, name)));
 }
+
+test.after(() => {
+  process.env.PATH = originalPath;
+  if (originalCodexHome === undefined) delete process.env.CODEX_HOME;
+  else process.env.CODEX_HOME = originalCodexHome;
+  setCommandPathProbe(null);
+});
 
 // ---------- TASK-1036: review/act-on-review fallback pool tracks current launchers ----------
 

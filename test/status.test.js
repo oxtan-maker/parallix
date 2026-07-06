@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 process.env.NO_COLOR = '1';
 
+const { stripAnsi } = require('../lib/core/fmt');
 const { parseWorktreeList, findStaleMissionWorktrees } = require('../lib/commands/status');
 const status = require('../lib/commands/status');
 
@@ -258,7 +259,7 @@ test('status reports detached-head rebase diagnostics for the current worktree',
     exit: () => {}
   });
 
-  const output = lines.join('\n');
+  const output = stripAnsi(lines.join('\n'));
   assert.match(output, /Detached HEAD: rebase in progress: detached HEAD, 3 unmerged file\(s\)/);
   assert.match(output, /backlog\/tasks\/task-1322 - prevent-backlog-task-id-recycling-collision\.md/);
   assert.match(output, /missions\/task-1322\/review-state\.json/);
@@ -302,7 +303,7 @@ test('status reports stale worktree rebase diagnostics instead of only cleanup h
     exit: () => {}
   });
 
-  const output = lines.join('\n');
+  const output = stripAnsi(lines.join('\n'));
   assert.match(output, /Rebase in progress on mission\/task-1322: detached HEAD, 3 unmerged file\(s\)/);
   assert.match(output, /missions\/task-1322\/CP-4\.md/);
   assert.match(output, /Cleanup: cleanup it/);

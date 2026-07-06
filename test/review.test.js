@@ -2825,7 +2825,7 @@ test('startReviewLoop continue falls back to the persisted reviewer when an expl
       isForgejoReviewEnabledFn: () => false,
       workflowLauncherStatusFn: (agent) => ({ supported: agent !== 'vibe', detail: `${agent} --help` }),
       rebaseBeforeReviewRoundFn: async () => ({ ok: true, sharedFileConflicts: false }),
-      consumeReviewerArtifactsFn: async () => ({ consumed: false }),
+      consumeReviewerArtifactsFn: async () => ({ consumed: true, ok: true, reviewState: 'APPROVED' }),
       consumeImplementerArtifactsFn: async () => ({ consumed: false }),
       startAgentFn: async (mode, opts) => {
         launches.push({ mode, agent: opts.agent });
