@@ -8,8 +8,8 @@
 // the stub cannot see: real CLI argument construction, real model selection,
 // and real agent output parseability (see missions/task-1359/MISSION.md).
 //
-// This gate requires a workstation with `opencode` on PATH and the pinned
-// local model below configured and reachable. See docs/real-agent-smoke.md
+// This gate requires a workstation with `opencode` on PATH and the repo's
+// configured custom-family local model reachable. See docs/real-agent-smoke.md
 // for prerequisites, invocation, expected runtime, and failure buckets.
 'use strict';
 
@@ -23,14 +23,21 @@ const assert = require('node:assert/strict');
 const packageJson = require('../package.json');
 const CLI_ENTRY = path.resolve(__dirname, '..', packageJson.bin.px);
 
-// Pinned local-model configuration for the `custom` agent family (SC5/mission
-// "Pin the real-agent path to one explicit local-model configuration").
-// Keep in sync with this repo's own workflow.config.json
-// adapters.agents.models.custom — the throwaway repo below sets this value
-// explicitly rather than copying the real config, so the smoke test stays
-// reproducible even if this repo's own model pin changes independently.
-const PINNED_CUSTOM_MODEL = 'vllm/cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit';
+// Custom-family model for the smoke run comes from this repository's own
+// workflow.config.json (adapters.agents.models.custom), so the e2e test always
+// exercises the exact agent configuration Parallix itself runs with. The
+// throwaway repo below still writes this value into its own workflow.config.json
+// explicitly (config route), so the smoke run never depends on the developer's
+// ambient PARALLIX_HOME/global state.
+const workflowConfig = require('../workflow.config.json');
+const CUSTOM_MODEL = workflowConfig?.adapters?.agents?.models?.custom;
 const RUN_TIMEOUT_MS = Number(process.env.PARALLIX_REAL_AGENT_TIMEOUT_MS || 600000);
+// The active phase runs up to three sequential model sessions in one px
+// invocation (execute agent, a possible repair relaunch, and the autonomous
+// review loop), so it gets twice the single-session budget. Observed: a run
+// where the relaunch machinery was legitimately recovering an
+// incomplete-evidence checkpoint was killed at 600s mid-recovery.
+const ACTIVE_TIMEOUT_MS = RUN_TIMEOUT_MS * 2;
 
 function runCommand(command, args, options = {}) {
   const result = childProcess.spawnSync(command, args, { encoding: 'utf8', ...options });
@@ -125,6 +132,8 @@ const LAUNCHER_FAILURE_PATTERNS = [
   /\bunknown model\b/i,
   /\binvalid (?:api )?key\b/i,
   /\bunauthorized\b/i,
+  /\bwal_checkpoint\b/i,
+  /\bsqlite\b/i,
   /\bunrecognized option\b|\bunknown option\b|\bno such option\b|\binvalid option\b/i,
   /\bENOENT\b/,
 ];
@@ -159,11 +168,35 @@ function classifyFailure({ stdout, stderr, status, signal }) {
 // opencode subcommands like `opencode models`, which can be tighter or flakier
 // than the launcher path this smoke test is meant to verify.
 function preflightCheck() {
+  if (!CUSTOM_MODEL || typeof CUSTOM_MODEL !== 'string') {
+    return 'adapters.agents.models.custom is not set in this repo\'s workflow.config.json; the smoke test mirrors the repo\'s own custom-agent model configuration.';
+  }
   const opencodePath = maybeOpencodePath();
   if (!opencodePath) {
-    return 'opencode binary not found on PATH. Install opencode and configure the pinned local model before running this gate.';
+    return 'opencode binary not found on PATH. Install opencode and configure the custom-family local model before running this gate.';
   }
   return null;
+}
+
+function runOpencodeHealthcheck(repoRoot, env, timeoutMs = 45000) {
+  const command = maybeOpencodePath() || 'opencode';
+  return runWorkflowAllowFail(
+    repoRoot,
+    env,
+    [
+      command,
+      'run',
+      '--pure',
+      '--dangerously-skip-permissions',
+      '--format',
+      'json',
+      '-m',
+      CUSTOM_MODEL,
+      'Reply with exactly OK'
+    ],
+    timeoutMs,
+    { directCommand: true }
+  );
 }
 
 function setupRepository({ slug, title }) {
@@ -172,13 +205,76 @@ function setupRepository({ slug, title }) {
   const binDir = path.join(repoRoot, 'bin');
   const stateHome = path.join(tmpRoot, 'parallix-home');
   const reviewTmpDir = path.join(tmpRoot, 'review-artifacts');
-  const xdgDataHome = path.join(tmpRoot, 'xdg-data');
 
-  fs.mkdirSync(path.join(repoRoot, 'backlog', 'tasks'), { recursive: true });
+  // Hand-rolled backlog.md structure: equivalent to `backlog init` +
+  // `backlog task create`, written directly for speed (no CLI dependency,
+  // no interactive prompts) but complete enough that the `backlog` CLI and
+  // px's backlog adapter both operate on it: full directory skeleton plus a
+  // config.yml whose statuses cover every transition the px lifecycle
+  // performs (backlog -> refined -> active -> review -> ready-for-integration).
+  for (const dir of [
+    ['backlog', 'tasks'],
+    ['backlog', 'drafts'],
+    ['backlog', 'completed'],
+    ['backlog', 'archive', 'tasks'],
+    ['backlog', 'archive', 'drafts'],
+    ['backlog', 'decisions'],
+    ['backlog', 'docs'],
+    ['backlog', 'milestones']
+  ]) {
+    fs.mkdirSync(path.join(repoRoot, ...dir), { recursive: true });
+  }
   fs.mkdirSync(path.join(repoRoot, 'config'), { recursive: true });
   fs.mkdirSync(binDir, { recursive: true });
   fs.mkdirSync(reviewTmpDir, { recursive: true });
-  fs.mkdirSync(xdgDataHome, { recursive: true });
+  fs.mkdirSync(stateHome, { recursive: true });
+
+  // Force every workflow step onto the `custom` family via the product's own
+  // blocklist mechanism (docs/agents.md "Local blocklist overrides", merged
+  // from <PARALLIX_HOME>/agents.local.json). This does two things:
+  //   1. Reviewer forcing: with no different-family agent eligible, the review
+  //      loop takes its single-family fallback and assigns `custom` as the
+  //      reviewer on its own PR (lib/review/review-loop.js), which the test
+  //      asserts explicitly.
+  //   2. Cost containment: no fallback or reviewer selection can ever launch
+  //      an expensive cloud agent (claude/codex) from this blocking gate.
+  fs.writeFileSync(path.join(stateHome, 'agents.local.json'), JSON.stringify({
+    blocklist: {
+      claude: { blocked: true },
+      codex: { blocked: true },
+      vibe: { blocked: true }
+    }
+  }, null, 2), 'utf8');
+
+  // Minimal repo verification gate: drafted missions declare gates like
+  // `./scripts/verify-local.sh docs` (the scaffold default), and the workflow
+  // executes mission-declared gates literally at handoff. A real px-managed
+  // repo ships this script, so the throwaway repo must too — otherwise every
+  // draft fails its own declared gates on a missing file.
+  fs.mkdirSync(path.join(repoRoot, 'scripts'), { recursive: true });
+  const verifyStub = path.join(repoRoot, 'scripts', 'verify-local.sh');
+  fs.writeFileSync(verifyStub, '#!/usr/bin/env bash\n# Smoke-repo verification gate: nothing to verify in the throwaway repo.\nexit 0\n', 'utf8');
+  fs.chmodSync(verifyStub, 0o755);
+
+  fs.writeFileSync(path.join(repoRoot, 'backlog', 'config.yml'), [
+    'project_name: "real-agent-smoke"',
+    'default_status: "backlog"',
+    'statuses: ["backlog", "refined", "active", "review", "ready-for-integration", "done"]',
+    'labels: []',
+    'date_format: yyyy-mm-dd',
+    'max_column_width: 20',
+    'auto_open_browser: false',
+    // default_port must be present: the backlog CLI adds it when absent, which
+    // would dirty the committed tree mid-draft and fail draft's repo-state check.
+    'default_port: 6420',
+    'remote_operations: false',
+    'auto_commit: false',
+    'bypass_git_hooks: false',
+    'check_active_branches: true',
+    'active_branch_days: 30',
+    'task_prefix: "task"',
+    ''
+  ].join('\n'), 'utf8');
 
   // Real launcher on PATH — unlike test/e2e-mission-lifecycle.test.js, no
   // scripted stub is installed here (SC3: the production launch path must
@@ -193,7 +289,7 @@ function setupRepository({ slug, title }) {
     product: { name: 'real-agent-smoke', targetUser: 'tests' },
     adapters: {
       tasks: { provider: 'backlog-md', storage: 'backlog', stateMap: 'config/state-map.json' },
-      agents: { models: { custom: PINNED_CUSTOM_MODEL } },
+      agents: { models: { custom: CUSTOM_MODEL } },
       missions: { baseDir: 'missions', branchPrefix: 'mission/', worktreePattern: '../<repo>-<slug>' },
       verification: { command: ':', defaultArea: 'all' },
       review: { provider: 'none', tmpDir: reviewTmpDir }
@@ -221,7 +317,7 @@ function setupRepository({ slug, title }) {
     '',
     '## Description',
     '',
-    'Launcher smoke probe (not a real feature request): draft a small, plausible mission contract for adding a tiny greeting helper function.',
+    'Create a .sh hello world program',
     ''
   ].join('\n'), 'utf8');
 
@@ -231,17 +327,22 @@ function setupRepository({ slug, title }) {
   runGit(repoRoot, ['add', '.']);
   runGit(repoRoot, ['commit', '-m', 'initial smoke repo']);
 
-  return { tmpRoot, repoRoot, binDir, stateHome, xdgDataHome };
+  return { tmpRoot, repoRoot, binDir, stateHome };
 }
 
-function runWorkflowAllowFail(repoRoot, env, args, timeout) {
+function runWorkflowAllowFail(repoRoot, env, args, timeout, options = {}) {
+  const {
+    directCommand = false
+  } = options;
   const stdoutPath = path.join(os.tmpdir(), `parallix-real-agent-stdout-${process.pid}-${Date.now()}.log`);
   const stderrPath = path.join(os.tmpdir(), `parallix-real-agent-stderr-${process.pid}-${Date.now()}.log`);
   const stdoutFd = fs.openSync(stdoutPath, 'w');
   const stderrFd = fs.openSync(stderrPath, 'w');
   let result;
   try {
-    result = childProcess.spawnSync(process.execPath, [CLI_ENTRY, ...args], {
+    const command = directCommand ? args[0] : process.execPath;
+    const commandArgs = directCommand ? args.slice(1) : [CLI_ENTRY, ...args];
+    result = childProcess.spawnSync(command, commandArgs, {
       cwd: repoRoot,
       env,
       timeout,
@@ -262,42 +363,110 @@ function shouldKeepTmp() {
   return process.env.PARALLIX_E2E_KEEP_TMP === '1';
 }
 
-test('real custom-agent launcher smoke: opencode draft produces a parseable MISSION.md (SC3/SC4/SC5/SC6/SC7)', () => {
+// Default Parallix state roots that must never receive smoke-run writes
+// (resolveParallixHome fallbacks when PARALLIX_HOME is unset: Linux default
+// and the generic-UNIX fallback).
+const DEFAULT_PARALLIX_HOMES = [
+  path.join(os.homedir(), '.local', 'state', 'parallix'),
+  path.join(os.homedir(), '.parallix')
+];
+
+// Snapshot the developer's default-location Parallix state before the run so
+// the isolation assertions can be delta-based (only lines added by THIS run
+// count as leakage).
+function snapshotDefaultParallixState() {
+  const snapshots = new Map();
+  for (const home of DEFAULT_PARALLIX_HOMES) {
+    for (const file of ['stats.csv', 'agents.local.json']) {
+      const filePath = path.join(home, file);
+      if (fs.existsSync(filePath)) {
+        snapshots.set(filePath, fs.readFileSync(filePath, 'utf8'));
+      }
+    }
+  }
+  return snapshots;
+}
+
+test('real custom-agent launcher smoke: full lifecycle with hello-world task (SC3/SC4/SC5/SC6/SC7)', () => {
   const preflightError = preflightCheck();
   if (preflightError) {
     assert.fail(
       `[local-model-environment] Cannot run the real custom-agent smoke test: ${preflightError}\n` +
       'This blocking gate requires a workstation with opencode installed and the pinned local model ' +
-      `(${PINNED_CUSTOM_MODEL}) configured and reachable. See docs/real-agent-smoke.md.`
+      `(${CUSTOM_MODEL}) configured and reachable. See docs/real-agent-smoke.md.`
     );
   }
 
   const slug = 'task-9001';
+  const defaultStateSnapshots = snapshotDefaultParallixState();
   const repo = setupRepository({ slug, title: 'Real Agent Launcher Smoke' });
   const worktree = path.resolve(repo.repoRoot, '..', `${path.basename(repo.repoRoot)}-${slug}`);
+  // Parallix-owned state isolation goes through configuration, not a hard
+  // filesystem sandbox: PARALLIX_HOME is the highest-precedence resolver input
+  // for both <PARALLIX_HOME>/stats.csv and the agent blocking file
+  // <PARALLIX_HOME>/agents.local.json (lib/core/storage.ts), so temp-scoping it
+  // keeps every Parallix write out of the developer's real state root.
+  // opencode's own runtime state (XDG data dir) is deliberately NOT overridden:
+  // the launcher child keeps its normal user configuration.
+  // binDir comes FIRST so the `opencode` the launcher resolves is the real
+  // binary symlinked by setupRepository (the launcher-boundary guarantee).
+  // The rest of the normal PATH is kept: the agent's own tooling must work
+  // like a real workstation — with a bare binDir-only PATH, opencode's glob
+  // tool cannot even extract its bundled ripgrep (spawns `tar`), feeding the
+  // agent artificial tool errors that destabilize the draft.
   const env = {
     ...process.env,
     FORCE_COLOR: '0',
-    FORGEJO_USER: 'custom',
     PRIMARY_WORKTREE: repo.repoRoot,
     PARALLIX_HOME: repo.stateHome,
-    XDG_DATA_HOME: repo.xdgDataHome,
-    PATH: repo.binDir
+    PATH: `${repo.binDir}${path.delimiter}${process.env.PATH || ''}`
   };
+  // Drop the inherited PWD: opencode trusts PWD over the real cwd for project
+  // resolution, so a stale PWD pointing at the developer's primary repo makes
+  // the launcher child attach to that project instead of the throwaway repo —
+  // colliding with any concurrently running opencode sessions (observed as
+  // SQLite WAL contention and as the child hanging at exit until SIGTERM).
+  delete env.PWD;
 
   try {
-    const result = runWorkflowAllowFail(repo.repoRoot, env, ['draft', slug, '--agent', 'custom'], RUN_TIMEOUT_MS);
+    // Verify CLI-under-test provenance: CLI_ENTRY resolves from this file's __dirname
+    // to the repo's px.js. This ensures we test the code under test, not a stale installed px.
+    // The __dirname is the test/ directory, so CLI_ENTRY = path.resolve(test/, ../, px.js) = repo/px.js
+    assert.ok(
+      fs.existsSync(CLI_ENTRY),
+      `[parallix-workflow-failure] CLI Entry point ${CLI_ENTRY} does not exist; may be using stale installed px`
+    );
+    assert.ok(
+      CLI_ENTRY.includes('px.js'),
+      `[parallix-workflow-failure] CLI Entry point ${CLI_ENTRY} does not point to px.js; may be using stale installed px`
+    );
 
-    if (result.status !== 0) {
-      const { bucket, detail } = classifyFailure(result);
+    // Fast-fail launcher sanity check: probe the real opencode child path with
+    // the pinned model before spending the full workflow timeout. This catches
+    // broken local launcher/model state without misattributing it to Parallix's
+    // mission lifecycle.
+    const healthcheckResult = runOpencodeHealthcheck(repo.repoRoot, env);
+    if (healthcheckResult.status !== 0) {
+      const { bucket, detail } = classifyFailure(healthcheckResult);
       assert.fail(
-        `[${bucket}] px draft --agent custom failed (status=${result.status}, signal=${result.signal}): ${detail}\n` +
-        `stdout:\n${result.stdout}\nstderr:\n${result.stderr}`
+        `[${bucket}] opencode healthcheck for pinned model failed (status=${healthcheckResult.status}, signal=${healthcheckResult.signal}): ${detail}\n` +
+        `stdout:\n${healthcheckResult.stdout}\nstderr:\n${healthcheckResult.stderr}`
+      );
+    }
+
+    // Phase 1: Draft
+    const draftResult = runWorkflowAllowFail(repo.repoRoot, env, ['draft', slug, '--agent', 'custom'], RUN_TIMEOUT_MS);
+
+    if (draftResult.status !== 0) {
+      const { bucket, detail } = classifyFailure(draftResult);
+      assert.fail(
+        `[${bucket}] px draft --agent custom failed (status=${draftResult.status}, signal=${draftResult.signal}): ${detail}\n` +
+        `stdout:\n${draftResult.stdout}\nstderr:\n${draftResult.stderr}`
       );
     }
 
     assert.match(
-      result.stdout,
+      draftResult.stdout,
       /Draft agent family: custom/,
       '[parallix-workflow-failure] expected the real run to select the custom agent family'
     );
@@ -314,20 +483,183 @@ test('real custom-agent launcher smoke: opencode draft produces a parseable MISS
       `[parallix-workflow-failure] real custom-agent draft output is not parseable: missing headings ${missingHeadings.join(', ')}`
     );
 
+    // Verify no placeholder markers remain (TASK-1273: catch phantom drafts
+    // that leave unfilled scaffold). The scaffold contains markers like <Title>,
+    // <Goal>, <Scope>, etc. that must be replaced with real content.
+    // Check this BEFORE the hello-world assertion so we detect phantom drafts
+    // regardless of whether the task description matches.
+    const placeholderMarkers = ['<Title>', '<Goal>', '<Scope>', '<Success Criteria>', '<Description>', '<Acceptance Criteria>'];
+    const foundPlaceholders = placeholderMarkers.filter((marker) => missionBody.includes(marker));
+    assert.deepEqual(
+      foundPlaceholders,
+      [],
+      `[parallix-workflow-failure] draft left placeholder markers (phantom draft): ${foundPlaceholders.join(', ')}`
+    );
+
+    // Verify the task description is the representative hello-world shell
+    // program. Case/separator-insensitive: the drafting model may render it
+    // as "Hello World", "Hello, World!", "hello-world", or "hello_world".
+    assert.match(
+      missionBody,
+      /hello[\s,_-]*world/i,
+      '[parallix-workflow-failure] expected MISSION.md to contain hello-world task description'
+    );
+
     // SC5: telemetry/session metadata must be structurally sane (a real
-    // provider/model/numeric shape), without requiring non-zero token counts
-    // (the custom/vLLM telemetry surface may honestly report zeros).
-    const statsMatch = result.stdout.match(
+    // provider/model/numeric shape). Parse the draft stats line to verify
+    // the agent actually did work (non-zero tokens or tool calls).
+    const statsMatch = draftResult.stdout.match(
       /Draft stats recorded: \S+ stage=draft provider=(\S+) model=(\S+) input_tokens=(\d+) tool_calls=(\d+)/
     );
     assert.ok(statsMatch, '[parallix-workflow-failure] expected a structurally sane draft-stats line for the custom launcher path');
+    
+    // Verify the draft reported non-zero tool calls.
+    // For the draft phase, the agent MUST use tools to edit files and create mission
+    // artifacts. Text-only responses (streamed tokens but zero tool calls) indicate
+    // a phantom draft where the model failed to use the required tools (TASK-1273 class).
+    // We also verify non-zero input tokens as a sanity check on the launcher connection.
+    const inputTokens = parseInt(statsMatch[3], 10);
+    const toolCalls = parseInt(statsMatch[4], 10);
+    assert.ok(
+      inputTokens > 0,
+      `[parallix-workflow-failure] draft reported zero input tokens (launcher may not be connected): input_tokens=${inputTokens}`
+    );
+    assert.ok(
+      toolCalls > 0,
+      `[parallix-workflow-failure] draft reported zero tool calls (phantom draft - model streamed text but did not use tools): input_tokens=${inputTokens} tool_calls=${toolCalls}`
+    );
     // opencode's own telemetry export reports the bare model id without the
     // provider prefix (e.g. "cyankiwi/..." not "vllm/cyankiwi/..."), so match
     // on the suffix rather than the full pinned launcher argument.
     assert.ok(
-      PINNED_CUSTOM_MODEL.endsWith(statsMatch[2]),
-      `draft stats model "${statsMatch[2]}" should correspond to the pinned local-model configuration "${PINNED_CUSTOM_MODEL}"`
+      CUSTOM_MODEL.endsWith(statsMatch[2]),
+      `draft stats model "${statsMatch[2]}" should correspond to the repo-configured custom model "${CUSTOM_MODEL}"`
     );
+
+    // Verify telemetry isolation: check that stats.csv file exists in isolated PARALLIX_HOME
+    const statsFile = path.join(repo.stateHome, 'stats.csv');
+    assert.ok(fs.existsSync(statsFile), '[parallix-workflow-failure] expected stats.csv file in isolated PARALLIX_HOME at ' + statsFile);
+    const statsContent = fs.readFileSync(statsFile, 'utf8');
+    
+    // Verify stats CSV contains expected content (headers and data)
+    assert.ok(statsContent.includes('mission'), '[parallix-workflow-failure] expected stats.csv to contain mission column');
+    assert.ok(statsContent.includes('stage'), '[parallix-workflow-failure] expected stats.csv to contain stage column');
+    assert.ok(statsContent.includes('model'), '[parallix-workflow-failure] expected stats.csv to contain model column');
+    assert.ok(statsContent.includes('draft'), '[parallix-workflow-failure] expected stats.csv to contain draft stage');
+    const modelBaseName = CUSTOM_MODEL.split('/').pop();
+    assert.ok(statsContent.includes(modelBaseName), `[parallix-workflow-failure] expected stats.csv to contain the repo-configured custom model (${modelBaseName})`);
+
+    // Verify no writes escaped to the developer's default Parallix state
+    // roots. Delta-based: only lines ADDED since the pre-run snapshot count as
+    // leakage, so ambient rows from earlier manual runs of the same throwaway
+    // scenario (same slug) or concurrent real px sessions cannot false-flag
+    // the gate. resolveParallixHome (lib/core/storage.ts) falls back to
+    // ~/.local/state/parallix on Linux and ~/.parallix elsewhere.
+    for (const defaultHome of DEFAULT_PARALLIX_HOMES) {
+      const defaultStatsFile = path.join(defaultHome, 'stats.csv');
+      const before = defaultStateSnapshots.get(defaultStatsFile) || '';
+      const after = fs.existsSync(defaultStatsFile) ? fs.readFileSync(defaultStatsFile, 'utf8') : '';
+      const beforeLines = new Set(before.split('\n'));
+      const addedSmokeLines = after.split('\n')
+        .filter((line) => !beforeLines.has(line))
+        .filter((line) => line.includes(slug) || line.includes('real-agent-smoke'));
+      assert.deepEqual(
+        addedSmokeLines,
+        [],
+        `[parallix-workflow-failure] telemetry isolation violated: this run added smoke-run rows to ${defaultStatsFile}: ${addedSmokeLines.join(' | ')}`
+      );
+
+      const defaultAgentsLocal = path.join(defaultHome, 'agents.local.json');
+      const agentsBefore = defaultStateSnapshots.get(defaultAgentsLocal) || '';
+      const agentsAfter = fs.existsSync(defaultAgentsLocal) ? fs.readFileSync(defaultAgentsLocal, 'utf8') : '';
+      assert.equal(
+        agentsAfter,
+        agentsBefore,
+        `[parallix-workflow-failure] agent blocking file isolation violated: this run modified ${defaultAgentsLocal}`
+      );
+    }
+
+    // Operator refinement step: in the real workflow a human reviews the
+    // drafted mission before activation. Small local models routinely write
+    // prose instead of runnable commands in the `## Gates` checklist (e.g.
+    // "- [ ] `bash hello.sh` outputs exactly `Hello, World!`"), and the
+    // workflow executes declared gates literally at handoff. All launcher and
+    // parseability assertions above ran against the RAW draft output; here the
+    // harness performs the minimal refinement an operator would: pin the Gates
+    // section to the repo's runnable verification gate, then commit.
+    const refinedBody = missionBody.replace(
+      /## Gates\n[\s\S]*?(?=\n## |$)/,
+      '## Gates\n- [ ] ./scripts/verify-local.sh all\n'
+    );
+    assert.ok(
+      refinedBody.includes('- [ ] ./scripts/verify-local.sh all'),
+      '[parallix-workflow-failure] drafted MISSION.md has no ## Gates section to refine'
+    );
+    fs.writeFileSync(missionFile, refinedBody, 'utf8');
+    runGit(worktree, ['add', path.relative(worktree, missionFile)]);
+    runGit(worktree, ['commit', '-m', `refine(${slug}): pin mission gates to the repo verification gate`]);
+
+    // Phase 2: Active - this autostarts the autonomous review loop.
+    // px active's preflight requires running from the mission worktree (PWD
+    // and branch checks), matching how a real implementer session operates.
+    const activeResult = runWorkflowAllowFail(worktree, env, ['active', slug, '--implementer', 'custom'], ACTIVE_TIMEOUT_MS);
+    assert.equal(
+      activeResult.status,
+      0,
+      `[parallix-workflow-failure] px active --implementer custom failed (status=${activeResult.status}): ${activeResult.stderr || activeResult.stdout}`
+    );
+
+    assert.match(
+      activeResult.stdout,
+      /Execute agent \(custom\)/,
+      '[parallix-workflow-failure] expected active phase to select the custom agent family'
+    );
+
+    // px active autostarts the autonomous review loop - verify it completed successfully
+    const reviewStateFile = path.join(worktree, 'missions', slug, 'review-state.json');
+    assert.ok(fs.existsSync(reviewStateFile), `[parallix-workflow-failure] expected review-state.json after active phase (review loop should have completed) at ${reviewStateFile}`);
+    const reviewState = JSON.parse(fs.readFileSync(reviewStateFile, 'utf8'));
+    
+    // Reviewer forcing (SC: "force custom as reviewer on its own PR"): the
+    // isolated PARALLIX_HOME's agents.local.json blocks every family except
+    // `custom`, so startReviewLoop's selection cannot find a different-family
+    // reviewer and must take its single-family fallback — assigning `custom`
+    // as the reviewer of its own PR. This is asserted strictly: any other
+    // reviewer means either the blocklist stopped being honored or reviewer
+    // selection regressed (and could silently launch an expensive agent).
+    assert.equal(
+      reviewState.reviewer,
+      'custom',
+      `[parallix-workflow-failure] expected reviewer forced to "custom" via agents.local.json blocklist (got: "${reviewState.reviewer}")`
+    );
+    
+    // Verify review loop completed with APPROVED disposition (if Parallix cannot create a hello-world program, we have a problem)
+    assert.deepEqual(
+      reviewState.disposition,
+      'APPROVED',
+      `[parallix-workflow-failure] expected review loop to complete with APPROVED disposition (got: "${reviewState.disposition}")`
+    );
+    
+    // Verify review phase reached approved state
+    assert.deepEqual(
+      reviewState.phase,
+      'approved',
+      `[parallix-workflow-failure] expected review phase to reach "approved" (got: "${reviewState.phase}")`
+    );
+
+    // Verify review loop produced artifacts
+    const reviewDir = path.join(worktree, 'missions', slug, 'review-events');
+    assert.ok(fs.existsSync(reviewDir), `[parallix-workflow-failure] expected review-events directory after active phase (review loop should have completed) at ${reviewDir}`);
+    const reviewFiles = fs.readdirSync(reviewDir);
+    assert.ok(reviewFiles.length > 0, `[parallix-workflow-failure] expected at least one review event file in ${reviewDir}`);
+
+    // Verify active phase artifacts
+    const cp1File = path.join(worktree, 'missions', slug, 'CP-1.md');
+    assert.ok(fs.existsSync(cp1File), `[parallix-workflow-failure] expected CP-1.md after active phase at ${cp1File}`);
+    const cp1Content = fs.readFileSync(cp1File, 'utf8');
+    assert.ok(cp1Content.includes('## Goal Check') || cp1Content.includes('## Goal Check Table'),
+      '[parallix-workflow-failure] expected CP-1.md to contain Goal Check heading');
+
   } finally {
     if (!shouldKeepTmp()) {
       fs.rmSync(repo.tmpRoot, { recursive: true, force: true });
