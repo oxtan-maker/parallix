@@ -66,6 +66,7 @@ const {
   promoteTaskForIntegrationIfNeeded,
   findExistingSquashCommit,
   printIntegrationPreflight,
+  buildIntegrationContext,
   resolveForgejoUserForIntegration,
   getUnresolvedIndexConflicts,
   parseStashPopCollisionFiles,
@@ -132,6 +133,104 @@ test('integration verification command and cwd are both derived from the candida
     area: 'integrate',
     rootDir: candidateWorktree
   }]);
+});
+
+test('buildIntegrationContext prefers the mission worktree task over stale base-checkout task metadata', (t) => {
+  const backlog = require('../lib/tools/backlog');
+  const worktree = '/tmp/project-task-2200';
+  const baseWorktree = '/tmp/project-main';
+  const worktreeTask = `${worktree}/backlog/tasks/task-2200 - fix.md`;
+  const baseTask = `${baseWorktree}/backlog/tasks/task-2200 - fix.md`;
+
+  const mockedResolveWorktree = mock.method(missionUtils, 'resolveWorktree', () => worktree);
+  const mockedFindMissionDir = mock.method(missionUtils, 'findMissionDir', () => `${worktree}/docs/missions/2026/task-2200`);
+  const mockedFindMissionArea = mock.method(missionUtils, 'findMissionArea', () => 'lib');
+  const mockedResolveMissionBaseBranch = mock.method(missionUtils, 'resolveMissionBaseBranch', () => 'main');
+  const mockedResolveBaseWorktree = mock.method(missionUtils, 'resolveBaseWorktree', () => baseWorktree);
+  const mockedGetCurrentBranch = mock.method(require('../lib/core/git'), 'getCurrentBranch', () => 'mission/task-2200');
+  const mockedGit = mock.method(require('../lib/core/git'), 'git', (args) => {
+    if (args.includes('branch') && args.includes('--show-current')) {
+      return { status: 0, stdout: 'main', stderr: '' };
+    }
+    if (args.includes('status') && args.includes('--short')) {
+      return { status: 0, stdout: '', stderr: '' };
+    }
+    return { status: 0, stdout: '', stderr: '' };
+  });
+  const mockedResolveTaskFile = mock.method(backlog, 'resolveTaskFile', (_slug, rootDir) => {
+    if (rootDir === worktree) {
+      return { ok: true, taskFile: worktreeTask };
+    }
+    if (rootDir === baseWorktree) {
+      return { ok: true, taskFile: baseTask };
+    }
+    return { ok: false, reason: 'missing', matches: [] };
+  });
+  const mockedGetTaskStatus = mock.method(backlog, 'getTaskStatus', (taskFile) => taskFile === worktreeTask ? 'review' : 'backlog');
+  const mockedGetTaskAssignee = mock.method(backlog, 'getTaskAssignee', () => 'claude');
+  t.after(() => {
+    mockedResolveWorktree.mock.restore();
+    mockedFindMissionDir.mock.restore();
+    mockedFindMissionArea.mock.restore();
+    mockedResolveMissionBaseBranch.mock.restore();
+    mockedResolveBaseWorktree.mock.restore();
+    mockedGetCurrentBranch.mock.restore();
+    mockedGit.mock.restore();
+    mockedResolveTaskFile.mock.restore();
+    mockedGetTaskStatus.mock.restore();
+    mockedGetTaskAssignee.mock.restore();
+  });
+
+  const context = buildIntegrationContext('task-2200', {
+    baseBranch: 'main',
+    baseWorktree,
+    isForgejoReviewEnabledFn: () => false
+  });
+
+  assert.equal(context.task.taskFile, worktreeTask);
+  assert.equal(context.taskStatus, 'review');
+});
+
+test('printIntegrationPreflight reads classification from the selected task file, not by re-resolving in the base checkout', (t) => {
+  const backlog = require('../lib/tools/backlog');
+  const logs = [];
+  const worktreeTask = '/tmp/project-task-2200/backlog/tasks/task-2200 - fix.md';
+
+  const mockedGetTaskClassification = mock.method(backlog, 'getTaskClassification', (taskFile) => taskFile === worktreeTask ? 'ai_sdlc' : null);
+  t.after(() => mockedGetTaskClassification.mock.restore());
+
+  const result = printIntegrationPreflight({
+    slug: 'task-2200',
+    branch: 'mission/task-2200',
+    currentBranch: 'mission/task-2200',
+    missionDir: '/tmp/project-task-2200/docs/missions/2026/task-2200',
+    area: 'lib',
+    task: { ok: true, taskFile: worktreeTask },
+    taskStatus: 'review',
+    taskAssignee: 'claude',
+    forgejoUser: 'claude',
+    taskAssigneeWarning: null,
+    pr: { exists: false, raw: 'no PR found' },
+    siblingPrs: [],
+    approval: { ok: true, reviewState: 'APPROVED' },
+    baseBranch: 'main',
+    baseWorktree: '/tmp/project-main',
+    mainBranch: 'main',
+    mainDirty: false,
+    mainDirtyEntries: []
+  }, {
+    readTokenFn: () => 'token',
+    resolveTokenFileFn: () => '/tmp/token',
+    detectRebaseStateFn: () => ({ inProgress: false, rebaseHead: null, unmergedFiles: [] }),
+    getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] }),
+    findMissionDocInBranchesFn: () => [],
+    isForgejoReviewEnabledFn: () => false,
+    resolveMissionClassificationFn: () => ({ classification: null, error: 'stale base resolver should not be used' }),
+    log: line => logs.push(line)
+  });
+
+  assert.ok(!result.failures.includes('classification'));
+  assert.match(logs.join('\n'), /Backlog classification: ai_sdlc/);
 });
 
 test('cleanupMissionWorktree removes the mission worktree and deletes the branch without shelling to the script helper', () => {

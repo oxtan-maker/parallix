@@ -126,7 +126,7 @@ function missionStart(args: string[], opts: { log?: Function, error?: Function, 
   }
   // Check 3: Backlog task
   if (slug) {
-    const taskResolution = resolveTaskFileFn(slug);
+    const taskResolution = resolveTaskFileFn(slug, cwd);
     if (taskResolution.ok) {
       const status = getTaskStatusFn(taskResolution.taskFile);
       const virtualStatus = toVirtualFn(status);
@@ -145,7 +145,7 @@ function missionStart(args: string[], opts: { log?: Function, error?: Function, 
       }
 
       try {
-        const { classification, error: classificationError } = resolveMissionClassificationFn(slug);
+        const { classification, error: classificationError } = resolveMissionClassificationFn(slug, cwd);
         if (!classification) {
           log(fmt.status('FAIL', `Backlog classification: ${classificationError || 'missing'}`));
           overallFail = true;
@@ -188,7 +188,7 @@ function missionStart(args: string[], opts: { log?: Function, error?: Function, 
           const primaryBranch = getPrimaryBranchFn();
           let recordedBase: string | null;
           try {
-            recordedBase = resolveMissionBaseBranchFn(slug, process.cwd());
+            recordedBase = resolveMissionBaseBranchFn(slug, cwd);
           } catch (_) {
             recordedBase = null;
           }
