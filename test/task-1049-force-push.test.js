@@ -43,7 +43,12 @@ test.afterEach(() => {
 });
 
 // Set env var before requiring modules that might use it at top level or during execution
+const previousPrimaryWorktree = process.env.PRIMARY_WORKTREE;
 process.env.PRIMARY_WORKTREE = FAKE_ROOT;
+test.after(() => {
+  if (previousPrimaryWorktree === undefined) delete process.env.PRIMARY_WORKTREE;
+  else process.env.PRIMARY_WORKTREE = previousPrimaryWorktree;
+});
 
 serialTest('createPr includes explicit force-with-lease sha when forceWithLease is true', (t) => {
   const branch = 'mission/task-1049';

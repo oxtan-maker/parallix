@@ -21,15 +21,17 @@ const os = require('os');
 const fs = require('fs');
 const path = require('path');
 
-const originalHome = process.env.HOME;
-const originalPath = process.env.PATH;
 const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1416-home-'));
+const previousHome = process.env.HOME;
+process.env.HOME = tmpHome;
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
 process.env.NO_COLOR = '1';
 
 const { startAgent, setCommandPathProbe } = require('../lib/agents/agents');
+if (previousHome === undefined) delete process.env.HOME;
+else process.env.HOME = previousHome;
 
 const sharedLauncherBin = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1416-launchers-'));
 for (const name of ['codex', 'claude', 'opencode', 'vibe']) {
@@ -38,15 +40,28 @@ for (const name of ['codex', 'claude', 'opencode', 'vibe']) {
   fs.chmodSync(launcherPath, 0o755);
 }
 
-test.before(() => {
-  process.env.HOME = tmpHome;
-  process.env.PATH = `${sharedLauncherBin}${path.delimiter}${originalPath}`;
+function withSharedLaunchers(run) {
+  const previousPath = process.env.PATH;
+  process.env.PATH = `${sharedLauncherBin}${path.delimiter}${previousPath}`;
   setCommandPathProbe(name => fs.existsSync(path.join(sharedLauncherBin, name)));
-});
+  const cleanup = () => {
+    process.env.PATH = previousPath;
+    setCommandPathProbe(null);
+  };
+  try {
+    const result = run();
+    if (result && typeof result.then === 'function') {
+      return result.finally(cleanup);
+    }
+    cleanup();
+    return result;
+  } catch (error) {
+    cleanup();
+    throw error;
+  }
+}
 
 test.after(() => {
-  process.env.HOME = originalHome;
-  process.env.PATH = originalPath;
   setCommandPathProbe(null);
   fs.rmSync(sharedLauncherBin, { recursive: true, force: true });
   fs.rmSync(tmpHome, { recursive: true, force: true });
@@ -105,7 +120,7 @@ test('codex exit 1 with real rollout telemetry is misclassified as a launch fail
   `;
 
   let attempts = 0;
-  const result = await withPathLaunchers({ codex: codexScript }, () => startAgent('draft', {
+  const result = await withSharedLaunchers(() => withPathLaunchers({ codex: codexScript }, () => startAgent('draft', {
     prompt: 'Execute.',
     worktree,
     isAgentBlockedFn: () => false,
@@ -118,7 +133,7 @@ test('codex exit 1 with real rollout telemetry is misclassified as a launch fail
     detectLimitHitFn: () => null,
     updateAgentBlockFn: fakeBlockFn,
     log: () => {}
-  }));
+  })));
 
   fs.rmSync(worktree, { recursive: true, force: true });
 
@@ -163,7 +178,7 @@ test('mistral exit 1 with real session telemetry is misclassified as a launch fa
   `;
 
   let attempts = 0;
-  const result = await withPathLaunchers({ vibe: vibeScript }, () => startAgent('draft', {
+  const result = await withSharedLaunchers(() => withPathLaunchers({ vibe: vibeScript }, () => startAgent('draft', {
     prompt: 'Execute.',
     worktree,
     isAgentBlockedFn: () => false,
@@ -176,7 +191,7 @@ test('mistral exit 1 with real session telemetry is misclassified as a launch fa
     detectLimitHitFn: () => null,
     updateAgentBlockFn: fakeBlockFn,
     log: () => {}
-  }));
+  })));
 
   fs.rmSync(worktree, { recursive: true, force: true });
 
@@ -205,7 +220,7 @@ test('codex exit 1 with no telemetry still reroutes and blocklists (real-failure
     process.exit(1);
   `;
 
-  const result = await withPathLaunchers({ codex: codexScript }, () => startAgent('draft', {
+  const result = await withSharedLaunchers(() => withPathLaunchers({ codex: codexScript }, () => startAgent('draft', {
     prompt: 'Execute.',
     worktree,
     isAgentBlockedFn: () => false,
@@ -217,7 +232,7 @@ test('codex exit 1 with no telemetry still reroutes and blocklists (real-failure
     detectLimitHitFn: () => null,
     updateAgentBlockFn: fakeBlockFn,
     log: () => {}
-  }));
+  })));
 
   fs.rmSync(worktree, { recursive: true, force: true });
 
@@ -262,7 +277,7 @@ test('mistral exit 1 with only stale telemetry still reroutes and blocklists (re
     process.exit(1);
   `;
 
-  const result = await withPathLaunchers({ vibe: vibeScript }, () => startAgent('draft', {
+  const result = await withSharedLaunchers(() => withPathLaunchers({ vibe: vibeScript }, () => startAgent('draft', {
     prompt: 'Execute.',
     worktree,
     isAgentBlockedFn: () => false,
@@ -274,7 +289,7 @@ test('mistral exit 1 with only stale telemetry still reroutes and blocklists (re
     detectLimitHitFn: () => null,
     updateAgentBlockFn: fakeBlockFn,
     log: () => {}
-  }));
+  })));
 
   fs.rmSync(worktree, { recursive: true, force: true });
 

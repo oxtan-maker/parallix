@@ -873,14 +873,29 @@ async function integrate(args: string[]) {
 function buildIntegrationContext(slug: string, {
   baseBranch = null,
   baseWorktree = null,
-  isForgejoReviewEnabledFn = isForgejoReviewEnabled
-}: {baseBranch?: string | null, baseWorktree?: string | null, isForgejoReviewEnabledFn?: Function} = {}) {
+  isForgejoReviewEnabledFn = isForgejoReviewEnabled,
+  getCurrentBranchFn = getCurrentBranch,
+  readTokenFn = readToken,
+  getPrStatusFn = getPrStatus,
+  getLatestReviewDecisionFn = getLatestReviewDecision,
+  readReviewStateFn = readReviewState,
+  gitFn = git
+}: {
+  baseBranch?: string | null,
+  baseWorktree?: string | null,
+  isForgejoReviewEnabledFn?: Function,
+  getCurrentBranchFn?: Function,
+  readTokenFn?: Function,
+  getPrStatusFn?: Function,
+  getLatestReviewDecisionFn?: Function,
+  readReviewStateFn?: Function,
+  gitFn?: Function
+} = {}) {
   if (!slug) {
     throw new Error('buildIntegrationContext requires a non-null mission slug.');
   }
-
   const branch = `mission/${slug}`;
-  const currentBranch = getCurrentBranch();
+  const currentBranch = getCurrentBranchFn();
   const missionDir = findMissionDir(slug);
   const area = missionDir ? findMissionArea(missionDir) : 'docs';
 
@@ -927,8 +942,8 @@ function buildIntegrationContext(slug: string, {
 
   if (forgejoEnabled) {
     forgejoIdentity = resolveForgejoUserForIntegration(taskAssignee);
-    forgejoToken = readToken(/** @type {any} */ (forgejoIdentity.forgejoUser || 'default'));
-    pr = /** @type {any} */ (getPrStatus(branch, process.cwd(), {
+    forgejoToken = readTokenFn(/** @type {any} */ (forgejoIdentity.forgejoUser || 'default'));
+    pr = /** @type {any} */ (getPrStatusFn(branch, process.cwd(), {
       forgejoUser: /** @type {any} */ (forgejoIdentity.forgejoUser),
       token: forgejoToken
     }));
@@ -942,7 +957,7 @@ function buildIntegrationContext(slug: string, {
       }
     }
 
-    approval = pr.exists ? /** @type {any} */ (getLatestReviewDecision(branch, {
+    approval = pr.exists ? /** @type {any} */ (getLatestReviewDecisionFn(branch, {
       forgejoUser: /** @type {any} */ (forgejoIdentity.forgejoUser),
       token: /** @type {any} */ (forgejoToken)
     })) : /** @type {any} */ ({ ok: false, error: 'pr-missing', reviewState: undefined });
@@ -953,15 +968,15 @@ function buildIntegrationContext(slug: string, {
   // so that integrate can proceed without a live Forgejo connection.
   // Only applies when Forgejo was enabled but approval could not be obtained.
   if (forgejoEnabled && !approval.ok) {
-    const localStateFallback = readReviewState(slug, /** @type {string} */ (resolvedBaseWorktree));
+    const localStateFallback = readReviewStateFn(slug, /** @type {string} */ (resolvedBaseWorktree));
     if (localStateFallback && localStateFallback.phase === 'approved' && localStateFallback.disposition === 'APPROVED') {
       approval = /** @type {any} */ ({ ok: true, reviewState: 'APPROVED', source: 'local-review-state' });
     }
   }
   
-  const mainBranchResult = git(['-C', /** @type {string} */ (resolvedBaseWorktree), 'branch', '--show-current']);
+  const mainBranchResult = gitFn(['-C', /** @type {string} */ (resolvedBaseWorktree), 'branch', '--show-current']);
   const mainBranch = mainBranchResult.stdout.trim();
-  const mainStatus = git(['-C', /** @type {string} */ (resolvedBaseWorktree), 'status', '--short']);
+  const mainStatus = gitFn(['-C', /** @type {string} */ (resolvedBaseWorktree), 'status', '--short']);
 
   return {
     slug,

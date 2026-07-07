@@ -10,6 +10,7 @@ const missionUtils = require('../lib/core/mission-utils');
 mock.method(missionUtils, 'getPrimaryBranch', () => 'main');
 
 const draftLib = require('../lib/commands/draft');
+const stats = require('../lib/commands/stats');
 const {
   buildDraftPrompt,
   recordDraftImplementer,
@@ -158,6 +159,21 @@ test('post-draft mission type validation is label-only', () => {
   });
   assert.equal(missingResult.ok, false);
   assert.ok(missingResult.reason.includes('missing'));
+});
+
+test('draft classification helpers fall back to stats when an injected resolver is invalid', (t) => {
+  const restore = mock.method(stats, 'resolveMissionClassification', () => ({ classification: 'ai_sdlc' }));
+  t.after(() => restore.mock.restore());
+
+  const validateResult = validateMissionType('task-test', '/tmp/worktree', {
+    resolveMissionClassificationFn: null,
+  });
+  assert.deepEqual(validateResult, { ok: true, [typeKey]: 'ai_sdlc' });
+
+  const normalizeResult = verifyMissionType('task-test', '/tmp/worktree', {
+    resolveMissionClassificationFn: null,
+  });
+  assert.deepEqual(normalizeResult, { ok: true, [typeKey]: 'ai_sdlc' });
 });
 
 test('restartDraftAgent uses the focused repair prompt', async () => {

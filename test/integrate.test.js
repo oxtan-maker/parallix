@@ -11,31 +11,49 @@ const backlog = require('../lib/tools/backlog');
 const verification = require('../lib/core/verification');
 const postIntegrateHookModule = require('../lib/core/post-integrate-hook');
 mock.method(backlog, 'getTaskClassification', () => 'ai_sdlc');
-mock.method(verification, 'captureVerifiedTreeProof', (area, rootDir) => ({
-  ok: true,
-  proof: {
-    rootDir: path.resolve(rootDir),
-    area,
-    command: 'mock-verification',
-    commit: 'abc123',
-    tree: 'tree123',
-    verifiedAt: '2026-01-01T00:00:00.000Z'
-  }
-}));
-mock.method(verification, 'assertVerifiedTreeProof', (proof, rootDir) => {
-  const resolvedRoot = path.resolve(rootDir);
-  if (!proof || proof.rootDir !== resolvedRoot) {
-    return { ok: false, error: 'verification proof does not match the tree being published' };
-  }
-  return { ok: true, proof };
+
+function installVerificationMocks() {
+  mock.method(verification, 'captureVerifiedTreeProof', (area, rootDir) => ({
+    ok: true,
+    proof: {
+      rootDir: path.resolve(rootDir),
+      area,
+      command: 'mock-verification',
+      commit: 'abc123',
+      tree: 'tree123',
+      verifiedAt: '2026-01-01T00:00:00.000Z'
+    }
+  }));
+  mock.method(verification, 'assertVerifiedTreeProof', (proof, rootDir) => {
+    const resolvedRoot = path.resolve(rootDir);
+    if (!proof || proof.rootDir !== resolvedRoot) {
+      return { ok: false, error: 'verification proof does not match the tree being published' };
+    }
+    return { ok: true, proof };
+  });
+}
+
+test.beforeEach(() => {
+  installVerificationMocks();
+  mock.method(backlog, 'getTaskClassification', () => 'ai_sdlc');
+  mock.method(missionUtils, 'getPrimaryBranch', () => 'main');
+  process.env.PRIMARY_WORKTREE = FAKE_ROOT;
 });
 
 const FAKE_ROOT = `/tmp/mission-${process.pid}`;
+test.afterEach(() => {
+  if (previousPrimaryWorktree === undefined) delete process.env.PRIMARY_WORKTREE;
+  else process.env.PRIMARY_WORKTREE = previousPrimaryWorktree;
+  mock.restoreAll();
+});
+
+const previousPrimaryWorktree = process.env.PRIMARY_WORKTREE;
 process.env.PRIMARY_WORKTREE = FAKE_ROOT;
 
 // Mock getPrimaryBranch BEFORE requiring dependent modules to ensure they use the mock.
 const missionUtils = require('../lib/core/mission-utils');
-mock.method(missionUtils, 'getPrimaryBranch', () => 'main');
+if (previousPrimaryWorktree === undefined) delete process.env.PRIMARY_WORKTREE;
+else process.env.PRIMARY_WORKTREE = previousPrimaryWorktree;
 
 function runGitOrThrow(args, options = {}) {
   const result = childProcess.spawnSync('git', args, {
@@ -987,6 +1005,7 @@ test('printIntegrationPreflight reports token resolution and detached-head recov
       branch: 'mission/task-113',
       currentBranch: 'mission/task-113',
       missionDir: '/tmp/docs/missions/2026/task-113',
+      baseWorktree: FAKE_ROOT,
       task: { ok: true, taskFile: '/tmp/task-113.md' },
       taskStatus: 'ready-for-integration',
       taskAssignee: 'codex',
@@ -1025,6 +1044,7 @@ test('printIntegrationPreflight fails when no Forgejo token is available', () =>
       branch: 'mission/task-113',
       currentBranch: 'mission/task-113',
       missionDir: '/tmp/docs/missions/2026/task-113',
+      baseWorktree: FAKE_ROOT,
       task: { ok: true, taskFile: '/tmp/task-113.md' },
       taskStatus: 'ready-for-integration',
       taskAssignee: 'codex',
@@ -1121,6 +1141,7 @@ test('printIntegrationPreflight reports unresolved index conflicts with recovery
       branch: 'mission/task-113',
       currentBranch: 'mission/task-113',
       missionDir: '/tmp/docs/missions/2026/task-113',
+      baseWorktree: FAKE_ROOT,
       task: { ok: true, taskFile: '/tmp/task-113.md' },
       taskStatus: 'ready-for-integration',
       taskAssignee: 'codex',
@@ -1165,6 +1186,7 @@ test('printIntegrationPreflight fails fast on an in-progress rebase in the integ
       branch: 'mission/task-1322',
       currentBranch: 'mission/task-1322',
       missionDir: '/tmp/docs/missions/2026/task-1322',
+      baseWorktree: FAKE_ROOT,
       task: { ok: true, taskFile: '/tmp/task-1322.md' },
       taskStatus: 'ready-for-integration',
       taskAssignee: 'codex',
@@ -1471,6 +1493,7 @@ test('finalizeVariantACloseout performs housekeeping then commits and pushes mai
       summary: 'Clean up integrate workflow',
       mainTaskFile: taskFile,
       rootDir: root,
+      baseBranch: 'main',
       gitRunner(args) {
         gitCalls.push(args);
         if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n' };

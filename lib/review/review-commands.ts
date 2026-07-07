@@ -95,6 +95,136 @@ export function formatStaticReviewSuccess(slug: string): string {
   ].join('\n');
 }
 
+function collectGoalCheckEvidenceRows(afterHeader: string): string[] {
+  const separatorPattern = /^\|(?:\s*:?-+:?\s*\|)+$/;
+  const headerPattern = /^\| .+\| .+\| .+\|$/;
+  const evidenceLinePattern = /^\| .+\| .+\| .+\|$/;
+  const linesAfterHeader = afterHeader.split('\n');
+  const evidenceRows: string[] = [];
+  let pastHeader = false;
+
+  for (const line of linesAfterHeader) {
+    const trimmed = line.trim();
+    if (trimmed === '') { continue; }
+    if (!pastHeader && headerPattern.test(trimmed)) {
+      pastHeader = true;
+      continue;
+    }
+    if (separatorPattern.test(trimmed)) { continue; }
+    if (pastHeader && evidenceLinePattern.test(trimmed)) {
+      evidenceRows.push(trimmed);
+      continue;
+    }
+    break;
+  }
+
+  return evidenceRows;
+}
+
+function collectRepoTestNames(rootDir: string): Set<string> {
+  const names = new Set<string>();
+  const testRoot = path.join(rootDir, 'test');
+  if (!fs.existsSync(testRoot)) {
+    return names;
+  }
+
+  const queue: string[] = [testRoot];
+  while (queue.length > 0) {
+    const current = queue.pop()!;
+    let entries: fs.Dirent[] = [];
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true }) as fs.Dirent[];
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const fullPath = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        queue.push(fullPath);
+        continue;
+      }
+      if (!entry.isFile() || !/\.(?:test|spec)\.[cm]?[jt]sx?$/i.test(entry.name)) {
+        continue;
+      }
+      const content = fs.readFileSync(fullPath, 'utf8') as string;
+      const testNamePattern = /\b(?:test|it)(?:\.\w+)?\s*\(\s*(['"`])([^'"`]+)\1/g;
+      let match: RegExpExecArray | null;
+      while ((match = testNamePattern.exec(content)) !== null) {
+        names.add(match[2]);
+      }
+    }
+  }
+
+  return names;
+}
+
+function evidenceCellHasVerifiableReference(cell: string, rootDir: string, knownTestNames: Set<string>): boolean {
+  const normalized = cell.replace(/\[[^\]]+\]\(([^)]+)\)/g, '$1');
+  const fileLinePattern = /(?:^|[\s(`])((?:\/|\.\/)?[\w./-]+\.[\w-]+):(\d+)(?:-\d+)?/g;
+  let fileLineMatch: RegExpExecArray | null;
+  while ((fileLineMatch = fileLinePattern.exec(normalized)) !== null) {
+    const candidatePath = fileLineMatch[1];
+    const resolved = path.isAbsolute(candidatePath)
+      ? candidatePath
+      : path.join(rootDir, candidatePath.replace(/^\.\//, ''));
+    if (fs.existsSync(resolved)) {
+      return true;
+    }
+  }
+
+  const adrPattern = /\bADR\s+(\d{4})\b/g;
+  let adrMatch: RegExpExecArray | null;
+  while ((adrMatch = adrPattern.exec(normalized)) !== null) {
+    const prefix = `${adrMatch[1]}-`;
+    const adrDir = path.join(rootDir, 'docs', 'adr');
+    if (fs.existsSync(adrDir) && fs.readdirSync(adrDir).some(name => name.startsWith(prefix) && name.endsWith('.md'))) {
+      return true;
+    }
+  }
+
+  const quotedPattern = /(['"`])([^'"`]+)\1/g;
+  let quotedMatch: RegExpExecArray | null;
+  while ((quotedMatch = quotedPattern.exec(normalized)) !== null) {
+    if (knownTestNames.has(quotedMatch[2])) {
+      return true;
+    }
+  }
+
+  const testFilePattern = /(?:^|[\s(`])((?:\/|\.\/)?[\w./-]+\.(?:test|spec)\.[cm]?[jt]sx?)(?=$|[\s),`])/g;
+  while (testFilePattern.exec(normalized) !== null) {
+    return true;
+  }
+
+  const inlineCommandPattern = /`([^`]+)`/g;
+  let commandMatch: RegExpExecArray | null;
+  while ((commandMatch = inlineCommandPattern.exec(cell)) !== null) {
+    const command = commandMatch[1].trim();
+    if (/^(npm|npx|node|git|px)\s+/i.test(command)) {
+      return true;
+    }
+    if (command.startsWith('./')) {
+      const commandPath = command.split(/\s+/)[0];
+      if (fs.existsSync(path.join(rootDir, commandPath.replace(/^\.\//, '')))) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+function findUnverifiableGoalCheckRow(evidenceRows: string[], rootDir: string): string | null {
+  const knownTestNames = collectRepoTestNames(rootDir);
+  for (const row of evidenceRows) {
+    const columns = row.split('|').slice(1, -1).map(part => part.trim()).filter(Boolean);
+    if (columns.some(cell => evidenceCellHasVerifiableReference(cell, rootDir, knownTestNames))) {
+      continue;
+    }
+    return row;
+  }
+  return null;
+}
+
 function repairStaleActiveTaskAfterReview(
   slug: string,
   options: {
@@ -267,30 +397,15 @@ export function performStaticReview(
 
       // Verify goal-check table has at least one evidence row
       const afterHeader = checkpointContent.slice(goalCheckMatch.index! + goalCheckMatch[0].length);
-      const separatorPattern = /^\|\s*:?-+:?\s*\|/;
-      const headerPattern = /^\| .+\| .+\| .+\|$/;
-      const evidenceLinePattern = /^\| .+\| .+\| .+\|$/;
-      const linesAfterHeader = afterHeader.split('\n');
-      let foundEvidence = false;
-      let pastHeader = false;
-      for (const line of linesAfterHeader) {
-        const trimmed = line.trim();
-        if (trimmed === '') { continue; }
-        if (!pastHeader && headerPattern.test(trimmed)) {
-          pastHeader = true;
-          continue;
-        }
-        if (separatorPattern.test(trimmed)) { continue; }
-        if (pastHeader && evidenceLinePattern.test(trimmed)) {
-          foundEvidence = true;
-          break;
-        }
-        break;
-      }
-      if (!foundEvidence) {
+      const evidenceRows = collectGoalCheckEvidenceRows(afterHeader);
+      if (evidenceRows.length === 0) {
         findings.push(`Final checkpoint ${path.basename(finalCheckpoint)} has "## Goal Check" section but no evidence rows.`);
       } else {
         log(fmt.status('PASS', 'Goal Check table contains evidence rows.'));
+        const unverifiableRow = findUnverifiableGoalCheckRow(evidenceRows, rootDir);
+        if (unverifiableRow) {
+          findings.push(`Final checkpoint ${path.basename(finalCheckpoint)} has a "## Goal Check" section but no evidence rows that cite a verifiable file:line, ADR, or test reference. A goal-check table with real evidence is required before handoff. Offending row: ${unverifiableRow}`);
+        }
       }
     }
   } catch (err) {

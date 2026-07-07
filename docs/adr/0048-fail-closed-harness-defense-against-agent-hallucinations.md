@@ -118,15 +118,23 @@ Seven candidate controls are evaluated and prioritized. The classification colum
 
 **C3: Error classifier and dispatch table** (task-1389). Replace the binary `isRelaunchableError` / `isDirtyError` / `isBehind` classification in `repair-handoff.js` with a structured error classifier that maps each error message pattern to a failure class and a dispatch action (auto-repair, auto-send-back with prompt, or human-only with clear message). This is foundational work that makes C1 and C2 cleaner to implement.
 
-### Implement Next Wave (C4, C5, C6, C7)
+### Implement Next Wave (C4, C5)
 
 **C4: Declared-gate pre-validation** (`TASK-1386`). Validate that gate commands reference existing files and are syntactically valid before executing them. This stays after C1-C3 only because the earlier controls close larger fail-open paths first, not because C4 is optional.
 
 **C5: Gatekeeper auto-send-back** (`TASK-1388`). When gatekeeper detects missing mandatory artifacts and the task strands in `active`, auto-send-back to the implementer with explicit artifact creation instructions. The auto-checkpoint generation at `handoff.js:103-126` already covers one sub-case, but the remaining cases still deserve explicit automation and therefore explicit backlog tracking.
 
-**C6: Forgejo/infrastructure blocker classification and operator handoff** (`TASK-1392`). Label Forgejo and related infrastructure failures as "infrastructure — human required", preserve the existing runtime outcome, and make the operator message deterministic and actionable. Human-required runtime behavior is still harness work and therefore still gets a backlog task.
+## Implementation Status
 
-**C7: Pre-review checkpoint evidence reference validation** (`TASK-1393`). Validate that checkpoint evidence rows cite real file:line references, ADR references, or test names rather than placeholder prose. The task must stay mechanical: it should verify reference shape and existence, not attempt to score evidence quality semantically.
+| # | Control | Status | Task | Notes |
+|---|---------|--------|------|-------|
+| C1 | Pre-review-round gate enforcement with auto-bounce | ✅ Implemented | task-1385 | Gate runs before each review round; auto-bounce on failure |
+| C2 | Gate-failure auto-send-back with captured output | ✅ Implemented | task-1387 | Full 8-class dispatch; captured output sent to implementer |
+| C3 | Error classifier and dispatch table | ✅ Implemented | task-1389 | `repair-handoff.ts` defines `FailureClass`, `DispatchAction`, `DISPATCH_TABLE`, `classifyError()` |
+| C4 | Declared-gate pre-validation | ⏳ Next wave | task-1386 | Static validation of gate commands before execution |
+| C5 | Gatekeeper auto-send-back with agent relaunch | ⏳ Next wave | task-1388 | Missing mandatory artifacts auto-send-back |
+| C6 | Infrastructure blocker classification and operator handoff | ✅ Implemented | task-1392 | `classifyGateFailure` now delegates to the shared classifier, HumanOnly failures strand instead of relaunching, and `repairHandoff()` returns a deterministic infrastructure blocker message |
+| C7 | Evidence-reference validation | ✅ Implemented | task-1393 | `handoff.ts` and `review-commands.ts` require Goal Check rows to cite verifiable file:line refs, ADR refs, or real test names / test-file paths instead of placeholder prose |
 
 ## Implementation Order
 
@@ -144,6 +152,8 @@ C3 first because it provides the dispatch framework that C1 and C2 plug into. C2
 - The fail-open path between review rounds is closed by C1 (task-1268)
 - Error handling moves from binary (repairable / not) to a classified dispatch table (C3)
 - Each failure class has an explicit owner (auto-repair, auto-send-back, or human)
+- The old `classifyGateFailure` stub is replaced with the shared 8-class classifier, so infra blockers and state-machine violations no longer masquerade as relaunchable gate failures
+- Checkpoint evidence validation now rejects placeholder prose unless the row cites a verifiable file:line reference, ADR, or test artifact
 
 ### Negative
 

@@ -12,23 +12,33 @@ const missionUtils = require('../lib/core/mission-utils.js');
 const verification = require('../lib/core/verification');
 const { mock } = test;
 
-mock.method(verification, 'captureVerifiedTreeProof', (area, rootDir) => ({
-  ok: true,
-  proof: {
-    rootDir: path.resolve(rootDir),
-    area,
-    command: 'mock-verification',
-    commit: 'abc123',
-    tree: 'tree123',
-    verifiedAt: '2026-01-01T00:00:00.000Z'
-  }
-}));
-mock.method(verification, 'assertVerifiedTreeProof', (proof, rootDir) => {
-  const resolvedRoot = path.resolve(rootDir);
-  if (!proof || proof.rootDir !== resolvedRoot) {
-    return { ok: false, error: 'verification proof does not match the tree being published' };
-  }
-  return { ok: true, proof };
+function installVerificationMocks() {
+  mock.method(verification, 'captureVerifiedTreeProof', (area, rootDir) => ({
+    ok: true,
+    proof: {
+      rootDir: path.resolve(rootDir),
+      area,
+      command: 'mock-verification',
+      commit: 'abc123',
+      tree: 'tree123',
+      verifiedAt: '2026-01-01T00:00:00.000Z'
+    }
+  }));
+  mock.method(verification, 'assertVerifiedTreeProof', (proof, rootDir) => {
+    const resolvedRoot = path.resolve(rootDir);
+    if (!proof || proof.rootDir !== resolvedRoot) {
+      return { ok: false, error: 'verification proof does not match the tree being published' };
+    }
+    return { ok: true, proof };
+  });
+}
+
+test.beforeEach(() => {
+  installVerificationMocks();
+});
+
+test.afterEach(() => {
+  mock.restoreAll();
 });
 
 test('authenticatedReviewUrl uses the configured standalone review repo', () => {

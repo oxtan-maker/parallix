@@ -7,12 +7,24 @@ const path = require('path');
 
 require('../lib/commands/stats');
 const backlog = require('../lib/tools/backlog');
-mock.method(backlog, 'getTaskClassification', () => 'ai_sdlc');
 const missionUtils = require('../lib/core/mission-utils');
-
 const FAKE_ROOT = `/tmp/mission-${process.pid}`;
-process.env.PRIMARY_WORKTREE = FAKE_ROOT;
-mock.method(missionUtils, 'getPrimaryBranch', () => 'main');
+function installCommonMocks() {
+  mock.method(backlog, 'getTaskClassification', () => 'ai_sdlc');
+  mock.method(missionUtils, 'getPrimaryBranch', () => 'main');
+}
+
+const previousPrimaryWorktree = process.env.PRIMARY_WORKTREE;
+test.beforeEach(() => {
+  process.env.PRIMARY_WORKTREE = FAKE_ROOT;
+  installCommonMocks();
+});
+
+test.afterEach(() => {
+  if (previousPrimaryWorktree === undefined) delete process.env.PRIMARY_WORKTREE;
+  else process.env.PRIMARY_WORKTREE = previousPrimaryWorktree;
+  mock.reset();
+});
 
 const { evaluateTaskStatusForIntegration, printIntegrationPreflight, buildIntegrationContext } = require('../lib/commands/integrate');
 
@@ -203,17 +215,18 @@ test('buildIntegrationContext returns local-review-state approval when token mis
     disposition: 'APPROVED'
   }), 'utf8');
   const previous = process.cwd();
-  const originalIsForgejoEnabled = require('../lib/core/product-config').isForgejoReviewEnabled;
-  const originalReadToken = require('../lib/tools/forgejo').readToken;
   try {
     process.chdir(tmpRoot);
-    mock.method(require('../lib/core/product-config'), 'isForgejoReviewEnabled', () => true);
-    mock.method(require('../lib/tools/forgejo'), 'readToken', () => null);
-    mock.method(require('../lib/tools/forgejo'), 'getPrStatus', () => ({ exists: true, state: 'open', merged: false, number: 1219 }));
-    mock.method(require('../lib/tools/forgejo'), 'getLatestReviewDecision', () => ({ ok: false, error: 'connection-refused', reviewState: null }));
-    mock.method(require('../lib/core/git'), 'getCurrentBranch', () => 'mission/task-1219');
-    mock.method(require('../lib/core/git'), 'git', () => ({ status: 0, stdout: 'main', stderr: '' }));
-    const result = buildIntegrationContext('task-1219', { baseBranch: 'main', baseWorktree: tmpRoot, isForgejoReviewEnabledFn: () => true });
+    const result = buildIntegrationContext('task-1219', {
+      baseBranch: 'main',
+      baseWorktree: tmpRoot,
+      isForgejoReviewEnabledFn: () => true,
+      readTokenFn: () => null,
+      getPrStatusFn: () => ({ exists: true, state: 'open', merged: false, number: 1219 }),
+      getLatestReviewDecisionFn: () => ({ ok: false, error: 'connection-refused', reviewState: null }),
+      getCurrentBranchFn: () => 'mission/task-1219',
+      gitFn: () => ({ status: 0, stdout: 'main', stderr: '' })
+    });
 
     assert.ok(result.approval, 'approval should be present');
     assert.equal(result.approval.ok, true, 'approval.ok should be true');
@@ -239,7 +252,16 @@ test('buildIntegrationContext does not fallback when review-state.json is absent
   const previous = process.cwd();
   try {
     process.chdir(tmpRoot);
-    const result = buildIntegrationContext('task-1219', { baseBranch: 'main', baseWorktree: tmpRoot, isForgejoReviewEnabledFn: () => true });
+    const result = buildIntegrationContext('task-1219', {
+      baseBranch: 'main',
+      baseWorktree: tmpRoot,
+      isForgejoReviewEnabledFn: () => true,
+      readTokenFn: () => null,
+      getPrStatusFn: () => ({ exists: true, state: 'open', merged: false, number: 1219 }),
+      getLatestReviewDecisionFn: () => ({ ok: false, error: 'connection-refused', reviewState: null }),
+      getCurrentBranchFn: () => 'mission/task-1219',
+      gitFn: () => ({ status: 0, stdout: 'main', stderr: '' })
+    });
     assert.equal(result.approval.source, undefined, 'without review-state.json, fallback source must be absent');
   } finally {
     process.chdir(previous);
@@ -265,7 +287,16 @@ test('buildIntegrationContext requires disposition=APPROVED not just phase=appro
   const previous = process.cwd();
   try {
     process.chdir(tmpRoot);
-    const result = buildIntegrationContext('task-1219', { baseBranch: 'main', baseWorktree: tmpRoot, isForgejoReviewEnabledFn: () => true });
+    const result = buildIntegrationContext('task-1219', {
+      baseBranch: 'main',
+      baseWorktree: tmpRoot,
+      isForgejoReviewEnabledFn: () => true,
+      readTokenFn: () => null,
+      getPrStatusFn: () => ({ exists: true, state: 'open', merged: false, number: 1219 }),
+      getLatestReviewDecisionFn: () => ({ ok: false, error: 'connection-refused', reviewState: null }),
+      getCurrentBranchFn: () => 'mission/task-1219',
+      gitFn: () => ({ status: 0, stdout: 'main', stderr: '' })
+    });
     assert.notEqual(result.approval.source, 'local-review-state', 'phase=approved with disposition=REQUEST_CHANGES should not fallback');
     assert.equal(result.approval.ok, false, 'fallback should not apply when disposition is not APPROVED');
   } finally {

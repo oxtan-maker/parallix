@@ -1,8 +1,15 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-// Set PRIMARY_WORKTREE to avoid module load time error
-process.env.PRIMARY_WORKTREE = process.env.PRIMARY_WORKTREE || `/tmp/visualBoard-${process.pid}`;
+const previousPrimaryWorktree = process.env.PRIMARY_WORKTREE;
+if (previousPrimaryWorktree === undefined) {
+  process.env.PRIMARY_WORKTREE = `/tmp/visualBoard-${process.pid}`;
+}
 const integrate = require('../lib/commands/integrate');
+if (previousPrimaryWorktree === undefined) {
+  delete process.env.PRIMARY_WORKTREE;
+} else {
+  process.env.PRIMARY_WORKTREE = previousPrimaryWorktree;
+}
 
 test('integrate guard', async (t) => {
   const originalExit = process.exit;

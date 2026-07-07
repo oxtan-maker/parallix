@@ -745,13 +745,30 @@ function fallbackDraftCommitMessage(slug) {
   return `draft(${slug}): capture agent output`;
 }
 
+function resolveMissionClassificationResolver(resolveMissionClassificationFn) {
+  if (typeof resolveMissionClassificationFn === 'function') {
+    return resolveMissionClassificationFn;
+  }
+  if (typeof stats.resolveMissionClassification === 'function') {
+    return stats.resolveMissionClassification;
+  }
+  // CJS fallback for edge cases where an import-star snapshot was created
+  // before stats attached its helper methods.
+  const statsModule = require('./stats.js');
+  if (statsModule && typeof statsModule.resolveMissionClassification === 'function') {
+    return statsModule.resolveMissionClassification;
+  }
+  throw new TypeError('resolveMissionClassificationFn is not a function');
+}
+
 // @ts-expect-error implicit any on slug/worktree
 function validateDraftClassification(slug, worktree, {
   resolveMissionClassificationFn = stats.resolveMissionClassification,
   errorFn = fmt.log.plainError
 } = {}) {
   try {
-    const { classification, error: classificationError } = resolveMissionClassificationFn(slug, worktree);
+    const resolveClassification = resolveMissionClassificationResolver(resolveMissionClassificationFn);
+    const { classification, error: classificationError } = resolveClassification(slug, worktree);
     if (!classification) {
       if (classificationError) {errorFn(fmt.status('FAIL', classificationError));}
       return { ok: true, classification: null };
@@ -772,7 +789,8 @@ function normalizeDraftClassification(slug, worktree, {
   errorFn = fmt.log.plainError
 } = {}) {
   try {
-    const { classification, error: classificationError } = resolveMissionClassificationFn(slug, worktree);
+    const resolveClassification = resolveMissionClassificationResolver(resolveMissionClassificationFn);
+    const { classification, error: classificationError } = resolveClassification(slug, worktree);
     if (!classification) {
       if (classificationError) {errorFn(fmt.status('FAIL', classificationError));}
       return { ok: false, reason: 'missing-classification' };
