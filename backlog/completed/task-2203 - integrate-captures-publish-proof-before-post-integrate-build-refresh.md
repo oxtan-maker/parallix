@@ -1,8 +1,8 @@
 ---
 id: TASK-2203
 title: integrate captures publish proof before post-integrate build refresh
-status: backlog
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-07-07 19:47'
 updated_date: '2026-07-07 19:47'
 labels: [ai_sdlc, bug]
