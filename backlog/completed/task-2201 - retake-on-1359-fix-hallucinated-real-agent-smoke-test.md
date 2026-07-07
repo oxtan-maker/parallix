@@ -1,12 +1,14 @@
 ---
 id: TASK-2201
 title: 'retake on 1359: fix hallucinated real-agent smoke test'
-status: backlog
-assignee: []
+status: done
+assignee:
+  - '@claude'
 created_date: '2026-07-06 15:46'
-updated_date: '2026-07-06 15:57'
+updated_date: '2026-07-06 21:15'
 labels:
   - ai_sdlc
+  - bug
 dependencies: []
 priority: high
 ---
@@ -35,6 +37,33 @@ Confirmed problems (verified against the current tree) — these are what actual
 
 Original task for reference: TASK-1359 (backlog/completed/task-1359 - Tier-2-non-blocking-real-local-model-smoke-test-for-the-agent-launcher-surface.md), implemented in missions/task-1359/.
 <!-- SECTION:DESCRIPTION:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. Verify the current round-5 changes against the actual runtime code paths for `px active`, reviewer selection, and the smoke-test harness so takeover starts from the real tree rather than the checkpoint narrative.
+2. Keep the fix scoped to TASK-2201: preserve the pinned model path, failure buckets, telemetry isolation, docs shape, and blocking gate registration while correcting any remaining mismatches in `test/e2e-real-agent-smoke.test.js` and `docs/real-agent-smoke.md`.
+3. Run targeted verification on the final tree: syntax/lint/test-hygiene for edited files, `./scripts/verify-local.sh all`, and direct execution of `node test/e2e-real-agent-smoke.test.js` when the required local-model environment is available; if the environment blocks it, record the exact blocker and do not over-claim.
+4. Update `graphify-out/` after code changes, then finalize TASK-2201 with implementation notes, a PR-style final summary, and Definition of Done evidence grounded in real file references and test results.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Took over from @vibe after review round 5 and verified the remaining issues against the real runtime paths in `lib/commands/active.ts`, `lib/agents/agents.js`, and `lib/review/review-loop.js`. Removed the misleading `FORGEJO_USER` injection from `test/e2e-real-agent-smoke.test.js`, corrected the active-phase failure text to `--implementer`, and normalized the docs/checkpoint trail to describe reviewer selection as auto-derived rather than explicitly forced.
+
+Verification on the current tree: `node --check test/e2e-real-agent-smoke.test.js` PASS; `npx --yes eslint test/e2e-real-agent-smoke.test.js` PASS; `bash scripts/test-hygiene.sh` PASS; `./scripts/verify-local.sh all` PASS for the default non-smoke suite (2043 tests / 2021 pass / 0 fail / 22 skip).
+
+Direct execution of `node test/e2e-real-agent-smoke.test.js` was attempted on 2026-07-06 and failed after the full 600s timeout in the test's `local-model-environment` bucket. The real `px draft --agent custom` path launched `opencode` with the pinned model, then produced no visible model output and was terminated with `SIGTERM`. This is recorded in `missions/task-2201/CP-5.md` as the current blocker to a true green closeout.
+
+Ran `graphify update .` after the code/doc changes so `graphify-out/graph.json` and `graphify-out/GRAPH_REPORT.md` reflect the latest tree.
+
+Follow-up fix after deeper investigation: the smoke harness now performs a fast real `opencode` health probe (`runOpencodeHealthcheck`) before entering the `draft -> active -> review` lifecycle, and the launcher-failure classification now recognizes SQLite/WAL startup failures (`wal_checkpoint`, `sqlite`) as `opencode-launcher-failure` instead of letting them degrade into a 600s timeout story.
+
+Telemetry isolation in the corrected harness is now explicitly scoped to Parallix-owned state via `PARALLIX_HOME`. The test no longer depends on `XDG_DATA_HOME` for telemetry/blocklist isolation, which matches the actual storage code paths (`lib/core/storage.ts`, `lib/commands/stats.ts`) more closely. The direct smoke run now fails in ~2.5s with `Failed to run the query 'PRAGMA wal_checkpoint(PASSIVE)'`, which is better evidence than the earlier long silent timeout.
+
+Re-ran `./scripts/verify-local.sh all` after the harness changes: PASS for the default non-smoke suite. Re-ran `node test/e2e-real-agent-smoke.test.js`: still FAIL, but now in the intended fast-fail `opencode-launcher-failure` bucket instead of after a long timeout. Updated CP-2/CP-3/CP-5 and `docs/real-agent-smoke.md` to match the final harness behavior, then ran `graphify update .` again.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
