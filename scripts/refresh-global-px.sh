@@ -31,10 +31,10 @@ npm run build:cjs
 
 echo "[refresh-global-px] Packing a tarball of this checkout..."
 TARBALL="$(npm pack)"
+trap 'rm -f "${TARBALL}"' EXIT
 
 echo "[refresh-global-px] Installing ${TARBALL} globally..."
 npm install -g "./${TARBALL}"
-rm -f "${TARBALL}"
 
 echo "[refresh-global-px] Global px runner refreshed to ${NEW_VERSION} from ${REPO_ROOT}."
 px --version || true

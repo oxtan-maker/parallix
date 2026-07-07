@@ -1,11 +1,11 @@
 ---
 id: TASK-1424
 title: publish fails
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-07-04 15:59'
-updated_date: '2026-07-05 06:20'
-labels: [ai_sdlc]
+updated_date: '2026-07-05 07:05'
+labels: [user_value, bug]
 dependencies: []
 ---
 

@@ -347,6 +347,18 @@ with `npm run build:cjs`, then run `npm pack` / `npm publish`. `px integrate`
 reuses the same freshness check when it captures the verification proof for the
 tree being published, so integration cannot bless a stale compiled runtime.
 
+This freshness check only runs against the checkout, not the installed package
+(task-1424): `package.json`'s `files` list excludes `.ts` sources under `lib/`
+(`!lib/**/*.ts`) from the published tarball, since the compiled `.js` is
+canonical for installed packages and the `.ts` is not needed at runtime.
+Tarball extraction assigns each file its own extraction-time mtime in
+directory-sorted order, and `<name>.ts` always sorts after `<name>.js`, so a
+shipped `.ts`/`.js` pair would otherwise always look stale on a fresh install
+regardless of actual build freshness. Excluding the source pairs from the
+package removes the false-positive comparison entirely while the
+checkout-side guard above still fails closed on a genuinely stale checkout
+before it is ever packed.
+
 `CHANGELOG.md` is the versioning authority. Until the first public release,
 PATCH bumps are the release discipline: bump before each `px integrate`, then
 reinstall from the new tarball after the integrate succeeds. That policy is not

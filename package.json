@@ -42,6 +42,7 @@
     "docs/",
     "examples/",
     "lib/",
+    "!lib/**/*.ts",
     "prompts/",
     "templates/",
     "tools/setup-forgejo-docker.sh"

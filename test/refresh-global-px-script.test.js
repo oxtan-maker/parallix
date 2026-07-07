@@ -39,3 +39,10 @@ test('scripts/refresh-global-px.sh bumps the patch version and reinstalls from a
   // Uses the hook-provided env vars documented in lib/core/post-integrate-hook.ts.
   assert.match(content, /INTEGRATE_HOOK_SLUG/);
 });
+
+test('scripts/refresh-global-px.sh cleans up the packed tarball on both success and failure', () => {
+  const content = fs.readFileSync(SCRIPT_PATH, 'utf8');
+  // A trap-based cleanup fires on EXIT regardless of whether a later step fails,
+  // so no tarball is left behind in the repo root either way (task-1424).
+  assert.match(content, /trap\s+'rm -f "\$\{TARBALL\}"'\s+EXIT/);
+});
