@@ -62,23 +62,13 @@ test('global tarball reinstall preserves PARALLIX_HOME stats and agent blocklist
 
     // Package name is scoped (@magnusekdahl/parallix), so npm installs under the scope dir.
     const installedRoot = path.join(prefix, 'lib', 'node_modules', '@magnusekdahl', 'parallix');
-    // Touch all .js files so the preflight check passes (packed tarball has stale mtimes
-    // and tsc is unavailable since devDependencies are not installed globally).
+    // Negative control (task-1424): .ts sources are excluded from the published
+    // package (see package.json's "files" entry `!lib/**/*.ts`), so no ad hoc
+    // mtime repair is needed for the installed guard to pass. Assert that.
     const commandsDir = path.join(installedRoot, 'lib', 'commands');
-    if (fs.existsSync(commandsDir)) {
-      for (const entry of fs.readdirSync(commandsDir)) {
-        if (!entry.endsWith('.ts')) { continue; }
-        const jsPath = path.join(commandsDir, entry.replace(/\.ts$/, '.js'));
-        if (fs.existsSync(jsPath)) {
-          fs.utimesSync(jsPath, new Date(), new Date());
-        }
-      }
-    }
-    for (const entry of ['px.ts', 'index.ts']) {
-      const jsPath = path.join(installedRoot, entry.replace(/\.ts$/, '.js'));
-      if (fs.existsSync(jsPath)) {
-        fs.utimesSync(jsPath, new Date(), new Date());
-      }
+    assert.ok(fs.existsSync(commandsDir), 'installed lib/commands should exist');
+    for (const entry of fs.readdirSync(commandsDir)) {
+      assert.ok(!entry.endsWith('.ts'), `installed package should not ship ${entry}`);
     }
 
     const env = { ...process.env, PARALLIX_HOME: parallixHome };

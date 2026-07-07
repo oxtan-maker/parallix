@@ -84,6 +84,18 @@ export function getBuildFreshnessStatus(rootDir: string): BuildFreshnessStatus {
  * Returns true when all pairs are fresh (or source has no sibling JS).
  * Prints a clear error with the `npm run build:cjs` instruction and
  * exits non-zero on any staleness detected.
+ *
+ * This check is only meaningful against a source checkout: `.ts` sources are
+ * excluded from the published npm package (see package.json's "files" entry
+ * `!lib/**\/*.ts`), so an installed package has no `.ts` files to compare
+ * against and every pair is skipped via findStaleBuildArtifacts' `!fs.existsSync(tsPath)`
+ * branch, always ok. That's intentional (task-1424): tarball extraction
+ * assigns each file its own extraction-time mtime in directory-sorted order,
+ * and "<name>.ts" always sorts after "<name>.js", so a packaged-and-installed
+ * `.ts`/`.js` pair would otherwise always look stale regardless of actual
+ * build freshness. The checkout-side guard (npm run prepack/publish:guard)
+ * still runs against the full source tree before packing, so a genuinely
+ * stale checkout is still caught before it is ever shipped.
  */
 export function assertBuildFreshness(
   rootDir: string,
