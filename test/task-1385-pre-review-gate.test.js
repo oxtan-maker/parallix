@@ -23,16 +23,74 @@ async function withTempDir(fn) {
 // classifyGateFailure tests
 // ============================================================================
 
-test('classifyGateFailure returns Class 6 auto-send-back for gate failures', () => {
-  const result = classifyGateFailure('some gate output');
-  assert.equal(result.classification, 'class-6-genuine-gate-failure');
-  assert.equal(result.action, 'auto-send-back');
+test('classifyGateFailure delegates to classifyError for GateFailure', () => {
+  const result = classifyGateFailure('verification gate failed with exit code 1');
+  assert.equal(result.classification, 'GateFailure');
+  assert.equal(result.action, 'AutoSendBack');
   assert.equal(result.isRelaunchable, true);
 });
 
-test('classifyGateFailure is relaunchable for any gate output', () => {
-  const result = classifyGateFailure('');
+test('classifyGateFailure delegates to classifyError for InfraBlocker', () => {
+  const result = classifyGateFailure('connection refused to forgejo server');
+  assert.equal(result.classification, 'InfraBlocker');
+  assert.equal(result.action, 'HumanOnly');
+  assert.equal(result.isRelaunchable, false);
+});
+
+test('classifyGateFailure delegates to classifyError for StateMachineViolation', () => {
+  const result = classifyGateFailure('task state violation: cannot transition from review to active');
+  assert.equal(result.classification, 'StateMachineViolation');
+  assert.equal(result.action, 'HumanOnly');
+  assert.equal(result.isRelaunchable, false);
+});
+
+test('classifyGateFailure delegates to classifyError for GitBlockers', () => {
+  const result = classifyGateFailure('MISSION.md is modified but uncommitted');
+  assert.equal(result.classification, 'GitBlockers');
+  assert.equal(result.action, 'AutoRepair');
   assert.equal(result.isRelaunchable, true);
+});
+
+test('classifyGateFailure delegates to classifyError for MissingArtifacts', () => {
+  const result = classifyGateFailure('missing mission artifact: CP-1.md not found');
+  assert.equal(result.classification, 'MissingArtifacts');
+  assert.equal(result.action, 'AutoSendBack');
+  assert.equal(result.isRelaunchable, true);
+});
+
+test('classifyGateFailure delegates to classifyError for IncompleteEvidence', () => {
+  const result = classifyGateFailure('has a "## Goal Check" section but no evidence rows. A goal-check table with real evidence is required before handoff');
+  assert.equal(result.classification, 'IncompleteEvidence');
+  assert.equal(result.action, 'AutoSendBack');
+  assert.equal(result.isRelaunchable, true);
+});
+
+test('classifyGateFailure delegates to classifyError for UnverifiableClaims', () => {
+  const result = classifyGateFailure('test passed but cannot verify proof found');
+  assert.equal(result.classification, 'UnverifiableClaims');
+  assert.equal(result.action, 'AutoSendBack');
+  assert.equal(result.isRelaunchable, true);
+});
+
+test('classifyGateFailure delegates to classifyError for MalformedGates', () => {
+  const result = classifyGateFailure('malformed gate: syntax error in command');
+  assert.equal(result.classification, 'MalformedGates');
+  assert.equal(result.action, 'AutoRepair');
+  assert.equal(result.isRelaunchable, true);
+});
+
+test('classifyGateFailure defaults to InfraBlocker HumanOnly for unrecognized errors', () => {
+  const result = classifyGateFailure('');
+  assert.equal(result.classification, 'InfraBlocker');
+  assert.equal(result.action, 'HumanOnly');
+  assert.equal(result.isRelaunchable, false);
+});
+
+test('classifyGateFailure defaults to InfraBlocker HumanOnly for non-string input', () => {
+  const result = classifyGateFailure(null);
+  assert.equal(result.classification, 'InfraBlocker');
+  assert.equal(result.action, 'HumanOnly');
+  assert.equal(result.isRelaunchable, false);
 });
 
 // ============================================================================
@@ -55,6 +113,8 @@ test('runPreReviewGate passes when gate command succeeds', async () => {
     const logs = [];
     const errors = [];
     const result = await runPreReviewGate('task-1385', root, {
+      runFn: () => ({ status: 0, stdout: 'ok\n', stderr: '' }),
+      findMissionAreaFn: () => 'docs',
       log: (msg) => logs.push(msg),
       error: (msg) => errors.push(msg),
     });
@@ -82,6 +142,8 @@ test('runPreReviewGate fails when gate command fails', async () => {
     const logs = [];
     const errors = [];
     const result = await runPreReviewGate('task-1385', root, {
+      runFn: () => ({ status: 1, stdout: '', stderr: '' }),
+      findMissionAreaFn: () => 'docs',
       log: (msg) => logs.push(msg),
       error: (msg) => errors.push(msg),
     });
@@ -108,6 +170,8 @@ test('runPreReviewGate passes when no verification gate is configured', async ()
     const logs = [];
     const errors = [];
     const result = await runPreReviewGate('task-1385', root, {
+      runFn: () => ({ status: 99, stdout: '', stderr: '' }),
+      findMissionAreaFn: () => 'docs',
       log: (msg) => logs.push(msg),
       error: (msg) => errors.push(msg),
     });
@@ -135,6 +199,8 @@ test('runPreReviewGate captures stdout and stderr on failure', async () => {
     const logs = [];
     const errors = [];
     const result = await runPreReviewGate('task-1385', root, {
+      runFn: () => ({ status: 2, stdout: 'out\n', stderr: 'err\n' }),
+      findMissionAreaFn: () => 'docs',
       log: (msg) => logs.push(msg),
       error: (msg) => errors.push(msg),
     });
@@ -167,6 +233,8 @@ test('runPreReviewGate resolves mission area from mission directory', async () =
     const logs = [];
     const errors = [];
     const result = await runPreReviewGate('task-1385', root, {
+      runFn: () => ({ status: 0, stdout: 'area-test\n', stderr: '' }),
+      findMissionAreaFn: () => 'task-1385',
       log: (msg) => logs.push(msg),
       error: (msg) => errors.push(msg),
     });
@@ -193,7 +261,7 @@ test('handleGateFailureAutoBounce bounces on first failure', async () => {
       command: 'exit 1',
       exitCode: 1,
       stdout: 'stdout output',
-      stderr: 'stderr output',
+      stderr: 'verification gate failed with exit code 1',
     };
 
     const result = await handleGateFailureAutoBounce('task-1385', root, gateResult, 'codex', {
@@ -231,7 +299,7 @@ test('handleGateFailureAutoBounce bounces on second failure', async () => {
       command: 'exit 1',
       exitCode: 1,
       stdout: 'output',
-      stderr: '',
+      stderr: 'verification gate failed with exit code 1',
     };
 
     // Simulate persisted state with retry count = 1
@@ -294,6 +362,73 @@ test('handleGateFailureAutoBounce strands when retry limit exceeded', async () =
   });
 });
 
+test('handleGateFailureAutoBounce does not bounce for InfraBlocker (HumanOnly)', async () => {
+  await withTempDir(async root => {
+    const errors = [];
+    const launches = [];
+
+    const gateResult = {
+      ok: false,
+      area: 'docs',
+      command: 'node parallix verify docs',
+      exitCode: 1,
+      stdout: '',
+      stderr: 'connection refused to forgejo server',
+    };
+
+    const result = await handleGateFailureAutoBounce('task-1385', root, gateResult, 'codex', {
+      readReviewStateFn: () => null,
+      writeReviewStateFn: () => {},
+      transitionTaskFn: () => {},
+      startAgentFn: async () => { launches.push('should-not-launch'); },
+      applyAgentFallbackFn: () => 'codex',
+      log: () => {},
+      error: (msg) => errors.push(msg),
+      sleepFn: () => Promise.resolve(),
+      exit: () => { throw new Error('exit called'); },
+    });
+
+    assert.equal(result.bounced, false);
+    assert.equal(result.stranded, true);
+    assert.equal(launches.length, 0, 'should not launch agent for HumanOnly errors');
+    assert.ok(errors.some(e => e.includes('InfraBlocker')));
+    assert.ok(errors.some(e => e.includes('Human intervention required')));
+  });
+});
+
+test('handleGateFailureAutoBounce does not bounce for StateMachineViolation (HumanOnly)', async () => {
+  await withTempDir(async root => {
+    const errors = [];
+    const launches = [];
+
+    const gateResult = {
+      ok: false,
+      area: 'docs',
+      command: 'node parallix verify docs',
+      exitCode: 1,
+      stdout: '',
+      stderr: 'task state violation: invalid transition',
+    };
+
+    const result = await handleGateFailureAutoBounce('task-1385', root, gateResult, 'codex', {
+      readReviewStateFn: () => null,
+      writeReviewStateFn: () => {},
+      transitionTaskFn: () => {},
+      startAgentFn: async () => { launches.push('should-not-launch'); },
+      applyAgentFallbackFn: () => 'codex',
+      log: () => {},
+      error: (msg) => errors.push(msg),
+      sleepFn: () => Promise.resolve(),
+      exit: () => { throw new Error('exit called'); },
+    });
+
+    assert.equal(result.bounced, false);
+    assert.equal(result.stranded, true);
+    assert.equal(launches.length, 0, 'should not launch agent for HumanOnly errors');
+    assert.ok(errors.some(e => e.includes('StateMachineViolation')));
+  });
+});
+
 test('handleGateFailureAutoBounce includes gate output in fix prompt', async () => {
   await withTempDir(async root => {
     let capturedPrompt = '';
@@ -304,7 +439,7 @@ test('handleGateFailureAutoBounce includes gate output in fix prompt', async () 
       command: 'npm run verify:workflow',
       exitCode: 3,
       stdout: 'test failed: assertion error',
-      stderr: 'npm ERR! code ELIFECYCLE',
+      stderr: 'verification gate failed with exit code 3',
     };
 
     await handleGateFailureAutoBounce('task-1385', root, gateResult, 'codex', {
@@ -327,8 +462,11 @@ test('handleGateFailureAutoBounce includes gate output in fix prompt', async () 
     assert.ok(capturedPrompt.includes('task-1385'));
     assert.ok(capturedPrompt.includes('workflow'));
     assert.ok(capturedPrompt.includes('test failed: assertion error'));
-    assert.ok(capturedPrompt.includes('npm ERR! code ELIFECYCLE'));
+    assert.ok(capturedPrompt.includes('verification gate failed'));
     assert.ok(capturedPrompt.includes('Retry attempt: 1/2'));
+    assert.ok(capturedPrompt.includes('Classification:'));
+    assert.ok(capturedPrompt.includes('GateFailure'));
+    assert.ok(capturedPrompt.includes('AutoSendBack'));
   });
 });
 
@@ -342,7 +480,7 @@ test('handleGateFailureAutoBounce increments retry count in persisted state', as
       command: 'exit 1',
       exitCode: 1,
       stdout: '',
-      stderr: '',
+      stderr: 'verification gate failed with exit code 1',
     };
 
     const persisted = { metadata: { gateFailureRetryCount: 0, existing: 'data' } };

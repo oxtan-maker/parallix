@@ -14,6 +14,15 @@ const path = require('path');
 const childProcess = require('child_process');
 const { rebaseBeforeReviewRound } = require('../lib/review/review');
 
+function runGit(root, args) {
+  const result = childProcess.spawnSync('git', ['-C', root, ...args], { encoding: 'utf8' });
+  return {
+    status: result.status,
+    stdout: result.stdout || '',
+    stderr: result.stderr || '',
+  };
+}
+
 async function withTempGitRepo(fn) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-test-1272-'));
   try {
@@ -46,6 +55,7 @@ test('rebaseBeforeReviewRound commits safe artifacts and skips rebase when Forge
     const result = await rebaseBeforeReviewRound(slug, {
       worktree: root,
       runFn,
+      gitFn: (args) => runGit(root, args),
       isForgejoReviewEnabledFn: () => false,
       log: m => logs.push(m)
     });
@@ -82,6 +92,7 @@ test('rebaseBeforeReviewRound still blocks on unsafe dirty files in standalone m
     const result = await rebaseBeforeReviewRound(slug, {
       worktree: root,
       runFn,
+      gitFn: (args) => runGit(root, args),
       isForgejoReviewEnabledFn: () => false,
       error: m => errors.push(m)
     });

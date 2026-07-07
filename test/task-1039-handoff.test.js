@@ -38,7 +38,7 @@ function setupMocks() {
     adapters: { review: { provider: 'forgejo', baseUrl: 'http://localhost:3300', remote: 'review', repo: 'magnus/visualboard' } },
   }));
   fs.writeFileSync(path.join(missionDir, 'MISSION.md'), 'mission');
-  fs.writeFileSync(path.join(missionDir, 'CP-1.md'), '## Goal Check\n\n| a | b | c |\n|---|---|---|\n| 1 | 2 | 3 |');
+  fs.writeFileSync(path.join(missionDir, 'CP-1.md'), '## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| handoff coverage | docs/missions/2026/task-handoff-test/MISSION.md:1 | PASS |');
 }
 
 const mockRebase = async () => ({ ok: true, sharedFileConflicts: false });

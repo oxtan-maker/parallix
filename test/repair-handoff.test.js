@@ -607,6 +607,33 @@ test('repairHandoff returns false for non-GitBlocker errors', async () => {
   assert.equal(repaired, false, 'repairHandoff should return repaired:false for non-GitBlocker errors');
 });
 
+// ── CP-4/CP-6: C6 InfraBlocker blocker message in repairHandoff ──────────────
+
+test('repairHandoff returns InfraBlocker-specific blocker message for infrastructure errors', async () => {
+  const logs = [];
+  const { repaired, blocker } = await repairHandoff('task-1037', '/tmp/worktree', 'connection timed out', {
+    log: (msg) => logs.push(msg)
+  });
+
+  assert.equal(repaired, false, 'repairHandoff should return repaired:false for InfraBlocker');
+  assert.ok(blocker, 'repairHandoff should return a non-null blocker for InfraBlocker errors');
+  assert.ok(blocker.includes('infrastructure'), 'InfraBlocker blocker should mention infrastructure');
+  assert.ok(blocker.toLowerCase().includes('forgejo'), 'InfraBlocker blocker should mention Forgejo');
+  assert.ok(blocker.toLowerCase().includes('relaunch'), 'InfraBlocker blocker should state relaunch will not help');
+  assert.ok(logs.some(l => l === blocker), 'InfraBlocker blocker should be logged');
+});
+
+test('repairHandoff returns InfraBlocker-specific blocker for token expired errors', async () => {
+  const logs = [];
+  const { repaired, blocker } = await repairHandoff('task-1037', '/tmp/worktree', 'Authentication failed for Forgejo: token expired', {
+    log: (msg) => logs.push(msg)
+  });
+
+  assert.equal(repaired, false);
+  assert.ok(blocker, 'repairHandoff should return a non-null blocker for token expired');
+  assert.ok(blocker.includes('infrastructure'), 'InfraBlocker blocker should mention infrastructure');
+});
+
 // ── Finding 1 fix: isBehind derived from classifyError(reason) ────────────────
 
 test('classifyError returns reason field for GitBlockers (dirty and behind)', () => {

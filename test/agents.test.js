@@ -452,16 +452,23 @@ test('selectAgent bypasses WORKFLOW_AGENT override when it is in the exclude set
   const previous = process.env.WORKFLOW_AGENT;
   process.env.WORKFLOW_AGENT = 'claude';
   try {
-    const config = {
-      steps: {
-        review: { eligible: ['claude', 'codex'], selection: 'random' }
-      }
-    };
-    // First call: no exclude → returns the pinned override.
-    assert.equal(selectAgent('review', { config }), 'claude');
-    // Second call: claude in exclude (post-limit-hit) → must NOT return claude.
-    const next = selectAgent('review', { config, exclude: new Set(['claude']) });
-    assert.equal(next, 'codex');
+    withPathLaunchers({
+      claude: 'process.exit(0);',
+      codex: 'process.exit(0);'
+    }, () => {
+      withCommandPathProbe(['claude', 'codex'], () => {
+        const config = {
+          steps: {
+            review: { eligible: ['claude', 'codex'], selection: 'random' }
+          }
+        };
+        // First call: no exclude → returns the pinned override.
+        assert.equal(selectAgent('review', { config }), 'claude');
+        // Second call: claude in exclude (post-limit-hit) → must NOT return claude.
+        const next = selectAgent('review', { config, exclude: new Set(['claude']) });
+        assert.equal(next, 'codex');
+      });
+    });
   } finally {
     if (previous === undefined) delete process.env.WORKFLOW_AGENT;
     else process.env.WORKFLOW_AGENT = previous;
@@ -478,24 +485,31 @@ test('selectAgent ignores WORKFLOW_AGENT override when the pinned agent is not i
   const previous = process.env.WORKFLOW_AGENT;
   process.env.WORKFLOW_AGENT = 'claude';
   try {
-    // Step eligibility excludes claude, so the override is not in the pool.
-    const config = {
-      steps: {
-        review: { eligible: ['codex'], selection: 'random' }
-      }
-    };
-    const agent = selectAgent('review', { config });
-    assert.equal(agent, 'codex', 'override outside the eligible pool must fall through to normal selection');
+    withPathLaunchers({
+      claude: 'process.exit(0);',
+      codex: 'process.exit(0);'
+    }, () => {
+      withCommandPathProbe(['claude', 'codex'], () => {
+        // Step eligibility excludes claude, so the override is not in the pool.
+        const config = {
+          steps: {
+            review: { eligible: ['codex'], selection: 'random' }
+          }
+        };
+        const agent = selectAgent('review', { config });
+        assert.equal(agent, 'codex', 'override outside the eligible pool must fall through to normal selection');
 
-    // Override is eligible but blocked → still must fall through.
-    const blockedConfig = {
-      steps: {
-        review: { eligible: ['claude', 'codex'], selection: 'random' }
-      },
-      blocklist: { claude: { until: '2099-12-31 23' } }
-    };
-    const fallback = selectAgent('review', { config: blockedConfig });
-    assert.equal(fallback, 'codex', 'override that is hard-blocked must fall through');
+        // Override is eligible but blocked → still must fall through.
+        const blockedConfig = {
+          steps: {
+            review: { eligible: ['claude', 'codex'], selection: 'random' }
+          },
+          blocklist: { claude: { until: '2099-12-31 23' } }
+        };
+        const fallback = selectAgent('review', { config: blockedConfig });
+        assert.equal(fallback, 'codex', 'override that is hard-blocked must fall through');
+      });
+    });
   } finally {
     if (previous === undefined) delete process.env.WORKFLOW_AGENT;
     else process.env.WORKFLOW_AGENT = previous;
@@ -527,13 +541,19 @@ test('selectAgent picks from eligible list when no env override', () => {
   const previous = process.env.WORKFLOW_AGENT;
   delete process.env.WORKFLOW_AGENT;
   try {
-    const config = {
-      steps: {
-        draft: { eligible: ['codex'], selection: 'random' }
-      }
-    };
-    const agent = selectAgent('draft', { config });
-    assert.equal(agent, 'codex');
+    withPathLaunchers({
+      codex: 'process.exit(0);'
+    }, () => {
+      withCommandPathProbe(['codex'], () => {
+        const config = {
+          steps: {
+            draft: { eligible: ['codex'], selection: 'random' }
+          }
+        };
+        const agent = selectAgent('draft', { config });
+        assert.equal(agent, 'codex');
+      });
+    });
   } finally {
     if (previous !== undefined) process.env.WORKFLOW_AGENT = previous;
   }
@@ -543,12 +563,18 @@ test('selectAgent excludes a draft agent blocked by workflow/config/agents.local
   const previous = process.env.WORKFLOW_AGENT;
   delete process.env.WORKFLOW_AGENT;
   try {
-    withTempAgentConfigTree(({ configPath, configDir, mainWorktreePath, targetPath }) => {
-      const localPath = path.join(configDir, 'agents.local.json');
-      fs.writeFileSync(localPath, JSON.stringify({ blocklist: { gemini: true } }));
+    withPathLaunchers({
+      codex: 'process.exit(0);'
+    }, () => {
+      withCommandPathProbe(['codex'], () => {
+        withTempAgentConfigTree(({ configPath, configDir, mainWorktreePath, targetPath }) => {
+          const localPath = path.join(configDir, 'agents.local.json');
+          fs.writeFileSync(localPath, JSON.stringify({ blocklist: { gemini: true } }));
 
-      const agent = selectAgent('draft', { configPath, mergeLocal: true, mainWorktreePath, targetPath });
-      assert.equal(agent, 'codex');
+          const agent = selectAgent('draft', { configPath, mergeLocal: true, mainWorktreePath, targetPath });
+          assert.equal(agent, 'codex');
+        });
+      });
     });
   } finally {
     if (previous !== undefined) process.env.WORKFLOW_AGENT = previous;

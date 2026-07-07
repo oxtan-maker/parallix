@@ -454,21 +454,27 @@ async function runHandoffAndReview(slug, worktree, agent, options = {}) {
   let handoffResult = await _performHandoff(slug, { forgejoUser: agent, worktree });
 
   if (!handoffResult.ok) {
-    // Check for genuine gate failure (task-1387): automatic relaunch with captured output
-    const isGenuineGateFailure = handoffResult.gateOutput ||
-      (handoffResult.error && (
-        /verification gate failed/i.test(handoffResult.error) ||
-        (/\bdeclared gate\b/i.test(handoffResult.error) && /\bfailed\b/i.test(handoffResult.error))
-      ));
+    // Check for relaunchable failure (task-1387, ADR 0048 C1): automatic relaunch
+    // with captured output. Delegates to repairHandoff.classifyError() for full
+    // 8-class dispatch; relaunchable classes (AutoSendBack/AutoRepair, excluding
+    // GitBlockers which are handled by repairHandoff auto-repair) trigger the
+    // relaunch path. InfraBlocker and StateMachineViolation are HumanOnly and
+    // fall through to the manual-handoff error message below.
+    const classification = handoffResult.error
+      ? repairHandoff.classifyError(handoffResult.error)
+      : null;
+    const isRelaunchableError = classification
+      ? classification.dispatchAction !== 'HumanOnly' && classification.failureClass !== 'GitBlockers'
+      : false;
 
-    if (isGenuineGateFailure) {
+    if (isRelaunchableError) {
       // Automatic relaunch with captured gate output, bounded to max 2 attempts
       let relaunchCount = 0;
       const maxRelaunches = 2;
 
       while (relaunchCount < maxRelaunches) {
         relaunchCount++;
-        log(`\nGenuine gate failure detected. Relaunch attempt ${relaunchCount}/${maxRelaunches}...`);
+        log(`\nRelaunchable error detected (${classification.failureClass}). Relaunch attempt ${relaunchCount}/${maxRelaunches}...`);
         const { relaunched, error: relaunchError } = await attemptAgentRelaunchFn(
           slug, worktree, /** @type{string} */(handoffResult.error), agent,
           { log, error, gateOutput: handoffResult.gateOutput }

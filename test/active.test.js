@@ -1483,6 +1483,8 @@ test('runHandoffAndReview: relaunch success must trigger post-relaunch handoff a
 test('runHandoffAndReview: relaunch success with post-relaunch handoff failure must not report success', async () => {
   // Edge case: relaunch succeeds but the post-relaunch handoff still fails.
   // The function must return false, not true.
+  // With ADR 0048 C1 classification, IncompleteEvidence maps to AutoSendBack
+  // which takes the relaunch path directly (up to 2 attempts).
   let handoffAttempts = 0;
   let reviewLoopStarted = false;
 
@@ -1490,8 +1492,7 @@ test('runHandoffAndReview: relaunch success with post-relaunch handoff failure m
     validateCheckpointsBeforeHandoffFn: () => ({ ok: true }),
     performHandoff: async () => {
       handoffAttempts++;
-      // Both attempts fail with a relaunchable-style error (simulating the agent
-      // couldn't fix the checkpoint issue)
+      // IncompleteEvidence error — classifies as AutoSendBack, triggers relaunch path
       return { ok: false, error: 'The final checkpoint at docs/missions/2026/task-1324/CP-1.md has a "## Goal Check" section but no evidence rows. A goal-check table with real evidence is required before handoff.' };
     },
     repairHandoffFn: async () => ({ repaired: false, blocker: null }),
@@ -1502,7 +1503,8 @@ test('runHandoffAndReview: relaunch success with post-relaunch handoff failure m
   });
 
   assert.equal(result, false, 'must return false when post-relaunch handoff fails');
-  assert.equal(handoffAttempts, 2, 'performHandoff called twice: initial + post-relaunch');
+  // IncompleteEvidence → AutoSendBack → relaunch path: initial + 2 relaunch retries = 3
+  assert.equal(handoffAttempts, 3, 'performHandoff called 3 times: initial + 2 relaunch retries');
   assert.equal(reviewLoopStarted, false, 'startReviewLoop must NOT be called when handoff fails');
 });
 

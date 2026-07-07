@@ -242,19 +242,13 @@ export function stageLaunchSinceMs(result: { startedAt?: string } | null | undef
 // Pre-review Gate Enforcement (ADR 0048 Control C1 / TASK-1385)
 // ============================================================================
 
-// Minimal error classifier stub for gate failures (TASK-1389 dependency).
-// Maps gate failures to Class 6: genuine gate failure — code issue, dispatch: auto-send-back.
-// TASK-1389 will replace this with the full 8-class dispatch table.
-const GATE_FAILURE_CLASS = 'class-6-genuine-gate-failure';
-const GATE_FAILURE_ACTION = 'auto-send-back';
-
-export function classifyGateFailure(_output: string): { classification: string; action: string; isRelaunchable: boolean } {
-  // Gate failures are genuine code issues — always relaunchable via auto-send-back.
-  // The full classifier (TASK-1389) will expand this to 8 classes with nuanced dispatch.
+export function classifyGateFailure(output: string): { classification: string; action: string; isRelaunchable: boolean } {
+  const rep = _require('../commands/repair-handoff.js');
+  const { failureClass, dispatchAction } = rep.classifyError(output);
   return {
-    classification: GATE_FAILURE_CLASS,
-    action: GATE_FAILURE_ACTION,
-    isRelaunchable: true,
+    classification: failureClass,
+    action: dispatchAction,
+    isRelaunchable: dispatchAction !== 'HumanOnly',
   };
 }
 
@@ -399,6 +393,14 @@ export async function handleGateFailureAutoBounce(
   const classification = classifyGateFailure(combinedOutput);
 
   log(fmt.status('WARN', `Pre-review gate failed for area "${gateResult.area}" (exit ${gateResult.exitCode}). Classification: ${classification.classification}.`));
+
+  // ADR 0048 C6: InfraBlocker and StateMachineViolation are HumanOnly — do not
+  // auto-bounce to implementer; surface for human intervention.
+  if (!classification.isRelaunchable) {
+    error(fmt.status('FAIL', `Pre-review gate failure: ${classification.classification} (${classification.action}). Human intervention required — not auto-bouncing.`));
+    error(fmt.status('FAIL', `Gate output:\n${gateResult.stdout || gateResult.stderr || '(no output)'}\n`));
+    return { bounced: false, stranded: true };
+  }
 
   // Build fix prompt with captured gate output
   const fixPrompt = [

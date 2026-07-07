@@ -3,11 +3,13 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const missionUtils = require('../lib/core/mission-utils');
 const {
   flagValue,
   readTextFlag,
   formatStaticReviewFindings,
   formatStaticReviewSuccess,
+  performStaticReview,
   review
 } = require('../lib/review/review-commands');
 
@@ -138,6 +140,110 @@ test('formatStaticReviewSuccess formats success message', () => {
   assert.match(result, /checkpoint presence/);
   assert.match(result, /final checkpoint Goal Check evidence/);
   assert.match(result, /Mission remains in `review` status awaiting an actual autonomous or peer review verdict/);
+});
+
+test('performStaticReview rejects placeholder-only Goal Check evidence rows', (t) => {
+  const { mock } = t;
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'static-review-placeholder-'));
+  const missionDir = path.join(rootDir, 'missions', 'task-placeholder');
+  const checkpointPath = path.join(missionDir, 'CP-1.md');
+
+  fs.mkdirSync(missionDir, { recursive: true });
+  fs.writeFileSync(checkpointPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| Works | Tested manually | Looks good |\n');
+  mock.method(missionUtils, 'getPrimaryBranch', () => 'main');
+
+  try {
+    const result = performStaticReview('task-placeholder', {
+      resolveWorktree: () => rootDir,
+      findMissionDir: () => missionDir,
+      findCheckpoints: () => [checkpointPath],
+      readFileSync: fs.readFileSync,
+      run: () => ({ status: 0, stdout: '' }),
+      log: () => {}
+    });
+
+    assert.equal(result.ok, false);
+    assert.ok(result.findings.some(f => /no evidence rows that cite a verifiable file:line, ADR, or test reference/.test(f)));
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('performStaticReview rejects separator-only Goal Check tables', (t) => {
+  const { mock } = t;
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'static-review-separator-'));
+  const missionDir = path.join(rootDir, 'missions', 'task-separator');
+  const checkpointPath = path.join(missionDir, 'CP-1.md');
+
+  fs.mkdirSync(missionDir, { recursive: true });
+  fs.writeFileSync(checkpointPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n|---|---|---|\n');
+  mock.method(missionUtils, 'getPrimaryBranch', () => 'main');
+
+  try {
+    const result = performStaticReview('task-separator', {
+      resolveWorktree: () => rootDir,
+      findMissionDir: () => missionDir,
+      findCheckpoints: () => [checkpointPath],
+      readFileSync: fs.readFileSync,
+      run: () => ({ status: 0, stdout: '' }),
+      log: () => {}
+    });
+
+    assert.equal(result.ok, false);
+    assert.ok(result.findings.some(f => /no evidence rows/.test(f)));
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('performStaticReview accepts Goal Check evidence that cites a real test name', (t) => {
+  const { mock } = t;
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'static-review-test-name-'));
+  const missionDir = path.join(rootDir, 'missions', 'task-test-name');
+  const checkpointPath = path.join(missionDir, 'CP-1.md');
+  const testFilePath = path.join(rootDir, 'test', 'sample.test.js');
+
+  fs.mkdirSync(path.dirname(testFilePath), { recursive: true });
+  fs.writeFileSync(testFilePath, "const test = require('node:test');\ntest('real evidence title', () => {});\n");
+  fs.mkdirSync(missionDir, { recursive: true });
+  fs.writeFileSync(checkpointPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| Test title cited | test `real evidence title` | PASS |\n');
+  mock.method(missionUtils, 'getPrimaryBranch', () => 'main');
+
+  try {
+    const result = performStaticReview('task-test-name', {
+      resolveWorktree: () => rootDir,
+      findMissionDir: () => missionDir,
+      findCheckpoints: () => [checkpointPath],
+      readFileSync: fs.readFileSync,
+      run: () => ({ status: 0, stdout: '' }),
+      log: () => {}
+    });
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.findings, []);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('performStaticReview accepts an existing repository checkpoint sample', (t) => {
+  const { mock } = t;
+  const repoRoot = path.resolve(__dirname, '..');
+  const sampleMissionDir = path.join(repoRoot, 'missions', 'task-1398');
+  const sampleCheckpoint = path.join(sampleMissionDir, 'CP-4.md');
+  mock.method(missionUtils, 'getPrimaryBranch', () => 'main');
+
+  const result = performStaticReview('task-1398', {
+    resolveWorktree: () => repoRoot,
+    findMissionDir: () => sampleMissionDir,
+    findCheckpoints: () => [sampleCheckpoint],
+    readFileSync: fs.readFileSync,
+    run: () => ({ status: 0, stdout: '' }),
+    log: () => {}
+  });
+
+  assert.deepEqual(result.findings, []);
+  assert.equal(result.ok, true);
 });
 
 // ============================================================================

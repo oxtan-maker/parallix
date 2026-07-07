@@ -313,6 +313,11 @@ async function repairHandoff(slug: string, worktree: string, errorMsg: string, o
   const isBehind = classification.reason === 'behind';
 
   if (!isGitBlocker) {
+    if (classification.failureClass === FailureClass.InfraBlocker) {
+      blocker = `Infrastructure blocker detected: the handoff error is infrastructure-related (likely Forgejo credentials, connectivity, or rate limits). No agent relaunch will resolve this — the operator must check the Forgejo instance, verify credentials/token validity, and confirm network connectivity before retrying.`;
+      log(blocker);
+      return { repaired: false, blocker };
+    }
     log(`Handoff error is not automatically repairable: ${errorMsg}`);
     return { repaired: false, blocker: null };
   }

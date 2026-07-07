@@ -1,11 +1,11 @@
 ---
 id: TASK-1427
 title: after the autofixing missions/ADR some rebounces still remains
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-07-05 05:14'
 updated_date: '2026-07-05 05:30'
-labels: []
+labels: ["ai_sdlc"]
 dependencies: []
 ---
 

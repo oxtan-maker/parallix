@@ -182,7 +182,7 @@ test('performHandoff follows the sequence: createPr -> gatekeeper -> transitionT
       events.push({ type: 'gatekeeper' });
       return { ok: true };
     }),
-    mock.method(fs, 'readFileSync', () => '## Goal Check\n| Goal | Evidence | Status |\n| :--- | :--- | :--- |\n| test | evidence | PASS |\n'),
+    mock.method(fs, 'readFileSync', () => '## Goal Check\n| Goal | Evidence | Status |\n| :--- | :--- | :--- |\n| test | test/task-1104-call-order.test.js:1 | PASS |\n'),
     mock.method(fs, 'existsSync', () => true),
     mock.method(git, 'getCurrentBranch', () => `mission/${slug}`)
   ];
