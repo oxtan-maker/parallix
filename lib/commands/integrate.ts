@@ -14,6 +14,7 @@ import stats from './stats.js';
 import * as verification from '../core/verification.js';
 const { formatVerificationCommand } = verification;
 import * as postIntegrateHook from '../core/post-integrate-hook.js';
+import { getBuildFreshnessStatus } from '../core/build-freshness.js';
 import { isForgejoReviewEnabled } from '../core/product-config.js';
 import { readReviewState } from '../review/review-state.js';
 
@@ -800,21 +801,20 @@ async function integrate(args: string[]) {
           fmt.log.info(`For this mission, the relevant verification command is ${formatVerificationCommand(context.area, baseWorktree)}`);
           throw new IntegrationAbort();
         }
-        const proofResult = verification.captureVerifiedTreeProof(context.area, baseWorktree, {
-          gitRunner: git,
-          runFn: /** @type {Function} */ (child_process.spawnSync)
+        // Refresh build and capture merge commit before post-integrate hook.
+        // Proof capture is deferred until after the hook so it represents the
+        // freshly rebuilt tree that will actually be published (task-2203).
+        const refreshResult = refreshBuildBeforeVerification(baseWorktree, {
+          runFn: child_process.spawnSync
         });
-        if (!/** @type {any} */ (proofResult).ok) {
-          fmt.log.fail(`Could not verify the exact tree being published: ${/** @type {any} */ (proofResult).error}`);
+        if (!refreshResult.ok) {
+          fmt.log.fail(`Could not refresh the publish tree before verification proof capture: ${refreshResult.error}`);
+          if (refreshResult.detail) {
+            fmt.log.fail(refreshResult.detail);
+          }
           throw new IntegrationAbort();
         }
-        const proof = /** @type {any} */ (proofResult).proof;
         const mergedCommit = git(['-C', baseWorktree, 'rev-parse', 'HEAD']).stdout.trim();
-        const proofCheck = verification.assertVerifiedTreeProof(proof!, baseWorktree, { gitRunner: git });
-        if (!proofCheck.ok) {
-          fmt.log.fail(`Verification proof is stale for the publish tree: ${/** @type {any} */ (proofCheck).error}`);
-          throw new IntegrationAbort();
-        }
 
         if (isForgejoReviewEnabled(baseWorktree)) {
           fmt.log.info('Step 6: Syncing merged state to Forgejo...');
@@ -844,6 +844,24 @@ async function integrate(args: string[]) {
 
         maybeUpdateGraphifyOnPrimary(baseWorktree);
         runPostIntegrateHookOrAbort(slug, { baseWorktree: baseWorktree as string, baseBranch: baseBranch as string, variant: 'variant-b' });
+
+        // Proof capture after post-integrate hook so it represents the
+        // freshly rebuilt tree that will actually be published (task-2203).
+        const proofResult = verification.captureVerifiedTreeProof(context.area, baseWorktree, {
+          gitRunner: git,
+          runFn: /** @type {Function} */ (child_process.spawnSync)
+        });
+        if (!/** @type {any} */ (proofResult).ok) {
+          fmt.log.fail(`Could not verify the exact tree being published: ${/** @type {any} */ (proofResult).error}`);
+          throw new IntegrationAbort();
+        }
+        const proof = /** @type {any} */ (proofResult).proof;
+        const proofCheck = verification.assertVerifiedTreeProof(proof!, baseWorktree, { gitRunner: git });
+        if (!proofCheck.ok) {
+          fmt.log.fail(`Verification proof is stale for the publish tree: ${/** @type {any} */ (proofCheck).error}`);
+          throw new IntegrationAbort();
+        }
+
         fmt.log.pass('Integration completed successfully.');
       }
     }
@@ -1528,7 +1546,50 @@ function runPostIntegrateHookOrAbort(slug: string, {
   return result;
 }
 
-/** @param{{slug: string, summary: string, mainTaskFile?: string, rootDir?: string, gitRunner?: Function, baseBranch?: string|null, verificationArea?: string|null, captureVerifiedTreeProofFn?: Function, assertVerifiedTreeProofFn?: Function}} params */
+/**
+ * Rebuild compiled runtime artifacts before exact-tree verification when the
+ * checkout is stale relative to tracked TypeScript sources.
+ * @param {string} rootDir
+ * @param {{runFn?: Function, log?: Function}} opts
+ */
+function refreshBuildBeforeVerification(rootDir: string, {
+  runFn = child_process.spawnSync,
+  log = fmt.log.info
+}: {runFn?: Function, log?: Function} = {}) {
+  const freshness = getBuildFreshnessStatus(rootDir);
+  if (freshness.ok) {
+    return { ok: true, refreshed: false };
+  }
+
+  log('Refreshing compiled runtime artifacts before verification proof capture...');
+  const buildResult = runFn('npm', ['run', 'build:cjs'], {
+    cwd: rootDir,
+    encoding: 'utf8'
+  });
+  const output = [buildResult.stdout, buildResult.stderr].filter(Boolean).join('\n').trim();
+  if (buildResult.status !== 0) {
+    return {
+      ok: false,
+      refreshed: true,
+      error: `pre-verification build refresh failed (exit code ${buildResult.status}): npm run build:cjs`,
+      detail: output
+    };
+  }
+
+  const refreshedFreshness = getBuildFreshnessStatus(rootDir);
+  if (!refreshedFreshness.ok) {
+    return {
+      ok: false,
+      refreshed: true,
+      error: refreshedFreshness.message || 'build freshness check failed after refresh',
+      detail: output
+    };
+  }
+
+  return { ok: true, refreshed: true, detail: output };
+}
+
+/** @param{{slug: string, summary: string, mainTaskFile?: string, rootDir?: string, gitRunner?: Function, baseBranch?: string|null, verificationArea?: string|null, refreshBuildBeforeVerificationFn?: Function, captureVerifiedTreeProofFn?: Function, assertVerifiedTreeProofFn?: Function}} params */
 function finalizeVariantACloseout({
   slug,
   summary,
@@ -1537,9 +1598,10 @@ function finalizeVariantACloseout({
   gitRunner = git,
   baseBranch = null,
   verificationArea = null,
+  refreshBuildBeforeVerificationFn = refreshBuildBeforeVerification,
   captureVerifiedTreeProofFn = verification.captureVerifiedTreeProof,
   assertVerifiedTreeProofFn = verification.assertVerifiedTreeProof
-}: {slug: string, summary: string, mainTaskFile?: string, rootDir?: string, gitRunner?: Function, baseBranch?: string|null, verificationArea?: string|null, captureVerifiedTreeProofFn?: Function, assertVerifiedTreeProofFn?: Function}) {
+}: {slug: string, summary: string, mainTaskFile?: string, rootDir?: string, gitRunner?: Function, baseBranch?: string|null, verificationArea?: string|null, refreshBuildBeforeVerificationFn?: Function, captureVerifiedTreeProofFn?: Function, assertVerifiedTreeProofFn?: Function}) {
   softResetTrailingBacklogNoise(rootDir, gitRunner);
 
   if (mainTaskFile && fs.existsSync(mainTaskFile)) {
@@ -1574,6 +1636,16 @@ function finalizeVariantACloseout({
   }
 
   const resolvedVerificationArea = verificationArea || verification.resolveVerificationAdapter(rootDir).defaultArea;
+  const refreshResult = refreshBuildBeforeVerificationFn(rootDir, {
+    runFn: child_process.spawnSync
+  });
+  if (!refreshResult.ok) {
+    return {
+      ok: false,
+      error: 'verification-prep-failed',
+      detail: [refreshResult.error, refreshResult.detail].filter(Boolean).join('\n').trim()
+    };
+  }
   const proofResult = captureVerifiedTreeProofFn(resolvedVerificationArea, rootDir, {
     gitRunner,
     runFn: child_process.spawnSync
@@ -1841,6 +1913,7 @@ function buildConflictResolutionPrompt(slug: string = '<slug>', area: string = '
 (integrate as any).recordPostIntegrationStats = recordPostIntegrationStats;
 (integrate as any).recordPostIntegrationStatsOrAbort = recordPostIntegrationStatsOrAbort;
 (integrate as any).runPostIntegrateHookOrAbort = runPostIntegrateHookOrAbort;
+(integrate as any).refreshBuildBeforeVerification = refreshBuildBeforeVerification;
 (integrate as any).formatRecordedStatsRow = formatRecordedStatsRow;
 (integrate as any).detectChangedAreas = detectChangedAreas;
 (integrate as any).parseFilesToAreas = parseFilesToAreas;
@@ -1857,7 +1930,7 @@ function buildConflictResolutionPrompt(slug: string = '<slug>', area: string = '
 // Re-export getPrimaryWorktree from mission-utils
 (integrate as any).getPrimaryWorktree = getPrimaryWorktree;
 export default integrate;
-export { integrate, formatRecordedStatsRow, detectChangedAreas, parseFilesToAreas, loadIntegrationConfig, getIntegrationGatePlan, printIntegrationGatePlan, buildIntegrationGateEnv, resolveIntegrationVerificationWorktree, buildIntegrationVerificationInvocation, executeIntegrationGates, orderIntegrationGates, gateMatchesChangedAreas, buildIntegrationContext, getPrimaryWorktree, resolveConflictsForMission, cleanupMissionWorktree, rewriteWorktreePaths, finalizeVariantACloseout, isNoMergeToAbortResult, buildConflictResolutionPrompt, VARIANT_B_AUTOMATION_SUMMARY, stashMainCheckoutIfNeeded, restoreMainCheckoutStash, evaluateTaskStatusForIntegration, promoteTaskForIntegrationIfNeeded, findExistingSquashCommit, printIntegrationPreflight, resolveForgejoUserForIntegration, getUnresolvedIndexConflicts, parseStashPopCollisionFiles, reportStashPopFailure, maybeUpdateGraphifyOnPrimary, SYNC_MERGED_DIAGNOSTICS, printDiagnosticTable, recordPostIntegrationStats, recordPostIntegrationStatsOrAbort, reportSyncMergedFailure, runPostIntegrateHookOrAbort };
+export { integrate, formatRecordedStatsRow, detectChangedAreas, parseFilesToAreas, loadIntegrationConfig, getIntegrationGatePlan, printIntegrationGatePlan, buildIntegrationGateEnv, resolveIntegrationVerificationWorktree, buildIntegrationVerificationInvocation, executeIntegrationGates, orderIntegrationGates, gateMatchesChangedAreas, buildIntegrationContext, getPrimaryWorktree, resolveConflictsForMission, cleanupMissionWorktree, rewriteWorktreePaths, finalizeVariantACloseout, isNoMergeToAbortResult, buildConflictResolutionPrompt, VARIANT_B_AUTOMATION_SUMMARY, stashMainCheckoutIfNeeded, restoreMainCheckoutStash, evaluateTaskStatusForIntegration, promoteTaskForIntegrationIfNeeded, findExistingSquashCommit, printIntegrationPreflight, resolveForgejoUserForIntegration, getUnresolvedIndexConflicts, parseStashPopCollisionFiles, reportStashPopFailure, maybeUpdateGraphifyOnPrimary, SYNC_MERGED_DIAGNOSTICS, printDiagnosticTable, recordPostIntegrationStats, recordPostIntegrationStatsOrAbort, reportSyncMergedFailure, runPostIntegrateHookOrAbort, refreshBuildBeforeVerification };
 // CJS compat: ensure require() returns the function directly
 declare const module: { exports: any } | undefined;
 if (typeof module !== 'undefined') { module.exports = integrate; }

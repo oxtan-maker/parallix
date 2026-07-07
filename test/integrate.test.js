@@ -96,7 +96,8 @@ const {
   formatRecordedStatsRow,
   resolveIntegrationVerificationWorktree,
   buildIntegrationVerificationInvocation,
-  runPostIntegrateHookOrAbort
+  runPostIntegrateHookOrAbort,
+  refreshBuildBeforeVerification
 } = require('../lib/commands/integrate');
 const integrateCommand = require('../lib/commands/integrate');
 const { conventionalWorktreePath, getPrimaryBranch } = missionUtils;
@@ -835,6 +836,80 @@ test('px integrate never invokes the post-integrate hook when preflight fails (S
   }
 
   assert.equal(hookSpy.mock.callCount(), 0);
+});
+
+test('refreshBuildBeforeVerification no-ops when the checkout is already fresh', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'integrate-refresh-fresh-'));
+  const pxTs = path.join(root, 'px.ts');
+  const pxJs = path.join(root, 'px.js');
+  fs.writeFileSync(pxTs, 'export {};\n');
+  fs.writeFileSync(pxJs, '"use strict";\n');
+
+  const calls = [];
+  const result = refreshBuildBeforeVerification(root, {
+    runFn(command, args) {
+      calls.push([command, ...args]);
+      return { status: 0, stdout: '', stderr: '' };
+    },
+    log: () => {}
+  });
+
+  assert.deepEqual(result, { ok: true, refreshed: false });
+  assert.deepEqual(calls, []);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('refreshBuildBeforeVerification rebuilds stale runtime artifacts before proof capture', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'integrate-refresh-stale-'));
+  const pxTs = path.join(root, 'px.ts');
+  const pxJs = path.join(root, 'px.js');
+  fs.writeFileSync(pxJs, '"use strict";\n');
+  fs.writeFileSync(pxTs, 'export {};\n');
+  const staleJsTime = new Date('2026-01-01T00:00:00.000Z');
+  const staleTsTime = new Date('2026-01-01T00:00:05.000Z');
+  fs.utimesSync(pxJs, staleJsTime, staleJsTime);
+  fs.utimesSync(pxTs, staleTsTime, staleTsTime);
+
+  const calls = [];
+  const result = refreshBuildBeforeVerification(root, {
+    runFn(command, args, options) {
+      calls.push({ command, args, options });
+      fs.writeFileSync(pxJs, '"use strict";\n// rebuilt\n');
+      return { status: 0, stdout: 'rebuilt', stderr: '' };
+    },
+    log: () => {}
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.refreshed, true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].command, 'npm');
+  assert.deepEqual(calls[0].args, ['run', 'build:cjs']);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('refreshBuildBeforeVerification surfaces build refresh failures before verification starts', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'integrate-refresh-fail-'));
+  const pxTs = path.join(root, 'px.ts');
+  const pxJs = path.join(root, 'px.js');
+  fs.writeFileSync(pxJs, '"use strict";\n');
+  fs.writeFileSync(pxTs, 'export {};\n');
+  const staleJsTime = new Date('2026-01-01T00:00:00.000Z');
+  const staleTsTime = new Date('2026-01-01T00:00:05.000Z');
+  fs.utimesSync(pxJs, staleJsTime, staleJsTime);
+  fs.utimesSync(pxTs, staleTsTime, staleTsTime);
+
+  const result = refreshBuildBeforeVerification(root, {
+    runFn() {
+      return { status: 2, stdout: '', stderr: 'build broke' };
+    },
+    log: () => {}
+  });
+
+  assert.equal(result.ok, false);
+  assert.match(result.error, /pre-verification build refresh failed/);
+  assert.match(result.detail, /build broke/);
+  fs.rmSync(root, { recursive: true, force: true });
 });
 
 test('evaluateTaskStatusForIntegration accepts approved (ready-for-integration) without extra conditions', () => {
@@ -1587,6 +1662,57 @@ test('finalizeVariantACloseout rejects a stale verification proof before pushing
       detail: 'verification proof does not match the tree being published'
     });
     assert.equal(gitCalls.some(args => args[2] === 'push'), false);
+  } finally {
+    process.chdir(previous);
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('finalizeVariantACloseout fails during verification prep when the publish tree needs a rebuild', () => {
+  const previous = process.cwd();
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-integrate-variant-a-refresh-'));
+  process.chdir(root);
+
+  try {
+    const taskFile = path.join(root, 'backlog', 'tasks', 'task-097 - cleanup.md');
+    fs.mkdirSync(path.dirname(taskFile), { recursive: true });
+    fs.writeFileSync(taskFile, 'Status: ○ ready-for-integration\n');
+
+    let captureCalls = 0;
+    const result = finalizeVariantACloseout({
+      slug: 'task-097',
+      summary: 'Clean up integrate workflow',
+      mainTaskFile: taskFile,
+      rootDir: root,
+      gitRunner(args) {
+        if (args.slice(-3).join(' ') === 'diff --cached --quiet') {
+          return { status: 1, stdout: '', stderr: '' };
+        }
+        if (args[2] === 'commit') {
+          return { status: 0, stdout: '', stderr: '' };
+        }
+        if (args[2] === 'push') {
+          throw new Error('push should not run when verification prep fails');
+        }
+        return { status: 0, stdout: '', stderr: '' };
+      },
+      refreshBuildBeforeVerificationFn: () => ({
+        ok: false,
+        error: 'pre-verification build refresh failed (exit code 2): npm run build:cjs',
+        detail: 'build broke'
+      }),
+      captureVerifiedTreeProofFn: () => {
+        captureCalls += 1;
+        return { ok: true, proof: {} };
+      }
+    });
+
+    assert.deepEqual(result, {
+      ok: false,
+      error: 'verification-prep-failed',
+      detail: 'pre-verification build refresh failed (exit code 2): npm run build:cjs\nbuild broke'
+    });
+    assert.equal(captureCalls, 0);
   } finally {
     process.chdir(previous);
     fs.rmSync(root, { recursive: true, force: true });
