@@ -1,11 +1,11 @@
 ---
 id: TASK-2200
 title: missing check for label
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-07-06 15:10'
 updated_date: '2026-07-06 15:12'
-labels: []
+labels: [ai_sdlc, bug]
 dependencies: []
 ---
 

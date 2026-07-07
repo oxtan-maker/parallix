@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import child_process from 'node:child_process';
 import { detectRebaseState, git, getCurrentBranch, run } from '../core/git.js';
-import { resolveTaskFile, getTaskStatus, setTaskStatus, completeTask, getTaskAssignee } from '../tools/backlog.js';
+import { resolveTaskFile, getTaskStatus, setTaskStatus, completeTask, getTaskAssignee, getTaskClassification } from '../tools/backlog.js';
 import { toVirtual, toActual } from '../core/state-map.js';
 import { getPrStatus, getLatestReviewDecision, syncMerged, readToken, resolveTokenFile, resolveForgejoUser, resolveForgejoHome, isForgejoPath, listOpenPrsForSlug } from '../tools/forgejo.js';
 import * as fmt from '../core/fmt.js';
@@ -644,7 +644,7 @@ async function integrate(args: string[]) {
     const branch = missionBranchName(slug, baseWorktree);
     const mainTitle = missionTitle(slug) || slug;
     const summary = mainTitle.replace(/\s+/g, ' ').trim();
-    const mainTaskFile = (context.task.taskFile as string).replace(executionDir, baseWorktree as string);
+    const mainTaskFile = ((context.task as any).taskFile as string).replace(executionDir, baseWorktree as string);
     const useVariantA = context.pr.merged;
     fmt.log.info(`Selecting integration variant: ${useVariantA ? 'Variant A (fast-path)' : 'Variant B (full squash-merge)'}`);
 
@@ -895,26 +895,24 @@ function buildIntegrationContext(slug: string, {
   if (!resolvedBaseWorktree) {
     try { resolvedBaseWorktree = resolveBaseWorktree(slug, { rootDir: process.cwd() }); } catch (_) { resolvedBaseWorktree = getPrimaryWorktree(); }
   }
-  // Resolve the backlog task from the mission's base-worktree context (the
-  // root where its classification will also be resolved), not process.cwd(),
-  // since integrate typically runs from the mission worktree while the
-  // backlog task lives in the recorded base worktree.
-  let task = resolveTaskFile(slug, /** @type {string} */ (resolvedBaseWorktree));
+  // Pre-merge task metadata is authoritative in the mission worktree. The
+  // base checkout only sees that task after the squash merge lands, so use
+  // the worktree copy first and fall back to the base checkout for legacy
+  // missions or recovery flows where no mission worktree is available.
+  const worktree = resolveWorktree(slug);
+  /** @type {ReturnType<typeof resolveTaskFile>} */
+  let task = worktree ? resolveTaskFile(slug, worktree) : { ok: false, reason: 'missing', matches: [] };
   if (!task.ok) {
-    const worktree = resolveWorktree(slug);
-    if (worktree) {task = resolveTaskFile(slug, worktree);}
+    task = resolveTaskFile(slug, /** @type {string} */ (resolvedBaseWorktree));
   }
   let taskStatus = task.ok ? getTaskStatus(task.taskFile as string) : null;
-  if (task.ok && taskStatus === 'backlog') {
-    const worktree = resolveWorktree(slug);
-    if (worktree) {
-      const wtTask = resolveTaskFile(slug, worktree);
-      if (wtTask.ok) {
-        const wtStatus = getTaskStatus(wtTask.taskFile as string);
-        if (wtStatus && wtStatus !== 'backlog') {
-          task = wtTask;
-          taskStatus = wtStatus;
-        }
+  if (task.ok && taskStatus === 'backlog' && worktree) {
+    const wtTask = resolveTaskFile(slug, worktree);
+    if (wtTask.ok) {
+      const wtStatus = getTaskStatus(wtTask.taskFile as string);
+      if (wtStatus && wtStatus !== 'backlog') {
+        task = wtTask;
+        taskStatus = wtStatus;
       }
     }
   }
@@ -1076,7 +1074,6 @@ function printIntegrationPreflight(
     getUnresolvedIndexConflictsFn = getUnresolvedIndexConflicts,
     findMissionDocInBranchesFn = findMissionDocInBranches,
     isForgejoReviewEnabledFn = isForgejoReviewEnabled,
-    resolveMissionClassificationFn = (stats as any).resolveMissionClassification,
     log = fmt.log.plain
   } = {}
 ) {
@@ -1133,11 +1130,10 @@ function printIntegrationPreflight(
     log(fmt.status('PASS', `Backlog task: ${path.basename(/** @type {string} */ (context.task.taskFile))} (${context.taskStatus})`));
     
     try {
-      // Resolve classification from the same base-worktree root that resolved
-      // context.task above, not the process's cwd — those can differ when
-      // integrate runs from a mission worktree while the backlog task lives
-      // in the mission's recorded base worktree.
-      const { classification, error: classificationError } = resolveMissionClassificationFn(context.slug, baseWorktree);
+      const classification = getTaskClassification(/** @type {string} */ (context.task.taskFile));
+      const classificationError = classification
+        ? null
+        : `Missing or invalid classification for ${context.slug}; expected exactly one of ai_sdlc, user_value, or unknown in the labels of ${context.task.taskFile}. Fix: add exactly one of those labels and do not use a separate frontmatter field for mission type.`;
       if (!classification) {
         failures.push('classification');
         log(fmt.status('FAIL', `Backlog classification: ${classificationError || 'missing'}`));

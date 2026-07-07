@@ -188,6 +188,80 @@ test('missionStart passes if classification is provided via labels', () => {
   assert.ok(output.includes('[PASS] Backlog classification: user_value'));
 });
 
+test('missionStart resolves classification for a task labeled with a primary classification plus bug, using the mission worktree (task-2200)', () => {
+  const os = require('os');
+  const path = require('path');
+
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mission-start-bug-label-'));
+  const tasksDir = path.join(root, 'backlog', 'tasks');
+  fs.mkdirSync(tasksDir, { recursive: true });
+  const taskFile = path.join(tasksDir, 'task-2200-bug-combo.md');
+  fs.writeFileSync(taskFile, '---\nid: TASK-2200-BUG-COMBO\nstatus: ready\nlabels: [ai_sdlc, bug]\n---\n');
+
+  const lines = [];
+  const errors = [];
+
+  // resolveMissionClassificationFn and resolveTaskFileFn are left as real
+  // (unmocked) so the test exercises the actual worktree-cwd plumbing:
+  // resolveMissionClassificationFn must be called with the worktree cwd
+  // (`root`), not process.cwd(), to find the task file created above.
+  const result = missionStart(['task-2200-bug-combo'], {
+    returnResult: true,
+    cwdFn: () => root,
+    getCurrentBranchFn: () => 'mission/task-2200-bug-combo',
+    // Mocked so this test does not depend on process.cwd() finding the
+    // temp task file; resolveMissionClassificationFn below is left real so
+    // it must be called with the worktree cwd (root) to resolve the file.
+    resolveTaskFileFn: () => ({ ok: true, taskFile }),
+    getTaskStatusFn: () => 'ready',
+    toVirtualFn: (s) => s,
+    findMissionDirFn: () => path.join(root, 'docs', 'missions', '2026', 'task-2200-bug-combo'),
+    fsExistsSync: () => true,
+    findCheckpointsFn: () => [],
+    getMissionYearFn: () => '2026',
+    conventionalWorktreePathFn: () => root,
+    getLastCommitFn: () => ({ sha: 'abcdef123456', subject: 'Initial', date: '2026-04-30' }),
+    getPrStatusFn: () => ({ exists: false }),
+    log: line => lines.push(line),
+    error: line => errors.push(line)
+  });
+
+  const output = lines.join('\n').replace(/\x1B\[\d+m/g, '');
+  assert.ok(output.includes('[PASS] Backlog classification: ai_sdlc'), output);
+  assert.deepEqual(result, { pass: true });
+
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('missionStart resolves the backlog task from the mission worktree, not process.cwd() (task-2200)', () => {
+  const lines = [];
+  const seenRootDirs = [];
+
+  const result = missionStart(['task-2200-root'], {
+    returnResult: true,
+    cwdFn: () => '/tmp/project-task-2200-root',
+    getCurrentBranchFn: () => 'mission/task-2200-root',
+    resolveTaskFileFn: (slug, rootDir) => {
+      seenRootDirs.push(rootDir);
+      return { ok: true, taskFile: `${rootDir}/${slug}.md` };
+    },
+    resolveMissionClassificationFn: () => ({ classification: 'ai_sdlc' }),
+    getTaskStatusFn: () => 'ready',
+    toVirtualFn: (s) => s,
+    findMissionDirFn: () => '/tmp/docs/missions/2026/task-2200-root',
+    fsExistsSync: () => true,
+    findCheckpointsFn: () => [],
+    getMissionYearFn: () => '2026',
+    conventionalWorktreePathFn: () => '/tmp/project-task-2200-root',
+    getLastCommitFn: () => ({ sha: 'abc123', subject: 'x', date: 'y' }),
+    getPrStatusFn: () => ({ exists: false }),
+    log: line => lines.push(line)
+  });
+
+  assert.deepEqual(result, { pass: true });
+  assert.deepEqual(seenRootDirs, ['/tmp/project-task-2200-root']);
+});
+
 test('missionStart fails if the mission is already complete', () => {
   const lines = [];
   const result = missionStart(['task-done'], {
@@ -297,6 +371,7 @@ test('missionStart fails when recorded base branch does not exist locally', () =
 test('missionStart passes when recorded base branch exists locally', () => {
   const lines = [];
   const errors = [];
+  const seenRootDirs = [];
 
   const result = missionStart(['task-feat-base'], {
     returnResult: true,
@@ -313,7 +388,10 @@ test('missionStart passes when recorded base branch exists locally', () => {
     conventionalWorktreePathFn: () => '/tmp/project-task-feat-base',
     getLastCommitFn: () => ({ sha: 'abc123', subject: 'x', date: 'y' }),
     getPrStatusFn: () => ({ exists: false }),
-    resolveMissionBaseBranchFn: () => 'feat/some-feature',
+    resolveMissionBaseBranchFn: (_slug, rootDir) => {
+      seenRootDirs.push(rootDir);
+      return 'feat/some-feature';
+    },
     getPrimaryBranchFn: () => 'main',
     // simulates git show-ref returning zero (branch exists)
     gitFn: () => ({ status: 0, stdout: '', stderr: '' }),
@@ -322,6 +400,7 @@ test('missionStart passes when recorded base branch exists locally', () => {
   });
 
   assert.deepEqual(result, { pass: true });
+  assert.deepEqual(seenRootDirs, ['/tmp/project-task-feat-base']);
   const output = lines.join('\n').replace(/\x1B\[\d+m/g, '');
   assert.ok(output.includes('[PASS]') && output.toLowerCase().includes('base branch'),
     `Expected pass message containing 'base branch', got: ${output}`);
