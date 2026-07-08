@@ -302,6 +302,7 @@ function setupRepository({ slug, title }) {
   }, null, 2));
 
   fs.writeFileSync(path.join(repoRoot, 'README.md'), '# Real Agent Smoke Probe\n', 'utf8');
+  fs.writeFileSync(path.join(repoRoot, 'hello.sh'), '#!/usr/bin/env bash\necho "Helo, Wrld!"\n', 'utf8');
 
   const taskPath = path.join(repoRoot, 'backlog', 'tasks', `${slug} - ${title.replace(/\s+/g, '-').toLowerCase()}.md`);
   fs.writeFileSync(taskPath, [
@@ -317,7 +318,7 @@ function setupRepository({ slug, title }) {
     '',
     '## Description',
     '',
-    'Create a .sh hello world program',
+    'Fix the typo in hello.sh so it prints Hello, World!',
     ''
   ].join('\n'), 'utf8');
 
