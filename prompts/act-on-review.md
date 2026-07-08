@@ -11,6 +11,7 @@ Minimum loop contract:
 - Load the locked mission at `{{missionPath}}` and `AGENTS.md` before acting.
 - Read the review outcome and findings from `missions/{{slug}}/review-events/` — the latest `reviewer_outcome-*` file has the verdict and `reviewer_findings-*` has the findings. Alternatively, read `missions/{{slug}}/review-state.json` for the current round/phase/disposition.
 - For each finding: fix, push back (with a clear reason), or park (record in a tracked follow-up such as a Backlog task).
+- If a finding is a rebasing artifact caused by branch stale-ness rather than this mission's diff, push back with the rationale: `Not a mission change - will be resolved by parallix rebase.`
 - Update the checkpoint document if needed, run the relevant gate, and commit before handoff.
 - Write `{{artifactDir}}/{{slug}}-round-resolution.md` with `fixed_items`, `pushed_back_items`, `parked_items`, and `blocked_reason` (when blocked).
 - Write `{{artifactDir}}/{{slug}}-review-disposition.txt` with one of `CHANGES_MADE|PUSHBACK_ALL|PARKED|BLOCKED`.

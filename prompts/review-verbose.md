@@ -18,6 +18,12 @@ Requirements:
 - do not post to Forgejo directly; `px` will consume the artifact files, publish them, and advance review state
 - stop once the artifact files are written
 
+Rebasing Artifacts:
+- ignore diff entries that are only present because the branch is behind `{{primaryBranch}}` and will be resolved by parallix rebase before integration
+- treat missing files that were added on `{{primaryBranch}}`, deletions that already happened on `{{primaryBranch}}`, and similar stale-baseline noise as rebasing artifacts, not mission changes
+- if a questioned change disappears when compared to the mission's actual parent or merge-base and the mission did not introduce it, do not file a finding for it
+- still flag real scope or correctness problems when this mission actually changes the file; only ignore branch stale-ness that is not a mission change
+
 Separation of duties — you are the reviewer, not the implementer. Stay in review-only mode:
 
 You MUST NOT:

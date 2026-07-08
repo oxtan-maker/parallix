@@ -235,6 +235,30 @@ test('buildReviewPrompt (verbose) substitutes {{reviewBaseline}} with the provid
   assert.doesNotMatch(prompt, /\{\{reviewBaseline\}\}/);
 });
 
+test('review prompts instruct reviewers to ignore rebasing artifacts that are not mission changes (task-1430)', () => {
+  const compactPrompt = buildCompactReviewPrompt({
+    reviewer: 'codex',
+    branch: 'mission/task-1430',
+    implementer: 'claude',
+    focus: 'all',
+    attempt: 1
+  });
+  const verbosePrompt = buildReviewPrompt({
+    reviewer: 'codex',
+    branch: 'mission/task-1430',
+    implementer: 'claude',
+    focus: 'all',
+    attempt: 1
+  });
+
+  for (const prompt of [compactPrompt, verbosePrompt]) {
+    assert.match(prompt, /Rebasing Artifacts:/);
+    assert.match(prompt, /will be resolved by parallix rebase/i);
+    assert.match(prompt, /rebasing artifacts, not mission changes|not a mission change/i);
+    assert.match(prompt, /branch stale-ness/i);
+  }
+});
+
 
 test('buildCompactActOnReviewPrompt reads from template and substitutes all variables', () => {
   const prompt = buildCompactActOnReviewPrompt({
@@ -304,6 +328,24 @@ test('buildCompactActOnReviewPrompt keeps the blocked safety warning inline', ()
   });
   assert.match(prompt, /DO NOT post PUSHBACK_ALL/);
   assert.match(prompt, /Post BLOCKED instead/);
+});
+
+test('act-on-review prompts provide pushback text for rebasing artifacts (task-1430)', () => {
+  const compactPrompt = buildCompactActOnReviewPrompt({
+    implementer: 'codex',
+    branch: 'mission/task-1430',
+    attempt: 1
+  });
+  const verbosePrompt = buildActOnReviewPrompt({
+    implementer: 'codex',
+    branch: 'mission/task-1430',
+    attempt: 1
+  });
+
+  for (const prompt of [compactPrompt, verbosePrompt]) {
+    assert.match(prompt, /rebasing artifact caused by branch stale-ness/i);
+    assert.match(prompt, /Not a mission change - will be resolved by parallix rebase\./);
+  }
 });
 
 
