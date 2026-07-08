@@ -441,7 +441,7 @@ test('performHandoff auto-remediates missing checkpoints by writing CP-1.md but 
     const result = await performHandoff(slug, { worktree, skipGate: true });
 
     assert.strictEqual(result.ok, false);
-    assert.match(result.error, /no evidence rows that cite a verifiable file:line, ADR, or test reference/);
+    assert.match(result.error, /no evidence rows that cite a verifiable reference/);
 
     // CP-1.md was actually written with the required structure.
     assert.ok(fs.existsSync(autoCpPath), 'CP-1.md should be written to the mission directory');
@@ -625,7 +625,35 @@ test('performHandoff fails when final checkpoint evidence row is placeholder pro
 
   const result = await performHandoff(slug, { worktree, skipGate: true });
   assert.strictEqual(result.ok, false);
-  assert.match(result.error, /no evidence rows that cite a verifiable file:line, ADR, or test reference/);
+  assert.match(result.error, /no evidence rows that cite a verifiable reference/);
+
+  fs.rmSync(cpPath, { force: true });
+  fs.rmSync(missionMdPath, { force: true });
+});
+
+test('performHandoff fails when final checkpoint evidence row is shell output only', async () => {
+  const slug = 'task-098';
+  const worktree = '/tmp/fake-worktree-shell-only';
+  const missionDir = '/tmp/fake-worktree-shell-only/docs/missions/2026/task-098';
+  const missionMdPath = path.join(missionDir, 'MISSION.md');
+
+  mock.method(missionUtils, 'findMissionDir', () => missionDir);
+  mock.method(missionUtils, 'findMissionArea', () => 'docs');
+  mock.method(missionUtils, 'findCheckpoints', () => [`${missionDir}/CP-1.md`]);
+  mock.method(git, 'getCurrentBranch', () => 'mission/task-098');
+  mock.method(git, 'getWorktreeStatus', () => []);
+
+  const cpPath = `${missionDir}/CP-1.md`;
+  fs.mkdirSync(missionDir, { recursive: true });
+  fs.writeFileSync(missionMdPath, '# MISSION.md\n\nTest mission.\n');
+  fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| Executable bit checked | `stat -c \'%A\' bin/hello.sh` → `-rwxrwxr-x` | PASS |\n');
+  writeReviewState(missionDir, 'claude', 'claude');
+
+  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile: '/tmp/fake-task' }));
+
+  const result = await performHandoff(slug, { worktree, skipGate: true });
+  assert.strictEqual(result.ok, false);
+  assert.match(result.error, /no evidence rows that cite a verifiable reference/);
 
   fs.rmSync(cpPath, { force: true });
   fs.rmSync(missionMdPath, { force: true });
@@ -644,6 +672,43 @@ test('performHandoff accepts final checkpoint evidence row with a real file:line
   fs.mkdirSync(missionDir, { recursive: true });
   fs.writeFileSync(missionMdPath, '# MISSION.md\n\nTest mission.\n');
   fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| Real source cited | lib/example.ts:1 | PASS |\n');
+  writeReviewState(missionDir, 'codex', 'codex');
+
+  mock.method(missionUtils, 'findMissionDir', () => missionDir);
+  mock.method(missionUtils, 'findMissionArea', () => 'docs');
+  mock.method(missionUtils, 'findCheckpoints', () => [cpPath]);
+  mock.method(git, 'getCurrentBranch', () => 'mission/task-098');
+  mock.method(git, 'getWorktreeStatus', () => []);
+  mock.method(git, 'run', () => ({ status: 0 }));
+  mock.method(git, 'git', () => ({ status: 0, stdout: '', stderr: '' }));
+  mock.method(forgejo, 'readToken', () => 'fake-token');
+  mock.method(forgejo, 'createPr', () => ({ ok: true, url: 'http://fake-pr' }));
+  mock.method(forgejo, 'authenticatedReviewUrl', () => 'http://fake-url');
+  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile: '/tmp/fake-task' }));
+  mock.method(backlog, 'transitionTask', () => true);
+  mock.method(gatekeeper, 'runGatekeeper', () => ({ ok: true, missing: [], skipped: false, posted: false }));
+
+  try {
+    const result = await performHandoff(slug, { worktree, skipGate: true });
+    assert.strictEqual(result.ok, true);
+  } finally {
+    fs.rmSync(worktree, { recursive: true, force: true });
+  }
+});
+
+test('performHandoff accepts file:line evidence with supporting shell context in the same cell', async () => {
+  const slug = 'task-098';
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'handoff-supporting-context-'));
+  const missionDir = path.join(worktree, 'docs/missions/2026/task-098');
+  const missionMdPath = path.join(missionDir, 'MISSION.md');
+  const cpPath = path.join(missionDir, 'CP-1.md');
+  const sourcePath = path.join(worktree, 'bin/hello.sh');
+
+  fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
+  fs.writeFileSync(sourcePath, '#!/usr/bin/env bash\necho hello\n');
+  fs.mkdirSync(missionDir, { recursive: true });
+  fs.writeFileSync(missionMdPath, '# MISSION.md\n\nTest mission.\n');
+  fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| Executable bit checked | bin/hello.sh:1; supporting context: `stat -c \'%A\' bin/hello.sh` → `-rwxr-xr-x` | PASS |\n');
   writeReviewState(missionDir, 'codex', 'codex');
 
   mock.method(missionUtils, 'findMissionDir', () => missionDir);

@@ -25,6 +25,10 @@ Drafting requirements:
 - preserve `{{taskPath}}`: update content as needed but do not delete, rename, or move the file
 - do not edit the backlog `assignee` field; the workflow records ownership itself
 - Refinement Signals section must use net engineering lines (NEL) bucket format (`Predicted NEL bucket: Small (0–80) / Medium (81–235) / Large (235+)`) and must NOT use the old agent-percentage-usage format
+- Every generated `MISSION.md` MUST keep the scaffolded `### Checkpoint Documentation Requirements` block under `## Checkpoints` and fill it with concrete instructions for the implementer.
+- That block must tell the agent to use the exact heading `## Goal Check` and the 3-column table `| Criterion | Evidence | Status |`.
+- That block must describe the evidence forms Parallix already verifies today: file:line references, exact test names, ADR references, test file paths, and recognized repo commands/paths such as backticked `npm ...`, `node ...`, `git ...`, `px ...`, or `./...`.
+- That block must make the weak-agent failure mode explicit: raw `stat`/`ls` output or generic prose alone is not enough; pair shell output with one of the accepted references above.
 
 Bug-labeled missions (regression-test-first / "lock the bug"):
 - this section applies only when the backlog task at `{{taskPath}}` carries a `bug` label (in addition to its `ai_sdlc` or `user_value` classification). If there is no `bug` label, ignore this section entirely.

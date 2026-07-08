@@ -1,10 +1,10 @@
 ---
 id: TASK-2207
 title: parallix is to unclear for agents
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-07-08 04:37'
-labels: []
+labels: ["ai_sdlc"]
 dependencies: []
 ---
 

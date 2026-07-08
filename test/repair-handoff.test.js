@@ -330,8 +330,8 @@ test('buildRelaunchPrompt returns string containing Goal Check table and mission
   assert.ok(typeof prompt === 'string', 'Prompt should be a string');
   assert.ok(prompt.includes('Goal Check table'), 'Prompt should contain "Goal Check table"');
   assert.ok(prompt.includes('task-1124'), 'Prompt should contain the mission slug');
-  assert.ok(prompt.includes('file:line'), 'Prompt should mention file:line references');
-  assert.ok(prompt.includes('test names'), 'Prompt should mention test names');
+  assert.ok(/file:line/i.test(prompt), 'Prompt should mention file:line references');
+  assert.ok(/test names/i.test(prompt), 'Prompt should mention test names');
 });
 
 test('buildRelaunchPrompt includes example table', () => {
@@ -339,8 +339,22 @@ test('buildRelaunchPrompt includes example table', () => {
   const errorMsg = 'The final checkpoint at docs/missions/2026/task-1121/CP-3.md has a "## Goal Check" section but no evidence rows. A goal-check table with real evidence is required before handoff.';
   const prompt = buildRelaunchPrompt(errorMsg, 'task-1124', '/tmp/worktree');
   
-  assert.ok(prompt.includes('| Goal Check | Evidence | Status |'), 'Prompt should include example table header');
+  assert.ok(prompt.includes('| Criterion | Evidence | Status |'), 'Prompt should include example table header');
   assert.ok(prompt.includes('|---|---|---|'), 'Prompt should include example table separator');
+});
+
+test('buildRelaunchPrompt gives actionable replacement guidance for shell-only offending rows', () => {
+  const { buildRelaunchPrompt } = repairHandoff;
+  const errorMsg = 'The final checkpoint at docs/missions/2026/task-1121/CP-3.md has a "## Goal Check" section but no evidence rows that cite a verifiable reference such as a file:line, ADR, test reference, or recognized repo command/path. A goal-check table with real evidence is required before handoff. Offending row: | `bin/hello.sh` exists as regular file with execute permissions | `stat -c \'%A\' bin/hello.sh` → `-rwxrwxr-x` | PASS |';
+  const prompt = buildRelaunchPrompt(errorMsg, 'task-1124', '/tmp/worktree');
+
+  assert.ok(prompt.includes('Offending row:'), 'Prompt should surface the offending row context');
+  assert.ok(prompt.includes("`stat -c '%A' bin/hello.sh`"), 'Prompt should include the rejected shell-only evidence');
+  assert.ok(prompt.includes('Do not retry with only shell output or file metadata'), 'Prompt should tell the agent what not to repeat');
+  assert.ok(prompt.includes('file:line reference'), 'Prompt should point the agent at file:line evidence');
+  assert.ok(prompt.includes('ADR reference'), 'Prompt should point the agent at ADR evidence');
+  assert.ok(prompt.includes('recognized repo command/path'), 'Prompt should point the agent at accepted repo commands and paths');
+  assert.ok(!prompt.includes('wrap it in backticks so the validator recognizes it'), 'Prompt should not repeat the old vague backtick-only advice');
 });
 
 // ── CP-1 tests: FailureClass, DispatchAction, getDispatchAction (SC2) ─────────
