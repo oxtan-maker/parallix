@@ -15,7 +15,12 @@ priority: high
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Add guardrails to prevent module resolution failures
+Add guardrails to prevent module resolution failures.
+
+Review follow-up linkage:
+- `task-2207` reduced the weak-agent handoff failure to this separate blocker.
+- Current failing proof: `test/px-runtime-smoke.test.js:8` runs `node px.ts --version` and hits `TypeError [ERR_UNKNOWN_FILE_EXTENSION]: Unknown file extension ".ts"` under Node's ESM loader.
+- This blocker is outside the Goal Check evidence-contract scope and must be resolved separately before `./scripts/verify-local.sh all` can return green for missions that otherwise satisfy the handoff contract.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria

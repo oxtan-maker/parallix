@@ -16,6 +16,9 @@ import { rebaseBeforeReviewRound } from '../review/rebase.js';
 import * as nels from '../core/nels.js';
 import { attemptAgentRelaunch } from './active.js';
 
+// Export for testing
+export { evidenceCellHasVerifiableReference as _evidenceCellHasVerifiableReference };
+
 /**
   * Verifies that the current environment is ready for handoff.
   *
@@ -309,7 +312,7 @@ function findUnverifiableGoalCheckRow(evidenceRows: string[], rootDir: string): 
   }
   const unverifiableRow = findUnverifiableGoalCheckRow(evidenceRows, rootDir);
   if (unverifiableRow) {
-    const msg = `The final checkpoint at ${fmt.path(relativeCheckpointPath)} has a "## Goal Check" section but no evidence rows that cite a verifiable file:line, ADR, or test reference. A goal-check table with real evidence is required before handoff. Offending row: ${unverifiableRow}`;
+    const msg = `The final checkpoint at ${fmt.path(relativeCheckpointPath)} has a "## Goal Check" section but no evidence rows that cite a verifiable reference such as a file:line, ADR, test reference, or recognized repo command/path. A goal-check table with real evidence is required before handoff. Offending row: ${unverifiableRow}`;
     error(msg);
     return { ok: false, error: msg };
   }
