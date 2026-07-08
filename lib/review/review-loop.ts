@@ -1511,6 +1511,10 @@ export async function startReviewLoop(slug: string, opts: {
     log(fmt.status('INFO', `Round ${attempt}: implementer made changes. Continuing to round ${attempt + 1}.`));
   }
 
+  if (!state.disposition) {
+    state.disposition = 'MAX_ATTEMPTS';
+    writeReviewStateFn(slug, state, worktree);
+  }
   log(fmt.status('INFO', `Autonomous review stopped: reached ${maxAttempts} attempts. Hand off to human review.`));
 }
 
