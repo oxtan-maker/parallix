@@ -30,7 +30,13 @@ echo "[refresh-global-px] Building the distributable (tsc -> CommonJS)..."
 npm run build:cjs
 
 echo "[refresh-global-px] Packing a tarball of this checkout..."
-TARBALL="$(npm pack)"
+PACK_OUTPUT="$(npm pack)"
+TARBALL="$(printf '%s\n' "${PACK_OUTPUT}" | awk '/\.tgz$/ { tarball = $0 } END { print tarball }')"
+if [[ -z "${TARBALL}" ]]; then
+  echo "[refresh-global-px] npm pack did not report a tarball filename." >&2
+  printf '%s\n' "${PACK_OUTPUT}" >&2
+  exit 1
+fi
 trap 'rm -f "${TARBALL}"' EXIT
 
 echo "[refresh-global-px] Installing ${TARBALL} globally..."

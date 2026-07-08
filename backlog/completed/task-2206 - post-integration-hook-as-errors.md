@@ -1,10 +1,10 @@
 ---
 id: TASK-2206
 title: post integration hook as errors
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-07-07 19:54'
-labels: []
+labels: [ai_sdlc]
 dependencies: []
 ---
 
