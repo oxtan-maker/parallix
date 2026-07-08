@@ -1,10 +1,10 @@
 ---
 id: TASK-1430
 title: some agents are still to strict in reviewing
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-07-05 07:02'
-labels: []
+labels: [ai_sdlc]
 dependencies: []
 ---
 

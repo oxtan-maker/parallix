@@ -12,6 +12,7 @@ Requirements:
 - {{repo_line}}read the live PR comments with `px review {{slug}} --comments` and check `px review {{slug}} --status`
 - In standalone mode (no Forgejo), read reviewer findings from `missions/{{slug}}/review-events/` — the latest `reviewer_findings-*` file has the findings and `reviewer_outcome-*` has the verdict. Also check `missions/{{slug}}/review-state.json` for round/phase/disposition.
 - for each finding: fix, push back with a clear reason, or park (track via a Backlog task)
+- if a finding is a rebasing artifact caused by branch stale-ness rather than this mission's diff, push back with: `Not a mission change - will be resolved by parallix rebase.`
 - update the checkpoint document if needed, run the relevant gate, and commit before handoff
 - write `{{artifactDir}}/{{slug}}-round-resolution.md` with `fixed_items`, `pushed_back_items`, `parked_items`, and `blocked_reason` when blocked
 - write `{{artifactDir}}/{{slug}}-review-disposition.txt` with one of `CHANGES_MADE|PUSHBACK_ALL|PARKED|BLOCKED`

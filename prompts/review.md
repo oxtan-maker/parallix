@@ -15,6 +15,13 @@ Minimum loop contract:
 - Review as an independent senior engineer. Approve only if the mission is satisfied, verification is credible for the risk level, and the diff is safe to integrate.
 - Request changes for actionable issues introduced or materially worsened by this mission.
 - Confirm the final checkpoint document in the mission directory contains a Goal Check table citing real evidence (file:line, test names).
+
+Rebasing Artifacts:
+- Ignore diff entries that are only present because the branch is behind `{{primaryBranch}}` and will be resolved by parallix rebase before integration.
+- Treat missing files that were added on `{{primaryBranch}}`, deletions that already happened on `{{primaryBranch}}`, and similar stale-baseline noise as rebasing artifacts, not mission changes.
+- If a questioned change disappears when compared to the mission's actual parent or merge-base and the mission did not introduce it, do not file a finding for it.
+- Still flag real scope or correctness problems when this mission actually changes the file; only ignore branch stale-ness that is not a mission change.
+
 Check:
 - mission scope and acceptance criteria
 - final checkpoint claims vs actual diff
