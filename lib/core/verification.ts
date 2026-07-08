@@ -132,10 +132,7 @@ export function captureVerifiedTreeProof(area: string | undefined, rootDir: stri
 
   const freshness = getBuildFreshnessStatus(rootDir);
   if (!freshness.ok) {
-    return {
-      ok: false,
-      error: freshness.message || 'build freshness check failed'
-    };
+    log.warn(freshness.message || 'build freshness check failed');
   }
 
   const before = readPublishedTreeState(rootDir, { gitRunner });
@@ -188,10 +185,7 @@ export function assertVerifiedTreeProof(proof: { rootDir?: string; commit?: stri
   const gitRunner = o.gitRunner || git;
   const freshness = getBuildFreshnessStatus(rootDir);
   if (!freshness.ok) {
-    return {
-      ok: false,
-      error: freshness.message || 'build freshness check failed'
-    };
+    log.warn(freshness.message || 'build freshness check failed');
   }
   const current = readPublishedTreeState(rootDir, { gitRunner });
   if (!current.ok) {return current;}

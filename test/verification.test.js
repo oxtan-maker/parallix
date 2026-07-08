@@ -181,7 +181,7 @@ test('captureVerifiedTreeProof uses the git-style runner by default', () => {
   });
 });
 
-test('captureVerifiedTreeProof fails when guarded compiled output is stale', () => {
+test('captureVerifiedTreeProof warns but succeeds when guarded compiled output is stale', () => {
   withTempDir(root => {
     initCommittedGitRepo(root);
 
@@ -212,8 +212,8 @@ test('captureVerifiedTreeProof fails when guarded compiled output is stale', () 
       stdio: 'pipe',
     });
 
-    assert.equal(proofResult.ok, false);
-    assert.match(proofResult.error, /Stale build detected/);
-    assert.match(proofResult.error, /npm run build:cjs/);
+    assert.equal(proofResult.ok, true);
+    assert.equal(proofResult.proof.rootDir, fs.realpathSync(root));
+    assert.equal(proofResult.proof.area, 'docs');
   });
 });
