@@ -1,10 +1,10 @@
 ---
 id: TASK-2205
 title: optimize the speed of e2e test with local ai
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-07-07 18:36'
-labels: []
+labels: [ai_sdlc]
 dependencies: []
 ---
 
