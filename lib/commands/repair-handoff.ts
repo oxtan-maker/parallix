@@ -310,6 +310,53 @@ Do NOT add placeholder or generic evidence. Each row must cite real, verifiable 
   return prompt;
 }
 
+/** @param {string} file */
+function isRepoLocalImplementationPath(file: string): boolean {
+  if (!file || typeof file !== 'string') {return false;}
+
+  const normalized = file.replace(/\\/g, '/');
+  if (!normalized || normalized === '.' || normalized.startsWith('/') || /^[A-Za-z]:\//.test(normalized)) {
+    return false;
+  }
+  if (normalized === '..' || normalized.startsWith('../') || normalized.includes('/../')) {
+    return false;
+  }
+  if (normalized === '.git' || normalized.startsWith('.git/')) {
+    return false;
+  }
+  if (missionUtils.isWorkflowGeneratedArtifact(normalized)) {
+    return false;
+  }
+  const implementationDirs = new Set([
+    'lib',
+    'test',
+    'scripts',
+    'config',
+    'prompts',
+    'templates',
+    'examples',
+    'data'
+  ]);
+  const implementationRootFiles = new Set([
+    'px.ts',
+    'px.js',
+    'index.js',
+    'package.json',
+    'package-lock.json',
+    'tsconfig.json',
+    'eslint.config.js'
+  ]);
+  const pathParts = normalized.split('/');
+  const topLevel = pathParts[0];
+  if (!topLevel || topLevel.startsWith('.')) {
+    return false;
+  }
+  if (pathParts.length === 1) {
+    return implementationRootFiles.has(normalized);
+  }
+  return implementationDirs.has(topLevel);
+}
+
 /**
  * Attempt to repair a failed automated handoff by auto-committing mission
  * artifacts or rebasing.
@@ -381,8 +428,8 @@ async function repairHandoff(slug: string, worktree: string, errorMsg: string, o
       const dirtyFiles = dirtyFilesWithStatus.map((f: { xy: string; file: string }) => f.file);
 
       const isSafeToCommit = (/** @type{string} */ file: string) =>
-        missionUtils.isWorkflowGeneratedArtifact(file)
-        || missionUtils.isMissionArtifact(file, slug, rootDir);
+        missionUtils.isMissionArtifact(file, slug, rootDir)
+        || isRepoLocalImplementationPath(file);
 
       const safeFiles = dirtyFiles.filter(isSafeToCommit);
       const unsafeFiles = dirtyFiles.filter((f: string) => !isSafeToCommit(f));

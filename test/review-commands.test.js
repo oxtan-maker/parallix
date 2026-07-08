@@ -163,7 +163,7 @@ test('performStaticReview rejects placeholder-only Goal Check evidence rows', (t
     });
 
     assert.equal(result.ok, false);
-    assert.ok(result.findings.some(f => /no evidence rows that cite a verifiable file:line, ADR, or test reference/.test(f)));
+    assert.ok(result.findings.some(f => /no evidence rows that cite a verifiable reference such as a file:line, ADR, test reference, or recognized repo command\/path/.test(f)));
   } finally {
     fs.rmSync(rootDir, { recursive: true, force: true });
   }

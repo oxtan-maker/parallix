@@ -1,17 +1,19 @@
 ---
 id: TASK-2202
 title: parallix autocommit seems to exclude some files
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-07-07 16:33'
-labels: []
+labels:
+  - ai_sdlc
+  - bug
 dependencies: []
 ---
 
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-when an agent forgets to commit files after for example active step I expect the harness to commit it without exclusion. Otherwise weak agent disturb the flow for fixes that the easily mechanicly handled.
+When an agent exits the `active` step with real implementation changes still uncommitted, I expect the workflow harness to finish the mechanical git work instead of rejecting the handoff because the dirty files are outside the current mission-artifact allowlist. Today `repairHandoff()` auto-commits `missions/<slug>/`, backlog task files, and a few workflow-generated paths, but it refuses ordinary implementation paths such as `lib/`, `test/`, or other repo files that belong to the mission worktree. That turns a recoverable weak-agent miss into a blocked workflow.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Definition of Done

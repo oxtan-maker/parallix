@@ -81,7 +81,7 @@ test('repairHandoff stages renamed mission files by destination path', async () 
   assert.equal(commits.length, 1);
 });
 
-test('repairHandoff refuses to commit when unsafe files are dirty', async () => {
+test('repairHandoff refuses to commit when operator-local or generated paths are dirty', async () => {
   const adds = [];
   const logs = [];
 
@@ -91,7 +91,10 @@ test('repairHandoff refuses to commit when unsafe files are dirty', async () => 
         status: 0, 
         stdout: [
           ' M missions/task-1037/MISSION.md',
-          ' M server/src/main/java/visual/App.java'
+          ' M .workflow/codex-home/.codex/logs_2.sqlite',
+          ' M .sessions/task-1037-implementer.json',
+          ' M .forgejo-local/tokens/codex',
+          ' M graphify-out/GRAPH_REPORT.md'
         ].join('\n')
       };
     }
@@ -108,10 +111,52 @@ test('repairHandoff refuses to commit when unsafe files are dirty', async () => 
   });
 
   assert.equal(repaired, false, 'repairHandoff should return repaired:false when unsafe files are dirty');
-  assert.ok(blocker && blocker.includes('server/src/main/java/visual/App.java'));
+  assert.ok(blocker && blocker.includes('.workflow/codex-home/.codex/logs_2.sqlite'));
+  assert.ok(blocker && blocker.includes('.sessions/task-1037-implementer.json'));
+  assert.ok(blocker && blocker.includes('.forgejo-local/tokens/codex'));
+  assert.ok(blocker && blocker.includes('graphify-out/GRAPH_REPORT.md'));
   assert.equal(adds.length, 0, 'No files should be added if unsafe files are present');
   assert.ok(logs.some(l => l.includes('dirty files include non-mission paths')));
-  assert.ok(logs.some(l => l.includes('server/src/main/java/visual/App.java')));
+  assert.ok(logs.some(l => l.includes('.workflow/codex-home/.codex/logs_2.sqlite')));
+  assert.ok(logs.some(l => l.includes('.sessions/task-1037-implementer.json')));
+  assert.ok(logs.some(l => l.includes('.forgejo-local/tokens/codex')));
+  assert.ok(logs.some(l => l.includes('graphify-out/GRAPH_REPORT.md')));
+});
+
+test('repairHandoff refuses to commit when arbitrary non-mission repo files are dirty', async () => {
+  const adds = [];
+  const logs = [];
+
+  const gitFn = (args) => {
+    if (args.includes('status')) {
+      return {
+        status: 0,
+        stdout: [
+          ' M missions/task-1037/MISSION.md',
+          ' M server/src/main/java/visual/App.java',
+          ' M .env',
+          ' M .claude/settings.local.json'
+        ].join('\n')
+      };
+    }
+    if (args.includes('add')) {
+      adds.push(args[args.length - 1]);
+      return { status: 0 };
+    }
+    return { status: 0 };
+  };
+
+  const { repaired, blocker } = await repairHandoff('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', {
+    gitFn,
+    log: (msg) => logs.push(msg)
+  });
+
+  assert.equal(repaired, false, 'repairHandoff should return repaired:false when arbitrary repo files fall outside the bounded implementation allowlist');
+  assert.ok(blocker && blocker.includes('server/src/main/java/visual/App.java'));
+  assert.ok(blocker && blocker.includes('.env'));
+  assert.ok(blocker && blocker.includes('.claude/settings.local.json'));
+  assert.equal(adds.length, 0, 'No files should be added if arbitrary non-mission files are present');
+  assert.ok(logs.some(l => l.includes('dirty files include non-mission paths')));
 });
 
 test('repairHandoff reports staging failures and stops before commit', async () => {
