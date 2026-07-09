@@ -52,7 +52,7 @@ test('evaluateTaskStatusForIntegration rejects when token and review-state both 
 
   assert.equal(result.ok, false);
   assert.equal(result.level, 'fail');
-  assert.match(result.message, /expected approved, or review with an approved\/merged Forgejo PR/i);
+  assert.match(result.message, /expected approved, or review with an approved Forgejo PR/i);
 });
 
 // SC 1c: evaluateTaskStatusForIntegration does not confuse local source with Forgejo APPROVED for default user override

@@ -1,8 +1,8 @@
 ---
 id: TASK-2204
 title: remove forgejo merged fast path from integrate
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-07-07 20:23'
 updated_date: '2026-07-07 20:23'
 labels: [ai_sdlc, bug]
@@ -14,9 +14,9 @@ dependencies: []
 <!-- SECTION:DESCRIPTION:BEGIN -->
 `px integrate` still has a Variant A fast path selected by `context.pr.merged`, meaning a PR already merged on Forgejo is treated as an acceptable integration state and closeout proceeds from the mirrored Forgejo result instead of the local/base-branch squash path.
 
-That behavior conflicts with this repo's actual model: Forgejo is a review/publication surface, while the authoritative integration target is the local base branch (`main`/`master` or a recorded feature base). A merge performed on Forgejo is therefore an out-of-band mutation of the mirrored base branch, not a normal workflow state that integrate should optimize for.
+Forgejo is a diff viewer — it is never merged to main and gets overwritten by new missions each time. The honest merge position is determined solely by local/remote branch state; ForgeJo state is irrelevant.
 
-Fix the integration contract so Forgejo merge state is never used as authority for landing a mission. `px integrate` should use a single local-authority merge/closeout path, and a Forgejo PR already marked merged should either fail preflight with explicit recovery guidance or otherwise be treated as an invalid mirror-drift condition rather than a valid fast path.
+Fix the integration contract so ForgeJo merge state is never consulted when computing the honest merge position. `px integrate` should use a single local-authority merge/closeout path based solely on local/remote branch state.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Definition of Done

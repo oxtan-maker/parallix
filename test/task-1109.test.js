@@ -222,21 +222,30 @@ test('integrate passes the pre-resolved Forgejo token into syncMerged', () => {
   }
 });
 
-test('integrate fast-path (Variant A) success path', async (t) => {
+test('integrate rejects a Forgejo PR that is already merged', async (t) => {
   setupMocks();
   mock.method(forgejo, 'getPrStatus', () => ({ exists: true, state: 'closed', merged: true, number: 41 }));
   const integrate = loadIntegrate();
-  const originalLog = console.log;
   const logs = [];
+  const errors = [];
+  const exitCodes = [];
+  const originalLog = console.log;
+  const originalError = console.error;
   console.log = (msg) => logs.push(msg);
+  console.error = (msg) => errors.push(msg);
+  mock.method(process, 'exit', (code) => exitCodes.push(code));
   
   integrate([TEST_SLUG]);
   
-  assert.ok(logs.some(l => l.includes('Selecting integration variant: Variant A')));
-  assert.ok(logs.some(l => l.includes('Variant A integration completed')));
-  assert.equal(statsCalls.length, 1);
+  const output = [...logs, ...errors].join('\n');
+  assert.match(output, /Forgejo PR: PR #41 is already marked merged/);
+  assert.match(output, /re-sync the local base branch/);
+  assert.match(output, new RegExp(`px integrate ${TEST_SLUG} --dry-run`));
+  assert.equal(statsCalls.length, 0);
+  assert.equal(exitCodes.at(-1), 1);
   
   console.log = originalLog;
+  console.error = originalError;
   cleanup();
 });
 
@@ -280,17 +289,9 @@ test('integrate exits non-zero when post-integration stats recording fails', () 
   cleanup();
 });
 
-test('integrate Variant A reports closeout commit failure guidance', () => {
+test('integrate reports merged-PR recovery guidance before any closeout work', () => {
   setupMocks();
   mock.method(forgejo, 'getPrStatus', () => ({ exists: true, state: 'closed', merged: true, number: 41 }));
-  mock.method(git, 'git', (args) => {
-    if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n', stderr: '' };
-    if (args.includes('branch') && args.includes('--show-current')) return { status: 0, stdout: 'main', stderr: '' };
-    if (args.includes('status')) return { status: 0, stdout: '', stderr: '' };
-    if (args.includes('diff') && args.includes('--cached')) return { status: 1, stdout: '', stderr: '' };
-    if (args[2] === 'commit') return { status: 1, stdout: '', stderr: 'hook failed' };
-    return { status: 0, stdout: '', stderr: '' };
-  });
   const integrate = loadIntegrate();
   const logs = [];
   const errors = [];
@@ -303,9 +304,10 @@ test('integrate Variant A reports closeout commit failure guidance', () => {
 
   integrate([TEST_SLUG]);
 
-  assert.ok(errors.some(l => l.includes('Variant A closeout failed (commit-failed).')));
-  assert.ok(errors.some(l => l.includes('hook failed')));
-  assert.ok(logs.some(l => l.includes('the relevant verification command is')));
+  const output = [...logs, ...errors].join('\n');
+  assert.match(output, /Integration preflight failed\./);
+  assert.match(output, /Forgejo PR: PR #41 is already marked merged/);
+  assert.match(output, /git -C \/tmp\/integrate-v2-root checkout main/);
   assert.equal(statsCalls.length, 0);
   assert.equal(exitCodes.at(-1), 1);
 
@@ -422,11 +424,11 @@ test('evaluateTaskStatusForIntegration edge cases', (t) => {
   // Case 1: Status review, PR merged
   const res1 = evaluateTaskStatusForIntegration({
     taskStatus: 'review',
-    pr: { merged: true },
+    pr: { state: 'merged', merged: true },
     approval: { ok: false }
   });
-  assert.strictEqual(res1.ok, true);
-  assert.match(res1.message, /already merged/);
+  assert.strictEqual(res1.ok, false);
+  assert.match(res1.message, /approved Forgejo PR/);
 
   // Case 2: Status review, review approved
   const res2 = evaluateTaskStatusForIntegration({

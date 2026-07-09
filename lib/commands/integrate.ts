@@ -492,7 +492,6 @@ export interface IntegrateFn extends Function {
   resolveConflictsForMission: typeof resolveConflictsForMission;
   cleanupMissionWorktree: typeof cleanupMissionWorktree;
   rewriteWorktreePaths: typeof rewriteWorktreePaths;
-  finalizeVariantACloseout: typeof finalizeVariantACloseout;
   isNoMergeToAbortResult: typeof isNoMergeToAbortResult;
   buildConflictResolutionPrompt: typeof buildConflictResolutionPrompt;
   VARIANT_B_AUTOMATION_SUMMARY: typeof VARIANT_B_AUTOMATION_SUMMARY;
@@ -619,20 +618,6 @@ async function integrate(args: string[]) {
         rootDir: /** @type{string} */(baseWorktree) as string
       });
 
-      if (dryRun) {
-      promoteTaskForIntegrationIfNeeded(context, { dryRun: true });
-      fmt.log.pass('\nDry run complete. Integration preflight passed.');
-      return;
-    }
-
-    promoteTaskForIntegrationIfNeeded(context);
-
-    temporaryStash = stashMainCheckoutIfNeeded({
-      slug,
-      dirtyEntries: context.mainDirtyEntries as string[],
-      rootDir: baseWorktree as string
-    });
-
     // End-context check: if we are in the worktree that is about to be deleted,
     // move the Node process to the base worktree to avoid being left in a ghost directory.
     const missionWorktree = conventionalWorktreePath(slug);
@@ -641,183 +626,29 @@ async function integrate(args: string[]) {
       process.chdir(baseWorktree as string);
     }
 
-    // Variant Selection
     const branch = missionBranchName(slug, baseWorktree);
     const mainTitle = missionTitle(slug) || slug;
     const summary = mainTitle.replace(/\s+/g, ' ').trim();
     const mainTaskFile = ((context.task as any).taskFile as string).replace(executionDir, baseWorktree as string);
-    const useVariantA = context.pr.merged;
-    fmt.log.info(`Selecting integration variant: ${useVariantA ? 'Variant A (fast-path)' : 'Variant B (full squash-merge)'}`);
+    fmt.log.info('Selecting integration variant: Variant B (local squash-merge)');
+    fmt.log.info(`\nStep 1: Using base worktree ${baseWorktree} on ${baseBranch} as the squash-merge target...`);
 
-    if (useVariantA) {
-      fmt.log.info(`Variant A: already merged on Forgejo; syncing local ${baseBranch} in base worktree ${baseWorktree} for closeout.`);
-      const closeoutResult = finalizeVariantACloseout({
-        slug,
-        summary,
-        mainTaskFile,
-        rootDir: baseWorktree,
-        baseBranch
-      });
-      if (!closeoutResult.ok) {
-        fmt.log.fail(`Variant A closeout failed (${closeoutResult.error}).`);
-        if (closeoutResult.detail) {
-          fmt.log.fail(closeoutResult.detail);
-        }
-        if (closeoutResult.error === 'commit-failed') {
-          fmt.log.info(`The closeout commit runs the repo git hooks. Fix the reported hook failure in ${baseWorktree} and retry integrate.`);
-          fmt.log.info(`For this mission, the relevant verification command is ${formatVerificationCommand(context.area, baseWorktree)}`);
-        }
-        throw new IntegrationAbort();
-      }
-      if (fs.existsSync(baseWorktree)) {
-        nextActionMessage = `Next: cd ${baseWorktree}`;
-      }
-      (recordPostIntegrationStatsOrAbort as any)(slug, { rootDir: baseWorktree });
-      if (!cleanupMissionWorktree(slug)) {
-        fmt.log.fail('Mission worktree cleanup failed for Variant A.');
-        throw new IntegrationAbort();
-      }
-      maybeUpdateGraphifyOnPrimary(baseWorktree);
-      runPostIntegrateHookOrAbort(slug, { baseWorktree: baseWorktree as string, baseBranch: baseBranch as string, variant: 'variant-a' });
-      fmt.log.pass('Variant A integration completed.');
-    } else {
-      fmt.log.info(`\nStep 1: Using base worktree ${baseWorktree} on ${baseBranch} as the squash-merge target...`);
-
-      fmt.log.info(`Step 2: Checking merge conflicts against local ${baseBranch} in the base worktree...`);
-      const dryMerge = git(['-C', baseWorktree, 'merge', '--no-commit', '--no-ff', branch]);
-      const abortResult = git(['-C', baseWorktree, 'merge', '--abort']);
-      if (abortResult.status !== 0 && !isNoMergeToAbortResult(abortResult)) {
-        fmt.log.fail('Dry-run merge could not be aborted cleanly. Inspect the local integration checkout before retrying integrate.');
-        throw new IntegrationAbort();
-      }
-      if (dryMerge.status !== 0) {
-        // Before failing, check if a squash commit for this mission already landed on the primary branch
-        // from a previous partial integration run (e.g. sync-merged failed after the commit was created).
-        const existingSquash = findExistingSquashCommit(baseWorktree, slug);
-        if (existingSquash) {
-          fmt.log.warn(`Squash commit already exists on local ${baseBranch} from a previous partial integration (${existingSquash.slice(0, 12)}). Resuming from sync-merged step.`);
-          const mergedCommit = existingSquash;
-          if (isForgejoReviewEnabled(baseWorktree)) {
-            fmt.log.info('Step 6 (resume): Syncing merged state to Forgejo...');
-            const syncResult = syncMerged(branch, mergedCommit, {
-              rootDir: baseWorktree,
-              forgejoUser: context.forgejoUser,
-              token: context.forgejoToken,
-              baseBranch: context.baseBranch
-            });
-            if (!syncResult.ok) {
-              reportSyncMergedFailure(syncResult);
-              throw new IntegrationAbort();
-            }
-          } else {
-            fmt.log.info('Step 6 (resume): Skipping Forgejo sync (review provider is not forgejo).');
-          }
-          if (fs.existsSync(baseWorktree)) {
-            nextActionMessage = `Next: cd ${baseWorktree}`;
-          }
-          (recordPostIntegrationStatsOrAbort as any)(slug, { rootDir: baseWorktree });
-          fmt.log.info('Step 7 (resume): Cleaning up the local mission worktree...');
-          if (!cleanupMissionWorktree(slug)) {
-            fmt.log.fail('Mission worktree cleanup failed.');
-            throw new IntegrationAbort();
-          }
-          maybeUpdateGraphifyOnPrimary(baseWorktree);
-          runPostIntegrateHookOrAbort(slug, { baseWorktree: baseWorktree as string, baseBranch: baseBranch as string, variant: 'variant-b-resumed' });
-          fmt.log.pass('Integration completed successfully (resumed from partial state).');
-        } else {
-          fmt.log.fail('Merge conflicts detected. Rebase the mission branch before integrating.');
-          const conflictOutput = [/** @type {any} */ (dryMerge).stdout, /** @type {any} */ (dryMerge).stderr].filter(Boolean).join('\n');
-          const conflictFiles = parseConflictFilesFromMergeOutput(conflictOutput);
-          if (conflictFiles.length > 0) {
-            fmt.log.info(`Conflicting files (${conflictFiles.length}):`);
-            conflictFiles.forEach(f => fmt.log.info(`  - ${f}`));
-          }
-          fmt.log.info('Conflict helper path:');
-          for (const line of formatMatrixSummary(buildAutonomousReviewMatrix())) {
-            fmt.log.info(line);
-          }
-          for (const line of buildConflictResolutionPrompt(slug, context.area, { baseBranch: context.baseBranch || '' })) {
-            fmt.log.info(line);
-          }
-          throw new IntegrationAbort();
-        }
-      } else {
-        fmt.log.info('Step 3: Squash-merging the mission branch...');
-        let noisePatchState = null;
-        if (softResetTrailingBacklogNoise(baseWorktree, git)) {
-          noisePatchState = prepareNoisePatchForSquash(baseWorktree, { gitRunner: git });
-          if (!noisePatchState.ok) {
-            fmt.log.fail('Could not preserve trailing backlog noise before squash merge.');
-            if (noisePatchState.error) {
-              fmt.log.fail(noisePatchState.error);
-            }
-            throw new IntegrationAbort();
-          }
-        }
-        const squashResult = git(['-C', baseWorktree, 'merge', '--squash', branch]);
-        if (squashResult.status !== 0) {
-          noisePatchState?.cleanup?.();
-          fmt.log.fail('Squash merge failed.');
-          throw new IntegrationAbort();
-        }
-        if (noisePatchState?.patchPath) {
-          const restoreNoiseResult = restoreNoisePatchAfterSquash(/** @type {string} */ (baseWorktree), noisePatchState.patchPath, { gitRunner: git });
-          (noisePatchState.cleanup as Function)();
-          if (!restoreNoiseResult.ok) {
-            fmt.log.fail('Could not restore trailing backlog noise after squash merge.');
-            if (restoreNoiseResult.error) {
-              fmt.log.fail(restoreNoiseResult.error);
-            }
-            throw new IntegrationAbort();
-          }
-        }
-
-        fmt.log.info('Step 4: Final closeout checks in the local integration checkout...');
-        if (fs.existsSync(mainTaskFile)) {
-          completeTask(slug, baseWorktree);
-          // Re-resolve because it moved
-          const updatedResolution = resolveTaskFile(slug, baseWorktree);
-          if (updatedResolution.ok) {
-            rewriteWorktreePaths(updatedResolution.taskFile as string, slug, { rootDir: baseWorktree });
-          }
-        }
-
-        git(['-C', baseWorktree, 'add', '-A']);
-        fmt.log.info('Step 5: Creating the landed squash commit in the local integration checkout...');
-        const commitResult = git([
-          '-C',
-          /** @type {string} */ (baseWorktree),
-          'commit',
-          '-m',
-          `${branch}: ${summary}`
-        ]);
-        if (commitResult.status !== 0) {
-          const output = [commitResult.stdout, commitResult.stderr].filter(Boolean).join('\n').trim();
-          fmt.log.fail('Could not create the squash commit in the local integration checkout.');
-          if (output) {
-            fmt.log.fail(output);
-          }
-          fmt.log.info(`The squash commit runs the repo git hooks. Fix the reported hook failure in ${baseWorktree} and retry integrate.`);
-          fmt.log.info(`For this mission, the relevant verification command is ${formatVerificationCommand(context.area, baseWorktree)}`);
-          throw new IntegrationAbort();
-        }
-        // Refresh build and capture merge commit before post-integrate hook.
-        // Proof capture is deferred until after the hook so it represents the
-        // freshly rebuilt tree that will actually be published (task-2203).
-        const refreshResult = refreshBuildBeforeVerification(baseWorktree, {
-          runFn: child_process.spawnSync
-        });
-        if (!refreshResult.ok) {
-          fmt.log.fail(`Could not refresh the publish tree before verification proof capture: ${refreshResult.error}`);
-          if (refreshResult.detail) {
-            fmt.log.fail(refreshResult.detail);
-          }
-          throw new IntegrationAbort();
-        }
-        const mergedCommit = git(['-C', baseWorktree, 'rev-parse', 'HEAD']).stdout.trim();
-
+    fmt.log.info(`Step 2: Checking merge conflicts against local ${baseBranch} in the base worktree...`);
+    const dryMerge = git(['-C', baseWorktree, 'merge', '--no-commit', '--no-ff', branch]);
+    const abortResult = git(['-C', baseWorktree, 'merge', '--abort']);
+    if (abortResult.status !== 0 && !isNoMergeToAbortResult(abortResult)) {
+      fmt.log.fail('Dry-run merge could not be aborted cleanly. Inspect the local integration checkout before retrying integrate.');
+      throw new IntegrationAbort();
+    }
+    if (dryMerge.status !== 0) {
+      // Before failing, check if a squash commit for this mission already landed on the primary branch
+      // from a previous partial integration run (e.g. sync-merged failed after the commit was created).
+      const existingSquash = findExistingSquashCommit(baseWorktree, slug);
+      if (existingSquash) {
+        fmt.log.warn(`Squash commit already exists on local ${baseBranch} from a previous partial integration (${existingSquash.slice(0, 12)}). Resuming from sync-merged step.`);
+        const mergedCommit = existingSquash;
         if (isForgejoReviewEnabled(baseWorktree)) {
-          fmt.log.info('Step 6: Syncing merged state to Forgejo...');
+          fmt.log.info('Step 6 (resume): Syncing merged state to Forgejo...');
           const syncResult = syncMerged(branch, mergedCommit, {
             rootDir: baseWorktree,
             forgejoUser: context.forgejoUser,
@@ -829,41 +660,159 @@ async function integrate(args: string[]) {
             throw new IntegrationAbort();
           }
         } else {
-          fmt.log.info('Step 6: Skipping Forgejo sync (review provider is not forgejo).');
+          fmt.log.info('Step 6 (resume): Skipping Forgejo sync (review provider is not forgejo).');
         }
-
         if (fs.existsSync(baseWorktree)) {
           nextActionMessage = `Next: cd ${baseWorktree}`;
         }
         (recordPostIntegrationStatsOrAbort as any)(slug, { rootDir: baseWorktree });
-        fmt.log.info('Step 7: Cleaning up the local mission worktree...');
+        fmt.log.info('Step 7 (resume): Cleaning up the local mission worktree...');
         if (!cleanupMissionWorktree(slug)) {
           fmt.log.fail('Mission worktree cleanup failed.');
           throw new IntegrationAbort();
         }
-
         maybeUpdateGraphifyOnPrimary(baseWorktree);
-        runPostIntegrateHookOrAbort(slug, { baseWorktree: baseWorktree as string, baseBranch: baseBranch as string, variant: 'variant-b' });
-
-        // Proof capture after post-integrate hook so it represents the
-        // freshly rebuilt tree that will actually be published (task-2203).
-        const proofResult = verification.captureVerifiedTreeProof(context.area, baseWorktree, {
-          gitRunner: git,
-          runFn: /** @type {Function} */ (child_process.spawnSync)
-        });
-        if (!/** @type {any} */ (proofResult).ok) {
-          fmt.log.fail(`Could not verify the exact tree being published: ${/** @type {any} */ (proofResult).error}`);
-          throw new IntegrationAbort();
+        runPostIntegrateHookOrAbort(slug, { baseWorktree: baseWorktree as string, baseBranch: baseBranch as string, variant: 'variant-b-resumed' });
+        fmt.log.pass('Integration completed successfully (resumed from partial state).');
+      } else {
+        fmt.log.fail('Merge conflicts detected. Rebase the mission branch before integrating.');
+        const conflictOutput = [/** @type {any} */ (dryMerge).stdout, /** @type {any} */ (dryMerge).stderr].filter(Boolean).join('\n');
+        const conflictFiles = parseConflictFilesFromMergeOutput(conflictOutput);
+        if (conflictFiles.length > 0) {
+          fmt.log.info(`Conflicting files (${conflictFiles.length}):`);
+          conflictFiles.forEach(f => fmt.log.info(`  - ${f}`));
         }
-        const proof = /** @type {any} */ (proofResult).proof;
-        const proofCheck = verification.assertVerifiedTreeProof(proof!, baseWorktree, { gitRunner: git });
-        if (!proofCheck.ok) {
-          fmt.log.fail(`Verification proof is stale for the publish tree: ${/** @type {any} */ (proofCheck).error}`);
-          throw new IntegrationAbort();
+        fmt.log.info('Conflict helper path:');
+        for (const line of formatMatrixSummary(buildAutonomousReviewMatrix())) {
+          fmt.log.info(line);
         }
-
-        fmt.log.pass('Integration completed successfully.');
+        for (const line of buildConflictResolutionPrompt(slug, context.area, { baseBranch: context.baseBranch || '' })) {
+          fmt.log.info(line);
+        }
+        throw new IntegrationAbort();
       }
+    } else {
+      fmt.log.info('Step 3: Squash-merging the mission branch...');
+      let noisePatchState = null;
+      if (softResetTrailingBacklogNoise(baseWorktree, git)) {
+        noisePatchState = prepareNoisePatchForSquash(baseWorktree, { gitRunner: git });
+        if (!noisePatchState.ok) {
+          fmt.log.fail('Could not preserve trailing backlog noise before squash merge.');
+          if (noisePatchState.error) {
+            fmt.log.fail(noisePatchState.error);
+          }
+          throw new IntegrationAbort();
+        }
+      }
+      const squashResult = git(['-C', baseWorktree, 'merge', '--squash', branch]);
+      if (squashResult.status !== 0) {
+        noisePatchState?.cleanup?.();
+        fmt.log.fail('Squash merge failed.');
+        throw new IntegrationAbort();
+      }
+      if (noisePatchState?.patchPath) {
+        const restoreNoiseResult = restoreNoisePatchAfterSquash(/** @type {string} */ (baseWorktree), noisePatchState.patchPath, { gitRunner: git });
+        (noisePatchState.cleanup as Function)();
+        if (!restoreNoiseResult.ok) {
+          fmt.log.fail('Could not restore trailing backlog noise after squash merge.');
+          if (restoreNoiseResult.error) {
+            fmt.log.fail(restoreNoiseResult.error);
+          }
+          throw new IntegrationAbort();
+        }
+      }
+
+      fmt.log.info('Step 4: Final closeout checks in the local integration checkout...');
+      if (fs.existsSync(mainTaskFile)) {
+        completeTask(slug, baseWorktree);
+        // Re-resolve because it moved
+        const updatedResolution = resolveTaskFile(slug, baseWorktree);
+        if (updatedResolution.ok) {
+          rewriteWorktreePaths(updatedResolution.taskFile as string, slug, { rootDir: baseWorktree });
+        }
+      }
+
+      git(['-C', baseWorktree, 'add', '-A']);
+      fmt.log.info('Step 5: Creating the landed squash commit in the local integration checkout...');
+      const commitResult = git([
+        '-C',
+        /** @type {string} */ (baseWorktree),
+        'commit',
+        '-m',
+        `${branch}: ${summary}`
+      ]);
+      if (commitResult.status !== 0) {
+        const output = [commitResult.stdout, commitResult.stderr].filter(Boolean).join('\n').trim();
+        fmt.log.fail('Could not create the squash commit in the local integration checkout.');
+        if (output) {
+          fmt.log.fail(output);
+        }
+        fmt.log.info(`The squash commit runs the repo git hooks. Fix the reported hook failure in ${baseWorktree} and retry integrate.`);
+        fmt.log.info(`For this mission, the relevant verification command is ${formatVerificationCommand(context.area, baseWorktree)}`);
+        throw new IntegrationAbort();
+      }
+      // Refresh build and capture merge commit before post-integrate hook.
+      // Proof capture is deferred until after the hook so it represents the
+      // freshly rebuilt tree that will actually be published (task-2203).
+      const refreshResult = refreshBuildBeforeVerification(baseWorktree, {
+        runFn: child_process.spawnSync
+      });
+      if (!refreshResult.ok) {
+        fmt.log.fail(`Could not refresh the publish tree before verification proof capture: ${refreshResult.error}`);
+        if (refreshResult.detail) {
+          fmt.log.fail(refreshResult.detail);
+        }
+        throw new IntegrationAbort();
+      }
+      const mergedCommit = git(['-C', baseWorktree, 'rev-parse', 'HEAD']).stdout.trim();
+
+      if (isForgejoReviewEnabled(baseWorktree)) {
+        fmt.log.info('Step 6: Syncing merged state to Forgejo...');
+        const syncResult = syncMerged(branch, mergedCommit, {
+          rootDir: baseWorktree,
+          forgejoUser: context.forgejoUser,
+          token: context.forgejoToken,
+          baseBranch: context.baseBranch
+        });
+        if (!syncResult.ok) {
+          reportSyncMergedFailure(syncResult);
+          throw new IntegrationAbort();
+        }
+      } else {
+        fmt.log.info('Step 6: Skipping Forgejo sync (review provider is not forgejo).');
+      }
+
+      if (fs.existsSync(baseWorktree)) {
+        nextActionMessage = `Next: cd ${baseWorktree}`;
+      }
+      (recordPostIntegrationStatsOrAbort as any)(slug, { rootDir: baseWorktree });
+      fmt.log.info('Step 7: Cleaning up the local mission worktree...');
+      if (!cleanupMissionWorktree(slug)) {
+        fmt.log.fail('Mission worktree cleanup failed.');
+        throw new IntegrationAbort();
+      }
+
+      maybeUpdateGraphifyOnPrimary(baseWorktree);
+      runPostIntegrateHookOrAbort(slug, { baseWorktree: baseWorktree as string, baseBranch: baseBranch as string, variant: 'variant-b' });
+
+      // Proof capture after post-integrate hook so it represents the
+      // freshly rebuilt tree that will actually be published (task-2203).
+      const proofResult = verification.captureVerifiedTreeProof(context.area, baseWorktree, {
+        gitRunner: git,
+        runFn: /** @type {Function} */ (child_process.spawnSync)
+      });
+      if (!/** @type {any} */ (proofResult).ok) {
+        fmt.log.fail(`Could not verify the exact tree being published: ${/** @type {any} */ (proofResult).error}`);
+        throw new IntegrationAbort();
+      }
+      const proof = /** @type {any} */ (proofResult).proof;
+      const proofCheck = verification.assertVerifiedTreeProof(proof!, baseWorktree, { gitRunner: git });
+      if (!proofCheck.ok) {
+        fmt.log.fail(`Verification proof is stale for the publish tree: ${/** @type {any} */ (proofCheck).error}`);
+        throw new IntegrationAbort();
+      }
+
+      fmt.log.pass('Integration completed successfully.');
     }
   } catch (error) {
     if (error instanceof IntegrationAbort) {
@@ -965,6 +914,9 @@ function buildIntegrationContext(slug: string, {
       forgejoUser: /** @type {any} */ (forgejoIdentity.forgejoUser),
       token: forgejoToken
     }));
+    if (pr.exists && pr.merged === true) {
+      pr = { ...pr, state: 'merged' };
+    }
     
     if (pr.exists && slug) {
       const baseSlugMatch = slug.match(/^(task-\d+)/i);
@@ -1035,14 +987,13 @@ function evaluateTaskStatusForIntegration(context: any) {
   const reviewApproved = context.approval?.ok && context.approval.reviewState === 'APPROVED';
   const defaultUserApproved = context.approval?.ok && context.approval.defaultUserApproved === true;
   const localApproved = context.approval?.source === 'local-review-state';
-  const reviewCanProceed = context.taskStatus === 'review' && (context.pr?.merged || reviewApproved || localApproved);
-  const defaultUserOverride = context.taskStatus === 'review' && context.pr?.merged === false && defaultUserApproved && context.approval.reviewState !== 'APPROVED';
+  const prAlreadyMerged = context.pr?.state === 'merged';
+  const reviewCanProceed = context.taskStatus === 'review' && (reviewApproved || localApproved);
+  const defaultUserOverride = context.taskStatus === 'review' && !prAlreadyMerged && defaultUserApproved && context.approval.reviewState !== 'APPROVED';
 
   if (reviewCanProceed) {
     let reason;
-    if (context.pr?.merged) {
-      reason = 'Forgejo PR already merged';
-    } else if (localApproved) {
+    if (localApproved) {
       reason = 'local review-state: approved';
     } else {
       reason = `latest formal review state is ${context.approval.reviewState}`;
@@ -1065,8 +1016,17 @@ function evaluateTaskStatusForIntegration(context: any) {
   return {
     ok: false,
     level: 'fail',
-    message: `Backlog status: expected approved, or review with an approved/merged Forgejo PR; found ${toVirtual(context.taskStatus, stateMapOptions)}`
+    message: `Backlog status: expected approved, or review with an approved Forgejo PR; found ${toVirtual(context.taskStatus, stateMapOptions)}`
   };
+}
+
+/** @param {Function} log @param {string} slug @param {string} baseWorktree @param {string} baseBranch */
+function printMergedPrRecoveryGuidance(log: Function, slug: string, baseWorktree: string, baseBranch: string) {
+  log(fmt.status('INFO', 'Recovery: re-sync the local base branch, confirm the landed commit locally, then retry integrate.'));
+  log(fmt.status('INFO', `  git -C ${baseWorktree} fetch --all --prune`));
+  log(fmt.status('INFO', `  git -C ${baseWorktree} checkout ${baseBranch}`));
+  log(fmt.status('INFO', `  git -C ${baseWorktree} pull --ff-only`));
+  log(fmt.status('INFO', `  px integrate ${slug} --dry-run`));
 }
 
 /** @param {{slug: string, branch: string, currentBranch: string, missionDir?: string, area: string, task: {ok: boolean, taskFile?: string, reason?: string, matches?: string[]}, taskStatus?: string, taskAssignee?: string|null, forgejoUser?: string|null, forgejoToken?: string|null, taskAssigneeWarning?: string|null, pr: {exists?: boolean, state?: string, number?: number, merged?: boolean, raw?: string}, siblingPrs: any[], approval: {ok?: boolean, error?: string, reviewState?: string, defaultUserApproved?: boolean, source?: string}, baseBranch?: string, baseWorktree?: string, mainBranch: string, mainDirtyEntries: string[], mainDirty: boolean}} context */
@@ -1202,7 +1162,7 @@ function printIntegrationPreflight(
     const localApproved = context.approval?.source === 'local-review-state';
     const localApprovalFallback = localApproved;
 
-    if (context.pr.exists && context.pr.state === 'open' && !context.pr.merged) {
+    if (context.pr.exists && context.pr.state === 'open') {
       log(fmt.status('PASS', `Forgejo PR: PR #${context.pr.number} open`));
       if (localApprovalFallback) {
         log(fmt.status('INFO', `Forgejo approval: token unavailable, approval sourced from local review-state.json (phase=approved)`));
@@ -1218,9 +1178,10 @@ function printIntegrationPreflight(
       } else {
         log(fmt.status('PASS', `Forgejo approval: latest formal review state is ${context.approval.reviewState}`));
       }
-    } else if (context.pr.exists && context.pr.merged) {
-      warnings.push('pr-merged');
-      log(fmt.status('WARN', `Forgejo PR: PR #${context.pr.number} is already marked merged`));
+    } else if (context.pr.exists && context.pr.state === 'merged') {
+      failures.push('pr-merged');
+      log(fmt.status('FAIL', `Forgejo PR: PR #${context.pr.number} is already marked merged`));
+      printMergedPrRecoveryGuidance(log, context.slug, baseWorktree, baseBranch);
     } else if (context.pr.exists) {
       failures.push('pr-state');
       log(fmt.status('FAIL', `Forgejo PR: unexpected state '${context.pr.state}'`));
@@ -1472,15 +1433,13 @@ function recordPostIntegrationStats(
     recordIntegrationStatsFn = (stats as any).recordIntegrationStats,
   } = {}
 ) {
-  // Do NOT derive the closed row's date from `git log -1 --format=%cs`: on the
-  // Variant A fast-forward path, `finalizeVariantACloseout` may create no new
-  // commit, so the base worktree's tip commit is whatever the mission branch
-  // already carried — its committer date can be days older than the actual
-  // integration/close date, silently pushing the closed row out of both weekly
+  // Do NOT derive the closed row's date from `git log -1 --format=%cs`: the tip
+  // commit that lands during integration can carry an older committer date than
+  // the actual closeout day, silently pushing the completed row out of weekly
   // report windows even though the mission just closed (task-1415). Every other
-  // stats writer (recordStageStats, recordActiveStats, ...) already defaults its
-  // `date` to "today"; omitting `date` here lets recordIntegrationStats use that
-  // same default instead of a stale commit timestamp.
+  // stats writer already defaults its `date` to "today"; omitting `date` here
+  // lets recordIntegrationStats use that same default instead of a stale commit
+  // timestamp.
   const statsCsvPath = (stats as any).resolveStatsFilePath(rootDir);
 
   const outcome = recordIntegrationStatsFn({
@@ -1587,97 +1546,6 @@ function refreshBuildBeforeVerification(rootDir: string, {
   }
 
   return { ok: true, refreshed: true, detail: output };
-}
-
-/** @param{{slug: string, summary: string, mainTaskFile?: string, rootDir?: string, gitRunner?: Function, baseBranch?: string|null, verificationArea?: string|null, refreshBuildBeforeVerificationFn?: Function, captureVerifiedTreeProofFn?: Function, assertVerifiedTreeProofFn?: Function}} params */
-function finalizeVariantACloseout({
-  slug,
-  summary,
-  mainTaskFile,
-  rootDir = getPrimaryWorktree(),
-  gitRunner = git,
-  baseBranch = null,
-  verificationArea = null,
-  refreshBuildBeforeVerificationFn = refreshBuildBeforeVerification,
-  captureVerifiedTreeProofFn = verification.captureVerifiedTreeProof,
-  assertVerifiedTreeProofFn = verification.assertVerifiedTreeProof
-}: {slug: string, summary: string, mainTaskFile?: string, rootDir?: string, gitRunner?: Function, baseBranch?: string|null, verificationArea?: string|null, refreshBuildBeforeVerificationFn?: Function, captureVerifiedTreeProofFn?: Function, assertVerifiedTreeProofFn?: Function}) {
-  softResetTrailingBacklogNoise(rootDir, gitRunner);
-
-  if (mainTaskFile && fs.existsSync(mainTaskFile)) {
-    completeTask(slug, rootDir);
-    // Re-resolve because it moved
-    const updatedResolution = resolveTaskFile(slug, rootDir);
-    if (updatedResolution.ok) {
-      rewriteWorktreePaths(updatedResolution.taskFile || '', slug, { rootDir });
-    }
-  }
-
-  gitRunner(['-C', rootDir, 'add', '-A']);
-
-  const stagedDiff = gitRunner(['-C', rootDir, 'diff', '--cached', '--quiet']);
-  if (stagedDiff.status === 0) {
-    return { ok: true, changed: false };
-  }
-
-  const commitResult = gitRunner([
-    '-C',
-    rootDir,
-    'commit',
-    '-m',
-    `${missionBranchName(slug, rootDir)}: ${summary} integration closeout`
-  ]);
-  if (commitResult.status !== 0) {
-    return {
-      ok: false,
-      error: 'commit-failed',
-      detail: [commitResult.stdout, commitResult.stderr].filter(Boolean).join('\n').trim()
-    };
-  }
-
-  const resolvedVerificationArea = verificationArea || verification.resolveVerificationAdapter(rootDir).defaultArea;
-  const refreshResult = refreshBuildBeforeVerificationFn(rootDir, {
-    runFn: child_process.spawnSync
-  });
-  if (!refreshResult.ok) {
-    return {
-      ok: false,
-      error: 'verification-prep-failed',
-      detail: [refreshResult.error, refreshResult.detail].filter(Boolean).join('\n').trim()
-    };
-  }
-  const proofResult = captureVerifiedTreeProofFn(resolvedVerificationArea, rootDir, {
-    gitRunner,
-    runFn: child_process.spawnSync
-  });
-  if (!proofResult.ok) {
-    return {
-      ok: false,
-      error: 'verification-failed',
-      detail: proofResult.error || 'failed to verify published tree'
-    };
-  }
-
-  const proofCheck = assertVerifiedTreeProofFn(proofResult.proof, rootDir, { gitRunner });
-  if (!proofCheck.ok) {
-    return {
-      ok: false,
-      error: 'verification-proof-mismatch',
-      detail: proofCheck.error || 'verification proof does not match the tree being published'
-    };
-  }
-
-  const pushTarget = baseBranch || getPrimaryBranch(gitRunner);
-  const pushResult = gitRunner(['-C', rootDir, 'push', 'review', pushTarget]);
-  if (pushResult.status !== 0) {
-    return {
-      ok: false,
-      error: 'push-primary-failed',
-      detail: [pushResult.stdout, pushResult.stderr].filter(Boolean).join('\n').trim()
-    };
-  }
-
-  return { ok: true, changed: true };
 }
 
 /**
@@ -1892,7 +1760,6 @@ function buildConflictResolutionPrompt(slug: string = '<slug>', area: string = '
 (integrate as any).resolveConflictsForMission = resolveConflictsForMission;
 (integrate as any).cleanupMissionWorktree = cleanupMissionWorktree;
 (integrate as any).rewriteWorktreePaths = rewriteWorktreePaths;
-(integrate as any).finalizeVariantACloseout = finalizeVariantACloseout;
 (integrate as any).isNoMergeToAbortResult = isNoMergeToAbortResult;
 (integrate as any).buildConflictResolutionPrompt = buildConflictResolutionPrompt;
 (integrate as any).VARIANT_B_AUTOMATION_SUMMARY = VARIANT_B_AUTOMATION_SUMMARY;
@@ -1930,7 +1797,7 @@ function buildConflictResolutionPrompt(slug: string = '<slug>', area: string = '
 // Re-export getPrimaryWorktree from mission-utils
 (integrate as any).getPrimaryWorktree = getPrimaryWorktree;
 export default integrate;
-export { integrate, formatRecordedStatsRow, detectChangedAreas, parseFilesToAreas, loadIntegrationConfig, getIntegrationGatePlan, printIntegrationGatePlan, buildIntegrationGateEnv, resolveIntegrationVerificationWorktree, buildIntegrationVerificationInvocation, executeIntegrationGates, orderIntegrationGates, gateMatchesChangedAreas, buildIntegrationContext, getPrimaryWorktree, resolveConflictsForMission, cleanupMissionWorktree, rewriteWorktreePaths, finalizeVariantACloseout, isNoMergeToAbortResult, buildConflictResolutionPrompt, VARIANT_B_AUTOMATION_SUMMARY, stashMainCheckoutIfNeeded, restoreMainCheckoutStash, evaluateTaskStatusForIntegration, promoteTaskForIntegrationIfNeeded, findExistingSquashCommit, printIntegrationPreflight, resolveForgejoUserForIntegration, getUnresolvedIndexConflicts, parseStashPopCollisionFiles, reportStashPopFailure, maybeUpdateGraphifyOnPrimary, SYNC_MERGED_DIAGNOSTICS, printDiagnosticTable, recordPostIntegrationStats, recordPostIntegrationStatsOrAbort, reportSyncMergedFailure, runPostIntegrateHookOrAbort, refreshBuildBeforeVerification };
+export { integrate, formatRecordedStatsRow, detectChangedAreas, parseFilesToAreas, loadIntegrationConfig, getIntegrationGatePlan, printIntegrationGatePlan, buildIntegrationGateEnv, resolveIntegrationVerificationWorktree, buildIntegrationVerificationInvocation, executeIntegrationGates, orderIntegrationGates, gateMatchesChangedAreas, buildIntegrationContext, getPrimaryWorktree, resolveConflictsForMission, cleanupMissionWorktree, rewriteWorktreePaths, isNoMergeToAbortResult, buildConflictResolutionPrompt, VARIANT_B_AUTOMATION_SUMMARY, stashMainCheckoutIfNeeded, restoreMainCheckoutStash, evaluateTaskStatusForIntegration, promoteTaskForIntegrationIfNeeded, findExistingSquashCommit, printIntegrationPreflight, resolveForgejoUserForIntegration, getUnresolvedIndexConflicts, parseStashPopCollisionFiles, reportStashPopFailure, maybeUpdateGraphifyOnPrimary, SYNC_MERGED_DIAGNOSTICS, printDiagnosticTable, recordPostIntegrationStats, recordPostIntegrationStatsOrAbort, reportSyncMergedFailure, runPostIntegrateHookOrAbort, refreshBuildBeforeVerification };
 // CJS compat: ensure require() returns the function directly
 declare const module: { exports: any } | undefined;
 if (typeof module !== 'undefined') { module.exports = integrate; }

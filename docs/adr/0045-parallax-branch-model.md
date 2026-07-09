@@ -48,7 +48,7 @@ Lifecycle:
 1. **Draft**: `mission/<slug>` is created from the primary branch (`main`/`master`). No `Base-Branch:` line is written to MISSION.md because the base equals the primary.
 2. **Development**: Agents work on the mission branch in the mission worktree.
 3. **Rebase**: The mission branch is rebased onto the local primary branch (ADR 0043 local-first rule). The workflow may fetch `review/<primary>` for remote visibility but the rebase target is the local primary ref.
-4. **Integration**: The mission branch is squash-merged into the primary worktree on `main`/`master`. The integration runs Variant A (PR already merged on Forgejo, fast-path closeout) or Variant B (local squash-merge).
+4. **Integration**: The mission branch is squash-merged into the primary worktree on `main`/`master`. A Forgejo PR already marked merged fails preflight; the workflow only lands through Variant B (local squash-merge).
 
 Branch flow:
 
@@ -71,7 +71,7 @@ Lifecycle:
 3. **Create**: The mission branch `mission/<slug>` is created from the recorded base branch as its start point.
 4. **Development**: Agents work on the mission branch in the mission worktree.
 5. **Resolve**: `resolveMissionBaseBranch()` returns the recorded `Base-Branch:` value. `resolveBaseWorktree()` resolves or auto-creates the base worktree on the recorded branch.
-6. **Integration**: The mission branch is squash-merged into the **base worktree** on the recorded base branch (not the primary worktree). The integration runs Variant A or Variant B as with trunk mode.
+6. **Integration**: The mission branch is squash-merged into the **base worktree** on the recorded base branch (not the primary worktree). A Forgejo PR already marked merged fails preflight here too; the workflow only lands through Variant B.
 
 Branch flow:
 

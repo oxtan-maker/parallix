@@ -189,10 +189,10 @@ extension seam, matching the existing `adapters.verification.command` opt-in pat
 - **No-op default:** a repo that does not set `postIntegrateCommand` sees no behavior change —
   `px integrate` runs exactly as it does today.
 - **When it runs:** at most once per successful, non-dry-run `px integrate` invocation, after
-  closeout success is established — after Variant A's closeout commit/push, after Variant B's
-  squash commit and (if configured) Forgejo sync, or after the equivalent resumed-from-existing-
-  squash-commit path. It never runs for `--dry-run`, a failed preflight, a failed integration
-  gate, or a failed closeout/squash/sync.
+  the local-authority squash-merge path succeeds — after Variant B's squash commit and (if
+  configured) Forgejo sync, or after the equivalent resumed-from-existing-squash-commit path.
+  It never runs for `--dry-run`, a failed preflight, a failed integration gate, or a failed
+  closeout/squash/sync.
 - **Where it runs:** from the base checkout (the mission's recorded base worktree, or the primary
   worktree for legacy missions) — never from the mission worktree, which has already been deleted
   by the time the hook runs.
@@ -203,7 +203,7 @@ extension seam, matching the existing `adapters.verification.command` opt-in pat
   | `INTEGRATE_HOOK_SLUG` | The mission slug (e.g. `task-1402`) |
   | `INTEGRATE_HOOK_BASE_WORKTREE` | Absolute path to the base checkout the hook runs from |
   | `INTEGRATE_HOOK_BASE_BRANCH` | The branch the mission was integrated into |
-  | `INTEGRATE_HOOK_VARIANT` | `variant-a`, `variant-b`, or `variant-b-resumed` |
+  | `INTEGRATE_HOOK_VARIANT` | `variant-b` or `variant-b-resumed` |
 
 - **Failure handling:** a non-zero exit is reported as a distinct post-integrate-hook failure
   (`[FAIL] Post-integrate hook failed (exit code N): <command>`, followed by the hook's captured

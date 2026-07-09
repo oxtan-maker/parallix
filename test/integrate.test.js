@@ -75,7 +75,6 @@ const {
   cleanupMissionWorktree,
   rewriteWorktreePaths,
   buildConflictResolutionPrompt,
-  finalizeVariantACloseout,
   stashMainCheckoutIfNeeded,
   restoreMainCheckoutStash,
   isNoMergeToAbortResult,
@@ -552,8 +551,7 @@ test('recordPostIntegrationStats records an unknown classification row for a mis
         assert.ok(filePath.includes('stats.csv'));
         // task-1415: no explicit date is passed anymore — recordIntegrationStats
         // defaults it to "today" itself, rather than trusting a stale
-        // `git log -1 --format=%cs` committer date (which can predate the actual
-        // integration day on the Variant A fast-forward closeout path).
+        // `git log -1 --format=%cs` committer date.
         assert.equal(date, undefined);
         return {
           changed: true,
@@ -715,7 +713,7 @@ test('runPostIntegrateHookOrAbort no-ops silently when no hook is configured (SC
     const result = runPostIntegrateHookOrAbort('task-1402', {
       baseWorktree: FAKE_ROOT,
       baseBranch: 'main',
-      variant: 'variant-a',
+      variant: 'variant-b',
       runPostIntegrateHookFn: () => ({ ran: false, ok: true })
     });
 
@@ -756,7 +754,7 @@ test('runPostIntegrateHookOrAbort logs a pass and the hook output on success', (
     runPostIntegrateHookOrAbort('task-1402', {
       baseWorktree: FAKE_ROOT,
       baseBranch: 'main',
-      variant: 'variant-a',
+      variant: 'variant-b',
       runPostIntegrateHookFn: () => ({ ran: true, ok: true, command: './scripts/refresh-px.sh', output: 'bumped to 1.3.5', exitCode: 0 })
     });
 
@@ -777,7 +775,7 @@ test('runPostIntegrateHookOrAbort throws IntegrationAbort and surfaces a distinc
       runPostIntegrateHookOrAbort('task-1402', {
         baseWorktree: FAKE_ROOT,
         baseBranch: 'main',
-        variant: 'variant-a',
+        variant: 'variant-b-resumed',
         runPostIntegrateHookFn: () => ({ ran: true, ok: false, command: './scripts/refresh-px.sh', output: 'permission denied', exitCode: 3 })
       });
     });
@@ -998,19 +996,19 @@ test('provider-backed approval repair leaves integration preflight with review i
   }
 });
 
-test('evaluateTaskStatusForIntegration accepts review when the Forgejo PR is already merged', () => {
+test('evaluateTaskStatusForIntegration rejects review when the Forgejo PR is already merged', () => {
   const result = evaluateTaskStatusForIntegration({
     taskStatus: 'review',
-    pr: { merged: true },
+    pr: { state: 'merged', merged: true },
     approval: { ok: false, reviewState: null }
   });
 
-  assert.equal(result.ok, true);
-  assert.equal(result.level, 'warn');
-  assert.match(result.message, /already merged/i);
+  assert.equal(result.ok, false);
+  assert.equal(result.level, 'fail');
+  assert.match(result.message, /approved Forgejo PR/i);
 });
 
-test('evaluateTaskStatusForIntegration rejects review without an approved or merged PR', () => {
+test('evaluateTaskStatusForIntegration rejects review without an approved Forgejo PR', () => {
   const result = evaluateTaskStatusForIntegration({
     taskStatus: 'review',
     pr: { merged: false },
@@ -1019,7 +1017,7 @@ test('evaluateTaskStatusForIntegration rejects review without an approved or mer
 
   assert.equal(result.ok, false);
   assert.equal(result.level, 'fail');
-  assert.match(result.message, /expected approved, or review with an approved\/merged Forgejo PR/i);
+  assert.match(result.message, /expected approved, or review with an approved Forgejo PR/i);
 });
 
 test('evaluateTaskStatusForIntegration accepts review when default user approved but latest is REQUEST_CHANGES', () => {
@@ -1043,7 +1041,7 @@ test('evaluateTaskStatusForIntegration rejects review when default user did not 
 
   assert.equal(result.ok, false);
   assert.equal(result.level, 'fail');
-  assert.match(result.message, /expected approved, or review with an approved\/merged Forgejo PR/i);
+  assert.match(result.message, /expected approved, or review with an approved Forgejo PR/i);
 });
 
 test('resolveForgejoUserForIntegration uses known task assignees directly', () => {
@@ -1541,242 +1539,6 @@ test('restoreMainCheckoutStash pops the temporary stash back onto the main check
   ]]);
 });
 
-test('finalizeVariantACloseout performs housekeeping then commits and pushes main closeout', () => {
-  const previous = process.cwd();
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-integrate-variant-a-'));
-  process.chdir(root);
-
-  try {
-    const taskFile = path.join(root, 'backlog', 'tasks', 'task-097 - cleanup.md');
-    fs.mkdirSync(path.dirname(taskFile), { recursive: true });
-    const wt = conventionalWorktreePath('task-097', root);
-    fs.writeFileSync(
-      taskFile,
-      [
-        'Status: ○ ready-for-integration',
-        `References: ${wt}/docs/missions/2026/task-097/MISSION.md`
-      ].join('\n')
-    );
-
-    const missionDir = path.join(root, 'docs', 'missions', '2026', 'task-097');
-    fs.mkdirSync(missionDir, { recursive: true });
-    fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Mission: Clean up integrate workflow\n');
-
-    const gitCalls = [];
-    const result = finalizeVariantACloseout({
-      slug: 'task-097',
-      summary: 'Clean up integrate workflow',
-      mainTaskFile: taskFile,
-      rootDir: root,
-      baseBranch: 'main',
-      gitRunner(args) {
-        gitCalls.push(args);
-        if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n' };
-        if (args.includes('rev-parse') && args.includes('HEAD')) {
-          return { status: 0, stdout: 'dummy-sha', stderr: '' };
-        }
-        if (args.slice(-3).join(' ') === 'diff --cached --quiet') {
-          return { status: 1, stdout: '', stderr: '' };
-        }
-        return { status: 0, stdout: '', stderr: '' };
-      }
-    }, { rootDir: root });
-
-    const updatedTaskFile = path.join(root, 'backlog', 'completed', 'task-097 - cleanup.md');
-    const taskContent = fs.readFileSync(updatedTaskFile, 'utf8');
-    const projectName = path.basename(root);
-    assert.deepEqual(result, { ok: true, changed: true });
-    assert.match(taskContent, /Status: ○ done/);
-    assert.doesNotMatch(taskContent, new RegExp(`${projectName}-task-097`));
-    assert.deepEqual(
-      gitCalls,
-      [
-        ['-C', root, 'status', '--porcelain'],
-        ['-C', root, 'rev-parse', '--symbolic-full-name', 'HEAD'],
-        ['-C', root, 'rev-parse', 'HEAD'],
-        ['-C', root, 'branch', '-a', '--contains', 'dummy-sha', '--format=%(refname)'],
-        ['-C', root, 'log', '-1', '--format=%s', 'HEAD'],
-        ['-C', root, 'diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD'],
-        ['-C', root, 'rev-parse', 'HEAD'],
-        ['-C', root, 'rev-parse', 'HEAD'],
-        ['-C', root, 'add', '-A'],
-        ['-C', root, 'diff', '--cached', '--quiet'],
-        ['-C', root, 'commit', '-m', 'mission/task-097: Clean up integrate workflow integration closeout'],
-        ['-C', root, 'push', 'review', 'main']
-      ]
-    );
-  } finally {
-    process.chdir(previous);
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test('finalizeVariantACloseout rejects a stale verification proof before pushing main closeout', () => {
-  const previous = process.cwd();
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-integrate-variant-a-proof-'));
-  process.chdir(root);
-
-  try {
-    const taskFile = path.join(root, 'backlog', 'tasks', 'task-097 - cleanup.md');
-    fs.mkdirSync(path.dirname(taskFile), { recursive: true });
-    fs.writeFileSync(taskFile, 'Status: ○ ready-for-integration\n');
-
-    const gitCalls = [];
-    const result = finalizeVariantACloseout({
-      slug: 'task-097',
-      summary: 'Clean up integrate workflow',
-      mainTaskFile: taskFile,
-      rootDir: root,
-      gitRunner(args) {
-        gitCalls.push(args);
-        if (args.includes('rev-parse') && args.includes('HEAD')) {
-          return { status: 0, stdout: 'dummy-sha\n', stderr: '' };
-        }
-        if (args.slice(-3).join(' ') === 'diff --cached --quiet') {
-          return { status: 1, stdout: '', stderr: '' };
-        }
-        if (args[2] === 'commit') {
-          return { status: 0, stdout: '', stderr: '' };
-        }
-        if (args[2] === 'push') {
-          throw new Error('push should not run when verification proof is stale');
-        }
-        return { status: 0, stdout: '', stderr: '' };
-      },
-      captureVerifiedTreeProofFn: () => ({
-        ok: true,
-        proof: {
-          rootDir: '/tmp/different-checkout',
-          area: 'integrate',
-          command: 'mock-verification',
-          commit: 'stale-commit',
-          tree: 'stale-tree',
-          verifiedAt: '2026-01-01T00:00:00.000Z'
-        }
-      })
-    });
-
-    assert.deepEqual(result, {
-      ok: false,
-      error: 'verification-proof-mismatch',
-      detail: 'verification proof does not match the tree being published'
-    });
-    assert.equal(gitCalls.some(args => args[2] === 'push'), false);
-  } finally {
-    process.chdir(previous);
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test('finalizeVariantACloseout fails during verification prep when the publish tree needs a rebuild', () => {
-  const previous = process.cwd();
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-integrate-variant-a-refresh-'));
-  process.chdir(root);
-
-  try {
-    const taskFile = path.join(root, 'backlog', 'tasks', 'task-097 - cleanup.md');
-    fs.mkdirSync(path.dirname(taskFile), { recursive: true });
-    fs.writeFileSync(taskFile, 'Status: ○ ready-for-integration\n');
-
-    let captureCalls = 0;
-    const result = finalizeVariantACloseout({
-      slug: 'task-097',
-      summary: 'Clean up integrate workflow',
-      mainTaskFile: taskFile,
-      rootDir: root,
-      gitRunner(args) {
-        if (args.slice(-3).join(' ') === 'diff --cached --quiet') {
-          return { status: 1, stdout: '', stderr: '' };
-        }
-        if (args[2] === 'commit') {
-          return { status: 0, stdout: '', stderr: '' };
-        }
-        if (args[2] === 'push') {
-          throw new Error('push should not run when verification prep fails');
-        }
-        return { status: 0, stdout: '', stderr: '' };
-      },
-      refreshBuildBeforeVerificationFn: () => ({
-        ok: false,
-        error: 'pre-verification build refresh failed (exit code 2): npm run build:cjs',
-        detail: 'build broke'
-      }),
-      captureVerifiedTreeProofFn: () => {
-        captureCalls += 1;
-        return { ok: true, proof: {} };
-      }
-    });
-
-    assert.deepEqual(result, {
-      ok: false,
-      error: 'verification-prep-failed',
-      detail: 'pre-verification build refresh failed (exit code 2): npm run build:cjs\nbuild broke'
-    });
-    assert.equal(captureCalls, 0);
-  } finally {
-    process.chdir(previous);
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test('finalizeVariantACloseout returns hook output when the closeout commit fails', () => {
-  const previous = process.cwd();
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-integrate-variant-a-fail-'));
-  process.chdir(root);
-
-  try {
-    const taskFile = path.join(root, 'backlog', 'tasks', 'task-097 - cleanup.md');
-    fs.mkdirSync(path.dirname(taskFile), { recursive: true });
-    fs.writeFileSync(taskFile, 'Status: ○ ready-for-integration\n');
-
-    const gitCalls = [];
-    const result = finalizeVariantACloseout({
-      slug: 'task-097',
-      summary: 'Clean up integrate workflow',
-      mainTaskFile: taskFile,
-      rootDir: root,
-      gitRunner(args) {
-        gitCalls.push(args);
-        if (args.includes('rev-parse') && args.includes('HEAD')) {
-          return { status: 0, stdout: 'dummy-sha', stderr: '' };
-        }
-        if (args.slice(-3).join(' ') === 'diff --cached --quiet') {
-          return { status: 1, stdout: '', stderr: '' };
-        }
-        if (args[2] === 'commit') {
-          return { status: 1, stdout: '', stderr: '[pre-commit] ERROR: docs changed but docs/index.md was not updated.' };
-        }
-        return { status: 0, stdout: '', stderr: '' };
-      }
-    });
-
-    assert.deepEqual(result, {
-      ok: false,
-      error: 'commit-failed',
-      detail: '[pre-commit] ERROR: docs changed but docs/index.md was not updated.'
-    });
-    assert.deepEqual(
-      gitCalls,
-      [
-        ['-C', root, 'status', '--porcelain'],
-        ['-C', root, 'rev-parse', '--symbolic-full-name', 'HEAD'],
-        ['-C', root, 'rev-parse', 'HEAD'],
-        ['-C', root, 'branch', '-a', '--contains', 'dummy-sha', '--format=%(refname)'],
-        ['-C', root, 'log', '-1', '--format=%s', 'HEAD'],
-        ['-C', root, 'diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD'],
-        ['-C', root, 'rev-parse', 'HEAD'],
-        ['-C', root, 'rev-parse', 'HEAD'],
-        ['-C', root, 'add', '-A'],
-        ['-C', root, 'diff', '--cached', '--quiet'],
-        ['-C', root, 'commit', '-m', 'mission/task-097: Clean up integrate workflow integration closeout']
-      ]
-    );
-  } finally {
-    process.chdir(previous);
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
 test('findExistingSquashCommit returns the SHA when a mission squash commit is in the recent log', () => {
   const logOutput = [
     'aabbccdd1234 some unrelated commit',
@@ -1945,48 +1707,5 @@ test('printIntegrationPreflight provides recovery commands when mission doc is m
     assert.match(output, /git show mission\/task-1054:docs\/missions\/2026\/task-1054\/MISSION\.md > missions\/task-1054\/MISSION\.md/);
   } finally {
     console.log = originalLog;
-  }
-});
-
-test('finalizeVariantACloseout pushes the recorded feature-branch base when baseBranch is provided', () => {
-  const previous = process.cwd();
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-integrate-variant-a-base-'));
-  process.chdir(root);
-
-  try {
-    const taskFile = path.join(root, 'backlog', 'tasks', 'task-098 - cleanup.md');
-    fs.mkdirSync(path.dirname(taskFile), { recursive: true });
-    fs.writeFileSync(taskFile, 'Status: ○ ready-for-integration\n');
-
-    const missionDir = path.join(root, 'docs', 'missions', '2026', 'task-098');
-    fs.mkdirSync(missionDir, { recursive: true });
-    fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Mission: Clean up integrate workflow\n');
-
-    const gitCalls = [];
-    const result = finalizeVariantACloseout({
-      slug: 'task-098',
-      summary: 'Clean up integrate workflow',
-      mainTaskFile: taskFile,
-      rootDir: root,
-      baseBranch: 'develop',
-      gitRunner(args) {
-        gitCalls.push(args);
-        if (args.includes('rev-parse') && args.includes('HEAD')) {
-          return { status: 0, stdout: 'dummy-sha', stderr: '' };
-        }
-        if (args.slice(-3).join(' ') === 'diff --cached --quiet') {
-          return { status: 1, stdout: '', stderr: '' };
-        }
-        return { status: 0, stdout: '', stderr: '' };
-      }
-    }, { rootDir: root });
-
-    const pushCall = gitCalls.find(a => a.includes('push'));
-    assert.ok(pushCall, 'push call should exist');
-    assert.deepEqual(pushCall, ['-C', root, 'push', 'review', 'develop']);
-    assert.deepEqual(result, { ok: true, changed: true });
-  } finally {
-    process.chdir(previous);
-    fs.rmSync(root, { recursive: true, force: true });
   }
 });
