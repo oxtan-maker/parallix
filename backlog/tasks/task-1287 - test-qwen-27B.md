@@ -1,10 +1,10 @@
 ---
 id: TASK-1287
 title: test qwen 27B
-status: backlog
+status: done
 assignee: []
 created_date: '2026-06-13 17:56'
-updated_date: '2026-07-04 09:14'
+updated_date: '2026-07-09 15:02'
 labels: []
 dependencies: []
 priority: low
