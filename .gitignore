@@ -14,6 +14,7 @@ missions/*/review-events/
 # Compiled output
 dist/
 lib/core/*.js
+lib/core/mission-utils/*.js
 lib/agents/*.js
 lib/tools/*.js
 lib/review/*.js
