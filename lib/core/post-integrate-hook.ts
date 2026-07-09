@@ -45,9 +45,9 @@ export function buildPostIntegrateHookEnv(params: PostIntegrateHookParams): Node
 }
 
 // Runs at most once per call site. Callers are responsible for invoking this
-// exactly once per successful integrate path (Variant A, Variant B, and the
-// resumed-from-existing-squash-commit path each call it from their own single
-// success seam, so no shared invocation counter is needed).
+// exactly once per successful integrate path (Variant B and the resumed-from-
+// existing-squash-commit path each call it from their own single success seam,
+// so no shared invocation counter is needed).
 export function runPostIntegrateHook(params: PostIntegrateHookParams): PostIntegrateHookResult {
   const resolveCommandFn = params.resolveCommandFn || resolvePostIntegrateCommand;
   const command = resolveCommandFn(params.baseWorktree);

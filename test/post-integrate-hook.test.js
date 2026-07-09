@@ -48,14 +48,14 @@ test('buildPostIntegrateHookEnv exposes slug, base worktree, base branch, and va
     slug: 'task-1402',
     baseWorktree: '/repo',
     baseBranch: 'main',
-    variant: 'variant-a',
+    variant: 'variant-b',
     processEnv: {},
   });
 
   assert.equal(env.INTEGRATE_HOOK_SLUG, 'task-1402');
   assert.equal(env.INTEGRATE_HOOK_BASE_WORKTREE, '/repo');
   assert.equal(env.INTEGRATE_HOOK_BASE_BRANCH, 'main');
-  assert.equal(env.INTEGRATE_HOOK_VARIANT, 'variant-a');
+  assert.equal(env.INTEGRATE_HOOK_VARIANT, 'variant-b');
 });
 
 test('runPostIntegrateHook is a no-op when no command is configured', () => {
@@ -64,7 +64,7 @@ test('runPostIntegrateHook is a no-op when no command is configured', () => {
     slug: 'task-1402',
     baseWorktree: '/repo',
     baseBranch: 'main',
-    variant: 'variant-a',
+    variant: 'variant-b',
     runFn,
     resolveCommandFn: () => null,
   });
@@ -113,7 +113,7 @@ test('runPostIntegrateHook reports a non-zero exit as a failed hook, not thrown'
     slug: 'task-1402',
     baseWorktree: '/repo',
     baseBranch: 'main',
-    variant: 'variant-a',
+    variant: 'variant-b-resumed',
     runFn,
     resolveCommandFn: () => './scripts/refresh-px.sh',
   });
