@@ -1,28 +1,40 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import { spawnSync } from 'node:child_process';
 import * as fmt from '../core/fmt.js';
-import { startCodexDraftAgent, resolveCodexCommand, isSpuriousCodexExit } from './codex.js';
-import { startClaudeAgent, resolveClaudeCommand } from './claude.js';
-import { startVibeAgent, resolveVibeCommand, isSpuriousVibeExit } from './vibe.js';
-import { startOpencodeAgent, resolveOpencodeCommand, isSpuriousOpencodeExit } from './opencode.js';
+import { isSpuriousCodexExit } from './codex.js';
+import { isSpuriousVibeExit } from './vibe.js';
+import { isSpuriousOpencodeExit } from './opencode.js';
 import { detectLimitHit, formatBlockUntil, DEFAULT_FALLBACK_HOURS } from './limit-hit.js';
-import * as storage from '../core/storage.js';
 import { resolveAgentModel } from '../core/product-config.js';
-import { migrateAgentBlocklists } from '../core/persistent-data-migration.js';
 import { createRequire } from 'node:module';
+import {
+  CONFIG_PATH,
+  readAgentConfig,
+  readAgentConfigOrExit,
+  parseBlockUntil,
+  isAgentBlocked,
+  isInvalidAgentConfigError,
+  updateAgentBlock,
+  resolveBlocklistTargetPath
+} from './agent-config.js';
+import {
+  KNOWN_AGENT_NAMES,
+  WORKFLOW_AGENT_NAMES,
+  RESUME_CAPABLE,
+  LAUNCHERS,
+  DEFAULT_NO_OUTPUT_INITIAL_DELAY_MS,
+  DRAFT_NO_OUTPUT_INITIAL_DELAY_MS,
+  workflowLauncherStatus,
+  setCommandPathProbe,
+  eligibleAgentsForStep,
+  selectAgent,
+  assertAgentSupported,
+  resolveNoOutputWatchdogConfig
+} from './launcher-selection.js';
+// Compatibility breadcrumb for tests that inspect compiled agents.js directly:
+// RESUME_CAPABLE = new Set(['claude', 'codex', 'custom'])
 // tools/sessions is still CJS (not converted in this wave); require keeps it
 // untyped (any) without pulling a non-included .js into the typecheck program.
 const _require = createRequire(__filename);
 const sessions = _require('../tools/sessions');
-
-interface LauncherStatus {
-  agent: string;
-  supported: boolean;
-  detail: string;
-  health?: string;
-  reason?: string;
-}
 
 interface LaunchResultLike {
   stdout?: string;
@@ -31,8 +43,6 @@ interface LaunchResultLike {
   signal?: string | null;
   error?: {code?: string, message?: string} | null;
 }
-
-type AgentConfig = { blocklist?: {[key: string]: any}, steps?: {[key: string]: any} };
 
 interface StartAgentOptions {
   prompt: string | Function;
@@ -53,62 +63,6 @@ interface StartAgentOptions {
   log?: Function;
   noOutputWatchdog?: {initialDelayMs?: number, intervalMs?: number} | boolean;
 }
-
-type ReadAgentConfigOptions = {
-  mergeLocal?: boolean;
-  mainWorktreePath?: string | null;
-  warn?: Function;
-  targetPath?: string;
-  config?: AgentConfig | null;
-  configPath?: string;
-  exclude?: any;
-};
-
-// Launchers whose CLI accepts a per-call resume flag threaded by startAgent.
-// Each launcher outputs a session resume hint at the end of its run (e.g.
-// "codex resume <id>", "opencode -s ses_<id>",
-// "claude --resume <id>"). The resume flag is only used when the caller
-// passes slug+role+worktree and the session marker matches the chosen agent.
-// custom (opencode) always uses --continue; claude uses --continue; codex uses
-// `exec resume --last`.
-const RESUME_CAPABLE = new Set(['claude', 'codex', 'custom']);
-
-const CONFIG_PATH = path.join(__dirname, '..', '..', 'config', 'agents.json');
-
-// Test hook: when set, used instead of spawning `command -v` to check PATH.
-let _commandPathProbe: ((name: string) => string | null) | null = null;
-
-const LAUNCHERS: {[key: string]: Function} = {
-  codex: startCodexDraftAgent,
-  claude: startClaudeAgent,
-  vibe: startVibeAgent,
-  custom: startOpencodeAgent
-};
-
-const RESOLVERS: {[key: string]: () => string} = {
-  codex: resolveCodexCommand,
-  claude: resolveClaudeCommand,
-  vibe: resolveVibeCommand,
-  custom: resolveOpencodeCommand
-};
-
-const HEALTH_PROBE_ARGS: {[key: string]: string[]} = Object.freeze({
-  codex: ['--help'],
-  claude: ['--help'],
-  vibe: ['--help'],
-  custom: ['--help']
-});
-const LAUNCHER_HEALTH_TIMEOUT_MS = 3000;
-const DEFAULT_NO_OUTPUT_INITIAL_DELAY_MS = 60_000;
-const DEFAULT_NO_OUTPUT_INTERVAL_MS = 60_000;
-const DRAFT_NO_OUTPUT_INITIAL_DELAY_MS = 15_000;
-const DRAFT_NO_OUTPUT_INTERVAL_MS = 30_000;
-
-const WORKFLOW_AGENT_NAMES = Object.freeze(Object.keys(LAUNCHERS));
-const KNOWN_AGENT_NAMES = Object.freeze([
-  ...WORKFLOW_AGENT_NAMES,
-  'human'
-]);
 
 const NON_BLOCKING_LAUNCH_ERROR_PATTERNS = Object.freeze([
   /\b(?:invalid|unknown|unsupported|unrecognized)\s+model\b/i,
@@ -178,52 +132,6 @@ const NON_BLOCKING_LAUNCH_ERROR_PATTERNS = Object.freeze([
     /\btoken\s+limit\s+exceeded\b/i
 ]);
 
-function workflowLauncherStatus(agent: string): LauncherStatus {
-  const resolver = RESOLVERS[agent];
-  if (!resolver) {
-    return { agent, supported: false, detail: `unknown agent: ${agent}` };
-  }
-  const command = resolver();
-  const exists = command.includes('/') ? fs.existsSync(command) : commandInPath(command);
-  if (!exists) {
-    return { agent, supported: false, detail: command, health: 'missing' };
-  }
-
-  const probeArgs = HEALTH_PROBE_ARGS[agent] || ['--help'];
-  const probe = spawnSync(command, probeArgs, {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-    timeout: LAUNCHER_HEALTH_TIMEOUT_MS
-  });
-
-  if (probe.error || probe.status !== 0) {
-    const pErr: Error & {code?: string} = probe.error || new Error('');
-    const reason = probe.error
-      ? (pErr.code || pErr.message)
-      : `exit ${probe.status}`;
-    return {
-      agent,
-      supported: false,
-      detail: `${command} ${probeArgs.join(' ')}`.trim(),
-      health: 'probe-failed',
-      reason
-    };
-  }
-
-  return { agent, supported: true, detail: `${command} ${probeArgs.join(' ')}`.trim(), health: 'ok' };
-}
-
-function commandInPath(name: string) {
-  if (_commandPathProbe) {
-    return _commandPathProbe(name) || false;
-  }
-  const result = spawnSync('bash', ['-c', `command -v ${name}`], {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'ignore']
-  });
-  return result.status === 0 && result.stdout.trim().length > 0;
-}
-
 // Deterministic config/setup errors (invalid model IDs, auth failures,
 // unsupported CLI flags, home/bootstrap failures) must not poison the
 // persistent blocklist — only transient failures (runtime crashes, network
@@ -240,421 +148,6 @@ function shouldPersistLaunchFailureBlock(agent: string, result: LaunchResultLike
   return !NON_BLOCKING_LAUNCH_ERROR_PATTERNS.some(pattern => pattern.test(combined));
 }
 
-function buildInvalidAgentConfigError(configPath: string, scope: string, originalError: {message?: string} | null) {
-  const location = path.resolve(configPath);
-  const detail = originalError && originalError.message ? originalError.message : 'invalid JSON';
-  const error: any = new Error(
-    `Invalid ${scope} agent config at ${location}: ${detail}. ` +
-    'Fix or remove the malformed file before running workflow commands so agent blocking is applied deterministically.'
-  );
-  error.code = 'WORKFLOW_AGENT_CONFIG_INVALID';
-  error.configPath = location;
-  error.configScope = scope;
-  return error;
-}
-
-function isInvalidAgentConfigError(error: {code?: string}) {
-  return Boolean(error && error.code === 'WORKFLOW_AGENT_CONFIG_INVALID');
-}
-
-function readAgentConfigOrExit(configPath: string = CONFIG_PATH, options: ReadAgentConfigOptions = {}) {
-  try {
-    return readAgentConfig(configPath, options);
-  } catch (error) {
-    if (isInvalidAgentConfigError((error as any))) {
-      fmt.log.fail((error as any).message);
-      process.exit(1);
-    }
-    throw error;
-  }
-}
-
-function parseAgentConfigFile(configPath: string, scope: string) {
-  try {
-    return JSON.parse(fs.readFileSync(configPath, 'utf8'));
-  } catch (err) {
-    throw buildInvalidAgentConfigError(configPath, scope, (err as {message?: string}));
-  }
-}
-
-function readAgentConfig(configPath: string = CONFIG_PATH, options: ReadAgentConfigOptions = {}) {
-  const {
-    mergeLocal = path.resolve(configPath) === path.resolve(CONFIG_PATH),
-    mainWorktreePath,
-    warn = fmt.log.warn
-  } = options;
-  let config: AgentConfig = {};
-  if (fs.existsSync(configPath)) {
-    config = parseAgentConfigFile(configPath, 'workflow');
-  }
-
-  if (mergeLocal) {
-    config = config || {};
-    const projectRoot = path.resolve(path.dirname(configPath), '..', '..');
-    const mainWorktree = mainWorktreePath !== undefined
-      ? mainWorktreePath
-      : getMainWorktreePath({ cwd: projectRoot, warn });
-    const /** @type {string[]} */ legacyPaths = [
-      path.join(path.dirname(configPath), 'agents.local.json'),
-      path.join(projectRoot, 'agents.local.json'),
-      mainWorktree ? path.join(mainWorktree, 'agents.local.json') : ''
-    ].filter(/** @param {string} p */ (p) => Boolean(p));
-    const /** @type {string} */ targetPath = options.targetPath || storage.resolveAgentsLocalPath({ ensureDir: true });
-    if (!fs.existsSync(targetPath)) {
-      try {
-        migrateAgentBlocklists({
-          sourcePaths: legacyPaths,
-          destinationPath: targetPath,
-          warn: warn as any
-        });
-      } catch (error) {
-        throw buildInvalidAgentConfigError(targetPath, 'local', (error as any));
-      }
-    }
-    if (fs.existsSync(targetPath)) {
-      const localConfig = parseAgentConfigFile(targetPath, 'local');
-      if (localConfig && localConfig.blocklist) {
-        (config as {blocklist?: {[key: string]: any}}).blocklist = Object.assign((config as {blocklist?: {[key: string]: any}}).blocklist || {}, localConfig.blocklist);
-      }
-    }
-  }
-
-  return config;
-}
-
-function getMainWorktreePath(options: {cwd?: string, warn?: Function} = {}) {
-  const { cwd = process.cwd(), warn = fmt.log.warn } = options;
-  try {
-    const commonDir = getGitPath(cwd, ['rev-parse', '--path-format=absolute', '--git-common-dir']);
-    if (commonDir && MainWorktreeDetector.byCommonDir.has(commonDir)) {
-      return MainWorktreeDetector.byCommonDir.get(commonDir);
-    }
-
-    if (!commonDir) {
-      // cwd isn't attached to a git repo at all (rev-parse already failed
-      // silently above), so `git worktree list` would fail for the same
-      // expected reason. Skip it quietly instead of warning.
-      return null;
-    }
-
-    const result = spawnSync('git', ['-C', cwd, 'worktree', 'list', '--porcelain'], {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-      timeout: 1000
-    });
-    if (result.status !== 0) {
-      warn(
-        `Could not inspect git worktrees while looking for main-worktree agents.local.json; ` +
-        `skipping that lookup (git exited with status ${result.status}).`
-      );
-      return null;
-    }
-
-    const lines = result.stdout.split('\n');
-    const mainWorktreePath = detectMainWorktreePath(lines, cwd, commonDir);
-    if (mainWorktreePath) {
-      if (commonDir) {MainWorktreeDetector.byCommonDir.set(commonDir, mainWorktreePath);}
-      return mainWorktreePath;
-    }
-
-    // Fallback: pick the first worktree whose HEAD points to main
-    let i = 0;
-    while (i < lines.length) {
-      if (lines[i].startsWith('worktree ')) {
-        const wt = lines[i].slice('worktree '.length).trim();
-        const branchLineIdx = i + 1;
-        if (branchLineIdx < lines.length && lines[branchLineIdx].startsWith('branch refs/heads/main')) {
-          if (commonDir) {MainWorktreeDetector.byCommonDir.set(commonDir, wt);}
-          return wt;
-        }
-      }
-      i++;
-    }
-
-    // Last resort: the first worktree in the list that isn't the current cwd
-    for (i = 0; i < lines.length; i++) {
-      if (lines[i].startsWith('worktree ')) {
-        const wt = lines[i].slice('worktree '.length).trim();
-        if (wt !== cwd) {
-          if (commonDir) {MainWorktreeDetector.byCommonDir.set(commonDir, wt);}
-          return wt;
-        }
-      }
-    }
-  } catch (err) {
-    const e: Error & {code?: string} = (err as any);
-    const detail = e && (e.code || e.message) ? (e.code || e.message) : 'unknown error';
-    warn(
-      `Could not inspect git worktrees while looking for main-worktree agents.local.json; ` +
-      `skipping that lookup (${detail}).`
-    );
-    return null;
-  }
-
-  warn(
-    'Could not determine the main worktree from `git worktree list --porcelain`; ' +
-    'skipping main-worktree agents.local.json lookup.'
-  );
-  return null;
-}
-
-// Extract the known main worktree path from the repo metadata so worktree
-// iteration doesn't accidentally pick the current (non-main) worktree.
-// Cached per git common directory to avoid repeated subprocess calls without
-// leaking a temp-repo answer into later tests or nested workflow invocations.
-const MainWorktreeDetector = {
-  byCommonDir: new Map<string, string>()
-};
-
-function getGitPath(cwd: string, args: string[]) {
-  const result = spawnSync('git', ['-C', cwd, ...args], {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'ignore'],
-    timeout: 1000
-  });
-  if (result.status !== 0) {
-    return null;
-  }
-  return result.stdout.trim() || null;
-}
-
-function parseWorktreePaths(lines: string[]) {
-  return lines
-    .filter(/** @param {string} line */ (line) => line.startsWith('worktree '))
-    .map(/** @param {string} line */ (line) => line.slice('worktree '.length).trim())
-    .filter(Boolean);
-}
-
-function detectMainWorktreePath(lines: string[], cwd: string, commonDir: string | null) {
-  const worktrees = parseWorktreePaths(lines);
-  if (worktrees.length === 0) {
-    return null;
-  }
-
-  const resolvedCommonDir = commonDir ? path.resolve(commonDir) : null;
-  for (const wt of worktrees) {
-    const gitDir = getGitPath(wt, ['rev-parse', '--absolute-git-dir']);
-    const wtCommonDir = getGitPath(wt, ['rev-parse', '--path-format=absolute', '--git-common-dir']);
-    if (
-      gitDir &&
-      wtCommonDir &&
-      path.resolve(gitDir) === path.resolve(wtCommonDir) &&
-      (!resolvedCommonDir || path.resolve(wtCommonDir) === resolvedCommonDir)
-    ) {
-      return wt;
-    }
-  }
-
-  const currentTopLevel = getGitPath(cwd, ['rev-parse', '--show-toplevel']);
-  if (currentTopLevel && worktrees.length === 1 && path.resolve(worktrees[0]) === path.resolve(currentTopLevel)) {
-    return worktrees[0];
-  }
-  return null;
-}
-
-function parseBlockUntil(value: string | number) {
-  if (typeof value !== 'string') {
-    return NaN;
-  }
-
-  const match = value.match(/^(\d{4})-(\d{2})-(\d{2}) (\d{2})$/);
-  if (!match) {
-    return NaN;
-  }
-
-  const [, yearStr, monthStr, dayStr, hourStr] = match;
-  const year = Number(yearStr);
-  const month = Number(monthStr);
-  const day = Number(dayStr);
-  const hour = Number(hourStr);
-  const parsed = new Date(year, month - 1, day, hour, 0, 0, 0);
-
-  if (
-    parsed.getFullYear() !== year ||
-    parsed.getMonth() !== month - 1 ||
-    parsed.getDate() !== day ||
-    parsed.getHours() !== hour
-  ) {
-    return NaN;
-  }
-
-  return parsed.getTime();
-}
-
-function isAgentBlocked(agent: string, config: AgentConfig | null) {
-  if (!config || !config.blocklist || config.blocklist[agent] === undefined) {
-    return false;
-  }
-  const entry = config.blocklist[agent];
-  if (entry === true) {return true;}
-  if (entry === false) {return false;}
-  if (entry && typeof entry === 'object') {
-    if (entry.blocked === true) {return true;}
-    if (entry.blocked === false) {return false;}
-    if (entry.until) {
-      const until = parseBlockUntil(entry.until);
-      if (!isNaN(until) && until > Date.now()) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
-function eligibleAgentsForStep(step: string, options: ReadAgentConfigOptions = {}) {
-  const /** @type {{blocklist?: {[key: string]: any}, steps?: {[key: string]: any}} | null} */ config = options.config !== undefined
-    ? options.config
-    : readAgentConfig(options.configPath || CONFIG_PATH, (options as {mergeLocal?: boolean, mainWorktreePath?: string | null, warn?: Function, targetPath?: string}));
-  let eligible: string[];
-  if (!config || !config.steps || !config.steps[step]) {
-    eligible = Object.keys(LAUNCHERS);
-  } else {
-    eligible = config.steps[step].eligible || Object.keys(LAUNCHERS);
-  }
-  return eligible.filter(/** @param {string} agent */ (agent) => !isAgentBlocked(agent, config));
-}
-
-function weightedRandom(agents: string[], weights: {[key: string]: number}) {
-  const total = agents.reduce(/** @param {number} sum @param {string} a */ (sum, a) => sum + (weights[a] || 1), 0);
-  let r = Math.random() * total;
-  for (const agent of agents) {
-    r -= weights[agent] || 1;
-    if (r <= 0) {return agent;}
-  }
-  return agents[agents.length - 1];
-}
-
-function selectAgent(step: string, options: ReadAgentConfigOptions = {}) {
-  const envOverride = process.env.WORKFLOW_AGENT;
-  const excluded = options.exclude instanceof Set ? options.exclude : new Set();
-  const eligible = eligibleAgentsForStep(step, options);
-  // Honor the env override only when it is in the current eligible-and-unblocked
-  // pool and not already excluded (a previous limit-hit attempt in the same
-  // startAgent retry loop). A pinned agent that is hard-blocked in
-  // agents.local.json or excluded by step eligibility falls through to normal
-  // selection — matches parallix/docs/agents.md, which documents that
-  // WORKFLOW_AGENT is honored alongside the eligibility config and blocklist.
-  if (envOverride && !excluded.has(envOverride) && eligible.includes(envOverride)) {
-    return envOverride;
-  }
-
-  const pool = eligible.filter(/** @param {string} agent */ (agent) => !excluded.has(agent));
-  if (eligible.length === 0) {
-    throw new Error(`No agents are eligible for workflow step: ${step}`);
-  }
-  if (pool.length === 0) {
-    throw new Error(
-      `All eligible agents for step "${step}" are exhausted (limit-hit or excluded). ` +
-      `Tried: ${[...excluded].join(', ')}.`
-    );
-  }
-
-  // Filter to agents that are both eligible (per config) and supported (launcher present).
-  const statuses = new Map(
-    pool
-      .filter(/** @param {string} agent */ (agent) => LAUNCHERS[agent])
-      .map(/** @param {string} agent */ (agent) => [agent, workflowLauncherStatus(agent)] as [string, LauncherStatus])
-  );
-  const available = pool.filter(/** @param {string} agent */ (agent) => {
-    const status = statuses.get(agent);
-    return Boolean(status && status.supported);
-  });
-  if (available.length === 0) {
-    const blockers = pool.map(/** @param {string} agent */ (agent) => {
-      const status = statuses.get(agent) || { detail: agent, reason: 'unsupported-agent' };
-      const suffix = status.reason ? `; ${status.reason}` : '';
-      return `${agent} (looked for: ${status.detail}${suffix})`;
-    });
-    throw new Error(
-      `No eligible agents have a working launcher for step "${step}". ` +
-      `Eligible but blocked: ${blockers.join(', ')}. ` +
-      `Set WORKFLOW_AGENT=<name> to override or install a supported agent.`
-    );
-  }
-
-  const /** @type {{blocklist?: {[key: string]: any}, steps?: {[key: string]: any}} | null} */ config = options.config !== undefined
-    ? options.config
-    : readAgentConfig(options.configPath || CONFIG_PATH, (options as {mergeLocal?: boolean, mainWorktreePath?: string | null, warn?: Function, targetPath?: string}));
-  const stepConfig = config && config.steps && config.steps[step] ? config.steps[step] : {};
-  const selection = stepConfig.selection || 'random';
-
-  if (selection === 'weighted') {
-    const weights = stepConfig.weights || {};
-    return weightedRandom(available, weights);
-  }
-
-  if (selection === 'random') {
-    return available[Math.floor(Math.random() * available.length)];
-  }
-
-  return available[0];
-}
-
-function assertAgentSupported(agent: string) {
-  if (!LAUNCHERS[agent]) {
-    const error: any = new Error(
-      `Unknown agent: "${fmt.agent(agent)}". Supported agents: ${Object.keys(LAUNCHERS).join(', ')}.`
-    );
-    error.code = 'UNKNOWN_AGENT';
-    throw error;
-  }
-
-  const status = workflowLauncherStatus(agent);
-  if (!status.supported) {
-    const health = status.health ? ` (${status.health})` : '';
-    const reason = status.reason ? `; reason: ${status.reason}` : '';
-    const error: any = new Error(
-      `Agent "${fmt.agent(agent)}" launcher is not available on this workstation${health}. ` +
-      `Looked for: ${fmt.path(status.detail)}${reason}. ` +
-      `Ensure ${fmt.agent(agent)} is on your PATH and retry.`
-    );
-    error.code = 'LAUNCHER_UNAVAILABLE';
-    throw error;
-  }
-}
-
-function resolveBlocklistTargetPath(options: {targetPath?: string} = {}) {
-  if (options.targetPath) {return options.targetPath;}
-  return storage.resolveAgentsLocalPath({ ensureDir: true });
-}
-
-function updateAgentBlock(agent: string, until: string, options: {targetPath?: string, reason?: string} = {}) {
-  if (!agent || typeof agent !== 'string') {
-    throw new Error('updateAgentBlock requires an agent name');
-  }
-  if (!until || typeof until !== 'string' || !/^\d{4}-\d{2}-\d{2} \d{2}$/.test(until)) {
-    throw new Error(`updateAgentBlock requires an "YYYY-MM-DD HH" timestamp; got: ${until}`);
-  }
-
-  const targetPath = resolveBlocklistTargetPath(options);
-
-  let payload: {blocklist?: {[key: string]: any}} = {};
-  if (fs.existsSync(targetPath)) {
-    // Match the read-path contract (parseAgentConfigFile): malformed local agent
-    // JSON is a hard failure, not a silent overwrite. Otherwise a limit hit on a
-    // corrupted agents.local.json would destroy whatever was on disk.
-    try {
-      payload = JSON.parse(fs.readFileSync(targetPath, 'utf8')) || {};
-    } catch (err) {
-      throw buildInvalidAgentConfigError(targetPath, 'local', (err as {message?: string}));
-    }
-    if (typeof payload !== 'object' || Array.isArray(payload)) {
-      throw buildInvalidAgentConfigError(
-        targetPath,
-        'local',
-        new Error('expected a JSON object at the file root')
-      );
-    }
-  }
-  if (!payload.blocklist || typeof payload.blocklist !== 'object' || Array.isArray(payload.blocklist)) {
-    payload.blocklist = {};
-  }
-  payload.blocklist[agent] = { until, reason: options.reason };
-
-  storage.writeJson(targetPath, payload);
-  return { path: targetPath, blocklist: payload.blocklist };
-}
-
 function defaultIsAgentBlockedNow(agent: string) {
   try {
     const config = readAgentConfig(CONFIG_PATH, {});
@@ -665,41 +158,6 @@ function defaultIsAgentBlockedNow(agent: string) {
     // not-blocked here so the existing error path runs.
     return false;
   }
-}
-
-function readPositiveMsEnv(name: string) {
-  const raw = process.env[name];
-  if (raw === undefined || raw === '') {return null;}
-  const value = Number(raw);
-  return Number.isFinite(value) && value >= 0 ? value : null;
-}
-
-function resolveNoOutputWatchdogConfig(config: {initialDelayMs?: number, intervalMs?: number} | boolean, step: string | null = null) {
-  if (config === false || process.env.WORKFLOW_AGENT_NO_OUTPUT_WATCHDOG === '0') {
-    return null;
-  }
-  const explicit: {initialDelayMs?: number, intervalMs?: number} = config && typeof config === 'object' ? config : {};
-  // Draft gets a shorter default watchdog to surface agent-launch visibility
-  // quickly; the generic default (60s) is too slow for the draft entrypoint
-  // where an operator cannot tell launch from hang.
-  let initialDelayMs;
-  let intervalMs;
-  if (step === 'draft') {
-    initialDelayMs = explicit.initialDelayMs ??
-      readPositiveMsEnv('WORKFLOW_DRAFT_AGENT_NO_OUTPUT_INITIAL_MS') ??
-      DRAFT_NO_OUTPUT_INITIAL_DELAY_MS;
-    intervalMs = explicit.intervalMs ??
-      readPositiveMsEnv('WORKFLOW_DRAFT_AGENT_NO_OUTPUT_INTERVAL_MS') ??
-      DRAFT_NO_OUTPUT_INTERVAL_MS;
-  } else {
-    initialDelayMs = explicit.initialDelayMs ??
-      readPositiveMsEnv('WORKFLOW_AGENT_NO_OUTPUT_INITIAL_MS') ??
-      DEFAULT_NO_OUTPUT_INITIAL_DELAY_MS;
-    intervalMs = explicit.intervalMs ??
-      readPositiveMsEnv('WORKFLOW_AGENT_NO_OUTPUT_INTERVAL_MS') ??
-      DEFAULT_NO_OUTPUT_INTERVAL_MS;
-  }
-  return { initialDelayMs, intervalMs };
 }
 
 function formatElapsed(elapsedMs: number) {
@@ -1023,10 +481,6 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
 async function startDraftAgent(opts: StartAgentOptions = { prompt: '' }) {
   return startAgent('draft', opts);
 }
-
-const setCommandPathProbe = (fn: ((name: string) => string | null) | null) => {
-  _commandPathProbe = typeof fn === 'function' ? fn : null;
-};
 
 export {
   KNOWN_AGENT_NAMES,

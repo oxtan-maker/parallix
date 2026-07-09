@@ -1,10 +1,10 @@
 ---
 id: TASK-1426
 title: refactor agents.ts
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-07-04 17:18'
-labels: []
+labels: [user_value]
 dependencies: []
 ---
 
