@@ -411,6 +411,74 @@ test('runDraftCommand accepts free-text intent and synthesizes a task slug', asy
   assert.equal(calls[0].syntheticTask.source, 'synthetic-free-text');
 });
 
+test('runDraftCommand honors an explicit --agent override without consulting selectAgentFn or WORKFLOW_AGENT', async () => {
+  const calls = [];
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'draft-command-agent-'));
+  const worktree = path.join(tmpRoot, 'main-task-1038');
+  const taskFile = path.join(worktree, 'backlog', 'tasks', 'task-1038.md');
+  fs.mkdirSync(path.dirname(taskFile), { recursive: true });
+  fs.writeFileSync(taskFile, ['---', 'id: TASK-1038', 'labels: [ai_sdlc]', 'status: backlog', '---'].join('\n'));
+
+  const priorWorkflowAgent = process.env.WORKFLOW_AGENT;
+  delete process.env.WORKFLOW_AGENT;
+
+  try {
+    await runDraftCommand(['task-1038', '--agent', 'claude'], {
+      inferSlugFn: (slug) => slug,
+      detectLaunchBaseBranchFn: () => null,
+      resolveMainRepoFn: () => path.join(tmpRoot, 'main'),
+      conventionalWorktreePathFn: () => worktree,
+      ensureRepoExistsFn: () => true,
+      ensureStandaloneMissionBaselineFn: () => ({ committed: false }),
+      ensureMissionBranchFn: () => {},
+      ensureWorktreeFn: () => {},
+      ensureGraphifyWorkspaceFn: () => {},
+      ensureMissionFileFn: (wt, slug) => `${wt}/docs/missions/2026/${slug}/MISSION.md`,
+      bootstrapBacklogTaskFn: () => true,
+      readAgentConfigOrExitFn: () => ({ draft: ['codex', 'claude'] }),
+      selectAgentFn: () => { throw new Error('selectAgentFn must not run when --agent is provided'); },
+      startDraftAgentFn: async ({ agent }) => {
+        calls.push(['launch', agent]);
+        return { agent, result: { status: 0 } };
+      },
+      resolveTaskFileFn: () => ({ ok: true, taskFile }),
+      recordDraftImplementerFn: (opts) => calls.push(['record', opts.selected, opts.actual]),
+      recordDraftStatsFn: () => {},
+      [normalizeKey]: () => ({ ok: true, [typeKey]: 'ai_sdlc' }),
+      enforceDraftCommitSafetyFn: () => {},
+      transitionTaskFn: () => true,
+      exitFn: (code) => { throw new Error(`unexpected exit ${code}`); },
+      logFn: () => {},
+      errorFn: (msg) => { throw new Error(`unexpected error ${msg}`); }
+    });
+  } finally {
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+    if (priorWorkflowAgent === undefined) { delete process.env.WORKFLOW_AGENT; } else { process.env.WORKFLOW_AGENT = priorWorkflowAgent; }
+  }
+
+  assert.deepEqual(calls, [
+    ['launch', 'claude'],
+    ['record', 'claude', 'claude']
+  ]);
+});
+
+test('runDraftCommand exits non-zero with usage text when --agent is missing its value', async () => {
+  let exitCode = null;
+  const errors = [];
+
+  await runDraftCommand(['task-1038', '--agent'], {
+    inferSlugFn: (slug) => slug,
+    selectAgentFn: () => { throw new Error('must not select an agent when --agent parsing fails'); },
+    startDraftAgentFn: async () => { throw new Error('must not launch when --agent parsing fails'); },
+    exitFn: (code) => { exitCode = code; throw new Error('__stop__'); },
+    logFn: () => {},
+    errorFn: (msg) => errors.push(msg)
+  }).catch(err => { if (err.message !== '__stop__') { throw err; } });
+
+  assert.equal(exitCode, 1);
+  assert.ok(errors.some(msg => msg.includes('px draft <slug> --agent <family>')));
+});
+
 test('ensureDraftRepoConfigCommitted blocks dirty mission-layout config before worktree creation', () => {
   const errors = [];
   const ok = ensureDraftRepoConfigCommitted('/tmp/main', {

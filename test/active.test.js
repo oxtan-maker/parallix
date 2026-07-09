@@ -231,6 +231,59 @@ test('active() success path: preflight, launch, and handoff run in order', async
   assert.ok(logs.some(line => line.includes('Starting automated handoff')));
 });
 
+test('active() honors an explicit --implementer override without consulting WORKFLOW_AGENT', async () => {
+  const calls = [];
+  const priorWorkflowAgent = process.env.WORKFLOW_AGENT;
+  delete process.env.WORKFLOW_AGENT;
+
+  try {
+    await active(['task-1038', '--implementer', 'claude'], {
+      inferSlugFn: () => 'task-1038',
+      missionStartFn: () => ({ pass: true }),
+      resolveWorktreeFn: () => '/tmp/project-task-1038',
+      readAgentConfigOrExitFn: () => ({ active: ['codex'] }),
+      resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/project-task-1038/backlog/tasks/task-1038.md' }),
+      buildCheckpointContextFn: () => 'Most recent checkpoint: CP-1.md',
+      buildExecutePromptFn: (slug) => `Execute ${slug}`,
+      selectLaunchAndRecordFn: async (opts) => {
+        calls.push(['launch', opts.preselectedAgent]);
+        return { agent: opts.preselectedAgent, result: { status: 0 } };
+      },
+      enforceExecuteCommitSafetyFn: () => false,
+      runHandoffAndReviewFn: async (slug, worktree, agent) => {
+        calls.push(['handoff', agent]);
+        return true;
+      },
+      exitFn: (code) => { throw new Error(`unexpected exit ${code}`); },
+      logFn: () => {},
+      errorFn: (msg) => { throw new Error(`unexpected error: ${msg}`); }
+    });
+  } finally {
+    if (priorWorkflowAgent === undefined) { delete process.env.WORKFLOW_AGENT; } else { process.env.WORKFLOW_AGENT = priorWorkflowAgent; }
+  }
+
+  assert.deepEqual(calls, [
+    ['launch', 'claude'],
+    ['handoff', 'claude']
+  ]);
+});
+
+test('active() exits non-zero with usage text when --implementer is missing its value', async () => {
+  let exitCode = null;
+  const errors = [];
+
+  await active(['task-1038', '--implementer'], {
+    inferSlugFn: () => 'task-1038',
+    missionStartFn: () => { throw new Error('must not run preflight when --implementer parsing fails'); },
+    exitFn: (code) => { exitCode = code; throw new Error('__stop__'); },
+    logFn: () => {},
+    errorFn: (msg) => errors.push(msg)
+  }).catch(err => { if (err.message !== '__stop__') { throw err; } });
+
+  assert.equal(exitCode, 1);
+  assert.ok(errors.some(msg => msg.includes('px active <slug> --implementer <family>')));
+});
+
 test('active() does not pre-write backlog state before the execute agent actually launches', async () => {
   const logs = [];
 

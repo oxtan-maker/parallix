@@ -1,10 +1,10 @@
 ---
 id: TASK-1423
 title: add agent override commands to draft and active
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-07-04 15:47'
-labels: []
+labels: [ai_sdlc]
 dependencies: []
 ---
 
