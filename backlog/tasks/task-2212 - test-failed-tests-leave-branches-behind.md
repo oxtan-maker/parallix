@@ -12,7 +12,7 @@ dependencies: []
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-feature/e2e-base and tasks that corrupt the backlog
+feature/e2e-base and tasks that corrupt the backlog TASK-2198 — stale active. Ensure all tests are isolated and do not corrupt actual developement
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Definition of Done
