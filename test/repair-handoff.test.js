@@ -521,6 +521,14 @@ test('classifyError classifies missing-artifacts error as MissingArtifacts', () 
   assert.equal(result.dispatchAction, DispatchAction.AutoSendBack);
 });
 
+test('classifyError recognizes auto-remediation failure as MissingArtifacts', () => {
+  // Exact message shape emitted by performHandoff when checkpoint auto-remediation
+  // fails (task-2215): must bounce back to the implementer, not strand on a human.
+  const result = classifyError('No checkpoint documents found in /home/magnus/code/parallix-task-2213/missions/task-2213 even after auto-remediation. Implementation evidence is mandatory for review.');
+  assert.equal(result.failureClass, FailureClass.MissingArtifacts);
+  assert.equal(result.dispatchAction, DispatchAction.AutoSendBack);
+});
+
 test('classifyError classifies infra-blocker error as InfraBlocker', () => {
   const result = classifyError('Authentication failed for Forgejo: token expired');
   assert.equal(result.failureClass, FailureClass.InfraBlocker);

@@ -851,8 +851,8 @@ function buildAutoCheckpointContent(slug) {
     '',
     '| Criterion | Evidence | Status |',
     '|-----------|----------|--------|',
-    '| Auto-generated checkpoint CP-1.md present | handoff.js auto-remediation creates CP-1.md when checkpoints.length === 0 | PASS |',
-    '| Mission contract exists for review | MISSION.md present in the mission directory | PASS |',
+    '| Auto-generated checkpoint CP-1.md present | lib/commands/handoff.ts:262 — auto-remediation writes CP-1.md when no checkpoints exist | PASS |',
+    '| Mission contract exists for review | lib/commands/handoff.ts:47 — verifyHandoff requires MISSION.md in the mission directory | PASS |',
     '',
     'Next action: Reviewer to replace this placeholder with real implementation evidence before approval.',
     ''
@@ -1033,8 +1033,21 @@ const _exports = {
   /** @returns {...} */
   get performHandoff() { return _handoffExport.performHandoff; }
 };
-/** @type {{verifyHandoff: typeof verifyHandoff, performHandoff: typeof performHandoff, gatekeeper: typeof gatekeeper, runDeclaredGates: typeof runDeclaredGates, captureNelAtHandoff: typeof captureNelAtHandoff, validateDeclaredGates: typeof validateDeclaredGates}} */
-const _namedExports = { verifyHandoff, performHandoff, gatekeeper, runDeclaredGates, captureNelAtHandoff, validateDeclaredGates };
+/** @type {{verifyHandoff: typeof verifyHandoff, performHandoff: typeof performHandoff, gatekeeper: typeof gatekeeper, runDeclaredGates: typeof runDeclaredGates, captureNelAtHandoff: typeof captureNelAtHandoff, validateDeclaredGates: typeof validateDeclaredGates, _buildAutoCheckpointContent: typeof buildAutoCheckpointContent, _findUnverifiableGoalCheckRow: typeof findUnverifiableGoalCheckRow, _collectGoalCheckEvidenceRows: typeof collectGoalCheckEvidenceRows}} */
+const _namedExports = {
+  verifyHandoff,
+  performHandoff,
+  gatekeeper,
+  runDeclaredGates,
+  captureNelAtHandoff,
+  validateDeclaredGates,
+  // Test seams (task-2215): expose the auto-checkpoint template and the
+  // goal-check evidence validator so tests can verify the generated CP-1.md
+  // passes the same validation performHandoff applies.
+  _buildAutoCheckpointContent: buildAutoCheckpointContent,
+  _findUnverifiableGoalCheckRow: findUnverifiableGoalCheckRow,
+  _collectGoalCheckEvidenceRows: collectGoalCheckEvidenceRows
+};
 /** @type {typeof handoffCommand & {verifyHandoff: typeof verifyHandoff, performHandoff: typeof performHandoff, gatekeeper: typeof gatekeeper, runDeclaredGates: typeof runDeclaredGates, captureNelAtHandoff: typeof captureNelAtHandoff, validateDeclaredGates: typeof validateDeclaredGates}} */
 const _handoffExport = Object.assign(handoffCommand, _namedExports);
 export default _handoffExport;
