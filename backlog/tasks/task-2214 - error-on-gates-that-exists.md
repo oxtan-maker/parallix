@@ -4,6 +4,7 @@ title: error on gates that exists
 status: backlog
 assignee: []
 created_date: '2026-07-11 04:10'
+updated_date: '2026-07-11 05:38'
 labels: []
 dependencies: []
 ---
@@ -24,6 +25,17 @@ To http://localhost:3300/magnus/parallix.git
 Automated handoff failed: Gate failure persisting after 2 relaunch attempts. Manual intervention required.
        You may need to complete the handoff manually:
        px review task-2210 --submit
+
+The problem was that the draft created a mission with gates that could not be executed by a machine, fix was
+
+   70  ## Gates
+      71 -- [ ] `./scripts/verify-local.sh all` passes on the final tree.                                                                                                                            
+      72 -- [ ] Relevant automated help-output tests pass and name the asserted `px`, `draft`, and `active` implementer-help behavior.                                                               
+      73 -- [ ] No focused (`.only`) or unannotated skipped tests are introduced.                                                                                                                    
+      71 +- [ ] ./scripts/verify-local.sh all                                                                                                                                                        
+      72 +- [ ] node --test test/index.test.js  
+
+ensure this does not happen
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Definition of Done
