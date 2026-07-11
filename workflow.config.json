@@ -5,7 +5,7 @@
   },
   "adapters": {
     "tasks": { "provider": "backlog-md", "storage": "backlog", "stateMap": "config/state-map.json" },
-    "agents": { "models": { "codex": "gpt-5.4", "custom": "QuantTrio/Qwen3.6-27B-AWQ-6Bit" }, "subagents": { "maxParallel": 2 } },
+    "agents": { "models": { "codex": "gpt-5.6-terra", "custom": "vllm/QuantTrio/Qwen3.6-27B-AWQ-6Bit" }, "subagents": { "maxParallel": 2 } },
     "missions": {
       "baseDir": "missions",
       "branchPrefix": "mission/",
