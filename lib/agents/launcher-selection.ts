@@ -5,7 +5,9 @@ import { startCodexDraftAgent, resolveCodexCommand } from './codex.js';
 import { startClaudeAgent, resolveClaudeCommand } from './claude.js';
 import { startVibeAgent, resolveVibeCommand } from './vibe.js';
 import { startOpencodeAgent, resolveOpencodeCommand } from './opencode.js';
+import { startPiAgent, resolvePiCommand } from './pi.js';
 import { CONFIG_PATH, readAgentConfig, isAgentBlocked, type AgentConfig, type ReadAgentConfigOptions } from './agent-config.js';
+import { resolveCustomRunner } from '../core/product-config.js';
 
 interface LauncherStatus {
   agent: string;
@@ -19,28 +21,38 @@ type AgentSelectionOptions = ReadAgentConfigOptions & {
   config?: AgentConfig | null;
   configPath?: string;
   exclude?: any;
+  worktree?: string;
 };
 
 const LAUNCHERS: {[key: string]: Function} = {
   codex: startCodexDraftAgent,
   claude: startClaudeAgent,
   vibe: startVibeAgent,
-  custom: startOpencodeAgent
+  opencode: startOpencodeAgent,
+  pi: startPiAgent
 };
 
 const RESOLVERS: {[key: string]: () => string} = {
   codex: resolveCodexCommand,
   claude: resolveClaudeCommand,
   vibe: resolveVibeCommand,
-  custom: resolveOpencodeCommand
+  opencode: resolveOpencodeCommand,
+  pi: resolvePiCommand
 };
+
+// Runtime dispatch for custom agent family based on configured runner
+function resolveCustomLauncher(worktree: string) {
+  const runner = resolveCustomRunner(worktree);
+  return LAUNCHERS[runner];
+}
 
 const RESUME_CAPABLE = new Set(['claude', 'codex', 'custom']);
 const HEALTH_PROBE_ARGS: {[key: string]: string[]} = Object.freeze({
   codex: ['--help'],
   claude: ['--help'],
   vibe: ['--help'],
-  custom: ['--help']
+  opencode: ['--help'],
+  pi: ['--help']
 });
 const LAUNCHER_HEALTH_TIMEOUT_MS = 3000;
 const DEFAULT_NO_OUTPUT_INITIAL_DELAY_MS = 60_000;
@@ -48,7 +60,7 @@ const DEFAULT_NO_OUTPUT_INTERVAL_MS = 60_000;
 const DRAFT_NO_OUTPUT_INITIAL_DELAY_MS = 15_000;
 const DRAFT_NO_OUTPUT_INTERVAL_MS = 30_000;
 
-const WORKFLOW_AGENT_NAMES = Object.freeze(Object.keys(LAUNCHERS));
+const WORKFLOW_AGENT_NAMES = Object.freeze(['codex', 'claude', 'vibe', 'custom']);
 const KNOWN_AGENT_NAMES = Object.freeze([
   ...WORKFLOW_AGENT_NAMES,
   'human'
@@ -67,18 +79,27 @@ function commandInPath(name: string) {
   return result.status === 0 && result.stdout.trim().length > 0;
 }
 
-function workflowLauncherStatus(agent: string): LauncherStatus {
-  const resolver = RESOLVERS[agent];
+function workflowLauncherStatus(agent: string, worktree?: string): LauncherStatus {
+  // For custom agent, resolve to the actual runner. resolveCustomRunner
+  // defaults to process.cwd() when worktree is undefined, so this must not
+  // be gated behind worktree truthiness — callers like review-loop.ts and
+  // active.ts select agents without a worktree, and previously left
+  // "custom" unresolvable (RESOLVERS has no "custom" key), permanently
+  // excluding it from availability and biasing selection toward claude.
+  const effectiveAgent = agent === 'custom'
+    ? resolveCustomRunner(worktree)
+    : agent;
+  const resolver = RESOLVERS[effectiveAgent];
   if (!resolver) {
-    return { agent, supported: false, detail: `unknown agent: ${agent}` };
+    return { agent, supported: false, detail: `unknown agent: ${effectiveAgent}` };
   }
   const command = resolver();
   const exists = command.includes('/') ? fs.existsSync(command) : commandInPath(command);
   if (!exists) {
-    return { agent, supported: false, detail: command, health: 'missing' };
+    return { agent: effectiveAgent, supported: false, detail: command, health: 'missing' };
   }
 
-  const probeArgs = HEALTH_PROBE_ARGS[agent] || ['--help'];
+  const probeArgs = HEALTH_PROBE_ARGS[effectiveAgent] || ['--help'];
   const probe = spawnSync(command, probeArgs, {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -91,7 +112,7 @@ function workflowLauncherStatus(agent: string): LauncherStatus {
       ? (pErr.code || pErr.message)
       : `exit ${probe.status}`;
     return {
-      agent,
+      agent: effectiveAgent,
       supported: false,
       detail: `${command} ${probeArgs.join(' ')}`.trim(),
       health: 'probe-failed',
@@ -99,7 +120,7 @@ function workflowLauncherStatus(agent: string): LauncherStatus {
     };
   }
 
-  return { agent, supported: true, detail: `${command} ${probeArgs.join(' ')}`.trim(), health: 'ok' };
+  return { agent: effectiveAgent, supported: true, detail: `${command} ${probeArgs.join(' ')}`.trim(), health: 'ok' };
 }
 
 function eligibleAgentsForStep(step: string, options: AgentSelectionOptions = {}) {
@@ -108,9 +129,9 @@ function eligibleAgentsForStep(step: string, options: AgentSelectionOptions = {}
     : readAgentConfig(options.configPath || CONFIG_PATH, options);
   let eligible: string[];
   if (!config || !config.steps || !config.steps[step]) {
-    eligible = Object.keys(LAUNCHERS);
+    eligible = WORKFLOW_AGENT_NAMES.slice(); // Use the public workflow agent names
   } else {
-    eligible = config.steps[step].eligible || Object.keys(LAUNCHERS);
+    eligible = config.steps[step].eligible || WORKFLOW_AGENT_NAMES.slice();
   }
   return eligible.filter((agent) => !isAgentBlocked(agent, config));
 }
@@ -144,10 +165,11 @@ function selectAgent(step: string, options: AgentSelectionOptions = {}) {
     );
   }
 
+  const { worktree } = options;
   const statuses = new Map(
     pool
-      .filter((agent) => LAUNCHERS[agent])
-      .map((agent) => [agent, workflowLauncherStatus(agent)] as [string, LauncherStatus])
+      .filter((agent) => LAUNCHERS[agent] || agent === 'custom')
+      .map((agent) => [agent, workflowLauncherStatus(agent, worktree)] as [string, LauncherStatus])
   );
   const available = pool.filter((agent) => {
     const status = statuses.get(agent);
@@ -184,23 +206,36 @@ function selectAgent(step: string, options: AgentSelectionOptions = {}) {
   return available[0];
 }
 
-function assertAgentSupported(agent: string) {
+function assertAgentSupported(agent: string, worktree?: string) {
   if (!LAUNCHERS[agent]) {
-    const error: any = new Error(
-      `Unknown agent: "${fmt.agent(agent)}". Supported agents: ${Object.keys(LAUNCHERS).join(', ')}.`
-    );
-    error.code = 'UNKNOWN_AGENT';
-    throw error;
+    // Special case: custom is valid but dispatches to a real runner
+    if (agent === 'custom') {
+      const runner = resolveCustomRunner(worktree);
+      if (!LAUNCHERS[runner]) {
+        const error: any = new Error(
+          `Unknown custom runner: "${runner}". Supported custom runners: ${['opencode', 'pi'].join(', ')}.`
+        );
+        error.code = 'UNKNOWN_AGENT';
+        throw error;
+      }
+    } else {
+      const error: any = new Error(
+        `Unknown agent: "${fmt.agent(agent)}". Supported agents: ${WORKFLOW_AGENT_NAMES.join(', ')}.`
+      );
+      error.code = 'UNKNOWN_AGENT';
+      throw error;
+    }
   }
 
-  const status = workflowLauncherStatus(agent);
+  const status = workflowLauncherStatus(agent, worktree);
   if (!status.supported) {
     const health = status.health ? ` (${status.health})` : '';
     const reason = status.reason ? `; reason: ${status.reason}` : '';
+    const displayAgent = agent === 'custom' ? `custom (${status.agent})` : agent;
     const error: any = new Error(
-      `Agent "${fmt.agent(agent)}" launcher is not available on this workstation${health}. ` +
+      `Agent "${fmt.agent(displayAgent)}" launcher is not available on this workstation${health}. ` +
       `Looked for: ${fmt.path(status.detail)}${reason}. ` +
-      `Ensure ${fmt.agent(agent)} is on your PATH and retry.`
+      `Ensure ${fmt.agent(displayAgent)} is on your PATH and retry.`
     );
     error.code = 'LAUNCHER_UNAVAILABLE';
     throw error;
@@ -256,5 +291,6 @@ export {
   weightedRandom,
   selectAgent,
   assertAgentSupported,
-  resolveNoOutputWatchdogConfig
+  resolveNoOutputWatchdogConfig,
+  resolveCustomLauncher
 };

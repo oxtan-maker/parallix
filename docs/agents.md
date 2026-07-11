@@ -2,14 +2,39 @@
 
 ## Supported Agent Families (this workstation, 2026-04-11)
 
-| Agent   | Launcher |
-|---------|----------|
-| codex   | `codex` |
-| claude  | `claude` |
-| mistral | `vibe` |
-| custom    | `opencode` |
+| Agent   | Launcher | Runner Configuration |
+|---------|----------|---------------------|
+| codex   | `codex` | Fixed |
+| claude  | `claude` | Fixed |
+| mistral | `vibe` | Fixed |
+| custom    | `opencode` or `pi` | Configurable via `adapters.agents.runners.custom` |
 
-All four listed launchers are supported on this workstation. Step eligibility for all workflow steps (`draft`, `active`, `conflict-resolution`, `review`) is controlled by `parallix/config/agents.json`. If a launcher is missing from `PATH`, the harness fails loudly with the exact blocker before launching.
+All four listed launchers are supported on this workstation. The `custom` agent family can switch between `opencode` and `pi` runners via configuration. Step eligibility for all workflow steps (`draft`, `active`, `conflict-resolution`, `review`) is controlled by `parallix/config/agents.json`. If a launcher is missing from `PATH`, the harness fails loudly with the exact blocker before launching.
+
+### Custom Runner Configuration
+
+The `custom` agent family supports multiple backends through the `adapters.agents.runners.custom` configuration field in `workflow.config.json`:
+
+```json
+{
+  "adapters": {
+    "agents": {
+      "runners": { "custom": "opencode" },  // or "pi"
+      "subagents": { "maxParallel": 2 }
+    }
+  }
+}
+```
+
+**Supported runners:**
+- `"opencode"` (default): Uses the opencode binary with built-in vLLM support
+- `"pi"`: Uses the Pi coding agent with external vLLM/Ollama configuration
+
+**Model selection:** `adapters.agents.models.custom` is an optional override, not a requirement — when unset, `opencode` reuses its own remembered default local model and `pi` reads `defaultProvider`/`defaultModel` from `~/.pi/agent/settings.json`. Pinning a specific model string in `workflow.config.json` is a footgun: it goes stale the moment the operator repoints the locally-served model, and silently breaks the launcher until someone edits the repo config. Only set it when you need to force a specific model for a specific run.
+
+**Switching runners:** Change the `runners.custom` value and restart your workflow. No code changes required.
+
+**Per-step eligibility:** The `custom` family is eligible for steps based on `config/agents.json`, regardless of which runner is configured.
 
 ## Tool Calling Workaround (custom/opencode)
 
@@ -24,10 +49,10 @@ Opencode (custom agent family) may encounter issues with concurrent tool calls o
 
 | Agent   | Invocation shape                                                     |
 |---------|----------------------------------------------------------------------|
-| codex   | `codex exec --sandbox danger-full-access --cd <worktree> <prompt>` with a worktree-local `HOME` under `.workflow/codex-home`; resume uses `codex exec resume <session-id-or---last> <prompt>`; the launcher also seeds `.workflow/codex-home/.codex/config.toml` with the repo-standard trusted posture and copies `.codex/auth.json` so headless review commands can start and keep localhost Forgejo access |
+| codex   | `codex exec --sandbox danger-full-access --cd <worktree> <prompt>` with `CODEX_HOME` set to `<worktree>/.workflow/codex-home/.codex`; resume uses `codex exec resume <session-id-or---last> <prompt>`. This isolates Codex config, auth, sessions, and rollout telemetry while retaining the operator `HOME` and `PATH` for nested tools such as `opencode` and `pi`; the launcher seeds `config.toml` with the repo-standard trusted posture, appends any `[mcp]`/`[mcp.*]` sections found in the operator's real `~/.codex/config.toml` so MCP servers (Slack, Datadog, etc.) remain available inside the isolated worktree, copies `auth.json` so headless review commands can start and keep localhost Forgejo access, and seeds the Graphify skill under the worktree-local Codex area. |
 | claude  | `claude --dangerously-skip-permissions --output-format stream-json --verbose --include-partial-messages -p <prompt>` (cwd=worktree) — uses `--output-format stream-json --verbose --include-partial-messages` to stream real-time JSONL events (tool calls, assistant text chunks) to the operator's terminal via the spawn-tee mechanism. `--include-partial-messages` is required: without it, the assistant event contains the full response at once and no intermediate progress is emitted. Session-id extraction parses the `result` event from stream-json output, falling back to the `claude --resume <id>` regex on plain text. |
 | mistral | `vibe --prompt <prompt> --trust --yolo --output text` (cwd=worktree) — `--yolo` approves tool calls non-interactively (mirrors `--dangerously-skip-permissions` for claude/opencode and codex's `trust_level = "trusted"`); `--trust` only bypasses the working-directory trust prompt and does not itself skip tool-call approval. **Note: NOT resume-capable in current Vibe version**; session management uses internal state in `~/.vibe/logs/session/` but does not emit a parseable resume hint to stdout/stderr. |
-| custom    | `opencode run --pure --dangerously-skip-permissions <prompt>` (cwd=worktree); resume uses `-s <session>` when a session id is known or `--continue` when only the family marker is known |
+| custom    | `opencode run --pure --dangerously-skip-permissions <prompt>` (cwd=worktree) or `pi --print --mode json --approve <prompt>` (cwd=worktree); resume uses `-s <session>` (opencode) or `--session-id <id>` (pi) when a session id is known or `--continue` when only the family marker is known. `pi`'s `--mode json` stream carries real per-message token usage and a session-header `id`, parsed directly from captured stdout (no separate export step, unlike opencode) |
 
 ## Launch output watchdog
 

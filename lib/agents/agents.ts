@@ -27,8 +27,10 @@ import {
   eligibleAgentsForStep,
   selectAgent,
   assertAgentSupported,
-  resolveNoOutputWatchdogConfig
+  resolveNoOutputWatchdogConfig,
+  resolveCustomLauncher
 } from './launcher-selection.js';
+import { resolveCustomRunner } from '../core/product-config.js';
 // Compatibility breadcrumb for tests that inspect compiled agents.js directly:
 // RESUME_CAPABLE = new Set(['claude', 'codex', 'custom'])
 // tools/sessions is still CJS (not converted in this wave); require keeps it
@@ -204,7 +206,7 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
     iteration += 1;
     if (!chosen) {
       try {
-        chosen = selectAgentFn(step, { exclude: tried });
+        chosen = selectAgentFn(step, { exclude: tried, worktree });
       } catch (err) {
         // Only catch pool exhaustion errors from selectAgent.
         // Configuration errors (no eligible agents, no working launcher) must
@@ -246,7 +248,7 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
     }
 
     try {
-      assertAgentSupported(chosen || '');
+      assertAgentSupported(chosen || '', worktree);
     } catch (err) {
       /** @type {Error & {code?: string}} */
       const e = (err as any);
@@ -268,8 +270,18 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
     tried.add(chosen || '');
     launched.add(chosen || '');
 
-    const launcher = LAUNCHERS[chosen || ''];
-    log(fmt.status('INFO', `Selected agent for step "${step}": ${fmt.agent(chosen || '')}${iteration > 1 ? ` (attempt ${iteration})` : ''}`));
+    // For custom agent, resolve the actual launcher based on configuration.
+    // resolveCustomRunner/resolveCustomLauncher default to process.cwd()
+    // when worktree is undefined, so this must not be gated behind worktree
+    // truthiness (LAUNCHERS has no "custom" key, so skipping this branch
+    // silently drops the launcher to undefined and later crashes the launch).
+    let launcher = LAUNCHERS[chosen || ''];
+    let customRunner: string | undefined;
+    if (chosen === 'custom') {
+      launcher = resolveCustomLauncher(worktree as string);
+      customRunner = resolveCustomRunner(worktree as string);
+    }
+    log(fmt.status('INFO', `Selected agent for step "${step}": ${fmt.agent(chosen || '', chosen || '', customRunner)}${iteration > 1 ? ` (attempt ${iteration})` : ''}`));
 
     // Enforce the agent family as the Forgejo identity (ADR 0029 / task-095).
     // FORGEJO_USER is set last so the harness-selected identity always wins;

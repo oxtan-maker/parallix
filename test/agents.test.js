@@ -1272,9 +1272,11 @@ test('custom is registered in LAUNCHERS and RESOLVERS', () => {
   const agents = require('../lib/agents/agents');
   // LAUNCHERS and RESOLVERS are module-private; verify custom is known by checking KNOWN_AGENT_NAMES
   assert.ok(agents.KNOWN_AGENT_NAMES.includes('custom'), 'custom should be in KNOWN_AGENT_NAMES');
-  // Verify custom registration via workflowLauncherStatus
+  // workflowLauncherStatus resolves "custom" to its configured runner (opencode/pi)
+  // even without a worktree (resolveCustomRunner defaults to process.cwd()), so
+  // the reported agent is the effective runner, not the literal family name.
   const status = agents.workflowLauncherStatus('custom');
-  assert.equal(status.agent, 'custom');
+  assert.ok(['opencode', 'pi'].includes(status.agent), `expected custom to resolve to a real runner, got: ${status.agent}`);
 });
 
 // ---------- Codex resume threading with specific session ID ----------

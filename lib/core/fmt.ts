@@ -58,10 +58,12 @@ export function status(type: string, text: string): string {
   return `${colorize(format, `[${type}]`)} ${text}`;
 }
 
-export function agent(family: string, text: string = family): string {
+export function agent(family: string, text: string = family, runner?: string): string {
   let label = text;
-  if (family === 'custom' && text !== 'custom') {
-    label = 'custom (opencode)';
+  if (family === 'custom' && text === 'custom' && runner) {
+    label = `custom (${runner})`;
+  } else if (family === 'custom' && text !== 'custom') {
+    label = `custom (${text})`;
   }
   const format = agentMap[family];
   if (!format) {return label;}

@@ -54,9 +54,27 @@ function resolveForgejoUser(explicitUser?: string): string {
   return explicitUser || process.env.FORGEJO_USER || DEFAULT_FORGEJO_USER;
 }
 
-function resolveForgejoHome() {
+function listGitWorktrees(rootDir: string = process.cwd()): string[] {
+  try {
+    const result = spawnSync('git', ['-C', rootDir, 'worktree', 'list', '--porcelain'], {
+      encoding: 'utf8',
+      timeout: 2000,
+    });
+    if (result.status !== 0) {return [];}
+
+    return (result.stdout || '')
+      .split('\n')
+      .filter((line) => line.startsWith('worktree '))
+      .map((line) => line.slice('worktree '.length).trim())
+      .filter(Boolean);
+  } catch (_) {
+    return [];
+  }
+}
+
+function resolveForgejoHome(rootDir: string = process.cwd()) {
   if (process.env.FORGEJO_HOME) {return process.env.FORGEJO_HOME;}
-  const directLocal = path.join(process.cwd(), '.forgejo-local');
+  const directLocal = path.join(rootDir, '.forgejo-local');
 
   // In test environments, we MUST NOT fall back to the real Forgejo home.
   // NODE_TEST_CONTEXT is set by node --test.
@@ -68,22 +86,47 @@ function resolveForgejoHome() {
   if (fs.existsSync(directLocal)) {
     return directLocal;
   }
+  const candidates: string[] = [directLocal];
+  const seen = new Set<string>([directLocal]);
+  const pushCandidate = (candidate?: string | null) => {
+    if (!candidate) {return;}
+    const resolved = path.resolve(candidate);
+    if (seen.has(resolved)) {return;}
+    seen.add(resolved);
+    candidates.push(resolved);
+  };
+
   try {
     const main = getPrimaryWorktree();
-    const candidates = [
-      path.join(main, '.forgejo-local'),
-      path.join(path.dirname(main), `${path.basename(main).toLowerCase()}-forgejo`),
-      path.join(process.cwd(), '..', 'forgejo'),
-    ];
-    for (const candidate of candidates) {
-      if (fs.existsSync(candidate)) {
-        return candidate;
+    pushCandidate(path.join(main, '.forgejo-local'));
+    pushCandidate(path.join(path.dirname(main), `${path.basename(main).toLowerCase()}-forgejo`));
+    try {
+      const parentDir = path.dirname(main);
+      const repoBase = path.basename(main);
+      for (const entry of fs.readdirSync(parentDir)) {
+        if (entry !== repoBase && !entry.startsWith(`${repoBase}-`)) {continue;}
+        pushCandidate(path.join(parentDir, entry, '.forgejo-local'));
       }
+    } catch (_) {
+      // Best-effort sibling scan only.
     }
-    return candidates[0];
   } catch (_) {
-    return directLocal;
+    // Keep best-effort fallback behaviour.
   }
+
+  for (const worktreePath of listGitWorktrees(rootDir)) {
+    pushCandidate(path.join(worktreePath, '.forgejo-local'));
+  }
+
+  pushCandidate(path.join(rootDir, '..', 'forgejo'));
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return candidates[0];
 }
 
 /** @param {string} targetPath @returns {string|null} */
@@ -102,7 +145,7 @@ function normalizePathForComparison(targetPath: string): string | null {
  * @returns {boolean}
  */
 function isForgejoPath(targetPath: string, options: any = {}): boolean {
-  const forgejoHome = options.forgejoHome || resolveForgejoHome();
+  const forgejoHome = options.forgejoHome || resolveForgejoHome(options.rootDir || process.cwd());
   const normalizedTarget = normalizePathForComparison(targetPath);
   const normalizedForgejoHome = normalizePathForComparison(forgejoHome);
   if (!normalizedTarget || !normalizedForgejoHome) {return false;}
@@ -122,9 +165,9 @@ function resolveForgejoSettings(rootDir = process.cwd()) {
  * @param {{forgejoUser?: string, token?: string}} options
  * @returns {{forgejoUser: string, token: string|null}}
  */
-function resolveForgejoAuth(options: { forgejoUser?: string, token?: string } = {} as { forgejoUser?: string, token?: string }): { forgejoUser: string, token: string | null } {
+function resolveForgejoAuth(options: { forgejoUser?: string, token?: string, rootDir?: string } = {} as { forgejoUser?: string, token?: string, rootDir?: string }): { forgejoUser: string, token: string | null } {
   const forgejoUser = resolveForgejoUser(options.forgejoUser);
-  const token = options.token || readToken(forgejoUser);
+  const token = options.token || readToken(forgejoUser, options.rootDir);
   return { forgejoUser, token };
 }
 
@@ -161,7 +204,7 @@ function getPrStatus(branch: string, rootDir?: string, options: any = {}) {
   const slugMatch = branch.match(/^mission\/(task-\d+)/);
   const slug = slugMatch ? slugMatch[1] : null;
 
-  const { token } = resolveForgejoAuth({ forgejoUser, token: providedToken });
+  const { token } = resolveForgejoAuth({ forgejoUser, token: providedToken, rootDir });
   // Don't short-circuit on missing primary token — resolvePrAccess has fallback logic
   // to try implementer and other known tokens when the primary is unavailable.
   const prAccess = resolvePrAccess(branch, token || null, { apiCall, slug, forgejoUser, rootDir });
@@ -212,14 +255,14 @@ function getPrStatus(branch: string, rootDir?: string, options: any = {}) {
  * @param {string} user  - Forgejo login (e.g. 'claude', 'codex', 'human')
  * @returns {string|null}
  */
-function resolveTokenFile(user: string): string | null {
+function resolveTokenFile(user: string, rootDir: string = process.cwd()): string | null {
   const resolvedUser = resolveForgejoUser(user);
   const isCurrentUser = resolvedUser === resolveForgejoUser();
   const canUseDefaultTokenFile = isCurrentUser || resolvedUser === DEFAULT_FORGEJO_USER;
   const candidates = [
     isCurrentUser ? process.env.FORGEJO_TOKEN_FILE : null,
-    path.join(resolveForgejoHome(), 'tokens', resolvedUser),
-    canUseDefaultTokenFile ? path.join(resolveForgejoHome(), 'token') : null,
+    path.join(resolveForgejoHome(rootDir), 'tokens', resolvedUser),
+    canUseDefaultTokenFile ? path.join(resolveForgejoHome(rootDir), 'token') : null,
   ];
 
   for (const candidate of candidates) {
@@ -235,12 +278,12 @@ function resolveTokenFile(user: string): string | null {
  * @param {string} user
  * @returns {string|null}
  */
-function readToken(user: string): string | null {
+function readToken(user: string, rootDir: string = process.cwd()): string | null {
   const resolvedUser = resolveForgejoUser(user);
   if (resolvedUser === resolveForgejoUser() && process.env.FORGEJO_TOKEN) {
     return process.env.FORGEJO_TOKEN;
   }
-  const tokenFile = resolveTokenFile(resolvedUser);
+  const tokenFile = resolveTokenFile(resolvedUser, rootDir);
   if (!tokenFile) {return null;}
   return fs.readFileSync(tokenFile, 'utf8').trim();
 }
@@ -466,7 +509,7 @@ function createPr(branch: string, user: string, token: string, options: any = {}
   }
 
   const repoOwner = resolveForgejoSettings(rootDir).repo.split('/')[0] || null;
-  const ownerToken = repoOwner ? readToken(repoOwner) : null;
+  const ownerToken = repoOwner ? readToken(repoOwner, rootDir) : null;
   const gitUser = ownerToken && repoOwner ? repoOwner : user;
   const gitToken = ownerToken || token;
   const apiUser = user;
@@ -714,7 +757,7 @@ function resolvePrAccess(branch: string, token: string | null, options: any = {}
 
     for (const user of candidates) {
       triedUsers.push(user);
-      const fallbackToken = readToken(user);
+      const fallbackToken = readToken(user, rootDir);
       if (fallbackToken) {
         prNumber = doLookup(fallbackToken);
         if (prNumber) {return { prNumber, token: fallbackToken };}
@@ -726,7 +769,7 @@ function resolvePrAccess(branch: string, token: string | null, options: any = {}
     const curlCheck = spawnSync('curl', ['--version'], { encoding: 'utf8' });
     fmt.log.fail(`PR not found for branch '${branch}' after checking tokens for: ${triedUsers.join(', ')}`);
     const settings = resolveForgejoSettings(rootDir);
-    fmt.log.info(`Current environment: FORGEJO_URL=${settings.url}, FORGEJO_REPO=${settings.repo}, FORGEJO_HOME=${resolveForgejoHome()}`);
+    fmt.log.info(`Current environment: FORGEJO_URL=${settings.url}, FORGEJO_REPO=${settings.repo}, FORGEJO_HOME=${resolveForgejoHome(rootDir)}`);
     if (lastApiError) {
       const err = lastApiError as { status?: number, error?: string, stderr?: string };
       fmt.log.warn(`API error encountered during lookup: status=${err.status || 0}, error=${err.error || 'unknown'}`);
@@ -1171,7 +1214,7 @@ function getLatestReviewDecision(branch: string, options: any = {}): { ok: boole
   const slugMatch = branch.match(/^mission\/(task-\d+)/);
   const slug = slugMatch ? slugMatch[1] : null;
 
-  const { token } = resolveForgejoAuth({ forgejoUser, token: providedToken });
+  const { token } = resolveForgejoAuth({ forgejoUser, token: providedToken, rootDir });
   if (!token) {
     return { ok: false, error: 'missing-token', reviewState: null };
   }
@@ -1465,7 +1508,7 @@ function syncMerged(branch: string, mergedCommit: string, options: any = {}) {
     return { ok: false, error: 'missing-merged-commit' };
   }
 
-  const { token } = resolveForgejoAuth({ forgejoUser, token: providedToken || undefined });
+  const { token } = resolveForgejoAuth({ forgejoUser, token: providedToken || undefined, rootDir });
   if (!token) {
     return { ok: false, error: 'missing-token' };
   }

@@ -69,10 +69,10 @@ test('buildCodexDraftInvocation uses --last when resume is true but no sessionId
   assert.ok(inv.args.includes('--last'));
 });
 
-test('buildCodexDraftInvocation sets HOME for non-interactive', () => {
-  const { buildCodexDraftInvocation } = require('../lib/agents/codex');
+test('buildCodexDraftInvocation sets CODEX_HOME for non-interactive', () => {
+  const { buildCodexDraftInvocation, codexStateRoot } = require('../lib/agents/codex');
   const inv = buildCodexDraftInvocation({ prompt: 'test', worktree: '/tmp', interactive: false });
-  assert.ok(inv.options.env.HOME.includes('.workflow/codex-home'));
+  assert.equal(inv.options.env.CODEX_HOME, codexStateRoot('/tmp'));
 });
 
 // ---------- codex home helpers ----------
@@ -157,6 +157,84 @@ test('ensureCodexHome skips skill seeding when no global skill is installed', ()
     assert.ok(fs.existsSync(codexConfigPath(worktree)), 'config must still be written');
     const seeded = path.join(codexHomeRoot(worktree), '.agents', 'skills', 'graphify');
     assert.ok(!fs.existsSync(seeded), 'no skill should be seeded when none is installed globally');
+  } finally {
+    process.env.HOME = origHome;
+    fs.rmSync(fakeHome, { recursive: true, force: true });
+    fs.rmSync(worktree, { recursive: true, force: true });
+  }
+});
+
+// ---------- ensureCodexHome MCP config copy (task-2209) ----------
+
+test('ensureCodexHome merges MCP sections from the operator config when present', () => {
+  const { ensureCodexHome, codexConfigPath } = require('../lib/agents/codex');
+  const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-mcp-present-'));
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-mcp-wt-'));
+  const origHome = process.env.HOME;
+  try {
+    const codexDir = path.join(fakeHome, '.codex');
+    fs.mkdirSync(codexDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(codexDir, 'config.toml'),
+      ['[mcp]', 'enabled = true', '', '[mcp.servers.slack]', 'command = "npx"', ''].join('\n'),
+      'utf8'
+    );
+    process.env.HOME = fakeHome;
+
+    ensureCodexHome(worktree);
+
+    const config = fs.readFileSync(codexConfigPath(worktree), 'utf8');
+    assert.ok(config.includes('[mcp]'), 'worktree config must include the operator [mcp] section');
+    assert.ok(config.includes('[mcp.servers.slack]'), 'worktree config must include operator MCP server definitions');
+    assert.ok(config.includes('sandbox_mode = "danger-full-access"'), 'base headless config must still be present');
+  } finally {
+    process.env.HOME = origHome;
+    fs.rmSync(fakeHome, { recursive: true, force: true });
+    fs.rmSync(worktree, { recursive: true, force: true });
+  }
+});
+
+test('ensureCodexHome skips MCP merge without throwing when operator config.toml is absent', () => {
+  const { ensureCodexHome, codexConfigPath } = require('../lib/agents/codex');
+  const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-mcp-absent-'));
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-mcp-wt2-'));
+  const origHome = process.env.HOME;
+  try {
+    process.env.HOME = fakeHome; // no .codex/config.toml at all
+    assert.doesNotThrow(() => ensureCodexHome(worktree));
+
+    const config = fs.readFileSync(codexConfigPath(worktree), 'utf8');
+    assert.ok(!config.includes('[mcp'), 'no MCP section should appear when operator config is absent');
+    assert.ok(config.includes('sandbox_mode = "danger-full-access"'), 'base headless config must remain intact');
+  } finally {
+    process.env.HOME = origHome;
+    fs.rmSync(fakeHome, { recursive: true, force: true });
+    fs.rmSync(worktree, { recursive: true, force: true });
+  }
+});
+
+test('ensureCodexHome MCP merge is idempotent across re-runs', () => {
+  const { ensureCodexHome, codexConfigPath } = require('../lib/agents/codex');
+  const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-mcp-idem-'));
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-mcp-wt3-'));
+  const origHome = process.env.HOME;
+  try {
+    const codexDir = path.join(fakeHome, '.codex');
+    fs.mkdirSync(codexDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(codexDir, 'config.toml'),
+      ['[mcp]', 'enabled = true', '', '[mcp.servers.datadog]', 'command = "npx"', ''].join('\n'),
+      'utf8'
+    );
+    process.env.HOME = fakeHome;
+
+    ensureCodexHome(worktree);
+    const firstRun = fs.readFileSync(codexConfigPath(worktree), 'utf8');
+
+    ensureCodexHome(worktree);
+    const secondRun = fs.readFileSync(codexConfigPath(worktree), 'utf8');
+
+    assert.equal(firstRun, secondRun, 'config content must be stable across repeated ensureCodexHome calls');
   } finally {
     process.env.HOME = origHome;
     fs.rmSync(fakeHome, { recursive: true, force: true });

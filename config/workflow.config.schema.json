@@ -101,6 +101,18 @@
               "description": "Optional per-agent-family LLM model override, keyed by agent family name (e.g. codex, claude, gemini, glm, vibe, custom). Each value is the model identifier passed to that agent's CLI. A family that is not listed sends no model parameter, so the agent uses its own default. There is no 'default' key.",
               "additionalProperties": { "type": "string" }
             },
+            "runners": {
+              "type": "object",
+              "description": "Runner selection for agent families that support multiple backends. Currently only 'custom' is supported, with values 'opencode' or 'pi'.",
+              "additionalProperties": false,
+              "properties": {
+                "custom": {
+                  "type": "string",
+                  "enum": ["opencode", "pi"],
+                  "description": "Selects the launcher backend for the custom agent family. Defaults to 'opencode' if not specified."
+                }
+              }
+            },
             "subagents": {
               "type": "object",
               "description": "Operational limits for subagent spawning within an agent.",
