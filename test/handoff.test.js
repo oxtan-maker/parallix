@@ -1889,3 +1889,26 @@ test('performHandoff relaunch prompt lists all missing artifact types', async (t
     fs.rmSync(worktree, { recursive: true, force: true });
   }
 });
+
+// ── task-2215: auto-generated checkpoint must pass evidence validation ────────
+
+test('buildAutoCheckpointContent produces verifiable evidence rows', () => {
+  const handoffModule = require('../lib/commands/handoff');
+  const rootDir = path.join(__dirname, '..');
+
+  const content = handoffModule._buildAutoCheckpointContent('task-2215');
+  assert.match(content, /^## Goal Check$/m, 'template must contain the ## Goal Check heading');
+  assert.ok(content.includes('lib/commands/handoff.ts:262'),
+    'evidence must cite the auto-remediation source file:line, not the removed handoff.js');
+  assert.ok(!content.includes('handoff.js auto-remediation'),
+    'template must not cite the non-existent handoff.js');
+
+  const goalCheckMatch = content.match(/^## Goal Check(?: Table)?\s*$/m);
+  const afterHeader = content.slice((goalCheckMatch.index ?? 0) + goalCheckMatch[0].length);
+  const evidenceRows = handoffModule._collectGoalCheckEvidenceRows(afterHeader);
+  assert.ok(evidenceRows.length >= 2, 'template must produce at least two evidence rows');
+
+  const offendingRow = handoffModule._findUnverifiableGoalCheckRow(evidenceRows, rootDir);
+  assert.equal(offendingRow, null,
+    `every evidence row must cite a verifiable reference; offending row: ${offendingRow}`);
+});

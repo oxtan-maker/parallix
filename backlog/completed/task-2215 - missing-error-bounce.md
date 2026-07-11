@@ -1,10 +1,13 @@
 ---
 id: TASK-2215
 title: missing error bounce
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-07-11 04:15'
-labels: []
+updated_date: '2026-07-11 04:54'
+labels:
+  - ai_sdlc
+  - bug
 dependencies: []
 ---
 
