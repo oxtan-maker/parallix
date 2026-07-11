@@ -4,7 +4,7 @@ title: error on gates that exists
 status: backlog
 assignee: []
 created_date: '2026-07-11 04:10'
-updated_date: '2026-07-11 05:38'
+updated_date: '2026-07-11 06:06'
 labels: []
 dependencies: []
 ---
@@ -36,6 +36,42 @@ The problem was that the draft created a mission with gates that could not be ex
       72 +- [ ] node --test test/index.test.js  
 
 ensure this does not happen
+
+even the e2e gates fail at the moment
+=== PASS: integration:workflow ===
+=== GATE: integration:custom-agent-smoke ===
+Command: node test/e2e-real-agent-smoke.test.js
+[benchmark] runner=opencode phase=draft duration_ms=142737 provider=opencode model=QuantTrio/Qwen3.6-27B-AWQ-6Bit input_tokens=121028 tool_calls=12
+TAP version 13
+# Subtest: real custom-agent launcher smoke (opencode): full lifecycle with hello-world task (SC3/SC4/SC5/SC6/SC7)
+not ok 1 - real custom-agent launcher smoke (opencode): full lifecycle with hello-world task (SC3/SC4/SC5/SC6/SC7)
+  ---
+  duration_ms: 1356761.76213
+  type: 'test'
+  location: '/home/magnus/code/parallix-task-2215/test/e2e-real-agent-smoke.test.js:756:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    [parallix-workflow-failure] px active --implementer custom failed (status=null): [FAIL] The final checkpoint at missions/task-9001/CP-1.md has a "## Goal Check" section but no evidence rows that cite a verifiable reference such as a file:line, ADR, test reference, or recognized repo command/path. A goal-check table with real evidence is required before handoff. Offending row: | SC2: `bash hello.sh` prints exactly `Hello, World!` | `bash hello.sh` outputs `Hello, World!` (no extra whitespace or lines) | PASS |
+    [FAIL] The final checkpoint at missions/task-9001/CP-1.md has a "## Goal Check" section but no evidence rows that cite a verifiable reference such as a file:line, ADR, test reference, or recognized repo command/path. A goal-check table with real evidence is required before handoff. Offending row: | SC2: `bash hello.sh` prints exactly `Hello, World!` | `bash hello.sh` | PASS |
+    
+    
+    null !== 0
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 0
+  actual: ~
+  operator: 'strictEqual'
+  stack: |-
+    runRealAgentSmoke (/home/magnus/code/parallix-task-2215/test/e2e-real-agent-smoke.test.js:678:12)
+    TestContext.<anonymous> (/home/magnus/code/parallix-task-2215/test/e2e-real-agent-smoke.test.js:761:3)
+    Test.runInAsyncScope (node:async_hooks:214:14)
+    Test.run (node:internal/test_runner/test:1047:25)
+    Test.start (node:internal/test_runner/test:944:17)
+    startSubtestAfterBootstrap (node:internal/test_runner/harness:296:17)
+  ...
+1..1
+# tests 1
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Definition of Done
