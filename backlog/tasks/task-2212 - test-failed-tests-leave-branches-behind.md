@@ -4,9 +4,16 @@ title: test/failed tests leave branches behind
 status: backlog
 assignee: []
 created_date: '2026-07-11 03:39'
+updated_date: '2026-07-11 03:40'
 labels: []
 dependencies: []
 ---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+feature/e2e-base and tasks that corrupt the backlog
+<!-- SECTION:DESCRIPTION:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
