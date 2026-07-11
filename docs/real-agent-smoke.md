@@ -22,14 +22,17 @@ configured local agent, integration must stop rather than merge silently.
 
 ## Prerequisites
 
-- `opencode` installed and present on `PATH`.
-- The `custom`-family local model configured in this repo's own
-  `workflow.config.json` (`adapters.agents.models.custom`) available and
-  reachable — currently `vllm/cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit`. The test
-  reads this value from the repo config at setup time and writes it into the
-  throwaway repo's own `workflow.config.json`, so the smoke run always
-  exercises the exact agent configuration Parallix itself runs with while
-  never depending on the developer's ambient Parallix state.
+- `opencode` installed and present on `PATH`, with a working default local
+  model configured in opencode's own state (no repo config needed for this —
+  opencode remembers its own last-selected model).
+- `adapters.agents.models.custom` in this repo's `workflow.config.json` is an
+  *optional* override, not a prerequisite: pinning a specific model string
+  there is a footgun (it goes stale whenever the operator repoints the
+  locally-served model). When unset, the test omits `-m` and lets the
+  launcher fall back to opencode's own default, mirroring production
+  behavior. If `adapters.agents.models.custom` is set, the test reads it and
+  writes it into the throwaway repo's own `workflow.config.json` so the
+  smoke run exercises that exact override.
 - No network access or cloud credentials are required — the model is local.
 
 ## Invocation
@@ -41,6 +44,17 @@ node test/e2e-real-agent-smoke.test.js
 Also runs as part of `px integrate` (or `./scripts/verify-local.sh integrate`)
 whenever the changed areas include `workflow` or `lib`, alongside the
 `workflow` gate.
+
+The gate runs **one** full lifecycle per invocation, with whichever custom
+runner this repository configures (`adapters.agents.runners.custom` in
+`workflow.config.json`, currently `opencode`). Running every supported runner
+back-to-back would multiply the gate's wall time, so the non-configured runner
+is exercised on demand instead — the harness itself is runner-parameterized
+(`opencode` and `pi`), and switching costs only an env var:
+
+```
+PARALLIX_REAL_AGENT_RUNNER=pi node test/e2e-real-agent-smoke.test.js
+```
 
 ## Expected runtime and determinism
 
@@ -95,11 +109,11 @@ adding it would increase runtime without proportionally increasing bug coverage.
 
 A failing run prefixes its assertion message with one of three buckets:
 
-- `[local-model-environment]` — `opencode` or the pinned model is
-  unavailable on this workstation, or the run was killed by a timeout/signal
-  waiting on the local backend. Action: check that `opencode` and the local
-  model backend are running and reachable; this is not necessarily a
-  Parallix regression.
+- `[local-model-environment]` — `opencode` or its default (or explicitly
+  overridden) local model is unavailable on this workstation, or the run was
+  killed by a timeout/signal waiting on the local backend. Action: check that
+  `opencode` and the local model backend are running and reachable; this is
+  not necessarily a Parallix regression.
 - `[opencode-launcher-failure]` — the real `opencode` invocation rejected
   the launch itself (bad `-m` argument, auth failure, missing binary). This
   is the `TASK-1351` class of bug: a launcher-argument regression in
@@ -112,8 +126,7 @@ A failing run prefixes its assertion message with one of three buckets:
 
 The smoke harness does two preflight checks before the full lifecycle run:
 
-- It verifies that the real `opencode` binary is present and that the repo's
-  `workflow.config.json` declares a `custom`-family model.
+- It verifies that the real `opencode` binary is present on `PATH`.
 - It runs a tiny real `opencode run ... 'Reply with exactly OK'` probe with the
   configured model and the same child environment the lifecycle test will use.
 

@@ -5,7 +5,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const { getPrStatus, getPrNumber, getPrAuthor, getLatestReviewDecision, syncMerged, createPr, forgejoAvailable, postReview, resolveForgejoUser, getComments, postComment, resolveForgejoHome, isForgejoPath, fetchReviewBranch } = require('../lib/tools/forgejo.js');
+const { getPrStatus, getPrNumber, getPrAuthor, getLatestReviewDecision, syncMerged, createPr, forgejoAvailable, postReview, resolveForgejoUser, getComments, postComment, resolveForgejoHome, resolveTokenFile, readToken, isForgejoPath, fetchReviewBranch } = require('../lib/tools/forgejo.js');
 const git = require('../lib/core/git.js');
 const backlog = require('../lib/tools/backlog.js');
 const missionUtils = require('../lib/core/mission-utils.js');
@@ -39,6 +39,64 @@ test.beforeEach(() => {
 
 test.afterEach(() => {
   mock.restoreAll();
+});
+
+test('resolveTokenFile discovers Forgejo tokens from sibling feature-branch worktrees', () => {
+  const sandboxRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'forgejo-worktree-home-'));
+  const mainRoot = path.join(sandboxRoot, 'parallix');
+  const featureRoot = path.join(sandboxRoot, 'parallix-skunk');
+  const missionRoot = path.join(sandboxRoot, 'parallix-task-2208');
+  const tokenPath = path.join(featureRoot, '.forgejo-local', 'tokens', 'custom');
+  const previousCwd = process.cwd();
+  const previousTestContext = process.env.NODE_TEST_CONTEXT;
+  const previousForgejoHome = process.env.FORGEJO_HOME;
+  try {
+    // resolveForgejoHome short-circuits to a safe fallback whenever
+    // NODE_TEST_CONTEXT is set (which node --test always sets) unless
+    // FORGEJO_HOME is explicit. This test exercises the real discovery
+    // logic, so both guards must be lifted for the duration of the test.
+    delete process.env.NODE_TEST_CONTEXT;
+    delete process.env.FORGEJO_HOME;
+    fs.mkdirSync(mainRoot, { recursive: true });
+    fs.mkdirSync(missionRoot, { recursive: true });
+    fs.mkdirSync(path.dirname(tokenPath), { recursive: true });
+    fs.writeFileSync(tokenPath, 'feature-token\n', 'utf8');
+
+    mock.method(missionUtils, 'getPrimaryWorktree', () => mainRoot);
+    mock.method(git, 'git', (args) => {
+      if (args.includes('worktree') && args.includes('--porcelain')) {
+        return {
+          status: 0,
+          stdout: [
+            `worktree ${mainRoot}`,
+            'branch refs/heads/main',
+            '',
+            `worktree ${featureRoot}`,
+            'branch refs/heads/skunkworks',
+            '',
+            `worktree ${missionRoot}`,
+            'branch refs/heads/mission/task-2208',
+            '',
+          ].join('\n'),
+          stderr: '',
+        };
+      }
+      return { status: 0, stdout: '', stderr: '' };
+    });
+
+    process.chdir(sandboxRoot);
+
+    assert.equal(resolveForgejoHome(missionRoot), path.join(featureRoot, '.forgejo-local'));
+    assert.equal(resolveTokenFile('custom', missionRoot), tokenPath);
+    assert.equal(readToken('custom', missionRoot), 'feature-token');
+  } finally {
+    process.chdir(previousCwd);
+    if (previousTestContext !== undefined) process.env.NODE_TEST_CONTEXT = previousTestContext;
+    else delete process.env.NODE_TEST_CONTEXT;
+    if (previousForgejoHome !== undefined) process.env.FORGEJO_HOME = previousForgejoHome;
+    else delete process.env.FORGEJO_HOME;
+    fs.rmSync(sandboxRoot, { recursive: true, force: true });
+  }
 });
 
 test('authenticatedReviewUrl uses the configured standalone review repo', () => {
@@ -2149,14 +2207,18 @@ test('createPr fails without retrying push when stale-info refresh fetch fails',
 
 test('resolveForgejoHome returns safe fallback in test context when FORGEJO_HOME is unset', () => {
   const previousHome = process.env.FORGEJO_HOME;
+  const previousTestContext = process.env.NODE_TEST_CONTEXT;
   delete process.env.FORGEJO_HOME;
-  // node --test already sets NODE_TEST_CONTEXT: true
+  process.env.NODE_TEST_CONTEXT = '1';
   
   try {
     const resolved = resolveForgejoHome();
     assert.strictEqual(resolved, '/tmp/forgejo-test-home-missing', 'Should return safe test fallback');
   } finally {
     if (previousHome !== undefined) process.env.FORGEJO_HOME = previousHome;
+    else delete process.env.FORGEJO_HOME;
+    if (previousTestContext !== undefined) process.env.NODE_TEST_CONTEXT = previousTestContext;
+    else delete process.env.NODE_TEST_CONTEXT;
   }
 });
 

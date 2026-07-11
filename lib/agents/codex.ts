@@ -71,7 +71,7 @@ function buildCodexDraftInvocation({ prompt, worktree, interactive = hasLiveTty(
       options: {
         stdio: 'inherit',
         cwd: worktree,
-        env: { ...process.env, ...env, HOME: codexHomeRoot(worktree) }
+        env: { ...process.env, ...env, CODEX_HOME: codexStateRoot(worktree) }
       }
     };
   }
@@ -82,9 +82,6 @@ function buildCodexDraftInvocation({ prompt, worktree, interactive = hasLiveTty(
     : ['exec', '--sandbox', 'danger-full-access', ...modelArgs, '--cd', worktree, prompt];
 
   const baseEnv = { ...process.env };
-  if (!interactive) {
-    baseEnv.HOME = codexHomeRoot(worktree);
-  }
 
   return {
     command: resolveCodexCommand(),
@@ -92,7 +89,7 @@ function buildCodexDraftInvocation({ prompt, worktree, interactive = hasLiveTty(
     options: {
       stdio: 'inherit',
       cwd: worktree,
-      env: { ...baseEnv, ...env }
+      env: { ...baseEnv, ...env, ...(!interactive ? { CODEX_HOME: codexStateRoot(worktree) } : {}) }
     }
   };
 }
@@ -159,6 +156,10 @@ function codexHomeRoot(worktree: string) {
   return path.join(worktree, '.workflow', 'codex-home');
 }
 
+function codexStateRoot(worktree: string) {
+  return path.join(codexHomeRoot(worktree), '.codex');
+}
+
 function codexConfigPath(worktree: string) {
   return path.join(codexHomeRoot(worktree), '.codex', 'config.toml');
 }
@@ -171,8 +172,41 @@ function userCodexAuthPath() {
   return path.join(os.homedir(), '.codex', 'auth.json');
 }
 
+function userCodexConfigPath() {
+  return path.join(os.homedir(), '.codex', 'config.toml');
+}
+
 function tomlString(value: any) {
   return `"${String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+}
+
+// Extract MCP-related TOML sections ([mcp], [mcp.servers.*], etc.) from a
+// config file. Used to carry MCP server definitions from the operator's real
+// ~/.codex/config.toml into the worktree codex-home. Returns the extracted
+// section text (prefixed with a newline) or an empty string if no MCP content
+// is present.
+function extractMcpSections(toml: string): string {
+  const lines = toml.split('\n');
+  const result: string[] = [];
+  let inMcpSection = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const sectionMatch = trimmed.match(/^\[+(.*)\]+$/);
+    if (sectionMatch) {
+      const sectionName = sectionMatch[1].trim();
+      inMcpSection = sectionName.startsWith('mcp');
+      if (inMcpSection) {
+        result.push(line);
+      }
+      continue;
+    }
+    if (inMcpSection) {
+      result.push(line);
+    }
+  }
+
+  return result.length ? `\n${result.join('\n')}` : '';
 }
 
 // Graphify's Codex skill requires multi_agent = true for spawn_agent subagent
@@ -202,18 +236,28 @@ function ensureCodexHome(worktree: string) {
   fs.mkdirSync(path.dirname(codexConfigPath(worktree)), { recursive: true });
   fs.writeFileSync(codexConfigPath(worktree), headlessCodexConfig(worktree), 'utf8');
 
+  // Carry MCP server definitions (Slack, Datadog, etc.) from the operator's
+  // real ~/.codex/config.toml into the worktree config so codex running with
+  // HOME=codexHomeRoot still has access to them. Appended after the base
+  // headless config write above, so sandbox/multi_agent/trust settings are
+  // preserved.
+  const sourceConfigPath = userCodexConfigPath();
+  if (fs.existsSync(sourceConfigPath)) {
+    const mcpSections = extractMcpSections(fs.readFileSync(sourceConfigPath, 'utf8'));
+    if (mcpSections) {
+      fs.appendFileSync(codexConfigPath(worktree), mcpSections, 'utf8');
+    }
+  }
+
   const sourceAuthPath = userCodexAuthPath();
   if (fs.existsSync(sourceAuthPath)) {
     fs.copyFileSync(sourceAuthPath, codexAuthPath(worktree));
   }
 
-  // Seed the globally-installed Graphify skill into the isolated worktree HOME,
-  // the same way auth.json is carried over from the operator's real home. Codex
-  // runs with HOME=codexHomeRoot, so it looks for skills under
-  // <home>/.agents/skills; without this copy the one-time global install at
-  // ~/.agents/skills is invisible to codex. This is a plain filesystem copy of
-  // an existing install, not a `graphify install` invocation, and skips cleanly
-  // when the skill is absent.
+  // Seed the globally-installed Graphify skill into the worktree-local Codex
+  // area, alongside auth.json. CODEX_HOME isolates Codex config and sessions;
+  // this copy keeps the per-worktree skill seed explicit without changing the
+  // HOME inherited by nested operator-installed tools.
   const sourceSkillPath = path.join(os.homedir(), '.agents', 'skills', 'graphify');
   if (fs.existsSync(sourceSkillPath)) {
     fs.cpSync(
@@ -241,6 +285,7 @@ export {
   buildCodexDraftInvocation,
   codexConfigPath,
   codexHomeRoot,
+  codexStateRoot,
   ensureCodexHome,
   extractCodexSessionId,
   extractCodexTelemetry,

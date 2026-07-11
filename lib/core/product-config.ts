@@ -483,6 +483,15 @@ export function resolveAgentModel(agentFamily: string, rootDir: string = process
   return typeof model === 'string' && model.length > 0 ? model : null;
 }
 
+export function resolveCustomRunner(rootDir: string = process.cwd()): string {
+  const agents = loadEffectiveConfig(rootDir).adapters.agents as PlainObject | undefined;
+  if (!isPlainObject(agents)) {return 'opencode';}
+  const runners = agents.runners as PlainObject | undefined;
+  if (!isPlainObject(runners)) {return 'opencode';}
+  const customRunner = runners.custom;
+  return typeof customRunner === 'string' && ['opencode', 'pi'].includes(customRunner) ? customRunner : 'opencode';
+}
+
 interface RepositoryReadinessResult {
   mode: string;
   configPath: string | null;
