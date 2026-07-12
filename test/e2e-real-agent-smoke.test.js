@@ -32,6 +32,16 @@ const CLI_ENTRY = path.resolve(__dirname, '..', packageJson.bin.px);
 const workflowConfig = require('../workflow.config.json');
 const CUSTOM_MODEL = workflowConfig?.adapters?.agents?.models?.custom;
 const RUN_TIMEOUT_MS = Number(process.env.PARALLIX_REAL_AGENT_TIMEOUT_MS || 600000);
+// A cold local backend or a queued shared model can need longer than the
+// original 45-second probe cap before it emits its first response. Keep the
+// probe bounded so an unavailable backend still fails ahead of the lifecycle,
+// while allowing it enough time to establish that the configured model works.
+// Operators can tighten or extend this independently when needed, but it can
+// never outlive the corresponding single-session workflow budget.
+const HEALTHCHECK_TIMEOUT_MS = Math.min(
+  Number(process.env.PARALLIX_REAL_AGENT_HEALTHCHECK_TIMEOUT_MS || 120000),
+  RUN_TIMEOUT_MS
+);
 // The active phase runs up to three sequential model sessions in one px
 // invocation (execute agent, a possible repair relaunch, and the autonomous
 // review loop), so it gets twice the single-session budget. Observed: a run
@@ -111,6 +121,15 @@ function piCommandCandidates() {
   };
 
   pushCandidate(process.env.PI_BIN);
+  // Pi is often installed through nvm. The controlling agent can narrow
+  // PATH before it starts this gate while retaining NVM_BIN; use the absolute
+  // executable so setupRepository can place its real-pi symlink in binDir.
+  if (process.env.NVM_BIN) {
+    pushCandidate(path.join(process.env.NVM_BIN, 'pi'));
+  }
+  // Match the production launcher's fallback for runners started from a
+  // stripped environment that retains neither PATH nor NVM_BIN.
+  pushCandidate(path.join(path.dirname(process.execPath), 'pi'));
   pushCandidate('pi');
   pushCandidate(path.join(os.homedir(), '.local', 'bin', 'pi'));
 
@@ -218,7 +237,7 @@ function preflightCheck(runner) {
   return null;
 }
 
-function runOpencodeHealthcheck(repoRoot, env, timeoutMs = 45000) {
+function runOpencodeHealthcheck(repoRoot, env, timeoutMs = HEALTHCHECK_TIMEOUT_MS) {
   const command = maybeOpencodePath() || 'opencode';
   const args = ['run', '--pure', '--dangerously-skip-permissions', '--format', 'json'];
   if (CUSTOM_MODEL) {args.push('-m', CUSTOM_MODEL);}
@@ -232,7 +251,7 @@ function runOpencodeHealthcheck(repoRoot, env, timeoutMs = 45000) {
   );
 }
 
-function runPiHealthcheck(repoRoot, env, timeoutMs = 45000) {
+function runPiHealthcheck(repoRoot, env, timeoutMs = HEALTHCHECK_TIMEOUT_MS) {
   const command = maybePiPath() || 'pi';
   const args = ['--print', '--mode', 'json', '--approve'];
   if (CUSTOM_MODEL) {args.push('--model', CUSTOM_MODEL);}
@@ -246,7 +265,7 @@ function runPiHealthcheck(repoRoot, env, timeoutMs = 45000) {
   );
 }
 
-function runHealthcheck(runner, repoRoot, env, timeoutMs = 45000) {
+function runHealthcheck(runner, repoRoot, env, timeoutMs = HEALTHCHECK_TIMEOUT_MS) {
   return runner === 'pi'
     ? runPiHealthcheck(repoRoot, env, timeoutMs)
     : runOpencodeHealthcheck(repoRoot, env, timeoutMs);
@@ -258,6 +277,22 @@ function setupRepository({ slug, title, runner = 'opencode' }) {
   const binDir = path.join(repoRoot, 'bin');
   const stateHome = path.join(tmpRoot, 'parallix-home');
   const reviewTmpDir = path.join(tmpRoot, 'review-artifacts');
+  const piAgentHome = path.join(tmpRoot, 'pi-agent');
+
+  // Pi takes an exclusive lock on its global settings and writes sessions
+  // beneath its agent directory. Seed the model/default configuration into a
+  // disposable writable directory so the real runner can execute in a
+  // sandboxed integration process without mutating the operator's Pi state.
+  if (runner === 'pi') {
+    fs.mkdirSync(piAgentHome, { recursive: true });
+    const configuredPiAgentHome = path.join(os.homedir(), '.pi', 'agent');
+    for (const fileName of ['models.json', 'settings.json', 'auth.json']) {
+      const source = path.join(configuredPiAgentHome, fileName);
+      if (fs.existsSync(source)) {
+        fs.copyFileSync(source, path.join(piAgentHome, fileName));
+      }
+    }
+  }
 
   // Hand-rolled backlog.md structure: equivalent to `backlog init` +
   // `backlog task create`, written directly for speed (no CLI dependency,
@@ -386,7 +421,7 @@ function setupRepository({ slug, title, runner = 'opencode' }) {
   runGit(repoRoot, ['add', '.']);
   runGit(repoRoot, ['commit', '-m', 'initial smoke repo']);
 
-  return { tmpRoot, repoRoot, binDir, stateHome };
+  return { tmpRoot, repoRoot, binDir, stateHome, piAgentHome };
 }
 
 function runWorkflowAllowFail(repoRoot, env, args, timeout, options = {}) {
@@ -480,6 +515,9 @@ function runRealAgentSmoke(runner) {
     PARALLIX_HOME: repo.stateHome,
     PATH: `${repo.binDir}${path.delimiter}${process.env.PATH || ''}`
   };
+  if (runner === 'pi') {
+    env.PI_CODING_AGENT_DIR = repo.piAgentHome;
+  }
   // Drop the inherited PWD: opencode trusts PWD over the real cwd for project
   // resolution, so a stale PWD pointing at the developer's primary repo makes
   // the launcher child attach to that project instead of the throwaway repo —

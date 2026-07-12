@@ -64,6 +64,38 @@ test('resolvePiCommand prefers PI_BIN when it points to an executable', () => {
   }
 });
 
+test('resolvePiCommand finds Pi through NVM_BIN when PATH is isolated', () => {
+  const { resolvePiCommand } = pi;
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-nvm-bin-'));
+  const nvmPi = path.join(tmpDir, 'pi');
+  fs.writeFileSync(nvmPi, '#!/usr/bin/env bash\nexit 0\n', 'utf8');
+  fs.chmodSync(nvmPi, 0o755);
+  const originalPiBin = process.env.PI_BIN;
+  const originalNvmBin = process.env.NVM_BIN;
+  const originalPath = process.env.PATH;
+  delete process.env.PI_BIN;
+  process.env.NVM_BIN = tmpDir;
+  process.env.PATH = '';
+  try {
+    assert.equal(resolvePiCommand(), nvmPi);
+  } finally {
+    if (originalPiBin === undefined) {
+      delete process.env.PI_BIN;
+    } else {
+      process.env.PI_BIN = originalPiBin;
+    }
+    if (originalNvmBin === undefined) {
+      delete process.env.NVM_BIN;
+    } else {
+      process.env.NVM_BIN = originalNvmBin;
+    }
+    process.env.PATH = originalPath;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test('resolvePiCommand falls back to bare "pi" when no candidate exists', () => {
   const { resolvePiCommand } = pi;
   const os = require('node:os');
@@ -73,9 +105,13 @@ test('resolvePiCommand falls back to bare "pi" when no candidate exists', () => 
   const originalHome = process.env.HOME;
   const originalPath = process.env.PATH;
   const originalBin = process.env.PI_BIN;
+  const originalNvmBin = process.env.NVM_BIN;
+  const originalExecPath = process.execPath;
   delete process.env.PI_BIN;
+  delete process.env.NVM_BIN;
   process.env.HOME = tmpHome;
   process.env.PATH = '';
+  Object.defineProperty(process, 'execPath', { value: path.join(tmpHome, 'node'), configurable: true });
   try {
     assert.equal(resolvePiCommand(), 'pi');
   } finally {
@@ -84,8 +120,14 @@ test('resolvePiCommand falls back to bare "pi" when no candidate exists', () => 
     } else {
       process.env.PI_BIN = originalBin;
     }
+    if (originalNvmBin === undefined) {
+      delete process.env.NVM_BIN;
+    } else {
+      process.env.NVM_BIN = originalNvmBin;
+    }
     process.env.HOME = originalHome;
     process.env.PATH = originalPath;
+    Object.defineProperty(process, 'execPath', { value: originalExecPath, configurable: true });
     fs.rmSync(tmpHome, { recursive: true, force: true });
   }
 });
@@ -93,37 +135,37 @@ test('resolvePiCommand falls back to bare "pi" when no candidate exists', () => 
 // ---------- buildPiInvocation ----------
 
 test('buildPiInvocation constructs basic pi non-interactive command', () => {
-  const { buildPiInvocation } = pi;
+  const { buildPiInvocation, resolvePiCommand } = pi;
   const result = buildPiInvocation({
     prompt: 'Hello world',
     worktree: '/tmp/test',
     env: {}
   });
-  assert.equal(result.command, 'pi');
+  assert.equal(result.command, resolvePiCommand());
   assert.deepEqual(result.args, ['--print', '--mode', 'json', '--approve', 'Hello world']);
   assert.equal(result.options.cwd, '/tmp/test');
 });
 
 test('buildPiInvocation includes model when specified', () => {
-  const { buildPiInvocation } = pi;
+  const { buildPiInvocation, resolvePiCommand } = pi;
   const result = buildPiInvocation({
     prompt: 'Hello world',
     worktree: '/tmp/test',
     model: 'test-model'
   });
-  assert.equal(result.command, 'pi');
+  assert.equal(result.command, resolvePiCommand());
   assert.deepEqual(result.args, ['--print', '--mode', 'json', '--approve', '--model', 'test-model', 'Hello world']);
 });
 
 test('buildPiInvocation includes session-id flag when resuming with sessionId', () => {
-  const { buildPiInvocation } = pi;
+  const { buildPiInvocation, resolvePiCommand } = pi;
   const result = buildPiInvocation({
     prompt: 'Hello world',
     worktree: '/tmp/test',
     resume: true,
     sessionId: 'conv-123'
   });
-  assert.equal(result.command, 'pi');
+  assert.equal(result.command, resolvePiCommand());
   assert.deepEqual(result.args, ['--print', '--mode', 'json', '--approve', '--session-id', 'conv-123', 'Hello world']);
 });
 

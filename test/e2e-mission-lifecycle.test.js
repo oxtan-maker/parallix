@@ -361,6 +361,31 @@ function shouldKeepTmp() {
   return process.env.PARALLIX_E2E_KEEP_TMP === '1';
 }
 
+function cleanInterruptedFixture(parentPid, root, worktree) {
+  const fs = require('node:fs');
+  const childProcess = require('node:child_process');
+  const isAlive = () => {
+    try {
+      process.kill(parentPid, 0);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  };
+  while (isAlive()) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+  }
+  childProcess.spawnSync('git', ['-C', root, 'worktree', 'remove', '--force', worktree], { stdio: 'ignore' });
+  fs.rmSync(root, { recursive: true, force: true });
+}
+
+function watchInterruptedFixture(root, worktree) {
+  const watcher = childProcess.spawn(process.execPath, [
+    '-e', `(${cleanInterruptedFixture.toString()})(${process.pid}, ${JSON.stringify(root)}, ${JSON.stringify(worktree)})`
+  ], { detached: true, stdio: 'ignore' });
+  watcher.unref();
+}
+
 function taskFileIn(rootDir, slug) {
   const candidateDirs = [
     path.join(rootDir, 'backlog', 'tasks'),
@@ -461,6 +486,8 @@ function runScenario({ launchFromFeatureBranch = false, integrate = true, postIn
     active: null,
     integrate: null
   };
+
+  watchInterruptedFixture(repo.tmpRoot, worktree);
 
   try {
     const mainHeadBefore = runGit(repo.repoRoot, ['rev-parse', 'HEAD']);

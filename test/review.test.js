@@ -73,6 +73,29 @@ function runGitOrThrow(args, options = {}) {
   return result.stdout || '';
 }
 
+function cleanInterruptedReviewFixture(parentPid, root) {
+  const fs = require('node:fs');
+  const isAlive = () => {
+    try {
+      process.kill(parentPid, 0);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  };
+  while (isAlive()) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+  }
+  fs.rmSync(root, { recursive: true, force: true });
+}
+
+function watchInterruptedReviewFixture(root) {
+  const watcher = childProcess.spawn(process.execPath, [
+    '-e', `(${cleanInterruptedReviewFixture.toString()})(${process.pid}, ${JSON.stringify(root)})`
+  ], { detached: true, stdio: 'ignore' });
+  watcher.unref();
+}
+
 async function captureExit(fn) {
   const originalExit = process.exit;
   const originalError = console.error;
@@ -3170,6 +3193,7 @@ test('submitReviewRound keeps YAML and rendered task status aligned when provide
   const taskFile = path.join(root, 'backlog', 'tasks', 'task-2198 - stale-active.md');
   const prev = process.env.FORGEJO_USER;
   process.env.FORGEJO_USER = 'codex';
+  watchInterruptedReviewFixture(root);
 
   try {
     fs.mkdirSync(path.dirname(taskFile), { recursive: true });
