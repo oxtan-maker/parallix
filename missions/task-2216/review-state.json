@@ -1,0 +1,24 @@
+{
+  "reviewer": "custom",
+  "implementer": "codex",
+  "round": 3,
+  "startedAt": "2026-07-11T10:02:04.916Z",
+  "phase": "fixing",
+  "disposition": "APPROVED",
+  "reviewerRetryCount": 1,
+  "metadata": {
+    "recordedStageLaunches": {
+      "review:custom": [
+        "custom|ses_0b00467afffeQONzoYmZziCkx7|2026-07-11T07:01:55.579Z|2026-07-11T07:30:28.592Z|0",
+        "custom|ses_0b00467afffeQONzoYmZziCkx7|2026-07-11T09:57:38.099Z|2026-07-11T09:59:15.583Z|0",
+        "custom|ses_0b00467afffeQONzoYmZziCkx7|2026-07-11T10:02:06.156Z|2026-07-11T10:04:23.665Z|0"
+      ],
+      "follow-up:codex": [
+        "codex||2026-07-11T07:30:31.399Z|2026-07-11T07:34:27.853Z|0",
+        "codex||2026-07-11T09:59:18.172Z|2026-07-11T10:02:03.709Z|0",
+        "codex||2026-07-11T10:21:03.550Z|2026-07-11T10:21:53.265Z|0",
+        "codex||2026-07-11T13:43:35.467Z|2026-07-11T13:44:08.370Z|0"
+      ]
+    }
+  }
+}

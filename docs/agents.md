@@ -20,6 +20,7 @@ The `custom` agent family supports multiple backends through the `adapters.agent
   "adapters": {
     "agents": {
       "runners": { "custom": "opencode" },  // or "pi"
+      "maxConcurrentCustom": 2,
       "subagents": { "maxParallel": 2 }
     }
   }
@@ -35,6 +36,12 @@ The `custom` agent family supports multiple backends through the `adapters.agent
 **Switching runners:** Change the `runners.custom` value and restart your workflow. No code changes required.
 
 **Per-step eligibility:** The `custom` family is eligible for steps based on `config/agents.json`, regardless of which runner is configured.
+
+### Custom capacity
+
+`adapters.agents.maxConcurrentCustom` optionally sets the maximum number of local `custom` instances that can run simultaneously in one workflow process. When unset, launches are unlimited; configured values must be positive integers. Invalid values are rejected by workflow configuration validation.
+
+The launcher reserves capacity immediately before starting a custom instance and releases it when that instance completes, fails to launch, exits with an error or cancellation signal, or its launcher promise rejects. A no-output watchdog message does not itself release capacity because the process is still running. While the custom pool is full, selection treats `custom` as unavailable and chooses another eligible, working non-custom family. If no such family exists, selection retains its explicit exhausted-pool error.
 
 ## Tool Calling Workaround (custom/opencode)
 

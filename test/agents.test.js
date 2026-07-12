@@ -30,6 +30,7 @@ const { buildClaudeInvocation, resolveClaudeCommand, extractClaudeSessionId } = 
 const { buildCodexDraftInvocation, resolveCodexCommand, extractCodexSessionId } = require('../lib/agents/codex');
 const { buildVibeInvocation, resolveVibeCommand, extractVibeSessionId } = require('../lib/agents/vibe');
 const { buildOpencodeInvocation, resolveOpencodeCommand, extractOpencodeSessionId, __setJsonFormatSupportForTest } = require('../lib/agents/opencode');
+const { activeCustomCapacityCount, resetCustomCapacity, tryAcquireCustomCapacity } = require('../lib/agents/custom-capacity');
 
 
 function formatBlockUntil(date) {
@@ -56,6 +57,58 @@ test.after(() => {
   process.env.PATH = originalPath;
   setCommandPathProbe(null);
   fs.rmSync(sharedLauncherBin, { recursive: true, force: true });
+});
+
+test.beforeEach(() => resetCustomCapacity());
+
+test('custom capacity saturation selects an eligible non-custom agent and preserves explicit exhaustion', () => {
+  const config = {
+    steps: {
+      draft: { eligible: ['custom', 'codex'], selection: 'first' },
+      review: { eligible: ['custom'], selection: 'first' }
+    }
+  };
+  const reservation = tryAcquireCustomCapacity();
+  assert.ok(reservation, 'the first custom reservation should acquire the default capacity');
+  try {
+    assert.equal(selectAgent('draft', { config }), 'codex');
+    assert.throws(
+      () => selectAgent('review', { config }),
+      /All eligible agents for step "review" are exhausted/
+    );
+  } finally {
+    reservation.release();
+  }
+});
+
+test('custom capacity releases after clean completion, launch failure, signal cancellation, and rejected runtime result', async () => {
+  const invocation = { command: 'opencode', args: [], options: {} };
+  const base = {
+    prompt: 'test',
+    agent: 'custom',
+    isAgentBlockedFn: () => false,
+    detectLimitHitFn: () => null,
+    selectAgentFn: () => { throw new Error('No agents available'); }
+  };
+  const run = async resultPromise => {
+    try {
+      await startAgent('draft', {
+        ...base,
+        launchAgentFn: () => ({ invocation, resultPromise })
+      });
+    } catch (_err) {
+      // Failed terminal paths reroute through the deliberately exhausted mock.
+    }
+    assert.equal(activeCustomCapacityCount(), 0, 'terminal paths must not retain custom capacity');
+    const next = tryAcquireCustomCapacity();
+    assert.ok(next, 'a released permit must allow exactly one subsequent launch');
+    next.release();
+  };
+
+  await run(Promise.resolve({ status: 0, stdout: '', stderr: '' }));
+  await run(Promise.resolve({ status: 1, stdout: '', stderr: 'launch failed' }));
+  await run(Promise.resolve({ status: null, signal: 'SIGTERM', stdout: '', stderr: '' }));
+  await run(Promise.reject(new Error('launcher runtime error')));
 });
 
 function withPathLaunchers(entries, run) {

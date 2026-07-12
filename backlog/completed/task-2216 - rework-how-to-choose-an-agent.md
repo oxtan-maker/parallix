@@ -1,10 +1,10 @@
 ---
 id: TASK-2216
 title: rework how to choose an agent
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-07-11 04:32'
-labels: []
+labels: [ai_sdlc]
 dependencies: []
 ---
 

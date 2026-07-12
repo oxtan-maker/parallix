@@ -19,6 +19,7 @@ const {
   loadWorkflowConfig,
   resolveAgentAdapter,
   resolveAgentModel,
+  resolveMaxConcurrentCustom,
   resolveReviewAdapter,
   resolveTaskStorage,
   validateWorkflowConfig,
@@ -427,6 +428,25 @@ test('resolveTaskStorage supports string storage paths and invalid storage types
 test('resolveAgentAdapter returns empty object (command env prefix removed)', () => {
   const { resolveAgentAdapter } = require('../lib/core/product-config');
   assert.deepEqual(resolveAgentAdapter('/tmp'), {});
+});
+
+test('resolveMaxConcurrentCustom defaults to unlimited and reads a positive configured limit', () => {
+  withTempDir(root => {
+    assert.equal(resolveMaxConcurrentCustom(root), Infinity);
+    fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
+      adapters: { agents: { maxConcurrentCustom: 3 } }
+    }), 'utf8');
+    assert.equal(resolveMaxConcurrentCustom(root), 3);
+  });
+});
+
+test('validateWorkflowConfig rejects invalid maxConcurrentCustom values', () => {
+  for (const value of [0, -1, 1.5, '2']) {
+    assert.deepEqual(
+      validateWorkflowConfig({ adapters: { agents: { maxConcurrentCustom: value } } }),
+      ['adapters.agents.maxConcurrentCustom must be a positive integer']
+    );
+  }
 });
 
 // ---------- resolveAgentModel ----------

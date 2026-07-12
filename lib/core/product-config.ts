@@ -127,6 +127,13 @@ export function validateWorkflowConfig(config: unknown): string[] {
       }
     }
   }
+  const agents = isPlainObject((cfg.adapters as PlainObject | undefined)?.agents)
+    ? ((cfg.adapters as PlainObject).agents as PlainObject)
+    : null;
+  if (agents && 'maxConcurrentCustom' in agents &&
+    (!Number.isInteger(agents.maxConcurrentCustom) || (agents.maxConcurrentCustom as number) < 1)) {
+    issues.push('adapters.agents.maxConcurrentCustom must be a positive integer');
+  }
   return issues;
 }
 
@@ -490,6 +497,12 @@ export function resolveCustomRunner(rootDir: string = process.cwd()): string {
   if (!isPlainObject(runners)) {return 'opencode';}
   const customRunner = runners.custom;
   return typeof customRunner === 'string' && ['opencode', 'pi'].includes(customRunner) ? customRunner : 'opencode';
+}
+
+export function resolveMaxConcurrentCustom(rootDir: string = process.cwd()): number {
+  const agents = loadEffectiveConfig(rootDir).adapters.agents as PlainObject | undefined;
+  const max = agents && agents.maxConcurrentCustom;
+  return Number.isInteger(max) && (max as number) > 0 ? max as number : Infinity;
 }
 
 interface RepositoryReadinessResult {

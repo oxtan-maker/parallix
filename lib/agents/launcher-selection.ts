@@ -8,6 +8,7 @@ import { startOpencodeAgent, resolveOpencodeCommand } from './opencode.js';
 import { startPiAgent, resolvePiCommand } from './pi.js';
 import { CONFIG_PATH, readAgentConfig, isAgentBlocked, type AgentConfig, type ReadAgentConfigOptions } from './agent-config.js';
 import { resolveCustomRunner } from '../core/product-config.js';
+import { isCustomCapacityAvailable } from './custom-capacity.js';
 
 interface LauncherStatus {
   agent: string;
@@ -150,11 +151,13 @@ function selectAgent(step: string, options: AgentSelectionOptions = {}) {
   const envOverride = process.env.WORKFLOW_AGENT;
   const excluded = options.exclude instanceof Set ? options.exclude : new Set();
   const eligible = eligibleAgentsForStep(step, options);
-  if (envOverride && !excluded.has(envOverride) && eligible.includes(envOverride)) {
+  if (envOverride && !excluded.has(envOverride) && eligible.includes(envOverride) &&
+    (envOverride !== 'custom' || isCustomCapacityAvailable(options.worktree))) {
     return envOverride;
   }
 
-  const pool = eligible.filter((agent) => !excluded.has(agent));
+  const pool = eligible.filter((agent) => !excluded.has(agent) &&
+    (agent !== 'custom' || isCustomCapacityAvailable(options.worktree)));
   if (eligible.length === 0) {
     throw new Error(`No agents are eligible for workflow step: ${step}`);
   }
