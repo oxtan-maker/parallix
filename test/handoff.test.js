@@ -1486,86 +1486,77 @@ test('validateDeclaredGates fails for non-existent absolute path', () => {
   assert.ok(result.error.includes('non-existent file'));
 });
 
-// ---------- Regression test for backtick/em-dash gate-line parsing (round-4 finding) ----------
+// ---------- Command-only gate declaration regression and compatibility ----------
 
-test('runDeclaredGates strips backticks and em-dash description from gate commands', () => {
-  const missionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gates-backtick-test-'));
-  fs.writeFileSync(path.join(missionDir, 'MISSION.md'), [
-    '# Mission',
-    '',
-    '## Gates',
-    '',
-    '- [ ] `npm run typecheck` — zero errors',
-    ''
-  ].join('\n'));
+test('validateDeclaredGates rejects outcome prose with command-only remediation', () => {
+  const gate = './scripts/verify-local.sh all passes on the final tree.';
+  const result = validateDeclaredGates([gate], path.join(__dirname, '..'));
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'validation-failed');
+  assert.equal(result.gate, gate);
+  assert.match(result.error, /exact runnable command only/i);
+  assert.match(result.error, /Success Criteria or checkpoint documentation/i);
+});
+
+test('runDeclaredGates rejects Markdown command followed by prose', () => {
+  const missionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gates-backtick-prose-test-'));
+  const gate = '`true` passes on the final tree.';
+  fs.writeFileSync(path.join(missionDir, 'MISSION.md'), `# Mission\n\n## Gates\n\n- [ ] ${gate}\n`);
   try {
     const result = runDeclaredGates(missionDir, missionDir, { log: () => {}, error: () => {} });
-    // The gate should parse to "npm run typecheck" and execute (exit non-zero is fine,
-    // but it should NOT fail with a shell parsing error from backticks or em-dash)
-    assert.strictEqual(result.ok, false);
-    assert.strictEqual(result.reason, 'gate-failed');
-    // The error should NOT contain bash parsing errors about non-ascii dashes
-    assert.ok(!result.error.includes('rad 1') && !result.error.includes('non-ascii dash'));
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, 'validation-failed');
+    assert.equal(result.gate, gate);
   } finally {
     fs.rmSync(missionDir, { recursive: true, force: true });
   }
 });
 
-test('runDeclaredGates strips em-dash without backticks', () => {
-  const missionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gates-emdash-test-'));
+test('runDeclaredGates rejects explanatory dash suffixes', () => {
+  for (const suffix of ['true — some description', 'true – brief note', 'true -– legacy note']) {
+    const missionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gates-dash-prose-test-'));
+    fs.writeFileSync(path.join(missionDir, 'MISSION.md'), `# Mission\n\n## Gates\n\n- [ ] ${suffix}\n`);
+    try {
+      const result = runDeclaredGates(missionDir, missionDir, { log: () => {}, error: () => {} });
+      assert.equal(result.ok, false, suffix);
+      assert.equal(result.reason, 'validation-failed', suffix);
+    } finally {
+      fs.rmSync(missionDir, { recursive: true, force: true });
+    }
+  }
+});
+
+test('runDeclaredGates executes bare, backticked, checked, and unchecked command forms', () => {
+  const missionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gates-command-forms-test-'));
   fs.writeFileSync(path.join(missionDir, 'MISSION.md'), [
     '# Mission',
     '',
     '## Gates',
     '',
-    '- [ ] true — some description',
+    '- true',
+    '- [ ] `true`',
+    '- [x] true',
     ''
   ].join('\n'));
   try {
     const result = runDeclaredGates(missionDir, missionDir, { log: () => {}, error: () => {} });
-    assert.strictEqual(result.ok, true);
-    assert.strictEqual(result.reason, 'all-gates-passed');
+    assert.equal(result.ok, true);
+    assert.equal(result.reason, 'all-gates-passed');
+    assert.equal(result.count, 3);
   } finally {
     fs.rmSync(missionDir, { recursive: true, force: true });
   }
 });
 
-test('runDeclaredGates strips en-dash without backticks', () => {
-  const missionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gates-endash-test-'));
-  fs.writeFileSync(path.join(missionDir, 'MISSION.md'), [
-    '# Mission',
-    '',
-    '## Gates',
-    '',
-    '- [ ] echo hello -– brief note',
-    ''
-  ].join('\n'));
-  try {
-    const result = runDeclaredGates(missionDir, missionDir, { log: () => {}, error: () => {} });
-    assert.strictEqual(result.ok, true);
-    assert.strictEqual(result.reason, 'all-gates-passed');
-  } finally {
-    fs.rmSync(missionDir, { recursive: true, force: true });
-  }
-});
+test('validateDeclaredGates preserves quoted arguments, pipelines, redirects, and compound commands', () => {
+  const result = validateDeclaredGates(
+    ['printf "%s\\n" "all checks pass" | grep -q pass && true > /dev/null'],
+    path.join(__dirname, '..')
+  );
 
-test('runDeclaredGates with backtick and em-dash passes validation then executes', () => {
-  const missionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gates-backtick-val-test-'));
-  fs.writeFileSync(path.join(missionDir, 'MISSION.md'), [
-    '# Mission',
-    '',
-    '## Gates',
-    '',
-    '- [ ] `true` — all good',
-    ''
-  ].join('\n'));
-  try {
-    const result = runDeclaredGates(missionDir, missionDir, { log: () => {}, error: () => {} });
-    assert.strictEqual(result.ok, true);
-    assert.strictEqual(result.reason, 'all-gates-passed');
-  } finally {
-    fs.rmSync(missionDir, { recursive: true, force: true });
-  }
+  assert.equal(result.ok, true);
+  assert.equal(result.reason, 'all-gates-valid');
 });
 
 // ---------- Gatekeeper pushback relaunch (task-1388) ----------
