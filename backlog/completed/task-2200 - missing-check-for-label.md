@@ -1,7 +1,7 @@
 ---
 id: TASK-2200
 title: missing check for label
-status: done
+status: review
 assignee: [codex]
 created_date: '2026-07-06 15:10'
 updated_date: '2026-07-06 15:12'
