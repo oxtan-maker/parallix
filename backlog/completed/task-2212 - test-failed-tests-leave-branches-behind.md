@@ -1,11 +1,11 @@
 ---
 id: TASK-2212
 title: test/failed tests leave branches behind
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-07-11 03:39'
 updated_date: '2026-07-11 03:40'
-labels: []
+labels: [ai_sdlc, bug]
 dependencies: []
 ---
 

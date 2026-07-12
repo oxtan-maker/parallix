@@ -63,11 +63,14 @@ inference calls for the draft, execute, and review agents and is expected to be
 **slower and less deterministic**. A green full-lifecycle run measured ~4
 minutes (242s) on the reference workstation; failing runs usually fail faster
 (the launcher health probe fails in seconds, a draft-phase failure within
-~40s). The single-session timeout defaults to 600s and can be raised via
-`PARALLIX_REAL_AGENT_TIMEOUT_MS`; the active phase gets twice that budget
-because one `px active` invocation covers up to three sequential model
-sessions (execute agent, a possible repair relaunch, and the autonomous
-review loop). Occasional local-model flakiness
+~40s). The health probe allows up to 120s by default so a cold or queued local
+backend can return its first response; set
+`PARALLIX_REAL_AGENT_HEALTHCHECK_TIMEOUT_MS` to tune that limit. The
+single-session timeout defaults to 600s and can be raised via
+`PARALLIX_REAL_AGENT_TIMEOUT_MS`; the health-probe limit is capped at that
+single-session budget, and the active phase gets twice that budget because one
+`px active` invocation covers up to three sequential model sessions (execute
+agent, a possible repair relaunch, and the autonomous review loop). Occasional local-model flakiness
 (slow tool calls, transient backend hiccups) is a known risk of this tier —
 see the failure-bucket classification below for how to tell that apart from
 a genuine Parallix regression.

@@ -7,7 +7,7 @@
     "tasks": { "provider": "backlog-md", "storage": "backlog", "stateMap": "config/state-map.json" },
     "agents": {
       "models": { "codex": "gpt-5.6-terra" },
-      "runners": { "custom": "pi" },
+      "runners": { "custom": "opencode" },
       "subagents": { "maxParallel": 2 }
     },
     "missions": {
@@ -17,6 +17,6 @@
     },
     "verification": { "command": "./scripts/verify-local.sh {{area}}", "defaultArea": "all" },
     "review": { "provider": "forgejo", "baseUrl": "http://localhost:3300", "remote": "review", "repo": "magnus/parallix" },
-    "integrate": { "postIntegrateCommand": "./scripts/refresh-global-px.sh" },
+    "integrate": { "postIntegrateCommand": "./scripts/refresh-global-px.sh" }
   }
 }

@@ -50,6 +50,16 @@ function piCommandCandidates() {
   };
 
   pushCandidate(process.env.PI_BIN);
+  // Pi is commonly installed globally through nvm. Agent launchers may keep
+  // NVM_BIN while narrowing PATH to their own tool directory, so retain this
+  // absolute candidate instead of losing the real runner at that boundary.
+  if (process.env.NVM_BIN) {
+    pushCandidate(path.join(process.env.NVM_BIN, 'pi'));
+  }
+  // A process launched by an nvm-managed Node binary can lose both PATH and
+  // NVM_BIN at an agent boundary. Pi's global nvm install lives alongside
+  // that Node binary, so this keeps the production launcher self-contained.
+  pushCandidate(path.join(path.dirname(process.execPath), 'pi'));
   pushCandidate('pi');
   pushCandidate(path.join(os.homedir(), '.local', 'bin', 'pi'));
   pushCandidate('/usr/local/bin/pi');
