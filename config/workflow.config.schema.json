@@ -96,6 +96,11 @@
           "description": "Agent adapter settings. Agent launcher commands are resolved from PATH and configured via operator-local environment, not this file.",
           "additionalProperties": true,
           "properties": {
+            "maxConcurrentCustom": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Optional maximum simultaneously running custom-agent instances. When unset, custom-agent launches are unlimited; configured values must be positive integers."
+            },
             "models": {
               "type": "object",
               "description": "Optional per-agent-family LLM model override, keyed by agent family name (e.g. codex, claude, gemini, glm, vibe, custom). Each value is the model identifier passed to that agent's CLI. A family that is not listed sends no model parameter, so the agent uses its own default. There is no 'default' key.",

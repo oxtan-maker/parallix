@@ -31,6 +31,7 @@ import {
   resolveCustomLauncher
 } from './launcher-selection.js';
 import { resolveCustomRunner } from '../core/product-config.js';
+import { tryAcquireCustomCapacity } from './custom-capacity.js';
 // Compatibility breadcrumb for tests that inspect compiled agents.js directly:
 // RESUME_CAPABLE = new Set(['claude', 'codex', 'custom'])
 // tools/sessions is still CJS (not converted in this wave); require keeps it
@@ -64,6 +65,7 @@ interface StartAgentOptions {
   sessionsModule?: any;
   log?: Function;
   noOutputWatchdog?: {initialDelayMs?: number, intervalMs?: number} | boolean;
+  launchAgentFn?: Function;
 }
 
 const NON_BLOCKING_LAUNCH_ERROR_PATTERNS = Object.freeze([
@@ -188,7 +190,8 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
     isAgentBlockedFn = defaultIsAgentBlockedNow,
     sessionsModule = sessions,
     log = fmt.log.plain,
-    noOutputWatchdog = {}
+    noOutputWatchdog = {},
+    launchAgentFn = null
   } = opts;
 
   // `exclude` seeds the tried-set so callers can reserve agents (e.g. exclude
@@ -281,6 +284,9 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
       launcher = resolveCustomLauncher(worktree as string);
       customRunner = resolveCustomRunner(worktree as string);
     }
+    if (launchAgentFn) {
+      launcher = launchAgentFn;
+    }
     log(fmt.status('INFO', `Selected agent for step "${step}": ${fmt.agent(chosen || '', chosen || '', customRunner)}${iteration > 1 ? ` (attempt ${iteration})` : ''}`));
 
     // Enforce the agent family as the Forgejo identity (ADR 0029 / task-095).
@@ -321,45 +327,62 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
     }
 
     const watchdogConfig = resolveNoOutputWatchdogConfig(noOutputWatchdog, step);
-    const launchResult = launcher({
-      prompt: actualPrompt,
-      worktree,
-      env: agentEnv,
-      resume,
-      sessionId,
-      model,
-      slug,
-      role,
-      teeOptions: watchdogConfig ? {
-        noOutputWatchdog: {
-          ...watchdogConfig,
-          onNoOutput: (evt: {pid: number, elapsedMs: number}) => {
-            const stage = evt.elapsedMs < (step === 'draft' ? DRAFT_NO_OUTPUT_INITIAL_DELAY_MS : DEFAULT_NO_OUTPUT_INITIAL_DELAY_MS)
-              ? 'starting up'
-              : 'running';
-            log(fmt.status(
-              'INFO',
-              `No output yet from ${fmt.agent(chosen || '')} for step "${step}" after ${formatElapsed(evt.elapsedMs)} ` +
-              `(pid ${evt.pid || 'unknown'}, agent ${stage}). ` +
-              `Launcher is still running; stdout/stderr have not produced visible output.`
-            ));
+    const customReservation = chosen === 'custom'
+      ? tryAcquireCustomCapacity(worktree)
+      : null;
+    if (chosen === 'custom' && !customReservation) {
+      log(fmt.status('WARN', 'Custom-agent capacity is saturated; selecting another eligible agent.'));
+      tried.add(chosen);
+      chosen = undefined;
+      continue;
+    }
+
+    let invocation;
+    let result;
+    try {
+      const launchResult = launcher({
+        prompt: actualPrompt,
+        worktree,
+        env: agentEnv,
+        resume,
+        sessionId,
+        model,
+        slug,
+        role,
+        teeOptions: watchdogConfig ? {
+          noOutputWatchdog: {
+            ...watchdogConfig,
+            onNoOutput: (evt: {pid: number, elapsedMs: number}) => {
+              const stage = evt.elapsedMs < (step === 'draft' ? DRAFT_NO_OUTPUT_INITIAL_DELAY_MS : DEFAULT_NO_OUTPUT_INITIAL_DELAY_MS)
+                ? 'starting up'
+                : 'running';
+              log(fmt.status(
+                'INFO',
+                `No output yet from ${fmt.agent(chosen || '')} for step "${step}" after ${formatElapsed(evt.elapsedMs)} ` +
+                `(pid ${evt.pid || 'unknown'}, agent ${stage}). ` +
+                `Launcher is still running; stdout/stderr have not produced visible output.`
+              ));
+            }
           }
+        } : {}
+      });
+      const { invocation: launchedInvocation, resultPromise } = launchResult;
+      invocation = launchedInvocation;
+      if (invocation) {
+        log(fmt.status('INFO', `Launching: ${fmt.command(`${invocation.command} ${invocation.args.join(' ')}`)}`));
+        if (invocation.options && invocation.options.cwd) {
+          log(fmt.status('INFO', `Working directory: ${fmt.path(invocation.options.cwd)}`));
         }
-      } : {}
-    });
-    const { invocation, resultPromise } = launchResult;
-    if (invocation) {
-      log(fmt.status('INFO', `Launching: ${fmt.command(`${invocation.command} ${invocation.args.join(' ')}`)}`));
-      if (invocation.options && invocation.options.cwd) {
-        log(fmt.status('INFO', `Working directory: ${fmt.path(invocation.options.cwd)}`));
       }
-    }
 
-    if (onLaunch) {
-      await onLaunch({ agent: chosen, invocation });
-    }
+      if (onLaunch) {
+        await onLaunch({ agent: chosen, invocation });
+      }
 
-    const result = resultPromise ? await resultPromise : launchResult.result;
+      result = resultPromise ? await resultPromise : launchResult.result;
+    } finally {
+      customReservation?.release();
+    }
 
     // Pass exit metadata so detectLimitHit only treats matching transcript text
     // as a real limit hit when the launcher actually failed. A successful run
