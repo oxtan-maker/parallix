@@ -703,9 +703,15 @@ function runRealAgentSmoke(runner) {
       refinedBody.includes('- [ ] ./scripts/verify-local.sh all'),
       '[parallix-workflow-failure] drafted MISSION.md has no ## Gates section to refine'
     );
-    fs.writeFileSync(missionFile, refinedBody, 'utf8');
-    runGit(worktree, ['add', path.relative(worktree, missionFile)]);
-    runGit(worktree, ['commit', '-m', `refine(${slug}): pin mission gates to the repo verification gate`]);
+    // A well-behaved agent can already emit this exact gate. In that case
+    // there is no operator change to commit, and Git correctly rejects an
+    // empty commit. Activation only requires the mission state to be
+    // committed, which the draft phase has already done.
+    if (refinedBody !== missionBody) {
+      fs.writeFileSync(missionFile, refinedBody, 'utf8');
+      runGit(worktree, ['add', path.relative(worktree, missionFile)]);
+      runGit(worktree, ['commit', '-m', `refine(${slug}): pin mission gates to the repo verification gate`]);
+    }
 
     // Phase 2: Active - this autostarts the autonomous review loop.
     // px active's preflight requires running from the mission worktree (PWD

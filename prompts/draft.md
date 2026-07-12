@@ -29,6 +29,8 @@ Drafting requirements:
 - That block must tell the agent to use the exact heading `## Goal Check` and the 3-column table `| Criterion | Evidence | Status |`.
 - That block must describe the evidence forms Parallix already verifies today: file:line references, exact test names, ADR references, test file paths, and recognized repo commands/paths such as backticked `npm ...`, `node ...`, `git ...`, `px ...`, or `./...`.
 - That block must make the weak-agent failure mode explicit: raw `stat`/`ls` output or generic prose alone is not enough; pair shell output with one of the accepted references above.
+- Every `## Gates` checklist item must contain only the exact runnable repository command (for example, `- [ ] ./scripts/verify-local.sh all`). Optional Markdown backticks around the whole command are allowed.
+- Never append outcome or explanatory prose to a gate command, including phrases such as "passes on the final tree". Put outcome expectations in Success Criteria or checkpoint documentation instead.
 
 Bug-labeled missions (regression-test-first / "lock the bug"):
 - this section applies only when the backlog task at `{{taskPath}}` carries a `bug` label (in addition to its `ai_sdlc` or `user_value` classification). If there is no `bug` label, ignore this section entirely.

@@ -637,6 +637,48 @@ function findUnverifiableGoalCheckRow(evidenceRows: string[], rootDir: string): 
  */
 function validateDeclaredGates(commands, rootDir) {
   for (const cmd of commands) {
+    // A Markdown code span followed by words is documentation, not an exact
+    // command. Keep the original declaration intact so the operator can fix
+    // the offending MISSION.md line instead of seeing a downstream Bash error.
+    const markdownCommandWithSuffix = /^`[^`\r\n]+`\s+\S/.test(cmd);
+
+    // Ignore quoted arguments while looking for outcome-language suffixes.
+    // This preserves commands such as `echo "all checks pass"`, pipelines,
+    // redirects, and compound commands while rejecting declarations such as
+    // `./scripts/verify-local.sh all passes on the final tree`.
+    let unquoted = '';
+    let proseSingleQuote = false;
+    let proseDoubleQuote = false;
+    for (let ci = 0; ci < cmd.length; ci++) {
+      const ch = cmd[ci];
+      if (ch === '\\' && proseDoubleQuote) {
+        unquoted += '  ';
+        ci++;
+        continue;
+      }
+      if (ch === '\'' && !proseDoubleQuote) {
+        proseSingleQuote = !proseSingleQuote;
+        unquoted += ' ';
+        continue;
+      }
+      if (ch === '"' && !proseSingleQuote) {
+        proseDoubleQuote = !proseDoubleQuote;
+        unquoted += ' ';
+        continue;
+      }
+      unquoted += proseSingleQuote || proseDoubleQuote ? ' ' : ch;
+    }
+    const hasDescriptionSeparator = /\s(?:—|–|-–)\s+\S/.test(unquoted);
+    const hasOutcomeSuffix = /\s(?:passes?|passed|succeeds?|succeeded|completes?|completed)(?:\s+(?:on|in|with|without|after|before|for|the|a|an|successfully|cleanly)\b[^;&|]*)?[.!]?\s*$/i.test(unquoted);
+    if (markdownCommandWithSuffix || hasDescriptionSeparator || hasOutcomeSuffix) {
+      return {
+        ok: false,
+        reason: 'validation-failed',
+        error: `Gate declaration must contain an exact runnable command only. Replace "${cmd}" with the command and move trailing prose or outcome expectations to Success Criteria or checkpoint documentation.`,
+        gate: cmd
+      };
+    }
+
     // Check for unclosed quotes — respect quote context so apostrophes
     // inside double-quoted strings (and vice-versa) are not flagged.
     // Only flag genuinely unmatched quotes (e.g. echo 'unclosed).
@@ -783,9 +825,7 @@ function runDeclaredGates(missionDir, rootDir, options = {}) {
   const commands = gateLines.map(line => {
     // Remove "- [ ] ", "- [x] ", or "- " prefix
     let cmd = line.replace(/^- \[[ x]\]\s*/, '').replace(/^- \s*/, '');
-    // Strip trailing description after em-dash or en-dash (e.g., "cmd — description")
-    cmd = cmd.replace(/\s+(—|-–)\s.*$/, '').trim();
-    // Strip surrounding backticks (e.g., "`npm run typecheck` — zero errors")
+    // Strip optional surrounding Markdown backticks from an exact command.
     cmd = cmd.replace(/^`(.+)`$/, '$1').trim();
     return cmd;
   }).filter(cmd => cmd.length > 0);

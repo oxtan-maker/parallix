@@ -81,6 +81,14 @@ test('buildDraftPrompt reads template and substitutes slug and YYYY', () => {
   }
 });
 
+test('buildDraftPrompt requires command-only Gates and relocates outcome prose', () => {
+  const prompt = buildDraftPrompt('task-test', { rootDir: process.cwd() });
+
+  assert.match(prompt, /Every `## Gates` checklist item must contain only the exact runnable repository command/);
+  assert.match(prompt, /Never append outcome or explanatory prose to a gate command/);
+  assert.match(prompt, /Put outcome expectations in Success Criteria or checkpoint documentation instead/);
+});
+
 test('draft setup accepts valid labels and tolerates missing labels before launch', () => {
   const okResult = validateMissionType('task-test', '/tmp/worktree', {
     resolveMissionClassificationFn: () => ({ [typeKey]: 'ai_sdlc' }),
