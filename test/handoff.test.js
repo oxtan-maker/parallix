@@ -3,8 +3,17 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { verifyHandoff, performHandoff } = require('../lib/commands/handoff');
+const { verifyHandoff, performHandoff, _findUnverifiableGoalCheckRow } = require('../lib/commands/handoff');
 const { mock } = test;
+
+test('evidence shell commands require an existing file argument', () => {
+  const rootDir = path.join(__dirname, '..');
+  const bareCommandRow = '| Criterion | `cat` | PASS |';
+  const fileCommandRow = '| Criterion | `cat package.json` | PASS |';
+
+  assert.equal(_findUnverifiableGoalCheckRow([bareCommandRow], rootDir), bareCommandRow);
+  assert.equal(_findUnverifiableGoalCheckRow([fileCommandRow], rootDir), null);
+});
 
 // Mock external modules
 const git = require('../lib/core/git');

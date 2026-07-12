@@ -241,6 +241,15 @@ function extractPiTelemetry(stdout: string) {
     }
   }
   if (!lastUsage) {return null;}
+  // Pi's usage shape varies by backend: some report {input, output, total},
+  // others use {prompt_tokens, completion_tokens, total_tokens}. Normalize to
+  // the telemetry convention expected by stats.ts (inputTokens, outputTokens).
+  const rawInput = lastUsage.input ?? lastUsage.prompt_tokens;
+  const rawOutput = lastUsage.output ?? lastUsage.completion_tokens;
+  const rawTotal = lastUsage.totalTokens ?? lastUsage.total ?? lastUsage.prompt_tokens + lastUsage.completion_tokens;
+  const inputTokens = Number(rawInput) || (rawTotal !== null && Number(rawInput) === 0
+    ? Math.floor(Number(rawTotal) * 0.6) // fallback: estimate input as ~60% of total
+    : 0);
   return {
     // Provider is the launcher identity ("pi"), matching opencode-telemetry's
     // convention of reporting the launcher name rather than the underlying
@@ -248,10 +257,10 @@ function extractPiTelemetry(stdout: string) {
     // actually invoked, distinct from opencode's rows even against the same model.
     provider: 'pi',
     model: lastModel,
-    inputTokens: Number(lastUsage.input) || 0,
-    outputTokens: Number(lastUsage.output) || 0,
+    inputTokens,
+    outputTokens: Number(rawOutput) || 0,
     cachedTokens: Number(lastUsage.cacheRead) || 0,
-    totalTokens: Number(lastUsage.totalTokens) || 0,
+    totalTokens: Number(rawTotal) || 0,
     toolCalls,
     usagePercent: null
   };

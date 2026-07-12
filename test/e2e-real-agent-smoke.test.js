@@ -31,6 +31,11 @@ const CLI_ENTRY = path.resolve(__dirname, '..', packageJson.bin.px);
 // ambient PARALLIX_HOME/global state.
 const workflowConfig = require('../workflow.config.json');
 const CUSTOM_MODEL = workflowConfig?.adapters?.agents?.models?.custom;
+// Pi rejects placeholder credentials such as "dummy-key" before contacting a
+// provider. The smoke fixture uses a local vLLM endpoint, for which any
+// non-placeholder bearer token is sufficient, so give only its disposable
+// copied configuration a deterministic test token.
+const LOCAL_PI_E2E_API_KEY = 'parallix-pi-e2e-local-key';
 const RUN_TIMEOUT_MS = Number(process.env.PARALLIX_REAL_AGENT_TIMEOUT_MS || 600000);
 // A cold local backend or a queued shared model can need longer than the
 // original 45-second probe cap before it emits its first response. Keep the
@@ -126,6 +131,20 @@ function piCommandCandidates() {
   // executable so setupRepository can place its real-pi symlink in binDir.
   if (process.env.NVM_BIN) {
     pushCandidate(path.join(process.env.NVM_BIN, 'pi'));
+  }
+  // Integration gates can be launched by a system Node process, which means
+  // neither NVM_BIN nor process.execPath identifies the nvm-managed Pi
+  // installation. Discover executable Pi candidates across installed nvm Node
+  // versions before falling back to PATH.
+  const nvmVersionsDir = path.join(os.homedir(), '.nvm', 'versions', 'node');
+  try {
+    for (const entry of fs.readdirSync(nvmVersionsDir, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        pushCandidate(path.join(nvmVersionsDir, entry.name, 'bin', 'pi'));
+      }
+    }
+  } catch (_) {
+    // nvm is optional; the regular candidates below cover other installs.
   }
   // Match the production launcher's fallback for runners started from a
   // stripped environment that retains neither PATH nor NVM_BIN.
@@ -252,7 +271,10 @@ function runOpencodeHealthcheck(repoRoot, env, timeoutMs = HEALTHCHECK_TIMEOUT_M
 }
 
 function runPiHealthcheck(repoRoot, env, timeoutMs = HEALTHCHECK_TIMEOUT_MS) {
-  const command = maybePiPath() || 'pi';
+  // Once setupRepository has linked the selected real executable into binDir,
+  // keep the probe on that exact path too. This prevents an inherited PI_BIN
+  // or a different Node installation from selecting another Pi binary.
+  const command = env.PI_BIN || maybePiPath() || 'pi';
   const args = ['--print', '--mode', 'json', '--approve'];
   if (CUSTOM_MODEL) {args.push('--model', CUSTOM_MODEL);}
   args.push('Reply with exactly OK');
@@ -291,6 +313,16 @@ function setupRepository({ slug, title, runner = 'opencode' }) {
       if (fs.existsSync(source)) {
         fs.copyFileSync(source, path.join(piAgentHome, fileName));
       }
+    }
+    const piModelsPath = path.join(piAgentHome, 'models.json');
+    if (fs.existsSync(piModelsPath)) {
+      const piModels = JSON.parse(fs.readFileSync(piModelsPath, 'utf8'));
+      for (const provider of Object.values(piModels.providers || {})) {
+        if (typeof provider?.apiKey === 'string' && /^(?:dummy|placeholder)/i.test(provider.apiKey)) {
+          provider.apiKey = LOCAL_PI_E2E_API_KEY;
+        }
+      }
+      fs.writeFileSync(piModelsPath, `${JSON.stringify(piModels, null, 2)}\n`, 'utf8');
     }
   }
 
@@ -516,6 +548,9 @@ function runRealAgentSmoke(runner) {
     PATH: `${repo.binDir}${path.delimiter}${process.env.PATH || ''}`
   };
   if (runner === 'pi') {
+    // Pin both Pi's executable and mutable agent state to the disposable
+    // fixture. The launcher resolves PI_BIN before NVM/PATH fallbacks.
+    env.PI_BIN = path.join(repo.binDir, 'pi');
     env.PI_CODING_AGENT_DIR = repo.piAgentHome;
   }
   // Drop the inherited PWD: opencode trusts PWD over the real cwd for project
