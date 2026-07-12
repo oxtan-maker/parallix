@@ -4,6 +4,7 @@ title: change parallix to make all backlog.md state changes on main
 status: backlog
 assignee: []
 created_date: '2026-07-12 04:54'
+updated_date: '2026-07-12 11:07'
 labels: []
 dependencies: []
 ---
@@ -11,7 +12,9 @@ dependencies: []
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-backlog.md does not really work well when you are changing a backlog state on a branch, to does not get picked up. Change parallix so all backlog.md task changes are done on main/featurebranch instead and then the mission branch is rebased afterwards
+backlog.md does not really work well when you are changing a backlog state on a branch, to does not get picked up. Change parallix so all backlog.md task changes are done on main/featurebranch instead and then the mission branch is rebased afterwards.
+
+Be carefule to find all reads and writes or this mission will leave parallix with regressions, which is not the purpose of this mission
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Definition of Done
