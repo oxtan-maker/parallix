@@ -1,10 +1,10 @@
 ---
 id: TASK-2236
 title: pi is not working on the e2e test
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-07-12 11:05'
-labels: []
+labels: [bug, user_value]
 dependencies: []
 ---
 

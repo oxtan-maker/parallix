@@ -70,9 +70,11 @@ export function classifyError(errorMsg: string): { failureClass: FailureClassTyp
     return { failureClass: FailureClass.InfraBlocker, dispatchAction: DispatchAction.HumanOnly };
   }
 
-  // 1. IncompleteEvidence: goal-check table missing evidence rows (most specific — checked before generic gate patterns)
-  if (errorMsg.includes('has a "## Goal Check" section but no evidence rows') &&
-      errorMsg.includes('A goal-check table with real evidence is required before handoff')) {
+  // 1. IncompleteEvidence: goal-check table missing or lacking evidence rows
+  // (most specific — checked before generic gate patterns).
+  // Covers both "missing section" and "section present but no valid evidence".
+  if (errorMsg.includes('"## Goal Check"') &&
+      errorMsg.includes('required before handoff')) {
     return { failureClass: FailureClass.IncompleteEvidence, dispatchAction: DispatchAction.AutoSendBack };
   }
 

@@ -158,6 +158,19 @@ function evidenceCellHasVerifiableReference(cell: string, rootDir: string, known
     if (/^(npm|npx|node|git|px)\s+/i.test(command)) {
       return true;
     }
+    // Common shell commands followed by a file argument (e.g. `bash hello.sh`,
+    // `cat output.txt`). The file path is checked against rootDir.
+    if (/^(bash|sh|cat|head|tail|diff|grep|sed|awk|xxd|od|wc|sort|uniq)\s+/i.test(command)) {
+      const args = command.split(/\s+/).slice(1);
+      for (const arg of args) {
+        // Skip flags like -n, --context, etc.
+        if (arg.startsWith('-')) { continue; }
+        const candidatePath = arg.replace(/^\./, '');
+        if (fs.existsSync(path.join(rootDir, candidatePath))) {
+          return true;
+        }
+      }
+    }
     if (command.startsWith('./')) {
       const commandPath = command.split(/\s+/)[0];
       if (fs.existsSync(path.join(rootDir, commandPath.replace(/^\.\//, '')))) {
@@ -825,8 +838,6 @@ function runDeclaredGates(missionDir, rootDir, options = {}) {
   const commands = gateLines.map(line => {
     // Remove "- [ ] ", "- [x] ", or "- " prefix
     let cmd = line.replace(/^- \[[ x]\]\s*/, '').replace(/^- \s*/, '');
-    // Strip trailing description after em-dash or en-dash (e.g., "cmd — description")
-    cmd = cmd.replace(/\s+(—|-–)\s.*$/, '').trim();
     // Strip surrounding backticks (e.g., "`npm run typecheck` — zero errors")
     cmd = cmd.replace(/^`(.+)`$/, '$1').trim();
     return cmd;

@@ -42,7 +42,7 @@ function formatBlockUntil(date) {
 }
 
 const sharedLauncherBin = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-test-launchers-'));
-for (const name of ['codex', 'claude', 'opencode', 'vibe']) {
+for (const name of ['codex', 'claude', 'opencode', 'vibe', 'pi']) {
   const launcherPath = path.join(sharedLauncherBin, name);
   fs.writeFileSync(launcherPath, `#!${process.execPath}\nprocess.exit(0);\n`);
   fs.chmodSync(launcherPath, 0o755);
@@ -62,22 +62,27 @@ test.after(() => {
 test.beforeEach(() => resetCustomCapacity());
 
 test('custom capacity saturation selects an eligible non-custom agent and preserves explicit exhaustion', () => {
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'custom-capacity-selection-'));
+  fs.writeFileSync(path.join(worktree, 'workflow.config.json'), JSON.stringify({
+    adapters: { agents: { maxConcurrentCustom: 1 } }
+  }), 'utf8');
   const config = {
     steps: {
       draft: { eligible: ['custom', 'codex'], selection: 'first' },
       review: { eligible: ['custom'], selection: 'first' }
     }
   };
-  const reservation = tryAcquireCustomCapacity();
+  const reservation = tryAcquireCustomCapacity(worktree);
   assert.ok(reservation, 'the first custom reservation should acquire the default capacity');
   try {
-    assert.equal(selectAgent('draft', { config }), 'codex');
+    assert.equal(selectAgent('draft', { config, worktree }), 'codex');
     assert.throws(
-      () => selectAgent('review', { config }),
+      () => selectAgent('review', { config, worktree }),
       /All eligible agents for step "review" are exhausted/
     );
   } finally {
     reservation.release();
+    fs.rmSync(worktree, { recursive: true, force: true });
   }
 });
 
@@ -1880,55 +1885,80 @@ test('startAgent throws with clear error when all agents exhausted', async () =>
 
 test('startAgent passes the resolved model to the launcher invocation', async () => {
   const log = [];
+  let launcherModel;
   const result = await startAgent('review', {
     prompt: 'test',
     selectAgentFn: () => 'custom',
     resolveAgentModelFn: (agent) => (agent === 'custom' ? 'qwen3.5:9b' : null),
-    log: msg => log.push(msg)
+    log: msg => log.push(msg),
+    launchAgentFn: (opts) => {
+      launcherModel = opts.model;
+      const args = ['run', '--pure', opts.prompt];
+      if (opts.model) {
+        args.push('-m', opts.model);
+      }
+      return { invocation: { command: 'custom', args, options: {} }, resultPromise: Promise.resolve({ status: 0, stdout: '', stderr: '' }) };
+    }
   });
 
-  const i = result.invocation.args.indexOf('-m');
-  assert.ok(i !== -1, `expected -m flag in args: ${result.invocation.args.join(' ')}`);
-  assert.equal(result.invocation.args[i + 1], 'qwen3.5:9b');
+  assert.equal(launcherModel, 'qwen3.5:9b', 'launcher must receive the resolved model');
+  const modelIdx = result.invocation.args.indexOf('qwen3.5:9b');
+  assert.ok(modelIdx !== -1, `expected model in args: ${result.invocation.args.join(' ')}`);
   assert.ok(log.some(m => m.includes('Using configured model for') && m.includes('qwen3.5:9b')));
 });
 
 test('startAgent omits the model flag when resolveAgentModel returns null', async () => {
+  let launcherModel;
   const result = await startAgent('review', {
     prompt: 'test',
     selectAgentFn: () => 'custom',
-    resolveAgentModelFn: () => null
+    resolveAgentModelFn: () => null,
+    launchAgentFn: (opts) => {
+      launcherModel = opts.model;
+      const args = ['run', '--pure', opts.prompt];
+      if (opts.model) {
+        args.push('-m', opts.model);
+      }
+      return { invocation: { command: 'custom', args, options: {} }, resultPromise: Promise.resolve({ status: 0, stdout: '', stderr: '' }) };
+    }
   });
 
+  assert.equal(launcherModel, null, 'launcher must receive null model');
   assert.ok(!result.invocation.args.includes('-m'));
 });
 
 test('non-limit launch failure with transient error retries and persists a block for non-custom agents', async () => {
-  let blockCalls = [];
-  const fakeBlockFn = (agent, until) => {
-    blockCalls.push({ agent, until });
-    return { path: '/fake/agents.local.json', blocklist: {} };
-  };
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-non-limit-'));
+  try {
+    let blockCalls = [];
+    const fakeBlockFn = (agent, until) => {
+      blockCalls.push({ agent, until });
+      return { path: '/fake/agents.local.json', blocklist: {} };
+    };
 
-  const error = await withPathLaunchers({
-    opencode: 'if (process.argv.includes("--help")) process.exit(0); process.exit(1);',
-    vibe: 'if (process.argv.includes("--help")) process.exit(0); process.exit(1);'
-  }, () => startAgent('draft', {
-    prompt: 'Execute.',
-    selectAgentFn: (step, opts) => {
-      if (!opts.exclude.has('vibe')) return 'vibe';
-      if (!opts.exclude.has('custom')) return 'custom';
-      throw new Error('All eligible agents exhausted');
-    },
-    detectLimitHitFn: () => null,
-    updateAgentBlockFn: fakeBlockFn,
-    log: () => {}
-  }).catch(err => err));
+    const error = await withPathLaunchers({
+      opencode: 'if (process.argv.includes("--help")) process.exit(0); process.exit(1);',
+      vibe: 'if (process.argv.includes("--help")) process.exit(0); process.exit(1);'
+    }, () => startAgent('draft', {
+      prompt: 'Execute.',
+      worktree: tmpRoot,
+      selectAgentFn: (step, opts) => {
+        if (!opts.exclude.has('vibe')) return 'vibe';
+        if (!opts.exclude.has('custom')) return 'custom';
+        throw new Error('All eligible agents exhausted');
+      },
+      detectLimitHitFn: () => null,
+      updateAgentBlockFn: fakeBlockFn,
+      log: () => {}
+    }).catch(err => err));
 
-  assert.ok(error instanceof Error);
-  assert.ok(error.message.includes('All eligible agents exhausted'));
-  assert.equal(blockCalls.length, 1, `transient non-limit failures should persist one block for mistral; got ${JSON.stringify(blockCalls)}`);
-  assert.equal(blockCalls[0].agent, 'vibe');
+    assert.ok(error instanceof Error);
+    assert.ok(error.message.includes('All eligible agents exhausted'));
+    assert.equal(blockCalls.length, 1, `transient non-limit failures should persist one block for mistral; got ${JSON.stringify(blockCalls)}`);
+    assert.equal(blockCalls[0].agent, 'vibe');
+  } finally {
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+  }
 });
 
 test('invalid-model launch failure retries without persisting a blocklist entry', async () => {
@@ -1963,58 +1993,70 @@ test('invalid-model launch failure retries without persisting a blocklist entry'
 });
 
 test('custom is excluded from non-limit block logic', async () => {
-  let blockCalls = [];
-  const fakeBlockFn = (agent, until) => {
-    blockCalls.push({ agent, until });
-    return { path: '/fake/agents.local.json', blocklist: {} };
-  };
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-custom-excluded-'));
+  try {
+    let blockCalls = [];
+    const fakeBlockFn = (agent, until) => {
+      blockCalls.push({ agent, until });
+      return { path: '/fake/agents.local.json', blocklist: {} };
+    };
 
-  const error = await withPathLaunchers({
-    opencode: 'if (process.argv.includes("--help")) process.exit(0); process.exit(1);',
-    vibe: 'if (process.argv.includes("--help")) process.exit(0); process.exit(1);'
-  }, () => startAgent('draft', {
-    prompt: 'Execute.',
-    selectAgentFn: (step, opts) => {
-      if (!opts.exclude.has('custom')) return 'custom';
-      if (!opts.exclude.has('vibe')) return 'vibe';
-      throw new Error('All eligible agents exhausted');
-    },
-    detectLimitHitFn: () => null,
-    updateAgentBlockFn: fakeBlockFn,
-    log: () => {}
-  }).catch(err => err));
+    const error = await withPathLaunchers({
+      opencode: 'if (process.argv.includes("--help")) process.exit(0); process.exit(1);',
+      vibe: 'if (process.argv.includes("--help")) process.exit(0); process.exit(1);'
+    }, () => startAgent('draft', {
+      prompt: 'Execute.',
+      worktree: tmpRoot,
+      selectAgentFn: (step, opts) => {
+        if (!opts.exclude.has('custom')) return 'custom';
+        if (!opts.exclude.has('vibe')) return 'vibe';
+        throw new Error('All eligible agents exhausted');
+      },
+      detectLimitHitFn: () => null,
+      updateAgentBlockFn: fakeBlockFn,
+      log: () => {}
+    }).catch(err => err));
 
-  assert.ok(error instanceof Error);
-  assert.ok(error.message.includes('All eligible agents exhausted'));
-  assert.equal(blockCalls.length, 1, `only non-custom agents should be blocklisted on transient failures; got ${JSON.stringify(blockCalls)}`);
-  assert.equal(blockCalls[0].agent, 'vibe', 'mistral should be blocked, not custom');
+    assert.ok(error instanceof Error);
+    assert.ok(error.message.includes('All eligible agents exhausted'));
+    assert.equal(blockCalls.length, 1, `only non-custom agents should be blocklisted on transient failures; got ${JSON.stringify(blockCalls)}`);
+    assert.equal(blockCalls[0].agent, 'vibe', 'mistral should be blocked, not custom');
+  } finally {
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+  }
 });
 
 test('hard launch failure (model not found) does not blocklist agent family', async () => {
-  let blockCalls = [];
-  const fakeBlockFn = (agent, until) => {
-    blockCalls.push({ agent, until });
-    return { path: '/fake/agents.local.json', blocklist: {} };
-  };
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-hard-failure-'));
+  try {
+    let blockCalls = [];
+    const fakeBlockFn = (agent, until) => {
+      blockCalls.push({ agent, until });
+      return { path: '/fake/agents.local.json', blocklist: {} };
+    };
 
-  const error = await withPathLaunchers({
-    opencode: 'if (process.argv.includes("--help")) process.exit(0); console.error("Error: model not found"); process.exit(1);',
-    vibe: 'if (process.argv.includes("--help")) process.exit(0); console.error("Error: model not found"); process.exit(1);'
-  }, () => startAgent('draft', {
-    prompt: 'Execute.',
-    selectAgentFn: (step, opts) => {
-      if (!opts.exclude.has('vibe')) return 'vibe';
-      if (!opts.exclude.has('custom')) return 'custom';
-      throw new Error('All eligible agents exhausted');
-    },
-    detectLimitHitFn: () => null,
-    updateAgentBlockFn: fakeBlockFn,
-    log: () => {}
-  }).catch(err => err));
+    const error = await withPathLaunchers({
+      opencode: 'if (process.argv.includes("--help")) process.exit(0); console.error("Error: model not found"); process.exit(1);',
+      vibe: 'if (process.argv.includes("--help")) process.exit(0); console.error("Error: model not found"); process.exit(1);'
+    }, () => startAgent('draft', {
+      prompt: 'Execute.',
+      worktree: tmpRoot,
+      selectAgentFn: (step, opts) => {
+        if (!opts.exclude.has('vibe')) return 'vibe';
+        if (!opts.exclude.has('custom')) return 'custom';
+        throw new Error('All eligible agents exhausted');
+      },
+      detectLimitHitFn: () => null,
+      updateAgentBlockFn: fakeBlockFn,
+      log: () => {}
+    }).catch(err => err));
 
-  assert.ok(error instanceof Error);
-  assert.ok(error.message.includes('All eligible agents exhausted'));
-  assert.equal(blockCalls.length, 0, `hard failures must not persist blocklist entries; got ${JSON.stringify(blockCalls)}`);
+    assert.ok(error instanceof Error);
+    assert.ok(error.message.includes('All eligible agents exhausted'));
+    assert.equal(blockCalls.length, 0, `hard failures must not persist blocklist entries; got ${JSON.stringify(blockCalls)}`);
+  } finally {
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+  }
 });
 
 // Reproduces the reported symptom: mistral/vibe repeatedly re-enters the
