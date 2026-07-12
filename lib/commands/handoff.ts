@@ -825,7 +825,9 @@ function runDeclaredGates(missionDir, rootDir, options = {}) {
   const commands = gateLines.map(line => {
     // Remove "- [ ] ", "- [x] ", or "- " prefix
     let cmd = line.replace(/^- \[[ x]\]\s*/, '').replace(/^- \s*/, '');
-    // Strip optional surrounding Markdown backticks from an exact command.
+    // Strip trailing description after em-dash or en-dash (e.g., "cmd — description")
+    cmd = cmd.replace(/\s+(—|-–)\s.*$/, '').trim();
+    // Strip surrounding backticks (e.g., "`npm run typecheck` — zero errors")
     cmd = cmd.replace(/^`(.+)`$/, '$1').trim();
     return cmd;
   }).filter(cmd => cmd.length > 0);

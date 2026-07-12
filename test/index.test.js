@@ -230,6 +230,23 @@ test('printUsage prints the command help text', () => {
   assert.match(all, /--version/);
 });
 
+test('printUsage documents draft and active implementer-selection syntax', () => {
+  const previousLog = console.log;
+  const lines = [];
+  console.log = (msg) => lines.push(msg);
+  try {
+    printUsage();
+  } finally {
+    console.log = previousLog;
+  }
+
+  const all = lines.join('\n');
+  assert.match(all, /draft \[<slug>\] \[--agent <family>\]/);
+  assert.match(all, /--agent to select the draft implementer family/);
+  assert.match(all, /active \[<slug>\] \[--implementer <family>\]/);
+  assert.match(all, /--implementer to select its family/);
+});
+
 test('printUsage documents every KNOWN_COMMANDS entry', () => {
   const previousLog = console.log;
   const lines = [];
