@@ -25,6 +25,14 @@ if (!fs.existsSync(agentsLocalPath)) {
   fs.writeFileSync(agentsLocalPath, '{"blocklist":{}}\n');
 }
 
+// Launcher resolution prefers explicit *_BIN env overrides over PATH
+// (resolveOpencodeCommand / resolvePiCommand), so an operator shell that
+// exports them would bypass the PATH safety net below and hand unit tests the
+// real CLI — an expensive launch that hangs the suite (task-2231). Tests that
+// exercise the override behaviour set these vars themselves.
+delete process.env.OPENCODE_BIN;
+delete process.env.PI_BIN;
+
 // Safety net: if a test forgets to stub launcher discovery, these harmless
 // binaries prevent real Codex/Claude/Vibe/Opencode CLIs from consuming tokens
 // or mutating operator-local state on the workstation.
