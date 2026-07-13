@@ -1,14 +1,17 @@
 ---
 id: TASK-2223
 title: Update the distribution ADR with a repository-wide TypeScript model
-status: review
-assignee: [custom]
+status: done
+assignee:
+  - custom
 created_date: '2026-07-11 00:00'
+updated_date: '2026-07-13 13:39'
 labels:
   - adr
   - typescript
   - architecture
   - distribution
+  - user_value
 dependencies: []
 priority: high
 ---
@@ -38,6 +41,12 @@ Update ADR 0044 with a dated decision for a best-in-class TypeScript development
 - [ ] #13 Do not modify runtime code, package scripts, compiler configuration, or tracked generated JavaScript in this ADR mission
 - [ ] #14 Run `./scripts/verify-local.sh docs` and documentation link/consistency checks successfully
 <!-- AC:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Integrated manually after completing the rebase. The 2026-07-11 ADR update and follow-up migration tasks T1–T6 are now on main.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Required Decision Outputs
 
