@@ -1,8 +1,8 @@
 ---
 id: TASK-2258
 title: slow unit tests
-status: refined
-assignee: [codex]
+status: active
+assignee: [custom]
 created_date: '2026-07-13 13:26'
 updated_date: '2026-07-13 13:28'
 labels: []
