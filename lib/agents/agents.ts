@@ -503,7 +503,7 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
         const sessionId = result && result.sessionId ? result.sessionId : null;
         ((sessionsModule as any)).writeSession(worktree, slug, role, { agent: chosen || '', sessionId });
       } catch (err) {
-        log(fmt.status('WARN', `Could not persist session marker for ${fmt.slug(slug)} (${role}): ${(err as any).message}`));
+        throw new Error(`Could not persist session marker for ${slug} (${role}): ${(err as any).message}`);
       }
     }
 

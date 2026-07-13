@@ -236,6 +236,82 @@ test('writeJson accepts a resolver function instead of a path', () => {
   }
 });
 
+test('writeFileAtomic propagates write failure and removes its stale temporary file', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'storage-write-fail-'));
+  const target = path.join(tmpDir, 'state.json');
+  const staleTemp = path.join(tmpDir, '.state.json.stale.tmp');
+  fs.writeFileSync(staleTemp, 'stale');
+  const fsModule = { ...fs, writeFileSync() { throw new Error('injected write failure'); } };
+  try {
+    assert.throws(
+      () => storage.writeFileAtomic(target, 'new', { fsModule, tempPathFactory: () => staleTemp }),
+      /injected write failure/
+    );
+    assert.equal(fs.existsSync(staleTemp), false);
+    assert.equal(fs.existsSync(target), false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('writeFileAtomic propagates rename failure and preserves the previous valid file', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'storage-rename-fail-'));
+  const target = path.join(tmpDir, 'state.json');
+  const temp = path.join(tmpDir, '.state.json.rename.tmp');
+  fs.writeFileSync(target, 'previous\n');
+  const fsModule = { ...fs, renameSync() { throw new Error('injected rename failure'); } };
+  try {
+    assert.throws(
+      () => storage.writeFileAtomic(target, 'replacement\n', { fsModule, tempPathFactory: () => temp }),
+      /injected rename failure/
+    );
+    assert.equal(fs.readFileSync(target, 'utf8'), 'previous\n');
+    assert.equal(fs.existsSync(temp), false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('writeFileAtomic successfully replaces content and preserves permission mode', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'storage-mode-'));
+  const target = path.join(tmpDir, 'state.json');
+  try {
+    fs.writeFileSync(target, 'old\n', { mode: 0o640 });
+    fs.chmodSync(target, 0o640);
+    storage.writeFileAtomic(target, 'new\n');
+    assert.equal(fs.readFileSync(target, 'utf8'), 'new\n');
+    assert.equal(fs.statSync(target).mode & 0o777, 0o640);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('writeJson creates parents and serializes UTF-8 with exactly one final newline', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'storage-utf8-'));
+  const target = path.join(tmpDir, 'nested', 'state.json');
+  try {
+    storage.writeJson(target, { label: 'räksmörgås' });
+    const raw = fs.readFileSync(target, 'utf8');
+    assert.deepEqual(JSON.parse(raw), { label: 'räksmörgås' });
+    assert.equal(raw, `${JSON.stringify({ label: 'räksmörgås' }, null, 2)}\n`);
+    assert.equal(raw.endsWith('\n'), true);
+    assert.equal(raw.endsWith('\n\n'), false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('writeFileAtomic applies a restrictive requested mode to new sensitive state', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'storage-sensitive-'));
+  const target = path.join(tmpDir, 'operator.json');
+  try {
+    storage.writeFileAtomic(target, '{}\n', { mode: 0o600 });
+    assert.equal(fs.statSync(target).mode & 0o777, 0o600);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 // ---------- isInitialized ----------
 
 test('isInitialized returns false for non-existent directory', () => {

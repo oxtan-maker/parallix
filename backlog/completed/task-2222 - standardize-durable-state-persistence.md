@@ -1,7 +1,7 @@
 ---
 id: TASK-2222
 title: Standardize durable state persistence across the repository
-status: review
+status: done
 assignee:
   - codex
 created_date: '2026-07-11 00:00'
@@ -11,6 +11,7 @@ labels:
   - reliability
   - persistence
   - maintainability
+  - user_value
 dependencies:
   - TASK-2220
 priority: medium

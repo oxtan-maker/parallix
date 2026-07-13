@@ -14,6 +14,7 @@ import { runVerificationGate } from '../core/verification.js';
 import { isForgejoReviewEnabled } from '../core/product-config.js';
 import { rebaseBeforeReviewRound } from '../review/rebase.js';
 import * as nels from '../core/nels.js';
+import { writeJson } from '../core/storage.js';
 import { attemptAgentRelaunch } from './active.js';
 
 // Export for testing
@@ -202,11 +203,11 @@ function findUnverifiableGoalCheckRow(evidenceRows: string[], rootDir: string): 
   * 4. Commits and pushes the Backlog state change to Forgejo.
   *
   * @param {string} slug - Mission slug
-  * @param {{skipGate?: boolean, worktree?: string|null, force?: boolean, forceWithLease?: boolean, log?: Function, error?: Function, rebaseFn?: Function, isForgejoReviewEnabledFn?: Function}} [options]
+  * @param {{skipGate?: boolean, worktree?: string|null, force?: boolean, forceWithLease?: boolean, log?: Function, error?: Function, rebaseFn?: Function, isForgejoReviewEnabledFn?: Function, captureNelFn?: Function}} [options]
   * @returns {Promise<{ ok: boolean, error?: string, gatekeeperPushedBack?: boolean }>}
   */
   async function performHandoff(slug, options = {}) {
-      /** @type{{skipGate?: boolean, worktree?: string|null, force?: boolean, forceWithLease?: boolean, log?: Function, error?: Function, rebaseFn?: Function, isForgejoReviewEnabledFn?: Function, runVerificationGateFn?: Function, maxAttempts?: number, attemptAgentRelaunchFn?: Function, remainingRetries?: number, runGatekeeperFn?: Function}} */
+      /** @type{{skipGate?: boolean, worktree?: string|null, force?: boolean, forceWithLease?: boolean, log?: Function, error?: Function, rebaseFn?: Function, isForgejoReviewEnabledFn?: Function, runVerificationGateFn?: Function, maxAttempts?: number, attemptAgentRelaunchFn?: Function, remainingRetries?: number, runGatekeeperFn?: Function, captureNelFn?: Function}} */
        const opts = options;
        const {
          skipGate = false,
@@ -220,7 +221,8 @@ function findUnverifiableGoalCheckRow(evidenceRows: string[], rootDir: string): 
          maxAttempts,
          attemptAgentRelaunchFn = attemptAgentRelaunch,
          remainingRetries,
-         runGatekeeperFn = gatekeeper.runGatekeeper
+         runGatekeeperFn = gatekeeper.runGatekeeper,
+         captureNelFn = captureNelAtHandoff
        } = opts;
 
     // Recursion guard: prevent infinite retry loops when gatekeeper pushback
@@ -385,9 +387,13 @@ function findUnverifiableGoalCheckRow(evidenceRows: string[], rootDir: string): 
 
   // Step 1.7: NEL capture — compute actual NEL from merge diff and persist record
   log('Step 1.7: Capturing Net Engineering Lines (NEL) at handoff...');
-  const nelResult = captureNelAtHandoff(slug, { rootDir, missionDir: missionDirPath, log, error });
+  const nelResult = captureNelFn(slug, { rootDir, missionDir: missionDirPath, log, error });
   if (nelResult.ok) {
     log(fmt.status('PASS', `NEL captured: ${nelResult.nel} NEL (${nelResult.bucket.label} bucket)`));
+  } else if (nelResult.persistenceFailed) {
+    const msg = `NEL persistence failed; handoff stopped before review state advanced: ${nelResult.error}`;
+    error(msg);
+    return { ok: false, error: msg };
   } else {
     log(fmt.status('WARN', `NEL capture skipped: ${nelResult.error}`));
   }
@@ -1012,14 +1018,14 @@ function buildAutoCheckpointContent(slug) {
  * bucket from the mission's Refinement Signals, resolves review rounds from
  * review-state.json, and persists a per-mission NEL record as `nel-record.json`.
  *
- * This is purely observational — no enforcement, gates, or blocks.
+ * NEL values remain observational; failure to durably persist a computed value is fatal to handoff.
  *
  * @param {string} slug - Mission slug
- * @param {{ rootDir: string, missionDir: string, log: Function, error: Function }} options
- * @returns {{ ok: boolean, nel?: number, bucket?: string, error?: string }}
+ * @param {{ rootDir: string, missionDir: string, log: Function, error: Function, writeJsonFn?: typeof writeJson }} options
+ * @returns {{ ok: boolean, nel?: number, bucket?: string, persistenceFailed?: boolean, error?: string }}
  */
 function captureNelAtHandoff(slug, options) {
-   const { rootDir, missionDir, error } = options;
+   const { rootDir, missionDir, error, writeJsonFn = writeJson } = options;
 
   // 1. Determine primary branch for diff range
   let primaryBranch;
@@ -1079,10 +1085,10 @@ function captureNelAtHandoff(slug, options) {
   };
 
   try {
-    fs.writeFileSync(nelRecordPath, JSON.stringify(record, null, 2) + '\n', 'utf8');
+    writeJsonFn(nelRecordPath, record);
   } catch (err) {
     error(`Failed to write NEL record: ${err.message}`);
-    return { ok: false, error: `failed to write NEL record: ${err.message}` };
+    return { ok: false, persistenceFailed: true, error: `failed to write NEL record: ${err.message}` };
   }
 
   return { ok: true, nel: actualNel, bucket: actualBucket };

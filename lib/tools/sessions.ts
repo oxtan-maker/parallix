@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { writeJson } from '../core/storage.js';
 
 // Per-worktree session markers used by startAgent to decide whether to launch
 // an agent fresh or with its family-specific resume flag. Stored under
@@ -31,17 +32,22 @@ function readSession(worktree: string, slug: string, role: string) {
 }
 
 /** @param {string} worktree @param {string} slug @param {string} role @param {{agent: string, lastLaunched?: string, sessionId?: string|null}} payload */
-function writeSession(worktree: string, slug: string, role: string, payload: {agent: string, lastLaunched?: string, sessionId?: string | null}) {
+function writeSession(
+  worktree: string,
+  slug: string,
+  role: string,
+  payload: {agent: string, lastLaunched?: string, sessionId?: string | null},
+  writeJsonFn: typeof writeJson = writeJson
+) {
   if (!worktree || !slug || !role || !payload || typeof payload.agent !== 'string') {
     return false;
   }
-  fs.mkdirSync(sessionsDir(worktree), { recursive: true });
   const body = {
     agent: payload.agent,
     lastLaunched: payload.lastLaunched || new Date().toISOString(),
     sessionId: payload.sessionId || null
   };
-  fs.writeFileSync(sessionFile(worktree, slug, role), JSON.stringify(body, null, 2) + '\n', 'utf8');
+  writeJsonFn(sessionFile(worktree, slug, role), body);
   return true;
 }
 

@@ -19,6 +19,17 @@ export interface IsInitializedResult {
   isInitialized: boolean;
 }
 
+type AtomicWriteFileSystem = Pick<typeof fs,
+  'mkdirSync' | 'existsSync' | 'statSync' | 'writeFileSync' | 'renameSync' | 'unlinkSync' | 'chmodSync'>;
+
+export interface AtomicWriteOptions {
+  /** Mode for a new file. Replacements always preserve the destination mode. */
+  mode?: number;
+  /** Fault-injection seams used by focused storage tests. */
+  fsModule?: AtomicWriteFileSystem;
+  tempPathFactory?: (_filePath: string) => string;
+}
+
 /**
  * Resolve the parallix-owned persistent-data root.
  *
@@ -146,25 +157,38 @@ export function readJson<T = unknown>(pathOrResolution: string | (() => string))
  * Write JSON to a path under PARALLIX_HOME (or an explicit path).
  * Creates parent directories as needed.
  */
-export function writeJson(filePath: string | (() => string), data: unknown): string {
+export function writeJson(
+  filePath: string | (() => string),
+  data: unknown,
+  options: AtomicWriteOptions = {}
+): string {
   if (typeof filePath === 'function') {
     filePath = filePath();
   }
-  writeFileAtomic(filePath, `${JSON.stringify(data, null, 2)}\n`);
+  writeFileAtomic(filePath, `${JSON.stringify(data, null, 2)}\n`, options);
   return filePath;
 }
 
-export function writeFileAtomic(filePath: string, content: string): void {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  const tempPath = path.join(
+export function writeFileAtomic(
+  filePath: string,
+  content: string,
+  options: AtomicWriteOptions = {}
+): void {
+  const fsModule = options.fsModule ?? fs;
+  fsModule.mkdirSync(path.dirname(filePath), { recursive: true });
+  const destinationMode = fsModule.existsSync(filePath)
+    ? fsModule.statSync(filePath).mode & 0o777
+    : options.mode;
+  const tempPath = options.tempPathFactory?.(filePath) ?? path.join(
     path.dirname(filePath),
-    `.${path.basename(filePath)}.${process.pid}.${Date.now()}.tmp`
+    `.${path.basename(filePath)}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`
   );
   try {
-    fs.writeFileSync(tempPath, content, 'utf8');
-    fs.renameSync(tempPath, filePath);
+    fsModule.writeFileSync(tempPath, content, { encoding: 'utf8', mode: destinationMode });
+    if (destinationMode !== undefined) {fsModule.chmodSync(tempPath, destinationMode);}
+    fsModule.renameSync(tempPath, filePath);
   } finally {
-    if (fs.existsSync(tempPath)) {fs.unlinkSync(tempPath);}
+    if (fsModule.existsSync(tempPath)) {fsModule.unlinkSync(tempPath);}
   }
 }
 

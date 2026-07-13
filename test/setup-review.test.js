@@ -188,6 +188,8 @@ test('bootstrapReviewSurface writes token files and configures the review remote
     assert.equal(result.ok, true, JSON.stringify(result));
     assert.equal(fs.readFileSync(path.join(forgejoHome, 'tokens', 'magnus'), 'utf8').trim(), 'owner-token');
     assert.equal(fs.readFileSync(path.join(forgejoHome, 'tokens', 'codex'), 'utf8').trim(), 'codex-token');
+    assert.equal(fs.statSync(path.join(forgejoHome, 'tokens', 'magnus')).mode & 0o777, 0o600);
+    assert.equal(fs.statSync(path.join(forgejoHome, 'tokens', 'codex')).mode & 0o777, 0o600);
     const ownerTokenRequest = requests.find(entry => entry.method === 'POST' && entry.url.endsWith('/api/v1/users/magnus/tokens'));
     assert.deepEqual(ownerTokenRequest.requestOptions.body.scopes, ['write:user', 'write:repository', 'write:issue', 'write:organization']);
     assert.ok(requests.some(entry => entry.method === 'PUT' && entry.url.endsWith('/api/v1/repos/test-org/test-repo/collaborators/codex')));

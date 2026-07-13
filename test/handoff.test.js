@@ -1124,7 +1124,11 @@ test('captureNelAtHandoff writes nel-record.json with predicted bucket, actual N
 
       // Verify nel-record.json was written
       assert.ok(fs.existsSync(nelRecordPath), 'nel-record.json should exist');
-      const record = JSON.parse(fs.readFileSync(nelRecordPath, 'utf8'));
+      const rawRecord = fs.readFileSync(nelRecordPath, 'utf8');
+      const record = JSON.parse(rawRecord);
+      assert.deepEqual(Object.keys(record), ['slug', 'predictedBucket', 'actualNel', 'actualBucket', 'reviewRounds', 'capturedAt']);
+      assert.equal(rawRecord.endsWith('\n'), true);
+      assert.equal(rawRecord.endsWith('\n\n'), false);
       assert.strictEqual(record.slug, 'task-nel-test');
       assert.strictEqual(record.predictedBucket, 'Small');
       assert.strictEqual(record.actualBucket, result.bucket);
@@ -1135,6 +1139,69 @@ test('captureNelAtHandoff writes nel-record.json with predicted bucket, actual N
     }
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('captureNelAtHandoff reports injected persistence failure and writes no success record', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nel-capture-fail-'));
+  const missionDir = path.join(tmpDir, 'missions/task-nel-fail');
+  fs.mkdirSync(missionDir, { recursive: true });
+  const primaryMock = mock.method(missionUtils, 'getPrimaryBranch', () => 'main');
+  const errors = [];
+  try {
+    const result = require('../lib/commands/handoff').captureNelAtHandoff('task-nel-fail', {
+      rootDir: tmpDir,
+      missionDir,
+      log: () => {},
+      error: message => errors.push(message),
+      writeJsonFn: () => { throw new Error('injected NEL persistence failure'); },
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.persistenceFailed, true);
+    assert.match(result.error, /injected NEL persistence failure/);
+    assert.equal(fs.existsSync(path.join(missionDir, 'nel-record.json')), false);
+    assert.equal(errors.length, 1);
+  } finally {
+    primaryMock.mock.restore();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('performHandoff stops before review transitions when NEL persistence fails', async (t) => {
+  const slug = 'task-nel-stop';
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'handoff-nel-stop-'));
+  const missionDir = path.join(worktree, 'missions', slug);
+  const checkpoint = path.join(missionDir, 'CP-1.md');
+  const taskFile = path.join(worktree, 'backlog', 'tasks', `${slug} - stop.md`);
+  fs.mkdirSync(path.dirname(taskFile), { recursive: true });
+  fs.mkdirSync(missionDir, { recursive: true });
+  fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Mission\n');
+  fs.writeFileSync(checkpoint, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| proof | test/handoff.test.js | PASS |\n');
+  fs.writeFileSync(taskFile, '---\nstatus: active\n---\n');
+  writeReviewState(missionDir, 'codex', 'codex');
+  let transitions = 0;
+  t.mock.method(missionUtils, 'findMissionDir', () => missionDir);
+  t.mock.method(missionUtils, 'findMissionArea', () => 'workflow');
+  t.mock.method(missionUtils, 'findCheckpoints', () => [checkpoint]);
+  t.mock.method(git, 'getCurrentBranch', () => `mission/${slug}`);
+  t.mock.method(git, 'getWorktreeStatus', () => []);
+  t.mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile }));
+  t.mock.method(backlog, 'transitionTask', () => { transitions++; return true; });
+  try {
+    const result = await performHandoff(slug, {
+      worktree,
+      skipGate: true,
+      isForgejoReviewEnabledFn: () => false,
+      rebaseFn: async () => ({ ok: true }),
+      captureNelFn: () => ({ ok: false, persistenceFailed: true, error: 'injected failure' }),
+      log: () => {},
+      error: () => {},
+    });
+    assert.equal(result.ok, false);
+    assert.match(result.error, /stopped before review state advanced/);
+    assert.equal(transitions, 0);
+  } finally {
+    fs.rmSync(worktree, { recursive: true, force: true });
   }
 });
 

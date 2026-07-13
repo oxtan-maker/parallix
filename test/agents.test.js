@@ -1261,6 +1261,32 @@ test('startAgent passes resume:false to claude on the first launch and writes a 
   }
 });
 
+test('startAgent rejects instead of reporting launch success when session persistence fails', async () => {
+  const fakeSessions = {
+    shouldResume: () => false,
+    getSessionId: () => null,
+    writeSession: () => { throw new Error('injected marker failure'); }
+  };
+  await assert.rejects(
+    () => startAgent('active', {
+      prompt: 'Execute the mission.',
+      worktree: '/tmp/task-2222-session-failure',
+      agent: 'claude',
+      slug: 'task-2222',
+      role: 'implementer',
+      sessionsModule: fakeSessions,
+      isAgentBlockedFn: () => false,
+      resolveAgentModelFn: () => null,
+      log: () => {},
+      launchAgentFn: () => ({
+        invocation: { command: 'claude', args: [], options: {} },
+        resultPromise: Promise.resolve({ status: 0, stdout: '', stderr: '' })
+      })
+    }),
+    /Could not persist session marker.*injected marker failure/
+  );
+});
+
 test('startAgent passes resume:true to claude when a matching marker exists', async () => {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'startagent-resume-hit-'));
   try {
