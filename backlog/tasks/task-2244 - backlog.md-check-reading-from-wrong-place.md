@@ -4,7 +4,7 @@ title: backlog.md check reading from wrong place
 status: backlog
 assignee: [custom]
 created_date: '2026-07-13 08:08'
-labels: []
+labels: [ai_sdlc]
 dependencies: []
 ordinal: 44000
 ---
