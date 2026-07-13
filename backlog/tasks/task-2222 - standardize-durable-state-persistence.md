@@ -1,8 +1,8 @@
 ---
 id: TASK-2222
 title: Standardize durable state persistence across the repository
-status: backlog
-assignee: []
+status: active
+assignee: [codex]
 created_date: '2026-07-11 00:00'
 labels:
   - refactor
