@@ -42,7 +42,7 @@ function formatBlockUntil(date) {
 }
 
 const sharedLauncherBin = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-test-launchers-'));
-for (const name of ['codex', 'claude', 'opencode', 'vibe', 'pi']) {
+for (const name of ['codex', 'claude', 'opencode', 'pi', 'vibe']) {
   const launcherPath = path.join(sharedLauncherBin, name);
   fs.writeFileSync(launcherPath, `#!${process.execPath}\nprocess.exit(0);\n`);
   fs.chmodSync(launcherPath, 0o755);
@@ -120,7 +120,11 @@ function withPathLaunchers(entries, run) {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-test-path-'));
   const binDir = path.join(tmpRoot, 'bin');
   fs.mkdirSync(binDir, { recursive: true });
-  for (const [name, body] of Object.entries(entries)) {
+  const launchers = { ...entries };
+  if (launchers.opencode && !launchers.pi) {
+    launchers.pi = launchers.opencode;
+  }
+  for (const [name, body] of Object.entries(launchers)) {
     const file = path.join(binDir, name);
     fs.writeFileSync(file, `#!${process.execPath}\n${body}\n`);
     fs.chmodSync(file, 0o755);
@@ -1902,8 +1906,9 @@ test('startAgent passes the resolved model to the launcher invocation', async ()
   });
 
   assert.equal(launcherModel, 'qwen3.5:9b', 'launcher must receive the resolved model');
-  const modelIdx = result.invocation.args.indexOf('qwen3.5:9b');
-  assert.ok(modelIdx !== -1, `expected model in args: ${result.invocation.args.join(' ')}`);
+  const i = result.invocation.args.findIndex(arg => arg === '-m' || arg === '--model');
+  assert.ok(i !== -1, `expected model flag in args: ${result.invocation.args.join(' ')}`);
+  assert.equal(result.invocation.args[i + 1], 'qwen3.5:9b');
   assert.ok(log.some(m => m.includes('Using configured model for') && m.includes('qwen3.5:9b')));
 });
 

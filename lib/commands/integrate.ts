@@ -310,25 +310,44 @@ function parseFilesToAreas(filesOutput: string) {
   return Array.from(areas);
 }
 
-/** @param {{gates?: Record<string, any>}} config */
+/**
+ * @param {{gates?: Record<string, any>}} config
+ * @returns {{key: string, command: string, order: number, run_last: boolean, areas?: string[]}[]}
+ */
 function orderIntegrationGates(config: {gates?: Record<string, any>}) {
   const gateEntries = Object.entries(config.gates || {});
+  /** @type {{key: string, command: string, order: number, run_last: boolean, areas?: string[]}[]} */
   const gates = gateEntries
-    .map(([key, value]: [string, any]) => ({
-      key,
-      command: value.command,
-      order: value.order || 0,
-      run_last: value.run_last || false
-    }));
+    .map(([key, value]) => {
+      /** @type {{key: string, command: string, order: number, run_last: boolean, areas?: string[]}} */
+      let gate = {
+        key,
+        command: value.command,
+        order: value.order || 0,
+        run_last: value.run_last || false,
+        ...(Array.isArray(value.areas) && value.areas.length > 0 ? { areas: value.areas } : {})
+      };
+      return gate;
+    })
+    .filter(gate => {
+      const rawGate = config.gates?.[gate.key];
+      if (rawGate && rawGate.enabled === false) {
+        return false;
+      }
+      return true;
+    });
 
   const nonRunLast = gates.filter(g => !g.run_last).sort((a, b) => a.order - b.order);
   const runLastGates = gates.filter(g => g.run_last).sort((a, b) => a.order - b.order);
-  return [...nonRunLast, ...runLastGates];
+  return /** @type {{key: string, command: string, order: number, run_last: boolean, areas?: string[]}[]} */ ([...nonRunLast, ...runLastGates]);
 }
 
-/** @param {string} gateKey @param {string[]} changedAreas */
-function gateMatchesChangedAreas(gateKey: string, changedAreas: string[]) {
+/** @param {string} gateKey @param {string[]} changedAreas @param {string[]|undefined} gateAreas */
+function gateMatchesChangedAreas(gateKey: string, changedAreas: string[], gateAreas?: string[]) {
   if (changedAreas.length === 0) {return true;}
+  if (Array.isArray(gateAreas) && gateAreas.length > 0) {
+    return gateAreas.some(area => changedAreas.includes(area));
+  }
   if (changedAreas.includes(gateKey)) {return true;}
   if (gateKey === 'web-e2e') {
     return changedAreas.includes('web-client');
@@ -390,8 +409,9 @@ function getIntegrationGatePlan(slug: string, opts: {runIntegrationGates?: boole
   }
   
   // Build list of gates to run, preserving order with run_last handling
+  /** @type {{key: string, command: string, order: number, run_last: boolean, areas?: string[]}[]} */
   const orderedGates = orderIntegrationGates(config);
-  const relevantGates = orderedGates.filter(gate => gateMatchesChangedAreas(gate.key, changedAreas));
+  const relevantGates = orderedGates.filter(gate => gateMatchesChangedAreas(gate.key, changedAreas, gate.areas));
   
   return { gates: relevantGates, changedAreas, configError: null };
 }

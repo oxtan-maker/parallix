@@ -37,7 +37,7 @@ delete process.env.PI_BIN;
 // binaries prevent real Codex/Claude/Vibe/OpenCode/Pi CLIs from consuming tokens
 // or mutating operator-local state on the workstation.
 const launcherBin = makeTempDir('parallix-test-launchers-');
-for (const name of ['codex', 'claude', 'opencode', 'vibe', 'pi']) {
+for (const name of ['codex', 'claude', 'opencode', 'pi', 'vibe']) {
   const launcherPath = path.join(launcherBin, name);
   fs.writeFileSync(launcherPath, `#!${process.execPath}
 if (process.argv.includes('--help')) process.exit(0);

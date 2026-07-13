@@ -3,14 +3,16 @@ id: TASK-1419
 title: >-
   Add configurable build gate to integration pipelines for parallix
   self-development
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-07-04 09:02'
+updated_date: '2026-07-11 03:52'
 labels:
   - guardrail
   - build
   - integration-gate
   - ts-js
+  - ai_sdlc
 dependencies: []
 priority: high
 ---
