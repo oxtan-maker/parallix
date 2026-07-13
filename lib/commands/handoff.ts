@@ -565,7 +565,12 @@ function findUnverifiableGoalCheckRow(evidenceRows: string[], rootDir: string): 
   if (!gatesResult.ok) {
     const msg = `Declared gate "${gatesResult.gate}" failed for ${fmt.slug(slug)}: ${gatesResult.error || gatesResult.reason}. Blocking handoff — task remains in active.`;
     error(msg);
-    return { ok: false, error: msg, gateOutput: { stdout: (gatesResult.stdout || ''), stderr: (gatesResult.stderr || '') } };
+    return {
+      ok: false,
+      error: msg,
+      reason: gatesResult.reason,
+      gateOutput: { stdout: (gatesResult.stdout || ''), stderr: (gatesResult.stderr || '') }
+    };
   }
   if (gatesResult.skipped) {
     log(`No declared gates for ${fmt.slug(slug)} (${gatesResult.reason}).`);
@@ -838,23 +843,43 @@ function runDeclaredGates(missionDir, rootDir, options = {}) {
   const commands = gateLines.map(line => {
     // Remove "- [ ] ", "- [x] ", or "- " prefix
     let cmd = line.replace(/^- \[[ x]\]\s*/, '').replace(/^- \s*/, '');
-    // Strip surrounding backticks (e.g., "`npm run typecheck` — zero errors")
+    // Reject gate entries that contain an explanatory dash separator
+    // (em-dash, en-dash, or hyphen+en-dash followed by prose) before any
+    // further processing, so validateDeclaredGates never sees a silently
+    // sanitized command.
+    if (/\s+(—|–|-–)\s+\S/.test(cmd)) {
+      return { _reject: true, cmd };
+    }
+    // Strip surrounding backticks (e.g., "`npm run typecheck`")
     cmd = cmd.replace(/^`(.+)`$/, '$1').trim();
     return cmd;
-  }).filter(cmd => cmd.length > 0);
+  }).filter(cmd => cmd && (!cmd._reject || cmd.cmd.length > 0));
 
-  if (commands.length === 0) {
+  // Check for any rejected entries (dash-suffix gates)
+  const rejected = commands.find(cmd => cmd && cmd._reject);
+  if (rejected) {
+    return {
+      ok: false,
+      reason: 'validation-failed',
+      error: `Gate declaration must contain an exact runnable command only. Replace "${rejected.cmd}" with the command and move trailing prose or outcome expectations to Success Criteria or checkpoint documentation.`,
+      gate: rejected.cmd
+    };
+  }
+
+  const cleanCommands = commands.map(cmd => cmd.cmd || cmd);
+
+  if (cleanCommands.length === 0) {
     return { ok: true, skipped: true, reason: 'no-gates-declared' };
   }
 
   // Pre-validate all gate commands before execution
-  const validationResult = validateDeclaredGates(commands, rootDir);
+  const validationResult = validateDeclaredGates(cleanCommands, rootDir);
   if (!validationResult.ok) {
     return validationResult;
   }
 
   // Execute each gate command
-  for (const cmd of commands) {
+  for (const cmd of cleanCommands) {
     log(`  Gate: ${cmd}`);
     const result = spawnSync('bash', ['-c', cmd], {
       cwd: rootDir,
@@ -876,7 +901,7 @@ function runDeclaredGates(missionDir, rootDir, options = {}) {
     }
   }
 
-  return { ok: true, skipped: false, count: commands.length, reason: 'all-gates-passed' };
+  return { ok: true, skipped: false, count: cleanCommands.length, reason: 'all-gates-passed' };
 }
 
 /**

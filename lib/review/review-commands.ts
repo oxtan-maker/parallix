@@ -643,6 +643,7 @@ export async function submitForReview(
     resolveWorktreeFn?: typeof resolveWorktree;
     performHandoffFn?: (_slug: string, _opts?: Record<string, unknown>) => Promise<Record<string, unknown>>;
     readReviewStateFn?: typeof readReviewState;
+    transitionTaskFn?: typeof transitionTask;
     isReviewProviderEnabledFn?: typeof isProviderEnabled;
     isForgejoReviewEnabledFn?: typeof isProviderEnabled;
     log?: (_msg: string) => void;
@@ -654,6 +655,7 @@ export async function submitForReview(
   const resolveWorktreeFn = options.resolveWorktreeFn || resolveWorktree;
   const performHandoffFn = options.performHandoffFn || (await getHandoff()).performHandoff;
   const readReviewStateFn = options.readReviewStateFn || readReviewState;
+  const transitionTaskFn = options.transitionTaskFn || transitionTask;
   const isReviewProviderEnabledFn = options.isReviewProviderEnabledFn || options.isForgejoReviewEnabledFn || isProviderEnabled;
   const log = options.log || fmt.log.plain;
 
@@ -687,6 +689,11 @@ export async function submitForReview(
 
   const result = await performHandoffFn(slug, { skipGate, reviewIdentity, forgejoUser: reviewIdentity, worktree });
   if (!result.ok) {
+    // Auto-bounce for declared-gate validation failures
+    if (result.reason === 'validation-failed') {
+      transitionTaskFn(slug, 'active', { rootDir: worktree, log });
+      log(fmt.status('INFO', `Auto-bounced ${slug} to active: declared-gate validation failure. Fix the gate in MISSION.md and retry.`));
+    }
     exit(1);
   }
 }
