@@ -502,7 +502,7 @@ test('createPr uses explicit force-with-lease sha when forceWithLease is true', 
   );
 });
 
-test('createPr falls back to origin tracking sha when review ref is unavailable', (t) => {
+test('createPr fails when review tracking ref is unavailable and origin is no longer a candidate', (t) => {
   const branch = 'mission/task-100b';
   const user = 'gemini';
   const token = 'fake-token';
@@ -513,9 +513,6 @@ test('createPr falls back to origin tracking sha when review ref is unavailable'
     if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n' };
     if (args.includes('rev-parse') && args.includes(`refs/remotes/review/${branch}^{commit}`)) {
       return { status: 128, stdout: '', stderr: 'unknown revision' };
-    }
-    if (args.includes('rev-parse') && args.includes(`refs/remotes/origin/${branch}^{commit}`)) {
-      return { status: 0, stdout: 'originsha\n', stderr: '' };
     }
     if (args.includes('push') && args.includes(branch)) {
       pushArgs = args;
@@ -533,11 +530,8 @@ test('createPr falls back to origin tracking sha when review ref is unavailable'
   });
 
   const result = createPr(branch, user, token, { rootDir, apiCall, log: () => {}, forceWithLease: true });
-  assert.strictEqual(result.ok, true);
-  assert.ok(
-    pushArgs.includes(`--force-with-lease=refs/heads/${branch}:originsha`),
-    'git push should use the origin tracking sha when review is unavailable'
-  );
+  assert.strictEqual(result.ok, false, 'createPr should fail when no tracking ref is available');
+  assert.ok(result.error.includes('could not resolve tracking ref'), 'error should mention unresolved tracking ref');
 });
 
 test('createPr uses a plain push when the branch is absent from the review remote', (t) => {
@@ -2148,9 +2142,6 @@ test('createPr fails cleanly when tracking ref remains missing after fetch', (t)
     if (args.includes('rev-parse') && args.includes(`refs/remotes/review/${branch}^{commit}`)) {
       return { status: 128, stdout: '', stderr: 'unknown revision' };
     }
-    if (args.includes('rev-parse') && args.includes(`refs/remotes/origin/${branch}^{commit}`)) {
-      return { status: 128, stdout: '', stderr: 'unknown revision' };
-    }
     if (args.includes('push') && args[args.length - 1] === branch) {
       pushAttempts++;
     }
@@ -2165,7 +2156,6 @@ test('createPr fails cleanly when tracking ref remains missing after fetch', (t)
   assert.strictEqual(pushAttempts, 0, 'should not push without an explicit lease sha');
   assert.match(result.error, new RegExp(`could not resolve tracking ref for ${branch}`));
   assert.match(result.error, new RegExp(`refs/remotes/review/${branch}`));
-  assert.match(result.error, new RegExp(`refs/remotes/origin/${branch}`));
 });
 
 test('createPr fails without retrying push when stale-info refresh fetch fails', (t) => {

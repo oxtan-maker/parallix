@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { git, run, getCurrentBranch } from '../core/git.js';
+import { git, run } from '../core/git.js';
 import { findMissionDir, findMissionArea, inferSlug } from '../core/mission-utils.js';
 import * as fmt from '../core/fmt.js';
 import { formatVerificationCommand, runVerificationGate } from '../core/verification.js';
@@ -56,16 +56,11 @@ function checkpoint(args) {
     process.exit(1);
   }
 
-  // Step 4: Push
-  const branch = getCurrentBranch();
-  fmt.log.info(`Step 4: Pushing to origin/${fmt.branch(branch)}...`);
-  const pushResult = git(['push', 'origin', branch]);
-  if (pushResult.status !== 0) {
-    fmt.log.fail('Push failed.');
-    process.exit(1);
-  }
-
-  fmt.log.pass('Checkpoint complete and pushed.');
+  fmt.log.pass('Checkpoint complete (local-only — branch not pushed to origin).');
 }
 
 export default checkpoint;
+
+// CJS compat: ensure require() returns the function directly
+declare const module: { exports: any } | undefined;
+if (typeof module !== 'undefined') { module.exports = checkpoint; }

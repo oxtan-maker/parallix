@@ -502,7 +502,7 @@ export function resolveCustomRunner(rootDir: string = process.cwd()): string {
 export function resolveMaxConcurrentCustom(rootDir: string = process.cwd()): number {
   const agents = loadEffectiveConfig(rootDir).adapters.agents as PlainObject | undefined;
   const max = agents && agents.maxConcurrentCustom;
-  return Number.isInteger(max) && (max as number) > 0 ? max as number : 1;
+  return Number.isInteger(max) && (max as number) > 0 ? max as number : Infinity;
 }
 
 interface RepositoryReadinessResult {
