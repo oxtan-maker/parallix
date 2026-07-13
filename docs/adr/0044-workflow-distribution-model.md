@@ -2,7 +2,358 @@
 
 Status: Accepted
 Date: 2026-06-02
-Last updated: 2026-06-22 (task-1331 — public distribution stance locked)
+Last updated: 2026-07-11 (task-2223 — repository-wide TypeScript model accepted)
+
+## 2026-07-11 Update: Repository-wide TypeScript development, build, test, and distribution model (task-2223)
+
+This dated update decides the end-state TypeScript architecture that the
+2026-06-22 distribution stance left open. It selects one coherent model for
+source layout, module format, compiler projects, tests, package metadata,
+declarations, source maps, assets, and local execution, and decomposes the
+migration into reviewable follow-up missions. **It changes no runtime, build,
+test, or package behavior in this mission** — the sections below are the
+accepted contract that migration missions implement. The 2026-06-22 update and
+the original Context/Decision below are preserved unchanged as history.
+
+### 1. Current state (evidence inventory)
+
+The repository today runs a hybrid model with two apparent output layouts and
+an mtime-based drift guard:
+
+```
+                    TypeScript sources (authoritative, tracked)
+                    index.ts   px.ts   lib/**/*.ts        (72 .ts under lib/)
+                          │
+          ┌───────────────┴────────────────────┐
+          │ npm run build                      │ npm run build:cjs
+          │ (tsc → outDir "dist")              │ (tsc --rootDir . --outDir .
+          ▼                                    ▼  --module CommonJS + shebang fix)
+   dist/** (gitignored,                 sibling .js beside every .ts
+   consumed by nothing today)           (gitignored except one tracked file:
+                                         lib/commands/repair-handoff.js)
+                                               │
+              ┌────────────────────────────────┼──────────────────────────┐
+              ▼                                ▼                          ▼
+   npm test (pretest=build:cjs;      npm pack / npm publish        node index.js <cmd>
+   node --test over 148 CJS          (files allowlist ships        (source-checkout dev,
+   test/*.test.js, tests             sibling .js, strips           runs sibling .js)
+   excluded from typecheck)          lib/**/*.ts; mtime
+                                     freshness guard fail-closed)
+```
+
+| Surface | Evidence | Current behavior |
+|---|---|---|
+| Package manifest | `package.json:7-13` | No `"type"` field (Node default: CommonJS); `"main": "index.js"`, `"bin": {"px": "px.js"}` point at repo-root compiled siblings; `"engines": {"node": ">=20"}`. |
+| npm artifact contents | `package.json:34-49` | `files` allowlist ships compiled `lib/**/*.js` plus `config/`, `data/`, `docs/`, `examples/`, `prompts/`, `templates/`, and excludes TypeScript sources under `lib/` via `!lib/**/*.ts` (`package.json:45`). |
+| TypeScript configuration | `tsconfig.json` (the only tsconfig in the repository) | `module`/`moduleResolution` `NodeNext`, `target ES2024`, `strict`; `outDir: "dist"`, `rootDir: "."`; includes `index.ts`, `px.ts`, `lib/**/*.ts`; **excludes `test/`** (`tsconfig.json:19`); `allowJs`/`checkJs` false. |
+| Build scripts | `package.json:51-52` | `build` = plain `tsc` (emits to `dist/`, consumed by nothing); `build:cjs` = in-place sibling emit with `--module CommonJS --moduleResolution Node`, then shebang re-insertion and `chmod +x px.js`. |
+| ESLint | `eslint.config.mjs:9-22` | Flat config lints `**/*.ts` and non-generated `**/*.js`; a hand-maintained `compiledJsIgnores` glob list mirrors `.gitignore`'s compiled-output entries. |
+| Unit test runner | `test/run-default-tests.js:7-20`, `package.json:56-57` | `pretest` runs `build:cjs`; `npm test` runs Node's built-in `node --test` over every `test/*.test.js` (148 CommonJS files, 0 TypeScript) except the real-agent smoke, preloading `test/bootstrap-parallix-home.js` via the CommonJS-only `--require` flag. |
+| E2E runners | `config/integration-pipelines.json`, `docs/real-agent-smoke.md:41` | `node test/e2e-mission-lifecycle.test.js` (gate order 50) and `node test/e2e-real-agent-smoke.test.js` (order 51) run as integration-only gates. |
+| Build-freshness guard | `lib/core/build-freshness.ts:32-51`, `package.json:53-55` | mtime comparison of `.ts`/`.js` pairs for `px`, `index`, and every `lib/commands/*.ts`; wired to `prepack`/`prepublishOnly`; bypass via `PARALLIX_SKIP_BUILD_CHECK=1`; skips installed packages by design (task-1424, `lib/core/build-freshness.ts:76-99`). |
+| Package-content tests | `test/package-persistent-data.test.js`, `test/task-1424-post-integrate-publish-reinstall.test.js` | Real pack/install proof exists: `"global tarball reinstall preserves PARALLIX_HOME stats and agent blocklist"` and `"installed tarball runtime does not trip the stale-build guard on a fresh, correctly-built checkout"` build, pack, and install into temp dirs. |
+| Coverage | `package.json:58` | `test:coverage` runs `node lib/commands/coverage-gate.js --lcov` against compiled sibling output. |
+| Mutation testing | `scripts/verify-local.sh:186-189`, `lib/commands/mutation-gate.ts:118-121`, `stryker.conf.json`, ADR 0049 | Diff-scoped StrykerJS ratchet: rebuilds siblings, mutates the compiled `.js` targets, shells out to `node --test`. Coupled to the sibling-output layout. |
+| Executable entry points | `px.ts:1`, `index.ts:1`, `package.json:52` | Both entries carry `#!/usr/bin/env node`; `build:cjs` repairs the compiled `px.js` shebang and executable bit. |
+| Tracked generated JavaScript | `.gitignore:15-25`; `git ls-files` | Compiled output is gitignored (`dist/`, per-directory `lib/**` globs, `/index.js`, `/px.js`) with exactly one tracked exception: `lib/commands/repair-handoff.js` beside its `.ts` source. |
+| Asset resolution | `lib/commands/draft.ts:17-18` | Runtime assets resolve `__dirname`-relative with hard-coded `../..` depth — correct in the sibling layout, broken by any layout that changes module depth. |
+| Import-specifier convention | `px.ts:5` | Sources already use ESM `import` syntax with explicit `.js` extensions (the NodeNext requirement), compiled down to CommonJS `require`. |
+| Direct source execution | `package.json:68` | `tsx ^4.22.4` is a devDependency wired to no npm script; the documented dev path runs compiled output (`node index.js <command>`, `README.md:194-206`). |
+
+Pain points this decision removes: (a) two output layouts where only one is
+consumed; (b) one tracked generated file creating noisy diffs; (c) tests
+excluded from the type boundary; (d) mtime freshness as the only drift
+defence; (e) per-directory ignore globs duplicated between `.gitignore` and
+`eslint.config.mjs`; (f) depth-coupled asset resolution.
+
+### 2. Measurable end-state goals
+
+- **G1 One authoritative source tree.** `index.ts`, `px.ts`, and `lib/**/*.ts` are the only runtime sources; the count of tracked compiled runtime `.js` files is 0 (today: 1, `lib/commands/repair-handoff.js`).
+- **G2 Reproducible clean builds.** From a fresh clone: `npm ci && npm run build && npm test` passes with no pre-existing artifacts; building the same commit twice yields an identical `dist/` file list.
+- **G3 Generated output separated.** All compiled output lives under `dist/` (gitignored); `git status` is clean after any build; no build writes into the source tree.
+- **G4 Full intended type coverage.** `tsc --noEmit` covers all runtime sources **and** all `test/**/*.js` files (via a test typecheck project); today tests are excluded (`tsconfig.json:19`).
+- **G5 Explicit public API boundary.** `package.json` `"exports"` restricts package-name resolution to the declared entry; internal `lib/` paths are not public API.
+- **G6 Correct npm artifact contents.** `npm pack --dry-run` output matches the inclusion/exclusion table in §7 exactly: no runtime `.ts`, no tests, no operator state.
+- **G7 Debuggable stack traces.** `dist/**/*.js.map` is emitted and published; the `px` entry enables source maps so traces cite `.ts` files and lines.
+- **G8 Fast local feedback.** One documented command each for: direct-source run (no build step), typecheck, unit tests; unit tests require at most one incremental `tsc` build.
+
+### 3. Alternatives and scored decision matrix
+
+Three coherent end-to-end models were evaluated. Scores are 1 (worst) to 5
+(best); weights reflect this repository's exposure: compatibility, package
+correctness, and migration cost carry weight 3 because the observed
+compatibility mass is large (148 CommonJS test files; the CommonJS-only
+`--require` preload at `test/run-default-tests.js:14`; `require()` calls into
+compiled output at `scripts/verify-local.sh:76` and `package.json:53`; the
+compiled-`.js` mutation scoper at `lib/commands/mutation-gate.ts:118`), while
+toolchain complexity, debugging, and local feedback carry weight 2.
+
+| Criterion (weight) | A: NodeNext ESM → `dist/` | B: CommonJS → `dist/` | C: Dual-package / bundled |
+|---|---|---|---|
+| Compatibility with current consumers and tests (3) | 2 — every CJS test file, the `--require` preload, and script-level `require()`s must move or be shimmed | 5 — existing tests, preload, and `require()` couplings keep working; only paths change | 3 — CJS half compatible, but the artifact doubles |
+| Toolchain complexity (2) | 3 — single `tsc`, but `__dirname` disappears, interop rules shift, shebang/bin behavior re-verified | 4 — single `tsc`, no semantic shift from today's emit | 1 — two builds or a bundler; conditional `exports`; largest surface |
+| Package correctness (3) | 4 — single format, no hazard | 4 — single format, no hazard | 1 — carries the documented dual-package hazard; two copies of every module |
+| Debugging / stack traces (2) | 4 — source maps supported | 4 — source maps supported identically | 2 — bundling obscures traces; dual output doubles map surface |
+| Migration cost (3) | 1 — test conversion or mass `.cjs` renames, preload replacement, asset/mutation rework land together | 4 — mechanical repointing, phaseable with a rollback point per step | 2 — everything in B plus a second pipeline |
+| Local feedback (2) | 4 — `tsx` runs sources directly | 4 — `tsx` runs sources directly | 3 — bundle step slows the loop |
+| **Weighted total** | **43** | **63** | **30** |
+
+**Winner: B — CommonJS emitted to `dist/`.**
+
+**Dual-package hazard and rejection of C.** Node.js documents that packages
+exposing both `"import"` and `"require"` conditions risk the dual
+CommonJS/ES-module-packages hazard: two module instances of the same package
+can load in one process with divergent state (Node.js Modules: Packages,
+accessed 2026-07-11). No current consumer requires dual output: `package.json`
+has no `exports` field today, ADRs 0044/0046 describe only the CLI
+tarball/registry path, and no external `require()`/`import` consumer of
+parallix-as-a-library is evidenced anywhere in the repository. **Dual-package
+output is rejected.** Discovery of a real consumer needing it is a
+stop-and-reassess condition for this decision, not license to broaden it.
+Bundled single-file output was already rejected as the primary path by this
+ADR's original decision matrix (Option E) and stays a future enterprise
+extension.
+
+**Why not ESM now.** Option A is the more modern layout, but novelty is not a
+scored criterion; observed compatibility is. The sources already use
+NodeNext-style extension-ful `import` specifiers (`px.ts:5`), so the accepted
+model keeps the door open: a later ESM flip is primarily a `"type"` flip plus
+the test-side migration — and is permitted **only** through a future dated
+update to this ADR. Until then, ESM emit is rejected, not deferred-ambiguous.
+
+### 4. Accepted end-state contract
+
+All items in this section are decided; no mutually exclusive options remain
+open.
+
+**Repository tree (authoritative):**
+
+```
+index.ts  px.ts  lib/**/*.ts        # the only runtime sources (tracked)
+test/**/*.js                        # checked-JavaScript tests (tracked; see §5)
+tsconfig.json                       # emit project (runtime sources → dist/)
+tsconfig.test.json                  # check-only project (tests; noEmit)
+dist/                               # ALL generated output (gitignored, never tracked)
+  dist/index.js  dist/px.js  dist/lib/**/*.js  (+ .js.map siblings)
+prompts/  templates/  config/  data/  docs/  examples/  tools/   # assets at package root
+```
+
+- **Module format:** CommonJS emit. `package.json` gains an explicit
+  `"type": "commonjs"` (today the field is absent and CommonJS is implied;
+  making it explicit pins the emit format under NodeNext detection rules).
+- **Import-specifier convention:** ESM `import` syntax in `.ts` sources with
+  explicit `.js` extensions on relative specifiers, exactly as today
+  (`px.ts:5`). This is an ecosystem requirement under
+  `moduleResolution: NodeNext`, not a style preference.
+- **`package.json` contract:** `"type": "commonjs"`;
+  `"main": "dist/index.js"`; `"bin": {"px": "dist/px.js"}`;
+  `"exports": {".": "./dist/index.js", "./package.json": "./package.json"}`.
+  The `exports` field formalizes that deep paths into `lib/` are not public
+  API (Node resolves `exports` in precedence over `main` when importing by
+  name). The CLI (`px`) is the supported product surface.
+- **Compiler projects:** `tsconfig.json` is the emit project — `module`/
+  `moduleResolution: NodeNext`, `outDir: "dist"`, `rootDir: "."`, `strict`,
+  `sourceMap: true`, `declaration: false`; includes only runtime sources.
+  `tsconfig.test.json` is the check-only project — `noEmit: true`,
+  `allowJs: true`, `checkJs: true`, including `test/**/*.js` (see §5). The
+  legacy `build:cjs` flag override (`--module CommonJS --moduleResolution
+  Node`) is retired with the sibling layout; plain `tsc` with
+  `"type": "commonjs"` emits the same CommonJS format under NodeNext.
+- **Declaration policy:** `.d.ts` files are neither emitted nor published.
+  parallix is a CLI, not a typed library; there is no evidenced library
+  consumer (§3). This is a repository preference, revisitable only via a
+  dated ADR update if such a consumer appears.
+- **Source-map policy:** `.js.map` files are emitted by the build and shipped
+  in the npm artifact. The `dist/px.js` and `dist/index.js` entries enable
+  source maps at startup (`process.setSourceMapsEnabled(true)`) so operator
+  stack traces cite `.ts` locations.
+- **Shebang/executable contract:** `px.ts` and `index.ts` keep
+  `#!/usr/bin/env node` as their first line; `tsc` preserves the shebang in
+  emitted entries, and npm requires it for `bin` targets. The tarball smoke
+  proof (§7) verifies the installed `px` launches.
+- **Clean-output ownership:** `dist/` is owned exclusively by `npm run build`
+  (plain `tsc`); a `clean` script removes it; it stays gitignored; the count
+  of tracked compiled runtime files is 0 (the one tracked sibling,
+  `lib/commands/repair-handoff.js`, is deleted in migration phase T4). With
+  the sibling layout gone, the per-directory compiled-output globs disappear
+  from both `.gitignore:15-25` and `eslint.config.mjs:9-22`, ending the
+  duplicated ignore-list maintenance.
+- **Development execution path:** direct-source runs use `tsx` (already a
+  devDependency, `package.json:68`) via a wired npm script (`npm run dev --
+  <command>`, executing `tsx px.ts`); compiled runs use `node dist/index.js
+  <command>` after `npm run build`. The README's `node index.js <command>`
+  guidance is updated in migration phase T5.
+
+### 5. Test contract
+
+- **Checked JavaScript, not conversion.** The 148 `test/*.test.js` files stay
+  CommonJS JavaScript and enter the type boundary through
+  `tsconfig.test.json` (`allowJs` + `checkJs` + `noEmit`). Wholesale
+  conversion to TypeScript is rejected on migration cost (it would be the
+  single largest diff in the repository for no behavioral gain). Authoring
+  new tests in TypeScript is deferred to optional phase T6 and is **not**
+  required for this decision to complete.
+- **Test-only typecheck configuration:** `tsconfig.test.json` as defined in
+  §4; wired into `./scripts/verify-local.sh static-analysis` alongside the
+  existing ESLint and runtime typecheck stages.
+- **Runners:** Node's built-in `node:test` remains the only test runner.
+  Unit: `npm test` → `test/run-default-tests.js` (the `--require` preload of
+  `test/bootstrap-parallix-home.js` keeps working because tests remain
+  CommonJS). E2E: `node test/e2e-mission-lifecycle.test.js` and
+  `node test/e2e-real-agent-smoke.test.js` as integration gates, unchanged.
+- **Execution against `dist/`:** after phase T4, tests and repo scripts load
+  runtime modules from `dist/` (e.g. `require('../dist/lib/...')`), and
+  `pretest` runs `npm run build` instead of `build:cjs`.
+- **Coverage:** `npm run test:coverage` (`lib/commands/coverage-gate.js
+  --lcov`) is retained, executing against `dist/` output after T4.
+- **Mutation testing:** the diff-scoped StrykerJS ratchet (ADR 0049) is
+  retained; phase T4 repoints the scoper's target mapping from sibling
+  `lib/**/*.js` to `dist/lib/**/*.js`. Ratchet semantics are unchanged.
+- **Direct source execution during development:** `npx tsx px.ts <command>`
+  (wrapped as `npm run dev`) — this is the command for running uncompiled
+  sources; tests always run against compiled output to keep the tested
+  artifact identical to the shipped artifact.
+
+### 6. Asset resolution and copy contract
+
+Non-code assets (`prompts/`, `templates/`, `config/`, `data/`, `docs/`,
+`examples/`, and the executable `tools/setup-forgejo-docker.sh`) follow one
+rule in both layouts:
+
+- **Assets live at the package root and are never copied into `dist/`.** The
+  build emits JavaScript and source maps only. The npm `files` allowlist
+  ships the asset directories at the package root exactly as today
+  (`package.json:34-49`), so the installed package root and the source
+  checkout root have the same asset shape.
+- **Resolution is module-relative through one helper.** A single
+  `packageRoot()` helper in `lib/core/` locates the package root by walking
+  up from the calling module's `__dirname` to the nearest directory whose
+  `package.json` has `"name": "@magnusekdahl/parallix"`. Every asset lookup
+  goes through it. This replaces hard-coded depth arithmetic such as
+  `path.join(__dirname, '..', '..', 'prompts', ...)`
+  (`lib/commands/draft.ts:17-18`), which silently breaks when compiled depth
+  changes (`lib/commands/` vs `dist/lib/commands/`).
+- **CWD-dependent asset lookup is prohibited.** `process.cwd()` identifies
+  the *target repository* (this ADR's runtime/target-state boundary), never
+  the location of tool-owned assets. No module may resolve `prompts/`,
+  `templates/`, `config/`, documentation, or scripts relative to the CWD.
+- The helper works identically for: compiled runs (`dist/lib/core/x.js` walks
+  up to the installed package root), source-checkout compiled runs, and
+  direct-source runs via `tsx` (`lib/core/x.ts` walks up to the checkout
+  root). Migration phase T2 lands the helper plus temp-directory resolution
+  tests before any layout change.
+
+### 7. Target verification contract (replaces mtime freshness)
+
+The mtime-based drift guard (`lib/core/build-freshness.ts:32-51`) exists
+because compiled output lives beside sources and can silently go stale. In the
+target architecture that failure mode is removed by construction, and the
+guard is replaced by four reproducible checks:
+
+- **V1 — Clean-checkout build proof.** From a pristine checkout of the release
+  commit (`git status --porcelain` empty): `npm ci && npm run build &&
+  npm test`. Because `prepack` runs `npm run build`, every packed artifact is
+  freshly emitted at pack time — a stale `dist/` can never be shipped, which
+  is the property the mtime guard approximated.
+- **V2 — Reproducible-output check.** Build the same commit twice into clean
+  `dist/` trees; the emitted file lists must be identical. This pins G2 and
+  catches nondeterministic emit or stray build inputs.
+- **V3 — Package-content audit.** `npm pack --dry-run` output is checked
+  against the §8 inclusion/exclusion table. This extends ADR 0046's
+  operational content audit into a named, scripted gate rather than an
+  operator habit.
+- **V4 — Tarball-install smoke.** Pack, install into a temporary prefix, run
+  `px --version` and representative read-only commands. This generalizes the
+  existing proofs in `test/task-1424-post-integrate-publish-reinstall.test.js`
+  and `test/package-persistent-data.test.js`, which already build, pack, and
+  install into temp dirs.
+
+**Temporary migration guard.** The existing mtime guard remains in force
+during phases T1–T4, because the sibling `.js` layout stays the
+source-checkout runtime until T4 completes and can still go stale in exactly
+the way the guard detects. Its purpose during migration is unchanged
+(fail-closed `prepack`/`prepublishOnly`, `PARALLIX_SKIP_BUILD_CHECK=1`
+bypass). **Removal gate:** phase T5 deletes the guard, `publish:guard`, and
+`build:cjs` together, and may do so only after V1–V4 are wired and passing as
+gates. Deleting the guard before its replacements are enforced is a
+stop-the-phase condition.
+
+### 8. Publication proof
+
+Named steps, executed in order for every release (automatable later; the
+contract is the sequence, not the automation):
+
+1. **P1 clean checkout** — fresh `git clone` (or pristine worktree) of the
+   release commit; `git status --porcelain` must be empty.
+2. **P2 install** — `npm ci`.
+3. **P3 build** — `npm run build` (emits `dist/` only).
+4. **P4 test** — `npm test`.
+5. **P5 content audit** — `npm pack --dry-run`; compare against the table
+   below; any unexpected entry fails the release.
+6. **P6 pack** — `npm pack` (`prepack` re-runs the build, so the tarball is
+   never stale).
+7. **P7 temp install** — `npm install -g --prefix "$(mktemp -d)"
+   ./magnusekdahl-parallix-*.tgz`.
+8. **P8 identity smoke** — `px --version` from that prefix; it must print the
+   executing `px.js` path (PATH-collision visibility, per the 2026-06-22
+   update).
+9. **P9 representative commands** — read-only commands (`px status`,
+   `px stats`) against a temporary target repository.
+10. **P10 publish** — `npm publish --access public` per ADR 0046 (registry
+    path) or distribution of the tarball (local path).
+
+**Artifact inclusion/exclusion table (the V3/P5 reference):**
+
+| Content | In tarball? | Rationale |
+|---|---|---|
+| `dist/**/*.js` | **Included** | The runtime. |
+| `dist/**/*.js.map` | **Included** | Source-mapped stack traces (G7). |
+| `*.d.ts` declarations | Excluded | Not emitted; no library consumer (§4). |
+| `index.ts`, `px.ts`, `lib/**/*.ts` | Excluded | Sources are not needed at runtime; today only `lib/**/*.ts` is stripped (`package.json:45`) while root entries are excluded by omission — the target makes the exclusion uniform. |
+| `test/` (all 148+ test files) | Excluded | Tests never ship. |
+| `tsconfig.json`, `tsconfig.test.json`, `eslint.config.mjs`, `stryker.conf.json` | Excluded | Development configuration. |
+| `prompts/`, `templates/`, `config/`, `data/`, `docs/`, `examples/`, `tools/setup-forgejo-docker.sh` | **Included** | Tool-owned assets at package root (§6). |
+| `package.json`, `README.md`, `LICENSE`, `CHANGELOG.md` | **Included** | npm always includes manifest/README/LICENSE; CHANGELOG is the versioning authority. |
+| Operator state: `.forgejo-local/`, sessions, `agents.local.json`, `graphify-out/`, `missions/`, `backlog/` | Excluded | Operator/repo-local state never ships (ADR 0046 security posture). |
+
+### 9. Phased migration backlog
+
+Each phase is one review-sized mission. No phase is implemented by task-2223.
+Every phase ends at a commit that is independently revertable; "rollback"
+names what a revert restores. Integration gates refer to the pipeline in
+`config/integration-pipelines.json` and `./scripts/verify-local.sh`.
+
+| Phase | Depends on | Scope (one mission each) | Compatibility shim while it lands | Gates (acceptance evidence) | Documentation duty | Rollback point |
+|---|---|---|---|---|---|---|
+| **T1 — Test typecheck project** | — | Add `tsconfig.test.json` (`noEmit`, `allowJs`, `checkJs`, includes `test/**/*.js`); wire it as a stage in `./scripts/verify-local.sh static-analysis`; fix or `@ts-expect-error`-annotate revealed test-type defects | None needed — no runtime or layout change | `./scripts/verify-local.sh static-analysis` and `npm test` pass; typecheck stage demonstrably covers `test/` | Note the new stage in AGENTS.md's static-analysis description | Revert the phase commit; runtime untouched |
+| **T2 — Asset-resolution hardening** | — | Add `packageRoot()` in `lib/core/`; migrate every depth-coupled asset lookup (e.g. `lib/commands/draft.ts:17-18`) to it; add temp-directory resolution tests proving lookups are CWD-independent | None — behavior-preserving refactor in the current layout | `npm test` and `node test/e2e-mission-lifecycle.test.js` pass; new resolution tests exercise a temp dir that is not the checkout | — | Revert the phase commit |
+| **T3 — Package flips to `dist/`** | T2 | `package.json`: add `"type": "commonjs"`, point `main`/`bin`/`exports` at `dist/`, rewrite `files` for the §8 table; `prepack` runs `npm run build`; enable `sourceMap` in `tsconfig.json`; entries enable source maps | Sibling layout and `build:cjs` remain the source-checkout dev/test runtime; only the packed artifact changes | Updated tarball tests pass, incl. successors of `"installed tarball runtime does not trip the stale-build guard on a fresh, correctly-built checkout"` and `"global tarball reinstall preserves PARALLIX_HOME stats and agent blocklist"`; `px --version` from a temp-prefix install; `npm pack --dry-run` matches the §8 table | CHANGELOG MINOR entry; update `docs/authority-reference.md` install steps | Revert `package.json`/`tsconfig.json`; previous tarball shape restored |
+| **T4 — Repo runtime moves to `dist/`** | T3 | `pretest` becomes `npm run build`; tests and repo scripts load `dist/` (test `require` paths, `scripts/verify-local.sh:76` `gate_integrate` require, `publish:guard` require, `npm run test:coverage` target); mutation scoper maps diff `.ts` → `dist/lib/**` (`lib/commands/mutation-gate.ts:118`); **delete tracked `lib/commands/repair-handoff.js`**; trim sibling globs from `.gitignore:15-25` and `eslint.config.mjs:9-22` (keep `dist/`) | `build:cjs` and the mtime guard remain available this phase so a revert restores a working sibling flow | `npm test`, `./scripts/verify-local.sh static-analysis`, `./scripts/verify-local.sh mutation-gate --dry-run`, `node test/e2e-mission-lifecycle.test.js` all pass on the `dist/` layout | Update ADR 0049's layout description via dated note | Revert the phase commit; `build:cjs` regenerates siblings |
+| **T5 — Retire sibling build and mtime guard** | T4, and V1–V4 wired as passing gates | Delete `build:cjs`, `publish:guard`, `prepack`/`prepublishOnly` freshness wiring, and `lib/core/build-freshness.ts` + its tests; add the V3 content-audit script and V2 reproducibility check as named gates; add `npm run dev` (`tsx px.ts`); update README Development and `docs/authority-reference.md` §Public distribution | None — replacements must already be enforced (see §7 removal gate) | Full integration pipeline (`px integrate` gate plan) passes; `npm pack --dry-run` audit passes; tarball-install smoke passes; CHANGELOG MINOR entry | Rewrite README `node index.js` guidance to `node dist/index.js` / `npm run dev`; supersede the freshness narrative in `docs/authority-reference.md` | Revert restores guard + `build:cjs` intact (they are deleted, not decayed) |
+| **T6 — TypeScript test authoring (optional)** | T1, T4 | Allow new tests in TypeScript and/or convert high-value suites; extend `tsconfig.test.json` | n/a | `npm test` + static-analysis | — | Revert; deferred indefinitely without affecting T1–T5 |
+
+Deletion timing, explicitly: the tracked sibling
+`lib/commands/repair-handoff.js` dies in **T4**; `build:cjs`, the mtime guard,
+and `PARALLIX_SKIP_BUILD_CHECK` die in **T5**; nothing is deleted in T1–T3.
+
+Backlog tasks capturing these phases: T1 = task-2224, T2 = task-2225,
+T3 = task-2226, T4 = task-2227, T5 = task-2228, T6 (optional) = task-2229.
+
+### 10. Compatibility and semver impact
+
+- **CLI surface (the supported product): unchanged.** Every `px <command>`
+  behaves identically; only the file executing it moves to `dist/px.js`.
+- **Package-name resolution: unchanged.** `require('@magnusekdahl/parallix')`
+  keeps resolving — `exports`/`main` move the target to `dist/index.js`.
+- **Deep subpath requires break at T3** (`@magnusekdahl/parallix/lib/...`)
+  once `exports` encapsulates internals. No such consumer is evidenced (§3);
+  these paths are declared non-public here. If a real one surfaces, that is
+  the same stop-and-reassess condition as the dual-package clause.
+- **Semver:** under the CHANGELOG-authority discipline
+  (`docs/authority-reference.md`), phases T1, T2, T4, T6 are PATCH-class
+  (internal); **T3 and T5 are MINOR-class** with explicit changelog entries
+  (artifact layout and release-verification contract change). Nothing here is
+  MAJOR because the supported public surface — the CLI — is unchanged.
 
 ## 2026-06-22 Update: Public distribution stance (task-1331)
 
