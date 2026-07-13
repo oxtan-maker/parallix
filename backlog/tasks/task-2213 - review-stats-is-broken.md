@@ -1,7 +1,7 @@
 ---
 id: TASK-2213
 title: review stats is broken
-status: review
+status: ready-for-integration
 assignee: [codex]
 created_date: '2026-07-11 03:53'
 labels: []
