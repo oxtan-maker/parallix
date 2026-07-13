@@ -20,6 +20,7 @@ test('loadCsv parses cleaned CSV (after merge conflict resolution) with valid da
     '2026-05-06,task-1057,ai_sdlc,claude,2',
   ].join('\n'));
 
+  // @ts-expect-error TS2339 Property '_internals' does not exist on type 'typeof import("/home/magnus/code/p
   const data = stats._internals.loadCsv(csv);
 
   assert.deepEqual(data.headers, ['date', 'mission', 'classification', 'implementer', 'pr_fix_rounds']);
@@ -58,6 +59,7 @@ test('loadCsv handles CSV with merge conflict markers by treating them as malfor
     '2026-05-06,task-1057,ai_sdlc,claude,2',
   ].join('\n'));
 
+  // @ts-expect-error TS2339 Property '_internals' does not exist on type 'typeof import("/home/magnus/code/p
   const data = stats._internals.loadCsv(csv);
 
   // Conflict markers are treated as data rows since they appear after the header
@@ -77,6 +79,7 @@ test('loadCsv parses CSV with merge conflict markers at the top after conflict r
     '2026-05-06,task-1057,ai_sdlc,claude,2',
   ].join('\n'));
 
+  // @ts-expect-error TS2339 Property '_internals' does not exist on type 'typeof import("/home/magnus/code/p
   const data = stats._internals.loadCsv(csv);
 
   assert.deepEqual(data.headers, ['date', 'mission', 'classification', 'implementer', 'pr_fix_rounds']);
@@ -116,6 +119,7 @@ test('loadCsv correctly skips empty lines and only parses valid data rows', () =
     '',
   ].join('\n'));
 
+  // @ts-expect-error TS2339 Property '_internals' does not exist on type 'typeof import("/home/magnus/code/p
   const data = stats._internals.loadCsv(csv);
 
   assert.deepEqual(data.headers, ['date', 'mission', 'classification', 'implementer', 'pr_fix_rounds']);

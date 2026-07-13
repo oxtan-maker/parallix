@@ -22,11 +22,13 @@ test('startReviewLoop skips reviewer and implementer launches for autonomous fal
       worktree: root,
       maxAttempts: 1,
       maybeUpdateGraphifyBeforeReviewFn: () => {},
+      // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-999.md' }),
       getTaskImplementerFn: () => null,
       readReviewStateFn: () => null,
       eligibleAgentsForStepFn: () => ['codex'],
       selectAgentFn: () => { throw new Error('No agents available'); },
+      // @ts-expect-error TS2322 Type 'Promise<{ ok: true; }>' is not assignable to type 'Promise<{ ok: boolean;
       rebaseBeforeReviewRoundFn: async () => ({ ok: true }),
       startAgentFn: async (mode) => {
         launches.push(mode);
@@ -36,6 +38,7 @@ test('startReviewLoop skips reviewer and implementer launches for autonomous fal
       consumeImplementerArtifactsFn: async () => ({ consumed: true, ok: true, disposition: 'CHANGES_MADE' }),
       transitionTaskFn: () => true,
       transitionVirtualFn: () => true,
+      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(slug: string, state: Record<string
       writeReviewStateFn: () => {},
       log: (msg) => logs.push(msg),
       error: (msg) => errors.push(msg),

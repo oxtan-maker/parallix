@@ -8,8 +8,11 @@ const { captureOpencodeExport } = require('../lib/agents/opencode-export');
 
 function makeFakeChild() {
   const child = new EventEmitter();
+  // @ts-expect-error TS2339 Property 'stdout' does not exist on type 'EventEmitter<any>'.
   child.stdout = new EventEmitter();
+  // @ts-expect-error TS2339 Property 'killed' does not exist on type 'EventEmitter<any>'.
   child.killed = false;
+  // @ts-expect-error TS2339 Property 'kill' does not exist on type 'EventEmitter<any>'.
   child.kill = () => { child.killed = true; };
   return child;
 }
@@ -20,6 +23,7 @@ test('captureOpencodeExport returns the full stdout JSON on clean exit', async (
   const spawn = (cmd, args, opts) => {
     return realSpawn('node', ['-e', 'process.stdout.write(Buffer.from(process.argv[1], "base64"))', encoded], opts);
   };
+  // @ts-expect-error TS2322 Type '(cmd: any, args: any, opts: any) => ChildProcessWithoutNullStreams' is not
   const result = await captureOpencodeExport('ses_x', { spawn });
   assert.equal(result, expected);
 });
@@ -27,8 +31,10 @@ test('captureOpencodeExport returns the full stdout JSON on clean exit', async (
 test('captureOpencodeExport times out and kills a non-exiting export child', async () => {
   const child = makeFakeChild();
   const spawn = () => child;
+  // @ts-expect-error TS2322 Type '() => EventEmitter<any>' is not assignable to type '{ (command: string, op
   const result = await captureOpencodeExport('ses_hang', { spawn, timeoutMs: 50 });
   assert.equal(result, null, 'must degrade to null, not hang');
+  // @ts-expect-error TS2339 Property 'killed' does not exist on type 'EventEmitter<any>'.
   assert.equal(child.killed, true, 'hung export child must be killed');
 });
 
@@ -36,6 +42,7 @@ test('captureOpencodeExport fails explicitly when output exceeds maxBytes', asyn
   const spawn = (cmd, args, opts) => {
     return realSpawn('node', ['-e', 'process.stdout.write(Buffer.alloc(200, "{").toString())'], opts);
   };
+  // @ts-expect-error TS2322 Type '(cmd: any, args: any, opts: any) => ChildProcessWithoutNullStreams' is not
   const result = await captureOpencodeExport('ses_big', { spawn, maxBytes: 100, timeoutMs: 1000 });
   assert.equal(result, null, 'oversize export must fail explicitly, not truncate');
 });
@@ -48,12 +55,14 @@ test('captureOpencodeExport resolves null when spawn throws', async () => {
 test('captureOpencodeExport resolves null on child error event', async () => {
   const child = makeFakeChild();
   const spawn = () => child;
+  // @ts-expect-error TS2322 Type '() => EventEmitter<any>' is not assignable to type '{ (command: string, op
   const p = captureOpencodeExport('ses_x', { spawn });
   child.emit('error', new Error('spawn ENOENT'));
   assert.equal(await p, null);
 });
 
 test('captureOpencodeExport returns null for missing session id', async () => {
+  // @ts-expect-error TS2322 Type 'EventEmitter<any>' is not assignable to type 'ChildProcess | ChildProcessW
   assert.equal(await captureOpencodeExport('', { spawn: () => makeFakeChild() }), null);
 });
 
@@ -78,6 +87,7 @@ test('captureOpencodeExport captures full output with large payloads (regression
     return realSpawn('node', ['-e', spawnCode], opts);
   };
 
+  // @ts-expect-error TS2322 Type '(cmd: any, args: any, opts: any) => ChildProcessWithoutNullStreams' is not
   const result = await captureOpencodeExport('ses_large', { spawn, timeoutMs: 30000 });
   assert.equal(result, largePayload, 'full large payload must be captured without truncation');
   assert.equal(result.length, largePayload.length, 'byte count must match original');

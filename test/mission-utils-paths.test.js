@@ -68,20 +68,24 @@ test('inferSlug identifies slug from explicit arg, current branch, directory nam
 
     // 2. Inference from mission branch
     git.getCurrentBranch = () => 'mission/task-118';
+    // @ts-expect-error TS2554 Expected 1 arguments, but got 0.
     assert.equal(inferSlug(), 'task-118');
 
     // 3. Inference from non-mission branch falls back to directory
     git.getCurrentBranch = () => 'main';
     process.cwd = () => `/tmp/anyProject-task-119`;
+    // @ts-expect-error TS2554 Expected 1 arguments, but got 0.
     assert.equal(inferSlug(), 'task-119');
 
     git.getCurrentBranch = () => 'main';
     process.cwd = () => `/tmp/anyProject-adhoc-hello-world`;
+    // @ts-expect-error TS2554 Expected 1 arguments, but got 0.
     assert.equal(inferSlug(), 'adhoc-hello-world');
 
     // 4. Inference from worktree registry
     git.getCurrentBranch = () => 'detached';
     process.cwd = () => '/tmp/random-dir';
+    // @ts-expect-error TS2322 Type '(args: string[]) => { stdout: string; }' is not assignable to type '(args:
     git.git = (args) => {
       if (args.includes('worktree') && args.includes('list')) {
         return {
@@ -90,11 +94,13 @@ test('inferSlug identifies slug from explicit arg, current branch, directory nam
       }
       return { stdout: '' };
     };
+    // @ts-expect-error TS2554 Expected 1 arguments, but got 0.
     assert.equal(inferSlug(), 'task-120');
 
     // 5. Mixed case branch
     git.getCurrentBranch = () => 'mission/TASK-099';
     process.cwd = () => FAKE_ROOT;
+    // @ts-expect-error TS2554 Expected 1 arguments, but got 0.
     assert.equal(inferSlug(), 'task-099');
   } finally {
     git.getCurrentBranch = originalBranch;

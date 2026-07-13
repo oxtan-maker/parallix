@@ -17,6 +17,7 @@ test('codex isolation repro keeps operator-home nested tool resolution while iso
     process.env.HOME = operatorHome;
 
     const invocation = buildCodexDraftInvocation({ prompt: 'Execute.', worktree, interactive: false });
+    // @ts-expect-error TS2339 Property 'HOME' does not exist on type '{ CODEX_HOME?: string; }'.
     const resolvedNestedTool = path.join(invocation.options.env.HOME, '.local', 'bin', 'opencode');
 
     assert.ok(fs.existsSync(resolvedNestedTool), 'a nested command must retain the operator HOME used to resolve its installation');

@@ -1176,7 +1176,7 @@ function printIntegrationPreflight(
   } else if (context.task.reason === 'ambiguous') {
     failures.push('task-ambiguity');
     log(fmt.status('FAIL', `Backlog task: ambiguous slug ${context.slug}`));
-    // @ts-expect-error context.task.matches may be undefined
+    // @ts-ignore context.task.matches may be undefined
     context.task.matches.forEach((/** @type{string} */ match) => log(`  - ${match}`));
   } else {
     log(fmt.status('WARN', `Backlog task: no task file found for ${context.slug}; continuing with synthetic/unknown task metadata.`));

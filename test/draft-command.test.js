@@ -15,8 +15,11 @@ test('runDraftCommand top-level flows are covered with injected dependencies', a
 
     await runDraftCommand([], {
       inferSlugFn: () => null,
+      // @ts-expect-error TS2322 Type '{ ok: true; }' is not assignable to type '{ ok: boolean; classification: a
       validateDraftClassificationFn: () => ({ ok: true }),
+      // @ts-expect-error TS2322 Type '(code: string | number) => void' is not assignable to type '(code?: string
       exitFn: (code) => { exitCode = code; },
+      // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
       errorFn: (msg) => errors.push(msg)
     });
 
@@ -40,9 +43,11 @@ test('runDraftCommand top-level flows are covered with injected dependencies', a
         resolveMainRepoFn: () => path.join(tmpRoot, 'main'),
         conventionalWorktreePathFn: () => worktree,
         ensureRepoExistsFn: (repo) => { calls.push(['repo', repo]); return true; },
+        // @ts-expect-error TS2322 Type '(repo: string) => { committed: true; }' is not assignable to type '(rootDi
         ensureStandaloneMissionBaselineFn: (repo) => { calls.push(['baseline', repo]); return { committed: true }; },
         ensureMissionBranchFn: (repo, branch) => { calls.push(['branch', repo, branch]); },
         ensureWorktreeFn: (repo, wt, branch) => { calls.push(['worktree', repo, wt, branch]); },
+        // @ts-expect-error TS2322 Type '(wt: any) => void' is not assignable to type '(targetWorktree: any, { logF
         ensureGraphifyWorkspaceFn: (wt) => { calls.push(['graphify', wt]); },
         ensureMissionFileFn: (wt, slug) => {
           calls.push(['mission', wt, slug]);
@@ -52,19 +57,26 @@ test('runDraftCommand top-level flows are covered with injected dependencies', a
           calls.push(['bootstrap', wt, repo, slug]);
           return true;
         },
+        // @ts-expect-error TS2559 Type '{ draft: string[]; }' has no properties in common with type 'AgentConfig'.
         readAgentConfigOrExitFn: () => ({ draft: ['codex'] }),
         selectAgentFn: () => 'codex',
+        // @ts-expect-error TS2322 Type '({ prompt, worktree: targetWorktree, agent }: StartAgentOptions) => Promis
         startDraftAgentFn: async ({ prompt, worktree: targetWorktree, agent }) => {
+          // @ts-expect-error TS2339 Property 'includes' does not exist on type 'string | Function'.
           calls.push(['launch', prompt.includes('task-1038'), targetWorktree, agent]);
           return { agent: 'codex', result: { status: 0 } };
         },
+        // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
         resolveTaskFileFn: () => ({ ok: true, taskFile }),
         recordDraftImplementerFn: (opts) => calls.push(['record', opts.slug, opts.actual]),
         recordDraftStatsFn: (opts) => calls.push(['stats', opts.slug, opts.rootDir]),
         [normalizeKey]: () => ({ ok: true, [typeKey]: 'ai_sdlc' }),
+        // @ts-expect-error TS2322 Type 'number' is not assignable to type 'boolean'.
         enforceDraftCommitSafetyFn: (opts) => calls.push(['safety', opts.slug, opts.worktree]),
+        // @ts-expect-error TS2322 Type 'number' is not assignable to type 'boolean'.
         transitionTaskFn: (slug, status) => calls.push(['transition', slug, status]),
         exitFn: (code) => { throw new Error(`unexpected exit ${code}`); },
+        // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
         logFn: (msg) => logs.push(msg),
         errorFn: (msg) => { throw new Error(`unexpected error ${msg}`); }
       });
@@ -102,14 +114,19 @@ test('runDraftCommand top-level flows are covered with injected dependencies', a
       resolveMainRepoFn: () => '/tmp/main',
       detectLaunchBaseBranchFn: () => null,
       ensureRepoExistsFn: () => true,
+      // @ts-expect-error TS2741 Property 'changed' is missing in type '{ committed: false; }' but required in ty
       ensureStandaloneMissionBaselineFn: () => ({ committed: false }),
       ensureDraftRepoConfigCommittedFn: () => false,
+      // @ts-expect-error TS2322 Type '{ ok: true; }' is not assignable to type '{ ok: boolean; classification: a
       validateDraftClassificationFn: () => ({ ok: true }),
       ensureMissionBranchFn: () => {
         throw new Error('should not create mission branch when repo config is dirty');
       },
+      // @ts-expect-error TS2322 Type '(code: string | number) => void' is not assignable to type '(code?: string
       exitFn: (code) => { exitCode = code; },
+      // @ts-expect-error TS2322 Type '() => void' is not assignable to type 'LogFunc'.
       logFn: () => {},
+      // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
       errorFn: (msg) => errors.push(msg)
     });
 
@@ -122,6 +139,7 @@ test('runDraftCommand top-level flows are covered with injected dependencies', a
     const errors = [];
 
     await runDraftCommand(['task-fail'], {
+      // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       checkBacklogIntegrityFn: () => [],
       inferSlugFn: (slug) => slug,
@@ -134,9 +152,13 @@ test('runDraftCommand top-level flows are covered with injected dependencies', a
       ensureMissionBranchFn: () => {
         throw new Error('should not continue after missing repo');
       },
+      // @ts-expect-error TS2322 Type '{ ok: true; }' is not assignable to type '{ ok: boolean; classification: a
       validateDraftClassificationFn: () => ({ ok: true }),
+      // @ts-expect-error TS2322 Type '(code: string | number) => void' is not assignable to type '(code?: string
       exitFn: (code) => { exitCode = code; },
+      // @ts-expect-error TS2322 Type '() => void' is not assignable to type 'LogFunc'.
       logFn: () => {},
+      // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
       errorFn: (msg) => errors.push(msg)
     });
 
@@ -149,21 +171,28 @@ test('runDraftCommand top-level flows are covered with injected dependencies', a
     const errors = [];
 
     await runDraftCommand(['task-fail'], {
+      // @ts-expect-error TS2322 Type '{ ok: false; reason: string; }' is not assignable to type '{ ok: boolean;
       resolveTaskFileFn: () => ({ ok: false, reason: 'missing' }),
       checkBacklogIntegrityFn: () => [],
       inferSlugFn: (slug) => slug,
       resolveMainRepoFn: () => '/tmp/main',
       detectLaunchBaseBranchFn: () => null,
       ensureRepoExistsFn: () => true,
+      // @ts-expect-error TS2741 Property 'changed' is missing in type '{ committed: false; }' but required in ty
       ensureStandaloneMissionBaselineFn: () => ({ committed: false }),
       ensureMissionBranchFn: () => {},
       ensureWorktreeFn: () => {},
+      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(targetWorktree: any, { logFn }?: {
       ensureGraphifyWorkspaceFn: () => {},
       ensureMissionFileFn: () => 'MISSION.md',
       bootstrapBacklogTaskFn: () => false,
+      // @ts-expect-error TS2322 Type '{ ok: true; }' is not assignable to type '{ ok: boolean; classification: a
       validateDraftClassificationFn: () => ({ ok: true }),
+      // @ts-expect-error TS2322 Type '(code: string | number) => void' is not assignable to type '(code?: string
       exitFn: (code) => { exitCode = code; },
+      // @ts-expect-error TS2322 Type '() => void' is not assignable to type 'LogFunc'.
       logFn: () => {},
+      // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
       errorFn: (msg) => errors.push(msg)
     });
 
@@ -176,25 +205,33 @@ test('runDraftCommand top-level flows are covered with injected dependencies', a
     const errors = [];
 
     await runDraftCommand(['task-fail'], {
+      // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       checkBacklogIntegrityFn: () => [],
       inferSlugFn: (slug) => slug,
       resolveMainRepoFn: () => '/tmp/main',
       detectLaunchBaseBranchFn: () => null,
       ensureRepoExistsFn: () => true,
+      // @ts-expect-error TS2741 Property 'changed' is missing in type '{ committed: false; }' but required in ty
       ensureStandaloneMissionBaselineFn: () => ({ committed: false }),
       ensureMissionBranchFn: () => {},
       ensureWorktreeFn: () => {},
+      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(targetWorktree: any, { logFn }?: {
       ensureGraphifyWorkspaceFn: () => {},
       ensureMissionFileFn: () => 'MISSION.md',
       bootstrapBacklogTaskFn: () => true,
       readAgentConfigOrExitFn: () => ({}),
       selectAgentFn: () => 'codex',
+      // @ts-expect-error TS2322 Type 'Promise<{ agent: string; result: { error: Error; }; }>' is not assignable
       startDraftAgentFn: async () => ({ agent: 'codex', result: { error: new Error('Launch failed') } }),
       transitionTaskFn: () => true,
+      // @ts-expect-error TS2322 Type '{ ok: true; }' is not assignable to type '{ ok: boolean; classification: a
       validateDraftClassificationFn: () => ({ ok: true }),
+      // @ts-expect-error TS2322 Type '(code: string | number) => void' is not assignable to type '(code?: string
       exitFn: (code) => { exitCode = code; },
+      // @ts-expect-error TS2322 Type '() => void' is not assignable to type 'LogFunc'.
       logFn: () => {},
+      // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
       errorFn: (msg) => errors.push(msg)
     });
 
@@ -207,25 +244,33 @@ test('runDraftCommand top-level flows are covered with injected dependencies', a
     const errors = [];
 
     await runDraftCommand(['task-fail'], {
+      // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       checkBacklogIntegrityFn: () => [],
       inferSlugFn: (slug) => slug,
       resolveMainRepoFn: () => '/tmp/main',
       detectLaunchBaseBranchFn: () => null,
       ensureRepoExistsFn: () => true,
+      // @ts-expect-error TS2741 Property 'changed' is missing in type '{ committed: false; }' but required in ty
       ensureStandaloneMissionBaselineFn: () => ({ committed: false }),
       ensureMissionBranchFn: () => {},
       ensureWorktreeFn: () => {},
+      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(targetWorktree: any, { logFn }?: {
       ensureGraphifyWorkspaceFn: () => {},
       ensureMissionFileFn: () => 'MISSION.md',
       bootstrapBacklogTaskFn: () => true,
       readAgentConfigOrExitFn: () => ({}),
       selectAgentFn: () => 'codex',
+      // @ts-expect-error TS2322 Type 'Promise<{ agent: string; result: { status: number; }; }>' is not assignabl
       startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 23 } }),
       transitionTaskFn: () => true,
+      // @ts-expect-error TS2322 Type '{ ok: true; }' is not assignable to type '{ ok: boolean; classification: a
       validateDraftClassificationFn: () => ({ ok: true }),
+      // @ts-expect-error TS2322 Type '(code: string | number) => void' is not assignable to type '(code?: string
       exitFn: (code) => { exitCode = code; },
+      // @ts-expect-error TS2322 Type '() => void' is not assignable to type 'LogFunc'.
       logFn: () => {},
+      // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
       errorFn: (msg) => errors.push(msg)
     });
 
@@ -238,30 +283,39 @@ test('runDraftCommand top-level flows are covered with injected dependencies', a
     const errors = [];
 
     await runDraftCommand(['task-fail'], {
+      // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       checkBacklogIntegrityFn: () => [],
       inferSlugFn: (slug) => slug,
       resolveMainRepoFn: () => '/tmp/main',
       detectLaunchBaseBranchFn: () => null,
       ensureRepoExistsFn: () => true,
+      // @ts-expect-error TS2741 Property 'changed' is missing in type '{ committed: false; }' but required in ty
       ensureStandaloneMissionBaselineFn: () => ({ committed: false }),
       ensureMissionBranchFn: () => {},
       ensureWorktreeFn: () => {},
+      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(targetWorktree: any, { logFn }?: {
       ensureGraphifyWorkspaceFn: () => {},
       ensureMissionFileFn: () => 'MISSION.md',
       bootstrapBacklogTaskFn: () => true,
       readAgentConfigOrExitFn: () => ({}),
       selectAgentFn: () => 'codex',
+      // @ts-expect-error TS2322 Type 'Promise<{ agent: string; result: { status: number; }; }>' is not assignabl
       startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
       transitionTaskFn: () => true,
+      // @ts-expect-error TS1117 An object literal cannot have multiple properties with the same name.
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       recordDraftImplementerFn: () => {},
       recordDraftStatsFn: () => {},
       [normalizeKey]: () => ({ ok: true, [typeKey]: 'ai_sdlc' }),
       enforceDraftCommitSafetyFn: () => { throw new Error('fallback commit failed'); },
+      // @ts-expect-error TS2322 Type '{ ok: true; }' is not assignable to type '{ ok: boolean; classification: a
       validateDraftClassificationFn: () => ({ ok: true }),
+      // @ts-expect-error TS2322 Type '(code: string | number) => void' is not assignable to type '(code?: string
       exitFn: (code) => { exitCode = code; },
+      // @ts-expect-error TS2322 Type '() => void' is not assignable to type 'LogFunc'.
       logFn: () => {},
+      // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
       errorFn: (msg) => errors.push(msg)
     });
 
@@ -274,24 +328,29 @@ test('runDraftCommand top-level flows are covered with injected dependencies', a
     let restartCount = 0;
 
     await runDraftCommand(['task-fix'], {
+      // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       checkBacklogIntegrityFn: () => [],
       inferSlugFn: (slug) => slug,
       resolveMainRepoFn: () => '/tmp/main',
       detectLaunchBaseBranchFn: () => null,
       ensureRepoExistsFn: () => true,
+      // @ts-expect-error TS2741 Property 'changed' is missing in type '{ committed: false; }' but required in ty
       ensureStandaloneMissionBaselineFn: () => ({ committed: false }),
       ensureMissionBranchFn: () => {},
       ensureWorktreeFn: () => {},
+      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(targetWorktree: any, { logFn }?: {
       ensureGraphifyWorkspaceFn: () => {},
       ensureMissionFileFn: () => 'MISSION.md',
       bootstrapBacklogTaskFn: () => true,
       readAgentConfigOrExitFn: () => ({}),
       selectAgentFn: () => 'codex',
+      // @ts-expect-error TS2322 Type 'Promise<{ agent: string; result: { status: number; }; }>' is not assignabl
       startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
       transitionTaskFn: () => true,
       recordDraftImplementerFn: () => {},
       recordDraftStatsFn: () => {},
+      // @ts-expect-error TS2322 Type '{ ok: true; }' is not assignable to type '{ ok: boolean; classification: a
       validateDraftClassificationFn: () => ({ ok: true }),
       [normalizeKey]: (() => {
         let calls = 0;
@@ -306,8 +365,11 @@ test('runDraftCommand top-level flows are covered with injected dependencies', a
         restartCount += 1;
         return true;
       },
+      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '({ slug, worktree, dirtyEntries, gi
       enforceDraftCommitSafetyFn: () => {},
+      // @ts-expect-error TS2322 Type '(code: string | number) => void' is not assignable to type '(code?: string
       exitFn: (code) => { exitCode = code; },
+      // @ts-expect-error TS2322 Type '() => void' is not assignable to type 'LogFunc'.
       logFn: () => {},
       errorFn: (msg) => { throw new Error(`unexpected error ${msg}`); }
     });
@@ -321,30 +383,39 @@ test('runDraftCommand top-level flows are covered with injected dependencies', a
     const errors = [];
 
     await runDraftCommand(['task-fix'], {
+      // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       checkBacklogIntegrityFn: () => [],
       inferSlugFn: (slug) => slug,
       resolveMainRepoFn: () => '/tmp/main',
       detectLaunchBaseBranchFn: () => null,
       ensureRepoExistsFn: () => true,
+      // @ts-expect-error TS2741 Property 'changed' is missing in type '{ committed: false; }' but required in ty
       ensureStandaloneMissionBaselineFn: () => ({ committed: false }),
       ensureMissionBranchFn: () => {},
       ensureWorktreeFn: () => {},
+      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(targetWorktree: any, { logFn }?: {
       ensureGraphifyWorkspaceFn: () => {},
       ensureMissionFileFn: () => 'MISSION.md',
       bootstrapBacklogTaskFn: () => true,
       readAgentConfigOrExitFn: () => ({}),
       selectAgentFn: () => 'codex',
+      // @ts-expect-error TS2322 Type 'Promise<{ agent: string; result: { status: number; }; }>' is not assignabl
       startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
       transitionTaskFn: () => true,
       recordDraftImplementerFn: () => {},
       recordDraftStatsFn: () => {},
+      // @ts-expect-error TS2322 Type '{ ok: true; }' is not assignable to type '{ ok: boolean; classification: a
       validateDraftClassificationFn: () => ({ ok: true }),
       [normalizeKey]: () => ({ ok: false, reason: 'missing-labels' }),
       restartDraftAgentFn: async () => true,
+      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '({ slug, worktree, dirtyEntries, gi
       enforceDraftCommitSafetyFn: () => {},
+      // @ts-expect-error TS2322 Type '(code: string | number) => void' is not assignable to type '(code?: string
       exitFn: (code) => { exitCode = code; },
+      // @ts-expect-error TS2322 Type '() => void' is not assignable to type 'LogFunc'.
       logFn: () => {},
+      // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
       errorFn: (msg) => errors.push(msg)
     });
 
@@ -357,15 +428,20 @@ test('runDraftCommand top-level flows are covered with injected dependencies', a
     const errors = [];
 
     await runDraftCommand(['task-fail'], {
+      // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       checkBacklogIntegrityFn: () => [],
       inferSlugFn: (slug) => slug,
       resolveMainRepoFn: () => '/tmp/main',
       detectLaunchBaseBranchFn: () => null,
       ensureRepoExistsFn: () => true,
+      // @ts-expect-error TS2739 Type '{ failed: true; message: string; }' is missing the following properties fr
       ensureStandaloneMissionBaselineFn: () => ({ failed: true, message: 'git status failed' }),
+      // @ts-expect-error TS2322 Type '(code: string | number) => void' is not assignable to type '(code?: string
       exitFn: (code) => { exitCode = code; },
+      // @ts-expect-error TS2322 Type '() => void' is not assignable to type 'LogFunc'.
       logFn: () => {},
+      // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
       errorFn: (msg) => errors.push(msg)
     });
 
@@ -381,12 +457,16 @@ test('runDraftCommand accepts free-text intent and synthesizes a task slug', asy
     resolveMainRepoFn: () => '/tmp/main',
     conventionalWorktreePathFn: (slug) => `/tmp/${slug}`,
     ensureRepoExistsFn: () => true,
+    // @ts-expect-error TS2741 Property 'changed' is missing in type '{ committed: false; }' but required in ty
     ensureStandaloneMissionBaselineFn: () => ({ committed: false }),
     ensureDraftRepoConfigCommittedFn: () => true,
+    // @ts-expect-error TS2322 Type '{ ok: false; reason: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: false, reason: 'missing' }),
     ensureMissionBranchFn: () => {},
     ensureWorktreeFn: () => {},
+    // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(targetWorktree: any, { logFn }?: {
     ensureGraphifyWorkspaceFn: () => {},
+    // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(targetWorktree: any, { gitFn, logF
     ensureGraphifyIgnoreFn: () => {},
     ensureMissionFileFn: () => '/tmp/adhoc-create-a-hello-world-program/MISSION.md',
     bootstrapBacklogTaskFn: (_wt, _repo, slug, options) => {
@@ -397,11 +477,14 @@ test('runDraftCommand accepts free-text intent and synthesizes a task slug', asy
     transitionTaskFn: () => true,
     readAgentConfigOrExitFn: () => ({}),
     selectAgentFn: () => 'codex',
+    // @ts-expect-error TS2322 Type 'Promise<{ agent: string; result: { status: number; }; }>' is not assignabl
     startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
     recordDraftImplementerFn: () => {},
     normalizeDraftClassificationFn: () => ({ ok: true, classification: 'unknown' }),
+    // @ts-expect-error TS2322 Type '() => void' is not assignable to type '({ slug, worktree, dirtyEntries, gi
     enforceDraftCommitSafetyFn: () => {},
     exitFn: (code) => { throw new Error(`unexpected exit ${code}`); },
+    // @ts-expect-error TS2322 Type '() => void' is not assignable to type 'LogFunc'.
     logFn: () => {},
     errorFn: (msg) => { throw new Error(`unexpected error ${msg}`); }
   });
@@ -429,25 +512,32 @@ test('runDraftCommand honors an explicit --agent override without consulting sel
       resolveMainRepoFn: () => path.join(tmpRoot, 'main'),
       conventionalWorktreePathFn: () => worktree,
       ensureRepoExistsFn: () => true,
+      // @ts-expect-error TS2741 Property 'changed' is missing in type '{ committed: false; }' but required in ty
       ensureStandaloneMissionBaselineFn: () => ({ committed: false }),
       ensureMissionBranchFn: () => {},
       ensureWorktreeFn: () => {},
+      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(targetWorktree: any, { logFn }?: {
       ensureGraphifyWorkspaceFn: () => {},
       ensureMissionFileFn: (wt, slug) => `${wt}/docs/missions/2026/${slug}/MISSION.md`,
       bootstrapBacklogTaskFn: () => true,
+      // @ts-expect-error TS2559 Type '{ draft: string[]; }' has no properties in common with type 'AgentConfig'.
       readAgentConfigOrExitFn: () => ({ draft: ['codex', 'claude'] }),
       selectAgentFn: () => { throw new Error('selectAgentFn must not run when --agent is provided'); },
+      // @ts-expect-error TS2322 Type '({ agent }: StartAgentOptions) => Promise<{ agent: string; result: { statu
       startDraftAgentFn: async ({ agent }) => {
         calls.push(['launch', agent]);
         return { agent, result: { status: 0 } };
       },
+      // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
       resolveTaskFileFn: () => ({ ok: true, taskFile }),
       recordDraftImplementerFn: (opts) => calls.push(['record', opts.selected, opts.actual]),
       recordDraftStatsFn: () => {},
       [normalizeKey]: () => ({ ok: true, [typeKey]: 'ai_sdlc' }),
+      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '({ slug, worktree, dirtyEntries, gi
       enforceDraftCommitSafetyFn: () => {},
       transitionTaskFn: () => true,
       exitFn: (code) => { throw new Error(`unexpected exit ${code}`); },
+      // @ts-expect-error TS2322 Type '() => void' is not assignable to type 'LogFunc'.
       logFn: () => {},
       errorFn: (msg) => { throw new Error(`unexpected error ${msg}`); }
     });
@@ -471,7 +561,9 @@ test('runDraftCommand exits non-zero with usage text when --agent is missing its
     selectAgentFn: () => { throw new Error('must not select an agent when --agent parsing fails'); },
     startDraftAgentFn: async () => { throw new Error('must not launch when --agent parsing fails'); },
     exitFn: (code) => { exitCode = code; throw new Error('__stop__'); },
+    // @ts-expect-error TS2322 Type '() => void' is not assignable to type 'LogFunc'.
     logFn: () => {},
+    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
     errorFn: (msg) => errors.push(msg)
   }).catch(err => { if (err.message !== '__stop__') { throw err; } });
 
@@ -487,6 +579,7 @@ test('ensureDraftRepoConfigCommitted blocks dirty mission-layout config before w
       '?? backlog/config.yml',
       ' M README.md'
     ],
+    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
     errorFn: (msg) => errors.push(msg)
   });
 

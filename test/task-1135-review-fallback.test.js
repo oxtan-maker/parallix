@@ -54,11 +54,13 @@ test('CP-1: blocked auto-derived reviewer falls back via selectAgent without mut
   // which returns 'claude'. 
   await startReviewLoop(TEST_SLUG, {
     eligibleAgentsForStepFn: () => ['codex', 'claude', 'custom', 'vibe'],
+    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: TASK_FILE }),
     implementer: 'vibe',
     dryRun: true,
     log: m => logs.push(m),
     error: m => errors.push(m),
+    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'never'.
     exit: c => exitCodes.push(c),
     selectAgentFn: (step, opts) => {
       const exclude = opts.exclude instanceof Set ? opts.exclude : new Set(opts.exclude || []);
@@ -66,11 +68,13 @@ test('CP-1: blocked auto-derived reviewer falls back via selectAgent without mut
       if (!exclude.has('claude')) return 'claude';
       return 'custom';
     },
+    // @ts-expect-error TS2741 Property 'agent' is missing in type '{ supported: boolean; detail: string; }' bu
     workflowLauncherStatusFn: (agent) => ({
       supported: agent !== 'codex',
       detail: agent
     }),
     formatMatrixSummaryFn: () => [],
+    // @ts-expect-error TS2739 Type '{ agents: string[]; }' is missing the following properties from type '{ st
     buildAutonomousReviewMatrixFn: () => ({ agents: ['codex', 'claude', 'custom', 'vibe'] })
   });
 
@@ -122,23 +126,28 @@ test('CP-1: usage-limit on auto-derived reviewer triggers fallback with blocklis
   // In the real code, startAgent writes the blocklist entry and returns a fallback.
   await startReviewLoop(TEST_SLUG, {
     eligibleAgentsForStepFn: () => ['codex', 'claude', 'vibe', 'custom'],
+    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: TASK_FILE }),
     implementer: 'claude',
     dryRun: true,
     log: m => logs.push(m),
     error: m => errors.push(m),
+    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'never'.
     exit: c => exitCodes.push(c),
     selectAgentFn: (step, opts) => {
       const exclude = opts.exclude instanceof Set ? opts.exclude : new Set(opts.exclude || []);
       if (!exclude.has('custom')) return 'custom';
       return 'vibe';
     },
+    // @ts-expect-error TS2741 Property 'agent' is missing in type '{ supported: true; detail: string; }' but r
     workflowLauncherStatusFn: (agent) => ({
       supported: true,
       detail: agent
     }),
     formatMatrixSummaryFn: () => [],
+    // @ts-expect-error TS2739 Type '{ agents: string[]; }' is missing the following properties from type '{ st
     buildAutonomousReviewMatrixFn: () => ({ agents: ['codex', 'claude', 'vibe', 'custom'] }),
+    // @ts-expect-error TS2322 Type '(step: string, opts: StartAgentOptions) => Promise<{ agent: string; origin
     startAgentFn: async (step, opts) => {
       // Simulate: first attempt picks custom, hits limit -> writes blocklist
       const original = opts.agent || 'custom';
@@ -187,24 +196,30 @@ test('CP-1: persisted blocked reviewer falls back via selectAgent without mutati
   // which returns 'vibe'.
   await startReviewLoop(TEST_SLUG, {
     eligibleAgentsForStepFn: () => ['codex', 'claude', 'vibe', 'custom'],
+    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: TASK_FILE }),
     implementer: 'custom',
     dryRun: true,
+    // @ts-expect-error TS2740 Type '{ reviewer: string; round: number; startedAt: string; phase: string; }' is
     readReviewStateFn: () => ({ reviewer: 'codex', round: 1, startedAt: '2026-01-01', phase: 'reviewing' }),
     log: m => logs.push(m),
     error: m => errors.push(m),
+    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'never'.
     exit: c => exitCodes.push(c),
     selectAgentFn: (step, opts) => {
       const exclude = opts.exclude instanceof Set ? opts.exclude : new Set(opts.exclude || []);
       if (!exclude.has('vibe')) return 'vibe';
       return 'claude';
     },
+    // @ts-expect-error TS2741 Property 'agent' is missing in type '{ supported: boolean; detail: string; }' bu
     workflowLauncherStatusFn: (agent) => ({
       supported: agent !== 'codex',
       detail: agent
     }),
     formatMatrixSummaryFn: () => [],
+    // @ts-expect-error TS2739 Type '{ agents: string[]; }' is missing the following properties from type '{ st
     buildAutonomousReviewMatrixFn: () => ({ agents: ['codex', 'claude', 'vibe', 'custom'] }),
+    // @ts-expect-error TS2322 Type '(step: string, opts: StartAgentOptions) => Promise<{ agent: string; }>' is
     startAgentFn: async (step, opts) => {
       return { agent: opts.agent };
     }
@@ -257,22 +272,26 @@ test('CP-1: reviewer fallback with no Backlog assignee mutation (regression)', a
   // Next selectAgent call returns 'claude'.
   await startReviewLoop(TEST_SLUG, {
     eligibleAgentsForStepFn: () => ['codex', 'claude', 'custom', 'vibe'],
+    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: TASK_FILE }),
     implementer: 'vibe',
     dryRun: true,
     log: m => logs.push(m),
     error: m => errors.push(m),
+    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'never'.
     exit: c => exitCodes.push(c),
     selectAgentFn: (step, opts) => {
       const exclude = opts.exclude instanceof Set ? opts.exclude : new Set(opts.exclude || []);
       if (!exclude.has('codex')) return 'codex';
       return 'claude';
     },
+    // @ts-expect-error TS2741 Property 'agent' is missing in type '{ supported: boolean; detail: string; }' bu
     workflowLauncherStatusFn: (agent) => ({
       supported: agent !== 'codex',
       detail: agent
     }),
     formatMatrixSummaryFn: () => [],
+    // @ts-expect-error TS2739 Type '{ agents: string[]; }' is missing the following properties from type '{ st
     buildAutonomousReviewMatrixFn: () => ({ agents: ['codex', 'claude', 'custom', 'vibe'] })
   });
 
@@ -298,18 +317,22 @@ test('CP-1: explicit blocked reviewer fails fast without fallback (unchanged beh
   // Current code: explicit reviewer never enters fallback loop, hard-fails
   await startReviewLoop(TEST_SLUG, {
     eligibleAgentsForStepFn: () => ['claude', 'vibe', 'custom', 'codex'], 
+    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: TASK_FILE }),
     implementer: 'custom',
     reviewer: 'codex', // explicit
     dryRun: true,
     log: m => logs.push(m),
     error: m => errors.push(m),
+    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'never'.
     exit: c => exitCodes.push(c),
+    // @ts-expect-error TS2741 Property 'agent' is missing in type '{ supported: boolean; detail: string; }' bu
     workflowLauncherStatusFn: (agent) => ({
       supported: agent !== 'codex',
       detail: agent
     }),
     formatMatrixSummaryFn: () => [],
+    // @ts-expect-error TS2739 Type '{ agents: string[]; }' is missing the following properties from type '{ st
     buildAutonomousReviewMatrixFn: () => ({ agents: ['claude', 'vibe', 'custom', 'codex'] })
   });
 
@@ -339,11 +362,13 @@ test('CP-1: multi-hop fallback scans remaining eligible agents when deterministi
   // Next selectAgent call returns claude (supported).
   await startReviewLoop(TEST_SLUG, {
     eligibleAgentsForStepFn: () => ['claude', 'custom', 'codex', 'vibe'],
+    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: TASK_FILE }),
     implementer: 'custom',
     dryRun: true,
     log: m => logs.push(m),
     error: m => errors.push(m),
+    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'never'.
     exit: c => exitCodes.push(c),
     selectAgentFn: (step, opts) => {
       const exclude = opts.exclude instanceof Set ? opts.exclude : new Set(opts.exclude || []);
@@ -351,11 +376,13 @@ test('CP-1: multi-hop fallback scans remaining eligible agents when deterministi
       if (!exclude.has('vibe')) return 'vibe';
       return 'claude';
     },
+    // @ts-expect-error TS2741 Property 'agent' is missing in type '{ supported: boolean; detail: string; }' bu
     workflowLauncherStatusFn: (agent) => ({
       supported: agent === 'claude' || agent === 'custom',
       detail: agent
     }),
     formatMatrixSummaryFn: () => [],
+    // @ts-expect-error TS2739 Type '{ agents: string[]; }' is missing the following properties from type '{ st
     buildAutonomousReviewMatrixFn: () => ({ agents: ['claude', 'custom', 'codex', 'vibe'] })
   });
 
@@ -388,11 +415,13 @@ test('CP-1: no runnable reviewer exits with error and does not mutate Backlog as
   // Next call throws because no more agents.
   await startReviewLoop(TEST_SLUG, {
     eligibleAgentsForStepFn: () => ['codex', 'claude', 'vibe'], 
+    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: TASK_FILE }),
     implementer: 'vibe',
     dryRun: true,
     log: m => logs.push(m),
     error: m => errors.push(m),
+    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'never'.
     exit: c => exitCodes.push(c),
     selectAgentFn: (step, opts) => {
       const exclude = opts.exclude instanceof Set ? opts.exclude : new Set(opts.exclude || []);
@@ -400,8 +429,10 @@ test('CP-1: no runnable reviewer exits with error and does not mutate Backlog as
       if (available.length === 0) throw new Error('No agents available');
       return available[0];
     },
+    // @ts-expect-error TS2741 Property 'agent' is missing in type '{ supported: false; detail: string; }' but
     workflowLauncherStatusFn: () => ({ supported: false, detail: 'blocked' }),
     formatMatrixSummaryFn: () => [],
+    // @ts-expect-error TS2739 Type '{ agents: string[]; }' is missing the following properties from type '{ st
     buildAutonomousReviewMatrixFn: () => ({ agents: ['codex', 'claude', 'vibe'] })
   });
 
@@ -432,11 +463,13 @@ test('CP-1: single-family fallback when no different-family reviewer is runnable
   // -> single-family fallback: claude reviews its own work
   await startReviewLoop(TEST_SLUG, {
     eligibleAgentsForStepFn: () => ['codex', 'claude', 'vibe'],
+    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: TASK_FILE }),
     implementer: 'claude',
     dryRun: true,
     log: m => logs.push(m),
     error: m => errors.push(m),
+    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'never'.
     exit: c => exitCodes.push(c),
     selectAgentFn: (step, opts) => {
       const exclude = opts.exclude instanceof Set ? opts.exclude : new Set(opts.exclude || []);
@@ -444,11 +477,13 @@ test('CP-1: single-family fallback when no different-family reviewer is runnable
       if (available.length === 0) throw new Error('No agents available');
       return available[0];
     },
+    // @ts-expect-error TS2741 Property 'agent' is missing in type '{ supported: boolean; detail: string; }' bu
     workflowLauncherStatusFn: (agent) => ({
       supported: agent === 'claude', // only implementer is runnable
       detail: agent
     }),
     formatMatrixSummaryFn: () => [],
+    // @ts-expect-error TS2739 Type '{ agents: string[]; }' is missing the following properties from type '{ st
     buildAutonomousReviewMatrixFn: () => ({ agents: ['codex', 'claude', 'vibe'] })
   });
 

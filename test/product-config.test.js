@@ -92,6 +92,7 @@ test('loadEffectiveConfig merges a partial override over the defaults', () => {
 
     const effective = loadEffectiveConfig(root);
     // overridden key wins
+    // @ts-expect-error TS2339 Property 'command' does not exist on type '{ defaultArea: string; }'.
     assert.equal(effective.adapters.verification.command, './gate.sh');
     // sibling default within the same section is preserved by deep merge
     assert.equal(effective.adapters.verification.defaultArea, 'docs');
@@ -114,6 +115,7 @@ test('loadEffectiveConfig merges a repo-declared post-integrate hook command', (
     }, null, 2));
 
     const effective = loadEffectiveConfig(root);
+    // @ts-expect-error TS2339 Property 'postIntegrateCommand' does not exist on type '{}'.
     assert.equal(effective.adapters.integrate.postIntegrateCommand, './scripts/refresh-px.sh');
     // unrelated defaults are untouched by declaring the hook
     assert.equal(effective.adapters.verification.defaultArea, 'docs');
@@ -218,6 +220,7 @@ test('initializeGitRepository falls back to git init then symbolic-ref when init
   withTempDir(root => {
     const calls = [];
     const result = initializeGitRepository(root, {
+      // @ts-expect-error TS2322 Type '(command: any, args: any) => { status: number; stderr: string; stdout?: un
       spawnSyncFn(command, args) {
         calls.push(args.join(' '));
         if (args[0] === 'init' && args[1] === '-b') {
@@ -234,6 +237,7 @@ test('initializeGitRepository falls back to git init then symbolic-ref when init
     });
 
     assert.equal(result.ok, true);
+    // @ts-expect-error TS2339 Property 'mode' does not exist on type '{ ok: boolean; branch: string; mode: str
     assert.equal(result.mode, 'init-fallback');
     assert.deepEqual(calls, ['init -b main', 'init', 'symbolic-ref HEAD refs/heads/main']);
   });
@@ -242,6 +246,7 @@ test('initializeGitRepository falls back to git init then symbolic-ref when init
 test('initializeGitRepository returns a failure payload when git init fallback fails', () => {
   withTempDir(root => {
     const result = initializeGitRepository(root, {
+      // @ts-expect-error TS2322 Type '(_command: any, args: any) => { status: number; stderr: string; }' is not
       spawnSyncFn(_command, args) {
         if (args[0] === 'init' && args[1] === '-b') {
           return { status: 1, stderr: 'unsupported' };
@@ -251,6 +256,7 @@ test('initializeGitRepository returns a failure payload when git init fallback f
     });
 
     assert.equal(result.ok, false);
+    // @ts-expect-error TS2339 Property 'message' does not exist on type '{ ok: boolean; branch: string; mode:
     assert.match(result.message, /fatal init error/);
   });
 });
@@ -427,6 +433,7 @@ test('resolveTaskStorage supports string storage paths and invalid storage types
 
 test('resolveAgentAdapter returns empty object (command env prefix removed)', () => {
   const { resolveAgentAdapter } = require('../lib/core/product-config');
+  // @ts-expect-error TS2554 Expected 0 arguments, but got 1.
   assert.deepEqual(resolveAgentAdapter('/tmp'), {});
 });
 

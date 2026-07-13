@@ -83,6 +83,7 @@ test('integrate full squash-merge (Variant B) success path', async (t) => {
   const logs = [];
   console.log = (msg) => logs.push(msg);
   
+  // @ts-expect-error TS2349 This expression is not callable.
   integrate([TEST_SLUG]);
   
   assert.ok(logs.some(l => l.includes('Selecting integration variant: Variant B')));
@@ -119,6 +120,7 @@ test('integrate Variant B promotes a review-approved task only after the squash 
   });
   const integrate = loadIntegrate();
 
+  // @ts-expect-error TS2349 This expression is not callable.
   integrate([TEST_SLUG]);
 
   assert.ok(events.indexOf('abort') < events.indexOf('squash'));
@@ -146,6 +148,7 @@ test('integrate Variant B preserves soft-reset backlog noise across squash merge
   });
   const integrate = loadIntegrate();
 
+  // @ts-expect-error TS2349 This expression is not callable.
   integrate([TEST_SLUG]);
 
   const diffIndex = gitCalls.findIndex(call => call.includes('diff --cached --binary'));
@@ -200,6 +203,7 @@ test('integrate resolves PR and approval using the task assignee Forgejo identit
   mock.method(process, 'exit', (code) => exitCodes.push(code));
 
   try {
+    // @ts-expect-error TS2349 This expression is not callable.
     integrate([TEST_SLUG, '--dry-run']);
 
     assert.equal(captured.prForgejoUser, 'gemini');
@@ -243,6 +247,7 @@ test('integrate passes the pre-resolved Forgejo token into syncMerged', () => {
   console.log = (msg) => logs.push(msg);
 
   try {
+    // @ts-expect-error TS2349 This expression is not callable.
     integrate([TEST_SLUG]);
 
     assert.equal(captured.prToken, 'preflight-token');
@@ -268,6 +273,7 @@ test('integrate rejects a Forgejo PR that is already merged', async (t) => {
   console.error = (msg) => errors.push(msg);
   mock.method(process, 'exit', (code) => exitCodes.push(code));
   
+  // @ts-expect-error TS2349 This expression is not callable.
   integrate([TEST_SLUG]);
   
   const output = [...logs, ...errors].join('\n');
@@ -289,6 +295,7 @@ test('integrate warns that --no-gate is ignored', () => {
   const originalLog = console.log;
   console.log = (msg) => logs.push(msg);
 
+  // @ts-expect-error TS2349 This expression is not callable.
   integrate([TEST_SLUG, '--dry-run', '--no-gate']);
 
   assert.ok(logs.some(l => l.includes('integrate ignores --no-gate')));
@@ -300,6 +307,7 @@ test('integrate warns that --no-gate is ignored', () => {
 
 test('integrate exits non-zero when post-integration stats recording fails', () => {
   setupMocks();
+  // @ts-expect-error TS2339 Property 'mock' does not exist on type '(options?: {}) => { report: string; meta
   stats.recordIntegrationStats.mock.mockImplementation((args) => {
     statsCalls.push(args);
     throw new Error('stats write failed');
@@ -311,6 +319,7 @@ test('integrate exits non-zero when post-integration stats recording fails', () 
   console.error = (msg) => errors.push(msg);
   mock.method(process, 'exit', (code) => exitCodes.push(code));
 
+  // @ts-expect-error TS2349 This expression is not callable.
   integrate([TEST_SLUG]);
 
   assert.equal(statsCalls.length, 1);
@@ -335,6 +344,7 @@ test('integrate reports merged-PR recovery guidance before any closeout work', (
   console.error = (msg) => errors.push(msg);
   mock.method(process, 'exit', (code) => exitCodes.push(code));
 
+  // @ts-expect-error TS2349 This expression is not callable.
   integrate([TEST_SLUG]);
 
   const output = [...logs, ...errors].join('\n');
@@ -372,6 +382,7 @@ test('integrate Variant B stops when dry-run merge cannot be aborted cleanly', (
   console.error = (msg) => errors.push(msg);
   mock.method(process, 'exit', (code) => exitCodes.push(code));
 
+  // @ts-expect-error TS2349 This expression is not callable.
   integrate([TEST_SLUG]);
 
   assert.ok(errors.some(l => l.includes('Dry-run merge could not be aborted cleanly')));
@@ -405,6 +416,7 @@ test('integrate Variant B resumed partial state prints sync diagnostics on sync 
   console.error = (msg) => errors.push(msg);
   mock.method(process, 'exit', (code) => exitCodes.push(code));
 
+  // @ts-expect-error TS2349 This expression is not callable.
   integrate([TEST_SLUG]);
 
   assert.ok(logs.some(l => l.includes('Resuming from sync-merged step')));
@@ -442,6 +454,7 @@ test('integrate Variant B conflict path prints conflicting files and helper guid
   console.error = (msg) => errors.push(msg);
   mock.method(process, 'exit', (code) => exitCodes.push(code));
 
+  // @ts-expect-error TS2349 This expression is not callable.
   integrate([TEST_SLUG]);
 
   assert.ok(errors.some(l => l.includes('Merge conflicts detected. Rebase the mission branch before integrating.')));
@@ -497,6 +510,7 @@ test('recordPostIntegrationStats keeps operator-owned stats outside git', () => 
     const { recordPostIntegrationStats } = loadIntegrate();
     const outcome = recordPostIntegrationStats('task-1109', {
       rootDir: FAKE_ROOT,
+      // @ts-expect-error TS2353 Object literal may only specify known properties, and 'gitRunner' does not exist
       gitRunner(args) {
         gitCalls.push(args);
         if (args.join(' ').includes('log -1 --format=%cs')) {

@@ -86,6 +86,7 @@ test('parseVibeMeta returns null for missing stats block', () => {
 test('parseVibeMeta returns null for empty/garbage input', () => {
   assert.equal(parseVibeMeta(null), null);
   assert.equal(parseVibeMeta(undefined), null);
+  // @ts-expect-error TS2345 Argument of type 'string' is not assignable to parameter of type 'ParseableMeta'
   assert.equal(parseVibeMeta('not json'), null);
 });
 

@@ -166,6 +166,7 @@ test('task-2234 repro: review-loop self-heal auto-bounces to active on validatio
       writeReviewStateFn: (slug, state) => { writtenStates.push({ slug, state }); },
     });
 
+    // @ts-expect-error TS2345 Argument of type '{ slug: string; implementer: string; reviewer: string; worktre
     await startReviewLoop('task-2234', opts);
 
     assertSelfHealAttempted(logs);
@@ -208,6 +209,7 @@ test('task-2234 repro: review-loop self-heal fails closed when validation-failur
     });
 
     await assert.rejects(
+      // @ts-expect-error TS2345 Argument of type '{ slug: string; implementer: string; reviewer: string; worktre
       () => startReviewLoop('task-2234', opts),
       /Review-state persistence failed for mission task-2234, phase unknown, round unknown, stage commit: simulated commit failure/
     );
@@ -229,6 +231,7 @@ test('task-2234 repro: review-loop self-heal does NOT bounce on gate-failed (exe
       transitionTaskFn: (slug, status) => { transitions.push({ slug, status }); },
     });
 
+    // @ts-expect-error TS2345 Argument of type '{ slug: string; implementer: string; reviewer: string; worktre
     await startReviewLoop('task-2234', opts);
 
     assertSelfHealAttempted(logs);
@@ -259,6 +262,7 @@ test('task-2234 repro: infra/auth errors do NOT bounce (mission risk: narrow cla
       transitionTaskFn: (slug, status) => { transitions.push({ slug, status }); },
     });
 
+    // @ts-expect-error TS2345 Argument of type '{ slug: string; implementer: string; reviewer: string; worktre
     await startReviewLoop('task-2234', opts);
 
     assertSelfHealAttempted(logs);
@@ -307,6 +311,7 @@ test('task-2234 repro: submitForReview auto-bounces to active on validation-fail
       error: 'Declared gate "true — some description" failed for task-2234: Gate declaration must contain an exact runnable command only.'
     });
 
+    // @ts-expect-error TS2345 Argument of type '{ resolveWorktreeFn: () => any; readReviewStateFn: () => any;
     await submitForReview('task-2234', false, options);
 
     assert.deepEqual(
@@ -330,6 +335,7 @@ test('task-2234 repro: submitForReview does NOT bounce on gate-failed (execution
       error: 'Declared gate "./scripts/verify-local.sh all" failed for task-2234: Gate exited with status 1.'
     });
 
+    // @ts-expect-error TS2345 Argument of type '{ resolveWorktreeFn: () => any; readReviewStateFn: () => any;
     await submitForReview('task-2234', false, options);
 
     assert.deepEqual(

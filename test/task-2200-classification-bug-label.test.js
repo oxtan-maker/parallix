@@ -13,6 +13,7 @@ test('missionStart resolves classification using the mission worktree cwd, not p
   const errors = [];
   const seenRootDirs = [];
 
+  // @ts-expect-error TS2349 This expression is not callable.
   const result = missionStart(['task-2200'], {
     returnResult: true,
     cwdFn: () => '/tmp/project-task-2200',

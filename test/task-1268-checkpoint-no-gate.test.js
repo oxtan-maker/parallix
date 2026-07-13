@@ -22,6 +22,7 @@ test('checkpoint runs the gate even when passed a stray --no-gate flag', async (
   mock.method(process, 'exit', (code) => { throw new FakeExit(code); });
 
   await assert.rejects(
+    // @ts-expect-error TS2349 This expression is not callable.
     async () => checkpoint(['task-1268', 'cp-name', 'next action', '--no-gate']),
     FakeExit
   );

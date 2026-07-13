@@ -115,6 +115,7 @@ test('writeReviewState reports commit failure if state remains dirty', () => {
         return { status: 0, stdout: '', stderr: '' };
       };
       const state = { reviewer: 'codex', implementer: 'claude', round: 1 };
+      // @ts-expect-error TS2345 Argument of type '(args: any) => { status: number; stderr: string; stdout?: unde
       const result = writeReviewState(slug, state, root, gitFn);
       assert.deepEqual(result, { outcome: 'commit-failed-dirty', stage: 'commit', diagnostic: 'commit failed' });
     } finally {

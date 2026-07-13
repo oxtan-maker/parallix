@@ -37,6 +37,7 @@ test('readTextFlag from inline', () => {
   const result = readTextFlag(
     ['--msg', 'hello'],
     '--msg', '--msg-file', 'message',
+    // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(_code: number) => never'.
     { readFileSync: fs.readFileSync, exit: () => {}, error: () => {} }
   );
   assert.equal(result, 'hello');
@@ -63,6 +64,7 @@ test('formatStaticReviewSuccess includes slug', () => {
 // performStaticReview - test different failure modes
 test('performStaticReview fails when no mission dir', () => {
   const result = performStaticReview(mockSlug, {
+    // @ts-expect-error TS2561 Object literal may only specify known properties, but 'findMissionDirFn' does no
     findMissionDirFn: () => null,
     resolveWorktreeFn: () => mockWorktree
   });
@@ -72,6 +74,7 @@ test('performStaticReview fails when no mission dir', () => {
 
 test('performStaticReview fails when no checkpoints', () => {
   const result = performStaticReview(mockSlug, {
+    // @ts-expect-error TS2561 Object literal may only specify known properties, but 'findMissionDirFn' does no
     findMissionDirFn: () => '/mock/mission',
     resolveWorktreeFn: () => mockWorktree,
     findCheckpointsFn: () => []
@@ -82,6 +85,7 @@ test('performStaticReview fails when no checkpoints', () => {
 
 test('performStaticReview fails when Goal Check missing', () => {
   const result = performStaticReview(mockSlug, {
+    // @ts-expect-error TS2561 Object literal may only specify known properties, but 'findMissionDirFn' does no
     findMissionDirFn: () => '/mock/mission',
     resolveWorktreeFn: () => mockWorktree,
     findCheckpointsFn: () => ['/mock/CP-1.md'],
@@ -116,11 +120,13 @@ test('verifyReview exits on missing mission dir', () => {
   verifyReview(mockSlug, false, {
     findMissionDirFn: () => null,
     getCurrentBranchFn: () => mockBranch,
+    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/mock/task.md' }),
     getTaskStatusFn: () => 'review',
     isForgejoReviewEnabledFn: () => false,
     log: () => {},
     error: () => {},
+    // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(_code: number) => never'.
     exit: () => { exited = true; }
   });
   assert.equal(exited, true);
@@ -131,11 +137,13 @@ test('verifyReview exits on branch mismatch', () => {
   verifyReview(mockSlug, false, {
     findMissionDirFn: () => '/mock/mission',
     getCurrentBranchFn: () => 'wrong-branch',
+    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/mock/task.md' }),
     getTaskStatusFn: () => 'review',
     isForgejoReviewEnabledFn: () => false,
     log: () => {},
     error: () => {},
+    // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(_code: number) => never'.
     exit: () => { exited = true; }
   });
   assert.equal(exited, true);
@@ -146,11 +154,13 @@ test('verifyReview exits on task not found', () => {
   verifyReview(mockSlug, false, {
     findMissionDirFn: () => '/mock/mission',
     getCurrentBranchFn: () => mockBranch,
+    // @ts-expect-error TS2322 Type '{ ok: false; }' is not assignable to type '{ ok: boolean; taskFile: string
     resolveTaskFileFn: () => ({ ok: false }),
     getTaskStatusFn: () => 'review',
     isForgejoReviewEnabledFn: () => false,
     log: () => {},
     error: () => {},
+    // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(_code: number) => never'.
     exit: () => { exited = true; }
   });
   assert.equal(exited, true);
@@ -161,12 +171,14 @@ test('verifyReview passes with all green', () => {
   verifyReview(mockSlug, false, {
     findMissionDirFn: () => '/mock/mission',
     getCurrentBranchFn: () => mockBranch,
+    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/mock/task.md' }),
     getTaskStatusFn: () => 'review',
     isForgejoReviewEnabledFn: () => false,
     runVerificationGate: () => ({ status: 0 }),
     log: () => {},
     error: () => {},
+    // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(_code: number) => never'.
     exit: () => { exited = true; }
   });
   assert.equal(exited, false);
@@ -179,6 +191,7 @@ test('submitReviewRound exits on invalid outcome', () => {
     isForgejoReviewEnabledFn: () => true,
     log: () => {},
     error: () => {},
+    // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(_code: number) => never'.
     exit: () => { exited = true; }
   });
   assert.equal(exited, true);
@@ -191,7 +204,9 @@ test('submitReviewRound handles approve for forgejo', () => {
   submitReviewRound(mockSlug, 'approve', 'msg', {
     worktree: mockWorktree,
     isForgejoReviewEnabledFn: () => true,
+    // @ts-expect-error TS2740 Type '{ round: number; phase: string; reviewer: string; implementer: string; tra
     readReviewStateFn: () => state,
+    // @ts-expect-error TS2322 Type '(s: string, st: Record<string, unknown> | ReviewState) => void' is not ass
     writeReviewStateFn: (s, st) => { disp = st.disposition; },
     transitionTaskFn: (slug, status) => { transitioned = { slug, status }; return true; },
     readTokenFn: () => 'token',
@@ -210,7 +225,9 @@ test('submitReviewRound handles request-changes for forgejo', () => {
   submitReviewRound(mockSlug, 'request-changes', 'msg', {
     worktree: mockWorktree,
     isForgejoReviewEnabledFn: () => true,
+    // @ts-expect-error TS2740 Type '{ round: number; phase: string; reviewer: string; implementer: string; tra
     readReviewStateFn: () => state,
+    // @ts-expect-error TS2322 Type '(s: string, st: Record<string, unknown> | ReviewState) => void' is not ass
     writeReviewStateFn: (s, st) => { disp = st.disposition; },
     transitionTaskFn: (slug, status) => { transitioned = { slug, status }; return true; },
     readTokenFn: () => 'token',
@@ -229,7 +246,9 @@ test('submitReviewRound handles provider=none', () => {
   submitReviewRound(mockSlug, 'approve', 'msg', {
     worktree: mockWorktree,
     isForgejoReviewEnabledFn: () => false,
+    // @ts-expect-error TS2740 Type '{ round: number; phase: string; reviewer: string; implementer: string; tra
     readReviewStateFn: () => state,
+    // @ts-expect-error TS2322 Type '(s: string, st: Record<string, unknown> | ReviewState) => void' is not ass
     writeReviewStateFn: (s, st) => { disp = st.disposition; },
     transitionTaskFn: () => { transitioned = true; return true; },
     log: () => {},
@@ -245,13 +264,16 @@ test('submitReviewRound creates state when none exists', () => {
     worktree: mockWorktree,
     isForgejoReviewEnabledFn: () => false,
     readReviewStateFn: () => null,
+    // @ts-expect-error TS2322 Type '(s: string, st: Record<string, unknown> | ReviewState) => void' is not ass
     writeReviewStateFn: (s, st) => { newState = st; },
     transitionTaskFn: () => true,
     log: () => {},
     error: () => {}
   });
   assert.ok(newState);
+  // @ts-expect-error TS2339 Property 'disposition' does not exist on type 'never'.
   assert.equal(newState.disposition, 'APPROVED');
+  // @ts-expect-error TS2339 Property 'phase' does not exist on type 'never'.
   assert.equal(newState.phase, 'approved');
 });
 
@@ -273,7 +295,9 @@ test('submitReviewRound does not exit when reviewer is the PR author (self-autho
     submitReviewRound(mockSlug, 'approve', 'msg', {
       worktree: mockWorktree,
       isForgejoReviewEnabledFn: () => true,
+      // @ts-expect-error TS2740 Type '{ round: number; phase: string; reviewer: string; implementer: string; tra
       readReviewStateFn: () => state,
+      // @ts-expect-error TS2322 Type '(s: string, st: Record<string, unknown> | ReviewState) => void' is not ass
       writeReviewStateFn: (s, st) => { recordedDisposition = st.disposition; },
       createEventFn: (slug, type, params) => { recordedVerdict = params.verdict; return { ok: true, path: '/mock' }; },
       readTokenFn: () => 'token',
@@ -281,6 +305,7 @@ test('submitReviewRound does not exit when reviewer is the PR author (self-autho
       postReviewFn: () => { postCalled = true; return { ok: true }; },
       log: (msg) => { if (/WARN/.test(msg)) warnings.push(msg); },
       error: () => {},
+      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(_code: number) => never'.
       exit: () => { exited = true; }
     });
   } finally {
@@ -299,13 +324,16 @@ test('submitReviewRound exits(1) on a genuine review failure (non-author path)',
   submitReviewRound(mockSlug, 'approve', 'msg', {
     worktree: mockWorktree,
     isForgejoReviewEnabledFn: () => true,
+    // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(nextPhase: string) => ReviewState'
     readReviewStateFn: () => ({ round: 1, phase: 'reviewing', reviewer: 'rev', implementer: 'impl', transitionTo: () => {} }),
+    // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(slug: string, state: Record<string
     writeReviewStateFn: () => {},
     readTokenFn: () => 'token',
     getPrAuthorFn: () => 'someone-else',
     postReviewFn: () => ({ ok: false, status: 500, data: { message: 'boom' } }),
     log: () => {},
     error: () => {},
+    // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(_code: number) => never'.
     exit: () => { exited = true; }
   });
   assert.equal(exited, true, 'genuine failures must still exit(1)');
@@ -319,12 +347,14 @@ test('pushRound exits when no forgejo identity can be resolved', async () => {
   try {
     await pushRound(mockSlug, {
       readReviewStateFn: () => null,
+      // @ts-expect-error TS2322 Type '{ ok: false; }' is not assignable to type '{ ok: boolean; taskFile: string
       resolveTaskFileFn: () => ({ ok: false }),
       isForgejoReviewEnabledFn: () => true,
       resolveForgejoUserFn: () => null,
       readTokenFn: () => 'token',
       log: () => {},
       error: () => {},
+      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(_code: number) => never'.
       exit: () => { exited = true; }
     });
   } finally {
@@ -337,10 +367,12 @@ test('pushRound exits when no forgejo identity can be resolved', async () => {
 test('pushRound exits when no token', async () => {
   let exited = false;
   await pushRound(mockSlug, {
+    // @ts-expect-error TS2740 Type '{ implementer: string; }' is missing the following properties from type 'R
     readReviewStateFn: () => ({ implementer: 'user' }),
     readTokenFn: () => null,
     log: () => {},
     error: () => {},
+    // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(_code: number) => never'.
     exit: () => { exited = true; }
   });
   assert.equal(exited, true);
@@ -350,6 +382,7 @@ test('pushRound succeeds with valid user and token', async () => {
   let transitioned = false;
   let created = false;
   await pushRound(mockSlug, {
+    // @ts-expect-error TS2740 Type '{ implementer: string; }' is missing the following properties from type 'R
     readReviewStateFn: () => ({ implementer: 'user' }),
     readTokenFn: () => 'token',
     transitionTaskFn: () => { transitioned = true; return true; },
@@ -370,6 +403,7 @@ test('pushRound bootstraps a missing review repo and retries push', async () => 
   let created = 0;
   let bootstrapped = false;
   await pushRound(mockSlug, {
+    // @ts-expect-error TS2740 Type '{ implementer: string; }' is missing the following properties from type 'R
     readReviewStateFn: () => ({ implementer: 'magnus' }),
     readTokenFn: () => 'token',
     transitionTaskFn: () => { transitioned = true; return true; },
@@ -384,9 +418,11 @@ test('pushRound bootstraps a missing review repo and retries push', async () => 
       bootstrapped = true;
       return { ok: true };
     },
+    // @ts-expect-error TS2741 Property 'provider' is missing in type '{ baseUrl: string; repo: string; remote:
     resolveReviewAdapterFn: () => ({ baseUrl: 'http://localhost:3300', repo: 'magnus/parallix', remote: 'review' }),
     log: () => {},
     error: () => {},
+    // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(_code: number) => never'.
     exit: () => {}
   });
   assert.equal(transitioned, true);
@@ -399,6 +435,7 @@ test('showReviewStatus shows state', () => {
   let logged = false;
   const state = { round: 5, phase: 'reviewing', reviewer: 'rev', implementer: 'impl', startedAt: '2024-01-01' };
   showReviewStatus(mockSlug, {
+    // @ts-expect-error TS2740 Type '{ round: number; phase: string; reviewer: string; implementer: string; sta
     readReviewStateFn: () => state,
     log: (msg) => { if (msg.includes('Round:')) logged = true; },
     error: () => {}
@@ -411,6 +448,7 @@ test('showReviewStatus handles missing state', () => {
   showReviewStatus(mockSlug, {
     readReviewStateFn: () => null,
     log: (msg) => { if (msg.includes('No persisted')) logged = true; },
+    // @ts-expect-error TS2353 Object literal may only specify known properties, and 'error' does not exist in
     error: () => {}
   });
   assert.equal(logged, true);
@@ -420,6 +458,7 @@ test('showReviewStatus shows disposition', () => {
   let logged = false;
   const state = { round: 1, phase: 'fixing', reviewer: 'rev', implementer: 'impl', startedAt: '2024-01-01', disposition: 'REQUEST_CHANGES' };
   showReviewStatus(mockSlug, {
+    // @ts-expect-error TS2740 Type '{ round: number; phase: string; reviewer: string; implementer: string; sta
     readReviewStateFn: () => state,
     log: (msg) => { if (msg.includes('Disposition:')) logged = true; },
     error: () => {}
@@ -441,18 +480,21 @@ test('verifyReview warns (not fails) when task is active and no PR exists', () =
   verifyReview(mockSlug, true, {
     findMissionDirFn: () => '/mock/mission',
     getCurrentBranchFn: () => mockBranch,
+    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/mock/task.md' }),
     getTaskStatusFn: () => 'active',
     isForgejoReviewEnabledFn: () => true,
     getPrStatusFn: () => ({ exists: false, raw: 'no PR found' }),
     getAcceptanceCriteriaFn: () => [],
     formatMatrixSummaryFn: () => [],
+    // @ts-expect-error TS2739 Type '{}' is missing the following properties from type '{ step: string; agents:
     buildAutonomousReviewMatrixFn: () => ({}),
     readReviewStateFn: () => null,
     findMissionAreaFn: () => 'workflow',
     cwdFn: () => mockWorktree,
     log: (msg) => { logs.push(msg); },
     error: (msg) => {},
+    // @ts-expect-error TS2322 Type '(code: number) => void' is not assignable to type '(_code: number) => neve
     exit: (code) => { exited = true; }
   });
 
@@ -472,18 +514,21 @@ test('verifyReview fails when task is review and no PR exists', () => {
   verifyReview(mockSlug, true, {
     findMissionDirFn: () => '/mock/mission',
     getCurrentBranchFn: () => mockBranch,
+    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/mock/task.md' }),
     getTaskStatusFn: () => 'review',
     isForgejoReviewEnabledFn: () => true,
     getPrStatusFn: () => ({ exists: false, raw: 'no PR found' }),
     getAcceptanceCriteriaFn: () => [],
     formatMatrixSummaryFn: () => [],
+    // @ts-expect-error TS2739 Type '{}' is missing the following properties from type '{ step: string; agents:
     buildAutonomousReviewMatrixFn: () => ({}),
     readReviewStateFn: () => null,
     findMissionAreaFn: () => 'workflow',
     cwdFn: () => mockWorktree,
     log: (msg) => { logs.push(msg); },
     error: (msg) => {},
+    // @ts-expect-error TS2322 Type '(code: number) => void' is not assignable to type '(_code: number) => neve
     exit: (code) => { exited = true; }
   });
 
@@ -501,18 +546,21 @@ test('verifyReview fails when task is approved and no PR exists', () => {
   verifyReview(mockSlug, true, {
     findMissionDirFn: () => '/mock/mission',
     getCurrentBranchFn: () => mockBranch,
+    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/mock/task.md' }),
     getTaskStatusFn: () => 'approved',
     isForgejoReviewEnabledFn: () => true,
     getPrStatusFn: () => ({ exists: false, raw: 'no PR found' }),
     getAcceptanceCriteriaFn: () => [],
     formatMatrixSummaryFn: () => [],
+    // @ts-expect-error TS2739 Type '{}' is missing the following properties from type '{ step: string; agents:
     buildAutonomousReviewMatrixFn: () => ({}),
     readReviewStateFn: () => null,
     findMissionAreaFn: () => 'workflow',
     cwdFn: () => mockWorktree,
     log: (msg) => { logs.push(msg); },
     error: (msg) => {},
+    // @ts-expect-error TS2322 Type '(code: number) => void' is not assignable to type '(_code: number) => neve
     exit: (code) => { exited = true; }
   });
 
@@ -529,18 +577,21 @@ test('verifyReview fails when task resolution fails and no PR exists', () => {
   verifyReview(mockSlug, true, {
     findMissionDirFn: () => '/mock/mission',
     getCurrentBranchFn: () => mockBranch,
+    // @ts-expect-error TS2322 Type '{ ok: false; }' is not assignable to type '{ ok: boolean; taskFile: string
     resolveTaskFileFn: () => ({ ok: false }),
     getTaskStatusFn: () => 'backlog',
     isForgejoReviewEnabledFn: () => true,
     getPrStatusFn: () => ({ exists: false, raw: 'no PR found' }),
     getAcceptanceCriteriaFn: () => [],
     formatMatrixSummaryFn: () => [],
+    // @ts-expect-error TS2739 Type '{}' is missing the following properties from type '{ step: string; agents:
     buildAutonomousReviewMatrixFn: () => ({}),
     readReviewStateFn: () => null,
     findMissionAreaFn: () => 'workflow',
     cwdFn: () => mockWorktree,
     log: (msg) => { logs.push(msg); },
     error: (msg) => {},
+    // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(_code: number) => never'.
     exit: () => { exited = true; }
   });
 
@@ -558,6 +609,7 @@ test('verifyReview warns (not fails) when task status maps to virtual active via
   verifyReview(mockSlug, true, {
     findMissionDirFn: () => '/mock/mission',
     getCurrentBranchFn: () => mockBranch,
+    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/mock/task.md' }),
     getTaskStatusFn: () => 'in-progress',
     toVirtualFn: (s) => s === 'in-progress' ? 'active' : s,
@@ -565,12 +617,14 @@ test('verifyReview warns (not fails) when task status maps to virtual active via
     getPrStatusFn: () => ({ exists: false, raw: 'no PR found' }),
     getAcceptanceCriteriaFn: () => [],
     formatMatrixSummaryFn: () => [],
+    // @ts-expect-error TS2739 Type '{}' is missing the following properties from type '{ step: string; agents:
     buildAutonomousReviewMatrixFn: () => ({}),
     readReviewStateFn: () => null,
     findMissionAreaFn: () => 'workflow',
     cwdFn: () => mockWorktree,
     log: (msg) => { logs.push(msg); },
     error: (msg) => {},
+    // @ts-expect-error TS2322 Type '(code: number) => void' is not assignable to type '(_code: number) => neve
     exit: (code) => { exited = true; }
   });
 

@@ -28,15 +28,18 @@ test('task-2215 repro: classifyError classifies auto-remediation checkpoint fail
 
 test('task-2215 repro: buildAutoCheckpointContent evidence rows pass findUnverifiableGoalCheckRow validation', () => {
   const rootDir = path.join(__dirname, '..');
+  // @ts-expect-error TS2339 Property '_buildAutoCheckpointContent' does not exist on type 'typeof import("/h
   const content = handoff._buildAutoCheckpointContent('task-2215');
 
   const goalCheckMatch = content.match(/^## Goal Check(?: Table)?\s*$/m);
   assert.ok(goalCheckMatch, 'auto-generated checkpoint must contain a "## Goal Check" section');
 
   const afterHeader = content.slice((goalCheckMatch.index ?? 0) + goalCheckMatch[0].length);
+  // @ts-expect-error TS2339 Property '_collectGoalCheckEvidenceRows' does not exist on type 'typeof import("
   const evidenceRows = handoff._collectGoalCheckEvidenceRows(afterHeader);
   assert.ok(evidenceRows.length > 0, 'auto-generated Goal Check table must contain evidence rows');
 
+  // @ts-expect-error TS2339 Property '_findUnverifiableGoalCheckRow' does not exist on type 'typeof import("
   const offendingRow = handoff._findUnverifiableGoalCheckRow(evidenceRows, rootDir);
   assert.equal(offendingRow, null,
     `auto-generated evidence rows must cite verifiable references; offending row: ${offendingRow}`);

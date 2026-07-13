@@ -138,6 +138,7 @@ test('integrate rejects merged Forgejo PRs during preflight with recovery guidan
   mock.method(process, 'exit', (code) => exitCodes.push(code));
 
   try {
+    // @ts-expect-error TS2349 This expression is not callable.
     integrate([TEST_SLUG]);
 
     const output = [...logs, ...errors].join('\n');

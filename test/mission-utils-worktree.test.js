@@ -39,6 +39,7 @@ function withTempRepo(fn) {
 test('getPrimaryBranch returns main when main branch exists', () => {
   const originalGit = git.git;
   try {
+    // @ts-expect-error TS2322 Type '(args: string[]) => { stdout: string; }' is not assignable to type '(args:
     git.git = (args) => {
       if (args.includes('branch') && args.includes('--list')) return { stdout: 'main\nmaster\n' };
       return { stdout: '' };
@@ -61,6 +62,7 @@ test('getPrimaryBranch falls back to master when config says main but only maste
     }, null, 2));
 
     try {
+      // @ts-expect-error TS2322 Type '(args: string[]) => { status: number; stdout: string; stderr: string; }' i
       git.git = (args) => {
         if (args.includes('branch') && args.includes('--list')) {
           return { status: 0, stdout: 'master\n', stderr: '' };
@@ -77,6 +79,7 @@ test('getPrimaryBranch falls back to master when config says main but only maste
 test('getPrimaryBranch returns master when only master exists', () => {
   const originalGit = git.git;
   try {
+    // @ts-expect-error TS2322 Type '(args: string[]) => { stdout: string; }' is not assignable to type '(args:
     git.git = (args) => {
       if (args.includes('branch') && args.includes('--list')) return { stdout: 'master\n' };
       return { stdout: '' };
@@ -90,6 +93,7 @@ test('getPrimaryBranch returns master when only master exists', () => {
 test('getPrimaryBranch throws when neither main nor master exists', () => {
   const originalGit = git.git;
   try {
+    // @ts-expect-error TS2739 Type '{ stdout: string; }' is missing the following properties from type 'GitRes
     git.git = () => ({ stdout: '' });
     assert.throws(() => getPrimaryBranch(), /Could not detect primary branch/);
   } finally {
@@ -100,6 +104,7 @@ test('getPrimaryBranch throws when neither main nor master exists', () => {
 test('resolveMainRepo finds the master worktree', () => {
   const originalGit = git.git;
   try {
+    // @ts-expect-error TS2322 Type '(args: string[]) => { stdout: string; }' is not assignable to type '(args:
     git.git = (args) => {
       if (args.includes('branch') && args.includes('--list')) {
         return { stdout: 'master\n' };
@@ -137,6 +142,7 @@ test('resolveMainRepo falls back to the current checkout when it is already on t
   delete process.env.PRIMARY_WORKTREE;
 
   try {
+    // @ts-expect-error TS2322 Type '(args: string[]) => { status: number; stdout: string; stderr: string; }' i
     git.git = (args) => {
       if (args.includes('branch') && args.includes('--list')) {
         return { status: 0, stdout: 'main\n', stderr: '' };
@@ -175,6 +181,7 @@ test('resolveMainRepo falls back to the standalone repo root when branch metadat
     fs.writeFileSync(path.join(root, 'workflow.config.json'), '{}\n');
 
     try {
+      // @ts-expect-error TS2322 Type '(args: string[]) => { status: number; stdout: string; stderr: string; }' i
       git.git = (args) => {
         if (args.includes('branch') && args.includes('--list')) {
           return { status: 0, stdout: 'main\n', stderr: '' };
@@ -208,6 +215,7 @@ test('resolveMainRepo (regression) throws when primary branch worktree is missin
   delete process.env.PRIMARY_WORKTREE;
 
   try {
+    // @ts-expect-error TS2322 Type '(args: string[]) => { stdout: string; }' is not assignable to type '(args:
     git.git = (args) => {
       // branch --list: report master exists so getPrimaryBranch succeeds
       if (args.includes('branch') && args.includes('--list')) {
@@ -320,6 +328,7 @@ test('resolveMissionBaseBranch falls back to the primary branch when no base is 
     fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Mission: Legacy mission with no base line\n');
 
     try {
+      // @ts-expect-error TS2322 Type '(args: string[]) => { status: number; stdout: string; stderr: string; }' i
       git.git = args => {
         if (args.includes('branch') && args.includes('--list')) {
           return { status: 0, stdout: 'main\n', stderr: '' };

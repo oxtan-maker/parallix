@@ -21,6 +21,7 @@ function runGitOrThrow(args, options = {}) {
   }
   if (typeof result.status === 'number' && result.status !== 0) {
     const error = new Error((result.stderr || result.stdout || `git ${args.join(' ')} failed`).trim());
+    // @ts-expect-error TS2339 Property 'result' does not exist on type 'Error'.
     error.result = result;
     throw error;
   }
@@ -66,6 +67,7 @@ assignee: [custom]
     error: msg => logs.push('[ERROR] ' + msg),
     exit: () => { throw new Error('exit called'); },
     resolveWorktreeFn: () => tmpDir,
+    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: taskFile }),
     resolveArtifactDirFn: () => artifactDir,
     readArtifactFn: (p) => {
@@ -100,6 +102,7 @@ assignee: [custom]
 
   assert.equal(result.consumed, true, 'should have consumed artifacts');
   assert.equal(result.ok, true, 'should succeed');
+  // @ts-expect-error TS18047 'taskStatusUpdate' is possibly 'null'.
   assert.equal(taskStatusUpdate.status, 'review', 'task should be set to review status');
   assert.ok(eventsWritten.length >= 2, `should write at least 2 events, got ${eventsWritten.length}`);
   assert.ok(eventsWritten.some(e => e.type === 'reviewer_findings'), 'should include reviewer_findings event');
@@ -142,6 +145,7 @@ test('consumeArtifacts leaves no untracked review-events files after a successfu
     const result = await consumeArtifacts('task-2200', {
       log: () => {},
       error: msg => { throw new Error(msg); },
+      // @ts-expect-error TS2353 Object literal may only specify known properties, and 'exit' does not exist in t
       exit: code => { throw new Error(`exit ${code}`); },
       resolveWorktreeFn: () => root,
       resolveArtifactDirFn: () => artifactDir,
@@ -187,6 +191,7 @@ test('consumeReviewerArtifacts returns informative message when artifacts exist 
     },
     tmpDir,
     worktree: tmpDir,
+    // @ts-expect-error TS2353 Object literal may only specify known properties, and 'readReviewStateFn' does n
     readReviewStateFn: () => null,
     createEventFn: () => ({ ok: true, path: '/mock/path' }),
     deleteArtifactFn: () => {},
@@ -197,6 +202,7 @@ test('consumeReviewerArtifacts returns informative message when artifacts exist 
 
   assert.equal(result.consumed, true, 'should have consumed');
   assert.equal(result.ok, false, 'should report ok:false');
+  // @ts-expect-error TS2339 Property 'includes' does not exist on type 'never'.
   assert.ok(capturedMessage && capturedMessage.includes('provider=none') || capturedMessage && capturedMessage.includes('verdict'),
     'error should reference provider=none or verdict absence');
 

@@ -38,6 +38,7 @@ test('stats report preserves merged/open counts for legacy merged/created_at CSV
     'task-2,codex,claude,http://example/pr/2,0,no,open,2026-05-02T10:00:00Z',
   ].join('\n'));
 
+  // @ts-expect-error TS2339 Property '_internals' does not exist on type 'typeof import("/home/magnus/code/p
   const report = stats._internals.generateMarkdownReport(stats._internals.loadCsv(csv), { groupBy: 'implementer' });
 
   assert.match(report, /- \*\*Merged:\*\* 1/);
@@ -53,6 +54,7 @@ test('stats report normalizes date/has_pr CSVs across summary, implementer, and 
     'task-2,2026-05-11,gemini,none,no PR,0,no,—',
   ].join('\n'));
 
+  // @ts-expect-error TS2339 Property '_internals' does not exist on type 'typeof import("/home/magnus/code/p
   const report = stats._internals.generateMarkdownReport(stats._internals.loadCsv(csv), { groupBy: 'period' });
 
   assert.match(report, /- \*\*Merged:\*\* 1/);
@@ -71,6 +73,7 @@ test('upsertStatsRow writes the workflow stats schema and updates existing missi
     mission: 'task-2000',
     classification: 'ai_sdlc',
     implementer: 'codex',
+    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
     pr_fix_rounds: 2,
   }, { filePath: csvFile });
 
@@ -84,6 +87,7 @@ test('upsertStatsRow writes the workflow stats schema and updates existing missi
     mission: 'task-2000',
     classification: 'ai_sdlc',
     implementer: 'codex',
+    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
     pr_fix_rounds: 2,
   }, { filePath: csvFile });
   assert.equal(second.changed, false);
@@ -95,6 +99,7 @@ test('upsertStatsRow writes the workflow stats schema and updates existing missi
     mission: 'task-2000',
     classification: 'ai_sdlc',
     implementer: 'codex',
+    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
     pr_fix_rounds: 3,
   }, { filePath: csvFile });
   assert.equal(third.changed, true);
@@ -245,6 +250,7 @@ test('upsertStatsRow accepts unknown classification rows and weekly report count
     mission: 'task-unknown',
     classification: 'unknown',
     implementer: 'unknown',
+    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
     pr_fix_rounds: 0,
     closed: 'yes',
   }, { filePath: csvFile });
@@ -349,6 +355,7 @@ test('stats command defaults to shared PARALLIX_HOME stats across target repos',
 
   try {
     process.env.PARALLIX_HOME = home;
+    // @ts-expect-error TS2349 This expression is not callable.
     stats(['--today', '2026-05-18'], {
       rootDir: repoOne,
       log: line => logs.push(line),
@@ -364,6 +371,7 @@ test('stats command defaults to shared PARALLIX_HOME stats across target repos',
     assert.match(output, /Current week \(2026-05-12 → 2026-05-18\)/);
 
     const secondLogs = [];
+    // @ts-expect-error TS2349 This expression is not callable.
     stats(['--today', '2026-05-18'], {
       rootDir: repoTwo,
       log: line => secondLogs.push(line),
@@ -572,6 +580,7 @@ test('stats command prints workflow weekly tables from the integration stats sch
   ].join('\n'));
   const logs = [];
 
+  // @ts-expect-error TS2349 This expression is not callable.
   stats(['--csv-file', csv, '--today', '2026-05-18'], {
     log: line => logs.push(line),
     error: line => logs.push(`ERR:${line}`),
@@ -594,6 +603,7 @@ test('stats --csv-file does not initialize PARALLIX_HOME', () => {
   const previousHome = process.env.PARALLIX_HOME;
   try {
     process.env.PARALLIX_HOME = home;
+    // @ts-expect-error TS2349 This expression is not callable.
     stats(['--csv-file', csv], {
       log: () => {},
       error: message => {
@@ -622,6 +632,7 @@ test('stats command prints workflow arbitrary range tables from the integration 
   ].join('\n'));
   const logs = [];
 
+  // @ts-expect-error TS2349 This expression is not callable.
   stats(['--csv-file', csv, '--from', '2026-05-01', '--to', '2026-05-31'], {
     log: line => logs.push(line),
     error: line => logs.push(`ERR:${line}`),
@@ -648,6 +659,7 @@ test('stats command does not treat --today value as a positional CSV path', () =
   const outputFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-stats-output-')), 'report.txt');
   const logs = [];
 
+  // @ts-expect-error TS2349 This expression is not callable.
   stats(['--csv-file', csv, '--today', '2026-05-18', '--output', outputFile], {
     log: line => logs.push(line),
     error: line => logs.push(`ERR:${line}`),
@@ -669,6 +681,7 @@ test('stats command writes arbitrary range report to --output without printing r
   const outputFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-stats-range-output-')), 'report.txt');
   const logs = [];
 
+  // @ts-expect-error TS2349 This expression is not callable.
   stats(['--csv-file', csv, '--from', '2026-05-01', '--to', '2026-05-31', '--output', outputFile], {
     log: line => logs.push(line),
     error: line => logs.push(`ERR:${line}`),
@@ -692,12 +705,14 @@ test('stats command exits non-zero and prints date-range diagnostics for invalid
   const logs = [];
   const exits = [];
 
+  // @ts-expect-error TS2349 This expression is not callable.
   stats(['--csv-file', csv, '--from', '2026-05-01'], {
     log: line => logs.push(line),
     error: line => logs.push(`ERR:${line}`),
     exit: code => exits.push(code),
   });
 
+  // @ts-expect-error TS2349 This expression is not callable.
   stats(['--csv-file', csv, '--from', '2026-06-01', '--to', '2026-05-31'], {
     log: line => logs.push(line),
     error: line => logs.push(`ERR:${line}`),
@@ -717,6 +732,7 @@ test('stats command keeps legacy retrospective CSVs on the markdown report path 
   ].join('\n'));
   const logs = [];
 
+  // @ts-expect-error TS2349 This expression is not callable.
   stats(['--csv-file', csv, '--from', '2026-05-01', '--to', '2026-05-31'], {
     log: line => logs.push(line),
     error: line => logs.push(`ERR:${line}`),
@@ -733,6 +749,7 @@ test('stats command keeps legacy retrospective CSVs on the markdown report path 
 test('stats command help documents the pre-integration preview workflow', () => {
   const logs = [];
 
+  // @ts-expect-error TS2349 This expression is not callable.
   stats(['--help'], {
     log: line => logs.push(line),
     error: line => logs.push(`ERR:${line}`),
@@ -1355,6 +1372,7 @@ test('task-1314: stats mission reports filter to the active repo', () => {
   ].join('\n'), 'utf8');
 
   const logs = [];
+  // @ts-expect-error TS2349 This expression is not callable.
   stats(['--csv-file', csvFile, '--mission', 'task-alpha'], {
     rootDir: root,
     log: line => logs.push(line),
@@ -1462,6 +1480,7 @@ test('recordReviewStats keeps the mission implementer for grouping and records t
     const result = stats.recordReviewStats({
       slug: 'task-2000',
       rootDir: root,
+      // @ts-expect-error TS2353 Object literal may only specify known properties, and 'filePath' does not exist
       filePath: csvFile,
       reviewer: 'claude',
       implementer: 'gemini',
@@ -1497,6 +1516,7 @@ test('recordReviewStats records the reviewer-session telemetry on the review row
     const result = stats.recordReviewStats({
       slug: 'task-2000',
       rootDir: root,
+      // @ts-expect-error TS2353 Object literal may only specify known properties, and 'filePath' does not exist
       filePath: csvFile,
       reviewer: 'codex',
       implementer: 'claude',
@@ -1533,12 +1553,18 @@ function writeReviewEvent(root, slug, { type, round, actor, verdict, timestamp, 
 test('deriveFixRoundsFromReviewEvents counts request-changes rounds resolved by the final implementer (task-1318)', () => {
   const root = createRepoFixture();
   try {
+    // @ts-expect-error TS2345 Argument of type '{ type: string; round: number; actor: string; verdict: string;
     writeReviewEvent(root, 'task-3000', { type: 'reviewer_outcome', round: 1, actor: 'custom', verdict: 'request-changes' });
+    // @ts-expect-error TS2345 Argument of type '{ type: string; round: number; actor: string; }' is not assign
     writeReviewEvent(root, 'task-3000', { type: 'implementer_disposition', round: 1, actor: 'codex' });
+    // @ts-expect-error TS2345 Argument of type '{ type: string; round: number; actor: string; verdict: string;
     writeReviewEvent(root, 'task-3000', { type: 'reviewer_outcome', round: 2, actor: 'claude', verdict: 'request-changes' });
+    // @ts-expect-error TS2345 Argument of type '{ type: string; round: number; actor: string; }' is not assign
     writeReviewEvent(root, 'task-3000', { type: 'implementer_disposition', round: 2, actor: 'codex' });
+    // @ts-expect-error TS2345 Argument of type '{ type: string; round: number; actor: string; verdict: string;
     writeReviewEvent(root, 'task-3000', { type: 'reviewer_outcome', round: 3, actor: 'custom', verdict: 'approve' });
 
+    // @ts-expect-error TS2339 Property '_internals' does not exist on type 'typeof import("/home/magnus/code/p
     const derived = stats._internals.deriveFixRoundsFromReviewEvents('task-3000', root);
     assert.ok(derived);
     assert.equal(derived.implementer, 'codex');
@@ -1556,13 +1582,20 @@ test('deriveFixRoundsFromReviewEvents attributes a mid-round handoff to the LATE
     // over and actually resolves the round. The round must be owned by claude
     // (latest disposition), not custom — otherwise the fix-round count and final
     // implementer are both wrong.
+    // @ts-expect-error TS2345 Argument of type '{ type: string; round: number; actor: string; verdict: string;
     writeReviewEvent(root, 'task-3002', { type: 'reviewer_outcome', round: 1, actor: 'codex', verdict: 'request-changes' });
+    // @ts-expect-error TS2345 Argument of type '{ type: string; round: number; actor: string; timestamp: strin
     writeReviewEvent(root, 'task-3002', { type: 'implementer_disposition', round: 1, actor: 'custom', timestamp: '2026-06-16T01:00:00.000Z' });
+    // @ts-expect-error TS2345 Argument of type '{ type: string; round: number; actor: string; verdict: string;
     writeReviewEvent(root, 'task-3002', { type: 'reviewer_outcome', round: 2, actor: 'codex', verdict: 'request-changes' });
+    // @ts-expect-error TS2345 Argument of type '{ type: string; round: number; actor: string; timestamp: strin
     writeReviewEvent(root, 'task-3002', { type: 'implementer_disposition', round: 2, actor: 'custom', timestamp: '2026-06-16T02:00:00.000Z', seq: 1 });
+    // @ts-expect-error TS2345 Argument of type '{ type: string; round: number; actor: string; timestamp: strin
     writeReviewEvent(root, 'task-3002', { type: 'implementer_disposition', round: 2, actor: 'claude', timestamp: '2026-06-16T02:30:00.000Z', seq: 2 });
+    // @ts-expect-error TS2345 Argument of type '{ type: string; round: number; actor: string; verdict: string;
     writeReviewEvent(root, 'task-3002', { type: 'reviewer_outcome', round: 3, actor: 'codex', verdict: 'approve' });
 
+    // @ts-expect-error TS2339 Property '_internals' does not exist on type 'typeof import("/home/magnus/code/p
     const derived = stats._internals.deriveFixRoundsFromReviewEvents('task-3002', root);
     assert.equal(derived.implementer, 'claude', 'final implementer is the latest round-2 responder');
     // claude owns round 2 (its request-changes counts); round 1 was custom's and is
@@ -1578,10 +1611,14 @@ test('deriveImplementerAndFixRounds prefers the review event store over other so
   try {
     const taskFile = path.join(root, 'backlog', 'tasks', 'task-3000 - Example.md');
     fs.writeFileSync(taskFile, ['---', 'id: TASK-3000', 'labels: [ai_sdlc]', 'assignee: [codex]', 'status: review', '---', ''].join('\n'));
+    // @ts-expect-error TS2345 Argument of type '{ type: string; round: number; actor: string; verdict: string;
     writeReviewEvent(root, 'task-3000', { type: 'reviewer_outcome', round: 1, actor: 'custom', verdict: 'request-changes' });
+    // @ts-expect-error TS2345 Argument of type '{ type: string; round: number; actor: string; }' is not assign
     writeReviewEvent(root, 'task-3000', { type: 'implementer_disposition', round: 1, actor: 'codex' });
+    // @ts-expect-error TS2345 Argument of type '{ type: string; round: number; actor: string; verdict: string;
     writeReviewEvent(root, 'task-3000', { type: 'reviewer_outcome', round: 2, actor: 'custom', verdict: 'approve' });
 
+    // @ts-expect-error TS2339 Property '_internals' does not exist on type 'typeof import("/home/magnus/code/p
     const info = stats._internals.deriveImplementerAndFixRounds('task-3000', root);
     assert.equal(info.source, 'review-events');
     assert.equal(info.implementer, 'codex');
@@ -1594,10 +1631,15 @@ test('deriveImplementerAndFixRounds prefers the review event store over other so
 test('summarizeAgentWindow trusts local ground truth over a stale zero in the CSV (task-1318)', () => {
   const root = createRepoFixture();
   try {
+    // @ts-expect-error TS2345 Argument of type '{ type: string; round: number; actor: string; verdict: string;
     writeReviewEvent(root, 'task-3000', { type: 'reviewer_outcome', round: 1, actor: 'custom', verdict: 'request-changes' });
+    // @ts-expect-error TS2345 Argument of type '{ type: string; round: number; actor: string; }' is not assign
     writeReviewEvent(root, 'task-3000', { type: 'implementer_disposition', round: 1, actor: 'codex' });
+    // @ts-expect-error TS2345 Argument of type '{ type: string; round: number; actor: string; verdict: string;
     writeReviewEvent(root, 'task-3000', { type: 'reviewer_outcome', round: 2, actor: 'custom', verdict: 'request-changes' });
+    // @ts-expect-error TS2345 Argument of type '{ type: string; round: number; actor: string; }' is not assign
     writeReviewEvent(root, 'task-3000', { type: 'implementer_disposition', round: 2, actor: 'codex' });
+    // @ts-expect-error TS2345 Argument of type '{ type: string; round: number; actor: string; verdict: string;
     writeReviewEvent(root, 'task-3000', { type: 'reviewer_outcome', round: 3, actor: 'custom', verdict: 'approve' });
 
     const window = { start: new Date('2026-06-10T00:00:00Z'), end: new Date('2026-06-16T00:00:00Z') };
@@ -1606,9 +1648,11 @@ test('summarizeAgentWindow trusts local ground truth over a stale zero in the CS
       { date: '2026-06-13', repo: '', mission: 'task-3000', implementer: 'codex', stage: 'review', classification: 'ai_sdlc', pr_fix_rounds: '0', closed: 'yes' },
     ];
 
+    // @ts-expect-error TS2339 Property '_internals' does not exist on type 'typeof import("/home/magnus/code/p
     const stored = stats._internals.summarizeAgentWindow(rows, window);
     assert.equal(stored[0].averageFixRounds, '0.00', 'without rootDir, stored value is used');
 
+    // @ts-expect-error TS2339 Property '_internals' does not exist on type 'typeof import("/home/magnus/code/p
     const authoritative = stats._internals.summarizeAgentWindow(rows, window, { rootDir: root });
     assert.equal(authoritative[0].implementer, 'codex');
     assert.equal(authoritative[0].missions, 1);
@@ -1698,6 +1742,7 @@ test('task-1342: mixed-agent phase report shows — for Usage % when provider is
       input_tokens: '0', output_tokens: '0', cached_tokens: '0',
       tool_calls: '0', duration_minutes: '0', cost_usd: '0',
     },
+  // @ts-expect-error TS2345 Argument of type '(row?: StatsRow, options?: NormalizeStatsRowOptions) => { date
   ].map(stats.normalizeStatsRow);
 
   const report = stats.renderMissionPhaseReport(rows, 'task-1339');
@@ -1723,6 +1768,7 @@ test('task-1342: phase report row for claude implementer does not show OpenAI Us
       input_tokens: '5000', output_tokens: '100', cached_tokens: '4000',
       tool_calls: '10', duration_minutes: '5', cost_usd: '0',
     },
+  // @ts-expect-error TS2345 Argument of type '(row?: StatsRow, options?: NormalizeStatsRowOptions) => { date
   ].map(stats.normalizeStatsRow);
 
   const report = stats.renderMissionPhaseReport(rows, 'task-mixed');
@@ -1761,6 +1807,7 @@ test('task-1342: review row with OpenAI reviewer shows Usage % even when claude 
       tool_calls: '76', duration_minutes: '2', cost_usd: '0',
       openai_usage_after: '37', closed: 'yes',
     },
+  // @ts-expect-error TS2345 Argument of type '(row?: StatsRow, options?: NormalizeStatsRowOptions) => { date
   ].map(stats.normalizeStatsRow);
 
   const report = stats.renderMissionPhaseReport(rows, 'task-1339');
@@ -1783,6 +1830,7 @@ test('task-2213: summarizeAgentWindow keeps separate model rows for local AI mis
     { date: '2026-06-14', mission: 'task-1003', implementer: 'custom', model: 'llama3', classification: 'ai_sdlc', pr_fix_rounds: '0', closed: 'yes' },
   ];
 
+  // @ts-expect-error TS2339 Property '_internals' does not exist on type 'typeof import("/home/magnus/code/p
   const result = stats._internals.summarizeAgentWindow(rows, window);
 
   assert.deepEqual(result, [
@@ -1798,6 +1846,7 @@ test('task-2213: summarizeAgentWindow falls back to the recorded implementer whe
     { date: '2026-06-13', mission: 'task-2002', implementer: 'claude', model: '', classification: 'user_value', pr_fix_rounds: '1', closed: 'yes' },
   ];
 
+  // @ts-expect-error TS2339 Property '_internals' does not exist on type 'typeof import("/home/magnus/code/p
   const result = stats._internals.summarizeAgentWindow(rows, window);
 
   assert.equal(result.length, 1, 'should have one group when model is empty');
@@ -1817,6 +1866,7 @@ test('task-2213: summarizeAgentWindow keeps mixed telemetry models in their own 
     { date: '2026-06-16', mission: 'task-3005', implementer: 'claude', model: '', classification: 'user_value', pr_fix_rounds: '3', closed: 'yes' },
   ];
 
+  // @ts-expect-error TS2339 Property '_internals' does not exist on type 'typeof import("/home/magnus/code/p
   const result = stats._internals.summarizeAgentWindow(rows, window);
 
   assert.deepEqual(result, [

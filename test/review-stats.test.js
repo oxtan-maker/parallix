@@ -23,6 +23,7 @@ function row(overrides = {}) {
 }
 
 test('task-2213: agent performance counts and fix-round averages use only each model row\'s completed missions', () => {
+  // @ts-expect-error TS2339 Property '_internals' does not exist on type 'typeof import("/home/magnus/code/p
   const summary = stats._internals.summarizeAgentWindow([
     row({ mission: 'task-qwen-fixes', pr_fix_rounds: '4' }),
     row({ mission: 'task-qwen-zero', pr_fix_rounds: '0' }),
@@ -40,6 +41,7 @@ test('task-2213: agent performance counts and fix-round averages use only each m
 });
 
 test('task-2213: models sharing an implementer family keep separate rows and averages', () => {
+  // @ts-expect-error TS2339 Property '_internals' does not exist on type 'typeof import("/home/magnus/code/p
   const summary = stats._internals.summarizeAgentWindow([
     row({ mission: 'task-sonnet-a', implementer: 'claude', model: 'claude-sonnet-5', pr_fix_rounds: '3' }),
     row({ mission: 'task-sonnet-b', implementer: 'claude', model: 'claude-sonnet-5', pr_fix_rounds: '1' }),
@@ -53,6 +55,7 @@ test('task-2213: models sharing an implementer family keep separate rows and ave
 });
 
 test('task-2213: completed rows with missing attribution or review-round metadata are explicit, not silent skew', () => {
+  // @ts-expect-error TS2339 Property '_internals' does not exist on type 'typeof import("/home/magnus/code/p
   const summary = stats._internals.summarizeAgentWindow([
     // No model and no implementer: must surface as a visible `unknown` row.
     row({ mission: 'task-no-attribution', model: '', implementer: '', pr_fix_rounds: '' }),
@@ -70,6 +73,7 @@ test('task-2213: completed rows with missing attribution or review-round metadat
 test('task-2213: completion on the blank-model rollup row keeps the mission in its model row with the rollup fix rounds', () => {
   // Real CSV shape: the model is recorded on non-closed stage rows, while
   // completion and the final pr_fix_rounds live on a blank-model rollup row.
+  // @ts-expect-error TS2339 Property '_internals' does not exist on type 'typeof import("/home/magnus/code/p
   const summary = stats._internals.summarizeAgentWindow([
     row({ mission: 'task-rollup', implementer: 'claude', model: 'claude-fable-5', stage: 'active', pr_fix_rounds: '0', closed: '' }),
     row({ mission: 'task-rollup', implementer: 'claude', model: '', stage: 'default', pr_fix_rounds: '3', closed: 'yes' }),
@@ -102,6 +106,7 @@ test('task-2213: completing implementer fallback is used when its model telemetr
   // A reviewer model is not ownership evidence. When the completing
   // implementer has no model telemetry in the window, use its recorded family
   // from the closed rollup instead of crediting the reviewer.
+  // @ts-expect-error TS2339 Property '_internals' does not exist on type 'typeof import("/home/magnus/code/p
   const summary = stats._internals.summarizeAgentWindow([
     // Implementer was codex; its gpt model row is outside the window.
     // Only the blank-model rollup and a reviewer-model row survive.
@@ -119,6 +124,7 @@ test('task-2213: completing implementer model beats reviewer model in attributio
   // When both the completing implementer's model row and a reviewer's model
   // row are in the window, only the completing implementer's telemetry may
   // determine the model label.
+  // @ts-expect-error TS2339 Property '_internals' does not exist on type 'typeof import("/home/magnus/code/p
   const summary = stats._internals.summarizeAgentWindow([
     // Model telemetry from the completing implementer.
     row({ mission: 'task-impl-vs-reviewer', implementer: 'claude', model: 'claude-sonnet-5', stage: 'active', pr_fix_rounds: '0', closed: '' }),
@@ -138,6 +144,7 @@ test('task-2213: completing implementer model beats reviewer model even when rev
   // A later reviewer date does not change the completing implementer's
   // ownership: impl=claude active on July 7, reviewer on July 8, and closed
   // rollup on July 9.
+  // @ts-expect-error TS2339 Property '_internals' does not exist on type 'typeof import("/home/magnus/code/p
   const summary = stats._internals.summarizeAgentWindow([
     // Completing implementer's model (earlier date)
     row({ mission: 'task-date-priority', date: '2026-07-07', implementer: 'claude', model: 'claude-sonnet-5', stage: 'active', pr_fix_rounds: '0', closed: '' }),
@@ -158,6 +165,7 @@ test('task-2213: the completing implementer owns the model row, not a later revi
   // mission. A reviewer may run later using a model that the old `custom`
   // family heuristic also accepted (mistral), but that telemetry must never
   // reassign credit away from the completing implementer.
+  // @ts-expect-error TS2339 Property '_internals' does not exist on type 'typeof import("/home/magnus/code/p
   const summary = stats._internals.summarizeAgentWindow([
     row({ mission: 'task-final-owner', date: '2026-07-07', implementer: 'custom', model: 'qwen3.6-27b-q8', stage: 'follow-up', pr_fix_rounds: '0', closed: '' }),
     row({ mission: 'task-final-owner', date: '2026-07-08', implementer: 'custom', reviewer_agent: 'vibe', model: 'mistral', stage: 'review', pr_fix_rounds: '0', closed: '' }),
@@ -172,6 +180,7 @@ test('task-2213: the completing implementer owns the model row, not a later revi
 test('task-2213: a closed reviewer row does not replace the final implementer after a handoff', () => {
   // Completion is mission-wide: a reviewer row may carry `closed: yes`, while
   // the last actual implementation was a follow-up by a different agent.
+  // @ts-expect-error TS2339 Property '_internals' does not exist on type 'typeof import("/home/magnus/code/p
   const summary = stats._internals.summarizeAgentWindow([
     row({ mission: 'task-handoff-owner', date: '2026-07-07', implementer: 'claude', model: 'claude-sonnet-5', stage: 'follow-up', closed: '' }),
     row({ mission: 'task-handoff-owner', date: '2026-07-08', implementer: 'custom', model: 'qwen3.6-27b-q8', stage: 'follow-up', closed: '' }),

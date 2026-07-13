@@ -60,6 +60,7 @@ test('task-1409: active-stage rows are visible in per-mission phase report', () 
       duration_minutes: '30',
       cost_usd: '2.50',
     },
+  // @ts-expect-error TS2345 Argument of type '(row?: StatsRow, options?: NormalizeStatsRowOptions) => { date
   ].map(stats.normalizeStatsRow);
 
   const report = stats.renderMissionPhaseReport(rows, 'task-1354');

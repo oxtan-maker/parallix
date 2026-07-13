@@ -52,6 +52,7 @@ test('readComments falls back to review-state identity when FORGEJO_USER is miss
     const logs = [];
     const { exitCode, errors } = await captureExit(async () => {
       await readComments(TEST_SLUG, {
+        // @ts-expect-error TS2740 Type '{ reviewer: string; implementer: string; round: number; phase: string; sta
         readReviewStateFn: () => reviewStateStub('claude', 'mistral'),
         readTokenFn: () => 'token-123',
         getCommentsFn: async () => [],
@@ -74,7 +75,9 @@ test('commentRound falls back to review-state identity when FORGEJO_USER is miss
   try {
     const writes = [];
     const { exitCode, errors } = await captureExit(() => commentRound(TEST_SLUG, 'test message', {
+      // @ts-expect-error TS2740 Type '{ reviewer: string; implementer: string; round: number; phase: string; sta
       readReviewStateFn: () => reviewStateStub('claude', 'mistral'),
+      // @ts-expect-error TS2322 Type 'number' is not assignable to type 'ReviewStatePersistenceResult'.
       writeReviewStateFn: (slug, state) => writes.push({ slug, reviewer: state.reviewer }),
       postCommentFn: () => ({ ok: true }),
       readTokenFn: () => 'token-123'
@@ -113,7 +116,9 @@ test('submitReviewRound falls back to review-state identity when FORGEJO_USER is
   try {
     const writes = [];
     const { exitCode, errors } = await captureExit(() => submitReviewRound(TEST_SLUG, 'approve', 'test summary', {
+      // @ts-expect-error TS2740 Type '{ reviewer: string; implementer: string; round: number; phase: string; sta
       readReviewStateFn: () => reviewStateStub('claude', 'mistral'),
+      // @ts-expect-error TS2322 Type 'number' is not assignable to type 'ReviewStatePersistenceResult'.
       writeReviewStateFn: (slug, state) => writes.push({ slug, disposition: state.disposition, phase: state.phase }),
       postReviewFn: () => ({ ok: true }),
       readTokenFn: () => 'token-123',
@@ -135,7 +140,9 @@ test('submitReviewRound ignores FORGEJO_USER and uses review-state identity', as
   try {
     let capturedUser = null;
     const { exitCode, errors } = await captureExit(() => submitReviewRound(TEST_SLUG, 'approve', 'test summary', {
+      // @ts-expect-error TS2740 Type '{ reviewer: string; implementer: string; round: number; phase: string; sta
       readReviewStateFn: () => reviewStateStub('state-reviewer', 'state-implementer'),
+      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(slug: string, state: Record<string
       writeReviewStateFn: () => {},
       postReviewFn: () => ({ ok: true }),
       readTokenFn: (user) => {
@@ -161,6 +168,7 @@ test('closeMissionPr falls back to review-state identity when FORGEJO_USER is mi
   try {
     const logs = [];
     const { exitCode, errors } = await captureExit(() => closeMissionPr(TEST_SLUG, {
+      // @ts-expect-error TS2740 Type '{ reviewer: string; implementer: string; round: number; phase: string; sta
       readReviewStateFn: () => reviewStateStub('claude', 'mistral'),
       readTokenFn: () => 'token-123',
       closePrFn: async () => ({ ok: true }),

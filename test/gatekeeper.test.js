@@ -259,7 +259,9 @@ test('runGatekeeper posts request-changes when artifacts are missing', async (t)
     assert.strictEqual(result.posted, true);
     assert.strictEqual(result.skipped, false);
     assert.strictEqual(postReviewCalled, true);
+    // @ts-expect-error TS18047 'postReviewArgs' is possibly 'null'.
     assert.strictEqual(postReviewArgs.outcome, 'request-changes');
+    // @ts-expect-error TS18047 'postReviewArgs' is possibly 'null'.
     assert.ok(postReviewArgs.body.includes('Pre-review gatekeeper'));
     assert.ok(logLines.some(l => l.includes('[INFO] Gatekeeper: posting request-changes')));
   });
@@ -302,6 +304,7 @@ test('runGatekeeper uses custom branch and user from options', async (t) => {
     });
 
     assert.strictEqual(result.posted, true);
+    // @ts-expect-error TS18047 'postReviewArgs' is possibly 'null'.
     assert.strictEqual(postReviewArgs.branch, 'custom/branch');
   });
 });

@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "noEmit": true,
+    "allowJs": true,
+    "checkJs": true,
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "target": "ES2024",
+    "resolveJsonModule": true
+  },
+  "include": [
+    "test/**/*.js"
+  ],
+  "exclude": [
+    "graphify-out/",
+    ".forgejo-local/",
+    "dist/"
+  ]
+}

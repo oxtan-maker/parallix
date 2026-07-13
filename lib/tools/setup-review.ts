@@ -929,11 +929,11 @@ async function bootstrapReviewSurface(rootDir: string, setup: any, options: any 
     const ownerToken = /** @type {string} */ ((ownerTokenResult as any).token);
 
     const ownerTokenPath = writeToken(setup.ownerLogin, ownerToken, forgejoHome);
-    // @ts-expect-error setup.repo may be undefined at runtime
+    // @ts-ignore setup.repo may be undefined at runtime
     const repoResult = ensureRepo(baseUrl, setup.repo, setup.ownerLogin, ownerToken, requestFn);
     if (!repoResult.ok) {return repoResult;}
 
-    // @ts-expect-error setup.repo may be undefined at runtime
+    // @ts-ignore setup.repo may be undefined at runtime
     const collaboratorResult = ensureRepoCollaborators(baseUrl, setup.repo, ownerToken, collaboratorUsers, 'write', requestFn);
     if (!collaboratorResult.ok) {return collaboratorResult;}
     if (collaboratorResult.created.length > 0) {
@@ -1008,18 +1008,18 @@ async function bootstrapReviewSurface(rootDir: string, setup: any, options: any 
     return { ok: false, error: `No owner token found for ${/** @type {string} */ (setup.ownerLogin)} at ${ownerTokenPath}. A token file for an existing user (typically human) is required to bootstrap new agent tokens.` };
   }
 
-  // @ts-expect-error setup.repo may be undefined at runtime
+  // @ts-ignore setup.repo may be undefined at runtime
   const repoResult = ensureRepo(baseUrl, setup.repo, setup.ownerLogin, ownerToken, requestFn);
   if (!repoResult.ok) {return repoResult;}
 
-  // @ts-expect-error setup.repo may be undefined at runtime
+  // @ts-ignore setup.repo may be undefined at runtime
   const collaboratorResult = ensureRepoCollaborators(baseUrl, setup.repo, ownerToken, collaboratorUsers, 'write', requestFn);
   if (!collaboratorResult.ok) {return collaboratorResult;}
   if (collaboratorResult.created.length > 0) {
     log(fmt.status('PASS', `Granted write access on ${setup.repo} to ${collaboratorResult.created.join(', ')}`));
   }
 
-  // @ts-expect-error setup.repo may be undefined at runtime
+  // @ts-ignore setup.repo may be undefined at runtime
   const tokensResult = tokenCreateViaOwnerToken(baseUrl, setup.repo, ownerToken, setup.agentPasswords, repoInfo, { requestFn, writeTokenFn: writeToken, forgejoHome, log });
   if (!tokensResult.ok) {return tokensResult;}
 

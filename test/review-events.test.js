@@ -299,6 +299,7 @@ test('buildEventFrontmatter includes all fields', () => {
     parkedItems: [],
   };
   
+  // @ts-expect-error TS2345 Argument of type '{ eventType: string; timestamp: string; round: number; phase:
   const frontmatter = buildEventFrontmatter(event);
   assert.ok(frontmatter.includes('event_type: reviewer_findings'));
   assert.ok(frontmatter.includes('timestamp: 2026-05-25T14:30:22.000Z'));
@@ -438,8 +439,11 @@ timestamp: 2026-05-25T14:30:22.000Z
   
   const events = readAllEvents(TEST_SLUG, { rootDir: tempDir });
   assert.equal(events.length, 1);
+  // @ts-expect-error TS2339 Property 'event_type' does not exist on type 'unknown'.
   assert.equal(events[0].event_type, 'reviewer_findings');
+  // @ts-expect-error TS2339 Property 'round' does not exist on type 'unknown'.
   assert.equal(events[0].round, 1);
+  // @ts-expect-error TS2339 Property 'actor' does not exist on type 'unknown'.
   assert.equal(events[0].actor, 'claude');
   
   // Cleanup
@@ -467,6 +471,7 @@ test('importLegacyArtifact imports existing /tmp/ file', () => {
   }, {
     worktree: tempDir,
     tmpDir: os.tmpdir(),
+    // @ts-expect-error TS2353 Object literal may only specify known properties, and 'skipGit' does not exist i
     skipGit: true
   });
   
@@ -520,6 +525,7 @@ test('importAllLegacyArtifacts imports multiple files', () => {
   const result = importAllLegacyArtifacts(TEST_SLUG, {
     worktree: tempDir,
     tmpDir: os.tmpdir(),
+    // @ts-expect-error TS2353 Object literal may only specify known properties, and 'skipGit' does not exist i
     skipGit: true
   });
   
@@ -532,6 +538,7 @@ test('importAllLegacyArtifacts imports multiple files', () => {
   }
   try { fs.unlinkSync(statePath); } catch (_) {}
   for (const imp of result.imported) {
+    // @ts-expect-error TS2339 Property 'path' does not exist on type 'unknown'.
     try { fs.unlinkSync(imp.path); } catch (_) {}
   }
 });
@@ -564,31 +571,38 @@ test('importAllLegacyArtifacts with full reviewer artifact set normalizes verdic
   const result = importAllLegacyArtifacts(TEST_SLUG, {
     worktree: tempDir,
     tmpDir: os.tmpdir(),
+    // @ts-expect-error TS2353 Object literal may only specify known properties, and 'skipGit' does not exist i
     skipGit: true
   });
   
+  // @ts-expect-error TS2339 Property 'error' does not exist on type 'unknown'.
   assert.ok(result.ok, `import failed: ${result.errors ? result.errors.map(e => e.error).join('; ') : ''}`);
   
   // Should import exactly 3 artifacts: findings, outcome (with verdict metadata), verdict (as metadata)
   // But only 2 unique event files should be created: reviewer_findings and reviewer_outcome
+  // @ts-expect-error TS2339 Property 'eventType' does not exist on type 'unknown'.
   const outcomeImports = result.imported.filter(i => i.eventType === VALID_EVENT_TYPES.REVIEWER_OUTCOME);
   assert.equal(outcomeImports.length, 2, 'Should have 2 entries for outcome (one for outcome.md, one for verdict.txt as metadata)');
   
   // Find the actual outcome event file (not the metadata entry)
+  // @ts-expect-error TS2339 Property 'asMetadata' does not exist on type 'unknown'.
   const actualOutcomeImport = outcomeImports.find(i => !i.asMetadata);
   assert.ok(actualOutcomeImport, 'Should have a non-metadata outcome import');
   
   // Verify the verdict was stored as metadata
+  // @ts-expect-error TS2339 Property 'path' does not exist on type 'unknown'.
   const outcomeContent = fs.readFileSync(actualOutcomeImport.path, 'utf8');
   assert.ok(outcomeContent.includes('verdict:'), 'Outcome event should contain verdict frontmatter');
   assert.ok(outcomeContent.includes('approve'), 'Outcome event should have verdict value "approve"');
   
   // Verify only ONE reviewer_outcome event file was created (not two separate files)
   // Count actual files created (excluding metadata markers)
+  // @ts-expect-error TS2339 Property 'asMetadata' does not exist on type 'unknown'.
   const uniqueEventPaths = new Set(result.imported.filter(i => !i.asMetadata).map(i => i.path));
   assert.equal(uniqueEventPaths.size, 2, 'Should have exactly 2 unique event files: findings + outcome (verdict merged into outcome)');
   
   // Verify findings was also imported
+  // @ts-expect-error TS2339 Property 'eventType' does not exist on type 'unknown'.
   const findingsImport = result.imported.find(i => i.eventType === VALID_EVENT_TYPES.REVIEWER_FINDINGS);
   assert.ok(findingsImport, 'Should have imported reviewer_findings');
   
@@ -598,6 +612,7 @@ test('importAllLegacyArtifacts with full reviewer artifact set normalizes verdic
   }
   try { fs.unlinkSync(statePath); } catch (_) {}
   for (const imp of result.imported) {
+    // @ts-expect-error TS2339 Property 'path' does not exist on type 'unknown'.
     try { fs.unlinkSync(imp.path); } catch (_) {}
   }
 });
@@ -670,6 +685,7 @@ test('consumeHumanNotes creates human_note events and skips workflow comments', 
   assert.equal(result.created.length, 1);
   assert.equal(result.skipped.length, 1);
 
+  // @ts-expect-error TS2339 Property 'path' does not exist on type 'unknown'.
   const eventPath = result.created[0].path;
   assert.ok(fs.existsSync(eventPath));
   const content = fs.readFileSync(eventPath, 'utf8');
@@ -700,17 +716,21 @@ test('importAllLegacyArtifacts with only review-verdict.txt creates standalone o
   const result = importAllLegacyArtifacts(TEST_SLUG, {
     worktree: tempDir,
     tmpDir: os.tmpdir(),
+    // @ts-expect-error TS2353 Object literal may only specify known properties, and 'skipGit' does not exist i
     skipGit: true
   });
   
   assert.ok(result.ok);
   assert.equal(result.imported.length, 1);
+  // @ts-expect-error TS2339 Property 'eventType' does not exist on type 'unknown'.
   assert.equal(result.imported[0].eventType, VALID_EVENT_TYPES.REVIEWER_OUTCOME);
+  // @ts-expect-error TS2339 Property 'artifactName' does not exist on type 'unknown'.
   assert.equal(result.imported[0].artifactName, 'review-verdict.txt');
   
   // Cleanup
   try { fs.unlinkSync(verdictPath); } catch (_) {}
   try { fs.unlinkSync(statePath); } catch (_) {}
+  // @ts-expect-error TS2339 Property 'path' does not exist on type 'unknown'.
   try { fs.unlinkSync(result.imported[0].path); } catch (_) {}
 });
 

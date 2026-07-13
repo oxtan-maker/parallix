@@ -70,6 +70,7 @@ test('task-1380: summarizeMissionWindow excludes non-closed rows', () => {
     label: '2026-06-16 → 2026-06-23',
   };
 
+  // @ts-expect-error TS2339 Property '_internals' does not exist on type 'typeof import("/home/magnus/code/p
   const result = stats._internals.summarizeMissionWindow(rows, window);
 
   assert.equal(result.total, 1,
@@ -184,6 +185,7 @@ test('task-1380: recordActiveStats does not set closed on in-progress rows (regr
     const result = stats.recordActiveStats({
       slug: 'task-5001',
       rootDir: root,
+      // @ts-expect-error TS2353 Object literal may only specify known properties, and 'filePath' does not exist
       filePath: csvFile,
       model: 'codex',
       date: '2026-07-01',

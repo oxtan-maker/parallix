@@ -24,6 +24,7 @@ function createDummyLauncher() {
     fs.chmodSync(launcher, 0o755);
   }
   process.env.PATH = `${dir}${path.delimiter}${process.env.PATH}`;
+  // @ts-expect-error TS2322 Type 'boolean' is not assignable to type 'string'.
   setCommandPathProbe(name => fs.existsSync(path.join(dir, name)));
 
   const launcherPath = path.join(dir, 'dummy-launcher');
@@ -48,6 +49,7 @@ function withPathLaunchers(entries, run) {
 
   const previousPath = process.env.PATH;
   process.env.PATH = `${binDir}${path.delimiter}${previousPath}`;
+  // @ts-expect-error TS2322 Type 'boolean' is not assignable to type 'string'.
   setCommandPathProbe(name => fs.existsSync(path.join(binDir, name)));
   try {
     return run();
@@ -86,6 +88,7 @@ test('launcherStatus reports an agent as blocked when its launcher is missing', 
 test('launcherStatus resolves bare agent names from PATH (SC 4)', () => {
   withPathLaunchers({ vibe: 'process.exit(0);' }, () => {
     const status = launcherStatus('vibe');
+    // @ts-expect-error TS2339 Property 'agent' does not exist on type 'LauncherStatusResult'.
     assert.equal(status.agent, 'vibe');
     assert.equal(status.supported, true);
     assert.match(status.detail, /^vibe\b/);
@@ -109,6 +112,7 @@ test('buildAutonomousReviewMatrix derives agents from injected step eligibility 
   assert.equal(matrix.launchers.claude.supported, true);
   assert.equal(matrix.launchers.gemini.supported, false);
   // No hardcoded implementer→reviewer routing survives.
+  // @ts-expect-error TS2339 Property 'routes' does not exist on type '{ step: string; agents: string[]; conf
   assert.equal(matrix.routes, undefined);
 });
 
@@ -132,6 +136,7 @@ test('buildAutonomousReviewMatrix supports future agent names without a hardcode
   });
 
   assert.deepEqual(matrix.agents, ['future-agent']);
+  // @ts-expect-error TS2339 Property 'agent' does not exist on type 'LauncherStatusResult'.
   assert.equal(matrix.launchers['future-agent'].agent, 'future-agent');
 });
 
@@ -165,6 +170,7 @@ test('formatMatrixSummary renders config and per-agent launcher support without 
 test('runnableDifferentFamilyExists returns true when a non-implementer agent has a supported launcher', () => {
   const result = runnableDifferentFamilyExists('codex', {
     eligibleAgentsForStepFn: () => ['codex', 'claude'],
+    // @ts-expect-error TS2741 Property 'detail' is missing in type '{ agent: string; supported: boolean; }' bu
     workflowLauncherStatusFn: agent => ({ agent, supported: agent === 'claude' })
   });
   assert.equal(result, true);
@@ -173,6 +179,7 @@ test('runnableDifferentFamilyExists returns true when a non-implementer agent ha
 test('runnableDifferentFamilyExists returns false when only the implementer family has a supported launcher', () => {
   const result = runnableDifferentFamilyExists('codex', {
     eligibleAgentsForStepFn: () => ['codex', 'claude'],
+    // @ts-expect-error TS2741 Property 'detail' is missing in type '{ agent: string; supported: boolean; }' bu
     workflowLauncherStatusFn: agent => ({ agent, supported: agent === 'codex' })
   });
   assert.equal(result, false);

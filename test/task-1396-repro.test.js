@@ -44,6 +44,7 @@ test('active throws "missionStartFn is not a function" when passed a namespace o
 
   // Verify the namespace object is NOT callable (this is the bug).
   assert.throws(
+    // @ts-expect-error TS2349 This expression is not callable.
     () => namespaceObj(['task-1396'], { returnResult: true }),
     TypeError,
     'namespace object must not be callable — this is the task-1396 bug',
@@ -56,6 +57,7 @@ test('active throws "missionStartFn is not a function" when passed a namespace o
   try {
     // active() calls missionStartFn([slug], { returnResult: true }) at the
     // preflight step. With a namespace object, this throws TypeError.
+    // @ts-expect-error TS2349 This expression is not callable.
     await active(['task-1396'], {
       missionStartFn: namespaceObj,
       inferSlugFn: () => 'task-1396',
@@ -88,6 +90,7 @@ test('active succeeds when missionStartFn is the default export function (task-1
   // active() should call fn([slug], { returnResult: true }) and get { pass: true },
   // then continue to resolveWorktreeFn which we also stub.
   let launched = false;
+  // @ts-expect-error TS2349 This expression is not callable.
   await active(['task-1396'], {
     missionStartFn: fn,
     inferSlugFn: () => 'task-1396',
