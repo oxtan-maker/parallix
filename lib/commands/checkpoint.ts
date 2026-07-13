@@ -7,8 +7,6 @@ import { formatVerificationCommand, runVerificationGate } from '../core/verifica
 /** @param {string[]} args */
 function checkpoint(args) {
   /** @param {string} a */
-  const flags = args.filter(a => a.startsWith('--'));
-  /** @param {string} a */
   const params = args.filter(a => !a.startsWith('--'));
 
   let [explicitSlug, cpName, nextAction] = params;
@@ -22,7 +20,7 @@ function checkpoint(args) {
   }
 
   if (!slug || !cpName || !nextAction) {
-    fmt.log.fail('Usage: node parallix checkpoint [<slug>] <cp-name> "<next-action>" [--no-gate]');
+    fmt.log.fail('Usage: node parallix checkpoint [<slug>] <cp-name> "<next-action>"');
     process.exit(1);
   }
 
@@ -33,22 +31,16 @@ function checkpoint(args) {
   }
 
   const area = findMissionArea(missionDir);
-  const skipGate = flags.includes('--no-gate');
-
   fmt.log.info(`Running checkpoint for mission: ${fmt.slug(slug)}, checkpoint: ${fmt.bold(cpName)}`);
 
   // Step 1: Verify
-  if (skipGate) {
-    fmt.log.warn('Step 1: Skipping verification gate (--no-gate)');
-  } else {
-    fmt.log.info(`Step 1: Running verification gate for area: ${fmt.bold(area)}...`);
-    const verifyResult = runVerificationGate(area, { rootDir: process.cwd(), stdio: 'inherit', runFn: run });
-    if (verifyResult.status !== 0) {
-      fmt.log.fail(`Verification gate failed for area: ${fmt.bold(area)}. Fix errors and retry ${fmt.command(formatVerificationCommand(area))} or use --no-gate.`);
-      process.exit(1);
-    }
-    fmt.log.pass(`Verification gate passed for area: ${fmt.bold(area)}`);
+  fmt.log.info(`Step 1: Running verification gate for area: ${fmt.bold(area)}...`);
+  const verifyResult = runVerificationGate(area, { rootDir: process.cwd(), stdio: 'inherit', runFn: run });
+  if (verifyResult.status !== 0) {
+    fmt.log.fail(`Verification gate failed for area: ${fmt.bold(area)}. Fix errors and retry ${fmt.command(formatVerificationCommand(area))}.`);
+    process.exit(1);
   }
+  fmt.log.pass(`Verification gate passed for area: ${fmt.bold(area)}`);
 
   // Step 2: Stage
   fmt.log.info('Step 2: Staging all tracked changes...');

@@ -4,6 +4,7 @@ import { loadAdapterConfig } from './product-config.js';
 import { log } from './fmt.js';
 import * as fsMod from 'node:fs';
 import { getBuildFreshnessStatus } from './build-freshness.js';
+import { getPrimaryBranch } from './mission-utils.js';
 
 interface GitOptions {
   encoding?: BufferEncoding;
@@ -74,10 +75,75 @@ export function resolveVerificationAdapter(rootDir: string = process.cwd()): Ver
   return { command, defaultArea };
 }
 
-/** @param {string} [area] @param {string} [rootDir] */
-export function formatVerificationCommand(area: string | undefined, rootDir: string = process.cwd()): string {
-  const { command, defaultArea } = resolveVerificationAdapter(rootDir);
-  const effectiveArea = area || defaultArea;
+const KNOWN_CHANGE_AREAS = ['lib', 'server', 'auth-server', 'web-client', 'docs', 'workflow', 'android', 'kubernetes'];
+const WORKFLOW_OWNED_DIRS = new Set(['test', 'scripts', 'config', 'prompts', 'data']);
+
+/** @param {string} filesOutput */
+export function detectAreasFromChangedFiles(filesOutput: string): string[] {
+  const areas = new Set<string>();
+  filesOutput.split('\n').forEach((rawFile) => {
+    const file = rawFile.trim();
+    if (!file || !file.includes('/')) {return;}
+    const topDir = file.split('/')[0];
+    if (KNOWN_CHANGE_AREAS.includes(topDir)) {
+      areas.add(topDir);
+      return;
+    }
+    if (WORKFLOW_OWNED_DIRS.has(topDir)) {
+      areas.add('workflow');
+    }
+  });
+  return Array.from(areas);
+}
+
+/**
+ * Detect the verification area from files changed in the mission's worktree
+ * relative to the primary branch. Returns null when no mission context or
+ * relevant changed files are available.
+ */
+export function detectMissionChangedArea(
+  missionDir: string | null,
+  rootDir: string = process.cwd(),
+  options: { gitRunner?: GitFn; baseBranch?: string } = {}
+): string | null {
+  if (!missionDir) {return null;}
+
+  const gitRunner = options.gitRunner || git;
+  let baseBranch = options.baseBranch;
+  if (!baseBranch) {
+    try {
+      baseBranch = getPrimaryBranch(rootDir, gitRunner as unknown as Function);
+    } catch {
+      return null;
+    }
+  }
+
+  const diffResult = gitRunner(['-C', rootDir, 'diff', '--name-only', `${baseBranch}...HEAD`]);
+  if (diffResult.status !== 0 || !diffResult.stdout || !diffResult.stdout.trim()) {
+    return null;
+  }
+
+  const areas = detectAreasFromChangedFiles(diffResult.stdout);
+  // A verification command accepts one area. Mixed-area changes must use the
+  // strict superset rather than silently choosing the first path in git's
+  // alphabetical output (for example, docs before lib).
+  if (areas.length > 1) {return 'all';}
+  return areas[0] || null;
+}
+
+/** Resolve an explicit, diff-scoped, or configured verification area. */
+export function resolveEffectiveArea(area: string | undefined, rootDir: string = process.cwd(), missionDir: string | null = null): string {
+  if (area) {return area;}
+  const { defaultArea } = resolveVerificationAdapter(rootDir);
+  return detectMissionChangedArea(missionDir, rootDir) || defaultArea;
+}
+
+/** @param {string} [area] @param {string} [rootDir] @param {string|null} [missionDir] */
+export function formatVerificationCommand(area: string | undefined, rootDir: string = process.cwd(), missionDir: string | null = null): string {
+  const { command } = resolveVerificationAdapter(rootDir);
+  // An already-resolved area is authoritative. Only resolve from mission
+  // context when the caller has not supplied one.
+  const effectiveArea = area || resolveEffectiveArea(undefined, rootDir, missionDir);
   if (!command) {
     return NO_GATE_NOTICE;
   }

@@ -1887,11 +1887,14 @@ test('startAgent throws with clear error when all agents exhausted', async () =>
 
 // ---------- per-family model override wiring (task-1256) ----------
 
-test('startAgent passes the resolved model to the launcher invocation', async () => {
+test('startAgent passes the resolved model to the launcher invocation', async (t) => {
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-model-'));
+  t.after(() => fs.rmSync(worktree, { recursive: true, force: true }));
   const log = [];
   let launcherModel;
   const result = await startAgent('review', {
     prompt: 'test',
+    worktree,
     selectAgentFn: () => 'custom',
     resolveAgentModelFn: (agent) => (agent === 'custom' ? 'qwen3.5:9b' : null),
     log: msg => log.push(msg),
@@ -1912,10 +1915,13 @@ test('startAgent passes the resolved model to the launcher invocation', async ()
   assert.ok(log.some(m => m.includes('Using configured model for') && m.includes('qwen3.5:9b')));
 });
 
-test('startAgent omits the model flag when resolveAgentModel returns null', async () => {
+test('startAgent omits the model flag when resolveAgentModel returns null', async (t) => {
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-model-'));
+  t.after(() => fs.rmSync(worktree, { recursive: true, force: true }));
   let launcherModel;
   const result = await startAgent('review', {
     prompt: 'test',
+    worktree,
     selectAgentFn: () => 'custom',
     resolveAgentModelFn: () => null,
     launchAgentFn: (opts) => {

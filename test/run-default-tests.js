@@ -7,6 +7,10 @@ const { spawnSync } = require('node:child_process');
 const defaultTestFiles = fs.readdirSync(__dirname)
   .sort()
   .filter(file => file.endsWith('.test.js'))
+  // Lifecycle E2E is an integration gate. Keeping it out of the fast default
+  // suite prevents review/checkpoint verification from repeatedly running it.
+  .filter(file => file !== 'e2e-mission-lifecycle.test.js')
+  // This suite exercises a real agent runner and is likewise integration-only.
   .filter(file => file !== 'e2e-real-agent-smoke.test.js')
   .map(file => path.join(__dirname, file));
 const requestedTestFiles = process.argv.slice(2);
