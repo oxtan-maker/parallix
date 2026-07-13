@@ -1,12 +1,10 @@
 ---
 id: TASK-2237
 title: make parallix local only development
-status: ready-for-integration
-assignee:
-  - claude
+status: done
+assignee: [codex]
 created_date: '2026-07-12 14:23'
-updated_date: '2026-07-13 08:07'
-labels: []
+labels: [user_value]
 dependencies: []
 ordinal: 37000
 ---
@@ -23,10 +21,10 @@ If there is no code that does this, update agent instructions and if possible se
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Verification gate ran and passed on the final tree with captured proof rather than an unverified claim
-- [ ] #2 Lint and static analysis report clean on every changed file
-- [ ] #3 No focused or unannotated skipped tests were introduced (no .only and no bare .skip)
-- [ ] #4 Final checkpoint Goal Check table cites real evidence using file:line references and test names
-- [ ] #5 Docs updated to reflect any workflow or user-facing behavior change
+- [X] #1 Verification gate ran and passed on the final tree with captured proof rather than an unverified claim
+- [X] #2 Lint and static analysis report clean on every changed file
+- [X] #3 No focused or unannotated skipped tests were introduced (no .only and no bare .skip)
+- [X] #4 Final checkpoint Goal Check table cites real evidence using file:line references and test names
+- [X] #5 Docs updated to reflect any workflow or user-facing behavior change
 - [ ] #6 Bug-labeled missions include a red-to-green reproduction test that fails before the fix and passes after
 <!-- DOD:END -->

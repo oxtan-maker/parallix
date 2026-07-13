@@ -1002,7 +1002,7 @@ function fetchReviewBranch(branch: string, rootDir: string = process.cwd(), opti
 
 /** @param {string} branch @param {string} rootDir @returns {{ok: boolean, ref?: string, sha?: string, error?: string}} */
 function resolveTrackingBranchSha(branch: string, rootDir: string = process.cwd()) {
-  const candidateRefs = [`refs/remotes/review/${branch}`, `refs/remotes/origin/${branch}`];
+  const candidateRefs = [`refs/remotes/review/${branch}`];
   for (const ref of candidateRefs) {
     const result = git(['-C', rootDir, 'rev-parse', '--verify', `${ref}^{commit}`], {
       stdio: ['ignore', 'pipe', 'pipe']

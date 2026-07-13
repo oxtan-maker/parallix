@@ -13,6 +13,10 @@ Rules:
 
 Before editing any `.md` file in the repo root or `docs/` directory, consult `docs/doc-standards.md` for the full standard.
 
+## Local-only development
+
+Mission branches must never be pushed to the `origin` (GitHub) remote. Only the `main` branch may be pushed to `origin`. The `review` (Forgejo) remote is the sole push target for code review on mission branches. The `px checkpoint` command stages and commits locally without pushing to `origin`. A `pre-push` hook (`.git/hooks/pre-push`) provides local enforcement — any attempt to `git push origin <non-main-branch>` will be rejected on machines where the hook is installed. The hook is local-only metadata (not tracked in git), so instruction-based enforcement via this AGENTS.md section is the team-wide mechanism for all clones.
+
 ## Integration Gates
 
 Static-analysis (`./scripts/verify-local.sh static-analysis`: ESLint + tsc --checkJs + test-hygiene) is a required integration gate for any mission that modifies files under `lib/`. The gate configuration lives in `config/integration-pipelines.json` and is enforced by `px integrate` before the squash-merge step. Missions touching `lib/` cannot merge while the static-analysis gate fails. Use `--no-integration-gates` to opt out in emergencies.
