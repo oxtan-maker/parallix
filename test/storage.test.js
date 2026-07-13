@@ -161,6 +161,7 @@ test('readJson returns { ok: true } for valid JSON', () => {
     fs.writeFileSync(file, JSON.stringify({ blocklist: { gemini: true } }), 'utf8');
     const result = storage.readJson(file);
     assert.equal(result.ok, true);
+    // @ts-expect-error TS2339 Property 'blocklist' does not exist on type 'unknown'.
     assert.equal(result.data.blocklist.gemini, true);
   } finally {
     process.env.PARALLIX_HOME = savedHome;
@@ -197,6 +198,7 @@ test('readJson accepts a resolver function instead of a path', () => {
     fs.writeFileSync(file, JSON.stringify({ key: 'val' }), 'utf8');
     const result = storage.readJson(() => file);
     assert.equal(result.ok, true);
+    // @ts-expect-error TS2339 Property 'key' does not exist on type 'unknown'.
     assert.equal(result.data.key, 'val');
   } finally {
     process.env.PARALLIX_HOME = savedHome;

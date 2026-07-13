@@ -28,15 +28,19 @@ test('TASK-1048: startReviewLoop does not crash when taskResolution is needed fo
     exit: (c) => { throw new Error(`exit(${c})`); },
     maybeUpdateGraphifyBeforeReviewFn: () => ({ updated: false, skipped: true }),
     readReviewStateFn: () => null,
+    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-1048.md' }),
+    // @ts-expect-error TS2739 Type '{ supported: true; }' is missing the following properties from type 'Launc
     workflowLauncherStatusFn: () => ({ supported: true }),
     isForgejoReviewEnabledFn: () => true,
     forgejoAvailableFn: async () => true,
     getPrStatusFn: () => ({ exists: true, state: 'open', number: 42 }),
     resolveForgejoUserFn: () => 'gemini',
     readTokenFn: () => 'mock-token',
+    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'ReviewStatePersistenceResult'.
     writeReviewStateFn: (slug, state) => writes.push({ slug, state }),
     rebaseBeforeReviewRoundFn: async () => ({ ok: true, sharedFileConflicts: false }),
+    // @ts-expect-error TS2322 Type '(step: string, options: StartAgentOptions) => Promise<{ agent: string; res
     startAgentFn: async (step, options) => {
       if (step === 'review') {
         return { agent: 'codex', result: { status: 0 } };

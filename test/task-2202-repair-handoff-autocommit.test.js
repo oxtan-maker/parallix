@@ -32,6 +32,7 @@ test('repairHandoff auto-commits bounded implementation files for active-step ha
     return { status: 0 };
   };
 
+  // @ts-expect-error TS2349 This expression is not callable.
   const { repaired, blocker } = await repairHandoff(
     'task-2202',
     '/tmp/worktree',

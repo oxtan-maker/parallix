@@ -50,6 +50,7 @@ test('integrate guard', async (t) => {
     errorOutput = '';
 
     try {
+      // @ts-expect-error TS2349 This expression is not callable.
       await integrate(['task-1086']);
     } catch (err) {
       if (err.message !== 'process.exit called') throw err;
@@ -79,6 +80,7 @@ test('integrate guard', async (t) => {
     errorOutput = '';
 
     try {
+      // @ts-expect-error TS2349 This expression is not callable.
       await integrate(['task-1086']);
     } catch (err) {
       if (err.message !== 'process.exit called') throw err;
@@ -108,6 +110,7 @@ test('integrate guard', async (t) => {
     errorOutput = '';
 
     try {
+      // @ts-expect-error TS2349 This expression is not callable.
       await integrate(['task-1086', '--dry-run']);
     } catch (err) {
       // It might call process.exit for other reasons (preflight fail), which is fine

@@ -29,6 +29,7 @@ test('writeReviewState does not report success when commit fails and state path 
       implementer: 'claude',
       round: 3,
       phase: 'fixing'
+    // @ts-expect-error TS2345 Argument of type '(args: any) => { status: number; stdout: string; stderr: strin
     }, root, gitFn);
 
     assert.deepEqual(result, {

@@ -189,11 +189,14 @@ test('restartDraftAgent uses the focused repair prompt', async () => {
   const ok = await restartDraftRepair('task-test', '/tmp/worktree', {
     readAgentConfigOrExitFn: () => ({}),
     selectAgentFn: () => 'codex',
+    // @ts-expect-error TS2322 Type '({ prompt }: StartAgentOptions) => Promise<{ agent: string; result: { stat
     startDraftAgentFn: async ({ prompt }) => {
       capturedPrompt = prompt;
       return { agent: 'codex', result: { status: 0 } };
     },
+    // @ts-expect-error TS2322 Type '() => void' is not assignable to type 'LogFunc'.
     logFn: () => {},
+    // @ts-expect-error TS2322 Type '() => void' is not assignable to type 'LogFunc'.
     errorFn: () => {},
     exitFn: () => {}
   });
@@ -210,8 +213,11 @@ test('restartDraftAgent leaves exit control to the caller on failure', async () 
   const ok = await restartDraftRepair('task-test', '/tmp/worktree', {
     readAgentConfigOrExitFn: () => ({}),
     selectAgentFn: () => 'codex',
+    // @ts-expect-error TS2322 Type 'Promise<{ agent: string; result: { status: number; }; }>' is not assignabl
     startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 17 } }),
+    // @ts-expect-error TS2322 Type '() => void' is not assignable to type 'LogFunc'.
     logFn: () => {},
+    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
     errorFn: (message) => errors.push(message),
     exitFn: (code) => { exitCode = code; }
   });
@@ -228,6 +234,7 @@ test('recordDraftImplementer returns actual when no taskResolution', () => {
     selected: 'codex',
     actual: 'codex',
     taskResolution: null,
+    // @ts-expect-error TS2322 Type '() => void' is not assignable to type 'LogFunc'.
     log: () => {}
   });
   assert.equal(result, 'codex');
@@ -238,6 +245,7 @@ test('recordDraftImplementer returns actual when taskResolution.ok is false', ()
     selected: 'codex',
     actual: 'codex',
     taskResolution: { ok: false },
+    // @ts-expect-error TS2322 Type '() => void' is not assignable to type 'LogFunc'.
     log: () => {}
   });
   assert.equal(result, 'codex');
@@ -250,6 +258,7 @@ test('recordDraftImplementer routes the actual implementer through the shared tr
     taskResolution: { ok: true, taskFile: '/tmp/task-086.md' },
     getTaskStatusFn: () => 'refined',
     transitionTaskFn: (...args) => { calls.push(args); return true; },
+    // @ts-expect-error TS2322 Type '() => void' is not assignable to type 'LogFunc'.
     log: () => {}
   });
   assert.equal(resolved, 'codex');
@@ -262,6 +271,7 @@ test('recordDraftImplementer does nothing when the draft task cannot be resolved
     selected: 'gemini',
     actual: 'codex',
     taskResolution: { ok: false },
+    // @ts-expect-error TS2353 Object literal may only specify known properties, and 'enforceTaskAssigneeFn' do
     enforceTaskAssigneeFn(taskFile, agent) {
       calls.push({ taskFile, agent });
       return true;
@@ -277,6 +287,7 @@ test('recordDraftImplementer logs fallback when selected differs from actual', (
     selected: 'claude',
     actual: 'codex',
     taskResolution: { ok: true, taskFile: '/tmp/task.md' },
+    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
     log: (msg) => logLines.push(msg),
     getTaskStatusFn: () => 'refined', transitionTaskFn: () => true
   });
@@ -289,6 +300,7 @@ test('recordDraftImplementer logs recording when selected equals actual', () => 
     selected: 'codex',
     actual: 'codex',
     taskResolution: { ok: true, taskFile: '/tmp/task.md' },
+    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
     log: (msg) => logLines.push(msg),
     getTaskStatusFn: () => 'refined', transitionTaskFn: () => true
   });
@@ -301,6 +313,7 @@ test('recordDraftImplementer logs warning when the shared transition fails', () 
     selected: 'codex',
     actual: 'codex',
     taskResolution: { ok: true, taskFile: '/tmp/task.md' },
+    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
     log: (msg) => logLines.push(msg),
     getTaskStatusFn: () => 'refined', transitionTaskFn: () => false
   });
@@ -356,12 +369,15 @@ test('ensureMissionBranch creates branch from main when absent', () => {
   let squashedRepo = null;
 
   ensureMissionBranch('/repo', 'mission/task-test', {
+    // @ts-expect-error TS2322 Type '(args: string[]) => { stdout: string; status?: undefined; stderr?: undefin
     gitFn(args) {
       gitCalls.push(args);
       if (args.includes('--list')) return { stdout: '' };
       return { status: 0, stdout: '', stderr: '' };
     },
+    // @ts-expect-error TS2322 Type '() => void' is not assignable to type 'LogFunc'.
     logFn: () => {},
+    // @ts-expect-error TS2322 Type '(repo: string) => void' is not assignable to type '(rootDir: string, gitRu
     squashTrailingBacklogNoiseIntoPreviousMissionFn: (repo) => { squashedRepo = repo; }
   });
 
@@ -373,10 +389,12 @@ test('ensureMissionBranch skips creation when branch already exists', () => {
   const gitCalls = [];
 
   ensureMissionBranch('/repo', 'mission/task-test', {
+    // @ts-expect-error TS2322 Type '(args: string[]) => { stdout: string; status: number; }' is not assignable
     gitFn(args) {
       gitCalls.push(args);
       return { stdout: '  mission/task-test\n', status: 0 };
     },
+    // @ts-expect-error TS2322 Type '() => void' is not assignable to type 'LogFunc'.
     logFn: () => {},
     squashTrailingBacklogNoiseIntoPreviousMissionFn: () => {
       throw new Error('should not squash when branch exists');
@@ -390,12 +408,15 @@ test('ensureMissionBranch skips creation when branch already exists', () => {
 test('ensureMissionBranch creates the mission branch from the recorded feature base', () => {
   const gitCalls = [];
   ensureMissionBranch('/repo', 'mission/task-test', {
+    // @ts-expect-error TS2322 Type '(args: string[]) => { stdout: string; status?: undefined; stderr?: undefin
     gitFn(args) {
       gitCalls.push(args);
       if (args.includes('--list')) return { stdout: '' };
       return { status: 0, stdout: '', stderr: '' };
     },
+    // @ts-expect-error TS2322 Type '() => void' is not assignable to type 'LogFunc'.
     logFn: () => {},
+    // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(rootDir: string, gitRunner?: Funct
     squashTrailingBacklogNoiseIntoPreviousMissionFn: () => {},
     baseBranch: 'feat/x'
   });
@@ -418,6 +439,7 @@ test('ensureMissionBaseBranchRecorded inserts a machine-readable Base-Branch lin
     const missionFile = path.join(root, 'MISSION.md');
     fs.writeFileSync(missionFile, '# Mission: Example (task-test)\n\n## Goal\nDo the thing.\n');
 
+    // @ts-expect-error TS2322 Type '() => void' is not assignable to type 'LogFunc'.
     const changed = ensureMissionBaseBranchRecorded(missionFile, 'feat/x', { logFn: () => {} });
     assert.equal(changed, true);
 
@@ -437,11 +459,14 @@ test('ensureMissionBaseBranchRecorded is a no-op for a primary/detached launch a
     fs.writeFileSync(missionFile, '# Mission: Example (task-test)\n\n## Goal\n');
 
     // null base (primary or detached HEAD) writes nothing.
+    // @ts-expect-error TS2322 Type '() => void' is not assignable to type 'LogFunc'.
     assert.equal(ensureMissionBaseBranchRecorded(missionFile, null, { logFn: () => {} }), false);
     assert.ok(!fs.readFileSync(missionFile, 'utf8').includes('Base-Branch:'));
 
     // First record changes the file; second identical record is a no-op.
+    // @ts-expect-error TS2322 Type '() => void' is not assignable to type 'LogFunc'.
     assert.equal(ensureMissionBaseBranchRecorded(missionFile, 'develop', { logFn: () => {} }), true);
+    // @ts-expect-error TS2322 Type '() => void' is not assignable to type 'LogFunc'.
     assert.equal(ensureMissionBaseBranchRecorded(missionFile, 'develop', { logFn: () => {} }), false);
     const count = fs.readFileSync(missionFile, 'utf8').split('\n').filter(l => l === 'Base-Branch: develop').length;
     assert.equal(count, 1);
@@ -456,6 +481,7 @@ test('ensureMissionBaseBranchRecorded replaces a stale Base-Branch line in place
     const missionFile = path.join(root, 'MISSION.md');
     fs.writeFileSync(missionFile, '# Mission: Example\n\nBase-Branch: old-branch\n\n## Goal\n');
 
+    // @ts-expect-error TS2322 Type '() => void' is not assignable to type 'LogFunc'.
     assert.equal(ensureMissionBaseBranchRecorded(missionFile, 'feat/new', { logFn: () => {} }), true);
     const content = fs.readFileSync(missionFile, 'utf8');
     assert.ok(!content.includes('Base-Branch: old-branch'));
@@ -473,10 +499,12 @@ test('ensureWorktree creates worktree when target directory is absent', () => {
 
   ensureWorktree('/repo', '/repo-task-test', 'mission/task-test', {
     existsFn: () => false,
+    // @ts-expect-error TS2322 Type '(args: string[]) => { status: number; stdout: string; stderr: string; }' i
     gitFn: (args) => {
       gitCalls.push(args);
       return { status: 0, stdout: '', stderr: '' };
     },
+    // @ts-expect-error TS2322 Type '() => void' is not assignable to type 'LogFunc'.
     logFn: () => {}
   });
 
@@ -492,6 +520,7 @@ test('ensureWorktree ignores add error when target directory already exists', ()
       gitCalls.push(args);
       throw new Error('already exists');
     },
+    // @ts-expect-error TS2322 Type '() => void' is not assignable to type 'LogFunc'.
     logFn: () => {}
   });
 
@@ -507,8 +536,11 @@ test('ensureWorktree exits 1 when creating a missing worktree fails', () => {
     gitFn: () => {
       throw new Error('boom');
     },
+    // @ts-expect-error TS2322 Type '() => void' is not assignable to type 'LogFunc'.
     logFn: () => {},
+    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
     errorFn: (msg) => errors.push(msg),
+    // @ts-expect-error TS2322 Type '(code: string | number) => void' is not assignable to type '(code?: string
     exitFn: (code) => { exitCode = code; }
   });
 
@@ -560,6 +592,7 @@ test('ensureRepoExists returns true when repo exists', () => {
 test('ensureRepoExists returns false and exits when repo is missing', () => {
   let exitCode = null;
   const errors = [];
+  // @ts-expect-error TS2345 Argument of type '(code: string | number) => void' is not assignable to paramete
   const result = ensureRepoExists('/definitely/missing/repo', (code) => { exitCode = code; }, (msg) => errors.push(msg));
   assert.equal(result, false);
   assert.equal(exitCode, 1);
@@ -570,10 +603,12 @@ test('ensureRepoExists returns false and exits when repo is missing', () => {
 
 test('bootstrapBacklogTask returns true when task already exists in worktree', () => {
   const result = bootstrapBacklogTask('/tmp/worktree', '/tmp/repo', 'task-exists', {
+    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/worktree/backlog/tasks/task-exists.md' }),
     gitFn: () => {
       throw new Error('git should not run for existing task');
     },
+    // @ts-expect-error TS2322 Type '() => void' is not assignable to type 'LogFunc'.
     logFn: () => {}
   });
 
@@ -593,14 +628,17 @@ test('bootstrapBacklogTask copies task from main repo and commits', () => {
 
   try {
     const result = bootstrapBacklogTask(worktree, mainRepo, 'task-test', {
+      // @ts-expect-error TS2322 Type '(_slug: string, repo: string) => { ok: false; taskFile?: undefined; } | {
       resolveTaskFileFn: (_slug, repo) => {
         if (repo === worktree) return { ok: false };
         return { ok: true, taskFile };
       },
+      // @ts-expect-error TS2322 Type '(args: string[]) => { status: number; stdout: string; stderr: string; }' i
       gitFn: (args) => {
         gitCalls.push(args);
         return { status: 0, stdout: '', stderr: '' };
       },
+      // @ts-expect-error TS2322 Type '() => void' is not assignable to type 'LogFunc'.
       logFn: () => {}
     });
     assert.equal(result, true);
@@ -623,11 +661,14 @@ test('bootstrapBacklogTask returns false when bootstrap commit fails', () => {
 
   try {
     const result = bootstrapBacklogTask(worktree, mainRepo, 'task-test', {
+      // @ts-expect-error TS2322 Type '{ ok: false; taskFile?: undefined; } | { ok: true; taskFile: string; }' is
       resolveTaskFileFn: (_slug, repo) => repo === worktree ? { ok: false } : { ok: true, taskFile },
+      // @ts-expect-error TS2322 Type '(args: string[]) => { status: number; stdout: string; stderr: string; }' i
       gitFn: (args) => {
         if (args.includes('commit')) throw new Error('commit failed');
         return { status: 0, stdout: '', stderr: '' };
       },
+      // @ts-expect-error TS2322 Type '() => void' is not assignable to type 'LogFunc'.
       logFn: () => {}
     });
 
@@ -639,10 +680,12 @@ test('bootstrapBacklogTask returns false when bootstrap commit fails', () => {
 
 test('bootstrapBacklogTask returns false when task missing in main repo', () => {
   const result = bootstrapBacklogTask('/tmp/worktree', '/tmp/repo', 'task-missing', {
+    // @ts-expect-error TS2322 Type '{ ok: false; }' is not assignable to type '{ ok: boolean; taskFile: string
     resolveTaskFileFn: () => ({ ok: false }),
     gitFn: () => {
       throw new Error('git should not run when task is missing');
     },
+    // @ts-expect-error TS2322 Type '() => void' is not assignable to type 'LogFunc'.
     logFn: () => {}
   });
 
@@ -656,7 +699,9 @@ test('bootstrapBacklogTask creates a synthetic unknown-classification task when 
 
   try {
     const ok = bootstrapBacklogTask(worktree, '/tmp/repo', 'adhoc-sample', {
+      // @ts-expect-error TS2322 Type '{ ok: false; reason: string; }' is not assignable to type '{ ok: boolean;
       resolveTaskFileFn: () => ({ ok: false, reason: 'missing' }),
+      // @ts-expect-error TS2741 Property 'signal' is missing in type '{ status: number; stdout: string; stderr:
       gitFn: () => ({ status: 0, stdout: '', stderr: '' }),
       syntheticTask: {
         id: 'ADHOC-SAMPLE-1234ABCD',
@@ -664,7 +709,9 @@ test('bootstrapBacklogTask creates a synthetic unknown-classification task when 
         intent: 'create sample output',
         source: 'synthetic-free-text',
       },
+      // @ts-expect-error TS2322 Type '() => void' is not assignable to type 'LogFunc'.
       logFn: () => {},
+      // @ts-expect-error TS2322 Type '() => void' is not assignable to type 'LogFunc'.
       errorFn: () => {}
     });
 
@@ -729,6 +776,7 @@ test('enforceDraftCommitSafety creates fallback commit with dirty entries', () =
     slug: 'task-test',
     worktree: '/tmp/wt',
     dirtyEntries: [' M missions/task-test/MISSION.md', '?? notes.txt'],
+    // @ts-expect-error TS2322 Type '(args: string[]) => { status: number; stdout: string; stderr: string; }' i
     gitImpl(args) {
       gitCalls.push(args);
       return { status: 0, stdout: '', stderr: '' };
@@ -746,6 +794,7 @@ test('enforceDraftCommitSafety auto-resolves mission-specific conflicts with --t
     slug: 'task-test',
     worktree: '/tmp/wt',
     dirtyEntries: ['UU missions/task-test/MISSION.md'],
+    // @ts-expect-error TS2322 Type '(args: string[]) => { status: number; stdout: string; stderr: string; }' i
     gitImpl(args) {
       gitCalls.push(args);
       return { status: 0, stdout: '', stderr: '' };
@@ -761,6 +810,7 @@ test('enforceDraftCommitSafety throws on shared-file conflicts', () => {
       slug: 'task-test',
       worktree: '/tmp/wt',
       dirtyEntries: ['DD shared-file.txt'],
+      // @ts-expect-error TS2741 Property 'signal' is missing in type '{ status: number; stdout: string; stderr:
       gitImpl: () => ({ status: 0, stdout: '', stderr: '' })
     }),
     /shared-file conflicts: shared-file\.txt/
@@ -773,6 +823,7 @@ test('enforceDraftCommitSafety throws when fallback commit fails', () => {
       slug: 'task-test',
       worktree: '/tmp/wt',
       dirtyEntries: [' M docs/missions/2026/task-test/MISSION.md'],
+      // @ts-expect-error TS2322 Type '(args: string[]) => { status: number; stdout: string; stderr: string; }' i
       gitImpl(args) {
         if (args.includes('commit')) return { status: 1, stdout: '', stderr: 'no changes' };
         return { status: 0, stdout: '', stderr: '' };
@@ -788,6 +839,7 @@ test('enforceDraftCommitSafety throws when the mission backlog task is deleted',
       slug: 'task-test',
       worktree: '/tmp/wt',
       dirtyEntries: [' D backlog/tasks/task-test.md'],
+      // @ts-expect-error TS2741 Property 'signal' is missing in type '{ status: number; stdout: string; stderr:
       gitImpl: () => ({ status: 0, stdout: '', stderr: '' })
     }),
     /deletion of the mission backlog task/
@@ -800,6 +852,7 @@ test('enforceDraftCommitSafety throws when the mission backlog task is renamed a
       slug: 'task-test',
       worktree: '/tmp/wt',
       dirtyEntries: ['R  backlog/tasks/task-test.md -> backlog/drafts/task-test.md'],
+      // @ts-expect-error TS2741 Property 'signal' is missing in type '{ status: number; stdout: string; stderr:
       gitImpl: () => ({ status: 0, stdout: '', stderr: '' })
     }),
     /rename\/move of the mission backlog task/
@@ -816,6 +869,7 @@ test('enforceDraftCommitSafety stages git-quoted paths from the task-1218 transc
       ' M server/build.gradle.kts',
       '?? docs/missions/2026/task-1207/'
     ],
+    // @ts-expect-error TS2322 Type '(args: string[]) => { status: number; stdout: string; stderr: string; }' i
     gitImpl(args) {
       gitCalls.push(args);
       return { status: 0, stdout: '', stderr: '' };
@@ -850,6 +904,7 @@ test('enforceDraftCommitSafety stages a rename with quoted source and destinatio
     slug: 'task-1218',
     worktree: '/tmp/wt',
     dirtyEntries: ['R  "docs/missions/2026/task-1218/old name.md" -> "docs/missions/2026/task-1218/new name.md"'],
+    // @ts-expect-error TS2322 Type '(args: string[]) => { status: number; stdout: string; stderr: string; }' i
     gitImpl(args) {
       gitCalls.push(args);
       return { status: 0, stdout: '', stderr: '' };
@@ -875,6 +930,7 @@ test('enforceDraftCommitSafety stages a quoted path containing parentheses and s
     slug: 'task-1218',
     worktree: '/tmp/wt',
     dirtyEntries: ['?? "web-client/src/components/Price (legacy) & co.tsx"'],
+    // @ts-expect-error TS2322 Type '(args: string[]) => { status: number; stdout: string; stderr: string; }' i
     gitImpl(args) {
       gitCalls.push(args);
       return { status: 0, stdout: '', stderr: '' };
@@ -896,6 +952,7 @@ test('enforceDraftCommitSafety decodes octal-escaped non-ASCII bytes in quoted p
     slug: 'task-1218',
     worktree: '/tmp/wt',
     dirtyEntries: ['?? "docs/missions/2026/task-1218/sm\\303\\245tt.md"'],
+    // @ts-expect-error TS2322 Type '(args: string[]) => { status: number; stdout: string; stderr: string; }' i
     gitImpl(args) {
       gitCalls.push(args);
       return { status: 0, stdout: '', stderr: '' };
@@ -914,6 +971,7 @@ test('enforceDraftCommitSafety still blocks deletion of a quoted mission task pa
       slug: 'task-1207',
       worktree: '/tmp/wt',
       dirtyEntries: [' D "backlog/tasks/task-1207 - add-automatic-pricing-functionality-to-BE-Web.md"'],
+      // @ts-expect-error TS2741 Property 'signal' is missing in type '{ status: number; stdout: string; stderr:
       gitImpl: () => ({ status: 0, stdout: '', stderr: '' })
     }),
     /deletion of the mission backlog task: backlog\/tasks\/task-1207 - add-automatic-pricing-functionality-to-BE-Web\.md/
@@ -937,6 +995,7 @@ test('recordDraftImplementer supplies the mission worktree to the shared transit
       taskResolution: { ok: true, taskFile },
       slug: 'task-086',
       worktree,
+      // @ts-expect-error TS2322 Type '(message: string) => void' is not assignable to type 'LogFunc'.
       log(message) { logs.push(message); },
       getTaskStatusFn: () => 'active',
       transitionTaskFn(slug, status, options) { calls.push({ slug, status, options }); return true; }
@@ -1028,18 +1087,22 @@ test('runDraftCommand transitions task to backlog after setup completes', async 
       detectLaunchBaseBranchFn: () => null,
       ensureMissionBranchFn: () => {},
       ensureWorktreeFn: () => {},
+      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(targetWorktree: any, { logFn }?: {
       ensureGraphifyWorkspaceFn: () => {},
       ensureMissionFileFn: () => '/wt-tst/docs/missions/2026/task-tst/MISSION.md',
       bootstrapBacklogTaskFn: () => true,
       transitionTaskFn: (slug, status, opts) => { transitions.push({ slug, status, rootDir: opts.rootDir }); return true; },
       readAgentConfigOrExitFn: () => ({}),
       selectAgentFn: () => 'codex',
+      // @ts-expect-error TS2322 Type 'Promise<{ agent: string; result: { status: number; }; }>' is not assignabl
       startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
       recordDraftImplementerFn: () => {},
       enforceDraftCommitSafetyFn: () => false,
+      // @ts-expect-error TS2322 Type '{ ok: true; }' is not assignable to type '{ ok: boolean; classification: a
       validateDraftClassificationFn: () => ({ ok: true }),
       [normalizeKey]: () => ({ ok: true, [typeKey]: 'ai_sdlc' }),
       exitFn: (code) => { throw new Error(`unexpected exit ${code}`); },
+      // @ts-expect-error TS2322 Type '() => void' is not assignable to type 'LogFunc'.
       logFn: () => {},
       errorFn: (msg) => { throw new Error(`unexpected error: ${msg}`); }
     });
@@ -1071,18 +1134,22 @@ test('runDraftCommand transitions task to refined after draft agent succeeds and
       detectLaunchBaseBranchFn: () => null,
       ensureMissionBranchFn: () => {},
       ensureWorktreeFn: () => {},
+      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(targetWorktree: any, { logFn }?: {
       ensureGraphifyWorkspaceFn: () => {},
       ensureMissionFileFn: () => '/wt-tst/docs/missions/2026/task-tst/MISSION.md',
       bootstrapBacklogTaskFn: () => true,
       transitionTaskFn: (slug, status, opts) => { transitions.push({ slug, status, rootDir: opts.rootDir }); return true; },
       readAgentConfigOrExitFn: () => ({}),
       selectAgentFn: () => 'codex',
+      // @ts-expect-error TS2322 Type 'Promise<{ agent: string; result: { status: number; }; }>' is not assignabl
       startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
       recordDraftImplementerFn: () => {},
       enforceDraftCommitSafetyFn: () => false,
+      // @ts-expect-error TS2322 Type '{ ok: true; }' is not assignable to type '{ ok: boolean; classification: a
       validateDraftClassificationFn: () => ({ ok: true }),
       [normalizeKey]: () => ({ ok: true, [typeKey]: 'ai_sdlc' }),
       exitFn: (code) => { throw new Error(`unexpected exit ${code}`); },
+      // @ts-expect-error TS2322 Type '() => void' is not assignable to type 'LogFunc'.
       logFn: () => {},
       errorFn: (msg) => { throw new Error(`unexpected error: ${msg}`); }
     });
@@ -1115,17 +1182,22 @@ test('runDraftCommand does not transition to refined when draft agent exits non-
     detectLaunchBaseBranchFn: () => null,
     ensureMissionBranchFn: () => {},
     ensureWorktreeFn: () => {},
+    // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(targetWorktree: any, { logFn }?: {
     ensureGraphifyWorkspaceFn: () => {},
     ensureMissionFileFn: () => '/wt-tst/docs/missions/2026/task-tst/MISSION.md',
     bootstrapBacklogTaskFn: () => true,
     transitionTaskFn: (slug, status, opts) => { transitions.push({ slug, status }); return true; },
     readAgentConfigOrExitFn: () => ({}),
     selectAgentFn: () => 'codex',
+    // @ts-expect-error TS2322 Type 'Promise<{ agent: string; result: { status: number; }; }>' is not assignabl
     startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 1 } }),
     recordDraftImplementerFn: () => {},
     enforceDraftCommitSafetyFn: () => false,
+    // @ts-expect-error TS2322 Type '(code: string | number) => void' is not assignable to type '(code?: string
     exitFn: (code) => { exitCode = code; },
+    // @ts-expect-error TS2322 Type '() => void' is not assignable to type 'LogFunc'.
     logFn: () => {},
+    // @ts-expect-error TS2322 Type '() => void' is not assignable to type 'LogFunc'.
     errorFn: () => {}
   });
 
@@ -1147,18 +1219,23 @@ test('runDraftCommand does not transition to refined when safety harness throws'
     detectLaunchBaseBranchFn: () => null,
     ensureMissionBranchFn: () => {},
     ensureWorktreeFn: () => {},
+    // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(targetWorktree: any, { logFn }?: {
     ensureGraphifyWorkspaceFn: () => {},
     ensureMissionFileFn: () => '/wt-tst/docs/missions/2026/task-tst/MISSION.md',
     bootstrapBacklogTaskFn: () => true,
     transitionTaskFn: (slug, status, opts) => { transitions.push({ slug, status }); return true; },
     readAgentConfigOrExitFn: () => ({}),
     selectAgentFn: () => 'codex',
+    // @ts-expect-error TS2322 Type 'Promise<{ agent: string; result: { status: number; }; }>' is not assignabl
     startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
     recordDraftImplementerFn: () => {},
     normalizeDraftClassificationFn: () => ({ ok: true, classification: 'user_value' }),
     enforceDraftCommitSafetyFn: () => { throw new Error('shared-file conflicts: lib/common.js'); },
+    // @ts-expect-error TS2322 Type '(code: string | number) => void' is not assignable to type '(code?: string
     exitFn: (code) => { exitCode = code; },
+    // @ts-expect-error TS2322 Type '() => void' is not assignable to type 'LogFunc'.
     logFn: () => {},
+    // @ts-expect-error TS2322 Type '() => void' is not assignable to type 'LogFunc'.
     errorFn: () => {}
   });
 

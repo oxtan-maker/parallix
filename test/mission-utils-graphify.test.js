@@ -11,6 +11,7 @@ test('probeGraphifyAvailability and graphifyAvailable distinguish missing comman
   const missing = probeGraphifyAvailability({
     commandRunner: () => {
       const error = new Error('missing');
+      // @ts-expect-error TS2339 Property 'code' does not exist on type 'Error'.
       error.code = 'ENOENT';
       throw error;
     }
@@ -26,6 +27,7 @@ test('probeGraphifyAvailability and graphifyAvailable distinguish missing comman
   });
   assert.equal(failure.available, false);
   assert.equal(failure.reason, 'probe-failed');
+  // @ts-expect-error TS2339 Property 'message' does not exist on type 'unknown'.
   assert.match(failure.error.message, /permission denied/);
 });
 
@@ -35,6 +37,7 @@ test('updateGraphifyKnowledgeGraph logs missing, probe-failed, update-failed, an
     log: msg => logs.push(msg),
     commandRunner: () => {
       const error = new Error('missing');
+      // @ts-expect-error TS2339 Property 'code' does not exist on type 'Error'.
       error.code = 'ENOENT';
       throw error;
     }

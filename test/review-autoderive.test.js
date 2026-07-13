@@ -107,6 +107,7 @@ test('startReviewLoop prioritizes explicit implementer over backlog task', async
       return startReviewLoop(slug, {
         implementer: 'gemini',
         eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini'],
+        // @ts-expect-error TS2741 Property 'agent' is missing in type '{ supported: true; detail: string; }' but r
         workflowLauncherStatusFn: () => ({ supported: true, detail: 'mock' }),
         selectAgentFn: () => 'claude',
         dryRun: true

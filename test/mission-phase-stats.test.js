@@ -15,6 +15,7 @@ function rows() {
     { mission: 'task-1285', stage: 'review', provider: 'openai', model: 'gpt-5.4', reviewer_agent: 'codex', input_tokens: '800', output_tokens: '150', cached_tokens: '20', tool_calls: '3', duration_minutes: '6', closed: 'yes' },
     // Unrelated mission must not leak into the task-1285 breakdown.
     { mission: 'task-1248', stage: 'active', provider: 'opencode', model: 'custom', implementer_agent: 'custom', input_tokens: '0', output_tokens: '0', closed: 'yes' },
+  // @ts-expect-error TS2345 Argument of type '(row?: StatsRow, options?: NormalizeStatsRowOptions) => { date
   ].map(normalizeStatsRow);
 }
 
@@ -112,6 +113,7 @@ test('mission phase report review phase attributes to reviewer_agent, not implem
   // Review rows store reviewer_agent (set by recordReviewStats passing reviewer as implementer)
   const reviewRows = [
     { mission: 'task-1318', stage: 'review', provider: 'anthropic', model: 'claude-opus-4-8', implementer_agent: 'claude', reviewer_agent: 'claude', input_tokens: '800', output_tokens: '150', cached_tokens: '20', tool_calls: '3', duration_minutes: '6', closed: 'yes' },
+  // @ts-expect-error TS2345 Argument of type '(row?: StatsRow, options?: NormalizeStatsRowOptions) => { date
   ].map(normalizeStatsRow);
   const report = renderMissionPhaseReport(reviewRows, 'task-1318');
   // The review phase should show the reviewer's agent family (claude), not self-attributed
@@ -123,6 +125,7 @@ test('mission phase report review phase attributes to reviewer_agent, not implem
 test('mission phase report execute phase shows implementer_agent when set', () => {
   const execRows = [
     { mission: 'task-1318', stage: 'active', provider: 'openai', model: 'gpt-5.4', implementer_agent: 'codex', input_tokens: '4000', output_tokens: '900', cached_tokens: '300', tool_calls: '18', duration_minutes: '22', closed: 'yes' },
+  // @ts-expect-error TS2345 Argument of type '(row?: StatsRow, options?: NormalizeStatsRowOptions) => { date
   ].map(normalizeStatsRow);
   const report = renderMissionPhaseReport(execRows, 'task-1318');
   const execLine = report.split('\n').find(line => /\bexecute\b/.test(line));
@@ -134,6 +137,7 @@ test('mission phase report shows multiple follow-up rows when different agent fa
   const report = renderMissionPhaseReport([
     { mission: 'task-1342', stage: 'follow-up', provider: 'openai', model: 'gpt-5', implementer_agent: 'codex', input_tokens: '100', output_tokens: '10', closed: 'yes' },
     { mission: 'task-1342', stage: 'follow-up', provider: 'openai', model: 'gpt-5', implementer_agent: 'custom', input_tokens: '200', output_tokens: '20', closed: 'yes' },
+  // @ts-expect-error TS2345 Argument of type '(row?: StatsRow, options?: NormalizeStatsRowOptions) => { date
   ].map(normalizeStatsRow), 'task-1342');
   const followUpLines = report.split('\n').filter(line => /\bfollow-up\b/.test(line));
   assert.equal(followUpLines.length, 2);

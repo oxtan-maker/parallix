@@ -30,7 +30,7 @@ gate_static_analysis() {
   echo "=== Static Analysis Gate ==="
 
   # Stage 1: ESLint on all sources with flat config (no --ext, ignores handled by config)
-  echo "[1/3] Running ESLint..."
+  echo "[1/4] Running ESLint..."
   if ! npx --yes eslint --max-warnings 300 lib/ index.ts px.ts 2>&1; then
     echo "FAIL: ESLint reported errors"
     return 1
@@ -38,7 +38,7 @@ gate_static_analysis() {
   echo "PASS: ESLint clean"
 
   # Stage 2: TypeScript typecheck (emission mode)
-  echo "[2/3] Running npm run typecheck..."
+  echo "[2/4] Running npm run typecheck..."
   TSC_OUTPUT=$(npm run typecheck 2>&1 || true)
   BAD_ERRORS=$(echo "$TSC_OUTPUT" | grep "error TS" | grep -v "TS18003" || true)
   if [ -z "$BAD_ERRORS" ]; then
@@ -50,12 +50,23 @@ gate_static_analysis() {
   fi
 
   # Stage 3: Test-hygiene scanner
-  echo "[3/3] Running test-hygiene check..."
+  echo "[3/4] Running test-hygiene check..."
   if ! bash scripts/test-hygiene.sh; then
     echo "FAIL: test-hygiene scanner found violations"
     return 1
   fi
   echo "PASS: test-hygiene clean"
+
+  # Stage 4: Test typecheck (check-only project for test/**/*.js)
+  echo "[4/4] Running test typecheck..."
+  TEST_TSC_OUTPUT=$(npx tsc --noEmit --project tsconfig.test.json 2>&1 || true)
+  if [ -z "$TEST_TSC_OUTPUT" ]; then
+    echo "PASS: test typecheck clean"
+  else
+    echo "$TEST_TSC_OUTPUT"
+    echo "FAIL: test typecheck reported errors"
+    return 1
+  fi
 
   echo "=== Static Analysis Gate: ALL STAGES PASSED ==="
   return 0

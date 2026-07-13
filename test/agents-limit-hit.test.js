@@ -56,6 +56,7 @@ function installPathLaunchers(tmpRoot) {
   }
   process.env.PATH = `${binDir}${path.delimiter}${process.env.PATH}`;
   process.env.CODEX_HOME ||= path.join(tmpRoot, 'glm-codex-home');
+  // @ts-expect-error TS2322 Type 'boolean' is not assignable to type 'string'.
   setCommandPathProbe(name => fs.existsSync(path.join(binDir, name)));
 }
 
@@ -355,6 +356,7 @@ test('updateAgentBlock fails loudly on malformed agents.local.json instead of ov
 
     assert.throws(
       () => updateAgentBlock('codex', '2026-05-01 15', { targetPath }),
+      // @ts-expect-error TS2339 Property 'code' does not exist on type 'unknown'.
       (err) => err && err.code === 'WORKFLOW_AGENT_CONFIG_INVALID' && err.configPath === targetPath
     );
 
@@ -440,6 +442,7 @@ test('updateAgentBlock preserves malformed PARALLIX_HOME agents.local.json', () 
     process.chdir(missionWorktree);
     assert.throws(
       () => updateAgentBlock('custom', '2030-01-02 03', { targetPath }),
+      // @ts-expect-error TS2339 Property 'code' does not exist on type 'unknown'.
       (err) => err && err.code === 'WORKFLOW_AGENT_CONFIG_INVALID' && err.configPath === targetPath
     );
 

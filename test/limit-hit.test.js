@@ -58,6 +58,7 @@ test('findLimitHitMatch finds matching phrase in stdout', () => {
 });
 
 test('findLimitHitMatch returns null when no match', () => {
+  // @ts-expect-error TS2554 Expected 2 arguments, but got 3.
   const match = findLimitHitMatch('Hello world', ['claude'], 'stdout');
   assert.equal(match, null);
 });
@@ -225,6 +226,7 @@ test('detectLimitHit returns null when error is set (spawn error)', () => {
     stderr: '',
     status: null,
     signal: null,
+    // @ts-expect-error TS2559 Type 'Error' has no properties in common with type '{ code?: string; }'.
     error: new Error('ENOENT')
   });
   assert.equal(result, null);

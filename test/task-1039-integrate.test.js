@@ -80,6 +80,7 @@ test('integrate fails when slug is missing', (t) => {
   let errorLogged = false;
   console.error = () => { errorLogged = true; };
   
+  // @ts-expect-error TS2349 This expression is not callable.
   integrate([]);
   assert.ok(errorLogged);
   
@@ -95,6 +96,7 @@ test('integrate preflight failure stops execution', (t) => {
   let errorLogged = false;
   console.error = (msg) => { if (msg && msg.includes('Integration preflight failed')) errorLogged = true; };
   
+  // @ts-expect-error TS2349 This expression is not callable.
   integrate([TEST_SLUG]);
   assert.ok(errorLogged);
   
@@ -109,6 +111,7 @@ test('integrate dry-run mode', (t) => {
   let logLogged = false;
   console.log = (msg) => { if (msg && msg.includes('Dry run complete')) logLogged = true; };
   
+  // @ts-expect-error TS2349 This expression is not callable.
   integrate([TEST_SLUG, '--dry-run']);
   assert.ok(logLogged);
   
@@ -145,6 +148,7 @@ test('resolveConflictsForMission - merge check failed', (t) => {
   
   const result = integrate.resolveConflictsForMission(TEST_SLUG, 'docs', {
     resolveWorktreeFn: () => wt,
+    // @ts-expect-error TS2353 Object literal may only specify known properties, and 'getConflictFilesFn' does
     getConflictFilesFn: () => { throw new Error('git error'); },
     rootDir: FAKE_ROOT
   });
@@ -165,6 +169,7 @@ test('resolveConflictsForMission - shared vs mission-specific classification', (
   // Case 1: Shared file conflict
   const res1 = integrate.resolveConflictsForMission(TEST_SLUG, 'docs', {
     resolveWorktreeFn: () => wt,
+    // @ts-expect-error TS2353 Object literal may only specify known properties, and 'getConflictFilesFn' does
     getConflictFilesFn: () => ['workflow/lib/commands/integrate.js'],
     rootDir: FAKE_ROOT
   });
@@ -174,6 +179,7 @@ test('resolveConflictsForMission - shared vs mission-specific classification', (
   // Case 2: Mission-specific conflict
   const res2 = integrate.resolveConflictsForMission(TEST_SLUG, 'docs', {
     resolveWorktreeFn: () => wt,
+    // @ts-expect-error TS2353 Object literal may only specify known properties, and 'getConflictFilesFn' does
     getConflictFilesFn: () => [`docs/missions/2026/${TEST_SLUG}/CP-1.md`],
     rootDir: FAKE_ROOT
   });

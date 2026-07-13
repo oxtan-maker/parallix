@@ -8,6 +8,7 @@ const { findLastNonNoiseCommit } = require('../lib/core/mission-utils');
 
 function git(args, cwd) {
   const result = spawnSync('git', args, { cwd, encoding: 'utf8' });
+  // @ts-expect-error TS2339 Property 'code' does not exist on type 'Error'.
   if (result.error && !(result.error.code === 'EPERM' && result.status === 0)) {
     throw result.error;
   }

@@ -114,8 +114,10 @@ test('buildVibeInvocation merges env', () => {
   const { buildVibeInvocation } = require('../lib/agents/vibe');
   const inv = buildVibeInvocation({ prompt: 'test', worktree: '/tmp', env: { CUSTOM: 'value' } });
   assert.equal(inv.command, 'vibe');
+  // @ts-expect-error TS2339 Property 'CUSTOM' does not exist on type '{ VIBE_HOME: string; VIBE_ACTIVE_MODEL
   assert.equal(inv.options.env.CUSTOM, 'value');
   assert.equal(inv.options.env.VIBE_HOME, '/tmp/.workflow/vibe-home');
+  // @ts-expect-error TS2339 Property 'PATH' does not exist on type '{ VIBE_HOME: string; VIBE_ACTIVE_MODEL:
   assert.equal(inv.options.env.PATH, process.env.PATH);
 });
 

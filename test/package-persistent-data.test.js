@@ -21,6 +21,7 @@ function run(command, args, options = {}) {
     },
     ...options
   });
+  // @ts-expect-error TS2339 Property 'code' does not exist on type 'Error'.
   if (result.error && result.error.code === 'EPERM') {
     return result;
   }

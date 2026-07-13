@@ -30,6 +30,7 @@ const CLI_ENTRY = path.resolve(__dirname, '..', packageJson.bin.px);
 // explicitly (config route), so the smoke run never depends on the developer's
 // ambient PARALLIX_HOME/global state.
 const workflowConfig = require('../workflow.config.json');
+// @ts-expect-error TS2339 Property 'custom' does not exist on type '{ codex: string; }'.
 const CUSTOM_MODEL = workflowConfig?.adapters?.agents?.models?.custom;
 // Pi rejects placeholder credentials such as "dummy-key" before contacting a
 // provider. The smoke fixture uses a local vLLM endpoint, for which any
@@ -478,7 +479,9 @@ function runWorkflowAllowFail(repoRoot, env, args, timeout, options = {}) {
     fs.closeSync(stdoutFd);
     fs.closeSync(stderrFd);
   }
+  // @ts-expect-error TS2322 Type 'string' is not assignable to type 'NonSharedBuffer'.
   result.stdout = fs.existsSync(stdoutPath) ? fs.readFileSync(stdoutPath, 'utf8') : '';
+  // @ts-expect-error TS2322 Type 'string' is not assignable to type 'NonSharedBuffer'.
   result.stderr = fs.existsSync(stderrPath) ? fs.readFileSync(stderrPath, 'utf8') : '';
   fs.rmSync(stdoutPath, { force: true });
   fs.rmSync(stderrPath, { force: true });
@@ -550,7 +553,9 @@ function runRealAgentSmoke(runner) {
   if (runner === 'pi') {
     // Pin both Pi's executable and mutable agent state to the disposable
     // fixture. The launcher resolves PI_BIN before NVM/PATH fallbacks.
+    // @ts-expect-error TS2339 Property 'PI_BIN' does not exist on type '{ FORCE_COLOR: string; PRIMARY_WORKTRE
     env.PI_BIN = path.join(repo.binDir, 'pi');
+    // @ts-expect-error TS2339 Property 'PI_CODING_AGENT_DIR' does not exist on type '{ FORCE_COLOR: string; PR
     env.PI_CODING_AGENT_DIR = repo.piAgentHome;
   }
   // Drop the inherited PWD: opencode trusts PWD over the real cwd for project
@@ -558,6 +563,7 @@ function runRealAgentSmoke(runner) {
   // the launcher child attach to that project instead of the throwaway repo —
   // colliding with any concurrently running opencode sessions (observed as
   // SQLite WAL contention and as the child hanging at exit until SIGTERM).
+  // @ts-expect-error TS2339 Property 'PWD' does not exist on type '{ FORCE_COLOR: string; PRIMARY_WORKTREE:
   delete env.PWD;
 
   try {
@@ -600,6 +606,7 @@ function runRealAgentSmoke(runner) {
     }
 
     assert.match(
+      // @ts-expect-error TS2769 No overload matches this call.
       draftResult.stdout,
       /Draft agent family: custom/,
       '[parallix-workflow-failure] expected the real run to select the custom agent family'
@@ -642,6 +649,7 @@ function runRealAgentSmoke(runner) {
     // SC5: telemetry/session metadata must be structurally sane (a real
     // provider/model/numeric shape). Parse the draft stats line to verify
     // the agent actually did work (non-zero tokens or tool calls).
+    // @ts-expect-error TS2339 Property 'match' does not exist on type 'NonSharedBuffer'.
     const statsMatch = draftResult.stdout.match(
       /Draft stats recorded: \S+ stage=draft provider=(\S+) model=(\S+) input_tokens=(\d+) tool_calls=(\d+)/
     );
@@ -761,6 +769,7 @@ function runRealAgentSmoke(runner) {
     );
 
     assert.match(
+      // @ts-expect-error TS2769 No overload matches this call.
       activeResult.stdout,
       /Execute agent \(custom\)/,
       '[parallix-workflow-failure] expected active phase to select the custom agent family'

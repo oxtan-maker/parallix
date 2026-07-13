@@ -268,6 +268,7 @@ test('createToken reports API failures and missing token payloads', () => {
       data: { message: 'denied' },
     };
   });
+  // @ts-expect-error TS18047 'seenBody' is possibly 'null'.
   assert.deepEqual(seenBody.scopes, ['write:user', 'write:repository', 'write:issue', 'write:organization']);
   assert.equal(result.ok, false);
   assert.match(result.error, /HTTP 401/);
@@ -605,7 +606,9 @@ test('promptLine supports visible and hidden prompts', async () => {
   }));
 
   try {
+    // @ts-expect-error TS2740 Type '{ write(chunk: any, _encoding: any, cb: any): boolean; }' is missing the f
     const visible = await require('../lib/tools/setup-review').promptLine('Prompt: ', { output });
+    // @ts-expect-error TS2740 Type '{ write(chunk: any, _encoding: any, cb: any): boolean; }' is missing the f
     const hidden = await require('../lib/tools/setup-review').promptLine('Secret: ', { hidden: true, output });
     assert.equal(visible, 'visible');
     assert.equal(hidden, 'secret');
@@ -746,6 +749,7 @@ test('bootstrapReviewSurface reports local validation and downstream setup failu
       agentPasswords: [],
     }, { log: () => {}, forgejoHome });
     assert.equal(result.ok, false);
+    // @ts-expect-error TS2339 Property 'error' does not exist on type '{ ok: boolean; error: string; statusCod
     assert.match(result.error, /must define adapters.review.baseUrl/);
 
     result = await bootstrapReviewSurface(root, {
@@ -756,6 +760,7 @@ test('bootstrapReviewSurface reports local validation and downstream setup failu
       agentPasswords: [],
     }, { log: () => {}, forgejoHome });
     assert.equal(result.ok, false);
+    // @ts-expect-error TS2339 Property 'error' does not exist on type '{ ok: boolean; error: string; statusCod
     assert.match(result.error, /Password is required/);
 
     result = await bootstrapReviewSurface(root, {
@@ -770,6 +775,7 @@ test('bootstrapReviewSurface reports local validation and downstream setup failu
       requestFn: () => ({ ok: false, statusCode: 401, data: { message: 'denied' } }),
     });
     assert.equal(result.ok, false);
+    // @ts-expect-error TS2339 Property 'error' does not exist on type '{ ok: boolean; error: string; statusCod
     assert.match(result.error, /token creation failed/);
 
     result = await bootstrapReviewSurface(root, {
@@ -800,8 +806,11 @@ test('bootstrapReviewSurface reports local validation and downstream setup failu
     assert.equal(result.ok, true);
     assert.equal(fs.readFileSync(path.join(forgejoHome, 'tokens', 'magnus'), 'utf8').trim(), 'owner-token');
     assert.equal(fs.existsSync(path.join(forgejoHome, 'tokens', 'codex')), false);
+    // @ts-expect-error TS2339 Property 'warnings' does not exist on type '{ ok: boolean; error: string; status
     assert.equal(result.warnings.length, 1);
+    // @ts-expect-error TS2339 Property 'warnings' does not exist on type '{ ok: boolean; error: string; status
     assert.equal(result.warnings[0].user, 'codex');
+    // @ts-expect-error TS2339 Property 'warnings' does not exist on type '{ ok: boolean; error: string; status
     assert.match(result.warnings[0].error, /token creation failed for codex/);
   });
 });
@@ -1110,6 +1119,7 @@ test('bootstrapReviewSurface non-interactive returns error when no owner token e
       });
 
       assert.equal(result.ok, false);
+      // @ts-expect-error TS2339 Property 'error' does not exist on type '{ ok: boolean; error: string; statusCod
       assert.ok(result.error.includes('No owner token found'));
     } finally {
       if (previousForgejoHome) {
@@ -1158,8 +1168,11 @@ test('bootstrapReviewSurface non-interactive reports agent token failure via war
       });
 
       assert.equal(result.ok, false);
+      // @ts-expect-error TS2339 Property 'warnings' does not exist on type '{ ok: boolean; error: string; status
       assert.equal(result.warnings.length, 1);
+      // @ts-expect-error TS2339 Property 'warnings' does not exist on type '{ ok: boolean; error: string; status
       assert.equal(result.warnings[0].user, 'custom');
+      // @ts-expect-error TS2339 Property 'error' does not exist on type '{ ok: boolean; error: string; statusCod
       assert.match(result.error, /custom: token creation via owner token failed/);
     } finally {
       if (previousForgejoHome) {

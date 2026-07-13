@@ -53,6 +53,7 @@ function installPathLaunchers(tmpRoot) {
   }
   process.env.PATH = `${binDir}${path.delimiter}${process.env.PATH}`;
   process.env.CODEX_HOME ||= path.join(tmpRoot, 'codex-home');
+  // @ts-expect-error TS2322 Type 'boolean' is not assignable to type 'string'.
   setCommandPathProbe(name => fs.existsSync(path.join(binDir, name)));
 }
 
@@ -135,7 +136,9 @@ test('startAgent review fallback selects vibe when claude hits limit and review 
         detectLimitHitFn,
         updateAgentBlockFn,
         selectAgentFn,
+        // @ts-expect-error TS1117 An object literal cannot have multiple properties with the same name.
         isAgentBlockedFn: () => false,
+        // @ts-expect-error TS2353 Object literal may only specify known properties, and 'config' does not exist in
         config: configWithoutReview,
         log: () => {}
       });
@@ -195,7 +198,9 @@ test('startAgent act-on-review fallback selects vibe when implementer hits limit
         detectLimitHitFn,
         updateAgentBlockFn,
         selectAgentFn,
+        // @ts-expect-error TS1117 An object literal cannot have multiple properties with the same name.
         isAgentBlockedFn: () => false,
+        // @ts-expect-error TS2353 Object literal may only specify known properties, and 'config' does not exist in
         config: configWithoutActOnReview,
         log: () => {}
       });

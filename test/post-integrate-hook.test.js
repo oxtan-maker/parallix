@@ -94,8 +94,11 @@ test('runPostIntegrateHook runs the configured command from the base worktree wi
 
   assert.equal(capturedCmd, 'bash');
   assert.deepEqual(capturedArgs, ['-lc', './scripts/refresh-px.sh']);
+  // @ts-expect-error TS18048 'capturedOptions' is possibly 'undefined'.
   assert.equal(capturedOptions.cwd, '/repo');
+  // @ts-expect-error TS18048 'capturedOptions' is possibly 'undefined'.
   assert.equal(capturedOptions.env.INTEGRATE_HOOK_SLUG, 'task-1402');
+  // @ts-expect-error TS18048 'capturedOptions' is possibly 'undefined'.
   assert.equal(capturedOptions.env.INTEGRATE_HOOK_VARIANT, 'variant-b');
   assert.deepEqual(result, {
     ran: true,

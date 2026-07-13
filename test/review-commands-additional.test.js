@@ -8,7 +8,9 @@ test('pushRound exits when no forgejoUser', () => {
   pushRound('test-slug', {
     resolveWorktreeFn: () => mockRootDir,
     readReviewStateFn: () => null,
+    // @ts-expect-error TS2322 Type '{ ok: false; }' is not assignable to type '{ ok: boolean; taskFile: string
     resolveTaskFileFn: () => ({ ok: false }),
+    // @ts-expect-error TS2322 Type '(code: number) => void' is not assignable to type '(_code: number) => neve
     exit: (code) => { exited = true; },
     log: () => {},
     error: () => {}
@@ -20,6 +22,7 @@ test('commentRound exits when no forgejoUser', () => {
   let exited = false;
   commentRound('test-slug', 'msg', {
     readReviewStateFn: () => null,
+    // @ts-expect-error TS2322 Type '(code: number) => void' is not assignable to type '(_code: number) => neve
     exit: (code) => { exited = true; },
     log: () => {},
     error: () => {},
@@ -32,6 +35,7 @@ test('submitReviewRound exits when no forgejoUser', () => {
   let exited = false;
   submitReviewRound('test-slug', 'approve', 'msg', {
     readReviewStateFn: () => null,
+    // @ts-expect-error TS2322 Type '(code: number) => void' is not assignable to type '(_code: number) => neve
     exit: (code) => { exited = true; },
     log: () => {},
     error: () => {},

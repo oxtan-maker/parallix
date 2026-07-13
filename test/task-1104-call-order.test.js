@@ -72,6 +72,7 @@ test('startReviewLoop follows the transition contract: review before reviewer, a
     
   };
 
+  // @ts-expect-error TS2345 Argument of type '{ isForgejoReviewEnabledFn: () => boolean; eligibleAgentsForSt
   await startReviewLoop(TEST_SLUG, baseOpts);
 
   // Expected sequence:
@@ -129,6 +130,7 @@ test('pushRound follows the transition contract: review before createPr', async 
     }
   };
 
+  // @ts-expect-error TS2345 Argument of type '{ resolveWorktreeFn: () => string; resolveTaskFileFn: () => {
   pushRound(TEST_SLUG, opts);
 
   const relevantEvents = events.filter(e => e.type === 'transition' || e.type === 'createPr');
@@ -251,6 +253,7 @@ test('startReviewLoop does not transition to review if rebase fails', async () =
     
   };
 
+  // @ts-expect-error TS2345 Argument of type '{ isForgejoReviewEnabledFn: () => boolean; eligibleAgentsForSt
   await startReviewLoop(TEST_SLUG, baseOpts);
 
   const reviewTransitions = events.filter(e => e.type === 'transition' && e.status === 'review');

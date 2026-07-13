@@ -337,7 +337,9 @@ function runWorkflow(repoRoot, env, args, timeout = 60000, { allowFailure = fals
     fs.closeSync(stdoutFd);
     fs.closeSync(stderrFd);
   }
+  // @ts-expect-error TS2322 Type 'string' is not assignable to type 'NonSharedBuffer'.
   result.stdout = fs.existsSync(stdoutPath) ? fs.readFileSync(stdoutPath, 'utf8') : '';
+  // @ts-expect-error TS2322 Type 'string' is not assignable to type 'NonSharedBuffer'.
   result.stderr = fs.existsSync(stderrPath) ? fs.readFileSync(stderrPath, 'utf8') : '';
   fs.rmSync(stdoutPath, { force: true });
   fs.rmSync(stderrPath, { force: true });

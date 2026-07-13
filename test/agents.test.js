@@ -50,6 +50,7 @@ for (const name of ['codex', 'claude', 'opencode', 'pi', 'vibe']) {
 
 test.before(() => {
   process.env.PATH = `${sharedLauncherBin}${path.delimiter}${originalPath}`;
+  // @ts-expect-error TS2322 Type 'boolean' is not assignable to type 'string'.
   setCommandPathProbe(name => fs.existsSync(path.join(sharedLauncherBin, name)));
 });
 
@@ -151,8 +152,10 @@ function withPathLaunchers(entries, run) {
 
 function withCommandPathProbe(available, run) {
   const availableSet = new Set(available);
+  // @ts-expect-error TS2322 Type 'boolean' is not assignable to type 'string'.
   setCommandPathProbe(name => availableSet.has(name));
   const restore = () => {
+    // @ts-expect-error TS2322 Type 'boolean' is not assignable to type 'string'.
     setCommandPathProbe(name => fs.existsSync(path.join(sharedLauncherBin, name)));
   };
   try {
@@ -958,6 +961,7 @@ test('startAgent injects FORGEJO_USER into subprocess env', async () => {
     prompt: 'Execute the mission.',
     worktree: '/tmp/mission-task-095',
     agent: 'codex',
+    // @ts-expect-error TS2353 Object literal may only specify known properties, and 'config' does not exist in
     config: {},
     isAgentBlockedFn: () => false
   });
@@ -988,6 +992,7 @@ test('startAgent merges caller-supplied env with FORGEJO_USER', async () => {
     worktree: '/tmp/mission-task-095',
     agent: 'codex',
     env: { SOME_CUSTOM_VAR: 'custom-value' },
+    // @ts-expect-error TS2353 Object literal may only specify known properties, and 'config' does not exist in
     config: {},
     isAgentBlockedFn: () => false
   });
@@ -1008,6 +1013,7 @@ test('startAgent harness identity wins over caller-supplied FORGEJO_USER', async
     worktree: '/tmp/mission-task-095',
     agent: 'codex',
     env: { FORGEJO_USER: 'wrong-identity' },
+    // @ts-expect-error TS2353 Object literal may only specify known properties, and 'config' does not exist in
     config: {},
     isAgentBlockedFn: () => false
   });
@@ -1020,6 +1026,7 @@ test('startAgent supports a function for prompt and calls it with chosen agent',
     prompt: (chosen) => `You are ${chosen}.`,
     worktree: '/tmp/mission-task-1051',
     agent: 'codex',
+    // @ts-expect-error TS2353 Object literal may only specify known properties, and 'config' does not exist in
     config: {},
     isAgentBlockedFn: () => false
   });
@@ -1082,6 +1089,7 @@ test('startAgent reroutes when the selected agent fails its health probe', async
 
 test('startAgent fails loudly when an unknown agent is requested', async () => {
   try {
+    // @ts-expect-error TS2345 Argument of type '{ agent: string; isAgentBlockedFn: () => boolean; }' is not as
     await startAgent('draft', {
       agent: 'unknown-agent-typo',
       isAgentBlockedFn: () => false

@@ -25,6 +25,7 @@ function writeLauncher(tmpRoot, name, body) {
 function createLauncherWithScript({
   tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-agent-script-')),
   name = 'script-launcher',
+  // @ts-expect-error TS2339 Property 'script' does not exist on type '{ tmpRoot?: string; name?: string; }'.
   script
 } = {}) {
   return writeLauncher(tmpRoot, name, script || 'process.exit(0);\n');
@@ -86,6 +87,7 @@ function fakeLauncher({
   sessionId = null,
   spawnError = null
 } = {}) {
+  // @ts-expect-error TS2339 Property 'prompt' does not exist on type '{ env?: {}; }'.
   return ({ prompt, worktree, env = {} } = {}) => ({
     invocation: {
       command,

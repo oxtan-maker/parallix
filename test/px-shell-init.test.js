@@ -17,6 +17,7 @@ import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 import { shellInit } from '../px.js';
 
+// @ts-expect-error TS1470 The 'import.meta' meta-property is not allowed in files which will build into Co
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pxJs = path.resolve(__dirname, '..', 'px.js');
 

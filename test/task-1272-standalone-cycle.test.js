@@ -166,15 +166,18 @@ test('startReviewLoop threads --mission override into the launched reviewer prom
       consumeReviewerArtifactsFn: async () => ({ consumed: true, ok: true, reviewState: 'APPROVED' })
     });
 
+    // @ts-expect-error TS2345 Argument of type '{ slug: string; implementer: string; reviewer: string; worktre
     await startReviewLoop('task-1272', opts);
 
     assert.ok(capturedPrompt, 'reviewer prompt should have been built');
     assert.ok(
+      // @ts-expect-error TS2339 Property 'includes' does not exist on type 'never'.
       capturedPrompt.includes(customMission),
       `launched reviewer prompt must reference the --mission override path; got missionPath context absent`
     );
     // Must NOT fall back to the slug-derived standard location.
     assert.ok(
+      // @ts-expect-error TS2339 Property 'includes' does not exist on type 'never'.
       !capturedPrompt.includes(missionPathForSlug(root, 'task-1272')),
       'override prompt must not also reference the slug-derived standard mission path'
     );
@@ -197,10 +200,12 @@ test('startReviewLoop uses the slug-derived mission path when --mission is absen
       consumeReviewerArtifactsFn: async () => ({ consumed: true, ok: true, reviewState: 'APPROVED' })
     });
 
+    // @ts-expect-error TS2345 Argument of type '{ slug: string; implementer: string; reviewer: string; worktre
     await startReviewLoop('task-1272', opts);
 
     assert.ok(capturedPrompt, 'reviewer prompt should have been built');
     assert.ok(
+      // @ts-expect-error TS2339 Property 'includes' does not exist on type 'never'.
       capturedPrompt.includes(missionPathForSlug(root, 'task-1272')),
       'absent --mission must resolve the slug-derived standard mission path'
     );
@@ -214,6 +219,7 @@ test('standalone review loop completes a first round to APPROVED with no Forgejo
       consumeReviewerArtifactsFn: async () => ({ consumed: true, ok: true, reviewState: 'APPROVED' })
     });
 
+    // @ts-expect-error TS2345 Argument of type '{ slug: string; implementer: string; reviewer: string; worktre
     await startReviewLoop('task-1272', opts);
 
     assert.deepEqual(exitCodes, [], `loop must not exit(1); errors=${errors.join(' | ')}`);
@@ -240,6 +246,7 @@ test('standalone loop survives REQUEST_CHANGES -> CHANGES_MADE -> APPROVED acros
       })
     });
 
+    // @ts-expect-error TS2345 Argument of type '{ slug: string; implementer: string; reviewer: string; worktre
     await startReviewLoop('task-1272', opts);
 
     assert.deepEqual(exitCodes, [], `multi-round loop must not exit(1); errors=${errors.join(' | ')}`);

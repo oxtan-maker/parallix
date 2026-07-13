@@ -4,6 +4,7 @@ const rebase = require('../lib/commands/rebase');
 
 test('rebase applies core.editor=true to initial rebase call', async () => {
   let capturedArgs = null;
+  // @ts-expect-error TS2349 This expression is not callable.
   await rebase(['task-1077'], {
     isForgejoReviewEnabledFn: () => false,
     inferSlugFn: () => 'task-1077',
@@ -24,12 +25,15 @@ test('rebase applies core.editor=true to initial rebase call', async () => {
   });
 
   assert.ok(capturedArgs, 'Args should be captured');
+  // @ts-expect-error TS2339 Property 'indexOf' does not exist on type 'never'.
   assert.ok(capturedArgs.indexOf('core.editor=true') < capturedArgs.indexOf('rebase'), 'core.editor=true should be before rebase');
+  // @ts-expect-error TS2339 Property 'indexOf' does not exist on type 'never'.
   assert.ok(capturedArgs.indexOf('merge.autoedit=no') < capturedArgs.indexOf('rebase'), 'merge.autoedit=no should be before rebase');
 });
 
 test('rebase applies core.editor=true to continueRebase calls', async () => {
   let capturedArgsList = [];
+  // @ts-expect-error TS2349 This expression is not callable.
   await rebase(['task-1077'], {
     isForgejoReviewEnabledFn: () => false,
     inferSlugFn: () => 'task-1077',

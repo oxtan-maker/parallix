@@ -71,6 +71,7 @@ test('installed tarball runtime does not trip the stale-build guard on a fresh, 
     const tarball = path.join(packDir, packed[0].filename);
 
     const installResult = run('npm', ['install', '-g', '--prefix', prefix, tarball], { tempHome: npmHome });
+    // @ts-expect-error TS2339 Property 'code' does not exist on type 'Error'.
     if (installResult.error && installResult.error.code === 'EPERM') {
       return;
     }

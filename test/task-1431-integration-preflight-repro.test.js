@@ -79,6 +79,7 @@ test('printIntegrationPreflight resolves classification from the mission base wo
     // context.baseWorktree and defaults to process.cwd() must fail.
     assert.notEqual(process.cwd(), root);
 
+    // @ts-expect-error TS2345 Argument of type '{ log: (line: any) => number; } & { readTokenFn: () => string;
     const result = printIntegrationPreflight(context, Object.assign({ log }, defaultPreflightOpts));
 
     const output = lines.join('\n');
@@ -95,6 +96,7 @@ test('printIntegrationPreflight still hard-fails on an ambiguous slug rather tha
     taskStatus: null
   });
 
+  // @ts-expect-error TS2345 Argument of type '{ log: (line: any) => number; } & { readTokenFn: () => string;
   const result = printIntegrationPreflight(context, Object.assign({ log }, defaultPreflightOpts));
 
   const output = lines.join('\n');
@@ -113,6 +115,7 @@ test('printIntegrationPreflight still warns and falls back to unknown classifica
     taskStatus: null
   });
 
+  // @ts-expect-error TS2345 Argument of type '{ log: (line: any) => number; } & { readTokenFn: () => string;
   const result = printIntegrationPreflight(context, Object.assign({ log }, defaultPreflightOpts));
 
   const output = lines.join('\n');
@@ -132,6 +135,7 @@ test('printIntegrationPreflight refuses to run with a null mission slug instead 
   });
 
   assert.throws(
+    // @ts-expect-error TS2345 Argument of type '{ log: (line: any) => number; } & { readTokenFn: () => string;
     () => printIntegrationPreflight(context, Object.assign({ log }, defaultPreflightOpts)),
     /non-null mission slug/
   );

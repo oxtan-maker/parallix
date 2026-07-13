@@ -41,14 +41,18 @@ test('SC1: --continue skip-check BLOCKED re-launches implementer instead of skip
       maxAttempts: 1,
       dryRun: false,
       maybeUpdateGraphifyBeforeReviewFn: () => {},
+      // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-1221-sc1.md' }),
       getTaskImplementerFn: () => null,
       readReviewStateFn: () => state,
       eligibleAgentsForStepFn: () => ['codex', 'custom'],
       selectAgentFn: () => 'codex',
+      // @ts-expect-error TS2322 Type 'boolean' is not assignable to type 'Promise<boolean>'.
       forgejoAvailableFn: () => true,
       getPrStatusFn: () => ({ exists: true, state: 'open', number: 208 }),
+      // @ts-expect-error TS2322 Type 'Promise<{ ok: true; }>' is not assignable to type 'Promise<{ ok: boolean;
       rebaseBeforeReviewRoundFn: async () => ({ ok: true }),
+      // @ts-expect-error TS2322 Type '(mode: string) => Promise<{ agent: string; }>' is not assignable to type '
       startAgentFn: async (mode) => {
         launches.push(mode);
         return { agent: 'custom' };
@@ -56,12 +60,16 @@ test('SC1: --continue skip-check BLOCKED re-launches implementer instead of skip
       consumeImplementerArtifactsFn: async () => ({ consumed: true, ok: true, disposition: 'CHANGES_MADE' }),
       transitionTaskFn: () => true,
       transitionVirtualFn: () => true,
+      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(slug: string, state: Record<string
       writeReviewStateFn: () => {},
+      // @ts-expect-error TS2739 Type '{ state: string; }' is missing the following properties from type 'Promise
       getLatestReviewForPrFn: () => ({ state: 'REQUEST_CHANGES' }),
       pollForReviewFn: async () => 'REQUEST_CHANGES',
       log: (msg) => logs.push(msg),
       error: (msg) => {},
+      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(_code: number) => never'.
       exit: () => {},
+      // @ts-expect-error TS2322 Type 'string' is not assignable to type 'Promise<string | Readonly<{ __isPollTim
       pollForDispositionFn: () => 'BLOCKED' // skip-check finds stale BLOCKED
     });
 
@@ -110,14 +118,18 @@ test('SC2: Re-launched implementer posts CHANGES_MADE → loop continues to next
       maxAttempts: 2,
       dryRun: false,
       maybeUpdateGraphifyBeforeReviewFn: () => {},
+      // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-1221-sc2.md' }),
       getTaskImplementerFn: () => null,
       readReviewStateFn: () => state,
       eligibleAgentsForStepFn: () => ['codex', 'custom'],
       selectAgentFn: () => 'codex',
+      // @ts-expect-error TS2322 Type 'boolean' is not assignable to type 'Promise<boolean>'.
       forgejoAvailableFn: () => true,
       getPrStatusFn: () => ({ exists: true, state: 'open', number: 208 }),
+      // @ts-expect-error TS2322 Type 'Promise<{ ok: true; }>' is not assignable to type 'Promise<{ ok: boolean;
       rebaseBeforeReviewRoundFn: async () => ({ ok: true }),
+      // @ts-expect-error TS2322 Type '(mode: string) => Promise<{ agent: string; }>' is not assignable to type '
       startAgentFn: async (mode) => {
         launches.push(mode);
         return { agent: 'custom' };
@@ -126,12 +138,17 @@ test('SC2: Re-launched implementer posts CHANGES_MADE → loop continues to next
       consumeReviewerArtifactsFn: async () => ({ consumed: true, ok: true, reviewState: 'REQUEST_CHANGES' }),
       transitionTaskFn: () => true,
       transitionVirtualFn: () => true,
+      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(slug: string, state: Record<string
       writeReviewStateFn: () => {},
+      // @ts-expect-error TS2739 Type '{ state: string; }' is missing the following properties from type 'Promise
       getLatestReviewForPrFn: () => ({ state: 'REQUEST_CHANGES' }),
+      // @ts-expect-error TS2322 Type 'string' is not assignable to type 'Promise<string | Readonly<{ __isPollTim
       pollForReviewFn: () => 'REQUEST_CHANGES',
       log: (msg) => logs.push(msg),
       error: (msg) => {},
+      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(_code: number) => never'.
       exit: () => {},
+      // @ts-expect-error TS2322 Type 'string' is not assignable to type 'Promise<string | Readonly<{ __isPollTim
       pollForDispositionFn: () => 'BLOCKED' // skip-check always finds stale BLOCKED
     });
 
@@ -182,14 +199,18 @@ test('SC3: Re-launched implementer still BLOCKED → loop stops with handoff', a
       maxAttempts: 1,
       dryRun: false,
       maybeUpdateGraphifyBeforeReviewFn: () => {},
+      // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-1221-sc3.md' }),
       getTaskImplementerFn: () => null,
       readReviewStateFn: () => state,
       eligibleAgentsForStepFn: () => ['codex', 'custom'],
       selectAgentFn: () => 'codex',
+      // @ts-expect-error TS2322 Type 'boolean' is not assignable to type 'Promise<boolean>'.
       forgejoAvailableFn: () => true,
       getPrStatusFn: () => ({ exists: true, state: 'open', number: 208 }),
+      // @ts-expect-error TS2322 Type 'Promise<{ ok: true; }>' is not assignable to type 'Promise<{ ok: boolean;
       rebaseBeforeReviewRoundFn: async () => ({ ok: true }),
+      // @ts-expect-error TS2322 Type '(mode: string) => Promise<{ agent: string; }>' is not assignable to type '
       startAgentFn: async (mode) => {
         launches.push(mode);
         return { agent: 'custom' };
@@ -202,14 +223,18 @@ test('SC3: Re-launched implementer still BLOCKED → loop stops with handoff', a
       consumeReviewerArtifactsFn: async () => ({ consumed: true, ok: true, reviewState: 'REQUEST_CHANGES' }),
       transitionTaskFn: () => true,
       transitionVirtualFn: () => true,
+      // @ts-expect-error TS2322 Type '(slug: string, s: Record<string, unknown> | ReviewState) => void' is not a
       writeReviewStateFn: (slug, s) => {
         loopState.disposition = s.disposition;
       },
+      // @ts-expect-error TS2739 Type '{ state: string; }' is missing the following properties from type 'Promise
       getLatestReviewForPrFn: () => ({ state: 'REQUEST_CHANGES' }),
       pollForReviewFn: async () => 'REQUEST_CHANGES',
       log: (msg) => logs.push(msg),
       error: (msg) => {},
+      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(_code: number) => never'.
       exit: () => {},
+      // @ts-expect-error TS2322 Type 'string' is not assignable to type 'Promise<string | Readonly<{ __isPollTim
       pollForDispositionFn: () => 'BLOCKED' // skip-check finds stale BLOCKED
     });
 
@@ -246,19 +271,25 @@ test('SC4: Non-continue (fresh start) path is unaffected', async () => {
       maxAttempts: 1,
       dryRun: true,
       maybeUpdateGraphifyBeforeReviewFn: () => {},
+      // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-1221-sc4.md' }),
       getTaskImplementerFn: () => null,
       readReviewStateFn: () => null,
       eligibleAgentsForStepFn: () => ['codex', 'custom'],
       selectAgentFn: () => 'codex',
+      // @ts-expect-error TS2322 Type 'boolean' is not assignable to type 'Promise<boolean>'.
       forgejoAvailableFn: () => true,
       getPrStatusFn: () => ({ exists: true, state: 'open' }),
+      // @ts-expect-error TS2322 Type 'Promise<{ ok: true; }>' is not assignable to type 'Promise<{ ok: boolean;
       rebaseBeforeReviewRoundFn: async () => ({ ok: true }),
+      // @ts-expect-error TS2322 Type 'Promise<{ agent: string; }>' is not assignable to type 'Promise<{ agent: s
       startAgentFn: async () => ({ agent: 'custom' }),
+      // @ts-expect-error TS2739 Type '{ state: string; }' is missing the following properties from type 'Promise
       getLatestReviewForPrFn: () => ({ state: 'REQUEST_CHANGES' }),
       pollForReviewFn: async () => 'REQUEST_CHANGES',
       log: (msg) => logs.push(msg),
       error: (msg) => {},
+      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(_code: number) => never'.
       exit: () => {}
     });
 
@@ -292,14 +323,18 @@ test('SC5: PARKED disposition also triggers re-launch (not just BLOCKED)', async
       maxAttempts: 1,
       dryRun: false,
       maybeUpdateGraphifyBeforeReviewFn: () => {},
+      // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-1221-sc5.md' }),
       getTaskImplementerFn: () => null,
       readReviewStateFn: () => state,
       eligibleAgentsForStepFn: () => ['codex', 'custom'],
       selectAgentFn: () => 'codex',
+      // @ts-expect-error TS2322 Type 'boolean' is not assignable to type 'Promise<boolean>'.
       forgejoAvailableFn: () => true,
       getPrStatusFn: () => ({ exists: true, state: 'open', number: 208 }),
+      // @ts-expect-error TS2322 Type 'Promise<{ ok: true; }>' is not assignable to type 'Promise<{ ok: boolean;
       rebaseBeforeReviewRoundFn: async () => ({ ok: true }),
+      // @ts-expect-error TS2322 Type '(mode: string) => Promise<{ agent: string; }>' is not assignable to type '
       startAgentFn: async (mode) => {
         launches.push(mode);
         return { agent: 'custom' };
@@ -307,12 +342,16 @@ test('SC5: PARKED disposition also triggers re-launch (not just BLOCKED)', async
       consumeImplementerArtifactsFn: async () => ({ consumed: true, ok: true, disposition: 'CHANGES_MADE' }),
       transitionTaskFn: () => true,
       transitionVirtualFn: () => true,
+      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(slug: string, state: Record<string
       writeReviewStateFn: () => {},
+      // @ts-expect-error TS2739 Type '{ state: string; }' is missing the following properties from type 'Promise
       getLatestReviewForPrFn: () => ({ state: 'REQUEST_CHANGES' }),
       pollForReviewFn: async () => 'REQUEST_CHANGES',
       log: (msg) => logs.push(msg),
       error: (msg) => {},
+      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(_code: number) => never'.
       exit: () => {},
+      // @ts-expect-error TS2322 Type 'string' is not assignable to type 'Promise<string | Readonly<{ __isPollTim
       pollForDispositionFn: () => 'PARKED' // skip-check finds stale PARKED
     });
 
@@ -357,23 +396,31 @@ test('Skip-check non-BLOCKED/PARKED disposition still skips (existing behaviour 
       maxAttempts: 1,
       dryRun: false,
       maybeUpdateGraphifyBeforeReviewFn: () => {},
+      // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-1221-skip-normal.md' }),
       getTaskImplementerFn: () => null,
       readReviewStateFn: () => state,
       eligibleAgentsForStepFn: () => ['codex', 'custom'],
       selectAgentFn: () => 'codex',
+      // @ts-expect-error TS2322 Type 'boolean' is not assignable to type 'Promise<boolean>'.
       forgejoAvailableFn: () => true,
       getPrStatusFn: () => ({ exists: true, state: 'open', number: 208 }),
+      // @ts-expect-error TS2322 Type 'Promise<{ ok: true; }>' is not assignable to type 'Promise<{ ok: boolean;
       rebaseBeforeReviewRoundFn: async () => ({ ok: true }),
+      // @ts-expect-error TS2322 Type 'Promise<{ agent: string; }>' is not assignable to type 'Promise<{ agent: s
       startAgentFn: async () => ({ agent: 'custom' }),
       consumeImplementerArtifactsFn: async () => ({ consumed: true, ok: true, disposition: 'CHANGES_MADE' }),
       transitionTaskFn: () => true,
       transitionVirtualFn: () => true,
+      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(slug: string, state: Record<string
       writeReviewStateFn: () => {},
+      // @ts-expect-error TS2739 Type '{ state: string; }' is missing the following properties from type 'Promise
       getLatestReviewForPrFn: () => ({ state: 'REQUEST_CHANGES' }),
       log: (msg) => logs.push(msg),
       error: (msg) => {},
+      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(_code: number) => never'.
       exit: () => {},
+      // @ts-expect-error TS2322 Type 'string' is not assignable to type 'Promise<string | Readonly<{ __isPollTim
       pollForDispositionFn: () => 'CHANGES_MADE' // skip-check finds non-blocking disposition
     });
 
@@ -413,14 +460,18 @@ test('SC1-Fix: Post-relaunch poll uses updated sinceIso, not stale state.started
       maxAttempts: 1,
       dryRun: false,
       maybeUpdateGraphifyBeforeReviewFn: () => {},
+      // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-1221-sc1-forge-race.md' }),
       getTaskImplementerFn: () => null,
       readReviewStateFn: () => state,
       eligibleAgentsForStepFn: () => ['codex', 'custom'],
       selectAgentFn: () => 'codex',
+      // @ts-expect-error TS2322 Type 'boolean' is not assignable to type 'Promise<boolean>'.
       forgejoAvailableFn: () => true,
       getPrStatusFn: () => ({ exists: true, state: 'open', number: 208 }),
+      // @ts-expect-error TS2322 Type 'Promise<{ ok: true; }>' is not assignable to type 'Promise<{ ok: boolean;
       rebaseBeforeReviewRoundFn: async () => ({ ok: true }),
+      // @ts-expect-error TS2322 Type '(mode: string) => Promise<{ agent: string; }>' is not assignable to type '
       startAgentFn: async (mode) => {
         launches.push(mode);
         return { agent: 'custom' };
@@ -434,11 +485,14 @@ test('SC1-Fix: Post-relaunch poll uses updated sinceIso, not stale state.started
       },
       transitionTaskFn: () => true,
       transitionVirtualFn: () => true,
+      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(slug: string, state: Record<string
       writeReviewStateFn: () => {},
+      // @ts-expect-error TS2739 Type '{ state: string; }' is missing the following properties from type 'Promise
       getLatestReviewForPrFn: () => ({ state: 'REQUEST_CHANGES' }),
       pollForReviewFn: async () => 'REQUEST_CHANGES',
       log: (msg) => logs.push(msg),
       error: (msg) => {},
+      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(_code: number) => never'.
       exit: () => {},
       pollForDispositionFn: async (prNumber, implementer, sinceIso, token, options) => {
         pollCalls.push({ sinceIso });

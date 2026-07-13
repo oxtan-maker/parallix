@@ -70,6 +70,7 @@ test('mission-start accepts isForgejoReviewEnabledFn option and skips PR check w
   const lines = [];
   let prStatusCalled = false;
 
+  // @ts-expect-error TS2349 This expression is not callable.
   const result = missionStart(['task-test'], {
     returnResult: true,
     cwdFn: () => '/tmp/project-task-test',
@@ -154,16 +155,20 @@ test('verifyReview skips Forgejo PR check when review provider is not forgejo', 
   verifyReview('task-test', false, {
     log: line => lines.push(line),
     error: line => lines.push(line),
+    // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(_code: number) => never'.
     exit: () => {},
     resolveWorktreeFn: () => '/tmp/project-task-test',
     findMissionDirFn: () => '/tmp/docs/missions/2026/task-test',
     getCurrentBranchFn: () => 'mission/task-test',
+    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     getTaskStatusFn: () => 'review',
     findMissionAreaFn: () => 'docs',
+    // @ts-expect-error TS2739 Type '{ status: number; }' is missing the following properties from type 'GitRes
     runFn: () => ({ status: 0 }),
     getAcceptanceCriteriaFn: () => [],
     formatMatrixSummaryFn: () => [],
+    // @ts-expect-error TS2739 Type 'any[]' is missing the following properties from type '{ step: string; agen
     buildAutonomousReviewMatrixFn: () => [],
     readReviewStateFn: () => null,
     cwdFn: () => '/tmp/project-task-test',
@@ -400,6 +405,7 @@ test('printIntegrationPreflight does not call Forgejo API helpers when context i
   
   const lines = [];
   fresh(context, {
+    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
     log: (line) => lines.push(line),
   });
   

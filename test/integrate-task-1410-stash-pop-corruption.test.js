@@ -25,6 +25,7 @@ function runGit(cwd, args, opts = {}) {
     const err = new Error(
       `git ${args.join(' ')} failed (exit ${result.status}): ${result.stderr.trim() || result.stdout.trim()}`
     );
+    // @ts-expect-error TS2339 Property 'result' does not exist on type 'Error'.
     err.result = result;
     throw err;
   }

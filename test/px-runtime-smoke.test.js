@@ -11,6 +11,7 @@ test('px runtime smoke test verifies node px.ts executes without module resoluti
     t.skip(`requires Node >= 24 (got ${process.version})`);
     return;
   }
+  // @ts-expect-error TS2367 This comparison appears to be unintentional because the types 'false | "strip"'
   if (process.features?.typescript !== true) {
     t.skip(`Node runtime lacks built-in TypeScript entrypoint support (process.features.typescript=${String(process.features?.typescript)})`);
     return;

@@ -14,6 +14,7 @@ test('runDraftCommand bails early if backlog task resolution is not ok', async (
     resolveMainRepoFn: () => '/tmp/main-repo',
     ensureRepoExistsFn: () => true,
     detectLaunchBaseBranchFn: () => null,
+    // @ts-expect-error TS2322 Type '{ ok: false; reason: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: false, reason: 'missing' }),
     reportTaskResolutionFn: (res, slug, log) => {
       errors.push(`Reported: ${res.reason} for ${slug}`);
@@ -21,10 +22,13 @@ test('runDraftCommand bails early if backlog task resolution is not ok', async (
     ensureMissionBranchFn: () => {
       ensureMissionBranchCalled = true;
     },
+    // @ts-expect-error TS2322 Type '(code: string | number) => void' is not assignable to type '(code?: string
     exitFn: (code) => {
       exitCode = code;
     },
+    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
     logFn: (msg) => logs.push(msg),
+    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
     errorFn: (msg) => errors.push(msg)
   });
 
@@ -43,6 +47,7 @@ test('runDraftCommand bails early if backlog integrity issues detected for the s
     resolveMainRepoFn: () => '/tmp/main-repo',
     ensureRepoExistsFn: () => true,
     detectLaunchBaseBranchFn: () => null,
+    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-093.md' }),
     checkBacklogIntegrityFn: () => [
       { file: 'backlog/tasks/task-093.md', type: 'id-mismatch', filenameId: 'TASK-093', frontmatterId: 'TASK-099' }
@@ -50,10 +55,13 @@ test('runDraftCommand bails early if backlog integrity issues detected for the s
     ensureMissionBranchFn: () => {
       ensureMissionBranchCalled = true;
     },
+    // @ts-expect-error TS2322 Type '(code: string | number) => void' is not assignable to type '(code?: string
     exitFn: (code) => {
       exitCode = code;
     },
+    // @ts-expect-error TS2322 Type '() => void' is not assignable to type 'LogFunc'.
     logFn: () => {},
+    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
     errorFn: (msg) => errors.push(msg)
   });
 

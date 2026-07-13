@@ -107,6 +107,7 @@ test('printIntegrationPreflight PR approval failures', (t) => {
     isForgejoReviewEnabledFn: () => true,
     readTokenFn: () => 'token',
     resolveTokenFileFn: () => 'file',
+    // @ts-expect-error TS1117 An object literal cannot have multiple properties with the same name.
     isForgejoReviewEnabledFn: () => true,
     getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
   });
@@ -118,6 +119,7 @@ test('printIntegrationPreflight PR approval failures', (t) => {
     isForgejoReviewEnabledFn: () => true,
     readTokenFn: () => 'token',
     resolveTokenFileFn: () => 'file',
+    // @ts-expect-error TS1117 An object literal cannot have multiple properties with the same name.
     isForgejoReviewEnabledFn: () => true,
     getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
   });
@@ -142,6 +144,7 @@ test('printIntegrationPreflight main-index-conflict-check failure', (t) => {
   const result = printIntegrationPreflight(context, {
     readTokenFn: () => 'token',
     resolveTokenFileFn: () => 'file',
+    // @ts-expect-error TS2322 Type '{ ok: false; error: string; }' is not assignable to type '{ ok: boolean; f
     getUnresolvedIndexConflictsFn: () => ({ ok: false, error: 'git error' })
   });
   

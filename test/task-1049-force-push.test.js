@@ -158,10 +158,14 @@ serialTest('review --push --force passes force:true to pushRound', async (t) => 
     error: () => {}
   };
 
+  // @ts-expect-error TS2349 This expression is not callable.
   await review(['task-1049', '--push', '--force'], options);
+  // @ts-expect-error TS18047 'pushRoundArgs' is possibly 'null'.
   assert.strictEqual(pushRoundArgs.force, true);
 
+  // @ts-expect-error TS2349 This expression is not callable.
   await review(['task-1049', '--push'], options);
+  // @ts-expect-error TS18047 'pushRoundArgs' is possibly 'null'.
   assert.strictEqual(pushRoundArgs.force, false);
 });
 
@@ -177,10 +181,14 @@ serialTest('handoff --force passes force:true to performHandoff', async (t) => {
   };
 
   try {
+    // @ts-expect-error TS2349 This expression is not callable.
     await handoffCommand(['task-1049', '--force']);
+    // @ts-expect-error TS18047 'performHandoffArgs' is possibly 'null'.
     assert.strictEqual(performHandoffArgs.force, true);
 
+    // @ts-expect-error TS2349 This expression is not callable.
     await handoffCommand(['task-1049']);
+    // @ts-expect-error TS18047 'performHandoffArgs' is possibly 'null'.
     assert.strictEqual(performHandoffArgs.force, false);
   } finally {
     handoffCommand.performHandoff = originalPerformHandoff;
@@ -219,7 +227,9 @@ serialTest('rebase --push calls createPrFn with forceWithLease:true on success',
     error: () => {}
   };
 
+  // @ts-expect-error TS2349 This expression is not callable.
   await rebase(['task-1049', '--push'], options);
+  // @ts-expect-error TS18047 'createPrOptions' is possibly 'null'.
   assert.strictEqual(createPrOptions.forceWithLease, true);
 });
 
@@ -252,6 +262,7 @@ serialTest('rebase without --push does NOT call createPrFn', async (t) => {
     error: () => {}
   };
 
+  // @ts-expect-error TS2349 This expression is not callable.
   await rebase(['task-1049'], options);
   assert.strictEqual(createPrCalled, false);
 });
@@ -314,10 +325,12 @@ serialTest('rebase --push preserves push and dependencies in recursive calls (ch
   };
 
   // Run with --push
+  // @ts-expect-error TS2349 This expression is not callable.
   await rebase(['task-1049', '--push'], options);
   
   assert.strictEqual(rebaseAttempts, 2, 'Should have attempted rebase continue twice');
   assert.ok(createPrOptions, 'createPrFn should have been called');
+  // @ts-expect-error TS2339 Property 'forceWithLease' does not exist on type 'never'.
   assert.strictEqual(createPrOptions.forceWithLease, true, 'Should have preserved forceWithLease');
 });
 
@@ -353,6 +366,7 @@ serialTest('rebase --push does NOT push if agent returns success but rebase is s
     error: () => {}
   };
 
+  // @ts-expect-error TS2349 This expression is not callable.
   await rebase(['task-1049', '--push'], options);
   assert.strictEqual(createPrCalled, false, 'Should not have pushed because rebase was still in progress');
 });
@@ -384,6 +398,7 @@ serialTest('rebase --push does NOT push if git rebase returns 0 but --show-curre
     error: () => {}
   };
 
+  // @ts-expect-error TS2349 This expression is not callable.
   await rebase(['task-1049', '--push'], options);
   assert.strictEqual(createPrCalled, false, 'Should not have pushed because rebase --show-current was non-empty');
 });
@@ -451,6 +466,7 @@ serialTest('rebase --push ignores FORGEJO_USER and falls back to task identity',
       error: () => {}
     };
 
+    // @ts-expect-error TS2349 This expression is not callable.
     await rebase(['task-1049', '--push'], options);
     assert.strictEqual(resolvedUser, 'backlog-agent', 'Should have resolved user from backlog identity');
   } finally {

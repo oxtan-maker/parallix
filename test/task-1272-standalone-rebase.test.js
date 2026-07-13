@@ -55,6 +55,7 @@ test('rebaseBeforeReviewRound commits safe artifacts and skips rebase when Forge
     const result = await rebaseBeforeReviewRound(slug, {
       worktree: root,
       runFn,
+      // @ts-expect-error TS2741 Property 'signal' is missing in type '{ status: number; stdout: string; stderr:
       gitFn: (args) => runGit(root, args),
       isForgejoReviewEnabledFn: () => false,
       log: m => logs.push(m)
@@ -92,6 +93,7 @@ test('rebaseBeforeReviewRound still blocks on unsafe dirty files in standalone m
     const result = await rebaseBeforeReviewRound(slug, {
       worktree: root,
       runFn,
+      // @ts-expect-error TS2741 Property 'signal' is missing in type '{ status: number; stdout: string; stderr:
       gitFn: (args) => runGit(root, args),
       isForgejoReviewEnabledFn: () => false,
       error: m => errors.push(m)

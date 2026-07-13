@@ -43,6 +43,7 @@ for (const name of ['codex', 'claude', 'opencode', 'vibe']) {
 function withSharedLaunchers(run) {
   const previousPath = process.env.PATH;
   process.env.PATH = `${sharedLauncherBin}${path.delimiter}${previousPath}`;
+  // @ts-expect-error TS2322 Type 'boolean' is not assignable to type 'string'.
   setCommandPathProbe(name => fs.existsSync(path.join(sharedLauncherBin, name)));
   const cleanup = () => {
     process.env.PATH = previousPath;

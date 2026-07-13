@@ -136,6 +136,7 @@ test('transitionTo rejects transitions from approved', () => {
 });
 
 test('normalizeReviewPhase repairs the rewiewing typo to reviewing', () => {
+  // @ts-expect-error TS2554 Expected 2 arguments, but got 1.
   assert.deepEqual(normalizeReviewPhase('rewiewing'), {
     phase: 'reviewing',
     original: 'rewiewing',
@@ -216,6 +217,7 @@ test('ReviewState save returns unchanged when commit is non-zero and state path 
       return { status: 0, stdout: '', stderr: '' };
     };
 
+    // @ts-expect-error TS2345 Argument of type '(args: any) => { status: number; stderr: string; stdout?: unde
     assert.deepEqual(state.save(root, gitFn), { outcome: 'unchanged' });
     assert.ok(gitCalls.some(args => args.includes('status') && args.includes('--porcelain')));
   });
@@ -234,6 +236,7 @@ test('ReviewState save returns commit-failed-dirty when git commit fails and fil
       return { status: 0, stdout: '', stderr: '' };
     };
 
+    // @ts-expect-error TS2345 Argument of type '(args: any) => { status: number; stderr: string; stdout?: unde
     assert.deepEqual(state.save(root, gitFn), {
       outcome: 'commit-failed-dirty',
       stage: 'commit',
@@ -256,6 +259,7 @@ test('ReviewState save returns add-failed when git add exits non-zero', () => {
     const gitFn = (args) => args.includes('add')
       ? { status: 1, stdout: '', stderr: 'index locked' }
       : { status: 0, stdout: '', stderr: '' };
+    // @ts-expect-error TS2345 Argument of type '(args: any) => { status: number; stdout: string; stderr: strin
     assert.deepEqual(state.save(root, gitFn), { outcome: 'add-failed', stage: 'add', diagnostic: 'index locked' });
   });
 });
@@ -283,13 +287,16 @@ test('startReviewLoop preserves persisted round data when the reviewer identity 
       isContinue: true,
       implementer: 'claude',
       reviewer: 'gemini', // differs from the persisted reviewer 'codex'
+      // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
       getPrStatusFn: () => ({ exists: true, state: 'open', number: 188 }),
+      // @ts-expect-error TS2739 Type '{ supported: true; }' is missing the following properties from type 'Launc
       workflowLauncherStatusFn: () => ({ supported: true }),
       isForgejoReviewEnabledFn: () => false, // workflow-owned surfaces; no live provider
       maybeUpdateGraphifyBeforeReviewFn: () => {},
       readTokenFn: () => null,
+      // @ts-expect-error TS2740 Type '{ reviewer: string; implementer: string; round: number; startedAt: string;
       readReviewStateFn: () => ({
         reviewer: 'codex',
         implementer: 'claude',
@@ -298,6 +305,7 @@ test('startReviewLoop preserves persisted round data when the reviewer identity 
         phase: 'fixing',
         disposition: 'REQUEST_CHANGES'
       }),
+      // @ts-expect-error TS2322 Type 'number' is not assignable to type 'ReviewStatePersistenceResult'.
       writeReviewStateFn: (slug, state) => writes.push({
         round: state.round,
         startedAt: state.startedAt,
@@ -308,8 +316,11 @@ test('startReviewLoop preserves persisted round data when the reviewer identity 
       }),
       consumeReviewerArtifactsFn: async () => ({ consumed: false }),
       consumeImplementerArtifactsFn: async () => ({ consumed: true, ok: true, disposition: 'PUSHBACK_ALL' }),
+      // @ts-expect-error TS2322 Type 'Promise<{ agent: string; }>' is not assignable to type 'Promise<{ agent: s
       startAgentFn: async () => ({ agent: 'claude' }),
+      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(slug: string, newStatus: string, {
       transitionTaskFn: () => {},
+      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(transitionTaskFn: TransitionTaskFn
       transitionVirtualFn: () => {},
       applyAgentFallbackFn: ({ original }) => original
     });
