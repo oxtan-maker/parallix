@@ -3,7 +3,7 @@ id: TASK-2224
 title: >-
   TS migration phase T1: test typecheck project (tsconfig.test.json checked
   JavaScript)
-status: backlog
+status: refined
 assignee: [custom]
 created_date: '2026-07-11 13:45'
 labels:
