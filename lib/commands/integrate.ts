@@ -630,8 +630,6 @@ async function integrate(args: string[]) {
         return;
       }
 
-      promoteTaskForIntegrationIfNeeded(context);
-
       temporaryStash = stashMainCheckoutIfNeeded({
         slug,
         dirtyEntries: context.mainDirtyEntries as string[],
@@ -743,6 +741,10 @@ async function integrate(args: string[]) {
       }
 
       fmt.log.info('Step 4: Final closeout checks in the local integration checkout...');
+      // Do not dirty the primary checkout before the probe merge and squash have
+      // completed. The task file is commonly part of the mission branch, so an
+      // early promotion can make `merge --abort` fail and leave index conflicts.
+      promoteTaskForIntegrationIfNeeded(context);
       if (fs.existsSync(mainTaskFile)) {
         completeTask(slug, baseWorktree);
         // Re-resolve because it moved

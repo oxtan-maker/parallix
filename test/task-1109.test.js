@@ -93,6 +93,39 @@ test('integrate full squash-merge (Variant B) success path', async (t) => {
   cleanup();
 });
 
+test('integrate Variant B promotes a review-approved task only after the squash merge', () => {
+  setupMocks();
+  const events = [];
+  mock.method(backlog, 'getTaskStatus', () => 'review');
+  mock.method(backlog, 'setTaskStatus', () => {
+    events.push('promote');
+    return true;
+  });
+  mock.method(git, 'git', (args) => {
+    if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n', stderr: '' };
+    if (args.includes('branch') && args.includes('--show-current')) return { status: 0, stdout: 'main', stderr: '' };
+    if (args.includes('status')) return { status: 0, stdout: '', stderr: '' };
+    if (args.includes('merge') && args.includes('--abort')) {
+      events.push('abort');
+      return { status: 0, stdout: '', stderr: '' };
+    }
+    if (args.includes('merge') && args.includes('--squash')) {
+      events.push('squash');
+      return { status: 0, stdout: '', stderr: '' };
+    }
+    if (args.includes('merge')) return { status: 0, stdout: '', stderr: '' };
+    if (args.includes('rev-parse')) return { status: 0, stdout: 'deadbeef', stderr: '' };
+    return { status: 0, stdout: '', stderr: '' };
+  });
+  const integrate = loadIntegrate();
+
+  integrate([TEST_SLUG]);
+
+  assert.ok(events.indexOf('abort') < events.indexOf('squash'));
+  assert.ok(events.indexOf('squash') < events.indexOf('promote'));
+  cleanup();
+});
+
 test('integrate Variant B preserves soft-reset backlog noise across squash merge', () => {
   setupMocks();
   const gitCalls = [];
@@ -318,6 +351,12 @@ test('integrate reports merged-PR recovery guidance before any closeout work', (
 
 test('integrate Variant B stops when dry-run merge cannot be aborted cleanly', () => {
   setupMocks();
+  let taskStatusMutations = 0;
+  mock.method(backlog, 'getTaskStatus', () => 'review');
+  mock.method(backlog, 'setTaskStatus', () => {
+    taskStatusMutations++;
+    return true;
+  });
   mock.method(git, 'git', (args) => {
     if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n', stderr: '' };
     if (args.includes('branch') && args.includes('--show-current')) return { status: 0, stdout: 'main', stderr: '' };
@@ -336,6 +375,7 @@ test('integrate Variant B stops when dry-run merge cannot be aborted cleanly', (
   integrate([TEST_SLUG]);
 
   assert.ok(errors.some(l => l.includes('Dry-run merge could not be aborted cleanly')));
+  assert.equal(taskStatusMutations, 0, 'must not promote the task before the probe merge abort succeeds');
   assert.equal(statsCalls.length, 0);
   assert.equal(exitCodes.at(-1), 1);
 

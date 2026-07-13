@@ -440,6 +440,38 @@ function statsMissionKey(row) {
 }
 
 /**
+ * Checks whether a model name belongs to the given implementer family.
+ * The stored `model === implementer` exact match is too strict for
+ * family-named implementers (e.g. `claude-sonnet-5` !== `claude`,
+ * `gpt-5.4` !== `codex`). This prefix-based check correctly identifies
+ * implementer-family models so the dedup logic can prefer them over
+ * reviewer-model rows or blank-model rollups.
+ *
+ * @param {string} model
+ * @param {string} impl
+ * @returns {boolean}
+ */
+function modelBelongsToImplFamily(model, impl) {
+  if (!model || !impl) { return false; }
+  const m = String(model).toLowerCase();
+  const i = String(impl).toLowerCase();
+  if (m === i) { return true; }
+  // Named families whose models don't prefix with the family label:
+  // codex → gpt-*, vibe → mistral
+  if (i === 'codex') { return m.startsWith('gpt'); }
+  if (i === 'vibe') { return m === 'mistral'; }
+  // custom family models are named paths/identifiers (cyankiwi/Qwen..., 
+  // QuantTrio/Qwen..., qwen3.6-27b-q8) that don't prefix with "custom".
+  // Recognize them as non-blank model names that aren't known reviewer families.
+  if (i === 'custom') {
+    return !m.startsWith('claude') && !m.startsWith('gpt');
+  }
+  // All other families: model starts with the family name
+  // (claude-sonnet-5 → claude, mistral → mistral, qwen3.6-27b-q8 → qwen, etc.)
+  return m.startsWith(i);
+}
+
+/**
  * @param {StatsRow[]} rows
  * @param {string} field
  */
@@ -826,53 +858,100 @@ function deriveFixRoundsLocalAuthoritative(slug, rootDir, repo) {
  *
  * @param {StatsRow[]} rows
  * @param {{start: Date, end: Date}} window
+ * @param {{completedOnly?: boolean}} [options]
  */
-function computeAgentMissionGroups(rows, window) {
+function computeAgentMissionGroups(rows, window, options = {}) {
   const windowRows = rows.filter(row => rowInWindow(row, window));
-  // Agent performance must include active-stage rows so in-progress
-  // implementation work is visible (task-1409). Include all rows with a valid
-  // classification regardless of closed status.
-  const allValidWindowRows = windowRows.filter(row => normalizeClassification(row.classification) !== null);
-  // Rollup rows (e.g. stage 'default') often carry a blank `model` alongside
-  // the mission's final pr_fix_rounds count; a row with a real model must
-  // always win over one without, or the mission gets bucketed under the
-  // generic implementer name (e.g. 'custom') instead of its actual model.
-  // Among rows that agree on having/lacking a model, prefer model===implementer
-  // (the implementer's own model), then the row with the highest fix rounds.
+  const validWindowRows = windowRows.filter(row => normalizeClassification(row.classification) !== null);
+  // `completedOnly` keys off the mission, not the row: completion is recorded
+  // on the blank-model rollup row, while the mission's model lives on its
+  // (non-closed) stage rows. Filtering individual rows by closed status would
+  // drop the attribution data and collapse model rows into implementer
+  // families, so keep every row belonging to a completed mission instead.
+  let allValidWindowRows = validWindowRows;
+  if (options.completedOnly) {
+    const completedMissionKeys = new Set(
+      validWindowRows.filter(row => row.closed === 'yes').map(row => statsMissionKey(row)),
+    );
+    allValidWindowRows = validWindowRows.filter(row => completedMissionKeys.has(statsMissionKey(row)));
+  }
+  // The non-completed path supports the live spend table, where no final owner
+  // exists yet. It picks a concrete model deterministically. Completed mission
+  // ownership is replaced below from the closed integration rollup instead.
   /** @type {Record<string, StatsRow>} */
   const byMission = {};
+  /** @type {Record<string, StatsRow[]>} */
+  const rowsByMission = {};
   for (const row of allValidWindowRows) {
     const key = statsMissionKey(row);
+    if (!rowsByMission[key]) {rowsByMission[key] = [];}
+    rowsByMission[key].push(row);
     const prev = byMission[key];
-    const rounds = Number.parseInt(String(row.pr_fix_rounds), 10) || 0;
-    const prevRounds = prev ? (Number.parseInt(String(prev.pr_fix_rounds), 10) || 0) : -1;
     const modelTrimmed = (row.model && String(row.model).trim()) || '';
     const implTrimmed = (row.implementer && String(row.implementer).trim()) || '';
-    const isImplementerRow = modelTrimmed && implTrimmed && modelTrimmed.toLowerCase() === implTrimmed.toLowerCase();
     const rowHasModel = Boolean(modelTrimmed);
-    let prevIsImpl = false;
-    let prevHasModel = false;
-    if (prev) {
-      const prevModelTrimmed = (prev.model && String(prev.model).trim()) || '';
-      const prevImplTrimmed = (prev.implementer && String(prev.implementer).trim()) || '';
-      prevIsImpl = prevModelTrimmed && prevImplTrimmed && prevModelTrimmed.toLowerCase() === prevImplTrimmed.toLowerCase();
-      prevHasModel = Boolean(prevModelTrimmed);
-    }
+    const isFamilyMatch = rowHasModel && implTrimmed && modelBelongsToImplFamily(modelTrimmed, implTrimmed);
     let shouldReplace;
     if (!prev) {
       shouldReplace = true;
-    } else if (rowHasModel !== prevHasModel) {
-      shouldReplace = rowHasModel && !prevHasModel;
-    } else if (isImplementerRow !== prevIsImpl) {
-      shouldReplace = isImplementerRow && !prevIsImpl;
     } else {
-      shouldReplace = rounds > prevRounds;
+      const prevModelTrimmed = (prev.model && String(prev.model).trim()) || '';
+      const prevImplTrimmed = (prev.implementer && String(prev.implementer).trim()) || '';
+      const prevHasModel = Boolean(prevModelTrimmed);
+      const prevFamilyMatch = prevHasModel && prevImplTrimmed && modelBelongsToImplFamily(prevModelTrimmed, prevImplTrimmed);
+      if (rowHasModel && !prevHasModel) {
+        shouldReplace = true;
+      } else if (!rowHasModel && prevHasModel) {
+        shouldReplace = false;
+      } else if (rowHasModel && prevHasModel) {
+        // Both have models — implementer-family match first, then date, then CSV order.
+        if (isFamilyMatch && !prevFamilyMatch) {
+          shouldReplace = true;
+        } else if (!isFamilyMatch && prevFamilyMatch) {
+          shouldReplace = false;
+        } else if (row.date > prev.date) {
+          shouldReplace = true;
+        } else if (row.date < prev.date) {
+          shouldReplace = false;
+        } else {
+          // Same date, same tier — last in CSV wins
+          shouldReplace = true;
+        }
+      } else {
+        // Both blank — last in CSV wins
+        shouldReplace = true;
+      }
     }
     if (shouldReplace) {
       byMission[key] = row;
     }
   }
+
+  if (options.completedOnly) {
+    // `closed: yes` establishes only that the mission is complete. It can be
+    // stamped on a rollup or on a reviewer row, so it must not determine model
+    // ownership. Credit the latest implementation-stage telemetry instead;
+    // review-stage telemetry belongs to the reviewer, not the implementer.
+    for (const [key, missionRows] of Object.entries(rowsByMission)) {
+      const completedRows = missionRows.filter(row => row.closed === 'yes');
+      const completion = completedRows.reduce((latest, row) =>
+        !latest || row.date >= latest.date ? row : latest, null);
+      if (!completion) {continue;}
+
+      const implementationModels = missionRows.filter(row =>
+        String(row.model || '').trim()
+          && String(row.stage || 'default').trim().toLowerCase() !== 'review'
+      );
+      const modelRow = implementationModels.reduce((latest, row) =>
+        !latest || row.date >= latest.date ? row : latest, null);
+
+      // With no implementation telemetry, retain the closed row so its
+      // implementer value (rather than inventing a reviewer model) is shown.
+      byMission[key] = modelRow || completion;
+    }
+  }
   const uniqueMissions = Object.values(byMission);
+
   /** @type {Record<string, StatsRow[]>} */
   const groups = {};
   /** @type {Record<string, string>} */
@@ -895,12 +974,28 @@ function summarizeAgentWindow(rows, window, options = {}) {
   /** @type {{rootDir?: string|null, deriveFixRoundsFn?: Function}} */
   const opts = options;
   const { rootDir = null, deriveFixRoundsFn = deriveFixRoundsLocalAuthoritative } = opts;
-  const { groups } = computeAgentMissionGroups(rows, window);
+  // Mission counts and repair-round averages describe completed missions only.
+  // Other report sections reuse the grouping helper without this filter so
+  // their live stage telemetry remains unchanged.
+  const { allValidWindowRows, groups } = computeAgentMissionGroups(rows, window, { completedOnly: true });
   // Build agent groups from the globally deduplicated missions.
   // For each mission, trust local ground truth (events/branch history) over
   // the stored value when available — this is what makes the report reflect
   // the review loop rather than the (untrusted) CSV. `pr_fix_rounds` is a
   // review-loop quantity, independent of whether the mission was integrated.
+  // The stored fallback is the highest pr_fix_rounds across all of the
+  // completed mission's window rows: the dedup winner is the model-labeled
+  // stage row, but the final fix-round count is usually recorded on the
+  // blank-model rollup row.
+  /** @type {Record<string, number>} */
+  const storedRoundsByMission = {};
+  for (const row of allValidWindowRows) {
+    const key = statsMissionKey(row);
+    const rounds = Number.parseInt(String(row.pr_fix_rounds), 10) || 0;
+    if (!(key in storedRoundsByMission) || rounds > storedRoundsByMission[key]) {
+      storedRoundsByMission[key] = rounds;
+    }
+  }
   const roundsFor = (/** @type {any} */ row) => {
     if (rootDir) {
       const authoritative = deriveFixRoundsFn(row.mission, rootDir, row.repo);
@@ -908,7 +1003,7 @@ function summarizeAgentWindow(rows, window, options = {}) {
         return Number.parseInt(authoritative, 10) || 0;
       }
     }
-    return Number.parseInt(row.pr_fix_rounds, 10) || 0;
+    return storedRoundsByMission[statsMissionKey(row)] || 0;
   };
   return Object.entries(groups)
     .map(([displayKey, group]) => {
