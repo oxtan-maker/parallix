@@ -2,7 +2,7 @@
 id: TASK-2244
 title: backlog.md check reading from wrong place
 status: backlog
-assignee: []
+assignee: [custom]
 created_date: '2026-07-13 08:08'
 labels: []
 dependencies: []
