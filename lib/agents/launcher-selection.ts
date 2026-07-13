@@ -90,10 +90,10 @@ function workflowLauncherStatus(agent: string, worktree?: string): LauncherStatu
   const effectiveAgent = agent === 'custom'
     ? resolveCustomRunner(worktree)
     : agent;
-  const resolver = RESOLVERS[effectiveAgent];
-  if (!resolver) {
-    return { agent, supported: false, detail: `unknown agent: ${effectiveAgent}` };
-  }
+  // Agent eligibility is configuration-driven.  A configured family without
+  // a built-in adapter can still be a usable reviewer when its CLI is on PATH;
+  // probe its family name rather than silently removing it from the pool.
+  const resolver = RESOLVERS[effectiveAgent] || (() => effectiveAgent);
   const command = resolver();
   const exists = command.includes('/') ? fs.existsSync(command) : commandInPath(command);
   if (!exists) {
@@ -171,7 +171,6 @@ function selectAgent(step: string, options: AgentSelectionOptions = {}) {
   const { worktree } = options;
   const statuses = new Map(
     pool
-      .filter((agent) => LAUNCHERS[agent] || agent === 'custom')
       .map((agent) => [agent, workflowLauncherStatus(agent, worktree)] as [string, LauncherStatus])
   );
   const available = pool.filter((agent) => {

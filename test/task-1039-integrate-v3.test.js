@@ -106,8 +106,8 @@ test('printIntegrationPreflight PR approval failures', (t) => {
   const res1 = printIntegrationPreflight(context1, {
     readTokenFn: () => 'token',
     resolveTokenFileFn: () => 'file',
-    getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] }),
-    isForgejoReviewEnabledFn: () => true
+    isForgejoReviewEnabledFn: () => true,
+    getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
   });
   assert.ok(res1.failures.includes('pr-approval'));
 
@@ -116,8 +116,8 @@ test('printIntegrationPreflight PR approval failures', (t) => {
   const res2 = printIntegrationPreflight(context2, {
     readTokenFn: () => 'token',
     resolveTokenFileFn: () => 'file',
-    getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] }),
-    isForgejoReviewEnabledFn: () => true
+    isForgejoReviewEnabledFn: () => true,
+    getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
   });
   assert.ok(res2.failures.includes('pr-approval'));
 });
