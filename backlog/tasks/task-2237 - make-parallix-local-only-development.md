@@ -1,7 +1,7 @@
 ---
 id: TASK-2237
 title: make parallix local only development
-status: active
+status: review
 assignee: [claude]
 created_date: '2026-07-12 14:23'
 labels: []
