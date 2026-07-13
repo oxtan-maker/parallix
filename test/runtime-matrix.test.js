@@ -189,6 +189,10 @@ test('reviewer selection for a codex implementer is unbiased: drawn from remaini
     claude: 'process.exit(0);',
     gemini: 'process.exit(0);',
     opencode: 'process.exit(0);',
+    // `custom` is configured to use pi in this repository. Supply that
+    // effective runner as well so the fixture actually makes every intended
+    // candidate runnable.
+    pi: 'process.exit(0);',
     vibe: 'process.exit(0);'
   }, () => {
     const config = {

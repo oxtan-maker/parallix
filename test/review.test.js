@@ -23,6 +23,7 @@ const childProcess = require('node:child_process');
 
 // Base mission slug — append process.pid for isolation between parallel runs.
 const TEST_SLUG = `task-test-review-${process.pid}`;
+const persistenceCommitted = () => ({ outcome: 'committed' });
 
 // Isolate stats writes to a temp PARALLIX_HOME so test runs never pollute
 // the real operator stats.csv (recordStageStatsSafe writes there via
@@ -2391,6 +2392,7 @@ test('startReviewLoop handles reviewer launch failure', async () => {
     implementer: 'claude',
     reviewer: 'codex',
     dryRun: false,
+    writeReviewStateFn: persistenceCommitted,
     error: (m) => errors.push(m),
     exit: (c) => exitCodes.push(c),
     workflowLauncherStatusFn: () => ({ supported: true }),
@@ -2421,6 +2423,7 @@ test('startReviewLoop handles reviewer polling timeout with recovery', async () 
     implementer: 'claude',
     reviewer: 'codex',
     dryRun: false,
+    writeReviewStateFn: persistenceCommitted,
     log: (m) => logs.push(String(m)),
     error: (m) => errors.push(m),
     exit: (c) => exitCodes.push(c),
@@ -2564,6 +2567,7 @@ test('startReviewLoop does not crash with ReferenceError when taskResolution is 
       implementer: 'codex',
       reviewer: 'claude',
       dryRun: false,
+      writeReviewStateFn: persistenceCommitted,
       pollTimeoutSeconds: 1,
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       getPrStatusFn: () => ({ exists: true, state: 'open' }),
@@ -2605,6 +2609,7 @@ test('startReviewLoop passes taskResolution to applyAgentFallback for both revie
       implementer: 'codex',
       reviewer: 'claude',
       dryRun: false,
+      writeReviewStateFn: persistenceCommitted,
       pollTimeoutSeconds: 1,
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       getPrStatusFn: () => ({ exists: true, state: 'open' }),
@@ -2836,6 +2841,7 @@ test('startReviewLoop continue falls back to the persisted reviewer when an expl
       reviewer: 'vibe',
       isContinue: true,
       dryRun: false,
+      writeReviewStateFn: persistenceCommitted,
       readReviewStateFn: () => ({
         reviewer: 'codex',
         implementer: 'custom',
@@ -2948,6 +2954,7 @@ test('commentRound appends metadata footer to message', () => {
     postCommentFn: (branch, token, message) => { posted = message; return { ok: true }; },
     readReviewStateFn: () => ({ reviewer: 'codex', implementer: 'codex' }),
     buildMetadataFooterFn: () => '\n\n---\n`[workflow-round:2, workflow-phase:reviewing]`',
+    writeReviewStateFn: persistenceCommitted,
     rootDir: '/tmp/visualBoard-task-meta-2',
     log: () => {},
     error: () => {},
@@ -2966,6 +2973,7 @@ test('submitReviewRound appends metadata footer to review message', () => {
     postReviewFn: (branch, token, outcome, message) => { posted = message; return { ok: true }; },
     readReviewStateFn: () => ({ reviewer: 'codex', implementer: 'codex' }),
     buildMetadataFooterFn: () => '\n\n---\n`[workflow-round:1, workflow-phase:reviewing]`',
+    writeReviewStateFn: persistenceCommitted,
     worktree: '/tmp/visualBoard-task-meta-3',
     isForgejoReviewEnabledFn: () => true,
     log: () => {},
@@ -3157,6 +3165,7 @@ test('submitReviewRound promotes an active backlog task to review after provider
       readTokenFn: () => 'token',
       postReviewFn: () => ({ ok: true }),
       buildMetadataFooterFn: () => '',
+      writeReviewStateFn: persistenceCommitted,
       readReviewStateFn: () => new ReviewState('task-2197', {
         reviewer: 'codex', implementer: 'claude', round: 1, phase: 'reviewing'
       }),
@@ -3220,6 +3229,7 @@ test('submitReviewRound keeps YAML and rendered task status aligned when provide
       readTokenFn: () => 'token',
       postReviewFn: () => ({ ok: true }),
       buildMetadataFooterFn: () => '',
+      writeReviewStateFn: persistenceCommitted,
       readReviewStateFn: () => new ReviewState('task-2198', {
         reviewer: 'codex', implementer: 'claude', round: 1, phase: 'reviewing'
       }),
@@ -3882,7 +3892,8 @@ test('startReviewLoop self-heals via handoff and recovers when task is review an
       resolveReviewUserFn: () => 'reviewer-user',
       implementer: 'codex',
       reviewer: 'claude',
-      dryRun: false
+      dryRun: false,
+      writeReviewStateFn: persistenceCommitted
     });
   });
 
@@ -3996,7 +4007,8 @@ test('startReviewLoop never self-heals in dry-run (crit. 7)', async () => {
       maybeUpdateGraphifyBeforeReviewFn: () => {},
       implementer: 'codex',
       reviewer: 'claude',
-      dryRun: true
+      dryRun: true,
+      writeReviewStateFn: persistenceCommitted
     });
   });
 

@@ -9,7 +9,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as fmt from '../core/fmt.js';
 import { missionBranchName, resolveWorktree } from '../core/mission-utils.js';
-import { readReviewState, writeReviewState, reviewStateFile, ReviewState, resolveReviewIdentity } from './review-state.js';
+import { readReviewState, writeReviewState, reviewStateFile, ReviewState, resolveReviewIdentity, persistReviewStateOrThrow } from './review-state.js';
 import { readToken, postComment, postReview, getPrAuthor, isEnabled, resolveArtifactDir as resolveConfiguredArtifactDir } from './review-adapter.js';
 import { createEvent, consumeHumanNotes, VALID_EVENT_TYPES, CreateEventParams, CreateEventOptions, CreateEventResult } from './review-events.js';
 
@@ -172,7 +172,7 @@ function recordLocalReviewVerdict(
   outcome: string,
   options: {
     worktree?: string;
-    writeReviewStateFn?: (_s: string, _st: any, _w: string) => boolean;
+    writeReviewStateFn?: typeof writeReviewState;
     createEventFn?: (_s: string, _t: string, _p: Record<string, unknown>, _o: Record<string, unknown>) => CreateResult;
     readReviewStateFn?: (_s: string, _r?: string) => any;
     log?: (_msg: string) => void;
@@ -203,7 +203,7 @@ function recordLocalReviewVerdict(
     state.disposition = 'REQUEST_CHANGES';
     try { state.transitionTo('fixing'); } catch { /* ignore */ }
   }
-  writeReviewStateFn(slug, state, worktree);
+  persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree);
 
   createEventFn(slug, VALID_EVENT_TYPES.REVIEWER_OUTCOME, { verdict: outcome, content: `Review verdict: ${outcome}` }, { worktree, log: log, error });
 }
@@ -226,7 +226,7 @@ function postWorkflowReview(
     reviewIdentity?: string;
     forgejoUser?: string;
     getPrAuthorFn?: (_branch: string, _token: string, _opts?: Record<string, unknown>) => unknown;
-    writeReviewStateFn?: (_s: string, _st: any, _w: string) => boolean;
+    writeReviewStateFn?: typeof writeReviewState;
     createEventFn?: (_s: string, _t: string, _p: Record<string, unknown>, _o: Record<string, unknown>) => CreateResult;
   } = {}
 ): { ok: boolean; error?: string; skipped?: boolean; reason?: string; prAuthor?: unknown } {

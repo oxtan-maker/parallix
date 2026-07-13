@@ -15,7 +15,7 @@ import { toVirtual, transitionVirtual } from '../core/state-map.js';
 import { getPrStatus, readToken, getLatestReviewForPr, getLatestDispositionForPr, providerAvailable, getComments, postComment, postReview, resolveReviewUser, isProviderEnabled } from './review-adapter.js';
 import { buildAutonomousReviewMatrix, formatMatrixSummary } from '../core/runtime-matrix.js';
 import { buildReviewPrompt, buildActOnReviewPrompt, buildCompactReviewPrompt, buildCompactActOnReviewPrompt } from './review-prompts.js';
-import { ReviewState, readReviewState, writeReviewState, resetReviewState, VALID_PHASES } from './review-state.js';
+import { ReviewState, readReviewState, writeReviewState, resetReviewState, VALID_PHASES, persistReviewStateOrThrow, assertReviewStatePersisted } from './review-state.js';
 import { workflowLauncherStatus, startAgent, eligibleAgentsForStep, selectAgent } from '../agents/agents.js';
 import { commitSafeMissionArtifacts, rebaseBeforeReviewRound } from './rebase.js';
 import { resolveAgentModel } from '../core/product-config.js';
@@ -84,7 +84,7 @@ function markStageLaunchRecorded(
     ...(state.metadata.recordedStageLaunches || {}),
     [key]: [...recorded, fingerprint].slice(-20),
   };
-  writeReviewStateFn(slug, state as ReviewState, worktree || process.cwd());
+  persistReviewStateOrThrow(writeReviewStateFn, slug, state as ReviewState, worktree || process.cwd());
   return true;
 }
 
@@ -196,7 +196,7 @@ export function applyAgentFallback(opts: {
   } else {
     state.implementer = fallback;
   }
-  writeReviewStateFn(slug, state as ReviewState, worktree || process.cwd());
+  persistReviewStateOrThrow(writeReviewStateFn, slug, state as ReviewState, worktree || process.cwd());
   if (role === 'implementer' && taskResolution && taskResolution.ok) {
     if (enforceTaskAssigneeFn && !enforceTaskAssigneeFn(taskResolution.taskFile, fallback)) {
       log(fmt.status('WARN', `Could not enforce fallback implementer ${fallback} in backlog task.`));
@@ -215,7 +215,7 @@ export function persistNormalizedPhaseRepair(
     return;
   }
   log(fmt.status('WARN', `Persisted review phase "${state.phaseOriginal}" is invalid. Repairing to "${state.phase}".`));
-  writeReviewStateFn(slug, state, worktree);
+  persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree);
   state.phaseOriginal = null;
 }
 
@@ -443,9 +443,9 @@ export async function handleGateFailureAutoBounce(
   // Update review state with incremented retry count
   if (persisted) {
     const updatedState = { ...persisted, metadata };
-    writeReviewStateFn(slug, updatedState as any, worktree);
+    persistReviewStateOrThrow(writeReviewStateFn, slug, updatedState as any, worktree);
   } else {
-    writeReviewStateFn(slug, { metadata } as any, worktree);
+    persistReviewStateOrThrow(writeReviewStateFn, slug, { metadata } as any, worktree);
   }
 
   // Transition task back to active (implementer phase) without consuming reviewer cycle
@@ -660,7 +660,9 @@ export async function startReviewLoop(slug: string, opts: {
 
   // --reset: clear persisted state before starting
   if (reset) {
-    if (resetReviewStateFn(slug, worktree)) {
+    const resetResult = resetReviewStateFn(slug, worktree);
+    assertReviewStatePersisted(resetResult, { slug, phase: 'reset', round: null });
+    if (resetResult.outcome === 'committed') {
       log(fmt.status('INFO', `Review state reset for ${slug}.`));
     }
   }
@@ -781,7 +783,12 @@ export async function startReviewLoop(slug: string, opts: {
             : {};
           metadata.gateFailureReason = 'validation-failed';
           metadata.gateFailureError = handoffObj.error;
-          writeReviewStateFn(slug, { ...(persisted || {}), metadata } as any, worktree);
+          persistReviewStateOrThrow(
+            writeReviewStateFn,
+            slug,
+            { ...(persisted || {}), metadata } as any,
+            worktree
+          );
           exit(1);
           return;
         }
@@ -1108,7 +1115,7 @@ export async function startReviewLoop(slug: string, opts: {
 
           if (!dryRun) { transitionTaskFn(slug, 'review', { rootDir: worktree, log }); }
           state.phase = 'reviewing';
-          writeReviewStateFn(slug, state, worktree);
+          persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree);
 
         }
 
@@ -1218,7 +1225,7 @@ export async function startReviewLoop(slug: string, opts: {
           const stateAny = state as unknown as Record<string, any>;
           while ((stateAny['reviewerRetryCount'] || 0) < 2) {
             stateAny['reviewerRetryCount'] = (stateAny['reviewerRetryCount'] || 0) + 1;
-            writeReviewStateFn(slug, state, worktree);
+            persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree);
             const elapsedStr = formatElapsed(Date.now() - Date.parse(stateAny['startedAt'] as string));
             const recoveryPrompt = `RECOVERY: Reviewer timeout after ${elapsedStr}. Please complete the review for ${branch}.`;
             log(fmt.status('INFO', `Round ${attempt}: relaunching reviewer (${reviewer}) with recovery prompt (retry ${stateAny['reviewerRetryCount']}/3)...`));
@@ -1295,7 +1302,7 @@ export async function startReviewLoop(slug: string, opts: {
       if (reviewState === 'APPROVED') {
         state.transitionTo('approved');
         state.disposition = reviewState as string;
-        writeReviewStateFn(slug, state, worktree);
+        persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree);
         log(fmt.status('PASS', 'Autonomous review stopped: reviewer approved the PR. Hand off to human review/integration.'));
         transitionVirtualFn(transitionTaskFn, slug, 'approved', { log });
         return;
@@ -1371,7 +1378,7 @@ export async function startReviewLoop(slug: string, opts: {
         return;
       }
 
-      writeReviewStateFn(slug, state, worktree);
+      persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree);
       transitionTaskFn(slug, 'active', { implementer, rootDir: worktree, log });
       if (implementer === 'autonomous' && !forgejoEnabled) {
         log(fmt.status('INFO', `Round ${attempt}: implementer identity is autonomous; skipping implementer launch and using local review artifacts only.`));
@@ -1435,7 +1442,7 @@ export async function startReviewLoop(slug: string, opts: {
         const stateAny = state as unknown as Record<string, any>;
         while ((stateAny['implementerRetryCount'] || 0) < 2) {
           stateAny['implementerRetryCount'] = (stateAny['implementerRetryCount'] || 0) + 1;
-          writeReviewStateFn(slug, state, worktree);
+          persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree);
           const elapsedStr = formatElapsed(Date.now() - Date.parse(stateAny['startedAt'] as string));
           const recoveryPrompt = `RECOVERY: Implementer disposition timeout after ${elapsedStr}. Please provide a disposition (PUSHBACK_ALL, BLOCKED, PARKED, or continue with fixes) for ${branch}.`;
           log(fmt.status('INFO', `Round ${attempt}: relaunching implementer (${implementer}) with recovery prompt (retry ${stateAny['implementerRetryCount']}/3)...`));
@@ -1483,7 +1490,7 @@ export async function startReviewLoop(slug: string, opts: {
         }
 
         if (isPollTimeout(disposition)) {
-          writeReviewStateFn(slug, state, worktree);
+          persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree);
           log(fmt.status('INFO', `Autonomous review stopped: excessive implementer timeout retries`));
           return;
         }
@@ -1509,7 +1516,7 @@ export async function startReviewLoop(slug: string, opts: {
     }
 
     if (isPollTimeout(disposition)) {
-      writeReviewStateFn(slug, state, worktree);
+      persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree);
       log(fmt.status('INFO', `Autonomous review stopped: excessive implementer timeout retries`));
       return;
     }
@@ -1518,27 +1525,27 @@ export async function startReviewLoop(slug: string, opts: {
 
     if (disposition === 'PUSHBACK_ALL') {
       state.disposition = disposition as string;
-      writeReviewStateFn(slug, state, worktree);
+      persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree);
       log(fmt.status('INFO', 'Autonomous review stopped: implementer pushed back on all remaining comments. Hand off to human review.'));
       return;
     }
 
     if (disposition === 'BLOCKED' || disposition === 'PARKED') {
       state.disposition = disposition as string;
-      writeReviewStateFn(slug, state, worktree);
+      persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree);
       log(fmt.status('INFO', `Autonomous review stopped: implementer reported ${disposition}. Hand off to human review.`));
       return;
     }
 
     state.disposition = disposition as string;
     try { state.transitionTo('reviewing'); } catch (_) { /* ignore */ }
-    writeReviewStateFn(slug, state, worktree);
+    persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree);
     log(fmt.status('INFO', `Round ${attempt}: implementer made changes. Continuing to round ${attempt + 1}.`));
   }
 
   if (!state.disposition) {
     state.disposition = 'MAX_ATTEMPTS';
-    writeReviewStateFn(slug, state, worktree);
+    persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree);
   }
   log(fmt.status('INFO', `Autonomous review stopped: reached ${maxAttempts} attempts. Hand off to human review.`));
 }

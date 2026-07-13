@@ -104,6 +104,7 @@ test('printIntegrationPreflight PR approval failures', (t) => {
   };
   
   const res1 = printIntegrationPreflight(context1, {
+    isForgejoReviewEnabledFn: () => true,
     readTokenFn: () => 'token',
     resolveTokenFileFn: () => 'file',
     isForgejoReviewEnabledFn: () => true,
@@ -114,6 +115,7 @@ test('printIntegrationPreflight PR approval failures', (t) => {
   // Case 2: review state not APPROVED
   const context2 = { ...context1, approval: { ok: true, reviewState: 'COMMENT' } };
   const res2 = printIntegrationPreflight(context2, {
+    isForgejoReviewEnabledFn: () => true,
     readTokenFn: () => 'token',
     resolveTokenFileFn: () => 'file',
     isForgejoReviewEnabledFn: () => true,

@@ -971,6 +971,7 @@ test('provider-backed approval repair leaves integration preflight with review i
       readTokenFn: () => 'token',
       postReviewFn: () => ({ ok: true }),
       buildMetadataFooterFn: () => '',
+      writeReviewStateFn: () => ({ outcome: 'committed' }),
       readReviewStateFn: () => new ReviewState('task-2199', {
         reviewer: 'codex', implementer: 'claude', round: 1, phase: 'reviewing'
       }),

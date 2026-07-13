@@ -11,7 +11,64 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { git } from '../core/git.js';
 import { findMissionDir, resolveWorktree } from '../core/mission-utils.js';
-import { log } from '../core/fmt.js';
+import { writeFileAtomic } from '../core/storage.js';
+
+export type ReviewStatePersistenceResult =
+  | { outcome: 'committed' }
+  | { outcome: 'unchanged' }
+  | { outcome: 'write-failed'; stage: 'write'; diagnostic: string }
+  | { outcome: 'add-failed'; stage: 'add'; diagnostic: string }
+  | { outcome: 'commit-failed-dirty'; stage: 'commit'; diagnostic: string };
+
+type GitFn = typeof git;
+type AtomicWriteFn = typeof writeFileAtomic;
+
+interface ReviewStatePersistenceContext {
+  slug: string;
+  phase?: string | null;
+  round?: number | null;
+}
+
+function diagnosticFrom(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message.trim()) { return error.message.trim(); }
+  const text = String(error || '').trim();
+  return text || fallback;
+}
+
+function gitDiagnostic(result: ReturnType<GitFn>, fallback: string): string {
+  return String(result.stderr || result.stdout || '').trim() || fallback;
+}
+
+export function assertReviewStatePersisted(
+  result: ReviewStatePersistenceResult | boolean | void | unknown,
+  context: ReviewStatePersistenceContext
+): void {
+  if (result === true || result === undefined) { return; }
+  if (result === false) {
+    throw new Error(`Review-state persistence failed for mission ${context.slug}, phase ${context.phase || 'unknown'}, round ${context.round ?? 'unknown'}: persistence returned false`);
+  }
+  if (!result || typeof result !== 'object' || !('outcome' in result)) { return; }
+  const persistenceResult = result as ReviewStatePersistenceResult;
+  if (persistenceResult.outcome === 'committed' || persistenceResult.outcome === 'unchanged') { return; }
+  throw new Error(
+    `Review-state persistence failed for mission ${context.slug}, phase ${context.phase || 'unknown'}, round ${context.round ?? 'unknown'}, stage ${persistenceResult.stage}: ${persistenceResult.diagnostic}`
+  );
+}
+
+export function persistReviewStateOrThrow(
+  writeFn: typeof writeReviewState,
+  slug: string,
+  state: ReviewState | Record<string, unknown>,
+  worktree: string
+): ReviewStatePersistenceResult {
+  const result = writeFn(slug, state, worktree);
+  assertReviewStatePersisted(result, {
+    slug,
+    phase: state instanceof ReviewState ? state.phase : String(state.phase || 'unknown'),
+    round: state instanceof ReviewState ? state.round : (typeof state.round === 'number' ? state.round : null)
+  });
+  return result;
+}
 
 /**
  * Return the path to the review-state file for a given slug.
@@ -278,28 +335,54 @@ export class ReviewState {
 
   save(
     worktree = resolveWorktree(this.slug) || process.cwd(),
-    gitFn = git
-  ): boolean {
+    gitFn: GitFn = git,
+    writeFileAtomicFn: AtomicWriteFn = writeFileAtomic
+  ): ReviewStatePersistenceResult {
     const statePath = reviewStateFile(this.slug, worktree);
-    if (!statePath) { return false; }
-
-    const payload = this.toJSON();
-    fs.writeFileSync(statePath, JSON.stringify(payload, null, 2) + '\n', 'utf8');
-
-    const relPath = path.relative(worktree, statePath);
-    const _result = gitFn(['-C', worktree, 'add', relPath]);
-    const msg = `review-state(${this.slug}): round ${this.round} (${this.phase}) [${this.reviewer} -> ${this.implementer}]${this.disposition ? ` disposition=${this.disposition}` : ''}`;
-    const commitResult = gitFn(['-C', worktree, 'commit', '-m', msg]);
-
-    if (commitResult.status !== 0) {
-      const statusResult = gitFn(['-C', worktree, 'status', '--porcelain', relPath]);
-      if (statusResult.stdout.trim() === '') {
-        return true;
-      }
-      log.warn(`Failed to commit review state update: ${commitResult.stderr}`);
+    if (!statePath) {
+      return { outcome: 'write-failed', stage: 'write', diagnostic: `Mission directory not found for ${this.slug}` };
     }
 
-    return true;
+    const payload = this.toJSON();
+    try {
+      writeFileAtomicFn(statePath, JSON.stringify(payload, null, 2) + '\n');
+    } catch (error) {
+      return { outcome: 'write-failed', stage: 'write', diagnostic: diagnosticFrom(error, 'Atomic review-state write failed') };
+    }
+
+    const relPath = path.relative(worktree, statePath);
+    let addResult: ReturnType<GitFn>;
+    try {
+      addResult = gitFn(['-C', worktree, 'add', relPath]);
+    } catch (error) {
+      return { outcome: 'add-failed', stage: 'add', diagnostic: diagnosticFrom(error, 'git add failed') };
+    }
+    if (addResult.status !== 0) {
+      return { outcome: 'add-failed', stage: 'add', diagnostic: gitDiagnostic(addResult, 'git add failed') };
+    }
+
+    const msg = `review-state(${this.slug}): round ${this.round} (${this.phase}) [${this.reviewer} -> ${this.implementer}]${this.disposition ? ` disposition=${this.disposition}` : ''}`;
+    let commitResult: ReturnType<GitFn>;
+    try {
+      commitResult = gitFn(['-C', worktree, 'commit', '-m', msg]);
+    } catch (error) {
+      return { outcome: 'commit-failed-dirty', stage: 'commit', diagnostic: diagnosticFrom(error, 'git commit failed') };
+    }
+
+    if (commitResult.status !== 0) {
+      let statusResult: ReturnType<GitFn>;
+      try {
+        statusResult = gitFn(['-C', worktree, 'status', '--porcelain', relPath]);
+      } catch (error) {
+        return { outcome: 'commit-failed-dirty', stage: 'commit', diagnostic: diagnosticFrom(error, gitDiagnostic(commitResult, 'git commit failed')) };
+      }
+      if (statusResult.status === 0 && statusResult.stdout.trim() === '') {
+        return { outcome: 'unchanged' };
+      }
+      return { outcome: 'commit-failed-dirty', stage: 'commit', diagnostic: gitDiagnostic(commitResult, 'git commit failed and review state remains dirty') };
+    }
+
+    return { outcome: 'committed' };
   }
 }
 
@@ -309,16 +392,17 @@ export class ReviewState {
  *
  * @param {string} slug
  * @param {ReviewState|object} state
- * @returns {boolean}  true if written successfully
+ * @returns {ReviewStatePersistenceResult}
  */
 export function writeReviewState(
   slug: string,
   state: ReviewState | Record<string, unknown>,
   worktree = resolveWorktree(slug) || process.cwd(),
-  gitFn = git
-): boolean {
+  gitFn: GitFn = git,
+  writeFileAtomicFn: AtomicWriteFn = writeFileAtomic
+): ReviewStatePersistenceResult {
   const instance = state instanceof ReviewState ? state : new ReviewState(slug, state as ReviewStateData);
-  return instance.save(worktree, gitFn);
+  return instance.save(worktree, gitFn, writeFileAtomicFn);
 }
 
 /**
@@ -326,28 +410,44 @@ export function writeReviewState(
  * Commits the deletion if the file was tracked.
  *
  * @param {string} slug
- * @returns {boolean}  true if a file was deleted
+ * @returns {ReviewStatePersistenceResult}
  */
 export function resetReviewState(
   slug: string,
   worktree = resolveWorktree(slug) || process.cwd(),
-  gitFn = git
-): boolean {
+  gitFn: GitFn = git
+): ReviewStatePersistenceResult {
   const statePath = reviewStateFile(slug, worktree);
-  if (!statePath || !fs.existsSync(statePath)) { return false; }
-
-  fs.unlinkSync(statePath);
+  if (!statePath || !fs.existsSync(statePath)) { return { outcome: 'unchanged' }; }
 
   const relPath = path.relative(worktree, statePath);
+  const tombstonePath = path.join(path.dirname(statePath), `.${path.basename(statePath)}.${process.pid}.${Date.now()}.deleted`);
   try {
-    gitFn(['-C', worktree, 'rm', '--cached', relPath]);
-    const result = gitFn(['-C', worktree, 'commit', '-m', `review-state(${slug}): reset (--reset flag)`]);
-    if (result.status !== 0) {
-      log.warn(`Failed to commit review state reset: ${result.stderr}`);
-    }
-  } catch {
-    // file may not have been tracked yet
+    fs.renameSync(statePath, tombstonePath);
+  } catch (error) {
+    return { outcome: 'write-failed', stage: 'write', diagnostic: diagnosticFrom(error, 'Atomic review-state deletion failed') };
   }
 
-  return true;
+  try {
+    const addResult = gitFn(['-C', worktree, 'add', '-u', '--', relPath]);
+    if (addResult.status !== 0) {
+      const statusResult = gitFn(['-C', worktree, 'status', '--porcelain', relPath]);
+      if (statusResult.status === 0 && statusResult.stdout.trim() === '') {
+        return { outcome: 'unchanged' };
+      }
+      return { outcome: 'add-failed', stage: 'add', diagnostic: gitDiagnostic(addResult, 'git add deletion failed') };
+    }
+    const commitResult = gitFn(['-C', worktree, 'commit', '-m', `review-state(${slug}): reset (--reset flag)`]);
+    if (commitResult.status === 0) { return { outcome: 'committed' }; }
+
+    const statusResult = gitFn(['-C', worktree, 'status', '--porcelain', relPath]);
+    if (statusResult.status === 0 && statusResult.stdout.trim() === '') {
+      return { outcome: 'unchanged' };
+    }
+    return { outcome: 'commit-failed-dirty', stage: 'commit', diagnostic: gitDiagnostic(commitResult, 'git commit failed and review-state deletion remains dirty') };
+  } catch (error) {
+    return { outcome: 'commit-failed-dirty', stage: 'commit', diagnostic: diagnosticFrom(error, 'Review-state reset commit failed') };
+  } finally {
+    if (fs.existsSync(tombstonePath)) { fs.unlinkSync(tombstonePath); }
+  }
 }
