@@ -430,9 +430,9 @@ test('resolveAgentAdapter returns empty object (command env prefix removed)', ()
   assert.deepEqual(resolveAgentAdapter('/tmp'), {});
 });
 
-test('resolveMaxConcurrentCustom defaults to unlimited and reads a positive configured limit', () => {
+test('resolveMaxConcurrentCustom defaults to 1 and reads a positive configured limit', () => {
   withTempDir(root => {
-    assert.equal(resolveMaxConcurrentCustom(root), Infinity);
+    assert.equal(resolveMaxConcurrentCustom(root), 1);
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
       adapters: { agents: { maxConcurrentCustom: 3 } }
     }), 'utf8');

@@ -761,6 +761,24 @@ export async function startReviewLoop(slug: string, opts: {
       }
 
       if (!handoff || !handoff.ok) {
+        // Auto-bounce for declared-gate validation failures: transition back to
+        // active and relaunch the implementer with a fix prompt, so the mission
+        // is not stranded waiting for manual intervention.
+        const handoffObj = handoff || {};
+        if (handoffObj.reason === 'validation-failed') {
+          transitionTaskFn(slug, 'active', { rootDir: worktree, log });
+          log(fmt.status('INFO', `Auto-bounced ${slug} to active: declared-gate validation failure. Fix the gate in MISSION.md and retry.`));
+          // Persist rejection reason for follow-up action
+          const persisted = readReviewStateFn(slug, worktree);
+          const metadata = persisted && persisted.metadata && typeof persisted.metadata === 'object'
+            ? { ...persisted.metadata }
+            : {};
+          metadata.gateFailureReason = 'validation-failed';
+          metadata.gateFailureError = handoffObj.error;
+          writeReviewStateFn(slug, { ...(persisted || {}), metadata } as any, worktree);
+          exit(1);
+          return;
+        }
         fallbackGuidance(handoff && handoff.error ? String(handoff.error) : null);
         exit(1);
         return;
