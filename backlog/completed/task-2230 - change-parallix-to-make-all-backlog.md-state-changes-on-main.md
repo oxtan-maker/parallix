@@ -1,11 +1,12 @@
 ---
 id: TASK-2230
 title: change parallix to make all backlog.md state changes on main
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-07-12 04:54'
 updated_date: '2026-07-12 11:07'
-labels: []
+labels:
+  - ai_sdlc
 dependencies: []
 ---
 

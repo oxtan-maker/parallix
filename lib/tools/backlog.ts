@@ -4,6 +4,7 @@ import { git } from '../core/git.js';
 import { WORKFLOW_AGENT_NAMES } from '../agents/agents.js';
 import * as fmt from '../core/fmt.js';
 import { resolveTaskStorage } from '../core/product-config.js';
+import { resolveBaseWorktree, resolveMissionBaseBranch, resolveWorktree } from '../core/mission-utils.js';
 
 /** @returns {readonly string[]} */
 function getSupportedAgents() {
@@ -522,7 +523,7 @@ function clearTaskAgentAssignee(taskFilePath: string) {
  * @param {{implementer?: string|null, clearAssignee?: boolean, rootDir?: string, log?: Function}} [opts]
  * @returns {boolean}
  */
-function transitionTask(slug: string, newStatus: string, { implementer = null, clearAssignee = false, rootDir = process.cwd(), log = fmt.log.plain }: { implementer?: string | null | undefined, clearAssignee?: boolean, rootDir?: string, log?: Function } = {} as any) {
+function transitionTaskLocal(slug: string, newStatus: string, { implementer = null, clearAssignee = false, rootDir = process.cwd(), log = fmt.log.plain }: { implementer?: string | null | undefined, clearAssignee?: boolean, rootDir?: string, log?: Function } = {} as any) {
   const resolution = resolveTaskFile(slug, rootDir);
   if (!resolution.ok) {
     log(fmt.status('WARN', `Could not transition task ${fmt.slug(slug)}: ${resolution.reason}`));
@@ -575,6 +576,65 @@ function transitionTask(slug: string, newStatus: string, { implementer = null, c
 
   return true; // Already in the desired state
 }
+
+/**
+ * Resolve the checkout that owns a mission's durable Backlog state.  The
+ * recorded feature base wins; missions without one retain main's legacy role.
+ */
+function resolveBacklogStateRoot(slug: string, missionRoot: string = process.cwd()): string {
+  const currentBranch = git(['-C', missionRoot, 'branch', '--show-current']);
+  if (currentBranch.status === 0 && currentBranch.stdout.trim() && !currentBranch.stdout.trim().startsWith('mission/')) {
+    return missionRoot;
+  }
+  return resolveBaseWorktree(slug, { rootDir: missionRoot });
+}
+
+/**
+ * Apply a mission lifecycle transition where Backlog is authoritative, then
+ * bring the mission worktree forward to the branch that received the update.
+ * This deliberately composes the established worktree and git abstractions;
+ * callers must not write a mission-worktree copy of backlog.md directly.
+ */
+function transitionTaskOnIntegrationBranch(
+  slug: string,
+  newStatus: string,
+  { implementer = null, clearAssignee = false, rootDir = process.cwd(), log = fmt.log.plain }: { implementer?: string | null | undefined, clearAssignee?: boolean, rootDir?: string, log?: Function } = {} as any
+): boolean {
+  let stateRoot: string;
+  try {
+    stateRoot = resolveBacklogStateRoot(slug, rootDir);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    log(fmt.status('WARN', `Could not resolve integration branch for ${fmt.slug(slug)}: ${detail}`));
+    return false;
+  }
+
+  if (!transitionTaskLocal(slug, newStatus, { implementer, clearAssignee, rootDir: stateRoot, log })) {
+    return false;
+  }
+
+  const missionWorktree = resolveWorktree(slug, { cwd: rootDir });
+  if (!missionWorktree || missionWorktree === stateRoot) {
+    return true;
+  }
+  const baseBranch = resolveMissionBaseBranch(slug, missionWorktree);
+  const result = git(['-C', missionWorktree, 'rebase', baseBranch]);
+  if (result.status !== 0) {
+    const detail = [result.stdout, result.stderr].filter(Boolean).join('\n').trim();
+    const abort = git(['-C', missionWorktree, 'rebase', '--abort']);
+    const abortDetail = abort.status === 0
+      ? ' Rebase aborted; the mission worktree was restored to its pre-rebase state.'
+      : ` Rebase abort also failed${[abort.stdout, abort.stderr].filter(Boolean).join('\n').trim() ? ': ' + [abort.stdout, abort.stderr].filter(Boolean).join('\n').trim() : '.'}`;
+    log(fmt.status('WARN', `Backlog state updated on integration branch, but mission/${slug} could not rebase onto ${baseBranch}${detail ? ': ' + detail : '.'}${abortDetail}`));
+    return false;
+  }
+  log(fmt.status('PASS', `Rebased mission/${slug} onto ${baseBranch} after Backlog state update.`));
+  return true;
+}
+
+// Public lifecycle seam. Existing command injection and mocks retain this name,
+// while every production caller now receives integration-branch behavior.
+const transitionTask = transitionTaskOnIntegrationBranch;
 
 /** @param {string} taskFilePath @returns {string|null} */
 function getTaskAssignee(taskFilePath: string) {
@@ -818,6 +878,8 @@ export { getTaskStorage };
 export { getTaskStatus };
 export { setTaskStatus };
 export { transitionTask };
+export { resolveBacklogStateRoot };
+export { transitionTaskOnIntegrationBranch };
 export { commitTaskFileUpdate };
 export { completeTask };
 export { getTaskAssignee };

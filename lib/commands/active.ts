@@ -18,7 +18,7 @@ const EXECUTE_PROMPT_PATH = path.join(__dirname, '..', '..', 'prompts', 'execute
 
 /**
  * @param {string[]} args
- * @param {{inferSlugFn?: Function, missionStartFn?: Function, resolveWorktreeFn?: Function, readAgentConfigOrExitFn?: Function, resolveTaskFileFn?: Function, buildCheckpointContextFn?: Function, buildExecutePromptFn?: Function, selectLaunchAndRecordFn?: Function, enforceExecuteCommitSafetyFn?: Function, runHandoffAndReviewFn?: Function, exitFn?: Function, logFn?: Function, errorFn?: Function}} [options]
+ * @param {{inferSlugFn?: Function, missionStartFn?: Function, resolveWorktreeFn?: Function, readAgentConfigOrExitFn?: Function, resolveTaskFileFn?: Function, buildCheckpointContextFn?: Function, buildExecutePromptFn?: Function, selectLaunchAndRecordFn?: Function, getTaskStatusFn?: Function, transitionTaskFn?: Function, enforceExecuteCommitSafetyFn?: Function, runHandoffAndReviewFn?: Function, exitFn?: Function, logFn?: Function, errorFn?: Function}} [options]
  */
 async function active(args, options = {}) {
   const {
@@ -30,6 +30,8 @@ async function active(args, options = {}) {
     buildCheckpointContextFn = buildCheckpointContext,
     buildExecutePromptFn = buildExecutePrompt,
     selectLaunchAndRecordFn = selectLaunchAndRecord,
+    getTaskStatusFn = getTaskStatus,
+    transitionTaskFn = transitionTask,
     enforceExecuteCommitSafetyFn = enforceExecuteCommitSafety,
     runHandoffAndReviewFn = runHandoffAndReview,
     exitFn = process.exit,
@@ -113,6 +115,22 @@ async function active(args, options = {}) {
     errorFn(`Execute agent (${fmt.agent(agent)}) exited with status ${result.status}.`);
     exitFn(result.status || 1);
     return;
+  }
+
+  // The execute agent may edit implementation artifacts, but task lifecycle
+  // transitions are owned by Parallix. Restore a direct status edit instead of
+  // interrupting a completed run. Do not rewrite the implementer: a launcher
+  // fallback or an operator reassignment is a legitimate concurrent update.
+  if (taskResolution.ok && taskResolution.taskFile) {
+    const taskStatus = getTaskStatusFn(taskResolution.taskFile);
+    if (taskStatus && taskStatus !== 'active') {
+      logFn(fmt.status('WARN', `Execute agent changed task ${fmt.slug(normalizedSlug)} status to ${taskStatus}; restoring status=active before handoff.`));
+      if (!transitionTaskFn(normalizedSlug, 'active', { rootDir: worktree, log: logFn })) {
+        errorFn(fmt.status('FAIL', `Could not restore task ${fmt.slug(normalizedSlug)} to status=active after an execute-agent lifecycle edit.`));
+        exitFn(1);
+        return;
+      }
+    }
   }
 
   try {
@@ -546,7 +564,7 @@ async function runHandoffAndReview(slug, worktree, agent, options = {}) {
   }
 
   log(`\nStarting autonomous review loop (implementer: ${fmt.agent(agent)})...`);
-  _startReviewLoop(slug, { implementer: agent, worktree, recordStageStatsSafeFn: review.recordStageStatsSafe });
+  await _startReviewLoop(slug, { implementer: agent, worktree, recordStageStatsSafeFn: review.recordStageStatsSafe });
   return true;
 }
 
