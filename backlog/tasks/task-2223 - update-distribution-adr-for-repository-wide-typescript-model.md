@@ -1,7 +1,7 @@
 ---
 id: TASK-2223
 title: Update the distribution ADR with a repository-wide TypeScript model
-status: backlog
+status: review
 assignee: []
 created_date: '2026-07-11 00:00'
 labels:
