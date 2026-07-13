@@ -31,6 +31,23 @@ test('writeSession then readSession returns the persisted agent and timestamp', 
   });
 });
 
+test('writeSession preserves the legacy path and exact JSON field structure', () => {
+  withTempWorktree(worktree => {
+    const file = path.join(worktree, '.workflow', 'sessions', 'task-1025-reviewer.json');
+    sessions.writeSession(worktree, 'task-1025', 'reviewer', {
+      agent: 'codex',
+      lastLaunched: '2026-07-13T08:00:00.000Z',
+      sessionId: 'session-123'
+    });
+    assert.equal(sessions.sessionFile(worktree, 'task-1025', 'reviewer'), file);
+    assert.equal(fs.readFileSync(file, 'utf8'), `${JSON.stringify({
+      agent: 'codex',
+      lastLaunched: '2026-07-13T08:00:00.000Z',
+      sessionId: 'session-123'
+    }, null, 2)}\n`);
+  });
+});
+
 test('writeSession refuses payload without an agent string', () => {
   withTempWorktree(worktree => {
     assert.equal(sessions.writeSession(worktree, 'task-1025', 'implementer', {}), false);
@@ -91,6 +108,23 @@ test('writeSession persists null sessionId when not provided', () => {
     assert.equal(ok, true);
     const marker = sessions.readSession(worktree, 'task-1025', 'implementer');
     assert.equal(marker.sessionId, null);
+  });
+});
+
+test('writeSession propagates durable persistence failure without replacing prior metadata', () => {
+  withTempWorktree(worktree => {
+    sessions.writeSession(worktree, 'task-1025', 'implementer', { agent: 'claude' });
+    assert.throws(
+      () => sessions.writeSession(
+        worktree,
+        'task-1025',
+        'implementer',
+        { agent: 'codex' },
+        () => { throw new Error('injected session persistence failure'); }
+      ),
+      /injected session persistence failure/
+    );
+    assert.equal(sessions.readSession(worktree, 'task-1025', 'implementer').agent, 'claude');
   });
 });
 

@@ -63,4 +63,7 @@ export default checkpoint;
 
 // CJS compat: ensure require() returns the function directly
 declare const module: { exports: any } | undefined;
-if (typeof module !== 'undefined') { module.exports = checkpoint; }
+if (typeof module !== 'undefined') {
+  module.exports = checkpoint;
+  module.exports.default = checkpoint;
+}
