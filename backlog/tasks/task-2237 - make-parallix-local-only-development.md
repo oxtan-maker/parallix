@@ -1,9 +1,11 @@
 ---
 id: TASK-2237
 title: make parallix local only development
-status: review
-assignee: [claude]
+status: ready-for-integration
+assignee:
+  - claude
 created_date: '2026-07-12 14:23'
+updated_date: '2026-07-13 08:07'
 labels: []
 dependencies: []
 ordinal: 37000
