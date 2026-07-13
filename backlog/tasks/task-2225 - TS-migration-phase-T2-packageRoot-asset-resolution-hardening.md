@@ -1,8 +1,8 @@
 ---
 id: TASK-2225
 title: 'TS migration phase T2: packageRoot() asset-resolution hardening'
-status: refined
-assignee: [codex]
+status: active
+assignee: [custom]
 created_date: '2026-07-11 13:46'
 labels:
   - typescript
