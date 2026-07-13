@@ -1,7 +1,7 @@
 ---
 id: TASK-2220
 title: Make review-state persistence atomic and fail closed
-status: review
+status: ready-for-integration
 assignee: [codex]
 created_date: '2026-07-11 00:00'
 labels:
