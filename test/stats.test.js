@@ -499,9 +499,9 @@ test('task-1414: renderWeeklyStatsReport adds an agent spend-by-stage table with
 
 test('task-1414: renderWeeklyStatsReport aggregates a Codex row from openai_usage_after with stage active shown as execute', () => {
   const report = stats.renderWeeklyStatsReport([
-    { date: '2026-05-16', repo: 'r', mission: 'task-codex', classification: 'ai_sdlc', implementer: 'codex', provider: 'openai', stage: 'draft', pr_fix_rounds: '0', openai_usage_after: '20', cost_usd: '0', duration_minutes: '0' },
-    { date: '2026-05-17', repo: 'r', mission: 'task-codex', classification: 'ai_sdlc', implementer: 'codex', provider: 'openai', stage: 'active', pr_fix_rounds: '0', openai_usage_after: '30', cost_usd: '0', duration_minutes: '0' },
-    { date: '2026-05-18', repo: 'r', mission: 'task-codex', classification: 'ai_sdlc', implementer: 'codex', provider: 'openai', stage: 'review', pr_fix_rounds: '0', openai_usage_after: '50', cost_usd: '0', duration_minutes: '0' },
+    { date: '2026-05-16', repo: 'r', mission: 'task-codex', classification: 'ai_sdlc', implementer: 'codex', provider: 'openai', stage: 'draft', pr_fix_rounds: '0', openai_usage_after: '20', cost_usd: '0', duration_minutes: '0', closed: 'yes' },
+    { date: '2026-05-17', repo: 'r', mission: 'task-codex', classification: 'ai_sdlc', implementer: 'codex', provider: 'openai', stage: 'active', pr_fix_rounds: '0', openai_usage_after: '30', cost_usd: '0', duration_minutes: '0', closed: 'yes' },
+    { date: '2026-05-18', repo: 'r', mission: 'task-codex', classification: 'ai_sdlc', implementer: 'codex', provider: 'openai', stage: 'review', pr_fix_rounds: '0', openai_usage_after: '50', cost_usd: '0', duration_minutes: '0', closed: 'yes' },
   ], { today: '2026-05-18' });
 
   const plain = require('../lib/core/fmt').stripAnsi(report);
@@ -514,9 +514,9 @@ test('task-1414: renderWeeklyStatsReport aggregates a Codex row from openai_usag
 
 test('task-1414: renderWeeklyStatsReport aggregates a Claude row from cost_usd, not tokens/duration/usage', () => {
   const report = stats.renderWeeklyStatsReport([
-    { date: '2026-05-16', repo: 'r', mission: 'task-claude', classification: 'ai_sdlc', implementer: 'claude', stage: 'draft', pr_fix_rounds: '0', openai_usage_after: '999', cost_usd: '1', duration_minutes: '999' },
-    { date: '2026-05-17', repo: 'r', mission: 'task-claude', classification: 'ai_sdlc', implementer: 'claude', stage: 'active', pr_fix_rounds: '0', openai_usage_after: '999', cost_usd: '3', duration_minutes: '999' },
-    { date: '2026-05-18', repo: 'r', mission: 'task-claude', classification: 'ai_sdlc', implementer: 'claude', stage: 'review', pr_fix_rounds: '0', openai_usage_after: '999', cost_usd: '6', duration_minutes: '999' },
+    { date: '2026-05-16', repo: 'r', mission: 'task-claude', classification: 'ai_sdlc', implementer: 'claude', stage: 'draft', pr_fix_rounds: '0', openai_usage_after: '999', cost_usd: '1', duration_minutes: '999', closed: 'yes' },
+    { date: '2026-05-17', repo: 'r', mission: 'task-claude', classification: 'ai_sdlc', implementer: 'claude', stage: 'active', pr_fix_rounds: '0', openai_usage_after: '999', cost_usd: '3', duration_minutes: '999', closed: 'yes' },
+    { date: '2026-05-18', repo: 'r', mission: 'task-claude', classification: 'ai_sdlc', implementer: 'claude', stage: 'review', pr_fix_rounds: '0', openai_usage_after: '999', cost_usd: '6', duration_minutes: '999', closed: 'yes' },
   ], { today: '2026-05-18' });
 
   const plain = require('../lib/core/fmt').stripAnsi(report);
@@ -527,9 +527,9 @@ test('task-1414: renderWeeklyStatsReport aggregates a Claude row from cost_usd, 
 
 test('task-1414: renderWeeklyStatsReport aggregates a Custom/local row from duration_minutes, not cost or usage', () => {
   const report = stats.renderWeeklyStatsReport([
-    { date: '2026-05-16', repo: 'r', mission: 'task-custom', classification: 'ai_sdlc', implementer: 'custom', stage: 'draft', pr_fix_rounds: '0', openai_usage_after: '999', cost_usd: '999', duration_minutes: '5' },
-    { date: '2026-05-17', repo: 'r', mission: 'task-custom', classification: 'ai_sdlc', implementer: 'custom', stage: 'active', pr_fix_rounds: '0', openai_usage_after: '999', cost_usd: '999', duration_minutes: '15' },
-    { date: '2026-05-18', repo: 'r', mission: 'task-custom', classification: 'ai_sdlc', implementer: 'custom', stage: 'review', pr_fix_rounds: '0', openai_usage_after: '999', cost_usd: '999', duration_minutes: '30' },
+    { date: '2026-05-16', repo: 'r', mission: 'task-custom', classification: 'ai_sdlc', implementer: 'custom', stage: 'draft', pr_fix_rounds: '0', openai_usage_after: '999', cost_usd: '999', duration_minutes: '5', closed: 'yes' },
+    { date: '2026-05-17', repo: 'r', mission: 'task-custom', classification: 'ai_sdlc', implementer: 'custom', stage: 'active', pr_fix_rounds: '0', openai_usage_after: '999', cost_usd: '999', duration_minutes: '15', closed: 'yes' },
+    { date: '2026-05-18', repo: 'r', mission: 'task-custom', classification: 'ai_sdlc', implementer: 'custom', stage: 'review', pr_fix_rounds: '0', openai_usage_after: '999', cost_usd: '999', duration_minutes: '30', closed: 'yes' },
   ], { today: '2026-05-18' });
 
   const plain = require('../lib/core/fmt').stripAnsi(report);
@@ -538,10 +538,10 @@ test('task-1414: renderWeeklyStatsReport aggregates a Custom/local row from dura
   assert.doesNotMatch(spendSection, /999/);
 });
 
-test('task-1414: renderWeeklyStatsReport spend table groups a local model row by model name, matching Agent performance this week', () => {
+test('task-2213: renderWeeklyStatsReport spend table groups a mission by its model row', () => {
   const rows = [
-    { date: '2026-05-17', repo: 'r', mission: 'task-model', classification: 'ai_sdlc', implementer: 'custom', model: 'qwen3.5', stage: 'draft', pr_fix_rounds: '0', duration_minutes: '10' },
-    { date: '2026-05-18', repo: 'r', mission: 'task-model', classification: 'ai_sdlc', implementer: 'custom', model: 'qwen3.5', stage: 'active', pr_fix_rounds: '0', duration_minutes: '10' },
+    { date: '2026-05-17', repo: 'r', mission: 'task-model', classification: 'ai_sdlc', implementer: 'custom', model: 'qwen3.5', stage: 'draft', pr_fix_rounds: '0', duration_minutes: '10', closed: 'yes' },
+    { date: '2026-05-18', repo: 'r', mission: 'task-model', classification: 'ai_sdlc', implementer: 'custom', model: 'qwen3.5', stage: 'active', pr_fix_rounds: '0', duration_minutes: '10', closed: 'yes' },
   ];
   const report = stats.renderWeeklyStatsReport(rows, { today: '2026-05-18' });
   const plain = require('../lib/core/fmt').stripAnsi(report);
@@ -549,12 +549,12 @@ test('task-1414: renderWeeklyStatsReport spend table groups a local model row by
   assert.match(plain, /Agent performance this week[\s\S]*qwen3\.5/);
   const spendSection = plain.slice(plain.indexOf('Agent spend by stage this week'));
   assert.match(spendSection, /qwen3\.5\s+10m \(50%\)\s+10m \(50%\)/);
-  assert.doesNotMatch(spendSection, /\bcustom\b/);
+  assert.doesNotMatch(spendSection, /custom/);
 });
 
 test('task-1414: renderWeeklyStatsReport spend table renders a stable empty state instead of misleading 0% for a row with no spend', () => {
   const report = stats.renderWeeklyStatsReport([
-    { date: '2026-05-18', repo: 'r', mission: 'task-none', classification: 'ai_sdlc', implementer: 'custom', stage: 'draft', pr_fix_rounds: '0', openai_usage_after: '0', cost_usd: '0', duration_minutes: '0' },
+    { date: '2026-05-18', repo: 'r', mission: 'task-none', classification: 'ai_sdlc', implementer: 'custom', stage: 'draft', pr_fix_rounds: '0', openai_usage_after: '0', cost_usd: '0', duration_minutes: '0', closed: 'yes' },
   ], { today: '2026-05-18' });
 
   const plain = require('../lib/core/fmt').stripAnsi(report);
@@ -1775,9 +1775,7 @@ test('task-1342: review row with OpenAI reviewer shows Usage % even when claude 
   assert.equal(usageCol, '37', 'Usage % should be 37 for review row with OpenAI reviewer');
 });
 
-// task-1376: summarizeAgentWindow groups by model when populated, falls back to implementer
-
-test('task-1376: summarizeAgentWindow groups local AI rows by model name, not by custom', () => {
+test('task-2213: summarizeAgentWindow keeps separate model rows for local AI missions', () => {
   const window = { start: new Date('2026-06-10T00:00:00Z'), end: new Date('2026-06-20T00:00:00Z') };
   const rows = [
     { date: '2026-06-12', mission: 'task-1001', implementer: 'custom', model: 'qwen3.5', classification: 'ai_sdlc', pr_fix_rounds: '1', closed: 'yes' },
@@ -1787,18 +1785,13 @@ test('task-1376: summarizeAgentWindow groups local AI rows by model name, not by
 
   const result = stats._internals.summarizeAgentWindow(rows, window);
 
-  assert.equal(result.length, 2, 'should have two groups: qwen3.5 and llama3');
-  const qwenEntry = result.find(r => r.implementer === 'qwen3.5');
-  const llamaEntry = result.find(r => r.implementer === 'llama3');
-  assert.ok(qwenEntry, 'qwen3.5 group should exist');
-  assert.ok(llamaEntry, 'llama3 group should exist');
-  assert.equal(qwenEntry.missions, 2, 'qwen3.5 should have 2 missions');
-  assert.equal(qwenEntry.averageFixRounds, '1.50', 'qwen3.5 avg fix rounds should be 1.50');
-  assert.equal(llamaEntry.missions, 1, 'llama3 should have 1 mission');
-  assert.equal(llamaEntry.averageFixRounds, '0.00', 'llama3 avg fix rounds should be 0.00');
+  assert.deepEqual(result, [
+    { implementer: 'llama3', missions: 1, averageFixRounds: '0.00' },
+    { implementer: 'qwen3.5', missions: 2, averageFixRounds: '1.50' },
+  ]);
 });
 
-test('task-1376: summarizeAgentWindow empty model falls back to implementer', () => {
+test('task-2213: summarizeAgentWindow falls back to the recorded implementer when the telemetry model is blank', () => {
   const window = { start: new Date('2026-06-10T00:00:00Z'), end: new Date('2026-06-20T00:00:00Z') };
   const rows = [
     { date: '2026-06-12', mission: 'task-2001', implementer: 'claude', model: '', classification: 'user_value', pr_fix_rounds: '3', closed: 'yes' },
@@ -1814,7 +1807,7 @@ test('task-1376: summarizeAgentWindow empty model falls back to implementer', ()
   assert.equal(claudeEntry.averageFixRounds, '2.00', 'claude avg fix rounds should be 2.00');
 });
 
-test('task-1376: summarizeAgentWindow handles mixed cloud + local AI rows together', () => {
+test('task-2213: summarizeAgentWindow keeps mixed telemetry models in their own rows', () => {
   const window = { start: new Date('2026-06-10T00:00:00Z'), end: new Date('2026-06-20T00:00:00Z') };
   const rows = [
     { date: '2026-06-12', mission: 'task-3001', implementer: 'codex', model: 'gpt-5', classification: 'ai_sdlc', pr_fix_rounds: '1', closed: 'yes' },
@@ -1826,25 +1819,16 @@ test('task-1376: summarizeAgentWindow handles mixed cloud + local AI rows togeth
 
   const result = stats._internals.summarizeAgentWindow(rows, window);
 
-  assert.equal(result.length, 5, 'should have five groups');
-  const gptEntry = result.find(r => r.implementer === 'gpt-5');
-  const qwenEntry = result.find(r => r.implementer === 'qwen3.5');
-  const geminiEntry = result.find(r => r.implementer === 'gemini-2.5-pro');
-  const llamaEntry = result.find(r => r.implementer === 'llama3');
-  const claudeEntry = result.find(r => r.implementer === 'claude');
-  assert.ok(gptEntry);
-  assert.ok(qwenEntry);
-  assert.ok(geminiEntry);
-  assert.ok(llamaEntry);
-  assert.ok(claudeEntry);
-  assert.equal(gptEntry.missions, 1);
-  assert.equal(qwenEntry.missions, 1);
-  assert.equal(geminiEntry.missions, 1);
-  assert.equal(llamaEntry.missions, 1);
-  assert.equal(claudeEntry.missions, 1);
+  assert.deepEqual(result, [
+    { implementer: 'claude', missions: 1, averageFixRounds: '3.00' },
+    { implementer: 'gemini-2.5-pro', missions: 1, averageFixRounds: '0.00' },
+    { implementer: 'gpt-5', missions: 1, averageFixRounds: '1.00' },
+    { implementer: 'llama3', missions: 1, averageFixRounds: '1.00' },
+    { implementer: 'qwen3.5', missions: 1, averageFixRounds: '2.00' },
+  ]);
 });
 
-test('task-1376: renderWeeklyStatsReport displays model names in Agent family column', () => {
+test('task-2213: renderWeeklyStatsReport displays model rows in the Agent family column', () => {
   const report = stats.renderWeeklyStatsReport([
     { date: '2026-05-18', mission: 'task-a', classification: 'ai_sdlc', implementer: 'custom', model: 'qwen3.5', pr_fix_rounds: '2', closed: 'yes' },
     { date: '2026-05-17', mission: 'task-b', classification: 'user_value', implementer: 'codex', model: 'gpt-5', pr_fix_rounds: '1', closed: 'yes' },
@@ -1855,7 +1839,7 @@ test('task-1376: renderWeeklyStatsReport displays model names in Agent family co
   assert.match(plain, /gpt-5\s+1\s+1\.00/);
 });
 
-test('task-1376: renderRangeStatsReport displays model names in Agent family column', () => {
+test('task-2213: renderRangeStatsReport displays model rows in the Agent family column', () => {
   const report = stats.renderRangeStatsReport([
     { date: '2026-05-10', mission: 'task-a', classification: 'ai_sdlc', implementer: 'custom', model: 'qwen3.5', pr_fix_rounds: '2', closed: 'yes' },
     { date: '2026-05-15', mission: 'task-b', classification: 'user_value', implementer: 'custom', model: 'llama3', pr_fix_rounds: '0', closed: 'yes' },
