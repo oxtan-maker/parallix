@@ -1,8 +1,8 @@
 ---
 id: TASK-2213
 title: review stats is broken
-status: review
-assignee: []
+status: active
+assignee: [codex]
 created_date: '2026-07-11 03:53'
 labels: []
 dependencies: []
