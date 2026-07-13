@@ -202,6 +202,18 @@ function evidenceCellHasVerifiableReference(cell: string, rootDir: string, known
     if (/^(npm|npx|node|git|px)\s+/i.test(command)) {
       return true;
     }
+    // Shell commands are evidence only when they name a repository file.
+    // This keeps raw environment output out while allowing `bash hello.sh`.
+    if (/^(bash|sh|cat|head|tail|diff|grep|sed|awk|xxd|od|wc|sort|uniq)\s+/i.test(command)) {
+      const args = command.split(/\s+/).slice(1);
+      for (const arg of args) {
+        if (arg.startsWith('-')) { continue; }
+        const candidatePath = arg.replace(/^\.\//, '');
+        if (fs.existsSync(path.join(rootDir, candidatePath))) {
+          return true;
+        }
+      }
+    }
     if (command.startsWith('./')) {
       const commandPath = command.split(/\s+/)[0];
       if (fs.existsSync(path.join(rootDir, commandPath.replace(/^\.\//, '')))) {

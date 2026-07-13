@@ -169,6 +169,32 @@ test('performStaticReview rejects placeholder-only Goal Check evidence rows', (t
   }
 });
 
+test('performStaticReview accepts a shell command that references an existing repository file', (t) => {
+  const { mock } = t;
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'static-review-shell-command-'));
+  const missionDir = path.join(rootDir, 'missions', 'task-shell-command');
+  const checkpointPath = path.join(missionDir, 'CP-1.md');
+  fs.mkdirSync(missionDir, { recursive: true });
+  fs.writeFileSync(path.join(rootDir, 'hello.sh'), '#!/usr/bin/env bash\necho hello\n');
+  fs.writeFileSync(checkpointPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| Script works | `bash hello.sh` prints hello | PASS |\n');
+  mock.method(missionUtils, 'getPrimaryBranch', () => 'main');
+
+  try {
+    const result = performStaticReview('task-shell-command', {
+      resolveWorktree: () => rootDir,
+      findMissionDir: () => missionDir,
+      findCheckpoints: () => [checkpointPath],
+      readFileSync: fs.readFileSync,
+      run: () => ({ status: 0, stdout: '' }),
+      log: () => {}
+    });
+
+    assert.equal(result.ok, true, result.findings.join('\n'));
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 test('performStaticReview rejects separator-only Goal Check tables', (t) => {
   const { mock } = t;
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'static-review-separator-'));

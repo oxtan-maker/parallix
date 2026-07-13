@@ -1065,7 +1065,10 @@ function promoteTaskForIntegrationIfNeeded(context: any, { dryRun = false } = {}
 
   const stateMapOptions = { rootDir: /** @type {string} */ (context.baseWorktree) };
   const approvedStatus = toActual('approved', stateMapOptions) || 'approved';
-  if (!setTaskStatus(/** @type {string} */ (context.task.taskFile || ''), approvedStatus)) {
+  const baseTask = context.slug && context.baseWorktree
+    ? resolveTaskFile(context.slug, context.baseWorktree)
+    : context.task;
+  if (!baseTask?.ok || !setTaskStatus(/** @type {string} */ (baseTask.taskFile || ''), approvedStatus)) {
     fmt.log.fail('Could not promote the Backlog task to approved before integration.');
     throw new IntegrationAbort();
   }

@@ -61,6 +61,13 @@ test('buildExecutePrompt uses absolute worktree paths and emits no docs/agent-pr
   assert.doesNotMatch(prompt, /\{\{[^}]+\}\}/);
 });
 
+test('buildExecutePrompt reserves Backlog lifecycle transitions for Parallix', () => {
+  const prompt = buildExecutePrompt('task-8', 'No checkpoint documents found. Start from CP-1.', { rootDir: '/tmp/testproj-task-8' });
+
+  assert.match(prompt, /do not change the Backlog task's status/i);
+  assert.match(prompt, /Parallix performs lifecycle transitions itself/i);
+});
+
 test('buildCheckpointContext returns fallback text when no checkpoints exist', () => {
   const context = buildCheckpointContext('task-nonexistent-9999');
   assert.match(context, /CP-1|no checkpoint/i);
@@ -436,6 +443,39 @@ test('active() runs the execute safety harness before handoff', async () => {
   assert.deepEqual(calls, ['safety', 'handoff']);
 });
 
+test('active() restores task status and continues to handoff when the execute agent changed it', async () => {
+  const calls = [];
+  const errors = [];
+
+  await active(['task-1038'], {
+    inferSlugFn: () => 'task-1038',
+    missionStartFn: () => ({ pass: true }),
+    resolveWorktreeFn: () => '/tmp/project-task-1038',
+    readAgentConfigOrExitFn: () => ({}),
+    resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
+    buildCheckpointContextFn: () => 'CP-1',
+    buildExecutePromptFn: () => 'Execute task-1038',
+    selectLaunchAndRecordFn: async () => ({ agent: 'codex', result: { status: 0 } }),
+    getTaskStatusFn: () => 'done',
+    transitionTaskFn: (slug, status, opts) => {
+      calls.push(['restore', slug, status, opts.rootDir]);
+      return true;
+    },
+    enforceExecuteCommitSafetyFn: () => calls.push('safety'),
+    runHandoffAndReviewFn: async () => calls.push('handoff'),
+    exitFn: (code) => { throw new Error(`unexpected exit ${code}`); },
+    logFn: () => {},
+    errorFn: (msg) => errors.push(msg)
+  });
+
+  assert.deepEqual(calls, [
+    ['restore', 'task-1038', 'active', '/tmp/project-task-1038'],
+    'safety',
+    'handoff'
+  ]);
+  assert.deepEqual(errors, []);
+});
+
 // ---------- runHandoffAndReview wiring ----------
 
 // Regression guard for the repairHandoffFn default in runHandoffAndReview
@@ -479,6 +519,28 @@ test('runHandoffAndReview passes worktree and implementer to startReviewLoop', a
   assert.equal(reviewLoopCalls[0].slug, 'task-test');
   assert.equal(reviewLoopCalls[0].opts.worktree, '/tmp/project-task-test');
   assert.equal(reviewLoopCalls[0].opts.implementer, 'codex');
+});
+
+test('runHandoffAndReview waits for the autonomous review loop to complete', async () => {
+  let resolveReview;
+  const reviewComplete = new Promise(resolve => { resolveReview = resolve; });
+  const handoffPromise = runHandoffAndReview('task-test', '/tmp/project-task-test', 'codex', {
+    validateCheckpointsBeforeHandoffFn: () => ({ ok: true }),
+    performHandoff: async () => ({ ok: true }),
+    startReviewLoop: async () => reviewComplete,
+    log: () => {},
+    error: () => {}
+  });
+  let settled = false;
+  handoffPromise.then(() => { settled = true; });
+
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(settled, false, 'px active must not finish while review is still running');
+
+  resolveReview();
+  assert.equal(await handoffPromise, true);
+  assert.equal(settled, true);
 });
 
 test('runHandoffAndReview retries handoff once after successful repair with force:true', async () => {

@@ -5,7 +5,7 @@ import * as crypto from 'node:crypto';
 import * as fmt from '../core/fmt.js';
 import { git, getWorktreeStatus } from '../core/git.js';
 import { startDraftAgent, selectAgent, readAgentConfigOrExit } from '../agents/agents.js';
-import { resolveTaskFile, enforceTaskAssignee, reportTaskResolution, checkBacklogIntegrity, transitionTask, getTaskStorage } from '../tools/backlog.js';
+import { resolveTaskFile, reportTaskResolution, checkBacklogIntegrity, transitionTask, getTaskStatus, getTaskStorage } from '../tools/backlog.js';
 import { findMissionArea, findMissionDir, inferSlug, getMissionYear, resolveMainRepo, conventionalWorktreePath, squashTrailingBacklogNoiseIntoPreviousMission, resolveWorktree, getPrimaryBranch, missionBranchName, missionDirForSlug, detectLaunchBaseBranch } from '../core/mission-utils.js';
 import { transitionVirtual } from '../core/state-map.js';
 import * as stats from './stats.js';
@@ -387,8 +387,8 @@ function recordDraftImplementer({
   // @ts-expect-error implicit any binding elements
   taskResolution,
   log = fmt.log.plain,
-  enforceTaskAssigneeFn = enforceTaskAssignee,
-  gitFn = git,
+  transitionTaskFn = transitionTask,
+  getTaskStatusFn = getTaskStatus,
   // @ts-expect-error implicit any binding elements
   slug,
   // @ts-expect-error implicit any binding elements
@@ -404,16 +404,8 @@ function recordDraftImplementer({
     log(fmt.status('INFO', `Enforcing draft agent ${fmt.agent(actual)} as assignee...`));
   }
 
-  if (enforceTaskAssigneeFn(taskResolution.taskFile, actual)) {
-    // Ensure we commit the fallback/recording to the mission branch so it is shared.
-    const effectiveWorktree = worktree || resolveWorktree(slug) || process.cwd();
-    const relativeTaskPath = path.relative(effectiveWorktree, taskResolution.taskFile);
-    gitFn(['-C', effectiveWorktree, 'add', relativeTaskPath]);
-    const commitResult = gitFn(['-C', effectiveWorktree, 'commit', '-m', `backlog(${slug}): enforce implementer=${actual}`]);
-    if (commitResult.status !== 0) {
-      log(fmt.status('WARN', `Failed to commit implementer recording: ${commitResult.stderr}`));
-    }
-  } else {
+  const currentStatus = getTaskStatusFn(taskResolution.taskFile);
+  if (!currentStatus || !transitionTaskFn(slug, currentStatus, { implementer: actual, rootDir: worktree || resolveWorktree(slug) || process.cwd(), log })) {
     log(fmt.status('WARN', `Could not enforce draft agent ${fmt.agent(actual)} in backlog task.`));
   }
   return actual;

@@ -1478,6 +1478,27 @@ test('promoteTaskForIntegrationIfNeeded updates the task file on a real integrat
   }
 });
 
+test('promoteTaskForIntegrationIfNeeded writes the integration checkout instead of the mission task copy', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'integrate-promote-base-'));
+  const baseTask = path.join(root, 'backlog', 'tasks', 'task-2230 - base.md');
+  const missionTask = path.join(root, 'mission-task.md');
+  fs.mkdirSync(path.dirname(baseTask), { recursive: true });
+  fs.writeFileSync(baseTask, 'id: TASK-2230\nstatus: review\n');
+  fs.writeFileSync(missionTask, 'id: TASK-2230\nstatus: review\n');
+  try {
+    const context = {
+      slug: 'task-2230', baseWorktree: root,
+      task: { ok: true, taskFile: missionTask }, taskStatus: 'review',
+      pr: { merged: false }, approval: { ok: true, reviewState: 'APPROVED' }
+    };
+    assert.deepEqual(promoteTaskForIntegrationIfNeeded(context), { changed: true, dryRun: false });
+    assert.match(fs.readFileSync(baseTask, 'utf8'), /^status: ready-for-integration$/m);
+    assert.match(fs.readFileSync(missionTask, 'utf8'), /^status: review$/m);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('stashMainCheckoutIfNeeded no-ops when the main checkout is already clean', () => {
   const result = stashMainCheckoutIfNeeded({
     slug: 'task-097',

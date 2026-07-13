@@ -24,7 +24,7 @@ Execution requirements:
 - **Not sufficient by themselves:** raw `stat`/`ls` output or generic prose claims. You may include them as supporting context, but the same Evidence cell must also cite at least one accepted reference from the list above.
 - verify all mission-declared Gates pass before handoff
 - preserve `{{taskPath}}`: update mission-relevant content as needed but do not delete, rename, or move the file
-- do not edit the backlog `assignee` field; the workflow records ownership itself
+- do not change the Backlog task's status, assignee, labels, or lifecycle metadata, and do not run `px active`, `px review`, or `px integrate`; Parallix performs lifecycle transitions itself
 - do not hand off to review if `{{missionPath}}` or checkpoint documents are uncommitted
 
 Graphify-first: before executing, check if `graphify-out/graph.json` exists. If it does, use `graphify query "<question>"` for codebase questions, `graphify path "<A>" "<B>"` for relationships, and `graphify explain "<concept>"` for focused concepts. Read `graphify-out/GRAPH_REPORT.md` only for broad architecture review. Run `graphify update .` after modifying code. If `graphify-out/wiki/index.md` exists, use it for broad navigation.

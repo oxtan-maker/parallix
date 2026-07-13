@@ -243,27 +243,17 @@ test('recordDraftImplementer returns actual when taskResolution.ok is false', ()
   assert.equal(result, 'codex');
 });
 
-test('recordDraftImplementer logs warning even if git commit fails', () => {
-  const logs = [];
+test('recordDraftImplementer routes the actual implementer through the shared transition path', () => {
+  const calls = [];
   const resolved = recordDraftImplementer({
-    selected: 'gemini',
-    actual: 'codex',
+    selected: 'gemini', actual: 'codex', slug: 'task-086', worktree: '/tmp/wt',
     taskResolution: { ok: true, taskFile: '/tmp/task-086.md' },
-    slug: 'task-086',
-    worktree: '/tmp/wt',
-    log(message) {
-      logs.push(message);
-    },
-    enforceTaskAssigneeFn() {
-      return true;
-    },
-    gitFn() {
-      return { status: 1, stderr: 'commit failed' };
-    }
+    getTaskStatusFn: () => 'refined',
+    transitionTaskFn: (...args) => { calls.push(args); return true; },
+    log: () => {}
   });
-
   assert.equal(resolved, 'codex');
-  assert.ok(logs.some(message => message.includes('Failed to commit implementer recording')));
+  assert.deepEqual(calls, [['task-086', 'refined', { implementer: 'codex', rootDir: '/tmp/wt', log: calls[0][2].log }]]);
 });
 
 test('recordDraftImplementer does nothing when the draft task cannot be resolved', () => {
@@ -288,9 +278,7 @@ test('recordDraftImplementer logs fallback when selected differs from actual', (
     actual: 'codex',
     taskResolution: { ok: true, taskFile: '/tmp/task.md' },
     log: (msg) => logLines.push(msg),
-    enforceTaskAssigneeFn: () => true,
-    setTaskImplementerFn: () => true,
-    gitFn: () => ({ status: 0, stdout: '', stderr: '' })
+    getTaskStatusFn: () => 'refined', transitionTaskFn: () => true
   });
   assert.ok(logLines.some(l => l.includes('fell back from claude to codex')));
 });
@@ -302,41 +290,23 @@ test('recordDraftImplementer logs recording when selected equals actual', () => 
     actual: 'codex',
     taskResolution: { ok: true, taskFile: '/tmp/task.md' },
     log: (msg) => logLines.push(msg),
-    enforceTaskAssigneeFn: () => true,
-    setTaskImplementerFn: () => true,
-    gitFn: () => ({ status: 0, stdout: '', stderr: '' })
+    getTaskStatusFn: () => 'refined', transitionTaskFn: () => true
   });
   assert.ok(logLines.some(l => l.includes('Enforcing draft agent codex')));
 });
 
-test('recordDraftImplementer logs warning when enforceTaskAssignee fails', () => {
+test('recordDraftImplementer logs warning when the shared transition fails', () => {
   const logLines = [];
   recordDraftImplementer({
     selected: 'codex',
     actual: 'codex',
     taskResolution: { ok: true, taskFile: '/tmp/task.md' },
     log: (msg) => logLines.push(msg),
-    enforceTaskAssigneeFn: () => false
+    getTaskStatusFn: () => 'refined', transitionTaskFn: () => false
   });
   assert.ok(logLines.some(l => l.includes('Could not enforce draft agent')));
 });
 
-test('recordDraftImplementer logs warning when backlog commit fails', () => {
-  const logLines = [];
-  recordDraftImplementer({
-    selected: 'codex',
-    actual: 'codex',
-    taskResolution: { ok: true, taskFile: '/tmp/task.md' },
-    slug: 'task-test',
-    worktree: '/tmp',
-    log: (msg) => logLines.push(msg),
-    enforceTaskAssigneeFn: () => true,
-    gitFn: (args) => args.includes('commit')
-      ? { status: 1, stdout: '', stderr: 'commit failed' }
-      : { status: 0, stdout: '', stderr: '' }
-  });
-  assert.ok(logLines.some(l => l.includes('Failed to commit implementer recording: commit failed')));
-});
 
 // ---------- fallbackDraftCommitMessage ----------
 
@@ -950,7 +920,7 @@ test('enforceDraftCommitSafety still blocks deletion of a quoted mission task pa
   );
 });
 
-test('recordDraftImplementer resolves the task file from the mission worktree, not the caller cwd', () => {
+test('recordDraftImplementer supplies the mission worktree to the shared transition', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-draft-wt-resolve-'));
   try {
     const worktree = path.join(root, 'visualBoard-task-086');
@@ -968,29 +938,14 @@ test('recordDraftImplementer resolves the task file from the mission worktree, n
       slug: 'task-086',
       worktree,
       log(message) { logs.push(message); },
-      enforceTaskAssigneeFn(file, agent) {
-        calls.push({ file, agent });
-        return true;
-      },
-      gitFn(args) {
-        const addIdx = args.indexOf('add');
-        if (addIdx !== -1) {
-          const addedPath = args[addIdx + 1];
-          assert.ok(
-            !path.isAbsolute(addedPath),
-            `git add path must be relative to worktree, got: ${addedPath}`
-          );
-          assert.ok(
-            !addedPath.startsWith(root),
-            `git add path must not be an absolute caller-cwd path, got: ${addedPath}`
-          );
-        }
-        return { status: 0, stdout: '', stderr: '' };
-      }
+      getTaskStatusFn: () => 'active',
+      transitionTaskFn(slug, status, options) { calls.push({ slug, status, options }); return true; }
     });
 
     assert.equal(calls.length, 1);
-    assert.equal(calls[0].file, taskFile);
+    assert.equal(calls[0].slug, 'task-086');
+    assert.equal(calls[0].status, 'active');
+    assert.equal(calls[0].options.rootDir, worktree);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

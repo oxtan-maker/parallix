@@ -165,7 +165,7 @@ function evidenceCellHasVerifiableReference(cell: string, rootDir: string, known
       for (const arg of args) {
         // Skip flags like -n, --context, etc.
         if (arg.startsWith('-')) { continue; }
-        const candidatePath = arg.replace(/^\./, '');
+        const candidatePath = arg.replace(/^\.\//, '');
         if (fs.existsSync(path.join(rootDir, candidatePath))) {
           return true;
         }

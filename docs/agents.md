@@ -223,6 +223,10 @@ The Backlog task is moved to `active` with the correct implementer **only after*
 
 When `startAgent` falls back to a different agent family after a limit hit, the Backlog records the fallback family (the agent that actually ran), not the originally preselected one.
 
+### Backlog branch ownership
+
+Mission lifecycle state changes are committed to the mission's integration branch: `main` for a normal mission, or the recorded `Base-Branch` for a feature-branch mission. Parallix then rebases the mission worktree onto that branch before later mission work uses the new task state. If that rebase conflicts, Parallix aborts it and reports the transition failure while leaving the mission worktree at its pre-rebase commit. This keeps `backlog.md` state visible in the checkout that owns integration instead of leaving a branch-local copy behind.
+
 ### Automatic post-execute handoff repair (TASK-1037)
 
 The workflow harness automatically recovers from routine handoff hygiene issues after a successful execute-agent exit. When `px active <slug>` completes its execution phase, it attempts automated handoff. If handoff fails, the harness runs a repair step and retries exactly once before declaring failure.
