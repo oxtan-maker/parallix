@@ -1,7 +1,7 @@
 ---
 id: TASK-1268
 title: Shift left
-status: backlog
+status: review
 assignee: []
 created_date: '2026-06-09 04:22'
 updated_date: '2026-07-04 06:35'
