@@ -61,6 +61,7 @@ assignee: [custom]
   const logs = [];
 
   const result = await consumeArtifacts('task-999', {
+    writeReviewStateFn: () => ({ outcome: 'committed' }),
     log: msg => logs.push(msg),
     error: msg => logs.push('[ERROR] ' + msg),
     exit: () => { throw new Error('exit called'); },

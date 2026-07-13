@@ -14,7 +14,7 @@ import { resolveTaskFile, getTaskStatus, getAcceptanceCriteria, getTaskAssignee,
 import { toVirtual } from '../core/state-map.js';
 import { getPrStatus, readToken, postComment, postReview, createPr, getComments, closePr, resolveReviewUser, isProviderEnabled } from './review-adapter.js';
 import { buildAutonomousReviewMatrix, formatMatrixSummary } from '../core/runtime-matrix.js';
-import { readReviewState, writeReviewState, resolveReviewIdentity, ReviewState } from './review-state.js';
+import { readReviewState, writeReviewState, resolveReviewIdentity, ReviewState, persistReviewStateOrThrow } from './review-state.js';
 import { createEvent, importAllLegacyArtifacts, ALL_EVENT_TYPES, isValidEventType, shouldMirrorToProvider, readAllEvents } from './review-events.js';
 import { startAgent } from '../agents/agents.js';
 import { formatVerificationCommand, runVerificationGate } from '../core/verification.js';
@@ -1025,7 +1025,7 @@ export function commentRound(
 
   const currentState = readReviewStateFn(slug, rootDir);
   if (currentState) {
-    writeReviewStateFn(slug, currentState, rootDir);
+    persistReviewStateOrThrow(writeReviewStateFn, slug, currentState, rootDir);
   }
 }
 
@@ -1046,6 +1046,7 @@ export async function consumeArtifacts(
     getTaskStatusFn?: typeof getTaskStatus;
     resolveArtifactDirFn?: typeof resolveArtifactDir;
     readReviewStateFn?: typeof readReviewState;
+    writeReviewStateFn?: typeof writeReviewState;
     createEventFn?: typeof createEvent;
     readArtifactFn?: unknown;
     deleteArtifactFn?: unknown;
@@ -1060,6 +1061,8 @@ export async function consumeArtifacts(
   const getTaskAssigneeFn = options.getTaskAssigneeFn || getTaskAssignee;
   const getTaskStatusFn = options.getTaskStatusFn || getTaskStatus;
   const resolveArtifactDirFn = options.resolveArtifactDirFn || resolveArtifactDir;
+  const readReviewStateFn = options.readReviewStateFn || readReviewState;
+  const writeReviewStateFn = options.writeReviewStateFn || writeReviewState;
 
   const worktree = resolveWorktreeFn(slug) || process.cwd();
   const rootDir = worktree;
@@ -1071,7 +1074,7 @@ export async function consumeArtifacts(
 
   // Determine reviewer identity from review-state first, then task assignee.
   const { identityUser: stateReviewer } = resolveReviewIdentity(slug, worktree, {
-    readReviewStateFn: options.readReviewStateFn || readReviewState,
+    readReviewStateFn,
   });
   let reviewer = stateReviewer;
   if (!reviewer && taskResolution.ok) {
@@ -1105,13 +1108,14 @@ export async function consumeArtifacts(
   }
 
   // Persist the artifact location to review-state.json if it doesn't exist yet
-  const persisted = readReviewState(slug, worktree);
+  const persisted = readReviewStateFn(slug, worktree);
   if (!persisted) {
-    writeReviewState(slug, new ReviewState(slug, {
+    const initialState = new ReviewState(slug, {
       reviewer,
       round: 1,
       phase: 'reviewing',
-    }), worktree);
+    });
+    persistReviewStateOrThrow(writeReviewStateFn, slug, initialState, worktree);
     log(fmt.status('INFO', 'Created review-state.json for artifact consumption.'));
   }
 
@@ -1215,7 +1219,7 @@ export function submitReviewRound(
         phase: phaseForOutcome,
       });
     }
-    writeReviewStateFn(slug, stateToWrite, worktree);
+    persistReviewStateOrThrow(writeReviewStateFn, slug, stateToWrite, worktree);
 
     // Also transition the backlog task for provider=none so integrate preflight passes
     const backlogStatusMap: Record<string, string> = {
@@ -1287,7 +1291,7 @@ export function submitReviewRound(
       currentState.disposition = 'REQUEST_CHANGES';
       try { currentState.transitionTo('fixing'); } catch (_) { /* ignore */ }
     }
-    writeReviewStateFn(slug, currentState, worktree);
+    persistReviewStateOrThrow(writeReviewStateFn, slug, currentState, worktree);
   }
 
   const taskResolution = resolveTaskFileFn(slug, worktree);

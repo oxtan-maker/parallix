@@ -52,8 +52,8 @@ test('ReviewState class can be instantiated and saved', () => {
     assert.equal(state.disposition, 'REQUEST_CHANGES');
     assert.deepEqual(state.metadata, { foo: 'bar' });
 
-    const ok = state.save(root);
-    assert.equal(ok, true);
+    const result = state.save(root);
+    assert.deepEqual(result, { outcome: 'committed' });
 
     const loaded = readReviewState(slug, root);
     assert.ok(loaded instanceof ReviewState);
@@ -201,7 +201,7 @@ test('stageLaunchSinceMs windows the read to the current launch start (per-round
   assert.equal(stageLaunchSinceMs({ startedAt: 'not-a-date' }), 0);
 });
 
-test('ReviewState save treats unchanged state as a successful no-op', () => {
+test('ReviewState save returns unchanged when commit is non-zero and state path is clean', () => {
   withTempMissionDir('task-save-noop', (root, missionDir, slug) => {
     const state = new ReviewState(slug, {
       reviewer: 'gemini',
@@ -216,22 +216,17 @@ test('ReviewState save treats unchanged state as a successful no-op', () => {
       return { status: 0, stdout: '', stderr: '' };
     };
 
-    assert.equal(state.save(root, gitFn), true);
+    assert.deepEqual(state.save(root, gitFn), { outcome: 'unchanged' });
     assert.ok(gitCalls.some(args => args.includes('status') && args.includes('--porcelain')));
   });
 });
 
-test('ReviewState save warns when commit fails and state file remains changed', () => {
+test('ReviewState save returns commit-failed-dirty when git commit fails and file remains dirty', () => {
   withTempMissionDir('task-save-fail', (root, missionDir, slug) => {
     const state = new ReviewState(slug, {
       reviewer: 'gemini',
       implementer: 'claude',
       phase: 'fixing'
-    });
-    const warnings = [];
-    const previousLogger = fmt.setLogger({
-      log: (message) => warnings.push(message),
-      error: () => {}
     });
     const gitFn = (args) => {
       if (args.includes('commit')) return { status: 1, stderr: 'commit failed' };
@@ -239,13 +234,29 @@ test('ReviewState save warns when commit fails and state file remains changed', 
       return { status: 0, stdout: '', stderr: '' };
     };
 
-    try {
-      assert.equal(state.save(root, gitFn), true);
-    } finally {
-      fmt.setLogger(previousLogger);
-    }
+    assert.deepEqual(state.save(root, gitFn), {
+      outcome: 'commit-failed-dirty',
+      stage: 'commit',
+      diagnostic: 'commit failed'
+    });
+  });
+});
 
-    assert.ok(warnings.some(message => message.includes('Failed to commit review state update: commit failed')));
+test('ReviewState save returns write-failed when atomic write throws', () => {
+  withTempMissionDir('task-save-write-fail', (root, missionDir, slug) => {
+    const state = new ReviewState(slug, { reviewer: 'codex', implementer: 'claude' });
+    const result = state.save(root, () => { throw new Error('git must not run'); }, () => { throw new Error('rename denied'); });
+    assert.deepEqual(result, { outcome: 'write-failed', stage: 'write', diagnostic: 'rename denied' });
+  });
+});
+
+test('ReviewState save returns add-failed when git add exits non-zero', () => {
+  withTempMissionDir('task-save-add-fail', (root, missionDir, slug) => {
+    const state = new ReviewState(slug, { reviewer: 'codex', implementer: 'claude' });
+    const gitFn = (args) => args.includes('add')
+      ? { status: 1, stdout: '', stderr: 'index locked' }
+      : { status: 0, stdout: '', stderr: '' };
+    assert.deepEqual(state.save(root, gitFn), { outcome: 'add-failed', stage: 'add', diagnostic: 'index locked' });
   });
 });
 

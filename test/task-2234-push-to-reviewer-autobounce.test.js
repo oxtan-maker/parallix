@@ -192,6 +192,30 @@ test('task-2234 repro: review-loop self-heal auto-bounces to active on validatio
   });
 });
 
+test('task-2234 repro: review-loop self-heal fails closed when validation-failure state cannot commit', async () => {
+  await withTempGitRepo(async (root) => {
+    const { opts, logs, exitCodes } = baseLoopHarness(root, {
+      performHandoffFn: async () => ({
+        ok: false,
+        reason: 'validation-failed',
+        error: 'Declared gate is invalid'
+      }),
+      writeReviewStateFn: () => ({
+        outcome: 'commit-failed-dirty',
+        stage: 'commit',
+        diagnostic: 'simulated commit failure'
+      })
+    });
+
+    await assert.rejects(
+      () => startReviewLoop('task-2234', opts),
+      /Review-state persistence failed for mission task-2234, phase unknown, round unknown, stage commit: simulated commit failure/
+    );
+    assertSelfHealAttempted(logs);
+    assert.deepEqual(exitCodes, [], 'fail-closed persistence must stop before the explicit error exit');
+  });
+});
+
 test('task-2234 repro: review-loop self-heal does NOT bounce on gate-failed (execution failure)', async () => {
   await withTempGitRepo(async (root) => {
     const transitions = [];

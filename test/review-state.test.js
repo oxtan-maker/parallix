@@ -85,8 +85,8 @@ test('writeReviewState writes a valid JSON file', () => {
     const { writeReviewState, readReviewState } = require('../lib/review/review-state');
 
     const state = { reviewer: 'codex', implementer: 'claude', round: 1 };
-    const ok = writeReviewState(slug, state);
-    assert.equal(ok, true);
+    const result = writeReviewState(slug, state);
+    assert.deepEqual(result, { outcome: 'committed' });
 
     const read = readReviewState(slug);
     assert.ok(read, 'state should be readable after write');
@@ -97,7 +97,7 @@ test('writeReviewState writes a valid JSON file', () => {
   });
 });
 
-test('writeReviewState logs warning if git commit fails', () => {
+test('writeReviewState reports commit failure if state remains dirty', () => {
   withTempMissionDir('task-rs-4c', (root, missionDir, slug) => {
     const { writeReviewState } = require('../lib/review/review-state');
     const logs = [];
@@ -115,9 +115,8 @@ test('writeReviewState logs warning if git commit fails', () => {
         return { status: 0, stdout: '', stderr: '' };
       };
       const state = { reviewer: 'codex', implementer: 'claude', round: 1 };
-      const ok = writeReviewState(slug, state, root, gitFn);
-      assert.equal(ok, true);
-      assert.ok(logs.some(l => l.includes('Failed to commit review state update')));
+      const result = writeReviewState(slug, state, root, gitFn);
+      assert.deepEqual(result, { outcome: 'commit-failed-dirty', stage: 'commit', diagnostic: 'commit failed' });
     } finally {
       console.log = originalLog;
     }
@@ -132,8 +131,8 @@ test('writeReviewState commits in the provided worktree even from the wrong cwd'
     try {
       process.chdir(outsideDir);
       const { writeReviewState } = require('../lib/review/review-state');
-      const ok = writeReviewState(slug, { reviewer: 'codex', implementer: 'claude', round: 2 }, root);
-      assert.equal(ok, true);
+      const result = writeReviewState(slug, { reviewer: 'codex', implementer: 'claude', round: 2 }, root);
+      assert.deepEqual(result, { outcome: 'committed' });
 
       const { spawnSync } = require('child_process');
       const status = spawnSync('git', ['status', '--short'], { cwd: root, encoding: 'utf8' });
@@ -170,10 +169,10 @@ test('readReviewState reads from the provided rootDir, not process.cwd()', () =>
   });
 });
 
-test('resetReviewState returns false when no state exists', () => {
+test('resetReviewState returns unchanged when no state exists', () => {
   withTempMissionDir('task-rs-5', (root, missionDir, slug) => {
     const { resetReviewState } = require('../lib/review/review-state');
-    assert.equal(resetReviewState(slug), false);
+    assert.deepEqual(resetReviewState(slug), { outcome: 'unchanged' });
   });
 });
 
@@ -185,7 +184,7 @@ test('resetReviewState removes the state file', () => {
     const { resetReviewState, readReviewState } = require('../lib/review/review-state');
 
     const deleted = resetReviewState(slug);
-    assert.equal(deleted, true);
+    assert.deepEqual(deleted, { outcome: 'unchanged' });
     assert.equal(fs.existsSync(stateFile), false);
     assert.equal(readReviewState(slug), null);
   });
