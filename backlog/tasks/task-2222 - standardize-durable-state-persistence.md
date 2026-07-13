@@ -1,9 +1,11 @@
 ---
 id: TASK-2222
 title: Standardize durable state persistence across the repository
-status: active
-assignee: [codex]
+status: review
+assignee:
+  - codex
 created_date: '2026-07-11 00:00'
+updated_date: '2026-07-13 16:26'
 labels:
   - refactor
   - reliability
