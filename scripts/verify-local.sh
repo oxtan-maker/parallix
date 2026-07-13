@@ -142,7 +142,7 @@ if (changedAreas.length === 0) {
 }
 
 const orderedGates = orderIntegrationGates(config);
-const relevantGates = orderedGates.filter(gate => gateMatchesChangedAreas(gate.key, changedAreas));
+const relevantGates = orderedGates.filter(gate => gateMatchesChangedAreas(gate.key, changedAreas, gate.areas));
 
 if (relevantGates.length === 0) {
   log('integration-gates: no applicable gates for changed areas');

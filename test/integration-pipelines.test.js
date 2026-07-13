@@ -20,7 +20,9 @@ const {
   getIntegrationGatePlan,
   printIntegrationGatePlan,
   buildIntegrationGateEnv,
-  executeIntegrationGates
+  executeIntegrationGates,
+  orderIntegrationGates,
+  gateMatchesChangedAreas
 } = require('../lib/commands/integrate');
 
 // task-1302 (standalone extraction): the tests below invoke the WrGroceries monorepo
@@ -981,4 +983,350 @@ esac
   const output = result.stdout + result.stderr;
   assert.match(output, /integration-gates: no area changes detected, skipping/);
   assert.ok(!output.includes('should-not-run'));
+});
+
+// task-1419: Configurable build gate with enabled/areas metadata
+
+test('orderIntegrationGates skips gates with enabled:false (task-1419)', () => {
+  const config = {
+    gates: {
+      lib: { command: './scripts/verify-local.sh static-analysis', order: 1, run_last: false, enabled: true },
+      build: { command: 'npm run build:cjs', order: 2, run_last: false, enabled: false },
+      workflow: { command: 'node test/e2e-mission-lifecycle.test.js', order: 50, run_last: true }
+    }
+  };
+
+  const ordered = orderIntegrationGates(config);
+
+  assert.equal(ordered.length, 2, 'disabled gate should be filtered out');
+  assert.equal(ordered[0].key, 'lib');
+  assert.equal(ordered[1].key, 'workflow');
+  assert.ok(!ordered.some(g => g.key === 'build'), 'disabled build gate should be omitted');
+});
+
+test('orderIntegrationGates includes legacy gates without enabled metadata (task-1419)', () => {
+  const config = {
+    gates: {
+      lib: { command: './scripts/verify-local.sh static-analysis', order: 1, run_last: false },
+      mutation: { command: './scripts/verify-local.sh mutation-gate', order: 40, run_last: false }
+    }
+  };
+
+  const ordered = orderIntegrationGates(config);
+
+  assert.equal(ordered.length, 2, 'legacy gates without enabled should be treated as enabled');
+  assert.equal(ordered[0].key, 'lib');
+  assert.equal(ordered[1].key, 'mutation');
+});
+
+test('orderIntegrationGates carries areas metadata through to gate objects (task-1419)', () => {
+  const config = {
+    gates: {
+      lib: { command: './scripts/verify-local.sh static-analysis', order: 1, run_last: false },
+      build: { command: 'npm run build:cjs', order: 2, run_last: false, areas: ['lib', 'workflow'] }
+    }
+  };
+
+  const ordered = orderIntegrationGates(config);
+
+  const buildGate = ordered.find(g => g.key === 'build');
+  assert.ok(buildGate, 'build gate should be present');
+  assert.deepEqual(buildGate.areas, ['lib', 'workflow'], 'areas metadata should be carried through');
+  assert.equal(ordered.find(g => g.key === 'lib').areas, undefined, 'legacy gate should not have areas');
+});
+
+test('gateMatchesChangedAreas uses areas metadata when provided (task-1419)', () => {
+  assert.equal(gateMatchesChangedAreas('build', ['lib'], ['lib', 'workflow']), true, 'build should match lib area via areas metadata');
+  assert.equal(gateMatchesChangedAreas('build', ['docs'], ['lib', 'workflow']), false, 'build should not match docs area via areas metadata');
+  assert.equal(gateMatchesChangedAreas('build', ['workflow'], ['lib', 'workflow']), true, 'build should match workflow area via areas metadata');
+  assert.equal(gateMatchesChangedAreas('build', ['server'], ['lib', 'workflow']), false, 'build should not match server area via areas metadata');
+});
+
+test('gateMatchesChangedAreas falls back to key-based matching when areas not provided (task-1419)', () => {
+  assert.equal(gateMatchesChangedAreas('lib', ['lib']), true, 'lib gate matches lib area by key');
+  assert.equal(gateMatchesChangedAreas('lib', ['docs']), false, 'lib gate does not match docs area by key');
+  assert.equal(gateMatchesChangedAreas('workflow', ['workflow']), true, 'workflow gate matches workflow area');
+  assert.equal(gateMatchesChangedAreas('workflow', ['lib']), true, 'workflow gate matches lib area (special case)');
+  assert.equal(gateMatchesChangedAreas('custom-agent-smoke', ['lib']), true, 'custom-agent-smoke matches lib area (special case)');
+  assert.equal(gateMatchesChangedAreas('custom-agent-smoke', ['docs']), false, 'custom-agent-smoke does not match docs area');
+});
+
+test('getIntegrationGatePlan selects build gate for lib changes when configured with areas (task-1419)', () => {
+  const config = {
+    gates: {
+      lib: { command: './scripts/verify-local.sh static-analysis', order: 1, run_last: false },
+      build: { command: 'npm run build:cjs', order: 2, run_last: false, areas: ['lib', 'workflow'] }
+    }
+  };
+
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-1419-build-lib-'));
+  const tmpConfigPath = path.join(tmpDir, 'integration-pipelines.json');
+  fs.writeFileSync(tmpConfigPath, JSON.stringify(config, null, 2));
+
+  const plan = getIntegrationGatePlan('task-1419', {
+    runIntegrationGates: true,
+    gitRunner: createMockGitRunner('lib/commands/integrate.js'),
+    dryRun: false,
+    configPath: tmpConfigPath
+  });
+
+  fs.unlinkSync(tmpConfigPath);
+  fs.rmdirSync(tmpDir);
+
+  assert.deepEqual(plan.gates.map(g => g.key), ['lib', 'build'], 'both lib and build gates should be selected for lib changes');
+  assert.deepEqual(plan.changedAreas, ['lib']);
+});
+
+test('getIntegrationGatePlan excludes build gate for docs-only changes (task-1419)', () => {
+  const config = {
+    gates: {
+      lib: { command: './scripts/verify-local.sh static-analysis', order: 1, run_last: false },
+      build: { command: 'npm run build:cjs', order: 2, run_last: false, areas: ['lib', 'workflow'] },
+      docs: { command: 'echo docs', order: 1, run_last: false }
+    }
+  };
+
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-1419-build-docs-'));
+  const tmpConfigPath = path.join(tmpDir, 'integration-pipelines.json');
+  fs.writeFileSync(tmpConfigPath, JSON.stringify(config, null, 2));
+
+  const plan = getIntegrationGatePlan('task-1419', {
+    runIntegrationGates: true,
+    gitRunner: createMockGitRunner('docs/README.md'),
+    dryRun: false,
+    configPath: tmpConfigPath
+  });
+
+  fs.unlinkSync(tmpConfigPath);
+  fs.rmdirSync(tmpDir);
+
+  assert.equal(plan.gates.length, 1, 'only docs gate should be selected for docs-only changes');
+  assert.equal(plan.gates[0].key, 'docs');
+  assert.ok(!plan.gates.some(g => g.key === 'build'), 'build gate should not appear for docs-only changes');
+});
+
+test('getIntegrationGatePlan omits explicitly disabled build gate (task-1419)', () => {
+  const config = {
+    gates: {
+      lib: { command: './scripts/verify-local.sh static-analysis', order: 1, run_last: false },
+      build: { command: 'npm run build:cjs', order: 2, run_last: false, enabled: false, areas: ['lib', 'workflow'] }
+    }
+  };
+
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-1419-disabled-'));
+  const tmpConfigPath = path.join(tmpDir, 'integration-pipelines.json');
+  fs.writeFileSync(tmpConfigPath, JSON.stringify(config, null, 2));
+
+  const plan = getIntegrationGatePlan('task-1419', {
+    runIntegrationGates: true,
+    gitRunner: createMockGitRunner('lib/commands/integrate.js'),
+    dryRun: false,
+    configPath: tmpConfigPath
+  });
+
+  fs.unlinkSync(tmpConfigPath);
+  fs.rmdirSync(tmpDir);
+
+  assert.equal(plan.gates.length, 1, 'only lib gate should be selected when build is disabled');
+  assert.equal(plan.gates[0].key, 'lib');
+  assert.ok(!plan.gates.some(g => g.key === 'build'), 'disabled build gate should be omitted');
+});
+
+test('getIntegrationGatePlan selects build gate for workflow changes (task-1419)', () => {
+  const config = {
+    gates: {
+      lib: { command: './scripts/verify-local.sh static-analysis', order: 1, run_last: false },
+      build: { command: 'npm run build:cjs', order: 2, run_last: false, areas: ['lib', 'workflow'] },
+      workflow: { command: 'node test/e2e-mission-lifecycle.test.js', order: 50, run_last: true }
+    }
+  };
+
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-1419-build-wf-'));
+  const tmpConfigPath = path.join(tmpDir, 'integration-pipelines.json');
+  fs.writeFileSync(tmpConfigPath, JSON.stringify(config, null, 2));
+
+  const plan = getIntegrationGatePlan('task-1419', {
+    runIntegrationGates: true,
+    gitRunner: createMockGitRunner('scripts/verify-local.sh'),
+    dryRun: false,
+    configPath: tmpConfigPath
+  });
+
+  fs.unlinkSync(tmpConfigPath);
+  fs.rmdirSync(tmpDir);
+
+  assert.deepEqual(plan.gates.map(g => g.key), ['build', 'workflow'], 'build and workflow gates should be selected for workflow changes');
+});
+
+test('getIntegrationGatePlan preserves run_last ordering with build gate inserted (task-1419)', () => {
+  const config = {
+    gates: {
+      lib: { command: './scripts/verify-local.sh static-analysis', order: 1, run_last: false },
+      build: { command: 'npm run build:cjs', order: 2, run_last: false, areas: ['lib', 'workflow'] },
+      mutation: { command: './scripts/verify-local.sh mutation-gate', order: 40, run_last: false },
+      workflow: { command: 'node test/e2e-mission-lifecycle.test.js', order: 50, run_last: true },
+      'custom-agent-smoke': { command: 'node test/e2e-real-agent-smoke.test.js', order: 51, run_last: true }
+    }
+  };
+
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-1419-ordering-'));
+  const tmpConfigPath = path.join(tmpDir, 'integration-pipelines.json');
+  fs.writeFileSync(tmpConfigPath, JSON.stringify(config, null, 2));
+
+  const plan = getIntegrationGatePlan('task-1419', {
+    runIntegrationGates: true,
+    gitRunner: createMockGitRunner('lib/commands/integrate.js'),
+    dryRun: false,
+    configPath: tmpConfigPath
+  });
+
+  fs.unlinkSync(tmpConfigPath);
+  fs.rmdirSync(tmpDir);
+
+  const keys = plan.gates.map(g => g.key);
+  assert.deepEqual(keys, ['lib', 'build', 'workflow', 'custom-agent-smoke'],
+    'ordering should be lib, build (non-run-last by order), then workflow and custom-agent-smoke (run_last)');
+});
+
+// Script-level tests for verify-local.sh integrate with build gate metadata
+
+verifyLocalTest('script integrate: dry-run shows build gate when lib area present (task-1419)', () => {
+  const child_process = require('child_process');
+  const scriptPath = path.join(__dirname, '..', 'scripts', 'verify-local.sh');
+
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-1419-script-dry-'));
+  const tmpConfigPath = path.join(tmpDir, 'integration-pipelines.json');
+  const config = {
+    gates: {
+      lib: { command: './scripts/verify-local.sh static-analysis', order: 1, run_last: false },
+      build: { command: 'npm run build:cjs', order: 2, run_last: false, areas: ['lib', 'workflow'] }
+    }
+  };
+  fs.writeFileSync(tmpConfigPath, JSON.stringify(config, null, 2));
+
+  const env = {
+    ...process.env,
+    WORKFLOW_SUITE_CONTEXT: '1',
+    INTEGRATE_DRY_RUN: 'true',
+    INTEGRATION_CONFIG_PATH: tmpConfigPath,
+    INTEGRATE_CHANGED_AREAS: 'lib'
+  };
+
+  const result = child_process.spawnSync(scriptPath, ['integrate'], {
+    cwd: __dirname,
+    env,
+    encoding: 'utf8'
+  });
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+
+  assert.equal(result.status, 0, 'script should exit 0 in dry-run');
+  const output = result.stdout + result.stderr;
+  assert.match(output, /integration-gates: resolved gate plan:/, 'should print gate plan');
+  assert.match(output, /lib:.*verify-local\.sh static-analysis/, 'should show lib gate');
+  assert.match(output, /build:npm run build:cjs/, 'should show build gate for lib area');
+});
+
+verifyLocalTest('script integrate: dry-run omits build gate for docs-only changes (task-1419)', () => {
+  const child_process = require('child_process');
+  const scriptPath = path.join(__dirname, '..', 'scripts', 'verify-local.sh');
+
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-1419-script-docs-'));
+  const tmpConfigPath = path.join(tmpDir, 'integration-pipelines.json');
+  const config = {
+    gates: {
+      lib: { command: './scripts/verify-local.sh static-analysis', order: 1, run_last: false },
+      build: { command: 'npm run build:cjs', order: 2, run_last: false, areas: ['lib', 'workflow'] },
+      docs: { command: 'echo docs', order: 1, run_last: false }
+    }
+  };
+  fs.writeFileSync(tmpConfigPath, JSON.stringify(config, null, 2));
+
+  const env = {
+    ...process.env,
+    WORKFLOW_SUITE_CONTEXT: '1',
+    INTEGRATE_DRY_RUN: 'true',
+    INTEGRATION_CONFIG_PATH: tmpConfigPath,
+    INTEGRATE_CHANGED_AREAS: 'docs'
+  };
+
+  const result = child_process.spawnSync(scriptPath, ['integrate'], {
+    cwd: __dirname,
+    env,
+    encoding: 'utf8'
+  });
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+
+  assert.equal(result.status, 0);
+  const output = result.stdout + result.stderr;
+  assert.match(output, /docs:echo docs/, 'should show docs gate');
+  assert.ok(!output.includes('build:'), 'build gate should not appear for docs-only changes');
+});
+
+// task-1419: Verify the actual repo config declares the build gate correctly
+
+test('repo config declares build gate with correct metadata (task-1419)', () => {
+  const configPath = path.join(__dirname, '..', 'config', 'integration-pipelines.json');
+  const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+
+  const buildGate = config?.gates?.build;
+  assert.ok(buildGate, 'build gate should exist in repo config');
+  assert.equal(buildGate.command, 'npm run build:cjs', 'build gate command should be npm run build:cjs');
+  assert.equal(buildGate.order, 2, 'build gate order should be 2');
+  assert.equal(buildGate.run_last, false, 'build gate run_last should be false');
+  assert.equal(buildGate.enabled, true, 'build gate enabled should be true');
+  assert.deepEqual(buildGate.areas, ['lib', 'workflow'], 'build gate areas should be lib and workflow');
+});
+
+test('repo config preserves existing gate orders (task-1419)', () => {
+  const configPath = path.join(__dirname, '..', 'config', 'integration-pipelines.json');
+  const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+
+  assert.equal(config.gates.lib.order, 1, 'lib gate remains order 1');
+  assert.equal(config.gates.mutation.order, 40, 'mutation gate remains order 40');
+  assert.equal(config.gates.workflow.order, 50, 'workflow gate remains order 50');
+  assert.equal(config.gates.workflow.run_last, true, 'workflow gate remains run_last');
+  assert.equal(config.gates['custom-agent-smoke'].order, 51, 'custom-agent-smoke gate remains order 51');
+  assert.equal(config.gates['custom-agent-smoke'].run_last, true, 'custom-agent-smoke gate remains run_last');
+});
+
+test('getIntegrationGatePlan with repo config selects lib and build for lib changes (task-1419)', () => {
+  const configPath = path.join(__dirname, '..', 'config', 'integration-pipelines.json');
+
+  const plan = getIntegrationGatePlan('task-1419', {
+    runIntegrationGates: true,
+    gitRunner: createMockGitRunner('lib/commands/integrate.js'),
+    dryRun: false,
+    configPath
+  });
+
+  const keys = plan.gates.map(g => g.key);
+  assert.ok(keys.includes('lib'), 'lib gate should be selected');
+  assert.ok(keys.includes('build'), 'build gate should be selected for lib changes');
+  assert.ok(keys.includes('workflow'), 'workflow gate should be selected for lib changes (special case)');
+  assert.ok(keys.includes('custom-agent-smoke'), 'custom-agent-smoke should be selected for lib changes (special case)');
+  // Verify ordering: lib (1) before build (2), run_last gates after
+  const libIdx = keys.indexOf('lib');
+  const buildIdx = keys.indexOf('build');
+  const wfIdx = keys.indexOf('workflow');
+  const casIdx = keys.indexOf('custom-agent-smoke');
+  assert.ok(libIdx < buildIdx, 'lib (order 1) should come before build (order 2)');
+  assert.ok(buildIdx < wfIdx, 'build (order 2) should come before workflow (run_last)');
+  assert.ok(wfIdx < casIdx, 'workflow (order 50) should come before custom-agent-smoke (order 51)');
+});
+
+test('getIntegrationGatePlan with repo config excludes build for docs-only changes (task-1419)', () => {
+  const configPath = path.join(__dirname, '..', 'config', 'integration-pipelines.json');
+
+  const plan = getIntegrationGatePlan('task-1419', {
+    runIntegrationGates: true,
+    gitRunner: createMockGitRunner('docs/README.md'),
+    dryRun: false,
+    configPath
+  });
+
+  const keys = plan.gates.map(g => g.key);
+  assert.ok(!keys.includes('build'), 'build gate should NOT be selected for docs-only changes');
+  assert.ok(!keys.includes('lib'), 'lib gate should NOT be selected for docs-only changes');
 });

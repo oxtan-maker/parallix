@@ -18,7 +18,7 @@ const { selectAgent, setCommandPathProbe } = require('../lib/agents/agents');
 // PATH reads as "supported".
 function createDummyLauncher() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'runtime-matrix-launcher-'));
-  for (const name of ['claude', 'gemini', 'opencode', 'vibe']) {
+  for (const name of ['claude', 'gemini', 'opencode', 'pi', 'vibe']) {
     const launcher = path.join(dir, name);
     fs.writeFileSync(launcher, `#!${process.execPath}\nprocess.exit(0);\n`);
     fs.chmodSync(launcher, 0o755);
@@ -36,7 +36,11 @@ function withPathLaunchers(entries, run) {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'runtime-matrix-path-'));
   const binDir = path.join(tmpRoot, 'bin');
   fs.mkdirSync(binDir, { recursive: true });
-  for (const [name, body] of Object.entries(entries)) {
+  const launchers = { ...entries };
+  if (launchers.opencode && !launchers.pi) {
+    launchers.pi = launchers.opencode;
+  }
+  for (const [name, body] of Object.entries(launchers)) {
     const file = path.join(binDir, name);
     fs.writeFileSync(file, `#!${process.execPath}\n${body}\n`);
     fs.chmodSync(file, 0o755);
