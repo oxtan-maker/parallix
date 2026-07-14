@@ -1,7 +1,7 @@
 ---
 id: TASK-2258
 title: slow unit tests
-status: active
+status: review
 assignee: [custom]
 created_date: '2026-07-13 13:26'
 updated_date: '2026-07-13 13:28'
