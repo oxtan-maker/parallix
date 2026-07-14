@@ -899,27 +899,19 @@ function buildIntegrationContext(slug: string, {
   if (!resolvedBaseWorktree) {
     try { resolvedBaseWorktree = resolveBaseWorktree(slug, { rootDir: process.cwd() }); } catch (_) { resolvedBaseWorktree = getPrimaryWorktree(); }
   }
-  // Pre-merge task metadata is authoritative in the mission worktree. The
-  // base checkout only sees that task after the squash merge lands, so use
-  // the worktree copy first and fall back to the base checkout for legacy
-  // missions or recovery flows where no mission worktree is available.
+  // The primary integration checkout owns the durable backlog status. Mission
+  // worktrees remain authoritative for mission metadata such as classification
+  // and implementer, but can retain an earlier status after primary records
+  // review approval.
   const worktree = resolveWorktree(slug);
   /** @type {ReturnType<typeof resolveTaskFile>} */
+  const baseTask = resolveTaskFile(slug, /** @type {string} */ (resolvedBaseWorktree));
   let task = worktree ? resolveTaskFile(slug, worktree) : { ok: false, reason: 'missing', matches: [] };
   if (!task.ok) {
-    task = resolveTaskFile(slug, /** @type {string} */ (resolvedBaseWorktree));
+    task = baseTask;
   }
-  let taskStatus = task.ok ? getTaskStatus(task.taskFile as string) : null;
-  if (task.ok && taskStatus === 'backlog' && worktree) {
-    const wtTask = resolveTaskFile(slug, worktree);
-    if (wtTask.ok) {
-      const wtStatus = getTaskStatus(wtTask.taskFile as string);
-      if (wtStatus && wtStatus !== 'backlog') {
-        task = wtTask;
-        taskStatus = wtStatus;
-      }
-    }
-  }
+  const taskStatusSource = baseTask.ok ? baseTask : task;
+  const taskStatus = taskStatusSource.ok ? getTaskStatus(taskStatusSource.taskFile as string) : null;
   const taskAssignee = task.ok ? getTaskAssignee(task.taskFile as string) : null;
   const forgejoEnabled = isForgejoReviewEnabledFn(/** @type {string} */ (resolvedBaseWorktree));
   

@@ -1,11 +1,12 @@
 ---
 id: TASK-2258
 title: slow unit tests
-status: ready-for-integration
-assignee: [custom]
+status: done
+assignee: [codex]
 created_date: '2026-07-13 13:26'
 updated_date: '2026-07-13 13:28'
-labels: []
+labels:
+  - user_value
 dependencies: []
 ordinal: 45000
 ---

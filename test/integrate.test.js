@@ -154,7 +154,7 @@ test('integration verification command and cwd are both derived from the candida
   }]);
 });
 
-test('buildIntegrationContext prefers the mission worktree task over stale base-checkout task metadata', (t) => {
+test('buildIntegrationContext reads status from primary while retaining mission worktree metadata', (t) => {
   const backlog = require('../lib/tools/backlog');
   const worktree = '/tmp/project-task-2200';
   const baseWorktree = '/tmp/project-main';
@@ -185,7 +185,7 @@ test('buildIntegrationContext prefers the mission worktree task over stale base-
     }
     return { ok: false, reason: 'missing', matches: [] };
   });
-  const mockedGetTaskStatus = mock.method(backlog, 'getTaskStatus', (taskFile) => taskFile === worktreeTask ? 'review' : 'backlog');
+  const mockedGetTaskStatus = mock.method(backlog, 'getTaskStatus', (taskFile) => taskFile === worktreeTask ? 'active' : 'ready-for-integration');
   const mockedGetTaskAssignee = mock.method(backlog, 'getTaskAssignee', () => 'claude');
   t.after(() => {
     mockedResolveWorktree.mock.restore();
@@ -207,7 +207,7 @@ test('buildIntegrationContext prefers the mission worktree task over stale base-
   });
 
   assert.equal(context.task.taskFile, worktreeTask);
-  assert.equal(context.taskStatus, 'review');
+  assert.equal(context.taskStatus, 'ready-for-integration');
 });
 
 test('printIntegrationPreflight reads classification from the selected task file, not by re-resolving in the base checkout', (t) => {
