@@ -98,6 +98,10 @@ function watchInterruptedReviewFixture(root) {
   watcher.unref();
 }
 
+function passingPreReviewGate() {
+  return { ok: true, area: 'all', command: 'test gate', exitCode: 0, stdout: '', stderr: '' };
+}
+
 async function captureExit(fn) {
   const originalExit = process.exit;
   const originalError = console.error;
@@ -641,6 +645,7 @@ test('startReviewLoop full loop success and exit cases', async () => {
   const { startReviewLoop } = require('../lib/review/review');
   const logs = [];
   const rebaseCalls = [];
+  let preReviewGateCalls = 0;
 
   const baseOpts = {
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
@@ -674,7 +679,11 @@ test('startReviewLoop full loop success and exit cases', async () => {
     buildCompactReviewPromptFn: () => 'review prompt',
     buildCompactActOnReviewPromptFn: () => 'act-on-review prompt',
     consumeReviewerArtifactsFn: async () => ({ consumed: false }),
-    consumeImplementerArtifactsFn: async () => ({ consumed: false })
+    consumeImplementerArtifactsFn: async () => ({ consumed: false }),
+    runPreReviewGateFn: () => {
+      preReviewGateCalls++;
+      return { ok: true, area: 'all', command: 'test gate', exitCode: 0, stdout: '', stderr: '' };
+    }
   };
 
   // Case 1: Max attempts reached
@@ -717,6 +726,7 @@ test('startReviewLoop full loop success and exit cases', async () => {
     pollForDispositionFn: async () => 'BLOCKED'
   });
   assert.ok(logs.some(l => l.includes('implementer reported BLOCKED')), 'Should stop on blocked');
+  assert.equal(preReviewGateCalls, 8, 'Should run the injected pre-review gate once for each review round');
 });
 
 test('review helper functions and error paths', async () => {
@@ -965,7 +975,7 @@ test('startReviewLoop rebases immediately before each reviewer round', async () 
     exit: () => {},
     consumeReviewerArtifactsFn: async () => ({ consumed: false }),
     consumeImplementerArtifactsFn: async () => ({ consumed: false }),
-    
+    runPreReviewGateFn: () => ({ ok: true, area: 'all', command: 'test gate', exitCode: 0, stdout: '', stderr: '' })
   });
 
   assert.deepEqual(events, [
@@ -1031,7 +1041,8 @@ test('startReviewLoop continue consumes existing fixing disposition before next 
     error: (message) => { throw new Error(message); },
     exit: (code) => { throw new Error(`unexpected exit ${code}`); },
     consumeReviewerArtifactsFn: async () => ({ consumed: false }),
-    consumeImplementerArtifactsFn: async () => ({ consumed: false })
+    consumeImplementerArtifactsFn: async () => ({ consumed: false }),
+    runPreReviewGateFn: passingPreReviewGate
   });
 
   assert.deepEqual(reviews, [{ prNumber: 41, reviewerUser: 'codex', sinceIso: startedAt }]);
@@ -1096,7 +1107,8 @@ test('startReviewLoop isContinue waits long enough for delayed existing fixing d
       error: (message) => { throw new Error(message); },
       exit: (code) => { throw new Error(`unexpected exit ${code}`); },
       consumeReviewerArtifactsFn: async () => ({ consumed: true, ok: true, reviewState: 'APPROVED' }),
-      consumeImplementerArtifactsFn: async () => ({ consumed: false })
+      consumeImplementerArtifactsFn: async () => ({ consumed: false }),
+      runPreReviewGateFn: passingPreReviewGate
     });
   } finally {
     Date.now = originalNow;
@@ -1158,7 +1170,8 @@ test('startReviewLoop continue stops on terminal existing fixing dispositions', 
       buildCompactActOnReviewPromptFn: () => 'act-on-review prompt',
       log: () => {},
       error: (message) => { throw new Error(message); },
-      exit: (code) => { throw new Error(`unexpected exit ${code}`); }
+      exit: (code) => { throw new Error(`unexpected exit ${code}`); },
+      runPreReviewGateFn: passingPreReviewGate
     });
 
     // PUSHBACK_ALL is non-blocking for the skip-check: it is not BLOCKED/PARKED,
@@ -1227,7 +1240,8 @@ test('startReviewLoop continue reviewing phase skips only when existing review i
       error: (message) => { throw new Error(message); },
       exit: (code) => { throw new Error(`unexpected exit ${code}`); },
       consumeReviewerArtifactsFn: async () => ({ consumed: false }),
-      consumeImplementerArtifactsFn: async () => ({ consumed: false })
+      consumeImplementerArtifactsFn: async () => ({ consumed: false }),
+      runPreReviewGateFn: passingPreReviewGate
     });
 
     assert.deepEqual(
@@ -2562,7 +2576,8 @@ test('startReviewLoop handles reviewer launch failure', async () => {
     resolveTaskFileFn: () => ({ ok: true, taskFile: 'task.md' }),
     enforceTaskAssigneeFn: () => true,
     rebaseBeforeReviewRoundFn: async () => ({ ok: true, sharedFileConflicts: false }),
-    startAgentFn: async () => { throw new Error('launch fail'); }
+    startAgentFn: async () => { throw new Error('launch fail'); },
+    runPreReviewGateFn: passingPreReviewGate
   });
 
   assert.ok(errors.some(e => e.includes('Could not launch reviewer agent')), 'Should log launch failure');
@@ -2606,7 +2621,8 @@ test('startReviewLoop handles reviewer polling timeout with recovery', async () 
     },
     pollForReviewFn: async () => POLL_TIMEOUT,
     consumeReviewerArtifactsFn: async () => ({ consumed: false }),
-    consumeImplementerArtifactsFn: async () => ({ consumed: false })
+    consumeImplementerArtifactsFn: async () => ({ consumed: false }),
+    runPreReviewGateFn: passingPreReviewGate
   });
 
   // With timeout recovery (task-1136), the reviewer is relaunched up to 2 times on timeout (3-strike limit)
@@ -2657,7 +2673,8 @@ test('startReviewLoop persists reviewer retry count before recovery relaunch', a
     applyAgentFallbackFn: (args) => args.original,
     buildCompactReviewPromptFn: () => 'review prompt',
     consumeReviewerArtifactsFn: async () => ({ consumed: false }),
-    consumeImplementerArtifactsFn: async () => ({ consumed: false })
+    consumeImplementerArtifactsFn: async () => ({ consumed: false }),
+    runPreReviewGateFn: passingPreReviewGate
   });
 
   const retryWriteIndex = events.findIndex(event => event.type === 'write' && event.reviewerRetryCount === 1);
@@ -2714,7 +2731,8 @@ test('startReviewLoop persists implementer retry count before recovery relaunch'
     buildCompactReviewPromptFn: () => 'review prompt',
     buildCompactActOnReviewPromptFn: () => 'act-on-review prompt',
     consumeReviewerArtifactsFn: async () => ({ consumed: false }),
-    consumeImplementerArtifactsFn: async () => ({ consumed: false })
+    consumeImplementerArtifactsFn: async () => ({ consumed: false }),
+    runPreReviewGateFn: passingPreReviewGate
   });
 
   const retryWriteIndex = events.findIndex(event => event.type === 'write' && event.implementerRetryCount === 1);
@@ -2765,7 +2783,8 @@ test('startReviewLoop does not crash with ReferenceError when taskResolution is 
         // @ts-expect-error TS2339 Property 'implementer' does not exist on type '{ role: string; original: string;
         return opts.original || opts.implementer;
       },
-      enforceTaskAssigneeFn: () => true
+      enforceTaskAssigneeFn: () => true,
+      runPreReviewGateFn: passingPreReviewGate
     });
   });
 
@@ -2812,7 +2831,8 @@ test('startReviewLoop passes taskResolution to applyAgentFallback for both revie
         // @ts-expect-error TS2339 Property 'implementer' does not exist on type '{ role: string; original: string;
         return opts.original || opts.implementer;
       },
-      enforceTaskAssigneeFn: () => true
+      enforceTaskAssigneeFn: () => true,
+      runPreReviewGateFn: passingPreReviewGate
     });
   });
 
@@ -2875,7 +2895,8 @@ test('startReviewLoop repairs a persisted rewiewing typo and resumes on the revi
       transitionTaskFn: () => {},
       // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(transitionTaskFn: TransitionTaskFn
       transitionVirtualFn: () => {},
-      applyAgentFallbackFn: ({ original }) => original
+      applyAgentFallbackFn: ({ original }) => original,
+      runPreReviewGateFn: passingPreReviewGate
     });
   });
 
@@ -3664,6 +3685,7 @@ test('startReviewLoop persists PUSHBACK_ALL disposition before returning', async
     buildCompactReviewPromptFn: () => 'review prompt',
     buildCompactActOnReviewPromptFn: () => 'act-on-review prompt',
     eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
+    runPreReviewGateFn: passingPreReviewGate,
   });
 
   const terminalWrite = stateWrites[stateWrites.length - 1];
@@ -3708,6 +3730,7 @@ test('startReviewLoop persists BLOCKED disposition before returning', async () =
     buildCompactReviewPromptFn: () => 'review prompt',
     buildCompactActOnReviewPromptFn: () => 'act-on-review prompt',
     eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
+    runPreReviewGateFn: passingPreReviewGate,
   });
 
   const terminalWrite = stateWrites[stateWrites.length - 1];
@@ -3752,6 +3775,7 @@ test('startReviewLoop persists PARKED disposition before returning', async () =>
     buildCompactReviewPromptFn: () => 'review prompt',
     buildCompactActOnReviewPromptFn: () => 'act-on-review prompt',
     eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
+    runPreReviewGateFn: passingPreReviewGate,
   });
 
   const terminalWrite = stateWrites[stateWrites.length - 1];
@@ -3796,6 +3820,7 @@ test('startReviewLoop persists CHANGES_MADE disposition before continuing', asyn
     buildCompactReviewPromptFn: () => 'review prompt',
     buildCompactActOnReviewPromptFn: () => 'act-on-review prompt',
     eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
+    runPreReviewGateFn: passingPreReviewGate,
   });
 
   const lastWrite = stateWrites[stateWrites.length - 1];
@@ -3843,6 +3868,7 @@ test('startReviewLoop consumes reviewer and implementer artifacts before polling
     buildCompactReviewPromptFn: () => 'review prompt',
     buildCompactActOnReviewPromptFn: () => 'act-on-review prompt',
     eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
+    runPreReviewGateFn: passingPreReviewGate,
   });
 
   assert.equal(reviewPolls, 0, 'review polling should be skipped when reviewer artifacts are present');
