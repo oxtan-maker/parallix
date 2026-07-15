@@ -22,6 +22,16 @@ No checkpoint documents found in /home/magnus/code/parallix-task-2225/missions/t
        Then re-run: px review task-2225 --submit
 <!-- SECTION:DESCRIPTION:END -->
 
+## Codex Pre-Draft
+
+**Goal:** turn a missing required checkpoint after a successful execute phase into a correctly classified, actionable repair bounce rather than a stranded handoff failure.
+
+**Scope and proof:** reproduce the TASK-2225 failure with a deterministic implementer fixture; trace checkpoint discovery, error classification, relaunch prompting, and retry state; ensure the repair prompt names the missing `CP-N.md`, required Goal Check table, and exact retry command; cover successful repair and repeated failure/exhaustion.
+
+**Checkpoints:** (1) red handoff fixture; (2) missing-artifact classification and targeted relaunch; (3) lifecycle regression coverage and evidence that a valid CP unblocks handoff.
+
+**Stop rule:** do not synthesize checkpoint evidence on behalf of the implementer or allow handoff/review to continue without a real checkpoint document and Goal Check table.
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Verification gate ran and passed on the final tree with captured proof rather than an unverified claim

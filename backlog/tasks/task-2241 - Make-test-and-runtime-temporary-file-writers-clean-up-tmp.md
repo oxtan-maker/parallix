@@ -29,6 +29,16 @@ Repeated Parallix test and runtime runs leave substantial temporary data in /tmp
 - [ ] #7 The smoke harness classifies ENOSPC and Git index/lock creation failures as environment/resource failures rather than Parallix workflow regressions.
 <!-- AC:END -->
 
+## Codex Pre-Draft
+
+**Goal:** bound Parallix-owned temporary storage and classify storage exhaustion explicitly without deleting operator-owned diagnostics or active worktrees.
+
+**Scope and proof:** inventory every `mkdtemp`, temporary log, clone/worktree, cache, and runtime writer; assign ownership and cleanup in `finally`/error paths; add an explicit opt-in retention switch; preflight available temp capacity in the real-agent smoke harness; preserve the underlying Git/ENOSPC error through handoff classification.
+
+**Checkpoints:** (1) writer inventory and red cleanup/ENOSPC fixtures; (2) ownership-safe cleanup and retention implementation; (3) repeated-run residue assertion plus focused smoke/handoff verification.
+
+**Stop rule:** never recursively clean shared `/tmp` paths, an operator-selected path, or a still-running worktree; request direction if safe ownership cannot be established for an existing artifact.
+
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->

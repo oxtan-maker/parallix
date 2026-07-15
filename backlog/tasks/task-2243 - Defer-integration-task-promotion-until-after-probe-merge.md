@@ -32,6 +32,16 @@ Do not mutate the primary checkout until the probe merge has been cleanly aborte
 - [ ] #3 A regression test proves no task-status mutation occurs when probe-merge abort fails
 <!-- AC:END -->
 
+## Codex Pre-Draft
+
+**Goal:** keep task status immutable until Variant B has proved that its dry-run merge can be cleanly aborted, preventing a failed preflight from corrupting workflow state.
+
+**Scope and proof:** trace promotion and probe-merge ordering; add a red test that forces `git merge --abort` failure and asserts no backlog mutation; move promotion to the successful landed-closeout path; retain promotion evidence for a successful integration.
+
+**Checkpoints:** (1) ordering inventory and failing abort fixture; (2) defer the mutation and cover success/failure paths; (3) integration-focused verification.
+
+**Stop rule:** do not compensate for an abort failure by manually rewriting task status or suppressing the Git error; the integration must stop with the original checkout recoverable.
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Verification gate ran and passed on the final tree with captured proof rather than an unverified claim

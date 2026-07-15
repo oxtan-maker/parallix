@@ -27,6 +27,16 @@ with backlog.md changes being done in primarybranch the main changes really fast
 Ensure an integration survives if main has changed mid integration as long as its just backlog.md changes
 <!-- SECTION:DESCRIPTION:END -->
 
+## Codex Pre-Draft
+
+**Goal:** make Variant B integration tolerate concurrent backlog-only changes on the base branch without hiding real merge conflicts or losing either task update.
+
+**Scope and proof:** reproduce a mid-integration base-branch update limited to canonical backlog files; classify which paths may be safely refreshed/retried; update the probe-merge/retry sequence to re-read the current base; add tests for successful backlog-only drift and rejection of overlapping code or mission changes.
+
+**Checkpoints:** (1) deterministic concurrent-change fixture; (2) narrow retry/rebase implementation; (3) integration preflight/probe regression suite and final gates.
+
+**Stop rule:** do not automatically discard, stash-pop, or overwrite arbitrary base-branch changes; fail closed on source, configuration, or overlapping task-file conflicts.
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Verification gate ran and passed on the final tree with captured proof rather than an unverified claim
