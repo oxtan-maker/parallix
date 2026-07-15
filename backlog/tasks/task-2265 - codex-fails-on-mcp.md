@@ -1,9 +1,9 @@
 ---
-id: TASK-2208
-title: evaluate pi as an agent to drive custom
+id: TASK-2265
+title: codex fails on mcp
 status: backlog
 assignee: []
-created_date: '2026-07-10 07:00'
+created_date: '2026-07-10 09:33'
 labels: []
 dependencies: []
 ---
@@ -11,18 +11,7 @@ dependencies: []
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-install pi  https://pi.dev/ on the local workstation and configure it to use the same model as opencode (QuantTrio/Qwen3.6-27B-AWQ-6Bit)
-
-research if/how to enable graphify for pi and graphify in parralix for pi
-
-implement pi as a runner
-
-ensure there is a configuration to change the runner for custom from opencode to pi
-
-test the e2e test with custom with opencode, measure token usage and duration
-test the e2e test with custom and pi, measure token usage and duration
-
-look trough the ADR:s to find out the format but also include data, make a recommendation of what should be the default runner for custom
+while it works reasonably well on this local machine, at work I cannot get access to slack, datadog etc. Ensure the complete codex is setup when a worktree is created so mcp etc works and is not blocked in missions
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Definition of Done

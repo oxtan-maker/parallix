@@ -38,6 +38,16 @@ in e2e test I got this error:
 Check the ADR for what rebounce we should have on this one, fix the above error and ensure we have a complete implementation for all the review bounces as part of the ADR
 <!-- SECTION:DESCRIPTION:END -->
 
+## Codex Pre-Draft
+
+**Goal:** make a missing formal reviewer outcome follow the ADR-defined recoverable bounce path, with diagnostics that distinguish reviewer non-submission from a product regression.
+
+**Scope and proof:** reproduce the quoted real-agent failure with a deterministic reviewer fixture; trace review outcome collection, error classification, retry/bounce routing, attempt limits, and human-escalation decision; implement the missing classification/transition and cover every review-bounce case required by the governing ADR.
+
+**Checkpoints:** (1) red deterministic reproduction and ADR-to-code mapping; (2) repair classification/routing plus focused tests; (3) lifecycle regression coverage and verification evidence.
+
+**Stop rule:** do not weaken the requirement for a formal review outcome or make an agent's silent exit an approval; escalate only after the configured automatic retry/repair budget is exhausted.
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Verification gate ran and passed on the final tree with captured proof rather than an unverified claim

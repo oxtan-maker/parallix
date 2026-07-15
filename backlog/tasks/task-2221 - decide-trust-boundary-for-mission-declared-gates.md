@@ -42,6 +42,16 @@ Create ADR 0051 to define this authority boundary before changing runtime behavi
 - General sandboxing of AI agent processes
 - Redesigning verification gates unrelated to mission-declared commands
 
+## Codex Pre-Draft
+
+**Goal:** produce ADR 0051 as a decision record, not a partial security implementation. Establish who authorizes a gate command, what validation can honestly guarantee, and how existing mission gate text migrates.
+
+**Scope and proof:** trace `MISSION.md` creation, commit/review ownership, gate parsing, and `bash -c` execution; compare the four required models against the stated criteria; select one model with fail-closed, audit, compatibility, and emergency-escape invariants; list bounded follow-up tickets. Update the ADR index and run the docs gate.
+
+**Checkpoints:** (1) evidence-backed current-state/data-flow inventory; (2) alternatives matrix and proposed decision; (3) ADR/index finalization and documentation verification.
+
+**Stop rule:** do not change gate execution, silently claim shell sanitization, or choose a trust model without recording the operator authority and legacy-command migration consequence.
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Verification gate ran and passed on the final tree with captured proof rather than an unverified claim

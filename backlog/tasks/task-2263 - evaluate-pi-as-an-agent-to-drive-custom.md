@@ -1,10 +1,9 @@
 ---
-id: TASK-2211
-title: codex isolation is broken
+id: TASK-2263
+title: evaluate pi as an agent to drive custom
 status: backlog
 assignee: []
-created_date: '2026-07-10 19:17'
-updated_date: '2026-07-10 19:17'
+created_date: '2026-07-10 07:00'
 labels: []
 dependencies: []
 ---
@@ -12,9 +11,18 @@ dependencies: []
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Codex ran the smoke test from a Parallix-created environment whose HOME had been replaced with a worktree-local directory. That hid or disrupted the operator-installed OpenCode and Pi commands. The test failure therefore reflects a Parallix Codex-launcher isolation bug, not evidence that the final repository tree fails the smoke gate.
+install pi  https://pi.dev/ on the local workstation and configure it to use the same model as opencode (QuantTrio/Qwen3.6-27B-AWQ-6Bit)
 
-Research how what parallix actually needs (telemetry and session isolation) should be expressed when setting up the codex harness. Then fix it
+research if/how to enable graphify for pi and graphify in parralix for pi
+
+implement pi as a runner
+
+ensure there is a configuration to change the runner for custom from opencode to pi
+
+test the e2e test with custom with opencode, measure token usage and duration
+test the e2e test with custom and pi, measure token usage and duration
+
+look trough the ADR:s to find out the format but also include data, make a recommendation of what should be the default runner for custom
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Definition of Done

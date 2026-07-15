@@ -32,6 +32,16 @@ Specifically, `px review --submit-review request-changes --message "..."` should
 Trigger: TASK-2213 — implementation collapsed model-level rows into implementer-family rows, breaking per-model PR round averages; operator's manual review produced no artifacts, causing claude to post BLOCKED.
 <!-- SECTION:DESCRIPTION:END -->
 
+## Codex Pre-Draft
+
+**Goal:** restore per-model review-round statistics and make a human `request-changes` submission indistinguishable, to the implementer workflow, from a structured reviewer submission.
+
+**Scope and proof:** first add a red regression for model-keyed stats aggregation; then make `px review --submit-review request-changes --message` atomically write the human outcome/findings artifacts and advance the review round alongside durable review state. Cover empty/malformed messages, persistence failure, and the subsequent implementer relaunch.
+
+**Checkpoints:** (1) isolate both regressions with fixture tests; (2) implement model-key preservation and human artifacts; (3) exercise request-changes-to-repair lifecycle and full relevant gates.
+
+**Stop rule:** do not merge models under an implementer-family key, and do not flip review disposition without durable artifacts that the implementer can consume.
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Verification gate ran and passed on the final tree with captured proof rather than an unverified claim

@@ -1,5 +1,5 @@
 ---
-id: TASK-2217
+id: TASK-2270
 title: add possibility to exclude directories from graphify
 status: backlog
 assignee: []
@@ -13,6 +13,16 @@ dependencies: []
 <!-- SECTION:DESCRIPTION:BEGIN -->
 problem: when parallix develops itselv it generates a lot of task documents that pollutes the graphify graph. Add configuration to exclude directories from graphify and configure parallix to exclude all mission documents from graphify
 <!-- SECTION:DESCRIPTION:END -->
+
+## Codex Pre-Draft
+
+**Goal:** allow Parallix to configure Graphify exclusions so generated mission artifacts do not dominate the self-hosting knowledge graph.
+
+**Scope and proof:** identify Graphify's supported exclusion configuration and the Parallix invocation/configuration seam; exclude mission-document directories from this repository's graph build without excluding source relationships; add a small fixture proving excluded files are absent while source nodes and cross-file links remain.
+
+**Checkpoints:** (1) configuration/API inventory and graph fixture; (2) exclusion wiring and repository configuration; (3) graph update plus focused verification.
+
+**Stop rule:** do not filter graph output after indexing or exclude `missions/` wholesale if it contains code-relevant artifacts; use the narrowest supported source-level exclusion and document it.
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

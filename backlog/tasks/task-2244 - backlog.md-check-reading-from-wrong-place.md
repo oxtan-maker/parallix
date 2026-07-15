@@ -37,6 +37,16 @@ magnus@debian:~/code/parallix-task-2237$ px integrate
 some time ago we had a mission to change backlog.md changes to primarybranch since backlog.md is very bad at picking up worktree changes
 <!-- SECTION:DESCRIPTION:END -->
 
+## Codex Pre-Draft
+
+**Goal:** make integration preflight read authoritative mission-task status from the correct worktree before squash, while retaining the base checkout as the closeout authority after landing.
+
+**Scope and proof:** reproduce the quoted `active`-versus-approved mismatch with divergent mission/base backlog copies; classify every preflight read by phase; resolve status/classification from the mission worktree until the squash succeeds; add regression tests for the worktree invocation and post-squash closeout.
+
+**Checkpoints:** (1) red two-worktree fixture; (2) phase-correct task resolution implementation; (3) preflight, retry, and closeout regression verification.
+
+**Stop rule:** do not globally switch all integration reads to the mission worktree; after landing, canonical backlog writes and closeout must still target the base checkout.
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Verification gate ran and passed on the final tree with captured proof rather than an unverified claim
