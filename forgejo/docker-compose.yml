@@ -1,0 +1,13 @@
+services:
+  forgejo:
+    image: codeberg.org/forgejo/forgejo:12
+    container_name: ${FORGEJO_CONTAINER_NAME:-workflow-forgejo}
+    restart: unless-stopped
+    environment:
+      USER_UID: ${UID:-1000}
+      USER_GID: ${GID:-1000}
+      FORGEJO__server__ROOT_URL: ${FORGEJO_ROOT_URL:-http://localhost:3300/}
+    ports:
+      - "${FORGEJO_PORT:-3300}:3000"
+    volumes:
+      - ../.forgejo-local/server:/data
