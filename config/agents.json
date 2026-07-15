@@ -3,19 +3,19 @@
   "_weights_comment": "Weights are relative integers (not percentages). Agent is selected by weighted random draw from eligible-and-supported set. Omit weights to use equal probability.",
   "steps": {
     "draft": {
-      "eligible": ["codex", "custom", "vibe"],
+      "eligible": ["codex"],
       "selection": "random"
     },
     "active": {
-      "eligible": ["codex", "claude",  "custom", "vibe"],
+      "eligible": ["codex"],
       "selection": "random"
     },
     "conflict-resolution": {
-      "eligible": ["claude", "codex", "vibe"],
+      "eligible": ["codex"],
       "selection": "random"
     },
     "review": {
-      "eligible": ["codex", "claude", "custom", "vibe"],
+      "eligible": ["codex"],
       "selection": "random"
     }
   },
