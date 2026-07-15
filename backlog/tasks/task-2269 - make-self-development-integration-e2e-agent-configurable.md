@@ -1,7 +1,7 @@
 ---
 id: TASK-2269
 title: make self-development integration E2E agent configurable
-status: backlog
+status: refined
 assignee: [codex]
 created_date: '2026-07-15 00:00'
 labels: [self-hosting, e2e]
