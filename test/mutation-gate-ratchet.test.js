@@ -1,15 +1,11 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
 const fmt = require('../lib/core/fmt');
 const mutationGate = require('../lib/commands/mutation-gate');
-
-const REPO_ROOT = path.join(__dirname, '..');
-const STRYKER_BIN = path.join(REPO_ROOT, 'node_modules', '.bin', 'stryker');
 
 const STRONG_TEST = `const test = require('node:test');
 const assert = require('node:assert');
@@ -66,10 +62,23 @@ function runGate(repoRoot, baselinePath, extraArgs = []) {
     mutationGate(['--base', 'main', '--baseline-path', baselinePath, ...extraArgs], {
       exitFn: code => { exitCode = code; },
       scopeFn,
-      spawnSyncFn: spawnSync,
+      // The ratchet is about how mutation scores affect the baseline, not
+      // Stryker's own process execution. Simulate its report so this remains
+      // a hermetic unit test on machines without the Stryker binary.
+      spawnSyncFn: () => {
+        const testSource = fs.readFileSync(path.join(repoRoot, 'test', 'widget.test.js'), 'utf8');
+        const mutants = testSource.includes('add is callable')
+          ? [{ status: 'Survived' }]
+          : [{ status: 'Killed' }];
+        const reportPath = path.join(repoRoot, 'reports', 'mutation', 'mutation.json');
+        fs.mkdirSync(path.dirname(reportPath), { recursive: true });
+        fs.writeFileSync(reportPath, JSON.stringify({
+          files: { 'lib/core/widget.js': { mutants } }
+        }));
+        return { status: 0, error: null };
+      },
       getPrimaryBranchFn: () => 'main',
       repoRoot,
-      strykerBin: STRYKER_BIN,
     });
   } finally {
     fmt.setLogger(previousLogger);

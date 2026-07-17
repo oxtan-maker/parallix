@@ -73,12 +73,54 @@ gate_static_analysis() {
 }
 
 gate_integrate() {
-  node <<'NODE'
+  local real_agent="${PARALLIX_REAL_AGENT:-}"
+  local real_agent_model="${PARALLIX_REAL_AGENT_MODEL:-}"
+  local saw_real_agent=0
+  local saw_real_agent_model=0
+
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --real-agent|--real-agent-model)
+        if [ "$#" -lt 2 ] || [ -z "$2" ] || [[ "$2" == --* ]]; then
+          echo "FAIL: $1 requires a value" >&2
+          return 1
+        fi
+        if [ "$1" = "--real-agent" ]; then
+          if [ "$saw_real_agent" -eq 1 ]; then echo "FAIL: --real-agent may be supplied only once" >&2; return 1; fi
+          real_agent="$2"; saw_real_agent=1
+        else
+          if [ "$saw_real_agent_model" -eq 1 ]; then echo "FAIL: --real-agent-model may be supplied only once" >&2; return 1; fi
+          real_agent_model="$2"; saw_real_agent_model=1
+        fi
+        shift 2
+        ;;
+      *) echo "FAIL: unknown integrate option: $1" >&2; return 1 ;;
+    esac
+  done
+
+  if [ -n "$real_agent" ] || [ -n "$real_agent_model" ]; then
+    if [ -z "$real_agent" ] || [ -z "$real_agent_model" ]; then
+      echo "FAIL: --real-agent and --real-agent-model must be supplied together" >&2
+      return 1
+    fi
+    if [ "$real_agent" != "codex" ]; then
+      echo "FAIL: unsupported real agent $real_agent (supported: codex)" >&2
+      return 1
+    fi
+    if [ "$real_agent_model" != "gpt-5.6-luna" ]; then
+      echo "FAIL: unsupported Codex real-agent model $real_agent_model (supported: gpt-5.6-luna)" >&2
+      return 1
+    fi
+  fi
+
+  PARALLIX_REAL_AGENT="$real_agent" PARALLIX_REAL_AGENT_MODEL="$real_agent_model" node <<'NODE'
 const fs = require('node:fs');
 const path = require('node:path');
 const childProcess = require('node:child_process');
 
 const repoRoot = process.cwd();
+const realAgent = String(process.env.PARALLIX_REAL_AGENT || '');
+const realAgentModel = String(process.env.PARALLIX_REAL_AGENT_MODEL || '');
 const {
   loadIntegrationConfig,
   parseFilesToAreas,
@@ -171,13 +213,23 @@ if (String(process.env.INTEGRATE_DRY_RUN || '').toLowerCase() === 'true') {
 for (const gate of relevantGates) {
   log(`=== GATE: integration:${gate.key} ===`);
   log(`Command: ${gate.command}`);
-  const result = childProcess.spawnSync('bash', ['-lc', gate.command], {
+  const gateEnv = {
+    ...process.env,
+    WORKFLOW_SUITE_CONTEXT: process.env.WORKFLOW_SUITE_CONTEXT || '',
+  };
+  if (gate.key === 'custom-agent-smoke' && realAgent && realAgentModel) {
+    gateEnv.PARALLIX_REAL_AGENT = realAgent;
+    gateEnv.PARALLIX_REAL_AGENT_MODEL = realAgentModel;
+  } else {
+    delete gateEnv.PARALLIX_REAL_AGENT;
+    delete gateEnv.PARALLIX_REAL_AGENT_MODEL;
+  }
+  // Gates inherit the verified runner environment. Avoid login-shell startup
+  // files, which can rewrite PATH or fail independently of the project.
+  const result = childProcess.spawnSync('bash', ['-c', gate.command], {
     cwd: repoRoot,
     stdio: 'inherit',
-    env: {
-      ...process.env,
-      WORKFLOW_SUITE_CONTEXT: process.env.WORKFLOW_SUITE_CONTEXT || '',
-    }
+    env: gateEnv
   });
   if (result.status !== 0) {
     fail(`=== FAIL: integration:${gate.key} ===`);
@@ -230,7 +282,8 @@ case "$subcommand" in
     exit 0
     ;;
   integrate)
-    gate_integrate || exit 1
+    shift || true
+    gate_integrate "$@" || exit 1
     exit 0
     ;;
   all|workflow)

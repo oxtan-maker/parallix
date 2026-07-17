@@ -100,3 +100,60 @@ test('verify-local integrate reports no applicable gates when changed areas do n
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
+
+test('verify-local integrate forwards the Codex override only to custom-agent-smoke', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'verify-local-real-agent-'));
+  const configPath = path.join(tmpDir, 'integration-pipelines.json');
+  const libOutput = path.join(tmpDir, 'lib-env.txt');
+  const smokeOutput = path.join(tmpDir, 'smoke-env.txt');
+  try {
+    fs.writeFileSync(configPath, JSON.stringify({
+      gates: {
+        lib: { command: `printf '%s:%s' "${'${PARALLIX_REAL_AGENT-}"'} "${'${PARALLIX_REAL_AGENT_MODEL-}"'} > ${libOutput}`, order: 1 },
+        'custom-agent-smoke': { command: `printf '%s:%s' "${'${PARALLIX_REAL_AGENT-}"'} "${'${PARALLIX_REAL_AGENT_MODEL-}"'} > ${smokeOutput}`, order: 2, run_last: true }
+      }
+    }));
+    const result = runScript(['integrate', '--real-agent', 'codex', '--real-agent-model', 'gpt-5.6-luna'], {
+      INTEGRATION_CONFIG_PATH: configPath,
+      INTEGRATE_CHANGED_AREAS: 'lib workflow'
+    });
+    assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
+    assert.equal(fs.readFileSync(libOutput, 'utf8'), ':');
+    assert.equal(fs.readFileSync(smokeOutput, 'utf8'), 'codex:gpt-5.6-luna');
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('verify-local integrate rejects incomplete or unsupported real-agent overrides', () => {
+  for (const args of [
+    ['integrate', '--real-agent', 'codex'],
+    ['integrate', '--real-agent', 'claude', '--real-agent-model', 'gpt-5.6-luna'],
+    ['integrate', '--real-agent', 'codex', '--real-agent-model', 'not-gpt'],
+    ['integrate', '--real-agent-model']
+  ]) {
+    const result = runScript(args, { INTEGRATE_CHANGED_AREAS: 'workflow' });
+    assert.notEqual(result.status, 0);
+  }
+});
+
+test('verify-local integrate does not source login-shell startup files for gates', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'verify-local-non-login-'));
+  const configPath = path.join(tmpDir, 'integration-pipelines.json');
+  const outputPath = path.join(tmpDir, 'gate-output.txt');
+  try {
+    fs.writeFileSync(path.join(tmpDir, '.bash_profile'), `echo sourced > ${outputPath}`);
+    fs.writeFileSync(configPath, JSON.stringify({
+      gates: { workflow: { command: `test ! -f ${outputPath}`, order: 1 } }
+    }));
+    const result = runScript(['integrate'], {
+      HOME: tmpDir,
+      INTEGRATION_CONFIG_PATH: configPath,
+      INTEGRATE_CHANGED_AREAS: 'workflow'
+    });
+    assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
+    assert.equal(fs.existsSync(outputPath), false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});

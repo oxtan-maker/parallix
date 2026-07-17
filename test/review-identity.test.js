@@ -120,6 +120,7 @@ test('submitReviewRound falls back to review-state identity when FORGEJO_USER is
       readReviewStateFn: () => reviewStateStub('claude', 'mistral'),
       // @ts-expect-error TS2322 Type 'number' is not assignable to type 'ReviewStatePersistenceResult'.
       writeReviewStateFn: (slug, state) => writes.push({ slug, disposition: state.disposition, phase: state.phase }),
+      getPrAuthorFn: () => 'different-author',
       postReviewFn: () => ({ ok: true }),
       readTokenFn: () => 'token-123',
       isForgejoReviewEnabledFn: () => true

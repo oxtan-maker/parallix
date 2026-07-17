@@ -22,7 +22,7 @@ const FAKE_ROOT = '/tmp/mission';
 
 function withTempRepo(fn) {
   const previous = process.cwd();
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-mission-utils-'));
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-mission-utils-')));
   process.chdir(root);
   fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
     adapters: { missions: { baseDir: 'docs/missions' } },

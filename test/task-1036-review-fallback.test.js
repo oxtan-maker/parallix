@@ -3,17 +3,13 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const originalPath = process.env.PATH;
-const originalCodexHome = process.env.CODEX_HOME;
-
 const {
   eligibleAgentsForStep,
-  setCommandPathProbe,
   startAgent,
   selectAgent
 } = require('../lib/agents/agents');
 
-const { createDummyLauncher } = require('./lib/agent-mock');
+const { fakeLauncher } = require('./lib/agent-mock');
 
 function withStubbedMathRandom(value, fn) {
   const previousRandom = Math.random;
@@ -42,27 +38,6 @@ function writeAgentConfig(root, config) {
   fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
   return configPath;
 }
-
-function installPathLaunchers(tmpRoot) {
-  const launcher = createDummyLauncher(tmpRoot);
-  const binDir = path.join(tmpRoot, 'bin');
-  fs.mkdirSync(binDir, { recursive: true });
-  for (const name of ['codex', 'claude', 'opencode', 'vibe']) {
-    fs.copyFileSync(launcher, path.join(binDir, name));
-    fs.chmodSync(path.join(binDir, name), 0o755);
-  }
-  process.env.PATH = `${binDir}${path.delimiter}${process.env.PATH}`;
-  process.env.CODEX_HOME ||= path.join(tmpRoot, 'codex-home');
-  // @ts-expect-error TS2322 Type 'boolean' is not assignable to type 'string'.
-  setCommandPathProbe(name => fs.existsSync(path.join(binDir, name)));
-}
-
-test.after(() => {
-  process.env.PATH = originalPath;
-  if (originalCodexHome === undefined) delete process.env.CODEX_HOME;
-  else process.env.CODEX_HOME = originalCodexHome;
-  setCommandPathProbe(null);
-});
 
 // ---------- TASK-1036: review/act-on-review fallback pool tracks current launchers ----------
 
@@ -114,7 +89,6 @@ test('startAgent review fallback selects vibe when claude hits limit and review 
       return { path: path.join(tmpRoot, 'agents.local.json') };
     };
 
-    installPathLaunchers(tmpRoot);
     const previousAgent = process.env.WORKFLOW_AGENT;
     delete process.env.WORKFLOW_AGENT;
 
@@ -136,6 +110,8 @@ test('startAgent review fallback selects vibe when claude hits limit and review 
         detectLimitHitFn,
         updateAgentBlockFn,
         selectAgentFn,
+        launchAgentFn: fakeLauncher(),
+        assertAgentSupportedFn: () => {},
         // @ts-expect-error TS1117 An object literal cannot have multiple properties with the same name.
         isAgentBlockedFn: () => false,
         // @ts-expect-error TS2353 Object literal may only specify known properties, and 'config' does not exist in
@@ -177,7 +153,6 @@ test('startAgent act-on-review fallback selects vibe when implementer hits limit
       return { path: path.join(tmpRoot, 'agents.local.json') };
     };
 
-    installPathLaunchers(tmpRoot);
     const previousAgent = process.env.WORKFLOW_AGENT;
     delete process.env.WORKFLOW_AGENT;
 
@@ -198,6 +173,8 @@ test('startAgent act-on-review fallback selects vibe when implementer hits limit
         detectLimitHitFn,
         updateAgentBlockFn,
         selectAgentFn,
+        launchAgentFn: fakeLauncher(),
+        assertAgentSupportedFn: () => {},
         // @ts-expect-error TS1117 An object literal cannot have multiple properties with the same name.
         isAgentBlockedFn: () => false,
         // @ts-expect-error TS2353 Object literal may only specify known properties, and 'config' does not exist in

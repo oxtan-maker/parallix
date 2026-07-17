@@ -63,6 +63,7 @@ function setupMocks() {
     number: 2204,
     raw: 'merged'
   }));
+  mock.method(forgejo, 'listOpenPrsForSlug', () => []);
   mock.method(forgejo, 'getLatestReviewDecision', () => ({
     ok: false,
     error: 'pr-already-merged',
@@ -139,7 +140,7 @@ test('integrate rejects merged Forgejo PRs during preflight with recovery guidan
 
   try {
     // @ts-expect-error TS2349 This expression is not callable.
-    integrate([TEST_SLUG]);
+    integrate([TEST_SLUG, '--no-integration-gates']);
 
     const output = [...logs, ...errors].join('\n');
     assert.deepEqual(exitCodes, [1]);

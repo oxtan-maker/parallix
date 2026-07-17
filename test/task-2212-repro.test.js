@@ -18,11 +18,19 @@ function removeTestRepository(root) {
 
 test('interrupted feature lifecycle leaves no e2e branch or worktree behind (SC1/SC2)', async () => {
   const before = new Set(fs.readdirSync(os.tmpdir()).filter(name => name.startsWith('parallix-e2e-')));
+  const signalRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2212-cleanup-'));
+  const cleanupMarker = path.join(signalRoot, 'complete');
   const child = childProcess.spawn(process.execPath, [
     '--test', '--test-name-pattern=feature-branch lifecycle drafts', 'test/e2e-mission-lifecycle.test.js'
   ], {
     cwd: repoRoot,
-    env: { ...process.env, NODE_TEST_CONTEXT: undefined, PARALLIX_E2E_KEEP_TMP: '1' },
+    env: {
+      ...process.env,
+      NODE_TEST_CONTEXT: undefined,
+      PARALLIX_E2E_KEEP_TMP: '1',
+      PARALLIX_E2E_CLEANUP_MARKER: cleanupMarker
+    },
+    detached: process.platform !== 'win32',
     stdio: 'ignore'
   });
   const childExited = new Promise(resolve => child.once('exit', resolve));
@@ -42,22 +50,25 @@ test('interrupted feature lifecycle leaves no e2e branch or worktree behind (SC1
     }
     assert.ok(fixtureRoot, 'the failed-test fixture should be created');
     assert.ok(worktree && fs.existsSync(worktree), 'the lifecycle should create its test worktree before interruption');
-    child.kill('SIGKILL');
+    if (process.platform === 'win32') {
+      child.kill('SIGKILL');
+    } else {
+      process.kill(-child.pid, 'SIGKILL');
+    }
     await childExited;
 
     const fixtureRepo = path.join(fixtureRoot, 'repo');
-    let branch = childProcess.spawnSync('git', ['-C', fixtureRepo, 'branch', '--list', 'feature/e2e-base'], { encoding: 'utf8' });
-    const cleanupDeadline = Date.now() + 5000;
-    while ((branch.stdout || '').trim() || fs.existsSync(worktree)) {
-      if (Date.now() >= cleanupDeadline) break;
+    while (!fs.existsSync(cleanupMarker)) {
       await new Promise(resolve => setTimeout(resolve, 20));
-      branch = childProcess.spawnSync('git', ['-C', fixtureRepo, 'branch', '--list', 'feature/e2e-base'], { encoding: 'utf8' });
     }
-    assert.equal(branch.stdout.trim(), '', 'feature/e2e-base must be removed after interruption');
+    assert.ok(fs.existsSync(cleanupMarker), 'the detached cleanup watcher must report completion');
+    const branch = childProcess.spawnSync('git', ['-C', fixtureRepo, 'branch', '--list', 'feature/e2e-base'], { encoding: 'utf8' });
+    assert.equal((branch.stdout || '').trim(), '', 'feature/e2e-base must be removed after interruption');
     assert.equal(fs.existsSync(worktree), false, 'the e2e test worktree must be removed after interruption');
   } finally {
     if (!child.killed) child.kill('SIGKILL');
     if (fixtureRoot) removeTestRepository(fixtureRoot);
+    fs.rmSync(signalRoot, { recursive: true, force: true });
   }
 });
 

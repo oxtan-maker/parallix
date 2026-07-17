@@ -63,13 +63,17 @@ test('startReviewLoop follows the transition contract: review before reviewer, a
     
     // Mock polling results to ensure we go through one full round
     pollForReviewFn: async () => 'REQUEST_CHANGES',
-    pollForDispositionFn: async () => 'CHANGES_MADE',
+    // A terminal disposition proves the complete reviewer -> implementer order
+    // in one round without exercising the five-round retry policy.
+    pollForDispositionFn: async () => 'PUSHBACK_ALL',
     
     applyAgentFallbackFn: (args) => args.original,
     buildCompactReviewPromptFn: () => 'review prompt',
     buildCompactActOnReviewPromptFn: () => 'act-on-review prompt',
-    
-    
+    consumeReviewerArtifactsFn: async () => ({ consumed: false }),
+    consumeImplementerArtifactsFn: async () => ({ consumed: false }),
+    recordStageStatsSafeFn: () => {},
+    runPreReviewGateFn: async () => ({ ok: true, area: 'all', command: 'mock gate', exitCode: 0, stdout: '', stderr: '' }),
   };
 
   // @ts-expect-error TS2345 Argument of type '{ isForgejoReviewEnabledFn: () => boolean; eligibleAgentsForSt

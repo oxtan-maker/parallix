@@ -1,10 +1,10 @@
 ---
 id: TASK-2269
 title: make self-development integration E2E agent configurable
-status: review
+status: done
 assignee: [codex]
 created_date: '2026-07-15 00:00'
-labels: [self-hosting, e2e]
+labels: [self-hosting, e2e, ai_sdlc]
 dependencies: []
 ---
 
@@ -26,6 +26,11 @@ Document the supported command-line interface and add regression coverage provin
 - the integration script selects Codex with `gpt-5.6-luna` for the self-development E2E
   invocation; and
 - the existing default Pi/custom path is unchanged when no override is requested.
+
+The same mission also covers making the affected unit tests independent of the
+developer workstation: unit tests must not discover real agent CLIs or contact a
+real Forgejo service, and temporary-path assertions must handle macOS's
+`/var` → `/private/var` physical-path resolution without changing production defaults.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Codex Pre-Draft

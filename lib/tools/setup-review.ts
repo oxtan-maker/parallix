@@ -662,7 +662,7 @@ async function createTokenWithRetries(setup: any, user: string, initialPassword:
 
 /**
  * @param {string} [rootDir]
- * @param {{promptFn?: Function, log?: Function, users?: string[]}} [options]
+ * @param {{promptFn?: Function, log?: Function, users?: string[], resolveForgejoSettingsFn?: Function}} [options]
  * @returns {Promise<{baseUrl: string, repo: string, ownerLogin: string, ownerPassword: string, agentPasswords: Array<{user: string, password: string}>, agentUsers: string[]}>}
  */
 async function collectSetupAnswers(rootDir?: string, options: any = {}) {
@@ -670,8 +670,9 @@ async function collectSetupAnswers(rootDir?: string, options: any = {}) {
     promptFn = promptLine,
     log = fmt.log.info,
     users = suggestedForgejoUsers(),
+    resolveForgejoSettingsFn = resolveForgejoSettings,
   } = options;
-  const review = resolveForgejoSettings(rootDir);
+  const review = resolveForgejoSettingsFn(rootDir);
   const repoInfo = parseRepoSlug(review.repo || '');
   const defaultOwnerLogin = repoInfo ? repoInfo.owner : 'human';
   const defaultUsers = users.join(',');
@@ -890,7 +891,7 @@ function tokenCreateViaOwnerToken(baseUrl: string, repoSlug: string, ownerToken:
 /**
  * @param {string} rootDir
  * @param {{baseUrl: string, repo: string, ownerLogin: string, ownerPassword: string, agentPasswords: Array<{user: string, password: string}>, agentUsers?: string[]}} setup
- * @param {{log?: Function, promptFn?: Function, requestFn?: Function, maxPasswordAttempts?: number, interactive?: boolean, forgejoHome?: string}} [options]
+ * @param {{log?: Function, promptFn?: Function, requestFn?: Function, maxPasswordAttempts?: number, interactive?: boolean, forgejoHome?: string, reviewRemoteUrlFn?: Function}} [options]
  * @returns {Promise<{ok: boolean, warnings?: Array<{user: string, error: string, response?: any}>, createdTokens?: Array<{user: string, path: string}>, error?: string, response?: any}>}
  */
 async function bootstrapReviewSurface(rootDir: string, setup: any, options: any = {}) {
@@ -900,6 +901,7 @@ async function bootstrapReviewSurface(rootDir: string, setup: any, options: any 
     requestFn = apiRequest,
     maxPasswordAttempts = 3,
     interactive = true,
+    reviewRemoteUrlFn = reviewRemoteUrl,
   } = options;
   const forgejoHome = resolveBootstrapForgejoHome(rootDir, options.forgejoHome);
   const repoInfo = parseRepoSlug(setup.repo);
@@ -975,7 +977,7 @@ async function bootstrapReviewSurface(rootDir: string, setup: any, options: any 
       createdTokens.push({ user: agent.user, path: writeToken(agent.user, /** @type {string} */ ((tokenResult as any).token), forgejoHome) });
     }
 
-    const remoteUrl = reviewRemoteUrl(rootDir);
+    const remoteUrl = reviewRemoteUrlFn(rootDir);
     const remoteName = resolveReviewAdapter(rootDir).remote || 'review';
     const remoteResult = remoteUrl ? ensureReviewRemote(rootDir, remoteName, remoteUrl) : { ok: true, created: false, updated: false };
     if (!remoteResult.ok) {return remoteResult;}

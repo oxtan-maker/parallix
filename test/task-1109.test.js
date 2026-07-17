@@ -47,6 +47,7 @@ function setupMocks() {
   mock.method(backlog, 'setTaskStatus', () => true);
   mock.method(backlog, 'completeTask', () => true);
   mock.method(forgejo, 'getPrStatus', () => ({ exists: true, state: 'open', merged: false, number: 41 }));
+  mock.method(forgejo, 'listOpenPrsForSlug', () => []);
   mock.method(forgejo, 'getLatestReviewDecision', () => ({ ok: true, reviewState: 'APPROVED' }));
   mock.method(forgejo, 'readToken', () => 'token');
   mock.method(forgejo, 'resolveTokenFile', () => 'token-file');
@@ -84,7 +85,7 @@ test('integrate full squash-merge (Variant B) success path', async (t) => {
   console.log = (msg) => logs.push(msg);
   
   // @ts-expect-error TS2349 This expression is not callable.
-  integrate([TEST_SLUG]);
+  integrate([TEST_SLUG, '--no-integration-gates']);
   
   assert.ok(logs.some(l => l.includes('Selecting integration variant: Variant B')));
   assert.ok(logs.some(l => l.includes('Integration completed successfully')));
@@ -121,7 +122,7 @@ test('integrate Variant B promotes a review-approved task only after the squash 
   const integrate = loadIntegrate();
 
   // @ts-expect-error TS2349 This expression is not callable.
-  integrate([TEST_SLUG]);
+  integrate([TEST_SLUG, '--no-integration-gates']);
 
   assert.ok(events.indexOf('abort') < events.indexOf('squash'));
   assert.ok(events.indexOf('squash') < events.indexOf('promote'));
@@ -149,7 +150,7 @@ test('integrate Variant B preserves soft-reset backlog noise across squash merge
   const integrate = loadIntegrate();
 
   // @ts-expect-error TS2349 This expression is not callable.
-  integrate([TEST_SLUG]);
+  integrate([TEST_SLUG, '--no-integration-gates']);
 
   const diffIndex = gitCalls.findIndex(call => call.includes('diff --cached --binary'));
   const resetIndex = gitCalls.findIndex(call => call.includes('reset --hard HEAD'));
@@ -204,7 +205,7 @@ test('integrate resolves PR and approval using the task assignee Forgejo identit
 
   try {
     // @ts-expect-error TS2349 This expression is not callable.
-    integrate([TEST_SLUG, '--dry-run']);
+    integrate([TEST_SLUG, '--dry-run', '--no-integration-gates']);
 
     assert.equal(captured.prForgejoUser, 'gemini');
     assert.equal(captured.approvalForgejoUser, 'gemini');
@@ -248,7 +249,7 @@ test('integrate passes the pre-resolved Forgejo token into syncMerged', () => {
 
   try {
     // @ts-expect-error TS2349 This expression is not callable.
-    integrate([TEST_SLUG]);
+    integrate([TEST_SLUG, '--no-integration-gates']);
 
     assert.equal(captured.prToken, 'preflight-token');
     assert.equal(captured.approvalToken, 'preflight-token');
@@ -274,7 +275,7 @@ test('integrate rejects a Forgejo PR that is already merged', async (t) => {
   mock.method(process, 'exit', (code) => exitCodes.push(code));
   
   // @ts-expect-error TS2349 This expression is not callable.
-  integrate([TEST_SLUG]);
+  integrate([TEST_SLUG, '--no-integration-gates']);
   
   const output = [...logs, ...errors].join('\n');
   assert.match(output, /Forgejo PR: PR #41 is already marked merged/);
@@ -296,7 +297,7 @@ test('integrate warns that --no-gate is ignored', () => {
   console.log = (msg) => logs.push(msg);
 
   // @ts-expect-error TS2349 This expression is not callable.
-  integrate([TEST_SLUG, '--dry-run', '--no-gate']);
+  integrate([TEST_SLUG, '--dry-run', '--no-gate', '--no-integration-gates']);
 
   assert.ok(logs.some(l => l.includes('integrate ignores --no-gate')));
   assert.equal(statsCalls.length, 0);
@@ -320,7 +321,7 @@ test('integrate exits non-zero when post-integration stats recording fails', () 
   mock.method(process, 'exit', (code) => exitCodes.push(code));
 
   // @ts-expect-error TS2349 This expression is not callable.
-  integrate([TEST_SLUG]);
+  integrate([TEST_SLUG, '--no-integration-gates']);
 
   assert.equal(statsCalls.length, 1);
   assert.ok(errors.some(l => l.includes('Post-integration workflow stats failed')));
@@ -345,7 +346,7 @@ test('integrate reports merged-PR recovery guidance before any closeout work', (
   mock.method(process, 'exit', (code) => exitCodes.push(code));
 
   // @ts-expect-error TS2349 This expression is not callable.
-  integrate([TEST_SLUG]);
+  integrate([TEST_SLUG, '--no-integration-gates']);
 
   const output = [...logs, ...errors].join('\n');
   assert.match(output, /Integration preflight failed\./);
@@ -383,7 +384,7 @@ test('integrate Variant B stops when dry-run merge cannot be aborted cleanly', (
   mock.method(process, 'exit', (code) => exitCodes.push(code));
 
   // @ts-expect-error TS2349 This expression is not callable.
-  integrate([TEST_SLUG]);
+  integrate([TEST_SLUG, '--no-integration-gates']);
 
   assert.ok(errors.some(l => l.includes('Dry-run merge could not be aborted cleanly')));
   assert.equal(taskStatusMutations, 0, 'must not promote the task before the probe merge abort succeeds');
@@ -417,7 +418,7 @@ test('integrate Variant B resumed partial state prints sync diagnostics on sync 
   mock.method(process, 'exit', (code) => exitCodes.push(code));
 
   // @ts-expect-error TS2349 This expression is not callable.
-  integrate([TEST_SLUG]);
+  integrate([TEST_SLUG, '--no-integration-gates']);
 
   assert.ok(logs.some(l => l.includes('Resuming from sync-merged step')));
   assert.ok(errors.some(l => l.includes('Forgejo sync-merged failed (api-failed: 500).')));
@@ -455,7 +456,7 @@ test('integrate Variant B conflict path prints conflicting files and helper guid
   mock.method(process, 'exit', (code) => exitCodes.push(code));
 
   // @ts-expect-error TS2349 This expression is not callable.
-  integrate([TEST_SLUG]);
+  integrate([TEST_SLUG, '--no-integration-gates']);
 
   assert.ok(errors.some(l => l.includes('Merge conflicts detected. Rebase the mission branch before integrating.')));
   assert.ok(logs.some(l => l.includes('Conflicting files (2):')));

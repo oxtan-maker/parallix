@@ -182,6 +182,7 @@ test('bootstrapReviewSurface writes token files and configures the review remote
     }, {
       requestFn,
       forgejoHome,
+      reviewRemoteUrlFn: () => 'http://localhost:3300/test-org/test-repo.git',
       log: () => {},
     });
 
@@ -389,6 +390,7 @@ test('collectSetupAnswers uses defaults and skips blank agent passwords', async 
     const answers = ['', 'owner-password', '', 'agent-password', ''];
     const result = await collectSetupAnswers(root, {
       users: ['codex', 'claude'],
+      resolveForgejoSettingsFn: () => ({ url: 'http://localhost:3300', repo: 'test-org/test-repo' }),
       log: () => {},
       promptFn: async (prompt, promptOptions = {}) => {
         prompts.push({ prompt, promptOptions });

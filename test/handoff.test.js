@@ -1562,7 +1562,7 @@ test('validateDeclaredGates fails for non-existent file still works with tokeniz
 
 test('validateDeclaredGates passes command with absolute path that exists', () => {
   const rootDir = path.join(__dirname, '..');
-  const result = validateDeclaredGates(['cat /etc/hostname'], rootDir);
+  const result = validateDeclaredGates([`cat ${process.execPath}`], rootDir);
   assert.strictEqual(result.ok, true);
   assert.strictEqual(result.reason, 'all-gates-valid');
 });

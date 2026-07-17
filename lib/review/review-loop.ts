@@ -19,7 +19,7 @@ import { ReviewState, readReviewState, writeReviewState, resetReviewState, VALID
 import { workflowLauncherStatus, startAgent, eligibleAgentsForStep, selectAgent } from '../agents/agents.js';
 import { commitSafeMissionArtifacts, rebaseBeforeReviewRound } from './rebase.js';
 import { resolveAgentModel } from '../core/product-config.js';
-import { delay, resolvePollIntervalMs, resolvePollTimeoutMs, formatElapsed, isPollTimeout, pollForReview, pollForDisposition } from './review-polling.js';
+import { POLL_TIMEOUT, delay, resolvePollIntervalMs, resolvePollTimeoutMs, formatElapsed, isPollTimeout, pollForReview, pollForDisposition } from './review-polling.js';
 import { buildMetadataFooter, resolveArtifactDir, consumeReviewerArtifacts, consumeImplementerArtifacts } from './review-artifacts.js';
 import { resolveStageTelemetry } from '../agents/stage-telemetry.js';
 
@@ -1210,8 +1210,12 @@ export async function startReviewLoop(slug: string, opts: {
             error
           });
           if (reviewerArtifacts.consumed) {
-            if (!reviewerArtifacts.ok) { exit(1); return; }
-            reviewState = reviewerArtifacts.reviewState;
+            if (!reviewerArtifacts.ok) {
+              log(fmt.status('WARN', `Reviewer ${reviewer} produced incomplete or invalid review artifacts; retrying the reviewer.`));
+              reviewState = POLL_TIMEOUT;
+            } else {
+              reviewState = reviewerArtifacts.reviewState;
+            }
           }
           if (!reviewState && forgejoEnabled) {
             reviewState = await pollForReviewFn(prNumber as number, reviewer!, state.startedAt, token!, {
@@ -1220,7 +1224,14 @@ export async function startReviewLoop(slug: string, opts: {
           }
         }
 
-        if (isPollTimeout(reviewState)) {
+        if (isPollTimeout(reviewState) || !reviewState) {
+          if (!reviewState) {
+            // Local-artifact review has no provider poll to yield POLL_TIMEOUT.
+            // Treat a missing outcome as reviewer recovery work before entering
+            // the bounded retry loop below.
+            log(fmt.status('WARN', `Reviewer ${reviewer} did not submit a formal review outcome for ${branch}; retrying the reviewer.`));
+            reviewState = POLL_TIMEOUT;
+          }
           // Timeout recovery loop for reviewer
           const stateAny = state as unknown as Record<string, any>;
           while ((stateAny['reviewerRetryCount'] || 0) < 2) {
@@ -1261,8 +1272,12 @@ export async function startReviewLoop(slug: string, opts: {
               error
             });
             if (retryArtifacts.consumed) {
-              if (!retryArtifacts.ok) { exit(1); return; }
-              reviewState = retryArtifacts.reviewState;
+              if (!retryArtifacts.ok) {
+                log(fmt.status('WARN', `Reviewer ${reviewer} produced incomplete or invalid review artifacts; retrying the reviewer.`));
+                reviewState = POLL_TIMEOUT;
+              } else {
+                reviewState = retryArtifacts.reviewState;
+              }
             }
             if (!reviewState && forgejoEnabled) {
               reviewState = await pollForReviewFn(prNumber as number, reviewer!, state.startedAt, token!, {
@@ -1274,13 +1289,10 @@ export async function startReviewLoop(slug: string, opts: {
           }
 
           if (isPollTimeout(reviewState)) {
-            log(fmt.status('INFO', `Autonomous review stopped: excessive reviewer timeout retries`));
-            return;
+            error(fmt.status('FAIL', `Reviewer ${reviewer} did not submit a usable formal review outcome after ${stateAny['reviewerRetryCount']} recovery retries.`));
+            error('       Human intervention is required to complete or repair the review.');
+            exit(1); return;
           }
-        } else if (!reviewState) {
-          error(fmt.status('FAIL', `Reviewer ${reviewer} did not submit a formal review outcome for ${branch}.`));
-          error('       The reviewer agent may have exited without posting to the review PR.');
-          exit(1); return;
         }
       }
 
@@ -1293,8 +1305,9 @@ export async function startReviewLoop(slug: string, opts: {
       }
 
       if (isPollTimeout(reviewState)) {
-        log(fmt.status('INFO', `Autonomous review stopped: excessive reviewer timeout retries`));
-        return;
+        error(fmt.status('FAIL', `Reviewer ${reviewer} did not submit a usable formal review outcome after bounded recovery retries.`));
+        error('       Human intervention is required to complete or repair the review.');
+        exit(1); return;
       }
 
       log(fmt.status('INFO', `Round ${attempt}: reviewer outcome = ${reviewState}`));

@@ -29,16 +29,25 @@ function runGit(cwd, args, options = {}) {
 }
 
 function commandDir(command) {
-  const probe = runCommand('bash', ['-lc', `command -v ${command}`], { encoding: 'utf8' });
-  if (probe.status !== 0) {
+  const resolved = maybeCommandPath(command);
+  if (!resolved) {
     throw new Error(`Could not resolve command on PATH: ${command}`);
   }
-  return (probe.stdout || '').trim();
+  return resolved;
 }
 
 function maybeCommandPath(command) {
-  const probe = runCommand('bash', ['-lc', `command -v ${command}`], { encoding: 'utf8' });
-  return probe.status === 0 ? (probe.stdout || '').trim() : null;
+  for (const directory of (process.env.PATH || '').split(path.delimiter)) {
+    if (!directory) {continue;}
+    const candidate = path.join(directory, command);
+    try {
+      fs.accessSync(candidate, fs.constants.X_OK);
+      return candidate;
+    } catch {
+      // Keep searching PATH.
+    }
+  }
+  return null;
 }
 
 function writeExecutable(filePath, content) {
@@ -250,7 +259,9 @@ function setupRepository({ slug, title, postIntegrateHook = false }) {
   fs.mkdirSync(path.join(repoRoot, 'config'), { recursive: true });
   fs.mkdirSync(reviewTmpDir, { recursive: true });
 
-  writeExecutable(path.join(binDir, 'opencode'), lifecycleStubSource());
+  const agentStub = lifecycleStubSource();
+  writeExecutable(path.join(binDir, 'opencode'), agentStub);
+  writeExecutable(path.join(binDir, 'codex'), agentStub);
   fs.symlinkSync(process.execPath, path.join(binDir, 'node'));
   fs.symlinkSync(commandDir('git'), path.join(binDir, 'git'));
   fs.symlinkSync(commandDir('bash'), path.join(binDir, 'bash'));
@@ -289,7 +300,10 @@ function setupRepository({ slug, title, postIntegrateHook = false }) {
   fs.writeFileSync(path.join(repoRoot, 'README.md'), '# E2E Probe\n', 'utf8');
   createTask(repoRoot, slug, title);
 
-  runGit(repoRoot, ['init', '-b', 'main']);
+  // `git init -b` was added in Git 2.28. Keep this real-Git E2E compatible
+  // with older installations by creating the initial branch separately.
+  runGit(repoRoot, ['init']);
+  runGit(repoRoot, ['checkout', '-b', 'main']);
   runGit(repoRoot, ['config', 'user.email', 'test@example.com']);
   runGit(repoRoot, ['config', 'user.name', 'Parallix E2E']);
   runGit(repoRoot, ['add', '.']);
@@ -363,7 +377,7 @@ function shouldKeepTmp() {
   return process.env.PARALLIX_E2E_KEEP_TMP === '1';
 }
 
-function cleanInterruptedFixture(parentPid, root, worktree) {
+function cleanInterruptedFixture(parentPid, root, repoRoot, worktree, cleanupMarker) {
   const fs = require('node:fs');
   const childProcess = require('node:child_process');
   const isAlive = () => {
@@ -377,13 +391,17 @@ function cleanInterruptedFixture(parentPid, root, worktree) {
   while (isAlive()) {
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
   }
-  childProcess.spawnSync('git', ['-C', root, 'worktree', 'remove', '--force', worktree], { stdio: 'ignore' });
+  childProcess.spawnSync('git', ['-C', repoRoot, 'worktree', 'remove', '--force', worktree], { stdio: 'ignore' });
   fs.rmSync(root, { recursive: true, force: true });
+  if (cleanupMarker) {
+    fs.writeFileSync(cleanupMarker, 'cleaned\n', 'utf8');
+  }
 }
 
-function watchInterruptedFixture(root, worktree) {
+function watchInterruptedFixture(root, repoRoot, worktree) {
+  const cleanupMarker = process.env.PARALLIX_E2E_CLEANUP_MARKER || '';
   const watcher = childProcess.spawn(process.execPath, [
-    '-e', `(${cleanInterruptedFixture.toString()})(${process.pid}, ${JSON.stringify(root)}, ${JSON.stringify(worktree)})`
+    '-e', `(${cleanInterruptedFixture.toString()})(${process.pid}, ${JSON.stringify(root)}, ${JSON.stringify(repoRoot)}, ${JSON.stringify(worktree)}, ${JSON.stringify(cleanupMarker)})`
   ], { detached: true, stdio: 'ignore' });
   watcher.unref();
 }
@@ -489,7 +507,9 @@ function runScenario({ launchFromFeatureBranch = false, integrate = true, postIn
     integrate: null
   };
 
-  watchInterruptedFixture(repo.tmpRoot, worktree);
+  if (!shouldKeepTmp() || process.env.PARALLIX_E2E_CLEANUP_MARKER) {
+    watchInterruptedFixture(repo.tmpRoot, repo.repoRoot, worktree);
+  }
 
   try {
     const mainHeadBefore = runGit(repo.repoRoot, ['rev-parse', 'HEAD']);

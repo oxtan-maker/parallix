@@ -7,6 +7,14 @@ const path = require('path');
 
 const PACKAGE_ROOT = path.join(__dirname, '..');
 
+function packFilename(stdout) {
+  const jsonMatches = [...String(stdout || '').matchAll(/"filename"\s*:\s*"([^"]+\.tgz)"/g)];
+  if (jsonMatches.length > 0) {
+    return jsonMatches[jsonMatches.length - 1][1];
+  }
+  return String(stdout || '').split(/\r?\n/).map(line => line.trim()).findLast(line => line.endsWith('.tgz')) || null;
+}
+
 function run(command, args, options = {}) {
   const tempHome = options.tempHome || fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-npm-home-'));
   const result = spawnSync(command, args, {
@@ -45,19 +53,25 @@ test('global tarball reinstall preserves PARALLIX_HOME stats and agent blocklist
   fs.mkdirSync(npmHome, { recursive: true });
   fs.mkdirSync(repoOne);
   fs.mkdirSync(repoTwo);
+  const rootTarballsBefore = new Set(
+    fs.readdirSync(PACKAGE_ROOT).filter(entry => entry.endsWith('.tgz'))
+  );
 
   try {
-    const packed = JSON.parse(run('npm', [
+    const packResult = run('npm', [
       'pack',
       PACKAGE_ROOT,
-      '--json',
-      '--pack-destination',
-      packDir
-    ], { tempHome: npmHome }).stdout || '[]');
-    if (!packed[0]) {
+      '--json'
+    ], { tempHome: npmHome, cwd: packDir });
+    const filename = packFilename(packResult.stdout);
+    if (!filename) {
       return;
     }
-    const tarball = path.join(packDir, packed[0].filename);
+    const tarball = path.join(packDir, filename);
+    const rootTarball = path.join(PACKAGE_ROOT, filename);
+    if (!fs.existsSync(tarball) && fs.existsSync(rootTarball)) {
+      fs.renameSync(rootTarball, tarball);
+    }
     const installArgs = ['install', '-g', '--prefix', prefix, tarball];
     run('npm', installArgs, { tempHome: npmHome });
 
@@ -92,8 +106,8 @@ test('global tarball reinstall preserves PARALLIX_HOME stats and agent blocklist
     ].join('');
     run(process.execPath, ['-e', readFromSecondRepo], { cwd: repoTwo, env });
     const pxStats = run(
-      path.join(prefix, 'bin', 'px'),
-      ['stats', '--today', '2026-06-06'],
+      process.execPath,
+      [path.join(installedRoot, 'px.js'), 'stats', '--today', '2026-06-06'],
       { cwd: repoTwo, env }
     );
     assert.match(pxStats.stdout, new RegExp(`Loading CSV: ${statsPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
@@ -116,6 +130,11 @@ test('global tarball reinstall preserves PARALLIX_HOME stats and agent blocklist
     assert.equal(fs.existsSync(path.join(repoTwo, 'stats.csv')), false);
     assert.equal(fs.existsSync(path.join(repoTwo, 'agents.local.json')), false);
   } finally {
+    for (const entry of fs.readdirSync(PACKAGE_ROOT)) {
+      if (entry.endsWith('.tgz') && !rootTarballsBefore.has(entry)) {
+        fs.rmSync(path.join(PACKAGE_ROOT, entry), { force: true });
+      }
+    }
     fs.rmSync(root, { recursive: true, force: true });
   }
 });

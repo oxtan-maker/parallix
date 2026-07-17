@@ -132,10 +132,17 @@ function resolveForgejoHome(rootDir: string = process.cwd()) {
 /** @param {string} targetPath @returns {string|null} */
 function normalizePathForComparison(targetPath: string): string | null {
   if (!targetPath) {return null;}
-  try {
-    return fs.realpathSync.native(targetPath);
-  } catch (_) {
-    return path.resolve(targetPath);
+  let candidate = path.resolve(targetPath);
+  const suffix: string[] = [];
+  while (true) {
+    try {
+      return path.join(fs.realpathSync.native(candidate), ...suffix.reverse());
+    } catch (_) {
+      const parent = path.dirname(candidate);
+      if (parent === candidate) {return path.resolve(targetPath);}
+      suffix.push(path.basename(candidate));
+      candidate = parent;
+    }
   }
 }
 
@@ -1463,6 +1470,12 @@ function postReview(branch: string, token: string, outcome: string, summary: str
  * @returns {Promise<boolean>} True if Forgejo is reachable, false otherwise
  */
 function forgejoAvailable(url = process.env.FORGEJO_URL || 'http://localhost:3300', options: { request?: Function, timeout?: number } = {} as { request?: Function, timeout?: number }): Promise<boolean> {
+  // The unit-test bootstrap sets this guard so an omitted availability mock
+  // fails closed instead of reaching an operator's Forgejo service. Tests that
+  // verify this helper inject `request`, which keeps that behavior testable.
+  if (process.env.PARALLIX_TEST_NO_FORGEJO === '1' && !options.request) {
+    return Promise.resolve(false);
+  }
   const {
     request = http.request,
     timeout = HTTP_REQUEST_TIMEOUT

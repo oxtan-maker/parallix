@@ -10,7 +10,7 @@
 // Relevant rollout events (each line is one JSON object):
 //   {"type":"session_meta","payload":{"id","model_provider","model"?,...}}
 //   {"type":"turn_context","payload":{"model","effort",...}}
-//   {"type":"response_item","payload":{"type":"function_call",...}}
+//   {"type":"response_item","payload":{"type":"function_call"|"custom_tool_call",...}}
 //   {"type":"event_msg","payload":{"type":"token_count","info":{...},"rate_limits":{...}}}
 
 import fs from 'node:fs';
@@ -60,7 +60,10 @@ function parseCodexRollout(content: string) {
         if (payload.effort) {effort = payload.effort;}
         break;
       case 'response_item':
-        if (payload.type === 'function_call') {toolCalls += 1;}
+        // Codex uses function_call for OpenAI-function tools and
+        // custom_tool_call for host-provided tools (such as exec). Both are
+        // actual tool invocations and must count toward stage telemetry.
+        if (payload.type === 'function_call' || payload.type === 'custom_tool_call') {toolCalls += 1;}
         break;
       case 'event_msg':
         if (payload.type === 'token_count') {

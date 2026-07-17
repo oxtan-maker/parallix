@@ -15,6 +15,7 @@ Minimum loop contract:
 - Review as an independent senior engineer. Approve only if the mission is satisfied, verification is credible for the risk level, and the diff is safe to integrate.
 - Request changes for actionable issues introduced or materially worsened by this mission.
 - Confirm the final checkpoint document in the mission directory contains a Goal Check table citing real evidence (file:line, test names).
+- Treat checkpoint evidence as a record of the work at the time it was performed. A command such as `git diff HEAD` is expected to be empty after a checkpoint is committed; that alone is not a finding. Flag evidence only when it is materially false, unverifiable from the committed tree, or conceals a mission change. Prefer the mission diff against `{{reviewBaseline}}` and stable file/test evidence when checking claims.
 
 Rebasing Artifacts:
 - Ignore diff entries that are only present because the branch is behind `{{primaryBranch}}` and will be resolved by parallix rebase before integration.
@@ -31,8 +32,9 @@ Check:
 - integration with existing code, config, APIs, schemas, docs, or workflows
 - maintainability issues that materially affect future work
 
-- Write findings to `{{artifactDir}}/{{slug}}-review-findings.md`.
-- Write the formal outcome to `{{artifactDir}}/{{slug}}-review-outcome.md` and the legacy verdict (`approve` | `request-changes`) to `{{artifactDir}}/{{slug}}-review-verdict.txt`. `comment` is not a valid outcome: if you have findings but the criteria pass, use `request-changes`.
+- Artifact handoff is mandatory: your final chat response does **not** submit a review. Before stopping, create all three files: `{{artifactDir}}/{{slug}}-review-findings.md`, `{{artifactDir}}/{{slug}}-review-outcome.md`, and `{{artifactDir}}/{{slug}}-review-verdict.txt`.
+- The findings file must contain findings (write `No findings.` when approving). The outcome file must state `Outcome: approve` or `Outcome: request-changes`. The verdict file must contain exactly `approve` or `request-changes` and a newline. `comment` is not valid.
+- After writing them, run `ls -l {{artifactDir}}/{{slug}}-review-findings.md {{artifactDir}}/{{slug}}-review-outcome.md {{artifactDir}}/{{slug}}-review-verdict.txt` and read back the verdict file. If any file is absent or the verdict is not exact, fix the files before stopping.
 - Do not call px directly, the workflow will do that for you
 - Do not post to Forgejo directly; `px review {{slug}} --start` or `--submit` publishes the artifacts.
 - Do not edit repo files; do not switch into implementer behavior.

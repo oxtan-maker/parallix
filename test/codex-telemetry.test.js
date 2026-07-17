@@ -67,6 +67,18 @@ test('parseCodexRollout extracts model, effort, summed-at-last tokens, tool call
   assert.equal(t.usagePercent, 42);
 });
 
+test('parseCodexRollout counts current custom_tool_call response items', () => {
+  const content = [
+    JSON.stringify({ type: 'session_meta', payload: { id: 'custom-call', model_provider: 'openai' } }),
+    JSON.stringify({ type: 'turn_context', payload: { model: 'gpt-5.6-luna' } }),
+    JSON.stringify({ type: 'response_item', payload: { type: 'custom_tool_call', name: 'exec' } }),
+    JSON.stringify({ type: 'response_item', payload: { type: 'custom_tool_call', name: 'exec' } }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 100, output_tokens: 10, total_tokens: 110 } } } }),
+  ].join('\n');
+
+  assert.equal(parseCodexRollout(content).toolCalls, 2);
+});
+
 test('parseCodexRollout returns honest nulls/zeros for a failed turn (info null)', () => {
   const content = [
     JSON.stringify({ type: 'session_meta', payload: { id: 'bbbb', model_provider: 'openai' } }),
