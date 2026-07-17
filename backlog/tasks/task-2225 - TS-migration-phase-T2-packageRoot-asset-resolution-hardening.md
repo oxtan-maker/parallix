@@ -1,7 +1,7 @@
 ---
 id: TASK-2225
 title: 'TS migration phase T2: packageRoot() asset-resolution hardening'
-status: review
+status: active
 assignee: [codex]
 created_date: '2026-07-11 13:46'
 labels:
