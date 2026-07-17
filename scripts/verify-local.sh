@@ -1,4 +1,10 @@
-#!/usr/bin/env bash
+#!/bin/sh
+# Start via POSIX sh so an inherited BASH_ENV cannot run before this script has
+# a chance to clear it. The verifier itself requires Bash below.
+if [ "${VERIFY_LOCAL_CLEAN_BASH:-}" != "1" ]; then
+  exec env -u BASH_ENV VERIFY_LOCAL_CLEAN_BASH=1 bash "$0" "$@"
+fi
+
 # verify-local.sh — local development verification gate
 # Usage: ./scripts/verify-local.sh <subcommand>
 # Subcommands:
@@ -217,6 +223,10 @@ for (const gate of relevantGates) {
     ...process.env,
     WORKFLOW_SUITE_CONTEXT: process.env.WORKFLOW_SUITE_CONTEXT || '',
   };
+  // `bash -c` does not load login profiles, but Bash still honors BASH_ENV for
+  // non-interactive shells. Do not let an inherited startup hook affect a
+  // project verification gate.
+  delete gateEnv.BASH_ENV;
   if (gate.key === 'custom-agent-smoke' && realAgent && realAgentModel) {
     gateEnv.PARALLIX_REAL_AGENT = realAgent;
     gateEnv.PARALLIX_REAL_AGENT_MODEL = realAgentModel;
