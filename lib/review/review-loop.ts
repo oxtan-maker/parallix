@@ -1258,6 +1258,11 @@ export async function startReviewLoop(slug: string, opts: {
               state: state as unknown as Record<string, any>, slug, worktree, taskResolution, log, writeReviewStateFn, enforceTaskAssigneeFn
             });
 
+            // The preceding attempt timed out. Clear that sentinel before
+            // inspecting artifacts and polling the newly launched reviewer;
+            // otherwise `!reviewState` stays false and every recovery launch
+            // is treated as another timeout without ever checking its result.
+            reviewState = null;
             const retryArtifacts = await consumeReviewerArtifactsFn(slug, reviewer!, {
               worktree,
               tmpDir: artifactDir,
