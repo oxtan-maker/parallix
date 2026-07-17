@@ -141,13 +141,16 @@ test('verify-local integrate does not source login-shell startup files for gates
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'verify-local-non-login-'));
   const configPath = path.join(tmpDir, 'integration-pipelines.json');
   const outputPath = path.join(tmpDir, 'gate-output.txt');
+  const bashEnvPath = path.join(tmpDir, 'bash-env');
   try {
     fs.writeFileSync(path.join(tmpDir, '.bash_profile'), `echo sourced > ${outputPath}`);
+    fs.writeFileSync(bashEnvPath, `echo sourced > ${outputPath}`);
     fs.writeFileSync(configPath, JSON.stringify({
       gates: { workflow: { command: `test ! -f ${outputPath}`, order: 1 } }
     }));
     const result = runScript(['integrate'], {
       HOME: tmpDir,
+      BASH_ENV: bashEnvPath,
       INTEGRATION_CONFIG_PATH: configPath,
       INTEGRATE_CHANGED_AREAS: 'workflow'
     });
