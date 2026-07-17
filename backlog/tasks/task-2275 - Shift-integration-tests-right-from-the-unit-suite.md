@@ -1,7 +1,7 @@
 ---
 id: TASK-2275
 title: shift integration tests right from the unit suite
-status: review
+status: active
 assignee: [codex]
 created_date: '2026-07-17 00:00'
 labels: [testing, performance, ai_sdlc]
