@@ -1,7 +1,7 @@
 ---
 id: TASK-2273
 title: deduplicate commit-equivalent verification gates in review rounds
-status: backlog
+status: refined
 assignee: [codex]
 created_date: '2026-07-16 10:54'
 labels: [ai_sdlc]
