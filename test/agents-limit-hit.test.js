@@ -16,8 +16,6 @@ if (process.env.PARALLIX_HOME) {
 
 const { spawnSync } = require('child_process');
 
-const { createDummyLauncher } = require('./lib/agent-mock');
-
 const {
   isAgentBlocked,
   readAgentConfig,
@@ -47,12 +45,14 @@ function makeFakeLauncher(scriptedResults, recorder) {
 }
 
 function installPathLaunchers(tmpRoot) {
-  const launcher = createDummyLauncher(tmpRoot);
   const binDir = path.join(tmpRoot, 'bin');
   fs.mkdirSync(binDir, { recursive: true });
+  // This fixture only needs an executable which accepts `--help`. Reuse the
+  // checked-in deterministic runner so no host-specific system binary or
+  // freshly created executable is involved.
+  const launcherRunner = path.join(__dirname, 'lib', 'agent-script-runner.js');
   for (const name of ['codex', 'claude', 'gemini', 'opencode', 'vibe']) {
-    fs.copyFileSync(launcher, path.join(binDir, name));
-    fs.chmodSync(path.join(binDir, name), 0o755);
+    fs.symlinkSync(launcherRunner, path.join(binDir, name));
   }
   process.env.PATH = `${binDir}${path.delimiter}${process.env.PATH}`;
   process.env.CODEX_HOME ||= path.join(tmpRoot, 'glm-codex-home');
@@ -149,7 +149,7 @@ test('startAgent persists a block via updateAgentBlock when limit-hit detector f
     // The actual launcher is invoked by agents.js using LAUNCHERS map; we cannot inject it via opts.
     // Instead we exercise the retry path by pinning agentOverride; the detector hits once on first launch
     // and selectAgent picks the second-choice agent (codex).
-    // createDummyLauncher installs bare-name launchers on PATH and configures the command probe.
+    // installPathLaunchers installs bare-name launchers on PATH and configures the command probe.
     installPathLaunchers(tmpRoot);
     const previousAgent = process.env.WORKFLOW_AGENT;
     delete process.env.WORKFLOW_AGENT;

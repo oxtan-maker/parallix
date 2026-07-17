@@ -24,6 +24,9 @@ const childProcess = require('node:child_process');
 // Base mission slug — append process.pid for isolation between parallel runs.
 const TEST_SLUG = `task-test-review-${process.pid}`;
 const persistenceCommitted = () => ({ outcome: 'committed' });
+// Dry-run tests assert local loop setup, not provider behavior. Make that
+// boundary explicit so they cannot probe the workstation's Forgejo service.
+const isolatedDryRun = { isForgejoReviewEnabledFn: () => false };
 
 // Isolate stats writes to a temp PARALLIX_HOME so test runs never pollute
 // the real operator stats.csv (recordStageStatsSafe writes there via
@@ -98,7 +101,7 @@ function watchInterruptedReviewFixture(root) {
   watcher.unref();
 }
 
-function passingPreReviewGate() {
+async function passingPreReviewGate() {
   return { ok: true, area: 'all', command: 'test gate', exitCode: 0, stdout: '', stderr: '' };
 }
 
@@ -146,7 +149,8 @@ test('startReviewLoop allows explicit same-family reviewer after rejection block
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       implementer: 'claude',
       reviewer: 'claude',
-      dryRun: true
+      dryRun: true,
+      ...isolatedDryRun
     });
   });
 
@@ -198,7 +202,8 @@ test('startReviewLoop fails for unsupported reviewer', async () => {
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       implementer: 'claude',
       reviewer: 'gpt4',
-      dryRun: true
+      dryRun: true,
+      ...isolatedDryRun
     });
   });
 
@@ -223,6 +228,10 @@ test('startReviewLoop validates reviewer and implementer from injected review el
     writeReviewStateFn: () => {},
     implementer: 'future-agent',
     dryRun: true,
+    // This test exercises eligibility selection only. Keep it independent of
+    // the checkout's configured review provider so dry-run cannot self-heal
+    // into a real handoff or poll a local Forgejo service.
+    isForgejoReviewEnabledFn: () => false,
     selectAgentFn: () => 'codex',
     // @ts-expect-error TS2741 Property 'agent' is missing in type '{ supported: true; detail: string; }' but r
     workflowLauncherStatusFn: () => ({ supported: true, detail: 'mock' }),
@@ -294,6 +303,7 @@ test('startReviewLoop reset path removes state file', async () => {
       reviewer: 'codex',
       reset: true,
       dryRun: true,
+      ...isolatedDryRun,
       readReviewStateFn: () => null,
       // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(slug: string, state: Record<string
       writeReviewStateFn: () => {},
@@ -320,6 +330,7 @@ test('startReviewLoop dryRun path skips agent launch', async () => {
       implementer: 'claude',
       reviewer: 'codex',
       dryRun: true,
+      ...isolatedDryRun,
       readReviewStateFn: () => null,
       // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(slug: string, state: Record<string
       writeReviewStateFn: () => {},
@@ -519,6 +530,7 @@ test('startReviewLoop handles reviewer launcher fallback', async () => {
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     implementer: 'claude',
     dryRun: true,
+    ...isolatedDryRun,
     readReviewStateFn: () => null,
     // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(slug: string, state: Record<string
     writeReviewStateFn: () => {},
@@ -555,6 +567,7 @@ test('startReviewLoop handles reviewer launcher fallback', async () => {
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     implementer: 'claude',
     dryRun: true,
+    ...isolatedDryRun,
     readReviewStateFn: () => null,
     // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(slug: string, state: Record<string
     writeReviewStateFn: () => {},
@@ -615,9 +628,8 @@ test('startReviewLoop handles Forgejo bootstrap failure', async () => {
 test('startReviewLoop handles missing PR', async () => {
   const { startReviewLoop } = require('../lib/review/review');
   const errors = [];
-  const exitCodes = [];
 
-  await startReviewLoop(TEST_SLUG, {
+  const { exitCode } = await captureExit(() => startReviewLoop(TEST_SLUG, {
       eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
     // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
@@ -625,20 +637,20 @@ test('startReviewLoop handles missing PR', async () => {
     reviewer: 'codex',
     dryRun: false,
     error: (m) => errors.push(m),
-    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'never'.
-    exit: (c) => exitCodes.push(c),
     // @ts-expect-error TS2739 Type '{ supported: true; }' is missing the following properties from type 'Launc
     workflowLauncherStatusFn: () => ({ supported: true }),
     isForgejoReviewEnabledFn: () => true,
     forgejoAvailableFn: async () => true,
     getPrStatusFn: () => ({ exists: false }),
+    performHandoffFn: async () => ({ ok: false, error: 'mock handoff failure' }),
     maybeUpdateGraphifyBeforeReviewFn: () => {},
     enforceTaskAssigneeFn: () => true,
     // @ts-expect-error TS1117 An object literal cannot have multiple properties with the same name.
     resolveTaskFileFn: () => ({ ok: true, taskFile: 'task.md' })
-  });
+  }));
 
   assert.ok(errors.some(e => e.includes('No open review PR found')), 'Should error when PR missing');
+  assert.equal(exitCode, 1);
 });
 
 test('startReviewLoop full loop success and exit cases', async () => {
@@ -668,6 +680,7 @@ test('startReviewLoop full loop success and exit cases', async () => {
     readTokenFn: () => 'token',
     readReviewStateFn: () => null,
     writeReviewStateFn: () => {},
+    transitionTaskFn: () => true,
     startAgentFn: async () => ({ agent: null }), // No fallback
     rebaseBeforeReviewRoundFn: async (slug, { worktree }) => {
       rebaseCalls.push({ slug, worktree });
@@ -680,6 +693,10 @@ test('startReviewLoop full loop success and exit cases', async () => {
     buildCompactActOnReviewPromptFn: () => 'act-on-review prompt',
     consumeReviewerArtifactsFn: async () => ({ consumed: false }),
     consumeImplementerArtifactsFn: async () => ({ consumed: false }),
+    // The loop test exercises state transitions, not telemetry collection.
+    // Keep it independent of git/process inspection performed by the real
+    // stage-statistics collector.
+    recordStageStatsSafeFn: () => {},
     runPreReviewGateFn: () => {
       preReviewGateCalls++;
       return { ok: true, area: 'all', command: 'test gate', exitCode: 0, stdout: '', stderr: '' };
@@ -832,6 +849,7 @@ test('polling configuration logic', async () => {
     implementer: 'claude',
     reviewer: 'codex',
     dryRun: true,
+    ...isolatedDryRun,
     readReviewStateFn: () => null,
     // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(slug: string, state: Record<string
     writeReviewStateFn: () => {},
@@ -857,6 +875,7 @@ test('polling configuration logic', async () => {
     implementer: 'claude',
     reviewer: 'codex',
     dryRun: true,
+    ...isolatedDryRun,
     pollTimeoutSeconds: 5,
     readReviewStateFn: () => null,
     // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(slug: string, state: Record<string
@@ -882,6 +901,7 @@ test('startReviewLoop explicit same-family path covers all four families', async
         implementer: agent,
         reviewer: agent,
         dryRun: true,
+        ...isolatedDryRun,
         readReviewStateFn: () => null,
         // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(slug: string, state: Record<string
         writeReviewStateFn: () => {},
@@ -915,6 +935,7 @@ test('startReviewLoop same-family explicit reviewer logs the agent name', async 
       implementer: 'gemini',
       reviewer: 'gemini',
       dryRun: true,
+      ...isolatedDryRun,
       // @ts-expect-error TS2739 Type '{ supported: true; }' is missing the following properties from type 'Launc
       workflowLauncherStatusFn: () => ({ supported: true }),
       buildReviewPromptFn: () => 'review prompt',
@@ -975,7 +996,7 @@ test('startReviewLoop rebases immediately before each reviewer round', async () 
     exit: () => {},
     consumeReviewerArtifactsFn: async () => ({ consumed: false }),
     consumeImplementerArtifactsFn: async () => ({ consumed: false }),
-    runPreReviewGateFn: () => ({ ok: true, area: 'all', command: 'test gate', exitCode: 0, stdout: '', stderr: '' })
+    runPreReviewGateFn: passingPreReviewGate
   });
 
   assert.deepEqual(events, [
@@ -2464,6 +2485,7 @@ test('commentRound and submitReviewRound fail loudly on API errors', () => {
   });
   review.submitReviewRound('task-1031', 'approve', 'ship it', {
     readTokenFn: () => 'token',
+    getPrAuthorFn: () => 'claude',
     postReviewFn: () => ({ ok: false, error: 'nope' }),
     // @ts-expect-error TS2322 Type '() => { reviewer: string; implementer: string; }' is not assignable to typ
     readReviewStateFn,
@@ -2627,9 +2649,9 @@ test('startReviewLoop handles reviewer polling timeout with recovery', async () 
 
   // With timeout recovery (task-1136), the reviewer is relaunched up to 2 times on timeout (3-strike limit)
   assert.equal(launchCount, 3, 'Should launch reviewer 1 initial + 2 retries on timeout');
-  // After 2 retries (3 total timeouts), should log excessive timeout retries and exit gracefully
-  assert.ok(errors.some(e => e.includes('excessive reviewer timeout retries')) || logs.some(l => l.includes('excessive reviewer timeout retries')), 'Should log excessive retries');
-  assert.equal(exitCodes[0], undefined, 'Should exit via return, not process.exit(1)');
+  // After 2 retries (3 total timeouts), fail closed for human intervention.
+  assert.ok(errors.some(e => e.includes('did not submit a usable formal review outcome')), 'Should report exhausted reviewer recovery');
+  assert.equal(exitCodes[0], 1, 'Should fail closed after bounded reviewer retries');
 });
 
 test('startReviewLoop persists reviewer retry count before recovery relaunch', async () => {
@@ -2946,6 +2968,7 @@ test('startReviewLoop allows single-family fallback when only implementer family
     implementer: 'codex',
     // reviewer not specified → auto-derived
     dryRun: true,
+    ...isolatedDryRun,
     log: m => logs.push(m),
     error: m => errors.push(m),
     // @ts-expect-error TS2322 Type 'number' is not assignable to type 'never'.
@@ -2981,6 +3004,7 @@ test('startReviewLoop accepts same-family when explicit even if a different-fami
       implementer: 'codex',
       reviewer: 'codex', // explicit same-family
       dryRun: true,
+      ...isolatedDryRun,
       // @ts-expect-error TS2741 Property 'agent' is missing in type '{ supported: true; detail: string; }' but r
       workflowLauncherStatusFn: () => ({ supported: true, detail: 'mock' })
     });
@@ -3004,6 +3028,9 @@ test('startReviewLoop rejects when no different-family reviewer and implementer 
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       implementer: 'codex',
       dryRun: true,
+      // Keep the provider logically enabled so this test exercises the
+      // no-runnable-route failure. dryRun prevents any provider I/O.
+      isForgejoReviewEnabledFn: () => true,
       reviewerForFn: () => 'claude',
       // @ts-expect-error TS2741 Property 'agent' is missing in type '{ supported: false; detail: string; }' but
       workflowLauncherStatusFn: () => ({ supported: false, detail: 'mock' }), // ALL blocked
@@ -3034,6 +3061,7 @@ test('startReviewLoop keeps persisted same-family reviewer after re-derive block
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     implementer: 'codex',
     dryRun: true,
+    ...isolatedDryRun,
     // @ts-expect-error TS2740 Type '{ reviewer: string; implementer: string; round: number; }' is missing the
     readReviewStateFn: () => ({ reviewer: 'codex', implementer: 'codex', round: 1 }), // persisted same-family
     log: m => logs.push(m),
@@ -3118,30 +3146,26 @@ test('startReviewLoop resolves task file from the mission worktree (regression)'
   const { startReviewLoop } = require('../lib/review/review');
   let resolvedWorktree = null;
 
-  await startReviewLoop(TEST_SLUG, {
-      eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
+  const { exitCode } = await captureExit(() => startReviewLoop(TEST_SLUG, {
+    eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
     implementer: 'claude',
     reviewer: 'codex',
-    dryRun: false,
+    dryRun: true,
+    ...isolatedDryRun,
     worktree: '/tmp/mission-worktree',
-    // Mock enough to avoid early exits
-    forgejoAvailableFn: async () => true,
-    getPrStatusFn: () => ({ exists: true, state: 'open', number: 41 }),
     readReviewStateFn: () => null,
     // @ts-expect-error TS2739 Type '{ supported: true; }' is missing the following properties from type 'Launc
     workflowLauncherStatusFn: () => ({ supported: true }),
-    isForgejoReviewEnabledFn: () => true,
     maybeUpdateGraphifyBeforeReviewFn: () => {},
     // @ts-expect-error TS2322 Type '(slug: string, worktree: string) => { ok: false; }' is not assignable to t
     resolveTaskFileFn: (slug, worktree) => {
       resolvedWorktree = worktree;
       return { ok: false };
-    },
-    // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(_code: number) => never'.
-    exit: () => {} // Don't actually exit
-  });
+    }
+  }));
 
   assert.equal(resolvedWorktree, '/tmp/mission-worktree');
+  assert.equal(exitCode, 1);
 });
 
 // CP-3 tests for fallback reviewer in startReviewLoop

@@ -114,9 +114,10 @@ test('authenticatedReviewUrl uses the configured standalone review repo', () => 
     }, null, 2), 'utf8');
 
     const { authenticatedReviewUrl } = require('../lib/tools/forgejo.js');
+    const baseUrl = process.env.FORGEJO_URL || 'http://localhost:3300';
     assert.equal(
       authenticatedReviewUrl('claude', 'token-123', root),
-      'http://claude:token-123@localhost:3300/magnus/testproj.git'
+      `http://claude:token-123@${baseUrl.replace(/^https?:\/\//, '')}/magnus/testproj.git`
     );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -159,7 +160,8 @@ test('createPr uses configured primaryBranch and configured Forgejo repo', () =>
 
     const result = createPr('mission/task-200', 'claude', 'token-123', { rootDir: root, apiCall, log: () => {}, forceWithLease: true });
     assert.equal(result.ok, true);
-    assert.ok(gitCalls.some(args => args.includes('http://claude:token-123@localhost:3300/magnus/testproj.git')));
+    const baseUrl = process.env.FORGEJO_URL || 'http://localhost:3300';
+    assert.ok(gitCalls.some(args => args.includes(`http://claude:token-123@${baseUrl.replace(/^https?:\/\//, '')}/magnus/testproj.git`)));
     assert.ok(apiCalls.some(call => call.method === 'POST' && call.body && call.body.base === 'main'));
     assert.ok(apiCalls.every(call => call.options.rootDir === root));
   } finally {
@@ -308,7 +310,8 @@ test('createPr uses the implementer token for PR APIs and the repo-owner token f
     assert.equal(result.ok, true);
     assert.ok(apiCalls.some(call => call.token === 'reviewer-token' && call.method === 'GET' && call.apiPath.includes('/pulls?state=open')));
     assert.ok(apiCalls.some(call => call.token === 'reviewer-token' && call.method === 'POST' && call.apiPath === '/pulls'));
-    assert.ok(gitCalls.some(args => args.includes('http://magnus:owner-token@localhost:3300/magnus/testproj.git')));
+    const baseUrl = process.env.FORGEJO_URL || 'http://localhost:3300';
+    assert.ok(gitCalls.some(args => args.includes(`http://magnus:owner-token@${baseUrl.replace(/^https?:\/\//, '')}/magnus/testproj.git`)));
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
     if (previousHome === undefined) delete process.env.FORGEJO_HOME;
@@ -2310,9 +2313,10 @@ test('fetchReviewBranch uses authenticated review url when a token is available'
     fetchReviewBranch('main', root, { user: 'codex', token: 'token-123' });
 
     assert.ok(capturedArgs, 'git should have been called');
+    const baseUrl = process.env.FORGEJO_URL || 'http://localhost:3300';
     assert.ok(
       // @ts-expect-error TS2339 Property 'includes' does not exist on type 'never'.
-      capturedArgs.includes('http://codex:token-123@localhost:3300/magnus/testproj.git'),
+      capturedArgs.includes(`http://codex:token-123@${baseUrl.replace(/^https?:\/\//, '')}/magnus/testproj.git`),
       // @ts-expect-error TS2339 Property 'join' does not exist on type 'never'.
       `expected authenticated fetch url, got: ${capturedArgs.join(' ')}`
     );

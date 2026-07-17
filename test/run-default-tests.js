@@ -4,6 +4,29 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
+function nodeMajor(command) {
+  const probe = spawnSync(command, ['--version'], { encoding: 'utf8' });
+  const match = probe.status === 0 && /v(\d+)\./.exec(probe.stdout || '');
+  return match ? Number(match[1]) : 0;
+}
+
+// `npm` can be launched through an older nvm shim even when a supported Node
+// is also on PATH. Node's built-in test runner requires Node 18+, while this
+// package declares Node 20+; select the first compatible executable rather
+// than recursively spawning the Node 14 process that invoked npm.
+function resolveTestNode() {
+  if (nodeMajor(process.execPath) >= 20) {return process.execPath;}
+  const candidates = (process.env.PATH || '').split(path.delimiter)
+    .filter(Boolean)
+    .map(dir => path.join(dir, 'node'));
+  for (const candidate of candidates) {
+    if (candidate !== process.execPath && nodeMajor(candidate) >= 20) {
+      return candidate;
+    }
+  }
+  throw new Error('Parallix requires Node.js >=20 to run its test suite. Install a supported Node runtime or put it on PATH.');
+}
+
 const defaultTestFiles = fs.readdirSync(__dirname)
   .sort()
   .filter(file => file.endsWith('.test.js'))
@@ -22,12 +45,16 @@ const testFiles = requestedTestFiles.length > 0 ? requestedTestFiles : defaultTe
 const runsRealAgentSmoke = requestedTestFiles.some(
   file => path.basename(file) === 'e2e-real-agent-smoke.test.js'
 );
-const bootstrapArgs = runsRealAgentSmoke
+const runsLifecycleE2E = requestedTestFiles.some(
+  file => path.basename(file) === 'e2e-mission-lifecycle.test.js'
+);
+const runsIntegrationE2E = runsRealAgentSmoke || runsLifecycleE2E;
+const bootstrapArgs = runsIntegrationE2E
   ? []
   : ['--require', path.join(__dirname, 'bootstrap-parallix-home.js')];
 
 const result = spawnSync(
-  process.execPath,
+  resolveTestNode(),
   [
     ...bootstrapArgs,
     '--test',

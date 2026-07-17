@@ -166,7 +166,7 @@ export function runVerificationGate(area: string | undefined, options: { rootDir
 
   const stdio = opts.stdio || 'inherit';
   const runFn = opts.runFn || run;
-  return runFn('bash', ['-lc', command.replaceAll('{{area}}', effectiveArea)], { cwd: rootDir, stdio });
+  return runFn('bash', ['-c', command.replaceAll('{{area}}', effectiveArea)], { cwd: rootDir, stdio });
 }
 
 /** @param {string} rootDir @param {{gitRunner?: GitFn}} [options] */

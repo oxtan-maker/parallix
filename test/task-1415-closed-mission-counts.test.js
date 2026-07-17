@@ -97,7 +97,7 @@ test('task-1415: recordPostIntegrationStats counts a closed mission in the curre
     },
   });
 
-  const committerDate = git(['log', '-1', '--format=%cs'], root).stdout.trim();
+  const committerDate = git(['log', '-1', '--date=short', '--format=%cd'], root).stdout.trim();
   assert.equal(committerDate, '2026-06-13',
     'fixture setup: base worktree tip commit must carry the stale committer date');
 

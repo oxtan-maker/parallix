@@ -1,5 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const missionUtils = require('../lib/core/mission-utils');
 const previousPrimaryWorktree = process.env.PRIMARY_WORKTREE;
 if (previousPrimaryWorktree === undefined) {
   process.env.PRIMARY_WORKTREE = `/tmp/visualBoard-${process.pid}`;
@@ -97,6 +98,7 @@ test('integrate guard', async (t) => {
   });
 
   await t.test('does not block other agents (e.g. codex)', async () => {
+    t.mock.method(missionUtils, 'inferSlug', () => null);
     process.exit = stubExit;
     console.error = stubError;
     console.log = stubLog;
@@ -111,7 +113,10 @@ test('integrate guard', async (t) => {
 
     try {
       // @ts-expect-error TS2349 This expression is not callable.
-      await integrate(['task-1086', '--dry-run']);
+      // A missing slug reaches the usage guard immediately after the agent
+      // authorization check. This test covers authorization only and must not
+      // proceed into integration preflight or Forgejo discovery.
+      await integrate([]);
     } catch (err) {
       // It might call process.exit for other reasons (preflight fail), which is fine
     } finally {

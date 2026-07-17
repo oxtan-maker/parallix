@@ -32,6 +32,10 @@ const CLI_ENTRY = path.resolve(__dirname, '..', packageJson.bin.px);
 const workflowConfig = require('../workflow.config.json');
 // @ts-expect-error TS2339 Property 'custom' does not exist on type '{ codex: string; }'.
 const CUSTOM_MODEL = workflowConfig?.adapters?.agents?.models?.custom;
+const OVERRIDE_AGENT = process.env.PARALLIX_REAL_AGENT || null;
+const OVERRIDE_MODEL = process.env.PARALLIX_REAL_AGENT_MODEL || null;
+const SMOKE_AGENT = OVERRIDE_AGENT || 'custom';
+const SMOKE_MODEL = OVERRIDE_MODEL || CUSTOM_MODEL;
 // Pi rejects placeholder credentials such as "dummy-key" before contacting a
 // provider. The smoke fixture uses a local vLLM endpoint, for which any
 // non-placeholder bearer token is sufficient, so give only its disposable
@@ -172,6 +176,10 @@ function maybePiPath() {
   return null;
 }
 
+function maybeCodexPath() {
+  return maybeCommandPath(process.env.CODEX_BIN || 'codex');
+}
+
 function requireCommandPath(command, resolver = maybeCommandPath) {
   const resolved = resolver(command);
   assert.ok(resolved, `Expected command path for ${command}`);
@@ -238,11 +246,17 @@ function classifyFailure({ stdout, stderr, status, signal }) {
 // `px draft --agent custom` launch below; do not fail early on auxiliary
 // opencode subcommands like `opencode models`, which can be tighter or flakier
 // than the launcher path this smoke test is meant to verify.
-function preflightCheck(runner) {
+function preflightCheck(agent, runner) {
   // adapters.agents.models.custom is an optional override (see MISSION.md
   // "Amended during CP-3 execution"): when unset, the launcher omits -m and
   // the runner (opencode/pi) falls back to its own configured default model,
   // so this gate no longer requires a pinned model string to exist.
+  if (agent === 'codex') {
+    if (!maybeCodexPath()) {
+      return 'codex binary not found on PATH. Install Codex and make the requested model available before running this override.';
+    }
+    return null;
+  }
   if (runner === 'pi') {
     const piPath = maybePiPath();
     if (!piPath) {
@@ -260,7 +274,7 @@ function preflightCheck(runner) {
 function runOpencodeHealthcheck(repoRoot, env, timeoutMs = HEALTHCHECK_TIMEOUT_MS) {
   const command = maybeOpencodePath() || 'opencode';
   const args = ['run', '--pure', '--dangerously-skip-permissions', '--format', 'json'];
-  if (CUSTOM_MODEL) {args.push('-m', CUSTOM_MODEL);}
+  if (SMOKE_MODEL) {args.push('-m', SMOKE_MODEL);}
   args.push('Reply with exactly OK');
   return runWorkflowAllowFail(
     repoRoot,
@@ -277,7 +291,7 @@ function runPiHealthcheck(repoRoot, env, timeoutMs = HEALTHCHECK_TIMEOUT_MS) {
   // or a different Node installation from selecting another Pi binary.
   const command = env.PI_BIN || maybePiPath() || 'pi';
   const args = ['--print', '--mode', 'json', '--approve'];
-  if (CUSTOM_MODEL) {args.push('--model', CUSTOM_MODEL);}
+  if (SMOKE_MODEL) {args.push('--model', SMOKE_MODEL);}
   args.push('Reply with exactly OK');
   return runWorkflowAllowFail(
     repoRoot,
@@ -288,13 +302,21 @@ function runPiHealthcheck(repoRoot, env, timeoutMs = HEALTHCHECK_TIMEOUT_MS) {
   );
 }
 
-function runHealthcheck(runner, repoRoot, env, timeoutMs = HEALTHCHECK_TIMEOUT_MS) {
+function runCodexHealthcheck(repoRoot, env, timeoutMs = HEALTHCHECK_TIMEOUT_MS) {
+  const args = ['exec', '--sandbox', 'danger-full-access'];
+  if (SMOKE_MODEL) {args.push('-m', SMOKE_MODEL);}
+  args.push('--cd', repoRoot, 'Reply with exactly OK');
+  return runWorkflowAllowFail(repoRoot, env, [env.CODEX_BIN || 'codex', ...args], timeoutMs, { directCommand: true });
+}
+
+function runHealthcheck(agent, runner, repoRoot, env, timeoutMs = HEALTHCHECK_TIMEOUT_MS) {
+  if (agent === 'codex') {return runCodexHealthcheck(repoRoot, env, timeoutMs);}
   return runner === 'pi'
     ? runPiHealthcheck(repoRoot, env, timeoutMs)
     : runOpencodeHealthcheck(repoRoot, env, timeoutMs);
 }
 
-function setupRepository({ slug, title, runner = 'opencode' }) {
+function setupRepository({ slug, title, agent = 'custom', runner = 'opencode' }) {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-real-agent-'));
   const repoRoot = path.join(tmpRoot, 'repo');
   const binDir = path.join(repoRoot, 'bin');
@@ -359,13 +381,9 @@ function setupRepository({ slug, title, runner = 'opencode' }) {
   //      asserts explicitly.
   //   2. Cost containment: no fallback or reviewer selection can ever launch
   //      an expensive cloud agent (claude/codex) from this blocking gate.
-  fs.writeFileSync(path.join(stateHome, 'agents.local.json'), JSON.stringify({
-    blocklist: {
-      claude: { blocked: true },
-      codex: { blocked: true },
-      vibe: { blocked: true }
-    }
-  }, null, 2), 'utf8');
+  const blocklist = { claude: { blocked: true }, codex: { blocked: true }, vibe: { blocked: true }, custom: { blocked: true } };
+  delete blocklist[agent];
+  fs.writeFileSync(path.join(stateHome, 'agents.local.json'), JSON.stringify({ blocklist }, null, 2), 'utf8');
 
   // Minimal repo verification gate: drafted missions declare gates like
   // `./scripts/verify-local.sh docs` (the scaffold default), and the workflow
@@ -401,7 +419,9 @@ function setupRepository({ slug, title, runner = 'opencode' }) {
   // scripted stub is installed here (SC3: the production launch path must
   // actually be reached). Symlink whichever binary the runner under test
   // needs (resolveCustomRunner dispatches to it at runtime).
-  if (runner === 'pi') {
+  if (agent === 'codex') {
+    fs.symlinkSync(requireCommandPath('codex', maybeCodexPath), path.join(binDir, 'codex'));
+  } else if (runner === 'pi') {
     fs.symlinkSync(requireCommandPath('pi', maybePiPath), path.join(binDir, 'pi'));
   } else {
     fs.symlinkSync(requireCommandPath('opencode', maybeOpencodePath), path.join(binDir, 'opencode'));
@@ -415,7 +435,7 @@ function setupRepository({ slug, title, runner = 'opencode' }) {
     product: { name: 'real-agent-smoke', targetUser: 'tests' },
     adapters: {
       tasks: { provider: 'backlog-md', storage: 'backlog', stateMap: 'config/state-map.json' },
-      agents: { models: CUSTOM_MODEL ? { custom: CUSTOM_MODEL } : {}, runners: { custom: runner } },
+      agents: { models: SMOKE_MODEL ? { [agent]: SMOKE_MODEL } : {}, runners: { custom: runner } },
       missions: { baseDir: 'missions', branchPrefix: 'mission/', worktreePattern: '../<repo>-<slug>' },
       verification: { command: ':', defaultArea: 'all' },
       review: { provider: 'none', tmpDir: reviewTmpDir }
@@ -428,7 +448,12 @@ function setupRepository({ slug, title, runner = 'opencode' }) {
   }, null, 2));
 
   fs.writeFileSync(path.join(repoRoot, 'README.md'), '# Real Agent Smoke Probe\n', 'utf8');
-  fs.writeFileSync(path.join(repoRoot, 'hello.sh'), '#!/usr/bin/env bash\necho "Helo, Wrld!"\n', 'utf8');
+  const helloScript = path.join(repoRoot, 'hello.sh');
+  fs.writeFileSync(helloScript, '#!/usr/bin/env bash\necho "Helo, Wrld!"\n', 'utf8');
+  // The smoke mission requires direct `./hello.sh` invocation while limiting
+  // the agent's authorized change to the greeting text. Seed the executable
+  // mode in the fixture so the task is satisfiable without a scope conflict.
+  fs.chmodSync(helloScript, 0o755);
 
   const taskPath = path.join(repoRoot, 'backlog', 'tasks', `${slug} - ${title.replace(/\s+/g, '-').toLowerCase()}.md`);
   fs.writeFileSync(taskPath, [
@@ -448,7 +473,10 @@ function setupRepository({ slug, title, runner = 'opencode' }) {
     ''
   ].join('\n'), 'utf8');
 
-  runGit(repoRoot, ['init', '-b', 'main']);
+  // Apple Git 2.24 is still common on supported macOS workstations and lacks
+  // `git init -b`; create the initial branch separately for fixture portability.
+  runGit(repoRoot, ['init']);
+  runGit(repoRoot, ['checkout', '-b', 'main']);
   runGit(repoRoot, ['config', 'user.email', 'test@example.com']);
   runGit(repoRoot, ['config', 'user.name', 'Parallix Real-Agent Smoke']);
   runGit(repoRoot, ['add', '.']);
@@ -516,19 +544,18 @@ function snapshotDefaultParallixState() {
   return snapshots;
 }
 
-function runRealAgentSmoke(runner) {
-  const preflightError = preflightCheck(runner);
+function runRealAgentSmoke(agent, runner) {
+  const preflightError = preflightCheck(agent, runner);
   if (preflightError) {
     assert.fail(
-      `[local-model-environment] Cannot run the real custom-agent smoke test (runner=${runner}): ${preflightError}\n` +
-      `This blocking gate requires a workstation with ${runner} installed and a working default local model ` +
-      '(or adapters.agents.models.custom set as an explicit override). See docs/real-agent-smoke.md.'
+      `[local-model-environment] Cannot run the real-agent smoke test (agent=${agent}, runner=${runner}): ${preflightError}\n` +
+      'This blocking gate requires the selected agent and model to be available. See docs/real-agent-smoke.md.'
     );
   }
 
-  const slug = runner === 'pi' ? 'task-9002' : 'task-9001';
+  const slug = agent === 'codex' ? 'task-9003' : (runner === 'pi' ? 'task-9002' : 'task-9001');
   const defaultStateSnapshots = snapshotDefaultParallixState();
-  const repo = setupRepository({ slug, title: 'Real Agent Launcher Smoke', runner });
+  const repo = setupRepository({ slug, title: 'Real Agent Launcher Smoke', agent, runner });
   const worktree = path.resolve(repo.repoRoot, '..', `${path.basename(repo.repoRoot)}-${slug}`);
   // Parallix-owned state isolation goes through configuration, not a hard
   // filesystem sandbox: PARALLIX_HOME is the highest-precedence resolver input
@@ -543,6 +570,7 @@ function runRealAgentSmoke(runner) {
   // like a real workstation — with a bare binDir-only PATH, opencode's glob
   // tool cannot even extract its bundled ripgrep (spawns `tar`), feeding the
   // agent artificial tool errors that destabilize the draft.
+  /** @type {NodeJS.ProcessEnv} */
   const env = {
     ...process.env,
     FORCE_COLOR: '0',
@@ -550,12 +578,16 @@ function runRealAgentSmoke(runner) {
     PARALLIX_HOME: repo.stateHome,
     PATH: `${repo.binDir}${path.delimiter}${process.env.PATH || ''}`
   };
+  if (agent === 'codex') {
+    // setupRepository's symlink is a test-controlled route to the production
+    // Codex adapter; keeping it first on PATH proves model dispatch without
+    // trusting another Codex executable selected by the parent environment.
+    env.CODEX_BIN = path.join(repo.binDir, 'codex');
+  }
   if (runner === 'pi') {
     // Pin both Pi's executable and mutable agent state to the disposable
     // fixture. The launcher resolves PI_BIN before NVM/PATH fallbacks.
-    // @ts-expect-error TS2339 Property 'PI_BIN' does not exist on type '{ FORCE_COLOR: string; PRIMARY_WORKTRE
     env.PI_BIN = path.join(repo.binDir, 'pi');
-    // @ts-expect-error TS2339 Property 'PI_CODING_AGENT_DIR' does not exist on type '{ FORCE_COLOR: string; PR
     env.PI_CODING_AGENT_DIR = repo.piAgentHome;
   }
   // Drop the inherited PWD: opencode trusts PWD over the real cwd for project
@@ -563,7 +595,6 @@ function runRealAgentSmoke(runner) {
   // the launcher child attach to that project instead of the throwaway repo —
   // colliding with any concurrently running opencode sessions (observed as
   // SQLite WAL contention and as the child hanging at exit until SIGTERM).
-  // @ts-expect-error TS2339 Property 'PWD' does not exist on type '{ FORCE_COLOR: string; PRIMARY_WORKTREE:
   delete env.PWD;
 
   try {
@@ -583,18 +614,18 @@ function runRealAgentSmoke(runner) {
     // configured model before spending the full workflow timeout. This
     // catches broken local launcher/model state without misattributing it
     // to Parallix's mission lifecycle.
-    const healthcheckResult = runHealthcheck(runner, repo.repoRoot, env);
+    const healthcheckResult = runHealthcheck(agent, runner, repo.repoRoot, env);
     if (healthcheckResult.status !== 0) {
       const { bucket, detail } = classifyFailure(healthcheckResult);
       assert.fail(
-        `[${bucket}] ${runner} healthcheck for the configured model failed (status=${healthcheckResult.status}, signal=${healthcheckResult.signal}): ${detail}\n` +
+        `[${bucket}] ${agent} healthcheck for the configured model failed (status=${healthcheckResult.status}, signal=${healthcheckResult.signal}): ${detail}\n` +
         `stdout:\n${healthcheckResult.stdout}\nstderr:\n${healthcheckResult.stderr}`
       );
     }
 
     // Phase 1: Draft
     const draftStartedAt = Date.now();
-    const draftResult = runWorkflowAllowFail(repo.repoRoot, env, ['draft', slug, '--agent', 'custom'], RUN_TIMEOUT_MS);
+    const draftResult = runWorkflowAllowFail(repo.repoRoot, env, ['draft', slug, '--agent', agent], RUN_TIMEOUT_MS);
     const draftDurationMs = Date.now() - draftStartedAt;
 
     if (draftResult.status !== 0) {
@@ -608,8 +639,8 @@ function runRealAgentSmoke(runner) {
     assert.match(
       // @ts-expect-error TS2769 No overload matches this call.
       draftResult.stdout,
-      /Draft agent family: custom/,
-      '[parallix-workflow-failure] expected the real run to select the custom agent family'
+      new RegExp(`Draft agent family: ${agent}`),
+      `[parallix-workflow-failure] expected the real run to select the ${agent} agent family`
     );
 
     const missionFile = path.join(worktree, 'missions', slug, 'MISSION.md');
@@ -676,10 +707,10 @@ function runRealAgentSmoke(runner) {
     // on the suffix rather than the full pinned launcher argument. With no
     // pinned CUSTOM_MODEL override, only assert a model name was recorded at
     // all (the launcher must report whatever default model it actually used).
-    if (CUSTOM_MODEL) {
+    if (SMOKE_MODEL) {
       assert.ok(
-        CUSTOM_MODEL.endsWith(statsMatch[2]),
-        `draft stats model "${statsMatch[2]}" should correspond to the repo-configured custom model "${CUSTOM_MODEL}"`
+        SMOKE_MODEL.endsWith(statsMatch[2]),
+        `draft stats model "${statsMatch[2]}" should correspond to the selected model "${SMOKE_MODEL}"`
       );
     } else {
       assert.ok(statsMatch[2] && statsMatch[2].length > 0, '[parallix-workflow-failure] draft stats reported an empty model name');
@@ -695,9 +726,9 @@ function runRealAgentSmoke(runner) {
     assert.ok(statsContent.includes('stage'), '[parallix-workflow-failure] expected stats.csv to contain stage column');
     assert.ok(statsContent.includes('model'), '[parallix-workflow-failure] expected stats.csv to contain model column');
     assert.ok(statsContent.includes('draft'), '[parallix-workflow-failure] expected stats.csv to contain draft stage');
-    if (CUSTOM_MODEL) {
-      const modelBaseName = CUSTOM_MODEL.split('/').pop();
-      assert.ok(statsContent.includes(modelBaseName), `[parallix-workflow-failure] expected stats.csv to contain the repo-configured custom model (${modelBaseName})`);
+    if (SMOKE_MODEL) {
+      const modelBaseName = SMOKE_MODEL.split('/').pop();
+      assert.ok(statsContent.includes(modelBaseName), `[parallix-workflow-failure] expected stats.csv to contain the selected model (${modelBaseName})`);
     }
 
     // Verify no writes escaped to the developer's default Parallix state
@@ -760,19 +791,19 @@ function runRealAgentSmoke(runner) {
     // px active's preflight requires running from the mission worktree (PWD
     // and branch checks), matching how a real implementer session operates.
     const activeStartedAt = Date.now();
-    const activeResult = runWorkflowAllowFail(worktree, env, ['active', slug, '--implementer', 'custom'], ACTIVE_TIMEOUT_MS);
+    const activeResult = runWorkflowAllowFail(worktree, env, ['active', slug, '--implementer', agent], ACTIVE_TIMEOUT_MS);
     const activeDurationMs = Date.now() - activeStartedAt;
     assert.equal(
       activeResult.status,
       0,
-      `[parallix-workflow-failure] px active --implementer custom failed (status=${activeResult.status}): ${activeResult.stderr || activeResult.stdout}`
+      `[parallix-workflow-failure] px active --implementer ${agent} failed (status=${activeResult.status}): ${activeResult.stderr || activeResult.stdout}`
     );
 
     assert.match(
       // @ts-expect-error TS2769 No overload matches this call.
       activeResult.stdout,
-      /Execute agent \(custom\)/,
-      '[parallix-workflow-failure] expected active phase to select the custom agent family'
+      new RegExp(`Execute agent \\(${agent}\\)`),
+      `[parallix-workflow-failure] expected active phase to select the ${agent} agent family`
     );
     console.log(`[benchmark] runner=${runner} phase=active duration_ms=${activeDurationMs}`);
 
@@ -790,8 +821,8 @@ function runRealAgentSmoke(runner) {
     // selection regressed (and could silently launch an expensive agent).
     assert.equal(
       reviewState.reviewer,
-      'custom',
-      `[parallix-workflow-failure] expected reviewer forced to "custom" via agents.local.json blocklist (got: "${reviewState.reviewer}")`
+      agent,
+      `[parallix-workflow-failure] expected reviewer forced to "${agent}" via agents.local.json blocklist (got: "${reviewState.reviewer}")`
     );
     
     // Verify review loop completed with APPROVED disposition (if Parallix cannot create a hello-world program, we have a problem)
@@ -821,6 +852,34 @@ function runRealAgentSmoke(runner) {
     assert.ok(cp1Content.includes('## Goal Check') || cp1Content.includes('## Goal Check Table'),
       '[parallix-workflow-failure] expected CP-1.md to contain Goal Check heading');
 
+    // Phase 3: Integrate through the real CLI rail. Agent work is complete at
+    // this point, so no further model session is needed; this proves the
+    // approved mission can land, close its task, and clean up its worktree.
+    const integrateResult = runWorkflowAllowFail(
+      worktree,
+      env,
+      ['integrate', slug, '--no-integration-gates'],
+      RUN_TIMEOUT_MS
+    );
+    assert.equal(
+      integrateResult.status,
+      0,
+      `[parallix-workflow-failure] px integrate ${slug} failed (status=${integrateResult.status}): ${integrateResult.stderr || integrateResult.stdout}`
+    );
+    assert.equal(fs.existsSync(worktree), false,
+      '[parallix-workflow-failure] integrate should remove the completed mission worktree');
+
+    const completedTask = fs.readdirSync(path.join(repo.repoRoot, 'backlog', 'completed'))
+      .find(name => name.startsWith(slug));
+    assert.ok(completedTask,
+      `[parallix-workflow-failure] integrate should move ${slug} into backlog/completed`);
+    const completedTaskContent = fs.readFileSync(
+      path.join(repo.repoRoot, 'backlog', 'completed', completedTask),
+      'utf8'
+    );
+    assert.match(completedTaskContent, /^status:\s*done$/m,
+      '[parallix-workflow-failure] integrated task should have status done');
+
   } finally {
     if (!shouldKeepTmp()) {
       fs.rmSync(repo.tmpRoot, { recursive: true, force: true });
@@ -841,10 +900,32 @@ const CONFIGURED_RUNNER = process.env.PARALLIX_REAL_AGENT_RUNNER
   || workflowConfig?.adapters?.agents?.runners?.custom
   || 'opencode';
 
-test(`real custom-agent launcher smoke (${CONFIGURED_RUNNER}): full lifecycle with hello-world task (SC3/SC4/SC5/SC6/SC7)`, () => {
+function assertSmokeSelection(agent) {
+  assert.ok(['custom', 'codex'].includes(agent), `Unknown real agent "${agent}"; expected custom or codex`);
+  if (agent === 'codex') {
+    assert.equal(SMOKE_MODEL, 'gpt-5.6-luna', 'Codex smoke override requires model gpt-5.6-luna');
+  }
   assert.ok(
     SUPPORTED_RUNNERS.includes(CONFIGURED_RUNNER),
     `Unknown custom runner "${CONFIGURED_RUNNER}" (from PARALLIX_REAL_AGENT_RUNNER or adapters.agents.runners.custom); expected one of: ${SUPPORTED_RUNNERS.join(', ')}`
   );
-  runRealAgentSmoke(CONFIGURED_RUNNER);
+}
+
+test('real-agent smoke rejects an unsupported Codex override model', () => {
+  if (OVERRIDE_AGENT !== 'codex') {return;}
+  assert.equal(OVERRIDE_MODEL, 'gpt-5.6-luna', 'Codex smoke override requires model gpt-5.6-luna');
+});
+
+test('real custom-agent launcher smoke: full lifecycle with hello-world task (SC3/SC4/SC5/SC6/SC7)', {
+  skip: SMOKE_AGENT !== 'custom'
+}, () => {
+  assertSmokeSelection('custom');
+  runRealAgentSmoke('custom', CONFIGURED_RUNNER);
+});
+
+test('real Codex gpt-5.6-luna launcher smoke: full lifecycle with hello-world task (SC3/SC4/SC5/SC6/SC7)', {
+  skip: SMOKE_AGENT !== 'codex' || SMOKE_MODEL !== 'gpt-5.6-luna'
+}, () => {
+  assertSmokeSelection('codex');
+  runRealAgentSmoke('codex', CONFIGURED_RUNNER);
 });

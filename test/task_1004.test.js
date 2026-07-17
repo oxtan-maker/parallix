@@ -33,12 +33,12 @@ test('resolveTaskFile prefers exact frontmatter id: match over filename-prefix m
     // Searching for task-093 should resolve to file1 because it has id: TASK-093
     const result = resolveTaskFile('task-093');
     assert.equal(result.ok, true);
-    assert.equal(result.taskFile, file1);
+    assert.equal(result.taskFile, fs.realpathSync(file1));
     
     // Searching for task-099 should resolve to file2 even if its filename starts with task-093
     const result2 = resolveTaskFile('task-099');
     assert.equal(result2.ok, true, `Expected task-099 to resolve via frontmatter ID, got: ${result2.reason}`);
-    assert.equal(result2.taskFile, file2);
+    assert.equal(result2.taskFile, fs.realpathSync(file2));
   });
 });
 
@@ -52,7 +52,7 @@ test('resolveTaskFile handles slugs with suffixes by falling back to base task I
     // Searching for task-1004-modern should resolve to file1 because it starts with task-1004
     const result = resolveTaskFile('task-1004-modern');
     assert.equal(result.ok, true);
-    assert.equal(result.taskFile, file1);
+    assert.equal(result.taskFile, fs.realpathSync(file1));
   });
 });
 

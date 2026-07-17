@@ -41,7 +41,7 @@ test('actOnReviewEntrypoint throws for unknown agent', () => {
   assert.throws(() => actOnReviewEntrypoint('unknown'), /unknown agent family/i);
 });
 
-test('buildReviewPrompt includes branch, focus, and attempt with entrypoint', () => {
+test('buildReviewPrompt renders the runtime review prompt for dry-run output', () => {
   const prompt = buildReviewPrompt({
     reviewer: 'codex',
     branch: 'mission/task-089',
@@ -50,11 +50,8 @@ test('buildReviewPrompt includes branch, focus, and attempt with entrypoint', ()
     attempt: 2
   });
 
-  assert.doesNotMatch(prompt, /reviewer agent family/);
-  assert.doesNotMatch(prompt, /implementer agent family/);
-  assert.match(prompt, /review attempt: `2`/);
-  assert.match(prompt, /Requested review focus: `security`/);
-  assert.match(prompt, /mission\/task-089/);
+  assert.match(prompt, /Attempt: 2\. Focus: security\./);
+  assert.match(prompt, /missions\/task-089\/MISSION\.md/);
   assert.match(prompt, /\$review all/); // codex entrypoint
   // Artifact paths resolve to the same dir the consumer reads (task-1264).
   const artifactDir = resolveArtifactDir(process.cwd());
@@ -74,15 +71,15 @@ test('buildReviewPrompt includes claude entrypoint for claude reviewer', () => {
   assert.match(prompt, /\/review all/);
 });
 
-test('buildActOnReviewPrompt includes implementer, branch, and attempt', () => {
+test('buildActOnReviewPrompt renders the runtime act-on-review prompt for dry-run output', () => {
   const prompt = buildActOnReviewPrompt({
     implementer: 'claude',
     branch: 'mission/task-089',
     attempt: 3
   });
 
-  assert.match(prompt, /implementer agent family: `claude`/);
-  assert.match(prompt, /review attempt response round: `3`/);
+  assert.match(prompt, /You are the implementer agent family: `claude`\./);
+  assert.match(prompt, /Attempt: 3\./);
   assert.match(prompt, /mission\/task-089/);
   assert.match(prompt, /act-on-review/);
   assert.doesNotMatch(prompt, /docs\/agent-prompts/);
@@ -106,7 +103,7 @@ test('buildReviewPrompt default focus is all', () => {
     implementer: 'claude',
     attempt: 1
   });
-  assert.match(prompt, /Requested review focus: `all`/);
+  assert.match(prompt, /Focus: all\./);
 });
 
 // --- compact prompt tests ---
@@ -147,6 +144,10 @@ test('buildCompactReviewPrompt inlines the contract instead of redirecting to do
   assert.ok(prompt.includes(`${artifactDir}/task-089-review-findings.md`));
   assert.ok(prompt.includes(`${artifactDir}/task-089-review-outcome.md`));
   assert.match(prompt, /Do not post to Forgejo directly/);
+  assert.match(prompt, /final chat response does \*\*not\*\* submit a review/);
+  assert.match(prompt, /create all three files/);
+  assert.match(prompt, /No findings\. when approving/);
+  assert.match(prompt, /run `ls -l/);
   assert.doesNotMatch(prompt, /FORGEJO_USER=/);
   assert.doesNotMatch(prompt, /docs\/agent-prompts/);
 });
@@ -172,7 +173,7 @@ test('buildCompactReviewPrompt enumerates separation-of-duties constraints keepi
   assert.match(prompt, /temporary diagnostic files under `\/tmp`/);
 });
 
-test('buildReviewPrompt (verbose) enumerates the same separation-of-duties constraints (task-1325)', () => {
+test('dry-run review builder preserves runtime separation-of-duties constraints', () => {
   const prompt = buildReviewPrompt({
     reviewer: 'codex',
     branch: 'mission/task-089',
@@ -182,12 +183,12 @@ test('buildReviewPrompt (verbose) enumerates the same separation-of-duties const
   });
   assert.match(prompt, /Separation of duties/i);
   assert.match(prompt, /reviewer, not the implementer/i);
-  assert.match(prompt, /edit, create, or delete any repo source/i);
+  assert.match(prompt, /Edit, create, or delete any repo source/i);
   assert.match(prompt, /no rebase, squash, amend/i);
   assert.match(prompt, /no merge, push/i);
   assert.match(prompt, /mutate workflow state/i);
   const artifactDir = resolveArtifactDir(process.cwd());
-  assert.ok(prompt.includes(`write to the artifact directory \`${artifactDir}\``));
+  assert.ok(prompt.includes(`Write to the artifact directory \`${artifactDir}\``));
   assert.match(prompt, /temporary diagnostic files under `\/tmp`/);
 });
 
@@ -222,7 +223,7 @@ test('buildCompactReviewPrompt substitutes {{reviewBaseline}} with the provided 
   assert.doesNotMatch(prompt, /\{\{reviewBaseline\}\}/);
 });
 
-test('buildReviewPrompt (verbose) substitutes {{reviewBaseline}} with the provided SHA and leaks no placeholder', () => {
+test('buildReviewPrompt substitutes {{reviewBaseline}} with the provided SHA and leaks no placeholder', () => {
   const prompt = buildReviewPrompt({
     reviewer: 'codex',
     branch: 'mission/task-089',
@@ -233,6 +234,14 @@ test('buildReviewPrompt (verbose) substitutes {{reviewBaseline}} with the provid
   });
   assert.match(prompt, /git diff abc1234deadbeef\.\.HEAD/);
   assert.doesNotMatch(prompt, /\{\{reviewBaseline\}\}/);
+});
+
+test('dry-run builders produce the same prompts that real agent launches receive', () => {
+  const reviewArgs = { reviewer: 'custom', branch: 'mission/task-9001', implementer: 'custom', attempt: 1, actualReviewer: 'custom', repoRoot: '/tmp/task-9001', reviewBaseline: 'baseline123' };
+  assert.equal(buildReviewPrompt(reviewArgs), buildCompactReviewPrompt(reviewArgs));
+
+  const actArgs = { implementer: 'custom', branch: 'mission/task-9001', attempt: 1, reviewOutcome: 'REQUEST_CHANGES', actualImplementer: 'custom', repoRoot: '/tmp/task-9001', reviewBaseline: 'baseline123' };
+  assert.equal(buildActOnReviewPrompt(actArgs), buildCompactActOnReviewPrompt(actArgs));
 });
 
 test('review prompts instruct reviewers to ignore rebasing artifacts that are not mission changes (task-1430)', () => {
@@ -256,6 +265,27 @@ test('review prompts instruct reviewers to ignore rebasing artifacts that are no
     assert.match(prompt, /will be resolved by parallix rebase/i);
     assert.match(prompt, /rebasing artifacts, not mission changes|not a mission change/i);
     assert.match(prompt, /branch stale-ness/i);
+  }
+});
+
+test('review prompts distinguish committed checkpoint records from live diff output', () => {
+  const compactPrompt = buildCompactReviewPrompt({
+    reviewer: 'custom',
+    branch: 'mission/task-9001',
+    implementer: 'custom',
+    attempt: 1
+  });
+  const verbosePrompt = buildReviewPrompt({
+    reviewer: 'custom',
+    branch: 'mission/task-9001',
+    implementer: 'custom',
+    attempt: 1
+  });
+
+  for (const prompt of [compactPrompt, verbosePrompt]) {
+    assert.match(prompt, /record of the work at the time it was performed/i);
+    assert.match(prompt, /git diff HEAD.*expected to be empty after a checkpoint is committed/i);
+    assert.match(prompt, /materially false, unverifiable from the committed tree, or conceals a mission change/i);
   }
 });
 

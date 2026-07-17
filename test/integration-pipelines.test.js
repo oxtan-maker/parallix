@@ -356,6 +356,30 @@ workflow/lib/commands/integrate.js`)
   assert.equal('INTEGRATION_CONFIG_PATH' in env, false);
 });
 
+test('buildIntegrationGateEnv forwards the validated Codex override as dedicated environment values', () => {
+  /** @type {NodeJS.ProcessEnv} */
+  const env = buildIntegrationGateEnv('task-2269', {
+    processEnv: {},
+    gitRunner: createMockGitRunner('lib/commands/integrate.ts'),
+    realAgent: 'codex',
+    realAgentModel: 'gpt-5.6-luna'
+  });
+
+  assert.equal(env.PARALLIX_REAL_AGENT, 'codex');
+  assert.equal(env.PARALLIX_REAL_AGENT_MODEL, 'gpt-5.6-luna');
+  assert.equal(Object.values(env).some(value => String(value).includes('gpt-5.6-luna') && value !== 'gpt-5.6-luna'), false);
+});
+
+test('buildIntegrationGateEnv inherits the invoking environment by default', () => {
+  /** @type {NodeJS.ProcessEnv} */
+  const env = buildIntegrationGateEnv('task-2269', {
+    gitRunner: createMockGitRunner('lib/commands/integrate.ts')
+  });
+
+  assert.equal(env.PATH, process.env.PATH);
+  assert.equal(env.HOME, process.env.HOME);
+});
+
 // Tests for the script area (Option C: scripts/verify-local.sh integrate)
 test('script integrate area: run_last ordering is respected', () => {
   // This test verifies that when called via the script, gates with run_last: true

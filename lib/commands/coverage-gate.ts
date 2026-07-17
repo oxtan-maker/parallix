@@ -41,7 +41,7 @@
  *    tests keep executable probes there while parallel coverage processes run.
  * 8. /tmp/test-main — not produced by any in-scope code; orphaned 1.1 GB dir
  *    on disk from manual integration test (pre-existing, outside parallix/ scope).
- * 9. Prompt templates (review.md, review-verbose.md, act-on-review.md, etc.) —
+ * 9. Prompt templates (review.md, act-on-review.md, etc.) —
  *    /tmp/{{slug}}-*.md patterns are templates, not actual writes.
  *
  * Cleanup strategy: per-process inventory (PER_RUN_SCRATCH) + exit/SIGINT/SIGTERM

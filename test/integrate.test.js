@@ -96,6 +96,7 @@ const {
   formatRecordedStatsRow,
   resolveIntegrationVerificationWorktree,
   buildIntegrationVerificationInvocation,
+  parseIntegrateArgs,
   runPostIntegrateHookOrAbort,
   refreshBuildBeforeVerification
 } = require('../lib/commands/integrate');
@@ -152,6 +153,29 @@ test('integration verification command and cwd are both derived from the candida
     area: 'integrate',
     rootDir: candidateWorktree
   }]);
+});
+
+test('px integrate parses the paired Codex real-agent override without placing values in a command string', () => {
+  const parsed = parseIntegrateArgs(['task-2269', '--real-agent', 'codex', '--real-agent-model', 'gpt-5.6-luna']);
+  assert.deepEqual(parsed, {
+    explicitSlug: 'task-2269', dryRun: false, noIntegrationGates: false, noGate: false,
+    realAgent: 'codex', realAgentModel: 'gpt-5.6-luna'
+  });
+});
+
+test('px integrate rejects malformed real-agent options before preflight or gate execution', () => {
+  /** @type {Array<[string[], RegExp]>} */
+  const malformedCases = [
+    [['task-2269', '--real-agent', 'codex'], /must be supplied together/],
+    [['task-2269', '--real-agent'], /requires a value/],
+    [['task-2269', '--real-agent', 'codex', '--real-agent', 'codex', '--real-agent-model', 'gpt-5.6-luna'], /only once/],
+    [['task-2269', '--real-agent', 'claude', '--real-agent-model', 'gpt-5.6-luna'], /Unsupported real agent/],
+    [['task-2269', '--real-agent', 'codex', '--real-agent-model', 'not-gpt'], /Unsupported Codex real-agent model/],
+    [['task-2269', '--not-real'], /Unknown integrate option/]
+  ];
+  for (const [args, message] of malformedCases) {
+    assert.throws(() => parseIntegrateArgs(args), message);
+  }
 });
 
 test('buildIntegrationContext reads status from primary while retaining mission worktree metadata', (t) => {

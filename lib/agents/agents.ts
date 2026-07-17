@@ -66,6 +66,7 @@ interface StartAgentOptions {
   log?: Function;
   noOutputWatchdog?: {initialDelayMs?: number, intervalMs?: number} | boolean;
   launchAgentFn?: Function;
+  assertAgentSupportedFn?: Function;
 }
 
 const NON_BLOCKING_LAUNCH_ERROR_PATTERNS = Object.freeze([
@@ -191,7 +192,8 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
     sessionsModule = sessions,
     log = fmt.log.plain,
     noOutputWatchdog = {},
-    launchAgentFn = null
+    launchAgentFn = null,
+    assertAgentSupportedFn = assertAgentSupported
   } = opts;
 
   // `exclude` seeds the tried-set so callers can reserve agents (e.g. exclude
@@ -251,7 +253,7 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
     }
 
     try {
-      assertAgentSupported(chosen || '', worktree);
+      assertAgentSupportedFn(chosen || '', worktree);
     } catch (err) {
       /** @type {Error & {code?: string}} */
       const e = (err as any);

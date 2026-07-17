@@ -187,6 +187,7 @@ test('missionStart passes if classification is provided via labels', () => {
     findMissionDirFn: () => 'd',
     findCheckpointsFn: () => [],
     fsExistsSync: () => true,
+    getPrStatusFn: () => ({ exists: false }),
     log: line => lines.push(line)
   });
 

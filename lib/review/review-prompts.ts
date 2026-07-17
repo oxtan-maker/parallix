@@ -3,8 +3,8 @@
  * Owned by the Node workflow harness (ADR 0037 / task-089).
  *
  * Node-invoked agent prompts read from parallix/prompts/*.md templates
- * (same pattern as active.js / draft.js). Full verbose prompts are kept
- * for --dry-run diagnostics and human/manual invocation.
+ * (same pattern as active.js / draft.js). Dry-run output uses the exact
+ * prompt that a real agent receives, preventing policy drift.
  */
 
 import * as fs from 'fs';
@@ -14,8 +14,6 @@ import { resolveArtifactDir } from './review-artifacts.js';
 
 const REVIEW_PROMPT_PATH = path.join(__dirname, '..', '..', 'prompts', 'review.md');
 const ACT_ON_REVIEW_PROMPT_PATH = path.join(__dirname, '..', '..', 'prompts', 'act-on-review.md');
-const REVIEW_VERBOSE_PROMPT_PATH = path.join(__dirname, '..', '..', 'prompts', 'review-verbose.md');
-const ACT_ON_REVIEW_VERBOSE_PROMPT_PATH = path.join(__dirname, '..', '..', 'prompts', 'act-on-review-verbose.md');
 
 type PromptEntry = { review: string; actOnReview: string };
 type PromptEntrypoints = { codex: PromptEntry; claude: PromptEntry; vibe: PromptEntry; custom: PromptEntry; autonomous: PromptEntry };
@@ -72,60 +70,20 @@ function resolvePrimaryBranch(repoRoot?: string): string {
  * @param {{reviewer: string, branch: string, implementer: string, focus?: string, attempt: number, repoRoot?: string, missionPath?: string}} opts
  * @returns {string}
  */
-export function buildReviewPrompt({ reviewer, branch, implementer, focus = 'all', attempt, repoRoot = '', missionPath: missionPathOverride, reviewBaseline }: {
-  reviewer: string; branch: string; implementer: string; focus?: string; attempt: number; repoRoot?: string; missionPath?: string; reviewBaseline?: string;
+export function buildReviewPrompt({ reviewer, branch, implementer, focus = 'all', attempt, actualReviewer, repoRoot = '', missionPath: missionPathOverride, reviewBaseline }: {
+  reviewer: string; branch: string; implementer: string; focus?: string; attempt: number; actualReviewer?: string; repoRoot?: string; missionPath?: string; reviewBaseline?: string;
 }): string {
-  const entrypoint = reviewEntrypoint(reviewer);
-  const repoLine = repoRoot ? `\noperate from repo root: ${repoRoot}` : '';
-  const slug = branch.replace(/^mission\//, '');
-  const year = getMissionYear(slug, repoRoot || process.cwd());
-  const missionPath = resolveMissionPath(slug, repoRoot, missionPathOverride);
-  const artifactDir = resolveArtifactDir(repoRoot || process.cwd());
-
-  const template = fs.readFileSync(REVIEW_VERBOSE_PROMPT_PATH, 'utf8');
-  return template
-    .replaceAll('{{branch}}',           branch)
-    .replaceAll('{{reviewer}}',         reviewer)
-    .replaceAll('{{implementer}}',      implementer)
-    .replaceAll('{{focus}}',            focus)
-    .replaceAll('{{attempt}}',          String(attempt))
-    .replaceAll('{{slug}}',             slug)
-    .replaceAll('{{missionPath}}',      missionPath)
-    .replaceAll('{{artifactDir}}',      artifactDir)
-    .replaceAll('{{primaryBranch}}',    resolvePrimaryBranch(repoRoot))
-    .replaceAll('{{reviewBaseline}}',   reviewBaseline || resolvePrimaryBranch(repoRoot))
-    .replaceAll('{{review_entrypoint}}', entrypoint)
-    .replaceAll('YYYY',                year)
-    .replaceAll('{{repo_line}}',        repoLine ? repoLine.trim() + '\n- ' : '');
+  return buildCompactReviewPrompt({ reviewer, branch, implementer, focus, attempt, actualReviewer, repoRoot, missionPath: missionPathOverride, reviewBaseline });
 }
 
 /**
  * @param {{implementer: string, branch: string, attempt: number, repoRoot?: string, missionPath?: string}} opts
  * @returns {string}
  */
-export function buildActOnReviewPrompt({ implementer, branch, attempt, repoRoot = '', missionPath: missionPathOverride, reviewBaseline }: {
-  implementer: string; branch: string; attempt: number; repoRoot?: string; missionPath?: string; reviewBaseline?: string;
+export function buildActOnReviewPrompt({ implementer, branch, attempt, reviewOutcome = '?', actualImplementer, repoRoot = '', missionPath: missionPathOverride, reviewBaseline }: {
+  implementer: string; branch: string; attempt: number; reviewOutcome?: string; actualImplementer?: string; repoRoot?: string; missionPath?: string; reviewBaseline?: string;
 }): string {
-  const entrypoint = actOnReviewEntrypoint(implementer);
-  const repoLine = repoRoot ? `\noperate from repo root: ${repoRoot}` : '';
-  const slug = branch.replace(/^mission\//, '');
-  const year = getMissionYear(slug, repoRoot || process.cwd());
-  const missionPath = resolveMissionPath(slug, repoRoot, missionPathOverride);
-  const artifactDir = resolveArtifactDir(repoRoot || process.cwd());
-
-  const template = fs.readFileSync(ACT_ON_REVIEW_VERBOSE_PROMPT_PATH, 'utf8');
-  return template
-    .replaceAll('{{branch}}',                  branch)
-    .replaceAll('{{implementer}}',             implementer)
-    .replaceAll('{{attempt}}',                 String(attempt))
-    .replaceAll('{{slug}}',                    slug)
-    .replaceAll('{{missionPath}}',             missionPath)
-    .replaceAll('{{artifactDir}}',             artifactDir)
-    .replaceAll('{{primaryBranch}}',           resolvePrimaryBranch(repoRoot))
-    .replaceAll('{{reviewBaseline}}',          reviewBaseline || resolvePrimaryBranch(repoRoot))
-    .replaceAll('{{act_on_review_entrypoint}}', entrypoint)
-    .replaceAll('YYYY',                       year)
-    .replaceAll('{{repo_line}}',               repoLine ? repoLine.trim() + '\n- ' : '');
+  return buildCompactActOnReviewPrompt({ implementer, branch, attempt, reviewOutcome, actualImplementer, repoRoot, missionPath: missionPathOverride, reviewBaseline });
 }
 
 /**

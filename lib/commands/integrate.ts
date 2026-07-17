@@ -48,7 +48,7 @@ function maybeUpdateGraphifyOnPrimary(rootDir = getPrimaryWorktree(), opts: {com
     rootDir,
     commandRunner: opts.commandRunner || ((/** @type{string} */ command: string, /** @type{string[]} */ args: string[], /** @type{object} */ options: any) => run(command, args, options)),
     log: opts.log,
-    startMessage: `Updating graphify knowledge graph on ${getPrimaryBranch()}...`,
+    startMessage: `Updating graphify knowledge graph on ${getPrimaryBranch(rootDir)}...`,
     failureHint: 'Continuing without blocking integration.'
   });
 }
@@ -235,7 +235,15 @@ function reportSyncMergedFailure(syncResult: any) {
 }
 
 // Integration gates support
-const INTEGRATION_CONFIG_PATH = path.join(getPrimaryWorktree(), 'config', 'integration-pipelines.json');
+/**
+ * Resolve this lazily: command modules are imported by the unit-test harness
+ * after some tests switch into temporary repositories that have no primary
+ * branch. Integration itself still resolves the config from the primary
+ * worktree when it needs to read it.
+ */
+function getIntegrationConfigPath(): string {
+  return path.join(getPrimaryWorktree(), 'config', 'integration-pipelines.json');
+}
 
 /**
  * Detect which top-level areas have been modified in the mission branch vs primary branch
@@ -363,7 +371,7 @@ function gateMatchesChangedAreas(gateKey: string, changedAreas: string[], gateAr
  */
 /** @param {{configPath?: string}} opts */
 function loadIntegrationConfig(opts: {configPath?: string} = {}) {
-  const configPath = opts.configPath || INTEGRATION_CONFIG_PATH;
+  const configPath = opts.configPath || getIntegrationConfigPath();
   if (!fs.existsSync(configPath) || !fs.statSync(configPath).size) {
     return { ok: false, error: 'no config present' };
   }
@@ -431,10 +439,13 @@ function printIntegrationGatePlan(gates: any) {
  * @param {string} slug
  * @param {{dryRun?: boolean, processEnv?: NodeJS.ProcessEnv, gitRunner?: Function, baseBranch?: string|null, baseWorktree?: string|null}} opts
  */
-function buildIntegrationGateEnv(slug: string, opts: {dryRun?: boolean, processEnv?: NodeJS.ProcessEnv, gitRunner?: Function, baseBranch?: string | null, baseWorktree?: string | null} = {}) {
+function buildIntegrationGateEnv(slug: string, opts: {dryRun?: boolean, processEnv?: NodeJS.ProcessEnv, gitRunner?: Function, baseBranch?: string | null, baseWorktree?: string | null, realAgent?: string | null, realAgentModel?: string | null} = {}) {
   /** @type {{[key: string]: string | undefined}} */
   const env = /** @type {{[key: string]: string | undefined}} */ ({
-    ...opts.processEnv,
+    // Integration gates need the invoking process environment (especially
+    // PATH and HOME) to find the selected Node runtime on macOS and Linux.
+    // Tests can still pass an isolated environment explicitly.
+    ...(opts.processEnv || process.env),
     INTEGRATE_DRY_RUN: opts.dryRun ? 'true' : 'false',
     INTEGRATE_CHANGED_AREAS: detectChangedAreas(slug, {
       gitRunner: opts.gitRunner,
@@ -446,7 +457,61 @@ function buildIntegrationGateEnv(slug: string, opts: {dryRun?: boolean, processE
   // Integration must always use the repo-side config, but the changed-area set
   // should be the one resolved for this mission branch, not rediscovered later.
   delete (env as any).INTEGRATION_CONFIG_PATH;
+  if (opts.realAgent && opts.realAgentModel) {
+    (env as any).PARALLIX_REAL_AGENT = opts.realAgent;
+    (env as any).PARALLIX_REAL_AGENT_MODEL = opts.realAgentModel;
+  }
   return env;
+}
+
+const REAL_AGENT_OPTION = '--real-agent';
+const REAL_AGENT_MODEL_OPTION = '--real-agent-model';
+const INTEGRATE_VALUE_OPTIONS = new Set([REAL_AGENT_OPTION, REAL_AGENT_MODEL_OPTION]);
+const CODEX_REAL_AGENT_MODEL = 'gpt-5.6-luna';
+
+/** Parse only the public integrate flags before any preflight or gate work. */
+function parseIntegrateArgs(args: string[]) {
+  const params: string[] = [];
+  let dryRun = false;
+  let noIntegrationGates = false;
+  let noGate = false;
+  let realAgent: string | null = null;
+  let realAgentModel: string | null = null;
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (INTEGRATE_VALUE_OPTIONS.has(arg)) {
+      const value = args[index + 1];
+      if (!value || value.startsWith('--')) {
+        throw new Error(`${arg} requires a value.`);
+      }
+      if (arg === REAL_AGENT_OPTION) {
+        if (realAgent !== null) {throw new Error('--real-agent may be supplied only once.');}
+        realAgent = value;
+      } else {
+        if (realAgentModel !== null) {throw new Error('--real-agent-model may be supplied only once.');}
+        realAgentModel = value;
+      }
+      index += 1;
+      continue;
+    }
+    if (arg === '--dry-run') { dryRun = true; continue; }
+    if (arg === '--no-integration-gates') { noIntegrationGates = true; continue; }
+    if (arg === '--no-gate') { noGate = true; continue; }
+    if (arg.startsWith('--')) {throw new Error(`Unknown integrate option: ${arg}`);}
+    params.push(arg);
+  }
+
+  if ((realAgent === null) !== (realAgentModel === null)) {
+    throw new Error('--real-agent and --real-agent-model must be supplied together.');
+  }
+  if (realAgent !== null && realAgent !== 'codex') {
+    throw new Error(`Unsupported real agent "${realAgent}". Supported value: codex.`);
+  }
+  if (realAgent === 'codex' && realAgentModel !== CODEX_REAL_AGENT_MODEL) {
+    throw new Error(`Unsupported Codex real-agent model "${realAgentModel}". Supported value: ${CODEX_REAL_AGENT_MODEL}.`);
+  }
+  return { explicitSlug: params[0], dryRun, noIntegrationGates, noGate, realAgent, realAgentModel };
 }
 
 /**
@@ -539,6 +604,7 @@ export interface IntegrateFn extends Function {
   getIntegrationGatePlan: typeof getIntegrationGatePlan;
   printIntegrationGatePlan: typeof printIntegrationGatePlan;
   buildIntegrationGateEnv: typeof buildIntegrationGateEnv;
+  parseIntegrateArgs: typeof parseIntegrateArgs;
   resolveIntegrationVerificationWorktree: typeof resolveIntegrationVerificationWorktree;
   buildIntegrationVerificationInvocation: typeof buildIntegrationVerificationInvocation;
   executeIntegrationGates: typeof executeIntegrationGates;
@@ -554,12 +620,16 @@ async function integrate(args: string[]) {
   /** @type{{created?: boolean, message?: string, rootDir?: string}|null} */
   let temporaryStash = null;
   let nextActionMessage = null;
-  const flags = args.filter((arg: string) => arg.startsWith('--'));
-  const params = args.filter((arg: string) => !arg.startsWith('--'));
-  const explicitSlug = params[0];
+  let parsedArgs;
+  try {
+    parsedArgs = parseIntegrateArgs(args);
+  } catch (error: any) {
+    fmt.log.fail(error.message);
+    process.exit(1);
+    return;
+  }
+  const { explicitSlug, dryRun, noIntegrationGates, noGate, realAgent, realAgentModel } = parsedArgs;
   const slug = inferSlug(explicitSlug);
-  const dryRun = flags.includes('--dry-run');
-  const noIntegrationGates = flags.includes('--no-integration-gates');
 
   /** @type {{slug: string, branch: string, currentBranch: string, missionDir?: string, area: string, task: {ok: boolean, taskFile?: string, reason?: string, matches?: string[]}, taskStatus?: string, taskAssignee?: string|null, forgejoUser?: string|null, forgejoToken?: string|null, taskAssigneeWarning?: string|null, pr: {exists?: boolean, state?: string, number?: number, merged?: boolean, raw?: string}, siblingPrs: any[], approval: {ok?: boolean, error?: string, reviewState?: string, defaultUserApproved?: boolean, source?: string}, baseBranch?: string, baseWorktree?: string, mainBranch: string, mainDirtyEntries: string[], mainDirty: boolean}} */
   let context;
@@ -576,7 +646,7 @@ async function integrate(args: string[]) {
     return;
   }
 
-    if (flags.includes('--no-gate')) {
+    if (noGate) {
       fmt.log.warn('integrate ignores --no-gate. The landed squash commit relies on the local git hooks for validation.');
     }
 
@@ -597,7 +667,7 @@ async function integrate(args: string[]) {
 
       if (!noIntegrationGates) {
         const verification = buildIntegrationVerificationInvocation(slug, { baseWorktree });
-        const env = buildIntegrationGateEnv(slug, { dryRun, baseBranch, baseWorktree });
+        const env = buildIntegrationGateEnv(slug, { dryRun, baseBranch, baseWorktree, realAgent, realAgentModel });
         
         if (dryRun) {
           fmt.log.info('Running integration gates (dry-run)...');
@@ -605,7 +675,9 @@ async function integrate(args: string[]) {
           fmt.log.info('Running integration gates...');
         }
         
-        const result = child_process.spawnSync('bash', ['-lc', verification.command], {
+        // Gate commands are project commands, not interactive login commands.
+        // A login shell can replace PATH or source a broken user profile.
+        const result = child_process.spawnSync('bash', ['-c', verification.command], {
           cwd: verification.cwd,
           env,
           stdio: 'inherit'
@@ -1805,6 +1877,7 @@ function buildConflictResolutionPrompt(slug: string = '<slug>', area: string = '
 (integrate as any).getIntegrationGatePlan = getIntegrationGatePlan;
 (integrate as any).printIntegrationGatePlan = printIntegrationGatePlan;
 (integrate as any).buildIntegrationGateEnv = buildIntegrationGateEnv;
+(integrate as any).parseIntegrateArgs = parseIntegrateArgs;
 (integrate as any).resolveIntegrationVerificationWorktree = resolveIntegrationVerificationWorktree;
 (integrate as any).buildIntegrationVerificationInvocation = buildIntegrationVerificationInvocation;
 (integrate as any).executeIntegrationGates = executeIntegrationGates;
@@ -1814,7 +1887,7 @@ function buildConflictResolutionPrompt(slug: string = '<slug>', area: string = '
 // Re-export getPrimaryWorktree from mission-utils
 (integrate as any).getPrimaryWorktree = getPrimaryWorktree;
 export default integrate;
-export { integrate, formatRecordedStatsRow, detectChangedAreas, parseFilesToAreas, loadIntegrationConfig, getIntegrationGatePlan, printIntegrationGatePlan, buildIntegrationGateEnv, resolveIntegrationVerificationWorktree, buildIntegrationVerificationInvocation, executeIntegrationGates, orderIntegrationGates, gateMatchesChangedAreas, buildIntegrationContext, getPrimaryWorktree, resolveConflictsForMission, cleanupMissionWorktree, rewriteWorktreePaths, isNoMergeToAbortResult, buildConflictResolutionPrompt, VARIANT_B_AUTOMATION_SUMMARY, stashMainCheckoutIfNeeded, restoreMainCheckoutStash, evaluateTaskStatusForIntegration, promoteTaskForIntegrationIfNeeded, findExistingSquashCommit, printIntegrationPreflight, resolveForgejoUserForIntegration, getUnresolvedIndexConflicts, parseStashPopCollisionFiles, reportStashPopFailure, maybeUpdateGraphifyOnPrimary, SYNC_MERGED_DIAGNOSTICS, printDiagnosticTable, recordPostIntegrationStats, recordPostIntegrationStatsOrAbort, reportSyncMergedFailure, runPostIntegrateHookOrAbort, refreshBuildBeforeVerification };
+export { integrate, formatRecordedStatsRow, detectChangedAreas, parseFilesToAreas, loadIntegrationConfig, getIntegrationGatePlan, printIntegrationGatePlan, buildIntegrationGateEnv, parseIntegrateArgs, resolveIntegrationVerificationWorktree, buildIntegrationVerificationInvocation, executeIntegrationGates, orderIntegrationGates, gateMatchesChangedAreas, buildIntegrationContext, getPrimaryWorktree, resolveConflictsForMission, cleanupMissionWorktree, rewriteWorktreePaths, isNoMergeToAbortResult, buildConflictResolutionPrompt, VARIANT_B_AUTOMATION_SUMMARY, stashMainCheckoutIfNeeded, restoreMainCheckoutStash, evaluateTaskStatusForIntegration, promoteTaskForIntegrationIfNeeded, findExistingSquashCommit, printIntegrationPreflight, resolveForgejoUserForIntegration, getUnresolvedIndexConflicts, parseStashPopCollisionFiles, reportStashPopFailure, maybeUpdateGraphifyOnPrimary, SYNC_MERGED_DIAGNOSTICS, printDiagnosticTable, recordPostIntegrationStats, recordPostIntegrationStatsOrAbort, reportSyncMergedFailure, runPostIntegrateHookOrAbort, refreshBuildBeforeVerification };
 // CJS compat: ensure require() returns the function directly
 declare const module: { exports: any } | undefined;
 if (typeof module !== 'undefined') { module.exports = integrate; }

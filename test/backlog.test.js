@@ -33,7 +33,7 @@ const { [`getTask${typeKey[0].toUpperCase()}${typeKey.slice(1)}`]: getTaskMissio
 
 function withTempRepo(fn) {
   const previous = process.cwd();
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-backlog-'));
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-backlog-')));
   fs.mkdirSync(path.join(root, 'backlog', 'tasks'), { recursive: true });
   fs.mkdirSync(path.join(root, 'workflow', 'config'), { recursive: true });
 

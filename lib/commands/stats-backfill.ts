@@ -95,7 +95,7 @@ function deriveDateFromGitHistory(slug: string, taskFile: string, rootDir = proc
   const targets: string[] = [missionDir, taskFile].filter((x): x is string => Boolean(x));
   if (targets.length === 0) {return null;}
 
-  const result = git(['-C', rootDir, 'log', '--all', '-1', '--format=%cs', '--', ...targets]);
+  const result = git(['-C', rootDir, 'log', '--all', '-1', '--date=short', '--format=%cd', '--', ...targets]);
   if (result.status !== 0) {return null;}
   return extractDateOnly(result.stdout.trim());
 }

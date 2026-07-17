@@ -1,4 +1,4 @@
-# Real custom-agent launcher smoke test
+# Real-agent launcher smoke test
 
 `test/e2e-real-agent-smoke.test.js` is a **blocking** integration gate
 (`custom-agent-smoke` in `config/integration-pipelines.json`) that launches
@@ -33,7 +33,11 @@ configured local agent, integration must stop rather than merge silently.
   behavior. If `adapters.agents.models.custom` is set, the test reads it and
   writes it into the throwaway repo's own `workflow.config.json` so the
   smoke run exercises that exact override.
-- No network access or cloud credentials are required — the model is local.
+- For the self-development Codex override, `codex` must be on `PATH` and
+  `gpt-5.6-luna` must be available to that Codex installation.
+- The default custom smoke route needs no cloud credentials because its model is
+  local. The explicit Codex override instead requires the operator's usable
+  Codex authentication and model access.
 
 ## Invocation
 
@@ -44,6 +48,24 @@ node test/e2e-real-agent-smoke.test.js
 Also runs as part of `px integrate` (or `./scripts/verify-local.sh integrate`)
 whenever the changed areas include `workflow` or `lib`, alongside the
 `workflow` gate.
+
+### Self-development Codex override
+
+When this repository cannot use its local custom-agent route, request the
+Codex smoke lifecycle explicitly during integration:
+
+```
+px integrate task-2269 --real-agent codex --real-agent-model gpt-5.6-luna
+```
+
+The flags are a required pair. `px integrate` and
+`./scripts/verify-local.sh integrate` reject an incomplete pair, duplicate
+values, unsupported families, and unknown options before gate execution. The
+values are forwarded as dedicated environment values only to
+`custom-agent-smoke`; they are never concatenated into its shell command.
+Without both flags, the configured `custom-agent-smoke` command remains
+`node test/e2e-real-agent-smoke.test.js`, and smoke selection retains the
+configured custom runner (`opencode` or `pi`) and its existing model behavior.
 
 The gate runs **one** full lifecycle per invocation, with whichever custom
 runner this repository configures (`adapters.agents.runners.custom` in

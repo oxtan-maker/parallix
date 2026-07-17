@@ -12,6 +12,7 @@ Harness preflight already confirmed:
 Execution requirements:
 - execute checkpoint-by-checkpoint per the contract in `{{missionPath}}`
 - after each completed checkpoint, write `CP-N.md` in `{{missionDir}}` containing: a summary of work done, a Goal Check table with file:line and test-name evidence, and a non-generic `Next action:` line
+- Keep Goal Check evidence durable: prefer stable file references and commands that can be rerun against the committed tree. Do not claim that `git diff HEAD` proves a committed change—its expected output is empty after committing. If historical diff evidence is needed, state the exact non-HEAD baseline or describe the observed change without implying that an empty post-commit diff will reproduce it.
 - the final checkpoint document MUST contain a Goal Check table citing real evidence (file:line, test names)
 - **Heading requirement:** Use the exact section header `## Goal Check`.
 - **Goal Check table format:** Use a 3-column pipe-delimited markdown table: `| Criterion | Evidence | Status |` followed by a separator row `|---|---|---|`, then one evidence row per criterion.

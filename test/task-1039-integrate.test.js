@@ -35,6 +35,7 @@ function setupMocks() {
   mock.method(backlog, 'getTaskAssignee', () => 'claude');
   mock.method(backlog, 'setTaskStatus', () => true);
   mock.method(forgejo, 'getPrStatus', () => ({ exists: true, state: 'open', merged: false, number: 41 }));
+  mock.method(forgejo, 'listOpenPrsForSlug', () => []);
   mock.method(forgejo, 'getLatestReviewDecision', () => ({ ok: true, reviewState: 'APPROVED' }));
   mock.method(forgejo, 'readToken', () => 'token');
   mock.method(forgejo, 'resolveTokenFile', () => 'token-file');
@@ -97,7 +98,7 @@ test('integrate preflight failure stops execution', (t) => {
   console.error = (msg) => { if (msg && msg.includes('Integration preflight failed')) errorLogged = true; };
   
   // @ts-expect-error TS2349 This expression is not callable.
-  integrate([TEST_SLUG]);
+  integrate([TEST_SLUG, '--no-integration-gates']);
   assert.ok(errorLogged);
   
   console.error = originalError;
@@ -112,7 +113,7 @@ test('integrate dry-run mode', (t) => {
   console.log = (msg) => { if (msg && msg.includes('Dry run complete')) logLogged = true; };
   
   // @ts-expect-error TS2349 This expression is not callable.
-  integrate([TEST_SLUG, '--dry-run']);
+  integrate([TEST_SLUG, '--dry-run', '--no-integration-gates']);
   assert.ok(logLogged);
   
   console.log = originalLog;

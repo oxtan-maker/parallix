@@ -33,6 +33,14 @@ function run(command, args, options = {}) {
   });
 }
 
+function packFilename(stdout) {
+  const jsonMatches = [...String(stdout || '').matchAll(/"filename"\s*:\s*"([^"]+\.tgz)"/g)];
+  if (jsonMatches.length > 0) {
+    return jsonMatches[jsonMatches.length - 1][1];
+  }
+  return String(stdout || '').split(/\r?\n/).map(line => line.trim()).findLast(line => line.endsWith('.tgz')) || null;
+}
+
 test('installed tarball runtime does not trip the stale-build guard on a fresh, correctly-built checkout', () => {
   // Guard the source checkout itself is fresh before we even pack it -- this is the
   // check `npm run prepack`/`publish:guard` runs against the checkout, and it must
@@ -54,21 +62,26 @@ test('installed tarball runtime does not trip the stale-build guard on a fresh, 
   const npmHome = path.join(root, 'npm-home');
   fs.mkdirSync(packDir, { recursive: true });
   fs.mkdirSync(npmHome, { recursive: true });
+  const rootTarballsBefore = new Set(
+    fs.readdirSync(PACKAGE_ROOT).filter(entry => entry.endsWith('.tgz'))
+  );
 
   try {
     const packResult = run('npm', [
       'pack',
       PACKAGE_ROOT,
-      '--json',
-      '--pack-destination',
-      packDir
-    ], { tempHome: npmHome });
+      '--json'
+    ], { tempHome: npmHome, cwd: packDir });
     assert.equal(packResult.status, 0, `npm pack failed\nstdout:\n${packResult.stdout}\nstderr:\n${packResult.stderr}`);
-    const packed = JSON.parse(packResult.stdout || '[]');
-    if (!packed[0]) {
+    const filename = packFilename(packResult.stdout);
+    if (!filename) {
       return;
     }
-    const tarball = path.join(packDir, packed[0].filename);
+    const tarball = path.join(packDir, filename);
+    const rootTarball = path.join(PACKAGE_ROOT, filename);
+    if (!fs.existsSync(tarball) && fs.existsSync(rootTarball)) {
+      fs.renameSync(rootTarball, tarball);
+    }
 
     const installResult = run('npm', ['install', '-g', '--prefix', prefix, tarball], { tempHome: npmHome });
     // @ts-expect-error TS2339 Property 'code' does not exist on type 'Error'.
@@ -102,6 +115,11 @@ test('installed tarball runtime does not trip the stale-build guard on a fresh, 
     const pxVersion = run(path.join(prefix, 'bin', 'px'), ['--version'], {});
     assert.equal(pxVersion.status, 0, `installed px --version failed\nstdout:\n${pxVersion.stdout}\nstderr:\n${pxVersion.stderr}`);
   } finally {
+    for (const entry of fs.readdirSync(PACKAGE_ROOT)) {
+      if (entry.endsWith('.tgz') && !rootTarballsBefore.has(entry)) {
+        fs.rmSync(path.join(PACKAGE_ROOT, entry), { force: true });
+      }
+    }
     fs.rmSync(root, { recursive: true, force: true });
   }
 });

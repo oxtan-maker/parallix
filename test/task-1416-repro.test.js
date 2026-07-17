@@ -124,6 +124,7 @@ test('codex exit 1 with real rollout telemetry is misclassified as a launch fail
   const result = await withSharedLaunchers(() => withPathLaunchers({ codex: codexScript }, () => startAgent('draft', {
     prompt: 'Execute.',
     worktree,
+    assertAgentSupportedFn: () => {},
     isAgentBlockedFn: () => false,
     sessionsModule: fakeSessions,
     selectAgentFn: (step, opts) => {
@@ -174,6 +175,19 @@ test('mistral exit 1 with real session telemetry is misclassified as a launch fa
   // Vibe run followed by a non-zero exit.
   const vibeScript = `
     if (process.argv.includes('--help')) { process.exit(0); }
+    const fs = require('fs');
+    const path = require('path');
+    const sessionDir = path.join(process.cwd(), '.workflow', 'vibe-home', 'logs', 'session', 'session_20260704_000000_task1416');
+    fs.mkdirSync(sessionDir, { recursive: true });
+    fs.writeFileSync(path.join(sessionDir, 'meta.json'), JSON.stringify({
+      start_time: new Date().toISOString(),
+      stats: {
+        session_prompt_tokens: 200,
+        session_completion_tokens: 80,
+        session_total_llm_tokens: 280,
+        session_cost: 0.01
+      }
+    }));
     process.stderr.write('vibe: non-zero exit after completion\\n');
     process.exit(1);
   `;
@@ -182,6 +196,7 @@ test('mistral exit 1 with real session telemetry is misclassified as a launch fa
   const result = await withSharedLaunchers(() => withPathLaunchers({ vibe: vibeScript }, () => startAgent('draft', {
     prompt: 'Execute.',
     worktree,
+    assertAgentSupportedFn: () => {},
     isAgentBlockedFn: () => false,
     sessionsModule: fakeSessions,
     selectAgentFn: (step, opts) => {
@@ -224,6 +239,7 @@ test('codex exit 1 with no telemetry still reroutes and blocklists (real-failure
   const result = await withSharedLaunchers(() => withPathLaunchers({ codex: codexScript }, () => startAgent('draft', {
     prompt: 'Execute.',
     worktree,
+    assertAgentSupportedFn: () => {},
     isAgentBlockedFn: () => false,
     sessionsModule: fakeSessions,
     selectAgentFn: (step, opts) => {
@@ -281,6 +297,7 @@ test('mistral exit 1 with only stale telemetry still reroutes and blocklists (re
   const result = await withSharedLaunchers(() => withPathLaunchers({ vibe: vibeScript }, () => startAgent('draft', {
     prompt: 'Execute.',
     worktree,
+    assertAgentSupportedFn: () => {},
     isAgentBlockedFn: () => false,
     sessionsModule: fakeSessions,
     selectAgentFn: (step, opts) => {

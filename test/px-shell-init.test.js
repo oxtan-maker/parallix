@@ -78,7 +78,7 @@ test('px function follows a Next: cd transition', () => {
 
   const output = `${result.stdout}${result.stderr}`;
   assert.equal(result.status, 0, output);
-  assert.match(output, new RegExp(`PWD_AFTER=${target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+  assert.match(output, new RegExp(`PWD_AFTER=${fs.realpathSync(target).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
 
   fs.rmSync(fakeBin, { recursive: true, force: true });
   fs.rmSync(target, { recursive: true, force: true });
@@ -99,7 +99,7 @@ test('px function follows a Working directory transition', () => {
 
   const output = `${result.stdout}${result.stderr}`;
   assert.equal(result.status, 0, output);
-  assert.match(output, new RegExp(`PWD_AFTER=${target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+  assert.match(output, new RegExp(`PWD_AFTER=${fs.realpathSync(target).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
 
   fs.rmSync(fakeBin, { recursive: true, force: true });
   fs.rmSync(target, { recursive: true, force: true });

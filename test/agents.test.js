@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const originalPath = process.env.PATH;
+const originalPiBin = process.env.PI_BIN;
 
 if (process.env.PARALLIX_HOME) {
   fs.mkdirSync(process.env.PARALLIX_HOME, { recursive: true });
@@ -42,25 +43,34 @@ function formatBlockUntil(date) {
 }
 
 const sharedLauncherBin = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-test-launchers-'));
+const sharedLauncherRunner = path.join(__dirname, 'lib', 'agent-script-runner.js');
 for (const name of ['codex', 'claude', 'opencode', 'pi', 'vibe']) {
-  const launcherPath = path.join(sharedLauncherBin, name);
-  fs.writeFileSync(launcherPath, `#!${process.execPath}\nprocess.exit(0);\n`);
-  fs.chmodSync(launcherPath, 0o755);
+  fs.symlinkSync(sharedLauncherRunner, path.join(sharedLauncherBin, name));
 }
 
 test.before(() => {
   process.env.PATH = `${sharedLauncherBin}${path.delimiter}${originalPath}`;
+  // Per-test launchers control custom->opencode/pi dispatch through PATH.
+  // The global bootstrap's PI_BIN safety pin would bypass those fixtures.
+  delete process.env.PI_BIN;
   // @ts-expect-error TS2322 Type 'boolean' is not assignable to type 'string'.
   setCommandPathProbe(name => fs.existsSync(path.join(sharedLauncherBin, name)));
 });
 
 test.after(() => {
   process.env.PATH = originalPath;
+  if (originalPiBin === undefined) delete process.env.PI_BIN;
+  else process.env.PI_BIN = originalPiBin;
   setCommandPathProbe(null);
   fs.rmSync(sharedLauncherBin, { recursive: true, force: true });
 });
 
-test.beforeEach(() => resetCustomCapacity());
+test.beforeEach(() => {
+  resetCustomCapacity();
+  if (process.env.PARALLIX_HOME) {
+    fs.writeFileSync(path.join(process.env.PARALLIX_HOME, 'agents.local.json'), '{"blocklist":{}}\n');
+  }
+});
 
 test('custom capacity saturation selects an eligible non-custom agent and preserves explicit exhaustion', () => {
   const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'custom-capacity-selection-'));
@@ -125,16 +135,25 @@ function withPathLaunchers(entries, run) {
   if (launchers.opencode && !launchers.pi) {
     launchers.pi = launchers.opencode;
   }
-  for (const [name, body] of Object.entries(launchers)) {
-    const file = path.join(binDir, name);
-    fs.writeFileSync(file, `#!${process.execPath}\n${body}\n`);
-    fs.chmodSync(file, 0o755);
+  const runner = path.join(__dirname, 'lib', 'agent-script-runner.js');
+  for (const name of Object.keys(launchers)) {
+    fs.symlinkSync(runner, path.join(binDir, name));
   }
 
   const previousPath = process.env.PATH;
+  const previousLaunchers = process.env.PARALLIX_TEST_LAUNCHERS;
+  const previousPiBin = process.env.PI_BIN;
   process.env.PATH = `${binDir}${path.delimiter}${previousPath}`;
+  process.env.PARALLIX_TEST_LAUNCHERS = JSON.stringify(launchers);
+  // The global bootstrap pins PI_BIN to a safety launcher. These tests supply
+  // their own PATH mock for custom->pi dispatch, so it must take precedence.
+  delete process.env.PI_BIN;
   const cleanup = () => {
     process.env.PATH = previousPath;
+    if (previousLaunchers === undefined) delete process.env.PARALLIX_TEST_LAUNCHERS;
+    else process.env.PARALLIX_TEST_LAUNCHERS = previousLaunchers;
+    if (previousPiBin === undefined) delete process.env.PI_BIN;
+    else process.env.PI_BIN = previousPiBin;
     fs.rmSync(tmpRoot, { recursive: true, force: true });
   };
   try {
@@ -889,17 +908,9 @@ test('startAgent calls onLaunch callback immediately after process launch', asyn
 test('startAgent logs no-output diagnostics with agent, step, and child pid', async () => {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-no-output-'));
   try {
-    const binDir = path.join(tmpRoot, 'bin');
-    fs.mkdirSync(binDir, { recursive: true });
-    const launcherPath = path.join(binDir, 'opencode');
-    fs.writeFileSync(launcherPath, `#!${process.execPath}
-if (process.argv.includes('--help')) process.exit(0);
-setTimeout(() => process.exit(0), 75);
-`);
-    fs.chmodSync(launcherPath, 0o755);
-    const previousPath = process.env.PATH;
-    process.env.PATH = `${binDir}${path.delimiter}${previousPath}`;
-    try {
+    await withPathLaunchers({
+      opencode: 'if (process.argv.includes("--help")) process.exit(0); setTimeout(() => process.exit(0), 75);'
+    }, async () => {
       const log = [];
       const result = await startAgent('active', {
         agent: 'custom',
@@ -919,9 +930,7 @@ setTimeout(() => process.exit(0), 75);
       assert.ok(diagnostic, `expected no-output diagnostic in logs: ${log.join(' | ')}`);
       assert.match(diagnostic, /pid \d+/);
       assert.match(diagnostic, /stdout\/stderr have not produced visible output/);
-    } finally {
-      process.env.PATH = previousPath;
-    }
+    });
   } finally {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
   }
@@ -1754,22 +1763,15 @@ test('draft launch shows agent-stage in no-output watchdog messages', async () =
   try {
     const previousDraftInitialMs = process.env.WORKFLOW_DRAFT_AGENT_NO_OUTPUT_INITIAL_MS;
     const previousDraftIntervalMs = process.env.WORKFLOW_DRAFT_AGENT_NO_OUTPUT_INTERVAL_MS;
-    const binDir = path.join(tmpRoot, 'bin');
-    fs.mkdirSync(binDir, { recursive: true });
-    const launcherPath = path.join(binDir, 'opencode');
-    fs.writeFileSync(launcherPath, `#!${process.execPath}
-if (process.argv.includes('--help')) process.exit(0);
-setTimeout(() => process.exit(0), 200);
-`);
-    fs.chmodSync(launcherPath, 0o755);
-    const previousPath = process.env.PATH;
-    process.env.PATH = `${binDir}${path.delimiter}${previousPath}`;
     // Use env var overrides to make tests fast while still exercising the default-selection
     // logic (no explicit noOutputWatchdog override passed to startAgent)
     process.env.WORKFLOW_DRAFT_AGENT_NO_OUTPUT_INITIAL_MS = '50';
     process.env.WORKFLOW_DRAFT_AGENT_NO_OUTPUT_INTERVAL_MS = '50';
 
     try {
+      await withPathLaunchers({
+        opencode: 'if (process.argv.includes("--help")) process.exit(0); setTimeout(() => process.exit(0), 200);'
+      }, async () => {
       const log = [];
       const result = await startAgent('draft', {
         agent: 'custom',
@@ -1785,8 +1787,8 @@ setTimeout(() => process.exit(0), 200);
       assert.ok(diagnostic, `expected draft no-output diagnostic in logs: ${log.join(' | ')}`);
       assert.ok(diagnostic.includes('starting up') || diagnostic.includes('running'),
         `diagnostic must include agent stage; got: ${diagnostic}`);
+      });
     } finally {
-      process.env.PATH = previousPath;
       if (previousDraftInitialMs !== undefined) process.env.WORKFLOW_DRAFT_AGENT_NO_OUTPUT_INITIAL_MS = previousDraftInitialMs;
       else delete process.env.WORKFLOW_DRAFT_AGENT_NO_OUTPUT_INITIAL_MS;
       if (previousDraftIntervalMs !== undefined) process.env.WORKFLOW_DRAFT_AGENT_NO_OUTPUT_INTERVAL_MS = previousDraftIntervalMs;
@@ -1800,19 +1802,9 @@ setTimeout(() => process.exit(0), 200);
 test('draft launch preserves the mission worktree in cwd and PWD for child CLIs', async () => {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-draft-pwd-'));
   try {
-    const binDir = path.join(tmpRoot, 'bin');
-    fs.mkdirSync(binDir, { recursive: true });
-    const launcherPath = path.join(binDir, 'opencode');
-    fs.writeFileSync(launcherPath, `#!${process.execPath}
-if (process.argv.includes('--help')) process.exit(0);
-require('fs').writeSync(1, JSON.stringify({ cwd: process.cwd(), pwd: process.env.PWD }));
-process.exit(0);
-`);
-    fs.chmodSync(launcherPath, 0o755);
-    const previousPath = process.env.PATH;
-    process.env.PATH = `${binDir}${path.delimiter}${previousPath}`;
-
-    try {
+    await withPathLaunchers({
+      opencode: 'if (process.argv.includes("--help")) process.exit(0); require("fs").writeSync(1, JSON.stringify({ cwd: process.cwd(), pwd: process.env.PWD })); process.exit(0);'
+    }, async () => {
       const result = await startAgent('draft', {
         agent: 'custom',
         prompt: 'Execute.',
@@ -1823,11 +1815,9 @@ process.exit(0);
       assert.equal(result.agent, 'custom');
       assert.equal(result.result.status, 0);
       const parsed = JSON.parse(result.result.stdout);
-      assert.equal(parsed.cwd, tmpRoot);
+      assert.equal(parsed.cwd, fs.realpathSync(tmpRoot));
       assert.equal(parsed.pwd, tmpRoot);
-    } finally {
-      process.env.PATH = previousPath;
-    }
+    });
   } finally {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
   }
@@ -1838,22 +1828,15 @@ test('non-draft launch uses generic no-output watchdog', async () => {
   try {
     const previousNoOutputInitialMs = process.env.WORKFLOW_AGENT_NO_OUTPUT_INITIAL_MS;
     const previousNoOutputIntervalMs = process.env.WORKFLOW_AGENT_NO_OUTPUT_INTERVAL_MS;
-    const binDir = path.join(tmpRoot, 'bin');
-    fs.mkdirSync(binDir, { recursive: true });
-    const launcherPath = path.join(binDir, 'vibe');
-    fs.writeFileSync(launcherPath, `#!${process.execPath}
-if (process.argv.includes('--help')) process.exit(0);
-setTimeout(() => process.exit(0), 200);
-`);
-    fs.chmodSync(launcherPath, 0o755);
-    const previousPath = process.env.PATH;
-    process.env.PATH = `${binDir}${path.delimiter}${previousPath}`;
     // Use env var overrides to make tests fast while still exercising the
     // default-selection logic (no explicit noOutputWatchdog override passed to startAgent)
     process.env.WORKFLOW_AGENT_NO_OUTPUT_INITIAL_MS = '50';
     process.env.WORKFLOW_AGENT_NO_OUTPUT_INTERVAL_MS = '50';
 
     try {
+      await withPathLaunchers({
+        vibe: 'if (process.argv.includes("--help")) process.exit(0); setTimeout(() => process.exit(0), 200);'
+      }, async () => {
       const log = [];
       const result = await startAgent('active', {
         agent: 'vibe',
@@ -1870,8 +1853,8 @@ setTimeout(() => process.exit(0), 200);
       assert.ok(diagnostic, `expected active no-output diagnostic in logs: ${log.join(' | ')}`);
       assert.ok(diagnostic.includes('starting up') || diagnostic.includes('running'),
         `diagnostic must include agent stage; got: ${diagnostic}`);
+      });
     } finally {
-      process.env.PATH = previousPath;
       if (previousNoOutputInitialMs !== undefined) process.env.WORKFLOW_AGENT_NO_OUTPUT_INITIAL_MS = previousNoOutputInitialMs;
       else delete process.env.WORKFLOW_AGENT_NO_OUTPUT_INITIAL_MS;
       if (previousNoOutputIntervalMs !== undefined) process.env.WORKFLOW_AGENT_NO_OUTPUT_INTERVAL_MS = previousNoOutputIntervalMs;

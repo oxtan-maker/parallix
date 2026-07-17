@@ -40,6 +40,8 @@ test('buildExecutePrompt injects slug, current year, and checkpoint context into
     assert.match(prompt, /Slug: task-088/);
     assert.match(prompt, /execute-after-lock|execute after lock|execute checkpoint/i);
     assert.match(prompt, /CP-3\.md/);
+    assert.match(prompt, /Do not claim that `git diff HEAD` proves a committed change/i);
+    assert.match(prompt, /exact non-HEAD baseline/i);
     // Template placeholders must not appear in output
     assert.doesNotMatch(prompt, /\{\{slug\}\}/);
     assert.doesNotMatch(prompt, /YYYY/);
