@@ -3,8 +3,11 @@ import type { SpawnSyncOptions } from 'node:child_process';
 import { loadAdapterConfig } from './product-config.js';
 import { log } from './fmt.js';
 import * as fsMod from 'node:fs';
+import * as pathMod from 'node:path';
+import { createHash } from 'node:crypto';
 import { getBuildFreshnessStatus } from './build-freshness.js';
 import { getPrimaryBranch } from './mission-utils.js';
+import { resolveParallixHome, readJson, writeJson } from './storage.js';
 
 interface GitOptions {
   encoding?: BufferEncoding;
@@ -37,6 +40,15 @@ export interface VerificationProof {
   commit: string;
   tree: string;
   verifiedAt: string;
+}
+
+export interface ReusableVerificationProof {
+  version: 1;
+  identity: string;
+  command: string;
+  inputFingerprint: string;
+  toolchain: string;
+  status: 'passed';
 }
 
 export interface PublishedTreeStateOk {
@@ -167,6 +179,71 @@ export function runVerificationGate(area: string | undefined, options: { rootDir
   const stdio = opts.stdio || 'inherit';
   const runFn = opts.runFn || run;
   return runFn('bash', ['-c', command.replaceAll('{{area}}', effectiveArea)], { cwd: rootDir, stdio });
+}
+
+function digest(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
+}
+
+/**
+ * Fingerprint every tracked input for an expensive verifier. This deliberately
+ * uses the complete tracked index rather than a guessed changed-file subset:
+ * an incomplete manifest must execute, never reuse. Any dirty worktree fails
+ * closed before the index fingerprint can be trusted.
+ */
+export function createVerificationProofIdentity(command: string, rootDir: string = process.cwd(), options: { gitRunner?: GitFn } = {}): { ok: boolean; identity?: string; inputFingerprint?: string; toolchain?: string; error?: string } {
+  if (typeof command !== 'string' || !command.trim()) {
+    return { ok: false, error: 'verification proof requires a non-empty command' };
+  }
+  const gitRunner = options.gitRunner || git;
+  let resolvedRoot: string;
+  try { resolvedRoot = fsMod.realpathSync(rootDir); } catch { return { ok: false, error: 'verification proof root is unreadable' }; }
+  const dirty = gitRunner(['-C', resolvedRoot, 'status', '--porcelain']);
+  const dirtyOutput = dirty.stdout || '';
+  if (dirty.status !== 0 || dirtyOutput.trim()) {
+    return { ok: false, error: 'verification proof cannot reuse a dirty worktree' };
+  }
+  const tracked = gitRunner(['-C', resolvedRoot, 'ls-files', '-s']);
+  const trackedOutput = tracked.stdout || '';
+  if (tracked.status !== 0 || !trackedOutput.trim()) {
+    return { ok: false, error: 'verification proof input manifest is unreadable' };
+  }
+  const toolchain = JSON.stringify({ node: process.version, modules: process.versions.modules, platform: process.platform, arch: process.arch });
+  const inputFingerprint = digest(trackedOutput);
+  return { ok: true, inputFingerprint, toolchain, identity: digest(JSON.stringify({ version: 1, command: command.trim(), inputFingerprint, toolchain })) };
+}
+
+export function verificationProofPath(identity: string, homeDir: string = resolveParallixHome({ ensureDir: false })): string {
+  return pathMod.join(homeDir, 'verification-proofs', `${identity}.json`);
+}
+
+export function readReusableVerificationProof(command: string, rootDir: string = process.cwd(), options: { gitRunner?: GitFn; proofPath?: string } = {}): { ok: boolean; proof?: ReusableVerificationProof; identity?: string; error?: string } {
+  const identityResult = createVerificationProofIdentity(command, rootDir, options);
+  if (!identityResult.ok) { return identityResult; }
+  const filePath = options.proofPath || verificationProofPath(identityResult.identity!);
+  const result = readJson<ReusableVerificationProof>(filePath);
+  const proof = result.data;
+  if (!result.ok || !proof || proof.version !== 1 || proof.status !== 'passed'
+    || proof.identity !== identityResult.identity || proof.command !== command.trim()
+    || proof.inputFingerprint !== identityResult.inputFingerprint || proof.toolchain !== identityResult.toolchain) {
+    return { ok: false, identity: identityResult.identity, error: 'verification proof is missing, malformed, or does not match current inputs' };
+  }
+  return { ok: true, proof, identity: identityResult.identity };
+}
+
+export function writeReusableVerificationProof(command: string, rootDir: string = process.cwd(), options: { gitRunner?: GitFn; proofPath?: string; expectedIdentity?: string } = {}): { ok: boolean; proof?: ReusableVerificationProof; identity?: string; error?: string } {
+  const identityResult = createVerificationProofIdentity(command, rootDir, options);
+  if (!identityResult.ok) { return identityResult; }
+  if (options.expectedIdentity && identityResult.identity !== options.expectedIdentity) {
+    return { ok: false, identity: identityResult.identity, error: 'verification inputs changed while the gate was running' };
+  }
+  const proof: ReusableVerificationProof = { version: 1, identity: identityResult.identity!, command: command.trim(), inputFingerprint: identityResult.inputFingerprint!, toolchain: identityResult.toolchain!, status: 'passed' };
+  try {
+    writeJson(options.proofPath || verificationProofPath(proof.identity, resolveParallixHome({ ensureDir: true })), proof, { mode: 0o600 });
+  } catch {
+    return { ok: false, identity: proof.identity, error: 'verification proof could not be written' };
+  }
+  return { ok: true, proof, identity: proof.identity };
 }
 
 /** @param {string} rootDir @param {{gitRunner?: GitFn}} [options] */
