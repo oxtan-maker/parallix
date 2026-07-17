@@ -1229,7 +1229,10 @@ export async function startReviewLoop(slug: string, opts: {
             // Local-artifact review has no provider poll to yield POLL_TIMEOUT.
             // Treat a missing outcome as reviewer recovery work before entering
             // the bounded retry loop below.
-            log(fmt.status('WARN', `Reviewer ${reviewer} did not submit a formal review outcome for ${branch}; retrying the reviewer.`));
+            const handoff = forgejoEnabled
+              ? 'did not submit a formal review outcome'
+              : `did not leave a complete local review handoff in ${artifactDir} (${slug}-review-findings.md, ${slug}-review-outcome.md, ${slug}-review-verdict.txt)`;
+            log(fmt.status('WARN', `Reviewer ${reviewer} ${handoff} for ${branch}; retrying the reviewer.`));
             reviewState = POLL_TIMEOUT;
           }
           // Timeout recovery loop for reviewer
@@ -1304,8 +1307,13 @@ export async function startReviewLoop(slug: string, opts: {
       if (dryRun) { return; }
 
       if (!reviewState) {
-        error(fmt.status('FAIL', `Reviewer ${reviewer} did not submit a formal review outcome for ${branch}.`));
-        error('       The reviewer agent may have exited without posting to the review PR.');
+        if (forgejoEnabled) {
+          error(fmt.status('FAIL', `Reviewer ${reviewer} did not submit a formal review outcome for ${branch}.`));
+          error('       The reviewer agent may have exited without posting to the review PR.');
+        } else {
+          error(fmt.status('FAIL', `Reviewer ${reviewer} did not leave a complete local review handoff for ${branch}.`));
+          error(`       Expected: ${artifactDir}/${slug}-review-findings.md, ${artifactDir}/${slug}-review-outcome.md, and ${artifactDir}/${slug}-review-verdict.txt.`);
+        }
         exit(1); return;
       }
 

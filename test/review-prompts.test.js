@@ -139,7 +139,8 @@ test('buildCompactReviewPrompt inlines the contract instead of redirecting to do
     attempt: 1
   });
   assert.match(prompt, /Entrypoint: \$review all/);
-  assert.match(prompt, /px review task-089 --verify/);
+  assert.match(prompt, /workflow runs the declared verification gate before this review/i);
+  assert.match(prompt, /Do not invoke `px` yourself/);
   const artifactDir = resolveArtifactDir(process.cwd());
   assert.ok(prompt.includes(`${artifactDir}/task-089-review-findings.md`));
   assert.ok(prompt.includes(`${artifactDir}/task-089-review-outcome.md`));
