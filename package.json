@@ -55,6 +55,7 @@
     "prepublishOnly": "npm run publish:guard",
     "pretest": "npm run build:cjs",
     "test": "FORCE_COLOR=0 node test/run-default-tests.js",
+    "test:integration": "FORCE_COLOR=0 node test/run-default-tests.js --integration",
     "test:coverage": "FORCE_COLOR=0 node lib/commands/coverage-gate.js --lcov",
     "typecheck": "tsc --noEmit"
   },

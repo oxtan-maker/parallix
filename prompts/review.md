@@ -11,7 +11,7 @@ Load before reviewing:
 
 Minimum loop contract:
 - Load the locked mission at `{{missionPath}}` and `AGENTS.md` before reviewing.
-- Run `px review {{slug}} --verify`.
+- The workflow runs the declared verification gate before this review. Do not invoke `px` yourself.
 - Review as an independent senior engineer. Approve only if the mission is satisfied, verification is credible for the risk level, and the diff is safe to integrate.
 - Request changes for actionable issues introduced or materially worsened by this mission.
 - Confirm the final checkpoint document in the mission directory contains a Goal Check table citing real evidence (file:line, test names).

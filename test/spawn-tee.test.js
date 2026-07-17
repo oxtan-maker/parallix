@@ -232,12 +232,12 @@ test('spawnAndTee clears no-output watchdog on clean exit before first interval'
     // @ts-expect-error TS2740 Type 'Writable' is missing the following properties from type 'WriteStream': cle
     stderrSink: noopSink(),
     noOutputWatchdog: {
-      initialDelayMs: 1000,
+      initialDelayMs: 25,
       intervalMs: 20,
       onNoOutput: event => diagnostics.push(event)
     }
   }));
-  await sleep(1020);
+  await sleep(50);
 
   assert.equal(result.status, 0);
   assert.deepEqual(diagnostics, []);
@@ -277,12 +277,12 @@ test('spawnAndTee clears no-output watchdog on signal exit', async () => {
     // @ts-expect-error TS2740 Type 'Writable' is missing the following properties from type 'WriteStream': cle
     stderrSink: noopSink(),
     noOutputWatchdog: {
-      initialDelayMs: 1000,
+      initialDelayMs: 25,
       intervalMs: 30,
       onNoOutput: event => diagnostics.push(event)
     }
   }));
-  await sleep(1020);
+  await sleep(50);
 
   assert.equal(result.status, null);
   assert.equal(result.signal, 'SIGTERM');

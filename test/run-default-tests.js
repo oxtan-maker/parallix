@@ -27,17 +27,62 @@ function resolveTestNode() {
   throw new Error('Parallix requires Node.js >=20 to run its test suite. Install a supported Node runtime or put it on PATH.');
 }
 
-const defaultTestFiles = fs.readdirSync(__dirname)
+const allRootTestFiles = fs.readdirSync(__dirname)
   .sort()
   .filter(file => file.endsWith('.test.js'))
   // Lifecycle E2E is an integration gate. Keeping it out of the fast default
   // suite prevents review/checkpoint verification from repeatedly running it.
   .filter(file => file !== 'e2e-mission-lifecycle.test.js')
   // This suite exercises a real agent runner and is likewise integration-only.
-  .filter(file => file !== 'e2e-real-agent-smoke.test.js')
+  .filter(file => file !== 'e2e-real-agent-smoke.test.js');
+
+// These markers identify tests that cross a real process, Git/worktree,
+// package, or network boundary. Keep that coverage intact, but run it only
+// through the explicit integration command rather than the hermetic default.
+const boundaryDependencyPattern = /\b(?:\w+\.)?(?:spawnSync|spawn|execSync|execFileSync|fork)\s*\(|git\s+(?:init|worktree|clone|commit|checkout|rebase|merge)|npm\s+(?:pack|install)|createServer|\bfetch\s*\(/;
+const knownIntegrationTestFiles = new Set([
+  // Measured at 55.7s in the CP-1 uncontended run; it drives draft workflow
+  // fixtures across the command boundary even though its process launcher is
+  // dependency-injected in the source.
+  'draft.test.js',
+  'draft-command.test.js',
+  'draft_preflight_modern.test.js',
+  'durable-state-policy.test.js',
+  'mission-start.test.js',
+  // The final CP-3 timing capture found these groups still crossing the
+  // Forgejo/worktree, agent-launcher, rebase, or review-artifact boundary.
+  // Their fakes protect assertions but do not make the groups hermetic.
+  'forgejo.test.js',
+  'forgejo-independence.test.js',
+  'mission-utils-worktree.test.js',
+  'mistral.test.js',
+  // This suite injects its launcher but deliberately invokes a real Node
+  // child process to verify stdout and pipe-buffer behavior.
+  'opencode-export.test.js',
+  'runtime-matrix.test.js',
+  'rebase_hardening.test.js',
+  'review-artifacts.test.js',
+  'review-commands-additional.test.js',
+  'review-commands-supplemental.test.js',
+  'review-identity.test.js',
+  'review-identity-placeholder.test.js',
+  'review.test.js',
+  'review-prompts.test.js',
+  'task-1416-repro.test.js'
+]);
+const integrationTestFiles = allRootTestFiles
+  .filter(file => knownIntegrationTestFiles.has(file)
+    || boundaryDependencyPattern.test(fs.readFileSync(path.join(__dirname, file), 'utf8')))
   .map(file => path.join(__dirname, file));
-const requestedTestFiles = process.argv.slice(2);
-const testFiles = requestedTestFiles.length > 0 ? requestedTestFiles : defaultTestFiles;
+const defaultTestFiles = allRootTestFiles
+  .filter(file => !integrationTestFiles.includes(path.join(__dirname, file)))
+  .map(file => path.join(__dirname, file));
+const requestedArgs = process.argv.slice(2);
+const runsIntegrationSuite = requestedArgs.includes('--integration');
+const requestedTestFiles = requestedArgs.filter(arg => arg !== '--integration');
+const testFiles = runsIntegrationSuite
+  ? integrationTestFiles
+  : (requestedTestFiles.length > 0 ? requestedTestFiles : defaultTestFiles);
 // The real-agent smoke test deliberately reads the operator's configured Pi
 // model/auth files and then copies them into its own disposable state root.
 // Do not preload the unit-test HOME isolation shim for that explicit e2e run:
