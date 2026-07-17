@@ -12,6 +12,9 @@ const {
   resolveVerificationAdapter,
   readPublishedTreeState,
   runVerificationGate,
+  createVerificationProofIdentity,
+  readReusableVerificationProof,
+  writeReusableVerificationProof,
 } = require('../lib/core/verification');
 
 function withTempDir(fn) {
@@ -28,7 +31,9 @@ function initCommittedGitRepo(root) {
     const result = childProcess.spawnSync('git', ['-C', root, ...args], { encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr || result.stdout || `git ${args.join(' ')} failed`);
   };
-  runGit(['init', '-b', 'main']);
+  // Older supported Git releases do not support `git init -b`.
+  runGit(['init']);
+  runGit(['checkout', '-b', 'main']);
   runGit(['config', 'user.name', 'Test User']);
   runGit(['config', 'user.email', 'test@example.com']);
   fs.writeFileSync(path.join(root, 'README.md'), '# temp repo\n', 'utf8');
@@ -216,5 +221,66 @@ test('captureVerifiedTreeProof warns but succeeds when guarded compiled output i
     assert.equal(proofResult.ok, true);
     assert.equal(proofResult.proof.rootDir, fs.realpathSync(root));
     assert.equal(proofResult.proof.area, 'docs');
+  });
+});
+
+test('reusable verification proof reuses only the exact clean command, tracked inputs, and toolchain identity', () => {
+  withTempDir(root => {
+    initCommittedGitRepo(root);
+    const proofPath = path.join(os.tmpdir(), `task-2273-proof-${process.pid}-${Date.now()}.json`);
+    const command = './scripts/verify-local.sh all';
+    const written = writeReusableVerificationProof(command, root, { proofPath });
+    assert.equal(written.ok, true);
+    const reused = readReusableVerificationProof(command, root, { proofPath });
+    assert.equal(reused.ok, true);
+    assert.equal(reused.identity, written.identity);
+    assert.equal(readReusableVerificationProof('npm test', root, { proofPath }).ok, false, 'command mismatch fails closed');
+
+    fs.writeFileSync(proofPath, '{malformed');
+    assert.equal(readReusableVerificationProof(command, root, { proofPath }).ok, false, 'malformed proof fails closed');
+    fs.writeFileSync(proofPath, JSON.stringify(written.proof));
+
+    fs.writeFileSync(path.join(root, 'README.md'), 'dirty source input\n');
+    assert.equal(readReusableVerificationProof(command, root, { proofPath }).ok, false, 'dirty input fails closed');
+    fs.rmSync(proofPath, { force: true });
+  });
+});
+
+test('verification proof identity changes for tracked production, test, package, script, config, and generated inputs', () => {
+  withTempDir(root => {
+    initCommittedGitRepo(root);
+    const command = './scripts/verify-local.sh all';
+    const initial = createVerificationProofIdentity(command, root);
+    assert.equal(initial.ok, true);
+    for (const file of ['lib/a.js', 'test/a.test.js', 'package.json', 'scripts/verify-local.sh', 'workflow.config.json', 'lib/a.generated.js']) {
+      fs.mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
+      fs.writeFileSync(path.join(root, file), file);
+      const git = childProcess.spawnSync('git', ['-C', root, 'add', file], { encoding: 'utf8' });
+      assert.equal(git.status, 0);
+      const commit = childProcess.spawnSync('git', ['-C', root, 'commit', '-m', `add ${file}`], { encoding: 'utf8' });
+      assert.equal(commit.status, 0);
+      const changed = createVerificationProofIdentity(command, root);
+      assert.equal(changed.ok, true);
+      assert.notEqual(changed.identity, initial.identity, `${file} must invalidate the proof`);
+    }
+  });
+});
+
+test('reusable proof refuses to publish when inputs changed during gate execution', () => {
+  withTempDir(root => {
+    initCommittedGitRepo(root);
+    const command = './scripts/verify-local.sh all';
+    const before = createVerificationProofIdentity(command, root);
+    assert.equal(before.ok, true);
+    fs.writeFileSync(path.join(root, 'README.md'), 'changed after gate began\n');
+    const add = childProcess.spawnSync('git', ['-C', root, 'add', 'README.md'], { encoding: 'utf8' });
+    assert.equal(add.status, 0);
+    const commit = childProcess.spawnSync('git', ['-C', root, 'commit', '-m', 'change during gate'], { encoding: 'utf8' });
+    assert.equal(commit.status, 0);
+    const proofPath = path.join(os.tmpdir(), `task-2273-race-proof-${process.pid}-${Date.now()}.json`);
+    const result = writeReusableVerificationProof(command, root, { proofPath, expectedIdentity: before.identity });
+    assert.equal(result.ok, false);
+    assert.match(result.error, /changed while the gate was running/);
+    assert.equal(fs.existsSync(proofPath), false);
   });
 });

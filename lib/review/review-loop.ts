@@ -1094,7 +1094,7 @@ export async function startReviewLoop(slug: string, opts: {
             log(fmt.status('INFO', `Round ${attempt}: reviewer identity is autonomous; skipping dry-run reviewer prompt and using local review artifacts only.`));
           } else {
             log(`\n--- DRY-RUN: reviewer (${reviewer}) prompt ---`);
-            log((buildReviewPromptFn as any)({ reviewer: reviewer!, branch, implementer: implementer!, focus, attempt, repoRoot: worktree, missionPath: effectiveMissionPath || undefined, actualReviewer: '{{AGENT_NAME}}', reviewBaseline }));
+            log((buildReviewPromptFn as any)({ reviewer: reviewer!, branch, implementer: implementer!, focus, attempt, repoRoot: worktree, missionPath: effectiveMissionPath || undefined, reviewBaseline }));
           }
         }
       } else {
@@ -1389,7 +1389,7 @@ export async function startReviewLoop(slug: string, opts: {
       // First launch or re-launch after stale BLOCKED/PARKED
       if (dryRun) {
         log(`\n--- DRY-RUN: implementer (${implementer}) act-on-review prompt ---`);
-        log((buildActOnReviewPromptFn as any)({ implementer: implementer!, branch, attempt, repoRoot: worktree, missionPath: effectiveMissionPath || undefined, actualImplementer: '{{AGENT_NAME}}', reviewBaseline }));
+        log((buildActOnReviewPromptFn as any)({ implementer: implementer!, branch, attempt, repoRoot: worktree, missionPath: effectiveMissionPath || undefined, reviewBaseline }));
         if (reLaunch!) {
           log(fmt.status('INFO', `Round ${attempt}: stale BLOCKED/PARKED disposition replaced by fresh implementer action.`));
         }

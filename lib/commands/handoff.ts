@@ -10,7 +10,7 @@ import { resolveReviewIdentity } from '../review/review-state.js';
 import * as setupReview from '../tools/setup-review.js';
 import * as gatekeeper from '../tools/gatekeeper.js';
 import * as fmt from '../core/fmt.js';
-import { runVerificationGate } from '../core/verification.js';
+import { createVerificationProofIdentity, formatVerificationCommand, readReusableVerificationProof, runVerificationGate, writeReusableVerificationProof } from '../core/verification.js';
 import { isForgejoReviewEnabled } from '../core/product-config.js';
 import { rebaseBeforeReviewRound } from '../review/rebase.js';
 import * as nels from '../core/nels.js';
@@ -350,6 +350,10 @@ function findUnverifiableGoalCheckRow(evidenceRows: string[], rootDir: string): 
   if (skipGate) {
     fmt.log.warn('Step 1: Skipping final verification gate (--no-gate)');
   } else {
+    const verificationCommand = formatVerificationCommand(area || 'docs', rootDir);
+    // Bind a reusable proof to the inputs that existed before execution. A
+    // successful process exit alone must not certify a tree changed mid-gate.
+    const beforeGateProof = createVerificationProofIdentity(verificationCommand, rootDir);
     log(`Step 1: Running final verification gate for area: ${fmt.bold(area || 'docs')}...`);
     const verifyResult = runVerificationGateFn(area || 'docs', {
       rootDir,
@@ -362,6 +366,14 @@ function findUnverifiableGoalCheckRow(evidenceRows: string[], rootDir: string): 
       const msg = 'Final verification gate failed. Fix errors before submitting or use --no-gate if appropriate.';
       error(msg);
       return { ok: false, error: msg, gateOutput: { stdout, stderr } };
+    }
+    const proofResult = beforeGateProof.ok
+      ? writeReusableVerificationProof(verificationCommand, rootDir, { expectedIdentity: beforeGateProof.identity })
+      : beforeGateProof;
+    if (proofResult.ok) {
+      log(`Step 1: Gate executed; stored proof ${proofResult.identity}.`);
+    } else {
+      log(`Step 1: Gate executed; proof unavailable (${proofResult.error}). Later boundaries will execute independently.`);
     }
   }
 
@@ -886,6 +898,11 @@ function runDeclaredGates(missionDir, rootDir, options = {}) {
 
   // Execute each gate command
   for (const cmd of cleanCommands) {
+    const reusableProof = readReusableVerificationProof(cmd, rootDir);
+    if (reusableProof.ok) {
+      log(`  Gate reused proof ${reusableProof.identity}: ${cmd}`);
+      continue;
+    }
     log(`  Gate: ${cmd}`);
     const result = spawnSync('bash', ['-c', cmd], {
       cwd: rootDir,
@@ -904,6 +921,12 @@ function runDeclaredGates(missionDir, rootDir, options = {}) {
         stdout,
         stderr
       };
+    }
+    const proofResult = writeReusableVerificationProof(cmd, rootDir);
+    if (proofResult.ok) {
+      log(`  Gate executed; stored proof ${proofResult.identity}: ${cmd}`);
+    } else {
+      log(`  Gate executed; proof unavailable (${proofResult.error}): ${cmd}`);
     }
   }
 
