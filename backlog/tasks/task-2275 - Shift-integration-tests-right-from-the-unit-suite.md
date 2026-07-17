@@ -4,7 +4,7 @@ title: shift integration tests right from the unit suite
 status: backlog
 assignee: [codex]
 created_date: '2026-07-17 00:00'
-labels: [testing, performance]
+labels: [testing, performance, ai_sdlc]
 dependencies: []
 priority: high
 ---
