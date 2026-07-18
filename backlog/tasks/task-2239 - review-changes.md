@@ -1,7 +1,7 @@
 ---
 id: TASK-2239
 title: review changes
-status: review
+status: ready-for-integration
 assignee: [codex]
 created_date: '2026-07-13 03:09'
 labels: []
