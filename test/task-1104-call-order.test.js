@@ -184,6 +184,7 @@ test('performHandoff follows the sequence: createPr -> gatekeeper -> transitionT
       return { ok: true };
     }),
     mock.method(forgejo, 'authenticatedReviewUrl', () => 'http://forgejo/push'),
+    mock.method(forgejo, 'resolveTrackingBranchSha', () => ({ ok: true, sha: 'expected-pr-tip' })),
     mock.method(gatekeeper, 'runGatekeeper', () => {
       events.push({ type: 'gatekeeper' });
       return { ok: true };

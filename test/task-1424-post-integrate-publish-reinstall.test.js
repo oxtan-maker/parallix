@@ -8,17 +8,12 @@ const path = require('path');
 const PACKAGE_ROOT = path.join(__dirname, '..');
 
 // Reproduces the real post-integrate self-update path from scripts/refresh-global-px.sh:
-// `npm pack` the checkout, `npm install -g` the tarball, then run the *installed*
-// package's own build-freshness guard against its own installed tree (the same check
-// `npm run publish:guard` runs). This is a packaged-runtime problem, not a stale
-// checkout problem: the source checkout here is freshly built and passes its own
-// prepack guard; the failure only appears after the tarball round-trip because tar
-// extraction assigns each file its own extraction-time mtime, and `<name>.ts` always
-// sorts after `<name>.js` in a directory listing, so every compiled pair gets
-// extracted .js-then-.ts and the .ts sibling ends up with a *later* mtime than the
-// .js it was compiled from -- even though the .js is fresh.
+// `npm pack` the checkout, `npm install -g` the tarball, then run the installed
+// executable from a temporary target repository. The package must contain only the
+// dist runtime, so extraction cannot couple source and sibling-JS mtimes.
 function run(command, args, options = {}) {
   const tempHome = options.tempHome || fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-npm-home-'));
+  const { env: extraEnv, ...spawnOptions } = options;
   return spawnSync(command, args, {
     encoding: 'utf8',
     timeout: 120000,
@@ -27,9 +22,9 @@ function run(command, args, options = {}) {
       HOME: tempHome,
       npm_config_cache: path.join(tempHome, '.npm-cache'),
       npm_config_userconfig: path.join(tempHome, '.npmrc'),
-      ...(options.env || {})
+      ...(extraEnv || {})
     },
-    ...options
+    ...spawnOptions
   });
 }
 
@@ -41,27 +36,16 @@ function packFilename(stdout) {
   return String(stdout || '').split(/\r?\n/).map(line => line.trim()).findLast(line => line.endsWith('.tgz')) || null;
 }
 
-test('installed tarball runtime does not trip the stale-build guard on a fresh, correctly-built checkout', () => {
-  // Guard the source checkout itself is fresh before we even pack it -- this is the
-  // check `npm run prepack`/`publish:guard` runs against the checkout, and it must
-  // already pass here, proving any failure we see below comes from the tarball
-  // round-trip, not from an actually-stale checkout.
-  const checkoutGuard = run(process.execPath, [
-    '-e',
-    `require(${JSON.stringify(path.join(PACKAGE_ROOT, 'lib', 'core', 'build-freshness.js'))}).assertBuildFreshness(${JSON.stringify(PACKAGE_ROOT)})`
-  ]);
-  assert.equal(
-    checkoutGuard.status,
-    0,
-    `source checkout must be freshly built before packing; run npm run build:cjs first.\nstderr:\n${checkoutGuard.stderr}`
-  );
-
+test('installed dist-layout tarball runs read-only commands outside the checkout', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-publish-reinstall-'));
   const packDir = path.join(root, 'pack');
   const prefix = path.join(root, 'npm-prefix');
   const npmHome = path.join(root, 'npm-home');
+  const target = path.join(root, 'target');
+  const parallixHome = path.join(root, 'parallix-home');
   fs.mkdirSync(packDir, { recursive: true });
   fs.mkdirSync(npmHome, { recursive: true });
+  fs.mkdirSync(target, { recursive: true });
   const rootTarballsBefore = new Set(
     fs.readdirSync(PACKAGE_ROOT).filter(entry => entry.endsWith('.tgz'))
   );
@@ -96,24 +80,28 @@ test('installed tarball runtime does not trip the stale-build guard on a fresh, 
 
     const installedRoot = path.join(prefix, 'lib', 'node_modules', '@magnusekdahl', 'parallix');
     assert.ok(fs.existsSync(installedRoot), 'installed package directory should exist');
+    assert.ok(fs.existsSync(path.join(installedRoot, 'dist', 'px.js')), 'installed package should contain dist/px.js');
+    assert.ok(fs.existsSync(path.join(installedRoot, 'dist', 'px.js.map')), 'installed package should contain source maps');
+    assert.ok(!fs.existsSync(path.join(installedRoot, 'lib')), 'installed package should not contain sibling lib runtime');
+    assert.ok(!fs.existsSync(path.join(installedRoot, 'px.js')), 'installed package should not contain sibling px runtime');
+    assert.ok(!fs.existsSync(path.join(installedRoot, 'px.ts')), 'installed package should not contain TypeScript source');
+    assert.ok(!fs.existsSync(path.join(installedRoot, 'test')), 'installed package should not contain tests');
+    assert.ok(!fs.existsSync(path.join(installedRoot, 'missions')), 'installed package should not contain mission records');
+    assert.ok(!fs.existsSync(path.join(installedRoot, 'backlog')), 'installed package should not contain backlog state');
+    assert.ok(!fs.existsSync(path.join(installedRoot, 'tsconfig.json')), 'installed package should not contain development configuration');
 
-    // No test helper should need to touch installed .js mtimes for the guard to pass:
-    // that ad hoc repair is exactly the false-positive behavior this mission removes.
-    const installedGuard = run(process.execPath, [
-      '-e',
-      `require(${JSON.stringify(path.join(installedRoot, 'lib', 'core', 'build-freshness.js'))}).assertBuildFreshness(${JSON.stringify(installedRoot)})`
-    ]);
-    assert.equal(
-      installedGuard.status,
-      0,
-      'the installed package runtime must not trip its own stale-build guard on a '
-      + `freshly packed-and-installed tree.\nstdout:\n${installedGuard.stdout}\nstderr:\n${installedGuard.stderr}`
-    );
-
-    // The installed runtime entrypoint must actually run (proves this is a real
-    // runnable install, not just a directory that happens to pass the guard).
-    const pxVersion = run(path.join(prefix, 'bin', 'px'), ['--version'], {});
+    const px = path.join(prefix, 'bin', 'px');
+    fs.mkdirSync(parallixHome, { recursive: true });
+    const { STATS_HEADERS } = require(path.join(installedRoot, 'dist', 'lib', 'commands', 'stats.js'));
+    fs.writeFileSync(path.join(parallixHome, 'stats.csv'), `${STATS_HEADERS.join(',')}\n`);
+    const pxVersion = run(px, ['--version'], { cwd: target });
     assert.equal(pxVersion.status, 0, `installed px --version failed\nstdout:\n${pxVersion.stdout}\nstderr:\n${pxVersion.stderr}`);
+    assert.match(pxVersion.stdout, new RegExp(`${installedRoot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/dist/px\\.js`));
+
+    for (const command of ['status', 'stats']) {
+      const result = run(px, [command], { cwd: target, tempHome: npmHome, env: { PARALLIX_HOME: parallixHome } });
+      assert.equal(result.status, 0, `installed px ${command} failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+    }
   } finally {
     for (const entry of fs.readdirSync(PACKAGE_ROOT)) {
       if (entry.endsWith('.tgz') && !rootTarballsBefore.has(entry)) {

@@ -389,6 +389,16 @@ test('buildRelaunchPrompt returns string containing Goal Check table and mission
   assert.ok(prompt.includes('task-1124'), 'Prompt should contain the mission slug');
   assert.ok(/file:line/i.test(prompt), 'Prompt should mention file:line references');
   assert.ok(/test names/i.test(prompt), 'Prompt should mention test names');
+  assert.ok(prompt.includes('px review task-1124 --submit'), 'Prompt should use the supported px re-submit command');
+  assert.ok(!prompt.includes('node parallix'), 'Prompt must not suggest a nonexistent node parallix executable');
+});
+
+test('buildRelaunchPrompt directs gate-failure repairs back through the supported submit path', () => {
+  const { buildRelaunchPrompt } = repairHandoff;
+  const prompt = buildRelaunchPrompt('Final verification gate failed. Fix errors before submitting.', 'task-1124', '/tmp/worktree');
+
+  assert.ok(prompt.includes('px review task-1124 --submit'));
+  assert.ok(!prompt.includes('node parallix'));
 });
 
 test('buildRelaunchPrompt includes example table', () => {

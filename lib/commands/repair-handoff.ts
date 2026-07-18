@@ -205,7 +205,7 @@ function buildGateFailurePrompt(errorMsg: string, slug: string, worktree: string
 ` +
           `4. Commit the fix with a descriptive commit message.
 ` +
-          `5. Re-run: node parallix review ${slug} --submit`;
+          `5. Re-run: px review ${slug} --submit`;
 
   if (gateOutput && (gateOutput.stdout || gateOutput.stderr)) {
     const totalOutput = (gateOutput.stdout || '') + (gateOutput.stderr || '');
@@ -291,7 +291,7 @@ Steps:
 3. Create or update the pipe-delimited table with columns: Criterion | Evidence | Status
 4. Add at least one evidence row per criterion using the accepted forms above
 5. Commit the updated checkpoint with a descriptive commit message
-6. Re-run: node parallix review ${slug} --submit
+6. Re-run: px review ${slug} --submit
 
 Example Goal Check table:
 | Criterion | Evidence | Status |

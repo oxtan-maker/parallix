@@ -10,6 +10,15 @@ function nodeMajor(command) {
   return match ? Number(match[1]) : 0;
 }
 
+function supportsTestForceExit(command) {
+  const probe = spawnSync(command, ['--version'], { encoding: 'utf8' });
+  const match = probe.status === 0 && /v(\d+)\.(\d+)\./.exec(probe.stdout || '');
+  if (!match) {return false;}
+  const major = Number(match[1]);
+  const minor = Number(match[2]);
+  return major >= 22 || (major === 20 && minor >= 14);
+}
+
 // `npm` can be launched through an older nvm shim even when a supported Node
 // is also on PATH. Node's built-in test runner requires Node 18+, while this
 // package declares Node 20+; select the first compatible executable rather
@@ -97,11 +106,19 @@ const runsIntegrationE2E = runsRealAgentSmoke || runsLifecycleE2E;
 const bootstrapArgs = runsIntegrationE2E
   ? []
   : ['--require', path.join(__dirname, 'bootstrap-parallix-home.js')];
+const testNode = resolveTestNode();
+const testForceExitArgs = supportsTestForceExit(testNode)
+  // This flag was added in Node 20.14 and Node 22.0. Keep the declared Node
+  // >=20 range runnable while still ensuring supported newer runtimes return
+  // control once the test runner has printed its final result.
+  ? ['--test-force-exit']
+  : [];
 
 const result = spawnSync(
-  resolveTestNode(),
+  testNode,
   [
     ...bootstrapArgs,
+    ...testForceExitArgs,
     '--test',
     ...testFiles
   ],

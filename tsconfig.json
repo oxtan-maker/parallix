@@ -5,6 +5,8 @@
     "noEmit": false,
     "outDir": "dist",
     "rootDir": ".",
+    "sourceMap": true,
+    "declaration": false,
     "strict": true,
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
