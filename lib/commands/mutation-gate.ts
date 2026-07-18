@@ -22,8 +22,9 @@ import * as path from 'node:path';
 import scopeMutationTargetsDefault, { type ScopeResult } from '../core/mutation-scoper.js';
 import { getPrimaryBranch as getPrimaryBranchDefault } from '../core/mission-utils.js';
 import * as fmt from '../core/fmt.js';
+import { packageRoot } from '../core/package-root.js';
 
-const REPO_ROOT = path.resolve(__dirname, '..', '..');
+const REPO_ROOT = packageRoot(__dirname);
 const DEFAULT_BASELINE_PATH = path.join(REPO_ROOT, 'config', 'mutation-baseline.json');
 // Rough per-mutant wall-clock budget for --dry-run's predicted-runtime estimate,
 // based on the CP-1 POC (a single-mutant `node --test` command-runner pass took

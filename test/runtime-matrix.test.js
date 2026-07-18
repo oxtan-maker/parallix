@@ -85,7 +85,7 @@ test('launcherStatus reports an agent as blocked when its launcher is missing', 
   assert.equal(status.health, 'missing');
 });
 
-test('launcherStatus resolves bare agent names from PATH (SC 4)', () => {
+test('launcherStatus resolves bare agent names from PATH (SC 4)', { concurrency: false }, () => {
   withPathLaunchers({ vibe: 'process.exit(0);' }, () => {
     const status = launcherStatus('vibe');
     // @ts-expect-error TS2339 Property 'agent' does not exist on type 'LauncherStatusResult'.
@@ -187,7 +187,7 @@ test('runnableDifferentFamilyExists returns false when only the implementer fami
 
 // ---------- Unbiased reviewer selection (mission Goal / SC) ----------
 
-test('reviewer selection for a codex implementer is unbiased: drawn from remaining agents, no hardcoded claude preference', () => {
+test('reviewer selection for a codex implementer is unbiased: drawn from remaining agents, no hardcoded claude preference', { concurrency: false }, () => {
   // Point every reviewer candidate at a working launcher so support is uniform
   // and only config + exclusion drive the choice.
   const previousAgent = process.env.WORKFLOW_AGENT;

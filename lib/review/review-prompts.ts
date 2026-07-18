@@ -10,10 +10,11 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { getMissionYear, getPrimaryBranch, missionPathForSlug } from '../core/mission-utils.js';
+import { packageRoot } from '../core/package-root.js';
 import { resolveArtifactDir } from './review-artifacts.js';
 
-const REVIEW_PROMPT_PATH = path.join(__dirname, '..', '..', 'prompts', 'review.md');
-const ACT_ON_REVIEW_PROMPT_PATH = path.join(__dirname, '..', '..', 'prompts', 'act-on-review.md');
+const REVIEW_PROMPT_PATH = path.join(packageRoot(__dirname), 'prompts', 'review.md');
+const ACT_ON_REVIEW_PROMPT_PATH = path.join(packageRoot(__dirname), 'prompts', 'act-on-review.md');
 
 type PromptEntry = { review: string; actOnReview: string };
 type PromptEntrypoints = { codex: PromptEntry; claude: PromptEntry; vibe: PromptEntry; custom: PromptEntry; autonomous: PromptEntry };

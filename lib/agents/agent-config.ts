@@ -4,6 +4,7 @@ import * as fmt from '../core/fmt.js';
 import * as storage from '../core/storage.js';
 import { migrateAgentBlocklists } from '../core/persistent-data-migration.js';
 import { getMainWorktreePath } from './worktree.js';
+import { packageRoot } from '../core/package-root.js';
 
 type AgentConfig = { blocklist?: {[key: string]: any}, steps?: {[key: string]: any} };
 
@@ -14,7 +15,7 @@ type ReadAgentConfigOptions = {
   targetPath?: string;
 };
 
-const CONFIG_PATH = path.join(__dirname, '..', '..', 'config', 'agents.json');
+const CONFIG_PATH = path.join(packageRoot(__dirname), 'config', 'agents.json');
 
 function buildInvalidAgentConfigError(configPath: string, scope: string, originalError: {message?: string} | null) {
   const location = path.resolve(configPath);

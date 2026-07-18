@@ -75,7 +75,7 @@ export function getPrStatus(branch: string, rootDir = process.cwd(), options: { 
  */
 export function readToken(user: string, options: { rootDir?: string } = {}): string | null {
   const rootDir = options.rootDir || process.cwd();
-  return isEnabled(rootDir) ? forgejo.readToken(user) : null;
+  return isEnabled(rootDir) ? forgejo.readToken(user, rootDir) : null;
 }
 
 /**

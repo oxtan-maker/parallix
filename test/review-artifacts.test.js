@@ -1430,7 +1430,7 @@ test('consumeImplementerArtifacts with invalid JSON in resolution', async () => 
 // must consume them and reach a recorded APPROVED verdict — not FAIL/exit(1).
 // The alignment is by construction: the prompt's {{artifactDir}} and the
 // consumer's tmpDir both come from resolveArtifactDir(worktree).
-test('REGRESSION task-1264: os.tmpdir() != /tmp + Forgejo off -> reviewer artifacts drive a recorded verdict', async () => {
+test('REGRESSION task-1264: os.tmpdir() != /tmp + Forgejo off -> reviewer artifacts drive a recorded verdict', { concurrency: false }, async () => {
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1264-e2e-'));
   const origTmp = process.env.TMPDIR;
   process.env.TMPDIR = scratch; // make os.tmpdir() diverge from /tmp

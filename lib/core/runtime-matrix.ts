@@ -1,8 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { eligibleAgentsForStep, workflowLauncherStatus } from '../agents/agents.js';
+import { packageRoot } from './package-root.js';
 
-const CONFIG_PATH = path.join(__dirname, '..', '..', 'config', 'agents.json');
+const CONFIG_PATH = path.join(packageRoot(__dirname), 'config', 'agents.json');
 
 interface LauncherStatusResult {
   supported: boolean;

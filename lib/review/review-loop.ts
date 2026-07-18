@@ -18,6 +18,7 @@ import { buildReviewPrompt, buildActOnReviewPrompt, buildCompactReviewPrompt, bu
 import { ReviewState, readReviewState, writeReviewState, resetReviewState, VALID_PHASES, persistReviewStateOrThrow, assertReviewStatePersisted } from './review-state.js';
 import { workflowLauncherStatus, startAgent, eligibleAgentsForStep, selectAgent } from '../agents/agents.js';
 import { commitSafeMissionArtifacts, rebaseBeforeReviewRound } from './rebase.js';
+import { packageRoot } from '../core/package-root.js';
 import { resolveAgentModel } from '../core/product-config.js';
 import { POLL_TIMEOUT, delay, resolvePollIntervalMs, resolvePollTimeoutMs, formatElapsed, isPollTimeout, pollForReview, pollForDisposition } from './review-polling.js';
 import { buildMetadataFooter, resolveArtifactDir, consumeReviewerArtifacts, consumeImplementerArtifacts } from './review-artifacts.js';
@@ -395,8 +396,23 @@ export async function handleGateFailureAutoBounce(
   }
 
   // Classify the failure
-  const combinedOutput = gateResult.stderr || gateResult.stdout || 'Gate failed with exit code ' + gateResult.exitCode;
-  const classification = classifyGateFailure(combinedOutput);
+  const diagnosticOutput = [gateResult.stdout, gateResult.stderr].filter(Boolean).join('\n');
+  const diagnosticClassification = classifyGateFailure(diagnosticOutput);
+  // A non-zero gate exit is authoritative evidence of a genuine verification
+  // failure. Arbitrary test/linter diagnostics have no classifier keyword and
+  // default to InfraBlocker, which used to strand a repairable mission. Keep
+  // the ADR's genuine human-only exceptions, however: a recognized provider,
+  // network, authentication, or state-machine diagnostic must not be hidden
+  // by the generic gate-failure marker.
+  const hasExplicitHumanOnlyDiagnostic = diagnosticClassification.action === 'HumanOnly'
+    && /state\s+violation|invalid\s+state|transition\s+not\s+allowed|cannot\s+(move|transition)\s+(from|to)\s+\w+\s+(to|from)|forgejo|infrastructure|authentication\s+failed|token\s+(expired|invalid|missing)|forbidden|unauthorized\s+(access|request)|rate\s+limit|connection\s+(refused|timed?\s*out)|network\s+error/i.test(diagnosticOutput);
+  const combinedOutput = [
+    gateResult.error || `verification gate failed with exit code ${gateResult.exitCode}`,
+    diagnosticOutput,
+  ].filter(Boolean).join('\n');
+  const classification = hasExplicitHumanOnlyDiagnostic
+    ? diagnosticClassification
+    : classifyGateFailure(combinedOutput);
 
   log(fmt.status('WARN', `Pre-review gate failed for area "${gateResult.area}" (exit ${gateResult.exitCode}). Classification: ${classification.classification}.`));
 
@@ -706,7 +722,7 @@ export async function startReviewLoop(slug: string, opts: {
   const forgejoEnabled = forgejoEnabledFn(worktree);
   if (!dryRun && forgejoEnabled) {
     const forgejoUrl = process.env.FORGEJO_URL || 'http://localhost:3300';
-    const bootstrapScript = path.resolve(__dirname, '../../scripts/bootstrap.sh');
+    const bootstrapScript = path.join(packageRoot(__dirname), 'scripts', 'bootstrap.sh');
     log(fmt.status('INFO', `Checking review-provider availability at ${forgejoUrl}...`));
     if (!await resolvedProviderAvailableFn(forgejoUrl)) {
       error(fmt.status('FAIL', `Review provider not reachable at ${forgejoUrl}`));
@@ -1094,7 +1110,7 @@ export async function startReviewLoop(slug: string, opts: {
             log(fmt.status('INFO', `Round ${attempt}: reviewer identity is autonomous; skipping dry-run reviewer prompt and using local review artifacts only.`));
           } else {
             log(`\n--- DRY-RUN: reviewer (${reviewer}) prompt ---`);
-            log((buildReviewPromptFn as any)({ reviewer: reviewer!, branch, implementer: implementer!, focus, attempt, repoRoot: worktree, missionPath: effectiveMissionPath || undefined, reviewBaseline }));
+            log((buildReviewPromptFn as any)({ reviewer: reviewer!, branch, implementer: implementer!, focus, attempt, repoRoot: worktree, missionPath: effectiveMissionPath || undefined, actualReviewer: reviewer!, reviewBaseline }));
           }
         }
       } else {
