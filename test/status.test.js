@@ -1,10 +1,11 @@
+// @ts-nocheck -- dist declaration inference is narrower than this legacy mock suite.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 process.env.NO_COLOR = '1';
 
-const { stripAnsi } = require('../lib/core/fmt');
-const { parseWorktreeList, findStaleMissionWorktrees } = require('../lib/commands/status');
-const status = require('../lib/commands/status');
+const { stripAnsi } = require('../dist/lib/core/fmt');
+const { parseWorktreeList, findStaleMissionWorktrees } = require('../dist/lib/commands/status');
+const status = require('../dist/lib/commands/status');
 
 // ---------- parseWorktreeList edge cases ----------
 

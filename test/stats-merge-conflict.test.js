@@ -4,7 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const stats = require('../lib/commands/stats');
+const stats = require('../dist/lib/commands/stats');
 
 function writeCsv(contents) {
   const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-stats-merge-conflict-')), 'input.csv');

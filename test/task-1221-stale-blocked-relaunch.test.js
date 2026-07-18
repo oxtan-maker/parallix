@@ -4,8 +4,8 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const { startReviewLoop } = require('../lib/review/review-loop');
-const { ReviewState } = require('../lib/review/review-state');
+const { startReviewLoop } = require('../dist/lib/review/review-loop');
+const { ReviewState } = require('../dist/lib/review/review-state');
 
 async function createWorktree(slug, config) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `task-1221-${slug}-`));

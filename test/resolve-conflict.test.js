@@ -1,3 +1,4 @@
+// @ts-nocheck -- dist declaration inference shifts legacy mock errors off their annotations.
 const test = require('node:test');
 const { mock } = test;
 const assert = require('node:assert/strict');
@@ -6,13 +7,13 @@ const os = require('os');
 const path = require('path');
 
 // Mock getPrimaryBranch BEFORE requiring dependent modules to ensure they use the mock.
-const missionUtils = require('../lib/core/mission-utils');
+const missionUtils = require('../dist/lib/core/mission-utils');
 mock.method(missionUtils, 'getPrimaryBranch', () => 'main');
 
 const { parseConflictFilesFromMergeOutput, getConflictFiles, getPrimaryBranch } = missionUtils;
-const { resolveConflictsForMission, buildConflictResolutionPrompt } = require('../lib/commands/integrate');
-const resolveConflict = require('../lib/commands/resolve-conflict');
-const { buildAgentResolutionPrompt } = require('../lib/commands/resolve-conflict');
+const { resolveConflictsForMission, buildConflictResolutionPrompt } = require('../dist/lib/commands/integrate');
+const resolveConflict = require('../dist/lib/commands/resolve-conflict');
+const { buildAgentResolutionPrompt } = require('../dist/lib/commands/resolve-conflict');
 
 const PRIMARY = getPrimaryBranch();
 const TEST_WORKTREE = '/tmp/visualBoard-task-108';
@@ -144,7 +145,7 @@ test('resolveConflictsForMission returns ok when no conflicts detected', () => {
   } finally {
     console.log = origLog;
     mock.restoreAll();
-    mock.method(require('../lib/core/mission-utils'), 'getPrimaryBranch', () => 'main');
+    mock.method(require('../dist/lib/core/mission-utils'), 'getPrimaryBranch', () => 'main');
   }
 });
 
@@ -189,7 +190,7 @@ test('resolveConflictsForMission emits skip-all-conflicts path for mission-speci
     console.log = origLog;
     console.error = origErr;
     mock.restoreAll();
-    mock.method(require('../lib/core/mission-utils'), 'getPrimaryBranch', () => 'main');
+    mock.method(require('../dist/lib/core/mission-utils'), 'getPrimaryBranch', () => 'main');
   }
 });
 
@@ -231,7 +232,7 @@ test('resolveConflictsForMission warns and returns error for shared file conflic
     console.log = origLog;
     console.error = origErr;
     mock.restoreAll();
-    mock.method(require('../lib/core/mission-utils'), 'getPrimaryBranch', () => 'main');
+    mock.method(require('../dist/lib/core/mission-utils'), 'getPrimaryBranch', () => 'main');
   }
 });
 
@@ -259,7 +260,7 @@ test('resolveConflictsForMission returns error when worktree is missing', () => 
     console.log = origLog;
     console.error = origErr;
     mock.restoreAll();
-    mock.method(require('../lib/core/mission-utils'), 'getPrimaryBranch', () => 'main');
+    mock.method(require('../dist/lib/core/mission-utils'), 'getPrimaryBranch', () => 'main');
   }
 });
 
@@ -291,7 +292,7 @@ test('resolveConflictsForMission returns merge-failed when getConflictFilesFn th
     console.log = origLog;
     console.error = origErr;
     mock.restoreAll();
-    mock.method(require('../lib/core/mission-utils'), 'getPrimaryBranch', () => 'main');
+    mock.method(require('../dist/lib/core/mission-utils'), 'getPrimaryBranch', () => 'main');
   }
 });
 
@@ -342,7 +343,7 @@ test('resolveConflictsForMission includes worktreePath in every return shape', (
     assert.ok(r3.worktreePath, 'worktreePath present on shared-conflict result');
   } finally {
     mock.restoreAll();
-    mock.method(require('../lib/core/mission-utils'), 'getPrimaryBranch', () => 'main');
+    mock.method(require('../dist/lib/core/mission-utils'), 'getPrimaryBranch', () => 'main');
   }
 });
 

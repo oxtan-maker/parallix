@@ -38,7 +38,7 @@ test('active throws "missionStartFn is not a function" when passed a namespace o
   // has `const missionStart = __importStar(require('./mission-start.js'))`
   // which produces a namespace object — not a function.
   // We simulate that by passing a namespace object as missionStartFn.
-  const active = require('../lib/commands/active.js');
+  const active = require('../dist/lib/commands/active.js');
 
   const namespaceObj = makeNamespaceObj(stubMissionStart);
 
@@ -81,7 +81,7 @@ test('active throws "missionStartFn is not a function" when passed a namespace o
 });
 
 test('active succeeds when missionStartFn is the default export function (task-1396 fix verified)', async () => {
-  const active = require('../lib/commands/active.js');
+  const active = require('../dist/lib/commands/active.js');
 
   // Pass the actual function (what the fix should provide).
   const fn = stubMissionStart;

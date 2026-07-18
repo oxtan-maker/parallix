@@ -12,7 +12,7 @@ const {
   levenshteinDistance,
   deriveAliases,
   resolveAlias,
-} = require('../index');
+} = require('../dist/index');
 
 // ---------- KNOWN_COMMANDS ----------
 

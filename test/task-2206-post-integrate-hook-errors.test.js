@@ -47,7 +47,7 @@ if (args[0] === 'version' && args[1] === 'patch') {
   process.exit(0);
 }
 
-if (args[0] === 'run' && args[1] === 'build:cjs') {
+if (args[0] === 'run' && args[1] === 'build') {
   process.exit(0);
 }
 
@@ -117,7 +117,7 @@ if (args[0] === 'version' && args[1] === 'patch') {
   process.stdout.write('v1.0.1\\n');
   process.exit(0);
 }
-if (args[0] === 'run' && args[1] === 'build:cjs') {
+if (args[0] === 'run' && args[1] === 'build') {
   process.exit(0);
 }
 if (args[0] === 'pack') {

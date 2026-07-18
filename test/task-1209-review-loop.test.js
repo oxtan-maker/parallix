@@ -4,7 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const { startReviewLoop } = require('../lib/review/review-loop');
+const { startReviewLoop } = require('../dist/lib/review/review-loop');
 
 test('startReviewLoop skips reviewer and implementer launches for autonomous fallback in provider=none mode', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1209-review-loop-'));

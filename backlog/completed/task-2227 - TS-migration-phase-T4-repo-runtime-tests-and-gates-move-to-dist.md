@@ -1,13 +1,14 @@
 ---
 id: TASK-2227
 title: 'TS migration phase T4: repo runtime, tests, and gates move to dist/'
-status: ready-for-integration
+status: done
 assignee: [codex]
 created_date: '2026-07-11 13:46'
 labels:
   - typescript
   - migration
   - adr-0044
+  - user_value
 dependencies:
   - TASK-2226
 references:

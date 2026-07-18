@@ -23,7 +23,7 @@ const {
   resolveReviewAdapter,
   resolveTaskStorage,
   validateWorkflowConfig,
-} = require('../lib/core/product-config');
+} = require('../dist/lib/core/product-config');
 const { spawnSync } = require('child_process');
 
 function withTempDir(fn) {
@@ -432,7 +432,7 @@ test('resolveTaskStorage supports string storage paths and invalid storage types
 });
 
 test('resolveAgentAdapter returns empty object (command env prefix removed)', () => {
-  const { resolveAgentAdapter } = require('../lib/core/product-config');
+  const { resolveAgentAdapter } = require('../dist/lib/core/product-config');
   // @ts-expect-error TS2554 Expected 0 arguments, but got 1.
   assert.deepEqual(resolveAgentAdapter('/tmp'), {});
 });

@@ -8,7 +8,7 @@ const {
   runPreReviewGate,
   handleGateFailureAutoBounce,
   classifyGateFailure,
-} = require('../lib/review/review-loop');
+} = require('../dist/lib/review/review-loop');
 
 async function withTempDir(fn) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1385-'));

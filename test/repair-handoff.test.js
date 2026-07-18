@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const repairHandoff = require('../lib/commands/repair-handoff');
+const repairHandoff = require('../dist/lib/commands/repair-handoff');
 const { classifyError, getDispatchAction, FailureClass, DispatchAction } = repairHandoff;
 
 test('repairHandoff auto-commits safe mission files', async () => {

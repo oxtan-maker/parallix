@@ -4,10 +4,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const childProcess = require('node:child_process');
-const { performHandoff } = require('../lib/commands/handoff');
-const missionUtils = require('../lib/core/mission-utils');
-const git = require('../lib/core/git');
-const backlog = require('../lib/tools/backlog');
+const { performHandoff } = require('../dist/lib/commands/handoff');
+const missionUtils = require('../dist/lib/core/mission-utils');
+const git = require('../dist/lib/core/git');
+const backlog = require('../dist/lib/tools/backlog');
 
 const REPO_ROOT = path.join(__dirname, '..');
 

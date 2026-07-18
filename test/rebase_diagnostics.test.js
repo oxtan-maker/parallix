@@ -1,8 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const status = require('../lib/commands/status');
-const rebase = require('../lib/commands/rebase');
-const { printIntegrationPreflight } = require('../lib/commands/integrate');
+const status = require('../dist/lib/commands/status');
+const rebase = require('../dist/lib/commands/rebase');
+const { printIntegrationPreflight } = require('../dist/lib/commands/integrate');
 
 const TASK_1322_UNMERGED = [
   'backlog/tasks/task-1322 - prevent-backlog-task-id-recycling-collision.md',

@@ -1,7 +1,8 @@
+// @ts-nocheck -- dist declaration inference is narrower than this legacy fixture suite.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('path');
-const { checkBacklogIntegrity } = require('../lib/tools/backlog');
+const { checkBacklogIntegrity } = require('../dist/lib/tools/backlog');
 
 test('Backlog integrity check passes', () => {
   // Use REPO_ROOT if available, otherwise assume we are in workflow/test/

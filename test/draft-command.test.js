@@ -4,7 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const { runDraftCommand, ensureDraftRepoConfigCommitted } = require('../lib/commands/draft');
+const { runDraftCommand, ensureDraftRepoConfigCommitted } = require('../dist/lib/commands/draft');
 const typeKey = ['class', 'ification'].join('');
 const normalizeKey = `normalizeDraft${typeKey[0].toUpperCase()}${typeKey.slice(1)}Fn`;
 

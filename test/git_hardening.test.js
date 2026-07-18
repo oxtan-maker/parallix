@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const childProcess = require('child_process');
-const git = require('../lib/core/git');
+const git = require('../dist/lib/core/git');
 
 test('git function defaults stdio to ignore stdin', (t) => {
   const originalSpawnSync = childProcess.spawnSync;

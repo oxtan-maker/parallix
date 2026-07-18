@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { writeReviewState, assertReviewStatePersisted } = require('../lib/review/review-state');
+const { writeReviewState, assertReviewStatePersisted } = require('../dist/lib/review/review-state');
 
 test('writeReviewState does not report success when commit fails and state path remains dirty', () => {
   const slug = 'task-2220-repro';

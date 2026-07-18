@@ -12,7 +12,7 @@ interface GitOptions {
   [key: string]: unknown;
 }
 
-interface GitResult {
+export interface GitResult {
   status: number | null;
   signal: string | null;
   stdout: string;

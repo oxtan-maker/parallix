@@ -6,7 +6,7 @@ const {
   extractOpencodeTelemetryFromExport,
   extractOpencodeTelemetry,
   getOpencodeProviderModel,
-} = require('../lib/agents/opencode-telemetry');
+} = require('../dist/lib/agents/opencode-telemetry');
 
 // --- extractOpencodeTelemetryFromExport tests ---
 

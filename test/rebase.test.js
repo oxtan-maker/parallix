@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const rebase = require('../lib/commands/rebase');
+const rebase = require('../dist/lib/commands/rebase');
 
 // ---------------------------------------------------------------------------
 // parseConflictFilesFromRebaseOutput

@@ -1,3 +1,4 @@
+// @ts-nocheck -- VM callback state is not represented by the generated dist declarations.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');

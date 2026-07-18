@@ -8,7 +8,7 @@
  * for why: a full compiler-services pass was ruled out by the mission's stop
  * rules as unacceptable added complexity for a diff-scoping utility).
  *
- * Scope is restricted to `lib/**\/*.js` and top-level `index.js`, matching
+ * Scope is restricted to `dist/lib/**\/*.js` and `dist/index.js`, matching
  * coverage-gate.ts's denominator and the mission's "lib/ source files, not
  * test/ files" boundary.
  */
@@ -41,21 +41,18 @@ interface ScopeResult {
 }
 
 function isInScope(relPath: string): boolean {
-  if (relPath === 'index.js') {return true;}
-  return relPath.startsWith('lib/') && relPath.endsWith('.js');
+  if (relPath === 'dist/index.js') {return true;}
+  return relPath.startsWith('dist/lib/') && relPath.endsWith('.js');
 }
 
 /**
- * Git tracks `.ts` sources (the `.js` build output of `npm run build:cjs` is
- * gitignored — see `.gitignore`), but mutation testing targets the compiled
- * `.js` that actually runs under `node --test` (per the CP-1 POC). Map a
- * changed `.ts` path to its build-output `.js` counterpart; pass through an
- * already-`.js` path unchanged (covers repos/configs where the build output
- * is tracked directly).
+ * Git tracks `.ts` sources while `npm run build` writes the runtime output to
+ * `dist/`. Map a changed source path to its built `.js` counterpart; pass
+ * through an already-dist runtime path unchanged.
  */
 function toRuntimePath(relPath: string): string {
   if (relPath.endsWith('.ts') && !relPath.endsWith('.d.ts')) {
-    return `${relPath.slice(0, -3)}.js`;
+    return `dist/${relPath.slice(0, -3)}.js`;
   }
   return relPath;
 }

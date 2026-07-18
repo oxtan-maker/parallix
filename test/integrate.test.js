@@ -6,10 +6,10 @@ const os = require('os');
 const path = require('path');
 const childProcess = require('node:child_process');
 
-const stats = require('../lib/commands/stats');
-const backlog = require('../lib/tools/backlog');
-const verification = require('../lib/core/verification');
-const postIntegrateHookModule = require('../lib/core/post-integrate-hook');
+const stats = require('../dist/lib/commands/stats');
+const backlog = require('../dist/lib/tools/backlog');
+const verification = require('../dist/lib/core/verification');
+const postIntegrateHookModule = require('../dist/lib/core/post-integrate-hook');
 mock.method(backlog, 'getTaskClassification', () => 'ai_sdlc');
 
 function installVerificationMocks() {
@@ -51,7 +51,7 @@ const previousPrimaryWorktree = process.env.PRIMARY_WORKTREE;
 process.env.PRIMARY_WORKTREE = FAKE_ROOT;
 
 // Mock getPrimaryBranch BEFORE requiring dependent modules to ensure they use the mock.
-const missionUtils = require('../lib/core/mission-utils');
+const missionUtils = require('../dist/lib/core/mission-utils');
 if (previousPrimaryWorktree === undefined) delete process.env.PRIMARY_WORKTREE;
 else process.env.PRIMARY_WORKTREE = previousPrimaryWorktree;
 
@@ -99,8 +99,8 @@ const {
   parseIntegrateArgs,
   runPostIntegrateHookOrAbort,
   refreshBuildBeforeVerification
-} = require('../lib/commands/integrate');
-const integrateCommand = require('../lib/commands/integrate');
+} = require('../dist/lib/commands/integrate');
+const integrateCommand = require('../dist/lib/commands/integrate');
 const { conventionalWorktreePath, getPrimaryBranch } = missionUtils;
 
 const PRIMARY = getPrimaryBranch();
@@ -179,7 +179,7 @@ test('px integrate rejects malformed real-agent options before preflight or gate
 });
 
 test('buildIntegrationContext reads status from primary while retaining mission worktree metadata', (t) => {
-  const backlog = require('../lib/tools/backlog');
+  const backlog = require('../dist/lib/tools/backlog');
   const worktree = '/tmp/project-task-2200';
   const baseWorktree = '/tmp/project-main';
   const worktreeTask = `${worktree}/backlog/tasks/task-2200 - fix.md`;
@@ -190,8 +190,8 @@ test('buildIntegrationContext reads status from primary while retaining mission 
   const mockedFindMissionArea = mock.method(missionUtils, 'findMissionArea', () => 'lib');
   const mockedResolveMissionBaseBranch = mock.method(missionUtils, 'resolveMissionBaseBranch', () => 'main');
   const mockedResolveBaseWorktree = mock.method(missionUtils, 'resolveBaseWorktree', () => baseWorktree);
-  const mockedGetCurrentBranch = mock.method(require('../lib/core/git'), 'getCurrentBranch', () => 'mission/task-2200');
-  const mockedGit = mock.method(require('../lib/core/git'), 'git', (args) => {
+  const mockedGetCurrentBranch = mock.method(require('../dist/lib/core/git'), 'getCurrentBranch', () => 'mission/task-2200');
+  const mockedGit = mock.method(require('../dist/lib/core/git'), 'git', (args) => {
     if (args.includes('branch') && args.includes('--show-current')) {
       return { status: 0, stdout: 'main', stderr: '' };
     }
@@ -235,7 +235,7 @@ test('buildIntegrationContext reads status from primary while retaining mission 
 });
 
 test('printIntegrationPreflight reads classification from the selected task file, not by re-resolving in the base checkout', (t) => {
-  const backlog = require('../lib/tools/backlog');
+  const backlog = require('../dist/lib/tools/backlog');
   const logs = [];
   const worktreeTask = '/tmp/project-task-2200/backlog/tasks/task-2200 - fix.md';
 
@@ -868,7 +868,8 @@ test('px integrate never invokes the post-integrate hook when preflight fails (S
 test('refreshBuildBeforeVerification no-ops when the checkout is already fresh', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'integrate-refresh-fresh-'));
   const pxTs = path.join(root, 'px.ts');
-  const pxJs = path.join(root, 'px.js');
+  const pxJs = path.join(root, 'dist', 'px.js');
+  fs.mkdirSync(path.dirname(pxJs), { recursive: true });
   fs.writeFileSync(pxTs, 'export {};\n');
   fs.writeFileSync(pxJs, '"use strict";\n');
 
@@ -889,7 +890,8 @@ test('refreshBuildBeforeVerification no-ops when the checkout is already fresh',
 test('refreshBuildBeforeVerification rebuilds stale runtime artifacts before proof capture', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'integrate-refresh-stale-'));
   const pxTs = path.join(root, 'px.ts');
-  const pxJs = path.join(root, 'px.js');
+  const pxJs = path.join(root, 'dist', 'px.js');
+  fs.mkdirSync(path.dirname(pxJs), { recursive: true });
   fs.writeFileSync(pxJs, '"use strict";\n');
   fs.writeFileSync(pxTs, 'export {};\n');
   const staleJsTime = new Date('2026-01-01T00:00:00.000Z');
@@ -911,14 +913,15 @@ test('refreshBuildBeforeVerification rebuilds stale runtime artifacts before pro
   assert.equal(result.refreshed, true);
   assert.equal(calls.length, 1);
   assert.equal(calls[0].command, 'npm');
-  assert.deepEqual(calls[0].args, ['run', 'build:cjs']);
+  assert.deepEqual(calls[0].args, ['run', 'build']);
   fs.rmSync(root, { recursive: true, force: true });
 });
 
 test('refreshBuildBeforeVerification surfaces build refresh failures before verification starts', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'integrate-refresh-fail-'));
   const pxTs = path.join(root, 'px.ts');
-  const pxJs = path.join(root, 'px.js');
+  const pxJs = path.join(root, 'dist', 'px.js');
+  fs.mkdirSync(path.dirname(pxJs), { recursive: true });
   fs.writeFileSync(pxJs, '"use strict";\n');
   fs.writeFileSync(pxTs, 'export {};\n');
   const staleJsTime = new Date('2026-01-01T00:00:00.000Z');
@@ -968,8 +971,8 @@ test('evaluateTaskStatusForIntegration accepts review when the latest formal rev
 });
 
 test('provider-backed approval repair leaves integration preflight with review instead of stale active', () => {
-  const { submitReviewRound } = require('../lib/review/review');
-  const { ReviewState } = require('../lib/review/review-state');
+  const { submitReviewRound } = require('../dist/lib/review/review');
+  const { ReviewState } = require('../dist/lib/review/review-state');
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1327-integrate-preflight-'));
   const taskFile = path.join(root, 'backlog', 'tasks', 'task-2199 - stale-active.md');
   const previousUser = process.env.FORGEJO_USER;
@@ -1338,7 +1341,7 @@ test('printIntegrationPreflight fails fast on an in-progress rebase in the integ
 });
 
 test('maybeUpdateGraphifyOnPrimary skips cleanly when graphify is missing', () => {
-  const { maybeUpdateGraphifyOnPrimary } = require('../lib/commands/integrate');
+  const { maybeUpdateGraphifyOnPrimary } = require('../dist/lib/commands/integrate');
   const logs = [];
 
   const result = maybeUpdateGraphifyOnPrimary('/tmp/visualBoard', {
@@ -1362,7 +1365,7 @@ test('maybeUpdateGraphifyOnPrimary skips cleanly when graphify is missing', () =
 });
 
 test('maybeUpdateGraphifyOnPrimary runs graphify update in the primary worktree when available', () => {
-  const { maybeUpdateGraphifyOnPrimary } = require('../lib/commands/integrate');
+  const { maybeUpdateGraphifyOnPrimary } = require('../dist/lib/commands/integrate');
   const calls = [];
   const logs = [];
 

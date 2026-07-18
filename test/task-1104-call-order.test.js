@@ -20,7 +20,7 @@ test.afterEach(() => {
   fs.rmSync(_tmpHome, { recursive: true, force: true });
 });
 
-const { startReviewLoop } = require('../lib/review/review');
+const { startReviewLoop } = require('../dist/lib/review/review');
 
 const TEST_SLUG = 'task-1104-test';
 
@@ -112,7 +112,7 @@ test('startReviewLoop follows the transition contract: review before reviewer, a
   assert.ok(firstActiveTransitionIdx > reviewTransitionIdx, "Initial transition should not be 'active'");
 });
 
-const { pushRound } = require('../lib/review/review');
+const { pushRound } = require('../dist/lib/review/review');
 
 test('pushRound follows the transition contract: review before createPr', async () => {
   const events = [];
@@ -147,12 +147,12 @@ test('pushRound follows the transition contract: review before createPr', async 
   assert.ok(reviewTransitionIdx < createPrIdx, "Transition to 'review' must occur BEFORE createPr");
 });
 
-const { performHandoff } = require('../lib/commands/handoff');
-const forgejo = require('../lib/tools/forgejo');
-const gatekeeper = require('../lib/tools/gatekeeper');
-const backlog = require('../lib/tools/backlog');
-const missionUtils = require('../lib/core/mission-utils');
-const git = require('../lib/core/git');
+const { performHandoff } = require('../dist/lib/commands/handoff');
+const forgejo = require('../dist/lib/tools/forgejo');
+const gatekeeper = require('../dist/lib/tools/gatekeeper');
+const backlog = require('../dist/lib/tools/backlog');
+const missionUtils = require('../dist/lib/core/mission-utils');
+const git = require('../dist/lib/core/git');
 
 test('performHandoff follows the sequence: createPr -> gatekeeper -> transitionTask -> push', async () => {
   const events = [];

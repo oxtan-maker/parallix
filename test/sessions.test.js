@@ -4,7 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const sessions = require('../lib/tools/sessions');
+const sessions = require('../dist/lib/tools/sessions');
 
 function withTempWorktree(run) {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'sessions-test-'));

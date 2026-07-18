@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { execSync } = require('child_process');
-const { startReviewLoop } = require('../lib/review/review');
+const { startReviewLoop } = require('../dist/lib/review/review');
 
 test('TASK-1048: startReviewLoop does not crash when taskResolution is needed for fallback', async () => {
   const writes = [];

@@ -5,8 +5,8 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const stats = require('../lib/commands/stats');
-const { resolveStageTelemetry } = require('../lib/agents/stage-telemetry');
+const stats = require('../dist/lib/commands/stats');
+const { resolveStageTelemetry } = require('../dist/lib/agents/stage-telemetry');
 
 // task-1285 review F8: the unit tests cover renderMissionPhaseReport() in
 // isolation; these exercise the `stats()` command function end-to-end so the

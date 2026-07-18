@@ -27,7 +27,7 @@ const {
   setupReview,
   setupWizard,
   writeWorkflowConfig,
-} = require('../lib/tools/setup-review');
+} = require('../dist/lib/tools/setup-review');
 
 async function withTempDir(fn) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-setup-review-'));
@@ -39,11 +39,11 @@ async function withTempDir(fn) {
 }
 
 function loadSetupReviewWithSpawn(spawnImpl) {
-  const modulePath = require.resolve('../lib/tools/setup-review');
+  const modulePath = require.resolve('../dist/lib/tools/setup-review');
   const mocked = mock.method(childProcess, 'spawnSync', spawnImpl);
   delete require.cache[modulePath];
   try {
-    return require('../lib/tools/setup-review');
+    return require('../dist/lib/tools/setup-review');
   } finally {
     mocked.mock.restore();
     delete require.cache[modulePath];
@@ -609,9 +609,9 @@ test('promptLine supports visible and hidden prompts', async () => {
 
   try {
     // @ts-expect-error TS2740 Type '{ write(chunk: any, _encoding: any, cb: any): boolean; }' is missing the f
-    const visible = await require('../lib/tools/setup-review').promptLine('Prompt: ', { output });
+    const visible = await require('../dist/lib/tools/setup-review').promptLine('Prompt: ', { output });
     // @ts-expect-error TS2740 Type '{ write(chunk: any, _encoding: any, cb: any): boolean; }' is missing the f
-    const hidden = await require('../lib/tools/setup-review').promptLine('Secret: ', { hidden: true, output });
+    const hidden = await require('../dist/lib/tools/setup-review').promptLine('Secret: ', { hidden: true, output });
     assert.equal(visible, 'visible');
     assert.equal(hidden, 'secret');
     assert.ok(writes.includes('typed'));

@@ -7,10 +7,10 @@ const path = require('path');
 const childProcess = require('node:child_process');
 
 // Setup mocks BEFORE requiring integrate
-const missionUtils = require('../lib/core/mission-utils');
+const missionUtils = require('../dist/lib/core/mission-utils');
 mock.method(missionUtils, 'getPrimaryBranch', () => 'main');
 
-const { printIntegrationPreflight } = require('../lib/commands/integrate');
+const { printIntegrationPreflight } = require('../dist/lib/commands/integrate');
 
 // Helpers ---------------------------------------------------------------
 

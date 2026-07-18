@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const fmt = require('../lib/core/fmt');
+const fmt = require('../dist/lib/core/fmt');
 
 function withForcedColor(run) {
   const previousForceColor = process.env.FORCE_COLOR;

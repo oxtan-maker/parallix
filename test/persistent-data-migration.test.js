@@ -7,7 +7,7 @@ const path = require('path');
 const {
   migrateStats,
   migrateAgentBlocklists
-} = require('../lib/core/persistent-data-migration');
+} = require('../dist/lib/core/persistent-data-migration');
 
 function withTempRoot(run) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-migration-'));
@@ -68,7 +68,7 @@ test('migrateStats imports source rows into fresh install (destination does not 
     assert.equal(result.imported, 2);
     assert.equal(result.rows, 2);
     const content = fs.readFileSync(destinationPath, 'utf8');
-    const statsHeaders = require('../lib/commands/stats').STATS_HEADERS.join(',');
+    const statsHeaders = require('../dist/lib/commands/stats').STATS_HEADERS.join(',');
     assert.ok(content.startsWith(`${statsHeaders}\n`));
     assert.equal(content.split('\n').filter(Boolean).length, 3);
   });
@@ -116,7 +116,7 @@ test('migrateStats merges sources into existing header-only destination', () => 
     const content = fs.readFileSync(destinationPath, 'utf8');
     assert.ok(content.includes('task-1'));
     assert.ok(content.includes('task-2'));
-    const statsHeaders = require('../lib/commands/stats').STATS_HEADERS.join(',');
+    const statsHeaders = require('../dist/lib/commands/stats').STATS_HEADERS.join(',');
     assert.match(content, new RegExp(`^${statsHeaders}\\n`));
   });
 });

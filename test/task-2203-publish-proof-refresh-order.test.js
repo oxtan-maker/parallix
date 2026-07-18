@@ -10,7 +10,7 @@ const path = require('path');
 //
 // Before the fix, lib/commands/integrate.ts captured proof
 // (captureVerifiedTreeProof) at ~line 814 and then ran the post-integrate hook
-// (runPostIntegrateHookOrAbort) at ~line 857.  The hook runs `npm run build:cjs`
+// (runPostIntegrateHookOrAbort) at ~line 857. The hook runs `npm run build`
 // which changes the committed tree, so the proof represented a stale pre-hook
 // tree.
 //
@@ -22,7 +22,7 @@ const path = require('path');
 // Variant B closeout path.
 // ---------------------------------------------------------------------------
 
-const { resolvePostIntegrateCommand } = require('../lib/core/post-integrate-hook');
+const { resolvePostIntegrateCommand } = require('../dist/lib/core/post-integrate-hook');
 
 function withTempDir(fn) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2203-proof-order-'));
@@ -47,7 +47,7 @@ function writeWorkflowConfig(root) {
 // ---------------------------------------------------------------------------
 // Test 1: The post-integrate command is wired and does a rebuild.
 // ---------------------------------------------------------------------------
-test('post-integrate hook runs npm run build:cjs (task-2203 prerequisite)', () => {
+test('post-integrate hook runs the configured distribution rebuild (task-2203 prerequisite)', () => {
   withTempDir(root => {
     writeWorkflowConfig(root);
     const command = resolvePostIntegrateCommand(root);
@@ -56,13 +56,13 @@ test('post-integrate hook runs npm run build:cjs (task-2203 prerequisite)', () =
 });
 
 // ---------------------------------------------------------------------------
-// Test 2: The post-integrate script rebuilds the tree via npm run build:cjs.
+// Test 2: The post-integrate script rebuilds the dist tree via npm run build.
 // ---------------------------------------------------------------------------
-test('refresh-global-px.sh performs build:cjs (task-2203 prerequisite)', () => {
+test('refresh-global-px.sh builds dist (task-2203 prerequisite)', () => {
   const REPO_ROOT = path.join(__dirname, '..');
   const scriptPath = path.join(REPO_ROOT, 'scripts', 'refresh-global-px.sh');
   const content = fs.readFileSync(scriptPath, 'utf8');
-  assert.match(content, /npm run build:cjs/,
+  assert.match(content, /npm run build/,
     'refresh-global-px.sh must rebuild compiled artifacts');
 });
 
@@ -79,7 +79,7 @@ test('refresh-global-px.sh performs build:cjs (task-2203 prerequisite)', () => {
 // ---------------------------------------------------------------------------
 test('Variant B: post-integrate hook runs before proof capture (task-2203 fix)', () => {
   const REPO_ROOT = path.join(__dirname, '..');
-  const integratePath = path.join(REPO_ROOT, 'lib', 'commands', 'integrate.js');
+  const integratePath = path.join(REPO_ROOT, 'dist', 'lib', 'commands', 'integrate.js');
   const content = fs.readFileSync(integratePath, 'utf8');
 
   // Find the positions of the key function calls in the compiled JS.
@@ -114,7 +114,7 @@ test('proof captured before rebuild is stale after post-integrate hook (task-220
       return res;
     };
 
-    runGit(['init', '-b', 'main']);
+    runGit(['init']);
     runGit(['config', 'user.name', 'Test User']);
     runGit(['config', 'user.email', 'test@example.com']);
     fs.writeFileSync(path.join(root, 'README.md'), '# temp repo\n', 'utf8');

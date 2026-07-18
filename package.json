@@ -51,14 +51,14 @@
   ],
   "scripts": {
     "build": "tsc",
-    "build:cjs": "tsc --rootDir . --outDir . --module CommonJS --moduleResolution Node --esModuleInterop --sourceMap false && node -e \"const fs=require('node:fs');const p='px.js';const s=fs.readFileSync(p,'utf8');if(!s.startsWith('#!'))fs.writeFileSync(p,'#!/usr/bin/env node\\n'+s);fs.chmodSync(p,0o755)\"",
-    "publish:guard": "node -e \"require('./lib/core/build-freshness.js').assertBuildFreshness(process.cwd())\"",
-    "prepack": "npm run build:cjs && npm run publish:guard && npm run build",
+    "build:cjs": "tsc --noEmit --module CommonJS --moduleResolution Node --esModuleInterop",
+    "publish:guard": "node -e \"require('./dist/lib/core/build-freshness.js').assertBuildFreshness(process.cwd())\"",
+    "prepack": "npm run build:cjs && npm run build && npm run publish:guard",
     "prepublishOnly": "npm run publish:guard",
-    "pretest": "npm run build:cjs",
+    "pretest": "npm run build",
     "test": "FORCE_COLOR=0 node test/run-default-tests.js",
     "test:integration": "FORCE_COLOR=0 node test/run-default-tests.js --integration",
-    "test:coverage": "FORCE_COLOR=0 node lib/commands/coverage-gate.js --lcov",
+    "test:coverage": "FORCE_COLOR=0 node dist/lib/commands/coverage-gate.js --lcov",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

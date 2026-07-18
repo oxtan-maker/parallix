@@ -15,7 +15,7 @@ const path = require('path');
 // so codex launched inside the worktree has the same MCP server definitions.
 
 test('MCP config is carried into worktree codex-home (reproduction)', () => {
-  const { ensureCodexHome, codexConfigPath } = require('../lib/agents/codex');
+  const { ensureCodexHome, codexConfigPath } = require('../dist/lib/agents/codex');
 
   const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-mcp-repro-'));
   const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-mcp-wt-'));

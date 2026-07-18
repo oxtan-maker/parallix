@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 // @ts-expect-error TS2614 Module '"../lib/commands/handoff"' has no exported member '_findUnverifiableGoal
-const { verifyHandoff, performHandoff, _findUnverifiableGoalCheckRow } = require('../lib/commands/handoff');
+const { verifyHandoff, performHandoff, _findUnverifiableGoalCheckRow } = require('../dist/lib/commands/handoff');
 const { mock } = test;
 
 test('evidence shell commands require an existing file argument', () => {
@@ -17,12 +17,12 @@ test('evidence shell commands require an existing file argument', () => {
 });
 
 // Mock external modules
-const git = require('../lib/core/git');
-const missionUtils = require('../lib/core/mission-utils');
-const backlog = require('../lib/tools/backlog');
-const forgejo = require('../lib/tools/forgejo');
-const setupReview = require('../lib/tools/setup-review');
-const gatekeeper = require('../lib/tools/gatekeeper');
+const git = require('../dist/lib/core/git');
+const missionUtils = require('../dist/lib/core/mission-utils');
+const backlog = require('../dist/lib/tools/backlog');
+const forgejo = require('../dist/lib/tools/forgejo');
+const setupReview = require('../dist/lib/tools/setup-review');
+const gatekeeper = require('../dist/lib/tools/gatekeeper');
 
 function writeReviewState(missionDir, reviewer, implementer) {
   fs.mkdirSync(missionDir, { recursive: true });
@@ -746,7 +746,7 @@ test('performHandoff accepts file:line evidence with supporting shell context in
 
 test('handoffCommand normalizes uppercase explicit slugs', async (t) => {
   const { mock } = t;
-  const handoff = require('../lib/commands/handoff');
+  const handoff = require('../dist/lib/commands/handoff');
 
   // We need to mock performHandoff which is exported from the same module
   // Actually, handoffCommand calls performHandoff from the same file.
@@ -984,7 +984,7 @@ test('performHandoff proceeds normally when rebase is a no-op (branch already up
 
 // ---------- runDeclaredGates (generic ## Gates runner) ----------
 
-const { runDeclaredGates } = require('../lib/commands/handoff');
+const { runDeclaredGates } = require('../dist/lib/commands/handoff');
 
 test('runDeclaredGates returns skipped when no ## Gates section exists', () => {
   const missionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gates-test-'));
@@ -1068,13 +1068,13 @@ test('runDeclaredGates handles checkbox prefixes [- [ ] and - [x])', () => {
 
 // ---------- captureNelAtHandoff ----------
 
-const { captureNelAtHandoff } = require('../lib/commands/handoff');
+const { captureNelAtHandoff } = require('../dist/lib/commands/handoff');
 
 test('captureNelAtHandoff returns error when primary branch not detected', () => {
-  const origGetPrimaryBranch = require('../lib/core/mission-utils').getPrimaryBranch;
+  const origGetPrimaryBranch = require('../dist/lib/core/mission-utils').getPrimaryBranch;
   const { mock } = test;
 
-  const mockFn = mock.method(require('../lib/core/mission-utils'), 'getPrimaryBranch', () => {
+  const mockFn = mock.method(require('../dist/lib/core/mission-utils'), 'getPrimaryBranch', () => {
     throw new Error('no branch');
   });
 
@@ -1120,7 +1120,7 @@ test('captureNelAtHandoff writes nel-record.json with predicted bucket, actual N
 
     // Mock getPrimaryBranch to return 'main'
     const { mock } = test;
-    const mockFn = mock.method(require('../lib/core/mission-utils'), 'getPrimaryBranch', () => 'main');
+    const mockFn = mock.method(require('../dist/lib/core/mission-utils'), 'getPrimaryBranch', () => 'main');
 
     try {
       const result = captureNelAtHandoff('task-nel-test', {
@@ -1161,7 +1161,7 @@ test('captureNelAtHandoff reports injected persistence failure and writes no suc
   const primaryMock = mock.method(missionUtils, 'getPrimaryBranch', () => 'main');
   const errors = [];
   try {
-    const result = require('../lib/commands/handoff').captureNelAtHandoff('task-nel-fail', {
+    const result = require('../dist/lib/commands/handoff').captureNelAtHandoff('task-nel-fail', {
       rootDir: tmpDir,
       missionDir,
       log: () => {},
@@ -1284,7 +1284,7 @@ test('captureNelAtHandoff reads predicted bucket from MISSION.md Refinement Sign
     ].join('\n'));
 
     const { mock } = test;
-    const mockFn = mock.method(require('../lib/core/mission-utils'), 'getPrimaryBranch', () => 'main');
+    const mockFn = mock.method(require('../dist/lib/core/mission-utils'), 'getPrimaryBranch', () => 'main');
 
     try {
       captureNelAtHandoff('task-nel-bucket', {
@@ -1395,7 +1395,7 @@ test('runDeclaredGates captures stdout and stderr on gate failure (SC2)', async 
 
 // ---------- validateDeclaredGates (pre-validation of gate commands) ----------
 
-const { validateDeclaredGates } = require('../lib/commands/handoff');
+const { validateDeclaredGates } = require('../dist/lib/commands/handoff');
 
 test('validateDeclaredGates passes for valid commands with existing files', () => {
   const rootDir = path.join(__dirname, '..');
@@ -2034,7 +2034,7 @@ test('performHandoff relaunch prompt lists all missing artifact types', async (t
 // ── task-2215: auto-generated checkpoint must pass evidence validation ────────
 
 test('buildAutoCheckpointContent produces verifiable evidence rows', () => {
-  const handoffModule = require('../lib/commands/handoff');
+  const handoffModule = require('../dist/lib/commands/handoff');
   const rootDir = path.join(__dirname, '..');
 
   // @ts-expect-error TS2339 Property '_buildAutoCheckpointContent' does not exist on type 'typeof import("/h

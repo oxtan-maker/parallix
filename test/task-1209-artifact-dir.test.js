@@ -4,7 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const { reviewArtifactPath, resolveArtifactDir } = require('../lib/review/review-artifacts');
+const { reviewArtifactPath, resolveArtifactDir } = require('../dist/lib/review/review-artifacts');
 
 function withTempRepo(config, fn) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1209-artifact-dir-'));

@@ -7,6 +7,8 @@ const test = require('node:test');
 const packageJson = require('../package.json');
 
 const CLI_ENTRY = path.resolve(__dirname, '..', packageJson.bin.px);
+const TEST_PARALLIX_HOME = process.env.PARALLIX_HOME
+  || path.join(require('node:os').tmpdir(), `parallix-task-1413-${process.pid}`);
 
 function runCommand(command, args, options = {}) {
   const result = childProcess.spawnSync(command, args, {
@@ -25,13 +27,13 @@ function touchOld(filePath) {
 }
 
 function buildProject() {
-  const result = runCommand('npm', ['run', 'build:cjs'], {
+  const result = runCommand('npm', ['run', 'build'], {
     cwd: path.resolve(__dirname, '..'),
     encoding: 'utf8'
   });
   if (result.error || result.status !== 0) {
     throw new Error(
-      `npm run build:cjs failed (status=${result.status})\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`
+      `npm run build failed (status=${result.status})\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`
     );
   }
 }
@@ -39,12 +41,14 @@ function buildProject() {
 function spawnCli(...args) {
   return childProcess.spawnSync(process.execPath, [CLI_ENTRY, ...args], {
     encoding: 'utf8',
+    env: { ...process.env, PARALLIX_HOME: TEST_PARALLIX_HOME },
     timeout: 30000
   });
 }
 
 function ensureStatsCsv() {
-  const statsPath = path.join(process.env.PARALLIX_HOME, 'stats.csv');
+  fs.mkdirSync(TEST_PARALLIX_HOME, { recursive: true });
+  const statsPath = path.join(TEST_PARALLIX_HOME, 'stats.csv');
   if (!fs.existsSync(statsPath)) {
     fs.writeFileSync(
       statsPath,
@@ -54,12 +58,12 @@ function ensureStatsCsv() {
   }
 }
 
-test('stale generated JS triggers preflight rejection with npm run build:cjs instruction', () => {
+test('stale dist JS triggers preflight rejection with npm run build instruction', () => {
   buildProject();
   ensureStatsCsv();
 
   const statsTs = path.resolve(__dirname, '..', 'lib', 'commands', 'stats.ts');
-  const statsJs = path.resolve(__dirname, '..', 'lib', 'commands', 'stats.js');
+  const statsJs = path.resolve(__dirname, '..', 'dist', 'lib', 'commands', 'stats.js');
 
   assert.ok(fs.existsSync(statsTs), 'stats.ts source must exist');
   assert.ok(fs.existsSync(statsJs), 'stats.js compiled artifact must exist');
@@ -86,8 +90,8 @@ test('stale generated JS triggers preflight rejection with npm run build:cjs ins
 
     const combinedOutput = (result.stdout || '') + (result.stderr || '');
     assert.ok(
-      combinedOutput.includes('npm run build:cjs'),
-      'error output must include "npm run build:cjs" instruction; got: ' + combinedOutput
+      combinedOutput.includes('npm run build'),
+      'error output must include "npm run build" instruction; got: ' + combinedOutput
     );
   } finally {
     fs.writeFileSync(statsJs, originalContent, 'utf8');
@@ -102,7 +106,7 @@ test('fresh generated JS allows normal command dispatch', () => {
   ensureStatsCsv();
 
   const statsTs = path.resolve(__dirname, '..', 'lib', 'commands', 'stats.ts');
-  const statsJs = path.resolve(__dirname, '..', 'lib', 'commands', 'stats.js');
+  const statsJs = path.resolve(__dirname, '..', 'dist', 'lib', 'commands', 'stats.js');
 
   assert.ok(fs.existsSync(statsTs), 'stats.ts source must exist');
   assert.ok(fs.existsSync(statsJs), 'stats.js compiled artifact must exist');
@@ -118,20 +122,13 @@ test('fresh generated JS allows normal command dispatch', () => {
   // Ensure PARALLIX_HOME has a stats.csv so px stats doesn't fail with
   // "CSV file not found" during the full test suite (where bootstrap sets
   // PARALLIX_HOME to a temp directory with no CSV).
-  const home = process.env.PARALLIX_HOME || path.join(require('os').homedir(), '.local', 'state', 'parallix');
-  fs.mkdirSync(home, { recursive: true });
-  const csvPath = path.join(home, 'stats.csv');
-  if (!fs.existsSync(csvPath)) {
-    fs.writeFileSync(csvPath, 'date,repo,mission,classification,implementer,pr_fix_rounds,provider,model,implementer_agent,reviewer_agent,stage,input_tokens,output_tokens,cached_tokens,context_tokens,tool_calls,openai_usage_before,openai_usage_after,openai_usage_delta,duration_minutes,cost_usd,closed\n', 'utf8');
-  }
-
   const result = spawnCli('stats');
 
   assert.strictEqual(result.status, 0, 'CLI must exit with code 0 for fresh build');
 
   const combinedOutput = (result.stdout || '') + (result.stderr || '');
   assert.ok(
-    !combinedOutput.includes('npm run build:cjs'),
+    !combinedOutput.includes('Stale build detected'),
     'fresh build must not trigger stale-build error'
   );
 });

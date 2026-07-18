@@ -32,14 +32,14 @@ function withVibeLauncher(run) {
 // ---------- resolveVibeCommand ----------
 
 test('resolveVibeCommand returns bare "vibe"', () => {
-  const { resolveVibeCommand } = require('../lib/agents/vibe');
+  const { resolveVibeCommand } = require('../dist/lib/agents/vibe');
   assert.equal(resolveVibeCommand(), 'vibe');
 });
 
 // ---------- extractVibeSessionId ----------
 
 test('extractVibeSessionId returns null for no match', () => {
-  const { extractVibeSessionId } = require('../lib/agents/vibe');
+  const { extractVibeSessionId } = require('../dist/lib/agents/vibe');
   assert.equal(extractVibeSessionId(null), null);
   assert.equal(extractVibeSessionId(''), null);
   assert.equal(extractVibeSessionId('some random text'), null);
@@ -48,7 +48,7 @@ test('extractVibeSessionId returns null for no match', () => {
 // Mistral Vibe does not emit a parseable resume hint in programmatic mode,
 // so extractVibeSessionId always returns null.
 test('extractVibeSessionId returns null (vibe has no stdout resume hint)', () => {
-  const { extractVibeSessionId } = require('../lib/agents/vibe');
+  const { extractVibeSessionId } = require('../dist/lib/agents/vibe');
   assert.equal(extractVibeSessionId('Session completed'), null);
   assert.equal(extractVibeSessionId('vibe --resume abc123'), null);
 });
@@ -56,7 +56,7 @@ test('extractVibeSessionId returns null (vibe has no stdout resume hint)', () =>
 // ---------- buildVibeInvocation ----------
 
 test('buildVibeInvocation includes --prompt flag', () => {
-  const { buildVibeInvocation } = require('../lib/agents/vibe');
+  const { buildVibeInvocation } = require('../dist/lib/agents/vibe');
   const inv = buildVibeInvocation({ prompt: 'test', worktree: '/tmp' });
   assert.equal(inv.command, 'vibe');
   assert.ok(inv.args.includes('--prompt'));
@@ -64,21 +64,21 @@ test('buildVibeInvocation includes --prompt flag', () => {
 });
 
 test('buildVibeInvocation includes --trust flag', () => {
-  const { buildVibeInvocation } = require('../lib/agents/vibe');
+  const { buildVibeInvocation } = require('../dist/lib/agents/vibe');
   const inv = buildVibeInvocation({ prompt: 'test', worktree: '/tmp' });
   assert.equal(inv.command, 'vibe');
   assert.ok(inv.args.includes('--trust'));
 });
 
 test('buildVibeInvocation includes --yolo flag for non-interactive tool-call approval', () => {
-  const { buildVibeInvocation } = require('../lib/agents/vibe');
+  const { buildVibeInvocation } = require('../dist/lib/agents/vibe');
   const inv = buildVibeInvocation({ prompt: 'test', worktree: '/tmp' });
   assert.equal(inv.command, 'vibe');
   assert.ok(inv.args.includes('--yolo'), `expected --yolo in args: ${inv.args.join(' ')}`);
 });
 
 test('buildVibeInvocation includes --output text flag', () => {
-  const { buildVibeInvocation } = require('../lib/agents/vibe');
+  const { buildVibeInvocation } = require('../dist/lib/agents/vibe');
   const inv = buildVibeInvocation({ prompt: 'test', worktree: '/tmp' });
   assert.equal(inv.command, 'vibe');
   assert.ok(inv.args.includes('--output'));
@@ -86,7 +86,7 @@ test('buildVibeInvocation includes --output text flag', () => {
 });
 
 test('buildVibeInvocation includes explicit workdir and temp-dir access', () => {
-  const { buildVibeInvocation } = require('../lib/agents/vibe');
+  const { buildVibeInvocation } = require('../dist/lib/agents/vibe');
   const inv = buildVibeInvocation({ prompt: 'test', worktree: '/tmp/worktree' });
   assert.ok(inv.args.includes('--workdir'));
   assert.ok(inv.args.includes('/tmp/worktree'));
@@ -95,7 +95,7 @@ test('buildVibeInvocation includes explicit workdir and temp-dir access', () => 
 });
 
 test('buildVibeInvocation does not include resume flags', () => {
-  const { buildVibeInvocation } = require('../lib/agents/vibe');
+  const { buildVibeInvocation } = require('../dist/lib/agents/vibe');
   const inv = buildVibeInvocation({ prompt: 'test', worktree: '/tmp', resume: true, sessionId: 'abc123' });
   assert.equal(inv.command, 'vibe');
   assert.ok(!inv.args.includes('--resume'));
@@ -104,14 +104,14 @@ test('buildVibeInvocation does not include resume flags', () => {
 });
 
 test('buildVibeInvocation sets cwd to worktree', () => {
-  const { buildVibeInvocation } = require('../lib/agents/vibe');
+  const { buildVibeInvocation } = require('../dist/lib/agents/vibe');
   const inv = buildVibeInvocation({ prompt: 'test', worktree: '/custom/worktree' });
   assert.equal(inv.command, 'vibe');
   assert.equal(inv.options.cwd, '/custom/worktree');
 });
 
 test('buildVibeInvocation merges env', () => {
-  const { buildVibeInvocation } = require('../lib/agents/vibe');
+  const { buildVibeInvocation } = require('../dist/lib/agents/vibe');
   const inv = buildVibeInvocation({ prompt: 'test', worktree: '/tmp', env: { CUSTOM: 'value' } });
   assert.equal(inv.command, 'vibe');
   // @ts-expect-error TS2339 Property 'CUSTOM' does not exist on type '{ VIBE_HOME: string; VIBE_ACTIVE_MODEL
@@ -124,7 +124,7 @@ test('buildVibeInvocation merges env', () => {
 // ---------- startVibeAgent ----------
 
 test('startVibeAgent returns invocation and resultPromise with bare name', async () => {
-  const { startVibeAgent, resolveVibeCommand } = require('../lib/agents/vibe');
+  const { startVibeAgent, resolveVibeCommand } = require('../dist/lib/agents/vibe');
   const result = withVibeLauncher(() => startVibeAgent({ prompt: 'test', worktree: '/tmp' }));
   assert.ok(result.invocation);
   assert.ok(result.invocation.command);
@@ -151,7 +151,7 @@ test('ensureVibeHome copies config and rewrites session logging to the worktree'
       ''
     ].join('\n'));
 
-    const { ensureVibeHome, vibeConfigPath, vibeSessionLogDir } = require('../lib/agents/vibe');
+    const { ensureVibeHome, vibeConfigPath, vibeSessionLogDir } = require('../dist/lib/agents/vibe');
     ensureVibeHome(worktree);
     const written = fs.readFileSync(vibeConfigPath(worktree), 'utf8');
     assert.match(written, new RegExp(vibeSessionLogDir(worktree).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
@@ -165,7 +165,7 @@ test('ensureVibeHome copies config and rewrites session logging to the worktree'
 // ---------- module exports ----------
 
 test('mistral module exports expected functions', () => {
-  const mistral = require('../lib/agents/vibe');
+  const mistral = require('../dist/lib/agents/vibe');
   assert.equal(typeof mistral.buildVibeInvocation, 'function');
   assert.equal(typeof mistral.extractVibeSessionId, 'function');
   assert.equal(typeof mistral.resolveVibeCommand, 'function');
@@ -175,7 +175,7 @@ test('mistral module exports expected functions', () => {
 // ---------- model override ----------
 
 test('buildVibeInvocation sets VIBE_ACTIVE_MODEL env when model is provided', () => {
-  const { buildVibeInvocation } = require('../lib/agents/vibe');
+  const { buildVibeInvocation } = require('../dist/lib/agents/vibe');
   const inv = buildVibeInvocation({ prompt: 'test', worktree: '/tmp', env: {}, model: 'mistral-large' });
   assert.equal(inv.options.env.VIBE_ACTIVE_MODEL, 'mistral-large');
   assert.ok(!inv.args.includes('-m'));
@@ -183,7 +183,7 @@ test('buildVibeInvocation sets VIBE_ACTIVE_MODEL env when model is provided', ()
 });
 
 test('buildVibeInvocation omits VIBE_ACTIVE_MODEL env when model is null/undefined', () => {
-  const { buildVibeInvocation } = require('../lib/agents/vibe');
+  const { buildVibeInvocation } = require('../dist/lib/agents/vibe');
   assert.equal(buildVibeInvocation({ prompt: 't', worktree: '/tmp', env: {} }).options.env.VIBE_ACTIVE_MODEL, undefined);
   assert.equal(buildVibeInvocation({ prompt: 't', worktree: '/tmp', env: {}, model: null }).options.env.VIBE_ACTIVE_MODEL, undefined);
 });
@@ -251,14 +251,14 @@ function createTempSessionDir(tmpDir, meta, subDirName) {
 }
 
 test('processResult returns telemetry null for null input', () => {
-  const { processResult } = require('../lib/agents/vibe');
+  const { processResult } = require('../dist/lib/agents/vibe');
   const result = processResult(null);
   assert.equal(result.telemetry, null);
   assert.equal(result.sessionId, null);
 });
 
 test('processResult returns telemetry null for empty object input (isolated FS)', () => {
-  const { processResult } = require('../lib/agents/vibe');
+  const { processResult } = require('../dist/lib/agents/vibe');
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mistral-proc-'));
   try {
     const result = processResult({}, tmp);
@@ -269,7 +269,7 @@ test('processResult returns telemetry null for empty object input (isolated FS)'
 });
 
 test('processResult populates telemetry with correct field names when meta.json exists', () => {
-  const { processResult } = require('../lib/agents/vibe');
+  const { processResult } = require('../dist/lib/agents/vibe');
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mistral-proc-'));
   try {
     createTempSessionDir(tmp, SAMPLE_META, 'session_20260701_171711_test0001');
@@ -290,7 +290,7 @@ test('processResult populates telemetry with correct field names when meta.json 
 });
 
 test('processResult preserves sessionId when present in input', () => {
-  const { processResult } = require('../lib/agents/vibe');
+  const { processResult } = require('../dist/lib/agents/vibe');
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mistral-proc-'));
   try {
     createTempSessionDir(tmp, SAMPLE_META, 'session_20260701_171711_test0002');
@@ -303,7 +303,7 @@ test('processResult preserves sessionId when present in input', () => {
 });
 
 test('processResult returns null telemetry when session has all-zero stats', () => {
-  const { processResult } = require('../lib/agents/vibe');
+  const { processResult } = require('../dist/lib/agents/vibe');
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mistral-proc-'));
   try {
     createTempSessionDir(tmp, ZERO_STATS_META, 'session_20260701_171711_test0003');
@@ -315,7 +315,7 @@ test('processResult returns null telemetry when session has all-zero stats', () 
 });
 
 test('processResult returns null telemetry when no session directories exist', () => {
-  const { processResult } = require('../lib/agents/vibe');
+  const { processResult } = require('../dist/lib/agents/vibe');
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mistral-proc-'));
   try {
     const result = processResult({ status: 0 }, tmp);
@@ -326,7 +326,7 @@ test('processResult returns null telemetry when no session directories exist', (
 });
 
 test('processResult picks valid session when newer one has zero stats', () => {
-  const { processResult } = require('../lib/agents/vibe');
+  const { processResult } = require('../dist/lib/agents/vibe');
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mistral-proc-'));
   try {
     createTempSessionDir(tmp, SAMPLE_META, 'session_20260601_100000_test0004');
@@ -343,14 +343,14 @@ test('processResult picks valid session when newer one has zero stats', () => {
 // ---------- getVibeProviderModel ----------
 
 test('getVibeProviderModel returns correct fallback identity', () => {
-  const { getVibeProviderModel } = require('../lib/agents/vibe');
+  const { getVibeProviderModel } = require('../dist/lib/agents/vibe');
   const pm = getVibeProviderModel();
   assert.equal(pm.provider, 'mistral');
   assert.equal(pm.model, 'mistral');
 });
 
 test('processResult preserves extra result fields', () => {
-  const { processResult } = require('../lib/agents/vibe');
+  const { processResult } = require('../dist/lib/agents/vibe');
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mistral-proc-'));
   try {
     createTempSessionDir(tmp, SAMPLE_META, 'session_20260701_171711_test0006');
@@ -367,7 +367,7 @@ test('processResult preserves extra result fields', () => {
 // ---------- session-scoping validation ----------
 
 test('processResult accepts telemetry when session start_time is within invocation window', () => {
-  const { processResult } = require('../lib/agents/vibe');
+  const { processResult } = require('../dist/lib/agents/vibe');
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mistral-proc-'));
   try {
     const recentMeta = makeRecentMeta();
@@ -383,7 +383,7 @@ test('processResult accepts telemetry when session start_time is within invocati
 });
 
 test('processResult rejects telemetry when session is too old (outside 120-min window)', () => {
-  const { processResult } = require('../lib/agents/vibe');
+  const { processResult } = require('../dist/lib/agents/vibe');
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mistral-proc-'));
   try {
     const oldMeta = Object.assign({}, SAMPLE_META, {
@@ -399,7 +399,7 @@ test('processResult rejects telemetry when session is too old (outside 120-min w
 });
 
 test('processResult rejects telemetry when session start_time is in the future', () => {
-  const { processResult } = require('../lib/agents/vibe');
+  const { processResult } = require('../dist/lib/agents/vibe');
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mistral-proc-'));
   try {
     const futureMeta = Object.assign({}, SAMPLE_META, {
@@ -415,7 +415,7 @@ test('processResult rejects telemetry when session start_time is in the future',
 });
 
 test('processResult rejects telemetry when meta.json has no start_time field', () => {
-  const { processResult } = require('../lib/agents/vibe');
+  const { processResult } = require('../dist/lib/agents/vibe');
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mistral-proc-'));
   try {
     const noTimeMeta = {
@@ -436,7 +436,7 @@ test('processResult rejects telemetry when meta.json has no start_time field', (
 });
 
 test('processResult accepts telemetry when no invocationStart is provided (backward compat)', () => {
-  const { processResult } = require('../lib/agents/vibe');
+  const { processResult } = require('../dist/lib/agents/vibe');
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mistral-proc-'));
   try {
     const recentMeta = makeRecentMeta();

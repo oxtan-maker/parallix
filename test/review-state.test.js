@@ -42,7 +42,7 @@ function withTempMissionDir(slug, fn) {
 }
 
 test('reviewStateFile returns null for unknown slug', () => {
-  const { reviewStateFile } = require('../lib/review/review-state');
+  const { reviewStateFile } = require('../dist/lib/review/review-state');
   // Non-existent slug in the real repo
   const result = reviewStateFile('task-nonexistent-zzz');
   assert.equal(result, null);
@@ -50,7 +50,7 @@ test('reviewStateFile returns null for unknown slug', () => {
 
 test('readReviewState returns null when file does not exist', () => {
   withTempMissionDir('task-rs-1', (root, missionDir, slug) => {
-    const { readReviewState } = require('../lib/review/review-state');
+    const { readReviewState } = require('../dist/lib/review/review-state');
     assert.equal(readReviewState(slug), null);
   });
 });
@@ -60,7 +60,7 @@ test('readReviewState returns null for malformed JSON', () => {
     const stateFile = path.join(missionDir, 'review-state.json');
     fs.writeFileSync(stateFile, '{not valid json}', 'utf8');
 
-    const { readReviewState } = require('../lib/review/review-state');
+    const { readReviewState } = require('../dist/lib/review/review-state');
     assert.equal(readReviewState(slug), null);
   });
 });
@@ -70,7 +70,7 @@ test('readReviewState returns null for JSON missing reviewer/implementer', () =>
     const stateFile = path.join(missionDir, 'review-state.json');
     fs.writeFileSync(stateFile, JSON.stringify({ round: 1 }), 'utf8');
 
-    const { readReviewState } = require('../lib/review/review-state');
+    const { readReviewState } = require('../dist/lib/review/review-state');
     assert.equal(readReviewState(slug), null);
   });
 });
@@ -82,7 +82,7 @@ test('writeReviewState writes a valid JSON file', () => {
     spawnSync('git', ['add', '-A'], { cwd: root });
     spawnSync('git', ['commit', '-m', 'mission init', '--allow-empty-message'], { cwd: root });
 
-    const { writeReviewState, readReviewState } = require('../lib/review/review-state');
+    const { writeReviewState, readReviewState } = require('../dist/lib/review/review-state');
 
     const state = { reviewer: 'codex', implementer: 'claude', round: 1 };
     const result = writeReviewState(slug, state);
@@ -99,7 +99,7 @@ test('writeReviewState writes a valid JSON file', () => {
 
 test('writeReviewState reports commit failure if state remains dirty', () => {
   withTempMissionDir('task-rs-4c', (root, missionDir, slug) => {
-    const { writeReviewState } = require('../lib/review/review-state');
+    const { writeReviewState } = require('../dist/lib/review/review-state');
     const logs = [];
     const originalLog = console.log;
     console.log = (msg) => logs.push(msg);
@@ -131,7 +131,7 @@ test('writeReviewState commits in the provided worktree even from the wrong cwd'
 
     try {
       process.chdir(outsideDir);
-      const { writeReviewState } = require('../lib/review/review-state');
+      const { writeReviewState } = require('../dist/lib/review/review-state');
       const result = writeReviewState(slug, { reviewer: 'codex', implementer: 'claude', round: 2 }, root);
       assert.deepEqual(result, { outcome: 'committed' });
 
@@ -154,7 +154,7 @@ test('readReviewState reads from the provided rootDir, not process.cwd()', () =>
     const previous = process.cwd();
     try {
       process.chdir(outsideDir);
-      const { readReviewState } = require('../lib/review/review-state');
+      const { readReviewState } = require('../dist/lib/review/review-state');
       // Without rootDir: should return null (outsideDir has no mission)
       assert.equal(readReviewState(slug), null);
       // With rootDir pointing at the worktree: should find the state
@@ -172,7 +172,7 @@ test('readReviewState reads from the provided rootDir, not process.cwd()', () =>
 
 test('resetReviewState returns unchanged when no state exists', () => {
   withTempMissionDir('task-rs-5', (root, missionDir, slug) => {
-    const { resetReviewState } = require('../lib/review/review-state');
+    const { resetReviewState } = require('../dist/lib/review/review-state');
     assert.deepEqual(resetReviewState(slug), { outcome: 'unchanged' });
   });
 });
@@ -182,7 +182,7 @@ test('resetReviewState removes the state file', () => {
     const stateFile = path.join(missionDir, 'review-state.json');
     fs.writeFileSync(stateFile, JSON.stringify({ reviewer: 'codex', implementer: 'claude', round: 1 }), 'utf8');
 
-    const { resetReviewState, readReviewState } = require('../lib/review/review-state');
+    const { resetReviewState, readReviewState } = require('../dist/lib/review/review-state');
 
     const deleted = resetReviewState(slug);
     assert.deepEqual(deleted, { outcome: 'unchanged' });

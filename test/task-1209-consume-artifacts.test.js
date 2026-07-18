@@ -9,7 +9,7 @@ const childProcess = require('node:child_process');
 // SC4: --consume-artifacts integration test
 // ============================================================================
 
-const { consumeArtifacts } = require('../lib/review/review-commands');
+const { consumeArtifacts } = require('../dist/lib/review/review-commands');
 
 function runGitOrThrow(args, options = {}) {
   const result = childProcess.spawnSync('git', args, {
@@ -165,7 +165,7 @@ test('consumeArtifacts leaves no untracked review-events files after a successfu
 // SC5: consumeReviewerArtifacts distinguishes "no artifacts" from "artifacts but no verdict"
 // ============================================================================
 
-const { consumeReviewerArtifacts } = require('../lib/review/review-artifacts');
+const { consumeReviewerArtifacts } = require('../dist/lib/review/review-artifacts');
 
 test('consumeReviewerArtifacts returns consumed:false when no artifact files exist (task-1209 SC5a)', async () => {
   const result = await consumeReviewerArtifacts('test-slug', 'test-reviewer', {

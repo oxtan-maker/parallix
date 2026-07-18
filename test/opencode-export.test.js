@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const { spawn: realSpawn } = require('child_process');
-const { captureOpencodeExport } = require('../lib/agents/opencode-export');
+const { captureOpencodeExport } = require('../dist/lib/agents/opencode-export');
 
 function makeFakeChild() {
   const child = new EventEmitter();

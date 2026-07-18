@@ -24,7 +24,7 @@ const {
   startAgent,
   updateAgentBlock,
   shouldPersistLaunchFailureBlock
-} = require('../lib/agents/agents');
+} = require('../dist/lib/agents/agents');
 
 function makeFakeLauncher(scriptedResults, recorder) {
   let attempt = 0;
@@ -191,7 +191,7 @@ test('startAgent does not loop forever when WORKFLOW_AGENT is pinned and that ag
       const config = {
         steps: { review: { eligible: ['claude', 'codex'], selection: 'random' } }
       };
-      const { selectAgent } = require('../lib/agents/agents');
+      const { selectAgent } = require('../dist/lib/agents/agents');
       const selectAgentFn = (step, opts = {}) => selectAgent(step, { ...opts, config });
 
       const detectLimitHitFn = ({ agent }) => {
@@ -909,7 +909,7 @@ test('shouldPersistLaunchFailureBlock returns false for token limit exceeded', (
 });
 
 // (j) detectLimitHit guard for status === undefined
-const { detectLimitHit } = require('../lib/agents/limit-hit');
+const { detectLimitHit } = require('../dist/lib/agents/limit-hit');
 
 test('detectLimitHit returns null when status is undefined (legacy caller)', () => {
   // Legacy callers that don't pass exit metadata must not trigger false-positive

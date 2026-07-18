@@ -8,18 +8,15 @@
  * These tests put a fake `px` on PATH so `command px` inside the function is
  * exercised without needing a global install.
  */
-import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { spawnSync } from 'node:child_process';
-import test from 'node:test';
-import { shellInit } from '../px.js';
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { spawnSync } = require('node:child_process');
+const test = require('node:test');
+const { shellInit } = require('../dist/px.js');
 
-// @ts-expect-error TS1470 The 'import.meta' meta-property is not allowed in files which will build into Co
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const pxJs = path.resolve(__dirname, '..', 'px.js');
+const pxJs = path.resolve(__dirname, '..', 'dist', 'px.js');
 
 // Builds a fake `px` executable that prints the given transition signal.
 function makeFakePx({ signalPath, exitCode = 0, signal = 'next' }) {

@@ -2,14 +2,14 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { verifyHandoff, performHandoff } = require('../lib/commands/handoff');
+const { verifyHandoff, performHandoff } = require('../dist/lib/commands/handoff');
 const { mock } = test;
 
-const git = require('../lib/core/git');
-const missionUtils = require('../lib/core/mission-utils');
-const backlog = require('../lib/tools/backlog');
-const forgejo = require('../lib/tools/forgejo');
-const gatekeeper = require('../lib/tools/gatekeeper');
+const git = require('../dist/lib/core/git');
+const missionUtils = require('../dist/lib/core/mission-utils');
+const backlog = require('../dist/lib/tools/backlog');
+const forgejo = require('../dist/lib/tools/forgejo');
+const gatekeeper = require('../dist/lib/tools/gatekeeper');
 
 const TEST_SLUG = 'task-handoff-test';
 const WORKTREE = '/tmp/handoff-test-worktree';

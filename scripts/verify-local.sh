@@ -35,6 +35,15 @@ gate_all() {
 gate_static_analysis() {
   echo "=== Static Analysis Gate ==="
 
+  # Tests execute dist/ JavaScript, but typechecking that generated CommonJS
+  # directly is both noisy and expensive. Emit declarations only for this gate
+  # so test imports resolve cheaply, then remove them: declarations are not part
+  # of the distribution contract (ADR 0044).
+  cleanup_test_declarations() {
+    find "$REPO_ROOT/dist" -type f -name '*.d.ts' -delete 2>/dev/null || true
+  }
+  trap cleanup_test_declarations EXIT
+
   # Stage 1: ESLint on all sources with flat config (no --ext, ignores handled by config)
   echo "[1/4] Running ESLint..."
   if ! npx --yes eslint --max-warnings 300 lib/ index.ts px.ts 2>&1; then
@@ -65,6 +74,10 @@ gate_static_analysis() {
 
   # Stage 4: Test typecheck (check-only project for test/**/*.js)
   echo "[4/4] Running test typecheck..."
+  if ! npx tsc --declaration --emitDeclarationOnly; then
+    echo "FAIL: could not prepare temporary declarations for test typecheck"
+    return 1
+  fi
   TEST_TSC_OUTPUT=$(npx tsc --noEmit --project tsconfig.test.json 2>&1 || true)
   if [ -z "$TEST_TSC_OUTPUT" ]; then
     echo "PASS: test typecheck clean"
@@ -132,7 +145,7 @@ const {
   parseFilesToAreas,
   orderIntegrationGates,
   gateMatchesChangedAreas,
-} = require('./lib/commands/integrate.js');
+} = require('./dist/lib/commands/integrate.js');
 
 function log(message = '') {
   process.stdout.write(`${message}\n`);
@@ -257,8 +270,8 @@ NODE
 # directly via `./scripts/verify-local.sh mutation-gate` or through the
 # integration pipeline at config/integration-pipelines.json (order 40).
 gate_mutation() {
-  npm run --silent build:cjs
-  node lib/commands/mutation-gate.js "$@"
+  npm run --silent build
+  node dist/lib/commands/mutation-gate.js "$@"
 }
 
 case "$subcommand" in

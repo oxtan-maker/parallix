@@ -26,8 +26,8 @@ echo "[refresh-global-px] package.json/package-lock.json bumped to ${NEW_VERSION
 git add package.json package-lock.json
 git commit -m "chore: bump version to ${NEW_VERSION#v} (post-integrate self-update)"
 
-echo "[refresh-global-px] Building the distributable (tsc -> CommonJS)..."
-npm run build:cjs
+echo "[refresh-global-px] Building the distributable (tsc -> dist/)..."
+npm run build
 
 echo "[refresh-global-px] Packing a tarball of this checkout..."
 PACK_OUTPUT="$(npm pack)"

@@ -4,18 +4,18 @@ const fs = require('fs');
 const path = require('path');
 const { mock } = test;
 
-const git = require('../lib/core/git');
-const missionUtils = require('../lib/core/mission-utils');
-const backlog = require('../lib/tools/backlog');
-const forgejo = require('../lib/tools/forgejo');
-const stats = require('../lib/commands/stats');
+const git = require('../dist/lib/core/git');
+const missionUtils = require('../dist/lib/core/mission-utils');
+const backlog = require('../dist/lib/tools/backlog');
+const forgejo = require('../dist/lib/tools/forgejo');
+const stats = require('../dist/lib/commands/stats');
 
 const TEST_SLUG = 'task-2204';
 const FAKE_ROOT = '/tmp/task-2204-integrate-root';
 
 function loadIntegrate() {
-  delete require.cache[require.resolve('../lib/commands/integrate')];
-  return require('../lib/commands/integrate');
+  delete require.cache[require.resolve('../dist/lib/commands/integrate')];
+  return require('../dist/lib/commands/integrate');
 }
 
 function setupMocks() {
