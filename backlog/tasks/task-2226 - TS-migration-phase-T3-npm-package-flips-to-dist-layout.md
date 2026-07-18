@@ -1,7 +1,7 @@
 ---
 id: TASK-2226
 title: 'TS migration phase T3: npm package flips to dist/ layout'
-status: backlog
+status: refined
 assignee: [codex]
 created_date: '2026-07-11 13:46'
 labels:
