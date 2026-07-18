@@ -250,6 +250,7 @@ test('printUsage prints the command help text', () => {
   assert.match(all, /shell-init/);
   assert.match(all, /review-event/);
   assert.match(all, /--version/);
+  assert.match(all, /integrate \[<slug>\].*--real-agent codex.*--real-agent-model gpt-5\.6-luna/);
 });
 
 test('printUsage documents draft and active implementer-selection syntax', () => {

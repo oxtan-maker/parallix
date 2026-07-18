@@ -20,8 +20,10 @@ const childProcess = require('node:child_process');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const packageJson = require('../package.json');
-const CLI_ENTRY = path.resolve(__dirname, '..', packageJson.bin.px);
+// build:cjs emits the development CLI alongside px.ts.  The package manifest
+// intentionally points consumers at dist/px.js, which is produced by the
+// separate publish build and is not present during this source-level suite.
+const CLI_ENTRY = path.resolve(__dirname, '..', 'px.js');
 
 // Custom-family model for the smoke run comes from this repository's own
 // workflow.config.json (adapters.agents.models.custom), so the e2e test always
