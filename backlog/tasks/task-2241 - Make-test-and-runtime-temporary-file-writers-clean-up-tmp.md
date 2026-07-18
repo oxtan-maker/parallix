@@ -1,7 +1,7 @@
 ---
 id: TASK-2241
 title: Make test and runtime temporary-file writers clean up /tmp
-status: active
+status: review
 assignee: [codex]
 created_date: '2026-07-13 04:22'
 updated_date: '2026-07-13 04:35'
