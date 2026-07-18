@@ -215,7 +215,8 @@ extension seam, matching the existing `adapters.verification.command` opt-in pat
 **parallix's own hook — keeping the global `px` runner current.** `workflow.config.json` wires
 `postIntegrateCommand` to `./scripts/refresh-global-px.sh`. Every successful `px integrate` in
 this repo now: bumps the patch version in `package.json`/`package-lock.json`, commits that bump,
-rebuilds the distributable (`npm run build:cjs`), packs a tarball of the just-integrated checkout,
+refreshes the checkout compatibility build (`npm run build:cjs`), packs a tarball whose prepack
+step builds `dist/`,
 and reinstalls the global `px` runner from that tarball (`npm install -g ./<tarball>`) — the same
 local-tarball path documented in [Public distribution](#public-distribution-canonical-packaging-and-install)
 below. This automates what was previously a manual operator step ("bump before integrate,
@@ -325,39 +326,32 @@ the unscoped `px` / `parallix` npm names are not relied upon. The shortest
 supported path is:
 
 ```sh
-npm run build:cjs
 npm pack
 ```
 
 ```sh
-npm install -g ./magnus-parallix-*.tgz
+npm install -g ./magnusekdahl-parallix-*.tgz
 ```
 
 ```sh
-npm install -g --prefix "$HOME/.local" ./magnus-parallix-*.tgz
+npm install -g --prefix "$HOME/.local" ./magnusekdahl-parallix-*.tgz
 ```
 
 Use the user-writable prefix when you do not have `sudo` access. If your shell
 does not already place `$HOME/.local/bin` on `PATH`, add it once.
 
-`npm pack` and `npm publish` now fail closed if any guarded runtime `.js` file
-is missing or older than its tracked `.ts` source (`px`, `index`, and every
-`lib/commands/*.ts` sibling pair). The release sequence is therefore: rebuild
-with `npm run build:cjs`, then run `npm pack` / `npm publish`. `px integrate`
-reuses the same freshness check when it captures the verification proof for the
-tree being published, so integration cannot bless a stale compiled runtime.
+`npm pack` first refreshes the checkout's sibling-`.js` compatibility build,
+runs its freshness guard, and then runs the production TypeScript build. The
+packed executable is `dist/px.js`; the tarball contains `dist/**/*.js` and
+`dist/**/*.js.map` plus the runtime assets listed in ADR 0044 §8. `px
+integrate` reuses the checkout freshness check when it captures the verification
+proof for the tree being published.
 
-This freshness check only runs against the checkout, not the installed package
-(task-1424): `package.json`'s `files` list excludes `.ts` sources under `lib/`
-(`!lib/**/*.ts`) from the published tarball, since the compiled `.js` is
-canonical for installed packages and the `.ts` is not needed at runtime.
-Tarball extraction assigns each file its own extraction-time mtime in
-directory-sorted order, and `<name>.ts` always sorts after `<name>.js`, so a
-shipped `.ts`/`.js` pair would otherwise always look stale on a fresh install
-regardless of actual build freshness. Excluding the source pairs from the
-package removes the false-positive comparison entirely while the
-checkout-side guard above still fails closed on a genuinely stale checkout
-before it is ever packed.
+This freshness check only runs against the checkout, not the installed package:
+the package allowlist excludes all TypeScript sources and sibling runtime files.
+An installed tarball therefore has one executable layout, `dist/`, without
+source/sibling mtime pairs. The checkout-side guard still fails closed before
+packing, while the production build is recreated by every `npm pack`.
 
 `CHANGELOG.md` is the versioning authority. Until the first public release,
 PATCH bumps are the release discipline: bump before each `px integrate`, then
@@ -375,9 +369,10 @@ identifies the executing `px.js` path so an accidental PATH collision with an
 unrelated `px` is visible.
 
 **What stays source-compatible for local development.** Running directly from a
-checkout is unchanged: `node index.js <command>` runs from source, requires no
-install step, and never changes the caller's shell directory. The tarball install and the source run are the same
-code; the tarball only adds a versioned, globally linked `px`.
+checkout is unchanged: after `npm run build:cjs`, `node index.js <command>`
+uses the sibling compatibility runtime and requires no install step. The
+tarball instead runs the built `dist/` artifact and adds a versioned, globally
+linked `px`.
 
 **What is not yet supported.** The following are explicitly out of the near-term
 model and are not claimed to work today: publishing to the public npm registry

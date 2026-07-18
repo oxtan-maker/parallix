@@ -614,8 +614,13 @@ function findUnverifiableGoalCheckRow(evidenceRows: string[], rootDir: string): 
     const pushUser = ownerToken && repoOwner ? repoOwner : (fallbackUser || forgejoUser);
     const pushToken = ownerToken || token;
     const remoteUrl = forgejo.authenticatedReviewUrl(pushUser, pushToken, rootDir);
+    // transitionTask commits the Backlog state on its integration branch, then
+    // rebases this mission branch onto that new commit. Step 2 has already
+    // published the pre-transition tip to create/update the PR, so this push
+    // is necessarily non-fast-forward even during an ordinary handoff. Use a
+    // lease to update that known PR tip without overwriting a concurrent push.
     let pushLeaseArg = null;
-    if (force) {
+    {
       const fetchArgs = ['-C', rootDir, 'fetch', remoteUrl, `+refs/heads/${branch}:refs/remotes/review/${branch}`];
       const fetchResult = git.git(fetchArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
       if (fetchResult.status !== 0) {
@@ -655,7 +660,7 @@ function findUnverifiableGoalCheckRow(evidenceRows: string[], rootDir: string): 
       }
       const msg = `Failed to push Backlog transition for ${fmt.slug(slug)} to Forgejo.`;
       error(msg);
-      return { ok: false, error: msg };
+      return { ok: false, error: pushError.trim() ? `${msg} ${pushError.trim()}` : msg };
     }
   }
 

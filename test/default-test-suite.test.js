@@ -40,16 +40,16 @@ const expectedIntegrationFiles = [
   'verify-local-integrate.test.js'
 ].sort();
 
-function selectedFiles(args) {
+function selectedFiles(args, version = process.version) {
   const runnerPath = path.join(__dirname, 'run-default-tests.js');
   const runner = fs.readFileSync(runnerPath, 'utf8');
-  let spawnedTestFiles;
+  let spawnedTestArgs;
   const childProcess = {
     ['spawn' + 'Sync'](command, commandArgs) {
       if (commandArgs[0] === '--version') {
-        return { status: 0, stdout: process.version };
+        return { status: 0, stdout: version };
       }
-      spawnedTestFiles = commandArgs.slice(commandArgs.indexOf('--test') + 1);
+      spawnedTestArgs = commandArgs;
       return { status: 0 };
     }
   };
@@ -68,15 +68,23 @@ function selectedFiles(args) {
     }
   };
   vm.runInNewContext(runner, sandbox, { filename: runnerPath });
-  return Array.from(spawnedTestFiles, file => path.basename(file)).sort();
+  if (!spawnedTestArgs) {
+    throw new Error('Expected the default test runner to spawn a test process');
+  }
+  return {
+    files: Array.from(spawnedTestArgs.slice(spawnedTestArgs.indexOf('--test') + 1), file => path.basename(file)).sort(),
+    args: spawnedTestArgs
+  };
 }
 
 test('default test runner routes every moved group to integration and excludes it from default', () => {
   const runner = fs.readFileSync(path.join(__dirname, 'run-default-tests.js'), 'utf8');
   const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
 
-  const defaultFiles = selectedFiles([]);
-  const integrationFiles = selectedFiles(['--integration']);
+  const defaultRun = selectedFiles([]);
+  const integrationRun = selectedFiles(['--integration']);
+  const defaultFiles = defaultRun.files;
+  const integrationFiles = integrationRun.files;
 
   assert.deepEqual(integrationFiles, expectedIntegrationFiles);
   for (const file of expectedIntegrationFiles) {
@@ -85,5 +93,8 @@ test('default test runner routes every moved group to integration and excludes i
   assert.ok(!integrationFiles.includes('e2e-mission-lifecycle.test.js'));
   assert.ok(!integrationFiles.includes('e2e-real-agent-smoke.test.js'));
   assert.match(runner, /runsIntegrationSuite/);
+  assert.ok(defaultRun.args.includes('--test-force-exit'));
+  assert.ok(!selectedFiles([], 'v20.13.1').args.includes('--test-force-exit'));
+  assert.ok(selectedFiles([], 'v20.14.0').args.includes('--test-force-exit'));
   assert.equal(pkg.scripts['test:integration'], 'FORCE_COLOR=0 node test/run-default-tests.js --integration');
 });

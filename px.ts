@@ -5,6 +5,7 @@ import path from 'node:path';
 import * as fmt from './lib/core/fmt.js';
 import { createRequire } from 'node:module';
 import { assertBuildFreshness } from './lib/core/build-freshness.js';
+import { packageRoot } from './lib/core/package-root.js';
 
 declare const __filename: string | undefined;
 declare const require: {
@@ -21,9 +22,12 @@ function resolveRuntimePath(): string {
 }
 
 const runtimePath = resolveRuntimePath();
-const _require = createRequire(runtimePath);
-const packageJson = _require('./package.json');
 const runtimeDir = path.dirname(runtimePath);
+const _require = createRequire(runtimePath);
+const packageDir = packageRoot(runtimeDir);
+const packageJson = _require(path.join(packageDir, 'package.json'));
+
+process.setSourceMapsEnabled(true);
 
 interface ParsedArgs {
   target: string;
@@ -120,7 +124,7 @@ export function versionInfo(): VersionInfo {
     name: packageJson.name,
     version: packageJson.version,
     pxPath: runtimePath,
-    packageRoot: runtimeDir,
+    packageRoot: packageDir,
     node: process.version,
   };
 }

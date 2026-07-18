@@ -130,7 +130,7 @@ test('performHandoff skips commit in Step 4 when Backlog transition already comm
   fs.rmSync(missionMdPath, { force: true });
 });
 
-test('performHandoff refreshes the review tracking ref before a forced Forgejo state push', async (t) => {
+test('performHandoff refreshes the review tracking ref and lease-updates the rebased PR branch after its Backlog transition', async (t) => {
   const slug = 'task-098';
   const worktree = '/tmp/fake-worktree';
   const cpPath = '/tmp/fake-worktree/docs/missions/2026/task-098/CP-1.md';
@@ -165,7 +165,7 @@ test('performHandoff refreshes the review tracking ref before a forced Forgejo s
   const result = await performHandoff(slug, {
     worktree,
     skipGate: true,
-    force: true,
+    force: false,
     isForgejoReviewEnabledFn: () => true,
     rebaseFn: mockRebase,
   });
@@ -229,6 +229,7 @@ test('performHandoff falls back to magnus and persists bootstrap failure summary
     assert.equal(token, 'human-token');
     return 'http://fake-url';
   });
+  mock.method(forgejo, 'resolveTrackingBranchSha', () => ({ ok: true, sha: 'lease-sha' }));
   mock.method(gatekeeper, 'runGatekeeper', () => ({ ok: true, missing: [], skipped: false, posted: false }));
   writeReviewState(missionDir, 'custom', 'custom');
 
@@ -808,6 +809,7 @@ test('performHandoff calls rebaseBeforeReviewRound before Forgejo PR creation', 
     return { ok: true, url: 'http://fake-pr' };
   });
   mock.method(forgejo, 'authenticatedReviewUrl', () => 'http://fake-url');
+  mock.method(forgejo, 'resolveTrackingBranchSha', () => ({ ok: true, sha: 'lease-sha' }));
   mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile }));
   mock.method(backlog, 'transitionTask', () => true);
   mock.method(gatekeeper, 'runGatekeeper', () => ({ ok: true, missing: [], skipped: false, posted: false }));
@@ -960,6 +962,7 @@ test('performHandoff proceeds normally when rebase is a no-op (branch already up
   mock.method(forgejo, 'readToken', () => 'fake-token');
   mock.method(forgejo, 'createPr', () => ({ ok: true, url: 'http://fake-pr' }));
   mock.method(forgejo, 'authenticatedReviewUrl', () => 'http://fake-url');
+  mock.method(forgejo, 'resolveTrackingBranchSha', () => ({ ok: true, sha: 'lease-sha' }));
   mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile }));
   mock.method(backlog, 'transitionTask', () => true);
   mock.method(gatekeeper, 'runGatekeeper', () => ({ ok: true, missing: [], skipped: false, posted: false }));

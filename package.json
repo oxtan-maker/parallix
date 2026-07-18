@@ -4,9 +4,14 @@
   "description": "AI mission workflow toolkit with a px CLI — local-first, human-in-the-loop multi-agent development",
   "license": "AGPL-3.0-or-later",
   "private": false,
-  "main": "index.js",
+  "type": "commonjs",
+  "main": "dist/index.js",
   "bin": {
-    "px": "px.js"
+    "px": "dist/px.js"
+  },
+  "exports": {
+    ".": "./dist/index.js",
+    "./package.json": "./package.json"
   },
   "engines": {
     "node": ">=20"
@@ -32,8 +37,7 @@
   },
   "homepage": "https://github.com/magnusekdahl/parallix#readme",
   "files": [
-    "index.js",
-    "px.js",
+    "dist/",
     "LICENSE",
     "README.md",
     "CHANGELOG.md",
@@ -41,17 +45,15 @@
     "data/",
     "docs/",
     "examples/",
-    "lib/",
-    "!lib/**/*.ts",
     "prompts/",
     "templates/",
     "tools/setup-forgejo-docker.sh"
   ],
   "scripts": {
     "build": "tsc",
-    "build:cjs": "tsc --rootDir . --outDir . --module CommonJS --moduleResolution Node --esModuleInterop && node -e \"const fs=require('node:fs');const p='px.js';const s=fs.readFileSync(p,'utf8');if(!s.startsWith('#!'))fs.writeFileSync(p,'#!/usr/bin/env node\\n'+s);fs.chmodSync(p,0o755)\"",
+    "build:cjs": "tsc --rootDir . --outDir . --module CommonJS --moduleResolution Node --esModuleInterop --sourceMap false && node -e \"const fs=require('node:fs');const p='px.js';const s=fs.readFileSync(p,'utf8');if(!s.startsWith('#!'))fs.writeFileSync(p,'#!/usr/bin/env node\\n'+s);fs.chmodSync(p,0o755)\"",
     "publish:guard": "node -e \"require('./lib/core/build-freshness.js').assertBuildFreshness(process.cwd())\"",
-    "prepack": "npm run publish:guard",
+    "prepack": "npm run build:cjs && npm run publish:guard && npm run build",
     "prepublishOnly": "npm run publish:guard",
     "pretest": "npm run build:cjs",
     "test": "FORCE_COLOR=0 node test/run-default-tests.js",

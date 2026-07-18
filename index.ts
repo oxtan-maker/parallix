@@ -11,6 +11,9 @@ import * as fmt from './lib/core/fmt.js';
 import { ensureStandaloneGitRepo } from './lib/core/product-config.js';
 import { loadStateMap } from './lib/core/state-map.js';
 import { assertBuildFreshness } from './lib/core/build-freshness.js';
+import { packageRoot } from './lib/core/package-root.js';
+
+process.setSourceMapsEnabled(true);
 
 // Fixed virtual-state → canonical-command invariants for alias derivation.
 const STATE_COMMAND_MAP: Record<string, string> = {
@@ -104,7 +107,7 @@ async function main(args = process.argv.slice(2), options: MainOptions = {}) {
   const command = args[0];
 
   if (command === '--version' || command === '-v') {
-    const pkg = requireFn(path.join(__dirname, 'package.json'));
+    const pkg = requireFn(path.join(packageRoot(__dirname), 'package.json'));
     logFn(pkg.name + '@' + pkg.version);
     exitFn(0);
     return;
