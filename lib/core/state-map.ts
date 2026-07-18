@@ -2,8 +2,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { loadEffectiveConfig } from './product-config.js';
 import { log, status } from './fmt.js';
+import { packageRoot } from './package-root.js';
 
-const SHIPPED_STATE_MAP_PATH = path.join(__dirname, '..', '..', 'config', 'state-map.json');
+const SHIPPED_STATE_MAP_PATH = path.join(packageRoot(__dirname), 'config', 'state-map.json');
 
 interface StateMapOptions {
   rootDir?: string;

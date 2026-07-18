@@ -12,10 +12,11 @@ import * as stats from './stats.js';
 import { formatVerificationCommand } from '../core/verification.js';
 import { ensureStandaloneMissionBaseline, resolveAgentModel } from '../core/product-config.js';
 import { ensureWorkflowGitignore } from '../core/gitignore.js';
+import { packageRoot } from '../core/package-root.js';
 import { unquoteGitStatusPath } from './active.js';
 
-const DRAFT_PROMPT_PATH = path.join(__dirname, '..', '..', 'prompts', 'draft.md');
-const MISSION_SCAFFOLD_PATH = path.join(__dirname, '..', '..', 'templates', 'mission-scaffold.md');
+const DRAFT_PROMPT_PATH = path.join(packageRoot(__dirname), 'prompts', 'draft.md');
+const MISSION_SCAFFOLD_PATH = path.join(packageRoot(__dirname), 'templates', 'mission-scaffold.md');
 const SYNTHETIC_SLUG_PREFIX = 'adhoc-';
 
 function slugifyDraftIntent(/** @type {string} */ value) {

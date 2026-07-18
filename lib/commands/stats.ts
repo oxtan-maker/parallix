@@ -89,6 +89,7 @@ import * as reviewEvents from '../review/review-events.js';
 import { git } from '../core/git.js';
 import { migrateStats } from '../core/persistent-data-migration.js';
 import { findMissionDir } from '../core/mission-utils.js';
+import { packageRoot } from '../core/package-root.js';
 import * as forgejo from '../tools/forgejo.js';
 import * as storage from '../core/storage.js';
 
@@ -119,7 +120,7 @@ const USAGE_NUMBERS = new Set([
 ]);
 
 const VALID_CLASSIFICATIONS = new Set(['ai_sdlc', 'user_value', 'unknown']);
-const SHIPPED_STATS_CSV_PATH = path.join(__dirname, '..', 'data', 'stats.seed.csv');
+const SHIPPED_STATS_CSV_PATH = path.join(packageRoot(__dirname), 'data', 'stats.seed.csv');
 function getStorage() {
   return storage;
 }

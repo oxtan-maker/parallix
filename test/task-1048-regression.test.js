@@ -37,6 +37,17 @@ test('TASK-1048: startReviewLoop does not crash when taskResolution is needed fo
     getPrStatusFn: () => ({ exists: true, state: 'open', number: 42 }),
     resolveForgejoUserFn: () => 'gemini',
     readTokenFn: () => 'mock-token',
+    // This is a unit test for fallback-state propagation, not an integration
+    // test for the project verifier. Running the real `all` gate here starts
+    // `npm test` again and recursively launches this suite.
+    runPreReviewGateFn: async () => ({
+      ok: true,
+      area: 'all',
+      command: 'mock verification gate',
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+    }),
     // @ts-expect-error TS2322 Type 'number' is not assignable to type 'ReviewStatePersistenceResult'.
     writeReviewStateFn: (slug, state) => writes.push({ slug, state }),
     rebaseBeforeReviewRoundFn: async () => ({ ok: true, sharedFileConflicts: false }),

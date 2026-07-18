@@ -1,13 +1,14 @@
 ---
 id: TASK-2225
 title: 'TS migration phase T2: packageRoot() asset-resolution hardening'
-status: review
+status: done
 assignee: [codex]
 created_date: '2026-07-11 13:46'
 labels:
   - typescript
   - migration
   - adr-0044
+  - user_value
 dependencies: []
 references:
   - docs/adr/0044-workflow-distribution-model.md

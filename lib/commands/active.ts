@@ -13,8 +13,9 @@ import * as review from '../review/review.js';
 import * as repairHandoff from './repair-handoff.js';
 import * as stats from './stats.js';
 import { resolveStageTelemetry } from '../agents/stage-telemetry.js';
+import { packageRoot } from '../core/package-root.js';
 
-const EXECUTE_PROMPT_PATH = path.join(__dirname, '..', '..', 'prompts', 'execute.md');
+const EXECUTE_PROMPT_PATH = path.join(packageRoot(__dirname), 'prompts', 'execute.md');
 
 /**
  * @param {string[]} args

@@ -70,7 +70,7 @@ async function captureExit(fn) {
   return { exitCode, errors, logs };
 }
 
-test('startReviewLoop auto-derives implementer from backlog task', async () => {
+test('startReviewLoop auto-derives implementer from backlog task', { concurrency: false }, async () => {
   const { startReviewLoop } = require('../lib/review/review');
 
   await withTempRepo(async root => {
@@ -95,7 +95,7 @@ test('startReviewLoop auto-derives implementer from backlog task', async () => {
   });
 });
 
-test('startReviewLoop prioritizes explicit implementer over backlog task', async () => {
+test('startReviewLoop prioritizes explicit implementer over backlog task', { concurrency: false }, async () => {
   const { startReviewLoop } = require('../lib/review/review');
 
   await withTempRepo(async root => {

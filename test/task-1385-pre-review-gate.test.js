@@ -297,6 +297,43 @@ test('handleGateFailureAutoBounce bounces on first failure', async () => {
   });
 });
 
+test('handleGateFailureAutoBounce rebounces a gate failure with arbitrary test output', async () => {
+  await withTempDir(async root => {
+    const launches = [];
+    const transitions = [];
+
+    const result = await handleGateFailureAutoBounce('task-1385', root, {
+      ok: false,
+      area: 'static-analysis',
+      command: './scripts/verify-local.sh static-analysis',
+      exitCode: 1,
+      stdout: 'test/example.test.js:42: assertion failed',
+      stderr: '',
+      error: 'verification gate failed with exit code 1',
+    }, 'codex', {
+      readReviewStateFn: () => null,
+      // @ts-expect-error minimal review state is sufficient for this behavior test.
+      writeReviewStateFn: () => {},
+      // @ts-expect-error transition arguments are asserted below.
+      transitionTaskFn: (slug, status) => { transitions.push({ slug, status }); },
+      // @ts-expect-error launcher behavior is limited to a successful relaunch.
+      startAgentFn: async (mode, opts) => {
+        const prompt = typeof opts.prompt === 'function' ? opts.prompt('codex') : opts.prompt;
+        launches.push({ mode, prompt });
+        return { agent: 'codex' };
+      },
+      applyAgentFallbackFn: () => 'codex',
+      log: () => {}, error: () => {}, sleepFn: () => Promise.resolve(),
+      exit: () => { throw new Error('exit called'); },
+    });
+
+    assert.deepEqual(result, { bounced: true, stranded: false });
+    assert.deepEqual(transitions, [{ slug: 'task-1385', status: 'active' }]);
+    assert.equal(launches.length, 1);
+    assert.match(launches[0].prompt, /assertion failed/);
+  });
+});
+
 test('handleGateFailureAutoBounce bounces on second failure', async () => {
   await withTempDir(async root => {
     const launches = [];
