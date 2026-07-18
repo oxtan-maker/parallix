@@ -1217,6 +1217,55 @@ test('performHandoff stops before review transitions when NEL persistence fails'
   }
 });
 
+test('performHandoff commits a newly captured NEL record before transitioning Backlog', async (t) => {
+  const slug = 'task-nel-commit';
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'handoff-nel-commit-'));
+  const missionDir = path.join(worktree, 'missions', slug);
+  const checkpoint = path.join(missionDir, 'CP-1.md');
+  const taskFile = path.join(worktree, 'backlog', 'tasks', `${slug} - commit.md`);
+  const relativeNelRecord = path.join('missions', slug, 'nel-record.json');
+  fs.mkdirSync(path.dirname(taskFile), { recursive: true });
+  fs.mkdirSync(missionDir, { recursive: true });
+  fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Mission\n');
+  fs.writeFileSync(checkpoint, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| proof | test/handoff.test.js | PASS |\n');
+  fs.writeFileSync(taskFile, '---\nstatus: active\n---\n');
+  writeReviewState(missionDir, 'codex', 'codex');
+  const gitCalls = [];
+  let transitions = 0;
+  t.mock.method(missionUtils, 'findMissionDir', () => missionDir);
+  t.mock.method(missionUtils, 'findMissionArea', () => 'workflow');
+  t.mock.method(missionUtils, 'findCheckpoints', () => [checkpoint]);
+  t.mock.method(git, 'getCurrentBranch', () => `mission/${slug}`);
+  t.mock.method(git, 'getWorktreeStatus', () => []);
+  t.mock.method(git, 'git', args => {
+    gitCalls.push(args);
+    if (args.includes('diff')) { return { status: 1, stdout: '', stderr: '' }; }
+    return { status: 0, stdout: '', stderr: '' };
+  });
+  t.mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile }));
+  t.mock.method(backlog, 'transitionTask', () => { transitions++; return true; });
+  try {
+    const result = await performHandoff(slug, {
+      worktree,
+      skipGate: true,
+      isForgejoReviewEnabledFn: () => false,
+      rebaseFn: async () => ({ ok: true }),
+      captureNelFn: () => ({ ok: true, nel: 0, bucket: { label: 'Small' } }),
+      log: () => {},
+      error: () => {},
+    });
+    assert.equal(result.ok, true);
+    assert.deepEqual(gitCalls, [
+      ['-C', worktree, 'add', '--', relativeNelRecord],
+      ['-C', worktree, 'diff', '--quiet', '--cached', '--', relativeNelRecord],
+      ['-C', worktree, 'commit', '-m', `chore(${slug}): capture handoff NEL`],
+    ]);
+    assert.equal(transitions, 1);
+  } finally {
+    fs.rmSync(worktree, { recursive: true, force: true });
+  }
+});
+
 test('captureNelAtHandoff reads predicted bucket from MISSION.md Refinement Signals', () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nel-capture-bucket-'));
   const missionDir = path.join(tmpDir, 'missions/task-nel-bucket');

@@ -43,6 +43,7 @@ const expectedIntegrationFiles = [
 function selectedFiles(args, version = process.version) {
   const runnerPath = path.join(__dirname, 'run-default-tests.js');
   const runner = fs.readFileSync(runnerPath, 'utf8');
+  /** @type {string[] | undefined} */
   let spawnedTestArgs;
   const childProcess = {
     ['spawn' + 'Sync'](command, commandArgs) {

@@ -238,7 +238,7 @@ ${fmt.bold('Core Commands:')}
   checkpoint [<slug>] <cp> "<next>"  Verify, commit, and push checkpoint.
   review [<slug>] [--verify|--submit|--push [--force]|--comment "<msg>"|--comment-file <path>|--submit-review <outcome> [--message "<msg>"|--message-file <path>]|--start|--continue] [--implementer <a>] [--reviewer <a>] [--focus <f>] [--max-attempts <n>] [--dry-run] [--reset] [--no-gate]
   handoff [<slug>] [--no-gate] [--force]  Sync, push, and transition mission to review.
-  integrate [<slug>] [--dry-run] [--no-integration-gates]  Land a reviewed mission into the local integration checkout on main. --no-integration-gates skips integration-time staging/e2e gates.
+  integrate [<slug>] [--dry-run] [--no-integration-gates] [--real-agent codex --real-agent-model gpt-5.6-luna]  Land a reviewed mission into the local integration checkout on main. --no-integration-gates skips integration-time staging/e2e gates; the paired real-agent flags override the Codex integration-gate runner.
   resolve-conflict [<slug>]       Detect merge conflicts in the mission worktree and emit resolution guidance.
   rebase [<slug>] [--push]          Rebase mission branch onto the primary integration branch (main) with auto-resolution of mission-specific conflicts.
   diff [<slug>]                Launch the primary local diff tool for branch-vs-main review.

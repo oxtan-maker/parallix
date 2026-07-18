@@ -1,7 +1,7 @@
 ---
 id: TASK-2262
 title: commit handoff NEL record before review-transition rebase
-status: review
+status: done
 assignee: [codex]
 created_date: '2026-07-14 07:00'
 labels: [ai_sdlc]
