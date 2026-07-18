@@ -1,7 +1,7 @@
 ---
 id: TASK-2239
 title: review changes
-status: active
+status: review
 assignee: [codex]
 created_date: '2026-07-13 03:09'
 labels: []
