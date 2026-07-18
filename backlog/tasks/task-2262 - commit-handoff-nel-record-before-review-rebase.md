@@ -4,7 +4,7 @@ title: commit handoff NEL record before review-transition rebase
 status: review
 assignee: [codex]
 created_date: '2026-07-14 07:00'
-labels: [bug]
+labels: [ai_sdlc]
 dependencies: []
 ordinal: 37010
 ---
