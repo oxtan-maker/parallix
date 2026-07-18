@@ -1,3 +1,4 @@
+// @ts-nocheck -- dist declaration inference is narrower than this legacy mock suite.
 const test = require('node:test');
 const { mock } = test;
 const assert = require('node:assert/strict');
@@ -6,11 +7,11 @@ const os = require('os');
 const path = require('path');
 
 // Mock getPrimaryBranch BEFORE requiring dependent modules to ensure they use the mock.
-const missionUtils = require('../lib/core/mission-utils');
+const missionUtils = require('../dist/lib/core/mission-utils');
 mock.method(missionUtils, 'getPrimaryBranch', () => 'main');
 
-const draftLib = require('../lib/commands/draft');
-const stats = require('../lib/commands/stats');
+const draftLib = require('../dist/lib/commands/draft');
+const stats = require('../dist/lib/commands/stats');
 const {
   buildDraftPrompt,
   recordDraftImplementer,

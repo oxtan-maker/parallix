@@ -11,7 +11,7 @@ const {
   collectRolloutFiles,
   extractCodexTelemetry,
   codexSessionsDir,
-} = require('../lib/agents/codex-telemetry');
+} = require('../dist/lib/agents/codex-telemetry');
 
 // Minimal but schema-faithful rollout JSONL, modelled on the real Codex
 // `~/.codex/sessions/.../rollout-*.jsonl` format (task-1251). Tests are fully

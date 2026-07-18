@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
-const { resolvePostIntegrateCommand } = require('../lib/core/post-integrate-hook');
+const { resolvePostIntegrateCommand } = require('../dist/lib/core/post-integrate-hook');
 
 const REPO_ROOT = path.join(__dirname, '..');
 const SCRIPT_PATH = path.join(REPO_ROOT, 'scripts', 'refresh-global-px.sh');
@@ -33,7 +33,7 @@ test('scripts/refresh-global-px.sh is syntactically valid bash', () => {
 test('scripts/refresh-global-px.sh bumps the patch version and reinstalls from a packed tarball of this checkout', () => {
   const content = fs.readFileSync(SCRIPT_PATH, 'utf8');
   assert.match(content, /npm version patch/);
-  assert.match(content, /npm run build:cjs/);
+  assert.match(content, /npm run build/);
   assert.match(content, /npm pack/);
   assert.match(content, /npm install -g/);
   // Uses the hook-provided env vars documented in lib/core/post-integrate-hook.ts.

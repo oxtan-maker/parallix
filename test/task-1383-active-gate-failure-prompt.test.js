@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const repairHandoff = require('../lib/commands/repair-handoff');
+const repairHandoff = require('../dist/lib/commands/repair-handoff');
 
 // task-1383: when a verification-gate failure carries captured failing-test
 // output, the relaunch prompt must be a state-aware fix prompt that cites the

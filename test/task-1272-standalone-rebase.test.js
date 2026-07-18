@@ -12,7 +12,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const childProcess = require('child_process');
-const { rebaseBeforeReviewRound } = require('../lib/review/review');
+const { rebaseBeforeReviewRound } = require('../dist/lib/review/review');
 
 function runGit(root, args) {
   const result = childProcess.spawnSync('git', ['-C', root, ...args], { encoding: 'utf8' });

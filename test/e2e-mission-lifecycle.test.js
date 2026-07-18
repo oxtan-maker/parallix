@@ -5,10 +5,10 @@ const childProcess = require('node:child_process');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-// build:cjs emits the development CLI alongside px.ts.  The package manifest
+// npm run build emits the development CLI under dist/. The package manifest
 // intentionally points consumers at dist/px.js, which is produced by the
 // separate publish build and is not present during this source-level suite.
-const CLI_ENTRY = path.resolve(__dirname, '..', 'px.js');
+const CLI_ENTRY = path.resolve(__dirname, '..', 'dist', 'px.js');
 
 function runCommand(command, args, options = {}) {
   const result = childProcess.spawnSync(command, args, {

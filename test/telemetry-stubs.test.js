@@ -10,7 +10,7 @@ const {
   parseVibeMeta,
   extractVibeTelemetry,
   getVibeProviderModel,
-} = require('../lib/agents/vibe-telemetry');
+} = require('../dist/lib/agents/vibe-telemetry');
 
 // ---------- parseVibeMeta ----------
 

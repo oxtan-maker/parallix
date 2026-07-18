@@ -72,7 +72,7 @@ test('task-1429: stale build freshness does not block captureVerifiedTreeProof',
     runGit(['commit', '-m', 'initial']);
 
     // Import the module under test
-    const { captureVerifiedTreeProof } = require('../lib/core/verification.js');
+    const { captureVerifiedTreeProof } = require('../dist/lib/core/verification.js');
 
     // Ensure PARALLIX_SKIP_BUILD_CHECK is NOT set (we want the stale build to trigger)
     const originalEnv = process.env.PARALLIX_SKIP_BUILD_CHECK;

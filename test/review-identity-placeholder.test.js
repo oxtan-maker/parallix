@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { buildCompactReviewPrompt, buildCompactActOnReviewPrompt } = require('../lib/review/review-prompts');
+const { buildCompactReviewPrompt, buildCompactActOnReviewPrompt } = require('../dist/lib/review/review-prompts');
 
 test('buildCompactReviewPrompt uses actualReviewer when provided', () => {
   const prompt = buildCompactReviewPrompt({

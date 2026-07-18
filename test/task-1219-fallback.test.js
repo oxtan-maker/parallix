@@ -5,9 +5,9 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-require('../lib/commands/stats');
-const backlog = require('../lib/tools/backlog');
-const missionUtils = require('../lib/core/mission-utils');
+require('../dist/lib/commands/stats');
+const backlog = require('../dist/lib/tools/backlog');
+const missionUtils = require('../dist/lib/core/mission-utils');
 const FAKE_ROOT = `/tmp/mission-${process.pid}`;
 function installCommonMocks() {
   mock.method(backlog, 'getTaskClassification', () => 'ai_sdlc');
@@ -26,7 +26,7 @@ test.afterEach(() => {
   mock.reset();
 });
 
-const { evaluateTaskStatusForIntegration, printIntegrationPreflight, buildIntegrationContext } = require('../lib/commands/integrate');
+const { evaluateTaskStatusForIntegration, printIntegrationPreflight, buildIntegrationContext } = require('../dist/lib/commands/integrate');
 
 // SC 1a: evaluateTaskStatusForIntegration accepts locally-derived reviewState: 'APPROVED' for tasks in status 'review'
 test('evaluateTaskStatusForIntegration accepts local-review-state approval for review status', () => {

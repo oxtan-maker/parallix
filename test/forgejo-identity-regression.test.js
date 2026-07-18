@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { getPrStatus, getPrNumber } = require('../lib/tools/forgejo.js');
+const { getPrStatus, getPrNumber } = require('../dist/lib/tools/forgejo.js');
 const { mock } = test;
 
 // Regression test for task-1121: ensure that when a token for a specific agent

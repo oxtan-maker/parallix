@@ -5,7 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 test('codex isolation repro keeps operator-home nested tool resolution while isolating Codex state', () => {
-  const { buildCodexDraftInvocation, codexStateRoot } = require('../lib/agents/codex');
+  const { buildCodexDraftInvocation, codexStateRoot } = require('../dist/lib/agents/codex');
   const operatorHome = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2211-operator-home-'));
   const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2211-worktree-'));
   const originalHome = process.env.HOME;
@@ -31,7 +31,7 @@ test('codex isolation repro keeps operator-home nested tool resolution while iso
 });
 
 test('Codex config, auth, skill seed, and rollout telemetry remain under the worktree state directory', () => {
-  const codex = require('../lib/agents/codex');
+  const codex = require('../dist/lib/agents/codex');
   const operatorHome = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2211-state-operator-home-'));
   const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2211-state-worktree-'));
   const originalHome = process.env.HOME;

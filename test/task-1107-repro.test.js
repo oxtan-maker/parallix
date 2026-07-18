@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { rebaseBeforeReviewRound } = require('../lib/review/review');
-const { isMissionArtifact, isWorkflowGeneratedArtifact } = require('../lib/core/mission-utils');
+const { rebaseBeforeReviewRound } = require('../dist/lib/review/review');
+const { isMissionArtifact, isWorkflowGeneratedArtifact } = require('../dist/lib/core/mission-utils');
 
 function porcelainZ(entries) {
   return `${entries.join('\0')}\0`;

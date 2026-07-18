@@ -5,12 +5,12 @@
  * and enforce a configurable line-coverage threshold (default 90%).
  *
  * Usage:
- *   node parallix/lib/commands/coverage-gate.js [--threshold <pct>] [--dry-run]
+ *   node parallix/dist/lib/commands/coverage-gate.js [--threshold <pct>] [--dry-run]
  *
  * Exit 0 when tests pass and coverage >= threshold.
  * Exit 1 otherwise.
  *
- * Denominator: parallix/index.js plus all nested .js files under parallix/lib
+ * Denominator: parallix/dist/index.js plus all nested .js files under parallix/dist/lib
  * Excludes: parallix/test/*, parallix/prompts/*, parallix/config/*.json,
  *           coverage output dirs, node_modules, generated/temp files.
  *
@@ -53,8 +53,9 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as fmt from '../core/fmt.js';
+import { packageRoot } from '../core/package-root.js';
 
-const REPO_ROOT = path.resolve(__dirname, '..', '..');
+const REPO_ROOT = packageRoot(__dirname);
 const SELF_TEST_FILE = 'coverage-gate.test.js';
 const TEMP_DIR_PREFIXES = [
   'agents-',
@@ -75,8 +76,8 @@ const TEMP_DIR_PREFIXES = [
   'backlog-'
 ];
 const COVERAGE_INCLUDES = [
-  'index.js',
-  'lib/**/*.js'
+  'dist/index.js',
+  'dist/lib/**/*.js'
 ];
 const COVERAGE_EXCLUDES = [
   'test/**',
@@ -285,7 +286,7 @@ function main() {
 
   if (dryRun) {
     fmt.log.info(`DRY-RUN mode — threshold=${threshold}%`);
-    fmt.log.info('Denominator: index.js + lib/**/*.js');
+    fmt.log.info('Denominator: dist/index.js + dist/lib/**/*.js');
     fmt.log.info(`Include globs: ${COVERAGE_INCLUDES.join(', ')}`);
     fmt.log.info(`Exclude globs: ${COVERAGE_EXCLUDES.join(', ')}`);
     fmt.log.info(`Would run: ${fmt.command(`${process.execPath} ${buildCoverageArgs(testFiles, threshold).join(' ')}`)}`);
@@ -328,7 +329,7 @@ function run(args: string[], options: CoverageGateOptions = {}) {
       } else {
         fmt.log.info(`Found ${testFiles.length} test file(s)`);
         fmt.log.info(`DRY-RUN mode — threshold=${threshold}%`);
-        fmt.log.info('Denominator: index.js + lib/**/*.js');
+        fmt.log.info('Denominator: dist/index.js + dist/lib/**/*.js');
         fmt.log.info(`Include globs: ${COVERAGE_INCLUDES.join(', ')}`);
         fmt.log.info(`Exclude globs: ${COVERAGE_EXCLUDES.join(', ')}`);
         fmt.log.info(`Would run: ${fmt.command(`${process.execPath} ${buildCoverageArgs(testFiles, threshold).join(' ')}`)}`);

@@ -14,7 +14,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { packageRoot } = require('../lib/core/package-root');
+const { packageRoot } = require('../dist/lib/core/package-root');
 
 // The real checkout root, resolved from this test's own directory.
 const ROOT = packageRoot(__dirname);
@@ -119,15 +119,15 @@ test('every migrated call site resolves its package asset from a temp CWD', asyn
     // Load every migrated module after changing CWD, then invoke the paths that
     // consume a shipped asset. This verifies the call-site resolver, rather
     // than only exercising packageRoot() with a synthetic module directory.
-    const reviewPrompts = require('../lib/review/review-prompts');
-    const draft = require('../lib/commands/draft');
-    const active = require('../lib/commands/active');
-    const stateMap = require('../lib/core/state-map');
-    const agentConfig = require('../lib/agents/agent-config');
-    const runtimeMatrix = require('../lib/core/runtime-matrix');
-    const mutationGate = require('../lib/commands/mutation-gate');
-    const stats = require('../lib/commands/stats');
-    const reviewLoop = require('../lib/review/review-loop');
+    const reviewPrompts = require('../dist/lib/review/review-prompts');
+    const draft = require('../dist/lib/commands/draft');
+    const active = require('../dist/lib/commands/active');
+    const stateMap = require('../dist/lib/core/state-map');
+    const agentConfig = require('../dist/lib/agents/agent-config');
+    const runtimeMatrix = require('../dist/lib/core/runtime-matrix');
+    const mutationGate = require('../dist/lib/commands/mutation-gate');
+    const stats = require('../dist/lib/commands/stats');
+    const reviewLoop = require('../dist/lib/review/review-loop');
 
     assert.match(reviewPrompts.buildReviewPrompt({
       reviewer: 'codex', branch: 'mission/task-2225', implementer: 'codex', attempt: 1, repoRoot: ROOT,

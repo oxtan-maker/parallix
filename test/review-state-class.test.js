@@ -3,9 +3,9 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { ReviewState, readReviewState, normalizeReviewPhase } = require('../lib/review/review-state');
-const { stageLaunchSinceMs } = require('../lib/review/review-loop');
-const fmt = require('../lib/core/fmt');
+const { ReviewState, readReviewState, normalizeReviewPhase } = require('../dist/lib/review/review-state');
+const { stageLaunchSinceMs } = require('../dist/lib/review/review-loop');
+const fmt = require('../dist/lib/core/fmt');
 
 function withTempMissionDir(slug, fn) {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'review-state-class-test-'));
@@ -270,7 +270,7 @@ test('ReviewState save returns add-failed when git add exits non-zero', () => {
 // ReviewState from scratch, dropping round/startedAt/phase/disposition back to
 // fresh-start defaults instead of carrying the persisted round data forward.
 test('startReviewLoop preserves persisted round data when the reviewer identity changes on resume', async () => {
-  const { startReviewLoop } = require('../lib/review/review');
+  const { startReviewLoop } = require('../dist/lib/review/review');
   const writes = [];
 
   // Drive the real loop with injected mocks (no live provider / agents) and capture

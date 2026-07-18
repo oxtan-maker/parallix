@@ -1,11 +1,11 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const missionUtils = require('../lib/core/mission-utils');
+const missionUtils = require('../dist/lib/core/mission-utils');
 const previousPrimaryWorktree = process.env.PRIMARY_WORKTREE;
 if (previousPrimaryWorktree === undefined) {
   process.env.PRIMARY_WORKTREE = `/tmp/visualBoard-${process.pid}`;
 }
-const integrate = require('../lib/commands/integrate');
+const integrate = require('../dist/lib/commands/integrate');
 if (previousPrimaryWorktree === undefined) {
   delete process.env.PRIMARY_WORKTREE;
 } else {

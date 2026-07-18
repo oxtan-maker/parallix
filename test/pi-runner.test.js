@@ -1,8 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const pi = require('../lib/agents/pi');
-const productConfig = require('../lib/core/product-config');
-const launcherSelection = require('../lib/agents/launcher-selection');
+const pi = require('../dist/lib/agents/pi');
+const productConfig = require('../dist/lib/core/product-config');
+const launcherSelection = require('../dist/lib/agents/launcher-selection');
 const os = require('node:os');
 
 test.afterEach(() => {

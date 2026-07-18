@@ -1610,7 +1610,7 @@ function refreshBuildBeforeVerification(rootDir: string, {
   }
 
   log('Refreshing compiled runtime artifacts before verification proof capture...');
-  const buildResult = runFn('npm', ['run', 'build:cjs'], {
+  const buildResult = runFn('npm', ['run', 'build'], {
     cwd: rootDir,
     encoding: 'utf8'
   });
@@ -1619,7 +1619,7 @@ function refreshBuildBeforeVerification(rootDir: string, {
     return {
       ok: false,
       refreshed: true,
-      error: `pre-verification build refresh failed (exit code ${buildResult.status}): npm run build:cjs`,
+      error: `pre-verification build refresh failed (exit code ${buildResult.status}): npm run build`,
       detail: output
     };
   }

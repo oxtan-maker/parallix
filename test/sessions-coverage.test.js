@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const os = require('os');
 const path = require('path');
 
-const sessions = require('../lib/tools/sessions');
+const sessions = require('../dist/lib/tools/sessions');
 
 function withTempWorktree(run) {
   const tmpRoot = require('fs').mkdtempSync(path.join(os.tmpdir(), 'sessions-coverage-'));

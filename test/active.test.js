@@ -4,7 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 process.env.NO_COLOR = '1';
-const active = require('../lib/commands/active');
+const active = require('../dist/lib/commands/active');
 
 const {
   buildExecutePrompt,
@@ -13,9 +13,9 @@ const {
   applyExecuteFallback,
   selectLaunchAndRecord,
   enforceExecuteCommitSafety
-} = require('../lib/commands/active');
-const { resolveWorktree } = require('../lib/core/mission-utils');
-const { completePreflightOrExit } = require('../lib/commands/mission-start');
+} = require('../dist/lib/commands/active');
+const { resolveWorktree } = require('../dist/lib/core/mission-utils');
+const { completePreflightOrExit } = require('../dist/lib/commands/mission-start');
 
 test('buildExecutePrompt injects slug, current year, and checkpoint context into the template', () => {
   const context = 'Most recent checkpoint: CP-3.md — CP-3: Real active command';
@@ -134,7 +134,7 @@ test('completePreflightOrExit returns {pass:true} on success when returnResult i
 test('mission-start verify mode reports diagnostics and open-ended success without slug', () => {
   const lines = [];
   const errors = [];
-  const missionStart = require('../lib/commands/mission-start');
+  const missionStart = require('../dist/lib/commands/mission-start');
 
   // @ts-expect-error TS2349 This expression is not callable.
   const result = missionStart([], {
@@ -168,7 +168,7 @@ test('mission-start verify mode reports diagnostics and open-ended success witho
 test('mission-start mission mode reports failures for wrong branch, ambiguous task, and missing mission dir', () => {
   const lines = [];
   const errors = [];
-  const missionStart = require('../lib/commands/mission-start');
+  const missionStart = require('../dist/lib/commands/mission-start');
 
   // @ts-expect-error TS2349 This expression is not callable.
   const result = missionStart(['task-1031'], {
@@ -506,7 +506,7 @@ test('active() restores task status and continues to handoff when the execute ag
 // `.default` resolves to the function. This test fails loudly if that export
 // shape ever changes without updating active.ts's accessor to match.
 test('repair-handoff module exposes its default export as callable under CJS require+importStar interop', () => {
-  const repairHandoffModule = require('../lib/commands/repair-handoff');
+  const repairHandoffModule = require('../dist/lib/commands/repair-handoff');
   assert.equal(typeof repairHandoffModule, 'function', 'require(repair-handoff) must return the function directly (CJS compat line)');
 
   // Replicate tsc's __importStar interop exactly (module lacks __esModule
@@ -1282,7 +1282,7 @@ test('active() state-ordering contract: does not write Backlog before launch (re
 
 // CP-2 tests for attemptAgentRelaunch
 
-const { attemptAgentRelaunch } = require('../lib/commands/active');
+const { attemptAgentRelaunch } = require('../dist/lib/commands/active');
 
 test('attemptAgentRelaunch function exists', () => {
   assert.ok(typeof attemptAgentRelaunch === 'function', 'attemptAgentRelaunch should be exported');

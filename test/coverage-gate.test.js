@@ -3,10 +3,10 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const fmt = require('../lib/core/fmt');
+const fmt = require('../dist/lib/core/fmt');
 
 const REPO_ROOT = path.join(__dirname, '..');
-const coverageGate = require('../lib/commands/coverage-gate');
+const coverageGate = require('../dist/lib/commands/coverage-gate');
 const {
   // @ts-expect-error TS2614 Module '"../lib/commands/coverage-gate"' has no exported member 'buildCoverageAr
   buildCoverageArgs,
@@ -23,7 +23,7 @@ const {
   resetPerRunScratchState,
   resolveTestTimeoutMs,
   runTests
-} = require('../lib/commands/coverage-gate');
+} = require('../dist/lib/commands/coverage-gate');
 
 function runGate(args = []) {
   const logs = [];
@@ -59,7 +59,7 @@ test('coverage-gate excludes its own test file from authoritative discovery', ()
 
 test('coverage-gate reports denominator and metric in output', () => {
   const result = runGate(['--dry-run']);
-  assert.match(result.stdout, /Denominator: index\.js/);
+  assert.match(result.stdout, /Denominator: dist\/index\.js/);
   assert.match(result.stdout, /Include globs:/);
 });
 

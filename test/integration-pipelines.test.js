@@ -1,3 +1,4 @@
+// @ts-nocheck -- dist declaration inference is narrower than this legacy fixture suite.
 const test = require('node:test');
 const { mock } = test;
 const assert = require('node:assert/strict');
@@ -6,7 +7,7 @@ const os = require('os');
 const path = require('path');
 
 // Mock getPrimaryWorktree and getPrimaryBranch before requiring integrate.js
-const missionUtils = require('../lib/core/mission-utils');
+const missionUtils = require('../dist/lib/core/mission-utils');
 mock.method(missionUtils, 'getPrimaryWorktree', () => '/tmp/mission');
 mock.method(missionUtils, 'getPrimaryBranch', () => 'main');
 mock.method(missionUtils, 'resolveWorktree', (slug) => `/tmp/mission-${slug}`);
@@ -23,7 +24,7 @@ const {
   executeIntegrationGates,
   orderIntegrationGates,
   gateMatchesChangedAreas
-} = require('../lib/commands/integrate');
+} = require('../dist/lib/commands/integrate');
 
 // task-1302 (standalone extraction): the tests below invoke the WrGroceries monorepo
 // gate runner scripts/verify-local.sh, which lives outside the parallix tree and is
@@ -769,7 +770,7 @@ verifyLocalTest('integrate command ignores INTEGRATION_CONFIG_PATH and INTEGRATE
   const child_process = require('child_process');
   const os = require('os');
   const scriptPath = path.join(__dirname, '..', '..', 'scripts', 'verify-local.sh');
-  const integratePath = path.join(__dirname, '..', 'lib', 'commands', 'integrate.js');
+  const integratePath = path.join(__dirname, '..', 'lib', 'commands', 'integrate.ts');
   
   // Create a temp config with harmless commands
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-integrate-env-sanitize-'));
@@ -1300,7 +1301,7 @@ test('repo config declares build gate with correct metadata (task-1419)', () => 
 
   const buildGate = config?.gates?.build;
   assert.ok(buildGate, 'build gate should exist in repo config');
-  assert.equal(buildGate.command, 'npm run build:cjs', 'build gate command should be npm run build:cjs');
+  assert.equal(buildGate.command, 'npm run build', 'build gate command should refresh dist without sibling artifacts');
   assert.equal(buildGate.order, 2, 'build gate order should be 2');
   assert.equal(buildGate.run_last, false, 'build gate run_last should be false');
   assert.equal(buildGate.enabled, true, 'build gate enabled should be true');

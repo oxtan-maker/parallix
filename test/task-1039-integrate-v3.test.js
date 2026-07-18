@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
-const { printIntegrationPreflight } = require('../lib/commands/integrate');
+const { printIntegrationPreflight } = require('../dist/lib/commands/integrate');
 const { mock } = test;
 
 const TEST_SLUG = 'task-preflight-test';
@@ -176,7 +176,7 @@ test('printIntegrationPreflight main-dirty warning', (t) => {
 });
 
 test('getUnresolvedIndexConflicts failure path', (t) => {
-  const { getUnresolvedIndexConflicts } = require('../lib/commands/integrate');
+  const { getUnresolvedIndexConflicts } = require('../dist/lib/commands/integrate');
   const result = getUnresolvedIndexConflicts('/tmp/dir', {
     gitRunner: () => ({ status: 1, stdout: 'git error' })
   });
@@ -185,7 +185,7 @@ test('getUnresolvedIndexConflicts failure path', (t) => {
 });
 
 test('promoteTaskForIntegrationIfNeeded failure path', (t) => {
-  const { promoteTaskForIntegrationIfNeeded } = require('../lib/commands/integrate');
+  const { promoteTaskForIntegrationIfNeeded } = require('../dist/lib/commands/integrate');
   const context = {
     task: { ok: true, taskFile: '/tmp/task.md' },
     taskStatus: 'review',
@@ -193,7 +193,7 @@ test('promoteTaskForIntegrationIfNeeded failure path', (t) => {
   };
   
   // Mock backlog.setTaskStatus to fail
-  const backlog = require('../lib/tools/backlog');
+  const backlog = require('../dist/lib/tools/backlog');
   const originalSetTaskStatus = backlog.setTaskStatus;
   backlog.setTaskStatus = () => false;
 

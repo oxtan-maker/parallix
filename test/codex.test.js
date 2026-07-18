@@ -7,32 +7,32 @@ const path = require('path');
 // ---------- resolveCodexCommand ----------
 
 test('resolveCodexCommand returns bare "codex"', () => {
-  const { resolveCodexCommand } = require('../lib/agents/codex');
+  const { resolveCodexCommand } = require('../dist/lib/agents/codex');
   assert.equal(resolveCodexCommand(), 'codex');
 });
 
 // ---------- extractCodexSessionId ----------
 
 test('extractCodexSessionId matches codex resume pattern', () => {
-  const { extractCodexSessionId } = require('../lib/agents/codex');
+  const { extractCodexSessionId } = require('../dist/lib/agents/codex');
   const id = extractCodexSessionId('Some text\ncodex resume abc123-def456\nend');
   assert.equal(id, 'abc123-def456');
 });
 
 test('extractCodexSessionId matches Session ID alt pattern', () => {
-  const { extractCodexSessionId } = require('../lib/agents/codex');
+  const { extractCodexSessionId } = require('../dist/lib/agents/codex');
   const id = extractCodexSessionId('Session ID: abc123de-f456');
   assert.equal(id, 'abc123de-f456');
 });
 
 test('extractCodexSessionId alt pattern is case-insensitive', () => {
-  const { extractCodexSessionId } = require('../lib/agents/codex');
+  const { extractCodexSessionId } = require('../dist/lib/agents/codex');
   const id = extractCodexSessionId('session id: abc123');
   assert.equal(id, 'abc123');
 });
 
 test('extractCodexSessionId returns null for no match', () => {
-  const { extractCodexSessionId } = require('../lib/agents/codex');
+  const { extractCodexSessionId } = require('../dist/lib/agents/codex');
   assert.equal(extractCodexSessionId(null), null);
   assert.equal(extractCodexSessionId(''), null);
 });
@@ -40,7 +40,7 @@ test('extractCodexSessionId returns null for no match', () => {
 // ---------- buildCodexDraftInvocation ----------
 
 test('buildCodexDraftInvocation uses exec path when interactive is false', () => {
-  const { buildCodexDraftInvocation } = require('../lib/agents/codex');
+  const { buildCodexDraftInvocation } = require('../dist/lib/agents/codex');
   const inv = buildCodexDraftInvocation({ prompt: 'test', worktree: '/tmp', interactive: false });
   assert.equal(inv.command, 'codex');
   assert.ok(inv.args.includes('exec'));
@@ -49,7 +49,7 @@ test('buildCodexDraftInvocation uses exec path when interactive is false', () =>
 });
 
 test('buildCodexDraftInvocation uses full-auto path when interactive is true', () => {
-  const { buildCodexDraftInvocation } = require('../lib/agents/codex');
+  const { buildCodexDraftInvocation } = require('../dist/lib/agents/codex');
   const inv = buildCodexDraftInvocation({ prompt: 'test', worktree: '/tmp', interactive: true });
   assert.equal(inv.command, 'codex');
   assert.ok(inv.args.includes('--full-auto'));
@@ -57,20 +57,20 @@ test('buildCodexDraftInvocation uses full-auto path when interactive is true', (
 });
 
 test('buildCodexDraftInvocation uses resume with sessionId', () => {
-  const { buildCodexDraftInvocation } = require('../lib/agents/codex');
+  const { buildCodexDraftInvocation } = require('../dist/lib/agents/codex');
   const inv = buildCodexDraftInvocation({ prompt: 'test', worktree: '/tmp', resume: true, sessionId: 'abc123' });
   assert.ok(inv.args.includes('resume'));
   assert.ok(inv.args.includes('abc123'));
 });
 
 test('buildCodexDraftInvocation uses --last when resume is true but no sessionId', () => {
-  const { buildCodexDraftInvocation } = require('../lib/agents/codex');
+  const { buildCodexDraftInvocation } = require('../dist/lib/agents/codex');
   const inv = buildCodexDraftInvocation({ prompt: 'test', worktree: '/tmp', resume: true, sessionId: null });
   assert.ok(inv.args.includes('--last'));
 });
 
 test('buildCodexDraftInvocation sets CODEX_HOME for non-interactive', () => {
-  const { buildCodexDraftInvocation, codexStateRoot } = require('../lib/agents/codex');
+  const { buildCodexDraftInvocation, codexStateRoot } = require('../dist/lib/agents/codex');
   const inv = buildCodexDraftInvocation({ prompt: 'test', worktree: '/tmp', interactive: false });
   assert.equal(inv.options.env.CODEX_HOME, codexStateRoot('/tmp'));
 });
@@ -78,22 +78,22 @@ test('buildCodexDraftInvocation sets CODEX_HOME for non-interactive', () => {
 // ---------- codex home helpers ----------
 
 test('codexHomeRoot returns the expected path', () => {
-  const { codexHomeRoot } = require('../lib/agents/codex');
+  const { codexHomeRoot } = require('../dist/lib/agents/codex');
   assert.equal(codexHomeRoot('/tmp/worktree'), '/tmp/worktree/.workflow/codex-home');
 });
 
 test('codexConfigPath returns the expected path', () => {
-  const { codexConfigPath } = require('../lib/agents/codex');
+  const { codexConfigPath } = require('../dist/lib/agents/codex');
   assert.ok(codexConfigPath('/tmp/worktree').includes('.codex/config.toml'));
 });
 
 test('codexAuthPath returns the expected path', () => {
-  const { codexAuthPath } = require('../lib/agents/codex');
+  const { codexAuthPath } = require('../dist/lib/agents/codex');
   assert.ok(codexAuthPath('/tmp/worktree').includes('.codex/auth.json'));
 });
 
 test('headlessCodexConfig produces valid TOML', () => {
-  const { headlessCodexConfig } = require('../lib/agents/codex');
+  const { headlessCodexConfig } = require('../dist/lib/agents/codex');
   const config = headlessCodexConfig('/tmp/worktree');
   assert.ok(config.includes('sandbox_mode = "danger-full-access"'));
   assert.ok(config.includes('trust_level = "trusted"'));
@@ -101,14 +101,14 @@ test('headlessCodexConfig produces valid TOML', () => {
 });
 
 test('headlessCodexConfig includes multi_agent = true for Graphify subagent support', () => {
-  const { headlessCodexConfig } = require('../lib/agents/codex');
+  const { headlessCodexConfig } = require('../dist/lib/agents/codex');
   const config = headlessCodexConfig('/tmp/worktree');
   assert.ok(config.includes('[features]'), 'must include [features] section');
   assert.ok(config.includes('multi_agent = true'), 'must include multi_agent = true for Graphify Codex subagent dispatch');
 });
 
 test('headlessCodexConfig escapes double quotes in worktree path', () => {
-  const { headlessCodexConfig } = require('../lib/agents/codex');
+  const { headlessCodexConfig } = require('../dist/lib/agents/codex');
   const config = headlessCodexConfig('/tmp/work"tree');
   assert.ok(config.includes('\\"'));
 });
@@ -116,7 +116,7 @@ test('headlessCodexConfig escapes double quotes in worktree path', () => {
 // ---------- ensureCodexHome graphify skill copy-seed ----------
 
 test('ensureCodexHome seeds the global graphify skill into the worktree HOME', () => {
-  const { ensureCodexHome, codexHomeRoot } = require('../lib/agents/codex');
+  const { ensureCodexHome, codexHomeRoot } = require('../dist/lib/agents/codex');
   const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-fakehome-'));
   const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-wt-'));
   const origHome = process.env.HOME;
@@ -147,7 +147,7 @@ test('ensureCodexHome seeds the global graphify skill into the worktree HOME', (
 });
 
 test('ensureCodexHome skips skill seeding when no global skill is installed', () => {
-  const { ensureCodexHome, codexHomeRoot, codexConfigPath } = require('../lib/agents/codex');
+  const { ensureCodexHome, codexHomeRoot, codexConfigPath } = require('../dist/lib/agents/codex');
   const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-nohome-'));
   const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-wt2-'));
   const origHome = process.env.HOME;
@@ -167,7 +167,7 @@ test('ensureCodexHome skips skill seeding when no global skill is installed', ()
 // ---------- ensureCodexHome MCP config copy (task-2209) ----------
 
 test('ensureCodexHome merges MCP sections from the operator config when present', () => {
-  const { ensureCodexHome, codexConfigPath } = require('../lib/agents/codex');
+  const { ensureCodexHome, codexConfigPath } = require('../dist/lib/agents/codex');
   const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-mcp-present-'));
   const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-mcp-wt-'));
   const origHome = process.env.HOME;
@@ -195,7 +195,7 @@ test('ensureCodexHome merges MCP sections from the operator config when present'
 });
 
 test('ensureCodexHome skips MCP merge without throwing when operator config.toml is absent', () => {
-  const { ensureCodexHome, codexConfigPath } = require('../lib/agents/codex');
+  const { ensureCodexHome, codexConfigPath } = require('../dist/lib/agents/codex');
   const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-mcp-absent-'));
   const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-mcp-wt2-'));
   const origHome = process.env.HOME;
@@ -214,7 +214,7 @@ test('ensureCodexHome skips MCP merge without throwing when operator config.toml
 });
 
 test('ensureCodexHome MCP merge is idempotent across re-runs', () => {
-  const { ensureCodexHome, codexConfigPath } = require('../lib/agents/codex');
+  const { ensureCodexHome, codexConfigPath } = require('../dist/lib/agents/codex');
   const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-mcp-idem-'));
   const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-mcp-wt3-'));
   const origHome = process.env.HOME;
@@ -245,7 +245,7 @@ test('ensureCodexHome MCP merge is idempotent across re-runs', () => {
 // ---------- model override ----------
 
 test('buildCodexDraftInvocation adds -m flag when model is provided', () => {
-  const { buildCodexDraftInvocation } = require('../lib/agents/codex');
+  const { buildCodexDraftInvocation } = require('../dist/lib/agents/codex');
   const inv = buildCodexDraftInvocation({ prompt: 'test', worktree: '/tmp', interactive: false, model: 'gpt-5.4-mini' });
   const i = inv.args.indexOf('-m');
   assert.ok(i !== -1);
@@ -253,13 +253,13 @@ test('buildCodexDraftInvocation adds -m flag when model is provided', () => {
 });
 
 test('buildCodexDraftInvocation omits -m flag when model is null/undefined', () => {
-  const { buildCodexDraftInvocation } = require('../lib/agents/codex');
+  const { buildCodexDraftInvocation } = require('../dist/lib/agents/codex');
   assert.ok(!buildCodexDraftInvocation({ prompt: 't', worktree: '/tmp', interactive: false }).args.includes('-m'));
   assert.ok(!buildCodexDraftInvocation({ prompt: 't', worktree: '/tmp', interactive: false, model: null }).args.includes('-m'));
 });
 
 test('buildCodexDraftInvocation adds -m flag on the resume path too', () => {
-  const { buildCodexDraftInvocation } = require('../lib/agents/codex');
+  const { buildCodexDraftInvocation } = require('../dist/lib/agents/codex');
   const inv = buildCodexDraftInvocation({ prompt: 't', worktree: '/tmp', resume: true, sessionId: 'abc', model: 'gpt-5.4-mini' });
   assert.ok(inv.args.includes('-m'));
   assert.ok(inv.args.includes('gpt-5.4-mini'));
@@ -268,7 +268,7 @@ test('buildCodexDraftInvocation adds -m flag on the resume path too', () => {
 // ---------- startCodexDraftAgent stale session detection (task-1322) ----------
 
 test('startCodexDraftAgent retries without exec resume when spawn returns "Session not found"', async () => {
-  const codex = require('../lib/agents/codex');
+  const codex = require('../dist/lib/agents/codex');
   const mockSessions = { clearSessionCalledWith: null, clearSession(worktree, slug, role) { this.clearSessionCalledWith = { worktree, slug, role }; return true; } };
   let spawnCount = 0;
   const mockSpawn = (cmd, args, opts) => {
@@ -297,7 +297,7 @@ test('startCodexDraftAgent retries without exec resume when spawn returns "Sessi
 });
 
 test('startCodexDraftAgent does NOT retry when resume is false', async () => {
-  const codex = require('../lib/agents/codex');
+  const codex = require('../dist/lib/agents/codex');
   let spawnCount = 0;
   const mockSpawn = (cmd, args, opts) => {
     spawnCount++;
@@ -318,7 +318,7 @@ test('startCodexDraftAgent does NOT retry when resume is false', async () => {
 });
 
 test('startCodexDraftAgent healthy resume still uses exec resume', async () => {
-  const codex = require('../lib/agents/codex');
+  const codex = require('../dist/lib/agents/codex');
   let spawnCount = 0;
   const mockSpawn = (cmd, args, opts) => {
     spawnCount++;

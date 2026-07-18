@@ -10,18 +10,21 @@ export interface BuildFreshnessStatus {
 
 function collectBuildArtifactPairs(rootDir: string): [string, string][] {
   const pairs: [string, string][] = [];
+  const sourceRoot = path.basename(rootDir) === 'dist'
+    ? path.dirname(rootDir)
+    : rootDir;
 
-  pairs.push([path.join(rootDir, 'px.ts'), path.join(rootDir, 'px.js')]);
-  pairs.push([path.join(rootDir, 'index.ts'), path.join(rootDir, 'index.js')]);
+  pairs.push([path.join(sourceRoot, 'px.ts'), path.join(sourceRoot, 'dist', 'px.js')]);
+  pairs.push([path.join(sourceRoot, 'index.ts'), path.join(sourceRoot, 'dist', 'index.js')]);
 
-  const commandsDir = path.join(rootDir, 'lib', 'commands');
+  const commandsDir = path.join(sourceRoot, 'lib', 'commands');
   if (fs.existsSync(commandsDir)) {
     for (const entry of fs.readdirSync(commandsDir)) {
       if (!entry.endsWith('.ts')) {
         continue;
       }
       const tsPath = path.join(commandsDir, entry);
-      const jsPath = path.join(commandsDir, entry.replace(/\.ts$/, '.js'));
+      const jsPath = path.join(sourceRoot, 'dist', 'lib', 'commands', entry.replace(/\.ts$/, '.js'));
       pairs.push([tsPath, jsPath]);
     }
   }
@@ -53,7 +56,7 @@ export function findStaleBuildArtifacts(rootDir: string): string[] {
 export function formatBuildFreshnessMessage(stale: string[]): string {
   return '[parallix] Stale build detected. One or more compiled artifacts are older than their TypeScript source:\n'
     + stale.map((entry) => `  - ${entry}`).join('\n')
-    + '\nRun `npm run build:cjs` to regenerate, or set PARALLIX_SKIP_BUILD_CHECK=1 to bypass.\n';
+    + '\nRun `npm run build` to regenerate, or set PARALLIX_SKIP_BUILD_CHECK=1 to bypass.\n';
 }
 
 export function getBuildFreshnessStatus(rootDir: string): BuildFreshnessStatus {
@@ -78,11 +81,11 @@ export function getBuildFreshnessStatus(rootDir: string): BuildFreshnessStatus {
  * TypeScript sources.  Skips when PARALLIX_SKIP_BUILD_CHECK=1.
  *
  * Checks:
- *   - Root entrypoints: px.ts <-> px.js, index.ts <-> index.js
- *   - All lib/commands/*.ts <-> lib/commands/*.js pairs
+ *   - Root entrypoints: px.ts <-> dist/px.js, index.ts <-> dist/index.js
+ *   - All lib/commands/*.ts <-> dist/lib/commands/*.js pairs
  *
  * Returns true when all pairs are fresh (or source has no sibling JS).
- * Prints a clear error with the `npm run build:cjs` instruction and
+ * Prints a clear error with the `npm run build` instruction and
  * exits non-zero on any staleness detected.
  *
  * This check is only meaningful against a source checkout: `.ts` sources are

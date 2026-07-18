@@ -6,7 +6,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const stats = require('../lib/commands/stats');
+const stats = require('../dist/lib/commands/stats');
 
 // Reproduction test for task-1409: active-stage stats rows are invisible in
 // stats reports because the per-mission phase report and the agent performance
@@ -69,7 +69,7 @@ test('task-1409: active-stage rows are visible in per-mission phase report', () 
   // rows only. Since active rows have no closed field, the report will say
   // "No telemetry rows recorded" even though active rows exist.
   // After the fix, the execute phase should show the active row.
-  const plain = require('../lib/core/fmt').stripAnsi(report);
+  const plain = require('../dist/lib/core/fmt').stripAnsi(report);
   
   // The active row for task-1354 should be visible
   assert.ok(plain.includes('task-1354') || plain.includes('execute'),
@@ -114,7 +114,7 @@ test('task-2213: weekly agent performance table excludes active-stage agents', (
   ];
 
   const report = stats.renderWeeklyStatsReport(rows, { today: '2026-06-24' });
-  const plain = require('../lib/core/fmt').stripAnsi(report);
+  const plain = require('../dist/lib/core/fmt').stripAnsi(report);
   const performance = plain.slice(
     plain.indexOf('Agent performance this week'),
     plain.indexOf('Agent spend by stage this week'),
@@ -168,7 +168,7 @@ test('task-2213: range agent performance table excludes active-stage agents', ()
   ];
 
   const report = stats.renderRangeStatsReport(rows, { from: '2026-06-15', to: '2026-06-17' });
-  const plain = require('../lib/core/fmt').stripAnsi(report);
+  const plain = require('../dist/lib/core/fmt').stripAnsi(report);
 
   // Mission count: 0 (no closed missions)
   assert.match(plain, /# missions\s+[^\d]*0\s/,
@@ -215,7 +215,7 @@ test('task-2213: completed missions keep per-model rows with per-model averages'
   ];
 
   const report = stats.renderWeeklyStatsReport(rows, { today: '2026-06-24' });
-  const plain = require('../lib/core/fmt').stripAnsi(report);
+  const plain = require('../dist/lib/core/fmt').stripAnsi(report);
 
   assert.match(plain, /qwen3\.5\s+2\s+1\.50/,
     'the qwen3.5 model row must average only its own completed missions');
@@ -258,7 +258,7 @@ test('task-1409: active and closed rows coexist without double-counting', () => 
   ];
 
   const report = stats.renderWeeklyStatsReport(rows, { today: '2026-06-24' });
-  const plain = require('../lib/core/fmt').stripAnsi(report);
+  const plain = require('../dist/lib/core/fmt').stripAnsi(report);
 
   // Mission count: only the closed row counts, so 1 mission
   assert.match(plain, /# missions\s+[^\d]*1\s/,
@@ -294,7 +294,7 @@ test('task-2213: a blank-model rollup row buckets under the mission\'s model row
   ];
 
   const report = stats.renderWeeklyStatsReport(rows, { today: '2026-06-24' });
-  const plain = require('../lib/core/fmt').stripAnsi(report);
+  const plain = require('../dist/lib/core/fmt').stripAnsi(report);
 
   assert.match(plain, /cyankiwi\/Qwen3\.6-35B-A3B-AWQ-4bit\s+1\s+1\.00/,
     'mission must keep its model-row label while averaging the fix rounds recorded on its rollup row');

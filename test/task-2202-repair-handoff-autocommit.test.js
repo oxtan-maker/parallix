@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const repairHandoff = require('../lib/commands/repair-handoff');
+const repairHandoff = require('../dist/lib/commands/repair-handoff');
 
 test('repairHandoff auto-commits bounded implementation files for active-step handoff repair', async () => {
   const adds = [];

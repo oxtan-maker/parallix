@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { pushReviewRef, isStaleInfoPushRejection } = require('../lib/tools/forgejo.js');
-const git = require('../lib/core/git.js');
+const { pushReviewRef, isStaleInfoPushRejection } = require('../dist/lib/tools/forgejo.js');
+const git = require('../dist/lib/core/git.js');
 const { mock } = test;
 
 test('pushReviewRef captures output allowing stale info detection (FIXED)', (t) => {

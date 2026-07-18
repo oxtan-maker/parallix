@@ -10,10 +10,9 @@ const fixtureRootEntries = [
   'package.json',
   'tsconfig.json',
   'index.ts',
-  'index.js',
   'px.ts',
-  'px.js',
   'lib',
+  'dist',
 ];
 
 function createPublishFixture() {
@@ -50,8 +49,8 @@ function setMtime(filePath, isoTime) {
 
 function setGuardedPairsFresh(fixtureDir) {
   const pairs = [
-    [path.join(fixtureDir, 'px.ts'), path.join(fixtureDir, 'px.js')],
-    [path.join(fixtureDir, 'index.ts'), path.join(fixtureDir, 'index.js')],
+    [path.join(fixtureDir, 'px.ts'), path.join(fixtureDir, 'dist', 'px.js')],
+    [path.join(fixtureDir, 'index.ts'), path.join(fixtureDir, 'dist', 'index.js')],
   ];
   const commandsDir = path.join(fixtureDir, 'lib', 'commands');
   for (const entry of fs.readdirSync(commandsDir)) {
@@ -60,7 +59,7 @@ function setGuardedPairsFresh(fixtureDir) {
     }
     pairs.push([
       path.join(commandsDir, entry),
-      path.join(commandsDir, entry.replace(/\.ts$/, '.js')),
+      path.join(fixtureDir, 'dist', 'lib', 'commands', entry.replace(/\.ts$/, '.js')),
     ]);
   }
 
@@ -79,7 +78,7 @@ test('prepublishOnly fails closed when a guarded compiled file is stale', () => 
     setGuardedPairsFresh(fixtureDir);
 
     const tsPath = path.join(fixtureDir, 'lib', 'commands', 'stats.ts');
-    const jsPath = path.join(fixtureDir, 'lib', 'commands', 'stats.js');
+    const jsPath = path.join(fixtureDir, 'dist', 'lib', 'commands', 'stats.js');
 
     assert.ok(fs.existsSync(tsPath), 'fixture must include lib/commands/stats.ts');
     assert.ok(fs.existsSync(jsPath), 'fixture must include lib/commands/stats.js');
@@ -96,7 +95,7 @@ test('prepublishOnly fails closed when a guarded compiled file is stale', () => 
       `expected npm run prepublishOnly to reject stale compiled output\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`
     );
     assert.match(output, /Stale build detected/);
-    assert.match(output, /npm run build:cjs/);
+    assert.match(output, /npm run build/);
   } finally {
     fs.rmSync(fixtureDir, { recursive: true, force: true });
   }

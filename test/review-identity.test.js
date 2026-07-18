@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { readComments, commentRound, submitReviewRound, closeMissionPr, readTextFlag } = require('../lib/review/review');
+const { readComments, commentRound, submitReviewRound, closeMissionPr, readTextFlag } = require('../dist/lib/review/review');
 
 const TEST_SLUG = 'task-test-identity-fail';
 

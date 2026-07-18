@@ -10,7 +10,7 @@ const childProcess = require('node:child_process');
 const { mock } = test;
 const { Writable } = require('node:stream');
 
-const { spawnAndTee, DEFAULT_MAX_TAIL_BYTES } = require('../lib/core/spawn-tee');
+const { spawnAndTee, DEFAULT_MAX_TAIL_BYTES } = require('../dist/lib/core/spawn-tee');
 
 function noopSink() {
   return new Writable({ write(chunk, enc, cb) { cb(); } });

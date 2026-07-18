@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const opencode = require('../lib/agents/opencode');
+const opencode = require('../dist/lib/agents/opencode');
 
 function resetInjections() {
   opencode.__setSpawnAndTeeForTest(null);
@@ -87,7 +87,7 @@ test('shouldRetryOpencodeFailure does NOT retry plain 429 (classified as limit-h
 });
 
 test('detectLimitHit classifies plain 429 as a limit-hit for custom', () => {
-  const { detectLimitHit } = require('../lib/agents/limit-hit');
+  const { detectLimitHit } = require('../dist/lib/agents/limit-hit');
   const result = detectLimitHit({ agent: 'custom', status: 1, stderr: '429 Too Many Requests' });
   assert.ok(result, 'plain 429 should be detected as a limit-hit');
   assert.equal(result.source, 'fallback', 'no reset-time info in plain 429, uses fallback block');

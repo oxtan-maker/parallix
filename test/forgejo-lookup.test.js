@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
-const { getPrNumber } = require('../lib/tools/forgejo.js');
+const { getPrNumber } = require('../dist/lib/tools/forgejo.js');
 
 test('getPrNumber robust matching', (t) => {
   const apiCall = (method, apiPath) => {

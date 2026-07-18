@@ -5,7 +5,7 @@ const {
   graphifyAvailable,
   probeGraphifyAvailability,
   updateGraphifyKnowledgeGraph,
-} = require('../lib/core/mission-utils');
+} = require('../dist/lib/core/mission-utils');
 
 test('probeGraphifyAvailability and graphifyAvailable distinguish missing commands from probe failures', () => {
   const missing = probeGraphifyAvailability({

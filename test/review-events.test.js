@@ -28,7 +28,7 @@ const {
   generateEventTimestamp,
   sanitizeFilename,
   consumeHumanNotes,
-} = require('../lib/review/review-events');
+} = require('../dist/lib/review/review-events');
 
 // Test slug that is guaranteed not to exist
 const NONEXISTENT_SLUG = 'task-test-review-events-nonexistent';
@@ -618,7 +618,7 @@ test('importAllLegacyArtifacts with full reviewer artifact set normalizes verdic
 });
 
 test('classifyComment identifies human notes (no workflow footer)', () => {
-  const { classifyComment, VALID_EVENT_TYPES } = require('../lib/review/review-events');
+  const { classifyComment, VALID_EVENT_TYPES } = require('../dist/lib/review/review-events');
   
   // Human comment (no footer)
   const humanComment = { body: 'This is a human comment' };
@@ -634,7 +634,7 @@ test('classifyComment identifies human notes (no workflow footer)', () => {
 });
 
 test('hasWorkflowFooter detects workflow metadata footer', () => {
-  const { hasWorkflowFooter } = require('../lib/review/review-events');
+  const { hasWorkflowFooter } = require('../dist/lib/review/review-events');
   
   // Has footer
   assert.ok(hasWorkflowFooter('Some content\n\n---\n`[workflow-round:1, workflow-phase:reviewing]`'));

@@ -4,7 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const storage = require('../lib/core/storage');
+const storage = require('../dist/lib/core/storage');
 
 // ---------- resolveParallixHome ----------
 

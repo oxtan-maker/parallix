@@ -7,7 +7,7 @@
  * the rationale and lifecycle placement (pre-integrate, not per-checkpoint).
  *
  * Usage:
- *   node lib/commands/mutation-gate.js [--dry-run] [--base <branch>] [--head <ref>]
+ *   node dist/lib/commands/mutation-gate.js [--dry-run] [--base <branch>] [--head <ref>]
  *     [--baseline-path <path>] [--threshold <pct>]
  *
  * Exit 0 when every diff-scoped file's mutation score is >= its baseline

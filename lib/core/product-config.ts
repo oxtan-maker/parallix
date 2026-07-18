@@ -382,7 +382,7 @@ export function loadAdapterConfig(rootDir: string = process.cwd()): PlainObject 
   return isPlainObject(explicit.config.adapters) ? explicit.config.adapters as PlainObject : {};
 }
 
-interface TaskStorageResult {
+export interface TaskStorageResult {
   baseDir: string;
   tasksDir: string;
   completedDir: string;

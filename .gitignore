@@ -13,16 +13,6 @@ agents.local.json
 missions/*/review-events/
 # Compiled output
 dist/
-lib/core/*.js
-lib/core/mission-utils/*.js
-lib/agents/*.js
-lib/tools/*.js
-lib/review/*.js
-lib/commands/*.js
-lib/*.js
-# Root entry point artifacts (compiled from .ts by build:cjs)
-/index.js
-/px.js
 # StrykerJS scratch/report output (mutation-gate.ts)
 .stryker-tmp*/
 reports/mutation/

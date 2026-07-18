@@ -4,20 +4,20 @@ const fs = require('fs');
 const path = require('path');
 const { mock } = test;
 
-const git = require('../lib/core/git');
-const missionUtils = require('../lib/core/mission-utils');
-const backlog = require('../lib/tools/backlog');
-const forgejo = require('../lib/tools/forgejo');
-const stats = require('../lib/commands/stats');
-const verification = require('../lib/core/verification');
+const git = require('../dist/lib/core/git');
+const missionUtils = require('../dist/lib/core/mission-utils');
+const backlog = require('../dist/lib/tools/backlog');
+const forgejo = require('../dist/lib/tools/forgejo');
+const stats = require('../dist/lib/commands/stats');
+const verification = require('../dist/lib/core/verification');
 
 const TEST_SLUG = 'task-integrate-test';
 const FAKE_ROOT = '/tmp/integrate-test-root';
 const WORKTREE = path.join(FAKE_ROOT, '..', TEST_SLUG);
 
 function loadIntegrate() {
-  delete require.cache[require.resolve('../lib/commands/integrate')];
-  return require('../lib/commands/integrate');
+  delete require.cache[require.resolve('../dist/lib/commands/integrate')];
+  return require('../dist/lib/commands/integrate');
 }
 
 function setupMocks() {

@@ -4,12 +4,12 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const fmt = require('../lib/core/fmt');
-const mutationGate = require('../lib/commands/mutation-gate');
+const fmt = require('../dist/lib/core/fmt');
+const mutationGate = require('../dist/lib/commands/mutation-gate');
 
 const STRONG_TEST = `const test = require('node:test');
 const assert = require('node:assert');
-const { add } = require('../lib/core/widget.js');
+const { add } = require('../dist/lib/core/widget.js');
 test('add sums two numbers correctly', () => {
   assert.strictEqual(add(2, 3), 5);
   assert.strictEqual(add(-1, 1), 0);
@@ -22,7 +22,7 @@ test('add sums two numbers correctly', () => {
 // body survives.
 const WEAK_TEST = `const test = require('node:test');
 const assert = require('node:assert');
-const { add } = require('../lib/core/widget.js');
+const { add } = require('../dist/lib/core/widget.js');
 test('add is callable', () => {
   assert.strictEqual(typeof add, 'function');
 });

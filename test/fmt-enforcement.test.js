@@ -3,8 +3,8 @@ const test = require('node:test');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const WORKFLOW_LIB = path.join(__dirname, '..', 'lib');
-const WORKFLOW_INDEX = path.join(__dirname, '..', 'index.js');
+const WORKFLOW_LIB = path.join(__dirname, '..', 'dist', 'lib');
+const WORKFLOW_INDEX = path.join(__dirname, '..', 'dist', 'index.js');
 // fmt.js is the centralized terminal sink — the one place allowed to call console.*
 const EXCLUDED = new Set(['fmt.js']);
 const CONSOLE_RE = /console\.(log|error)/;

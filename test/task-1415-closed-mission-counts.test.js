@@ -5,8 +5,8 @@ const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
-const stats = require('../lib/commands/stats');
-const { recordPostIntegrationStats } = require('../lib/commands/integrate');
+const stats = require('../dist/lib/commands/stats');
+const { recordPostIntegrationStats } = require('../dist/lib/commands/integrate');
 
 function git(args, cwd) {
   const result = spawnSync('git', args, { cwd, encoding: 'utf8' });

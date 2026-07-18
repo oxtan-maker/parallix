@@ -7,7 +7,7 @@ const {
   eligibleAgentsForStep,
   startAgent,
   selectAgent
-} = require('../lib/agents/agents');
+} = require('../dist/lib/agents/agents');
 
 const { fakeLauncher } = require('./lib/agent-mock');
 

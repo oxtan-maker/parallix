@@ -13,7 +13,7 @@ const TEST_SLUG = 'task-1135-coverage';
 // impractical to fully mock; the identity-fallback behaviour is verified manually.
 
 test('commitSafeMissionArtifacts handles commit failure', async () => {
-  const { commitSafeMissionArtifacts } = require('../lib/review/review');
+  const { commitSafeMissionArtifacts } = require('../dist/lib/review/review');
   const logs = [];
   const errors = [];
 
@@ -38,7 +38,7 @@ test('commitSafeMissionArtifacts commits the configured stats CSV the review loo
   // Regression: the review loop's own recordStageStatsSafe writes a row to the
   // configured stats CSV; without treating it as a safe artifact the pre-rebase
   // auto-commit aborts every multi-round mission with "non-mission paths".
-  const { commitSafeMissionArtifacts } = require('../lib/review/review');
+  const { commitSafeMissionArtifacts } = require('../dist/lib/review/review');
   const added = [];
   const logs = [];
   const errors = [];
@@ -63,7 +63,7 @@ test('commitSafeMissionArtifacts commits the configured stats CSV the review loo
 });
 
 test('commitSafeMissionArtifacts still rejects genuinely non-mission paths', async () => {
-  const { commitSafeMissionArtifacts } = require('../lib/review/review');
+  const { commitSafeMissionArtifacts } = require('../dist/lib/review/review');
   const errors = [];
 
   const result = await commitSafeMissionArtifacts(TEST_SLUG, '/tmp/worktree', {
@@ -83,7 +83,7 @@ test('commitSafeMissionArtifacts still rejects genuinely non-mission paths', asy
 });
 
 test('postStaticReviewComment handles missing token', async () => {
-  const { postStaticReviewComment } = require('../lib/review/review');
+  const { postStaticReviewComment } = require('../dist/lib/review/review');
   const errors = [];
 
   const result = await postStaticReviewComment(TEST_SLUG, 'message', {
@@ -102,7 +102,7 @@ test('postStaticReviewComment handles missing token', async () => {
 });
 
 test('performStaticReview handles missing Goal Check section', async () => {
-  const { performStaticReview } = require('../lib/review/review');
+  const { performStaticReview } = require('../dist/lib/review/review');
   const logs = [];
 
   const result = performStaticReview(TEST_SLUG, {
@@ -120,7 +120,7 @@ test('performStaticReview handles missing Goal Check section', async () => {
 });
 
 test('performStaticReview handles Goal Check section with no evidence rows', async () => {
-  const { performStaticReview } = require('../lib/review/review');
+  const { performStaticReview } = require('../dist/lib/review/review');
   const logs = [];
 
   const result = performStaticReview(TEST_SLUG, {

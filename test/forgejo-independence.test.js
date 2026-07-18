@@ -13,7 +13,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 
-const { isForgejoReviewEnabled } = require('../lib/core/product-config');
+const { isForgejoReviewEnabled } = require('../dist/lib/core/product-config');
 
 function createTempConfigDir(reviewProvider) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wf-forgejo-ind-'));
@@ -66,7 +66,7 @@ test('isForgejoReviewEnabled defaults to false for legacy repo without config', 
 // =============================================================================
 
 test('mission-start accepts isForgejoReviewEnabledFn option and skips PR check when false', () => {
-  const missionStart = require('../lib/commands/mission-start');
+  const missionStart = require('../dist/lib/commands/mission-start');
   const lines = [];
   let prStatusCalled = false;
 
@@ -107,7 +107,7 @@ test('mission-start accepts isForgejoReviewEnabledFn option and skips PR check w
 // =============================================================================
 
 test('performHandoff gates Forgejo PR creation behind isForgejoReviewEnabled', () => {
-  const handoff = require('../lib/commands/handoff');
+  const handoff = require('../dist/lib/commands/handoff');
   const src = handoff.performHandoff.toString();
   assert.ok(src.includes('isForgejoReviewEnabled'),
     'performHandoff should check isForgejoReviewEnabled to skip Forgejo PR creation');
@@ -118,7 +118,7 @@ test('performHandoff gates Forgejo PR creation behind isForgejoReviewEnabled', (
 // =============================================================================
 
 test('integrate gates syncMerged behind isForgejoReviewEnabled', () => {
-  const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'commands', 'integrate.js'), 'utf8');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'commands', 'integrate.ts'), 'utf8');
   assert.ok(src.includes('isForgejoReviewEnabled'),
     'integrate.js should gate syncMerged behind isForgejoReviewEnabled');
 });
@@ -128,7 +128,7 @@ test('integrate gates syncMerged behind isForgejoReviewEnabled', () => {
 // =============================================================================
 
 test('evaluateReviewSetup returns not-required when provider is not forgejo', () => {
-  const { evaluateReviewSetup } = require('../lib/tools/setup-review');
+  const { evaluateReviewSetup } = require('../dist/lib/tools/setup-review');
   const dir = createTempConfigDir('none');
   const result = evaluateReviewSetup(dir, {
     users: ['claude'],
@@ -148,7 +148,7 @@ test('evaluateReviewSetup returns not-required when provider is not forgejo', ()
 // =============================================================================
 
 test('verifyReview skips Forgejo PR check when review provider is not forgejo', () => {
-  const { verifyReview } = require('../lib/review/review');
+  const { verifyReview } = require('../dist/lib/review/review');
   const lines = [];
   let prStatusCalled = false;
 
@@ -190,7 +190,7 @@ test('verifyReview skips Forgejo PR check when review provider is not forgejo', 
 
 test('startReviewLoop gates Forgejo availability behind isForgejoReviewEnabled', () => {
   // Check review-loop.js since startReviewLoop is now extracted there
-  const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'review', 'review-loop.js'), 'utf8');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'review', 'review-loop.ts'), 'utf8');
   assert.ok(src.includes('forgejoEnabled') && src.includes('isForgejoReviewEnabled'),
     'review-loop.js startReviewLoop should gate Forgejo checks behind isForgejoReviewEnabled');
 });
@@ -200,7 +200,7 @@ test('startReviewLoop gates Forgejo availability behind isForgejoReviewEnabled',
 // =============================================================================
 
 test('integrate printIntegrationPreflight gates Forgejo checks', () => {
-  const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'commands', 'integrate.js'), 'utf8');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'commands', 'integrate.ts'), 'utf8');
   const preflightSection = src.slice(src.indexOf('function printIntegrationPreflight'));
   assert.ok(preflightSection.includes('isForgejoReviewEnabled'),
     'printIntegrationPreflight should gate Forgejo PR/approval checks');
@@ -211,7 +211,7 @@ test('integrate printIntegrationPreflight gates Forgejo checks', () => {
 // =============================================================================
 
 test('consumeReviewerArtifacts does not call Forgejo helpers when forgejoEnabled is false', async () => {
-  const { consumeReviewerArtifacts, reviewArtifactPath } = require('../lib/review/review');
+  const { consumeReviewerArtifacts, reviewArtifactPath } = require('../dist/lib/review/review');
   
   let consumeHumanNotesCalled = false;
   let postCommentCalled = false;
@@ -250,9 +250,9 @@ test('consumeReviewerArtifacts does not call Forgejo helpers when forgejoEnabled
     return originalRequire.apply(this, arguments);
   };
   
-  delete require.cache[require.resolve('../lib/review/review')];
-  delete require.cache[require.resolve('../lib/review/review-events')];
-  const { consumeReviewerArtifacts: fresh } = require('../lib/review/review');
+  delete require.cache[require.resolve('../dist/lib/review/review')];
+  delete require.cache[require.resolve('../dist/lib/review/review-events')];
+  const { consumeReviewerArtifacts: fresh } = require('../dist/lib/review/review');
   Module.prototype.require = originalRequire;
   
   const result = await fresh('task-test', 'codex', {
@@ -289,7 +289,7 @@ test('consumeReviewerArtifacts does not call Forgejo helpers when forgejoEnabled
 // =============================================================================
 
 test('consumeImplementerArtifacts does not call Forgejo helpers when forgejoEnabled is false', async () => {
-  const { consumeImplementerArtifacts, reviewArtifactPath } = require('../lib/review/review');
+  const { consumeImplementerArtifacts, reviewArtifactPath } = require('../dist/lib/review/review');
   
   let consumeHumanNotesCalled = false;
   let postCommentCalled = false;
@@ -325,9 +325,9 @@ test('consumeImplementerArtifacts does not call Forgejo helpers when forgejoEnab
     return originalRequire.apply(this, arguments);
   };
   
-  delete require.cache[require.resolve('../lib/review/review')];
-  delete require.cache[require.resolve('../lib/review/review-events')];
-  const { consumeImplementerArtifacts: fresh } = require('../lib/review/review');
+  delete require.cache[require.resolve('../dist/lib/review/review')];
+  delete require.cache[require.resolve('../dist/lib/review/review-events')];
+  const { consumeImplementerArtifacts: fresh } = require('../dist/lib/review/review');
   Module.prototype.require = originalRequire;
   
   const result = await fresh('task-test', 'mistral', {
@@ -361,7 +361,7 @@ test('consumeImplementerArtifacts does not call Forgejo helpers when forgejoEnab
 // =============================================================================
 
 test('printIntegrationPreflight does not call Forgejo API helpers when context indicates provider off', () => {
-  const { printIntegrationPreflight } = require('../lib/commands/integrate');
+  const { printIntegrationPreflight } = require('../dist/lib/commands/integrate');
   
   let getPrStatusCalled = false;
   let readTokenCalled = false;
@@ -381,9 +381,9 @@ test('printIntegrationPreflight does not call Forgejo API helpers when context i
     return originalRequire.apply(this, arguments);
   };
   
-  delete require.cache[require.resolve('../lib/commands/integrate')];
-  delete require.cache[require.resolve('../lib/tools/forgejo')];
-  const { printIntegrationPreflight: fresh } = require('../lib/commands/integrate');
+  delete require.cache[require.resolve('../dist/lib/commands/integrate')];
+  delete require.cache[require.resolve('../dist/lib/tools/forgejo')];
+  const { printIntegrationPreflight: fresh } = require('../dist/lib/commands/integrate');
   Module.prototype.require = originalRequire;
   
   // Create a context that indicates Forgejo is disabled

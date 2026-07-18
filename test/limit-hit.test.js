@@ -17,7 +17,7 @@ const {
   formatBlockUntil,
   ceilToNextHour,
   detectLimitHit
-} = require('../lib/agents/limit-hit');
+} = require('../dist/lib/agents/limit-hit');
 
 // ---------- getPatternsForAgent ----------
 

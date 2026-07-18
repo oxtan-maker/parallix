@@ -10,10 +10,10 @@ test('checkpoint has no --no-gate escape hatch', () => {
 
 test('checkpoint runs the gate even when passed a stray --no-gate flag', async (t) => {
   const { mock } = t;
-  const missionUtils = require('../lib/core/mission-utils');
-  const git = require('../lib/core/git');
-  const verification = require('../lib/core/verification');
-  const checkpoint = require('../lib/commands/checkpoint');
+  const missionUtils = require('../dist/lib/core/mission-utils');
+  const git = require('../dist/lib/core/git');
+  const verification = require('../dist/lib/core/verification');
+  const checkpoint = require('../dist/lib/commands/checkpoint');
   mock.method(missionUtils, 'findMissionDir', () => '/tmp/fake-mission-dir');
   mock.method(missionUtils, 'findMissionArea', () => 'lib');
   const gateMock = mock.method(verification, 'runVerificationGate', () => ({ status: 1 }));

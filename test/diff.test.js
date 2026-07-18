@@ -14,7 +14,7 @@ const mockGit = (responses) => (args, options = {}) => {
 };
 
 test('node parallix diff resolves correct target branches', async (t) => {
-  const diff = require('../lib/commands/diff');
+  const diff = require('../dist/lib/commands/diff');
   const calls = [];
   const worktree = '/tmp/mission-task-1147';
 
@@ -46,7 +46,7 @@ test('node parallix diff resolves correct target branches', async (t) => {
 });
 
 test('node parallix diff detects pager.diff', async (t) => {
-  const diff = require('../lib/commands/diff');
+  const diff = require('../dist/lib/commands/diff');
   const calls = [];
   const worktree = '/tmp/mission-task-1147';
 
@@ -79,7 +79,7 @@ test('node parallix diff detects pager.diff', async (t) => {
 });
 
 test('node parallix diff detects core.pager', async (t) => {
-  const diff = require('../lib/commands/diff');
+  const diff = require('../dist/lib/commands/diff');
   const calls = [];
   const worktree = '/tmp/mission-task-1147';
 
@@ -113,7 +113,7 @@ test('node parallix diff detects core.pager', async (t) => {
 });
 
 test('node parallix diff rejects less variants', async (t) => {
-  const diff = require('../lib/commands/diff');
+  const diff = require('../dist/lib/commands/diff');
   const calls = [];
 
   const gitFn = mockGit([
@@ -140,7 +140,7 @@ test('node parallix diff rejects less variants', async (t) => {
 });
 
 test('node parallix diff fails on spawn error', async (t) => {
-  const diff = require('../lib/commands/diff');
+  const diff = require('../dist/lib/commands/diff');
   const calls = [];
 
   const gitFn = mockGit([
@@ -165,7 +165,7 @@ test('node parallix diff fails on spawn error', async (t) => {
 });
 
 test('node parallix diff fails on spawn signal', async (t) => {
-  const diff = require('../lib/commands/diff');
+  const diff = require('../dist/lib/commands/diff');
   const calls = [];
 
   const gitFn = mockGit([
@@ -190,7 +190,7 @@ test('node parallix diff fails on spawn signal', async (t) => {
 });
 
 test('node parallix diff fails when slug cannot be inferred', async (t) => {
-  const diff = require('../lib/commands/diff');
+  const diff = require('../dist/lib/commands/diff');
   const calls = [];
 
   // @ts-expect-error TS2349 This expression is not callable.
@@ -207,7 +207,7 @@ test('node parallix diff fails when slug cannot be inferred', async (t) => {
 });
 
 test('node parallix diff fails when primary branch detection fails', async (t) => {
-  const diff = require('../lib/commands/diff');
+  const diff = require('../dist/lib/commands/diff');
   const calls = [];
 
   // @ts-expect-error TS2349 This expression is not callable.
@@ -226,7 +226,7 @@ test('node parallix diff fails when primary branch detection fails', async (t) =
 });
 
 test('node parallix diff fails when no tool is configured', async (t) => {
-  const diff = require('../lib/commands/diff');
+  const diff = require('../dist/lib/commands/diff');
   const calls = [];
 
   const gitFn = mockGit([
@@ -252,7 +252,7 @@ test('node parallix diff fails when no tool is configured', async (t) => {
 });
 
 test('node parallix diff fails when mission worktree cannot be resolved', async (t) => {
-  const diff = require('../lib/commands/diff');
+  const diff = require('../dist/lib/commands/diff');
   const calls = [];
 
   // @ts-expect-error TS2349 This expression is not callable.
