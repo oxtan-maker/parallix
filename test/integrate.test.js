@@ -98,7 +98,7 @@ const {
   buildIntegrationVerificationInvocation,
   parseIntegrateArgs,
   runPostIntegrateHookOrAbort,
-  refreshBuildBeforeVerification
+  buildBeforeVerification
 } = require('../dist/lib/commands/integrate');
 const integrateCommand = require('../dist/lib/commands/integrate');
 const { conventionalWorktreePath, getPrimaryBranch } = missionUtils;
@@ -865,16 +865,17 @@ test('px integrate never invokes the post-integrate hook when preflight fails (S
   assert.equal(hookSpy.mock.callCount(), 0);
 });
 
-test('refreshBuildBeforeVerification no-ops when the checkout is already fresh', () => {
+test('buildBeforeVerification builds canonical dist before proof capture', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'integrate-refresh-fresh-'));
   const pxTs = path.join(root, 'px.ts');
   const pxJs = path.join(root, 'dist', 'px.js');
   fs.mkdirSync(path.dirname(pxJs), { recursive: true });
+  fs.writeFileSync(path.join(root, 'package.json'), '{}\n');
   fs.writeFileSync(pxTs, 'export {};\n');
   fs.writeFileSync(pxJs, '"use strict";\n');
 
   const calls = [];
-  const result = refreshBuildBeforeVerification(root, {
+  const result = buildBeforeVerification(root, {
     runFn(command, args) {
       calls.push([command, ...args]);
       return { status: 0, stdout: '', stderr: '' };
@@ -882,16 +883,17 @@ test('refreshBuildBeforeVerification no-ops when the checkout is already fresh',
     log: () => {}
   });
 
-  assert.deepEqual(result, { ok: true, refreshed: false });
-  assert.deepEqual(calls, []);
+  assert.deepEqual(result, { ok: true, refreshed: true, detail: '' });
+  assert.equal(calls.length, 1);
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-test('refreshBuildBeforeVerification rebuilds stale runtime artifacts before proof capture', () => {
+test('buildBeforeVerification builds dist without consulting source mtimes', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'integrate-refresh-stale-'));
   const pxTs = path.join(root, 'px.ts');
   const pxJs = path.join(root, 'dist', 'px.js');
   fs.mkdirSync(path.dirname(pxJs), { recursive: true });
+  fs.writeFileSync(path.join(root, 'package.json'), '{}\n');
   fs.writeFileSync(pxJs, '"use strict";\n');
   fs.writeFileSync(pxTs, 'export {};\n');
   const staleJsTime = new Date('2026-01-01T00:00:00.000Z');
@@ -900,7 +902,7 @@ test('refreshBuildBeforeVerification rebuilds stale runtime artifacts before pro
   fs.utimesSync(pxTs, staleTsTime, staleTsTime);
 
   const calls = [];
-  const result = refreshBuildBeforeVerification(root, {
+  const result = buildBeforeVerification(root, {
     runFn(command, args, options) {
       calls.push({ command, args, options });
       fs.writeFileSync(pxJs, '"use strict";\n// rebuilt\n');
@@ -917,11 +919,12 @@ test('refreshBuildBeforeVerification rebuilds stale runtime artifacts before pro
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-test('refreshBuildBeforeVerification surfaces build refresh failures before verification starts', () => {
+test('buildBeforeVerification surfaces build failures before verification starts', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'integrate-refresh-fail-'));
   const pxTs = path.join(root, 'px.ts');
   const pxJs = path.join(root, 'dist', 'px.js');
   fs.mkdirSync(path.dirname(pxJs), { recursive: true });
+  fs.writeFileSync(path.join(root, 'package.json'), '{}\n');
   fs.writeFileSync(pxJs, '"use strict";\n');
   fs.writeFileSync(pxTs, 'export {};\n');
   const staleJsTime = new Date('2026-01-01T00:00:00.000Z');
@@ -929,7 +932,7 @@ test('refreshBuildBeforeVerification surfaces build refresh failures before veri
   fs.utimesSync(pxJs, staleJsTime, staleJsTime);
   fs.utimesSync(pxTs, staleTsTime, staleTsTime);
 
-  const result = refreshBuildBeforeVerification(root, {
+  const result = buildBeforeVerification(root, {
     runFn() {
       return { status: 2, stdout: '', stderr: 'build broke' };
     },

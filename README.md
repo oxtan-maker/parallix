@@ -200,10 +200,16 @@ npm run test:integration  # real process, Git/worktree, package, and local-netwo
 
 The test suite is the verification gate this repo declares in `workflow.config.json`. Run it before integrating any change. Contributions follow the same mission lifecycle the tool itself runs: branch, worktree, checkpoints, a second review, and a passing gate before integration.
 
-If you are developing Parallix itself from a checkout, the repo-root dispatcher is:
+If you are developing Parallix itself from a checkout, use the built runtime
+after `npm run build`, or run the TypeScript entry directly with the development
+script:
 
 ```sh
-node index.js <command>
+npm run build
+node dist/index.js <command>
+
+# Direct-source development path
+npm run dev -- <command>
 ```
 
 ## License

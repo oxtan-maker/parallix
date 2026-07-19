@@ -1,6 +1,6 @@
 {
   "name": "@magnusekdahl/parallix",
-  "version": "1.3.61",
+  "version": "1.4.0",
   "description": "AI mission workflow toolkit with a px CLI — local-first, human-in-the-loop multi-agent development",
   "license": "AGPL-3.0-or-later",
   "private": false,
@@ -51,13 +51,13 @@
   ],
   "scripts": {
     "build": "tsc",
-    "build:cjs": "tsc --noEmit --module CommonJS --moduleResolution Node --esModuleInterop",
-    "publish:guard": "node -e \"require('./dist/lib/core/build-freshness.js').assertBuildFreshness(process.cwd())\"",
-    "prepack": "npm run build:cjs && npm run build && npm run publish:guard",
-    "prepublishOnly": "npm run publish:guard",
+    "dev": "tsx px.ts",
+    "prepack": "npm run build",
     "pretest": "npm run build",
     "test": "FORCE_COLOR=0 node test/run-default-tests.js",
     "test:integration": "FORCE_COLOR=0 node test/run-default-tests.js --integration",
+    "test:package-content": "node scripts/package-content-audit.js",
+    "test:reproducible-output": "node scripts/verify-reproducible-dist.js",
     "test:coverage": "FORCE_COLOR=0 node dist/lib/commands/coverage-gate.js --lcov",
     "typecheck": "tsc --noEmit"
   },

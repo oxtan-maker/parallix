@@ -104,7 +104,7 @@ async function active(args, options = {}) {
     return;
   }
 
-  const { agent, result } = launchResult;
+  const { agent, result, rebaseDeferred = false } = launchResult;
 
   if (result.error) {
     errorFn(`Could not start execute agent (${fmt.agent(agent)}): ${result.error.message}`);
@@ -118,28 +118,30 @@ async function active(args, options = {}) {
     return;
   }
 
-  // The execute agent may edit implementation artifacts, but task lifecycle
-  // transitions are owned by Parallix. Restore a direct status edit instead of
-  // interrupting a completed run. Do not rewrite the implementer: a launcher
-  // fallback or an operator reassignment is a legitimate concurrent update.
-  if (taskResolution.ok && taskResolution.taskFile) {
-    const taskStatus = getTaskStatusFn(taskResolution.taskFile);
-    if (taskStatus && taskStatus !== 'active') {
-      logFn(fmt.status('WARN', `Execute agent changed task ${fmt.slug(normalizedSlug)} status to ${taskStatus}; restoring status=active before handoff.`));
-      if (!transitionTaskFn(normalizedSlug, 'active', { rootDir: worktree, log: logFn })) {
-        errorFn(fmt.status('FAIL', `Could not restore task ${fmt.slug(normalizedSlug)} to status=active after an execute-agent lifecycle edit.`));
-        exitFn(1);
-        return;
-      }
-    }
-  }
-
   try {
     enforceExecuteCommitSafetyFn({ slug: normalizedSlug, worktree });
   } catch (error) {
     errorFn(fmt.status('FAIL', /** @type{Error} */(error).message));
     exitFn(1);
     return;
+  }
+
+  // The launch callback records durable state on the integration branch but
+  // deliberately does not rebase underneath a running agent. Once execute
+  // output is committed, synchronize that state before handoff. This also
+  // restores any direct lifecycle edit made by the agent without discarding
+  // unrelated task metadata from its mission commit.
+  if (taskResolution.ok && taskResolution.taskFile) {
+    const taskStatus = getTaskStatusFn(taskResolution.taskFile);
+    if (taskStatus && taskStatus !== 'active') {
+      logFn(fmt.status('WARN', `Execute agent changed task ${fmt.slug(normalizedSlug)} status to ${taskStatus}; restoring status=active before handoff.`));
+    }
+    if ((rebaseDeferred || (taskStatus && taskStatus !== 'active'))
+      && !transitionTaskFn(normalizedSlug, 'active', { rootDir: worktree, log: logFn })) {
+      errorFn(fmt.status('FAIL', `Could not synchronize task ${fmt.slug(normalizedSlug)} lifecycle state after execute.`));
+      exitFn(1);
+      return;
+    }
   }
 
   // Automation: Post-active handoff
@@ -211,6 +213,7 @@ async function selectLaunchAndRecord(opts) {
   const priorImplementer = taskFile ? getTaskImplementerFn(taskFile) : null;
   let launchRecorded = false;
   let launchTransitionFailed = false;
+  let rebaseDeferred = false;
   let launchedAgent = null;
   const rollbackIfNeeded = ({ throwOnFailure = true } = {}) => {
     if (!launchRecorded || !priorStatus) {
@@ -249,12 +252,21 @@ async function selectLaunchAndRecord(opts) {
         }
 
         log(`Recording implementer ${fmt.agent(agent)} and status=active for ${fmt.slug(slug)}...`);
-        if (!transitionTaskFn(slug, 'active', { implementer: agent, rootDir: worktree, log })) {
+        if (!transitionTaskFn(slug, 'active', {
+          implementer: agent,
+          rootDir: worktree,
+          log,
+          // The agent process is already running when onLaunch fires. Never
+          // rebase its worktree concurrently; the post-execute lifecycle check
+          // synchronizes the clean, committed worktree before handoff.
+          deferMissionRebase: true,
+        })) {
           launchTransitionFailed = true;
           return;
         }
 
         launchRecorded = true;
+        rebaseDeferred = true;
       },
       onLimitHit: () => {
         // Roll back the intermediate active write so the retry's onLaunch starts
@@ -280,7 +292,7 @@ async function selectLaunchAndRecord(opts) {
     throw new Error(`Failed to record task ${fmt.slug(slug)} as active after execute launch.`);
   }
 
-  return { preselected, agent, result };
+  return { preselected, agent, result, rebaseDeferred };
 }
 
 // When startAgent falls back to a different family after a limit hit, the

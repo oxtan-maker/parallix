@@ -1580,8 +1580,11 @@ test('resolvePollTimeoutMs honours AUTONOMOUS_REVIEW_POLL_TIMEOUT_MS env overrid
 test('maybeUpdateGraphifyBeforeReview skips cleanly when graphify is missing', () => {
   const { maybeUpdateGraphifyBeforeReview } = require('../dist/lib/review/review');
   const logs = [];
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'review-graphify-missing-'));
+  fs.mkdirSync(path.join(root, 'graphify-out'));
+  fs.writeFileSync(path.join(root, 'graphify-out', 'graph.json'), '{}\n');
 
-  const result = maybeUpdateGraphifyBeforeReview('/tmp/visualBoard-task-1006', {
+  const result = maybeUpdateGraphifyBeforeReview(root, {
     commandRunner() {
       const error = new Error('missing');
       // @ts-expect-error TS2339 Property 'code' does not exist on type 'Error'.
@@ -1592,6 +1595,7 @@ test('maybeUpdateGraphifyBeforeReview skips cleanly when graphify is missing', (
       logs.push(message);
     }
   });
+  fs.rmSync(root, { recursive: true, force: true });
 
   assert.deepEqual(result, {
     updated: false,
@@ -1605,8 +1609,11 @@ test('maybeUpdateGraphifyBeforeReview runs graphify update in the mission worktr
   const { maybeUpdateGraphifyBeforeReview } = require('../dist/lib/review/review');
   const calls = [];
   const logs = [];
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'review-graphify-update-'));
+  fs.mkdirSync(path.join(root, 'graphify-out'));
+  fs.writeFileSync(path.join(root, 'graphify-out', 'graph.json'), '{}\n');
 
-  const result = maybeUpdateGraphifyBeforeReview('/tmp/visualBoard-task-1006', {
+  const result = maybeUpdateGraphifyBeforeReview(root, {
     // @ts-expect-error TS2322 Type '(command: string, args: string[], options?: GitOptions) => { status: numbe
     commandRunner(command, args, options = {}) {
       calls.push({ command, args, options });
@@ -1632,11 +1639,12 @@ test('maybeUpdateGraphifyBeforeReview runs graphify update in the mission worktr
     command: expectedGraphifyCommand,
     args: ['update', '.'],
     options: {
-      cwd: '/tmp/visualBoard-task-1006',
+      cwd: root,
       stdio: 'inherit'
     }
   });
   assert.ok(logs.some(line => line.includes('Updating graphify knowledge graph...')));
+  fs.rmSync(root, { recursive: true, force: true });
 });
 
 test('pollForDisposition misses comment if created_at is slightly before sinceIso (clock skew)', async () => {

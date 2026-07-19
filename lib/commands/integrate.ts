@@ -14,7 +14,6 @@ import stats from './stats.js';
 import * as verification from '../core/verification.js';
 const { formatVerificationCommand } = verification;
 import * as postIntegrateHook from '../core/post-integrate-hook.js';
-import { getBuildFreshnessStatus } from '../core/build-freshness.js';
 import { isForgejoReviewEnabled } from '../core/product-config.js';
 import { readReviewState } from '../review/review-state.js';
 
@@ -848,7 +847,7 @@ async function integrate(args: string[]) {
       // Refresh build and capture merge commit before post-integrate hook.
       // Proof capture is deferred until after the hook so it represents the
       // freshly rebuilt tree that will actually be published (task-2203).
-      const refreshResult = refreshBuildBeforeVerification(baseWorktree, {
+      const refreshResult = buildBeforeVerification(baseWorktree, {
         runFn: child_process.spawnSync
       });
       if (!refreshResult.ok) {
@@ -1595,21 +1594,18 @@ function runPostIntegrateHookOrAbort(slug: string, {
 }
 
 /**
- * Rebuild compiled runtime artifacts before exact-tree verification when the
- * checkout is stale relative to tracked TypeScript sources.
+ * Rebuild the canonical dist runtime before exact-tree verification.
  * @param {string} rootDir
  * @param {{runFn?: Function, log?: Function}} opts
  */
-function refreshBuildBeforeVerification(rootDir: string, {
+function buildBeforeVerification(rootDir: string, {
   runFn = child_process.spawnSync,
   log = fmt.log.info
 }: {runFn?: Function, log?: Function} = {}) {
-  const freshness = getBuildFreshnessStatus(rootDir);
-  if (freshness.ok) {
+  if (!fs.existsSync(path.join(rootDir, 'package.json'))) {
     return { ok: true, refreshed: false };
   }
-
-  log('Refreshing compiled runtime artifacts before verification proof capture...');
+  log('Building canonical dist runtime before verification proof capture...');
   const buildResult = runFn('npm', ['run', 'build'], {
     cwd: rootDir,
     encoding: 'utf8'
@@ -1620,16 +1616,6 @@ function refreshBuildBeforeVerification(rootDir: string, {
       ok: false,
       refreshed: true,
       error: `pre-verification build refresh failed (exit code ${buildResult.status}): npm run build`,
-      detail: output
-    };
-  }
-
-  const refreshedFreshness = getBuildFreshnessStatus(rootDir);
-  if (!refreshedFreshness.ok) {
-    return {
-      ok: false,
-      refreshed: true,
-      error: refreshedFreshness.message || 'build freshness check failed after refresh',
       detail: output
     };
   }
@@ -1869,7 +1855,7 @@ function buildConflictResolutionPrompt(slug: string = '<slug>', area: string = '
 (integrate as any).recordPostIntegrationStats = recordPostIntegrationStats;
 (integrate as any).recordPostIntegrationStatsOrAbort = recordPostIntegrationStatsOrAbort;
 (integrate as any).runPostIntegrateHookOrAbort = runPostIntegrateHookOrAbort;
-(integrate as any).refreshBuildBeforeVerification = refreshBuildBeforeVerification;
+(integrate as any).buildBeforeVerification = buildBeforeVerification;
 (integrate as any).formatRecordedStatsRow = formatRecordedStatsRow;
 (integrate as any).detectChangedAreas = detectChangedAreas;
 (integrate as any).parseFilesToAreas = parseFilesToAreas;
@@ -1887,7 +1873,7 @@ function buildConflictResolutionPrompt(slug: string = '<slug>', area: string = '
 // Re-export getPrimaryWorktree from mission-utils
 (integrate as any).getPrimaryWorktree = getPrimaryWorktree;
 export default integrate;
-export { integrate, formatRecordedStatsRow, detectChangedAreas, parseFilesToAreas, loadIntegrationConfig, getIntegrationGatePlan, printIntegrationGatePlan, buildIntegrationGateEnv, parseIntegrateArgs, resolveIntegrationVerificationWorktree, buildIntegrationVerificationInvocation, executeIntegrationGates, orderIntegrationGates, gateMatchesChangedAreas, buildIntegrationContext, getPrimaryWorktree, resolveConflictsForMission, cleanupMissionWorktree, rewriteWorktreePaths, isNoMergeToAbortResult, buildConflictResolutionPrompt, VARIANT_B_AUTOMATION_SUMMARY, stashMainCheckoutIfNeeded, restoreMainCheckoutStash, evaluateTaskStatusForIntegration, promoteTaskForIntegrationIfNeeded, findExistingSquashCommit, printIntegrationPreflight, resolveForgejoUserForIntegration, getUnresolvedIndexConflicts, parseStashPopCollisionFiles, reportStashPopFailure, maybeUpdateGraphifyOnPrimary, SYNC_MERGED_DIAGNOSTICS, printDiagnosticTable, recordPostIntegrationStats, recordPostIntegrationStatsOrAbort, reportSyncMergedFailure, runPostIntegrateHookOrAbort, refreshBuildBeforeVerification };
+export { integrate, formatRecordedStatsRow, detectChangedAreas, parseFilesToAreas, loadIntegrationConfig, getIntegrationGatePlan, printIntegrationGatePlan, buildIntegrationGateEnv, parseIntegrateArgs, resolveIntegrationVerificationWorktree, buildIntegrationVerificationInvocation, executeIntegrationGates, orderIntegrationGates, gateMatchesChangedAreas, buildIntegrationContext, getPrimaryWorktree, resolveConflictsForMission, cleanupMissionWorktree, rewriteWorktreePaths, isNoMergeToAbortResult, buildConflictResolutionPrompt, VARIANT_B_AUTOMATION_SUMMARY, stashMainCheckoutIfNeeded, restoreMainCheckoutStash, evaluateTaskStatusForIntegration, promoteTaskForIntegrationIfNeeded, findExistingSquashCommit, printIntegrationPreflight, resolveForgejoUserForIntegration, getUnresolvedIndexConflicts, parseStashPopCollisionFiles, reportStashPopFailure, maybeUpdateGraphifyOnPrimary, SYNC_MERGED_DIAGNOSTICS, printDiagnosticTable, recordPostIntegrationStats, recordPostIntegrationStatsOrAbort, reportSyncMergedFailure, runPostIntegrateHookOrAbort, buildBeforeVerification };
 // CJS compat: ensure require() returns the function directly
 declare const module: { exports: any } | undefined;
 if (typeof module !== 'undefined') { module.exports = integrate; }

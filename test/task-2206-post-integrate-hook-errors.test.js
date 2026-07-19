@@ -53,7 +53,7 @@ if (args[0] === 'run' && args[1] === 'build') {
 
 if (args[0] === 'pack') {
   process.stdout.write('> fixture@1.0.1 prepack\\n');
-  process.stdout.write('> npm run publish:guard\\n');
+  process.stdout.write('> npm run build\\n');
   process.stdout.write('\\n');
   process.stdout.write('fixture-1.0.1.tgz\\n');
   process.exit(0);

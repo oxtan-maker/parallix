@@ -33,13 +33,13 @@ cycle (pre-integrate bump + post-integrate reinstall).
 
 ### Changed
 
-- **MINOR — npm tarballs now run the published CLI from CommonJS files in
-  `dist/`.** The package `main`, `px` bin entry, and supported exports resolve
-  to `dist/`; the tarball includes emitted JavaScript and source maps plus only
-  ADR 0044 runtime assets. TypeScript sources, tests, development
-  configuration, mission/backlog records, and operator state are excluded.
-  Checkout development and tests continue to use the sibling-`.js`
-  `build:cjs` compatibility runtime during this migration phase.
+- **MINOR — T5 completes the `dist/` distribution model.** The package `main`,
+  `px` bin entry, and supported exports resolve to `dist/`; `build:cjs`, the
+  mtime freshness guard, and their bypass are retired. `npm run dev` runs
+  `px.ts` through `tsx`, while `npm run test:package-content` audits the npm
+  artifact and `npm run test:reproducible-output` compares two clean-build
+  output lists. TypeScript sources, tests, development configuration,
+  mission/backlog records, and operator state are excluded from the tarball.
 
 - **Relicensed from MIT to AGPL-3.0-or-later.** Replaced `LICENSE-MIT` with the
   full AGPL-3.0 text in `LICENSE`, updated the `package.json` `license` field and

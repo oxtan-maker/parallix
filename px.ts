@@ -4,7 +4,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import * as fmt from './lib/core/fmt.js';
 import { createRequire } from 'node:module';
-import { assertBuildFreshness } from './lib/core/build-freshness.js';
 import { packageRoot } from './lib/core/package-root.js';
 
 declare const __filename: string | undefined;
@@ -217,11 +216,6 @@ export async function run(argv = process.argv.slice(2), options: RunOptions = {}
     log(formatVersionInfo());
     return 0;
   }
-
-  assertBuildFreshness(runtimeDir, (code) => {
-    process.exitCode = code;
-    throw new Error(`Stale build detected (exit ${code})`);
-  }, error);
 
   const previousCwd = process.cwd();
   try {

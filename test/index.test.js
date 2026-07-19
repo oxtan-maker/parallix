@@ -112,6 +112,22 @@ test('main() loads and invokes known command modules', async () => {
   assert.equal(calls.some(entry => Array.isArray(entry) && entry[0] === 'exit'), false);
 });
 
+test('main() dispatches a source command module when compiled output is absent', async () => {
+  const calls = [];
+
+  await main(['integrate', '--dry-run'], {
+    existsSyncFn: targetLib => String(targetLib).endsWith('integrate.ts'),
+    // @ts-expect-error TS2739 Test double only needs the command-module shape.
+    requireFn: targetLib => {
+      calls.push(['require', targetLib]);
+      return async (args, options) => calls.push(['invoke', args, options]);
+    },
+  });
+
+  assert.ok(calls[0][1].endsWith('lib/commands/integrate.ts'));
+  assert.deepEqual(calls[1], ['invoke', ['--dry-run'], { command: 'integrate' }]);
+});
+
 test('main() skips standalone git bootstrap for read-only config command', async () => {
   const calls = [];
 
