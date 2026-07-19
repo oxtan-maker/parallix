@@ -8,6 +8,7 @@
  */
 
 import * as path from 'path';
+import * as fs from 'fs';
 import * as fmt from '../core/fmt.js';
 import { git } from '../core/git.js';
 import { resolveWorktree, isMissionArtifact, isWorkflowGeneratedArtifact } from '../core/mission-utils.js';
@@ -157,11 +158,21 @@ export async function rebaseBeforeReviewRound(slug: string, {
     return { ok: true, sharedFileConflicts: false };
   }
 
-  const workflowCli = path.resolve(__dirname, '..', 'index.js');
+  // A checkout is TypeScript-first: its CLI is px.ts and lib/index.js is not
+  // tracked.  Nested commands must therefore use tsx in a source checkout.
+  // Packaged installations retain the compiled dist/px.js entrypoint.
+  const sourceCli = path.resolve(worktree, 'px.ts');
+  const usesSourceRuntime = fs.existsSync(sourceCli);
+  const workflowCommand = usesSourceRuntime
+    ? path.resolve(worktree, 'node_modules', '.bin', 'tsx')
+    : process.execPath;
+  const workflowArgs = usesSourceRuntime
+    ? [sourceCli, 'rebase', slug, '--push']
+    : [path.resolve(__dirname, '..', '..', 'px.js'), 'rebase', slug, '--push'];
 
   log(`Rebasing ${fmt.branch(`mission/${slug}`)} onto the latest primary branch before reviewer launch...`);
 
-  const result = runFn(process.execPath, [workflowCli, 'rebase', slug, '--push'], {
+  const result = runFn(workflowCommand, workflowArgs, {
     cwd: worktree,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe']
@@ -185,4 +196,3 @@ export async function rebaseBeforeReviewRound(slug: string, {
   }
   return { ok: false, sharedFileConflicts };
 }
-
