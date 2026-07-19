@@ -1,7 +1,7 @@
 ---
 id: TASK-2229
 title: 'TS migration phase T6 (optional): TypeScript test authoring'
-status: ready-for-integration
+status: review
 assignee: [codex]
 created_date: '2026-07-11 13:47'
 labels:
