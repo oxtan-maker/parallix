@@ -10,7 +10,6 @@ import path from 'node:path';
 import * as fmt from './lib/core/fmt.js';
 import { ensureStandaloneGitRepo } from './lib/core/product-config.js';
 import { loadStateMap } from './lib/core/state-map.js';
-import { assertBuildFreshness } from './lib/core/build-freshness.js';
 import { packageRoot } from './lib/core/package-root.js';
 
 process.setSourceMapsEnabled(true);
@@ -125,6 +124,7 @@ async function main(args = process.argv.slice(2), options: MainOptions = {}) {
   }
 
   const libPath = path.join(__dirname, 'lib', 'commands', `${command}.js`);
+  const sourceLibPath = path.join(__dirname, 'lib', 'commands', `${command}.ts`);
 
   // Special case: verify-env is an alias for mission-start diagnostic.
   // active is now its own command (real agent-start path).
@@ -133,9 +133,20 @@ async function main(args = process.argv.slice(2), options: MainOptions = {}) {
     targetLib = path.join(__dirname, 'lib', 'commands', 'mission-start.js');
   }
 
-  if (existsSyncFn(targetLib)) {
-    assertBuildFreshness(__dirname, exitFn, errorFn);
+  // `npm run dev` executes this source tree through tsx. The runtime loader can
+  // load .ts modules, but fs.existsSync cannot resolve the emitted .js path to
+  // its source counterpart, so select it explicitly when the build output is
+  // absent. Compiled/package runtimes continue to prefer .js.
+  if (!existsSyncFn(targetLib)) {
+    const sourceTargetLib = command === 'verify-env'
+      ? path.join(__dirname, 'lib', 'commands', 'mission-start.ts')
+      : sourceLibPath;
+    if (existsSyncFn(sourceTargetLib)) {
+      targetLib = sourceTargetLib;
+    }
+  }
 
+  if (existsSyncFn(targetLib)) {
     if (!READ_ONLY_COMMANDS.has(command)) {
       const initResult = ensureStandaloneGitRepoFn(cwdFn());
       if (initResult && initResult.failed) {

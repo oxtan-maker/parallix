@@ -67,7 +67,8 @@ function withTempRepo(fn) {
 
 function withTempGitRepo(fn) {
   withTempRepo(root => {
-    childProcess.spawnSync('git', ['init', '-b', 'main'], { cwd: root, encoding: 'utf8' });
+    childProcess.spawnSync('git', ['init'], { cwd: root, encoding: 'utf8' });
+    childProcess.spawnSync('git', ['symbolic-ref', 'HEAD', 'refs/heads/main'], { cwd: root, encoding: 'utf8' });
     childProcess.spawnSync('git', ['config', 'user.name', 'Workflow Test'], { cwd: root, encoding: 'utf8' });
     childProcess.spawnSync('git', ['config', 'user.email', 'workflow-test@example.com'], { cwd: root, encoding: 'utf8' });
     fn(root);
@@ -800,19 +801,129 @@ test('transitionTaskOnIntegrationBranch targets a recorded feature base branch',
   });
 });
 
-test('transitionTaskOnIntegrationBranch aborts a conflicted rebase after updating the integration branch', () => {
+test('transitionTaskOnIntegrationBranch reconciles task metadata conflicts and completes the rebase', () => {
   withTempGitRepo(root => {
     const slug = 'task-2232';
     const taskPath = path.join(root, 'backlog', 'tasks', `${slug} - rebase conflict.md`);
-    fs.writeFileSync(taskPath, 'id: TASK-2232\nstatus: backlog\nassignee: [gemini]\n');
+    fs.writeFileSync(taskPath, 'id: TASK-2232\nstatus: refined\nassignee: [gemini]\nlabels:\n  - distribution\n');
     childProcess.spawnSync('git', ['add', '.'], { cwd: root, encoding: 'utf8' });
     childProcess.spawnSync('git', ['commit', '-m', 'seed task'], { cwd: root, encoding: 'utf8' });
     const missionWorktree = path.join(os.tmpdir(), `workflow-task-2232-${Date.now()}`);
     childProcess.spawnSync('git', ['worktree', 'add', '-b', `mission/${slug}`, missionWorktree, 'HEAD'], { cwd: root, encoding: 'utf8' });
-    fs.writeFileSync(path.join(missionWorktree, 'backlog', 'tasks', `${slug} - rebase conflict.md`), 'id: TASK-2232\nstatus: mission-local\nassignee: [gemini]\n');
+    fs.writeFileSync(path.join(missionWorktree, 'backlog', 'tasks', `${slug} - rebase conflict.md`), 'id: TASK-2232\nstatus: mission-local\nassignee: [gemini]\nlabels:\n  - distribution\n  - user_value\n');
     childProcess.spawnSync('git', ['add', '.'], { cwd: missionWorktree, encoding: 'utf8' });
-    childProcess.spawnSync('git', ['commit', '-m', 'mission task edit'], { cwd: missionWorktree, encoding: 'utf8' });
+    childProcess.spawnSync('git', ['commit', '-m', 'classify mission task'], { cwd: missionWorktree, encoding: 'utf8' });
+    const previousPrimary = process.env.PRIMARY_WORKTREE;
+    process.env.PRIMARY_WORKTREE = root;
+    try {
+      const logs = [];
+      assert.equal(transitionTaskOnIntegrationBranch(slug, 'active', { implementer: 'codex', rootDir: missionWorktree, log: message => logs.push(message) }), true, logs.join('\n'));
+      assert.match(fs.readFileSync(taskPath, 'utf8'), /^status: active$/m);
+      assert.match(fs.readFileSync(taskPath, 'utf8'), /^assignee: \[codex\]$/m);
+      const missionContent = fs.readFileSync(path.join(missionWorktree, 'backlog', 'tasks', `${slug} - rebase conflict.md`), 'utf8');
+      assert.match(missionContent, /^status: active$/m, 'integration-branch lifecycle status must win');
+      assert.match(missionContent, /^assignee: \[codex\]$/m, 'integration-branch workflow assignee must win');
+      assert.match(missionContent, /^  - user_value$/m, 'mission metadata must survive reconciliation');
+      assert.equal(childProcess.spawnSync('git', ['merge-base', '--is-ancestor', 'HEAD', `mission/${slug}`], { cwd: root, encoding: 'utf8' }).status, 0);
+      assert.notEqual(childProcess.spawnSync('git', ['rebase', '--show-current'], { cwd: missionWorktree, encoding: 'utf8' }).status, 0);
+      assert.ok(logs.some(message => message.includes('Automatically reconciled')));
+    } finally {
+      if (previousPrimary === undefined) { delete process.env.PRIMARY_WORKTREE; } else { process.env.PRIMARY_WORKTREE = previousPrimary; }
+      childProcess.spawnSync('git', ['worktree', 'remove', '--force', missionWorktree], { cwd: root, encoding: 'utf8' });
+      fs.rmSync(missionWorktree, { recursive: true, force: true });
+    }
+  });
+});
+
+test('transitionTaskOnIntegrationBranch defers the rebase while the mission worktree has agent edits', () => {
+  withTempGitRepo(root => {
+    const slug = 'task-2234';
+    const taskPath = path.join(root, 'backlog', 'tasks', `${slug} - dirty mission.md`);
+    fs.writeFileSync(taskPath, 'id: TASK-2234\nstatus: refined\nassignee: [gemini]\n');
+    childProcess.spawnSync('git', ['add', '.'], { cwd: root, encoding: 'utf8' });
+    childProcess.spawnSync('git', ['commit', '-m', 'seed dirty mission task'], { cwd: root, encoding: 'utf8' });
+
+    const missionWorktree = path.join(os.tmpdir(), `workflow-task-2234-${Date.now()}`);
+    childProcess.spawnSync('git', ['worktree', 'add', '-b', `mission/${slug}`, missionWorktree, 'HEAD'], { cwd: root, encoding: 'utf8' });
+    const missionFile = path.join(missionWorktree, 'missions', slug, 'MISSION.md');
+    fs.mkdirSync(path.dirname(missionFile), { recursive: true });
+    fs.writeFileSync(missionFile, '# Agent output in progress\n');
+
+    const previousPrimary = process.env.PRIMARY_WORKTREE;
+    process.env.PRIMARY_WORKTREE = root;
+    try {
+      const logs = [];
+      assert.equal(transitionTaskOnIntegrationBranch(slug, 'active', { implementer: 'codex', rootDir: missionWorktree, log: message => logs.push(message) }), true, logs.join('\n'));
+      assert.match(fs.readFileSync(taskPath, 'utf8'), /^status: active$/m);
+      assert.match(fs.readFileSync(taskPath, 'utf8'), /^assignee: \[codex\]$/m);
+      assert.equal(fs.readFileSync(missionFile, 'utf8'), '# Agent output in progress\n', 'agent edits must not be stashed or rewritten');
+      assert.ok(logs.some(message => message.includes('Deferring mission rebase')));
+      assert.notEqual(childProcess.spawnSync('git', ['merge-base', '--is-ancestor', 'HEAD', `mission/${slug}`], { cwd: root, encoding: 'utf8' }).status, 0);
+    } finally {
+      if (previousPrimary === undefined) { delete process.env.PRIMARY_WORKTREE; } else { process.env.PRIMARY_WORKTREE = previousPrimary; }
+      childProcess.spawnSync('git', ['worktree', 'remove', '--force', missionWorktree], { cwd: root, encoding: 'utf8' });
+      fs.rmSync(missionWorktree, { recursive: true, force: true });
+    }
+  });
+});
+
+test('transitionTaskOnIntegrationBranch synchronizes approval with untracked reviewer events', () => {
+  withTempGitRepo(root => {
+    const slug = 'task-2235';
+    const taskPath = path.join(root, 'backlog', 'tasks', `${slug} - approved review.md`);
+    fs.writeFileSync(taskPath, 'id: TASK-2235\nstatus: review\nassignee: [codex]\n');
+    fs.mkdirSync(path.join(root, 'missions', slug), { recursive: true });
+    fs.writeFileSync(path.join(root, 'missions', slug, 'MISSION.md'), '# Approved review mission\n');
+    childProcess.spawnSync('git', ['add', '.'], { cwd: root, encoding: 'utf8' });
+    childProcess.spawnSync('git', ['commit', '-m', 'seed review task'], { cwd: root, encoding: 'utf8' });
+
+    const missionWorktree = path.join(os.tmpdir(), `workflow-task-2235-${Date.now()}`);
+    childProcess.spawnSync('git', ['worktree', 'add', '-b', `mission/${slug}`, missionWorktree, 'HEAD'], { cwd: root, encoding: 'utf8' });
+    const eventPath = path.join(missionWorktree, 'missions', slug, 'review-events', 'reviewer_outcome.md');
+    fs.mkdirSync(path.dirname(eventPath), { recursive: true });
+    fs.writeFileSync(eventPath, 'Outcome: approve\n');
+    assert.equal(
+      childProcess.spawnSync('git', ['status', '--porcelain'], { cwd: missionWorktree, encoding: 'utf8' }).stdout.trim(),
+      '?? missions/task-2235/review-events/'
+    );
+
+    const previousPrimary = process.env.PRIMARY_WORKTREE;
+    process.env.PRIMARY_WORKTREE = root;
+    try {
+      const logs = [];
+      assert.equal(transitionTaskOnIntegrationBranch(slug, 'ready-for-integration', { rootDir: missionWorktree, log: message => logs.push(message) }), true, logs.join('\n'));
+      assert.match(fs.readFileSync(taskPath, 'utf8'), /^status: ready-for-integration$/m);
+      assert.match(fs.readFileSync(path.join(missionWorktree, 'backlog', 'tasks', path.basename(taskPath)), 'utf8'), /^status: ready-for-integration$/m, logs.join('\n'));
+      assert.equal(fs.readFileSync(eventPath, 'utf8'), 'Outcome: approve\n');
+      assert.ok(!logs.some(message => message.includes('Deferring mission rebase')));
+    } finally {
+      if (previousPrimary === undefined) { delete process.env.PRIMARY_WORKTREE; } else { process.env.PRIMARY_WORKTREE = previousPrimary; }
+      childProcess.spawnSync('git', ['worktree', 'remove', '--force', missionWorktree], { cwd: root, encoding: 'utf8' });
+      fs.rmSync(missionWorktree, { recursive: true, force: true });
+    }
+  });
+});
+
+test('transitionTaskOnIntegrationBranch still aborts shared-file rebase conflicts', () => {
+  withTempGitRepo(root => {
+    const slug = 'task-2233';
+    const taskPath = path.join(root, 'backlog', 'tasks', `${slug} - shared conflict.md`);
+    fs.writeFileSync(taskPath, 'id: TASK-2233\nstatus: refined\nassignee: [gemini]\n');
+    fs.writeFileSync(path.join(root, 'shared.txt'), 'base\n');
+    childProcess.spawnSync('git', ['add', '.'], { cwd: root, encoding: 'utf8' });
+    childProcess.spawnSync('git', ['commit', '-m', 'seed task and shared file'], { cwd: root, encoding: 'utf8' });
+
+    const missionWorktree = path.join(os.tmpdir(), `workflow-task-2233-${Date.now()}`);
+    childProcess.spawnSync('git', ['worktree', 'add', '-b', `mission/${slug}`, missionWorktree, 'HEAD'], { cwd: root, encoding: 'utf8' });
+    fs.writeFileSync(path.join(missionWorktree, 'shared.txt'), 'mission\n');
+    childProcess.spawnSync('git', ['add', '.'], { cwd: missionWorktree, encoding: 'utf8' });
+    childProcess.spawnSync('git', ['commit', '-m', 'edit shared file on mission'], { cwd: missionWorktree, encoding: 'utf8' });
     const missionHead = childProcess.spawnSync('git', ['rev-parse', 'HEAD'], { cwd: missionWorktree, encoding: 'utf8' }).stdout.trim();
+
+    fs.writeFileSync(path.join(root, 'shared.txt'), 'main\n');
+    childProcess.spawnSync('git', ['add', '.'], { cwd: root, encoding: 'utf8' });
+    childProcess.spawnSync('git', ['commit', '-m', 'edit shared file on main'], { cwd: root, encoding: 'utf8' });
+
     const previousPrimary = process.env.PRIMARY_WORKTREE;
     process.env.PRIMARY_WORKTREE = root;
     try {

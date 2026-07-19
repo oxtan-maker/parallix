@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import * as fmt from '../fmt.js';
@@ -68,6 +69,10 @@ export function updateGraphifyKnowledgeGraph(options: { rootDir?: string; comman
   const startMessage = options.startMessage || 'Updating graphify knowledge graph...';
   const failureHint = options.failureHint || 'Continuing without blocking workflow.';
   const cmdRunner = commandRunner || gitModule.run;
+  if (!fs.existsSync(path.join(rootDir, 'graphify-out', 'graph.json'))) {
+    logFn(fmt.status('INFO', 'No existing graphify graph found. Skipping knowledge graph update.'));
+    return { updated: false, skipped: true, reason: 'missing-graph' };
+  }
   const probe = probeGraphifyAvailability({ commandRunner: cmdRunner });
   if (!probe.available) {
     if (probe.reason === 'missing-command') {

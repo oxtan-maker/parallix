@@ -263,7 +263,7 @@ test('recordDraftImplementer routes the actual implementer through the shared tr
     log: () => {}
   });
   assert.equal(resolved, 'codex');
-  assert.deepEqual(calls, [['task-086', 'refined', { implementer: 'codex', rootDir: '/tmp/wt', log: calls[0][2].log }]]);
+  assert.deepEqual(calls, [['task-086', 'refined', { implementer: 'codex', rootDir: '/tmp/wt', log: calls[0][2].log, deferMissionRebase: true }]]);
 });
 
 test('recordDraftImplementer does nothing when the draft task cannot be resolved', () => {

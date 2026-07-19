@@ -323,14 +323,13 @@ function setupRepository({ slug, title, agent = 'custom', runner = 'opencode' })
   const repoRoot = path.join(tmpRoot, 'repo');
   const binDir = path.join(repoRoot, 'bin');
   const stateHome = path.join(tmpRoot, 'parallix-home');
-  const reviewTmpDir = path.join(tmpRoot, 'review-artifacts');
   const piAgentHome = path.join(tmpRoot, 'pi-agent');
 
   // Pi takes an exclusive lock on its global settings and writes sessions
   // beneath its agent directory. Seed the model/default configuration into a
   // disposable writable directory so the real runner can execute in a
   // sandboxed integration process without mutating the operator's Pi state.
-  if (runner === 'pi') {
+  if (agent === 'custom' && runner === 'pi') {
     fs.mkdirSync(piAgentHome, { recursive: true });
     const configuredPiAgentHome = path.join(os.homedir(), '.pi', 'agent');
     for (const fileName of ['models.json', 'settings.json', 'auth.json']) {
@@ -371,7 +370,6 @@ function setupRepository({ slug, title, agent = 'custom', runner = 'opencode' })
   }
   fs.mkdirSync(path.join(repoRoot, 'config'), { recursive: true });
   fs.mkdirSync(binDir, { recursive: true });
-  fs.mkdirSync(reviewTmpDir, { recursive: true });
   fs.mkdirSync(stateHome, { recursive: true });
 
   // Force every workflow step onto the `custom` family via the product's own
@@ -437,10 +435,10 @@ function setupRepository({ slug, title, agent = 'custom', runner = 'opencode' })
     product: { name: 'real-agent-smoke', targetUser: 'tests' },
     adapters: {
       tasks: { provider: 'backlog-md', storage: 'backlog', stateMap: 'config/state-map.json' },
-      agents: { models: SMOKE_MODEL ? { [agent]: SMOKE_MODEL } : {}, runners: { custom: runner } },
+      agents: { models: SMOKE_MODEL ? { [agent]: SMOKE_MODEL } : {}, runners: agent === 'custom' ? { custom: runner } : {} },
       missions: { baseDir: 'missions', branchPrefix: 'mission/', worktreePattern: '../<repo>-<slug>' },
       verification: { command: ':', defaultArea: 'all' },
-      review: { provider: 'none', tmpDir: reviewTmpDir }
+      review: { provider: 'none', tmpDir: '.workflow/review-artifacts' }
     }
   }, null, 2));
 
@@ -450,6 +448,17 @@ function setupRepository({ slug, title, agent = 'custom', runner = 'opencode' })
   }, null, 2));
 
   fs.writeFileSync(path.join(repoRoot, 'README.md'), '# Real Agent Smoke Probe\n', 'utf8');
+  fs.writeFileSync(path.join(repoRoot, '.gitignore'), [
+    '.workflow/',
+    '.sessions/',
+    '.forgejo-local/',
+    'workflow/.cache/',
+    'workflow/.sessions/',
+    'workflow/config/agents.local.json',
+    'agents.local.json',
+    ''
+  ].join('\n'), 'utf8');
+  fs.writeFileSync(path.join(repoRoot, '.graphifyignore'), '.workflow/\n', 'utf8');
   const helloScript = path.join(repoRoot, 'hello.sh');
   fs.writeFileSync(helloScript, '#!/usr/bin/env bash\necho "Helo, Wrld!"\n', 'utf8');
   // The smoke mission requires direct `./hello.sh` invocation while limiting
@@ -586,7 +595,7 @@ function runRealAgentSmoke(agent, runner) {
     // trusting another Codex executable selected by the parent environment.
     env.CODEX_BIN = path.join(repo.binDir, 'codex');
   }
-  if (runner === 'pi') {
+  if (agent === 'custom' && runner === 'pi') {
     // Pin both Pi's executable and mutable agent state to the disposable
     // fixture. The launcher resolves PI_BIN before NVM/PATH fallbacks.
     env.PI_BIN = path.join(repo.binDir, 'pi');
@@ -929,5 +938,5 @@ test('real Codex gpt-5.6-luna launcher smoke: full lifecycle with hello-world ta
   skip: SMOKE_AGENT !== 'codex' || SMOKE_MODEL !== 'gpt-5.6-luna'
 }, () => {
   assertSmokeSelection('codex');
-  runRealAgentSmoke('codex', CONFIGURED_RUNNER);
+  runRealAgentSmoke('codex', 'codex');
 });

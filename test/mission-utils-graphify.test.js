@@ -1,5 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 
 const {
   graphifyAvailable,
@@ -31,9 +34,26 @@ test('probeGraphifyAvailability and graphifyAvailable distinguish missing comman
   assert.match(failure.error.message, /permission denied/);
 });
 
-test('updateGraphifyKnowledgeGraph logs missing, probe-failed, update-failed, and success outcomes', () => {
+test('updateGraphifyKnowledgeGraph logs missing graph, missing command, probe-failed, update-failed, and success outcomes', () => {
+  const graphRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'graphify-update-test-'));
+  const emptyRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'graphify-empty-test-'));
+  fs.mkdirSync(path.join(graphRoot, 'graphify-out'), { recursive: true });
+  fs.writeFileSync(path.join(graphRoot, 'graphify-out', 'graph.json'), '{}\n');
   const logs = [];
+  let missingGraphRunnerCalled = false;
+  const missingGraph = updateGraphifyKnowledgeGraph({
+    rootDir: emptyRoot,
+    log: msg => logs.push(msg),
+    commandRunner: () => {
+      missingGraphRunnerCalled = true;
+      return { status: 0 };
+    }
+  });
+  assert.deepEqual(missingGraph, { updated: false, skipped: true, reason: 'missing-graph' });
+  assert.equal(missingGraphRunnerCalled, false);
+
   const missing = updateGraphifyKnowledgeGraph({
+    rootDir: graphRoot,
     log: msg => logs.push(msg),
     commandRunner: () => {
       const error = new Error('missing');
@@ -45,6 +65,7 @@ test('updateGraphifyKnowledgeGraph logs missing, probe-failed, update-failed, an
   assert.deepEqual(missing, { updated: false, skipped: true, reason: 'missing-command' });
 
   const probeFailure = updateGraphifyKnowledgeGraph({
+    rootDir: graphRoot,
     log: msg => logs.push(msg),
     commandRunner: () => {
       throw new Error('boom');
@@ -54,7 +75,7 @@ test('updateGraphifyKnowledgeGraph logs missing, probe-failed, update-failed, an
 
   let calls = [];
   const updateFailure = updateGraphifyKnowledgeGraph({
-    rootDir: '/tmp/graph-root',
+    rootDir: graphRoot,
     log: msg => logs.push(msg),
     commandRunner: (command, args, options) => {
       calls.push({ command, args, options });
@@ -64,14 +85,18 @@ test('updateGraphifyKnowledgeGraph logs missing, probe-failed, update-failed, an
   });
   assert.equal(updateFailure.reason, 'update-failed');
   assert.equal(calls[1].args.join(' '), 'update .');
-  assert.equal(calls[1].options.cwd, '/tmp/graph-root');
+  assert.equal(calls[1].options.cwd, graphRoot);
 
   const success = updateGraphifyKnowledgeGraph({
+    rootDir: graphRoot,
     log: msg => logs.push(msg),
     commandRunner: (_command, args) => ({ status: args[0] === '--help' ? 0 : 0 })
   });
   assert.deepEqual(success, { updated: true, skipped: false });
+  assert.ok(logs.some(msg => msg.includes('No existing graphify graph found')));
   assert.ok(logs.some(msg => msg.includes('graphify not found')));
   assert.ok(logs.some(msg => msg.includes('graphify probe failed')));
   assert.ok(logs.some(msg => msg.includes('graphify update failed with status 3')));
+  fs.rmSync(graphRoot, { recursive: true, force: true });
+  fs.rmSync(emptyRoot, { recursive: true, force: true });
 });

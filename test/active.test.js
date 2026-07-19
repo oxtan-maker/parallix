@@ -484,11 +484,43 @@ test('active() restores task status and continues to handoff when the execute ag
   });
 
   assert.deepEqual(calls, [
-    ['restore', 'task-1038', 'active', '/tmp/project-task-1038'],
     'safety',
+    ['restore', 'task-1038', 'active', '/tmp/project-task-1038'],
     'handoff'
   ]);
   assert.deepEqual(errors, []);
+});
+
+test('active() synchronizes a launch-deferred rebase after execute output is committed', async () => {
+  const calls = [];
+
+  // @ts-expect-error TS2349 This expression is not callable.
+  await active(['task-1038'], {
+    inferSlugFn: () => 'task-1038',
+    missionStartFn: () => ({ pass: true }),
+    resolveWorktreeFn: () => '/tmp/project-task-1038',
+    readAgentConfigOrExitFn: () => ({}),
+    resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
+    buildCheckpointContextFn: () => 'CP-1',
+    buildExecutePromptFn: () => 'Execute task-1038',
+    selectLaunchAndRecordFn: async () => ({ agent: 'codex', result: { status: 0 }, rebaseDeferred: true }),
+    getTaskStatusFn: () => 'active',
+    transitionTaskFn: (slug, status, opts) => {
+      calls.push(['sync', slug, status, opts.rootDir]);
+      return true;
+    },
+    enforceExecuteCommitSafetyFn: () => calls.push('safety'),
+    runHandoffAndReviewFn: async () => calls.push('handoff'),
+    exitFn: (code) => { throw new Error(`unexpected exit ${code}`); },
+    logFn: () => {},
+    errorFn: (msg) => { throw new Error(`unexpected error: ${msg}`); }
+  });
+
+  assert.deepEqual(calls, [
+    'safety',
+    ['sync', 'task-1038', 'active', '/tmp/project-task-1038'],
+    'handoff'
+  ]);
 });
 
 // ---------- runHandoffAndReview wiring ----------
@@ -774,9 +806,11 @@ test('selectLaunchAndRecord writes Backlog with the launched agent after a succe
   });
 
   assert.equal(result.agent, 'codex');
+  assert.equal(result.rebaseDeferred, true, 'launch callback must defer worktree rebase until execute completes');
   assert.equal(transitions.length, 1, 'transitionTask must be called exactly once on success');
   assert.equal(transitions[0].status, 'active');
   assert.equal(transitions[0].opts.implementer, 'codex');
+  assert.equal(transitions[0].opts.deferMissionRebase, true);
 });
 
 test('selectLaunchAndRecord reuses the caller preselection instead of choosing again', async () => {

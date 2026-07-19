@@ -4,7 +4,7 @@ import { git } from '../core/git.js';
 import { WORKFLOW_AGENT_NAMES } from '../agents/agents.js';
 import * as fmt from '../core/fmt.js';
 import { resolveTaskStorage } from '../core/product-config.js';
-import { resolveBaseWorktree, resolveMissionBaseBranch, resolveWorktree } from '../core/mission-utils.js';
+import { isMissionArtifact, missionPathForSlug, resolveBaseWorktree, resolveMissionBaseBranch, resolveWorktree } from '../core/mission-utils.js';
 
 /** @returns {readonly string[]} */
 function getSupportedAgents() {
@@ -589,6 +589,89 @@ function resolveBacklogStateRoot(slug: string, missionRoot: string = process.cwd
   return resolveBaseWorktree(slug, { rootDir: missionRoot });
 }
 
+/** @param {string} taskFilePath @param {string[]} families */
+function replaceTaskAssignees(taskFilePath: string, families: string[]): boolean {
+  if (!taskFilePath || !fs.existsSync(taskFilePath)) {return false;}
+  let content = fs.readFileSync(taskFilePath, 'utf8');
+  const replacement = `assignee: [${families.join(', ')}]`;
+  const blockPattern = /^assignee:[ \t]*[\r\n]+((?:[ \t]+-[ \t]+.+[\r\n]*)+)/m;
+  if (blockPattern.test(content)) {
+    content = content.replace(blockPattern, replacement + '\n');
+  } else if (/^assignee:[ \t]*.*$/m.test(content)) {
+    content = content.replace(/^assignee:[ \t]*.*$/m, replacement);
+  } else {
+    const idMatch = content.match(/^id:.*$/m);
+    if (!idMatch || idMatch.index === undefined) {return false;}
+    const insertPos = idMatch.index + idMatch[0].length;
+    content = content.slice(0, insertPos) + '\n' + replacement + content.slice(insertPos);
+  }
+  fs.writeFileSync(taskFilePath, content, 'utf8');
+  return true;
+}
+
+/**
+ * Keep the mission's descriptive task metadata while restoring the lifecycle
+ * fields owned by the integration branch.
+ * @param {string} missionTaskFile
+ * @param {string} authoritativeTaskFile
+ */
+function restoreAuthoritativeTaskLifecycle(missionTaskFile: string, authoritativeTaskFile: string): boolean {
+  if (!fs.existsSync(missionTaskFile) || !fs.existsSync(authoritativeTaskFile)) {return false;}
+  const authoritative = fs.readFileSync(authoritativeTaskFile, 'utf8');
+  const status = getTaskStatus(authoritativeTaskFile);
+  const assignees = parseAssigneeFamilies(authoritative);
+  if (!status || !assignees.matched) {return false;}
+  return setTaskStatus(missionTaskFile, status)
+    && replaceTaskAssignees(missionTaskFile, assignees.families);
+}
+
+/** @param {string} worktree */
+function unresolvedRebaseFiles(worktree: string): string[] {
+  const result = git(['-C', worktree, 'diff', '--name-only', '--diff-filter=U']);
+  if (result.status !== 0) {return [];}
+  return result.stdout.split('\n').map(file => file.trim()).filter(Boolean);
+}
+
+/**
+ * Resolve only mission-owned artifacts. Shared source conflicts still require a
+ * human decision. Task files receive a field-aware merge: descriptive metadata
+ * comes from the mission commit, while status and assignee come from the
+ * integration branch.
+ */
+function reconcileMissionRebase({ slug, missionWorktree, authoritativeTaskFile, taskRelativePath, log }: {
+  slug: string;
+  missionWorktree: string;
+  authoritativeTaskFile: string;
+  taskRelativePath: string;
+  log: Function;
+}): boolean {
+  for (let round = 0; round < 20; round += 1) {
+    const conflicts = unresolvedRebaseFiles(missionWorktree);
+    if (conflicts.length === 0 || conflicts.some(file => !isMissionArtifact(file, slug, missionWorktree))) {
+      return false;
+    }
+
+    for (const file of conflicts) {
+      const checkout = git(['-C', missionWorktree, 'checkout', '--theirs', '--', file]);
+      if (checkout.status !== 0) {return false;}
+      if (file === taskRelativePath) {
+        const missionTaskFile = path.join(missionWorktree, file);
+        if (!restoreAuthoritativeTaskLifecycle(missionTaskFile, authoritativeTaskFile)) {return false;}
+      }
+      if (git(['-C', missionWorktree, 'add', '--', file]).status !== 0) {return false;}
+    }
+
+    log(fmt.status('INFO', `Automatically reconciled mission-owned rebase conflict(s): ${conflicts.join(', ')}`));
+    const staged = git(['-C', missionWorktree, 'diff', '--cached', '--quiet']);
+    const continuation = staged.status === 0
+      ? git(['-C', missionWorktree, 'rebase', '--skip'])
+      : git(['-C', missionWorktree, '-c', 'core.editor=true', 'rebase', '--continue']);
+    if (continuation.status === 0) {return true;}
+    if (unresolvedRebaseFiles(missionWorktree).length === 0) {return false;}
+  }
+  return false;
+}
+
 /**
  * Apply a mission lifecycle transition where Backlog is authoritative, then
  * bring the mission worktree forward to the branch that received the update.
@@ -598,7 +681,7 @@ function resolveBacklogStateRoot(slug: string, missionRoot: string = process.cwd
 function transitionTaskOnIntegrationBranch(
   slug: string,
   newStatus: string,
-  { implementer = null, clearAssignee = false, rootDir = process.cwd(), log = fmt.log.plain }: { implementer?: string | null | undefined, clearAssignee?: boolean, rootDir?: string, log?: Function } = {} as any
+  { implementer = null, clearAssignee = false, rootDir = process.cwd(), log = fmt.log.plain, deferMissionRebase = false }: { implementer?: string | null | undefined, clearAssignee?: boolean, rootDir?: string, log?: Function, deferMissionRebase?: boolean } = {} as any
 ): boolean {
   let stateRoot: string;
   try {
@@ -617,9 +700,49 @@ function transitionTaskOnIntegrationBranch(
   if (!missionWorktree || missionWorktree === stateRoot) {
     return true;
   }
+  const authoritativeResolution = resolveTaskFile(slug, stateRoot);
+  if (!authoritativeResolution.ok || !authoritativeResolution.taskFile) {
+    log(fmt.status('WARN', `Could not resolve authoritative task metadata for ${fmt.slug(slug)} after transition.`));
+    return false;
+  }
+  const taskRelativePath = path.relative(stateRoot, authoritativeResolution.taskFile).split(path.sep).join('/');
+
+  // Launch callbacks run concurrently with the newly spawned agent, and draft
+  // bookkeeping can run while agent output is still uncommitted. Rebasing in
+  // either state races or rejects those edits. The authoritative transition is
+  // already durable on the integration branch, so leave synchronization to the
+  // next clean lifecycle boundary.
+  const dirty = git(['-C', missionWorktree, 'status', '--porcelain']);
+  const reviewEventPrefix = `${path.relative(missionWorktree, path.join(path.dirname(missionPathForSlug(missionWorktree, slug)), 'review-events')).split(path.sep).join('/')}/`;
+  const blockingDirtyEntries = dirty.status === 0
+    ? dirty.stdout.split('\n').map(entry => entry.trimEnd()).filter(Boolean).filter(entry => {
+      const status = entry.slice(0, 2);
+      const file = entry.slice(3).trim().split(path.sep).join('/');
+      // Reviewer artifacts are complete workflow output by the time approval is
+      // recorded. They are committed at the next review boundary, but must not
+      // look like in-flight agent edits and strand the mission task at `review`.
+      return status !== '??'
+        || !file.startsWith(reviewEventPrefix);
+    })
+    : [];
+  if (deferMissionRebase || blockingDirtyEntries.length > 0) {
+    log(fmt.status('INFO', `Deferring mission rebase for ${fmt.slug(slug)} until the worktree is clean.`));
+    return true;
+  }
+
   const baseBranch = resolveMissionBaseBranch(slug, missionWorktree);
   const result = git(['-C', missionWorktree, 'rebase', baseBranch]);
   if (result.status !== 0) {
+    if (reconcileMissionRebase({
+      slug,
+      missionWorktree,
+      authoritativeTaskFile: authoritativeResolution.taskFile,
+      taskRelativePath,
+      log,
+    })) {
+      log(fmt.status('PASS', `Rebased mission/${slug} onto ${baseBranch} after automatic mission-state reconciliation.`));
+      return true;
+    }
     const detail = [result.stdout, result.stderr].filter(Boolean).join('\n').trim();
     const abort = git(['-C', missionWorktree, 'rebase', '--abort']);
     const abortDetail = abort.status === 0

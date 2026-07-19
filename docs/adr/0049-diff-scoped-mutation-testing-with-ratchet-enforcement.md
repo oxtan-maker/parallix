@@ -149,14 +149,12 @@ run build:cjs`) is gitignored and is what actually executes under `node
 counterpart (`toRuntimePath`) before scoping, so the mutation target set
 always reflects what will actually run, not what's tracked in git.
 
-**2026-07-18 correction (ADR 0044 T4):** The sibling-layout description above
-is superseded for the repository source checkout. `npm run build` now emits
+**2026-07-18 correction (ADR 0044 T4/T5):** The sibling-layout description
+above is superseded for the repository source checkout. `npm run build` emits
 the executing runtime under `dist/`; tests and mutation targets use
-`dist/index.js` and `dist/lib/**/*.js`. The retained `build:cjs` command is a
-no-emit CommonJS compatibility check, and the mtime guard compares sources to
-`dist/`. Reverting the T4 phase commits restores the earlier sibling-emitting
-command when rollback is required; the active review loop never creates those
-siblings.
+`dist/index.js` and `dist/lib/**/*.js`. T5 removed `build:cjs` and the mtime
+freshness guard after adding reproducible-output and package-content gates.
+Reverting the T5 phase commit restores both legacy mechanisms together.
 
 **2. StrykerJS via the `command` test runner.** `@stryker-mutator/core` has no
 dedicated plugin for Node's built-in `--test` runner (confirmed: no

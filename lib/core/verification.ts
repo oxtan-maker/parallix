@@ -5,7 +5,6 @@ import { log } from './fmt.js';
 import * as fsMod from 'node:fs';
 import * as pathMod from 'node:path';
 import { createHash } from 'node:crypto';
-import { getBuildFreshnessStatus } from './build-freshness.js';
 import { getPrimaryBranch } from './mission-utils.js';
 import { resolveParallixHome, readJson, writeJson } from './storage.js';
 
@@ -273,11 +272,6 @@ export function captureVerifiedTreeProof(area: string | undefined, rootDir: stri
     stdio = 'inherit'
   } = options;
 
-  const freshness = getBuildFreshnessStatus(rootDir);
-  if (!freshness.ok) {
-    log.warn(freshness.message || 'build freshness check failed');
-  }
-
   const before = readPublishedTreeState(rootDir, { gitRunner });
   if (!before.ok) {return before;}
 
@@ -326,10 +320,6 @@ export function assertVerifiedTreeProof(proof: { rootDir?: string; commit?: stri
 
   const o = opts;
   const gitRunner = o.gitRunner || git;
-  const freshness = getBuildFreshnessStatus(rootDir);
-  if (!freshness.ok) {
-    log.warn(freshness.message || 'build freshness check failed');
-  }
   const current = readPublishedTreeState(rootDir, { gitRunner });
   if (!current.ok) {return current;}
 

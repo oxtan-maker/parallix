@@ -324,11 +324,6 @@ function workflowEnv(binDir, stateHome, repoRoot) {
     ...process.env,
     FORCE_COLOR: '0',
     FORGEJO_USER: 'custom',
-    // This suite exercises lifecycle behavior in a throwaway repo, not the
-    // parent checkout's build-freshness guard. Other tests intentionally stale
-    // compiled artifacts in this checkout, so bypass the unrelated preflight
-    // to avoid cross-file races when Node runs test files concurrently.
-    PARALLIX_SKIP_BUILD_CHECK: '1',
     PRIMARY_WORKTREE: repoRoot,
     PARALLIX_HOME: stateHome,
     PATH: binDir
