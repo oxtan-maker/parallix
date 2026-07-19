@@ -27,6 +27,49 @@ SCRIPT_DIR="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 cd "$REPO_ROOT"
 
+# `bash -lc` may activate an old NVM default after Parallix has already been
+# launched with a supported runtime. The default suite uses `node --test`, so
+# ensure npm resolves a Node version that satisfies package.json's >=20 engine.
+node_major() {
+  "$1" -p 'process.versions.node.split(".")[0]' 2>/dev/null || true
+}
+
+select_supported_node() {
+  local candidate major nvm_dir version
+  local candidates=()
+
+  [[ -n "${PARALLIX_NODE:-}" ]] && candidates+=("$PARALLIX_NODE")
+  candidates+=("$(command -v node)")
+  [[ -x "$HOME/.local/bin/node" ]] && candidates+=("$HOME/.local/bin/node")
+
+  nvm_dir="${NVM_DIR:-$HOME/.nvm}/versions/node"
+  if [[ -d "$nvm_dir" ]]; then
+    for version in "$nvm_dir"/*; do
+      [[ -x "$version/bin/node" ]] && candidates+=("$version/bin/node")
+    done
+  fi
+
+  for candidate in "${candidates[@]}"; do
+    [[ -n "$candidate" && -x "$candidate" ]] || continue
+    major="$(node_major "$candidate")"
+    if [[ "$major" =~ ^[0-9]+$ ]] && (( major >= 20 )); then
+      export PATH="$(dirname "$candidate"):$PATH"
+      return 0
+    fi
+  done
+
+  echo "FAIL: Node.js >=20 is required for verification; found $(node --version 2>/dev/null || echo 'no node')." >&2
+  return 1
+}
+
+select_supported_node
+
+# Apple Git 2.24 lacks `git init -b`, while the fixture suite uses that modern
+# spelling. Keep the compatibility shim scoped to verification so production
+# Git calls retain the operator's configured executable.
+export PARALLIX_REAL_GIT="$(command -v git)"
+export PATH="${SCRIPT_DIR}:$PATH"
+
 gate_all() {
   npm test
 }

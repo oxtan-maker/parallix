@@ -101,6 +101,10 @@ export function buildCompactReviewPrompt({ reviewer, branch, implementer, focus 
   const primaryBranch = resolvePrimaryBranch(repoRoot);
   const artifactDir = resolveArtifactDir(repoRoot || process.cwd());
   const template = fs.readFileSync(REVIEW_PROMPT_PATH, 'utf8');
+  // Dry-run output preserves the runtime-selected agent as a placeholder.
+  // Resolve its entrypoint from the configured reviewer instead, because the
+  // placeholder is deliberately not a registered agent family.
+  const entrypointAgent = finalReviewer === '{{AGENT_NAME}}' ? reviewer : finalReviewer;
   return template
     .replaceAll('{{branch}}',           branch)
     .replaceAll('{{reviewer}}',         finalReviewer)
@@ -113,7 +117,7 @@ export function buildCompactReviewPrompt({ reviewer, branch, implementer, focus 
     .replaceAll('{{primaryBranch}}',    primaryBranch)
     .replaceAll('{{reviewBaseline}}',   reviewBaseline || primaryBranch)
     .replaceAll('YYYY',                year)
-    .replaceAll('{{review_entrypoint}}', reviewEntrypoint(finalReviewer));
+    .replaceAll('{{review_entrypoint}}', reviewEntrypoint(entrypointAgent));
 }
 
 /**

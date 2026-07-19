@@ -1034,6 +1034,20 @@ export async function startReviewLoop(slug: string, opts: {
     log(fmt.status('INFO', `Resuming review loop from round ${state.round} (${state.phase}).`));
   }
 
+  // Human review is a terminal escape hatch for a reviewer-specific failure or
+  // for the configured review-attempt budget. Keep the reason in durable state
+  // so an implementer response can never be mistaken for a reviewer approval.
+  const escalateToHumanReview = (reason: string, disposition = state.disposition) => {
+    state.disposition = disposition || reason;
+    state.metadata = {
+      ...state.metadata,
+      humanEscalationReason: reason,
+      humanEscalatedAt: new Date().toISOString()
+    };
+    persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree);
+    log(fmt.status('INFO', `Autonomous review stopped: human review required after reviewer ${reason}.`));
+  };
+
   log(fmt.status('INFO', `Starting autonomous review loop for mission: ${slug}`));
   log(fmt.status('INFO', `Branch: ${branch}`));
   log(fmt.status('INFO', `Implementer: ${implementer} | Reviewer: ${reviewer} (${reviewerSource})`));
@@ -1190,7 +1204,8 @@ export async function startReviewLoop(slug: string, opts: {
               });
             } catch (err: unknown) {
               error(fmt.status('FAIL', `Could not launch reviewer agent (${reviewer}): ${(err as Error).message}`));
-              exit(1); return;
+              escalateToHumanReview('REVIEWER_LAUNCH_FAILURE');
+              return;
             }
 
             reviewer = applyAgentFallbackFn({
@@ -1269,7 +1284,8 @@ export async function startReviewLoop(slug: string, opts: {
               });
             } catch (err: unknown) {
               error(fmt.status('FAIL', `Could not relaunch reviewer agent (${reviewer}): ${(err as Error).message}`));
-              exit(1); return;
+              escalateToHumanReview('REVIEWER_LAUNCH_FAILURE');
+              return;
             }
 
             reviewer = applyAgentFallbackFn({
@@ -1315,7 +1331,8 @@ export async function startReviewLoop(slug: string, opts: {
           if (isPollTimeout(reviewState)) {
             error(fmt.status('FAIL', `Reviewer ${reviewer} did not submit a usable formal review outcome after ${stateAny['reviewerRetryCount']} recovery retries.`));
             error('       Human intervention is required to complete or repair the review.');
-            exit(1); return;
+            escalateToHumanReview('REVIEWER_NON_APPROVAL');
+            return;
           }
         }
       }
@@ -1330,13 +1347,15 @@ export async function startReviewLoop(slug: string, opts: {
           error(fmt.status('FAIL', `Reviewer ${reviewer} did not leave a complete local review handoff for ${branch}.`));
           error(`       Expected: ${artifactDir}/${slug}-review-findings.md, ${artifactDir}/${slug}-review-outcome.md, and ${artifactDir}/${slug}-review-verdict.txt.`);
         }
-        exit(1); return;
+        escalateToHumanReview('REVIEWER_NON_APPROVAL');
+        return;
       }
 
       if (isPollTimeout(reviewState)) {
         error(fmt.status('FAIL', `Reviewer ${reviewer} did not submit a usable formal review outcome after bounded recovery retries.`));
         error('       Human intervention is required to complete or repair the review.');
-        exit(1); return;
+        escalateToHumanReview('REVIEWER_NON_APPROVAL');
+        return;
       }
 
       log(fmt.status('INFO', `Round ${attempt}: reviewer outcome = ${reviewState}`));
@@ -1567,9 +1586,13 @@ export async function startReviewLoop(slug: string, opts: {
 
     if (disposition === 'PUSHBACK_ALL') {
       state.disposition = disposition as string;
+      // A response to every outstanding finding is not a formal review
+      // decision. Preserve the response, return to reviewing, and let the
+      // same persisted reviewer make the next decision in the next round.
+      try { state.transitionTo('reviewing'); } catch (_) { /* ignore */ }
       persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree);
-      log(fmt.status('INFO', 'Autonomous review stopped: implementer pushed back on all remaining comments. Hand off to human review.'));
-      return;
+      log(fmt.status('INFO', `Round ${attempt}: implementer responded to all findings. Continuing to reviewer re-review round ${attempt + 1}.`));
+      continue;
     }
 
     if (disposition === 'BLOCKED' || disposition === 'PARKED') {
@@ -1585,10 +1608,13 @@ export async function startReviewLoop(slug: string, opts: {
     log(fmt.status('INFO', `Round ${attempt}: implementer made changes. Continuing to round ${attempt + 1}.`));
   }
 
-  if (!state.disposition) {
-    state.disposition = 'MAX_ATTEMPTS';
-    persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree);
-  }
+  state.disposition = 'MAX_ATTEMPTS';
+  state.metadata = {
+    ...state.metadata,
+    humanEscalationReason: 'MAX_ATTEMPTS',
+    humanEscalatedAt: new Date().toISOString()
+  };
+  persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree);
   log(fmt.status('INFO', `Autonomous review stopped: reached ${maxAttempts} attempts. Hand off to human review.`));
 }
 
