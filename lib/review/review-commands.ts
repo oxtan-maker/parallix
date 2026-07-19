@@ -25,9 +25,17 @@ import { startReviewLoop, recordStageStatsSafe, commitSafeMissionArtifacts } fro
 
 /** Lazily loaded handoff module. */
 let _handoff: any = null;
+/** Normalize ESM named exports and tsx's CommonJS default-export wrapper. */
+export function unwrapHandoffModule(loaded: any): any {
+  return loaded?.default || loaded;
+}
+
 async function getHandoff(): Promise<any> {
   if (!_handoff) {
-    _handoff = await import('../commands/handoff.js');
+    const loaded = await import('../commands/handoff.js');
+    // tsx exposes the CommonJS-compatible handoff module under `default`,
+    // while the compiled distribution provides named exports.
+    _handoff = unwrapHandoffModule(loaded);
   }
   return _handoff as any;
 }

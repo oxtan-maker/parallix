@@ -236,6 +236,48 @@ test('rebaseBeforeReviewRound reports shared-file rebase conflicts', async () =>
   assert.ok(errors.some(m => m.includes('Shared-file rebase conflicts detected')), 'Should report shared-file conflicts');
 });
 
+test('rebaseBeforeReviewRound uses the tsx source runtime in a checkout', async () => {
+  const calls = [];
+  const result = await rebaseBeforeReviewRound('task-1107', {
+    worktree: process.cwd(),
+    isForgejoReviewEnabledFn: () => true,
+    gitFn: () => ({ status: 0, signal: null, stdout: '', stderr: '' }),
+    runFn: (command, args) => {
+      calls.push({ command, args });
+      return { status: 0, stdout: '', stderr: '' };
+    },
+    log: () => {},
+    error: message => assert.fail(`Should not have errored: ${message}`)
+  });
+
+  assert.deepEqual(result, { ok: true, sharedFileConflicts: false });
+  assert.deepEqual(calls, [{
+    command: require('node:path').join(process.cwd(), 'node_modules', '.bin', 'tsx'),
+    args: [require('node:path').join(process.cwd(), 'px.ts'), 'rebase', 'task-1107', '--push']
+  }]);
+});
+
+test('rebaseBeforeReviewRound uses the compiled CLI outside a source checkout', async () => {
+  const calls = [];
+  const result = await rebaseBeforeReviewRound('task-1107', {
+    worktree: '/tmp/parallix-packaged-runtime',
+    isForgejoReviewEnabledFn: () => true,
+    gitFn: () => ({ status: 0, signal: null, stdout: '', stderr: '' }),
+    runFn: (command, args) => {
+      calls.push({ command, args });
+      return { status: 0, stdout: '', stderr: '' };
+    },
+    log: () => {},
+    error: message => assert.fail(`Should not have errored: ${message}`)
+  });
+
+  assert.deepEqual(result, { ok: true, sharedFileConflicts: false });
+  assert.deepEqual(calls, [{
+    command: process.execPath,
+    args: [require('node:path').join(process.cwd(), 'dist', 'px.js'), 'rebase', 'task-1107', '--push']
+  }]);
+});
+
 test('rebaseBeforeReviewRound reports missing Forgejo token failure from rebase push', async () => {
   const errors = [];
   const slug = 'task-1107';

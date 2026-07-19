@@ -1,0 +1,19 @@
+{
+  "name": "task-2277-local-runtime-proof",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "source": "node --enable-source-maps --import tsx --experimental-loader ./proof-loader.mjs src/entry.tsx",
+    "build": "esbuild src/entry.tsx --bundle --platform=node --format=esm --target=node22 --sourcemap --loader:.txt=text \"--banner:js=import {createRequire} from 'node:module';const require=createRequire(import.meta.url);\" --outfile=build/local-runtime-proof.mjs",
+    "bundle": "node --enable-source-maps build/local-runtime-proof.mjs"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.14",
+    "esbuild": "0.25.12",
+    "ink": "6.8.0",
+    "react": "19.2.3",
+    "react-devtools-core": "6.1.5",
+    "tsx": "4.20.6",
+    "typescript": "5.9.3"
+  }
+}

@@ -2536,6 +2536,14 @@ test('submitForReview exits when no forgejo user and no task implementer (task-1
   assert.equal(calls.length, 0);
 });
 
+test('unwrapHandoffModule supports the tsx default-export wrapper', () => {
+  const { unwrapHandoffModule } = require('../dist/lib/review/review-commands');
+  const handoff = { performHandoff: async () => ({ ok: true }) };
+
+  assert.equal(unwrapHandoffModule({ default: handoff }), handoff);
+  assert.equal(unwrapHandoffModule(handoff), handoff);
+});
+
 test('submitForReview and closeMissionPr use injected handoff and close functions', async () => {
   const review = require('../dist/lib/review/review');
   const previous = process.env.FORGEJO_USER;
