@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# Compatibility shim used only by scripts/verify-local.sh. Apple Git 2.24
+# predates `git init -b <branch> [directory]`, which test fixtures use.
+
+set -eo pipefail
+
+real_git="${PARALLIX_REAL_GIT:-/usr/bin/git}"
+prefix=()
+
+# Preserve global options (notably `-C <directory>`) before the subcommand.
+while (($#)) && [[ "$1" != "init" ]]; do
+  prefix+=("$1")
+  shift
+  if [[ "${prefix[$((${#prefix[@]} - 1))]}" == "-C" ]] && (($#)); then
+    prefix+=("$1")
+    shift
+  fi
+done
+
+if [[ "${1:-}" != "init" ]]; then
+  exec "$real_git" "${prefix[@]}" "$@"
+fi
+
+shift
+branch=""
+target="."
+args=()
+
+while (($#)); do
+  case "$1" in
+    -b|--initial-branch)
+      branch="${2:-}"
+      shift 2
+      ;;
+    *)
+      args+=("$1")
+      target="$1"
+      shift
+      ;;
+  esac
+done
+
+if [[ -z "$branch" ]]; then
+  exec "$real_git" "${prefix[@]}" init "${args[@]}"
+fi
+
+"$real_git" "${prefix[@]}" init "${args[@]}"
+exec "$real_git" "${prefix[@]}" -C "$target" symbolic-ref HEAD "refs/heads/$branch"

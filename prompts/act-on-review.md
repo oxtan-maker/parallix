@@ -14,7 +14,7 @@ Minimum loop contract:
 - If a finding is a rebasing artifact caused by branch stale-ness rather than this mission's diff, push back with the rationale: `Not a mission change - will be resolved by parallix rebase.`
 - Update the checkpoint document if needed, run the relevant gate, and commit before handoff.
 - Write `{{artifactDir}}/{{slug}}-round-resolution.md` with `fixed_items`, `pushed_back_items`, `parked_items`, and `blocked_reason` (when blocked).
-- Write `{{artifactDir}}/{{slug}}-review-disposition.txt` with one of `CHANGES_MADE|PUSHBACK_ALL|PARKED|BLOCKED`.
+- Write `{{artifactDir}}/{{slug}}-review-disposition.txt` with one of `CHANGES_MADE|PUSHBACK_ALL|PARKED|BLOCKED`. `PUSHBACK_ALL` records your response to every remaining finding and sends the mission back to the active reviewer for the next formal decision; it is not an approval.
 - Do not post to Forgejo directly; the workflow loop consumes the artifacts.
 - In standalone mode (no Forgejo), the review loop reads your artifacts directly — no CLI commands needed.
 

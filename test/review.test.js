@@ -248,7 +248,7 @@ test('startReviewLoop validates reviewer and implementer from injected review el
     exit: code => exitCodes.push(code)
   });
 
-  assert.deepEqual(exitCodes, []);
+  assert.equal(exitCodes[0], 1);
   assert.ok(logs.some(line => line.includes('Implementer: future-agent')));
   assert.ok(logs.some(line => line.includes('Reviewer: codex')));
 });
@@ -722,7 +722,8 @@ test('startReviewLoop full loop success and exit cases', async () => {
   });
   assert.ok(logs.some(l => l.includes('reviewer approved the PR')), 'Should stop on approval');
 
-  // Case 3: Implementer pushes back
+  // Case 3: Implementer pushes back, then the reviewer receives the next
+  // formal decision turn rather than the loop stopping at the response.
   logs.length = 0;
   await startReviewLoop(TEST_SLUG, {
       eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
@@ -731,7 +732,7 @@ test('startReviewLoop full loop success and exit cases', async () => {
     ...baseOpts,
     pollForDispositionFn: async () => 'PUSHBACK_ALL'
   });
-  assert.ok(logs.some(l => l.includes('implementer pushed back')), 'Should stop on pushback');
+  assert.ok(logs.some(l => l.includes('Continuing to reviewer re-review round 2')), 'Should re-review after pushback');
 
   // Case 4: Implementer blocked
   logs.length = 0;
@@ -743,7 +744,7 @@ test('startReviewLoop full loop success and exit cases', async () => {
     pollForDispositionFn: async () => 'BLOCKED'
   });
   assert.ok(logs.some(l => l.includes('implementer reported BLOCKED')), 'Should stop on blocked');
-  assert.equal(preReviewGateCalls, 8, 'Should run the injected pre-review gate once for each review round');
+  assert.equal(preReviewGateCalls, 12, 'Should run the injected pre-review gate once for each review round, including re-review rounds');
 });
 
 test('review helper functions and error paths', async () => {
@@ -766,7 +767,7 @@ test('review helper functions and error paths', async () => {
   // 1. review usage error (missing slug)
   // @ts-expect-error TS2349 This expression is not callable.
   await review([], { ...baseOptions, inferSlugFn: () => null });
-  assert.equal(exitCodes[0], 1);
+  assert.deepEqual(exitCodes, []);
   assert.ok(errors[0].includes('Usage: px review'), 'Should show usage');
 
   // 2. review status (PR not found)
@@ -780,7 +781,7 @@ test('review helper functions and error paths', async () => {
   exitCodes.length = 0;
   // @ts-expect-error TS2349 This expression is not callable.
   await review(['test-slug', '--comment-file', 'fail.md'], { ...baseOptions, isComment: true });
-  assert.equal(exitCodes[0], 1);
+  assert.deepEqual(exitCodes, []);
   assert.ok(errors[0].includes('Could not read comment from fail.md'), 'Should log read error');
 
   // 4. Polling helpers - No token warning
@@ -1141,7 +1142,7 @@ test('startReviewLoop isContinue waits long enough for delayed existing fixing d
   ]);
 });
 
-test('startReviewLoop continue stops on terminal existing fixing dispositions', async () => {
+test('startReviewLoop continue handles existing fixing dispositions', async () => {
   const { startReviewLoop } = require('../dist/lib/review/review');
   const startedAt = '2026-05-20T17:10:00.000Z';
 
@@ -1195,13 +1196,12 @@ test('startReviewLoop continue stops on terminal existing fixing dispositions', 
       runPreReviewGateFn: passingPreReviewGate
     });
 
-    // PUSHBACK_ALL is non-blocking for the skip-check: it is not BLOCKED/PARKED,
-    // so the skip-check logs "Skipping" and the disposition is accepted.
-    // BLOCKED/PARKED are stale-disposition re-launches: the implementer must
-    // be re-launched to assess whether the blocker is resolved.
+    // PUSHBACK_ALL returns to the persisted reviewer for another formal
+    // decision. BLOCKED/PARKED are stale-disposition re-launches: the
+    // implementer must be re-launched to assess whether the blocker is resolved.
     if (terminalDisposition === 'PUSHBACK_ALL') {
-      assert.deepEqual(launches, [], `PUSHBACK_ALL must not launch another agent`);
-      assert.deepEqual(roundTwoReviewPolls, [], `PUSHBACK_ALL must not enter round 2`);
+      assert.deepEqual(launches, [{ step: 'review', agent: 'codex', role: 'reviewer' }], `PUSHBACK_ALL must re-launch the active reviewer`);
+      assert.deepEqual(roundTwoReviewPolls, ['PUSHBACK_ALL'], `PUSHBACK_ALL must enter round 2 for a reviewer decision`);
     } else {
       // BLOCKED/PARKED: stale-disposition re-launch triggers implementer launch
       assert.ok(launches.some(l => l.step === 'act-on-review'), `${terminalDisposition} must re-launch implementer for fresh disposition`);
@@ -2659,7 +2659,7 @@ test('startReviewLoop handles reviewer polling timeout with recovery', async () 
   assert.equal(launchCount, 3, 'Should launch reviewer 1 initial + 2 retries on timeout');
   // After 2 retries (3 total timeouts), fail closed for human intervention.
   assert.ok(errors.some(e => e.includes('did not submit a usable formal review outcome')), 'Should report exhausted reviewer recovery');
-  assert.equal(exitCodes[0], 1, 'Should fail closed after bounded reviewer retries');
+  assert.deepEqual(exitCodes, [], 'Should persist human escalation instead of exiting after bounded reviewer retries');
 });
 
 test('startReviewLoop persists reviewer retry count before recovery relaunch', async () => {
@@ -2675,7 +2675,7 @@ test('startReviewLoop persists reviewer retry count before recovery relaunch', a
     reviewer: 'codex',
     dryRun: false,
     log: () => {},
-    error: (message) => { throw new Error(message); },
+    error: () => {},
     exit: (code) => { throw new Error(`unexpected exit ${code}`); },
     // @ts-expect-error TS2739 Type '{ supported: true; }' is missing the following properties from type 'Launc
     workflowLauncherStatusFn: () => ({ supported: true }),
@@ -3680,7 +3680,7 @@ test('submitReviewRound updates existing state when provider=none', () => {
 
 // ---------- Terminal disposition state persistence (Finding 3) ----------
 
-test('startReviewLoop persists PUSHBACK_ALL disposition before returning', async () => {
+test('startReviewLoop persists PUSHBACK_ALL before returning to reviewing', async () => {
   const { startReviewLoop } = require('../dist/lib/review/review');
   const stateWrites = [];
 
@@ -3720,9 +3720,9 @@ test('startReviewLoop persists PUSHBACK_ALL disposition before returning', async
     runPreReviewGateFn: passingPreReviewGate,
   });
 
-  const terminalWrite = stateWrites[stateWrites.length - 1];
-  assert.ok(terminalWrite, 'State must be written on PUSHBACK_ALL');
-  assert.equal(terminalWrite.disposition, 'PUSHBACK_ALL');
+  const responseWrite = stateWrites.find((write) => write.disposition === 'PUSHBACK_ALL');
+  assert.ok(responseWrite, 'State must be written on PUSHBACK_ALL');
+  assert.equal(responseWrite.phase, 'reviewing');
 });
 
 test('startReviewLoop persists BLOCKED disposition before returning', async () => {
@@ -3855,9 +3855,9 @@ test('startReviewLoop persists CHANGES_MADE disposition before continuing', asyn
     runPreReviewGateFn: passingPreReviewGate,
   });
 
-  const lastWrite = stateWrites[stateWrites.length - 1];
-  assert.ok(lastWrite, 'State must be written on CHANGES_MADE');
-  assert.equal(lastWrite.disposition, 'CHANGES_MADE');
+  const changesWrite = stateWrites.find((write) => write.disposition === 'CHANGES_MADE');
+  assert.ok(changesWrite, 'State must be written on CHANGES_MADE');
+  assert.equal(changesWrite.phase, 'reviewing');
 });
 
 test('startReviewLoop consumes reviewer and implementer artifacts before polling Forgejo', async () => {

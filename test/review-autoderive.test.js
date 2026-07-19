@@ -15,9 +15,12 @@ async function withTempRepo(fn) {
   fs.mkdirSync(path.join(root, 'backlog', 'tasks'), { recursive: true });
   fs.mkdirSync(path.join(root, 'workflow', 'config'), { recursive: true });
 
-  // Initialize git repo with main branch so getPrimaryWorktree() works
+  // Initialize git repo with main branch so getPrimaryWorktree() works.
+  // Use the portable two-step form because the verification environment also
+  // supports Git versions predating `git init -b`.
   const { execSync } = require('child_process');
-  execSync('git init -b main', { cwd: root, stdio: 'pipe' });
+  execSync('git init', { cwd: root, stdio: 'pipe' });
+  execSync('git checkout -b main', { cwd: root, stdio: 'pipe' });
   execSync('git config user.email "test@test.com"', { cwd: root, stdio: 'pipe' });
   execSync('git config user.name "Test"', { cwd: root, stdio: 'pipe' });
   fs.writeFileSync(path.join(root, 'README.md'), '# Test Repo');
