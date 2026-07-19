@@ -3,7 +3,7 @@ id: TASK-2228
 title: >-
   TS migration phase T5: retire build:cjs and mtime freshness guard; wire
   clean-build verification
-status: active
+status: review
 assignee: [codex]
 created_date: '2026-07-11 13:46'
 labels:
