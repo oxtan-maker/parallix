@@ -5,6 +5,7 @@ const http = require('node:http');
 const https = require('node:https');
 const os = require('os');
 const path = require('path');
+const childProcess = require('child_process');
 
 const tempRoots = [];
 
@@ -157,6 +158,7 @@ for (const name of ['codex', 'claude', 'opencode', 'pi', 'vibe']) {
   const launcherPath = path.join(launcherBin, name);
   fs.symlinkSync(launcherRunner, launcherPath);
 }
+
 process.env.PATH = `${launcherBin}${path.delimiter}${process.env.PATH || ''}`;
 // Pi also resolves NVM_BIN and the Node-adjacent global install before PATH;
 // pin its explicit override so those fallback candidates cannot escape this

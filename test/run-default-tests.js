@@ -1,13 +1,41 @@
 'use strict';
 
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
-function nodeMajor(command) {
-  const probe = spawnSync(command, ['--version'], { encoding: 'utf8' });
-  const match = probe.status === 0 && /v(\d+)\./.exec(probe.stdout || '');
+const MINIMUM_TEST_NODE_MAJOR = 20;
+
+function nodeMajorVersion(executable) {
+  const result = spawnSync(executable, ['--version'], { encoding: 'utf8' });
+  const match = result.status === 0 && String(result.stdout || '').match(/^v(\d+)/);
   return match ? Number(match[1]) : 0;
+}
+
+function compatibleTestNode() {
+  const candidates = [process.env.PARALLIX_TEST_NODE, process.execPath];
+  for (const dir of (process.env.PATH || '').split(path.delimiter)) {
+    if (dir) { candidates.push(path.join(dir, 'node')); }
+  }
+  const nvmNodeRoot = path.join(os.homedir(), '.nvm', 'versions', 'node');
+  try {
+    for (const version of fs.readdirSync(nvmNodeRoot)) {
+      candidates.push(path.join(nvmNodeRoot, version, 'bin', 'node'));
+    }
+  } catch (_) {
+    // nvm is optional; PATH and the current executable remain valid sources.
+  }
+
+  const seen = new Set();
+  for (const candidate of candidates) {
+    if (!candidate || seen.has(candidate)) { continue; }
+    seen.add(candidate);
+    if (nodeMajorVersion(candidate) >= MINIMUM_TEST_NODE_MAJOR) {
+      return candidate;
+    }
+  }
+  throw new Error(`Node ${MINIMUM_TEST_NODE_MAJOR}+ is required for node:test; set PARALLIX_TEST_NODE to a compatible executable.`);
 }
 
 function supportsTestForceExit(command) {
@@ -17,23 +45,6 @@ function supportsTestForceExit(command) {
   const major = Number(match[1]);
   const minor = Number(match[2]);
   return major >= 22 || (major === 20 && minor >= 14);
-}
-
-// `npm` can be launched through an older nvm shim even when a supported Node
-// is also on PATH. Node's built-in test runner requires Node 18+, while this
-// package declares Node 20+; select the first compatible executable rather
-// than recursively spawning the Node 14 process that invoked npm.
-function resolveTestNode() {
-  if (nodeMajor(process.execPath) >= 20) {return process.execPath;}
-  const candidates = (process.env.PATH || '').split(path.delimiter)
-    .filter(Boolean)
-    .map(dir => path.join(dir, 'node'));
-  for (const candidate of candidates) {
-    if (candidate !== process.execPath && nodeMajor(candidate) >= 20) {
-      return candidate;
-    }
-  }
-  throw new Error('Parallix requires Node.js >=20 to run its test suite. Install a supported Node runtime or put it on PATH.');
 }
 
 const allRootTestFiles = fs.readdirSync(__dirname)
@@ -106,7 +117,7 @@ const runsIntegrationE2E = runsRealAgentSmoke || runsLifecycleE2E;
 const bootstrapArgs = runsIntegrationE2E
   ? []
   : ['--require', path.join(__dirname, 'bootstrap-parallix-home.js')];
-const testNode = resolveTestNode();
+const testNode = compatibleTestNode();
 const testForceExitArgs = supportsTestForceExit(testNode)
   // This flag was added in Node 20.14 and Node 22.0. Keep the declared Node
   // >=20 range runnable while still ensuring supported newer runtimes return

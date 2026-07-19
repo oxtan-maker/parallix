@@ -1815,6 +1815,8 @@ test('draft launch preserves the mission worktree in cwd and PWD for child CLIs'
       assert.equal(result.agent, 'custom');
       assert.equal(result.result.status, 0);
       const parsed = JSON.parse(result.result.stdout);
+      // macOS resolves /var through its /private/var symlink for process.cwd().
+      // Compare canonical paths while preserving the exact PWD contract below.
       assert.equal(parsed.cwd, fs.realpathSync(tmpRoot));
       assert.equal(parsed.pwd, tmpRoot);
     });

@@ -52,8 +52,8 @@ function maybeUpdateGraphifyOnPrimary(rootDir = getPrimaryWorktree(), opts: {com
   });
 }
 
-/** @param {string} rootDir @param {{gitRunner?: Function}} opts */
-function prepareNoisePatchForSquash(rootDir: string, opts: {gitRunner?: Function} = {}) {
+/** @param {string} rootDir @param {{gitRunner?: Function, tmpDir?: string}} opts */
+function prepareNoisePatchForSquash(rootDir: string, opts: {gitRunner?: Function, tmpDir?: string} = {}) {
   const runner = (opts.gitRunner || git) as Function;
   const diffResult = runner(['-C', rootDir, 'diff', '--cached', '--binary']);
   if (diffResult.status !== 0) {
@@ -68,15 +68,18 @@ function prepareNoisePatchForSquash(rootDir: string, opts: {gitRunner?: Function
     return { ok: true, patchPath: null, cleanup: () => {} };
   }
 
-  const patchDir = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-integrate-noise-'));
+  // mkdtemp gives this invocation an ownership-scoped cleanup target. Never
+  // remove the supplied root: it may be an operator or concurrent process path.
+  const patchDir = fs.mkdtempSync(path.join(opts.tmpDir || os.tmpdir(), 'parallix-integrate-noise-'));
   const patchPath = path.join(patchDir, 'backlog-noise.patch');
+  const cleanup = () => fs.rmSync(patchDir, { recursive: true, force: true });
   fs.writeFileSync(patchPath, patch, 'utf8');
 
   const resetResult = runner(['-C', rootDir, 'reset', '--hard', 'HEAD']);
   if (resetResult.status !== 0) {
+    cleanup();
     return {
       ok: false,
-      patchPath,
       error: [resetResult.stdout, resetResult.stderr].filter(Boolean).join('\n').trim() || 'Could not restore a clean checkout after capturing backlog-noise patch.'
     };
   }
@@ -84,7 +87,7 @@ function prepareNoisePatchForSquash(rootDir: string, opts: {gitRunner?: Function
   return {
     ok: true,
     patchPath,
-    cleanup: () => fs.rmSync(patchDir, { recursive: true, force: true })
+    cleanup
   };
 }
 
@@ -1870,10 +1873,11 @@ function buildConflictResolutionPrompt(slug: string = '<slug>', area: string = '
 (integrate as any).orderIntegrationGates = orderIntegrationGates;
 (integrate as any).gateMatchesChangedAreas = gateMatchesChangedAreas;
 (integrate as any).buildIntegrationContext = buildIntegrationContext;
+(integrate as any).prepareNoisePatchForSquash = prepareNoisePatchForSquash;
 // Re-export getPrimaryWorktree from mission-utils
 (integrate as any).getPrimaryWorktree = getPrimaryWorktree;
 export default integrate;
-export { integrate, formatRecordedStatsRow, detectChangedAreas, parseFilesToAreas, loadIntegrationConfig, getIntegrationGatePlan, printIntegrationGatePlan, buildIntegrationGateEnv, parseIntegrateArgs, resolveIntegrationVerificationWorktree, buildIntegrationVerificationInvocation, executeIntegrationGates, orderIntegrationGates, gateMatchesChangedAreas, buildIntegrationContext, getPrimaryWorktree, resolveConflictsForMission, cleanupMissionWorktree, rewriteWorktreePaths, isNoMergeToAbortResult, buildConflictResolutionPrompt, VARIANT_B_AUTOMATION_SUMMARY, stashMainCheckoutIfNeeded, restoreMainCheckoutStash, evaluateTaskStatusForIntegration, promoteTaskForIntegrationIfNeeded, findExistingSquashCommit, printIntegrationPreflight, resolveForgejoUserForIntegration, getUnresolvedIndexConflicts, parseStashPopCollisionFiles, reportStashPopFailure, maybeUpdateGraphifyOnPrimary, SYNC_MERGED_DIAGNOSTICS, printDiagnosticTable, recordPostIntegrationStats, recordPostIntegrationStatsOrAbort, reportSyncMergedFailure, runPostIntegrateHookOrAbort, buildBeforeVerification };
+export { integrate, formatRecordedStatsRow, detectChangedAreas, parseFilesToAreas, loadIntegrationConfig, getIntegrationGatePlan, printIntegrationGatePlan, buildIntegrationGateEnv, parseIntegrateArgs, resolveIntegrationVerificationWorktree, buildIntegrationVerificationInvocation, executeIntegrationGates, orderIntegrationGates, gateMatchesChangedAreas, buildIntegrationContext, getPrimaryWorktree, resolveConflictsForMission, cleanupMissionWorktree, rewriteWorktreePaths, isNoMergeToAbortResult, buildConflictResolutionPrompt, VARIANT_B_AUTOMATION_SUMMARY, stashMainCheckoutIfNeeded, restoreMainCheckoutStash, evaluateTaskStatusForIntegration, promoteTaskForIntegrationIfNeeded, findExistingSquashCommit, printIntegrationPreflight, resolveForgejoUserForIntegration, getUnresolvedIndexConflicts, parseStashPopCollisionFiles, reportStashPopFailure, maybeUpdateGraphifyOnPrimary, SYNC_MERGED_DIAGNOSTICS, printDiagnosticTable, recordPostIntegrationStats, recordPostIntegrationStatsOrAbort, reportSyncMergedFailure, runPostIntegrateHookOrAbort, buildBeforeVerification, prepareNoisePatchForSquash };
 // CJS compat: ensure require() returns the function directly
 declare const module: { exports: any } | undefined;
 if (typeof module !== 'undefined') { module.exports = integrate; }

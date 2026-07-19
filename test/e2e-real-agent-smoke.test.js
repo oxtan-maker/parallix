@@ -60,6 +60,7 @@ const HEALTHCHECK_TIMEOUT_MS = Math.min(
 // where the relaunch machinery was legitimately recovering an
 // incomplete-evidence checkpoint was killed at 600s mid-recovery.
 const ACTIVE_TIMEOUT_MS = RUN_TIMEOUT_MS * 2;
+const MIN_TMP_FREE_BYTES = Number(process.env.PARALLIX_REAL_AGENT_MIN_TMP_BYTES || 512 * 1024 * 1024);
 
 function runCommand(command, args, options = {}) {
   const result = childProcess.spawnSync(command, args, { encoding: 'utf8', ...options });
@@ -229,8 +230,40 @@ const MODEL_UNAVAILABLE_PATTERNS = [
   /\b(?:502|503|504)\b/,
 ];
 
+const TEMPORARY_RESOURCE_FAILURE_PATTERNS = [
+  /\bENOSPC\b/i,
+  /no space left on device/i,
+  /unable to create .*index/i,
+  /could not lock .*index/i,
+  /index\.lock/i,
+  /unable to create .*lock/i,
+];
+
+function temporaryCapacityPreflight({
+  tmpDir = os.tmpdir(),
+  requiredBytes = MIN_TMP_FREE_BYTES,
+  statfs = fs.statfsSync
+} = {}) {
+  try {
+    const stats = statfs(tmpDir);
+    const availableBytes = Number(stats.bavail) * Number(stats.bsize);
+    if (!Number.isFinite(availableBytes)) {
+      return { ok: false, bucket: 'environment-resource', detail: `temporary-storage capacity is unavailable for ${tmpDir}` };
+    }
+    if (availableBytes < requiredBytes) {
+      return { ok: false, bucket: 'environment-resource', detail: `temporary-storage exhaustion at ${tmpDir}: ${availableBytes} bytes available, ${requiredBytes} required` };
+    }
+    return { ok: true, availableBytes };
+  } catch (error) {
+    return { ok: false, bucket: 'environment-resource', detail: `temporary-storage capacity check failed at ${tmpDir}: ${error.message}` };
+  }
+}
+
 function classifyFailure({ stdout, stderr, status, signal }) {
   const text = `${stdout || ''}\n${stderr || ''}`;
+  if (TEMPORARY_RESOURCE_FAILURE_PATTERNS.some((re) => re.test(text))) {
+    return { bucket: 'environment-resource', detail: 'temporary-storage or Git index/lock creation failed; reclaim capacity and retry' };
+  }
   if (signal) {
     return { bucket: 'local-model-environment', detail: `run was killed by signal ${signal} (likely a timeout waiting on the local model backend)` };
   }
@@ -498,14 +531,21 @@ function setupRepository({ slug, title, agent = 'custom', runner = 'opencode' })
 
 function runWorkflowAllowFail(repoRoot, env, args, timeout, options = {}) {
   const {
-    directCommand = false
+    directCommand = false,
+    keepCaptureArtifacts = shouldKeepTmp()
   } = options;
-  const stdoutPath = path.join(os.tmpdir(), `parallix-real-agent-stdout-${process.pid}-${Date.now()}.log`);
-  const stderrPath = path.join(os.tmpdir(), `parallix-real-agent-stderr-${process.pid}-${Date.now()}.log`);
-  const stdoutFd = fs.openSync(stdoutPath, 'w');
-  const stderrFd = fs.openSync(stderrPath, 'w');
+  // Own a unique directory, rather than independent predictable files under a
+  // shared root. This gives this invocation a single safe cleanup target and
+  // makes opt-in diagnostics retain only its own captures.
+  const captureDir = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-real-agent-capture-'));
+  const stdoutPath = path.join(captureDir, 'stdout.log');
+  const stderrPath = path.join(captureDir, 'stderr.log');
+  let stdoutFd;
+  let stderrFd;
   let result;
   try {
+    stdoutFd = fs.openSync(stdoutPath, 'w');
+    stderrFd = fs.openSync(stderrPath, 'w');
     const command = directCommand ? args[0] : process.execPath;
     const commandArgs = directCommand ? args.slice(1) : [CLI_ENTRY, ...args];
     result = childProcess.spawnSync(command, commandArgs, {
@@ -514,17 +554,18 @@ function runWorkflowAllowFail(repoRoot, env, args, timeout, options = {}) {
       timeout,
       stdio: ['ignore', stdoutFd, stderrFd]
     });
+    // @ts-expect-error TS2322 Type 'string' is not assignable to type 'NonSharedBuffer'.
+    result.stdout = fs.existsSync(stdoutPath) ? fs.readFileSync(stdoutPath, 'utf8') : '';
+    // @ts-expect-error TS2322 Type 'string' is not assignable to type 'NonSharedBuffer'.
+    result.stderr = fs.existsSync(stderrPath) ? fs.readFileSync(stderrPath, 'utf8') : '';
+    return result;
   } finally {
-    fs.closeSync(stdoutFd);
-    fs.closeSync(stderrFd);
+    if (stdoutFd !== undefined) { fs.closeSync(stdoutFd); }
+    if (stderrFd !== undefined) { fs.closeSync(stderrFd); }
+    if (!keepCaptureArtifacts) {
+      fs.rmSync(captureDir, { recursive: true, force: true });
+    }
   }
-  // @ts-expect-error TS2322 Type 'string' is not assignable to type 'NonSharedBuffer'.
-  result.stdout = fs.existsSync(stdoutPath) ? fs.readFileSync(stdoutPath, 'utf8') : '';
-  // @ts-expect-error TS2322 Type 'string' is not assignable to type 'NonSharedBuffer'.
-  result.stderr = fs.existsSync(stderrPath) ? fs.readFileSync(stderrPath, 'utf8') : '';
-  fs.rmSync(stdoutPath, { force: true });
-  fs.rmSync(stderrPath, { force: true });
-  return result;
 }
 
 function shouldKeepTmp() {
@@ -565,6 +606,11 @@ function runRealAgentSmoke(agent, runner) {
   }
 
   const slug = agent === 'codex' ? 'task-9003' : (runner === 'pi' ? 'task-9002' : 'task-9001');
+  const tempPreflight = temporaryCapacityPreflight();
+  assert.ok(
+    tempPreflight.ok,
+    `[${tempPreflight.bucket}] ${tempPreflight.detail}`
+  );
   const defaultStateSnapshots = snapshotDefaultParallixState();
   const repo = setupRepository({ slug, title: 'Real Agent Launcher Smoke', agent, runner });
   const worktree = path.resolve(repo.repoRoot, '..', `${path.basename(repo.repoRoot)}-${slug}`);
@@ -922,21 +968,25 @@ function assertSmokeSelection(agent) {
   );
 }
 
-test('real-agent smoke rejects an unsupported Codex override model', () => {
-  if (OVERRIDE_AGENT !== 'codex') {return;}
-  assert.equal(OVERRIDE_MODEL, 'gpt-5.6-luna', 'Codex smoke override requires model gpt-5.6-luna');
-});
+if (process.env.PARALLIX_E2E_SMOKE_TEST_HELPERS === '1') {
+  module.exports = { runWorkflowAllowFail, temporaryCapacityPreflight, classifyFailure };
+} else {
+  test('real-agent smoke rejects an unsupported Codex override model', () => {
+    if (OVERRIDE_AGENT !== 'codex') {return;}
+    assert.equal(OVERRIDE_MODEL, 'gpt-5.6-luna', 'Codex smoke override requires model gpt-5.6-luna');
+  });
 
-test('real custom-agent launcher smoke: full lifecycle with hello-world task (SC3/SC4/SC5/SC6/SC7)', {
-  skip: SMOKE_AGENT !== 'custom'
-}, () => {
-  assertSmokeSelection('custom');
-  runRealAgentSmoke('custom', CONFIGURED_RUNNER);
-});
+  test('real custom-agent launcher smoke: full lifecycle with hello-world task (SC3/SC4/SC5/SC6/SC7)', {
+    skip: SMOKE_AGENT !== 'custom'
+  }, () => {
+    assertSmokeSelection('custom');
+    runRealAgentSmoke('custom', CONFIGURED_RUNNER);
+  });
 
-test('real Codex gpt-5.6-luna launcher smoke: full lifecycle with hello-world task (SC3/SC4/SC5/SC6/SC7)', {
-  skip: SMOKE_AGENT !== 'codex' || SMOKE_MODEL !== 'gpt-5.6-luna'
-}, () => {
-  assertSmokeSelection('codex');
-  runRealAgentSmoke('codex', 'codex');
-});
+  test('real Codex gpt-5.6-luna launcher smoke: full lifecycle with hello-world task (SC3/SC4/SC5/SC6/SC7)', {
+    skip: SMOKE_AGENT !== 'codex' || SMOKE_MODEL !== 'gpt-5.6-luna'
+  }, () => {
+    assertSmokeSelection('codex');
+    runRealAgentSmoke('codex', 'codex');
+  });
+}

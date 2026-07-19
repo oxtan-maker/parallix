@@ -8,6 +8,10 @@ interface CaptureOpencodeExportOptions {
   env?: Record<string, string>;
   timeoutMs?: number;
   maxBytes?: number;
+  /** Retain only this invocation's owned capture directory for diagnosis. */
+  retainTemp?: boolean;
+  /** Injectable temporary root for deterministic tests. */
+  tmpDir?: string;
   spawn?: typeof childProcess.spawn;
 }
 
@@ -94,6 +98,8 @@ function captureOpencodeExport(sessionId: string, opts: CaptureOpencodeExportOpt
     env,
     timeoutMs = 30000,
     maxBytes = 32 * 1024 * 1024,
+    retainTemp = process.env.PARALLIX_KEEP_TEMP_ARTIFACTS === '1',
+    tmpDir = os.tmpdir(),
     spawn = childProcess.spawn,
   } = opts;
 
@@ -108,6 +114,7 @@ function captureOpencodeExport(sessionId: string, opts: CaptureOpencodeExportOpt
     let size = 0;
     let tmpFd: number | null = null;
     let tmpPath: string | null = null;
+    let tmpRoot: string | null = null;
 
     const finish = (value: string | null) => {
       if (settled) {return;}
@@ -117,8 +124,10 @@ function captureOpencodeExport(sessionId: string, opts: CaptureOpencodeExportOpt
       if (tmpFd !== null) {
         try { fs.closeSync(tmpFd); } catch (_) { /* already closed */ }
       }
-      if (tmpPath) {
-        try { fs.unlinkSync(tmpPath); } catch (_) { /* already gone */ }
+      if (tmpRoot && !retainTemp) {
+        // tmpRoot is created by this invocation with mkdtempSync, so this
+        // never reaches an operator path or another export's active capture.
+        try { fs.rmSync(tmpRoot, { recursive: true, force: true }); } catch (_) { /* best effort */ }
       }
       resolve(value);
     };
@@ -130,7 +139,8 @@ function captureOpencodeExport(sessionId: string, opts: CaptureOpencodeExportOpt
     // Create a temp file for stdout to avoid pipe-buffer truncation
     let tmpFileError = null;
     try {
-      tmpPath = path.join(os.tmpdir(), `opencode-export-${process.pid}-${Date.now()}.json`);
+      tmpRoot = fs.mkdtempSync(path.join(tmpDir, 'opencode-export-'));
+      tmpPath = path.join(tmpRoot, 'stdout.json');
       tmpFd = fs.openSync(tmpPath, 'w');
     } catch (e) {
       tmpFileError = e;

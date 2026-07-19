@@ -98,3 +98,10 @@ test('default test runner routes every moved group to integration and excludes i
   assert.ok(selectedFiles([], 'v20.14.0').args.includes('--test-force-exit'));
   assert.equal(pkg.scripts['test:integration'], 'FORCE_COLOR=0 node test/run-default-tests.js --integration');
 });
+
+test('default test runner selects a Node version that supports node:test', () => {
+  const runner = fs.readFileSync(path.join(__dirname, 'run-default-tests.js'), 'utf8');
+  assert.match(runner, /MINIMUM_TEST_NODE_MAJOR = 20/);
+  assert.match(runner, /PARALLIX_TEST_NODE/);
+  assert.match(runner, /compatibleTestNode\(\)/);
+});

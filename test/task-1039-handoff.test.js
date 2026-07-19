@@ -149,10 +149,11 @@ test('performHandoff fails when git add fails', async (t) => {
 
 test('performHandoff fails when git push fails', async (t) => {
   setupMocks();
-  mock.method(git, 'git', (args) => args.includes('push') ? { status: 1 } : { status: 0 });
+  mock.method(git, 'git', (args) => args.includes('push') ? { status: 1, stderr: 'fatal: Unable to create .git/index.lock: No space left on device' } : { status: 0 });
   mock.method(forgejo, 'authenticatedReviewUrl', () => 'url');
   const result = await performHandoff(TEST_SLUG, { worktree: WORKTREE, skipGate: true, error: () => {}, rebaseFn: mockRebase });
   assert.strictEqual(result.ok, false);
   assert.match(result.error, /Failed to push Backlog transition/);
+  assert.match(result.error, /Unable to create .git\/index\.lock: No space left on device/);
   cleanup();
 });
