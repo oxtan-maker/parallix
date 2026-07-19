@@ -10,7 +10,8 @@
     "resolveJsonModule": true
   },
   "include": [
-    "test/**/*.js"
+    "test/**/*.js",
+    "test/**/*.ts"
   ],
   "exclude": [
     "graphify-out/",
