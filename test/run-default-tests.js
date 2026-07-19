@@ -6,11 +6,16 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const MINIMUM_TEST_NODE_MAJOR = 20;
+const MINIMUM_TEST_NODE_MINOR = 6;
 
-function nodeMajorVersion(executable) {
+function supportsTestImports(executable) {
   const result = spawnSync(executable, ['--version'], { encoding: 'utf8' });
-  const match = result.status === 0 && String(result.stdout || '').match(/^v(\d+)/);
-  return match ? Number(match[1]) : 0;
+  const match = result.status === 0 && String(result.stdout || '').match(/^v(\d+)\.(\d+)\./);
+  if (!match) { return false; }
+  const major = Number(match[1]);
+  const minor = Number(match[2]);
+  return major > MINIMUM_TEST_NODE_MAJOR
+    || (major === MINIMUM_TEST_NODE_MAJOR && minor >= MINIMUM_TEST_NODE_MINOR);
 }
 
 function compatibleTestNode() {
@@ -31,11 +36,11 @@ function compatibleTestNode() {
   for (const candidate of candidates) {
     if (!candidate || seen.has(candidate)) { continue; }
     seen.add(candidate);
-    if (nodeMajorVersion(candidate) >= MINIMUM_TEST_NODE_MAJOR) {
+    if (supportsTestImports(candidate)) {
       return candidate;
     }
   }
-  throw new Error(`Node ${MINIMUM_TEST_NODE_MAJOR}+ is required for node:test; set PARALLIX_TEST_NODE to a compatible executable.`);
+  throw new Error(`Node ${MINIMUM_TEST_NODE_MAJOR}.${MINIMUM_TEST_NODE_MINOR}+ is required for TypeScript tests; set PARALLIX_TEST_NODE to a compatible executable.`);
 }
 
 function supportsTestForceExit(command) {
@@ -49,7 +54,7 @@ function supportsTestForceExit(command) {
 
 const allRootTestFiles = fs.readdirSync(__dirname)
   .sort()
-  .filter(file => file.endsWith('.test.js'))
+  .filter(file => /\.test\.(?:js|ts)$/.test(file))
   // Lifecycle E2E is an integration gate. Keeping it out of the fast default
   // suite prevents review/checkpoint verification from repeatedly running it.
   .filter(file => file !== 'e2e-mission-lifecycle.test.js')
@@ -117,6 +122,9 @@ const runsIntegrationE2E = runsRealAgentSmoke || runsLifecycleE2E;
 const bootstrapArgs = runsIntegrationE2E
   ? []
   : ['--require', path.join(__dirname, 'bootstrap-parallix-home.js')];
+const typeScriptLoaderArgs = testFiles.some(file => file.endsWith('.ts'))
+  ? ['--import', 'tsx']
+  : [];
 const testNode = compatibleTestNode();
 const testForceExitArgs = supportsTestForceExit(testNode)
   // This flag was added in Node 20.14 and Node 22.0. Keep the declared Node
@@ -129,6 +137,7 @@ const result = spawnSync(
   testNode,
   [
     ...bootstrapArgs,
+    ...typeScriptLoaderArgs,
     ...testForceExitArgs,
     '--test',
     ...testFiles

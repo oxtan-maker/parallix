@@ -102,6 +102,11 @@ test('default test runner routes every moved group to integration and excludes i
 test('default test runner selects a Node version that supports node:test', () => {
   const runner = fs.readFileSync(path.join(__dirname, 'run-default-tests.js'), 'utf8');
   assert.match(runner, /MINIMUM_TEST_NODE_MAJOR = 20/);
+  assert.match(runner, /MINIMUM_TEST_NODE_MINOR = 6/);
   assert.match(runner, /PARALLIX_TEST_NODE/);
   assert.match(runner, /compatibleTestNode\(\)/);
+  assert.throws(
+    () => selectedFiles([], 'v20.5.0'),
+    /Node 20\.6\+ is required for TypeScript tests/
+  );
 });
