@@ -48,7 +48,6 @@ test('startReviewLoop follows the transition contract: review before reviewer, a
     readReviewStateFn: () => null,
     writeReviewStateFn: () => {},
     rebaseBeforeReviewRoundFn: async () => ({ ok: true, sharedFileConflicts: false }),
-    
     // Track transition calls
     transitionTaskFn: (slug, status, options) => {
       events.push({ type: 'transition', status, implementer: options.implementer });

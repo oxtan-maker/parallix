@@ -22,3 +22,15 @@ test('bootstrap pins dummy agent launchers so tests do not hit real workstation 
   const piHelp = spawnSync(process.env.PI_BIN, ['--help'], { encoding: 'utf8', env: process.env });
   assert.equal(piHelp.status, 0, 'PI_BIN dummy launcher should exit 0 for --help');
 });
+
+test('bootstrap provides a portable git init -b compatibility shim', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bootstrap-git-init-'));
+  try {
+    const result = spawnSync('git', ['init', '-b', 'main', root], { encoding: 'utf8', env: process.env });
+    assert.equal(result.status, 0, result.stderr);
+    const branch = spawnSync('git', ['-C', root, 'symbolic-ref', '--short', 'HEAD'], { encoding: 'utf8', env: process.env });
+    assert.equal(branch.stdout.trim(), 'main');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

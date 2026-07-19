@@ -4,6 +4,9 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const { spawn: realSpawn } = require('child_process');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const { captureOpencodeExport } = require('../dist/lib/agents/opencode-export');
 
 function makeFakeChild() {
@@ -50,6 +53,41 @@ test('captureOpencodeExport fails explicitly when output exceeds maxBytes', asyn
 test('captureOpencodeExport resolves null when spawn throws', async () => {
   const spawn = () => { throw new Error('opencode not found'); };
   assert.equal(await captureOpencodeExport('ses_x', { spawn }), null);
+});
+
+test('captureOpencodeExport removes its owned temporary directory after launch error and timeout', async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-export-cleanup-'));
+  try {
+    assert.equal(await captureOpencodeExport('ses_launch', { tmpDir, spawn: () => { throw new Error('ENOENT'); } }), null);
+    assert.deepEqual(fs.readdirSync(tmpDir), []);
+    const child = makeFakeChild();
+    // @ts-expect-error TS2322 fake child only implements the error/close surface.
+    assert.equal(await captureOpencodeExport('ses_timeout', { tmpDir, timeoutMs: 20, spawn: () => child }), null);
+    assert.deepEqual(fs.readdirSync(tmpDir), []);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('captureOpencodeExport retains only its owned temporary directory when opted in', async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-export-retain-'));
+  const operatorFile = path.join(tmpDir, 'operator.log');
+  fs.writeFileSync(operatorFile, 'keep');
+  try {
+    const result = await captureOpencodeExport('ses_keep', {
+      tmpDir,
+      retainTemp: true,
+      // @ts-expect-error TS2322 realSpawn's overload cannot infer the fd-only stderr stream.
+      spawn: (cmd, args, opts) => realSpawn('node', ['-e', 'process.stdout.write("{}")'], opts)
+    });
+    assert.equal(result, '{}');
+    const owned = fs.readdirSync(tmpDir).filter((entry) => entry.startsWith('opencode-export-'));
+    assert.equal(owned.length, 1);
+    assert.ok(fs.existsSync(path.join(tmpDir, owned[0], 'stdout.json')));
+    assert.equal(fs.readFileSync(operatorFile, 'utf8'), 'keep');
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
 });
 
 test('captureOpencodeExport resolves null on child error event', async () => {

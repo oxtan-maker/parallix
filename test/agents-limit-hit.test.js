@@ -68,7 +68,8 @@ test.after(() => {
 });
 
 function runGit(cwd, args) {
-  const result = spawnSync('git', args, {
+  /** @type {import('node:child_process').SpawnSyncOptionsWithStringEncoding} */
+  const options = {
     cwd,
     encoding: 'utf8',
     env: {
@@ -78,7 +79,17 @@ function runGit(cwd, args) {
       GIT_COMMITTER_NAME: 'Workflow Test',
       GIT_COMMITTER_EMAIL: 'workflow-test@example.com'
     }
-  });
+  };
+  let result = spawnSync('git', args, options);
+  // Apple Git 2.24 and earlier lacks `git init -b`. Keep the worktree test
+  // portable by setting the unborn branch explicitly after the fallback init.
+  if (result.status !== 0 && args[0] === 'init' && args[1] === '-b') {
+    const branch = args[2];
+    const target = args[3];
+    result = spawnSync('git', ['init', target], options);
+    assert.equal(result.status, 0, `git init fallback failed\n${result.stderr}`);
+    result = spawnSync('git', ['-C', target, 'symbolic-ref', 'HEAD', `refs/heads/${branch}`], options);
+  }
   assert.equal(
     result.status,
     0,

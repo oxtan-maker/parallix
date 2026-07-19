@@ -14,6 +14,36 @@ function withTempRoot(run) {
   }
 }
 
+test('runReproAtRef removes its owned directory after worktree success and add failure', () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'redgreen-cleanup-'));
+  const originalTmpdir = os.tmpdir;
+  try {
+    os.tmpdir = () => tempRoot;
+    const successful = redgreen.runReproAtRef('parent', 'test/repro.test.js', {
+      rootDir: '/fake-repo',
+      gitFn: args => {
+        if (args.includes('add')) { return { status: 0, stdout: '', stderr: '' }; }
+        if (args.includes('show')) { return { status: 1, stdout: '', stderr: '' }; }
+        if (args.includes('remove')) { return { status: 0, stdout: '', stderr: '' }; }
+        throw new Error(`unexpected git invocation: ${args.join(' ')}`);
+      },
+      runCommandFn: () => ({ status: 0 })
+    });
+    assert.deepEqual(successful, { status: 0 });
+    assert.deepEqual(fs.readdirSync(tempRoot), []);
+
+    const failedAdd = redgreen.runReproAtRef('parent', 'test/repro.test.js', {
+      rootDir: '/fake-repo',
+      gitFn: () => ({ status: 1, stdout: '', stderr: '' })
+    });
+    assert.deepEqual(failedAdd, { status: null, skipped: true, reason: 'worktree-add-failed' });
+    assert.deepEqual(fs.readdirSync(tempRoot), []);
+  } finally {
+    os.tmpdir = originalTmpdir;
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
 // ---------- findReproTestPath ----------
 
 test('findReproTestPath reads Reproduction-Test marker from MISSION.md', () => {

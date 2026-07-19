@@ -98,12 +98,33 @@ const {
   buildIntegrationVerificationInvocation,
   parseIntegrateArgs,
   runPostIntegrateHookOrAbort,
-  buildBeforeVerification
+  buildBeforeVerification,
+  prepareNoisePatchForSquash
 } = require('../dist/lib/commands/integrate');
 const integrateCommand = require('../dist/lib/commands/integrate');
 const { conventionalWorktreePath, getPrimaryBranch } = missionUtils;
 
 const PRIMARY = getPrimaryBranch();
+
+test('prepareNoisePatchForSquash cleans only its owned patch directory when reset fails', () => {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'integrate-noise-cleanup-'));
+  const operatorFile = path.join(tmpRoot, 'operator-note.txt');
+  fs.writeFileSync(operatorFile, 'keep');
+  const gitRunner = args => {
+    if (args.includes('diff')) { return { status: 0, stdout: 'diff --git a/backlog/tasks/a.md b/backlog/tasks/a.md', stderr: '' }; }
+    if (args.includes('reset')) { return { status: 1, stdout: '', stderr: 'reset failed' }; }
+    throw new Error(`unexpected git invocation: ${args.join(' ')}`);
+  };
+  try {
+    const result = prepareNoisePatchForSquash('/fake-worktree', { gitRunner, tmpDir: tmpRoot });
+    assert.equal(result.ok, false);
+    assert.match(result.error, /reset failed/);
+    assert.deepEqual(fs.readdirSync(tmpRoot), ['operator-note.txt']);
+    assert.equal(fs.readFileSync(operatorFile, 'utf8'), 'keep');
+  } finally {
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+  }
+});
 
 test('integration verification resolves the candidate mission worktree, not the primary checkout', () => {
   const primaryWorktree = '/tmp/primary-checkout';
