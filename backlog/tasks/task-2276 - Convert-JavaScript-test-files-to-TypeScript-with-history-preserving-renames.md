@@ -1,7 +1,7 @@
 ---
 id: TASK-2276
 title: Convert JavaScript test files to TypeScript with history-preserving renames
-status: active
+status: review
 assignee: [codex]
 created_date: '2026-07-19 00:00'
 labels:
