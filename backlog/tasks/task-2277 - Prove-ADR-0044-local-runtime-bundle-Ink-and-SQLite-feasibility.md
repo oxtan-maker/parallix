@@ -2,7 +2,7 @@
 id: TASK-2277
 title: Prove ADR 0044 local runtime, bundle, Ink, and SQLite feasibility
 status: backlog
-assignee: []
+assignee: [codex]
 created_date: '2026-07-19 00:00'
 labels:
   - architecture
