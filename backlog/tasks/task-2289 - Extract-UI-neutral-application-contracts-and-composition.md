@@ -2,7 +2,7 @@
 id: TASK-2289
 title: Extract UI-neutral application contracts and composition
 status: backlog
-assignee: []
+assignee: [codex]
 created_date: '2026-07-20 00:00'
 labels:
   - architecture
