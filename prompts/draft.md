@@ -35,7 +35,7 @@ Drafting requirements:
 Bug-labeled missions (regression-test-first / "lock the bug"):
 - this section applies only when the backlog task at `{{taskPath}}` carries a `bug` label (in addition to its `ai_sdlc` or `user_value` classification). If there is no `bug` label, ignore this section entirely.
 - make the **first checkpoint** the authoring of a failing reproduction test that locks the bug before any fix is written. Describe in that checkpoint: the test file location (under `test/`), the reproduction scenario, and the assertion that fails at the mission's parent commit (red) and will pass once the fix lands (green).
-- record the reproduction test's path in `{{missionPath}}` on its own line in the exact form `Reproduction-Test: <path>` (e.g. `Reproduction-Test: test/task-1354-repro.test.js`). The handoff red→green gate reads this line to locate the test, so it must be present and accurate.
+- record the reproduction test's path in `{{missionPath}}` on its own line in the exact form `Reproduction-Test: <path>` (e.g. `Reproduction-Test: test/task-1354-repro.test.ts`). The handoff red→green gate reads this line to locate the test, so it must be present and accurate.
 - do not author the fix during draft — the reproduction test and its `Reproduction-Test:` declaration are the only bug-specific drafting outputs.
 
 Graphify-first: before drafting, check if `graphify-out/graph.json` exists. If it does, run `graphify query "{{slug}} mission scope and dependencies"` to understand the codebase context before filling in the mission contract. After drafting, run `graphify update .` if you modified any code files.

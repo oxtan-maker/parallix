@@ -133,7 +133,7 @@ places, both in `lib/tools/backlog.js`:
 - **Guard / gate:** `checkBacklogIntegrity()` emits a `duplicate-completed` issue
   for any task id present in both `backlog/tasks/` and a canonical
   (`completed/` or `archive/`) location. The gate is exercised by
-  `test/backlog_gate.test.js` (fails when a recurrence ships) and by the `px draft`
+  `test/backlog_gate.test.ts` (fails when a recurrence ships) and by the `px draft`
   preflight (`lib/commands/draft.js`), which refuses to draft while the duplicate
   exists. This is in addition to the existing filename-vs-frontmatter id check.
 - **Mutation hygiene:** `pruneStaleBacklogDuplicates()` treats the completed/archive
@@ -141,7 +141,7 @@ places, both in `lib/tools/backlog.js`:
   mutation does not leave a recreated `status: backlog` duplicate behind.
 
 Regression coverage for the reorder-recreates-completed-task scenario lives in
-`test/backlog_reorder_completed_duplicate.test.js`.
+`test/backlog_reorder_completed_duplicate.test.ts`.
 
 ### 4.5 Integration gate
 
@@ -164,7 +164,7 @@ Example config:
 {
   "gates": {
     "lib": {"command": "./scripts/verify-local.sh static-analysis", "order": 1, "run_last": false},
-    "workflow": {"command": "node test/e2e-mission-lifecycle.test.js", "order": 50, "run_last": true}
+    "workflow": {"command": "node --import tsx test/e2e-mission-lifecycle.test.ts", "order": 50, "run_last": true}
   }
 }
 ```

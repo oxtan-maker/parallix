@@ -1,0 +1,37 @@
+Mission base: 15594359
+Filename-sensitive files discovered before conversion:
+
++config/integration-pipelines.json
+scripts/annotate-test-errors.js
+scripts/fix-remaining-test-errors.js
+scripts/package-content-audit.js
+scripts/test-hygiene.sh
+scripts/verify-local.sh
+test/coverage-gate.test.js
+test/default-test-suite.test.js
+test/e2e-real-agent-smoke.test.js
+test/handoff.test.js
+test/integration-pipelines.test.js
+test/mission-start.test.js
+test/mutation-gate-ratchet.test.js
+test/mutation-gate.test.js
+test/mutation-scoper.test.js
+test/nels.test.js
+test/opencode-telemetry.test.js
+test/redgreen.test.js
+test/review-commands.test.js
+test/run-default-tests.js
+test/task-1049-force-push.test.js
+test/task-1104-call-order.test.js
+test/task-1268-diff-scoped-area.test.js
+test/task-1383-active-gate-failure-prompt.test.js
+test/task-1385-pre-review-gate.test.js
+test/task-2202-repair-handoff-autocommit.test.js
+test/task-2212-repro.test.js
+test/task-2228-distribution-verification.test.js
+test/task-2236-pi-e2e-repro.test.js
+test/task-2241-tmp-cleanup-repro.test.js
+test/task-2273-review-gate-ownership.test.js
+test/verification.test.js
+test/verify-local-integrate.test.js
+tsconfig.test.json

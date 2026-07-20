@@ -16,7 +16,7 @@ while IFS= read -r -d '' file; do
     echo "  $content"
     errors=$((errors + 1))
   done < <(grep -n -E '(it|describe|test)\.only\s*\(' "$file" 2>/dev/null | tr '\n' '\0' || true)
-done < <(find "$test_dir" -name '*.test.js' -print0 2>/dev/null)
+done < <(find "$test_dir" \( -name '*.test.js' -o -name '*.test.ts' \) -print0 2>/dev/null)
 
 # Check for .skip, xit, fit without inline annotated reason
 while IFS= read -r -d '' file; do
@@ -31,7 +31,7 @@ while IFS= read -r -d '' file; do
     echo "  $content"
     errors=$((errors + 1))
   done < <(grep -n -E '(it|describe|test)\.(skip)\s*\(|\bxit\s*\(|\bfit\s*\(' "$file" 2>/dev/null | tr '\n' '\0' || true)
-done < <(find "$test_dir" -name '*.test.js' -print0 2>/dev/null)
+done < <(find "$test_dir" \( -name '*.test.js' -o -name '*.test.ts' \) -print0 2>/dev/null)
 
 if [ "$errors" -gt 0 ]; then
   echo "FAIL: $errors test-hygiene violation(s) found"

@@ -159,7 +159,7 @@ export async function rebaseBeforeReviewRound(slug: string, {
   }
 
   // A checkout is TypeScript-first: its CLI is px.ts and lib/index.js is not
-  // tracked.  Nested commands must therefore use tsx in a source checkout.
+  // tracked. Nested commands must therefore use tsx in a source checkout.
   // Packaged installations retain the compiled dist/px.js entrypoint.
   const sourceCli = path.resolve(worktree, 'px.ts');
   const usesSourceRuntime = fs.existsSync(sourceCli);

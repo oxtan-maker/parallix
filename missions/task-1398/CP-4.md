@@ -21,7 +21,7 @@ $ ./scripts/verify-local.sh all
 
 Exit code `0`. The 22 skipped tests are pre-existing (unrelated to this
 mission — no `.skip`/`.only` added by this branch's changes, confirmed by
-`git diff` on `test/agents.test.js` and `test/mistral.test.js`).
+`git diff` on `test/agents.test.ts` and `test/mistral.test.ts`).
 
 ### `./scripts/verify-local.sh static-analysis` (required — `lib/agents/mistral.ts` changed)
 
@@ -47,14 +47,14 @@ unrelated files (`lib/review/review-loop.ts`, `lib/review/review-polling.ts`,
 
 | Success criterion (from MISSION.md) | Evidence | Status |
 |---|---|---|
-| Focused reproduction fails pre-fix, demonstrates the symptom | `test/agents.test.js:1939` `mistral without a non-interactive tool-approval bypass gets re-blocklisted on every launch` — failed pre-fix with `All eligible agents exhausted ... mistral: exit 1 (Tool call requires approval but no interactive terminal is available.)` (CP-1) | PASS |
+| Focused reproduction fails pre-fix, demonstrates the symptom | `test/agents.test.ts:2103` `mistral without a non-interactive tool-approval bypass gets re-blocklisted on every launch` — failed pre-fix with `All eligible agents exhausted ... mistral: exit 1 (Tool call requires approval but no interactive terminal is available.)` (CP-1) | PASS |
 | Fix tied to reproduced path with concrete file references | `lib/agents/mistral.ts:51` (`--yolo` added to `buildMistralInvocation`'s `args`); write site traced to `lib/agents/agents.ts:909` via `shouldPersistLaunchFailureBlock` at `lib/agents/agents.ts:171-181` (CP-2) | PASS |
-| Reproduced case passes after fix, no incorrect persistent write | `test/agents.test.js:1939` green post-fix; `blockCalls` asserted empty (CP-3) | PASS |
-| Genuine usage-limit handling for mistral still works | `test/agents-limit-hit.test.js` and `test/limit-hit.test.js` (all `PATTERN_SETS.mistral` cases) plus `test/agents.test.js` `startAgent launch failure does not retry when limit-hit is detected` — all pass unchanged | PASS |
-| No `.only`/bare `.skip` introduced | Verified via `git diff -- test/agents.test.js test/mistral.test.js`; test-hygiene stage of `static-analysis` gate passes | PASS |
+| Reproduced case passes after fix, no incorrect persistent write | `test/agents.test.ts:2103` green post-fix; `blockCalls` asserted empty (CP-3) | PASS |
+| Genuine usage-limit handling for mistral still works | `test/agents-limit-hit.test.ts` and `test/limit-hit.test.ts` (all `PATTERN_SETS.mistral` cases) plus `test/agents.test.ts` `startAgent launch failure does not retry when limit-hit is detected` — all pass unchanged | PASS |
+| No `.only`/bare `.skip` introduced | Verified via `git diff -- test/agents.test.ts test/mistral.test.ts`; test-hygiene stage of `static-analysis` gate passes | PASS |
 | `./scripts/verify-local.sh all` passes | Exit 0, `tests 1779 / pass 1757 / fail 0` (this checkpoint, above) | PASS |
 | `./scripts/verify-local.sh static-analysis` passes (lib/ changed) | Exit 0, ESLint 0 errors / tsc clean / test-hygiene clean (this checkpoint, above) | PASS |
-| Final checkpoint evidence cites real file:line + test names | This table and CP-1/CP-2/CP-3 cite `lib/agents/mistral.ts:44` (pre-fix) / `:51` (post-fix), `lib/agents/agents.ts:171-181,909`, `lib/agents/claude.ts:74`, `lib/agents/opencode.ts:142`, `lib/agents/codex.ts:188`, and test names `test/agents.test.js:1939`, `test/mistral.test.js:73` | PASS |
+| Final checkpoint evidence cites real file:line + test names | This table and CP-1/CP-2/CP-3 cite `lib/agents/mistral.ts:44` (pre-fix) / `:51` (post-fix), `lib/agents/agents.ts:171-181,909`, `lib/agents/claude.ts:74`, `lib/agents/opencode.ts:142`, `lib/agents/codex.ts:188`, and test names `test/agents.test.ts:2103`, `test/mistral.test.ts:73` | PASS |
 
 Next action: none — mission complete. Ready for handoff/review; no further checkpoints required by MISSION.md.
 
@@ -62,7 +62,7 @@ Next action: none — mission complete. Ready for handoff/review; no further che
 
 Review rounds 1-3 repeatedly surfaced "regressions" (px.ts ESM guard,
 `mistral-telemetry.ts` CJS, `package.json`/`package-lock.json` version,
-`test/px-runner.test.js`/`test/px-shell-init.test.js` reverts) that were not
+`test/px-runner.test.ts`/`test/px-shell-init.test.ts` reverts) that were not
 introduced by this mission's changes — `mission/task-1398` forked from `main`
 before task-1395/task-1400/task-1402 merged, and the review tooling diffs
 directly against `main`'s continuously-advancing tip. Resolved by merging
@@ -75,7 +75,7 @@ deletions). Re-verified both gates pass post-merge: `verify-local.sh all`
 clean, test-hygiene clean).
 
 Added a regression test pinning the `lib/commands/active.ts:433`
-`repairHandoff.default` accessor: `test/active.test.js` `repair-handoff
+`repairHandoff.default` accessor: `test/active.test.ts` `repair-handoff
 module exposes its default export as callable under CJS
 require+importStar interop` — proves empirically that `.default` is the only
 accessor that resolves to a callable function under the compiled CJS runtime

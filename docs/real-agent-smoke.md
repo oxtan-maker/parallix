@@ -1,6 +1,6 @@
 # Real-agent launcher smoke test
 
-`test/e2e-real-agent-smoke.test.js` is a **blocking** integration gate
+`test/e2e-real-agent-smoke.test.ts` is a **blocking** integration gate
 (`custom-agent-smoke` in `config/integration-pipelines.json`) that launches
 the real `opencode` binary against a pinned local model through the
 production launcher path in `lib/agents/opencode.ts`. It exists specifically
@@ -9,7 +9,7 @@ developing itself — see `missions/task-1359/MISSION.md` and `missions/task-220
 for the original implementation and the retake that corrected the lifecycle coverage.
 
 This is a second, additive tier on top of the deterministic
-`test/e2e-mission-lifecycle.test.js` harness (the `workflow` gate), which
+`test/e2e-mission-lifecycle.test.ts` harness (the `workflow` gate), which
 stubs `opencode` entirely and is not weakened or replaced by this test.
 
 ## Why it's blocking, not advisory
@@ -42,7 +42,7 @@ configured local agent, integration must stop rather than merge silently.
 ## Invocation
 
 ```
-node test/e2e-real-agent-smoke.test.js
+node --import tsx test/e2e-real-agent-smoke.test.ts
 ```
 
 Also runs as part of `px integrate` (or `./scripts/verify-local.sh integrate`)
@@ -64,7 +64,7 @@ values, unsupported families, and unknown options before gate execution. The
 values are forwarded as dedicated environment values only to
 `custom-agent-smoke`; they are never concatenated into its shell command.
 Without both flags, the configured `custom-agent-smoke` command remains
-`node test/e2e-real-agent-smoke.test.js`, and smoke selection retains the
+`node --import tsx test/e2e-real-agent-smoke.test.ts`, and smoke selection retains the
 configured custom runner (`opencode` or `pi`) and its existing model behavior.
 
 The gate runs **one** full lifecycle per invocation, with whichever custom
@@ -75,7 +75,7 @@ is exercised on demand instead — the harness itself is runner-parameterized
 (`opencode` and `pi`), and switching costs only an env var:
 
 ```
-PARALLIX_REAL_AGENT_RUNNER=pi node test/e2e-real-agent-smoke.test.js
+PARALLIX_REAL_AGENT_RUNNER=pi node --import tsx test/e2e-real-agent-smoke.test.ts
 ```
 
 ## Expected runtime and determinism

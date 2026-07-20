@@ -29,19 +29,19 @@ still executes all tests with zero skips and zero failures.
 
 ### 1. Monorepo-script tests → auto-skip when the script is absent
 
-`test/install.test.js` and the `scripts/verify-local.sh`-invoking tests in
-`test/integration-pipelines.test.js` exercise WrGroceries monorepo scripts
+`test/install.test.ts` and the `scripts/verify-local.sh`-invoking tests in
+`test/integration-pipelines.test.ts` exercise WrGroceries monorepo scripts
 (`scripts/install-workflow.sh`, `scripts/verify-local.sh`) that live **outside** the
 parallix tree and are intentionally **not** carried into the standalone repo
 (MISSION scope item 9 — those scripts stay in WrGroceries and are repointed to the
 global `px` runner). Each such test now carries a `{ skip: ... }` guard keyed on the
 script's presence: it runs unchanged in the monorepo and skips (with a documented
-reason) in the standalone repo. Tests affected: 13 in `install.test.js`, 8 in
-`integration-pipelines.test.js`.
+reason) in the standalone repo. Tests affected: 13 in `install.test.ts`, 8 in
+`integration-pipelines.test.ts`.
 
 ### 2. Monorepo `.gitignore` assertion → skip outside the monorepo host
 
-`test/agents.test.js` has one test asserting the monorepo `.gitignore` semantics for
+`test/agents.test.ts` has one test asserting the monorepo `.gitignore` semantics for
 the embedded `workflow/config/` tree, computed against `../..` (the monorepo root). In
 the standalone repo `../..` is the parent code directory, not a git repo, so the
 assertion does not apply. It now skips when no `.git` exists at `../..`. (1 test.)
@@ -51,8 +51,8 @@ assertion does not apply. It now skips when no `.git` exists at `../..`. (1 test
 The standalone repo declares `workflow.config.json` with `adapters.review.provider:
 "forgejo"` (required for self-hosting parity). That turns
 `isForgejoReviewEnabled(process.cwd())` ON at the repo root. The rebase tests in
-`test/rebase.test.js`, `test/rebase_diagnostics.test.js`, and
-`test/rebase_hardening.test.js` were written assuming Forgejo-off (in the monorepo
+`test/rebase.test.ts`, `test/rebase_diagnostics.test.ts`, and
+`test/rebase_hardening.test.ts` were written assuming Forgejo-off (in the monorepo
 they ran with `cwd = parallix/`, which had no local config), and they do not mock the
 Forgejo fetch path. They now inject `isForgejoReviewEnabledFn: () => false` — the same
 injection idiom two sibling tests in the file already use with `() => true` — so they

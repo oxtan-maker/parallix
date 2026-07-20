@@ -56,7 +56,7 @@ import * as fmt from '../core/fmt.js';
 import { packageRoot } from '../core/package-root.js';
 
 const REPO_ROOT = packageRoot(__dirname);
-const SELF_TEST_FILE = 'coverage-gate.test.js';
+const SELF_TEST_FILE = 'coverage-gate.test.ts';
 const TEMP_DIR_PREFIXES = [
   'agents-',
   'sessions-',
@@ -111,7 +111,7 @@ function discoverTestFiles() {
   const testDir = path.join(REPO_ROOT, 'test');
   if (!fs.existsSync(testDir)) {return [];}
   return fs.readdirSync(testDir)
-    .filter(file => file.endsWith('.test.js'))
+    .filter(file => file.endsWith('.test.ts'))
     .filter(file => file !== SELF_TEST_FILE)
     .map(file => path.join(testDir, file))
     .sort();
@@ -211,6 +211,7 @@ function resetPerRunScratchState() {
 
 function buildCoverageArgs(testFiles: string[], coverageThreshold = threshold, useLcov = lcov) {
   const args = [
+    ...(testFiles.some(file => file.endsWith('.ts')) ? ['--import', 'tsx'] : []),
     '--test',
     '--experimental-test-coverage',
     `--test-coverage-lines=${coverageThreshold}`,
