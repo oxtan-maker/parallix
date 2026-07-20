@@ -2,7 +2,7 @@
 id: TASK-2278
 title: Establish UI-neutral application architecture and ADR 0051
 status: backlog
-assignee: []
+assignee: [codex]
 created_date: '2026-07-19 00:00'
 labels:
   - architecture
