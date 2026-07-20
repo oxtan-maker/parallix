@@ -250,7 +250,7 @@ test('startReviewLoop validates reviewer and implementer from injected review el
     exit: code => exitCodes.push(code)
   });
 
-  assert.equal(exitCodes[0], 1);
+  assert.deepEqual(exitCodes, []);
   assert.ok(logs.some(line => line.includes('Implementer: future-agent')));
   assert.ok(logs.some(line => line.includes('Reviewer: codex')));
 });
@@ -769,11 +769,12 @@ test('review helper functions and error paths', async () => {
   // 1. review usage error (missing slug)
   // @ts-expect-error TS2349 This expression is not callable.
   await review([], { ...baseOptions, inferSlugFn: () => null });
-  assert.deepEqual(exitCodes, []);
+  assert.deepEqual(exitCodes, [1]);
   assert.ok(errors[0].includes('Usage: px review'), 'Should show usage');
 
   // 2. review status (PR not found)
   logs.length = 0;
+  exitCodes.length = 0;
   // @ts-expect-error TS2349 This expression is not callable.
   await review(['test-slug'], { ...baseOptions });
   assert.ok(logs.some(l => l.includes('No active PR found')), 'Should log PR not found');
@@ -783,7 +784,7 @@ test('review helper functions and error paths', async () => {
   exitCodes.length = 0;
   // @ts-expect-error TS2349 This expression is not callable.
   await review(['test-slug', '--comment-file', 'fail.md'], { ...baseOptions, isComment: true });
-  assert.deepEqual(exitCodes, []);
+  assert.deepEqual(exitCodes, [1, 1]);
   assert.ok(errors[0].includes('Could not read comment from fail.md'), 'Should log read error');
 
   // 4. Polling helpers - No token warning
@@ -2621,7 +2622,7 @@ test('startReviewLoop handles reviewer launch failure', async () => {
   });
 
   assert.ok(errors.some(e => e.includes('Could not launch reviewer agent')), 'Should log launch failure');
-  assert.equal(exitCodes[0], 1);
+  assert.deepEqual(exitCodes, []);
 });
 
 test('startReviewLoop handles reviewer polling timeout with recovery', async () => {
@@ -3082,6 +3083,9 @@ test('startReviewLoop keeps persisted same-family reviewer after re-derive block
     ...isolatedDryRun,
     // @ts-expect-error TS2740 Type '{ reviewer: string; implementer: string; round: number; }' is missing the
     readReviewStateFn: () => ({ reviewer: 'codex', implementer: 'codex', round: 1 }), // persisted same-family
+    // Resuming persisted state commits the selected identity snapshot before
+    // entering the loop; keep this unit test independent of a mission directory.
+    writeReviewStateFn: persistenceCommitted,
     log: m => logs.push(m),
     error: () => {},
     // @ts-expect-error TS2322 Type 'number' is not assignable to type 'never'.

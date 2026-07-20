@@ -251,13 +251,16 @@ if (!config.gates || Object.keys(config.gates).length === 0) {
 }
 
 const changedAreas = resolveChangedAreas();
-if (changedAreas.length === 0) {
-  log('integration-gates: no area changes detected, skipping');
-  process.exit(0);
-}
-
 const orderedGates = orderIntegrationGates(config);
-const relevantGates = orderedGates.filter(gate => gateMatchesChangedAreas(gate.key, changedAreas, gate.areas));
+// An unconditional defense must run even when a change has no classified
+// area. For an empty/no-area diff, retain only unconditional gates so the
+// area-scoped lifecycle E2E and real-agent smoke gates keep their selection
+// behavior. Configurations without an unconditional gate retain the legacy
+// matcher behavior.
+const alwaysGates = orderedGates.filter(gate => gate.always);
+const relevantGates = changedAreas.length === 0 && alwaysGates.length > 0
+  ? alwaysGates
+  : orderedGates.filter(gate => gateMatchesChangedAreas(gate.key, changedAreas, gate.areas, gate.always));
 
 if (relevantGates.length === 0) {
   log('integration-gates: no applicable gates for changed areas');

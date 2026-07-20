@@ -1252,7 +1252,10 @@ test('performHandoff commits a newly captured NEL record before transitioning Ba
       skipGate: true,
       isForgejoReviewEnabledFn: () => false,
       rebaseFn: async () => ({ ok: true }),
-      captureNelFn: () => ({ ok: true, nel: 0, bucket: { label: 'Small' } }),
+      captureNelFn: () => {
+        fs.writeFileSync(path.join(missionDir, 'nel-record.json'), '{}');
+        return { ok: true, nel: 0, bucket: { label: 'Small' } };
+      },
       log: () => {},
       error: () => {},
     });

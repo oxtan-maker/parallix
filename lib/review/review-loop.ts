@@ -1025,6 +1025,10 @@ export async function startReviewLoop(slug: string, opts: {
     state = ReviewState.from(slug, persisted);
     state.reviewer = reviewer;
     state.implementer = implementer;
+    // Commit the resume snapshot before entering the loop. This makes a
+    // reviewer/implementer selection change durable without waiting for the
+    // next state transition (which may advance the round first).
+    persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree);
   } else {
     state = new ReviewState(slug, { reviewer, implementer });
   }

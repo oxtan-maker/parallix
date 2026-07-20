@@ -73,7 +73,7 @@ test('verify-local integrate prints the resolved dry-run plan for workflow gates
     assert.equal(result.status, 0, output);
     assert.match(output, /integration-gates: resolved gate plan:/);
     assert.match(output, /lib: \.\/scripts\/verify-local\.sh static-analysis/);
-    assert.match(output, /workflow: node test\/e2e-mission-lifecycle.test.ts/);
+    assert.match(output, /workflow: node --import tsx test\/e2e-mission-lifecycle.test.ts/);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -98,6 +98,74 @@ test('verify-local integrate reports no applicable gates when changed areas do n
 
     assert.equal(result.status, 0, output);
     assert.match(output, /integration-gates: no applicable gates for changed areas/);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('verify-local integrate resolves the unconditional integration suite for every required area class (task-2292)', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'verify-local-always-gate-'));
+  const configPath = path.join(tmpDir, 'integration-pipelines.json');
+  try {
+    fs.writeFileSync(configPath, JSON.stringify({
+      gates: {
+        'integration-suite': { command: 'npm run test:integration', order: 3, run_last: false, always: true },
+        workflow: { command: 'node --import tsx test/e2e-mission-lifecycle.test.ts', order: 50, run_last: true },
+        'custom-agent-smoke': { command: 'node --import tsx test/e2e-real-agent-smoke.test.ts', order: 51, run_last: true }
+      }
+    }, null, 2));
+
+    for (const [label, changedAreas, expectsE2E] of [
+      ['lib', 'lib', true],
+      ['workflow', 'workflow', true],
+      ['docs', 'docs', false],
+      ['backlog-only', 'backlog', false],
+      ['mission-artifact-only', 'missions', false],
+      ['unknown-path', 'unrecognized-boundary', false],
+      ['no-area', '', false]
+    ]) {
+      const result = runScript(['integrate'], {
+        INTEGRATE_DRY_RUN: 'true',
+        INTEGRATION_CONFIG_PATH: configPath,
+        INTEGRATE_CHANGED_AREAS: changedAreas
+      });
+      const output = `${result.stdout}${result.stderr}`;
+      assert.equal(result.status, 0, `${label}: ${output}`);
+      assert.match(output, /integration-suite: npm run test:integration/, `${label} must include the suite gate`);
+      assert.equal(output.includes('workflow: node --import tsx test/e2e-mission-lifecycle.test.ts'), expectsE2E, `${label} workflow selection`);
+      assert.equal(output.includes('custom-agent-smoke: node --import tsx test/e2e-real-agent-smoke.test.ts'), expectsE2E, `${label} smoke selection`);
+      if (expectsE2E) {
+        const suiteIndex = output.indexOf('integration-suite: npm run test:integration');
+        const workflowIndex = output.indexOf('workflow: node --import tsx test/e2e-mission-lifecycle.test.ts');
+        const smokeIndex = output.indexOf('custom-agent-smoke: node --import tsx test/e2e-real-agent-smoke.test.ts');
+        assert.ok(suiteIndex < workflowIndex, `${label} suite must run before workflow E2E`);
+        assert.ok(workflowIndex < smokeIndex, `${label} workflow E2E must run before smoke`);
+      }
+    }
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('verify-local integrate aborts after an integration-suite failure before a later command (task-2292)', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'verify-local-suite-failure-'));
+  const configPath = path.join(tmpDir, 'integration-pipelines.json');
+  const laterCommandMarker = path.join(tmpDir, 'later-command-ran');
+  try {
+    fs.writeFileSync(configPath, JSON.stringify({
+      gates: {
+        'integration-suite': { command: 'exit 23', order: 3, run_last: false, always: true },
+        'simulated-squash-merge': { command: `touch ${laterCommandMarker}`, order: 4, run_last: false, always: true }
+      }
+    }, null, 2));
+    const result = runScript(['integrate'], {
+      INTEGRATION_CONFIG_PATH: configPath,
+      INTEGRATE_CHANGED_AREAS: 'docs'
+    });
+    const output = `${result.stdout}${result.stderr}`;
+    assert.notEqual(result.status, 0, output);
+    assert.match(output, /=== FAIL: integration:integration-suite ===/);
+    assert.equal(fs.existsSync(laterCommandMarker), false, 'later command must not run after suite failure');
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

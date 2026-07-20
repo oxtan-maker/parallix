@@ -408,22 +408,28 @@ function findUnverifiableGoalCheckRow(evidenceRows: string[], rootDir: string): 
     // after the Backlog transition has already been committed.
     const nelRecordPath = path.join(missionDirPath, 'nel-record.json');
     const relativeNelRecordPath = path.relative(rootDir, nelRecordPath);
-    // Stage the explicit durable artifact and inspect the index.  Do not infer
-    // whether it changed from porcelain output: this check must not leave the
-    // record behind for transitionTask's immediately following rebase.
-    const stageNelRecord = git.git(['-C', rootDir, 'add', '--', relativeNelRecordPath]);
-    if (stageNelRecord.status !== 0) {
-      const msg = `Could not stage NEL record before handoff: ${(stageNelRecord.stderr || stageNelRecord.stdout || 'unknown git error').trim()}`;
-      error(msg);
-      return { ok: false, error: msg };
-    }
-    const nelRecordIsStaged = git.git(['-C', rootDir, 'diff', '--quiet', '--cached', '--', relativeNelRecordPath]).status === 1;
-    if (nelRecordIsStaged) {
-      const commitNelRecord = git.git(['-C', rootDir, 'commit', '-m', `chore(${slug}): capture handoff NEL`]);
-      if (commitNelRecord.status !== 0) {
-        const msg = `Could not commit NEL record before handoff: ${(commitNelRecord.stderr || commitNelRecord.stdout || 'unknown git error').trim()}`;
+    // Production capture persists this record, but injected capture functions
+    // used by callers that only need its measurement result may not. Stage and
+    // commit only a record that was actually written; do not turn a successful
+    // measurement into a pathspec failure solely because no artifact exists.
+    if (fs.existsSync(nelRecordPath)) {
+      // Stage the explicit durable artifact and inspect the index.  Do not infer
+      // whether it changed from porcelain output: this check must not leave the
+      // record behind for transitionTask's immediately following rebase.
+      const stageNelRecord = git.git(['-C', rootDir, 'add', '--', relativeNelRecordPath]);
+      if (stageNelRecord.status !== 0) {
+        const msg = `Could not stage NEL record before handoff: ${(stageNelRecord.stderr || stageNelRecord.stdout || 'unknown git error').trim()}`;
         error(msg);
         return { ok: false, error: msg };
+      }
+      const nelRecordIsStaged = git.git(['-C', rootDir, 'diff', '--quiet', '--cached', '--', relativeNelRecordPath]).status === 1;
+      if (nelRecordIsStaged) {
+        const commitNelRecord = git.git(['-C', rootDir, 'commit', '-m', `chore(${slug}): capture handoff NEL`]);
+        if (commitNelRecord.status !== 0) {
+          const msg = `Could not commit NEL record before handoff: ${(commitNelRecord.stderr || commitNelRecord.stdout || 'unknown git error').trim()}`;
+          error(msg);
+          return { ok: false, error: msg };
+        }
       }
     }
     log(fmt.status('PASS', `NEL captured: ${nelResult.nel} NEL (${nelResult.bucket.label} bucket)`));

@@ -12,6 +12,12 @@
       "enabled": true,
       "areas": ["lib", "workflow"]
     },
+    "integration-suite": {
+      "command": "npm run test:integration",
+      "order": 3,
+      "run_last": false,
+      "always": true
+    },
     "mutation": {
       "command": "./scripts/verify-local.sh mutation-gate",
       "order": 40,
