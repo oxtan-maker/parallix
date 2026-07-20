@@ -287,6 +287,9 @@ test('startReviewLoop preserves persisted round data when the reviewer identity 
     await startReviewLoop('task-1305-resume', {
       dryRun: false,
       isContinue: true,
+      // This regression covers the resume snapshot itself. Keep the loop on
+      // its persisted round so it does not start a separate re-review cycle.
+      maxAttempts: 3,
       implementer: 'claude',
       reviewer: 'gemini', // differs from the persisted reviewer 'codex'
       // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;

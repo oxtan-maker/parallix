@@ -1,10 +1,12 @@
 ---
 id: TASK-2292
 title: Restore integration-suite defense on px integrate
-status: ready-for-integration
+status: done
 assignee: [codex]
 created_date: '2026-07-20 00:00'
 labels:
+  - ai_sdlc
+  - bug
   - testing
   - reliability
   - workflow

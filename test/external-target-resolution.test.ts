@@ -174,7 +174,7 @@ test('node parallix mission-start verify-env resolves from a temp dir without re
     fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Mission: E2E test\n\n## Gates\n- [ ] ./scripts/verify-local.sh docs\n');
 
     // Initialize git repo in temp dir so ensureStandaloneGitRepo does not create one
-    runCommand('git', ['init', '-b', 'main'], { cwd: tempDir });
+    runCommand('git', ['init'], { cwd: tempDir });
     runCommand('git', ['config', 'user.email', 'test@test.com'], { cwd: tempDir });
     runCommand('git', ['config', 'user.name', 'Test'], { cwd: tempDir });
 
@@ -191,7 +191,7 @@ test('node parallix mission-start verify-env resolves from a temp dir without re
     }, null, 2));
 
     // Run mission-start verify-env from a temp directory that does NOT contain parallix source tree
-    const result = spawnSync(process.execPath, [path.join(__dirname, '..', 'index.js'), 'mission-start', 'verify-env'], {
+    const result = spawnSync(process.execPath, [path.join(__dirname, '..', 'dist', 'index.js'), 'mission-start', 'verify-env'], {
       cwd: tempDir,
       encoding: 'utf8',
       timeout: 15000,

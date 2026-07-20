@@ -322,20 +322,21 @@ function parseFilesToAreas(filesOutput: string) {
 
 /**
  * @param {{gates?: Record<string, any>}} config
- * @returns {{key: string, command: string, order: number, run_last: boolean, areas?: string[]}[]}
+ * @returns {{key: string, command: string, order: number, run_last: boolean, areas?: string[], always?: boolean}[]}
  */
 function orderIntegrationGates(config: {gates?: Record<string, any>}) {
   const gateEntries = Object.entries(config.gates || {});
-  /** @type {{key: string, command: string, order: number, run_last: boolean, areas?: string[]}[]} */
+  /** @type {{key: string, command: string, order: number, run_last: boolean, areas?: string[], always?: boolean}[]} */
   const gates = gateEntries
     .map(([key, value]) => {
-      /** @type {{key: string, command: string, order: number, run_last: boolean, areas?: string[]}} */
+      /** @type {{key: string, command: string, order: number, run_last: boolean, areas?: string[], always?: boolean}} */
       let gate = {
         key,
         command: value.command,
         order: value.order || 0,
         run_last: value.run_last || false,
-        ...(Array.isArray(value.areas) && value.areas.length > 0 ? { areas: value.areas } : {})
+        ...(Array.isArray(value.areas) && value.areas.length > 0 ? { areas: value.areas } : {}),
+        ...(value.always === true ? { always: true } : {})
       };
       return gate;
     })
@@ -349,11 +350,12 @@ function orderIntegrationGates(config: {gates?: Record<string, any>}) {
 
   const nonRunLast = gates.filter(g => !g.run_last).sort((a, b) => a.order - b.order);
   const runLastGates = gates.filter(g => g.run_last).sort((a, b) => a.order - b.order);
-  return /** @type {{key: string, command: string, order: number, run_last: boolean, areas?: string[]}[]} */ ([...nonRunLast, ...runLastGates]);
+  return /** @type {{key: string, command: string, order: number, run_last: boolean, areas?: string[], always?: boolean}[]} */ ([...nonRunLast, ...runLastGates]);
 }
 
-/** @param {string} gateKey @param {string[]} changedAreas @param {string[]|undefined} gateAreas */
-function gateMatchesChangedAreas(gateKey: string, changedAreas: string[], gateAreas?: string[]) {
+/** @param {string} gateKey @param {string[]} changedAreas @param {string[]|undefined} gateAreas @param {boolean|undefined} always */
+function gateMatchesChangedAreas(gateKey: string, changedAreas: string[], gateAreas?: string[], always?: boolean) {
+  if (always) {return true;}
   if (changedAreas.length === 0) {return true;}
   if (Array.isArray(gateAreas) && gateAreas.length > 0) {
     return gateAreas.some(area => changedAreas.includes(area));
@@ -413,15 +415,16 @@ function getIntegrationGatePlan(slug: string, opts: {runIntegrationGates?: boole
   // Detect changed areas (always detect for dry-run; for real run, detect only if runIntegrationGates)
   const changedAreas = (opts.runIntegrationGates || opts.dryRun) ? detectChangedAreas(slug, opts) : [];
   
-  if (opts.runIntegrationGates && !opts.dryRun && changedAreas.length === 0) {
-    fmt.log.info('integration-gates: no area changes detected, skipping');
-    return { gates: [], changedAreas: [], configError: null };
-  }
-  
   // Build list of gates to run, preserving order with run_last handling
-  /** @type {{key: string, command: string, order: number, run_last: boolean, areas?: string[]}[]} */
+  /** @type {{key: string, command: string, order: number, run_last: boolean, areas?: string[], always?: boolean}[]} */
   const orderedGates = orderIntegrationGates(config);
-  const relevantGates = orderedGates.filter(gate => gateMatchesChangedAreas(gate.key, changedAreas, gate.areas));
+  // Retain legacy dry-run behaviour for configurations without an unconditional
+  // gate. Once a config declares one, an empty/no-area diff must run only its
+  // unconditional defenses instead of expanding area-scoped E2E gates.
+  const alwaysGates = orderedGates.filter(gate => gate.always);
+  const relevantGates = changedAreas.length === 0 && alwaysGates.length > 0
+    ? alwaysGates
+    : orderedGates.filter(gate => gateMatchesChangedAreas(gate.key, changedAreas, gate.areas, gate.always));
   
   return { gates: relevantGates, changedAreas, configError: null };
 }

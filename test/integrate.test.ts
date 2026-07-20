@@ -1369,8 +1369,11 @@ test('printIntegrationPreflight fails fast on an in-progress rebase in the integ
 test('maybeUpdateGraphifyOnPrimary skips cleanly when graphify is missing', () => {
   const { maybeUpdateGraphifyOnPrimary } = require('../dist/lib/commands/integrate');
   const logs = [];
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'integrate-graphify-missing-'));
+  fs.mkdirSync(path.join(root, 'graphify-out'));
+  fs.writeFileSync(path.join(root, 'graphify-out', 'graph.json'), '{}\n');
 
-  const result = maybeUpdateGraphifyOnPrimary('/tmp/visualBoard', {
+  const result = maybeUpdateGraphifyOnPrimary(root, {
     commandRunner() {
       const error = new Error('missing');
       // @ts-expect-error TS2339 Property 'code' does not exist on type 'Error'.
@@ -1381,6 +1384,7 @@ test('maybeUpdateGraphifyOnPrimary skips cleanly when graphify is missing', () =
       logs.push(message);
     }
   });
+  fs.rmSync(root, { recursive: true, force: true });
 
   assert.deepEqual(result, {
     updated: false,
@@ -1394,8 +1398,11 @@ test('maybeUpdateGraphifyOnPrimary runs graphify update in the primary worktree 
   const { maybeUpdateGraphifyOnPrimary } = require('../dist/lib/commands/integrate');
   const calls = [];
   const logs = [];
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'integrate-graphify-update-'));
+  fs.mkdirSync(path.join(root, 'graphify-out'));
+  fs.writeFileSync(path.join(root, 'graphify-out', 'graph.json'), '{}\n');
 
-  const result = maybeUpdateGraphifyOnPrimary('/tmp/visualBoard', {
+  const result = maybeUpdateGraphifyOnPrimary(root, {
     commandRunner(command, args, options = {}) {
       calls.push({ command, args, options });
       return { status: 0, stdout: '', stderr: '' };
@@ -1420,12 +1427,13 @@ test('maybeUpdateGraphifyOnPrimary runs graphify update in the primary worktree 
       command: expectedGraphifyCommand,
       args: ['update', '.'],
       options: {
-        cwd: '/tmp/visualBoard',
+        cwd: root,
         stdio: 'inherit'
       }
     }
   ]);
   assert.ok(logs.some(line => line.includes(`Updating graphify knowledge graph on ${PRIMARY}...`)));
+  fs.rmSync(root, { recursive: true, force: true });
 });
 
 test('parseStashPopCollisionFiles extracts already-exists paths from stash pop output', () => {

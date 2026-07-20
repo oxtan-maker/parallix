@@ -286,6 +286,29 @@ test('executeIntegrationGates uses injected commandRunner and aborts on failure'
   assert.ok(result.error.includes('Command exited with code 1'));
 });
 
+test('integration-suite failure aborts before a simulated squash merge command (task-2292)', async () => {
+  const gates = [
+    { key: 'integration-suite', command: 'npm run test:integration', order: 3, run_last: false },
+    { key: 'simulated-squash-merge', command: 'git merge --squash mission/task-2292', order: 4, run_last: false }
+  ];
+  const commands = [];
+  const result = await executeIntegrationGates(gates, {
+    commandRunner(command) {
+      commands.push(command);
+      if (command === 'npm run test:integration') {
+        return { status: 23, stdout: '', stderr: 'intentional integration-suite failure' };
+      }
+      throw new Error(`unexpected command after failed integration suite: ${command}`);
+    },
+    rootDir: '/tmp/task-2292'
+  });
+
+  assert.deepEqual(commands, ['npm run test:integration']);
+  assert.equal(result.ok, false);
+  assert.equal(result.failedGate, 'integration-suite');
+  assert.match(result.error, /23/);
+});
+
 test('executeIntegrationGates with injected commandRunner succeeds on all pass', async () => {
   const gates = [
     { key: 'server', command: './server/updateStaging.sh', order: 1, run_last: false },
@@ -1319,6 +1342,41 @@ test('repo config preserves existing gate orders (task-1419)', () => {
   assert.equal(config.gates.workflow.run_last, true, 'workflow gate remains run_last');
   assert.equal(config.gates['custom-agent-smoke'].order, 51, 'custom-agent-smoke gate remains order 51');
   assert.equal(config.gates['custom-agent-smoke'].run_last, true, 'custom-agent-smoke gate remains run_last');
+});
+
+test('every representative changed-area plan includes the unconditional integration-suite gate (task-2292)', () => {
+  const configPath = path.join(__dirname, '..', 'config', 'integration-pipelines.json');
+  const cases = [
+    ['lib', 'lib/commands/integrate.ts', true],
+    ['workflow', 'scripts/verify-local.sh', true],
+    ['docs', 'docs/README.md', false],
+    ['backlog-only', 'backlog/tasks/task-2292.md', false],
+    ['mission-artifact-only', 'missions/task-2292/CP-1.md', false],
+    ['unknown-path', 'unrecognized-boundary/file.txt', false],
+    ['no-area', '', false]
+  ];
+
+  for (const [label, changedFiles, expectsE2E] of cases) {
+    const plan = getIntegrationGatePlan('task-2292', {
+      runIntegrationGates: true,
+      gitRunner: createMockGitRunner(changedFiles),
+      dryRun: false,
+      configPath
+    });
+    const suiteGate = plan.gates.find(gate => gate.key === 'integration-suite');
+    assert.ok(suiteGate, `${label} plan must include the integration-suite gate`);
+    assert.equal(suiteGate.command, 'npm run test:integration');
+    const workflowGate = plan.gates.find(gate => gate.key === 'workflow');
+    const smokeGate = plan.gates.find(gate => gate.key === 'custom-agent-smoke');
+    assert.equal(Boolean(workflowGate), expectsE2E, `${label} workflow gate selection must remain area-scoped`);
+    assert.equal(Boolean(smokeGate), expectsE2E, `${label} custom-agent-smoke selection must remain area-scoped`);
+    if (expectsE2E) {
+      assert.equal(workflowGate.command, 'node --import tsx test/e2e-mission-lifecycle.test.ts');
+      assert.equal(smokeGate.command, 'node --import tsx test/e2e-real-agent-smoke.test.ts');
+      assert.ok(plan.gates.indexOf(suiteGate) < plan.gates.indexOf(workflowGate), `${label} suite gate runs before workflow E2E`);
+      assert.ok(plan.gates.indexOf(workflowGate) < plan.gates.indexOf(smokeGate), `${label} workflow E2E remains before smoke E2E`);
+    }
+  }
 });
 
 test('getIntegrationGatePlan with repo config selects lib and build for lib changes (task-1419)', () => {
