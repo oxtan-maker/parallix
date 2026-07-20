@@ -13,7 +13,7 @@ dependencies:
   - TASK-2283
 references:
   - docs/adr/0044-workflow-distribution-model.md
-  - docs/adr/0051-interface-boundary-and-operator-board-architecture.md
+  - docs/adr/0051-ui-neutral-application-boundary.md
   - lib/tools/backlog.ts
   - backlog/config.yml
 priority: medium

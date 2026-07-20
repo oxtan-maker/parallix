@@ -12,7 +12,7 @@ labels:
 dependencies:
   - TASK-2281
 references:
-  - docs/adr/0051-interface-boundary-and-operator-board-architecture.md
+  - docs/adr/0051-ui-neutral-application-boundary.md
   - https://claude.ai/code/artifact/5f739bc8-6e14-48c7-aca6-ed9a96923432
 priority: medium
 ---
