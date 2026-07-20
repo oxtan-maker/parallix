@@ -1,0 +1,113 @@
+// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+
+const expectedIntegrationFiles = [
+  'active.test.ts', 'agents-limit-hit.test.ts', 'agents.test.ts', 'backlog.test.ts',
+  'bootstrap-isolation.test.ts', 'draft-command.test.ts', 'draft.test.ts',
+  'draft_preflight_modern.test.ts', 'durable-state-policy.test.ts',
+  'external-target-resolution.test.ts', 'forgejo-independence.test.ts',
+  'forgejo.test.ts', 'handoff.test.ts', 'install.test.ts',
+  'integrate-task-1410-stash-pop-corruption.test.ts', 'integrate-workflow-gate.test.ts',
+  'integrate.test.ts', 'integration-pipelines.test.ts', 'mission-start.test.ts',
+  'mission-utils-worktree.test.ts', 'mistral.test.ts', 'nels.test.ts',
+  'noise-reduction.test.ts', 'opencode-export.test.ts', 'package-persistent-data.test.ts',
+  'product-config.test.ts',
+  'px-runner.test.ts', 'px-runtime-smoke.test.ts', 'px-shell-init.test.ts',
+  'rebase.test.ts', 'rebase_diagnostics.test.ts', 'rebase_hardening.test.ts',
+  'refresh-global-px-script.test.ts', 'resolve-conflict.test.ts',
+  'review-artifacts.test.ts', 'review-autoderive.test.ts',
+  'review-commands-additional.test.ts', 'review-commands-supplemental.test.ts',
+  'review-identity-placeholder.test.ts', 'review-identity.test.ts',
+  'review-prompts.test.ts', 'review-state-class.test.ts', 'review-state.test.ts',
+  'review.test.ts', 'runtime-matrix.test.ts', 'setup-review.test.ts',
+  'stats-backfill.test.ts', 'status.test.ts', 'task-1048-regression.test.ts',
+  'task-1049-force-push.test.ts', 'task-1080-sync-merged-hardening.test.ts',
+  'task-1104-rebase-cleanup.test.ts', 'task-1209-consume-artifacts.test.ts',
+  'task-1272-standalone-cycle.test.ts', 'task-1272-standalone-rebase.test.ts',
+  'task-1390-shell-init-shebang.test.ts',
+  'task-1415-closed-mission-counts.test.ts', 'task-1416-repro.test.ts',
+  'task-1424-post-integrate-publish-reinstall.test.ts',
+  'task-2203-publish-proof-refresh-order.test.ts',
+  'task-2206-post-integrate-hook-errors.test.ts', 'task-2212-repro.test.ts',
+  'task-2231-unit-tests-hang-repro.test.ts',
+  'task-2234-push-to-reviewer-autobounce.test.ts',
+  'task-2273-review-gate-ownership.test.ts', 'test-hygiene.test.ts', 'verification.test.ts',
+  'verify-local-integrate.test.ts'
+].sort();
+
+function selectedFiles(args, version = process.version) {
+  const runnerPath = path.join(__dirname, 'run-default-tests.js');
+  const runner = fs.readFileSync(runnerPath, 'utf8');
+  /** @type {string[] | undefined} */
+  let spawnedTestArgs;
+  const childProcess = {
+    ['spawn' + 'Sync'](command, commandArgs) {
+      if (commandArgs[0] === '--version') {
+        return { status: 0, stdout: version };
+      }
+      spawnedTestArgs = commandArgs;
+      return { status: 0 };
+    }
+  };
+  const sandbox = {
+    __dirname,
+    require(id) {
+      if (id === 'node:child_process') return childProcess;
+      return require(id);
+    },
+    process: {
+      argv: ['node', runnerPath, ...args],
+      env: process.env,
+      execPath: process.execPath,
+      exit() {},
+      kill() {}
+    }
+  };
+  vm.runInNewContext(runner, sandbox, { filename: runnerPath });
+  if (!spawnedTestArgs) {
+    throw new Error('Expected the default test runner to spawn a test process');
+  }
+  return {
+    files: Array.from(spawnedTestArgs.slice(spawnedTestArgs.indexOf('--test') + 1), file => path.basename(file)).sort(),
+    args: spawnedTestArgs
+  };
+}
+
+test('default test runner routes every moved group to integration and excludes it from default', () => {
+  const runner = fs.readFileSync(path.join(__dirname, 'run-default-tests.js'), 'utf8');
+  const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+
+  const defaultRun = selectedFiles([]);
+  const integrationRun = selectedFiles(['--integration']);
+  const defaultFiles = defaultRun.files;
+  const integrationFiles = integrationRun.files;
+
+  assert.deepEqual(integrationFiles, expectedIntegrationFiles);
+  for (const file of expectedIntegrationFiles) {
+    assert.ok(!defaultFiles.includes(file), `${file} must be excluded from npm test`);
+  }
+  assert.ok(!integrationFiles.includes('e2e-mission-lifecycle.test.ts'));
+  assert.ok(!integrationFiles.includes('e2e-real-agent-smoke.test.ts'));
+  assert.match(runner, /runsIntegrationSuite/);
+  assert.ok(defaultRun.args.includes('--test-force-exit'));
+  assert.ok(!selectedFiles([], 'v20.13.1').args.includes('--test-force-exit'));
+  assert.ok(selectedFiles([], 'v20.14.0').args.includes('--test-force-exit'));
+  assert.equal(pkg.scripts['test:integration'], 'FORCE_COLOR=0 node test/run-default-tests.js --integration');
+});
+
+test('default test runner selects a Node version that supports node:test', () => {
+  const runner = fs.readFileSync(path.join(__dirname, 'run-default-tests.js'), 'utf8');
+  assert.match(runner, /MINIMUM_TEST_NODE_MAJOR = 20/);
+  assert.match(runner, /MINIMUM_TEST_NODE_MINOR = 6/);
+  assert.match(runner, /PARALLIX_TEST_NODE/);
+  assert.match(runner, /compatibleTestNode\(\)/);
+  assert.throws(
+    () => selectedFiles([], 'v20.5.0'),
+    /Node 20\.6\+ is required for TypeScript tests/
+  );
+});

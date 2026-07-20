@@ -1,8 +1,6 @@
 {
   "compilerOptions": {
     "noEmit": true,
-    "allowJs": true,
-    "checkJs": true,
     "skipLibCheck": true,
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
@@ -10,7 +8,6 @@
     "resolveJsonModule": true
   },
   "include": [
-    "test/**/*.js",
     "test/**/*.ts"
   ],
   "exclude": [

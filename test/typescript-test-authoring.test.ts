@@ -1,3 +1,5 @@
+// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
+
 import assert from 'node:assert/strict';
 import test from 'node:test';
 

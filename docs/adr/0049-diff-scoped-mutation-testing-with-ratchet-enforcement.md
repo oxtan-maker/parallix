@@ -187,9 +187,9 @@ child for the identical reason; `mutation-gate.ts`'s `runStryker()` does the
 same. Anyone adding another nested-test-runner integration to this repo should
 strip these two vars as a matter of course.
 
-To keep runs fast, `findTestFiles` matches `test/<basename>.test.js` by naming
+To keep runs fast, `findTestFiles` matches `test/<basename>.test.ts` by naming
 convention for each target file and only falls back to the full
-`test/*.test.js` suite (~120 files) when no exact match exists — running the
+`test/*.test.ts` suite (~120 files) when no exact match exists — running the
 matched-only suite against 2 real repo files completed in ~27s, well under the
 60s/10-file budget from the mission's success criteria.
 
@@ -251,7 +251,7 @@ POC performed in isolated scratch dir (`/tmp/stryker-poc`, not committed):
 
 ### 3. Regression test (CP-5)
 
-`test/mutation-gate-ratchet.test.js` — strong test scores 100 and seeds the
+`test/mutation-gate-ratchet.test.ts` — strong test scores 100 and seeds the
 baseline, then a shallow/weak test (the exact "AI-generated shallow test"
 pattern the mission's Why Now section cites) regresses the score and the
 ratchet rejects it with exit 1.
@@ -263,7 +263,7 @@ tsc clean, test-hygiene clean)
 
 ### 5. Full test suite
 
-`FORCE_COLOR=0 node --test test/mutation-gate.test.js test/mutation-scoper.test.js test/mutation-gate-ratchet.test.js` → 18 pass, 0 fail
+`FORCE_COLOR=0 node --import tsx --test test/mutation-gate.test.ts test/mutation-scoper.test.ts test/mutation-gate-ratchet.test.ts` → 18 pass, 0 fail
 
 ## Consequences
 
@@ -322,8 +322,8 @@ tsc clean, test-hygiene clean)
 
 1. **Diff scoper:** `lib/core/mutation-scoper.ts` — computes changed files + direct callees
 2. **Gate CLI:** `lib/commands/mutation-gate.ts` — StrykerJS runner with `--dry-run`, ratchet enforcement, baseline I/O
-3. **Unit tests:** `test/mutation-scoper.test.js`, `test/mutation-gate.test.js`
-4. **Regression test:** `test/mutation-gate-ratchet.test.js` — strong test seeds baseline, weak test regresses score, ratchet rejects (exit 1)
+3. **Unit tests:** `test/mutation-scoper.test.ts`, `test/mutation-gate.test.ts`
+4. **Regression test:** `test/mutation-gate-ratchet.test.ts` — strong test seeds baseline, weak test regresses score, ratchet rejects (exit 1)
 5. **Verification script:** `scripts/verify-local.sh` — added `mutation-gate` subcommand (`gate_mutation()`)
 6. **Integration pipeline:** `config/integration-pipelines.json` — `mutation` gate at order 40
 7. **Dev dependency:** `package.json` — `@stryker-mutator/core`
@@ -337,7 +337,7 @@ tsc clean, test-hygiene clean)
 - `lib/commands/coverage-gate.ts`: Complementary 90% line-coverage gate (unchanged)
 - `lib/core/mutation-scoper.ts`: Diff-scoped callee resolver
 - `lib/commands/mutation-gate.ts`: Gate CLI implementation
-- `test/mutation-gate-ratchet.test.js`: Regression test (CP-5)
+- `test/mutation-gate-ratchet.test.ts`: Regression test (CP-5)
 - `missions/task-1269/MISSION.md`: Mission specification
 - `missions/task-1269/CP-1.md`: POC verification
 - arxiv 2510.09907; earezki.com, "Tests Are Everything in Agentic AI"

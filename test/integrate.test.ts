@@ -1,0 +1,1794 @@
+// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
+
+const test = require('node:test');
+const { mock } = test;
+const assert = require('node:assert/strict');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const childProcess = require('node:child_process');
+
+const stats = require('../dist/lib/commands/stats');
+const backlog = require('../dist/lib/tools/backlog');
+const verification = require('../dist/lib/core/verification');
+const postIntegrateHookModule = require('../dist/lib/core/post-integrate-hook');
+mock.method(backlog, 'getTaskClassification', () => 'ai_sdlc');
+
+function installVerificationMocks() {
+  mock.method(verification, 'captureVerifiedTreeProof', (area, rootDir) => ({
+    ok: true,
+    proof: {
+      rootDir: path.resolve(rootDir),
+      area,
+      command: 'mock-verification',
+      commit: 'abc123',
+      tree: 'tree123',
+      verifiedAt: '2026-01-01T00:00:00.000Z'
+    }
+  }));
+  mock.method(verification, 'assertVerifiedTreeProof', (proof, rootDir) => {
+    const resolvedRoot = path.resolve(rootDir);
+    if (!proof || proof.rootDir !== resolvedRoot) {
+      return { ok: false, error: 'verification proof does not match the tree being published' };
+    }
+    return { ok: true, proof };
+  });
+}
+
+test.beforeEach(() => {
+  installVerificationMocks();
+  mock.method(backlog, 'getTaskClassification', () => 'ai_sdlc');
+  mock.method(missionUtils, 'getPrimaryBranch', () => 'main');
+  process.env.PRIMARY_WORKTREE = FAKE_ROOT;
+});
+
+const FAKE_ROOT = `/tmp/mission-${process.pid}`;
+test.afterEach(() => {
+  if (previousPrimaryWorktree === undefined) delete process.env.PRIMARY_WORKTREE;
+  else process.env.PRIMARY_WORKTREE = previousPrimaryWorktree;
+  mock.restoreAll();
+});
+
+const previousPrimaryWorktree = process.env.PRIMARY_WORKTREE;
+process.env.PRIMARY_WORKTREE = FAKE_ROOT;
+
+// Mock getPrimaryBranch BEFORE requiring dependent modules to ensure they use the mock.
+const missionUtils = require('../dist/lib/core/mission-utils');
+if (previousPrimaryWorktree === undefined) delete process.env.PRIMARY_WORKTREE;
+else process.env.PRIMARY_WORKTREE = previousPrimaryWorktree;
+
+function runGitOrThrow(args, options = {}) {
+  const result = childProcess.spawnSync('git', args, {
+    encoding: 'utf8',
+    ...options
+  });
+  if (result.error && result.status !== 0) {
+    throw result.error;
+  }
+  if (typeof result.status === 'number' && result.status !== 0) {
+    const error = new Error((result.stderr || result.stdout || `git ${args.join(' ')} failed`).trim());
+    // @ts-expect-error TS2339 Property 'result' does not exist on type 'Error'.
+    error.result = result;
+    throw error;
+  }
+  return result.stdout || '';
+}
+
+const {
+  cleanupMissionWorktree,
+  rewriteWorktreePaths,
+  buildConflictResolutionPrompt,
+  stashMainCheckoutIfNeeded,
+  restoreMainCheckoutStash,
+  isNoMergeToAbortResult,
+  VARIANT_B_AUTOMATION_SUMMARY,
+  evaluateTaskStatusForIntegration,
+  promoteTaskForIntegrationIfNeeded,
+  findExistingSquashCommit,
+  printIntegrationPreflight,
+  buildIntegrationContext,
+  resolveForgejoUserForIntegration,
+  getUnresolvedIndexConflicts,
+  parseStashPopCollisionFiles,
+  reportStashPopFailure,
+  SYNC_MERGED_DIAGNOSTICS,
+  printDiagnosticTable,
+  reportSyncMergedFailure,
+  recordPostIntegrationStats,
+  formatRecordedStatsRow,
+  resolveIntegrationVerificationWorktree,
+  buildIntegrationVerificationInvocation,
+  parseIntegrateArgs,
+  runPostIntegrateHookOrAbort,
+  buildBeforeVerification,
+  prepareNoisePatchForSquash
+} = require('../dist/lib/commands/integrate');
+const integrateCommand = require('../dist/lib/commands/integrate');
+const { conventionalWorktreePath, getPrimaryBranch } = missionUtils;
+
+const PRIMARY = getPrimaryBranch();
+
+test('prepareNoisePatchForSquash cleans only its owned patch directory when reset fails', () => {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'integrate-noise-cleanup-'));
+  const operatorFile = path.join(tmpRoot, 'operator-note.txt');
+  fs.writeFileSync(operatorFile, 'keep');
+  const gitRunner = args => {
+    if (args.includes('diff')) { return { status: 0, stdout: 'diff --git a/backlog/tasks/a.md b/backlog/tasks/a.md', stderr: '' }; }
+    if (args.includes('reset')) { return { status: 1, stdout: '', stderr: 'reset failed' }; }
+    throw new Error(`unexpected git invocation: ${args.join(' ')}`);
+  };
+  try {
+    const result = prepareNoisePatchForSquash('/fake-worktree', { gitRunner, tmpDir: tmpRoot });
+    assert.equal(result.ok, false);
+    assert.match(result.error, /reset failed/);
+    assert.deepEqual(fs.readdirSync(tmpRoot), ['operator-note.txt']);
+    assert.equal(fs.readFileSync(operatorFile, 'utf8'), 'keep');
+  } finally {
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test('integration verification resolves the candidate mission worktree, not the primary checkout', () => {
+  const primaryWorktree = '/tmp/primary-checkout';
+  const candidateWorktree = '/tmp/task-1253-candidate';
+  const observed = [];
+
+  const resolved = resolveIntegrationVerificationWorktree('task-1253', {
+    baseWorktree: primaryWorktree,
+    resolveWorktreeFn(slug, options) {
+      observed.push({ slug, options });
+      return candidateWorktree;
+    },
+    conventionalWorktreePathFn() {
+      throw new Error('fallback should not be used');
+    }
+  });
+
+  assert.equal(resolved, candidateWorktree);
+  assert.deepEqual(observed, [{
+    slug: 'task-1253',
+    options: { cwd: primaryWorktree }
+  }]);
+});
+
+test('integration verification command and cwd are both derived from the candidate worktree', () => {
+  const primaryWorktree = '/tmp/primary-checkout';
+  const candidateWorktree = '/tmp/task-1253-candidate';
+  const commandRoots = [];
+
+  const invocation = buildIntegrationVerificationInvocation('task-1253', {
+    baseWorktree: primaryWorktree,
+    resolveWorktreeFn: () => candidateWorktree,
+    conventionalWorktreePathFn() {
+      throw new Error('fallback should not be used');
+    },
+    formatVerificationCommandFn(area, rootDir) {
+      commandRoots.push({ area, rootDir });
+      return rootDir === candidateWorktree ? 'candidate-verify integrate' : 'primary-verify integrate';
+    }
+  });
+
+  assert.deepEqual(invocation, {
+    command: 'candidate-verify integrate',
+    cwd: candidateWorktree
+  });
+  assert.deepEqual(commandRoots, [{
+    area: 'integrate',
+    rootDir: candidateWorktree
+  }]);
+});
+
+test('px integrate parses the paired Codex real-agent override without placing values in a command string', () => {
+  const parsed = parseIntegrateArgs(['task-2269', '--real-agent', 'codex', '--real-agent-model', 'gpt-5.6-luna']);
+  assert.deepEqual(parsed, {
+    explicitSlug: 'task-2269', dryRun: false, noIntegrationGates: false, noGate: false,
+    realAgent: 'codex', realAgentModel: 'gpt-5.6-luna'
+  });
+});
+
+test('px integrate rejects malformed real-agent options before preflight or gate execution', () => {
+  /** @type {Array<[string[], RegExp]>} */
+  const malformedCases = [
+    [['task-2269', '--real-agent', 'codex'], /must be supplied together/],
+    [['task-2269', '--real-agent'], /requires a value/],
+    [['task-2269', '--real-agent', 'codex', '--real-agent', 'codex', '--real-agent-model', 'gpt-5.6-luna'], /only once/],
+    [['task-2269', '--real-agent', 'claude', '--real-agent-model', 'gpt-5.6-luna'], /Unsupported real agent/],
+    [['task-2269', '--real-agent', 'codex', '--real-agent-model', 'not-gpt'], /Unsupported Codex real-agent model/],
+    [['task-2269', '--not-real'], /Unknown integrate option/]
+  ];
+  for (const [args, message] of malformedCases) {
+    assert.throws(() => parseIntegrateArgs(args), message);
+  }
+});
+
+test('buildIntegrationContext reads status from primary while retaining mission worktree metadata', (t) => {
+  const backlog = require('../dist/lib/tools/backlog');
+  const worktree = '/tmp/project-task-2200';
+  const baseWorktree = '/tmp/project-main';
+  const worktreeTask = `${worktree}/backlog/tasks/task-2200 - fix.md`;
+  const baseTask = `${baseWorktree}/backlog/tasks/task-2200 - fix.md`;
+
+  const mockedResolveWorktree = mock.method(missionUtils, 'resolveWorktree', () => worktree);
+  const mockedFindMissionDir = mock.method(missionUtils, 'findMissionDir', () => `${worktree}/docs/missions/2026/task-2200`);
+  const mockedFindMissionArea = mock.method(missionUtils, 'findMissionArea', () => 'lib');
+  const mockedResolveMissionBaseBranch = mock.method(missionUtils, 'resolveMissionBaseBranch', () => 'main');
+  const mockedResolveBaseWorktree = mock.method(missionUtils, 'resolveBaseWorktree', () => baseWorktree);
+  const mockedGetCurrentBranch = mock.method(require('../dist/lib/core/git'), 'getCurrentBranch', () => 'mission/task-2200');
+  const mockedGit = mock.method(require('../dist/lib/core/git'), 'git', (args) => {
+    if (args.includes('branch') && args.includes('--show-current')) {
+      return { status: 0, stdout: 'main', stderr: '' };
+    }
+    if (args.includes('status') && args.includes('--short')) {
+      return { status: 0, stdout: '', stderr: '' };
+    }
+    return { status: 0, stdout: '', stderr: '' };
+  });
+  const mockedResolveTaskFile = mock.method(backlog, 'resolveTaskFile', (_slug, rootDir) => {
+    if (rootDir === worktree) {
+      return { ok: true, taskFile: worktreeTask };
+    }
+    if (rootDir === baseWorktree) {
+      return { ok: true, taskFile: baseTask };
+    }
+    return { ok: false, reason: 'missing', matches: [] };
+  });
+  const mockedGetTaskStatus = mock.method(backlog, 'getTaskStatus', (taskFile) => taskFile === worktreeTask ? 'active' : 'ready-for-integration');
+  const mockedGetTaskAssignee = mock.method(backlog, 'getTaskAssignee', () => 'claude');
+  t.after(() => {
+    mockedResolveWorktree.mock.restore();
+    mockedFindMissionDir.mock.restore();
+    mockedFindMissionArea.mock.restore();
+    mockedResolveMissionBaseBranch.mock.restore();
+    mockedResolveBaseWorktree.mock.restore();
+    mockedGetCurrentBranch.mock.restore();
+    mockedGit.mock.restore();
+    mockedResolveTaskFile.mock.restore();
+    mockedGetTaskStatus.mock.restore();
+    mockedGetTaskAssignee.mock.restore();
+  });
+
+  const context = buildIntegrationContext('task-2200', {
+    baseBranch: 'main',
+    baseWorktree,
+    isForgejoReviewEnabledFn: () => false
+  });
+
+  assert.equal(context.task.taskFile, worktreeTask);
+  assert.equal(context.taskStatus, 'ready-for-integration');
+});
+
+test('printIntegrationPreflight reads classification from the selected task file, not by re-resolving in the base checkout', (t) => {
+  const backlog = require('../dist/lib/tools/backlog');
+  const logs = [];
+  const worktreeTask = '/tmp/project-task-2200/backlog/tasks/task-2200 - fix.md';
+
+  const mockedGetTaskClassification = mock.method(backlog, 'getTaskClassification', (taskFile) => taskFile === worktreeTask ? 'ai_sdlc' : null);
+  t.after(() => mockedGetTaskClassification.mock.restore());
+
+  const result = printIntegrationPreflight({
+    slug: 'task-2200',
+    branch: 'mission/task-2200',
+    currentBranch: 'mission/task-2200',
+    missionDir: '/tmp/project-task-2200/docs/missions/2026/task-2200',
+    area: 'lib',
+    task: { ok: true, taskFile: worktreeTask },
+    taskStatus: 'review',
+    taskAssignee: 'claude',
+    forgejoUser: 'claude',
+    taskAssigneeWarning: null,
+    pr: { exists: false, raw: 'no PR found' },
+    siblingPrs: [],
+    approval: { ok: true, reviewState: 'APPROVED' },
+    baseBranch: 'main',
+    baseWorktree: '/tmp/project-main',
+    mainBranch: 'main',
+    mainDirty: false,
+    mainDirtyEntries: []
+  }, {
+    readTokenFn: () => 'token',
+    resolveTokenFileFn: () => '/tmp/token',
+    // @ts-expect-error TS2739 Type '{ inProgress: false; rebaseHead: any; unmergedFiles: any[]; }' is missing
+    detectRebaseStateFn: () => ({ inProgress: false, rebaseHead: null, unmergedFiles: [] }),
+    getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] }),
+    findMissionDocInBranchesFn: () => [],
+    isForgejoReviewEnabledFn: () => false,
+    resolveMissionClassificationFn: () => ({ classification: null, error: 'stale base resolver should not be used' }),
+    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
+    log: line => logs.push(line)
+  });
+
+  assert.ok(!result.failures.includes('classification'));
+  assert.match(logs.join('\n'), /Backlog classification: ai_sdlc/);
+});
+
+test('cleanupMissionWorktree removes the mission worktree and deletes the branch without shelling to the script helper', () => {
+  const gitCalls = [];
+  const removed = [];
+  let worktreeExists = true;
+  const wt = conventionalWorktreePath('task-082', FAKE_ROOT);
+  const result = cleanupMissionWorktree('task-082', {
+    rootDir: FAKE_ROOT,
+    existsSync(target) {
+      return target === wt ? worktreeExists : false;
+    },
+    removeDir(target) {
+      removed.push(target);
+      worktreeExists = false;
+    },
+    gitRunner(args) {
+      gitCalls.push(args);
+      if (args.slice(-2).join(' ') === 'branch --show-current') {
+        return { status: 0, stdout: 'main\n', stderr: '' };
+      }
+      if (args.includes('show-ref')) {
+        return { status: 0, stdout: '', stderr: '' };
+      }
+      if (args.slice(-2).join(' ') === 'list --porcelain') {
+        return { status: 0, stdout: `worktree ${wt}\nbranch refs/heads/mission/task-082\n`, stderr: '' };
+      }
+      return { status: 0, stdout: '', stderr: '' };
+    }
+  });
+
+  assert.equal(result, true);
+  assert.deepEqual(removed, [wt]);
+  assert.deepEqual(
+    gitCalls,
+    [
+      ['-C', FAKE_ROOT, 'branch', '--show-current'],
+      ['-C', FAKE_ROOT, 'show-ref', '--verify', '--quiet', 'refs/heads/mission/task-082'],
+      ['-C', FAKE_ROOT, 'worktree', 'list', '--porcelain'],
+      ['-C', FAKE_ROOT, 'worktree', 'remove', wt],
+      ['-C', FAKE_ROOT, 'worktree', 'prune'],
+      ['-C', FAKE_ROOT, 'branch', '-D', 'mission/task-082']
+    ]
+  );
+});
+
+test('cleanupMissionWorktree prunes stale prunable worktrees before deleting the mission branch', () => {
+  // Reproduces task-118: a prunable worktree at /tmp/mission-118
+  // holds mission/task-118 even though its path is not what
+  // integrate wants to delete. Without a prune step `git branch -D`
+  // fails because git still thinks the branch is checked out.
+  const gitCalls = [];
+  let branchDeleteAttempts = 0;
+  const result = cleanupMissionWorktree('task-118', {
+    rootDir: FAKE_ROOT,
+    existsSync: () => false,
+    removeDir: () => {},
+    gitRunner(args) {
+      gitCalls.push(args);
+      if (args.slice(-2).join(' ') === 'branch --show-current') {
+        return { status: 0, stdout: 'main\n', stderr: '' };
+      }
+      if (args.includes('show-ref')) {
+        return { status: 0, stdout: '', stderr: '' };
+      }
+      if (args.slice(-2).join(' ') === 'list --porcelain') {
+        // A worktree (no task- prefix) is registered but prunable; the
+        // path the helper queries for is not listed.
+        return {
+          status: 0,
+          stdout: `worktree /tmp/project-118\nHEAD deadbeef\nbranch refs/heads/mission/task-118\nprunable gitdir file points to non-existent location\n\n`,
+          stderr: ''
+        };
+      }
+      if (args.slice(-2).join(' ') === 'worktree prune') {
+        return { status: 0, stdout: '', stderr: '' };
+      }
+      if (args[args.length - 2] === '-D') {
+        branchDeleteAttempts += 1;
+        return { status: 0, stdout: '', stderr: '' };
+      }
+      return { status: 0, stdout: '', stderr: '' };
+    }
+  });
+
+  assert.equal(result, true);
+  const pruneIdx = gitCalls.findIndex(a => a.slice(-2).join(' ') === 'worktree prune');
+  const branchDelIdx = gitCalls.findIndex(a => a[a.length - 2] === '-D' && a[a.length - 1] === 'mission/task-118');
+  assert.notEqual(pruneIdx, -1, 'expected worktree prune to be invoked');
+  assert.notEqual(branchDelIdx, -1, 'expected branch -D to be invoked');
+  assert.ok(pruneIdx < branchDelIdx, 'worktree prune must run before branch -D');
+  assert.equal(branchDeleteAttempts, 1);
+});
+
+test('cleanupMissionWorktree blocks deletion when the mission worktree resolves inside Forgejo home', () => {
+  const forgejoHome = '/tmp/visualboard-forgejo';
+  const rootDir = `${forgejoHome}/project`;
+  const worktreePath = conventionalWorktreePath('task-082', rootDir);
+  const previousHome = process.env.FORGEJO_HOME;
+  process.env.FORGEJO_HOME = forgejoHome;
+
+  try {
+    let thrown = null;
+    try {
+      cleanupMissionWorktree('task-082', {
+        rootDir,
+        existsSync(target) {
+          return target === worktreePath;
+        },
+        gitRunner(args) {
+          if (args.slice(-2).join(' ') === 'branch --show-current') {
+            return { status: 0, stdout: 'main\n', stderr: '' };
+          }
+          if (args.includes('show-ref')) {
+            return { status: 0, stdout: '', stderr: '' };
+          }
+          if (args.slice(-2).join(' ') === 'list --porcelain') {
+            return {
+              status: 0,
+              stdout: `worktree ${worktreePath}\nbranch refs/heads/mission/task-082\n`,
+              stderr: ''
+            };
+          }
+          if (args.includes('worktree') && args.includes('remove')) {
+            return { status: 0, stdout: '', stderr: '' };
+          }
+          if (args.slice(-2).join(' ') === 'worktree prune') {
+            return { status: 0, stdout: '', stderr: '' };
+          }
+          return { status: 0, stdout: '', stderr: '' };
+        }
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    assert.ok(thrown, 'expected forgejo-home deletion attempt to throw');
+    assert.match(thrown.message, /CRITICAL SAFETY VIOLATION/);
+  } finally {
+    if (previousHome === undefined) delete process.env.FORGEJO_HOME;
+    else process.env.FORGEJO_HOME = previousHome;
+  }
+});
+
+test('rewriteWorktreePaths rewrites worktree references to the main checkout path', () => {
+  const file = path.join(os.tmpdir(), `integrate-rewrite-${process.pid}.md`);
+  const wt = conventionalWorktreePath('task-097', FAKE_ROOT);
+  fs.writeFileSync(file, `${wt}/docs/missions/2026/task-097/MISSION.md\n`);
+
+  try {
+    rewriteWorktreePaths(file, 'task-097', { rootDir: FAKE_ROOT });
+    const updated = fs.readFileSync(file, 'utf8');
+    assert.equal(
+      updated,
+      `${FAKE_ROOT}/docs/missions/2026/task-097/MISSION.md\n`
+    );
+  } finally {
+    fs.rmSync(file, { force: true });
+  }
+});
+
+test('buildConflictResolutionPrompt gives explicit rebase-first guidance', () => {
+  const wt = conventionalWorktreePath('task-097', FAKE_ROOT);
+  const primaryBranch = getPrimaryBranch();
+  const prompt = buildConflictResolutionPrompt('task-097', 'docs', { rootDir: FAKE_ROOT }).join('\n');
+  assert.doesNotMatch(prompt, new RegExp(`review/${PRIMARY}`));
+  assert.match(prompt, new RegExp(`Rebase the mission branch onto the local ${PRIMARY} branch`, 'i'));
+  assert.match(prompt, new RegExp(wt));
+  assert.match(prompt, new RegExp(`cd "${wt}"`));
+  assert.match(prompt, /git status --short/);
+  assert.match(prompt, new RegExp(`git fetch review ${PRIMARY}`));
+  assert.match(prompt, new RegExp(`git rebase ${PRIMARY}`));
+  assert.match(prompt, /no verification gate configured/);
+  assert.match(prompt, /px integrate task-097 --dry-run/);
+});
+
+test('buildConflictResolutionPrompt targets the recorded feature base branch', () => {
+  const prompt = buildConflictResolutionPrompt('task-097', 'docs', { rootDir: FAKE_ROOT, baseBranch: 'feature/foo' }).join('\n');
+  assert.match(prompt, /Rebase the mission branch onto the local feature\/foo branch/i);
+  assert.match(prompt, /git fetch review feature\/foo/);
+  assert.match(prompt, /git rebase feature\/foo/);
+  // The primary branch must not leak into feature-branch mission guidance.
+  assert.doesNotMatch(prompt, new RegExp(`git rebase ${PRIMARY}\\b`));
+});
+
+test('variant B automation summary stays explicit about automated closeout steps', () => {
+  assert.match(VARIANT_B_AUTOMATION_SUMMARY, /squash commit/i);
+  assert.match(VARIANT_B_AUTOMATION_SUMMARY, /Forgejo sync-merged/);
+  assert.doesNotMatch(VARIANT_B_AUTOMATION_SUMMARY, /mission-ledger/);
+  assert.doesNotMatch(VARIANT_B_AUTOMATION_SUMMARY, /local gate/i);
+});
+
+test('sync-merged diagnostics include stale-info branch push recovery', () => {
+  const staleInfoDiagnostic = SYNC_MERGED_DIAGNOSTICS.find(d => /stale info/i.test(d.symptom));
+
+  assert.strictEqual(staleInfoDiagnostic?.symptom, 'git push rejects mission branch with "stale info" or "fetch first"');
+  assert.match(staleInfoDiagnostic.cause, /tracking is stale/i);
+  assert.match(staleInfoDiagnostic.fix, /fetches review\/<branch>/i);
+  assert.match(staleInfoDiagnostic.fix, /force-with-lease/i);
+});
+
+test('printDiagnosticTable prominently includes the stale-info diagnostic row', () => {
+  const lines = [];
+  const originalLog = console.log;
+  console.log = message => lines.push(message);
+  try {
+    printDiagnosticTable();
+  } finally {
+    console.log = originalLog;
+  }
+
+  const output = lines.join('\n');
+  assert.match(output, /Node sync-merged Diagnostic Table/);
+  assert.match(output, /stale info/);
+  assert.match(output, /Automated: sync-merged fetches review\/<branch>/);
+});
+
+test('reportSyncMergedFailure prints failure, raw output, and diagnostics table', () => {
+  const errors = [];
+  const logs = [];
+  const originalError = console.error;
+  const originalLog = console.log;
+  console.error = message => errors.push(message);
+  console.log = message => logs.push(message);
+  try {
+    reportSyncMergedFailure({
+      ok: false,
+      error: 'push-branch-failed',
+      raw: '! [rejected] abc123 -> mission/task-1062 (stale info)'
+    });
+  } finally {
+    console.error = originalError;
+    console.log = originalLog;
+  }
+
+  assert.match(errors.join('\n'), /^\[FAIL\] Forgejo sync-merged failed \(push-branch-failed\)\.$/m);
+  assert.match(errors.join('\n'), /^! \[rejected\] abc123 -> mission\/task-1062 \(stale info\)$/m);
+  assert.match(logs.join('\n'), /^\[INFO\] sync-merged raw output:$/m);
+  assert.match(logs.join('\n'), /Node sync-merged Diagnostic Table/);
+  assert.match(logs.join('\n'), /fetches review\/<branch>/);
+});
+
+test('formatRecordedStatsRow renders the persisted review-round count', () => {
+  assert.equal(
+    formatRecordedStatsRow({
+      mission: 'task-2000',
+      implementer: 'claude',
+      pr_fix_rounds: '8',
+      classification: 'ai_sdlc',
+      date: '2026-05-18',
+    }),
+    'task-2000: implementer=claude, pr_fix_rounds=8, classification=ai_sdlc, date=2026-05-18'
+  );
+});
+
+test('recordPostIntegrationStats logs the persisted stats row including pr_fix_rounds', () => {
+  const logs = [];
+  const originalLog = console.log;
+  console.log = message => logs.push(message);
+  try {
+    const outcome = recordPostIntegrationStats('task-2000', {
+      rootDir: FAKE_ROOT,
+      recordIntegrationStatsFn() {
+        return {
+          changed: true,
+          row: {
+            mission: 'task-2000',
+            implementer: 'claude',
+            pr_fix_rounds: '8',
+            classification: 'ai_sdlc',
+            date: '2026-05-18',
+          },
+          report: 'weekly report',
+          data: { rows: [] },
+        };
+      },
+    });
+
+    assert.equal(outcome.row.pr_fix_rounds, '8');
+  } finally {
+    console.log = originalLog;
+  }
+
+  assert.match(logs.join('\n'), /\[INFO\] Workflow stats recorded: task-2000: implementer=claude, pr_fix_rounds=8, classification=ai_sdlc, date=2026-05-18/);
+  assert.match(logs.join('\n'), /\[INFO\] Workflow stats updated:/);
+  assert.match(logs.join('\n'), /weekly report/);
+  assert.match(logs.join('\n'), /\[INFO\] Mission telemetry by phase: task-2000/);
+});
+
+test('recordPostIntegrationStats records an unknown classification row for a missing-task mission', () => {
+  const logs = [];
+  const originalLog = console.log;
+  console.log = message => logs.push(message);
+  try {
+    const outcome = recordPostIntegrationStats('task-unknown', {
+      rootDir: FAKE_ROOT,
+      recordIntegrationStatsFn({ slug, rootDir, filePath, date }) {
+        assert.equal(slug, 'task-unknown');
+        assert.equal(rootDir, FAKE_ROOT);
+        assert.ok(filePath.includes('stats.csv'));
+        // task-1415: no explicit date is passed anymore — recordIntegrationStats
+        // defaults it to "today" itself, rather than trusting a stale
+        // `git log -1 --format=%cs` committer date.
+        assert.equal(date, undefined);
+        return {
+          changed: true,
+          row: {
+            mission: 'task-unknown',
+            implementer: 'unknown',
+            pr_fix_rounds: '0',
+            classification: 'unknown',
+            date: '2026-06-24',
+          },
+          report: 'weekly report',
+          data: { rows: [] },
+        };
+      },
+    });
+
+    assert.equal(outcome.row.classification, 'unknown');
+  } finally {
+    console.log = originalLog;
+  }
+
+  assert.match(logs.join('\n'), /\[INFO\] Workflow stats recorded: task-unknown: implementer=unknown, pr_fix_rounds=0, classification=unknown, date=2026-06-24/);
+});
+
+test('recordPostIntegrationStats routes stats through PARALLIX_HOME, not a consuming-repo path', () => {
+  const runtimeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'px-runtime-root-'));
+  const parallixHome = fs.mkdtempSync(path.join(os.tmpdir(), 'px-stats-home-'));
+  const previousHome = process.env.PARALLIX_HOME;
+  process.env.PARALLIX_HOME = parallixHome;
+  const originalResolveStatsFilePath = stats.resolveStatsFilePath;
+  const resolverRoots = [];
+  stats.resolveStatsFilePath = (rootDir) => {
+    resolverRoots.push(rootDir);
+    return originalResolveStatsFilePath(rootDir);
+  };
+  try {
+    const capturedFilePaths = [];
+    const runOnce = () => recordPostIntegrationStats('task-2046', {
+      rootDir: runtimeRoot,
+      recordIntegrationStatsFn({ filePath }) {
+        capturedFilePaths.push(filePath);
+        return {
+          changed: false,
+          row: {
+            mission: 'task-2046',
+            implementer: 'claude',
+            pr_fix_rounds: '0',
+            classification: 'ai_sdlc',
+            date: '2026-05-18',
+          },
+          report: 'weekly report',
+          data: { rows: [] },
+        };
+      },
+    });
+
+    const originalLog = console.log;
+    console.log = () => {};
+    try {
+      runOnce();
+      runOnce();
+    } finally {
+      console.log = originalLog;
+    }
+
+    assert.equal(capturedFilePaths.length, 2);
+    assert.deepEqual(resolverRoots, [runtimeRoot, runtimeRoot]);
+    assert.equal(capturedFilePaths[0], capturedFilePaths[1]);
+    assert.equal(capturedFilePaths[0], stats.resolveStatsFilePath(runtimeRoot));
+    assert.equal(capturedFilePaths[0], path.join(parallixHome, 'stats.csv'));
+  } finally {
+    stats.resolveStatsFilePath = originalResolveStatsFilePath;
+    if (previousHome === undefined) delete process.env.PARALLIX_HOME;
+    else process.env.PARALLIX_HOME = previousHome;
+    fs.rmSync(runtimeRoot, { recursive: true, force: true });
+    fs.rmSync(parallixHome, { recursive: true, force: true });
+  }
+});
+
+test('recordPostIntegrationStats prints mission-phase telemetry after weekly stats', () => {
+  const logs = [];
+  const originalLog = console.log;
+  console.log = message => logs.push(message);
+  try {
+    const missionPhaseRows = [
+      { mission: 'task-3000', stage: 'draft', provider: 'openai', model: 'gpt-4', implementer: 'claude', input_tokens: '1000', output_tokens: '500', cached_tokens: '100', tool_calls: '50', duration_minutes: '10', cost_usd: '1.50' },
+      { mission: 'task-3000', stage: 'execute', provider: 'openai', model: 'gpt-4', implementer: 'claude', input_tokens: '2000', output_tokens: '1000', cached_tokens: '200', tool_calls: '100', duration_minutes: '20', cost_usd: '3.00' },
+    ];
+    recordPostIntegrationStats('task-3000', {
+      rootDir: FAKE_ROOT,
+      recordIntegrationStatsFn() {
+        return {
+          changed: true,
+          row: {
+            mission: 'task-3000',
+            implementer: 'claude',
+            pr_fix_rounds: '2',
+            classification: 'ai_sdlc',
+            date: '2026-05-18',
+          },
+          report: 'weekly report',
+          data: { rows: missionPhaseRows },
+        };
+      },
+    });
+
+    const combined = logs.join('\n');
+    assert.match(combined, /\[INFO\] Workflow stats updated:/);
+    assert.match(combined, /weekly report/);
+    assert.match(combined, /\[INFO\] Mission telemetry by phase: task-3000/);
+    assert.match(combined, /draft/);
+    assert.match(combined, /execute/);
+  } finally {
+    console.log = originalLog;
+  }
+});
+
+test('recordPostIntegrationStats handles empty mission-phase rows gracefully', () => {
+  const logs = [];
+  const originalLog = console.log;
+  console.log = message => logs.push(message);
+  try {
+    recordPostIntegrationStats('task-4000', {
+      rootDir: FAKE_ROOT,
+      recordIntegrationStatsFn() {
+        return {
+          changed: false,
+          row: {
+            mission: 'task-4000',
+            implementer: 'claude',
+            pr_fix_rounds: '0',
+            classification: 'ai_sdlc',
+            date: '2026-05-18',
+          },
+          report: 'weekly report',
+          data: { rows: [] },
+        };
+      },
+    });
+
+    const combined = logs.join('\n');
+    assert.match(combined, /\[INFO\] Workflow stats updated:/);
+    assert.match(combined, /weekly report/);
+    assert.match(combined, /\[INFO\] Mission telemetry by phase: task-4000/);
+    assert.match(combined, /No telemetry rows recorded for mission "task-4000"/);
+  } finally {
+    console.log = originalLog;
+  }
+});
+
+test('runPostIntegrateHookOrAbort no-ops silently when no hook is configured (SC1: unchanged behavior)', () => {
+  const logs = [];
+  const errors = [];
+  const originalLog = console.log;
+  const originalError = console.error;
+  console.log = message => logs.push(message);
+  console.error = message => errors.push(message);
+  try {
+    const result = runPostIntegrateHookOrAbort('task-1402', {
+      baseWorktree: FAKE_ROOT,
+      baseBranch: 'main',
+      variant: 'variant-b',
+      runPostIntegrateHookFn: () => ({ ran: false, ok: true })
+    });
+
+    assert.deepEqual(result, { ran: false, ok: true });
+    assert.deepEqual(logs, []);
+    assert.deepEqual(errors, []);
+  } finally {
+    console.log = originalLog;
+    console.error = originalError;
+  }
+});
+
+test('runPostIntegrateHookOrAbort passes slug, base worktree/branch, and variant to the hook (SC2/SC3)', () => {
+  let received;
+  runPostIntegrateHookOrAbort('task-1402', {
+    baseWorktree: FAKE_ROOT,
+    baseBranch: 'main',
+    variant: 'variant-b',
+    runPostIntegrateHookFn: (params) => {
+      received = params;
+      return { ran: true, ok: true, command: './scripts/refresh-px.sh', output: 'ok', exitCode: 0 };
+    }
+  });
+
+  assert.deepEqual(received, {
+    slug: 'task-1402',
+    baseWorktree: FAKE_ROOT,
+    baseBranch: 'main',
+    variant: 'variant-b'
+  });
+});
+
+test('runPostIntegrateHookOrAbort logs a pass and the hook output on success', () => {
+  const logs = [];
+  const originalLog = console.log;
+  console.log = message => logs.push(message);
+  try {
+    runPostIntegrateHookOrAbort('task-1402', {
+      baseWorktree: FAKE_ROOT,
+      baseBranch: 'main',
+      variant: 'variant-b',
+      runPostIntegrateHookFn: () => ({ ran: true, ok: true, command: './scripts/refresh-px.sh', output: 'bumped to 1.3.5', exitCode: 0 })
+    });
+
+    const combined = logs.join('\n');
+    assert.match(combined, /\[PASS\] Post-integrate hook completed: \.\/scripts\/refresh-px\.sh/);
+    assert.match(combined, /bumped to 1\.3\.5/);
+  } finally {
+    console.log = originalLog;
+  }
+});
+
+test('runPostIntegrateHookOrAbort throws IntegrationAbort and surfaces a distinct failure with hook output (SC5)', () => {
+  const errors = [];
+  const originalError = console.error;
+  console.error = message => errors.push(message);
+  try {
+    assert.throws(() => {
+      runPostIntegrateHookOrAbort('task-1402', {
+        baseWorktree: FAKE_ROOT,
+        baseBranch: 'main',
+        variant: 'variant-b-resumed',
+        runPostIntegrateHookFn: () => ({ ran: true, ok: false, command: './scripts/refresh-px.sh', output: 'permission denied', exitCode: 3 })
+      });
+    });
+
+    const combined = errors.join('\n');
+    assert.match(combined, /\[FAIL\] Post-integrate hook failed \(exit code 3\): \.\/scripts\/refresh-px\.sh/);
+    assert.match(combined, /permission denied/);
+  } finally {
+    console.error = originalError;
+  }
+});
+
+test('px integrate --dry-run never invokes the post-integrate hook (SC4)', async () => {
+  const hookSpy = mock.method(postIntegrateHookModule, 'runPostIntegrateHook');
+  const originalExit = process.exit;
+  const originalError = console.error;
+  const originalLog = console.log;
+  process.exit = () => { throw new Error('process.exit called'); };
+  console.error = () => {};
+  console.log = () => {};
+  try {
+    try {
+      // @ts-expect-error TS2349 This expression is not callable.
+      await integrateCommand(['task-integrate-hook-dry-run-does-not-exist', '--dry-run']);
+    } catch (err) {
+      if (err.message !== 'process.exit called') throw err;
+    }
+  } finally {
+    process.exit = originalExit;
+    console.error = originalError;
+    console.log = originalLog;
+    hookSpy.mock.restore();
+  }
+
+  assert.equal(hookSpy.mock.callCount(), 0);
+});
+
+test('px integrate never invokes the post-integrate hook when preflight fails (SC4)', async () => {
+  const hookSpy = mock.method(postIntegrateHookModule, 'runPostIntegrateHook');
+  const originalExit = process.exit;
+  const originalError = console.error;
+  const originalLog = console.log;
+  process.exit = () => { throw new Error('process.exit called'); };
+  console.error = () => {};
+  console.log = () => {};
+  try {
+    try {
+      // @ts-expect-error TS2349 This expression is not callable.
+      await integrateCommand(['task-integrate-hook-preflight-fails-does-not-exist']);
+    } catch (err) {
+      if (err.message !== 'process.exit called') throw err;
+    }
+  } finally {
+    process.exit = originalExit;
+    console.error = originalError;
+    console.log = originalLog;
+    hookSpy.mock.restore();
+  }
+
+  assert.equal(hookSpy.mock.callCount(), 0);
+});
+
+test('buildBeforeVerification builds canonical dist before proof capture', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'integrate-refresh-fresh-'));
+  const pxTs = path.join(root, 'px.ts');
+  const pxJs = path.join(root, 'dist', 'px.js');
+  fs.mkdirSync(path.dirname(pxJs), { recursive: true });
+  fs.writeFileSync(path.join(root, 'package.json'), '{}\n');
+  fs.writeFileSync(pxTs, 'export {};\n');
+  fs.writeFileSync(pxJs, '"use strict";\n');
+
+  const calls = [];
+  const result = buildBeforeVerification(root, {
+    runFn(command, args) {
+      calls.push([command, ...args]);
+      return { status: 0, stdout: '', stderr: '' };
+    },
+    log: () => {}
+  });
+
+  assert.deepEqual(result, { ok: true, refreshed: true, detail: '' });
+  assert.equal(calls.length, 1);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('buildBeforeVerification builds dist without consulting source mtimes', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'integrate-refresh-stale-'));
+  const pxTs = path.join(root, 'px.ts');
+  const pxJs = path.join(root, 'dist', 'px.js');
+  fs.mkdirSync(path.dirname(pxJs), { recursive: true });
+  fs.writeFileSync(path.join(root, 'package.json'), '{}\n');
+  fs.writeFileSync(pxJs, '"use strict";\n');
+  fs.writeFileSync(pxTs, 'export {};\n');
+  const staleJsTime = new Date('2026-01-01T00:00:00.000Z');
+  const staleTsTime = new Date('2026-01-01T00:00:05.000Z');
+  fs.utimesSync(pxJs, staleJsTime, staleJsTime);
+  fs.utimesSync(pxTs, staleTsTime, staleTsTime);
+
+  const calls = [];
+  const result = buildBeforeVerification(root, {
+    runFn(command, args, options) {
+      calls.push({ command, args, options });
+      fs.writeFileSync(pxJs, '"use strict";\n// rebuilt\n');
+      return { status: 0, stdout: 'rebuilt', stderr: '' };
+    },
+    log: () => {}
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.refreshed, true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].command, 'npm');
+  assert.deepEqual(calls[0].args, ['run', 'build']);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('buildBeforeVerification surfaces build failures before verification starts', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'integrate-refresh-fail-'));
+  const pxTs = path.join(root, 'px.ts');
+  const pxJs = path.join(root, 'dist', 'px.js');
+  fs.mkdirSync(path.dirname(pxJs), { recursive: true });
+  fs.writeFileSync(path.join(root, 'package.json'), '{}\n');
+  fs.writeFileSync(pxJs, '"use strict";\n');
+  fs.writeFileSync(pxTs, 'export {};\n');
+  const staleJsTime = new Date('2026-01-01T00:00:00.000Z');
+  const staleTsTime = new Date('2026-01-01T00:00:05.000Z');
+  fs.utimesSync(pxJs, staleJsTime, staleJsTime);
+  fs.utimesSync(pxTs, staleTsTime, staleTsTime);
+
+  const result = buildBeforeVerification(root, {
+    runFn() {
+      return { status: 2, stdout: '', stderr: 'build broke' };
+    },
+    log: () => {}
+  });
+
+  assert.equal(result.ok, false);
+  assert.match(result.error, /pre-verification build refresh failed/);
+  assert.match(result.detail, /build broke/);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('evaluateTaskStatusForIntegration accepts approved (ready-for-integration) without extra conditions', () => {
+  assert.deepEqual(
+    evaluateTaskStatusForIntegration({
+      taskStatus: 'ready-for-integration',
+      pr: { merged: false },
+      approval: { ok: false, reviewState: null }
+    }),
+    {
+      ok: true,
+      level: 'pass',
+      message: 'Backlog status: approved'
+    }
+  );
+});
+
+test('evaluateTaskStatusForIntegration accepts review when the latest formal review is approved', () => {
+  const result = evaluateTaskStatusForIntegration({
+    taskStatus: 'review',
+    pr: { merged: false },
+    approval: { ok: true, reviewState: 'APPROVED' }
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.level, 'warn');
+  assert.match(result.message, /review accepted for integration/i);
+  assert.match(result.message, /APPROVED/);
+});
+
+test('provider-backed approval repair leaves integration preflight with review instead of stale active', () => {
+  const { submitReviewRound } = require('../dist/lib/review/review');
+  const { ReviewState } = require('../dist/lib/review/review-state');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1327-integrate-preflight-'));
+  const taskFile = path.join(root, 'backlog', 'tasks', 'task-2199 - stale-active.md');
+  const previousUser = process.env.FORGEJO_USER;
+  process.env.FORGEJO_USER = 'codex';
+
+  try {
+    fs.mkdirSync(path.dirname(taskFile), { recursive: true });
+    fs.writeFileSync(taskFile, [
+      '---',
+      'id: TASK-2199',
+      'title: stale active',
+      'status: active',
+      'assignee: [claude]',
+      '---',
+      '',
+      'Status: ○ active',
+      ''
+    ].join('\n'));
+
+    runGitOrThrow(['init'], { cwd: root });
+    runGitOrThrow(['config', 'user.email', 'task-1327@example.com'], { cwd: root });
+    runGitOrThrow(['config', 'user.name', 'Task 1327'], { cwd: root });
+    runGitOrThrow(['add', '.'], { cwd: root });
+    runGitOrThrow(['commit', '-m', 'fixture'], { cwd: root });
+
+    submitReviewRound('task-2199', 'approve', 'LGTM', {
+      isForgejoReviewEnabledFn: () => true,
+      readTokenFn: () => 'token',
+      postReviewFn: () => ({ ok: true }),
+      buildMetadataFooterFn: () => '',
+      writeReviewStateFn: () => ({ outcome: 'committed' }),
+      readReviewStateFn: () => new ReviewState('task-2199', {
+        reviewer: 'codex', implementer: 'claude', round: 1, phase: 'reviewing'
+      }),
+      worktree: root,
+      log: () => {},
+      error: () => {},
+      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(_code: number) => never'.
+      exit: () => {}
+    });
+
+    const result = evaluateTaskStatusForIntegration({
+      taskStatus: backlog.getTaskStatus(taskFile),
+      pr: { merged: false },
+      approval: { ok: true, reviewState: 'APPROVED' }
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.level, 'warn');
+    assert.match(result.message, /review accepted for integration/i);
+  } finally {
+    if (previousUser === undefined) delete process.env.FORGEJO_USER;
+    else process.env.FORGEJO_USER = previousUser;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('evaluateTaskStatusForIntegration rejects review when the Forgejo PR is already merged', () => {
+  const result = evaluateTaskStatusForIntegration({
+    taskStatus: 'review',
+    pr: { state: 'merged', merged: true },
+    approval: { ok: false, reviewState: null }
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.level, 'fail');
+  assert.match(result.message, /approved Forgejo PR/i);
+});
+
+test('evaluateTaskStatusForIntegration rejects review without an approved Forgejo PR', () => {
+  const result = evaluateTaskStatusForIntegration({
+    taskStatus: 'review',
+    pr: { merged: false },
+    approval: { ok: true, reviewState: 'COMMENT' }
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.level, 'fail');
+  assert.match(result.message, /expected approved, or review with an approved Forgejo PR/i);
+});
+
+test('evaluateTaskStatusForIntegration accepts review when default user approved but latest is REQUEST_CHANGES', () => {
+  const result = evaluateTaskStatusForIntegration({
+    taskStatus: 'review',
+    pr: { merged: false },
+    approval: { ok: true, reviewState: 'REQUEST_CHANGES', defaultUserApproved: true }
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.level, 'warn');
+  assert.match(result.message, /default user approved for integration/i);
+});
+
+test('evaluateTaskStatusForIntegration rejects review when default user did not approve and latest is not APPROVED', () => {
+  const result = evaluateTaskStatusForIntegration({
+    taskStatus: 'review',
+    pr: { merged: false },
+    approval: { ok: true, reviewState: 'REQUEST_CHANGES', defaultUserApproved: false }
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.level, 'fail');
+  assert.match(result.message, /expected approved, or review with an approved Forgejo PR/i);
+});
+
+test('resolveForgejoUserForIntegration uses known task assignees directly', () => {
+  assert.deepEqual(resolveForgejoUserForIntegration('codex'), {
+    forgejoUser: 'codex',
+    warning: null
+  });
+});
+
+test('resolveForgejoUserForIntegration uses task assignee directly even for unknown agents', () => {
+  // Hardened behavior: always use the task assignee if set, regardless of whether
+  // it is in the known agent list. This ensures consistent identity resolution
+  // for all Forgejo operations using the task's assignee/implementer.
+  const originalUser = process.env.FORGEJO_USER;
+  process.env.FORGEJO_USER = 'gemini';
+
+  try {
+    const result = resolveForgejoUserForIntegration('[nonstandard]');
+    assert.equal(result.forgejoUser, '[nonstandard]');
+    assert.equal(result.warning, null);
+  } finally {
+    process.env.FORGEJO_USER = originalUser;
+  }
+});
+
+test('printIntegrationPreflight reports token resolution and detached-head recovery command', () => {
+  const lines = [];
+  const originalLog = console.log;
+  console.log = line => lines.push(line);
+
+  try {
+    const result = printIntegrationPreflight({
+      slug: 'task-113',
+      branch: 'mission/task-113',
+      currentBranch: 'mission/task-113',
+      missionDir: '/tmp/docs/missions/2026/task-113',
+      baseWorktree: FAKE_ROOT,
+      task: { ok: true, taskFile: '/tmp/task-113.md' },
+      taskStatus: 'ready-for-integration',
+      taskAssignee: 'codex',
+      forgejoUser: 'codex',
+      taskAssigneeWarning: null,
+      pr: { exists: true, state: 'open', merged: false, number: 113 },
+      approval: { ok: true, reviewState: 'APPROVED' },
+      mainBranch: '',
+      mainDirty: false,
+      mainDirtyEntries: []
+    }, {
+      readTokenFn: () => 'secret-token',
+      resolveTokenFileFn: () => '/tmp/tokens/codex',
+      isForgejoReviewEnabledFn: () => true,
+      getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
+    });
+
+    assert.ok(result.failures.includes('main-branch'));
+    const output = lines.join('\n');
+    assert.match(output, /Forgejo token: resolved for codex \(\/tmp\/tokens\/codex\)/);
+    assert.match(output, new RegExp(`expected ${PRIMARY}, found \\(detached HEAD\\)`));
+    assert.match(output, new RegExp(`Retry with: git -C ${FAKE_ROOT} checkout ${PRIMARY}`));
+  } finally {
+    console.log = originalLog;
+  }
+});
+
+test('printIntegrationPreflight fails when no Forgejo token is available', () => {
+  const lines = [];
+  const originalLog = console.log;
+  console.log = line => lines.push(line);
+
+  try {
+    const result = printIntegrationPreflight({
+      slug: 'task-113',
+      branch: 'mission/task-113',
+      currentBranch: 'mission/task-113',
+      missionDir: '/tmp/docs/missions/2026/task-113',
+      baseWorktree: FAKE_ROOT,
+      task: { ok: true, taskFile: '/tmp/task-113.md' },
+      taskStatus: 'ready-for-integration',
+      taskAssignee: 'codex',
+      forgejoUser: 'codex',
+      taskAssigneeWarning: null,
+      pr: { exists: true, state: 'open', merged: false, number: 113 },
+      approval: { ok: true, reviewState: 'APPROVED' },
+      mainBranch: 'main',
+      mainAheadCount: 0,
+      mainDirty: false,
+      mainDirtyEntries: []
+    }, {
+      readTokenFn: () => null,
+      resolveTokenFileFn: () => null,
+      isForgejoReviewEnabledFn: () => true,
+      getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
+    });
+
+    assert.ok(result.failures.includes('forgejo-token'));
+    const output = lines.join('\n');
+    assert.match(output, /Forgejo token: no token file found for codex/);
+  } finally {
+    console.log = originalLog;
+  }
+});
+
+test('printIntegrationPreflight tolerates a missing task file and reports unknown classification', () => {
+  const lines = [];
+  const originalLog = console.log;
+  console.log = line => lines.push(line);
+
+  try {
+    const result = printIntegrationPreflight({
+      slug: 'task-unknown',
+      branch: 'mission/task-unknown',
+      currentBranch: 'mission/task-unknown',
+      missionDir: '/tmp/docs/missions/2026/task-unknown',
+      task: { ok: false, reason: 'missing' },
+      taskStatus: null,
+      taskAssignee: null,
+      forgejoUser: 'codex',
+      taskAssigneeWarning: null,
+      pr: { exists: false, raw: 'no PR found' },
+      approval: { ok: false, error: 'pr-missing', reviewState: null },
+      mainBranch: 'main',
+      mainDirty: false,
+      mainDirtyEntries: []
+    }, {
+      readTokenFn: () => 'secret-token',
+      resolveTokenFileFn: () => '/tmp/tokens/codex',
+      isForgejoReviewEnabledFn: () => false,
+      getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
+    });
+
+    const output = lines.join('\n');
+    assert.ok(!result.failures.includes('task-missing'));
+    assert.match(output, /no task file found for task-unknown/);
+    assert.match(output, /Backlog classification: unknown/);
+  } finally {
+    console.log = originalLog;
+  }
+});
+
+test('getUnresolvedIndexConflicts deduplicates conflicted paths from git ls-files -u', () => {
+  const result = getUnresolvedIndexConflicts('/tmp/main-checkout', {
+    gitRunner(args) {
+      assert.deepEqual(args, ['-C', '/tmp/main-checkout', 'ls-files', '-u']);
+      return {
+        status: 0,
+        stdout: [
+          '100644 aaaaa 1\tserver/src/App.java',
+          '100644 bbbbb 2\tserver/src/App.java',
+          '100644 ccccc 3\tworkflow/lib/commands/integrate.js'
+        ].join('\n'),
+        stderr: ''
+      };
+    }
+  });
+
+  assert.deepEqual(result, {
+    ok: true,
+    files: ['server/src/App.java', 'workflow/lib/commands/integrate.js']
+  });
+});
+
+test('printIntegrationPreflight reports unresolved index conflicts with recovery commands', () => {
+  const lines = [];
+  const originalLog = console.log;
+  console.log = line => lines.push(line);
+
+  try {
+    const result = printIntegrationPreflight({
+      slug: 'task-113',
+      branch: 'mission/task-113',
+      currentBranch: 'mission/task-113',
+      missionDir: '/tmp/docs/missions/2026/task-113',
+      baseWorktree: FAKE_ROOT,
+      task: { ok: true, taskFile: '/tmp/task-113.md' },
+      taskStatus: 'ready-for-integration',
+      taskAssignee: 'codex',
+      forgejoUser: 'codex',
+      taskAssigneeWarning: null,
+      pr: { exists: true, state: 'open', merged: false, number: 113 },
+      approval: { ok: true, reviewState: 'APPROVED' },
+      mainBranch: 'main',
+      mainAheadCount: 0,
+      mainDirty: false,
+      mainDirtyEntries: []
+    }, {
+      readTokenFn: () => 'secret-token',
+      resolveTokenFileFn: () => '/tmp/tokens/codex',
+      isForgejoReviewEnabledFn: () => true,
+      getUnresolvedIndexConflictsFn: () => ({
+        ok: true,
+        files: ['workflow/lib/commands/integrate.js', 'backlog/tasks/task-113.md']
+      })
+    });
+
+    assert.ok(result.failures.includes('main-index-conflicts'));
+    const output = lines.join('\n');
+    assert.match(output, /Integration checkout conflicts: unresolved merge entries detected/i);
+    assert.match(output, new RegExp(`git -C ${FAKE_ROOT} rm "workflow/lib/commands/integrate\\.js"`));
+    assert.match(output, new RegExp(`git -C ${FAKE_ROOT} add "backlog/tasks/task-113\\.md"`));
+    assert.match(output, new RegExp(`git -C ${FAKE_ROOT} stash drop`));
+    assert.match(output, /Retry with: px integrate task-113 --dry-run/);
+  } finally {
+    console.log = originalLog;
+  }
+});
+
+test('printIntegrationPreflight fails fast on an in-progress rebase in the integration checkout', () => {
+  const lines = [];
+  const originalLog = console.log;
+  console.log = line => lines.push(line);
+
+  try {
+    const result = printIntegrationPreflight({
+      slug: 'task-1322',
+      branch: 'mission/task-1322',
+      currentBranch: 'mission/task-1322',
+      missionDir: '/tmp/docs/missions/2026/task-1322',
+      baseWorktree: FAKE_ROOT,
+      task: { ok: true, taskFile: '/tmp/task-1322.md' },
+      taskStatus: 'ready-for-integration',
+      taskAssignee: 'codex',
+      forgejoUser: 'codex',
+      taskAssigneeWarning: null,
+      pr: { exists: true, state: 'open', merged: false, number: 1322 },
+      approval: { ok: true, reviewState: 'APPROVED' },
+      mainBranch: 'main',
+      mainAheadCount: 0,
+      mainDirty: false,
+      mainDirtyEntries: []
+    }, {
+      readTokenFn: () => 'secret-token',
+      resolveTokenFileFn: () => '/tmp/tokens/codex',
+      isForgejoReviewEnabledFn: () => true,
+      // @ts-expect-error TS2322 Type '(target: string) => { inProgress: true; detached: true; rebaseHead: string
+      detectRebaseStateFn: target => {
+        assert.equal(target, FAKE_ROOT);
+        return {
+          inProgress: true,
+          detached: true,
+          rebaseHead: 'abc123def456',
+          unmergedFiles: [
+            'backlog/tasks/task-1322 - prevent-backlog-task-id-recycling-collision.md',
+            'missions/task-1322/review-state.json',
+            'missions/task-1322/CP-4.md'
+          ]
+        };
+      },
+      getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
+    });
+
+    assert.ok(result.failures.includes('rebase-in-progress'));
+    const output = lines.join('\n');
+    assert.match(output, /Integration checkout rebase: rebase in progress/i);
+    assert.match(output, /Current rebase head: abc123def456/);
+    assert.match(output, /backlog\/tasks\/task-1322 - prevent-backlog-task-id-recycling-collision\.md/);
+    assert.match(output, new RegExp(`git -C ${FAKE_ROOT} rebase --continue`));
+    assert.match(output, new RegExp(`git -C ${FAKE_ROOT} rebase --abort`));
+    assert.match(output, new RegExp(`git -C ${FAKE_ROOT} rebase --skip`));
+    assert.match(output, /Retry with: px integrate task-1322 --dry-run/);
+  } finally {
+    console.log = originalLog;
+  }
+});
+
+test('maybeUpdateGraphifyOnPrimary skips cleanly when graphify is missing', () => {
+  const { maybeUpdateGraphifyOnPrimary } = require('../dist/lib/commands/integrate');
+  const logs = [];
+
+  const result = maybeUpdateGraphifyOnPrimary('/tmp/visualBoard', {
+    commandRunner() {
+      const error = new Error('missing');
+      // @ts-expect-error TS2339 Property 'code' does not exist on type 'Error'.
+      error.code = 'ENOENT';
+      throw error;
+    },
+    log(message) {
+      logs.push(message);
+    }
+  });
+
+  assert.deepEqual(result, {
+    updated: false,
+    skipped: true,
+    reason: 'missing-command'
+  });
+  assert.ok(logs.some(line => line.includes('graphify not found')));
+});
+
+test('maybeUpdateGraphifyOnPrimary runs graphify update in the primary worktree when available', () => {
+  const { maybeUpdateGraphifyOnPrimary } = require('../dist/lib/commands/integrate');
+  const calls = [];
+  const logs = [];
+
+  const result = maybeUpdateGraphifyOnPrimary('/tmp/visualBoard', {
+    commandRunner(command, args, options = {}) {
+      calls.push({ command, args, options });
+      return { status: 0, stdout: '', stderr: '' };
+    },
+    log(message) {
+      logs.push(message);
+    }
+  });
+
+  assert.deepEqual(result, {
+    updated: true,
+    skipped: false
+  });
+  const expectedGraphifyCommand = process.env.GRAPHIFY_BIN || 'graphify';
+  assert.deepEqual(calls, [
+    {
+      command: expectedGraphifyCommand,
+      args: ['--help'],
+      options: {}
+    },
+    {
+      command: expectedGraphifyCommand,
+      args: ['update', '.'],
+      options: {
+        cwd: '/tmp/visualBoard',
+        stdio: 'inherit'
+      }
+    }
+  ]);
+  assert.ok(logs.some(line => line.includes(`Updating graphify knowledge graph on ${PRIMARY}...`)));
+});
+
+test('parseStashPopCollisionFiles extracts already-exists paths from stash pop output', () => {
+  const files = parseStashPopCollisionFiles([
+    'foo.txt already exists, no checkout',
+    'nested/bar.md already exists, no checkout',
+    'error: could not restore untracked files from stash'
+  ].join('\n'));
+
+  assert.deepEqual(files, ['foo.txt', 'nested/bar.md']);
+});
+
+test('reportStashPopFailure confirms landed integration and prints merge-conflict recovery steps', () => {
+  const lines = [];
+  const originalError = console.error;
+  console.error = line => lines.push(line);
+
+  try {
+    reportStashPopFailure('task-113', { status: 1, stdout: '', stderr: 'conflict output' }, {
+      rootDir: '/tmp/main-checkout',
+      gitRunner(args) {
+        assert.deepEqual(args, ['-C', '/tmp/main-checkout', 'log', '-1', '--oneline']);
+        return { status: 0, stdout: 'abc123 mission/task-113: harden integrate preflight\n', stderr: '' };
+      },
+      getUnresolvedIndexConflictsFn: () => ({
+        ok: true,
+        files: ['workflow/lib/commands/integrate.js']
+      })
+    });
+
+    const output = lines.join('\n');
+    assert.match(output, /Integration commit landed: abc123 mission\/task-113: harden integrate preflight/);
+    assert.match(output, /Stash restore failure type: merge-conflict/);
+    assert.match(output, /Resolve workflow\/lib\/commands\/integrate\.js, then run git add "workflow\/lib\/commands\/integrate\.js" or git rm "workflow\/lib\/commands\/integrate\.js"/);
+    assert.match(output, /git stash drop/);
+  } finally {
+    console.error = originalError;
+  }
+});
+
+test('reportStashPopFailure prints file-collision recovery steps when no merge entries remain', () => {
+  const lines = [];
+  const originalError = console.error;
+  console.error = line => lines.push(line);
+
+  try {
+    reportStashPopFailure('task-113', {
+      status: 1,
+      stdout: 'docs/index.md already exists, no checkout',
+      stderr: 'error: could not restore untracked files from stash'
+    }, {
+      rootDir: '/tmp/main-checkout',
+      gitRunner() {
+        return { status: 0, stdout: 'def456 unrelated latest commit\n', stderr: '' };
+      },
+      getUnresolvedIndexConflictsFn: () => ({
+        ok: true,
+        files: []
+      })
+    });
+
+    const output = lines.join('\n');
+    assert.match(output, /Integration landing not confirmed by HEAD: def456 unrelated latest commit/);
+    assert.match(output, /Stash restore failure type: file-collision/);
+    assert.match(output, /git -C \/tmp\/main-checkout stash show --name-only stash@\{0\}/);
+    assert.match(output, /mv \/tmp\/main-checkout\/docs\/index\.md \/tmp\/main-checkout\/docs\/index\.md\.pre-stash-pop/);
+    assert.match(output, /git -C \/tmp\/main-checkout stash pop/);
+  } finally {
+    console.error = originalError;
+  }
+});
+
+test('promoteTaskForIntegrationIfNeeded logs the dry-run auto-promotion without mutating status', () => {
+  const context = {
+    task: { ok: true, taskFile: '/tmp/task-097.md' },
+    taskStatus: 'review',
+    pr: { merged: false },
+    approval: { ok: true, reviewState: 'APPROVED' }
+  };
+  const lines = [];
+  const originalLog = console.log;
+  console.log = line => lines.push(line);
+
+  try {
+    const result = promoteTaskForIntegrationIfNeeded(context, { dryRun: true });
+    assert.deepEqual(result, { changed: false, dryRun: true });
+    assert.equal(context.taskStatus, 'review');
+    assert.match(lines.join('\n'), /would promote Backlog status from review to approved/i);
+  } finally {
+    console.log = originalLog;
+  }
+});
+
+test('promoteTaskForIntegrationIfNeeded updates the task file on a real integration run', () => {
+  const taskFile = path.join(os.tmpdir(), `integrate-promote-${process.pid}.md`);
+  fs.writeFileSync(taskFile, 'Status: ○ review\n');
+
+  try {
+    const context = {
+      task: { ok: true, taskFile },
+      taskStatus: 'review',
+      pr: { merged: false },
+      approval: { ok: true, reviewState: 'APPROVED' }
+    };
+    const result = promoteTaskForIntegrationIfNeeded(context);
+
+    assert.deepEqual(result, { changed: true, dryRun: false });
+    assert.equal(context.taskStatus, 'ready-for-integration');
+    assert.match(fs.readFileSync(taskFile, 'utf8'), /Status: ○ ready-for-integration/); // actual backlog.md state
+  } finally {
+    fs.rmSync(taskFile, { force: true });
+  }
+});
+
+test('promoteTaskForIntegrationIfNeeded writes the integration checkout instead of the mission task copy', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'integrate-promote-base-'));
+  const baseTask = path.join(root, 'backlog', 'tasks', 'task-2230 - base.md');
+  const missionTask = path.join(root, 'mission-task.md');
+  fs.mkdirSync(path.dirname(baseTask), { recursive: true });
+  fs.writeFileSync(baseTask, 'id: TASK-2230\nstatus: review\n');
+  fs.writeFileSync(missionTask, 'id: TASK-2230\nstatus: review\n');
+  try {
+    const context = {
+      slug: 'task-2230', baseWorktree: root,
+      task: { ok: true, taskFile: missionTask }, taskStatus: 'review',
+      pr: { merged: false }, approval: { ok: true, reviewState: 'APPROVED' }
+    };
+    assert.deepEqual(promoteTaskForIntegrationIfNeeded(context), { changed: true, dryRun: false });
+    assert.match(fs.readFileSync(baseTask, 'utf8'), /^status: ready-for-integration$/m);
+    assert.match(fs.readFileSync(missionTask, 'utf8'), /^status: review$/m);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('stashMainCheckoutIfNeeded no-ops when the main checkout is already clean', () => {
+  const result = stashMainCheckoutIfNeeded({
+    slug: 'task-097',
+    dirtyEntries: [],
+    gitRunner() {
+      throw new Error('gitRunner should not be called for a clean checkout');
+    }
+  });
+
+  assert.deepEqual(result, { created: false });
+});
+
+test('stashMainCheckoutIfNeeded creates an explicit include-untracked stash', () => {
+  const gitCalls = [];
+  const result = stashMainCheckoutIfNeeded({
+    slug: 'task-097',
+    dirtyEntries: ['?? backlog/tasks/task-099 - fix-act-on-review.md'],
+    rootDir: '/tmp/main-checkout',
+    gitRunner(args) {
+      gitCalls.push(args);
+      return { status: 0, stdout: '', stderr: '' };
+    }
+  });
+
+  assert.deepEqual(result, {
+    created: true,
+    message: 'integrate:task-097: temporary integration checkout stash',
+    rootDir: '/tmp/main-checkout'
+  });
+  assert.deepEqual(gitCalls, [[
+    '-C',
+    '/tmp/main-checkout',
+    'stash',
+    'push',
+    '--include-untracked',
+    '-m',
+    'integrate:task-097: temporary integration checkout stash'
+  ]]);
+});
+
+test('restoreMainCheckoutStash pops the temporary stash back onto the main checkout', () => {
+  const gitCalls = [];
+  const result = restoreMainCheckoutStash({
+    message: 'integrate:task-097: temporary integration checkout stash',
+    rootDir: '/tmp/main-checkout',
+    gitRunner(args) {
+      gitCalls.push(args);
+      return { status: 0, stdout: '', stderr: '' };
+    }
+  });
+
+  assert.equal(result.status, 0);
+  assert.deepEqual(gitCalls, [[
+    '-C',
+    '/tmp/main-checkout',
+    'stash',
+    'pop',
+    '--index'
+  ]]);
+});
+
+test('findExistingSquashCommit returns the SHA when a mission squash commit is in the recent log', () => {
+  const logOutput = [
+    'aabbccdd1234 some unrelated commit',
+    'f8e2155f45bf mission/task-103: Fix Codex Sandbox Connectivity',
+    '20e409cadfa0 closeout(task-098): move task to completed'
+  ].join('\n');
+  const slug = 'task-103';
+  const prefix = `mission/${slug}:`;
+  let found = null;
+  for (const line of logOutput.split('\n')) {
+    const spaceIdx = line.indexOf(' ');
+    if (spaceIdx === -1) continue;
+    const hash = line.slice(0, spaceIdx);
+    const subject = line.slice(spaceIdx + 1);
+    if (subject.startsWith(prefix)) { found = hash; break; }
+  }
+  assert.equal(found, 'f8e2155f45bf');
+});
+
+test('findExistingSquashCommit returns null when no squash commit exists for the slug', () => {
+  const logOutput = [
+    'aabbccdd1234 some unrelated commit',
+    'f8e2155f45bf mission/task-099: some other mission',
+    '20e409cadfa0 closeout(task-098): move task to completed'
+  ].join('\n');
+  const slug = 'task-103';
+  const prefix = `mission/${slug}:`;
+  let found = null;
+  for (const line of logOutput.split('\n')) {
+    const spaceIdx = line.indexOf(' ');
+    if (spaceIdx === -1) continue;
+    const hash = line.slice(0, spaceIdx);
+    const subject = line.slice(spaceIdx + 1);
+    if (subject.startsWith(prefix)) { found = hash; break; }
+  }
+  assert.equal(found, null);
+});
+
+test('isNoMergeToAbortResult only ignores the known no-merge case', () => {
+  assert.equal(
+    isNoMergeToAbortResult({ status: 1, stdout: '', stderr: 'fatal: There is no merge to abort (MERGE_HEAD missing).' }),
+    true
+  );
+  assert.equal(
+    isNoMergeToAbortResult({ status: 1, stdout: '', stderr: 'fatal: some other git error' }),
+    false
+  );
+});
+
+test('printIntegrationPreflight prints base-slug path when mission doc is missing and slug has a suffix', () => {
+  const lines = [];
+  const originalLog = console.log;
+  console.log = line => lines.push(line);
+
+  try {
+    const result = printIntegrationPreflight({
+      slug: 'task-1054-modern',
+      branch: 'mission/task-1054-modern',
+      currentBranch: 'mission/task-1054-modern',
+      missionDir: null,
+      task: { ok: true, taskFile: '/tmp/task-1054-modern.md' },
+      taskStatus: 'ready-for-integration',
+      taskAssignee: 'codex',
+      forgejoUser: 'codex',
+      taskAssigneeWarning: null,
+      pr: { exists: true, state: 'open', merged: false, number: 1054 },
+      approval: { ok: true, reviewState: 'APPROVED' },
+      mainBranch: 'main',
+      mainAheadCount: 0,
+      mainDirty: false,
+      mainDirtyEntries: []
+    }, {
+      readTokenFn: () => 'secret-token',
+      resolveTokenFileFn: () => '/tmp/tokens/codex',
+      isForgejoReviewEnabledFn: () => true,
+      getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
+    });
+
+    assert.ok(result.failures.includes('mission-doc'));
+    const output = lines.join('\n');
+    assert.match(output, /Mission doc: missions\/task-1054\/MISSION\.md not found/);
+    assert.doesNotMatch(output, /task-1054-modern.*MISSION\.md/);
+  } finally {
+    console.log = originalLog;
+  }
+});
+
+test('printIntegrationPreflight warns when multiple PRs exist for the same task', () => {
+  const lines = [];
+  const originalLog = console.log;
+  console.log = line => lines.push(line);
+
+  try {
+    const result = printIntegrationPreflight({
+      slug: 'task-1054-modern',
+      branch: 'mission/task-1054-modern',
+      currentBranch: 'mission/task-1054-modern',
+      missionDir: '/tmp/docs/missions/2026/task-1054',
+      task: { ok: true, taskFile: '/tmp/task-1054.md' },
+      taskStatus: 'ready-for-integration',
+      taskAssignee: 'codex',
+      forgejoUser: 'codex',
+      taskAssigneeWarning: null,
+      pr: { exists: true, state: 'open', merged: false, number: 1054 },
+      siblingPrs: [
+        { number: 1055, head: 'mission/task-1054-old', html_url: 'http://forgejo/pulls/1055' }
+      ],
+      approval: { ok: true, reviewState: 'APPROVED' },
+      mainBranch: 'main',
+      mainAheadCount: 0,
+      mainDirty: false,
+      mainDirtyEntries: []
+    }, {
+      readTokenFn: () => 'secret-token',
+      resolveTokenFileFn: () => '/tmp/tokens/codex',
+      isForgejoReviewEnabledFn: () => true,
+      getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
+    });
+
+    assert.ok(result.warnings.includes('sibling-prs'));
+    const output = lines.join('\n');
+    assert.match(output, /Multiple open PRs detected for task-1054/);
+    assert.match(output, /PR #1055 \(mission\/task-1054-old\): http:\/\/forgejo\/pulls\/1055/);
+  } finally {
+    console.log = originalLog;
+  }
+});
+
+test('printIntegrationPreflight provides recovery commands when mission doc is missing but found on another branch', () => {
+  const lines = [];
+  const originalLog = console.log;
+  console.log = line => lines.push(line);
+
+  try {
+    const result = printIntegrationPreflight({
+      slug: 'task-1054-modern',
+      branch: 'mission/task-1054-modern',
+      currentBranch: 'mission/task-1054-modern',
+      missionDir: null,
+      task: { ok: true, taskFile: '/tmp/task-1054.md' },
+      taskStatus: 'ready-for-integration',
+      taskAssignee: 'codex',
+      forgejoUser: 'codex',
+      taskAssigneeWarning: null,
+      pr: { exists: true, state: 'open', merged: false, number: 1054 },
+      siblingPrs: [],
+      approval: { ok: true, reviewState: 'APPROVED' },
+      mainBranch: 'main',
+      mainAheadCount: 0,
+      mainDirty: false,
+      mainDirtyEntries: []
+    }, {
+      readTokenFn: () => 'secret-token',
+      resolveTokenFileFn: () => '/tmp/tokens/codex',
+      isForgejoReviewEnabledFn: () => true,
+      getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] }),
+      findMissionDocInBranchesFn: () => [
+        { branch: 'mission/task-1054', path: 'docs/missions/2026/task-1054/MISSION.md' }
+      ]
+    });
+
+    assert.ok(result.failures.includes('mission-doc'));
+    const output = lines.join('\n');
+    assert.match(output, /Mission doc: missions\/task-1054\/MISSION\.md not found/);
+    assert.match(output, /Found mission doc candidates on other branches\. To recover, run:/);
+    assert.match(output, /git show mission\/task-1054:docs\/missions\/2026\/task-1054\/MISSION\.md > missions\/task-1054\/MISSION\.md/);
+  } finally {
+    console.log = originalLog;
+  }
+});

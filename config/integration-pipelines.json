@@ -18,12 +18,12 @@
       "run_last": false
     },
     "workflow": {
-      "command": "node test/e2e-mission-lifecycle.test.js",
+      "command": "node --import tsx test/e2e-mission-lifecycle.test.ts",
       "order": 50,
       "run_last": true
     },
     "custom-agent-smoke": {
-      "command": "node test/e2e-real-agent-smoke.test.js",
+      "command": "node --import tsx test/e2e-real-agent-smoke.test.ts",
       "order": 51,
       "run_last": true
     }

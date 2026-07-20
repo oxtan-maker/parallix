@@ -20,8 +20,8 @@ Execution requirements:
   1. **File:line references** — e.g., `lib/commands/handoff.ts:292` (must point to an existing file and line)
   2. **Test names** — e.g., `"real custom-agent launcher smoke: full lifecycle with hello-world task (SC3/SC4/SC5/SC6/SC7)"` (must match a test name found in repo test files)
   3. **ADR references** — e.g., `ADR 0048` (must correspond to an existing file under `docs/adr/`)
-  4. **Test file paths** — e.g., `test/e2e-real-agent-smoke.test.js` (must be an existing test file)
-  5. **Recognized repo commands or paths** — e.g., `` `npm test -- test/repair-handoff.test.js` ``, `` `px review {{slug}} --verify` ``, or `` `./scripts/verify-local.sh all` ``
+  4. **Test file paths** — e.g., `test/e2e-real-agent-smoke.test.ts` (must be an existing test file)
+  5. **Recognized repo commands or paths** — e.g., `` `npm test -- test/repair-handoff.test.ts` ``, `` `px review {{slug}} --verify` ``, or `` `./scripts/verify-local.sh all` ``
 - **Not sufficient by themselves:** raw `stat`/`ls` output or generic prose claims. You may include them as supporting context, but the same Evidence cell must also cite at least one accepted reference from the list above.
 - verify all mission-declared Gates pass before handoff
 - preserve `{{taskPath}}`: update mission-relevant content as needed but do not delete, rename, or move the file

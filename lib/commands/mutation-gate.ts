@@ -94,19 +94,19 @@ function saveBaseline(baselinePath: string, baseline: Baseline, fsModule: typeof
   fsModule.writeFileSync(baselinePath, `${JSON.stringify(baseline, null, 2)}\n`);
 }
 
-/** Find test files to run for the given target set: exact `<basename>.test.js` matches first, else the whole test/ suite. */
+/** Find test files to run for the given target set: exact `<basename>.test.ts` matches first, else the whole test/ suite. */
 function findTestFiles(targetFiles: string[], repoRoot: string, fsModule: typeof fs = fs): string[] {
   const testDir = path.join(repoRoot, 'test');
   if (!fsModule.existsSync(testDir)) {return [];}
   const matched = new Set<string>();
   for (const target of targetFiles) {
     const base = path.basename(target, '.js');
-    const candidate = path.join(testDir, `${base}.test.js`);
+    const candidate = path.join(testDir, `${base}.test.ts`);
     if (fsModule.existsSync(candidate)) {matched.add(candidate);}
   }
   if (matched.size === 0) {
     for (const file of fsModule.readdirSync(testDir)) {
-      if (file.endsWith('.test.js')) {matched.add(path.join(testDir, file));}
+      if (file.endsWith('.test.ts')) {matched.add(path.join(testDir, file));}
     }
   }
   return Array.from(matched).sort();
@@ -119,7 +119,7 @@ function buildStrykerConfig(targetFiles: string[], testFiles: string[], repoRoot
     mutate: targetFiles,
     testRunner: 'command',
     commandRunner: {
-      command: `${process.execPath} --test ${relTestFiles.join(' ')}`,
+      command: `${process.execPath} --import tsx --test ${relTestFiles.join(' ')}`,
     },
     reporters: ['json'],
     coverageAnalysis: 'off',

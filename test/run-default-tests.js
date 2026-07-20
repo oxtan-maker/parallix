@@ -57,9 +57,9 @@ const allRootTestFiles = fs.readdirSync(__dirname)
   .filter(file => /\.test\.(?:js|ts)$/.test(file))
   // Lifecycle E2E is an integration gate. Keeping it out of the fast default
   // suite prevents review/checkpoint verification from repeatedly running it.
-  .filter(file => file !== 'e2e-mission-lifecycle.test.js')
+  .filter(file => file !== 'e2e-mission-lifecycle.test.ts')
   // This suite exercises a real agent runner and is likewise integration-only.
-  .filter(file => file !== 'e2e-real-agent-smoke.test.js');
+  .filter(file => file !== 'e2e-real-agent-smoke.test.ts');
 
 // These markers identify tests that cross a real process, Git/worktree,
 // package, or network boundary. Keep that coverage intact, but run it only
@@ -69,31 +69,31 @@ const knownIntegrationTestFiles = new Set([
   // Measured at 55.7s in the CP-1 uncontended run; it drives draft workflow
   // fixtures across the command boundary even though its process launcher is
   // dependency-injected in the source.
-  'draft.test.js',
-  'draft-command.test.js',
-  'draft_preflight_modern.test.js',
-  'durable-state-policy.test.js',
-  'mission-start.test.js',
+  'draft.test.ts',
+  'draft-command.test.ts',
+  'draft_preflight_modern.test.ts',
+  'durable-state-policy.test.ts',
+  'mission-start.test.ts',
   // The final CP-3 timing capture found these groups still crossing the
   // Forgejo/worktree, agent-launcher, rebase, or review-artifact boundary.
   // Their fakes protect assertions but do not make the groups hermetic.
-  'forgejo.test.js',
-  'forgejo-independence.test.js',
-  'mission-utils-worktree.test.js',
-  'mistral.test.js',
+  'forgejo.test.ts',
+  'forgejo-independence.test.ts',
+  'mission-utils-worktree.test.ts',
+  'mistral.test.ts',
   // This suite injects its launcher but deliberately invokes a real Node
   // child process to verify stdout and pipe-buffer behavior.
-  'opencode-export.test.js',
-  'runtime-matrix.test.js',
-  'rebase_hardening.test.js',
-  'review-artifacts.test.js',
-  'review-commands-additional.test.js',
-  'review-commands-supplemental.test.js',
-  'review-identity.test.js',
-  'review-identity-placeholder.test.js',
-  'review.test.js',
-  'review-prompts.test.js',
-  'task-1416-repro.test.js'
+  'opencode-export.test.ts',
+  'runtime-matrix.test.ts',
+  'rebase_hardening.test.ts',
+  'review-artifacts.test.ts',
+  'review-commands-additional.test.ts',
+  'review-commands-supplemental.test.ts',
+  'review-identity.test.ts',
+  'review-identity-placeholder.test.ts',
+  'review.test.ts',
+  'review-prompts.test.ts',
+  'task-1416-repro.test.ts'
 ]);
 const integrationTestFiles = allRootTestFiles
   .filter(file => knownIntegrationTestFiles.has(file)
@@ -113,10 +113,10 @@ const testFiles = runsIntegrationSuite
 // Do not preload the unit-test HOME isolation shim for that explicit e2e run:
 // the shim replaces HOME before the fixture can read the real Pi config.
 const runsRealAgentSmoke = requestedTestFiles.some(
-  file => path.basename(file) === 'e2e-real-agent-smoke.test.js'
+  file => path.basename(file) === 'e2e-real-agent-smoke.test.ts'
 );
 const runsLifecycleE2E = requestedTestFiles.some(
-  file => path.basename(file) === 'e2e-mission-lifecycle.test.js'
+  file => path.basename(file) === 'e2e-mission-lifecycle.test.ts'
 );
 const runsIntegrationE2E = runsRealAgentSmoke || runsLifecycleE2E;
 const bootstrapArgs = runsIntegrationE2E

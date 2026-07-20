@@ -261,9 +261,9 @@ function buildGoalCheckRepairPrompt(errorMsg: string, slug: string, worktree: st
 ` +
           `- ADR references such as "ADR 0048"
 ` +
-          `- test file paths such as "test/e2e-real-agent-smoke.test.js"
+          `- test file paths such as "test/e2e-real-agent-smoke.test.ts"
 ` +
-          `- recognized repo commands or paths already accepted by Parallix, such as \`npm test -- test/repair-handoff.test.js\`, \`px review ${slug} --verify\`, or \`./scripts/verify-local.sh all\`
+          `- recognized repo commands or paths already accepted by Parallix, such as \`npm test -- test/repair-handoff.test.ts\`, \`px review ${slug} --verify\`, or \`./scripts/verify-local.sh all\`
 
 ` +
           `Do not rely on raw \`stat\`/\`ls\` output or generic prose by themselves. If you keep shell output, pair it with one of the accepted references above.
@@ -297,7 +297,7 @@ Example Goal Check table:
 | Criterion | Evidence | Status |
 |---|---|---|
 | Final checkpoint has Goal Check section | docs/missions/${year}/${slug}/CP-1.md:15 | PASS |
-| Tests pass | "buildRelaunchPrompt returns string containing Goal Check table and mission slug", test/repair-handoff.test.js | PASS |
+| Tests pass | "buildRelaunchPrompt returns string containing Goal Check table and mission slug", test/repair-handoff.test.ts | PASS |
 | Verification gate ran | \`./scripts/verify-local.sh all\` | PASS |
 | ADR 0048 exists | ADR 0048 | PASS |
 
