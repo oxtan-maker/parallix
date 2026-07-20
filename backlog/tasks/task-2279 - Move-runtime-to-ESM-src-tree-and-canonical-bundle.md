@@ -11,9 +11,10 @@ labels:
   - build
 dependencies:
   - TASK-2278
+  - TASK-2290
 references:
   - docs/adr/0044-workflow-distribution-model.md
-  - docs/adr/0051-interface-boundary-and-operator-board-architecture.md
+  - docs/adr/0051-ui-neutral-application-boundary.md
   - package.json
   - tsconfig.json
 priority: high
