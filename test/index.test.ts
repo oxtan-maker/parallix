@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -69,9 +68,7 @@ test('main() prints usage and exits 0 when no args provided', async () => {
 
   await main([], {
     printUsageFn: () => calls.push('usage'),
-    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'never'.
     exitFn: (code) => calls.push(['exit', code]),
-    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
     errorFn: () => calls.push('error')
   });
 
@@ -83,9 +80,7 @@ test('main() prints usage and exits 0 for help aliases', async () => {
     const calls = [];
     await main([arg], {
       printUsageFn: () => calls.push('usage'),
-      // @ts-expect-error TS2322 Type 'number' is not assignable to type 'never'.
       exitFn: (code) => calls.push(['exit', code]),
-      // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
       errorFn: () => calls.push('error')
     });
     assert.deepEqual(calls, ['usage', ['exit', 0]], `unexpected flow for ${arg}`);
@@ -97,15 +92,12 @@ test('main() loads and invokes known command modules', async () => {
 
   await main(['draft', 'task-1038'], {
     existsSyncFn: () => true,
-    // @ts-expect-error TS2739 Type '(targetLib: string) => (args: any, options: any) => Promise<number>' is mi
     requireFn: (targetLib) => {
       calls.push(['require', targetLib]);
       return async (args, options) => calls.push(['invoke', args, options]);
     },
     printUsageFn: () => calls.push('usage'),
-    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'never'.
     exitFn: (code) => calls.push(['exit', code]),
-    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
     errorFn: (msg) => calls.push(['error', msg])
   });
 
@@ -119,7 +111,6 @@ test('main() dispatches a source command module when compiled output is absent',
 
   await main(['integrate', '--dry-run'], {
     existsSyncFn: targetLib => String(targetLib).endsWith('integrate.ts'),
-    // @ts-expect-error TS2739 Test double only needs the command-module shape.
     requireFn: targetLib => {
       calls.push(['require', targetLib]);
       return async (args, options) => calls.push(['invoke', args, options]);
@@ -135,9 +126,7 @@ test('main() skips standalone git bootstrap for read-only config command', async
 
   await main(['config'], {
     existsSyncFn: () => true,
-    // @ts-expect-error TS2322 Type 'number' is not assignable to type '{ changed: boolean; initialized: boolea
     ensureStandaloneGitRepoFn: () => calls.push('bootstrap'),
-    // @ts-expect-error TS2739 Type '() => () => Promise<number>' is missing the following properties from type
     requireFn: () => async () => calls.push('invoke'),
   });
 
@@ -149,15 +138,12 @@ test('main() maps verify-env to mission-start.js', async () => {
 
   await main(['verify-env', 'task-1038'], {
     existsSyncFn: () => true,
-    // @ts-expect-error TS2739 Type '(targetLib: string) => (args: any, options: any) => Promise<number>' is mi
     requireFn: (targetLib) => {
       calls.push(['require', targetLib]);
       return async (args, options) => calls.push(['invoke', args, options]);
     },
     printUsageFn: () => calls.push('usage'),
-    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'never'.
     exitFn: (code) => calls.push(['exit', code]),
-    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
     errorFn: (msg) => calls.push(['error', msg])
   });
 
@@ -170,15 +156,12 @@ test('main() dispatches verify command with requested area', async () => {
 
   await main(['verify', 'docs'], {
     existsSyncFn: () => true,
-    // @ts-expect-error TS2739 Type '(targetLib: string) => (args: any, options: any) => Promise<number>' is mi
     requireFn: (targetLib) => {
       calls.push(['require', targetLib]);
       return async (args, options) => calls.push(['invoke', args, options]);
     },
     printUsageFn: () => calls.push('usage'),
-    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'never'.
     exitFn: (code) => calls.push(['exit', code]),
-    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
     errorFn: (msg) => calls.push(['error', msg])
   });
 
@@ -192,12 +175,9 @@ test('main() rejects command modules that do not export a function', async () =>
 
   await main(['draft'], {
     existsSyncFn: () => true,
-    // @ts-expect-error TS2739 Type '() => { notAFunction: boolean; }' is missing the following properties from
     requireFn: () => ({ notAFunction: true }),
     printUsageFn: () => {},
-    // @ts-expect-error TS2322 Type '(code: number) => void' is not assignable to type '(_code?: number) => nev
     exitFn: (code) => { exitCode = code; },
-    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
     errorFn: (msg) => errors.push(msg)
   });
 
@@ -214,9 +194,7 @@ test('main() prints suggestion and exits 1 for unknown commands', async () => {
     existsSyncFn: () => false,
     loadAliasesFn: () => ({}),
     printUsageFn: () => { usageCount += 1; },
-    // @ts-expect-error TS2322 Type '(code: number) => void' is not assignable to type '(_code?: number) => nev
     exitFn: (code) => { exitCode = code; },
-    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
     errorFn: (msg) => errors.push(msg)
   });
 
@@ -235,9 +213,7 @@ test('main() prints usage without suggestion when unknown command is too distant
     existsSyncFn: () => false,
     loadAliasesFn: () => ({}),
     printUsageFn: () => { usageCount += 1; },
-    // @ts-expect-error TS2322 Type '(code: number) => void' is not assignable to type '(_code?: number) => nev
     exitFn: (code) => { exitCode = code; },
-    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
     errorFn: (msg) => errors.push(msg)
   });
 
@@ -345,7 +321,6 @@ test('deriveAliases derives actual-name aliases from state-map file', () => {
 
 test('printAliases prints sorted alias table', () => {
   const lines = [];
-  // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
   printAliases({ ready: 'draft', done: 'integrate' }, (msg) => lines.push(msg));
   assert.ok(lines.some(l => l.includes('done') && l.includes('integrate')));
   assert.ok(lines.some(l => l.includes('ready') && l.includes('draft')));
@@ -356,7 +331,6 @@ test('printAliases prints sorted alias table', () => {
 
 test('printAliases prints "No aliases configured" when map is empty', () => {
   const lines = [];
-  // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
   printAliases({}, (msg) => lines.push(msg));
   assert.ok(lines.some(l => l.includes('No aliases configured')));
 });
@@ -366,12 +340,9 @@ test('main() resolves alias and delegates to canonical command', async () => {
   const calls = [];
 
   await main(['ready', 'task-1076'], {
-    // @ts-expect-error TS2339 Property 'endsWith' does not exist on type 'PathLike'.
     existsSyncFn: (p) => p.endsWith('draft.js'),
-    // @ts-expect-error TS2739 Type '() => (args: any, opts: any) => Promise<number>' is missing the following
     requireFn: () => async (args, opts) => calls.push({ args, opts }),
     loadAliasesFn: () => ({ ready: 'draft' }),
-    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
     logFn: (msg) => logs.push(msg),
     exitFn: (code) => { throw new Error(`unexpected exit ${code}`); },
     errorFn: (msg) => { throw new Error(`unexpected error: ${msg}`); },
@@ -388,12 +359,9 @@ test('main() resolves alias for actual backlog.md name (refined → draft)', asy
   const calls = [];
 
   await main(['refined', 'task-1076'], {
-    // @ts-expect-error TS2339 Property 'endsWith' does not exist on type 'PathLike'.
     existsSyncFn: (p) => p.endsWith('draft.js'),
-    // @ts-expect-error TS2739 Type '() => (args: any, opts: any) => Promise<number>' is missing the following
     requireFn: () => async (args, opts) => calls.push({ args, opts }),
     loadAliasesFn: () => ({ refined: 'draft' }),
-    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
     logFn: (msg) => logs.push(msg),
     exitFn: (code) => { throw new Error(`unexpected exit ${code}`); },
     errorFn: (msg) => { throw new Error(`unexpected error: ${msg}`); },
@@ -412,11 +380,8 @@ test('main() exits 1 for unknown alias (not in alias map)', async () => {
     existsSyncFn: () => false,
     loadAliasesFn: () => ({}),
     printUsageFn: () => {},
-    // @ts-expect-error TS2322 Type '(code: number) => void' is not assignable to type '(_code?: number) => nev
     exitFn: (code) => { exitCode = code; },
-    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
     errorFn: (msg) => errors.push(msg),
-    // @ts-expect-error TS2322 Type '() => void' is not assignable to type 'LogFunc'.
     logFn: () => {}
   });
 
@@ -429,11 +394,8 @@ test('main() prints alias table for "aliases" subcommand', async () => {
 
   await main(['aliases'], {
     loadAliasesFn: () => ({ ready: 'draft', done: 'integrate' }),
-    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
     logFn: (msg) => logs.push(msg),
-    // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(_code?: number) => never'.
     exitFn: () => {},
-    // @ts-expect-error TS2322 Type '() => void' is not assignable to type 'LogFunc'.
     errorFn: () => {}
   });
 

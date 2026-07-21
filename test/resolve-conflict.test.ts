@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 const test = require('node:test');
 const { mock } = test;
@@ -135,7 +134,6 @@ test('resolveConflictsForMission returns ok when no conflicts detected', () => {
   try {
     const result = resolveConflictsForMission('task-108', 'docs', {
       worktreePathOverride: TEST_WORKTREE,
-      // @ts-expect-error TS2353 Object literal may only specify known properties, and 'getConflictFilesFn' does
       getConflictFilesFn: () => []
     });
 
@@ -167,7 +165,6 @@ test('resolveConflictsForMission emits skip-all-conflicts path for mission-speci
   try {
     const result = resolveConflictsForMission('task-108', 'docs', {
       worktreePathOverride: TEST_WORKTREE,
-      // @ts-expect-error TS2353 Object literal may only specify known properties, and 'getConflictFilesFn' does
       getConflictFilesFn: () => [
         'docs/missions/2026/task-108/CP-1.md',
         'backlog/tasks/task-108 - Fix.md'
@@ -212,7 +209,6 @@ test('resolveConflictsForMission warns and returns error for shared file conflic
   try {
     const result = resolveConflictsForMission('task-108', 'docs', {
       worktreePathOverride: TEST_WORKTREE,
-      // @ts-expect-error TS2353 Object literal may only specify known properties, and 'getConflictFilesFn' does
       getConflictFilesFn: () => [
         'workflow/lib/commands/integrate.js',
         'docs/missions/2026/task-108/CP-1.md'
@@ -282,7 +278,6 @@ test('resolveConflictsForMission returns merge-failed when getConflictFilesFn th
   try {
     const result = resolveConflictsForMission('task-108', 'docs', {
       worktreePathOverride: TEST_WORKTREE,
-      // @ts-expect-error TS2353 Object literal may only specify known properties, and 'getConflictFilesFn' does
       getConflictFilesFn: () => { throw new Error(`git merge exited 128 with no CONFLICT lines — raw output:\nfatal: index.lock: File exists.`); }
     });
 
@@ -323,14 +318,12 @@ test('resolveConflictsForMission includes worktreePath in every return shape', (
 
   try {
     // No-conflicts path
-    // @ts-expect-error TS2353 Object literal may only specify known properties, and 'getConflictFilesFn' does
     const r1 = resolveConflictsForMission('task-108', 'docs', { worktreePathOverride: TEST_WORKTREE, getConflictFilesFn: () => [] });
     assert.ok(r1.worktreePath, 'worktreePath present on no-conflict result');
 
     // Mission-specific conflicts path
     const r2 = resolveConflictsForMission('task-108', 'docs', {
       worktreePathOverride: TEST_WORKTREE,
-      // @ts-expect-error TS2353 Object literal may only specify known properties, and 'getConflictFilesFn' does
       getConflictFilesFn: () => ['docs/missions/2026/task-108/CP-1.md']
     });
     assert.ok(r2.worktreePath, 'worktreePath present on mission-specific result');
@@ -338,7 +331,6 @@ test('resolveConflictsForMission includes worktreePath in every return shape', (
     // Shared-file conflicts path
     const r3 = resolveConflictsForMission('task-108', 'docs', {
       worktreePathOverride: TEST_WORKTREE,
-      // @ts-expect-error TS2353 Object literal may only specify known properties, and 'getConflictFilesFn' does
       getConflictFilesFn: () => ['workflow/lib/commands/integrate.js']
     });
     assert.ok(r3.worktreePath, 'worktreePath present on shared-conflict result');
@@ -395,7 +387,6 @@ test('resolveConflict exits 0 and skips agent when no conflicts', () => {
   console.log = l => lines.push(l);
 
   try {
-    // @ts-expect-error TS2349 This expression is not callable.
     resolveConflict(['task-108'], {
       resolveConflictsFn: () => ({ ok: true, conflictFiles: [], sharedFiles: [], missionSpecificFiles: [], worktreePath: '/tmp/wt' }),
       startAgentFn: () => { agentCalled = true; return { agent: 'claude', result: { status: 0 } }; },
@@ -417,7 +408,6 @@ test('resolveConflict exits 1 and skips agent for shared-file conflicts', () => 
   console.error = l => errs.push(l);
 
   try {
-    // @ts-expect-error TS2349 This expression is not callable.
     resolveConflict(['task-108'], {
       resolveConflictsFn: () => ({
         ok: false,
@@ -449,7 +439,6 @@ test('resolveConflict spawns agent for mission-specific-only conflicts and exits
   console.log = l => lines.push(l);
 
   try {
-    // @ts-expect-error TS2349 This expression is not callable.
     await resolveConflict(['task-108'], {
       resolveConflictsFn: () => ({
         ok: true,
@@ -485,7 +474,6 @@ test('resolveConflict exits with agent status when agent fails', async () => {
   console.error = l => errs.push(l);
 
   try {
-    // @ts-expect-error TS2349 This expression is not callable.
     await resolveConflict(['task-108'], {
       resolveConflictsFn: () => ({
         ok: true,

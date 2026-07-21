@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 'use strict';
 
@@ -31,7 +30,7 @@ test('real-agent smoke capture removes its first stdout file when stderr capture
         return originalOpenSync(filePath, ...args);
       }
       const error = new Error('ENOSPC: no space left while opening stderr capture');
-      // @ts-expect-error TS2339 Error codes are present on Node system errors.
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `code` absent from its inferred mock shape.
       error.code = 'ENOSPC';
       throw error;
     };

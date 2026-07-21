@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -10,9 +9,7 @@ const fmt = require('../dist/lib/core/fmt');
 const REPO_ROOT = path.join(__dirname, '..');
 const coverageGate = require('../dist/lib/commands/coverage-gate');
 const {
-  // @ts-expect-error TS2614 Module '"../lib/commands/coverage-gate"' has no exported member 'buildCoverageAr
   buildCoverageArgs,
-  // @ts-expect-error TS2614 Module '"../lib/commands/coverage-gate"' has no exported member 'cleanupNewTempD
   cleanupNewTempDirs,
   cleanupPerRunScratch,
   COVERAGE_EXCLUDES,
@@ -32,13 +29,10 @@ function runGate(args = []) {
   const errors = [];
   let exitCode = null;
   const previousLogger = fmt.setLogger({
-    // @ts-expect-error TS2345 Argument of type 'unknown' is not assignable to parameter of type 'string'.
     log: message => logs.push(fmt.stripAnsi(message)),
-    // @ts-expect-error TS2345 Argument of type 'unknown' is not assignable to parameter of type 'string'.
     error: message => errors.push(fmt.stripAnsi(message)),
   });
   try {
-    // @ts-expect-error TS2349 This expression is not callable.
     coverageGate(args, { exitFn: code => { exitCode = code; } });
     return { status: exitCode, stdout: logs.join('\n'), stderr: errors.join('\n') };
   } finally {
@@ -110,35 +104,30 @@ test('cleanupNewTempDirs does not remove active runtime-matrix launcher dirs', (
 
 test('runTests returns 1 when spawn fails with error', () => {
   const mockSpawn = () => ({ error: new Error('ENOENT'), signal: null, status: null });
-  // @ts-expect-error TS2345 Argument of type '() => { error: Error; signal: any; status: any; }' is not assi
   const exitCode = runTests(['/tmp/fake.test.js'], 90, mockSpawn);
   assert.equal(exitCode, 1);
 });
 
 test('runTests returns 1 when child process is killed by signal', () => {
   const mockSpawn = () => ({ error: null, signal: 'SIGKILL', status: null });
-  // @ts-expect-error TS2345 Argument of type '() => { error: any; signal: string; status: any; }' is not ass
   const exitCode = runTests(['/tmp/fake.test.js'], 90, mockSpawn);
   assert.equal(exitCode, 1);
 });
 
 test('runTests returns 1 when status is null and no error or signal', () => {
   const mockSpawn = () => ({ error: null, signal: null, status: null });
-  // @ts-expect-error TS2345 Argument of type '() => { error: any; signal: any; status: any; }' is not assign
   const exitCode = runTests(['/tmp/fake.test.js'], 90, mockSpawn);
   assert.equal(exitCode, 1);
 });
 
 test('runTests returns subprocess exit code on normal exit', () => {
   const mockSpawn = () => ({ error: null, signal: null, status: 0 });
-  // @ts-expect-error TS2345 Argument of type '() => { error: any; signal: any; status: number; }' is not ass
   const exitCode = runTests(['/tmp/fake.test.js'], 90, mockSpawn);
   assert.equal(exitCode, 0);
 });
 
 test('runTests returns non-zero subprocess exit code on test failure', () => {
   const mockSpawn = () => ({ error: null, signal: null, status: 1 });
-  // @ts-expect-error TS2345 Argument of type '() => { error: any; signal: any; status: number; }' is not ass
   const exitCode = runTests(['/tmp/fake.test.js'], 90, mockSpawn);
   assert.equal(exitCode, 1);
 });
@@ -205,20 +194,13 @@ test('runTests sets NODE_V8_COVERAGE to the created dir', () => {
     capturedOptions = options;
     return { error: null, signal: null, status: 0 };
   };
-  // @ts-expect-error TS2345 Argument of type '(_execPath: any, _args: any, options: any) => { error: any; si
   const exitCode = runTests(['/tmp/fake.test.js'], 90, mockSpawn);
   assert.equal(exitCode, 0);
   assert.ok(capturedOptions, 'spawnSync should have been called with options');
-  // @ts-expect-error TS2339 Property 'env' does not exist on type 'never'.
   assert.ok(capturedOptions.env.NODE_V8_COVERAGE, 'NODE_V8_COVERAGE should be set in child env');
-  // @ts-expect-error TS2339 Property 'env' does not exist on type 'never'.
   assert.ok(capturedOptions.env.NODE_V8_COVERAGE.startsWith(path.join(os.tmpdir(), 'node-coverage-')),
-    // @ts-expect-error TS2339 Property 'env' does not exist on type 'never'.
     `NODE_V8_COVERAGE ${capturedOptions.env.NODE_V8_COVERAGE} should start with node-coverage- prefix`);
-  // @ts-expect-error TS2339 Property 'env' does not exist on type 'never'.
   assert.ok(capturedOptions.env.GRAPHIFY_BIN, 'GRAPHIFY_BIN should be set to a mock in child env');
-  // @ts-expect-error TS2339 Property 'env' does not exist on type 'never'.
   assert.ok(capturedOptions.env.GRAPHIFY_BIN.startsWith(path.join(os.tmpdir(), 'graphify-')),
-    // @ts-expect-error TS2339 Property 'env' does not exist on type 'never'.
     `GRAPHIFY_BIN ${capturedOptions.env.GRAPHIFY_BIN} should start with graphify- prefix`);
 });

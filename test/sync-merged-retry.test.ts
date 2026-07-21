@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -95,6 +94,7 @@ test('syncMerged retries push and falls back to force push if still stale', asyn
       if (ref.includes('master') || ref.includes('main')) return { status: 0 };
       
       // Always return stale info for force-with-lease
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `forceWithLease` absent from its inferred mock shape.
       if (opts.forceWithLease) {
         return {
           status: 1,

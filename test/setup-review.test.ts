@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -264,6 +263,7 @@ test('bootstrapReviewSurface creates a missing Forgejo agent user before minting
 test('createToken reports API failures and missing token payloads', () => {
   let seenBody = null;
   let result = createToken('http://localhost:3300/', 'codex', 'pw', 'workflow-codex', (_method, _url, requestOptions = {}) => {
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `body` absent from its inferred mock shape.
     seenBody = requestOptions.body;
     return {
       ok: false,
@@ -271,7 +271,6 @@ test('createToken reports API failures and missing token payloads', () => {
       data: { message: 'denied' },
     };
   });
-  // @ts-expect-error TS18047 'seenBody' is possibly 'null'.
   assert.deepEqual(seenBody.scopes, ['write:user', 'write:repository', 'write:issue', 'write:organization']);
   assert.equal(result.ok, false);
   assert.match(result.error, /HTTP 401/);
@@ -561,6 +560,7 @@ test('ensureReviewRemote adds and updates git remotes and readConfiguredReviewRe
 test('apiRequest handles success, plain-text payloads, and curl failures', () => {
   const setupReviewModule = loadSetupReviewWithSpawn((_command, args, options = {}) => {
     if (args.includes('http://localhost:3300/success')) {
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `equal` absent from its inferred mock shape.
       assert.equal(options.input, JSON.stringify({ hello: 'world' }));
       return { status: 0, stdout: '{"ok":true}\n201' };
     }
@@ -610,9 +610,7 @@ test('promptLine supports visible and hidden prompts', async () => {
   }));
 
   try {
-    // @ts-expect-error TS2740 Type '{ write(chunk: any, _encoding: any, cb: any): boolean; }' is missing the f
     const visible = await require('../dist/lib/tools/setup-review').promptLine('Prompt: ', { output });
-    // @ts-expect-error TS2740 Type '{ write(chunk: any, _encoding: any, cb: any): boolean; }' is missing the f
     const hidden = await require('../dist/lib/tools/setup-review').promptLine('Secret: ', { hidden: true, output });
     assert.equal(visible, 'visible');
     assert.equal(hidden, 'secret');
@@ -695,6 +693,7 @@ test('bootstrapReviewSurface uses unique token names across reruns', async () =>
     const seenTokenNames = new Set();
     const requestFn = (method, url, requestOptions = {}) => {
       if (method === 'POST' && url.includes('/tokens')) {
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `body` absent from its inferred mock shape.
         const tokenName = requestOptions.body && requestOptions.body.name;
         assert.ok(tokenName);
         assert.equal(seenTokenNames.has(tokenName), false);
@@ -753,7 +752,6 @@ test('bootstrapReviewSurface reports local validation and downstream setup failu
       agentPasswords: [],
     }, { log: () => {}, forgejoHome });
     assert.equal(result.ok, false);
-    // @ts-expect-error TS2339 Property 'error' does not exist on type '{ ok: boolean; error: string; statusCod
     assert.match(result.error, /must define adapters.review.baseUrl/);
 
     result = await bootstrapReviewSurface(root, {
@@ -764,7 +762,6 @@ test('bootstrapReviewSurface reports local validation and downstream setup failu
       agentPasswords: [],
     }, { log: () => {}, forgejoHome });
     assert.equal(result.ok, false);
-    // @ts-expect-error TS2339 Property 'error' does not exist on type '{ ok: boolean; error: string; statusCod
     assert.match(result.error, /Password is required/);
 
     result = await bootstrapReviewSurface(root, {
@@ -779,7 +776,6 @@ test('bootstrapReviewSurface reports local validation and downstream setup failu
       requestFn: () => ({ ok: false, statusCode: 401, data: { message: 'denied' } }),
     });
     assert.equal(result.ok, false);
-    // @ts-expect-error TS2339 Property 'error' does not exist on type '{ ok: boolean; error: string; statusCod
     assert.match(result.error, /token creation failed/);
 
     result = await bootstrapReviewSurface(root, {
@@ -810,11 +806,8 @@ test('bootstrapReviewSurface reports local validation and downstream setup failu
     assert.equal(result.ok, true);
     assert.equal(fs.readFileSync(path.join(forgejoHome, 'tokens', 'magnus'), 'utf8').trim(), 'owner-token');
     assert.equal(fs.existsSync(path.join(forgejoHome, 'tokens', 'codex')), false);
-    // @ts-expect-error TS2339 Property 'warnings' does not exist on type '{ ok: boolean; error: string; status
     assert.equal(result.warnings.length, 1);
-    // @ts-expect-error TS2339 Property 'warnings' does not exist on type '{ ok: boolean; error: string; status
     assert.equal(result.warnings[0].user, 'codex');
-    // @ts-expect-error TS2339 Property 'warnings' does not exist on type '{ ok: boolean; error: string; status
     assert.match(result.warnings[0].error, /token creation failed for codex/);
   });
 });
@@ -1079,7 +1072,9 @@ test('bootstrapReviewSurface non-interactive mode creates agent token via owner 
           if (method === 'PUT' && url.endsWith('/api/v1/repos/test-org/test-repo/collaborators/custom')) {
             return { ok: true, statusCode: 204, data: {} };
           }
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `endsWith` absent from its inferred mock shape.
           if (method === 'POST' && url.endsWith('/api/v1/users/custom/tokens') && requestOptions.token) {
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `equal` absent from its inferred mock shape.
             assert.equal(requestOptions.token, 'owner-pat');
             return { ok: true, statusCode: 201, data: { sha1: 'custom-bootstrap-token' } };
           }
@@ -1123,7 +1118,6 @@ test('bootstrapReviewSurface non-interactive returns error when no owner token e
       });
 
       assert.equal(result.ok, false);
-      // @ts-expect-error TS2339 Property 'error' does not exist on type '{ ok: boolean; error: string; statusCod
       assert.ok(result.error.includes('No owner token found'));
     } finally {
       if (previousForgejoHome) {
@@ -1172,11 +1166,8 @@ test('bootstrapReviewSurface non-interactive reports agent token failure via war
       });
 
       assert.equal(result.ok, false);
-      // @ts-expect-error TS2339 Property 'warnings' does not exist on type '{ ok: boolean; error: string; status
       assert.equal(result.warnings.length, 1);
-      // @ts-expect-error TS2339 Property 'warnings' does not exist on type '{ ok: boolean; error: string; status
       assert.equal(result.warnings[0].user, 'custom');
-      // @ts-expect-error TS2339 Property 'error' does not exist on type '{ ok: boolean; error: string; statusCod
       assert.match(result.error, /custom: token creation via owner token failed/);
     } finally {
       if (previousForgejoHome) {

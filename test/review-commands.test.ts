@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -59,7 +58,6 @@ test('readTextFlag reads from file when fileFlag is provided', () => {
       '--message',
       '--message-file',
       'message',
-      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(_code: number) => never'.
       { readFileSync: fs.readFileSync, exit: () => {}, error: () => {} }
     );
     assert.equal(result, 'file content');
@@ -74,7 +72,6 @@ test('readTextFlag reads from inline flag when fileFlag not found', () => {
     '--message',
     '--message-file',
     'message',
-    // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(_code: number) => never'.
     { readFileSync: fs.readFileSync, exit: () => {}, error: () => {} }
   );
   assert.equal(result, 'inline content');
@@ -86,7 +83,6 @@ test('readTextFlag returns null when neither flag is present', () => {
     '--message',
     '--message-file',
     'message',
-    // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(_code: number) => never'.
     { readFileSync: fs.readFileSync, exit: () => {}, error: () => {} }
   );
   assert.equal(result, null);
@@ -101,7 +97,6 @@ test('readTextFlag handles file read error gracefully', () => {
     'message',
     {
       readFileSync: () => { throw new Error('ENOENT'); },
-      // @ts-expect-error TS2322 Type '(code: number) => void' is not assignable to type '(_code: number) => neve
       exit: (code) => { exited = true; },
       error: () => {}
     }
@@ -164,7 +159,6 @@ test('performStaticReview rejects placeholder-only Goal Check evidence rows', (t
       findMissionDir: () => missionDir,
       findCheckpoints: () => [checkpointPath],
       readFileSync: fs.readFileSync,
-      // @ts-expect-error TS2739 Type '{ status: number; stdout: string; }' is missing the following properties f
       run: () => ({ status: 0, stdout: '' }),
       log: () => {}
     });
@@ -192,7 +186,6 @@ test('performStaticReview accepts a shell command that references an existing re
       findMissionDir: () => missionDir,
       findCheckpoints: () => [checkpointPath],
       readFileSync: fs.readFileSync,
-      // @ts-expect-error TS2739 Type '{ status: number; stdout: string; }' is missing the following properties f
       run: () => ({ status: 0, stdout: '' }),
       log: () => {}
     });
@@ -219,7 +212,6 @@ test('performStaticReview rejects separator-only Goal Check tables', (t) => {
       findMissionDir: () => missionDir,
       findCheckpoints: () => [checkpointPath],
       readFileSync: fs.readFileSync,
-      // @ts-expect-error TS2739 Type '{ status: number; stdout: string; }' is missing the following properties f
       run: () => ({ status: 0, stdout: '' }),
       log: () => {}
     });
@@ -250,7 +242,6 @@ test('performStaticReview accepts Goal Check evidence that cites a real test nam
       findMissionDir: () => missionDir,
       findCheckpoints: () => [checkpointPath],
       readFileSync: fs.readFileSync,
-      // @ts-expect-error TS2739 Type '{ status: number; stdout: string; }' is missing the following properties f
       run: () => ({ status: 0, stdout: '' }),
       log: () => {}
     });
@@ -274,7 +265,6 @@ test('performStaticReview accepts an existing repository checkpoint sample', (t)
     findMissionDir: () => sampleMissionDir,
     findCheckpoints: () => [sampleCheckpoint],
     readFileSync: fs.readFileSync,
-    // @ts-expect-error TS2739 Type '{ status: number; stdout: string; }' is missing the following properties f
     run: () => ({ status: 0, stdout: '' }),
     log: () => {}
   });
@@ -298,16 +288,13 @@ test('no-PR + clean static review does NOT auto-transition task to approved/read
     inferSlugFn: (s) => s || 'task-1259-regression',
     log: (m) => logs.push(m),
     error: (m) => errors.push(m),
-    // @ts-expect-error TS2322 Type '(c: number) => void' is not assignable to type '(_code: number) => never'.
     exit: (c) => { /* swallow exit */ },
     getPrStatusFn: () => ({ exists: false }),
     performStaticReviewFn: () => ({ ok: true, findings: [] }),
     submitForReviewFn: async () => { submitForReviewCalled = true; },
-    // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(slug: string, message: string, opt
     postStaticReviewCommentFn: () => { postStaticReviewCalled = true; },
     resolveWorktreeFn: () => null,
     readReviewStateFn: () => null,
-    // @ts-expect-error TS2739 Type '{ status: number; }' is missing the following properties from type 'GitRes
     run: () => ({ status: 0 })
   });
 
@@ -351,22 +338,17 @@ test('no-PR + static review findings re-launches the implementer (not the review
     inferSlugFn: (s) => s || 'task-1259-regression-findings',
     log: (m) => logs.push(m),
     error: (m) => errors.push(m),
-    // @ts-expect-error TS2322 Type '(c: number) => void' is not assignable to type '(_code: number) => never'.
     exit: (c) => { /* swallow exit */ },
     getPrStatusFn: () => ({ exists: false }),
     performStaticReviewFn: () => ({ ok: false, findings }),
-    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-1259.md' }),
     getTaskImplementerFn: () => 'claude',
     startReviewLoopFn: async () => { startReviewLoopCalled += 1; },
-    // @ts-expect-error TS2322 Type '(step: string, opts: StartAgentOptions) => Promise<void>' is not assignabl
     startAgentFn: async (step, opts) => { startAgentCalls.push({ step, opts }); },
     submitForReviewFn: async () => { submitForReviewCalled = true; },
-    // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(slug: string, message: string, opt
     postStaticReviewCommentFn: () => { postStaticReviewCalled = true; },
     resolveWorktreeFn: () => '/tmp/wt-1259',
     readReviewStateFn: () => null,
-    // @ts-expect-error TS2739 Type '{ status: number; }' is missing the following properties from type 'GitRes
     run: () => ({ status: 0 })
   });
 
@@ -415,19 +397,15 @@ test('no-PR + static review findings with unresolvable implementer logs WARN and
     inferSlugFn: (s) => s || 'task-1311-no-implementer',
     log: (m) => logs.push(m),
     error: () => {},
-    // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(_code: number) => never'.
     exit: () => {},
     getPrStatusFn: () => ({ exists: false }),
     performStaticReviewFn: () => ({ ok: false, findings: ['Missing Goal Check section'] }),
-    // @ts-expect-error TS2322 Type '{ ok: false; taskFile: any; }' is not assignable to type '{ ok: boolean; t
     resolveTaskFileFn: () => ({ ok: false, taskFile: null }),
     getTaskImplementerFn: () => null,
     startReviewLoopFn: async () => { startReviewLoopCalled += 1; },
-    // @ts-expect-error TS2322 Type '() => Promise<void>' is not assignable to type '(step: string, opts?: Star
     startAgentFn: async () => { startAgentCalled += 1; },
     resolveWorktreeFn: () => null,
     readReviewStateFn: () => null,
-    // @ts-expect-error TS2739 Type '{ status: number; }' is missing the following properties from type 'GitRes
     run: () => ({ status: 0 })
   });
 

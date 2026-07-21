@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -20,7 +19,6 @@ test('commitSafeMissionArtifacts handles commit failure', async () => {
   const errors = [];
 
   const result = await commitSafeMissionArtifacts(TEST_SLUG, '/tmp/worktree', {
-    // @ts-expect-error TS2322 Type '(args: string[]) => { status: number; stdout: Buffer<ArrayBuffer>; stderr?
     gitFn: (args) => {
       if (args.includes('status')) return { status: 0, stdout: Buffer.from(' M safe.js\0') };
       if (args.includes('commit')) return { status: 1, stderr: 'commit failed' };
@@ -46,7 +44,6 @@ test('commitSafeMissionArtifacts commits the configured stats CSV the review loo
   const errors = [];
 
   const result = await commitSafeMissionArtifacts(TEST_SLUG, '/tmp/worktree', {
-    // @ts-expect-error TS2322 Type '(args: string[]) => { status: number; stdout: Buffer<ArrayBuffer>; } | { s
     gitFn: (args) => {
       if (args.includes('status')) return { status: 0, stdout: Buffer.from(' M stats.csv\0') };
       if (args.includes('add')) { added.push(args[args.length - 1]); return { status: 0, stdout: '' }; }
@@ -69,7 +66,6 @@ test('commitSafeMissionArtifacts still rejects genuinely non-mission paths', asy
   const errors = [];
 
   const result = await commitSafeMissionArtifacts(TEST_SLUG, '/tmp/worktree', {
-    // @ts-expect-error TS2322 Type '(args: string[]) => { status: number; stdout: Buffer<ArrayBuffer>; } | { s
     gitFn: (args) => {
       if (args.includes('status')) return { status: 0, stdout: Buffer.from(' M server/src/Main.java\0') };
       return { status: 0, stdout: '' };
@@ -91,7 +87,6 @@ test('postStaticReviewComment handles missing token', async () => {
   const result = await postStaticReviewComment(TEST_SLUG, 'message', {
     readTokenFn: () => null, // No token
     resolveWorktreeFn: () => '/tmp/worktree',
-    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     getTaskImplementerFn: () => 'gemini',
     resolveForgejoUserFn: (u) => u,
@@ -110,9 +105,7 @@ test('performStaticReview handles missing Goal Check section', async () => {
   const result = performStaticReview(TEST_SLUG, {
     findMissionDir: () => '/tmp/mission',
     findCheckpoints: () => ['/tmp/mission/CP-1.md'],
-    // @ts-expect-error TS2322 Type '() => string' is not assignable to type '{ (path: PathOrFileDescriptor, op
     readFileSync: () => '# CP-1\nNo goal check here.',
-    // @ts-expect-error TS2739 Type '{ status: number; stdout: string; }' is missing the following properties f
     run: () => ({ status: 0, stdout: '' }),
     log: m => logs.push(m)
   });
@@ -128,9 +121,7 @@ test('performStaticReview handles Goal Check section with no evidence rows', asy
   const result = performStaticReview(TEST_SLUG, {
     findMissionDir: () => '/tmp/mission',
     findCheckpoints: () => ['/tmp/mission/CP-1.md'],
-    // @ts-expect-error TS2322 Type '() => string' is not assignable to type '{ (path: PathOrFileDescriptor, op
     readFileSync: () => '## Goal Check\n| Goal | Evidence | Status |\n|---|---|---|',
-    // @ts-expect-error TS2739 Type '{ status: number; stdout: string; }' is missing the following properties f
     run: () => ({ status: 0, stdout: '' }),
     log: m => logs.push(m)
   });

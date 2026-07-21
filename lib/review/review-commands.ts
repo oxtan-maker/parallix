@@ -484,6 +484,7 @@ export function verifyReview(
     getTaskStatusFn?: typeof getTaskStatus;
     toVirtualFn?: typeof toVirtual;
     findMissionAreaFn?: typeof findMissionArea;
+    runVerificationGate?: typeof runVerificationGate;
     runFn?: typeof run;
     getAcceptanceCriteriaFn?: typeof getAcceptanceCriteria;
     formatMatrixSummaryFn?: typeof formatMatrixSummary;
@@ -507,6 +508,7 @@ export function verifyReview(
   const getTaskStatusFn = options.getTaskStatusFn || getTaskStatus;
   const toVirtualFn = options.toVirtualFn || toVirtual;
   const findMissionAreaFn = options.findMissionAreaFn || findMissionArea;
+  const runVerificationGateFn = options.runVerificationGate || runVerificationGate;
   const runFn = options.runFn || run;
   const getAcceptanceCriteriaFn = options.getAcceptanceCriteriaFn || getAcceptanceCriteria;
   const formatMatrixSummaryFn = options.formatMatrixSummaryFn || formatMatrixSummary;
@@ -607,7 +609,7 @@ export function verifyReview(
       log(fmt.status('WARN', `Verification gate skipped (--no-gate) for area ${area}`));
     } else {
       log(`Running reviewer gate: ${fmt.command(formatVerificationCommand(area, process.cwd()))}`);
-      const verifyResult = runVerificationGate(area, { rootDir: process.cwd(), stdio: 'inherit', runFn });
+      const verifyResult = runVerificationGateFn(area, { rootDir: process.cwd(), stdio: 'inherit', runFn });
       if (verifyResult.status !== 0) {
         failures.push('gate');
         log(fmt.status('FAIL', 'Reviewer gate failed.'));

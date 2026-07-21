@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -27,22 +26,18 @@ test('startReviewLoop falls back when the auto-derived reviewer is blocked but a
   // Post-refactor: selectAgent skips codex and picks mistral directly.
   await startReviewLoop(TEST_SLUG, {
     eligibleAgentsForStepFn: () => ['claude', 'vibe', 'custom'], // codex blocked
-    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     implementer: 'custom',
     dryRun: true,
     log: m => logs.push(m),
     error: m => errors.push(m),
-    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'never'.
     exit: c => exitCodes.push(c),
     selectAgentFn: (step, { exclude }) => {
       const available = ['vibe', 'claude'].filter(a => !exclude.has(a));
       return available[0];
     },
-    // @ts-expect-error TS2741 Property 'agent' is missing in type '{ supported: true; detail: string; }' but r
     workflowLauncherStatusFn: () => ({ supported: true, detail: 'mock' }),
     formatMatrixSummaryFn: () => [],
-    // @ts-expect-error TS2739 Type '{ agents: string[]; }' is missing the following properties from type '{ st
     buildAutonomousReviewMatrixFn: () => ({ agents: ['claude', 'vibe', 'custom'] })
   });
 
@@ -67,26 +62,22 @@ test('startReviewLoop iterates past a blocked deterministic fallback to a third 
   // codex first (unsupported), then vibe (unsupported), then claude (supported).
   await startReviewLoop(TEST_SLUG, {
     eligibleAgentsForStepFn: () => ['claude', 'custom', 'codex', 'vibe'],
-    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     implementer: 'custom',
     dryRun: true,
     log: m => logs.push(m),
     error: m => errors.push(m),
-    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'never'.
     exit: c => exitCodes.push(c),
     selectAgentFn: (step, { exclude }) => {
       if (!exclude.has('codex')) return 'codex';
       if (!exclude.has('vibe')) return 'vibe';
       return 'claude';
     },
-    // @ts-expect-error TS2741 Property 'agent' is missing in type '{ supported: boolean; detail: string; }' bu
     workflowLauncherStatusFn: (agent) => ({
       supported: agent === 'claude' || agent === 'custom',
       detail: agent
     }),
     formatMatrixSummaryFn: () => [],
-    // @ts-expect-error TS2739 Type '{ agents: string[]; }' is missing the following properties from type '{ st
     buildAutonomousReviewMatrixFn: () => ({ agents: ['claude', 'custom', 'codex', 'vibe'] })
   });
 
@@ -108,19 +99,15 @@ test('startReviewLoop still rejects with a clear error when the explicit reviewe
 
   await startReviewLoop(TEST_SLUG, {
     eligibleAgentsForStepFn: () => ['claude', 'gemini', 'custom', 'codex'], 
-    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     implementer: 'custom',
     reviewer: 'codex',
     dryRun: true,
     log: () => {},
     error: m => errors.push(m),
-    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'never'.
     exit: c => exitCodes.push(c),
-    // @ts-expect-error TS2741 Property 'agent' is missing in type '{ supported: boolean; detail: string; }' bu
     workflowLauncherStatusFn: (agent) => ({ supported: agent !== 'codex', detail: 'mock' }),
     formatMatrixSummaryFn: () => [],
-    // @ts-expect-error TS2739 Type '{ agents: string[]; }' is missing the following properties from type '{ st
     buildAutonomousReviewMatrixFn: () => ({ agents: ['claude', 'vibe', 'custom', 'codex'] })
   });
 

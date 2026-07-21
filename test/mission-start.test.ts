@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -10,7 +9,6 @@ test('missionStart fails if the backlog task is missing classification', () => {
   const lines = [];
   const errors = [];
   
-  // @ts-expect-error TS2349 This expression is not callable.
   const result = missionStart(['task-test'], {
     returnResult: true,
     cwdFn: () => '/tmp/project-task-test',
@@ -41,7 +39,6 @@ test('missionStart passes if the backlog task has classification', () => {
   const lines = [];
   const errors = [];
   
-  // @ts-expect-error TS2349 This expression is not callable.
   const result = missionStart(['task-test'], {
     returnResult: true,
     cwdFn: () => '/tmp/project-task-test',
@@ -70,7 +67,6 @@ test('missionStart passes when the task file is missing and classification falls
   const lines = [];
   const errors = [];
 
-  // @ts-expect-error TS2349 This expression is not callable.
   const result = missionStart(['task-free-text'], {
     returnResult: true,
     cwdFn: () => '/tmp/project-task-free-text',
@@ -98,7 +94,6 @@ test('missionStart passes when the task file is missing and classification falls
 
 test('missionStart verify-env reports standalone adapter readiness once', () => {
   const lines = [];
-  // @ts-expect-error TS2349 This expression is not callable.
   const result = missionStart([], {
     returnResult: true,
     command: 'verify-env',
@@ -153,7 +148,6 @@ test('missionStart passes if classification is provided via labels', () => {
   // Actually, mission-start calls resolveMissionClassificationFn which we mock
   // To test the real backlog.js logic, we need to mock fs
   
-  // @ts-expect-error TS2349 This expression is not callable.
   const result = missionStart(['task-labels'], {
     returnResult: true,
     cwdFn: () => '/tmp/project-task-labels',
@@ -180,7 +174,6 @@ test('missionStart passes if classification is provided via labels', () => {
   // Actually, I'll just add a direct test for getTaskClassification in backlog.test.js or similar
   // But since I'm here, I'll just mock resolveMissionClassificationFn to return user_value
   // and assert it's logged.
-  // @ts-expect-error TS2349 This expression is not callable.
   const result2 = missionStart(['task-labels'], {
     returnResult: true,
     resolveMissionClassificationFn: () => ({ classification: 'user_value' }),
@@ -214,7 +207,6 @@ test('missionStart resolves classification for a task labeled with a primary cla
   // (unmocked) so the test exercises the actual worktree-cwd plumbing:
   // resolveMissionClassificationFn must be called with the worktree cwd
   // (`root`), not process.cwd(), to find the task file created above.
-  // @ts-expect-error TS2349 This expression is not callable.
   const result = missionStart(['task-2200-bug-combo'], {
     returnResult: true,
     cwdFn: () => root,
@@ -247,7 +239,6 @@ test('missionStart resolves the backlog task from the mission worktree, not proc
   const lines = [];
   const seenRootDirs = [];
 
-  // @ts-expect-error TS2349 This expression is not callable.
   const result = missionStart(['task-2200-root'], {
     returnResult: true,
     cwdFn: () => '/tmp/project-task-2200-root',
@@ -275,7 +266,6 @@ test('missionStart resolves the backlog task from the mission worktree, not proc
 
 test('missionStart fails if the mission is already complete', () => {
   const lines = [];
-  // @ts-expect-error TS2349 This expression is not callable.
   const result = missionStart(['task-done'], {
     returnResult: true,
     cwdFn: () => '/tmp/project-task-done',
@@ -301,7 +291,6 @@ test('missionStart fails if the mission is already complete', () => {
 
 test('missionStart verify-env with slug checks classification', () => {
   const lines = [];
-  // @ts-expect-error TS2349 This expression is not callable.
   const result = missionStart(['task-test'], {
     command: 'verify-env',
     returnResult: true,
@@ -323,7 +312,6 @@ test('missionStart verify-env with slug checks classification', () => {
 
 test('missionStart fails if MISSION.md is missing', () => {
   const lines = [];
-  // @ts-expect-error TS2349 This expression is not callable.
   const result = missionStart(['task-test'], {
     returnResult: true,
     cwdFn: () => '/tmp/project-task-test',
@@ -351,7 +339,6 @@ test('missionStart fails when recorded base branch does not exist locally', () =
   const lines = [];
   const errors = [];
 
-  // @ts-expect-error TS2349 This expression is not callable.
   const result = missionStart(['task-broken-base'], {
     returnResult: true,
     cwdFn: () => '/tmp/project-task-broken-base',
@@ -388,7 +375,6 @@ test('missionStart passes when recorded base branch exists locally', () => {
   const errors = [];
   const seenRootDirs = [];
 
-  // @ts-expect-error TS2349 This expression is not callable.
   const result = missionStart(['task-feat-base'], {
     returnResult: true,
     cwdFn: () => '/tmp/project-task-feat-base',
@@ -427,7 +413,6 @@ test('missionStart skips base branch check when recorded base equals primary', (
   const errors = [];
   let runCalled = false;
 
-  // @ts-expect-error TS2349 This expression is not callable.
   const result = missionStart(['task-primary-base'], {
     returnResult: true,
     cwdFn: () => '/tmp/project-task-primary-base',
@@ -460,7 +445,6 @@ test('verify-env happy path prints USABLE verdict', () => {
   const lines = [];
   const errors = [];
 
-  // @ts-expect-error TS2349 This expression is not callable.
   const result = missionStart([], {
     returnResult: true,
     command: 'verify-env',
@@ -494,7 +478,6 @@ test('verify-env blocked path prints NOT USABLE verdict with remediation', () =>
   const lines = [];
   const errors = [];
 
-  // @ts-expect-error TS2349 This expression is not callable.
   const result = missionStart([], {
     returnResult: true,
     command: 'verify-env',

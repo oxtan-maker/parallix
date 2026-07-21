@@ -1,5 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
-
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
@@ -150,7 +148,6 @@ test('mission-start verify mode reports diagnostics and open-ended success witho
   const errors = [];
   const missionStart = require('../dist/lib/commands/mission-start');
 
-  // @ts-expect-error TS2349 This expression is not callable.
   const result = missionStart([], {
     returnResult: true,
     inferSlugFn: () => null,
@@ -184,7 +181,6 @@ test('mission-start mission mode reports failures for wrong branch, ambiguous ta
   const errors = [];
   const missionStart = require('../dist/lib/commands/mission-start');
 
-  // @ts-expect-error TS2349 This expression is not callable.
   const result = missionStart(['task-1031'], {
     returnResult: true,
     cwdFn: () => '/tmp/not-the-right-worktree',
@@ -218,7 +214,6 @@ test('active() success path: preflight, launch, and handoff run in order', async
   const calls = [];
   const logs = [];
 
-  // @ts-expect-error TS2349 This expression is not callable.
   await active(['task-1038'], {
     inferSlugFn: () => 'task-1038',
     service: { execute: async () => {
@@ -270,7 +265,6 @@ test('active() honors an explicit --implementer override without consulting WORK
   delete process.env.WORKFLOW_AGENT;
 
   try {
-    // @ts-expect-error TS2349 This expression is not callable.
     await active(['task-1038', '--implementer', 'claude'], {
       inferSlugFn: () => 'task-1038',
       service: { execute: async request => {
@@ -311,7 +305,6 @@ test('active() exits non-zero with usage text when --implementer is missing its 
   let exitCode = null;
   const errors = [];
 
-  // @ts-expect-error TS2349 This expression is not callable.
   await active(['task-1038', '--implementer'], {
     inferSlugFn: () => 'task-1038',
     missionStartFn: () => { throw new Error('must not run preflight when --implementer parsing fails'); },
@@ -327,7 +320,6 @@ test('active() exits non-zero with usage text when --implementer is missing its 
 test('active() does not pre-write backlog state before the execute agent actually launches', async () => {
   const logs = [];
 
-  // @ts-expect-error TS2349 This expression is not callable.
   await active(['task-1038'], {
     inferSlugFn: () => 'task-1038',
     service: { execute: async () => ({ status: 'completed', value: { agent: 'codex' }, durableEvidence: [] }) },
@@ -355,7 +347,6 @@ test('active() exits 1 when preflight fails', async () => {
   let exitCode = null;
   const errors = [];
 
-  // @ts-expect-error TS2349 This expression is not callable.
   await active(['task-1038'], {
     inferSlugFn: () => 'task-1038',
     service: { execute: async () => ({ status: 'rejected', error: { kind: 'validation', message: 'execute preflight failed' }, durableEvidence: [] }) },
@@ -373,7 +364,6 @@ test('active() exits 1 when worktree is missing', async () => {
   let exitCode = null;
   const errors = [];
 
-  // @ts-expect-error TS2349 This expression is not callable.
   await active(['task-1038'], {
     inferSlugFn: () => 'task-1038',
     service: { execute: async () => ({ status: 'rejected', error: { kind: 'validation', message: 'dedicated execute worktree is required' }, durableEvidence: [] }) },
@@ -392,7 +382,6 @@ test('active() exits 1 when execute launch throws', async () => {
   let exitCode = null;
   const errors = [];
 
-  // @ts-expect-error TS2349 This expression is not callable.
   await active(['task-1038'], {
     inferSlugFn: () => 'task-1038',
     service: { execute: async () => ({ status: 'failed', error: { kind: 'execution', message: 'Could not launch execute agent: launcher exploded' }, durableEvidence: [] }) },
@@ -416,7 +405,6 @@ test('active() exits with agent status when execute agent returns non-zero', asy
   let exitCode = null;
   const errors = [];
 
-  // @ts-expect-error TS2349 This expression is not callable.
   await active(['task-1038'], {
     inferSlugFn: () => 'task-1038',
     service: { execute: async () => ({ status: 'failed', error: { kind: 'execution', message: 'Execute agent (codex) exited with status 23.' }, durableEvidence: [] }) },
@@ -439,7 +427,6 @@ test('active() exits with agent status when execute agent returns non-zero', asy
 test('active() exits 1 when handoff fails after successful execute launch', async () => {
   let exitCode = null;
 
-  // @ts-expect-error TS2349 This expression is not callable.
   await active(['task-1038'], {
     inferSlugFn: () => 'task-1038',
     service: { execute: async () => ({ status: 'failed', error: { kind: 'execution', message: 'legacy handoff failed' }, durableEvidence: [] }) },
@@ -463,7 +450,6 @@ test('active() exits 1 when handoff fails after successful execute launch', asyn
 test('active() runs the execute safety harness before handoff', async () => {
   const calls = [];
 
-  // @ts-expect-error TS2349 This expression is not callable.
   await active(['task-1038'], {
     inferSlugFn: () => 'task-1038',
     service: { execute: async () => {
@@ -498,7 +484,6 @@ test('active() restores task status and continues to handoff when the execute ag
   const calls = [];
   const errors = [];
 
-  // @ts-expect-error TS2349 This expression is not callable.
   await active(['task-1038'], {
     inferSlugFn: () => 'task-1038',
     service: { execute: async () => {
@@ -537,7 +522,6 @@ test('active() restores task status and continues to handoff when the execute ag
 test('active() synchronizes a launch-deferred rebase after execute output is committed', async () => {
   const calls = [];
 
-  // @ts-expect-error TS2349 This expression is not callable.
   await active(['task-1038'], {
     inferSlugFn: () => 'task-1038',
     service: { execute: async () => {
@@ -592,7 +576,7 @@ test('repair-handoff module exposes its default export as callable under CJS req
 
   // Replicate tsc's __importStar interop exactly (module lacks __esModule
   // since `module.exports = repairHandoff` overwrites it at runtime).
-  const ns = {};
+  const ns: Record<string, unknown> & { default?: unknown; repairHandoff?: unknown } = {};
   for (const k of Object.keys(repairHandoffModule)) { ns[k] = repairHandoffModule[k]; }
   ns.default = repairHandoffModule;
 
@@ -634,7 +618,6 @@ test('runHandoffAndReview waits for the autonomous review loop to complete', asy
   await Promise.resolve();
   assert.equal(settled, false, 'px active must not finish while review is still running');
 
-  // @ts-expect-error TS2722 Cannot invoke an object which is possibly 'undefined'.
   resolveReview();
   assert.equal(await handoffPromise, true);
   assert.equal(settled, true);
@@ -939,7 +922,6 @@ test('selectLaunchAndRecord writes Backlog before the launcher resolves its fina
   assert.equal(transitionCountAtReturn, 1, 'transitionTask must run during onLaunch, before the final result resolves');
   assert.equal(transitions[0].status, 'active');
 
-  // @ts-expect-error TS2722 Cannot invoke an object which is possibly 'undefined'.
   resolveResult({ status: 0 });
   await callPromise;
 });
@@ -1337,7 +1319,6 @@ test('active() state-ordering contract: does not write Backlog before launch (re
   const statusWrites = [];
   const assigneeWrites = [];
 
-  // @ts-expect-error TS2349 This expression is not callable.
   await active(['task-1038'], {
     inferSlugFn: () => 'task-1038',
     service: { execute: async () => ({ status: 'completed', value: { agent: 'codex' }, durableEvidence: [] }) },
@@ -1435,15 +1416,10 @@ test('attemptAgentRelaunch calls startAgent with correct parameters', async () =
   assert.equal(relaunched, true);
   assert.equal(startAgentCalled, true);
   assert.equal(stepArg, 'active');
-  // @ts-expect-error TS18047 'optsArg' is possibly 'null'.
   assert.equal(optsArg.slug, 'task-1124');
-  // @ts-expect-error TS18047 'optsArg' is possibly 'null'.
   assert.equal(optsArg.role, 'implementer');
-  // @ts-expect-error TS18047 'optsArg' is possibly 'null'.
   assert.equal(optsArg.agent, 'codex');
-  // @ts-expect-error TS18047 'optsArg' is possibly 'null'.
   assert.equal(optsArg.worktree, '/tmp/worktree');
-  // @ts-expect-error TS18047 'optsArg' is possibly 'null'.
   assert.equal(optsArg.prompt, 'test prompt');
 });
 
@@ -1796,9 +1772,7 @@ test('runHandoffAndReview relaunches on verification gate failure with captured 
   assert.equal(handoffAttempts, 2, 'performHandoff called twice: initial + post-relaunch');
   assert.equal(relaunchAttempts, 1, 'attemptAgentRelaunch called once');
   assert.ok(lastGateOutput, 'gateOutput should be passed to attemptAgentRelaunch');
-  // @ts-expect-error TS2339 Property 'stdout' does not exist on type 'never'.
   assert.equal(lastGateOutput.stdout, 'lint: ERROR: unused import in foo.js');
-  // @ts-expect-error TS2339 Property 'stderr' does not exist on type 'never'.
   assert.equal(lastGateOutput.stderr, 'TypeScript: error TS2345: type mismatch');
 });
 
@@ -1838,9 +1812,7 @@ test('runHandoffAndReview relaunches on declared gate failure with captured outp
   assert.equal(handoffAttempts, 2, 'performHandoff called twice');
   assert.equal(relaunchAttempts, 1, 'attemptAgentRelaunch called once');
   assert.ok(lastGateOutput, 'gateOutput should be passed to attemptAgentRelaunch for declared gate failures');
-  // @ts-expect-error TS2339 Property 'stdout' does not exist on type 'never'.
   assert.equal(lastGateOutput.stdout, 'declared gate stdout');
-  // @ts-expect-error TS2339 Property 'stderr' does not exist on type 'never'.
   assert.equal(lastGateOutput.stderr, 'declared gate stderr');
 });
 

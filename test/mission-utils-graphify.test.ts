@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -16,7 +15,7 @@ test('probeGraphifyAvailability and graphifyAvailable distinguish missing comman
   const missing = probeGraphifyAvailability({
     commandRunner: () => {
       const error = new Error('missing');
-      // @ts-expect-error TS2339 Property 'code' does not exist on type 'Error'.
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `code` absent from its inferred mock shape.
       error.code = 'ENOENT';
       throw error;
     }
@@ -32,7 +31,6 @@ test('probeGraphifyAvailability and graphifyAvailable distinguish missing comman
   });
   assert.equal(failure.available, false);
   assert.equal(failure.reason, 'probe-failed');
-  // @ts-expect-error TS2339 Property 'message' does not exist on type 'unknown'.
   assert.match(failure.error.message, /permission denied/);
 });
 
@@ -59,7 +57,7 @@ test('updateGraphifyKnowledgeGraph logs missing graph, missing command, probe-fa
     log: msg => logs.push(msg),
     commandRunner: () => {
       const error = new Error('missing');
-      // @ts-expect-error TS2339 Property 'code' does not exist on type 'Error'.
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `code` absent from its inferred mock shape.
       error.code = 'ENOENT';
       throw error;
     }

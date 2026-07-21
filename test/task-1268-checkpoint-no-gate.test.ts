@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -24,7 +23,6 @@ test('checkpoint runs the gate even when passed a stray --no-gate flag', async (
   mock.method(process, 'exit', (code) => { throw new FakeExit(code); });
 
   await assert.rejects(
-    // @ts-expect-error TS2349 This expression is not callable.
     async () => checkpoint(['task-1268', 'cp-name', 'next action', '--no-gate']),
     FakeExit
   );

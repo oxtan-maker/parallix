@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -76,6 +75,7 @@ test('startAgent review fallback selects vibe when claude hits limit and review 
   try {
     const order = ['claude', 'vibe'];
     const selectAgentFn = (step, opts = {}) => {
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `exclude` absent from its inferred mock shape.
       const exclude = opts.exclude instanceof Set ? opts.exclude : new Set();
       return order.find(a => !exclude.has(a));
     };
@@ -114,9 +114,8 @@ test('startAgent review fallback selects vibe when claude hits limit and review 
         selectAgentFn,
         launchAgentFn: fakeLauncher(),
         assertAgentSupportedFn: () => {},
-        // @ts-expect-error TS1117 An object literal cannot have multiple properties with the same name.
+// @ts-expect-error -- Legacy fixture deliberately exercises a duplicate or partial object-literal runtime shape.
         isAgentBlockedFn: () => false,
-        // @ts-expect-error TS2353 Object literal may only specify known properties, and 'config' does not exist in
         config: configWithoutReview,
         log: () => {}
       });
@@ -140,6 +139,7 @@ test('startAgent act-on-review fallback selects vibe when implementer hits limit
   try {
     const order = ['custom', 'vibe'];
     const selectAgentFn = (step, opts = {}) => {
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `exclude` absent from its inferred mock shape.
       const exclude = opts.exclude instanceof Set ? opts.exclude : new Set();
       return order.find(a => !exclude.has(a));
     };
@@ -177,9 +177,8 @@ test('startAgent act-on-review fallback selects vibe when implementer hits limit
         selectAgentFn,
         launchAgentFn: fakeLauncher(),
         assertAgentSupportedFn: () => {},
-        // @ts-expect-error TS1117 An object literal cannot have multiple properties with the same name.
+// @ts-expect-error -- Legacy fixture deliberately exercises a duplicate or partial object-literal runtime shape.
         isAgentBlockedFn: () => false,
-        // @ts-expect-error TS2353 Object literal may only specify known properties, and 'config' does not exist in
         config: configWithoutActOnReview,
         log: () => {}
       });

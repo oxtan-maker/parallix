@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -73,7 +72,7 @@ function runGitOrThrow(args, options = {}) {
   }
   if (typeof result.status === 'number' && result.status !== 0) {
     const error = new Error((result.stderr || result.stdout || `git ${args.join(' ')} failed`).trim());
-    // @ts-expect-error TS2339 Property 'result' does not exist on type 'Error'.
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `result` absent from its inferred mock shape.
     error.result = result;
     throw error;
   }
@@ -147,7 +146,6 @@ test('startReviewLoop allows explicit same-family reviewer after rejection block
   const { exitCode, errors, logs } = await captureExit(() => {
     return startReviewLoop(TEST_SLUG, {
       eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
-      // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       implementer: 'claude',
       reviewer: 'claude',
@@ -170,12 +168,10 @@ test('startReviewLoop allows implementer not in eligible agents with explicit re
   const { exitCode, errors } = await captureExit(() => {
     return startReviewLoop(TEST_SLUG, {
       eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
-      // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       implementer: 'gpt4',
       reviewer: 'codex',
       dryRun: true,
-      // @ts-expect-error TS2739 Type '{ supported: true; }' is missing the following properties from type 'Launc
       workflowLauncherStatusFn: () => ({ supported: true }),
       isForgejoReviewEnabledFn: () => true,
       getPrStatusFn: () => ({ exists: true, state: 'open', number: 1 })
@@ -200,7 +196,6 @@ test('startReviewLoop fails for unsupported reviewer', async () => {
   const { exitCode, errors } = await captureExit(() => {
     return startReviewLoop(TEST_SLUG, {
       eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
-      // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       implementer: 'claude',
       reviewer: 'gpt4',
@@ -223,10 +218,8 @@ test('startReviewLoop validates reviewer and implementer from injected review el
 
   await startReviewLoop(TEST_SLUG, {
     eligibleAgentsForStepFn: step => step === 'review' ? ['codex', 'future-agent'] : [],
-    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     readReviewStateFn: () => null,
-    // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(slug: string, state: Record<string
     writeReviewStateFn: () => {},
     implementer: 'future-agent',
     dryRun: true,
@@ -235,9 +228,7 @@ test('startReviewLoop validates reviewer and implementer from injected review el
     // into a real handoff or poll a local Forgejo service.
     isForgejoReviewEnabledFn: () => false,
     selectAgentFn: () => 'codex',
-    // @ts-expect-error TS2741 Property 'agent' is missing in type '{ supported: true; detail: string; }' but r
     workflowLauncherStatusFn: () => ({ supported: true, detail: 'mock' }),
-    // @ts-expect-error TS2739 Type '{ agents: string[]; launchers: { codex: { supported: true; detail: string;
     buildAutonomousReviewMatrixFn: () => ({
       agents: ['codex', 'future-agent'],
       launchers: { codex: { supported: true, detail: 'mock' }, 'future-agent': { supported: true, detail: 'mock' } }
@@ -246,7 +237,6 @@ test('startReviewLoop validates reviewer and implementer from injected review el
     buildActOnReviewPromptFn: () => 'act prompt',
     log: line => logs.push(line),
     error: () => {},
-    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'never'.
     exit: code => exitCodes.push(code)
   });
 
@@ -261,18 +251,14 @@ test('startReviewLoop defaults to autonomous when no implementer and no persiste
   const { exitCode, errors, logs } = await captureExit(() => {
     return startReviewLoop(TEST_SLUG, {
       eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
-      // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       readReviewStateFn: () => null,
-      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(slug: string, state: Record<string
       writeReviewStateFn: () => {},
       isForgejoReviewEnabledFn: () => false,
       dryRun: true,
-      // @ts-expect-error TS2739 Type '{ supported: true; }' is missing the following properties from type 'Launc
       workflowLauncherStatusFn: () => ({ supported: true }),
       buildAutonomousReviewMatrixFn: () => ({
         agents: ['codex', 'claude', 'gemini', 'custom'],
-        // @ts-expect-error TS2741 Property 'detail' is missing in type '{ supported: true; }' but required in type
         launchers: { codex: { supported: true }, claude: { supported: true }, gemini: { supported: true }, custom: { supported: true } }
       }),
       selectAgentFn: () => { throw new Error('no reviewer available'); },
@@ -299,7 +285,6 @@ test('startReviewLoop reset path removes state file', async () => {
   const { exitCode } = await captureExit(() => {
     return startReviewLoop(TEST_SLUG, {
       eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
-      // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       implementer: 'claude',
       reviewer: 'codex',
@@ -307,11 +292,8 @@ test('startReviewLoop reset path removes state file', async () => {
       dryRun: true,
       ...isolatedDryRun,
       readReviewStateFn: () => null,
-      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(slug: string, state: Record<string
       writeReviewStateFn: () => {},
-      // @ts-expect-error TS2739 Type '{ supported: true; }' is missing the following properties from type 'Launc
       workflowLauncherStatusFn: () => ({ supported: true }),
-      // @ts-expect-error TS2322 Type '() => boolean' is not assignable to type '(slug: string, worktree?: string
       resetReviewStateFn: () => { resetCalled = true; return true; },
       buildReviewPromptFn: () => 'review prompt',
       buildActOnReviewPromptFn: () => 'act prompt'
@@ -327,16 +309,13 @@ test('startReviewLoop dryRun path skips agent launch', async () => {
   const { exitCode } = await captureExit(() => {
     return startReviewLoop(TEST_SLUG, {
       eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
-      // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       implementer: 'claude',
       reviewer: 'codex',
       dryRun: true,
       ...isolatedDryRun,
       readReviewStateFn: () => null,
-      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(slug: string, state: Record<string
       writeReviewStateFn: () => {},
-      // @ts-expect-error TS2739 Type '{ supported: true; }' is missing the following properties from type 'Launc
       workflowLauncherStatusFn: () => ({ supported: true }),
       buildReviewPromptFn: () => 'review prompt',
       buildActOnReviewPromptFn: () => 'act prompt'
@@ -372,14 +351,12 @@ test('verifyReview handles task status edge cases', async () => {
   // 1. Task not found
   verifyReview(TEST_SLUG, false, {
     ...baseOptions,
-    // @ts-expect-error TS2322 Type '{ ok: false; reason: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: false, reason: 'missing' })
   });
   assert.ok(logs.some(l => l.includes('not found in backlog/tasks/')), 'Should log task not found');
 
   // 2. Task ambiguous
   logs.length = 0;
-  // @ts-expect-error TS2345 Argument of type '{ resolveTaskFileFn: () => { ok: false; reason: string; matche
   verifyReview(TEST_SLUG, false, {
     ...baseOptions,
     resolveTaskFileFn: () => ({ ok: false, reason: 'ambiguous', matches: ['a.md', 'b.md'] })
@@ -389,10 +366,9 @@ test('verifyReview handles task status edge cases', async () => {
   // 3. Task status DONE
   logs.length = 0;
   verifyReview(TEST_SLUG, false, {
-    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     ...baseOptions,
-    // @ts-expect-error TS1117 An object literal cannot have multiple properties with the same name.
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `md` absent from its inferred mock shape.
     resolveTaskFileFn: () => ({ ok: true, taskFile: 'task.md' }),
     getTaskStatusFn: () => 'done'
   });
@@ -401,10 +377,9 @@ test('verifyReview handles task status edge cases', async () => {
   // 4. Task status ACTIVE (warning)
   logs.length = 0;
   verifyReview(TEST_SLUG, false, {
-    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     ...baseOptions,
-    // @ts-expect-error TS1117 An object literal cannot have multiple properties with the same name.
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `md` absent from its inferred mock shape.
     resolveTaskFileFn: () => ({ ok: true, taskFile: 'task.md' }),
     getTaskStatusFn: () => 'active'
   });
@@ -413,10 +388,9 @@ test('verifyReview handles task status edge cases', async () => {
   // 5. Unexpected task status
   logs.length = 0;
   verifyReview(TEST_SLUG, false, {
-    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     ...baseOptions,
-    // @ts-expect-error TS1117 An object literal cannot have multiple properties with the same name.
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `md` absent from its inferred mock shape.
     resolveTaskFileFn: () => ({ ok: true, taskFile: 'task.md' }),
     getTaskStatusFn: () => 'backlog'
   });
@@ -450,7 +424,6 @@ test('verifyReview handles PR state edge cases', async () => {
 
   // 1. PR closed/merged
   verifyReview(TEST_SLUG, false, {
-    // @ts-expect-error TS2322 Type '{ ok: boolean; taskFile: string; }' is not assignable to type '{ ok: boole
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     ...baseOptions,
     getPrStatusFn: () => ({ exists: true, state: 'closed', merged: true, number: 41 })
@@ -460,7 +433,6 @@ test('verifyReview handles PR state edge cases', async () => {
   // 2. PR missing
   logs.length = 0;
   verifyReview(TEST_SLUG, false, {
-    // @ts-expect-error TS2322 Type '{ ok: boolean; taskFile: string; }' is not assignable to type '{ ok: boole
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     ...baseOptions,
     getPrStatusFn: () => ({ exists: false, raw: 'Not found' })
@@ -488,25 +460,21 @@ test('verifyReview handles gate failures', async () => {
   process.chdir(tmp);
   try {
     verifyReview(TEST_SLUG, false, {
-      // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       log: (m) => logs.push(m),
       error: () => {},
-      // @ts-expect-error TS2322 Type 'number' is not assignable to type 'never'.
       exit: (c) => exitCodes.push(c),
       resolveWorktreeFn: () => null,
       findMissionDirFn: () => '/tmp/mission',
       getCurrentBranchFn: () => `mission/${TEST_SLUG}`,
-      // @ts-expect-error TS1117 An object literal cannot have multiple properties with the same name.
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `md` absent from its inferred mock shape.
       resolveTaskFileFn: () => ({ ok: true, taskFile: 'task.md' }),
       getTaskStatusFn: () => 'review',
       getPrStatusFn: () => ({ exists: true, state: 'open', number: 41 }),
       findMissionAreaFn: () => 'docs',
-      // @ts-expect-error TS2739 Type '{ status: number; }' is missing the following properties from type 'GitRes
       runFn: () => ({ status: 1 }), // Fails
       getAcceptanceCriteriaFn: () => [],
       formatMatrixSummaryFn: () => [],
-      // @ts-expect-error TS2739 Type '{}' is missing the following properties from type '{ step: string; agents:
       buildAutonomousReviewMatrixFn: () => ({}),
       readReviewStateFn: () => null,
       cwdFn: () => '/home/magnus/code/visualBoard'
@@ -528,20 +496,16 @@ test('startReviewLoop handles reviewer launcher fallback', async () => {
   // Case 1: auto-derived reviewer blocked, falls back successfully
   await startReviewLoop(TEST_SLUG, {
       eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
-    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     implementer: 'claude',
     dryRun: true,
     ...isolatedDryRun,
     readReviewStateFn: () => null,
-    // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(slug: string, state: Record<string
     writeReviewStateFn: () => {},
     log: (m) => logs.push(m),
     error: (m) => errors.push(m),
-    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'never'.
     exit: (c) => exitCodes.push(c),
     reviewerForFn: () => 'codex',
-    // @ts-expect-error TS2741 Property 'agent' is missing in type '{ supported: boolean; detail: string; }' bu
     workflowLauncherStatusFn: (a) => ({ supported: a === 'gemini', detail: 'mock' }),
     selectAgentFn: (step, { exclude }) => {
       const ex = exclude instanceof Set ? exclude : new Set(exclude || []);
@@ -549,7 +513,6 @@ test('startReviewLoop handles reviewer launcher fallback', async () => {
       return 'gemini';
     },
     formatMatrixSummaryFn: () => [],
-    // @ts-expect-error TS2739 Type '{ agents: string[]; launchers: { codex: { supported: false; detail: string
     buildAutonomousReviewMatrixFn: () => ({
       agents: ['codex', 'claude', 'gemini', 'custom'],
       launchers: { codex: { supported: false, detail: 'mock' }, gemini: { supported: true, detail: 'mock' } }
@@ -565,19 +528,15 @@ test('startReviewLoop handles reviewer launcher fallback', async () => {
   errors.length = 0;
   await startReviewLoop(TEST_SLUG, {
       eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
-    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     implementer: 'claude',
     dryRun: true,
     ...isolatedDryRun,
     readReviewStateFn: () => null,
-    // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(slug: string, state: Record<string
     writeReviewStateFn: () => {},
     log: (m) => logs.push(m),
     error: (m) => errors.push(m),
-    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'never'.
     exit: (c) => exitCodes.push(c),
-    // @ts-expect-error TS2741 Property 'agent' is missing in type '{ supported: boolean; detail: string; }' bu
     workflowLauncherStatusFn: (agent) => ({ supported: agent === 'claude', detail: 'mock' }),
     selectAgentFn: (step, { exclude }) => {
       const ex = exclude instanceof Set ? exclude : new Set(exclude || []);
@@ -585,7 +544,6 @@ test('startReviewLoop handles reviewer launcher fallback', async () => {
       throw new Error('All eligible agents exhausted');
     },
     formatMatrixSummaryFn: () => [],
-    // @ts-expect-error TS2739 Type '{ agents: string[]; launchers: { codex: { supported: false; detail: string
     buildAutonomousReviewMatrixFn: () => ({
       agents: ['codex', 'claude', 'gemini', 'custom'],
       launchers: { codex: { supported: false, detail: 'mock' } }
@@ -607,19 +565,15 @@ test('startReviewLoop handles Forgejo bootstrap failure', async () => {
 
   await startReviewLoop(TEST_SLUG, {
       eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
-    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     implementer: 'claude',
     reviewer: 'codex',
     dryRun: false,
     error: (m) => errors.push(m),
-    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'never'.
     exit: (c) => exitCodes.push(c),
-    // @ts-expect-error TS2739 Type '{ supported: true; }' is missing the following properties from type 'Launc
     workflowLauncherStatusFn: () => ({ supported: true }),
     isForgejoReviewEnabledFn: () => true,
     forgejoAvailableFn: async () => false,
-    // @ts-expect-error TS2739 Type '{ status: number; }' is missing the following properties from type 'GitRes
     runFn: () => ({ status: 1 }), // Bootstrap fails
     maybeUpdateGraphifyBeforeReviewFn: () => {}
   });
@@ -633,13 +587,11 @@ test('startReviewLoop handles missing PR', async () => {
 
   const { exitCode } = await captureExit(() => startReviewLoop(TEST_SLUG, {
       eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
-    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     implementer: 'claude',
     reviewer: 'codex',
     dryRun: false,
     error: (m) => errors.push(m),
-    // @ts-expect-error TS2739 Type '{ supported: true; }' is missing the following properties from type 'Launc
     workflowLauncherStatusFn: () => ({ supported: true }),
     isForgejoReviewEnabledFn: () => true,
     forgejoAvailableFn: async () => true,
@@ -647,7 +599,7 @@ test('startReviewLoop handles missing PR', async () => {
     performHandoffFn: async () => ({ ok: false, error: 'mock handoff failure' }),
     maybeUpdateGraphifyBeforeReviewFn: () => {},
     enforceTaskAssigneeFn: () => true,
-    // @ts-expect-error TS1117 An object literal cannot have multiple properties with the same name.
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `md` absent from its inferred mock shape.
     resolveTaskFileFn: () => ({ ok: true, taskFile: 'task.md' })
   }));
 
@@ -675,7 +627,7 @@ test('startReviewLoop full loop success and exit cases', async () => {
     forgejoAvailableFn: async () => true,
     getPrStatusFn: () => ({ exists: true, state: 'open', number: 41 }),
     maybeUpdateGraphifyBeforeReviewFn: () => {},
-    // @ts-expect-error TS1117 An object literal cannot have multiple properties with the same name.
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `md` absent from its inferred mock shape.
     resolveTaskFileFn: () => ({ ok: true, taskFile: 'task.md' }),
     enforceTaskAssigneeFn: () => true,
     resolveForgejoUserFn: () => 'gemini',
@@ -708,7 +660,6 @@ test('startReviewLoop full loop success and exit cases', async () => {
   // Case 1: Max attempts reached
   await startReviewLoop(TEST_SLUG, {
       eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
-    // @ts-expect-error TS2322 Type '{ ok: boolean; taskFile: string; }' is not assignable to type '{ ok: boole
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }), ...baseOpts });
   assert.ok(logs.some(l => l.includes('reached 5 attempts')), 'Should stop at max attempts');
   assert.equal(rebaseCalls.length, 5, 'Should rebase before each review round');
@@ -717,7 +668,6 @@ test('startReviewLoop full loop success and exit cases', async () => {
   logs.length = 0;
   await startReviewLoop(TEST_SLUG, {
       eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
-    // @ts-expect-error TS2322 Type '{ ok: boolean; taskFile: string; }' is not assignable to type '{ ok: boole
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     ...baseOpts,
     pollForReviewFn: async () => 'APPROVED'
@@ -729,7 +679,6 @@ test('startReviewLoop full loop success and exit cases', async () => {
   logs.length = 0;
   await startReviewLoop(TEST_SLUG, {
       eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
-    // @ts-expect-error TS2322 Type '{ ok: boolean; taskFile: string; }' is not assignable to type '{ ok: boole
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     ...baseOpts,
     pollForDispositionFn: async () => 'PUSHBACK_ALL'
@@ -740,7 +689,6 @@ test('startReviewLoop full loop success and exit cases', async () => {
   logs.length = 0;
   await startReviewLoop(TEST_SLUG, {
       eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
-    // @ts-expect-error TS2322 Type '{ ok: boolean; taskFile: string; }' is not assignable to type '{ ok: boole
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     ...baseOpts,
     pollForDispositionFn: async () => 'BLOCKED'
@@ -767,7 +715,6 @@ test('review helper functions and error paths', async () => {
   };
 
   // 1. review usage error (missing slug)
-  // @ts-expect-error TS2349 This expression is not callable.
   await review([], { ...baseOptions, inferSlugFn: () => null });
   assert.deepEqual(exitCodes, [1]);
   assert.ok(errors[0].includes('Usage: px review'), 'Should show usage');
@@ -775,14 +722,12 @@ test('review helper functions and error paths', async () => {
   // 2. review status (PR not found)
   logs.length = 0;
   exitCodes.length = 0;
-  // @ts-expect-error TS2349 This expression is not callable.
   await review(['test-slug'], { ...baseOptions });
   assert.ok(logs.some(l => l.includes('No active PR found')), 'Should log PR not found');
 
   // 3. readTextFlag error path
   errors.length = 0;
   exitCodes.length = 0;
-  // @ts-expect-error TS2349 This expression is not callable.
   await review(['test-slug', '--comment-file', 'fail.md'], { ...baseOptions, isComment: true });
   assert.deepEqual(exitCodes, [1, 1]);
   assert.ok(errors[0].includes('Could not read comment from fail.md'), 'Should log read error');
@@ -821,19 +766,16 @@ test('review function missing argument and env var error paths', async () => {
   };
 
   // 1. --comments should use review-state identity without needing FORGEJO_USER
-  // @ts-expect-error TS2349 This expression is not callable.
   await review(['test-slug', '--comments'], { ...baseOptions });
   assert.ok(!errors.some(e => e.includes('Cannot determine Forgejo user')), 'Should not require FORGEJO_USER for --comments');
 
   // 2. --comment missing message
   errors.length = 0;
-  // @ts-expect-error TS2349 This expression is not callable.
   await review(['test-slug', '--comment'], { ...baseOptions });
   assert.ok(errors.some(e => e.includes('--comment requires text')), 'Should error on missing message for --comment');
 
   // 3. --submit-review missing outcome
   errors.length = 0;
-  // @ts-expect-error TS2349 This expression is not callable.
   await review(['test-slug', '--submit-review'], { ...baseOptions });
   assert.ok(errors.some(e => e.includes('--submit-review requires an outcome')), 'Should error on missing outcome for --submit-review');
 });
@@ -848,16 +790,13 @@ test('polling configuration logic', async () => {
   const logs = [];
   await startReviewLoop(TEST_SLUG, {
       eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
-    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     implementer: 'claude',
     reviewer: 'codex',
     dryRun: true,
     ...isolatedDryRun,
     readReviewStateFn: () => null,
-    // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(slug: string, state: Record<string
     writeReviewStateFn: () => {},
-    // @ts-expect-error TS2739 Type '{ supported: true; }' is missing the following properties from type 'Launc
     workflowLauncherStatusFn: () => ({ supported: true }),
     buildReviewPromptFn: () => 'review prompt',
     buildActOnReviewPromptFn: () => 'act prompt',
@@ -874,7 +813,6 @@ test('polling configuration logic', async () => {
   logs.length = 0;
   await startReviewLoop(TEST_SLUG, {
       eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
-    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     implementer: 'claude',
     reviewer: 'codex',
@@ -882,9 +820,7 @@ test('polling configuration logic', async () => {
     ...isolatedDryRun,
     pollTimeoutSeconds: 5,
     readReviewStateFn: () => null,
-    // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(slug: string, state: Record<string
     writeReviewStateFn: () => {},
-    // @ts-expect-error TS2739 Type '{ supported: true; }' is missing the following properties from type 'Launc
     workflowLauncherStatusFn: () => ({ supported: true }),
     buildReviewPromptFn: () => 'review prompt',
     buildActOnReviewPromptFn: () => 'act prompt',
@@ -900,16 +836,13 @@ test('startReviewLoop explicit same-family path covers all four families', async
     const { exitCode, errors, logs } = await captureExit(() => {
       return startReviewLoop(TEST_SLUG, {
       eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
-      // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
         implementer: agent,
         reviewer: agent,
         dryRun: true,
         ...isolatedDryRun,
         readReviewStateFn: () => null,
-        // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(slug: string, state: Record<string
         writeReviewStateFn: () => {},
-        // @ts-expect-error TS2739 Type '{ supported: true; }' is missing the following properties from type 'Launc
         workflowLauncherStatusFn: () => ({ supported: true }),
         buildReviewPromptFn: () => 'review prompt',
         buildActOnReviewPromptFn: () => 'act prompt'
@@ -931,16 +864,13 @@ test('startReviewLoop same-family explicit reviewer logs the agent name', async 
   const { exitCode, errors, logs } = await captureExit(() => {
     return startReviewLoop(TEST_SLUG, {
       eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
-      // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       readReviewStateFn: () => null,
-      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(slug: string, state: Record<string
       writeReviewStateFn: () => {},
       implementer: 'gemini',
       reviewer: 'gemini',
       dryRun: true,
       ...isolatedDryRun,
-      // @ts-expect-error TS2739 Type '{ supported: true; }' is missing the following properties from type 'Launc
       workflowLauncherStatusFn: () => ({ supported: true }),
       buildReviewPromptFn: () => 'review prompt',
       buildActOnReviewPromptFn: () => 'act prompt'
@@ -963,12 +893,10 @@ test('startReviewLoop rebases immediately before each reviewer round', async () 
 
   await startReviewLoop(TEST_SLUG, {
     eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
-    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     implementer: 'claude',
     reviewer: 'codex',
     dryRun: false,
-    // @ts-expect-error TS2739 Type '{ supported: true; }' is missing the following properties from type 'Launc
     workflowLauncherStatusFn: () => ({ supported: true }),
     isForgejoReviewEnabledFn: () => true,
     forgejoAvailableFn: async () => true,
@@ -978,13 +906,11 @@ test('startReviewLoop rebases immediately before each reviewer round', async () 
     resolveForgejoUserFn: () => 'gemini',
     readTokenFn: () => 'token',
     readReviewStateFn: () => null,
-    // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(slug: string, state: Record<string
     writeReviewStateFn: () => {},
     rebaseBeforeReviewRoundFn: async () => {
       events.push('rebase');
       return { ok: true, sharedFileConflicts: false };
     },
-    // @ts-expect-error TS2322 Type '(step: string, options: StartAgentOptions) => Promise<{ agent: any; }>' is
     startAgentFn: async (step, options) => {
       events.push(`${step}:${options.role}`);
       return { agent: null };
@@ -996,7 +922,6 @@ test('startReviewLoop rebases immediately before each reviewer round', async () 
     buildCompactActOnReviewPromptFn: () => 'act-on-review prompt',
     log: () => {},
     error: () => {},
-    // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(_code: number) => never'.
     exit: () => {},
     consumeReviewerArtifactsFn: async () => ({ consumed: false }),
     consumeImplementerArtifactsFn: async () => ({ consumed: false }),
@@ -1022,10 +947,8 @@ test('startReviewLoop continue consumes existing fixing disposition before next 
   await startReviewLoop(TEST_SLUG, {
     continue: true,
     eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
-    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     dryRun: false,
-    // @ts-expect-error TS2739 Type '{ supported: true; }' is missing the following properties from type 'Launc
     workflowLauncherStatusFn: () => ({ supported: true }),
     isForgejoReviewEnabledFn: () => true,
     forgejoAvailableFn: async () => true,
@@ -1034,7 +957,6 @@ test('startReviewLoop continue consumes existing fixing disposition before next 
     enforceTaskAssigneeFn: () => true,
     resolveForgejoUserFn: () => 'gemini',
     readTokenFn: () => 'token',
-    // @ts-expect-error TS2740 Type '{ reviewer: string; implementer: string; round: number; startedAt: string;
     readReviewStateFn: () => ({
       reviewer: 'codex',
       implementer: 'gemini',
@@ -1042,7 +964,6 @@ test('startReviewLoop continue consumes existing fixing disposition before next 
       startedAt,
       phase: 'fixing'
     }),
-    // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(slug: string, state: Record<string
     writeReviewStateFn: () => {},
     rebaseBeforeReviewRoundFn: async () => ({ ok: true, sharedFileConflicts: false }),
     getLatestReviewForPrFn: async (prNumber, reviewerUser, sinceIso) => {
@@ -1054,7 +975,6 @@ test('startReviewLoop continue consumes existing fixing disposition before next 
       dispositions.push({ prNumber, implementerUser, sinceIso });
       return 'CHANGES_MADE';
     },
-    // @ts-expect-error TS2322 Type '(step: string, options: StartAgentOptions) => Promise<{ agent: any; }>' is
     startAgentFn: async (step, options) => {
       launches.push({ step, agent: options.agent, role: options.role });
       return { agent: null };
@@ -1090,10 +1010,8 @@ test('startReviewLoop isContinue waits long enough for delayed existing fixing d
     await startReviewLoop(TEST_SLUG, {
       isContinue: true,
       eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
-      // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       dryRun: false,
-      // @ts-expect-error TS2739 Type '{ supported: true; }' is missing the following properties from type 'Launc
       workflowLauncherStatusFn: () => ({ supported: true }),
       isForgejoReviewEnabledFn: () => true,
       forgejoAvailableFn: async () => true,
@@ -1102,7 +1020,6 @@ test('startReviewLoop isContinue waits long enough for delayed existing fixing d
       enforceTaskAssigneeFn: () => true,
       resolveForgejoUserFn: () => 'gemini',
       readTokenFn: () => 'token',
-      // @ts-expect-error TS2740 Type '{ reviewer: string; implementer: string; round: number; startedAt: string;
       readReviewStateFn: () => ({
         reviewer: 'codex',
         implementer: 'gemini',
@@ -1110,7 +1027,6 @@ test('startReviewLoop isContinue waits long enough for delayed existing fixing d
         startedAt,
         phase: 'fixing'
       }),
-      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(slug: string, state: Record<string
       writeReviewStateFn: () => {},
       rebaseBeforeReviewRoundFn: async () => ({ ok: true, sharedFileConflicts: false }),
       getLatestReviewForPrFn: async () => ({ state: 'REQUEST_CHANGES' }),
@@ -1120,7 +1036,6 @@ test('startReviewLoop isContinue waits long enough for delayed existing fixing d
       },
       pollForReviewFn: async () => 'APPROVED',
       sleepFn: async (ms) => { now += ms; },
-      // @ts-expect-error TS2322 Type '(step: string, options: StartAgentOptions) => Promise<{ agent: any; }>' is
       startAgentFn: async (step, options) => {
         launches.push({ step, agent: options.agent, role: options.role });
         return { agent: null };
@@ -1156,10 +1071,8 @@ test('startReviewLoop continue handles existing fixing dispositions', async () =
     await startReviewLoop(TEST_SLUG, {
       continue: true,
       eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
-      // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       dryRun: false,
-      // @ts-expect-error TS2739 Type '{ supported: true; }' is missing the following properties from type 'Launc
       workflowLauncherStatusFn: () => ({ supported: true }),
       isForgejoReviewEnabledFn: () => true,
       forgejoAvailableFn: async () => true,
@@ -1168,7 +1081,6 @@ test('startReviewLoop continue handles existing fixing dispositions', async () =
       enforceTaskAssigneeFn: () => true,
       resolveForgejoUserFn: () => 'gemini',
       readTokenFn: () => 'token',
-      // @ts-expect-error TS2740 Type '{ reviewer: string; implementer: string; round: number; startedAt: string;
       readReviewStateFn: () => ({
         reviewer: 'codex',
         implementer: 'gemini',
@@ -1176,7 +1088,6 @@ test('startReviewLoop continue handles existing fixing dispositions', async () =
         startedAt,
         phase: 'fixing'
       }),
-      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(slug: string, state: Record<string
       writeReviewStateFn: () => {},
       rebaseBeforeReviewRoundFn: async () => ({ ok: true, sharedFileConflicts: false }),
       getLatestReviewForPrFn: async () => ({ state: 'REQUEST_CHANGES' }),
@@ -1185,7 +1096,6 @@ test('startReviewLoop continue handles existing fixing dispositions', async () =
         return 'APPROVED';
       },
       pollForDispositionFn: async () => terminalDisposition,
-      // @ts-expect-error TS2322 Type '(step: string, options: StartAgentOptions) => Promise<{ agent: any; }>' is
       startAgentFn: async (step, options) => {
         launches.push({ step, agent: options.agent, role: options.role });
         return { agent: null };
@@ -1222,10 +1132,8 @@ test('startReviewLoop continue reviewing phase skips only when existing review i
     await startReviewLoop(TEST_SLUG, {
       continue: true,
       eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
-      // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       dryRun: false,
-      // @ts-expect-error TS2739 Type '{ supported: true; }' is missing the following properties from type 'Launc
       workflowLauncherStatusFn: () => ({ supported: true }),
       isForgejoReviewEnabledFn: () => true,
       forgejoAvailableFn: async () => true,
@@ -1234,7 +1142,6 @@ test('startReviewLoop continue reviewing phase skips only when existing review i
       enforceTaskAssigneeFn: () => true,
       resolveForgejoUserFn: () => 'gemini',
       readTokenFn: () => 'token',
-      // @ts-expect-error TS2740 Type '{ reviewer: string; implementer: string; round: number; startedAt: string;
       readReviewStateFn: () => ({
         reviewer: 'codex',
         implementer: 'gemini',
@@ -1242,7 +1149,6 @@ test('startReviewLoop continue reviewing phase skips only when existing review i
         startedAt,
         phase: 'reviewing'
       }),
-      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(slug: string, state: Record<string
       writeReviewStateFn: () => {},
       rebaseBeforeReviewRoundFn: async () => ({ ok: true, sharedFileConflicts: false }),
       pollForReviewFn: async (prNumber, reviewerUser, sinceIso, token, options) => {
@@ -1252,7 +1158,6 @@ test('startReviewLoop continue reviewing phase skips only when existing review i
         return 'APPROVED';
       },
       pollForDispositionFn: async () => 'CHANGES_MADE',
-      // @ts-expect-error TS2322 Type '(step: string, options: StartAgentOptions) => Promise<{ agent: any; }>' is
       startAgentFn: async (step, options) => {
         launches.push({ step, agent: options.agent, role: options.role });
         return { agent: null };
@@ -1358,12 +1263,10 @@ test('startReviewLoop aborts on shared-file rebase conflicts before reviewer lau
 
   await startReviewLoop(TEST_SLUG, {
     eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
-    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     implementer: 'claude',
     reviewer: 'codex',
     dryRun: false,
-    // @ts-expect-error TS2739 Type '{ supported: true; }' is missing the following properties from type 'Launc
     workflowLauncherStatusFn: () => ({ supported: true }),
     isForgejoReviewEnabledFn: () => true,
     forgejoAvailableFn: async () => true,
@@ -1373,14 +1276,12 @@ test('startReviewLoop aborts on shared-file rebase conflicts before reviewer lau
     resolveForgejoUserFn: () => 'gemini',
     readTokenFn: () => 'token',
     readReviewStateFn: () => null,
-    // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(slug: string, state: Record<string
     writeReviewStateFn: () => {},
     rebaseBeforeReviewRoundFn: async (_slug, { log, error }) => {
       error('[FAIL] Shared-file rebase conflicts detected. Autonomous review loop cannot continue safely.');
       log(`[INFO] Resolve the conflicts in the worktree, then re-run: px review ${TEST_SLUG} --start`);
       return { ok: false, sharedFileConflicts: true };
     },
-    // @ts-expect-error TS2322 Type '() => Promise<{ agent: any; }>' is not assignable to type '(step: string,
     startAgentFn: async () => {
       reviewerLaunched = true;
       return { agent: null };
@@ -1390,7 +1291,6 @@ test('startReviewLoop aborts on shared-file rebase conflicts before reviewer lau
     buildCompactActOnReviewPromptFn: () => 'act-on-review prompt',
     log: (message) => logs.push(message),
     error: (message) => errors.push(message),
-    // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(_code: number) => never'.
     exit: () => {}
   });
 
@@ -1414,12 +1314,10 @@ test('startReviewLoop aborts on non-shared-file rebase failure (e.g. push stale 
 
   await startReviewLoop(TEST_SLUG, {
     eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
-    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     implementer: 'claude',
     reviewer: 'codex',
     dryRun: false,
-    // @ts-expect-error TS2739 Type '{ supported: true; }' is missing the following properties from type 'Launc
     workflowLauncherStatusFn: () => ({ supported: true }),
     isForgejoReviewEnabledFn: () => true,
     forgejoAvailableFn: async () => true,
@@ -1429,10 +1327,8 @@ test('startReviewLoop aborts on non-shared-file rebase failure (e.g. push stale 
     resolveForgejoUserFn: () => 'claude',
     readTokenFn: () => 'token',
     readReviewStateFn: () => null,
-    // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(slug: string, state: Record<string
     writeReviewStateFn: () => {},
     rebaseBeforeReviewRoundFn: async () => ({ ok: false, sharedFileConflicts: false }),
-    // @ts-expect-error TS2322 Type '() => Promise<{ agent: any; }>' is not assignable to type '(step: string,
     startAgentFn: async () => {
       reviewerLaunched = true;
       return { agent: null };
@@ -1442,7 +1338,6 @@ test('startReviewLoop aborts on non-shared-file rebase failure (e.g. push stale 
     buildCompactActOnReviewPromptFn: () => 'act-on-review prompt',
     log: () => {},
     error: (message) => errors.push(message),
-    // @ts-expect-error TS2322 Type '(code: number) => void' is not assignable to type '(_code: number) => neve
     exit: (code) => { exitCode = code; }
   });
 
@@ -1590,7 +1485,7 @@ test('maybeUpdateGraphifyBeforeReview skips cleanly when graphify is missing', (
   const result = maybeUpdateGraphifyBeforeReview(root, {
     commandRunner() {
       const error = new Error('missing');
-      // @ts-expect-error TS2339 Property 'code' does not exist on type 'Error'.
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `code` absent from its inferred mock shape.
       error.code = 'ENOENT';
       throw error;
     },
@@ -1617,7 +1512,6 @@ test('maybeUpdateGraphifyBeforeReview runs graphify update in the mission worktr
   fs.writeFileSync(path.join(root, 'graphify-out', 'graph.json'), '{}\n');
 
   const result = maybeUpdateGraphifyBeforeReview(root, {
-    // @ts-expect-error TS2322 Type '(command: string, args: string[], options?: GitOptions) => { status: numbe
     commandRunner(command, args, options = {}) {
       calls.push({ command, args, options });
       return { status: 0, stdout: '', stderr: '' };
@@ -2020,7 +1914,6 @@ test('applyAgentFallback rewrites reviewer identity and persists state but does 
     worktree: '/tmp/visualBoard-task-test-fallback',
     taskResolution: { ok: true, taskFile: '/tmp/task.md' },
     log: () => {},
-    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'ReviewStatePersistenceResult'.
     writeReviewStateFn: (slug, st, worktree) => writes.push({ slug, state: st, worktree }),
     enforceTaskAssigneeFn: () => { throw new Error('enforceTaskAssignee must not be called for reviewer fallback'); }
   });
@@ -2049,7 +1942,6 @@ test('applyAgentFallback rewrites implementer identity on fallback without touch
     worktree: '/tmp/visualBoard-task-test-fallback',
     taskResolution: { ok: false },
     log: () => {},
-    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'ReviewStatePersistenceResult'.
     writeReviewStateFn: (slug, st, worktree) => writes.push({ slug, state: st, worktree }),
     enforceTaskAssigneeFn: () => { throw new Error('enforceTaskAssignee must not run when taskResolution.ok is false'); }
   });
@@ -2075,7 +1967,6 @@ test('applyAgentFallback enforces implementer in backlog when implementer falls 
     worktree: '/tmp/visualBoard-task-test-fallback',
     taskResolution: { ok: true, taskFile: '/tmp/task.md' },
     log: () => {},
-    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'ReviewStatePersistenceResult'.
     writeReviewStateFn: (slug, st, worktree) => writes.push({ slug, state: st, worktree }),
     enforceTaskAssigneeFn: (file, agent) => { enforced.push({ file, agent }); return true; }
   });
@@ -2122,7 +2013,6 @@ test('applyAgentFallback preserves the original roundStartedAt when rewriting st
     worktree: '/tmp/visualBoard-task-test-fallback',
     taskResolution: { ok: true, taskFile: '/tmp/task.md' },
     log: () => {},
-    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'ReviewStatePersistenceResult'.
     writeReviewStateFn: (slug, st, worktree) => writes.push({ slug, state: st, worktree }),
     enforceTaskAssigneeFn: () => true
   });
@@ -2142,7 +2032,6 @@ test('startReviewLoop polls for the fallback reviewer identity after a limit-hit
   const reviewPolls = [];
 
   await startReviewLoop('task-1028-review-fallback', {
-    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     implementer: 'custom',
     reviewer: 'claude',
@@ -2150,21 +2039,18 @@ test('startReviewLoop polls for the fallback reviewer identity after a limit-hit
     eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
     worktree: '/tmp/visualBoard-task-1028',
     maybeUpdateGraphifyBeforeReviewFn: () => ({ updated: false, skipped: true }),
-    // @ts-expect-error TS2741 Property 'agent' is missing in type '{ supported: true; detail: string; }' but r
     workflowLauncherStatusFn: () => ({ supported: true, detail: process.execPath }),
     isForgejoReviewEnabledFn: () => true,
     forgejoAvailableFn: async () => true,
     getPrStatusFn: () => ({ exists: true, state: 'open', number: 79 }),
     resolveForgejoUserFn: () => 'gemini',
     readTokenFn: () => 'fake-token',
-    // @ts-expect-error TS1117 An object literal cannot have multiple properties with the same name.
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `md` absent from its inferred mock shape.
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-1028.md' }),
     enforceTaskAssigneeFn: () => true,
     readReviewStateFn: () => null,
-    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'ReviewStatePersistenceResult'.
     writeReviewStateFn: (slug, state) => writes.push({ slug, state }),
     rebaseBeforeReviewRoundFn: async () => ({ ok: true, sharedFileConflicts: false }),
-    // @ts-expect-error TS2322 Type '(step: string, options: StartAgentOptions) => Promise<{ agent: string; res
     startAgentFn: async (step, options) => {
       if (step === 'review') {
         assert.equal(options.agent, 'claude');
@@ -2200,7 +2086,6 @@ test('startReviewLoop polls for the fallback implementer identity after a limit-
   const assigneeWrites = [];
 
   await startReviewLoop('task-1028-act-on-review-fallback', {
-    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     implementer: 'claude',
     reviewer: 'codex',
@@ -2208,24 +2093,21 @@ test('startReviewLoop polls for the fallback implementer identity after a limit-
     eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
     worktree: '/tmp/visualBoard-task-1028',
     maybeUpdateGraphifyBeforeReviewFn: () => ({ updated: false, skipped: true }),
-    // @ts-expect-error TS2741 Property 'agent' is missing in type '{ supported: true; detail: string; }' but r
     workflowLauncherStatusFn: () => ({ supported: true, detail: process.execPath }),
     isForgejoReviewEnabledFn: () => true,
     forgejoAvailableFn: async () => true,
     getPrStatusFn: () => ({ exists: true, state: 'open', number: 80 }),
     resolveForgejoUserFn: () => 'gemini',
     readTokenFn: () => 'fake-token',
-    // @ts-expect-error TS1117 An object literal cannot have multiple properties with the same name.
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `md` absent from its inferred mock shape.
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-1028.md' }),
     enforceTaskAssigneeFn: (file, agent) => {
       assigneeWrites.push({ file, agent });
       return true;
     },
     readReviewStateFn: () => null,
-    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'ReviewStatePersistenceResult'.
     writeReviewStateFn: (slug, state) => writes.push({ slug, state }),
     rebaseBeforeReviewRoundFn: async () => ({ ok: true, sharedFileConflicts: false }),
-    // @ts-expect-error TS2322 Type '(step: string, options: StartAgentOptions) => Promise<{ agent: string; res
     startAgentFn: async (step, options) => {
       if (step === 'review') {
         assert.equal(options.agent, 'codex');
@@ -2262,7 +2144,6 @@ test('review dispatches to verifyReview with inferred slug and no-gate flag', as
   const review = require('../dist/lib/review/review');
   const calls = [];
 
-  // @ts-expect-error TS2349 This expression is not callable.
   await review(['task-1031', '--verify', '--no-gate'], {
     inferSlugFn: explicit => explicit,
     verifyReviewFn: (slug, skipGate) => calls.push({ slug, skipGate })
@@ -2275,7 +2156,6 @@ test('review dispatches to commentRound with file-backed message', async () => {
   const review = require('../dist/lib/review/review');
   const calls = [];
 
-  // @ts-expect-error TS2349 This expression is not callable.
   await review(['task-1031', '--comment-file', '/tmp/review-comment.txt'], {
     inferSlugFn: explicit => explicit,
     readFileSync: () => 'Review body\n',
@@ -2289,7 +2169,6 @@ test('review prints status when no action flag is provided', async () => {
   const review = require('../dist/lib/review/review');
   const lines = [];
 
-  // @ts-expect-error TS2349 This expression is not callable.
   await review(['task-1031'], {
     inferSlugFn: explicit => explicit,
     getPrStatusFn: () => ({ exists: true, raw: 'PR #83 open' }),
@@ -2306,7 +2185,6 @@ test('review re-launches the implementer on static findings instead of starting 
   const review = require('../dist/lib/review/review');
   const calls = [];
 
-  // @ts-expect-error TS2349 This expression is not callable.
   await review(['task-1031'], {
     inferSlugFn: explicit => explicit,
     resolveWorktreeFn: () => '/tmp/mission-task-1031',
@@ -2338,7 +2216,6 @@ test('review posts zero-finding artifact but does NOT transition task when stati
   const review = require('../dist/lib/review/review');
   const calls = [];
 
-  // @ts-expect-error TS2349 This expression is not callable.
   await review(['task-1031'], {
     inferSlugFn: explicit => explicit,
     resolveWorktreeFn: () => '/tmp/mission-task-1031',
@@ -2369,22 +2246,17 @@ test('verifyReview reports success path with gate pass and persisted state', () 
     resolveWorktreeFn: () => '/tmp/mission-task-1031',
     findMissionDirFn: () => '/tmp/mission-task-1031/docs/missions/2026/task-1031',
     getCurrentBranchFn: () => 'mission/task-1031',
-    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-1031.md' }),
     getPrStatusFn: () => ({ exists: true, state: 'open', merged: false, number: 83 }),
     getTaskStatusFn: () => 'review',
     findMissionAreaFn: () => 'workflow',
-    // @ts-expect-error TS2739 Type '{ status: number; }' is missing the following properties from type 'GitRes
     runFn: () => ({ status: 0 }),
     getAcceptanceCriteriaFn: () => ['- [x] prove it'],
     formatMatrixSummaryFn: () => ['matrix line'],
-    // @ts-expect-error TS2739 Type '{}' is missing the following properties from type '{ step: string; agents:
     buildAutonomousReviewMatrixFn: () => ({}),
-    // @ts-expect-error TS2740 Type '{ reviewer: string; implementer: string; round: number; startedAt: string;
     readReviewStateFn: () => ({ reviewer: 'codex', implementer: 'claude', round: 2, startedAt: '2026-04-30T10:00:00Z' }),
     log: line => lines.push(line),
     error: line => lines.push(`ERR:${line}`),
-    // @ts-expect-error TS2322 Type '(code: number) => void' is not assignable to type '(_code: number) => neve
     exit: code => { exitCode = code; }
   });
 
@@ -2410,12 +2282,10 @@ test('verifyReview reports failure path and exits when blockers exist', () => {
     resolveTaskFileFn: () => ({ ok: false, reason: 'ambiguous', matches: ['a.md', 'b.md'] }),
     getPrStatusFn: () => ({ exists: false, raw: 'missing' }),
     formatMatrixSummaryFn: () => [],
-    // @ts-expect-error TS2739 Type '{}' is missing the following properties from type '{ step: string; agents:
     buildAutonomousReviewMatrixFn: () => ({}),
     readReviewStateFn: () => null,
     log: line => lines.push(line),
     error: line => lines.push(`ERR:${line}`),
-    // @ts-expect-error TS2322 Type '(code: number) => void' is not assignable to type '(_code: number) => neve
     exit: code => { exitCode = code; }
   });
 
@@ -2436,12 +2306,10 @@ test('readComments renders comment list when token and comments exist', async ()
     getCommentsFn: async () => [
       { kind: 'inline', location: 'workflow/lib/review/review.js:10', user: 'claude', created: 'today', body: 'Looks good' }
     ],
-    // @ts-expect-error TS2740 Type '{ reviewer: string; implementer: string; }' is missing the following prope
     readReviewStateFn: () => ({ reviewer: 'codex', implementer: 'codex' }),
     isForgejoReviewEnabledFn: () => true,
     log: line => lines.push(line),
     error: line => lines.push(`ERR:${line}`),
-    // @ts-expect-error TS2322 Type '(code: number) => void' is not assignable to type '(_code: number) => neve
     exit: code => { exitCode = code; }
   });
 
@@ -2461,14 +2329,12 @@ test('pushRound resolves forgejo user from backlog assignee and reports success'
     await review.pushRound('task-1031', {
       isForgejoReviewEnabledFn: () => false,
       resolveWorktreeFn: () => '/tmp/mission-task-1031',
-      // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-1031.md' }),
       getTaskImplementerFn: () => 'codex',
       readTokenFn: () => 'token',
       createPrFn: () => ({ ok: true }),
       log: line => lines.push(line),
       error: line => lines.push(`ERR:${line}`),
-      // @ts-expect-error TS2322 Type '(code: number) => void' is not assignable to type '(_code: number) => neve
       exit: code => { exitCode = code; }
     });
   } finally {
@@ -2488,21 +2354,17 @@ test('commentRound and submitReviewRound fail loudly on API errors', () => {
   review.commentRound('task-1031', 'body', {
     readTokenFn: () => 'token',
     postCommentFn: () => ({ ok: false, error: 'boom' }),
-    // @ts-expect-error TS2322 Type '() => { reviewer: string; implementer: string; }' is not assignable to typ
     readReviewStateFn,
     error: line => errors.push(line),
-    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'never'.
     exit: code => exits.push(code)
   });
   review.submitReviewRound('task-1031', 'approve', 'ship it', {
     readTokenFn: () => 'token',
     getPrAuthorFn: () => 'claude',
     postReviewFn: () => ({ ok: false, error: 'nope' }),
-    // @ts-expect-error TS2322 Type '() => { reviewer: string; implementer: string; }' is not assignable to typ
     readReviewStateFn,
     isForgejoReviewEnabledFn: () => true,
     error: line => errors.push(line),
-    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'never'.
     exit: code => exits.push(code)
   });
 
@@ -2519,7 +2381,6 @@ test('submitForReview exits when no forgejo user and no task implementer (task-1
   let exitCode = null;
   try {
     await review.submitForReview('task-1105', true, {
-      // @ts-expect-error TS2322 Type '{ ok: false; }' is not assignable to type '{ ok: boolean; taskFile: string
       resolveTaskFileFn: () => ({ ok: false }),
       getTaskImplementerFn: () => null,
       resolveWorktreeFn: () => '/tmp/mission-task-1105',
@@ -2528,7 +2389,6 @@ test('submitForReview exits when no forgejo user and no task implementer (task-1
         calls.push({ slug, opts });
         return { ok: true };
       },
-      // @ts-expect-error TS2322 Type '(code: number) => void' is not assignable to type '(_code: number) => neve
       exit: code => { exitCode = code; }
     });
   } finally {
@@ -2555,7 +2415,6 @@ test('submitForReview and closeMissionPr use injected handoff and close function
   let exitCode = null;
   try {
     await review.submitForReview('task-1031', true, {
-      // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-1031.md' }),
       getTaskImplementerFn: () => 'gemini',
       resolveWorktreeFn: () => '/tmp/mission-task-1031',
@@ -2564,19 +2423,16 @@ test('submitForReview and closeMissionPr use injected handoff and close function
         calls.push({ slug, opts });
         return { ok: true };
       },
-      // @ts-expect-error TS2322 Type '(code: number) => void' is not assignable to type '(_code: number) => neve
       exit: code => { exitCode = code; }
       });
 
     await review.closeMissionPr('task-1031', {
       readTokenFn: () => 'token',
-      // @ts-expect-error TS2740 Type '{ reviewer: string; implementer: string; }' is missing the following prope
       readReviewStateFn: () => ({ reviewer: 'codex', implementer: 'gemini' }),
       closePrFn: async (branch, token, user) => {
         calls.push({ branch, token, user });
         return { ok: true };
       },
-      // @ts-expect-error TS2322 Type '(code: number) => void' is not assignable to type '(_code: number) => neve
       exit: code => { exitCode = code; }
     });
   } finally {
@@ -2597,23 +2453,19 @@ test('startReviewLoop handles reviewer launch failure', async () => {
 
   await startReviewLoop(TEST_SLUG, {
       eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
-    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     implementer: 'claude',
     reviewer: 'codex',
     dryRun: false,
-    // @ts-expect-error TS2322 Type '() => { outcome: string; }' is not assignable to type '(slug: string, stat
     writeReviewStateFn: persistenceCommitted,
     error: (m) => errors.push(m),
-    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'never'.
     exit: (c) => exitCodes.push(c),
-    // @ts-expect-error TS2739 Type '{ supported: true; }' is missing the following properties from type 'Launc
     workflowLauncherStatusFn: () => ({ supported: true }),
     isForgejoReviewEnabledFn: () => true,
     forgejoAvailableFn: async () => true,
     getPrStatusFn: () => ({ exists: true, state: 'open', number: 41 }),
     maybeUpdateGraphifyBeforeReviewFn: () => {},
-    // @ts-expect-error TS1117 An object literal cannot have multiple properties with the same name.
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `md` absent from its inferred mock shape.
     resolveTaskFileFn: () => ({ ok: true, taskFile: 'task.md' }),
     enforceTaskAssigneeFn: () => true,
     rebaseBeforeReviewRoundFn: async () => ({ ok: true, sharedFileConflicts: false }),
@@ -2634,28 +2486,23 @@ test('startReviewLoop handles reviewer polling timeout with recovery', async () 
 
   await startReviewLoop(TEST_SLUG, {
       eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
-    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     implementer: 'claude',
     reviewer: 'codex',
     dryRun: false,
-    // @ts-expect-error TS2322 Type '() => { outcome: string; }' is not assignable to type '(slug: string, stat
     writeReviewStateFn: persistenceCommitted,
     log: (m) => logs.push(String(m)),
     error: (m) => errors.push(m),
-    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'never'.
     exit: (c) => exitCodes.push(c),
-    // @ts-expect-error TS2739 Type '{ supported: true; }' is missing the following properties from type 'Launc
     workflowLauncherStatusFn: () => ({ supported: true }),
     isForgejoReviewEnabledFn: () => true,
     forgejoAvailableFn: async () => true,
     getPrStatusFn: () => ({ exists: true, state: 'open', number: 41 }),
     maybeUpdateGraphifyBeforeReviewFn: () => {},
-    // @ts-expect-error TS1117 An object literal cannot have multiple properties with the same name.
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `md` absent from its inferred mock shape.
     resolveTaskFileFn: () => ({ ok: true, taskFile: 'task.md' }),
     enforceTaskAssigneeFn: () => true,
     rebaseBeforeReviewRoundFn: async () => ({ ok: true, sharedFileConflicts: false }),
-    // @ts-expect-error TS2322 Type '() => Promise<{ agent: string; }>' is not assignable to type '(step: strin
     startAgentFn: async () => {
       launchCount++;
       return { agent: 'codex' };
@@ -2680,7 +2527,6 @@ test('startReviewLoop persists reviewer retry count before recovery relaunch', a
 
   await startReviewLoop(TEST_SLUG, {
     eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
-    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     implementer: 'claude',
     reviewer: 'codex',
@@ -2688,7 +2534,6 @@ test('startReviewLoop persists reviewer retry count before recovery relaunch', a
     log: () => {},
     error: () => {},
     exit: (code) => { throw new Error(`unexpected exit ${code}`); },
-    // @ts-expect-error TS2739 Type '{ supported: true; }' is missing the following properties from type 'Launc
     workflowLauncherStatusFn: () => ({ supported: true }),
     isForgejoReviewEnabledFn: () => true,
     forgejoAvailableFn: async () => true,
@@ -2698,11 +2543,9 @@ test('startReviewLoop persists reviewer retry count before recovery relaunch', a
     rebaseBeforeReviewRoundFn: async () => ({ ok: true, sharedFileConflicts: false }),
     resolveForgejoUserFn: () => 'codex',
     readTokenFn: () => 'token',
-    // @ts-expect-error TS2322 Type '(slug: string, state: Record<string, unknown> | ReviewState) => void' is n
     writeReviewStateFn: (slug, state) => {
       events.push({ type: 'write', reviewerRetryCount: state.reviewerRetryCount, phase: state.phase });
     },
-    // @ts-expect-error TS2322 Type '(step: string) => Promise<{ agent: string; }>' is not assignable to type '
     startAgentFn: async (step) => {
       events.push({ type: 'start', step });
       return { agent: 'codex' };
@@ -2735,7 +2578,6 @@ test('startReviewLoop persists implementer retry count before recovery relaunch'
 
   await startReviewLoop(TEST_SLUG, {
     eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
-    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     implementer: 'claude',
     reviewer: 'codex',
@@ -2744,7 +2586,6 @@ test('startReviewLoop persists implementer retry count before recovery relaunch'
     log: () => {},
     error: (message) => { throw new Error(message); },
     exit: (code) => { throw new Error(`unexpected exit ${code}`); },
-    // @ts-expect-error TS2739 Type '{ supported: true; }' is missing the following properties from type 'Launc
     workflowLauncherStatusFn: () => ({ supported: true }),
     isForgejoReviewEnabledFn: () => true,
     forgejoAvailableFn: async () => true,
@@ -2754,11 +2595,9 @@ test('startReviewLoop persists implementer retry count before recovery relaunch'
     rebaseBeforeReviewRoundFn: async () => ({ ok: true, sharedFileConflicts: false }),
     resolveForgejoUserFn: () => 'codex',
     readTokenFn: () => 'token',
-    // @ts-expect-error TS2322 Type '(slug: string, state: Record<string, unknown> | ReviewState) => void' is n
     writeReviewStateFn: (slug, state) => {
       events.push({ type: 'write', implementerRetryCount: state.implementerRetryCount, phase: state.phase });
     },
-    // @ts-expect-error TS2322 Type '(step: string) => Promise<{ agent: string; }>' is not assignable to type '
     startAgentFn: async (step) => {
       events.push({ type: 'start', step });
       return { agent: step === 'review' ? 'codex' : 'claude' };
@@ -2799,14 +2638,11 @@ test('startReviewLoop does not crash with ReferenceError when taskResolution is 
       implementer: 'codex',
       reviewer: 'claude',
       dryRun: false,
-      // @ts-expect-error TS2322 Type '() => { outcome: string; }' is not assignable to type '(slug: string, stat
       writeReviewStateFn: persistenceCommitted,
       pollTimeoutSeconds: 1,
-      // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       getPrStatusFn: () => ({ exists: true, state: 'open' }),
       forgejoAvailableFn: async () => true,
-      // @ts-expect-error TS2739 Type '{ supported: true; }' is missing the following properties from type 'Launc
       workflowLauncherStatusFn: () => ({ supported: true }),
       isForgejoReviewEnabledFn: () => true,
       maybeUpdateGraphifyBeforeReviewFn: () => {},
@@ -2817,11 +2653,9 @@ test('startReviewLoop does not crash with ReferenceError when taskResolution is 
       rebaseBeforeReviewRoundFn: async () => ({ ok: true, sharedFileConflicts: false }),
       consumeReviewerArtifactsFn: async () => ({ consumed: false }),
       consumeImplementerArtifactsFn: async () => ({ consumed: false }),
-      // @ts-expect-error TS2322 Type 'Promise<{ agent: string; }>' is not assignable to type 'Promise<{ agent: s
       startAgentFn: async () => ({ agent: 'claude' }),
       applyAgentFallbackFn: (opts) => {
         fallbackCalls.push(opts);
-        // @ts-expect-error TS2339 Property 'implementer' does not exist on type '{ role: string; original: string;
         return opts.original || opts.implementer;
       },
       enforceTaskAssigneeFn: () => true,
@@ -2847,14 +2681,11 @@ test('startReviewLoop passes taskResolution to applyAgentFallback for both revie
       implementer: 'codex',
       reviewer: 'claude',
       dryRun: false,
-      // @ts-expect-error TS2322 Type '() => { outcome: string; }' is not assignable to type '(slug: string, stat
       writeReviewStateFn: persistenceCommitted,
       pollTimeoutSeconds: 1,
-      // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       getPrStatusFn: () => ({ exists: true, state: 'open' }),
       forgejoAvailableFn: async () => true,
-      // @ts-expect-error TS2739 Type '{ supported: true; }' is missing the following properties from type 'Launc
       workflowLauncherStatusFn: () => ({ supported: true }),
       isForgejoReviewEnabledFn: () => true,
       maybeUpdateGraphifyBeforeReviewFn: () => {},
@@ -2865,11 +2696,9 @@ test('startReviewLoop passes taskResolution to applyAgentFallback for both revie
       rebaseBeforeReviewRoundFn: async () => ({ ok: true, sharedFileConflicts: false }),
       consumeReviewerArtifactsFn: async () => ({ consumed: false }),
       consumeImplementerArtifactsFn: async () => ({ consumed: false }),
-      // @ts-expect-error TS2322 Type 'Promise<{ agent: string; }>' is not assignable to type 'Promise<{ agent: s
       startAgentFn: async () => ({ agent: 'codex' }),
       applyAgentFallbackFn: (opts) => {
         fallbackCalls.push(opts);
-        // @ts-expect-error TS2339 Property 'implementer' does not exist on type '{ role: string; original: string;
         return opts.original || opts.implementer;
       },
       enforceTaskAssigneeFn: () => true,
@@ -2899,17 +2728,14 @@ test('startReviewLoop repairs a persisted rewiewing typo and resumes on the revi
       isContinue: true,
       implementer: 'codex',
       reviewer: 'custom',
-      // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
       getPrStatusFn: () => ({ exists: true, state: 'open', number: 188 }),
       forgejoAvailableFn: async () => true,
-      // @ts-expect-error TS2739 Type '{ supported: true; }' is missing the following properties from type 'Launc
       workflowLauncherStatusFn: () => ({ supported: true }),
       isForgejoReviewEnabledFn: () => true,
       maybeUpdateGraphifyBeforeReviewFn: () => {},
       readTokenFn: () => 'fake-token',
-      // @ts-expect-error TS2740 Type '{ reviewer: string; implementer: string; round: number; startedAt: string;
       readReviewStateFn: () => ({
         reviewer: 'custom',
         implementer: 'codex',
@@ -2918,12 +2744,10 @@ test('startReviewLoop repairs a persisted rewiewing typo and resumes on the revi
         phase: 'rewiewing',
         disposition: null
       }),
-      // @ts-expect-error TS2322 Type 'number' is not assignable to type 'ReviewStatePersistenceResult'.
       writeReviewStateFn: (slug, state) => writes.push({ slug, phase: state.phase, phaseOriginal: state.phaseOriginal }),
       rebaseBeforeReviewRoundFn: async () => ({ ok: true, sharedFileConflicts: false }),
       consumeReviewerArtifactsFn: async () => ({ consumed: false }),
       consumeImplementerArtifactsFn: async () => ({ consumed: false }),
-      // @ts-expect-error TS2322 Type '(mode: string) => Promise<{ agent: string; }>' is not assignable to type '
       startAgentFn: async (mode) => {
         launches.push(mode);
         return { agent: mode === 'review' ? 'custom' : 'codex' };
@@ -2932,9 +2756,7 @@ test('startReviewLoop repairs a persisted rewiewing typo and resumes on the revi
         reviewPolls += 1;
         return reviewPolls === 1 ? null : 'APPROVED';
       },
-      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(slug: string, newStatus: string, {
       transitionTaskFn: () => {},
-      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(transitionTaskFn: TransitionTaskFn
       transitionVirtualFn: () => {},
       applyAgentFallbackFn: ({ original }) => original,
       runPreReviewGateFn: passingPreReviewGate
@@ -2956,11 +2778,9 @@ test('startReviewLoop does not crash with ReferenceError in dry-run mode', async
       implementer: 'codex',
       reviewer: 'claude',
       dryRun: true,
-      // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       getPrStatusFn: () => ({ exists: true, state: 'open' }),
       forgejoAvailableFn: async () => true,
-      // @ts-expect-error TS2739 Type '{ supported: true; }' is missing the following properties from type 'Launc
       workflowLauncherStatusFn: () => ({ supported: true }),
       isForgejoReviewEnabledFn: () => true,
       maybeUpdateGraphifyBeforeReviewFn: () => {}
@@ -2982,7 +2802,6 @@ test('startReviewLoop allows single-family fallback when only implementer family
   // codex (implementer) is the only supported launcher → single-family fallback must be authorized.
   await startReviewLoop(TEST_SLUG, {
     eligibleAgentsForStepFn: () => ['codex', 'claude'],
-    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     implementer: 'codex',
     // reviewer not specified → auto-derived
@@ -2990,14 +2809,11 @@ test('startReviewLoop allows single-family fallback when only implementer family
     ...isolatedDryRun,
     log: m => logs.push(m),
     error: m => errors.push(m),
-    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'never'.
     exit: c => exitCodes.push(c),
     reviewerForFn: () => 'claude',
-    // @ts-expect-error TS2741 Property 'agent' is missing in type '{ supported: boolean; detail: string; }' bu
     workflowLauncherStatusFn: a => ({ supported: a === 'codex', detail: 'mock' }),
     fallbackForFn: () => null,
     formatMatrixSummaryFn: () => [],
-    // @ts-expect-error TS2739 Type '{}' is missing the following properties from type '{ step: string; agents:
     buildAutonomousReviewMatrixFn: () => ({})
   });
 
@@ -3018,13 +2834,11 @@ test('startReviewLoop accepts same-family when explicit even if a different-fami
   const { exitCode, errors, logs } = await captureExit(() => {
     return startReviewLoop(TEST_SLUG, {
       eligibleAgentsForStepFn: () => ['codex', 'claude'],
-      // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       implementer: 'codex',
       reviewer: 'codex', // explicit same-family
       dryRun: true,
       ...isolatedDryRun,
-      // @ts-expect-error TS2741 Property 'agent' is missing in type '{ supported: true; detail: string; }' but r
       workflowLauncherStatusFn: () => ({ supported: true, detail: 'mock' })
     });
   });
@@ -3043,7 +2857,6 @@ test('startReviewLoop rejects when no different-family reviewer and implementer 
   const { exitCode, errors } = await captureExit(() => {
     return startReviewLoop(TEST_SLUG, {
       eligibleAgentsForStepFn: () => ['codex', 'claude'],
-      // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       implementer: 'codex',
       dryRun: true,
@@ -3051,11 +2864,9 @@ test('startReviewLoop rejects when no different-family reviewer and implementer 
       // no-runnable-route failure. dryRun prevents any provider I/O.
       isForgejoReviewEnabledFn: () => true,
       reviewerForFn: () => 'claude',
-      // @ts-expect-error TS2741 Property 'agent' is missing in type '{ supported: false; detail: string; }' but
       workflowLauncherStatusFn: () => ({ supported: false, detail: 'mock' }), // ALL blocked
       fallbackForFn: () => null,
       formatMatrixSummaryFn: () => [],
-      // @ts-expect-error TS2739 Type '{}' is missing the following properties from type '{ step: string; agents:
       buildAutonomousReviewMatrixFn: () => ({})
     });
   });
@@ -3076,25 +2887,20 @@ test('startReviewLoop keeps persisted same-family reviewer after re-derive block
   // The mission removes the re-derive block, so the persisted reviewer remains in place.
   await startReviewLoop(TEST_SLUG, {
     eligibleAgentsForStepFn: () => ['codex', 'claude'],
-    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     implementer: 'codex',
     dryRun: true,
     ...isolatedDryRun,
-    // @ts-expect-error TS2740 Type '{ reviewer: string; implementer: string; round: number; }' is missing the
     readReviewStateFn: () => ({ reviewer: 'codex', implementer: 'codex', round: 1 }), // persisted same-family
     // Resuming persisted state commits the selected identity snapshot before
     // entering the loop; keep this unit test independent of a mission directory.
     writeReviewStateFn: persistenceCommitted,
     log: m => logs.push(m),
     error: () => {},
-    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'never'.
     exit: c => exitCodes.push(c),
-    // @ts-expect-error TS2741 Property 'agent' is missing in type '{ supported: true; detail: string; }' but r
     workflowLauncherStatusFn: () => ({ supported: true, detail: 'mock' }), // Both now available
     fallbackForFn: () => null,
     formatMatrixSummaryFn: () => [],
-    // @ts-expect-error TS2739 Type '{}' is missing the following properties from type '{ step: string; agents:
     buildAutonomousReviewMatrixFn: () => ({})
   });
 
@@ -3113,15 +2919,12 @@ test('startReviewLoop continue falls back to the persisted reviewer when an expl
   const { exitCode, errors, logs } = await captureExit(() => {
     return startReviewLoop(TEST_SLUG, {
       eligibleAgentsForStepFn: () => ['codex', 'claude', 'custom', 'vibe'],
-      // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       implementer: 'custom',
       reviewer: 'vibe',
       isContinue: true,
       dryRun: false,
-      // @ts-expect-error TS2322 Type '() => { outcome: string; }' is not assignable to type '(slug: string, stat
       writeReviewStateFn: persistenceCommitted,
-      // @ts-expect-error TS2740 Type '{ reviewer: string; implementer: string; round: number; startedAt: string;
       readReviewStateFn: () => ({
         reviewer: 'codex',
         implementer: 'custom',
@@ -3132,20 +2935,16 @@ test('startReviewLoop continue falls back to the persisted reviewer when an expl
       }),
       maybeUpdateGraphifyBeforeReviewFn: () => {},
       isForgejoReviewEnabledFn: () => false,
-      // @ts-expect-error TS2741 Property 'agent' is missing in type '{ supported: boolean; detail: string; }' bu
       workflowLauncherStatusFn: (agent) => ({ supported: agent !== 'vibe', detail: `${agent} --help` }),
       rebaseBeforeReviewRoundFn: async () => ({ ok: true, sharedFileConflicts: false }),
       consumeReviewerArtifactsFn: async () => ({ consumed: true, ok: true, reviewState: 'APPROVED' }),
       consumeImplementerArtifactsFn: async () => ({ consumed: false }),
-      // @ts-expect-error TS2322 Type '(mode: string, opts: StartAgentOptions) => Promise<{ agent: string; result
       startAgentFn: async (mode, opts) => {
         launches.push({ mode, agent: opts.agent });
         return { agent: opts.agent, result: { startedAt: '2026-07-04T19:20:00.000Z' } };
       },
       pollForReviewFn: async () => 'APPROVED',
-      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(slug: string, newStatus: string, {
       transitionTaskFn: () => {},
-      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(transitionTaskFn: TransitionTaskFn
       transitionVirtualFn: () => {},
       applyAgentFallbackFn: ({ original }) => original
     });
@@ -3176,10 +2975,8 @@ test('startReviewLoop resolves task file from the mission worktree (regression)'
     ...isolatedDryRun,
     worktree: '/tmp/mission-worktree',
     readReviewStateFn: () => null,
-    // @ts-expect-error TS2739 Type '{ supported: true; }' is missing the following properties from type 'Launc
     workflowLauncherStatusFn: () => ({ supported: true }),
     maybeUpdateGraphifyBeforeReviewFn: () => {},
-    // @ts-expect-error TS2322 Type '(slug: string, worktree: string) => { ok: false; }' is not assignable to t
     resolveTaskFileFn: (slug, worktree) => {
       resolvedWorktree = worktree;
       return { ok: false };
@@ -3235,21 +3032,16 @@ test('commentRound appends metadata footer to message', () => {
   commentRound('task-meta-2', 'Test comment body', {
     readTokenFn: () => 'token',
     postCommentFn: (branch, token, message) => { posted = message; return { ok: true }; },
-    // @ts-expect-error TS2740 Type '{ reviewer: string; implementer: string; }' is missing the following prope
     readReviewStateFn: () => ({ reviewer: 'codex', implementer: 'codex' }),
     buildMetadataFooterFn: () => '\n\n---\n`[workflow-round:2, workflow-phase:reviewing]`',
-    // @ts-expect-error TS2322 Type '() => { outcome: string; }' is not assignable to type '(slug: string, stat
     writeReviewStateFn: persistenceCommitted,
     rootDir: '/tmp/visualBoard-task-meta-2',
     log: () => {},
     error: () => {},
-    // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(_code: number) => never'.
     exit: () => {}
   });
 
-  // @ts-expect-error TS18047 'posted' is possibly 'null'.
   assert.ok(posted.startsWith('Test comment body'));
-  // @ts-expect-error TS18047 'posted' is possibly 'null'.
   assert.ok(posted.includes('[workflow-round:2, workflow-phase:reviewing]'));
 });
 
@@ -3259,22 +3051,17 @@ test('submitReviewRound appends metadata footer to review message', () => {
   submitReviewRound('task-meta-3', 'approve', 'Looks good', {
     readTokenFn: () => 'token',
     postReviewFn: (branch, token, outcome, message) => { posted = message; return { ok: true }; },
-    // @ts-expect-error TS2740 Type '{ reviewer: string; implementer: string; }' is missing the following prope
     readReviewStateFn: () => ({ reviewer: 'codex', implementer: 'codex' }),
     buildMetadataFooterFn: () => '\n\n---\n`[workflow-round:1, workflow-phase:reviewing]`',
-    // @ts-expect-error TS2322 Type '() => { outcome: string; }' is not assignable to type '(slug: string, stat
     writeReviewStateFn: persistenceCommitted,
     worktree: '/tmp/visualBoard-task-meta-3',
     isForgejoReviewEnabledFn: () => true,
     log: () => {},
     error: () => {},
-    // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(_code: number) => never'.
     exit: () => {}
   });
 
-  // @ts-expect-error TS18047 'posted' is possibly 'null'.
   assert.ok(posted.startsWith('Looks good'));
-  // @ts-expect-error TS18047 'posted' is possibly 'null'.
   assert.ok(posted.includes('[workflow-round:1, workflow-phase:reviewing]'));
 });
 
@@ -3330,12 +3117,10 @@ test('commentRound persists review state after successful post', () => {
       readReviewStateFn: () => new ReviewState('task-persist-1', {
         reviewer: 'codex', implementer: 'claude', round: 1, phase: 'reviewing'
       }),
-      // @ts-expect-error TS2322 Type '(slug: string, state: Record<string, unknown> | ReviewState, worktree: str
       writeReviewStateFn: (slug, state, worktree) => { stateWritten = { slug, state, worktree }; },
       rootDir: '/tmp/visualBoard-task-persist-1',
       log: () => {},
       error: () => {},
-      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(_code: number) => never'.
       exit: () => {}
     });
   } finally {
@@ -3344,7 +3129,6 @@ test('commentRound persists review state after successful post', () => {
   }
 
   assert.ok(stateWritten, 'writeReviewStateFn must be called after successful comment post');
-  // @ts-expect-error TS2339 Property 'slug' does not exist on type 'never'.
   assert.equal(stateWritten.slug, 'task-persist-1');
 });
 
@@ -3360,12 +3144,10 @@ test('commentRound does not persist state when no state exists', () => {
       postCommentFn: () => ({ ok: true }),
       buildMetadataFooterFn: () => '',
       readReviewStateFn: () => null,
-      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(slug: string, state: Record<string
       writeReviewStateFn: () => { writeCount++; },
       rootDir: '/tmp/visualBoard-task-persist-2',
       log: () => {},
       error: () => {},
-      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(_code: number) => never'.
       exit: () => {}
     });
   } finally {
@@ -3392,7 +3174,6 @@ test('submitReviewRound persists state with REQUEST_CHANGES disposition after re
       readReviewStateFn: () => new ReviewState('task-persist-3', {
         reviewer: 'codex', implementer: 'claude', round: 1, phase: 'reviewing'
       }),
-      // @ts-expect-error TS2322 Type '(slug: string, state: Record<string, unknown> | ReviewState) => void' is n
       writeReviewStateFn: (slug, state) => { stateWritten = { slug, disposition: state.disposition, phase: state.phase }; },
       transitionTaskFn: (slug, status) => {
         backlogTransitioned = { slug, status };
@@ -3401,7 +3182,6 @@ test('submitReviewRound persists state with REQUEST_CHANGES disposition after re
       worktree: '/tmp/visualBoard-task-persist-3',
       log: () => {},
       error: () => {},
-      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(_code: number) => never'.
       exit: () => {}
     });
   } finally {
@@ -3410,9 +3190,7 @@ test('submitReviewRound persists state with REQUEST_CHANGES disposition after re
   }
 
   assert.ok(stateWritten, 'writeReviewStateFn must be called after successful review post');
-  // @ts-expect-error TS2339 Property 'disposition' does not exist on type 'never'.
   assert.equal(stateWritten.disposition, 'REQUEST_CHANGES');
-  // @ts-expect-error TS2339 Property 'phase' does not exist on type 'never'.
   assert.equal(stateWritten.phase, 'fixing');
   assert.deepEqual(backlogTransitioned, { slug: 'task-persist-3', status: 'review' });
 });
@@ -3433,7 +3211,6 @@ test('submitReviewRound persists state with APPROVED disposition after approve',
       readReviewStateFn: () => new ReviewState('task-persist-4', {
         reviewer: 'codex', implementer: 'claude', round: 1, phase: 'reviewing'
       }),
-      // @ts-expect-error TS2322 Type '(slug: string, state: Record<string, unknown> | ReviewState) => void' is n
       writeReviewStateFn: (slug, state) => { stateWritten = { slug, disposition: state.disposition, phase: state.phase }; },
       transitionTaskFn: (slug, status) => {
         backlogTransitioned = { slug, status };
@@ -3442,7 +3219,6 @@ test('submitReviewRound persists state with APPROVED disposition after approve',
       worktree: '/tmp/visualBoard-task-persist-4',
       log: () => {},
       error: () => {},
-      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(_code: number) => never'.
       exit: () => {}
     });
   } finally {
@@ -3451,9 +3227,7 @@ test('submitReviewRound persists state with APPROVED disposition after approve',
   }
 
   assert.ok(stateWritten, 'writeReviewStateFn must be called after successful review post');
-  // @ts-expect-error TS2339 Property 'disposition' does not exist on type 'never'.
   assert.equal(stateWritten.disposition, 'APPROVED');
-  // @ts-expect-error TS2339 Property 'phase' does not exist on type 'never'.
   assert.equal(stateWritten.phase, 'approved');
   assert.deepEqual(backlogTransitioned, { slug: 'task-persist-4', status: 'approved' });
 });
@@ -3471,12 +3245,10 @@ test('submitReviewRound promotes an active backlog task to review after provider
       readTokenFn: () => 'token',
       postReviewFn: () => ({ ok: true }),
       buildMetadataFooterFn: () => '',
-      // @ts-expect-error TS2322 Type '() => { outcome: string; }' is not assignable to type '(slug: string, stat
       writeReviewStateFn: persistenceCommitted,
       readReviewStateFn: () => new ReviewState('task-2197', {
         reviewer: 'codex', implementer: 'claude', round: 1, phase: 'reviewing'
       }),
-      // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-2197.md' }),
       getTaskStatusFn: () => 'active',
       transitionTaskFn: (slug, status) => {
@@ -3486,7 +3258,6 @@ test('submitReviewRound promotes an active backlog task to review after provider
       worktree: '/tmp/visualBoard-task-2197',
       log: () => {},
       error: () => {},
-      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(_code: number) => never'.
       exit: () => {}
     });
   } finally {
@@ -3538,7 +3309,6 @@ test('submitReviewRound keeps YAML and rendered task status aligned when provide
       readTokenFn: () => 'token',
       postReviewFn: () => ({ ok: true }),
       buildMetadataFooterFn: () => '',
-      // @ts-expect-error TS2322 Type '() => { outcome: string; }' is not assignable to type '(slug: string, stat
       writeReviewStateFn: persistenceCommitted,
       readReviewStateFn: () => new ReviewState('task-2198', {
         reviewer: 'codex', implementer: 'claude', round: 1, phase: 'reviewing'
@@ -3546,7 +3316,6 @@ test('submitReviewRound keeps YAML and rendered task status aligned when provide
       worktree: root,
       log: () => {},
       error: () => {},
-      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(_code: number) => never'.
       exit: () => {}
     });
 
@@ -3594,7 +3363,6 @@ test('submitReviewRound skips Forgejo and updates review-state only when provide
     submitReviewRound('task-test', 'approve', 'Test approval', {
       isForgejoReviewEnabledFn: () => false, // Simulate provider=none
       readReviewStateFn: () => null, // No existing state
-      // @ts-expect-error TS2322 Type '(slug: string, state: Record<string, unknown> | ReviewState) => void' is n
       writeReviewStateFn: (slug, state) => {
         stateWritten = { slug, disposition: state.disposition, phase: state.phase, implementer: state.implementer };
       },
@@ -3605,7 +3373,6 @@ test('submitReviewRound skips Forgejo and updates review-state only when provide
       worktree,
       log: () => {},
       error: () => {},
-      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(_code: number) => never'.
       exit: () => {}
     });
   } finally {
@@ -3619,18 +3386,13 @@ test('submitReviewRound skips Forgejo and updates review-state only when provide
 
   // Verify review-state was written with correct values
   assert.ok(stateWritten, 'writeReviewStateFn must be called');
-  // @ts-expect-error TS2339 Property 'disposition' does not exist on type 'never'.
   assert.equal(stateWritten.disposition, 'APPROVED');
-  // @ts-expect-error TS2339 Property 'phase' does not exist on type 'never'.
   assert.equal(stateWritten.phase, 'approved');
-  // @ts-expect-error TS2339 Property 'implementer' does not exist on type 'never'.
   assert.equal(stateWritten.implementer, 'custom');
 
   // Verify backlog task was transitioned
   assert.ok(backlogTransitioned, 'transitionTaskFn must be called');
-  // @ts-expect-error TS2339 Property 'slug' does not exist on type 'never'.
   assert.equal(backlogTransitioned.slug, 'task-test');
-  // @ts-expect-error TS2339 Property 'status' does not exist on type 'never'.
   assert.equal(backlogTransitioned.status, 'approved');
 });
 
@@ -3656,7 +3418,6 @@ test('submitReviewRound updates existing state when provider=none', () => {
     submitReviewRound('task-exist', 'request-changes', 'Needs work', {
       isForgejoReviewEnabledFn: () => false, // Simulate provider=none
       readReviewStateFn: () => existingState,
-      // @ts-expect-error TS2322 Type '(slug: string, state: Record<string, unknown> | ReviewState) => void' is n
       writeReviewStateFn: (slug, state) => {
         stateWritten = { slug, disposition: state.disposition, phase: state.phase };
       },
@@ -3667,7 +3428,6 @@ test('submitReviewRound updates existing state when provider=none', () => {
       worktree: '/tmp/test-worktree',
       log: () => {},
       error: () => {},
-      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(_code: number) => never'.
       exit: () => {}
     });
   } finally {
@@ -3679,16 +3439,12 @@ test('submitReviewRound updates existing state when provider=none', () => {
 
   // Verify review-state was updated
   assert.ok(stateWritten, 'writeReviewStateFn must be called');
-  // @ts-expect-error TS2339 Property 'disposition' does not exist on type 'never'.
   assert.equal(stateWritten.disposition, 'REQUEST_CHANGES');
-  // @ts-expect-error TS2339 Property 'phase' does not exist on type 'never'.
   assert.equal(stateWritten.phase, 'fixing');
 
   // Verify backlog task was transitioned to review
   assert.ok(backlogTransitioned, 'transitionTaskFn must be called');
-  // @ts-expect-error TS2339 Property 'slug' does not exist on type 'never'.
   assert.equal(backlogTransitioned.slug, 'task-exist');
-  // @ts-expect-error TS2339 Property 'status' does not exist on type 'never'.
   assert.equal(backlogTransitioned.status, 'review');
 });
 
@@ -3704,23 +3460,18 @@ test('startReviewLoop persists PUSHBACK_ALL before returning to reviewing', asyn
     maxAttempts: 1,
     log: () => {},
     error: () => {},
-    // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(_code: number) => never'.
     exit: () => {},
-    // @ts-expect-error TS2739 Type '{ supported: true; }' is missing the following properties from type 'Launc
     workflowLauncherStatusFn: () => ({ supported: true }),
     isForgejoReviewEnabledFn: () => true,
     forgejoAvailableFn: async () => true,
     getPrStatusFn: () => ({ exists: true, state: 'open', number: 50 }),
     maybeUpdateGraphifyBeforeReviewFn: () => {},
-    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: 'task.md' }),
     enforceTaskAssigneeFn: () => true,
     resolveForgejoUserFn: () => 'codex',
     readTokenFn: () => 'token',
     readReviewStateFn: () => null,
-    // @ts-expect-error TS2322 Type '(slug: string, state: Record<string, unknown> | ReviewState) => void' is n
     writeReviewStateFn: (slug, state) => { stateWrites.push({ slug, disposition: state.disposition, phase: state.phase }); },
-    // @ts-expect-error TS2322 Type 'Promise<{ agent: any; }>' is not assignable to type 'Promise<{ agent: stri
     startAgentFn: async () => ({ agent: null }),
     rebaseBeforeReviewRoundFn: async () => ({ ok: true, sharedFileConflicts: false }),
     consumeReviewerArtifactsFn: async () => ({ consumed: false }),
@@ -3749,23 +3500,18 @@ test('startReviewLoop persists BLOCKED disposition before returning', async () =
     maxAttempts: 1,
     log: () => {},
     error: () => {},
-    // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(_code: number) => never'.
     exit: () => {},
-    // @ts-expect-error TS2739 Type '{ supported: true; }' is missing the following properties from type 'Launc
     workflowLauncherStatusFn: () => ({ supported: true }),
     isForgejoReviewEnabledFn: () => true,
     forgejoAvailableFn: async () => true,
     getPrStatusFn: () => ({ exists: true, state: 'open', number: 51 }),
     maybeUpdateGraphifyBeforeReviewFn: () => {},
-    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: 'task.md' }),
     enforceTaskAssigneeFn: () => true,
     resolveForgejoUserFn: () => 'codex',
     readTokenFn: () => 'token',
     readReviewStateFn: () => null,
-    // @ts-expect-error TS2322 Type '(slug: string, state: Record<string, unknown> | ReviewState) => void' is n
     writeReviewStateFn: (slug, state) => { stateWrites.push({ slug, disposition: state.disposition, phase: state.phase }); },
-    // @ts-expect-error TS2322 Type 'Promise<{ agent: any; }>' is not assignable to type 'Promise<{ agent: stri
     startAgentFn: async () => ({ agent: null }),
     rebaseBeforeReviewRoundFn: async () => ({ ok: true, sharedFileConflicts: false }),
     consumeReviewerArtifactsFn: async () => ({ consumed: false }),
@@ -3794,23 +3540,18 @@ test('startReviewLoop persists PARKED disposition before returning', async () =>
     maxAttempts: 1,
     log: () => {},
     error: () => {},
-    // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(_code: number) => never'.
     exit: () => {},
-    // @ts-expect-error TS2739 Type '{ supported: true; }' is missing the following properties from type 'Launc
     workflowLauncherStatusFn: () => ({ supported: true }),
     isForgejoReviewEnabledFn: () => true,
     forgejoAvailableFn: async () => true,
     getPrStatusFn: () => ({ exists: true, state: 'open', number: 52 }),
     maybeUpdateGraphifyBeforeReviewFn: () => {},
-    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: 'task.md' }),
     enforceTaskAssigneeFn: () => true,
     resolveForgejoUserFn: () => 'codex',
     readTokenFn: () => 'token',
     readReviewStateFn: () => null,
-    // @ts-expect-error TS2322 Type '(slug: string, state: Record<string, unknown> | ReviewState) => void' is n
     writeReviewStateFn: (slug, state) => { stateWrites.push({ slug, disposition: state.disposition, phase: state.phase }); },
-    // @ts-expect-error TS2322 Type 'Promise<{ agent: any; }>' is not assignable to type 'Promise<{ agent: stri
     startAgentFn: async () => ({ agent: null }),
     rebaseBeforeReviewRoundFn: async () => ({ ok: true, sharedFileConflicts: false }),
     consumeReviewerArtifactsFn: async () => ({ consumed: false }),
@@ -3839,23 +3580,18 @@ test('startReviewLoop persists CHANGES_MADE disposition before continuing', asyn
     maxAttempts: 2,
     log: () => {},
     error: () => {},
-    // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(_code: number) => never'.
     exit: () => {},
-    // @ts-expect-error TS2739 Type '{ supported: true; }' is missing the following properties from type 'Launc
     workflowLauncherStatusFn: () => ({ supported: true }),
     isForgejoReviewEnabledFn: () => true,
     forgejoAvailableFn: async () => true,
     getPrStatusFn: () => ({ exists: true, state: 'open', number: 53 }),
     maybeUpdateGraphifyBeforeReviewFn: () => {},
-    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: 'task.md' }),
     enforceTaskAssigneeFn: () => true,
     resolveForgejoUserFn: () => 'codex',
     readTokenFn: () => 'token',
     readReviewStateFn: () => null,
-    // @ts-expect-error TS2322 Type '(slug: string, state: Record<string, unknown> | ReviewState) => void' is n
     writeReviewStateFn: (slug, state) => { stateWrites.push({ slug, disposition: state.disposition, phase: state.phase }); },
-    // @ts-expect-error TS2322 Type 'Promise<{ agent: any; }>' is not assignable to type 'Promise<{ agent: stri
     startAgentFn: async () => ({ agent: null }),
     rebaseBeforeReviewRoundFn: async () => ({ ok: true, sharedFileConflicts: false }),
     consumeReviewerArtifactsFn: async () => ({ consumed: false }),
@@ -3885,28 +3621,21 @@ test('startReviewLoop consumes reviewer and implementer artifacts before polling
     maxAttempts: 1,
     log: () => {},
     error: () => {},
-    // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(_code: number) => never'.
     exit: () => {},
-    // @ts-expect-error TS2739 Type '{ supported: true; }' is missing the following properties from type 'Launc
     workflowLauncherStatusFn: () => ({ supported: true }),
     isForgejoReviewEnabledFn: () => true,
     forgejoAvailableFn: async () => true,
     getPrStatusFn: () => ({ exists: true, state: 'open', number: 54 }),
     maybeUpdateGraphifyBeforeReviewFn: () => {},
-    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: 'task.md' }),
     enforceTaskAssigneeFn: () => true,
     resolveForgejoUserFn: () => 'codex',
     readTokenFn: () => 'token',
     readReviewStateFn: () => null,
-    // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(slug: string, state: Record<string
     writeReviewStateFn: () => {},
-    // @ts-expect-error TS2322 Type 'Promise<{ agent: any; }>' is not assignable to type 'Promise<{ agent: stri
     startAgentFn: async () => ({ agent: null }),
     rebaseBeforeReviewRoundFn: async () => ({ ok: true, sharedFileConflicts: false }),
-    // @ts-expect-error TS2739 Type '{ consumed: boolean; ok: boolean; reviewState: string; }' is missing the f
     consumeReviewerArtifactsFn: () => ({ consumed: true, ok: true, reviewState: 'REQUEST_CHANGES' }),
-    // @ts-expect-error TS2739 Type '{ consumed: boolean; ok: boolean; disposition: string; }' is missing the f
     consumeImplementerArtifactsFn: () => ({ consumed: true, ok: true, disposition: 'PARKED' }),
     pollForReviewFn: async () => { reviewPolls++; return 'REQUEST_CHANGES'; },
     pollForDispositionFn: async () => { dispositionPolls++; return 'PARKED'; },
@@ -4168,7 +3897,6 @@ test('startReviewLoop returns early with guidance when task is active and no PR 
   const { exitCode, errors, logs } = await captureExit(() => {
     return startReviewLoop(TEST_SLUG, {
       eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
-      // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       getTaskStatusFn: () => 'active',
       getTaskImplementerFn: () => 'codex',
@@ -4198,7 +3926,6 @@ test('startReviewLoop returns early with guidance when task maps to virtual acti
   const { exitCode, logs } = await captureExit(() => {
     return startReviewLoop(TEST_SLUG, {
       eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
-      // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       getTaskStatusFn: () => 'in-progress',
       toVirtualFn: (status) => status === 'in-progress' ? 'active' : status,
@@ -4230,7 +3957,6 @@ test('startReviewLoop self-heals via handoff and recovers when task is review an
   const { exitCode, errors, logs } = await captureExit(() => {
     return startReviewLoop(TEST_SLUG, {
       eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
-      // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       getTaskStatusFn: () => 'review',
       getTaskImplementerFn: () => 'codex',
@@ -4252,18 +3978,14 @@ test('startReviewLoop self-heals via handoff and recovers when task is review an
       implementer: 'codex',
       reviewer: 'claude',
       dryRun: false,
-      // @ts-expect-error TS2322 Type '() => { outcome: string; }' is not assignable to type '(slug: string, stat
       writeReviewStateFn: persistenceCommitted
     });
   });
 
   // Self-heal called with the implementer identity and worktree.
   assert.ok(handoffArgs, 'performHandoffFn should be called');
-  // @ts-expect-error TS2339 Property 'slug' does not exist on type 'never'.
   assert.equal(handoffArgs.slug, TEST_SLUG);
-  // @ts-expect-error TS2339 Property 'opts' does not exist on type 'never'.
   assert.equal(handoffArgs.opts.forgejoUser, 'codex');
-  // @ts-expect-error TS2339 Property 'opts' does not exist on type 'never'.
   assert.ok('worktree' in handoffArgs.opts, 'worktree should be threaded into handoff');
   // Did NOT exit for the PR-missing reason; recovery was logged.
   assert.notEqual(exitCode, 1);
@@ -4277,7 +3999,6 @@ test('startReviewLoop emits --push fallback (not --submit) when handoff fails fo
   const { exitCode, errors } = await captureExit(() => {
     return startReviewLoop(TEST_SLUG, {
       eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
-      // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       getTaskStatusFn: () => 'review',
       getTaskImplementerFn: () => 'codex',
@@ -4305,7 +4026,6 @@ test('startReviewLoop emits --push fallback when handoff ok but no PR appears (c
   const { exitCode, errors } = await captureExit(() => {
     return startReviewLoop(TEST_SLUG, {
       eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
-      // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       getTaskStatusFn: () => 'approved',
       getTaskImplementerFn: () => 'codex',
@@ -4334,7 +4054,6 @@ test('startReviewLoop short-circuits on gatekeeper pushback without launching re
   const { exitCode, errors } = await captureExit(() => {
     return startReviewLoop(TEST_SLUG, {
       eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
-      // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       getTaskStatusFn: () => 'review',
       getTaskImplementerFn: () => 'codex',
@@ -4342,7 +4061,6 @@ test('startReviewLoop short-circuits on gatekeeper pushback without launching re
       forgejoAvailableFn: async () => true,
       getPrStatusFn: () => ({ exists: false, state: 'closed' }),
       performHandoffFn: async () => ({ ok: true, gatekeeperPushedBack: true }),
-      // @ts-expect-error TS2322 Type '() => {}' is not assignable to type '(step: string, opts?: StartAgentOptio
       startAgentFn: () => { reviewerLaunched = true; return {}; },
       maybeUpdateGraphifyBeforeReviewFn: () => {},
       implementer: 'codex',
@@ -4363,7 +4081,6 @@ test('startReviewLoop never self-heals in dry-run (crit. 7)', async () => {
   const { logs } = await captureExit(() => {
     return startReviewLoop(TEST_SLUG, {
       eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
-      // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       getTaskStatusFn: () => 'review',
       getTaskImplementerFn: () => 'codex',
@@ -4376,7 +4093,6 @@ test('startReviewLoop never self-heals in dry-run (crit. 7)', async () => {
       implementer: 'codex',
       reviewer: 'claude',
       dryRun: true,
-      // @ts-expect-error TS2322 Type '() => { outcome: string; }' is not assignable to type '(slug: string, stat
       writeReviewStateFn: persistenceCommitted
     });
   });
@@ -4391,7 +4107,6 @@ test('startReviewLoop hard-fails when task cannot be resolved and no PR exists',
   const { exitCode, errors, logs } = await captureExit(() => {
     return startReviewLoop(TEST_SLUG, {
       eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
-      // @ts-expect-error TS2322 Type '{ ok: false; }' is not assignable to type '{ ok: boolean; taskFile: string
       resolveTaskFileFn: () => ({ ok: false }),
       getTaskStatusFn: () => null,
       getTaskImplementerFn: () => 'codex',

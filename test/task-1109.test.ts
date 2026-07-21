@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -86,7 +85,6 @@ test('integrate full squash-merge (Variant B) success path', async (t) => {
   const logs = [];
   console.log = (msg) => logs.push(msg);
   
-  // @ts-expect-error TS2349 This expression is not callable.
   integrate([TEST_SLUG, '--no-integration-gates']);
   
   assert.ok(logs.some(l => l.includes('Selecting integration variant: Variant B')));
@@ -123,7 +121,6 @@ test('integrate Variant B promotes a review-approved task only after the squash 
   });
   const integrate = loadIntegrate();
 
-  // @ts-expect-error TS2349 This expression is not callable.
   integrate([TEST_SLUG, '--no-integration-gates']);
 
   assert.ok(events.indexOf('abort') < events.indexOf('squash'));
@@ -151,7 +148,6 @@ test('integrate Variant B preserves soft-reset backlog noise across squash merge
   });
   const integrate = loadIntegrate();
 
-  // @ts-expect-error TS2349 This expression is not callable.
   integrate([TEST_SLUG, '--no-integration-gates']);
 
   const diffIndex = gitCalls.findIndex(call => call.includes('diff --cached --binary'));
@@ -181,14 +177,18 @@ test('integrate resolves PR and approval using the task assignee Forgejo identit
   };
   mock.method(backlog, 'getTaskAssignee', () => 'gemini');
   mock.method(forgejo, 'getPrStatus', (_branch, _rootDir, options = {}) => {
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `prForgejoUser` absent from its inferred mock shape.
     captured.prForgejoUser = options.forgejoUser || null;
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `forgejoUser` absent from its inferred mock shape.
     if (options.forgejoUser !== 'gemini') {
       return { exists: false, error: 'api-failed', raw: 'failed to resolve PR for mission/task-integrate-v2' };
     }
     return { exists: true, state: 'open', merged: false, number: 41 };
   });
   mock.method(forgejo, 'getLatestReviewDecision', (_branch, options = {}) => {
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `approvalForgejoUser` absent from its inferred mock shape.
     captured.approvalForgejoUser = options.forgejoUser || null;
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `forgejoUser` absent from its inferred mock shape.
     if (options.forgejoUser !== 'gemini') {
       return { ok: false, error: 'api-failed', reviewState: null };
     }
@@ -206,7 +206,6 @@ test('integrate resolves PR and approval using the task assignee Forgejo identit
   mock.method(process, 'exit', (code) => exitCodes.push(code));
 
   try {
-    // @ts-expect-error TS2349 This expression is not callable.
     integrate([TEST_SLUG, '--dry-run', '--no-integration-gates']);
 
     assert.equal(captured.prForgejoUser, 'gemini');
@@ -236,10 +235,12 @@ test('integrate passes the pre-resolved Forgejo token into syncMerged', () => {
     return readTokenCalls <= 2 ? 'preflight-token' : null;
   });
   mock.method(forgejo, 'getPrStatus', (_branch, _rootDir, options = {}) => {
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `prToken` absent from its inferred mock shape.
     captured.prToken = options.token || null;
     return { exists: true, state: 'open', merged: false, number: 41 };
   });
   mock.method(forgejo, 'getLatestReviewDecision', (_branch, options = {}) => {
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `approvalToken` absent from its inferred mock shape.
     captured.approvalToken = options.token || null;
     return { ok: true, reviewState: 'APPROVED' };
   });
@@ -250,7 +251,6 @@ test('integrate passes the pre-resolved Forgejo token into syncMerged', () => {
   console.log = (msg) => logs.push(msg);
 
   try {
-    // @ts-expect-error TS2349 This expression is not callable.
     integrate([TEST_SLUG, '--no-integration-gates']);
 
     assert.equal(captured.prToken, 'preflight-token');
@@ -276,7 +276,6 @@ test('integrate rejects a Forgejo PR that is already merged', async (t) => {
   console.error = (msg) => errors.push(msg);
   mock.method(process, 'exit', (code) => exitCodes.push(code));
   
-  // @ts-expect-error TS2349 This expression is not callable.
   integrate([TEST_SLUG, '--no-integration-gates']);
   
   const output = [...logs, ...errors].join('\n');
@@ -298,7 +297,6 @@ test('integrate warns that --no-gate is ignored', () => {
   const originalLog = console.log;
   console.log = (msg) => logs.push(msg);
 
-  // @ts-expect-error TS2349 This expression is not callable.
   integrate([TEST_SLUG, '--dry-run', '--no-gate', '--no-integration-gates']);
 
   assert.ok(logs.some(l => l.includes('integrate ignores --no-gate')));
@@ -310,7 +308,6 @@ test('integrate warns that --no-gate is ignored', () => {
 
 test('integrate exits non-zero when post-integration stats recording fails', () => {
   setupMocks();
-  // @ts-expect-error TS2339 Property 'mock' does not exist on type '(options?: {}) => { report: string; meta
   stats.recordIntegrationStats.mock.mockImplementation((args) => {
     statsCalls.push(args);
     throw new Error('stats write failed');
@@ -322,7 +319,6 @@ test('integrate exits non-zero when post-integration stats recording fails', () 
   console.error = (msg) => errors.push(msg);
   mock.method(process, 'exit', (code) => exitCodes.push(code));
 
-  // @ts-expect-error TS2349 This expression is not callable.
   integrate([TEST_SLUG, '--no-integration-gates']);
 
   assert.equal(statsCalls.length, 1);
@@ -347,7 +343,6 @@ test('integrate reports merged-PR recovery guidance before any closeout work', (
   console.error = (msg) => errors.push(msg);
   mock.method(process, 'exit', (code) => exitCodes.push(code));
 
-  // @ts-expect-error TS2349 This expression is not callable.
   integrate([TEST_SLUG, '--no-integration-gates']);
 
   const output = [...logs, ...errors].join('\n');
@@ -385,7 +380,6 @@ test('integrate Variant B stops when dry-run merge cannot be aborted cleanly', (
   console.error = (msg) => errors.push(msg);
   mock.method(process, 'exit', (code) => exitCodes.push(code));
 
-  // @ts-expect-error TS2349 This expression is not callable.
   integrate([TEST_SLUG, '--no-integration-gates']);
 
   assert.ok(errors.some(l => l.includes('Dry-run merge could not be aborted cleanly')));
@@ -419,7 +413,6 @@ test('integrate Variant B resumed partial state prints sync diagnostics on sync 
   console.error = (msg) => errors.push(msg);
   mock.method(process, 'exit', (code) => exitCodes.push(code));
 
-  // @ts-expect-error TS2349 This expression is not callable.
   integrate([TEST_SLUG, '--no-integration-gates']);
 
   assert.ok(logs.some(l => l.includes('Resuming from sync-merged step')));
@@ -457,7 +450,6 @@ test('integrate Variant B conflict path prints conflicting files and helper guid
   console.error = (msg) => errors.push(msg);
   mock.method(process, 'exit', (code) => exitCodes.push(code));
 
-  // @ts-expect-error TS2349 This expression is not callable.
   integrate([TEST_SLUG, '--no-integration-gates']);
 
   assert.ok(errors.some(l => l.includes('Merge conflicts detected. Rebase the mission branch before integrating.')));
@@ -513,7 +505,6 @@ test('recordPostIntegrationStats keeps operator-owned stats outside git', () => 
     const { recordPostIntegrationStats } = loadIntegrate();
     const outcome = recordPostIntegrationStats('task-1109', {
       rootDir: FAKE_ROOT,
-      // @ts-expect-error TS2353 Object literal may only specify known properties, and 'gitRunner' does not exist
       gitRunner(args) {
         gitCalls.push(args);
         if (args.join(' ').includes('log -1 --format=%cs')) {

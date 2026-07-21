@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -84,10 +83,8 @@ test('detectRebaseState reports active rebase with detached head and unmerged fi
   const calls = [];
 
   const result = git.detectRebaseState('/tmp/repo', {
-    // @ts-expect-error TS2740 Type '{ existsSync(target: any): boolean; }' is missing the following properties
     fsModule,
     pathModule,
-    // @ts-expect-error TS2322 Type '(args: string[]) => { status: number; stdout: string; stderr: string; }' i
     gitRunner(args) {
       calls.push(args);
       if (args.includes('rev-parse')) {
@@ -130,10 +127,8 @@ test('detectRebaseState reports active rebase with detached head and unmerged fi
 
 test('detectRebaseState reports false for a clean worktree with no rebase activity', () => {
   const result = git.detectRebaseState('/tmp/repo', {
-    // @ts-expect-error TS2740 Type '{ existsSync: () => false; }' is missing the following properties from typ
     fsModule: { existsSync: () => false },
     pathModule: require('path'),
-    // @ts-expect-error TS2322 Type '(args: string[]) => { status: number; stdout: string; stderr: string; }' i
     gitRunner(args) {
       if (args.includes('rev-parse')) {
         return { status: 0, stdout: '.git\n', stderr: '' };
@@ -162,10 +157,8 @@ test('detectRebaseState reports false for a clean worktree with no rebase activi
 
 test('detectRebaseState reports false once rebase metadata is gone and head is attached', () => {
   const result = git.detectRebaseState('/tmp/repo', {
-    // @ts-expect-error TS2740 Type '{ existsSync: () => false; }' is missing the following properties from typ
     fsModule: { existsSync: () => false },
     pathModule: require('path'),
-    // @ts-expect-error TS2322 Type '(args: string[]) => { status: number; stdout: string; stderr: string; }' i
     gitRunner(args) {
       if (args.includes('rev-parse')) {
         return { status: 0, stdout: '.git\n', stderr: '' };

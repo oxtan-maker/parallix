@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 /**
  * Regression test for task-1391: TypeScript import-equals syntax errors.

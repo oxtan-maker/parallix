@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 /**
  * Reproduction test for task-1396: `import * as missionStart` in active.ts
@@ -46,7 +45,7 @@ test('active delegates without invoking a legacy missionStartFn namespace object
 
   // Verify the namespace object is NOT callable (this is the bug).
   assert.throws(
-    // @ts-expect-error TS2349 This expression is not callable.
+// @ts-expect-error -- Legacy fixture deliberately exercises a duplicate or partial object-literal runtime shape.
     () => namespaceObj(['task-1396'], { returnResult: true }),
     TypeError,
     'namespace object must not be callable — this is the task-1396 bug',
@@ -59,7 +58,6 @@ test('active delegates without invoking a legacy missionStartFn namespace object
   try {
     // active() calls missionStartFn([slug], { returnResult: true }) at the
     // preflight step. With a namespace object, this throws TypeError.
-    // @ts-expect-error TS2349 This expression is not callable.
     await active(['task-1396'], {
       missionStartFn: namespaceObj,
       service: { execute: async () => ({ status: 'completed', value: { agent: 'codex' }, durableEvidence: [] }) },
@@ -84,7 +82,6 @@ test('active succeeds when missionStartFn is the default export function (task-1
   // active() should call fn([slug], { returnResult: true }) and get { pass: true },
   // then continue to resolveWorktreeFn which we also stub.
   let launched = false;
-  // @ts-expect-error TS2349 This expression is not callable.
   await active(['task-1396'], {
     missionStartFn: fn,
     service: { execute: async () => {

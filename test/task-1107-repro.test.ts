@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -51,7 +50,6 @@ test('rebaseBeforeReviewRound auto-commits safe mission artifacts before rebase'
   const result = await rebaseBeforeReviewRound(slug, {
     worktree: '/tmp/worktree',
     isForgejoReviewEnabledFn: () => true,
-    // @ts-expect-error TS2322 Type '(args: string[]) => { status: number; stdout: string; stderr: string; }' i
     gitFn: (args) => {
       gitCalls.push(args);
       if (args.includes('status')) {
@@ -88,7 +86,6 @@ test('rebaseBeforeReviewRound invokes px.ts through tsx in a source checkout', a
     const result = await rebaseBeforeReviewRound(slug, {
       worktree: root,
       isForgejoReviewEnabledFn: () => true,
-      // @ts-expect-error TS2741 mock only supplies fields read by the helper
       gitFn: () => ({ status: 0, stdout: '', stderr: '' }),
       runFn: (command, args) => {
         calls.push({ command, args });
@@ -114,7 +111,6 @@ test('rebaseBeforeReviewRound parses rename, copy, and space paths from porcelai
   const result = await rebaseBeforeReviewRound(slug, {
     worktree: '/tmp/worktree',
     isForgejoReviewEnabledFn: () => true,
-    // @ts-expect-error TS2322 Type '(args: string[]) => { status: number; stdout: string; stderr: string; }' i
     gitFn: (args) => {
       gitCalls.push(args);
       if (args.includes('status')) {
@@ -150,7 +146,6 @@ test('rebaseBeforeReviewRound refuses rename or copy records with unsafe sources
   const result = await rebaseBeforeReviewRound(slug, {
     worktree: '/tmp/worktree',
     isForgejoReviewEnabledFn: () => true,
-    // @ts-expect-error TS2322 Type '(args: string[]) => { status: number; stdout: string; stderr: string; }' i
     gitFn: (args) => {
       if (args.includes('status')) {
         return {
@@ -181,7 +176,6 @@ test('rebaseBeforeReviewRound refuses to auto-commit when unsafe files are prese
   const result = await rebaseBeforeReviewRound(slug, {
     worktree: '/tmp/worktree',
     isForgejoReviewEnabledFn: () => true,
-    // @ts-expect-error TS2322 Type '(args: string[]) => { status: number; stdout: string; stderr: string; }' i
     gitFn: (args) => {
       if (args.includes('status')) {
         return { status: 0, stdout: porcelainZ([` M docs/missions/2026/${slug}/MISSION.md`, ' M workflow/lib/review/review.js']), stderr: '' };
@@ -204,7 +198,6 @@ test('rebaseBeforeReviewRound ignores workflow-generated runtime state when chec
   const result = await rebaseBeforeReviewRound(slug, {
     worktree: '/tmp/worktree',
     isForgejoReviewEnabledFn: () => true,
-    // @ts-expect-error TS2322 Type '(args: string[]) => { status: number; stdout: string; stderr: string; }' i
     gitFn: (args) => {
       if (args.includes('status')) {
         return {
@@ -236,7 +229,6 @@ test('rebaseBeforeReviewRound refuses to auto-commit when unmerged conflicts exi
   const result = await rebaseBeforeReviewRound(slug, {
     worktree: '/tmp/worktree',
     isForgejoReviewEnabledFn: () => true,
-    // @ts-expect-error TS2322 Type '(args: string[]) => { status: number; stdout: string; stderr: string; }' i
     gitFn: (args) => {
       if (args.includes('status')) {
         return { status: 0, stdout: porcelainZ([`UU docs/missions/2026/${slug}/MISSION.md`]), stderr: '' };
@@ -260,7 +252,6 @@ test('rebaseBeforeReviewRound reports shared-file rebase conflicts', async () =>
   const result = await rebaseBeforeReviewRound(slug, {
     worktree: '/tmp/worktree',
     isForgejoReviewEnabledFn: () => true,
-    // @ts-expect-error TS2741 Property 'signal' is missing in type '{ status: number; stdout: string; stderr:
     gitFn: () => ({ status: 0, stdout: '', stderr: '' }),
     runFn: () => ({
       status: 1,
@@ -324,7 +315,6 @@ test('rebaseBeforeReviewRound reports missing Forgejo token failure from rebase 
   const result = await rebaseBeforeReviewRound(slug, {
     worktree: '/tmp/worktree',
     isForgejoReviewEnabledFn: () => true,
-    // @ts-expect-error TS2741 Property 'signal' is missing in type '{ status: number; stdout: string; stderr:
     gitFn: () => ({ status: 0, stdout: '', stderr: '' }),
     runFn: () => ({
       status: 1,
@@ -348,7 +338,6 @@ test('rebaseBeforeReviewRound reports generic rebase failure', async () => {
   const result = await rebaseBeforeReviewRound(slug, {
     worktree: '/tmp/worktree',
     isForgejoReviewEnabledFn: () => true,
-    // @ts-expect-error TS2741 Property 'signal' is missing in type '{ status: number; stdout: string; stderr:
     gitFn: () => ({ status: 0, stdout: '', stderr: '' }),
     runFn: () => ({
       status: 1,

@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -53,7 +52,6 @@ test('integrate guard', async (t) => {
     errorOutput = '';
 
     try {
-      // @ts-expect-error TS2349 This expression is not callable.
       await integrate(['task-1086']);
     } catch (err) {
       if (err.message !== 'process.exit called') throw err;
@@ -83,7 +81,6 @@ test('integrate guard', async (t) => {
     errorOutput = '';
 
     try {
-      // @ts-expect-error TS2349 This expression is not callable.
       await integrate(['task-1086']);
     } catch (err) {
       if (err.message !== 'process.exit called') throw err;
@@ -114,7 +111,6 @@ test('integrate guard', async (t) => {
     errorOutput = '';
 
     try {
-      // @ts-expect-error TS2349 This expression is not callable.
       // A missing slug reaches the usage guard immediately after the agent
       // authorization check. This test covers authorization only and must not
       // proceed into integration preflight or Forgejo discovery.

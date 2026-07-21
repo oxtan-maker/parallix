@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 'use strict';
 
@@ -95,9 +94,7 @@ test('startOpencodeAgent does not hang when the real export capture times out', 
     stderr: '',
   }));
   const hangingChild = new EventEmitter();
-  // @ts-expect-error TS2339 Property 'stdout' does not exist on type 'EventEmitter<any>'.
   hangingChild.stdout = new EventEmitter();
-  // @ts-expect-error TS2339 Property 'kill' does not exist on type 'EventEmitter<any>'.
   hangingChild.kill = () => { hangingChild.killed = true; };
   opencode.__setExportCaptureForTest((sessionId, opts) =>
     captureOpencodeExport(sessionId, { ...opts, timeoutMs: 50, spawn: () => hangingChild }));
@@ -107,7 +104,6 @@ test('startOpencodeAgent does not hang when the real export capture times out', 
 
   assert.equal(result.sessionId, 'ses_neverexits');
   assert.equal(result.telemetry, undefined, 'timed-out export must not fabricate telemetry');
-  // @ts-expect-error TS2339 Property 'killed' does not exist on type 'EventEmitter<any>'.
   assert.equal(hangingChild.killed, true, 'the hung export child must be killed');
 });
 

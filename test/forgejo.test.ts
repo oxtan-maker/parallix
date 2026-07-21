@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -578,10 +577,8 @@ test('createPr uses a plain push when the branch is absent from the review remot
   const result = createPr(branch, user, token, { rootDir, apiCall, log: () => {}, forceWithLease: true });
   assert.strictEqual(result.ok, true);
   assert.ok(pushArgs, 'a git push should be attempted');
-  // @ts-expect-error TS2339 Property 'includes' does not exist on type 'never'.
   assert.ok(pushArgs.includes(branch), 'push should target the mission branch');
   assert.ok(
-    // @ts-expect-error TS2339 Property 'some' does not exist on type 'never'.
     !pushArgs.some(a => typeof a === 'string' && a.startsWith('--force-with-lease')),
     'first push of a new branch must not use --force-with-lease'
   );
@@ -977,7 +974,6 @@ test('syncMerged pushes landed commit, marks PR merged, and deletes the remote b
 
   assert.equal(result.ok, true);
   assert.equal(result.prNumber, 97);
-  // @ts-expect-error TS2339 Property 'branchDeleted' does not exist on type '{ ok: boolean; error: string; p
   assert.equal(result.branchDeleted, true);
   assert.deepEqual(
     calls.filter(call => call.type === 'push').map(call => [call.sourceRef, call.destinationRef]),
@@ -1603,17 +1599,13 @@ test('syncMerged fails on 409 Conflict if commits do NOT match', () => {
 
   assert.equal(result.ok, false, 'Should NOT be ok if SHAs do not match');
   assert.equal(result.error, 'merge-conflict-sha-mismatch');
-  // @ts-expect-error TS2339 Property 'baseSha' does not exist on type '{ ok: boolean; error: string; prNumbe
   assert.equal(result.baseSha, 'some-other-sha');
 });
 
 test('forgejoAvailable returns true when Forgejo is reachable', async () => {
   const req = new EventEmitter();
-  // @ts-expect-error TS2339 Property 'destroy' does not exist on type 'EventEmitter<any>'.
   req.destroy = mock.fn();
-  // @ts-expect-error TS2339 Property 'end' does not exist on type 'EventEmitter<any>'.
   req.end = mock.fn(() => {
-    // @ts-expect-error TS2339 Property '_onResponse' does not exist on type 'EventEmitter<any>'.
     process.nextTick(() => req._onResponse({ statusCode: 200 }));
   });
 
@@ -1621,24 +1613,19 @@ test('forgejoAvailable returns true when Forgejo is reachable', async () => {
     request(url, options, onResponse) {
       assert.equal(String(url), 'http://localhost:3300/');
       assert.equal(options.method, 'GET');
-      // @ts-expect-error TS2339 Property '_onResponse' does not exist on type 'EventEmitter<any>'.
       req._onResponse = onResponse;
       return req;
     }
   });
 
   assert.strictEqual(result, true, 'Forgejo should be reachable');
-  // @ts-expect-error TS2339 Property 'end' does not exist on type 'EventEmitter<any>'.
   assert.equal(req.end.mock.callCount(), 1);
-  // @ts-expect-error TS2339 Property 'destroy' does not exist on type 'EventEmitter<any>'.
   assert.equal(req.destroy.mock.callCount(), 1);
 });
 
 test('forgejoAvailable returns false when Forgejo is unreachable', async () => {
   const req = new EventEmitter();
-  // @ts-expect-error TS2339 Property 'destroy' does not exist on type 'EventEmitter<any>'.
   req.destroy = mock.fn();
-  // @ts-expect-error TS2339 Property 'end' does not exist on type 'EventEmitter<any>'.
   req.end = mock.fn(() => {
     process.nextTick(() => req.emit('error', new Error('ECONNREFUSED')));
   });
@@ -1647,14 +1634,12 @@ test('forgejoAvailable returns false when Forgejo is unreachable', async () => {
     request(url, options, onResponse) {
       assert.equal(String(url), 'http://127.0.0.1:3301/');
       assert.equal(options.timeout, 5000);
-      // @ts-expect-error TS2339 Property '_onResponse' does not exist on type 'EventEmitter<any>'.
       req._onResponse = onResponse;
       return req;
     }
   });
 
   assert.strictEqual(result, false, 'Forgejo should be unreachable');
-  // @ts-expect-error TS2339 Property 'end' does not exist on type 'EventEmitter<any>'.
   assert.equal(req.end.mock.callCount(), 1);
 });
 
@@ -1846,7 +1831,6 @@ test('getPrNumber API failure returns structured error with _apiError and _notFo
 
   assert.ok(result && typeof result === 'object', 'Should return structured error object');
   assert.ok(result._apiError, 'Should include _apiError');
-  // @ts-expect-error TS2339 Property 'status' does not exist on type 'object'.
   assert.equal(result._apiError.status, 7);
   assert.equal(result._notFound, true);
 });
@@ -2260,7 +2244,6 @@ test('fetchReviewBranch uses force-update refspec to handle rebased branches', (
   fetchReviewBranch('mission/task-regression', '/tmp/fake-root');
 
   assert.ok(capturedArgs, 'git should have been called');
-  // @ts-expect-error TS2339 Property 'find' does not exist on type 'never'.
   const refspec = capturedArgs.find(a => a.includes('refs/heads/'));
   assert.ok(refspec, 'refspec argument should be present');
   assert.ok(
@@ -2284,11 +2267,8 @@ test('fetchReviewBranch forces a C locale so git diagnostics are English', (t) =
   fetchReviewBranch('mission/task-1317', '/tmp/fake-root');
 
   assert.ok(capturedOptions, 'git should have been called with options');
-  // @ts-expect-error TS2339 Property 'env' does not exist on type 'never'.
   assert.ok(capturedOptions.env, 'fetch should pass an env override');
-  // @ts-expect-error TS2339 Property 'env' does not exist on type 'never'.
   assert.strictEqual(capturedOptions.env.LC_ALL, 'C', 'LC_ALL must be forced to C');
-  // @ts-expect-error TS2339 Property 'env' does not exist on type 'never'.
   assert.strictEqual(capturedOptions.env.LANG, 'C', 'LANG must be forced to C');
 });
 
@@ -2317,9 +2297,7 @@ test('fetchReviewBranch uses authenticated review url when a token is available'
     assert.ok(capturedArgs, 'git should have been called');
     const baseUrl = process.env.FORGEJO_URL || 'http://localhost:3300';
     assert.ok(
-      // @ts-expect-error TS2339 Property 'includes' does not exist on type 'never'.
       capturedArgs.includes(`http://codex:token-123@${baseUrl.replace(/^https?:\/\//, '')}/magnus/testproj.git`),
-      // @ts-expect-error TS2339 Property 'join' does not exist on type 'never'.
       `expected authenticated fetch url, got: ${capturedArgs.join(' ')}`
     );
   } finally {
@@ -2404,7 +2382,6 @@ test('ensureRemoteBaseBranch mirrors an existing local base branch with a force 
       return { status: 0, stdout: '', stderr: '' };
     };
 
-    // @ts-expect-error TS2322 Type '(args: any) => { status: number; stdout: string; stderr: string; }' is not
     const result = ensureRemoteBaseBranch('feat/x', 'mistral', 'token-456', root, { gitRunner });
     assert.equal(result.ok, true);
     assert.ok(calls.some(args => args.includes('push') && args.includes('--force') && args.includes('feat/x:feat/x')),
@@ -2422,7 +2399,6 @@ test('ensureRemoteBaseBranch fails when the base branch is absent locally', () =
     if (args.includes('show-ref')) return { status: 1, stdout: '', stderr: '' };
     return { status: 0, stdout: '', stderr: '' };
   };
-  // @ts-expect-error TS2322 Type '(args: any) => { status: number; stdout: string; stderr: string; }' is not
   const result = ensureRemoteBaseBranch('feat/missing', 'mistral', 'token-456', process.cwd(), { gitRunner });
   assert.equal(result.ok, false);
   assert.match(result.error, /does not exist locally/);

@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -57,9 +56,7 @@ test('fmt.bold and fmt.dim', () => {
 
 test('fmt.table preserves falsy values like 0 and false', () => {
   const rendered = fmt.table([
-    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
     ['count', 0],
-    // @ts-expect-error TS2322 Type 'boolean' is not assignable to type 'string'.
     ['flag', false]
   ], { indent: 0, colPadding: 1 });
   assert.ok(rendered.includes('0'), 'expected "0" to be rendered');

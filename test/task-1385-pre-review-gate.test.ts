@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -115,7 +114,6 @@ test('runPreReviewGate passes when gate command succeeds', async () => {
     const logs = [];
     const errors = [];
     const result = await runPreReviewGate('task-1385', root, {
-      // @ts-expect-error TS2741 Property 'signal' is missing in type '{ status: number; stdout: string; stderr:
       runFn: () => ({ status: 0, stdout: 'ok\n', stderr: '' }),
       findMissionAreaFn: () => 'docs',
       log: (msg) => logs.push(msg),
@@ -145,7 +143,6 @@ test('runPreReviewGate fails when gate command fails', async () => {
     const logs = [];
     const errors = [];
     const result = await runPreReviewGate('task-1385', root, {
-      // @ts-expect-error TS2741 Property 'signal' is missing in type '{ status: number; stdout: string; stderr:
       runFn: () => ({ status: 1, stdout: '', stderr: '' }),
       findMissionAreaFn: () => 'docs',
       log: (msg) => logs.push(msg),
@@ -174,7 +171,6 @@ test('runPreReviewGate passes when no verification gate is configured', async ()
     const logs = [];
     const errors = [];
     const result = await runPreReviewGate('task-1385', root, {
-      // @ts-expect-error TS2741 Property 'signal' is missing in type '{ status: number; stdout: string; stderr:
       runFn: () => ({ status: 99, stdout: '', stderr: '' }),
       findMissionAreaFn: () => 'docs',
       log: (msg) => logs.push(msg),
@@ -204,7 +200,6 @@ test('runPreReviewGate captures stdout and stderr on failure', async () => {
     const logs = [];
     const errors = [];
     const result = await runPreReviewGate('task-1385', root, {
-      // @ts-expect-error TS2741 Property 'signal' is missing in type '{ status: number; stdout: string; stderr:
       runFn: () => ({ status: 2, stdout: 'out\n', stderr: 'err\n' }),
       findMissionAreaFn: () => 'docs',
       log: (msg) => logs.push(msg),
@@ -239,7 +234,6 @@ test('runPreReviewGate resolves mission area from mission directory', async () =
     const logs = [];
     const errors = [];
     const result = await runPreReviewGate('task-1385', root, {
-      // @ts-expect-error TS2741 Property 'signal' is missing in type '{ status: number; stdout: string; stderr:
       runFn: () => ({ status: 0, stdout: 'area-test\n', stderr: '' }),
       findMissionAreaFn: () => 'task-1385',
       log: (msg) => logs.push(msg),
@@ -273,11 +267,8 @@ test('handleGateFailureAutoBounce bounces on first failure', async () => {
 
     const result = await handleGateFailureAutoBounce('task-1385', root, gateResult, 'codex', {
       readReviewStateFn: () => null,
-      // @ts-expect-error TS2322 Type '(slug: string, state: Record<string, unknown> | ReviewState) => void' is n
       writeReviewStateFn: (slug, state) => { stateWritten = state; },
-      // @ts-expect-error TS2322 Type '(slug: string, status: string) => void' is not assignable to type '(slug:
       transitionTaskFn: (slug, status) => { },
-      // @ts-expect-error TS2322 Type '(mode: string, opts: StartAgentOptions) => Promise<{ agent: string; }>' is
       startAgentFn: async (mode, opts) => {
         launches.push({ mode, hasPrompt: !!opts.prompt });
         return { agent: 'codex' };
@@ -294,7 +285,6 @@ test('handleGateFailureAutoBounce bounces on first failure', async () => {
     assert.equal(launches.length, 1);
     assert.equal(launches[0].hasPrompt, true);
     assert.ok(stateWritten);
-    // @ts-expect-error TS2339 Property 'metadata' does not exist on type 'never'.
     assert.equal(stateWritten.metadata.gateFailureRetryCount, 1);
   });
 });
@@ -314,11 +304,8 @@ test('handleGateFailureAutoBounce rebounces a gate failure with arbitrary test o
       error: 'verification gate failed with exit code 1',
     }, 'codex', {
       readReviewStateFn: () => null,
-      // @ts-expect-error minimal review state is sufficient for this behavior test.
       writeReviewStateFn: () => {},
-      // @ts-expect-error transition arguments are asserted below.
       transitionTaskFn: (slug, status) => { transitions.push({ slug, status }); },
-      // @ts-expect-error launcher behavior is limited to a successful relaunch.
       startAgentFn: async (mode, opts) => {
         const prompt = typeof opts.prompt === 'function' ? opts.prompt('codex') : opts.prompt;
         launches.push({ mode, prompt });
@@ -354,13 +341,9 @@ test('handleGateFailureAutoBounce bounces on second failure', async () => {
     const persistedState = { metadata: { gateFailureRetryCount: 1 } };
 
     const result = await handleGateFailureAutoBounce('task-1385', root, gateResult, 'codex', {
-      // @ts-expect-error TS2740 Type '{ metadata: { gateFailureRetryCount: number; }; }' is missing the followin
       readReviewStateFn: () => persistedState,
-      // @ts-expect-error TS2322 Type '(slug: string, state: Record<string, unknown> | ReviewState) => void' is n
       writeReviewStateFn: (slug, state) => { stateWritten.push(state); },
-      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(slug: string, newStatus: string, {
       transitionTaskFn: () => { },
-      // @ts-expect-error TS2322 Type '(mode: string) => Promise<{ agent: string; }>' is not assignable to type '
       startAgentFn: async (mode) => {
         launches.push(mode);
         return { agent: 'codex' };
@@ -397,11 +380,8 @@ test('handleGateFailureAutoBounce strands when retry limit exceeded', async () =
     const persistedState = { metadata: { gateFailureRetryCount: 2 } };
 
     const result = await handleGateFailureAutoBounce('task-1385', root, gateResult, 'codex', {
-      // @ts-expect-error TS2740 Type '{ metadata: { gateFailureRetryCount: number; }; }' is missing the followin
       readReviewStateFn: () => persistedState,
-      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(slug: string, state: Record<string
       writeReviewStateFn: () => {},
-      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(slug: string, newStatus: string, {
       transitionTaskFn: () => {},
       startAgentFn: async () => { throw new Error('should not launch'); },
       applyAgentFallbackFn: () => 'codex',
@@ -433,11 +413,8 @@ test('handleGateFailureAutoBounce does not bounce for InfraBlocker (HumanOnly)',
 
     const result = await handleGateFailureAutoBounce('task-1385', root, gateResult, 'codex', {
       readReviewStateFn: () => null,
-      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(slug: string, state: Record<string
       writeReviewStateFn: () => {},
-      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(slug: string, newStatus: string, {
       transitionTaskFn: () => {},
-      // @ts-expect-error TS2322 Type '() => Promise<void>' is not assignable to type '(step: string, opts?: Star
       startAgentFn: async () => { launches.push('should-not-launch'); },
       applyAgentFallbackFn: () => 'codex',
       log: () => {},
@@ -470,11 +447,8 @@ test('handleGateFailureAutoBounce does not bounce for StateMachineViolation (Hum
 
     const result = await handleGateFailureAutoBounce('task-1385', root, gateResult, 'codex', {
       readReviewStateFn: () => null,
-      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(slug: string, state: Record<string
       writeReviewStateFn: () => {},
-      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(slug: string, newStatus: string, {
       transitionTaskFn: () => {},
-      // @ts-expect-error TS2322 Type '() => Promise<void>' is not assignable to type '(step: string, opts?: Star
       startAgentFn: async () => { launches.push('should-not-launch'); },
       applyAgentFallbackFn: () => 'codex',
       log: () => {},
@@ -505,11 +479,8 @@ test('handleGateFailureAutoBounce includes gate output in fix prompt', async () 
 
     await handleGateFailureAutoBounce('task-1385', root, gateResult, 'codex', {
       readReviewStateFn: () => null,
-      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(slug: string, state: Record<string
       writeReviewStateFn: () => {},
-      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(slug: string, newStatus: string, {
       transitionTaskFn: () => {},
-      // @ts-expect-error TS2322 Type '(mode: string, opts: StartAgentOptions) => Promise<{ agent: string; }>' is
       startAgentFn: async (mode, opts) => {
         const prompt = typeof opts.prompt === 'function' ? opts.prompt('codex') : opts.prompt;
         capturedPrompt = prompt;
@@ -550,13 +521,9 @@ test('handleGateFailureAutoBounce increments retry count in persisted state', as
     const persisted = { metadata: { gateFailureRetryCount: 0, existing: 'data' } };
 
     await handleGateFailureAutoBounce('task-1385', root, gateResult, 'codex', {
-      // @ts-expect-error TS2740 Type '{ metadata: { gateFailureRetryCount: number; existing: string; }; }' is mi
       readReviewStateFn: () => persisted,
-      // @ts-expect-error TS2322 Type '(slug: string, state: Record<string, unknown> | ReviewState) => void' is n
       writeReviewStateFn: (slug, state) => { capturedState = state; },
-      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(slug: string, newStatus: string, {
       transitionTaskFn: () => {},
-      // @ts-expect-error TS2322 Type 'Promise<{ agent: string; }>' is not assignable to type 'Promise<{ agent: s
       startAgentFn: async () => ({ agent: 'codex' }),
       applyAgentFallbackFn: () => 'codex',
       log: () => {},
@@ -566,9 +533,7 @@ test('handleGateFailureAutoBounce increments retry count in persisted state', as
     });
 
     assert.ok(capturedState);
-    // @ts-expect-error TS2339 Property 'metadata' does not exist on type 'never'.
     assert.equal(capturedState.metadata.gateFailureRetryCount, 1);
-    // @ts-expect-error TS2339 Property 'metadata' does not exist on type 'never'.
     assert.equal(capturedState.metadata.existing, 'data');
   });
 });

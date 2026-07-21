@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 const test = require('node:test');
 const { mock } = test;
@@ -177,7 +176,6 @@ test('printIntegrationGatePlan outputs gate plan lines', () => {
   // Mock console.log to capture output
   const logs = [];
   const originalLog = console.log;
-  // @ts-expect-error TS2769 No overload matches this call.
   mock.method(console, 'log', (msg) => { logs.push(msg); }, { restoreAfterAll: true });
   
   printIntegrationGatePlan(gates);
@@ -705,7 +703,6 @@ verifyLocalTest('script integrate: is callable and handles missing config gracef
   });
   
   // Cleanup temp dir
-  // @ts-expect-error TS2554 Expected 1 arguments, but got 2.
   fs.rmdirSync(tmpDir, { recursive: true, force: true });
   
   // The script should succeed (exit 0) with no config
@@ -777,7 +774,6 @@ verifyLocalTest('script integrate: failure output prints command', () => {
   
   // Cleanup temp dir
   fs.unlinkSync(tmpConfigPath);
-  // @ts-expect-error TS2554 Expected 1 arguments, but got 2.
   fs.rmdirSync(tmpDir, { recursive: true, force: true });
   
   // The script should fail (non-zero exit)
@@ -847,7 +843,6 @@ verifyLocalTest('integrate command ignores INTEGRATION_CONFIG_PATH and INTEGRATE
   });
   
   // Cleanup temp dir
-  // @ts-expect-error TS2554 Expected 1 arguments, but got 2.
   fs.rmdirSync(tmpDir, { recursive: true, force: true });
   
   // The result without overrides should use the repo's real config
@@ -1359,6 +1354,7 @@ test('every representative changed-area plan includes the unconditional integrat
   for (const [label, changedFiles, expectsE2E] of cases) {
     const plan = getIntegrationGatePlan('task-2292', {
       runIntegrationGates: true,
+// @ts-expect-error -- Legacy fixture deliberately exercises a duplicate or partial object-literal runtime shape.
       gitRunner: createMockGitRunner(changedFiles),
       dryRun: false,
       configPath

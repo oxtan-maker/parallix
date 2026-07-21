@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 'use strict';
 
@@ -28,7 +27,6 @@ function writeCsv() {
 function capture(args) {
   const lines = [];
   let exitCode = null;
-  // @ts-expect-error TS2349 This expression is not callable.
   stats(args, {
     log: msg => lines.push(String(msg)),
     error: msg => lines.push(String(msg)),
@@ -62,7 +60,6 @@ test('stats command still treats an existing file positional as a CSV path', () 
 });
 
 test('resolveStageTelemetry returns null when the launcher attached no telemetry', () => {
-  // @ts-expect-error TS2353 Object literal may only specify known properties, and 'startedAt' does not exist
   assert.equal(resolveStageTelemetry({ worktree: os.tmpdir(), result: { startedAt: 'x' } }), null);
   assert.equal(resolveStageTelemetry({ worktree: os.tmpdir(), result: null }), null);
 });

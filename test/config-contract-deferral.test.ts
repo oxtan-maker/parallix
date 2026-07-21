@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 // Characterization tests locking the workflow.config.json contract after the
 // task-1233 (parallix phase 3) decision: schema deferred, and the example +

@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -87,7 +86,6 @@ test('readArtifactFile returns null for non-existent file', () => {
 
 test('readArtifactFile returns null for non-string read result', () => {
   // Mock readFileSync to return non-string
-  // @ts-expect-error TS2322 Type '{}' is not assignable to type 'string | NonSharedBuffer'.
   const result = readArtifactFile('/nonexistent', () => ({}));
   assert.equal(result, '');
 });
@@ -98,7 +96,6 @@ test('readArtifactFile uses injected readFileSync function', () => {
     assert.equal(enc, 'utf8');
     return 'mock content';
   };
-  // @ts-expect-error TS2345 Argument of type '(p: any, enc: any) => string' is not assignable to parameter o
   const result = readArtifactFile('/mock/path', mockRead);
   assert.equal(result, 'mock content');
 });
@@ -299,7 +296,6 @@ test('postWorkflowReview skips the Forgejo POST when reviewer is the PR author',
     getPrAuthorFn: () => 'custom', // reviewer == PR author
     postReviewFn: () => { postCalled = true; return { ok: true }; },
     readReviewStateFn: () => ({ mission: 'test-slug', reviewer: 'custom', implementer: 'custom' }),
-    // @ts-expect-error TS2322 Type '(slug: string, state: Record<string, unknown> | ReviewState) => void' is n
     writeReviewStateFn: (slug, state) => { writtenState = state; },
     createEventFn: (slug, type, params) => { recordedEvent = { slug, type, params }; return { ok: true, path: '/mock' }; },
     buildMetadataFooterFn: () => '',
@@ -314,12 +310,9 @@ test('postWorkflowReview skips the Forgejo POST when reviewer is the PR author',
 
   // Verdict recorded locally in review-state.json and review-events.
   assert.ok(writtenState, 'review-state must be written locally');
-  // @ts-expect-error TS2339 Property 'disposition' does not exist on type 'never'.
   assert.equal(writtenState.disposition, 'APPROVED');
   assert.ok(recordedEvent, 'a reviewer_outcome event must be recorded');
-  // @ts-expect-error TS2339 Property 'type' does not exist on type 'never'.
   assert.equal(recordedEvent.type, 'reviewer_outcome');
-  // @ts-expect-error TS2339 Property 'params' does not exist on type 'never'.
   assert.equal(recordedEvent.params.verdict, 'approve');
 
   // WARN mentions the self-approval and instructs a different agent/human to post.
@@ -359,7 +352,6 @@ test('postWorkflowReview posts normally when reviewer differs from PR author', (
   assert.equal(result.ok, true);
   assert.notEqual(result.skipped, true);
   assert.ok(postArgs, 'postReviewFn must be called on the non-author path');
-  // @ts-expect-error TS2339 Property 'outcome' does not exist on type 'never'.
   assert.equal(postArgs.outcome, 'approve');
 });
 
@@ -393,7 +385,6 @@ test('consumeReviewerArtifacts returns ok:false when findings are missing', asyn
     },
     tmpDir,
     worktree: tmpDir,
-    // @ts-expect-error TS2353 Object literal may only specify known properties, and 'readReviewStateFn' does n
     readReviewStateFn: () => null,
     createEventFn: () => ({ ok: true, path: '/mock/path' }),
     forgejoEnabled: false,
@@ -424,7 +415,6 @@ test('consumeReviewerArtifacts returns ok:false when outcome is missing', async 
     },
     tmpDir,
     worktree: tmpDir,
-    // @ts-expect-error TS2353 Object literal may only specify known properties, and 'readReviewStateFn' does n
     readReviewStateFn: () => null,
     createEventFn: () => ({ ok: true, path: '/mock/path' }),
     forgejoEnabled: false,
@@ -454,7 +444,6 @@ test('consumeReviewerArtifacts returns ok:false when verdict is missing', async 
     },
     tmpDir,
     worktree: tmpDir,
-    // @ts-expect-error TS2353 Object literal may only specify known properties, and 'readReviewStateFn' does n
     readReviewStateFn: () => null,
     createEventFn: () => ({ ok: true, path: '/mock/path' }),
     forgejoEnabled: false,
@@ -480,7 +469,6 @@ test('consumeReviewerArtifacts handles all three artifact files', async () => {
     },
     tmpDir,
     worktree: tmpDir,
-    // @ts-expect-error TS2353 Object literal may only specify known properties, and 'readReviewStateFn' does n
     readReviewStateFn: () => null,
     createEventFn: () => ({ ok: true, path: '/mock/path' }),
     deleteArtifactFn: () => {},
@@ -512,7 +500,6 @@ test('consumeReviewerArtifacts recovers /tmp artifacts when fallbackToTmp is set
     tmpDir: '/var/tmp',
     fallbackToTmp: true,
     worktree: '/var/tmp',
-    // @ts-expect-error TS2353 Object literal may only specify known properties, and 'readReviewStateFn' does n
     readReviewStateFn: () => null,
     createEventFn: () => ({ ok: true, path: '/mock/path' }),
     deleteArtifactFn: () => {},
@@ -542,7 +529,6 @@ test('consumeReviewerArtifacts ignores /tmp artifacts when fallbackToTmp is not 
     readArtifactFn: readFromTmpOnly,
     tmpDir: '/var/tmp',
     worktree: '/var/tmp',
-    // @ts-expect-error TS2353 Object literal may only specify known properties, and 'readReviewStateFn' does n
     readReviewStateFn: () => null,
     createEventFn: () => ({ ok: true, path: '/mock/path' }),
     deleteArtifactFn: () => {},
@@ -569,7 +555,6 @@ test('consumeImplementerArtifacts recovers /tmp artifacts when fallbackToTmp is 
     tmpDir: '/var/tmp',
     fallbackToTmp: true,
     worktree: '/var/tmp',
-    // @ts-expect-error TS2353 Object literal may only specify known properties, and 'readReviewStateFn' does n
     readReviewStateFn: () => null,
     createEventFn: () => ({ ok: true, path: '/mock/path' }),
     deleteArtifactFn: () => {},
@@ -595,7 +580,6 @@ test('consumeReviewerArtifacts returns REQUEST_CHANGES reviewState for request-c
     },
     tmpDir,
     worktree: tmpDir,
-    // @ts-expect-error TS2353 Object literal may only specify known properties, and 'readReviewStateFn' does n
     readReviewStateFn: () => null,
     createEventFn: () => ({ ok: true, path: '/mock/path' }),
     deleteArtifactFn: () => {},
@@ -637,7 +621,6 @@ test('consumeImplementerArtifacts returns ok:false when resolution is missing', 
     },
     tmpDir,
     worktree: tmpDir,
-    // @ts-expect-error TS2353 Object literal may only specify known properties, and 'readReviewStateFn' does n
     readReviewStateFn: () => null,
     createEventFn: () => ({ ok: true, path: '/mock/path' }),
     forgejoEnabled: false,
@@ -665,7 +648,6 @@ test('consumeImplementerArtifacts returns ok:false when disposition is missing',
     },
     tmpDir,
     worktree: tmpDir,
-    // @ts-expect-error TS2353 Object literal may only specify known properties, and 'readReviewStateFn' does n
     readReviewStateFn: () => null,
     createEventFn: () => ({ ok: true, path: '/mock/path' }),
     forgejoEnabled: false,
@@ -696,7 +678,6 @@ test('consumeImplementerArtifacts parses structured resolution content', async (
     },
     tmpDir,
     worktree: tmpDir,
-    // @ts-expect-error TS2353 Object literal may only specify known properties, and 'readReviewStateFn' does n
     readReviewStateFn: () => null,
     createEventFn: (slug, type, payload, opts) => {
       if (type === 'implementer_round_summary') {
@@ -713,11 +694,8 @@ test('consumeImplementerArtifacts parses structured resolution content', async (
   assert.equal(result.consumed, true);
   assert.equal(result.ok, true);
   assert.equal(result.disposition, 'CHANGES_MADE');
-  // @ts-expect-error TS18047 'eventPayload' is possibly 'null'.
   assert.deepEqual(eventPayload.fixedItems, ['F1', 'F2']);
-  // @ts-expect-error TS18047 'eventPayload' is possibly 'null'.
   assert.deepEqual(eventPayload.pushedBackItems, ['P1']);
-  // @ts-expect-error TS18047 'eventPayload' is possibly 'null'.
   assert.deepEqual(eventPayload.parkedItems, []);
 
   fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -734,7 +712,6 @@ test('consumeImplementerArtifacts handles BLOCKED disposition with blockedReason
     },
     tmpDir,
     worktree: tmpDir,
-    // @ts-expect-error TS2353 Object literal may only specify known properties, and 'readReviewStateFn' does n
     readReviewStateFn: () => null,
     createEventFn: (slug, type, payload, opts) => {
       if (type === 'implementer_round_summary') {
@@ -926,7 +903,6 @@ test('consumeReviewerArtifacts fails when findings event creation fails', async 
     tmpDir,
     worktree: tmpDir,
     readReviewStateFn: () => null,
-    // @ts-expect-error TS2741 Property 'path' is missing in type '{ ok: false; error: string; }' but required
     createEventFn: () => ({ ok: false, error: 'Event creation failed' }),
     deleteArtifactFn: () => {},
     forgejoEnabled: false,
@@ -954,7 +930,6 @@ test('consumeReviewerArtifacts fails when outcome event creation fails', async (
     tmpDir,
     worktree: tmpDir,
     readReviewStateFn: () => null,
-    // @ts-expect-error TS2322 Type '(slug: string, type: string, payload: CreateEventParams, opts: CreateEvent
     createEventFn: (slug, type, payload, opts) => {
       callCount++;
       if (callCount === 1) return { ok: true, path: '/mock/findings' };
@@ -986,7 +961,6 @@ test('consumeReviewerArtifacts with non-approve/non-request-changes verdict', as
     },
     tmpDir,
     worktree: tmpDir,
-    // @ts-expect-error TS2353 Object literal may only specify known properties, and 'readReviewStateFn' does n
     readReviewStateFn: () => null,
     createEventFn: () => ({ ok: true, path: '/mock/path' }),
     deleteArtifactFn: () => {},
@@ -1017,7 +991,6 @@ test('consumeImplementerArtifacts fails when summary event creation fails', asyn
     tmpDir,
     worktree: tmpDir,
     readReviewStateFn: () => null,
-    // @ts-expect-error TS2741 Property 'path' is missing in type '{ ok: false; error: string; }' but required
     createEventFn: () => ({ ok: false, error: 'Summary event creation failed' }),
     deleteArtifactFn: () => {},
     forgejoEnabled: false,
@@ -1044,7 +1017,6 @@ test('consumeImplementerArtifacts fails when disposition event creation fails', 
     tmpDir,
     worktree: tmpDir,
     readReviewStateFn: () => null,
-    // @ts-expect-error TS2322 Type '(slug: string, type: string, payload: CreateEventParams, opts: CreateEvent
     createEventFn: (slug, type, payload, opts) => {
       callCount++;
       if (callCount === 1) return { ok: true, path: '/mock/summary' };
@@ -1073,7 +1045,6 @@ test('consumeImplementerArtifacts parses blockedReason from resolution content w
     },
     tmpDir,
     worktree: tmpDir,
-    // @ts-expect-error TS2353 Object literal may only specify known properties, and 'readReviewStateFn' does n
     readReviewStateFn: () => null,
     createEventFn: (slug, type, payload, opts) => {
       if (type === 'implementer_round_summary') {
@@ -1105,7 +1076,6 @@ test('consumeImplementerArtifacts with PARKED disposition', async () => {
     },
     tmpDir,
     worktree: tmpDir,
-    // @ts-expect-error TS2353 Object literal may only specify known properties, and 'readReviewStateFn' does n
     readReviewStateFn: () => null,
     createEventFn: () => ({ ok: true, path: '/mock/path' }),
     deleteArtifactFn: () => {},
@@ -1132,7 +1102,6 @@ test('consumeImplementerArtifacts with PUSHBACK_ALL disposition', async () => {
     },
     tmpDir,
     worktree: tmpDir,
-    // @ts-expect-error TS2353 Object literal may only specify known properties, and 'readReviewStateFn' does n
     readReviewStateFn: () => null,
     createEventFn: () => ({ ok: true, path: '/mock/path' }),
     deleteArtifactFn: () => {},
@@ -1170,7 +1139,6 @@ test('consumeReviewerArtifacts with forgejoEnabled and consumeHumanNotes', async
     deleteArtifactFn: () => {},
     forgejoEnabled: true,
     readTokenFn: () => 'mock-token',
-    // @ts-expect-error TS2739 Type 'any[]' is missing the following properties from type 'Promise<unknown[]>':
     getCommentsFn: () => [],
     consumeHumanNotesFn: () => { humanNotesCalled = true; },
     postCommentFn: () => ({ ok: true }),
@@ -1198,7 +1166,6 @@ test('consumeReviewerArtifacts fails when commentResult is not ok', async () => 
     },
     tmpDir,
     worktree: tmpDir,
-    // @ts-expect-error TS2353 Object literal may only specify known properties, and 'readReviewStateFn' does n
     readReviewStateFn: () => null,
     createEventFn: () => ({ ok: true, path: '/mock/path' }),
     deleteArtifactFn: () => {},
@@ -1229,7 +1196,6 @@ test('consumeReviewerArtifacts fails when reviewResult is not ok', async () => {
     },
     tmpDir,
     worktree: tmpDir,
-    // @ts-expect-error TS2353 Object literal may only specify known properties, and 'readReviewStateFn' does n
     readReviewStateFn: () => null,
     createEventFn: () => ({ ok: true, path: '/mock/path' }),
     deleteArtifactFn: () => {},
@@ -1260,7 +1226,6 @@ test('consumeReviewerArtifacts with forgejo disabled', async () => {
     },
     tmpDir,
     worktree: tmpDir,
-    // @ts-expect-error TS2353 Object literal may only specify known properties, and 'readReviewStateFn' does n
     readReviewStateFn: () => null,
     createEventFn: () => ({ ok: true, path: '/mock/path' }),
     deleteArtifactFn: () => {},
@@ -1291,7 +1256,6 @@ test('consumeImplementerArtifacts with consumeHumanNotes', async () => {
     deleteArtifactFn: () => {},
     forgejoEnabled: true,
     readTokenFn: () => 'mock-token',
-    // @ts-expect-error TS2739 Type 'any[]' is missing the following properties from type 'Promise<unknown[]>':
     getCommentsFn: () => [],
     postCommentFn: () => ({ ok: true }),
     buildMetadataFooterFn: () => '',
@@ -1317,7 +1281,6 @@ test('consumeImplementerArtifacts fails when resolution comment fails', async ()
     },
     tmpDir,
     worktree: tmpDir,
-    // @ts-expect-error TS2353 Object literal may only specify known properties, and 'readReviewStateFn' does n
     readReviewStateFn: () => null,
     createEventFn: () => ({ ok: true, path: '/mock/path' }),
     deleteArtifactFn: () => {},
@@ -1347,7 +1310,6 @@ test('consumeImplementerArtifacts fails when disposition comment fails', async (
     },
     tmpDir,
     worktree: tmpDir,
-    // @ts-expect-error TS2353 Object literal may only specify known properties, and 'readReviewStateFn' does n
     readReviewStateFn: () => null,
     createEventFn: () => ({ ok: true, path: '/mock/path' }),
     deleteArtifactFn: () => {},
@@ -1379,7 +1341,6 @@ test('consumeImplementerArtifacts with forgejo disabled', async () => {
     },
     tmpDir,
     worktree: tmpDir,
-    // @ts-expect-error TS2353 Object literal may only specify known properties, and 'readReviewStateFn' does n
     readReviewStateFn: () => null,
     createEventFn: () => ({ ok: true, path: '/mock/path' }),
     deleteArtifactFn: () => {},
@@ -1406,7 +1367,6 @@ test('consumeImplementerArtifacts with invalid JSON in resolution', async () => 
     },
     tmpDir,
     worktree: tmpDir,
-    // @ts-expect-error TS2353 Object literal may only specify known properties, and 'readReviewStateFn' does n
     readReviewStateFn: () => null,
     createEventFn: () => ({ ok: true, path: '/mock/path' }),
     deleteArtifactFn: () => {},
@@ -1466,7 +1426,6 @@ test('REGRESSION task-1264: os.tmpdir() != /tmp + Forgejo off -> reviewer artifa
       fallbackToTmp: true,
       worktree: scratch,
       forgejoEnabled: false,
-      // @ts-expect-error TS2353 Object literal may only specify known properties, and 'readReviewStateFn' does n
       readReviewStateFn: () => null,
       createEventFn: () => ({ ok: true, path: '/mock/event.md' }),
       deleteArtifactFn: () => {},

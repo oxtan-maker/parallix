@@ -1,5 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
-
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
@@ -58,7 +56,6 @@ function installPathLaunchers(tmpRoot) {
   }
   process.env.PATH = `${binDir}${path.delimiter}${process.env.PATH}`;
   process.env.CODEX_HOME ||= path.join(tmpRoot, 'glm-codex-home');
-  // @ts-expect-error TS2322 Type 'boolean' is not assignable to type 'string'.
   setCommandPathProbe(name => fs.existsSync(path.join(binDir, name)));
 }
 
@@ -142,7 +139,7 @@ test('startAgent persists a block via updateAgentBlock when limit-hit detector f
   try {
     // Stub selectAgent to deterministic order
     const order = ['claude', 'codex'];
-    const selectAgentFn = (step, opts = {}) => {
+    const selectAgentFn = (step, opts: { exclude?: Set<string> } = {}) => {
       const exclude = opts.exclude instanceof Set ? opts.exclude : new Set();
       return order.find(a => !exclude.has(a));
     };
@@ -205,7 +202,7 @@ test('startAgent does not loop forever when WORKFLOW_AGENT is pinned and that ag
         steps: { review: { eligible: ['claude', 'codex'], selection: 'random' } }
       };
       const { selectAgent } = require('../dist/lib/agents/agents');
-      const selectAgentFn = (step, opts = {}) => selectAgent(step, { ...opts, config });
+      const selectAgentFn = (step, opts: { exclude?: Set<string> } = {}) => selectAgent(step, { ...opts, config });
 
       const detectLimitHitFn = ({ agent }) => {
         if (agent === 'claude') return { until: '2026-05-01 18', source: 'parsed' };
@@ -241,7 +238,7 @@ test('startAgent throws when every eligible agent hits the limit', async () => {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-limit-exhausted-'));
   try {
     const order = ['claude', 'codex'];
-    const selectAgentFn = (step, opts = {}) => {
+    const selectAgentFn = (step, opts: { exclude?: Set<string> } = {}) => {
       const exclude = opts.exclude instanceof Set ? opts.exclude : new Set();
       const next = order.find(a => !exclude.has(a));
       if (!next) {
@@ -369,7 +366,6 @@ test('updateAgentBlock fails loudly on malformed agents.local.json instead of ov
 
     assert.throws(
       () => updateAgentBlock('codex', '2026-05-01 15', { targetPath }),
-      // @ts-expect-error TS2339 Property 'code' does not exist on type 'unknown'.
       (err) => err && err.code === 'WORKFLOW_AGENT_CONFIG_INVALID' && err.configPath === targetPath
     );
 
@@ -455,7 +451,6 @@ test('updateAgentBlock preserves malformed PARALLIX_HOME agents.local.json', () 
     process.chdir(missionWorktree);
     assert.throws(
       () => updateAgentBlock('custom', '2030-01-02 03', { targetPath }),
-      // @ts-expect-error TS2339 Property 'code' does not exist on type 'unknown'.
       (err) => err && err.code === 'WORKFLOW_AGENT_CONFIG_INVALID' && err.configPath === targetPath
     );
 
@@ -563,7 +558,7 @@ test('startAgent reroutes an explicit agent override that is already in the bloc
       const isAgentBlockedFn = (agent) => agent === 'claude';
 
       const seenSelectExcludes = [];
-      const selectAgentFn = (step, opts = {}) => {
+      const selectAgentFn = (step, opts: { exclude?: Set<string> } = {}) => {
         const exclude = opts.exclude instanceof Set ? opts.exclude : new Set();
         seenSelectExcludes.push([...exclude].sort());
         if (exclude.has('codex')) {
@@ -617,7 +612,7 @@ test('startAgent honours opts.exclude as a seed for the tried set (family-separa
       // tried-set already has claude on the very first selectAgent call, so the
       // fallback can only be "vibe".
       const order = ['codex', 'claude', 'vibe'];
-      const selectAgentFn = (step, opts = {}) => {
+      const selectAgentFn = (step, opts: { exclude?: Set<string> } = {}) => {
         const exclude = opts.exclude instanceof Set ? opts.exclude : new Set();
         seenExcludes.push([...exclude].sort());
         return order.find(a => !exclude.has(a));

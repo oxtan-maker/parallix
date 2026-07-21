@@ -1,11 +1,9 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-// @ts-expect-error TS2614 Module '"../lib/commands/handoff"' has no exported member '_findUnverifiableGoal
 const { verifyHandoff, performHandoff, _findUnverifiableGoalCheckRow } = require('../dist/lib/commands/handoff');
 const { mock } = test;
 
@@ -765,7 +763,6 @@ test('handoffCommand normalizes uppercase explicit slugs', async (t) => {
   // Mock process.exit to avoid crashing the test runner
   const exitMock = mock.method(process, 'exit', () => {});
 
-  // @ts-expect-error TS2349 This expression is not callable.
   await handoff(['TASK-1022']);
 
   assert.strictEqual(inferSlugMock.mock.calls[0].arguments[0], 'TASK-1022');
@@ -994,7 +991,6 @@ test('runDeclaredGates returns skipped when no ## Gates section exists', () => {
   try {
     const result = runDeclaredGates(missionDir, '/tmp/fake', { log: () => {}, error: () => {} });
     assert.strictEqual(result.ok, true);
-    // @ts-expect-error TS2339 Property 'skipped' does not exist on type '{ ok: boolean; reason: string; error?
     assert.strictEqual(result.skipped, true);
     assert.strictEqual(result.reason, 'no-gates-section');
   } finally {
@@ -1008,7 +1004,6 @@ test('runDeclaredGates returns skipped when ## Gates section is empty', () => {
   try {
     const result = runDeclaredGates(missionDir, '/tmp/fake', { log: () => {}, error: () => {} });
     assert.strictEqual(result.ok, true);
-    // @ts-expect-error TS2339 Property 'skipped' does not exist on type '{ ok: boolean; reason: string; error?
     assert.strictEqual(result.skipped, true);
     assert.strictEqual(result.reason, 'no-gates-declared');
   } finally {
@@ -1022,9 +1017,7 @@ test('runDeclaredGates executes passing gates and reports count', () => {
   try {
     const result = runDeclaredGates(missionDir, missionDir, { log: () => {}, error: () => {} });
     assert.strictEqual(result.ok, true);
-    // @ts-expect-error TS2339 Property 'skipped' does not exist on type '{ ok: boolean; reason: string; error?
     assert.strictEqual(result.skipped, false);
-    // @ts-expect-error TS2339 Property 'count' does not exist on type '{ ok: boolean; reason: string; error?:
     assert.strictEqual(result.count, 2);
     assert.strictEqual(result.reason, 'all-gates-passed');
   } finally {
@@ -1048,7 +1041,6 @@ test('runDeclaredGates fails when a gate command exits non-zero', () => {
 test('runDeclaredGates skips when mission directory does not exist', () => {
   const result = runDeclaredGates('/nonexistent/dir', '/tmp/fake', { log: () => {}, error: () => {} });
   assert.strictEqual(result.ok, true);
-  // @ts-expect-error TS2339 Property 'skipped' does not exist on type '{ ok: boolean; reason: string; error?
   assert.strictEqual(result.skipped, true);
   assert.strictEqual(result.reason, 'no-mission-file');
 });
@@ -1059,9 +1051,7 @@ test('runDeclaredGates handles checkbox prefixes [- [ ] and - [x])', () => {
   try {
     const result = runDeclaredGates(missionDir, missionDir, { log: () => {}, error: () => {} });
     assert.strictEqual(result.ok, true);
-    // @ts-expect-error TS2339 Property 'skipped' does not exist on type '{ ok: boolean; reason: string; error?
     assert.strictEqual(result.skipped, false);
-    // @ts-expect-error TS2339 Property 'count' does not exist on type '{ ok: boolean; reason: string; error?:
     assert.strictEqual(result.count, 2);
   } finally {
     fs.rmSync(missionDir, { recursive: true, force: true });
@@ -1384,13 +1374,9 @@ test('runDeclaredGates captures stdout and stderr on gate failure (SC2)', async 
     const result = runDeclaredGates(missionDir, missionDir, { log: () => {}, error: () => {} });
     assert.strictEqual(result.ok, false);
     assert.strictEqual(result.reason, 'gate-failed');
-    // @ts-expect-error TS2339 Property 'stdout' does not exist on type '{ ok: boolean; reason: string; error?:
     assert.ok(result.stdout !== undefined, 'stdout should be captured');
-    // @ts-expect-error TS2339 Property 'stderr' does not exist on type '{ ok: boolean; reason: string; error?:
     assert.ok(result.stderr !== undefined, 'stderr should be captured');
-    // @ts-expect-error TS2339 Property 'stdout' does not exist on type '{ ok: boolean; reason: string; error?:
     assert.ok(result.stdout.includes('out message'), 'stdout should contain expected output');
-    // @ts-expect-error TS2339 Property 'stderr' does not exist on type '{ ok: boolean; reason: string; error?:
     assert.ok(result.stderr.includes('err message'), 'stderr should contain expected error');
   } finally {
     mockSpawnSync.mock.restore();
@@ -1689,7 +1675,6 @@ test('runDeclaredGates executes bare, backticked, checked, and unchecked command
     const result = runDeclaredGates(missionDir, missionDir, { log: () => {}, error: () => {} });
     assert.equal(result.ok, true);
     assert.equal(result.reason, 'all-gates-passed');
-    // @ts-expect-error TS2339 Property 'count' does not exist on type '{ ok: boolean; reason: string; error?:
     assert.equal(result.count, 3);
   } finally {
     fs.rmSync(missionDir, { recursive: true, force: true });
@@ -1764,9 +1749,7 @@ test('performHandoff attempts agent relaunch when gatekeeper posts pushback', as
     assert.ok(result.error && result.error.includes('Manual intervention required'));
     assert.strictEqual(relaunchCallCount, 1, 'attemptAgentRelaunch should have been called once');
     assert.ok(relaunchPrompt, 'promptOverride should have been passed');
-    // @ts-expect-error TS2339 Property 'includes' does not exist on type 'never'.
     assert.ok(relaunchPrompt.includes('MISSION.md'), 'prompt should mention MISSION.md');
-    // @ts-expect-error TS2339 Property 'includes' does not exist on type 'never'.
     assert.ok(relaunchPrompt.includes('create'), 'prompt should contain creation instructions');
   } finally {
     fs.rmSync(worktree, { recursive: true, force: true });
@@ -2019,17 +2002,11 @@ test('performHandoff relaunch prompt lists all missing artifact types', async (t
     });
 
     assert.ok(capturedPrompt, 'prompt should have been captured');
-    // @ts-expect-error TS2339 Property 'includes' does not exist on type 'never'.
     assert.ok(capturedPrompt.includes('MISSION.md'), 'prompt should list MISSION.md');
-    // @ts-expect-error TS2339 Property 'includes' does not exist on type 'never'.
     assert.ok(capturedPrompt.includes('CP-'), 'prompt should list CP-*.md');
-    // @ts-expect-error TS2339 Property 'includes' does not exist on type 'never'.
     assert.ok(capturedPrompt.includes('backlog/tasks'), 'prompt should list backlog task file');
-    // @ts-expect-error TS2339 Property 'includes' does not exist on type 'never'.
     assert.ok(capturedPrompt.includes('create'), 'prompt should contain creation keyword');
-    // @ts-expect-error TS2339 Property 'includes' does not exist on type 'never'.
     assert.ok(capturedPrompt.includes('frontmatter'), 'prompt should mention frontmatter for task file');
-    // @ts-expect-error TS2339 Property 'includes' does not exist on type 'never'.
     assert.ok(capturedPrompt.includes('Goal Check'), 'prompt should mention Goal Check for checkpoints');
   } finally {
     fs.rmSync(worktree, { recursive: true, force: true });
@@ -2042,7 +2019,6 @@ test('buildAutoCheckpointContent produces verifiable evidence rows', () => {
   const handoffModule = require('../dist/lib/commands/handoff');
   const rootDir = path.join(__dirname, '..');
 
-  // @ts-expect-error TS2339 Property '_buildAutoCheckpointContent' does not exist on type 'typeof import("/h
   const content = handoffModule._buildAutoCheckpointContent('task-2215');
   assert.match(content, /^## Goal Check$/m, 'template must contain the ## Goal Check heading');
   assert.ok(content.includes('lib/commands/handoff.ts:262'),
@@ -2052,11 +2028,9 @@ test('buildAutoCheckpointContent produces verifiable evidence rows', () => {
 
   const goalCheckMatch = content.match(/^## Goal Check(?: Table)?\s*$/m);
   const afterHeader = content.slice((goalCheckMatch.index ?? 0) + goalCheckMatch[0].length);
-  // @ts-expect-error TS2339 Property '_collectGoalCheckEvidenceRows' does not exist on type 'typeof import("
   const evidenceRows = handoffModule._collectGoalCheckEvidenceRows(afterHeader);
   assert.ok(evidenceRows.length >= 2, 'template must produce at least two evidence rows');
 
-  // @ts-expect-error TS2339 Property '_findUnverifiableGoalCheckRow' does not exist on type 'typeof import("
   const offendingRow = handoffModule._findUnverifiableGoalCheckRow(evidenceRows, rootDir);
   assert.equal(offendingRow, null,
     `every evidence row must cite a verifiable reference; offending row: ${offendingRow}`);

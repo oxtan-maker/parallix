@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -18,6 +17,7 @@ function packFilename(stdout) {
 }
 
 function run(command, args, options = {}) {
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `tempHome` absent from its inferred mock shape.
   const tempHome = options.tempHome || fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-npm-home-'));
   const result = spawnSync(command, args, {
     encoding: 'utf8',
@@ -27,11 +27,11 @@ function run(command, args, options = {}) {
       HOME: tempHome,
       npm_config_cache: path.join(tempHome, '.npm-cache'),
       npm_config_userconfig: path.join(tempHome, '.npmrc'),
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `env` absent from its inferred mock shape.
       ...(options.env || {})
     },
     ...options
   });
-  // @ts-expect-error TS2339 Property 'code' does not exist on type 'Error'.
   if (result.error && result.error.code === 'EPERM') {
     return result;
   }
