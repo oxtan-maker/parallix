@@ -2118,7 +2118,7 @@ function defaultPrFixRounds(slug: string, rootDir: string, provided: string | nu
  * @param {RecordActiveStatsOptions} options
  */
 // @ts-expect-error recordActiveStats options missing slug
-function recordActiveStats(options: {slug: string, stage?: string, rootDir?: string, prFixRounds?: string, model?: string} = {}) {
+function recordActiveStats(options: {slug: string, stage?: string, rootDir?: string, implementer?: string, prFixRounds?: string, telemetry?: any, durationMinutes?: number, model?: string} = {}) {
   /** @type {any} */
   const opts = options;
   const { stage = 'active', slug, rootDir = process.cwd(), prFixRounds, model, ...rest } = opts;
