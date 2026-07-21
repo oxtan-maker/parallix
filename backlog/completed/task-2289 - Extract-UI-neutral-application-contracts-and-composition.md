@@ -1,13 +1,14 @@
 ---
 id: TASK-2289
 title: Extract UI-neutral application contracts and composition
-status: review
+status: done
 assignee: [codex]
 created_date: '2026-07-20 00:00'
 labels:
   - architecture
   - application
   - refactor
+  - user_value
 dependencies:
   - TASK-2278
 references:
