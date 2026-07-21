@@ -204,6 +204,10 @@ test('CP-1: persisted blocked reviewer falls back via selectAgent without mutati
     dryRun: true,
     // @ts-expect-error TS2740 Type '{ reviewer: string; round: number; startedAt: string; phase: string; }' is
     readReviewStateFn: () => ({ reviewer: 'codex', round: 1, startedAt: '2026-01-01', phase: 'reviewing' }),
+    // The synthetic slug deliberately has no mission directory. Persistence is
+    // a separate adapter concern, so keep this fallback-routing unit test
+    // hermetic instead of invoking the real review-state filesystem adapter.
+    writeReviewStateFn: () => ({ outcome: 'unchanged' }),
     log: m => logs.push(m),
     error: m => errors.push(m),
     // @ts-expect-error TS2322 Type 'number' is not assignable to type 'never'.
