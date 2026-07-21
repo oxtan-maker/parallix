@@ -1,5 +1,5 @@
 ---
-id: TASK-2277
+id: TASK-2293
 title: Harden legacy TypeScript test mock shapes
 status: backlog
 assignee: [codex]
