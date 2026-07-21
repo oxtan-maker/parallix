@@ -43,9 +43,14 @@ function withFixture(fn) {
   fs.writeFileSync(path.join(root, 'workflow', 'data', 'stats.csv'), 'date,repo,mission,classification,implementer,pr_fix_rounds\n', 'utf8');
 
   try {
-    fn(root);
-  } finally {
+    const result = fn(root);
+    if (result && typeof result.then === 'function') {
+      return result.finally(() => fs.rmSync(root, { recursive: true, force: true }));
+    }
     fs.rmSync(root, { recursive: true, force: true });
+  } catch (error) {
+    fs.rmSync(root, { recursive: true, force: true });
+    throw error;
   }
 }
 
@@ -267,8 +272,8 @@ test('collectHistoricalStatsBackfill reports unresolved task resolution and lega
   });
 });
 
-test('statsBackfill supports help, json output, summary output, and apply mode', () => {
-  withFixture(root => {
+test('statsBackfill supports help, json output, summary output, and apply mode', async () => {
+  await withFixture(async root => {
     initGitRepo(root);
 
     fs.writeFileSync(path.join(root, 'backlog', 'completed', 'task-2008 - Workflow cleanup.md'), [
@@ -305,7 +310,7 @@ test('statsBackfill supports help, json output, summary output, and apply mode',
 
     const logs = [];
     // @ts-expect-error TS2349 This expression is not callable.
-    statsBackfill(['--help'], {
+    await statsBackfill(['--help'], {
       rootDir: root,
       log: line => logs.push(line),
       error: line => logs.push(`ERR:${line}`),
@@ -321,7 +326,7 @@ test('statsBackfill supports help, json output, summary output, and apply mode',
     try {
       process.env.PARALLIX_HOME = isolatedHome;
       // @ts-expect-error TS2349 This expression is not callable.
-      statsBackfill(['--json', '--csv-file', path.join(root, 'workflow', 'data', 'stats.csv')], {
+      await statsBackfill(['--json', '--csv-file', path.join(root, 'workflow', 'data', 'stats.csv')], {
         rootDir: root,
         log: line => jsonLogs.push(line),
         error: line => jsonLogs.push(`ERR:${line}`),
@@ -340,7 +345,7 @@ test('statsBackfill supports help, json output, summary output, and apply mode',
 
     const summaryLogs = [];
     // @ts-expect-error TS2349 This expression is not callable.
-    statsBackfill(['--csv-file', path.join(root, 'workflow', 'data', 'stats.csv')], {
+    await statsBackfill(['--csv-file', path.join(root, 'workflow', 'data', 'stats.csv')], {
       rootDir: root,
       log: line => summaryLogs.push(line),
       error: line => summaryLogs.push(`ERR:${line}`),
@@ -353,7 +358,7 @@ test('statsBackfill supports help, json output, summary output, and apply mode',
 
     const applyLogs = [];
     // @ts-expect-error TS2349 This expression is not callable.
-    statsBackfill(['--apply', '--csv-file', path.join(root, 'workflow', 'data', 'stats.csv')], {
+    await statsBackfill(['--apply', '--csv-file', path.join(root, 'workflow', 'data', 'stats.csv')], {
       rootDir: root,
       log: line => applyLogs.push(line),
       error: line => applyLogs.push(`ERR:${line}`),
@@ -372,7 +377,7 @@ test('statsBackfill supports help, json output, summary output, and apply mode',
       process.env.PARALLIX_HOME = parallixHome;
       const defaultLogs = [];
       // @ts-expect-error TS2349 This expression is not callable.
-      statsBackfill(['--apply'], {
+      await statsBackfill(['--apply'], {
         rootDir: root,
         log: line => defaultLogs.push(line),
         error: line => defaultLogs.push(`ERR:${line}`),
@@ -387,4 +392,30 @@ test('statsBackfill supports help, json output, summary output, and apply mode',
       else process.env.PARALLIX_HOME = previousHome;
     }
   });
+});
+
+test('statsBackfill maps a delegated write failure to stderr and exit 1 without success output', async () => {
+  const errors = [];
+  const logs = [];
+  let exitCode = null;
+
+  await statsBackfill(['--apply'], {
+    rootDir: process.cwd(),
+    service: {
+      async execute() {
+        return {
+          status: 'failed',
+          error: { kind: 'unavailable', message: 'stats write failed' },
+          durableEvidence: [],
+        };
+      },
+    },
+    log: line => logs.push(line),
+    error: line => errors.push(line),
+    exit: code => { exitCode = code; },
+  });
+
+  assert.equal(exitCode, 1);
+  assert.deepEqual(logs, []);
+  assert.match(errors.join('\n'), /stats write failed/);
 });

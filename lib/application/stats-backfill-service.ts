@@ -7,6 +7,7 @@ export interface StatsBackfillRequest {
   readonly apply: boolean;
   readonly capabilities: ReadonlySet<Capability>;
   readonly cancellation?: Cancellation;
+  readonly filePath?: string | null;
 }
 
 export class StatsBackfillService {
@@ -18,11 +19,11 @@ export class StatsBackfillService {
     if (request.cancellation?.requested) {return failure('cancelled', 'cancelled before reading projection');}
     this.emit(request.operationId, 1, 'read', 'reading stats projection');
     try {
-      const projection = await this._port.readProjection();
+      const projection = await this._port.readProjection({ filePath: request.filePath });
       if (!request.apply) {return { status: 'completed', value: projection, durableEvidence: [] };}
       if (request.cancellation?.requested) {return failure('cancelled', 'cancelled before applying rows');}
       this.emit(request.operationId, 2, 'apply', 'applying stats rows');
-      const evidence = await this._port.applyRows(projection.rows);
+      const evidence = await this._port.applyRows(projection.rows, { filePath: request.filePath });
       return { status: 'completed', value: projection, durableEvidence: evidence };
     } catch (error) {
       return failure('unavailable', error instanceof Error ? error.message : 'stats dependency unavailable');

@@ -32,6 +32,7 @@ export interface ProgressEvent {
   readonly phase: string;
   readonly message: string;
   readonly timestamp: string;
+  readonly agent?: string;
 }
 
 export interface Cancellation {

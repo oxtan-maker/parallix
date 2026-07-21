@@ -3,38 +3,34 @@ import { git, getWorktreeStatus } from '../core/git.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as fmt from '../core/fmt.js';
-import missionStart from './mission-start.js';
 import * as agents from '../agents/agents.js';
-import { findMissionDir, findCheckpoints, getFirstLine, resolveWorktree, inferSlug, getMissionYear, missionDirForSlug, isWorkflowGeneratedArtifact } from '../core/mission-utils.js';
+import { findMissionDir, findCheckpoints, getFirstLine, inferSlug, getMissionYear, missionDirForSlug, isWorkflowGeneratedArtifact } from '../core/mission-utils.js';
 import * as handoff from './handoff.js';
 import { resolveTaskFile, transitionTask, getTaskStatus, getTaskImplementer } from '../tools/backlog.js';
-import { resolveAgentModel } from '../core/product-config.js';
 import * as review from '../review/review.js';
 import * as repairHandoff from './repair-handoff.js';
-import * as stats from './stats.js';
-import { resolveStageTelemetry } from '../agents/stage-telemetry.js';
 import { packageRoot } from '../core/package-root.js';
+import { createProductionApplicationServices } from '../composition/application-services.js';
 
 const EXECUTE_PROMPT_PATH = path.join(packageRoot(__dirname), 'prompts', 'execute.md');
 
+function renderActiveProgress(event, logFn) {
+  if (event.phase === 'launch') {
+    logFn('Launching execute agent...');
+  } else if (event.phase === 'handoff') {
+    logFn(`\nExecute agent (${fmt.agent(event.agent)}) completed successfully. Starting automated handoff...`);
+  }
+}
+
 /**
  * @param {string[]} args
- * @param {{inferSlugFn?: Function, missionStartFn?: Function, resolveWorktreeFn?: Function, readAgentConfigOrExitFn?: Function, resolveTaskFileFn?: Function, buildCheckpointContextFn?: Function, buildExecutePromptFn?: Function, selectLaunchAndRecordFn?: Function, getTaskStatusFn?: Function, transitionTaskFn?: Function, enforceExecuteCommitSafetyFn?: Function, runHandoffAndReviewFn?: Function, exitFn?: Function, logFn?: Function, errorFn?: Function}} [options]
+ * @param {{inferSlugFn?: Function, service?: {execute: Function}, rootDir?: string, exitFn?: Function, logFn?: Function, errorFn?: Function}} [options]
  */
 async function active(args, options = {}) {
   const {
     inferSlugFn = inferSlug,
-    missionStartFn = missionStart,
-    resolveWorktreeFn = resolveWorktree,
-    readAgentConfigOrExitFn = agents.readAgentConfigOrExit,
-    resolveTaskFileFn = resolveTaskFile,
-    buildCheckpointContextFn = buildCheckpointContext,
-    buildExecutePromptFn = buildExecutePrompt,
-    selectLaunchAndRecordFn = selectLaunchAndRecord,
-    getTaskStatusFn = getTaskStatus,
-    transitionTaskFn = transitionTask,
-    enforceExecuteCommitSafetyFn = enforceExecuteCommitSafety,
-    runHandoffAndReviewFn = runHandoffAndReview,
+    service,
+    rootDir = process.cwd(),
     exitFn = process.exit,
     logFn = fmt.log.info,
     errorFn = fmt.log.fail
@@ -63,116 +59,28 @@ async function active(args, options = {}) {
     return v;
   }
   const preselectedImplementer = flagValue(args, '--implementer', 'implementer');
+  if (args.includes('--implementer') && !preselectedImplementer) {return;}
 
   logFn('Running execute preflight...');
-  const preflight = missionStartFn([normalizedSlug], { returnResult: true });
-  if (!preflight.pass) {
-    errorFn('Preflight failed. Fix blockers above before launching the execute agent.');
-    exitFn(1);
-    return;
-  }
-
-  const worktree = resolveWorktreeFn(normalizedSlug);
-  if (!worktree) {
-    errorFn(
-      `Could not locate dedicated worktree for mission/${fmt.slug(normalizedSlug)}. ` +
-      `Run "px draft ${normalizedSlug}" first or create the worktree manually.`
-    );
-    exitFn(1);
-    return;
-  }
-
-  const agentConfig = readAgentConfigOrExitFn();
-  const taskResolution = resolveTaskFileFn(normalizedSlug, worktree);
-  const checkpointContext = buildCheckpointContextFn(normalizedSlug);
-  const prompt = buildExecutePromptFn(normalizedSlug, checkpointContext, { rootDir: worktree });
-
-  logFn('Launching execute agent...');
-  let launchResult;
-  try {
-    launchResult = await selectLaunchAndRecordFn({
-      slug: normalizedSlug,
-      worktree,
-      preselectedAgent: preselectedImplementer,
-      agentConfig,
-      taskResolution,
-      prompt
-    });
-  } catch (err) {
-    errorFn(`Could not launch execute agent: ${/** @type{Error} */(err).message}`);
-    exitFn(1);
-    return;
-  }
-
-  const { agent, result, rebaseDeferred = false } = launchResult;
-
-  if (result.error) {
-    errorFn(`Could not start execute agent (${fmt.agent(agent)}): ${result.error.message}`);
-    exitFn(1);
-    return;
-  }
-
-  if (typeof result.status === 'number' && result.status !== 0) {
-    errorFn(`Execute agent (${fmt.agent(agent)}) exited with status ${result.status}.`);
-    exitFn(result.status || 1);
-    return;
-  }
-
-  try {
-    enforceExecuteCommitSafetyFn({ slug: normalizedSlug, worktree });
-  } catch (error) {
-    errorFn(fmt.status('FAIL', /** @type{Error} */(error).message));
-    exitFn(1);
-    return;
-  }
-
-  // The launch callback records durable state on the integration branch but
-  // deliberately does not rebase underneath a running agent. Once execute
-  // output is committed, synchronize that state before handoff. This also
-  // restores any direct lifecycle edit made by the agent without discarding
-  // unrelated task metadata from its mission commit.
-  if (taskResolution.ok && taskResolution.taskFile) {
-    const taskStatus = getTaskStatusFn(taskResolution.taskFile);
-    if (taskStatus && taskStatus !== 'active') {
-      logFn(fmt.status('WARN', `Execute agent changed task ${fmt.slug(normalizedSlug)} status to ${taskStatus}; restoring status=active before handoff.`));
-    }
-    if ((rebaseDeferred || (taskStatus && taskStatus !== 'active'))
-      && !transitionTaskFn(normalizedSlug, 'active', { rootDir: worktree, log: logFn })) {
-      errorFn(fmt.status('FAIL', `Could not synchronize task ${fmt.slug(normalizedSlug)} lifecycle state after execute.`));
-      exitFn(1);
-      return;
-    }
-  }
-
-  // Automation: Post-active handoff
-  logFn(`\nExecute agent (${fmt.agent(agent)}) completed successfully. Recording execute-phase stats...`);
-  try {
-    const result = launchResult.result;
-    const sinceMs = result && result.startedAt ? Date.parse(result.startedAt) : 0;
-    stats.recordActiveStats(
-      /** @type{Parameters<typeof stats.recordActiveStats>[0]} */({
-      slug: normalizedSlug,
-      rootDir: worktree,
-      implementer: agent,
-      model: resolveAgentModel(agent, worktree),
-      // Use the windowed Codex rollout (bounded by sinceMs) when present, else
-      // the launcher-attached telemetry — same resolution as the review hook,
-      // so the execute phase records this stage's delta, not cumulative usage.
-      telemetry: resolveStageTelemetry({ worktree, result, sinceMs }),
-      durationMinutes: result && result.startedAt && result.endedAt
-        ? (Date.parse(result.endedAt) - Date.parse(result.startedAt)) / 60000
-        : 0,
-    })
-    );
-  } catch (err) {
-    logFn(fmt.status('WARN', `Could not record execute stats for ${fmt.slug(normalizedSlug)}: ${/** @type{Error} */(err).message}`));
-  }
-  logFn(`\nExecute agent (${fmt.agent(agent)}) completed successfully. Starting automated handoff...`);
-  const ok = await runHandoffAndReviewFn(normalizedSlug, worktree, agent, {
-    taskFile: taskResolution.ok ? taskResolution.taskFile : null
+  const renderProgress = event => renderActiveProgress(event, logFn);
+  const outcome = await (service || createProductionApplicationServices(rootDir, renderProgress).active).execute({
+    operationId: `active:${normalizedSlug}`,
+    slug: normalizedSlug,
+    agent: preselectedImplementer,
+    capabilities: new Set(['active:execute']),
   });
-  if (!ok) {
-    exitFn(1);
+  if (outcome.status !== 'completed' || !outcome.value) {
+    const message = outcome.error?.message || 'Could not launch execute agent.';
+    const status = /exited with status (\d+)/.exec(message);
+    if (message === 'execute preflight failed') {
+      errorFn('Preflight failed. Fix blockers above before launching the execute agent.');
+    } else if (message === 'dedicated execute worktree is required') {
+      errorFn(`Could not locate dedicated worktree for mission/${fmt.slug(normalizedSlug)}. Run "px draft ${normalizedSlug}" first or create the worktree manually.`);
+    } else {
+      errorFn(message);
+    }
+    exitFn(status ? Number(status[1]) : 1);
+    return;
   }
 }
 
@@ -739,9 +647,9 @@ function enforceExecuteCommitSafety(opts) {
 }
 
 /** @type {typeof active & {buildExecutePrompt: typeof buildExecutePrompt, buildCheckpointContext: typeof buildCheckpointContext, runHandoffAndReview: typeof runHandoffAndReview, applyExecuteFallback: typeof applyExecuteFallback, selectLaunchAndRecord: typeof selectLaunchAndRecord, validateCheckpointsBeforeHandoff: typeof validateCheckpointsBeforeHandoff, attemptAgentRelaunch: typeof attemptAgentRelaunch, enforceExecuteCommitSafety: typeof enforceExecuteCommitSafety, unquoteGitStatusPath: typeof unquoteGitStatusPath}} */
-const _activeExport = Object.assign(active, { buildExecutePrompt, buildCheckpointContext, runHandoffAndReview, applyExecuteFallback, selectLaunchAndRecord, validateCheckpointsBeforeHandoff, attemptAgentRelaunch, enforceExecuteCommitSafety, unquoteGitStatusPath });
+const _activeExport = Object.assign(active, { buildExecutePrompt, buildCheckpointContext, runHandoffAndReview, applyExecuteFallback, selectLaunchAndRecord, validateCheckpointsBeforeHandoff, attemptAgentRelaunch, enforceExecuteCommitSafety, unquoteGitStatusPath, renderActiveProgress });
 export default _activeExport;
-export { _activeExport as active, buildExecutePrompt, buildCheckpointContext, runHandoffAndReview, applyExecuteFallback, selectLaunchAndRecord, validateCheckpointsBeforeHandoff, attemptAgentRelaunch, enforceExecuteCommitSafety, unquoteGitStatusPath };
+export { _activeExport as active, buildExecutePrompt, buildCheckpointContext, runHandoffAndReview, applyExecuteFallback, selectLaunchAndRecord, validateCheckpointsBeforeHandoff, attemptAgentRelaunch, enforceExecuteCommitSafety, unquoteGitStatusPath, renderActiveProgress };
 
 // CJS compat: ensure require() returns the function directly
 declare const module: { exports: any } | undefined;

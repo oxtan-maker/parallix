@@ -39,6 +39,8 @@ test('legacy active adapter stops after a failed launch without safety, stats, o
   const { runtime, calls } = strictRuntime({ async selectLaunchAndRecord() { calls.push('launch-record'); return { agent: 'codex', result: { status: 1 } }; } });
   const adapter = new LegacyActiveAdapter('/repo', runtime);
   assert.equal(await adapter.validateSlug('task-1'), null);
-  await assert.rejects(adapter.launch('task-1', 'codex'), /did not complete successfully/);
+  await assert.rejects(adapter.launch('task-1', 'codex'), {
+    message: 'Execute agent (codex) exited with status 1.',
+  });
   assert.deepEqual(calls, ['preflight', 'worktree', 'task', 'checkpoint', 'config', 'prompt', 'launch-record']);
 });

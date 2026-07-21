@@ -10,6 +10,8 @@ import {
   resolveTaskFile,
 } from '../tools/backlog.js';
 import { findMissionDir } from '../core/mission-utils.js';
+import { createProductionApplicationServices } from '../composition/application-services.js';
+import type { StatsBackfillService } from '../application/stats-backfill-service.js';
 
 interface StatsAugmented {
   resolveMissionClassification: (_slug: string, _rootDir?: string) => { classification?: string; source?: string };
@@ -285,7 +287,7 @@ function collectHistoricalStatsBackfill(rootDir = process.cwd(), filePath: strin
   return { rows, unresolved, skipped };
 }
 
-function renderBackfillSummary(report: { rows: any[]; unresolved: any[]; skipped: any[] }) {
+function renderBackfillSummary(report: { rows: readonly any[]; unresolved: readonly any[]; skipped: readonly any[] }) {
   const lines = [];
   lines.push(`Resolved rows: ${report.rows.length}`);
   lines.push(`Unresolved missions: ${report.unresolved.length}`);
@@ -320,17 +322,6 @@ function renderBackfillSummary(report: { rows: any[]; unresolved: any[]; skipped
   return lines.join('\n');
 }
 
-function applyBackfillRows(rows: any[], filePath: string | null = null, rootDir = process.cwd()) {
-  const s = getStats();
-  filePath = filePath || s.resolveStatsPath({ ensureDir: true });
-  let changed = 0;
-  for (const row of rows) {
-    const result = s.upsertStatsRow(row, { filePath, rootDir });
-    if (result.changed) {changed += 1;}
-  }
-  return changed;
-}
-
 function printUsage(log = fmt.log.plain) {
   log(`Usage: px stats-backfill [--apply] [--json] [--csv-file <path>]
 
@@ -349,13 +340,16 @@ Notes:
 interface BackfillOptions {
   log?: (_msg: string) => string | null;
   error?: (_msg: string) => string | null;
+  exit?: (_code?: number) => never;
   rootDir?: string;
+  service?: Pick<StatsBackfillService, 'execute'>;
 }
 
-function statsBackfill(args: string[], options: BackfillOptions = {}) {
+async function statsBackfill(args: string[], options: BackfillOptions = {}) {
   const opts = options;
   const log = opts.log || fmt.log.plain;
   const error = opts.error || fmt.log.plainError;
+  const exit = opts.exit || process.exit;
   const rootDir = opts.rootDir || process.cwd();
 
   if (args.includes('--help') || args.includes('-h')) {
@@ -384,9 +378,26 @@ function statsBackfill(args: string[], options: BackfillOptions = {}) {
   }
   const s = getStats();
   filePath = filePath || s.resolveStatsPath({ ensureDir: apply });
+  const service = opts.service || createProductionApplicationServices(rootDir).statsBackfill;
+  const outcome = await service.execute({
+    operationId: `stats-backfill:${Date.now()}`,
+    apply,
+    filePath,
+    capabilities: apply ? new Set(['stats:apply'] as const) : new Set(),
+  });
 
-    const report = collectHistoricalStatsBackfill(rootDir, filePath);
-    const changed = apply ? applyBackfillRows(report.rows, filePath, rootDir) : 0;
+  if (outcome.status !== 'completed' || !outcome.value) {
+    error(fmt.status('FAIL', outcome.error?.message || 'Could not backfill historical stats.'));
+    exit(1);
+    return;
+  }
+
+  const report = {
+    rows: outcome.value.rows,
+    unresolved: outcome.value.unresolved || [],
+    skipped: outcome.value.skipped || [],
+  };
+  const changed = outcome.durableEvidence.length;
   const payload = {
     resolved: report.rows.length,
     unresolved: report.unresolved.length,

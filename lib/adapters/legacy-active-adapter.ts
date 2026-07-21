@@ -11,8 +11,14 @@ import type { ActiveLaunch, ActivePort } from '../application/ports.js';
 
 export class LegacyActiveAdapter implements ActivePort {
   private readonly _runs = new Map<string, LegacyLaunchRun>();
+  private readonly _runtime: LegacyActiveRuntime;
 
-  constructor(private readonly _rootDir: string, private readonly _runtime: LegacyActiveRuntime = defaultLegacyActiveRuntime) {}
+  constructor(private readonly _rootDir: string, runtime?: LegacyActiveRuntime) {
+    // The command imports the composition root, which imports this adapter.
+    // Resolve command exports when an adapter is actually constructed so that
+    // this circular module graph cannot capture uninitialized helper bindings.
+    this._runtime = runtime || createDefaultLegacyActiveRuntime();
+  }
 
   async validateSlug(slug: string): Promise<string | null> {
     if (!slug.startsWith('task-')) {return 'slug must begin with task-';}
@@ -31,18 +37,21 @@ export class LegacyActiveAdapter implements ActivePort {
     return null;
   }
 
-  async launch(slug: string, agent: string): Promise<ActiveLaunch> {
+  async launch(slug: string, agent?: string | null): Promise<ActiveLaunch> {
     const run = this.requireRun(slug);
     const launch = await this._runtime.selectLaunchAndRecord({
       slug,
       worktree: run.worktree,
-      preselectedAgent: agent,
+      preselectedAgent: agent || null,
       agentConfig: run.agentConfig,
       taskResolution: run.taskResolution,
       prompt: run.prompt,
     });
-    if (launch.result.error || (typeof launch.result.status === 'number' && launch.result.status !== 0)) {
-      throw new Error('execute agent did not complete successfully');
+    if (launch.result.error) {
+      throw new Error(`Could not start execute agent (${launch.agent}): ${launch.result.error.message}`);
+    }
+    if (typeof launch.result.status === 'number' && launch.result.status !== 0) {
+      throw new Error(`Execute agent (${launch.agent}) exited with status ${launch.result.status}.`);
     }
     run.launch = launch;
     return { agent: launch.agent, evidence: { id: `${slug}:agent`, source: 'task-markdown', detail: 'legacy agent launch completed' } };
@@ -109,22 +118,24 @@ export interface LegacyActiveRuntime {
   readonly runHandoffAndReview: typeof runHandoffAndReview;
 }
 
-const defaultLegacyActiveRuntime: LegacyActiveRuntime = {
-  preflight: missionStart,
-  resolveWorktree,
-  resolveTaskFile,
-  buildCheckpointContext,
-  readAgentConfig: readAgentConfigOrExit,
-  buildExecutePrompt,
-  selectLaunchAndRecord,
-  enforceExecuteCommitSafety,
-  getTaskStatus,
-  transitionTask,
-  recordActiveStats: stats.recordActiveStats,
-  resolveAgentModel,
-  resolveStageTelemetry,
-  runHandoffAndReview,
-};
+function createDefaultLegacyActiveRuntime(): LegacyActiveRuntime {
+  return {
+    preflight: missionStart,
+    resolveWorktree,
+    resolveTaskFile,
+    buildCheckpointContext,
+    readAgentConfig: readAgentConfigOrExit,
+    buildExecutePrompt,
+    selectLaunchAndRecord,
+    enforceExecuteCommitSafety,
+    getTaskStatus,
+    transitionTask,
+    recordActiveStats: stats.recordActiveStats,
+    resolveAgentModel,
+    resolveStageTelemetry,
+    runHandoffAndReview,
+  };
+}
 
 interface LegacyLaunchRun {
   readonly worktree: string;
