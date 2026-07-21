@@ -790,7 +790,7 @@ verifyLocalTest('integrate command ignores INTEGRATION_CONFIG_PATH and INTEGRATE
   const child_process = require('child_process');
   const os = require('os');
   const scriptPath = path.join(__dirname, '..', '..', 'scripts', 'verify-local.sh');
-  const integratePath = path.join(__dirname, '..', 'lib', 'commands', 'integrate.ts');
+  const integratePath = path.join(__dirname, '..', 'src', 'platform', 'runtime', 'lib', 'commands', 'integrate.ts');
   
   // Create a temp config with harmless commands
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-integrate-env-sanitize-'));

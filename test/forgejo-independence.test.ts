@@ -13,6 +13,7 @@ const assert = require('node:assert/strict');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const RUNTIME_LIB = path.join(__dirname, '..', 'src', 'platform', 'runtime', 'lib');
 
 const { isForgejoReviewEnabled } = require('../dist/lib/core/product-config');
 
@@ -118,7 +119,7 @@ test('performHandoff gates Forgejo PR creation behind isForgejoReviewEnabled', (
 // =============================================================================
 
 test('integrate gates syncMerged behind isForgejoReviewEnabled', () => {
-  const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'commands', 'integrate.ts'), 'utf8');
+  const src = fs.readFileSync(path.join(RUNTIME_LIB, 'commands', 'integrate.ts'), 'utf8');
   assert.ok(src.includes('isForgejoReviewEnabled'),
     'integrate.js should gate syncMerged behind isForgejoReviewEnabled');
 });
@@ -186,7 +187,7 @@ test('verifyReview skips Forgejo PR check when review provider is not forgejo', 
 
 test('startReviewLoop gates Forgejo availability behind isForgejoReviewEnabled', () => {
   // Check review-loop.js since startReviewLoop is now extracted there
-  const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'review', 'review-loop.ts'), 'utf8');
+  const src = fs.readFileSync(path.join(RUNTIME_LIB, 'review', 'review-loop.ts'), 'utf8');
   assert.ok(src.includes('forgejoEnabled') && src.includes('isForgejoReviewEnabled'),
     'review-loop.js startReviewLoop should gate Forgejo checks behind isForgejoReviewEnabled');
 });
@@ -196,7 +197,7 @@ test('startReviewLoop gates Forgejo availability behind isForgejoReviewEnabled',
 // =============================================================================
 
 test('integrate printIntegrationPreflight gates Forgejo checks', () => {
-  const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'commands', 'integrate.ts'), 'utf8');
+  const src = fs.readFileSync(path.join(RUNTIME_LIB, 'commands', 'integrate.ts'), 'utf8');
   const preflightSection = src.slice(src.indexOf('function printIntegrationPreflight'));
   assert.ok(preflightSection.includes('isForgejoReviewEnabled'),
     'printIntegrationPreflight should gate Forgejo PR/approval checks');

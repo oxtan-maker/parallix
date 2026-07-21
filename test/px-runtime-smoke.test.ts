@@ -7,7 +7,7 @@ const test = require('node:test');
 const repoRoot = path.resolve(__dirname, '..');
 const nodeMajor = Number.parseInt(process.versions.node.split('.')[0], 10);
 
-test('px runtime smoke test verifies node px.ts executes without module resolution errors', (t) => {
+test('px runtime smoke test verifies the source entrypoint executes without module resolution errors', (t) => {
   if (nodeMajor < 24) {
     t.skip(`requires Node >= 24 (got ${process.version})`);
     return;
@@ -17,7 +17,7 @@ test('px runtime smoke test verifies node px.ts executes without module resoluti
     t.skip(`Node runtime lacks built-in TypeScript entrypoint support (process.features.typescript=${String(process.features?.typescript)})`);
     return;
   }
-  const result = spawnSync('node', ['px.ts', '--version'], {
+  const result = spawnSync('node', ['src/entry/px.ts', '--version'], {
     cwd: repoRoot,
     encoding: 'utf8',
   });

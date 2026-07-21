@@ -7,7 +7,7 @@
 // process CWD is a temporary directory outside the checkout.
 //
 // See MISSION docs/adr/0044-workflow-distribution-model.md §6, §9 and
-// lib/core/package-root.ts.
+// src/platform/runtime/lib/core/package-root.ts.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -55,7 +55,13 @@ test('packageRoot resolves the checkout root by package name', () => {
 });
 
 test('packageRoot walks up from any nested module dir to the same root', () => {
-  for (const dir of ['lib', 'lib/core', 'lib/commands', 'lib/review', 'lib/agents']) {
+  for (const dir of [
+    'src/platform/runtime/lib',
+    'src/platform/runtime/lib/core',
+    'src/platform/runtime/lib/commands',
+    'src/platform/runtime/lib/review',
+    'src/platform/runtime/lib/agents',
+  ]) {
     assert.equal(
       packageRoot(path.join(ROOT, dir)),
       ROOT,
@@ -65,7 +71,7 @@ test('packageRoot walks up from any nested module dir to the same root', () => {
 });
 
 test('packageRoot does not consult process.cwd()', () => {
-  const fromOutsideCheckout = withTempCwd(() => packageRoot(path.join(ROOT, 'lib', 'core')));
+  const fromOutsideCheckout = withTempCwd(() => packageRoot(path.join(ROOT, 'src', 'platform', 'runtime', 'lib', 'core')));
   assert.equal(fromOutsideCheckout, ROOT);
   // Also confirm passing the temp CWD itself (no matching ancestor) throws
   // rather than silently succeeding via a CWD fallback.
@@ -103,7 +109,7 @@ const MIGRATED_ASSETS = [
 test('every migrated asset resolves under the package root from a temp CWD', () => {
   withTempCwd(() => {
     for (const { rel, mustExist } of MIGRATED_ASSETS) {
-      const resolved = path.join(packageRoot(path.join(ROOT, 'lib', 'core')), ...rel.split('/'));
+      const resolved = path.join(packageRoot(path.join(ROOT, 'src', 'platform', 'runtime', 'lib', 'core')), ...rel.split('/'));
       assert.equal(resolved, path.join(ROOT, ...rel.split('/')), `${rel} must resolve under the root`);
       if (mustExist) {
         assert.ok(fs.existsSync(resolved), `${rel} must exist as a shipped asset`);

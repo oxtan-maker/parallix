@@ -109,15 +109,27 @@ const testFiles = runsIntegrationSuite
   ? integrationTestFiles
   : (requestedTestFiles.length > 0 ? requestedTestFiles : defaultTestFiles);
 
-// Tests import the compiled CommonJS output under dist/. Build immediately
-// before every suite so a direct runner invocation and npm test exercise this
-// checkout's current source, never a previously compiled artifact.
+// Build the canonical bundle before every suite so a direct runner invocation
+// also catches bundle regressions in the current checkout.
 const buildResult = spawnSync('npm', ['run', 'build'], { stdio: 'inherit' });
 if (buildResult.error) {
   throw buildResult.error;
 }
 if (buildResult.status !== 0) {
   process.exit(buildResult.status ?? 1);
+}
+
+// The product build is a bundled ESM artifact. Existing unit tests retain
+// dist/lib import spelling and use node:test method mocks, which require
+// writable CommonJS exports. Generate those modules in the ignored,
+// test-only .test-runtime/ tree; the preload maps legacy imports there so
+// concurrent product builds cannot race with test module loading.
+const testRuntimeBuild = spawnSync(process.execPath, [path.join(__dirname, '..', 'scripts', 'build-test-runtime.js')], { stdio: 'inherit' });
+if (testRuntimeBuild.error) {
+  throw testRuntimeBuild.error;
+}
+if (testRuntimeBuild.status !== 0) {
+  process.exit(testRuntimeBuild.status ?? 1);
 }
 
 // The real-agent smoke test deliberately reads the operator's configured Pi
@@ -133,7 +145,12 @@ const runsLifecycleE2E = requestedTestFiles.some(
 const runsIntegrationE2E = runsRealAgentSmoke || runsLifecycleE2E;
 const bootstrapArgs = runsIntegrationE2E
   ? []
-  : ['--require', path.join(__dirname, 'bootstrap-parallix-home.js')];
+  : [
+    '--require', path.join(__dirname, 'bootstrap-parallix-home.js')
+  ];
+const sourceAliasArgs = runsIntegrationE2E
+  ? []
+  : ['--require', path.join(__dirname, 'source-runtime-alias.js')];
 const typeScriptLoaderArgs = testFiles.some(file => file.endsWith('.ts'))
   ? ['--import', 'tsx']
   : [];
@@ -149,6 +166,7 @@ const result = spawnSync(
   testNode,
   [
     ...bootstrapArgs,
+    ...sourceAliasArgs,
     ...typeScriptLoaderArgs,
     ...testForceExitArgs,
     '--test',

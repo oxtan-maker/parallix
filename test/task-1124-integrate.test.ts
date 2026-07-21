@@ -21,7 +21,7 @@ test('SC 2: buildRelaunchPrompt contains Goal Check table and mission slug', () 
 
 test('SC 3: active.js runHandoffAndReview calls attemptAgentRelaunch when repair fails and error is relaunchable', () => {
   const fs = require('fs');
-  const activeSource = fs.readFileSync(path.join(__dirname, '../lib/commands/active.ts'), 'utf8');
+  const activeSource = fs.readFileSync(path.join(__dirname, '../src/platform/runtime/lib/commands/active.ts'), 'utf8');
   assert.ok(activeSource.includes('attemptAgentRelaunchFn'), 'runHandoffAndReview should have attemptAgentRelaunchFn parameter');
   assert.ok(activeSource.includes('repairHandoff.isRelaunchableError(handoffResult.error)'), 'Should check isRelaunchableError before calling attemptAgentRelaunch');
 });
@@ -29,7 +29,7 @@ test('SC 3: active.js runHandoffAndReview calls attemptAgentRelaunch when repair
 test('SC 4: review.js startReviewLoop uses selectAgent for reviewer fallback', () => {
   const fs = require('fs');
   // Check review-loop.js since startReviewLoop is now extracted there
-  const reviewLoopSource = fs.readFileSync(path.join(__dirname, '../lib/review/review-loop.ts'), 'utf8');
+  const reviewLoopSource = fs.readFileSync(path.join(__dirname, '../src/platform/runtime/lib/review/review-loop.ts'), 'utf8');
   assert.ok(reviewLoopSource.includes("selectAgentFn('review', { exclude: excludeSet })"), 'Should select reviewer fallback from the review eligibility pool');
   assert.ok(!reviewLoopSource.includes('fallbackForFn(reviewer, implementer)'), 'Should not call fallbackFor for reviewer fallback');
   // Verify the implementer check was removed
@@ -39,7 +39,7 @@ test('SC 4: review.js startReviewLoop uses selectAgent for reviewer fallback', (
 test('SC 5: review.js does not update Backlog task on reviewer fallback', () => {
   const fs = require('fs');
   // Check review-loop.js since applyAgentFallback is now extracted there
-  const reviewLoopSource = fs.readFileSync(path.join(__dirname, '../lib/review/review-loop.ts'), 'utf8');
+  const reviewLoopSource = fs.readFileSync(path.join(__dirname, '../src/platform/runtime/lib/review/review-loop.ts'), 'utf8');
   assert.ok(!reviewLoopSource.includes('workflow(${slug}): fallback reviewer from'), 'Should not contain reviewer fallback commit message pattern');
   assert.ok(reviewLoopSource.includes("if (role === 'implementer' && taskResolution && taskResolution.ok)"), 'Backlog assignee enforcement should be guarded to implementer fallback');
   assert.ok(reviewLoopSource.includes('enforceTaskAssigneeFn(taskResolution.taskFile, fallback)'), 'Implementer fallback should still enforce Backlog assignee');
@@ -47,8 +47,8 @@ test('SC 5: review.js does not update Backlog task on reviewer fallback', () => 
 
 test('SC 6: resume-capable agents use session persistence via startAgent', () => {
   const fs = require('fs');
-  const agentsSource = fs.readFileSync(path.join(__dirname, '../lib/agents/agents.ts'), 'utf8');
-  const activeSource = fs.readFileSync(path.join(__dirname, '../lib/commands/active.ts'), 'utf8');
+  const agentsSource = fs.readFileSync(path.join(__dirname, '../src/platform/runtime/lib/agents/agents.ts'), 'utf8');
+  const activeSource = fs.readFileSync(path.join(__dirname, '../src/platform/runtime/lib/commands/active.ts'), 'utf8');
   
   // Verify RESUME_CAPABLE matches the current resume-capable families
   assert.ok(agentsSource.includes("RESUME_CAPABLE = new Set(['claude', 'codex', 'custom'])"), 'RESUME_CAPABLE should include the current resume-capable agents');
@@ -60,7 +60,7 @@ test('SC 6: resume-capable agents use session persistence via startAgent', () =>
 
 test('SC 8: manual handoff path preserved - outputs manual handoff message when relaunch fails', () => {
   const fs = require('fs');
-  const activeSource = fs.readFileSync(path.join(__dirname, '../lib/commands/active.ts'), 'utf8');
+  const activeSource = fs.readFileSync(path.join(__dirname, '../src/platform/runtime/lib/commands/active.ts'), 'utf8');
   assert.ok(activeSource.includes('You may need to complete the handoff manually:'), 'Manual handoff message should be preserved');
   assert.ok(activeSource.includes('px review ${slug} --submit'), 'Manual handoff command should be preserved');
 });
