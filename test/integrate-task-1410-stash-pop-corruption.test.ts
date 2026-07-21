@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 const test = require('node:test');
 const { mock } = test;
@@ -27,7 +26,7 @@ function runGit(cwd, args, opts = {}) {
     const err = new Error(
       `git ${args.join(' ')} failed (exit ${result.status}): ${result.stderr.trim() || result.stdout.trim()}`
     );
-    // @ts-expect-error TS2339 Property 'result' does not exist on type 'Error'.
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `result` absent from its inferred mock shape.
     err.result = result;
     throw err;
   }

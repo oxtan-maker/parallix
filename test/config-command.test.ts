@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -21,7 +20,6 @@ function runConfig(root) {
   const logs = [];
   const errors = [];
   let exitCode = null;
-  // @ts-expect-error TS2349 This expression is not callable.
   return config([], {
     rootDir: root,
     logFn: message => logs.push(message),
@@ -58,7 +56,6 @@ test('config leaves a non-git standalone directory unchanged', () => {
     fs.writeFileSync(path.join(root, 'workflow.config.json'), '{}\n');
     fs.writeFileSync(path.join(root, 'existing.txt'), 'unrelated adopter content\n');
 
-    // @ts-expect-error TS2349 This expression is not callable.
     const result = await config([], {
       rootDir: root,
       logFn: () => {},

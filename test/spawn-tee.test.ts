@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 'use strict';
 
@@ -24,29 +23,33 @@ function sleep(ms) {
 
 function createMockChild(config = {}) {
   const child = new EventEmitter();
-  // @ts-expect-error TS2339 Property 'pid' does not exist on type 'EventEmitter<any>'.
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `pid` absent from its inferred mock shape.
   child.pid = config.pid || 1234;
-  // @ts-expect-error TS2339 Property 'stdout' does not exist on type 'EventEmitter<any>'.
   child.stdout = new EventEmitter();
-  // @ts-expect-error TS2339 Property 'stderr' does not exist on type 'EventEmitter<any>'.
   child.stderr = new EventEmitter();
 
   const emitChunks = (stream, chunks = [], delayMs = 0) => {
     chunks.forEach((chunk, index) => {
       const payload = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `emit` absent from its inferred mock shape.
       setTimeout(() => stream.emit('data', payload), delayMs + index * (config.chunkGapMs || 0));
     });
   };
 
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `error` absent from its inferred mock shape.
   if (config.error) {
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `emit` absent from its inferred mock shape.
     setImmediate(() => child.emit('error', config.error));
   } else {
-    // @ts-expect-error TS2339 Property 'stdout' does not exist on type 'EventEmitter<any>'.
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `stdout` absent from its inferred mock shape.
     emitChunks(child.stdout, config.stdoutChunks, config.stdoutDelayMs || 0);
-    // @ts-expect-error TS2339 Property 'stderr' does not exist on type 'EventEmitter<any>'.
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `stderr` absent from its inferred mock shape.
     emitChunks(child.stderr, config.stderrChunks, config.stderrDelayMs || 0);
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `closeDelayMs` absent from its inferred mock shape.
     const closeDelayMs = config.closeDelayMs ?? Math.max(config.stdoutDelayMs || 0, config.stderrDelayMs || 0) + 1;
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `status` absent from its inferred mock shape.
     const status = config.status === undefined ? 0 : config.status;
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `signal` absent from its inferred mock shape.
     const signal = config.signal === undefined ? null : config.signal;
     setTimeout(() => child.emit('close', status, signal), closeDelayMs);
   }
@@ -73,9 +76,7 @@ test('spawnAndTee retains the full transcript when output stays under the cap', 
     stderrChunks: ['world'],
     status: 0
   }, async () => spawnAndTee('mock-node', [], {
-    // @ts-expect-error TS2740 Type 'Writable' is missing the following properties from type 'WriteStream': cle
     stdoutSink: noopSink(),
-    // @ts-expect-error TS2740 Type 'Writable' is missing the following properties from type 'WriteStream': cle
     stderrSink: noopSink()
   }));
   assert.equal(result.status, 0);
@@ -104,9 +105,7 @@ test('spawnAndTee bounds the in-memory transcript via maxTailBytes', async () =>
     stdoutChunks: Array.from({ length: totalChunks }, () => 'x'.repeat(chunkSize)).concat(['END']),
     status: 0
   }, async () => spawnAndTee('mock-node', [], {
-    // @ts-expect-error TS2740 Type 'Writable' is missing the following properties from type 'WriteStream': cle
     stdoutSink: noopSink(),
-    // @ts-expect-error TS2740 Type 'Writable' is missing the following properties from type 'WriteStream': cle
     stderrSink: noopSink(),
     maxTailBytes: cap
   }));
@@ -135,9 +134,7 @@ test('spawnAndTee tail buffer preserves enough context for limit-hit detection',
     stderrChunks: ['Claude usage limit reached. Your limit will reset at 5pm (UTC).'],
     status: 1
   }, async () => spawnAndTee('mock-node', [], {
-    // @ts-expect-error TS2740 Type 'Writable' is missing the following properties from type 'WriteStream': cle
     stdoutSink: noopSink(),
-    // @ts-expect-error TS2740 Type 'Writable' is missing the following properties from type 'WriteStream': cle
     stderrSink: noopSink(),
     maxTailBytes: 4 * 1024
   }));
@@ -161,9 +158,7 @@ test('spawnAndTee reports no-output intervals until the child writes output', as
     status: 0,
     closeDelayMs: 90
   }, async () => spawnAndTee('mock-node', [], {
-    // @ts-expect-error TS2740 Type 'Writable' is missing the following properties from type 'WriteStream': cle
     stdoutSink: noopSink(),
-    // @ts-expect-error TS2740 Type 'Writable' is missing the following properties from type 'WriteStream': cle
     stderrSink: noopSink(),
     noOutputWatchdog: {
       initialDelayMs: 20,
@@ -185,9 +180,7 @@ test('spawnAndTee treats stdout before the first interval as visible output', as
     stdoutChunks: ['hello'],
     status: 0
   }, async () => spawnAndTee('mock-node', [], {
-    // @ts-expect-error TS2740 Type 'Writable' is missing the following properties from type 'WriteStream': cle
     stdoutSink: noopSink(),
-    // @ts-expect-error TS2740 Type 'Writable' is missing the following properties from type 'WriteStream': cle
     stderrSink: noopSink(),
     noOutputWatchdog: {
       initialDelayMs: 1000,
@@ -207,9 +200,7 @@ test('spawnAndTee treats stderr before the first interval as visible output', as
     stderrChunks: ['warn'],
     status: 0
   }, async () => spawnAndTee('mock-node', [], {
-    // @ts-expect-error TS2740 Type 'Writable' is missing the following properties from type 'WriteStream': cle
     stdoutSink: noopSink(),
-    // @ts-expect-error TS2740 Type 'Writable' is missing the following properties from type 'WriteStream': cle
     stderrSink: noopSink(),
     noOutputWatchdog: {
       initialDelayMs: 1000,
@@ -229,9 +220,7 @@ test('spawnAndTee clears no-output watchdog on clean exit before first interval'
     status: 0,
     closeDelayMs: 1
   }, async () => spawnAndTee('mock-node', [], {
-    // @ts-expect-error TS2740 Type 'Writable' is missing the following properties from type 'WriteStream': cle
     stdoutSink: noopSink(),
-    // @ts-expect-error TS2740 Type 'Writable' is missing the following properties from type 'WriteStream': cle
     stderrSink: noopSink(),
     noOutputWatchdog: {
       initialDelayMs: 25,
@@ -250,9 +239,7 @@ test('spawnAndTee clears no-output watchdog on spawn error', async () => {
   const result = await withMockSpawn({
     error: new Error('ENOENT')
   }, async () => spawnAndTee('missing-node', [], {
-    // @ts-expect-error TS2740 Type 'Writable' is missing the following properties from type 'WriteStream': cle
     stdoutSink: noopSink(),
-    // @ts-expect-error TS2740 Type 'Writable' is missing the following properties from type 'WriteStream': cle
     stderrSink: noopSink(),
     noOutputWatchdog: {
       initialDelayMs: 20,
@@ -274,9 +261,7 @@ test('spawnAndTee clears no-output watchdog on signal exit', async () => {
     status: null,
     closeDelayMs: 1
   }, async () => spawnAndTee('mock-node', [], {
-    // @ts-expect-error TS2740 Type 'Writable' is missing the following properties from type 'WriteStream': cle
     stdoutSink: noopSink(),
-    // @ts-expect-error TS2740 Type 'Writable' is missing the following properties from type 'WriteStream': cle
     stderrSink: noopSink(),
     noOutputWatchdog: {
       initialDelayMs: 25,
@@ -304,9 +289,7 @@ test('spawnAndTee rewrites PWD to the spawned cwd so child CLIs see the mission 
       status: 0
     }, async (observed) => spawnAndTee('mock-node', [], {
       cwd: tmpRoot,
-      // @ts-expect-error TS2740 Type 'Writable' is missing the following properties from type 'WriteStream': cle
       stdoutSink: noopSink(),
-      // @ts-expect-error TS2740 Type 'Writable' is missing the following properties from type 'WriteStream': cle
       stderrSink: noopSink()
     }).then(res => {
       assert.equal(observed[0].options.cwd, tmpRoot);
@@ -331,9 +314,7 @@ test('spawnAndTee leaves no-output watchdog intact when no stall cutoff is confi
     status: 0,
     closeDelayMs: 60
   }, async () => spawnAndTee('mock-node', [], {
-    // @ts-expect-error TS2740 Type 'Writable' is missing the following properties from type 'WriteStream': cle
     stdoutSink: noopSink(),
-    // @ts-expect-error TS2740 Type 'Writable' is missing the following properties from type 'WriteStream': cle
     stderrSink: noopSink(),
     noOutputWatchdog: {
       initialDelayMs: 10_000,

@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -31,10 +30,8 @@ test('startReviewLoop runs the pre-review gate before every reviewer round', asy
 
   await startReviewLoop(TEST_SLUG, {
     eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
-    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     implementer: 'claude', reviewer: 'codex', dryRun: false,
-    // @ts-expect-error TS2739 Type '{ supported: true; }' is missing the following properties from type 'Launc
     workflowLauncherStatusFn: () => ({ supported: true }),
     isForgejoReviewEnabledFn: () => true,
     forgejoAvailableFn: async () => true,
@@ -42,14 +39,12 @@ test('startReviewLoop runs the pre-review gate before every reviewer round', asy
     maybeUpdateGraphifyBeforeReviewFn: () => {},
     enforceTaskAssigneeFn: () => true,
     resolveForgejoUserFn: () => 'gemini', readTokenFn: () => 'token',
-    // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(slug: string, state: Record<string
     readReviewStateFn: () => null, writeReviewStateFn: () => {},
     rebaseBeforeReviewRoundFn: async () => ({ ok: true, sharedFileConflicts: false }),
     runPreReviewGateFn: async () => {
       gateCalls.push(gateCalls.length + 1);
       return { ok: true, area: 'lib', command: 'true', exitCode: 0, stdout: '', stderr: '' };
     },
-    // @ts-expect-error TS2322 Type '(step: string, options: StartAgentOptions) => Promise<{ agent: any; }>' is
     startAgentFn: async (step, options) => {
       events.push(`${step}:${options.role}`);
       return { agent: null };
@@ -59,7 +54,6 @@ test('startReviewLoop runs the pre-review gate before every reviewer round', asy
     applyAgentFallbackFn: ({ original }) => original,
     buildCompactReviewPromptFn: () => 'review prompt',
     buildCompactActOnReviewPromptFn: () => 'act-on-review prompt',
-    // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(_code: number) => never'.
     log: () => {}, error: () => {}, exit: () => {},
     consumeReviewerArtifactsFn: async () => ({ consumed: false }),
     consumeImplementerArtifactsFn: async () => ({ consumed: false }),
@@ -76,10 +70,8 @@ test('startReviewLoop stops after a gate-failure bounce without launching a revi
 
   await startReviewLoop(TEST_SLUG, {
     eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
-    // @ts-expect-error TS2322 Type '{ ok: true; taskFile: string; }' is not assignable to type '{ ok: boolean;
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     implementer: 'claude', reviewer: 'codex', dryRun: false,
-    // @ts-expect-error TS2739 Type '{ supported: true; }' is missing the following properties from type 'Launc
     workflowLauncherStatusFn: () => ({ supported: true }),
     isForgejoReviewEnabledFn: () => true,
     forgejoAvailableFn: async () => true,
@@ -87,7 +79,6 @@ test('startReviewLoop stops after a gate-failure bounce without launching a revi
     maybeUpdateGraphifyBeforeReviewFn: () => {},
     enforceTaskAssigneeFn: () => true,
     resolveForgejoUserFn: () => 'gemini', readTokenFn: () => 'token',
-    // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(slug: string, state: Record<string
     readReviewStateFn: () => null, writeReviewStateFn: () => {},
     rebaseBeforeReviewRoundFn: async () => ({ ok: true, sharedFileConflicts: false }),
     runPreReviewGateFn: async () => {
@@ -95,7 +86,6 @@ test('startReviewLoop stops after a gate-failure bounce without launching a revi
       return { ok: false, area: 'lib', command: 'false', exitCode: 1, stdout: '', stderr: '' };
     },
     handleGateFailureAutoBounceFn: async () => ({ bounced: true, stranded: false }),
-    // @ts-expect-error TS2322 Type '(step: string, options: StartAgentOptions) => Promise<{ agent: any; }>' is
     startAgentFn: async (step, options) => {
       events.push(`${step}:${options.role}`);
       return { agent: null };
@@ -103,7 +93,6 @@ test('startReviewLoop stops after a gate-failure bounce without launching a revi
     applyAgentFallbackFn: ({ original }) => original,
     buildCompactReviewPromptFn: () => 'review prompt',
     buildCompactActOnReviewPromptFn: () => 'act-on-review prompt',
-    // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(_code: number) => never'.
     log: () => {}, error: () => {}, exit: () => {},
     consumeReviewerArtifactsFn: async () => ({ consumed: false }),
     consumeImplementerArtifactsFn: async () => ({ consumed: false }),

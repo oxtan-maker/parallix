@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -52,7 +51,6 @@ test('writeSession preserves the legacy path and exact JSON field structure', ()
 
 test('writeSession refuses payload without an agent string', () => {
   withTempWorktree(worktree => {
-    // @ts-expect-error TS2345 Argument of type '{}' is not assignable to parameter of type '{ agent: string; l
     assert.equal(sessions.writeSession(worktree, 'task-1025', 'implementer', {}), false);
     assert.equal(sessions.writeSession(worktree, 'task-1025', 'implementer', null), false);
   });

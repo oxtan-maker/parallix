@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -10,7 +9,6 @@ const { findLastNonNoiseCommit } = require('../dist/lib/core/mission-utils');
 
 function git(args, cwd) {
   const result = spawnSync('git', args, { cwd, encoding: 'utf8' });
-  // @ts-expect-error TS2339 Property 'code' does not exist on type 'Error'.
   if (result.error && !(result.error.code === 'EPERM' && result.status === 0)) {
     throw result.error;
   }

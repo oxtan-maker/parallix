@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -54,13 +53,10 @@ function runGate(repoRoot, baselinePath, extraArgs = []) {
   const errors = [];
   let exitCode = null;
   const previousLogger = fmt.setLogger({
-    // @ts-expect-error TS2345 Argument of type 'unknown' is not assignable to parameter of type 'string'.
     log: message => logs.push(fmt.stripAnsi(message)),
-    // @ts-expect-error TS2345 Argument of type 'unknown' is not assignable to parameter of type 'string'.
     error: message => errors.push(fmt.stripAnsi(message)),
   });
   try {
-    // @ts-expect-error TS2349 This expression is not callable.
     mutationGate(['--base', 'main', '--baseline-path', baselinePath, ...extraArgs], {
       exitFn: code => { exitCode = code; },
       scopeFn,

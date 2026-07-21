@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 // task-2225 — TS migration phase T2: packageRoot() asset-resolution hardening.
 //

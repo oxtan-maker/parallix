@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 const test = require('node:test');
 const { mock } = test;
@@ -67,7 +66,7 @@ function runGitOrThrow(args, options = {}) {
   }
   if (typeof result.status === 'number' && result.status !== 0) {
     const error = new Error((result.stderr || result.stdout || `git ${args.join(' ')} failed`).trim());
-    // @ts-expect-error TS2339 Property 'result' does not exist on type 'Error'.
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `result` absent from its inferred mock shape.
     error.result = result;
     throw error;
   }
@@ -287,13 +286,11 @@ test('printIntegrationPreflight reads classification from the selected task file
   }, {
     readTokenFn: () => 'token',
     resolveTokenFileFn: () => '/tmp/token',
-    // @ts-expect-error TS2739 Type '{ inProgress: false; rebaseHead: any; unmergedFiles: any[]; }' is missing
     detectRebaseStateFn: () => ({ inProgress: false, rebaseHead: null, unmergedFiles: [] }),
     getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] }),
     findMissionDocInBranchesFn: () => [],
     isForgejoReviewEnabledFn: () => false,
     resolveMissionClassificationFn: () => ({ classification: null, error: 'stale base resolver should not be used' }),
-    // @ts-expect-error TS2322 Type 'number' is not assignable to type 'string'.
     log: line => logs.push(line)
   });
 
@@ -848,7 +845,6 @@ test('px integrate --dry-run never invokes the post-integrate hook (SC4)', async
   console.log = () => {};
   try {
     try {
-      // @ts-expect-error TS2349 This expression is not callable.
       await integrateCommand(['task-integrate-hook-dry-run-does-not-exist', '--dry-run']);
     } catch (err) {
       if (err.message !== 'process.exit called') throw err;
@@ -873,7 +869,6 @@ test('px integrate never invokes the post-integrate hook when preflight fails (S
   console.log = () => {};
   try {
     try {
-      // @ts-expect-error TS2349 This expression is not callable.
       await integrateCommand(['task-integrate-hook-preflight-fails-does-not-exist']);
     } catch (err) {
       if (err.message !== 'process.exit called') throw err;
@@ -1036,7 +1031,6 @@ test('provider-backed approval repair leaves integration preflight with review i
       worktree: root,
       log: () => {},
       error: () => {},
-      // @ts-expect-error TS2322 Type '() => void' is not assignable to type '(_code: number) => never'.
       exit: () => {}
     });
 
@@ -1335,7 +1329,6 @@ test('printIntegrationPreflight fails fast on an in-progress rebase in the integ
       readTokenFn: () => 'secret-token',
       resolveTokenFileFn: () => '/tmp/tokens/codex',
       isForgejoReviewEnabledFn: () => true,
-      // @ts-expect-error TS2322 Type '(target: string) => { inProgress: true; detached: true; rebaseHead: string
       detectRebaseStateFn: target => {
         assert.equal(target, FAKE_ROOT);
         return {
@@ -1376,7 +1369,7 @@ test('maybeUpdateGraphifyOnPrimary skips cleanly when graphify is missing', () =
   const result = maybeUpdateGraphifyOnPrimary(root, {
     commandRunner() {
       const error = new Error('missing');
-      // @ts-expect-error TS2339 Property 'code' does not exist on type 'Error'.
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `code` absent from its inferred mock shape.
       error.code = 'ENOENT';
       throw error;
     },

@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -30,7 +29,6 @@ test('node parallix diff resolves correct target branches', async (t) => {
     return { status: 0 };
   };
 
-  // @ts-expect-error TS2349 This expression is not callable.
   await diff(['task-1147'], {
     gitFn,
     spawnSyncFn: spawnSync,
@@ -63,7 +61,6 @@ test('node parallix diff detects pager.diff', async (t) => {
     return { status: 0 };
   };
 
-  // @ts-expect-error TS2349 This expression is not callable.
   await diff(['task-1147'], {
     gitFn,
     spawnSyncFn: spawnSync,
@@ -97,7 +94,6 @@ test('node parallix diff detects core.pager', async (t) => {
     return { status: 0 };
   };
 
-  // @ts-expect-error TS2349 This expression is not callable.
   await diff(['task-1147'], {
     gitFn,
     spawnSyncFn: spawnSync,
@@ -125,7 +121,6 @@ test('node parallix diff rejects less variants', async (t) => {
     [/branch --list --format/, { status: 0, stdout: 'main\n' }]
   ]);
 
-  // @ts-expect-error TS2349 This expression is not callable.
   await diff(['task-1147'], {
     gitFn,
     spawnSyncFn: () => ({ status: 0 }),
@@ -150,7 +145,6 @@ test('node parallix diff fails on spawn error', async (t) => {
     [/branch --list --format/, { status: 0, stdout: 'main\n' }]
   ]);
 
-  // @ts-expect-error TS2349 This expression is not callable.
   await diff(['task-1147'], {
     gitFn,
     spawnSyncFn: () => ({ error: new Error('spawn failed'), status: null }),
@@ -175,7 +169,6 @@ test('node parallix diff fails on spawn signal', async (t) => {
     [/branch --list --format/, { status: 0, stdout: 'main\n' }]
   ]);
 
-  // @ts-expect-error TS2349 This expression is not callable.
   await diff(['task-1147'], {
     gitFn,
     spawnSyncFn: () => ({ signal: 'SIGKILL', status: null }),
@@ -195,7 +188,6 @@ test('node parallix diff fails when slug cannot be inferred', async (t) => {
   const diff = require('../dist/lib/commands/diff');
   const calls = [];
 
-  // @ts-expect-error TS2349 This expression is not callable.
   await diff([], {
     gitFn: () => ({ status: 0 }),
     spawnSyncFn: () => ({ status: 0 }),
@@ -212,7 +204,6 @@ test('node parallix diff fails when primary branch detection fails', async (t) =
   const diff = require('../dist/lib/commands/diff');
   const calls = [];
 
-  // @ts-expect-error TS2349 This expression is not callable.
   await diff(['task-1147'], {
     gitFn: () => ({ status: 0 }),
     spawnSyncFn: () => ({ status: 0 }),
@@ -237,7 +228,6 @@ test('node parallix diff fails when no tool is configured', async (t) => {
     [/config --get core.pager/, { status: 0, stdout: 'less\n' }]
   ]);
 
-  // @ts-expect-error TS2349 This expression is not callable.
   await diff(['task-1147'], {
     gitFn,
     spawnSyncFn: () => ({ status: 0 }),
@@ -257,7 +247,6 @@ test('node parallix diff fails when mission worktree cannot be resolved', async 
   const diff = require('../dist/lib/commands/diff');
   const calls = [];
 
-  // @ts-expect-error TS2349 This expression is not callable.
   await diff(['task-1147'], {
     gitFn: () => ({ status: 0 }),
     spawnSyncFn: () => ({ status: 0 }),

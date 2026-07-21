@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -112,7 +111,6 @@ test('startReviewLoop prioritizes explicit implementer over backlog task', { con
       return startReviewLoop(slug, {
         implementer: 'gemini',
         eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini'],
-        // @ts-expect-error TS2741 Property 'agent' is missing in type '{ supported: true; detail: string; }' but r
         workflowLauncherStatusFn: () => ({ supported: true, detail: 'mock' }),
         selectAgentFn: () => 'claude',
         dryRun: true

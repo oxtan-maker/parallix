@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -50,7 +49,6 @@ test('runPreReviewGate runs the diff-scoped resolver and executes its selected a
         resolverCalls.push({ area, worktree, resolvedMissionDir });
         return 'all';
       },
-      // @ts-expect-error TS2322 Type '(_command: string, args: string[]) => { status: number; stdout: string; st
       runFn: (_command, args) => {
         commands.push(args[1]);
         return { status: 0, stdout: 'area=all\n', stderr: '' };

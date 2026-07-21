@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -28,7 +27,6 @@ test('rebase reports git output and hook hints on non-conflict failure', async (
   const originalError = console.error;
   console.error = (...args) => { capturedStderr.push(args.join(' ')); };
 
-  // @ts-expect-error TS2349 This expression is not callable.
   await rebase(['task-1077'], {
     isForgejoReviewEnabledFn: () => false,
     inferSlugFn: () => 'task-1077',
@@ -63,7 +61,6 @@ test('rebase reports git output on failed continue attempt', async () => {
   const originalError = console.error;
   console.error = (...args) => { capturedStderr.push(args.join(' ')); };
 
-  // @ts-expect-error TS2349 This expression is not callable.
   await rebase(['task-1077'], {
     isForgejoReviewEnabledFn: () => false,
     inferSlugFn: () => 'task-1077',
@@ -105,7 +102,6 @@ test('task-1322 recovery diagnostics report an in-progress rebase across status,
   const statusLines = [];
   let statusExitCode = null;
 
-  // @ts-expect-error TS2349 This expression is not callable.
   status(['task-1322'], {
     inferSlugFn: () => 'task-1322',
     getCurrentBranchFn: () => '',
@@ -139,7 +135,6 @@ test('task-1322 recovery diagnostics report an in-progress rebase across status,
   let attemptedFreshRebase = false;
 
   try {
-    // @ts-expect-error TS2349 This expression is not callable.
     await rebase(['task-1322'], {
       isForgejoReviewEnabledFn: () => false,
       inferSlugFn: () => 'task-1322',

@@ -1,5 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
-
 // Regression for TASK-1343: a "Reorder tasks in backlog" / ordinal write path
 // recreates a `status: backlog` copy in backlog/tasks/ for a task whose
 // canonical record already lives in backlog/completed/ (or backlog/archive/).

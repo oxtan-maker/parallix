@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -36,9 +35,7 @@ test('startPiAgent requests a much larger tail buffer than spawn-tee\'s 64KB def
   // 64 * 1024 is spawn-tee's DEFAULT_MAX_TAIL_BYTES; the fix must exceed it
   // by a wide margin, not just nudge it — real sessions reached 18.6MB.
   assert.ok(
-    // @ts-expect-error TS2339 Property 'maxTailBytes' does not exist on type 'never'.
     capturedOptions.maxTailBytes > 64 * 1024 * 100,
-    // @ts-expect-error TS2339 Property 'maxTailBytes' does not exist on type 'never'.
     `expected maxTailBytes to be far larger than the 64KB default, got: ${capturedOptions.maxTailBytes}`
   );
 });

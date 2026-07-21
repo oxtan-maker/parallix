@@ -1,7 +1,10 @@
 #!/bin/sh
 # Start via POSIX sh so an inherited BASH_ENV cannot run before this script has
 # a chance to clear it. The verifier itself requires Bash below.
-if [ "${VERIFY_LOCAL_CLEAN_BASH:-}" != "1" ]; then
+# The sentinel alone is not enough: a parent verifier can legitimately pass it
+# through its environment while this executable is still entered by `/bin/sh`.
+# Re-exec unless we have both a clean environment and a Bash interpreter.
+if [ "${VERIFY_LOCAL_CLEAN_BASH:-}" != "1" ] || [ -z "${BASH_VERSION:-}" ]; then
   exec env -u BASH_ENV VERIFY_LOCAL_CLEAN_BASH=1 bash "$0" "$@"
 fi
 

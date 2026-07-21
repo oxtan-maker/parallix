@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -31,7 +30,6 @@ test('writeReviewState does not report success when commit fails and state path 
       implementer: 'claude',
       round: 3,
       phase: 'fixing'
-    // @ts-expect-error TS2345 Argument of type '(args: any) => { status: number; stdout: string; stderr: strin
     }, root, gitFn);
 
     assert.deepEqual(result, {

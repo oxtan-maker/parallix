@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -7,9 +6,10 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const test = require('node:test');
 
-// --experimental-strip-types is only stable and reliable on Node 24+.
-// On Node 22 it fails with ERR_NO_TYPESCRIPT when spawning px.ts, causing
-// all 8 px-runner tests to fail. Skip the entire file on older runtimes.
+// This source-checkout runner launches px.ts from a separate caller CWD.
+// Use the project's tsx loader so module classification stays tied to the
+// source entrypoint rather than the caller's temporary CommonJS package.
+// Skip the entire file on older runtimes.
 const major = Number(process.versions.node.split('.')[0]);
 if (major < 24) {
   console.warn(`px-runner tests require Node >= 24 (got ${process.version}); skipping all tests.`);
@@ -18,6 +18,7 @@ if (major < 24) {
 
 const repoRoot = path.resolve(__dirname, '..');
 const pxPath = path.join(repoRoot, 'px.ts');
+const tsxLoaderPath = require.resolve('tsx');
 // Read the version from the manifest so version bumps do not break these tests.
 const pkgVersion = require('../package.json').version;
 const versionRe = new RegExp(`parallix ${pkgVersion.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`);
@@ -75,7 +76,8 @@ function makeTargetRepo({ slug = 'task-px-001' } = {}) {
 }
 
 function runPx(args, options = {}) {
-  return spawnSync(process.execPath, ['--experimental-strip-types', pxPath, ...args], {
+  return spawnSync(process.execPath, ['--import', tsxLoaderPath, pxPath, ...args], {
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `cwd` absent from its inferred mock shape.
     cwd: options.cwd || repoRoot,
     encoding: 'utf8',
   });

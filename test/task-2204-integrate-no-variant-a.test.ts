@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -141,7 +140,6 @@ test('integrate rejects merged Forgejo PRs during preflight with recovery guidan
   mock.method(process, 'exit', (code) => exitCodes.push(code));
 
   try {
-    // @ts-expect-error TS2349 This expression is not callable.
     integrate([TEST_SLUG, '--no-integration-gates']);
 
     const output = [...logs, ...errors].join('\n');

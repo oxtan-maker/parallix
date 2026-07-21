@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 // Tier 2 blocking e2e: launches the REAL `custom` agent family (opencode + a
 // pinned local model) through the production launcher path in
@@ -34,7 +33,6 @@ const CLI_ENTRY = path.resolve(__dirname, '..', 'dist', 'px.js');
 // explicitly (config route), so the smoke run never depends on the developer's
 // ambient PARALLIX_HOME/global state.
 const workflowConfig = require('../workflow.config.json');
-// @ts-expect-error TS2339 Property 'custom' does not exist on type '{ codex: string; }'.
 const CUSTOM_MODEL = workflowConfig?.adapters?.agents?.models?.custom;
 const OVERRIDE_AGENT = process.env.PARALLIX_REAL_AGENT || null;
 const OVERRIDE_MODEL = process.env.PARALLIX_REAL_AGENT_MODEL || null;
@@ -377,7 +375,9 @@ function setupRepository({ slug, title, agent = 'custom', runner = 'opencode' })
     if (fs.existsSync(piModelsPath)) {
       const piModels = JSON.parse(fs.readFileSync(piModelsPath, 'utf8'));
       for (const provider of Object.values(piModels.providers || {})) {
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `apiKey` absent from its inferred mock shape.
         if (typeof provider?.apiKey === 'string' && /^(?:dummy|placeholder)/i.test(provider.apiKey)) {
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `apiKey` absent from its inferred mock shape.
           provider.apiKey = LOCAL_PI_E2E_API_KEY;
         }
       }
@@ -533,7 +533,9 @@ function setupRepository({ slug, title, agent = 'custom', runner = 'opencode' })
 
 function runWorkflowAllowFail(repoRoot, env, args, timeout, options = {}) {
   const {
+// @ts-expect-error -- Legacy CommonJS assertion exercises a runtime shape not represented by the inferred declaration.
     directCommand = false,
+// @ts-expect-error -- Legacy CommonJS assertion exercises a runtime shape not represented by the inferred declaration.
     keepCaptureArtifacts = shouldKeepTmp()
   } = options;
   // Own a unique directory, rather than independent predictable files under a
@@ -556,9 +558,7 @@ function runWorkflowAllowFail(repoRoot, env, args, timeout, options = {}) {
       timeout,
       stdio: ['ignore', stdoutFd, stderrFd]
     });
-    // @ts-expect-error TS2322 Type 'string' is not assignable to type 'NonSharedBuffer'.
     result.stdout = fs.existsSync(stdoutPath) ? fs.readFileSync(stdoutPath, 'utf8') : '';
-    // @ts-expect-error TS2322 Type 'string' is not assignable to type 'NonSharedBuffer'.
     result.stderr = fs.existsSync(stderrPath) ? fs.readFileSync(stderrPath, 'utf8') : '';
     return result;
   } finally {
@@ -641,12 +641,15 @@ function runRealAgentSmoke(agent, runner) {
     // setupRepository's symlink is a test-controlled route to the production
     // Codex adapter; keeping it first on PATH proves model dispatch without
     // trusting another Codex executable selected by the parent environment.
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `CODEX_BIN` absent from its inferred mock shape.
     env.CODEX_BIN = path.join(repo.binDir, 'codex');
   }
   if (agent === 'custom' && runner === 'pi') {
     // Pin both Pi's executable and mutable agent state to the disposable
     // fixture. The launcher resolves PI_BIN before NVM/PATH fallbacks.
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `PI_BIN` absent from its inferred mock shape.
     env.PI_BIN = path.join(repo.binDir, 'pi');
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `PI_CODING_AGENT_DIR` absent from its inferred mock shape.
     env.PI_CODING_AGENT_DIR = repo.piAgentHome;
   }
   // Drop the inherited PWD: opencode trusts PWD over the real cwd for project
@@ -654,6 +657,7 @@ function runRealAgentSmoke(agent, runner) {
   // the launcher child attach to that project instead of the throwaway repo —
   // colliding with any concurrently running opencode sessions (observed as
   // SQLite WAL contention and as the child hanging at exit until SIGTERM).
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `PWD` absent from its inferred mock shape.
   delete env.PWD;
 
   try {
@@ -696,7 +700,6 @@ function runRealAgentSmoke(agent, runner) {
     }
 
     assert.match(
-      // @ts-expect-error TS2769 No overload matches this call.
       draftResult.stdout,
       new RegExp(`Draft agent family: ${agent}`),
       `[parallix-workflow-failure] expected the real run to select the ${agent} agent family`
@@ -739,7 +742,6 @@ function runRealAgentSmoke(agent, runner) {
     // SC5: telemetry/session metadata must be structurally sane (a real
     // provider/model/numeric shape). Parse the draft stats line to verify
     // the agent actually did work (non-zero tokens or tool calls).
-    // @ts-expect-error TS2339 Property 'match' does not exist on type 'NonSharedBuffer'.
     const statsMatch = draftResult.stdout.match(
       /Draft stats recorded: \S+ stage=draft provider=(\S+) model=(\S+) input_tokens=(\d+) tool_calls=(\d+)/
     );
@@ -859,7 +861,6 @@ function runRealAgentSmoke(agent, runner) {
     );
 
     assert.match(
-      // @ts-expect-error TS2769 No overload matches this call.
       activeResult.stdout,
       new RegExp(`Execute agent \\(${agent}\\)`),
       `[parallix-workflow-failure] expected active phase to select the ${agent} agent family`

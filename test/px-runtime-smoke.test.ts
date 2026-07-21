@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 const assert = require('node:assert/strict');
 const path = require('node:path');
@@ -13,7 +12,7 @@ test('px runtime smoke test verifies node px.ts executes without module resoluti
     t.skip(`requires Node >= 24 (got ${process.version})`);
     return;
   }
-  // @ts-expect-error TS2367 This comparison appears to be unintentional because the types 'false | "strip"'
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `features` absent from its inferred mock shape.
   if (process.features?.typescript !== true) {
     t.skip(`Node runtime lacks built-in TypeScript entrypoint support (process.features.typescript=${String(process.features?.typescript)})`);
     return;

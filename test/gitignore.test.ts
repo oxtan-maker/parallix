@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -44,7 +43,6 @@ test('creates .gitignore when missing in a git repo', async () => {
   try {
     initGitRepo(dir);
     const logs = [];
-    // @ts-expect-error TS2349 This expression is not callable.
     const result = ensureWorkflowGitignore(dir, {
       logFn: msg => logs.push(msg),
     });
@@ -72,7 +70,6 @@ test('appends only missing entries and leaves existing untouched', async () => {
     initGitRepo(dir);
     writeGitignore(dir, '.workflow/\n# some comment\nnode_modules/\n');
 
-    // @ts-expect-error TS2349 This expression is not callable.
     const result = ensureWorkflowGitignore(dir);
 
     assert.equal(result.ok, true);
@@ -104,7 +101,6 @@ test('no-op when all entries already present (zero duplicates)', async () => {
     const content = ensureWorkflowGitignore.WORKFLOW_ENTRIES.join('\n') + '\n';
     writeGitignore(dir, content);
 
-    // @ts-expect-error TS2349 This expression is not callable.
     const result = ensureWorkflowGitignore(dir);
 
     assert.equal(result.ok, true);
@@ -127,7 +123,6 @@ test('detects symlinked .gitignore and skips without crashing', async () => {
     fs.writeFileSync(realFile, 'real-content\n', 'utf8');
     fs.symlinkSync(realFile, path.join(dir, '.gitignore'));
 
-    // @ts-expect-error TS2349 This expression is not callable.
     const result = ensureWorkflowGitignore(dir);
 
     assert.equal(result.ok, true);
@@ -149,7 +144,6 @@ test('skips gracefully when not a git repository', async () => {
     // No .git directory
     writeGitignore(dir, '.workflow/\n');
 
-    // @ts-expect-error TS2349 This expression is not callable.
     const result = ensureWorkflowGitignore(dir);
 
     assert.equal(result.ok, true);
@@ -169,7 +163,6 @@ test('skips gracefully when not a git repository', async () => {
 test('skips gracefully when .gitignore does not exist and no .git directory', async () => {
   const dir = mktempDir();
   try {
-    // @ts-expect-error TS2349 This expression is not callable.
     const result = ensureWorkflowGitignore(dir);
 
     assert.equal(result.ok, true);
@@ -189,7 +182,6 @@ test('handles partial overlap - only some entries present', async () => {
     initGitRepo(dir);
     writeGitignore(dir, '.workflow/\n.sessions/\n');
 
-    // @ts-expect-error TS2349 This expression is not callable.
     const result = ensureWorkflowGitignore(dir);
 
     assert.equal(result.ok, true);
@@ -211,14 +203,12 @@ test('idempotent - running twice produces same result', async () => {
   try {
     initGitRepo(dir);
 
-    // @ts-expect-error TS2349 This expression is not callable.
     const result1 = ensureWorkflowGitignore(dir);
     assert.equal(result1.created, true);
     assert.equal(result1.appended, 7);
 
     const contentAfterFirst = readGitignore(dir);
 
-    // @ts-expect-error TS2349 This expression is not callable.
     const result2 = ensureWorkflowGitignore(dir);
     assert.equal(result2.created, false);
     assert.equal(result2.appended, 0);
@@ -238,7 +228,6 @@ test('injectable dependencies work correctly', async () => {
     let writeCalled = false;
     let readCalled = false;
 
-    // @ts-expect-error TS2349 This expression is not callable.
     const result = ensureWorkflowGitignore(dir, {
       existsSyncFn: (p) => p.endsWith('.git') || p.endsWith('.gitignore'),
       lstatSyncFn: (p) => ({ isSymbolicLink: () => false }),
@@ -267,7 +256,6 @@ test('preserves comment lines in existing .gitignore', async () => {
     const existing = '# Workflow ignores\n.workflow/\n\n# Build artifacts\nnode_modules/\n';
     writeGitignore(dir, existing);
 
-    // @ts-expect-error TS2349 This expression is not callable.
     const result = ensureWorkflowGitignore(dir);
 
     assert.equal(result.ok, true);
@@ -286,7 +274,6 @@ test('handles .gitignore with Windows line endings', async () => {
     initGitRepo(dir);
     writeGitignore(dir, '.workflow/\r\nnode_modules/\r\n');
 
-    // @ts-expect-error TS2349 This expression is not callable.
     const result = ensureWorkflowGitignore(dir);
 
     assert.equal(result.ok, true);
@@ -309,7 +296,6 @@ test('handles .gitignore with blank lines', async () => {
     initGitRepo(dir);
     writeGitignore(dir, '\n\n.workflow/\n\n.sessions/\n\n');
 
-    // @ts-expect-error TS2349 This expression is not callable.
     const result = ensureWorkflowGitignore(dir);
 
     assert.equal(result.ok, true);

@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -33,7 +32,6 @@ test('parseWorktreeList handles entry without branch line', () => {
 
 test('findStaleMissionWorktrees returns empty array when git fails', () => {
   const stale = findStaleMissionWorktrees({
-    // @ts-expect-error TS2322 Type '() => { status: number; stdout: string; stderr: string; }' is not assignab
     gitRun() {
       return { status: 1, stdout: '', stderr: 'error' };
     }
@@ -44,7 +42,6 @@ test('findStaleMissionWorktrees returns empty array when git fails', () => {
 test('findStaleMissionWorktrees skips entries without mission branch refs', () => {
   const stale = findStaleMissionWorktrees({
     primaryWorktree: '/home/magnus/code/repo',
-    // @ts-expect-error TS2322 Type '() => { status: number; stdout: string; stderr: string; }' is not assignab
     gitRun() {
       return {
         status: 0,
@@ -68,7 +65,6 @@ test('findStaleMissionWorktrees skips entries without mission branch refs', () =
 test('findStaleMissionWorktrees skips entries with non-done task status', () => {
   const stale = findStaleMissionWorktrees({
     primaryWorktree: '/home/magnus/code/repo',
-    // @ts-expect-error TS2322 Type '() => { status: number; stdout: string; stderr: string; }' is not assignab
     gitRun() {
       return {
         status: 0,
@@ -94,7 +90,6 @@ test('findStaleMissionWorktrees skips entries with non-done task status', () => 
 test('findStaleMissionWorktrees returns cleanup command for done task', () => {
   const stale = findStaleMissionWorktrees({
     primaryWorktree: '/home/magnus/code/repo',
-    // @ts-expect-error TS2322 Type '() => { status: number; stdout: string; stderr: string; }' is not assignab
     gitRun() {
       return {
         status: 0,
@@ -122,7 +117,6 @@ test('findStaleMissionWorktrees returns cleanup command for done task', () => {
 test('findStaleMissionWorktrees returns git remove command for missing task file', () => {
   const stale = findStaleMissionWorktrees({
     primaryWorktree: '/home/magnus/code/repo',
-    // @ts-expect-error TS2322 Type '() => { status: number; stdout: string; stderr: string; }' is not assignab
     gitRun() {
       return {
         status: 0,
@@ -152,7 +146,6 @@ test('status prints mission details and agent matrix for inferred slug', () => {
   const lines = [];
   let exitCode = null;
 
-  // @ts-expect-error TS2349 This expression is not callable.
   status([], {
     inferSlugFn: () => 'task-1031',
     getCurrentBranchFn: () => 'mission/task-1031',
@@ -186,7 +179,6 @@ test('status prints mission details and agent matrix for inferred slug', () => {
 test('status agent matrix includes every workflow launcher even when not step-eligible', () => {
   const lines = [];
 
-  // @ts-expect-error TS2349 This expression is not callable.
   status(['task-1031'], {
     inferSlugFn: () => 'task-1031',
     getCurrentBranchFn: () => 'mission/task-1031',
@@ -212,7 +204,6 @@ test('status prints stale worktrees only when no explicit slug is provided', () 
   const lines = [];
   let exitCode = null;
 
-  // @ts-expect-error TS2349 This expression is not callable.
   status(['task-1031'], {
     inferSlugFn: () => 'task-1031',
     getCurrentBranchFn: () => 'mission/task-1031',
@@ -240,7 +231,6 @@ test('status prints stale worktrees only when no explicit slug is provided', () 
 test('status reports detached-head rebase diagnostics for the current worktree', () => {
   const lines = [];
 
-  // @ts-expect-error TS2349 This expression is not callable.
   status(['task-1322'], {
     inferSlugFn: () => 'task-1322',
     getCurrentBranchFn: () => '',
@@ -280,7 +270,6 @@ test('status reports detached-head rebase diagnostics for the current worktree',
 test('status reports stale worktree rebase diagnostics instead of only cleanup hints', () => {
   const lines = [];
 
-  // @ts-expect-error TS2349 This expression is not callable.
   status([], {
     inferSlugFn: () => null,
     getCurrentBranchFn: () => 'main',

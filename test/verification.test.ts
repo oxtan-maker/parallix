@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -147,7 +146,6 @@ test('readPublishedTreeState uses the git-style runner by default', () => {
   withTempDir(root => {
     const realpathRoot = fs.realpathSync(root);
     const state = readPublishedTreeState(root, {
-      // @ts-expect-error TS2322 Type '(args: string[]) => { status: number; stdout: string; stderr: string; }' i
       gitRunner(args) {
         assert.ok(Array.isArray(args), 'expected git-style argv array');
         if (args.includes('HEAD^{tree}')) {

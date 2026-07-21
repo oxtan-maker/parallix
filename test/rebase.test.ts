@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -92,7 +91,6 @@ test('buildRebasePrompt omits mission-specific section when empty', () => {
 
 test('rebase exits 1 when no slug can be inferred', async () => {
   let exitCode = null;
-  // @ts-expect-error TS2349 This expression is not callable.
   await rebase([], {
     isForgejoReviewEnabledFn: () => false,
     inferSlugFn: () => null,
@@ -103,7 +101,6 @@ test('rebase exits 1 when no slug can be inferred', async () => {
 
 test('rebase exits 1 when not on the correct branch', async () => {
   let exitCode = null;
-  // @ts-expect-error TS2349 This expression is not callable.
   await rebase(['task-1018'], {
     isForgejoReviewEnabledFn: () => false,
     inferSlugFn: () => 'task-1018',
@@ -126,7 +123,6 @@ test('rebase exits 1 with recovery guidance when a rebase is already in progress
   let attemptedFreshRebase = false;
 
   try {
-    // @ts-expect-error TS2349 This expression is not callable.
     await rebase(['task-1322'], {
       isForgejoReviewEnabledFn: () => false,
       inferSlugFn: () => 'task-1322',
@@ -172,7 +168,6 @@ test('rebase exits 1 with recovery guidance when a rebase is already in progress
 
 test('rebase exits 0 on clean rebase', async () => {
   let exitCode = null;
-  // @ts-expect-error TS2349 This expression is not callable.
   await rebase(['task-1018'], {
     inferSlugFn: () => 'task-1018',
     findMissionDirFn: () => '/tmp/docs/missions/2026/task-1018',
@@ -198,7 +193,6 @@ test('rebase exits 0 on clean rebase', async () => {
 test('rebase targets the mission recorded base branch, not the primary branch', async () => {
   let exitCode = null;
   let rebaseTarget = null;
-  // @ts-expect-error TS2349 This expression is not callable.
   await rebase(['task-1350'], {
     inferSlugFn: () => 'task-1350',
     findMissionDirFn: () => '/tmp/docs/missions/2026/task-1350',
@@ -227,7 +221,6 @@ test('rebase targets the mission recorded base branch, not the primary branch', 
 test('rebase uses local main and does not fetch Forgejo even when review is enabled', async () => {
   let exitCode = null;
   let fetchCalled = false;
-  // @ts-expect-error TS2349 This expression is not callable.
   await rebase(['task-1018'], {
     inferSlugFn: () => 'task-1018',
     findMissionDirFn: () => '/tmp/docs/missions/2026/task-1018',
@@ -257,7 +250,6 @@ test('rebase uses local main and does not fetch Forgejo even when review is enab
 
 test('rebase detects non-conflict rebase failure', async () => {
   let exitCode = null;
-  // @ts-expect-error TS2349 This expression is not callable.
   await rebase(['task-1018'], {
     isForgejoReviewEnabledFn: () => false,
     inferSlugFn: () => 'task-1018',
@@ -280,7 +272,6 @@ test('rebase detects non-conflict rebase failure', async () => {
 
 test('rebase detects localized KONFLIKT in rebase output', async () => {
   let exitCode = null;
-  // @ts-expect-error TS2349 This expression is not callable.
   await rebase(['task-1018'], {
     isForgejoReviewEnabledFn: () => false,
     inferSlugFn: () => 'task-1018',
@@ -429,7 +420,6 @@ test('rebase task-1057 flow: sharedFiles and prompt contain only workflow/docs/a
   let capturedPrompt = null;
   let exitCode = null;
 
-  // @ts-expect-error TS2349 This expression is not callable.
   await rebase(['task-1057'], {
     isForgejoReviewEnabledFn: () => false,
     inferSlugFn: () => 'task-1057',
@@ -461,7 +451,6 @@ test('rebase task-1057 flow: sharedFiles and prompt contain only workflow/docs/a
   assert.ok(capturedPrompt !== null, 'agent should have been launched with a prompt');
   assert.match(capturedPrompt, /workflow\/docs\/agents\.md/);
   assert.ok(
-    // @ts-expect-error TS18047 'capturedPrompt' is possibly 'null'.
     !capturedPrompt.includes('\n  - tips') && !capturedPrompt.includes('  - tips\n'),
     `prompt must not list 'tips' as a shared file but got:\n${capturedPrompt}`
   );
@@ -509,7 +498,6 @@ test('rebase detects staged-no-conflict continuation after failed git rebase --c
   const originalLog = console.log;
   console.log = (...args) => { capturedStdout.push(args.join(' ')); };
 
-  // @ts-expect-error TS2349 This expression is not callable.
   await rebase(['task-1035'], {
     isForgejoReviewEnabledFn: () => false,
     inferSlugFn: () => 'task-1035',
@@ -571,7 +559,6 @@ test('rebase detects empty/no-op pick and guides operator', async () => {
   const originalLog = console.log;
   console.log = (...args) => { capturedStdout.push(args.join(' ')); };
 
-  // @ts-expect-error TS2349 This expression is not callable.
   await rebase(['task-1035'], {
     isForgejoReviewEnabledFn: () => false,
     inferSlugFn: () => 'task-1035',
@@ -628,7 +615,6 @@ test('rebase caps failed continue retries when rebase remains active', async () 
   console.log = (...args) => { capturedStdout.push(args.join(' ')); };
   console.error = (...args) => { capturedStderr.push(args.join(' ')); };
 
-  // @ts-expect-error TS2349 This expression is not callable.
   await rebase(['task-1035'], {
     isForgejoReviewEnabledFn: () => false,
     inferSlugFn: () => 'task-1035',
@@ -686,7 +672,6 @@ test('rebase distinguishes hook failure from genuine conflict after --continue',
   const originalLog = console.log;
   console.log = (...args) => { capturedStdout.push(args.join(' ')); };
 
-  // @ts-expect-error TS2349 This expression is not callable.
   await rebase(['task-1035'], {
     isForgejoReviewEnabledFn: () => false,
     inferSlugFn: () => 'task-1035',

@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 'use strict';
 
@@ -17,7 +16,6 @@ function rows() {
     { mission: 'task-1285', stage: 'review', provider: 'openai', model: 'gpt-5.4', reviewer_agent: 'codex', input_tokens: '800', output_tokens: '150', cached_tokens: '20', tool_calls: '3', duration_minutes: '6', closed: 'yes' },
     // Unrelated mission must not leak into the task-1285 breakdown.
     { mission: 'task-1248', stage: 'active', provider: 'opencode', model: 'custom', implementer_agent: 'custom', input_tokens: '0', output_tokens: '0', closed: 'yes' },
-  // @ts-expect-error TS2345 Argument of type '(row?: StatsRow, options?: NormalizeStatsRowOptions) => { date
   ].map(normalizeStatsRow);
 }
 
@@ -72,6 +70,7 @@ test('mission phase report includes Cost ($) column in header and data rows', ()
 });
 
 test('mission phase report Cost ($) column shows values from telemetry rows and totals', () => {
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `map` absent from its inferred mock shape.
   const rowsWithCost = rows().map(r => ({ ...r, cost_usd: '5' }));
   const report = renderMissionPhaseReport(rowsWithCost, 'task-1285');
   // Each phase row should show the cost value
@@ -88,6 +87,7 @@ test('mission phase report Cost ($) column preserves fractional dollar costs (ta
   // Real cost_usd values are sub-dollar floats (e.g. 1.4226295, 0.46). parseInt
   // would truncate these to "1"/"0", silently discarding the cost. The column
   // must render the rounded decimal instead.
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `map` absent from its inferred mock shape.
   const rowsWithCost = rows().map((r, i) => ({ ...r, cost_usd: i === 1 ? '1.4226295' : '0.46433' }));
   const report = renderMissionPhaseReport(rowsWithCost, 'task-1285');
   const lines = report.split('\n');
@@ -115,7 +115,6 @@ test('mission phase report review phase attributes to reviewer_agent, not implem
   // Review rows store reviewer_agent (set by recordReviewStats passing reviewer as implementer)
   const reviewRows = [
     { mission: 'task-1318', stage: 'review', provider: 'anthropic', model: 'claude-opus-4-8', implementer_agent: 'claude', reviewer_agent: 'claude', input_tokens: '800', output_tokens: '150', cached_tokens: '20', tool_calls: '3', duration_minutes: '6', closed: 'yes' },
-  // @ts-expect-error TS2345 Argument of type '(row?: StatsRow, options?: NormalizeStatsRowOptions) => { date
   ].map(normalizeStatsRow);
   const report = renderMissionPhaseReport(reviewRows, 'task-1318');
   // The review phase should show the reviewer's agent family (claude), not self-attributed
@@ -127,7 +126,6 @@ test('mission phase report review phase attributes to reviewer_agent, not implem
 test('mission phase report execute phase shows implementer_agent when set', () => {
   const execRows = [
     { mission: 'task-1318', stage: 'active', provider: 'openai', model: 'gpt-5.4', implementer_agent: 'codex', input_tokens: '4000', output_tokens: '900', cached_tokens: '300', tool_calls: '18', duration_minutes: '22', closed: 'yes' },
-  // @ts-expect-error TS2345 Argument of type '(row?: StatsRow, options?: NormalizeStatsRowOptions) => { date
   ].map(normalizeStatsRow);
   const report = renderMissionPhaseReport(execRows, 'task-1318');
   const execLine = report.split('\n').find(line => /\bexecute\b/.test(line));
@@ -139,7 +137,6 @@ test('mission phase report shows multiple follow-up rows when different agent fa
   const report = renderMissionPhaseReport([
     { mission: 'task-1342', stage: 'follow-up', provider: 'openai', model: 'gpt-5', implementer_agent: 'codex', input_tokens: '100', output_tokens: '10', closed: 'yes' },
     { mission: 'task-1342', stage: 'follow-up', provider: 'openai', model: 'gpt-5', implementer_agent: 'custom', input_tokens: '200', output_tokens: '20', closed: 'yes' },
-  // @ts-expect-error TS2345 Argument of type '(row?: StatsRow, options?: NormalizeStatsRowOptions) => { date
   ].map(normalizeStatsRow), 'task-1342');
   const followUpLines = report.split('\n').filter(line => /\bfollow-up\b/.test(line));
   assert.equal(followUpLines.length, 2);

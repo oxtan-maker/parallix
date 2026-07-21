@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 const fs = require('node:fs');
 const os = require('node:os');
@@ -284,6 +283,7 @@ function setupRepository({ slug, title, postIntegrateHook = false }) {
 
   if (postIntegrateHook) {
     const scriptPath = writePostIntegrateHookScript(repoRoot);
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `integrate` absent from its inferred mock shape.
     adapters.integrate = { postIntegrateCommand: `./${path.relative(repoRoot, scriptPath)}` };
   }
 
@@ -349,9 +349,7 @@ function runWorkflow(repoRoot, env, args, timeout = 60000, { allowFailure = fals
     fs.closeSync(stdoutFd);
     fs.closeSync(stderrFd);
   }
-  // @ts-expect-error TS2322 Type 'string' is not assignable to type 'NonSharedBuffer'.
   result.stdout = fs.existsSync(stdoutPath) ? fs.readFileSync(stdoutPath, 'utf8') : '';
-  // @ts-expect-error TS2322 Type 'string' is not assignable to type 'NonSharedBuffer'.
   result.stderr = fs.existsSync(stderrPath) ? fs.readFileSync(stderrPath, 'utf8') : '';
   fs.rmSync(stdoutPath, { force: true });
   fs.rmSync(stderrPath, { force: true });

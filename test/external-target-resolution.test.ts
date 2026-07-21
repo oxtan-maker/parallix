@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -197,7 +196,6 @@ test('node parallix mission-start verify-env resolves from a temp dir without re
       timeout: 15000,
     });
     const output = `${result.stdout || ''}${result.stderr || ''}`;
-    // @ts-expect-error TS2339 Property 'code' does not exist on type 'Error'.
     if (result.error && result.error.code === 'EPERM' && !output) {
       return;
     }
@@ -221,7 +219,6 @@ function runCommand(command, args, options = {}) {
     encoding: 'utf8',
     ...options
   });
-  // @ts-expect-error TS2339 Property 'code' does not exist on type 'Error'.
   if (result.error && !(result.error.code === 'EPERM' && result.status === 0)) {
     throw result.error;
   }

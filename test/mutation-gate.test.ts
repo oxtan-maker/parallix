@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -149,7 +148,6 @@ test('run: first-run with no baseline entries passes the ratchet and seeds the b
     };
 
     let exitCode = null;
-    // @ts-expect-error TS2349 This expression is not callable.
     mutationGate(['--base', 'main', '--baseline-path', baselinePath], {
       exitFn: code => { exitCode = code; },
       scopeFn,
@@ -180,7 +178,6 @@ test('run: --dry-run never invokes spawnSyncFn and exits 0', () => {
     });
     let spawned = false;
     let exitCode = null;
-    // @ts-expect-error TS2349 This expression is not callable.
     mutationGate(['--dry-run', '--base', 'main'], {
       exitFn: code => { exitCode = code; },
       scopeFn,

@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -32,7 +31,6 @@ test('repairHandoff auto-commits safe mission files', async () => {
     return { status: 0 };
   };
 
-  // @ts-expect-error TS2349 This expression is not callable.
   const { repaired, blocker } = await repairHandoff('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', {
     taskFile: '/tmp/worktree/backlog/tasks/task-1037 - some task.md',
     gitFn,
@@ -73,7 +71,6 @@ test('repairHandoff stages renamed mission files by destination path', async () 
     return { status: 0 };
   };
 
-  // @ts-expect-error TS2349 This expression is not callable.
   const { repaired, blocker } = await repairHandoff('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', {
     gitFn,
     log: () => {}
@@ -109,7 +106,6 @@ test('repairHandoff refuses to commit when operator-local or generated paths are
     return { status: 0 };
   };
 
-  // @ts-expect-error TS2349 This expression is not callable.
   const { repaired, blocker } = await repairHandoff('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', {
     gitFn,
     log: (msg) => logs.push(msg)
@@ -151,7 +147,6 @@ test('repairHandoff refuses to commit when arbitrary non-mission repo files are 
     return { status: 0 };
   };
 
-  // @ts-expect-error TS2349 This expression is not callable.
   const { repaired, blocker } = await repairHandoff('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', {
     gitFn,
     log: (msg) => logs.push(msg)
@@ -190,7 +185,6 @@ test('repairHandoff reports staging failures and stops before commit', async () 
     return { status: 0 };
   };
 
-  // @ts-expect-error TS2349 This expression is not callable.
   const { repaired, blocker } = await repairHandoff('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', {
     gitFn,
     error: (msg) => errors.push(msg),
@@ -220,7 +214,6 @@ test('repairHandoff refuses to commit when mission files are conflicted', async 
     return { status: 0 };
   };
 
-  // @ts-expect-error TS2349 This expression is not callable.
   const { repaired, blocker } = await repairHandoff('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', {
     gitFn,
     log: (msg) => logs.push(msg)
@@ -248,7 +241,6 @@ test('repairHandoff calls rebase when branch is behind', async () => {
     opts.exitFn(0);
   };
 
-  // @ts-expect-error TS2349 This expression is not callable.
   const { repaired, blocker } = await repairHandoff('task-1037', '/tmp/worktree', 'git push failed: Updates were rejected', {
     gitFn,
     rebaseFn,
@@ -274,7 +266,6 @@ test('repairHandoff returns false when rebase fails', async () => {
     opts.exitFn(1);
   };
 
-  // @ts-expect-error TS2349 This expression is not callable.
   const { repaired, blocker } = await repairHandoff('task-1037', '/tmp/worktree', 'git push failed: Updates were rejected', {
     gitFn,
     rebaseFn,
@@ -305,7 +296,6 @@ test('repairHandoff auto-commits safe mission files including completed tasks', 
     return { status: 0 };
   };
 
-  // @ts-expect-error TS2349 This expression is not callable.
   const { repaired } = await repairHandoff('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', {
     taskFile: '/tmp/worktree/backlog/completed/task-1037 - some task.md',
     gitFn,
@@ -330,7 +320,6 @@ test('repairHandoff returns repaired:false when rebase fails after successful au
     opts.exitFn(1); // Rebase fails
   };
 
-  // @ts-expect-error TS2349 This expression is not callable.
   const { repaired, blocker } = await repairHandoff('task-1037', '/tmp/worktree', 'Updates were rejected', {
     gitFn,
     rebaseFn,
@@ -343,7 +332,6 @@ test('repairHandoff returns repaired:false when rebase fails after successful au
 });
 
 test('repairHandoff returns repaired:false for generic git push failed (auth/transport)', async () => {
-  // @ts-expect-error TS2349 This expression is not callable.
   const { repaired } = await repairHandoff('task-1037', '/tmp/worktree', 'git push failed with status 128: fatal: Authentication failed', {
     log: () => {}
   });
@@ -364,7 +352,6 @@ test('isRelaunchableError returns false for non-relaunchable errors', () => {
   
   assert.equal(isRelaunchableError(null), false);
   assert.equal(isRelaunchableError(undefined), false);
-  // @ts-expect-error TS2345 Argument of type 'number' is not assignable to parameter of type 'string'.
   assert.equal(isRelaunchableError(123), false);
   assert.equal(isRelaunchableError(''), false);
   assert.equal(isRelaunchableError('Some other error'), false);
@@ -654,7 +641,6 @@ test('repairHandoff uses classifyError internally for dirty errors', async () =>
     return { status: 0 };
   };
 
-  // @ts-expect-error TS2349 This expression is not callable.
   const { repaired, blocker } = await repairHandoff('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', {
     taskFile: '/tmp/worktree/backlog/tasks/task-1037 - some task.md',
     gitFn,
@@ -680,7 +666,6 @@ test('repairHandoff uses classifyError internally for behind errors', async () =
     opts.exitFn(0);
   };
 
-  // @ts-expect-error TS2349 This expression is not callable.
   const { repaired, blocker } = await repairHandoff('task-1037', '/tmp/worktree', 'git push failed: Updates were rejected', {
     gitFn,
     rebaseFn,
@@ -693,7 +678,6 @@ test('repairHandoff uses classifyError internally for behind errors', async () =
 });
 
 test('repairHandoff returns false for non-GitBlocker errors', async () => {
-  // @ts-expect-error TS2349 This expression is not callable.
   const { repaired } = await repairHandoff('task-1037', '/tmp/worktree', 'verification gate failed: exit code 1', {
     log: () => {}
   });
@@ -705,7 +689,6 @@ test('repairHandoff returns false for non-GitBlocker errors', async () => {
 
 test('repairHandoff returns InfraBlocker-specific blocker message for infrastructure errors', async () => {
   const logs = [];
-  // @ts-expect-error TS2349 This expression is not callable.
   const { repaired, blocker } = await repairHandoff('task-1037', '/tmp/worktree', 'connection timed out', {
     log: (msg) => logs.push(msg)
   });
@@ -720,7 +703,6 @@ test('repairHandoff returns InfraBlocker-specific blocker message for infrastruc
 
 test('repairHandoff returns InfraBlocker-specific blocker for token expired errors', async () => {
   const logs = [];
-  // @ts-expect-error TS2349 This expression is not callable.
   const { repaired, blocker } = await repairHandoff('task-1037', '/tmp/worktree', 'Authentication failed for Forgejo: token expired', {
     log: (msg) => logs.push(msg)
   });
@@ -759,7 +741,6 @@ test('repairHandoff derives isBehind from classifyError reason (dirty only, no r
 
   const rebaseFn = async () => { rebaseCalled = true; };
 
-  // @ts-expect-error TS2349 This expression is not callable.
   const { repaired } = await repairHandoff('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', {
     gitFn,
     rebaseFn,

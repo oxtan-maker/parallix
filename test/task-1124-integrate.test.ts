@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -71,8 +70,6 @@ test('runtime-matrix no longer exports hardcoded reviewer routing (reviewerFor/f
 
   // The biased, hardcoded implementer→reviewer routing has been removed in
   // favor of config-driven, unbiased selectAgent('review', { exclude: [implementer] }).
-  // @ts-expect-error TS2339 Property 'reviewerFor' does not exist on type 'typeof import("/home/magnus/code/
   assert.equal(runtimeMatrix.reviewerFor, undefined, 'reviewerFor must no longer be exported');
-  // @ts-expect-error TS2339 Property 'fallbackFor' does not exist on type 'typeof import("/home/magnus/code/
   assert.equal(runtimeMatrix.fallbackFor, undefined, 'fallbackFor must no longer be exported');
 });

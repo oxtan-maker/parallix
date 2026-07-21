@@ -1,4 +1,3 @@
-// @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -309,7 +308,6 @@ test('statsBackfill supports help, json output, summary output, and apply mode',
     commitAll(root, 'task-2008 task-2009 fixture');
 
     const logs = [];
-    // @ts-expect-error TS2349 This expression is not callable.
     await statsBackfill(['--help'], {
       rootDir: root,
       log: line => logs.push(line),
@@ -325,7 +323,6 @@ test('statsBackfill supports help, json output, summary output, and apply mode',
     const previousExplicitHome = process.env.PARALLIX_HOME;
     try {
       process.env.PARALLIX_HOME = isolatedHome;
-      // @ts-expect-error TS2349 This expression is not callable.
       await statsBackfill(['--json', '--csv-file', path.join(root, 'workflow', 'data', 'stats.csv')], {
         rootDir: root,
         log: line => jsonLogs.push(line),
@@ -344,7 +341,6 @@ test('statsBackfill supports help, json output, summary output, and apply mode',
     assert.equal(payload.skipped, 1);
 
     const summaryLogs = [];
-    // @ts-expect-error TS2349 This expression is not callable.
     await statsBackfill(['--csv-file', path.join(root, 'workflow', 'data', 'stats.csv')], {
       rootDir: root,
       log: line => summaryLogs.push(line),
@@ -357,7 +353,6 @@ test('statsBackfill supports help, json output, summary output, and apply mode',
     assert.match(summaryLogs.join('\n'), /Skipped:\n- task-2009 status=active/);
 
     const applyLogs = [];
-    // @ts-expect-error TS2349 This expression is not callable.
     await statsBackfill(['--apply', '--csv-file', path.join(root, 'workflow', 'data', 'stats.csv')], {
       rootDir: root,
       log: line => applyLogs.push(line),
@@ -376,7 +371,6 @@ test('statsBackfill supports help, json output, summary output, and apply mode',
     try {
       process.env.PARALLIX_HOME = parallixHome;
       const defaultLogs = [];
-      // @ts-expect-error TS2349 This expression is not callable.
       await statsBackfill(['--apply'], {
         rootDir: root,
         log: line => defaultLogs.push(line),
