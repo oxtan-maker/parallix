@@ -1,7 +1,7 @@
 ---
 id: TASK-2280
 title: Add bounded SQLite operator state and migrations
-status: active
+status: review
 assignee: [custom]
 created_date: '2026-07-19 00:00'
 labels:
