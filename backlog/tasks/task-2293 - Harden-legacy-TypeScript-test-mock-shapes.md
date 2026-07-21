@@ -1,7 +1,7 @@
 ---
 id: TASK-2293
 title: Harden legacy TypeScript test mock shapes
-status: backlog
+status: refined
 assignee: [codex]
 created_date: '2026-07-19 00:00'
 labels:
