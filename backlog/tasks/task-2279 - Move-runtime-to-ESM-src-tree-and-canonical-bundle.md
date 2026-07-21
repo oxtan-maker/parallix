@@ -1,7 +1,7 @@
 ---
 id: TASK-2279
 title: Move runtime to ESM src tree and canonical bundle
-status: review
+status: active
 assignee: [codex]
 created_date: '2026-07-19 00:00'
 labels:
