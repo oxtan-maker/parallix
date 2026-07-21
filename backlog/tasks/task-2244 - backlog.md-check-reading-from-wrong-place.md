@@ -1,7 +1,7 @@
 ---
 id: TASK-2244
 title: backlog.md check reading from wrong place
-status: ready-for-integration
+status: review
 assignee: [vibe]
 created_date: '2026-07-13 08:08'
 labels: [ai_sdlc]
