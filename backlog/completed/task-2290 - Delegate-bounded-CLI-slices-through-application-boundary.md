@@ -1,7 +1,7 @@
 ---
 id: TASK-2290
 title: Delegate bounded CLI slices through application boundary
-status: review
+status: done
 assignee: [codex]
 created_date: '2026-07-20 00:00'
 labels:
@@ -9,6 +9,7 @@ labels:
   - cli
   - refactor
   - testing
+  - user_value
 dependencies:
   - TASK-2278
   - TASK-2289

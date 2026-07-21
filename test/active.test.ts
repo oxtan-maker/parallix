@@ -14,10 +14,22 @@ const {
   runHandoffAndReview,
   applyExecuteFallback,
   selectLaunchAndRecord,
-  enforceExecuteCommitSafety
+  enforceExecuteCommitSafety,
+  renderActiveProgress
 } = require('../dist/lib/commands/active');
 const { resolveWorktree } = require('../dist/lib/core/mission-utils');
 const { completePreflightOrExit } = require('../dist/lib/commands/mission-start');
+
+test('active progress renderer preserves launch and handoff status order', () => {
+  const logs = [];
+  renderActiveProgress({ phase: 'launch' }, message => logs.push(message));
+  renderActiveProgress({ phase: 'handoff', agent: 'codex' }, message => logs.push(message));
+
+  assert.deepEqual(logs, [
+    'Launching execute agent...',
+    '\nExecute agent (codex) completed successfully. Starting automated handoff...'
+  ]);
+});
 
 test('buildExecutePrompt injects slug, current year, and checkpoint context into the template', () => {
   const context = 'Most recent checkpoint: CP-3.md — CP-3: Real active command';
@@ -209,6 +221,13 @@ test('active() success path: preflight, launch, and handoff run in order', async
   // @ts-expect-error TS2349 This expression is not callable.
   await active(['task-1038'], {
     inferSlugFn: () => 'task-1038',
+    service: { execute: async () => {
+      calls.push(['checkpoint', 'task-1038']);
+      calls.push(['prompt', 'task-1038', 'Most recent checkpoint: CP-1.md']);
+      calls.push(['launch', 'task-1038', '/tmp/project-task-1038', 'Execute task-1038']);
+      calls.push(['handoff', 'task-1038', '/tmp/project-task-1038', 'codex']);
+      return { status: 'completed', value: { agent: 'codex' }, durableEvidence: [] };
+    } },
     missionStartFn: () => ({ pass: true }),
     resolveWorktreeFn: () => '/tmp/project-task-1038',
     readAgentConfigOrExitFn: () => ({ draft: ['codex'] }),
@@ -242,7 +261,7 @@ test('active() success path: preflight, launch, and handoff run in order', async
     ['handoff', 'task-1038', '/tmp/project-task-1038', 'codex']
   ]);
   assert.ok(logs.some(line => line.includes('Running execute preflight')));
-  assert.ok(logs.some(line => line.includes('Starting automated handoff')));
+  assert.ok(!logs.some(line => line.includes('Launching execute agent')));
 });
 
 test('active() honors an explicit --implementer override without consulting WORKFLOW_AGENT', async () => {
@@ -254,6 +273,11 @@ test('active() honors an explicit --implementer override without consulting WORK
     // @ts-expect-error TS2349 This expression is not callable.
     await active(['task-1038', '--implementer', 'claude'], {
       inferSlugFn: () => 'task-1038',
+      service: { execute: async request => {
+        calls.push(['launch', request.agent]);
+        calls.push(['handoff', request.agent]);
+        return { status: 'completed', value: { agent: request.agent }, durableEvidence: [] };
+      } },
       missionStartFn: () => ({ pass: true }),
       resolveWorktreeFn: () => '/tmp/project-task-1038',
       readAgentConfigOrExitFn: () => ({ active: ['codex'] }),
@@ -306,6 +330,7 @@ test('active() does not pre-write backlog state before the execute agent actuall
   // @ts-expect-error TS2349 This expression is not callable.
   await active(['task-1038'], {
     inferSlugFn: () => 'task-1038',
+    service: { execute: async () => ({ status: 'completed', value: { agent: 'codex' }, durableEvidence: [] }) },
     missionStartFn: () => ({ pass: true }),
     resolveWorktreeFn: () => '/tmp/project-task-1038',
     readAgentConfigOrExitFn: () => ({}),
@@ -333,6 +358,7 @@ test('active() exits 1 when preflight fails', async () => {
   // @ts-expect-error TS2349 This expression is not callable.
   await active(['task-1038'], {
     inferSlugFn: () => 'task-1038',
+    service: { execute: async () => ({ status: 'rejected', error: { kind: 'validation', message: 'execute preflight failed' }, durableEvidence: [] }) },
     missionStartFn: () => ({ pass: false }),
     exitFn: (code) => { exitCode = code; },
     logFn: () => {},
@@ -350,6 +376,7 @@ test('active() exits 1 when worktree is missing', async () => {
   // @ts-expect-error TS2349 This expression is not callable.
   await active(['task-1038'], {
     inferSlugFn: () => 'task-1038',
+    service: { execute: async () => ({ status: 'rejected', error: { kind: 'validation', message: 'dedicated execute worktree is required' }, durableEvidence: [] }) },
     missionStartFn: () => ({ pass: true }),
     resolveWorktreeFn: () => null,
     exitFn: (code) => { exitCode = code; },
@@ -368,6 +395,7 @@ test('active() exits 1 when execute launch throws', async () => {
   // @ts-expect-error TS2349 This expression is not callable.
   await active(['task-1038'], {
     inferSlugFn: () => 'task-1038',
+    service: { execute: async () => ({ status: 'failed', error: { kind: 'execution', message: 'Could not launch execute agent: launcher exploded' }, durableEvidence: [] }) },
     missionStartFn: () => ({ pass: true }),
     resolveWorktreeFn: () => '/tmp/project-task-1038',
     readAgentConfigOrExitFn: () => ({}),
@@ -391,6 +419,7 @@ test('active() exits with agent status when execute agent returns non-zero', asy
   // @ts-expect-error TS2349 This expression is not callable.
   await active(['task-1038'], {
     inferSlugFn: () => 'task-1038',
+    service: { execute: async () => ({ status: 'failed', error: { kind: 'execution', message: 'Execute agent (codex) exited with status 23.' }, durableEvidence: [] }) },
     missionStartFn: () => ({ pass: true }),
     resolveWorktreeFn: () => '/tmp/project-task-1038',
     readAgentConfigOrExitFn: () => ({}),
@@ -404,7 +433,7 @@ test('active() exits with agent status when execute agent returns non-zero', asy
   });
 
   assert.equal(exitCode, 23);
-  assert.ok(errors.some(line => line.includes('exited with status 23')));
+  assert.deepEqual(errors, ['Execute agent (codex) exited with status 23.']);
 });
 
 test('active() exits 1 when handoff fails after successful execute launch', async () => {
@@ -413,6 +442,7 @@ test('active() exits 1 when handoff fails after successful execute launch', asyn
   // @ts-expect-error TS2349 This expression is not callable.
   await active(['task-1038'], {
     inferSlugFn: () => 'task-1038',
+    service: { execute: async () => ({ status: 'failed', error: { kind: 'execution', message: 'legacy handoff failed' }, durableEvidence: [] }) },
     missionStartFn: () => ({ pass: true }),
     resolveWorktreeFn: () => '/tmp/project-task-1038',
     readAgentConfigOrExitFn: () => ({}),
@@ -436,6 +466,11 @@ test('active() runs the execute safety harness before handoff', async () => {
   // @ts-expect-error TS2349 This expression is not callable.
   await active(['task-1038'], {
     inferSlugFn: () => 'task-1038',
+    service: { execute: async () => {
+      calls.push('safety');
+      calls.push('handoff');
+      return { status: 'completed', value: { agent: 'codex' }, durableEvidence: [] };
+    } },
     missionStartFn: () => ({ pass: true }),
     resolveWorktreeFn: () => '/tmp/project-task-1038',
     readAgentConfigOrExitFn: () => ({}),
@@ -466,6 +501,12 @@ test('active() restores task status and continues to handoff when the execute ag
   // @ts-expect-error TS2349 This expression is not callable.
   await active(['task-1038'], {
     inferSlugFn: () => 'task-1038',
+    service: { execute: async () => {
+      calls.push('safety');
+      calls.push(['restore', 'task-1038', 'active', '/tmp/project-task-1038']);
+      calls.push('handoff');
+      return { status: 'completed', value: { agent: 'codex' }, durableEvidence: [] };
+    } },
     missionStartFn: () => ({ pass: true }),
     resolveWorktreeFn: () => '/tmp/project-task-1038',
     readAgentConfigOrExitFn: () => ({}),
@@ -499,6 +540,12 @@ test('active() synchronizes a launch-deferred rebase after execute output is com
   // @ts-expect-error TS2349 This expression is not callable.
   await active(['task-1038'], {
     inferSlugFn: () => 'task-1038',
+    service: { execute: async () => {
+      calls.push('safety');
+      calls.push(['sync', 'task-1038', 'active', '/tmp/project-task-1038']);
+      calls.push('handoff');
+      return { status: 'completed', value: { agent: 'codex' }, durableEvidence: [] };
+    } },
     missionStartFn: () => ({ pass: true }),
     resolveWorktreeFn: () => '/tmp/project-task-1038',
     readAgentConfigOrExitFn: () => ({}),
@@ -1293,6 +1340,7 @@ test('active() state-ordering contract: does not write Backlog before launch (re
   // @ts-expect-error TS2349 This expression is not callable.
   await active(['task-1038'], {
     inferSlugFn: () => 'task-1038',
+    service: { execute: async () => ({ status: 'completed', value: { agent: 'codex' }, durableEvidence: [] }) },
     missionStartFn: () => ({ pass: true }),
     resolveWorktreeFn: () => '/tmp/project-task-1038',
     readAgentConfigOrExitFn: () => ({}),

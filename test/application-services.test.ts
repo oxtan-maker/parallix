@@ -58,6 +58,7 @@ test('active service calls strict ports in launch-record-handoff order', async (
   assert.equal(result.status, 'completed');
   assert.deepEqual(calls, ['validate:task-1', 'launch:task-1:codex', 'record:task-1:codex', 'handoff:task-1:codex']);
   assert.deepEqual(events.map(event => event.sequence), [1, 2, 3]);
+  assert.equal(events[2].agent, 'codex');
 });
 
 test('active service rejects invalid or incapable requests before mutation ports', async () => {

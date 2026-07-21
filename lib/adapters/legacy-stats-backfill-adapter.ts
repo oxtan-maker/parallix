@@ -6,17 +6,26 @@ import type { StatsBackfillPort, StatsProjection, StatsRow } from '../applicatio
 export class LegacyStatsBackfillAdapter implements StatsBackfillPort {
   constructor(private readonly _rootDir: string) {}
 
-  async readProjection(): Promise<StatsProjection> {
-    const report = collectHistoricalStatsBackfill(this._rootDir);
-    const rows: StatsRow[] = report.rows.map(row => ({ mission: row.mission, implementer: row.implementer }));
-    return { rows, sources: [{ source: 'stats', status: 'fresh', value: 'legacy stats report' }] };
+  async readProjection(options: { readonly filePath?: string | null } = {}): Promise<StatsProjection> {
+    const report = collectHistoricalStatsBackfill(this._rootDir, options.filePath ?? null);
+    const rows: StatsRow[] = report.rows.map(row => ({ ...row }));
+    return {
+      rows,
+      unresolved: report.unresolved,
+      skipped: report.skipped,
+      sources: [{ source: 'stats', status: 'fresh', value: 'legacy stats report' }],
+    };
   }
 
-  async applyRows(rows: readonly StatsRow[]): Promise<readonly DurableEvidence[]> {
-    const filePath = stats.resolveStatsPath({ ensureDir: true });
+  async applyRows(rows: readonly StatsRow[], options: { readonly filePath?: string | null } = {}): Promise<readonly DurableEvidence[]> {
+    const filePath = options.filePath || stats.resolveStatsPath({ ensureDir: true });
+    const evidence: DurableEvidence[] = [];
     for (const row of rows) {
-      stats.upsertStatsRow({ mission: row.mission, implementer: row.implementer }, { filePath, rootDir: this._rootDir });
+      const result = stats.upsertStatsRow(row as Record<string, string>, { filePath, rootDir: this._rootDir });
+      if (result.changed) {
+        evidence.push({ id: row.mission, source: 'stats', detail: `legacy stats row applied for ${row.mission}` });
+      }
     }
-    return rows.map(row => ({ id: row.mission, source: 'stats', detail: `legacy stats row applied for ${row.mission}` }));
+    return evidence;
   }
 }

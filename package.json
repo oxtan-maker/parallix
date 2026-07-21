@@ -53,7 +53,6 @@
     "build": "tsc",
     "dev": "tsx px.ts",
     "prepack": "npm run build",
-    "pretest": "npm run build",
     "test": "FORCE_COLOR=0 node test/run-default-tests.js",
     "test:integration": "FORCE_COLOR=0 node test/run-default-tests.js --integration",
     "test:package-content": "node scripts/package-content-audit.js",

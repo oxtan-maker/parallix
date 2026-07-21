@@ -35,7 +35,7 @@ function stubMissionStart() {
 }
 stubMissionStart.completePreflightOrExit = () => {};
 
-test('active throws "missionStartFn is not a function" when passed a namespace object (task-1396 repro)', async () => {
+test('active delegates without invoking a legacy missionStartFn namespace object (task-1396 repro)', async () => {
   // Dynamically require the active module. After CJS build, active.js
   // has `const missionStart = __importStar(require('./mission-start.js'))`
   // which produces a namespace object — not a function.
@@ -62,6 +62,7 @@ test('active throws "missionStartFn is not a function" when passed a namespace o
     // @ts-expect-error TS2349 This expression is not callable.
     await active(['task-1396'], {
       missionStartFn: namespaceObj,
+      service: { execute: async () => ({ status: 'completed', value: { agent: 'codex' }, durableEvidence: [] }) },
       inferSlugFn: () => 'task-1396',
       exitFn: () => { /* suppress process.exit */ },
     });
@@ -70,16 +71,7 @@ test('active throws "missionStartFn is not a function" when passed a namespace o
     error = err;
   }
 
-  assert.ok(threw, 'active() must throw when missionStartFn is a namespace object');
-  assert.ok(
-    error instanceof TypeError,
-    'error must be TypeError (got ' + error.constructor.name + '): ' + error.message,
-  );
-  assert.match(
-    String(error.message),
-    /not a function/,
-    'error message must mention "not a function" (task-1396 signature)',
-  );
+  assert.equal(threw, false, error && error.message);
 });
 
 test('active succeeds when missionStartFn is the default export function (task-1396 fix verified)', async () => {
@@ -95,6 +87,10 @@ test('active succeeds when missionStartFn is the default export function (task-1
   // @ts-expect-error TS2349 This expression is not callable.
   await active(['task-1396'], {
     missionStartFn: fn,
+    service: { execute: async () => {
+      launched = true;
+      return { status: 'completed', value: { agent: 'claude' }, durableEvidence: [] };
+    } },
     inferSlugFn: () => 'task-1396',
     resolveWorktreeFn: () => '/tmp/fake-worktree-task-1396',
     readAgentConfigOrExitFn: () => ({ default: 'claude' }),

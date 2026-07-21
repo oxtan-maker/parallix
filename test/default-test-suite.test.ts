@@ -94,6 +94,10 @@ test('default test runner routes every moved group to integration and excludes i
   assert.ok(!integrationFiles.includes('e2e-mission-lifecycle.test.ts'));
   assert.ok(!integrationFiles.includes('e2e-real-agent-smoke.test.ts'));
   assert.match(runner, /runsIntegrationSuite/);
+  assert.match(runner, /spawnSync\('npm', \['run', 'build'\]/,
+    'the runner must compile this checkout before tests import dist/');
+  assert.equal(pkg.scripts.pretest, undefined,
+    'building belongs to the runner so direct and npm-invoked suites have the same protection');
   assert.ok(defaultRun.args.includes('--test-force-exit'));
   assert.ok(!selectedFiles([], 'v20.13.1').args.includes('--test-force-exit'));
   assert.ok(selectedFiles([], 'v20.14.0').args.includes('--test-force-exit'));

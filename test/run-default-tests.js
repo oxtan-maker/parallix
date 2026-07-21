@@ -108,6 +108,18 @@ const requestedTestFiles = requestedArgs.filter(arg => arg !== '--integration');
 const testFiles = runsIntegrationSuite
   ? integrationTestFiles
   : (requestedTestFiles.length > 0 ? requestedTestFiles : defaultTestFiles);
+
+// Tests import the compiled CommonJS output under dist/. Build immediately
+// before every suite so a direct runner invocation and npm test exercise this
+// checkout's current source, never a previously compiled artifact.
+const buildResult = spawnSync('npm', ['run', 'build'], { stdio: 'inherit' });
+if (buildResult.error) {
+  throw buildResult.error;
+}
+if (buildResult.status !== 0) {
+  process.exit(buildResult.status ?? 1);
+}
+
 // The real-agent smoke test deliberately reads the operator's configured Pi
 // model/auth files and then copies them into its own disposable state root.
 // Do not preload the unit-test HOME isolation shim for that explicit e2e run:
