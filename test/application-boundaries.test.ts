@@ -9,7 +9,7 @@ const root = process.cwd();
 const fixture = (name: string) => path.join(root, 'test', 'fixtures', 'application-boundary', name);
 
 test('application import guard accepts the application services', () => {
-  const entries = [path.join(root, 'lib', 'application', 'active-service.ts'), path.join(root, 'lib', 'application', 'stats-backfill-service.ts')];
+  const entries = [path.join(root, 'src', 'platform', 'runtime', 'lib', 'application', 'active-service.ts'), path.join(root, 'src', 'platform', 'runtime', 'lib', 'application', 'stats-backfill-service.ts')];
   assert.deepEqual(findForbiddenApplicationDependencies(entries), []);
 });
 
@@ -25,7 +25,7 @@ test('application import guard rejects transitive prohibited dependency fixture'
 });
 
 test('composition guard accepts the sole production composition root', () => {
-  assert.deepEqual(findCompositionViolations(path.join(root, 'lib')), []);
+  assert.deepEqual(findCompositionViolations(path.join(root, 'src', 'platform', 'runtime', 'lib')), []);
   const graph = createProductionApplicationServices(root);
   assert.equal(graph.active.constructor.name, 'ActiveService');
   assert.equal(graph.statsBackfill.constructor.name, 'StatsBackfillService');

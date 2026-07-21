@@ -50,19 +50,22 @@
     "tools/setup-forgejo-docker.sh"
   ],
   "scripts": {
-    "build": "tsc",
-    "dev": "tsx px.ts",
+    "build": "npm run bundle",
+    "bundle": "node scripts/build-canonical-bundle.js",
+    "dev": "tsx --import ./src/entry/esm-globals.ts src/entry/px.ts",
     "prepack": "npm run build",
     "test": "FORCE_COLOR=0 node test/run-default-tests.js",
     "test:integration": "FORCE_COLOR=0 node test/run-default-tests.js --integration",
     "test:package-content": "node scripts/package-content-audit.js",
     "test:reproducible-output": "node scripts/verify-reproducible-dist.js",
     "test:coverage": "FORCE_COLOR=0 node dist/lib/commands/coverage-gate.js --lcov",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:bundle": "node --enable-source-maps build/px.mjs --version"
   },
   "devDependencies": {
     "@stryker-mutator/core": "^9.6.1",
     "@types/node": "^26.0.1",
+    "esbuild": "^0.25.12",
     "@typescript-eslint/eslint-plugin": "^8.62.1",
     "@typescript-eslint/parser": "^8.62.1",
     "eslint": "^9.39.4",

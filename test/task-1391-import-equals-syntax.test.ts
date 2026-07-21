@@ -4,12 +4,13 @@
  *
  * Node.js native TypeScript strip-only mode does not support the TypeScript
  * `import X = require(Y)` (import-equals) declaration or `export =` statements.
- * This test verifies that no such patterns remain in px.ts or lib/index.ts,
+ * This test verifies that no such patterns remain in the runtime px.ts or
+ * lib/index.ts,
  * which are the two files that serve as the entry point and barrel re-export.
  *
  * At the mission's parent commit (before the fix), this test fails because
- * px.ts:6 contains `import missionStart = require('./lib/commands/mission-start.js')`
- * and lib/index.ts contains ~19 import-equals declarations.
+ * the runtime px.ts contains `import missionStart = require('./lib/commands/mission-start.js')`
+ * and runtime lib/index.ts contains ~19 import-equals declarations.
  *
  * After the fix, all import-equals declarations are replaced with standard ESM
  * imports and all export = statements are replaced with ESM named/default exports.
@@ -21,8 +22,9 @@ const path = require('node:path');
 const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..');
-const pxTsPath = path.join(repoRoot, 'px.ts');
-const libIndexPath = path.join(repoRoot, 'lib', 'index.ts');
+const runtimeRoot = path.join(repoRoot, 'src', 'platform', 'runtime');
+const pxTsPath = path.join(runtimeRoot, 'px.ts');
+const libIndexPath = path.join(runtimeRoot, 'lib', 'index.ts');
 
 // Regex matches TypeScript import-equals: `import X = require('...')`
 // Also matches the variant: `import X = require("...")`

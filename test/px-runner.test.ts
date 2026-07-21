@@ -6,7 +6,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const test = require('node:test');
 
-// This source-checkout runner launches px.ts from a separate caller CWD.
+// This source-checkout runner launches the source entrypoint from a separate caller CWD.
 // Use the project's tsx loader so module classification stays tied to the
 // source entrypoint rather than the caller's temporary CommonJS package.
 // Skip the entire file on older runtimes.
@@ -17,7 +17,8 @@ if (major < 24) {
 }
 
 const repoRoot = path.resolve(__dirname, '..');
-const pxPath = path.join(repoRoot, 'px.ts');
+const pxPath = path.join(repoRoot, 'src', 'entry', 'px.ts');
+const runtimePxPath = path.join(repoRoot, 'src', 'platform', 'runtime', 'px.ts');
 const tsxLoaderPath = require.resolve('tsx');
 // Read the version from the manifest so version bumps do not break these tests.
 const pkgVersion = require('../package.json').version;
@@ -120,7 +121,7 @@ test('px --version reports package version and executing runtime path', () => {
 
     assert.equal(result.status, 0, output);
     assert.match(output, versionRe);
-    assert.match(output, new RegExp(pxPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    assert.match(output, new RegExp(runtimePxPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
     assert.match(output, /package: /);
     assert.match(output, /node: v/);
   } finally {

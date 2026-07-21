@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 
 test('checkpoint has no --no-gate escape hatch', () => {
-  const src = fs.readFileSync(require.resolve('../lib/commands/checkpoint.ts'), 'utf8');
+  const src = fs.readFileSync(require.resolve('../src/platform/runtime/lib/commands/checkpoint.ts'), 'utf8');
   assert.ok(!src.includes('--no-gate'));
   assert.ok(!src.includes('skipGate'));
 });

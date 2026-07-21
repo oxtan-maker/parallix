@@ -13,6 +13,8 @@ agents.local.json
 missions/*/review-events/
 # Compiled output
 dist/
+build/
+.test-runtime/
 # StrykerJS scratch/report output (mutation-gate.ts)
 .stryker-tmp*/
 reports/mutation/

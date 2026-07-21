@@ -7,6 +7,7 @@ const ts = require('typescript');
 const { MACHINE_WRITTEN_PATH_INVENTORY } = require('../dist/lib/core/durable-state-inventory');
 
 const ROOT = path.resolve(__dirname, '..');
+const RUNTIME_LIB = path.join(ROOT, 'src', 'platform', 'runtime', 'lib');
 const DIRECT_JSON_EXCEPTIONS = new Map([
   ['lib/commands/mutation-gate.ts:baselinePath', 'mutation-baseline'],
   ['lib/commands/mutation-gate.ts:configPath', 'mutation-run-config'],
@@ -61,9 +62,10 @@ test('durable-state inventory assigns every required path exactly one recognized
 });
 
 test('direct durable JSON write guard passes only inventory-documented exceptions', () => {
-  // The guard intentionally covers every TypeScript source in lib/. It detects
+  // The guard intentionally covers every authored runtime TypeScript source in
+  // src/platform/runtime/lib/. It detects
   // inline JSON.stringify/writeFileSync pairs, not pre-serialized or async writes.
-  const writes = directJsonWritesInLib(path.join(ROOT, 'lib'));
+  const writes = directJsonWritesInLib(RUNTIME_LIB);
   assert.deepEqual(writes.sort(), [...DIRECT_JSON_EXCEPTIONS.keys()].sort());
   for (const inventoryId of DIRECT_JSON_EXCEPTIONS.values()) {
     const row = MACHINE_WRITTEN_PATH_INVENTORY.find(entry => entry.id === inventoryId);

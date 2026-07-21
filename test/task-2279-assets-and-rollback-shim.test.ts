@@ -1,0 +1,39 @@
+// @ts-nocheck
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+
+const ROOT = path.resolve(__dirname, '..');
+const assetStoreSource = fs.readFileSync(path.join(ROOT, 'src/platform/assets/runtime-assets.ts'), 'utf8');
+
+test('task-2279 routes shipped prompts and configuration through the runtime AssetStore', () => {
+  const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'build', 'asset-manifest.json'), 'utf8'));
+  for (const asset of [
+    'config/agents.json', 'config/state-map.json', 'prompts/act-on-review.md',
+    'prompts/draft.md', 'prompts/execute.md', 'prompts/review.md',
+    'templates/mission-scaffold.md',
+  ]) {
+    assert.match(assetStoreSource, new RegExp(`'${asset.replace('.', '\\.')}'`));
+    assert.ok(manifest.assets.some((entry) => entry.key === asset && entry.sha256), `${asset} must be in the canonical asset manifest`);
+  }
+
+  for (const file of [
+    'src/platform/runtime/lib/commands/draft.ts',
+    'src/platform/runtime/lib/commands/active.ts',
+    'src/platform/runtime/lib/review/review-prompts.ts',
+    'src/platform/runtime/lib/agents/agent-config.ts',
+    'src/platform/runtime/lib/core/state-map.ts',
+  ]) {
+    const source = fs.readFileSync(path.join(ROOT, file), 'utf8');
+    assert.match(source, /runtimeAssetStore\.readText/);
+    assert.doesNotMatch(source, /packageRoot\(__dirname\).*'(prompts|templates|config)'/);
+  }
+});
+
+test('task-2279 build retains executable CommonJS rollback package targets', () => {
+  for (const file of ['dist/index.js', 'dist/index.js.map', 'dist/px.js', 'dist/px.js.map']) {
+    assert.ok(fs.existsSync(path.join(ROOT, file)), `${file} must exist after npm run build`);
+  }
+  assert.equal(typeof require('../dist').main, 'function');
+});

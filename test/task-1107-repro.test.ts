@@ -76,13 +76,14 @@ test('rebaseBeforeReviewRound auto-commits safe mission artifacts before rebase'
   assert.match(rebaseCalls[0].args[0], /px\.js$/, 'Packaged pre-review rebase must invoke its compiled CLI');
 });
 
-test('rebaseBeforeReviewRound invokes px.ts through tsx in a source checkout', async () => {
+test('rebaseBeforeReviewRound invokes the TypeScript entrypoint through tsx in a source checkout', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-source-rebase-'));
   const calls = [];
   const slug = 'task-1107';
 
   try {
-    fs.writeFileSync(path.join(root, 'px.ts'), '// source checkout marker\n');
+    fs.mkdirSync(path.join(root, 'src', 'entry'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'src', 'entry', 'px.ts'), '// source checkout marker\n');
     const result = await rebaseBeforeReviewRound(slug, {
       worktree: root,
       isForgejoReviewEnabledFn: () => true,
@@ -97,8 +98,10 @@ test('rebaseBeforeReviewRound invokes px.ts through tsx in a source checkout', a
 
     assert.deepEqual(result, { ok: true, sharedFileConflicts: false });
     assert.match(calls[0].command, /node_modules\/\.bin\/tsx$/, 'Source checkouts must launch tsx');
-    assert.equal(calls[0].args[0], path.join(root, 'px.ts'));
-    assert.deepEqual(calls[0].args.slice(1), ['rebase', slug, '--push']);
+    assert.deepEqual(calls[0].args, [
+      '--import', path.join(root, 'src', 'entry', 'esm-globals.ts'),
+      path.join(root, 'src', 'entry', 'px.ts'), 'rebase', slug, '--push'
+    ]);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -283,7 +286,10 @@ test('rebaseBeforeReviewRound uses the tsx source runtime in a checkout', async 
   assert.deepEqual(result, { ok: true, sharedFileConflicts: false });
   assert.deepEqual(calls, [{
     command: require('node:path').join(process.cwd(), 'node_modules', '.bin', 'tsx'),
-    args: [require('node:path').join(process.cwd(), 'px.ts'), 'rebase', 'task-1107', '--push']
+    args: [
+      '--import', require('node:path').join(process.cwd(), 'src', 'entry', 'esm-globals.ts'),
+      require('node:path').join(process.cwd(), 'src', 'entry', 'px.ts'), 'rebase', 'task-1107', '--push'
+    ]
   }]);
 });
 

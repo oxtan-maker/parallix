@@ -6,10 +6,12 @@ const childProcess = require('node:child_process');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-// npm run build emits the development CLI under dist/. The package manifest
-// intentionally points consumers at dist/px.js, which is produced by the
-// separate publish build and is not present during this source-level suite.
-const CLI_ENTRY = path.resolve(__dirname, '..', 'dist', 'px.js');
+// This is a source-level lifecycle suite. Run the canonical TypeScript
+// entrypoint so concurrent package/publish tests rebuilding dist/ cannot
+// remove the CLI while a fixture is being created.
+const CLI_LOADER = path.resolve(__dirname, '..', 'src', 'entry', 'esm-globals.ts');
+const CLI_ENTRY = path.resolve(__dirname, '..', 'src', 'entry', 'px.ts');
+const TSX_LOADER = require.resolve('tsx');
 
 function runCommand(command, args, options = {}) {
   const result = childProcess.spawnSync(command, args, {
@@ -339,7 +341,7 @@ function runWorkflow(repoRoot, env, args, timeout = 60000, { allowFailure = fals
   const stderrFd = fs.openSync(stderrPath, 'w');
   let result;
   try {
-    result = childProcess.spawnSync(process.execPath, [CLI_ENTRY, ...args], {
+    result = childProcess.spawnSync(process.execPath, ['--import', TSX_LOADER, '--import', CLI_LOADER, CLI_ENTRY, ...args], {
       cwd: repoRoot,
       env,
       timeout,
@@ -371,6 +373,23 @@ function worktreePathFor(repoRoot, slug) {
 
 function shouldKeepTmp() {
   return process.env.PARALLIX_E2E_KEEP_TMP === '1';
+}
+
+function pauseAfterWorktreeFixture(repo, worktree) {
+  const readyMarker = process.env.PARALLIX_E2E_WORKTREE_READY_MARKER || '';
+  if (!readyMarker) { return; }
+  fs.writeFileSync(readyMarker, JSON.stringify({
+    tmpRoot: repo.tmpRoot,
+    repoRoot: repo.repoRoot,
+    worktree,
+    pid: process.pid,
+  }), 'utf8');
+  // TASK-2212 kills the fixture process group after observing the marker.
+  // SIGSTOP gives the parent a deterministic interruption point without a
+  // timed sleep or polling delay in the lifecycle suite.
+  if (process.platform !== 'win32') {
+    process.kill(process.pid, 'SIGSTOP');
+  }
 }
 
 function cleanInterruptedFixture(parentPid, root, repoRoot, worktree, cleanupMarker) {
@@ -517,6 +536,7 @@ function runScenario({ launchFromFeatureBranch = false, integrate = true, postIn
     runWorkflow(repo.repoRoot, env, ['draft', slug, '--agent', 'custom']);
 
     assert.ok(fs.existsSync(worktree), `expected mission worktree at ${worktree}`);
+    pauseAfterWorktreeFixture(repo, worktree);
     const worktreeTask = taskFileIn(worktree, slug);
     assert.ok(worktreeTask, 'draft should bootstrap the backlog task into the worktree');
     assert.equal(taskStatus(worktreeTask), 'refined');

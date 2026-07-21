@@ -2992,8 +2992,8 @@ test('startReviewLoop resolves task file from the mission worktree (regression)'
 test('startReviewLoop uses selectAgent for unsupported reviewer fallback (SC 4)', async () => {
   const fs = require('fs');
   const path = require('path');
-  // Check review-loop.js since startReviewLoop is now extracted there
-  const reviewLoopSource = fs.readFileSync(path.join(__dirname, '../lib/review/review-loop.ts'), 'utf8');
+  // startReviewLoop lives in the platform runtime source tree.
+  const reviewLoopSource = fs.readFileSync(path.join(__dirname, '../src/platform/runtime/lib/review/review-loop.ts'), 'utf8');
   assert.ok(reviewLoopSource.includes("selectAgentFn('review', { exclude: excludeSet })"), 'startReviewLoop should select reviewer fallback from review eligibility');
   assert.ok(!reviewLoopSource.includes('fallbackForFn(reviewer, implementer)'), 'startReviewLoop should not call fallbackFor for reviewer fallback');
 });
@@ -3001,7 +3001,7 @@ test('startReviewLoop uses selectAgent for unsupported reviewer fallback (SC 4)'
 test('startReviewLoop removes implementer eligibility check (SC 4)', async () => {
   const fs = require('fs');
   const path = require('path');
-  const reviewSource = fs.readFileSync(path.join(__dirname, '../lib/review/review.ts'), 'utf8');
+  const reviewSource = fs.readFileSync(path.join(__dirname, '../src/platform/runtime/lib/review/review.ts'), 'utf8');
   // The old code had: if (!agents.includes(implementer)) { ... exit(1) ... }
   // This should be removed or commented out
   const hasStrictImplementerCheck = /if\s*\(\s*!agents\.includes\(implementer\)\s*\)\s*\{[\s\S]*?exit\(1\);[\s\S]*?\}/.test(reviewSource);
@@ -3011,8 +3011,8 @@ test('startReviewLoop removes implementer eligibility check (SC 4)', async () =>
 test('review.js does not update Backlog task assignee on reviewer fallback (SC 5)', async () => {
   const fs = require('fs');
   const path = require('path');
-  // Check review-loop.js since applyAgentFallback is now extracted there
-  const reviewLoopSource = fs.readFileSync(path.join(__dirname, '../lib/review/review-loop.ts'), 'utf8');
+  // applyAgentFallback lives in the platform runtime source tree.
+  const reviewLoopSource = fs.readFileSync(path.join(__dirname, '../src/platform/runtime/lib/review/review-loop.ts'), 'utf8');
   assert.ok(!reviewLoopSource.includes('workflow(${slug}): fallback reviewer from'), 'Should not contain reviewer fallback commit message pattern');
   assert.ok(reviewLoopSource.includes("if (role === 'implementer' && taskResolution && taskResolution.ok)"), 'Backlog assignee enforcement should be guarded to implementer fallback');
   assert.ok(reviewLoopSource.includes('enforceTaskAssigneeFn(taskResolution.taskFile, fallback)'), 'Implementer fallback should still enforce Backlog assignee');

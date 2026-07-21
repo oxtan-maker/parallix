@@ -21,6 +21,7 @@ test('interrupted feature lifecycle leaves no e2e branch or worktree behind (SC1
   const before = new Set(fs.readdirSync(os.tmpdir()).filter(name => name.startsWith('parallix-e2e-')));
   const signalRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2212-cleanup-'));
   const cleanupMarker = path.join(signalRoot, 'complete');
+  const readyMarker = path.join(signalRoot, 'worktree-ready.json');
   const child = childProcess.spawn(process.execPath, [
     '--test', '--test-name-pattern=feature-branch lifecycle drafts', 'test/e2e-mission-lifecycle.test.ts'
   ], {
@@ -29,24 +30,25 @@ test('interrupted feature lifecycle leaves no e2e branch or worktree behind (SC1
       ...process.env,
       NODE_TEST_CONTEXT: undefined,
       PARALLIX_E2E_KEEP_TMP: '1',
-      PARALLIX_E2E_CLEANUP_MARKER: cleanupMarker
+      PARALLIX_E2E_CLEANUP_MARKER: cleanupMarker,
+      PARALLIX_E2E_WORKTREE_READY_MARKER: readyMarker,
     },
     detached: process.platform !== 'win32',
     stdio: 'ignore'
   });
   const childExited = new Promise(resolve => child.once('exit', resolve));
-  const deadline = Date.now() + 30000;
+  const deadline = Date.now() + 5000;
   let fixtureRoot;
   let worktree;
 
   try {
     while (Date.now() < deadline) {
-      const roots = fs.readdirSync(os.tmpdir())
-        .filter(name => name.startsWith('parallix-e2e-') && !before.has(name))
-        .map(name => path.join(os.tmpdir(), name));
-      fixtureRoot = roots.find(root => fs.existsSync(path.join(root, 'repo', '.git')));
-      worktree = fixtureRoot && path.join(fixtureRoot, 'repo-task-2001');
-      if (fixtureRoot && fs.existsSync(worktree)) break;
+      if (fs.existsSync(readyMarker)) {
+        const fixture = JSON.parse(fs.readFileSync(readyMarker, 'utf8'));
+        fixtureRoot = fixture.tmpRoot;
+        worktree = fixture.worktree;
+        break;
+      }
       await new Promise(resolve => setTimeout(resolve, 20));
     }
     assert.ok(fixtureRoot, 'the failed-test fixture should be created');

@@ -11,9 +11,10 @@ const git = require('../dist/lib/core/git');
 const backlog = require('../dist/lib/tools/backlog');
 
 const REPO_ROOT = path.join(__dirname, '..');
+const RUNTIME_LIB = path.join(REPO_ROOT, 'src', 'platform', 'runtime', 'lib');
 
 test('task-2273 baseline: handoff owns two commit-equivalent general-gate invocations', () => {
-  const handoff = fs.readFileSync(path.join(REPO_ROOT, 'lib', 'commands', 'handoff.ts'), 'utf8');
+  const handoff = fs.readFileSync(path.join(RUNTIME_LIB, 'commands', 'handoff.ts'), 'utf8');
 
   const owners = [
     { boundary: 'handoff-final', invocation: handoff.indexOf('runVerificationGateFn(area || \'docs\'') },
@@ -27,7 +28,7 @@ test('task-2273 baseline: handoff owns two commit-equivalent general-gate invoca
 });
 
 test('task-2273 baseline: no repository-managed review-remote pre-push verifier exists', () => {
-  const trackedFiles = fs.readdirSync(path.join(REPO_ROOT, 'lib'));
+  const trackedFiles = fs.readdirSync(RUNTIME_LIB);
   assert.ok(trackedFiles.length > 0, 'repository fixture is available');
   assert.equal(fs.existsSync(path.join(REPO_ROOT, '.githooks', 'pre-push')), false,
     'the review-remote pre-push hook described by the backlog is local-only, not a tracked gate owner');

@@ -1524,7 +1524,7 @@ test('validateDeclaredGates passes glob patterns (no false positive on /*)', () 
 test('validateDeclaredGates passes directory references with trailing slash', () => {
   const rootDir = path.join(__dirname, '..');
   const result = validateDeclaredGates(
-    ["npm run prepublishOnly && npm pack --dry-run 2>&1 | grep -q 'lib/agents/'"],
+    ["npm run prepublishOnly && npm pack --dry-run 2>&1 | grep -q 'src/platform/runtime/lib/agents/'"],
     rootDir
   );
   assert.strictEqual(result.ok, true);
@@ -2021,7 +2021,7 @@ test('buildAutoCheckpointContent produces verifiable evidence rows', () => {
 
   const content = handoffModule._buildAutoCheckpointContent('task-2215');
   assert.match(content, /^## Goal Check$/m, 'template must contain the ## Goal Check heading');
-  assert.ok(content.includes('lib/commands/handoff.ts:262'),
+  assert.ok(content.includes('src/platform/runtime/lib/commands/handoff.ts:277'),
     'evidence must cite the auto-remediation source file:line, not the removed handoff.js');
   assert.ok(!content.includes('handoff.js auto-remediation'),
     'template must not cite the non-existent handoff.js');
