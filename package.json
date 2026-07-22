@@ -65,11 +65,11 @@
   "devDependencies": {
     "@stryker-mutator/core": "^9.6.1",
     "@types/node": "^26.0.1",
-    "esbuild": "^0.25.12",
     "@typescript-eslint/eslint-plugin": "^8.62.1",
     "@typescript-eslint/parser": "^8.62.1",
+    "esbuild": "^0.25.12",
     "eslint": "^9.39.4",
-    "sonarqube-scanner": "^4.0.1",
+    "sonarqube-scanner": "^5.0.0",
     "tsx": "4.20.6",
     "typescript": "^5.9.3"
   }
