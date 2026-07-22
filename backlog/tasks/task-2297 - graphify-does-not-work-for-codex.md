@@ -1,7 +1,7 @@
 ---
 id: TASK-2297
 title: graphify does not work for codex
-status: backlog
+status: refined
 assignee: [codex]
 created_date: '2026-07-22 06:44'
 labels: []
