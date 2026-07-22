@@ -6,6 +6,7 @@ title: >-
 status: backlog
 assignee: []
 created_date: '2026-07-22 04:47'
+updated_date: '2026-07-22 04:55'
 labels:
   - domain-model
   - architecture
@@ -49,8 +50,8 @@ Key context: current state surfaces are `src/platform/runtime/lib/core/storage.t
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [ ] #1 Canonical domain model exists as pure code under `src/domain/` (TypeScript types/value objects) importing no React, Ink, SQLite, node:fs, git, subprocess, Forgejo, or terminal module, enforced by the import-boundary test
-- [ ] #2 The model covers, with explicit identity and invariants, at least: Mission, Checkpoint, Review, Finding, AgentFamily/eligibility, UsageRecord, Repository, NelRecord, and SessionMarker; invariants are covered by unit tests
-- [ ] #3 An entity-level authority map assigns each entity/field exactly one authority owner (Git-Markdown target-repo state vs operator-local/PARALLIX_HOME vs tool-owned asset), marks cache-vs-source-of-truth, encodes 'repository state wins', and supersedes the path-based MACHINE_WRITTEN_PATH_INVENTORY intent
+- [ ] #2 The model accounts for the workflow state that exists today — mission lifecycle, checkpoints, review rounds and findings, agent families and eligibility, usage/statistics, known repositories, NEL capture, and session/resume markers — and decides per concern whether it is an entity, aggregate, value object, or attribute (a separate entity is NOT required where a value object or field is the honest model); the chosen shape and its invariants are covered by unit tests
+- [ ] #3 An entity-level authority map assigns each modeled concern/field exactly one authority owner (Git-Markdown target-repo state vs operator-local/PARALLIX_HOME vs tool-owned asset), marks cache-vs-source-of-truth, encodes 'repository state wins', and supersedes the path-based MACHINE_WRITTEN_PATH_INVENTORY intent
 - [ ] #4 A read-model / access-pattern catalog enumerates the queries the CLI, board, and TUI need and is explicitly validated against the board read surfaces (mission-list projection with class/state/agent/checkpoint/gate/next-action/PR/blocking/flags, attention-ranking inputs, cumulative-flow and median-cycle-time series, WIP counts, agent availability with timed-block countdown, command/event log)
 - [ ] #5 The mission-lifecycle state machine (states, transitions, guards, triggerers) is modeled in the domain, formalizing fail-closed handling (ADR 0048) and the launch->record->rollback ordering (ADR 0051), with tests asserting illegal transitions are rejected
 - [ ] #6 The sync/async persistence seam is proven in code on the agent eligibility/selection consumer path via a materialized in-memory snapshot loaded at the composition root: async only at the port boundary, synchronous reads in the hot algorithm, with a test proving no async cascade is required in that consumer
@@ -60,6 +61,8 @@ Key context: current state surfaces are `src/platform/runtime/lib/core/storage.t
 - [ ] #10 The mission adds no SQLite adapter, no migration, and no change to repository/task authority or write paths; the `mission/task-2280` branch is left unmerged and a follow-up for the conforming SQLite implementation is recorded
 - [ ] #11 `./scripts/verify-local.sh all` passes and, for the `src/` changes, `./scripts/verify-local.sh static-analysis` passes
 <!-- AC:END -->
+
+
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
