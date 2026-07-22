@@ -2,7 +2,7 @@
 id: TASK-2296
 title: test failure
 status: backlog
-assignee: []
+assignee: [codex]
 created_date: '2026-07-22 05:33'
 labels: []
 dependencies: []
