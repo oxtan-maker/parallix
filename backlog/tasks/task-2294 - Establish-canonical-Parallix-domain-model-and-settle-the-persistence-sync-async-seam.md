@@ -3,7 +3,7 @@ id: TASK-2294
 title: >-
   Establish canonical Parallix domain model and settle the persistence
   sync/async seam
-status: review
+status: ready-for-integration
 assignee: [codex]
 created_date: '2026-07-22 04:47'
 updated_date: '2026-07-22 05:00'
