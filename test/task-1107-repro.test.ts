@@ -308,9 +308,16 @@ test('rebaseBeforeReviewRound uses the compiled CLI outside a source checkout', 
   });
 
   assert.deepEqual(result, { ok: true, sharedFileConflicts: false });
+  // The default suite aliases compiled modules into .test-runtime/.  The
+  // packaged-launcher contract is therefore relative to the loaded module,
+  // rather than relative to this checkout's dist directory.
+  const compiledCli = path.resolve(
+    path.dirname(require.resolve('../dist/lib/review/review')),
+    '..', '..', 'px.js',
+  );
   assert.deepEqual(calls, [{
     command: process.execPath,
-    args: [require('node:path').join(process.cwd(), 'dist', 'px.js'), 'rebase', 'task-1107', '--push']
+    args: [compiledCli, 'rebase', 'task-1107', '--push']
   }]);
 });
 
