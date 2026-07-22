@@ -1,10 +1,13 @@
 ---
 id: TASK-2240
 title: when forgejo is activated PR is not updated between rounds
-status: review
+status: done
 assignee: [custom]
 created_date: '2026-07-13 03:38'
-labels: []
+updated_date: '2026-07-13 03:39'
+labels:
+  - ai_sdlc
+  - bug
 dependencies: []
 ordinal: 40000
 ---
