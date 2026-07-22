@@ -4,7 +4,7 @@ title: >-
   Establish canonical Parallix domain model and settle the persistence
   sync/async seam
 status: backlog
-assignee: []
+assignee: [custom]
 created_date: '2026-07-22 04:47'
 updated_date: '2026-07-22 05:00'
 labels:
