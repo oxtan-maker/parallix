@@ -2,7 +2,7 @@
 id: TASK-2298
 title: Strengthen the defence
 status: backlog
-assignee: []
+assignee: [codex]
 created_date: '2026-07-22 06:52'
 labels: []
 dependencies: []
