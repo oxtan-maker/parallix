@@ -2,7 +2,7 @@
 id: TASK-2242
 title: backlog.md changes fast
 status: backlog
-assignee: []
+assignee: [custom]
 created_date: '2026-07-13 05:35'
 labels: []
 dependencies: []
