@@ -17,8 +17,6 @@ const { spawnSync } = require('node:child_process');
 const test = require('node:test');
 const { shellInit } = require('../dist/px.js');
 
-const pxJs = path.resolve(__dirname, '..', 'dist', 'px.js');
-
 // Builds a fake `px` executable that prints the given transition signal.
 function makeFakePx({ signalPath, exitCode = 0, signal = 'next' }) {
   const fakeBin = fs.mkdtempSync(path.join(os.tmpdir(), 'px-shell-init-bin-'));
@@ -32,6 +30,16 @@ function makeFakePx({ signalPath, exitCode = 0, signal = 'next' }) {
   );
   fs.chmodSync(pxPath, 0o755);
   return fakeBin;
+}
+
+// Keep the transition tests independent of the shared generated dist tree.
+// The test runner builds that tree before loading this module, but other
+// integration tests may rebuild it while this file is running.  Distribution
+// execution is covered separately by task-1390-shell-init-shebang.test.ts.
+function writeShellInit(fakeBin) {
+  const initPath = path.join(fakeBin, 'shell-init.sh');
+  fs.writeFileSync(initPath, shellInit('bash'));
+  return initPath;
 }
 
 // PATH must be set inside the script: a login shell (`-l`) reloads the profile
@@ -64,10 +72,11 @@ test('shellInit rejects an unsupported shell', () => {
 test('px function follows a Next: cd transition', () => {
   const target = fs.mkdtempSync(path.join(os.tmpdir(), 'px-shell-init-target-'));
   const fakeBin = makeFakePx({ signalPath: target });
+  const initPath = writeShellInit(fakeBin);
 
   const result = runBash(
     [
-      `eval "$(node ${JSON.stringify(pxJs)} shell-init bash)"`,
+      `source ${JSON.stringify(initPath)}`,
       'px draft task-1 >/dev/null',
       'printf "PWD_AFTER=%s\\n" "$(pwd -P)"',
     ],
@@ -85,10 +94,11 @@ test('px function follows a Next: cd transition', () => {
 test('px function follows a Working directory transition', () => {
   const target = fs.mkdtempSync(path.join(os.tmpdir(), 'px-shell-init-wd-'));
   const fakeBin = makeFakePx({ signalPath: target, signal: 'working-directory' });
+  const initPath = writeShellInit(fakeBin);
 
   const result = runBash(
     [
-      `eval "$(node ${JSON.stringify(pxJs)} shell-init bash)"`,
+      `source ${JSON.stringify(initPath)}`,
       'px active task-1 >/dev/null',
       'printf "PWD_AFTER=%s\\n" "$(pwd -P)"',
     ],
@@ -106,10 +116,11 @@ test('px function follows a Working directory transition', () => {
 test('px function preserves the runner exit code', () => {
   const target = fs.mkdtempSync(path.join(os.tmpdir(), 'px-shell-init-exit-'));
   const fakeBin = makeFakePx({ signalPath: target, exitCode: 7 });
+  const initPath = writeShellInit(fakeBin);
 
   const result = runBash(
     [
-      `eval "$(node ${JSON.stringify(pxJs)} shell-init bash)"`,
+      `source ${JSON.stringify(initPath)}`,
       'px integrate task-1 >/dev/null',
       'printf "STATUS=%s\\n" "$?"',
     ],
@@ -135,10 +146,11 @@ test('px function silently skips cd when target directory is missing (task-1381)
   assert.ok(!fs.existsSync(missingTarget), 'test setup: target must not exist');
 
   const fakeBin = makeFakePx({ signalPath: missingTarget });
+  const initPath = writeShellInit(fakeBin);
 
   const result = runBash(
     [
-      `eval "$(node ${JSON.stringify(pxJs)} shell-init bash)"`,
+      `source ${JSON.stringify(initPath)}`,
       'px integrate task-1 >/dev/null',
       'printf "STATUS=%s\\n" "$?"',
     ],
@@ -166,10 +178,11 @@ test('px function silently skips cd for Working directory signal when target mis
   assert.ok(!fs.existsSync(missingTarget), 'test setup: target must not exist');
 
   const fakeBin = makeFakePx({ signalPath: missingTarget, signal: 'working-directory' });
+  const initPath = writeShellInit(fakeBin);
 
   const result = runBash(
     [
-      `eval "$(node ${JSON.stringify(pxJs)} shell-init bash)"`,
+      `source ${JSON.stringify(initPath)}`,
       'px integrate task-1 >/dev/null',
       'printf "STATUS=%s\\n" "$?"',
     ],
