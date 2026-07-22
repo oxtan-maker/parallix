@@ -1,7 +1,7 @@
 ---
 id: TASK-2296
 title: test failure
-status: backlog
+status: refined
 assignee: [codex]
 created_date: '2026-07-22 05:33'
 labels: []
