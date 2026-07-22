@@ -1,8 +1,8 @@
 ---
 id: TASK-2242
 title: backlog.md changes fast
-status: refined
-assignee: [custom]
+status: active
+assignee: [vibe]
 created_date: '2026-07-13 05:35'
 labels: []
 dependencies: []
