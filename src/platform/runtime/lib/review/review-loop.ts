@@ -28,6 +28,7 @@ import * as statsModule from '../commands/stats.js';
 import * as handoffModule from '../commands/handoff.js';
 import * as repairHandoffModule from '../commands/repair-handoff.js';
 import { updateGraphifyKnowledgeGraph } from '../core/mission-utils.js';
+import { pushReviewRef, isStaleInfoPushRejection, fetchReviewBranch } from '../tools/forgejo.js';
 
 /** Lazily loaded stats module — loaded on first use to avoid circular dependency. */
 let _stats: any = null;
@@ -570,6 +571,10 @@ export async function startReviewLoop(slug: string, opts: {
   recordStageStatsSafeFn?: (..._args: any[]) => void;
   runPreReviewGateFn?: typeof runPreReviewGate;
   handleGateFailureAutoBounceFn?: typeof handleGateFailureAutoBounce;
+  pushReviewRefFn?: typeof pushReviewRef;
+  isStaleInfoPushRejectionFn?: typeof isStaleInfoPushRejection;
+  fetchReviewBranchFn?: typeof fetchReviewBranch;
+  hasNewCommittedChangeFn?: ((_branch: string, _rootDir: string) => boolean) | null;
 } = {}): Promise<void> {
   let {
     implementer,
@@ -633,7 +638,11 @@ export async function startReviewLoop(slug: string, opts: {
     isReviewProviderEnabledFn = undefined,
     legacyIsForgejoReviewEnabledFn = null,
     isForgejoReviewEnabledFn = null,
-    recordStageStatsSafeFn = () => {}
+    recordStageStatsSafeFn = () => {},
+    pushReviewRefFn = pushReviewRef,
+    isStaleInfoPushRejectionFn = isStaleInfoPushRejection,
+    fetchReviewBranchFn = fetchReviewBranch,
+    hasNewCommittedChangeFn = null,
   } = opts;
 
   const performHandoffFn = opts.performHandoffFn || (await getHandoff()).performHandoff;
@@ -1402,8 +1411,28 @@ export async function startReviewLoop(slug: string, opts: {
     }
 
     // Fixing phase
+    // task-2240: snapshot the mission branch HEAD at this round/commit boundary
+    // (after any reviewing-phase rebase, before the implementer acts) so the
+    // between-round PR push only fires when the implementer actually advances
+    // the branch with a new committed change this round. This is the production
+    // default for the no-new-commit guard; hasNewCommittedChangeFn stays a null
+    // injection used only as a test seam.
+    const readBranchHeadSha = (): string | null => {
+      try {
+        const headResult = gitFn(['-C', worktree, 'rev-parse', 'HEAD']);
+        if (headResult.status !== 0) { return null; }
+        return (headResult.stdout || '').trim() || null;
+      } catch {
+        return null;
+      }
+    };
+    const preFixHeadSha = readBranchHeadSha();
     let disposition: unknown;
     let reLaunch: boolean | null;
+    let implementerSkippedResume = false;
+    // task-2240: track whether the implementer was skipped on resume so the
+    // no-new-commit guard can fall open when the snapshot was captured at the
+    // already-advanced HEAD (see F1 round 4).
     let sinceIso = state.startedAt;
     if (isContinue && attempt === state.round) {
       if (forgejoEnabled) {
@@ -1571,9 +1600,14 @@ export async function startReviewLoop(slug: string, opts: {
       // Re-launch path: stale BLOCKED/PARKED was replaced by fresh implementation.
       // The disposition was set by the re-launch above (lines 767-785).
       // Fall through to disposition handling below.
-    } else {
+    } else if (disposition) {
       // Skip-check found an existing disposition that is not BLOCKED/PARKED (or reLaunch flag).
       log(fmt.status('INFO', `Round ${attempt}: implementer disposition found (${disposition}). Skipping implementer launch.`));
+      // task-2240: implementer was skipped on resume; the HEAD snapshot was
+      // captured at the already-advanced post-implementer HEAD, so the
+      // no-new-commit comparison would falsely report no change. Mark this
+      // so the guard falls open and the push still fires.
+      implementerSkippedResume = true;
     }
 
     if (!disposition) {
@@ -1609,6 +1643,55 @@ export async function startReviewLoop(slug: string, opts: {
 
     state.disposition = disposition as string;
     try { state.transitionTo('reviewing'); } catch (_) { /* ignore */ }
+    // Push mission branch to review remote so the PR diff is current (task-2240)
+    // Skip if no new committed source change (SC4: activated-Forgejo + CHANGES_MADE
+    // + no-new-commit must not attempt the push path).
+    // Production default: a new committed source change advanced the branch
+    // HEAD past the boundary snapshot taken at the start of this round's fixing
+    // phase. If either read failed we fall open (push) so the PR does not go
+    // stale on an unreadable git state. hasNewCommittedChangeFn overrides this
+    // as a test seam only.
+    const hasCommittedChange = hasNewCommittedChangeFn
+      ? hasNewCommittedChangeFn(branch, worktree)
+      : (() => {
+          // task-2240 (F1 round 4): when the implementer was skipped on resume,
+          // the preFixHeadSha was captured at the already-advanced HEAD, so the
+          // comparison would falsely report no change. Fall open (push) instead.
+          if (implementerSkippedResume) { return true; }
+          const postFixHeadSha = readBranchHeadSha();
+          if (preFixHeadSha === null || postFixHeadSha === null) { return true; }
+          return postFixHeadSha !== preFixHeadSha;
+        })();
+    if (forgejoEnabled && token && hasCommittedChange) {
+      let pushResult = pushReviewRefFn(branch, branch, worktree, {
+        forceWithLease: true,
+        token,
+      });
+      // Tokenized-URL pushes have no remote-tracking lease base, so bare
+      // --force-with-lease is rejected with "stale info" even for fast-forward
+      // pushes. Reuse the integrate path's fetch-retry-then-force fallback.
+      if (isStaleInfoPushRejectionFn(pushResult)) {
+        log(fmt.status('INFO', `Round ${attempt}: push rejected as stale; fetching review/${branch} and retrying.`));
+        fetchReviewBranchFn(branch, worktree, { token });
+        pushResult = pushReviewRefFn(branch, branch, worktree, {
+          forceWithLease: true,
+          token,
+        });
+        if (isStaleInfoPushRejectionFn(pushResult)) {
+          log(fmt.status('INFO', `Round ${attempt}: force-with-lease still stale; using force push.`));
+          pushResult = pushReviewRefFn(branch, branch, worktree, {
+            force: true,
+            token,
+          });
+        }
+      }
+      if (pushResult.status !== 0) {
+        log(fmt.status('WARN', `Round ${attempt}: could not push mission branch to review remote (exit ${pushResult.status}): ${pushResult.stderr || pushResult.stdout || '(no output)'}. Continuing to next round.`));
+      } else {
+        log(fmt.status('INFO', `Round ${attempt}: pushed mission branch ${branch} to review remote.`));
+      }
+    }
+
     persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree);
     log(fmt.status('INFO', `Round ${attempt}: implementer made changes. Continuing to round ${attempt + 1}.`));
   }

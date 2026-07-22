@@ -10,7 +10,7 @@ const expectedIntegrationFiles = [
   'bootstrap-isolation.test.ts', 'draft-command.test.ts', 'draft.test.ts',
   'draft_preflight_modern.test.ts', 'durable-state-policy.test.ts',
   'external-target-resolution.test.ts', 'forgejo-independence.test.ts',
-  'forgejo.test.ts', 'handoff.test.ts', 'install.test.ts',
+  'forgejo-pr-round-sync.test.js', 'forgejo.test.ts', 'handoff.test.ts', 'install.test.ts',
   'integrate-task-1410-stash-pop-corruption.test.ts', 'integrate-workflow-gate.test.ts',
   'integrate.test.ts', 'integration-pipelines.test.ts', 'mission-start.test.ts',
   'mission-utils-worktree.test.ts', 'mistral.test.ts', 'nels.test.ts',
