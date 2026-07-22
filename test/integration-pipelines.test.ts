@@ -284,6 +284,15 @@ test('executeIntegrationGates uses injected commandRunner and aborts on failure'
   assert.ok(result.error.includes('Command exited with code 1'));
 });
 
+test('executeIntegrationGates rejects an omitted execution root before launching a child', async () => {
+  let launched = false;
+  await assert.rejects(
+    () => executeIntegrationGates([], { commandRunner: () => { launched = true; return { status: 0 }; } }),
+    /explicit execution root/
+  );
+  assert.equal(launched, false);
+});
+
 test('integration-suite failure aborts before a simulated squash merge command (task-2292)', async () => {
   const gates = [
     { key: 'integration-suite', command: 'npm run test:integration', order: 3, run_last: false },

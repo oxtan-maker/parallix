@@ -5,6 +5,15 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
+// A verifier may be launched from an operator checkout while it is validating
+// a mission worktree. Capture that selected root once and use it for every
+// build, test-runtime generation, test discovery, and nested Node process.
+const executionRoot = path.resolve(process.env.PARALLIX_EXECUTION_ROOT || path.join(__dirname, '..'));
+const testRoot = path.join(executionRoot, 'test');
+if (!fs.existsSync(path.join(executionRoot, 'package.json')) || !fs.existsSync(testRoot)) {
+  throw new Error(`PARALLIX_EXECUTION_ROOT is not a Parallix checkout: ${executionRoot}`);
+}
+
 const MINIMUM_TEST_NODE_MAJOR = 20;
 const MINIMUM_TEST_NODE_MINOR = 6;
 
@@ -52,7 +61,7 @@ function supportsTestForceExit(command) {
   return major >= 22 || (major === 20 && minor >= 14);
 }
 
-const allRootTestFiles = fs.readdirSync(__dirname)
+const allRootTestFiles = fs.readdirSync(testRoot)
   .sort()
   .filter(file => /\.test\.(?:js|ts)$/.test(file))
   // Lifecycle E2E is an integration gate. Keeping it out of the fast default
@@ -97,11 +106,11 @@ const knownIntegrationTestFiles = new Set([
 ]);
 const integrationTestFiles = allRootTestFiles
   .filter(file => knownIntegrationTestFiles.has(file)
-    || boundaryDependencyPattern.test(fs.readFileSync(path.join(__dirname, file), 'utf8')))
-  .map(file => path.join(__dirname, file));
+    || boundaryDependencyPattern.test(fs.readFileSync(path.join(testRoot, file), 'utf8')))
+  .map(file => path.join(testRoot, file));
 const defaultTestFiles = allRootTestFiles
-  .filter(file => !integrationTestFiles.includes(path.join(__dirname, file)))
-  .map(file => path.join(__dirname, file));
+  .filter(file => !integrationTestFiles.includes(path.join(testRoot, file)))
+  .map(file => path.join(testRoot, file));
 const requestedArgs = process.argv.slice(2);
 const runsIntegrationSuite = requestedArgs.includes('--integration');
 const requestedTestFiles = requestedArgs.filter(arg => arg !== '--integration');
@@ -111,7 +120,7 @@ const testFiles = runsIntegrationSuite
 
 // Build the canonical bundle before every suite so a direct runner invocation
 // also catches bundle regressions in the current checkout.
-const buildResult = spawnSync('npm', ['run', 'build'], { stdio: 'inherit' });
+const buildResult = spawnSync('npm', ['run', 'build'], { cwd: executionRoot, stdio: 'inherit' });
 if (buildResult.error) {
   throw buildResult.error;
 }
@@ -124,7 +133,7 @@ if (buildResult.status !== 0) {
 // writable CommonJS exports. Generate those modules in the ignored,
 // test-only .test-runtime/ tree; the preload maps legacy imports there so
 // concurrent product builds cannot race with test module loading.
-const testRuntimeBuild = spawnSync(process.execPath, [path.join(__dirname, '..', 'scripts', 'build-test-runtime.js')], { stdio: 'inherit' });
+const testRuntimeBuild = spawnSync(process.execPath, [path.join(executionRoot, 'scripts', 'build-test-runtime.js')], { cwd: executionRoot, stdio: 'inherit' });
 if (testRuntimeBuild.error) {
   throw testRuntimeBuild.error;
 }
@@ -146,11 +155,11 @@ const runsIntegrationE2E = runsRealAgentSmoke || runsLifecycleE2E;
 const bootstrapArgs = runsIntegrationE2E
   ? []
   : [
-    '--require', path.join(__dirname, 'bootstrap-parallix-home.js')
+    '--require', path.join(testRoot, 'bootstrap-parallix-home.js')
   ];
 const sourceAliasArgs = runsIntegrationE2E
   ? []
-  : ['--require', path.join(__dirname, 'source-runtime-alias.js')];
+  : ['--require', path.join(testRoot, 'source-runtime-alias.js')];
 const typeScriptLoaderArgs = testFiles.some(file => file.endsWith('.ts'))
   ? ['--import', 'tsx']
   : [];
@@ -174,7 +183,8 @@ const result = spawnSync(
   ],
   {
     stdio: 'inherit',
-    env: process.env
+    cwd: executionRoot,
+    env: { ...process.env, PARALLIX_EXECUTION_ROOT: executionRoot }
   }
 );
 

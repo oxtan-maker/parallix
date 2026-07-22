@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { detectRebaseState, git, getCurrentBranch } from '../core/git.js';
 import integrate from './integrate.js';
-import { findMissionDir, findMissionArea, inferSlug, resolveWorktree, conventionalWorktreePath, getPrimaryWorktree, getPrimaryBranch, resolveMissionBaseBranch, missionBranchName, missionDirForSlug } from '../core/mission-utils.js';
+import { findMissionDir, findMissionArea, inferSlug, resolveWorktree, conventionalWorktreePath, getPrimaryBranch, resolveMissionBaseBranch, missionBranchName, missionDirForSlug } from '../core/mission-utils.js';
 import { startAgent } from '../agents/agents.js';
 import { createPr, readToken, resolveForgejoUser, fetchReviewBranch } from '../tools/forgejo.js';
 import { resolveTaskFile, getTaskImplementer } from '../tools/backlog.js';
@@ -29,13 +29,15 @@ async function rebase(args: string[], {
   resolveForgejoUserFn = resolveForgejoUser,
   resolveTaskFileFn = resolveTaskFile,
   getTaskImplementerFn = getTaskImplementer,
+  resolveReviewIdentityFn = resolveReviewIdentity,
   detectRebaseStateFn = detectRebaseState,
   resolveMissionBaseBranchFn = resolveMissionBaseBranch,
+  resolveWorktreeFn = resolveWorktree,
   gitFn = git,
   exitFn = ((_code: number) => process.exit(_code)) as (_code: number) => void,
   isForgejoReviewEnabledFn = isForgejoReviewEnabled,
   fetchReviewBranchFn = fetchReviewBranch,
-}: {inferSlugFn?: Function, findMissionDirFn?: Function, findMissionAreaFn?: Function, getCurrentBranchFn?: Function, resolveConflictsFn?: Function, startAgentFn?: Function, createPrFn?: Function, readTokenFn?: Function, resolveForgejoUserFn?: Function, resolveTaskFileFn?: Function, getTaskImplementerFn?: Function, detectRebaseStateFn?: Function, resolveMissionBaseBranchFn?: Function, gitFn?: Function, exitFn?: (_code: number) => void, isForgejoReviewEnabledFn?: Function, fetchReviewBranchFn?: Function} = {}) {
+}: {inferSlugFn?: Function, findMissionDirFn?: Function, findMissionAreaFn?: Function, getCurrentBranchFn?: Function, resolveConflictsFn?: Function, startAgentFn?: Function, createPrFn?: Function, readTokenFn?: Function, resolveForgejoUserFn?: Function, resolveTaskFileFn?: Function, getTaskImplementerFn?: Function, resolveReviewIdentityFn?: Function, detectRebaseStateFn?: Function, resolveMissionBaseBranchFn?: Function, resolveWorktreeFn?: Function, gitFn?: Function, exitFn?: (_code: number) => void, isForgejoReviewEnabledFn?: Function, fetchReviewBranchFn?: Function} = {}) {
   const flags = args.filter(a => a.startsWith('--'));
   const params = args.filter(a => !a.startsWith('--'));
   const isPush = flags.includes('--push');
@@ -47,11 +49,15 @@ async function rebase(args: string[], {
     return;
   }
 
-  const missionDir = findMissionDirFn(slug);
+  // Select the mission root exactly once at the command boundary. All later
+  // lifecycle, Git, proof, and publication calls use this value explicitly.
+  const launchRoot = process.cwd();
+  const executionRoot = resolveWorktreeFn(slug, { cwd: launchRoot }) || launchRoot;
+  const missionDir = findMissionDirFn(slug, executionRoot);
   const area = missionDir ? findMissionAreaFn(missionDir) : 'docs';
-  const branch = missionBranchName(slug);
+  const branch = missionBranchName(slug, executionRoot);
 
-  const existingRebase = detectRebaseStateFn(process.cwd());
+  const existingRebase = detectRebaseStateFn(executionRoot);
   if (existingRebase.inProgress) {
     fmt.log.fail(`Rebase already in progress for ${fmt.branch(branch)}.`);
     if (existingRebase.rebaseHead) {
@@ -71,16 +77,16 @@ async function rebase(args: string[], {
 
   const performPush = async () => {
     if (!isPush) {return;}
-    if (!isForgejoReviewEnabledFn(process.cwd())) {
+    if (!isForgejoReviewEnabledFn(executionRoot)) {
       fmt.log.info(`Skipping Forgejo push (review provider is not forgejo).`);
       return;
     }
     fmt.log.info(`--push detected. Updating Forgejo PR for ${fmt.branch(branch)}...`);
 
-    const reviewIdentity = resolveReviewIdentity(slug, resolveWorktree(slug) || process.cwd());
+    const reviewIdentity = resolveReviewIdentityFn(slug, executionRoot);
     let forgejoUser = reviewIdentity.forgejoUser;
     if (!forgejoUser) {
-      const taskResolution = resolveTaskFileFn(slug, getPrimaryWorktree());
+      const taskResolution = resolveTaskFileFn(slug, executionRoot);
       if (taskResolution.ok) {
         forgejoUser = getTaskImplementerFn(taskResolution.taskFile);
       }
@@ -93,7 +99,7 @@ async function rebase(args: string[], {
       exitFn(1);
       return;
     }
-    const result = createPrFn(branch, forgejoUser || 'default', token, { rootDir: getPrimaryWorktree(), forceWithLease: true });
+    const result = createPrFn(branch, forgejoUser || 'default', token, { rootDir: executionRoot, forceWithLease: true });
     if (!result.ok) {
       fmt.log.fail(`Push to Forgejo failed: ${result.error}`);
       exitFn(1);
@@ -103,7 +109,7 @@ async function rebase(args: string[], {
   };
 
   // Verify we are on the correct branch
-  const currentBranch = getCurrentBranchFn();
+  const currentBranch = getCurrentBranchFn(executionRoot);
   if (currentBranch !== branch) {
     fmt.log.fail(`Expected branch ${fmt.branch(branch)}, found ${fmt.branch(currentBranch)}`);
     fmt.log.info(`Switch to the mission branch first: ${fmt.command(`git checkout ${branch}`)}`);
@@ -114,21 +120,21 @@ async function rebase(args: string[], {
   // Honor the mission's recorded base branch (a feature-branch mission rebases
   // onto its base, e.g. skunkworks — not the primary branch). Falls back to the
   // primary branch for every mission without a recorded Base-Branch.
-  const baseBranch = resolveMissionBaseBranchFn(slug, process.cwd(), { gitFn });
+  const baseBranch = resolveMissionBaseBranchFn(slug, executionRoot, { gitFn });
   fmt.log.info(`Rebasing ${fmt.branch(branch)} onto local ${fmt.branch(baseBranch)}...`);
-  const rebaseResult = gitFn(['-c', 'core.editor=true', '-c', 'merge.autoedit=no', 'rebase', baseBranch]);
+  const rebaseResult = gitFn(['-C', executionRoot, '-c', 'core.editor=true', '-c', 'merge.autoedit=no', 'rebase', baseBranch]);
 
   // Rebase succeeded (status 0) or was already up to date
   // Also handle "Already up to date" variants
   if (rebaseResult.status === 0 || /up to date|Already up to date/i.test(rebaseResult.stdout + rebaseResult.stderr)) {
-    const rebaseStatus = gitFn(['rebase', '--show-current']);
+    const rebaseStatus = gitFn(['-C', executionRoot, 'rebase', '--show-current']);
     // If no rebase is in progress, we're done
     const rebaseInProg = rebaseStatus.stdout.trim().length > 0;
     if (rebaseInProg) {
       // rebase --show-current returned something but status was 0 — treat as incomplete
       fmt.log.pass('Rebase round completed.');
       fmt.log.warn('Rebase is still in progress (non-empty --show-current). Skipping automatic push.');
-      fmt.log.info(`Next: ${fmt.command(formatVerificationCommand(area, process.cwd()))}`);
+      fmt.log.info(`Next: ${fmt.command(formatVerificationCommand(area, executionRoot))}`);
       fmt.log.info(`Next: ${fmt.command('git rebase --continue')}`);
       exitFn(0);
       return;
@@ -136,7 +142,7 @@ async function rebase(args: string[], {
 
     fmt.log.pass('Rebase completed cleanly.');
     await performPush();
-    fmt.log.info(`Next: ${fmt.command(formatVerificationCommand(area, process.cwd()))}`);
+    fmt.log.info(`Next: ${fmt.command(formatVerificationCommand(area, executionRoot))}`);
     fmt.log.info(`Next: ${fmt.command(`px integrate ${slug} --dry-run`)}`);
     exitFn(0);
     return;
@@ -168,8 +174,7 @@ async function rebase(args: string[], {
   fmt.log.warn('Rebase paused on conflicts. Classifying...');
 
   // Resolve the worktree for conflict classification
-  const rootDir = getPrimaryWorktree();
-  const worktreePath = resolveWorktree(slug) || conventionalWorktreePath(slug, rootDir);
+  const worktreePath = executionRoot;
 
   /** @type{{worktreePathOverride?: string}} */
   const conflictOpts: {worktreePathOverride?: string} = { worktreePathOverride: worktreePath };
@@ -208,7 +213,7 @@ async function rebase(args: string[], {
     const cr: {error?: string} = conflictResult;
     if (cr.error === 'worktree-missing') {
       fmt.log.fail(`Mission worktree not found: ${fmt.path(worktreePath)}`);
-      fmt.log.info(`Ensure the worktree is registered: ${fmt.command(`git worktree add ${conventionalWorktreePath(slug, getPrimaryWorktree())} ${branch}`)}`);
+      fmt.log.info(`Ensure the worktree is registered: ${fmt.command(`git worktree add ${conventionalWorktreePath(slug, executionRoot)} ${branch}`)}`);
       exitFn(1);
       return;
     }
@@ -241,7 +246,7 @@ async function rebase(args: string[], {
     /** @param {{stdio?: string}} opts */
     const continueRebase = (opts: {stdio?: string} = {}) => {
       continueAttempts += 1;
-      return gitFn(['-c', 'core.editor=true', '-c', 'merge.autoedit=no', 'rebase', '--continue'], opts);
+      return gitFn(['-C', executionRoot, '-c', 'core.editor=true', '-c', 'merge.autoedit=no', 'rebase', '--continue'], opts);
     };
     /** @param {{stdout: string, stderr: string, status: number}} result */
     const reportContinueFailure = (result: {stdout: string, stderr: string, status: number}) => {
@@ -271,12 +276,12 @@ async function rebase(args: string[], {
 
     for (const file of conflictResult.missionSpecificFiles) {
       fmt.log.info(`Resolving: ${fmt.path(file)}`);
-      const checkoutResult = gitFn(['checkout', '--theirs', file]);
+      const checkoutResult = gitFn(['-C', executionRoot, 'checkout', '--theirs', file]);
       if (checkoutResult.status !== 0) {
         // Try add -u as fallback (file may have been added/deleted)
-        gitFn(['add', file]);
+        gitFn(['-C', executionRoot, 'add', file]);
       }
-      const addResult = gitFn(['add', file]);
+      const addResult = gitFn(['-C', executionRoot, 'add', file]);
       if (addResult.status !== 0) {
         fmt.log.warn(`Could not add ${fmt.path(file)} for rebase continue.`);
       }
@@ -310,19 +315,19 @@ async function rebase(args: string[], {
         return;
       }
       // Could be editor opening — check if rebase is still in progress
-      const statusResult = gitFn(['status', '--porcelain']);
+      const statusResult = gitFn(['-C', executionRoot, 'status', '--porcelain']);
       if (statusResult.stdout.trim()) {
         fmt.log.info('More changes detected. Continuing rebase...');
-        gitFn(['add', '-A']);
+        gitFn(['-C', executionRoot, 'add', '-A']);
         if (continueAttempts >= maxContinueAttempts) {
-          const rebaseCheck = gitFn(['rebase', '--show-current']);
+          const rebaseCheck = gitFn(['-C', executionRoot, 'rebase', '--show-current']);
           failContinueBudget(rebaseCheck.stdout.trim());
           return;
         }
         const cont2 = continueRebase();
         if (cont2.status !== 0) {
           // Verify whether a rebase is still in progress
-          const rebaseCheck = gitFn(['rebase', '--show-current']);
+          const rebaseCheck = gitFn(['-C', executionRoot, 'rebase', '--show-current']);
           if (rebaseCheck.stdout.trim().length > 0) {
             if (continueAttempts >= maxContinueAttempts) {
               failContinueBudget(rebaseCheck.stdout.trim());
@@ -339,7 +344,7 @@ async function rebase(args: string[], {
         rebaseCompleted = true;
       } else {
         // No staged changes and --continue failed but no conflict — rebase may have completed
-        const rebaseCheck = gitFn(['rebase', '--show-current']);
+        const rebaseCheck = gitFn(['-C', executionRoot, 'rebase', '--show-current']);
         if (rebaseCheck.stdout.trim().length === 0) {
           rebaseCompleted = true;
         } else {
@@ -376,7 +381,7 @@ async function rebase(args: string[], {
               return;
             }
             // Another empty-pick or hook — verify again
-            const recheck = gitFn(['rebase', '--show-current']);
+            const recheck = gitFn(['-C', executionRoot, 'rebase', '--show-current']);
             if (recheck.stdout.trim().length > 0) {
               fmt.log.info('Empty pick detected; continuing to next commit...');
               if (continueAttempts >= maxContinueAttempts) {
@@ -387,7 +392,7 @@ async function rebase(args: string[], {
               if (cont3.status === 0) {
                 rebaseCompleted = true;
               } else {
-                const recheck2 = gitFn(['rebase', '--show-current']);
+                const recheck2 = gitFn(['-C', executionRoot, 'rebase', '--show-current']);
                 if (recheck2.stdout.trim().length === 0) {
                   rebaseCompleted = true;
                 } else {
@@ -415,7 +420,7 @@ async function rebase(args: string[], {
     if (rebaseCompleted) {
       fmt.log.pass('Mission-specific conflicts resolved. Rebase completed.');
       await performPush();
-      fmt.log.info(`Next: ${fmt.command(formatVerificationCommand(area, process.cwd()))}`);
+      fmt.log.info(`Next: ${fmt.command(formatVerificationCommand(area, executionRoot))}`);
       fmt.log.info(`Next: ${fmt.command(`px integrate ${slug} --dry-run`)}`);
       exitFn(0);
       return;
@@ -449,7 +454,7 @@ async function rebase(args: string[], {
   }
 
   // Verify rebase is actually complete before pushing
-  const finalRebaseCheck = gitFn(['rebase', '--show-current']);
+  const finalRebaseCheck = gitFn(['-C', executionRoot, 'rebase', '--show-current']);
   if (finalRebaseCheck.stdout.trim().length > 0) {
     fmt.log.pass(`Agent (${fmt.agent(agent)}) completed their round.`);
     fmt.log.warn('Rebase is still in progress. Skipping automatic push.');
@@ -460,7 +465,7 @@ async function rebase(args: string[], {
 
   fmt.log.pass(`Agent (${fmt.agent(agent)}) completed conflict resolution.`);
   await performPush();
-  fmt.log.info(`Next: ${fmt.command(formatVerificationCommand(area, process.cwd()))}`);
+  fmt.log.info(`Next: ${fmt.command(formatVerificationCommand(area, executionRoot))}`);
   fmt.log.info(`Next: ${fmt.command(`px integrate ${slug} --dry-run`)}`);
   exitFn(0);
 }

@@ -27,7 +27,16 @@ set -euo pipefail
 
 subcommand="${1:-}"
 SCRIPT_DIR="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
+DEFAULT_REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
+# The caller may select a mission worktree explicitly. Do not silently verify
+# the checkout containing this script when that root is supplied.
+REPO_ROOT="${PARALLIX_EXECUTION_ROOT:-$DEFAULT_REPO_ROOT}"
+if [[ ! -f "$REPO_ROOT/package.json" ]]; then
+  echo "FAIL: PARALLIX_EXECUTION_ROOT is not a repository checkout: $REPO_ROOT" >&2
+  exit 1
+fi
+REPO_ROOT="$(cd -- "$REPO_ROOT" && pwd)"
+export PARALLIX_EXECUTION_ROOT="$REPO_ROOT"
 cd "$REPO_ROOT"
 
 # `bash -lc` may activate an old NVM default after Parallix has already been

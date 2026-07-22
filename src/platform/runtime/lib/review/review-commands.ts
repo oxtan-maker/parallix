@@ -614,8 +614,8 @@ export function verifyReview(
     if (skipGateFlag) {
       log(fmt.status('WARN', `Verification gate skipped (--no-gate) for area ${area}`));
     } else {
-      log(`Running reviewer gate: ${fmt.command(formatVerificationCommand(area, process.cwd()))}`);
-      const verifyResult = runVerificationGateFn(area, { rootDir: process.cwd(), stdio: 'inherit', runFn });
+      log(`Running reviewer gate: ${fmt.command(formatVerificationCommand(area, rootDir))}`);
+      const verifyResult = runVerificationGateFn(area, { rootDir, stdio: 'inherit', runFn });
       if (verifyResult.status !== 0) {
         failures.push('gate');
         log(fmt.status('FAIL', 'Reviewer gate failed.'));
@@ -639,7 +639,7 @@ export function verifyReview(
   formatMatrixSummaryFn(buildAutonomousReviewMatrixFn()).forEach((line: string) => log(line));
 
   // Show persisted reviewer state if present
-  const persisted = readReviewStateFn(slug);
+  const persisted = readReviewStateFn(slug, rootDir);
   if (persisted) {
     log(`Persisted reviewer state: reviewer=${fmt.agent(persisted.reviewer ?? '')} implementer=${fmt.agent(persisted.implementer ?? '')} round=${persisted.round} startedAt=${persisted.startedAt}`);
   }

@@ -532,6 +532,9 @@ function createPr(branch: string, user: string, token: string, options: any = {}
   if (!proofResult.ok) {
     return { ok: false, error: proofResult.error || 'failed to verify publish tree' };
   }
+  if (proofResult.proof && proofResult.proof.branch && proofResult.proof.branch !== branch) {
+    return { ok: false, error: `verification proof branch ${proofResult.proof.branch} does not match branch being published ${branch}` };
+  }
 
   // 1. Sync primary branch baseline
   const syncResult = syncPrimaryBaseline(gitUser, gitToken, rootDir, {

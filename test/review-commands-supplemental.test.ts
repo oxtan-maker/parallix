@@ -173,6 +173,29 @@ test('verifyReview passes with all green', () => {
   assert.equal(exited, false);
 });
 
+test('verifyReview preserves the selected worktree for its verification gate and review state', () => {
+  const missionRoot = '/tmp/selected-mission-tree';
+  let gateRoot = null;
+  let stateRoot = null;
+  verifyReview(mockSlug, false, {
+    resolveWorktreeFn: () => missionRoot,
+    findMissionDirFn: () => `${missionRoot}/missions/${mockSlug}`,
+    getCurrentBranchFn: () => mockBranch,
+    resolveTaskFileFn: () => ({ ok: true, taskFile: `${missionRoot}/backlog/task.md` }),
+    getTaskStatusFn: () => 'review',
+    findMissionAreaFn: () => 'workflow',
+    isForgejoReviewEnabledFn: () => false,
+    runVerificationGate: (_area, options) => { gateRoot = options.rootDir; return { status: 0 }; },
+    readReviewStateFn: (_slug, rootDir) => { stateRoot = rootDir; return null; },
+    getAcceptanceCriteriaFn: () => [],
+    formatMatrixSummaryFn: () => [],
+    buildAutonomousReviewMatrixFn: () => ({}),
+    log: () => {}, error: () => {}, exit: () => {}
+  });
+  assert.equal(gateRoot, missionRoot);
+  assert.equal(stateRoot, missionRoot);
+});
+
 // submitReviewRound - test different outcomes
 test('submitReviewRound exits on invalid outcome', () => {
   let exited = false;
