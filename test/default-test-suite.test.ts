@@ -114,3 +114,10 @@ test('default test runner selects a Node version that supports node:test', () =>
     /Node 20\.6\+ is required for TypeScript tests/
   );
 });
+
+test('default test runner preserves an explicitly selected execution root for every child process', () => {
+  const runner = fs.readFileSync(path.join(__dirname, 'run-default-tests.js'), 'utf8');
+  assert.match(runner, /PARALLIX_EXECUTION_ROOT/);
+  assert.match(runner, /cwd: executionRoot/);
+  assert.match(runner, /env: \{ \.\.\.process\.env, PARALLIX_EXECUTION_ROOT: executionRoot \}/);
+});

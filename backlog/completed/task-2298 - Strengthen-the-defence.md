@@ -1,10 +1,11 @@
 ---
 id: TASK-2298
 title: Strengthen the defence
-status: ready-for-integration
+status: done
 assignee: [codex]
 created_date: '2026-07-22 06:52'
-labels: []
+labels:
+  - user_value
 dependencies: []
 ordinal: 51000
 ---

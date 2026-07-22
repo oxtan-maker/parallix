@@ -34,6 +34,7 @@ export interface VerificationAdapterConfig {
 
 export interface VerificationProof {
   rootDir: string;
+  branch?: string;
   area: string;
   command: string | null;
   commit: string;
@@ -303,6 +304,7 @@ export function captureVerifiedTreeProof(area: string | undefined, rootDir: stri
     ok: true,
     proof: {
       rootDir: before.rootDir!,
+      branch: gitRunner(['-C', before.rootDir!, 'branch', '--show-current']).stdout.trim(),
       area: effectiveArea,
       command: command || null,
       commit: after.commit,
@@ -313,7 +315,7 @@ export function captureVerifiedTreeProof(area: string | undefined, rootDir: stri
 }
 
 /** @param {{rootDir?: string, commit?: string, tree?: string}} proof @param {string} [rootDir] @param {{gitRunner?: GitFn}} [opts] */
-export function assertVerifiedTreeProof(proof: { rootDir?: string; commit?: string; tree?: string }, rootDir: string = process.cwd(), opts: { gitRunner?: GitFn } = {}): { ok: boolean; proof?: PublishedTreeState; error?: string } {
+export function assertVerifiedTreeProof(proof: { rootDir?: string; branch?: string; commit?: string; tree?: string }, rootDir: string = process.cwd(), opts: { gitRunner?: GitFn } = {}): { ok: boolean; proof?: PublishedTreeState; error?: string } {
   if (!proof || typeof proof !== 'object') {
     return { ok: false, error: 'missing verification proof' };
   }

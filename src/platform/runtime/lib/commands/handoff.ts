@@ -30,7 +30,8 @@ export { evidenceCellHasVerifiableReference as _evidenceCellHasVerifiableReferen
  function verifyHandoff(slug, options = {}) {
    /** @type{{worktree?: string}} */
    const opts = options;
-   const rootDir = opts.worktree || process.cwd();
+   const launchRoot = process.cwd();
+   const rootDir = opts.worktree || missionUtils.resolveWorktree(slug, { cwd: launchRoot }) || launchRoot;
   const missionDir = missionUtils.findMissionDir(slug, rootDir);
   if (!missionDir) {
     return { ok: false, error: `Mission directory not found for slug: ${slug}` };
@@ -1019,7 +1020,8 @@ function buildAutoCheckpointContent(slug) {
  function writeFallbackSummary(slug, summary, options = {}) {
    /** @type{{rootDir?: string, log?: Function}} */
    const opts = options;
-   const rootDir = opts.rootDir || process.cwd();
+   const launchRoot = process.cwd();
+   const rootDir = opts.rootDir || missionUtils.resolveWorktree(slug, { cwd: launchRoot }) || launchRoot;
    const log = opts.log || fmt.log.plain;
   const resolution = backlog.resolveTaskFile(slug, rootDir);
   if (!resolution.ok) {

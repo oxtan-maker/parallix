@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { git, run } from '../core/git.js';
-import { findMissionDir, findMissionArea, inferSlug } from '../core/mission-utils.js';
+import { findMissionDir, findMissionArea, inferSlug, resolveWorktree } from '../core/mission-utils.js';
 import * as fmt from '../core/fmt.js';
 import { formatVerificationCommand, runVerificationGate } from '../core/verification.js';
 
@@ -24,7 +24,12 @@ function checkpoint(args) {
     process.exit(1);
   }
 
-  const missionDir = findMissionDir(slug);
+  // Capture the launch directory once, while selecting the target. Every
+  // operation below receives the selected worktree explicitly; a later child
+  // process must never rediscover an ambient or primary checkout.
+  const launchRoot = process.cwd();
+  const rootDir = resolveWorktree(slug, { cwd: launchRoot }) || launchRoot;
+  const missionDir = findMissionDir(slug, rootDir);
   if (!missionDir) {
     fmt.log.fail(`Mission directory not found for slug: ${fmt.slug(slug)}`);
     process.exit(1);
@@ -35,22 +40,22 @@ function checkpoint(args) {
 
   // Step 1: Verify
   fmt.log.info(`Step 1: Running verification gate for area: ${fmt.bold(area)}...`);
-  const verifyResult = runVerificationGate(area, { rootDir: process.cwd(), stdio: 'inherit', runFn: run });
+  const verifyResult = runVerificationGate(area, { rootDir, stdio: 'inherit', runFn: run });
   if (verifyResult.status !== 0) {
-    fmt.log.fail(`Verification gate failed for area: ${fmt.bold(area)}. Fix errors and retry ${fmt.command(formatVerificationCommand(area))}.`);
+    fmt.log.fail(`Verification gate failed for area: ${fmt.bold(area)}. Fix errors and retry ${fmt.command(formatVerificationCommand(area, rootDir))}.`);
     process.exit(1);
   }
   fmt.log.pass(`Verification gate passed for area: ${fmt.bold(area)}`);
 
   // Step 2: Stage
   fmt.log.info('Step 2: Staging all tracked changes...');
-  git(['add', '-A']);
+  git(['-C', rootDir, 'add', '-A']);
 
   // Step 3: Commit
   fmt.log.info('Step 3: Committing checkpoint...');
   const commitMsg = `checkpoint(${slug}): ${cpName}`;
   const commitBody = `Next action: ${nextAction}`;
-  const commitResult = git(['commit', '-m', commitMsg, '-m', commitBody]);
+  const commitResult = git(['-C', rootDir, 'commit', '-m', commitMsg, '-m', commitBody]);
   if (commitResult.status !== 0) {
     fmt.log.fail('Commit failed.');
     process.exit(1);

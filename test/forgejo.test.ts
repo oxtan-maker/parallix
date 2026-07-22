@@ -222,6 +222,28 @@ test('createPr rejects a verification proof from a different checkout before syn
   }
 });
 
+test('createPr rejects a verification proof for a different branch before any push', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'forgejo-proof-branch-mismatch-'));
+  try {
+    fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { missions: { primaryBranch: 'main' }, review: { provider: 'forgejo', repo: 'magnus/test' } } }), 'utf8');
+    let pushed = false;
+    mock.method(git, 'git', (args) => {
+      if (args.includes('push')) { pushed = true; }
+      return { status: 0, stdout: '', stderr: '' };
+    });
+    const result = createPr('mission/task-200', 'claude', 'token-123', {
+      rootDir: root,
+      log: () => {},
+      captureVerifiedTreeProofFn: () => ({ ok: true, proof: { rootDir: path.resolve(root), branch: 'mission/task-201', commit: 'abc', tree: 'tree' } })
+    });
+    assert.equal(result.ok, false);
+    assert.match(result.error, /proof branch/i);
+    assert.equal(pushed, false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('standalone createPr refuses to publish when the configured verification gate fails', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'forgejo-proof-failed-gate-'));
   try {

@@ -65,3 +65,34 @@ test('rebase applies core.editor=true to continueRebase calls', async () => {
     assert.ok(args.indexOf('merge.autoedit=no') < args.indexOf('rebase'), 'merge.autoedit=no should be before rebase');
   });
 });
+
+test('rebase uses the selected mission root for rebase state, Git, and publication', async () => {
+  const missionRoot = '/tmp/mission-tree';
+  let stateRoot = null;
+  let publishedRoot = null;
+  let rebaseArgs = null;
+  await rebase(['task-1077', '--push'], {
+    inferSlugFn: () => 'task-1077',
+    resolveWorktreeFn: () => missionRoot,
+    findMissionDirFn: (_slug, root) => root === missionRoot ? '/tmp/mission-tree/missions/task-1077' : null,
+    findMissionAreaFn: () => 'workflow',
+    detectRebaseStateFn: root => {
+      stateRoot = root;
+      return { inProgress: false, unmergedFiles: [] };
+    },
+    isForgejoReviewEnabledFn: root => root === missionRoot,
+    getCurrentBranchFn: root => root === missionRoot ? 'mission/task-1077' : 'main',
+    resolveMissionBaseBranchFn: (_slug, root) => root === missionRoot ? 'main' : 'wrong-base',
+    resolveReviewIdentityFn: () => ({ forgejoUser: 'tester' }),
+    readTokenFn: () => 'token',
+    createPrFn: (_branch, _user, _token, options) => { publishedRoot = options.rootDir; return { ok: true }; },
+    gitFn: args => {
+      if (args.includes('rebase') && args.includes('main')) { rebaseArgs = args; return { status: 0, stdout: '', stderr: '' }; }
+      return { status: 0, stdout: '', stderr: '' };
+    },
+    exitFn: () => {},
+  });
+  assert.equal(stateRoot, missionRoot);
+  assert.equal(publishedRoot, missionRoot);
+  assert.deepEqual(rebaseArgs.slice(0, 2), ['-C', missionRoot]);
+});

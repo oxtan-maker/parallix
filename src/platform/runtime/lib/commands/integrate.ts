@@ -549,12 +549,15 @@ function buildIntegrationVerificationInvocation(slug: string, opts: {baseWorktre
  */
 /**
  * @param {{key: string, command: string, order: number, run_last: boolean}[]} gates
- * @param {{commandRunner?: Function, rootDir?: string}} opts
+ * @param {{commandRunner?: Function, rootDir: string}} opts
  */
-async function executeIntegrationGates(gates: any, opts: {commandRunner?: Function, rootDir?: string} = {}) {
+async function executeIntegrationGates(gates: any, opts: {commandRunner?: Function, rootDir: string}) {
+  if (!opts.rootDir) {
+    throw new Error('integration gates require an explicit execution root');
+  }
   const runner = (opts.commandRunner || ((/** @type{string} */ cmd: string) => child_process.spawnSync(cmd, {
       shell: true,
-      cwd: opts.rootDir || getPrimaryWorktree(),
+      cwd: opts.rootDir,
       stdio: 'inherit'
     }))) as Function;
   
