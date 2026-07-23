@@ -1,0 +1,15 @@
+{
+  "reviewer": "custom",
+  "implementer": "vibe",
+  "round": 1,
+  "startedAt": "2026-07-21T18:59:08.371Z",
+  "phase": "approved",
+  "disposition": "APPROVED",
+  "metadata": {
+    "recordedStageLaunches": {
+      "review:custom": [
+        "custom|019f860c-201f-7e43-a7a8-2fb27a6a0be6|2026-07-21T18:59:28.735Z|2026-07-21T19:04:21.603Z|0"
+      ]
+    }
+  }
+}

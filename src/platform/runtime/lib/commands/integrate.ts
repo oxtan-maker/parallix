@@ -1079,19 +1079,16 @@ function buildIntegrationContext(slug: string, {
   if (!resolvedBaseWorktree) {
     try { resolvedBaseWorktree = resolveBaseWorktree(slug, { rootDir: process.cwd() }); } catch (_) { resolvedBaseWorktree = getPrimaryWorktree(); }
   }
-  // The primary integration checkout owns the durable backlog status. Mission
-  // worktrees remain authoritative for mission metadata such as classification
-  // and implementer, but can retain an earlier status after primary records
-  // review approval.
-  const worktree = resolveWorktree(slug);
+  // The primary integration checkout owns all authoritative Backlog task
+  // metadata (task file, status, assignee). Mission worktrees can retain an
+  // earlier status after primary records review approval, and Backlog.md is
+  // unreliable at picking up worktree copies, so integration reads the base
+  // worktree task file only — never the mission worktree as a fallback. If the
+  // base worktree cannot supply the task, resolution fails rather than silently
+  // trusting a stale mission copy.
   /** @type {ReturnType<typeof resolveTaskFile>} */
-  const baseTask = resolveTaskFile(slug, /** @type {string} */ (resolvedBaseWorktree));
-  let task = worktree ? resolveTaskFile(slug, worktree) : { ok: false, reason: 'missing', matches: [] };
-  if (!task.ok) {
-    task = baseTask;
-  }
-  const taskStatusSource = baseTask.ok ? baseTask : task;
-  const taskStatus = taskStatusSource.ok ? getTaskStatus(taskStatusSource.taskFile as string) : null;
+  const task = resolveTaskFile(slug, /** @type {string} */ (resolvedBaseWorktree));
+  const taskStatus = task.ok ? getTaskStatus(task.taskFile as string) : null;
   const taskAssignee = task.ok ? getTaskAssignee(task.taskFile as string) : null;
   const forgejoEnabled = isForgejoReviewEnabledFn(/** @type {string} */ (resolvedBaseWorktree));
   
