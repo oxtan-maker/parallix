@@ -151,6 +151,20 @@ function getUnresolvedIndexConflicts(rootDir = getPrimaryWorktree(), opts: {gitR
   };
 }
 
+/**
+ * Check if all conflict files are under the backlog/ directory.
+ * Uses the same noise-path pattern as softResetTrailingBacklogNoise and
+ * findLastNonNoiseCommit. An empty list is treated as backlog-only
+ * (no conflicts to classify).
+ *
+ * @param {string[]} conflictFiles - Relative file paths from parseConflictFilesFromMergeOutput
+ * @returns {boolean} true if every file starts with 'backlog/'
+ */
+function areAllBacklogOnlyConflicts(conflictFiles: string[]): boolean {
+  if (conflictFiles.length === 0) { return true; }
+  return conflictFiles.every(f => f.startsWith('backlog/'));
+}
+
 function parseStashPopCollisionFiles(output = '') {
   return output
     .split('\n')
@@ -619,6 +633,7 @@ export interface IntegrateFn extends Function {
   orderIntegrationGates: typeof orderIntegrationGates;
   gateMatchesChangedAreas: typeof gateMatchesChangedAreas;
   buildIntegrationContext: typeof buildIntegrationContext;
+  areAllBacklogOnlyConflicts: typeof areAllBacklogOnlyConflicts;
   getPrimaryWorktree: typeof getPrimaryWorktree;
 }
 
@@ -734,62 +749,127 @@ async function integrate(args: string[]) {
     fmt.log.info(`Step 2: Checking merge conflicts against local ${baseBranch} in the base worktree...`);
     const dryMerge = git(['-C', baseWorktree, 'merge', '--no-commit', '--no-ff', branch]);
     const abortResult = git(['-C', baseWorktree, 'merge', '--abort']);
-    if (abortResult.status !== 0 && !isNoMergeToAbortResult(abortResult)) {
+
+    let proceedToSquash = false;
+
+    // Check abort failure for the success path (merge was clean but abort didn't).
+    // When dryMerge.status === 0, the abort restores the worktree after a clean
+    // probe — if it fails the base may be left in a dirty merge state.
+    let abortFailed = abortResult.status !== 0 && !isNoMergeToAbortResult(abortResult);
+
+    if (dryMerge.status === 0 && abortFailed) {
       fmt.log.fail('Dry-run merge could not be aborted cleanly. Inspect the local integration checkout before retrying integrate.');
       throw new IntegrationAbort();
     }
+
     if (dryMerge.status !== 0) {
-      // Before failing, check if a squash commit for this mission already landed on the primary branch
-      // from a previous partial integration run (e.g. sync-merged failed after the commit was created).
-      const existingSquash = findExistingSquashCommit(baseWorktree, slug);
-      if (existingSquash) {
-        fmt.log.warn(`Squash commit already exists on local ${baseBranch} from a previous partial integration (${existingSquash.slice(0, 12)}). Resuming from sync-merged step.`);
-        const mergedCommit = existingSquash;
-        if (isForgejoReviewEnabled(baseWorktree)) {
-          fmt.log.info('Step 6 (resume): Syncing merged state to Forgejo...');
-          const syncResult = syncMerged(branch, mergedCommit, {
-            rootDir: baseWorktree,
-            forgejoUser: context.forgejoUser,
-            token: context.forgejoToken,
-            baseBranch: context.baseBranch
-          });
-          if (!syncResult.ok) {
-            reportSyncMergedFailure(syncResult);
+      // Classify conflicts BEFORE deciding on abort failure.
+      // This allows backlog-only classification to rescue unabortable merges.
+      // (SC1 / task-2242)
+      const conflictOutput = [/** @type {any} */ (dryMerge).stdout, /** @type {any} */ (dryMerge).stderr].filter(Boolean).join('\n');
+      const conflictFiles = parseConflictFilesFromMergeOutput(conflictOutput);
+      const backlogOnly = areAllBacklogOnlyConflicts(conflictFiles) && conflictFiles.length > 0;
+
+      if (backlogOnly) {
+        fmt.log.info('Backlog-only conflicts detected — refreshing base branch and retrying probe merge...');
+
+        // Safe cleanup: if abort failed, use reset --hard to clear stale merge state.
+        // After successful reset, clear abortFailed so the fallback path after retry
+        // uses the normal conflict-resolution flow (not the generic abort-failure path).
+        if (abortFailed) {
+          const resetResult = git(['-C', baseWorktree, 'reset', '--hard', 'HEAD']);
+          if (resetResult.status !== 0) {
+            fmt.log.fail('[RETRY] Could not clean up after backlog-only conflict merge.');
             throw new IntegrationAbort();
           }
-        } else {
-          fmt.log.info('Step 6 (resume): Skipping Forgejo sync (review provider is not forgejo).');
+          abortFailed = false;
         }
-        if (fs.existsSync(baseWorktree)) {
-          nextActionMessage = `Next: cd ${baseWorktree}`;
-        }
-        (recordPostIntegrationStatsOrAbort as any)(slug, { rootDir: baseWorktree });
-        fmt.log.info('Step 7 (resume): Cleaning up the local mission worktree...');
-        if (!cleanupMissionWorktree(slug)) {
-          fmt.log.fail('Mission worktree cleanup failed.');
+
+        // Fetch and advance local base branch to the latest remote ref.
+        // Either failure aborts the integration — retrying against an unrefreshed
+        // base would violate the mission's requirement to retry against updated base.
+        const fetchResult = git(['-C', baseWorktree, 'fetch', '--all', '--prune']);
+        if (fetchResult.status !== 0) {
+          fmt.log.fail('[RETRY] Could not fetch remote refs — aborting integration.');
           throw new IntegrationAbort();
         }
-        maybeUpdateGraphifyOnPrimary(baseWorktree);
-        runPostIntegrateHookOrAbort(slug, { baseWorktree: baseWorktree as string, baseBranch: baseBranch as string, variant: 'variant-b-resumed' });
-        fmt.log.pass('Integration completed successfully (resumed from partial state).');
+        const pullResult = git(['-C', baseWorktree, 'pull', '--ff-only']);
+        if (pullResult.status !== 0) {
+          fmt.log.fail(`[RETRY] Could not fast-forward ${baseBranch} — aborting integration.`);
+          throw new IntegrationAbort();
+        }
+        fmt.log.info(`Base branch ${baseBranch} refreshed via fast-forward.`);
+
+        // Retry probe merge against the refreshed base.
+        const retryMerge = git(['-C', baseWorktree, 'merge', '--no-commit', '--no-ff', branch]);
+        const retryAbort = git(['-C', baseWorktree, 'merge', '--abort']);
+        if (retryAbort.status !== 0 && !isNoMergeToAbortResult(retryAbort)) {
+          abortFailed = true;
+          fmt.log.fail('[RETRY] Dry-run merge retry could not be aborted cleanly.');
+        } else if (retryMerge.status === 0) {
+          fmt.log.pass('Probe merge retry succeeded — proceeding to squash-merge.');
+          proceedToSquash = true;
+        }
+      }
+
+      if (proceedToSquash) {
+        // Retry resolved drift — fall through to Step 3 (squash-merge) below.
+      } else if (!abortFailed) {
+        // Abort succeeded; check for existing squash or fail with conflict details.
+        const existingSquash = findExistingSquashCommit(baseWorktree, slug);
+        if (existingSquash) {
+          fmt.log.warn(`Squash commit already exists on local ${baseBranch} from a previous partial integration (${existingSquash.slice(0, 12)}). Resuming from sync-merged step.`);
+          const mergedCommit = existingSquash;
+          if (isForgejoReviewEnabled(baseWorktree)) {
+            fmt.log.info('Step 6 (resume): Syncing merged state to Forgejo...');
+            const syncResult = syncMerged(branch, mergedCommit, {
+              rootDir: baseWorktree,
+              forgejoUser: context.forgejoUser,
+              token: context.forgejoToken,
+              baseBranch: context.baseBranch
+            });
+            if (!syncResult.ok) {
+              reportSyncMergedFailure(syncResult);
+              throw new IntegrationAbort();
+            }
+          } else {
+            fmt.log.info('Step 6 (resume): Skipping Forgejo sync (review provider is not forgejo).');
+          }
+          if (fs.existsSync(baseWorktree)) {
+            nextActionMessage = `Next: cd ${baseWorktree}`;
+          }
+          (recordPostIntegrationStatsOrAbort as any)(slug, { rootDir: baseWorktree });
+          fmt.log.info('Step 7 (resume): Cleaning up the local mission worktree...');
+          if (!cleanupMissionWorktree(slug)) {
+            fmt.log.fail('Mission worktree cleanup failed.');
+            throw new IntegrationAbort();
+          }
+          maybeUpdateGraphifyOnPrimary(baseWorktree);
+          runPostIntegrateHookOrAbort(slug, { baseWorktree: baseWorktree as string, baseBranch: baseBranch as string, variant: 'variant-b-resumed' });
+          fmt.log.pass('Integration completed successfully (resumed from partial state).');
+        } else {
+          fmt.log.fail('Merge conflicts detected. Rebase the mission branch before integrating.');
+          if (conflictFiles.length > 0) {
+            fmt.log.info(`Conflicting files (${conflictFiles.length}):`);
+            conflictFiles.forEach(f => fmt.log.info(`  - ${f}`));
+          }
+          fmt.log.info('Conflict helper path:');
+          for (const line of formatMatrixSummary(buildAutonomousReviewMatrix())) {
+            fmt.log.info(line);
+          }
+          for (const line of buildConflictResolutionPrompt(slug, context.area, { baseBranch: context.baseBranch || '' })) {
+            fmt.log.info(line);
+          }
+          throw new IntegrationAbort();
+        }
       } else {
-        fmt.log.fail('Merge conflicts detected. Rebase the mission branch before integrating.');
-        const conflictOutput = [/** @type {any} */ (dryMerge).stdout, /** @type {any} */ (dryMerge).stderr].filter(Boolean).join('\n');
-        const conflictFiles = parseConflictFilesFromMergeOutput(conflictOutput);
-        if (conflictFiles.length > 0) {
-          fmt.log.info(`Conflicting files (${conflictFiles.length}):`);
-          conflictFiles.forEach(f => fmt.log.info(`  - ${f}`));
-        }
-        fmt.log.info('Conflict helper path:');
-        for (const line of formatMatrixSummary(buildAutonomousReviewMatrix())) {
-          fmt.log.info(line);
-        }
-        for (const line of buildConflictResolutionPrompt(slug, context.area, { baseBranch: context.baseBranch || '' })) {
-          fmt.log.info(line);
-        }
+        // Abort failed and not backlog-only (or retry failed): fail closed.
+        fmt.log.fail('Dry-run merge could not be aborted cleanly. Inspect the local integration checkout before retrying integrate.');
         throw new IntegrationAbort();
       }
-    } else {
+    }
+
+    if (dryMerge.status === 0 || proceedToSquash) {
       fmt.log.info('Step 3: Squash-merging the mission branch...');
       let noisePatchState = null;
       if (softResetTrailingBacklogNoise(baseWorktree, git)) {
@@ -1880,10 +1960,11 @@ function buildConflictResolutionPrompt(slug: string = '<slug>', area: string = '
 (integrate as any).gateMatchesChangedAreas = gateMatchesChangedAreas;
 (integrate as any).buildIntegrationContext = buildIntegrationContext;
 (integrate as any).prepareNoisePatchForSquash = prepareNoisePatchForSquash;
+(integrate as any).areAllBacklogOnlyConflicts = areAllBacklogOnlyConflicts;
 // Re-export getPrimaryWorktree from mission-utils
 (integrate as any).getPrimaryWorktree = getPrimaryWorktree;
 export default integrate;
-export { integrate, formatRecordedStatsRow, detectChangedAreas, parseFilesToAreas, loadIntegrationConfig, getIntegrationGatePlan, printIntegrationGatePlan, buildIntegrationGateEnv, parseIntegrateArgs, resolveIntegrationVerificationWorktree, buildIntegrationVerificationInvocation, executeIntegrationGates, orderIntegrationGates, gateMatchesChangedAreas, buildIntegrationContext, getPrimaryWorktree, resolveConflictsForMission, cleanupMissionWorktree, rewriteWorktreePaths, isNoMergeToAbortResult, buildConflictResolutionPrompt, VARIANT_B_AUTOMATION_SUMMARY, stashMainCheckoutIfNeeded, restoreMainCheckoutStash, evaluateTaskStatusForIntegration, promoteTaskForIntegrationIfNeeded, findExistingSquashCommit, printIntegrationPreflight, resolveForgejoUserForIntegration, getUnresolvedIndexConflicts, parseStashPopCollisionFiles, reportStashPopFailure, maybeUpdateGraphifyOnPrimary, SYNC_MERGED_DIAGNOSTICS, printDiagnosticTable, recordPostIntegrationStats, recordPostIntegrationStatsOrAbort, reportSyncMergedFailure, runPostIntegrateHookOrAbort, buildBeforeVerification, prepareNoisePatchForSquash };
+export { integrate, formatRecordedStatsRow, detectChangedAreas, parseFilesToAreas, loadIntegrationConfig, getIntegrationGatePlan, printIntegrationGatePlan, buildIntegrationGateEnv, parseIntegrateArgs, resolveIntegrationVerificationWorktree, buildIntegrationVerificationInvocation, executeIntegrationGates, orderIntegrationGates, gateMatchesChangedAreas, buildIntegrationContext, getPrimaryWorktree, resolveConflictsForMission, cleanupMissionWorktree, rewriteWorktreePaths, isNoMergeToAbortResult, buildConflictResolutionPrompt, VARIANT_B_AUTOMATION_SUMMARY, stashMainCheckoutIfNeeded, restoreMainCheckoutStash, evaluateTaskStatusForIntegration, promoteTaskForIntegrationIfNeeded, findExistingSquashCommit, printIntegrationPreflight, resolveForgejoUserForIntegration, getUnresolvedIndexConflicts, parseStashPopCollisionFiles, reportStashPopFailure, maybeUpdateGraphifyOnPrimary, SYNC_MERGED_DIAGNOSTICS, printDiagnosticTable, recordPostIntegrationStats, recordPostIntegrationStatsOrAbort, reportSyncMergedFailure, runPostIntegrateHookOrAbort, buildBeforeVerification, prepareNoisePatchForSquash, areAllBacklogOnlyConflicts };
 // CJS compat: ensure require() returns the function directly
 declare const module: { exports: any } | undefined;
 if (typeof module !== 'undefined') { module.exports = integrate; }
