@@ -11,6 +11,7 @@ labels:
   - ui
 dependencies:
   - TASK-2281
+  - TASK-2302
 references:
   - docs/adr/0044-workflow-distribution-model.md
   - docs/adr/0051-ui-neutral-application-boundary.md
