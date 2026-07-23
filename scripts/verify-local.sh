@@ -240,14 +240,14 @@ function resolveChangedAreas() {
 const configPath = process.env.INTEGRATION_CONFIG_PATH || path.join(repoRoot, 'config', 'integration-pipelines.json');
 const configResult = loadIntegrationConfig({ configPath });
 if (!configResult.ok) {
-  log(`integration-gates: ${configResult.error}, skipping`);
-  process.exit(0);
+  fail(`integration-gates: ${configResult.error}; mandatory integration gate plan is unavailable`);
+  process.exit(1);
 }
 
 const config = configResult.config || {};
 if (!config.gates || Object.keys(config.gates).length === 0) {
-  log('integration-gates: no gates defined in config, skipping');
-  process.exit(0);
+  fail('integration-gates: no gates defined in config; mandatory integration gate plan is unavailable');
+  process.exit(1);
 }
 
 const changedAreas = resolveChangedAreas();
@@ -263,8 +263,8 @@ const relevantGates = changedAreas.length === 0 && alwaysGates.length > 0
   : orderedGates.filter(gate => gateMatchesChangedAreas(gate.key, changedAreas, gate.areas, gate.always));
 
 if (relevantGates.length === 0) {
-  log('integration-gates: no applicable gates for changed areas');
-  process.exit(0);
+  fail('integration-gates: no applicable gates; mandatory integration suite is unavailable');
+  process.exit(1);
 }
 
 if (String(process.env.INTEGRATE_DRY_RUN || '').toLowerCase() === 'true') {

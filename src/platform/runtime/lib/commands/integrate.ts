@@ -466,6 +466,7 @@ function buildIntegrationGateEnv(slug: string, opts: {dryRun?: boolean, processE
     // Tests can still pass an isolated environment explicitly.
     ...(opts.processEnv || process.env),
     INTEGRATE_DRY_RUN: opts.dryRun ? 'true' : 'false',
+    PARALLIX_EXECUTION_ROOT: opts.baseWorktree ? path.resolve(opts.baseWorktree) : undefined,
     INTEGRATE_CHANGED_AREAS: detectChangedAreas(slug, {
       gitRunner: opts.gitRunner,
       baseBranch: opts.baseBranch,
@@ -481,6 +482,28 @@ function buildIntegrationGateEnv(slug: string, opts: {dryRun?: boolean, processE
     (env as any).PARALLIX_REAL_AGENT_MODEL = opts.realAgentModel;
   }
   return env;
+}
+
+/** Capture the exact clean mission tree that integration gates are allowed to verify. */
+function captureFinalIntegrationTree(rootDir: string, opts: {gitRunner?: Function} = {}) {
+  const resolvedRoot = path.resolve(rootDir || '');
+  if (!rootDir || !fs.existsSync(resolvedRoot)) {
+    return { ok: false, error: `selected execution root does not exist: ${resolvedRoot || rootDir}` };
+  }
+  const runner = (opts.gitRunner || git) as Function;
+  const status = runner(['-C', resolvedRoot, 'status', '--porcelain']);
+  if (status.status !== 0) {
+    return { ok: false, error: `could not inspect selected execution root: ${status.stderr || status.stdout || resolvedRoot}` };
+  }
+  if (String(status.stdout || '').trim()) {
+    return { ok: false, error: `selected execution root is not finalized (dirty tree): ${resolvedRoot}` };
+  }
+  const commit = runner(['-C', resolvedRoot, 'rev-parse', 'HEAD']);
+  const tree = runner(['-C', resolvedRoot, 'rev-parse', 'HEAD^{tree}']);
+  if (commit.status !== 0 || tree.status !== 0) {
+    return { ok: false, error: `could not resolve final commit/tree for selected execution root: ${resolvedRoot}` };
+  }
+  return { ok: true, rootDir: resolvedRoot, commit: String(commit.stdout || '').trim(), tree: String(tree.stdout || '').trim() };
 }
 
 const REAL_AGENT_OPTION = '--real-agent';
@@ -529,6 +552,9 @@ function parseIntegrateArgs(args: string[]) {
   }
   if (realAgent === 'codex' && realAgentModel !== CODEX_REAL_AGENT_MODEL) {
     throw new Error(`Unsupported Codex real-agent model "${realAgentModel}". Supported value: ${CODEX_REAL_AGENT_MODEL}.`);
+  }
+  if (noIntegrationGates && process.env.PARALLIX_TEST_ALLOW_INTEGRATION_GATE_BYPASS !== '1') {
+    throw new Error('--no-integration-gates is rejected: final integration gates are mandatory.');
   }
   return { explicitSlug: params[0], dryRun, noIntegrationGates, noGate, realAgent, realAgentModel };
 }
@@ -626,6 +652,7 @@ export interface IntegrateFn extends Function {
   getIntegrationGatePlan: typeof getIntegrationGatePlan;
   printIntegrationGatePlan: typeof printIntegrationGatePlan;
   buildIntegrationGateEnv: typeof buildIntegrationGateEnv;
+  captureFinalIntegrationTree: typeof captureFinalIntegrationTree;
   parseIntegrateArgs: typeof parseIntegrateArgs;
   resolveIntegrationVerificationWorktree: typeof resolveIntegrationVerificationWorktree;
   buildIntegrationVerificationInvocation: typeof buildIntegrationVerificationInvocation;
@@ -690,7 +717,12 @@ async function integrate(args: string[]) {
 
       if (!noIntegrationGates) {
         const verification = buildIntegrationVerificationInvocation(slug, { baseWorktree });
-        const env = buildIntegrationGateEnv(slug, { dryRun, baseBranch, baseWorktree, realAgent, realAgentModel });
+        const finalTree = captureFinalIntegrationTree(verification.cwd);
+        if (!finalTree.ok) {
+          fmt.log.fail(`Integration gates cannot start for ${slug}: ${finalTree.error}`);
+          throw new IntegrationAbort();
+        }
+        const env = buildIntegrationGateEnv(slug, { dryRun, baseBranch, baseWorktree: finalTree.rootDir, realAgent, realAgentModel });
         
         if (dryRun) {
           fmt.log.info('Running integration gates (dry-run)...');
@@ -700,6 +732,7 @@ async function integrate(args: string[]) {
         
         // Gate commands are project commands, not interactive login commands.
         // A login shell can replace PATH or source a broken user profile.
+        fmt.log.info(`Integration gate target: slug=${slug} root=${finalTree.rootDir} commit=${finalTree.commit} tree=${finalTree.tree}`);
         const result = child_process.spawnSync('bash', ['-c', verification.command], {
           cwd: verification.cwd,
           env,
@@ -707,7 +740,7 @@ async function integrate(args: string[]) {
         });
         
         if (result.status !== 0) {
-          fmt.log.fail(`\nIntegration gates failed with exit code ${result.status}`);
+          fmt.log.fail(`\nIntegration gates failed for ${slug} (root=${finalTree.rootDir}, commit=${finalTree.commit}, tree=${finalTree.tree}) with exit code ${result.status}`);
           fmt.log.fail('Aborting before merge.');
           throw new IntegrationAbort();
         }
@@ -931,19 +964,6 @@ async function integrate(args: string[]) {
         }
         fmt.log.info(`The squash commit runs the repo git hooks. Fix the reported hook failure in ${baseWorktree} and retry integrate.`);
         fmt.log.info(`For this mission, the relevant verification command is ${formatVerificationCommand(context.area, baseWorktree)}`);
-        throw new IntegrationAbort();
-      }
-      // Refresh build and capture merge commit before post-integrate hook.
-      // Proof capture is deferred until after the hook so it represents the
-      // freshly rebuilt tree that will actually be published (task-2203).
-      const refreshResult = buildBeforeVerification(baseWorktree, {
-        runFn: child_process.spawnSync
-      });
-      if (!refreshResult.ok) {
-        fmt.log.fail(`Could not refresh the publish tree before verification proof capture: ${refreshResult.error}`);
-        if (refreshResult.detail) {
-          fmt.log.fail(refreshResult.detail);
-        }
         throw new IntegrationAbort();
       }
       const mergedCommit = git(['-C', baseWorktree, 'rev-parse', 'HEAD']).stdout.trim();
@@ -1683,36 +1703,6 @@ function runPostIntegrateHookOrAbort(slug: string, {
 }
 
 /**
- * Rebuild the canonical dist runtime before exact-tree verification.
- * @param {string} rootDir
- * @param {{runFn?: Function, log?: Function}} opts
- */
-function buildBeforeVerification(rootDir: string, {
-  runFn = child_process.spawnSync,
-  log = fmt.log.info
-}: {runFn?: Function, log?: Function} = {}) {
-  if (!fs.existsSync(path.join(rootDir, 'package.json'))) {
-    return { ok: true, refreshed: false };
-  }
-  log('Building canonical dist runtime before verification proof capture...');
-  const buildResult = runFn('npm', ['run', 'build'], {
-    cwd: rootDir,
-    encoding: 'utf8'
-  });
-  const output = [buildResult.stdout, buildResult.stderr].filter(Boolean).join('\n').trim();
-  if (buildResult.status !== 0) {
-    return {
-      ok: false,
-      refreshed: true,
-      error: `pre-verification build refresh failed (exit code ${buildResult.status}): npm run build`,
-      detail: output
-    };
-  }
-
-  return { ok: true, refreshed: true, detail: output };
-}
-
-/**
  * @param {string} slug
  * @param{{rootDir?: string, gitRunner?: Function, removeDir?: Function, existsSync?: Function}} options
  */
@@ -1944,7 +1934,6 @@ function buildConflictResolutionPrompt(slug: string = '<slug>', area: string = '
 (integrate as any).recordPostIntegrationStats = recordPostIntegrationStats;
 (integrate as any).recordPostIntegrationStatsOrAbort = recordPostIntegrationStatsOrAbort;
 (integrate as any).runPostIntegrateHookOrAbort = runPostIntegrateHookOrAbort;
-(integrate as any).buildBeforeVerification = buildBeforeVerification;
 (integrate as any).formatRecordedStatsRow = formatRecordedStatsRow;
 (integrate as any).detectChangedAreas = detectChangedAreas;
 (integrate as any).parseFilesToAreas = parseFilesToAreas;
@@ -1952,6 +1941,7 @@ function buildConflictResolutionPrompt(slug: string = '<slug>', area: string = '
 (integrate as any).getIntegrationGatePlan = getIntegrationGatePlan;
 (integrate as any).printIntegrationGatePlan = printIntegrationGatePlan;
 (integrate as any).buildIntegrationGateEnv = buildIntegrationGateEnv;
+(integrate as any).captureFinalIntegrationTree = captureFinalIntegrationTree;
 (integrate as any).parseIntegrateArgs = parseIntegrateArgs;
 (integrate as any).resolveIntegrationVerificationWorktree = resolveIntegrationVerificationWorktree;
 (integrate as any).buildIntegrationVerificationInvocation = buildIntegrationVerificationInvocation;
@@ -1964,7 +1954,7 @@ function buildConflictResolutionPrompt(slug: string = '<slug>', area: string = '
 // Re-export getPrimaryWorktree from mission-utils
 (integrate as any).getPrimaryWorktree = getPrimaryWorktree;
 export default integrate;
-export { integrate, formatRecordedStatsRow, detectChangedAreas, parseFilesToAreas, loadIntegrationConfig, getIntegrationGatePlan, printIntegrationGatePlan, buildIntegrationGateEnv, parseIntegrateArgs, resolveIntegrationVerificationWorktree, buildIntegrationVerificationInvocation, executeIntegrationGates, orderIntegrationGates, gateMatchesChangedAreas, buildIntegrationContext, getPrimaryWorktree, resolveConflictsForMission, cleanupMissionWorktree, rewriteWorktreePaths, isNoMergeToAbortResult, buildConflictResolutionPrompt, VARIANT_B_AUTOMATION_SUMMARY, stashMainCheckoutIfNeeded, restoreMainCheckoutStash, evaluateTaskStatusForIntegration, promoteTaskForIntegrationIfNeeded, findExistingSquashCommit, printIntegrationPreflight, resolveForgejoUserForIntegration, getUnresolvedIndexConflicts, parseStashPopCollisionFiles, reportStashPopFailure, maybeUpdateGraphifyOnPrimary, SYNC_MERGED_DIAGNOSTICS, printDiagnosticTable, recordPostIntegrationStats, recordPostIntegrationStatsOrAbort, reportSyncMergedFailure, runPostIntegrateHookOrAbort, buildBeforeVerification, prepareNoisePatchForSquash, areAllBacklogOnlyConflicts };
+export { integrate, formatRecordedStatsRow, detectChangedAreas, parseFilesToAreas, loadIntegrationConfig, getIntegrationGatePlan, printIntegrationGatePlan, buildIntegrationGateEnv, captureFinalIntegrationTree, parseIntegrateArgs, resolveIntegrationVerificationWorktree, buildIntegrationVerificationInvocation, executeIntegrationGates, orderIntegrationGates, gateMatchesChangedAreas, buildIntegrationContext, getPrimaryWorktree, resolveConflictsForMission, cleanupMissionWorktree, rewriteWorktreePaths, isNoMergeToAbortResult, buildConflictResolutionPrompt, VARIANT_B_AUTOMATION_SUMMARY, stashMainCheckoutIfNeeded, restoreMainCheckoutStash, evaluateTaskStatusForIntegration, promoteTaskForIntegrationIfNeeded, findExistingSquashCommit, printIntegrationPreflight, resolveForgejoUserForIntegration, getUnresolvedIndexConflicts, parseStashPopCollisionFiles, reportStashPopFailure, maybeUpdateGraphifyOnPrimary, SYNC_MERGED_DIAGNOSTICS, printDiagnosticTable, recordPostIntegrationStats, recordPostIntegrationStatsOrAbort, reportSyncMergedFailure, runPostIntegrateHookOrAbort, buildBeforeVerification, prepareNoisePatchForSquash, areAllBacklogOnlyConflicts };
 // CJS compat: ensure require() returns the function directly
 declare const module: { exports: any } | undefined;
 if (typeof module !== 'undefined') { module.exports = integrate; }

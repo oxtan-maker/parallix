@@ -917,7 +917,14 @@ function runRealAgentSmoke(agent, runner) {
     // approved mission can land, close its task, and clean up its worktree.
     const integrateResult = runWorkflowAllowFail(
       worktree,
-      env,
+      // The smoke fixture must not recursively run the final integration
+      // gates (which would launch this same real-agent gate again). Keep the
+      // production fail-closed default intact; authorize this one disposable
+      // fixture invocation through the explicit test-only escape hatch.
+      {
+        ...env,
+        PARALLIX_TEST_ALLOW_INTEGRATION_GATE_BYPASS: '1'
+      },
       ['integrate', slug, '--no-integration-gates'],
       RUN_TIMEOUT_MS
     );
@@ -974,8 +981,9 @@ function assertSmokeSelection(agent) {
 if (process.env.PARALLIX_E2E_SMOKE_TEST_HELPERS === '1') {
   module.exports = { runWorkflowAllowFail, temporaryCapacityPreflight, classifyFailure };
 } else {
-  test('real-agent smoke rejects an unsupported Codex override model', () => {
-    if (OVERRIDE_AGENT !== 'codex') {return;}
+  test('real-agent smoke rejects an unsupported Codex override model', {
+    skip: OVERRIDE_AGENT !== 'codex'
+  }, () => {
     assert.equal(OVERRIDE_MODEL, 'gpt-5.6-luna', 'Codex smoke override requires model gpt-5.6-luna');
   });
 

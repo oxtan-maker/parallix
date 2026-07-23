@@ -26,6 +26,9 @@ process.env.HOME = makeTempDir('parallix-test-user-home-');
 process.env.FORGEJO_HOME = makeTempDir('parallix-test-forgejo-home-');
 process.env.FORGEJO_URL = 'http://127.0.0.1:9';
 process.env.PARALLIX_TEST_NO_FORGEJO = '1';
+// Legacy unit fixtures exercise later integrate branches directly. This test-only
+// marker keeps those hermetic fixtures from bypassing the production gate rule.
+process.env.PARALLIX_TEST_ALLOW_INTEGRATION_GATE_BYPASS = '1';
 
 function forgejoNetworkError(target) {
   return new Error(`Unit test attempted an unmocked Forgejo request to ${String(target)}`);
