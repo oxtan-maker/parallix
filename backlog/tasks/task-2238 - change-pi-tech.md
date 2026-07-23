@@ -1,8 +1,8 @@
 ---
 id: TASK-2238
 title: change pi tech
-status: review
-assignee: [codex]
+status: active
+assignee: [custom]
 created_date: '2026-07-12 14:53'
 labels: []
 dependencies: []
