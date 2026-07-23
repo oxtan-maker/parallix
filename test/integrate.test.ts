@@ -232,7 +232,7 @@ test('px integrate rejects malformed real-agent options before preflight or gate
   }
 });
 
-test('buildIntegrationContext reads status from primary while retaining mission worktree metadata', (t) => {
+test('buildIntegrationContext reads task file and status from the base worktree only', (t) => {
   const backlog = require('../dist/lib/tools/backlog');
   const worktree = '/tmp/project-task-2200';
   const baseWorktree = '/tmp/project-main';
@@ -284,8 +284,64 @@ test('buildIntegrationContext reads status from primary while retaining mission 
     isForgejoReviewEnabledFn: () => false
   });
 
-  assert.equal(context.task.taskFile, worktreeTask);
+  // The mission worktree status is a stale 'active'; the base worktree owns the
+  // authoritative 'ready-for-integration' status and the task-file path.
+  assert.equal(context.task.taskFile, baseTask);
   assert.equal(context.taskStatus, 'ready-for-integration');
+});
+
+test('buildIntegrationContext does not let a mission-worktree status replace the base status (task-2244 regression)', (t) => {
+  const backlog = require('../dist/lib/tools/backlog');
+  const worktree = '/tmp/project-task-2244';
+  const baseWorktree = '/tmp/project-main-2244';
+  const worktreeTask = `${worktree}/backlog/tasks/task-2244 - fix.md`;
+  const baseTask = `${baseWorktree}/backlog/tasks/task-2244 - fix.md`;
+
+  const mockedResolveWorktree = mock.method(missionUtils, 'resolveWorktree', () => worktree);
+  const mockedFindMissionDir = mock.method(missionUtils, 'findMissionDir', () => `${worktree}/docs/missions/2026/task-2244`);
+  const mockedFindMissionArea = mock.method(missionUtils, 'findMissionArea', () => 'lib');
+  const mockedResolveMissionBaseBranch = mock.method(missionUtils, 'resolveMissionBaseBranch', () => 'main');
+  const mockedResolveBaseWorktree = mock.method(missionUtils, 'resolveBaseWorktree', () => baseWorktree);
+  const mockedGetCurrentBranch = mock.method(require('../dist/lib/core/git'), 'getCurrentBranch', () => 'mission/task-2244');
+  const mockedGit = mock.method(require('../dist/lib/core/git'), 'git', (args) => {
+    if (args.includes('branch') && args.includes('--show-current')) {
+      return { status: 0, stdout: 'main', stderr: '' };
+    }
+    return { status: 0, stdout: '', stderr: '' };
+  });
+  const mockedResolveTaskFile = mock.method(backlog, 'resolveTaskFile', (_slug, rootDir) => {
+    if (rootDir === worktree) {
+      return { ok: true, taskFile: worktreeTask };
+    }
+    if (rootDir === baseWorktree) {
+      return { ok: true, taskFile: baseTask };
+    }
+    return { ok: false, reason: 'missing', matches: [] };
+  });
+  // Mission worktree still shows the pre-approval 'active'; base is 'ready-for-integration'.
+  const mockedGetTaskStatus = mock.method(backlog, 'getTaskStatus', (taskFile) => taskFile === worktreeTask ? 'active' : 'ready-for-integration');
+  const mockedGetTaskAssignee = mock.method(backlog, 'getTaskAssignee', () => 'claude');
+  t.after(() => {
+    mockedResolveWorktree.mock.restore();
+    mockedFindMissionDir.mock.restore();
+    mockedFindMissionArea.mock.restore();
+    mockedResolveMissionBaseBranch.mock.restore();
+    mockedResolveBaseWorktree.mock.restore();
+    mockedGetCurrentBranch.mock.restore();
+    mockedGit.mock.restore();
+    mockedResolveTaskFile.mock.restore();
+    mockedGetTaskStatus.mock.restore();
+    mockedGetTaskAssignee.mock.restore();
+  });
+
+  const context = buildIntegrationContext('task-2244', {
+    baseBranch: 'main',
+    baseWorktree,
+    isForgejoReviewEnabledFn: () => false
+  });
+
+  assert.equal(context.task.taskFile, baseTask, 'context.task.taskFile must be the base worktree task file');
+  assert.equal(context.taskStatus, 'ready-for-integration', 'base status must not be replaced by mission-worktree status');
 });
 
 test('printIntegrationPreflight reads classification from the selected task file, not by re-resolving in the base checkout', (t) => {
