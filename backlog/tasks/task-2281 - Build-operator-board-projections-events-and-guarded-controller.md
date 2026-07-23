@@ -1,8 +1,8 @@
 ---
 id: TASK-2281
 title: Build operator board projections, events, and guarded controller
-status: refined
-assignee: [custom]
+status: active
+assignee: [vibe]
 created_date: '2026-07-19 00:00'
 labels:
   - application
