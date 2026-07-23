@@ -4,7 +4,7 @@ title: >-
   Implement concrete repository read-adapters as the single board
   materialization path
 status: backlog
-assignee: []
+assignee: [custom]
 created_date: '2026-07-23 00:00'
 labels:
   - application
