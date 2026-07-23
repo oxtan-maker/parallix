@@ -1,7 +1,7 @@
 ---
 id: TASK-2299
 title: test fixes
-status: backlog
+status: refined
 assignee: [codex]
 created_date: '2026-07-23 09:42'
 labels: []
