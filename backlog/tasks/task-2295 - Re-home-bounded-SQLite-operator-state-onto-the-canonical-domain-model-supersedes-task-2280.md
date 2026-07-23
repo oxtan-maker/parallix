@@ -3,7 +3,7 @@ id: TASK-2295
 title: >-
   Re-home bounded SQLite operator state onto the canonical domain model
   (supersedes task-2280)
-status: refined
+status: active
 assignee: [custom]
 created_date: '2026-07-22 04:50'
 labels:
