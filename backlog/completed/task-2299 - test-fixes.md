@@ -1,10 +1,11 @@
 ---
 id: TASK-2299
 title: test fixes
-status: ready-for-integration
+status: done
 assignee: [claude]
 created_date: '2026-07-23 09:42'
-labels: []
+labels:
+  - user_value
 dependencies: []
 ordinal: 51000
 ---
