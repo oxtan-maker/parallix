@@ -1,10 +1,15 @@
 ---
 id: TASK-2281
 title: Build operator board projections, events, and guarded controller
-status: ready-for-integration
+status: done
 assignee: [custom]
 created_date: '2026-07-19 00:00'
-labels: [ai_sdlc]
+labels:
+  - application
+  - board
+  - architecture
+  - observability
+  - user_value
 dependencies:
   - TASK-2295
 references:
