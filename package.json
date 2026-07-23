@@ -62,6 +62,9 @@
     "typecheck": "tsc --noEmit",
     "test:bundle": "node --enable-source-maps build/px.mjs --version"
   },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "^0.80.6"
+  },
   "devDependencies": {
     "@stryker-mutator/core": "^9.6.1",
     "@types/node": "^26.0.1",

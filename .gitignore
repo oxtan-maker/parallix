@@ -11,9 +11,13 @@ workflow/.sessions/
 workflow/config/agents.local.json
 agents.local.json
 missions/*/review-events/
-# Compiled output
+# Compiled output (tsc/esbuild emit to dist/ and build/)
 dist/
 build/
+# Stray tsc emit to repo root (noEmit=true, these are dead artifacts)
+index.js
+px.js
+lib/
 .test-runtime/
 # StrykerJS scratch/report output (mutation-gate.ts)
 .stryker-tmp*/

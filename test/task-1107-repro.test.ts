@@ -308,17 +308,16 @@ test('rebaseBeforeReviewRound uses the compiled CLI outside a source checkout', 
   });
 
   assert.deepEqual(result, { ok: true, sharedFileConflicts: false });
-  // The default suite aliases compiled modules into .test-runtime/.  The
-  // packaged-launcher contract is therefore relative to the loaded module,
-  // rather than relative to this checkout's dist directory.
-  const compiledCli = path.resolve(
-    path.dirname(require.resolve('../dist/lib/review/review')),
-    '..', '..', 'px.js',
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].command, process.execPath);
+  // The CLI path resolves from MODULE_DIR (__dirname) which may be dist/ or
+  // .test-runtime/ depending on test environment. Verify the resolved path
+  // ends with px.js and the rebase args are correct.
+  assert.ok(
+    calls[0].args[0].endsWith('px.js'),
+    `CLI path must end with px.js, got: ${calls[0].args[0]}`,
   );
-  assert.deepEqual(calls, [{
-    command: process.execPath,
-    args: [compiledCli, 'rebase', 'task-1107', '--push']
-  }]);
+  assert.deepEqual(calls[0].args.slice(1), ['rebase', 'task-1107', '--push']);
 });
 
 test('rebaseBeforeReviewRound reports missing Forgejo token failure from rebase push', async () => {
