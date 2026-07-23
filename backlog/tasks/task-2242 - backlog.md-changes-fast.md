@@ -1,7 +1,7 @@
 ---
 id: TASK-2242
 title: backlog.md changes fast
-status: ready-for-integration
+status: review
 assignee: [custom]
 created_date: '2026-07-13 05:35'
 labels: []
