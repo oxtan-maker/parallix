@@ -23,7 +23,7 @@ const expectedIntegrationFiles = [
   'review-commands-additional.test.ts', 'review-commands-supplemental.test.ts',
   'review-identity-placeholder.test.ts', 'review-identity.test.ts',
   'review-prompts.test.ts', 'review-state-class.test.ts', 'review-state.test.ts',
-  'review.test.ts', 'runtime-matrix.test.ts', 'setup-review.test.ts',
+  'review.test.ts', 'runtime-matrix.test.ts', 'setup-review.test.ts', 'sqlite-recovery-cp5.test.ts',
   'stats-backfill.test.ts', 'status.test.ts', 'task-1048-regression.test.ts',
   'task-1049-force-push.test.ts', 'task-1080-sync-merged-hardening.test.ts',
   'task-1104-rebase-cleanup.test.ts', 'task-1209-consume-artifacts.test.ts',

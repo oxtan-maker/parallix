@@ -34,9 +34,9 @@ test('application import guard rejects transitive prohibited dependency fixture'
   assert.match(findForbiddenApplicationDependencies([fixture('transitive-prohibited.ts')]).join('\n'), /node:fs/);
 });
 
-test('composition guard accepts the sole production composition root', () => {
+test('composition guard accepts the sole production composition root', async () => {
   assert.deepEqual(findCompositionViolations(path.join(root, 'src', 'platform', 'runtime', 'lib')), []);
-  const graph = createProductionApplicationServices(root);
+  const graph = await createProductionApplicationServices(root);
   assert.equal(graph.active.constructor.name, 'ActiveService');
   assert.equal(graph.statsBackfill.constructor.name, 'StatsBackfillService');
 });
