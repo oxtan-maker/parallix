@@ -6,11 +6,7 @@ title: >-
 status: ready-for-integration
 assignee: [claude]
 created_date: '2026-07-22 04:50'
-labels:
-  - sqlite
-  - persistence
-  - migration
-  - domain-model
+labels: [ai_sdlc]
 dependencies:
   - TASK-2294
 references:
