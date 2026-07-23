@@ -4,6 +4,23 @@ const assert = require('node:assert/strict');
 const rebase = require('../dist/lib/commands/rebase');
 
 // ---------------------------------------------------------------------------
+// Test-local Git argument normalization
+// ---------------------------------------------------------------------------
+// Production rebase Git invocations are execution-root-aware: since commit
+// 6f401e34a each call is prefixed with `-C <executionRoot>` (and the existing
+// `-c <key=value>` config pairs) ahead of the Git subcommand. Strip exactly
+// those leading global options so a fake can check the Git subcommand at a
+// fixed index again, without loose whole-array matching that would also accept
+// a malformed command. Returns the tail whose index 0 is the Git subcommand.
+function gitSubcommandArgs(args: string[]): string[] {
+  let i = 0;
+  while (i + 1 < args.length && (args[i] === '-C' || args[i] === '-c')) {
+    i += 2; // skip the global option and its required value
+  }
+  return args.slice(i);
+}
+
+// ---------------------------------------------------------------------------
 // parseConflictFilesFromRebaseOutput
 // ---------------------------------------------------------------------------
 
@@ -180,7 +197,7 @@ test('rebase exits 0 on clean rebase', async () => {
       if (args.includes('rebase') && args.includes('main')) {
         return { status: 0, stdout: '', stderr: '' };
       }
-      if (args[0] === 'rebase' && args[1] === '--show-current') {
+      if (gitSubcommandArgs(args)[0] === 'rebase' && gitSubcommandArgs(args)[1] === '--show-current') {
         return { status: 0, stdout: '', stderr: '' };
       }
       return { status: 0, stdout: '', stderr: '' };
@@ -207,7 +224,7 @@ test('rebase targets the mission recorded base branch, not the primary branch', 
         rebaseTarget = args[rebaseIdx + 1];
         return { status: 0, stdout: '', stderr: '' };
       }
-      if (args[0] === 'rebase' && args[1] === '--show-current') {
+      if (gitSubcommandArgs(args)[0] === 'rebase' && gitSubcommandArgs(args)[1] === '--show-current') {
         return { status: 0, stdout: '', stderr: '' };
       }
       return { status: 0, stdout: '', stderr: '' };
@@ -237,7 +254,7 @@ test('rebase uses local main and does not fetch Forgejo even when review is enab
       if (args.includes('rebase') && args.includes('main')) {
         return { status: 0, stdout: '', stderr: '' };
       }
-      if (args[0] === 'rebase' && args[1] === '--show-current') {
+      if (gitSubcommandArgs(args)[0] === 'rebase' && gitSubcommandArgs(args)[1] === '--show-current') {
         return { status: 0, stdout: '', stderr: '' };
       }
       return { status: 0, stdout: '', stderr: '' };
@@ -259,7 +276,7 @@ test('rebase detects non-conflict rebase failure', async () => {
     getCurrentBranchFn: () => 'mission/task-1018',
     gitFn: args => {
       if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n', stderr: '' };
-      if (args[0] === 'fetch') return { status: 0, stdout: '', stderr: '' };
+      if (gitSubcommandArgs(args)[0] === 'fetch') return { status: 0, stdout: '', stderr: '' };
       if (args.includes('rebase') && args.includes('main')) {
         return { status: 128, stdout: 'fatal: not a git repository', stderr: '' };
       }
@@ -287,7 +304,7 @@ test('rebase detects localized KONFLIKT in rebase output', async () => {
     }),
     gitFn: args => {
       if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n', stderr: '' };
-      if (args[0] === 'fetch') return { status: 0, stdout: '', stderr: '' };
+      if (gitSubcommandArgs(args)[0] === 'fetch') return { status: 0, stdout: '', stderr: '' };
       if (args.includes('rebase') && args.includes('main')) {
         return { status: 1, stdout: '', stderr: 'KONFLIKT (innehåll): Sammanslagningskonflikt i backlog/tasks/task-1018.md\n' };
       }
@@ -434,7 +451,7 @@ test('rebase task-1057 flow: sharedFiles and prompt contain only workflow/docs/a
     },
     gitFn: (args) => {
       if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n', stderr: '' };
-      if (args[0] === 'fetch') return { status: 0, stdout: '', stderr: '' };
+      if (gitSubcommandArgs(args)[0] === 'fetch') return { status: 0, stdout: '', stderr: '' };
       if (args.includes('rebase') && args.includes('main')) {
         return { status: 1, stdout: '', stderr: SWEDISH_REBASE_OUTPUT };
       }
@@ -512,14 +529,14 @@ test('rebase detects staged-no-conflict continuation after failed git rebase --c
     }),
     gitFn: (args, opts) => {
       if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n', stderr: '' };
-      if (args[0] === 'fetch') return { status: 0, stdout: '', stderr: '' };
+      if (gitSubcommandArgs(args)[0] === 'fetch') return { status: 0, stdout: '', stderr: '' };
       if (args.includes('rebase') && args.includes('main')) {
         return { status: 1, stdout: '', stderr: 'CONFLICT (content): Merge conflict in docs/missions/2026/task-1035/MISSION.md\n' };
       }
-      if (args[0] === 'checkout' && args[2] === 'docs/missions/2026/task-1035/MISSION.md') {
+      if (gitSubcommandArgs(args)[0] === 'checkout' && gitSubcommandArgs(args)[2] === 'docs/missions/2026/task-1035/MISSION.md') {
         return { status: 0, stdout: '', stderr: '' };
       }
-      if (args[0] === 'add') return { status: 0, stdout: '', stderr: '' };
+      if (gitSubcommandArgs(args)[0] === 'add') return { status: 0, stdout: '', stderr: '' };
       if (args.includes('rebase') && args.includes('--continue')) {
         continueCalls += 1;
         // Fail the first call to trigger the retry path
@@ -528,7 +545,7 @@ test('rebase detects staged-no-conflict continuation after failed git rebase --c
         }
         return { status: 1, stdout: '', stderr: 'hook declined' };
       }
-      if (args[0] === 'status' && args[1] === '--porcelain') {
+      if (gitSubcommandArgs(args)[0] === 'status' && gitSubcommandArgs(args)[1] === '--porcelain') {
         // No unresolved conflicts — staged but clean
         return { status: 0, stdout: '', stderr: '' };
       }
@@ -573,7 +590,7 @@ test('rebase detects empty/no-op pick and guides operator', async () => {
     }),
     gitFn: (args, opts) => {
       if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n', stderr: '' };
-      if (args[0] === 'fetch') return { status: 0, stdout: '', stderr: '' };
+      if (gitSubcommandArgs(args)[0] === 'fetch') return { status: 0, stdout: '', stderr: '' };
       if (args.includes('rebase') && args.includes('main')) {
         return { status: 1, stdout: '', stderr: 'CONFLICT (content): Merge conflict in docs/missions/2026/task-1035/MISSION.md\n' };
       }
@@ -585,10 +602,10 @@ test('rebase detects empty/no-op pick and guides operator', async () => {
         }
         return { status: 1, stdout: '', stderr: 'Aborting commit; try again' };
       }
-      if (args[0] === 'status' && args[1] === '--porcelain') {
+      if (gitSubcommandArgs(args)[0] === 'status' && gitSubcommandArgs(args)[1] === '--porcelain') {
         return { status: 0, stdout: '', stderr: '' };
       }
-      if (args[0] === 'rebase' && args[1] === '--show-current') {
+      if (gitSubcommandArgs(args)[0] === 'rebase' && gitSubcommandArgs(args)[1] === '--show-current') {
         return { status: 0, stdout: 'mission/task-1035', stderr: '' };
       }
       return { status: 0, stdout: '', stderr: '' };
@@ -629,14 +646,14 @@ test('rebase caps failed continue retries when rebase remains active', async () 
     }),
     gitFn: (args, opts) => {
       if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n', stderr: '' };
-      if (args[0] === 'fetch') return { status: 0, stdout: '', stderr: '' };
+      if (gitSubcommandArgs(args)[0] === 'fetch') return { status: 0, stdout: '', stderr: '' };
       if (args.includes('rebase') && args.includes('main')) {
         return { status: 1, stdout: '', stderr: 'CONFLICT (content): Merge conflict in docs/missions/2026/task-1035/MISSION.md\n' };
       }
-      if (args[0] === 'checkout' && args[2] === 'docs/missions/2026/task-1035/MISSION.md') {
+      if (gitSubcommandArgs(args)[0] === 'checkout' && gitSubcommandArgs(args)[2] === 'docs/missions/2026/task-1035/MISSION.md') {
         return { status: 0, stdout: '', stderr: '' };
       }
-      if (args[0] === 'add') return { status: 0, stdout: '', stderr: '' };
+      if (gitSubcommandArgs(args)[0] === 'add') return { status: 0, stdout: '', stderr: '' };
       if (args.includes('rebase') && args.includes('--continue')) {
         continueCalls += 1;
         if (args.includes('core.editor=true')) {
@@ -644,10 +661,10 @@ test('rebase caps failed continue retries when rebase remains active', async () 
         }
         return { status: 1, stdout: '', stderr: 'hook declined' };
       }
-      if (args[0] === 'status' && args[1] === '--porcelain') {
+      if (gitSubcommandArgs(args)[0] === 'status' && gitSubcommandArgs(args)[1] === '--porcelain') {
         return { status: 0, stdout: '', stderr: '' };
       }
-      if (args[0] === 'rebase' && args[1] === '--show-current') {
+      if (gitSubcommandArgs(args)[0] === 'rebase' && gitSubcommandArgs(args)[1] === '--show-current') {
         return { status: 0, stdout: 'mission/task-1035', stderr: '' };
       }
       return { status: 0, stdout: '', stderr: '' };
@@ -686,14 +703,14 @@ test('rebase distinguishes hook failure from genuine conflict after --continue',
     }),
     gitFn: (args, opts) => {
       if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n', stderr: '' };
-      if (args[0] === 'fetch') return { status: 0, stdout: '', stderr: '' };
+      if (gitSubcommandArgs(args)[0] === 'fetch') return { status: 0, stdout: '', stderr: '' };
       if (args.includes('rebase') && args.includes('main')) {
         return { status: 1, stdout: '', stderr: 'CONFLICT (content): Merge conflict in docs/missions/2026/task-1035/MISSION.md\n' };
       }
-      if (args[0] === 'checkout' && args[2] === 'docs/missions/2026/task-1035/MISSION.md') {
+      if (gitSubcommandArgs(args)[0] === 'checkout' && gitSubcommandArgs(args)[2] === 'docs/missions/2026/task-1035/MISSION.md') {
         return { status: 0, stdout: '', stderr: '' };
       }
-      if (args[0] === 'add') return { status: 0, stdout: '', stderr: '' };
+      if (gitSubcommandArgs(args)[0] === 'add') return { status: 0, stdout: '', stderr: '' };
       if (args.includes('rebase') && args.includes('--continue')) {
         continueCalls += 1;
         // First --continue: hook fails
@@ -702,11 +719,11 @@ test('rebase distinguishes hook failure from genuine conflict after --continue',
         }
         return { status: 1, stdout: '', stderr: 'pre-commit hook declined' };
       }
-      if (args[0] === 'status' && args[1] === '--porcelain') {
+      if (gitSubcommandArgs(args)[0] === 'status' && gitSubcommandArgs(args)[1] === '--porcelain') {
         // No unresolved conflicts
         return { status: 0, stdout: '', stderr: '' };
       }
-      if (args[0] === 'rebase' && args[1] === '--show-current') {
+      if (gitSubcommandArgs(args)[0] === 'rebase' && gitSubcommandArgs(args)[1] === '--show-current') {
         return { status: 0, stdout: 'mission/task-1035', stderr: '' };
       }
       return { status: 0, stdout: '', stderr: '' };

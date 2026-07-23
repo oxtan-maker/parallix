@@ -5,6 +5,23 @@ const status = require('../dist/lib/commands/status');
 const rebase = require('../dist/lib/commands/rebase');
 const { printIntegrationPreflight } = require('../dist/lib/commands/integrate');
 
+// ---------------------------------------------------------------------------
+// Test-local Git argument normalization
+// ---------------------------------------------------------------------------
+// Production rebase Git invocations are execution-root-aware: since commit
+// 6f401e34a each call is prefixed with `-C <executionRoot>` (and the existing
+// `-c <key=value>` config pairs) ahead of the Git subcommand. Strip exactly
+// those leading global options so a fake can check the Git subcommand at a
+// fixed index again, without loose whole-array matching that would also accept
+// a malformed command. Returns the tail whose index 0 is the Git subcommand.
+function gitSubcommandArgs(args: string[]): string[] {
+  let i = 0;
+  while (i + 1 < args.length && (args[i] === '-C' || args[i] === '-c')) {
+    i += 2; // skip the global option and its required value
+  }
+  return args.slice(i);
+}
+
 const TASK_1322_UNMERGED = [
   'backlog/tasks/task-1322 - prevent-backlog-task-id-recycling-collision.md',
   'missions/task-1322/review-state.json',
@@ -35,7 +52,7 @@ test('rebase reports git output and hook hints on non-conflict failure', async (
     getCurrentBranchFn: () => 'mission/task-1077',
     gitFn: (args, opts) => {
       if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n' };
-      if (args[0] === 'fetch') return { status: 0 };
+      if (gitSubcommandArgs(args)[0] === 'fetch') return { status: 0 };
       if (args.includes('rebase') && args.includes('main')) {
         return { status: 1, stdout: '', stderr: 'error: pre-commit hook failed\nAborting rebase' };
       }
@@ -75,15 +92,15 @@ test('rebase reports git output on failed continue attempt', async () => {
     }),
     gitFn: (args, opts) => {
       if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n' };
-      if (args[0] === 'fetch') return { status: 0 };
+      if (gitSubcommandArgs(args)[0] === 'fetch') return { status: 0 };
       if (args.includes('rebase') && args.includes('main')) return { status: 1, stderr: 'CONFLICT' };
-      if (args[0] === 'checkout') return { status: 0 };
-      if (args[0] === 'add') return { status: 0 };
+      if (gitSubcommandArgs(args)[0] === 'checkout') return { status: 0 };
+      if (gitSubcommandArgs(args)[0] === 'add') return { status: 0 };
       if (args.includes('rebase') && args.includes('--continue')) {
         return { status: 1, stdout: '', stderr: 'error: another hook failed' };
       }
-      if (args[0] === 'status' && args[1] === '--porcelain') return { status: 0, stdout: 'M  file.js' };
-      if (args[0] === 'rebase' && args[1] === '--show-current') return { status: 0, stdout: 'mission/task-1077' };
+      if (gitSubcommandArgs(args)[0] === 'status' && gitSubcommandArgs(args)[1] === '--porcelain') return { status: 0, stdout: 'M  file.js' };
+      if (gitSubcommandArgs(args)[0] === 'rebase' && gitSubcommandArgs(args)[1] === '--show-current') return { status: 0, stdout: 'mission/task-1077' };
       return { status: 0, stdout: '' };
     },
     exitFn: () => {},
