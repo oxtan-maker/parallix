@@ -2,7 +2,7 @@
 id: TASK-2281
 title: Build operator board projections, events, and guarded controller
 status: active
-assignee: [vibe]
+assignee: [custom]
 created_date: '2026-07-19 00:00'
 labels:
   - application
