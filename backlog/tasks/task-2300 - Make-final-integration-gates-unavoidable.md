@@ -2,7 +2,7 @@
 id: TASK-2300
 title: Make final integration gates unavoidable
 status: backlog
-assignee: []
+assignee: [codex]
 created_date: '2026-07-23 09:49'
 labels: []
 dependencies: []
