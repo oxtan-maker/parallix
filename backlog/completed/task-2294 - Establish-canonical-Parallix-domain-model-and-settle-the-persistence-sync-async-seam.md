@@ -3,7 +3,7 @@ id: TASK-2294
 title: >-
   Establish canonical Parallix domain model and settle the persistence
   sync/async seam
-status: review
+status: done
 assignee: [codex]
 created_date: '2026-07-22 04:47'
 updated_date: '2026-07-22 05:00'
@@ -12,6 +12,7 @@ labels:
   - architecture
   - adr
   - persistence
+  - user_value
 dependencies: []
 references:
   - docs/adr/0044-workflow-distribution-model.md

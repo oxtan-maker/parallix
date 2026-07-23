@@ -112,12 +112,11 @@ behavior. Delivery speed is secondary and cannot compensate for more bug work:
    and stop interface or adapter changes from bypassing the same rules. The
    completed-mission label baseline must continue after implementation so reduction is
    measured rather than asserted.
-2. **One authority and one transition path during migration.** Until a
-   task-catalog decision replaces it, a task lifecycle update continues to use
-   the existing Markdown/Git path, including its integration-branch and rebase
-   behavior. A UI cache, event stream, or SQLite index cannot become a
-   competing writer by accident. This is a containment rule, not an endorsement
-   of the legacy task files or primary-branch bookkeeping as the end state.
+2. **One authority and one transition path during migration.** Until the
+   ADR 0044 database cutover replaces it, a task lifecycle update continues to
+   use the existing Markdown/Git path, including its integration-branch and
+   rebase behavior. A UI cache, event stream, or SQLite index cannot become a
+   competing writer.
 3. **Preservation of fail-closed lifecycle semantics.** ADR 0048 classifies
    state-machine violations and infrastructure blockers as human-only. An
    interface must be able to show an operation failure without converting it
@@ -157,7 +156,7 @@ unproven behaviour or a separate decision; `✗` = contradicts the criterion.
 | C4: Isolated effects | Hard constraint | Unit-test use-case behavior without real Git, Forgejo, filesystem, or agent processes. | Existing command tests inject collaborators, but the seam is not yet an application boundary (`lib/commands/active.ts:24-40`). |
 | C5: Interface independence | Benefit | CLI, Ink, and web can invoke the same behavior without parsing terminal output or reproducing lifecycle policy. | ADR 0044 requires one application core for these clients. |
 | C6: Operational truth and recovery | Benefit | Long-running work can report progress, reconnect by re-querying, and distinguish durable evidence from UI liveness. | `active` can launch agents and defer synchronization; ADR 0048 requires fail-closed handling. |
-| C7: Authority evolution and rollback | Benefit | A future catalog can replace the current task adapter without a dual-write steady state; this change can be removed without persisted-data migration. | Task storage is already behind `resolveTaskFile`/`transitionTask`; task-authority migration is explicitly deferred. |
+| C7: Authority evolution and rollback | Benefit | A future catalog can replace the current task adapter without a dual-write steady state; this change can be removed without persisted-data migration. | Task storage is already behind `resolveTaskFile`/`transitionTask`; ADR 0044 defines the later database cutover. |
 | C8: Structural cost and cognitive load | Cost | New abstractions should be limited to behavior with multiple interface/effect boundaries; do not create ceremonial layers around every helper. | Current `lib/` is mixed and only the two selected slices are characterized. |
 
 | Option | C0 | C1 | C2 | C3 | C4 | C5 | C6 | C7 | C8 | Result |
@@ -204,10 +203,9 @@ its full layer vocabulary as a separate migration target.
 
 The decisive trade-off is therefore not delivery speed. Option 3 accepts the
 extra interfaces and composition wiring in C8 in exchange for satisfying the
-five hard constraints while retaining a reversible path to a future
-board and task-catalog decision. Option 5 is not judged inferior in principle;
-it is deliberately deferred because the repository has not yet supplied the
-authority-migration evidence needed to assess it.
+five hard constraints while retaining a reversible path to the ADR 0044
+database cutover. Option 5 remains outside this mission because the required
+migration evidence belongs to that later implementation.
 
 ## Decision
 
@@ -319,6 +317,44 @@ inventing a lifecycle state. It is view data: neither a mutable client store
 nor a write model. `stats-backfill` must retain its current distinction between
 the computed report and `--apply`.
 
+Review is an ordered command conversation, not the mutable phase/disposition
+snapshot used by the current file harness. A reviewer approves with an optional
+comment or requests changes with findings. The implementer submits a complete
+fixed/disputed resolution or requests human intervention. `PARKED` and
+`BLOCKED` are legacy adapter inputs for that same intervention result; a
+standalone reviewer comment is view/event data rather than a state command.
+
+Each review round records a local review-conversation identity and exact commit
+revision. An optional review surface contributes its key, opaque pull-request
+ID, optional URL, and source/target branches; review without that surface
+records local source and target branches. Forgejo is a local Docker-hosted
+projection of this conversation, not a remote-service boundary. Approval and
+integration promotion must name the same revision, not merely the same branch
+or PR.
+Reviewer assignment is accepted only from the user-configured `review`
+eligibility policy. The application selects the next eligible reviewer after an
+implementer resolution; neither the implementer nor the domain invents a
+built-in fallback family. The explicit review step is required: neither a
+general default policy nor legacy Claude/Codex defaults may be substituted when
+it is absent or empty. Forgejo may adapt its PR response into these contracts
+but is neither named nor required by the model.
+
+Persistence ports are owned by the application layer, not the domain. The
+domain model neither imports nor implements `MissionStore`; Markdown/Git and
+the ADR 0044 database adapter can satisfy the same port without adding storage
+concepts to `Mission`. Persistence authority remains owned by ADR 0044 rather
+than being decided indirectly through the model.
+
+A task adapter returns a typed unavailable/conflict result instead of a
+partially valid mission. For the current Git topology, the committed integration
+base owns lifecycle status and assignment, while an open mission worktree may
+provide newer mission content. A committed `done` task remains unclosed while
+that worktree exists. Only successful integration-base closeout plus worktree
+removal permits the adapter to return a closed mission. PR-provider state is
+absent from this materialization contract: Forgejo is an optional view surface,
+and Parallix operates without it. An uncommitted working-tree move is likewise
+not closure authority.
+
 **Progress.** A use case may publish ordered, best-effort progress records
 with an operation identifier, phase, timestamp, message, and terminal
 outcome. Progress supports CLI streaming and future UI attention, but has no
@@ -365,13 +401,10 @@ history, not the source of truth for lifecycle state.
 During this migration, canonical task records remain the Markdown files in
 `backlog/tasks/`, `backlog/completed/`, and `backlog/archive/`, with Git-owned
 mission and review artifacts retaining their existing roles. This is a
-compatibility constraint, not a commitment to retain `backlog.md`, task-file
-writes on the primary branch, or Git-tracked task authority once a board is
-operational. The board may retire the aggregate `backlog.md` as soon as no
-supported flow needs it. Replacing the task catalog or its write path needs a
-separate ADR that evaluates migration, concurrent writers, Git merge and
-conflict behavior, offline operation, backup/recovery, import/export,
-compatibility, and rollback. Dual-write is not an accepted steady state.
+compatibility constraint until the ADR 0044 database cutover, not a long-term
+authority decision. Board availability does not trigger that cutover. The
+gated database migration replaces the task and mission write paths as one unit;
+dual-write is not an accepted steady state.
 
 ## Consequences
 
@@ -385,9 +418,9 @@ compatibility, and rollback. Dual-write is not an accepted steady state.
 - Explicit ports convert the repository's current ad hoc function injection
   into a stable unit-test seam and keep external operations mocked in unit
   tests.
-- The boundary supports an eventual local board while deferring its security,
-  hosting, persistence, and authority decisions until they have their own
-  evidence.
+- The boundary supports an eventual local board while leaving security,
+  hosting, and the ADR 0044 persistence cutover to their gated implementation
+  missions.
 
 ### Negative and accepted costs
 
@@ -456,8 +489,9 @@ Implementation then proceeds in bounded steps:
 Rollback restores the previous CLI wiring and removes the new boundary modules
 as one revert. It must not rewrite task Markdown, mission/review Git
 artifacts, lifecycle policy, authorization behavior, text/JSON schemas, or
-exit codes. Any need for a UI server, SQLite authority, task migration, or
-broader command-family redesign stops this plan for a separate decision.
+exit codes. Any need to implement a UI server, perform the ADR 0044 database
+cutover, or broaden command families stops this plan for the corresponding
+implementation mission.
 
 ## Reconsideration triggers
 

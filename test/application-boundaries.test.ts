@@ -9,7 +9,17 @@ const root = process.cwd();
 const fixture = (name: string) => path.join(root, 'test', 'fixtures', 'application-boundary', name);
 
 test('application import guard accepts the application services', () => {
-  const entries = [path.join(root, 'src', 'platform', 'runtime', 'lib', 'application', 'active-service.ts'), path.join(root, 'src', 'platform', 'runtime', 'lib', 'application', 'stats-backfill-service.ts')];
+  const entries = [
+    path.join(root, 'src', 'platform', 'runtime', 'lib', 'application', 'active-service.ts'),
+    path.join(root, 'src', 'platform', 'runtime', 'lib', 'application', 'stats-backfill-service.ts'),
+    path.join(root, 'src', 'application', 'mission-authority.ts'),
+    path.join(root, 'src', 'application', 'projections', 'mission-board.ts'),
+    path.join(root, 'src', 'application', 'projections', 'mission-detail.ts'),
+    path.join(root, 'src', 'application', 'projections', 'analytics.ts'),
+    path.join(root, 'src', 'application', 'projections', 'agent-status.ts'),
+    path.join(root, 'src', 'application', 'projections', 'activity.ts'),
+    path.join(root, 'src', 'application', 'projections', 'repository-selector.ts'),
+  ];
   assert.deepEqual(findForbiddenApplicationDependencies(entries), []);
 });
 
