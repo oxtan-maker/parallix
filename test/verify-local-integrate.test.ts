@@ -36,7 +36,7 @@ function runScript(args, env = {}) {
   return result;
 }
 
-test('verify-local integrate skips cleanly when integration config is missing', () => {
+test('verify-local integrate fails closed when integration config is missing (task-2300)', () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'verify-local-missing-'));
   try {
     const result = runScript(['integrate'], {
@@ -44,8 +44,8 @@ test('verify-local integrate skips cleanly when integration config is missing', 
     });
     const output = `${result.stdout}${result.stderr}`;
 
-    assert.equal(result.status, 0, output);
-    assert.match(output, /integration-gates: no config present, skipping/);
+    assert.notEqual(result.status, 0, output);
+    assert.match(output, /mandatory integration gate plan is unavailable/);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -78,7 +78,7 @@ test('verify-local integrate prints the resolved dry-run plan for workflow gates
   }
 });
 
-test('verify-local integrate reports no applicable gates when changed areas do not match', () => {
+test('verify-local integrate fails closed when no mandatory gate applies (task-2300)', () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'verify-local-no-match-'));
   const configPath = path.join(tmpDir, 'integration-pipelines.json');
   try {
@@ -95,8 +95,8 @@ test('verify-local integrate reports no applicable gates when changed areas do n
     });
     const output = `${result.stdout}${result.stderr}`;
 
-    assert.equal(result.status, 0, output);
-    assert.match(output, /integration-gates: no applicable gates for changed areas/);
+    assert.notEqual(result.status, 0, output);
+    assert.match(output, /mandatory integration suite is unavailable/);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

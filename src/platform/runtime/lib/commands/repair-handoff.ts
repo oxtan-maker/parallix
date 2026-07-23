@@ -266,6 +266,9 @@ function buildGoalCheckRepairPrompt(errorMsg: string, slug: string, worktree: st
           `- recognized repo commands or paths already accepted by Parallix, such as \`npm test -- test/repair-handoff.test.ts\`, \`px review ${slug} --verify\`, or \`./scripts/verify-local.sh all\`
 
 ` +
+          `For an integration handoff, \`./scripts/verify-local.sh integrate\` is mandatory; \`./scripts/verify-local.sh all\` alone is not sufficient.
+
+` +
           `Do not rely on raw \`stat\`/\`ls\` output or generic prose by themselves. If you keep shell output, pair it with one of the accepted references above.
 
 `;
@@ -299,6 +302,7 @@ Example Goal Check table:
 | Final checkpoint has Goal Check section | docs/missions/${year}/${slug}/CP-1.md:15 | PASS |
 | Tests pass | "buildRelaunchPrompt returns string containing Goal Check table and mission slug", test/repair-handoff.test.ts | PASS |
 | Verification gate ran | \`./scripts/verify-local.sh all\` | PASS |
+| Mandatory integration gate ran | \`./scripts/verify-local.sh integrate\` | PASS |
 | ADR 0048 exists | ADR 0048 | PASS |
 
 Do NOT add placeholder or generic evidence. Each row must cite real, verifiable artifacts.

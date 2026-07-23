@@ -577,6 +577,12 @@ function runScenario({ launchFromFeatureBranch = false, integrate = true, postIn
       return summary;
     }
 
+    // The review loop deliberately leaves its event-store files for the next
+    // checkpoint boundary. Final integration gates require the exact tree they
+    // verify to be committed, so model that boundary before invoking integrate.
+    runGit(worktree, ['add', '--', path.relative(worktree, path.join(missionDir(worktree, slug), 'review-events'))]);
+    runGit(worktree, ['commit', '-m', `test(${slug}): finalize review events`]);
+
     if (failIntegrationGate) {
       // px integrate's own gate step reads adapters.verification.command from the
       // mission worktree (not the base checkout), so flipping it to a failing
@@ -587,6 +593,8 @@ function runScenario({ launchFromFeatureBranch = false, integrate = true, postIn
       const worktreeConfig = JSON.parse(fs.readFileSync(worktreeConfigPath, 'utf8'));
       worktreeConfig.adapters.verification.command = 'exit 7';
       fs.writeFileSync(worktreeConfigPath, JSON.stringify(worktreeConfig, null, 2));
+      runGit(worktree, ['add', '--', 'workflow.config.json']);
+      runGit(worktree, ['commit', '-m', `test(${slug}): install failing integration gate`]);
 
       const gateResult = runWorkflow(worktree, env, ['integrate', slug], 60000, { allowFailure: true });
       summary.integrate = {
@@ -600,7 +608,7 @@ function runScenario({ launchFromFeatureBranch = false, integrate = true, postIn
       return summary;
     }
 
-    runWorkflow(worktree, env, ['integrate', slug, '--no-integration-gates']);
+    runWorkflow(worktree, env, ['integrate', slug]);
 
     const rootTask = taskFileIn(repo.repoRoot, slug);
     assert.ok(rootTask, 'integrate should leave the task in the base checkout');

@@ -97,9 +97,9 @@ const {
   formatRecordedStatsRow,
   resolveIntegrationVerificationWorktree,
   buildIntegrationVerificationInvocation,
+  captureFinalIntegrationTree,
   parseIntegrateArgs,
   runPostIntegrateHookOrAbort,
-  buildBeforeVerification,
   prepareNoisePatchForSquash
 } = require('../dist/lib/commands/integrate');
 const integrateCommand = require('../dist/lib/commands/integrate');
@@ -175,6 +175,38 @@ test('integration verification command and cwd are both derived from the candida
     area: 'integrate',
     rootDir: candidateWorktree
   }]);
+});
+
+test('final integration gate identity rejects a dirty or wrong selected root before side effects (task-2300)', () => {
+  const root = path.join(__dirname, '..');
+  const dirty = captureFinalIntegrationTree(root, {
+    gitRunner(args) {
+      assert.deepEqual(args.slice(1), [path.resolve(root), 'status', '--porcelain']);
+      return { status: 0, stdout: ' M src/platform/runtime/lib/commands/integrate.ts', stderr: '' };
+    }
+  });
+  assert.equal(dirty.ok, false);
+  assert.match(dirty.error, /not finalized \(dirty tree\)/);
+
+  const final = captureFinalIntegrationTree(root, {
+    gitRunner(args) {
+      if (args.includes('status')) return { status: 0, stdout: '', stderr: '' };
+      if (args.includes('HEAD^{tree}')) return { status: 0, stdout: 'tree-final\n', stderr: '' };
+      return { status: 0, stdout: 'commit-final\n', stderr: '' };
+    }
+  });
+  assert.deepEqual(final, { ok: true, rootDir: path.resolve(root), commit: 'commit-final', tree: 'tree-final' });
+});
+
+test('px integrate rejects the normal integration-gate bypass (task-2300)', () => {
+  const prior = process.env.PARALLIX_TEST_ALLOW_INTEGRATION_GATE_BYPASS;
+  delete process.env.PARALLIX_TEST_ALLOW_INTEGRATION_GATE_BYPASS;
+  try {
+    assert.throws(() => parseIntegrateArgs(['task-2300', '--no-integration-gates']), /final integration gates are mandatory/);
+  } finally {
+    if (prior === undefined) delete process.env.PARALLIX_TEST_ALLOW_INTEGRATION_GATE_BYPASS;
+    else process.env.PARALLIX_TEST_ALLOW_INTEGRATION_GATE_BYPASS = prior;
+  }
 });
 
 test('px integrate parses the paired Codex real-agent override without placing values in a command string', () => {
@@ -881,86 +913,6 @@ test('px integrate never invokes the post-integrate hook when preflight fails (S
   }
 
   assert.equal(hookSpy.mock.callCount(), 0);
-});
-
-test('buildBeforeVerification builds canonical dist before proof capture', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'integrate-refresh-fresh-'));
-  const pxTs = path.join(root, 'px.ts');
-  const pxJs = path.join(root, 'dist', 'px.js');
-  fs.mkdirSync(path.dirname(pxJs), { recursive: true });
-  fs.writeFileSync(path.join(root, 'package.json'), '{}\n');
-  fs.writeFileSync(pxTs, 'export {};\n');
-  fs.writeFileSync(pxJs, '"use strict";\n');
-
-  const calls = [];
-  const result = buildBeforeVerification(root, {
-    runFn(command, args) {
-      calls.push([command, ...args]);
-      return { status: 0, stdout: '', stderr: '' };
-    },
-    log: () => {}
-  });
-
-  assert.deepEqual(result, { ok: true, refreshed: true, detail: '' });
-  assert.equal(calls.length, 1);
-  fs.rmSync(root, { recursive: true, force: true });
-});
-
-test('buildBeforeVerification builds dist without consulting source mtimes', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'integrate-refresh-stale-'));
-  const pxTs = path.join(root, 'px.ts');
-  const pxJs = path.join(root, 'dist', 'px.js');
-  fs.mkdirSync(path.dirname(pxJs), { recursive: true });
-  fs.writeFileSync(path.join(root, 'package.json'), '{}\n');
-  fs.writeFileSync(pxJs, '"use strict";\n');
-  fs.writeFileSync(pxTs, 'export {};\n');
-  const staleJsTime = new Date('2026-01-01T00:00:00.000Z');
-  const staleTsTime = new Date('2026-01-01T00:00:05.000Z');
-  fs.utimesSync(pxJs, staleJsTime, staleJsTime);
-  fs.utimesSync(pxTs, staleTsTime, staleTsTime);
-
-  const calls = [];
-  const result = buildBeforeVerification(root, {
-    runFn(command, args, options) {
-      calls.push({ command, args, options });
-      fs.writeFileSync(pxJs, '"use strict";\n// rebuilt\n');
-      return { status: 0, stdout: 'rebuilt', stderr: '' };
-    },
-    log: () => {}
-  });
-
-  assert.equal(result.ok, true);
-  assert.equal(result.refreshed, true);
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].command, 'npm');
-  assert.deepEqual(calls[0].args, ['run', 'build']);
-  fs.rmSync(root, { recursive: true, force: true });
-});
-
-test('buildBeforeVerification surfaces build failures before verification starts', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'integrate-refresh-fail-'));
-  const pxTs = path.join(root, 'px.ts');
-  const pxJs = path.join(root, 'dist', 'px.js');
-  fs.mkdirSync(path.dirname(pxJs), { recursive: true });
-  fs.writeFileSync(path.join(root, 'package.json'), '{}\n');
-  fs.writeFileSync(pxJs, '"use strict";\n');
-  fs.writeFileSync(pxTs, 'export {};\n');
-  const staleJsTime = new Date('2026-01-01T00:00:00.000Z');
-  const staleTsTime = new Date('2026-01-01T00:00:05.000Z');
-  fs.utimesSync(pxJs, staleJsTime, staleJsTime);
-  fs.utimesSync(pxTs, staleTsTime, staleTsTime);
-
-  const result = buildBeforeVerification(root, {
-    runFn() {
-      return { status: 2, stdout: '', stderr: 'build broke' };
-    },
-    log: () => {}
-  });
-
-  assert.equal(result.ok, false);
-  assert.match(result.error, /pre-verification build refresh failed/);
-  assert.match(result.detail, /build broke/);
-  fs.rmSync(root, { recursive: true, force: true });
 });
 
 test('evaluateTaskStatusForIntegration accepts approved (ready-for-integration) without extra conditions', () => {
