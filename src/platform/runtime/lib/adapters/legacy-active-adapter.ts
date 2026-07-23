@@ -8,16 +8,31 @@ import * as stats from '../commands/stats.js';
 import { resolveStageTelemetry } from '../agents/stage-telemetry.js';
 import type { DurableEvidence } from '../application/contracts.js';
 import type { ActiveLaunch, ActivePort } from '../application/ports.js';
+// Type-only import (erased at runtime): the plain overlay shape materialized at
+// the composition root. No SQLite driver binding reaches this module (SC2).
+import type { OperatorBlocklistOverlay } from '../../../../adapters/sqlite/blocklist-snapshot.js';
+
+export type { OperatorBlocklistOverlay };
+
+export interface LegacyActiveAdapterOptions {
+  readonly operatorBlocklist?: OperatorBlocklistOverlay | null;
+}
 
 export class LegacyActiveAdapter implements ActivePort {
   private readonly _runs = new Map<string, LegacyLaunchRun>();
   private readonly _runtime: LegacyActiveRuntime;
+  private readonly _operatorBlocklist: OperatorBlocklistOverlay | null;
 
-  constructor(private readonly _rootDir: string, runtime?: LegacyActiveRuntime) {
+  constructor(
+    private readonly _rootDir: string,
+    runtime?: LegacyActiveRuntime,
+    options?: LegacyActiveAdapterOptions,
+  ) {
     // The command imports the composition root, which imports this adapter.
     // Resolve command exports when an adapter is actually constructed so that
     // this circular module graph cannot capture uninitialized helper bindings.
     this._runtime = runtime || createDefaultLegacyActiveRuntime();
+    this._operatorBlocklist = options?.operatorBlocklist ?? null;
   }
 
   async validateSlug(slug: string): Promise<string | null> {
@@ -31,7 +46,7 @@ export class LegacyActiveAdapter implements ActivePort {
     this._runs.set(slug, {
       worktree,
       taskResolution,
-      agentConfig: this._runtime.readAgentConfig(),
+      agentConfig: this.resolveAgentConfig(),
       prompt: this._runtime.buildExecutePrompt(slug, checkpointContext, { rootDir: worktree }),
     });
     return null;
@@ -92,6 +107,21 @@ export class LegacyActiveAdapter implements ActivePort {
     if (!await this._runtime.runHandoffAndReview(slug, run.worktree, agent, { taskFile: run.taskResolution.ok ? run.taskResolution.taskFile : undefined })) {
       throw new Error('legacy handoff failed');
     }
+  }
+
+  /**
+   * Read the file-based agent config and, when SQLite is enabled, overlay the
+   * operator-local blocklist as the sole authority for that field. Repository
+   * (config file) authority is preserved for every other field (steps,
+   * eligibility, weights). Fully synchronous — the async materialization
+   * already happened once at the composition root.
+   */
+  private resolveAgentConfig(): object {
+    const fileConfig = this._runtime.readAgentConfig() as Record<string, unknown>;
+    if (!this._operatorBlocklist) {
+      return fileConfig;
+    }
+    return { ...fileConfig, blocklist: this._operatorBlocklist };
   }
 
   private requireRun(slug: string): LegacyLaunchRun {

@@ -378,7 +378,7 @@ async function statsBackfill(args: string[], options: BackfillOptions = {}) {
   }
   const s = getStats();
   filePath = filePath || s.resolveStatsPath({ ensureDir: apply });
-  const service = opts.service || createProductionApplicationServices(rootDir).statsBackfill;
+  const service = opts.service || (await createProductionApplicationServices(rootDir)).statsBackfill;
   const outcome = await service.execute({
     operationId: `stats-backfill:${Date.now()}`,
     apply,
