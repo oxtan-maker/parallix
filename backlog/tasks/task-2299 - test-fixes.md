@@ -1,7 +1,7 @@
 ---
 id: TASK-2299
 title: test fixes
-status: review
+status: ready-for-integration
 assignee: [claude]
 created_date: '2026-07-23 09:42'
 labels: []
