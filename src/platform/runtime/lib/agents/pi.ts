@@ -1,4 +1,3 @@
-import { spawnAndTee } from '../core/spawn-tee.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -27,33 +26,39 @@ interface StartPiAgentOptions {
   maxTransientRetries?: number;
 }
 
-// Injectable I/O for tests. Production uses the real spawn-tee.
-let _spawnAndTee: any = spawnAndTee;
+// Lazily-loaded SDK (ESM-only, loaded via dynamic import in CJS context).
+// TypeScript compiles `await import('...')` to `require('...')` for CJS output,
+// which fails for ESM-only packages. Use a raw dynamic import instead.
+let _sdk: any = null;
+async function loadSdk() {
+  if (!_sdk) {
+    _sdk = await new Function('p', 'return import(p)')('@earendil-works/pi-coding-agent');
+  }
+  return _sdk;
+}
+
+// Injectable SDK for tests. Production uses the real createAgentSession.
+let _createAgentSession: any = null;
 let _sessions: any = sessions;
 
 // Test hooks: override the launcher's I/O without touching the public signature.
-function __setSpawnAndTeeForTest(fn: any) { _spawnAndTee = fn || spawnAndTee; }
+function __setCreateAgentSessionForTest(fn: any) { _createAgentSession = fn || null; }
 function __setSessionsForTest(mod: any) { _sessions = mod || sessions; }
+function __setSdkForTest(sdk: any) { _sdk = sdk || null; }
 
 function piCommandCandidates() {
   const candidates: string[] = [];
   const seen = new Set<string>();
   const pushCandidate = (candidate?: string | null) => {
-    if (!candidate || seen.has(candidate)) {return;}
+    if (!candidate || seen.has(candidate)) { return; }
     seen.add(candidate);
     candidates.push(candidate);
   };
 
   pushCandidate(process.env.PI_BIN);
-  // Pi is commonly installed globally through nvm. Agent launchers may keep
-  // NVM_BIN while narrowing PATH to their own tool directory, so retain this
-  // absolute candidate instead of losing the real runner at that boundary.
   if (process.env.NVM_BIN) {
     pushCandidate(path.join(process.env.NVM_BIN, 'pi'));
   }
-  // A process launched by an nvm-managed Node binary can lose both PATH and
-  // NVM_BIN at an agent boundary. Pi's global nvm install lives alongside
-  // that Node binary, so this keeps the production launcher self-contained.
   pushCandidate(path.join(path.dirname(process.execPath), 'pi'));
   pushCandidate('pi');
   pushCandidate(path.join(os.homedir(), '.local', 'bin', 'pi'));
@@ -64,7 +69,7 @@ function piCommandCandidates() {
 }
 
 function resolveExistingCommand(candidate: string) {
-  if (!candidate) {return null;}
+  if (!candidate) { return null; }
   if (candidate.includes(path.sep)) {
     try {
       fs.accessSync(candidate, fs.constants.X_OK);
@@ -76,7 +81,7 @@ function resolveExistingCommand(candidate: string) {
 
   const dirs = (process.env.PATH || '').split(path.delimiter);
   for (const dir of dirs) {
-    if (!dir) {continue;}
+    if (!dir) { continue; }
     const commandPath = path.join(dir, candidate);
     try {
       fs.accessSync(commandPath, fs.constants.X_OK);
@@ -89,40 +94,30 @@ function resolveExistingCommand(candidate: string) {
 function resolvePiCommand() {
   for (const candidate of piCommandCandidates()) {
     const resolved = resolveExistingCommand(candidate);
-    if (resolved) {return resolved;}
+    if (resolved) { return resolved; }
   }
   return 'pi';
 }
 
-// Real pi CLI contract (verified against `pi --help` on
-// @earendil-works/pi-coding-agent@0.80.6): non-interactive one-shot mode is
-// `--print`/`-p`, machine-readable output is `--mode json` (emits a JSON
-// line per event, including a { type: "session", id } header and real
-// per-message token usage), and non-interactive runs never show a trust
-// prompt but still need `--approve` to load project-local settings/skills.
-// There is no `ask` subcommand and no `--quiet` flag on the real CLI.
 function buildPiInvocation({ prompt, worktree, env, resume = false, sessionId = null, model = null }: BuildPiInvocationOptions) {
-  const args = ['--print', '--mode', 'json', '--approve'];
+  const args: string[] = ['--print', '--mode', 'json', '--approve'];
 
   if (model) {
     args.push('--model', model);
   }
 
   if (resume && sessionId) {
-    // Reuses the exact session id, creating it if it no longer exists.
     args.push('--session-id', sessionId);
   } else if (resume) {
     args.push('--continue');
   }
 
-  // Prompt is a positional argument.
   args.push(prompt);
 
   return {
     command: resolvePiCommand(),
     args,
     options: {
-      stdio: 'inherit',
       cwd: worktree,
       env: { ...process.env, ...env }
     }
@@ -152,113 +147,52 @@ const TRANSIENT_PI_PATTERNS = [
   /\bretry[- ]after\b/i,
 ];
 
-// Hard, non-retryable failures for Pi
-const HARD_PI_PATTERNS = [
-  /\bmodel not found\b/i,
-  /\bno such model\b/i,
-  /\bunknown model\b/i,
-  /\binvalid (?:api )?key\b/i,
-  /\b401\b[^\n]*\bunauthorized\b/i,
-  /\bauthentication (?:failed|error)\b/i,
-  /\bpermission denied\b/i,
-];
-
-function failureText(result: any) {
-  return `${(result && result.stdout) || ''}\n${(result && result.stderr) || ''}`;
-}
-
-function isHardPiFailure(result: any) {
-  if (!result) {return false;}
-  if (result.error && (result.error.code === 'ENOENT' || result.error.code === 'EACCES')) {return true;}
-  const text = failureText(result);
-  return HARD_PI_PATTERNS.some((re) => re.test(text));
-}
-
-function isTransientPiFailure(result: any) {
-  if (!result) {return false;}
-  const text = failureText(result);
+function isTransientPiFailure(error: any) {
+  if (!error) { return false; }
+  const text = `${error.stdout || ''}\n${error.stderr || ''}`;
   return TRANSIENT_PI_PATTERNS.some((re) => re.test(text));
 }
 
-function shouldRetryPiFailure(result: any) {
-  if (!result) {return false;}
-  if (result.error && (result.error.code === 'ENOENT' || result.error.code === 'EACCES')) {return false;}
-  if (result.signal) {return false;}
-  if (!(typeof result.status === 'number' && result.status !== 0)) {return false;}
-  return isTransientPiFailure(result);
-}
-
-// With --mode json, the first stdout line is a session header:
-// {"type":"session","version":3,"id":"uuid","timestamp":"...","cwd":"/path"}
-// (see @earendil-works/pi-coding-agent docs/json.md). Parsed defensively
-// since a hard failure before the header (e.g. bad flags) leaves no JSON.
-function extractPiSessionId(stdout: string) {
-  if (!stdout) {return null;}
-  for (const line of stdout.split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed.startsWith('{')) {continue;}
-    try {
-      const event = JSON.parse(trimmed);
-      if (event && event.type === 'session' && typeof event.id === 'string') {
-        return event.id;
-      }
-    } catch (_) { /* not a JSON line, or not the header — keep scanning */ }
-  }
-  return null;
-}
-
-// Extracts real token usage from the last assistant message_end/agent_end
-// event's `usage` field in the --mode json stream. Unlike opencode (which
-// requires a separate `export` step), pi's JSON stream carries usage and
-// model/provider identity per-message, so this is derived directly from
-// captured stdout. Shape matches lib/commands/stats.ts's telemetryToStatsFields
-// (camelCase: provider, model, inputTokens, outputTokens, cachedTokens,
-// totalTokens, toolCalls), mirroring extractOpencodeTelemetryFromExport.
-function extractPiTelemetry(stdout: string) {
-  if (!stdout) {return null;}
-  let lastUsage: any = null;
-  let lastModel: string | undefined;
-  let toolCalls = 0;
-  for (const line of stdout.split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed.startsWith('{')) {continue;}
-    let event: any;
-    try {
-      event = JSON.parse(trimmed);
-    } catch (_) {
-      continue;
-    }
-    if (event.type === 'tool_execution_end') {toolCalls += 1;}
-    const message = event && (event.message || (event.messages && event.messages[event.messages.length - 1]));
-    if (message && message.role === 'assistant' && message.usage) {
-      lastUsage = message.usage;
-      lastModel = message.model || lastModel;
-    }
-  }
-  if (!lastUsage) {return null;}
-  // Pi's usage shape varies by backend: some report {input, output, total},
-  // others use {prompt_tokens, completion_tokens, total_tokens}. Normalize to
-  // the telemetry convention expected by stats.ts (inputTokens, outputTokens).
-  const rawInput = lastUsage.input ?? lastUsage.prompt_tokens;
-  const rawOutput = lastUsage.output ?? lastUsage.completion_tokens;
-  const rawTotal = lastUsage.totalTokens ?? lastUsage.total ?? lastUsage.prompt_tokens + lastUsage.completion_tokens;
-  const inputTokens = Number(rawInput) || (rawTotal !== null && Number(rawInput) === 0
-    ? Math.floor(Number(rawTotal) * 0.6) // fallback: estimate input as ~60% of total
-    : 0);
+/** Extract telemetry from SDK session stats. */
+function extractTelemetryFromStats(stats: any) {
+  if (!stats || !stats.tokens) { return null; }
   return {
-    // Provider is the launcher identity ("pi"), matching opencode-telemetry's
-    // convention of reporting the launcher name rather than the underlying
-    // backend (e.g. "vllm") — keeps stats attributable to which runner Parallix
-    // actually invoked, distinct from opencode's rows even against the same model.
     provider: 'pi',
-    model: lastModel,
-    inputTokens,
-    outputTokens: Number(rawOutput) || 0,
-    cachedTokens: Number(lastUsage.cacheRead) || 0,
-    totalTokens: Number(rawTotal) || 0,
-    toolCalls,
-    usagePercent: null
+    model: undefined,
+    inputTokens: stats.tokens.input || 0,
+    outputTokens: stats.tokens.output || 0,
+    cachedTokens: stats.tokens.cacheRead || 0,
+    totalTokens: stats.tokens.total || 0,
+    toolCalls: stats.toolCalls || 0,
+    usagePercent: null,
   };
+}
+
+/** Create a session manager based on resume state. */
+async function createSessionManager(
+  sdk: typeof import('@earendil-works/pi-coding-agent'),
+  worktree: string,
+  resume: boolean,
+  sessionId: string | null,
+) {
+  if (resume && sessionId) {
+    // Find the session file matching the stored sessionId and open it so the
+    // SDK continues the exact prior session instead of creating a new one.
+    const sessions = await sdk.SessionManager.list(worktree);
+    const match = sessions.find((s) => s.id === sessionId);
+    if (match) {
+      return sdk.SessionManager.open(match.path, undefined, worktree);
+    }
+    // Session ID not found — fall back to continuing the most recent session
+    // (may be the same session under a different directory).
+    return sdk.SessionManager.continueRecent(worktree);
+  }
+  if (resume) {
+    // Resume without a stored sessionId — continue the most recent session.
+    return sdk.SessionManager.continueRecent(worktree);
+  }
+  // Fresh run — in-memory to avoid leaving stale session files.
+  return sdk.SessionManager.inMemory();
 }
 
 function startPiAgent({
@@ -268,110 +202,215 @@ function startPiAgent({
   resume = false,
   sessionId = null,
   model = null,
-  teeOptions = {},
-  slug = null,
-  role = null,
-  maxTransientRetries = 1
+  teeOptions: _teeOptions = {},
+  slug: _slug = null,
+  role: _role = null,
+  maxTransientRetries = 1,
 }: StartPiAgentOptions) {
   // Prepend the subagent-limit advisory prefix to the prompt.
   const subagentPrefix = buildSubagentLimitPrefix(undefined);
   const injectedPrompt = subagentPrefix + prompt;
 
-  function isStaleSessionResult(result: any) {
-    if (!result) {return false;}
-    const stderr = result.stderr || '';
-    const stdout = result.stdout || '';
-    return stderr.includes('Conversation not found') || stdout.includes('Conversation not found') ||
-           stderr.includes('Session not found') || stdout.includes('Session not found');
-  }
+  // Build invocation for logging (preserves caller contract).
+  const invocation = buildPiInvocation({
+    prompt: injectedPrompt,
+    worktree,
+    env,
+    resume,
+    sessionId,
+    model,
+  });
 
-  function runInvocation(invocation: any) {
-    // spawn-tee's default 64KB tail buffer silently truncates result.stdout
-    // to its LAST 64KB. That's fine for opencode (telemetry comes from a
-    // separate bounded `opencode export`), but pi's --mode json stream emits
-    // a JSON event per token/delta, not per message, so a real multi-turn
-    // session routinely exceeds 64KB by orders of magnitude (observed: 18.6MB
-    // for one draft run). With the default tail, both the session-id header
-    // (first line) and every tool_execution_end event from early in the
-    // session get silently dropped from result.stdout — extractPiSessionId
-    // and extractPiTelemetry's toolCalls then read 0/null despite the run
-    // having genuinely used tools, because only the final assistant message's
-    // usage (near the true end of the stream) survives the tail window. A
-    // much larger cap keeps this a soft bound rather than a routine truncation.
-    const spawnOptions = { maxTailBytes: 32 * 1024 * 1024, ...invocation.options, ...teeOptions };
-    return _spawnAndTee(invocation.command, invocation.args, spawnOptions);
-  }
+  // All async work deferred to resultPromise so callers get
+  // { invocation, resultPromise } synchronously (agents.ts contract).
+  const resultPromise = (async () => {
+    // Resolve the SDK (or test override).
+    const sdk = await loadSdk();
+    const createSession = _createAgentSession || sdk.createAgentSession;
 
-  async function runInvocationWithRetry(invocation: any) {
-    let attempts = 0;
-    let result = await runInvocation(invocation);
-    while (attempts < maxTransientRetries && shouldRetryPiFailure(result)) {
-      attempts += 1;
-      result = await runInvocation(invocation);
-    }
-    if (result) {result.transientRetries = attempts;}
-    return result;
-  }
+    // Auth and model registry (shared across sessions).
+    const authStorage = sdk.AuthStorage.create();
+    const modelRegistry = sdk.ModelRegistry.create(authStorage);
+    const sessionManager = await createSessionManager(sdk, worktree, resume, sessionId);
 
-  function isUnrecognizedFlagError(result: any) {
-    if (!result) {return false;}
-    const text = failureText(result);
-    return (/\bunrecognized option\b|\bunknown option\b|\bno such option\b|\binvalid option\b|\bunrecognized flag\b|\bunknown flag\b/i).test(text);
-  }
-
-  async function processResult(result: any) {
-    if (result && result.stdout) {
-      result.sessionId = extractPiSessionId(result.stdout) || undefined;
-      const telemetry = extractPiTelemetry(result.stdout);
-      if (telemetry) {
-        result.telemetry = telemetry;
-        if (telemetry.model) {result.model = telemetry.model;}
-        if (telemetry.provider) {result.provider = telemetry.provider;}
+    // Resolve the caller-supplied model string into a Model object the SDK
+    // can use. When model is a "provider/modelId" reference, parse and look
+    // it up in the registry so configured model selection reaches execution.
+    let sdkModel: any = undefined;
+    if (model) {
+      const slashIndex = model.indexOf('/');
+      if (slashIndex > 0) {
+        const provider = model.substring(0, slashIndex);
+        const modelId = model.substring(slashIndex + 1);
+        sdkModel = modelRegistry.find(provider, modelId);
+      } else {
+        // Bare model id — search across all providers
+        sdkModel = modelRegistry.getAll().find((m: any) => m.id === model);
       }
     }
-    return result;
-  }
 
-  async function runWithFallback(invocation: any) {
-    let result = await runInvocationWithRetry(invocation);
-    // Runtime fallback: if the first invocation used flags that Pi doesn't support,
-    // retry without those flags
-    if (isUnrecognizedFlagError(result) && invocation.args.includes('--continue')) {
-      const legacyInv = buildPiInvocation({
-        prompt: injectedPrompt, worktree, env, resume: false, sessionId: null, model,
-      });
-      result = await runInvocationWithRetry(legacyInv);
+    // Build SDK session options.
+    const sdkOptions: any = {
+      cwd: worktree,
+      authStorage,
+      modelRegistry,
+      sessionManager,
+    };
+    if (sdkModel) {
+      sdkOptions.model = sdkModel;
     }
-    return result;
-  }
 
-  async function staleSessionHandler(invocation: any) {
-    let result = await runWithFallback(invocation);
-    if (isStaleSessionResult(result) && worktree && resume) {
-      try {
-        _sessions.clearSession(worktree, slug || '', role || '');
-      } catch (_) { /* best-effort */ }
-      const freshInv = buildPiInvocation({ prompt: injectedPrompt, worktree, env, resume: false, sessionId: null, model });
-      result = await runWithFallback(freshInv);
+    // Merge caller-supplied environment into process.env so the SDK's
+    // subprocess spawning (bash tool, etc.) inherits the caller's scoped
+    // environment (e.g., FORGEJO_USER). Restore after the session completes.
+    const prevEnvEntries: [string, string | undefined][] = [];
+    if (env && typeof env === 'object') {
+      for (const [key, value] of Object.entries(env)) {
+        prevEnvEntries.push([key, process.env[key as keyof typeof process.env]]);
+        if (value === undefined || value === null) {
+          delete process.env[key as keyof typeof process.env];
+        } else {
+          process.env[key as keyof typeof process.env] = String(value);
+        }
+      }
     }
-    return processResult(result);
-  }
 
-  const invocation = buildPiInvocation({ prompt: injectedPrompt, worktree, env, resume, sessionId, model });
-  const resultPromise = staleSessionHandler(invocation);
+    // Collect output during SDK execution.
+    let assistantText = '';
+    let _toolCalls = 0;
+    let errorText = '';
+
+    let attempts = 0;
+    let session: any = null;
+
+    try {
+      while (attempts <= maxTransientRetries) {
+        try {
+          // Reset per-attempt state.
+          assistantText = '';
+          _toolCalls = 0;
+          errorText = '';
+
+          const { session: sdkSession } = await createSession(sdkOptions);
+          session = sdkSession;
+
+          // Subscribe to events for output filtering and telemetry.
+          const unsubscribe = session.subscribe((event: any) => {
+            switch (event.type) {
+              case 'message_update':
+                if (event.assistantMessageEvent && event.assistantMessageEvent.type === 'text_delta') {
+                  assistantText += event.assistantMessageEvent.delta;
+                }
+                break;
+              case 'tool_execution_end':
+                _toolCalls += 1;
+                break;
+              case 'agent_end':
+                // Agent completed.
+                break;
+            }
+          });
+
+          // Send the prompt and wait for the agent to complete.
+          await session.prompt(injectedPrompt);
+          await session.waitForIdle();
+
+          if (typeof unsubscribe === 'function') { unsubscribe(); }
+          if (typeof session.dispose === 'function') { session.dispose(); }
+
+          // Build the result from SDK state.
+          const stats = session.getSessionStats?.() || {};
+          const lastText = session.getLastAssistantText?.() || assistantText;
+          const sdkSessionId = session.sessionId || null;
+
+          const telemetry = extractTelemetryFromStats(stats);
+
+          return {
+            status: 0,
+            stdout: lastText,
+            stderr: errorText,
+            error: null,
+            signal: null,
+            sessionId: sdkSessionId,
+            telemetry,
+            model: undefined,
+            provider: 'pi',
+            transientRetries: attempts,
+            startedAt: new Date().toISOString(),
+            endedAt: new Date().toISOString(),
+          };
+        } catch (err: any) {
+          const errorResult = {
+            status: err.exitCode || 1,
+            stdout: assistantText,
+            stderr: err.message || String(err),
+            error: err,
+            signal: null,
+          };
+
+          if (attempts < maxTransientRetries && isTransientPiFailure(errorResult)) {
+            attempts += 1;
+            continue;
+          }
+
+          // Build result from error state.
+          const stats = session?.getSessionStats?.() || {};
+          const sdkSessionId = session?.sessionId || null;
+          const telemetry = extractTelemetryFromStats(stats);
+
+          return {
+            status: errorResult.status,
+            stdout: assistantText,
+            stderr: errorResult.stderr,
+            error: err,
+            signal: errorResult.signal,
+            sessionId: sdkSessionId,
+            telemetry,
+            model: undefined,
+            provider: 'pi',
+            transientRetries: attempts,
+            startedAt: new Date().toISOString(),
+            endedAt: new Date().toISOString(),
+          };
+        }
+      }
+
+      // Should not reach here, but safety fallback.
+      return {
+        status: 1,
+        stdout: assistantText,
+        stderr: 'Max retries exceeded',
+        error: new Error('Max retries exceeded'),
+        signal: null,
+        sessionId: null,
+        telemetry: null,
+        model: undefined,
+        provider: 'pi',
+        transientRetries: maxTransientRetries,
+        startedAt: new Date().toISOString(),
+        endedAt: new Date().toISOString(),
+      };
+    } finally {
+      // Restore original process.env.
+      for (const [key, prevValue] of prevEnvEntries) {
+        if (prevValue === undefined) {
+          delete process.env[key as keyof typeof process.env];
+        } else {
+          process.env[key as keyof typeof process.env] = prevValue;
+        }
+      }
+    }
+  })();
 
   return { invocation, resultPromise };
 }
 
 export {
   buildPiInvocation,
-  extractPiSessionId,
-  extractPiTelemetry,
   resolvePiCommand,
   startPiAgent,
-  isHardPiFailure,
   isTransientPiFailure,
-  shouldRetryPiFailure,
-  __setSpawnAndTeeForTest,
   __setSessionsForTest,
+  __setCreateAgentSessionForTest,
+  __setSdkForTest,
 };
