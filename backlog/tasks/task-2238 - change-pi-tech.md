@@ -4,7 +4,7 @@ title: change pi tech
 status: review
 assignee: [custom]
 created_date: '2026-07-12 14:53'
-labels: []
+labels: [ai_sdlc]
 dependencies: []
 ordinal: 38000
 ---
