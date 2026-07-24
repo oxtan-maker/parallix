@@ -3,7 +3,7 @@ id: TASK-2303
 title: >-
   Record lifecycle lane-transition events and typed board metrics schema
 status: backlog
-assignee: []
+assignee: [custom]
 created_date: '2026-07-23 00:00'
 labels:
   - application
