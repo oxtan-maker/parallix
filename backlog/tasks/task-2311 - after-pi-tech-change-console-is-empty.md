@@ -1,7 +1,7 @@
 ---
 id: TASK-2311
 title: after pi tech change console is empty
-status: backlog
+status: refined
 assignee: [custom]
 created_date: '2026-07-24 05:40'
 labels: []
