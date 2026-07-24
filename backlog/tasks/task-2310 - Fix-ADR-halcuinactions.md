@@ -1,8 +1,8 @@
 ---
 id: TASK-2310
 title: Fix ADR halcuinactions
-status: refined
-assignee: [custom]
+status: active
+assignee: [vibe]
 created_date: '2026-07-24 04:44'
 labels: []
 dependencies: []
