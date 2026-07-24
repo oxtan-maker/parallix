@@ -1,7 +1,7 @@
 ---
 id: TASK-2310
 title: Fix ADR halcuinactions
-status: review
+status: ready-for-integration
 assignee: [claude]
 created_date: '2026-07-24 04:44'
 labels: []
