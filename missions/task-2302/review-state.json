@@ -1,0 +1,25 @@
+{
+  "reviewer": "claude",
+  "implementer": "custom",
+  "round": 4,
+  "startedAt": "2026-07-24T02:43:15.959Z",
+  "phase": "approved",
+  "disposition": "APPROVED",
+  "metadata": {
+    "recordedStageLaunches": {
+      "review:claude": [
+        "claude|c3c82171-f169-43b3-bc90-2b4404bb26d0|2026-07-23T16:28:59.643Z|2026-07-23T16:32:08.902Z|0",
+        "claude|c3c82171-f169-43b3-bc90-2b4404bb26d0|2026-07-23T16:51:07.140Z|2026-07-23T16:56:18.891Z|0",
+        "claude|c3c82171-f169-43b3-bc90-2b4404bb26d0|2026-07-24T02:31:46.659Z|2026-07-24T02:35:09.943Z|0",
+        "claude|c3c82171-f169-43b3-bc90-2b4404bb26d0|2026-07-24T02:43:35.620Z|2026-07-24T02:46:19.207Z|0"
+      ],
+      "follow-up:custom": [
+        "custom||2026-07-23T16:45:32.808Z|2026-07-23T16:50:44.848Z|0",
+        "custom||2026-07-23T16:56:22.206Z|2026-07-23T17:08:28.103Z|0",
+        "custom|019f8fde-39cf-7b1f-872b-9828f16ce681|2026-07-24T02:43:14.084Z|2026-07-24T02:43:14.084Z|0"
+      ]
+    },
+    "humanEscalationReason": "REVIEWER_LAUNCH_FAILURE",
+    "humanEscalatedAt": "2026-07-23T17:35:11.905Z"
+  }
+}

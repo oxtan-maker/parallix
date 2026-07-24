@@ -119,7 +119,7 @@ test('task-1322 recovery diagnostics report an in-progress rebase across status,
   const statusLines = [];
   let statusExitCode = null;
 
-  status(['task-1322'], {
+  await status(['task-1322'], {
     inferSlugFn: () => 'task-1322',
     getCurrentBranchFn: () => '',
     findTaskFileFn: () => '/tmp/task-1322.md',

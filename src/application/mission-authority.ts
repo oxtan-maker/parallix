@@ -19,6 +19,7 @@ export const MISSION_FIELD_AUTHORITY = {
   title: targetSource,
   labels: targetSource,
   status: targetSource,
+  rawStatus: targetSource,
   closedAt: targetSource,
   assignee: targetSource,
   checkpoints: targetSource,

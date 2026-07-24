@@ -11,8 +11,8 @@ import {
   type OperationLogReadAdapter,
   type ReviewReadAdapter,
 } from '../src/application/projections/board-readers.js';
-import { agentFamily } from '../src/domain/agents.js';
-import { missionId, missionLabels } from '../src/domain/mission.js';
+import { agentFamily, type AgentFamily } from '../src/domain/agents.js';
+import { missionId, missionLabels, type Mission } from '../src/domain/mission.js';
 import { repositoryId } from '../src/domain/repository.js';
 
 const repo = repositoryId('parallix');
@@ -24,7 +24,7 @@ const id3 = missionId('task-0003');
 // Mock adapters
 // ---------------------------------------------------------------------------
 
-function makeMissionAdapter(missions: Array<{ id: typeof id1; repositoryId: typeof repo; title: string; labels: ReturnType<typeof missionLabels>; status: 'backlog' | 'refined' | 'active' | 'review' | 'integration' | 'done'; closedAt: string | null; assignee: typeof agentFamily | null; checkpoints: Array<{ missionId: typeof id1; name: string; goalCheck: Array<{ criterion: string; evidence: string }>; nextActionText: string }>; review: null; netEngineeringLines: number | null }> | null = null): MissionReadAdapter {
+function makeMissionAdapter(missions: Mission[] | null = null): MissionReadAdapter {
   const missionList = missions ?? [];
   return {
     async loadAllMissions() { return missionList; },
