@@ -1,8 +1,8 @@
 ---
 id: TASK-2311
 title: after pi tech change console is empty
-status: active
-assignee: [custom]
+status: review
+assignee: [vibe]
 created_date: '2026-07-24 05:40'
 labels: []
 dependencies: []
