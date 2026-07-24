@@ -61,10 +61,9 @@ Ink components contain no workflow, SQL, Git, Forgejo, or subprocess behavior; t
 <!-- SECTION:PLAN:END -->
 
 ## Definition of Done
-
 <!-- DOD:BEGIN -->
-- [ ] #1 Semantic component and PTY evidence is captured
-- [ ] #2 Static analysis and UI isolation pass
-- [ ] #3 Tests mock application ports and execute no real workflow commands
-- [ ] #4 Headless CLI compatibility remains green
+- [ ] #1 Static analysis and UI isolation pass
+- [ ] #2 Tests mock application ports and execute no real workflow commands
+- [ ] #3 Headless CLI compatibility remains green
+- [ ] #4 Launch and clean-exit evidence for `px ui` is captured from a real terminal run (PTY coverage itself is wave 3 / TASK-2305)
 <!-- DOD:END -->
