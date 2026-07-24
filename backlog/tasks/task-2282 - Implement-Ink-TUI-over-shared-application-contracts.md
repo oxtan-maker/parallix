@@ -15,7 +15,7 @@ dependencies:
 references:
   - docs/adr/0044-workflow-distribution-model.md
   - docs/adr/0051-ui-neutral-application-boundary.md
-  - https://claude.ai/code/artifact/5f739bc8-6e14-48c7-aca6-ed9a96923432
+  - /tmp/Parallix Kanban Board Controller.zip
 priority: medium
 ---
 
