@@ -13,7 +13,6 @@ labels:
 dependencies:
   - TASK-2279
   - TASK-2282
-  - TASK-2283
 references:
   - docs/adr/0044-workflow-distribution-model.md
   - docs/adr/0046-npm-publish-process-and-security.md
