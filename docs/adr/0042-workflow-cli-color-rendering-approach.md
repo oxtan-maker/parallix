@@ -32,7 +32,7 @@ Replace the hand-rolled ANSI palette and `useColor()` function in `workflow/lib/
 | B: `chalk` v4 | Most popular Node color lib | Battle-tested, rich API, CJS compatible | Adds npm dependency + `supports-color` transitive dep; violates zero-dep constraint | Poor — introduces external dependency | Reject |
 | C: `picocolors` | Ultra-light color lib (~3KB) | Tiny, fast, CJS, auto detection | Still an npm dependency; basic API | Poor — still a dependency | Reject |
 | D: Fix hand-rolled | Patch `useColor()` dead code | Minimal change, keeps existing API | Reinvents color detection that Node.js already provides; fragile; more code to maintain | Acceptable but inferior | Reject |
-| E: Ink (Gemini CLI style) | React for terminals | Powerful interactive components | Massive dep tree (react, ink, chalk); CJS incompatible; complete overkill for batch CLI output | Very poor — wrong tool | Reject |
+| E: Ink (Gemini CLI style) | React for terminals | Powerful interactive components; chosen interactive TUI stack per ADR 0044; eventual single-stack direction for all terminal output to eliminate two-path maintenance | Massive dep tree (react, ink, chalk); CJS incompatible; overkill for batch/headless status output | Wrong tool for batch CLI color; correct for the interactive TUI (ADR 0044). Converging on Ink for all terminal output reduces agent hallucination from maintaining two rendering frameworks | Reject for batch CLI color; use `util.styleText` here. Ink is the chosen TUI stack and eventual direction for all terminal output (ADR 0044) |
 
 ## Consequences
 
@@ -88,18 +88,42 @@ Negative:
 
 ### Ink (React for terminals)
 
+Ink is the chosen interactive terminal UI stack for Parallix per ADR 0044 (Interactive
+entry points `px` / `px ui`). This ADR does not reject Ink as a terminal framework; it
+scopes batch color rendering (the concern of this ADR) from the interactive TUI.
+
+The forward direction is **one rendering framework for all terminal output**. The
+motivation is not richer visuals — it is that two terminal rendering frameworks create
+two paths agents forget to maintain. When errors, progress, or output can flow through
+either raw `console.log`/ANSI or Ink, agents updating one component will miss the other
+path most of the time. This snowballing effect is the main driver for converging on Ink
+for all terminal commands, including current headless console output. The single-stack
+direction eliminates the hallucination surface that two competing frameworks introduce.
+
+In the current scope, batch/headless CLI output — status lines, tables, exit-coded
+`--json` commands that must never initialize React, Ink, or cursor control — is served by
+`util.styleText`. The rich interactive TUI is served by Ink. Choosing `util.styleText` for
+batch color rendering does not contradict adopting Ink for the interactive layer or the
+eventual single-stack direction.
+
 Positive:
 - Extremely powerful for interactive UIs (spinners, layouts, live updates)
 - Component model scales to complex interfaces
+- The chosen stack for the interactive Parallix TUI (ADR 0044)
+- Single rendering framework eliminates the agent-hallucination surface of maintaining
+  two competing terminal paths
 
-Negative:
-- Massive dependency tree (react, ink, chalk, and dozens of transitive deps)
+Negative (as a batch CLI color solution specifically):
+- Massive dependency tree (react, ink, chalk, and dozens of transitive deps) for what
+  batch output needs
 - ESM-only in recent versions; CJS fork exists but is unofficial
-- Total architectural overkill for batch status output and tables
+- Architectural overkill for batch status output and tables, which must stay headless and
+  must not initialize React/Ink
 - Would require rewriting the entire fmt.js layer as React components
 
 ## Links
 
+- [ADR 0044](0044-workflow-distribution-model.md) — Ink is the chosen interactive terminal UI stack and eventual direction for all terminal output; this ADR's `util.styleText` decision applies to batch/headless CLI color rendering. The single-stack direction (Ink for all terminal output) reduces agent hallucination from maintaining two rendering frameworks
 - [Node.js `util.styleText` docs](https://nodejs.org/api/util.html#utilstyletextformat-text-options)
 - [NO_COLOR standard](https://no-color.org/)
 - [Gemini CLI package.json](https://github.com/google-gemini/gemini-cli/blob/main/packages/cli/package.json)
