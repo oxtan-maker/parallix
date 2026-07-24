@@ -4,6 +4,7 @@ title: Publish canonical ESM bundle as npm fallback
 status: backlog
 assignee: []
 created_date: '2026-07-19 00:00'
+updated_date: '2026-07-24 04:32'
 labels:
   - npm
   - distribution
@@ -24,6 +25,8 @@ priority: medium
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
 Change the npm fallback package to execute the canonical ESM bundle and complete the CLI-only package boundary for the next major release. The package includes the bundle, source map, assets represented by the generated manifest, licenses, README, and third-party notices, but no unbundled source tree or unrelated binary artifacts.
+
+SCOPE NOTE: this mission requires the CLI, the headless JSON surfaces, and the Ink runtime to be bundlable — TASK-2282 (Ink TUI wave 1) is what puts React/Ink into the production bundle and re-baselines the size gate. It does NOT require the local web board (TASK-2283), which is unprioritized and appears in none of the acceptance criteria; that dependency was packaging-completeness only and has been removed so the npm fallback is not blocked by an unbuilt UI. If a web board ships later, extending the package content allowlist is a separate, additive change.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -41,10 +44,12 @@ Change the npm fallback package to execute the canonical ESM bundle and complete
 
 ## Implementation Plan
 
+<!-- SECTION:PLAN:BEGIN -->
 1. Update package metadata and release content allowlist.
 2. Add license, SBOM, notice, checksum, and content gates.
 3. Pack and install in temporary prefixes across supported npm runtimes.
 4. Record major-version compatibility and rollback instructions.
+<!-- SECTION:PLAN:END -->
 
 ## Definition of Done
 
