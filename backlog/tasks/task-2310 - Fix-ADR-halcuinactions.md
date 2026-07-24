@@ -4,7 +4,7 @@ title: Fix ADR halcuinactions
 status: review
 assignee: [custom]
 created_date: '2026-07-24 04:44'
-labels: []
+labels: [ai_sdlc]
 dependencies: []
 ordinal: 66000
 ---
