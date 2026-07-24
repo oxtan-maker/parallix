@@ -1,7 +1,7 @@
 ---
 id: TASK-2310
 title: Fix ADR halcuinactions
-status: backlog
+status: refined
 assignee: [custom]
 created_date: '2026-07-24 04:44'
 labels: []
