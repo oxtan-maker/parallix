@@ -9,7 +9,14 @@ export interface GoalCheckRow {
 
 export interface CheckpointData {
   readonly missionId: MissionId;
+  /** Normalized name (e.g. "CP-2"). Used for board rendering and sorting. */
   readonly name: string;
+  /** Original filename with .md extension (e.g. "CP-2.md"). Preserves legacy output contract.
+   * Optional for backward compatibility; defaults to name when absent. */
+  readonly rawFilename?: string;
+  /** First line of the checkpoint file (e.g. "CP-2: Status Command Re-implemented"). Preserves legacy output contract.
+   * Optional for backward compatibility; defaults to empty string when absent. */
+  readonly firstLine?: string;
   readonly goalCheck: readonly GoalCheckRow[];
   /** Operator guidance rendered in checkpoint and board views; never executed. */
   readonly nextActionText: string;

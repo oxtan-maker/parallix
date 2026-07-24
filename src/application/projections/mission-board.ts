@@ -44,9 +44,14 @@ export interface MissionCard {
   readonly labels: readonly MissionLabel[];
   readonly lane: BoardLane;
   readonly status: MissionStatus;
+  /** Original raw status from backlog file (e.g. "ready", "approved"). Preserves legacy output contract. */
+  readonly rawStatus: string;
   readonly closed: boolean;
   readonly agent: AgentFamily | null;
+  /** Checkpoint filename with .md extension (e.g. "CP-2.md"). Preserves legacy output contract. */
   readonly checkpoint: string | null;
+  /** First line of checkpoint file (e.g. "CP-2: Status Command Re-implemented"). */
+  readonly checkpointDescription: string | null;
   readonly nextActionText: string | null;
   readonly gate: MissionOperationalFacts['latestGate'];
   readonly pullRequest: PullRequestReference | null;
@@ -104,9 +109,11 @@ export function projectMissionCard(mission: Mission, facts: MissionOperationalFa
     labels: mission.labels,
     lane: boardLane(mission),
     status: mission.status,
+    rawStatus: mission.rawStatus ?? mission.status,
     closed: isClosedMission(mission),
     agent: mission.assignee,
-    checkpoint: checkpoint?.name ?? null,
+    checkpoint: checkpoint?.rawFilename ?? checkpoint?.name ?? null,
+    checkpointDescription: checkpoint?.firstLine ?? null,
     nextActionText: checkpoint?.nextActionText ?? null,
     gate: facts.latestGate,
     pullRequest: reviewedChange?.kind === 'pull-request' ? reviewedChange : null,

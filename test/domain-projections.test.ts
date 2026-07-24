@@ -56,9 +56,10 @@ test('mission card contains the board decision inputs without changing lifecycle
     title: 'Domain model',
     labels: missionLabels(['ai_sdlc', 'bug']),
     status: 'integration',
+    rawStatus: 'approved',
     closedAt: null,
     assignee: implementer,
-    checkpoints: [{ missionId: id, name: 'CP-2', goalCheck: [{ criterion: 'x', evidence: 'y' }], nextActionText: 'integrate' }],
+    checkpoints: [{ missionId: id, name: 'CP-2', rawFilename: 'CP-2.md', firstLine: 'CP-2: Domain model', goalCheck: [{ criterion: 'x', evidence: 'y' }], nextActionText: 'integrate' }],
     review: applyReviewerCommand(reviewConversation(), {
       type: 'approve',
       decidedAt: 'now',
@@ -87,7 +88,7 @@ test('mission card contains the board decision inputs without changing lifecycle
 });
 
 test('board lanes are projections, not invented mission statuses', () => {
-  const open = { id, repositoryId: repo, title: 'x', labels: missionLabels(['unknown']), status: 'integration' as const, closedAt: null, assignee: null, checkpoints: [], review: null, netEngineeringLines: null };
+  const open = { id, repositoryId: repo, title: 'x', labels: missionLabels(['unknown']), status: 'integration' as const, rawStatus: 'approved', closedAt: null, assignee: null, checkpoints: [], review: null, netEngineeringLines: null };
   const integrated = { ...open, status: 'done' as const };
   const closed = { ...integrated, closedAt: '2026-07-22T10:00:00Z' };
   assert.equal(boardLane(closed), 'shipped');
@@ -96,7 +97,7 @@ test('board lanes are projections, not invented mission statuses', () => {
 });
 
 test('attention and WIP projections reflect blockers, gates, and lanes', () => {
-  const base = { id, repositoryId: repo, title: 'x', labels: missionLabels(['user_value']), lane: 'active' as const, status: 'active' as const, closed: false, agent: null, checkpoint: null, nextActionText: null, gate: 'passed' as const, pullRequest: null, reviewApproved: false, currentWork: null, blockingReason: null, flags: [], commands: [] };
+  const base = { id, repositoryId: repo, title: 'x', labels: missionLabels(['user_value']), lane: 'active' as const, status: 'active' as const, rawStatus: 'active', closed: false, agent: null, checkpoint: null, checkpointDescription: null, nextActionText: null, gate: 'passed' as const, pullRequest: null, reviewApproved: false, currentWork: null, blockingReason: null, flags: [], commands: [] };
   const blocked = { ...base, blockingReason: 'human decision' };
   const failed = { ...base, gate: 'failed' as const };
   assert.deepEqual(attentionQueue([failed, blocked]).map((card) => card.blockingReason), ['human decision', null]);
@@ -104,7 +105,7 @@ test('attention and WIP projections reflect blockers, gates, and lanes', () => {
 });
 
 test('board command projection exposes guarded current CLI actions', () => {
-  const active = { id, repositoryId: repo, title: 'x', labels: missionLabels(['user_value']), status: 'active' as const, closedAt: null, assignee: null, checkpoints: [], review: null, netEngineeringLines: null };
+  const active = { id, repositoryId: repo, title: 'x', labels: missionLabels(['user_value']), status: 'active' as const, rawStatus: 'active', closedAt: null, assignee: null, checkpoints: [], review: null, netEngineeringLines: null };
   const commands = availableBoardCommands(active, { reviewApproval: null });
   assert.equal(commands.find(({ command }) => command === 'active')?.enabled, true);
   assert.deepEqual(commands.find(({ command }) => command === 'handoff'), {
@@ -119,6 +120,7 @@ test('approved review exposes integrate without inventing another lifecycle stat
     title: 'x',
     labels: missionLabels(['user_value']),
     status: 'review' as const,
+    rawStatus: 'review',
     closedAt: null,
     assignee: null,
     checkpoints: [],
@@ -146,7 +148,7 @@ test('flow and median cycle projections operate on domain facts', () => {
   const flow = cumulativeFlow(new Map([[id, 'backlog']]), [transition], ['2026-07-22T08:00:00Z', '2026-07-22T10:00:00Z']);
   assert.equal(flow[0]?.counts.backlog, 1);
   assert.equal(flow[1]?.counts.active, 1);
-  const baseMission = { id, repositoryId: repo, title: 'x', labels: missionLabels(['unknown']), status: 'done' as const, closedAt: '2026-07-21T10:00:00Z', assignee: implementer, checkpoints: [], review: null, netEngineeringLines: 1 };
+  const baseMission = { id, repositoryId: repo, title: 'x', labels: missionLabels(['unknown']), status: 'done' as const, rawStatus: 'done', closedAt: '2026-07-21T10:00:00Z', assignee: implementer, checkpoints: [], review: null, netEngineeringLines: 1 };
   const baseOutcome = { missionId: id, repositoryId: repo, cycleTimeMinutes: 10, reviewFixRounds: 1, runs: [] };
   const series = medianCycleTimeSeries([
     { mission: requireClosedMission(baseMission), outcome: baseOutcome },
@@ -183,8 +185,8 @@ test('known repositories are a de-duplicated projection of observed work', () =>
 test('mission detail keeps review, checkpoint guidance, NEL, and statistics on one screen contract', () => {
   const mission = {
     id, repositoryId: repo, title: 'x', labels: missionLabels(['user_value', 'bug']), status: 'review' as const,
-    closedAt: null, assignee: implementer, netEngineeringLines: 12,
-    checkpoints: [{ missionId: id, name: 'CP-1', goalCheck: [{ criterion: 'x', evidence: 'y' }], nextActionText: 'address review' }],
+    rawStatus: 'review', closedAt: null, assignee: implementer, netEngineeringLines: 12,
+    checkpoints: [{ missionId: id, name: 'CP-1', rawFilename: 'CP-1.md', firstLine: 'CP-1: Review', goalCheck: [{ criterion: 'x', evidence: 'y' }], nextActionText: 'address review' }],
     review: applyReviewerCommand(startReview(
       reviewedSubject,
       reviewer,

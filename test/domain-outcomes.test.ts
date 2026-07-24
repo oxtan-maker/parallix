@@ -24,6 +24,7 @@ function closedMission(overrides: Partial<Omit<ClosedMission, 'status' | 'closed
     title: 'Model the domain',
     labels: missionLabels(['ai_sdlc', 'bug']),
     status: 'done',
+    rawStatus: 'done',
     closedAt: '2026-07-22T10:00:00Z',
     assignee: agentFamily('configured-implementer'),
     checkpoints: [],

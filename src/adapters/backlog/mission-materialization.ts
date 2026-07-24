@@ -9,6 +9,9 @@ import {
 /** Adapter-neutral mission data read from one committed repository view. */
 export type BacklogMissionRecord = MissionData & {
   readonly status: MissionStatus;
+  /** Original raw status from backlog file (e.g. "ready", "approved").
+   * Optional for backward compatibility; defaults to mapped status when absent. */
+  readonly rawStatus?: string;
 };
 
 /** Map current persisted and virtual Backlog vocabulary into domain states. */

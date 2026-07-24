@@ -52,6 +52,10 @@ export interface MissionData {
   readonly review: Review | null;
   /** Captured at handoff; null until the change-size measurement exists. */
   readonly netEngineeringLines: number | null;
+  /** Original raw status from the backlog file (e.g. "ready", "approved").
+   * Preserves the legacy `px status` output contract. Mapped status is `status` field.
+   * Optional for backward compatibility; defaults to mapped status when absent. */
+  readonly rawStatus?: string;
 }
 
 /** Includes the intentional post-integration, pre-cleanup `done` state. */

@@ -9,7 +9,7 @@ import { MACHINE_WRITTEN_PATH_INVENTORY } from '../src/platform/runtime/lib/core
 
 const repositoryMission: Mission = {
   id: missionId('task-2294'), repositoryId: repositoryId('parallix'), title: 'authoritative',
-  labels: missionLabels(['user_value', 'bug']), status: 'active', closedAt: null, assignee: agentFamily('codex'),
+  labels: missionLabels(['user_value', 'bug']), status: 'active', rawStatus: 'active', closedAt: null, assignee: agentFamily('codex'),
   checkpoints: [], review: null, netEngineeringLines: 10,
 };
 

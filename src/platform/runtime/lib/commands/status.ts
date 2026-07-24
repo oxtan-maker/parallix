@@ -1,10 +1,17 @@
 import { detectRebaseState, getCurrentBranch, getUncommittedCount, getLastThreeCommits, run } from '../core/git.js';
 import { findTaskFile, getTaskStatus } from '../tools/backlog.js';
-import { findMissionDir, findCheckpoints, getFirstLine, inferSlug, missionBranchPrefix, missionBranchName, getPrimaryWorktree } from '../core/mission-utils.js';
+import { inferSlug, missionBranchPrefix, missionBranchName, getPrimaryWorktree } from '../core/mission-utils.js';
+// findMissionDir, findCheckpoints, getFirstLine are now routed through the projection (SC9).
+// Kept for parse-primitive fallback in the projection-unavailable path.
+import { findMissionDir, findCheckpoints, getFirstLine } from '../core/mission-utils.js';
 import { WORKFLOW_AGENT_NAMES, eligibleAgentsForStep, readAgentConfigOrExit, workflowLauncherStatus } from '../agents/agents.js';
 import { getPrStatus } from '../tools/forgejo.js';
 import * as path from 'node:path';
 import * as fmt from '../core/fmt.js';
+
+// SC8 / SC9 — projection wiring (dynamic imports for CJS rollback compat)
+// These modules are not in the dist/ CJS bundle, so they are loaded lazily.
+import type { BoardProjectionBuilder } from '../../../../application/projections/board-readers.js';
 
 /** @param {string} porcelain */
 function parseWorktreeList(porcelain: string) {
@@ -103,8 +110,52 @@ function logRebaseDiagnostics(log: Function, label: string, rebaseState: {detach
   });
 }
 
+// ---------------------------------------------------------------------------
+// SC8 — Composition root: build BoardProjectionBuilder over concrete adapters
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a lightweight in-memory SQLite adapter set for projection reading.
+ * Falls back to empty repos when SQLite is unavailable.
+ * Uses dynamic imports for CJS rollback bundle compatibility.
+ */
+async function createProjectionDeps(rootDir: string) {
+  let blocklistRepo: any;
+  let historyRepo: any;
+
+  try {
+    const { SqliteDatabaseAdapter } = await import('../../../../adapters/sqlite/database-adapter.js');
+    const { SqliteBlocklistRepository } = await import('../../../../adapters/sqlite/blocklist-repository.js');
+    const { SqliteOperationalHistoryRepository } = await import('../../../../adapters/sqlite/operational-history-repository.js');
+    const db = new SqliteDatabaseAdapter();
+    blocklistRepo = new SqliteBlocklistRepository(db);
+    historyRepo = new SqliteOperationalHistoryRepository(db);
+  } catch {
+    // SQLite unavailable (CJS rollback bundle or missing modules) — use empty fallbacks
+    blocklistRepo = { findAll: async () => [], findByAgent: async () => undefined };
+    historyRepo = { findAll: async () => [] };
+  }
+
+  return { rootDir, blocklistRepo, historyRepo };
+}
+
+/** Build BoardProjectionBuilder from production concrete adapters (SC8). */
+async function buildProjectionBuilder(rootDir: string): Promise<BoardProjectionBuilder> {
+  const deps = await createProjectionDeps(rootDir);
+  const { createBoardProjectionBuilder } = await import('../../../../application/projections/create-board-projection-builder.js');
+  const { repositoryId } = await import('../../../../domain/repository.js');
+  const { agentFamily } = await import('../../../../domain/agents.js');
+  return createBoardProjectionBuilder({
+    rootDir,
+    repositoryId: repositoryId(rootDir),
+    blocklistRepo: deps.blocklistRepo,
+    historyRepo: deps.historyRepo,
+    knownAgentFamilies: WORKFLOW_AGENT_NAMES.map((name: string) => agentFamily(name)),
+  });
+}
+
 /** @param {string[]} args @param {{exit?: Function, log?: Function, inferSlugFn?: Function, getCurrentBranchFn?: Function, findTaskFileFn?: Function, getTaskStatusFn?: Function, findMissionDirFn?: Function, findCheckpointsFn?: Function, getFirstLineFn?: Function, getPrStatusFn?: Function, findStaleMissionWorktreesFn?: Function, readAgentConfigOrExitFn?: Function, eligibleAgentsForStepFn?: Function, allWorkflowAgentNamesFn?: Function, workflowLauncherStatusFn?: Function, getLastThreeCommitsFn?: Function, getUncommittedCountFn?: Function, detectRebaseStateFn?: Function}} opts */
-function status(args: string[], opts: {exit?: Function, log?: Function, inferSlugFn?: Function, getCurrentBranchFn?: Function, findTaskFileFn?: Function, getTaskStatusFn?: Function, findMissionDirFn?: Function, findCheckpointsFn?: Function, getFirstLineFn?: Function, getPrStatusFn?: Function, findStaleMissionWorktreesFn?: Function, readAgentConfigOrExitFn?: Function, eligibleAgentsForStepFn?: Function, allWorkflowAgentNamesFn?: Function, workflowLauncherStatusFn?: Function, getLastThreeCommitsFn?: Function, getUncommittedCountFn?: Function, detectRebaseStateFn?: Function}) {
+async function status(args: string[], opts: {exit?: Function, log?: Function, inferSlugFn?: Function, getCurrentBranchFn?: Function, findTaskFileFn?: Function, getTaskStatusFn?: Function, findMissionDirFn?: Function, findCheckpointsFn?: Function, getFirstLineFn?: Function, getPrStatusFn?: Function, findStaleMissionWorktreesFn?: Function, readAgentConfigOrExitFn?: Function, eligibleAgentsForStepFn?: Function, allWorkflowAgentNamesFn?: Function, workflowLauncherStatusFn?: Function, getLastThreeCommitsFn?: Function, getUncommittedCountFn?: Function, detectRebaseStateFn?: Function}) {
   const exit = opts.exit || process.exit;
   const log = opts.log || fmt.log.plain;
   const inferSlugFn = opts.inferSlugFn || inferSlug;
@@ -141,22 +192,54 @@ function status(args: string[], opts: {exit?: Function, log?: Function, inferSlu
   }
 
   if (slug) {
-    const taskFile = findTaskFileFn(slug);
-    const taskStatus = getTaskStatusFn(taskFile);
-    log(`Backlog status: ${taskStatus || 'unknown'}`);
+    // SC9 — route mission-specific output through the BoardProjectionBuilder.
+    // The projection is the single materialization path; parse primitives are
+    // called internally by the concrete adapters, not directly here.
+    const projection = await buildProjectionBuilder(process.cwd()).then(
+      (builder) => builder.build(),
+    ).catch(() => null);
 
-    const missionDir = findMissionDirFn(slug);
-    if (missionDir) {
-      const checkpoints = findCheckpointsFn(missionDir);
-      if (checkpoints.length > 0) {
-        const lastCP = checkpoints[checkpoints.length - 1];
-        const firstLine = getFirstLineFn(lastCP);
-        log(`Last checkpoint: ${path.basename(lastCP)} - ${firstLine}`);
+    /** Render checkpoint line via parse primitives (shared by both fallback paths). */
+    function logLastCheckpoint(taskSlug) {
+      const missionDir = findMissionDirFn(taskSlug);
+      if (missionDir) {
+        const checkpoints = findCheckpointsFn(missionDir);
+        if (checkpoints.length > 0) {
+          const lastCP = checkpoints[checkpoints.length - 1];
+          const firstLine = getFirstLineFn(lastCP);
+          log(`Last checkpoint: ${path.basename(lastCP)} - ${firstLine}`);
+        } else {
+          log('Last checkpoint: none');
+        }
       } else {
-        log('Last checkpoint: none');
+        log('Last checkpoint: unknown');
+      }
+    }
+
+    if (projection) {
+      const card = projection.stages.flatMap((s) => s.cards).find(
+        (c) => c.id.toLowerCase() === slug.toLowerCase(),
+      );
+      if (card) {
+        log(`Backlog status: ${card.rawStatus ?? card.status}`);
+        if (card.checkpoint) {
+          log(`Last checkpoint: ${card.checkpoint} - ${card.checkpointDescription || ''}`);
+        } else {
+          log('Last checkpoint: none');
+        }
+      } else {
+        // Fallback to parse primitives if projection has no card for this slug
+        const taskFile = findTaskFileFn(slug);
+        const taskStatus = getTaskStatusFn(taskFile);
+        log(`Backlog status: ${taskStatus || 'unknown'}`);
+        logLastCheckpoint(slug);
       }
     } else {
-      log('Last checkpoint: unknown');
+      // Projection unavailable — fall back to parse primitives
+      const taskFile = findTaskFileFn(slug);
+      const taskStatus = getTaskStatusFn(taskFile);
+      log(`Backlog status: ${taskStatus || 'unknown'}`);
+      logLastCheckpoint(slug);
     }
 
     // Forgejo PR state
@@ -216,8 +299,10 @@ function status(args: string[], opts: {exit?: Function, log?: Function, inferSlu
 
 (status as any).parseWorktreeList = parseWorktreeList;
 (status as any).findStaleMissionWorktrees = findStaleMissionWorktrees;
+(status as any).createProjectionDeps = createProjectionDeps;
+(status as any).buildProjectionBuilder = buildProjectionBuilder;
 export default status;
-export { status, parseWorktreeList, findStaleMissionWorktrees };
+export { status, parseWorktreeList, findStaleMissionWorktrees, createProjectionDeps, buildProjectionBuilder };
 
 // CJS compat: ensure require() returns the function directly
 declare const module: { exports: any } | undefined;

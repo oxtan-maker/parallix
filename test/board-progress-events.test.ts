@@ -10,11 +10,11 @@ function makeActivePort(overrides: Record<string, unknown> = {}) {
     async validateSlug(slug: string) { calls.push(`validate:${slug}`); return null; },
     async launch(slug: string, agent: string) {
       calls.push(`launch:${slug}:${agent ?? 'default'}`);
-      return { agent: agent ?? 'codex', evidence: { id: 'launch-1', source: 'task-markdown', detail: 'agent launched' } };
+      return { agent: agent ?? 'codex', evidence: { id: 'launch-1', source: 'task-markdown' as const, detail: 'agent launched' } };
     },
     async recordLaunch(_slug: string, _agent: string) {
       calls.push(`record:${_slug}:${_agent}`);
-      return { id: 'record-1', source: 'task-markdown', detail: 'active recorded' };
+      return { id: 'record-1', source: 'task-markdown' as const, detail: 'active recorded' };
     },
     async handoff(slug: string, agent: string) { calls.push(`handoff:${slug}:${agent}`); },
     ...overrides,

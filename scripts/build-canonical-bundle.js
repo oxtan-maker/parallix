@@ -27,7 +27,7 @@ esbuild.buildSync({
   packages: 'bundle',
   logLevel: 'error',
   banner: {
-    js: "import { fileURLToPath as __pxFileURLToPath } from 'node:url'; import { dirname as __pxDirname } from 'node:path'; const __filename = __pxFileURLToPath(import.meta.url); const __dirname = __pxDirname(__filename); const module = { exports: {} };",
+    js: "import { fileURLToPath as __pxFileURLToPath } from 'node:url'; import { dirname as __pxDirname } from 'node:path'; import { createRequire as __pxCreateRequire } from 'node:module'; const __filename = __pxFileURLToPath(import.meta.url); const __dirname = __pxDirname(__filename); const module = { exports: {} }; const require = __pxCreateRequire(import.meta.url);",
   },
 });
 

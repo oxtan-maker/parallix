@@ -70,6 +70,19 @@ const allRootTestFiles = fs.readdirSync(testRoot)
   // This suite exercises a real agent runner and is likewise integration-only.
   .filter(file => file !== 'e2e-real-agent-smoke.test.ts');
 
+// Discover test files from known subdirectories.
+function findSubdirTests(subdir) {
+  const dirPath = path.join(testRoot, subdir);
+  if (!fs.existsSync(dirPath) || !fs.statSync(dirPath).isDirectory()) {
+    return [];
+  }
+  return fs.readdirSync(dirPath)
+    .sort()
+    .filter(file => /\.test\.(?:js|ts)$/.test(file))
+    .map(file => path.join(testRoot, subdir, file));
+}
+const allSubdirTestFiles = findSubdirTests('adapters');
+
 // These markers identify tests that cross a real process, Git/worktree,
 // package, or network boundary. Keep that coverage intact, but run it only
 // through the explicit integration command rather than the hermetic default.
@@ -104,18 +117,28 @@ const knownIntegrationTestFiles = new Set([
   'review-prompts.test.ts',
   'task-1416-repro.test.ts'
 ]);
+
+// Classify subdir tests through the same boundary filter as root-level tests.
+const subdirIntegrationFiles = allSubdirTestFiles.filter(
+  fp => boundaryDependencyPattern.test(fs.readFileSync(fp, 'utf8')),
+);
+const subdirUnitFiles = allSubdirTestFiles.filter(fp => !subdirIntegrationFiles.includes(fp));
+
 const integrationTestFiles = allRootTestFiles
   .filter(file => knownIntegrationTestFiles.has(file)
     || boundaryDependencyPattern.test(fs.readFileSync(path.join(testRoot, file), 'utf8')))
   .map(file => path.join(testRoot, file));
-const defaultTestFiles = allRootTestFiles
-  .filter(file => !integrationTestFiles.includes(path.join(testRoot, file)))
-  .map(file => path.join(testRoot, file));
+const defaultTestFiles = [
+  ...allRootTestFiles
+    .filter(file => !integrationTestFiles.includes(path.join(testRoot, file)))
+    .map(file => path.join(testRoot, file)),
+  ...subdirUnitFiles,
+];
 const requestedArgs = process.argv.slice(2);
 const runsIntegrationSuite = requestedArgs.includes('--integration');
 const requestedTestFiles = requestedArgs.filter(arg => arg !== '--integration');
 const testFiles = runsIntegrationSuite
-  ? integrationTestFiles
+  ? [...integrationTestFiles, ...subdirIntegrationFiles]
   : (requestedTestFiles.length > 0 ? requestedTestFiles : defaultTestFiles);
 
 // Build the canonical bundle before every suite so a direct runner invocation

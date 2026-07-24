@@ -1,7 +1,7 @@
 import type { AgentAvailability, AgentFamily } from '../../domain/agents.js';
 import type { Mission, MissionId } from '../../domain/mission.js';
 import type { RepositoryId } from '../../domain/repository.js';
-import type { Review } from '../../domain/review.js';
+import type { Review, ReviewedRevision } from '../../domain/review.js';
 import type { SourceFact } from '../../platform/runtime/lib/application/contracts.js';
 import type { BoardProjection, BoardMetrics } from './board.js';
 import { buildBoardMetrics, buildBoardProjection } from './board.js';
@@ -31,7 +31,7 @@ export interface ReviewReadAdapter {
   /** Load review for a mission. Returns null if no review exists. */
   loadReview(_missionId: MissionId): Promise<Review | null>;
   /** Load review approval status from the review surface. */
-  loadReviewApproval(_missionId: MissionId): Promise<{ subject: unknown; approvedAt: string | null } | null>;
+  loadReviewApproval(_missionId: MissionId): Promise<{ subject: ReviewedRevision; approvedAt: string | null } | null>;
 }
 
 /** Read adapter for gate state from integration pipeline results. */

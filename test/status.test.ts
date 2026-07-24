@@ -142,11 +142,11 @@ test('findStaleMissionWorktrees returns git remove command for missing task file
   assert.ok(stale[0].cleanupCommand.includes('git branch -D'));
 });
 
-test('status prints mission details and agent matrix for inferred slug', () => {
+test('status prints mission details and agent matrix for inferred slug', async () => {
   const lines = [];
   let exitCode = null;
 
-  status([], {
+  await status([], {
     inferSlugFn: () => 'task-1031',
     getCurrentBranchFn: () => 'mission/task-1031',
     findTaskFileFn: () => '/tmp/task-1031.md',
@@ -176,10 +176,10 @@ test('status prints mission details and agent matrix for inferred slug', () => {
   assert.ok(lines.includes('Uncommitted files: 2'));
 });
 
-test('status agent matrix includes every workflow launcher even when not step-eligible', () => {
+test('status agent matrix includes every workflow launcher even when not step-eligible', async () => {
   const lines = [];
 
-  status(['task-1031'], {
+  await status(['task-1031'], {
     inferSlugFn: () => 'task-1031',
     getCurrentBranchFn: () => 'mission/task-1031',
     findTaskFileFn: () => '/tmp/task-1031.md',
@@ -200,11 +200,11 @@ test('status agent matrix includes every workflow launcher even when not step-el
   assert.ok(lines.includes('  future-agent: supported | eligible: -,-'));
 });
 
-test('status prints stale worktrees only when no explicit slug is provided', () => {
+test('status prints stale worktrees only when no explicit slug is provided', async () => {
   const lines = [];
   let exitCode = null;
 
-  status(['task-1031'], {
+  await status(['task-1031'], {
     inferSlugFn: () => 'task-1031',
     getCurrentBranchFn: () => 'mission/task-1031',
     findTaskFileFn: () => null,
@@ -228,10 +228,10 @@ test('status prints stale worktrees only when no explicit slug is provided', () 
   assert.ok(lines.includes('Forgejo PR: none'));
 });
 
-test('status reports detached-head rebase diagnostics for the current worktree', () => {
+test('status reports detached-head rebase diagnostics for the current worktree', async () => {
   const lines = [];
 
-  status(['task-1322'], {
+  await status(['task-1322'], {
     inferSlugFn: () => 'task-1322',
     getCurrentBranchFn: () => '',
     findTaskFileFn: () => '/tmp/task-1322.md',
@@ -267,10 +267,10 @@ test('status reports detached-head rebase diagnostics for the current worktree',
   assert.match(output, /missions\/task-1322\/CP-4\.md/);
 });
 
-test('status reports stale worktree rebase diagnostics instead of only cleanup hints', () => {
+test('status reports stale worktree rebase diagnostics instead of only cleanup hints', async () => {
   const lines = [];
 
-  status([], {
+  await status([], {
     inferSlugFn: () => null,
     getCurrentBranchFn: () => 'main',
     readAgentConfigOrExitFn: () => ({}),

@@ -46,6 +46,7 @@ function mission(status: Mission['status'] = 'refined'): Mission {
     title: 'Model the domain',
     labels: missionLabels(['user_value']),
     status,
+    rawStatus: status,
     closedAt: null,
     assignee: null,
     checkpoints: [],
@@ -91,6 +92,8 @@ test('mission lifecycle follows the command-owned path without UI-only states', 
     checkpoints: [{
       missionId: id,
       name: 'CP-1',
+      rawFilename: 'CP-1.md',
+      firstLine: 'CP-1: Model the domain',
       goalCheck: [{ criterion: 'model', evidence: 'test' }],
       nextActionText: 'request review',
     }],
@@ -133,7 +136,7 @@ test('mission lifecycle rejects unsupported jumps and missing handoff evidence',
   assert.throws(
     () => decideMission({
       ...mission('active'),
-      checkpoints: [{ missionId: id, name: 'CP-1', goalCheck: [], nextActionText: 'x' }],
+      checkpoints: [{ missionId: id, name: 'CP-1', rawFilename: 'CP-1.md', firstLine: 'CP-1', goalCheck: [], nextActionText: 'x' }],
     }, {
       type: 'submit-for-review',
       gatesPassed: false,
@@ -200,6 +203,8 @@ test('review assignment accepts only reviewers eligible in user configuration', 
     checkpoints: [{
       missionId: id,
       name: 'CP-1',
+      rawFilename: 'CP-1.md',
+      firstLine: 'CP-1: Review ready',
       goalCheck: [{ criterion: 'review', evidence: 'ready' }],
       nextActionText: 'request review',
     }],
@@ -289,6 +294,8 @@ test('mission approval must preserve the exact reviewed revision', () => {
     checkpoints: [{
       missionId: id,
       name: 'CP-1',
+      rawFilename: 'CP-1.md',
+      firstLine: 'CP-1: Model the domain',
       goalCheck: [{ criterion: 'model', evidence: 'test' }],
       nextActionText: 'review',
     }],
@@ -378,8 +385,8 @@ test('integration queue remains a required durable lifecycle transition', () => 
 });
 
 test('recording the same checkpoint replaces stale evidence after a redo', () => {
-  const first = { missionId: id, name: 'CP-1', goalCheck: [{ criterion: 'old', evidence: 'old' }], nextActionText: 'old action' };
-  const replacement = { missionId: id, name: 'CP-1', goalCheck: [{ criterion: 'new', evidence: 'new' }], nextActionText: 'new action' };
+  const first = { missionId: id, name: 'CP-1', rawFilename: 'CP-1.md', firstLine: 'CP-1: old', goalCheck: [{ criterion: 'old', evidence: 'old' }], nextActionText: 'old action' };
+  const replacement = { missionId: id, name: 'CP-1', rawFilename: 'CP-1.md', firstLine: 'CP-1: new', goalCheck: [{ criterion: 'new', evidence: 'new' }], nextActionText: 'new action' };
   const checkpoints = recordCheckpoint(recordCheckpoint([], first), replacement);
   assert.equal(checkpoints.length, 1);
   assert.equal(checkpoints[0]?.nextActionText, 'new action');
