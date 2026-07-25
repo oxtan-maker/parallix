@@ -25,6 +25,8 @@ const ALLOWED_ASSEMBLERS = new Set([
   'src/application/projections/create-board-projection-builder.ts',
   // SC8/SC9: status.ts now routes through BoardProjectionBuilder
   'src/platform/runtime/lib/commands/status.ts',
+  // TUI shell assembles a read-only projection via BoardProjectionBuilder
+  'src/interfaces/tui/ui-command.ts',
 ]);
 
 // ---------------------------------------------------------------------------

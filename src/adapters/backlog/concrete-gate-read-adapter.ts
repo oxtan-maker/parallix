@@ -3,6 +3,7 @@ import path from 'node:path';
 
 import type { MissionId } from '../../domain/mission.js';
 import type { GateReadAdapter } from '../../application/projections/board-readers.js';
+import { findMissionDir } from '../../platform/runtime/lib/core/mission-utils.js';
 
 // ---------------------------------------------------------------------------
 // Parse-primitive types
@@ -11,11 +12,10 @@ import type { GateReadAdapter } from '../../application/projections/board-reader
 type FindMissionDirFn = (_slug: string, _rootDir?: string, _options?: { missionPath?: string }) => string | null;
 
 // ---------------------------------------------------------------------------
-// Defaults
+// Defaults — static imports (no circular deps)
 // ---------------------------------------------------------------------------
 
 function defaultFindMissionDir(): FindMissionDirFn {
-  const { findMissionDir } = require('../../platform/runtime/lib/core/mission-utils.js');
   return findMissionDir as FindMissionDirFn;
 }
 

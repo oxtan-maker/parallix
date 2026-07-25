@@ -63,7 +63,10 @@
     "test:bundle": "node --enable-source-maps build/px.mjs --version"
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "^0.80.6"
+    "@earendil-works/pi-coding-agent": "^0.80.6",
+    "@types/react": "^19.2.14",
+    "ink": "^6.8.0",
+    "react": "^19.2.3"
   },
   "devDependencies": {
     "@stryker-mutator/core": "^9.6.1",

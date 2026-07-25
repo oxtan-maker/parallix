@@ -56,9 +56,10 @@ export const KNOWN_COMMANDS: string[] = [
   'aliases',
   'config',
   'diff',
+  'ui',
 ];
 
-const READ_ONLY_COMMANDS = new Set(['config']);
+const READ_ONLY_COMMANDS = new Set(['config', 'ui']);
 
 type Command = (..._args: any[]) => unknown;
 const COMMANDS: Record<string, Command> = {
@@ -66,6 +67,10 @@ const COMMANDS: Record<string, Command> = {
   'mission-start': missionStart, 'mutation-gate': mutationGate, rebase,
   'resolve-conflict': resolveConflict, review, setup, 'setup-review': setupReview,
   stats, status, verify,
+  ui: async (...args: any[]) => {
+    const { runUiCommand } = await import('../../interfaces/tui/ui-command.js');
+    return runUiCommand(...args);
+  },
 };
 
 function loadStateMapForAliases(options = {}): Record<string, unknown> {
@@ -152,6 +157,7 @@ async function main(args = process.argv.slice(2), options: MainOptions = {}) {
   const commandFn = options.commandFns && Object.prototype.hasOwnProperty.call(options.commandFns, command)
     ? options.commandFns[command]
     : staticCommandFn;
+
   if (commandFn) {
     if (!READ_ONLY_COMMANDS.has(command)) {
       const initResult = ensureStandaloneGitRepoFn(cwdFn());
@@ -260,6 +266,7 @@ ${fmt.bold('Core Commands:')}
   diff [<slug>]                Launch the primary local diff tool for branch-vs-main review.
   stats [<csv_file>|--csv-file <path>] [--today YYYY-MM-DD|--from YYYY-MM-DD --to YYYY-MM-DD] [--output <file>]  Print parallix weekly or range tables from <PARALLIX_HOME>/stats.csv; legacy retrospective CSVs remain supported.
   config                Print the effective configuration (built-in defaults merged with workflow.config.json). Read-only.
+  ui                    Render the static Ink TUI board shell. Read-only; press q or Ctrl+C to exit.
   aliases               Print the derived command-alias table (state-map virtual states → canonical commands).
 
 ${fmt.bold('Utility Commands:')}

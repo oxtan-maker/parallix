@@ -6,6 +6,8 @@ import { agentFamily, type AgentFamily } from '../../domain/agents.js';
 import type { RepositoryId } from '../../domain/repository.js';
 import type { SourceFact } from '../../platform/runtime/lib/application/contracts.js';
 import type { MissionReadAdapter } from '../../application/projections/board-readers.js';
+import { getFirstLine, findCheckpoints, findMissionDir, resolveWorktree } from '../../platform/runtime/lib/core/mission-utils.js';
+import { getTaskAssignee, getTaskFrontmatterValue, getTaskLabels, getTaskStatus, getTaskStorage, resolveTaskFile } from '../../platform/runtime/lib/tools/backlog.js';
 import {
   materializeBacklogMission,
   missionStatusFromBacklog,
@@ -31,56 +33,46 @@ type ResolveWorktreeFn = (_slug: string, _options?: { cwd?: string; gitFn?: Func
 type GetFirstLineFn = (_filePath: string) => string;
 
 // ---------------------------------------------------------------------------
-// Defaults — resolve at runtime to avoid circular imports
+// Defaults — use static imports (no circular deps with backlog/mission-utils)
 // ---------------------------------------------------------------------------
 
 function defaultResolveTaskFile(): ResolveTaskFileFn {
-  const { resolveTaskFile } = require('../../platform/runtime/lib/tools/backlog.js');
   return resolveTaskFile as ResolveTaskFileFn;
 }
 
 function defaultGetTaskStatus(): GetTaskStatusFn {
-  const { getTaskStatus } = require('../../platform/runtime/lib/tools/backlog.js');
   return getTaskStatus as GetTaskStatusFn;
 }
 
 function defaultGetTaskAssignee(): GetTaskAssigneeFn {
-  const { getTaskAssignee } = require('../../platform/runtime/lib/tools/backlog.js');
   return getTaskAssignee as GetTaskAssigneeFn;
 }
 
 function defaultGetTaskFrontmatterValue(): GetTaskFrontmatterValueFn {
-  const { getTaskFrontmatterValue } = require('../../platform/runtime/lib/tools/backlog.js');
   return getTaskFrontmatterValue as GetTaskFrontmatterValueFn;
 }
 
 function defaultGetTaskLabels(): GetTaskLabelsFn {
-  const { getTaskLabels } = require('../../platform/runtime/lib/tools/backlog.js');
   return getTaskLabels as GetTaskLabelsFn;
 }
 
 function defaultGetTaskStorage(): GetTaskStorageFn {
-  const { getTaskStorage } = require('../../platform/runtime/lib/tools/backlog.js');
   return getTaskStorage as GetTaskStorageFn;
 }
 
 function defaultFindMissionDir(): FindMissionDirFn {
-  const { findMissionDir } = require('../../platform/runtime/lib/core/mission-utils.js');
   return findMissionDir as FindMissionDirFn;
 }
 
 function defaultFindCheckpoints(): FindCheckpointsFn {
-  const { findCheckpoints } = require('../../platform/runtime/lib/core/mission-utils.js');
   return findCheckpoints as FindCheckpointsFn;
 }
 
 function defaultResolveWorktree(): ResolveWorktreeFn {
-  const { resolveWorktree } = require('../../platform/runtime/lib/core/mission-utils.js');
   return resolveWorktree as ResolveWorktreeFn;
 }
 
 function defaultGetFirstLine(): GetFirstLineFn {
-  const { getFirstLine } = require('../../platform/runtime/lib/core/mission-utils.js');
   return getFirstLine as GetFirstLineFn;
 }
 

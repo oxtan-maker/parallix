@@ -136,6 +136,9 @@ process.exit(97);
   fs.chmodSync(curlShim, 0o755);
   process.env.PARALLIX_TEST_REAL_CURL = realCurl;
   process.env.PATH = `${curlBin}${path.delimiter}${process.env.PATH || ''}`;
+  // Expose the marker path so tests that legitimately spawn CLI child
+  // processes (which make curl calls) can acknowledge them.
+  process.env.PARALLIX_TEST_CURL_MARKER = curlMarker;
   process.on('exit', () => {
     if (fs.existsSync(curlMarker)) {
       process.stderr.write(`Unmocked unit-test curl invocation(s):\n${fs.readFileSync(curlMarker, 'utf8')}`);

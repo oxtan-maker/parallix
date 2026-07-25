@@ -3,6 +3,7 @@ import { agentFamily } from '../../domain/agents.js';
 import type { AgentReadAdapter } from '../../application/projections/board-readers.js';
 import type { AgentBlockEntry, AgentBlocklistRepository } from '../sqlite/ports.js';
 import type { MissionId } from '../../domain/mission.js';
+import { getTaskAssignee, resolveTaskFile } from '../../platform/runtime/lib/tools/backlog.js';
 
 // ---------------------------------------------------------------------------
 // Parse-primitive types
@@ -12,16 +13,14 @@ type GetTaskAssigneeFn = (_taskFilePath: string) => string | null;
 type ResolveTaskFileFn = (_slug: string, _rootDir?: string) => { ok: boolean; taskFile?: string; matches: string[]; reason?: string };
 
 // ---------------------------------------------------------------------------
-// Defaults
+// Defaults — static imports (no circular deps)
 // ---------------------------------------------------------------------------
 
 function defaultResolveTaskFile(): ResolveTaskFileFn {
-  const { resolveTaskFile } = require('../../platform/runtime/lib/tools/backlog.js');
   return resolveTaskFile as ResolveTaskFileFn;
 }
 
 function defaultGetTaskAssignee(): GetTaskAssigneeFn {
-  const { getTaskAssignee } = require('../../platform/runtime/lib/tools/backlog.js');
   return getTaskAssignee as GetTaskAssigneeFn;
 }
 

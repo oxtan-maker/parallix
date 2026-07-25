@@ -124,9 +124,19 @@ const subdirIntegrationFiles = allSubdirTestFiles.filter(
 );
 const subdirUnitFiles = allSubdirTestFiles.filter(fp => !subdirIntegrationFiles.includes(fp));
 
+// tui-spawn.test.ts uses execFileSync but is an artifact-verification test
+// (spawns dist/px.js and build/px.mjs to check exit codes). In the default
+// suite the child inherits the curl shim and temp HOME — the 30 s timeout
+// and the marker unlink in after() absorb the shim impact. When explicitly
+// requested as the sole file, the bootstrap preload is bypassed so the child
+// runs with the real environment.
+const artifactSpawnTestFiles = new Set(['tui-spawn.test.ts']);
 const integrationTestFiles = allRootTestFiles
-  .filter(file => knownIntegrationTestFiles.has(file)
-    || boundaryDependencyPattern.test(fs.readFileSync(path.join(testRoot, file), 'utf8')))
+  .filter(file => {
+    if (artifactSpawnTestFiles.has(file)) { return false; }
+    return knownIntegrationTestFiles.has(file)
+      || boundaryDependencyPattern.test(fs.readFileSync(path.join(testRoot, file), 'utf8'));
+  })
   .map(file => path.join(testRoot, file));
 const defaultTestFiles = [
   ...allRootTestFiles
@@ -166,15 +176,20 @@ if (testRuntimeBuild.status !== 0) {
 
 // The real-agent smoke test deliberately reads the operator's configured Pi
 // model/auth files and then copies them into its own disposable state root.
-// Do not preload the unit-test HOME isolation shim for that explicit e2e run:
-// the shim replaces HOME before the fixture can read the real Pi config.
+// The tui-spawn test, when explicitly requested as the sole file, also benefits
+// from running without the bootstrap's temp HOME and curl shim.
+// Do not preload the unit-test HOME isolation shim for these e2e runs.
+// When tui-spawn is batched with other files the bootstrap stays active — the
+// 30 s timeout and marker unlink in the test handle the shim impact.
 const runsRealAgentSmoke = requestedTestFiles.some(
   file => path.basename(file) === 'e2e-real-agent-smoke.test.ts'
 );
 const runsLifecycleE2E = requestedTestFiles.some(
   file => path.basename(file) === 'e2e-mission-lifecycle.test.ts'
 );
-const runsIntegrationE2E = runsRealAgentSmoke || runsLifecycleE2E;
+const runsTuiSpawnSolo = requestedTestFiles.length === 1 &&
+  requestedTestFiles.some(file => path.basename(file) === 'tui-spawn.test.ts');
+const runsIntegrationE2E = runsRealAgentSmoke || runsLifecycleE2E || runsTuiSpawnSolo;
 const bootstrapArgs = runsIntegrationE2E
   ? []
   : [
