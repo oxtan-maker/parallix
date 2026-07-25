@@ -744,7 +744,7 @@ test('applyExecuteFallback rewrites backlog assignee and returns the fallback ag
     actual: 'codex',
     taskResolution: { ok: true, taskFile: '/tmp/task.md' },
     log: () => {},
-    transitionTaskFn: (slug, status, opts) => { transitions.push({ slug, status, opts }); return true; }
+    transitionTaskFn: (slug, status, opts) => { transitions.push({ slug, status, opts }); return Promise.resolve(true); }
   });
   assert.equal(next, 'codex');
   assert.equal(transitions.length, 1);
@@ -763,7 +763,7 @@ test('applyExecuteFallback logs warning and returns fallback agent even if git c
     actual: 'codex',
     taskResolution: { ok: true, taskFile: '/tmp/task.md' },
     log: (msg) => logs.push(msg),
-    transitionTaskFn: () => false // transition/commit fails
+    transitionTaskFn: () => Promise.resolve(false) // transition/commit fails
   });
   assert.equal(next, 'codex');
   // transitionTask handles its own logging now
@@ -918,6 +918,9 @@ test('selectLaunchAndRecord writes Backlog before the launcher resolves its fina
     log: () => {}
   });
 
+  // transitionTaskFn is now async; yield two microtask turns so onLaunch's
+  // `await transitionTaskFn(...)` settles before startAgentFn captures the count.
+  await Promise.resolve();
   await Promise.resolve();
   assert.equal(transitionCountAtReturn, 1, 'transitionTask must run during onLaunch, before the final result resolves');
   assert.equal(transitions[0].status, 'active');

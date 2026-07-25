@@ -122,21 +122,33 @@ function logRebaseDiagnostics(log: Function, label: string, rebaseState: {detach
 async function createProjectionDeps(rootDir: string) {
   let blocklistRepo: any;
   let historyRepo: any;
+  let laneEventRepo: any;
+  let usageRepo: any;
 
   try {
     const { SqliteDatabaseAdapter } = await import('../../../../adapters/sqlite/database-adapter.js');
+    const { SqliteMigrationRunner, loadDefaultMigrations } = await import('../../../../adapters/sqlite/migration-runner.js');
     const { SqliteBlocklistRepository } = await import('../../../../adapters/sqlite/blocklist-repository.js');
     const { SqliteOperationalHistoryRepository } = await import('../../../../adapters/sqlite/operational-history-repository.js');
+    const { SqliteBoardLaneEventRepository } = await import('../../../../adapters/sqlite/board-lane-event-repository.js');
+    const { SqliteUsageRepository } = await import('../../../../adapters/sqlite/usage-repository.js');
+    const { resolveDatabasePath } = await import('../../../../adapters/sqlite/database-path-resolver.js');
     const db = new SqliteDatabaseAdapter();
+    await db.open({ path: resolveDatabasePath() });
+    await new SqliteMigrationRunner(db).applyPending(loadDefaultMigrations());
     blocklistRepo = new SqliteBlocklistRepository(db);
     historyRepo = new SqliteOperationalHistoryRepository(db);
+    laneEventRepo = new SqliteBoardLaneEventRepository(db);
+    usageRepo = new SqliteUsageRepository(db);
   } catch {
     // SQLite unavailable (CJS rollback bundle or missing modules) — use empty fallbacks
     blocklistRepo = { findAll: async () => [], findByAgent: async () => undefined };
     historyRepo = { findAll: async () => [] };
+    laneEventRepo = { findAll: async () => [], findByMissionId: async () => [] };
+    usageRepo = { findAll: async () => [] };
   }
 
-  return { rootDir, blocklistRepo, historyRepo };
+  return { rootDir, blocklistRepo, historyRepo, laneEventRepo, usageRepo };
 }
 
 /** Build BoardProjectionBuilder from production concrete adapters (SC8). */
@@ -150,6 +162,8 @@ async function buildProjectionBuilder(rootDir: string): Promise<BoardProjectionB
     repositoryId: repositoryId(rootDir),
     blocklistRepo: deps.blocklistRepo,
     historyRepo: deps.historyRepo,
+    laneEventRepo: deps.laneEventRepo,
+    usageRepo: deps.usageRepo,
     knownAgentFamilies: WORKFLOW_AGENT_NAMES.map((name: string) => agentFamily(name)),
   });
 }
@@ -200,7 +214,7 @@ async function status(args: string[], opts: {exit?: Function, log?: Function, in
     ).catch(() => null);
 
     /** Render checkpoint line via parse primitives (shared by both fallback paths). */
-    function logLastCheckpoint(taskSlug) {
+    function logLastCheckpoint(taskSlug: string) {
       const missionDir = findMissionDirFn(taskSlug);
       if (missionDir) {
         const checkpoints = findCheckpointsFn(missionDir);

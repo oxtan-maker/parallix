@@ -90,9 +90,9 @@ describe('SQLite recovery, backup, concurrency, rollback — CP5', () => {
         ['0002-import-history', migrations[1].checksum, new Date().toISOString()],
       );
 
-      // Re-applying both should be idempotent (both already in ledger)
+      // Re-applying all should be idempotent (all already in ledger after migration 3 is applied)
       const applied = await runner.applyPending(migrations);
-      assert.equal(applied.length, 2, 'Should report both migrations as applied');
+      assert.equal(applied.length, 3, 'Should report all migrations as applied');
     } finally {
       await db.close();
       cleanupTempDir(dir);

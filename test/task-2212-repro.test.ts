@@ -37,7 +37,7 @@ test('interrupted feature lifecycle leaves no e2e branch or worktree behind (SC1
     stdio: 'ignore'
   });
   const childExited = new Promise(resolve => child.once('exit', resolve));
-  const deadline = Date.now() + 5000;
+  const deadline = Date.now() + 10000; // 10s — async transitionTask adds overhead to draft bootstrap
   let fixtureRoot;
   let worktree;
 

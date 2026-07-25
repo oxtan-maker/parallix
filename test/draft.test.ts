@@ -224,8 +224,8 @@ test('restartDraftAgent leaves exit control to the caller on failure', async () 
 
 // ---------- recordDraftImplementer ----------
 
-test('recordDraftImplementer returns actual when no taskResolution', () => {
-  const result = recordDraftImplementer({
+test('recordDraftImplementer returns actual when no taskResolution', async () => {
+  const result = await recordDraftImplementer({
     selected: 'codex',
     actual: 'codex',
     taskResolution: null,
@@ -234,8 +234,8 @@ test('recordDraftImplementer returns actual when no taskResolution', () => {
   assert.equal(result, 'codex');
 });
 
-test('recordDraftImplementer returns actual when taskResolution.ok is false', () => {
-  const result = recordDraftImplementer({
+test('recordDraftImplementer returns actual when taskResolution.ok is false', async () => {
+  const result = await recordDraftImplementer({
     selected: 'codex',
     actual: 'codex',
     taskResolution: { ok: false },
@@ -244,22 +244,22 @@ test('recordDraftImplementer returns actual when taskResolution.ok is false', ()
   assert.equal(result, 'codex');
 });
 
-test('recordDraftImplementer routes the actual implementer through the shared transition path', () => {
+test('recordDraftImplementer routes the actual implementer through the shared transition path', async () => {
   const calls = [];
-  const resolved = recordDraftImplementer({
+  const resolved = await recordDraftImplementer({
     selected: 'gemini', actual: 'codex', slug: 'task-086', worktree: '/tmp/wt',
     taskResolution: { ok: true, taskFile: '/tmp/task-086.md' },
     getTaskStatusFn: () => 'refined',
-    transitionTaskFn: (...args) => { calls.push(args); return true; },
+    transitionTaskFn: (...args) => { calls.push(args); return Promise.resolve(true); },
     log: () => {}
   });
   assert.equal(resolved, 'codex');
   assert.deepEqual(calls, [['task-086', 'refined', { implementer: 'codex', rootDir: '/tmp/wt', log: calls[0][2].log, deferMissionRebase: true }]]);
 });
 
-test('recordDraftImplementer does nothing when the draft task cannot be resolved', () => {
+test('recordDraftImplementer does nothing when the draft task cannot be resolved', async () => {
   const calls = [];
-  const resolved = recordDraftImplementer({
+  const resolved = await recordDraftImplementer({
     selected: 'gemini',
     actual: 'codex',
     taskResolution: { ok: false },
@@ -272,38 +272,38 @@ test('recordDraftImplementer does nothing when the draft task cannot be resolved
   assert.deepEqual(calls, []);
 });
 
-test('recordDraftImplementer logs fallback when selected differs from actual', () => {
+test('recordDraftImplementer logs fallback when selected differs from actual', async () => {
   const logLines = [];
-  recordDraftImplementer({
+  await recordDraftImplementer({
     selected: 'claude',
     actual: 'codex',
     taskResolution: { ok: true, taskFile: '/tmp/task.md' },
     log: (msg) => logLines.push(msg),
-    getTaskStatusFn: () => 'refined', transitionTaskFn: () => true
+    getTaskStatusFn: () => 'refined', transitionTaskFn: () => Promise.resolve(true)
   });
   assert.ok(logLines.some(l => l.includes('fell back from claude to codex')));
 });
 
-test('recordDraftImplementer logs recording when selected equals actual', () => {
+test('recordDraftImplementer logs recording when selected equals actual', async () => {
   const logLines = [];
-  recordDraftImplementer({
+  await recordDraftImplementer({
     selected: 'codex',
     actual: 'codex',
     taskResolution: { ok: true, taskFile: '/tmp/task.md' },
     log: (msg) => logLines.push(msg),
-    getTaskStatusFn: () => 'refined', transitionTaskFn: () => true
+    getTaskStatusFn: () => 'refined', transitionTaskFn: () => Promise.resolve(true)
   });
   assert.ok(logLines.some(l => l.includes('Enforcing draft agent codex')));
 });
 
-test('recordDraftImplementer logs warning when the shared transition fails', () => {
+test('recordDraftImplementer logs warning when the shared transition fails', async () => {
   const logLines = [];
-  recordDraftImplementer({
+  await recordDraftImplementer({
     selected: 'codex',
     actual: 'codex',
     taskResolution: { ok: true, taskFile: '/tmp/task.md' },
     log: (msg) => logLines.push(msg),
-    getTaskStatusFn: () => 'refined', transitionTaskFn: () => false
+    getTaskStatusFn: () => 'refined', transitionTaskFn: () => Promise.resolve(false)
   });
   assert.ok(logLines.some(l => l.includes('Could not enforce draft agent')));
 });

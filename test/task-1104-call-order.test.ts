@@ -133,7 +133,7 @@ test('pushRound follows the transition contract: review before createPr', async 
     }
   };
 
-  pushRound(TEST_SLUG, opts);
+  await pushRound(TEST_SLUG, opts);
 
   const relevantEvents = events.filter(e => e.type === 'transition' || e.type === 'createPr');
   

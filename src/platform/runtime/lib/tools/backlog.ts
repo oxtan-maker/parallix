@@ -678,11 +678,15 @@ function reconcileMissionRebase({ slug, missionWorktree, authoritativeTaskFile, 
  * This deliberately composes the established worktree and git abstractions;
  * callers must not write a mission-worktree copy of backlog.md directly.
  */
-function transitionTaskOnIntegrationBranch(
+/**
+ * Transition a task to a new status on the integration branch.
+ * Awaits lane-event recording so the write is not dropped in short-lived CLI processes.
+ */
+async function transitionTaskOnIntegrationBranch(
   slug: string,
   newStatus: string,
   { implementer = null, clearAssignee = false, rootDir = process.cwd(), log = fmt.log.plain, deferMissionRebase = false }: { implementer?: string | null | undefined, clearAssignee?: boolean, rootDir?: string, log?: Function, deferMissionRebase?: boolean } = {} as any
-): boolean {
+): Promise<boolean> {
   let stateRoot: string;
   try {
     stateRoot = resolveBacklogStateRoot(slug, rootDir);
@@ -692,8 +696,65 @@ function transitionTaskOnIntegrationBranch(
     return false;
   }
 
+  // Capture old status before the transition for lane-event recording
+  const resolution = resolveTaskFile(slug, stateRoot);
+  const oldStatus = resolution.ok && resolution.taskFile ? getTaskStatus(resolution.taskFile) : null;
+
   if (!transitionTaskLocal(slug, newStatus, { implementer, clearAssignee, rootDir: stateRoot, log })) {
     return false;
+  }
+
+  // Lane-transition event recording (awaited so the write is not dropped
+  // in short-lived CLI processes). Uses dynamic import so the recorder is
+  // an optional dependency — recording failure never blocks the authoritative
+  // transition (ADR 0051).
+  // The old status read above is captured before transitionTaskLocal overwrites it.
+  if (oldStatus !== newStatus) {
+    await (async () => {
+      try {
+        const { SqliteDatabaseAdapter } = await import('../../../../adapters/sqlite/database-adapter.js');
+        const { SqliteMigrationRunner, loadDefaultMigrations } = await import('../../../../adapters/sqlite/migration-runner.js');
+        const { SqliteBoardLaneEventRepository } = await import('../../../../adapters/sqlite/board-lane-event-repository.js');
+        const { resolveDatabasePath } = await import('../../../../adapters/sqlite/database-path-resolver.js');
+        const { BoardEventRecorder, recordLaneTransitionSafely } = await import('../../../../application/recording/board-event-recorder.js');
+        const { missionId } = await import('../../../../domain/mission.js');
+        const { repositoryId } = await import('../../../../domain/repository.js');
+        const { triggerFromTransition, parseMissionStatus } = await import('../../../../domain/board-event.js');
+        const toStatus = parseMissionStatus(newStatus);
+        // Skip if the target status is not a valid MissionStatus
+        if (!toStatus) {
+          return;
+        }
+        const fromStatus = parseMissionStatus(oldStatus ?? '');
+        const trigger = triggerFromTransition(fromStatus, toStatus);
+        // Skip recording if the transition is not recognised by the state machine
+        if (!trigger) {
+          return;
+        }
+        const db = new SqliteDatabaseAdapter();
+        await db.open({ path: resolveDatabasePath() });
+        try {
+          const runner = new SqliteMigrationRunner(db);
+          await runner.applyPending(loadDefaultMigrations());
+          const repo = new SqliteBoardLaneEventRepository(db);
+          const recorder = new BoardEventRecorder(repo);
+          await recordLaneTransitionSafely(recorder, {
+            missionId: missionId(slug),
+            repositoryId: repositoryId(rootDir),
+            from: fromStatus,
+            to: toStatus,
+            trigger,
+            agent: (implementer ?? 'unknown'),
+            occurredAt: new Date().toISOString(),
+            idempotencyKey: `${slug}-${fromStatus ?? 'null'}-${toStatus}-${Date.now() / 1000 | 0}`,
+          });
+        } finally {
+          await db.close();
+        }
+      } catch {
+        // Recording failure is silently swallowed — never blocks the transition
+      }
+    })();
   }
 
   const missionWorktree = resolveWorktree(slug, { cwd: rootDir });

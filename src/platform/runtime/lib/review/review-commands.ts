@@ -251,7 +251,7 @@ function findUnverifiableGoalCheckRow(evidenceRows: string[], rootDir: string): 
   return null;
 }
 
-function repairStaleActiveTaskAfterReview(
+async function repairStaleActiveTaskAfterReview(
   slug: string,
   options: {
     log?: (_msg: string) => void;
@@ -261,7 +261,7 @@ function repairStaleActiveTaskAfterReview(
     transitionTaskFn?: typeof transitionTask;
     rootDir?: string;
   } = {}
-): { repaired: boolean; skipped?: boolean; currentStatus?: string } {
+): Promise<{ repaired: boolean; skipped?: boolean; currentStatus?: string }> {
   const log = options.log || fmt.log.plain;
   const error = options.error || fmt.log.plainError;
   const getTaskStatusFn = options.getTaskStatusFn || getTaskStatus;
@@ -279,7 +279,7 @@ function repairStaleActiveTaskAfterReview(
     return { repaired: false, skipped: true, currentStatus: currentStatus ?? undefined };
   }
 
-  if (!transitionTaskFn(slug, 'review', { rootDir, log })) {
+  if (!await transitionTaskFn(slug, 'review', { rootDir, log })) {
     error(fmt.status('WARN', `Could not transition backlog task ${slug} to review after recording the review outcome.`));
     return { repaired: false, skipped: false, currentStatus: currentStatus ?? undefined };
   }
@@ -719,7 +719,7 @@ export async function submitForReview(
   if (!result.ok) {
     // Auto-bounce for declared-gate validation failures
     if (result.reason === 'validation-failed') {
-      transitionTaskFn(slug, 'active', { rootDir: worktree, log });
+      await transitionTaskFn(slug, 'active', { rootDir: worktree, log });
       log(fmt.status('INFO', `Auto-bounced ${slug} to active: declared-gate validation failure. Fix the gate in MISSION.md and retry.`));
     }
     exit(1);
@@ -907,7 +907,7 @@ export async function pushRound(
   }
 
   // Transition to review before pushing so the state change is included in the PR update
-  transitionTaskFn(slug, 'review', { rootDir, log });
+  await transitionTaskFn(slug, 'review', { rootDir, log });
 
   log(fmt.status('INFO', `Pushing ${branch} to the review provider as ${reviewIdentity}...${force ? ' (force-with-lease)' : ''}`));
   if (worktree) {
@@ -1139,7 +1139,7 @@ export async function consumeArtifacts(
   if (taskResolution.ok) {
     const currentStatus = getTaskStatusFn ? getTaskStatusFn(taskResolution.taskFile!) : null;
     if (!currentStatus || currentStatus !== 'review') {
-      transitionTaskFn(slug, 'review', { rootDir, log });
+      void transitionTaskFn(slug, 'review', { rootDir, log }).catch(() => {});
     } else {
       log(fmt.status('INFO', `Backlog task for ${slug} already at review status.`));
     }
@@ -1164,7 +1164,7 @@ export async function consumeArtifacts(
 // Command: submitReviewRound
 // ============================================================================
 
-export function submitReviewRound(
+export async function submitReviewRound(
   slug: string,
   outcome: string,
   message: string,
@@ -1188,7 +1188,7 @@ export function submitReviewRound(
     createEventFn?: typeof createEvent;
     buildMetadataFooterFn?: typeof buildMetadataFooter;
   } = {}
-): void {
+): Promise<void> {
   const log = options.log || fmt.log.plain;
   const error = options.error || fmt.log.plainError;
   const exit = options.exit || process.exit;
@@ -1244,8 +1244,10 @@ export function submitReviewRound(
       'comment': 'review'
     };
     const backlogStatus = backlogStatusMap[outcome];
-    if (backlogStatus && !transitionTaskFn(slug, backlogStatus, { rootDir: worktree, log })) {
-      log(fmt.status('WARN', `Could not transition backlog task ${slug} to ${backlogStatus}.`));
+    if (backlogStatus) {
+      void transitionTaskFn(slug, backlogStatus, { rootDir: worktree, log }).catch(() => {
+        log(fmt.status('WARN', `Could not transition backlog task ${slug} to ${backlogStatus}.`));
+      });
     }
 
     log(fmt.status('PASS', `Review outcome "${outcome}" recorded locally for ${slug}.`));
@@ -1281,7 +1283,7 @@ export function submitReviewRound(
   // (reviewer == PR author) and already persisted the verdict locally. This is
   // a legitimate same-agent-reviewer fallback, not a failure — do NOT exit(1).
   if (result.ok && result.skipped) {
-    repairStaleActiveTaskAfterReview(slug, {
+    await repairStaleActiveTaskAfterReview(slug, {
       rootDir: worktree,
       resolveTaskFileFn,
       getTaskStatusFn,
@@ -1320,8 +1322,10 @@ export function submitReviewRound(
     backlogStatus = 'review';
   }
 
-  if (backlogStatus && !transitionTaskFn(slug, backlogStatus, { rootDir: worktree, log })) {
-    log(fmt.status('WARN', `Could not transition backlog task ${slug} to ${backlogStatus}.`));
+  if (backlogStatus) {
+    void transitionTaskFn(slug, backlogStatus, { rootDir: worktree, log }).catch(() => {
+      log(fmt.status('WARN', `Could not transition backlog task ${slug} to ${backlogStatus}.`));
+    });
   }
 }
 
@@ -1654,7 +1658,7 @@ export async function review(
       exit(1);
       return;
     }
-    submitReviewRoundFn(slug, outcome, message, options);
+    await submitReviewRoundFn(slug, outcome, message, options);
   } else if (isClose) {
     await closeMissionPrFn(slug, options);
   } else if (isCreateEvent) {

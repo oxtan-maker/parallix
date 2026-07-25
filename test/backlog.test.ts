@@ -31,7 +31,7 @@ const {
 } = require('../dist/lib/tools/backlog');
 const { [`getTask${typeKey[0].toUpperCase()}${typeKey.slice(1)}`]: getTaskMissionType } = require('../dist/lib/tools/backlog');
 
-function withTempRepo(fn) {
+async function withTempRepo(fn) {
   const previous = process.cwd();
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-backlog-')));
   fs.mkdirSync(path.join(root, 'backlog', 'tasks'), { recursive: true });
@@ -57,20 +57,20 @@ function withTempRepo(fn) {
   process.chdir(root);
 
   try {
-    fn(root);
+    await fn(root);
   } finally {
     process.chdir(previous);
     fs.rmSync(root, { recursive: true, force: true });
   }
 }
 
-function withTempGitRepo(fn) {
-  withTempRepo(root => {
+async function withTempGitRepo(fn) {
+  await withTempRepo(async root => {
     childProcess.spawnSync('git', ['init'], { cwd: root, encoding: 'utf8' });
     childProcess.spawnSync('git', ['symbolic-ref', 'HEAD', 'refs/heads/main'], { cwd: root, encoding: 'utf8' });
     childProcess.spawnSync('git', ['config', 'user.name', 'Workflow Test'], { cwd: root, encoding: 'utf8' });
     childProcess.spawnSync('git', ['config', 'user.email', 'workflow-test@example.com'], { cwd: root, encoding: 'utf8' });
-    fn(root);
+    await fn(root);
   });
 }
 
@@ -940,14 +940,14 @@ test('transitionTaskOnIntegrationBranch still aborts shared-file rebase conflict
   });
 });
 
-test('transitionTask with clearAssignee resets assignee to empty and commits', () => {
-  withTempGitRepo(root => {
+test('transitionTask with clearAssignee resets assignee to empty and commits', async () => {
+  await withTempGitRepo(async root => {
     const taskPath = path.join(root, 'backlog', 'tasks', 'task-129 - clear-assignee.md');
     fs.writeFileSync(taskPath, 'id: TASK-129\nstatus: active\nassignee: [claude]\n');
     childProcess.spawnSync('git', ['add', '.'], { cwd: root, encoding: 'utf8' });
     childProcess.spawnSync('git', ['commit', '-m', 'seed task'], { cwd: root, encoding: 'utf8' });
 
-    const ok = transitionTask('task-129', 'refined', { clearAssignee: true, rootDir: root, log: () => {} });
+    const ok = await transitionTask('task-129', 'refined', { clearAssignee: true, rootDir: root, log: () => {} });
     assert.equal(ok, true);
     assert.equal(getTaskStatus(taskPath), 'refined');
     const content = fs.readFileSync(taskPath, 'utf8');
@@ -958,28 +958,28 @@ test('transitionTask with clearAssignee resets assignee to empty and commits', (
   });
 });
 
-test('transitionTask with clearAssignee handles block-form assignee', () => {
-  withTempGitRepo(root => {
+test('transitionTask with clearAssignee handles block-form assignee', async () => {
+  await withTempGitRepo(async root => {
     const taskPath = path.join(root, 'backlog', 'tasks', 'task-130 - clear-block.md');
     fs.writeFileSync(taskPath, 'id: TASK-130\nstatus: active\nassignee:\n  - claude\n  - codex\n');
     childProcess.spawnSync('git', ['add', '.'], { cwd: root, encoding: 'utf8' });
     childProcess.spawnSync('git', ['commit', '-m', 'seed task'], { cwd: root, encoding: 'utf8' });
 
-    const ok = transitionTask('task-130', 'refined', { clearAssignee: true, rootDir: root, log: () => {} });
+    const ok = await transitionTask('task-130', 'refined', { clearAssignee: true, rootDir: root, log: () => {} });
     assert.equal(ok, true);
     const content = fs.readFileSync(taskPath, 'utf8');
     assert.ok(content.includes('assignee: []'), 'block-form assignee must be cleared to empty array');
   });
 });
 
-test('transitionTask with clearAssignee when no assignee field returns true without writing', () => {
-  withTempGitRepo(root => {
+test('transitionTask with clearAssignee when no assignee field returns true without writing', async () => {
+  await withTempGitRepo(async root => {
     const taskPath = path.join(root, 'backlog', 'tasks', 'task-131 - no-assignee.md');
     fs.writeFileSync(taskPath, 'id: TASK-131\nstatus: refined\n');
     childProcess.spawnSync('git', ['add', '.'], { cwd: root, encoding: 'utf8' });
     childProcess.spawnSync('git', ['commit', '-m', 'seed task'], { cwd: root, encoding: 'utf8' });
 
-    const ok = transitionTask('task-131', 'refined', { clearAssignee: true, rootDir: root, log: () => {} });
+    const ok = await transitionTask('task-131', 'refined', { clearAssignee: true, rootDir: root, log: () => {} });
     assert.equal(ok, true);
     const content = fs.readFileSync(taskPath, 'utf8');
     assert.ok(!content.includes('assignee'), 'assignee field must not be added when it did not exist');
@@ -1031,8 +1031,8 @@ test('clearTaskAgentAssignee does not mutate task when no agent families are pre
   });
 });
 
-test('transitionTask rejects suffixed slug regardless of frontmatter id match', () => {
-  withTempGitRepo(root => {
+test('transitionTask rejects suffixed slug regardless of frontmatter id match', async () => {
+  await withTempGitRepo(async root => {
     const taskDir = path.join(root, 'backlog', 'tasks');
     const taskPath1 = path.join(taskDir, 'task-1048 - target.md');
     fs.writeFileSync(taskPath1, 'id: TASK-1048\nstatus: backlog\nassignee: [gemini]\n');
@@ -1045,7 +1045,7 @@ test('transitionTask rejects suffixed slug regardless of frontmatter id match', 
     childProcess.spawnSync('git', ['commit', '-m', 'seed tasks'], { cwd: root, encoding: 'utf8' });
 
     const logs = [];
-    const ok = transitionTask('task-1048-regress', 'active', { rootDir: root, log: msg => logs.push(msg) });
+    const ok = await transitionTask('task-1048-regress', 'active', { rootDir: root, log: msg => logs.push(msg) });
     assert.equal(ok, false, 'transitionTask must return false for suffixed slug with id mismatch');
 
     const lastSubject = childProcess.spawnSync('git', ['log', '-1', '--format=%s'], { cwd: root, encoding: 'utf8' }).stdout.trim();
@@ -1058,8 +1058,8 @@ test('transitionTask rejects suffixed slug regardless of frontmatter id match', 
   });
 });
 
-test('transitionTask permits exact slug match (no suffix)', () => {
-  withTempGitRepo(root => {
+test('transitionTask permits exact slug match (no suffix)', async () => {
+  await withTempGitRepo(async root => {
     const taskPath = path.join(root, 'backlog', 'tasks', 'task-1048 - exact.md');
     fs.writeFileSync(taskPath, 'id: TASK-1048\nstatus: backlog\nassignee: [gemini]\n');
 
@@ -1067,7 +1067,7 @@ test('transitionTask permits exact slug match (no suffix)', () => {
     childProcess.spawnSync('git', ['commit', '-m', 'seed task'], { cwd: root, encoding: 'utf8' });
 
     const logs = [];
-    const ok = transitionTask('task-1048', 'active', { rootDir: root, log: msg => logs.push(msg) });
+    const ok = await transitionTask('task-1048', 'active', { rootDir: root, log: msg => logs.push(msg) });
     assert.equal(ok, true, 'exact slug match must be permitted');
 
     const lastSubject = childProcess.spawnSync('git', ['log', '-1', '--format=%s'], { cwd: root, encoding: 'utf8' }).stdout.trim();

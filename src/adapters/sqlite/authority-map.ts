@@ -122,6 +122,28 @@ export const IMPORT_HISTORY_AUTHORITY = {
 } as const satisfies Readonly<Record<string, FieldAuthority>>;
 
 /**
+ * Exhaustive authority mapping for the `board_lane_events` table.
+ *
+ * Maps to TASK-2303 domain entity: `LaneTransitionEvent` in
+ * `src/domain/board-event.ts`. Operator-local telemetry only (ADR 0051).
+ *
+ * Relationship to usage_statistics:
+ *   board_lane_events records every lifecycle transition. usage_statistics
+ *   records outcome measurements for completed missions. Both share mission_id
+ *   as the join key and use operator-local authority.
+ */
+export const BOARD_LANE_EVENTS_AUTHORITY = {
+  id: { owner: 'operator-local' } as const,
+  mission_id: { owner: 'operator-local' } as const,
+  from_status: { owner: 'operator-local' } as const,
+  to_status: { owner: 'operator-local' } as const,
+  trigger: { owner: 'operator-local' } as const,
+  agent: { owner: 'operator-local' } as const,
+  occurred_at: { owner: 'operator-local' } as const,
+  idempotency_key: { owner: 'operator-local' } as const,
+} as const satisfies Readonly<Record<string, FieldAuthority>>;
+
+/**
  * Complete entity-level authority map for all SQLite tables.
  *
  * Each table and its fields are mapped to exactly one authority owner.
@@ -137,4 +159,5 @@ export const SQLITE_ENTITY_AUTHORITY = {
   operational_history: OPERATIONAL_HISTORY_AUTHORITY,
   schema_migrations: SCHEMA_MIGRATIONS_AUTHORITY,
   import_history: IMPORT_HISTORY_AUTHORITY,
+  board_lane_events: BOARD_LANE_EVENTS_AUTHORITY,
 } as const;
