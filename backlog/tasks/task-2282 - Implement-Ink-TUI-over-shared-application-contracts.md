@@ -3,7 +3,7 @@ id: TASK-2282
 title: >-
   Ink TUI wave 1: runtime foundation, `px ui` read-only shell, and headless
   isolation gates
-status: active
+status: review
 assignee: [custom]
 created_date: '2026-07-19 00:00'
 updated_date: '2026-07-24 04:22'
