@@ -1,0 +1,17 @@
+{
+  "reviewer": "claude",
+  "implementer": "custom",
+  "round": 1,
+  "startedAt": "2026-07-24T06:13:24.212Z",
+  "phase": "approved",
+  "disposition": "APPROVED",
+  "metadata": {
+    "humanEscalationReason": "REVIEWER_LAUNCH_FAILURE",
+    "humanEscalatedAt": "2026-07-24T07:42:02.208Z",
+    "recordedStageLaunches": {
+      "review:claude": [
+        "claude|6fad0c73-0f31-4fdc-8ebb-74072107342d|2026-07-25T12:51:30.163Z|2026-07-25T12:55:01.432Z|0"
+      ]
+    }
+  }
+}

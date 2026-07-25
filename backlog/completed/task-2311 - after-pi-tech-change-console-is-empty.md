@@ -1,10 +1,10 @@
 ---
 id: TASK-2311
 title: after pi tech change console is empty
-status: ready-for-integration
+status: done
 assignee: [vibe]
 created_date: '2026-07-24 05:40'
-labels: [ai_sdlc]
+labels: [ai_sdlc, bug]
 dependencies: []
 ordinal: 66000
 ---
