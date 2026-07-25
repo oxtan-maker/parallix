@@ -1,7 +1,7 @@
 ---
 id: TASK-2233
 title: check the bounce on review errors
-status: backlog
+status: refined
 assignee: [custom]
 created_date: '2026-07-12 06:39'
 labels: []
