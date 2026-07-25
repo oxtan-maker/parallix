@@ -2,7 +2,7 @@
 id: TASK-2312
 title: labelling has broken
 status: backlog
-assignee: []
+assignee: [custom]
 created_date: '2026-07-25 19:28'
 labels: []
 dependencies: []
