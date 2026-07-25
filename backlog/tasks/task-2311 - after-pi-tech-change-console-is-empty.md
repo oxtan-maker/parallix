@@ -4,7 +4,7 @@ title: after pi tech change console is empty
 status: ready-for-integration
 assignee: [vibe]
 created_date: '2026-07-24 05:40'
-labels: []
+labels: [ai_sdlc]
 dependencies: []
 ordinal: 66000
 ---
