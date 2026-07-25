@@ -120,7 +120,7 @@ async function selectLaunchAndRecord(opts) {
   let launchTransitionFailed = false;
   let rebaseDeferred = false;
   let launchedAgent = null;
-  const rollbackIfNeeded = ({ throwOnFailure = true } = {}) => {
+  const rollbackIfNeeded = async ({ throwOnFailure = true } = {}) => {
     if (!launchRecorded || !priorStatus) {
       return;
     }
@@ -133,7 +133,7 @@ async function selectLaunchAndRecord(opts) {
     } else {
       rollbackOpts.clearAssignee = true;
     }
-    if (!transitionTaskFn(slug, priorStatus, rollbackOpts)) {
+    if (!await transitionTaskFn(slug, priorStatus, rollbackOpts)) {
       const msg = `Failed to roll back task ${fmt.slug(slug)} to ${priorStatus} after execute launch failure.`;
       if (throwOnFailure) {throw new Error(msg);}
       log(fmt.status('WARN', msg));
@@ -150,14 +150,14 @@ async function selectLaunchAndRecord(opts) {
       agent: preselected,
       slug: slug,
       role: 'implementer',
-      onLaunch: (/** @type{{agent: string}} */ { agent }) => {
+      onLaunch: async (/** @type{{agent: string}} */ { agent }) => {
         launchedAgent = agent;
         if (!(taskResolutionTyped && taskResolutionTyped.ok)) {
           return;
         }
 
         log(`Recording implementer ${fmt.agent(agent)} and status=active for ${fmt.slug(slug)}...`);
-        if (!transitionTaskFn(slug, 'active', {
+        if (!await transitionTaskFn(slug, 'active', {
           implementer: agent,
           rootDir: worktree,
           log,
@@ -180,7 +180,7 @@ async function selectLaunchAndRecord(opts) {
       }
     }));
   } catch (err) {
-    rollbackIfNeeded();
+    await rollbackIfNeeded();
     throw err;
   }
 
@@ -190,7 +190,7 @@ async function selectLaunchAndRecord(opts) {
   const launchSucceeded = !result.error && (typeof result.status !== 'number' || result.status === 0);
 
   if (!launchSucceeded) {
-    rollbackIfNeeded();
+    await rollbackIfNeeded();
   }
 
   if (launchTransitionFailed) {
@@ -221,7 +221,7 @@ function applyExecuteFallback(opts) {
   const taskResolutionTyped2 = /** @type{{ok: boolean, taskFile?: string} | undefined} */(taskResolution);
   if (taskResolutionTyped2 && taskResolutionTyped2.ok) {
     log(fmt.status('INFO', `Execute agent fell back from ${fmt.agent(preselected)} to ${fmt.agent(actual)}; enforcing backlog assignee.`));
-    transitionTaskFn(slug, 'active', { implementer: actual, rootDir: worktree, log });
+    void transitionTaskFn(slug, 'active', { implementer: actual, rootDir: worktree, log }).catch(() => {});
   }
   return actual;
 }

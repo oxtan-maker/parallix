@@ -467,7 +467,7 @@ export async function handleGateFailureAutoBounce(
   }
 
   // Transition task back to active (implementer phase) without consuming reviewer cycle
-  transitionTaskFn(slug, 'active', { rootDir: worktree, log });
+  await transitionTaskFn(slug, 'active', { rootDir: worktree, log });
   log(fmt.status('INFO', `Auto-bouncing to implementer (${implementer}) with fix prompt. Retry ${retryCount + 1}/${MAX_GATE_RETRY}.`));
 
   // Launch implementer with the fix prompt
@@ -800,7 +800,7 @@ export async function startReviewLoop(slug: string, opts: {
         // is not stranded waiting for manual intervention.
         const handoffObj = handoff || {};
         if (handoffObj.reason === 'validation-failed') {
-          transitionTaskFn(slug, 'active', { rootDir: worktree, log });
+          await transitionTaskFn(slug, 'active', { rootDir: worktree, log });
           log(fmt.status('INFO', `Auto-bounced ${slug} to active: declared-gate validation failure. Fix the gate in MISSION.md and retry.`));
           // Persist rejection reason for follow-up action
           const persisted = readReviewStateFn(slug, worktree);
@@ -1114,7 +1114,7 @@ export async function startReviewLoop(slug: string, opts: {
     if (state.phase === 'reviewing') {
       // Check if we can skip reviewer launch
       if (isContinue && attempt === initialRound) {
-        if (!dryRun) { transitionTaskFn(slug, 'review', { rootDir: worktree, log }); }
+        if (!dryRun) { await transitionTaskFn(slug, 'review', { rootDir: worktree, log }); }
         if (forgejoEnabled) {
           log(fmt.status('INFO', `Round ${attempt}: checking for existing review by ${reviewer} since ${state.startedAt}...`));
           reviewState = await pollForReviewFn(prNumber as number, reviewer!, state.startedAt, token!, {
@@ -1157,7 +1157,7 @@ export async function startReviewLoop(slug: string, opts: {
           // with the SHA that HEAD was actually rebased onto (task-1407).
           reviewBaseline = captureReviewBaseline();
 
-          if (!dryRun) { transitionTaskFn(slug, 'review', { rootDir: worktree, log }); }
+          if (!dryRun) { await transitionTaskFn(slug, 'review', { rootDir: worktree, log }); }
           state.phase = 'reviewing';
           persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree);
 
@@ -1379,7 +1379,7 @@ export async function startReviewLoop(slug: string, opts: {
         state.disposition = reviewState as string;
         persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree);
         log(fmt.status('PASS', 'Autonomous review stopped: reviewer approved the PR. Hand off to human review/integration.'));
-        transitionVirtualFn(transitionTaskFn, slug, 'approved', { log });
+        await transitionVirtualFn(transitionTaskFn, slug, 'approved', { log });
         return;
       }
       state.transitionTo('fixing');
@@ -1474,7 +1474,7 @@ export async function startReviewLoop(slug: string, opts: {
       }
 
       persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree);
-      transitionTaskFn(slug, 'active', { implementer, rootDir: worktree, log });
+      await transitionTaskFn(slug, 'active', { implementer, rootDir: worktree, log });
       if (implementer === 'autonomous' && !forgejoEnabled) {
         log(fmt.status('INFO', `Round ${attempt}: implementer identity is autonomous; skipping implementer launch and using local review artifacts only.`));
       } else {

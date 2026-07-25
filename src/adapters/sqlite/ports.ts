@@ -335,3 +335,70 @@ export interface ImportRecord {
   /** Path of the backup file created before import. */
   readonly backupPath?: string;
 }
+
+// ---------------------------------------------------------------------------
+// Board lane-events domain
+// ---------------------------------------------------------------------------
+
+/**
+ * A single board lane-transition event row.
+ *
+ * Maps to TASK-2303 domain entity: `LaneTransitionEvent` in
+ * `src/domain/board-event.ts`. Stored in the dedicated `board_lane_events`
+ * table (migration 0003) with typed columns — follows the same analytical
+ * pattern as `usage_statistics` rather than the JSON-blob pattern of
+ * `operational_history`.
+ *
+ * Relationship to usage_statistics:
+ *   board_lane_events records every lifecycle transition (the "when" and
+ *   "how" of mission movement). usage_statistics records outcome measurements
+ *   for completed missions. Both share mission_id as the join key.
+ */
+export interface BoardLaneEventEntry {
+  /** Auto-incrementing row ID. */
+  readonly id?: number;
+  /** Mission id / slug whose lane changed. */
+  readonly missionId: string;
+  /** Lane the mission moved from, or NULL if unknown. */
+  readonly fromStatus: string | null;
+  /** Lane the mission moved to. */
+  readonly toStatus: string;
+  /** Which MissionCommand caused the transition. */
+  readonly trigger: string;
+  /** Agent that performed the transition. */
+  readonly agent: string;
+  /** ISO-8601 timestamp of the transition. */
+  readonly occurredAt: string;
+  /** Idempotency key for deduplication. */
+  readonly idempotencyKey: string;
+}
+
+/**
+ * Application port for the operator-local board lane-event log.
+ *
+ * Maps to TASK-2303 domain: board lane-transition telemetry.
+ * Authority: operator-local telemetry only (ADR 0051).
+ */
+export interface BoardLaneEventRepository {
+  /**
+   * Append a new lane-transition event.
+   * Returns true when a new row was written, false when the idempotency key
+   * was already recorded (idempotent no-op).
+   */
+  append(_entry: BoardLaneEventEntry): Promise<boolean>;
+
+  /**
+   * Return all lane-transition events for a specific mission, ordered by time.
+   */
+  findByMissionId(_missionId: string): Promise<readonly BoardLaneEventEntry[]>;
+
+  /**
+   * Return all lane-transition events, ordered by time.
+   */
+  findAll(): Promise<readonly BoardLaneEventEntry[]>;
+
+  /**
+   * Clear all lane events.
+   */
+  clear(): Promise<void>;
+}

@@ -1,5 +1,5 @@
 import type { AgentAvailability, AgentFamily } from '../../domain/agents.js';
-import type { Mission, MissionId } from '../../domain/mission.js';
+import type { Mission, MissionId, MissionStatus } from '../../domain/mission.js';
 import type { RepositoryId } from '../../domain/repository.js';
 import type { Review, ReviewedRevision } from '../../domain/review.js';
 import type { SourceFact } from '../../platform/runtime/lib/application/contracts.js';
@@ -11,6 +11,7 @@ import {
   type MissionCard,
   type MissionOperationalFacts,
 } from './mission-board.js';
+import type { MetricsReadAdapter } from './metrics-read-adapter.js';
 
 // ---------------------------------------------------------------------------
 // Read adapters — each adapter reads from one authority
@@ -62,13 +63,18 @@ export interface OperationLogReadAdapter {
   loadOperationLog(): Promise<readonly { readonly operationId: string; readonly phase: string; readonly message: string; readonly timestamp: string; readonly agent?: string }[]>;
 }
 
+// Re-export MetricsReadAdapter for consumers
+export type { MetricsReadAdapter } from './metrics-read-adapter.js';
+
 // ---------------------------------------------------------------------------
 // BoardProjectionBuilder — composes read adapters into BoardProjection
 // ---------------------------------------------------------------------------
 
 export interface BoardProjectionOptions {
-  /** Time-based metrics (from CP-3). */
+  /** Time-based metrics (from CP-3). Prefer MetricsReadAdapter for production use. */
   metrics?: BoardMetrics;
+  /** Derives metrics from board_lane_events + usage_statistics. */
+  metricsAdapter?: MetricsReadAdapter;
 }
 
 /**
@@ -117,8 +123,8 @@ export class BoardProjectionBuilder {
     // Build available actions from application policy
     const availableActions = this.deriveAvailableActions(cards);
 
-    // Build metrics (use defaults if not provided)
-    const metrics = this._options?.metrics ?? this.defaultMetrics();
+    // Build metrics from event history (or use provided/default)
+    const metrics = await this.buildMetrics(missions);
 
     return buildBoardProjection(
       repositoryId,
@@ -128,6 +134,34 @@ export class BoardProjectionBuilder {
       metrics,
       sourceFacts,
     );
+  }
+
+  /**
+   * Derive metrics from event history, provided metrics, or defaults.
+   * Priority: explicit metrics > MetricsReadAdapter > default fallback.
+   */
+  private async buildMetrics(
+    missions: readonly Mission[],
+  ): Promise<BoardMetrics> {
+    // Explicit metrics (for testing/fixtures)
+    if (this._options?.metrics) {
+      return this._options.metrics;
+    }
+
+    // Derive from event history via MetricsReadAdapter
+    if (this._options?.metricsAdapter) {
+      const initialStates = new Map<MissionId, MissionStatus>();
+      for (const mission of missions) {
+        initialStates.set(mission.id, mission.status);
+      }
+      try {
+        return await this._options.metricsAdapter.buildMetrics(initialStates);
+      } catch {
+        // Adapter failure — fall through to defaults
+      }
+    }
+
+    return this.defaultMetrics();
   }
 
   /** Derive available actions from mission cards' command availability. */

@@ -79,7 +79,7 @@ export class LegacyActiveAdapter implements ActivePort {
     if (run.taskResolution.ok && run.taskResolution.taskFile) {
       const status = this._runtime.getTaskStatus(run.taskResolution.taskFile);
       if ((run.launch.rebaseDeferred || (status && status !== 'active'))
-        && !this._runtime.transitionTask(slug, 'active', { rootDir: run.worktree })) {
+        && !await this._runtime.transitionTask(slug, 'active', { rootDir: run.worktree })) {
         throw new Error('legacy task lifecycle synchronization failed');
       }
     }

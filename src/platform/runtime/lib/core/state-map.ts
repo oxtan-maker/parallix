@@ -89,10 +89,10 @@ interface TransitionVirtualOptions {
 }
 
 interface TransitionTaskFn {
-  (_slug: string, _actual: string, _options: TransitionVirtualOptions): boolean;
+  (_slug: string, _actual: string, _options: TransitionVirtualOptions): boolean | Promise<boolean>;
 }
 
-export function transitionVirtual(transitionTaskFn: TransitionTaskFn, slug: string, virtualState: string, options: TransitionVirtualOptions = {}, mapParam?: Record<string, unknown>): boolean {
+export function transitionVirtual(transitionTaskFn: TransitionTaskFn, slug: string, virtualState: string, options: TransitionVirtualOptions = {}, mapParam?: Record<string, unknown>): boolean | Promise<boolean> {
   let map: Record<string, unknown>;
   if (mapParam && typeof mapParam === 'object' && !Array.isArray(mapParam)) {
     if (Object.prototype.hasOwnProperty.call(mapParam, 'rootDir')

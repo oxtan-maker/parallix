@@ -95,7 +95,7 @@ assignee: [custom]
       const content = fs.readFileSync(taskFile, 'utf8');
       const updated = content.replace(/status: \w+/, `status: ${status}`);
       fs.writeFileSync(taskFile, updated);
-      return true;
+      return Promise.resolve(true);
     },
     getTaskAssigneeFn: () => 'custom',
   });

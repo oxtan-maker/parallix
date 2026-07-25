@@ -265,7 +265,7 @@ async function runDraftCommand(/** @type {string[]} */ args, {
   logFn(`Worktree: ${fmt.path(targetWorktree)}`);
   logFn(`Mission doc: ${fmt.path(missionFile)}`);
 
-  if (!transitionTaskFn(normalizedSlug, 'backlog', { rootDir: targetWorktree, log: logFn })) {
+  if (!await transitionTaskFn(normalizedSlug, 'backlog', { rootDir: targetWorktree, log: logFn })) {
     errorFn(fmt.status('FAIL', `Could not transition task ${normalizedSlug} to backlog status.`));
     exitFn(1);
     return;
@@ -364,7 +364,7 @@ async function runDraftCommand(/** @type {string[]} */ args, {
     return;
   }
 
-  if (!transitionVirtualFn(transitionTaskFn, normalizedSlug, 'ready', /** @type {{ rootDir: string, log: Function }} */ ({ rootDir: targetWorktree, log: logFn }))) {
+  if (!(await transitionVirtualFn(transitionTaskFn, normalizedSlug, 'ready', /** @type {{ rootDir: string, log: Function }} */ ({ rootDir: targetWorktree, log: logFn })))) {
     errorFn(fmt.status('FAIL', `Could not transition task ${normalizedSlug} to ready status.`));
     exitFn(1);
     return;
@@ -378,7 +378,7 @@ async function draft(args, deps) {
   return runDraftCommand(args, deps);
 }
 
-function recordDraftImplementer({
+async function recordDraftImplementer({
   // @ts-expect-error implicit any binding elements
   selected,
   // @ts-expect-error implicit any binding elements
@@ -404,7 +404,7 @@ function recordDraftImplementer({
   }
 
   const currentStatus = getTaskStatusFn(taskResolution.taskFile);
-  if (!currentStatus || !transitionTaskFn(slug, currentStatus, {
+  if (!currentStatus || !await transitionTaskFn(slug, currentStatus, {
     implementer: actual,
     rootDir: worktree || resolveWorktree(slug) || process.cwd(),
     log,

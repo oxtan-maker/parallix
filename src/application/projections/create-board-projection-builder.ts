@@ -1,6 +1,11 @@
 import type { RepositoryId } from '../../domain/repository.js';
 import type { AgentFamily } from '../../domain/agents.js';
-import type { AgentBlocklistRepository, OperationalHistoryRepository } from '../../adapters/sqlite/ports.js';
+import type {
+  AgentBlocklistRepository,
+  BoardLaneEventRepository,
+  OperationalHistoryRepository,
+  UsageRepository,
+} from '../../adapters/sqlite/ports.js';
 import { BoardProjectionBuilder } from './board-readers.js';
 import { ConcreteMissionReadAdapter } from '../../adapters/backlog/concrete-mission-read-adapter.js';
 import { ConcreteReviewReadAdapter } from '../../adapters/backlog/concrete-review-read-adapter.js';
@@ -8,6 +13,7 @@ import { ConcreteGateReadAdapter } from '../../adapters/backlog/concrete-gate-re
 import { ConcreteAgentReadAdapter } from '../../adapters/backlog/concrete-agent-read-adapter.js';
 import { ConcreteOperationLogReadAdapter } from '../../adapters/backlog/concrete-operation-log-read-adapter.js';
 import { ConcreteGitReadAdapter } from '../../adapters/backlog/concrete-git-read-adapter.js';
+import { ConcreteMetricsReadAdapter } from './metrics-read-adapter.js';
 
 // ---------------------------------------------------------------------------
 // Composition root — wires concrete adapters into BoardProjectionBuilder
@@ -22,6 +28,10 @@ export interface BoardProjectionBuilderDeps {
   readonly blocklistRepo: AgentBlocklistRepository;
   /** SQLite operational history repository (TASK-2295 snapshot). */
   readonly historyRepo: OperationalHistoryRepository;
+  /** SQLite board lane-events repository (TASK-2303). */
+  readonly laneEventRepo: BoardLaneEventRepository;
+  /** SQLite usage statistics repository (TASK-2294). */
+  readonly usageRepo: UsageRepository;
   /** Known agent families to report availability for. */
   readonly knownAgentFamilies: readonly AgentFamily[];
 }
@@ -59,6 +69,11 @@ export function createBoardProjectionBuilder(
     historyRepo: deps.historyRepo,
   });
 
+  const metricsAdapter = new ConcreteMetricsReadAdapter({
+    laneEventRepo: deps.laneEventRepo,
+    usageRepo: deps.usageRepo,
+  });
+
   const gitAdapter = new ConcreteGitReadAdapter({
     rootDir: deps.rootDir,
     repositoryId: deps.repositoryId,
@@ -71,5 +86,6 @@ export function createBoardProjectionBuilder(
     agentAdapter,
     gitAdapter,
     operationLogAdapter,
+    { metricsAdapter },
   );
 }

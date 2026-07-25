@@ -637,7 +637,7 @@ function findUnverifiableGoalCheckRow(evidenceRows: string[], rootDir: string): 
   log('Step 3 & 4: Transitioning and committing Backlog task to review...');
 
   const taskImplementer = forgejoUser;
-  if (!backlog.transitionTask(slug, 'review', { implementer: taskImplementer, rootDir, log })) {
+  if (!await backlog.transitionTask(slug, 'review', { implementer: taskImplementer, rootDir, log })) {
     const msg = `Could not transition task ${fmt.slug(slug)} to review.`;
     error(msg);
     return { ok: false, error: msg };

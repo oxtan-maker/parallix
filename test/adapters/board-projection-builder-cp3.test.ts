@@ -15,7 +15,12 @@ import { ConcreteGitReadAdapter } from '../../src/adapters/backlog/concrete-git-
 import { agentFamily } from '../../src/domain/agents.js';
 import { missionId, missionLabels } from '../../src/domain/mission.js';
 import { repositoryId } from '../../src/domain/repository.js';
-import type { AgentBlocklistRepository, OperationalHistoryRepository } from '../../src/adapters/sqlite/ports.js';
+import type {
+  AgentBlocklistRepository,
+  BoardLaneEventRepository,
+  OperationalHistoryRepository,
+  UsageRepository,
+} from '../../src/adapters/sqlite/ports.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -51,6 +56,21 @@ class MockHistoryRepo implements OperationalHistoryRepository {
   async clear() {}
 }
 
+class MockLaneEventRepo implements BoardLaneEventRepository {
+  async findAll() { return []; }
+  async findByMissionId() { return []; }
+  async append() { return true; }
+  async clear() {}
+}
+
+class MockUsageRepo implements UsageRepository {
+  async findAll() { return []; }
+  async findWhere() { return []; }
+  async save() {}
+  async saveAll() {}
+  async clear() {}
+}
+
 // ---------------------------------------------------------------------------
 // BoardProjectionBuilder wiring tests
 // ---------------------------------------------------------------------------
@@ -70,6 +90,8 @@ test('BoardProjectionBuilder is wired in composition root over all six concrete 
     repositoryId: repositoryId('test-repo'),
     blocklistRepo: new MockBlocklistRepo(),
     historyRepo: new MockHistoryRepo(),
+    laneEventRepo: new MockLaneEventRepo(),
+    usageRepo: new MockUsageRepo(),
     knownAgentFamilies: [agentFamily('codex'), agentFamily('claude')],
   });
 
@@ -105,6 +127,8 @@ test('BoardProjectionBuilder.build() returns BoardProjection with missions from 
     repositoryId: repositoryId('test-repo'),
     blocklistRepo: new MockBlocklistRepo(),
     historyRepo: new MockHistoryRepo(),
+    laneEventRepo: new MockLaneEventRepo(),
+    usageRepo: new MockUsageRepo(),
     knownAgentFamilies: [agentFamily('codex')],
   });
 
@@ -262,12 +286,14 @@ test('Integration-base vs worktree reconciliation: done + worktree absent + clos
   assert.equal(missions[0].closedAt, '2026-07-15T12:00:00Z'); // closed
 });
 
-test('createBoardProjectionBuilder wires all six adapters into BoardProjectionBuilder', () => {
+test('createBoardProjectionBuilder wires all eight adapters into BoardProjectionBuilder', () => {
   const builder = createBoardProjectionBuilder({
     rootDir: '/tmp',
     repositoryId: repositoryId('test-repo'),
     blocklistRepo: new MockBlocklistRepo(),
     historyRepo: new MockHistoryRepo(),
+    laneEventRepo: new MockLaneEventRepo(),
+    usageRepo: new MockUsageRepo(),
     knownAgentFamilies: [agentFamily('codex')],
   });
 
