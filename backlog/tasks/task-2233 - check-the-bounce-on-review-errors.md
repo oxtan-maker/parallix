@@ -2,7 +2,7 @@
 id: TASK-2233
 title: check the bounce on review errors
 status: backlog
-assignee: []
+assignee: [custom]
 created_date: '2026-07-12 06:39'
 labels: []
 dependencies: []
