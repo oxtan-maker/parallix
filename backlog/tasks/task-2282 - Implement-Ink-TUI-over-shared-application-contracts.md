@@ -7,11 +7,7 @@ status: ready-for-integration
 assignee: [custom]
 created_date: '2026-07-19 00:00'
 updated_date: '2026-07-24 04:22'
-labels:
-  - ink
-  - tui
-  - react
-  - ui
+labels: [ai_sdlc]
 dependencies:
   - TASK-2281
   - TASK-2302
