@@ -2,7 +2,7 @@
 id: TASK-2304
 title: 'Ink TUI wave 2: lane columns, mission cards, and responsive terminal layout'
 status: backlog
-assignee: []
+assignee: [custom]
 created_date: '2026-07-24 04:23'
 labels:
   - ink
