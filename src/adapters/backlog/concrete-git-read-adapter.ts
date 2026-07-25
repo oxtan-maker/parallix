@@ -1,6 +1,7 @@
 import type { RepositoryId } from '../../domain/repository.js';
 import { repositoryId } from '../../domain/repository.js';
 import type { GitReadAdapter } from '../../application/projections/board-readers.js';
+import { git } from '../../platform/runtime/lib/core/git.js';
 
 // ---------------------------------------------------------------------------
 // Git runner type
@@ -11,11 +12,10 @@ interface GitRunner {
 }
 
 // ---------------------------------------------------------------------------
-// Defaults
+// Defaults — static imports (no circular deps)
 // ---------------------------------------------------------------------------
 
 function defaultGitRunner(): GitRunner {
-  const { git } = require('../../platform/runtime/lib/core/git.js');
   return git as GitRunner;
 }
 

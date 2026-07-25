@@ -13,6 +13,8 @@ import type {
 import { changeRevision } from '../../domain/review.js';
 import type { ReviewReadAdapter } from '../../application/projections/board-readers.js';
 import type { ReviewState } from '../../platform/runtime/lib/review/review-state.js';
+import { findMissionDir } from '../../platform/runtime/lib/core/mission-utils.js';
+import { readReviewState } from '../../platform/runtime/lib/review/review-state.js';
 
 // ---------------------------------------------------------------------------
 // Parse-primitive types
@@ -22,16 +24,14 @@ type ReadReviewStateFn = (_slug: string, _rootDir?: string) => ReviewState | nul
 type FindMissionDirFn = (_slug: string, _rootDir?: string, _options?: { missionPath?: string }) => string | null;
 
 // ---------------------------------------------------------------------------
-// Defaults
+// Defaults — static imports (no circular deps)
 // ---------------------------------------------------------------------------
 
 function defaultReadReviewState(): ReadReviewStateFn {
-  const { readReviewState } = require('../../platform/runtime/lib/review/review-state.js');
   return readReviewState as ReadReviewStateFn;
 }
 
 function defaultFindMissionDir(): FindMissionDirFn {
-  const { findMissionDir } = require('../../platform/runtime/lib/core/mission-utils.js');
   return findMissionDir as FindMissionDirFn;
 }
 

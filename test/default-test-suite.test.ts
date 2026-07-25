@@ -35,8 +35,8 @@ const expectedIntegrationFiles = [
   'task-2206-post-integrate-hook-errors.test.ts', 'task-2212-repro.test.ts',
   'task-2231-unit-tests-hang-repro.test.ts',
   'task-2234-push-to-reviewer-autobounce.test.ts',
-  'task-2273-review-gate-ownership.test.ts', 'test-hygiene.test.ts', 'verification.test.ts',
-  'verify-local-integrate.test.ts'
+  'task-2273-review-gate-ownership.test.ts', 'test-hygiene.test.ts',
+  'verification.test.ts', 'verify-local-integrate.test.ts'
 ].sort();
 
 function selectedFiles(args, version = process.version) {
@@ -120,4 +120,24 @@ test('default test runner preserves an explicitly selected execution root for ev
   assert.match(runner, /PARALLIX_EXECUTION_ROOT/);
   assert.match(runner, /cwd: executionRoot/);
   assert.match(runner, /env: \{ \.\.\.process\.env, PARALLIX_EXECUTION_ROOT: executionRoot \}/);
+});
+
+test('default test runner classifies tui-spawn as default (not integration) and pins bootstrap bypass', () => {
+  const runner = fs.readFileSync(path.join(__dirname, 'run-default-tests.js'), 'utf8');
+  const defaultRun = selectedFiles([]);
+  const defaultFiles = defaultRun.files;
+
+  // tui-spawn must be in the default suite (artifactSpawnTestFiles carve-out)
+  assert.ok(defaultFiles.includes('tui-spawn.test.ts'),
+    'tui-spawn.test.ts must be in the default (unit) suite');
+
+  // Bootstrap bypass: solo run skips preload so child CLI gets real environment
+  const soloRun = selectedFiles(['test/tui-spawn.test.ts']);
+  assert.ok(!soloRun.args.some(a => typeof a === 'string' && a.includes('bootstrap-parallix-home')),
+    'solo tui-spawn run must bypass the bootstrap preload');
+
+  // Bootstrap bypass must NOT leak to co-requested files (finding-2 regression guard)
+  const batchedRun = selectedFiles(['test/tui-spawn.test.ts', 'test/foo.test.ts']);
+  assert.ok(batchedRun.args.some(a => typeof a === 'string' && a.includes('bootstrap-parallix-home')),
+    'batched tui-spawn run must keep the bootstrap preload for co-requested files');
 });
