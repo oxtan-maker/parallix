@@ -13,6 +13,16 @@ interface BuildPiInvocationOptions {
   model?: string | null;
 }
 
+interface PiNoOutputWatchdog {
+  onNoOutput?: (_event: { command: string; args: string[]; pid: number | undefined; elapsedMs: number }) => void;
+  initialDelayMs?: number;
+  intervalMs?: number;
+}
+
+interface PiTeeOptions {
+  noOutputWatchdog?: PiNoOutputWatchdog | null;
+}
+
 interface StartPiAgentOptions {
   prompt: string;
   worktree: string;
@@ -20,7 +30,7 @@ interface StartPiAgentOptions {
   resume?: boolean;
   sessionId?: string | null;
   model?: string | null;
-  teeOptions?: object;
+  teeOptions?: PiTeeOptions;
   slug?: string | null;
   role?: string | null;
   maxTransientRetries?: number;
@@ -202,7 +212,7 @@ function startPiAgent({
   resume = false,
   sessionId = null,
   model = null,
-  teeOptions: _teeOptions = {},
+  teeOptions = {},
   slug: _slug = null,
   role: _role = null,
   maxTransientRetries = 1,
@@ -280,6 +290,43 @@ function startPiAgent({
     let _toolCalls = 0;
     let errorText = '';
 
+    // Tee / watchdog — write text_delta to process.stdout in real time
+    // and fire noOutputWatchdog.onNoOutput when no visible text arrives.
+    const watchdog = teeOptions.noOutputWatchdog;
+    let sawOutput = false;
+    let watchdogTimer: ReturnType<typeof setTimeout> | null = null;
+    const outputStartTime = Date.now();
+
+    const clearWatchdog = () => {
+      if (watchdogTimer) {
+        clearTimeout(watchdogTimer);
+        watchdogTimer = null;
+      }
+    };
+
+    const scheduleWatchdog = (delayMs: number) => {
+      if (!watchdog || typeof watchdog.onNoOutput !== 'function') { return; }
+      const delay = Number.isFinite(delayMs) && delayMs >= 0 ? delayMs : 0;
+      watchdogTimer = setTimeout(() => {
+        watchdogTimer = null;
+        if (sawOutput) { return; }
+        if (typeof watchdog.onNoOutput !== 'function') { return; }
+        watchdog.onNoOutput({
+          command: invocation.command,
+          args: invocation.args,
+          pid: undefined,
+          elapsedMs: Date.now() - outputStartTime,
+        });
+        scheduleWatchdog(watchdog.intervalMs ?? 0);
+      }, delay);
+      if (typeof watchdogTimer.unref === 'function') { watchdogTimer.unref(); }
+    };
+
+    // Schedule initial watchdog before session starts.
+    if (watchdog) {
+      scheduleWatchdog(watchdog.initialDelayMs ?? 0);
+    }
+
     let attempts = 0;
     let session: any = null;
 
@@ -299,7 +346,15 @@ function startPiAgent({
             switch (event.type) {
               case 'message_update':
                 if (event.assistantMessageEvent && event.assistantMessageEvent.type === 'text_delta') {
-                  assistantText += event.assistantMessageEvent.delta;
+                  const delta = event.assistantMessageEvent.delta;
+                  assistantText += delta;
+                  // Tee text_delta to stdout for real-time console visibility.
+                  process.stdout.write(delta);
+                  // Clear the no-output watchdog on first visible text.
+                  if (!sawOutput) {
+                    sawOutput = true;
+                    clearWatchdog();
+                  }
                 }
                 break;
               case 'tool_execution_end':
@@ -317,6 +372,7 @@ function startPiAgent({
 
           if (typeof unsubscribe === 'function') { unsubscribe(); }
           if (typeof session.dispose === 'function') { session.dispose(); }
+          clearWatchdog();
 
           // Build the result from SDK state.
           const stats = session.getSessionStats?.() || {};
@@ -391,6 +447,8 @@ function startPiAgent({
         endedAt: new Date().toISOString(),
       };
     } finally {
+      // Clean up watchdog timer.
+      clearWatchdog();
       // Restore original process.env.
       for (const [key, prevValue] of prevEnvEntries) {
         if (prevValue === undefined) {

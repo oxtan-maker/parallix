@@ -503,3 +503,94 @@ test('startPiAgent propagates caller environment to subprocess context', async (
     pi.__setSdkForTest(null);
   }
 });
+
+// ---------- Console stdout tee (task-2311, SC3) ----------
+
+test('startPiAgent writes text_delta to process.stdout during SDK execution', async () => {
+  let stdoutWrites = [];
+  const originalWrite = process.stdout.write.bind(process.stdout);
+  process.stdout.write = (chunk, encoding, callback) => {
+    stdoutWrites.push(typeof chunk === 'string' ? chunk : chunk.toString());
+    if (callback) callback();
+    return true;
+  };
+
+  try {
+    pi.__setCreateAgentSessionForTest(async () => {
+      const sdkEvents = [
+        { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'Hello' } },
+        { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: ' world' } },
+        { type: 'agent_end', messages: [{ role: 'assistant' }] },
+      ];
+      let listener: any = null;
+      const session = {
+        sessionId: 'stdout-tee-session',
+        subscribe: (l) => { listener = l; return () => { listener = null; }; },
+        prompt: async () => {
+          for (const event of sdkEvents) { if (listener) listener(event); }
+        },
+        waitForIdle: async () => {},
+        dispose: () => {},
+        getLastAssistantText: () => '',
+        getSessionStats: () => ({ sessionId: 'stdout-tee-session', userMessages: 1, assistantMessages: 1, toolCalls: 0, toolResults: 0, totalMessages: 2, tokens: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, total: 15 }, cost: 0 }),
+      };
+      return { session, extensionsResult: { extensions: [], diagnostics: [] } };
+    });
+
+    const { resultPromise } = pi.startPiAgent({ prompt: 'Say hello', worktree: '/tmp/test' });
+    const result = await resultPromise;
+
+    assert.ok(stdoutWrites.length > 0, `process.stdout.write should be called during SDK execution (got ${stdoutWrites.length} writes)`);
+    const writtenText = stdoutWrites.join('');
+    assert.ok(writtenText.includes('Hello'), `stdout should contain "Hello", got: "${writtenText}"`);
+    assert.ok(writtenText.includes('world'), `stdout should contain "world", got: "${writtenText}"`);
+    assert.equal(result.stdout, 'Hello world', 'Result stdout should contain combined text');
+  } finally {
+    process.stdout.write = originalWrite;
+  }
+});
+
+// ---------- No-output watchdog (task-2311, SC4) ----------
+
+test('startPiAgent invokes teeOptions.noOutputWatchdog.onNoOutput when no text arrives', async () => {
+  let watchdogCalled = false;
+  let watchdogEvent = null;
+
+  const teeOptions = {
+    noOutputWatchdog: {
+      initialDelayMs: 10,
+      intervalMs: 50,
+      onNoOutput: (event) => { watchdogCalled = true; watchdogEvent = event; },
+    },
+  };
+
+  pi.__setCreateAgentSessionForTest(async () => {
+    const sdkEvents = [
+      { type: 'agent_start' },
+      { type: 'tool_execution_end', toolName: 'bash', toolCallId: 't1', result: 'OK', isError: false },
+      { type: 'agent_end', messages: [{ role: 'assistant' }] },
+    ];
+    let listener: any = null;
+    const session = {
+      sessionId: 'watchdog-session',
+      subscribe: (l) => { listener = l; return () => { listener = null; }; },
+      prompt: async () => {
+        for (const event of sdkEvents) { if (listener) listener(event); }
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      },
+      waitForIdle: async () => {},
+      dispose: () => {},
+      getLastAssistantText: () => '',
+      getSessionStats: () => ({ sessionId: 'watchdog-session', userMessages: 1, assistantMessages: 0, toolCalls: 1, toolResults: 1, totalMessages: 1, tokens: { input: 50, output: 0, cacheRead: 0, cacheWrite: 0, total: 50 }, cost: 0 }),
+    };
+    return { session, extensionsResult: { extensions: [], diagnostics: [] } };
+  });
+
+  const { resultPromise } = pi.startPiAgent({ prompt: 'Test', worktree: '/tmp/test', teeOptions });
+  const result = await resultPromise;
+
+  assert.ok(watchdogCalled, 'onNoOutput should be invoked when no text_delta arrives');
+  assert.ok(watchdogEvent, 'Watchdog event object should be passed to callback');
+  assert.ok(watchdogEvent.elapsedMs >= 10, `elapsedMs (${watchdogEvent.elapsedMs}) should be >= initialDelayMs (10)`);
+  assert.equal(result.status, 0);
+});
