@@ -2,8 +2,8 @@
 id: TASK-2260
 title: >-
   TS cleanup: resolve 6 @ts-ignore directives in lib/ with proper TypeScript types
-status: refined
-assignee: [custom]
+status: active
+assignee: [claude]
 created_date: '2026-07-13 18:00'
 labels:
   - typescript
