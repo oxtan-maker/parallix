@@ -558,6 +558,26 @@ test('classifyError returns InfraBlocker(HumanOnly) for unknown error', () => {
   assert.equal(result.dispatchAction, DispatchAction.HumanOnly);
 });
 
+// ── task-2233: reviewer-non-submission classification ─────────────────────
+
+test('classifyError classifies reviewer-non-submission (formal outcome) as InfraBlocker', () => {
+  const result = classifyError('Reviewer custom did not submit a formal review outcome for mission/task-9001.');
+  assert.equal(result.failureClass, FailureClass.InfraBlocker);
+  assert.equal(result.dispatchAction, DispatchAction.HumanOnly);
+});
+
+test('classifyError classifies reviewer-non-submission (usable outcome) as InfraBlocker', () => {
+  const result = classifyError('Reviewer claude did not submit a usable formal review outcome after 2 recovery retries.');
+  assert.equal(result.failureClass, FailureClass.InfraBlocker);
+  assert.equal(result.dispatchAction, DispatchAction.HumanOnly);
+});
+
+test('classifyError classifies reviewer-non-submission (local handoff) as InfraBlocker', () => {
+  const result = classifyError('Reviewer custom did not leave a complete local review handoff for mission/task-9001.');
+  assert.equal(result.failureClass, FailureClass.InfraBlocker);
+  assert.equal(result.dispatchAction, DispatchAction.HumanOnly);
+});
+
 test('classifyError does not false-positive on partial matches', () => {
   // "tests passed" alone should NOT match UnverifiableClaims (needs verification failure)
   const r1 = classifyError('All tests passed');

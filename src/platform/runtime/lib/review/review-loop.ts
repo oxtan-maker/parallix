@@ -1339,10 +1339,16 @@ export async function startReviewLoop(slug: string, opts: {
               });
             }
 
-            if (!isPollTimeout(reviewState)) { break; }
+            // Treat null/undefined as timeout so the recovery loop continues
+            // until the budget is exhausted rather than breaking prematurely
+            // when pollForReview returns null (no token) or artifacts yield
+            // reviewState: null (comment verdict with provider enabled).
+            if (!isPollTimeout(reviewState) && reviewState) { break; }
           }
 
-          if (isPollTimeout(reviewState)) {
+          // Exhausted retry budget: reviewState is either POLL_TIMEOUT or
+          // null (both mean the reviewer never produced a usable outcome).
+          if (isPollTimeout(reviewState) || !reviewState) {
             error(fmt.status('FAIL', `Reviewer ${reviewer} did not submit a usable formal review outcome after ${stateAny['reviewerRetryCount']} recovery retries.`));
             error('       Human intervention is required to complete or repair the review.');
             escalateToHumanReview('REVIEWER_NON_APPROVAL');
@@ -1353,24 +1359,8 @@ export async function startReviewLoop(slug: string, opts: {
 
       if (dryRun) { return; }
 
-      if (!reviewState) {
-        if (forgejoEnabled) {
-          error(fmt.status('FAIL', `Reviewer ${reviewer} did not submit a formal review outcome for ${branch}.`));
-          error('       The reviewer agent may have exited without posting to the review PR.');
-        } else {
-          error(fmt.status('FAIL', `Reviewer ${reviewer} did not leave a complete local review handoff for ${branch}.`));
-          error(`       Expected: ${artifactDir}/${slug}-review-findings.md, ${artifactDir}/${slug}-review-outcome.md, and ${artifactDir}/${slug}-review-verdict.txt.`);
-        }
-        escalateToHumanReview('REVIEWER_NON_APPROVAL');
-        return;
-      }
-
-      if (isPollTimeout(reviewState)) {
-        error(fmt.status('FAIL', `Reviewer ${reviewer} did not submit a usable formal review outcome after bounded recovery retries.`));
-        error('       Human intervention is required to complete or repair the review.');
-        escalateToHumanReview('REVIEWER_NON_APPROVAL');
-        return;
-      }
+      // reviewState is a valid outcome string (APPROVED, REQUEST_CHANGES, etc.)
+      // at this point — the recovery loop above handles all timeout/null cases.
 
       log(fmt.status('INFO', `Round ${attempt}: reviewer outcome = ${reviewState}`));
 
