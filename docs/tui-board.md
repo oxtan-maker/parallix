@@ -62,6 +62,26 @@ A lane shows as many cards as the terminal height allows, up to eight, and folds
 the rest into a `+N more` line. The lane keeps its column; it does not stretch the
 board past the last row of the terminal.
 
+## Keyboard controls
+
+The board is read-only. Navigation changes only the current selection; it does
+not run a workflow command or change repository state.
+
+| Keys | Result |
+|---|---|
+| `↑` or `W` | Select the previous mission in the current lane. Stops at the first mission. |
+| `↓` or `S` | Select the next mission in the current lane. Stops at the last mission. |
+| `←` or `A` | Select the nearest populated lane to the left, wrapping across the board. |
+| `→` or `D` | Select the nearest populated lane to the right, wrapping across the board. |
+| `?` | Show or hide the keyboard reference in the board footer. |
+| `q` or `Ctrl+C` | Leave the board. |
+
+Arrow keys are the primary navigation controls; `W`, `A`, `S`, and `D` provide a
+left-hand alternative. Empty lanes are skipped when moving left or right. In a
+lane with more cards than fit, moving selection also scrolls the visible card
+window just enough to keep the focused card shown. The board is read-only, so it
+assigns no workflow actions to `Enter` or other letter keys.
+
 ## Leaving
 
 Press `q` or `Ctrl+C`.

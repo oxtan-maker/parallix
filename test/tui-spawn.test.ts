@@ -10,16 +10,23 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 
 const root = path.resolve(__dirname, '..');
 
 describe('px ui spawns and exits 0 from shipped artifacts', () => {
   let distPxExists = false;
   let buildPxExists = false;
+  let fixtureRoot = '';
 
   before(() => {
     distPxExists = fs.existsSync(path.join(root, 'dist', 'px.js'));
     buildPxExists = fs.existsSync(path.join(root, 'build', 'px.mjs'));
+    fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-tui-spawn-'));
+    fs.mkdirSync(path.join(fixtureRoot, 'backlog', 'tasks'), { recursive: true });
+    fs.writeFileSync(path.join(fixtureRoot, 'backlog', 'tasks', 'task-spawn.md'), [
+      '---', 'id: TASK-SPAWN', 'title: Shipped artifact fixture', 'status: active', 'assignee: []', 'labels: []', '---', '',
+    ].join('\n'));
   });
 
   it('dist/px.js ui exits 0 (CJS rollback artifact)', () => {
@@ -27,8 +34,8 @@ describe('px ui spawns and exits 0 from shipped artifacts', () => {
       // Skip if dist/ not built (e.g., test run before build)
       return;
     }
-    const result = execFileSync(process.execPath, ['dist/px.js', 'ui'], {
-      cwd: root,
+    const result = execFileSync(process.execPath, [path.join(root, 'dist', 'px.js'), 'ui'], {
+      cwd: fixtureRoot,
       stdio: ['pipe', 'pipe', 'pipe'],
       timeout: 30_000,
       maxBuffer: 1024 * 1024, // 1 MB
@@ -49,8 +56,8 @@ describe('px ui spawns and exits 0 from shipped artifacts', () => {
       // Skip if bundle not built
       return;
     }
-    const result = execFileSync(process.execPath, ['build/px.mjs', 'ui'], {
-      cwd: root,
+    const result = execFileSync(process.execPath, [path.join(root, 'build', 'px.mjs'), 'ui'], {
+      cwd: fixtureRoot,
       stdio: ['pipe', 'pipe', 'pipe'],
       timeout: 30_000,
       maxBuffer: 1024 * 1024,
@@ -85,6 +92,9 @@ describe('px ui spawns and exits 0 from shipped artifacts', () => {
   // failed. Any future in-process curl from this file would be discarded
   // alongside the expected child-CLI ones.
   after(() => {
+    if (fixtureRoot) {
+      fs.rmSync(fixtureRoot, { recursive: true, force: true });
+    }
     const marker = process.env.PARALLIX_TEST_CURL_MARKER;
     if (marker && fs.existsSync(marker)) {
       fs.unlinkSync(marker);

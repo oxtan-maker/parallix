@@ -1,11 +1,13 @@
 import { basename, join } from 'node:path';
 import { readFileSync } from 'node:fs';
 import React from 'react';
-import { render } from 'ink';
+import { render, renderToString } from 'ink';
 import type { AgentBlockEntry, AgentBlocklistRepository, BoardLaneEventEntry, BoardLaneEventRepository, OperationalHistoryEntry, OperationalHistoryRepository, UsageRecord, UsageRepository } from '../../adapters/sqlite/ports.js';
 import type { AgentFamily } from '../../domain/agents.js';
 import type { RepositoryId } from '../../domain/repository.js';
 import { createBoardProjectionBuilder } from '../../application/projections/create-board-projection-builder.js';
+import { projectMissionDetail, type MissionDetail } from '../../application/projections/mission-detail.js';
+import { ConcreteMissionReadAdapter } from '../../adapters/backlog/concrete-mission-read-adapter.js';
 import { BoardShell } from './shell.js';
 
 // ---------------------------------------------------------------------------
@@ -123,9 +125,23 @@ export async function runUiCommand(_args: string[] = []): Promise<number> {
   });
 
   const projection = await builder.build();
+  // Detail materialisation stays in the composition root. BoardShell receives
+  // pure projection data and therefore cannot reach backlog, Git, or Forgejo.
+  const missionReader = new ConcreteMissionReadAdapter({ rootDir, repositoryId });
+  const missionDetails = new Map<string, MissionDetail>();
+  for (const mission of await missionReader.loadAllMissions()) {
+    missionDetails.set(mission.id, projectMissionDetail(mission, null));
+  }
+
+  // A piped CLI invocation has no keyboard source. Render one static frame and
+  // return so shipped-artifact/headless callers cannot wait forever for `q`.
+  if (!process.stdin.isTTY && !process.stdout.isTTY) {
+    process.stdout.write(renderToString(React.createElement(BoardShell, { projection, missionDetails })));
+    return 0;
+  }
 
   const { waitUntilExit } = render(
-    React.createElement(BoardShell, { projection }),
+    React.createElement(BoardShell, { projection, missionDetails }),
     {
       exitOnCtrlC: true,
     },

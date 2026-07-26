@@ -82,6 +82,8 @@ export interface MissionCardProps {
   readonly card: MissionCardFacts;
   /** Content width available to the card, in columns. */
   readonly width?: number;
+  /** View-only focus state owned by the board shell. */
+  readonly selected?: boolean;
 }
 
 /**
@@ -97,7 +99,7 @@ export interface MissionCardProps {
  * several Text children mid-word, which is what corrupts a six-column board on
  * a 100-column terminal.
  */
-export function MissionCard({ card, width = DEFAULT_CARD_WIDTH }: MissionCardProps): React.ReactElement {
+export function MissionCard({ card, width = DEFAULT_CARD_WIDTH, selected = false }: MissionCardProps): React.ReactElement {
   const inner = Math.max(1, width - 1);
   const agent = card.agent ?? UNAVAILABLE;
   const title = isPlaceholderTitle(card.title) ? UNAVAILABLE : card.title;
@@ -111,7 +113,7 @@ export function MissionCard({ card, width = DEFAULT_CARD_WIDTH }: MissionCardPro
   return (
     <Box flexDirection="column" width={width} marginBottom={1}>
       <Box flexDirection="row">
-        <Text color={gutterColor(card)}>{'▍'}</Text>
+        <Text bold={selected} color={selected ? 'cyan' : gutterColor(card)}>{selected ? '▶' : '▍'}</Text>
         <Text wrap="truncate-end" bold color="blue">{truncate(`${card.id} · ${agent}`, inner)}</Text>
       </Box>
 

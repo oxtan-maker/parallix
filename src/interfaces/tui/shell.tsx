@@ -1,9 +1,14 @@
 import React from 'react';
-import { useApp, useStdin, Box, Text } from 'ink';
+import { useApp, useInput, Box, Text } from 'ink';
+import type { Key } from 'ink';
 import type { BoardProjection } from '../../application/projections/board.js';
 import type { MissionCard } from '../../application/projections/mission-board.js';
+import type { MissionDetail } from '../../application/projections/mission-detail.js';
 import { BoardLayout, selectLayoutMode, useTerminalDimensions, MIN_LANE_WIDTH } from './board-layout.js';
 import { BOARD_LANES } from './lane-column.js';
+import { MissionDetailPanel } from './mission-detail-panel.js';
+import { createNavigationState, moveSelection, type NavigationKey } from './navigation.js';
+import { visibleCardsForHeight } from './board-layout.js';
 
 // ---------------------------------------------------------------------------
 // TUI Shell — static read-only board from a BoardProjection
@@ -63,6 +68,10 @@ export interface BoardShellProps {
   readonly columns?: number;
   /** Terminal height override; defaults to the live terminal height. */
   readonly rows?: number;
+  /** Shared application projections keyed by mission id; the TUI never loads them itself. */
+  readonly missionDetails?: ReadonlyMap<string, MissionDetail>;
+  /** Test and embedding override for initial view-only selection. */
+  readonly initialSelectedMissionId?: string | null;
 }
 
 /**
@@ -72,7 +81,7 @@ export interface BoardShellProps {
  * Narrow terminal: attention rail above a single stacked column of lanes.
  * In headless mode (piped): Ink renders as static text dump.
  */
-export function BoardShell({ projection, columns, rows }: BoardShellProps): React.ReactElement {
+export function BoardShell({ projection, columns, rows, missionDetails, initialSelectedMissionId }: BoardShellProps): React.ReactElement {
   const { exit } = useApp();
   const detected = useTerminalDimensions();
   const width = columns ?? detected.columns;
@@ -97,6 +106,17 @@ export function BoardShell({ projection, columns, rows }: BoardShellProps): Reac
   const attnCount = projection.attentionQueue.filter(
     (item) => item.reason.kind !== 'none',
   ).length;
+  const maxVisibleCards = visibleCardsForHeight(mode, height);
+  const [navigation, setNavigation] = React.useState(() => {
+    const initial = createNavigationState(projection);
+    return initialSelectedMissionId && projection.stages.some((stage) => stage.cards.some((card) => card.id === initialSelectedMissionId))
+      ? { ...initial, selectedMissionId: initialSelectedMissionId }
+      : initial;
+  });
+  const [showKeyboardHelp, setShowKeyboardHelp] = React.useState(false);
+  const detailSourceState: 'current' | 'stale' | 'unavailable' = hasUnavailable
+    ? 'unavailable'
+    : hasStale ? 'stale' : 'current';
 
   return (
     <Box flexDirection="column" flexGrow={1}>
@@ -148,9 +168,16 @@ export function BoardShell({ projection, columns, rows }: BoardShellProps): Reac
             mode={mode}
             columns={boardWidth}
             rows={height}
+            selectedMissionId={navigation.selectedMissionId}
+            visibleStarts={navigation.visibleStarts}
           />
         </Box>
       </Box>
+
+      <MissionDetailPanel
+        detail={navigation.selectedMissionId ? missionDetails?.get(navigation.selectedMissionId) ?? null : null}
+        sourceState={detailSourceState}
+      />
 
       {/* ═══ COMMAND LOG ═══ */}
       <Box flexDirection="column" borderTopColor="gray" paddingTop={1} minHeight={3}>
@@ -167,10 +194,19 @@ export function BoardShell({ projection, columns, rows }: BoardShellProps): Reac
           <Text color="gray">$ </Text>
           <Text bold color="green">▌</Text>
         </Box>
+        <Text color="gray">
+          {showKeyboardHelp
+            ? 'arrows or WASD: move selection · ?: hide help · q / Ctrl+C: quit'
+            : 'arrows or WASD: move selection · ?: keyboard help · q: quit'}
+        </Text>
       </Box>
 
       {/* Key handler */}
-      <KeyHandler onExit={() => exit(0)} />
+      <KeyHandler
+        onExit={() => exit(0)}
+        onNavigate={(key) => setNavigation((previous) => moveSelection(previous, projection, key, maxVisibleCards))}
+        onToggleHelp={() => setShowKeyboardHelp((visible) => !visible)}
+      />
     </Box>
   );
 }
@@ -232,33 +268,38 @@ function formatLogEntry(entry: { operationId: string; phase: string; message: st
 }
 
 // ---------------------------------------------------------------------------
-// Key handler — exits on 'q' or Ctrl+C
+// Key handler — Ink parses terminal escape sequences before this callback sees
+// them. Do not match raw bytes here: terminals may split an escape sequence
+// across data events, and sequences vary with modifiers and terminal modes.
 // ---------------------------------------------------------------------------
 
-function KeyHandler({ onExit }: { readonly onExit: () => void }): React.ReactElement {
-  const { stdin, setRawMode } = useStdin();
+export function navigationKeyForInput(input: string, key: Pick<Key, 'upArrow' | 'downArrow' | 'leftArrow' | 'rightArrow' | 'ctrl' | 'meta'>): NavigationKey | undefined {
+  if (key.upArrow) { return 'up'; }
+  if (key.downArrow) { return 'down'; }
+  if (key.leftArrow) { return 'left'; }
+  if (key.rightArrow) { return 'right'; }
+  if (key.ctrl || key.meta) { return undefined; }
+  return ({ w: 'up', a: 'left', s: 'down', d: 'right' } as const)[input];
+}
 
-  React.useEffect(() => {
-    const handleData = (data: string | Buffer) => {
-      const char = typeof data === 'string' ? data : data.toString();
-      if (char === 'q' || char === '\u0003') {
-        onExit();
-      }
-    };
-
-    try {
-      setRawMode(true);
-    } catch {
-      // stdin is not a TTY (piped / CI) — skip raw mode
+function KeyHandler({ onExit, onNavigate, onToggleHelp }: {
+  readonly onExit: () => void;
+  readonly onNavigate: (_key: NavigationKey) => void;
+  readonly onToggleHelp: () => void;
+}): React.ReactElement {
+  useInput((input, key) => {
+    if ((input === 'q' && !key.ctrl && !key.meta) || (input === 'c' && key.ctrl)) {
+      onExit();
+      return;
     }
-    stdin.resume();
-    stdin.on('data', handleData);
 
-    return () => {
-      stdin.removeListener('data', handleData);
-      try { setRawMode(false); } catch {}
-    };
-  }, [stdin, setRawMode, onExit]);
+    const navigation = navigationKeyForInput(input, key);
+    if (navigation) { onNavigate(navigation); return; }
+
+    if (input === '?' && !key.ctrl && !key.meta) {
+      onToggleHelp();
+    }
+  });
 
   return <></>;
 }
