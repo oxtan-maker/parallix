@@ -5,6 +5,8 @@
  * touches Forgejo, reads a repository, or runs a workflow command.
  */
 import type {
+  AttentionItem,
+  AttentionReason,
   BoardMetrics,
   BoardProjection,
   BoardStage,
@@ -113,4 +115,18 @@ export function makeCards(count: number, lane: BoardLane): MissionCard[] {
       title: `Mission ${index + 1}`,
     }),
   );
+}
+
+/** Build an AttentionItem from a card, reason, and rank. */
+export function makeAttentionItem(
+  card: MissionCard,
+  reason: AttentionReason,
+  rank: number,
+): AttentionItem {
+  return {
+    missionId: card.id,
+    rank,
+    reason,
+    card,
+  };
 }

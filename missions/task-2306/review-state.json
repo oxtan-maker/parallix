@@ -1,0 +1,26 @@
+{
+  "reviewer": "codex",
+  "implementer": "custom",
+  "round": 5,
+  "startedAt": "2026-07-26T10:23:07.885Z",
+  "phase": "approved",
+  "disposition": "APPROVED",
+  "metadata": {
+    "recordedStageLaunches": {
+      "review:codex": [
+        "codex||2026-07-26T07:15:14.812Z|2026-07-26T07:16:52.480Z|0",
+        "codex||2026-07-26T09:28:06.487Z|2026-07-26T09:29:53.464Z|0",
+        "codex||2026-07-26T10:03:28.113Z|2026-07-26T10:04:33.825Z|0",
+        "codex||2026-07-26T10:18:12.783Z|2026-07-26T10:19:28.789Z|0",
+        "codex||2026-07-26T10:26:55.423Z|2026-07-26T10:27:56.365Z|0"
+      ],
+      "follow-up:custom": [
+        "custom|019f9d48-b31b-7cd2-ac5c-cf375c8bae19|2026-07-26T07:27:01.786Z|2026-07-26T07:27:01.786Z|0",
+        "custom|019f9d48-b31b-7cd2-ac5c-cf375c8bae19|2026-07-26T09:59:39.877Z|2026-07-26T09:59:39.877Z|0",
+        "custom|019f9d48-b31b-7cd2-ac5c-cf375c8bae19|2026-07-26T10:14:26.555Z|2026-07-26T10:14:26.555Z|0",
+        "custom|019f9d48-b31b-7cd2-ac5c-cf375c8bae19|2026-07-26T10:23:06.046Z|2026-07-26T10:23:06.046Z|0"
+      ]
+    },
+    "gateFailureRetryCount": 1
+  }
+}
