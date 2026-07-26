@@ -1,8 +1,8 @@
 ---
 id: TASK-2285
 title: Publish canonical ESM bundle as npm fallback
-status: review
-assignee: [claude]
+status: active
+assignee: [custom]
 created_date: '2026-07-19 00:00'
 updated_date: '2026-07-24 04:32'
 labels:
