@@ -10,6 +10,7 @@ labels:
   - distribution
   - esm
   - migration
+  - user_value
 dependencies:
   - TASK-2279
   - TASK-2282
