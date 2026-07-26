@@ -1,7 +1,7 @@
 ---
 id: TASK-2297
 title: graphify does not work for codex
-status: active
+status: review
 assignee: [custom]
 created_date: '2026-07-22 06:44'
 labels: []
