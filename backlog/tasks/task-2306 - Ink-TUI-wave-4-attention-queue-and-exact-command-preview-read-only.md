@@ -2,7 +2,7 @@
 id: TASK-2306
 title: 'Ink TUI wave 4: attention queue and exact-command preview (read-only)'
 status: active
-assignee: [claude]
+assignee: [custom]
 created_date: '2026-07-24 04:24'
 labels:
   - ink
