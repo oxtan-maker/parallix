@@ -4,7 +4,7 @@ title: >-
   Ink TUI wave 3: keyboard navigation, selection, mission detail, and PTY smoke
   harness
 status: backlog
-assignee: []
+assignee: [codex]
 created_date: '2026-07-24 04:23'
 labels:
   - ink
