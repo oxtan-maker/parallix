@@ -1,10 +1,10 @@
 ---
 id: TASK-2312
 title: labelling has broken
-status: ready-for-integration
+status: done
 assignee: [custom]
 created_date: '2026-07-25 19:28'
-labels: [ai_sdlc]
+labels: [ai_sdlc, bug]
 dependencies: []
 ordinal: 67000
 ---

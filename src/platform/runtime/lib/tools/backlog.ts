@@ -901,6 +901,96 @@ function hasBugLabel(taskFilePath: string) {
   return labels.includes('bug');
 }
 
+/**
+ * Write a label array to a task file's `labels` frontmatter field.
+ * Preserves the existing format (inline `labels: [a, b]` or block
+ * `labels:\n  - a\n  - b`). If no `labels` field exists, inserts
+ * an inline format field after `created_date`.
+ *
+ * @param {string} taskFilePath
+ * @param {string[]} labels
+ * @returns {boolean}
+ */
+function setTaskLabels(taskFilePath: string, labels: string[]) {
+  if (!taskFilePath || !fs.existsSync(taskFilePath)) {return false;}
+  let content = fs.readFileSync(taskFilePath, 'utf8');
+
+  const inlinePattern = /^labels:[ \t]*\[.*\]$/m;
+  const blockPattern = /^labels:[ \t]*[\r\n]+((?:\s+-\s+.+[\r\n]*)+)/m;
+
+  if (inlinePattern.test(content)) {
+    // Replace existing inline format
+    const newInline = `labels: [${labels.join(', ')}]`;
+    content = content.replace(inlinePattern, newInline);
+  } else if (blockPattern.test(content)) {
+    // Replace existing block format, preserving block style
+    const newBlock = 'labels:\n' + labels.map((l: string) => `  - ${l}`).join('\n') + '\n';
+    content = content.replace(blockPattern, newBlock);
+  } else {
+    // No labels field — insert after created_date (inline format)
+    const createdDateMatch = content.match(/^created_date:.*$/m);
+    if (createdDateMatch && createdDateMatch.index !== undefined) {
+      const insertPos = createdDateMatch.index + createdDateMatch[0].length;
+      const newLine = '\nlabels: [' + labels.join(', ') + ']';
+      content = content.slice(0, insertPos) + newLine + content.slice(insertPos);
+    } else {
+      // Fallback: insert after the id field
+      const idMatch = content.match(/^id:.*$/m);
+      if (!idMatch || idMatch.index === undefined) {return false;}
+      const insertPos = idMatch.index + idMatch[0].length;
+      const newLine = '\nlabels: [' + labels.join(', ') + ']';
+      content = content.slice(0, insertPos) + newLine + content.slice(insertPos);
+    }
+  }
+
+  fs.writeFileSync(taskFilePath, content, 'utf8');
+  return true;
+}
+
+/**
+ * Sync classification labels from a mission worktree task file to the base
+ * worktree task file. Reads labels from the mission worktree, writes them to
+ * the base worktree using setTaskLabels, and commits the change.
+ *
+ * @param {string} slug - The mission slug (e.g., 'task-2312')
+ * @param {string} missionWorktree - Path to the mission worktree
+ * @param {string} [baseRoot] - Optional base worktree root (resolved from missionWorktree if omitted)
+ * @returns {boolean} - true if sync succeeded, false otherwise
+ */
+function syncTaskLabelsToBaseWorktree(slug: string, missionWorktree: string, baseRoot?: string) {
+  try {
+    const missionResolution = resolveTaskFile(slug, missionWorktree);
+    if (!missionResolution.ok || !missionResolution.taskFile) {
+      return false;
+    }
+
+    const missionLabels = getTaskLabels(missionResolution.taskFile);
+    if (missionLabels.length === 0) {
+      return false;
+    }
+
+    const baseWorktree = baseRoot || resolveBaseWorktree(slug, { rootDir: missionWorktree });
+    const baseResolution = resolveTaskFile(slug, baseWorktree);
+    if (!baseResolution.ok || !baseResolution.taskFile) {
+      return false;
+    }
+
+    if (!setTaskLabels(baseResolution.taskFile, missionLabels)) {
+      return false;
+    }
+
+    commitTaskFileUpdate(
+      baseResolution.taskFile,
+      `backlog(${slug}): sync classification labels from mission worktree`,
+      baseWorktree
+    );
+
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
 
 /**
  * @param {string} taskFilePath
@@ -1071,6 +1161,8 @@ export { getTaskImplementer };
 export { getTaskFrontmatterValue };
 export { getTaskClassification };
 export { getTaskLabels };
+export { setTaskLabels };
+export { syncTaskLabelsToBaseWorktree };
 export { hasBugLabel };
 export { setTaskAssignee };
 export { setTaskImplementer };
