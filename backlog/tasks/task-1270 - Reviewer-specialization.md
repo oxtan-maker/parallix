@@ -5,7 +5,7 @@ status: refined
 assignee: [codex]
 created_date: '2026-06-09 04:27'
 updated_date: '2026-06-13 18:14'
-labels: []
+labels: [ai_sdlc]
 dependencies: []
 priority: low
 ordinal: 9000
