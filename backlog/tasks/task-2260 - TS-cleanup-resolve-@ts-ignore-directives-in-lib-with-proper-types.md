@@ -22,7 +22,7 @@ priority: medium
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Task-2224 (T1: test typecheck project) converted 6 `@ts-expect-error` directives in `lib/` to `@ts-ignore` as a scoped tradeoff — without `strict` on the test project, those directives became unused (TS2578). This task resolves them properly using TypeScript-compatible type narrowing rather than suppression comments. The directives cover two patterns: `context.task.matches` possibly undefined (integrate.ts:1179) and `setup.repo` possibly undefined at runtime (setup-review.ts:932,936,1011,1015,1022,1028). Fix by adding optional types to the affected interfaces and using type guards or null checks at call sites. Small scope (< 500 lines), no behavioral change.
+Task-2224 (T1: test typecheck project) converted 6 `@ts-expect-error` directives in to `@ts-ignore` as a scoped tradeoff — without `strict` on the test project, those directives became unused (TS2578). This task resolves them properly using TypeScript-compatible type narrowing rather than suppression comments. The directives cover two patterns: `context.task.matches` possibly undefined (integrate.ts:1179) and `setup.repo` possibly undefined at runtime (setup-review.ts:932,936,1011,1015,1022,1028). Fix by adding optional types to the affected interfaces and using type guards or null checks at call sites. Small scope (< 500 lines), no behavioral change.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
