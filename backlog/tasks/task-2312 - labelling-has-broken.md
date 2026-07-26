@@ -4,7 +4,7 @@ title: labelling has broken
 status: ready-for-integration
 assignee: [custom]
 created_date: '2026-07-25 19:28'
-labels: []
+labels: [ai_sdlc]
 dependencies: []
 ordinal: 67000
 ---
