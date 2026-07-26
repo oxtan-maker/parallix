@@ -6,7 +6,7 @@ title: >-
 status: ready-for-integration
 assignee: [codex]
 created_date: '2026-07-24 04:23'
-labels: [ai_sdlcyu]
+labels: [ai_sdlc]
 dependencies:
   - TASK-2304
 references:
