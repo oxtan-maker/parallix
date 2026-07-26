@@ -18,6 +18,8 @@ build/
 index.js
 px.js
 lib/
+# tsc incremental build cache
+tsconfig.tsbuildinfo
 .test-runtime/
 # StrykerJS scratch/report output (mutation-gate.ts)
 .stryker-tmp*/

@@ -35,7 +35,8 @@ const expectedIntegrationFiles = [
   'task-2206-post-integrate-hook-errors.test.ts', 'task-2212-repro.test.ts',
   'task-2231-unit-tests-hang-repro.test.ts',
   'task-2234-push-to-reviewer-autobounce.test.ts',
-  'task-2273-review-gate-ownership.test.ts', 'test-hygiene.test.ts',
+  'task-2273-review-gate-ownership.test.ts', 'task-2312-label-sync.test.ts',
+  'test-hygiene.test.ts',
   'verification.test.ts', 'verify-local-integrate.test.ts'
 ].sort();
 

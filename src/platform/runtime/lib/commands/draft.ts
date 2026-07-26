@@ -5,7 +5,7 @@ import * as crypto from 'node:crypto';
 import * as fmt from '../core/fmt.js';
 import { git, getWorktreeStatus } from '../core/git.js';
 import { startDraftAgent, selectAgent, readAgentConfigOrExit } from '../agents/agents.js';
-import { resolveTaskFile, reportTaskResolution, checkBacklogIntegrity, transitionTask, getTaskStatus, getTaskStorage } from '../tools/backlog.js';
+import { resolveTaskFile, reportTaskResolution, checkBacklogIntegrity, transitionTask, getTaskStatus, getTaskStorage, getTaskLabels, syncTaskLabelsToBaseWorktree } from '../tools/backlog.js';
 import { findMissionArea, findMissionDir, inferSlug, getMissionYear, resolveMainRepo, conventionalWorktreePath, squashTrailingBacklogNoiseIntoPreviousMission, resolveWorktree, getPrimaryBranch, missionBranchName, missionDirForSlug, detectLaunchBaseBranch } from '../core/mission-utils.js';
 import { transitionVirtual } from '../core/state-map.js';
 import * as stats from './stats.js';
@@ -350,6 +350,26 @@ async function runDraftCommand(/** @type {string[]} */ args, {
     }
   } else {
     logFn(fmt.status('PASS', `Post-draft mission type labels validated: ${normalizationResult.classification}`));
+  }
+
+  // Post-draft label sync: copy validated labels from the mission worktree
+  // task file to the base worktree task file so integration preflight can
+  // find them. See TASK-2312.
+  try {
+    const missionTaskResolution = resolveTaskFileFn(normalizedSlug, targetWorktree);
+    if (missionTaskResolution.ok && missionTaskResolution.taskFile) {
+      const missionLabels = getTaskLabels(missionTaskResolution.taskFile);
+      if (missionLabels.length > 0) {
+        const syncOk = syncTaskLabelsToBaseWorktree(normalizedSlug, targetWorktree);
+        if (syncOk) {
+          logFn(fmt.status('PASS', `Classification labels synced to base worktree: [${missionLabels.join(', ')}]`));
+        } else {
+          logFn(fmt.status('WARN', `Could not sync labels to base worktree for ${normalizedSlug}. Labels remain valid on mission worktree.`));
+        }
+      }
+    }
+  } catch (labelSyncError) {
+    logFn(fmt.status('WARN', `Label sync skipped: ${/** @type {any} */ (labelSyncError).message}`));
   }
 
   // Re-assert the Base-Branch record after the agent runs so a full MISSION.md
