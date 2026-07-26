@@ -2,7 +2,7 @@
 id: TASK-2261
 title: checkpoint gates bouncing not working
 status: active
-assignee: [vibe]
+assignee: [custom]
 created_date: '2026-07-14 03:33'
 labels: []
 dependencies: []
