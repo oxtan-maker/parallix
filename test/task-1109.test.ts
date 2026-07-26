@@ -95,12 +95,19 @@ test('integrate full squash-merge (Variant B) success path', async (t) => {
   cleanup();
 });
 
-test('integrate Variant B promotes a review-approved task only after the squash merge', () => {
+test('integrate Variant B promotes and completes a review-approved task in the landed closeout', () => {
   setupMocks();
+  const taskFile = path.join(FAKE_ROOT, 'backlog/tasks/task.md');
+  fs.mkdirSync(path.dirname(taskFile), { recursive: true });
+  fs.writeFileSync(taskFile, '---\nstatus: review\n---\n', 'utf8');
   const events = [];
   mock.method(backlog, 'getTaskStatus', () => 'review');
   mock.method(backlog, 'setTaskStatus', () => {
     events.push('promote');
+    return true;
+  });
+  mock.method(backlog, 'completeTask', () => {
+    events.push('complete');
     return true;
   });
   mock.method(git, 'git', (args) => {
@@ -115,6 +122,10 @@ test('integrate Variant B promotes a review-approved task only after the squash 
       events.push('squash');
       return { status: 0, stdout: '', stderr: '' };
     }
+    if (args.includes('commit')) {
+      events.push('commit');
+      return { status: 0, stdout: '', stderr: '' };
+    }
     if (args.includes('merge')) return { status: 0, stdout: '', stderr: '' };
     if (args.includes('rev-parse')) return { status: 0, stdout: 'deadbeef', stderr: '' };
     return { status: 0, stdout: '', stderr: '' };
@@ -123,8 +134,7 @@ test('integrate Variant B promotes a review-approved task only after the squash 
 
   integrate([TEST_SLUG, '--no-integration-gates']);
 
-  assert.ok(events.indexOf('abort') < events.indexOf('squash'));
-  assert.ok(events.indexOf('squash') < events.indexOf('promote'));
+  assert.deepEqual(events, ['abort', 'squash', 'promote', 'complete', 'commit']);
   cleanup();
 });
 

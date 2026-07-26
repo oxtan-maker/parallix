@@ -1,7 +1,7 @@
 ---
 id: TASK-2243
 title: Defer integration task promotion until after probe merge
-status: ready-for-integration
+status: done
 assignee: [codex]
 created_date: '2026-07-13 05:38'
 labels:

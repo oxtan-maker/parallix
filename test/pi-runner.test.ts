@@ -290,6 +290,66 @@ test('startPiAgent SDK execution returns session ID and telemetry from session s
   assert.equal(result.telemetry.toolCalls, 3, 'telemetry toolCalls');
 });
 
+test('startPiAgent supports legacy and current Pi SDK model APIs', async () => {
+  const session = {
+    sessionId: 'sdk-api-shape-session',
+    prompt: async () => {},
+    subscribe: () => () => {},
+    waitForIdle: async () => {},
+    dispose: () => {},
+    getLastAssistantText: () => 'ok',
+    getSessionStats: () => ({}),
+  };
+  const model = { id: 'model-id' };
+  const legacyAuthStorage = { source: 'legacy-auth' };
+  const legacyRegistry = {
+    find: () => model,
+    getAll: () => [model],
+  };
+  let legacyOptions = null;
+  pi.__setSdkForTest({
+    AuthStorage: { create: () => legacyAuthStorage },
+    ModelRegistry: { create: (authStorage) => {
+      assert.equal(authStorage, legacyAuthStorage);
+      return legacyRegistry;
+    } },
+    SessionManager: { inMemory: () => ({}) },
+  });
+  pi.__setCreateAgentSessionForTest(async options => {
+    legacyOptions = options;
+    return { session, extensionsResult: { extensions: [], diagnostics: [] } };
+  });
+  await pi.startPiAgent({ prompt: 'test', worktree: '/tmp/test', model: 'provider/model-id' }).resultPromise;
+  assert.equal(legacyOptions.authStorage, legacyAuthStorage);
+  assert.equal(legacyOptions.modelRegistry, legacyRegistry);
+  assert.equal(legacyOptions.model, model);
+
+  const currentRuntime = { source: 'current-runtime' };
+  let runtimeCreated = 0;
+  let currentOptions = null;
+  class CurrentModelRegistry {
+    constructor(runtime) { assert.equal(runtime, currentRuntime); }
+    async refresh() {}
+    find() { return model; }
+    getAll() { return [model]; }
+  }
+  pi.__setSdkForTest({
+    ModelRuntime: { create: async () => { runtimeCreated++; return currentRuntime; } },
+    ModelRegistry: CurrentModelRegistry,
+    SessionManager: { inMemory: () => ({}) },
+  });
+  pi.__setCreateAgentSessionForTest(async options => {
+    currentOptions = options;
+    return { session, extensionsResult: { extensions: [], diagnostics: [] } };
+  });
+  await pi.startPiAgent({ prompt: 'test', worktree: '/tmp/test', model: 'provider/model-id' }).resultPromise;
+  assert.equal(runtimeCreated, 1);
+  assert.equal(currentOptions.modelRuntime, currentRuntime);
+  assert.equal(currentOptions.model, model);
+  assert.equal(currentOptions.authStorage, undefined);
+  assert.equal(currentOptions.modelRegistry, undefined);
+});
+
 test('startPiAgent SDK handles errors and maps them to result shape', async () => {
   pi.__setCreateAgentSessionForTest(async () => {
     const session = {
@@ -509,12 +569,10 @@ test('startPiAgent propagates caller environment to subprocess context', async (
 test('startPiAgent writes text_delta to process.stdout during SDK execution', async () => {
   let stdoutWrites = [];
   const originalWrite = process.stdout.write.bind(process.stdout);
-  // Cast through the real signature: process.stdout.write is overloaded and its
-  // (chunk, cb) form takes two arguments, so a fixed three-parameter arrow is
-  // not assignable to it.
-  process.stdout.write = ((chunk, encoding, callback) => {
+  process.stdout.write = ((chunk: string | Uint8Array, ...args: unknown[]) => {
     stdoutWrites.push(typeof chunk === 'string' ? chunk : chunk.toString());
-    if (callback) callback();
+    const callback = args.find((arg): arg is () => void => typeof arg === 'function');
+    callback?.();
     return true;
   }) as typeof process.stdout.write;
 
