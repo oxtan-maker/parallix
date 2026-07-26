@@ -6,11 +6,7 @@ title: >-
 status: ready-for-integration
 assignee: [codex]
 created_date: '2026-07-24 04:23'
-labels:
-  - ink
-  - tui
-  - react
-  - ui
+labels: [ai_sdlcyu]
 dependencies:
   - TASK-2304
 references:
