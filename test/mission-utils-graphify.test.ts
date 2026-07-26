@@ -9,6 +9,8 @@ const {
   graphifyAvailable,
   probeGraphifyAvailability,
   updateGraphifyKnowledgeGraph,
+  resolveGraphPath,
+  queryGraph,
 } = require('../dist/lib/core/mission-utils');
 
 test('probeGraphifyAvailability and graphifyAvailable distinguish missing commands from probe failures', () => {
@@ -99,4 +101,66 @@ test('updateGraphifyKnowledgeGraph logs missing graph, missing command, probe-fa
   assert.ok(logs.some(msg => msg.includes('graphify update failed with status 3')));
   fs.rmSync(graphRoot, { recursive: true, force: true });
   fs.rmSync(emptyRoot, { recursive: true, force: true });
+});
+
+// ---------- resolveGraphPath (task-2297: active-worktree anchoring) ----------
+
+test('resolveGraphPath returns absolute path when graph exists, null when absent', () => {
+  const graphRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'graphify-resolve-'));
+  const emptyRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'graphify-resolve-empty-'));
+  fs.mkdirSync(path.join(graphRoot, 'graphify-out'), { recursive: true });
+  fs.writeFileSync(path.join(graphRoot, 'graphify-out', 'graph.json'), '{}\n');
+
+  const result = resolveGraphPath({ rootDir: graphRoot });
+  assert.ok(result, 'should return non-null when graph exists');
+  assert.equal(result.graphPath, path.join(graphRoot, 'graphify-out', 'graph.json'));
+  assert.ok(path.isAbsolute(result.graphPath), 'graphPath must be absolute');
+
+  const absent = resolveGraphPath({ rootDir: emptyRoot });
+  assert.equal(absent, null, 'should return null when graph is absent');
+
+  fs.rmSync(graphRoot, { recursive: true, force: true });
+  fs.rmSync(emptyRoot, { recursive: true, force: true });
+});
+
+// ---------- queryGraph (task-2297: actionable missing-graph handling) ----------
+
+test('queryGraph returns missing-graph when graph.json is absent', () => {
+  const emptyRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'graphify-query-empty-'));
+  const logs = [];
+  const result = queryGraph({
+    question: 'test',
+    rootDir: emptyRoot,
+    log: msg => logs.push(msg),
+    commandRunner: () => { throw new Error('should not be called'); },
+  });
+  assert.deepEqual(result.success, false);
+  assert.equal(result.reason, 'missing-graph');
+  assert.ok(logs.some(msg => msg.includes('No graphify graph')));
+  fs.rmSync(emptyRoot, { recursive: true, force: true });
+});
+
+test('queryGraph passes --graph with absolute path anchored to active worktree', () => {
+  const graphRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'graphify-query-anchored-'));
+  fs.mkdirSync(path.join(graphRoot, 'graphify-out'), { recursive: true });
+  fs.writeFileSync(path.join(graphRoot, 'graphify-out', 'graph.json'), '{}\n');
+
+  let capturedArgs;
+  const result = queryGraph({
+    question: 'how does it work',
+    rootDir: graphRoot,
+    commandRunner: (command, args, options) => {
+      if (args[0] === '--help') return { status: 0 };
+      capturedArgs = { command, args, options };
+      return { status: 0, stdout: 'query result' };
+    },
+  });
+  assert.ok(result.success);
+  assert.equal(capturedArgs.args[0], 'query');
+  assert.equal(capturedArgs.args[1], 'how does it work');
+  assert.equal(capturedArgs.args[2], '--graph');
+  assert.equal(capturedArgs.args[3], path.join(graphRoot, 'graphify-out', 'graph.json'));
+  assert.ok(path.isAbsolute(capturedArgs.args[3]), '--graph path must be absolute');
+  assert.equal(capturedArgs.options.cwd, graphRoot);
+  fs.rmSync(graphRoot, { recursive: true, force: true });
 });

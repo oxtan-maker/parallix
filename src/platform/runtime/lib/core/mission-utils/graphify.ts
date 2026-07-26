@@ -69,7 +69,8 @@ export function updateGraphifyKnowledgeGraph(options: { rootDir?: string; comman
   const startMessage = options.startMessage || 'Updating graphify knowledge graph...';
   const failureHint = options.failureHint || 'Continuing without blocking workflow.';
   const cmdRunner = commandRunner || gitModule.run;
-  if (!fs.existsSync(path.join(rootDir, 'graphify-out', 'graph.json'))) {
+  const graph = resolveGraphPath({ rootDir });
+  if (!graph) {
     logFn(fmt.status('INFO', 'No existing graphify graph found. Skipping knowledge graph update.'));
     return { updated: false, skipped: true, reason: 'missing-graph' };
   }
@@ -97,4 +98,65 @@ export function updateGraphifyKnowledgeGraph(options: { rootDir?: string; comman
   }
 
   return { updated: true, skipped: false };
+}
+
+/**
+ * Resolve the graphify graph path anchored to the active worktree.
+ * Returns the absolute path to graphify-out/graph.json for the given root,
+ * or null if the file does not exist.
+ *
+ * This prevents the cross-worktree path resolution bug where a relative
+ * `graphify-out/graph.json` resolves to a sibling worktree's graph.
+ *
+ * @param {{rootDir?: string}} [options]
+ * @returns {{graphPath: string} | null}
+ */
+export function resolveGraphPath(options: { rootDir?: string } = {}): { graphPath: string } | null {
+  const rootDir = options.rootDir || process.cwd();
+  const graphPath = path.join(rootDir, 'graphify-out', 'graph.json');
+  if (fs.existsSync(graphPath)) {
+    return { graphPath };
+  }
+  return null;
+}
+
+/**
+ * Run a graphify query anchored to the active worktree.
+ * Returns an actionable result when the graph is absent instead of an
+ * uncaught `graph file not found` failure referencing another worktree.
+ *
+ * @param {{question: string, rootDir?: string, commandRunner?: Function, log?: Function}} options
+ * @returns {{success: boolean; output?: string; reason?: string; status?: number}}
+ */
+export function queryGraph(options: { question: string; rootDir?: string; commandRunner?: Function; log?: Function }): { success: boolean; output?: string; reason?: string; status?: number } {
+  const rootDir = options.rootDir || process.cwd();
+  const logFn = options.log || fmt.log.plain;
+  const cmdRunner = options.commandRunner || gitModule.run;
+  const graphPath = path.join(rootDir, 'graphify-out', 'graph.json');
+
+  if (!fs.existsSync(graphPath)) {
+    logFn(fmt.status('INFO', `No graphify graph at ${graphPath} — run /graphify . to build it first.`));
+    return { success: false, reason: 'missing-graph' };
+  }
+
+  const probe = probeGraphifyAvailability({ commandRunner: cmdRunner });
+  if (!probe.available) {
+    return { success: false, reason: probe.reason || 'missing-command' };
+  }
+
+  try {
+    const result = cmdRunner(probe.command!, ['query', options.question, '--graph', graphPath], {
+      cwd: rootDir,
+      stdio: 'pipe',
+      encoding: 'utf8',
+    });
+
+    if (result.status !== 0) {
+      return { success: false, reason: 'query-failed', status: result.status, output: result.stdout || result.stderr };
+    }
+    return { success: true, output: result.stdout || '' };
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return { success: false, reason: 'query-error', output: msg };
+  }
 }

@@ -53,6 +53,8 @@ export const graphifyAvailable = graphify.graphifyAvailable;
 export const graphifyCommandCandidates = graphify.graphifyCommandCandidates;
 export const probeGraphifyAvailability = graphify.probeGraphifyAvailability;
 export const updateGraphifyKnowledgeGraph = graphify.updateGraphifyKnowledgeGraph;
+export const resolveGraphPath = graphify.resolveGraphPath;
+export const queryGraph = graphify.queryGraph;
 
 export const parseConflictFilesFromMergeOutput = mergeNoise.parseConflictFilesFromMergeOutput;
 export const getConflictFiles = mergeNoise.getConflictFiles;
