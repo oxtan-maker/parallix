@@ -1,7 +1,7 @@
 ---
 id: TASK-2261
 title: checkpoint gates bouncing not working
-status: backlog
+status: refined
 assignee: [codex]
 created_date: '2026-07-14 03:33'
 labels: []
