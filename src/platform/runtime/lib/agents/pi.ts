@@ -205,6 +205,46 @@ async function createSessionManager(
   return sdk.SessionManager.inMemory();
 }
 
+/**
+ * Build SDK options across the supported Pi SDK API shapes. Pi 0.80.6 exposes
+ * AuthStorage/ModelRegistry.create(), while later 0.80 releases expose a
+ * ModelRuntime factory and a ModelRegistry constructor instead. Sessions with
+ * no explicit model can use the SDK defaults and avoid initializing either
+ * model/auth API.
+ */
+async function createSdkSessionOptions(
+  sdk: any,
+  worktree: string,
+  sessionManager: any,
+  model: string | null,
+) {
+  const sdkOptions: any = { cwd: worktree, sessionManager };
+  if (!model) { return sdkOptions; }
+
+  let modelRegistry: any = null;
+  if (sdk.AuthStorage?.create && sdk.ModelRegistry?.create) {
+    const authStorage = sdk.AuthStorage.create();
+    modelRegistry = sdk.ModelRegistry.create(authStorage);
+    sdkOptions.authStorage = authStorage;
+    sdkOptions.modelRegistry = modelRegistry;
+  } else if (sdk.ModelRuntime?.create && sdk.ModelRegistry) {
+    const modelRuntime = await sdk.ModelRuntime.create();
+    modelRegistry = new sdk.ModelRegistry(modelRuntime);
+    await modelRegistry.refresh?.();
+    sdkOptions.modelRuntime = modelRuntime;
+  }
+
+  if (!modelRegistry) { return sdkOptions; }
+  const slashIndex = model.indexOf('/');
+  if (slashIndex > 0) {
+    sdkOptions.model = modelRegistry.find(model.substring(0, slashIndex), model.substring(slashIndex + 1));
+  } else {
+    sdkOptions.model = modelRegistry.getAll().find((candidate: any) => candidate.id === model);
+  }
+  if (sdkOptions.model === undefined) { delete sdkOptions.model; }
+  return sdkOptions;
+}
+
 function startPiAgent({
   prompt,
   worktree,
@@ -238,37 +278,8 @@ function startPiAgent({
     const sdk = await loadSdk();
     const createSession = _createAgentSession || sdk.createAgentSession;
 
-    // Auth and model registry (shared across sessions).
-    const authStorage = sdk.AuthStorage.create();
-    const modelRegistry = sdk.ModelRegistry.create(authStorage);
     const sessionManager = await createSessionManager(sdk, worktree, resume, sessionId);
-
-    // Resolve the caller-supplied model string into a Model object the SDK
-    // can use. When model is a "provider/modelId" reference, parse and look
-    // it up in the registry so configured model selection reaches execution.
-    let sdkModel: any = undefined;
-    if (model) {
-      const slashIndex = model.indexOf('/');
-      if (slashIndex > 0) {
-        const provider = model.substring(0, slashIndex);
-        const modelId = model.substring(slashIndex + 1);
-        sdkModel = modelRegistry.find(provider, modelId);
-      } else {
-        // Bare model id — search across all providers
-        sdkModel = modelRegistry.getAll().find((m: any) => m.id === model);
-      }
-    }
-
-    // Build SDK session options.
-    const sdkOptions: any = {
-      cwd: worktree,
-      authStorage,
-      modelRegistry,
-      sessionManager,
-    };
-    if (sdkModel) {
-      sdkOptions.model = sdkModel;
-    }
+    const sdkOptions = await createSdkSessionOptions(sdk, worktree, sessionManager, model);
 
     // Merge caller-supplied environment into process.env so the SDK's
     // subprocess spawning (bash tool, etc.) inherits the caller's scoped

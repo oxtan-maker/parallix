@@ -21,12 +21,11 @@ test.afterEach(() => {
 test('startPiAgent writes text_delta to process.stdout during SDK execution (repro: console empty)', async () => {
   let stdoutWrites = [];
   const originalWrite = process.stdout.write.bind(process.stdout);
-  // Cast through the real signature: process.stdout.write is overloaded and its
-  // (chunk, cb) form takes two arguments, so a fixed three-parameter arrow is
-  // not assignable to it.
-  process.stdout.write = ((chunk, encoding, callback) => {
+  process.stdout.write = ((chunk: string | Uint8Array, ...args: unknown[]) => {
+    const encoding = typeof args[0] === 'string' ? args[0] : undefined;
     stdoutWrites.push({ chunk: typeof chunk === 'string' ? chunk : chunk.toString(), encoding });
-    if (callback) callback();
+    const callback = args.find((arg): arg is () => void => typeof arg === 'function');
+    callback?.();
     return true;
   }) as typeof process.stdout.write;
 

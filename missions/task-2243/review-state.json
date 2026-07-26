@@ -1,0 +1,21 @@
+{
+  "reviewer": "claude",
+  "implementer": "codex",
+  "round": 2,
+  "startedAt": "2026-07-25T20:40:40.025Z",
+  "phase": "approved",
+  "disposition": "APPROVED",
+  "metadata": {
+    "recordedStageLaunches": {
+      "review:claude": [
+        "claude|f4f72e58-c386-4ba8-8962-51c72faa001a|2026-07-25T20:30:58.846Z|2026-07-25T20:36:24.673Z|0",
+        "claude|f4f72e58-c386-4ba8-8962-51c72faa001a|2026-07-26T04:43:37.349Z|2026-07-26T04:45:39.533Z|0"
+      ],
+      "follow-up:codex": [
+        "codex||2026-07-25T20:36:26.960Z|2026-07-25T20:40:37.895Z|0"
+      ]
+    },
+    "humanEscalationReason": "REVIEWER_LAUNCH_FAILURE",
+    "humanEscalatedAt": "2026-07-25T20:45:17.951Z"
+  }
+}
