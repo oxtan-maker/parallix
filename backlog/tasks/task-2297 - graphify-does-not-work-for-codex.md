@@ -1,8 +1,8 @@
 ---
 id: TASK-2297
 title: graphify does not work for codex
-status: refined
-assignee: [codex]
+status: active
+assignee: [vibe]
 created_date: '2026-07-22 06:44'
 labels: []
 dependencies: []
