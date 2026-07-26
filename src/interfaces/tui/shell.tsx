@@ -1,7 +1,9 @@
 import React from 'react';
 import { useApp, useStdin, Box, Text } from 'ink';
 import type { BoardProjection } from '../../application/projections/board.js';
-import type { BoardLane, MissionCard } from '../../application/projections/mission-board.js';
+import type { MissionCard } from '../../application/projections/mission-board.js';
+import { BoardLayout, selectLayoutMode, useTerminalDimensions, MIN_LANE_WIDTH } from './board-layout.js';
+import { BOARD_LANES } from './lane-column.js';
 
 // ---------------------------------------------------------------------------
 // TUI Shell — static read-only board from a BoardProjection
@@ -10,38 +12,19 @@ import type { BoardLane, MissionCard } from '../../application/projections/missi
 // Design box hierarchy (Ink mapping):
 //   root (flex column)
 //     ├─ top bar (flex row): px board | repo | wip·attn | staleness
-//     ├─ main (flex:1, flex ROW)
-//     │   ├─ attention rail (width:32, flex column, border-right)
+//     ├─ main (flex:1) — ROW when wide, COLUMN when narrow
+//     │   ├─ attention rail (width:34 when wide, full width when narrow)
 //     │   │   └─ cards: rank | slug | [reason] | why | $cmd
-//     │   └─ board area (flex:1, flex ROW)
-//     │       ├─ INTAKE (width:28, flex column)
-//     │       │   ├─ Refined (border-bottom)
-//     │       │   └─ Backlog (flex:1)
-//     │       ├─ ACTIVE (flex:1)
-//     │       ├─ REVIEW (flex:1)
-//     │       └─ INTEGRATE (flex:1)
+//     │   └─ BoardLayout (flex:1): the six LaneColumns, side by side or stacked
 //     ├─ command log (flex-shrink:0, border-top)
 //     └─ footer: $ prompt
+//
+// The six lanes and their cards live in ./board-layout.tsx, ./lane-column.tsx,
+// and ./mission-card.tsx. The shell owns only the surrounding chrome.
 // ---------------------------------------------------------------------------
 
-const FLIGHT_LANES: readonly BoardLane[] = ['active', 'review', 'integrate'];
-
-const LANE_LABELS: Record<BoardLane, string> = {
-  backlog: 'BACKLOG',
-  refined: 'REFINED',
-  active: 'ACTIVE',
-  review: 'REVIEW',
-  integrate: 'INTEGRATE',
-  shipped: 'SHIPPED',
-};
-
-/** Classify label to short badge (matches design: [cls] on cards). */
-function classifyLabel(labels: readonly string[]): string {
-  if (labels.length === 0) {
-    return '';
-  }
-  return labels[0] || '';
-}
+/** Width of the attention rail in the wide layout, in terminal columns. */
+const RAIL_WIDTH = 34;
 
 /** Format attention reason into "why" text (matches design attention rail). */
 function attentionWhy(reason: { kind: string; detail?: string }): string {
@@ -74,14 +57,38 @@ function attentionCommand(card: MissionCard, reason: { kind: string }): string {
   }
 }
 
+export interface BoardShellProps {
+  readonly projection: BoardProjection;
+  /** Terminal width override; defaults to the live terminal width. */
+  readonly columns?: number;
+  /** Terminal height override; defaults to the live terminal height. */
+  readonly rows?: number;
+}
+
 /**
  * BoardShell — renders the full design layout.
  *
- * In TTY mode: side-by-side columns (attention rail | board).
+ * Wide terminal: attention rail beside the six lane columns.
+ * Narrow terminal: attention rail above a single stacked column of lanes.
  * In headless mode (piped): Ink renders as static text dump.
  */
-export function BoardShell({ projection }: { readonly projection: BoardProjection }): React.ReactElement {
+export function BoardShell({ projection, columns, rows }: BoardShellProps): React.ReactElement {
   const { exit } = useApp();
+  const detected = useTerminalDimensions();
+  const width = columns ?? detected.columns;
+  const height = rows ?? detected.rows;
+
+  /* Layout mode is selected from the raw terminal width so the ≥100
+   * wide-layout contract holds for the full px ui surface. */
+  const mode = selectLayoutMode(width);
+
+  /* The attention rail can only sit beside the board when the terminal
+   * is wide enough for both the rail and six lanes at their minimum width.
+   * 6 × 12 (min lane) + 5 (margins) + 2 (gutter) + 34 (rail) = 113.
+   * Below that the rail moves above the board but lanes stay side by side. */
+  const LANE_AREA_MIN = BOARD_LANES.length * MIN_LANE_WIDTH + (BOARD_LANES.length - 1) + 2;
+  const railBeside = width >= RAIL_WIDTH + LANE_AREA_MIN;
+  const boardWidth = railBeside ? Math.max(1, width - RAIL_WIDTH - 2) : width;
 
   const hasStale = projection.sourceFacts.some((fact) => fact.status === 'stale');
   const hasUnavailable = projection.sourceFacts.some((fact) => fact.status === 'unavailable');
@@ -113,10 +120,16 @@ export function BoardShell({ projection }: { readonly projection: BoardProjectio
         )}
       </Box>
 
-      {/* ═══ MAIN: attention rail (left) | board (right) ═══ */}
-      <Box flexDirection="row" flexGrow={1} minHeight={15}>
+      {/* ═══ MAIN: attention rail + board, side by side or stacked ═══ */}
+      <Box flexDirection={railBeside ? 'row' : 'column'} flexGrow={1} minHeight={15}>
         {/* ── ATTENTION RAIL ── */}
-        <Box flexDirection="column" width={34} borderStyle="single" borderColor="gray" paddingX={1}>
+        <Box
+          flexDirection="column"
+          width={railBeside ? RAIL_WIDTH : undefined}
+          borderStyle="single"
+          borderColor="gray"
+          paddingX={1}
+        >
           <Box>
             <Text bold color="yellow">▲ NEEDS YOU NEXT</Text>
           </Box>
@@ -128,47 +141,14 @@ export function BoardShell({ projection }: { readonly projection: BoardProjectio
           </Box>
         </Box>
 
-        {/* ── BOARD AREA ── */}
-        <Box flexDirection="row" flexGrow={1} paddingX={1}>
-          {/* INTAKE column: Refined (top) + Backlog (bottom) */}
-          <Box flexDirection="column" width={30}>
-            <LaneHeader lane="refined" count={getCount(projection, 'refined')} />
-            <Box flexDirection="column" flexGrow={1}>
-              {getStage(projection, 'refined')?.cards.map((card) => (
-                <Card key={card.id} card={card} lane="refined" />
-              ))}
-              {(!getStage(projection, 'refined') || getStage(projection, 'refined')!.cards.length === 0) && (
-                <Text dimColor>nothing refined — draft from backlog</Text>
-              )}
-            </Box>
-
-            <Box marginTop={1}>
-              <LaneHeader lane="backlog" count={getCount(projection, 'backlog')} />
-            </Box>
-            <Box flexDirection="column" flexGrow={2}>
-              {getStage(projection, 'backlog')?.cards.slice(0, 8).map((card) => (
-                <Card key={card.id} card={card} lane="backlog" />
-              ))}
-              {getStage(projection, 'backlog') && getStage(projection, 'backlog')!.cards.length > 8 && (
-                <Text dimColor>{`+${getStage(projection, 'backlog')!.cards.length - 8} more`}</Text>
-              )}
-            </Box>
-          </Box>
-
-          {/* IN-FLIGHT columns: ACTIVE | REVIEW | INTEGRATE */}
-          {FLIGHT_LANES.map((lane) => (
-            <Box key={lane} flexDirection="column" flexBasis={26} flexGrow={1} paddingX={1}>
-              <LaneHeader lane={lane} count={getCount(projection, lane)} />
-              <Box flexDirection="column" flexGrow={1} paddingTop={1}>
-                {getStage(projection, lane)?.cards.map((card) => (
-                  <Card key={card.id} card={card} lane={lane} />
-                ))}
-                {(!getStage(projection, lane) || getStage(projection, lane)!.cards.length === 0) && (
-                  <Text dimColor>nothing in {lane}</Text>
-                )}
-              </Box>
-            </Box>
-          ))}
+        {/* ── BOARD AREA: the six lane columns ── */}
+        <Box flexDirection="column" flexGrow={1} paddingX={1}>
+          <BoardLayout
+            projection={projection}
+            mode={mode}
+            columns={boardWidth}
+            rows={height}
+          />
         </Box>
       </Box>
 
@@ -233,120 +213,8 @@ function AttentionItems({ queue }: { readonly queue: BoardProjection['attentionQ
 }
 
 // ---------------------------------------------------------------------------
-// Lane header: ── LANE_NAME count
-// ---------------------------------------------------------------------------
-
-function LaneHeader({ lane, count }: { readonly lane: BoardLane; readonly count: number }): React.ReactElement {
-  return (
-    <Box borderBottomColor="gray">
-      <Text color="gray">── </Text>
-      <Text bold>{LANE_LABELS[lane]}</Text>
-      <Text color="gray">{` ${count}`}</Text>
-    </Box>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Mission card: slug [cls] agent / title / cp · gate / next
-// ---------------------------------------------------------------------------
-
-function Card({ card, lane }: { readonly card: MissionCard; readonly lane: BoardLane }): React.ReactElement {
-  const cls = classifyLabel(card.labels);
-  const title = card.title && !isPlaceholderTitle(card.title) ? card.title : null;
-
-  return (
-    <Box flexDirection="column" marginBottom={1}>
-      {/* Header row: │ slug [cls] ... agent */}
-      <Box flexDirection="row" justifyContent="space-between">
-        <Text color={getCardBorderColor(card)}>│ </Text>
-        <Box>
-          <Text bold color="blue">{card.id}</Text>
-          {cls && <Text color="gray">{` [${cls}]`}</Text>}
-        </Box>
-        {card.agent && (
-          <Text color={getAgentColor(card.agent)}>{card.agent}</Text>
-        )}
-      </Box>
-
-      {/* Title */}
-      {title && (
-        <Box>
-          <Text wrap="end">{title}</Text>
-        </Box>
-      )}
-
-      {/* In-flight detail: checkpoint · gate / next */}
-      {isInFlight(lane) && (
-        <>
-          {(card.checkpoint || (card.gate && card.gate !== 'unknown')) && (
-            <Box>
-              {card.checkpoint && <Text color="gray">{card.checkpoint}</Text>}
-              {card.checkpoint && card.gate && card.gate !== 'unknown' && <Text color="gray">{' · '}</Text>}
-              {card.gate && card.gate !== 'unknown' && (
-                <Text color={card.gate === 'passed' ? 'green' : card.gate === 'failed' ? 'red' : 'gray'}>
-                  {card.gate === 'passed' ? 'gate ✓' : card.gate === 'failed' ? 'gate ✗' : 'gate ·'}
-                </Text>
-              )}
-            </Box>
-          )}
-          {card.nextActionText && (
-            <Box>
-              <Text color="gray">next: </Text>
-              <Text wrap="end" dimColor>{card.nextActionText}</Text>
-            </Box>
-          )}
-        </>
-      )}
-
-      {/* Review info */}
-      {lane === 'review' && card.pullRequest && (
-        <Box>
-          <Text color="gray">{`PR ${card.pullRequest.id}`}</Text>
-          {card.reviewApproved && <Text color="green"> approved</Text>}
-        </Box>
-      )}
-
-      {/* Blocking flag */}
-      {card.blockingReason && (
-        <Box>
-          <Text bold color="red">▲ </Text>
-          <Text wrap="end" color="red">{card.blockingReason}</Text>
-        </Box>
-      )}
-    </Box>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function getStage(
-  projection: BoardProjection,
-  lane: BoardLane,
-): { lane: BoardLane; cards: readonly MissionCard[]; count: number } | null {
-  return projection.stages.find((s) => s.lane === lane) ?? null;
-}
-
-function getCount(projection: BoardProjection, lane: BoardLane): number {
-  return projection.wipCounts.find((wc) => wc.lane === lane)?.count ?? 0;
-}
-
-function isInFlight(lane: BoardLane): boolean {
-  return ['active', 'review', 'integrate'].includes(lane);
-}
-
-function isPlaceholderTitle(title: string): boolean {
-  return title === '>- ' || title === '>-' || title.trim() === '';
-}
-
-function getCardBorderColor(card: MissionCard): 'green' | 'red' | 'yellow' | 'blue' | 'magenta' | 'gray' {
-  if (card.blockingReason) { return 'red'; }
-  if (card.gate === 'failed') { return 'yellow'; }
-  if (card.gate === 'passed') { return 'green'; }
-  if (card.agent) { return getAgentColor(card.agent); }
-  return 'gray';
-}
 
 function getReasonColor(kind: string): 'green' | 'yellow' | 'red' | 'blue' {
   switch (kind) {
@@ -355,16 +223,6 @@ function getReasonColor(kind: string): 'green' | 'yellow' | 'red' | 'blue' {
     case 'review-lane': return 'blue';
     case 'integrate-lane': return 'green';
     default: return 'yellow';
-  }
-}
-
-function getAgentColor(agent: string): 'blue' | 'yellow' | 'magenta' | 'green' {
-  switch (agent) {
-    case 'codex': return 'blue';
-    case 'claude': return 'yellow';
-    case 'mistral': return 'magenta';
-    case 'custom': return 'green';
-    default: return 'blue';
   }
 }
 

@@ -79,7 +79,7 @@ test('mission card contains the board decision inputs without changing lifecycle
   });
   assert.equal(card.status, 'integration');
   assert.equal(card.closed, false);
-  assert.equal(card.lane, 'integrate');
+  assert.equal(card.lane, 'integration');
   assert.equal(card.nextActionText, 'integrate');
   assert.equal(card.pullRequest?.id, '152');
   assert.equal(card.currentWork?.phase, 'gates');
@@ -87,13 +87,13 @@ test('mission card contains the board decision inputs without changing lifecycle
   assert.equal(card.commands.find(({ command }) => command === 'integrate')?.enabled, true);
 });
 
-test('board lanes are projections, not invented mission statuses', () => {
+test('board lanes are mission statuses, never a vocabulary of their own', () => {
   const open = { id, repositoryId: repo, title: 'x', labels: missionLabels(['unknown']), status: 'integration' as const, rawStatus: 'approved', closedAt: null, assignee: null, checkpoints: [], review: null, netEngineeringLines: null };
   const integrated = { ...open, status: 'done' as const };
   const closed = { ...integrated, closedAt: '2026-07-22T10:00:00Z' };
-  assert.equal(boardLane(closed), 'shipped');
-  assert.equal(boardLane(open), 'integrate');
-  assert.equal(boardLane(integrated), 'integrate');
+  assert.equal(boardLane(closed), 'done');
+  assert.equal(boardLane(open), 'integration');
+  assert.equal(boardLane(integrated), 'done');
 });
 
 test('attention and WIP projections reflect blockers, gates, and lanes', () => {
