@@ -32,7 +32,7 @@ import { visibleCardsForHeight } from './board-layout.js';
 const RAIL_WIDTH = 34;
 
 /** Format attention reason into "why" text (matches design attention rail). */
-function attentionWhy(reason: { kind: string; detail?: string }): string {
+export function attentionWhy(reason: { kind: string; detail?: string }): string {
   switch (reason.kind) {
     case 'blocking':
       return reason.detail || 'mission is blocked';
@@ -48,7 +48,7 @@ function attentionWhy(reason: { kind: string; detail?: string }): string {
 }
 
 /** Suggest the px command for an attention item. */
-function attentionCommand(card: MissionCard, reason: { kind: string }): string {
+export function attentionCommand(card: MissionCard, reason: { kind: string }): string {
   switch (reason.kind) {
     case 'integrate-lane':
       return `px integrate ${card.id}`;
@@ -114,6 +114,31 @@ export function BoardShell({ projection, columns, rows, missionDetails, initialS
       : initial;
   });
   const [showKeyboardHelp, setShowKeyboardHelp] = React.useState(false);
+  const [focusedAttentionIndex, setFocusedAttentionIndex] = React.useState(0);
+  const [showWave5Message, setShowWave5Message] = React.useState(false);
+  /** Which area the keyboard is focused on: rail or board. Defaults to board for backward compat. */
+  const [focusedArea, setFocusedArea] = React.useState<'rail' | 'board'>('board');
+
+  /* Bidirectional sync: when the board's selected mission changes (via lane-
+   * card selection), update the focused attention rail item to match. */
+  const queueItems = projection.attentionQueue.filter(
+    (item) => item.reason.kind !== 'none',
+  );
+  React.useEffect(() => {
+    if (!navigation.selectedMissionId || queueItems.length === 0) { return; }
+    const idx = queueItems.findIndex((item) => item.missionId === navigation.selectedMissionId);
+    if (idx >= 0) { setFocusedAttentionIndex(idx); }
+  }, [navigation.selectedMissionId]);
+
+  /* Compute per-source status for attention item rendering. */
+  const sourceStatusMap = React.useMemo(() => {
+    const map = new Map<string, 'fresh' | 'stale' | 'unavailable'>();
+    for (const fact of projection.sourceFacts) {
+      map.set(fact.source, fact.status);
+    }
+    return map;
+  }, [projection.sourceFacts]);
+
   const detailSourceState: 'current' | 'stale' | 'unavailable' = hasUnavailable
     ? 'unavailable'
     : hasStale ? 'stale' : 'current';
@@ -154,7 +179,12 @@ export function BoardShell({ projection, columns, rows, missionDetails, initialS
             <Text bold color="yellow">▲ NEEDS YOU NEXT</Text>
           </Box>
           <Box flexDirection="column" flexGrow={1} paddingTop={1}>
-            <AttentionItems queue={projection.attentionQueue} />
+            <AttentionItems
+              queue={projection.attentionQueue}
+              selectedMissionId={navigation.selectedMissionId}
+              focusedIndex={focusedArea === 'rail' ? focusedAttentionIndex : -1}
+              sourceStatusMap={sourceStatusMap}
+            />
           </Box>
           <Box paddingTop={1}>
             <Text wrap="end" dimColor>{'ranked: integrate>review>active'}</Text>
@@ -181,6 +211,11 @@ export function BoardShell({ projection, columns, rows, missionDetails, initialS
 
       {/* ═══ COMMAND LOG ═══ */}
       <Box flexDirection="column" borderTopColor="gray" paddingTop={1} minHeight={3}>
+        {showWave5Message && (
+          <Box>
+            <Text color="yellow">execution arrives in wave 5 (TASK-2307)</Text>
+          </Box>
+        )}
         {projection.operationLog.length > 0 ? (
           projection.operationLog.slice(-4).map((entry, idx) => (
             <Box key={idx}>
@@ -204,8 +239,20 @@ export function BoardShell({ projection, columns, rows, missionDetails, initialS
       {/* Key handler */}
       <KeyHandler
         onExit={() => exit(0)}
-        onNavigate={(key) => setNavigation((previous) => moveSelection(previous, projection, key, maxVisibleCards))}
+        onNavigate={(key) => {
+          if (key === 'self') { return; }
+          setNavigation((previous) => moveSelection(previous, projection, key, maxVisibleCards));
+        }}
         onToggleHelp={() => setShowKeyboardHelp((visible) => !visible)}
+        onEnterAttention={(missionId) => {
+          setNavigation((previous) => ({ ...previous, selectedMissionId: missionId }));
+          setShowWave5Message(true);
+        }}
+        queueItems={queueItems}
+        focusedAttentionIndex={focusedAttentionIndex}
+        setFocusedIdx={setFocusedAttentionIndex}
+        focusedArea={focusedArea}
+        setFocusedArea={setFocusedArea}
       />
     </Box>
   );
@@ -215,7 +262,16 @@ export function BoardShell({ projection, columns, rows, missionDetails, initialS
 // Attention items
 // ---------------------------------------------------------------------------
 
-function AttentionItems({ queue }: { readonly queue: BoardProjection['attentionQueue'] }): React.ReactElement {
+export interface AttentionItemsProps {
+  readonly queue: BoardProjection['attentionQueue'];
+  readonly selectedMissionId: string | null;
+  /** Index of the keyboard-focused item in the filtered queue (-1 when rail not focused). */
+  readonly focusedIndex: number;
+  /** Per-source status map for rendering ⚠ on items whose source is stale/unavailable. */
+  readonly sourceStatusMap: Map<string, 'fresh' | 'stale' | 'unavailable'>;
+}
+
+export function AttentionItems({ queue, selectedMissionId, focusedIndex, sourceStatusMap }: AttentionItemsProps): React.ReactElement {
   const items = queue.filter((item) => item.reason.kind !== 'none');
 
   if (items.length === 0) {
@@ -224,23 +280,35 @@ function AttentionItems({ queue }: { readonly queue: BoardProjection['attentionQ
 
   return (
     <Box flexDirection="column">
-      {items.slice(0, 5).map((item, idx) => (
-        <Box key={item.missionId} flexDirection="column" marginBottom={1}>
-          <Box>
-            <Text color="gray">{String(idx + 1).padStart(2, '0')}</Text>
-            <Text bold color="blue">{` ${item.card.id}`}</Text>
+      {items.slice(0, 5).map((item, idx) => {
+        const isSelected = item.missionId === selectedMissionId;
+        const isFocused = idx === focusedIndex;
+        /* Determine status indicator for this item based on source facts. */
+        const statusIndicator = getSourceStatusIndicator(item, sourceStatusMap);
+        return (
+          <Box key={item.missionId} flexDirection="column" marginBottom={1}>
+            <Box>
+              <Text color={isFocused && !isSelected ? 'cyan' : isSelected ? 'cyan' : 'gray'}>
+                {isFocused && !isSelected ? '▌ ' : isSelected ? '▶ ' : '  '}
+              </Text>
+              <Text color="gray">{String(idx + 1).padStart(2, '0')}</Text>
+              <Text bold color="blue">{` ${item.card.id}`}</Text>
+            </Box>
+            <Box>
+              <Text color={getReasonColor(item.reason.kind)}>{` [${item.reason.kind}]`}</Text>
+              {statusIndicator && (
+                <Text color="yellow">{' ' + statusIndicator}</Text>
+              )}
+            </Box>
+            <Box>
+              <Text wrap="end" dimColor>{attentionWhy(item.reason)}</Text>
+            </Box>
+            <Box>
+              <Text wrap="end" color="gray">{`$ ${attentionCommand(item.card, item.reason)}`}</Text>
+            </Box>
           </Box>
-          <Box>
-            <Text color={getReasonColor(item.reason.kind)}>{` [${item.reason.kind}]`}</Text>
-          </Box>
-          <Box>
-            <Text wrap="end" dimColor>{attentionWhy(item.reason)}</Text>
-          </Box>
-          <Box>
-            <Text wrap="end" color="gray">{`$ ${attentionCommand(item.card, item.reason)}`}</Text>
-          </Box>
-        </Box>
-      ))}
+        );
+      })}
       {items.length > 5 && (
         <Text dimColor>{`+${items.length - 5} more`}</Text>
       )}
@@ -251,6 +319,23 @@ function AttentionItems({ queue }: { readonly queue: BoardProjection['attentionQ
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/** Resolve a per-item source status indicator from the global sourceFacts map. */
+function getSourceStatusIndicator(
+  item: BoardProjection['attentionQueue'][number],
+  sourceStatusMap: Map<string, 'fresh' | 'stale' | 'unavailable'>,
+): string | null {
+  /* Check source facts for any non-fresh status. */
+  for (const [source, status] of sourceStatusMap) {
+    if (status === 'unavailable') {
+      return `⚠ ${source} unavailable`;
+    }
+    if (status === 'stale') {
+      return `⚠ ${source} stale`;
+    }
+  }
+  return null;
+}
 
 function getReasonColor(kind: string): 'green' | 'yellow' | 'red' | 'blue' {
   switch (kind) {
@@ -282,10 +367,16 @@ export function navigationKeyForInput(input: string, key: Pick<Key, 'upArrow' | 
   return ({ w: 'up', a: 'left', s: 'down', d: 'right' } as const)[input];
 }
 
-function KeyHandler({ onExit, onNavigate, onToggleHelp }: {
+function KeyHandler({ onExit, onNavigate, onToggleHelp, onEnterAttention, queueItems: queueItemsList, focusedAttentionIndex: focusedIdx, setFocusedIdx, focusedArea, setFocusedArea }: {
   readonly onExit: () => void;
-  readonly onNavigate: (_key: NavigationKey) => void;
+  readonly onNavigate: (_key: NavigationKey | 'self') => void;
   readonly onToggleHelp: () => void;
+  readonly onEnterAttention: (_missionId: string) => void;
+  readonly queueItems: readonly BoardProjection['attentionQueue'][number][];
+  readonly focusedAttentionIndex: number;
+  readonly setFocusedIdx: React.Dispatch<React.SetStateAction<number>>;
+  readonly focusedArea: 'rail' | 'board';
+  readonly setFocusedArea: React.Dispatch<React.SetStateAction<'rail' | 'board'>>;
 }): React.ReactElement {
   useInput((input, key) => {
     if ((input === 'q' && !key.ctrl && !key.meta) || (input === 'c' && key.ctrl)) {
@@ -294,10 +385,49 @@ function KeyHandler({ onExit, onNavigate, onToggleHelp }: {
     }
 
     const navigation = navigationKeyForInput(input, key);
-    if (navigation) { onNavigate(navigation); return; }
+    if (navigation) {
+      /* Arrow keys navigate the focused area. */
+      if (focusedArea === 'rail' && queueItemsList.length > 0) {
+        if (key.upArrow || input === 'w') {
+          setFocusedIdx((previous) => Math.max(0, previous - 1));
+          return;
+        }
+        if (key.downArrow || input === 's') {
+          setFocusedIdx((previous) => Math.min(queueItemsList.length - 1, previous + 1));
+          return;
+        }
+      }
+      /* Board area: normal navigation (arrows + WASD). */
+      if (focusedArea === 'board') { onNavigate(navigation); return; }
+      /* When rail is focused and key is not up/down, treat left/right as board nav. */
+      if (key.leftArrow || key.rightArrow || input === 'a' || input === 'd') {
+        onNavigate(navigation);
+        return;
+      }
+      return;
+    }
 
     if (input === '?' && !key.ctrl && !key.meta) {
       onToggleHelp();
+    }
+
+    /* Tab / Shift+Tab: switch focus between rail and board.
+     * Ink sets input='' for non-alphanumeric keys; use key.tab instead. */
+    if (key.tab && !key.ctrl && !key.meta) {
+      setFocusedArea((current) => current === 'rail' ? 'board' : 'rail');
+      return;
+    }
+
+    /* Enter on the attention rail: select the focused item and show wave-5
+     * run-affordance message. Only activates when the rail has keyboard focus;
+     * pressing Enter on the board does not trigger attention selection. */
+    if ((input === '\r' || key.return) && !key.ctrl && !key.meta && focusedArea === 'rail') {
+      const item = queueItemsList[focusedIdx];
+      if (item) {
+        onNavigate('self');
+        onEnterAttention(item.missionId);
+      }
+      return;
     }
   });
 
