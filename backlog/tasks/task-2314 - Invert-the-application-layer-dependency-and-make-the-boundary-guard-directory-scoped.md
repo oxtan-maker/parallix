@@ -6,15 +6,32 @@ title: >-
 status: backlog
 assignee: []
 created_date: '2026-07-26 19:21'
+updated_date: '2026-07-26 19:35'
 labels:
   - architecture
   - refactor
   - boundary
-dependencies: []
+dependencies:
+  - TASK-2285
 references:
   - docs/adr/0051-ui-neutral-application-boundary.md
   - docs/adr/0044-workflow-distribution-model.md
 documentation:
+  - docs/adr/0051-ui-neutral-application-boundary.md
+modified_files:
+  - src/application
+  - src/adapters/legacy
+  - src/adapters/backlog
+  - src/platform/runtime/lib/application
+  - src/platform/runtime/lib/adapters
+  - src/platform/runtime/lib/composition
+  - src/platform/runtime/lib/architecture/boundary-guards.ts
+  - src/platform/runtime/lib/commands/stats-backfill.ts
+  - scripts/build-canonical-bundle.js
+  - test/application-boundaries.test.ts
+  - test/application-contracts.test.ts
+  - test/application-services.test.ts
+  - test/legacy-active-adapter.test.ts
   - docs/adr/0051-ui-neutral-application-boundary.md
 priority: high
 ordinal: 67000
@@ -48,6 +65,20 @@ Scope note: this task deliberately does not flatten `src/platform/runtime/lib/` 
 - [ ] #8 Tests that load the relocated modules through dist paths are updated, and the default suite is green with no reduction in the number of executed tests
 - [ ] #9 ADR 0051 is amended in place to record the corrected dependency direction, without appending superseding or dated-history clauses
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Readiness / sequencing (verified against main @ f5bb550e3 on 2026-07-26):
+
+SATISFIED prerequisites (not encoded as dependencies because completed tasks cannot be referenced, and they add no scheduling signal) — TASK-2278 established the UI-neutral application boundary and the contracts/ports vocabulary this task relocates; TASK-2290 delegated the first CLI slices through it. Both are done, so the target shape is already agreed and exercised. Nothing about the design needs re-deciding before starting.
+
+BLOCKING — TASK-2285 is active with a live worktree (mission/task-2285 @ 6ea8043d7) whose diff against main changes scripts/build-canonical-bundle.js by +44 lines plus package.json. This task must also edit that script's emit-tree list, because relocating the application modules changes which trees are emitted as CJS versus ESM. Two concurrent missions editing that file will conflict in exactly the region both need. Start once TASK-2285 integrates. Note this is serialization on a shared file, not a functional dependency: nothing TASK-2285 produces is consumed here, so if TASK-2285 is abandoned or descoped away from the build script, this task is immediately startable.
+
+NOT a blocker, deliberately — TASK-2288 (retire transitional CommonJS) runs the other way: it gets cheaper once this arrow is corrected. The current double emit of lib/ (83 files as CJS at dist/lib/, the same 83 again as ESM at dist/platform/runtime/lib/) plus four brittle string .replace() path repairs in the build script are what make the emit list fragile. Do not wait for TASK-2288; prefer running this first.
+
+WATCH, not a dependency — TASK-2307 (Ink TUI wave 5) has a worktree (mission/task-2307 @ 49c3072dc), but its diff so far only adds new files under src/interfaces/tui/ with their tests, and does not touch src/application/controller. If that wave grows to route guarded actions through board-command.ts or board-controller.ts before this task starts, re-check overlap: those two files are among the nine import sites rewritten here.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
