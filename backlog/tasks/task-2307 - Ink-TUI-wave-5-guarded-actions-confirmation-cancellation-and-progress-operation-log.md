@@ -11,6 +11,7 @@ labels:
   - tui
   - react
   - ui
+  - user_value
 dependencies:
   - TASK-2306
 references:
