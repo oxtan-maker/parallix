@@ -6,7 +6,7 @@ assignee: [codex]
 created_date: '2026-07-13 05:38'
 labels:
   - bug
-  - integration
+  - ai_sdlc
 dependencies: []
 ordinal: 43000
 ---
