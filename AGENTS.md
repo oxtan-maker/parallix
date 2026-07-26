@@ -1,14 +1,15 @@
 ## graphify
 
-This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+This project has a knowledge graph at `$(pwd)/graphify-out/` with god nodes, community structure, and cross-file relationships. All graphify commands below use `$(pwd)/graphify-out/graph.json` to anchor to the active worktree and avoid resolving to a sibling worktree's graph.
 
 When the user types `/graphify`, invoke the `skill` tool with `skill: "graphify"` before doing anything else.
 
 Rules:
-- For codebase questions, first run `graphify query "<question>"` when graphify-out/graph.json exists. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
+- For codebase questions, first run `graphify query "<question>" --graph "$(pwd)/graphify-out/graph.json"` when `$(pwd)/graphify-out/graph.json` exists. Use `graphify path "<A>" "<B>" --graph "$(pwd)/graphify-out/graph.json"` for relationships and `graphify explain "<concept>" --graph "$(pwd)/graphify-out/graph.json"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
+- When `$(pwd)/graphify-out/graph.json` is absent, do not run graphify query/path/explain. Instead signal that the graph has not been built yet (e.g. "graphify-out/graph.json not found in this worktree — run `/graphify .` to build it first") and fall back to reading source files directly.
 - Dirty graphify-out/ files are expected after hooks or incremental updates; dirty graph files are not a reason to skip graphify. Only skip graphify if the task is about stale or incorrect graph output, or the user explicitly says not to use it.
-- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
-- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
+- If `$(pwd)/graphify-out/wiki/index.md` exists, use it for broad navigation instead of raw source browsing.
+- Read `$(pwd)/graphify-out/GRAPH_REPORT.md` only for broad architecture review or when query/path/explain do not surface enough context.
 - After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
 
 Before editing any `.md` file in the repo root or `docs/` directory, consult `docs/doc-standards.md` for the full standard.
