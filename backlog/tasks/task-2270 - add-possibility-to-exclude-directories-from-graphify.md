@@ -4,7 +4,7 @@ title: add possibility to exclude directories from graphify
 status: backlog
 assignee: [codex]
 created_date: '2026-07-11 05:03'
-labels: []
+labels: [user_value]
 dependencies: []
 ---
 
