@@ -2,7 +2,7 @@
 id: TASK-2270
 title: add possibility to exclude directories from graphify
 status: backlog
-assignee: []
+assignee: [codex]
 created_date: '2026-07-11 05:03'
 labels: []
 dependencies: []
