@@ -4,7 +4,7 @@ title: checkpoint gates bouncing not working
 status: ready-for-integration
 assignee: [custom]
 created_date: '2026-07-14 03:33'
-labels: []
+labels: [ai_sdlc]
 dependencies: []
 ordinal: 47000
 ---

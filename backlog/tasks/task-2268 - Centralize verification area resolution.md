@@ -8,11 +8,6 @@ updated_date: '2026-07-11 07:45'
 labels: []
 dependencies: []
 references:
-  - lib/core/verification.ts
-  - lib/commands/integrate.ts
-  - lib/review/review-commands.ts
-  - lib/commands/checkpoint.ts
-  - lib/commands/handoff.ts
 priority: medium
 ordinal: 7001
 ---
