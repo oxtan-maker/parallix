@@ -9,6 +9,7 @@ labels:
   - tui
   - react
   - ui
+  - user_value
 dependencies:
   - TASK-2305
 references:
