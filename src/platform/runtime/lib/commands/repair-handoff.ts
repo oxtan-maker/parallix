@@ -140,6 +140,13 @@ export function classifyError(errorMsg: string): { failureClass: FailureClassTyp
     return { failureClass: FailureClass.InfraBlocker, dispatchAction: DispatchAction.HumanOnly };
   }
 
+  // 11. InfraBlocker: reviewer non-submission (ADR 0048 — human-only after bounded retries)
+  // Matches: "Reviewer X did not submit a formal review outcome" and
+  // "Reviewer X did not leave a complete local review handoff".
+  if (/did not (submit|leave).*(review (outcome|handoff)|formal review)/i.test(errorMsg)) {
+    return { failureClass: FailureClass.InfraBlocker, dispatchAction: DispatchAction.HumanOnly };
+  }
+
   // Default: human-only for unrecognized errors
   return { failureClass: FailureClass.InfraBlocker, dispatchAction: DispatchAction.HumanOnly };
 }
