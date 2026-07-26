@@ -5,11 +5,7 @@ title: >-
 status: ready-for-integration
 assignee: [claude]
 created_date: '2026-07-13 18:00'
-labels:
-  - typescript
-  - migration
-  - adr-0044
-  - tech-debt
+labels: [ai_sdlc]
 dependencies:
   - TASK-2224
 references:
