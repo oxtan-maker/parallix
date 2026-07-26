@@ -3,7 +3,7 @@ id: TASK-2305
 title: >-
   Ink TUI wave 3: keyboard navigation, selection, mission detail, and PTY smoke
   harness
-status: backlog
+status: refined
 assignee: [codex]
 created_date: '2026-07-24 04:23'
 labels:
