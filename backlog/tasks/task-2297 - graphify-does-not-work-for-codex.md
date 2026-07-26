@@ -4,7 +4,7 @@ title: graphify does not work for codex
 status: ready-for-integration
 assignee: [custom]
 created_date: '2026-07-22 06:44'
-labels: []
+labels: [ai_sdlc]
 dependencies: []
 ordinal: 50000
 ---
