@@ -39,6 +39,10 @@ export interface LaneColumnProps {
   readonly width?: number;
   /** Maximum cards rendered before the "+N more" indicator. */
   readonly maxVisibleCards?: number;
+  /** First card shown in this lane's view-only scrolling window. */
+  readonly visibleStart?: number;
+  /** The selected mission id, for focus rendering only. */
+  readonly selectedMissionId?: string | null;
 }
 
 /**
@@ -53,10 +57,13 @@ export function LaneColumn({
   count,
   width = DEFAULT_CARD_WIDTH,
   maxVisibleCards = DEFAULT_VISIBLE_CARDS,
+  visibleStart = 0,
+  selectedMissionId = null,
 }: LaneColumnProps): React.ReactElement {
   const cards = stage.cards;
-  const visible = cards.slice(0, Math.max(0, maxVisibleCards));
-  const hidden = cards.length - visible.length;
+  const start = Math.max(0, Math.min(visibleStart, Math.max(0, cards.length - maxVisibleCards)));
+  const visible = cards.slice(start, start + Math.max(0, maxVisibleCards));
+  const hidden = cards.length - start - visible.length;
 
   return (
     <Box flexDirection="column">
@@ -71,10 +78,10 @@ export function LaneColumn({
           <Text dimColor>{emptyLaneMessage(stage.lane)}</Text>
         ) : (
           visible.map((card) => (
-            <MissionCard key={card.id} card={card} width={width} />
+            <MissionCard key={card.id} card={card} width={width} selected={card.id === selectedMissionId} />
           ))
         )}
-        {hidden > 0 && <Text dimColor>{`+${hidden} more`}</Text>}
+        {hidden > 0 && <Text dimColor>{`${start > 0 ? `↑${start} · ` : ''}+${hidden} more`}</Text>}
       </Box>
     </Box>
   );

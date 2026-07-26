@@ -126,6 +126,8 @@ export interface BoardLayoutProps {
    * mode from its own smaller width.
    */
   readonly mode?: LayoutMode;
+  readonly selectedMissionId?: string | null;
+  readonly visibleStarts?: Partial<Record<BoardLane, number>>;
 }
 
 /**
@@ -134,7 +136,7 @@ export interface BoardLayoutProps {
  * `columns`/`rows` exist so a caller (and the layout tests) can drive an exact
  * terminal size; when omitted the live dimensions are used.
  */
-export function BoardLayout({ projection, columns, rows, mode: modeOverride }: BoardLayoutProps): React.ReactElement {
+export function BoardLayout({ projection, columns, rows, mode: modeOverride, selectedMissionId, visibleStarts }: BoardLayoutProps): React.ReactElement {
   const detected = useTerminalDimensions();
   const width = columns ?? detected.columns;
   const height = rows ?? detected.rows;
@@ -158,6 +160,8 @@ export function BoardLayout({ projection, columns, rows, mode: modeOverride }: B
             count={wipCountFor(projection, lane)}
             width={columnWidth}
             maxVisibleCards={maxVisibleCards}
+            selectedMissionId={selectedMissionId}
+            visibleStart={visibleStarts?.[lane] ?? 0}
           />
         </Box>
       ))}
