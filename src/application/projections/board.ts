@@ -82,7 +82,7 @@ export function attentionReason(card: MissionCard): AttentionReason {
   if (card.blockingReason) { return { kind: 'blocking', detail: card.blockingReason }; }
   if (card.gate === 'failed') { return { kind: 'gate-failed', detail: `Gate ${card.gate}` }; }
   if (card.lane === 'review') { return { kind: 'review-lane', detail: 'Awaiting review decision' }; }
-  if (card.lane === 'integrate') { return { kind: 'integrate-lane', detail: 'Awaiting integration' }; }
+  if (card.lane === 'integration') { return { kind: 'integrate-lane', detail: 'Awaiting integration' }; }
   return { kind: 'none' };
 }
 
@@ -111,7 +111,7 @@ export function buildBoardProjection(
   metrics: BoardMetrics,
   sourceFacts: readonly SourceFact<string>[],
 ): BoardProjection {
-  const allLanes: readonly BoardLane[] = ['backlog', 'refined', 'active', 'review', 'integrate', 'shipped'];
+  const allLanes: readonly BoardLane[] = ['backlog', 'refined', 'active', 'review', 'integration', 'done'];
   const stages = allLanes.map((lane) => buildBoardStage(lane, cards));
 
   const ranked = cards.map((card) => ({

@@ -509,11 +509,14 @@ test('startPiAgent propagates caller environment to subprocess context', async (
 test('startPiAgent writes text_delta to process.stdout during SDK execution', async () => {
   let stdoutWrites = [];
   const originalWrite = process.stdout.write.bind(process.stdout);
-  process.stdout.write = (chunk, encoding, callback) => {
+  // Cast through the real signature: process.stdout.write is overloaded and its
+  // (chunk, cb) form takes two arguments, so a fixed three-parameter arrow is
+  // not assignable to it.
+  process.stdout.write = ((chunk, encoding, callback) => {
     stdoutWrites.push(typeof chunk === 'string' ? chunk : chunk.toString());
     if (callback) callback();
     return true;
-  };
+  }) as typeof process.stdout.write;
 
   try {
     pi.__setCreateAgentSessionForTest(async () => {

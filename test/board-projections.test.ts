@@ -37,9 +37,9 @@ function makeCard(
     title: `Mission ${id}`,
     labels: missionLabels(['user_value']),
     lane,
-    status: lane === 'shipped' ? 'done' : lane === 'integrate' ? 'integration' : lane,
-    rawStatus: lane === 'shipped' ? 'done' : lane === 'integrate' ? 'integration' : lane,
-    closed: lane === 'shipped',
+    status: lane,
+    rawStatus: lane,
+    closed: lane === 'done',
     agent: agentFamily('codex'),
     checkpoint: null,
     checkpointDescription: null,
@@ -131,8 +131,8 @@ test('attentionRank returns 2 for review lane', () => {
   assert.equal(attentionRank(card), 2);
 });
 
-test('attentionRank returns 3 for integrate lane', () => {
-  const card = makeCard(id1, 'integrate');
+test('attentionRank returns 3 for integration lane', () => {
+  const card = makeCard(id1, 'integration');
   assert.equal(attentionRank(card), 3);
 });
 
@@ -140,18 +140,18 @@ test('attentionRank returns 4 for all others', () => {
   const backlog = makeCard(id1, 'backlog');
   const refined = makeCard(id1, 'refined');
   const active = makeCard(id1, 'active');
-  const shipped = makeCard(id1, 'shipped');
+  const done = makeCard(id1, 'done');
   assert.equal(attentionRank(backlog), 4);
   assert.equal(attentionRank(refined), 4);
   assert.equal(attentionRank(active), 4);
-  assert.equal(attentionRank(shipped), 4);
+  assert.equal(attentionRank(done), 4);
 });
 
 test('attentionQueue sorts by rank then missionId ascending', () => {
   const cards: MissionCard[] = [
     makeCard(id3, 'active'),
     makeCard(id1, 'active', { blockingReason: 'blocked' }),
-    makeCard(id5, 'integrate'),
+    makeCard(id5, 'integration'),
     makeCard(id2, 'review'),
     makeCard(id4, 'active', { gate: 'failed' }),
     makeCard(id3, 'backlog'),
@@ -200,7 +200,7 @@ test('attentionReason returns review-lane kind', () => {
 });
 
 test('attentionReason returns integrate-lane kind', () => {
-  const card = makeCard(id1, 'integrate');
+  const card = makeCard(id1, 'integration');
   const reason = attentionReason(card);
   assert.deepEqual(reason, { kind: 'integrate-lane', detail: 'Awaiting integration' });
 });
@@ -248,7 +248,7 @@ test('buildBoardProjection wipCounts reflects all lanes', () => {
     makeCard(id2, 'active'),
     makeCard(id3, 'active'),
     makeCard(id4, 'review'),
-    makeCard(id5, 'shipped'),
+    makeCard(id5, 'done'),
   ];
   const projection = buildBoardProjection(
     repo,
@@ -269,8 +269,8 @@ test('buildBoardProjection wipCounts reflects all lanes', () => {
   assert.equal(counts.refined, 0);
   assert.equal(counts.active, 2);
   assert.equal(counts.review, 1);
-  assert.equal(counts.integrate, 0);
-  assert.equal(counts.shipped, 1);
+  assert.equal(counts.integration, 0);
+  assert.equal(counts.done, 1);
 });
 
 test('buildBoardProjection stages cover all six lanes', () => {
@@ -290,7 +290,7 @@ test('buildBoardProjection stages cover all six lanes', () => {
 
   assert.equal(projection.stages.length, 6);
   const lanes = projection.stages.map((s) => s.lane);
-  assert.deepEqual(lanes, ['backlog', 'refined', 'active', 'review', 'integrate', 'shipped']);
+  assert.deepEqual(lanes, ['backlog', 'refined', 'active', 'review', 'integration', 'done']);
 });
 
 // ---------------------------------------------------------------------------
@@ -317,17 +317,17 @@ test('BoardLane maps review status to review lane', () => {
   assert.equal(boardLane(mission), 'review');
 });
 
-test('BoardLane maps integration status to integrate lane', () => {
+test('BoardLane maps integration status to integration lane', () => {
   const mission = { id: id1, repositoryId: repo, title: 'x', labels: missionLabels(['a']), status: 'integration' as const, closedAt: null, assignee: null, checkpoints: [], review: null, netEngineeringLines: null };
-  assert.equal(boardLane(mission), 'integrate');
+  assert.equal(boardLane(mission), 'integration');
 });
 
-test('BoardLane maps done (open) to integrate lane', () => {
+test('BoardLane maps done (open) to done lane', () => {
   const mission = { id: id1, repositoryId: repo, title: 'x', labels: missionLabels(['a']), status: 'done' as const, closedAt: null, assignee: null, checkpoints: [], review: null, netEngineeringLines: null };
-  assert.equal(boardLane(mission), 'integrate');
+  assert.equal(boardLane(mission), 'done');
 });
 
-test('BoardLane maps done (closed) to shipped lane', () => {
+test('BoardLane maps done (closed) to done lane', () => {
   const mission = { id: id1, repositoryId: repo, title: 'x', labels: missionLabels(['a']), status: 'done' as const, closedAt: '2026-01-01', assignee: null, checkpoints: [], review: null, netEngineeringLines: null };
-  assert.equal(boardLane(mission), 'shipped');
+  assert.equal(boardLane(mission), 'done');
 });

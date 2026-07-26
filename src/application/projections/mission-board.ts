@@ -8,7 +8,11 @@ import {
   type ReviewedRevision,
 } from '../../domain/review.js';
 
-export type BoardLane = 'backlog' | 'refined' | 'active' | 'review' | 'integrate' | 'shipped';
+/**
+ * A board lane is a mission status. The board shows the lifecycle the domain
+ * records — it does not invent a vocabulary of its own.
+ */
+export type BoardLane = MissionStatus;
 export type BoardCommand = 'active' | 'handoff' | 'review' | 'integrate';
 
 /** Ephemeral operation progress for a live board. It is never mission lifecycle state. */
@@ -63,8 +67,6 @@ export interface MissionCard {
 }
 
 export function boardLane(mission: Mission): BoardLane {
-  if (isClosedMission(mission)) { return 'shipped'; }
-  if (mission.status === 'integration' || mission.status === 'done') { return 'integrate'; }
   return mission.status;
 }
 
@@ -131,7 +133,7 @@ export function attentionRank(card: MissionCard): number {
   if (card.blockingReason) { return 0; }
   if (card.gate === 'failed') { return 1; }
   if (card.lane === 'review') { return 2; }
-  if (card.lane === 'integrate') { return 3; }
+  if (card.lane === 'integration') { return 3; }
   return 4;
 }
 
@@ -144,7 +146,7 @@ export function attentionQueue(cards: readonly MissionCard[]): MissionCard[] {
 
 export function wipCounts(cards: readonly MissionCard[]): Readonly<Record<BoardLane, number>> {
   const result: Record<BoardLane, number> = {
-    backlog: 0, refined: 0, active: 0, review: 0, integrate: 0, shipped: 0,
+    backlog: 0, refined: 0, active: 0, review: 0, integration: 0, done: 0,
   };
   for (const card of cards) { result[card.lane] += 1; }
   return result;

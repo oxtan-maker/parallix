@@ -1,10 +1,15 @@
 ---
 id: TASK-2304
 title: 'Ink TUI wave 2: lane columns, mission cards, and responsive terminal layout'
-status: ready-for-integration
+status: done
 assignee: [custom]
 created_date: '2026-07-24 04:23'
-labels: [ai_sdlc]
+labels:
+  - ink
+  - tui
+  - react
+  - ui
+  - user_value
 dependencies:
   - TASK-2282
 references:
@@ -21,7 +26,7 @@ ordinal: 60000
 <!-- SECTION:DESCRIPTION:BEGIN -->
 WAVE 2 of 7 (see TASK-2282 for the wave sequence). Wave 1 delivered `px ui` as a static shell (identity, WIP counts, staleness) plus the Ink runtime, build, and isolation guardrails. This wave renders the actual board content, still read-only.
 
-DELIVERABLE: the lane columns from the design reference — backlog, refined, active, review, integrate, shipped — each with its count and its `MissionCard` rows carrying the facts the projection already provides (slug, title, lane, agent, checkpoint, gate status, next step, review/PR indication, blocking flag). Layout adapts to terminal width and height: a wide terminal shows columns side by side, a narrow terminal falls back to a single-column stacked view, and a resize re-lays out without corrupting the screen.
+DELIVERABLE: the lane columns from the design reference — backlog, refined, active, review, integration, done (the mission statuses in `MISSION_STATUSES`; the board never invents lane names) — each with its count and its `MissionCard` rows carrying the facts the projection already provides (slug, title, lane, agent, checkpoint, gate status, next step, review/PR indication, blocking flag). Layout adapts to terminal width and height: a wide terminal shows columns side by side, a narrow terminal falls back to a single-column stacked view, and a resize re-lays out without corrupting the screen.
 
 NON-GOALS: keyboard navigation and selection (wave 3 / TASK-2305), the attention queue (wave 4 / TASK-2306), any action or command dispatch (wave 5 / TASK-2307), analytics and cycle-time panels (wave 6 / TASK-2308). Cards render facts; they do not compute lifecycle state — anything not present on the projection is shown as unavailable rather than derived in a component.
 
@@ -30,15 +35,15 @@ The design reference is evidence of intended operator experience only; per ADR 0
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 All six lanes render from `BoardProjection.stages` with per-lane counts matching `wipCounts`, including an explicit empty-lane message per lane
-- [ ] #2 Mission cards render the card facts supplied by the projection (slug, title, agent, checkpoint, gate, next step, review/PR indication, blocking flag) and show 'unavailable' for absent sources instead of deriving a value in the component
-- [ ] #3 Wide-terminal column layout and narrow-terminal single-column fallback are both covered by semantic tests at named widths, including the exact breakpoint
-- [ ] #4 A terminal resize re-renders at the new dimensions without duplicated or truncated frames; a test drives at least one resize
-- [ ] #5 Long titles and overflowing lanes truncate or scroll within the column rather than breaking the layout
-- [ ] #6 Components remain pure over the projection: no workflow, SQL, Git, Forgejo, or subprocess calls, enforced by the wave-1 import guardrail
-- [ ] #7 Component tests assert rendered semantics rather than relying only on snapshots
-- [ ] #8 Headless CLI output, exit codes, and the non-TTY Ink-isolation test remain green
-- [ ] #9 `./scripts/verify-local.sh all` passes plus `static-analysis` for the changed `src/` code
+- [x] #1 All six lanes render from `BoardProjection.stages` with per-lane counts matching `wipCounts`, including an explicit empty-lane message per lane
+- [x] #2 Mission cards render the card facts supplied by the projection (slug, title, agent, checkpoint, gate, next step, review/PR indication, blocking flag) and show 'unavailable' for absent sources instead of deriving a value in the component
+- [x] #3 Wide-terminal column layout and narrow-terminal single-column fallback are both covered by semantic tests at named widths, including the exact breakpoint
+- [x] #4 A terminal resize re-renders at the new dimensions without duplicated or truncated frames; a test drives at least one resize
+- [x] #5 Long titles and overflowing lanes truncate or scroll within the column rather than breaking the layout
+- [x] #6 Components remain pure over the projection: no workflow, SQL, Git, Forgejo, or subprocess calls, enforced by the wave-1 import guardrail
+- [x] #7 Component tests assert rendered semantics rather than relying only on snapshots
+- [x] #8 Headless CLI output, exit codes, and the non-TTY Ink-isolation test remain green
+- [x] #9 `./scripts/verify-local.sh all` passes plus `static-analysis` for the changed `src/` code
 <!-- AC:END -->
 
 ## Definition of Done

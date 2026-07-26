@@ -227,8 +227,8 @@ test('checkProjectionStaleness returns stale when no cached HEAD', () => {
 // ---------------------------------------------------------------------------
 
 test('attention ranking tie-breaker: proximity to completion (lower rank = closer to completion)', () => {
-  // shipped (rank 4) is "completed" but not in active lanes
-  // integrate (rank 3) is closest to completion among active lanes
+  // done (rank 4) is "completed" but not in active lanes
+  // integration (rank 3) is closest to completion among active lanes
   // review (rank 2) is next
   // gate-failed (rank 1) needs attention
   // blocking (rank 0) needs most attention
@@ -238,7 +238,7 @@ test('attention ranking tie-breaker: proximity to completion (lower rank = close
   const blocking = makeCard(id1, 'active', { blockingReason: 'blocked' });
   const gateFailed = makeCard(id2, 'active', { gate: 'failed' });
   const review = makeCard(id3, 'review');
-  const integrate = makeCard(id1, 'integrate');
+  const integrate = makeCard(id1, 'integration');
   const active = makeCard(id2, 'active');
 
   assert.equal(attentionRank(blocking), 0);
@@ -282,7 +282,7 @@ test('attention ranking tie-breaker: severity within same lane (blocking > gate-
 function createCardHelpers() {
   function makeCard(
     id: typeof id1,
-    lane: 'backlog' | 'refined' | 'active' | 'review' | 'integrate' | 'shipped',
+    lane: 'backlog' | 'refined' | 'active' | 'review' | 'integration' | 'done',
     opts: { blockingReason?: string | null; gate?: 'passed' | 'failed' | 'running' | 'unknown' } = {},
   ) {
     return {
@@ -291,8 +291,8 @@ function createCardHelpers() {
       title: `Mission ${id}`,
       labels: missionLabels(['user_value']),
       lane,
-      status: lane === 'shipped' ? 'done' : lane,
-      closed: lane === 'shipped',
+      status: lane,
+      closed: lane === 'done',
       agent: agentFamily('codex'),
       checkpoint: null,
       nextActionText: null,

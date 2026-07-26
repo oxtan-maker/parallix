@@ -25,6 +25,13 @@ esbuild.buildSync({
   sourcesContent: true,
   legalComments: 'none',
   packages: 'bundle',
+  // Ink reaches for react-devtools-core only under `DEV=true`. px never ships a
+  // devtools bridge, so the package is aliased to a local no-op stub: it is not
+  // a declared dependency, and marking it external would hoist it into a
+  // top-level import that fails to resolve at startup.
+  alias: {
+    'react-devtools-core': path.join(__dirname, 'stubs', 'react-devtools-core.mjs'),
+  },
   logLevel: 'error',
   jsx: 'automatic',
   loader: {
