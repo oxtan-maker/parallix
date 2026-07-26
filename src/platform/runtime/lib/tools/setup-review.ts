@@ -890,7 +890,7 @@ function tokenCreateViaOwnerToken(baseUrl: string, repoSlug: string, ownerToken:
 
 /**
  * @param {string} rootDir
- * @param {{baseUrl: string, repo: string, ownerLogin: string, ownerPassword: string, agentPasswords: Array<{user: string, password: string}>, agentUsers?: string[]}} setup
+ * @param {{baseUrl?: string, repo?: string, ownerLogin: string, ownerPassword: string, agentPasswords: Array<{user: string, password: string}>, agentUsers?: string[]}} setup
  * @param {{log?: Function, promptFn?: Function, requestFn?: Function, maxPasswordAttempts?: number, interactive?: boolean, forgejoHome?: string, reviewRemoteUrlFn?: Function}} [options]
  * @returns {Promise<{ok: boolean, warnings?: Array<{user: string, error: string, response?: any}>, createdTokens?: Array<{user: string, path: string}>, error?: string, response?: any}>}
  */
@@ -905,11 +905,14 @@ async function bootstrapReviewSurface(rootDir: string, setup: any, options: any 
   } = options;
   const forgejoHome = resolveBootstrapForgejoHome(rootDir, options.forgejoHome);
   const repoInfo = parseRepoSlug(setup.repo);
-  if (!setup.baseUrl || !repoInfo) {
+  // Narrow on the normalized value so `baseUrl` is a plain `string` for every
+  // downstream call; the guard is equivalent to the previous `!setup.baseUrl`
+  // check because normalizeBaseUrl only ever strips trailing slashes.
+  const baseUrl = normalizeBaseUrl(setup.baseUrl);
+  if (!baseUrl || !repoInfo) {
     return { ok: false, error: 'workflow.config.json must define adapters.review.baseUrl and adapters.review.repo before setup can run.' };
   }
 
-  const baseUrl = normalizeBaseUrl(setup.baseUrl);
   const collaboratorUsers = unique([
     ...(Array.isArray(setup.agentUsers) ? setup.agentUsers : []),
     ...(Array.isArray(setup.agentPasswords) ? setup.agentPasswords.map((agent: any) => agent.user) : []),
@@ -931,11 +934,9 @@ async function bootstrapReviewSurface(rootDir: string, setup: any, options: any 
     const ownerToken = /** @type {string} */ ((ownerTokenResult as any).token);
 
     const ownerTokenPath = writeToken(setup.ownerLogin, ownerToken, forgejoHome);
-    // @ts-ignore setup.repo may be undefined at runtime
     const repoResult = ensureRepo(baseUrl, setup.repo, setup.ownerLogin, ownerToken, requestFn);
     if (!repoResult.ok) {return repoResult;}
 
-    // @ts-ignore setup.repo may be undefined at runtime
     const collaboratorResult = ensureRepoCollaborators(baseUrl, setup.repo, ownerToken, collaboratorUsers, 'write', requestFn);
     if (!collaboratorResult.ok) {return collaboratorResult;}
     if (collaboratorResult.created.length > 0) {
@@ -1010,18 +1011,15 @@ async function bootstrapReviewSurface(rootDir: string, setup: any, options: any 
     return { ok: false, error: `No owner token found for ${/** @type {string} */ (setup.ownerLogin)} at ${ownerTokenPath}. A token file for an existing user (typically human) is required to bootstrap new agent tokens.` };
   }
 
-  // @ts-ignore setup.repo may be undefined at runtime
   const repoResult = ensureRepo(baseUrl, setup.repo, setup.ownerLogin, ownerToken, requestFn);
   if (!repoResult.ok) {return repoResult;}
 
-  // @ts-ignore setup.repo may be undefined at runtime
   const collaboratorResult = ensureRepoCollaborators(baseUrl, setup.repo, ownerToken, collaboratorUsers, 'write', requestFn);
   if (!collaboratorResult.ok) {return collaboratorResult;}
   if (collaboratorResult.created.length > 0) {
     log(fmt.status('PASS', `Granted write access on ${setup.repo} to ${collaboratorResult.created.join(', ')}`));
   }
 
-  // @ts-ignore setup.repo may be undefined at runtime
   const tokensResult = tokenCreateViaOwnerToken(baseUrl, setup.repo, ownerToken, setup.agentPasswords, repoInfo, { requestFn, writeTokenFn: writeToken, forgejoHome, log });
   if (!tokensResult.ok) {return tokensResult;}
 

@@ -634,7 +634,7 @@ test('startReviewLoop full loop success and exit cases', async () => {
     readTokenFn: () => 'token',
     readReviewStateFn: () => null,
     writeReviewStateFn: () => {},
-    transitionTaskFn: () => true,
+    transitionTaskFn: () => Promise.resolve(true),
     startAgentFn: async () => ({ agent: null }), // No fallback
     rebaseBeforeReviewRoundFn: async (slug, { worktree }) => {
       rebaseCalls.push({ slug, worktree });
@@ -2756,7 +2756,7 @@ test('startReviewLoop repairs a persisted rewiewing typo and resumes on the revi
         reviewPolls += 1;
         return reviewPolls === 1 ? null : 'APPROVED';
       },
-      transitionTaskFn: () => {},
+      transitionTaskFn: async () => {},
       transitionVirtualFn: () => {},
       applyAgentFallbackFn: ({ original }) => original,
       runPreReviewGateFn: passingPreReviewGate
@@ -2944,7 +2944,7 @@ test('startReviewLoop continue falls back to the persisted reviewer when an expl
         return { agent: opts.agent, result: { startedAt: '2026-07-04T19:20:00.000Z' } };
       },
       pollForReviewFn: async () => 'APPROVED',
-      transitionTaskFn: () => {},
+      transitionTaskFn: async () => {},
       transitionVirtualFn: () => {},
       applyAgentFallbackFn: ({ original }) => original
     });
@@ -3175,7 +3175,7 @@ test('submitReviewRound persists state with REQUEST_CHANGES disposition after re
         reviewer: 'codex', implementer: 'claude', round: 1, phase: 'reviewing'
       }),
       writeReviewStateFn: (slug, state) => { stateWritten = { slug, disposition: state.disposition, phase: state.phase }; },
-      transitionTaskFn: (slug, status) => {
+      transitionTaskFn: async (slug, status) => {
         backlogTransitioned = { slug, status };
         return true;
       },
@@ -3212,7 +3212,7 @@ test('submitReviewRound persists state with APPROVED disposition after approve',
         reviewer: 'codex', implementer: 'claude', round: 1, phase: 'reviewing'
       }),
       writeReviewStateFn: (slug, state) => { stateWritten = { slug, disposition: state.disposition, phase: state.phase }; },
-      transitionTaskFn: (slug, status) => {
+      transitionTaskFn: async (slug, status) => {
         backlogTransitioned = { slug, status };
         return true;
       },
@@ -3251,7 +3251,7 @@ test('submitReviewRound promotes an active backlog task to review after provider
       }),
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-2197.md' }),
       getTaskStatusFn: () => 'active',
-      transitionTaskFn: (slug, status) => {
+      transitionTaskFn: async (slug, status) => {
         transitioned = { slug, status };
         return true;
       },
@@ -3366,7 +3366,7 @@ test('submitReviewRound skips Forgejo and updates review-state only when provide
       writeReviewStateFn: (slug, state) => {
         stateWritten = { slug, disposition: state.disposition, phase: state.phase, implementer: state.implementer };
       },
-      transitionTaskFn: (slug, status) => {
+      transitionTaskFn: async (slug, status) => {
         backlogTransitioned = { slug, status };
         return true;
       },
@@ -3421,7 +3421,7 @@ test('submitReviewRound updates existing state when provider=none', () => {
       writeReviewStateFn: (slug, state) => {
         stateWritten = { slug, disposition: state.disposition, phase: state.phase };
       },
-      transitionTaskFn: (slug, status) => {
+      transitionTaskFn: async (slug, status) => {
         backlogTransitioned = { slug, status };
         return true;
       },

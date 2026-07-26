@@ -2,10 +2,15 @@
 id: TASK-2260
 title: >-
   TS cleanup: resolve 6 @ts-ignore directives in lib/ with proper TypeScript types
-status: ready-for-integration
+status: done
 assignee: [claude]
 created_date: '2026-07-13 18:00'
-labels: [ai_sdlc]
+labels:
+  - typescript
+  - migration
+  - adr-0044
+  - tech-debt
+  - user_value
 dependencies:
   - TASK-2224
 references:
