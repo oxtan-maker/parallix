@@ -4,7 +4,7 @@ title: >-
   Ink TUI wave 5: guarded actions, confirmation, cancellation, and
   progress/operation log
 status: backlog
-assignee: []
+assignee: [custom]
 created_date: '2026-07-24 04:24'
 labels:
   - ink
