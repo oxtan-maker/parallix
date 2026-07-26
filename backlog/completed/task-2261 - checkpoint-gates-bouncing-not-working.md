@@ -1,10 +1,12 @@
 ---
 id: TASK-2261
 title: checkpoint gates bouncing not working
-status: ready-for-integration
+status: done
 assignee: [custom]
 created_date: '2026-07-14 03:33'
-labels: [ai_sdlc]
+labels:
+  - ai_sdlc
+  - bug
 dependencies: []
 ordinal: 47000
 ---

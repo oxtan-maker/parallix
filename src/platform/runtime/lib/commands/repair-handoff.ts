@@ -78,6 +78,23 @@ export function classifyError(errorMsg: string): { failureClass: FailureClassTyp
     return { failureClass: FailureClass.IncompleteEvidence, dispatchAction: DispatchAction.AutoSendBack };
   }
 
+  // 1b. IncompleteEvidence: checkpoint missing Goal Check section entirely
+  // (task-2261: handoff.ts emits "missing a \"## Goal Check\" section" for
+  // checkpoints that lack the required heading).
+  if (errorMsg.includes('missing a') && errorMsg.includes('"## Goal Check" section')) {
+    return { failureClass: FailureClass.IncompleteEvidence, dispatchAction: DispatchAction.AutoSendBack };
+  }
+
+  // 1c. IncompleteEvidence: no checkpoint documents found at all
+  // (task-2261: validateCheckpointsBeforeHandoff emits "No checkpoint documents
+  // found" — classify as IncompleteEvidence so the lifecycle can relaunch the
+  // implementer with a targeted repair prompt rather than stranding on manual
+  // instructions).
+  if (errorMsg.includes('No checkpoint documents found') &&
+      errorMsg.includes('Goal Check table')) {
+    return { failureClass: FailureClass.IncompleteEvidence, dispatchAction: DispatchAction.AutoSendBack };
+  }
+
   // 2. GitBlockers: dirty/uncommitted mission artifacts (mechanical git blocker — auto-repairable)
   if (errorMsg.includes('is modified but uncommitted') ||
       errorMsg.includes('Commit the mission contract before handoff') ||
@@ -243,14 +260,25 @@ function buildGoalCheckRepairPrompt(errorMsg: string, slug: string, worktree: st
   const offendingRowMatch = errorMsg.match(/Offending row:\s*(.+)$/m);
   const offendingRow = offendingRowMatch ? offendingRowMatch[1].trim() : null;
 
+  // Detect whether this is a missing-checkpoint error (no CP-N.md exists)
+  // vs an existing-checkpoint-with-bad-evidence error.
+  const isMissingCheckpoint = errorMsg.includes('No checkpoint documents found');
+
   let prompt = `Automated handoff failed for mission ${slug} with a repairable error: ${errorMsg}
 
-` +
-          `Please fix the final checkpoint document in ${missionDir} by updating the ` +
+`;
+  if (isMissingCheckpoint) {
+    prompt += `Please create a checkpoint document (CP-1.md) in ${missionDir} with a ` +
           `## Goal Check section and its evidence rows.
 
-` +
-          `Use one canonical heading: ## Goal Check
+`;
+  } else {
+    prompt += `Please fix the final checkpoint document in ${missionDir} by updating the ` +
+          `## Goal Check section and its evidence rows.
+
+`;
+  }
+  prompt += `Use one canonical heading: ## Goal Check
 
 ` +
           `Use this exact table shape:

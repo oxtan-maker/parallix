@@ -381,10 +381,66 @@ async function runHandoffAndReview(slug, worktree, agent, options = {}) {
   // before the repair flow runs, and provides an explicit instruction to create them.
   const validation = validateCheckpointsBeforeHandoffFn(slug, worktree, { log, error });
   if (!validation.ok) {
-    // Don't attempt repair for missing checkpoints — instruct the agent to create them
-    error(`       Create a checkpoint document (CP-N.md) in ${fmt.path(missionDirForSlug(worktree, slug))} with a Goal Check table.`);
-    error(`       Then re-run: ${fmt.command(`px review ${slug} --submit`)}`);
-    return false;
+    // task-2261: classify the checkpoint validation error and attempt a targeted
+    // agent relaunch (repair bounce) instead of only emitting stranded manual
+    // instructions. Missing checkpoints and malformed Goal Check tables are
+    // IncompleteEvidence — dispatchable to the implementer for repair.
+    const checkpointClassification = validation.error
+      ? repairHandoff.classifyError(validation.error)
+      : null;
+    // task-2261: restrict targeted relaunch to IncompleteEvidence only.
+    // Non-incomplete-evidence errors (e.g. GitBlockers/dirty checkpoints,
+    // InfraBlockers) retain their existing handling paths.
+    const isCheckpointRelaunchable = checkpointClassification
+      ? checkpointClassification.failureClass === repairHandoff.FailureClass.IncompleteEvidence
+      : false;
+
+    if (isCheckpointRelaunchable) {
+      // task-2261: bounded retry loop for pre-handoff checkpoint validation.
+      // Repeated absent or invalid checkpoint evidence reaches a configured
+      // exhaustion boundary without review submission.
+      let checkpointRelaunchCount = 0;
+      const maxCheckpointRelaunches = 2;
+
+      while (checkpointRelaunchCount < maxCheckpointRelaunches) {
+        checkpointRelaunchCount++;
+        log(`Checkpoint validation failed (${checkpointClassification.failureClass}). Targeted repair relaunch attempt ${checkpointRelaunchCount}/${maxCheckpointRelaunches}...`);
+        const { relaunched, error: relaunchError } = await attemptAgentRelaunchFn(
+          slug, worktree, /** @type{string} */(validation.error), agent,
+          { log, error }
+        );
+        if (relaunched) {
+          log('Agent relaunched for checkpoint repair. Re-validating checkpoints...');
+          // After relaunch, re-validate and proceed to performHandoff if checkpoints
+          // are now present. The agent is expected to create/update the CP-N.md
+          // before the next handoff attempt.
+          const retryValidation = validateCheckpointsBeforeHandoffFn(slug, worktree, { log, error });
+          if (retryValidation.ok) {
+            // Checkpoints now valid — fall through to performHandoff below
+            break;
+          }
+          // Checkpoint still missing/invalid after this relaunch; continue loop
+        } else {
+          log(`Agent relaunch failed: ${relaunchError || 'unknown error'}`);
+          break; // Relaunch itself failed; stop
+        }
+      }
+
+      // Re-validate after the loop to check final state
+      const finalValidation = validateCheckpointsBeforeHandoffFn(slug, worktree, { log, error });
+      if (!finalValidation.ok) {
+        // Checkpoint still missing/invalid after all relaunch attempts — exhaustion
+        error(`       Create a checkpoint document (CP-N.md) in ${fmt.path(missionDirForSlug(worktree, slug))} with a Goal Check table.`);
+        error(`       Then re-run: ${fmt.command(`px review ${slug} --submit`)}`);
+        return false;
+      }
+      // Fall through to performHandoff below
+    } else {
+      // Non-relaunchable checkpoint error — emit manual instruction
+      error(`       Create a checkpoint document (CP-N.md) in ${fmt.path(missionDirForSlug(worktree, slug))} with a Goal Check table.`);
+      error(`       Then re-run: ${fmt.command(`px review ${slug} --submit`)}`);
+      return false;
+    }
   }
 
   let handoffResult = await _performHandoff(slug, { forgejoUser: agent, worktree });
