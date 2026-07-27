@@ -3,7 +3,7 @@ id: TASK-2308
 title: >-
   Ink TUI wave 6: flow analytics panel (CFD, cycle time, throughput, bottleneck
   read)
-status: refined
+status: active
 assignee: [codex]
 created_date: '2026-07-24 04:24'
 labels:
