@@ -1,0 +1,15 @@
+{
+  "reviewer": "custom",
+  "implementer": "codex",
+  "round": 1,
+  "startedAt": "2026-07-26T20:13:05.282Z",
+  "phase": "approved",
+  "disposition": "APPROVED",
+  "metadata": {
+    "recordedStageLaunches": {
+      "review:custom": [
+        "custom|019fa012-e84a-7910-8e65-e34795406be5|2026-07-26T20:19:17.008Z|2026-07-26T20:19:17.008Z|0"
+      ]
+    }
+  }
+}

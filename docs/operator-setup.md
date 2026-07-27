@@ -17,6 +17,24 @@ This installs the `graphify` entry-point script to `~/.local/bin/graphify` (on L
 
 The CLI resolves in this order: `$GRAPHIFY_BIN` → `graphify` on `$PATH` → `~/.local/bin/graphify`.
 
+## Repository Input Exclusions
+
+Graphify reads `.graphifyignore` before it creates graph nodes. The file uses
+gitignore-style patterns, so a repository can keep generated workflow text out
+of the input corpus without filtering a graph after it has been built.
+
+Parallix's own `.graphifyignore` excludes only generated mission documents:
+
+```text
+missions/**/MISSION.md
+missions/**/CP-*.md
+```
+
+These patterns omit mission plans and checkpoint records while leaving other
+files under `missions/`, plus source and repository documentation elsewhere,
+available for Graphify relationships. Run `graphify update .` after changing
+the file to refresh an existing repository graph.
+
 ## One-Time Platform Install
 
 Run the installer once per agent family. It copies a platform-specific skill (and, for Claude, a `CLAUDE.md` directive) into the agent's config directory. **Do not use `--project` scope** — it writes artifacts into the current working directory.
