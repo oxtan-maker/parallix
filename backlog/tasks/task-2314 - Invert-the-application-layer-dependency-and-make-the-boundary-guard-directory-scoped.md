@@ -8,6 +8,7 @@ assignee: [codex]
 created_date: '2026-07-26 19:21'
 updated_date: '2026-07-26 19:35'
 labels:
+  - user_value
   - architecture
   - refactor
   - boundary
