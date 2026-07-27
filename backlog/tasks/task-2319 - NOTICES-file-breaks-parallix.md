@@ -1,7 +1,7 @@
 ---
 id: TASK-2319
 title: NOTICES file breaks parallix
-status: backlog
+status: refined
 assignee: [codex]
 created_date: '2026-07-27 08:16'
 labels: [ai_sdlc, bug]
