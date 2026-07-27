@@ -3,7 +3,7 @@ id: TASK-2309
 title: >-
   Ink TUI wave 7: make no-command TTY launch the default after compatibility
   gates
-status: ready-for-integration
+status: active
 assignee: [codex]
 created_date: '2026-07-24 04:24'
 labels:
