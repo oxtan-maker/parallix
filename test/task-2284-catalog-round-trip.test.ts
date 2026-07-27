@@ -11,7 +11,7 @@ import {
 } from './helpers/task-2284-catalog-round-trip.js';
 
 const root = process.cwd();
-const MISSION_TASK = 'backlog/tasks/task-2284 - Decide-future-task-catalog-authority-and-board-authorship-migration.md';
+const MISSION_TASK_BASENAME = 'task-2284 - Decide-future-task-catalog-authority-and-board-authorship-migration.md';
 
 // A synthetic record that carries every frontmatter key named by the mission
 // plus two extension keys no reader in src/platform/runtime/lib/tools/backlog.ts
@@ -89,6 +89,16 @@ function firstTaskFile(relativeDir: string, exclude: string = ''): string {
   return path.posix.join(relativeDir, file);
 }
 
+function findTaskFile(fileName: string, stores: readonly string[]): string {
+  for (const store of stores) {
+    const relative = path.posix.join(store, fileName);
+    if (fs.existsSync(path.join(root, relative))) {
+      return relative;
+    }
+  }
+  assert.fail(`expected to find ${fileName} in one of: ${stores.join(', ')}`);
+}
+
 function entry(record: TaskRecord, key: string): unknown {
   return record.frontmatter.find(item => item.key === key)?.value;
 }
@@ -157,9 +167,14 @@ test('round trip preserves the SECTION:DESCRIPTION body and every AC and DOD ite
 });
 
 test('round trip reports zero field differences for real task records copied from all three stores', () => {
+  const missionTask = findTaskFile(MISSION_TASK_BASENAME, [
+    'backlog/tasks',
+    'backlog/completed',
+    'backlog/archive/tasks',
+  ]);
   const sources = [
-    MISSION_TASK,
-    firstTaskFile('backlog/tasks', path.basename(MISSION_TASK)),
+    missionTask,
+    firstTaskFile('backlog/tasks', path.basename(missionTask)),
     firstTaskFile('backlog/completed'),
   ];
   const before = sources.map(relative => fs.readFileSync(path.join(root, relative)));
