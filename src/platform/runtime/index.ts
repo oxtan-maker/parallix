@@ -117,6 +117,28 @@ interface MainOptions {
   errorFn?: typeof fmt.log.plainError;
   logFn?: typeof fmt.log.plain;
   loadAliasesFn?: typeof deriveAliases;
+  isInteractiveTTYFn?: () => boolean;
+  environment?: NodeJS.ProcessEnv;
+}
+
+/**
+ * Returns whether bare `px` should open the interactive board. Both terminal
+ * streams are required so pipes and redirected output retain their historical
+ * usage output; CI and PARALLIX_NO_TUI=1 deliberately preserve that fallback.
+ */
+export function shouldLaunchDefaultUi({
+  isInteractiveTTY,
+  stdinIsTTY = Boolean(process.stdin.isTTY),
+  stdoutIsTTY = Boolean(process.stdout.isTTY),
+  environment = process.env,
+}: {
+  isInteractiveTTY?: boolean;
+  stdinIsTTY?: boolean;
+  stdoutIsTTY?: boolean;
+  environment?: NodeJS.ProcessEnv;
+} = {}): boolean {
+  const terminalIsInteractive = isInteractiveTTY ?? (stdinIsTTY && stdoutIsTTY);
+  return terminalIsInteractive && !environment.CI && environment.PARALLIX_NO_TUI !== '1';
 }
 
 async function main(args = process.argv.slice(2), options: MainOptions = {}) {
@@ -129,6 +151,8 @@ async function main(args = process.argv.slice(2), options: MainOptions = {}) {
     errorFn = fmt.log.plainError,
     logFn = fmt.log.plain,
     loadAliasesFn = deriveAliases,
+    isInteractiveTTYFn = () => Boolean(process.stdin.isTTY && process.stdout.isTTY),
+    environment = process.env,
   } = options;
 
   const command = args[0];
@@ -136,6 +160,15 @@ async function main(args = process.argv.slice(2), options: MainOptions = {}) {
   if (command === '--version' || command === '-v') {
     logFn(packageJson.name + '@' + packageJson.version);
     exitFn(0);
+    return;
+  }
+
+  if (!command && shouldLaunchDefaultUi({ isInteractiveTTY: isInteractiveTTYFn(), environment })) {
+    const injectedUiCommand = options.commandFns && Object.prototype.hasOwnProperty.call(options.commandFns, 'ui')
+      ? options.commandFns.ui
+      : undefined;
+    const uiCommandFn = typeof injectedUiCommand === 'function' ? injectedUiCommand : COMMANDS.ui;
+    await uiCommandFn([], { command: 'ui' });
     return;
   }
 
@@ -279,6 +312,8 @@ ${fmt.bold('Notes:')}
   - When provided, <slug> MUST be the lowercase Backlog task key (e.g., task-073).
   - Mistyped parallix subcommands print the closest supported \`px ...\` suggestion when the match is unambiguous.
   - Run \`px stats --help\` for pre-integration stats preview examples.
+  - In an interactive terminal, running \`px\` with no command opens the board; \`px ui\` remains available explicitly.
+  - Set \`PARALLIX_NO_TUI=1\` to keep the previous no-command usage help behavior in an interactive terminal.
   - No npm dependencies — requires Node.js built-ins only.
 `);
 }

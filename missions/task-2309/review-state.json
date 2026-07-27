@@ -1,0 +1,19 @@
+{
+  "reviewer": "custom",
+  "implementer": "codex",
+  "round": 2,
+  "startedAt": "2026-07-27T11:01:49.859Z",
+  "phase": "approved",
+  "disposition": "APPROVED",
+  "metadata": {
+    "recordedStageLaunches": {
+      "review:custom": [
+        "custom|019fa2a9-60f8-7002-836e-9dcafb858ec1|2026-07-27T08:31:36.292Z|2026-07-27T08:31:36.292Z|0",
+        "custom|019fa340-d399-7eee-adbb-1336db03375d|2026-07-27T11:15:25.636Z|2026-07-27T11:15:25.636Z|0"
+      ],
+      "follow-up:codex": [
+        "codex||2026-07-27T10:29:16.973Z|2026-07-27T10:29:59.370Z|0"
+      ]
+    }
+  }
+}
