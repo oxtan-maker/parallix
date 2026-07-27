@@ -1,0 +1,23 @@
+import React from 'react';
+import { Box, Text } from 'ink';
+import type { BoardCommandKind } from '../../application/controller/board-command.js';
+
+export interface ConfirmationDialogProps {
+  readonly kind: BoardCommandKind;
+  readonly missionId: string;
+}
+
+/** Exact command text is informational; Enter is still required to dispatch. */
+export function applicationCommandText(kind: BoardCommandKind, missionId: string): string {
+  return kind === 'active:execute' ? `px active ${missionId}` : `px ${kind} ${missionId}`;
+}
+
+export function ConfirmationDialog({ kind, missionId }: ConfirmationDialogProps): React.ReactElement {
+  return (
+    <Box flexDirection="column" borderStyle="double" borderColor="yellow" paddingX={1}>
+      <Text bold color="yellow">CONFIRM CONSEQUENTIAL ACTION</Text>
+      <Text>{applicationCommandText(kind, missionId)}</Text>
+      <Text color="gray">Enter: confirm · Escape: cancel</Text>
+    </Box>
+  );
+}

@@ -72,6 +72,16 @@ export function toProgressEvent(event: OperationEvent): ProgressEvent {
   return event as ProgressEvent;
 }
 
+export type BoardProgressEvent = ProgressEvent;
+export type BoardProgressSink = (_event: BoardProgressEvent) => void;
+
+export interface BoardCommandDispatcher {
+  dispatchWithStatus<T = unknown>(
+    _request: BoardCommandRequest,
+    _currentMissionStatus: string,
+  ): Promise<BoardCommandResult<T>>;
+}
+
 // ---------------------------------------------------------------------------
 // Capability registry — which commands are currently available
 // ---------------------------------------------------------------------------

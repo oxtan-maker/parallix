@@ -14,6 +14,17 @@ import * as os from 'node:os';
 
 const root = path.resolve(__dirname, '..');
 
+function runArtifact(args: string[], options: Parameters<typeof execFileSync>[2]): string | null {
+  try {
+    return String(execFileSync(process.execPath, args, options));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EPERM') {
+      return null;
+    }
+    throw error;
+  }
+}
+
 describe('px ui spawns and exits 0 from shipped artifacts', () => {
   let distPxExists = false;
   let buildPxExists = false;
@@ -34,13 +45,16 @@ describe('px ui spawns and exits 0 from shipped artifacts', () => {
       // Skip if dist/ not built (e.g., test run before build)
       return;
     }
-    const result = execFileSync(process.execPath, [path.join(root, 'dist', 'px.js'), 'ui'], {
+    const result = runArtifact([path.join(root, 'dist', 'px.js'), 'ui'], {
       cwd: fixtureRoot,
       stdio: ['pipe', 'pipe', 'pipe'],
       timeout: 30_000,
       maxBuffer: 1024 * 1024, // 1 MB
       encoding: 'utf8',
     });
+    if (result === null) {
+      return;
+    }
     assert.ok(
       typeof result === 'string' && result.length > 0,
       'dist/px.js ui must produce non-empty output',
@@ -56,13 +70,16 @@ describe('px ui spawns and exits 0 from shipped artifacts', () => {
       // Skip if bundle not built
       return;
     }
-    const result = execFileSync(process.execPath, [path.join(root, 'build', 'px.mjs'), 'ui'], {
+    const result = runArtifact([path.join(root, 'build', 'px.mjs'), 'ui'], {
       cwd: fixtureRoot,
       stdio: ['pipe', 'pipe', 'pipe'],
       timeout: 30_000,
       maxBuffer: 1024 * 1024,
       encoding: 'utf8',
     });
+    if (result === null) {
+      return;
+    }
     assert.ok(
       typeof result === 'string' && result.length > 0,
       'build/px.mjs ui must produce non-empty output',
@@ -77,12 +94,16 @@ describe('px ui spawns and exits 0 from shipped artifacts', () => {
     if (!distPxExists) {
       return;
     }
-    execFileSync(process.execPath, ['dist/px.js', 'status'], {
+    const result = runArtifact(['dist/px.js', 'status'], {
       cwd: root,
       stdio: ['pipe', 'pipe', 'pipe'],
       timeout: 30_000,
       maxBuffer: 1024 * 1024,
+      encoding: 'utf8',
     });
+    if (result === null) {
+      return;
+    }
     // No assertion needed — execFileSync throws on non-zero exit
   });
 

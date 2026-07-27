@@ -310,11 +310,11 @@ test('attention-items: up/down (WASD) independently navigate attention rail with
     /▶.*task-nav2/,
     'Tab + s (down) + Enter must select the second attention item (task-nav2)',
   );
-  // Wave 5 message must appear (proving Enter was processed)
+  // The unavailable action bar remains visible after the selection changes.
   assert.match(
     finalOutput,
-    /wave 5|TASK-2307/,
-    'Enter on attention item must show wave 5 message',
+    /ACTIONS[\s\S]*Mission cannot be activated from its current state/,
+    'Enter on an unavailable attention item must not dispatch',
   );
   // Extract only the rail box content (between ▲ NEEDS YOU NEXT and ranked:) to verify
   // the rail itself shows task-nav2 as selected (not task-nav3 from the board area).
@@ -493,11 +493,12 @@ test('attention-items: activating run affordance shows wave 5 message and dispat
   instance.unmount();
   const output = stdout.writes.join('');
 
-  // Must contain wave 5 / TASK-2307 reference
+  // The selected review mission has no integrated action, so the guarded bar
+  // explains why Enter causes no dispatch.
   assert.match(
     output,
-    /wave 5|TASK-2307/,
-    'activating run affordance must show wave 5 message',
+    /ACTIONS[\s\S]*Mission cannot be activated from its current state/,
+    'activating an unavailable action must render its reason',
   );
 });
 

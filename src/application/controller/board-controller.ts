@@ -1,7 +1,9 @@
-import type { ActivePort, ProgressPort } from '../../platform/runtime/lib/application/ports.js';
+import type { ActivePort } from '../../platform/runtime/lib/application/ports.js';
 import { ActiveService, type ActiveRequest, type ActiveResult } from '../../platform/runtime/lib/application/active-service.js';
 import type {
+  BoardCommandDispatcher,
   BoardCommandKind,
+  BoardProgressSink,
   BoardCommandRequest,
   BoardCommandResult,
   OperationEvent,
@@ -19,13 +21,13 @@ import {
 // BoardCommandController — guarded dispatch over integrated use cases
 // ---------------------------------------------------------------------------
 
-export class BoardCommandController {
+export class BoardCommandController implements BoardCommandDispatcher {
   private readonly activeService: ActiveService;
-  private readonly progressPort?: ProgressPort;
+  private readonly progressPort?: BoardProgressSink;
 
   constructor(
     activePort: ActivePort,
-    progressPort?: ProgressPort,
+    progressPort?: BoardProgressSink,
   ) {
     this.activeService = new ActiveService(activePort, progressPort);
     this.progressPort = progressPort;
