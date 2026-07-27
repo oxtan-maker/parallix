@@ -1,8 +1,8 @@
 ---
 id: TASK-2318
 title: Fix test temp-directory leaks that exhaust /tmp inodes
-status: active
-assignee: [custom]
+status: review
+assignee: [codex]
 created_date: '2026-07-27 09:00'
 labels:
   - bug
