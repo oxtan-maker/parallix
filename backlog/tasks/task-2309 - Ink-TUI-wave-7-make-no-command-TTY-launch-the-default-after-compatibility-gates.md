@@ -4,7 +4,7 @@ title: >-
   Ink TUI wave 7: make no-command TTY launch the default after compatibility
   gates
 status: backlog
-assignee: []
+assignee: [codex]
 created_date: '2026-07-24 04:24'
 labels:
   - ink
@@ -16,6 +16,7 @@ dependencies:
 references:
   - docs/adr/0051-ui-neutral-application-boundary.md
   - docs/adr/0044-workflow-distribution-model.md
+  - design at '/tmp/Parallix Kanban Board Controller.zip'
 priority: low
 ordinal: 65000
 ---
