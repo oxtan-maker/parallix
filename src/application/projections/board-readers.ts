@@ -12,6 +12,7 @@ import {
   type MissionOperationalFacts,
 } from './mission-board.js';
 import type { MetricsReadAdapter } from './metrics-read-adapter.js';
+import { projectAgentAvailability } from './agent-status.js';
 
 // ---------------------------------------------------------------------------
 // Read adapters — each adapter reads from one authority
@@ -94,10 +95,11 @@ export class BoardProjectionBuilder {
 
   /** Build the full BoardProjection from all authority adapters. */
   async build(): Promise<BoardProjection> {
-    const [repositoryId, missions, operationLog] = await Promise.all([
+    const [repositoryId, missions, operationLog, agentAvailability] = await Promise.all([
       this._git.loadRepositoryId(),
       this._missions.loadAllMissions(),
       this._operationLog.loadOperationLog(),
+      this._agents.loadAgentAvailability(),
     ]);
 
     const sourceFacts = this._missions.getSourceFacts();
@@ -124,7 +126,7 @@ export class BoardProjectionBuilder {
     const availableActions = this.deriveAvailableActions(cards);
 
     // Build metrics from event history (or use provided/default)
-    const metrics = await this.buildMetrics(missions);
+    const metrics = await this.buildMetrics(missions, projectAgentAvailability(agentAvailability, Date.now()));
 
     return buildBoardProjection(
       repositoryId,
@@ -142,6 +144,7 @@ export class BoardProjectionBuilder {
    */
   private async buildMetrics(
     missions: readonly Mission[],
+    agentAvailability: BoardMetrics['agentAvailability'],
   ): Promise<BoardMetrics> {
     // Explicit metrics (for testing/fixtures)
     if (this._options?.metrics) {
@@ -155,13 +158,13 @@ export class BoardProjectionBuilder {
         initialStates.set(mission.id, mission.status);
       }
       try {
-        return await this._options.metricsAdapter.buildMetrics(initialStates);
+        return await this._options.metricsAdapter.buildMetrics(initialStates, agentAvailability);
       } catch {
         // Adapter failure — fall through to defaults
       }
     }
 
-    return this.defaultMetrics();
+    return this.defaultMetrics(agentAvailability);
   }
 
   /** Derive available actions from mission cards' command availability. */
@@ -187,12 +190,21 @@ export class BoardProjectionBuilder {
   }
 
   /** Default metrics with skip fallback (no event history available). */
-  private defaultMetrics(): BoardMetrics {
+  private defaultMetrics(agentAvailability: BoardMetrics['agentAvailability']): BoardMetrics {
     return buildBoardMetrics(
       { series: [], missingHistoryFallback: 'skip' },
       { series: [], missingHistoryFallback: 'skip' },
       { series: [], missingHistoryFallback: 'skip' },
       { series: [], missingHistoryFallback: 'skip' },
+      { series: [], missingHistoryFallback: 'skip' },
+      { series: [], missingHistoryFallback: 'skip' },
+      { series: [], missingHistoryFallback: 'skip' },
+      { series: [], missingHistoryFallback: 'skip' },
+      agentAvailability,
+      {
+        sentence: 'Bottleneck unavailable: history is missing.',
+        inputs: { lane: null, medianAgeMinutes: null, reviewLoopRate: null, weeklyThroughput: null },
+      },
     );
   }
 }

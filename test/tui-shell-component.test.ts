@@ -25,9 +25,18 @@ describe('BoardShell component renders with mocked BoardProjection', () => {
   /** Empty BoardMetrics for mocked projection. */
   const emptyMetrics: BoardMetrics = {
     cumulativeFlow: emptySeries,
+    cumulativeFlowByState: emptySeries as unknown as BoardMetrics['cumulativeFlowByState'],
     medianStateTimes: emptySeries,
+    medianCycleTimeByState: emptySeries as unknown as BoardMetrics['medianCycleTimeByState'],
     throughput: emptySeries,
+    weeklyThroughput: emptySeries,
     reviewLoopRate: emptySeries,
+    medianAgeByLane: emptySeries as unknown as BoardMetrics['medianAgeByLane'],
+    agentAvailability: [],
+    bottleneck: {
+      sentence: 'Bottleneck unavailable: history is missing.',
+      inputs: { lane: null, medianAgeMinutes: null, reviewLoopRate: null, weeklyThroughput: null },
+    },
   };
 
   /** Minimal MissionCard for mocked projection (partial, cast to type). */
@@ -133,6 +142,10 @@ describe('BoardShell component renders with mocked BoardProjection', () => {
       output.includes('test-repo'),
       `Top bar must contain repositoryId. Got: ${output.slice(0, 200)}`,
     );
+    assert.ok(
+      output.includes('FLOW'),
+      `Top bar must contain the FLOW affordance. Got: ${output.slice(0, 200)}`,
+    );
   });
 
   it('renders attention rail with "NEEDS YOU" header', async () => {
@@ -211,6 +224,34 @@ describe('BoardShell component renders with mocked BoardProjection', () => {
     assert.ok(
       typeof output === 'string' && output.length > 0,
       'Empty projection must render non-empty output',
+    );
+  });
+
+  it('keeps FLOW hidden by default and renders it above the board when opened', async () => {
+    const ink = await import('ink');
+    const React = await import('react');
+    const { BoardShell } = await import('../src/interfaces/tui/shell.js');
+
+    const closed = ink.renderToString(
+      React.createElement(BoardShell, { projection: mockProjection }),
+      { columns: 120 },
+    );
+    assert.ok(
+      !closed.includes('CUMULATIVE FLOW'),
+      `FLOW content must stay hidden by default. Got: ${closed.slice(0, 400)}`,
+    );
+
+    const open = ink.renderToString(
+      React.createElement(BoardShell, { projection: mockProjection, initialFlowOpen: true }),
+      { columns: 120 },
+    );
+    assert.ok(
+      open.includes('CUMULATIVE FLOW'),
+      `Open FLOW state must render analytics content. Got: ${open.slice(0, 500)}`,
+    );
+    assert.ok(
+      open.indexOf('CUMULATIVE FLOW') < open.indexOf('▲ NEEDS YOU NEXT'),
+      'FLOW region must render above the board and attention rail, not below them',
     );
   });
 });

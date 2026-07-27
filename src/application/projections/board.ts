@@ -1,5 +1,6 @@
 import type { MissionId } from '../../domain/mission.js';
 import type { RepositoryId } from '../../domain/repository.js';
+import type { AgentFamily } from '../../domain/agents.js';
 import type { SourceFact } from '../../platform/runtime/lib/application/contracts.js';
 import type {
   BoardLane,
@@ -39,6 +40,38 @@ export interface MetricSeries {
   readonly missingHistoryFallback: 'null' | 'estimate' | 'skip';
 }
 
+export interface StateFlowPoint {
+  readonly at: string;
+  readonly counts: Readonly<Record<BoardLane, number>>;
+}
+
+export interface StateFlowSeries {
+  readonly series: readonly StateFlowPoint[];
+  readonly missingHistoryFallback: MetricSeries['missingHistoryFallback'];
+}
+
+export interface LaneMetricSeries {
+  readonly series: readonly { readonly lane: BoardLane; readonly value: number | null }[];
+  readonly missingHistoryFallback: MetricSeries['missingHistoryFallback'];
+}
+
+export interface AgentAvailabilityMetric {
+  readonly family: AgentFamily;
+  readonly available: boolean;
+  readonly blockedForMs: number;
+}
+
+/** A fixed, projection-owned explanation of the constraint identified by FLOW. */
+export interface BottleneckNarrative {
+  readonly sentence: string;
+  readonly inputs: {
+    readonly lane: BoardLane | null;
+    readonly medianAgeMinutes: number | null;
+    readonly reviewLoopRate: number | null;
+    readonly weeklyThroughput: number | null;
+  };
+}
+
 export interface WipCountMetric {
   readonly lane: BoardLane;
   readonly count: number;
@@ -68,9 +101,15 @@ export interface BoardProjection {
 
 export interface BoardMetrics {
   readonly cumulativeFlow: MetricSeries;
+  readonly cumulativeFlowByState: StateFlowSeries;
   readonly medianStateTimes: MetricSeries;
+  readonly medianCycleTimeByState: LaneMetricSeries;
   readonly throughput: MetricSeries;
+  readonly weeklyThroughput: MetricSeries;
   readonly reviewLoopRate: MetricSeries;
+  readonly medianAgeByLane: LaneMetricSeries;
+  readonly agentAvailability: readonly AgentAvailabilityMetric[];
+  readonly bottleneck: BottleneckNarrative;
 }
 
 // ---------------------------------------------------------------------------
@@ -92,14 +131,69 @@ export function buildBoardStage(lane: BoardLane, cards: readonly MissionCard[]):
   return { lane, cards: laneCards, count: laneCards.length };
 }
 
+function emptyFlowMetrics(): Pick<BoardMetrics, 'cumulativeFlowByState' | 'medianCycleTimeByState' | 'weeklyThroughput' | 'medianAgeByLane' | 'agentAvailability' | 'bottleneck'> {
+  return {
+    cumulativeFlowByState: { series: [], missingHistoryFallback: 'skip' },
+    medianCycleTimeByState: { series: [], missingHistoryFallback: 'skip' },
+    weeklyThroughput: { series: [], missingHistoryFallback: 'skip' },
+    medianAgeByLane: { series: [], missingHistoryFallback: 'skip' },
+    agentAvailability: [],
+    bottleneck: {
+      sentence: 'Bottleneck unavailable: history is missing.',
+      inputs: { lane: null, medianAgeMinutes: null, reviewLoopRate: null, weeklyThroughput: null },
+    },
+  };
+}
+
 /** Build BoardMetrics with explicit missing-history fallback behavior. */
 export function buildBoardMetrics(
+  _cumulativeFlow: MetricSeries,
+  _medianStateTimes: MetricSeries,
+  _throughput: MetricSeries,
+  _reviewLoopRate: MetricSeries,
+): BoardMetrics;
+export function buildBoardMetrics(
+  _cumulativeFlow: MetricSeries,
+  _cumulativeFlowByState: StateFlowSeries,
+  _medianStateTimes: MetricSeries,
+  _medianCycleTimeByState: LaneMetricSeries,
+  _throughput: MetricSeries,
+  _weeklyThroughput: MetricSeries,
+  _reviewLoopRate: MetricSeries,
+  _medianAgeByLane: LaneMetricSeries,
+  _agentAvailability: readonly AgentAvailabilityMetric[],
+  _bottleneck: BottleneckNarrative,
+): BoardMetrics;
+export function buildBoardMetrics(
   cumulativeFlow: MetricSeries,
-  medianStateTimes: MetricSeries,
-  throughput: MetricSeries,
-  reviewLoopRate: MetricSeries,
+  stateFlowOrMedianStateTimes: StateFlowSeries | MetricSeries,
+  medianStateTimesOrThroughput: MetricSeries,
+  cycleTimesOrReviewLoopRate: LaneMetricSeries | MetricSeries,
+  ...extensions: readonly unknown[]
 ): BoardMetrics {
-  return { cumulativeFlow, medianStateTimes, throughput, reviewLoopRate };
+  if (extensions.length === 0) {
+    const defaults = emptyFlowMetrics();
+    return {
+      cumulativeFlow,
+      ...defaults,
+      medianStateTimes: stateFlowOrMedianStateTimes as MetricSeries,
+      throughput: medianStateTimesOrThroughput,
+      reviewLoopRate: cycleTimesOrReviewLoopRate as MetricSeries,
+    };
+  }
+  const [throughput, weeklyThroughput, reviewLoopRate, medianAgeByLane, agentAvailability, bottleneck] = extensions as readonly [MetricSeries, MetricSeries, MetricSeries, LaneMetricSeries, readonly AgentAvailabilityMetric[], BottleneckNarrative];
+  return {
+    cumulativeFlow,
+    cumulativeFlowByState: stateFlowOrMedianStateTimes as StateFlowSeries,
+    medianStateTimes: medianStateTimesOrThroughput,
+    medianCycleTimeByState: cycleTimesOrReviewLoopRate as LaneMetricSeries,
+    throughput,
+    weeklyThroughput,
+    reviewLoopRate,
+    medianAgeByLane,
+    agentAvailability,
+    bottleneck,
+  };
 }
 
 /** Assemble the full BoardProjection from mission cards and operational data. */

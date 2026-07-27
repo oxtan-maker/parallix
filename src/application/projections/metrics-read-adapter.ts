@@ -4,6 +4,7 @@ import type { MissionTransition } from '../../domain/mission-workflow.js';
 import type { MissionOutcome } from '../../domain/usage.js';
 import type { RepositoryId } from '../../domain/repository.js';
 import type { BoardMetrics } from './board.js';
+import type { AgentAvailabilityRow } from './agent-status.js';
 import { buildMetrics } from './metrics.js';
 
 // ---------------------------------------------------------------------------
@@ -22,7 +23,7 @@ export interface MetricsReadAdapter {
    * Build metrics from the current event history.
    * @param initialStates — current mission statuses (from MissionReadAdapter)
    */
-  buildMetrics(_initialStates: ReadonlyMap<MissionId, MissionStatus>): Promise<BoardMetrics>;
+  buildMetrics(_initialStates: ReadonlyMap<MissionId, MissionStatus>, _agentAvailability?: readonly AgentAvailabilityRow[]): Promise<BoardMetrics>;
 }
 
 // ---------------------------------------------------------------------------
@@ -50,6 +51,7 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
 
   async buildMetrics(
     initialStates: ReadonlyMap<MissionId, MissionStatus>,
+    agentAvailability: readonly AgentAvailabilityRow[] = [],
   ): Promise<BoardMetrics> {
     const [entries, usageRecords] = await Promise.all([
       this.laneEventRepo.findAll(),
@@ -67,6 +69,8 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
       transitions,
       outcomes,
       instants,
+      agentAvailability,
+      asOf: instants.at(-1),
     });
   }
 
