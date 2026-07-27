@@ -79,11 +79,15 @@ SHA-256 digest.
 
 ## UI invocation: `px` on a TTY vs a non-TTY
 
-- `px ui` renders the Ink TUI explicitly. On a non-TTY it falls back and exits 0.
+- `px` with no command opens the Ink TUI when both terminal streams are TTYs and
+  `CI` is unset. `px ui` remains an explicit way to launch the same board. On a
+  non-TTY, `px ui` renders one static frame and exits 0.
 - `px <command>` is headless: it never initialises React, Ink, cursor control, or
   interactive input.
-- `px` with no command prints normal usage help and exits 0 (ADR 0044).
-  This runs before the target-path check so it works even outside a repository.
+- `PARALLIX_NO_TUI=1 px` restores normal usage help and exit 0 for an interactive
+  no-command invocation. Piped, CI, and redirected-output no-command invocations
+  also print normal usage help and exit 0. This runs before the target-path check
+  so it works even outside a repository.
 
 ## SQLite import boundary
 

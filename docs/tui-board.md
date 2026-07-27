@@ -1,9 +1,14 @@
 # The `px ui` board
 
-`px ui` renders the mission board in the terminal. It is read-only: it shows what
-the board projection already knows and never computes lifecycle state of its own.
-Every headless command (`px status`, `px active`, `px review`, …) behaves exactly
-as before; the TUI is an additional surface, not a replacement.
+Running `px` with no command in an interactive terminal renders the mission board.
+`px ui` remains available as an explicit board command. The board is read-only: it
+shows what the board projection already knows and never computes lifecycle state
+of its own. Every headless command (`px status`, `px active`, `px review`, …)
+behaves exactly as before; the TUI is an additional surface, not a replacement.
+
+Set `PARALLIX_NO_TUI=1` to restore the previous interactive no-command behavior:
+`px` prints usage help and exits successfully. Piped, CI, and redirected-output
+no-command invocations already use that same usage-help behavior automatically.
 
 ## Layout
 
@@ -85,3 +90,10 @@ assigns no workflow actions to `Enter` or other letter keys.
 ## Leaving
 
 Press `q` or `Ctrl+C`.
+
+## Launching the board
+
+Use `px` with no command from an interactive terminal for the default board
+launch. `px ui` continues to launch the same board explicitly. To opt out of the
+default for one invocation, run `PARALLIX_NO_TUI=1 px`; set that environment
+variable in your shell environment to keep usage help as the no-command default.

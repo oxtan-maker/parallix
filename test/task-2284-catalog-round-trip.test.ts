@@ -11,7 +11,9 @@ import {
 } from './helpers/task-2284-catalog-round-trip.js';
 
 const root = process.cwd();
-const MISSION_TASK_BASENAME = 'task-2284 - Decide-future-task-catalog-authority-and-board-authorship-migration.md';
+// TASK-2284 is the real completed-store exemplar for this catalog migration.
+// It is no longer an active backlog task after its lifecycle transition.
+const MISSION_TASK = 'backlog/completed/task-2284 - Decide-future-task-catalog-authority-and-board-authorship-migration.md';
 
 // A synthetic record that carries every frontmatter key named by the mission
 // plus two extension keys no reader in src/platform/runtime/lib/tools/backlog.ts
@@ -167,14 +169,9 @@ test('round trip preserves the SECTION:DESCRIPTION body and every AC and DOD ite
 });
 
 test('round trip reports zero field differences for real task records copied from all three stores', () => {
-  const missionTask = findTaskFile(MISSION_TASK_BASENAME, [
-    'backlog/tasks',
-    'backlog/completed',
-    'backlog/archive/tasks',
-  ]);
   const sources = [
-    missionTask,
-    firstTaskFile('backlog/tasks', path.basename(missionTask)),
+    MISSION_TASK,
+    firstTaskFile('backlog/tasks'),
     firstTaskFile('backlog/completed'),
   ];
   const before = sources.map(relative => fs.readFileSync(path.join(root, relative)));

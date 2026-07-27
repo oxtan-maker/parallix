@@ -53,7 +53,6 @@ const SEA_FUSE = 'NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2';
  */
 const SEA_CONFIG = Object.freeze({
   main: 'px.mjs',
-  output: 'sea-prep.blob',
   disableExperimentalSEAWarning: true,
   useSnapshot: false,
   useCodeCache: false,
@@ -62,6 +61,12 @@ const SEA_CONFIG = Object.freeze({
 
 function sha256File(file) {
   return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+}
+
+function parseNodeVersion(version) {
+  const match = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(String(version || '').trim());
+  if (!match) { return null; }
+  return { major: Number(match[1]), minor: Number(match[2]), patch: Number(match[3]) };
 }
 
 /** Report the version string of a candidate Node executable, or null. */
@@ -142,6 +147,25 @@ function resolveSeaNode() {
   );
   error.exitCode = NO_TOOLCHAIN_EXIT;
   throw error;
+}
+
+/** Node >= 25.5.0 can build the final SEA executable without postject. */
+function supportsBuiltInSeaBuild(version) {
+  const parsed = parseNodeVersion(version);
+  if (!parsed) { return false; }
+  return parsed.major > 25 || (parsed.major === 25 && parsed.minor >= 5);
+}
+
+function resolvePostjectCli() {
+  try {
+    return require.resolve('postject/dist/cli.js');
+  } catch {
+    return null;
+  }
+}
+
+function buildSeaConfig(output, executable) {
+  return { ...SEA_CONFIG, output, executable };
 }
 
 /** Recursively copy `from` into `to`, creating parents. */
@@ -230,6 +254,40 @@ function rollback() {
   return 0;
 }
 
+function buildWithPostject({ seaNode, staging, configPath, payload, stagedExecutable }) {
+  const postjectCli = resolvePostjectCli();
+  if (!postjectCli) {
+    throw new Error(
+      `Node ${seaNode.version} requires external SEA blob injection, but the optional ` +
+      '`postject` tool is not installed in this checkout. Install dev dependencies or use ' +
+      'Node 25.5.0+ so `--build-sea` can build the executable directly.',
+    );
+  }
+
+  const blobName = 'sea-prep.blob';
+  const blobConfig = { ...SEA_CONFIG, output: blobName };
+  fs.writeFileSync(configPath, `${JSON.stringify(blobConfig, null, 2)}\n`);
+
+  execFileSync(seaNode.executable, ['--experimental-sea-config', configPath], {
+    cwd: staging,
+    stdio: 'inherit',
+  });
+
+  // Embed the *pinned* runtime: the executable is a copy of the very Node
+  // that validated the config, not whatever `node` resolves to at run time.
+  fs.copyFileSync(seaNode.executable, stagedExecutable);
+  fs.chmodSync(stagedExecutable, 0o755);
+  execFileSync(process.execPath, [
+    postjectCli,
+    stagedExecutable,
+    'NODE_SEA_BLOB',
+    path.join(staging, blobName),
+    '--sentinel-fuse', SEA_FUSE,
+  ], { cwd: staging, stdio: 'inherit' });
+
+  return blobConfig;
+}
+
 function build() {
   // SC1: the runtime gate runs before any artifact is created or staged.
   const seaNode = resolveSeaNode();
@@ -256,25 +314,26 @@ function build() {
       throw new Error(`SEA input is not byte-identical to ${bundlePath} (${seaMainSha256} != ${bundleSha256})`);
     }
 
-    const configPath = path.join(staging, 'sea-config.json');
-    fs.writeFileSync(configPath, `${JSON.stringify(SEA_CONFIG, null, 2)}\n`);
-    execFileSync(seaNode.executable, ['--experimental-sea-config', configPath], {
-      cwd: staging,
-      stdio: 'inherit',
-    });
-
-    // Embed the *pinned* runtime: the executable is a copy of the very Node
-    // that validated the config, not whatever `node` resolves to at run time.
     const stagedExecutable = path.join(payload, executableName);
-    fs.copyFileSync(seaNode.executable, stagedExecutable);
-    fs.chmodSync(stagedExecutable, 0o755);
-    execFileSync(process.execPath, [
-      require.resolve('postject/dist/cli.js'),
-      stagedExecutable,
-      'NODE_SEA_BLOB',
-      path.join(staging, SEA_CONFIG.output),
-      '--sentinel-fuse', SEA_FUSE,
-    ], { cwd: staging, stdio: 'inherit' });
+    const configPath = path.join(staging, 'sea-config.json');
+    let materializedConfig;
+    if (supportsBuiltInSeaBuild(seaNode.version)) {
+      materializedConfig = buildSeaConfig(stagedExecutable, seaNode.executable);
+      fs.writeFileSync(configPath, `${JSON.stringify(materializedConfig, null, 2)}\n`);
+      execFileSync(seaNode.executable, ['--build-sea', configPath], {
+        cwd: staging,
+        stdio: 'inherit',
+      });
+      fs.chmodSync(stagedExecutable, 0o755);
+    } else {
+      materializedConfig = buildWithPostject({
+        seaNode,
+        staging,
+        configPath,
+        payload,
+        stagedExecutable,
+      });
+    }
 
     // The payload directory is the executable's package root. `packageRoot()`
     // walks up from the bundle's own directory — which, inside a SEA, is the
@@ -316,7 +375,7 @@ function build() {
       adr: 'docs/adr/0044-workflow-distribution-model.md',
       platform: `${process.platform}-${process.arch}`,
       pinnedNode: { executable: seaNode.executable, version: seaNode.version, major: seaNode.major },
-      seaConfig: SEA_CONFIG,
+      seaConfig: materializedConfig,
       bundleSha256,
       executableSha256,
       executableSizeBytes: fs.statSync(stagedExecutable).size,

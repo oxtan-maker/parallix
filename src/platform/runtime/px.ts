@@ -212,13 +212,19 @@ export async function run(argv = process.argv.slice(2), options: RunOptions = {}
     }
   }
 
-  // Bare `px` (no command) prints help — satisfies SC3 non-TTY requirement.
-  // Runs before the target-path check so it works even outside a repo.
+  // Delegate bare invocation to the dispatcher. It keeps historical usage
+  // output for non-TTY/CI/opt-out paths and selects the same lazy `ui` entry
+  // point as explicit `px ui` for an interactive terminal.
   if (!parsed.command) {
-    // Import usage lazily so the help text is always fresh.
-    const { printUsage } = await import('./index.js');
-    printUsage();
-    return 0;
+    const { main } = await import('./index.js');
+    let exitCode = 0;
+    await main([], {
+      cwdFn: () => parsed.target,
+      exitFn: ((code?: number) => { exitCode = typeof code === 'number' ? code : 0; }) as (_code?: number) => never,
+      logFn: log,
+      errorFn: error,
+    });
+    return exitCode;
   }
 
   if (!fs.existsSync(parsed.target) || !fs.statSync(parsed.target).isDirectory()) {
