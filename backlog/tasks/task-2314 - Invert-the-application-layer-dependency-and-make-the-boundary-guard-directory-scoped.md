@@ -3,7 +3,7 @@ id: TASK-2314
 title: >-
   Invert the application-layer dependency and make the boundary guard
   directory-scoped
-status: review
+status: ready-for-integration
 assignee: [custom]
 created_date: '2026-07-26 19:21'
 updated_date: '2026-07-26 19:35'
