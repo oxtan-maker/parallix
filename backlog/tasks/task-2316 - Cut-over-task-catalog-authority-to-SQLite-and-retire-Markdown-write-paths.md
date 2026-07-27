@@ -2,7 +2,7 @@
 id: TASK-2316
 title: Cut over task catalog authority to SQLite and retire Markdown write paths
 status: active
-assignee: [claude]
+assignee: [custom]
 created_date: '2026-07-27 12:00'
 labels:
   - sqlite
