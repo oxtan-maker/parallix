@@ -10,6 +10,7 @@ labels:
   - adr
   - backlog
   - migration
+  - user_value
 dependencies:
   - TASK-2307
 references:
