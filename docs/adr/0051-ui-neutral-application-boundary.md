@@ -2,7 +2,7 @@
 
 Status: Accepted; implementation requires integrated-ADR and explicit human approval
 Date: 2026-07-20
-Related: ADR 0037 (workflow coordination), ADR 0044 (workflow distribution model), ADR 0048 (fail-closed harness), TASK-2277, TASK-2278
+Related: ADR 0037 (workflow coordination), ADR 0044 (workflow distribution model), ADR 0048 (fail-closed harness), ADR 0052 (task catalog authority), TASK-2277, TASK-2278
 
 ## Context
 
@@ -42,7 +42,9 @@ and `backlog/archive/`; `resolveTaskFile` searches those stores and
 `lib/tools/backlog.ts:280-307`). Mission and review artifacts are Git-owned.
 ADR 0037 retained those surfaces rather than adding a new state store.
 `backlog.md` is an optional legacy aggregate, not the canonical task catalog;
-this ADR neither requires it nor makes preserving writes to it a goal. The
+this ADR neither requires it nor makes preserving writes to it a goal. That
+Markdown authority is the pre-cutover state: ADR 0052 owns the task-catalog
+authority decision and the rule for who may author a task record. The
 operator board supplied to this mission is evidence of desired operator
 attention and interaction, not evidence for a browser-owned store, component
 model, or authority migration.

@@ -166,6 +166,10 @@ This database direction is decided. A future implementation mission chooses
 schema and migration mechanics within these constraints; it does not reopen
 file-backed domain authority as the long-term design.
 
+ADR 0052 owns the task-catalog authority decision and applies this cutover rule
+to task records specifically; read it, not this section, for what happens to
+`backlog/tasks/`, `backlog/completed/`, and `backlog/archive/`.
+
 ## SQLite boundary
 
 `node:sqlite` is confined to `src/adapters/sqlite/`. Application-owned
