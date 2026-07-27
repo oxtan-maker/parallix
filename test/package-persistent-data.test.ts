@@ -79,17 +79,21 @@ test('global tarball reinstall preserves PARALLIX_HOME stats and agent blocklist
 
     // Package name is scoped (@magnusekdahl/parallix), so npm installs under the scope dir.
     const installedRoot = path.join(prefix, 'lib', 'node_modules', '@magnusekdahl', 'parallix');
-    const commandsDir = path.join(installedRoot, 'dist', 'lib', 'commands');
-    assert.ok(fs.existsSync(commandsDir), 'installed dist/lib/commands should exist');
-    assert.ok(fs.existsSync(path.join(installedRoot, 'dist', 'px.js.map')), 'installed package should ship source maps');
+    assert.ok(fs.existsSync(path.join(installedRoot, 'build', 'px.mjs')), 'installed build/px.mjs should exist');
+    assert.ok(fs.existsSync(path.join(installedRoot, 'build', 'px.mjs.map')), 'installed package should ship source maps');
+    assert.equal(fs.existsSync(path.join(installedRoot, 'dist')), false, 'installed package should not ship the CommonJS rollback tree');
     assert.equal(fs.existsSync(path.join(installedRoot, 'lib')), false, 'installed package should not ship sibling lib runtime');
     assert.equal(fs.existsSync(path.join(installedRoot, 'px.js')), false, 'installed package should not ship sibling px runtime');
     assert.equal(fs.existsSync(path.join(installedRoot, 'px.ts')), false, 'installed package should not ship TypeScript sources');
 
     const env = { ...process.env, PARALLIX_HOME: parallixHome };
+    // Since TASK-2285 the published package exposes no importable modules, so the
+    // fixture seeds operator state through the checkout's rollback build. The
+    // assertions that matter here — where that state lives, that the installed CLI
+    // reads it, and that a reinstall preserves it — are unchanged.
     const writeScript = [
-      `const stats = require(${JSON.stringify(path.join(installedRoot, 'dist', 'lib', 'commands', 'stats.js'))});`,
-      `const agents = require(${JSON.stringify(path.join(installedRoot, 'dist', 'lib', 'agents', 'agents.js'))});`,
+      `const stats = require(${JSON.stringify(path.join(PACKAGE_ROOT, 'dist', 'lib', 'commands', 'stats.js'))});`,
+      `const agents = require(${JSON.stringify(path.join(PACKAGE_ROOT, 'dist', 'lib', 'agents', 'agents.js'))});`,
       "stats.upsertStatsRow({date:'2026-06-06',mission:'task-reinstall-proof',classification:'ai_sdlc',implementer:'codex',pr_fix_rounds:'2'});",
       "agents.updateAgentBlock('custom', '2026-07-01 12');"
     ].join('');
@@ -100,14 +104,14 @@ test('global tarball reinstall preserves PARALLIX_HOME stats and agent blocklist
     const statsBefore = fs.readFileSync(statsPath, 'utf8');
     const agentsBefore = fs.readFileSync(agentsPath, 'utf8');
     const readFromSecondRepo = [
-      `const stats = require(${JSON.stringify(path.join(installedRoot, 'dist', 'lib', 'commands', 'stats.js'))});`,
+      `const stats = require(${JSON.stringify(path.join(PACKAGE_ROOT, 'dist', 'lib', 'commands', 'stats.js'))});`,
       "const row = stats.loadStatsCsv().rows.find(item => item.mission === 'task-reinstall-proof');",
       "if (!row || row.pr_fix_rounds !== '2') process.exit(1);"
     ].join('');
     run(process.execPath, ['-e', readFromSecondRepo], { cwd: repoTwo, env });
     const pxStats = run(
       process.execPath,
-      [path.join(installedRoot, 'dist', 'px.js'), 'stats', '--today', '2026-06-06'],
+      [path.join(installedRoot, 'build', 'px.mjs'), 'stats', '--today', '2026-06-06'],
       { cwd: repoTwo, env }
     );
     assert.match(pxStats.stdout, new RegExp(`Loading CSV: ${statsPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));

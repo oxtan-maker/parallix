@@ -4,17 +4,12 @@
   "description": "AI mission workflow toolkit with a px CLI — local-first, human-in-the-loop multi-agent development",
   "license": "AGPL-3.0-or-later",
   "private": false,
-  "type": "commonjs",
-  "main": "dist/index.js",
+  "type": "module",
   "bin": {
-    "px": "dist/px.js"
-  },
-  "exports": {
-    ".": "./dist/index.js",
-    "./package.json": "./package.json"
+    "px": "build/px.mjs"
   },
   "engines": {
-    "node": ">=23.0.0"
+    "node": ">=22.23.1"
   },
   "publishConfig": {
     "access": "public"
@@ -37,23 +32,18 @@
   },
   "homepage": "https://github.com/magnusekdahl/parallix#readme",
   "files": [
-    "dist/",
+    "build/",
     "LICENSE",
     "README.md",
     "CHANGELOG.md",
-    "config/",
-    "data/",
-    "docs/",
-    "examples/",
-    "prompts/",
-    "templates/",
-    "tools/setup-forgejo-docker.sh"
+    "NOTICES"
   ],
   "scripts": {
     "build": "npm run bundle",
     "bundle": "node scripts/build-canonical-bundle.js",
     "dev": "tsx --import ./src/entry/esm-globals.ts src/entry/px.ts",
     "prepack": "npm run build",
+    "prepublishOnly": "npm run test:package-content && npm audit --omit=dev",
     "test": "FORCE_COLOR=0 node test/run-default-tests.js",
     "test:integration": "FORCE_COLOR=0 node test/run-default-tests.js --integration",
     "test:package-content": "node scripts/package-content-audit.js",
@@ -62,19 +52,25 @@
     "typecheck": "tsc --noEmit",
     "test:bundle": "node --enable-source-maps build/px.mjs --version"
   },
-  "dependencies": {
-    "@earendil-works/pi-coding-agent": "^0.80.6",
-    "@types/react": "^19.2.14",
-    "ink": "^6.8.0",
-    "react": "^19.2.3"
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.80.6"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    }
   },
   "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.80.6",
     "@stryker-mutator/core": "^9.6.1",
     "@types/node": "^26.0.1",
+    "@types/react": "^19.2.14",
     "@typescript-eslint/eslint-plugin": "^8.62.1",
     "@typescript-eslint/parser": "^8.62.1",
     "esbuild": "^0.25.12",
     "eslint": "^9.39.4",
+    "ink": "^6.8.0",
+    "react": "^19.2.3",
     "sonarqube-scanner": "^5.0.0",
     "tsx": "4.20.6",
     "typescript": "^5.9.3"
