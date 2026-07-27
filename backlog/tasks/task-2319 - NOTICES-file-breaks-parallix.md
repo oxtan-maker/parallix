@@ -2,7 +2,7 @@
 id: TASK-2319
 title: NOTICES file breaks parallix
 status: active
-assignee: [vibe]
+assignee: [custom]
 created_date: '2026-07-27 08:16'
 labels: [ai_sdlc, bug]
 dependencies: []
