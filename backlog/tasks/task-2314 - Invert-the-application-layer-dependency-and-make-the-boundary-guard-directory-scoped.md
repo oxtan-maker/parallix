@@ -4,7 +4,7 @@ title: >-
   Invert the application-layer dependency and make the boundary guard
   directory-scoped
 status: backlog
-assignee: []
+assignee: [codex]
 created_date: '2026-07-26 19:21'
 updated_date: '2026-07-26 19:35'
 labels:
