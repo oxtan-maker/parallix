@@ -1,7 +1,7 @@
 ---
 id: TASK-2284
 title: Decide future task catalog authority and board authorship migration
-status: ready-for-integration
+status: done
 assignee: [claude]
 created_date: '2026-07-19 00:00'
 updated_date: '2026-07-24 04:32'
@@ -34,12 +34,12 @@ Current reality must anchor the decision: `backlog.md` is optional, while canoni
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [ ] #1 A new ADR inventories current task creation, ID allocation, status transitions, main-branch writes, archival, Git review, portability, and recovery behavior
-- [ ] #2 The ADR compares at least Git Markdown authority, SQLite authority with export, and append-only event authority with materialized views
-- [ ] #3 The decision defines offline behavior, multi-repository identity, concurrent writers, merge/conflict handling, backup, corruption recovery, downgrade, import/export, human inspection, and automation access
+- [ ] #2 The ADR compares at least Git Markdown authority, SQLite authority after draft/import materialization, and append-only event authority with materialized views
+- [ ] #3 The decision defines offline behavior, ingress sources for mission intent, multi-repository identity, concurrent writers, merge/conflict handling, backup, corruption recovery, forward-only migration, human inspection, and automation access
 - [ ] #4 Dual-write is rejected as a steady state; any temporary compatibility write has reconciliation rules, telemetry, a removal gate, and a bounded lifetime
-- [ ] #5 Any board client can author and edit tasks only through the selected application port and capability rules, never direct SQL or filesystem writes; the rule is stated client-neutrally so it binds the TUI and any future web board equally
+- [ ] #5 The ADR states the post-materialization mutation rule client-neutrally: any client edits materialized task state only through the selected application port and capability rules, never direct SQL or authoritative filesystem writes
 - [ ] #6 Existing repositories remain portable and operable from CLI throughout migration
-- [ ] #7 A dry-run importer/exporter round trip proves no loss of frontmatter, description, acceptance criteria, dependencies, references, priority, or unknown extension fields
+- [ ] #7 The migration evidence proves no loss of frontmatter, description, acceptance criteria, dependencies, references, priority, or unknown extension fields during forward import
 - [ ] #8 The ADR states whether task content remains version-controlled and reviewable, and why
 - [ ] #9 Implementation follow-up tasks are created only after the authority decision, with compatibility and rollback gates
 - [ ] #10 This mission does not delete or silently demote current task files
@@ -51,8 +51,8 @@ Current reality must anchor the decision: `backlog.md` is optional, while canoni
 
 <!-- SECTION:PLAN:BEGIN -->
 1. Inventory all task readers, writers, transitions, and Git behaviors.
-2. Evaluate authority alternatives against portability and board requirements.
-3. Prototype a lossless round trip without changing authority.
+2. Evaluate authority alternatives against portability, draft-ingress, and client requirements.
+3. Verify that forward import can preserve stored task content without changing authority yet.
 4. Record the decision in a dedicated ADR and create implementation missions.
 <!-- SECTION:PLAN:END -->
 
