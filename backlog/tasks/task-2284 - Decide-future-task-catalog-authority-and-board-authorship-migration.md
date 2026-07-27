@@ -1,7 +1,7 @@
 ---
 id: TASK-2284
 title: Decide future task catalog authority and board authorship migration
-status: backlog
+status: refined
 assignee: [claude]
 created_date: '2026-07-19 00:00'
 updated_date: '2026-07-24 04:32'
