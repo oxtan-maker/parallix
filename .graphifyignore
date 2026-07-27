@@ -1,1 +1,5 @@
 graphify-out/
+# Generated mission plans and checkpoints are workflow artifacts, not repository
+# source documentation. Keep other mission artifacts available to Graphify.
+missions/**/MISSION.md
+missions/**/CP-*.md
