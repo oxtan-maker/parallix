@@ -2,12 +2,13 @@
 id: TASK-2287
 title: Build native binary platform matrix and release evidence
 status: backlog
-assignee: []
+assignee: [codex]
 created_date: '2026-07-19 00:00'
 labels:
   - binary
   - release
   - supply-chain
+  - user_value
 dependencies:
   - TASK-2286
 references:
