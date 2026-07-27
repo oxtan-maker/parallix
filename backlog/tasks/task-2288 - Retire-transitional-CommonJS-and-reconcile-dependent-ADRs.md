@@ -2,7 +2,7 @@
 id: TASK-2288
 title: Retire transitional CommonJS and reconcile dependent ADRs
 status: active
-assignee: [custom]
+assignee: [claude]
 created_date: '2026-07-19 00:00'
 labels:
   - migration
