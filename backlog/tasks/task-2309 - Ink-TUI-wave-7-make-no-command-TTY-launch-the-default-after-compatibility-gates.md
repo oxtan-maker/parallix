@@ -11,6 +11,7 @@ labels:
   - tui
   - ui
   - cli
+  - user_value
 dependencies:
   - TASK-2308
 references:
