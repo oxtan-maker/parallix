@@ -12,6 +12,7 @@ labels:
   - react
   - ui
   - metrics
+  - user_value
 dependencies:
   - TASK-2307
   - TASK-2303
