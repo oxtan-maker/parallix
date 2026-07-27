@@ -4,7 +4,7 @@ title: NOTICES file breaks parallix
 status: backlog
 assignee: [codex]
 created_date: '2026-07-27 08:16'
-labels: []
+labels: [ai_sdlc, bug]
 dependencies: []
 ordinal: 69000
 ---
