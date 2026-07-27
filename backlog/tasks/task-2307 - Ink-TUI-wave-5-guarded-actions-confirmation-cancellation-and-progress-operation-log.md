@@ -3,7 +3,7 @@ id: TASK-2307
 title: >-
   Ink TUI wave 5: guarded actions, confirmation, cancellation, and
   progress/operation log
-status: review
+status: active
 assignee: [codex]
 created_date: '2026-07-24 04:24'
 labels:
