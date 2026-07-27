@@ -1,7 +1,7 @@
 ---
 id: TASK-2316
 title: Cut over task catalog authority to SQLite and retire Markdown write paths
-status: backlog
+status: refined
 assignee: [codex]
 created_date: '2026-07-27 12:00'
 labels:
