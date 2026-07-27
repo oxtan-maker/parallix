@@ -31,6 +31,11 @@ function collectTypeScriptFiles(directory) {
   return files;
 }
 
+// The root package is ESM after TASK-2285; these emitted modules are CommonJS
+// .js, so the test runtime carries its own type marker.
+fs.mkdirSync(testRuntimeRoot, { recursive: true });
+fs.writeFileSync(path.join(testRuntimeRoot, 'package.json'), `${JSON.stringify({ type: 'commonjs' }, null, 2)}\n`);
+
 for (const [inputRoot, outputRootForSource] of [[sourceRoot, outputRoot], [assetSourceRoot, assetOutputRoot]]) {
   fs.rmSync(outputRootForSource, { recursive: true, force: true });
   for (const sourcePath of collectTypeScriptFiles(inputRoot)) {

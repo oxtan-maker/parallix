@@ -24,3 +24,9 @@ tsconfig.tsbuildinfo
 # StrykerJS scratch/report output (mutation-gate.ts)
 .stryker-tmp*/
 reports/mutation/
+
+# Canonical-bundle staging/retired trees (atomic swap in scripts/build-canonical-bundle.js)
+.build-staging.*
+.dist-staging.*
+build.retired.*
+dist.retired.*

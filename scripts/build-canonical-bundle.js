@@ -2,19 +2,89 @@
 
 const crypto = require('node:crypto');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const esbuild = require('esbuild');
+const { generateReleaseMetadata } = require('./release-metadata.js');
 
 const root = path.resolve(__dirname, '..');
-const buildDir = path.join(root, 'build');
-const output = path.join(buildDir, 'px.mjs');
-const rollbackDir = path.join(root, 'dist');
+const publishedBuildDir = path.join(root, 'build');
+const publishedRollbackDir = path.join(root, 'dist');
 
-fs.rmSync(buildDir, { recursive: true, force: true });
+// Build into private staging directories and swap them into place at the end.
+// `npm pack` collects files *after* prepack returns, so a concurrent build that
+// deleted build/ in place could make a pack observe an empty payload; the
+// tarball would then be missing build/px.mjs. Renames are atomic, so a reader
+// either sees the previous complete tree or the new one.
+const buildDir = path.join(root, `.build-staging.${process.pid}`);
+const rollbackDir = path.join(root, `.dist-staging.${process.pid}`);
+const output = path.join(buildDir, 'px.mjs');
+
+// Serialize builds per checkout with an atomic mkdir lock kept outside the
+// repository: two interleaving builds otherwise raced on the staging swap.
+const lockDir = path.join(
+  os.tmpdir(),
+  `parallix-bundle-build-${crypto.createHash('sha256').update(root).digest('hex').slice(0, 16)}.lock`,
+);
+const LOCK_WAIT_MS = 300_000;
+const LOCK_STALE_MS = 600_000;
+
+function acquireBuildLock() {
+  const deadline = Date.now() + LOCK_WAIT_MS;
+  for (;;) {
+    try {
+      fs.mkdirSync(lockDir);
+      fs.writeFileSync(path.join(lockDir, 'pid'), `${process.pid}\n`);
+      return;
+    } catch (err) {
+      if (err.code !== 'EEXIST') { throw err; }
+      // Reclaim a lock left behind by a killed build rather than blocking forever.
+      const heldSince = fs.existsSync(lockDir) ? fs.statSync(lockDir).mtimeMs : Date.now();
+      if (Date.now() - heldSince > LOCK_STALE_MS) {
+        fs.rmSync(lockDir, { recursive: true, force: true });
+        continue;
+      }
+      if (Date.now() > deadline) {
+        throw new Error(`Timed out after ${LOCK_WAIT_MS / 1000}s waiting for the canonical-bundle build lock at ${lockDir}`);
+      }
+      // esbuild.buildSync makes this script synchronous end to end, so sleep
+      // without yielding to an event loop that has nothing to run.
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+    }
+  }
+}
+
+acquireBuildLock();
+// maxRetries absorbs the brief window where another process still holds a
+// directory handle (Windows) or a stale NFS entry lingers.
+const RM_OPTIONS = { recursive: true, force: true, maxRetries: 10, retryDelay: 100 };
+
+process.on('exit', () => {
+  // A failed build must leave the previously published trees untouched.
+  for (const staging of [buildDir, rollbackDir]) {
+    try { fs.rmSync(staging, RM_OPTIONS); } catch { /* best effort */ }
+  }
+  try { fs.rmSync(lockDir, RM_OPTIONS); } catch { /* best effort */ }
+});
+
+/** Replace `published` with `staging` as close to atomically as the filesystem allows. */
+function publishTree(staging, published) {
+  const retired = `${published}.retired.${process.pid}`;
+  fs.rmSync(retired, RM_OPTIONS);
+  if (fs.existsSync(published)) { fs.renameSync(published, retired); }
+  fs.renameSync(staging, published);
+  fs.rmSync(retired, RM_OPTIONS);
+}
+
+fs.rmSync(buildDir, RM_OPTIONS);
 fs.mkdirSync(buildDir, { recursive: true });
 
-esbuild.buildSync({
+const bundleResult = esbuild.buildSync({
   absWorkingDir: root,
+  // Not bundler configuration: the metafile is a build report. It is the
+  // authoritative list of third-party modules inlined into build/px.mjs and
+  // drives NOTICES, the SBOM, and the license audit (TASK-2285).
+  metafile: true,
   entryPoints: ['src/entry/px.ts'],
   bundle: true,
   format: 'esm',
@@ -42,8 +112,20 @@ esbuild.buildSync({
   },
 });
 
-const assets = { version: 1, assets: [] };
-assets.assets = [
+// TASK-2285: build/ is the self-contained npm payload root. `packageRoot()`
+// walks upward from a module's own directory to the nearest package.json named
+// `@magnusekdahl/parallix`, so writing that name here makes build/ — not the
+// checkout or the installed package root — the asset root for build/px.mjs.
+// That is what lets the published tarball ship only build/ plus release
+// metadata while the declared runtime assets still resolve.
+const rootPackageJson = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+fs.writeFileSync(path.join(buildDir, 'package.json'), `${JSON.stringify({
+  name: rootPackageJson.name,
+  version: rootPackageJson.version,
+  type: 'module',
+}, null, 2)}\n`);
+
+const RUNTIME_ASSET_KEYS = [
   'config/agents.json',
   'config/state-map.json',
   'prompts/act-on-review.md',
@@ -51,10 +133,35 @@ assets.assets = [
   'prompts/execute.md',
   'prompts/review.md',
   'templates/mission-scaffold.md',
-].map(key => ({ key, sha256: crypto.createHash('sha256').update(fs.readFileSync(path.join(root, key))).digest('hex') }));
+];
+
+// Stage every declared runtime asset under the bundle's own package root so
+// `FilesystemAssetStore` reads them from build/ in the checkout, in the npm
+// install, and later from the SEA payload directory (TASK-2286).
+const assets = { version: 1, assets: [] };
+assets.assets = RUNTIME_ASSET_KEYS.map(key => {
+  const contents = fs.readFileSync(path.join(root, key));
+  const stagedPath = path.join(buildDir, key);
+  fs.mkdirSync(path.dirname(stagedPath), { recursive: true });
+  fs.writeFileSync(stagedPath, contents);
+  return { key, sha256: crypto.createHash('sha256').update(contents).digest('hex') };
+});
 fs.writeFileSync(path.join(buildDir, 'asset-manifest.json'), `${JSON.stringify(assets, null, 2)}\n`);
 
-const files = fs.readdirSync(buildDir).filter(file => file !== 'manifest.sha256').sort();
+// NOTICES and build/sbom.json are written before the checksum manifest so that
+// manifest.sha256 covers the SBOM as well as the bundle and staged assets.
+// This also runs the license audit (ADR 0044 release gate 9) and throws on a
+// dependency license outside the approved set.
+generateReleaseMetadata(root, buildDir, bundleResult.metafile);
+
+function collectBuildFiles(directory, relative = '') {
+  return fs.readdirSync(path.join(directory, relative), { withFileTypes: true }).flatMap(entry => {
+    const child = relative ? path.posix.join(relative, entry.name) : entry.name;
+    return entry.isDirectory() ? collectBuildFiles(directory, child) : [child];
+  });
+}
+
+const files = collectBuildFiles(buildDir).filter(file => file !== 'manifest.sha256').sort();
 const manifest = files.map(file => {
   const digest = crypto.createHash('sha256').update(fs.readFileSync(path.join(buildDir, file))).digest('hex');
   return `${digest}  ${file}`;
@@ -131,7 +238,12 @@ function emitEsmTree(sourceRoot, outputRoot) {
 // The CommonJS outputs remain an explicit, removable rollback shim until the
 // TASK-2285 npm-package compatibility gate authorizes its deletion. esbuild is
 // still the only production JavaScript emitter; TypeScript remains no-emit.
-fs.rmSync(rollbackDir, { recursive: true, force: true });
+fs.rmSync(rollbackDir, RM_OPTIONS);
+fs.mkdirSync(rollbackDir, { recursive: true });
+// The root package is ESM after TASK-2285. The rollback tree is CommonJS .js,
+// so it needs its own type marker to stay loadable (the .mjs TUI sub-modules
+// below are unaffected, since .mjs is always ESM).
+fs.writeFileSync(path.join(rollbackDir, 'package.json'), `${JSON.stringify({ type: 'commonjs' }, null, 2)}\n`);
 emitCommonJsTree(path.join(root, 'src', 'platform', 'runtime'), rollbackDir);
 emitCommonJsTree(path.join(root, 'src', 'platform', 'assets'), path.join(rollbackDir, 'assets'));
 // TUI module is ESM-only (ink 6 has top-level await) — emit as .mjs so that
@@ -150,14 +262,19 @@ emitEsmTree(path.join(root, 'src', 'platform', 'runtime', 'lib'), path.join(roll
 // platform/assets are required by some modules — emit as ESM.
 emitEsmTree(path.join(root, 'src', 'platform', 'assets'), path.join(rollbackDir, 'platform', 'assets'));
 
-// SC6: Bundle-size gate — stop rule is 5 MB
+// SC6: Bundle-size gate — stop rule is 5 MB. It runs before the staging swap so
+// an oversized bundle never reaches build/.
+const publishedOutput = path.join(publishedBuildDir, 'px.mjs');
 const bundleStat = fs.statSync(output);
 const bundleSizeBytes = bundleStat.size;
 const bundleSizeMB = (bundleSizeBytes / (1024 * 1024)).toFixed(1);
-console.log(`[bundle-size] ${output}: ${bundleSizeBytes.toLocaleString()} bytes (${bundleSizeMB} MB)`);
+console.log(`[bundle-size] ${publishedOutput}: ${bundleSizeBytes.toLocaleString()} bytes (${bundleSizeMB} MB)`);
 const maxSizeBytes = 5 * 1024 * 1024; // 5 MB stop rule
 if (bundleSizeBytes > maxSizeBytes) {
   console.error(`[bundle-size] FAIL: ${bundleSizeMB} MB exceeds ${maxSizeBytes / (1024 * 1024)} MB stop rule`);
   process.exit(1);
 }
 console.log(`[bundle-size] PASS: ${bundleSizeMB} MB within 5 MB stop rule`);
+
+publishTree(buildDir, publishedBuildDir);
+publishTree(rollbackDir, publishedRollbackDir);

@@ -1,26 +1,48 @@
 'use strict';
 
+// Package-content audit for the canonical ESM bundle (ADR 0044 §8, TASK-2285).
+//
+// The published tarball is the bundle payload plus release metadata: build/,
+// package.json, LICENSE, README.md, CHANGELOG.md, NOTICES. It carries no
+// unbundled source tree, no CommonJS dist/ output, no tests, and no operator
+// state. The CommonJS dist/ tree remains a local rollback artifact only — it is
+// built, but never published (see docs/npm-package-major-migration.md).
+
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const REQUIRED_PATHS = [
-  'dist/index.js',
-  'dist/index.js.map',
-  'dist/px.js',
-  'dist/px.js.map',
+  'build/px.mjs',
+  'build/px.mjs.map',
+  'build/asset-manifest.json',
+  'build/manifest.sha256',
+  'build/package.json',
+  'build/sbom.json',
   'package.json',
   'README.md',
   'LICENSE',
   'CHANGELOG.md',
-  'tools/setup-forgejo-docker.sh',
+  'NOTICES',
 ];
+// Runtime assets are staged under the bundle's own package root so they resolve
+// from build/ in the checkout, in an npm install, and from the SEA payload.
 const REQUIRED_PREFIXES = [
-  'config/', 'data/', 'docs/', 'examples/', 'prompts/', 'templates/',
+  'build/config/', 'build/prompts/', 'build/templates/',
 ];
 const FORBIDDEN_PATHS = new Set([
   'tsconfig.json', 'tsconfig.test.json', 'eslint.config.mjs', 'stryker.conf.json',
+  'workflow.config.json', 'AGENTS.md', 'CLAUDE.md',
 ]);
 const FORBIDDEN_PREFIXES = [
-  'test/', '.forgejo-local/', 'sessions/', 'graphify-out/', 'missions/', 'backlog/',
+  // The CommonJS rollback tree and the source of authority never ship.
+  'dist/', 'src/', 'test/', 'scripts/', 'node_modules/',
+  // Repository-local material that is not part of the runtime payload.
+  '.forgejo-local/', 'sessions/', 'graphify-out/', 'missions/', 'backlog/',
+  'docs/', 'examples/', 'tools/', 'proofs/', 'forgejo/',
+  // Package-root asset directories: superseded by their build/ staged copies.
+  'config/', 'data/', 'prompts/', 'templates/',
 ];
 
 function violationsFor(files) {
@@ -33,15 +55,66 @@ function violationsFor(files) {
     if (!files.some(file => file.startsWith(prefix))) {violations.push(`missing required package asset directory: ${prefix}`);}
   }
   for (const file of files) {
-    if (FORBIDDEN_PATHS.has(file) || file.endsWith('.ts') || file.endsWith('.d.ts')
+    if (FORBIDDEN_PATHS.has(file) || file.endsWith('.ts') || file.endsWith('.tsx') || file.endsWith('.d.ts')
       || FORBIDDEN_PREFIXES.some(prefix => file.startsWith(prefix))
       || /(^|\/)agents\.local\.json$/.test(file)) {
       violations.push(`forbidden package file: ${file}`);
     }
   }
-  if (!files.some(file => /^dist\/.+\.js$/.test(file))) {violations.push('missing emitted dist JavaScript');}
-  if (!files.some(file => /^dist\/.+\.js\.map$/.test(file))) {violations.push('missing emitted dist source maps');}
+  // Every published payload file lives under build/ except the four root
+  // metadata files; anything else means the `files` allowlist has drifted.
+  const rootAllowed = new Set(['package.json', 'README.md', 'LICENSE', 'CHANGELOG.md', 'NOTICES']);
+  for (const file of files) {
+    if (!file.startsWith('build/') && !rootAllowed.has(file)) {
+      violations.push(`unexpected package file outside build/: ${file}`);
+    }
+  }
+  if (!files.some(file => /^build\/.+\.mjs$/.test(file))) {violations.push('missing canonical ESM bundle');}
+  if (!files.some(file => /^build\/.+\.mjs\.map$/.test(file))) {violations.push('missing canonical bundle source map');}
   return violations;
+}
+
+/**
+ * Checksum gate: every published build/ file must be listed in
+ * build/manifest.sha256 with a digest matching the file on disk.
+ */
+function checksumViolations(rootDir, files) {
+  const manifestPath = path.join(rootDir, 'build', 'manifest.sha256');
+  if (!fs.existsSync(manifestPath)) {
+    return ['missing checksum manifest: build/manifest.sha256'];
+  }
+  const recorded = new Map(
+    fs.readFileSync(manifestPath, 'utf8').split('\n').filter(Boolean).map(line => {
+      const [digest, ...rest] = line.split(/\s+/);
+      return [rest.join(' '), digest];
+    }),
+  );
+  const violations = [];
+  for (const file of files) {
+    if (!file.startsWith('build/') || file === 'build/manifest.sha256') { continue; }
+    const relative = file.slice('build/'.length);
+    const digest = recorded.get(relative);
+    if (digest === undefined) {
+      violations.push(`checksum manifest does not cover published file: ${file}`);
+      continue;
+    }
+    const actual = crypto.createHash('sha256').update(fs.readFileSync(path.join(rootDir, file))).digest('hex');
+    if (actual !== digest) {
+      violations.push(`checksum mismatch for ${file}: manifest ${digest}, actual ${actual}`);
+    }
+  }
+  return violations;
+}
+
+/**
+ * `npm pack --json` runs the `prepack` build first, and that build's progress
+ * output lands on the same stdout stream ahead of the JSON report. Parse from
+ * the first line that opens the report array rather than from raw stdout.
+ */
+function parsePackReport(stdout) {
+  const start = stdout.search(/^\[\s*$/m);
+  const json = start === -1 ? stdout : stdout.slice(start);
+  return JSON.parse(json);
 }
 
 function packageFiles(rootDir) {
@@ -53,22 +126,23 @@ function packageFiles(rootDir) {
   if (result.status !== 0) {
     throw new Error(`npm pack --dry-run failed (exit ${result.status}): ${result.stderr || result.stdout}`);
   }
-  const report = JSON.parse(result.stdout);
+  const report = parsePackReport(result.stdout);
   const files = report[0] && Array.isArray(report[0].files) ? report[0].files.map(entry => entry.path) : null;
   if (!files) {throw new Error('npm pack --dry-run --json did not return a file list');}
   return files.sort();
 }
 
 function main(rootDir = process.cwd()) {
-  const violations = violationsFor(packageFiles(rootDir));
+  const files = packageFiles(rootDir);
+  const violations = [...violationsFor(files), ...checksumViolations(rootDir, files)];
   if (violations.length > 0) {
     process.stderr.write(`Package-content audit failed:\n${violations.map(item => `- ${item}`).join('\n')}\n`);
     return 1;
   }
-  process.stdout.write('Package-content audit passed (ADR 0044 §8).\n');
+  process.stdout.write(`Package-content audit passed (ADR 0044 §8): ${files.length} files, checksums verified.\n`);
   return 0;
 }
 
 if (require.main === module) {process.exitCode = main();}
 
-module.exports = { violationsFor, packageFiles, main };
+module.exports = { checksumViolations, main, packageFiles, parsePackReport, violationsFor };

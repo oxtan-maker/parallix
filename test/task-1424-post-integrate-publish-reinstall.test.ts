@@ -10,8 +10,9 @@ const PACKAGE_ROOT = path.join(__dirname, '..');
 
 // Reproduces the real post-integrate self-update path from scripts/refresh-global-px.sh:
 // `npm pack` the checkout, `npm install -g` the tarball, then run the installed
-// executable from a temporary target repository. The package must contain only the
-// dist runtime, so extraction cannot couple source and sibling-JS mtimes.
+// executable from a temporary target repository. Since TASK-2285 the package
+// contains only the canonical ESM bundle payload (build/), so extraction cannot
+// couple source and sibling-JS mtimes.
 function run(command, args, options = {}) {
 // @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `tempHome` absent from its inferred mock shape.
   const tempHome = options.tempHome || fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-npm-home-'));
@@ -39,7 +40,7 @@ function packFilename(stdout) {
   return String(stdout || '').split(/\r?\n/).map(line => line.trim()).findLast(line => line.endsWith('.tgz')) || null;
 }
 
-test('installed dist-layout tarball runs read-only commands outside the checkout', () => {
+test('installed bundle-layout tarball runs read-only commands outside the checkout', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-publish-reinstall-'));
   const packDir = path.join(root, 'pack');
   const prefix = path.join(root, 'npm-prefix');
@@ -82,11 +83,13 @@ test('installed dist-layout tarball runs read-only commands outside the checkout
 
     const installedRoot = path.join(prefix, 'lib', 'node_modules', '@magnusekdahl', 'parallix');
     assert.ok(fs.existsSync(installedRoot), 'installed package directory should exist');
-    assert.ok(fs.existsSync(path.join(installedRoot, 'dist', 'px.js')), 'installed package should contain dist/px.js');
-    assert.ok(fs.existsSync(path.join(installedRoot, 'dist', 'px.js.map')), 'installed package should contain source maps');
+    assert.ok(fs.existsSync(path.join(installedRoot, 'build', 'px.mjs')), 'installed package should contain build/px.mjs');
+    assert.ok(fs.existsSync(path.join(installedRoot, 'build', 'px.mjs.map')), 'installed package should contain source maps');
+    assert.ok(!fs.existsSync(path.join(installedRoot, 'dist')), 'installed package should not contain the CommonJS rollback tree');
     assert.ok(!fs.existsSync(path.join(installedRoot, 'lib')), 'installed package should not contain sibling lib runtime');
     assert.ok(!fs.existsSync(path.join(installedRoot, 'px.js')), 'installed package should not contain sibling px runtime');
     assert.ok(!fs.existsSync(path.join(installedRoot, 'px.ts')), 'installed package should not contain TypeScript source');
+    assert.ok(!fs.existsSync(path.join(installedRoot, 'src')), 'installed package should not contain source authority');
     assert.ok(!fs.existsSync(path.join(installedRoot, 'test')), 'installed package should not contain tests');
     assert.ok(!fs.existsSync(path.join(installedRoot, 'missions')), 'installed package should not contain mission records');
     assert.ok(!fs.existsSync(path.join(installedRoot, 'backlog')), 'installed package should not contain backlog state');
@@ -94,11 +97,13 @@ test('installed dist-layout tarball runs read-only commands outside the checkout
 
     const px = path.join(prefix, 'bin', 'px');
     fs.mkdirSync(parallixHome, { recursive: true });
-    const { STATS_HEADERS } = require(path.join(installedRoot, 'dist', 'lib', 'commands', 'stats.js'));
+    // The published package no longer exposes importable modules, so the CSV
+    // header comes from the checkout's rollback build rather than the install.
+    const { STATS_HEADERS } = require(path.join(PACKAGE_ROOT, 'dist', 'lib', 'commands', 'stats.js'));
     fs.writeFileSync(path.join(parallixHome, 'stats.csv'), `${STATS_HEADERS.join(',')}\n`);
     const pxVersion = run(px, ['--version'], { cwd: target });
     assert.equal(pxVersion.status, 0, `installed px --version failed\nstdout:\n${pxVersion.stdout}\nstderr:\n${pxVersion.stderr}`);
-    assert.match(pxVersion.stdout, new RegExp(`${installedRoot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/dist/px\\.js`));
+    assert.match(pxVersion.stdout, new RegExp(`${installedRoot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/build/px\\.mjs`));
 
     for (const command of ['status', 'stats']) {
       const result = run(px, [command], { cwd: target, tempHome: npmHome, env: { PARALLIX_HOME: parallixHome } });

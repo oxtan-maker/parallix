@@ -67,8 +67,10 @@ export function parseArgs(argv: string[], baseCwd = process.cwd()): ParsedArgs {
   }
 
   const command = args.shift();
+  // No command provided: return empty string so the caller can print usage.
+  // This satisfies SC3's "non-TTY bare px prints help" requirement.
   if (!command) {
-    throw new Error('Missing command');
+    return { target: path.resolve(baseCwd), command: '', args: [] };
   }
 
   return { target: path.resolve(baseCwd), command, args };
@@ -208,6 +210,15 @@ export async function run(argv = process.argv.slice(2), options: RunOptions = {}
       error(fmt.status('FAIL', (err as Error).message));
       return 1;
     }
+  }
+
+  // Bare `px` (no command) prints help — satisfies SC3 non-TTY requirement.
+  // Runs before the target-path check so it works even outside a repo.
+  if (!parsed.command) {
+    // Import usage lazily so the help text is always fresh.
+    const { printUsage } = await import('./index.js');
+    printUsage();
+    return 0;
   }
 
   if (!fs.existsSync(parsed.target) || !fs.statSync(parsed.target).isDirectory()) {
