@@ -30,3 +30,4 @@ reports/mutation/
 .dist-staging.*
 build.retired.*
 dist.retired.*
+/NOTICES
