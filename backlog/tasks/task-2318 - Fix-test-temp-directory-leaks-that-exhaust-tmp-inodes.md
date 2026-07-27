@@ -6,7 +6,7 @@ assignee: [codex]
 created_date: '2026-07-27 09:00'
 labels:
   - bug
-  - testing
+  - user_value
 dependencies: []
 ---
 
