@@ -2,7 +2,7 @@
 id: TASK-2319
 title: NOTICES file breaks parallix
 status: backlog
-assignee: []
+assignee: [codex]
 created_date: '2026-07-27 08:16'
 labels: []
 dependencies: []
