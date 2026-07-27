@@ -8,6 +8,7 @@ labels:
   - migration
   - cleanup
   - documentation
+  - user_value
 dependencies:
   - TASK-2284
   - TASK-2285
