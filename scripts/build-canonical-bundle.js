@@ -251,6 +251,8 @@ emitCommonJsTree(path.join(root, 'src', 'platform', 'assets'), path.join(rollbac
 emitEsmTree(path.join(root, 'src', 'interfaces', 'tui'), path.join(rollbackDir, 'interfaces', 'tui'));
 // application/projections is required by ui-command.mjs — emit as ESM.
 emitEsmTree(path.join(root, 'src', 'application', 'projections'), path.join(rollbackDir, 'application', 'projections'));
+// application/controller is required by ui-command.mjs and shell.mjs.
+emitEsmTree(path.join(root, 'src', 'application', 'controller'), path.join(rollbackDir, 'application', 'controller'));
 // concrete adapters are required by create-board-projection-builder — emit as ESM.
 emitEsmTree(path.join(root, 'src', 'adapters', 'backlog'), path.join(rollbackDir, 'adapters', 'backlog'));
 // domain modules are required by projections and adapters — emit as ESM.

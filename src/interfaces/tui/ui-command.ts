@@ -2,12 +2,13 @@ import { basename, join } from 'node:path';
 import { readFileSync } from 'node:fs';
 import React from 'react';
 import { render, renderToString } from 'ink';
-import type { AgentBlockEntry, AgentBlocklistRepository, BoardLaneEventEntry, BoardLaneEventRepository, OperationalHistoryEntry, OperationalHistoryRepository, UsageRecord, UsageRepository } from '../../adapters/sqlite/ports.js';
 import type { AgentFamily } from '../../domain/agents.js';
 import type { RepositoryId } from '../../domain/repository.js';
+import type { BoardProgressSink } from '../../application/controller/board-command.js';
 import { createBoardProjectionBuilder } from '../../application/projections/create-board-projection-builder.js';
 import { projectMissionDetail, type MissionDetail } from '../../application/projections/mission-detail.js';
 import { ConcreteMissionReadAdapter } from '../../adapters/backlog/concrete-mission-read-adapter.js';
+import { BoardCommandController } from '../../application/controller/board-controller.js';
 import { BoardShell } from './shell.js';
 
 // ---------------------------------------------------------------------------
@@ -18,10 +19,10 @@ import { BoardShell } from './shell.js';
  * Minimal in-memory AgentBlocklistRepository for read-only TUI use.
  * Returns empty blocklist — sufficient for the static shell projection.
  */
-class EmptyBlocklistRepository implements AgentBlocklistRepository {
-  async findAll(): Promise<readonly AgentBlockEntry[]> { return []; }
-  async findByAgent(): Promise<AgentBlockEntry | undefined> { return undefined; }
-  async save(_entry: AgentBlockEntry): Promise<void> {}
+class EmptyBlocklistRepository {
+  async findAll() { return []; }
+  async findByAgent() { return undefined; }
+  async save(_entry: unknown): Promise<void> {}
   async deleteByAgent(_agent: string): Promise<void> {}
   async clear(): Promise<void> {}
 }
@@ -30,10 +31,10 @@ class EmptyBlocklistRepository implements AgentBlocklistRepository {
  * Minimal in-memory OperationalHistoryRepository for read-only TUI use.
  * Returns empty history — sufficient for the static shell projection.
  */
-class EmptyHistoryRepository implements OperationalHistoryRepository {
-  async findAll(): Promise<readonly OperationalHistoryEntry[]> { return []; }
-  async findByType(_type: string): Promise<readonly OperationalHistoryEntry[]> { return []; }
-  async append(_entry: OperationalHistoryEntry): Promise<void> {}
+class EmptyHistoryRepository {
+  async findAll() { return []; }
+  async findByType(_type: string) { return []; }
+  async append(_entry: unknown): Promise<void> {}
   async clear(): Promise<void> {}
 }
 
@@ -42,10 +43,10 @@ class EmptyHistoryRepository implements OperationalHistoryRepository {
  * Returns empty lane-event log — sufficient for the static shell projection.
  * Lane events are used by Wave 3 flow panel (TASK-2304+).
  */
-class EmptyLaneEventRepository implements BoardLaneEventRepository {
-  async append(_entry: BoardLaneEventEntry): Promise<boolean> { return false; }
-  async findByMissionId(_missionId: string): Promise<readonly BoardLaneEventEntry[]> { return []; }
-  async findAll(): Promise<readonly BoardLaneEventEntry[]> { return []; }
+class EmptyLaneEventRepository {
+  async append(_entry: unknown): Promise<boolean> { return false; }
+  async findByMissionId(_missionId: string) { return []; }
+  async findAll() { return []; }
   async clear(): Promise<void> {}
 }
 
@@ -54,12 +55,25 @@ class EmptyLaneEventRepository implements BoardLaneEventRepository {
  * Returns empty usage records — sufficient for the static shell projection.
  * Usage records are used by Wave 3 metrics (TASK-2304+).
  */
-class EmptyUsageRepository implements UsageRepository {
-  async findAll(): Promise<readonly UsageRecord[]> { return []; }
-  async findWhere(_predicate: (_record: UsageRecord) => boolean): Promise<readonly UsageRecord[]> { return []; }
-  async save(_record: UsageRecord): Promise<void> {}
-  async saveAll(_records: readonly UsageRecord[]): Promise<void> {}
+class EmptyUsageRepository {
+  async findAll() { return []; }
+  async findWhere(_predicate: (_record: object) => boolean) { return []; }
+  async save(_record: unknown): Promise<void> {}
+  async saveAll(_records: readonly unknown[]): Promise<void> {}
   async clear(): Promise<void> {}
+}
+
+/**
+ * The runtime composition point deliberately has no direct lifecycle adapter.
+ * It still supplies the application controller so the UI's only dispatch path
+ * is stable and testable; deployments provide the real ActivePort at the
+ * application composition boundary as that adapter is extracted.
+ */
+class UnconfiguredActivePort {
+  async validateSlug(_slug: string): Promise<string> { return 'active lifecycle adapter is not configured'; }
+  async launch(_slug: string, _agent?: string | null): Promise<never> { throw new Error('unreachable after validation'); }
+  async recordLaunch(_slug: string, _agent: string): Promise<never> { throw new Error('unreachable after validation'); }
+  async handoff(_slug: string, _agent: string): Promise<void> {}
 }
 
 // ---------------------------------------------------------------------------
@@ -126,22 +140,25 @@ export async function runUiCommand(_args: string[] = []): Promise<number> {
 
   const projection = await builder.build();
   // Detail materialisation stays in the composition root. BoardShell receives
-  // pure projection data and therefore cannot reach backlog, Git, or Forgejo.
+  // pure projection data and therefore cannot reach the lifecycle authority.
   const missionReader = new ConcreteMissionReadAdapter({ rootDir, repositoryId });
   const missionDetails = new Map<string, MissionDetail>();
   for (const mission of await missionReader.loadAllMissions()) {
     missionDetails.set(mission.id, projectMissionDetail(mission, null));
   }
+  const commandControllerFactory = (progress: BoardProgressSink) =>
+    new BoardCommandController(new UnconfiguredActivePort(), progress);
+  const refreshProjection = () => builder.build();
 
   // A piped CLI invocation has no keyboard source. Render one static frame and
   // return so shipped-artifact/headless callers cannot wait forever for `q`.
   if (!process.stdin.isTTY && !process.stdout.isTTY) {
-    process.stdout.write(renderToString(React.createElement(BoardShell, { projection, missionDetails })));
+    process.stdout.write(renderToString(React.createElement(BoardShell, { projection, missionDetails, commandControllerFactory, refreshProjection })));
     return 0;
   }
 
   const { waitUntilExit } = render(
-    React.createElement(BoardShell, { projection, missionDetails }),
+    React.createElement(BoardShell, { projection, missionDetails, commandControllerFactory, refreshProjection }),
     {
       exitOnCtrlC: true,
     },

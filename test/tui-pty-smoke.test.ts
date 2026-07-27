@@ -28,6 +28,18 @@ test('real PTY smoke: launch, keyboard navigation, resize, clean exit, timeout b
     }
     assert.match(plain(session.output()), /px board/, 'real PTY must render the Ink board after launch');
     assert.match(plain(session.output()), /task-pty/, 'real PTY must render the selectable fixture mission');
+    session.send('\r');
+    const confirmationDeadline = Date.now() + 2_000;
+    while (!/CONFIRM CONSEQUENTIAL ACTION/.test(plain(session.output())) && Date.now() < confirmationDeadline) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    assert.match(plain(session.output()), /CONFIRM CONSEQUENTIAL ACTION/, 'Enter must show guarded confirmation without launching an agent');
+    session.send('\u001b');
+    const cancellationDeadline = Date.now() + 2_000;
+    while (!/CANCELLED: cancelled before dispatch/.test(plain(session.output())) && Date.now() < cancellationDeadline) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    assert.match(plain(session.output()), /CANCELLED: cancelled before dispatch/, 'Escape must cancel before controller dispatch');
     session.send('\u001b[B');
     const focusDeadline = Date.now() + 2_000;
     while (!/▶\s*task-pty-2/.test(plain(session.output())) && Date.now() < focusDeadline) {

@@ -73,7 +73,8 @@ test('component: keyboard help is visible on demand and ordinary keys have no wo
     if (key === '?') {
       assert.match(output, /\?: hide help/, 'question mark must show the keyboard reference');
     } else {
-      assert.doesNotMatch(output, /not yet available|approve|run workflow|cancel workflow/, `${key} must not trigger a workflow action`);
+      assert.doesNotMatch(output, /CONFIRM CONSEQUENTIAL ACTION|COMPLETED:|CANCELLED:/,
+        `${key} must not trigger a guarded workflow dispatch`);
     }
   }
 });
