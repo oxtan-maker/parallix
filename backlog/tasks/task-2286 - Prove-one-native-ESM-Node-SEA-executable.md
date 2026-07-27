@@ -6,6 +6,7 @@ assignee: [custom]
 created_date: '2026-07-19 00:00'
 updated_date: '2026-07-24 04:36'
 labels:
+  - ai_sdlc
   - binary
   - sea
   - distribution
