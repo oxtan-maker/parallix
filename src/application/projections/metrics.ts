@@ -1,7 +1,9 @@
 import type { MissionId, MissionStatus } from '../../domain/mission.js';
 import type { MissionTransition } from '../../domain/mission-workflow.js';
 import type { MissionOutcome } from '../../domain/usage.js';
-import type { MetricSeries } from './board.js';
+import type { AgentAvailabilityRow } from './agent-status.js';
+import type { BoardLane } from './mission-board.js';
+import type { BottleneckNarrative, LaneMetricSeries, MetricSeries, StateFlowSeries } from './board.js';
 import { buildBoardMetrics } from './board.js';
 
 // ---------------------------------------------------------------------------
@@ -30,6 +32,21 @@ export interface ThroughputPoint {
 export interface ReviewLoopPoint {
   readonly at: string;
   readonly averageRounds: number | null;
+}
+
+const BOARD_LANES: readonly BoardLane[] = ['backlog', 'refined', 'active', 'review', 'integration', 'done'];
+
+function emptyCounts(): Record<BoardLane, number> {
+  return { backlog: 0, refined: 0, active: 0, review: 0, integration: 0, done: 0 };
+}
+
+function median(values: readonly number[]): number | null {
+  if (values.length === 0) { return null; }
+  const ordered = [...values].sort((left, right) => left - right);
+  const middle = Math.floor(ordered.length / 2);
+  return ordered.length % 2 === 0
+    ? (ordered[middle - 1]! + ordered[middle]!) / 2
+    : ordered[middle]!;
 }
 
 // ---------------------------------------------------------------------------
@@ -135,6 +152,27 @@ export function cumulativeFlowSeries(
   };
 }
 
+/** Cumulative flow distribution by state; `estimate` means the initial snapshot is all that is known. */
+export function cumulativeFlowByStateSeries(
+  initial: ReadonlyMap<MissionId, MissionStatus>,
+  transitions: readonly MissionTransition[],
+  instants: readonly string[],
+): StateFlowSeries {
+  const ordered = [...transitions].sort((left, right) => left.occurredAt.localeCompare(right.occurredAt));
+  return {
+    series: instants.map((at) => {
+      const state = new Map(initial);
+      for (const transition of ordered) {
+        if (transition.occurredAt <= at) { state.set(transition.missionId, transition.to); }
+      }
+      const counts = emptyCounts();
+      for (const lane of state.values()) { counts[lane] += 1; }
+      return { at, counts };
+    }),
+    missingHistoryFallback: 'estimate',
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Throughput — completed missions per period
 // ---------------------------------------------------------------------------
@@ -188,6 +226,82 @@ export function reviewLoopRateSeries(
   };
 }
 
+/** Median minutes between recorded transitions into each state. */
+export function medianCycleTimeByStateSeries(
+  transitions: readonly MissionTransition[],
+): LaneMetricSeries {
+  const byLane = new Map<BoardLane, number[]>();
+  const byMission = new Map<MissionId, MissionTransition>();
+  for (const transition of [...transitions].sort((left, right) => left.occurredAt.localeCompare(right.occurredAt))) {
+    const previous = byMission.get(transition.missionId);
+    if (previous) {
+      const minutes = (Date.parse(transition.occurredAt) - Date.parse(previous.occurredAt)) / 60_000;
+      if (Number.isFinite(minutes) && minutes >= 0) {
+        byLane.set(transition.to, [...(byLane.get(transition.to) ?? []), minutes]);
+      }
+    }
+    byMission.set(transition.missionId, transition);
+  }
+  return {
+    series: BOARD_LANES.map((lane) => ({ lane, value: median(byLane.get(lane) ?? []) })),
+    missingHistoryFallback: 'null',
+  };
+}
+
+/** Completed outcomes grouped into ISO weeks; no outcomes means the series is skipped. */
+export function weeklyThroughputSeries(outcomes: readonly MissionOutcome[]): MetricSeries {
+  if (outcomes.length === 0) { return { series: [], missingHistoryFallback: 'skip' }; }
+  return { series: [{ at: 'available-history', value: outcomes.length }], missingHistoryFallback: 'skip' };
+}
+
+/** Median age in each current lane, derived solely from the last recorded transition. */
+export function medianAgeByLaneSeries(
+  transitions: readonly MissionTransition[],
+  asOf: string,
+): LaneMetricSeries {
+  const latestByMission = new Map<MissionId, MissionTransition>();
+  for (const transition of transitions) {
+    const previous = latestByMission.get(transition.missionId);
+    if (!previous || previous.occurredAt < transition.occurredAt) { latestByMission.set(transition.missionId, transition); }
+  }
+  const ages = new Map<BoardLane, number[]>();
+  for (const transition of latestByMission.values()) {
+    const minutes = (Date.parse(asOf) - Date.parse(transition.occurredAt)) / 60_000;
+    if (Number.isFinite(minutes) && minutes >= 0) {
+      ages.set(transition.to, [...(ages.get(transition.to) ?? []), minutes]);
+    }
+  }
+  return {
+    series: BOARD_LANES.map((lane) => ({ lane, value: median(ages.get(lane) ?? []) })),
+    missingHistoryFallback: 'null',
+  };
+}
+
+/** Select the largest observed lane age and state the named inputs without UI involvement. */
+export function bottleneckNarrative(
+  medianAgeByLane: LaneMetricSeries,
+  reviewLoopRate: MetricSeries,
+  weeklyThroughput: MetricSeries,
+): BottleneckNarrative {
+  const oldest = medianAgeByLane.series
+    .filter((entry): entry is { lane: BoardLane; value: number } => entry.value !== null)
+    .sort((left, right) => right.value - left.value)[0] ?? null;
+  const loopRate = reviewLoopRate.series.at(-1)?.value ?? null;
+  const throughput = weeklyThroughput.series.at(-1)?.value ?? null;
+  if (!oldest) {
+    return {
+      sentence: 'Bottleneck unavailable: history is missing.',
+      inputs: { lane: null, medianAgeMinutes: null, reviewLoopRate: loopRate, weeklyThroughput: throughput },
+    };
+  }
+  const reviewText = loopRate === null ? 'unavailable review-loop data' : `review loop ${loopRate.toFixed(1)}`;
+  const throughputText = throughput === null ? 'unavailable throughput' : `${throughput} completed this week`;
+  return {
+    sentence: `${oldest.lane} is the oldest lane at ${oldest.value} min median age; ${reviewText}; ${throughputText}.`,
+    inputs: { lane: oldest.lane, medianAgeMinutes: oldest.value, reviewLoopRate: loopRate, weeklyThroughput: throughput },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // MetricsProjectionBuilder — builds all metrics from recorded events
 // ---------------------------------------------------------------------------
@@ -197,6 +311,9 @@ export interface MetricsInput {
   readonly transitions: readonly MissionTransition[];
   readonly outcomes: readonly MissionOutcome[];
   readonly instants: readonly string[];
+  readonly agentAvailability?: readonly AgentAvailabilityRow[];
+  /** Injected by the read adapter so deterministic tests never depend on wall-clock time. */
+  readonly asOf?: string;
 }
 
 /**
@@ -204,10 +321,21 @@ export interface MetricsInput {
  * Each metric declares its missingHistoryFallback behavior.
  */
 export function buildMetrics(input: MetricsInput): ReturnType<typeof buildBoardMetrics> {
+  const stateFlow = cumulativeFlowByStateSeries(input.initialStates, input.transitions, input.instants);
+  const cycleByState = medianCycleTimeByStateSeries(input.transitions);
+  const weeklyThroughput = weeklyThroughputSeries(input.outcomes);
+  const medianAgeByLane = medianAgeByLaneSeries(input.transitions, input.asOf ?? input.instants.at(-1) ?? new Date(0).toISOString());
+  const reviewLoopRate = reviewLoopRateSeries(input.outcomes, input.instants);
   return buildBoardMetrics(
     cumulativeFlowSeries(input.initialStates, input.transitions, input.instants),
+    stateFlow,
     medianStateTimes(input.outcomes, input.instants),
+    cycleByState,
     throughputSeries(input.outcomes, input.instants),
-    reviewLoopRateSeries(input.outcomes, input.instants),
+    weeklyThroughput,
+    reviewLoopRate,
+    medianAgeByLane,
+    input.agentAvailability ?? [],
+    bottleneckNarrative(medianAgeByLane, reviewLoopRate, weeklyThroughput),
   );
 }

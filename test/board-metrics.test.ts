@@ -3,6 +3,10 @@ import assert from 'node:assert/strict';
 
 import {
   buildMetrics,
+  bottleneckNarrative,
+  cumulativeFlowByStateSeries,
+  medianAgeByLaneSeries,
+  medianCycleTimeByStateSeries,
   cumulativeFlowSeries,
   medianStateTimes,
   reviewLoopRateSeries,
@@ -10,6 +14,7 @@ import {
   wipSeries,
   type MetricsInput,
 } from '../src/application/projections/metrics.js';
+import { agentFamily } from '../src/domain/agents.js';
 import { missionId } from '../src/domain/mission.js';
 
 const id1 = missionId('task-0001');
@@ -63,6 +68,17 @@ test('cumulativeFlowSeries with multiple missions and transitions', () => {
   assert.equal(series.series[0]?.value, 2); // both in initial state
   assert.equal(series.series[1]?.value, 2); // id1 moved to active
   assert.equal(series.series[2]?.value, 2); // id2 moved to active
+});
+
+test('cumulativeFlowByStateSeries exposes per-state counts from BoardMetrics inputs', () => {
+  const series = cumulativeFlowByStateSeries(
+    new Map([[id1, 'backlog'], [id2, 'review']]),
+    [{ missionId: id1, from: 'backlog', to: 'active', trigger: 'activate', actor: 'codex', occurredAt: now }],
+    [earlier, now],
+  );
+  assert.deepEqual(series.series[0]?.counts, { backlog: 1, refined: 0, active: 0, review: 1, integration: 0, done: 0 });
+  assert.deepEqual(series.series[1]?.counts, { backlog: 0, refined: 0, active: 1, review: 1, integration: 0, done: 0 });
+  assert.equal(series.missingHistoryFallback, 'estimate');
 });
 
 // ---------------------------------------------------------------------------
@@ -231,6 +247,49 @@ test('buildMetrics with data populates all series', () => {
   assert.equal(metrics.medianStateTimes.series[0]?.value, 10);
   assert.equal(metrics.throughput.series[0]?.value, 1);
   assert.equal(metrics.reviewLoopRate.series[0]?.value, 1);
+});
+
+test('FLOW projection derives lane rows, agent availability, and a deterministic bottleneck sentence', () => {
+  const transitions = [
+    { missionId: id1, from: 'backlog' as const, to: 'active' as const, trigger: 'activate' as const, actor: 'codex', occurredAt: '2026-07-22T08:00:00Z' },
+    { missionId: id1, from: 'active' as const, to: 'review' as const, trigger: 'submit-for-review' as const, actor: 'codex', occurredAt: '2026-07-22T09:00:00Z' },
+    { missionId: id1, from: 'review' as const, to: 'active' as const, trigger: 'request-changes' as const, actor: 'codex', occurredAt: '2026-07-22T11:00:00Z' },
+    { missionId: id2, from: 'backlog' as const, to: 'active' as const, trigger: 'activate' as const, actor: 'codex', occurredAt: '2026-07-22T08:00:00Z' },
+    { missionId: id2, from: 'active' as const, to: 'review' as const, trigger: 'submit-for-review' as const, actor: 'codex', occurredAt: '2026-07-22T10:00:00Z' },
+  ];
+  const outcomes = [
+    { missionId: id1, repositoryId: 'parallix' as never, cycleTimeMinutes: 10, reviewFixRounds: 1, runs: [] },
+    { missionId: id2, repositoryId: 'parallix' as never, cycleTimeMinutes: 20, reviewFixRounds: 3, runs: [] },
+  ];
+  const metrics = buildMetrics({
+    initialStates: new Map([[id1, 'active'], [id2, 'review']]),
+    transitions,
+    outcomes,
+    instants: ['2026-07-22T12:00:00Z'],
+    asOf: '2026-07-22T12:00:00Z',
+    agentAvailability: [
+      { family: agentFamily('codex'), available: true, blockedForMs: 0 },
+      { family: agentFamily('claude'), available: false, blockedForMs: Infinity },
+    ],
+  });
+
+  assert.equal(metrics.medianCycleTimeByState.series.find((entry) => entry.lane === 'review')?.value, 90);
+  assert.equal(metrics.medianAgeByLane.series.find((entry) => entry.lane === 'review')?.value, 120);
+  assert.equal(metrics.weeklyThroughput.series[0]?.value, 2);
+  assert.deepEqual(metrics.agentAvailability.map((agent) => [agent.family, agent.available]), [['codex', true], ['claude', false]]);
+  assert.equal(metrics.bottleneck.sentence, 'review is the oldest lane at 120 min median age; review loop 2.0; 2 completed this week.');
+});
+
+test('FLOW projection reports explicit missing history without fabricated values', () => {
+  const metrics = buildMetrics({ initialStates: new Map(), transitions: [], outcomes: [], instants: [now], asOf: now });
+  assert.equal(metrics.medianCycleTimeByState.missingHistoryFallback, 'null');
+  assert.ok(metrics.medianCycleTimeByState.series.every((entry) => entry.value === null));
+  assert.equal(metrics.weeklyThroughput.missingHistoryFallback, 'skip');
+  assert.deepEqual(metrics.weeklyThroughput.series, []);
+  assert.equal(metrics.bottleneck.sentence, 'Bottleneck unavailable: history is missing.');
+  assert.deepEqual(medianAgeByLaneSeries([], now).series.map((entry) => entry.value), [null, null, null, null, null, null]);
+  assert.equal(medianCycleTimeByStateSeries([]).missingHistoryFallback, 'null');
+  assert.equal(bottleneckNarrative(metrics.medianAgeByLane, metrics.reviewLoopRate, metrics.weeklyThroughput).sentence, 'Bottleneck unavailable: history is missing.');
 });
 
 // ---------------------------------------------------------------------------

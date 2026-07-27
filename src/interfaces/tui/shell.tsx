@@ -19,6 +19,7 @@ import { visibleCardsForHeight } from './board-layout.js';
 import { ActionBar, canDispatchAction } from './action-bar.js';
 import { ConfirmationDialog } from './confirmation-dialog.js';
 import { OutcomeBanner } from './outcome-banner.js';
+import { FlowPanel } from './flow-panel.js';
 
 // ---------------------------------------------------------------------------
 // TUI Shell — static read-only board from a BoardProjection
@@ -86,6 +87,8 @@ export interface BoardShellProps {
   readonly commandControllerFactory?: (_progress: BoardProgressSink) => BoardCommandDispatcher;
   /** Rebuilds read data after a stale-state conflict. */
   readonly refreshProjection?: () => Promise<BoardProjection>;
+  /** Test override for the FLOW panel's initial visibility. */
+  readonly initialFlowOpen?: boolean;
 }
 
 /**
@@ -95,7 +98,7 @@ export interface BoardShellProps {
  * Narrow terminal: attention rail above a single stacked column of lanes.
  * In headless mode (piped): Ink renders as static text dump.
  */
-export function BoardShell({ projection, columns, rows, missionDetails, initialSelectedMissionId, commandControllerFactory, refreshProjection }: BoardShellProps): React.ReactElement {
+export function BoardShell({ projection, columns, rows, missionDetails, initialSelectedMissionId, commandControllerFactory, refreshProjection, initialFlowOpen = false }: BoardShellProps): React.ReactElement {
   const { exit } = useApp();
   const detected = useTerminalDimensions();
   const width = columns ?? detected.columns;
@@ -128,10 +131,12 @@ export function BoardShell({ projection, columns, rows, missionDetails, initialS
       : initial;
   });
   const [showKeyboardHelp, setShowKeyboardHelp] = React.useState(false);
+  const [flowOpen, setFlowOpen] = React.useState(initialFlowOpen);
   const [focusedAttentionIndex, setFocusedAttentionIndex] = React.useState(0);
   const [confirmation, setConfirmation] = React.useState<{ kind: BoardCommandKind; mission: MissionCard } | null>(null);
   const [outcome, setOutcome] = React.useState<BoardCommandResult | null>(null);
   const [liveEvents, setLiveEvents] = React.useState<Array<BoardProjection['operationLog'][number] & { sequence: number }>>([]);
+  const confirmationRef = React.useRef<{ kind: BoardCommandKind; mission: MissionCard } | null>(null);
   /** Which area the keyboard is focused on: rail or board. Defaults to board for backward compat. */
   const [focusedArea, setFocusedArea] = React.useState<'rail' | 'board'>('board');
   const controller = React.useMemo(() => commandControllerFactory?.((event) => {
@@ -145,30 +150,36 @@ export function BoardShell({ projection, columns, rows, missionDetails, initialS
     const mission = projection.stages.flatMap((stage) => stage.cards).find((card) => card.id === missionId) ?? null;
     if (!mission || !canDispatchAction('active:execute', mission)) { return false; }
     setOutcome(null);
-    setConfirmation({ kind: 'active:execute', mission });
+    const nextConfirmation = { kind: 'active:execute', mission } as const;
+    confirmationRef.current = nextConfirmation;
+    setConfirmation(nextConfirmation);
     return true;
   };
 
   const confirmAction = async () => {
-    if (!confirmation || !controller) { return; }
+    const pendingConfirmation = confirmationRef.current;
+    if (!pendingConfirmation || !controller) { return; }
     const request = {
       operationId: `board-${Date.now()}`,
-      kind: confirmation.kind,
-      missionId: confirmation.mission.id,
-      missionStatusAtRequest: confirmation.mission.status,
-      agent: confirmation.mission.agent,
+      kind: pendingConfirmation.kind,
+      missionId: pendingConfirmation.mission.id,
+      missionStatusAtRequest: pendingConfirmation.mission.status,
+      agent: pendingConfirmation.mission.agent,
       capabilities: new Set(['active:execute'] as const),
       cancellation: { requested: false },
     } as const;
+    confirmationRef.current = null;
     setConfirmation(null);
-    const result = await controller.dispatchWithStatus(request, confirmation.mission.status);
+    const result = await controller.dispatchWithStatus(request, pendingConfirmation.mission.status);
     setOutcome(result);
     if (result.error?.kind === 'conflict' && refreshProjection) {
       const refreshed = await refreshProjection();
       const refreshedMission = refreshed.stages.flatMap((stage) => stage.cards)
-        .find((card) => card.id === confirmation.mission.id) ?? confirmation.mission;
+        .find((card) => card.id === pendingConfirmation.mission.id) ?? pendingConfirmation.mission;
+      const nextConfirmation = { kind: 'active:execute', mission: refreshedMission } as const;
       // Re-present, rather than retrying, with a fresh request on the next Enter.
-      setConfirmation({ kind: 'active:execute', mission: refreshedMission });
+      confirmationRef.current = nextConfirmation;
+      setConfirmation(nextConfirmation);
     }
   };
 
@@ -207,16 +218,20 @@ export function BoardShell({ projection, columns, rows, missionDetails, initialS
           <Text color="gray">{` · attention `}</Text>
           <Text color="yellow">{String(attnCount)}</Text>
         </Box>
-        {(hasStale || hasUnavailable) && (
-          <Box>
+        <Box>
+          {(hasStale || hasUnavailable) && (
             <Text color="yellow">
               {hasStale ? '⚠ stale' : ''}
               {hasStale && hasUnavailable ? ' · ' : ''}
               {hasUnavailable ? '⚠ unavailable' : ''}
+              {'  '}
             </Text>
-          </Box>
-        )}
+          )}
+          <Text color={flowOpen ? 'cyan' : 'gray'}>{flowOpen ? '▤ FLOW' : '▥ FLOW'}</Text>
+        </Box>
       </Box>
+
+      {flowOpen && <FlowPanel metrics={projection.metrics} columns={width} />}
 
       {/* ═══ MAIN: attention rail + board, side by side or stacked ═══ */}
       <Box flexDirection={railBeside ? 'row' : 'column'} flexGrow={1} minHeight={15}>
@@ -284,8 +299,8 @@ export function BoardShell({ projection, columns, rows, missionDetails, initialS
         </Box>
         <Text color="gray">
           {showKeyboardHelp
-            ? 'arrows or WASD: move selection · ?: hide help · q / Ctrl+C: quit'
-            : 'arrows or WASD: move selection · ?: keyboard help · q: quit'}
+            ? 'arrows or WASD: move selection · f: toggle FLOW · ?: hide help · q / Ctrl+C: quit'
+            : 'arrows or WASD: move selection · f: FLOW · ?: keyboard help · q: quit'}
         </Text>
       </Box>
 
@@ -297,6 +312,7 @@ export function BoardShell({ projection, columns, rows, missionDetails, initialS
           setNavigation((previous) => moveSelection(previous, projection, key, maxVisibleCards));
         }}
         onToggleHelp={() => setShowKeyboardHelp((visible) => !visible)}
+        onToggleFlow={() => setFlowOpen((visible) => !visible)}
         onEnterAttention={(missionId) => {
           setNavigation((previous) => ({ ...previous, selectedMissionId: missionId }));
           startAction(missionId);
@@ -305,7 +321,11 @@ export function BoardShell({ projection, columns, rows, missionDetails, initialS
         selectedMissionId={navigation.selectedMissionId}
         confirmationOpen={confirmation !== null}
         onConfirm={() => { void confirmAction(); }}
-        onCancel={() => { setConfirmation(null); setOutcome(cancelledOutcome('cancelled before dispatch')); }}
+        onCancel={() => {
+          confirmationRef.current = null;
+          setConfirmation(null);
+          setOutcome(cancelledOutcome('cancelled before dispatch'));
+        }}
         queueItems={queueItems}
         focusedAttentionIndex={focusedAttentionIndex}
         setFocusedIdx={setFocusedAttentionIndex}
@@ -425,10 +445,11 @@ export function navigationKeyForInput(input: string, key: Pick<Key, 'upArrow' | 
   return ({ w: 'up', a: 'left', s: 'down', d: 'right' } as const)[input];
 }
 
-function KeyHandler({ onExit, onNavigate, onToggleHelp, onEnterAttention, onStartAction, selectedMissionId, confirmationOpen, onConfirm, onCancel, queueItems: queueItemsList, focusedAttentionIndex: focusedIdx, setFocusedIdx, focusedArea, setFocusedArea }: {
+function KeyHandler({ onExit, onNavigate, onToggleHelp, onToggleFlow, onEnterAttention, onStartAction, selectedMissionId, confirmationOpen, onConfirm, onCancel, queueItems: queueItemsList, focusedAttentionIndex: focusedIdx, setFocusedIdx, focusedArea, setFocusedArea }: {
   readonly onExit: () => void;
   readonly onNavigate: (_key: NavigationKey | 'self') => void;
   readonly onToggleHelp: () => void;
+  readonly onToggleFlow: () => void;
   readonly onEnterAttention: (_missionId: string) => void;
   readonly onStartAction: (_missionId: string) => boolean;
   readonly selectedMissionId: string | null;
@@ -488,6 +509,12 @@ function KeyHandler({ onExit, onNavigate, onToggleHelp, onEnterAttention, onStar
 
     if (input === '?' && !key.ctrl && !key.meta) {
       onToggleHelp();
+      return;
+    }
+
+    if ((input === 'f' || input === 'F') && !key.ctrl && !key.meta) {
+      onToggleFlow();
+      return;
     }
 
     /* Tab / Shift+Tab: switch focus between rail and board.
