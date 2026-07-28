@@ -1,7 +1,7 @@
 ---
 id: TASK-2288
 title: Retire transitional CommonJS and reconcile dependent ADRs
-status: review
+status: ready-for-integration
 assignee: [codex]
 created_date: '2026-07-19 00:00'
 labels:
