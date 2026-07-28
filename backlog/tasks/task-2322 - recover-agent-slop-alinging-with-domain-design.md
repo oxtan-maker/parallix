@@ -1,7 +1,7 @@
 ---
 id: TASK-2322
 title: recover agent slop alinging with domain design
-status: review
+status: active
 assignee: [codex]
 created_date: '2026-07-28 14:19'
 labels: [user_value]
