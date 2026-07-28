@@ -1,9 +1,11 @@
 ---
 id: TASK-2287
 title: Build native binary platform matrix and release evidence
-status: active
-assignee: [codex]
+status: ready-for-integration
+assignee:
+  - codex
 created_date: '2026-07-19 00:00'
+updated_date: '2026-07-28 04:35'
 labels:
   - binary
   - release
