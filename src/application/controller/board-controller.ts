@@ -1,5 +1,5 @@
-import type { ActivePort } from '../../platform/runtime/lib/application/ports.js';
-import { ActiveService, type ActiveRequest, type ActiveResult } from '../../platform/runtime/lib/application/active-service.js';
+import type { ActivePort } from '../ports.js';
+import { ActiveService, type ActiveRequest, type ActiveResult } from '../active-service.js';
 import type {
   BoardCommandDispatcher,
   BoardCommandKind,

@@ -1,8 +1,8 @@
-import { ActiveService } from '../application/active-service.js';
-import { StatsBackfillService } from '../application/stats-backfill-service.js';
+import { ActiveService } from '../../../../application/active-service.js';
+import { StatsBackfillService } from '../../../../application/stats-backfill-service.js';
 import { LegacyActiveAdapter } from '../adapters/legacy-active-adapter.js';
 import { LegacyStatsBackfillAdapter } from '../adapters/legacy-stats-backfill-adapter.js';
-import type { ProgressPort } from '../application/ports.js';
+import type { ProgressPort } from '../../../../application/ports.js';
 import type { OperatorBlocklistOverlay } from '../../../../adapters/sqlite/blocklist-snapshot.js';
 
 export interface OperatorStateServices {

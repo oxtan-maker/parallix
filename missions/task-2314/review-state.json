@@ -1,0 +1,24 @@
+{
+  "reviewer": "codex",
+  "implementer": "custom",
+  "round": 4,
+  "startedAt": "2026-07-27T17:53:02.640Z",
+  "phase": "approved",
+  "disposition": "APPROVED",
+  "metadata": {
+    "recordedStageLaunches": {
+      "review:codex": [
+        "codex||2026-07-27T06:42:31.192Z|2026-07-27T06:43:56.633Z|0",
+        "codex||2026-07-27T07:25:42.849Z|2026-07-27T07:27:40.948Z|0",
+        "codex||2026-07-27T17:16:10.690Z|2026-07-27T17:18:22.431Z|0",
+        "codex||2026-07-27T17:57:22.642Z|2026-07-27T17:58:48.328Z|0"
+      ],
+      "follow-up:custom": [
+        "custom|019fa244-d935-7d0d-beac-217ea2fb7117|2026-07-27T07:20:31.231Z|2026-07-27T07:20:31.231Z|0",
+        "custom|019fa244-d935-7d0d-beac-217ea2fb7117|2026-07-27T07:30:04.348Z|2026-07-27T07:30:04.348Z|0",
+        "custom|019fa244-d935-7d0d-beac-217ea2fb7117|2026-07-27T17:53:01.386Z|2026-07-27T17:53:01.386Z|0"
+      ]
+    },
+    "gateFailureRetryCount": 1
+  }
+}

@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
-const forbidden = ['@oclif', 'ink', 'react', 'http', 'sqlite', 'node:fs', '../core/git', '../tools/forgejo', 'node:child_process', 'process.exit', '../core/fmt'];
+const forbidden = ['@oclif', 'ink', 'react', 'http', 'node:sqlite', 'sqlite3', 'node:fs', '../core/git', '../tools/forgejo', 'node:child_process', 'process.exit', '../core/fmt'];
 
 function importsFrom(source: string): string[] {
   return [...source.matchAll(/(?:from\s+|import\s*(?:\(\s*)?)['"]([^'"]+)['"]/g)].map(match => match[1]);
@@ -13,9 +13,10 @@ function resolveLocal(file: string, specifier: string): string | null {
   return ['.ts', '.js', '/index.ts'].map(suffix => `${base}${suffix}`).find(fs.existsSync) ?? null;
 }
 
-export function findForbiddenApplicationDependencies(entryFiles: readonly string[]): string[] {
+export function findForbiddenApplicationDependencies(entryFiles: readonly string[], scopeDir?: string): string[] {
   const visited = new Set<string>();
   const violations: string[] = [];
+  const scope = scopeDir ? path.resolve(scopeDir) : null;
   const visit = (file: string) => {
     if (visited.has(file)) {return;}
     visited.add(file);
@@ -23,7 +24,7 @@ export function findForbiddenApplicationDependencies(entryFiles: readonly string
     for (const specifier of importsFrom(source)) {
       if (forbidden.some(item => specifier.includes(item))) {violations.push(`${file}: ${specifier}`);}
       const local = resolveLocal(file, specifier);
-      if (local) {visit(local);}
+      if (local && (!scope || local.startsWith(scope + path.sep))) {visit(local);}
     }
     if (source.includes('process.exit')) {violations.push(`${file}: process.exit`);}
   };

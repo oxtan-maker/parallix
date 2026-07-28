@@ -32,11 +32,11 @@
   },
   "homepage": "https://github.com/magnusekdahl/parallix#readme",
   "files": [
+    "NOTICES",
     "build/",
     "LICENSE",
     "README.md",
-    "CHANGELOG.md",
-    "NOTICES"
+    "CHANGELOG.md"
   ],
   "scripts": {
     "build": "npm run bundle",

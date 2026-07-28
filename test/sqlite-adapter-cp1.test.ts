@@ -495,6 +495,8 @@ describe('SQLite adapter — CP1: schema and migration runner', () => {
   it('no module under src/platform/runtime/lib imports node:sqlite (SC2 negative)', () => {
     // The application/runtime layer must never bind the SQLite driver directly;
     // it reaches operator state only through the async composition-root boundary.
+    // The boundary-guards.ts file references 'node:sqlite' as a forbidden token
+    // (not an import), so we check for actual import statements.
     const libDir = path.resolve('src/platform/runtime/lib');
     const files = fs.readdirSync(libDir, { recursive: true })
       .filter((f): f is string => typeof f === 'string' && f.endsWith('.ts'))
@@ -502,7 +504,8 @@ describe('SQLite adapter — CP1: schema and migration runner', () => {
 
     const offenders = files.filter((f) => {
       const content = fs.readFileSync(f, 'utf8');
-      return content.includes("'node:sqlite'") || content.includes('"node:sqlite"');
+      // Check for import statements referencing node:sqlite (not string constants)
+      return /(?:from\s+|import\s*(?:\(\s*)?)['"]node:sqlite['"]/.test(content);
     });
 
     assert.deepEqual(offenders, [], `no lib module may import node:sqlite; found: ${offenders.join(', ')}`);

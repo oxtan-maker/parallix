@@ -1,5 +1,5 @@
-import type { Capability, DurableEvidence, ProgressEvent } from '../../platform/runtime/lib/application/contracts.js';
-import { failure, rejected, type ApplicationOutcome } from '../../platform/runtime/lib/application/contracts.js';
+import type { Capability, DurableEvidence, ProgressEvent } from '../contracts.js';
+import { failure, rejected, type ApplicationOutcome } from '../contracts.js';
 
 // ---------------------------------------------------------------------------
 // BoardCommandRequest — typed request for a board operation

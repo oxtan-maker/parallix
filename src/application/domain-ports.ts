@@ -1,5 +1,5 @@
-import type { AgentSelectionSnapshot } from '../../domain/agents.js';
-import type { Mission, MissionId, MissionStatus } from '../../domain/mission.js';
+import type { AgentSelectionSnapshot } from '../domain/agents.js';
+import type { Mission, MissionId, MissionStatus } from '../domain/mission.js';
 
 export type MissionLoadResult =
   | { readonly kind: 'found'; readonly mission: Mission }

@@ -1,7 +1,7 @@
 import { collectHistoricalStatsBackfill } from '../commands/stats-backfill.js';
 import * as stats from '../commands/stats.js';
-import type { DurableEvidence } from '../application/contracts.js';
-import type { StatsBackfillPort, StatsProjection, StatsRow } from '../application/ports.js';
+import type { DurableEvidence } from '../../../../application/contracts.js';
+import type { StatsBackfillPort, StatsProjection, StatsRow } from '../../../../application/ports.js';
 
 export class LegacyStatsBackfillAdapter implements StatsBackfillPort {
   constructor(private readonly _rootDir: string) {}

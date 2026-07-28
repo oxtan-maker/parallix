@@ -2,7 +2,7 @@ import type { AgentAvailability, AgentFamily } from '../../domain/agents.js';
 import type { Mission, MissionId, MissionStatus } from '../../domain/mission.js';
 import type { RepositoryId } from '../../domain/repository.js';
 import type { Review, ReviewedRevision } from '../../domain/review.js';
-import type { SourceFact } from '../../platform/runtime/lib/application/contracts.js';
+import type { SourceFact } from '../contracts.js';
 import type { BoardProjection, BoardMetrics } from './board.js';
 import { buildBoardMetrics, buildBoardProjection } from './board.js';
 import {
