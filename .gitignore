@@ -14,6 +14,7 @@ missions/*/review-events/
 # Compiled output (tsc/esbuild emit to dist/ and build/)
 dist/
 build/
+release-artifacts/
 # Stray tsc emit to repo root (noEmit=true, these are dead artifacts)
 index.js
 px.js
