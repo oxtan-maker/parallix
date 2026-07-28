@@ -16,9 +16,10 @@ declare const module: unknown;
 
 function resolveRuntimePath(): string {
   if (import.meta.url) { return fileURLToPath(import.meta.url); }
-  // The rollback npm target is CommonJS. Its global bin wrapper invokes the
-  // module through a symlink, so argv[1] names the wrapper rather than
-  // dist/px.js. __filename is the only stable anchor in that layout.
+  // A CommonJS host (the test runtime, or any consumer that require()s this
+  // module) has no import.meta. Its bin wrapper invokes the module through a
+  // symlink, so argv[1] names the wrapper rather than this file; __filename is
+  // the only stable anchor in that layout.
   if (typeof __filename === 'string') { return __filename; }
   const arg1 = typeof process.argv[1] === 'string' ? process.argv[1] : '';
   if (arg1.endsWith('/px.ts') || arg1.endsWith('/px.js')) { return arg1; }

@@ -45,7 +45,7 @@ test.afterEach(() => {
 test('CP-1: blocked auto-derived reviewer falls back via selectAgent without mutating Backlog assignee', async () => {
   createTaskFile(TASK_FILE);
 
-  const { startReviewLoop } = require('../dist/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
   const logs = [];
   const errors = [];
   const exitCodes = [];
@@ -113,7 +113,7 @@ test('CP-1: blocked auto-derived reviewer falls back via selectAgent without mut
 test('CP-1: usage-limit on auto-derived reviewer triggers fallback with blocklist write', async () => {
   createTaskFile(TASK_FILE);
 
-  const { startReviewLoop } = require('../dist/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
   const logs = [];
   const errors = [];
   const exitCodes = [];
@@ -178,7 +178,7 @@ test('CP-1: usage-limit on auto-derived reviewer triggers fallback with blocklis
 test('CP-1: persisted blocked reviewer falls back via selectAgent without mutating Backlog assignee', async () => {
   createTaskFile(TASK_FILE);
 
-  const { startReviewLoop } = require('../dist/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
   const logs = [];
   const errors = [];
   const exitCodes = [];
@@ -253,7 +253,7 @@ test('CP-1: persisted blocked reviewer falls back via selectAgent without mutati
 test('CP-1: reviewer fallback with no Backlog assignee mutation (regression)', async () => {
   createTaskFile(TASK_FILE);
 
-  const { startReviewLoop } = require('../dist/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
   const logs = [];
   const errors = [];
   const exitCodes = [];
@@ -294,7 +294,7 @@ test('CP-1: reviewer fallback with no Backlog assignee mutation (regression)', a
 test('CP-1: explicit blocked reviewer fails fast without fallback (unchanged behavior)', async () => {
   createTaskFile(TASK_FILE);
 
-  const { startReviewLoop } = require('../dist/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
   const logs = [];
   const errors = [];
   const exitCodes = [];
@@ -334,7 +334,7 @@ test('CP-1: explicit blocked reviewer fails fast without fallback (unchanged beh
 test('CP-1: multi-hop fallback scans remaining eligible agents when deterministic fallback is also blocked', async () => {
   createTaskFile(TASK_FILE);
 
-  const { startReviewLoop } = require('../dist/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
   const logs = [];
   const errors = [];
   const exitCodes = [];
@@ -383,7 +383,7 @@ test('CP-1: multi-hop fallback scans remaining eligible agents when deterministi
 test('CP-1: no runnable reviewer exits with error and does not mutate Backlog assignee', async () => {
   createTaskFile(TASK_FILE);
 
-  const { startReviewLoop } = require('../dist/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
   const logs = [];
   const errors = [];
   const exitCodes = [];
@@ -428,7 +428,7 @@ test('CP-1: no runnable reviewer exits with error and does not mutate Backlog as
 test('CP-1: single-family fallback when no different-family reviewer is runnable (unchanged)', async () => {
   createTaskFile(TASK_FILE);
 
-  const { startReviewLoop } = require('../dist/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
   const logs = [];
   const errors = [];
   const exitCodes = [];

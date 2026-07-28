@@ -11,10 +11,10 @@ test('checkpoint has no --no-gate escape hatch', () => {
 
 test('checkpoint runs the gate even when passed a stray --no-gate flag', async (t) => {
   const { mock } = t;
-  const missionUtils = require('../dist/lib/core/mission-utils');
-  const git = require('../dist/lib/core/git');
-  const verification = require('../dist/lib/core/verification');
-  const checkpoint = require('../dist/lib/commands/checkpoint');
+  const missionUtils = require('../.test-runtime/lib/core/mission-utils');
+  const git = require('../.test-runtime/lib/core/git');
+  const verification = require('../.test-runtime/lib/core/verification');
+  const checkpoint = require('../.test-runtime/lib/commands/checkpoint');
   mock.method(missionUtils, 'findMissionDir', () => '/tmp/fake-mission-dir');
   mock.method(missionUtils, 'findMissionArea', () => 'lib');
   mock.method(missionUtils, 'resolveWorktree', () => '/tmp/fake-mission-root');
@@ -33,10 +33,10 @@ test('checkpoint runs the gate even when passed a stray --no-gate flag', async (
 
 test('checkpoint preserves the selected mission root for verification and Git', async (t) => {
   const { mock } = t;
-  const missionUtils = require('../dist/lib/core/mission-utils');
-  const git = require('../dist/lib/core/git');
-  const verification = require('../dist/lib/core/verification');
-  const checkpoint = require('../dist/lib/commands/checkpoint');
+  const missionUtils = require('../.test-runtime/lib/core/mission-utils');
+  const git = require('../.test-runtime/lib/core/git');
+  const verification = require('../.test-runtime/lib/core/verification');
+  const checkpoint = require('../.test-runtime/lib/commands/checkpoint');
   const missionRoot = '/tmp/mission-tree';
   mock.method(missionUtils, 'resolveWorktree', () => missionRoot);
   mock.method(missionUtils, 'findMissionDir', (_slug, root) => root === missionRoot ? '/tmp/mission-tree/missions/task-1268' : null);

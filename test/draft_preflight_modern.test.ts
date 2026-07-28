@@ -2,7 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('path');
-const { runDraftCommand } = require('../dist/lib/commands/draft');
+const { runDraftCommand } = require('../.test-runtime/lib/commands/draft');
 
 test('runDraftCommand bails early if backlog task resolution is not ok', async () => {
   const logs = [];

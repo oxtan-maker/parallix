@@ -18,7 +18,7 @@ const {
   owningPackageLocation,
   renderNotices,
   renderSbom,
-} = require('../scripts/release-metadata.js');
+} = require('../scripts/release-metadata.ts');
 
 const ROOT = path.resolve(__dirname, '..');
 const packageJson = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
@@ -41,7 +41,7 @@ test('task-2285 files allowlist ships only the bundle payload and release metada
 });
 
 test('task-2285 bin path is the bundler entry point reused as SEA input', () => {
-  const bundler = fs.readFileSync(path.join(ROOT, 'scripts', 'build-canonical-bundle.js'), 'utf8');
+  const bundler = fs.readFileSync(path.join(ROOT, 'scripts', 'build-canonical-bundle.ts'), 'utf8');
   assert.match(bundler, /const output = path\.join\(buildDir, 'px\.mjs'\)/);
   assert.match(bundler, /outfile: output/);
   assert.equal(packageJson.bin.px, 'build/px.mjs');

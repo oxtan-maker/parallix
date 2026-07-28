@@ -1,9 +1,9 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const status = require('../dist/lib/commands/status');
-const rebase = require('../dist/lib/commands/rebase');
-const { printIntegrationPreflight } = require('../dist/lib/commands/integrate');
+const status = require('../.test-runtime/lib/commands/status');
+const rebase = require('../.test-runtime/lib/commands/rebase');
+const { printIntegrationPreflight } = require('../.test-runtime/lib/commands/integrate');
 
 // ---------------------------------------------------------------------------
 // Test-local Git argument normalization

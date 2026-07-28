@@ -25,13 +25,13 @@ const {
   workflowLauncherStatus,
   isAgentBlocked,
   setCommandPathProbe
-} = require('../dist/lib/agents/agents');
+} = require('../.test-runtime/lib/agents/agents');
 
-const { buildClaudeInvocation, resolveClaudeCommand, extractClaudeSessionId } = require('../dist/lib/agents/claude');
-const { buildCodexDraftInvocation, resolveCodexCommand, extractCodexSessionId } = require('../dist/lib/agents/codex');
-const { buildVibeInvocation, resolveVibeCommand, extractVibeSessionId } = require('../dist/lib/agents/vibe');
-const { buildOpencodeInvocation, resolveOpencodeCommand, extractOpencodeSessionId, __setJsonFormatSupportForTest } = require('../dist/lib/agents/opencode');
-const { activeCustomCapacityCount, resetCustomCapacity, tryAcquireCustomCapacity } = require('../dist/lib/agents/custom-capacity');
+const { buildClaudeInvocation, resolveClaudeCommand, extractClaudeSessionId } = require('../.test-runtime/lib/agents/claude');
+const { buildCodexDraftInvocation, resolveCodexCommand, extractCodexSessionId } = require('../.test-runtime/lib/agents/codex');
+const { buildVibeInvocation, resolveVibeCommand, extractVibeSessionId } = require('../.test-runtime/lib/agents/vibe');
+const { buildOpencodeInvocation, resolveOpencodeCommand, extractOpencodeSessionId, __setJsonFormatSupportForTest } = require('../.test-runtime/lib/agents/opencode');
+const { activeCustomCapacityCount, resetCustomCapacity, tryAcquireCustomCapacity } = require('../.test-runtime/lib/agents/custom-capacity');
 
 
 function formatBlockUntil(date) {
@@ -1366,7 +1366,7 @@ test('startAgent does not pass --continue to non-resume-capable launchers even w
 });
 
 test('custom is registered in LAUNCHERS and RESOLVERS', () => {
-  const agents = require('../dist/lib/agents/agents');
+  const agents = require('../.test-runtime/lib/agents/agents');
   // LAUNCHERS and RESOLVERS are module-private; verify custom is known by checking KNOWN_AGENT_NAMES
   assert.ok(agents.KNOWN_AGENT_NAMES.includes('custom'), 'custom should be in KNOWN_AGENT_NAMES');
   // workflowLauncherStatus resolves "custom" to its configured runner (opencode/pi)
@@ -1733,7 +1733,7 @@ test('startAgent launch failure with signal retries next agent', async () => {
 // ---------- Draft-specific no-output watchdog (task-1214) ----------
 
 test('resolveNoOutputWatchdogConfig returns draft-specific defaults when step is draft', () => {
-  const { resolveNoOutputWatchdogConfig } = require('../dist/lib/agents/agents');
+  const { resolveNoOutputWatchdogConfig } = require('../.test-runtime/lib/agents/agents');
 
   // Draft step defaults must be 15s initial / 30s interval.
   const draftConfig = resolveNoOutputWatchdogConfig({}, 'draft');

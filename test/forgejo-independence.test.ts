@@ -15,7 +15,7 @@ const fs = require('fs');
 const os = require('os');
 const RUNTIME_LIB = path.join(__dirname, '..', 'src', 'platform', 'runtime', 'lib');
 
-const { isForgejoReviewEnabled } = require('../dist/lib/core/product-config');
+const { isForgejoReviewEnabled } = require('../.test-runtime/lib/core/product-config');
 
 function createTempConfigDir(reviewProvider) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wf-forgejo-ind-'));
@@ -68,7 +68,7 @@ test('isForgejoReviewEnabled defaults to false for legacy repo without config', 
 // =============================================================================
 
 test('mission-start accepts isForgejoReviewEnabledFn option and skips PR check when false', () => {
-  const missionStart = require('../dist/lib/commands/mission-start');
+  const missionStart = require('../.test-runtime/lib/commands/mission-start');
   const lines = [];
   let prStatusCalled = false;
 
@@ -108,7 +108,7 @@ test('mission-start accepts isForgejoReviewEnabledFn option and skips PR check w
 // =============================================================================
 
 test('performHandoff gates Forgejo PR creation behind isForgejoReviewEnabled', () => {
-  const handoff = require('../dist/lib/commands/handoff');
+  const handoff = require('../.test-runtime/lib/commands/handoff');
   const src = handoff.performHandoff.toString();
   assert.ok(src.includes('isForgejoReviewEnabled'),
     'performHandoff should check isForgejoReviewEnabled to skip Forgejo PR creation');
@@ -129,7 +129,7 @@ test('integrate gates syncMerged behind isForgejoReviewEnabled', () => {
 // =============================================================================
 
 test('evaluateReviewSetup returns not-required when provider is not forgejo', () => {
-  const { evaluateReviewSetup } = require('../dist/lib/tools/setup-review');
+  const { evaluateReviewSetup } = require('../.test-runtime/lib/tools/setup-review');
   const dir = createTempConfigDir('none');
   const result = evaluateReviewSetup(dir, {
     users: ['claude'],
@@ -149,7 +149,7 @@ test('evaluateReviewSetup returns not-required when provider is not forgejo', ()
 // =============================================================================
 
 test('verifyReview skips Forgejo PR check when review provider is not forgejo', () => {
-  const { verifyReview } = require('../dist/lib/review/review');
+  const { verifyReview } = require('../.test-runtime/lib/review/review');
   const lines = [];
   let prStatusCalled = false;
 
@@ -208,7 +208,7 @@ test('integrate printIntegrationPreflight gates Forgejo checks', () => {
 // =============================================================================
 
 test('consumeReviewerArtifacts does not call Forgejo helpers when forgejoEnabled is false', async () => {
-  const { consumeReviewerArtifacts, reviewArtifactPath } = require('../dist/lib/review/review');
+  const { consumeReviewerArtifacts, reviewArtifactPath } = require('../.test-runtime/lib/review/review');
   
   let consumeHumanNotesCalled = false;
   let postCommentCalled = false;
@@ -247,9 +247,9 @@ test('consumeReviewerArtifacts does not call Forgejo helpers when forgejoEnabled
     return originalRequire.apply(this, arguments);
   };
   
-  delete require.cache[require.resolve('../dist/lib/review/review')];
-  delete require.cache[require.resolve('../dist/lib/review/review-events')];
-  const { consumeReviewerArtifacts: fresh } = require('../dist/lib/review/review');
+  delete require.cache[require.resolve('../.test-runtime/lib/review/review')];
+  delete require.cache[require.resolve('../.test-runtime/lib/review/review-events')];
+  const { consumeReviewerArtifacts: fresh } = require('../.test-runtime/lib/review/review');
   Module.prototype.require = originalRequire;
   
   const result = await fresh('task-test', 'codex', {
@@ -286,7 +286,7 @@ test('consumeReviewerArtifacts does not call Forgejo helpers when forgejoEnabled
 // =============================================================================
 
 test('consumeImplementerArtifacts does not call Forgejo helpers when forgejoEnabled is false', async () => {
-  const { consumeImplementerArtifacts, reviewArtifactPath } = require('../dist/lib/review/review');
+  const { consumeImplementerArtifacts, reviewArtifactPath } = require('../.test-runtime/lib/review/review');
   
   let consumeHumanNotesCalled = false;
   let postCommentCalled = false;
@@ -322,9 +322,9 @@ test('consumeImplementerArtifacts does not call Forgejo helpers when forgejoEnab
     return originalRequire.apply(this, arguments);
   };
   
-  delete require.cache[require.resolve('../dist/lib/review/review')];
-  delete require.cache[require.resolve('../dist/lib/review/review-events')];
-  const { consumeImplementerArtifacts: fresh } = require('../dist/lib/review/review');
+  delete require.cache[require.resolve('../.test-runtime/lib/review/review')];
+  delete require.cache[require.resolve('../.test-runtime/lib/review/review-events')];
+  const { consumeImplementerArtifacts: fresh } = require('../.test-runtime/lib/review/review');
   Module.prototype.require = originalRequire;
   
   const result = await fresh('task-test', 'mistral', {
@@ -358,7 +358,7 @@ test('consumeImplementerArtifacts does not call Forgejo helpers when forgejoEnab
 // =============================================================================
 
 test('printIntegrationPreflight does not call Forgejo API helpers when context indicates provider off', () => {
-  const { printIntegrationPreflight } = require('../dist/lib/commands/integrate');
+  const { printIntegrationPreflight } = require('../.test-runtime/lib/commands/integrate');
   
   let getPrStatusCalled = false;
   let readTokenCalled = false;
@@ -378,9 +378,9 @@ test('printIntegrationPreflight does not call Forgejo API helpers when context i
     return originalRequire.apply(this, arguments);
   };
   
-  delete require.cache[require.resolve('../dist/lib/commands/integrate')];
-  delete require.cache[require.resolve('../dist/lib/tools/forgejo')];
-  const { printIntegrationPreflight: fresh } = require('../dist/lib/commands/integrate');
+  delete require.cache[require.resolve('../.test-runtime/lib/commands/integrate')];
+  delete require.cache[require.resolve('../.test-runtime/lib/tools/forgejo')];
+  const { printIntegrationPreflight: fresh } = require('../.test-runtime/lib/commands/integrate');
   Module.prototype.require = originalRequire;
   
   // Create a context that indicates Forgejo is disabled

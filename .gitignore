@@ -11,7 +11,9 @@ workflow/.sessions/
 workflow/config/agents.local.json
 agents.local.json
 missions/*/review-events/
-# Compiled output (tsc/esbuild emit to dist/ and build/)
+# Compiled output (esbuild emits the canonical bundle to build/).
+# dist/ stays ignored defensively: TASK-2288 retired that CommonJS tree, and
+# scripts/package-content-audit.ts forbids it in a published tarball.
 dist/
 build/
 release-artifacts/
@@ -26,9 +28,7 @@ tsconfig.tsbuildinfo
 .stryker-tmp*/
 reports/mutation/
 
-# Canonical-bundle staging/retired trees (atomic swap in scripts/build-canonical-bundle.js)
+# Canonical-bundle staging/retired trees (atomic swap in scripts/build-canonical-bundle.ts)
 .build-staging.*
-.dist-staging.*
 build.retired.*
-dist.retired.*
 /NOTICES

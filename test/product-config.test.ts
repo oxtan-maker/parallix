@@ -24,7 +24,7 @@ const {
   resolveReviewAdapter,
   resolveTaskStorage,
   validateWorkflowConfig,
-} = require('../dist/lib/core/product-config');
+} = require('../.test-runtime/lib/core/product-config');
 const { spawnSync } = require('child_process');
 
 function withTempDir(fn) {
@@ -427,7 +427,7 @@ test('resolveTaskStorage supports string storage paths and invalid storage types
 });
 
 test('resolveAgentAdapter returns empty object (command env prefix removed)', () => {
-  const { resolveAgentAdapter } = require('../dist/lib/core/product-config');
+  const { resolveAgentAdapter } = require('../.test-runtime/lib/core/product-config');
   assert.deepEqual(resolveAgentAdapter('/tmp'), {});
 });
 

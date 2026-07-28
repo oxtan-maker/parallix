@@ -8,7 +8,7 @@
  * for why: a full compiler-services pass was ruled out by the mission's stop
  * rules as unacceptable added complexity for a diff-scoping utility).
  *
- * Scope is restricted to `dist/lib/**\/*.js` and `dist/index.js`, matching
+ * Scope is restricted to .test-runtime/lib/ (recursive) and .test-runtime/lib/index.js, matching
  * coverage-gate.ts's denominator and the mission's "lib/ source files, not
  * test/ files" boundary.
  */
@@ -43,20 +43,29 @@ interface ScopeResult {
 }
 
 function isInScope(relPath: string): boolean {
-  if (relPath === 'dist/index.js') {return true;}
-  return relPath.startsWith('dist/lib/') && relPath.endsWith('.js');
+  if (relPath === '.test-runtime/lib/index.js') {return true;}
+  return relPath.startsWith('.test-runtime/lib/') && relPath.endsWith('.js');
 }
 
 /**
- * Git tracks `.ts` sources while `npm run build` writes the runtime output to
- * `dist/`. Map a changed source path to its built `.js` counterpart; pass
- * through an already-dist runtime path unchanged.
+ * Git tracks `.ts` sources under `src/platform/runtime/lib/` while
+ * `scripts/build-test-runtime.ts` writes the transpiled CommonJS output to
+ * `.test-runtime/lib/`. Map a changed source path to its built `.js`
+ * counterpart; pass through an already-.test-runtime path unchanged, and leave
+ * anything outside the runtime library source root alone so `isInScope` drops
+ * it.
  */
+const RUNTIME_SOURCE_ROOT = 'src/platform/runtime/lib/';
+
 function toRuntimePath(relPath: string): string {
-  if (relPath.endsWith('.ts') && !relPath.endsWith('.d.ts')) {
-    return `dist/${relPath.slice(0, -3)}.js`;
+  if (!relPath.endsWith('.ts') || relPath.endsWith('.d.ts')) {
+    return relPath;
   }
-  return relPath;
+  if (!relPath.startsWith(RUNTIME_SOURCE_ROOT)) {
+    return relPath;
+  }
+  const withinLib = relPath.slice(RUNTIME_SOURCE_ROOT.length, -3);
+  return `.test-runtime/lib/${withinLib}.js`;
 }
 
 /** Compute the set of in-scope files changed between baseBranch and headRef, mapped to their runtime .js paths. */

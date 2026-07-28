@@ -8,9 +8,9 @@ const os = require('node:os');
 const path = require('node:path');
 const { EventEmitter } = require('node:events');
 
-const opencode = require('../dist/lib/agents/opencode');
-const { captureOpencodeExport } = require('../dist/lib/agents/opencode-export');
-const stats = require('../dist/lib/commands/stats');
+const opencode = require('../.test-runtime/lib/agents/opencode');
+const { captureOpencodeExport } = require('../.test-runtime/lib/agents/opencode-export');
+const stats = require('../.test-runtime/lib/commands/stats');
 
 // Captured from a real `opencode export` (opencode v2.0.0, session
 // ses_132f470d8ffexge85esdX0nzCs, model cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit,

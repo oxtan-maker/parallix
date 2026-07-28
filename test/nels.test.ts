@@ -14,7 +14,7 @@ const {
   EXCLUSION_PATTERNS,
   BUCKET_SMALL_MAX,
   BUCKET_MEDIUM_MAX,
-} = require('../dist/lib/core/nels');
+} = require('../.test-runtime/lib/core/nels');
 
 // ---------- exclude-path tests ----------
 

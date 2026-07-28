@@ -7,7 +7,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 // This is a source-level lifecycle suite. Run the canonical TypeScript
-// entrypoint so concurrent package/publish tests rebuilding dist/ cannot
+// entrypoint so concurrent package/publish tests rebuilding build/ cannot
 // remove the CLI while a fixture is being created.
 const CLI_LOADER = path.resolve(__dirname, '..', 'src', 'entry', 'esm-globals.ts');
 const CLI_ENTRY = path.resolve(__dirname, '..', 'src', 'entry', 'px.ts');

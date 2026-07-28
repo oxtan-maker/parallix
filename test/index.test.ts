@@ -14,7 +14,7 @@ const {
   levenshteinDistance,
   deriveAliases,
   resolveAlias,
-} = require('../dist/index');
+} = require('../src/platform/runtime/index.ts');
 
 // ---------- KNOWN_COMMANDS ----------
 

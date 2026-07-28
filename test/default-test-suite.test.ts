@@ -4,13 +4,14 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const ts = require('typescript');
 
 const expectedIntegrationFiles = [
   'active.test.ts', 'agents-limit-hit.test.ts', 'agents.test.ts', 'backlog.test.ts',
   'bootstrap-isolation.test.ts', 'draft-command.test.ts', 'draft.test.ts',
   'draft_preflight_modern.test.ts', 'durable-state-policy.test.ts',
   'external-target-resolution.test.ts', 'forgejo-independence.test.ts',
-  'forgejo-pr-round-sync.test.js', 'forgejo.test.ts', 'handoff.test.ts', 'install.test.ts',
+  'forgejo-pr-round-sync.test.ts', 'forgejo.test.ts', 'handoff.test.ts', 'install.test.ts',
   'integrate-task-1410-stash-pop-corruption.test.ts', 'integrate-workflow-gate.test.ts',
   'integrate.test.ts', 'integration-pipelines.test.ts', 'mission-start.test.ts',
   'mission-utils-worktree.test.ts', 'mistral.test.ts', 'nels.test.ts',
@@ -34,10 +35,10 @@ const expectedIntegrationFiles = [
   'task-2203-publish-proof-refresh-order.test.ts',
   'task-2206-post-integrate-hook-errors.test.ts', 'task-2212-repro.test.ts',
   'task-2231-unit-tests-hang-repro.test.ts',
-  'task-2285-pack-install-smoke.test.ts', 'task-2285-rollback.test.ts',
+  'task-2285-pack-install-smoke.test.ts',
   'task-2286-native-sea-smoke.test.ts',
   'task-2234-push-to-reviewer-autobounce.test.ts',
-  'task-2270-graphify-exclusion.test.js',
+  'task-2270-graphify-exclusion.test.ts',
   'task-2273-review-gate-ownership.test.ts', 'task-2312-label-sync.test.ts',
   'task-2319-notices-git-tracking.test.ts',
   'task-2318-temp-directory-leaks.test.js',
@@ -46,8 +47,13 @@ const expectedIntegrationFiles = [
 ].sort();
 
 function selectedFiles(args, version = process.version) {
-  const runnerPath = path.join(__dirname, 'run-default-tests.js');
-  const runner = fs.readFileSync(runnerPath, 'utf8');
+  const runnerPath = path.join(__dirname, 'run-default-tests.ts');
+  // The runner is TypeScript; strip its type annotations before running it in a
+  // bare vm context, which understands only plain JavaScript.
+  const runner = ts.transpileModule(fs.readFileSync(runnerPath, 'utf8'), {
+    compilerOptions: { target: ts.ScriptTarget.ES2024, module: ts.ModuleKind.CommonJS },
+    fileName: runnerPath,
+  }).outputText;
   /** @type {string[] | undefined} */
   let spawnedTestArgs;
   const childProcess = {
@@ -84,7 +90,7 @@ function selectedFiles(args, version = process.version) {
 }
 
 test('default test runner routes every moved group to integration and excludes it from default', () => {
-  const runner = fs.readFileSync(path.join(__dirname, 'run-default-tests.js'), 'utf8');
+  const runner = fs.readFileSync(path.join(__dirname, 'run-default-tests.ts'), 'utf8');
   const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
 
   const defaultRun = selectedFiles([]);
@@ -100,17 +106,17 @@ test('default test runner routes every moved group to integration and excludes i
   assert.ok(!integrationFiles.includes('e2e-real-agent-smoke.test.ts'));
   assert.match(runner, /runsIntegrationSuite/);
   assert.match(runner, /spawnSync\('npm', \['run', 'build'\]/,
-    'the runner must compile this checkout before tests import dist/');
+    'the runner must build this checkout before tests load the canonical bundle');
   assert.equal(pkg.scripts.pretest, undefined,
     'building belongs to the runner so direct and npm-invoked suites have the same protection');
   assert.ok(defaultRun.args.includes('--test-force-exit'));
   assert.ok(!selectedFiles([], 'v20.13.1').args.includes('--test-force-exit'));
   assert.ok(selectedFiles([], 'v20.14.0').args.includes('--test-force-exit'));
-  assert.equal(pkg.scripts['test:integration'], 'FORCE_COLOR=0 node test/run-default-tests.js --integration');
+  assert.equal(pkg.scripts['test:integration'], 'FORCE_COLOR=0 tsx test/run-default-tests.ts --integration');
 });
 
 test('default test runner selects a Node version that supports node:test', () => {
-  const runner = fs.readFileSync(path.join(__dirname, 'run-default-tests.js'), 'utf8');
+  const runner = fs.readFileSync(path.join(__dirname, 'run-default-tests.ts'), 'utf8');
   assert.match(runner, /MINIMUM_TEST_NODE_MAJOR = 20/);
   assert.match(runner, /MINIMUM_TEST_NODE_MINOR = 6/);
   assert.match(runner, /PARALLIX_TEST_NODE/);
@@ -122,14 +128,14 @@ test('default test runner selects a Node version that supports node:test', () =>
 });
 
 test('default test runner preserves an explicitly selected execution root for every child process', () => {
-  const runner = fs.readFileSync(path.join(__dirname, 'run-default-tests.js'), 'utf8');
+  const runner = fs.readFileSync(path.join(__dirname, 'run-default-tests.ts'), 'utf8');
   assert.match(runner, /PARALLIX_EXECUTION_ROOT/);
   assert.match(runner, /cwd: executionRoot/);
   assert.match(runner, /env: \{ \.\.\.process\.env, PARALLIX_EXECUTION_ROOT: executionRoot \}/);
 });
 
 test('default test runner classifies tui-spawn as default (not integration) and pins bootstrap bypass', () => {
-  const runner = fs.readFileSync(path.join(__dirname, 'run-default-tests.js'), 'utf8');
+  const runner = fs.readFileSync(path.join(__dirname, 'run-default-tests.ts'), 'utf8');
   const defaultRun = selectedFiles([]);
   const defaultFiles = defaultRun.files;
 

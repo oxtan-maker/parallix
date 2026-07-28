@@ -7,6 +7,7 @@ const os = require('os');
 const path = require('path');
 
 const PACKAGE_ROOT = path.join(__dirname, '..');
+const TSX_IMPORT = path.join(PACKAGE_ROOT, 'node_modules', 'tsx', 'dist', 'esm', 'index.mjs');
 
 type RunOptions = import('node:child_process').SpawnSyncOptions & {
   tempHome?: string;
@@ -97,27 +98,27 @@ test('global tarball reinstall preserves PARALLIX_HOME stats and agent blocklist
 
     const env = { ...process.env, PARALLIX_HOME: parallixHome };
     // Since TASK-2285 the published package exposes no importable modules, so the
-    // fixture seeds operator state through the checkout's rollback build. The
-    // assertions that matter here — where that state lives, that the installed CLI
+    // fixture seeds operator state through the checkout's TypeScript source via tsx.
+    // The assertions that matter here — where that state lives, that the installed CLI
     // reads it, and that a reinstall preserves it — are unchanged.
     const writeScript = [
-      `const stats = require(${JSON.stringify(path.join(PACKAGE_ROOT, 'dist', 'lib', 'commands', 'stats.js'))});`,
-      `const agents = require(${JSON.stringify(path.join(PACKAGE_ROOT, 'dist', 'lib', 'agents', 'agents.js'))});`,
+      `const stats = require(${JSON.stringify(path.join(PACKAGE_ROOT, 'src', 'platform', 'runtime', 'lib', 'commands', 'stats.ts'))});`,
+      `const agents = require(${JSON.stringify(path.join(PACKAGE_ROOT, 'src', 'platform', 'runtime', 'lib', 'agents', 'agents.ts'))});`,
       "stats.upsertStatsRow({date:'2026-06-06',mission:'task-reinstall-proof',classification:'ai_sdlc',implementer:'codex',pr_fix_rounds:'2'});",
       "agents.updateAgentBlock('custom', '2026-07-01 12');"
     ].join('');
-    run(process.execPath, ['-e', writeScript], { cwd: repoOne, env });
+    run(process.execPath, ['--import', TSX_IMPORT, '-e', writeScript], { cwd: repoOne, env });
 
     const statsPath = path.join(parallixHome, 'stats.csv');
     const agentsPath = path.join(parallixHome, 'agents.local.json');
     const statsBefore = fs.readFileSync(statsPath, 'utf8');
     const agentsBefore = fs.readFileSync(agentsPath, 'utf8');
     const readFromSecondRepo = [
-      `const stats = require(${JSON.stringify(path.join(PACKAGE_ROOT, 'dist', 'lib', 'commands', 'stats.js'))});`,
+      `const stats = require(${JSON.stringify(path.join(PACKAGE_ROOT, 'src', 'platform', 'runtime', 'lib', 'commands', 'stats.ts'))});`,
       "const row = stats.loadStatsCsv().rows.find(item => item.mission === 'task-reinstall-proof');",
       "if (!row || row.pr_fix_rounds !== '2') process.exit(1);"
     ].join('');
-    run(process.execPath, ['-e', readFromSecondRepo], { cwd: repoTwo, env });
+    run(process.execPath, ['--import', TSX_IMPORT, '-e', readFromSecondRepo], { cwd: repoTwo, env });
     const pxStats = run(
       process.execPath,
       [path.join(installedRoot, 'build', 'px.mjs'), 'stats', '--today', '2026-06-06'],

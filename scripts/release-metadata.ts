@@ -1,5 +1,3 @@
-'use strict';
-
 // Release metadata for the canonical ESM bundle (TASK-2285, ADR 0044 §"Verification
 // and release gates" item 9: "locked dependencies, vulnerability/license audits,
 // checksums, SBOM, and third-party notices").
@@ -15,13 +13,13 @@
 //   NOTICES         third-party notices, license texts deduplicated by content
 //   build/sbom.json CycloneDX 1.5 software bill of materials
 //
-// scripts/build-canonical-bundle.js calls generateReleaseMetadata() after staging the
+// scripts/build-canonical-bundle.ts calls generateReleaseMetadata() after staging the
 // bundle and before writing build/manifest.sha256, so the checksum manifest covers the
 // SBOM too.
 
-const crypto = require('node:crypto');
-const fs = require('node:fs');
-const path = require('node:path');
+import * as crypto from 'node:crypto';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 
 // SPDX identifiers accepted in a package published under AGPL-3.0-or-later.
 // A dependency outside this set is a license-audit violation: it must be removed,
@@ -45,9 +43,9 @@ const LICENSE_FILE_PATTERN = /^(LICENSE|LICENCE|COPYING|NOTICE)(\.\w+)?$/i;
  * `node_modules/<name>` (or `node_modules/@scope/<name>`) segment on the path,
  * which correctly attributes nested (non-hoisted) copies to themselves.
  */
-function owningPackageLocation(inputPath) {
+function owningPackageLocation(inputPath: string): string | null {
   const segments = inputPath.split('/');
-  let location = null;
+  let location: string | null = null;
   for (let index = 0; index < segments.length; index += 1) {
     if (segments[index] !== 'node_modules') { continue; }
     const scoped = (segments[index + 1] || '').startsWith('@');
@@ -58,13 +56,27 @@ function owningPackageLocation(inputPath) {
   return location;
 }
 
+/** A third-party package statically inlined into the canonical bundle. */
+interface BundledPackage {
+  name: string;
+  version: string;
+  license: string;
+  resolved: string | null;
+  integrity: string | null;
+  homepage: string | null;
+  location: string;
+  packageDir: string;
+}
+
+interface EsbuildMetafile { inputs: Record<string, unknown>; }
+
 /**
  * Third-party packages statically inlined into the canonical bundle.
  *
  * @param rootDir repository root
  * @param metafile esbuild metafile from the canonical bundle build
  */
-function bundledPackages(rootDir, metafile) {
+function bundledPackages(rootDir: string, metafile: EsbuildMetafile): BundledPackage[] {
   if (!metafile || typeof metafile.inputs !== 'object') {
     throw new Error('bundledPackages requires the esbuild metafile from the canonical bundle build');
   }
@@ -73,7 +85,7 @@ function bundledPackages(rootDir, metafile) {
   // The same name@version can be installed at several paths (npm nests
   // conflicting versions). Notices and SBOM components are per released
   // artifact, not per install path: dedupe on identity.
-  const byIdentity = new Map();
+  const byIdentity = new Map<string, BundledPackage>();
   for (const inputPath of Object.keys(metafile.inputs)) {
     const location = owningPackageLocation(inputPath.split(path.sep).join('/'));
     if (location === null) { continue; }
@@ -99,27 +111,27 @@ function bundledPackages(rootDir, metafile) {
     .sort((a, b) => (a.name === b.name ? a.version.localeCompare(b.version) : a.name.localeCompare(b.name)));
 }
 
-function normalizeLicense(license) {
+function normalizeLicense(license: unknown): string {
   if (typeof license === 'string') { return license; }
   if (Array.isArray(license)) { return license.map(item => (item && item.type) || String(item)).join(' OR '); }
-  if (license && typeof license === 'object' && license.type) { return String(license.type); }
+  if (license && typeof license === 'object' && 'type' in license) { return String((license as { type: unknown }).type); }
   return 'UNKNOWN';
 }
 
-function repositoryUrl(repository) {
+function repositoryUrl(repository: unknown): string | null {
   if (typeof repository === 'string') { return repository; }
-  if (repository && typeof repository === 'object' && repository.url) { return String(repository.url); }
+  if (repository && typeof repository === 'object' && 'url' in repository) { return String((repository as { url: unknown }).url); }
   return null;
 }
 
 /** Dependencies whose declared license is outside ALLOWED_LICENSES. */
-function licenseViolations(packages) {
+function licenseViolations(packages: BundledPackage[]): string[] {
   return packages
     .filter(entry => !ALLOWED_LICENSES.has(entry.license))
     .map(entry => `${entry.name}@${entry.version}: unapproved license ${entry.license}`);
 }
 
-function licenseText(packageDir) {
+function licenseText(packageDir: string): string | null {
   const candidates = fs.readdirSync(packageDir, { withFileTypes: true })
     .filter(item => item.isFile() && LICENSE_FILE_PATTERN.test(item.name))
     .map(item => item.name)
@@ -134,7 +146,7 @@ function licenseText(packageDir) {
  * Render NOTICES: an index of every bundled package, then each distinct license
  * text once, attributed to the packages that ship it.
  */
-function renderNotices(packages, rootManifest) {
+function renderNotices(packages: BundledPackage[], rootManifest: Record<string, string>): string {
   const lines = [
     `THIRD-PARTY NOTICES for ${rootManifest.name} ${rootManifest.version}`,
     '',
@@ -143,7 +155,7 @@ function renderNotices(packages, rootManifest) {
     'The published package is a single bundled ESM payload (build/px.mjs). The',
     'third-party packages listed below are statically inlined into that payload by',
     'the build, so their notices are reproduced here. This file is generated by',
-    'scripts/release-metadata.js from package-lock.json; do not edit it by hand.',
+    'scripts/release-metadata.ts from package-lock.json; do not edit it by hand.',
     '',
     `Bundled third-party packages: ${packages.length}`,
     '',
@@ -158,8 +170,8 @@ function renderNotices(packages, rootManifest) {
 
   // Group by license text so a shared MIT body is reproduced once rather than
   // eighty times. Packages that ship no license file are reported by SPDX id only.
-  const byText = new Map();
-  const withoutText = [];
+  const byText = new Map<string, { text: string; packages: BundledPackage[] }>();
+  const withoutText: BundledPackage[] = [];
   for (const entry of packages) {
     const text = licenseText(entry.packageDir);
     if (text === null) { withoutText.push(entry); continue; }
@@ -191,7 +203,7 @@ function renderNotices(packages, rootManifest) {
 }
 
 /** CycloneDX 1.5 SBOM. Deterministic: no timestamp, no serial number, sorted components. */
-function renderSbom(packages, rootManifest) {
+function renderSbom(packages: BundledPackage[], rootManifest: Record<string, string>): Record<string, unknown> {
   return {
     bomFormat: 'CycloneDX',
     specVersion: '1.5',
@@ -205,7 +217,7 @@ function renderSbom(packages, rootManifest) {
         licenses: [{ license: { id: rootManifest.license } }],
         description: rootManifest.description,
       },
-      tools: [{ name: 'scripts/release-metadata.js', vendor: rootManifest.name }],
+      tools: [{ name: 'scripts/release-metadata.ts', vendor: rootManifest.name }],
     },
     components: packages.map(entry => ({
       type: 'library',
@@ -220,10 +232,10 @@ function renderSbom(packages, rootManifest) {
   };
 }
 
-function integrityHashes(integrity) {
+function integrityHashes(integrity: string): Array<{ alg: string; content: string }> {
   return String(integrity).split(/\s+/).flatMap(item => {
     const [algorithm, value] = item.split('-');
-    const alg = { sha512: 'SHA-512', sha256: 'SHA-256', sha1: 'SHA-1' }[algorithm];
+    const alg = ({ sha512: 'SHA-512', sha256: 'SHA-256', sha1: 'SHA-1' } as Record<string, string>)[algorithm];
     if (!alg || !value) { return []; }
     return [{ alg, content: Buffer.from(value, 'base64').toString('hex') }];
   });
@@ -234,7 +246,7 @@ function integrityHashes(integrity) {
  *
  * @throws when a dependency's declared license is outside ALLOWED_LICENSES.
  */
-function generateReleaseMetadata(rootDir, buildDir, metafile) {
+function generateReleaseMetadata(rootDir: string, buildDir: string, metafile: EsbuildMetafile): BundledPackage[] {
   const rootManifest = JSON.parse(fs.readFileSync(path.join(rootDir, 'package.json'), 'utf8'));
   const packages = bundledPackages(rootDir, metafile);
 
@@ -251,7 +263,7 @@ function generateReleaseMetadata(rootDir, buildDir, metafile) {
 
 // Not runnable standalone: the metafile only exists inside a bundle build.
 // `npm run build` (and therefore `prepack`) regenerates NOTICES and build/sbom.json.
-module.exports = {
+export {
   ALLOWED_LICENSES,
   bundledPackages,
   generateReleaseMetadata,
@@ -261,3 +273,19 @@ module.exports = {
   renderNotices,
   renderSbom,
 };
+export type { BundledPackage };
+
+// CJS compat: consumed via require() from the CommonJS test files.
+declare const module: { exports: any } | undefined;
+if (typeof module !== 'undefined') {
+  module.exports = {
+    ALLOWED_LICENSES,
+    bundledPackages,
+    generateReleaseMetadata,
+    licenseViolations,
+    normalizeLicense,
+    owningPackageLocation,
+    renderNotices,
+    renderSbom,
+  };
+}

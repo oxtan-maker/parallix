@@ -5,7 +5,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const stats = require('../dist/lib/commands/stats');
+const stats = require('../.test-runtime/lib/commands/stats');
 
 // Reproduction test for task-1380: stats is counting started missions
 // instead of closed missions. This test verifies that:

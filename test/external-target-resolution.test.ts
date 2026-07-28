@@ -6,7 +6,7 @@ const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
-const { findMissionDir, getMissionYear, findCheckpoints, getFirstLine, missionTitle, missionPathForSlug, missionDirForSlug } = require('../dist/lib/core/mission-utils');
+const { findMissionDir, getMissionYear, findCheckpoints, getFirstLine, missionTitle, missionPathForSlug, missionDirForSlug } = require('../.test-runtime/lib/core/mission-utils');
 
 // Resolve REPO_ROOT dynamically so the leak-detention test does not reference
 // a concrete absolute path that would be operator-local.
@@ -190,7 +190,7 @@ test('node parallix mission-start verify-env resolves from a temp dir without re
     }, null, 2));
 
     // Run mission-start verify-env from a temp directory that does NOT contain parallix source tree
-    const result = spawnSync(process.execPath, [path.join(__dirname, '..', 'dist', 'index.js'), 'mission-start', 'verify-env'], {
+    const result = spawnSync(process.execPath, [path.join(__dirname, '..', 'build', 'px.mjs'), 'mission-start', 'verify-env'], {
       cwd: tempDir,
       encoding: 'utf8',
       timeout: 15000,

@@ -2,7 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const stats = require('../dist/lib/commands/stats');
+const stats = require('../.test-runtime/lib/commands/stats');
 
 const WINDOW = {
   start: new Date('2026-07-05T00:00:00Z'),
@@ -84,7 +84,7 @@ test('task-2213: completion on the blank-model rollup row keeps the mission in i
 });
 
 test('task-2213: weekly report retains live active-stage spend while excluding that mission from agent performance', () => {
-  const report = require('../dist/lib/core/fmt').stripAnsi(stats.renderWeeklyStatsReport([
+  const report = require('../.test-runtime/lib/core/fmt').stripAnsi(stats.renderWeeklyStatsReport([
     row({ mission: 'task-complete', pr_fix_rounds: '2', duration_minutes: '5', stage: 'default' }),
     row({ mission: 'task-active', pr_fix_rounds: '9', duration_minutes: '15', stage: 'active', closed: '' }),
   ], { today: '2026-07-11' }));

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-const { LegacyActiveAdapter } = require('../dist/lib/adapters/legacy-active-adapter');
+const { LegacyActiveAdapter } = require('../.test-runtime/lib/adapters/legacy-active-adapter');
 
 function strictRuntime(overrides: Record<string, unknown> = {}) {
   const calls: string[] = [];

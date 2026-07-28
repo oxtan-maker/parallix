@@ -1,7 +1,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const rebase = require('../dist/lib/commands/rebase');
+const rebase = require('../.test-runtime/lib/commands/rebase');
 
 test('rebase applies core.editor=true to initial rebase call', async () => {
   let capturedArgs = null;

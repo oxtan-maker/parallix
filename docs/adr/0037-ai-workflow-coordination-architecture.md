@@ -160,3 +160,7 @@ Negative: per-CLI config is correct for workspace scope, not session handoff. Se
 - [ARCHITECTURE_PROPOSAL.md](../missions/2026/task-068/ARCHITECTURE_PROPOSAL.md) §6 — Harness-first analysis
 - [FOLLOW_UP_MISSIONS.md](../missions/2026/task-068/FOLLOW_UP_MISSIONS.md) — F0 implements this ADR
 - GSD architecture: `/tmp/gsd-harness/docs/ARCHITECTURE.md` (cloned 2026-04-06, v1.33.0)
+
+## Reconciliation addendum (2026-07-27, task-2288)
+
+The original decision adopted Option C' (Lightweight Node.js Harness) with `workflow/index.js` as the CLI entry point and modules under `workflow/lib/`. The runtime has since been migrated to TypeScript source under `src/platform/runtime/` with an esbuild canonical bundle (`build/px.mjs`) as the distribution artifact (ADR 0044). The architectural principle — scripted coordination layer, agents call CLI tools rather than following documented procedures — remains in effect. The entry point and module structure described in this ADR are superseded by the canonical bundle distribution model; the decision to adopt a lightweight Node.js harness over bash scripts or full GSD is preserved.

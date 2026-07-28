@@ -15,7 +15,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const test = require('node:test');
-const { shellInit } = require('../dist/px.js');
+const { shellInit } = require('../src/platform/runtime/px.ts');
 
 // Builds a fake `px` executable that prints the given transition signal.
 function makeFakePx({ signalPath, exitCode = 0, signal = 'next' }) {
@@ -32,10 +32,10 @@ function makeFakePx({ signalPath, exitCode = 0, signal = 'next' }) {
   return fakeBin;
 }
 
-// Keep the transition tests independent of the shared generated dist tree.
-// The test runner builds that tree before loading this module, but other
-// integration tests may rebuild it while this file is running.  Distribution
-// execution is covered separately by task-1390-shell-init-shebang.test.ts.
+// `shellInit` is read straight from TypeScript source, so these transition
+// tests never depend on a generated tree that a concurrent integration test
+// could rebuild mid-run.  Distribution execution of the shipped entry point is
+// covered separately by task-1390-shell-init-shebang.test.ts.
 function writeShellInit(fakeBin) {
   const initPath = path.join(fakeBin, 'shell-init.sh');
   fs.writeFileSync(initPath, shellInit('bash'));

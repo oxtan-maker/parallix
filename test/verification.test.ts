@@ -16,7 +16,7 @@ const {
   createVerificationProofIdentity,
   readReusableVerificationProof,
   writeReusableVerificationProof,
-} = require('../dist/lib/core/verification');
+} = require('../.test-runtime/lib/core/verification');
 
 function withTempDir(fn) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-verification-'));

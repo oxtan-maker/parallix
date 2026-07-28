@@ -6,11 +6,11 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const { getPrStatus, getPrNumber, getPrAuthor, getLatestReviewDecision, syncMerged, createPr, forgejoAvailable, postReview, resolveForgejoUser, getComments, postComment, resolveForgejoHome, resolveTokenFile, readToken, isForgejoPath, fetchReviewBranch } = require('../dist/lib/tools/forgejo.js');
-const git = require('../dist/lib/core/git.js');
-const backlog = require('../dist/lib/tools/backlog.js');
-const missionUtils = require('../dist/lib/core/mission-utils.js');
-const verification = require('../dist/lib/core/verification');
+const { getPrStatus, getPrNumber, getPrAuthor, getLatestReviewDecision, syncMerged, createPr, forgejoAvailable, postReview, resolveForgejoUser, getComments, postComment, resolveForgejoHome, resolveTokenFile, readToken, isForgejoPath, fetchReviewBranch } = require('../.test-runtime/lib/tools/forgejo.js');
+const git = require('../.test-runtime/lib/core/git.js');
+const backlog = require('../.test-runtime/lib/tools/backlog.js');
+const missionUtils = require('../.test-runtime/lib/core/mission-utils.js');
+const verification = require('../.test-runtime/lib/core/verification');
 const { mock } = test;
 
 function installVerificationMocks() {
@@ -114,7 +114,7 @@ test('authenticatedReviewUrl uses the configured standalone review repo', () => 
       },
     }, null, 2), 'utf8');
 
-    const { authenticatedReviewUrl } = require('../dist/lib/tools/forgejo.js');
+    const { authenticatedReviewUrl } = require('../.test-runtime/lib/tools/forgejo.js');
     const baseUrl = process.env.FORGEJO_URL || 'http://localhost:3300';
     assert.equal(
       authenticatedReviewUrl('claude', 'token-123', root),
@@ -2383,7 +2383,7 @@ test('createPr targets the recorded feature-branch base when MISSION.md has Base
 });
 
 test('ensureRemoteBaseBranch mirrors an existing local base branch with a force push', () => {
-  const { ensureRemoteBaseBranch } = require('../dist/lib/tools/forgejo.js');
+  const { ensureRemoteBaseBranch } = require('../.test-runtime/lib/tools/forgejo.js');
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'forgejo-base-mirror-'));
   try {
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
@@ -2414,7 +2414,7 @@ test('ensureRemoteBaseBranch mirrors an existing local base branch with a force 
 });
 
 test('ensureRemoteBaseBranch fails when the base branch is absent locally', () => {
-  const { ensureRemoteBaseBranch } = require('../dist/lib/tools/forgejo.js');
+  const { ensureRemoteBaseBranch } = require('../.test-runtime/lib/tools/forgejo.js');
   const calls = [];
   const gitRunner = (args) => {
     calls.push(args);

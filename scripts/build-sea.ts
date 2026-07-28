@@ -1,19 +1,19 @@
 #!/usr/bin/env node
 
 /**
- * build-sea.js — narrow SEA build adapter for the native single-executable
+ * build-sea.ts — narrow SEA build adapter for the native single-executable
  * proof (TASK-2286, ADR 0044).
  *
  * The adapter is deliberately thin: it consumes the canonical ESM bundle that
- * `scripts/build-canonical-bundle.js` already published to `build/px.mjs` and
+ * `scripts/build-canonical-bundle.ts` already published to `build/px.mjs` and
  * wraps it — byte for byte — into one Node single executable for the local
  * platform. It never rebuilds, re-bundles, transforms, or minifies the payload,
  * and it never edits `build/`.
  *
  * Usage:
- *   node scripts/build-sea.js                 build build/sea/px for this platform
- *   node scripts/build-sea.js --check-runtime resolve/validate the SEA Node only
- *   node scripts/build-sea.js --rollback      withdraw build/sea, leaving npm intact
+ *   tsx scripts/build-sea.ts                  build build/sea/px for this platform
+ *   tsx scripts/build-sea.ts --check-runtime  resolve/validate the SEA Node only
+ *   tsx scripts/build-sea.ts --rollback       withdraw build/sea, leaving npm intact
  *
  * Environment:
  *   PARALLIX_SEA_NODE  explicit Node executable to embed and to run the SEA
@@ -26,15 +26,18 @@
  *   2  no ESM-SEA-capable Node runtime available (ADR 0044 toolchain stop)
  */
 
-const crypto = require('node:crypto');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
-const { execFileSync, spawnSync } = require('node:child_process');
+import * as crypto from 'node:crypto';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
+import { execFileSync, spawnSync } from 'node:child_process';
 
-const { MINIMUM_SEA_NODE_MAJOR, evaluateSeaRuntime } = require('./sea-surfaces.js');
+import { MINIMUM_SEA_NODE_MAJOR, evaluateSeaRuntime } from './sea-surfaces.ts';
 
-const root = path.resolve(__dirname, '..');
+const moduleRequire = createRequire(import.meta.url);
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const bundleDir = path.join(root, 'build');
 const bundlePath = path.join(bundleDir, 'px.mjs');
 const seaDir = path.join(bundleDir, 'sea');
@@ -59,18 +62,32 @@ const SEA_CONFIG = Object.freeze({
   mainFormat: 'module',
 });
 
-function sha256File(file) {
+interface SeaNode { executable: string; version: string; major: number; }
+
+type SeaConfig = typeof SEA_CONFIG & { output: string; executable?: string };
+
+/** Error carrying the process exit code the CLI should report. */
+class SeaBuildError extends Error {
+  readonly exitCode: number;
+  constructor(message: string, exitCode: number) {
+    super(message);
+    this.name = 'SeaBuildError';
+    this.exitCode = exitCode;
+  }
+}
+
+function sha256File(file: string): string {
   return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 }
 
-function parseNodeVersion(version) {
+function parseNodeVersion(version: string | null | undefined): { major: number; minor: number; patch: number } | null {
   const match = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(String(version || '').trim());
   if (!match) { return null; }
   return { major: Number(match[1]), minor: Number(match[2]), patch: Number(match[3]) };
 }
 
 /** Report the version string of a candidate Node executable, or null. */
-function probeNodeVersion(executable) {
+function probeNodeVersion(executable: string): string | null {
   const probe = spawnSync(executable, ['--version'], { encoding: 'utf8' });
   if (probe.status !== 0) { return null; }
   const version = String(probe.stdout || '').trim();
@@ -81,8 +98,8 @@ function probeNodeVersion(executable) {
  * Collect candidate Node executables in preference order: an operator-pinned
  * one first, then the running runtime, PATH, and nvm installs.
  */
-function candidateNodeExecutables() {
-  const candidates = [];
+function candidateNodeExecutables(): string[] {
+  const candidates: string[] = [];
   if (process.env.PARALLIX_SEA_NODE) { candidates.push(process.env.PARALLIX_SEA_NODE); }
   candidates.push(process.execPath);
   for (const dir of String(process.env.PATH || '').split(path.delimiter)) {
@@ -97,7 +114,7 @@ function candidateNodeExecutables() {
   } catch {
     // nvm is optional.
   }
-  const seen = new Set();
+  const seen = new Set<string>();
   return candidates.filter(candidate => {
     if (!candidate || seen.has(candidate)) { return false; }
     seen.add(candidate);
@@ -112,27 +129,22 @@ function candidateNodeExecutables() {
  * hard failure rather than a reason to silently search for a different runtime
  * — ADR 0044 forbids substituting a runtime behind the operator's back.
  *
- * @returns {{ executable: string, version: string, major: number }}
  */
-function resolveSeaNode() {
+function resolveSeaNode(): SeaNode {
   const pinned = process.env.PARALLIX_SEA_NODE;
   if (pinned) {
     const version = probeNodeVersion(pinned);
     if (!version) {
-      const error = new Error(`PARALLIX_SEA_NODE is not a runnable Node executable: ${pinned}`);
-      error.exitCode = NO_TOOLCHAIN_EXIT;
-      throw error;
+      throw new SeaBuildError(`PARALLIX_SEA_NODE is not a runnable Node executable: ${pinned}`, NO_TOOLCHAIN_EXIT);
     }
     const verdict = evaluateSeaRuntime(version);
     if (!verdict.supported) {
-      const error = new Error(`PARALLIX_SEA_NODE=${pinned}: ${verdict.reason}`);
-      error.exitCode = NO_TOOLCHAIN_EXIT;
-      throw error;
+      throw new SeaBuildError(`PARALLIX_SEA_NODE=${pinned}: ${verdict.reason}`, NO_TOOLCHAIN_EXIT);
     }
     return { executable: pinned, version, major: verdict.major };
   }
 
-  const inspected = [];
+  const inspected: string[] = [];
   for (const candidate of candidateNodeExecutables()) {
     const version = probeNodeVersion(candidate);
     if (!version) { continue; }
@@ -140,42 +152,41 @@ function resolveSeaNode() {
     const verdict = evaluateSeaRuntime(version);
     if (verdict.supported) { return { executable: candidate, version, major: verdict.major }; }
   }
-  const error = new Error(
+  throw new SeaBuildError(
     `No ESM-SEA-capable Node runtime found (need major >= ${MINIMUM_SEA_NODE_MAJOR} for ` +
     'mainFormat: "module"). Inspected: ' + (inspected.join(', ') || 'none') + '. ' +
     'Set PARALLIX_SEA_NODE to a Node 25/26 executable, or install one (e.g. `nvm install 26`).',
+    NO_TOOLCHAIN_EXIT,
   );
-  error.exitCode = NO_TOOLCHAIN_EXIT;
-  throw error;
 }
 
 /** Node >= 25.5.0 can build the final SEA executable without postject. */
-function supportsBuiltInSeaBuild(version) {
+function supportsBuiltInSeaBuild(version: string): boolean {
   const parsed = parseNodeVersion(version);
   if (!parsed) { return false; }
   return parsed.major > 25 || (parsed.major === 25 && parsed.minor >= 5);
 }
 
-function resolvePostjectCli() {
+function resolvePostjectCli(): string | null {
   try {
-    return require.resolve('postject/dist/cli.js');
+    return moduleRequire.resolve('postject/dist/cli.js');
   } catch {
     return null;
   }
 }
 
-function buildSeaConfig(output, executable) {
+function buildSeaConfig(output: string, executable: string): SeaConfig {
   return { ...SEA_CONFIG, output, executable };
 }
 
 /** Recursively copy `from` into `to`, creating parents. */
-function copyTree(from, to) {
+function copyTree(from: string, to: string): void {
   fs.mkdirSync(path.dirname(to), { recursive: true });
   fs.cpSync(from, to, { recursive: true });
 }
 
 /** Current source commit, or 'unknown' outside a Git checkout. */
-function sourceCommit() {
+function sourceCommit(): string {
   const result = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' });
   return result.status === 0 ? String(result.stdout).trim() : 'unknown';
 }
@@ -186,10 +197,9 @@ function sourceCommit() {
  * Only the section-header table and its string table are read, so the cost is
  * independent of the embedded SEA payload size.
  *
- * @param {string} file path to an ELF executable
- * @returns {string[]} section names, or [] when the file is not 64-bit ELF
+ * Returns [] when the file is not a 64-bit little-endian ELF.
  */
-function elfSectionNames(file) {
+function elfSectionNames(file: string): string[] {
   const handle = fs.openSync(file, 'r');
   try {
     const header = Buffer.alloc(64);
@@ -210,7 +220,7 @@ function elfSectionNames(file) {
     const strings = Buffer.alloc(stringsSize);
     fs.readSync(handle, strings, 0, stringsSize, stringsOffset);
 
-    const names = [];
+    const names: string[] = [];
     for (let index = 0; index < entryCount; index += 1) {
       const nameOffset = table.readUInt32LE(index * entrySize);
       const end = strings.indexOf(0, nameOffset);
@@ -227,7 +237,7 @@ function elfSectionNames(file) {
  * The proof is explicitly unsigned (signing is a later phase), so this exists
  * to make the *absence* inspectable rather than assumed.
  */
-function inspectSignature(executable) {
+function inspectSignature(executable: string): { signed: boolean; status: string; mechanism: string } {
   if (process.platform === 'darwin') {
     const result = spawnSync('codesign', ['-dv', executable], { encoding: 'utf8' });
     const signed = result.status === 0;
@@ -245,7 +255,7 @@ function inspectSignature(executable) {
 }
 
 /** SC9: withdraw the binary artifact. npm and source execution are untouched. */
-function rollback() {
+function rollback(): number {
   const existed = fs.existsSync(seaDir);
   fs.rmSync(seaDir, RM_OPTIONS);
   console.log(existed
@@ -254,7 +264,14 @@ function rollback() {
   return 0;
 }
 
-function buildWithPostject({ seaNode, staging, configPath, payload, stagedExecutable }) {
+interface PostjectBuild {
+  seaNode: SeaNode;
+  staging: string;
+  configPath: string;
+  stagedExecutable: string;
+}
+
+function buildWithPostject({ seaNode, staging, configPath, stagedExecutable }: PostjectBuild): SeaConfig {
   const postjectCli = resolvePostjectCli();
   if (!postjectCli) {
     throw new Error(
@@ -288,7 +305,7 @@ function buildWithPostject({ seaNode, staging, configPath, payload, stagedExecut
   return blobConfig;
 }
 
-function build() {
+function build(): number {
   // SC1: the runtime gate runs before any artifact is created or staged.
   const seaNode = resolveSeaNode();
   console.log(`[sea-build] pinned SEA runtime: ${seaNode.executable} (${seaNode.version})`);
@@ -316,7 +333,7 @@ function build() {
 
     const stagedExecutable = path.join(payload, executableName);
     const configPath = path.join(staging, 'sea-config.json');
-    let materializedConfig;
+    let materializedConfig: SeaConfig;
     if (supportsBuiltInSeaBuild(seaNode.version)) {
       materializedConfig = buildSeaConfig(stagedExecutable, seaNode.executable);
       fs.writeFileSync(configPath, `${JSON.stringify(materializedConfig, null, 2)}\n`);
@@ -330,7 +347,6 @@ function build() {
         seaNode,
         staging,
         configPath,
-        payload,
         stagedExecutable,
       });
     }
@@ -352,7 +368,7 @@ function build() {
     // stay the ones a developer can open.
     const stagedMap = path.join(payload, 'px.mjs.map');
     const sourceMap = JSON.parse(fs.readFileSync(stagedMap, 'utf8'));
-    sourceMap.sources = sourceMap.sources.map(source =>
+    sourceMap.sources = sourceMap.sources.map((source: string) =>
       (path.posix.isAbsolute(source) || /^[a-z]+:/i.test(source)) ? source : `../${source}`);
     fs.writeFileSync(stagedMap, JSON.stringify(sourceMap));
 
@@ -360,7 +376,7 @@ function build() {
       fs.copyFileSync(path.join(root, file), path.join(payload, file));
     }
     // SQLite migrations are resolved from the bundle's own directory by
-    // `loadDefaultMigrations()`. `scripts/build-canonical-bundle.js` is a
+    // `loadDefaultMigrations()`. `scripts/build-canonical-bundle.ts` is a
     // restricted area for this mission and does not stage them into build/,
     // so the SEA payload stages them here. This is a documented divergence
     // from the npm layout: without it, the operator schema is never created
@@ -403,7 +419,7 @@ function build() {
   }
 }
 
-function main(argv) {
+function main(argv: string[]): number {
   if (argv.includes('--rollback')) { return rollback(); }
   if (argv.includes('--check-runtime')) {
     const seaNode = resolveSeaNode();
@@ -413,13 +429,21 @@ function main(argv) {
   return build();
 }
 
-if (require.main === module) {
+function runCli(): void {
   try {
     process.exitCode = main(process.argv.slice(2));
   } catch (error) {
-    console.error(`[sea-build] FAIL: ${error.message}`);
-    process.exitCode = typeof error.exitCode === 'number' ? error.exitCode : 1;
+    console.error(`[sea-build] FAIL: ${(error as Error).message}`);
+    const exitCode = (error as SeaBuildError).exitCode;
+    process.exitCode = typeof exitCode === 'number' ? exitCode : 1;
   }
 }
 
-module.exports = { SEA_CONFIG, executableName, resolveSeaNode, seaDir, main };
+export { SEA_CONFIG, SeaBuildError, executableName, resolveSeaNode, seaDir, main };
+export type { SeaNode };
+
+// Run as a script: `tsx scripts/build-sea.ts [--rollback|--check-runtime]`.
+// The module is ESM (it reads import.meta.url), so entry detection compares the
+// invoked path rather than require.main.
+const invokedPath = process.argv[1] ? path.resolve(process.argv[1]) : '';
+if (invokedPath === fileURLToPath(import.meta.url)) { runCli(); }

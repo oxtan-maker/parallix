@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { violationsFor, parsePackReport } = require('../scripts/package-content-audit.js');
-const { compareFileLists } = require('../scripts/verify-reproducible-dist.js');
+const { violationsFor, parsePackReport } = require('../scripts/package-content-audit.ts');
+const { artifactDifferences, compareFileLists } = require('../scripts/verify-reproducible-build.ts');
 
 // The published package shape after TASK-2285: the canonical ESM bundle plus
 // release metadata, with runtime assets staged under the bundle's payload root.
@@ -80,7 +80,21 @@ test('pack report parses past prepack build output on stdout', () => {
   assert.deepEqual(parsePackReport('[\n  {\n    "files": []\n  }\n]\n')[0].files, []);
 });
 
-test('reproducible dist check compares complete clean-build file lists', () => {
-  assert.equal(compareFileLists(['index.js', 'px.js'], ['index.js', 'px.js']), true);
-  assert.equal(compareFileLists(['index.js'], ['index.js', 'px.js']), false);
+test('reproducible build check compares complete clean-build file lists', () => {
+  assert.equal(compareFileLists(['px.mjs', 'px.mjs.map'], ['px.mjs', 'px.mjs.map']), true);
+  assert.equal(compareFileLists(['px.mjs'], ['px.mjs', 'px.mjs.map']), false);
+});
+
+test('reproducible build check reports added, removed, and byte-changed artifacts', () => {
+  const base = { files: ['px.mjs', 'sbom.json'], digests: { 'px.mjs': 'aaa', 'sbom.json': 'bbb' } };
+  assert.deepEqual(artifactDifferences(base, base), []);
+
+  const renamed = { files: ['px.mjs'], digests: { 'px.mjs': 'aaa' } };
+  assert.deepEqual(artifactDifferences(base, renamed), ['only in first build: sbom.json']);
+  assert.deepEqual(artifactDifferences(renamed, base), ['only in second build: sbom.json']);
+
+  // A nondeterministic build emits the same file names with different bytes —
+  // the failure mode the retired file-list-only check could not see.
+  const rebuilt = { files: ['px.mjs', 'sbom.json'], digests: { 'px.mjs': 'aaa', 'sbom.json': 'ccc' } };
+  assert.deepEqual(artifactDifferences(base, rebuilt), ['content differs: sbom.json (bbb != ccc)']);
 });

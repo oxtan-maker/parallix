@@ -1,17 +1,16 @@
-'use strict';
-
 // Package-content audit for the canonical ESM bundle (ADR 0044 §8, TASK-2285).
 //
 // The published tarball is the bundle payload plus release metadata: build/,
 // package.json, LICENSE, README.md, CHANGELOG.md, NOTICES. It carries no
 // unbundled source tree, no CommonJS dist/ output, no tests, and no operator
-// state. The CommonJS dist/ tree remains a local rollback artifact only — it is
-// built, but never published (see docs/npm-package-major-migration.md).
+// state. TASK-2288 retired the transitional CommonJS dist/ tree entirely; the
+// `dist/` prefix stays in the forbidden list so a reintroduced tree can never
+// slip into a published tarball (see docs/npm-package-major-migration.md).
 
-const crypto = require('node:crypto');
-const fs = require('node:fs');
-const path = require('node:path');
-const { spawnSync } = require('node:child_process');
+import * as crypto from 'node:crypto';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { spawnSync } from 'node:child_process';
 
 const REQUIRED_PATHS = [
   'build/px.mjs',
@@ -36,7 +35,7 @@ const FORBIDDEN_PATHS = new Set([
   'workflow.config.json', 'AGENTS.md', 'CLAUDE.md',
 ]);
 const FORBIDDEN_PREFIXES = [
-  // The CommonJS rollback tree and the source of authority never ship.
+  // The retired CommonJS tree and the source of authority never ship.
   'dist/', 'src/', 'test/', 'scripts/', 'node_modules/',
   // Repository-local material that is not part of the runtime payload.
   '.forgejo-local/', 'sessions/', 'graphify-out/', 'missions/', 'backlog/',
@@ -45,9 +44,9 @@ const FORBIDDEN_PREFIXES = [
   'config/', 'data/', 'prompts/', 'templates/',
 ];
 
-function violationsFor(files) {
+function violationsFor(files: string[]): string[] {
   const names = new Set(files);
-  const violations = [];
+  const violations: string[] = [];
   for (const required of REQUIRED_PATHS) {
     if (!names.has(required)) {violations.push(`missing required package file: ${required}`);}
   }
@@ -78,7 +77,7 @@ function violationsFor(files) {
  * Checksum gate: every published build/ file must be listed in
  * build/manifest.sha256 with a digest matching the file on disk.
  */
-function checksumViolations(rootDir, files) {
+function checksumViolations(rootDir: string, files: string[]): string[] {
   const manifestPath = path.join(rootDir, 'build', 'manifest.sha256');
   if (!fs.existsSync(manifestPath)) {
     return ['missing checksum manifest: build/manifest.sha256'];
@@ -89,7 +88,7 @@ function checksumViolations(rootDir, files) {
       return [rest.join(' '), digest];
     }),
   );
-  const violations = [];
+  const violations: string[] = [];
   for (const file of files) {
     if (!file.startsWith('build/') || file === 'build/manifest.sha256') { continue; }
     const relative = file.slice('build/'.length);
@@ -111,13 +110,13 @@ function checksumViolations(rootDir, files) {
  * output lands on the same stdout stream ahead of the JSON report. Parse from
  * the first line that opens the report array rather than from raw stdout.
  */
-function parsePackReport(stdout) {
+function parsePackReport(stdout: string): Array<{ files?: Array<{ path: string }> }> {
   const start = stdout.search(/^\[\s*$/m);
   const json = start === -1 ? stdout : stdout.slice(start);
   return JSON.parse(json);
 }
 
-function packageFiles(rootDir) {
+function packageFiles(rootDir: string): string[] {
   const result = spawnSync('npm', ['pack', '--dry-run', '--json'], {
     cwd: rootDir,
     encoding: 'utf8',
@@ -132,7 +131,7 @@ function packageFiles(rootDir) {
   return files.sort();
 }
 
-function main(rootDir = process.cwd()) {
+function main(rootDir: string = process.cwd()): number {
   const files = packageFiles(rootDir);
   const violations = [...violationsFor(files), ...checksumViolations(rootDir, files)];
   if (violations.length > 0) {
@@ -143,6 +142,15 @@ function main(rootDir = process.cwd()) {
   return 0;
 }
 
-if (require.main === module) {process.exitCode = main();}
+export { checksumViolations, main, packageFiles, parsePackReport, violationsFor };
 
-module.exports = { checksumViolations, main, packageFiles, parsePackReport, violationsFor };
+// Run as a script (`tsx scripts/package-content-audit.ts`) and also consumed via
+// require() from the CommonJS test files, so both entry shapes are handled.
+declare const module: { exports: any } | undefined;
+declare const require: { main?: unknown } | undefined;
+if (typeof module !== 'undefined') {
+  if (typeof require !== 'undefined' && require.main === module) { process.exitCode = main(); }
+  module.exports = { checksumViolations, main, packageFiles, parsePackReport, violationsFor };
+} else if (process.argv[1] && path.basename(process.argv[1]).startsWith('package-content-audit')) {
+  process.exitCode = main();
+}

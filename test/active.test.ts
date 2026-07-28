@@ -4,7 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 process.env.NO_COLOR = '1';
-const active = require('../dist/lib/commands/active');
+const active = require('../.test-runtime/lib/commands/active');
 
 const {
   buildExecutePrompt,
@@ -14,9 +14,9 @@ const {
   selectLaunchAndRecord,
   enforceExecuteCommitSafety,
   renderActiveProgress
-} = require('../dist/lib/commands/active');
-const { resolveWorktree } = require('../dist/lib/core/mission-utils');
-const { completePreflightOrExit } = require('../dist/lib/commands/mission-start');
+} = require('../.test-runtime/lib/commands/active');
+const { resolveWorktree } = require('../.test-runtime/lib/core/mission-utils');
+const { completePreflightOrExit } = require('../.test-runtime/lib/commands/mission-start');
 
 test('active progress renderer preserves launch and handoff status order', () => {
   const logs = [];
@@ -146,7 +146,7 @@ test('completePreflightOrExit returns {pass:true} on success when returnResult i
 test('mission-start verify mode reports diagnostics and open-ended success without slug', () => {
   const lines = [];
   const errors = [];
-  const missionStart = require('../dist/lib/commands/mission-start');
+  const missionStart = require('../.test-runtime/lib/commands/mission-start');
 
   const result = missionStart([], {
     returnResult: true,
@@ -179,7 +179,7 @@ test('mission-start verify mode reports diagnostics and open-ended success witho
 test('mission-start mission mode reports failures for wrong branch, ambiguous task, and missing mission dir', () => {
   const lines = [];
   const errors = [];
-  const missionStart = require('../dist/lib/commands/mission-start');
+  const missionStart = require('../.test-runtime/lib/commands/mission-start');
 
   const result = missionStart(['task-1031'], {
     returnResult: true,
@@ -571,7 +571,7 @@ test('active() synchronizes a launch-deferred rebase after execute output is com
 // `.default` resolves to the function. This test fails loudly if that export
 // shape ever changes without updating active.ts's accessor to match.
 test('repair-handoff module exposes its default export as callable under CJS require+importStar interop', () => {
-  const repairHandoffModule = require('../dist/lib/commands/repair-handoff');
+  const repairHandoffModule = require('../.test-runtime/lib/commands/repair-handoff');
   assert.equal(typeof repairHandoffModule, 'function', 'require(repair-handoff) must return the function directly (CJS compat line)');
 
   // Replicate tsc's __importStar interop exactly (module lacks __esModule
@@ -1350,7 +1350,7 @@ test('active() state-ordering contract: does not write Backlog before launch (re
 
 // CP-2 tests for attemptAgentRelaunch
 
-const { attemptAgentRelaunch } = require('../dist/lib/commands/active');
+const { attemptAgentRelaunch } = require('../.test-runtime/lib/commands/active');
 
 test('attemptAgentRelaunch function exists', () => {
   assert.ok(typeof attemptAgentRelaunch === 'function', 'attemptAgentRelaunch should be exported');

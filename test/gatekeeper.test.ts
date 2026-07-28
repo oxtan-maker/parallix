@@ -5,7 +5,7 @@ const os = require('os');
 const path = require('path');
 const fs = require('fs');
 
-const gatekeeper = require('../dist/lib/tools/gatekeeper');
+const gatekeeper = require('../.test-runtime/lib/tools/gatekeeper');
 const { DEFAULT_GATEKEEPER_USER } = gatekeeper;
 
 function withTempRoot(run) {

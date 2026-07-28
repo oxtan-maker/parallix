@@ -160,9 +160,11 @@ export async function rebaseBeforeReviewRound(slug: string, {
     return { ok: true, sharedFileConflicts: false };
   }
 
-  // A checkout is TypeScript-first: its CLI is src/entry/px.ts and lib/index.js
-  // is not tracked. Nested commands must therefore use tsx in a source checkout.
-  // Packaged installations retain the compiled dist/px.js entrypoint.
+  // A checkout is TypeScript-first: its CLI is src/entry/px.ts, so nested
+  // commands must run through tsx there. A packaged installation runs from the
+  // canonical bundle, where this module's own directory is the bundle root and
+  // build/px.mjs is the entrypoint (the transitional dist/px.js was retired in
+  // TASK-2288).
   const sourceCli = path.resolve(worktree, 'src', 'entry', 'px.ts');
   const usesSourceRuntime = fs.existsSync(sourceCli);
   const workflowCommand = usesSourceRuntime
@@ -173,7 +175,7 @@ export async function rebaseBeforeReviewRound(slug: string, {
       '--import', path.resolve(worktree, 'src', 'entry', 'esm-globals.ts'),
       sourceCli, 'rebase', slug, '--push'
     ]
-    : [path.resolve(MODULE_DIR, '..', '..', 'px.js'), 'rebase', slug, '--push'];
+    : [path.resolve(MODULE_DIR, 'px.mjs'), 'rebase', slug, '--push'];
 
   log(`Rebasing ${fmt.branch(`mission/${slug}`)} onto the latest primary branch before reviewer launch...`);
 

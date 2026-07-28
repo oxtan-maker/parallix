@@ -1,7 +1,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const missionStart = require('../dist/lib/commands/mission-start');
+const missionStart = require('../.test-runtime/lib/commands/mission-start');
 
 // Reproduces task-2200: mission-start's primary classification lookup
 // (mission-start.ts:148) calls resolveMissionClassificationFn(slug) without

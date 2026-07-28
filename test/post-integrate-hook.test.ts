@@ -9,7 +9,7 @@ const {
   resolvePostIntegrateCommand,
   buildPostIntegrateHookEnv,
   runPostIntegrateHook,
-} = require('../dist/lib/core/post-integrate-hook');
+} = require('../.test-runtime/lib/core/post-integrate-hook');
 
 function withTempDir(fn) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-post-integrate-hook-'));
