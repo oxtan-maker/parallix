@@ -4,7 +4,7 @@ import * as path from 'node:path';
 import type { Mission, MissionId, MissionLabel, MissionStatus } from '../../domain/mission.js';
 import { agentFamily, type AgentFamily } from '../../domain/agents.js';
 import type { RepositoryId } from '../../domain/repository.js';
-import type { SourceFact } from '../../platform/runtime/lib/application/contracts.js';
+import type { SourceFact } from '../../application/contracts.js';
 import type { MissionReadAdapter } from '../../application/projections/board-readers.js';
 import { getFirstLine, findCheckpoints, findMissionDir, resolveWorktree } from '../../platform/runtime/lib/core/mission-utils.js';
 import { getTaskAssignee, getTaskFrontmatterValue, getTaskLabels, getTaskStatus, getTaskStorage, resolveTaskFile } from '../../platform/runtime/lib/tools/backlog.js';

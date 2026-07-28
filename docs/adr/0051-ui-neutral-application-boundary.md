@@ -259,6 +259,17 @@ Domain policy contains only rules that can be expressed without interface or
 infrastructure dependencies. Adapters perform effects and translate external
 failures; they do not choose lifecycle transitions or authorization policy.
 
+**Canonical application home (TASK-2314).** The shared contracts, ports, and
+services now live at `src/application/` — the canonical home for the application
+layer. The legacy runtime tree (`src/platform/runtime/lib/`) depends on
+`src/application/`, not the reverse. Four modules were relocated from
+`src/platform/runtime/lib/application/` to `src/application/`:
+`contracts.ts`, `ports.ts`, `active-service.ts`, and `stats-backfill-service.ts`.
+No file beneath `src/application/` or `src/adapters/` imports the legacy
+`src/platform/runtime/lib/application/` path. A directory-scoped import-boundary
+test (`test/application-boundaries.test.ts`) enforces this rule across the full
+`src/application/` tree.
+
 ### Relationship to controller/service/repository
 
 Hexagonal Architecture is compatible with the controller/service/repository

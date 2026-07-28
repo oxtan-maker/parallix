@@ -6,8 +6,8 @@ import { getTaskStatus, resolveTaskFile, transitionTask } from '../tools/backlog
 import { resolveAgentModel } from '../core/product-config.js';
 import * as stats from '../commands/stats.js';
 import { resolveStageTelemetry } from '../agents/stage-telemetry.js';
-import type { DurableEvidence } from '../application/contracts.js';
-import type { ActiveLaunch, ActivePort } from '../application/ports.js';
+import type { DurableEvidence } from '../../../../application/contracts.js';
+import type { ActiveLaunch, ActivePort } from '../../../../application/ports.js';
 // Type-only import (erased at runtime): the plain overlay shape materialized at
 // the composition root. No SQLite driver binding reaches this module (SC2).
 import type { OperatorBlocklistOverlay } from '../../../../adapters/sqlite/blocklist-snapshot.js';

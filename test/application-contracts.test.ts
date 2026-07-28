@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-const { failure, rejected } = require('../dist/lib/application/contracts');
+const { failure, rejected } = require('../dist/application/contracts');
 
 test('application outcomes have one terminal status and typed error variants', () => {
   const validation = rejected('validation', 'bad request');

@@ -17,6 +17,8 @@ const testRuntimeRoot = path.join(root, '.test-runtime');
 const outputRoot = path.join(testRuntimeRoot, 'lib');
 const assetSourceRoot = path.join(root, 'src', 'platform', 'assets');
 const assetOutputRoot = path.join(testRuntimeRoot, 'assets');
+const applicationSourceRoot = path.join(root, 'src', 'application');
+const applicationOutputRoot = path.join(testRuntimeRoot, 'application');
 
 function collectTypeScriptFiles(directory) {
   const files = [];
@@ -36,7 +38,11 @@ function collectTypeScriptFiles(directory) {
 fs.mkdirSync(testRuntimeRoot, { recursive: true });
 fs.writeFileSync(path.join(testRuntimeRoot, 'package.json'), `${JSON.stringify({ type: 'commonjs' }, null, 2)}\n`);
 
-for (const [inputRoot, outputRootForSource] of [[sourceRoot, outputRoot], [assetSourceRoot, assetOutputRoot]]) {
+for (const [inputRoot, outputRootForSource] of [
+  [sourceRoot, outputRoot],
+  [assetSourceRoot, assetOutputRoot],
+  [applicationSourceRoot, applicationOutputRoot],
+]) {
   fs.rmSync(outputRootForSource, { recursive: true, force: true });
   for (const sourcePath of collectTypeScriptFiles(inputRoot)) {
     const relative = path.relative(inputRoot, sourcePath);

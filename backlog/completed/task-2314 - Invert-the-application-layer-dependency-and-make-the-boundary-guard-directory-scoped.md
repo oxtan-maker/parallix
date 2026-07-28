@@ -3,10 +3,11 @@ id: TASK-2314
 title: >-
   Invert the application-layer dependency and make the boundary guard
   directory-scoped
-status: ready-for-integration
-assignee: [custom]
+status: done
+assignee:
+  - codex
 created_date: '2026-07-26 19:21'
-updated_date: '2026-07-26 19:35'
+updated_date: '2026-07-28 04:33'
 labels:
   - user_value
   - architecture
@@ -67,6 +68,16 @@ Scope note: this task deliberately does not flatten `src/platform/runtime/lib/` 
 - [ ] #9 ADR 0051 is amended in place to record the corrected dependency direction, without appending superseding or dated-history clauses
 <!-- AC:END -->
 
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. Audit the current mission/task-2314 branch against TASK-2314 acceptance criteria and separate valid application-layer refactor changes from unrelated late-commit drift.
+2. Preserve the canonical application relocation, legacy-to-canonical import inversion, and directory-scoped boundary guard changes that satisfy the task.
+3. Remove the unrelated root-NOTICES/package allowlist drift introduced in the final packaging commit if it is not required by TASK-2314 and breaks existing package-shape expectations.
+4. Re-run focused verification for TASK-2314 scope: application boundary tests, application service/contract tests, and package/distribution checks touched by the cleanup.
+5. If verification is green, leave the task implementation intact, update mission evidence as needed, and return the backlog task to ready-for-integration with accurate notes.
+<!-- SECTION:PLAN:END -->
+
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
@@ -79,6 +90,8 @@ BLOCKING — TASK-2285 is active with a live worktree (mission/task-2285 @ 6ea80
 NOT a blocker, deliberately — TASK-2288 (retire transitional CommonJS) runs the other way: it gets cheaper once this arrow is corrected. The current double emit of lib/ (83 files as CJS at dist/lib/, the same 83 again as ESM at dist/platform/runtime/lib/) plus four brittle string .replace() path repairs in the build script are what make the emit list fragile. Do not wait for TASK-2288; prefer running this first.
 
 WATCH, not a dependency — TASK-2307 (Ink TUI wave 5) has a worktree (mission/task-2307 @ 49c3072dc), but its diff so far only adds new files under src/interfaces/tui/ with their tests, and does not touch src/application/controller. If that wave grows to route guarded actions through board-command.ts or board-controller.ts before this task starts, re-check overlap: those two files are among the nine import sites rewritten here.
+
+2026-07-28: Rebased mission/task-2314 onto main, audited post-rebase drift, and removed the unrelated branch-local NOTICES packaging changes so TASK-2314 stays aligned with main's root-NOTICES contract. Focused verification after cleanup: release-metadata targeted checks passed; application boundary/contracts/services plus sqlite adapter checks passed; package/distribution verification plus rollback checks had already passed earlier in the same cleanup pass.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

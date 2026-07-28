@@ -37,7 +37,7 @@ test('task-2285 package metadata declares the CLI-only ESM boundary', () => {
 });
 
 test('task-2285 files allowlist ships only the bundle payload and release metadata', () => {
-  assert.deepEqual(packageJson.files, ['build/', 'LICENSE', 'README.md', 'CHANGELOG.md', 'NOTICES']);
+  assert.deepEqual(packageJson.files, ['NOTICES', 'build/', 'LICENSE', 'README.md', 'CHANGELOG.md']);
 });
 
 test('task-2285 bin path is the bundler entry point reused as SEA input', () => {

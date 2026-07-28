@@ -103,7 +103,7 @@ commands throw `MissionRuleViolation` with the ADR 0048 human-only disposition.
 ## Persistence seam
 
 The domain does not depend on repository interfaces. Application-owned ports
-live in `src/application/ports/domain.ts`; a Markdown/Git adapter can implement
+live in `src/application/domain-ports.ts`; a Markdown/Git adapter can implement
 `MissionStore` today and another adapter can implement it later without changing
 `Mission` or `decideMission()`. Markdown/Git is the current compatibility
 adapter; ADR 0044 makes a database-backed adapter the long-term authority after

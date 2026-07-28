@@ -1,7 +1,7 @@
 import type { MissionId } from '../../domain/mission.js';
 import type { RepositoryId } from '../../domain/repository.js';
 import type { AgentFamily } from '../../domain/agents.js';
-import type { SourceFact } from '../../platform/runtime/lib/application/contracts.js';
+import type { SourceFact } from '../contracts.js';
 import type {
   BoardLane,
   CommandAvailability,

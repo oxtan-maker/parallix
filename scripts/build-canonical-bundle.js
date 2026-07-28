@@ -196,7 +196,13 @@ function emitCommonJsTree(sourceRoot, outputRoot) {
       .replace('../../../assets/runtime-assets.js', '../../assets/runtime-assets.js')
       .replace('../runtime/lib/core/package-root.js', '../lib/core/package-root.js')
       .replace('../../../package.json', '../package.json')
-      .replace('../../interfaces/tui/ui-command.js', './interfaces/tui/ui-command.mjs');
+      .replace('../../interfaces/tui/ui-command.js', './interfaces/tui/ui-command.mjs')
+      // CJS tree (dist/lib/) is shallower than source (src/platform/runtime/lib/),
+      // so cross-tree imports to application/ need fewer ".." segments.
+      .replace('../../../../application/active-service.js', '../../application/active-service.js')
+      .replace('../../../../application/stats-backfill-service.js', '../../application/stats-backfill-service.js')
+      .replace('../../../../application/contracts.js', '../../application/contracts.js')
+      .replace('../../../../application/ports.js', '../../application/ports.js');
     fs.mkdirSync(path.dirname(outputPath), { recursive: true });
     fs.writeFileSync(outputPath, adjustedCode, 'utf8');
     fs.writeFileSync(`${outputPath}.map`, result.map, 'utf8');
@@ -246,6 +252,8 @@ fs.mkdirSync(rollbackDir, { recursive: true });
 fs.writeFileSync(path.join(rollbackDir, 'package.json'), `${JSON.stringify({ type: 'commonjs' }, null, 2)}\n`);
 emitCommonJsTree(path.join(root, 'src', 'platform', 'runtime'), rollbackDir);
 emitCommonJsTree(path.join(root, 'src', 'platform', 'assets'), path.join(rollbackDir, 'assets'));
+// application/ is the canonical home for contracts, ports, and services — emit as CJS.
+emitCommonJsTree(path.join(root, 'src', 'application'), path.join(rollbackDir, 'application'));
 // TUI module is ESM-only (ink 6 has top-level await) — emit as .mjs so that
 // the dynamic import() in dist/index.js loads it as an ESM module.
 emitEsmTree(path.join(root, 'src', 'interfaces', 'tui'), path.join(rollbackDir, 'interfaces', 'tui'));
@@ -261,6 +269,8 @@ emitEsmTree(path.join(root, 'src', 'domain'), path.join(rollbackDir, 'domain'));
 emitEsmTree(path.join(root, 'src', 'adapters', 'sqlite'), path.join(rollbackDir, 'adapters', 'sqlite'));
 // platform/runtime/lib is required by adapters — emit as ESM.
 emitEsmTree(path.join(root, 'src', 'platform', 'runtime', 'lib'), path.join(rollbackDir, 'platform', 'runtime', 'lib'));
+// application/ is the canonical home for contracts, ports, and services — emit as ESM.
+emitEsmTree(path.join(root, 'src', 'application'), path.join(rollbackDir, 'application'));
 // platform/assets are required by some modules — emit as ESM.
 emitEsmTree(path.join(root, 'src', 'platform', 'assets'), path.join(rollbackDir, 'platform', 'assets'));
 

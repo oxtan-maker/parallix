@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-const { StatsBackfillService } = require('../dist/lib/application/stats-backfill-service');
-const { ActiveService } = require('../dist/lib/application/active-service');
+const { StatsBackfillService } = require('../dist/application/stats-backfill-service');
+const { ActiveService } = require('../dist/application/active-service');
 
 function strictStatsPort(overrides: Record<string, unknown> = {}) {
   const calls: string[] = [];

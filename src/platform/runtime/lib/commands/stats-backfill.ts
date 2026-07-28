@@ -11,7 +11,7 @@ import {
 } from '../tools/backlog.js';
 import { findMissionDir } from '../core/mission-utils.js';
 import { createProductionApplicationServices } from '../composition/application-services.js';
-import type { StatsBackfillService } from '../application/stats-backfill-service.js';
+import type { StatsBackfillService } from '../../../../application/stats-backfill-service.js';
 
 interface StatsAugmented {
   resolveMissionClassification: (_slug: string, _rootDir?: string) => { classification?: string; source?: string };
