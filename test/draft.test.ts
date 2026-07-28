@@ -7,11 +7,11 @@ const os = require('os');
 const path = require('path');
 
 // Mock getPrimaryBranch BEFORE requiring dependent modules to ensure they use the mock.
-const missionUtils = require('../dist/lib/core/mission-utils');
+const missionUtils = require('../.test-runtime/lib/core/mission-utils');
 mock.method(missionUtils, 'getPrimaryBranch', () => 'main');
 
-const draftLib = require('../dist/lib/commands/draft');
-const stats = require('../dist/lib/commands/stats');
+const draftLib = require('../.test-runtime/lib/commands/draft');
+const stats = require('../.test-runtime/lib/commands/stats');
 const {
   buildDraftPrompt,
   recordDraftImplementer,

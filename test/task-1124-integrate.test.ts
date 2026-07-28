@@ -6,13 +6,13 @@ const path = require('path');
 // CP-4 integration tests for task-1124
 
 test('SC 1: isRelaunchableError returns true for goal-check missing evidence rows', () => {
-  const { isRelaunchableError } = require('../dist/lib/commands/repair-handoff');
+  const { isRelaunchableError } = require('../.test-runtime/lib/commands/repair-handoff');
   const errorMsg = 'The final checkpoint at docs/missions/2026/task-1121/CP-3.md has a "## Goal Check" section but no evidence rows. A goal-check table with real evidence is required before handoff.';
   assert.equal(isRelaunchableError(errorMsg), true);
 });
 
 test('SC 2: buildRelaunchPrompt contains Goal Check table and mission slug', () => {
-  const { buildRelaunchPrompt } = require('../dist/lib/commands/repair-handoff');
+  const { buildRelaunchPrompt } = require('../.test-runtime/lib/commands/repair-handoff');
   const errorMsg = 'The final checkpoint at docs/missions/2026/task-1121/CP-3.md has a "## Goal Check" section but no evidence rows. A goal-check table with real evidence is required before handoff.';
   const prompt = buildRelaunchPrompt(errorMsg, 'task-1124', '/tmp/worktree');
   assert.ok(prompt.includes('Goal Check table'));
@@ -66,7 +66,7 @@ test('SC 8: manual handoff path preserved - outputs manual handoff message when 
 });
 
 test('runtime-matrix no longer exports hardcoded reviewer routing (reviewerFor/fallbackFor removed)', () => {
-  const runtimeMatrix = require('../dist/lib/core/runtime-matrix');
+  const runtimeMatrix = require('../.test-runtime/lib/core/runtime-matrix');
 
   // The biased, hardcoded implementer→reviewer routing has been removed in
   // favor of config-driven, unbiased selectAgent('review', { exclude: [implementer] }).

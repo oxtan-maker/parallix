@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const missionUtils = require('../dist/lib/core/mission-utils');
+const missionUtils = require('../.test-runtime/lib/core/mission-utils');
 const {
   flagValue,
   readTextFlag,
@@ -12,7 +12,7 @@ const {
   formatStaticReviewSuccess,
   performStaticReview,
   review
-} = require('../dist/lib/review/review-commands');
+} = require('../.test-runtime/lib/review/review-commands');
 
 // ============================================================================
 // flagValue tests
@@ -278,7 +278,7 @@ test('performStaticReview accepts an existing repository checkpoint sample', (t)
 // ============================================================================
 
 test('no-PR + clean static review does NOT auto-transition task to approved/ready-for-integration', async () => {
-  const { review } = require('../dist/lib/review/review-commands');
+  const { review } = require('../.test-runtime/lib/review/review-commands');
   let submitForReviewCalled = false;
   let postStaticReviewCalled = false;
   const logs = [];
@@ -325,7 +325,7 @@ test('no-PR + clean static review does NOT auto-transition task to approved/read
 });
 
 test('no-PR + static review findings re-launches the implementer (not the review loop)', async () => {
-  const { review } = require('../dist/lib/review/review-commands');
+  const { review } = require('../.test-runtime/lib/review/review-commands');
   let startReviewLoopCalled = 0;
   let startAgentCalls = [];
   let submitForReviewCalled = false;
@@ -388,7 +388,7 @@ test('no-PR + static review findings re-launches the implementer (not the review
 });
 
 test('no-PR + static review findings with unresolvable implementer logs WARN and does nothing', async () => {
-  const { review } = require('../dist/lib/review/review-commands');
+  const { review } = require('../.test-runtime/lib/review/review-commands');
   let startReviewLoopCalled = 0;
   let startAgentCalled = 0;
   const logs = [];

@@ -1,4 +1,0 @@
-{
-  "//": "The root package is ESM (ADR 0044). Repository build/verification scripts remain CommonJS .js files; this marker keeps them loadable without renaming them to .cjs. It is never published (package.json `files` ships only build/ and release metadata).",
-  "type": "commonjs"
-}

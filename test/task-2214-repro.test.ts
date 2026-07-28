@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { runDeclaredGates } = require('../dist/lib/commands/handoff');
+const { runDeclaredGates } = require('../.test-runtime/lib/commands/handoff');
 
 test('runDeclaredGates rejects prose-appended commands before execution', () => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2214-gates-'));

@@ -7,8 +7,8 @@ const path = require('node:path');
 const childProcess = require('child_process');
 const { mock } = test;
 
-const { runDeclaredGates } = require('../dist/lib/commands/handoff');
-const { startReviewLoop, submitForReview } = require('../dist/lib/review/review');
+const { runDeclaredGates } = require('../.test-runtime/lib/commands/handoff');
+const { startReviewLoop, submitForReview } = require('../.test-runtime/lib/review/review');
 
 // Reproduction tests for task-2234 (push-to-reviewer autobounce).
 //

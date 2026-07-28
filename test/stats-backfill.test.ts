@@ -9,14 +9,14 @@ const childProcess = require('child_process');
 const {
   collectHistoricalStatsBackfill,
   inferHistoricalClassificationFromMissionDoc,
-} = require('../dist/lib/commands/stats-backfill');
-const statsBackfill = require('../dist/lib/commands/stats-backfill');
-const stats = require('../dist/lib/commands/stats');
+} = require('../.test-runtime/lib/commands/stats-backfill');
+const statsBackfill = require('../.test-runtime/lib/commands/stats-backfill');
+const stats = require('../.test-runtime/lib/commands/stats');
 
 test('stats-backfill module loads without a parse-time SyntaxError', () => {
   assert.doesNotThrow(() => {
-    delete require.cache[require.resolve('../dist/lib/commands/stats-backfill')];
-    require('../dist/lib/commands/stats-backfill');
+    delete require.cache[require.resolve('../.test-runtime/lib/commands/stats-backfill')];
+    require('../.test-runtime/lib/commands/stats-backfill');
   });
 });
 

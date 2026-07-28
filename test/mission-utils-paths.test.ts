@@ -16,8 +16,8 @@ const {
   normalizeVerifyArea,
   inferSlug,
   getMissionYear,
-} = require('../dist/lib/core/mission-utils');
-const git = require('../dist/lib/core/git');
+} = require('../.test-runtime/lib/core/mission-utils');
+const git = require('../.test-runtime/lib/core/git');
 
 const FAKE_ROOT = '/tmp/mission';
 

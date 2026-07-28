@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const ts = require('typescript');
-const { MACHINE_WRITTEN_PATH_INVENTORY } = require('../dist/lib/core/durable-state-inventory');
+const { MACHINE_WRITTEN_PATH_INVENTORY } = require('../.test-runtime/lib/core/durable-state-inventory');
 
 const ROOT = path.resolve(__dirname, '..');
 const RUNTIME_LIB = path.join(ROOT, 'src', 'platform', 'runtime', 'lib');

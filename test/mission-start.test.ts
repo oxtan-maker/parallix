@@ -2,8 +2,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
-const missionStart = require('../dist/lib/commands/mission-start');
-const stats = require('../dist/lib/commands/stats');
+const missionStart = require('../.test-runtime/lib/commands/mission-start');
+const stats = require('../.test-runtime/lib/commands/stats');
 
 test('missionStart fails if the backlog task is missing classification', () => {
   const lines = [];

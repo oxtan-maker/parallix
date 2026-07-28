@@ -141,35 +141,15 @@ and `npm audit --omit=dev` before any publish.
 
 ## Rollback
 
-`scripts/build-canonical-bundle.js` keeps emitting the CommonJS `dist/` tree
-alongside the bundle, so rolling back is a **package-metadata change only**. No
-source change is involved: `src/` remains the sole source authority in both
-shapes, and the `dist/` tree is a build product of exactly the same sources.
+The transitional CommonJS `dist/` tree has been retired (task-2288). The
+published package ships the canonical ESM bundle (`build/px.mjs`) as the sole
+executable artifact. `scripts/rollback-commonjs-package.js` and
+`test/task-2285-rollback.test.ts` were removed as part of the retirement.
 
-```sh
-node scripts/rollback-commonjs-package.js --apply   # rewrite package.json
-npm install                                          # restore the runtime closure
-npm run build                                        # re-emit dist/
-npm pack
-```
-
-Run without `--apply` to print the resulting manifest and review it first.
-
-The rollback restores:
-
-- `"type": "commonjs"`, `main: "dist/index.js"`, `bin.px: "dist/px.js"`, and the
-  `exports` map — so `require('@magnusekdahl/parallix')` resolves again;
-- `dependencies` on ink, react, @types/react and the pi SDK. The transpiled
-  CommonJS tree is *not* bundled, so it resolves these from `node_modules`;
-- the package-root asset directories (`config/`, `prompts/`, `templates/`,
-  `data/`, `docs/`, `examples/`, `tools/setup-forgejo-docker.sh`) in `files`,
-  because `packageRoot()` then resolves to the package directory rather than to
-  `build/`.
-
-`engines.node` stays at `>=22.23.1`: the CommonJS tree is emitted with the same
-`node22.23` target and does not need Node 23.
-
-The rollback artifact is exercised end to end by `test/task-2285-rollback.test.ts`,
-which assembles the rolled-back package in a temporary directory, checks its
-`npm pack` contents, and runs `dist/px.js` for `--version`, `--help`, a headless
-JSON command, package-root asset loading, and the programmatic `main` entry.
+A rollback to the CommonJS `dist/` shape is still possible as a coordinated
+change — it would restore the `dist/` emitter in `scripts/build-canonical-bundle.ts`,
+update `package.json` metadata (`"type": "commonjs"`, `main`, `bin.px`, `exports`),
+and re-add runtime `dependencies`. The TypeScript source (`src/`) remains the
+sole source authority in both shapes. This is a single coherent rollback phase
+covering the emitter, package entries, exports, and dependencies together;
+partial restoration of individual shims is not coherent.

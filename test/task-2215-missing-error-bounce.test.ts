@@ -2,9 +2,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
-const repairHandoff = require('../dist/lib/commands/repair-handoff');
+const repairHandoff = require('../.test-runtime/lib/commands/repair-handoff');
 const { classifyError, FailureClass, DispatchAction } = repairHandoff;
-const handoff = require('../dist/lib/commands/handoff');
+const handoff = require('../.test-runtime/lib/commands/handoff');
 
 // Reproduction tests for task-2215 (missing error bounce).
 //

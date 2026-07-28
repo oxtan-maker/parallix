@@ -21,10 +21,10 @@ const childProcess = require('node:child_process');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-// npm run build emits the development CLI under dist/. The package manifest
-// intentionally points consumers at dist/px.js, which is produced by the
-// separate publish build and is not present during this source-level suite.
-const CLI_ENTRY = path.resolve(__dirname, '..', 'dist', 'px.js');
+// `npm run build` emits the canonical bundle at build/px.mjs, which is also the
+// target of package.json's `bin.px`. TASK-2288 retired the transitional
+// dist/px.js, so the smoke run spawns the same artifact consumers install.
+const CLI_ENTRY = path.resolve(__dirname, '..', 'build', 'px.mjs');
 
 // Custom-family model for the smoke run comes from this repository's own
 // workflow.config.json (adapters.agents.models.custom), so the e2e test always
@@ -661,16 +661,16 @@ function runRealAgentSmoke(agent, runner) {
   delete env.PWD;
 
   try {
-    // Verify CLI-under-test provenance: CLI_ENTRY resolves from this file's __dirname
-    // to the repo's px.js. This ensures we test the code under test, not a stale installed px.
-    // The __dirname is the test/ directory, so CLI_ENTRY = path.resolve(test/, ../, px.js) = repo/px.js
+    // Verify CLI-under-test provenance: CLI_ENTRY resolves from this file's
+    // __dirname to this checkout's build/px.mjs, so the run exercises the code
+    // under test rather than a stale globally installed px.
     assert.ok(
       fs.existsSync(CLI_ENTRY),
       `[parallix-workflow-failure] CLI Entry point ${CLI_ENTRY} does not exist; may be using stale installed px`
     );
     assert.ok(
-      CLI_ENTRY.includes('px.js'),
-      `[parallix-workflow-failure] CLI Entry point ${CLI_ENTRY} does not point to px.js; may be using stale installed px`
+      CLI_ENTRY.endsWith(path.join('build', 'px.mjs')),
+      `[parallix-workflow-failure] CLI Entry point ${CLI_ENTRY} does not point to build/px.mjs; may be using stale installed px`
     );
 
     // Fast-fail launcher sanity check: probe the real child path with the

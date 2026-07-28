@@ -23,7 +23,7 @@ const os = require('os');
 const { spawnSync } = require('child_process');
 
 const BOOTSTRAP_PATH = path.join(__dirname, 'bootstrap-parallix-home.js');
-const OPENCODE_MODULE_PATH = path.join(__dirname, '..', 'dist', 'lib', 'agents', 'opencode.js');
+const OPENCODE_MODULE_PATH = path.join(__dirname, '..', '.test-runtime', 'lib', 'agents', 'opencode.js');
 
 function writeLauncher(filePath, body) {
   fs.writeFileSync(filePath, `#!${process.execPath}\n${body}\n`);

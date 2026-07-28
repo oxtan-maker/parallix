@@ -23,7 +23,7 @@ const path = require('path');
 // Variant B closeout path.
 // ---------------------------------------------------------------------------
 
-const { resolvePostIntegrateCommand } = require('../dist/lib/core/post-integrate-hook');
+const { resolvePostIntegrateCommand } = require('../.test-runtime/lib/core/post-integrate-hook');
 
 function withTempDir(fn) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2203-proof-order-'));
@@ -71,7 +71,7 @@ test('refresh-global-px.sh builds dist (task-2203 prerequisite)', () => {
 // Test 3: Source code ordering — proof capture must come AFTER post-integrate
 // hook invocation in the Variant B integrate flow.
 //
-// This test reads the compiled JavaScript of integrate.ts and asserts that the
+// This test reads the source TypeScript of integrate.ts and asserts that the
 // textual ordering of function calls matches the fixed behaviour:
 //   runPostIntegrateHook (or runPostIntegrateHookOrAbort)  <  captureVerifiedTreeProof
 //
@@ -80,23 +80,23 @@ test('refresh-global-px.sh builds dist (task-2203 prerequisite)', () => {
 // ---------------------------------------------------------------------------
 test('Variant B: post-integrate hook runs before proof capture (task-2203 fix)', () => {
   const REPO_ROOT = path.join(__dirname, '..');
-  const integratePath = path.join(REPO_ROOT, 'dist', 'lib', 'commands', 'integrate.js');
+  const integratePath = path.join(REPO_ROOT, 'src', 'platform', 'runtime', 'lib', 'commands', 'integrate.ts');
   const content = fs.readFileSync(integratePath, 'utf8');
 
-  // Find the positions of the key function calls in the compiled JS.
+  // Find the positions of the key function calls in the source.
   // We look for the pattern in the Variant B closeout path (after squash commit).
   const hookIdx = content.indexOf('runPostIntegrateHookOrAbort');
   const proofIdx = content.indexOf('captureVerifiedTreeProof');
 
-  assert.ok(hookIdx >= 0, 'integrate.js must call runPostIntegrateHookOrAbort');
-  assert.ok(proofIdx >= 0, 'integrate.js must call captureVerifiedTreeProof');
+  assert.ok(hookIdx >= 0, 'integrate.ts must call runPostIntegrateHookOrAbort');
+  assert.ok(proofIdx >= 0, 'integrate.ts must call captureVerifiedTreeProof');
 
   // The proof capture must appear AFTER the post-integrate hook in the source.
-  // In the compiled JS, this means the proof function call text comes after the
+  // In the source, this means the proof function call text comes after the
   // hook function call text in the Variant B flow.
   assert.ok(proofIdx > hookIdx,
     'captureVerifiedTreeProof must appear AFTER runPostIntegrateHookOrAbort in '
-    + 'integrate.js (proof must be captured after the post-integrate rebuild, '
+    + 'integrate.ts (proof must be captured after the post-integrate rebuild, '
     + 'not before — task-2203 fix)');
 });
 

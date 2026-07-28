@@ -14,8 +14,9 @@ Mission flow: `backlog → draft → ready → active → review → approved �
 
 ## Entrypoints
 
-- `index.js` is the dispatcher; run it directly as `node index.js <command>`.
-- `px.js` is the `px` binary wrapper and shell-init helper.
+- `src/platform/runtime/index.ts` is the dispatcher (TypeScript source).
+- `src/platform/runtime/px.ts` is the `px` binary wrapper and shell-init helper (TypeScript source).
+- `build/px.mjs` is the canonical ESM bundle produced by `npm run build`; it is the sole executable artifact and the `bin.px` entry in `package.json`.
 
 ## Config Boundary
 
@@ -215,7 +216,7 @@ extension seam, matching the existing `adapters.verification.command` opt-in pat
 **parallix's own hook — keeping the global `px` runner current.** `workflow.config.json` wires
 `postIntegrateCommand` to `./scripts/refresh-global-px.sh`. Every successful `px integrate` in
 this repo now: bumps the patch version in `package.json`/`package-lock.json`, commits that bump,
-builds the canonical `dist/` runtime, packs a tarball whose prepack step also builds `dist/`,
+builds the canonical `build/` bundle (`build/px.mjs`), packs a tarball whose prepack step also builds `build/`,
 and reinstalls the global `px` runner from that tarball (`npm install -g ./<tarball>`) — the same
 local-tarball path documented in [Public distribution](#public-distribution-canonical-packaging-and-install)
 below. This automates what was previously a manual operator step ("bump before integrate,
@@ -340,11 +341,12 @@ Use the user-writable prefix when you do not have `sudo` access. If your shell
 does not already place `$HOME/.local/bin` on `PATH`, add it once.
 
 `npm pack` runs the production TypeScript build through `prepack`. The packed
-executable is `dist/px.js`; the tarball contains `dist/**/*.js` and
-`dist/**/*.js.map` plus the runtime assets listed in ADR 0044 §8. Release
+executable is `build/px.mjs`; the tarball contains `build/px.mjs`,
+`build/px.mjs.map`, the runtime assets under `build/` (config, prompts, templates),
+and the package metadata files listed in ADR 0044 §8. Release
 verification runs `npm run test:package-content` to audit the package list and
-`npm run test:reproducible-output` to compare two clean-build `dist/` file
-lists. There is no sibling-JavaScript compatibility build or mtime freshness
+`npm run test:reproducible-output` to compare two clean-build `build/` artifact
+bytes. There is no sibling-JavaScript compatibility build or mtime freshness
 guard.
 
 `CHANGELOG.md` is the versioning authority. Until the first public release,
@@ -363,9 +365,9 @@ identifies the executing `px.js` path so an accidental PATH collision with an
 unrelated `px` is visible.
 
 **Local development and built runtime.** From a checkout, run `npm run dev --
-<command>` to execute `px.ts` directly through `tsx`. For the built runtime,
-run `npm run build` followed by `node dist/index.js <command>`. The tarball
-uses the same `dist/` artifact and adds a versioned, globally linked `px`.
+<command>` to execute `src/platform/runtime/px.ts` directly through `tsx`. For the built runtime,
+run `npm run build` followed by `node build/px.mjs <command>`. The tarball
+uses the same `build/` bundle and adds a versioned, globally linked `px`.
 
 **What is not yet supported.** The following are explicitly out of the near-term
 model and are not claimed to work today: publishing to the public npm registry

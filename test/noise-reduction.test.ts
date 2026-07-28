@@ -5,7 +5,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
-const { findLastNonNoiseCommit } = require('../dist/lib/core/mission-utils');
+const { findLastNonNoiseCommit } = require('../.test-runtime/lib/core/mission-utils');
 
 function git(args, cwd) {
   const result = spawnSync('git', args, { cwd, encoding: 'utf8' });
@@ -170,7 +170,7 @@ test('findLastNonNoiseCommit returns null if the non-noise commit is shared', ()
   });
 });
 
-const { squashTrailingBacklogNoiseIntoPreviousMission, softResetTrailingBacklogNoise } = require('../dist/lib/core/mission-utils');
+const { squashTrailingBacklogNoiseIntoPreviousMission, softResetTrailingBacklogNoise } = require('../.test-runtime/lib/core/mission-utils');
 
 test('squashTrailingBacklogNoiseIntoPreviousMission skips when worktree is dirty', () => {
   withTempRepo(root => {

@@ -22,7 +22,7 @@ const path = require('path');
 const {
   printIntegrationPreflight,
   buildIntegrationContext
-} = require('../dist/lib/commands/integrate');
+} = require('../.test-runtime/lib/commands/integrate');
 
 function withTempBaseWorktree(fn) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1431-base-'));

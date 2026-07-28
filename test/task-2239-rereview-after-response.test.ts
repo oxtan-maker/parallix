@@ -1,20 +1,19 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { startReviewLoop } from '../src/platform/runtime/lib/review/review.js';
 
-const { startReviewLoop } = require('../dist/lib/review/review');
-
-function reviewLoopHarness(overrides = {}) {
+function reviewLoopHarness(overrides: Record<string, unknown> = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2239-rereview-'));
   fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { review: { provider: 'none' } } }));
-  const launches = [];
-  const writes = [];
-  const logs = [];
-  const errors = [];
-  const exits = [];
-  const opts = {
+  const launches: Array<{ step: string; agent: string }> = [];
+  const writes: Array<{ round: number; phase: string; disposition: string; metadata: Record<string, unknown> }> = [];
+  const logs: string[] = [];
+  const errors: string[] = [];
+  const exits: number[] = [];
+  const opts: Record<string, unknown> = {
     worktree: root,
     implementer: 'claude',
     reviewer: 'codex',
@@ -26,27 +25,27 @@ function reviewLoopHarness(overrides = {}) {
     eligibleAgentsForStepFn: () => ['codex', 'claude'],
     workflowLauncherStatusFn: () => ({ supported: true }),
     readReviewStateFn: () => null,
-    writeReviewStateFn: (_slug, state) => writes.push({ round: state.round, phase: state.phase, disposition: state.disposition, metadata: { ...state.metadata } }),
+    writeReviewStateFn: (_slug: string, state: { round: number; phase: string; disposition: string; metadata: Record<string, unknown> }) => writes.push({ round: state.round, phase: state.phase, disposition: state.disposition, metadata: { ...state.metadata } }),
     transitionTaskFn: () => true,
     transitionVirtualFn: () => true,
     rebaseBeforeReviewRoundFn: async () => ({ ok: true }),
     runPreReviewGateFn: async () => ({ ok: true, area: 'all', exitCode: 0 }),
-    startAgentFn: async (step, options) => {
+    startAgentFn: async (step: string, options: { agent: string }) => {
       launches.push({ step, agent: options.agent });
       return { agent: options.agent };
     },
-    applyAgentFallbackFn: ({ original }) => original,
+    applyAgentFallbackFn: ({ original }: { original: string }) => original,
     buildCompactReviewPromptFn: () => 'review prompt',
     buildCompactActOnReviewPromptFn: () => 'act-on-review prompt',
-    log: (message) => logs.push(message),
-    error: (message) => errors.push(message),
-    exit: (code) => exits.push(code),
+    log: (message: string) => logs.push(message),
+    error: (message: string) => errors.push(message),
+    exit: (code: number) => exits.push(code),
     ...overrides,
   };
   return { root, opts, launches, writes, logs, errors, exits };
 }
 
-async function runHarness(harness) {
+async function runHarness(harness: { root: string; opts: Record<string, unknown> }) {
   try {
     await startReviewLoop('task-2239', harness.opts);
   } finally {
@@ -87,7 +86,7 @@ test('reviewer launch failure after a response records a reviewer-specific human
   const harness = reviewLoopHarness({
     consumeReviewerArtifactsFn: async () => ({ consumed: true, ok: true, reviewState: 'REQUEST_CHANGES' }),
     consumeImplementerArtifactsFn: async () => ({ consumed: true, ok: true, disposition: 'PUSHBACK_ALL' }),
-    startAgentFn: async (step, options) => {
+    startAgentFn: async (step: string, options: { agent: string }) => {
       if (step === 'review' && harness.launches.filter((launch) => launch.step === 'review').length === 1) {
         throw new Error('reviewer unavailable');
       }

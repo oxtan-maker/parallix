@@ -1,8 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const missionUtils = require('../dist/lib/core/mission-utils');
-const { areAllBacklogOnlyConflicts } = require('../dist/lib/commands/integrate');
+const missionUtils = require('../.test-runtime/lib/core/mission-utils');
+const { areAllBacklogOnlyConflicts } = require('../.test-runtime/lib/commands/integrate');
 
 // ---------------------------------------------------------------------------
 // Tier 1: Classification tests (areAllBacklogOnlyConflicts)
@@ -305,19 +305,19 @@ test('happy path: probe merge succeeds on first try with no conflicts', () => {
 
 const path = require('node:path');
 const { mock } = test;
-const git = require('../dist/lib/core/git');
-const backlog = require('../dist/lib/tools/backlog');
-const forgejo = require('../dist/lib/tools/forgejo');
-const productConfig = require('../dist/lib/core/product-config');
-const runtimeMatrix = require('../dist/lib/core/runtime-matrix');
-const stats = require('../dist/lib/commands/stats');
+const git = require('../.test-runtime/lib/core/git');
+const backlog = require('../.test-runtime/lib/tools/backlog');
+const forgejo = require('../.test-runtime/lib/tools/forgejo');
+const productConfig = require('../.test-runtime/lib/core/product-config');
+const runtimeMatrix = require('../.test-runtime/lib/core/runtime-matrix');
+const stats = require('../.test-runtime/lib/commands/stats');
 
 const TEST_SLUG = 'task-2242';
 const FAKE_ROOT = '/tmp/task-2242-integrate-root';
 
 function loadIntegrate() {
-  delete require.cache[require.resolve('../dist/lib/commands/integrate')];
-  return require('../dist/lib/commands/integrate');
+  delete require.cache[require.resolve('../.test-runtime/lib/commands/integrate')];
+  return require('../.test-runtime/lib/commands/integrate');
 }
 
 // Base git responses shared by all production integration tests.

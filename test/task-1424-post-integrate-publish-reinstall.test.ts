@@ -108,8 +108,8 @@ test('installed bundle-layout tarball runs read-only commands outside the checko
     const px = path.join(prefix, 'bin', 'px');
     fs.mkdirSync(parallixHome, { recursive: true });
     // The published package no longer exposes importable modules, so the CSV
-    // header comes from the checkout's rollback build rather than the install.
-    const { STATS_HEADERS } = require(path.join(PACKAGE_ROOT, 'dist', 'lib', 'commands', 'stats.js'));
+    // header comes from the checkout's test runtime rather than the install.
+    const { STATS_HEADERS } = require(path.join(PACKAGE_ROOT, '.test-runtime', 'lib', 'commands', 'stats.js'));
     fs.writeFileSync(path.join(parallixHome, 'stats.csv'), `${STATS_HEADERS.join(',')}\n`);
     const pxVersion = run(px, ['--version'], { cwd: target });
     assert.equal(pxVersion.status, 0, `installed px --version failed\nstdout:\n${pxVersion.stdout}\nstderr:\n${pxVersion.stderr}`);

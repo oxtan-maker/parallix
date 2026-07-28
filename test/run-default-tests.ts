@@ -17,7 +17,7 @@ if (!fs.existsSync(path.join(executionRoot, 'package.json')) || !fs.existsSync(t
 const MINIMUM_TEST_NODE_MAJOR = 20;
 const MINIMUM_TEST_NODE_MINOR = 6;
 
-function supportsTestImports(executable) {
+function supportsTestImports(executable: string): boolean {
   const result = spawnSync(executable, ['--version'], { encoding: 'utf8' });
   const match = result.status === 0 && String(result.stdout || '').match(/^v(\d+)\.(\d+)\./);
   if (!match) { return false; }
@@ -27,8 +27,8 @@ function supportsTestImports(executable) {
     || (major === MINIMUM_TEST_NODE_MAJOR && minor >= MINIMUM_TEST_NODE_MINOR);
 }
 
-function compatibleTestNode() {
-  const candidates = [process.env.PARALLIX_TEST_NODE, process.execPath];
+function compatibleTestNode(): string {
+  const candidates: Array<string | undefined> = [process.env.PARALLIX_TEST_NODE, process.execPath];
   for (const dir of (process.env.PATH || '').split(path.delimiter)) {
     if (dir) { candidates.push(path.join(dir, 'node')); }
   }
@@ -41,7 +41,7 @@ function compatibleTestNode() {
     // nvm is optional; PATH and the current executable remain valid sources.
   }
 
-  const seen = new Set();
+  const seen = new Set<string>();
   for (const candidate of candidates) {
     if (!candidate || seen.has(candidate)) { continue; }
     seen.add(candidate);
@@ -52,7 +52,7 @@ function compatibleTestNode() {
   throw new Error(`Node ${MINIMUM_TEST_NODE_MAJOR}.${MINIMUM_TEST_NODE_MINOR}+ is required for TypeScript tests; set PARALLIX_TEST_NODE to a compatible executable.`);
 }
 
-function supportsTestForceExit(command) {
+function supportsTestForceExit(command: string): boolean {
   const probe = spawnSync(command, ['--version'], { encoding: 'utf8' });
   const match = probe.status === 0 && /v(\d+)\.(\d+)\./.exec(probe.stdout || '');
   if (!match) {return false;}
@@ -71,7 +71,7 @@ const allRootTestFiles = fs.readdirSync(testRoot)
   .filter(file => file !== 'e2e-real-agent-smoke.test.ts');
 
 // Discover test files from known subdirectories.
-function findSubdirTests(subdir) {
+function findSubdirTests(subdir: string): string[] {
   const dirPath = path.join(testRoot, subdir);
   if (!fs.existsSync(dirPath) || !fs.statSync(dirPath).isDirectory()) {
     return [];
@@ -125,7 +125,7 @@ const subdirIntegrationFiles = allSubdirTestFiles.filter(
 const subdirUnitFiles = allSubdirTestFiles.filter(fp => !subdirIntegrationFiles.includes(fp));
 
 // tui-spawn.test.ts uses execFileSync but is an artifact-verification test
-// (spawns dist/px.js and build/px.mjs to check exit codes). In the default
+// (spawns build/px.mjs to check exit codes). In the default
 // suite the child inherits the curl shim and temp HOME — the 30 s timeout
 // and the marker unlink in after() absorb the shim impact. When explicitly
 // requested as the sole file, the bootstrap preload is bypassed so the child
@@ -161,12 +161,16 @@ if (buildResult.status !== 0) {
   process.exit(buildResult.status ?? 1);
 }
 
-// The product build is a bundled ESM artifact. Existing unit tests retain
-// dist/lib import spelling and use node:test method mocks, which require
-// writable CommonJS exports. Generate those modules in the ignored,
-// test-only .test-runtime/ tree; the preload maps legacy imports there so
-// concurrent product builds cannot race with test module loading.
-const testRuntimeBuild = spawnSync(process.execPath, [path.join(executionRoot, 'scripts', 'build-test-runtime.js')], { cwd: executionRoot, stdio: 'inherit' });
+// The product build is a bundled ESM artifact, whose exports are read-only.
+// Most unit tests replace dependencies with node:test method mocks, which need
+// writable CommonJS exports, so they import from .test-runtime/ instead.
+// Generate that ignored, test-only tree here; keeping it separate from build/
+// means concurrent product builds cannot race with test module loading.
+const testRuntimeBuild = spawnSync(
+  process.execPath,
+  ['--import', 'tsx', path.join(executionRoot, 'scripts', 'build-test-runtime.ts')],
+  { cwd: executionRoot, stdio: 'inherit' },
+);
 if (testRuntimeBuild.error) {
   throw testRuntimeBuild.error;
 }
@@ -195,9 +199,9 @@ const bootstrapArgs = runsIntegrationE2E
   : [
     '--require', path.join(testRoot, 'bootstrap-parallix-home.js')
   ];
-const sourceAliasArgs = runsIntegrationE2E
-  ? []
-  : ['--require', path.join(testRoot, 'source-runtime-alias.js')];
+// TASK-2288: the source-runtime-alias.js shim is retired. Test files now name
+// .test-runtime/ (or src/) directly instead of relying on a runtime resolver
+// hook to rewrite ../dist/ paths.
 const typeScriptLoaderArgs = testFiles.some(file => file.endsWith('.ts'))
   ? ['--import', 'tsx']
   : [];
@@ -213,7 +217,6 @@ const result = spawnSync(
   testNode,
   [
     ...bootstrapArgs,
-    ...sourceAliasArgs,
     ...typeScriptLoaderArgs,
     ...testForceExitArgs,
     '--test',

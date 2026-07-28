@@ -24,6 +24,10 @@ export interface ProductionApplicationServices {
   readonly operatorState: OperatorStateServices;
 }
 
+export interface ProductionApplicationServiceOptions {
+  readonly includeOperatorState?: boolean;
+}
+
 /**
  * Sole production construction point for the complete concrete graph.
  *
@@ -38,8 +42,11 @@ export interface ProductionApplicationServices {
 export async function createProductionApplicationServices(
   rootDir: string,
   activeProgress?: ProgressPort,
+  options: ProductionApplicationServiceOptions = {},
 ): Promise<ProductionApplicationServices> {
-  const operatorState = await materializeOperatorState();
+  const operatorState = options.includeOperatorState === false
+    ? { db: null, migrations: null, blocklist: null }
+    : await materializeOperatorState();
 
   return {
     active: new ActiveService(

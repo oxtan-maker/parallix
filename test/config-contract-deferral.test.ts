@@ -13,7 +13,7 @@ const {
   configCandidates,
   evaluateRepositoryReadiness,
   findWorkflowConfig,
-} = require('../dist/lib/core/product-config');
+} = require('../.test-runtime/lib/core/product-config');
 
 function withTempDir(fn) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-config-deferral-'));

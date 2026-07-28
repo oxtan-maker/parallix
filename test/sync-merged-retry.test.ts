@@ -1,8 +1,8 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { syncMerged, isStaleInfoPushRejection } = require('../dist/lib/tools/forgejo.js');
-const git = require('../dist/lib/core/git.js');
+const { syncMerged, isStaleInfoPushRejection } = require('../.test-runtime/lib/tools/forgejo.js');
+const git = require('../.test-runtime/lib/core/git.js');
 const { mock } = test;
 
 test('syncMerged retries push on stale info rejection with strong assertions', async (t) => {

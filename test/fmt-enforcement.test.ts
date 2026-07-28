@@ -4,10 +4,13 @@ const test = require('node:test');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const WORKFLOW_LIB = path.join(__dirname, '..', 'dist', 'lib');
-const WORKFLOW_INDEX = path.join(__dirname, '..', 'dist', 'index.js');
-// fmt.js is the centralized terminal sink — the one place allowed to call console.*
-const EXCLUDED = new Set(['fmt.js']);
+// Enforced against TypeScript source rather than a generated tree: the source
+// is authoritative after the transitional dist/ emitter was retired, and the
+// check no longer needs a build to have run first.
+const RUNTIME_LIB = path.join(__dirname, '..', 'src', 'platform', 'runtime', 'lib');
+const RUNTIME_INDEX = path.join(__dirname, '..', 'src', 'platform', 'runtime', 'index.ts');
+// fmt.ts is the centralized terminal sink — the one place allowed to call console.*
+const EXCLUDED = new Set(['fmt.ts']);
 const CONSOLE_RE = /console\.(log|error)/;
 // Catches raw status-prefix strings like '[INFO] ...' or `[FAIL] ...` passed directly to log sinks.
 // These bypass the coloring layer; use fmt.status('LEVEL', text) instead.
@@ -25,18 +28,18 @@ function findViolations(filePath) {
   }, []);
 }
 
-function walkJsFiles(rootDir) {
+function walkSourceFiles(rootDir) {
   return fs.readdirSync(rootDir, { withFileTypes: true }).flatMap(entry => {
     const fullPath = path.join(rootDir, entry.name);
-    if (entry.isDirectory()) return walkJsFiles(fullPath);
-    if (entry.isFile() && entry.name.endsWith('.js')) return [fullPath];
+    if (entry.isDirectory()) return walkSourceFiles(fullPath);
+    if (entry.isFile() && entry.name.endsWith('.ts') && !entry.name.endsWith('.d.ts')) return [fullPath];
     return [];
   });
 }
 
-test('no direct console.log/error calls in workflow/lib/**/*.js except fmt.js', () => {
-  const files = walkJsFiles(WORKFLOW_LIB)
-    .filter(f => path.basename(f) !== 'index.js')
+test('no direct console.log/error calls in src/platform/runtime/lib/**/*.ts except fmt.ts', () => {
+  const files = walkSourceFiles(RUNTIME_LIB)
+    .filter(f => path.basename(f) !== 'index.ts')
     .filter(f => !EXCLUDED.has(path.basename(f)));
 
   const violations = files.flatMap(findViolations);
@@ -44,8 +47,8 @@ test('no direct console.log/error calls in workflow/lib/**/*.js except fmt.js', 
     `Formatter violations found (use fmt.status/fmt.log.* instead):\n${violations.join('\n')}`);
 });
 
-test('no direct console.log/error calls in workflow/index.js', () => {
-  const violations = findViolations(WORKFLOW_INDEX);
+test('no direct console.log/error calls in src/platform/runtime/index.ts', () => {
+  const violations = findViolations(RUNTIME_INDEX);
   assert.deepEqual(violations, [],
-    `Formatter violations found in index.js (use fmt.status/fmt.log.* instead):\n${violations.join('\n')}`);
+    `Formatter violations found in index.ts (use fmt.status/fmt.log.* instead):\n${violations.join('\n')}`);
 });

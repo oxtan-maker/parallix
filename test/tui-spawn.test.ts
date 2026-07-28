@@ -26,13 +26,9 @@ function runArtifact(args: string[], options: Parameters<typeof execFileSync>[2]
 }
 
 describe('px ui spawns and exits 0 from shipped artifacts', () => {
-  let distPxExists = false;
-  let buildPxExists = false;
   let fixtureRoot = '';
 
   before(() => {
-    distPxExists = fs.existsSync(path.join(root, 'dist', 'px.js'));
-    buildPxExists = fs.existsSync(path.join(root, 'build', 'px.mjs'));
     fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-tui-spawn-'));
     fs.mkdirSync(path.join(fixtureRoot, 'backlog', 'tasks'), { recursive: true });
     fs.writeFileSync(path.join(fixtureRoot, 'backlog', 'tasks', 'task-spawn.md'), [
@@ -40,36 +36,14 @@ describe('px ui spawns and exits 0 from shipped artifacts', () => {
     ].join('\n'));
   });
 
-  it('dist/px.js ui exits 0 (CJS rollback artifact)', () => {
-    if (!distPxExists) {
-      // Skip if dist/ not built (e.g., test run before build)
-      return;
-    }
-    const result = runArtifact([path.join(root, 'dist', 'px.js'), 'ui'], {
-      cwd: fixtureRoot,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      timeout: 30_000,
-      maxBuffer: 1024 * 1024, // 1 MB
-      encoding: 'utf8',
-    });
-    if (result === null) {
-      return;
-    }
-    assert.ok(
-      typeof result === 'string' && result.length > 0,
-      'dist/px.js ui must produce non-empty output',
-    );
-    assert.ok(
-      result.includes('px board') || result.includes('board'),
-      'dist/px.js ui output must contain board label',
-    );
-  });
-
+  // TASK-2288 retired the transitional dist/ CommonJS tree, so build/px.mjs is
+  // the only shipped artifact left to spawn. The test runner always builds
+  // before the suite, so a missing bundle is a failure rather than a skip.
   it('build/px.mjs ui exits 0 (ESM single-file bundle)', () => {
-    if (!buildPxExists) {
-      // Skip if bundle not built
-      return;
-    }
+    assert.ok(
+      fs.existsSync(path.join(root, 'build', 'px.mjs')),
+      'build/px.mjs must exist after npm run build',
+    );
     const result = runArtifact([path.join(root, 'build', 'px.mjs'), 'ui'], {
       cwd: fixtureRoot,
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -90,11 +64,8 @@ describe('px ui spawns and exits 0 from shipped artifacts', () => {
     );
   });
 
-  it('dist/px.js status still exits 0 (headless path unchanged)', () => {
-    if (!distPxExists) {
-      return;
-    }
-    const result = runArtifact(['dist/px.js', 'status'], {
+  it('build/px.mjs status still exits 0 (headless path unchanged)', () => {
+    const result = runArtifact([path.join(root, 'build', 'px.mjs'), 'status'], {
       cwd: root,
       stdio: ['pipe', 'pipe', 'pipe'],
       timeout: 30_000,

@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const mutationGate = require('../dist/lib/commands/mutation-gate');
+const mutationGate = require('../.test-runtime/lib/commands/mutation-gate');
 const {
   parseArgs,
   loadBaseline,

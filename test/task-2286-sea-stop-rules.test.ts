@@ -16,7 +16,7 @@ const {
   SeaStopAndReassessError,
   assertSurface,
   evaluateSeaRuntime,
-} = require('../scripts/sea-surfaces.js');
+} = require('../scripts/sea-surfaces.ts');
 
 const ROOT = path.resolve(__dirname, '..');
 
@@ -94,7 +94,7 @@ test('SEA build adapter: restricted areas are untouched by the SEA proof', () =>
   // ADR 0044 requires npm and the executable to run the same canonical bundle.
   // The adapter therefore consumes build/px.mjs and must never write into the
   // canonical builder, the bundle payload, or the npm bin entry.
-  const adapter = fs.readFileSync(path.join(ROOT, 'scripts/build-sea.js'), 'utf8');
+  const adapter = fs.readFileSync(path.join(ROOT, 'scripts/build-sea.ts'), 'utf8');
   assert.doesNotMatch(adapter, /require\(['"]esbuild['"]\)/, 'the SEA adapter must not re-bundle the payload');
   assert.match(adapter, /fs\.copyFileSync\(bundlePath, seaMain\)/, 'the SEA adapter reads the canonical bundle as its input');
   assert.doesNotMatch(

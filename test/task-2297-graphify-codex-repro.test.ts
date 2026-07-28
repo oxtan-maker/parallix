@@ -1,7 +1,8 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 // Reproduction test for task-2297: graphify does not work for codex
 //
@@ -67,7 +68,6 @@ test('queryGraph from worktree without graph returns actionable missing-graph re
   // Exercise the programmatic queryGraph helper with mocked dependencies.
   // This verifies the active-worktree resolution path that the Codex-facing
   // query uses via the AGENTS.md instruction mechanism.
-  const os = require('node:os');
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'graphify-codex-repro-'));
 
   try {
@@ -84,8 +84,8 @@ test('queryGraph from worktree without graph returns actionable missing-graph re
       'utf8'
     );
 
-    // Load from the compiled dist bundle (CJS entry used by mission-utils-graphify.test.ts)
-    const { resolveGraphPath, queryGraph } = require(path.resolve(__dirname, '..', 'dist/lib/core/mission-utils'));
+    // Load from source (ESM)
+    const { resolveGraphPath, queryGraph } = await import('../src/platform/runtime/lib/core/mission-utils.js');
 
     // --- Scenario 1: active worktree has NO graph ---
     // resolveGraphPath must return null for the active worktree (no graph)
@@ -97,7 +97,7 @@ test('queryGraph from worktree without graph returns actionable missing-graph re
     const siblingResult = resolveGraphPath({ rootDir: siblingWorktree });
     assert.ok(siblingResult, 'resolveGraphPath must return result when graph.json exists');
     assert.strictEqual(siblingResult.graphPath, path.join(siblingWorktree, 'graphify-out', 'graph.json'));
-    assert.ok(siblingResult.graphPath.startsWith('/'), 'graphPath must be absolute');
+    assert.ok((siblingResult.graphPath as string).startsWith('/'), 'graphPath must be absolute');
 
     // queryGraph must return actionable missing-graph for active worktree (mocked)
     const queryResult = queryGraph({
@@ -126,8 +126,8 @@ test('queryGraph from worktree without graph returns actionable missing-graph re
     );
 
     // Capturing command runner: record the arguments passed to graphify
-    let capturedArgs = null;
-    const capturingRunner = (cmd, args) => {
+    let capturedArgs: string[] | null = null;
+    const capturingRunner = (_cmd: string, args: string[]) => {
       capturedArgs = args;
       return { status: 0, stdout: 'query output' };
     };
@@ -143,9 +143,9 @@ test('queryGraph from worktree without graph returns actionable missing-graph re
     assert.ok(capturedArgs, 'commandRunner must have been called');
 
     // The --graph argument must use the active worktree's path, not the sibling's
-    const graphFlagIndex = capturedArgs.indexOf('--graph');
+    const graphFlagIndex = capturedArgs!.indexOf('--graph');
     assert.ok(graphFlagIndex >= 0, '--graph flag must be present in query args');
-    const graphPathArg = capturedArgs[graphFlagIndex + 1];
+    const graphPathArg = capturedArgs![graphFlagIndex + 1];
     assert.strictEqual(graphPathArg, path.join(activeWorktree, 'graphify-out', 'graph.json'),
       '--graph must use active worktree path, not sibling');
     assert.ok(
@@ -170,7 +170,6 @@ test('Codex launcher sets cwd to active worktree so $(pwd)/graphify-out resolves
   // shell resolve to the active worktree. Combined with AGENTS.md instructions
   // to use $(pwd)/graphify-out/graph.json, this ensures the graph path never
   // resolves to a sibling worktree.
-  const os = require('node:os');
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'graphify-codex-launcher-'));
 
   try {
@@ -192,15 +191,15 @@ test('Codex launcher sets cwd to active worktree so $(pwd)/graphify-out resolves
       'utf8'
     );
 
-    // Load buildCodexDraftInvocation from the compiled dist bundle
-    const { __setSpawnAndTeeForTest, __setSessionsForTest, startCodexDraftAgent } =
-      require(path.resolve(__dirname, '..', 'dist/lib/agents/codex'));
+    // Load from source (ESM)
+    const codex = await import('../src/platform/runtime/lib/agents/codex.js');
+    const { __setSpawnAndTeeForTest, __setSessionsForTest, startCodexDraftAgent } = codex;
 
     // Capture the spawnAndTee call to inspect cwd and env
-    let capturedCwd = null;
-    let capturedEnv = null;
-    let capturedArgs = null;
-    __setSpawnAndTeeForTest((cmd, args, options) => {
+    let capturedCwd: string | null = null;
+    let capturedEnv: Record<string, string> | null = null;
+    let capturedArgs: string[] | null = null;
+    __setSpawnAndTeeForTest((cmd: string, args: string[], options: { cwd: string; env: Record<string, string> }) => {
       capturedCwd = options.cwd;
       capturedEnv = options.env;
       capturedArgs = args;
@@ -230,7 +229,7 @@ test('Codex launcher sets cwd to active worktree so $(pwd)/graphify-out resolves
 
     // The cwd must NOT be the sibling worktree
     assert.ok(
-      !capturedCwd.includes(path.basename(siblingWorktree)),
+      !capturedCwd!.includes(path.basename(siblingWorktree)),
       'Codex launcher cwd must NOT reference sibling worktree'
     );
 

@@ -194,7 +194,7 @@ This is a tool for a local-first developer workflow on one machine, driven by an
 ## Development
 
 ```sh
-npm test     # FORCE_COLOR=0 node --test test/run-default-tests.js
+npm test     # FORCE_COLOR=0 tsx test/run-default-tests.ts
 npm run test:integration  # real process, Git/worktree, package, and local-network boundary coverage
 ```
 
@@ -206,7 +206,7 @@ script:
 
 ```sh
 npm run build
-node dist/index.js <command>
+node build/px.mjs <command>
 
 # Direct-source development path
 npm run dev -- <command>

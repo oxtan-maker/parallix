@@ -7,7 +7,7 @@
  * the rationale and lifecycle placement (pre-integrate, not per-checkpoint).
  *
  * Usage:
- *   node dist/lib/commands/mutation-gate.js [--dry-run] [--base <branch>] [--head <ref>]
+ *   node .test-runtime/lib/commands/mutation-gate.js [--dry-run] [--base <branch>] [--head <ref>]
  *     [--baseline-path <path>] [--threshold <pct>]
  *
  * Exit 0 when every diff-scoped file's mutation score is >= its baseline
@@ -309,7 +309,16 @@ function run(args: string[] = [], options: MutationGateOptions = {}) {
   }
 }
 
-if (typeof require !== 'undefined' && require.main === module) {
+// Entry detection for both module systems: `require.main` under the CommonJS
+// test runtime, and the invoked script path when run as an ESM script
+// (`tsx src/platform/runtime/lib/commands/mutation-gate.ts`).
+//
+// Deliberately NOT compared against import.meta.url: this module is inlined
+// into the canonical bundle, where every inlined module reports the bundle's
+// own URL. That would make the gate run on every `px` command.
+const isCjsEntry = typeof require !== 'undefined' && require.main === module;
+const isEsmEntry = Boolean(process.argv[1]) && /[\\/]mutation-gate\.ts$/.test(process.argv[1]);
+if (isCjsEntry || isEsmEntry) {
   run(process.argv.slice(2));
 }
 

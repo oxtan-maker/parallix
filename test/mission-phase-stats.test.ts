@@ -3,7 +3,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { renderMissionPhaseReport, normalizeStatsRow } = require('../dist/lib/commands/stats');
+const { renderMissionPhaseReport, normalizeStatsRow } = require('../.test-runtime/lib/commands/stats');
 
 // task-1285: prove `node parallix stats <mission>` breaks one mission down by
 // phase (draft / execute / review) from stored telemetry rows, and that the

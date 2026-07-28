@@ -5,20 +5,20 @@ const fs = require('fs');
 const path = require('path');
 const { mock } = test;
 
-const git = require('../dist/lib/core/git');
-const missionUtils = require('../dist/lib/core/mission-utils');
-const backlog = require('../dist/lib/tools/backlog');
-const forgejo = require('../dist/lib/tools/forgejo');
-const stats = require('../dist/lib/commands/stats');
-const verification = require('../dist/lib/core/verification');
+const git = require('../.test-runtime/lib/core/git');
+const missionUtils = require('../.test-runtime/lib/core/mission-utils');
+const backlog = require('../.test-runtime/lib/tools/backlog');
+const forgejo = require('../.test-runtime/lib/tools/forgejo');
+const stats = require('../.test-runtime/lib/commands/stats');
+const verification = require('../.test-runtime/lib/core/verification');
 
 const TEST_SLUG = 'task-integrate-test';
 const FAKE_ROOT = '/tmp/integrate-test-root';
 const WORKTREE = path.join(FAKE_ROOT, '..', TEST_SLUG);
 
 function loadIntegrate() {
-  delete require.cache[require.resolve('../dist/lib/commands/integrate')];
-  return require('../dist/lib/commands/integrate');
+  delete require.cache[require.resolve('../.test-runtime/lib/commands/integrate')];
+  return require('../.test-runtime/lib/commands/integrate');
 }
 
 function setupMocks() {

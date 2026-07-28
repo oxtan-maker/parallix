@@ -1,5 +1,10 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import childProcess from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { startReviewLoop } from '../src/platform/runtime/lib/review/review.js';
 
 // Reproduction test for task-2240: when Forgejo is activated, the mission
 // pull request is not updated between agent rounds. Each round's committed
@@ -21,10 +26,13 @@ const TEST_SLUG = `task-2240-test-${process.pid}`;
 // ---------------------------------------------------------------------------
 // Helper: build a standard set of injected dependencies for startReviewLoop
 // ---------------------------------------------------------------------------
-function baseLoopOpts(overrides = {}) {
+// The injected bag is a deliberately partial set of stubs, so it is typed as a
+// loose record rather than startReviewLoop's full options type — the same shape
+// test/task-2239-rereview-after-response.test.ts uses.
+function baseLoopOpts(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
-    resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
+    resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md', matches: ['/tmp/task.md'] }),
     implementer: 'claude',
     reviewer: 'codex',
     dryRun: false,
@@ -39,10 +47,10 @@ function baseLoopOpts(overrides = {}) {
     readReviewStateFn: () => null,
     writeReviewStateFn: () => {},
     rebaseBeforeReviewRoundFn: async () => ({ ok: true, sharedFileConflicts: false }),
-    startAgentFn: async (step, options) => {
+    startAgentFn: async (step: string, options: { agent: string }) => {
       return { agent: null };
     },
-    applyAgentFallbackFn: (args) => args.original,
+    applyAgentFallbackFn: (args: { original: string }) => args.original,
     buildCompactReviewPromptFn: () => 'review prompt',
     buildCompactActOnReviewPromptFn: () => 'act-on-review prompt',
     log: () => {},
@@ -61,10 +69,8 @@ function baseLoopOpts(overrides = {}) {
 // SC1 + SC2: Push happens after CHANGES_MADE disposition (round boundary)
 // ---------------------------------------------------------------------------
 test('Forgejo PR round sync: mission branch is pushed after implementer CHANGES_MADE before next round', async () => {
-  const { startReviewLoop } = require('../dist/lib/review/review');
-
-  const pushCalls = [];
-  const pushReviewRefFn = (sourceRef, destinationRef, rootDir, opts) => {
+  const pushCalls: Array<{ sourceRef: string; destinationRef: string; rootDir: string; opts: Record<string, unknown> }> = [];
+  const pushReviewRefFn = (sourceRef: string, destinationRef: string, rootDir: string, opts: Record<string, unknown>) => {
     pushCalls.push({ sourceRef, destinationRef, rootDir, opts });
     return { status: 0, stdout: '', stderr: '' };
   };
@@ -74,8 +80,8 @@ test('Forgejo PR round sync: mission branch is pushed after implementer CHANGES_
 
   await startReviewLoop(TEST_SLUG, {
     ...baseLoopOpts({
-      pollForReviewFn: async () => reviewOutcomes.shift(),
-      pollForDispositionFn: async () => dispositions.shift(),
+      pollForReviewFn: async () => reviewOutcomes.shift()!,
+      pollForDispositionFn: async () => dispositions.shift()!,
       pushReviewRefFn,
       // This mocked implementer does not advance real git HEAD, so use the
       // test seam to declare a new commit and isolate the push wiring. The
@@ -118,10 +124,8 @@ test('Forgejo PR round sync: mission branch is pushed after implementer CHANGES_
 // SC3: Same PR updated across multiple rounds (not replaced)
 // ---------------------------------------------------------------------------
 test('Forgejo PR round sync: second round updates the same PR, not a replacement', async () => {
-  const { startReviewLoop } = require('../dist/lib/review/review');
-
-  const pushCalls = [];
-  const pushReviewRefFn = (sourceRef, destinationRef, rootDir, opts) => {
+  const pushCalls: Array<{ sourceRef: string; destinationRef: string; rootDir: string; opts: Record<string, unknown> }> = [];
+  const pushReviewRefFn = (sourceRef: string, destinationRef: string, rootDir: string, opts: Record<string, unknown>) => {
     pushCalls.push({ sourceRef, destinationRef, rootDir, opts });
     return { status: 0, stdout: '', stderr: '' };
   };
@@ -133,8 +137,8 @@ test('Forgejo PR round sync: second round updates the same PR, not a replacement
   await startReviewLoop(TEST_SLUG, {
     ...baseLoopOpts({
       maxAttempts: 3,
-      pollForReviewFn: async () => reviewOutcomes.shift(),
-      pollForDispositionFn: async () => dispositions.shift(),
+      pollForReviewFn: async () => reviewOutcomes.shift()!,
+      pollForDispositionFn: async () => dispositions.shift()!,
       pushReviewRefFn,
       // Mocked implementer; use the test seam to declare a new commit. The real
       // branch-HEAD boundary comparison is covered by the real-Git tests.
@@ -162,9 +166,7 @@ test('Forgejo PR round sync: second round updates the same PR, not a replacement
 // SC4a: Forgejo-inactive mission does not trigger the round-boundary push
 // ---------------------------------------------------------------------------
 test('Forgejo PR round sync: no push when Forgejo is not activated', async () => {
-  const { startReviewLoop } = require('../dist/lib/review/review');
-
-  const pushCalls = [];
+  const pushCalls: number[] = [];
   const pushReviewRefFn = () => {
     pushCalls.push(1);
     return { status: 0, stdout: '', stderr: '' };
@@ -190,9 +192,7 @@ test('Forgejo PR round sync: no push when Forgejo is not activated', async () =>
 // SC4b: Non-CHANGES_MADE dispositions (APPROVED) do not trigger the push
 // ---------------------------------------------------------------------------
 test('Forgejo PR round sync: no push after APPROVED disposition (loop exits)', async () => {
-  const { startReviewLoop } = require('../dist/lib/review/review');
-
-  const pushCalls = [];
+  const pushCalls: number[] = [];
   const pushReviewRefFn = () => {
     pushCalls.push(1);
     return { status: 0, stdout: '', stderr: '' };
@@ -218,9 +218,7 @@ test('Forgejo PR round sync: no push after APPROVED disposition (loop exits)', a
 // SC4c: Non-CHANGES_MADE dispositions (BLOCKED) do not trigger the push
 // ---------------------------------------------------------------------------
 test('Forgejo PR round sync: no push after BLOCKED disposition (loop exits)', async () => {
-  const { startReviewLoop } = require('../dist/lib/review/review');
-
-  const pushCalls = [];
+  const pushCalls: number[] = [];
   const pushReviewRefFn = () => {
     pushCalls.push(1);
     return { status: 0, stdout: '', stderr: '' };
@@ -246,9 +244,7 @@ test('Forgejo PR round sync: no push after BLOCKED disposition (loop exits)', as
 // SC4d: Non-CHANGES_MADE dispositions (PARKED) do not trigger the push
 // ---------------------------------------------------------------------------
 test('Forgejo PR round sync: no push after PARKED disposition (loop exits)', async () => {
-  const { startReviewLoop } = require('../dist/lib/review/review');
-
-  const pushCalls = [];
+  const pushCalls: number[] = [];
   const pushReviewRefFn = () => {
     pushCalls.push(1);
     return { status: 0, stdout: '', stderr: '' };
@@ -274,9 +270,7 @@ test('Forgejo PR round sync: no push after PARKED disposition (loop exits)', asy
 // SC4e: PUSHBACK_ALL disposition does not trigger the push
 // ---------------------------------------------------------------------------
 test('Forgejo PR round sync: no push after PUSHBACK_ALL disposition (loop exits)', async () => {
-  const { startReviewLoop } = require('../dist/lib/review/review');
-
-  const pushCalls = [];
+  const pushCalls: number[] = [];
   const pushReviewRefFn = () => {
     pushCalls.push(1);
     return { status: 0, stdout: '', stderr: '' };
@@ -302,11 +296,9 @@ test('Forgejo PR round sync: no push after PUSHBACK_ALL disposition (loop exits)
 // F1: Stale-info retry — first push rejected, fetch-retry succeeds
 // ---------------------------------------------------------------------------
 test('Forgejo PR round sync: stale-info rejection triggers fetch-retry then succeeds', async () => {
-  const { startReviewLoop } = require('../dist/lib/review/review');
-
-  const pushCalls = [];
+  const pushCalls: Array<{ sourceRef: string; destinationRef: string; rootDir: string; opts: Record<string, unknown> }> = [];
   let staleRoundSeen = false;
-  const pushReviewRefFn = (sourceRef, destinationRef, rootDir, opts) => {
+  const pushReviewRefFn = (sourceRef: string, destinationRef: string, rootDir: string, opts: Record<string, unknown>) => {
     pushCalls.push({ sourceRef, destinationRef, rootDir, opts });
     // First call overall: stale info rejection
     if (!staleRoundSeen) {
@@ -317,13 +309,13 @@ test('Forgejo PR round sync: stale-info rejection triggers fetch-retry then succ
     return { status: 0, stdout: '', stderr: '' };
   };
 
-  const fetchCalls = [];
-  const fetchReviewBranchFn = (branch, rootDir, opts) => {
+  const fetchCalls: Array<{ branch: string; rootDir: string; opts: Record<string, unknown> }> = [];
+  const fetchReviewBranchFn = (branch: string, rootDir: string, opts: Record<string, unknown>) => {
     fetchCalls.push({ branch, rootDir, opts });
     return { status: 0, stdout: '', stderr: '' };
   };
 
-  const isStaleInfoPushRejectionFn = (result) => {
+  const isStaleInfoPushRejectionFn = (result: { status: number; stderr: string; stdout: string }) => {
     return result && result.status !== 0 && /stale info/i.test(result.stderr || result.stdout || '');
   };
 
@@ -333,8 +325,8 @@ test('Forgejo PR round sync: stale-info rejection triggers fetch-retry then succ
 
   await startReviewLoop(TEST_SLUG, {
     ...baseLoopOpts({
-      pollForReviewFn: async () => reviewOutcomes.shift(),
-      pollForDispositionFn: async () => dispositions.shift(),
+      pollForReviewFn: async () => reviewOutcomes.shift()!,
+      pollForDispositionFn: async () => dispositions.shift()!,
       pushReviewRefFn,
       isStaleInfoPushRejectionFn,
       fetchReviewBranchFn,
@@ -369,21 +361,19 @@ test('Forgejo PR round sync: stale-info rejection triggers fetch-retry then succ
 // F2: Push result status check — non-zero status routes to WARN
 // ---------------------------------------------------------------------------
 test('Forgejo PR round sync: push failure after all retries logs WARN and does not throw', async () => {
-  const { startReviewLoop } = require('../dist/lib/review/review');
-
-  const pushCalls = [];
-  const pushReviewRefFn = (sourceRef, destinationRef, rootDir, opts) => {
+  const pushCalls: Array<{ sourceRef: string; destinationRef: string; rootDir: string; opts: Record<string, unknown> }> = [];
+  const pushReviewRefFn = (sourceRef: string, destinationRef: string, rootDir: string, opts: Record<string, unknown>) => {
     pushCalls.push({ sourceRef, destinationRef, rootDir, opts });
     // All calls fail with non-zero status (not stale-info)
     return { status: 1, stdout: '', stderr: 'push failed: connection reset' };
   };
 
-  const isStaleInfoPushRejectionFn = (result) => {
+  const isStaleInfoPushRejectionFn = (result: { status: number; stderr: string; stdout: string }) => {
     return result && result.status !== 0 && /stale info/i.test(result.stderr || result.stdout || '');
   };
 
-  const logMessages = [];
-  const log = (msg) => logMessages.push(msg);
+  const logMessages: Array<string | unknown> = [];
+  const log = (msg: unknown) => logMessages.push(msg);
 
   // One round: REQUEST_CHANGES → CHANGES_MADE, then APPROVED exits loop
   const reviewOutcomes = ['REQUEST_CHANGES', 'APPROVED'];
@@ -391,8 +381,8 @@ test('Forgejo PR round sync: push failure after all retries logs WARN and does n
 
   await startReviewLoop(TEST_SLUG, {
     ...baseLoopOpts({
-      pollForReviewFn: async () => reviewOutcomes.shift(),
-      pollForDispositionFn: async () => dispositions.shift(),
+      pollForReviewFn: async () => reviewOutcomes.shift()!,
+      pollForDispositionFn: async () => dispositions.shift()!,
       pushReviewRefFn,
       isStaleInfoPushRejectionFn,
       log,
@@ -420,9 +410,7 @@ test('Forgejo PR round sync: push failure after all retries logs WARN and does n
 // F1: No-new-commit guard — CHANGES_MADE with no committed change skips push
 // ---------------------------------------------------------------------------
 test('Forgejo PR round sync: no push when CHANGES_MADE but hasNewCommittedChange is false', async () => {
-  const { startReviewLoop } = require('../dist/lib/review/review');
-
-  const pushCalls = [];
+  const pushCalls: number[] = [];
   const pushReviewRefFn = () => {
     pushCalls.push(1);
     return { status: 0, stdout: '', stderr: '' };
@@ -436,8 +424,8 @@ test('Forgejo PR round sync: no push when CHANGES_MADE but hasNewCommittedChange
 
   await startReviewLoop(TEST_SLUG, {
     ...baseLoopOpts({
-      pollForReviewFn: async () => reviewOutcomes.shift(),
-      pollForDispositionFn: async () => dispositions.shift(),
+      pollForReviewFn: async () => reviewOutcomes.shift()!,
+      pollForDispositionFn: async () => dispositions.shift()!,
       pushReviewRefFn,
       hasNewCommittedChangeFn,
     }),
@@ -466,17 +454,11 @@ test('Forgejo PR round sync: no push when CHANGES_MADE but hasNewCommittedChange
 // fail. After the fix it is green.
 // ---------------------------------------------------------------------------
 test('Forgejo PR round sync: PR ref publishes round-one commit before round two and accumulates both round commits (real Git)', async () => {
-  const { startReviewLoop } = require('../dist/lib/review/review');
-  const { execSync } = require('node:child_process');
-  const fs = require('node:fs');
-  const os = require('node:os');
-  const path = require('node:path');
-
   const slug = `${TEST_SLUG}-real-git`;
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'forgejo-sync-'));
   const branch = `mission/${slug}`;
 
-  const sh = (cmd, cwd) => execSync(cmd, { cwd, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+  const sh = (cmd: string, cwd: string) => childProcess.execSync(cmd, { cwd, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
 
   // Create a bare "review remote" repo
   const remoteDir = path.join(tmpDir, 'remote.git');
@@ -503,8 +485,8 @@ test('Forgejo PR round sync: PR ref publishes round-one commit before round two 
     catch { return null; }
   };
 
-  const pushedShas = [];
-  const pushReviewRefFn = (sourceRef, destinationRef, rootDir, opts) => {
+  const pushedShas: Array<{ sourceRef: string; destinationRef: string; headSha: string; opts: Record<string, unknown> }> = [];
+  const pushReviewRefFn = (sourceRef: string, destinationRef: string, rootDir: string, opts: Record<string, unknown>) => {
     const headSha = sh(`git -C ${rootDir} rev-parse ${sourceRef}`, rootDir);
     // Push to the real review remote so the ref reflects the PR branch state.
     sh(`git -C ${rootDir} push review ${sourceRef}:${destinationRef} --force-with-lease`, rootDir);
@@ -522,10 +504,10 @@ test('Forgejo PR round sync: PR ref publishes round-one commit before round two 
   // boundary, and the implementer launches to create distinct per-round commits.
   let reviewLaunches = 0;
   let actOnReviewLaunches = 0;
-  const remoteRefAtRoundStart = {}; // round number -> remote branch SHA when that round's reviewer began
+  const remoteRefAtRoundStart: Record<number, string> = {}; // round number -> remote branch SHA when that round's reviewer began
   const remoteHead = () => sh(`git -C ${remoteDir} rev-parse ${branch}`, remoteDir);
 
-  const startAgentFn = async (step) => {
+  const startAgentFn = async (step: string) => {
     if (step === 'review') {
       reviewLaunches++;
       // Record the remote ref exactly when this round's reviewer begins.
@@ -549,8 +531,8 @@ test('Forgejo PR round sync: PR ref publishes round-one commit before round two 
     ...baseLoopOpts({
       maxAttempts: 3,
       worktree,
-      pollForReviewFn: async () => reviewOutcomes.shift(),
-      pollForDispositionFn: async () => dispositions.shift(),
+      pollForReviewFn: async () => reviewOutcomes.shift()!,
+      pollForDispositionFn: async () => dispositions.shift()!,
       pushReviewRefFn,
       startAgentFn,
     }),
@@ -585,7 +567,7 @@ test('Forgejo PR round sync: PR ref publishes round-one commit before round two 
   const round2Head = sh(`git -C ${worktree} rev-parse HEAD`, worktree);
   assert.equal(finalRemoteHead, round2Head, 'Final PR ref matches the round-two branch HEAD');
   // round1 is an ancestor of the final ref, and round2 (the file) is present in its tree.
-  execSync(`git -C ${remoteDir} merge-base --is-ancestor ${round1Commit} ${finalRemoteHead}`, { cwd: remoteDir });
+  childProcess.execSync(`git -C ${remoteDir} merge-base --is-ancestor ${round1Commit} ${finalRemoteHead}`, { cwd: remoteDir });
   const finalTree = sh(`git -C ${remoteDir} ls-tree -r --name-only ${finalRemoteHead}`, remoteDir).split('\n');
   assert.ok(finalTree.includes('round1-change.txt'), 'Final PR ref tree contains round-one change');
   assert.ok(finalTree.includes('round2-change.txt'), 'Final PR ref tree contains round-two change');
@@ -600,16 +582,10 @@ test('Forgejo PR round sync: PR ref publishes round-one commit before round two 
 // so this proves the default path — not a test-only seam — skips the push.
 // ---------------------------------------------------------------------------
 test('Forgejo PR round sync: production default skips push when CHANGES_MADE advances no commit (real Git)', async () => {
-  const { startReviewLoop } = require('../dist/lib/review/review');
-  const { execSync } = require('node:child_process');
-  const fs = require('node:fs');
-  const os = require('node:os');
-  const path = require('node:path');
-
   const slug = `${TEST_SLUG}-real-git-nochange`;
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'forgejo-sync-nc-'));
   const branch = `mission/${slug}`;
-  const sh = (cmd, cwd) => execSync(cmd, { cwd, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+  const sh = (cmd: string, cwd: string) => childProcess.execSync(cmd, { cwd, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
 
   const worktree = path.join(tmpDir, 'worktree');
   fs.mkdirSync(worktree, { recursive: true });
@@ -621,7 +597,7 @@ test('Forgejo PR round sync: production default skips push when CHANGES_MADE adv
   sh("git commit -m 'initial'", worktree);
   sh(`git checkout -b ${branch}`, worktree);
 
-  const pushCalls = [];
+  const pushCalls: number[] = [];
   const pushReviewRefFn = () => { pushCalls.push(1); return { status: 0, stdout: '', stderr: '' }; };
 
   const reviewOutcomes = ['REQUEST_CHANGES', 'APPROVED'];
@@ -633,8 +609,8 @@ test('Forgejo PR round sync: production default skips push when CHANGES_MADE adv
   await startReviewLoop(slug, {
     ...baseLoopOpts({
       worktree,
-      pollForReviewFn: async () => reviewOutcomes.shift(),
-      pollForDispositionFn: async () => dispositions.shift(),
+      pollForReviewFn: async () => reviewOutcomes.shift()!,
+      pollForDispositionFn: async () => dispositions.shift()!,
       pushReviewRefFn,
       startAgentFn,
       // NOTE: hasNewCommittedChangeFn intentionally NOT injected — this
@@ -659,10 +635,8 @@ test('Forgejo PR round sync: production default skips push when CHANGES_MADE adv
 // open so the push still fires.
 // ---------------------------------------------------------------------------
 test('Forgejo PR round sync: resume with existing CHANGES_MADE still pushes (implementer skipped)', async () => {
-  const { startReviewLoop } = require('../dist/lib/review/review');
-
-  const pushCalls = [];
-  const pushReviewRefFn = (sourceRef, destinationRef, rootDir, opts) => {
+  const pushCalls: Array<{ sourceRef: string; destinationRef: string; opts: Record<string, unknown> }> = [];
+  const pushReviewRefFn = (sourceRef: string, destinationRef: string, _rootDir: string, opts: Record<string, unknown>) => {
     pushCalls.push({ sourceRef, destinationRef, opts });
     return { status: 0, stdout: '', stderr: '' };
   };

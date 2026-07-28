@@ -341,3 +341,7 @@ tsc clean, test-hygiene clean)
 - `missions/task-1269/MISSION.md`: Mission specification
 - `missions/task-1269/CP-1.md`: POC verification
 - arxiv 2510.09907; earezki.com, "Tests Are Everything in Agentic AI"
+
+## Reconciliation addendum (2026-07-27, task-2288)
+
+The original decision for diff-scoped mutation testing with ratchet enforcement remains in effect. The 2026-07-18 correction in §1 noted that `npm run build` emits the runtime under `dist/` and tests target `dist/lib/**/*.js`. This is superseded: the transitional CommonJS `dist/` tree has been retired. The mutation scoper now targets TypeScript source files under `src/platform/runtime/lib/` directly, and the gate executes via `tsx` rather than `node --test` against compiled `.js`. The `toRuntimePath()` mapping and `isInScope()` logic have been updated accordingly (`src/platform/runtime/lib/core/mutation-scoper.ts`). The diff-scoped + ratchet design, StrykerJS via the `command` runner, and all operational consequences are unchanged.

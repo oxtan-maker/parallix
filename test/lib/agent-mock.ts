@@ -2,19 +2,33 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-function jsString(value) {
+interface MockResult {
+  status: number;
+  signal: string | null;
+  stdout: string;
+  stderr: string;
+  sessionId?: string;
+}
+
+function jsString(value: unknown): string {
   return JSON.stringify(String(value ?? ''));
 }
 
-function buildMockResult(status = 0, signal = null, stdout = '', stderr = '', sessionId = null) {
-  const result = { status, signal, stdout, stderr };
+function buildMockResult(
+  status = 0,
+  signal: string | null = null,
+  stdout = '',
+  stderr = '',
+  sessionId: string | null = null,
+): MockResult {
+  const result: MockResult = { status, signal, stdout, stderr };
   if (sessionId !== null && sessionId !== undefined) {
     result.sessionId = sessionId;
   }
   return result;
 }
 
-function writeLauncher(tmpRoot, name, body) {
+function writeLauncher(tmpRoot: string, name: string, body: string): string {
   fs.mkdirSync(tmpRoot, { recursive: true });
   const launcherPath = path.join(tmpRoot, name);
   fs.writeFileSync(launcherPath, `#!${process.execPath}\n${body}`);
@@ -25,9 +39,8 @@ function writeLauncher(tmpRoot, name, body) {
 function createLauncherWithScript({
   tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-agent-script-')),
   name = 'script-launcher',
-  // @ts-expect-error TS2339 Property 'script' does not exist on type '{ tmpRoot?: string; name?: string; }'.
   script
-} = {}) {
+}: { tmpRoot?: string; name?: string; script?: string } = {}): string {
   return writeLauncher(tmpRoot, name, script || 'process.exit(0);\n');
 }
 
@@ -41,7 +54,17 @@ function createLauncherWithOutput({
   delayMs = 0,
   signal = null,
   sessionId = null
-} = {}) {
+}: {
+  tmpRoot?: string;
+  name?: string;
+  stdout?: string;
+  stderr?: string;
+  exitCode?: number;
+  healthOk?: boolean;
+  delayMs?: number;
+  signal?: string | null;
+  sessionId?: string | null;
+} = {}): string {
   const body = [
     "const args = process.argv.slice(2);",
     "if (args.includes('--help')) {",
@@ -59,20 +82,20 @@ function createLauncherWithOutput({
   return writeLauncher(tmpRoot, name, body);
 }
 
-function createDummyLauncher(tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-agent-dummy-'))) {
+function createDummyLauncher(tmpRoot: string = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-agent-dummy-'))): string {
   return createLauncherWithOutput({ tmpRoot, name: 'dummy-launcher', exitCode: 0, healthOk: true });
 }
 
-function createFailLauncher(exitCode = 1, tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-agent-fail-'))) {
+function createFailLauncher(exitCode = 1, tmpRoot: string = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-agent-fail-'))): string {
   return createLauncherWithOutput({ tmpRoot, name: `fail-launcher-${exitCode}`, exitCode, healthOk: true });
 }
 
-function createSpawnErrorLauncher(code = 'ENOENT', tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-agent-spawn-error-'))) {
+function createSpawnErrorLauncher(code = 'ENOENT', tmpRoot: string = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-agent-spawn-error-'))): string {
   fs.mkdirSync(tmpRoot, { recursive: true });
   return path.join(tmpRoot, `missing-launcher-${code}`);
 }
 
-function cleanupLauncher(launcherPath) {
+function cleanupLauncher(launcherPath: string | null | undefined): void {
   if (!launcherPath) return;
   fs.rmSync(launcherPath, { force: true });
 }
@@ -86,9 +109,17 @@ function fakeLauncher({
   signal = null,
   sessionId = null,
   spawnError = null
+}: {
+  command?: string;
+  args?: string[];
+  exitCode?: number;
+  stdout?: string;
+  stderr?: string;
+  signal?: string | null;
+  sessionId?: string | null;
+  spawnError?: { message?: string; code?: string } | null;
 } = {}) {
-  // @ts-expect-error TS2339 Property 'prompt' does not exist on type '{ env?: {}; }'.
-  return ({ prompt, worktree, env = {} } = {}) => ({
+  return ({ prompt, worktree, env = {} }: { prompt?: string; worktree?: string; env?: Record<string, string> } = {}) => ({
     invocation: {
       command,
       args,
@@ -101,7 +132,7 @@ function fakeLauncher({
   });
 }
 
-module.exports = {
+export {
   buildMockResult,
   cleanupLauncher,
   createDummyLauncher,
@@ -111,3 +142,19 @@ module.exports = {
   createSpawnErrorLauncher,
   fakeLauncher
 };
+export type { MockResult };
+
+// CJS compat: the test files consume this helper via require().
+declare const module: { exports: any } | undefined;
+if (typeof module !== 'undefined') {
+  module.exports = {
+    buildMockResult,
+    cleanupLauncher,
+    createDummyLauncher,
+    createFailLauncher,
+    createLauncherWithScript,
+    createLauncherWithOutput,
+    createSpawnErrorLauncher,
+    fakeLauncher
+  };
+}

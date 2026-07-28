@@ -4,8 +4,8 @@
 // This test verifies:
 // 1. The 'ui' COMMANDS entry is dynamically imported (not statically required)
 //    so removing it does not break the headless module graph.
-// 2. The dist/ build includes TUI files but they are not on the critical path
-//    for headless commands.
+// 2. The canonical bundle (build/px.mjs) includes TUI files but they are not on
+//    the critical path for headless commands.
 // 3. The COMMANDS map structure remains valid when 'ui' is absent.
 
 import test from 'node:test';
@@ -46,26 +46,27 @@ test('rollback-proof: COMMANDS map structure is valid without ui entry', () => {
   );
 });
 
-test('rollback-proof: dist build includes TUI files but headless entry does not depend on them', () => {
-  // Verify dist/ includes TUI files
-  const tuiDistPath = path.join(root, 'dist', 'interfaces', 'tui');
-  assert.ok(fs.existsSync(tuiDistPath), 'dist/interfaces/tui must exist after build');
+test('rollback-proof: canonical bundle includes TUI but keeps it off the headless startup path', () => {
+  // The transitional dist/ CommonJS tree is retired (TASK-2288); build/px.mjs is
+  // the sole product artifact, so the rollback property is asserted against it.
+  const bundlePath = path.join(root, 'build', 'px.mjs');
+  assert.ok(fs.existsSync(bundlePath), 'build/px.mjs must exist after npm run build');
+  const bundleSource = fs.readFileSync(bundlePath, 'utf8');
 
-  const tuiFiles = fs.readdirSync(tuiDistPath);
-  assert.ok(tuiFiles.some((f) => f.includes('shell')), 'dist/interfaces/tui must include shell.js');
-  assert.ok(tuiFiles.some((f) => f.includes('ui-command')), 'dist/interfaces/tui must include ui-command.js');
+  // The TUI is bundled: both the ui-command entry and the Ink shell it pulls in.
+  assert.match(bundleSource, /src\/interfaces\/tui\/ui-command\.ts/,
+    'canonical bundle must include the TUI ui-command module');
+  assert.match(bundleSource, /src\/interfaces\/tui\/shell\.tsx?/,
+    'canonical bundle must include the TUI shell module');
 
-  // Verify the headless dist/index.js uses dynamic import (not static require)
-  const distIndexSource = fs.readFileSync(path.join(root, 'dist', 'index.js'), 'utf8');
-  assert.ok(
-    distIndexSource.includes('await import("./interfaces/tui/ui-command.mjs")') ||
-      distIndexSource.includes('await import("./interfaces/tui/ui-command.js")'),
-    'dist/index.js must use dynamic import() for TUI (rollback safety)',
-  );
-  assert.ok(
-    !distIndexSource.includes('require("./interfaces/tui/ui-command'),
-    'dist/index.js must not statically require TUI files (rollback safety)',
-  );
+  // ...but only behind a lazy initializer, so headless commands never evaluate
+  // it at startup. esbuild emits the deferred dynamic import as an __esm() cell
+  // that is invoked from the `ui` command handler and nowhere else.
+  assert.match(bundleSource, /var init_ui_command = __esm\(\{/,
+    'TUI must be bundled as a deferred __esm() cell (rollback safety)');
+  const lazyInvocations = bundleSource.match(/await init_ui_command\(\)/g) || [];
+  assert.equal(lazyInvocations.length, 1,
+    'init_ui_command must be awaited exactly once, from the ui command handler');
 });
 
 test('rollback-proof: removing ui entry leaves COMMANDS structure intact', () => {

@@ -2,8 +2,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('path');
-const { createPr, pushReviewRef } = require('../dist/lib/tools/forgejo.js');
-const git = require('../dist/lib/core/git.js');
+const { createPr, pushReviewRef } = require('../.test-runtime/lib/tools/forgejo.js');
+const git = require('../.test-runtime/lib/core/git.js');
 const { mock } = test;
 const serialTest = (name, fn) => test(name, { concurrency: false }, fn);
 
@@ -149,7 +149,7 @@ serialTest('pushReviewRef prioritizes forceWithLease over force', (t) => {
 });
 
 serialTest('review --push --force passes force:true to pushRound', async (t) => {
-  const review = require('../dist/lib/review/review.js');
+  const review = require('../.test-runtime/lib/review/review.js');
   let pushRoundArgs = null;
   const options = {
     inferSlugFn: (s) => s || 'task-1049',
@@ -167,7 +167,7 @@ serialTest('review --push --force passes force:true to pushRound', async (t) => 
 });
 
 serialTest('handoff --force passes force:true to performHandoff', async (t) => {
-  const handoffCommand = require('../dist/lib/commands/handoff.js');
+  const handoffCommand = require('../.test-runtime/lib/commands/handoff.js');
   let performHandoffArgs = null;
   
   // Mock performHandoff on the module exports
@@ -189,7 +189,7 @@ serialTest('handoff --force passes force:true to performHandoff', async (t) => {
 });
 
 serialTest('rebase --push calls createPrFn with forceWithLease:true on success', async (t) => {
-  const rebase = require('../dist/lib/commands/rebase.js');
+  const rebase = require('../.test-runtime/lib/commands/rebase.js');
 
   let createPrOptions = null;
   const options = {
@@ -225,7 +225,7 @@ serialTest('rebase --push calls createPrFn with forceWithLease:true on success',
 });
 
 serialTest('rebase without --push does NOT call createPrFn', async (t) => {
-  const rebase = require('../dist/lib/commands/rebase.js');
+  const rebase = require('../.test-runtime/lib/commands/rebase.js');
 
   let createPrCalled = false;
   const options = {
@@ -258,7 +258,7 @@ serialTest('rebase without --push does NOT call createPrFn', async (t) => {
 });
 
 serialTest('rebase --push preserves push and dependencies in recursive calls (chained conflicts)', async (t) => {
-  const rebase = require('../dist/lib/commands/rebase.js');
+  const rebase = require('../.test-runtime/lib/commands/rebase.js');
   let createPrOptions = null;
   let rebaseAttempts = 0;
   let firstRebaseStarted = false;
@@ -323,7 +323,7 @@ serialTest('rebase --push preserves push and dependencies in recursive calls (ch
 });
 
 serialTest('rebase --push does NOT push if agent returns success but rebase is still in progress', async (t) => {
-  const rebase = require('../dist/lib/commands/rebase.js');
+  const rebase = require('../.test-runtime/lib/commands/rebase.js');
   let createPrCalled = false;
 
   const options = {
@@ -359,7 +359,7 @@ serialTest('rebase --push does NOT push if agent returns success but rebase is s
 });
 
 serialTest('rebase --push does NOT push if git rebase returns 0 but --show-current is non-empty', async (t) => {
-  const rebase = require('../dist/lib/commands/rebase.js');
+  const rebase = require('../.test-runtime/lib/commands/rebase.js');
   let createPrCalled = false;
 
   const options = {
@@ -421,7 +421,7 @@ serialTest('createPr fails cleanly (no --force fallback) when stale push persist
 });
 
 serialTest('rebase --push ignores FORGEJO_USER and falls back to task identity', async (t) => {
-  const rebase = require('../dist/lib/commands/rebase.js');
+  const rebase = require('../.test-runtime/lib/commands/rebase.js');
   const previousUser = process.env.FORGEJO_USER;
   process.env.FORGEJO_USER = 'rebase-override';
 

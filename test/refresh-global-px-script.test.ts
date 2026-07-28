@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
-const { resolvePostIntegrateCommand } = require('../dist/lib/core/post-integrate-hook');
+const { resolvePostIntegrateCommand } = require('../.test-runtime/lib/core/post-integrate-hook');
 
 const REPO_ROOT = path.join(__dirname, '..');
 const SCRIPT_PATH = path.join(REPO_ROOT, 'scripts', 'refresh-global-px.sh');

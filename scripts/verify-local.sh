@@ -317,7 +317,10 @@ NODE
 # integration pipeline at config/integration-pipelines.json (order 40).
 gate_mutation() {
   npm run --silent build
-  node dist/lib/commands/mutation-gate.js "$@"
+  # Run the TypeScript source through tsx. The transpiled .test-runtime/ tree is
+  # CommonJS for node:test's writable-export mocks and retains `import.meta`,
+  # so it is loadable only under a TS loader — not as a bare `node` entry point.
+  npx --yes tsx src/platform/runtime/lib/commands/mutation-gate.ts "$@"
 }
 
 case "$subcommand" in

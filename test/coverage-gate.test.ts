@@ -4,10 +4,10 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const fmt = require('../dist/lib/core/fmt');
+const fmt = require('../.test-runtime/lib/core/fmt');
 
 const REPO_ROOT = path.join(__dirname, '..');
-const coverageGate = require('../dist/lib/commands/coverage-gate');
+const coverageGate = require('../.test-runtime/lib/commands/coverage-gate');
 const {
   buildCoverageArgs,
   cleanupNewTempDirs,
@@ -22,7 +22,7 @@ const {
   resetPerRunScratchState,
   resolveTestTimeoutMs,
   runTests
-} = require('../dist/lib/commands/coverage-gate');
+} = require('../.test-runtime/lib/commands/coverage-gate');
 
 function runGate(args = []) {
   const logs = [];
@@ -55,7 +55,7 @@ test('coverage-gate excludes its own test file from authoritative discovery', ()
 
 test('coverage-gate reports denominator and metric in output', () => {
   const result = runGate(['--dry-run']);
-  assert.match(result.stdout, /Denominator: dist\/index\.js/);
+  assert.match(result.stdout, /Denominator: \.test-runtime\/lib\/index\.js/);
   assert.match(result.stdout, /Include globs:/);
 });
 

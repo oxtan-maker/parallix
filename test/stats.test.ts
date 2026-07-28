@@ -5,9 +5,9 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const stats = require('../dist/lib/commands/stats');
-const forgejo = require('../dist/lib/tools/forgejo');
-const gitLib = require('../dist/lib/core/git');
+const stats = require('../.test-runtime/lib/commands/stats');
+const forgejo = require('../.test-runtime/lib/tools/forgejo');
+const gitLib = require('../.test-runtime/lib/core/git');
 
 function writeCsv(contents) {
   const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-stats-')), 'input.csv');
@@ -430,7 +430,7 @@ test('renderRangeStatsReport filters inclusive boundary dates and summarizes mis
     { date: '2026-06-01', mission: 'task-after', classification: 'user_value', implementer: 'claude', pr_fix_rounds: '0' },
   ], { from: '2026-05-01', to: '2026-05-31' });
 
-  const plain = require('../dist/lib/core/fmt').stripAnsi(report);
+  const plain = require('../.test-runtime/lib/core/fmt').stripAnsi(report);
   assert.match(plain, /Missions \(2026-05-01 → 2026-05-31\)/);
   assert.match(plain, /# missions\s+# user value missions\s+# AI SDLC missions/);
   assert.match(plain, /3\s+2\s+1/);
@@ -466,7 +466,7 @@ test('renderWeeklyStatsReport sorts agent tables alphabetically by family name',
     { date: '2026-05-16', mission: 'task-c', classification: 'ai_sdlc', implementer: 'codex', pr_fix_rounds: '3', closed: 'yes' },
   ], { today: '2026-05-18' });
 
-  const plain = require('../dist/lib/core/fmt').stripAnsi(report);
+  const plain = require('../.test-runtime/lib/core/fmt').stripAnsi(report);
   const claudeIndex = plain.indexOf('claude');
   const codexIndex = plain.indexOf('codex');
   const geminiIndex = plain.indexOf('gemini');
@@ -512,7 +512,7 @@ test('task-1414: renderWeeklyStatsReport adds an agent spend-by-stage table with
     { date: '2026-05-18', repo: 'r', mission: 'task-codex', classification: 'ai_sdlc', implementer: 'codex', provider: 'openai', stage: 'draft', pr_fix_rounds: '0', openai_usage_after: '0' },
   ], { today: '2026-05-18' });
 
-  const plain = require('../dist/lib/core/fmt').stripAnsi(report);
+  const plain = require('../.test-runtime/lib/core/fmt').stripAnsi(report);
   assert.match(plain, /Agent spend by stage this week/);
   assert.match(plain, /Agent family\s+draft\s+execute\s+review\s+follow-up\s+default\s+total/);
 });
@@ -524,7 +524,7 @@ test('task-1414: renderWeeklyStatsReport aggregates a Codex row from openai_usag
     { date: '2026-05-18', repo: 'r', mission: 'task-codex', classification: 'ai_sdlc', implementer: 'codex', provider: 'openai', stage: 'review', pr_fix_rounds: '0', openai_usage_after: '50', cost_usd: '0', duration_minutes: '0', closed: 'yes' },
   ], { today: '2026-05-18' });
 
-  const plain = require('../dist/lib/core/fmt').stripAnsi(report);
+  const plain = require('../.test-runtime/lib/core/fmt').stripAnsi(report);
   const spendSection = plain.slice(plain.indexOf('Agent spend by stage this week'));
   assert.match(spendSection, /codex\s+20% \(20%\)\s+30% \(30%\)\s+50% \(50%\)\s+0% \(0%\)\s+0% \(0%\)\s+100% \(100%\)/);
   // Not fed by cost_usd or duration_minutes for a Codex/OpenAI row.
@@ -539,7 +539,7 @@ test('task-1414: renderWeeklyStatsReport aggregates a Claude row from cost_usd, 
     { date: '2026-05-18', repo: 'r', mission: 'task-claude', classification: 'ai_sdlc', implementer: 'claude', stage: 'review', pr_fix_rounds: '0', openai_usage_after: '999', cost_usd: '6', duration_minutes: '999', closed: 'yes' },
   ], { today: '2026-05-18' });
 
-  const plain = require('../dist/lib/core/fmt').stripAnsi(report);
+  const plain = require('../.test-runtime/lib/core/fmt').stripAnsi(report);
   const spendSection = plain.slice(plain.indexOf('Agent spend by stage this week'));
   assert.match(spendSection, /claude\s+\$1 \(10%\)\s+\$3 \(30%\)\s+\$6 \(60%\)\s+\$0 \(0%\)\s+\$0 \(0%\)\s+\$10 \(100%\)/);
   assert.doesNotMatch(spendSection, /999/);
@@ -552,7 +552,7 @@ test('task-1414: renderWeeklyStatsReport aggregates a Custom/local row from dura
     { date: '2026-05-18', repo: 'r', mission: 'task-custom', classification: 'ai_sdlc', implementer: 'custom', stage: 'review', pr_fix_rounds: '0', openai_usage_after: '999', cost_usd: '999', duration_minutes: '30', closed: 'yes' },
   ], { today: '2026-05-18' });
 
-  const plain = require('../dist/lib/core/fmt').stripAnsi(report);
+  const plain = require('../.test-runtime/lib/core/fmt').stripAnsi(report);
   const spendSection = plain.slice(plain.indexOf('Agent spend by stage this week'));
   assert.match(spendSection, /custom\s+5m \(10%\)\s+15m \(30%\)\s+30m \(60%\)\s+0m \(0%\)\s+0m \(0%\)\s+50m \(100%\)/);
   assert.doesNotMatch(spendSection, /999/);
@@ -564,7 +564,7 @@ test('task-2213: renderWeeklyStatsReport spend table groups a mission by its mod
     { date: '2026-05-18', repo: 'r', mission: 'task-model', classification: 'ai_sdlc', implementer: 'custom', model: 'qwen3.5', stage: 'active', pr_fix_rounds: '0', duration_minutes: '10', closed: 'yes' },
   ];
   const report = stats.renderWeeklyStatsReport(rows, { today: '2026-05-18' });
-  const plain = require('../dist/lib/core/fmt').stripAnsi(report);
+  const plain = require('../.test-runtime/lib/core/fmt').stripAnsi(report);
 
   assert.match(plain, /Agent performance this week[\s\S]*qwen3\.5/);
   const spendSection = plain.slice(plain.indexOf('Agent spend by stage this week'));
@@ -577,7 +577,7 @@ test('task-1414: renderWeeklyStatsReport spend table renders a stable empty stat
     { date: '2026-05-18', repo: 'r', mission: 'task-none', classification: 'ai_sdlc', implementer: 'custom', stage: 'draft', pr_fix_rounds: '0', openai_usage_after: '0', cost_usd: '0', duration_minutes: '0', closed: 'yes' },
   ], { today: '2026-05-18' });
 
-  const plain = require('../dist/lib/core/fmt').stripAnsi(report);
+  const plain = require('../.test-runtime/lib/core/fmt').stripAnsi(report);
   const spendSection = plain.slice(plain.indexOf('Agent spend by stage this week'));
   assert.match(spendSection, /custom\s+—\s+—\s+—\s+—\s+—\s+—/);
   assert.doesNotMatch(spendSection, /0%/);
@@ -655,7 +655,7 @@ test('stats command prints workflow arbitrary range tables from the integration 
       },
     });
 
-    const output = require('../dist/lib/core/fmt').stripAnsi(logs.join('\n'));
+    const output = require('../.test-runtime/lib/core/fmt').stripAnsi(logs.join('\n'));
     assert.match(output, /Missions \(2026-05-01 → 2026-05-31\)/);
     assert.match(output, /3\s+2\s+1/);
     assert.match(output, /Agent performance \(2026-05-01 → 2026-05-31\)/);
@@ -710,7 +710,7 @@ test('stats command writes arbitrary range report to --output without printing r
       },
     });
 
-    const stdout = require('../dist/lib/core/fmt').stripAnsi(logs.join('\n'));
+    const stdout = require('../.test-runtime/lib/core/fmt').stripAnsi(logs.join('\n'));
     assert.match(stdout, new RegExp(`Report written to ${outputFile.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
     assert.doesNotMatch(stdout, /Missions \(2026-05-01 → 2026-05-31\)/);
     assert.match(fs.readFileSync(outputFile, 'utf8'), /Missions \(2026-05-01 → 2026-05-31\)/);
@@ -941,7 +941,7 @@ test('recordIntegrationStats returns the unchanged weekly report labels for inte
       date: '2026-05-18',
     });
 
-    const report = require('../dist/lib/core/fmt').stripAnsi(result.report);
+    const report = require('../.test-runtime/lib/core/fmt').stripAnsi(result.report);
     assert.match(report, /Current week \(2026-05-12 → 2026-05-18\)/);
     assert.match(report, /Previous week \(2026-05-05 → 2026-05-11\)/);
     assert.match(report, /Agent performance this week \(2026-05-12 → 2026-05-18\)/);
@@ -1409,7 +1409,7 @@ test('task-1314: stats mission reports filter to the active repo', () => {
       },
     });
 
-    const output = require('../dist/lib/core/fmt').stripAnsi(logs.join('\n'));
+    const output = require('../.test-runtime/lib/core/fmt').stripAnsi(logs.join('\n'));
     assert.match(output, /Mission telemetry by phase: task-alpha/);
     assert.match(output, /draft\s+openai\s+gpt-5\.4-mini\s+codex\s+11\s+12\s+13\s+15\s+2\s+1/);
     assert.doesNotMatch(output, /google\s+gemini-2\.5-pro\s+gemini\s+21\s+22\s+23\s+25\s+3\s+2/);
@@ -1470,7 +1470,7 @@ test('task-1301: renderRangeStatsReport counts unique missions when a mission ha
     { date: '2026-06-10', mission: 'task-beta', classification: 'user_value', implementer: 'codex', pr_fix_rounds: '2', stage: 'review', closed: 'yes' },
   ];
   const report = stats.renderRangeStatsReport(rows, { from: '2026-06-10', to: '2026-06-10' });
-  const plain = require('../dist/lib/core/fmt').stripAnsi(report);
+  const plain = require('../.test-runtime/lib/core/fmt').stripAnsi(report);
   assert.match(plain, /2\s+1\s+1/); // 2 missions total, 1 user_value, 1 ai_sdlc
   assert.match(plain, /codex\s+1\s+2\.00/); // 1 unique codex mission with pr_fix_rounds=2
   assert.match(plain, /\bcustom\s+1\s+1\.00/); // 1 unique custom mission with highest pr_fix_rounds=1
@@ -1484,7 +1484,7 @@ test('task-1314: renderRangeStatsReport counts same mission separately across re
     { date: '2026-06-10', repo: 'parallix', mission: 'task-alpha', classification: 'user_value', implementer: 'codex', pr_fix_rounds: '3', stage: 'review', closed: 'yes' },
   ];
   const report = stats.renderRangeStatsReport(rows, { from: '2026-06-10', to: '2026-06-10' });
-  const plain = require('../dist/lib/core/fmt').stripAnsi(report);
+  const plain = require('../.test-runtime/lib/core/fmt').stripAnsi(report);
   assert.match(plain, /2\s+1\s+1/); // two repo-distinct missions with the same slug
   assert.match(plain, /codex\s+1\s+3\.00/); // repo-distinct custom/codex rows stay separate
   assert.match(plain, /\bcustom\s+1\s+1\.00/);
@@ -1716,7 +1716,7 @@ test('task-1342: weekly summary total equals user_value + ai_sdlc even with uncl
   }
 
   const report = stats.renderWeeklyStatsReport(rows, { today: '2026-06-24' });
-  const plain = require('../dist/lib/core/fmt').stripAnsi(report);
+  const plain = require('../.test-runtime/lib/core/fmt').stripAnsi(report);
 
   // The current week (2026-06-18 to 2026-06-24) contains all 35 rows.
   // total should equal userValue + aiSdlc = 3 + 12 = 15, NOT 35.
@@ -1734,7 +1734,7 @@ test('task-1342: weekly summary total equals user_value + ai_sdlc + unknown when
   ];
 
   const report = stats.renderWeeklyStatsReport(rows, { today: '2026-06-24' });
-  const plain = require('../dist/lib/core/fmt').stripAnsi(report);
+  const plain = require('../.test-runtime/lib/core/fmt').stripAnsi(report);
 
   // 'USER_VALUE' is lowercased by normalizeClassification, so it counts as user_value.
   // 'unknown' is a valid classification and counts toward the total; null does not.
@@ -1904,7 +1904,7 @@ test('task-2213: renderWeeklyStatsReport displays model rows in the Agent family
     { date: '2026-05-17', mission: 'task-b', classification: 'user_value', implementer: 'codex', model: 'gpt-5', pr_fix_rounds: '1', closed: 'yes' },
   ], { today: '2026-05-18' });
 
-  const plain = require('../dist/lib/core/fmt').stripAnsi(report);
+  const plain = require('../.test-runtime/lib/core/fmt').stripAnsi(report);
   assert.match(plain, /qwen3\.5\s+1\s+2\.00/);
   assert.match(plain, /gpt-5\s+1\s+1\.00/);
 });
@@ -1915,7 +1915,7 @@ test('task-2213: renderRangeStatsReport displays model rows in the Agent family 
     { date: '2026-05-15', mission: 'task-b', classification: 'user_value', implementer: 'custom', model: 'llama3', pr_fix_rounds: '0', closed: 'yes' },
   ], { from: '2026-05-01', to: '2026-05-31' });
 
-  const plain = require('../dist/lib/core/fmt').stripAnsi(report);
+  const plain = require('../.test-runtime/lib/core/fmt').stripAnsi(report);
   assert.match(plain, /qwen3\.5\s+1\s+2\.00/);
   assert.match(plain, /llama3\s+1\s+0\.00/);
 });

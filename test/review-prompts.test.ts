@@ -13,8 +13,8 @@ const {
   buildActOnReviewPrompt,
   buildCompactReviewPrompt,
   buildCompactActOnReviewPrompt
-} = require('../dist/lib/review/review-prompts');
-const { resolveArtifactDir } = require('../dist/lib/review/review-artifacts');
+} = require('../.test-runtime/lib/review/review-prompts');
+const { resolveArtifactDir } = require('../.test-runtime/lib/review/review-artifacts');
 
 test('PROMPT_ENTRYPOINTS covers all supported agent families', () => {
   for (const agent of ['codex', 'claude', 'vibe', 'custom', 'autonomous']) {

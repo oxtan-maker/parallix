@@ -5,12 +5,12 @@
  * and enforce a configurable line-coverage threshold (default 90%).
  *
  * Usage:
- *   node parallix/dist/lib/commands/coverage-gate.js [--threshold <pct>] [--dry-run]
+ *   node .test-runtime/lib/commands/coverage-gate.js [--threshold <pct>] [--dry-run]
  *
  * Exit 0 when tests pass and coverage >= threshold.
  * Exit 1 otherwise.
  *
- * Denominator: parallix/dist/index.js plus all nested .js files under parallix/dist/lib
+ * Denominator: .test-runtime/lib/index.js plus all nested .js files under .test-runtime/lib
  * Excludes: parallix/test/*, parallix/prompts/*, parallix/config/*.json,
  *           coverage output dirs, node_modules, generated/temp files.
  *
@@ -78,8 +78,8 @@ const TEMP_DIR_PREFIXES = [
   'backlog-'
 ];
 const COVERAGE_INCLUDES = [
-  'dist/index.js',
-  'dist/lib/**/*.js'
+  '.test-runtime/lib/index.js',
+  '.test-runtime/lib/**/*.js'
 ];
 const COVERAGE_EXCLUDES = [
   'test/**',
@@ -289,7 +289,7 @@ function main() {
 
   if (dryRun) {
     fmt.log.info(`DRY-RUN mode — threshold=${threshold}%`);
-    fmt.log.info('Denominator: dist/index.js + dist/lib/**/*.js');
+    fmt.log.info('Denominator: .test-runtime/lib/index.js + .test-runtime/lib/**/*.js');
     fmt.log.info(`Include globs: ${COVERAGE_INCLUDES.join(', ')}`);
     fmt.log.info(`Exclude globs: ${COVERAGE_EXCLUDES.join(', ')}`);
     fmt.log.info(`Would run: ${fmt.command(`${process.execPath} ${buildCoverageArgs(testFiles, threshold).join(' ')}`)}`);
@@ -300,7 +300,16 @@ function main() {
   process.exit(runTests(testFiles, threshold));
 }
 
-if (typeof require !== 'undefined' && require.main === module) {
+// Entry detection for both module systems: `require.main` under the CommonJS
+// test runtime, and the invoked script path when run as an ESM script
+// (`tsx src/platform/runtime/lib/commands/coverage-gate.ts`).
+//
+// Deliberately NOT compared against import.meta.url: this module is inlined
+// into the canonical bundle, where every inlined module reports the bundle's
+// own URL. That would make the gate run on every `px` command.
+const isCjsEntry = typeof require !== 'undefined' && require.main === module;
+const isEsmEntry = Boolean(process.argv[1]) && /[\\/]coverage-gate\.ts$/.test(process.argv[1]);
+if (isCjsEntry || isEsmEntry) {
   main();
 }
 
@@ -332,7 +341,7 @@ function run(args: string[], options: CoverageGateOptions = {}) {
       } else {
         fmt.log.info(`Found ${testFiles.length} test file(s)`);
         fmt.log.info(`DRY-RUN mode — threshold=${threshold}%`);
-        fmt.log.info('Denominator: dist/index.js + dist/lib/**/*.js');
+        fmt.log.info('Denominator: .test-runtime/lib/index.js + .test-runtime/lib/**/*.js');
         fmt.log.info(`Include globs: ${COVERAGE_INCLUDES.join(', ')}`);
         fmt.log.info(`Exclude globs: ${COVERAGE_EXCLUDES.join(', ')}`);
         fmt.log.info(`Would run: ${fmt.command(`${process.execPath} ${buildCoverageArgs(testFiles, threshold).join(' ')}`)}`);

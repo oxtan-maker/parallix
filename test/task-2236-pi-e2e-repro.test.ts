@@ -6,7 +6,7 @@ const path = require('node:path');
 
 test('task-2236 repro: npm test forwards the requested pi e2e smoke file', () => {
   const runnerSource = fs.readFileSync(
-    path.join(__dirname, 'run-default-tests.js'),
+    path.join(__dirname, 'run-default-tests.ts'),
     'utf8'
   );
 

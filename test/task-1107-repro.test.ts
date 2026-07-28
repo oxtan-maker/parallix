@@ -4,8 +4,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { rebaseBeforeReviewRound } = require('../dist/lib/review/review');
-const { isMissionArtifact, isWorkflowGeneratedArtifact } = require('../dist/lib/core/mission-utils');
+const { rebaseBeforeReviewRound } = require('../.test-runtime/lib/review/review');
+const { isMissionArtifact, isWorkflowGeneratedArtifact } = require('../.test-runtime/lib/core/mission-utils');
 
 function porcelainZ(entries) {
   return `${entries.join('\0')}\0`;
@@ -73,7 +73,7 @@ test('rebaseBeforeReviewRound auto-commits safe mission artifacts before rebase'
   assert.ok(gitCalls.some(args => args.includes('add') && args.includes(`docs/missions/${year}/${slug}/MISSION.md`)));
   assert.ok(gitCalls.some(args => args.includes('add') && args.includes(`backlog/tasks/${slug} - title.md`)));
   assert.ok(gitCalls.some(args => args.includes('commit') && args.includes(`workflow(${slug}): auto-commit mission artifacts before pre-review rebase`)));
-  assert.match(rebaseCalls[0].args[0], /px\.js$/, 'Packaged pre-review rebase must invoke its compiled CLI');
+  assert.match(rebaseCalls[0].args[0], /px\.mjs$/, 'Packaged pre-review rebase must invoke the canonical bundle');
 });
 
 test('rebaseBeforeReviewRound invokes the TypeScript entrypoint through tsx in a source checkout', async () => {
@@ -310,12 +310,12 @@ test('rebaseBeforeReviewRound uses the compiled CLI outside a source checkout', 
   assert.deepEqual(result, { ok: true, sharedFileConflicts: false });
   assert.equal(calls.length, 1);
   assert.equal(calls[0].command, process.execPath);
-  // The CLI path resolves from MODULE_DIR (__dirname) which may be dist/ or
-  // .test-runtime/ depending on test environment. Verify the resolved path
-  // ends with px.js and the rebase args are correct.
+  // The CLI path resolves from MODULE_DIR (this module's own directory), which
+  // is the bundle root in a packaged install and .test-runtime/ under test.
+  // Verify it names the canonical bundle entry and the rebase args are correct.
   assert.ok(
-    calls[0].args[0].endsWith('px.js'),
-    `CLI path must end with px.js, got: ${calls[0].args[0]}`,
+    calls[0].args[0].endsWith('px.mjs'),
+    `CLI path must end with px.mjs, got: ${calls[0].args[0]}`,
   );
   assert.deepEqual(calls[0].args.slice(1), ['rebase', 'task-1107', '--push']);
 });

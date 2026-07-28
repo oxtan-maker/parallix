@@ -128,3 +128,7 @@ Negative (as a batch CLI color solution specifically):
 - [NO_COLOR standard](https://no-color.org/)
 - [Gemini CLI package.json](https://github.com/google-gemini/gemini-cli/blob/main/packages/cli/package.json)
 - [task-1132: workflow coloring in terminal is unstable](../missions/2026/task-1132/MISSION.md)
+
+## Reconciliation addendum (2026-07-27, task-2288)
+
+The original decision to replace hand-rolled ANSI coloring with `util.styleText()` for batch/headless CLI output and Ink for the interactive TUI remains in effect. The CLI entry point is now the canonical ESM bundle `build/px.mjs` (ADR 0044), which inlines the fmt layer. The transitional CommonJS `dist/` tree has been retired (task-2288); the batch color rendering decision applies to the bundled `build/px.mjs` runtime. The single-stack direction — converging all terminal output to Ink — is unchanged.

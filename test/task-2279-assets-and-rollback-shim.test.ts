@@ -31,9 +31,18 @@ test('task-2279 routes shipped prompts and configuration through the runtime Ass
   }
 });
 
-test('task-2279 build retains executable CommonJS rollback package targets', () => {
-  for (const file of ['dist/index.js', 'dist/index.js.map', 'dist/px.js', 'dist/px.js.map']) {
+// TASK-2288 retired the transitional CommonJS rollback tree. The build no longer
+// emits dist/; build/px.mjs is the sole executable product target, and rollback
+// is the coherent phase documented in docs/npm-package-major-migration.md rather
+// than a second distribution shipped alongside the bundle.
+test('task-2288 build emits the canonical bundle as the sole executable package target', () => {
+  for (const file of ['build/px.mjs', 'build/px.mjs.map']) {
     assert.ok(fs.existsSync(path.join(ROOT, file)), `${file} must exist after npm run build`);
   }
-  assert.equal(typeof require('../dist').main, 'function');
+  assert.ok(!fs.existsSync(path.join(ROOT, 'dist')),
+    'the transitional CommonJS dist/ tree must not be emitted by the build');
+
+  const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+  assert.equal(pkg.bin.px, 'build/px.mjs', 'package bin must point at the canonical bundle');
+  assert.ok(!pkg.main, 'package must not declare a CommonJS main entry');
 });

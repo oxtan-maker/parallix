@@ -1,7 +1,5 @@
-'use strict';
-
 /**
- * sea-surfaces.js — the ADR 0044 stop-and-reassess contract for the native
+ * sea-surfaces.ts — the ADR 0044 stop-and-reassess contract for the native
  * single-executable proof (TASK-2286).
  *
  * ADR 0044 ("Stop and reassess") lists the runtime surfaces that must run
@@ -46,11 +44,10 @@ const MINIMUM_SEA_NODE_MAJOR = 25;
 
 /** Error raised when an ADR 0044 surface fails on the native executable. */
 class SeaStopAndReassessError extends Error {
-  /**
-   * @param {string} surface one of SEA_SURFACES
-   * @param {string} detail observed failure, quoted into the message
-   */
-  constructor(surface, detail) {
+  readonly surface: string;
+  readonly detail: string;
+
+  constructor(surface: string, detail: string) {
     super(
       `ADR 0044 stop-and-reassess: the ${surface} surface failed on the native ` +
       `single-executable build — ${detail}. ADR 0044 forbids silently substituting ` +
@@ -63,15 +60,12 @@ class SeaStopAndReassessError extends Error {
 }
 
 /**
- * Assert an ADR 0044 surface held on the native executable.
+ * Assert an ADR 0044 surface held on the native executable. The only failure
+ * behavior is to throw: there is deliberately no fallback or degraded mode.
  *
- * @param {string} surface one of SEA_SURFACES
- * @param {boolean} ok whether the surface was observed working
- * @param {string} detail observed evidence or failure description
- * @returns {true} when the surface held; otherwise throws
- * @throws {SeaStopAndReassessError} when `ok` is false
+ * @throws {SeaStopAndReassessError} when `ok` is not exactly true
  */
-function assertSurface(surface, ok, detail) {
+function assertSurface(surface: string, ok: boolean, detail: string): true {
   if (!SEA_SURFACES.includes(surface)) {
     throw new Error(`Unknown ADR 0044 surface: ${surface} (expected one of ${SEA_SURFACES.join(', ')})`);
   }
@@ -81,24 +75,20 @@ function assertSurface(surface, ok, detail) {
   return true;
 }
 
-/**
- * Parse a `vX.Y.Z` string into its major number.
- *
- * @param {string} version e.g. "v26.5.0"
- * @returns {number} NaN when the string is not a Node version
- */
-function nodeMajor(version) {
+/** Parse a `vX.Y.Z` string into its major number; NaN when unparseable. */
+function nodeMajor(version: string): number {
   const match = /^v?(\d+)\./.exec(String(version || '').trim());
   return match ? Number(match[1]) : Number.NaN;
 }
 
-/**
- * Decide whether a Node runtime may build an ESM SEA.
- *
- * @param {string} version e.g. "v24.15.0"
- * @returns {{ supported: boolean, major: number, reason: string }}
- */
-function evaluateSeaRuntime(version) {
+interface SeaRuntimeEvaluation {
+  supported: boolean;
+  major: number;
+  reason: string;
+}
+
+/** Decide whether a Node runtime may build an ESM SEA. */
+function evaluateSeaRuntime(version: string): SeaRuntimeEvaluation {
   const major = nodeMajor(version);
   if (!Number.isFinite(major)) {
     return { supported: false, major: Number.NaN, reason: `unrecognized Node version string: ${String(version)}` };
@@ -116,7 +106,7 @@ function evaluateSeaRuntime(version) {
   return { supported: true, major, reason: `Node ${version} supports SEA mainFormat: "module"` };
 }
 
-module.exports = {
+export {
   MINIMUM_SEA_NODE_MAJOR,
   SEA_SURFACES,
   SEA_THRESHOLDS,
@@ -125,3 +115,18 @@ module.exports = {
   evaluateSeaRuntime,
   nodeMajor,
 };
+export type { SeaRuntimeEvaluation };
+
+// CJS compat: consumed via require() from the CommonJS test files.
+declare const module: { exports: any } | undefined;
+if (typeof module !== 'undefined') {
+  module.exports = {
+    MINIMUM_SEA_NODE_MAJOR,
+    SEA_SURFACES,
+    SEA_THRESHOLDS,
+    SeaStopAndReassessError,
+    assertSurface,
+    evaluateSeaRuntime,
+    nodeMajor,
+  };
+}

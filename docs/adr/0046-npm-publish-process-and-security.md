@@ -135,4 +135,8 @@ Assessment: `@magnusekdahl/parallix` is the correct scope for a solo-maintainer 
 - npm docs: Verifying ECDSA registry signatures — https://docs.npmjs.com/verifying-registry-signatures
 - npm docs: Threats and Mitigations — https://docs.npmjs.com/threats-and-mitigations
 
+## Reconciliation addendum (2026-07-27, task-2288)
+
+The original decision to adopt public npm registry publication as `@magnusekdahl/parallix` remains in effect. The published package now ships the canonical ESM bundle (`build/px.mjs`) as the sole executable artifact — no `dist/` tree, no source tree, no runtime `node_modules`. The `bin.px` entry is `build/px.mjs`; the package has no `main` or `exports` (ADR 0044: Parallix is a CLI application, not a supported JavaScript SDK). The `files` allowlist in `package.json` and the `.npmignore` exclusion layer preserve the defense-in-depth security posture described in this ADR. The zero-runtime-dependencies claim is maintained: the bundle inlines all third-party code, and only Node built-ins are imported at runtime.
+
 (End of file - total 130 lines)

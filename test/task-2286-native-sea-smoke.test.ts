@@ -7,7 +7,7 @@
 // packaging, Git, and terminal boundaries on purpose.
 //
 // Every ADR 0044 surface reports through `assertSurface` from
-// scripts/sea-surfaces.js, whose only failure mode is a stop-and-reassess
+// scripts/sea-surfaces.ts, whose only failure mode is a stop-and-reassess
 // error (SC7). Nothing here falls back to a substituted runtime.
 //
 // Scope note (DOD #3): the proof covers exactly one platform — the one it runs
@@ -22,14 +22,14 @@ import { DatabaseSync } from 'node:sqlite';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { launchSeaPty } from './helpers/sea-pty-session.js';
 
-const surfaces = require('../scripts/sea-surfaces.js');
+const surfaces = require('../scripts/sea-surfaces.ts');
 const { SEA_THRESHOLDS, assertSurface, evaluateSeaRuntime } = surfaces;
 
 const ROOT = path.resolve(__dirname, '..');
 const BUNDLE = path.join(ROOT, 'build', 'px.mjs');
 const SEA_DIR = path.join(ROOT, 'build', 'sea');
 const EXECUTABLE = path.join(SEA_DIR, process.platform === 'win32' ? 'px.exe' : 'px');
-const BUILD_SEA = path.join(ROOT, 'scripts', 'build-sea.js');
+const BUILD_SEA = path.join(ROOT, 'scripts', 'build-sea.ts');
 const ANSI_CURSOR_CONTROL = /\[(?:\?25[lh]|[0-9;]*[ABCDEFGJKSTHf])/;
 
 /** Measurements printed at the end of the run and asserted against SEA_THRESHOLDS. */
@@ -492,7 +492,7 @@ test('native SEA smoke: the npm fallback passes the same headless smoke set (SC8
   assert.ok(fs.existsSync(path.join(seaHome, 'parallix.db')), 'the executable did not open the operator database');
 
   // Documented divergence: build/px.mjs resolves SQLite migrations from its own
-  // directory, and scripts/build-canonical-bundle.js (a restricted area for
+  // directory, and scripts/build-canonical-bundle.ts (a restricted area for
   // this mission) does not stage them into build/. The npm layout therefore
   // creates an empty database, while the SEA payload stages the migrations and
   // materializes the operator schema. Assert the divergence explicitly so it

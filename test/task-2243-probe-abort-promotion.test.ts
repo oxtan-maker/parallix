@@ -1,21 +1,27 @@
-const test = require('node:test');
+const { test, mock } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { mock } = test;
 
-const git = require('../dist/lib/core/git');
-const missionUtils = require('../dist/lib/core/mission-utils');
-const backlog = require('../dist/lib/tools/backlog');
-const forgejo = require('../dist/lib/tools/forgejo');
-const stats = require('../dist/lib/commands/stats');
+// Loaded from the CommonJS test runtime rather than from src/: this test
+// replaces module methods with mock.method(), which needs writable exports.
+// An ESM namespace object is read-only, so the same mocks throw there.
+// scripts/build-test-runtime.ts emits .test-runtime/ for exactly this purpose.
+const git = require('../.test-runtime/lib/core/git');
+const missionUtils = require('../.test-runtime/lib/core/mission-utils');
+const backlog = require('../.test-runtime/lib/tools/backlog');
+const forgejo = require('../.test-runtime/lib/tools/forgejo');
+const stats = require('../.test-runtime/lib/commands/stats');
 
 const TEST_SLUG = 'task-2243-probe-abort';
 
 function loadIntegrate() {
-  delete require.cache[require.resolve('../dist/lib/commands/integrate')];
-  return require('../dist/lib/commands/integrate');
+  // Drop the cached module so each run re-reads the mocked dependencies.
+  const modulePath = require.resolve('../.test-runtime/lib/commands/integrate');
+  delete require.cache[modulePath];
+  const loaded = require(modulePath);
+  return loaded.default || loaded;
 }
 
 test('Variant B rejects a failed probe abort without promoting the review-approved task fixture (task-2243)', async () => {
@@ -38,14 +44,14 @@ test('Variant B rejects a failed probe abort without promoting the review-approv
     adapters: { review: { provider: 'forgejo', baseUrl: 'http://localhost:3300', remote: 'review', repo: 'magnus/parallix' } },
   }), 'utf8');
 
-  const errors = [];
-  const exitCodes = [];
+  const errors: string[] = [];
+  const exitCodes: number[] = [];
   const originalError = console.error;
-  console.error = message => errors.push(String(message));
+  console.error = (message: unknown) => errors.push(String(message));
 
   try {
     mock.method(missionUtils, 'getPrimaryBranch', () => 'main');
-    mock.method(missionUtils, 'inferSlug', slug => slug || TEST_SLUG);
+    mock.method(missionUtils, 'inferSlug', (slug: string) => slug || TEST_SLUG);
     mock.method(missionUtils, 'findMissionDir', () => path.join(root, 'missions', TEST_SLUG));
     mock.method(missionUtils, 'findMissionArea', () => 'runtime');
     mock.method(missionUtils, 'getPrimaryWorktree', () => root);
@@ -54,7 +60,7 @@ test('Variant B rejects a failed probe abort without promoting the review-approv
     mock.method(missionUtils, 'missionTitle', () => 'Task 2243 probe abort fixture');
     mock.method(missionUtils, 'updateGraphifyKnowledgeGraph', () => false);
     mock.method(git, 'getCurrentBranch', () => `mission/${TEST_SLUG}`);
-    mock.method(git, 'git', args => {
+    mock.method(git, 'git', (args: string[]) => {
       if (args.includes('branch') && args.includes('--list')) return { status: 0, stdout: 'main\n', stderr: '' };
       if (args.includes('branch') && args.includes('--show-current')) return { status: 0, stdout: 'main', stderr: '' };
       if (args.includes('status')) return { status: 0, stdout: '', stderr: '' };
@@ -67,7 +73,7 @@ test('Variant B rejects a failed probe abort without promoting the review-approv
     mock.method(backlog, 'getTaskStatus', () => 'review');
     mock.method(backlog, 'getTaskClassification', () => 'ai_sdlc');
     mock.method(backlog, 'getTaskAssignee', () => 'codex');
-    mock.method(backlog, 'setTaskStatus', (_taskFile, status) => {
+    mock.method(backlog, 'setTaskStatus', (_taskFile: string, status: string) => {
       fs.writeFileSync(taskFile, fs.readFileSync(taskFile, 'utf8').replace('status: review', `status: ${status}`), 'utf8');
       return true;
     });
@@ -83,12 +89,13 @@ test('Variant B rejects a failed probe abort without promoting the review-approv
       throw new Error('stats must not run after probe-abort failure');
     });
     mock.method(process, 'cwd', () => root);
-    mock.method(process, 'exit', code => exitCodes.push(code));
+    mock.method(process, 'exit', (code: number) => exitCodes.push(code));
 
-    await loadIntegrate()([TEST_SLUG, '--no-integration-gates']);
+    const integrate = loadIntegrate();
+    await integrate([TEST_SLUG, '--no-integration-gates']);
 
     assert.deepEqual(exitCodes, [1], 'integration must reject the unsafe checkout with a nonzero result');
-    assert.ok(errors.some(message => message.includes('Dry-run merge could not be aborted cleanly')));
+    assert.ok(errors.some((message) => message.includes('Dry-run merge could not be aborted cleanly')));
     assert.equal(fs.readFileSync(taskFile, 'utf8'), fixture, 'probe-abort failure must not mutate the review task fixture');
   } finally {
     console.error = originalError;

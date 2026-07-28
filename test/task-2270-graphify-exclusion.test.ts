@@ -1,11 +1,9 @@
-'use strict';
-
-const assert = require('node:assert/strict');
-const childProcess = require('node:child_process');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
-const test = require('node:test');
+import assert from 'node:assert/strict';
+import childProcess from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import test from 'node:test';
 
 const repoRoot = path.resolve(__dirname, '..');
 const fixtureRoot = path.join(__dirname, 'fixtures', 'task-2270-graphify-exclusion');
@@ -43,17 +41,17 @@ print(json.dumps({
     });
 
     assert.equal(result.status, 0, result.stderr);
-    const graph = JSON.parse(result.stdout);
+    const graph = JSON.parse(result.stdout as string);
     assert.ok(
-      !graph.documents.some(file => file.endsWith('/missions/task-0000/MISSION.md')),
+      !graph.documents.some((file: string) => file.endsWith('/missions/task-0000/MISSION.md')),
       'the configured mission document must be excluded before Graphify creates nodes'
     );
     assert.ok(
-      graph.node_sources.some(file => file.endsWith('src/source.ts')),
+      graph.node_sources.some((file: string) => file.endsWith('src/source.ts')),
       'the non-excluded source fixture must create graph nodes'
     );
     assert.ok(
-      graph.edges.some(edge => edge.relation === 'imports_from'),
+      graph.edges.some((edge: { relation: string }) => edge.relation === 'imports_from'),
       'the retained source fixtures must preserve their import relationship'
     );
   } finally {

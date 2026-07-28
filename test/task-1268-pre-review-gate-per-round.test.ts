@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { startReviewLoop } = require('../dist/lib/review/review');
+const { startReviewLoop } = require('../.test-runtime/lib/review/review');
 
 const TEST_SLUG = `task-1268-gate-per-round-${process.pid}`;
 let previousHome;
