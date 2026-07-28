@@ -1,0 +1,43 @@
+{
+  "target": "linux-x64",
+  "archive": "parallix-v1.4.45-linux-x64.tar.gz",
+  "archiveSha256": "b2476f7bea23320c5d13daa5f93ef0cd68fcf291b0b7aa84b1d77772b380a690",
+  "sourceCommit": "2f300622b2c8e23082cb28208a1c5ee6ce1afd24",
+  "pinnedNode": {
+    "executable": "/home/magnus/.nvm/versions/node/v26.5.0/bin/node",
+    "version": "v26.5.0",
+    "major": 26
+  },
+  "executableSha256": "e079d20c7322ee5043e7b71482899bc9e9fed88207b2c9467a43be66a8393a2c",
+  "signature": {
+    "signed": false,
+    "status": "unsigned",
+    "mechanism": "elf-section-header"
+  },
+  "build": "passed",
+  "smoke": "passed",
+  "install": "passed",
+  "files": [
+    "LICENSE",
+    "NOTICES",
+    "asset-manifest.json",
+    "config/agents.json",
+    "config/state-map.json",
+    "manifest.sha256",
+    "migrations/0001-initial-schema.sql",
+    "migrations/0002-import-history.sql",
+    "migrations/0003-board-lane-events.sql",
+    "package.json",
+    "prompts/act-on-review.md",
+    "prompts/draft.md",
+    "prompts/execute.md",
+    "prompts/review.md",
+    "px",
+    "px.mjs.map",
+    "sbom.json",
+    "sea-config.json",
+    "sea-metadata.json",
+    "templates/mission-scaffold.md"
+  ],
+  "recordedAt": "2026-07-27T18:27:55.547Z"
+}
