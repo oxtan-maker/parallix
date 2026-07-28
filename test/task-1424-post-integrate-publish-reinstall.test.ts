@@ -8,17 +8,22 @@ const path = require('path');
 
 const PACKAGE_ROOT = path.join(__dirname, '..');
 
+type RunOptions = import('node:child_process').SpawnSyncOptions & {
+  tempHome?: string;
+  env?: Record<string, string>;
+};
+
 // Reproduces the real post-integrate self-update path from scripts/refresh-global-px.sh:
 // `npm pack` the checkout, `npm install -g` the tarball, then run the installed
 // executable from a temporary target repository. Since TASK-2285 the package
 // contains only the canonical ESM bundle payload (build/), so extraction cannot
 // couple source and sibling-JS mtimes.
-function run(command, args, options = {}) {
-// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `tempHome` absent from its inferred mock shape.
-  const tempHome = options.tempHome || fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-npm-home-'));
-// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `spawnOptions` absent from its inferred mock shape.
-  const { env: extraEnv, ...spawnOptions } = options;
-  return spawnSync(command, args, {
+function run(command: string, args: string[], options: RunOptions = {}) {
+  const runOptions = options as RunOptions;
+  const callerProvided = runOptions.tempHome !== undefined;
+  const tempHome = runOptions.tempHome || fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-npm-home-'));
+  const { env: extraEnv, ...spawnOptions } = runOptions;
+  const result = spawnSync(command, args, {
     encoding: 'utf8',
     timeout: 120000,
     env: {
@@ -30,6 +35,11 @@ function run(command, args, options = {}) {
     },
     ...spawnOptions
   });
+  // Clean up auto-created tempHome; preserve caller-provided directories.
+  if (!callerProvided) {
+    try { fs.rmSync(tempHome, { recursive: true, force: true }); } catch (_) {}
+  }
+  return result;
 }
 
 function packFilename(stdout) {

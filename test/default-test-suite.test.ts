@@ -40,6 +40,7 @@ const expectedIntegrationFiles = [
   'task-2270-graphify-exclusion.test.js',
   'task-2273-review-gate-ownership.test.ts', 'task-2312-label-sync.test.ts',
   'task-2319-notices-git-tracking.test.ts',
+  'task-2318-temp-directory-leaks.test.js',
   'test-hygiene.test.ts',
   'verification.test.ts', 'verify-local-integrate.test.ts'
 ].sort();

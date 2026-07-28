@@ -56,25 +56,28 @@ test('ConcreteMissionReadAdapter loadAllMissions returns missions from tasks sto
       title: 'First Task',
     }),
   });
+  try {
+    const adapter = new ConcreteMissionReadAdapter({
+      rootDir: tmp,
+      repositoryId: repositoryId('test-repo'),
+      getTaskStorage: () => ({
+        tasksDir: path.join(tmp, 'backlog', 'tasks'),
+        completedDir: path.join(tmp, 'backlog', 'completed'),
+        archiveTasksDir: path.join(tmp, 'backlog', 'archive', 'tasks'),
+      }),
+      findMissionDir: () => null,
+      findCheckpoints: () => [],
+      resolveWorktree: () => null,
+    });
 
-  const adapter = new ConcreteMissionReadAdapter({
-    rootDir: tmp,
-    repositoryId: repositoryId('test-repo'),
-    getTaskStorage: () => ({
-      tasksDir: path.join(tmp, 'backlog', 'tasks'),
-      completedDir: path.join(tmp, 'backlog', 'completed'),
-      archiveTasksDir: path.join(tmp, 'backlog', 'archive', 'tasks'),
-    }),
-    findMissionDir: () => null,
-    findCheckpoints: () => [],
-    resolveWorktree: () => null,
-  });
-
-  const missions = await adapter.loadAllMissions();
-  assert.equal(missions.length, 1);
-  assert.equal(missions[0].id, 'task-1001');
-  assert.equal(missions[0].status, 'refined');
-  assert.equal(missions[0].title, 'First Task');
+    const missions = await adapter.loadAllMissions();
+    assert.equal(missions.length, 1);
+    assert.equal(missions[0].id, 'task-1001');
+    assert.equal(missions[0].status, 'refined');
+    assert.equal(missions[0].title, 'First Task');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 test('ConcreteMissionReadAdapter loadAllMissions returns missions from completed store', async () => {
@@ -87,25 +90,28 @@ test('ConcreteMissionReadAdapter loadAllMissions returns missions from completed
       closedAt: '2026-07-01T00:00:00Z',
     }),
   });
+  try {
+    const adapter = new ConcreteMissionReadAdapter({
+      rootDir: tmp,
+      repositoryId: repositoryId('test-repo'),
+      getTaskStorage: () => ({
+        tasksDir: path.join(tmp, 'backlog', 'tasks'),
+        completedDir: path.join(tmp, 'backlog', 'completed'),
+        archiveTasksDir: path.join(tmp, 'backlog', 'archive', 'tasks'),
+      }),
+      findMissionDir: () => null,
+      findCheckpoints: () => [],
+      resolveWorktree: () => null,
+    });
 
-  const adapter = new ConcreteMissionReadAdapter({
-    rootDir: tmp,
-    repositoryId: repositoryId('test-repo'),
-    getTaskStorage: () => ({
-      tasksDir: path.join(tmp, 'backlog', 'tasks'),
-      completedDir: path.join(tmp, 'backlog', 'completed'),
-      archiveTasksDir: path.join(tmp, 'backlog', 'archive', 'tasks'),
-    }),
-    findMissionDir: () => null,
-    findCheckpoints: () => [],
-    resolveWorktree: () => null,
-  });
-
-  const missions = await adapter.loadAllMissions();
-  assert.equal(missions.length, 1);
-  assert.equal(missions[0].id, 'task-2001');
-  assert.equal(missions[0].status, 'done');
-  assert.equal(missions[0].closedAt, '2026-07-01T00:00:00Z');
+    const missions = await adapter.loadAllMissions();
+    assert.equal(missions.length, 1);
+    assert.equal(missions[0].id, 'task-2001');
+    assert.equal(missions[0].status, 'done');
+    assert.equal(missions[0].closedAt, '2026-07-01T00:00:00Z');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 test('ConcreteMissionReadAdapter loadAllMissions reads from tasks, completed, and archive stores', async () => {
@@ -131,25 +137,28 @@ test('ConcreteMissionReadAdapter loadAllMissions reads from tasks, completed, an
       closedAt: '2026-06-01T00:00:00Z',
     }),
   });
+  try {
+    const adapter = new ConcreteMissionReadAdapter({
+      rootDir: tmp,
+      repositoryId: repositoryId('test-repo'),
+      getTaskStorage: () => ({
+        tasksDir: path.join(tmp, 'backlog', 'tasks'),
+        completedDir: path.join(tmp, 'backlog', 'completed'),
+        archiveTasksDir: path.join(tmp, 'backlog', 'archive', 'tasks'),
+      }),
+      findMissionDir: () => null,
+      findCheckpoints: () => [],
+      resolveWorktree: () => null,
+    });
 
-  const adapter = new ConcreteMissionReadAdapter({
-    rootDir: tmp,
-    repositoryId: repositoryId('test-repo'),
-    getTaskStorage: () => ({
-      tasksDir: path.join(tmp, 'backlog', 'tasks'),
-      completedDir: path.join(tmp, 'backlog', 'completed'),
-      archiveTasksDir: path.join(tmp, 'backlog', 'archive', 'tasks'),
-    }),
-    findMissionDir: () => null,
-    findCheckpoints: () => [],
-    resolveWorktree: () => null,
-  });
-
-  const missions = await adapter.loadAllMissions();
-  assert.equal(missions.length, 3);
-  assert.equal(missions[0].id, 'task-1001');
-  assert.equal(missions[1].id, 'task-2001');
-  assert.equal(missions[2].id, 'task-3001');
+    const missions = await adapter.loadAllMissions();
+    assert.equal(missions.length, 3);
+    assert.equal(missions[0].id, 'task-1001');
+    assert.equal(missions[1].id, 'task-2001');
+    assert.equal(missions[2].id, 'task-3001');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 test('ConcreteMissionReadAdapter deduplicates task ids across stores preferring lower-priority directory', async () => {
@@ -168,45 +177,51 @@ test('ConcreteMissionReadAdapter deduplicates task ids across stores preferring 
       closedAt: '2026-07-01T00:00:00Z',
     }),
   });
+  try {
+    const adapter = new ConcreteMissionReadAdapter({
+      rootDir: tmp,
+      repositoryId: repositoryId('test-repo'),
+      getTaskStorage: () => ({
+        tasksDir: path.join(tmp, 'backlog', 'tasks'),
+        completedDir: path.join(tmp, 'backlog', 'completed'),
+        archiveTasksDir: path.join(tmp, 'backlog', 'archive', 'tasks'),
+      }),
+      findMissionDir: () => null,
+      findCheckpoints: () => [],
+      resolveWorktree: () => null,
+    });
 
-  const adapter = new ConcreteMissionReadAdapter({
-    rootDir: tmp,
-    repositoryId: repositoryId('test-repo'),
-    getTaskStorage: () => ({
-      tasksDir: path.join(tmp, 'backlog', 'tasks'),
-      completedDir: path.join(tmp, 'backlog', 'completed'),
-      archiveTasksDir: path.join(tmp, 'backlog', 'archive', 'tasks'),
-    }),
-    findMissionDir: () => null,
-    findCheckpoints: () => [],
-    resolveWorktree: () => null,
-  });
-
-  const missions = await adapter.loadAllMissions();
-  assert.equal(missions.length, 1);
-  assert.equal(missions[0].id, 'task-1001');
-  assert.equal(missions[0].status, 'active'); // tasks/ copy (priority 0) preferred over completed/ (priority 1)
-  // The "active" status is mapped by missionStatusFromBacklog
+    const missions = await adapter.loadAllMissions();
+    assert.equal(missions.length, 1);
+    assert.equal(missions[0].id, 'task-1001');
+    assert.equal(missions[0].status, 'active'); // tasks/ copy (priority 0) preferred over completed/ (priority 1)
+    // The "active" status is mapped by missionStatusFromBacklog
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 test('ConcreteMissionReadAdapter returns empty array when no task files exist', async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'px-mra-empty-'));
+  try {
+    const adapter = new ConcreteMissionReadAdapter({
+      rootDir: tmp,
+      repositoryId: repositoryId('test-repo'),
+      getTaskStorage: () => ({
+        tasksDir: path.join(tmp, 'backlog', 'tasks'),
+        completedDir: path.join(tmp, 'backlog', 'completed'),
+        archiveTasksDir: path.join(tmp, 'backlog', 'archive', 'tasks'),
+      }),
+      findMissionDir: () => null,
+      findCheckpoints: () => [],
+      resolveWorktree: () => null,
+    });
 
-  const adapter = new ConcreteMissionReadAdapter({
-    rootDir: tmp,
-    repositoryId: repositoryId('test-repo'),
-    getTaskStorage: () => ({
-      tasksDir: path.join(tmp, 'backlog', 'tasks'),
-      completedDir: path.join(tmp, 'backlog', 'completed'),
-      archiveTasksDir: path.join(tmp, 'backlog', 'archive', 'tasks'),
-    }),
-    findMissionDir: () => null,
-    findCheckpoints: () => [],
-    resolveWorktree: () => null,
-  });
-
-  const missions = await adapter.loadAllMissions();
-  assert.equal(missions.length, 0);
+    const missions = await adapter.loadAllMissions();
+    assert.equal(missions.length, 0);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 test('ConcreteMissionReadAdapter getSourceFacts returns non-empty source facts after load', async () => {
@@ -218,25 +233,28 @@ test('ConcreteMissionReadAdapter getSourceFacts returns non-empty source facts a
       title: 'First',
     }),
   });
+  try {
+    const adapter = new ConcreteMissionReadAdapter({
+      rootDir: tmp,
+      repositoryId: repositoryId('test-repo'),
+      getTaskStorage: () => ({
+        tasksDir: path.join(tmp, 'backlog', 'tasks'),
+        completedDir: path.join(tmp, 'backlog', 'completed'),
+        archiveTasksDir: path.join(tmp, 'backlog', 'archive', 'tasks'),
+      }),
+      findMissionDir: () => null,
+      findCheckpoints: () => [],
+      resolveWorktree: () => null,
+    });
 
-  const adapter = new ConcreteMissionReadAdapter({
-    rootDir: tmp,
-    repositoryId: repositoryId('test-repo'),
-    getTaskStorage: () => ({
-      tasksDir: path.join(tmp, 'backlog', 'tasks'),
-      completedDir: path.join(tmp, 'backlog', 'completed'),
-      archiveTasksDir: path.join(tmp, 'backlog', 'archive', 'tasks'),
-    }),
-    findMissionDir: () => null,
-    findCheckpoints: () => [],
-    resolveWorktree: () => null,
-  });
-
-  await adapter.loadAllMissions();
-  const facts = adapter.getSourceFacts();
-  assert.ok(facts.length > 0);
-  assert.equal(facts[0].source, 'task-markdown');
-  assert.ok(facts[0].value?.includes('task-1001'));
+    await adapter.loadAllMissions();
+    const facts = adapter.getSourceFacts();
+    assert.ok(facts.length > 0);
+    assert.equal(facts[0].source, 'task-markdown');
+    assert.ok(facts[0].value?.includes('task-1001'));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -252,52 +270,58 @@ test('ConcreteMissionReadAdapter loadMission returns mission by id', async () =>
       title: 'Specific Task',
     }),
   });
+  try {
+    const tasksDir = path.join(tmp, 'backlog', 'tasks');
+    const adapter = new ConcreteMissionReadAdapter({
+      rootDir: tmp,
+      repositoryId: repositoryId('test-repo'),
+      resolveTaskFile: (slug) => {
+        const files = fs.readdirSync(tasksDir).filter((f) => f.endsWith('.md'));
+        const file = files.find((f) => f.toLowerCase().startsWith(slug.toLowerCase()));
+        if (file) return { ok: true, taskFile: path.join(tasksDir, file), matches: [file] };
+        return { ok: false, matches: [] };
+      },
+      getTaskStorage: () => ({
+        tasksDir,
+        completedDir: path.join(tmp, 'backlog', 'completed'),
+        archiveTasksDir: path.join(tmp, 'backlog', 'archive', 'tasks'),
+      }),
+      findMissionDir: () => null,
+      findCheckpoints: () => [],
+      resolveWorktree: () => null,
+    });
 
-  const tasksDir = path.join(tmp, 'backlog', 'tasks');
-  const adapter = new ConcreteMissionReadAdapter({
-    rootDir: tmp,
-    repositoryId: repositoryId('test-repo'),
-    resolveTaskFile: (slug) => {
-      const files = fs.readdirSync(tasksDir).filter((f) => f.endsWith('.md'));
-      const file = files.find((f) => f.toLowerCase().startsWith(slug.toLowerCase()));
-      if (file) return { ok: true, taskFile: path.join(tasksDir, file), matches: [file] };
-      return { ok: false, matches: [] };
-    },
-    getTaskStorage: () => ({
-      tasksDir,
-      completedDir: path.join(tmp, 'backlog', 'completed'),
-      archiveTasksDir: path.join(tmp, 'backlog', 'archive', 'tasks'),
-    }),
-    findMissionDir: () => null,
-    findCheckpoints: () => [],
-    resolveWorktree: () => null,
-  });
-
-  const mission = await adapter.loadMission(missionId('task-5001'));
-  assert.ok(mission !== null);
-  assert.equal(mission!.id, 'task-5001');
-  assert.equal(mission!.title, 'Specific Task');
+    const mission = await adapter.loadMission(missionId('task-5001'));
+    assert.ok(mission !== null);
+    assert.equal(mission!.id, 'task-5001');
+    assert.equal(mission!.title, 'Specific Task');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 test('ConcreteMissionReadAdapter loadMission returns null for missing id', async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'px-mra-missing-'));
+  try {
+    const adapter = new ConcreteMissionReadAdapter({
+      rootDir: tmp,
+      repositoryId: repositoryId('test-repo'),
+      resolveTaskFile: () => ({ ok: false, matches: [] }),
+      getTaskStorage: () => ({
+        tasksDir: path.join(tmp, 'backlog', 'tasks'),
+        completedDir: path.join(tmp, 'backlog', 'completed'),
+        archiveTasksDir: path.join(tmp, 'backlog', 'archive', 'tasks'),
+      }),
+      findMissionDir: () => null,
+      findCheckpoints: () => [],
+      resolveWorktree: () => null,
+    });
 
-  const adapter = new ConcreteMissionReadAdapter({
-    rootDir: tmp,
-    repositoryId: repositoryId('test-repo'),
-    resolveTaskFile: () => ({ ok: false, matches: [] }),
-    getTaskStorage: () => ({
-      tasksDir: path.join(tmp, 'backlog', 'tasks'),
-      completedDir: path.join(tmp, 'backlog', 'completed'),
-      archiveTasksDir: path.join(tmp, 'backlog', 'archive', 'tasks'),
-    }),
-    findMissionDir: () => null,
-    findCheckpoints: () => [],
-    resolveWorktree: () => null,
-  });
-
-  const mission = await adapter.loadMission(missionId('task-9999'));
-  assert.equal(mission, null);
+    const mission = await adapter.loadMission(missionId('task-9999'));
+    assert.equal(mission, null);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -313,24 +337,27 @@ test('Materialization: found with integration-base content and absent worktree',
       title: 'Base Content',
     }),
   });
+  try {
+    const adapter = new ConcreteMissionReadAdapter({
+      rootDir: tmp,
+      repositoryId: repositoryId('test-repo'),
+      getTaskStorage: () => ({
+        tasksDir: path.join(tmp, 'backlog', 'tasks'),
+        completedDir: path.join(tmp, 'backlog', 'completed'),
+        archiveTasksDir: path.join(tmp, 'backlog', 'archive', 'tasks'),
+      }),
+      findMissionDir: () => null,
+      findCheckpoints: () => [],
+      resolveWorktree: () => null, // absent worktree
+    });
 
-  const adapter = new ConcreteMissionReadAdapter({
-    rootDir: tmp,
-    repositoryId: repositoryId('test-repo'),
-    getTaskStorage: () => ({
-      tasksDir: path.join(tmp, 'backlog', 'tasks'),
-      completedDir: path.join(tmp, 'backlog', 'completed'),
-      archiveTasksDir: path.join(tmp, 'backlog', 'archive', 'tasks'),
-    }),
-    findMissionDir: () => null,
-    findCheckpoints: () => [],
-    resolveWorktree: () => null, // absent worktree
-  });
-
-  const missions = await adapter.loadAllMissions();
-  assert.equal(missions.length, 1);
-  assert.equal(missions[0].status, 'refined');
-  assert.equal(missions[0].closedAt, null);
+    const missions = await adapter.loadAllMissions();
+    assert.equal(missions.length, 1);
+    assert.equal(missions[0].status, 'refined');
+    assert.equal(missions[0].closedAt, null);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 test('Materialization: completed task with closedAt becomes ClosedMission', async () => {
@@ -343,24 +370,27 @@ test('Materialization: completed task with closedAt becomes ClosedMission', asyn
       closedAt: '2026-07-15T12:00:00Z',
     }),
   });
+  try {
+    const adapter = new ConcreteMissionReadAdapter({
+      rootDir: tmp,
+      repositoryId: repositoryId('test-repo'),
+      getTaskStorage: () => ({
+        tasksDir: path.join(tmp, 'backlog', 'tasks'),
+        completedDir: path.join(tmp, 'backlog', 'completed'),
+        archiveTasksDir: path.join(tmp, 'backlog', 'archive', 'tasks'),
+      }),
+      findMissionDir: () => null,
+      findCheckpoints: () => [],
+      resolveWorktree: () => null,
+    });
 
-  const adapter = new ConcreteMissionReadAdapter({
-    rootDir: tmp,
-    repositoryId: repositoryId('test-repo'),
-    getTaskStorage: () => ({
-      tasksDir: path.join(tmp, 'backlog', 'tasks'),
-      completedDir: path.join(tmp, 'backlog', 'completed'),
-      archiveTasksDir: path.join(tmp, 'backlog', 'archive', 'tasks'),
-    }),
-    findMissionDir: () => null,
-    findCheckpoints: () => [],
-    resolveWorktree: () => null,
-  });
-
-  const missions = await adapter.loadAllMissions();
-  assert.equal(missions.length, 1);
-  assert.equal(missions[0].status, 'done');
-  assert.equal(missions[0].closedAt, '2026-07-15T12:00:00Z');
+    const missions = await adapter.loadAllMissions();
+    assert.equal(missions.length, 1);
+    assert.equal(missions[0].status, 'done');
+    assert.equal(missions[0].closedAt, '2026-07-15T12:00:00Z');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 test('Materialization: status mapping from backlog vocabulary', async () => {
@@ -384,27 +414,30 @@ test('Materialization: status mapping from backlog vocabulary', async () => {
       title: 'Integration',
     }),
   });
+  try {
+    const adapter = new ConcreteMissionReadAdapter({
+      rootDir: tmp,
+      repositoryId: repositoryId('test-repo'),
+      getTaskStorage: () => ({
+        tasksDir: path.join(tmp, 'backlog', 'tasks'),
+        completedDir: path.join(tmp, 'backlog', 'completed'),
+        archiveTasksDir: path.join(tmp, 'backlog', 'archive', 'tasks'),
+      }),
+      findMissionDir: () => null,
+      findCheckpoints: () => [],
+      resolveWorktree: () => null,
+    });
 
-  const adapter = new ConcreteMissionReadAdapter({
-    rootDir: tmp,
-    repositoryId: repositoryId('test-repo'),
-    getTaskStorage: () => ({
-      tasksDir: path.join(tmp, 'backlog', 'tasks'),
-      completedDir: path.join(tmp, 'backlog', 'completed'),
-      archiveTasksDir: path.join(tmp, 'backlog', 'archive', 'tasks'),
-    }),
-    findMissionDir: () => null,
-    findCheckpoints: () => [],
-    resolveWorktree: () => null,
-  });
+    const missions = await adapter.loadAllMissions();
+    assert.equal(missions.length, 3);
 
-  const missions = await adapter.loadAllMissions();
-  assert.equal(missions.length, 3);
-
-  const byId = new Map(missions.map((m) => [m.id, m]));
-  assert.equal(byId.get(missionId('task-8001'))!.status, 'refined'); // ready -> refined
-  assert.equal(byId.get(missionId('task-8002'))!.status, 'integration'); // approved -> integration
-  assert.equal(byId.get(missionId('task-8003'))!.status, 'integration');
+    const byId = new Map(missions.map((m) => [m.id, m]));
+    assert.equal(byId.get(missionId('task-8001'))!.status, 'refined'); // ready -> refined
+    assert.equal(byId.get(missionId('task-8002'))!.status, 'integration'); // approved -> integration
+    assert.equal(byId.get(missionId('task-8003'))!.status, 'integration');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -420,29 +453,32 @@ test('ConcreteMissionReadAdapter records unavailable source fact for materializa
       title: 'Done Without ClosedAt',
     }),
   });
+  try {
+    const adapter = new ConcreteMissionReadAdapter({
+      rootDir: tmp,
+      repositoryId: repositoryId('test-repo'),
+      getTaskStorage: () => ({
+        tasksDir: path.join(tmp, 'backlog', 'tasks'),
+        completedDir: path.join(tmp, 'backlog', 'completed'),
+        archiveTasksDir: path.join(tmp, 'backlog', 'archive', 'tasks'),
+      }),
+      findMissionDir: () => null,
+      findCheckpoints: () => [],
+      resolveWorktree: () => null,
+    });
 
-  const adapter = new ConcreteMissionReadAdapter({
-    rootDir: tmp,
-    repositoryId: repositoryId('test-repo'),
-    getTaskStorage: () => ({
-      tasksDir: path.join(tmp, 'backlog', 'tasks'),
-      completedDir: path.join(tmp, 'backlog', 'completed'),
-      archiveTasksDir: path.join(tmp, 'backlog', 'archive', 'tasks'),
-    }),
-    findMissionDir: () => null,
-    findCheckpoints: () => [],
-    resolveWorktree: () => null,
-  });
+    const missions = await adapter.loadAllMissions();
+    // A done task in completed store without closedAt fails materialization
+    // (closure-time-missing) because worktree is absent but no closedAt
+    assert.equal(missions.length, 0);
 
-  const missions = await adapter.loadAllMissions();
-  // A done task in completed store without closedAt fails materialization
-  // (closure-time-missing) because worktree is absent but no closedAt
-  assert.equal(missions.length, 0);
-
-  const facts = adapter.getSourceFacts();
-  assert.equal(facts.length, 1);
-  assert.equal(facts[0].status, 'unavailable');
-  assert.equal(facts[0].value, 'closure-time-missing');
+    const facts = adapter.getSourceFacts();
+    assert.equal(facts.length, 1);
+    assert.equal(facts[0].status, 'unavailable');
+    assert.equal(facts[0].value, 'closure-time-missing');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -458,51 +494,54 @@ test('ConcreteMissionReadAdapter uses worktree content when worktree is present'
       title: 'Base Title',
     }),
   });
+  try {
+    // Simulate a worktree with updated content
+    const worktreePath = path.join(tmp, 'worktree', 'task-4001');
+    const worktreeTasksDir = path.join(worktreePath, 'backlog', 'tasks');
+    fs.mkdirSync(worktreeTasksDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(worktreeTasksDir, 'task-4001 - worktree.md'),
+      taskMd({
+        id: 'TASK-4001',
+        status: 'review',
+        assignee: 'custom',
+        title: 'Worktree Title',
+      }),
+      'utf8'
+    );
 
-  // Simulate a worktree with updated content
-  const worktreePath = path.join(tmp, 'worktree', 'task-4001');
-  const worktreeTasksDir = path.join(worktreePath, 'backlog', 'tasks');
-  fs.mkdirSync(worktreeTasksDir, { recursive: true });
-  fs.writeFileSync(
-    path.join(worktreeTasksDir, 'task-4001 - worktree.md'),
-    taskMd({
-      id: 'TASK-4001',
-      status: 'review',
-      assignee: 'custom',
-      title: 'Worktree Title',
-    }),
-    'utf8'
-  );
+    const adapter = new ConcreteMissionReadAdapter({
+      rootDir: tmp,
+      repositoryId: repositoryId('test-repo'),
+      getTaskStorage: () => ({
+        tasksDir: path.join(tmp, 'backlog', 'tasks'),
+        completedDir: path.join(tmp, 'backlog', 'completed'),
+        archiveTasksDir: path.join(tmp, 'backlog', 'archive', 'tasks'),
+      }),
+      findMissionDir: () => null,
+      findCheckpoints: () => [],
+      resolveWorktree: (slug) => {
+        if (slug === 'task-4001') return worktreePath;
+        return null;
+      },
+      resolveTaskFile: (slug, rootDir) => {
+        const dir = rootDir || tmp;
+        const tasksDir = path.join(dir, 'backlog', 'tasks');
+        if (!fs.existsSync(tasksDir)) return { ok: false, matches: [] };
+        const files = fs.readdirSync(tasksDir).filter((f) => f.endsWith('.md'));
+        const file = files.find((f) => f.toLowerCase().startsWith(slug.toLowerCase()));
+        if (file) return { ok: true, taskFile: path.join(tasksDir, file), matches: [file] };
+        return { ok: false, matches: [] };
+      },
+    });
 
-  const adapter = new ConcreteMissionReadAdapter({
-    rootDir: tmp,
-    repositoryId: repositoryId('test-repo'),
-    getTaskStorage: () => ({
-      tasksDir: path.join(tmp, 'backlog', 'tasks'),
-      completedDir: path.join(tmp, 'backlog', 'completed'),
-      archiveTasksDir: path.join(tmp, 'backlog', 'archive', 'tasks'),
-    }),
-    findMissionDir: () => null,
-    findCheckpoints: () => [],
-    resolveWorktree: (slug) => {
-      if (slug === 'task-4001') return worktreePath;
-      return null;
-    },
-    resolveTaskFile: (slug, rootDir) => {
-      const dir = rootDir || tmp;
-      const tasksDir = path.join(dir, 'backlog', 'tasks');
-      if (!fs.existsSync(tasksDir)) return { ok: false, matches: [] };
-      const files = fs.readdirSync(tasksDir).filter((f) => f.endsWith('.md'));
-      const file = files.find((f) => f.toLowerCase().startsWith(slug.toLowerCase()));
-      if (file) return { ok: true, taskFile: path.join(tasksDir, file), matches: [file] };
-      return { ok: false, matches: [] };
-    },
-  });
-
-  const missions = await adapter.loadAllMissions();
-  assert.equal(missions.length, 1);
-  // Integration base owns status; worktree provides content
-  assert.equal(missions[0].status, 'integration');
-  assert.equal(missions[0].assignee, 'codex'); // base assignee
-  assert.equal(missions[0].title, 'Worktree Title'); // worktree title
+    const missions = await adapter.loadAllMissions();
+    assert.equal(missions.length, 1);
+    // Integration base owns status; worktree provides content
+    assert.equal(missions[0].status, 'integration');
+    assert.equal(missions[0].assignee, 'codex'); // base assignee
+    assert.equal(missions[0].title, 'Worktree Title'); // worktree title
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });

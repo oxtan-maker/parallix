@@ -171,7 +171,15 @@ process.env.PATH = `${launcherBin}${path.delimiter}${process.env.PATH || ''}`;
 // test harness and execute the operator's real Pi CLI during a health probe.
 process.env.PI_BIN = path.join(launcherBin, 'pi');
 
-process.on('exit', () => {
+// Idempotent cleanup: safe to invoke from both `exit` and `SIGTERM`.
+// When `SIGTERM` fires first, cleanup runs and then `process.exit()`
+// triggers the `exit` event — the second invocation is a no-op because
+// the directories are already removed (force: true). The `tempRoots`
+// array is cleared after the first sweep so subsequent calls skip.
+let cleanupRan = false;
+function cleanupTempDirs() {
+  if (cleanupRan) return;
+  cleanupRan = true;
   for (const dir of tempRoots.reverse()) {
     try {
       fs.rmSync(dir, { recursive: true, force: true });
@@ -179,4 +187,21 @@ process.on('exit', () => {
       // best-effort cleanup only
     }
   }
+}
+
+// `process.on('exit')` does not fire when a signal terminates the process
+// without a handler (e.g., SIGTERM from the test runner's --test-force-exit
+// or a timeout). Register an explicit SIGTERM handler so cleanup runs
+// on both graceful exit and signal termination (task-2318).
+process.on('SIGTERM', () => {
+  cleanupTempDirs();
+  process.exit(128 + 15); // 128 + SIGTERM signal number
 });
+
+process.on('exit', () => {
+  cleanupTempDirs();
+});
+
+// Expose tempRoots so child processes (e.g., SIGKILL regression test) can
+// record every directory the bootstrap creates and clean them up in the parent.
+module.exports = { tempRoots };

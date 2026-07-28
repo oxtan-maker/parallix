@@ -85,7 +85,7 @@ test('SEA surfaces: a non-boolean surface result is a failure, never an implicit
 test('SEA thresholds: measurement stop thresholds are declared for size, cold start, memory, and shutdown (SC5)', () => {
   assert.deepEqual(Object.keys(SEA_THRESHOLDS).sort(), ['binarySizeBytes', 'coldStartMs', 'idleMemoryMb', 'shutdownMs']);
   assert.equal(SEA_THRESHOLDS.binarySizeBytes, 100 * 1024 * 1024);
-  for (const [name, value] of Object.entries(SEA_THRESHOLDS)) {
+  for (const [name, value] of Object.entries(SEA_THRESHOLDS) as [string, number][]) {
     assert.ok(Number.isFinite(value) && value > 0, `${name} must be a positive number`);
   }
 });

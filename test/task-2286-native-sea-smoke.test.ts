@@ -383,7 +383,8 @@ test('native SEA smoke: the executable runs with no Node on PATH and no node_mod
   });
   assert.equal(isolated.status, 0, `the executable needs an external Node on PATH: ${isolated.stderr}`);
   assert.match(isolated.stdout, /node: v\d+\.\d+\.\d+/);
-  assert.equal(spawnSync('node', ['--version'], { env: { PATH: '' }, encoding: 'utf8' }).error?.code, 'ENOENT',
+  const hiddenNodeError = spawnSync('node', ['--version'], { env: { PATH: '' }, encoding: 'utf8' }).error as NodeJS.ErrnoException | undefined;
+  assert.equal(hiddenNodeError?.code, 'ENOENT',
     'the isolation check is only meaningful if an empty PATH really hides node');
 });
 

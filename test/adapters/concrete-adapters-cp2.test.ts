@@ -274,22 +274,26 @@ test('AgentReadAdapter loadAgentAvailability handles timed blocks', async () => 
 
 test('AgentReadAdapter loadAssignedAgent returns agent from task file', async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'px-agent-test-'));
-  const taskFile = path.join(tmpDir, 'task-1001.md');
-  fs.writeFileSync(taskFile, '---\nid: TASK-1001\nassignee: [codex]\n---\n', 'utf8');
+  try {
+    const taskFile = path.join(tmpDir, 'task-1001.md');
+    fs.writeFileSync(taskFile, '---\nid: TASK-1001\nassignee: [codex]\n---\n', 'utf8');
 
-  const adapter = new ConcreteAgentReadAdapter({
-    rootDir: tmpDir,
-    blocklistRepo: new MockBlocklistRepo(),
-    knownAgentFamilies: [agentFamily('codex')],
-    resolveTaskFile: () => ({ ok: true, taskFile, matches: [taskFile] }),
-    getTaskAssignee: (f) => {
-      if (f === taskFile) return 'codex';
-      return null;
-    },
-  });
+    const adapter = new ConcreteAgentReadAdapter({
+      rootDir: tmpDir,
+      blocklistRepo: new MockBlocklistRepo(),
+      knownAgentFamilies: [agentFamily('codex')],
+      resolveTaskFile: () => ({ ok: true, taskFile, matches: [taskFile] }),
+      getTaskAssignee: (f) => {
+        if (f === taskFile) return 'codex';
+        return null;
+      },
+    });
 
-  const assigned = await adapter.loadAssignedAgent(missionId('task-1001'));
-  assert.equal(assigned, 'codex');
+    const assigned = await adapter.loadAssignedAgent(missionId('task-1001'));
+    assert.equal(assigned, 'codex');
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
 });
 
 test('AgentReadAdapter loadAssignedAgent returns null for missing task', async () => {

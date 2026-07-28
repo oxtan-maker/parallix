@@ -32,3 +32,95 @@ test('test hygiene accepts an annotated TypeScript skip', () => {
     assert.equal(result.status, 0);
   });
 });
+
+// Inode-usage guard: exercises the real scripts/test-hygiene.sh with a
+// mocked df binary so the threshold logic is verified without depending
+// on the host's actual /tmp inode state.
+function withMockedDf(dfOutput, assertion) {
+  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'test-hygiene-inode-'));
+  try {
+    fs.mkdirSync(path.join(repoRoot, 'test'));
+    // Copy the real test-hygiene.sh into the fixture repo
+    fs.copyFileSync(HYGIENE_SCRIPT, path.join(repoRoot, 'test-hygiene.sh'));
+
+    // Create a mock df binary that returns the provided output
+    const binDir = path.join(repoRoot, 'bin');
+    fs.mkdirSync(binDir);
+    const dfScript = path.join(binDir, 'df');
+    fs.writeFileSync(dfScript, `#!/usr/bin/env bash
+echo "Filesystem     Inodes  IUsed   IFree IUse% Mounted"
+echo "${dfOutput}"
+`, 'utf8');
+    fs.chmodSync(dfScript, 0o755);
+
+    assertion(spawnSync('bash', ['test-hygiene.sh'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        PATH: `${binDir}:${process.env.PATH}`,
+      },
+    }));
+  } finally {
+    fs.rmSync(repoRoot, { recursive: true, force: true });
+  }
+}
+
+test('inode guard fails the real script at 86% usage', () => {
+  withMockedDf('tmpfs  524288  450000  74288  86%  /tmp', result => {
+    assert.equal(result.status, 1, 'inode guard should fail at 86% usage');
+    assert.match(result.stdout, /FAIL: \/tmp inode usage is 86% \(threshold: 80%\)/);
+  });
+});
+
+test('inode guard passes the real script below 80% threshold', () => {
+  withMockedDf('tmpfs  524288  300000  224288  57%  /tmp', result => {
+    assert.equal(result.status, 0, 'inode guard should pass at 57% usage');
+    assert.match(result.stdout, /PASS: no test-hygiene violations/);
+  });
+});
+
+// BSD/macOS df -i format:
+// Filesystem 512-blocks Used Available Capacity iused ifree %iused Mounted on
+// Inode percentage is in field 8 (%iused), not field 5.
+function withMockedDfBsd(dfOutput, assertion) {
+  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'test-hygiene-inode-bsd-'));
+  try {
+    fs.mkdirSync(path.join(repoRoot, 'test'));
+    fs.copyFileSync(HYGIENE_SCRIPT, path.join(repoRoot, 'test-hygiene.sh'));
+
+    const binDir = path.join(repoRoot, 'bin');
+    fs.mkdirSync(binDir);
+    const dfScript = path.join(binDir, 'df');
+    fs.writeFileSync(dfScript, `#!/usr/bin/env bash
+echo "Filesystem 512-blocks      Used Available Capacity iused     ifree     %iused Mounted on"
+echo "${dfOutput}"
+`, 'utf8');
+    fs.chmodSync(dfScript, 0o755);
+
+    assertion(spawnSync('bash', ['test-hygiene.sh'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        PATH: `${binDir}:${process.env.PATH}`,
+      },
+    }));
+  } finally {
+    fs.rmSync(repoRoot, { recursive: true, force: true });
+  }
+}
+
+test('inode guard fails the real script on BSD layout at 92% usage', () => {
+  withMockedDfBsd('/dev/disk1s1  488281264  244140632  244140632  50%  122070316  122070316  92%  /tmp', result => {
+    assert.equal(result.status, 1, 'inode guard should fail at 92% usage (BSD)');
+    assert.match(result.stdout, /FAIL: \/tmp inode usage is 92% \(threshold: 80%\)/);
+  });
+});
+
+test('inode guard passes the real script on BSD layout below 80%', () => {
+  withMockedDfBsd('/dev/disk1s1  488281264  244140632  244140632  50%  61035158  183105474  45%  /tmp', result => {
+    assert.equal(result.status, 0, 'inode guard should pass at 45% usage (BSD)');
+    assert.match(result.stdout, /PASS: no test-hygiene violations/);
+  });
+});
