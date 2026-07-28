@@ -4,7 +4,7 @@ title: recover agent slop alinging with domain design
 status: backlog
 assignee: [codex]
 created_date: '2026-07-28 14:19'
-labels: []
+labels: [user_value]
 dependencies: []
 ordinal: 69000
 ---
