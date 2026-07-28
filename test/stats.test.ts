@@ -38,13 +38,16 @@ test('stats report preserves merged/open counts for legacy merged/created_at CSV
     'task-1,codex,claude,http://example/pr/1,3,yes,merged,2026-05-01T10:00:00Z',
     'task-2,codex,claude,http://example/pr/2,0,no,open,2026-05-02T10:00:00Z',
   ].join('\n'));
+  try {
+    const report = stats._internals.generateMarkdownReport(stats._internals.loadCsv(csv), { groupBy: 'implementer' });
 
-  const report = stats._internals.generateMarkdownReport(stats._internals.loadCsv(csv), { groupBy: 'implementer' });
-
-  assert.match(report, /- \*\*Merged:\*\* 1/);
-  assert.match(report, /- \*\*Open\/Closed:\*\* 1/);
-  assert.match(report, /\| codex \| 2 \| 1 \| 1 \| 3 \| 1\.50 \| 2\.00 \|/);
-  assert.match(report, /\| task-1 \| codex \| claude \| 3 \| yes \| 2026-05-01 \|/);
+    assert.match(report, /- \*\*Merged:\*\* 1/);
+    assert.match(report, /- \*\*Open\/Closed:\*\* 1/);
+    assert.match(report, /\| codex \| 2 \| 1 \| 1 \| 3 \| 1\.50 \| 2\.00 \|/);
+    assert.match(report, /\| task-1 \| codex \| claude \| 3 \| yes \| 2026-05-01 \|/);
+  } finally {
+    fs.rmSync(path.dirname(csv), { recursive: true, force: true });
+  }
 });
 
 test('stats report normalizes date/has_pr CSVs across summary, implementer, and period views', () => {
@@ -53,20 +56,23 @@ test('stats report normalizes date/has_pr CSVs across summary, implementer, and 
     'task-1,2026-05-10,gemini,codex,http://example/pr/1,4,yes,PR#1',
     'task-2,2026-05-11,gemini,none,no PR,0,no,—',
   ].join('\n'));
+  try {
+    const report = stats._internals.generateMarkdownReport(stats._internals.loadCsv(csv), { groupBy: 'period' });
 
-  const report = stats._internals.generateMarkdownReport(stats._internals.loadCsv(csv), { groupBy: 'period' });
-
-  assert.match(report, /- \*\*Merged:\*\* 1/);
-  assert.match(report, /- \*\*Open\/Closed:\*\* 1/);
-  assert.match(report, /\| task-1 \| gemini \| codex \| 4 \| yes \| 2026-05-10 \|/);
-  assert.match(report, /\| task-2 \| gemini \| none \| 0 \| no \| 2026-05-11 \|/);
-  assert.match(report, /\| 2026-05-10 → 2026-05-11 \| 2 \| 2 \| 1 \| 1 \| 4 \| 2\.00 \|/);
+    assert.match(report, /- \*\*Merged:\*\* 1/);
+    assert.match(report, /- \*\*Open\/Closed:\*\* 1/);
+    assert.match(report, /\| task-1 \| gemini \| codex \| 4 \| yes \| 2026-05-10 \|/);
+    assert.match(report, /\| task-2 \| gemini \| none \| 0 \| no \| 2026-05-11 \|/);
+    assert.match(report, /\| 2026-05-10 → 2026-05-11 \| 2 \| 2 \| 1 \| 1 \| 4 \| 2\.00 \|/);
+  } finally {
+    fs.rmSync(path.dirname(csv), { recursive: true, force: true });
+  }
 });
 
 test('upsertStatsRow writes the workflow stats schema and updates existing missions idempotently', () => {
   const csvFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-stats-upsert-')), 'stats.csv');
-
-  const first = stats.upsertStatsRow({
+  try {
+    const first = stats.upsertStatsRow({
     date: '2026-05-18',
     repo: 'parallix',
     mission: 'task-2000',
@@ -100,12 +106,15 @@ test('upsertStatsRow writes the workflow stats schema and updates existing missi
   }, { filePath: csvFile });
   assert.equal(third.changed, true);
   assert.equal(third.data.rows[0].pr_fix_rounds, '3');
+  } finally {
+    fs.rmSync(path.dirname(csvFile), { recursive: true, force: true });
+  }
 });
 
 test('task-1314: upsertStatsRow keys on (repo, mission, stage) so same mission in different repos stays distinct', () => {
   const csvFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-stats-repo-stage-')), 'stats.csv');
-
-  stats.upsertStatsRow({
+  try {
+    stats.upsertStatsRow({
     date: '2026-06-07',
     repo: 'visualboard',
     mission: 'task-3000',
@@ -142,12 +151,15 @@ test('task-1314: upsertStatsRow keys on (repo, mission, stage) so same mission i
   const parallixRow = data.rows.find(r => r.repo === 'parallix');
   assert.equal(visualboardRow.input_tokens, '999');
   assert.equal(parallixRow.input_tokens, '200');
+  } finally {
+    fs.rmSync(path.dirname(csvFile), { recursive: true, force: true });
+  }
 });
 
 test('task-1342: upsertStatsRow keeps same mission/stage separate by acting agent family', () => {
   const csvFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-stats-stage-actor-')), 'stats.csv');
-
-  stats.upsertStatsRow({
+  try {
+    stats.upsertStatsRow({
     date: '2026-06-24',
     repo: 'parallix',
     mission: 'task-1342',
@@ -172,6 +184,9 @@ test('task-1342: upsertStatsRow keeps same mission/stage separate by acting agen
   assert.equal(data.rows.length, 2);
   assert.ok(data.rows.some(r => r.stage === 'follow-up' && r.implementer_agent === 'codex' && r.input_tokens === '100'));
   assert.ok(data.rows.some(r => r.stage === 'follow-up' && r.implementer_agent === 'custom' && r.input_tokens === '200'));
+  } finally {
+    fs.rmSync(path.dirname(csvFile), { recursive: true, force: true });
+  }
 });
 
 test('task-1342: accumulateStageStats sums repeated launches for the same mission/stage/family', () => {
@@ -240,20 +255,24 @@ test('resolveMissionClassification returns null classification with error when n
 
 test('upsertStatsRow accepts unknown classification rows and weekly report counts them', () => {
   const csvFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-stats-unknown-')), 'stats.csv');
-  stats.upsertStatsRow({
-    date: '2026-06-23',
-    repo: 'parallix',
-    mission: 'task-unknown',
-    classification: 'unknown',
-    implementer: 'unknown',
-    pr_fix_rounds: 0,
-    closed: 'yes',
-  }, { filePath: csvFile });
+  try {
+    stats.upsertStatsRow({
+      date: '2026-06-23',
+      repo: 'parallix',
+      mission: 'task-unknown',
+      classification: 'unknown',
+      implementer: 'unknown',
+      pr_fix_rounds: 0,
+      closed: 'yes',
+    }, { filePath: csvFile });
 
-  const rows = stats.loadStatsCsv(csvFile).rows;
-  const report = stats.renderWeeklyStatsReport(rows, { today: '2026-06-23' });
-  assert.match(report, /# unknown missions/);
-  assert.match(report, /\b1\b/);
+    const rows = stats.loadStatsCsv(csvFile).rows;
+    const report = stats.renderWeeklyStatsReport(rows, { today: '2026-06-23' });
+    assert.match(report, /# unknown missions/);
+    assert.match(report, /\b1\b/);
+  } finally {
+    fs.rmSync(path.dirname(csvFile), { recursive: true, force: true });
+  }
 });
 
 test('resolveStatsCsvPath resolves configured stats CSV from target repo root', () => {
@@ -571,20 +590,24 @@ test('stats command prints workflow weekly tables from the integration stats sch
     '2026-05-12,task-b,user_value,gemini,1',
     '2026-05-11,task-c,ai_sdlc,claude,4',
   ].join('\n'));
-  const logs = [];
+  try {
+    const logs = [];
 
-  stats(['--csv-file', csv, '--today', '2026-05-18'], {
-    log: line => logs.push(line),
-    error: line => logs.push(`ERR:${line}`),
-    exit: code => {
-      throw new Error(`unexpected exit ${code}`);
-    },
-  });
+    stats(['--csv-file', csv, '--today', '2026-05-18'], {
+      log: line => logs.push(line),
+      error: line => logs.push(`ERR:${line}`),
+      exit: code => {
+        throw new Error(`unexpected exit ${code}`);
+      },
+    });
 
-  const output = logs.join('\n');
-  assert.match(output, /Current week \(2026-05-12 → 2026-05-18\)/);
-  assert.match(output, /Previous week \(2026-05-05 → 2026-05-11\)/);
-  assert.match(output, /Agent performance this week \(2026-05-12 → 2026-05-18\)/);
+    const output = logs.join('\n');
+    assert.match(output, /Current week \(2026-05-12 → 2026-05-18\)/);
+    assert.match(output, /Previous week \(2026-05-05 → 2026-05-11\)/);
+    assert.match(output, /Agent performance this week \(2026-05-12 → 2026-05-18\)/);
+  } finally {
+    fs.rmSync(path.dirname(csv), { recursive: true, force: true });
+  }
 });
 
 test('stats --csv-file does not initialize PARALLIX_HOME', () => {
@@ -621,24 +644,28 @@ test('stats command prints workflow arbitrary range tables from the integration 
     '2026-05-31,task-end,user_value,codex,4',
     '2026-06-01,task-after,ai_sdlc,custom,0',
   ].join('\n'));
-  const logs = [];
+  try {
+    const logs = [];
 
-  stats(['--csv-file', csv, '--from', '2026-05-01', '--to', '2026-05-31'], {
-    log: line => logs.push(line),
-    error: line => logs.push(`ERR:${line}`),
-    exit: code => {
-      throw new Error(`unexpected exit ${code}`);
-    },
-  });
+    stats(['--csv-file', csv, '--from', '2026-05-01', '--to', '2026-05-31'], {
+      log: line => logs.push(line),
+      error: line => logs.push(`ERR:${line}`),
+      exit: code => {
+        throw new Error(`unexpected exit ${code}`);
+      },
+    });
 
-  const output = require('../dist/lib/core/fmt').stripAnsi(logs.join('\n'));
-  assert.match(output, /Missions \(2026-05-01 → 2026-05-31\)/);
-  assert.match(output, /3\s+2\s+1/);
-  assert.match(output, /Agent performance \(2026-05-01 → 2026-05-31\)/);
-  assert.match(output, /codex\s+2\s+3\.00/);
-  assert.match(output, /gemini\s+1\s+1\.00/);
-  assert.doesNotMatch(output, /task-before/);
-  assert.doesNotMatch(output, /Current week/);
+    const output = require('../dist/lib/core/fmt').stripAnsi(logs.join('\n'));
+    assert.match(output, /Missions \(2026-05-01 → 2026-05-31\)/);
+    assert.match(output, /3\s+2\s+1/);
+    assert.match(output, /Agent performance \(2026-05-01 → 2026-05-31\)/);
+    assert.match(output, /codex\s+2\s+3\.00/);
+    assert.match(output, /gemini\s+1\s+1\.00/);
+    assert.doesNotMatch(output, /task-before/);
+    assert.doesNotMatch(output, /Current week/);
+  } finally {
+    fs.rmSync(path.dirname(csv), { recursive: true, force: true });
+  }
 });
 
 test('stats command does not treat --today value as a positional CSV path', () => {
@@ -647,19 +674,23 @@ test('stats command does not treat --today value as a positional CSV path', () =
     '2026-05-18,task-a,ai_sdlc,codex,2',
   ].join('\n'));
   const outputFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-stats-output-')), 'report.txt');
-  const logs = [];
+  try {
+    const logs = [];
 
-  stats(['--csv-file', csv, '--today', '2026-05-18', '--output', outputFile], {
-    log: line => logs.push(line),
-    error: line => logs.push(`ERR:${line}`),
-    exit: code => {
-      throw new Error(`unexpected exit ${code}`);
-    },
-  });
+    stats(['--csv-file', csv, '--today', '2026-05-18', '--output', outputFile], {
+      log: line => logs.push(line),
+      error: line => logs.push(`ERR:${line}`),
+      exit: code => {
+        throw new Error(`unexpected exit ${code}`);
+      },
+    });
 
-  const output = logs.join('\n');
-  assert.match(output, new RegExp(`Report written to ${outputFile.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
-  fs.rmSync(path.dirname(outputFile), { recursive: true, force: true });
+    const output = logs.join('\n');
+    assert.match(output, new RegExp(`Report written to ${outputFile.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+  } finally {
+    fs.rmSync(path.dirname(outputFile), { recursive: true, force: true });
+    fs.rmSync(path.dirname(csv), { recursive: true, force: true });
+  }
 });
 
 test('stats command writes arbitrary range report to --output without printing report body', () => {
@@ -668,21 +699,25 @@ test('stats command writes arbitrary range report to --output without printing r
     '2026-05-18,task-a,ai_sdlc,codex,2',
   ].join('\n'));
   const outputFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-stats-range-output-')), 'report.txt');
-  const logs = [];
+  try {
+    const logs = [];
 
-  stats(['--csv-file', csv, '--from', '2026-05-01', '--to', '2026-05-31', '--output', outputFile], {
-    log: line => logs.push(line),
-    error: line => logs.push(`ERR:${line}`),
-    exit: code => {
-      throw new Error(`unexpected exit ${code}`);
-    },
-  });
+    stats(['--csv-file', csv, '--from', '2026-05-01', '--to', '2026-05-31', '--output', outputFile], {
+      log: line => logs.push(line),
+      error: line => logs.push(`ERR:${line}`),
+      exit: code => {
+        throw new Error(`unexpected exit ${code}`);
+      },
+    });
 
-  const stdout = require('../dist/lib/core/fmt').stripAnsi(logs.join('\n'));
-  assert.match(stdout, new RegExp(`Report written to ${outputFile.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
-  assert.doesNotMatch(stdout, /Missions \(2026-05-01 → 2026-05-31\)/);
-  assert.match(fs.readFileSync(outputFile, 'utf8'), /Missions \(2026-05-01 → 2026-05-31\)/);
-  fs.rmSync(path.dirname(outputFile), { recursive: true, force: true });
+    const stdout = require('../dist/lib/core/fmt').stripAnsi(logs.join('\n'));
+    assert.match(stdout, new RegExp(`Report written to ${outputFile.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+    assert.doesNotMatch(stdout, /Missions \(2026-05-01 → 2026-05-31\)/);
+    assert.match(fs.readFileSync(outputFile, 'utf8'), /Missions \(2026-05-01 → 2026-05-31\)/);
+  } finally {
+    fs.rmSync(path.dirname(outputFile), { recursive: true, force: true });
+    fs.rmSync(path.dirname(csv), { recursive: true, force: true });
+  }
 });
 
 test('stats command exits non-zero and prints date-range diagnostics for invalid range flags', () => {
@@ -690,25 +725,29 @@ test('stats command exits non-zero and prints date-range diagnostics for invalid
     'date,mission,classification,implementer,pr_fix_rounds',
     '2026-05-18,task-a,ai_sdlc,codex,2',
   ].join('\n'));
-  const logs = [];
-  const exits = [];
+  try {
+    const logs = [];
+    const exits = [];
 
-  stats(['--csv-file', csv, '--from', '2026-05-01'], {
-    log: line => logs.push(line),
-    error: line => logs.push(`ERR:${line}`),
-    exit: code => exits.push(code),
-  });
+    stats(['--csv-file', csv, '--from', '2026-05-01'], {
+      log: line => logs.push(line),
+      error: line => logs.push(`ERR:${line}`),
+      exit: code => exits.push(code),
+    });
 
-  stats(['--csv-file', csv, '--from', '2026-06-01', '--to', '2026-05-31'], {
-    log: line => logs.push(line),
-    error: line => logs.push(`ERR:${line}`),
-    exit: code => exits.push(code),
-  });
+    stats(['--csv-file', csv, '--from', '2026-06-01', '--to', '2026-05-31'], {
+      log: line => logs.push(line),
+      error: line => logs.push(`ERR:${line}`),
+      exit: code => exits.push(code),
+    });
 
-  const output = logs.join('\n');
-  assert.deepEqual(exits, [1, 1]);
-  assert.match(output, /Invalid date range argument --to/);
-  assert.match(output, /Invalid date range argument --from\/--to/);
+    const output = logs.join('\n');
+    assert.deepEqual(exits, [1, 1]);
+    assert.match(output, /Invalid date range argument --to/);
+    assert.match(output, /Invalid date range argument --from\/--to/);
+  } finally {
+    fs.rmSync(path.dirname(csv), { recursive: true, force: true });
+  }
 });
 
 test('stats command keeps legacy retrospective CSVs on the markdown report path when range flags are present', () => {
@@ -716,19 +755,23 @@ test('stats command keeps legacy retrospective CSVs on the markdown report path 
     'mission,implementer,reviewer,pr_link,review_count,merged,state,created_at',
     'task-1,codex,claude,http://example/pr/1,3,yes,merged,2026-05-01T10:00:00Z',
   ].join('\n'));
-  const logs = [];
+  try {
+    const logs = [];
 
-  stats(['--csv-file', csv, '--from', '2026-05-01', '--to', '2026-05-31'], {
-    log: line => logs.push(line),
-    error: line => logs.push(`ERR:${line}`),
-    exit: code => {
-      throw new Error(`unexpected exit ${code}`);
-    },
-  });
+    stats(['--csv-file', csv, '--from', '2026-05-01', '--to', '2026-05-31'], {
+      log: line => logs.push(line),
+      error: line => logs.push(`ERR:${line}`),
+      exit: code => {
+        throw new Error(`unexpected exit ${code}`);
+      },
+    });
 
-  const output = logs.join('\n');
-  assert.match(output, /# Forgejo Stats Report/);
-  assert.doesNotMatch(output, /Missions \(2026-05-01 → 2026-05-31\)/);
+    const output = logs.join('\n');
+    assert.match(output, /# Forgejo Stats Report/);
+    assert.doesNotMatch(output, /Missions \(2026-05-01 → 2026-05-31\)/);
+  } finally {
+    fs.rmSync(path.dirname(csv), { recursive: true, force: true });
+  }
 });
 
 test('stats command help documents the pre-integration preview workflow', () => {
@@ -1333,59 +1376,66 @@ test('task-1251 and task-1314: normalizeStatsRow migrates a legacy 5-column row 
 
 test('task-1314: stats mission reports filter to the active repo', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-stats-mission-repo-'));
-  const csvFile = path.join(root, 'stats.csv');
-  fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
-    product: { name: 'visualboard' },
-  }), 'utf8');
+  try {
+    const csvFile = path.join(root, 'stats.csv');
+    fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
+      product: { name: 'visualboard' },
+    }), 'utf8');
 
-  const rows = [
-    [
-      '2026-06-10', 'visualboard', 'task-alpha', 'ai_sdlc', 'codex', '1',
-      'openai', 'gpt-5.4-mini', 'codex', '', 'draft',
-      '11', '12', '13', '14', '15', '0', '1', '0', '2', '0', 'yes'
-    ],
-    [
-      '2026-06-10', 'parallix', 'task-alpha', 'user_value', 'gemini', '2',
-      'google', 'gemini-2.5-pro', 'gemini', '', 'review',
-      '21', '22', '23', '24', '25', '0', '2', '0', '3', '0', 'yes'
-    ],
-  ];
-  fs.writeFileSync(csvFile, [
-    stats.STATS_HEADERS.join(','),
-    ...rows.map(values => values.join(',')),
-  ].join('\n'), 'utf8');
+    const rows = [
+      [
+        '2026-06-10', 'visualboard', 'task-alpha', 'ai_sdlc', 'codex', '1',
+        'openai', 'gpt-5.4-mini', 'codex', '', 'draft',
+        '11', '12', '13', '14', '15', '0', '1', '0', '2', '0', 'yes'
+      ],
+      [
+        '2026-06-10', 'parallix', 'task-alpha', 'user_value', 'gemini', '2',
+        'google', 'gemini-2.5-pro', 'gemini', '', 'review',
+        '21', '22', '23', '24', '25', '0', '2', '0', '3', '0', 'yes'
+      ],
+    ];
+    fs.writeFileSync(csvFile, [
+      stats.STATS_HEADERS.join(','),
+      ...rows.map(values => values.join(',')),
+    ].join('\n'), 'utf8');
 
-  const logs = [];
-  stats(['--csv-file', csvFile, '--mission', 'task-alpha'], {
-    rootDir: root,
-    log: line => logs.push(line),
-    error: line => logs.push(`ERR:${line}`),
-    exit: code => {
-      throw new Error(`unexpected exit ${code}`);
-    },
-  });
+    const logs = [];
+    stats(['--csv-file', csvFile, '--mission', 'task-alpha'], {
+      rootDir: root,
+      log: line => logs.push(line),
+      error: line => logs.push(`ERR:${line}`),
+      exit: code => {
+        throw new Error(`unexpected exit ${code}`);
+      },
+    });
 
-  const output = require('../dist/lib/core/fmt').stripAnsi(logs.join('\n'));
-  assert.match(output, /Mission telemetry by phase: task-alpha/);
-  assert.match(output, /draft\s+openai\s+gpt-5\.4-mini\s+codex\s+11\s+12\s+13\s+15\s+2\s+1/);
-  assert.doesNotMatch(output, /google\s+gemini-2\.5-pro\s+gemini\s+21\s+22\s+23\s+25\s+3\s+2/);
+    const output = require('../dist/lib/core/fmt').stripAnsi(logs.join('\n'));
+    assert.match(output, /Mission telemetry by phase: task-alpha/);
+    assert.match(output, /draft\s+openai\s+gpt-5\.4-mini\s+codex\s+11\s+12\s+13\s+15\s+2\s+1/);
+    assert.doesNotMatch(output, /google\s+gemini-2\.5-pro\s+gemini\s+21\s+22\s+23\s+25\s+3\s+2/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('task-1251: upsertStatsRow keys on (mission, stage) so stages do not collide', () => {
   const csvFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-stats-stage-')), 'stats.csv');
+  try {
+    stats.upsertStatsRow({ date: '2026-06-07', mission: 'task-3000', classification: 'ai_sdlc', implementer: 'codex', stage: 'draft', input_tokens: '100' }, { filePath: csvFile });
+    stats.upsertStatsRow({ date: '2026-06-07', mission: 'task-3000', classification: 'ai_sdlc', implementer: 'codex', stage: 'active', input_tokens: '200' }, { filePath: csvFile });
 
-  stats.upsertStatsRow({ date: '2026-06-07', mission: 'task-3000', classification: 'ai_sdlc', implementer: 'codex', stage: 'draft', input_tokens: '100' }, { filePath: csvFile });
-  stats.upsertStatsRow({ date: '2026-06-07', mission: 'task-3000', classification: 'ai_sdlc', implementer: 'codex', stage: 'active', input_tokens: '200' }, { filePath: csvFile });
+    let data = stats.loadStatsCsv(csvFile);
+    assert.equal(data.rows.length, 2); // distinct stages -> distinct rows
 
-  let data = stats.loadStatsCsv(csvFile);
-  assert.equal(data.rows.length, 2); // distinct stages -> distinct rows
-
-  // Re-upserting the same (mission, stage) updates in place, not append.
-  stats.upsertStatsRow({ date: '2026-06-07', mission: 'task-3000', classification: 'ai_sdlc', implementer: 'codex', stage: 'draft', input_tokens: '999' }, { filePath: csvFile });
-  data = stats.loadStatsCsv(csvFile);
-  assert.equal(data.rows.length, 2);
-  const draftRow = data.rows.find(r => r.stage === 'draft');
-  assert.equal(draftRow.input_tokens, '999');
+    // Re-upserting the same (mission, stage) updates in place, not append.
+    stats.upsertStatsRow({ date: '2026-06-07', mission: 'task-3000', classification: 'ai_sdlc', implementer: 'codex', stage: 'draft', input_tokens: '999' }, { filePath: csvFile });
+    data = stats.loadStatsCsv(csvFile);
+    assert.equal(data.rows.length, 2);
+    const draftRow = data.rows.find(r => r.stage === 'draft');
+    assert.equal(draftRow.input_tokens, '999');
+  } finally {
+    fs.rmSync(path.dirname(csvFile), { recursive: true, force: true });
+  }
 });
 
 test('task-1251: telemetryToStatsFields maps codex telemetry, with honest-zero fallback', () => {

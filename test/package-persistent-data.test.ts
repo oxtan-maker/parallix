@@ -8,6 +8,11 @@ const path = require('path');
 
 const PACKAGE_ROOT = path.join(__dirname, '..');
 
+type RunOptions = import('node:child_process').SpawnSyncOptions & {
+  tempHome?: string;
+  env?: Record<string, string>;
+};
+
 function packFilename(stdout) {
   const jsonMatches = [...String(stdout || '').matchAll(/"filename"\s*:\s*"([^"]+\.tgz)"/g)];
   if (jsonMatches.length > 0) {
@@ -16,9 +21,10 @@ function packFilename(stdout) {
   return String(stdout || '').split(/\r?\n/).map(line => line.trim()).findLast(line => line.endsWith('.tgz')) || null;
 }
 
-function run(command, args, options = {}) {
-// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `tempHome` absent from its inferred mock shape.
-  const tempHome = options.tempHome || fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-npm-home-'));
+function run(command: string, args: string[], options: RunOptions = {}) {
+  const runOptions = options as RunOptions;
+  const callerProvided = runOptions.tempHome !== undefined;
+  const tempHome = runOptions.tempHome || fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-npm-home-'));
   const result = spawnSync(command, args, {
     encoding: 'utf8',
     timeout: 120000,
@@ -27,11 +33,14 @@ function run(command, args, options = {}) {
       HOME: tempHome,
       npm_config_cache: path.join(tempHome, '.npm-cache'),
       npm_config_userconfig: path.join(tempHome, '.npmrc'),
-// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `env` absent from its inferred mock shape.
-      ...(options.env || {})
+      ...(runOptions.env || {})
     },
-    ...options
+    ...runOptions
   });
+  // Clean up auto-created tempHome; preserve caller-provided directories.
+  if (!callerProvided) {
+    try { fs.rmSync(tempHome, { recursive: true, force: true }); } catch (_) {}
+  }
   if (result.error && result.error.code === 'EPERM') {
     return result;
   }
