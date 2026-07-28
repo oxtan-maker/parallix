@@ -2,7 +2,7 @@
 id: TASK-2322
 title: recover agent slop alinging with domain design
 status: backlog
-assignee: []
+assignee: [codex]
 created_date: '2026-07-28 14:19'
 labels: []
 dependencies: []
