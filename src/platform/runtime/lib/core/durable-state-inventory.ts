@@ -5,6 +5,15 @@ export type MachineWrittenPathClass =
   | 'cache-scratch-data'
   | 'secrets-configuration';
 
+/** ADR 0053 classification for a durable-state boundary. */
+export type ADR0053Classification =
+  | 'database-owned-domain-state'
+  | 'explicit-one-way-legacy-input'
+  | 'external-fact-or-intake'
+  | 'configuration-or-secret'
+  | 'generated-artifact'
+  | 'forbidden-persistence';
+
 export interface MachineWrittenPathInventoryEntry {
   id: string;
   pathPattern: string;
@@ -13,7 +22,706 @@ export interface MachineWrittenPathInventoryEntry {
   persistencePolicy: string;
 }
 
-/** Bounded persistence inventory for TASK-2222; every row has exactly one class. */
+/**
+ * One production reader or writer entry for an ADR 0053 durable-state concept.
+ *
+ * Every entry names:
+ * - the ADR 0053 concept it belongs to
+ * - whether it is the default or compatibility (legacy) path
+ * - the file location of the reader or writer
+ * - the operation it performs
+ * - its ADR 0053 classification
+ * - the later cutover task for temporary exceptions
+ */
+export interface ADR0053BoundaryEntry {
+  /** Stable identifier for this boundary. */
+  readonly id: string;
+  /** ADR 0053 concept this boundary belongs to. */
+  readonly concept: ADR0053ConceptName;
+  /** Default path or compatibility (legacy) path. */
+  readonly pathType: 'default' | 'compatibility';
+  /** File location of the reader or writer (relative to repo root). */
+  readonly fileLocation: string;
+  /** 'read' or 'write'. */
+  readonly operation: 'read' | 'write';
+  /** ADR 0053 classification. */
+  readonly classification: ADR0053Classification;
+  /** Later cutover task that removes this temporary exception, or null if permanent. */
+  readonly cutoverTask: string | null;
+}
+
+/** The 15 ADR 0053 durable-state concepts listed in the persistence ADR. */
+export type ADR0053ConceptName =
+  | 'Mission'
+  | 'CheckpointData'
+  | 'Review'
+  | 'MissionOutcome'
+  | 'AgentRunMeasurement'
+  | 'KnownRepository'
+  | 'SessionMarker'
+  | 'LaneTransitionEvent'
+  | 'AgentBlock'
+  | 'UIPreferences'
+  | 'TaskIntake'
+  | 'GitObservations'
+  | 'Configuration'
+  | 'Secrets'
+  | 'LargeArtifacts';
+
+/**
+ * Exhaustive executable inventory of production readers and writers for all
+ * 15 ADR 0053 durable-state concepts.
+ *
+ * Every current default and compatibility reader/writer is listed. Each
+ * boundary is classified as exactly one of the ADR 0053 categories. Temporary
+ * exceptions (compatibility paths that will be removed by a later cutover)
+ * name the specific task that owns their removal.
+ *
+ * This inventory is the contract that the architecture test in CP 3 enforces:
+ * any new durable file read or write must be registered here or the build fails.
+ */
+export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
+  // -----------------------------------------------------------------------
+  // Mission — authoritative domain state (target-repository, file-backed)
+  // -----------------------------------------------------------------------
+  {
+    id: 'mission-read-backlog',
+    concept: 'Mission',
+    pathType: 'default',
+    fileLocation: 'src/adapters/backlog/concrete-mission-read-adapter.ts',
+    operation: 'read',
+    classification: 'database-owned-domain-state',
+    cutoverTask: 'TASK-2322.02',
+  },
+  {
+    id: 'mission-write-handoff',
+    concept: 'Mission',
+    pathType: 'default',
+    fileLocation: 'src/platform/runtime/lib/commands/handoff.ts',
+    operation: 'write',
+    classification: 'database-owned-domain-state',
+    cutoverTask: 'TASK-2322.02',
+  },
+  {
+    id: 'mission-write-draft',
+    concept: 'Mission',
+    pathType: 'default',
+    fileLocation: 'src/platform/runtime/lib/commands/draft.ts',
+    operation: 'write',
+    classification: 'database-owned-domain-state',
+    cutoverTask: 'TASK-2322.02',
+  },
+  {
+    id: 'mission-read-integrate',
+    concept: 'Mission',
+    pathType: 'compatibility',
+    fileLocation: 'src/platform/runtime/lib/commands/integrate.ts',
+    operation: 'read',
+    classification: 'database-owned-domain-state',
+    cutoverTask: 'TASK-2322.02',
+  },
+  {
+    id: 'mission-migration-read',
+    concept: 'Mission',
+    pathType: 'compatibility',
+    fileLocation: 'src/platform/runtime/lib/core/persistent-data-migration.ts',
+    operation: 'read',
+    classification: 'database-owned-domain-state',
+    cutoverTask: 'TASK-2322.02',
+  },
+  {
+    id: 'mission-migration-write',
+    concept: 'Mission',
+    pathType: 'compatibility',
+    fileLocation: 'src/platform/runtime/lib/core/persistent-data-migration.ts',
+    operation: 'write',
+    classification: 'database-owned-domain-state',
+    cutoverTask: 'TASK-2322.02',
+  },
+  {
+    id: 'mission-state-map-read',
+    concept: 'Mission',
+    pathType: 'default',
+    fileLocation: 'src/platform/runtime/lib/core/state-map.ts',
+    operation: 'read',
+    classification: 'database-owned-domain-state',
+    cutoverTask: 'TASK-2322.02',
+  },
+  {
+    id: 'mission-gate-adapter-read',
+    concept: 'Mission',
+    pathType: 'default',
+    fileLocation: 'src/adapters/backlog/concrete-gate-read-adapter.ts',
+    operation: 'read',
+    classification: 'database-owned-domain-state',
+    cutoverTask: null,
+  },
+  // -----------------------------------------------------------------------
+  // CheckpointData — nested Mission data (file-backed)
+  // -----------------------------------------------------------------------
+  {
+    id: 'checkpoint-read-mission-dir',
+    concept: 'CheckpointData',
+    pathType: 'default',
+    fileLocation: 'src/adapters/backlog/concrete-mission-read-adapter.ts',
+    operation: 'read',
+    classification: 'database-owned-domain-state',
+    cutoverTask: 'TASK-2322.02',
+  },
+  {
+    id: 'checkpoint-write-handoff',
+    concept: 'CheckpointData',
+    pathType: 'default',
+    fileLocation: 'src/platform/runtime/lib/commands/handoff.ts',
+    operation: 'write',
+    classification: 'database-owned-domain-state',
+    cutoverTask: 'TASK-2322.02',
+  },
+  {
+    id: 'checkpoint-read-review-commands',
+    concept: 'CheckpointData',
+    pathType: 'compatibility',
+    fileLocation: 'src/platform/runtime/lib/review/review-commands.ts',
+    operation: 'read',
+    classification: 'database-owned-domain-state',
+    cutoverTask: 'TASK-2322.02',
+  },
+  // -----------------------------------------------------------------------
+  // Review — nested Mission data (file-backed review-state.json)
+  // -----------------------------------------------------------------------
+  {
+    id: 'review-read-review-state',
+    concept: 'Review',
+    pathType: 'default',
+    fileLocation: 'src/platform/runtime/lib/review/review-state.ts',
+    operation: 'read',
+    classification: 'database-owned-domain-state',
+    cutoverTask: 'TASK-2322.02',
+  },
+  {
+    id: 'review-write-review-state',
+    concept: 'Review',
+    pathType: 'default',
+    fileLocation: 'src/platform/runtime/lib/review/review-state.ts',
+    operation: 'write',
+    classification: 'database-owned-domain-state',
+    cutoverTask: 'TASK-2322.02',
+  },
+  {
+    id: 'review-read-review-artifacts',
+    concept: 'Review',
+    pathType: 'compatibility',
+    fileLocation: 'src/platform/runtime/lib/review/review-artifacts.ts',
+    operation: 'read',
+    classification: 'database-owned-domain-state',
+    cutoverTask: 'TASK-2322.02',
+  },
+  {
+    id: 'review-write-review-events',
+    concept: 'Review',
+    pathType: 'compatibility',
+    fileLocation: 'src/platform/runtime/lib/review/review-events.ts',
+    operation: 'write',
+    classification: 'database-owned-domain-state',
+    cutoverTask: 'TASK-2322.02',
+  },
+  {
+    id: 'review-read-stats',
+    concept: 'Review',
+    pathType: 'compatibility',
+    fileLocation: 'src/platform/runtime/lib/commands/stats.ts',
+    operation: 'read',
+    classification: 'database-owned-domain-state',
+    cutoverTask: 'TASK-2322.02',
+  },
+  {
+    id: 'review-read-review-commands',
+    concept: 'Review',
+    pathType: 'compatibility',
+    fileLocation: 'src/platform/runtime/lib/review/review-commands.ts',
+    operation: 'read',
+    classification: 'database-owned-domain-state',
+    cutoverTask: 'TASK-2322.02',
+  },
+  // -----------------------------------------------------------------------
+  // MissionOutcome — derived from Mission + AgentRunMeasurement
+  // -----------------------------------------------------------------------
+  {
+    id: 'outcome-derive-completed',
+    concept: 'MissionOutcome',
+    pathType: 'default',
+    fileLocation: 'src/domain/usage.ts',
+    operation: 'read',
+    classification: 'database-owned-domain-state',
+    cutoverTask: 'TASK-2322.03',
+  },
+  {
+    id: 'outcome-stats-csv',
+    concept: 'MissionOutcome',
+    pathType: 'compatibility',
+    fileLocation: 'src/platform/runtime/lib/commands/stats.ts',
+    operation: 'write',
+    classification: 'database-owned-domain-state',
+    cutoverTask: 'TASK-2322.03',
+  },
+  // -----------------------------------------------------------------------
+  // AgentRunMeasurement — operator-local measurement data
+  // -----------------------------------------------------------------------
+  {
+    id: 'measurement-stats-csv-read',
+    concept: 'AgentRunMeasurement',
+    pathType: 'default',
+    fileLocation: 'src/platform/runtime/lib/commands/stats.ts',
+    operation: 'read',
+    classification: 'database-owned-domain-state',
+    cutoverTask: 'TASK-2322.03',
+  },
+  {
+    id: 'measurement-stats-csv-write',
+    concept: 'AgentRunMeasurement',
+    pathType: 'default',
+    fileLocation: 'src/platform/runtime/lib/commands/stats.ts',
+    operation: 'write',
+    classification: 'database-owned-domain-state',
+    cutoverTask: 'TASK-2322.03',
+  },
+  {
+    id: 'measurement-sqlite-usage-repo',
+    concept: 'AgentRunMeasurement',
+    pathType: 'compatibility',
+    fileLocation: 'src/adapters/sqlite/usage-repository.ts',
+    operation: 'read',
+    classification: 'database-owned-domain-state',
+    cutoverTask: null,
+  },
+  {
+    id: 'measurement-sqlite-usage-write',
+    concept: 'AgentRunMeasurement',
+    pathType: 'compatibility',
+    fileLocation: 'src/adapters/sqlite/usage-repository.ts',
+    operation: 'write',
+    classification: 'database-owned-domain-state',
+    cutoverTask: null,
+  },
+  {
+    id: 'measurement-stats-backfill-read',
+    concept: 'AgentRunMeasurement',
+    pathType: 'compatibility',
+    fileLocation: 'src/platform/runtime/lib/commands/stats-backfill.ts',
+    operation: 'read',
+    classification: 'database-owned-domain-state',
+    cutoverTask: 'TASK-2322.03',
+  },
+  {
+    id: 'measurement-codex-telemetry-read',
+    concept: 'AgentRunMeasurement',
+    pathType: 'default',
+    fileLocation: 'src/platform/runtime/lib/agents/codex-telemetry.ts',
+    operation: 'read',
+    classification: 'database-owned-domain-state',
+    cutoverTask: 'TASK-2322.03',
+  },
+  {
+    id: 'measurement-vibe-telemetry-read',
+    concept: 'AgentRunMeasurement',
+    pathType: 'default',
+    fileLocation: 'src/platform/runtime/lib/agents/vibe-telemetry.ts',
+    operation: 'read',
+    classification: 'database-owned-domain-state',
+    cutoverTask: 'TASK-2322.03',
+  },
+  // -----------------------------------------------------------------------
+  // KnownRepository — operator-local cache
+  // -----------------------------------------------------------------------
+  {
+    id: 'known-repo-sqlite-read',
+    concept: 'KnownRepository',
+    pathType: 'default',
+    fileLocation: 'src/adapters/sqlite/repository-repository.ts',
+    operation: 'read',
+    classification: 'database-owned-domain-state',
+    cutoverTask: null,
+  },
+  {
+    id: 'known-repo-sqlite-write',
+    concept: 'KnownRepository',
+    pathType: 'default',
+    fileLocation: 'src/adapters/sqlite/repository-repository.ts',
+    operation: 'write',
+    classification: 'database-owned-domain-state',
+    cutoverTask: null,
+  },
+  // -----------------------------------------------------------------------
+  // SessionMarker — file-backed resume marker (compatibility)
+  // -----------------------------------------------------------------------
+  {
+    id: 'session-read-sessions',
+    concept: 'SessionMarker',
+    pathType: 'default',
+    fileLocation: 'src/platform/runtime/lib/tools/sessions.ts',
+    operation: 'read',
+    classification: 'database-owned-domain-state',
+    cutoverTask: 'TASK-2322.03',
+  },
+  {
+    id: 'session-write-sessions',
+    concept: 'SessionMarker',
+    pathType: 'default',
+    fileLocation: 'src/platform/runtime/lib/tools/sessions.ts',
+    operation: 'write',
+    classification: 'database-owned-domain-state',
+    cutoverTask: 'TASK-2322.03',
+  },
+  // -----------------------------------------------------------------------
+  // LaneTransitionEvent — operator-local telemetry
+  // -----------------------------------------------------------------------
+  {
+    id: 'lane-event-sqlite-write',
+    concept: 'LaneTransitionEvent',
+    pathType: 'default',
+    fileLocation: 'src/adapters/sqlite/board-lane-event-repository.ts',
+    operation: 'write',
+    classification: 'database-owned-domain-state',
+    cutoverTask: null,
+  },
+  {
+    id: 'lane-event-sqlite-read',
+    concept: 'LaneTransitionEvent',
+    pathType: 'default',
+    fileLocation: 'src/adapters/sqlite/board-lane-event-repository.ts',
+    operation: 'read',
+    classification: 'database-owned-domain-state',
+    cutoverTask: null,
+  },
+  {
+    id: 'lane-event-recorder',
+    concept: 'LaneTransitionEvent',
+    pathType: 'default',
+    fileLocation: 'src/application/recording/board-event-recorder.ts',
+    operation: 'write',
+    classification: 'database-owned-domain-state',
+    cutoverTask: null,
+  },
+  // -----------------------------------------------------------------------
+  // AgentBlock — operator-local durable choice
+  // -----------------------------------------------------------------------
+  {
+    id: 'agent-block-file-read',
+    concept: 'AgentBlock',
+    pathType: 'default',
+    fileLocation: 'src/platform/runtime/lib/agents/agent-config.ts',
+    operation: 'read',
+    classification: 'database-owned-domain-state',
+    cutoverTask: 'TASK-2322.03',
+  },
+  {
+    id: 'agent-block-file-write',
+    concept: 'AgentBlock',
+    pathType: 'default',
+    fileLocation: 'src/platform/runtime/lib/agents/agent-config.ts',
+    operation: 'write',
+    classification: 'database-owned-domain-state',
+    cutoverTask: 'TASK-2322.03',
+  },
+  {
+    id: 'agent-block-sqlite-read',
+    concept: 'AgentBlock',
+    pathType: 'compatibility',
+    fileLocation: 'src/adapters/sqlite/blocklist-repository.ts',
+    operation: 'read',
+    classification: 'database-owned-domain-state',
+    cutoverTask: null,
+  },
+  {
+    id: 'agent-block-sqlite-write',
+    concept: 'AgentBlock',
+    pathType: 'compatibility',
+    fileLocation: 'src/adapters/sqlite/blocklist-repository.ts',
+    operation: 'write',
+    classification: 'database-owned-domain-state',
+    cutoverTask: null,
+  },
+  // -----------------------------------------------------------------------
+  // UI Preferences — operator-local settings
+  // -----------------------------------------------------------------------
+  {
+    id: 'ui-prefs-sqlite-read',
+    concept: 'UIPreferences',
+    pathType: 'default',
+    fileLocation: 'src/adapters/sqlite/ui-preferences-repository.ts',
+    operation: 'read',
+    classification: 'database-owned-domain-state',
+    cutoverTask: null,
+  },
+  {
+    id: 'ui-prefs-sqlite-write',
+    concept: 'UIPreferences',
+    pathType: 'default',
+    fileLocation: 'src/adapters/sqlite/ui-preferences-repository.ts',
+    operation: 'write',
+    classification: 'database-owned-domain-state',
+    cutoverTask: null,
+  },
+  // -----------------------------------------------------------------------
+  // Task Intake — external fact / one-way legacy input
+  // -----------------------------------------------------------------------
+  {
+    id: 'task-intake-read-backlog',
+    concept: 'TaskIntake',
+    pathType: 'default',
+    fileLocation: 'src/platform/runtime/lib/tools/backlog.ts',
+    operation: 'read',
+    classification: 'external-fact-or-intake',
+    cutoverTask: null,
+  },
+  {
+    id: 'task-intake-write-draft',
+    concept: 'TaskIntake',
+    pathType: 'compatibility',
+    fileLocation: 'src/platform/runtime/lib/commands/draft.ts',
+    operation: 'write',
+    classification: 'external-fact-or-intake',
+    cutoverTask: 'TASK-2322.02',
+  },
+  {
+    id: 'task-intake-read-mission-adapter',
+    concept: 'TaskIntake',
+    pathType: 'default',
+    fileLocation: 'src/adapters/backlog/concrete-mission-read-adapter.ts',
+    operation: 'read',
+    classification: 'external-fact-or-intake',
+    cutoverTask: null,
+  },
+  {
+    id: 'task-intake-write-handoff',
+    concept: 'TaskIntake',
+    pathType: 'compatibility',
+    fileLocation: 'src/platform/runtime/lib/commands/handoff.ts',
+    operation: 'write',
+    classification: 'external-fact-or-intake',
+    cutoverTask: 'TASK-2322.02',
+  },
+  // -----------------------------------------------------------------------
+  // Git Observations — external fact (Git/OS authority)
+  // -----------------------------------------------------------------------
+  {
+    id: 'git-obs-read-git-core',
+    concept: 'GitObservations',
+    pathType: 'default',
+    fileLocation: 'src/platform/runtime/lib/core/git.ts',
+    operation: 'read',
+    classification: 'external-fact-or-intake',
+    cutoverTask: null,
+  },
+  {
+    id: 'git-obs-read-git-adapter',
+    concept: 'GitObservations',
+    pathType: 'compatibility',
+    fileLocation: 'src/adapters/backlog/concrete-git-read-adapter.ts',
+    operation: 'read',
+    classification: 'external-fact-or-intake',
+    cutoverTask: 'TASK-2322.02',
+  },
+  {
+    id: 'git-obs-write-handoff',
+    concept: 'GitObservations',
+    pathType: 'compatibility',
+    fileLocation: 'src/platform/runtime/lib/commands/handoff.ts',
+    operation: 'write',
+    classification: 'external-fact-or-intake',
+    cutoverTask: 'TASK-2322.02',
+  },
+  // -----------------------------------------------------------------------
+  // Configuration — operator-authored policy
+  // -----------------------------------------------------------------------
+  {
+    id: 'config-read-product-config',
+    concept: 'Configuration',
+    pathType: 'default',
+    fileLocation: 'src/platform/runtime/lib/core/product-config.ts',
+    operation: 'read',
+    classification: 'configuration-or-secret',
+    cutoverTask: null,
+  },
+  {
+    id: 'config-read-agents-json',
+    concept: 'Configuration',
+    pathType: 'default',
+    fileLocation: 'src/platform/runtime/lib/agents/agent-config.ts',
+    operation: 'read',
+    classification: 'configuration-or-secret',
+    cutoverTask: null,
+  },
+  {
+    id: 'config-write-setup-review',
+    concept: 'Configuration',
+    pathType: 'compatibility',
+    fileLocation: 'src/platform/runtime/lib/tools/setup-review.ts',
+    operation: 'write',
+    classification: 'configuration-or-secret',
+    cutoverTask: 'TASK-2322.02',
+  },
+  {
+    id: 'config-read-ui-command',
+    concept: 'Configuration',
+    pathType: 'default',
+    fileLocation: 'src/interfaces/tui/ui-command.ts',
+    operation: 'read',
+    classification: 'configuration-or-secret',
+    cutoverTask: null,
+  },
+  {
+    id: 'config-read-agent-config-resolver',
+    concept: 'Configuration',
+    pathType: 'default',
+    fileLocation: 'src/interfaces/tui/agent-config-resolver.ts',
+    operation: 'read',
+    classification: 'configuration-or-secret',
+    cutoverTask: null,
+  },
+  {
+    id: 'config-gitignore-read',
+    concept: 'Configuration',
+    pathType: 'default',
+    fileLocation: 'src/platform/runtime/lib/core/gitignore.ts',
+    operation: 'read',
+    classification: 'configuration-or-secret',
+    cutoverTask: null,
+  },
+  {
+    id: 'config-gitignore-write',
+    concept: 'Configuration',
+    pathType: 'default',
+    fileLocation: 'src/platform/runtime/lib/core/gitignore.ts',
+    operation: 'write',
+    classification: 'configuration-or-secret',
+    cutoverTask: null,
+  },
+  // -----------------------------------------------------------------------
+  // Secrets — credentials / tokens
+  // -----------------------------------------------------------------------
+  {
+    id: 'secrets-forgejo-token',
+    concept: 'Secrets',
+    pathType: 'default',
+    fileLocation: 'src/platform/runtime/lib/tools/setup-review.ts',
+    operation: 'write',
+    classification: 'configuration-or-secret',
+    cutoverTask: null,
+  },
+  {
+    id: 'secrets-forgejo-home',
+    concept: 'Secrets',
+    pathType: 'default',
+    fileLocation: 'src/platform/runtime/lib/tools/forgejo.ts',
+    operation: 'read',
+    classification: 'configuration-or-secret',
+    cutoverTask: null,
+  },
+  // -----------------------------------------------------------------------
+  // Large Artifacts — reference-only in database
+  // -----------------------------------------------------------------------
+  {
+    id: 'artifacts-review-verdicts',
+    concept: 'LargeArtifacts',
+    pathType: 'default',
+    fileLocation: 'src/platform/runtime/lib/review/review-events.ts',
+    operation: 'write',
+    classification: 'generated-artifact',
+    cutoverTask: null,
+  },
+  {
+    id: 'artifacts-review-reading',
+    concept: 'LargeArtifacts',
+    pathType: 'default',
+    fileLocation: 'src/platform/runtime/lib/review/review-artifacts.ts',
+    operation: 'read',
+    classification: 'generated-artifact',
+    cutoverTask: null,
+  },
+  {
+    id: 'artifacts-mutation-baseline',
+    concept: 'LargeArtifacts',
+    pathType: 'compatibility',
+    fileLocation: 'src/platform/runtime/lib/commands/mutation-gate.ts',
+    operation: 'write',
+    classification: 'generated-artifact',
+    cutoverTask: 'TASK-2322.02',
+  },
+  {
+    id: 'artifacts-stats-output',
+    concept: 'LargeArtifacts',
+    pathType: 'compatibility',
+    fileLocation: 'src/platform/runtime/lib/commands/stats.ts',
+    operation: 'write',
+    classification: 'generated-artifact',
+    cutoverTask: 'TASK-2322.02',
+  },
+  {
+    id: 'artifacts-handoff-nel',
+    concept: 'LargeArtifacts',
+    pathType: 'compatibility',
+    fileLocation: 'src/platform/runtime/lib/commands/handoff.ts',
+    operation: 'write',
+    classification: 'generated-artifact',
+    cutoverTask: 'TASK-2322.02',
+  },
+  {
+    id: 'artifacts-asset-store-read',
+    concept: 'LargeArtifacts',
+    pathType: 'default',
+    fileLocation: 'src/platform/assets/asset-store.ts',
+    operation: 'read',
+    classification: 'generated-artifact',
+    cutoverTask: null,
+  },
+  {
+    id: 'artifacts-coverage-gate-write',
+    concept: 'LargeArtifacts',
+    pathType: 'compatibility',
+    fileLocation: 'src/platform/runtime/lib/commands/coverage-gate.ts',
+    operation: 'write',
+    classification: 'generated-artifact',
+    cutoverTask: 'TASK-2322.02',
+  },
+  {
+    id: 'artifacts-sqlite-importer-read',
+    concept: 'LargeArtifacts',
+    pathType: 'compatibility',
+    fileLocation: 'src/adapters/sqlite/importer.ts',
+    operation: 'read',
+    classification: 'database-owned-domain-state',
+    cutoverTask: null,
+  },
+  {
+    id: 'artifacts-sqlite-migration-read',
+    concept: 'LargeArtifacts',
+    pathType: 'compatibility',
+    fileLocation: 'src/adapters/sqlite/migration-runner.ts',
+    operation: 'read',
+    classification: 'database-owned-domain-state',
+    cutoverTask: null,
+  },
+] as const;
+
+/**
+ * Bounded persistence inventory for TASK-2222; every row has exactly one class.
+ *
+ * This inventory uses a different taxonomy (MachineWrittenPathClass) than the
+ * ADR 0053 inventory above. Both describe overlapping boundaries. The ADR 0053
+ * inventory (ADR0053_PERSISTENCE_INVENTORY) is the authoritative source for the
+ * six-class ADR 0053 classification; this MACHINE_WRITTEN_PATH_INVENTORY remains
+ * the TASK-2222 migration plan. Cross-references for shared boundaries:
+ * - `session-metadata` ↔ `session-read-sessions` / `session-write-sessions`
+ * - `nel-record` ↔ `artifacts-handoff-nel`
+ * - `review-state` ↔ `review-read-review-state` / `review-write-review-state`
+ * - `agent-blocklist` ↔ `agent-block-file-read` / `agent-block-file-write`
+ * - `mutation-baseline` ↔ `artifacts-mutation-baseline`
+ * - `forgejo-token` ↔ `secrets-forgejo-token`
+ * - `workflow-config` ↔ `config-write-setup-review`
+ * - `backlog-task` ↔ `task-intake-read-backlog`
+ * - `mutation-run-config` ↔ (cache-scratch, not in ADR 0053 scope)
+ */
 export const MACHINE_WRITTEN_PATH_INVENTORY: readonly MachineWrittenPathInventoryEntry[] = [
   {
     id: 'session-metadata',

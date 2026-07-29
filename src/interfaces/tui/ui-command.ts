@@ -1,8 +1,6 @@
-import { basename, join } from 'node:path';
-import { readFileSync } from 'node:fs';
+import { basename } from 'node:path';
 import React from 'react';
 import { render, renderToString } from 'ink';
-import type { AgentFamily } from '../../domain/agents.js';
 import type { RepositoryId } from '../../domain/repository.js';
 import type { BoardProgressSink } from '../../application/controller/board-command.js';
 import { createBoardProjectionBuilder } from '../../application/projections/create-board-projection-builder.js';
@@ -10,6 +8,8 @@ import { projectMissionDetail, type MissionDetail } from '../../application/proj
 import { ConcreteMissionReadAdapter } from '../../adapters/backlog/concrete-mission-read-adapter.js';
 import { BoardCommandController } from '../../application/controller/board-controller.js';
 import { BoardShell } from './shell.js';
+import { resolveKnownAgentFamilies } from './agent-config-resolver.js';
+export { resolveKnownAgentFamilies } from './agent-config-resolver.js';
 
 // ---------------------------------------------------------------------------
 // In-memory stub repositories for read-only TUI shell
@@ -86,25 +86,6 @@ function resolveRepositoryId(rootDir: string): RepositoryId {
     throw new Error('Cannot determine repository identity from path');
   }
   return name as RepositoryId;
-}
-
-// ---------------------------------------------------------------------------
-// Resolve known agent families from agents.json config
-// ---------------------------------------------------------------------------
-
-function resolveKnownAgentFamilies(rootDir: string): readonly AgentFamily[] {
-  const agentsPath = join(rootDir, 'config', 'agents.json');
-  try {
-    const raw = readFileSync(agentsPath, 'utf8');
-    const config = JSON.parse(raw);
-    if (Array.isArray(config?.families)) {
-      return config.families.filter((f: unknown): f is string => typeof f === 'string')
-        .map((f: string) => f as AgentFamily);
-    }
-  } catch {
-    // Config file missing or malformed — return empty list
-  }
-  return [];
 }
 
 // ---------------------------------------------------------------------------

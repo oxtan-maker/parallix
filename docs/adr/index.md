@@ -21,6 +21,7 @@ ADR 0023 remains in WrGroceries and is cross-referenced here instead of copied.
 - `docs/adr/0049-diff-scoped-mutation-testing-with-ratchet-enforcement.md` — Add StrykerJS mutation testing as a diff-scoped pre-integrate gate with per-file ratchet enforcement; parallix-internal-only development quality gate
 - `docs/adr/0051-ui-neutral-application-boundary.md` — UI-neutral command/query boundary for CLI, Ink TUI, and web transport; Markdown/Git remains the compatibility adapter until the ADR 0053 Mission cutover
 - `docs/adr/0053-operational-persistence-and-authority-boundaries.md` — One operator-local SQLite authority for checked domain concepts including Mission, Review, CheckpointData, AgentRunMeasurement, SessionMarker, LaneTransitionEvent, and AgentBlock; speculative entities such as Attempt remain excluded
+- `docs/adr/0053-persistence-inventory.md` — Executable inventory of all 15 ADR 0053 durable-state concepts: production readers/writers, six-class taxonomy, architecture guard enforcement, and how future cutover tasks consume the inventory
 
 ## Cross-reference
 - `docs/adr/0023-ai-sdlc-configuration.md` remains in WrGroceries at `/home/magnus/code/visualBoard-task-1302/docs/adr/0023-ai-sdlc-configuration.md`.
