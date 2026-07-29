@@ -113,9 +113,13 @@ areas; the area names a repo uses are whatever its configured `command` accepts)
 
 Each locked mission may add gates (staging validation, manual QA, ADR creation, C2 review). These add to the baseline; they do not replace it.
 
+After each successful mission-declared gate, the executing agent compacts its working context before continuing and reloads the locked mission goal and scope plus committed checkpoint or gate evidence that exists. Failed gates do not trigger that compaction; their diagnostic remains available for repair.
+
 ### 4.3 Review gate
 
 External review by a different agent is mandatory before integration. Valid review: surface exists; reviewer inspects `<primary-branch>..HEAD`; findings cite file references; zero-finding reviews for non-trivial missions include explicit searched-and-found-none evidence.
+
+The implementer compacts implementation context before `act-on-review`, even when the mission has no `## Gates` section. Before review round 2 and later rounds, the reviewer compacts prior-round context after any successful rebase and baseline capture, then reloads the mission scope, durable checkpoint/gate evidence, round/disposition, unresolved findings and resolutions, and the rewritten revision/baseline. Repair and recovery relaunches compact first while retaining their exact diagnostic and retry state.
 
 ### 4.4 Backlog integrity gate (completed/archive-aware board mutations)
 

@@ -8,6 +8,7 @@ Latest reviewer outcome was: {{review_outcome}}
 Entrypoint: {{act_on_review_entrypoint}}
 
 Minimum loop contract:
+- Before acting on findings, compact the implementation context and reload the locked mission goal and scope; committed checkpoint or gate evidence when present; current review round and disposition; unresolved findings and implementer resolutions; and the exact revision under review. This requirement applies even when `MISSION.md` declares no gates.
 - Load the locked mission at `{{missionPath}}` and `AGENTS.md` before acting.
 - Read the review outcome and findings from `missions/{{slug}}/review-events/` — the latest `reviewer_outcome-*` file has the verdict and `reviewer_findings-*` has the findings. Alternatively, read `missions/{{slug}}/review-state.json` for the current round/phase/disposition.
 - For each finding: fix, push back (with a clear reason), or park (record in a tracked follow-up such as a Backlog task).

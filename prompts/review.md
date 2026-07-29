@@ -10,6 +10,7 @@ Load before reviewing:
 - diff: `git diff {{reviewBaseline}}..HEAD`
 
 Minimum loop contract:
+- When `{{attempt}}` is 2 or later, before beginning this review round compact the prior-round working context. Reload the locked mission goal and scope; committed checkpoint or gate evidence when present; current round and disposition; unresolved findings and implementer resolutions; and the exact post-rebase revision and review baseline shown by `git diff {{reviewBaseline}}..HEAD`. This review-loop compaction is independent of `MISSION.md` gates.
 - Load the locked mission at `{{missionPath}}` and `AGENTS.md` before reviewing.
 - The workflow runs the declared verification gate before this review. Do not invoke `px` yourself.
 - Review as an independent senior engineer. Approve only if the mission is satisfied, verification is credible for the risk level, and the diff is safe to integrate.
