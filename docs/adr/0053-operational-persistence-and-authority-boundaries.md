@@ -134,6 +134,11 @@ Existing file-backed domains remain compatibility authorities until their
 named migration gate passes. A domain cuts over all reads and writes together.
 There is no steady-state dual-write or fallback writer.
 
+`AgentBlock` has passed that gate: `agent_blocklist` is its runtime authority.
+Legacy `agents.local.json` block entries are accepted only by the explicit
+dry-run/import command path; static agent policy and launcher discovery remain
+file-backed inputs, and a checked-repository failure is surfaced to the caller.
+
 After Mission cutover, external task material remains an intake source and
 reference, not a lifecycle mirror. Generated Markdown, JSON, CSV, provider, and
 board views are rebuildable projections.

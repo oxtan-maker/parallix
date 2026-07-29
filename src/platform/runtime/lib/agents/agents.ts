@@ -161,6 +161,15 @@ function defaultIsAgentBlockedNow(agent: string) {
   }
 }
 
+/** Persist runtime blocks through the checked authority without changing the synchronous config seam. */
+async function updateAgentBlockChecked(agent: string, until: string, options: {reason?: string} = {}) {
+  const { initOperatorState } = await import('../../../../adapters/sqlite/adapter-factory.js');
+  const { SqliteBlocklistRepository } = await import('../../../../adapters/sqlite/blocklist-repository.js');
+  const { AgentBlockService } = await import('../../../../application/services/agent-block-service.js');
+  const state = await initOperatorState();
+  return new AgentBlockService(new SqliteBlocklistRepository(state.db)).block(agent, until, options.reason ?? null);
+}
+
 function formatElapsed(elapsedMs: number) {
   const seconds = Math.max(0, Math.round(elapsedMs / 1000));
   if (seconds < 60) {return `${seconds}s`;}
@@ -181,7 +190,7 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
     slug = null,
     role = null,
     detectLimitHitFn = detectLimitHit,
-    updateAgentBlockFn = updateAgentBlock,
+    updateAgentBlockFn = updateAgentBlockChecked,
     selectAgentFn = selectAgent,
     resolveAgentModelFn = resolveAgentModel,
     isAgentBlockedFn = defaultIsAgentBlockedNow,
@@ -399,8 +408,8 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
     if (limitHit) {
       log(fmt.status('WARN', `Limit hit detected for ${fmt.agent(chosen || '')}; reset estimate "${limitHit.until}" (${limitHit.source}). Blocking and retrying.`));
       try {
-        const blockResult = updateAgentBlockFn(chosen || '', limitHit.until, { reason: limitHit.reason });
-        log(fmt.status('INFO', `Wrote blocklist entry for ${fmt.agent(chosen || '')} -> ${fmt.path(blockResult.path)}`));
+        const blockResult = await updateAgentBlockFn(chosen || '', limitHit.until, { reason: limitHit.reason });
+        log(fmt.status('INFO', `Wrote checked AgentBlock for ${fmt.agent(chosen || '')} (${blockResult.reason || 'limit'})`));
       } catch (err) {
         log(fmt.status('WARN', `Could not persist blocklist entry for ${fmt.agent(chosen || '')}: ${(err as any).message}`));
       }
@@ -481,8 +490,8 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
           }
          const blockUntil = formatBlockUntil(new Date(Date.now() + DEFAULT_FALLBACK_HOURS * 60 * 60 * 1000));
          try {
-           const blockResult = updateAgentBlockFn(chosen || '', blockUntil, { reason: blockReason });
-           log(fmt.status('INFO', `Wrote blocklist entry for ${fmt.agent(chosen || '')} -> ${fmt.path(blockResult.path)} (${DEFAULT_FALLBACK_HOURS}h block, ${blockReason})`));
+           const blockResult = await updateAgentBlockFn(chosen || '', blockUntil, { reason: blockReason });
+           log(fmt.status('INFO', `Wrote checked AgentBlock for ${fmt.agent(chosen || '')} (${DEFAULT_FALLBACK_HOURS}h block, ${blockResult.reason || blockReason})`));
          } catch (err) {
           log(fmt.status('WARN', `Could not persist blocklist entry for ${fmt.agent(chosen || '')}: ${(err as any).message}`));
           }

@@ -166,7 +166,14 @@ test('flow and median cycle projections operate on domain facts', () => {
 
 test('agent availability exposes a timed-block countdown', () => {
   const rows = projectAgentAvailability([{ family: agentFamily('custom'), launcherAvailable: true, block: { kind: 'until', untilMs: 2_000, reason: 'limit' } }], 1_250);
-  assert.deepEqual(rows, [{ family: 'custom', available: false, blockedForMs: 750 }]);
+  assert.deepEqual(rows, [{
+    family: 'custom',
+    available: false,
+    blockedForMs: 750,
+    reason: 'limit',
+    expiresAtMs: 2_000,
+    limit: 'limit',
+  }]);
 });
 
 test('known repositories are a de-duplicated projection of observed work', () => {

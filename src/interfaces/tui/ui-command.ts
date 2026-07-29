@@ -16,8 +16,9 @@ export { resolveKnownAgentFamilies } from './agent-config-resolver.js';
 // ---------------------------------------------------------------------------
 
 /**
- * Minimal in-memory AgentBlocklistRepository for read-only TUI use.
- * Returns empty blocklist — sufficient for the static shell projection.
+ * The read-only TUI does not open persistence adapters itself. Its host
+ * composition root supplies an AgentBlock repository when a live operator
+ * projection is needed; the standalone shell stays side-effect free.
  */
 class EmptyBlocklistRepository {
   async findAll() { return []; }

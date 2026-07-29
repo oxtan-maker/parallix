@@ -148,7 +148,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'launch-session-resume',
     family: 'launch',
     fileLocation: 'src/platform/runtime/lib/agents/agents.ts',
-    line: 299,
+    line: 308,
     anchor: 'const resume = Boolean(',
     reads: ['SessionMarker', 'Mission'],
     requirement:
@@ -159,7 +159,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'launch-session-marker-write',
     family: 'launch',
     fileLocation: 'src/platform/runtime/lib/agents/agents.ts',
-    line: 502,
+    line: 511,
     anchor: 'writeSession(worktree, slug, role',
     reads: ['SessionMarker'],
     requirement:
@@ -174,7 +174,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'retry-in-process-tried-set',
     family: 'retry',
     fileLocation: 'src/platform/runtime/lib/agents/agents.ts',
-    line: 198,
+    line: 207,
     anchor: 'const tried = new Set(',
     reads: ['AgentBlock'],
     requirement:
@@ -185,7 +185,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'retry-launch-failure-reselect',
     family: 'retry',
     fileLocation: 'src/platform/runtime/lib/agents/agents.ts',
-    line: 460,
+    line: 469,
     anchor: 'retrying with next eligible agent',
     reads: ['AgentBlock'],
     requirement:
@@ -222,7 +222,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'failover-limit-hit-block',
     family: 'failover',
     fileLocation: 'src/platform/runtime/lib/agents/agents.ts',
-    line: 402,
+    line: 411,
     anchor: 'updateAgentBlockFn(chosen',
     reads: ['AgentBlock'],
     requirement:
@@ -233,7 +233,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'failover-transient-failure-block',
     family: 'failover',
     fileLocation: 'src/platform/runtime/lib/agents/agents.ts',
-    line: 484,
+    line: 493,
     anchor: 'updateAgentBlockFn(chosen',
     reads: ['AgentBlock'],
     requirement:
@@ -355,7 +355,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'ui-agent-status',
     family: 'ui-board',
     fileLocation: 'src/application/projections/agent-status.ts',
-    line: 9,
+    line: 12,
     anchor: 'function projectAgentAvailability',
     reads: ['AgentBlock'],
     requirement:
