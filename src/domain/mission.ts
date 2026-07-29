@@ -1,5 +1,6 @@
 import type { AgentFamily } from './agents.js';
 import type { CheckpointData } from './checkpoint.js';
+import type { ExternalTaskRef } from './external-task.js';
 import type { RepositoryId } from './repository.js';
 import type { Review } from './review.js';
 
@@ -56,6 +57,10 @@ export interface MissionData {
    * Preserves the legacy `px status` output contract. Mapped status is `status` field.
    * Optional for backward compatibility; defaults to mapped status when absent. */
   readonly rawStatus?: string;
+  /** Intake traceability for accepted external material (ADR 0053).
+   * A reference only: it never carries external lifecycle state or content.
+   * Optional for backward compatibility; `null`/absent means intake recorded none. */
+  readonly externalTaskRef?: ExternalTaskRef | null;
 }
 
 /** Includes the intentional post-integration, pre-cleanup `done` state. */
@@ -78,6 +83,52 @@ export class MissionRuleViolation extends Error {
     super(message);
     this.name = 'MissionRuleViolation';
   }
+}
+
+/** Facts an interface must supply before Parallix owns a Mission. */
+export interface MissionIntake {
+  readonly id: MissionId;
+  readonly repositoryId: RepositoryId;
+  readonly title: string;
+  readonly labels?: readonly MissionLabel[];
+  readonly assignee?: AgentFamily | null;
+  /** Raw vocabulary from the intake source; retained for output compatibility. */
+  readonly rawStatus?: string;
+  /** Optional trace back to accepted external material (never an aggregate). */
+  readonly externalTaskRef?: ExternalTaskRef | null;
+}
+
+/**
+ * Materialize a new Mission at intake.
+ *
+ * Intake owns identity, repository ownership, description, and optional
+ * external traceability only. Evidence (`checkpoints`), review conversation,
+ * and change size are produced by later commands, so an intake that arrives
+ * carrying them is rejected rather than silently trusted.
+ */
+export function intakeMission(intake: MissionIntake): OpenMission {
+  if (!intake.title.trim()) {
+    throw new MissionRuleViolation(`Mission ${intake.id} requires a non-empty title`);
+  }
+  if (!intake.repositoryId.trim()) {
+    throw new MissionRuleViolation(`Mission ${intake.id} requires an owning repository`);
+  }
+  return {
+    id: intake.id,
+    repositoryId: intake.repositoryId,
+    title: intake.title.trim(),
+    labels: intake.labels === undefined ? [] : [...new Set(intake.labels)],
+    assignee: intake.assignee ?? null,
+    checkpoints: [],
+    review: null,
+    netEngineeringLines: null,
+    status: 'backlog',
+    closedAt: null,
+    ...(intake.rawStatus === undefined ? {} : { rawStatus: intake.rawStatus }),
+    // Absent means "intake recorded no external trace"; the field is only
+    // present when a reference was actually supplied.
+    ...(intake.externalTaskRef ? { externalTaskRef: intake.externalTaskRef } : {}),
+  };
 }
 
 export function recordNetEngineeringLines(mission: Mission, value: number): Mission {

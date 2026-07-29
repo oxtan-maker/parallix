@@ -168,6 +168,17 @@ export const MISSIONS_AUTHORITY = {
 
 const MISSION_VALUE_AUTHORITY = { owner: 'operator-local' } as const;
 
+/**
+ * Intake traceability recorded with the Mission. Parallix owns the reference it
+ * accepted; the external system keeps owning the material it points at.
+ */
+export const MISSION_EXTERNAL_TASK_REFS_AUTHORITY = {
+  mission_id: MISSION_VALUE_AUTHORITY,
+  source: MISSION_VALUE_AUTHORITY,
+  external_id: MISSION_VALUE_AUTHORITY,
+  url: MISSION_VALUE_AUTHORITY,
+} as const satisfies Readonly<Record<string, FieldAuthority>>;
+
 export const MISSION_LABELS_AUTHORITY = {
   mission_id: MISSION_VALUE_AUTHORITY,
   position: MISSION_VALUE_AUTHORITY,
@@ -259,6 +270,7 @@ export const SQLITE_ENTITY_AUTHORITY = {
   board_lane_events: BOARD_LANE_EVENTS_AUTHORITY,
   missions: MISSIONS_AUTHORITY,
   mission_labels: MISSION_LABELS_AUTHORITY,
+  mission_external_task_refs: MISSION_EXTERNAL_TASK_REFS_AUTHORITY,
   mission_checkpoints: MISSION_CHECKPOINTS_AUTHORITY,
   mission_checkpoint_goal_checks: MISSION_CHECKPOINT_GOAL_CHECKS_AUTHORITY,
   mission_reviews: MISSION_REVIEWS_AUTHORITY,

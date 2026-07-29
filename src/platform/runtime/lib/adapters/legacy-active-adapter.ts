@@ -2,8 +2,13 @@ import { readAgentConfigOrExit } from '../agents/agents.js';
 import { resolveWorktree } from '../core/mission-utils.js';
 import missionStart from '../commands/mission-start.js';
 import { buildCheckpointContext, buildExecutePrompt, enforceExecuteCommitSafety, runHandoffAndReview, selectLaunchAndRecord } from '../commands/active.js';
-import { getTaskStatus, resolveTaskFile, transitionTask } from '../tools/backlog.js';
+import { getTaskStatus, resolveTaskFile } from '../tools/backlog.js';
 import { resolveAgentModel } from '../core/product-config.js';
+import { createMissionApplicationServices } from '../composition/application-services.js';
+import { MissionLifecycleService } from '../../../../application/mission-lifecycle-service.js';
+import type { MissionTransitionStore } from '../../../../application/domain-ports.js';
+import { agentFamily } from '../../../../domain/agents.js';
+import { missionId } from '../../../../domain/mission.js';
 import * as stats from '../commands/stats.js';
 import { resolveStageTelemetry } from '../agents/stage-telemetry.js';
 import type { DurableEvidence } from '../../../../application/contracts.js';
@@ -78,9 +83,14 @@ export class LegacyActiveAdapter implements ActivePort {
     this._runtime.enforceExecuteCommitSafety({ slug, worktree: run.worktree });
     if (run.taskResolution.ok && run.taskResolution.taskFile) {
       const status = this._runtime.getTaskStatus(run.taskResolution.taskFile);
-      if ((run.launch.rebaseDeferred || (status && status !== 'active'))
-        && !await this._runtime.transitionTask(slug, 'active', { rootDir: run.worktree })) {
-        throw new Error('legacy task lifecycle synchronization failed');
+      // Whether the recorded lane still needs synchronizing is an observation of
+      // the launch (a deferred rebase, or a task that is not yet active). What
+      // the transition *is* — and whether it is legal from the current status —
+      // is decided by `decideMission` inside the lifecycle use case, which then
+      // writes through the selected Mission authority with the exact revision
+      // it read.
+      if (run.launch.rebaseDeferred || (status && status !== 'active')) {
+        await this.synchronizeLifecycle(slug, agent, run.worktree);
       }
     }
     try {
@@ -106,6 +116,25 @@ export class LegacyActiveAdapter implements ActivePort {
     this._runs.delete(slug);
     if (!await this._runtime.runHandoffAndReview(slug, run.worktree, agent, { taskFile: run.taskResolution.ok ? run.taskResolution.taskFile : undefined })) {
       throw new Error('legacy handoff failed');
+    }
+  }
+
+  /**
+   * Route activation through the checked Mission boundary.
+   *
+   * The failure message is unchanged so the command layer's fail-closed
+   * behavior and its existing operator text are preserved.
+   */
+  private async synchronizeLifecycle(slug: string, agent: string, worktree: string): Promise<void> {
+    const outcome = await new MissionLifecycleService(this._runtime.missionStore(worktree)).activate({
+      operationId: `active-${slug}`,
+      missionId: missionId(slug),
+      capabilities: new Set(['mission:transition']),
+      agent: agentFamily(agent),
+      occurredAt: new Date().toISOString(),
+    });
+    if (outcome.status !== 'completed') {
+      throw new Error('legacy task lifecycle synchronization failed');
     }
   }
 
@@ -141,7 +170,12 @@ export interface LegacyActiveRuntime {
   readonly selectLaunchAndRecord: typeof selectLaunchAndRecord;
   readonly enforceExecuteCommitSafety: typeof enforceExecuteCommitSafety;
   readonly getTaskStatus: typeof getTaskStatus;
-  readonly transitionTask: typeof transitionTask;
+  /**
+   * The selected Mission authority for the launched worktree. This replaced the
+   * adapter's direct `transitionTask` call: the write now happens inside the
+   * store, behind the application port.
+   */
+  readonly missionStore: (_rootDir: string) => MissionTransitionStore;
   readonly recordActiveStats: typeof stats.recordActiveStats;
   readonly resolveAgentModel: typeof resolveAgentModel;
   readonly resolveStageTelemetry: typeof resolveStageTelemetry;
@@ -159,7 +193,7 @@ function createDefaultLegacyActiveRuntime(): LegacyActiveRuntime {
     selectLaunchAndRecord,
     enforceExecuteCommitSafety,
     getTaskStatus,
-    transitionTask,
+    missionStore: (rootDir: string) => createMissionApplicationServices(rootDir).store,
     recordActiveStats: stats.recordActiveStats,
     resolveAgentModel,
     resolveStageTelemetry,

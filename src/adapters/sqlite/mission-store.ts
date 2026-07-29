@@ -11,6 +11,7 @@ import type { SqliteDatabaseAdapter } from './database-adapter.js';
 import { SqliteBoardLaneEventRepository } from './board-lane-event-repository.js';
 import {
   hydrateMission,
+  type MissionExternalTaskRefRecord,
   type MissionCheckpointRecord,
   type MissionGoalCheckRecord,
   type MissionLabelRecord,
@@ -68,7 +69,16 @@ export class SqliteMissionStore implements MissionStore {
       return { kind: 'missing' };
     }
 
-    const [labels, checkpoints, goalChecks, reviews, reviewRounds, findings, resolutions] =
+    const [
+      labels,
+      checkpoints,
+      goalChecks,
+      reviews,
+      reviewRounds,
+      findings,
+      resolutions,
+      externalRefs,
+    ] =
       await Promise.all([
         this.db.query<MissionLabelRecord>(
           'SELECT mission_id, position, label FROM mission_labels WHERE mission_id = ? ORDER BY position',
@@ -113,10 +123,16 @@ export class SqliteMissionStore implements MissionStore {
            WHERE mission_id = ? ORDER BY round_position, position`,
           [id],
         ),
+        this.db.query<MissionExternalTaskRefRecord>(
+          `SELECT mission_id, source, external_id, url
+           FROM mission_external_task_refs WHERE mission_id = ?`,
+          [id],
+        ),
       ]);
 
     const hydrated = hydrateMission({
       mission: missionRows[0],
+      externalTaskRef: externalRefs[0] ?? null,
       labels,
       checkpoints,
       goalChecks,
@@ -279,12 +295,25 @@ export class SqliteMissionStore implements MissionStore {
   }
 
   private async clearAggregateValues(id: MissionId): Promise<void> {
+    await this.db.execute('DELETE FROM mission_external_task_refs WHERE mission_id = ?', [id]);
     await this.db.execute('DELETE FROM mission_reviews WHERE mission_id = ?', [id]);
     await this.db.execute('DELETE FROM mission_checkpoints WHERE mission_id = ?', [id]);
     await this.db.execute('DELETE FROM mission_labels WHERE mission_id = ?', [id]);
   }
 
   private async insertAggregateValues(mission: Mission): Promise<void> {
+    if (mission.externalTaskRef) {
+      await this.db.execute(
+        `INSERT INTO mission_external_task_refs (mission_id, source, external_id, url)
+         VALUES (?, ?, ?, ?)`,
+        [
+          mission.id,
+          mission.externalTaskRef.source,
+          mission.externalTaskRef.id,
+          mission.externalTaskRef.url,
+        ],
+      );
+    }
     for (const [position, label] of mission.labels.entries()) {
       await this.db.execute(
         'INSERT INTO mission_labels (mission_id, position, label) VALUES (?, ?, ?)',

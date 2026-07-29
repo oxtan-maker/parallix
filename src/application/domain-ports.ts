@@ -1,5 +1,7 @@
 import type { AgentSelectionSnapshot } from '../domain/agents.js';
+import type { LaneTransitionEvent } from '../domain/board-event.js';
 import type { Mission, MissionId } from '../domain/mission.js';
+import type { MissionNelRecord } from '../domain/net-engineering-lines.js';
 
 export type MissionVersion = number & { readonly __brand: 'MissionVersion' };
 
@@ -23,6 +25,66 @@ export interface MissionStore {
    * aggregate revision returned by load().
    */
   save(_mission: Mission, _expectedVersion: MissionVersion | null): Promise<MissionVersion>;
+}
+
+/**
+ * A Mission store that can commit a lifecycle transition and the event that
+ * describes it as one unit (ADR 0053 transaction rule 1).
+ *
+ * Both the SQLite adapter and the compatibility adapter satisfy this port; the
+ * use cases never learn which one they hold.
+ */
+export interface MissionTransitionStore extends MissionStore {
+  saveWithTransition(
+    _mission: Mission,
+    _expectedVersion: MissionVersion,
+    _event: LaneTransitionEvent,
+  ): Promise<MissionVersion>;
+}
+
+/**
+ * Durable recording of the structured NEL report produced at handoff.
+ *
+ * The record itself is derived Mission data. The port exists so the use case
+ * never learns whether the selected authority writes a compatibility JSON
+ * document or a database row, and so a stale expected version is still refused.
+ */
+export interface MissionNelRecorder {
+  recordNel(
+    _record: MissionNelRecord,
+  ): Promise<MissionNelRecordReceipt>;
+}
+
+/** Where the recorded NEL report landed. A reference, never the payload. */
+export interface MissionNelRecordReceipt {
+  /** Locator of the durable record, e.g. a document path or a row identity. */
+  readonly reference: string;
+  /** Authority that accepted the write. */
+  readonly authority: 'compatibility' | 'sqlite';
+}
+
+/** A write refused because the caller's expected revision is no longer current. */
+export class MissionStaleVersion extends Error {
+  readonly disposition = 'stale-write' as const;
+
+  constructor(
+    readonly missionId: MissionId,
+    readonly expectedVersion: MissionVersion | null,
+    readonly actualVersion: MissionVersion | null,
+  ) {
+    super(
+      `Stale write: mission ${missionId} expected version ` +
+      `${expectedVersion ?? 'missing'}, found ${actualVersion ?? 'missing'}`,
+    );
+    this.name = 'MissionStaleVersion';
+  }
+}
+
+/** True for any adapter-reported stale-write refusal, whichever store raised it. */
+export function isStaleWrite(error: unknown): boolean {
+  return typeof error === 'object'
+    && error !== null
+    && (error as { disposition?: string }).disposition === 'stale-write';
 }
 
 export interface AgentSelectionSnapshotPort {

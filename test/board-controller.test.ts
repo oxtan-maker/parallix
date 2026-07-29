@@ -66,12 +66,15 @@ test('controller rejects draft:create with capability kind', async () => {
   assert.ok(result.error.message.includes('draft:create'));
 });
 
-test('controller rejects checkpoint:record with capability kind', async () => {
+// checkpoint:record became an integrated capability in TASK-2322.05. A host
+// without a Mission authority still gets a typed rejection rather than a
+// filesystem or SQL path, and a payload-less request is a validation rejection.
+test('controller rejects checkpoint:record without a payload', async () => {
   const { port } = makeActivePort();
   const controller = new BoardCommandController(port);
   const result = await controller.dispatch(makeRequest({ kind: 'checkpoint:record' }));
   assert.equal(result.status, 'rejected');
-  assert.equal(result.error.kind, 'capability');
+  assert.equal(result.error.kind, 'validation');
 });
 
 test('controller rejects review:submit with capability kind', async () => {
@@ -192,24 +195,28 @@ test('dispatchWithStatus proceeds when status matches', async () => {
 // Capability registry
 // ---------------------------------------------------------------------------
 
-test('isIntegratedCapability returns true only for active:execute', () => {
+test('isIntegratedCapability covers the Mission commands extracted so far', () => {
   assert.equal(isIntegratedCapability('active:execute'), true);
+  assert.equal(isIntegratedCapability('mission:intake'), true);
+  assert.equal(isIntegratedCapability('checkpoint:record'), true);
+  assert.equal(isIntegratedCapability('handoff:record'), true);
   assert.equal(isIntegratedCapability('draft:create'), false);
-  assert.equal(isIntegratedCapability('checkpoint:record'), false);
   assert.equal(isIntegratedCapability('review:submit'), false);
   assert.equal(isIntegratedCapability('review:act-on-findings'), false);
   assert.equal(isIntegratedCapability('approve:review'), false);
   assert.equal(isIntegratedCapability('integrate:merge'), false);
 });
 
-test('INTEGRATED_CAPABILITIES contains exactly active:execute', () => {
-  assert.equal(INTEGRATED_CAPABILITIES.size, 1);
-  assert.ok(INTEGRATED_CAPABILITIES.has('active:execute'));
+test('INTEGRATED_CAPABILITIES contains active:execute and the Mission commands', () => {
+  assert.equal(INTEGRATED_CAPABILITIES.size, 4);
+  for (const kind of ['active:execute', 'mission:intake', 'checkpoint:record', 'handoff:record'] as const) {
+    assert.ok(INTEGRATED_CAPABILITIES.has(kind), `${kind} should be integrated`);
+  }
 });
 
-test('UNAVAILABLE_CAPABILITIES has reasons for all six unextracted commands', () => {
-  assert.equal(UNAVAILABLE_CAPABILITIES.size, 6);
-  for (const kind of ['draft:create', 'checkpoint:record', 'review:submit', 'review:act-on-findings', 'approve:review', 'integrate:merge'] as const) {
+test('UNAVAILABLE_CAPABILITIES has reasons for all five unextracted commands', () => {
+  assert.equal(UNAVAILABLE_CAPABILITIES.size, 5);
+  for (const kind of ['draft:create', 'review:submit', 'review:act-on-findings', 'approve:review', 'integrate:merge'] as const) {
     const reason = unavailableReason(kind);
     assert.ok(reason, `Missing reason for ${kind}`);
     assert.ok(reason.length > 0);

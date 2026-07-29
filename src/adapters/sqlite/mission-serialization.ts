@@ -1,5 +1,6 @@
 import { agentFamily } from '../../domain/agents.js';
 import type { CheckpointData, GoalCheckRow } from '../../domain/checkpoint.js';
+import { externalTaskRef, type ExternalTaskRef } from '../../domain/external-task.js';
 import { isCheckpointName } from '../../domain/checkpoint.js';
 import {
   missionId,
@@ -105,8 +106,16 @@ export interface MissionReviewResolutionRecord {
   readonly explanation: string;
 }
 
+export interface MissionExternalTaskRefRecord {
+  readonly mission_id: string;
+  readonly source: string;
+  readonly external_id: string;
+  readonly url: string | null;
+}
+
 export interface MissionAggregateRecords {
   readonly mission: MissionRecord;
+  readonly externalTaskRef?: MissionExternalTaskRefRecord | null;
   readonly labels: readonly MissionLabelRecord[];
   readonly checkpoints: readonly MissionCheckpointRecord[];
   readonly goalChecks: readonly MissionGoalCheckRecord[];
@@ -317,6 +326,26 @@ function reviewFrom(records: MissionAggregateRecords): Review | null {
   };
 }
 
+/**
+ * Rebuild the intake trace, if one was recorded.
+ *
+ * The key stays absent when no row exists so a Mission that was never given an
+ * external reference is indistinguishable from one persisted before this column
+ * existed — the reference is traceability, not a required aggregate part.
+ */
+function externalTaskRefFrom(
+  records: MissionAggregateRecords,
+): { externalTaskRef?: ExternalTaskRef } {
+  const row = records.externalTaskRef;
+  if (!row) {
+    return {};
+  }
+  if (row.mission_id !== records.mission.id) {
+    throw new Error('Persisted external task reference belongs to another Mission');
+  }
+  return { externalTaskRef: externalTaskRef(row.source, row.external_id, row.url) };
+}
+
 /** Reconstruct and validate domain values from the normalized relational rows. */
 export function hydrateMission(records: MissionAggregateRecords): HydratedMission {
   const row = records.mission;
@@ -338,6 +367,7 @@ export function hydrateMission(records: MissionAggregateRecords): HydratedMissio
     review: reviewFrom(records),
     netEngineeringLines: row.net_engineering_lines,
     rawStatus: row.raw_status ?? undefined,
+    ...externalTaskRefFrom(records),
   };
   const mission: Mission = closedAt === null
     ? { ...common, status: missionStatus, closedAt: null }

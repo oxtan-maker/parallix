@@ -1,5 +1,12 @@
 import type { Capability, DurableEvidence, ProgressEvent } from '../contracts.js';
 import { failure, rejected, type ApplicationOutcome } from '../contracts.js';
+import type { MissionVersion } from '../domain-ports.js';
+import type { AgentFamily } from '../../domain/agents.js';
+import type { CheckpointData } from '../../domain/checkpoint.js';
+import type { ExternalTaskRef } from '../../domain/external-task.js';
+import type { MissionLabel } from '../../domain/mission.js';
+import type { ArtifactReference, NelBucketLabel } from '../../domain/net-engineering-lines.js';
+import type { RepositoryId } from '../../domain/repository.js';
 
 // ---------------------------------------------------------------------------
 // BoardCommandRequest — typed request for a board operation
@@ -7,12 +14,46 @@ import { failure, rejected, type ApplicationOutcome } from '../contracts.js';
 
 export type BoardCommandKind =
   | 'active:execute'
+  | 'mission:intake'
   | 'draft:create'
   | 'checkpoint:record'
+  | 'handoff:record'
   | 'review:submit'
   | 'review:act-on-findings'
   | 'approve:review'
   | 'integrate:merge';
+
+/**
+ * Domain-shaped input for the Mission commands this controller dispatches.
+ *
+ * A payload carries checked domain values only — never a mission-directory
+ * path, a `CP-N.md` filename, or SQL. A board button therefore cannot acquire
+ * filesystem or database authority by sending a richer payload.
+ */
+export type BoardCommandPayload =
+  | {
+    readonly kind: 'mission:intake';
+    readonly repositoryId: RepositoryId;
+    readonly title: string;
+    readonly labels?: readonly MissionLabel[];
+    readonly assignee?: AgentFamily | null;
+    readonly rawStatus?: string;
+    readonly externalTaskRef?: ExternalTaskRef | null;
+  }
+  | {
+    readonly kind: 'checkpoint:record';
+    readonly checkpoint: CheckpointData;
+    readonly expectedVersion?: MissionVersion;
+  }
+  | {
+    readonly kind: 'handoff:record';
+    readonly netEngineeringLines: number;
+    readonly predictedBucket?: NelBucketLabel | 'Unknown';
+    readonly capturedAt: string;
+    readonly artifacts?: readonly ArtifactReference[];
+    readonly reviewRounds?: number;
+    readonly expectedVersion?: MissionVersion;
+  };
 
 export interface BoardCommandRequest {
   readonly operationId: string;
@@ -23,6 +64,8 @@ export interface BoardCommandRequest {
   readonly capabilities: ReadonlySet<Capability>;
   /** Optional cancellation handle for cooperative cancellation. */
   readonly cancellation?: BoardCancellation;
+  /** Required by the Mission commands; absent for `active:execute`. */
+  readonly payload?: BoardCommandPayload;
 }
 
 // ---------------------------------------------------------------------------
@@ -92,6 +135,9 @@ export interface BoardCommandDispatcher {
  */
 export const INTEGRATED_CAPABILITIES = new Set<BoardCommandKind>([
   'active:execute',
+  'mission:intake',
+  'checkpoint:record',
+  'handoff:record',
 ]);
 
 /**
@@ -100,7 +146,6 @@ export const INTEGRATED_CAPABILITIES = new Set<BoardCommandKind>([
  */
 export const UNAVAILABLE_CAPABILITIES: ReadonlyMap<BoardCommandKind, string> = new Map([
   ['draft:create', 'Draft extraction not yet integrated (TASK-2289)'],
-  ['checkpoint:record', 'Checkpoint extraction not yet integrated (TASK-2290)'],
   ['review:submit', 'Review extraction not yet integrated (TASK-2289)'],
   ['review:act-on-findings', 'Review findings extraction not yet integrated (TASK-2290)'],
   ['approve:review', 'Approve extraction not yet integrated (TASK-2289)'],

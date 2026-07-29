@@ -1060,9 +1060,36 @@ test('runDeclaredGates handles checkbox prefixes [- [ ] and - [x])', () => {
 
 // ---------- captureNelAtHandoff ----------
 
+/**
+ * TASK-2322.05: NEL capture now records through the checked Mission boundary,
+ * whose selected compatibility authority is the Backlog task record plus the
+ * mission documents. These fixtures therefore write the task document the
+ * production path always has (handoff already refuses a mission whose task
+ * cannot be transitioned).
+ */
+function writeCompatibilityTaskRecord(rootDir, slug, status = 'active') {
+  const tasksDir = path.join(rootDir, 'backlog', 'tasks');
+  fs.mkdirSync(tasksDir, { recursive: true });
+  const taskFile = path.join(tasksDir, `${slug} - nel fixture.md`);
+  fs.writeFileSync(taskFile, [
+    '---',
+    `id: ${slug.toUpperCase()}`,
+    'title: NEL fixture',
+    `status: ${status}`,
+    'assignee: [codex]',
+    '---',
+    '',
+    '## Description',
+    '',
+    'NEL fixture task.',
+    '',
+  ].join('\n'));
+  return taskFile;
+}
+
 const { captureNelAtHandoff } = require('../.test-runtime/lib/commands/handoff');
 
-test('captureNelAtHandoff returns error when primary branch not detected', () => {
+test('captureNelAtHandoff returns error when primary branch not detected', async () => {
   const origGetPrimaryBranch = require('../.test-runtime/lib/core/mission-utils').getPrimaryBranch;
   const { mock } = test;
 
@@ -1071,7 +1098,7 @@ test('captureNelAtHandoff returns error when primary branch not detected', () =>
   });
 
   try {
-    const result = captureNelAtHandoff('task-fake', {
+    const result = await captureNelAtHandoff('task-fake', {
       rootDir: '/tmp/fake',
       missionDir: '/tmp/fake/missions/task-fake',
       log: () => {},
@@ -1084,13 +1111,14 @@ test('captureNelAtHandoff returns error when primary branch not detected', () =>
   }
 });
 
-test('captureNelAtHandoff writes nel-record.json with predicted bucket, actual NEL, actual bucket, review rounds', () => {
+test('captureNelAtHandoff writes nel-record.json with predicted bucket, actual NEL, actual bucket, review rounds', async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nel-capture-'));
   const missionDir = path.join(tmpDir, 'missions/task-nel-test');
   const nelRecordPath = path.join(missionDir, 'nel-record.json');
 
   try {
     fs.mkdirSync(missionDir, { recursive: true });
+    writeCompatibilityTaskRecord(tmpDir, 'task-nel-test');
 
     // Create MISSION.md with predicted NEL bucket
     fs.writeFileSync(path.join(missionDir, 'MISSION.md'), [
@@ -1115,7 +1143,7 @@ test('captureNelAtHandoff writes nel-record.json with predicted bucket, actual N
     const mockFn = mock.method(require('../.test-runtime/lib/core/mission-utils'), 'getPrimaryBranch', () => 'main');
 
     try {
-      const result = captureNelAtHandoff('task-nel-test', {
+      const result = await captureNelAtHandoff('task-nel-test', {
         rootDir: tmpDir,
         missionDir,
         log: () => {},
@@ -1130,7 +1158,10 @@ test('captureNelAtHandoff writes nel-record.json with predicted bucket, actual N
       assert.ok(fs.existsSync(nelRecordPath), 'nel-record.json should exist');
       const rawRecord = fs.readFileSync(nelRecordPath, 'utf8');
       const record = JSON.parse(rawRecord);
-      assert.deepEqual(Object.keys(record), ['slug', 'predictedBucket', 'actualNel', 'actualBucket', 'reviewRounds', 'capturedAt']);
+      // TASK-2322.05 appends `artifacts`: locators for the generated evidence
+      // the capture observed. The legacy keys and their order are unchanged.
+      assert.deepEqual(Object.keys(record), ['slug', 'predictedBucket', 'actualNel', 'actualBucket', 'reviewRounds', 'capturedAt', 'artifacts']);
+      assert.deepEqual(record.artifacts, [{ kind: 'git-range', location: 'main..HEAD', byteSize: null }]);
       assert.equal(rawRecord.endsWith('\n'), true);
       assert.equal(rawRecord.endsWith('\n\n'), false);
       assert.strictEqual(record.slug, 'task-nel-test');
@@ -1146,14 +1177,15 @@ test('captureNelAtHandoff writes nel-record.json with predicted bucket, actual N
   }
 });
 
-test('captureNelAtHandoff reports injected persistence failure and writes no success record', () => {
+test('captureNelAtHandoff reports injected persistence failure and writes no success record', async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nel-capture-fail-'));
   const missionDir = path.join(tmpDir, 'missions/task-nel-fail');
   fs.mkdirSync(missionDir, { recursive: true });
+  writeCompatibilityTaskRecord(tmpDir, 'task-nel-fail');
   const primaryMock = mock.method(missionUtils, 'getPrimaryBranch', () => 'main');
   const errors = [];
   try {
-    const result = require('../.test-runtime/lib/commands/handoff').captureNelAtHandoff('task-nel-fail', {
+    const result = await require('../.test-runtime/lib/commands/handoff').captureNelAtHandoff('task-nel-fail', {
       rootDir: tmpDir,
       missionDir,
       log: () => {},
@@ -1261,13 +1293,14 @@ test('performHandoff commits a newly captured NEL record before transitioning Ba
   }
 });
 
-test('captureNelAtHandoff reads predicted bucket from MISSION.md Refinement Signals', () => {
+test('captureNelAtHandoff reads predicted bucket from MISSION.md Refinement Signals', async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nel-capture-bucket-'));
   const missionDir = path.join(tmpDir, 'missions/task-nel-bucket');
   const nelRecordPath = path.join(missionDir, 'nel-record.json');
 
   try {
     fs.mkdirSync(missionDir, { recursive: true });
+    writeCompatibilityTaskRecord(tmpDir, 'task-nel-bucket');
 
     // Create MISSION.md with Medium predicted bucket
     fs.writeFileSync(path.join(missionDir, 'MISSION.md'), [
@@ -1282,7 +1315,7 @@ test('captureNelAtHandoff reads predicted bucket from MISSION.md Refinement Sign
     const mockFn = mock.method(require('../.test-runtime/lib/core/mission-utils'), 'getPrimaryBranch', () => 'main');
 
     try {
-      captureNelAtHandoff('task-nel-bucket', {
+      await captureNelAtHandoff('task-nel-bucket', {
         rootDir: tmpDir,
         missionDir,
         log: () => {},

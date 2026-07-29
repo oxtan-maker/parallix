@@ -20,6 +20,11 @@ const applicationSourceRoot = path.join(root, 'src', 'application');
 const applicationOutputRoot = path.join(testRuntimeRoot, 'application');
 const adapterSourceRoot = path.join(root, 'src', 'adapters');
 const adapterOutputRoot = path.join(testRuntimeRoot, 'adapters');
+// The application and adapter layers import domain *values* (rule violations,
+// factories, policy), not only erasable types, so the domain tree must be part
+// of the CommonJS test runtime as well.
+const domainSourceRoot = path.join(root, 'src', 'domain');
+const domainOutputRoot = path.join(testRuntimeRoot, 'domain');
 
 function collectTypeScriptFiles(directory: string): string[] {
   const files: string[] = [];
@@ -44,6 +49,7 @@ for (const [inputRoot, outputRootForSource] of [
   [assetSourceRoot, assetOutputRoot],
   [applicationSourceRoot, applicationOutputRoot],
   [adapterSourceRoot, adapterOutputRoot],
+  [domainSourceRoot, domainOutputRoot],
 ]) {
   fs.rmSync(outputRootForSource, { recursive: true, force: true });
   for (const sourcePath of collectTypeScriptFiles(inputRoot)) {
@@ -62,7 +68,8 @@ for (const [inputRoot, outputRootForSource] of [
     const assetAdjustedOutput = result.outputText.replace('../../../assets/runtime-assets.js', '../../assets/runtime-assets.js');
     const applicationAdjustedOutput = assetAdjustedOutput
       .replace(/\.\.\/\.\.\/\.\.\/\.\.\/application\//g, '../../application/')
-      .replace(/\.\.\/\.\.\/\.\.\/\.\.\/adapters\//g, '../../adapters/');
+      .replace(/\.\.\/\.\.\/\.\.\/\.\.\/adapters\//g, '../../adapters/')
+      .replace(/\.\.\/\.\.\/\.\.\/\.\.\/domain\//g, '../../domain/');
     const adapterAdjustedOutput = applicationAdjustedOutput
       .replace(/\.\.\/\.\.\/platform\/runtime\/lib\//g, '../../lib/');
     const cjsSafeOutput = adapterAdjustedOutput

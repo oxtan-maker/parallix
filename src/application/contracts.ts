@@ -9,7 +9,8 @@ export interface ApplicationError {
 
 export interface DurableEvidence {
   readonly id: string;
-  readonly source: 'task-markdown' | 'git' | 'stats';
+  /** `mission-store` is the selected Mission authority behind the repository port. */
+  readonly source: 'task-markdown' | 'git' | 'stats' | 'mission-store';
   readonly detail: string;
 }
 
@@ -39,7 +40,20 @@ export interface Cancellation {
   readonly requested: boolean;
 }
 
-export type Capability = 'stats:apply' | 'active:execute';
+export type Capability =
+  | 'stats:apply'
+  | 'active:execute'
+  | 'mission:intake'
+  | 'mission:transition'
+  | 'checkpoint:record'
+  | 'handoff:record';
+
+export function completed<T>(
+  value: T,
+  durableEvidence: readonly DurableEvidence[] = [],
+): ApplicationOutcome<T> {
+  return { status: 'completed', value, durableEvidence };
+}
 
 export function failure<T>(kind: ErrorKind, message: string, durableEvidence: readonly DurableEvidence[] = []): ApplicationOutcome<T> {
   return { status: kind === 'cancelled' ? 'cancelled' : 'failed', error: { kind, message }, durableEvidence };

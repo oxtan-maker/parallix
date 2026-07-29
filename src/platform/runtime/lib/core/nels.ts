@@ -17,6 +17,8 @@
 
 import { spawnSync } from 'node:child_process';
 
+import { classifyNelBucket } from '../../../../domain/net-engineering-lines.js';
+
 // ---------- exclusion globs (ADR 0047) ----------
 // Each entry is a minimatch-compatible pattern. Patterns are checked in order;
 // the first match wins.
@@ -36,9 +38,11 @@ export const EXCLUSION_PATTERNS = [
 
 /**
  * Bucket constants derived from ADR 0047 empirical terciles.
+ *
+ * Re-exported from the domain so this Git-facing module and the Mission use
+ * cases classify a change size with one rule instead of two copies.
  */
-export const BUCKET_SMALL_MAX = 80;
-export const BUCKET_MEDIUM_MAX = 235;
+export { BUCKET_SMALL_MAX, BUCKET_MEDIUM_MAX } from '../../../../domain/net-engineering-lines.js';
 
 /**
  * Classify NEL count into a bucket label.
@@ -47,13 +51,7 @@ export const BUCKET_MEDIUM_MAX = 235;
  * @returns {{ label: 'Small' | 'Medium' | 'Large', min: number, max: number }}
  */
 export function classifyBucket(nel: number) {
-  if (nel <= BUCKET_SMALL_MAX) {
-    return { label: 'Small', min: 0, max: BUCKET_SMALL_MAX };
-  }
-  if (nel <= BUCKET_MEDIUM_MAX) {
-    return { label: 'Medium', min: BUCKET_SMALL_MAX + 1, max: BUCKET_MEDIUM_MAX };
-  }
-  return { label: 'Large', min: BUCKET_MEDIUM_MAX + 1, max: Infinity };
+  return classifyNelBucket(nel);
 }
 
 /**

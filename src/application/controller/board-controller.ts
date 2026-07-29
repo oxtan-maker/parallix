@@ -1,5 +1,10 @@
 import type { ActivePort } from '../ports.js';
 import { ActiveService, type ActiveRequest, type ActiveResult } from '../active-service.js';
+import { rejected } from '../contracts.js';
+import type { MissionCheckpointService } from '../mission-checkpoint-service.js';
+import type { MissionHandoffService } from '../mission-handoff-service.js';
+import type { MissionIntakeService } from '../mission-intake-service.js';
+import type { MissionId } from '../../domain/mission.js';
 import type {
   BoardCommandDispatcher,
   BoardCommandKind,
@@ -17,6 +22,19 @@ import {
   toProgressEvent,
 } from './board-command.js';
 
+/**
+ * The Mission use cases a host composition root supplies.
+ *
+ * A host that has no Mission authority wired (the read-only shell) omits them,
+ * and the corresponding commands report an explicit unavailable result instead
+ * of reaching for a store the interface is not allowed to open.
+ */
+export interface BoardMissionServices {
+  readonly intake?: MissionIntakeService;
+  readonly checkpoints?: MissionCheckpointService;
+  readonly handoff?: MissionHandoffService;
+}
+
 // ---------------------------------------------------------------------------
 // BoardCommandController — guarded dispatch over integrated use cases
 // ---------------------------------------------------------------------------
@@ -24,13 +42,16 @@ import {
 export class BoardCommandController implements BoardCommandDispatcher {
   private readonly activeService: ActiveService;
   private readonly progressPort?: BoardProgressSink;
+  private readonly missionServices: BoardMissionServices;
 
   constructor(
     activePort: ActivePort,
     progressPort?: BoardProgressSink,
+    missionServices: BoardMissionServices = {},
   ) {
     this.activeService = new ActiveService(activePort, progressPort);
     this.progressPort = progressPort;
+    this.missionServices = missionServices;
   }
 
   /**
@@ -58,12 +79,83 @@ export class BoardCommandController implements BoardCommandDispatcher {
       return cancelledOutcome<T>('cancelled before launch');
     }
 
-    // Dispatch to integrated use case (only active:execute is currently integrated)
+    // Dispatch to the integrated use cases.
     if (kind === 'active:execute') {
       return (await this.dispatchActive(request)) as BoardCommandResult<T>;
     }
+    if (kind === 'mission:intake') {
+      return (await this.dispatchIntake(request)) as BoardCommandResult<T>;
+    }
+    if (kind === 'checkpoint:record') {
+      return (await this.dispatchCheckpoint(request)) as BoardCommandResult<T>;
+    }
+    if (kind === 'handoff:record') {
+      return (await this.dispatchHandoff(request)) as BoardCommandResult<T>;
+    }
     // Unreachable: isIntegratedCapability guard above catches all non-integrated kinds
     return unavailableCapability(kind, 'unexpected integrated capability') as BoardCommandResult<T>;
+  }
+
+  private async dispatchIntake(request: BoardCommandRequest): Promise<BoardCommandResult<unknown>> {
+    const payload = request.payload;
+    if (payload?.kind !== 'mission:intake') {
+      return rejected('validation', 'mission:intake requires an intake payload');
+    }
+    if (!this.missionServices.intake) {
+      return unavailableCapability('mission:intake', 'no Mission authority is configured for this interface');
+    }
+    this.emit(request.operationId, 1, 'intake', `materializing ${request.missionId}`);
+    return this.missionServices.intake.execute({
+      operationId: request.operationId,
+      missionId: request.missionId as MissionId,
+      repositoryId: payload.repositoryId,
+      title: payload.title,
+      labels: payload.labels,
+      assignee: payload.assignee ?? null,
+      rawStatus: payload.rawStatus,
+      externalTaskRef: payload.externalTaskRef ?? null,
+      capabilities: request.capabilities,
+    });
+  }
+
+  private async dispatchCheckpoint(request: BoardCommandRequest): Promise<BoardCommandResult<unknown>> {
+    const payload = request.payload;
+    if (payload?.kind !== 'checkpoint:record') {
+      return rejected('validation', 'checkpoint:record requires a checkpoint payload');
+    }
+    if (!this.missionServices.checkpoints) {
+      return unavailableCapability('checkpoint:record', 'no Mission authority is configured for this interface');
+    }
+    this.emit(request.operationId, 1, 'checkpoint', `recording ${payload.checkpoint.name}`);
+    return this.missionServices.checkpoints.record({
+      operationId: request.operationId,
+      missionId: request.missionId as MissionId,
+      capabilities: request.capabilities,
+      expectedVersion: payload.expectedVersion,
+      checkpoint: payload.checkpoint,
+    });
+  }
+
+  private async dispatchHandoff(request: BoardCommandRequest): Promise<BoardCommandResult<unknown>> {
+    const payload = request.payload;
+    if (payload?.kind !== 'handoff:record') {
+      return rejected('validation', 'handoff:record requires a handoff payload');
+    }
+    if (!this.missionServices.handoff) {
+      return unavailableCapability('handoff:record', 'no Mission authority is configured for this interface');
+    }
+    this.emit(request.operationId, 1, 'handoff', `recording change size for ${request.missionId}`);
+    return this.missionServices.handoff.recordNel({
+      operationId: request.operationId,
+      missionId: request.missionId as MissionId,
+      capabilities: request.capabilities,
+      expectedVersion: payload.expectedVersion,
+      netEngineeringLines: payload.netEngineeringLines,
+      predictedBucket: payload.predictedBucket,
+      capturedAt: payload.capturedAt,
+      artifacts: payload.artifacts,
+      reviewRounds: payload.reviewRounds,
+    });
   }
 
   private async dispatchActive(request: BoardCommandRequest): Promise<BoardCommandResult<ActiveResult>> {
