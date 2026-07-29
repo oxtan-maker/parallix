@@ -1,8 +1,8 @@
 ---
 id: TASK-2324
 title: isolate db for worktrees
-status: refined
-assignee: [codex]
+status: active
+assignee: [claude]
 created_date: '2026-07-29 15:14'
 labels: [ai_sdlc]
 dependencies: []
