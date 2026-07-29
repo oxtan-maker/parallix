@@ -4,7 +4,7 @@ title: ui becomes corrupted
 status: backlog
 assignee: [custom]
 created_date: '2026-07-26 05:53'
-labels: []
+labels: [user_value, bug]
 dependencies: []
 ordinal: 66000
 ---
