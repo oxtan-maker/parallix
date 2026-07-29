@@ -24,7 +24,8 @@ const expectedIntegrationFiles = [
   'review-commands-additional.test.ts', 'review-commands-supplemental.test.ts',
   'review-identity-placeholder.test.ts', 'review-identity.test.ts',
   'review-prompts.test.ts', 'review-state-class.test.ts', 'review-state.test.ts',
-  'review.test.ts', 'runtime-matrix.test.ts', 'setup-review.test.ts', 'sqlite-recovery-cp5.test.ts',
+  'review.test.ts', 'runtime-matrix.test.ts', 'setup-review.test.ts',
+  'sqlite-mission-store.integration.test.ts', 'sqlite-recovery-cp5.test.ts',
   'stats-backfill.test.ts', 'status.test.ts', 'task-1048-regression.test.ts',
   'task-1049-force-push.test.ts', 'task-1080-sync-merged-hardening.test.ts',
   'task-1104-rebase-cleanup.test.ts', 'task-1209-consume-artifacts.test.ts',
@@ -113,6 +114,8 @@ test('default test runner routes every moved group to integration and excludes i
   assert.ok(!selectedFiles([], 'v20.13.1').args.includes('--test-force-exit'));
   assert.ok(selectedFiles([], 'v20.14.0').args.includes('--test-force-exit'));
   assert.equal(pkg.scripts['test:integration'], 'FORCE_COLOR=0 tsx test/run-default-tests.ts --integration');
+  assert.match(runner, /file\.endsWith\('\.integration\.test\.ts'\)/,
+    'integration suffix must provide an explicit category independent of dependency heuristics');
 });
 
 test('default test runner selects a Node version that supports node:test', () => {

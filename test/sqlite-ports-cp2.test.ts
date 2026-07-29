@@ -415,7 +415,7 @@ describe('SQLite repository ports — CP2: domain mappings and authority', () =>
 
   // --- Authority map completeness ---
 
-  it('authority map covers all six operator-local domains', () => {
+  it('authority map covers all operator-local domains', () => {
     const domains = Object.keys(SQLITE_ENTITY_AUTHORITY);
     assert.ok(domains.includes('agent_blocklist'), 'agent_blocklist authority');
     assert.ok(domains.includes('usage_statistics'), 'usage_statistics authority');
@@ -424,6 +424,8 @@ describe('SQLite repository ports — CP2: domain mappings and authority', () =>
     assert.ok(domains.includes('operational_history'), 'operational_history authority');
     assert.ok(domains.includes('schema_migrations'), 'migration metadata authority');
     assert.ok(domains.includes('import_history'), 'import history authority');
+    assert.ok(domains.includes('board_lane_events'), 'board lane events authority');
+    assert.ok(domains.includes('missions'), 'missions authority');
   });
 
   it('authority map: every field maps to exactly one authority owner', () => {

@@ -40,7 +40,7 @@ export interface Migration {
 /**
  * Row type for query results.
  */
-export type QueryRow = Record<string, unknown>;
+export type QueryRow = object;
 
 /**
  * SQLite database adapter using `node:sqlite` (DatabaseSync).
@@ -131,13 +131,16 @@ export class SqliteDatabaseAdapter {
 
   /**
    * Execute a parameterized SQL statement.
+   * Returns the number of rows changed/affected by the statement.
    */
-  async execute(sql: string, params?: readonly unknown[]): Promise<void> {
+  async execute(sql: string, params?: readonly unknown[]): Promise<number> {
     this.assertOpen();
     if (params && params.length > 0) {
-      this.db!.prepare(sql).run(...params as any);
+      const result = this.db!.prepare(sql).run(...params as any);
+      return (result as { changes?: number }).changes ?? 0;
     } else {
       this.db!.exec(sql);
+      return 0;
     }
   }
 

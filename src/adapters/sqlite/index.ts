@@ -28,6 +28,8 @@ export type {
   MigrationLedgerEntry,
   MigrationLedgerRepository,
   ImportRecord,
+  BoardLaneEventEntry,
+  BoardLaneEventRepository,
 } from './ports.js';
 
 // Repository implementations
@@ -37,6 +39,17 @@ export { SqliteKnownRepositoriesRepository } from './repository-repository.js';
 export { SqliteUIPreferencesRepository } from './ui-preferences-repository.js';
 export { SqliteOperationalHistoryRepository } from './operational-history-repository.js';
 export { SqliteMigrationLedgerRepository } from './migration-ledger-repository.js';
+export { SqliteBoardLaneEventRepository } from './board-lane-event-repository.js';
+
+// Mission aggregate
+export { SqliteMissionStore, MissionStaleWriteError } from './mission-store.js';
+export type { KnownRepositoryObservation } from './mission-store.js';
+export { hydrateMission } from './mission-serialization.js';
+export type {
+  HydratedMission,
+  MissionAggregateRecords,
+  MissionRecord,
+} from './mission-serialization.js';
 
 // Authority map
 export {
@@ -48,5 +61,13 @@ export {
   OPERATIONAL_HISTORY_AUTHORITY,
   SCHEMA_MIGRATIONS_AUTHORITY,
   IMPORT_HISTORY_AUTHORITY,
+  MISSIONS_AUTHORITY,
+  MISSION_LABELS_AUTHORITY,
+  MISSION_CHECKPOINTS_AUTHORITY,
+  MISSION_CHECKPOINT_GOAL_CHECKS_AUTHORITY,
+  MISSION_REVIEWS_AUTHORITY,
+  MISSION_REVIEW_ROUNDS_AUTHORITY,
+  MISSION_REVIEW_FINDINGS_AUTHORITY,
+  MISSION_REVIEW_RESOLUTIONS_AUTHORITY,
 } from './authority-map.js';
 export type { AuthorityOwner, FieldAuthority } from './authority-map.js';

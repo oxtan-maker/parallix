@@ -295,7 +295,7 @@ describe('SQLite adapter — CP1: schema and migration runner', () => {
 
       // After all migrations
       await runner.applyPending(migrations);
-      assert.equal(await runner.getCurrentVersion(), '0003-board-lane-events');
+      assert.equal(await runner.getCurrentVersion(), '0004-mission-aggregate');
     } finally {
       await db.close();
       cleanupTempDir(dir);
@@ -315,7 +315,7 @@ describe('SQLite adapter — CP1: schema and migration runner', () => {
       );
       const tableNames = tables.map((t) => t.name);
 
-      // Seven operator-local domains + schema_migrations
+      // Operator-local domains + schema_migrations
       assert.ok(tableNames.includes('agent_blocklist'), 'Domain: agent_blocklist');
       assert.ok(tableNames.includes('usage_statistics'), 'Domain: usage_statistics');
       assert.ok(tableNames.includes('known_repositories'), 'Domain: known_repositories');
@@ -324,6 +324,7 @@ describe('SQLite adapter — CP1: schema and migration runner', () => {
       assert.ok(tableNames.includes('schema_migrations'), 'Domain: migration metadata (ledger)');
       assert.ok(tableNames.includes('import_history'), 'Domain: import history (from migration 0002)');
       assert.ok(tableNames.includes('board_lane_events'), 'Domain: board lane events (from migration 0003)');
+      assert.ok(tableNames.includes('missions'), 'Domain: Mission aggregate (from migration 0004)');
     } finally {
       await db.close();
       cleanupTempDir(dir);

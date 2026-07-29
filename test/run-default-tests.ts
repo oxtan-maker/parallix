@@ -134,7 +134,11 @@ const artifactSpawnTestFiles = new Set(['tui-spawn.test.ts']);
 const integrationTestFiles = allRootTestFiles
   .filter(file => {
     if (artifactSpawnTestFiles.has(file)) { return false; }
-    return knownIntegrationTestFiles.has(file)
+    // New boundary tests declare their category in the filename. This avoids
+    // silently activating real databases/filesystems/processes in `npm test`
+    // merely because a heuristic did not recognize their dependency.
+    return file.endsWith('.integration.test.ts')
+      || knownIntegrationTestFiles.has(file)
       || boundaryDependencyPattern.test(fs.readFileSync(path.join(testRoot, file), 'utf8'));
   })
   .map(file => path.join(testRoot, file));
