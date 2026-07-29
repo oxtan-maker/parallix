@@ -156,7 +156,7 @@ export const TECHNICAL_PERSISTENCE_METADATA: readonly TechnicalPersistenceMetada
     id: 'sqlite-import-identity',
     kind: 'import-identity',
     fileLocation: 'src/adapters/sqlite/importer.ts',
-    line: 41,
+    line: 58,
     anchor: 'export class SqliteImporter',
     whyNotDomain:
       'Source path plus content digest exist to make an import idempotent. They identify a file that was read, not a domain entity, and are never surfaced to a consumer.',

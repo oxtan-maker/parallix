@@ -1,7 +1,8 @@
 import type { AgentAvailability, AgentBlock, AgentFamily } from '../../domain/agents.js';
 import { agentFamily } from '../../domain/agents.js';
+import { AgentBlockService, parseAgentBlockUntil } from '../../application/services/agent-block-service.js';
 import type { AgentReadAdapter } from '../../application/projections/board-readers.js';
-import type { AgentBlockEntry, AgentBlocklistRepository } from '../sqlite/ports.js';
+import type { AgentBlocklistRepository } from '../sqlite/ports.js';
 import type { MissionId } from '../../domain/mission.js';
 import { getTaskAssignee, resolveTaskFile } from '../../platform/runtime/lib/tools/backlog.js';
 
@@ -69,16 +70,16 @@ export class ConcreteAgentReadAdapter implements AgentReadAdapter {
   // -----------------------------------------------------------------------
 
   async loadAgentAvailability(): Promise<readonly AgentAvailability[]> {
-    const blocks = await this.blocklistRepo.findAll();
-    const blockMap = new Map<string, AgentBlockEntry>();
-    for (const entry of blocks) {
-      blockMap.set(entry.agent.toLowerCase(), entry);
-    }
-
     const nowMs = Date.now();
+    const states = await new AgentBlockService(this.blocklistRepo).queryAll(this.knownAgentFamilies, nowMs);
+    const stateByAgent = new Map(states.map((state) => [state.agent.toLowerCase(), state]));
     const availability: AgentAvailability[] = this.knownAgentFamilies.map((family) => {
-      const blockEntry = blockMap.get(family.toLowerCase());
-      const block: AgentBlock = this.blockFromEntry(blockEntry, nowMs);
+      const state = stateByAgent.get(family.toLowerCase());
+      const block: AgentBlock = state?.blocked
+        ? (state.until
+          ? { kind: 'until', untilMs: parseAgentBlockUntil(state.until), reason: state.reason }
+          : { kind: 'indefinite', reason: state?.reason ?? null })
+        : { kind: 'none' };
       return {
         family,
         launcherAvailable: this.launcherAvailable(family),
@@ -111,20 +112,4 @@ export class ConcreteAgentReadAdapter implements AgentReadAdapter {
   // Internal helpers
   // -----------------------------------------------------------------------
 
-  private blockFromEntry(entry: AgentBlockEntry | undefined, nowMs: number): AgentBlock {
-    if (!entry || !entry.blocked) {
-      return { kind: 'none' };
-    }
-
-    if (entry.until) {
-      const untilMs = new Date(entry.until).getTime();
-      if (Number.isFinite(untilMs) && untilMs > nowMs) {
-        return { kind: 'until', untilMs, reason: entry.reason || null };
-      }
-      // Expired timed block → treat as indefinite if still marked blocked
-      return { kind: 'indefinite', reason: entry.reason || null };
-    }
-
-    return { kind: 'indefinite', reason: entry.reason || null };
-  }
 }

@@ -4,6 +4,23 @@ import path from 'node:path';
 import type { SqliteDatabaseAdapter } from './database-adapter.js';
 import type { AgentBlockEntry, ImportRecord } from './ports.js';
 
+export interface LegacyBlockImportConflict {
+  readonly agent: string;
+  readonly source: AgentBlockEntry;
+  readonly canonical: AgentBlockEntry;
+}
+
+/** Result of inspecting or importing the former agents.local.json blocklist. */
+export interface LegacyBlockImportReport {
+  readonly sourcePath: string;
+  readonly digest: string;
+  readonly dryRun: boolean;
+  readonly imported: readonly string[];
+  readonly unchanged: readonly string[];
+  readonly conflicts: readonly LegacyBlockImportConflict[];
+  readonly invalid: readonly { readonly agent: string; readonly error: string }[];
+}
+
 /**
  * Coerce a CSV cell into a numeric value for INTEGER/REAL columns. An empty or
  * unparseable cell becomes SQL NULL ("unavailable"), which is distinct from a
@@ -61,6 +78,111 @@ export class SqliteImporter {
     const backupPath = `${filePath}.bak.${timestamp}`;
     fs.copyFileSync(filePath, backupPath);
     return backupPath;
+  }
+
+  /**
+   * Inspect or atomically import legacy `agents.local.json` blocks.
+   *
+   * This is deliberately separate from the broad compatibility importer above:
+   * an AgentBlock cutover must never overwrite a newer checked row or silently
+   * discard malformed legacy data. Dry runs make no database or source-file
+   * changes. A non-dry run commits only a fully valid, conflict-free plan.
+   */
+  async importLegacyBlocklist(
+    sourcePath: string,
+    options: { readonly dryRun?: boolean } = {},
+  ): Promise<LegacyBlockImportReport> {
+    const absPath = path.resolve(sourcePath);
+    if (!fs.existsSync(absPath)) {
+      throw new Error(`Blocklist source not found: ${absPath}`);
+    }
+
+    const source = fs.readFileSync(absPath, 'utf8');
+    const digest = crypto.createHash('sha256').update(source).digest('hex');
+    let raw: unknown;
+    try {
+      raw = JSON.parse(source);
+    } catch (error) {
+      throw new Error(`Malformed blocklist JSON at ${absPath}: ${(error as Error).message}`);
+    }
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      throw new Error(`Blocklist JSON at ${absPath} must be a JSON object`);
+    }
+
+    const blocklist = (raw as { blocklist?: unknown }).blocklist;
+    if (blocklist !== undefined && (typeof blocklist !== 'object' || blocklist === null || Array.isArray(blocklist))) {
+      throw new Error(`Blocklist JSON at ${absPath} has a non-object blocklist`);
+    }
+
+    const parsed: AgentBlockEntry[] = [];
+    const invalid: Array<{ agent: string; error: string }> = [];
+    for (const [agent, entry] of Object.entries((blocklist ?? {}) as Record<string, unknown>)) {
+      try {
+        parsed.push(this.parseBlocklistEntry(agent, entry));
+      } catch (error) {
+        invalid.push({ agent, error: (error as Error).message });
+      }
+    }
+
+    const canonical = await this.db.query<{
+      agent: unknown; blocked: unknown; until: unknown; reason: unknown;
+    }>('SELECT agent, blocked, until, reason FROM agent_blocklist;');
+    const canonicalByAgent = new Map(canonical.map((row) => [String(row.agent), {
+      agent: String(row.agent),
+      blocked: Boolean(row.blocked),
+      until: row.until ? String(row.until) : undefined,
+      reason: row.reason ? String(row.reason) : undefined,
+    } satisfies AgentBlockEntry]));
+
+    const imported: string[] = [];
+    const unchanged: string[] = [];
+    const conflicts: LegacyBlockImportConflict[] = [];
+    for (const entry of parsed) {
+      const existing = canonicalByAgent.get(entry.agent);
+      if (!existing) {
+        imported.push(entry.agent);
+      } else if (this.sameBlockEntry(existing, entry)) {
+        unchanged.push(entry.agent);
+      } else {
+        conflicts.push({ agent: entry.agent, source: entry, canonical: existing });
+      }
+    }
+
+    const report: LegacyBlockImportReport = {
+      sourcePath: absPath,
+      digest,
+      dryRun: options.dryRun === true,
+      imported,
+      unchanged,
+      conflicts,
+      invalid,
+    };
+    if (options.dryRun || invalid.length > 0 || conflicts.length > 0) {
+      return report;
+    }
+
+    await this.db.beginTransaction();
+    try {
+      for (const entry of parsed.filter((entry) => imported.includes(entry.agent))) {
+        await this.db.execute(
+          `INSERT INTO agent_blocklist (agent, blocked, until, reason, updated_at)
+           VALUES (?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'));`,
+          [entry.agent, entry.blocked ? 1 : 0, entry.until ?? null, entry.reason ?? null],
+        );
+      }
+      await this.recordImport({
+        sourcePath: absPath,
+        digest,
+        importedCount: imported.length,
+        skippedCount: unchanged.length,
+        importedAt: new Date().toISOString(),
+      });
+      await this.db.commitTransaction();
+    } catch (error) {
+      await this.db.rollbackTransaction();
+      throw new Error(`Blocklist import from ${absPath} failed and was rolled back: ${(error as Error).message}`);
+    }
+    return report;
   }
 
   /**
@@ -362,6 +484,13 @@ export class SqliteImporter {
       `Entry for "${agent}" has unsupported type ${typeof entry}; ` +
         'expected boolean or object',
     );
+  }
+
+  private sameBlockEntry(left: AgentBlockEntry, right: AgentBlockEntry): boolean {
+    return left.agent === right.agent
+      && left.blocked === right.blocked
+      && left.until === right.until
+      && left.reason === right.reason;
   }
 
   /**

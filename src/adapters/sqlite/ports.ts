@@ -28,10 +28,9 @@ export interface AgentBlockEntry {
 /**
  * Application port for the operator-local agent blocklist.
  *
- * Authority: `PARALLIX_HOME/agents.local.json` is the source of truth.
- * The adapter may cache the blocklist in SQLite, but the repository
- * file remains authoritative — callers fall back to the file reader
- * when the adapter is disabled.
+ * Authority: the checked `agent_blocklist` repository is the sole mutable
+ * AgentBlock authority. `agents.local.json` may be supplied once to the
+ * explicit legacy importer, but is never a runtime fallback.
  *
  * Maps to TASK-2294 domain entity: `AgentBlock` in `src/domain/agents.ts`.
  */
