@@ -122,6 +122,24 @@ async function rebase(args: string[], {
   // primary branch for every mission without a recorded Base-Branch.
   const baseBranch = resolveMissionBaseBranchFn(slug, executionRoot, { gitFn });
   fmt.log.info(`Rebasing ${fmt.branch(branch)} onto local ${fmt.branch(baseBranch)}...`);
+
+  // Postcondition shared by every success path: the resolved *local* base must
+  // be an ancestor of the mission HEAD. Reporting a successful rebase without
+  // this guarantee is a silent false success (task-2323). Returns false after
+  // emitting diagnostics and calling exitFn(1); callers must return at once.
+  const verifyBaseAncestry = () => {
+    const ancestry = gitFn(['-C', executionRoot, 'merge-base', '--is-ancestor', baseBranch, 'HEAD']);
+    if (ancestry.status === 0) {return true;}
+    const headSha = (gitFn(['-C', executionRoot, 'rev-parse', 'HEAD']).stdout || '').trim() || '(unknown)';
+    fmt.log.fail('Rebase postcondition failed: the local base branch is not an ancestor of the mission HEAD.');
+    fmt.log.fail(`Resolved local base branch: ${baseBranch}`);
+    fmt.log.fail(`Mission HEAD: ${headSha}`);
+    fmt.log.fail('This is local-base ancestry, not origin/mission/* tracking divergence.');
+    fmt.log.fail(`Recovery: ${fmt.command('git rebase --abort')}`);
+    exitFn(1);
+    return false;
+  };
+
   const rebaseResult = gitFn(['-C', executionRoot, '-c', 'core.editor=true', '-c', 'merge.autoedit=no', 'rebase', baseBranch]);
 
   // Rebase succeeded (status 0) or was already up to date
@@ -139,6 +157,8 @@ async function rebase(args: string[], {
       exitFn(0);
       return;
     }
+
+    if (!verifyBaseAncestry()) {return;}
 
     fmt.log.pass('Rebase completed cleanly.');
     await performPush();
@@ -418,6 +438,7 @@ async function rebase(args: string[], {
     }
 
     if (rebaseCompleted) {
+      if (!verifyBaseAncestry()) {return;}
       fmt.log.pass('Mission-specific conflicts resolved. Rebase completed.');
       await performPush();
       fmt.log.info(`Next: ${fmt.command(formatVerificationCommand(area, executionRoot))}`);
@@ -462,6 +483,8 @@ async function rebase(args: string[], {
     exitFn(0);
     return;
   }
+
+  if (!verifyBaseAncestry()) {return;}
 
   fmt.log.pass(`Agent (${fmt.agent(agent)}) completed conflict resolution.`);
   await performPush();
