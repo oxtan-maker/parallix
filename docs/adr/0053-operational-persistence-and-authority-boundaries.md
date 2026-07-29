@@ -70,6 +70,15 @@ This ADR does not introduce `Attempt`, `RepositoryAlias`, `ImportRecord`,
 ports may carry technical keys and metadata, but those do not create domain
 concepts by naming convention.
 
+Every boundary in `ADR0053_PERSISTENCE_INVENTORY` classified
+`database-owned-domain-state` resolves, in checked code, to exactly one of a
+named domain type with its invariant or an item on the explicit
+technical-persistence-metadata list
+(`src/application/persistence-domain-map.ts`), enumerated by
+`test/persistence-domain-mapping.test.ts`. The consumers that justify each
+concept are traced with `file:line` citations in
+`src/application/consumer-domain-requirements.ts`.
+
 Application use cases decide domain transitions. SQLite persists their result;
 SQL does not decide lifecycle, approval, or closure. CLI, TUI, and web
 interfaces use application ports and never execute lifecycle SQL directly.
@@ -86,7 +95,7 @@ interfaces use application ports and never execute lifecycle SQL directly.
 | `Review`, `ReviewRound`, findings, resolutions, interventions, and reviewed revisions | **Authoritative as nested Mission data.** | Let Forgejo, another provider, or mutable review JSON own the conversation. | Review works without a provider and approval stays tied to an exact revision; provider synchronization becomes projection work. |
 | `AgentRunMeasurement` and `MissionOutcome` | **Authoritative measurement data.** Preserve `Measurement.unavailable` instead of inventing zeroes; derive `CompletedMissionStatistics`. | Store a CSV-shaped statistics authority or infer a launch identity from measurements. | Retains the dimensions the domain models, but cannot answer per-launch identity questions the model does not represent. |
 | `SessionMarker` | **Authoritative for the last recorded resumability marker, not for provider availability.** | Keep the only session identity in a worktree file or invent an Attempt to own it. | Resume metadata survives worktree cleanup, while the provider still decides whether the session can resume. |
-| `Attempt` | **Excluded.** No checked production domain type defines its identity, lifecycle, or relationship to `AgentRunMeasurement` and `SessionMarker`. | Create attempt tables from the desired persistence shape first. | Avoids another schema-led domain model; failover history remains limited until the domain introduces and tests this concept. |
+| `Attempt` | **Excluded.** The decision is now enforced rather than asserted: no checked production domain type defines its identity, lifecycle, or relationship to `AgentRunMeasurement` and `SessionMarker`, and no current launch, retry, failover, usage, review, or UI consumer requires durable per-launch identity. Retry/failover bookkeeping is process-local (`src/platform/runtime/lib/agents/agents.ts:198`), a launch leaves only a family-keyed `AgentBlock` and one replaceable `SessionMarker`, and measurements are grouped by `(repo, mission)` (`src/platform/runtime/lib/commands/stats.ts:441`). `test/domain-attempt-guard.test.ts` fails if any Attempt-shaped type, table, or record is declared under `src/domain`, `src/application`, or `src/adapters`. | Create attempt tables from the desired persistence shape first. | Avoids another schema-led domain model; failover history remains limited until the domain introduces and tests this concept. |
 | Process liveness, PIDs, and worktrees | **Excluded as durable entities.** Observe them from the OS, Git, and filesystem. | Persist a Process or Worktree row and treat it as proof that the resource still exists. | Avoids stale infrastructure truth; restart recovery must re-observe external state. |
 | `Mission.netEngineeringLines` and `CompletedMissionStatistics` | **NEL is authoritative Mission data; completed statistics are derived from `Mission` and `MissionOutcome`.** | Duplicate closure, implementer, labels, and NEL into an independent statistics authority. | Prevents reporting data from competing with the Mission aggregate; analytical queries may require joins or maintained projections. |
 | Lane-transition events and operational history | **Authoritative for the event history itself, never for current Mission state.** Write events in the same transaction as the state change they describe. | Replay events as the lifecycle authority or write telemetry best-effort after the transition. | Produces reliable metrics without creating a second current-state model; event retention must be managed. |
@@ -155,7 +164,10 @@ Costs:
   requires an explicit Parallix backup or export.
 - Per-launch failover history remains unavailable until a checked domain model
   introduces it; persistence is not allowed to fill that gap by inventing an
-  `Attempt` table.
+  `Attempt` table, and `test/domain-attempt-guard.test.ts` blocks that route.
+  The one durable per-launch value in the tree — the review-loop stage-launch
+  fingerprint — is recorded as an idempotency key on the
+  technical-persistence-metadata list, not as an entity.
 - A single local database is not a multi-user coordination service.
 
 ## Reconsideration triggers
@@ -176,4 +188,6 @@ requires revisiting the measurement and session-marker rows in this ADR.
 - `src/domain/board-event.ts`
 - `src/domain/agents.ts`
 - `src/application/domain-ports.ts`
+- `src/application/consumer-domain-requirements.ts`
+- `src/application/persistence-domain-map.ts`
 - `docs/adr/0051-ui-neutral-application-boundary.md`
