@@ -4,7 +4,7 @@ title: use compact after each gate
 status: backlog
 assignee: [codex]
 created_date: '2026-07-27 06:27'
-labels: []
+labels: [ai_sdlc]
 dependencies: []
 ordinal: 68000
 ---
