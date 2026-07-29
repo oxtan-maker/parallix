@@ -739,3 +739,215 @@ test('rebase distinguishes hook failure from genuine conflict after --continue',
   // Should show "all conflicts resolved" message after retry succeeds
   assert.match(combined, /Mission-specific conflicts resolved/i);
 });
+
+// ---------------------------------------------------------------------------
+// task-2323: local-base ancestry postcondition on every success path
+// ---------------------------------------------------------------------------
+
+// Recognize the ancestry postcondition call regardless of the leading
+// `-C <executionRoot>` global options.
+function isAncestryCheck(args: string[]): boolean {
+  const tail = gitSubcommandArgs(args);
+  return tail[0] === 'merge-base' && tail[1] === '--is-ancestor';
+}
+
+test('rebase exits 1 when base is not an ancestor of HEAD', async () => {
+  const captured: string[] = [];
+  const originalLog = console.log;
+  const originalError = console.error;
+  console.log = (...args) => { captured.push(args.join(' ')); };
+  console.error = (...args) => { captured.push(args.join(' ')); };
+
+  let exitCode = null;
+  let pushed = false;
+  try {
+    await rebase(['task-2323'], {
+      inferSlugFn: () => 'task-2323',
+      findMissionDirFn: () => '/tmp/missions/task-2323',
+      findMissionAreaFn: () => 'docs',
+      detectRebaseStateFn: () => ({ inProgress: false, detached: false, unmergedFiles: [] }),
+      getCurrentBranchFn: () => 'mission/task-2323',
+      isForgejoReviewEnabledFn: () => true,
+      resolveMissionBaseBranchFn: () => 'skunkworks',
+      createPrFn: () => { pushed = true; return { ok: true }; },
+      gitFn: args => {
+        if (isAncestryCheck(args)) return { status: 1, stdout: '', stderr: '' };
+        if (gitSubcommandArgs(args)[0] === 'rev-parse') {
+          return { status: 0, stdout: 'deadbee1234567\n', stderr: '' };
+        }
+        return { status: 0, stdout: '', stderr: '' };
+      },
+      exitFn: code => { exitCode = code; },
+    });
+  } finally {
+    console.log = originalLog;
+    console.error = originalError;
+  }
+
+  const output = captured.join('\n');
+  assert.equal(exitCode, 1);
+  assert.equal(pushed, false, 'must not push a branch that failed the ancestry postcondition');
+  assert.doesNotMatch(output, /Rebase completed cleanly/);
+  assert.match(output, /skunkworks/);
+  assert.match(output, /deadbee1234567/);
+  assert.match(output, /git rebase --abort/);
+  // Local-base ancestry must not be conflated with origin/mission/* tracking.
+  assert.match(output, /origin\/mission/);
+});
+
+test('rebase clean rebase verifies ancestry before reporting success', async () => {
+  let exitCode = null;
+  let ancestryArgs = null;
+  await rebase(['task-2323'], {
+    inferSlugFn: () => 'task-2323',
+    findMissionDirFn: () => '/tmp/missions/task-2323',
+    findMissionAreaFn: () => 'docs',
+    detectRebaseStateFn: () => ({ inProgress: false, detached: false, unmergedFiles: [] }),
+    getCurrentBranchFn: () => 'mission/task-2323',
+    isForgejoReviewEnabledFn: () => false,
+    resolveMissionBaseBranchFn: () => 'main',
+    gitFn: args => {
+      if (isAncestryCheck(args)) {
+        ancestryArgs = gitSubcommandArgs(args);
+        return { status: 0, stdout: '', stderr: '' };
+      }
+      return { status: 0, stdout: '', stderr: '' };
+    },
+    exitFn: code => { exitCode = code; },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(ancestryArgs, ['merge-base', '--is-ancestor', 'main', 'HEAD']);
+});
+
+test('rebase mission-specific resolution verifies ancestry before reporting success', async () => {
+  let exitCode = null;
+  let ancestryChecked = false;
+  await rebase(['task-2323'], {
+    inferSlugFn: () => 'task-2323',
+    findMissionDirFn: () => '/tmp/missions/task-2323',
+    findMissionAreaFn: () => 'docs',
+    detectRebaseStateFn: () => ({ inProgress: false, detached: false, unmergedFiles: [] }),
+    getCurrentBranchFn: () => 'mission/task-2323',
+    isForgejoReviewEnabledFn: () => false,
+    resolveMissionBaseBranchFn: () => 'main',
+    resolveConflictsFn: () => ({
+      ok: true,
+      conflictFiles: ['missions/task-2323/MISSION.md'],
+      missionSpecificFiles: ['missions/task-2323/MISSION.md'],
+      sharedFiles: [],
+    }),
+    gitFn: args => {
+      if (isAncestryCheck(args)) {
+        ancestryChecked = true;
+        return { status: 0, stdout: '', stderr: '' };
+      }
+      const tail = gitSubcommandArgs(args);
+      if (tail[0] === 'rebase' && tail[1] === 'main') {
+        return { status: 1, stdout: '', stderr: 'CONFLICT (content): Merge conflict in missions/task-2323/MISSION.md\n' };
+      }
+      if (tail[0] === 'rebase' && tail[1] === '--show-current') {
+        return { status: 0, stdout: '', stderr: '' };
+      }
+      return { status: 0, stdout: '', stderr: '' };
+    },
+    exitFn: code => { exitCode = code; },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.equal(ancestryChecked, true, 'auto-resolve success path must verify base ancestry');
+});
+
+test('rebase agent-assisted rebase rechecks ancestry after conflict resolution', async () => {
+  let exitCode = null;
+  let ancestryChecked = false;
+  let agentLaunched = false;
+  await rebase(['task-2323'], {
+    inferSlugFn: () => 'task-2323',
+    findMissionDirFn: () => '/tmp/missions/task-2323',
+    findMissionAreaFn: () => 'docs',
+    detectRebaseStateFn: () => ({ inProgress: false, detached: false, unmergedFiles: [] }),
+    getCurrentBranchFn: () => 'mission/task-2323',
+    isForgejoReviewEnabledFn: () => false,
+    resolveMissionBaseBranchFn: () => 'main',
+    resolveConflictsFn: () => ({
+      ok: true,
+      conflictFiles: ['src/platform/runtime/lib/core/git.ts'],
+      missionSpecificFiles: [],
+      sharedFiles: ['src/platform/runtime/lib/core/git.ts'],
+    }),
+    startAgentFn: async () => {
+      agentLaunched = true;
+      return { agent: 'test-agent', result: { status: 0 } };
+    },
+    gitFn: args => {
+      if (isAncestryCheck(args)) {
+        ancestryChecked = true;
+        return { status: 0, stdout: '', stderr: '' };
+      }
+      const tail = gitSubcommandArgs(args);
+      if (tail[0] === 'rebase' && tail[1] === 'main') {
+        return { status: 1, stdout: '', stderr: 'CONFLICT (content): Merge conflict in src/platform/runtime/lib/core/git.ts\n' };
+      }
+      if (tail[0] === 'rebase' && tail[1] === '--show-current') {
+        return { status: 0, stdout: '', stderr: '' };
+      }
+      return { status: 0, stdout: '', stderr: '' };
+    },
+    exitFn: code => { exitCode = code; },
+  });
+
+  assert.equal(agentLaunched, true);
+  assert.equal(exitCode, 0);
+  assert.equal(ancestryChecked, true, 'agent-assisted success path must recheck base ancestry');
+});
+
+test('rebase agent-assisted rebase exits 1 when ancestry fails after conflict resolution', async () => {
+  const captured: string[] = [];
+  const originalLog = console.log;
+  const originalError = console.error;
+  console.log = (...args) => { captured.push(args.join(' ')); };
+  console.error = (...args) => { captured.push(args.join(' ')); };
+
+  let exitCode = null;
+  try {
+    await rebase(['task-2323'], {
+      inferSlugFn: () => 'task-2323',
+      findMissionDirFn: () => '/tmp/missions/task-2323',
+      findMissionAreaFn: () => 'docs',
+      detectRebaseStateFn: () => ({ inProgress: false, detached: false, unmergedFiles: [] }),
+      getCurrentBranchFn: () => 'mission/task-2323',
+      isForgejoReviewEnabledFn: () => false,
+      resolveMissionBaseBranchFn: () => 'main',
+      resolveConflictsFn: () => ({
+        ok: true,
+        conflictFiles: ['src/platform/runtime/lib/core/git.ts'],
+        missionSpecificFiles: [],
+        sharedFiles: ['src/platform/runtime/lib/core/git.ts'],
+      }),
+      startAgentFn: async () => ({ agent: 'test-agent', result: { status: 0 } }),
+      gitFn: args => {
+        if (isAncestryCheck(args)) return { status: 1, stdout: '', stderr: '' };
+        const tail = gitSubcommandArgs(args);
+        if (tail[0] === 'rev-parse') return { status: 0, stdout: 'cafe4242\n', stderr: '' };
+        if (tail[0] === 'rebase' && tail[1] === 'main') {
+          return { status: 1, stdout: '', stderr: 'CONFLICT (content): Merge conflict in src/platform/runtime/lib/core/git.ts\n' };
+        }
+        if (tail[0] === 'rebase' && tail[1] === '--show-current') {
+          return { status: 0, stdout: '', stderr: '' };
+        }
+        return { status: 0, stdout: '', stderr: '' };
+      },
+      exitFn: code => { exitCode = code; },
+    });
+  } finally {
+    console.log = originalLog;
+    console.error = originalError;
+  }
+
+  const output = captured.join('\n');
+  assert.equal(exitCode, 1);
+  assert.doesNotMatch(output, /completed conflict resolution/);
+  assert.match(output, /cafe4242/);
+  assert.match(output, /git rebase --abort/);
+});
