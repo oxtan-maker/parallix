@@ -1,7 +1,7 @@
 ---
 id: TASK-2313
 title: ui becomes corrupted
-status: review
+status: ready-for-integration
 assignee: [codex]
 created_date: '2026-07-26 05:53'
 labels: [user_value, bug]
