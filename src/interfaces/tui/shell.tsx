@@ -445,6 +445,11 @@ export function navigationKeyForInput(input: string, key: Pick<Key, 'upArrow' | 
   return ({ w: 'up', a: 'left', s: 'down', d: 'right' } as const)[input];
 }
 
+/** PTYs can normalize Enter from carriage return to line feed before Ink reads it. */
+function isUnmodifiedEnter(input: string, key: Pick<Key, 'return' | 'ctrl' | 'meta'>): boolean {
+  return (input === '\r' || input === '\n' || key.return) && !key.ctrl && !key.meta;
+}
+
 function KeyHandler({ onExit, onNavigate, onToggleHelp, onToggleFlow, onEnterAttention, onStartAction, selectedMissionId, confirmationOpen, onConfirm, onCancel, queueItems: queueItemsList, focusedAttentionIndex: focusedIdx, setFocusedIdx, focusedArea, setFocusedArea }: {
   readonly onExit: () => void;
   readonly onNavigate: (_key: NavigationKey | 'self') => void;
@@ -469,7 +474,7 @@ function KeyHandler({ onExit, onNavigate, onToggleHelp, onToggleFlow, onEnterAtt
 
   useInput((input, key) => {
     if (confirmationArmedRef.current) {
-      if ((input === '\r' || key.return) && !key.ctrl && !key.meta) {
+      if (isUnmodifiedEnter(input, key)) {
         confirmationArmedRef.current = false;
         onConfirm();
       }
@@ -527,7 +532,7 @@ function KeyHandler({ onExit, onNavigate, onToggleHelp, onToggleFlow, onEnterAtt
     /* Enter on the attention rail: select the focused item and show wave-5
      * run-affordance message. Only activates when the rail has keyboard focus;
      * pressing Enter on the board does not trigger attention selection. */
-    if ((input === '\r' || key.return) && !key.ctrl && !key.meta && focusedArea === 'rail') {
+    if (isUnmodifiedEnter(input, key) && focusedArea === 'rail') {
       const item = queueItemsList[focusedIdx];
       if (item) {
         onNavigate('self');
@@ -535,7 +540,7 @@ function KeyHandler({ onExit, onNavigate, onToggleHelp, onToggleFlow, onEnterAtt
       }
       return;
     }
-    if ((input === '\r' || key.return) && !key.ctrl && !key.meta && focusedArea === 'board') {
+    if (isUnmodifiedEnter(input, key) && focusedArea === 'board') {
       // The shell's board selection is already the current card; callback uses
       // the same stable mission id as the projection request.
       if (selectedMissionId) {
