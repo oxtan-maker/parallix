@@ -1,7 +1,7 @@
 ---
 id: TASK-2323
 title: make px rebase verify selected base ancestry before reporting success
-status: backlog
+status: refined
 assignee: [custom]
 created_date: '2026-07-17 00:00'
 labels: [ai_sdlc, rebase]
