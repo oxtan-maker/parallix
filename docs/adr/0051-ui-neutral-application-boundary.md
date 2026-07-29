@@ -2,15 +2,15 @@
 
 Status: Accepted; implementation requires integrated-ADR and explicit human approval
 Date: 2026-07-20
-Related: ADR 0037 (workflow coordination), ADR 0044 (workflow distribution model), ADR 0048 (fail-closed harness), ADR 0052 (task catalog authority), TASK-2277, TASK-2278
+Related: ADR 0037 (workflow coordination), ADR 0044 (workflow distribution
+model), ADR 0048 (fail-closed harness), ADR 0053 (persistence authority),
+TASK-2277, TASK-2278
 
 ## Context
 
-ADR 0044 establishes the product direction: the headless CLI remains the
-automation surface, Ink is an additional terminal interface, and a local web
-board is a possible third client. It also sets the intended dependency
-direction—interfaces call application use cases; adapters implement effects.
-This ADR makes that direction concrete for the current repository without
+ADR 0044 establishes the runtime and distribution model for the CLI bundle and
+native executables. This ADR separately defines how the headless CLI, Ink
+terminal UI, and a possible local web board share application behavior without
 pretending that the current `lib/` layout already has those layers.
 
 Today a command module is both an interface adapter and an orchestrator. For
@@ -35,19 +35,17 @@ ordering and exit-code contracts (`test/active.test.ts:203-244`,
 `test/active.test.ts:301-323`, `test/active.test.ts:385-406`). A new interface
 must preserve these invariants, not merely expose a convenient button.
 
-Workflow state already has distinct, legacy authorities. Task records are
+Workflow state already has distinct compatibility authorities. Task records are
 currently individual Markdown files in `backlog/tasks/`, `backlog/completed/`,
 and `backlog/archive/`; `resolveTaskFile` searches those stores and
 `getTaskStatus` reads their front matter (`lib/tools/backlog.ts:52-83`,
 `lib/tools/backlog.ts:280-307`). Mission and review artifacts are Git-owned.
 ADR 0037 retained those surfaces rather than adding a new state store.
 `backlog.md` is an optional legacy aggregate, not the canonical task catalog;
-this ADR neither requires it nor makes preserving writes to it a goal. That
-Markdown authority is the pre-cutover state: ADR 0052 owns the task-catalog
-authority decision and the rule for who may author a task record. The
+this ADR neither requires it nor makes preserving writes to it a goal. The
 operator board supplied to this mission is evidence of desired operator
 attention and interaction, not evidence for a browser-owned store, component
-model, or authority migration.
+model, database schema, or authority migration.
 
 The proposed boundary also has to retain the CLI's public behavior. The `px`
 entry delegates command dispatch through `index.js` while capturing the command
@@ -114,11 +112,11 @@ behavior. Delivery speed is secondary and cannot compensate for more bug work:
    and stop interface or adapter changes from bypassing the same rules. The
    completed-mission label baseline must continue after implementation so reduction is
    measured rather than asserted.
-2. **One authority and one transition path during migration.** Until the
-   ADR 0044 database cutover replaces it, a task lifecycle update continues to
-   use the existing Markdown/Git path, including its integration-branch and
-   rebase behavior. A UI cache, event stream, or SQLite index cannot become a
-   competing writer.
+2. **One authority and one transition path.** Before the ADR 0053 Mission
+   cutover, a task lifecycle update continues to use the existing Markdown/Git
+   path, including its integration-branch and rebase behavior. A UI cache or
+   event stream cannot become a competing writer. Cutover changes the adapter
+   as one unit rather than adding a second write path.
 3. **Preservation of fail-closed lifecycle semantics.** ADR 0048 classifies
    state-machine violations and infrastructure blockers as human-only. An
    interface must be able to show an operation failure without converting it
@@ -156,9 +154,9 @@ unproven behaviour or a separate decision; `✗` = contradicts the criterion.
 | C2: Transition correctness | Hard constraint | Preserve launch → record → rollback ordering and do not represent an incomplete operation as complete. | `active` launch/rollback code and ordering tests (`lib/commands/active.ts:195-299`; `test/active.test.ts:301-323`). |
 | C3: Automation compatibility | Hard constraint | Preserve CLI text, existing JSON schemas, and exit codes. | `px` captures command exit codes; `stats-backfill` and `active` tests cover their distinct contracts (`px.ts:157-260`; `test/stats-backfill.test.ts:268-389`; `test/active.test.ts:385-406`). |
 | C4: Isolated effects | Hard constraint | Unit-test use-case behavior without real Git, Forgejo, filesystem, or agent processes. | Existing command tests inject collaborators, but the seam is not yet an application boundary (`lib/commands/active.ts:24-40`). |
-| C5: Interface independence | Benefit | CLI, Ink, and web can invoke the same behavior without parsing terminal output or reproducing lifecycle policy. | ADR 0044 requires one application core for these clients. |
+| C5: Interface independence | Benefit | CLI, Ink, and web can invoke the same behavior without parsing terminal output or reproducing lifecycle policy. | This ADR requires one application core for these clients. |
 | C6: Operational truth and recovery | Benefit | Long-running work can report progress, reconnect by re-querying, and distinguish durable evidence from UI liveness. | `active` can launch agents and defer synchronization; ADR 0048 requires fail-closed handling. |
-| C7: Authority evolution and rollback | Benefit | A future catalog can replace the current task adapter without a dual-write steady state; this change can be removed without persisted-data migration. | Task storage is already behind `resolveTaskFile`/`transitionTask`; ADR 0044 defines the later database cutover. |
+| C7: Authority evolution and rollback | Benefit | The ADR 0053 store can replace the current task adapter without a dual-write steady state; this boundary change can be removed before cutover without persisted-data migration. | Task storage is already behind `resolveTaskFile`/`transitionTask`; ADR 0053 owns the authority change. |
 | C8: Structural cost and cognitive load | Cost | New abstractions should be limited to behavior with multiple interface/effect boundaries; do not create ceremonial layers around every helper. | Current `lib/` is mixed and only the two selected slices are characterized. |
 
 | Option | C0 | C1 | C2 | C3 | C4 | C5 | C6 | C7 | C8 | Result |
@@ -167,7 +165,7 @@ unproven behaviour or a separate decision; `✗` = contradicts the criterion.
 | 2. Board/TUI facade with direct reads and command processes | ✗ | ~ | ~ | ~ | ✗ | ~ | ✗ | ✗ | ~ | Rejected: adds bypass paths and no mechanism to reduce recurring lifecycle defects. |
 | 3. Narrow Hexagonal Architecture boundary; CLI remains an adapter | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ~ | **Accepted:** centralizes policy behind characterized ports, limits migration risk, and creates a seam where regression prevention and bug frequency can be measured. |
 | 4. Full Clean Architecture layering as the migration target | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ~ | ✓ | ✗ | Rejected for this mission: it can provide the same defect-isolation mechanism, but extra layer distinctions either collapse to option 3 at this scope or increase migration-regression risk without evidence of additional bug reduction. |
-| 5. Board store, SQLite, or event log becomes authority now | ✗ | ✗ | ~ | ~ | ~ | ✓ | ~ | ~ | ✗ | Deferred: may be viable, but adds authority-migration defects before supplying a measured reliability benefit. |
+| 5. Make this boundary mission perform the SQLite authority cutover | ✗ | ✗ | ~ | ~ | ~ | ✓ | ~ | ~ | ✗ | Rejected for this mission: ADR 0053 owns that separate cutover and its migration evidence. |
 | 6. Generalized command-framework rewrite first | ~ | ~ | ~ | ~ | ~ | ✓ | ~ | ~ | ✗ | Rejected: changes too many uncharacterized policies to establish C0–C4 credibly and creates a large regression surface. |
 
 ### Clean Architecture comparison
@@ -205,17 +203,17 @@ its full layer vocabulary as a separate migration target.
 
 The decisive trade-off is therefore not delivery speed. Option 3 accepts the
 extra interfaces and composition wiring in C8 in exchange for satisfying the
-five hard constraints while retaining a reversible path to the ADR 0044
-database cutover. Option 5 remains outside this mission because the required
-migration evidence belongs to that later implementation.
+five hard constraints while retaining a reversible path to the ADR 0053
+persistence change. Option 5 remains outside this mission because authority
+migration requires separate evidence and rollback gates.
 
 ## Decision
 
 Adopt a narrow **Hexagonal Architecture (Ports and Adapters)** boundary for
 newly extracted behavior. The boundary is a target architecture and an
 incremental migration rule; it is not a claim that all existing `lib/` modules
-are already layered, nor authority to implement a web server, Ink UI, SQLite
-authority, or a task-record migration.
+are already layered, nor authority from this ADR alone to implement a web
+server, Ink UI, SQLite cutover, or a task-record migration.
 
 This boundary applies Clean Architecture's compatible inward-dependency rule:
 application policy owns the contracts and outer mechanisms depend on them. It
@@ -353,10 +351,10 @@ it is absent or empty. Forgejo may adapt its PR response into these contracts
 but is neither named nor required by the model.
 
 Persistence ports are owned by the application layer, not the domain. The
-domain model neither imports nor implements `MissionStore`; Markdown/Git and
-the ADR 0044 database adapter can satisfy the same port without adding storage
-concepts to `Mission`. Persistence authority remains owned by ADR 0044 rather
-than being decided indirectly through the model.
+domain model neither imports nor implements `MissionStore`; the compatibility
+Markdown/Git adapter and ADR 0053 SQLite adapter satisfy the same port without
+adding storage concepts to `Mission`. ADR 0053, not this boundary, decides
+store contents and authority.
 
 A task adapter returns a typed unavailable/conflict result instead of a
 partially valid mission. For the current Git topology, the committed integration
@@ -411,13 +409,11 @@ the returned outcome and refresh on stale-state conflict; they cannot move a
 card by editing a local store or task file. A command/event log is diagnostic
 history, not the source of truth for lifecycle state.
 
-During this migration, canonical task records remain the Markdown files in
-`backlog/tasks/`, `backlog/completed/`, and `backlog/archive/`, with Git-owned
-mission and review artifacts retaining their existing roles. This is a
-compatibility constraint until the ADR 0044 database cutover, not a long-term
-authority decision. Board availability does not trigger that cutover. The
-gated database migration replaces the task and mission write paths as one unit;
-dual-write is not an accepted steady state.
+Until ADR 0053's Mission cutover, canonical task records remain the Markdown
+files in `backlog/tasks/`, `backlog/completed/`, and `backlog/archive/`, with
+Git-owned mission and review artifacts retaining their compatibility roles.
+Board availability does not trigger cutover, and dual-write is not an accepted
+steady state.
 
 ## Consequences
 
@@ -432,7 +428,7 @@ dual-write is not an accepted steady state.
   into a stable unit-test seam and keep external operations mocked in unit
   tests.
 - The boundary supports an eventual local board while leaving security,
-  hosting, and the ADR 0044 persistence cutover to their gated implementation
+  hosting, and ADR 0053 persistence cutover to separate gated implementation
   missions.
 
 ### Negative and accepted costs
@@ -502,9 +498,9 @@ Implementation then proceeds in bounded steps:
 Rollback restores the previous CLI wiring and removes the new boundary modules
 as one revert. It must not rewrite task Markdown, mission/review Git
 artifacts, lifecycle policy, authorization behavior, text/JSON schemas, or
-exit codes. Any need to implement a UI server, perform the ADR 0044 database
-cutover, or broaden command families stops this plan for the corresponding
-implementation mission.
+exit codes. Any need to implement a UI server, change persistence authority, or
+broaden command families stops this plan for the corresponding implementation
+mission.
 
 ## Reconsideration triggers
 

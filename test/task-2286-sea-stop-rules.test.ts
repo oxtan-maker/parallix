@@ -48,7 +48,7 @@ test('SEA surfaces: the ADR 0044 surface list is exactly Ink, SQLite, assets, si
   for (const fragment of ['Ink', '`node:sqlite`', 'subprocesses', 'signals', 'assets', 'source maps']) {
     assert.ok(stopSection.includes(fragment), `ADR 0044 stop section must still list ${fragment}`);
   }
-  assert.match(stopSection, /may not\s+silently substitute another authority, runtime, or distribution model/);
+  assert.match(stopSection, /may not\s+silently substitute another runtime or\s+distribution model/);
 });
 
 test('SEA surfaces: a failing surface raises stop-and-reassess and returns no fallback value (SC7)', () => {

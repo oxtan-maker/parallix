@@ -65,7 +65,7 @@ export class SqliteDatabaseAdapter {
    */
   async open(config: DatabaseConfig): Promise<void> {
     this.config = config;
-    // Clamp busy timeout to 0–5000 ms per ADR 0044 bounded busy timeout rule.
+    // Clamp the timeout so local command failure remains bounded (ADR 0053).
     const rawTimeout = typeof config.busyTimeoutMs === 'number' ? config.busyTimeoutMs : 5000;
     const busyTimeout = Math.min(5000, Math.max(0, Math.floor(rawTimeout)));
     const enableWal = config.enableWal !== false;

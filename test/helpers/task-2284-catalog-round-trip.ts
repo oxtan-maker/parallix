@@ -1,4 +1,4 @@
-// Mission-local round-trip harness for TASK-2284 / ADR 0052.
+// Mission-local round-trip harness for TASK-2284.
 //
 // This is decision evidence, not a product surface: it proves that a candidate
 // canonical task record can be parsed out of today's Markdown task files and

@@ -9,8 +9,9 @@
  * - `operator-local` — source of truth for operator-local state
  * - `operator-local-cache` — cached projection (repository state wins on conflict)
  *
- * No field in the SQLite schema is owned by `target-repository` authority.
- * Repository artifacts remain under Git/repository authority per ADR 0044.
+ * This map describes the currently implemented operator-state schema. ADR 0053
+ * owns the target persistence boundary; new domain tables require their own
+ * checked mappings rather than being inferred from this legacy inventory.
  */
 
 export type AuthorityOwner = 'operator-local' | 'operator-local-cache';

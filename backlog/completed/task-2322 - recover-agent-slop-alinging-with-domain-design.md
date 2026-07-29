@@ -1,10 +1,13 @@
 ---
 id: TASK-2322
 title: recover agent slop alinging with domain design
-status: ready-for-integration
-assignee: [codex]
+status: done
+assignee:
+  - codex
 created_date: '2026-07-28 14:19'
-labels: [user_value]
+updated_date: '2026-07-29 03:52'
+labels:
+  - user_value
 dependencies: []
 ordinal: 69000
 ---
@@ -369,3 +372,9 @@ The final diff contains no unrelated task repairs, task renumbering, TUI fixes, 
 - [ ] #5 Docs updated to reflect any workflow or user-facing behavior change
 - [ ] #6 Bug-labeled missions include a red-to-green reproduction test that fails before the fix and passes after
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Implementation follow-up is decomposed into TASK-2322.01 through TASK-2322.12. The dependency graph enforces inventory -> checked-domain sufficiency -> unused persistence and application seams -> atomic domain cutovers -> final zero-stray-persistence certification. TASK-2283 is gated on TASK-2322.12.
+<!-- SECTION:NOTES:END -->

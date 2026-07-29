@@ -34,7 +34,7 @@ const FIXTURE = [
   '  - user_value',
   'dependencies: [TASK-2307]',
   'references:',
-  '  - docs/adr/0052-task-catalog-authority-and-board-authorship.md',
+  '  - docs/adr/0051-ui-neutral-application-boundary.md',
   '  - >-',
   '    backlog/completed/task-2307 - Ink-TUI-wave-5-guarded-actions-confirmation-',
   '    cancellation-and-progress-operation-log.md',
@@ -193,7 +193,7 @@ test('round trip reports zero field differences for real task records copied fro
 });
 
 // Two stored records are not valid YAML frontmatter and cannot round trip.
-// They are evidence for ADR 0052, not defects in the harness: today's readers
+// They are migration evidence, not defects in the harness: today's readers
 // accept both silently, because each reader is an independent regex over raw
 // text with no schema validation. Both files are in a Restricted Area for
 // TASK-2284, so they are pinned here rather than repaired.
@@ -253,7 +253,7 @@ test('the harness detects the stored task records whose frontmatter is corrupt',
 
   // The first record reads as two different missions depending on which regex
   // match a reader takes — the concrete failure mode of unvalidated text
-  // authority that ADR 0052 cites.
+  // authority that the original task-catalog investigation identified.
   const conflicted = fs.readFileSync(path.join(root, [...KNOWN_CORRUPT.keys()][0]), 'utf8');
   assert.match(conflicted, /^<<<<<<< /m);
   assert.match(conflicted, /^status: done$/m);

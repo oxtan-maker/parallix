@@ -4,8 +4,8 @@
  *
  * The composition root reads blocklist rows from SQLite once (async) at
  * startup and calls {@link materializeBlocklistSnapshot} to produce this
- * snapshot; the hot selection path then stays fully synchronous (ADR 0044 /
- * TASK-2294). This module imports nothing effectful so it is safe to load from
+ * snapshot; the hot selection path then stays fully synchronous (ADR 0051 /
+ * ADR 0053). This module imports nothing effectful so it is safe to load from
  * both the adapter and the application composition layer, and it can be unit
  * tested without opening a database.
  */

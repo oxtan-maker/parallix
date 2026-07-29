@@ -4,16 +4,17 @@ title: Implement local web operator board over shared contracts
 status: backlog
 assignee: []
 created_date: '2026-07-19 00:00'
+updated_date: '2026-07-29 03:53'
 labels:
   - web
   - board
   - react
   - ui
 dependencies:
-  - TASK-2281
+  - TASK-2322.12
 references:
   - docs/adr/0051-ui-neutral-application-boundary.md
-  - https://claude.ai/code/artifact/5f739bc8-6e14-48c7-aca6-ed9a96923432
+  - 'https://claude.ai/code/artifact/5f739bc8-6e14-48c7-aca6-ed9a96923432'
 priority: medium
 ---
 
@@ -47,6 +48,16 @@ The initial server is local-only and single-operator. It must not expose an unau
 2. Implement transport adapters for projection, commands, and progress events.
 3. Build the board UI from the intended information hierarchy in the artifact.
 4. Add confirmations, conflict refresh, reconnect, accessibility, and security tests.
+
+## Comments
+
+<!-- COMMENTS:BEGIN -->
+author: codex
+created: 2026-07-29 03:53
+---
+TASK-2281 is already complete. UI implementation now begins only after TASK-2322.12 certifies ADR 0053 authority cutover and shared projection readiness.
+---
+<!-- COMMENTS:END -->
 
 ## Definition of Done
 

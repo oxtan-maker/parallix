@@ -2,8 +2,10 @@
 id: TASK-2316
 title: Cut over task catalog authority to SQLite and retire Markdown write paths
 status: active
-assignee: [codex]
+assignee:
+  - codex
 created_date: '2026-07-27 12:00'
+updated_date: '2026-07-29 03:52'
 labels:
   - sqlite
   - migration
@@ -12,7 +14,6 @@ labels:
   - ai_sdlc
 dependencies:
   - TASK-2284
-  - TASK-2315
 references:
   - docs/adr/0052-task-catalog-authority-and-board-authorship.md
   - docs/adr/0044-workflow-distribution-model.md
@@ -61,6 +62,16 @@ preserved draft-ingress coverage for task-file, directory, and free-text input.
 4. Delete the shadow path and the file-authority reconciliation machinery.
 5. Document the forward-only operating model and verify the legacy file path is no longer authoritative.
 <!-- SECTION:PLAN:END -->
+
+## Comments
+
+<!-- COMMENTS:BEGIN -->
+author: codex
+created: 2026-07-29 03:52
+---
+Superseded by ADR 0053 and TASK-2322.01 through TASK-2322.12. The replacement wave prepares complete application seams before one Mission-domain cutover, then migrates other authorities independently and finishes with an executable no-fallback gate.
+---
+<!-- COMMENTS:END -->
 
 ## Definition of Done
 

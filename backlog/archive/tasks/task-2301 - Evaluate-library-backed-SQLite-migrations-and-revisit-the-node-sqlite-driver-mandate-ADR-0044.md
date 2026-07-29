@@ -6,6 +6,7 @@ title: >-
 status: backlog
 assignee: []
 created_date: '2026-07-23 12:46'
+updated_date: '2026-07-29 03:52'
 labels:
   - sqlite
   - persistence
@@ -55,3 +56,13 @@ This task is to make that decision deliberately, at senior-review altitude, rath
 - [ ] #5 Docs updated to reflect any workflow or user-facing behavior change
 - [ ] #6 Bug-labeled missions include a red-to-green reproduction test that fails before the fix and passes after
 <!-- DOD:END -->
+
+## Comments
+
+<!-- COMMENTS:BEGIN -->
+author: codex
+created: 2026-07-29 03:52
+---
+Superseded because ADR 0044 now decides distribution only. Persistence migration mechanics and their recovery test matrix are governed by ADR 0053 and TASK-2322.03; this task must not reopen driver policy in the distribution ADR.
+---
+<!-- COMMENTS:END -->

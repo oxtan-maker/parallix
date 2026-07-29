@@ -5,9 +5,8 @@
 // (`src/platform/runtime/lib/tools/sessions.ts`: `writeSession` at :35,
 // `readSession` at :21, `shouldResume` at :58). A marker records which agent
 // family last launched for a (slug, role) so a relaunch can pass the family's
-// resume flag. ADR 0044 keeps these markers as target-repository state (they
-// control resumability for a particular mission checkout), so they are NOT
-// operator-local SQLite state.
+// resume flag. The file is the current compatibility representation; ADR 0053
+// owns the target persistence decision for `SessionMarker`.
 
 import type { AgentFamily } from './agents.js';
 import type { MissionId } from './mission.js';
