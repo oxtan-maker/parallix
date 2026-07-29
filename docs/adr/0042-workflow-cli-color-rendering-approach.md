@@ -32,7 +32,7 @@ Replace the hand-rolled ANSI palette and `useColor()` function in `workflow/lib/
 | B: `chalk` v4 | Most popular Node color lib | Battle-tested, rich API, CJS compatible | Adds npm dependency + `supports-color` transitive dep; violates zero-dep constraint | Poor — introduces external dependency | Reject |
 | C: `picocolors` | Ultra-light color lib (~3KB) | Tiny, fast, CJS, auto detection | Still an npm dependency; basic API | Poor — still a dependency | Reject |
 | D: Fix hand-rolled | Patch `useColor()` dead code | Minimal change, keeps existing API | Reinvents color detection that Node.js already provides; fragile; more code to maintain | Acceptable but inferior | Reject |
-| E: Ink (Gemini CLI style) | React for terminals | Powerful interactive components; chosen interactive TUI stack per ADR 0044; eventual single-stack direction for all terminal output to eliminate two-path maintenance | Massive dep tree (react, ink, chalk); CJS incompatible; overkill for batch/headless status output | Wrong tool for batch CLI color; correct for the interactive TUI (ADR 0044). Converging on Ink for all terminal output reduces agent hallucination from maintaining two rendering frameworks | Reject for batch CLI color; use `util.styleText` here. Ink is the chosen TUI stack and eventual direction for all terminal output (ADR 0044) |
+| E: Ink (Gemini CLI style) | React for terminals | Powerful interactive components; chosen interactive TUI stack per ADR 0051; eventual single-stack direction for all terminal output to eliminate two-path maintenance | Massive dep tree (react, ink, chalk); CJS incompatible; overkill for batch/headless status output | Wrong tool for batch CLI color; correct for the interactive TUI (ADR 0051). Converging on Ink for all terminal output reduces agent hallucination from maintaining two rendering frameworks | Reject for batch CLI color; use `util.styleText` here. Ink is the chosen TUI stack and eventual direction for all terminal output (ADR 0051) |
 
 ## Consequences
 
@@ -88,8 +88,8 @@ Negative:
 
 ### Ink (React for terminals)
 
-Ink is the chosen interactive terminal UI stack for Parallix per ADR 0044 (Interactive
-entry points `px` / `px ui`). This ADR does not reject Ink as a terminal framework; it
+Ink is the chosen interactive terminal UI stack for Parallix per ADR 0051
+(`px` / `px ui` entry points). This ADR does not reject Ink as a terminal framework; it
 scopes batch color rendering (the concern of this ADR) from the interactive TUI.
 
 The forward direction is **one rendering framework for all terminal output**. The
@@ -109,7 +109,7 @@ eventual single-stack direction.
 Positive:
 - Extremely powerful for interactive UIs (spinners, layouts, live updates)
 - Component model scales to complex interfaces
-- The chosen stack for the interactive Parallix TUI (ADR 0044)
+- The chosen stack for the interactive Parallix TUI (ADR 0051)
 - Single rendering framework eliminates the agent-hallucination surface of maintaining
   two competing terminal paths
 
@@ -123,7 +123,7 @@ Negative (as a batch CLI color solution specifically):
 
 ## Links
 
-- [ADR 0044](0044-workflow-distribution-model.md) — Ink is the chosen interactive terminal UI stack and eventual direction for all terminal output; this ADR's `util.styleText` decision applies to batch/headless CLI color rendering. The single-stack direction (Ink for all terminal output) reduces agent hallucination from maintaining two rendering frameworks
+- [ADR 0051](0051-ui-neutral-application-boundary.md) — Ink is the chosen interactive terminal UI stack and eventual direction for all terminal output; this ADR's `util.styleText` decision applies to batch/headless CLI color rendering. The single-stack direction (Ink for all terminal output) reduces agent hallucination from maintaining two rendering frameworks
 - [Node.js `util.styleText` docs](https://nodejs.org/api/util.html#utilstyletextformat-text-options)
 - [NO_COLOR standard](https://no-color.org/)
 - [Gemini CLI package.json](https://github.com/google-gemini/gemini-cli/blob/main/packages/cli/package.json)

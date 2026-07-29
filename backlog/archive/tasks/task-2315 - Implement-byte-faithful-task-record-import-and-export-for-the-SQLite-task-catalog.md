@@ -4,6 +4,7 @@ title: Implement forward-only task record import into the SQLite task catalog
 status: backlog
 assignee: []
 created_date: '2026-07-27 12:00'
+updated_date: '2026-07-29 03:52'
 labels:
   - sqlite
   - migration
@@ -62,6 +63,16 @@ the cutover mission, and its lifetime is bounded to this mission plus TASK-2316.
 4. Repair the two corrupt records and remove their pin.
 5. Add shadow-write telemetry with the three named outcomes.
 <!-- SECTION:PLAN:END -->
+
+## Comments
+
+<!-- COMMENTS:BEGIN -->
+author: codex
+created: 2026-07-29 03:52
+---
+Superseded by ADR 0053 and TASK-2322.01 through TASK-2322.12. The replacement wave imports checked Mission and operator-state concepts rather than a byte-faithful task catalog, never repairs source task files, and forbids shadow writes.
+---
+<!-- COMMENTS:END -->
 
 ## Definition of Done
 

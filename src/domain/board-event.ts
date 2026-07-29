@@ -6,10 +6,9 @@ import type { RepositoryId } from './repository.js';
  * Board lane-transition telemetry event.
  *
  * Emitted once every time a mission changes lane through the single
- * `transitionTask` authority path. Events are operator-local telemetry only
- * (ADR 0051 "operational truth over UI liveness"): they are the source of truth
- * for the event log itself, but a replayed event log never becomes the
- * authoritative current lane of a mission — repository Git/Markdown state wins.
+ * `transitionTask` compatibility path. Per ADR 0053, events are the source of
+ * truth for the event history itself, but a replayed event log never becomes
+ * the authoritative current lane of a mission.
  *
  * The event is persisted in the dedicated `board_lane_events` table
  * (migration 0003) with typed columns matching this interface. This follows

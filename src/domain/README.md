@@ -7,6 +7,10 @@ storage path, or board lane is an adapter or projection concern unless it has
 identity and rules of its own. The checked TypeScript is the model; this note
 explains its boundaries and the evidence behind them.
 
+This README documents the checked model and current implementation. It does not
+decide storage placement or authority. ADR 0053 owns those decisions; when this
+note and ADR 0053 differ, the ADR governs and this note must be corrected.
+
 ## The model
 
 `Mission` is the aggregate root. It owns labels, workflow status, closure time,
@@ -15,6 +19,10 @@ assignee, replaceable checkpoint evidence, the review conversation, and NEL
 commands and rejects invalid state or missing evidence (`mission-workflow.ts`).
 Agent-launch callbacks, operation progress, and restoration after an execution
 failure are application orchestration; they are not mission lifecycle commands.
+There is no production `Attempt` type: current agent work is modeled as
+`AgentRunMeasurement` and `SessionMarker`, neither of which supplies an
+Attempt identity or lifecycle invariant. This is an implementation boundary,
+not permission for a persistence adapter to invent an Attempt table.
 
 Labels are an open-ended collection, matching Backlog task frontmatter. They
 preserve independent dimensions: a mission may currently be both `ai_sdlc` and
@@ -104,10 +112,9 @@ commands throw `MissionRuleViolation` with the ADR 0048 human-only disposition.
 
 The domain does not depend on repository interfaces. Application-owned ports
 live in `src/application/domain-ports.ts`; a Markdown/Git adapter can implement
-`MissionStore` today and another adapter can implement it later without changing
-`Mission` or `decideMission()`. Markdown/Git is the current compatibility
-adapter; ADR 0044 makes a database-backed adapter the long-term authority after
-its gated cutover.
+`MissionStore` without changing `Mission` or `decideMission()`. Markdown/Git is
+the current compatibility adapter. ADR 0053 exclusively defines the target
+SQLite location, persisted domain concepts, authority, and cutover rules.
 
 `materializeBacklogMission()` defines what the current Backlog/Git adapter must
 prove. Its
@@ -122,9 +129,8 @@ For the current Backlog/Git adapter, `completionRecorded` means the committed
 integration-base task has both `status: done` and canonical placement in
 `backlog/completed/`. Closure is exposed only after that fact is durable and Git
 reports the mission worktree absent. Backlog Markdown stores the lifecycle
-status; it does not gain a second closure field. A future database-backed
-mission adapter may record closure directly after the same integration and
-worktree-removal conditions.
+status; it does not gain a second closure field. The ADR 0053 adapter may record
+closure only after the same integration and worktree-removal conditions.
 
 | Repository observation | Materialized result |
 |---|---|
@@ -150,27 +156,16 @@ Unweighted selection is random across the available pool. Array order is never
 a selection strategy; explicit CLI choice enters as `preferred`, while durable
 selection bias must be declared with `weighted` policy and explicit weights.
 
-## Authority
+## Compatibility routing
 
-Authority is application behavior, not a domain annotation.
-`MISSION_FIELD_AUTHORITY` is exhaustive over `keyof Mission`, so adding or
-renaming a mission field fails type-check until its authority is decided.
-`reconcileMissionRead()` selects repository truth, marks cache-only fallback as
-stale, and reports unavailable data explicitly. `missionMutationOwner()` routes
-mission writes to the target-repository adapter. The legacy nine-entry map is
-retained only for durable-state migration compatibility
-(`src/application/mission-authority.ts`).
+`src/application/mission-authority.ts` describes current file-backed routing
+while migration is incomplete. Its exhaustive `MISSION_FIELD_AUTHORITY` map
+prevents an unclassified compatibility write, but it is not the architecture
+decision for the target store. ADR 0053 owns that decision.
 
-| Owner | Authoritative fields | Cached fields |
-|---|---|---|
-| Target repository | mission identity/lifecycle/assignment, checkpoints, review, NEL, worktree session markers | none |
-| Operator local (`PARALLIX_HOME`) | agent blocks, execution measurements | known repositories, board projections |
-| Tool-owned assets | agent-selection policy, lifecycle aliases | none |
-
-Repository facts win over a conflicting local projection. Session markers are
-target-worktree state but are gitignored; “target repository” does not mean that
-every such field is committed to Git. Forgejo is optional and does not enter
-mission materialization; when configured, its PR data is projection-only.
+Forgejo remains an optional projection. Git and filesystem observations used
+by the compatibility adapter remain external facts rather than fields whose
+meaning is redefined by this README.
 
 ## Read models and access patterns
 
@@ -240,7 +235,7 @@ agent-family label or inventing a zero.
 | Domain `integration` queue vs adapter status and board lane | Encoding `approved`, `ready-for-integration`, and `integrate` as three domain states | `config/state-map.json` maps adapter vocabulary; live work distinguishes queued from active integration |
 | Review as reviewer/implementer commands over exact revisions | Copying the mutable `review-state.json` phase/disposition snapshot | Prompts expose two reviewer decisions and implementer resolution/intervention; runtime phase and disposition can legitimately disagree (`review-loop.ts:1375-1696`) |
 | Explicit configured reviewer eligibility passed into round creation | Built-in reviewer names, the default step policy, or fallback families | `config/agents.json` owns the eligible `review` families; missing or empty review eligibility makes assignment unavailable |
-| Stable finding IDs and per-finding resolutions | Global `CHANGES_MADE`/`PUSHBACK_ALL` transitions | The implementer prompt already requires a response for every finding, while the current file format cannot reliably join them; authoritative IDs are a database-persistence target |
+| Stable finding IDs and per-finding resolutions | Global `CHANGES_MADE`/`PUSHBACK_ALL` transitions | The implementer prompt already requires a response for every finding, while the current file format cannot reliably join them; durable storage needs stable IDs |
 | One human-intervention state | Separate `PARKED` and `BLOCKED` domain states | Both legacy dispositions stop the autonomous loop and hand control to a human (`review-loop.ts:1637-1641`) |
 | Provider-neutral reviewed revision on each round | Forgejo PR fields in `MissionOperationalFacts` or approval tied only to a branch | Review can run with provider disabled, while approval must identify both the stable PR/local change and the exact reviewed commit |
 | Valid open/closed `Mission` union with an explicit `done` closeout-pending case | Nested closure object or inferring closure from `status: done` | Integration commits `done`/completed before worktree cleanup; cleanup can fail independently (`integrate.ts:829-891`) |
@@ -254,14 +249,11 @@ agent-family label or inventing a zero.
 | Concrete projection contracts/functions | `catalog.ts` and `read-model.ts` string registries | Board consumers need data and behavior, not filenames and rationales encoded as runtime records |
 | Screen-specific application projections | Domain-level `projections.ts` grab bag | ADR 0051 defines several interface reads and keeps view data out of the write model |
 
-## Deferred implementation
+## Implementation status
 
-- ADR 0044 has decided that mutable domain state moves from Markdown/Git to
-  database authority. Schema, import, rollback, recovery, and cutover mechanics
-  remain a separate implementation mission.
-- A durable cross-repository registry is not modeled as authoritative because
-  there is no current writer. Add one only when the repository selector gains a
-  real registration/removal use case.
-- Historical lifecycle events needed for flow charts may be projected from Git
-  history initially. A durable event store requires its own retention and
-  authority decision; `ActivityEntry` does not make that decision.
+- The checked `MissionStore` implementation still uses the compatibility
+  adapter; ADR 0053 cutover is not implemented by this README.
+- `Attempt` is absent from the checked domain. ADR 0053 therefore excludes it
+  from persistence until domain code establishes its identity and invariants.
+- Existing SQLite adapters predate the complete ADR 0053 cutover and must not be
+  read as architecture decisions.

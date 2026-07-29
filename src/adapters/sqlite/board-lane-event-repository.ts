@@ -12,7 +12,7 @@ import type {
  * analytical pattern as `usage_statistics` — typed columns, proper indexes,
  * no JSON encoding.
  *
- * Authority mapping: operator-local telemetry (ADR 0051).
+ * Authority mapping: operator-local event history (ADR 0053).
  * Maps to TASK-2303 domain: `LaneTransitionEvent` in `src/domain/board-event.ts`.
  */
 export class SqliteBoardLaneEventRepository implements BoardLaneEventRepository {
