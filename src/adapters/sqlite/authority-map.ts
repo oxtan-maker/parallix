@@ -75,6 +75,7 @@ export const USAGE_STATISTICS_AUTHORITY = {
 export const KNOWN_REPOSITORIES_AUTHORITY = {
   id: { owner: 'operator-local-cache' } as const,
   path: { owner: 'operator-local-cache' } as const,
+  display_name: { owner: 'operator-local-cache' } as const,
   last_accessed: { owner: 'operator-local-cache' } as const,
 } as const satisfies Readonly<Record<string, FieldAuthority>>;
 
@@ -145,6 +146,101 @@ export const BOARD_LANE_EVENTS_AUTHORITY = {
 } as const satisfies Readonly<Record<string, FieldAuthority>>;
 
 /**
+ * Exhaustive authority mapping for the `missions` table.
+ *
+ * Maps to TASK-2322 domain entity: `Mission` in `src/domain/mission.ts`.
+ * Authority: operator-local source-of-truth after cutover (ADR 0053).
+ *
+ * `repository_id` is the stable identity reference. Replaceable repository
+ * observations remain in the separate known_repositories cache.
+ */
+export const MISSIONS_AUTHORITY = {
+  id: { owner: 'operator-local' } as const,
+  repository_id: { owner: 'operator-local' } as const,
+  title: { owner: 'operator-local' } as const,
+  status: { owner: 'operator-local' } as const,
+  raw_status: { owner: 'operator-local' } as const,
+  assignee: { owner: 'operator-local' } as const,
+  net_engineering_lines: { owner: 'operator-local' } as const,
+  closed_at: { owner: 'operator-local' } as const,
+  version: { owner: 'operator-local' } as const,
+} as const satisfies Readonly<Record<string, FieldAuthority>>;
+
+const MISSION_VALUE_AUTHORITY = { owner: 'operator-local' } as const;
+
+export const MISSION_LABELS_AUTHORITY = {
+  mission_id: MISSION_VALUE_AUTHORITY,
+  position: MISSION_VALUE_AUTHORITY,
+  label: MISSION_VALUE_AUTHORITY,
+} as const satisfies Readonly<Record<string, FieldAuthority>>;
+
+export const MISSION_CHECKPOINTS_AUTHORITY = {
+  mission_id: MISSION_VALUE_AUTHORITY,
+  position: MISSION_VALUE_AUTHORITY,
+  checkpoint_mission_id: MISSION_VALUE_AUTHORITY,
+  name: MISSION_VALUE_AUTHORITY,
+  raw_filename: MISSION_VALUE_AUTHORITY,
+  first_line: MISSION_VALUE_AUTHORITY,
+  next_action_text: MISSION_VALUE_AUTHORITY,
+} as const satisfies Readonly<Record<string, FieldAuthority>>;
+
+export const MISSION_CHECKPOINT_GOAL_CHECKS_AUTHORITY = {
+  mission_id: MISSION_VALUE_AUTHORITY,
+  checkpoint_position: MISSION_VALUE_AUTHORITY,
+  position: MISSION_VALUE_AUTHORITY,
+  criterion: MISSION_VALUE_AUTHORITY,
+  evidence: MISSION_VALUE_AUTHORITY,
+} as const satisfies Readonly<Record<string, FieldAuthority>>;
+
+export const MISSION_REVIEWS_AUTHORITY = {
+  mission_id: MISSION_VALUE_AUTHORITY,
+  intervention_requested_at: MISSION_VALUE_AUTHORITY,
+  intervention_requested_by: MISSION_VALUE_AUTHORITY,
+  intervention_reason: MISSION_VALUE_AUTHORITY,
+} as const satisfies Readonly<Record<string, FieldAuthority>>;
+
+export const MISSION_REVIEW_ROUNDS_AUTHORITY = {
+  mission_id: MISSION_VALUE_AUTHORITY,
+  position: MISSION_VALUE_AUTHORITY,
+  round_number: MISSION_VALUE_AUTHORITY,
+  change_kind: MISSION_VALUE_AUTHORITY,
+  provider: MISSION_VALUE_AUTHORITY,
+  provider_change_id: MISSION_VALUE_AUTHORITY,
+  provider_url: MISSION_VALUE_AUTHORITY,
+  source_branch: MISSION_VALUE_AUTHORITY,
+  target_branch: MISSION_VALUE_AUTHORITY,
+  revision: MISSION_VALUE_AUTHORITY,
+  reviewer: MISSION_VALUE_AUTHORITY,
+  implementer: MISSION_VALUE_AUTHORITY,
+  started_at: MISSION_VALUE_AUTHORITY,
+  decision_kind: MISSION_VALUE_AUTHORITY,
+  decided_at: MISSION_VALUE_AUTHORITY,
+  decision_comment: MISSION_VALUE_AUTHORITY,
+  approval_source_kind: MISSION_VALUE_AUTHORITY,
+  approval_source_provider: MISSION_VALUE_AUTHORITY,
+  responded_at: MISSION_VALUE_AUTHORITY,
+  resulting_revision: MISSION_VALUE_AUTHORITY,
+} as const satisfies Readonly<Record<string, FieldAuthority>>;
+
+export const MISSION_REVIEW_FINDINGS_AUTHORITY = {
+  mission_id: MISSION_VALUE_AUTHORITY,
+  round_position: MISSION_VALUE_AUTHORITY,
+  position: MISSION_VALUE_AUTHORITY,
+  finding_id: MISSION_VALUE_AUTHORITY,
+  summary: MISSION_VALUE_AUTHORITY,
+  location: MISSION_VALUE_AUTHORITY,
+} as const satisfies Readonly<Record<string, FieldAuthority>>;
+
+export const MISSION_REVIEW_RESOLUTIONS_AUTHORITY = {
+  mission_id: MISSION_VALUE_AUTHORITY,
+  round_position: MISSION_VALUE_AUTHORITY,
+  position: MISSION_VALUE_AUTHORITY,
+  finding_id: MISSION_VALUE_AUTHORITY,
+  kind: MISSION_VALUE_AUTHORITY,
+  explanation: MISSION_VALUE_AUTHORITY,
+} as const satisfies Readonly<Record<string, FieldAuthority>>;
+
+/**
  * Complete entity-level authority map for all SQLite tables.
  *
  * Each table and its fields are mapped to exactly one authority owner.
@@ -161,4 +257,12 @@ export const SQLITE_ENTITY_AUTHORITY = {
   schema_migrations: SCHEMA_MIGRATIONS_AUTHORITY,
   import_history: IMPORT_HISTORY_AUTHORITY,
   board_lane_events: BOARD_LANE_EVENTS_AUTHORITY,
+  missions: MISSIONS_AUTHORITY,
+  mission_labels: MISSION_LABELS_AUTHORITY,
+  mission_checkpoints: MISSION_CHECKPOINTS_AUTHORITY,
+  mission_checkpoint_goal_checks: MISSION_CHECKPOINT_GOAL_CHECKS_AUTHORITY,
+  mission_reviews: MISSION_REVIEWS_AUTHORITY,
+  mission_review_rounds: MISSION_REVIEW_ROUNDS_AUTHORITY,
+  mission_review_findings: MISSION_REVIEW_FINDINGS_AUTHORITY,
+  mission_review_resolutions: MISSION_REVIEW_RESOLUTIONS_AUTHORITY,
 } as const;

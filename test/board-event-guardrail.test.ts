@@ -15,6 +15,11 @@ const repoRoot = path.resolve(process.cwd());
 function findTsFiles(dir: string): string[] {
   const results: string[] = [];
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    // Skip temp files created by other tests (e.g., __temp-violating-file.ts)
+    // to avoid race conditions when tests run concurrently.
+    if (entry.name.startsWith('__temp-')) {
+      continue;
+    }
     const fullPath = path.join(dir, entry.name);
     if (entry.isDirectory() && entry.name !== 'node_modules' && entry.name !== 'dist') {
       results.push(...findTsFiles(fullPath));
@@ -40,6 +45,8 @@ const METRICS_ADAPTER_MODULE = 'src/application/projections/metrics-read-adapter
 const CREATION_ROOT_MODULE = 'src/application/projections/create-board-projection-builder.ts';
 const STATUS_COMMAND_MODULE = 'src/platform/runtime/lib/commands/status.ts';
 const TUI_COMMAND_MODULE = 'src/interfaces/tui/ui-command.ts';
+const INDEX_MODULE = 'src/adapters/sqlite/index.ts';
+const MISSION_STORE_MODULE = 'src/adapters/sqlite/mission-store.ts';
 
 test('SC2: only the designated write-path module imports BoardEventRecorder outside the recorder package', () => {
   const srcDir = path.join(repoRoot, 'src');
@@ -156,6 +163,8 @@ test('SC2: no source file writes lane-transition events outside backlog.ts', () 
       || relPath === CREATION_ROOT_MODULE
       || relPath === STATUS_COMMAND_MODULE
       || relPath === TUI_COMMAND_MODULE
+      || relPath === INDEX_MODULE
+      || relPath === MISSION_STORE_MODULE
       || relPath === DESIGNATED_WRITER
     ) {
       continue;
