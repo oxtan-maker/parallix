@@ -1,7 +1,7 @@
 ---
 id: TASK-2317
 title: use compact after each gate
-status: review
+status: ready-for-integration
 assignee: [codex]
 created_date: '2026-07-27 06:27'
 labels: [ai_sdlc]
