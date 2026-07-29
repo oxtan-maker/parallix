@@ -2,7 +2,7 @@
 id: TASK-2317
 title: use compact after each gate
 status: backlog
-assignee: []
+assignee: [codex]
 created_date: '2026-07-27 06:27'
 labels: []
 dependencies: []
@@ -12,7 +12,7 @@ ordinal: 68000
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-ensure agents are instructed to compact context after each gate in a mission to save up on usage
+ensure agents are instructed to compact context after each gate in a mission to save up on usage, and instruct them to compact when transitioing from implementing -> act-on-review, and on each review round
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Definition of Done
