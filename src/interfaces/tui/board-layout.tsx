@@ -59,12 +59,12 @@ function readDimensions(stdout: NodeJS.WriteStream | undefined): TerminalDimensi
  * so a resize produces exactly one re-rendered frame rather than a second,
  * stale frame appended below the first.
  */
-export function useTerminalDimensions(): TerminalDimensions {
+export function useTerminalDimensions(enabled = true): TerminalDimensions {
   const { stdout } = useStdout();
   const [dimensions, setDimensions] = React.useState<TerminalDimensions>(() => readDimensions(stdout));
 
   React.useEffect(() => {
-    if (!stdout || typeof stdout.on !== 'function') {
+    if (!enabled || !stdout || typeof stdout.on !== 'function') {
       return;
     }
     const onResize = (): void => {
@@ -82,7 +82,7 @@ export function useTerminalDimensions(): TerminalDimensions {
     return () => {
       stdout.off('resize', onResize);
     };
-  }, [stdout]);
+  }, [stdout, enabled]);
 
   return dimensions;
 }
@@ -137,7 +137,9 @@ export interface BoardLayoutProps {
  * terminal size; when omitted the live dimensions are used.
  */
 export function BoardLayout({ projection, columns, rows, mode: modeOverride, selectedMissionId, visibleStarts }: BoardLayoutProps): React.ReactElement {
-  const detected = useTerminalDimensions();
+  // BoardShell supplies both dimensions in the live tree, leaving it as the
+  // only resize subscriber. Standalone BoardLayout users retain live sizing.
+  const detected = useTerminalDimensions(columns === undefined || rows === undefined);
   const width = columns ?? detected.columns;
   const height = rows ?? detected.rows;
   const mode = modeOverride ?? selectLayoutMode(width);
