@@ -2,7 +2,7 @@
 id: TASK-2313
 title: ui becomes corrupted
 status: backlog
-assignee: []
+assignee: [custom]
 created_date: '2026-07-26 05:53'
 labels: []
 dependencies: []
