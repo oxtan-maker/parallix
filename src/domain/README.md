@@ -21,8 +21,11 @@ Agent-launch callbacks, operation progress, and restoration after an execution
 failure are application orchestration; they are not mission lifecycle commands.
 There is no production `Attempt` type: current agent work is modeled as
 `AgentRunMeasurement` and `SessionMarker`, neither of which supplies an
-Attempt identity or lifecycle invariant. This is an implementation boundary,
-not permission for a persistence adapter to invent an Attempt table.
+Attempt identity or lifecycle invariant. That is not merely an implementation
+boundary — no traced launch, retry, failover, usage, review, or UI consumer
+needs one (`src/application/consumer-domain-requirements.ts`), and
+`test/domain-attempt-guard.test.ts` fails if an Attempt-shaped type, table, or
+record is declared under `src/domain`, `src/application`, or `src/adapters`.
 
 Labels are an open-ended collection, matching Backlog task frontmatter. They
 preserve independent dimensions: a mission may currently be both `ai_sdlc` and
@@ -253,7 +256,16 @@ agent-family label or inventing a zero.
 
 - The checked `MissionStore` implementation still uses the compatibility
   adapter; ADR 0053 cutover is not implemented by this README.
-- `Attempt` is absent from the checked domain. ADR 0053 therefore excludes it
-  from persistence until domain code establishes its identity and invariants.
+- `Attempt` is absent from the checked domain, and TASK-2322.02 re-tested that
+  exclusion against real consumers rather than restating it: the durable
+  consequences of a launch are a family-keyed `AgentBlock`, one replaceable
+  `SessionMarker` per (mission, role), and measurement rows grouped by
+  `(repo, mission)`. ADR 0053 therefore excludes `Attempt` from persistence
+  until domain code establishes its identity and invariants, and
+  `test/domain-attempt-guard.test.ts` enforces that.
+- Each `database-owned-domain-state` boundary in the ADR 0053 inventory resolves
+  to one of these concepts plus its invariant, or to the explicit
+  technical-persistence-metadata list, in
+  `src/application/persistence-domain-map.ts`.
 - Existing SQLite adapters predate the complete ADR 0053 cutover and must not be
   read as architecture decisions.
