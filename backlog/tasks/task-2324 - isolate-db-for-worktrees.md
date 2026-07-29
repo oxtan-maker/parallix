@@ -4,7 +4,7 @@ title: isolate db for worktrees
 status: backlog
 assignee: [codex]
 created_date: '2026-07-29 15:14'
-labels: []
+labels: [ai_sdlc]
 dependencies: []
 ordinal: 67000
 ---
