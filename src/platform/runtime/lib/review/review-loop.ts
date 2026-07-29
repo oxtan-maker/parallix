@@ -445,6 +445,8 @@ export async function handleGateFailureAutoBounce(
     `Classification: ${classification.classification} — ${classification.action}`,
     `Retry attempt: ${retryCount + 1}/${MAX_GATE_RETRY}`,
     ``,
+    `Before repair work, compact the aborted working context. Reload the locked mission goal and scope; committed checkpoint or gate evidence when present; this exact gate diagnostic and classification; retry attempt ${retryCount + 1}/${MAX_GATE_RETRY}; current review round and disposition; unresolved findings and implementer resolutions; and the current branch revision.`,
+    ``,
     `Fix the underlying issue so the verification gate passes for area "${gateResult.area}".`,
     `After fixing, restart the review loop; it will re-run the gate before the next review round.`,
   ].join('\n');
@@ -1286,7 +1288,7 @@ export async function startReviewLoop(slug: string, opts: {
             stateAny['reviewerRetryCount'] = (stateAny['reviewerRetryCount'] || 0) + 1;
             persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree);
             const elapsedStr = formatElapsed(Date.now() - Date.parse(stateAny['startedAt'] as string));
-            const recoveryPrompt = `RECOVERY: Reviewer timeout after ${elapsedStr}. Please complete the review for ${branch}.`;
+            const recoveryPrompt = `RECOVERY: Reviewer timeout after ${elapsedStr}. Before resuming, compact the failed-attempt context and reload the locked mission goal and scope; committed checkpoint or gate evidence when present; current round and disposition; unresolved findings and implementer resolutions; the exact revision and review baseline; and reviewer retry ${stateAny['reviewerRetryCount']}/2. Please complete the review for ${branch}.`;
             log(fmt.status('INFO', `Round ${attempt}: relaunching reviewer (${reviewer}) with recovery prompt (retry ${stateAny['reviewerRetryCount']}/3)...`));
 
             let relaunchResult: any;
@@ -1529,7 +1531,7 @@ export async function startReviewLoop(slug: string, opts: {
           stateAny['implementerRetryCount'] = (stateAny['implementerRetryCount'] || 0) + 1;
           persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree);
           const elapsedStr = formatElapsed(Date.now() - Date.parse(stateAny['startedAt'] as string));
-          const recoveryPrompt = `RECOVERY: Implementer disposition timeout after ${elapsedStr}. Please provide a disposition (PUSHBACK_ALL, BLOCKED, PARKED, or continue with fixes) for ${branch}.`;
+          const recoveryPrompt = `RECOVERY: Implementer disposition timeout after ${elapsedStr}. Before resuming, compact the failed-attempt context and reload the locked mission goal and scope; committed checkpoint or gate evidence when present; current round and disposition; unresolved findings and implementer resolutions; the exact revision under review; and implementer retry ${stateAny['implementerRetryCount']}/2. Please provide a disposition (PUSHBACK_ALL, BLOCKED, PARKED, or continue with fixes) for ${branch}.`;
           log(fmt.status('INFO', `Round ${attempt}: relaunching implementer (${implementer}) with recovery prompt (retry ${stateAny['implementerRetryCount']}/3)...`));
 
           let relaunchResult: any;

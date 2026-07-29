@@ -24,6 +24,7 @@ Execution requirements:
   5. **Recognized repo commands or paths** — e.g., `` `npm test -- test/repair-handoff.test.ts` ``, `` `px review {{slug}} --verify` ``, or `` `./scripts/verify-local.sh all` ``
 - **Not sufficient by themselves:** raw `stat`/`ls` output or generic prose claims. You may include them as supporting context, but the same Evidence cell must also cite at least one accepted reference from the list above.
 - verify all mission-declared Gates pass before handoff
+- Immediately after **each successful mission-declared Gate**, compact your working context before starting the next gate, checkpoint work, or handoff work. Reload only the locked mission goal and scope plus committed checkpoint or successful-gate evidence that is present. Do not compact for a failed gate: retain its failure diagnostic while repairing it.
 - preserve `{{taskPath}}`: update mission-relevant content as needed but do not delete, rename, or move the file
 - do not change the Backlog task's status, assignee, labels, or lifecycle metadata, and do not run `px active`, `px review`, or `px integrate`; Parallix performs lifecycle transitions itself
 - do not hand off to review if `{{missionPath}}` or checkpoint documents are uncommitted
