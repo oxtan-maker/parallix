@@ -15,6 +15,8 @@ import { isForgejoReviewEnabled } from '../core/product-config.js';
 import { rebaseBeforeReviewRound } from '../review/rebase.js';
 import * as nels from '../core/nels.js';
 import { writeJson } from '../core/storage.js';
+import { createMissionApplicationServices } from '../composition/application-services.js';
+import { artifactReference } from '../../../../domain/net-engineering-lines.js';
 import { attemptAgentRelaunch } from './active.js';
 
 // Export for testing
@@ -405,7 +407,7 @@ function findUnverifiableGoalCheckRow(evidenceRows: string[], rootDir: string): 
 
   // Step 1.7: NEL capture — compute actual NEL from merge diff and persist record
   log('Step 1.7: Capturing Net Engineering Lines (NEL) at handoff...');
-  const nelResult = captureNelFn(slug, { rootDir, missionDir: missionDirPath, log, error });
+  const nelResult = await captureNelFn(slug, { rootDir, missionDir: missionDirPath, log, error });
   if (nelResult.ok) {
     // The NEL record is durable mission state.  It is written after the initial
     // cleanliness check, so commit it before transitionTask rebases this
@@ -1082,15 +1084,18 @@ function buildAutoCheckpointContent(slug) {
  *
  * Computes actual NEL from the merge diff (primary..HEAD), reads the predicted
  * bucket from the mission's Refinement Signals, resolves review rounds from
- * review-state.json, and persists a per-mission NEL record as `nel-record.json`.
+ * review-state.json, and records the result through the checked Mission
+ * boundary. This command module stays an interface adapter: it observes Git and
+ * the repository-owned mission documents, then hands domain values to
+ * `MissionHandoffService`, which owns the rule and the durable write.
  *
  * NEL values remain observational; failure to durably persist a computed value is fatal to handoff.
  *
  * @param {string} slug - Mission slug
- * @param {{ rootDir: string, missionDir: string, log: Function, error: Function, writeJsonFn?: typeof writeJson }} options
- * @returns {{ ok: boolean, nel?: number, bucket?: string, persistenceFailed?: boolean, error?: string }}
+ * @param {{ rootDir: string, missionDir: string, log: Function, error: Function, writeJsonFn?: typeof writeJson, missionServicesFn?: Function }} options
+ * @returns {Promise<{ ok: boolean, nel?: number, bucket?: string, persistenceFailed?: boolean, error?: string }>}
  */
-function captureNelAtHandoff(slug, options) {
+async function captureNelAtHandoff(slug, options) {
    const { rootDir, missionDir, error, writeJsonFn = writeJson } = options;
 
   // 1. Determine primary branch for diff range
@@ -1139,22 +1144,31 @@ function captureNelAtHandoff(slug, options) {
     }
   }
 
-  // 5. Persist NEL record
-  const nelRecordPath = path.join(missionDir, 'nel-record.json');
-  const record = {
-    slug,
+  // 5. Record through the checked Mission boundary. The use case decides and the
+  //    selected compatibility authority writes; this adapter supplies only
+  //    domain values and the artifact *references* it observed.
+  const missionServices = (options.missionServicesFn || createMissionApplicationServices)(rootDir, {
+    missionDir,
+    documentWriter: writeJsonFn,
+  });
+  const artifacts = [
+    artifactReference('git-range', `${primaryBranch}..HEAD`),
+  ];
+  const outcome = await missionServices.handoff.recordNel({
+    operationId: `handoff-nel-${slug}`,
+    missionId: slug,
+    capabilities: new Set(['handoff:record']),
+    netEngineeringLines: actualNel,
     predictedBucket,
-    actualNel,
-    actualBucket,
     reviewRounds,
     capturedAt: new Date().toISOString(),
-  };
+    artifacts,
+  });
 
-  try {
-    writeJsonFn(nelRecordPath, record);
-  } catch (err) {
-    error(`Failed to write NEL record: ${err.message}`);
-    return { ok: false, persistenceFailed: true, error: `failed to write NEL record: ${err.message}` };
+  if (outcome.status !== 'completed') {
+    const message = outcome.error?.message || 'NEL record was not persisted';
+    error(`Failed to write NEL record: ${message}`);
+    return { ok: false, persistenceFailed: true, error: `failed to write NEL record: ${message}` };
   }
 
   return { ok: true, nel: actualNel, bucket: actualBucket };

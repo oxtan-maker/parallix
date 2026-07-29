@@ -36,9 +36,17 @@ export function ActionBar({ mission, selectedKind = null, onSelect }: ActionBarP
     <Box flexDirection="column" borderTopColor="gray" paddingTop={1}>
       <Text bold color="cyan">ACTIONS</Text>
       {BOARD_ACTION_KINDS.map((kind) => {
-        const integrated = isIntegratedCapability(kind);
-        const enabled = integrated && mission.commands.some((command) => command.command === 'active' && command.enabled);
-        const reason = enabled ? null : unavailableReason(kind) ?? 'Mission cannot be activated from its current state';
+        // A row is enabled only when this interface can actually dispatch it.
+        // Several Mission commands are integrated in the application layer while
+        // this board build still supplies no request payload for them, so the
+        // capability registry alone must not light a row up.
+        const enabled = canDispatchAction(kind, mission);
+        const reason = enabled
+          ? null
+          : unavailableReason(kind)
+            ?? (kind === 'active:execute'
+              ? 'Mission cannot be activated from its current state'
+              : 'This board dispatches active:execute only');
         const selected = selectedKind === kind;
         return (
           <Box key={kind}>

@@ -1,5 +1,13 @@
+import * as path from 'node:path';
+
 import { ActiveService } from '../../../../application/active-service.js';
 import { StatsBackfillService } from '../../../../application/stats-backfill-service.js';
+import { MissionCheckpointService } from '../../../../application/mission-checkpoint-service.js';
+import { MissionHandoffService } from '../../../../application/mission-handoff-service.js';
+import { MissionIntakeService } from '../../../../application/mission-intake-service.js';
+import { MissionLifecycleService } from '../../../../application/mission-lifecycle-service.js';
+import { CompatibilityMissionStore } from '../../../../adapters/backlog/compatibility-mission-store.js';
+import { repositoryId } from '../../../../domain/repository.js';
 import { LegacyActiveAdapter } from '../adapters/legacy-active-adapter.js';
 import { LegacyStatsBackfillAdapter } from '../adapters/legacy-stats-backfill-adapter.js';
 import type { ProgressPort } from '../../../../application/ports.js';
@@ -17,11 +25,30 @@ export interface OperatorStateServices {
   readonly blocklist: OperatorBlocklistOverlay | null;
 }
 
+/**
+ * The checked Mission use cases, bound to the selected compatibility authority.
+ *
+ * Exactly one Mission store is constructed here. The SQLite Mission adapter is
+ * deliberately absent from this graph until the TASK-2322.07 cutover, so no
+ * command path can dual-write, reconcile, or fall back between the two.
+ */
+export interface MissionApplicationServices {
+  readonly store: CompatibilityMissionStore;
+  readonly intake: MissionIntakeService;
+  readonly lifecycle: MissionLifecycleService;
+  readonly checkpoints: MissionCheckpointService;
+  readonly handoff: MissionHandoffService;
+  /** Which authority the graph selected; `sqlite` is not reachable yet. */
+  readonly authority: 'compatibility';
+}
+
 export interface ProductionApplicationServices {
   readonly active: ActiveService;
   readonly statsBackfill: StatsBackfillService;
   /** Operator-local SQLite state (blocklist authority + adapter handles). */
   readonly operatorState: OperatorStateServices;
+  /** Mission lifecycle, checkpoint, and handoff use cases. */
+  readonly mission: MissionApplicationServices;
 }
 
 export interface ProductionApplicationServiceOptions {
@@ -55,6 +82,44 @@ export async function createProductionApplicationServices(
     ),
     statsBackfill: new StatsBackfillService(new LegacyStatsBackfillAdapter(rootDir)),
     operatorState,
+    mission: createMissionApplicationServices(rootDir),
+  };
+}
+
+/**
+ * Build the Mission use cases over the single selected compatibility authority.
+ *
+ * Callers that need only the Mission boundary (the handoff command, a future
+ * board host) use this instead of materializing operator-local SQLite state.
+ */
+export interface MissionApplicationServiceOverrides {
+  /** Pin the mission document directory a command already resolved. */
+  readonly missionDir?: string;
+  /** Document writer seam used by command-level failure injection. */
+  readonly documentWriter?: (_filePath: string, _data: unknown) => void;
+}
+
+export function createMissionApplicationServices(
+  rootDir: string,
+  overrides: MissionApplicationServiceOverrides = {},
+): MissionApplicationServices {
+  const store = new CompatibilityMissionStore({
+    rootDir,
+    repositoryId: repositoryId(path.basename(rootDir) || rootDir),
+    ...(overrides.missionDir === undefined
+      ? {}
+      : { findMissionDir: () => overrides.missionDir as string }),
+    ...(overrides.documentWriter === undefined
+      ? {}
+      : { writeDocumentJson: overrides.documentWriter }),
+  });
+  return {
+    store,
+    intake: new MissionIntakeService(store),
+    lifecycle: new MissionLifecycleService(store),
+    checkpoints: new MissionCheckpointService(store),
+    handoff: new MissionHandoffService(store, store),
+    authority: 'compatibility',
   };
 }
 

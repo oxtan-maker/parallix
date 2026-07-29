@@ -22,6 +22,9 @@ export const MISSION_FIELD_AUTHORITY = {
   rawStatus: targetSource,
   closedAt: targetSource,
   assignee: targetSource,
+  // Intake traceability only: the external system still owns the material, so
+  // Parallix is authoritative for the reference it accepted, not the task.
+  externalTaskRef: targetSource,
   checkpoints: targetSource,
   review: targetSource,
   netEngineeringLines: targetSource,

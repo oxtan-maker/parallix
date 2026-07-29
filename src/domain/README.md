@@ -57,12 +57,12 @@ The other requested state surfaces have these roles:
 | Agents and eligibility | Value objects plus pure selection policy | Eligibility is evaluated from configuration, explicit blocks, and launcher availability | `src/platform/runtime/lib/agents/launcher-selection.ts:127` |
 | Usage/statistics | Agent work measurements plus a completed-mission projection | Statistics need closure, final implementer, model attribution, cost, time, tokens, fix rounds, and change size; the CSV is only one storage format | `src/platform/runtime/lib/commands/stats.ts:108`, `:866`, `:1940` |
 | Known repositories | Repository identity plus an application selector projection | No repository registry or last-used signal is authoritative today | `src/domain/repository.ts`, `src/application/projections/repository-selector.ts` |
-| NEL | Replaceable numeric attribute on `Mission` | It describes the mission's change size and is captured at handoff; it has no independent identity | `src/platform/runtime/lib/commands/handoff.ts:1093`, `src/platform/runtime/lib/core/nels.ts:186` |
+| NEL | Replaceable numeric attribute on `Mission` | It describes the mission's change size and is captured at handoff; it has no independent identity | `src/platform/runtime/lib/commands/handoff.ts:1098`, `src/platform/runtime/lib/core/nels.ts:184`, `src/domain/net-engineering-lines.ts:36` |
 | Session/resume | Value object scoped to mission, role, and agent family | Resume is allowed only when all three match | `src/platform/runtime/lib/tools/sessions.ts:35`, `:58` |
 
 Checkpoint content is not immutable. `recordCheckpoint()` replaces an existing
 checkpoint with the same name and rejects cross-mission evidence
-(`checkpoint.ts:46`). Review is not a mutable phase enum. `Review` records an
+(`checkpoint.ts:45`). Review is not a mutable phase enum. `Review` records an
 ordered sequence of rounds; each round names the exact revision, reviewer
 decision, findings, and implementer response (`review.ts`). Agent family names
 are open values, but reviewer assignment succeeds only when the family appears
@@ -118,6 +118,23 @@ live in `src/application/domain-ports.ts`; a Markdown/Git adapter can implement
 `MissionStore` without changing `Mission` or `decideMission()`. Markdown/Git is
 the current compatibility adapter. ADR 0053 exclusively defines the target
 SQLite location, persisted domain concepts, authority, and cutover rules.
+
+Intake, activation, checkpoint recording, and handoff NEL recording run through
+checked application use cases over that port
+(`src/application/mission-intake-service.ts`,
+`mission-lifecycle-service.ts`, `mission-checkpoint-service.ts`,
+`mission-handoff-service.ts`). Production selects exactly one authority — the
+compatibility store over the task document, `CP-N.md` evidence, and
+`nel-record.json` (`src/adapters/backlog/compatibility-mission-store.ts`) —
+until TASK-2322.07. The SQLite Mission adapter satisfies the same port and is
+exercised only by isolated test fixtures, so no command dual-writes.
+
+Two value objects keep persistence out of the model. `ExternalTaskRef` carries
+intake traceability for accepted external material and rejects embedded task
+content (`external-task.ts:50`); external task catalogs remain excluded as
+aggregates. `ArtifactReference` carries a locator plus an observed size for
+generated evidence and rejects inlined content, so large artifacts stay
+references rather than database blobs (`net-engineering-lines.ts:60`).
 
 `materializeBacklogMission()` defines what the current Backlog/Git adapter must
 prove. Its
@@ -243,7 +260,7 @@ agent-family label or inventing a zero.
 | Provider-neutral reviewed revision on each round | Forgejo PR fields in `MissionOperationalFacts` or approval tied only to a branch | Review can run with provider disabled, while approval must identify both the stable PR/local change and the exact reviewed commit |
 | Valid open/closed `Mission` union with an explicit `done` closeout-pending case | Nested closure object or inferring closure from `status: done` | Integration commits `done`/completed before worktree cleanup; cleanup can fail independently (`integrate.ts:829-891`) |
 | Backlog/Git integration-base/worktree materialization policy in its adapter | Making Git topology part of `MissionStore` or letting the last queried checkout win | Current integration takes lifecycle status from the base checkout and mission metadata from the worktree (`integrate.ts:978-1001`) |
-| NEL as a mission attribute | Standalone NEL entity or duplicated outcome field | Handoff captures one replaceable change-size observation for the mission (`handoff.ts:1093`) |
+| NEL as a mission attribute | Standalone NEL entity or duplicated outcome field | Handoff captures one replaceable change-size observation for the mission (`handoff.ts:1098`) |
 | Agent work and completed-mission statistics | Copy of `StatsRow`/CSV columns or an outcome detached from its mission | Reports group completed missions by final implementer/model and attribute review rows to reviewers (`stats.ts:667`, `:866`, `:1940`) |
 | Explicit token-using work stages with `default` as an unmapped-debt sentinel | Copying `active`/`follow-up` CSV aliases or allowing known launches into `default` | Execute, review preparation, review response, conflict resolution, and integration verification all launch agents today; the runtime does not yet record every path |
 | Open agent-family value | Closed enum of current built-ins | Launcher selection accepts configured families and probes their CLI (`launcher-selection.ts:93-101`, `:127`) |

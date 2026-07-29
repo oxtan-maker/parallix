@@ -33,6 +33,18 @@ cycle (pre-integrate bump + post-integrate reinstall).
 
 ### Changed
 
+- **Mission intake, activation, checkpoint, and handoff run through checked
+  application use cases** over one Mission repository port (TASK-2322.05,
+  ADR 0053). Production keeps exactly one authority — the compatibility store
+  over the Backlog task document, `CP-N.md` evidence, and `nel-record.json` —
+  until TASK-2322.07; the SQLite Mission adapter is exercised only by isolated
+  test fixtures, and no command dual-writes between the two. Two user-visible
+  effects: `nel-record.json` gains an `artifacts` array holding locators (not
+  content) for the generated evidence a handoff observed, and NEL capture now
+  fails closed when the mission it belongs to is not recorded, which surfaces
+  the same missing-task failure handoff already reported at its Backlog
+  transition step.
+
 - **MINOR — T5 completes the `dist/` distribution model.** The package `main`,
   `px` bin entry, and supported exports resolve to `dist/`; `build:cjs`, the
   mtime freshness guard, and their bypass are retired. `npm run dev` runs

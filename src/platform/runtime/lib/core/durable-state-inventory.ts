@@ -121,6 +121,28 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     cutoverTask: 'TASK-2322.02',
   },
   {
+    // TASK-2322.05: the selected compatibility Mission authority behind the
+    // application repository port. Reads the task document, `CP-N.md` evidence,
+    // and `nel-record.json`; writes checkpoint evidence and the NEL record and
+    // delegates lifecycle to the existing transition path.
+    id: 'mission-read-compatibility-store',
+    concept: 'Mission',
+    pathType: 'compatibility',
+    fileLocation: 'src/adapters/backlog/compatibility-mission-store.ts',
+    operation: 'read',
+    classification: 'database-owned-domain-state',
+    cutoverTask: 'TASK-2322.07',
+  },
+  {
+    id: 'mission-write-compatibility-store',
+    concept: 'Mission',
+    pathType: 'compatibility',
+    fileLocation: 'src/adapters/backlog/compatibility-mission-store.ts',
+    operation: 'write',
+    classification: 'database-owned-domain-state',
+    cutoverTask: 'TASK-2322.07',
+  },
+  {
     id: 'mission-migration-read',
     concept: 'Mission',
     pathType: 'compatibility',

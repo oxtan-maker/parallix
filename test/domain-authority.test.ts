@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import { LEGACY_INVENTORY_AUTHORITY, MISSION_FIELD_AUTHORITY, missionMutationOwner, OPERATOR_CONCERN_AUTHORITY, reconcileMissionRead } from '../src/application/mission-authority.js';
 import { agentFamily } from '../src/domain/agents.js';
+import { externalTaskRef } from '../src/domain/external-task.js';
 import { missionId, missionLabels, type Mission } from '../src/domain/mission.js';
 import { repositoryId } from '../src/domain/repository.js';
 import { MACHINE_WRITTEN_PATH_INVENTORY } from '../src/platform/runtime/lib/core/durable-state-inventory.js';
@@ -11,6 +12,7 @@ const repositoryMission: Mission = {
   id: missionId('task-2294'), repositoryId: repositoryId('parallix'), title: 'authoritative',
   labels: missionLabels(['user_value', 'bug']), status: 'active', rawStatus: 'active', closedAt: null, assignee: agentFamily('codex'),
   checkpoints: [], review: null, netEngineeringLines: 10,
+  externalTaskRef: externalTaskRef('backlog', 'TASK-2294', 'backlog/tasks/task-2294.md'),
 };
 
 test('authority is exhaustive over mission fields and covers the legacy path inventory', () => {

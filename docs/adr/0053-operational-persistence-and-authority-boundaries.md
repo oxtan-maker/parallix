@@ -134,6 +134,21 @@ Existing file-backed domains remain compatibility authorities until their
 named migration gate passes. A domain cuts over all reads and writes together.
 There is no steady-state dual-write or fallback writer.
 
+`Mission` intake, activation, checkpoint evidence, and NEL recording run through
+checked application use cases over one Mission repository port
+(`src/application/mission-intake-service.ts`,
+`src/application/mission-lifecycle-service.ts`,
+`src/application/mission-checkpoint-service.ts`,
+`src/application/mission-handoff-service.ts`). Production selects exactly one
+implementation of that port — the compatibility store over the task document,
+`CP-N.md` evidence, and `nel-record.json`
+(`src/adapters/backlog/compatibility-mission-store.ts`) — and the SQLite Mission
+adapter is exercised only by isolated test fixtures until the Mission gate
+passes. Accepted external material is carried as one `ExternalTaskRef` value
+(`src/domain/external-task.ts`), and generated evidence is carried as
+`ArtifactReference` locators (`src/domain/net-engineering-lines.ts`), which
+reject inlined content.
+
 `AgentBlock` has passed that gate: `agent_blocklist` is its runtime authority.
 Legacy `agents.local.json` block entries are accepted only by the explicit
 dry-run/import command path; static agent policy and launcher discovery remain
@@ -186,6 +201,8 @@ requires revisiting the measurement and session-marker rows in this ADR.
 ## References
 
 - `src/domain/mission.ts`
+- `src/domain/external-task.ts`
+- `src/domain/net-engineering-lines.ts`
 - `src/domain/review.ts`
 - `src/domain/checkpoint.ts`
 - `src/domain/usage.ts`
@@ -193,6 +210,7 @@ requires revisiting the measurement and session-marker rows in this ADR.
 - `src/domain/board-event.ts`
 - `src/domain/agents.ts`
 - `src/application/domain-ports.ts`
+- `src/adapters/backlog/compatibility-mission-store.ts`
 - `src/application/consumer-domain-requirements.ts`
 - `src/application/persistence-domain-map.ts`
 - `docs/adr/0051-ui-neutral-application-boundary.md`
