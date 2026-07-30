@@ -31,9 +31,10 @@ import {
 } from './launcher-selection.js';
 import { resolveCustomRunner } from '../core/product-config.js';
 import { tryAcquireCustomCapacity } from './custom-capacity.js';
-// Compatibility breadcrumb for tests that inspect compiled agents.js directly:
-// RESUME_CAPABLE = new Set(['claude', 'codex', 'custom'])
-import * as sessions from '../tools/sessions.js';
+import type { SessionMarkerPort } from '../../../../application/domain-ports.js';
+import type { AgentFamily } from '../../../../domain/agents.js';
+import type { MissionId } from '../../../../domain/mission.js';
+import type { SessionRole } from '../../../../domain/session.js';
 
 interface LaunchResultLike {
   stdout?: string;
@@ -58,7 +59,8 @@ interface StartAgentOptions {
   selectAgentFn?: Function;
   resolveAgentModelFn?: Function;
   isAgentBlockedFn?: Function;
-  sessionsModule?: any;
+  /** Checked application port for session markers (TASK-2322.09 cutover). */
+  sessionMarkerPort?: SessionMarkerPort;
   log?: Function;
   noOutputWatchdog?: {initialDelayMs?: number, intervalMs?: number} | boolean;
   launchAgentFn?: Function;
@@ -133,6 +135,68 @@ const NON_BLOCKING_LAUNCH_ERROR_PATTERNS = Object.freeze([
     /\btoken\s+limit\s+exceeded\b/i
 ]);
 
+const defaultSessionMarkerPorts = new Map<string, Promise<SessionMarkerPort>>();
+
+/**
+ * Build the sole production session-marker authority on demand.  This keeps
+ * SQLite out of the launcher module's static graph while making an unavailable
+ * database an explicit launch failure instead of falling back to worktree files.
+ */
+async function defaultSessionMarkerPort(worktree: string): Promise<SessionMarkerPort> {
+  const { ConcreteGitReadAdapter } = await import('../../../../adapters/backlog/concrete-git-read-adapter.js');
+  const repositoryId = await new ConcreteGitReadAdapter({ rootDir: worktree }).loadRepositoryId();
+  let port = defaultSessionMarkerPorts.get(repositoryId);
+  if (!port) {
+    port = (async () => {
+      const { initOperatorState } = await import('../../../../adapters/sqlite/adapter-factory.js');
+      const { SqliteSessionMarkerAdapter } = await import('../../../../adapters/sqlite/session-marker-adapter.js');
+      const { db } = await initOperatorState();
+      return new SqliteSessionMarkerAdapter(db, repositoryId);
+    })();
+    defaultSessionMarkerPorts.set(repositoryId, port);
+  }
+  try {
+    return await port;
+  } catch (error) {
+    defaultSessionMarkerPorts.delete(repositoryId);
+    throw error;
+  }
+}
+
+/**
+ * Runtime callers describe the participant identity while SessionMarker uses
+ * the checked workflow stage. Keep that translation at this boundary instead
+ * of casting unchecked strings through the application port.
+ */
+function normalizeSessionRole(role: string): SessionRole {
+  switch (role) {
+    case 'implementer':
+      return 'execute';
+    case 'reviewer':
+      return 'review';
+    case 'execute':
+    case 'draft':
+    case 'review':
+      return role;
+    default:
+      throw new Error(`Unsupported session marker role: ${role}`);
+  }
+}
+
+/**
+ * Launcher inputs have already passed mission lookup and agent selection.
+ * Keep their checked identities as branded values without adding a second
+ * runtime dependency on domain constructors here. The authoritative
+ * SessionMarker adapter validates them again at every persistence boundary.
+ */
+function sessionMissionId(slug: string): MissionId {
+  return slug as MissionId;
+}
+
+function sessionAgentFamily(agent: string): AgentFamily {
+  return agent as AgentFamily;
+}
+
 // Deterministic config/setup errors (invalid model IDs, auth failures,
 // unsupported CLI flags, home/bootstrap failures) must not poison the
 // persistent blocklist — only transient failures (runtime crashes, network
@@ -194,7 +258,7 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
     selectAgentFn = selectAgent,
     resolveAgentModelFn = resolveAgentModel,
     isAgentBlockedFn = defaultIsAgentBlockedNow,
-    sessionsModule = sessions,
+    sessionMarkerPort,
     log = fmt.log.plain,
     noOutputWatchdog = {},
     launchAgentFn = null,
@@ -305,12 +369,22 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
     // Only honored when the caller passed slug+role+worktree AND the previous
     // marker matches the chosen agent family (a fallback to a different family
     // invalidates the prior session).
-    const resume = Boolean(
-      worktree && slug && role &&
-      RESUME_CAPABLE.has(chosen || '') &&
-      ((sessionsModule as any)).shouldResume(worktree, slug, role, chosen || '')
-    );
-    const sessionId = ((sessionsModule as any)).getSessionId(worktree, slug, role);
+    let resume = false;
+    let sessionId: string | null = null;
+    let launchSessionMarkerPort: SessionMarkerPort | undefined;
+    let sessionRole: SessionRole | null = null;
+    if (worktree && slug && role) {
+      sessionRole = normalizeSessionRole(role);
+      launchSessionMarkerPort = sessionMarkerPort || await defaultSessionMarkerPort(worktree);
+      resume = RESUME_CAPABLE.has(chosen || '') &&
+        await launchSessionMarkerPort.shouldResume(
+          sessionMissionId(slug),
+          sessionRole,
+          sessionAgentFamily(chosen || ''),
+        );
+      const marker = await launchSessionMarkerPort.find(sessionMissionId(slug), sessionRole);
+      sessionId = marker?.sessionId ?? null;
+    }
     if (slug && role) {
       if (resume) {
         log(fmt.status('INFO', `Resuming ${fmt.agent(chosen || '')} session for ${fmt.slug(slug)} (${role}).${sessionId ? ` Session: ${sessionId}` : ''}`));
@@ -355,7 +429,8 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
         sessionId,
         model,
         slug,
-        role,
+        role: sessionRole,
+        sessionMarkerPort: launchSessionMarkerPort,
         teeOptions: watchdogConfig ? {
           noOutputWatchdog: {
             ...watchdogConfig,
@@ -507,8 +582,17 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
     // the canonical session marker with a stale transcript.
     if (worktree && slug && role && result && result.status === 0 && !result.error) {
       try {
-        const sessionId = result && result.sessionId ? result.sessionId : null;
-        ((sessionsModule as any)).writeSession(worktree, slug, role, { agent: chosen || '', sessionId });
+        const launchSessionId = result && result.sessionId ? result.sessionId : null;
+        if (!launchSessionMarkerPort || !sessionRole) {
+          throw new Error('SessionMarkerPort and canonical role are required');
+        }
+        await launchSessionMarkerPort.save({
+          missionId: sessionMissionId(slug),
+          role: sessionRole,
+          agent: sessionAgentFamily(chosen || ''),
+          lastLaunched: new Date().toISOString(),
+          sessionId: launchSessionId,
+        });
       } catch (err) {
         throw new Error(`Could not persist session marker for ${slug} (${role}): ${(err as any).message}`);
       }

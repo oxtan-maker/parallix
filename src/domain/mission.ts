@@ -7,7 +7,7 @@ import type { Review } from './review.js';
 export type MissionId = string & { readonly __brand: 'MissionId' };
 export type MissionSlug = MissionId;
 
-const MISSION_SLUG_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)+$/;
+const MISSION_SLUG_PATTERN = /^[a-z][a-z0-9]*(?:[-.][a-z0-9]+)+$/;
 
 export function missionId(value: string): MissionId {
   if (typeof value !== 'string' || !MISSION_SLUG_PATTERN.test(value)) {

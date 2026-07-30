@@ -3,7 +3,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnAndTee } from '../core/spawn-tee.js';
 import { extractCodexTelemetry } from './codex-telemetry.js';
-import * as sessions from '../tools/sessions.js';
+import type { SessionMarkerPort } from '../../../../application/domain-ports.js';
+import type { MissionId } from '../../../../domain/mission.js';
+import type { SessionRole } from '../../../../domain/session.js';
 
 interface CodexInvocationOptions {
   prompt: string;
@@ -17,17 +19,21 @@ interface CodexInvocationOptions {
 
 interface StartCodexAgentOptions extends CodexInvocationOptions {
   teeOptions?: object;
-  slug?: string | null;
-  role?: string | null;
+  slug?: MissionId | null;
+  role?: SessionRole | null;
+  /** Checked application port for session markers (TASK-2322.09 cutover). */
+  sessionMarkerPort?: SessionMarkerPort;
 }
 
 // Injectable I/O for tests. Production uses the real spawn-tee / export capture.
 let _spawnAndTee: any = spawnAndTee;
-let _sessions: any = sessions;
+let _sessionPort: SessionMarkerPort | null = null;
 
 // Test hooks: override the launcher's I/O without touching the public signature.
 function __setSpawnAndTeeForTest(fn: any) { _spawnAndTee = fn || spawnAndTee; }
-function __setSessionsForTest(mod: any) { _sessions = mod || sessions; }
+/** @deprecated Test compatibility hook; file-backed sessions are no longer used. */
+function __setSessionsForTest(_mod: any) { /* no-op */ }
+function __setSessionPortForTest(port: SessionMarkerPort | null) { _sessionPort = port; }
 
 // Codex outputs "To continue this session, run codex resume <id>" at the end.
 // Also captures the session ID from the "Interaction Summary" block.
@@ -90,7 +96,7 @@ function buildCodexDraftInvocation({ prompt, worktree, interactive = hasLiveTty(
   };
 }
 
-function startCodexDraftAgent({ prompt, worktree, env = {}, resume = false, sessionId = null, model = null, teeOptions = {}, slug = null, role = null }: StartCodexAgentOptions) {
+function startCodexDraftAgent({ prompt, worktree, env = {}, resume = false, sessionId = null, model = null, teeOptions = {}, slug = null, role = null, sessionMarkerPort }: StartCodexAgentOptions) {
   // The launcher always tees through spawnAndTee for limit-hit detection, which
   // forces child stdio to ['inherit', 'pipe', 'pipe']. Codex's `--full-auto`
   // interactive UI requires a TTY on stdout, so we always use the headless
@@ -129,11 +135,15 @@ function startCodexDraftAgent({ prompt, worktree, env = {}, resume = false, sess
 
   function staleSessionHandler(invocation: any) {
     return _spawnAndTee(invocation.command, invocation.args, { ...invocation.options, ...teeOptions })
-      .then((result: any) => {
+      .then(async (result: any) => {
         if (isStaleSessionResult(result) && worktree && resume) {
           try {
-            _sessions.clearSession(worktree, slug, role);
-          } catch (_) { /* best-effort */ }
+            const port = sessionMarkerPort || _sessionPort;
+            if (!port || !slug || !role) {
+              throw new Error('Could not clear stale session marker: SessionMarkerPort is required');
+            }
+            await port.delete(slug, role);
+          } catch (error) { throw error; }
           const freshInv = buildCodexDraftInvocation({ prompt, worktree, interactive: false, env, resume: false, sessionId: null, model });
           return _spawnAndTee(freshInv.command, freshInv.args, { ...freshInv.options, ...teeOptions });
         }
@@ -290,5 +300,6 @@ export {
   resolveCodexCommand,
   startCodexDraftAgent,
   __setSpawnAndTeeForTest,
-  __setSessionsForTest
+  __setSessionsForTest,
+  __setSessionPortForTest
 };

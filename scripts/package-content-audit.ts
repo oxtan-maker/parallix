@@ -28,7 +28,7 @@ const REQUIRED_PATHS = [
 // Runtime assets are staged under the bundle's own package root so they resolve
 // from build/ in the checkout, in an npm install, and from the SEA payload.
 const REQUIRED_PREFIXES = [
-  'build/config/', 'build/prompts/', 'build/templates/',
+  'build/config/', 'build/migrations/', 'build/prompts/', 'build/templates/',
 ];
 const FORBIDDEN_PATHS = new Set([
   'tsconfig.json', 'tsconfig.test.json', 'eslint.config.mjs', 'stryker.conf.json',

@@ -72,7 +72,6 @@ import * as backlogMod from './tools/backlog.js';
 import * as forgejoMod from './tools/forgejo.js';
 import * as gatekeeperMod from './tools/gatekeeper.js';
 import * as setupReviewMod from './tools/setup-review.js';
-import * as sessionsMod from './tools/sessions.js';
 
 // agents/
 export const agents = agentsMod;
@@ -131,4 +130,3 @@ export const backlog = backlogMod;
 export const forgejo = forgejoMod;
 export const gatekeeper = gatekeeperMod;
 export const setupReview = setupReviewMod;
-export const sessions = sessionsMod;

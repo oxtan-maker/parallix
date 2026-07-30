@@ -295,7 +295,7 @@ describe('SQLite adapter — CP1: schema and migration runner', () => {
 
       // After all migrations
       await runner.applyPending(migrations);
-      assert.equal(await runner.getCurrentVersion(), '0005-mission-external-task-ref');
+      assert.equal(await runner.getCurrentVersion(), '0006-session-markers');
     } finally {
       await db.close();
       cleanupTempDir(dir);

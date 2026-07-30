@@ -123,6 +123,17 @@ export const IMPORT_HISTORY_AUTHORITY = {
   backup_path: { owner: 'operator-local' } as const,
 } as const satisfies Readonly<Record<string, FieldAuthority>>;
 
+/** Exhaustive authority mapping for repository-scoped session markers. */
+export const SESSION_MARKERS_AUTHORITY = {
+  repository_id: { owner: 'operator-local' } as const,
+  mission_id: { owner: 'operator-local' } as const,
+  role: { owner: 'operator-local' } as const,
+  agent: { owner: 'operator-local' } as const,
+  last_launched: { owner: 'operator-local' } as const,
+  session_id: { owner: 'operator-local' } as const,
+  updated_at: { owner: 'operator-local' } as const,
+} as const satisfies Readonly<Record<string, FieldAuthority>>;
+
 /**
  * Exhaustive authority mapping for the `board_lane_events` table.
  *
@@ -267,6 +278,7 @@ export const SQLITE_ENTITY_AUTHORITY = {
   operational_history: OPERATIONAL_HISTORY_AUTHORITY,
   schema_migrations: SCHEMA_MIGRATIONS_AUTHORITY,
   import_history: IMPORT_HISTORY_AUTHORITY,
+  session_markers: SESSION_MARKERS_AUTHORITY,
   board_lane_events: BOARD_LANE_EVENTS_AUTHORITY,
   missions: MISSIONS_AUTHORITY,
   mission_labels: MISSION_LABELS_AUTHORITY,

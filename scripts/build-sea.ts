@@ -375,14 +375,6 @@ function build(): number {
     for (const file of ['LICENSE', 'NOTICES']) {
       fs.copyFileSync(path.join(root, file), path.join(payload, file));
     }
-    // SQLite migrations are resolved from the bundle's own directory by
-    // `loadDefaultMigrations()`. `scripts/build-canonical-bundle.ts` is a
-    // restricted area for this mission and does not stage them into build/,
-    // so the SEA payload stages them here. This is a documented divergence
-    // from the npm layout: without it, the operator schema is never created
-    // and every SQLite read degrades to an empty result.
-    copyTree(path.join(root, 'src', 'adapters', 'sqlite', 'migrations'), path.join(payload, 'migrations'));
-
     fs.copyFileSync(configPath, path.join(payload, 'sea-config.json'));
 
     const executableSha256 = sha256File(stagedExecutable);

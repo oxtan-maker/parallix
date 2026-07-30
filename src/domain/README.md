@@ -58,7 +58,7 @@ The other requested state surfaces have these roles:
 | Usage/statistics | Agent work measurements plus a completed-mission projection | Statistics need closure, final implementer, model attribution, cost, time, tokens, fix rounds, and change size; the CSV is only one storage format | `src/platform/runtime/lib/commands/stats.ts:108`, `:866`, `:1940` |
 | Known repositories | Repository identity plus an application selector projection | No repository registry or last-used signal is authoritative today | `src/domain/repository.ts`, `src/application/projections/repository-selector.ts` |
 | NEL | Replaceable numeric attribute on `Mission` | It describes the mission's change size and is captured at handoff; it has no independent identity | `src/platform/runtime/lib/commands/handoff.ts:1098`, `src/platform/runtime/lib/core/nels.ts:184`, `src/domain/net-engineering-lines.ts:36` |
-| Session/resume | Value object scoped to mission, role, and agent family | Resume is allowed only when all three match | `src/platform/runtime/lib/tools/sessions.ts:35`, `:58` |
+| Session/resume | Value object scoped to mission, role, and agent family | Resume is allowed only when all three match | `src/domain/session.ts`, `src/platform/runtime/lib/agents/agents.ts:327`, `src/adapters/sqlite/session-marker-repository.ts` |
 
 Checkpoint content is not immutable. `recordCheckpoint()` replaces an existing
 checkpoint with the same name and rejects cross-mission evidence

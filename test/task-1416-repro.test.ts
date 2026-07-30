@@ -87,12 +87,6 @@ function withPathLaunchers(entries, run) {
   return run().finally(cleanup);
 }
 
-const fakeSessions = {
-  shouldResume: () => false,
-  getSessionId: () => null,
-  writeSession: () => true
-};
-
 test('codex exit 1 with real rollout telemetry is misclassified as a launch failure', async () => {
   const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1416-codex-wt-'));
   let blockCalls = [];
@@ -126,7 +120,6 @@ test('codex exit 1 with real rollout telemetry is misclassified as a launch fail
     worktree,
     assertAgentSupportedFn: () => {},
     isAgentBlockedFn: () => false,
-    sessionsModule: fakeSessions,
     selectAgentFn: (step, opts) => {
       attempts += 1;
       if (!opts.exclude.has('codex')) {return 'codex';}
@@ -198,7 +191,6 @@ test('mistral exit 1 with real session telemetry is misclassified as a launch fa
     worktree,
     assertAgentSupportedFn: () => {},
     isAgentBlockedFn: () => false,
-    sessionsModule: fakeSessions,
     selectAgentFn: (step, opts) => {
       attempts += 1;
       if (!opts.exclude.has('vibe')) {return 'vibe';}
@@ -241,7 +233,6 @@ test('codex exit 1 with no telemetry still reroutes and blocklists (real-failure
     worktree,
     assertAgentSupportedFn: () => {},
     isAgentBlockedFn: () => false,
-    sessionsModule: fakeSessions,
     selectAgentFn: (step, opts) => {
       if (!opts.exclude.has('codex')) {return 'codex';}
       return 'vibe';
@@ -299,7 +290,6 @@ test('mistral exit 1 with only stale telemetry still reroutes and blocklists (re
     worktree,
     assertAgentSupportedFn: () => {},
     isAgentBlockedFn: () => false,
-    sessionsModule: fakeSessions,
     selectAgentFn: (step, opts) => {
       if (!opts.exclude.has('vibe')) {return 'vibe';}
       return 'codex';

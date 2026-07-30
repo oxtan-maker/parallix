@@ -148,7 +148,12 @@ export class SqliteMigrationRunner {
 
 /**
  * Load the default migration SQL files from the migrations directory.
- * Migrations are loaded in alphabetical order (by filename).
+ *
+ * Migrations are normally loaded in alphabetical order. The SessionMarker
+ * table creation is an explicit prerequisite of repository scoping: the two
+ * immutable migrations acquired their current identifiers on separate mission
+ * branches, so lexical order alone would run the scoping migration first on a
+ * fresh database.
  */
 export function loadDefaultMigrations(): readonly Migration[] {
   const __filename = fileURLToPath(import.meta.url);
@@ -162,6 +167,15 @@ export function loadDefaultMigrations(): readonly Migration[] {
     .readdirSync(migrationsDir)
     .filter((f) => f.endsWith('.sql'))
     .sort();
+
+  const sessionMarkerBase = '0006-session-markers.sql';
+  const repositoryScope = '0005-repository-scoped-session-markers.sql';
+  const baseIndex = files.indexOf(sessionMarkerBase);
+  const scopeIndex = files.indexOf(repositoryScope);
+  if (baseIndex > scopeIndex && scopeIndex !== -1) {
+    files.splice(baseIndex, 1);
+    files.splice(scopeIndex, 0, sessionMarkerBase);
+  }
 
   return files.map((file) => {
     const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf8');

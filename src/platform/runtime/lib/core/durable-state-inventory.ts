@@ -374,25 +374,34 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     cutoverTask: null,
   },
   // -----------------------------------------------------------------------
-  // SessionMarker — file-backed resume marker (compatibility)
+  // SessionMarker — SQLite-backed resume marker (TASK-2322.09 cutover complete)
   // -----------------------------------------------------------------------
   {
     id: 'session-read-sessions',
     concept: 'SessionMarker',
     pathType: 'default',
-    fileLocation: 'src/platform/runtime/lib/tools/sessions.ts',
+    fileLocation: 'src/adapters/sqlite/session-marker-repository.ts',
     operation: 'read',
     classification: 'database-owned-domain-state',
-    cutoverTask: 'TASK-2322.03',
+    cutoverTask: null,
   },
   {
     id: 'session-write-sessions',
     concept: 'SessionMarker',
     pathType: 'default',
-    fileLocation: 'src/platform/runtime/lib/tools/sessions.ts',
+    fileLocation: 'src/adapters/sqlite/session-marker-repository.ts',
     operation: 'write',
     classification: 'database-owned-domain-state',
-    cutoverTask: 'TASK-2322.03',
+    cutoverTask: null,
+  },
+  {
+    id: 'session-import-legacy-files',
+    concept: 'SessionMarker',
+    pathType: 'compatibility',
+    fileLocation: 'src/adapters/sqlite/session-marker-import.ts',
+    operation: 'read',
+    classification: 'explicit-one-way-legacy-input',
+    cutoverTask: null,
   },
   // -----------------------------------------------------------------------
   // LaneTransitionEvent — operator-local telemetry
@@ -747,10 +756,10 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
 export const MACHINE_WRITTEN_PATH_INVENTORY: readonly MachineWrittenPathInventoryEntry[] = [
   {
     id: 'session-metadata',
-    pathPattern: '.workflow/sessions/<slug>-<role>.json',
-    writer: 'lib/tools/sessions.ts#writeSession',
+    pathPattern: '<PARALLIX_HOME>/parallix.db:session_markers',
+    writer: 'src/adapters/sqlite/session-marker-repository.ts#save',
     classification: 'durable-state',
-    persistencePolicy: 'Migrate to writeJson; a valid marker controls resume behavior after restart.',
+    persistencePolicy: 'SQLite-backed application port is authoritative; legacy worktree files are explicit one-way import input only.',
   },
   {
     id: 'nel-record',

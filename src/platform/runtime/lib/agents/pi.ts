@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import * as sessions from '../tools/sessions.js';
+import type { SessionMarkerPort } from '../../../../application/domain-ports.js';
 import { buildSubagentLimitPrefix } from '../core/subagent-limit.js';
 
 interface BuildPiInvocationOptions {
@@ -34,6 +34,8 @@ interface StartPiAgentOptions {
   slug?: string | null;
   role?: string | null;
   maxTransientRetries?: number;
+  /** Checked application port for session markers (TASK-2322.09 cutover). */
+  sessionMarkerPort?: SessionMarkerPort;
 }
 
 // Lazily-loaded SDK (ESM-only, loaded via dynamic import in CJS context).
@@ -49,12 +51,14 @@ async function loadSdk() {
 
 // Injectable SDK for tests. Production uses the real createAgentSession.
 let _createAgentSession: any = null;
-let _sessions: any = sessions;
+let _sessionPort: SessionMarkerPort | null = null;
 
 // Test hooks: override the launcher's I/O without touching the public signature.
 function __setCreateAgentSessionForTest(fn: any) { _createAgentSession = fn || null; }
-function __setSessionsForTest(mod: any) { _sessions = mod || sessions; }
+function __setSessionPortForTest(port: SessionMarkerPort | null) { _sessionPort = port; }
 function __setSdkForTest(sdk: any) { _sdk = sdk || null; }
+// Legacy test hook retained for backward compatibility (pi.ts no longer uses file-based sessions).
+function __setSessionsForTest(_mod: any) { /* no-op: pi.ts uses SessionMarkerPort */ }
 
 function piCommandCandidates() {
   const candidates: string[] = [];
@@ -479,6 +483,7 @@ export {
   resolvePiCommand,
   startPiAgent,
   isTransientPiFailure,
+  __setSessionPortForTest,
   __setSessionsForTest,
   __setCreateAgentSessionForTest,
   __setSdkForTest,
