@@ -1,5 +1,5 @@
 ---
-id: TASK-2323
+id: TASK-2328
 title: Remove all CommonJS traces and make the repository ESM-only
 status: backlog
 assignee: []
