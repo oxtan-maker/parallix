@@ -1,5 +1,5 @@
 ---
-id: TASK-2325
+id: TASK-2326
 title: improve resource usage
 status: backlog
 assignee: []
