@@ -4,7 +4,7 @@ title: improve resource usage
 status: backlog
 assignee: [codex]
 created_date: '2026-07-30 07:45'
-labels: []
+labels: [user_value]
 dependencies: []
 ordinal: 68000
 ---
