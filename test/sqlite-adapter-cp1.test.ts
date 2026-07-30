@@ -293,9 +293,13 @@ describe('SQLite adapter — CP1: schema and migration runner', () => {
       await runner.applyPending([migrations[0]]);
       assert.equal(await runner.getCurrentVersion(), '0001-initial-schema');
 
-      // After all migrations
+      // After all migrations — the highest applied id, whichever migration is
+      // currently last on disk.
       await runner.applyPending(migrations);
-      assert.equal(await runner.getCurrentVersion(), '0006-session-markers');
+      // Highest id, not last-applied: loadDefaultMigrations may hoist a
+      // migration out of lexical order to satisfy a prerequisite.
+      const highestId = [...migrations].map((m) => m.id).sort().at(-1);
+      assert.equal(await runner.getCurrentVersion(), highestId);
     } finally {
       await db.close();
       cleanupTempDir(dir);

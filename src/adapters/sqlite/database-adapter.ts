@@ -59,6 +59,7 @@ export class SqliteDatabaseAdapter {
   private db: DatabaseSync | null = null;
   private config: DatabaseConfig | null = null;
   private inTransaction = false;
+  private transactionDepth = 0;
 
   /**
    * Open (or create) the database.
@@ -94,6 +95,7 @@ export class SqliteDatabaseAdapter {
     }
 
     this.inTransaction = false;
+    this.transactionDepth = 0;
   }
 
   /**
@@ -113,6 +115,7 @@ export class SqliteDatabaseAdapter {
     }
     this.config = null;
     this.inTransaction = false;
+    this.transactionDepth = 0;
   }
 
   /**
@@ -161,35 +164,55 @@ export class SqliteDatabaseAdapter {
 
   /**
    * Begin an explicit transaction.
+   * Supports nested calls: only the outermost call executes BEGIN.
+   * Inner callers (e.g. SqliteMissionStore.save()) participate in the
+   * outer transaction without starting a new one.
    */
   async beginTransaction(): Promise<void> {
     this.assertOpen();
+    if (this.inTransaction) {
+      this.transactionDepth++;
+      return;
+    }
     this.db!.exec('BEGIN TRANSACTION;');
     this.inTransaction = true;
+    this.transactionDepth = 1;
   }
 
   /**
    * Commit the current transaction.
+   * Only the outermost call executes COMMIT; inner callers are no-ops.
    */
   async commitTransaction(): Promise<void> {
     this.assertOpen();
     if (!this.inTransaction) {
       throw new Error('Cannot commit: no active transaction');
     }
+    if (this.transactionDepth > 1) {
+      this.transactionDepth--;
+      return;
+    }
     this.db!.exec('COMMIT;');
     this.inTransaction = false;
+    this.transactionDepth = 0;
   }
 
   /**
    * Roll back the current transaction.
+   * Only the outermost call executes ROLLBACK; inner callers are no-ops.
    */
   async rollbackTransaction(): Promise<void> {
     this.assertOpen();
     if (!this.inTransaction) {
       throw new Error('Cannot rollback: no active transaction');
     }
+    if (this.transactionDepth > 1) {
+      this.transactionDepth--;
+      return;
+    }
     this.db!.exec('ROLLBACK;');
     this.inTransaction = false;
+    this.transactionDepth = 0;
   }
 
   /**
