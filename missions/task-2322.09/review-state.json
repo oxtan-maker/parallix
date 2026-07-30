@@ -1,0 +1,22 @@
+{
+  "reviewer": "custom",
+  "implementer": "codex",
+  "round": 2,
+  "startedAt": "2026-07-29T21:45:02.375Z",
+  "phase": "approved",
+  "disposition": "APPROVED",
+  "metadata": {
+    "humanEscalationReason": "REVIEWER_LAUNCH_FAILURE",
+    "humanEscalatedAt": "2026-07-29T21:49:34.012Z",
+    "gateFailureRetryCount": 1,
+    "recordedStageLaunches": {
+      "review:custom": [
+        "custom|019faf65-40bc-76cb-a364-9db436271ddc|2026-07-29T19:45:49.768Z|2026-07-29T19:45:49.768Z|0",
+        "custom|019fb1d3-ba69-7478-9829-0174fa1dbe78|2026-07-30T07:06:22.416Z|2026-07-30T07:06:22.416Z|0"
+      ],
+      "follow-up:codex": [
+        "codex||2026-07-29T20:53:26.457Z|2026-07-29T20:55:00.508Z|0"
+      ]
+    }
+  }
+}

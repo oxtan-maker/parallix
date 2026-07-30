@@ -64,6 +64,24 @@ test('task-2285 build/ is a self-contained payload root with staged runtime asse
   }
 });
 
+test('task-2285 build/ stages every canonical SQLite migration byte-for-byte', () => {
+  const sourceDir = path.join(ROOT, 'src', 'adapters', 'sqlite', 'migrations');
+  const stagedDir = path.join(ROOT, 'build', 'migrations');
+  const sourceFiles = fs.readdirSync(sourceDir).filter(file => file.endsWith('.sql')).sort();
+  assert.deepEqual(
+    fs.readdirSync(stagedDir).filter(file => file.endsWith('.sql')).sort(),
+    sourceFiles,
+    'the published CLI must carry the complete operator-schema migration set',
+  );
+  for (const file of sourceFiles) {
+    assert.deepEqual(
+      fs.readFileSync(path.join(stagedDir, file)),
+      fs.readFileSync(path.join(sourceDir, file)),
+      `${file} must retain its immutable source bytes in build/`,
+    );
+  }
+});
+
 test('task-2285 checksum manifest covers every build/ file except itself', () => {
   const buildDir = path.join(ROOT, 'build');
   const recorded = new Map(

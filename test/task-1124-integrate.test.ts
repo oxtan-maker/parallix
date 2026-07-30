@@ -48,10 +48,12 @@ test('SC 5: review.js does not update Backlog task on reviewer fallback', () => 
 test('SC 6: resume-capable agents use session persistence via startAgent', () => {
   const fs = require('fs');
   const agentsSource = fs.readFileSync(path.join(__dirname, '../src/platform/runtime/lib/agents/agents.ts'), 'utf8');
+  const launcherSelectionSource = fs.readFileSync(path.join(__dirname, '../src/platform/runtime/lib/agents/launcher-selection.ts'), 'utf8');
   const activeSource = fs.readFileSync(path.join(__dirname, '../src/platform/runtime/lib/commands/active.ts'), 'utf8');
   
   // Verify RESUME_CAPABLE matches the current resume-capable families
-  assert.ok(agentsSource.includes("RESUME_CAPABLE = new Set(['claude', 'codex', 'custom'])"), 'RESUME_CAPABLE should include the current resume-capable agents');
+  assert.ok(launcherSelectionSource.includes("RESUME_CAPABLE = new Set(['claude', 'codex', 'custom'])"), 'RESUME_CAPABLE should include the current resume-capable agents');
+  assert.ok(agentsSource.includes('await launchSessionMarkerPort.shouldResume('), 'startAgent should query the checked session-marker port');
   
   // Verify attemptAgentRelaunch calls startAgent which handles resume
   assert.ok(activeSource.includes("startAgentFn('active'"), 'Should call startAgent');

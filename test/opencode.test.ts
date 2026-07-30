@@ -184,13 +184,7 @@ test('buildOpencodeInvocation accepts preferJson:false to omit --format json (ta
 
 test('startOpencodeAgent retries without -s when spawn returns "Session not found" in stderr', async () => {
   const opencode = require('../.test-runtime/lib/agents/opencode');
-  const mockSessions = {
-    clearSessionCalledWith: null,
-    clearSession(worktree, slug, role) {
-      this.clearSessionCalledWith = { worktree, slug, role };
-      return true;
-    }
-  };
+  const mockSessionPort = { deleted: null, async delete(missionId, role) { this.deleted = { missionId, role }; } };
   let spawnCount = 0;
   const mockSpawn = (cmd, args, opts) => {
     spawnCount++;
@@ -205,7 +199,7 @@ test('startOpencodeAgent retries without -s when spawn returns "Session not foun
 
   opencode.__setSpawnAndTeeForTest(mockSpawn);
   opencode.__setExportCaptureForTest(mockExport);
-  opencode.__setSessionsForTest(mockSessions);
+  opencode.__setSessionPortForTest(mockSessionPort);
 
   const { invocation, resultPromise } = opencode.startOpencodeAgent({
     prompt: 'review task',
@@ -221,15 +215,13 @@ test('startOpencodeAgent retries without -s when spawn returns "Session not foun
 
   assert.equal(spawnCount, 2, 'must spawn twice: stale session then fresh');
   assert.equal(invocation.args.includes('-s'), true, 'original invocation must include -s');
-  assert.equal(mockSessions.clearSessionCalledWith.worktree, '/tmp/wt', 'clearSession must be called with worktree');
-  assert.equal(mockSessions.clearSessionCalledWith.slug, 'task-1322', 'clearSession must be called with slug');
-  assert.equal(mockSessions.clearSessionCalledWith.role, 'reviewer', 'clearSession must be called with role');
+  assert.deepEqual(mockSessionPort.deleted, { missionId: 'task-1322', role: 'reviewer' }, 'marker must be cleared through the port');
   assert.equal(result.status, 0, 'final result must show success');
 
   // Restore originals
   opencode.__setSpawnAndTeeForTest(null);
   opencode.__setExportCaptureForTest(null);
-  opencode.__setSessionsForTest(null);
+  opencode.__setSessionPortForTest(null);
   opencode.__setJsonFormatSupportForTest(null);
 });
 

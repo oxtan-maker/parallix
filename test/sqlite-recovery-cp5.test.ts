@@ -90,7 +90,7 @@ describe('SQLite recovery, backup, concurrency, rollback — CP5', () => {
         ['0002-import-history', migrations[1].checksum, new Date().toISOString()],
       );
 
-      // Re-applying all should be idempotent (all already in ledger after migration 3 is applied)
+      // Re-applying all should be idempotent and report the complete current ledger.
       const applied = await runner.applyPending(migrations);
       assert.equal(
         applied.length,

@@ -21,7 +21,11 @@ export function parseAgentBlockUntil(until: string): number {
  * checked-state operation rather than consulting a compatibility file.
  */
 export class AgentBlockService {
-  constructor(private readonly repository: AgentBlocklistRepository) {}
+  private readonly repository: AgentBlocklistRepository;
+
+  constructor(repository: AgentBlocklistRepository) {
+    this.repository = repository;
+  }
 
   async query(agent: string, nowMs = Date.now()): Promise<AgentBlockState> {
     return this.toState(agent, await this.repository.findByAgent(agent), nowMs);

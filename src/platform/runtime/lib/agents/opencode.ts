@@ -6,7 +6,9 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import * as sessions from '../tools/sessions.js';
+import type { SessionMarkerPort } from '../../../../application/domain-ports.js';
+import type { MissionId } from '../../../../domain/mission.js';
+import type { SessionRole } from '../../../../domain/session.js';
 import { buildSubagentLimitPrefix } from '../core/subagent-limit.js';
 
 interface BuildOpencodeInvocationOptions {
@@ -27,20 +29,24 @@ interface StartOpencodeAgentOptions {
   sessionId?: string | null;
   model?: string | null;
   teeOptions?: object;
-  slug?: string | null;
-  role?: string | null;
+  slug?: MissionId | null;
+  role?: SessionRole | null;
   maxTransientRetries?: number;
+  /** Checked application port for session markers (TASK-2322.09 cutover). */
+  sessionMarkerPort?: SessionMarkerPort;
 }
 
 // Injectable I/O for tests. Production uses the real spawn-tee / export capture.
 let _spawnAndTee: any = spawnAndTee;
 let _captureExport: any = captureOpencodeExport;
-let _sessions: any = sessions;
+let _sessionPort: SessionMarkerPort | null = null;
 
 // Test hooks: override the launcher's I/O without touching the public signature.
 function __setSpawnAndTeeForTest(fn: any) { _spawnAndTee = fn || spawnAndTee; }
 function __setExportCaptureForTest(fn: any) { _captureExport = fn || captureOpencodeExport; }
-function __setSessionsForTest(mod: any) { _sessions = mod || sessions; }
+/** @deprecated Test compatibility hook; file-backed sessions are no longer used. */
+function __setSessionsForTest(_mod: any) { /* no-op */ }
+function __setSessionPortForTest(port: SessionMarkerPort | null) { _sessionPort = port; }
 
 // Test hook: override the cached feature-detect for `--format json` support.
 // Set to true/false to force inclusion/exclusion of the flag regardless of
@@ -302,7 +308,8 @@ function startOpencodeAgent({
   teeOptions = {},
   slug = null,
   role = null,
-  maxTransientRetries = 1
+  maxTransientRetries = 1,
+  sessionMarkerPort
 }: StartOpencodeAgentOptions) {
   // Prepend the subagent-limit advisory prefix to the prompt.
   // When maxParallel is unset/null/zero the prefix is empty (no-op).
@@ -383,8 +390,12 @@ function startOpencodeAgent({
     let result = await runWithJsonFallback(invocation);
     if (isStaleSessionResult(result) && worktree && resume) {
       try {
-        _sessions.clearSession(worktree, slug || '', role || '');
-      } catch (_) { /* best-effort */ }
+        const port = sessionMarkerPort || _sessionPort;
+        if (!port || !slug || !role) {
+          throw new Error('Could not clear stale session marker: SessionMarkerPort is required');
+        }
+        await port.delete(slug, role);
+      } catch (error) { throw error; }
       const freshInv = buildOpencodeInvocation({ prompt: injectedPrompt, worktree, env, resume: false, sessionId: null, model });
       result = await runWithJsonFallback(freshInv);
     }
@@ -409,6 +420,7 @@ export {
   __setSpawnAndTeeForTest,
   __setExportCaptureForTest,
   __setSessionsForTest,
+  __setSessionPortForTest,
   __setJsonFormatSupportForTest,
   __setJsonFormatDetectForTest,
 };

@@ -1231,16 +1231,16 @@ test('startAgent passes resume:false to claude on the first launch and writes a 
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'startagent-resume-'));
   try {
     let writes = 0;
-    const fakeSessions = {
+    const sessionMarkerPort = {
       shouldResume: () => false,
-      getSessionId: () => null,
-      writeSession: (worktree, slug, role, payload) => {
+      find: () => null,
+      save: (marker) => {
         writes += 1;
-        assert.equal(slug, 'task-1025');
-        assert.equal(role, 'implementer');
-        assert.equal(payload.agent, 'claude');
-        return true;
-      }
+        assert.equal(marker.missionId, 'task-1025');
+        assert.equal(marker.role, 'execute');
+        assert.equal(marker.agent, 'claude');
+      },
+      delete: () => {}
     };
 
     const result = await startAgent('active', {
@@ -1250,7 +1250,7 @@ test('startAgent passes resume:false to claude on the first launch and writes a 
       isAgentBlockedFn: () => false,
       slug: 'task-1025',
       role: 'implementer',
-      sessionsModule: fakeSessions,
+      sessionMarkerPort,
       log: () => {}
     });
 
@@ -1271,10 +1271,11 @@ test('startAgent passes resume:false to claude on the first launch and writes a 
 });
 
 test('startAgent rejects instead of reporting launch success when session persistence fails', async () => {
-  const fakeSessions = {
+  const sessionMarkerPort = {
     shouldResume: () => false,
-    getSessionId: () => null,
-    writeSession: () => { throw new Error('injected marker failure'); }
+    find: () => null,
+    save: () => { throw new Error('injected marker failure'); },
+    delete: () => {}
   };
   await assert.rejects(
     () => startAgent('active', {
@@ -1283,7 +1284,7 @@ test('startAgent rejects instead of reporting launch success when session persis
       agent: 'claude',
       slug: 'task-2222',
       role: 'implementer',
-      sessionsModule: fakeSessions,
+      sessionMarkerPort,
       isAgentBlockedFn: () => false,
       resolveAgentModelFn: () => null,
       log: () => {},
@@ -1299,15 +1300,16 @@ test('startAgent rejects instead of reporting launch success when session persis
 test('startAgent passes resume:true to claude when a matching marker exists', async () => {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'startagent-resume-hit-'));
   try {
-    const fakeSessions = {
-      shouldResume: (worktree, slug, role, agent) => {
-        assert.equal(slug, 'task-1025');
-        assert.equal(role, 'implementer');
+    const sessionMarkerPort = {
+      shouldResume: (missionId, role, agent) => {
+        assert.equal(missionId, 'task-1025');
+        assert.equal(role, 'execute');
         assert.equal(agent, 'claude');
         return true;
       },
-      getSessionId: () => null,
-      writeSession: () => true
+      find: () => null,
+      save: () => {},
+      delete: () => {}
     };
 
     const result = await startAgent('act-on-review', {
@@ -1317,7 +1319,7 @@ test('startAgent passes resume:true to claude when a matching marker exists', as
       isAgentBlockedFn: () => false,
       slug: 'task-1025',
       role: 'implementer',
-      sessionsModule: fakeSessions,
+      sessionMarkerPort,
       log: () => {}
     });
 
@@ -1341,10 +1343,17 @@ test('startAgent does not pass --continue to non-resume-capable launchers even w
   try {
     // Even if shouldResume reported true, codex's launcher does not support
     // a per-call resume flag; the resume option must be dropped silently.
-    const fakeSessions = {
+    const sessionMarkerPort = {
       shouldResume: () => true,
-      getSessionId: () => null,
-      writeSession: () => true
+      find: () => ({
+        missionId: 'task-1025',
+        role: 'execute',
+        agent: 'codex',
+        lastLaunched: new Date().toISOString(),
+        sessionId: null
+      }),
+      save: () => {},
+      delete: () => {}
     };
 
     const result = await startAgent('act-on-review', {
@@ -1354,7 +1363,7 @@ test('startAgent does not pass --continue to non-resume-capable launchers even w
       isAgentBlockedFn: () => false,
       slug: 'task-1025',
       role: 'implementer',
-      sessionsModule: fakeSessions,
+      sessionMarkerPort,
       log: () => {}
     });
 
@@ -1363,6 +1372,77 @@ test('startAgent does not pass --continue to non-resume-capable launchers even w
   } finally {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
   }
+});
+
+test('startAgent maps reviewer to review and forwards the checked port to the launcher', async () => {
+  const sessionMarkerPort = {
+    shouldResume: (_missionId, role) => {
+      assert.equal(role, 'review');
+      return false;
+    },
+    find: (_missionId, role) => {
+      assert.equal(role, 'review');
+      return null;
+    },
+    save: (marker) => {
+      assert.equal(marker.role, 'review');
+    },
+    delete: () => {}
+  };
+  let launcherOptions;
+
+  await startAgent('review', {
+    prompt: 'Review the mission.',
+    worktree: '/tmp/task-2322-review-role',
+    agent: 'claude',
+    slug: 'task-2322.09',
+    role: 'reviewer',
+    sessionMarkerPort,
+    isAgentBlockedFn: () => false,
+    resolveAgentModelFn: () => null,
+    log: () => {},
+    launchAgentFn: (options) => {
+      launcherOptions = options;
+      return {
+        invocation: { command: 'claude', args: [], options: {} },
+        resultPromise: Promise.resolve({ status: 0, stdout: '', stderr: '' })
+      };
+    }
+  });
+
+  assert.equal(launcherOptions.role, 'review');
+  assert.equal(launcherOptions.sessionMarkerPort, sessionMarkerPort);
+});
+
+test('startAgent rejects unsupported session marker roles before launching', async () => {
+  let launched = false;
+  await assert.rejects(
+    () => startAgent('review', {
+      prompt: 'Review the mission.',
+      worktree: '/tmp/task-2322-unknown-role',
+      agent: 'claude',
+      slug: 'task-2322.09',
+      role: 'reviewing',
+      sessionMarkerPort: {
+        shouldResume: () => false,
+        find: () => null,
+        save: () => {},
+        delete: () => {}
+      },
+      isAgentBlockedFn: () => false,
+      resolveAgentModelFn: () => null,
+      log: () => {},
+      launchAgentFn: () => {
+        launched = true;
+        return {
+          invocation: { command: 'claude', args: [], options: {} },
+          resultPromise: Promise.resolve({ status: 0, stdout: '', stderr: '' })
+        };
+      }
+    }),
+    /Unsupported session marker role: reviewing/
+  );
+  assert.equal(launched, false);
 });
 
 test('custom is registered in LAUNCHERS and RESOLVERS', () => {

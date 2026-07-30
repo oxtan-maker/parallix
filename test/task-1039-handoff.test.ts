@@ -2,6 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { verifyHandoff, performHandoff } = require('../.test-runtime/lib/commands/handoff');
 const { mock } = test;
@@ -13,7 +14,7 @@ const forgejo = require('../.test-runtime/lib/tools/forgejo');
 const gatekeeper = require('../.test-runtime/lib/tools/gatekeeper');
 
 const TEST_SLUG = 'task-handoff-test';
-const WORKTREE = '/tmp/handoff-test-worktree';
+const WORKTREE = path.join(os.tmpdir(), `handoff-test-worktree-${process.pid}`);
 
 function setupMocks() {
   mock.method(missionUtils, 'findMissionDir', () => path.join(WORKTREE, 'docs/missions/2026', TEST_SLUG));
@@ -70,7 +71,17 @@ test('performHandoff handles gatekeeper pushback', async (t) => {
   };
   // Mock relaunch to succeed so the retry loop can proceed
   const mockRelaunch = async () => ({ relaunched: true });
-  const result = await performHandoff(TEST_SLUG, { worktree: WORKTREE, skipGate: true, rebaseFn: mockRebase, attemptAgentRelaunchFn: mockRelaunch, runGatekeeperFn: mockGK });
+  const unexpectedVerification = () => {
+    throw new Error('skipGate must survive the remediation retry');
+  };
+  const result = await performHandoff(TEST_SLUG, {
+    worktree: WORKTREE,
+    skipGate: true,
+    rebaseFn: mockRebase,
+    attemptAgentRelaunchFn: mockRelaunch,
+    runGatekeeperFn: mockGK,
+    runVerificationGateFn: unexpectedVerification,
+  });
   assert.strictEqual(result.ok, true);
   assert.strictEqual(result.gatekeeperPushedBack, true);
   cleanup();

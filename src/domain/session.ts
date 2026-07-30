@@ -1,21 +1,25 @@
 // Session / resume marker value object.
 //
-// Mirrors the per-worktree resume markers written to
-// `.workflow/sessions/<slug>-<role>.json`
-// (`src/platform/runtime/lib/tools/sessions.ts`: `writeSession` at :35,
-// `readSession` at :21, `shouldResume` at :58). A marker records which agent
-// family last launched for a (slug, role) so a relaunch can pass the family's
-// resume flag. The file is the current compatibility representation; ADR 0053
-// owns the target persistence decision for `SessionMarker`.
+// A marker records which agent family last launched for a (mission, role) so a
+// relaunch can pass the family's resume flag. ADR 0053 makes the operator
+// database authoritative; production callers use the checked application port,
+// while legacy worktree files are explicit one-way import input only.
 
 import type { AgentFamily } from './agents.js';
 import type { MissionId } from './mission.js';
 
-/** Roles a session marker distinguishes (the `<role>` file suffix). */
+/** Roles distinguished by the checked session-marker repository. */
 export type SessionRole = 'execute' | 'draft' | 'review';
 
+export function sessionRole(value: string): SessionRole {
+  if (value === 'execute' || value === 'draft' || value === 'review') {
+    return value;
+  }
+  throw new Error(`Invalid session role: ${JSON.stringify(value)}`);
+}
+
 /** A resume marker: the agent family, when it last launched, and an optional
- * provider session id. Fields track the persisted body (`sessions.ts:45-49`). */
+ * provider session id. */
 export interface SessionMarker {
   readonly missionId: MissionId;
   readonly role: SessionRole;
@@ -25,8 +29,7 @@ export interface SessionMarker {
 }
 
 /** Resume only when the previous marker used the same agent family; a fallback
- * to a different family invalidates the marker. Behavioral re-statement of
- * `shouldResume` (`sessions.ts:58`). */
+ * to a different family invalidates the marker. */
 export function shouldResume(
   marker: SessionMarker | null,
   missionId: MissionId,

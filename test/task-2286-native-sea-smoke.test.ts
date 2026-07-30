@@ -491,18 +491,15 @@ test('native SEA smoke: the npm fallback passes the same headless smoke set (SC8
   assert.ok(fs.existsSync(path.join(npmHome, 'parallix.db')), 'the npm fallback did not open the operator database');
   assert.ok(fs.existsSync(path.join(seaHome, 'parallix.db')), 'the executable did not open the operator database');
 
-  // Documented divergence: build/px.mjs resolves SQLite migrations from its own
-  // directory, and scripts/build-canonical-bundle.ts (a restricted area for
-  // this mission) does not stage them into build/. The npm layout therefore
-  // creates an empty database, while the SEA payload stages the migrations and
-  // materializes the operator schema. Assert the divergence explicitly so it
-  // cannot regress unnoticed and stays visible for the follow-up.
-  assert.equal(fs.existsSync(path.join(ROOT, 'build', 'migrations')), false,
-    'if build/ starts shipping migrations, this divergence is resolved and the assertion below must be updated');
+  // Both shipped surfaces carry the same immutable migrations and materialize
+  // the operator schema before any repository reads it.
+  assert.equal(fs.existsSync(path.join(ROOT, 'build', 'migrations')), true);
   const npmDb = new DatabaseSync(path.join(npmHome, 'parallix.db'), { readOnly: true });
   try {
-    const tables = npmDb.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all();
-    assert.equal(tables.length, 0, 'the npm layout is expected to create an empty database (no staged migrations)');
+    const tables = npmDb.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all()
+      .map((row: any) => String(row.name));
+    assert.ok(tables.includes('session_markers'), 'the npm layout must materialize the SessionMarker authority');
+    assert.ok(tables.includes('schema_migrations'), 'the npm layout must record applied migration checksums');
   } finally {
     npmDb.close();
   }

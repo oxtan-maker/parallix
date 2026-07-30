@@ -26,6 +26,14 @@ const id = missionId('task-2294');
 const repo = repositoryId('parallix');
 const implementer = agentFamily('configured-implementer');
 const reviewer = agentFamily('configured-reviewer');
+
+test('missionId accepts dotted child-task suffixes', () => {
+  assert.equal(missionId('task-2322.09'), 'task-2322.09');
+});
+
+test('missionId rejects empty dotted segments', () => {
+  assert.throws(() => missionId('task-2322..09'), /Invalid mission slug/);
+});
 const reviewerEligibility = ConfiguredReviewerEligibility.fromReviewStep({
   eligible: [reviewer],
   strategy: 'random',

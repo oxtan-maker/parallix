@@ -30,6 +30,9 @@ export type {
   ImportRecord,
   BoardLaneEventEntry,
   BoardLaneEventRepository,
+  SessionMarkerEntry,
+  SessionMarkerWrite,
+  SessionMarkerRepository,
 } from './ports.js';
 
 // Repository implementations
@@ -40,6 +43,15 @@ export { SqliteUIPreferencesRepository } from './ui-preferences-repository.js';
 export { SqliteOperationalHistoryRepository } from './operational-history-repository.js';
 export { SqliteMigrationLedgerRepository } from './migration-ledger-repository.js';
 export { SqliteBoardLaneEventRepository } from './board-lane-event-repository.js';
+export { SqliteSessionMarkerRepository } from './session-marker-repository.js';
+export { SqliteSessionMarkerAdapter } from './session-marker-adapter.js';
+export { importSessionMarkers } from './session-marker-import.js';
+export type {
+  FileSessionMarker,
+  ImportConflict,
+  ImportEntry,
+  ImportResult,
+} from './session-marker-import.js';
 
 // Mission aggregate
 export { SqliteMissionStore, MissionStaleWriteError } from './mission-store.js';

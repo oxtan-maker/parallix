@@ -98,7 +98,7 @@ export const DOMAIN_CONCEPT_INVARIANTS: Readonly<
     invariant:
       'Resume is permitted only when mission, role, and agent family all match the recorded marker; a fallback to another family invalidates it.',
     fileLocation: 'src/domain/session.ts',
-    line: 30,
+    line: 33,
     anchor: 'export function shouldResume',
   },
   LaneTransitionEvent: {

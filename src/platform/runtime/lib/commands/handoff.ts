@@ -584,7 +584,9 @@ function findUnverifiableGoalCheckRow(evidenceRows: string[], rootDir: string): 
         // Re-run handoff with decremented retry budget
         const retryResult = await performHandoff(slug, {
           worktree,
+          skipGate,
           force: true,
+          forceWithLease,
           isForgejoReviewEnabledFn: isForgejoReviewEnabledFn,
           rebaseFn: rebaseFn,
           runVerificationGateFn: runVerificationGateFn,

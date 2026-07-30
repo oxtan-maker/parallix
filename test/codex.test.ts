@@ -270,7 +270,7 @@ test('buildCodexDraftInvocation adds -m flag on the resume path too', () => {
 
 test('startCodexDraftAgent retries without exec resume when spawn returns "Session not found"', async () => {
   const codex = require('../.test-runtime/lib/agents/codex');
-  const mockSessions = { clearSessionCalledWith: null, clearSession(worktree, slug, role) { this.clearSessionCalledWith = { worktree, slug, role }; return true; } };
+  const mockSessionPort = { deleted: null, async delete(missionId, role) { this.deleted = { missionId, role }; } };
   let spawnCount = 0;
   const mockSpawn = (cmd, args, opts) => {
     spawnCount++;
@@ -281,7 +281,7 @@ test('startCodexDraftAgent retries without exec resume when spawn returns "Sessi
   };
 
   codex.__setSpawnAndTeeForTest(mockSpawn);
-  codex.__setSessionsForTest(mockSessions);
+  codex.__setSessionPortForTest(mockSessionPort);
 
   const { invocation, resultPromise } = codex.startCodexDraftAgent({
     prompt: 'review task', worktree: '/tmp/wt', env: {}, resume: true, sessionId: 'ses_stale', slug: 'task-1322', role: 'reviewer'
@@ -290,11 +290,11 @@ test('startCodexDraftAgent retries without exec resume when spawn returns "Sessi
 
   assert.equal(spawnCount, 2, 'must spawn twice: stale session then fresh');
   assert.ok(invocation.args.includes('resume'), 'original invocation must include resume');
-  assert.equal(mockSessions.clearSessionCalledWith.worktree, '/tmp/wt', 'clearSession must be called with worktree');
+  assert.deepEqual(mockSessionPort.deleted, { missionId: 'task-1322', role: 'reviewer' }, 'marker must be cleared through the port');
   assert.equal(result.status, 0, 'final result must show success');
 
   codex.__setSpawnAndTeeForTest(null);
-  codex.__setSessionsForTest(null);
+  codex.__setSessionPortForTest(null);
 });
 
 test('startCodexDraftAgent does NOT retry when resume is false', async () => {

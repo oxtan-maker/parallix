@@ -99,7 +99,8 @@ Nothing is compiled, downloaded, or linked at install time.
 
 The database lives at `<PARALLIX_HOME>/parallix.db` and is never created inside a
 target repository, mission worktree, executable directory, or the package
-directory.
+directory. The npm bundle and native executable both ship the immutable SQLite
+migrations under their payload root and apply them before operator-state reads.
 
 ## Optional agent SDK: `@earendil-works/pi-coding-agent`
 

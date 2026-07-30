@@ -2,6 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
+const os = require('node:os');
 const path = require('path');
 const { mock } = test;
 
@@ -13,7 +14,7 @@ const runtimeMatrix = require('../.test-runtime/lib/core/runtime-matrix');
 const stats = require('../.test-runtime/lib/commands/stats');
 
 const TEST_SLUG = 'task-integrate-v2';
-const FAKE_ROOT = '/tmp/integrate-v2-root';
+const FAKE_ROOT = path.join(os.tmpdir(), `integrate-v2-root-${process.pid}`);
 let statsCalls = [];
 
 function loadIntegrate() {
@@ -358,7 +359,7 @@ test('integrate reports merged-PR recovery guidance before any closeout work', (
   const output = [...logs, ...errors].join('\n');
   assert.match(output, /Integration preflight failed\./);
   assert.match(output, /Forgejo PR: PR #41 is already marked merged/);
-  assert.match(output, /git -C \/tmp\/integrate-v2-root checkout main/);
+  assert.ok(output.includes(`git -C ${FAKE_ROOT} checkout main`));
   assert.equal(statsCalls.length, 0);
   assert.equal(exitCodes.at(-1), 1);
 
@@ -509,7 +510,6 @@ test('evaluateTaskStatusForIntegration edge cases', (t) => {
 test('recordPostIntegrationStats keeps operator-owned stats outside git', () => {
   setupMocks();
   const gitCalls = [];
-  const FAKE_ROOT = '/tmp/integrate-v2-root';
 
   try {
     const { recordPostIntegrationStats } = loadIntegrate();

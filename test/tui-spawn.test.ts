@@ -66,7 +66,7 @@ describe('px ui spawns and exits 0 from shipped artifacts', () => {
 
   it('build/px.mjs status still exits 0 (headless path unchanged)', () => {
     const result = runArtifact([path.join(root, 'build', 'px.mjs'), 'status'], {
-      cwd: root,
+      cwd: fixtureRoot,
       stdio: ['pipe', 'pipe', 'pipe'],
       timeout: 30_000,
       maxBuffer: 1024 * 1024,

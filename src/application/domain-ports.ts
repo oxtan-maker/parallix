@@ -1,7 +1,9 @@
+import type { AgentFamily } from '../domain/agents.js';
 import type { AgentSelectionSnapshot } from '../domain/agents.js';
 import type { LaneTransitionEvent } from '../domain/board-event.js';
 import type { Mission, MissionId } from '../domain/mission.js';
 import type { MissionNelRecord } from '../domain/net-engineering-lines.js';
+import type { SessionMarker, SessionRole } from '../domain/session.js';
 
 export type MissionVersion = number & { readonly __brand: 'MissionVersion' };
 
@@ -89,4 +91,40 @@ export function isStaleWrite(error: unknown): boolean {
 
 export interface AgentSelectionSnapshotPort {
   load(): Promise<AgentSelectionSnapshot>;
+}
+
+// ---------------------------------------------------------------------------
+// Session marker port
+// ---------------------------------------------------------------------------
+
+/**
+ * Application port for session marker operations.
+ *
+ * Exposes checked session marker behavior to callers (agent launchers, commands)
+ * without exposing the SQLite adapter or file-based sessions module directly.
+ * Domain `SessionMarker` types flow through this port; the adapter layer handles
+ * the storage conversion.
+ */
+export interface SessionMarkerPort {
+  /**
+   * Find the session marker for a (mission, role) pair.
+   * Returns `null` when no marker exists.
+   */
+  find(_missionId: MissionId, _role: SessionRole): Promise<SessionMarker | null>;
+
+  /**
+   * Save (upsert) a session marker. Idempotent for the same (mission, role).
+   */
+  save(_marker: SessionMarker): Promise<void>;
+
+  /**
+   * Remove the session marker for a (mission, role) pair.
+   */
+  delete(_missionId: MissionId, _role: SessionRole): Promise<void>;
+
+  /**
+   * Determine whether the given agent family should resume using the stored marker.
+   * Returns `true` only when mission, role, and agent family all match the recorded marker.
+   */
+  shouldResume(_missionId: MissionId, _role: SessionRole, _agent: AgentFamily): Promise<boolean>;
 }

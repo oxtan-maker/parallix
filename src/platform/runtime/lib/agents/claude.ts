@@ -1,6 +1,8 @@
 import { spawnAndTee } from '../core/spawn-tee.js';
 import { extractClaudeTelemetryFromStdout } from './claude-telemetry.js';
-import * as sessions from '../tools/sessions.js';
+import type { SessionMarkerPort } from '../../../../application/domain-ports.js';
+import type { MissionId } from '../../../../domain/mission.js';
+import type { SessionRole } from '../../../../domain/session.js';
 
 interface ClaudeInvocationOptions {
   prompt: string;
@@ -13,17 +15,21 @@ interface ClaudeInvocationOptions {
 
 interface StartClaudeAgentOptions extends ClaudeInvocationOptions {
   teeOptions?: object;
-  slug?: string | null;
-  role?: string | null;
+  slug?: MissionId | null;
+  role?: SessionRole | null;
+  /** Checked application port for session markers (TASK-2322.09 cutover). */
+  sessionMarkerPort?: SessionMarkerPort;
 }
 
 // Injectable I/O for tests. Production uses the real spawn-tee / export capture.
 let _spawnAndTee: any = spawnAndTee;
-let _sessions: any = sessions;
+let _sessionPort: SessionMarkerPort | null = null;
 
 // Test hooks: override the launcher's I/O without touching the public signature.
 function __setSpawnAndTeeForTest(fn: any) { _spawnAndTee = fn || spawnAndTee; }
-function __setSessionsForTest(mod: any) { _sessions = mod || sessions; }
+/** @deprecated Test compatibility hook; file-backed sessions are no longer used. */
+function __setSessionsForTest(_mod: any) { /* no-op */ }
+function __setSessionPortForTest(port: SessionMarkerPort | null) { _sessionPort = port; }
 
 // Claude usage telemetry is parsed from the `stream-json` stdout stream, which
 // carries `message_start` (input) and `message_delta` (output) usage events. The
@@ -95,7 +101,7 @@ function buildClaudeInvocation({ prompt, worktree, env, resume = false, sessionI
   };
 }
 
-function startClaudeAgent({ prompt, worktree, env, resume = false, sessionId = null, model = null, teeOptions = {}, slug = null, role = null }: StartClaudeAgentOptions) {
+function startClaudeAgent({ prompt, worktree, env, resume = false, sessionId = null, model = null, teeOptions = {}, slug = null, role = null, sessionMarkerPort }: StartClaudeAgentOptions) {
   function isStaleSessionResult(result: any) {
     if (!result) {return false;}
     const stderr = result.stderr || '';
@@ -123,11 +129,15 @@ function startClaudeAgent({ prompt, worktree, env, resume = false, sessionId = n
   function staleSessionHandler(invocation: any) {
     const teeWithTail = { maxTailBytes: CLAUDE_TELEMETRY_TAIL_BYTES, ...invocation.options, ...teeOptions };
     return _spawnAndTee(invocation.command, invocation.args, teeWithTail)
-      .then((result: any) => {
+      .then(async (result: any) => {
         if (isStaleSessionResult(result) && worktree && resume) {
           try {
-            _sessions.clearSession(worktree, slug, role);
-          } catch (_) { /* best-effort */ }
+            const port = sessionMarkerPort || _sessionPort;
+            if (!port || !slug || !role) {
+              throw new Error('Could not clear stale session marker: SessionMarkerPort is required');
+            }
+            await port.delete(slug, role);
+          } catch (error) { throw error; }
           const freshInv = buildClaudeInvocation({ prompt, worktree, env, resume: false, sessionId: null, model });
           const freshTee = { maxTailBytes: CLAUDE_TELEMETRY_TAIL_BYTES, ...freshInv.options, ...teeOptions };
           return _spawnAndTee(freshInv.command, freshInv.args, freshTee);
@@ -150,5 +160,6 @@ export {
   resolveClaudeCommand,
   startClaudeAgent,
   __setSpawnAndTeeForTest,
-  __setSessionsForTest
+  __setSessionsForTest,
+  __setSessionPortForTest
 };

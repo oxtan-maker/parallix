@@ -131,6 +131,10 @@ const RUNTIME_ASSET_KEYS = [
   'prompts/execute.md',
   'prompts/review.md',
   'templates/mission-scaffold.md',
+  ...fs.readdirSync(path.join(root, 'src', 'adapters', 'sqlite', 'migrations'))
+    .filter(file => file.endsWith('.sql'))
+    .sort()
+    .map(file => path.posix.join('migrations', file)),
 ];
 
 // Stage every declared runtime asset under the bundle's own package root so
@@ -139,7 +143,10 @@ const RUNTIME_ASSET_KEYS = [
 interface AssetEntry { key: string; sha256: string; }
 const assets: { version: number; assets: AssetEntry[] } = { version: 1, assets: [] };
 assets.assets = RUNTIME_ASSET_KEYS.map((key): AssetEntry => {
-  const contents = fs.readFileSync(path.join(root, key));
+  const sourcePath = key.startsWith('migrations/')
+    ? path.join(root, 'src', 'adapters', 'sqlite', key)
+    : path.join(root, key);
+  const contents = fs.readFileSync(sourcePath);
   const stagedPath = path.join(buildDir, key);
   fs.mkdirSync(path.dirname(stagedPath), { recursive: true });
   fs.writeFileSync(stagedPath, contents);

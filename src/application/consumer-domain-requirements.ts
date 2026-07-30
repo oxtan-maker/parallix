@@ -148,8 +148,8 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'launch-session-resume',
     family: 'launch',
     fileLocation: 'src/platform/runtime/lib/agents/agents.ts',
-    line: 308,
-    anchor: 'const resume = Boolean(',
+    line: 380,
+    anchor: 'await launchSessionMarkerPort.shouldResume(',
     reads: ['SessionMarker', 'Mission'],
     requirement:
       'Whether the previous launch for this (mission, role) used the same agent family, so the family-specific resume flag may be passed.',
@@ -159,8 +159,8 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'launch-session-marker-write',
     family: 'launch',
     fileLocation: 'src/platform/runtime/lib/agents/agents.ts',
-    line: 511,
-    anchor: 'writeSession(worktree, slug, role',
+    line: 589,
+    anchor: 'await launchSessionMarkerPort.save({',
     reads: ['SessionMarker'],
     requirement:
       'One current marker per (mission, role) recording the family that last ran and its provider session id; a new launch replaces it rather than appending history.',
@@ -174,7 +174,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'retry-in-process-tried-set',
     family: 'retry',
     fileLocation: 'src/platform/runtime/lib/agents/agents.ts',
-    line: 207,
+    line: 271,
     anchor: 'const tried = new Set(',
     reads: ['AgentBlock'],
     requirement:
@@ -185,7 +185,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'retry-launch-failure-reselect',
     family: 'retry',
     fileLocation: 'src/platform/runtime/lib/agents/agents.ts',
-    line: 469,
+    line: 544,
     anchor: 'retrying with next eligible agent',
     reads: ['AgentBlock'],
     requirement:
@@ -222,8 +222,8 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'failover-limit-hit-block',
     family: 'failover',
     fileLocation: 'src/platform/runtime/lib/agents/agents.ts',
-    line: 411,
-    anchor: 'updateAgentBlockFn(chosen',
+    line: 486,
+    anchor: 'await updateAgentBlockFn(chosen',
     reads: ['AgentBlock'],
     requirement:
       'The reset estimate and reason for a provider usage limit, written as a time-bounded block so later selections skip the family until it expires.',
@@ -233,8 +233,8 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'failover-transient-failure-block',
     family: 'failover',
     fileLocation: 'src/platform/runtime/lib/agents/agents.ts',
-    line: 493,
-    anchor: 'updateAgentBlockFn(chosen',
+    line: 568,
+    anchor: 'await updateAgentBlockFn(chosen',
     reads: ['AgentBlock'],
     requirement:
       'That a launch failure looked transient rather than a deterministic config error, so a bounded block is written instead of poisoning the family permanently.',

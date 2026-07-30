@@ -234,7 +234,7 @@ test('extractClaudeTelemetryFromStdout handles raw (non-wrapped) stream-json eve
 
 test('startClaudeAgent retries without --resume when spawn returns "Session not found"', async () => {
   const claude = require('../.test-runtime/lib/agents/claude');
-  const mockSessions = { clearSessionCalledWith: null, clearSession(worktree, slug, role) { this.clearSessionCalledWith = { worktree, slug, role }; return true; } };
+  const mockSessionPort = { deleted: null, async delete(missionId, role) { this.deleted = { missionId, role }; } };
   let spawnCount = 0;
   const mockSpawn = (cmd, args, opts) => {
     spawnCount++;
@@ -246,7 +246,7 @@ test('startClaudeAgent retries without --resume when spawn returns "Session not 
   const mockExport = () => Promise.resolve(null);
 
   claude.__setSpawnAndTeeForTest(mockSpawn);
-  claude.__setSessionsForTest(mockSessions);
+  claude.__setSessionPortForTest(mockSessionPort);
 
   const { invocation, resultPromise } = claude.startClaudeAgent({
     prompt: 'review task', worktree: '/tmp/wt', env: {}, resume: true, sessionId: 'ses_stale', slug: 'task-1322', role: 'reviewer'
@@ -255,11 +255,11 @@ test('startClaudeAgent retries without --resume when spawn returns "Session not 
 
   assert.equal(spawnCount, 2, 'must spawn twice: stale session then fresh');
   assert.ok(invocation.args.includes('--resume'), 'original invocation must include --resume');
-  assert.equal(mockSessions.clearSessionCalledWith.worktree, '/tmp/wt', 'clearSession must be called with worktree');
+  assert.deepEqual(mockSessionPort.deleted, { missionId: 'task-1322', role: 'reviewer' }, 'marker must be cleared through the port');
   assert.equal(result.status, 0, 'final result must show success');
 
   claude.__setSpawnAndTeeForTest(null);
-  claude.__setSessionsForTest(null);
+  claude.__setSessionPortForTest(null);
 });
 
 test('startClaudeAgent does NOT retry when resume is false', async () => {
