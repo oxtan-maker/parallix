@@ -4,8 +4,9 @@ import { render, renderToString } from 'ink';
 import type { RepositoryId } from '../../domain/repository.js';
 import type { BoardProgressSink } from '../../application/controller/board-command.js';
 import { createBoardProjectionBuilder } from '../../application/projections/create-board-projection-builder.js';
-import { projectMissionDetail, type MissionDetail } from '../../application/projections/mission-detail.js';
+import type { MissionDetail } from '../../application/projections/mission-detail.js';
 import { ConcreteMissionReadAdapter } from '../../adapters/backlog/concrete-mission-read-adapter.js';
+import { MissionProjectionQuery } from '../../application/projections/mission-query.js';
 import { BoardCommandController } from '../../application/controller/board-controller.js';
 import { BoardShell } from './shell.js';
 import { resolveKnownAgentFamilies } from './agent-config-resolver.js';
@@ -123,11 +124,10 @@ export async function runUiCommand(_args: string[] = []): Promise<number> {
   const projection = await builder.build();
   // Detail materialisation stays in the composition root. BoardShell receives
   // pure projection data and therefore cannot reach the lifecycle authority.
-  const missionReader = new ConcreteMissionReadAdapter({ rootDir, repositoryId });
-  const missionDetails = new Map<string, MissionDetail>();
-  for (const mission of await missionReader.loadAllMissions()) {
-    missionDetails.set(mission.id, projectMissionDetail(mission, null));
-  }
+  const missionQuery = new MissionProjectionQuery(
+    new ConcreteMissionReadAdapter({ rootDir, repositoryId }),
+  );
+  const missionDetails: ReadonlyMap<string, MissionDetail> = await missionQuery.allDetails();
   const commandControllerFactory = (progress: BoardProgressSink) =>
     new BoardCommandController(new UnconfiguredActivePort(), progress);
   const refreshProjection = () => builder.build();

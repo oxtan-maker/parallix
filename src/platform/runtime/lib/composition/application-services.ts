@@ -6,6 +6,7 @@ import { MissionCheckpointService } from '../../../../application/mission-checkp
 import { MissionHandoffService } from '../../../../application/mission-handoff-service.js';
 import { MissionIntakeService } from '../../../../application/mission-intake-service.js';
 import { MissionLifecycleService } from '../../../../application/mission-lifecycle-service.js';
+import { MissionIntegrationService } from '../../../../application/mission-integration-service.js';
 import { CompatibilityMissionStore } from '../../../../adapters/backlog/compatibility-mission-store.js';
 import { repositoryId } from '../../../../domain/repository.js';
 import { LegacyActiveAdapter } from '../adapters/legacy-active-adapter.js';
@@ -36,6 +37,7 @@ export interface MissionApplicationServices {
   readonly store: CompatibilityMissionStore;
   readonly intake: MissionIntakeService;
   readonly lifecycle: MissionLifecycleService;
+  readonly integration: MissionIntegrationService;
   readonly checkpoints: MissionCheckpointService;
   readonly handoff: MissionHandoffService;
   /** Which authority the graph selected; `sqlite` is not reachable yet. */
@@ -117,6 +119,7 @@ export function createMissionApplicationServices(
     store,
     intake: new MissionIntakeService(store),
     lifecycle: new MissionLifecycleService(store),
+    integration: new MissionIntegrationService(store),
     checkpoints: new MissionCheckpointService(store),
     handoff: new MissionHandoffService(store, store),
     authority: 'compatibility',

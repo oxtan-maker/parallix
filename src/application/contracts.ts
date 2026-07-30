@@ -45,6 +45,8 @@ export type Capability =
   | 'active:execute'
   | 'mission:intake'
   | 'mission:transition'
+  | 'integration:decide'
+  | 'closure:record'
   | 'checkpoint:record'
   | 'handoff:record';
 

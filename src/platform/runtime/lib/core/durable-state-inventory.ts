@@ -91,7 +91,7 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     fileLocation: 'src/adapters/backlog/concrete-mission-read-adapter.ts',
     operation: 'read',
     classification: 'database-owned-domain-state',
-    cutoverTask: 'TASK-2322.02',
+    cutoverTask: 'TASK-2322.07',
   },
   {
     id: 'mission-write-handoff',
@@ -100,7 +100,7 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     fileLocation: 'src/platform/runtime/lib/commands/handoff.ts',
     operation: 'write',
     classification: 'database-owned-domain-state',
-    cutoverTask: 'TASK-2322.02',
+    cutoverTask: 'TASK-2322.07',
   },
   {
     id: 'mission-write-draft',
@@ -109,7 +109,7 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     fileLocation: 'src/platform/runtime/lib/commands/draft.ts',
     operation: 'write',
     classification: 'database-owned-domain-state',
-    cutoverTask: 'TASK-2322.02',
+    cutoverTask: 'TASK-2322.07',
   },
   {
     id: 'mission-read-integrate',
@@ -118,7 +118,7 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     fileLocation: 'src/platform/runtime/lib/commands/integrate.ts',
     operation: 'read',
     classification: 'database-owned-domain-state',
-    cutoverTask: 'TASK-2322.02',
+    cutoverTask: 'TASK-2322.07',
   },
   {
     // TASK-2322.05: the selected compatibility Mission authority behind the
@@ -149,7 +149,7 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     fileLocation: 'src/platform/runtime/lib/core/persistent-data-migration.ts',
     operation: 'read',
     classification: 'database-owned-domain-state',
-    cutoverTask: 'TASK-2322.02',
+    cutoverTask: 'TASK-2322.07',
   },
   {
     id: 'mission-migration-write',
@@ -158,7 +158,7 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     fileLocation: 'src/platform/runtime/lib/core/persistent-data-migration.ts',
     operation: 'write',
     classification: 'database-owned-domain-state',
-    cutoverTask: 'TASK-2322.02',
+    cutoverTask: 'TASK-2322.07',
   },
   {
     id: 'mission-state-map-read',
@@ -167,7 +167,7 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     fileLocation: 'src/platform/runtime/lib/core/state-map.ts',
     operation: 'read',
     classification: 'database-owned-domain-state',
-    cutoverTask: 'TASK-2322.02',
+    cutoverTask: 'TASK-2322.07',
   },
   {
     id: 'mission-gate-adapter-read',
@@ -176,7 +176,7 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     fileLocation: 'src/adapters/backlog/concrete-gate-read-adapter.ts',
     operation: 'read',
     classification: 'database-owned-domain-state',
-    cutoverTask: null,
+    cutoverTask: 'TASK-2322.07',
   },
   // -----------------------------------------------------------------------
   // CheckpointData — nested Mission data (file-backed)
@@ -188,7 +188,7 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     fileLocation: 'src/adapters/backlog/concrete-mission-read-adapter.ts',
     operation: 'read',
     classification: 'database-owned-domain-state',
-    cutoverTask: 'TASK-2322.02',
+    cutoverTask: 'TASK-2322.07',
   },
   {
     id: 'checkpoint-write-handoff',
@@ -197,7 +197,7 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     fileLocation: 'src/platform/runtime/lib/commands/handoff.ts',
     operation: 'write',
     classification: 'database-owned-domain-state',
-    cutoverTask: 'TASK-2322.02',
+    cutoverTask: 'TASK-2322.07',
   },
   {
     id: 'checkpoint-read-review-commands',
@@ -206,7 +206,7 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     fileLocation: 'src/platform/runtime/lib/review/review-commands.ts',
     operation: 'read',
     classification: 'database-owned-domain-state',
-    cutoverTask: 'TASK-2322.02',
+    cutoverTask: 'TASK-2322.07',
   },
   // -----------------------------------------------------------------------
   // Review — nested Mission data (file-backed review-state.json)
@@ -218,7 +218,7 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     fileLocation: 'src/platform/runtime/lib/review/review-state.ts',
     operation: 'read',
     classification: 'database-owned-domain-state',
-    cutoverTask: 'TASK-2322.02',
+    cutoverTask: 'TASK-2322.07',
   },
   {
     id: 'review-write-review-state',
@@ -227,7 +227,7 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     fileLocation: 'src/platform/runtime/lib/review/review-state.ts',
     operation: 'write',
     classification: 'database-owned-domain-state',
-    cutoverTask: 'TASK-2322.02',
+    cutoverTask: 'TASK-2322.07',
   },
   {
     id: 'review-read-review-artifacts',
@@ -236,7 +236,7 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     fileLocation: 'src/platform/runtime/lib/review/review-artifacts.ts',
     operation: 'read',
     classification: 'database-owned-domain-state',
-    cutoverTask: 'TASK-2322.02',
+    cutoverTask: 'TASK-2322.07',
   },
   {
     id: 'review-write-review-events',
@@ -245,7 +245,7 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     fileLocation: 'src/platform/runtime/lib/review/review-events.ts',
     operation: 'write',
     classification: 'database-owned-domain-state',
-    cutoverTask: 'TASK-2322.02',
+    cutoverTask: 'TASK-2322.07',
   },
   {
     id: 'review-read-stats',
@@ -254,7 +254,7 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     fileLocation: 'src/platform/runtime/lib/commands/stats.ts',
     operation: 'read',
     classification: 'database-owned-domain-state',
-    cutoverTask: 'TASK-2322.02',
+    cutoverTask: 'TASK-2322.07',
   },
   {
     id: 'review-read-review-commands',
@@ -263,7 +263,7 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     fileLocation: 'src/platform/runtime/lib/review/review-commands.ts',
     operation: 'read',
     classification: 'database-owned-domain-state',
-    cutoverTask: 'TASK-2322.02',
+    cutoverTask: 'TASK-2322.07',
   },
   // -----------------------------------------------------------------------
   // MissionOutcome — derived from Mission + AgentRunMeasurement

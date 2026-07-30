@@ -1,9 +1,14 @@
 import { detectRebaseState, getCurrentBranch, getUncommittedCount, getLastThreeCommits, run } from '../core/git.js';
 import { findTaskFile, getTaskStatus } from '../tools/backlog.js';
-import { inferSlug, missionBranchPrefix, missionBranchName, getPrimaryWorktree } from '../core/mission-utils.js';
-// findMissionDir, findCheckpoints, getFirstLine are now routed through the projection (SC9).
-// Kept for parse-primitive fallback in the projection-unavailable path.
-import { findMissionDir, findCheckpoints, getFirstLine } from '../core/mission-utils.js';
+import {
+  findCheckpoints,
+  findMissionDir,
+  getFirstLine,
+  getPrimaryWorktree,
+  inferSlug,
+  missionBranchName,
+  missionBranchPrefix,
+} from '../core/mission-utils.js';
 import { WORKFLOW_AGENT_NAMES, eligibleAgentsForStep, readAgentConfigOrExit, workflowLauncherStatus } from '../agents/agents.js';
 import { getPrStatus } from '../tools/forgejo.js';
 import * as path from 'node:path';
@@ -213,21 +218,25 @@ async function status(args: string[], opts: {exit?: Function, log?: Function, in
       (builder) => builder.build(),
     ).catch(() => null);
 
-    /** Render checkpoint line via parse primitives (shared by both fallback paths). */
-    function logLastCheckpoint(taskSlug: string) {
-      const missionDir = findMissionDirFn(taskSlug);
-      if (missionDir) {
-        const checkpoints = findCheckpointsFn(missionDir);
-        if (checkpoints.length > 0) {
-          const lastCP = checkpoints[checkpoints.length - 1];
-          const firstLine = getFirstLineFn(lastCP);
-          log(`Last checkpoint: ${path.basename(lastCP)} - ${firstLine}`);
-        } else {
-          log('Last checkpoint: none');
-        }
-      } else {
+    function logParsePrimitiveFallback() {
+      const taskFile = findTaskFileFn(slug);
+      const taskStatus = taskFile ? getTaskStatusFn(taskFile) : null;
+      log(`Backlog status: ${taskStatus || 'unknown'}`);
+
+      const missionDir = findMissionDirFn(slug);
+      if (!missionDir) {
         log('Last checkpoint: unknown');
+        return;
       }
+
+      const checkpoints = findCheckpointsFn(missionDir);
+      if (checkpoints.length === 0) {
+        log('Last checkpoint: none');
+        return;
+      }
+
+      const lastCheckpoint = checkpoints[checkpoints.length - 1];
+      log(`Last checkpoint: ${path.basename(lastCheckpoint)} - ${getFirstLineFn(lastCheckpoint)}`);
     }
 
     if (projection) {
@@ -242,18 +251,10 @@ async function status(args: string[], opts: {exit?: Function, log?: Function, in
           log('Last checkpoint: none');
         }
       } else {
-        // Fallback to parse primitives if projection has no card for this slug
-        const taskFile = findTaskFileFn(slug);
-        const taskStatus = getTaskStatusFn(taskFile);
-        log(`Backlog status: ${taskStatus || 'unknown'}`);
-        logLastCheckpoint(slug);
+        logParsePrimitiveFallback();
       }
     } else {
-      // Projection unavailable — fall back to parse primitives
-      const taskFile = findTaskFileFn(slug);
-      const taskStatus = getTaskStatusFn(taskFile);
-      log(`Backlog status: ${taskStatus || 'unknown'}`);
-      logLastCheckpoint(slug);
+      logParsePrimitiveFallback();
     }
 
     // Forgejo PR state
