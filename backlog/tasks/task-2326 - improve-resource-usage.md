@@ -1,12 +1,15 @@
 ---
 id: TASK-2326
 title: improve resource usage
-status: active
-assignee: [custom]
+status: review
+assignee:
+  - custom
 created_date: '2026-07-30 07:45'
-labels: [user_value]
+updated_date: '2026-07-30 15:28'
+labels:
+  - user_value
 dependencies: []
-ordinal: 68000
+ordinal: 1000
 ---
 
 ## Description
