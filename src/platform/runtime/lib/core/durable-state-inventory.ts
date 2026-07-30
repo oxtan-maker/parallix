@@ -178,6 +178,15 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     classification: 'database-owned-domain-state',
     cutoverTask: 'TASK-2322.07',
   },
+  {
+    id: 'mission-importer-read',
+    concept: 'Mission',
+    pathType: 'compatibility',
+    fileLocation: 'src/adapters/sqlite/mission-importer.ts',
+    operation: 'read',
+    classification: 'database-owned-domain-state',
+    cutoverTask: 'TASK-2322.02',
+  },
   // -----------------------------------------------------------------------
   // CheckpointData — nested Mission data (file-backed)
   // -----------------------------------------------------------------------
