@@ -171,6 +171,38 @@ process.env.PATH = `${launcherBin}${path.delimiter}${process.env.PATH || ''}`;
 // test harness and execute the operator's real Pi CLI during a health probe.
 process.env.PI_BIN = path.join(launcherBin, 'pi');
 
+// Write per-worker manifest synchronously (before any workers spawn) so the
+// runner can reclaim these roots even when the child is SIGKILL'd (task-2326).
+// Each worker writes to its own <worker-PID>.json file inside the manifest
+// directory, so concurrent workers do not overwrite each other's root lists.
+const manifestDir = process.env.PARALLIX_TEST_MANIFEST_DIR;
+const workerManifestPath = manifestDir
+  ? path.join(manifestDir, `${process.pid}.json`)
+  : null;
+
+function flushManifest() {
+  if (!workerManifestPath) return;
+  try {
+    fs.writeFileSync(workerManifestPath, JSON.stringify(tempRoots));
+  } catch (_) {
+    // best-effort manifest write
+  }
+}
+
+flushManifest();
+
+// Register an additional temp root with the manifest so the runner can
+// reclaim it on SIGKILL. Test files that create their own temporary
+// directories (e.g., via mkdtempSync) should call this to ensure those
+// directories are cleaned up even when the worker is killed.
+function registerTempRoot(dir) {
+  if (dir && !tempRoots.includes(dir)) {
+    tempRoots.push(dir);
+    flushManifest();
+  }
+  return dir;
+}
+
 // Idempotent cleanup: safe to invoke from both `exit` and `SIGTERM`.
 // When `SIGTERM` fires first, cleanup runs and then `process.exit()`
 // triggers the `exit` event — the second invocation is a no-op because
@@ -202,6 +234,6 @@ process.on('exit', () => {
   cleanupTempDirs();
 });
 
-// Expose tempRoots so child processes (e.g., SIGKILL regression test) can
-// record every directory the bootstrap creates and clean them up in the parent.
-module.exports = { tempRoots };
+// Expose tempRoots and registerTempRoot so child processes and test files
+// can record every directory and ensure cleanup on SIGKILL (task-2326).
+module.exports = { tempRoots, registerTempRoot };

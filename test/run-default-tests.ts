@@ -115,25 +115,53 @@ const knownIntegrationTestFiles = new Set([
   'review-identity-placeholder.test.ts',
   'review.test.ts',
   'review-prompts.test.ts',
-  'task-1416-repro.test.ts'
+  'task-1416-repro.test.ts',
+  // TASK-2326: relocated from default suite — these cross a real process,
+  // Git, or packaging boundary and are not hermetic unit tests.
+  'task-2285-pack-install-smoke.test.ts',
+  'task-2286-native-sea-smoke.test.ts',
+  'task-2312-label-sync.test.ts',
+  'task-2318-temp-directory-leaks.test.js',
+  'task-2319-notices-git-tracking.test.ts',
+  // TASK-2326 round 2: tui-spawn uses execFileSync (real process boundary)
+  // and was relocated from the default suite to integration.
+  'tui-spawn.test.ts',
+  // TASK-2326 round 3: tests exceeding 1 s per test in the unit suite.
+  // These are heavy (Ink render cycles, full status command, SDK sessions)
+  // but do not necessarily cross a process boundary.
+  'pi-runner.test.ts',
+  'task-1104-call-order.test.ts',
+  'task-1268-pre-review-gate-per-round.test.ts',
+  'task-2311-console-empty-repro.test.ts',
+  'task-2313-repro.test.ts',
+  'tui-action-bar.test.ts',
+  'tui-confirmation.test.ts',
+  'tui-lane-columns.test.ts',
+  'tui-outcome-banner.test.ts',
+  'tui-pty-smoke.test.ts',
+  'tui-responsive-layout.test.ts',
+  // Subdir: status-characterization exercises the full status command
+  // (BoardProjectionBuilder + projection pipeline) and is 15–23 s per test.
+  'adapters/status-characterization-cp4.test.ts'
 ]);
 
-// Classify subdir tests through the same boundary filter as root-level tests.
-const subdirIntegrationFiles = allSubdirTestFiles.filter(
-  fp => boundaryDependencyPattern.test(fs.readFileSync(fp, 'utf8')),
-);
+// Classify subdir tests through the same boundary filter as root-level tests,
+// plus any explicitly registered in knownIntegrationTestFiles (relative path).
+const subdirIntegrationFiles = allSubdirTestFiles.filter(fp => {
+  const relativePath = path.relative(testRoot, fp);
+  return knownIntegrationTestFiles.has(relativePath)
+    || boundaryDependencyPattern.test(fs.readFileSync(fp, 'utf8'));
+});
 const subdirUnitFiles = allSubdirTestFiles.filter(fp => !subdirIntegrationFiles.includes(fp));
 
-// tui-spawn.test.ts uses execFileSync but is an artifact-verification test
-// (spawns build/px.mjs to check exit codes). In the default
-// suite the child inherits the curl shim and temp HOME — the 30 s timeout
-// and the marker unlink in after() absorb the shim impact. When explicitly
-// requested as the sole file, the bootstrap preload is bypassed so the child
-// runs with the real environment.
-const artifactSpawnTestFiles = new Set(['tui-spawn.test.ts']);
+// tui-spawn.test.ts uses execFileSync (artifact-verification test that
+// spawns build/px.mjs). It crosses a real process boundary and was
+// relocated to the integration layer in task-2326 round 2.
+// When explicitly requested as the sole file, the bootstrap preload is
+// bypassed so the child runs with the real environment.
+const artifactSpawnTestFiles = new Set();
 const integrationTestFiles = allRootTestFiles
   .filter(file => {
-    if (artifactSpawnTestFiles.has(file)) { return false; }
     // New boundary tests declare their category in the filename. This avoids
     // silently activating real databases/filesystems/processes in `npm test`
     // merely because a heuristic did not recognize their dependency.
@@ -217,28 +245,99 @@ const testForceExitArgs = supportsTestForceExit(testNode)
   ? ['--test-force-exit']
   : [];
 
+// TASK-2326: enforceable unit-test timing guard.
+// Per-test timeout: 30 s catches tests that should be hermetic but cross a
+// process boundary (real Git, npm, agent launch). Integration tests run via
+// --integration and are exempt from this bound.
+// Suite-level budget: 180 s for the full default suite on a typical developer
+// workstation. Adjust PARALLIX_UNIT_TEST_BUDGET_MS to override.
+const UNIT_TEST_TIMEOUT_MS = 30_000;
+const UNIT_TEST_BUDGET_MS = Number(process.env.PARALLIX_UNIT_TEST_BUDGET_MS) || 180_000;
+const testTimeoutArgs = runsIntegrationSuite ? [] : ['--test-timeout=' + UNIT_TEST_TIMEOUT_MS];
+
+// Per-worker manifest directory for SIGKILL orphan cleanup.
+// The runner creates a PID-scoped directory and passes its path to the child
+// process via PARALLIX_TEST_MANIFEST_DIR. Each worker (including the main child
+// process) writes its own <worker-PID>.json file inside the directory, so
+// concurrent workers do not overwrite each other's root lists (task-2326 round 5).
+// After the suite completes, the runner reads all files and unions the roots.
+const testManifestDir = path.join(os.tmpdir(), `parallix-test-run-${process.pid}`);
+fs.mkdirSync(testManifestDir, { recursive: true });
+
+// Measure elapsed time for the suite-level budget check.
+// process.hrtime may be undefined in vm.runInNewContext (default-test-suite test sandbox).
+const suiteStart = typeof process.hrtime === 'function' ? process.hrtime.bigint() : 0n;
 const result = spawnSync(
   testNode,
   [
     ...bootstrapArgs,
     ...typeScriptLoaderArgs,
     ...testForceExitArgs,
+    ...testTimeoutArgs,
     '--test',
     ...testFiles
   ],
   {
     stdio: 'inherit',
     cwd: executionRoot,
-    env: { ...process.env, PARALLIX_EXECUTION_ROOT: executionRoot }
+    env: {
+      ...process.env,
+      PARALLIX_EXECUTION_ROOT: executionRoot,
+      PARALLIX_TEST_MANIFEST_DIR: testManifestDir,
+    }
   }
 );
+const suiteElapsedMs = suiteStart !== 0n
+  ? Number(process.hrtime.bigint() - suiteStart) / 1e6
+  : 0;
 
 if (result.error) {
   throw result.error;
+}
+
+// SIGKILL cleanup: child test workers cannot catch SIGKILL, so their
+// bootstrap temp directories (parallix-test-*) persist after forced exit.
+// The runner reads per-worker manifest files from the manifest directory
+// and unions all roots — safely ignoring roots from concurrent test runs.
+// This is the safe owner/boundary for the SIGKILL artifact class (task-2326).
+function cleanupOrphanedTempDirs() {
+  try {
+    if (!fs.existsSync(testManifestDir)) return;
+    const ownedRoots = new Set();
+    for (const entry of fs.readdirSync(testManifestDir)) {
+      if (!entry.endsWith('.json')) continue;
+      try {
+        const roots = JSON.parse(fs.readFileSync(path.join(testManifestDir, entry), 'utf8'));
+        if (Array.isArray(roots)) roots.forEach(r => ownedRoots.add(r));
+      } catch (_) { /* best-effort */ }
+    }
+    for (const dir of ownedRoots) {
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) {}
+    }
+    try { fs.rmSync(testManifestDir, { recursive: true, force: true }); } catch (_) {}
+  } catch (_) {
+    // best-effort cleanup only
+  }
 }
 
 if (result.signal) {
   process.kill(process.pid, result.signal);
 }
 
-process.exit(result.status ?? 1);
+// Suite-level budget enforcement (unit suite only).
+// Compare measured elapsed time against the configured budget.
+// If exceeded, the suite fails even if all individual tests passed.
+let suiteExceeded = false;
+if (!runsIntegrationSuite) {
+  const actualBudget = UNIT_TEST_BUDGET_MS;
+  console.error(`[unit-test-budget] timeout=${UNIT_TEST_TIMEOUT_MS}ms per test, suite budget=${actualBudget}ms, elapsed=${Math.round(suiteElapsedMs)}ms`);
+  if (result.status === 0 && suiteElapsedMs > actualBudget) {
+    console.error(`[unit-test-budget] SUITE BUDGET EXCEEDED: ${Math.round(suiteElapsedMs)}ms > ${actualBudget}ms`);
+    suiteExceeded = true;
+  }
+}
+
+// Clean up orphaned temp directories from SIGKILL'd child processes.
+cleanupOrphanedTempDirs();
+
+process.exit(result.status || (suiteExceeded ? 1 : 0));

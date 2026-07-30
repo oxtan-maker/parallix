@@ -91,7 +91,9 @@ test('task-2285 checksum manifest covers every build/ file except itself', () =>
   );
   const walk = (dir: string, prefix = ''): string[] => fs.readdirSync(dir, { withFileTypes: true })
     .flatMap((entry: any) => (entry.isDirectory()
-      ? walk(path.join(dir, entry.name), `${prefix}${entry.name}/`)
+      ? (entry.name === 'sea' ? [] : walk(path.join(dir, entry.name), `${prefix}${entry.name}/`))
+        // build/sea is owned by the SEA build script and is not part of the
+        // canonical bundle's checksum manifest (task-2286).
       : [`${prefix}${entry.name}`]));
   const present = walk(buildDir).filter(file => file !== 'manifest.sha256').sort();
   assert.deepEqual(present, [...recorded.keys()].sort(), 'manifest must list exactly the build outputs');
