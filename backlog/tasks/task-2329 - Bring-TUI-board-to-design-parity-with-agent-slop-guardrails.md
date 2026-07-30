@@ -1,7 +1,7 @@
 ---
 id: TASK-2329
 title: Bring TUI board to design parity with agent slop guardrails
-status: review
+status: ready-for-integration
 assignee: [custom]
 created_date: '2026-07-30 00:00'
 updated_date: '2026-07-30 00:00'
