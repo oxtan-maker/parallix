@@ -9,6 +9,7 @@ labels:
   - tui
   - board
   - ui
+  - user_value
 dependencies: []
 references:
   - /tmp/Parallix Kanban Board Controller.zip (design source — HTML mockup only)
