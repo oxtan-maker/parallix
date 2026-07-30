@@ -180,3 +180,336 @@ test('bootstrap temp directories are cleaned up after SIGKILL termination', asyn
     try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) {}
   }
 });
+
+test('runner orphan cleanup reclaims SIGKILL temp directories', async () => {
+  // Regression test for task-2326: the bootstrap writes a per-worker manifest
+  // synchronously to a directory (PARALLIX_TEST_MANIFEST_DIR), so it survives SIGKILL.
+  // The runner reads all <PID>.json files from the directory and unions the roots.
+  // This test verifies the real SIGKILL path: spawn child with manifest dir,
+  // SIGKILL child, verify manifest was written by bootstrap, then clean.
+
+  const manifestDir = path.join(os.tmpdir(), MARKER_PREFIX + Date.now() + '-' + process.pid + '-run');
+  fs.mkdirSync(manifestDir, { recursive: true });
+
+  // Spawn a child that loads the bootstrap with manifest dir env var.
+  // The bootstrap writes per-worker manifest synchronously (before any workers).
+  const child = spawn(process.execPath, [
+    '-e',
+    [
+      `require('./test/bootstrap-parallix-home.js');`,
+      `setTimeout(() => {}, 30000);`,
+    ].join('\n'),
+  ], {
+    stdio: 'pipe',
+    env: { ...process.env, PARALLIX_TEST_MANIFEST_DIR: manifestDir },
+  });
+
+  // Wait briefly for bootstrap to complete (manifest written synchronously)
+  await new Promise(resolve => setTimeout(resolve, 500));
+
+  // Verify the manifest directory has a file written by the bootstrap
+  const entries = fs.readdirSync(manifestDir).filter(e => e.endsWith('.json'));
+  assert.ok(entries.length > 0, 'Bootstrap must write per-worker manifest synchronously');
+
+  // Union all roots from all manifest files (matches runner cleanup)
+  const allRoots = [];
+  for (const entry of entries) {
+    const roots = JSON.parse(fs.readFileSync(path.join(manifestDir, entry), 'utf8'));
+    if (Array.isArray(roots)) allRoots.push(...roots);
+  }
+  assert.ok(allRoots.length > 0, 'Manifest must contain root directories');
+
+  // Verify all manifest roots exist on disk
+  const allExist = allRoots.every(dir => fs.existsSync(dir));
+  assert.ok(allExist, 'All manifest roots must exist on disk before SIGKILL');
+
+  // SIGKILL the child (simulates --test-force-exit)
+  child.kill('SIGKILL');
+  await new Promise(resolve => { child.on('close', resolve); });
+
+  // Verify directories still exist after SIGKILL (no handler can catch it)
+  const leakedAfter = allRoots.filter(dir => fs.existsSync(dir));
+  assert.equal(
+    leakedAfter.length,
+    allRoots.length,
+    `SIGKILL leaves all directories behind (${leakedAfter.length} leaked)`,
+  );
+
+  // Run manifest-based cleanup (matches cleanupOrphanedTempDirs in runner)
+  for (const dir of allRoots) {
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) {}
+  }
+  try { fs.rmSync(manifestDir, { recursive: true, force: true }); } catch (_) {}
+
+  // Verify all directories are now removed
+  const stillLeaked = allRoots.filter(dir => fs.existsSync(dir));
+  assert.equal(
+    stillLeaked.length,
+    0,
+    `Runner orphan cleanup did not reclaim all directories: ${stillLeaked.join(', ')}`,
+  );
+});
+
+test('runner orphan cleanup is safe with concurrent test runs', async () => {
+  // Regression test for task-2326 round 3: two concurrent runners must not
+  // delete each other's active roots. Each runner uses a PID-scoped manifest
+  // directory (per-worker files written synchronously by bootstrap), so
+  // cleanup only touches roots listed in its own directory.
+
+  const manifestDirA = path.join(os.tmpdir(), MARKER_PREFIX + Date.now() + '-A-run');
+  const manifestDirB = path.join(os.tmpdir(), MARKER_PREFIX + Date.now() + '-B-run');
+  fs.mkdirSync(manifestDirA, { recursive: true });
+  fs.mkdirSync(manifestDirB, { recursive: true });
+
+  // Spawn two children with separate manifest dirs (bootstrap writes synchronously)
+  const childA = spawn(process.execPath, [
+    '-e',
+    [
+      `require('./test/bootstrap-parallix-home.js');`,
+      `setTimeout(() => {}, 30000);`,
+    ].join('\n'),
+  ], { stdio: 'pipe', env: { ...process.env, PARALLIX_TEST_MANIFEST_DIR: manifestDirA } });
+
+  const childB = spawn(process.execPath, [
+    '-e',
+    [
+      `require('./test/bootstrap-parallix-home.js');`,
+      `setTimeout(() => {}, 30000);`,
+    ].join('\n'),
+  ], { stdio: 'pipe', env: { ...process.env, PARALLIX_TEST_MANIFEST_DIR: manifestDirB } });
+
+  // Wait for both bootstraps to complete (manifests written synchronously)
+  await new Promise(resolve => setTimeout(resolve, 500));
+
+  // Read all manifest files from each directory
+  const readManifestDir = (dir) => {
+    const roots = [];
+    for (const entry of fs.readdirSync(dir).filter(e => e.endsWith('.json'))) {
+      const r = JSON.parse(fs.readFileSync(path.join(dir, entry), 'utf8'));
+      if (Array.isArray(r)) roots.push(...r);
+    }
+    return roots;
+  };
+  const rootsA = readManifestDir(manifestDirA);
+  const rootsB = readManifestDir(manifestDirB);
+
+  // Verify all directories exist
+  const allExist = [...rootsA, ...rootsB].every(dir => fs.existsSync(dir));
+  assert.ok(allExist, 'All bootstrap directories must exist before cleanup');
+
+  // SIGKILL child A (simulates runner A completing with forced exit)
+  childA.kill('SIGKILL');
+  await new Promise(r => childA.on('close', r));
+
+  // Runner A reads its manifest dir and cleans only its roots
+  for (const dir of rootsA) {
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) {}
+  }
+  try { fs.rmSync(manifestDirA, { recursive: true, force: true }); } catch (_) {}
+
+  // Verify runner B's roots still exist (not deleted by runner A's cleanup)
+  const bDirsSurvived = rootsB.filter(dir => fs.existsSync(dir));
+  assert.equal(
+    bDirsSurvived.length,
+    rootsB.length,
+    `Runner A must not delete runner B's roots: ${rootsB.length - bDirsSurvived.length} deleted`,
+  );
+
+  // Clean up runner B's roots and child
+  for (const dir of rootsB) {
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) {}
+  }
+  try { fs.rmSync(manifestDirB, { recursive: true, force: true }); } catch (_) {}
+  childB.kill('SIGKILL');
+  await new Promise(r => childB.on('close', r));
+});
+
+test('registerTempRoot adds test-created directories to the manifest', async () => {
+  // Regression test for task-2326 round 4: test files that create their own
+  // temporary directories (e.g., via mkdtempSync with 'task-*' prefix) must
+  // register them so the runner can reclaim them on SIGKILL.
+
+  const manifestDir = path.join(os.tmpdir(), MARKER_PREFIX + Date.now() + '-' + process.pid + '-register');
+  fs.mkdirSync(manifestDir, { recursive: true });
+
+  const child = spawn(process.execPath, [
+    '-e',
+    [
+      `const bootstrap = require('./test/bootstrap-parallix-home.js');`,
+      `const fs = require('fs');`,
+      `const os = require('os');`,
+      `const path = require('path');`,
+      // Create a custom temp directory (simulates test file creating its own dir)
+      `const customDir = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2318-custom-'));`,
+      // Register it with the bootstrap manifest
+      `bootstrap.registerTempRoot(customDir);`,
+      `setTimeout(() => {}, 30000);`,
+    ].join('\n'),
+  ], {
+    stdio: 'pipe',
+    env: { ...process.env, PARALLIX_TEST_MANIFEST_DIR: manifestDir },
+  });
+
+  // Wait for bootstrap + registration to complete
+  await new Promise(resolve => setTimeout(resolve, 500));
+
+  // Read the manifest and verify the custom dir is included
+  const entries = fs.readdirSync(manifestDir).filter(e => e.endsWith('.json'));
+  assert.ok(entries.length > 0, 'Manifest file must exist');
+
+  const allRoots = [];
+  for (const entry of entries) {
+    const roots = JSON.parse(fs.readFileSync(path.join(manifestDir, entry), 'utf8'));
+    if (Array.isArray(roots)) allRoots.push(...roots);
+  }
+
+  // The custom directory must be in the manifest roots
+  const hasCustomDir = allRoots.some(dir => dir.includes('task-2318-custom-'));
+  assert.ok(
+    hasCustomDir,
+    `registerTempRoot must add custom directory to manifest (roots: ${allRoots.length} total)`,
+  );
+
+  // SIGKILL child and verify cleanup via manifest reclaims the custom dir
+  child.kill('SIGKILL');
+  await new Promise(r => child.on('close', r));
+
+  // Custom dir should still exist after SIGKILL
+  const customDirs = allRoots.filter(dir => dir.includes('task-2318-custom-'));
+  assert.ok(
+    customDirs.every(dir => fs.existsSync(dir)),
+    'Custom directory must exist after SIGKILL (before runner cleanup)',
+  );
+
+  // Clean up via manifest (matches runner cleanup)
+  for (const dir of allRoots) {
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) {}
+  }
+  try { fs.rmSync(manifestDir, { recursive: true, force: true }); } catch (_) {}
+
+  // Verify custom dir is now removed
+  const stillLeaked = customDirs.filter(dir => fs.existsSync(dir));
+  assert.equal(
+    stillLeaked.length,
+    0,
+    `Runner cleanup must reclaim registered custom directories: ${stillLeaked.join(', ')}`,
+  );
+});
+
+test('test/helpers/temp-dir.js mkdtemp registers directory with manifest', async () => {
+  // Verify the temp-dir helper module registers directories with the manifest.
+
+  const manifestDir = path.join(os.tmpdir(), MARKER_PREFIX + Date.now() + '-' + process.pid + '-helper');
+  fs.mkdirSync(manifestDir, { recursive: true });
+
+  const child = spawn(process.execPath, [
+    '-e',
+    [
+      `require('./test/bootstrap-parallix-home.js');`,
+      `const { mkdtemp } = require('./test/helpers/temp-dir.js');`,
+      `const dir = mkdtemp('task-2318-helper-');`,
+      `process.env._TEST_TEMP_DIR = dir;`,
+      `setTimeout(() => {}, 30000);`,
+    ].join('\n'),
+  ], {
+    stdio: 'pipe',
+    env: { ...process.env, PARALLIX_TEST_MANIFEST_DIR: manifestDir },
+  });
+
+  await new Promise(resolve => setTimeout(resolve, 500));
+
+  // Read manifest
+  const entries = fs.readdirSync(manifestDir).filter(e => e.endsWith('.json'));
+  const allRoots = [];
+  for (const entry of entries) {
+    const roots = JSON.parse(fs.readFileSync(path.join(manifestDir, entry), 'utf8'));
+    if (Array.isArray(roots)) allRoots.push(...roots);
+  }
+
+  const hasHelperDir = allRoots.some(dir => dir.includes('task-2318-helper-'));
+  assert.ok(
+    hasHelperDir,
+    'temp-dir.js mkdtemp must register directory with manifest',
+  );
+
+  child.kill('SIGKILL');
+  await new Promise(r => child.on('close', r));
+
+  // Clean up
+  for (const dir of allRoots) {
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) {}
+  }
+  try { fs.rmSync(manifestDir, { recursive: true, force: true }); } catch (_) {}
+});
+
+test('parallel workers each write their own manifest file in shared directory', async () => {
+  // Regression test for task-2326 round 5: multiple workers sharing one
+  // manifest directory must each write a separate <PID>.json file so no
+  // worker's roots are lost when another worker writes concurrently.
+
+  const manifestDir = path.join(os.tmpdir(), MARKER_PREFIX + Date.now() + '-parallel-workers');
+  fs.mkdirSync(manifestDir, { recursive: true });
+
+  // Spawn three children that all share the same manifest directory
+  const children = [];
+  for (let i = 0; i < 3; i++) {
+    children.push(spawn(process.execPath, [
+      '-e',
+      [
+        `require('./test/bootstrap-parallix-home.js');`,
+        `setTimeout(() => {}, 30000);`,
+      ].join('\n'),
+    ], { stdio: 'pipe', env: { ...process.env, PARALLIX_TEST_MANIFEST_DIR: manifestDir } }));
+  }
+
+  // Wait for all bootstraps to complete
+  await new Promise(resolve => setTimeout(resolve, 1000));
+
+  // Verify each worker wrote its own manifest file
+  const entries = fs.readdirSync(manifestDir).filter(e => e.endsWith('.json'));
+  assert.equal(
+    entries.length,
+    3,
+    `Each worker must write its own manifest file (found ${entries.length}, expected 3)`,
+  );
+
+  // Union all roots from all manifest files
+  const allRoots = [];
+  for (const entry of entries) {
+    const roots = JSON.parse(fs.readFileSync(path.join(manifestDir, entry), 'utf8'));
+    if (Array.isArray(roots)) allRoots.push(...roots);
+  }
+  assert.ok(allRoots.length > 0, 'Manifests must contain root directories');
+
+  // Verify all roots exist on disk
+  const allExist = allRoots.every(dir => fs.existsSync(dir));
+  assert.ok(allExist, 'All manifest roots must exist on disk');
+
+  // SIGKILL all children
+  for (const child of children) {
+    child.kill('SIGKILL');
+  }
+  await Promise.all(children.map(c => new Promise(r => c.on('close', r))));
+
+  // Verify directories still exist after SIGKILL
+  const leakedAfter = allRoots.filter(dir => fs.existsSync(dir));
+  assert.equal(
+    leakedAfter.length,
+    allRoots.length,
+    `SIGKILL leaves all directories behind (${leakedAfter.length} leaked)`,
+  );
+
+  // Run manifest-based cleanup (matches cleanupOrphanedTempDirs in runner)
+  for (const dir of allRoots) {
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) {}
+  }
+  try { fs.rmSync(manifestDir, { recursive: true, force: true }); } catch (_) {}
+
+  // Verify all directories are now removed
+  const stillLeaked = allRoots.filter(dir => fs.existsSync(dir));
+  assert.equal(
+    stillLeaked.length,
+    0,
+    `Runner orphan cleanup did not reclaim all directories: ${stillLeaked.join(', ')}`,
+  );
+});

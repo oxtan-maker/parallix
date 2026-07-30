@@ -1,0 +1,28 @@
+{
+  "reviewer": "codex",
+  "implementer": "custom",
+  "round": 5,
+  "startedAt": "2026-07-30T10:02:52.232Z",
+  "phase": "reviewing",
+  "disposition": "MAX_ATTEMPTS",
+  "metadata": {
+    "recordedStageLaunches": {
+      "review:codex": [
+        "codex||2026-07-30T09:03:49.483Z|2026-07-30T09:05:32.229Z|0",
+        "codex||2026-07-30T09:20:57.143Z|2026-07-30T09:22:55.151Z|0",
+        "codex||2026-07-30T09:37:08.931Z|2026-07-30T09:38:19.449Z|0",
+        "codex||2026-07-30T09:56:35.888Z|2026-07-30T09:57:38.375Z|0",
+        "codex||2026-07-30T10:07:04.853Z|2026-07-30T10:07:52.162Z|0"
+      ],
+      "follow-up:custom": [
+        "custom|019fb245-9ad1-7a1c-98bc-6e608fc1ab4f|2026-07-30T09:19:36.311Z|2026-07-30T09:19:36.311Z|0",
+        "custom|019fb245-9ad1-7a1c-98bc-6e608fc1ab4f|2026-07-30T09:32:59.531Z|2026-07-30T09:32:59.531Z|0",
+        "custom|019fb245-9ad1-7a1c-98bc-6e608fc1ab4f|2026-07-30T09:52:17.367Z|2026-07-30T09:52:17.367Z|0",
+        "custom|019fb245-9ad1-7a1c-98bc-6e608fc1ab4f|2026-07-30T10:02:50.079Z|2026-07-30T10:02:50.079Z|0",
+        "custom|019fb245-9ad1-7a1c-98bc-6e608fc1ab4f|2026-07-30T10:12:24.457Z|2026-07-30T10:12:24.457Z|0"
+      ]
+    },
+    "humanEscalationReason": "MAX_ATTEMPTS",
+    "humanEscalatedAt": "2026-07-30T10:12:25.560Z"
+  }
+}

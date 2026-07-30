@@ -1,0 +1,15 @@
+{
+  "slug": "task-2326",
+  "predictedBucket": "Medium",
+  "actualNel": 199,
+  "actualBucket": "Medium",
+  "reviewRounds": 1,
+  "capturedAt": "2026-07-30T08:55:12.500Z",
+  "artifacts": [
+    {
+      "kind": "git-range",
+      "location": "main..HEAD",
+      "byteSize": null
+    }
+  ]
+}

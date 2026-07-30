@@ -67,11 +67,23 @@ process.on('exit', () => {
 
 /** Replace `published` with `staging` as close to atomically as the filesystem allows. */
 function publishTree(staging: string, published: string): void {
+  // Preserve build/sea (owned by the SEA build script) so a bundle rebuild
+  // does not wipe out the native executable while its smoke test runs in
+  // parallel (task-2286 integration suite).
+  const seaDir = path.join(published, 'sea');
+  const seaExists = fs.existsSync(seaDir);
+  const savedSea = seaExists ? path.join(root, `.sea-preserve.${process.pid}`) : null;
+  if (seaExists) { fs.renameSync(seaDir, savedSea!); }
+
   const retired = `${published}.retired.${process.pid}`;
   fs.rmSync(retired, RM_OPTIONS);
   if (fs.existsSync(published)) { fs.renameSync(published, retired); }
   fs.renameSync(staging, published);
   fs.rmSync(retired, RM_OPTIONS);
+
+  if (seaExists && savedSea) {
+    fs.renameSync(savedSea, path.join(published, 'sea'));
+  }
 }
 
 fs.rmSync(buildDir, RM_OPTIONS);
