@@ -1,7 +1,7 @@
 ---
 id: TASK-2326
 title: improve resource usage
-status: backlog
+status: refined
 assignee: [codex]
 created_date: '2026-07-30 07:45'
 labels: [user_value]
