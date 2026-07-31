@@ -146,6 +146,7 @@ test('pushRound follows the transition contract: review before createPr', async 
 });
 
 const { performHandoff } = require('../.test-runtime/lib/commands/handoff');
+const { stubMissionServices } = require('./helpers/stub-mission-services');
 const forgejo = require('../.test-runtime/lib/tools/forgejo');
 const gatekeeper = require('../.test-runtime/lib/tools/gatekeeper');
 const backlog = require('../.test-runtime/lib/tools/backlog');
@@ -194,7 +195,7 @@ test('performHandoff follows the sequence: createPr -> gatekeeper -> transitionT
 
   try {
     const mockRebase = async () => ({ ok: true, sharedFileConflicts: false });
-    await performHandoff(slug, { skipGate: true, isForgejoReviewEnabledFn: () => true, rebaseFn: mockRebase });
+    await performHandoff(slug, { skipGate: true, isForgejoReviewEnabledFn: () => true, rebaseFn: mockRebase, missionServicesFn: stubMissionServices() });
 
     const relevantEvents = events.filter(e => e.type === 'createPr' || e.type === 'gatekeeper' || e.type === 'transition' || e.type === 'push');
     

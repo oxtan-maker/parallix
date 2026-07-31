@@ -39,7 +39,7 @@ import {
  */
 function parseAssigneeValue(raw: string | string[]): string | null {
   if (Array.isArray(raw)) {
-    return raw.length > 0 ? raw[0].trim() : null;
+    return raw.length > 0 ? normalizeAssignee(raw[0]) : null;
   }
   const trimmed = raw.trim();
   // Inline YAML list: [codex] or [codex, claude]
@@ -49,9 +49,30 @@ function parseAssigneeValue(raw: string | string[]): string | null {
       return null;
     }
     // Take first item from comma-separated list
-    return inner.split(',')[0].trim();
+    return normalizeAssignee(inner.split(',')[0]);
   }
-  return trimmed || null;
+  return normalizeAssignee(trimmed);
+}
+
+/**
+ * Strip surrounding YAML quotes (single or double) and a leading @ mention
+ * prefix from a raw assignee token so it matches agentFamily()'s
+ * /^[a-z][a-z0-9-]*$/ requirement.
+ */
+function normalizeAssignee(value: string): string | null {
+  let token = value.trim();
+  // Strip surrounding YAML quotes
+  if (
+    (token.startsWith("'") && token.endsWith("'")) ||
+    (token.startsWith('"') && token.endsWith('"'))
+  ) {
+    token = token.slice(1, -1);
+  }
+  // Strip leading @ mention prefix
+  if (token.startsWith('@')) {
+    token = token.slice(1);
+  }
+  return token || null;
 }
 
 /**

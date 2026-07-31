@@ -23,6 +23,12 @@ test('Backlog adapter maps persisted and virtual queue vocabulary to domain stat
   assert.equal(missionStatusFromBacklog('not-a-state'), null);
 });
 
+test('missionStatusFromBacklog maps "open" to "backlog"', () => {
+  assert.equal(missionStatusFromBacklog('open'), 'backlog');
+  assert.equal(missionStatusFromBacklog('OPEN'), 'backlog');
+  assert.equal(missionStatusFromBacklog(' Open '), 'backlog');
+});
+
 function record(overrides: Partial<BacklogMissionRecord> = {}): BacklogMissionRecord {
   return {
     id: missionId('task-2294'),

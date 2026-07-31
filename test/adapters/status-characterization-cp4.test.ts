@@ -159,9 +159,10 @@ test('status output: checkpoint format preserved (rawFilename + firstLine) (SC9)
   );
 });
 
-test('status output: fallback path renders checkpoint via parse primitives (SC9)', async () => {
-  // When the projection has no card for the slug, the fallback must use
-  // findMissionDirFn / findCheckpointsFn / getFirstLineFn — not hardcode 'unknown'.
+test('status output: fallback path reports projection unavailable (SC9, post-SQLite cutover)', async () => {
+  // SC3: after the SQLite cutover, the fallback no longer reads legacy files
+  // (task frontmatter, CP-N.md). It reports that the projection is unavailable
+  // because the SQLite store is the sole authority for Mission domain state.
   const opts = buildCommonOpts({
     // Force a slug the projection won't have a card for
     inferSlugFn: () => 'task-fallback-only',
@@ -172,11 +173,17 @@ test('status output: fallback path renders checkpoint via parse primitives (SC9)
     getFirstLineFn: () => 'Fix the output contract',
   });
   const output = await captureOutput(['task-fallback-only'], opts);
+  const statusLine = output.find((line) => line.startsWith('Backlog status:'));
+  assert.equal(
+    statusLine,
+    'Backlog status: unknown (projection unavailable)',
+    'Fallback must report projection unavailable, not read legacy files',
+  );
   const cpLine = output.find((line) => line.startsWith('Last checkpoint:'));
   assert.equal(
     cpLine,
-    'Last checkpoint: CP-3.md - Fix the output contract',
-    'Fallback must render checkpoint filename and description via parse primitives',
+    'Last checkpoint: none',
+    'Fallback must report no checkpoint, not read CP-N.md files',
   );
 });
 

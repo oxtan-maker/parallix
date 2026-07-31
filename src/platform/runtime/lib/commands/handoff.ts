@@ -18,6 +18,8 @@ import { writeJson } from '../core/storage.js';
 import { createMissionApplicationServices } from '../composition/application-services.js';
 import { artifactReference } from '../../../../domain/net-engineering-lines.js';
 import { attemptAgentRelaunch } from './active.js';
+import { startReview, ConfiguredReviewerEligibility, changeRevision } from '../../../../domain/review.js';
+import { agentFamily } from '../../../../domain/agents.js';
 
 // Export for testing
 export { evidenceCellHasVerifiableReference as _evidenceCellHasVerifiableReference };
@@ -215,7 +217,7 @@ function findUnverifiableGoalCheckRow(evidenceRows: string[], rootDir: string): 
   * @returns {Promise<{ ok: boolean, error?: string, gatekeeperPushedBack?: boolean }>}
   */
   async function performHandoff(slug, options = {}) {
-      /** @type{{skipGate?: boolean, worktree?: string|null, force?: boolean, forceWithLease?: boolean, log?: Function, error?: Function, rebaseFn?: Function, isForgejoReviewEnabledFn?: Function, runVerificationGateFn?: Function, maxAttempts?: number, attemptAgentRelaunchFn?: Function, remainingRetries?: number, runGatekeeperFn?: Function, captureNelFn?: Function}} */
+      /** @type{{skipGate?: boolean, worktree?: string|null, force?: boolean, forceWithLease?: boolean, log?: Function, error?: Function, rebaseFn?: Function, isForgejoReviewEnabledFn?: Function, runVerificationGateFn?: Function, maxAttempts?: number, attemptAgentRelaunchFn?: Function, remainingRetries?: number, runGatekeeperFn?: Function, captureNelFn?: Function, missionServicesFn?: Function}} */
        const opts = options;
        const {
          skipGate = false,
@@ -230,7 +232,8 @@ function findUnverifiableGoalCheckRow(evidenceRows: string[], rootDir: string): 
          attemptAgentRelaunchFn = attemptAgentRelaunch,
          remainingRetries,
          runGatekeeperFn = gatekeeper.runGatekeeper,
-         captureNelFn = captureNelAtHandoff
+         captureNelFn = captureNelAtHandoff,
+         missionServicesFn = createMissionApplicationServices
        } = opts;
 
     // Recursion guard: prevent infinite retry loops when gatekeeper pushback
@@ -405,41 +408,13 @@ function findUnverifiableGoalCheckRow(evidenceRows: string[], rootDir: string): 
     }
   }
 
-  // Step 1.7: NEL capture — compute actual NEL from merge diff and persist record
+  // Step 1.7: NEL capture — compute actual NEL from merge diff and persist record.
+  // SC5: NEL is persisted through SqliteMissionStore.recordNel() via the Mission
+  // use case; nel-record.json is no longer staged or committed because the SQLite
+  // database is the sole durable authority for Mission state.
   log('Step 1.7: Capturing Net Engineering Lines (NEL) at handoff...');
-  const nelResult = await captureNelFn(slug, { rootDir, missionDir: missionDirPath, log, error });
+  const nelResult = await captureNelFn(slug, { rootDir, missionDir: missionDirPath, log, error, missionServicesFn });
   if (nelResult.ok) {
-    // The NEL record is durable mission state.  It is written after the initial
-    // cleanliness check, so commit it before transitionTask rebases this
-    // worktree onto the branch that owns Backlog state.  Otherwise the rebase
-    // correctly refuses the uncommitted nel-record.json and handoff stalls
-    // after the Backlog transition has already been committed.
-    const nelRecordPath = path.join(missionDirPath, 'nel-record.json');
-    const relativeNelRecordPath = path.relative(rootDir, nelRecordPath);
-    // Production capture persists this record, but injected capture functions
-    // used by callers that only need its measurement result may not. Stage and
-    // commit only a record that was actually written; do not turn a successful
-    // measurement into a pathspec failure solely because no artifact exists.
-    if (fs.existsSync(nelRecordPath)) {
-      // Stage the explicit durable artifact and inspect the index.  Do not infer
-      // whether it changed from porcelain output: this check must not leave the
-      // record behind for transitionTask's immediately following rebase.
-      const stageNelRecord = git.git(['-C', rootDir, 'add', '--', relativeNelRecordPath]);
-      if (stageNelRecord.status !== 0) {
-        const msg = `Could not stage NEL record before handoff: ${(stageNelRecord.stderr || stageNelRecord.stdout || 'unknown git error').trim()}`;
-        error(msg);
-        return { ok: false, error: msg };
-      }
-      const nelRecordIsStaged = git.git(['-C', rootDir, 'diff', '--quiet', '--cached', '--', relativeNelRecordPath]).status === 1;
-      if (nelRecordIsStaged) {
-        const commitNelRecord = git.git(['-C', rootDir, 'commit', '-m', `chore(${slug}): capture handoff NEL`]);
-        if (commitNelRecord.status !== 0) {
-          const msg = `Could not commit NEL record before handoff: ${(commitNelRecord.stderr || commitNelRecord.stdout || 'unknown git error').trim()}`;
-          error(msg);
-          return { ok: false, error: msg };
-        }
-      }
-    }
     log(fmt.status('PASS', `NEL captured: ${nelResult.nel} NEL (${nelResult.bucket.label} bucket)`));
   } else if (nelResult.persistenceFailed) {
     const msg = `NEL persistence failed; handoff stopped before review state advanced: ${nelResult.error}`;
@@ -592,6 +567,7 @@ function findUnverifiableGoalCheckRow(evidenceRows: string[], rootDir: string): 
           runVerificationGateFn: runVerificationGateFn,
           runGatekeeperFn: runGatekeeperFn,
           attemptAgentRelaunchFn: attemptAgentRelaunchFn,
+          missionServicesFn: missionServicesFn,
           log,
           error,
           maxAttempts: currentAttempt + 1,
@@ -637,7 +613,79 @@ function findUnverifiableGoalCheckRow(evidenceRows: string[], rootDir: string): 
     log(`All ${gatesResult.count} declared gate(s) passed for ${fmt.slug(slug)}.`);
   }
 
-  // Step 3 & 4: Backlog Transition and Commit
+  // SC3/SC5: Transition Mission state through SqliteMissionStore FIRST.
+  // The durable Mission state must commit before any external Backlog effect.
+  // Database unavailability fails the operation (SC5: fail-closed).
+  const missionServices = await missionServicesFn(rootDir, { missionDir: missionDirPath });
+
+  // SC3: the checkpoint this handoff verified becomes durable Mission evidence
+  // in SQLite. CP-N.md stays an operator-authored input; it is never the
+  // authority the review transition reads.
+  const checkpointName = path.basename(finalCheckpoint).replace(/\.md$/, '');
+  const nextActionMatch = checkpointContent.match(/^\s*(?:\*\*)?Next action(?:\*\*)?:\s*(.+)$/mi);
+  const checkpointOutcome = await missionServices.checkpoints.record({
+    operationId: `handoff-checkpoint-${slug}`,
+    missionId: slug,
+    capabilities: new Set(['checkpoint:record']),
+    checkpoint: {
+      missionId: slug,
+      name: checkpointName,
+      rawFilename: path.basename(finalCheckpoint),
+      firstLine: (checkpointContent.split('\n')[0] || '').replace(/^#+\s*/, ''),
+      goalCheck: evidenceRows.map((row) => {
+        const cells = row.split('|').slice(1, -1).map((cell) => cell.trim());
+        return { criterion: cells[0] || '', evidence: cells[1] || '' };
+      }),
+      nextActionText: nextActionMatch ? nextActionMatch[1].trim() : 'Review the handed-off change.',
+    },
+  });
+  if (checkpointOutcome.status !== 'completed') {
+    const msg = `Recording checkpoint ${checkpointName} failed: ${checkpointOutcome.error?.message || 'unknown'}.`;
+    error(msg);
+    return { ok: false, error: msg };
+  }
+
+  // The review subject records where the branch is headed. A repository without
+  // a detectable primary branch still hands off; the target is nominal here.
+  let targetBranch = 'main';
+  try {
+    targetBranch = missionUtils.getPrimaryBranch(rootDir) || 'main';
+  } catch {
+    targetBranch = 'main';
+  }
+  const reviewer = agentFamily(typeof forgejoUser === 'string' ? forgejoUser : 'codex');
+  const implementer = agentFamily(forgejoUser || 'custom');
+  const reviewerEligibility = new ConfiguredReviewerEligibility([reviewer]);
+  const review = startReview({
+    change: {
+      kind: 'local-branch' as const,
+      sourceBranch: branch,
+      targetBranch,
+    },
+    revision: changeRevision(`handoff-${Date.now()}`),
+  }, reviewer, implementer, new Date().toISOString(), reviewerEligibility);
+  const transitionResult = await missionServices.lifecycle.transition({
+    operationId: `handoff-transition-${slug}`,
+    missionId: slug,
+    capabilities: new Set(['mission:transition']),
+    command: {
+      type: 'submit-for-review',
+      gatesPassed: true,
+      review,
+      reviewerEligibility,
+    },
+    actor: reviewer,
+    occurredAt: new Date().toISOString(),
+    idempotencyKey: `handoff-${slug}-${Date.now()}`,
+  });
+  if (transitionResult.status !== 'completed') {
+    const msg = `Mission state transition failed: ${transitionResult.error?.message || 'unknown'}.`;
+    error(msg);
+    return { ok: false, error: msg };
+  }
+  log(fmt.status('PASS', `Mission state transitioned to review (v${transitionResult.value.version})`));
+
+  // Step 3 & 4: Backlog Transition and Commit (external boundary effect after durable state committed).
   log('Step 3 & 4: Transitioning and committing Backlog task to review...');
 
   const taskImplementer = forgejoUser;
@@ -1134,25 +1182,21 @@ async function captureNelAtHandoff(slug, options) {
     }
   }
 
-  // 4. Read review rounds from review-state.json
-  let reviewRounds = 1;
-  const reviewStatePath = path.join(missionDir, 'review-state.json');
-  if (fs.existsSync(reviewStatePath)) {
-    try {
-      const rs = JSON.parse(fs.readFileSync(reviewStatePath, 'utf8'));
-      reviewRounds = rs.round || 1;
-    } catch (_) {
-      // ignore parse errors
-    }
-  }
-
   // 5. Record through the checked Mission boundary. The use case decides and the
-  //    selected compatibility authority writes; this adapter supplies only
+  //    selected SQLite authority writes; this adapter supplies only
   //    domain values and the artifact *references* it observed.
-  const missionServices = (options.missionServicesFn || createMissionApplicationServices)(rootDir, {
+  const missionServices = await (options.missionServicesFn || createMissionApplicationServices)(rootDir, {
     missionDir,
     documentWriter: writeJsonFn,
   });
+
+  // 4. Read review rounds from the Mission store (not review-state.json).
+  // SC3: the SQLite store is the sole authority for Mission domain state.
+  let reviewRounds = 1;
+  const missionLoad = await missionServices.store.load(slug);
+  if (missionLoad.kind === 'found' && missionLoad.mission.review) {
+    reviewRounds = missionLoad.mission.review.rounds.length;
+  }
   const artifacts = [
     artifactReference('git-range', `${primaryBranch}..HEAD`),
   ];

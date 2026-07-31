@@ -184,26 +184,51 @@ test('getUnresolvedIndexConflicts failure path', (t) => {
   assert.strictEqual(result.error, 'git error');
 });
 
-test('promoteTaskForIntegrationIfNeeded failure path', (t) => {
+test('promoteTaskForIntegrationIfNeeded failure path', async (t) => {
   const { promoteTaskForIntegrationIfNeeded } = require('../.test-runtime/lib/commands/integrate');
   const context = {
     task: { ok: true, taskFile: '/tmp/task.md' },
     taskStatus: 'review',
-    approval: { ok: true, reviewState: 'APPROVED' }
+    approval: { ok: true, reviewState: 'APPROVED' },
+    baseWorktree: '/tmp',
+    missionDir: '/tmp/mission',
+    slug: 'test-task',
+    forgejoUser: 'custom'
   };
-  
+
   // Mock backlog.setTaskStatus to fail
   const backlog = require('../.test-runtime/lib/tools/backlog');
   const originalSetTaskStatus = backlog.setTaskStatus;
   backlog.setTaskStatus = () => false;
 
+  // Mock createMissionApplicationServices for SQLite-first transitions
+  const composition = require('../.test-runtime/lib/composition/application-services');
+  const originalCreate = composition.createMissionApplicationServices;
+  composition.createMissionApplicationServices = async () => ({
+    store: {
+      _repoId: 'default',
+      load: async () => ({ kind: 'found', mission: { status: 'review', review: null }, version: 1 }),
+    },
+    lifecycle: {
+      transition: async () => ({ status: 'completed', value: { to: 'integration', version: 2 } }),
+    },
+  });
+
   const originalError = console.error;
   console.error = () => {};
 
   try {
-    assert.throws(() => promoteTaskForIntegrationIfNeeded(context), (err) => err.constructor.name === 'IntegrationAbort');
+    let threw = false;
+    try {
+      await promoteTaskForIntegrationIfNeeded(context);
+    } catch (err) {
+      threw = true;
+      assert.equal(err.constructor.name, 'IntegrationAbort', 'should throw IntegrationAbort');
+    }
+    assert.ok(threw, 'should have thrown');
   } finally {
     backlog.setTaskStatus = originalSetTaskStatus;
+    composition.createMissionApplicationServices = originalCreate;
     console.error = originalError;
   }
 });

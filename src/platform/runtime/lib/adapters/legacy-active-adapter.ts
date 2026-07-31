@@ -126,7 +126,8 @@ export class LegacyActiveAdapter implements ActivePort {
    * behavior and its existing operator text are preserved.
    */
   private async synchronizeLifecycle(slug: string, agent: string, worktree: string): Promise<void> {
-    const outcome = await new MissionLifecycleService(this._runtime.missionStore(worktree)).activate({
+    const store = await this._runtime.missionStore(worktree);
+    const outcome = await new MissionLifecycleService(store).activate({
       operationId: `active-${slug}`,
       missionId: missionId(slug),
       capabilities: new Set(['mission:transition']),
@@ -173,9 +174,10 @@ export interface LegacyActiveRuntime {
   /**
    * The selected Mission authority for the launched worktree. This replaced the
    * adapter's direct `transitionTask` call: the write now happens inside the
-   * store, behind the application port.
+   * store, behind the application port. Async after the TASK-2322.07 SQLite
+   * cutover (preflight import gate runs at construction time).
    */
-  readonly missionStore: (_rootDir: string) => MissionTransitionStore;
+  readonly missionStore: (_rootDir: string) => Promise<MissionTransitionStore>;
   readonly recordActiveStats: typeof stats.recordActiveStats;
   readonly resolveAgentModel: typeof resolveAgentModel;
   readonly resolveStageTelemetry: typeof resolveStageTelemetry;
@@ -193,7 +195,7 @@ function createDefaultLegacyActiveRuntime(): LegacyActiveRuntime {
     selectLaunchAndRecord,
     enforceExecuteCommitSafety,
     getTaskStatus,
-    missionStore: (rootDir: string) => createMissionApplicationServices(rootDir).store,
+    missionStore: async (rootDir: string) => (await createMissionApplicationServices(rootDir)).store,
     recordActiveStats: stats.recordActiveStats,
     resolveAgentModel,
     resolveStageTelemetry,

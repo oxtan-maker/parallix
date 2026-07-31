@@ -1065,6 +1065,118 @@ labels:
     }
   });
 
+  // --- Finding 3b: @mention and quoted assignee parsing ---
+
+  it('dry-run strips @ mention prefix from assignee value', async () => {
+    const fixture = await createRepoFixture();
+    const tasksDir = path.join(fixture.rootDir, 'backlog', 'tasks');
+
+    // Backlog files use @mention syntax in YAML-quoted form
+    const content = `---
+id: TASK-2322-ONE
+title: Mention Assignee Mission
+status: ready
+assignee:
+  - '@claude'
+labels:
+  - ai_sdlc
+---
+
+# Mention Assignee Mission
+`;
+    writeTaskFile(tasksDir, `${SLUG_ONE} - Mention-Assignee.md`, content);
+
+    try {
+      const importer = await createImporter(fixture.rootDir, fixture.db, fixture.store);
+      const report = await importer.dryRun();
+
+      assert.equal(report.candidates.length, 1);
+      assert.equal(
+        report.candidates[0].assignee,
+        agentFamily('claude'),
+        'Should strip quotes and @ prefix from @claude',
+      );
+      assert.equal(
+        report.candidates[0].validationErrors.length,
+        0,
+        'Should have no validation errors',
+      );
+    } finally {
+      await fixture.db.close();
+    }
+  });
+
+  it('dry-run strips @ mention prefix from unquoted assignee value', async () => {
+    const fixture = await createRepoFixture();
+    const tasksDir = path.join(fixture.rootDir, 'backlog', 'tasks');
+
+    // Bare @mention without YAML quotes
+    const content = `---
+id: TASK-2322-ONE
+title: Bare Mention Mission
+status: ready
+assignee: @codex
+labels:
+  - ai_sdlc
+---
+
+# Bare Mention Mission
+`;
+    writeTaskFile(tasksDir, `${SLUG_ONE} - Bare-Mention.md`, content);
+
+    try {
+      const importer = await createImporter(fixture.rootDir, fixture.db, fixture.store);
+      const report = await importer.dryRun();
+
+      assert.equal(report.candidates.length, 1);
+      assert.equal(
+        report.candidates[0].assignee,
+        agentFamily('codex'),
+        'Should strip @ prefix from bare @codex',
+      );
+      assert.equal(
+        report.candidates[0].validationErrors.length,
+        0,
+        'Should have no validation errors',
+      );
+    } finally {
+      await fixture.db.close();
+    }
+  });
+
+  it('dry-run handles double-quoted assignee with @ mention', async () => {
+    const fixture = await createRepoFixture();
+    const tasksDir = path.join(fixture.rootDir, 'backlog', 'tasks');
+
+    // Double-quoted @mention
+    const content = `---
+id: TASK-2322-ONE
+title: Double Quoted Mission
+status: ready
+assignee: "@claude"
+labels:
+  - ai_sdlc
+---
+
+# Double Quoted Mission
+`;
+    writeTaskFile(tasksDir, `${SLUG_ONE} - Double-Quoted.md`, content);
+
+    try {
+      const importer = await createImporter(fixture.rootDir, fixture.db, fixture.store);
+      const report = await importer.dryRun();
+
+      assert.equal(report.candidates.length, 1);
+      assert.equal(
+        report.candidates[0].assignee,
+        agentFamily('claude'),
+        'Should strip double quotes and @ prefix',
+      );
+    } finally {
+      await fixture.db.close();
+    }
+  });
+
   // --- Finding 4a: Invalid checkpoint name validation ---
 
   it('apply reports invalid checkpoint name as validation error', async () => {

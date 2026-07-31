@@ -91,7 +91,7 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     fileLocation: 'src/adapters/backlog/concrete-mission-read-adapter.ts',
     operation: 'read',
     classification: 'database-owned-domain-state',
-    cutoverTask: 'TASK-2322.07',
+    cutoverTask: null,
   },
   {
     id: 'mission-write-handoff',
@@ -100,7 +100,7 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     fileLocation: 'src/platform/runtime/lib/commands/handoff.ts',
     operation: 'write',
     classification: 'database-owned-domain-state',
-    cutoverTask: 'TASK-2322.07',
+    cutoverTask: null,
   },
   {
     id: 'mission-write-draft',
@@ -109,56 +109,37 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     fileLocation: 'src/platform/runtime/lib/commands/draft.ts',
     operation: 'write',
     classification: 'database-owned-domain-state',
-    cutoverTask: 'TASK-2322.07',
+    cutoverTask: null,
   },
   {
     id: 'mission-read-integrate',
     concept: 'Mission',
-    pathType: 'compatibility',
+    pathType: 'default',
     fileLocation: 'src/platform/runtime/lib/commands/integrate.ts',
     operation: 'read',
     classification: 'database-owned-domain-state',
-    cutoverTask: 'TASK-2322.07',
+    cutoverTask: null,
   },
   {
-    // TASK-2322.05: the selected compatibility Mission authority behind the
-    // application repository port. Reads the task document, `CP-N.md` evidence,
-    // and `nel-record.json`; writes checkpoint evidence and the NEL record and
-    // delegates lifecycle to the existing transition path.
-    id: 'mission-read-compatibility-store',
+    // TASK-2322.07 cutover complete: SqliteMissionStore is the sole production
+    // authority. Reads the checked Mission aggregate (including CheckpointData,
+    // Review, NEL, external task ref) from normalized relational rows.
+    id: 'mission-read-sqlite-store',
     concept: 'Mission',
-    pathType: 'compatibility',
-    fileLocation: 'src/adapters/backlog/compatibility-mission-store.ts',
+    pathType: 'default',
+    fileLocation: 'src/adapters/sqlite/mission-store.ts',
     operation: 'read',
     classification: 'database-owned-domain-state',
-    cutoverTask: 'TASK-2322.07',
+    cutoverTask: null,
   },
   {
-    id: 'mission-write-compatibility-store',
+    id: 'mission-write-sqlite-store',
     concept: 'Mission',
-    pathType: 'compatibility',
-    fileLocation: 'src/adapters/backlog/compatibility-mission-store.ts',
+    pathType: 'default',
+    fileLocation: 'src/adapters/sqlite/mission-store.ts',
     operation: 'write',
     classification: 'database-owned-domain-state',
-    cutoverTask: 'TASK-2322.07',
-  },
-  {
-    id: 'mission-migration-read',
-    concept: 'Mission',
-    pathType: 'compatibility',
-    fileLocation: 'src/platform/runtime/lib/core/persistent-data-migration.ts',
-    operation: 'read',
-    classification: 'database-owned-domain-state',
-    cutoverTask: 'TASK-2322.07',
-  },
-  {
-    id: 'mission-migration-write',
-    concept: 'Mission',
-    pathType: 'compatibility',
-    fileLocation: 'src/platform/runtime/lib/core/persistent-data-migration.ts',
-    operation: 'write',
-    classification: 'database-owned-domain-state',
-    cutoverTask: 'TASK-2322.07',
+    cutoverTask: null,
   },
   {
     id: 'mission-state-map-read',
@@ -167,7 +148,7 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     fileLocation: 'src/platform/runtime/lib/core/state-map.ts',
     operation: 'read',
     classification: 'database-owned-domain-state',
-    cutoverTask: 'TASK-2322.07',
+    cutoverTask: null,
   },
   {
     id: 'mission-gate-adapter-read',
@@ -176,7 +157,7 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     fileLocation: 'src/adapters/backlog/concrete-gate-read-adapter.ts',
     operation: 'read',
     classification: 'database-owned-domain-state',
-    cutoverTask: 'TASK-2322.07',
+    cutoverTask: null,
   },
   {
     id: 'mission-importer-read',
@@ -187,56 +168,94 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     classification: 'database-owned-domain-state',
     cutoverTask: 'TASK-2322.02',
   },
-  // -----------------------------------------------------------------------
-  // CheckpointData — nested Mission data (file-backed)
-  // -----------------------------------------------------------------------
+  // CompatibilityMissionStore is no longer a production boundary after the
+  // TASK-2322.07 cutover: it is reachable only from the import pipeline, which
+  // is already registered as `mission-importer-read`. Its former read/write
+  // entries are removed because SqliteMissionStore fully subsumes them.
+  // persistent-data-migration: still used for data migration (not subsumed by SQLite).
   {
-    id: 'checkpoint-read-mission-dir',
-    concept: 'CheckpointData',
+    id: 'mission-migration-read',
+    concept: 'Mission',
     pathType: 'default',
-    fileLocation: 'src/adapters/backlog/concrete-mission-read-adapter.ts',
+    fileLocation: 'src/platform/runtime/lib/core/persistent-data-migration.ts',
     operation: 'read',
     classification: 'database-owned-domain-state',
-    cutoverTask: 'TASK-2322.07',
+    cutoverTask: null,
   },
   {
-    id: 'checkpoint-write-handoff',
-    concept: 'CheckpointData',
+    id: 'mission-migration-write',
+    concept: 'Mission',
     pathType: 'default',
-    fileLocation: 'src/platform/runtime/lib/commands/handoff.ts',
+    fileLocation: 'src/platform/runtime/lib/core/persistent-data-migration.ts',
     operation: 'write',
     classification: 'database-owned-domain-state',
-    cutoverTask: 'TASK-2322.07',
+    cutoverTask: null,
   },
+  // -----------------------------------------------------------------------
+  // CheckpointData — nested Mission data (SQLite after TASK-2322.07 cutover)
+  // -----------------------------------------------------------------------
   {
-    id: 'checkpoint-read-review-commands',
+    id: 'checkpoint-read-sqlite-store',
     concept: 'CheckpointData',
-    pathType: 'compatibility',
-    fileLocation: 'src/platform/runtime/lib/review/review-commands.ts',
+    pathType: 'default',
+    fileLocation: 'src/adapters/sqlite/mission-store.ts',
     operation: 'read',
     classification: 'database-owned-domain-state',
-    cutoverTask: 'TASK-2322.07',
+    cutoverTask: null,
+  },
+  {
+    id: 'checkpoint-write-sqlite-store',
+    concept: 'CheckpointData',
+    pathType: 'default',
+    fileLocation: 'src/adapters/sqlite/mission-store.ts',
+    operation: 'write',
+    classification: 'database-owned-domain-state',
+    cutoverTask: null,
   },
   // -----------------------------------------------------------------------
-  // Review — nested Mission data (file-backed review-state.json)
+  // Review — nested Mission data (SQLite after TASK-2322.07 cutover)
   // -----------------------------------------------------------------------
+  {
+    id: 'review-read-sqlite-store',
+    concept: 'Review',
+    pathType: 'default',
+    fileLocation: 'src/adapters/sqlite/mission-store.ts',
+    operation: 'read',
+    classification: 'database-owned-domain-state',
+    cutoverTask: null,
+  },
+  {
+    id: 'review-write-sqlite-store',
+    concept: 'Review',
+    pathType: 'default',
+    fileLocation: 'src/adapters/sqlite/mission-store.ts',
+    operation: 'write',
+    classification: 'database-owned-domain-state',
+    cutoverTask: null,
+  },
+  // review-state.ts, review-artifacts.ts, review-events.ts, stats.ts,
+  // review-commands.ts: review *workflow* state (round/disposition tracking,
+  // artifact management, event persistence), not the Review domain data nested
+  // in the Mission aggregate — that authority is SqliteMissionStore (entries
+  // above) after the TASK-2322.07 cutover. Retiring these remaining workflow
+  // files is owned by TASK-2322.12 (eliminate stray legacy persistence).
   {
     id: 'review-read-review-state',
     concept: 'Review',
-    pathType: 'default',
+    pathType: 'compatibility',
     fileLocation: 'src/platform/runtime/lib/review/review-state.ts',
     operation: 'read',
     classification: 'database-owned-domain-state',
-    cutoverTask: 'TASK-2322.07',
+    cutoverTask: 'TASK-2322.12',
   },
   {
     id: 'review-write-review-state',
     concept: 'Review',
-    pathType: 'default',
+    pathType: 'compatibility',
     fileLocation: 'src/platform/runtime/lib/review/review-state.ts',
     operation: 'write',
     classification: 'database-owned-domain-state',
-    cutoverTask: 'TASK-2322.07',
+    cutoverTask: 'TASK-2322.12',
   },
   {
     id: 'review-read-review-artifacts',
@@ -245,7 +264,7 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     fileLocation: 'src/platform/runtime/lib/review/review-artifacts.ts',
     operation: 'read',
     classification: 'database-owned-domain-state',
-    cutoverTask: 'TASK-2322.07',
+    cutoverTask: 'TASK-2322.12',
   },
   {
     id: 'review-write-review-events',
@@ -254,7 +273,7 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     fileLocation: 'src/platform/runtime/lib/review/review-events.ts',
     operation: 'write',
     classification: 'database-owned-domain-state',
-    cutoverTask: 'TASK-2322.07',
+    cutoverTask: 'TASK-2322.12',
   },
   {
     id: 'review-read-stats',
@@ -263,7 +282,7 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     fileLocation: 'src/platform/runtime/lib/commands/stats.ts',
     operation: 'read',
     classification: 'database-owned-domain-state',
-    cutoverTask: 'TASK-2322.07',
+    cutoverTask: 'TASK-2322.12',
   },
   {
     id: 'review-read-review-commands',
@@ -272,7 +291,7 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     fileLocation: 'src/platform/runtime/lib/review/review-commands.ts',
     operation: 'read',
     classification: 'database-owned-domain-state',
-    cutoverTask: 'TASK-2322.07',
+    cutoverTask: 'TASK-2322.12',
   },
   // -----------------------------------------------------------------------
   // MissionOutcome — derived from Mission + AgentRunMeasurement

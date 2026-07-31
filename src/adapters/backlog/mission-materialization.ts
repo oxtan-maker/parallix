@@ -25,6 +25,9 @@ export function missionStatusFromBacklog(value: string): MissionStatus | null {
   ) {
     return 'integration';
   }
+  if (normalized === 'open') {
+    return 'backlog';
+  }
   if (['backlog', 'active', 'review', 'done'].includes(normalized)) {
     return normalized as MissionStatus;
   }

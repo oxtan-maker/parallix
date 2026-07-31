@@ -10,6 +10,7 @@ const missionUtils = require('../.test-runtime/lib/core/mission-utils');
 const backlog = require('../.test-runtime/lib/tools/backlog');
 const forgejo = require('../.test-runtime/lib/tools/forgejo');
 const stats = require('../.test-runtime/lib/commands/stats');
+const composition = require('../.test-runtime/lib/composition/application-services');
 
 const TEST_SLUG = 'task-2204';
 const FAKE_ROOT = '/tmp/task-2204-integrate-root';
@@ -94,6 +95,20 @@ function setupMocks() {
   }));
   mock.method(process, 'cwd', () => FAKE_ROOT);
 
+  // SC3: Mock createMissionApplicationServices for SQLite-first transitions.
+  mock.method(composition, 'createMissionApplicationServices', async () => ({
+    store: {
+      _repoId: 'default',
+      load: async () => ({ kind: 'found', mission: { status: 'review', review: null }, version: 1 }),
+    },
+    lifecycle: {
+      transition: async () => ({ status: 'completed', value: { to: 'review', version: 2 } }),
+    },
+    handoff: {
+      recordNel: async () => ({}),
+    },
+  }));
+
   if (!fs.existsSync(FAKE_ROOT)) {
     fs.mkdirSync(FAKE_ROOT, { recursive: true });
   }
@@ -126,7 +141,7 @@ function cleanup() {
   }
 }
 
-test('integrate rejects merged Forgejo PRs during preflight with recovery guidance', () => {
+test('integrate rejects merged Forgejo PRs during preflight with recovery guidance', async () => {
   const state = setupMocks();
   const integrate = loadIntegrate();
   const logs = [];
@@ -140,7 +155,7 @@ test('integrate rejects merged Forgejo PRs during preflight with recovery guidan
   mock.method(process, 'exit', (code) => exitCodes.push(code));
 
   try {
-    integrate([TEST_SLUG, '--no-integration-gates']);
+    await integrate([TEST_SLUG, '--no-integration-gates']);
 
     const output = [...logs, ...errors].join('\n');
     assert.deepEqual(exitCodes, [1]);

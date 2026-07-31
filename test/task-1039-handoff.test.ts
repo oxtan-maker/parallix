@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { verifyHandoff, performHandoff } = require('../.test-runtime/lib/commands/handoff');
+const { stubMissionServices } = require('./helpers/stub-mission-services');
 const { mock } = test;
 
 const git = require('../.test-runtime/lib/core/git');
@@ -81,6 +82,7 @@ test('performHandoff handles gatekeeper pushback', async (t) => {
     attemptAgentRelaunchFn: mockRelaunch,
     runGatekeeperFn: mockGK,
     runVerificationGateFn: unexpectedVerification,
+    missionServicesFn: stubMissionServices(),
   });
   assert.strictEqual(result.ok, true);
   assert.strictEqual(result.gatekeeperPushedBack, true);
@@ -90,7 +92,7 @@ test('performHandoff handles gatekeeper pushback', async (t) => {
 test('performHandoff handles gatekeeper block', async (t) => {
   setupMocks();
   mock.method(gatekeeper, 'runGatekeeper', () => ({ ok: false, posted: false, skipped: false, missing: ['A'] }));
-  const result = await performHandoff(TEST_SLUG, { worktree: WORKTREE, skipGate: true, error: () => {}, rebaseFn: mockRebase });
+  const result = await performHandoff(TEST_SLUG, { worktree: WORKTREE, skipGate: true, error: () => {}, rebaseFn: mockRebase, missionServicesFn: stubMissionServices() });
   assert.strictEqual(result.ok, false);
   assert.match(result.error, /Gatekeeper detected missing artifacts/);
   cleanup();
@@ -101,7 +103,7 @@ test('performHandoff fails when forgejoUser is missing', async (t) => {
   mock.method(backlog, 'getTaskImplementer', () => null);
   const originalEnv = process.env.FORGEJO_USER;
   delete process.env.FORGEJO_USER;
-  const result = await performHandoff(TEST_SLUG, { worktree: WORKTREE, skipGate: true, error: () => {}, rebaseFn: mockRebase });
+  const result = await performHandoff(TEST_SLUG, { worktree: WORKTREE, skipGate: true, error: () => {}, rebaseFn: mockRebase, missionServicesFn: stubMissionServices() });
   assert.strictEqual(result.ok, false);
   assert.strictEqual(result.error, 'forgejoUser is required');
   process.env.FORGEJO_USER = originalEnv;
@@ -116,7 +118,7 @@ test('performHandoff fails when final verification gate fails', async (t) => {
     JSON.stringify({ adapters: { verification: { command: 'npm test' } } })
   );
   mock.method(git, 'run', () => ({ status: 1 }));
-  const result = await performHandoff(TEST_SLUG, { worktree: WORKTREE, error: () => {}, rebaseFn: mockRebase });
+  const result = await performHandoff(TEST_SLUG, { worktree: WORKTREE, error: () => {}, rebaseFn: mockRebase, missionServicesFn: stubMissionServices() });
   assert.strictEqual(result.ok, false);
   assert.match(result.error, /Final verification gate failed/);
   cleanup();
@@ -125,7 +127,7 @@ test('performHandoff fails when final verification gate fails', async (t) => {
 test('performHandoff fails when PR creation fails', async (t) => {
   setupMocks();
   mock.method(forgejo, 'createPr', () => ({ ok: false, error: 'API Error' }));
-  const result = await performHandoff(TEST_SLUG, { worktree: WORKTREE, skipGate: true, error: () => {}, rebaseFn: mockRebase });
+  const result = await performHandoff(TEST_SLUG, { worktree: WORKTREE, skipGate: true, error: () => {}, rebaseFn: mockRebase, missionServicesFn: stubMissionServices() });
   assert.strictEqual(result.ok, false);
   assert.match(result.error, /Forgejo PR creation\/update failed/);
   cleanup();
@@ -134,7 +136,7 @@ test('performHandoff fails when PR creation fails', async (t) => {
 test('performHandoff fails when Backlog transition fails (assignee)', async (t) => {
   setupMocks();
   mock.method(backlog, 'transitionTask', () => false);
-  const result = await performHandoff(TEST_SLUG, { worktree: WORKTREE, skipGate: true, error: () => {}, rebaseFn: mockRebase });
+  const result = await performHandoff(TEST_SLUG, { worktree: WORKTREE, skipGate: true, error: () => {}, rebaseFn: mockRebase, missionServicesFn: stubMissionServices() });
   assert.strictEqual(result.ok, false);
   assert.match(result.error, /Could not transition task task-handoff-test to review/);
   cleanup();
@@ -143,7 +145,7 @@ test('performHandoff fails when Backlog transition fails (assignee)', async (t) 
 test('performHandoff fails when Backlog transition fails (status)', async (t) => {
   setupMocks();
   mock.method(backlog, 'transitionTask', () => false);
-  const result = await performHandoff(TEST_SLUG, { worktree: WORKTREE, skipGate: true, error: () => {}, rebaseFn: mockRebase });
+  const result = await performHandoff(TEST_SLUG, { worktree: WORKTREE, skipGate: true, error: () => {}, rebaseFn: mockRebase, missionServicesFn: stubMissionServices() });
   assert.strictEqual(result.ok, false);
   assert.match(result.error, /Could not transition task task-handoff-test to review/);
   cleanup();
@@ -153,7 +155,7 @@ test('performHandoff fails when git add fails', async (t) => {
   setupMocks();
   // transitionTask now handles git add/commit, so we mock it to fail
   mock.method(backlog, 'transitionTask', () => false);
-  const result = await performHandoff(TEST_SLUG, { worktree: WORKTREE, skipGate: true, error: () => {}, rebaseFn: mockRebase });
+  const result = await performHandoff(TEST_SLUG, { worktree: WORKTREE, skipGate: true, error: () => {}, rebaseFn: mockRebase, missionServicesFn: stubMissionServices() });
   assert.strictEqual(result.ok, false);
   assert.match(result.error, /Could not transition task task-handoff-test to review/);
   cleanup();
@@ -163,7 +165,7 @@ test('performHandoff fails when git push fails', async (t) => {
   setupMocks();
   mock.method(git, 'git', (args) => args.includes('push') ? { status: 1, stderr: 'fatal: Unable to create .git/index.lock: No space left on device' } : { status: 0 });
   mock.method(forgejo, 'authenticatedReviewUrl', () => 'url');
-  const result = await performHandoff(TEST_SLUG, { worktree: WORKTREE, skipGate: true, error: () => {}, rebaseFn: mockRebase });
+  const result = await performHandoff(TEST_SLUG, { worktree: WORKTREE, skipGate: true, error: () => {}, rebaseFn: mockRebase, missionServicesFn: stubMissionServices() });
   assert.strictEqual(result.ok, false);
   assert.match(result.error, /Failed to push Backlog transition/);
   assert.match(result.error, /Unable to create .git\/index\.lock: No space left on device/);

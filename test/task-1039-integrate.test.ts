@@ -11,6 +11,7 @@ const backlog = require('../.test-runtime/lib/tools/backlog');
 const forgejo = require('../.test-runtime/lib/tools/forgejo');
 const stats = require('../.test-runtime/lib/commands/stats');
 const verification = require('../.test-runtime/lib/core/verification');
+const composition = require('../.test-runtime/lib/composition/application-services');
 
 const TEST_SLUG = 'task-integrate-test';
 const FAKE_ROOT = '/tmp/integrate-test-root';
@@ -62,6 +63,20 @@ function setupMocks() {
   mock.method(stats, 'resolveMissionClassification', () => ({ classification: 'ai_sdlc' }));
   mock.method(process, 'cwd', () => FAKE_ROOT);
   mock.method(process, 'exit', () => {});
+
+  // SC3: Mock createMissionApplicationServices for SQLite-first transitions.
+  mock.method(composition, 'createMissionApplicationServices', async () => ({
+    store: {
+      _repoId: 'default',
+      load: async () => ({ kind: 'found', mission: { status: 'review', review: null }, version: 1 }),
+    },
+    lifecycle: {
+      transition: async () => ({ status: 'completed', value: { to: 'review', version: 2 } }),
+    },
+    handoff: {
+      recordNel: async () => ({}),
+    },
+  }));
   
   if (!fs.existsSync(FAKE_ROOT)) fs.mkdirSync(FAKE_ROOT, { recursive: true });
   fs.writeFileSync(path.join(FAKE_ROOT, 'workflow.config.json'), JSON.stringify({
@@ -89,31 +104,39 @@ test('integrate fails when slug is missing', (t) => {
   cleanup();
 });
 
-test('integrate preflight failure stops execution', (t) => {
+test('integrate preflight failure stops execution', async (t) => {
   setupMocks();
   mock.method(git, 'getCurrentBranch', () => 'wrong-branch');
   const integrate = loadIntegrate();
   const originalError = console.error;
   let errorLogged = false;
   console.error = (msg) => { if (msg && msg.includes('Integration preflight failed')) errorLogged = true; };
-  
-  integrate([TEST_SLUG, '--no-integration-gates']);
+
+  try {
+    await integrate([TEST_SLUG, '--no-integration-gates']);
+  } catch {
+    // Expected to throw
+  }
   assert.ok(errorLogged);
-  
+
   console.error = originalError;
   cleanup();
 });
 
-test('integrate dry-run mode', (t) => {
+test('integrate dry-run mode', async (t) => {
   setupMocks();
   const integrate = loadIntegrate();
   const originalLog = console.log;
   let logLogged = false;
   console.log = (msg) => { if (msg && msg.includes('Dry run complete')) logLogged = true; };
-  
-  integrate([TEST_SLUG, '--dry-run', '--no-integration-gates']);
+
+  try {
+    await integrate([TEST_SLUG, '--dry-run', '--no-integration-gates']);
+  } catch {
+    // Expected to throw
+  }
   assert.ok(logLogged);
-  
+
   console.log = originalLog;
   cleanup();
 });
