@@ -1,5 +1,16 @@
 import type { DurableEvidence, ProgressEvent, SourceFact } from './contracts.js';
 
+// Re-export operator-state repository ports so presentation consumers (TUI,
+// CLI status) can import them from the application layer without referencing
+// the adapter layer directly. This satisfies the ADR 0051 boundary rule that
+// UI modules delegate through application ports.
+export type {
+  AgentBlocklistRepository,
+  OperationalHistoryRepository,
+  BoardLaneEventRepository,
+  UsageRepository,
+} from '../adapters/sqlite/ports.js';
+
 export interface StatsRow {
   readonly mission: string;
   readonly implementer: string;

@@ -8,7 +8,7 @@ import crypto from 'node:crypto';
 import { SqliteDatabaseAdapter } from '../src/adapters/sqlite/database-adapter.js';
 import { SqliteMigrationRunner, loadDefaultMigrations } from '../src/adapters/sqlite/migration-runner.js';
 import { resolveDatabasePath, verifyDatabasePathIsolation } from '../src/adapters/sqlite/database-path-resolver.js';
-import { initOperatorState } from '../src/adapters/sqlite/adapter-factory.js';
+import { initOperatorState, clearOperatorStateCache } from '../src/adapters/sqlite/adapter-factory.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -465,6 +465,60 @@ describe('SQLite adapter — CP1: schema and migration runner', () => {
       }
     } finally {
       cleanupTempDir(home);
+    }
+  });
+
+  // --- Singleton cache: shared connection per database path ---
+
+  it('initOperatorState returns the same cached adapter for repeated calls on the same path', async () => {
+    clearOperatorStateCache();
+    const home = createTempDir('home');
+    try {
+      const first = await initOperatorState({ homeDir: home });
+      const second = await initOperatorState({ homeDir: home });
+      assert.strictEqual(first, second, 'Repeated calls must return the same cached instance');
+      assert.strictEqual(first.db.getPath(), second.db.getPath(), 'Cached adapter must share database path');
+    } finally {
+      cleanupTempDir(home);
+    }
+  });
+
+  it('initOperatorState creates separate cached adapters for different home directories', async () => {
+    clearOperatorStateCache();
+    const homeA = createTempDir('home-a');
+    const homeB = createTempDir('home-b');
+    try {
+      const adapterA = await initOperatorState({ homeDir: homeA });
+      const adapterB = await initOperatorState({ homeDir: homeB });
+      assert.notStrictEqual(adapterA, adapterB, 'Different home dirs must yield different adapters');
+      assert.notStrictEqual(adapterA.db.getPath(), adapterB.db.getPath(), 'Different home dirs must have different database paths');
+    } finally {
+      cleanupTempDir(homeA);
+      cleanupTempDir(homeB);
+    }
+  });
+
+  it('initOperatorState evicts cache entry on initialization failure', async () => {
+    clearOperatorStateCache();
+    // Use a file path as homeDir — resolveDatabasePath treats it as a directory
+    // and the database open fails because the path is a file, not a directory.
+    const badHome = path.join(os.tmpdir(), `parallix-bad-home-${Date.now()}`);
+    fs.writeFileSync(badHome, 'not a directory');
+    try {
+      await assert.rejects(
+        initOperatorState({ homeDir: badHome }),
+        /database|open|path/i,
+      );
+      // Cache must be evicted so a subsequent call with a valid path works.
+      const goodHome = createTempDir('good-home');
+      try {
+        const adapter = await initOperatorState({ homeDir: goodHome });
+        assert.ok(adapter.db.isOpen(), 'Subsequent call with valid path must succeed after cache eviction');
+      } finally {
+        cleanupTempDir(goodHome);
+      }
+    } finally {
+      fs.rmSync(badHome, { force: true });
     }
   });
 

@@ -7,6 +7,9 @@ import { MissionHandoffService } from '../../../../application/mission-handoff-s
 import { MissionIntakeService } from '../../../../application/mission-intake-service.js';
 import { MissionLifecycleService } from '../../../../application/mission-lifecycle-service.js';
 import { MissionIntegrationService } from '../../../../application/mission-integration-service.js';
+import { KnownRepositoryService } from '../../../../application/services/known-repository-service.js';
+import { UIPreferencesService } from '../../../../application/services/ui-preferences-service.js';
+import { OperationalHistoryService } from '../../../../application/services/operational-history-service.js';
 import { SqliteMissionStore } from '../../../../adapters/sqlite/mission-store.js';
 import { MissionCompatibilityImporter } from '../../../../adapters/sqlite/mission-importer.js';
 import { repositoryId, type RepositoryId } from '../../../../domain/repository.js';
@@ -15,6 +18,15 @@ import { LegacyActiveAdapter } from '../adapters/legacy-active-adapter.js';
 import { LegacyStatsBackfillAdapter } from '../adapters/legacy-stats-backfill-adapter.js';
 import type { ProgressPort } from '../../../../application/ports.js';
 import type { OperatorBlocklistOverlay } from '../../../../adapters/sqlite/blocklist-snapshot.js';
+import type {
+  AgentBlocklistRepository,
+  KnownRepositoriesRepository,
+  UIPreferencesRepository,
+  OperationalHistoryRepository,
+  BoardLaneEventRepository,
+  UsageRepository,
+} from '../../../../adapters/sqlite/ports.js';
+import type { SqliteDatabaseAdapter } from '../../../../adapters/sqlite/database-adapter.js';
 
 export interface OperatorStateServices {
   readonly db: unknown;
@@ -26,6 +38,26 @@ export interface OperatorStateServices {
    * for this field; `null` means consumers use the untouched file readers.
    */
   readonly blocklist: OperatorBlocklistOverlay | null;
+  /**
+   * SQLite repositories for operator-local state. Provided so presentation
+   * consumers (TUI, CLI status, web-board projection) can build their read
+   * adapters from the single composition root rather than opening the database
+   * independently. `null` when the adapter is unavailable.
+   */
+  readonly repositories: OperatorStateRepositories | null;
+}
+
+/**
+ * The concrete SQLite repositories materialized at composition time.
+ * All presentation consumers receive these ports from the composition root.
+ */
+export interface OperatorStateRepositories {
+  readonly agentBlocklist: AgentBlocklistRepository;
+  readonly knownRepositories: KnownRepositoriesRepository;
+  readonly uiPreferences: UIPreferencesRepository;
+  readonly operationalHistory: OperationalHistoryRepository;
+  readonly boardLaneEvents: BoardLaneEventRepository;
+  readonly usage: UsageRepository;
 }
 
 /**
@@ -67,6 +99,23 @@ export interface ProductionApplicationServices {
    * same SQLite database, so building it would open (and create) it anyway.
    */
   readonly mission: MissionApplicationServices | null;
+  /**
+   * Application services for operator-local state. `null` when the caller
+   * opted out of operator-local state. Supplies ports for KnownRepository
+   * observations, UI preferences, and operational history.
+   */
+  readonly operatorServices: OperatorApplicationServices | null;
+}
+
+/**
+ * Application-layer services that operate over the operator-local SQLite
+ * repositories. Provided by the composition root so presentation consumers
+ * receive ports rather than adapter handles.
+ */
+export interface OperatorApplicationServices {
+  readonly knownRepositories: KnownRepositoryService;
+  readonly uiPreferences: UIPreferencesService;
+  readonly operationalHistory: OperationalHistoryService;
 }
 
 export interface ProductionApplicationServiceOptions {
@@ -92,12 +141,43 @@ export async function createProductionApplicationServices(
   options: ProductionApplicationServiceOptions = {},
 ): Promise<ProductionApplicationServices> {
   const operatorState = options.includeOperatorState === false
-    ? { db: null, migrations: null, blocklist: null }
+    ? { db: null, migrations: null, blocklist: null, repositories: null }
     : await materializeOperatorState();
+
+  const operatorServices = options.includeOperatorState === false
+    ? null
+    : operatorState.repositories
+      ? {
+          knownRepositories: new KnownRepositoryService(operatorState.repositories.knownRepositories),
+          uiPreferences: new UIPreferencesService(operatorState.repositories.uiPreferences),
+          operationalHistory: new OperationalHistoryService(operatorState.repositories.operationalHistory),
+        }
+      : null;
+
+  // Build a SessionMarkerPort from the shared database connection so that
+  // startAgent reuses the composition root's SQLite handle instead of opening
+  // a second independent connection (avoids "database is locked" contention
+  // between DatabaseSync handles on the same file).
+  let sessionMarkerPort: import('../../../../application/domain-ports.js').SessionMarkerPort | null = null;
+  if (operatorState.repositories) {
+    const sourceRoot = resolvePrimaryRoot(rootDir);
+    const repoId = repositoryId(path.basename(sourceRoot) || sourceRoot);
+    // Dynamic import avoids circular module capture at construction time.
+    const { SqliteSessionMarkerAdapter } = await import(
+      '../../../../adapters/sqlite/session-marker-adapter.js'
+    );
+    sessionMarkerPort = new SqliteSessionMarkerAdapter(
+      operatorState.db as SqliteDatabaseAdapter,
+      repoId,
+    );
+  }
 
   return {
     active: new ActiveService(
-      new LegacyActiveAdapter(rootDir, undefined, { operatorBlocklist: operatorState.blocklist }),
+      new LegacyActiveAdapter(rootDir, undefined, {
+        operatorBlocklist: operatorState.blocklist,
+        sessionMarkerPort,
+      }),
       activeProgress,
     ),
     statsBackfill: new StatsBackfillService(new LegacyStatsBackfillAdapter(rootDir)),
@@ -107,6 +187,7 @@ export async function createProductionApplicationServices(
       : await createMissionApplicationServices(rootDir, {
         skipImportGate: options.skipImportGate,
       }),
+    operatorServices,
   };
 }
 
@@ -169,18 +250,19 @@ export async function createMissionApplicationServices(
 
   // Dynamic imports keep the built-in SQLite module out of the statically
   // loaded runtime graph so the CJS rollback bundle degrades gracefully.
-  const { SqliteDatabaseAdapter } = await import('../../../../adapters/sqlite/database-adapter.js');
-  const { SqliteMigrationRunner, loadDefaultMigrations } = await import(
-    '../../../../adapters/sqlite/migration-runner.js'
-  );
+  const { initOperatorState } = await import('../../../../adapters/sqlite/adapter-factory.js');
   const { resolveDatabasePath } = await import('../../../../adapters/sqlite/database-path-resolver.js');
 
-  const db = new SqliteDatabaseAdapter();
+  // Use the shared singleton connection from initOperatorState so that the
+  // mission store, session markers, and blocklist all converge on the same
+  // DatabaseSync handle. This avoids "database is locked" contention between
+  // independent connections on the same file.
   const dbPath = overrides.databasePath ?? resolveDatabasePath();
-  await db.open({ path: dbPath });
-
-  const migrations = new SqliteMigrationRunner(db);
-  await migrations.applyPending(loadDefaultMigrations());
+  const { db } = await initOperatorState({
+    homeDir: overrides.databasePath
+      ? path.dirname(dbPath)
+      : undefined,
+  });
 
   // Preflight import gate: ensure all legacy Missions have been imported
   // before any command path reads or writes through the SQLite store.
@@ -231,24 +313,36 @@ async function materializeOperatorState(): Promise<OperatorStateServices> {
     // loaded runtime graph so the CJS rollback bundle (which lacks these
     // modules) degrades gracefully through the catch below rather than failing
     // to load. The adapter layer is the only place that binds the SQLite driver.
-    const { SqliteDatabaseAdapter } = await import('../../../../adapters/sqlite/database-adapter.js');
-    const { SqliteMigrationRunner, loadDefaultMigrations } = await import(
-      '../../../../adapters/sqlite/migration-runner.js'
-    );
-    const { resolveDatabasePath } = await import('../../../../adapters/sqlite/database-path-resolver.js');
+    const { initOperatorState } = await import('../../../../adapters/sqlite/adapter-factory.js');
     const { SqliteBlocklistRepository } = await import('../../../../adapters/sqlite/blocklist-repository.js');
+    const { SqliteKnownRepositoriesRepository } = await import('../../../../adapters/sqlite/repository-repository.js');
+    const { SqliteUIPreferencesRepository } = await import('../../../../adapters/sqlite/ui-preferences-repository.js');
+    const { SqliteOperationalHistoryRepository } = await import('../../../../adapters/sqlite/operational-history-repository.js');
+    const { SqliteBoardLaneEventRepository } = await import('../../../../adapters/sqlite/board-lane-event-repository.js');
+    const { SqliteUsageRepository } = await import('../../../../adapters/sqlite/usage-repository.js');
     const { materializeBlocklistSnapshot } = await import('../../../../adapters/sqlite/blocklist-snapshot.js');
 
-    const db = new SqliteDatabaseAdapter();
-    await db.open({ path: resolveDatabasePath() });
-
-    const migrations = new SqliteMigrationRunner(db);
-    await migrations.applyPending(loadDefaultMigrations());
+    // Use the shared singleton connection from initOperatorState so that the
+    // composition root, session markers, and blocklist all converge on the
+    // same DatabaseSync handle. This avoids "database is locked" contention
+    // between independent connections on the same file.
+    const { db, migrations } = await initOperatorState();
 
     // Materialize the operator-local blocklist ONCE (single async read).
     const entries = await new SqliteBlocklistRepository(db).findAll();
-    return { db, migrations, blocklist: materializeBlocklistSnapshot(entries) };
+
+    // Create all operator-state repositories from the shared database connection.
+    const repositories = {
+      agentBlocklist: new SqliteBlocklistRepository(db),
+      knownRepositories: new SqliteKnownRepositoriesRepository(db),
+      uiPreferences: new SqliteUIPreferencesRepository(db),
+      operationalHistory: new SqliteOperationalHistoryRepository(db),
+      boardLaneEvents: new SqliteBoardLaneEventRepository(db),
+      usage: new SqliteUsageRepository(db),
+    };
+
+    return { db, migrations, blocklist: materializeBlocklistSnapshot(entries), repositories };
   } catch {
-    return { db: null, migrations: null, blocklist: null };
+    return { db: null, migrations: null, blocklist: null, repositories: null };
   }
 }

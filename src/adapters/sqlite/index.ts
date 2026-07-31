@@ -10,7 +10,7 @@ export { SqliteMigrationRunner, loadDefaultMigrations } from './migration-runner
 
 export { resolveDatabasePath, verifyDatabasePathIsolation } from './database-path-resolver.js';
 
-export { initOperatorState } from './adapter-factory.js';
+export { initOperatorState, clearOperatorStateCache } from './adapter-factory.js';
 export type { AdapterInitOptions, OperatorStateAdapter } from './adapter-factory.js';
 
 // Repository ports

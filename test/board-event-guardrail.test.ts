@@ -47,6 +47,8 @@ const STATUS_COMMAND_MODULE = 'src/platform/runtime/lib/commands/status.ts';
 const TUI_COMMAND_MODULE = 'src/interfaces/tui/ui-command.ts';
 const INDEX_MODULE = 'src/adapters/sqlite/index.ts';
 const MISSION_STORE_MODULE = 'src/adapters/sqlite/mission-store.ts';
+const APPLICATION_PORTS_MODULE = 'src/application/ports.ts';
+const COMPOSITION_ROOT_MODULE = 'src/platform/runtime/lib/composition/application-services.ts';
 
 test('SC2: only the designated write-path module imports BoardEventRecorder outside the recorder package', () => {
   const srcDir = path.join(repoRoot, 'src');
@@ -165,6 +167,8 @@ test('SC2: no source file writes lane-transition events outside backlog.ts', () 
       || relPath === TUI_COMMAND_MODULE
       || relPath === INDEX_MODULE
       || relPath === MISSION_STORE_MODULE
+      || relPath === APPLICATION_PORTS_MODULE
+      || relPath === COMPOSITION_ROOT_MODULE
       || relPath === DESIGNATED_WRITER
     ) {
       continue;

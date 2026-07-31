@@ -12,6 +12,7 @@ import { missionId } from '../../../../domain/mission.js';
 import * as stats from '../commands/stats.js';
 import { resolveStageTelemetry } from '../agents/stage-telemetry.js';
 import type { DurableEvidence } from '../../../../application/contracts.js';
+import type { SessionMarkerPort } from '../../../../application/domain-ports.js';
 import type { ActiveLaunch, ActivePort } from '../../../../application/ports.js';
 // Type-only import (erased at runtime): the plain overlay shape materialized at
 // the composition root. No SQLite driver binding reaches this module (SC2).
@@ -21,12 +22,20 @@ export type { OperatorBlocklistOverlay };
 
 export interface LegacyActiveAdapterOptions {
   readonly operatorBlocklist?: OperatorBlocklistOverlay | null;
+  /**
+   * Shared session-marker authority from the composition root. When provided,
+   * startAgent reuses the composition root's SQLite connection instead of
+   * opening a separate one (avoids "database is locked" contention between
+   * independent DatabaseSync handles on the same file).
+   */
+  readonly sessionMarkerPort?: SessionMarkerPort | null;
 }
 
 export class LegacyActiveAdapter implements ActivePort {
   private readonly _runs = new Map<string, LegacyLaunchRun>();
   private readonly _runtime: LegacyActiveRuntime;
   private readonly _operatorBlocklist: OperatorBlocklistOverlay | null;
+  private readonly _sessionMarkerPort: SessionMarkerPort | null;
 
   constructor(
     private readonly _rootDir: string,
@@ -38,6 +47,7 @@ export class LegacyActiveAdapter implements ActivePort {
     // this circular module graph cannot capture uninitialized helper bindings.
     this._runtime = runtime || createDefaultLegacyActiveRuntime();
     this._operatorBlocklist = options?.operatorBlocklist ?? null;
+    this._sessionMarkerPort = options?.sessionMarkerPort ?? null;
   }
 
   async validateSlug(slug: string): Promise<string | null> {
@@ -66,6 +76,7 @@ export class LegacyActiveAdapter implements ActivePort {
       agentConfig: run.agentConfig,
       taskResolution: run.taskResolution,
       prompt: run.prompt,
+      sessionMarkerPort: this._sessionMarkerPort,
     });
     if (launch.result.error) {
       throw new Error(`Could not start execute agent (${launch.agent}): ${launch.result.error.message}`);

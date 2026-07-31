@@ -4,6 +4,22 @@ import { SqliteMigrationRunner, loadDefaultMigrations } from './migration-runner
 import { resolveDatabasePath } from './database-path-resolver.js';
 
 /**
+ * Module-level singleton cache keyed by resolved database path.
+ *
+ * Multiple callers — the composition root, defaultSessionMarkerPort,
+ * updateAgentBlockChecked, and the review loop — all converge on this
+ * single DatabaseSync handle per PARALLIX_HOME. Without this cache each
+ * caller opens an independent connection to the same file and SQLite's
+ * file-level write lock causes "database is locked" contention between
+ * the handles.
+ *
+ * Callers must not close the returned adapter; the connection lives for
+ * the duration of the process. Use clearOperatorStateCache() in test
+ * fixtures that need a fresh connection.
+ */
+const operatorStateCache = new Map<string, Promise<OperatorStateAdapter>>();
+
+/**
  * Configuration for initializing the SQLite operator-state adapter.
  */
 export interface AdapterInitOptions {
@@ -60,6 +76,34 @@ export async function initOperatorState(
 ): Promise<OperatorStateAdapter> {
   const dbPath = resolveDatabasePath({ home: options.homeDir });
 
+  let adapter = operatorStateCache.get(dbPath);
+  const debug = process.env.PARALLIX_DEBUG_SQL;
+  if (!adapter) {
+    adapter = createOperatorState(dbPath, options);
+    operatorStateCache.set(dbPath, adapter);
+    if (debug) {
+      process.stderr.write(`[sql-cache] MISS ${dbPath} (pid=${process.pid})\n`);
+    }
+  } else {
+    if (debug) {
+      process.stderr.write(`[sql-cache] HIT ${dbPath} (pid=${process.pid})\n`);
+    }
+  }
+  try {
+    return await adapter;
+  } catch (error) {
+    operatorStateCache.delete(dbPath);
+    if (debug) {
+      process.stderr.write(`[sql-cache] EVICT ${dbPath} (${(error as Error).message})\n`);
+    }
+    throw error;
+  }
+}
+
+async function createOperatorState(
+  dbPath: string,
+  options: AdapterInitOptions,
+): Promise<OperatorStateAdapter> {
   // Open database with configured settings
   const db = new SqliteDatabaseAdapter();
   await db.open({
@@ -74,4 +118,19 @@ export async function initOperatorState(
   await migrations.applyPending(migrationList);
 
   return { db, migrations };
+}
+
+/**
+ * Clear the singleton cache. Intended for test fixtures that need a fresh
+ * database connection after closing a cached adapter.
+ */
+export function clearOperatorStateCache(): void {
+  operatorStateCache.clear();
+}
+
+/**
+ * Return the number of cached entries (for diagnostics).
+ */
+export function getOperatorStateCacheSize(): number {
+  return operatorStateCache.size;
 }

@@ -581,11 +581,11 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
     // (status 0 and no spawn error); a failed launch should not overwrite
     // the canonical session marker with a stale transcript.
     if (worktree && slug && role && result && result.status === 0 && !result.error) {
+      const launchSessionId = result && result.sessionId ? result.sessionId : null;
+      if (!launchSessionMarkerPort || !sessionRole) {
+        throw new Error('SessionMarkerPort and canonical role are required');
+      }
       try {
-        const launchSessionId = result && result.sessionId ? result.sessionId : null;
-        if (!launchSessionMarkerPort || !sessionRole) {
-          throw new Error('SessionMarkerPort and canonical role are required');
-        }
         await launchSessionMarkerPort.save({
           missionId: sessionMissionId(slug),
           role: sessionRole,
@@ -594,7 +594,15 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
           sessionId: launchSessionId,
         });
       } catch (err) {
-        throw new Error(`Could not persist session marker for ${slug} (${role}): ${(err as any).message}`);
+        // Diagnostic: log full error details and database state
+        if (process.env.PARALLIX_DEBUG_SQL) {
+          const { getOperatorStateCacheSize } = await import('../../../../adapters/sqlite/adapter-factory.js');
+          const e = err as Error & { code?: string };
+          process.stderr.write(`[sql-error] save failed: code=${e.code ?? 'n/a'} message="${e.message}"\n`);
+          process.stderr.write(`[sql-error] cacheSize=${getOperatorStateCacheSize()} pid=${process.pid}\n`);
+          process.stderr.write(`[sql-error] stack:\n${e.stack ?? 'n/a'}\n`);
+        }
+        throw new Error(`Could not persist session marker for ${slug} (${role}): ${(err as Error).message}`);
       }
     }
 
