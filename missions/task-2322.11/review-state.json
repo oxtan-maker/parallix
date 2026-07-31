@@ -1,0 +1,17 @@
+{
+  "reviewer": "custom",
+  "implementer": "codex",
+  "round": 1,
+  "startedAt": "2026-07-31T04:35:45.443Z",
+  "phase": "approved",
+  "disposition": "APPROVED",
+  "metadata": {
+    "humanEscalationReason": "REVIEWER_LAUNCH_FAILURE",
+    "humanEscalatedAt": "2026-07-31T06:18:54.987Z",
+    "recordedStageLaunches": {
+      "review:custom": [
+        "custom|019fb6d7-35ee-7b3d-8511-d3ef65cb28b6|2026-07-31T06:27:29.517Z|2026-07-31T06:27:29.517Z|0"
+      ]
+    }
+  }
+}

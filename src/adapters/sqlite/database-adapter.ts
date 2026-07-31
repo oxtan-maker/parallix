@@ -78,6 +78,10 @@ export class SqliteDatabaseAdapter {
     }
 
     this.db = new DatabaseSync(config.path);
+    const debug = process.env.PARALLIX_DEBUG_SQL;
+    if (debug) {
+      process.stderr.write(`[sql-open] ${config.path} (busyTimeout=${busyTimeout}ms, wal=${enableWal}, pid=${process.pid})\n`);
+    }
 
     // Enable foreign keys
     this.db.exec('PRAGMA foreign_keys = ON;');
@@ -138,12 +142,29 @@ export class SqliteDatabaseAdapter {
    */
   async execute(sql: string, params?: readonly unknown[]): Promise<number> {
     this.assertOpen();
-    if (params && params.length > 0) {
-      const result = this.db!.prepare(sql).run(...params as any);
-      return (result as { changes?: number }).changes ?? 0;
-    } else {
-      this.db!.exec(sql);
-      return 0;
+    const debug = process.env.PARALLIX_DEBUG_SQL;
+    if (debug) {
+      process.stderr.write(`[sql-exec] ${this.config?.path ?? 'unknown'} | ${sql.trim().replace(/\s+/g, ' ').slice(0, 120)}\n`);
+    }
+    try {
+      if (params && params.length > 0) {
+        const result = this.db!.prepare(sql).run(...params as any);
+        return (result as { changes?: number }).changes ?? 0;
+      } else {
+        this.db!.exec(sql);
+        return 0;
+      }
+    } catch (err) {
+      if (debug && this.db) {
+        try {
+          const bt = this.db.prepare('PRAGMA busy_timeout;').all();
+          const jm = this.db.prepare('PRAGMA journal_mode;').all();
+          const btVal = bt?.[0] ?? bt;
+          const jmVal = jm?.[0] ?? jm;
+          process.stderr.write(`[sql-diag] error on ${this.config?.path}: busy_timeout=${JSON.stringify(btVal)}, journal_mode=${JSON.stringify(jmVal)}, pid=${process.pid}\n`);
+        } catch (_) { /* diag failed, ignore */ }
+      }
+      throw err;
     }
   }
 

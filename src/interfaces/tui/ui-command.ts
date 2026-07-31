@@ -3,6 +3,7 @@ import React from 'react';
 import { render, renderToString } from 'ink';
 import type { RepositoryId } from '../../domain/repository.js';
 import type { BoardProgressSink } from '../../application/controller/board-command.js';
+import type { AgentBlocklistRepository, OperationalHistoryRepository, BoardLaneEventRepository, UsageRepository } from '../../application/ports.js';
 import { createBoardProjectionBuilder } from '../../application/projections/create-board-projection-builder.js';
 import type { MissionDetail } from '../../application/projections/mission-detail.js';
 import { ConcreteMissionReadAdapter } from '../../adapters/backlog/concrete-mission-read-adapter.js';
@@ -13,57 +14,44 @@ import { resolveKnownAgentFamilies } from './agent-config-resolver.js';
 export { resolveKnownAgentFamilies } from './agent-config-resolver.js';
 
 // ---------------------------------------------------------------------------
-// In-memory stub repositories for read-only TUI shell
+// Fallback empty repositories — used only when the checked adapter is unavailable
 // ---------------------------------------------------------------------------
 
 /**
- * The read-only TUI does not open persistence adapters itself. Its host
- * composition root supplies an AgentBlock repository when a live operator
- * projection is needed; the standalone shell stays side-effect free.
+ * Empty fallback repositories for TUI projection when the composition root's
+ * The checked adapter is unavailable (CJS rollback bundle, missing built-in module,
+ * or database open/migration failure). These are not production authorities;
+ * they are the graceful-degradation path.
  */
-class EmptyBlocklistRepository {
-  async findAll() { return []; }
-  async findByAgent() { return undefined; }
-  async save(_entry: unknown): Promise<void> {}
-  async deleteByAgent(_agent: string): Promise<void> {}
-  async clear(): Promise<void> {}
-}
+const EMPTY_BLOCKLIST: AgentBlocklistRepository = {
+  async findAll() { return []; },
+  async findByAgent() { return undefined; },
+  async save(_entry: unknown): Promise<void> {},
+  async deleteByAgent(_agent: string): Promise<void> {},
+  async clear(): Promise<void> {},
+};
 
-/**
- * Minimal in-memory OperationalHistoryRepository for read-only TUI use.
- * Returns empty history — sufficient for the static shell projection.
- */
-class EmptyHistoryRepository {
-  async findAll() { return []; }
-  async findByType(_type: string) { return []; }
-  async append(_entry: unknown): Promise<void> {}
-  async clear(): Promise<void> {}
-}
+const EMPTY_HISTORY: OperationalHistoryRepository = {
+  async findAll() { return []; },
+  async findByType(_type: string) { return []; },
+  async append(_entry: unknown): Promise<void> {},
+  async clear(): Promise<void> {},
+};
 
-/**
- * Minimal in-memory BoardLaneEventRepository for read-only TUI use.
- * Returns empty lane-event log — sufficient for the static shell projection.
- * Lane events are used by Wave 3 flow panel (TASK-2304+).
- */
-class EmptyLaneEventRepository {
-  async append(_entry: unknown): Promise<boolean> { return false; }
-  async findByMissionId(_missionId: string) { return []; }
-  async findAll() { return []; }
-  async clear(): Promise<void> {}
-}
+const EMPTY_LANE_EVENTS: BoardLaneEventRepository = {
+  async append(_entry: unknown): Promise<boolean> { return false; },
+  async findByMissionId(_missionId: string) { return []; },
+  async findAll() { return []; },
+  async clear(): Promise<void> {},
+};
 
-/**
- * Minimal in-memory UsageRepository for read-only TUI use.
- * Returns empty usage records — sufficient for the static shell projection.
- * Usage records are used by Wave 3 metrics (TASK-2304+).
- */
-class EmptyUsageRepository {
-  async findAll() { return []; }
-  async findWhere(_predicate: (_record: object) => boolean) { return []; }
-  async save(_record: unknown): Promise<void> {}
-  async saveAll(_records: readonly unknown[]): Promise<void> {}
-  async clear(): Promise<void> {}
-}
+const EMPTY_USAGE: UsageRepository = {
+  async findAll() { return []; },
+  async findWhere(_predicate: (_record: object) => boolean) { return []; },
+  async save(_record: unknown): Promise<void> {},
+  async saveAll(_records: readonly unknown[]): Promise<void> {},
+  async clear(): Promise<void> {},
+};
 
 /**
  * The runtime composition point deliberately has no direct lifecycle adapter.
@@ -95,6 +83,49 @@ function resolveRepositoryId(rootDir: string): RepositoryId {
 // ---------------------------------------------------------------------------
 
 /**
+ * Resolve repositories from the production composition root.
+ *
+ * The TUI receives its operator-state ports from the single composition root
+ * rather than opening the database independently. When the adapter is unavailable
+ * (CJS rollback, missing module, database failure), falls back to empty
+ * repositories.
+ */
+async function resolveTuiRepositories(
+  rootDir: string,
+): Promise<{
+  blocklistRepo: AgentBlocklistRepository;
+  historyRepo: OperationalHistoryRepository;
+  laneEventRepo: BoardLaneEventRepository;
+  usageRepo: UsageRepository;
+}> {
+  try {
+    const { createProductionApplicationServices } = await import(
+      '../../platform/runtime/lib/composition/application-services.js'
+    );
+    const services = await createProductionApplicationServices(rootDir);
+    if (services.operatorState.repositories) {
+      // Real repositories from the composition root
+      const repos = services.operatorState.repositories;
+      return {
+        blocklistRepo: repos.agentBlocklist,
+        historyRepo: repos.operationalHistory,
+        laneEventRepo: repos.boardLaneEvents,
+        usageRepo: repos.usage,
+      };
+    }
+  } catch {
+    // Adapter unavailable — fall through to empty fallbacks
+  }
+
+  return {
+    blocklistRepo: EMPTY_BLOCKLIST,
+    historyRepo: EMPTY_HISTORY,
+    laneEventRepo: EMPTY_LANE_EVENTS,
+    usageRepo: EMPTY_USAGE,
+  };
+}
+
+/**
  * Render the static Ink TUI shell.
  *
  * Obtains one BoardProjection from the composition root using concrete read
@@ -111,13 +142,16 @@ export async function runUiCommand(_args: string[] = []): Promise<number> {
   const repositoryId = resolveRepositoryId(rootDir);
   const knownAgentFamilies = resolveKnownAgentFamilies(rootDir);
 
+  // Resolve repositories from the production composition root.
+  const repos = await resolveTuiRepositories(rootDir);
+
   const builder = createBoardProjectionBuilder({
     rootDir,
     repositoryId,
-    blocklistRepo: new EmptyBlocklistRepository(),
-    historyRepo: new EmptyHistoryRepository(),
-    laneEventRepo: new EmptyLaneEventRepository(),
-    usageRepo: new EmptyUsageRepository(),
+    blocklistRepo: repos.blocklistRepo,
+    historyRepo: repos.historyRepo,
+    laneEventRepo: repos.laneEventRepo,
+    usageRepo: repos.usageRepo,
     knownAgentFamilies,
   });
 

@@ -13,6 +13,12 @@ import * as fmt from '../core/fmt.js';
 // SC8 / SC9 — projection wiring (dynamic imports for CJS rollback compat)
 // These modules are not in the dist/ CJS bundle, so they are loaded lazily.
 import type { BoardProjectionBuilder } from '../../../../application/projections/board-readers.js';
+import type {
+  AgentBlocklistRepository,
+  OperationalHistoryRepository,
+  BoardLaneEventRepository,
+  UsageRepository,
+} from '../../../../adapters/sqlite/ports.js';
 
 /** @param {string} porcelain */
 function parseWorktreeList(porcelain: string) {
@@ -116,40 +122,77 @@ function logRebaseDiagnostics(log: Function, label: string, rebaseState: {detach
 // ---------------------------------------------------------------------------
 
 /**
- * Build a lightweight in-memory SQLite adapter set for projection reading.
- * Falls back to empty repos when SQLite is unavailable.
+ * Build a lightweight SQLite adapter set for projection reading.
+ *
+ * Resolves repositories from the production composition root rather than
+ * opening SQLite independently. Falls back to empty repos when SQLite is
+ * unavailable (CJS rollback bundle, missing modules, or database failure).
+ *
  * Uses dynamic imports for CJS rollback bundle compatibility.
  */
-async function createProjectionDeps(rootDir: string) {
-  let blocklistRepo: any;
-  let historyRepo: any;
-  let laneEventRepo: any;
-  let usageRepo: any;
-
+async function createProjectionDeps(rootDir: string): Promise<{
+  rootDir: string;
+  blocklistRepo: AgentBlocklistRepository;
+  historyRepo: OperationalHistoryRepository;
+  laneEventRepo: BoardLaneEventRepository;
+  usageRepo: UsageRepository;
+}> {
   try {
-    const { SqliteDatabaseAdapter } = await import('../../../../adapters/sqlite/database-adapter.js');
-    const { SqliteMigrationRunner, loadDefaultMigrations } = await import('../../../../adapters/sqlite/migration-runner.js');
-    const { SqliteBlocklistRepository } = await import('../../../../adapters/sqlite/blocklist-repository.js');
-    const { SqliteOperationalHistoryRepository } = await import('../../../../adapters/sqlite/operational-history-repository.js');
-    const { SqliteBoardLaneEventRepository } = await import('../../../../adapters/sqlite/board-lane-event-repository.js');
-    const { SqliteUsageRepository } = await import('../../../../adapters/sqlite/usage-repository.js');
-    const { resolveDatabasePath } = await import('../../../../adapters/sqlite/database-path-resolver.js');
-    const db = new SqliteDatabaseAdapter();
-    await db.open({ path: resolveDatabasePath() });
-    await new SqliteMigrationRunner(db).applyPending(loadDefaultMigrations());
-    blocklistRepo = new SqliteBlocklistRepository(db);
-    historyRepo = new SqliteOperationalHistoryRepository(db);
-    laneEventRepo = new SqliteBoardLaneEventRepository(db);
-    usageRepo = new SqliteUsageRepository(db);
+    const { createProductionApplicationServices } = await import(
+      '../composition/application-services.js'
+    );
+
+    const services = await createProductionApplicationServices(rootDir);
+    const repos = services.operatorState.repositories;
+    if (repos) {
+      // Real repositories from the composition root
+      return {
+        rootDir,
+        blocklistRepo: repos.agentBlocklist,
+        historyRepo: repos.operationalHistory,
+        laneEventRepo: repos.boardLaneEvents,
+        usageRepo: repos.usage,
+      };
+    }
   } catch {
-    // SQLite unavailable (CJS rollback bundle or missing modules) — use empty fallbacks
-    blocklistRepo = { findAll: async () => [], findByAgent: async () => undefined };
-    historyRepo = { findAll: async () => [] };
-    laneEventRepo = { findAll: async () => [], findByMissionId: async () => [] };
-    usageRepo = { findAll: async () => [] };
+    // Adapter unavailable — fall through to empty fallbacks
   }
 
-  return { rootDir, blocklistRepo, historyRepo, laneEventRepo, usageRepo };
+  // Empty fallbacks when SQLite is not available
+  const emptyBlocklist: AgentBlocklistRepository = {
+    async findAll() { return []; },
+    async findByAgent() { return undefined; },
+    async save() {},
+    async deleteByAgent() {},
+    async clear() {},
+  };
+  const emptyHistory: OperationalHistoryRepository = {
+    async findAll() { return []; },
+    async findByType() { return []; },
+    async append() {},
+    async clear() {},
+  };
+  const emptyLaneEvents: BoardLaneEventRepository = {
+    async append() { return false; },
+    async findByMissionId() { return []; },
+    async findAll() { return []; },
+    async clear() {},
+  };
+  const emptyUsage: UsageRepository = {
+    async findAll() { return []; },
+    async findWhere() { return []; },
+    async save() {},
+    async saveAll() {},
+    async clear() {},
+  };
+
+  return {
+    rootDir,
+    blocklistRepo: emptyBlocklist,
+    historyRepo: emptyHistory,
+    laneEventRepo: emptyLaneEvents,
+    usageRepo: emptyUsage,
+  };
 }
 
 /** Build BoardProjectionBuilder from production concrete adapters (SC8). */

@@ -92,7 +92,7 @@ async function active(args, options = {}) {
 // immediately after the launcher successfully spawns the process. If the final
 // launch result later fails, we roll the task status back to the prior status.
 /**
- * @param {{slug: string, worktree: string, preselectedAgent?: string | null, agentConfig: object, taskResolution: object, prompt: string, startAgentFn?: Function, transitionTaskFn?: Function, getTaskStatusFn?: Function, getTaskImplementerFn?: Function, selectAgentFn?: Function, log?: Function}} opts
+ * @param {{slug: string, worktree: string, preselectedAgent?: string | null, agentConfig: object, taskResolution: object, prompt: string, startAgentFn?: Function, transitionTaskFn?: Function, getTaskStatusFn?: Function, getTaskImplementerFn?: Function, selectAgentFn?: Function, log?: Function, sessionMarkerPort?: object | null}} opts
  */
 async function selectLaunchAndRecord(opts) {
   const {
@@ -107,7 +107,8 @@ async function selectLaunchAndRecord(opts) {
     getTaskStatusFn = getTaskStatus,
     getTaskImplementerFn = getTaskImplementer,
     selectAgentFn = agents.selectAgent,
-    log = fmt.log.plain
+    log = fmt.log.plain,
+    sessionMarkerPort = null,
   } = opts;
   const preselected = preselectedAgent || selectAgentFn('active', { config: agentConfig });
   const taskResolutionTyped = /** @type{{ok: boolean, taskFile?: string} | undefined} */(taskResolution);
@@ -150,6 +151,7 @@ async function selectLaunchAndRecord(opts) {
       agent: preselected,
       slug: slug,
       role: 'implementer',
+      sessionMarkerPort: sessionMarkerPort ?? undefined,
       onLaunch: async (/** @type{{agent: string}} */ { agent }) => {
         launchedAgent = agent;
         if (!(taskResolutionTyped && taskResolutionTyped.ok)) {
