@@ -26,17 +26,21 @@ const adapterOutputRoot = path.join(testRuntimeRoot, 'adapters');
 const domainSourceRoot = path.join(root, 'src', 'domain');
 const domainOutputRoot = path.join(testRuntimeRoot, 'domain');
 
-function collectTypeScriptFiles(directory: string): string[] {
+function collectFilesWithExtension(directory: string, extension: string): string[] {
   const files: string[] = [];
   for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
     const filePath = path.join(directory, entry.name);
     if (entry.isDirectory()) {
-      files.push(...collectTypeScriptFiles(filePath));
-    } else if (entry.isFile() && entry.name.endsWith('.ts')) {
+      files.push(...collectFilesWithExtension(filePath, extension));
+    } else if (entry.isFile() && entry.name.endsWith(extension)) {
       files.push(filePath);
     }
   }
   return files;
+}
+
+function collectTypeScriptFiles(directory: string): string[] {
+  return collectFilesWithExtension(directory, '.ts');
 }
 
 // The root package is ESM after TASK-2285; these emitted modules are CommonJS
@@ -73,10 +77,22 @@ for (const [inputRoot, outputRootForSource] of [
     const adapterAdjustedOutput = applicationAdjustedOutput
       .replace(/\.\.\/\.\.\/platform\/runtime\/lib\//g, '../../lib/');
     const cjsSafeOutput = adapterAdjustedOutput
-      .replace(/import\.meta\.url \? [^:;]+ : __dirname/g, '__dirname');
+      .replace(/import\.meta\.url \? [^:;]+ : __dirname/g, '__dirname')
+      .replace(/\(0, [^)]+\.fileURLToPath\)\(import\.meta\.url\)/g, '__filename')
+      // Remove "const __filename = __filename;" lines that shadow the CJS global
+      .replace(/^(\s*)const __filename = __filename;\s*$/gm, '$1');
     const outputText = sourcePath.endsWith(`${path.sep}runtime-assets.ts`)
       ? cjsSafeOutput.replace('../runtime/lib/core/package-root.js', '../lib/core/package-root.js')
       : cjsSafeOutput;
     fs.writeFileSync(outputPath, outputText, 'utf8');
+  }
+
+  // SQL migrations are read from disk at runtime (loadDefaultMigrations resolves
+  // `migrations/` relative to the emitted module), so they must travel with the
+  // transpiled tree. The product bundle inlines them instead.
+  for (const sourcePath of collectFilesWithExtension(inputRoot, '.sql')) {
+    const outputPath = path.join(outputRootForSource, path.relative(inputRoot, sourcePath));
+    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+    fs.copyFileSync(sourcePath, outputPath);
   }
 }

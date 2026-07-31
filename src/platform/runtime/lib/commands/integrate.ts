@@ -16,6 +16,8 @@ const { formatVerificationCommand } = verification;
 import * as postIntegrateHook from '../core/post-integrate-hook.js';
 import { isForgejoReviewEnabled } from '../core/product-config.js';
 import { readReviewState } from '../review/review-state.js';
+import { createMissionApplicationServices } from '../composition/application-services.js';
+import { missionId } from '../../../../domain/mission.js';
 
 const VARIANT_B_AUTOMATION_SUMMARY = 'Variant B automation: Backlog task closeout, worktree-path rewrite, squash commit with hook-enforced validation, Forgejo sync-merged, and mission worktree cleanup.';
 
@@ -703,6 +705,33 @@ async function integrate(args: string[]) {
     try {
       const executionDir = process.cwd();
       context = buildIntegrationContext(slug);
+
+      // SC3/SC5: Read authoritative Mission state from SqliteMissionStore.
+      // Database unavailability fails the operation (SC5: fail-closed).
+      const missionServices = await createMissionApplicationServices(context.baseWorktree || process.cwd());
+      const missionLoad = await missionServices.store.load(missionId(slug));
+      if (missionLoad.kind === 'unavailable') {
+        fmt.log.fail(`Mission store unavailable: ${missionLoad.reason}. Integration cannot proceed on legacy files.`);
+        throw new IntegrationAbort();
+      }
+      if (missionLoad.kind === 'missing') {
+        fmt.log.fail(`Mission ${missionId(slug)} not found in SQLite. Materialize through the intake boundary before integration.`);
+        throw new IntegrationAbort();
+      }
+      if (missionLoad.kind === 'found') {
+        const missionContext = /** @type {Record<string, unknown>} */ (context as Record<string, unknown>);
+        missionContext.missionStatus = missionLoad.mission.status;
+        missionContext.missionReview = missionLoad.mission.review;
+        missionContext.missionVersion = missionLoad.version;
+        // SC3: Use Mission store review as approval source when Forgejo is unavailable.
+        if (context.approval.ok !== true && missionLoad.mission.review) {
+          const lastRound = missionLoad.mission.review.rounds[missionLoad.mission.review.rounds.length - 1];
+          if (lastRound?.decision?.kind === 'approved') {
+            context.approval = { ok: true, reviewState: 'APPROVED', source: 'mission-store' };
+          }
+        }
+      }
+
       // The integration target is the mission's recorded base worktree/branch.
       // For legacy missions these resolve to the primary worktree/branch, keeping
       // the merge/commit/sync path byte-identical to today.
@@ -753,7 +782,7 @@ async function integrate(args: string[]) {
       }
 
       if (dryRun) {
-        promoteTaskForIntegrationIfNeeded(context, { dryRun: true });
+        await promoteTaskForIntegrationIfNeeded(context, { dryRun: true });
         fmt.log.pass('\nDry run complete. Integration preflight passed.');
         return;
       }
@@ -937,7 +966,7 @@ async function integrate(args: string[]) {
       // Do not dirty the primary checkout before the probe merge and squash have
       // completed. The task file is commonly part of the mission branch, so an
       // early promotion can make `merge --abort` fail and leave index conflicts.
-      promoteTaskForIntegrationIfNeeded(context);
+      await promoteTaskForIntegrationIfNeeded(context);
       if (fs.existsSync(mainTaskFile)) {
         completeTask(slug, baseWorktree);
         // Re-resolve because it moved
@@ -1020,7 +1049,14 @@ async function integrate(args: string[]) {
     if (error instanceof IntegrationAbort) {
       exitCode = 1;
     } else {
-      throw /** @type {any} */ (error);
+      // Report and fail. Rethrowing here is swallowed by the `process.exit()`
+      // below, which would end the run with a success code and no output at
+      // all — the operator would see integrate "succeed" while doing nothing.
+      fmt.log.fail(`Integration failed: ${(error as any)?.message || String(error)}`);
+      if ((error as any)?.stack) {
+        fmt.log.fail(String((error as any).stack));
+      }
+      exitCode = 1;
     }
   } finally {
     if (temporaryStash?.created) {
@@ -1221,7 +1257,10 @@ function printMergedPrRecoveryGuidance(log: Function, slug: string, baseWorktree
 }
 
 /** @param {{slug: string, branch: string, currentBranch: string, missionDir?: string, area: string, task: {ok: boolean, taskFile?: string, reason?: string, matches?: string[]}, taskStatus?: string, taskAssignee?: string|null, forgejoUser?: string|null, forgejoToken?: string|null, taskAssigneeWarning?: string|null, pr: {exists?: boolean, state?: string, number?: number, merged?: boolean, raw?: string}, siblingPrs: any[], approval: {ok?: boolean, error?: string, reviewState?: string, defaultUserApproved?: boolean, source?: string}, baseBranch?: string, baseWorktree?: string, mainBranch: string, mainDirtyEntries: string[], mainDirty: boolean}} context */
-function promoteTaskForIntegrationIfNeeded(context: any, { dryRun = false } = {}) {
+async function promoteTaskForIntegrationIfNeeded(
+  context: any,
+  { dryRun = false, missionServicesFn = createMissionApplicationServices }: { dryRun?: boolean, missionServicesFn?: Function } = {},
+) {
   const taskStatusCheck = evaluateTaskStatusForIntegration(context);
   const needsPromotion = context.task?.ok && context.taskStatus === 'review' && taskStatusCheck.ok;
 
@@ -1234,6 +1273,38 @@ function promoteTaskForIntegrationIfNeeded(context: any, { dryRun = false } = {}
     return { changed: false, dryRun: true };
   }
 
+  // SC3/SC5: Transition Mission state through SqliteMissionStore FIRST.
+  // The durable Mission state must commit before any external Backlog effect.
+  // Database unavailability fails the operation (SC5: fail-closed).
+  const missionServices = await missionServicesFn(context.baseWorktree || process.cwd());
+  const missionLoad = await missionServices.store.load(missionId(context.slug));
+  if (missionLoad.kind === 'unavailable') {
+    fmt.log.fail(`Mission store unavailable: ${missionLoad.reason}. Refusing to promote the Backlog task.`);
+    throw new IntegrationAbort();
+  }
+  if (missionLoad.kind === 'missing') {
+    fmt.log.fail(`Mission ${missionId(context.slug)} not found in SQLite. Refusing to promote the Backlog task — file-only lifecycle state is not permitted after cutover.`);
+    throw new IntegrationAbort();
+  }
+  if (missionLoad.kind === 'found') {
+    const transitionResult = await missionServices.lifecycle.transition({
+      operationId: `integrate-transition-${context.slug}`,
+      missionId: missionId(context.slug),
+      capabilities: new Set(['mission:transition']),
+      command: { type: 'integrate' },
+      actor: context.forgejoUser || 'custom',
+      occurredAt: new Date().toISOString(),
+      idempotencyKey: `integrate-${context.slug}-${Date.now()}`,
+    });
+    if (transitionResult.status !== 'completed' || !transitionResult.value) {
+      fmt.log.fail(`Mission state transition failed: ${transitionResult.error?.message || 'unknown'}.`);
+      throw new IntegrationAbort();
+    }
+    const transitioned = transitionResult.value;
+    fmt.log.info(`Mission state transitioned to ${transitioned.to} (v${transitioned.version})`);
+  }
+
+  // External boundary effect (Backlog promotion) after durable state committed.
   const stateMapOptions = { rootDir: /** @type {string} */ (context.baseWorktree) };
   const approvedStatus = toActual('approved', stateMapOptions) || 'approved';
   const baseTask = context.slug && context.baseWorktree
@@ -1246,6 +1317,7 @@ function promoteTaskForIntegrationIfNeeded(context: any, { dryRun = false } = {}
 
   context.taskStatus = toActual('approved', stateMapOptions);
   fmt.log.info('Promoted Backlog status from review to approved because review is already fulfilled.');
+
   return { changed: true, dryRun: false };
 }
 

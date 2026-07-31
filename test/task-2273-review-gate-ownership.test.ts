@@ -13,6 +13,8 @@ const backlog = require('../.test-runtime/lib/tools/backlog');
 const REPO_ROOT = path.join(__dirname, '..');
 const RUNTIME_LIB = path.join(REPO_ROOT, 'src', 'platform', 'runtime', 'lib');
 
+const { stubMissionServices } = require('./helpers/stub-mission-services');
+
 test('task-2273 baseline: handoff owns two commit-equivalent general-gate invocations', () => {
   const handoff = fs.readFileSync(path.join(RUNTIME_LIB, 'commands', 'handoff.ts'), 'utf8');
 
@@ -72,6 +74,7 @@ test('task-2273 review submission runs the handoff plan once and reuses it at th
     t.mock.method(backlog, 'getTaskImplementer', () => 'codex');
     t.mock.method(backlog, 'transitionTask', () => true);
     const result = await performHandoff(slug, {
+      missionServicesFn: stubMissionServices(),
       worktree: root,
       isForgejoReviewEnabledFn: () => false,
       rebaseFn: async () => ({ ok: true }),

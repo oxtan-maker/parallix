@@ -107,6 +107,8 @@ const { conventionalWorktreePath, getPrimaryBranch } = missionUtils;
 
 const PRIMARY = getPrimaryBranch();
 
+const { stubMissionServices } = require('./helpers/stub-mission-services');
+
 test('prepareNoisePatchForSquash cleans only its owned patch directory when reset fails', () => {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'integrate-noise-cleanup-'));
   const operatorFile = path.join(tmpRoot, 'operator-note.txt');
@@ -1507,7 +1509,7 @@ test('reportStashPopFailure prints file-collision recovery steps when no merge e
   }
 });
 
-test('promoteTaskForIntegrationIfNeeded logs the dry-run auto-promotion without mutating status', () => {
+test('promoteTaskForIntegrationIfNeeded logs the dry-run auto-promotion without mutating status', async () => {
   const context = {
     task: { ok: true, taskFile: '/tmp/task-097.md' },
     taskStatus: 'review',
@@ -1519,7 +1521,7 @@ test('promoteTaskForIntegrationIfNeeded logs the dry-run auto-promotion without 
   console.log = line => lines.push(line);
 
   try {
-    const result = promoteTaskForIntegrationIfNeeded(context, { dryRun: true });
+    const result = await promoteTaskForIntegrationIfNeeded(context, { dryRun: true });
     assert.deepEqual(result, { changed: false, dryRun: true });
     assert.equal(context.taskStatus, 'review');
     assert.match(lines.join('\n'), /would promote Backlog status from review to approved/i);
@@ -1528,18 +1530,19 @@ test('promoteTaskForIntegrationIfNeeded logs the dry-run auto-promotion without 
   }
 });
 
-test('promoteTaskForIntegrationIfNeeded updates the task file on a real integration run', () => {
+test('promoteTaskForIntegrationIfNeeded updates the task file on a real integration run', async () => {
   const taskFile = path.join(os.tmpdir(), `integrate-promote-${process.pid}.md`);
   fs.writeFileSync(taskFile, 'Status: ○ review\n');
 
   try {
     const context = {
+      slug: 'task-2229',
       task: { ok: true, taskFile },
       taskStatus: 'review',
       pr: { merged: false },
       approval: { ok: true, reviewState: 'APPROVED' }
     };
-    const result = promoteTaskForIntegrationIfNeeded(context);
+    const result = await promoteTaskForIntegrationIfNeeded(context, { missionServicesFn: stubMissionServices() });
 
     assert.deepEqual(result, { changed: true, dryRun: false });
     assert.equal(context.taskStatus, 'ready-for-integration');
@@ -1549,7 +1552,43 @@ test('promoteTaskForIntegrationIfNeeded updates the task file on a real integrat
   }
 });
 
-test('promoteTaskForIntegrationIfNeeded writes the integration checkout instead of the mission task copy', () => {
+// TASK-2322.07: after the cutover a Mission that has no SQLite aggregate is not
+// a lifecycle state Parallix recognises. Promoting the external task anyway
+// would recreate a file-only lifecycle, so a `missing` (or `unavailable`) load
+// must abort before the Backlog mutation.
+for (const [label, read] of [
+  ['missing', { kind: 'missing' }],
+  ['unavailable', { kind: 'unavailable', reason: 'database is locked' }],
+] as const) {
+  test(`promoteTaskForIntegrationIfNeeded refuses to promote the Backlog task when the Mission aggregate is ${label}`, async () => {
+    const taskFile = path.join(os.tmpdir(), `integrate-promote-${label}-${process.pid}.md`);
+    fs.writeFileSync(taskFile, 'Status: ○ review\n');
+
+    try {
+      const context = {
+        slug: 'task-2322-07-absent',
+        task: { ok: true, taskFile },
+        taskStatus: 'review',
+        pr: { merged: false },
+        approval: { ok: true, reviewState: 'APPROVED' }
+      };
+      const missionServicesFn = stubMissionServices({
+        store: { _repoId: 'test-repo', async load() { return read; } },
+      });
+
+      await assert.rejects(
+        () => promoteTaskForIntegrationIfNeeded(context, { missionServicesFn }),
+        (error: Error) => error.constructor.name === 'IntegrationAbort',
+      );
+      assert.equal(context.taskStatus, 'review', 'the external task status must be untouched');
+      assert.match(fs.readFileSync(taskFile, 'utf8'), /Status: ○ review/);
+    } finally {
+      fs.rmSync(taskFile, { force: true });
+    }
+  });
+}
+
+test('promoteTaskForIntegrationIfNeeded writes the integration checkout instead of the mission task copy', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'integrate-promote-base-'));
   const baseTask = path.join(root, 'backlog', 'tasks', 'task-2230 - base.md');
   const missionTask = path.join(root, 'mission-task.md');
@@ -1562,7 +1601,10 @@ test('promoteTaskForIntegrationIfNeeded writes the integration checkout instead 
       task: { ok: true, taskFile: missionTask }, taskStatus: 'review',
       pr: { merged: false }, approval: { ok: true, reviewState: 'APPROVED' }
     };
-    assert.deepEqual(promoteTaskForIntegrationIfNeeded(context), { changed: true, dryRun: false });
+    assert.deepEqual(
+      await promoteTaskForIntegrationIfNeeded(context, { missionServicesFn: stubMissionServices() }),
+      { changed: true, dryRun: false },
+    );
     assert.match(fs.readFileSync(baseTask, 'utf8'), /^status: ready-for-integration$/m);
     assert.match(fs.readFileSync(missionTask, 'utf8'), /^status: review$/m);
   } finally {

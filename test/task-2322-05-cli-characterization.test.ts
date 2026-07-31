@@ -117,6 +117,19 @@ test('SC5 characterization: NEL capture observes the primary branch first, then 
     log: () => {},
     error: () => {},
     missionServicesFn: () => ({
+      store: {
+        async load() {
+          return {
+            kind: 'found' as const,
+            mission: {
+              review: {
+                rounds: [{ decision: 'APPROVE' }, { decision: 'REQUEST_CHANGES' }, { decision: 'APPROVE' }, { decision: 'APPROVE' }],
+              },
+            },
+            version: 1 as const,
+          };
+        },
+      },
       handoff: {
         async recordNel(request: Record<string, unknown>) {
           effects.push(`record:${request.netEngineeringLines}:${request.predictedBucket}:${request.reviewRounds}`);
@@ -144,6 +157,11 @@ test('SC5 characterization: a refused Mission write makes NEL capture fail close
     log: () => {},
     error: (message: string) => errors.push(message),
     missionServicesFn: () => ({
+      store: {
+        async load() {
+          return { ok: false, mission: null };
+        },
+      },
       handoff: {
         async recordNel() {
           return {

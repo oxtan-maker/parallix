@@ -14,6 +14,8 @@ import { ensureStandaloneMissionBaseline, resolveAgentModel } from '../core/prod
 import { ensureWorkflowGitignore } from '../core/gitignore.js';
 import { runtimeAssetStore } from '../../../assets/runtime-assets.js';
 import { unquoteGitStatusPath } from './active.js';
+import { createMissionApplicationServices } from '../composition/application-services.js';
+import { missionId } from '../../../../domain/mission.js';
 
 const SYNTHETIC_SLUG_PREFIX = 'adhoc-';
 
@@ -264,6 +266,69 @@ async function runDraftCommand(/** @type {string[]} */ args, {
   logFn('\n' + fmt.status('PASS', 'Draft setup complete.'));
   logFn(`Worktree: ${fmt.path(targetWorktree)}`);
   logFn(`Mission doc: ${fmt.path(missionFile)}`);
+
+  // Materialize the Mission aggregate in SQLite through the intake boundary
+  // BEFORE the external Backlog task is transitioned. After cutover
+  // (TASK-2322.07) SQLite is the sole lifecycle authority, so a Mission that
+  // exists only as Markdown is not a valid post-draft state: the lifecycle and
+  // integration services fail closed on a missing aggregate. Intake is
+  // idempotent — a second intake of the same identity is refused as a
+  // `conflict`, which is the expected result on a re-draft. Every other
+  // outcome (database unavailable, validation, write failure) aborts the draft
+  // before any external effect, per SC5.
+  // Title and labels are descriptive metadata: read them best-effort so a
+  // missing document never becomes the reason a Mission is not materialized.
+  let missionTitle = normalizedSlug;
+  try {
+    const firstLine = fs.readFileSync(missionFile, 'utf8').split('\n')[0] || '';
+    missionTitle = firstLine.replace(/^#\s*Mission:\s*/i, '').trim() || normalizedSlug;
+  } catch {
+    missionTitle = normalizedSlug;
+  }
+  let taskLabels = [];
+  try {
+    const taskResolution = resolveTaskFileFn(normalizedSlug, targetWorktree);
+    taskLabels = taskResolution?.ok && taskResolution?.taskFile
+      ? getTaskLabels(taskResolution.taskFile)
+      : [];
+  } catch {
+    taskLabels = [];
+  }
+
+  let intakeOutcome;
+  try {
+    const missionServices = await createMissionApplicationServices(targetWorktree);
+    intakeOutcome = await missionServices.intake.execute({
+      operationId: `draft-intake-${normalizedSlug}`,
+      missionId: missionId(normalizedSlug),
+      // Read the identity back from composition rather than deriving it from
+      // `targetWorktree`: that path is the `<repo>-<slug>` mission worktree,
+      // and keying the Mission off it would persist a repository no other
+      // command resolves to. Composition canonicalizes to the primary checkout.
+      repositoryId: missionServices.repositoryId,
+      title: missionTitle,
+      labels: taskLabels,
+      rawStatus: 'backlog',
+      externalTaskRef: null,
+      capabilities: new Set(['mission:intake']),
+    });
+  } catch (intakeError) {
+    errorFn(fmt.status('FAIL', `Mission intake to SQLite failed for ${normalizedSlug}: ${/** @type {any} */ (intakeError).message}`));
+    logFn('Repair: ensure the operator-local database is reachable, then re-run the draft. The Backlog task was not transitioned.');
+    exitFn(1);
+    return;
+  }
+
+  if (intakeOutcome.status === 'completed') {
+    logFn(fmt.status('PASS', `Mission materialized in SQLite (v${intakeOutcome.value.version})`));
+  } else if (intakeOutcome.error?.kind === 'conflict') {
+    logFn(fmt.status('INFO', `Mission already recorded in SQLite: ${intakeOutcome.error.message}`));
+  } else {
+    errorFn(fmt.status('FAIL', `Mission intake to SQLite failed for ${normalizedSlug}: ${intakeOutcome.error?.message || 'unknown error'}`));
+    logFn('Repair: resolve the intake failure above, then re-run the draft. The Backlog task was not transitioned.');
+    exitFn(1);
+    return;
+  }
 
   if (!await transitionTaskFn(normalizedSlug, 'backlog', { rootDir: targetWorktree, log: logFn })) {
     errorFn(fmt.status('FAIL', `Could not transition task ${normalizedSlug} to backlog status.`));

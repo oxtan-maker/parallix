@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { verifyHandoff, performHandoff, _findUnverifiableGoalCheckRow } = require('../.test-runtime/lib/commands/handoff');
+const { stubMissionServices } = require('./helpers/stub-mission-services');
 const { mock } = test;
 
 test('evidence shell commands require an existing file argument', () => {
@@ -84,7 +85,7 @@ test('performHandoff uses provided worktree and fails hard on Backlog missing', 
   });
   writeReviewState('/tmp/fake-worktree/docs/missions/2026/task-098', 'claude', 'claude');
 
-  const result = await performHandoff(slug, { worktree, skipGate: true });
+  const result = await performHandoff(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
   assert.strictEqual(result.ok, false);
   assert.match(result.error, /Backlog task file for task-098 not found or ambiguous/);
 
@@ -123,7 +124,7 @@ test('performHandoff skips commit in Step 4 when Backlog transition already comm
   fs.writeFileSync(missionMdPath, '# MISSION.md\n\nTest mission.\n');
   fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | test/example.test.ts | PASS |\n');
 
-  const result = await performHandoff(slug, { worktree, skipGate: true });
+  const result = await performHandoff(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
   assert.strictEqual(result.ok, true);
 
   fs.rmSync(cpPath, { force: true });
@@ -163,6 +164,7 @@ test('performHandoff refreshes the review tracking ref and lease-updates the reb
 
   const mockRebase = async () => ({ ok: true, sharedFileConflicts: false });
   const result = await performHandoff(slug, {
+      missionServicesFn: stubMissionServices(),
     worktree,
     skipGate: true,
     force: false,
@@ -236,6 +238,7 @@ test('performHandoff falls back to magnus and persists bootstrap failure summary
   try {
     const mockRebase = async () => ({ ok: true, sharedFileConflicts: false });
     const result = await performHandoff(slug, {
+      missionServicesFn: stubMissionServices(),
       worktree,
       skipGate: true,
       isForgejoReviewEnabledFn: () => true,
@@ -286,7 +289,7 @@ test('performHandoff fails hard when git commit fails in Step 4', async (t) => {
     fs.writeFileSync(missionMdPath, '# MISSION.md\n\nTest mission.\n');
     fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | test/example.test.ts | PASS |\n');
 
-    const result = await performHandoff(slug, { worktree, skipGate: true });
+    const result = await performHandoff(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
     assert.strictEqual(result.ok, false);
     assert.match(result.error, /Could not transition task task-098 to review/);
 
@@ -321,7 +324,7 @@ test('performHandoff fails when MISSION.md is missing from mission directory', a
   mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile: '/tmp/fake-task' }));
   writeReviewState(missionDir, 'claude', 'claude');
 
-  const result = await performHandoff(slug, { worktree, skipGate: true });
+  const result = await performHandoff(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
   assert.strictEqual(result.ok, false);
   assert.match(result.error, /MISSION\.md not found/);
 });
@@ -355,7 +358,7 @@ test('performHandoff succeeds with ## Goal Check Table heading variant', async (
   fs.writeFileSync(missionMdPath, '# MISSION.md\n\nTest mission.\n');
   fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check Table\n\n| Criteria | Evidence | Status |\n|----------|----------|--------|\n| test | test/example.test.ts | PASS |\n');
 
-  const result = await performHandoff(slug, { worktree, skipGate: true });
+  const result = await performHandoff(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
   assert.strictEqual(result.ok, true);
 
   fs.rmSync(cpPath, { force: true });
@@ -381,7 +384,7 @@ test('performHandoff fails when MISSION.md is uncommitted', async () => {
   fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | test/example.test.ts | PASS |\n');
   writeReviewState(missionDir, 'claude', 'claude');
 
-  const result = await performHandoff(slug, { worktree, skipGate: true });
+  const result = await performHandoff(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
   assert.strictEqual(result.ok, false);
   assert.match(result.error, /MISSION\.md is modified but uncommitted/);
 
@@ -406,7 +409,7 @@ test('performHandoff fails when no checkpoint documents exist', async () => {
   fs.writeFileSync(missionMdPath, '# MISSION.md\n\nTest mission.\n');
   writeReviewState(missionDir, 'claude', 'claude');
 
-  const result = await performHandoff(slug, { worktree, skipGate: true });
+  const result = await performHandoff(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
   assert.strictEqual(result.ok, false);
   assert.match(result.error, /No checkpoint documents found/);
 
@@ -449,7 +452,7 @@ test('performHandoff auto-remediates missing checkpoints by writing CP-1.md but 
 
   try {
     writeReviewState(missionDir, 'claude', 'claude');
-    const result = await performHandoff(slug, { worktree, skipGate: true });
+    const result = await performHandoff(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
 
     assert.strictEqual(result.ok, false);
     assert.match(result.error, /no evidence rows that cite a verifiable reference/);
@@ -489,7 +492,7 @@ test('performHandoff fails when the latest checkpoint document is uncommitted', 
   fs.writeFileSync(cp2Path, '# CP-2\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | test/example.test.ts | PASS |\n');
   writeReviewState(missionDir, 'claude', 'claude');
 
-  const result = await performHandoff(slug, { worktree, skipGate: true });
+  const result = await performHandoff(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
   assert.strictEqual(result.ok, false);
   assert.match(result.error, /latest checkpoint document is modified but uncommitted/);
 
@@ -519,7 +522,7 @@ test('performHandoff fails when final checkpoint is missing Goal Check section',
 
   mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile: '/tmp/fake-task' }));
 
-  const result = await performHandoff(slug, { worktree, skipGate: true });
+  const result = await performHandoff(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
   assert.strictEqual(result.ok, false);
   assert.match(result.error, /missing a "## Goal Check" section/);
 
@@ -548,7 +551,7 @@ test('performHandoff fails when final checkpoint has Goal Check section but no e
 
   mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile: '/tmp/fake-task' }));
 
-  const result = await performHandoff(slug, { worktree, skipGate: true });
+  const result = await performHandoff(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
   assert.strictEqual(result.ok, false);
   assert.match(result.error, /no evidence rows/);
 
@@ -577,7 +580,7 @@ test('performHandoff fails when final checkpoint has header-only goal-check tabl
 
   mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile: '/tmp/fake-task' }));
 
-  const result = await performHandoff(slug, { worktree, skipGate: true });
+  const result = await performHandoff(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
   assert.strictEqual(result.ok, false);
   assert.match(result.error, /no evidence rows/);
 
@@ -606,7 +609,7 @@ test('performHandoff fails when final checkpoint has separator-only goal-check t
 
   mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile: '/tmp/fake-task' }));
 
-  const result = await performHandoff(slug, { worktree, skipGate: true });
+  const result = await performHandoff(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
   assert.strictEqual(result.ok, false);
   assert.match(result.error, /no evidence rows/);
 
@@ -634,7 +637,7 @@ test('performHandoff fails when final checkpoint evidence row is placeholder pro
 
   mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile: '/tmp/fake-task' }));
 
-  const result = await performHandoff(slug, { worktree, skipGate: true });
+  const result = await performHandoff(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
   assert.strictEqual(result.ok, false);
   assert.match(result.error, /no evidence rows that cite a verifiable reference/);
 
@@ -662,7 +665,7 @@ test('performHandoff fails when final checkpoint evidence row is shell output on
 
   mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile: '/tmp/fake-task' }));
 
-  const result = await performHandoff(slug, { worktree, skipGate: true });
+  const result = await performHandoff(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
   assert.strictEqual(result.ok, false);
   assert.match(result.error, /no evidence rows that cite a verifiable reference/);
 
@@ -700,7 +703,7 @@ test('performHandoff accepts final checkpoint evidence row with a real file:line
   mock.method(gatekeeper, 'runGatekeeper', () => ({ ok: true, missing: [], skipped: false, posted: false }));
 
   try {
-    const result = await performHandoff(slug, { worktree, skipGate: true });
+    const result = await performHandoff(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
     assert.strictEqual(result.ok, true);
   } finally {
     fs.rmSync(worktree, { recursive: true, force: true });
@@ -737,7 +740,7 @@ test('performHandoff accepts file:line evidence with supporting shell context in
   mock.method(gatekeeper, 'runGatekeeper', () => ({ ok: true, missing: [], skipped: false, posted: false }));
 
   try {
-    const result = await performHandoff(slug, { worktree, skipGate: true });
+    const result = await performHandoff(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
     assert.strictEqual(result.ok, true);
   } finally {
     fs.rmSync(worktree, { recursive: true, force: true });
@@ -816,6 +819,7 @@ test('performHandoff calls rebaseBeforeReviewRound before Forgejo PR creation', 
 
   try {
     const result = await performHandoff(slug, {
+      missionServicesFn: stubMissionServices(),
       worktree,
       skipGate: true,
       isForgejoReviewEnabledFn: () => true,
@@ -868,6 +872,7 @@ test('performHandoff fails when rebase returns ok=false with no shared-file conf
 
   try {
     const result = await performHandoff(slug, {
+      missionServicesFn: stubMissionServices(),
       worktree,
       skipGate: true,
       isForgejoReviewEnabledFn: () => true,
@@ -918,6 +923,7 @@ test('performHandoff fails when rebase returns sharedFileConflicts=true', async 
 
   try {
     const result = await performHandoff(slug, {
+      missionServicesFn: stubMissionServices(),
       worktree,
       skipGate: true,
       isForgejoReviewEnabledFn: () => true,
@@ -969,6 +975,7 @@ test('performHandoff proceeds normally when rebase is a no-op (branch already up
 
   try {
     const result = await performHandoff(slug, {
+      missionServicesFn: stubMissionServices(),
       worktree,
       skipGate: true,
       isForgejoReviewEnabledFn: () => true,
@@ -1111,7 +1118,7 @@ test('captureNelAtHandoff returns error when primary branch not detected', async
   }
 });
 
-test('captureNelAtHandoff writes nel-record.json with predicted bucket, actual NEL, actual bucket, review rounds', async () => {
+test('captureNelAtHandoff records the NEL through the Mission store and writes no nel-record.json', async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nel-capture-'));
   const missionDir = path.join(tmpDir, 'missions/task-nel-test');
   const nelRecordPath = path.join(missionDir, 'nel-record.json');
@@ -1126,21 +1133,34 @@ test('captureNelAtHandoff writes nel-record.json with predicted bucket, actual N
       '',
       '## Refinement Signals',
       '',
-      '- Predicted NEL bucket: Small (0–80) / Medium (81–235) / Large (235+)',
+      '- Predicted NEL bucket: Small (0\u201380) / Medium (81\u2013235) / Large (235+)',
       '- Confidence: High',
     ].join('\n'));
-
-    // Create review-state.json with round info
-    fs.writeFileSync(path.join(missionDir, 'review-state.json'), JSON.stringify({
-      reviewer: 'claude',
-      implementer: 'claude',
-      round: 3,
-      phase: 'reviewing',
-    }, null, 2));
 
     // Mock getPrimaryBranch to return 'main'
     const { mock } = test;
     const mockFn = mock.method(require('../.test-runtime/lib/core/mission-utils'), 'getPrimaryBranch', () => 'main');
+
+    // TASK-2322.07: review rounds come from the Mission store, not review-state.json.
+    const recorded = [];
+    const missionServicesFn = stubMissionServices({
+      store: {
+        _repoId: 'test-repo',
+        async load() {
+          return {
+            kind: 'found',
+            mission: { review: { rounds: [{}, {}, {}] } },
+            version: 1,
+          };
+        },
+      },
+      handoff: {
+        async recordNel(request) {
+          recorded.push(request);
+          return { status: 'completed', value: {}, durableEvidence: [] };
+        },
+      },
+    });
 
     try {
       const result = await captureNelAtHandoff('task-nel-test', {
@@ -1148,27 +1168,23 @@ test('captureNelAtHandoff writes nel-record.json with predicted bucket, actual N
         missionDir,
         log: () => {},
         error: () => {},
+        missionServicesFn,
       });
 
       assert.strictEqual(result.ok, true);
       assert.ok(typeof result.nel === 'number', 'nel should be a number');
       assert.ok(['Small', 'Medium', 'Large'].includes(result.bucket), `bucket should be valid, got ${result.bucket}`);
 
-      // Verify nel-record.json was written
-      assert.ok(fs.existsSync(nelRecordPath), 'nel-record.json should exist');
-      const rawRecord = fs.readFileSync(nelRecordPath, 'utf8');
-      const record = JSON.parse(rawRecord);
-      // TASK-2322.05 appends `artifacts`: locators for the generated evidence
-      // the capture observed. The legacy keys and their order are unchanged.
-      assert.deepEqual(Object.keys(record), ['slug', 'predictedBucket', 'actualNel', 'actualBucket', 'reviewRounds', 'capturedAt', 'artifacts']);
-      assert.deepEqual(record.artifacts, [{ kind: 'git-range', location: 'main..HEAD', byteSize: null }]);
-      assert.equal(rawRecord.endsWith('\n'), true);
-      assert.equal(rawRecord.endsWith('\n\n'), false);
-      assert.strictEqual(record.slug, 'task-nel-test');
-      assert.strictEqual(record.predictedBucket, 'Small');
-      assert.strictEqual(record.actualBucket, result.bucket);
-      assert.strictEqual(record.reviewRounds, 3);
-      assert.ok(record.capturedAt, 'should have capturedAt timestamp');
+      // SC3: the retired legacy record is never written.
+      assert.equal(fs.existsSync(nelRecordPath), false, 'nel-record.json must not be written after the cutover');
+
+      assert.equal(recorded.length, 1, 'NEL is recorded once through the Mission store');
+      const request = recorded[0];
+      assert.strictEqual(request.missionId, 'task-nel-test');
+      assert.strictEqual(request.predictedBucket, 'Small');
+      assert.strictEqual(request.reviewRounds, 3);
+      assert.deepEqual(request.artifacts, [{ kind: 'git-range', location: 'main..HEAD', byteSize: null }]);
+      assert.ok(request.capturedAt, 'should have capturedAt timestamp');
     } finally {
       mockFn.mock.restore();
     }
@@ -1177,7 +1193,7 @@ test('captureNelAtHandoff writes nel-record.json with predicted bucket, actual N
   }
 });
 
-test('captureNelAtHandoff reports injected persistence failure and writes no success record', async () => {
+test('captureNelAtHandoff reports a refused Mission write and leaves no legacy record', async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nel-capture-fail-'));
   const missionDir = path.join(tmpDir, 'missions/task-nel-fail');
   fs.mkdirSync(missionDir, { recursive: true });
@@ -1190,7 +1206,17 @@ test('captureNelAtHandoff reports injected persistence failure and writes no suc
       missionDir,
       log: () => {},
       error: message => errors.push(message),
-      writeJsonFn: () => { throw new Error('injected NEL persistence failure'); },
+      missionServicesFn: stubMissionServices({
+        handoff: {
+          async recordNel() {
+            return {
+              status: 'failed',
+              error: { kind: 'unavailable', message: 'injected NEL persistence failure' },
+              durableEvidence: [],
+            };
+          },
+        },
+      }),
     });
     assert.equal(result.ok, false);
     assert.equal(result.persistenceFailed, true);
@@ -1225,6 +1251,7 @@ test('performHandoff stops before review transitions when NEL persistence fails'
   t.mock.method(backlog, 'transitionTask', () => { transitions++; return true; });
   try {
     const result = await performHandoff(slug, {
+      missionServicesFn: stubMissionServices(),
       worktree,
       skipGate: true,
       isForgejoReviewEnabledFn: () => false,
@@ -1241,13 +1268,12 @@ test('performHandoff stops before review transitions when NEL persistence fails'
   }
 });
 
-test('performHandoff commits a newly captured NEL record before transitioning Backlog', async (t) => {
+test('performHandoff no longer stages or commits a legacy NEL record before transitioning Backlog', async (t) => {
   const slug = 'task-nel-commit';
   const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'handoff-nel-commit-'));
   const missionDir = path.join(worktree, 'missions', slug);
   const checkpoint = path.join(missionDir, 'CP-1.md');
   const taskFile = path.join(worktree, 'backlog', 'tasks', `${slug} - commit.md`);
-  const relativeNelRecord = path.join('missions', slug, 'nel-record.json');
   fs.mkdirSync(path.dirname(taskFile), { recursive: true });
   fs.mkdirSync(missionDir, { recursive: true });
   fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Mission\n');
@@ -1270,6 +1296,7 @@ test('performHandoff commits a newly captured NEL record before transitioning Ba
   t.mock.method(backlog, 'transitionTask', () => { transitions++; return true; });
   try {
     const result = await performHandoff(slug, {
+      missionServicesFn: stubMissionServices(),
       worktree,
       skipGate: true,
       isForgejoReviewEnabledFn: () => false,
@@ -1282,10 +1309,10 @@ test('performHandoff commits a newly captured NEL record before transitioning Ba
       error: () => {},
     });
     assert.equal(result.ok, true);
+    // SC3: the NEL lives in SQLite, so handoff stages and commits nothing for it.
+    // The only git call is the review target-branch lookup for the Mission transition.
     assert.deepEqual(gitCalls, [
-      ['-C', worktree, 'add', '--', relativeNelRecord],
-      ['-C', worktree, 'diff', '--quiet', '--cached', '--', relativeNelRecord],
-      ['-C', worktree, 'commit', '-m', `chore(${slug}): capture handoff NEL`],
+      ['-C', worktree, 'branch', '--list', '--format=%(refname:short)', 'main', 'master'],
     ]);
     assert.equal(transitions, 1);
   } finally {
@@ -1296,7 +1323,6 @@ test('performHandoff commits a newly captured NEL record before transitioning Ba
 test('captureNelAtHandoff reads predicted bucket from MISSION.md Refinement Signals', async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nel-capture-bucket-'));
   const missionDir = path.join(tmpDir, 'missions/task-nel-bucket');
-  const nelRecordPath = path.join(missionDir, 'nel-record.json');
 
   try {
     fs.mkdirSync(missionDir, { recursive: true });
@@ -1308,11 +1334,12 @@ test('captureNelAtHandoff reads predicted bucket from MISSION.md Refinement Sign
       '',
       '## Refinement Signals',
       '',
-      '- Predicted NEL bucket: Medium (81–235)',
+      '- Predicted NEL bucket: Medium (81\u2013235)',
     ].join('\n'));
 
     const { mock } = test;
     const mockFn = mock.method(require('../.test-runtime/lib/core/mission-utils'), 'getPrimaryBranch', () => 'main');
+    const recorded = [];
 
     try {
       await captureNelAtHandoff('task-nel-bucket', {
@@ -1320,10 +1347,17 @@ test('captureNelAtHandoff reads predicted bucket from MISSION.md Refinement Sign
         missionDir,
         log: () => {},
         error: () => {},
+        missionServicesFn: stubMissionServices({
+          handoff: {
+            async recordNel(request) {
+              recorded.push(request);
+              return { status: 'completed', value: {}, durableEvidence: [] };
+            },
+          },
+        }),
       });
 
-      const record = JSON.parse(fs.readFileSync(nelRecordPath, 'utf8'));
-      assert.strictEqual(record.predictedBucket, 'Medium');
+      assert.strictEqual(recorded[0].predictedBucket, 'Medium');
     } finally {
       mockFn.mock.restore();
     }
@@ -1374,6 +1408,7 @@ test('performHandoff captures verification gate stdout/stderr on non-zero exit (
 
   try {
     const result = await performHandoff(slug, {
+      missionServicesFn: stubMissionServices(),
       worktree,
       isForgejoReviewEnabledFn: () => true,
       rebaseFn: mockRebase,
@@ -1770,6 +1805,7 @@ test('performHandoff attempts agent relaunch when gatekeeper posts pushback', as
 
   try {
     const result = await performHandoff(slug, {
+      missionServicesFn: stubMissionServices(),
       worktree,
       skipGate: true,
       isForgejoReviewEnabledFn: () => true,
@@ -1835,6 +1871,7 @@ test('performHandoff respects bounded retry limit of 2 for gatekeeper pushback',
 
   try {
     const result = await performHandoff(slug, {
+      missionServicesFn: stubMissionServices(),
       worktree,
       skipGate: true,
       isForgejoReviewEnabledFn: () => true,
@@ -1899,6 +1936,7 @@ test('performHandoff consumes full retry budget when relaunch succeeds but pushb
 
   try {
     const result = await performHandoff(slug, {
+      missionServicesFn: stubMissionServices(),
       worktree,
       skipGate: true,
       isForgejoReviewEnabledFn: () => true,
@@ -1965,6 +2003,7 @@ test('performHandoff succeeds after successful agent relaunch', async (t) => {
 
   try {
     const result = await performHandoff(slug, {
+      missionServicesFn: stubMissionServices(),
       worktree,
       skipGate: true,
       isForgejoReviewEnabledFn: () => true,
@@ -2027,6 +2066,7 @@ test('performHandoff relaunch prompt lists all missing artifact types', async (t
 
   try {
     await performHandoff(slug, {
+      missionServicesFn: stubMissionServices(),
       worktree,
       skipGate: true,
       isForgejoReviewEnabledFn: () => true,

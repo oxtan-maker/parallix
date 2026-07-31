@@ -98,9 +98,11 @@ test('boundary guard permits src/adapters/sqlite/ repository adapter path', () =
 
 test('composition guard accepts the sole production composition root', async () => {
   assert.deepEqual(findCompositionViolations(path.join(root, 'src', 'platform', 'runtime', 'lib')), []);
-  const graph = await createProductionApplicationServices(root);
+  const graph = await createProductionApplicationServices(root, undefined, { skipImportGate: true });
   assert.equal(graph.active.constructor.name, 'ActiveService');
   assert.equal(graph.statsBackfill.constructor.name, 'StatsBackfillService');
+  assert.equal(graph.mission.authority, 'sqlite');
+  assert.equal(graph.mission.store.constructor.name, 'SqliteMissionStore');
 });
 
 test('composition guard rejects complete adapter construction fixture', () => {

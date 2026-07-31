@@ -311,6 +311,7 @@ const forgejo = require('../.test-runtime/lib/tools/forgejo');
 const productConfig = require('../.test-runtime/lib/core/product-config');
 const runtimeMatrix = require('../.test-runtime/lib/core/runtime-matrix');
 const stats = require('../.test-runtime/lib/commands/stats');
+const composition = require('../.test-runtime/lib/composition/application-services');
 
 const TEST_SLUG = 'task-2242';
 const FAKE_ROOT = '/tmp/task-2242-integrate-root';
@@ -360,6 +361,18 @@ function setupBaseMocks(gitMockFn) {
   mock.method(productConfig, 'isForgejoReviewEnabled', () => false);
   mock.method(runtimeMatrix, 'buildAutonomousReviewMatrix', () => ({}));
   mock.method(runtimeMatrix, 'formatMatrixSummary', () => ['matrix-line']);
+  mock.method(composition, 'createMissionApplicationServices', async () => ({
+    store: {
+      _repoId: 'default',
+      load: async () => ({ kind: 'found', mission: { status: 'review', review: null }, version: 1 }),
+    },
+    lifecycle: {
+      transition: async () => ({ status: 'completed', value: { to: 'review', version: 2 } }),
+    },
+    handoff: {
+      recordNel: async () => ({}),
+    },
+  }));
 }
 
 test('integrate SC2b: non-backlog conflict exits with conflict files and helper path', async () => {

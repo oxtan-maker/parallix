@@ -299,25 +299,25 @@ describe('Mission application boundary over isolated SQLite adapters', () => {
     }
   });
 
-  it('SC6: production selects exactly one compatibility authority for every Mission use case', () => {
-    const services = createMissionApplicationServices(process.cwd());
-    assert.equal(services.authority, 'compatibility');
-    assert.equal(services.store.constructor.name, 'CompatibilityMissionStore');
+  it('SC6: production selects exactly one SQLite authority for every Mission use case', async () => {
+    const services = await createMissionApplicationServices(process.cwd(), {
+      skipImportGate: true,
+    });
+    assert.equal(services.authority, 'sqlite');
+    assert.equal(services.store.constructor.name, 'SqliteMissionStore');
 
     const compositionSource = fs.readFileSync(
       path.join(process.cwd(), 'src/platform/runtime/lib/composition/application-services.ts'),
       'utf8',
     );
-    // One store construction, and no SQLite Mission adapter in the graph.
-    assert.equal(compositionSource.match(/new CompatibilityMissionStore\(/g)!.length, 1);
-    assert.ok(!compositionSource.includes('SqliteMissionStore'));
-
-    const storeSource = fs.readFileSync(
-      path.join(process.cwd(), 'src/adapters/backlog/compatibility-mission-store.ts'),
-      'utf8',
-    );
-    for (const token of ['node:sqlite', 'SqliteMissionStore', 'sqlite/mission-store']) {
-      assert.ok(!storeSource.includes(token), `compatibility authority must not reach for ${token}`);
-    }
+    // One SQLite store construction, and no CompatibilityMissionStore in the graph.
+    assert.ok(compositionSource.includes('new SqliteMissionStore('));
+    assert.ok(!compositionSource.includes('new CompatibilityMissionStore('));
+    assert.equal(services.authority, 'sqlite');
+    assert.equal(services.intake.constructor.name, 'MissionIntakeService');
+    assert.equal(services.lifecycle.constructor.name, 'MissionLifecycleService');
+    assert.equal(services.integration.constructor.name, 'MissionIntegrationService');
+    assert.equal(services.checkpoints.constructor.name, 'MissionCheckpointService');
+    assert.equal(services.handoff.constructor.name, 'MissionHandoffService');
   });
 });

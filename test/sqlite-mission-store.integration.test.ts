@@ -510,8 +510,14 @@ describe('SQLite Mission aggregate integration', () => {
       }
     };
     collect(sourceRoot);
+    // The composition root is the one place allowed to name the concrete
+    // adapter: after the TASK-2322.07 cutover it constructs SqliteMissionStore
+    // as the sole production authority. Everything else stays behind the ports.
+    const compositionRoot = path.join(
+      sourceRoot, 'platform', 'runtime', 'lib', 'composition', 'application-services.ts',
+    );
     const forbidden = files
-      .filter((file) => !file.startsWith(sqliteRoot))
+      .filter((file) => !file.startsWith(sqliteRoot) && file !== compositionRoot)
       .filter((file) => /(?:from\s+|import\s*\()['"](?:node:sqlite|[^'"]*adapters\/sqlite\/mission-store)/.test(
         fs.readFileSync(file, 'utf8'),
       ));

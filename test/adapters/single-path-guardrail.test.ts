@@ -116,6 +116,13 @@ test('SC10: no module outside the allowed set assembles a board projection', () 
     }
 
     const fullPath = path.join(repoRoot, relPath);
+
+    // Skip temp files created by other tests (e.g., __temp-violating-file.ts)
+    // and files that disappear between listing and reading (parallel test race).
+    if (!fs.existsSync(fullPath)) {
+      continue;
+    }
+
     const content = fs.readFileSync(fullPath, 'utf8');
 
     // A module assembles a projection if it:

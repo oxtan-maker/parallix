@@ -1166,3 +1166,187 @@ test('runDraftCommand does not transition to refined when safety harness throws'
   assert.equal(exitCode, 1);
   assert.ok(!transitions.some(t => t.status === 'refined'), 'must not transition to refined when safety harness fails');
 });
+
+// ---------- runDraftCommand — SQLite intake boundary (TASK-2322.07) ----------
+//
+// After the cutover, SQLite is the sole Mission lifecycle authority. A draft
+// that produced only Markdown would leave a Mission that the lifecycle and
+// integration services reject as `missing`, so intake must succeed BEFORE the
+// external Backlog task is touched.
+
+const composition = require('../.test-runtime/lib/composition/application-services');
+
+function draftDepsForIntake(overrides) {
+  return Object.assign({
+    inferSlugFn: () => 'task-tst',
+    resolveMainRepoFn: () => '/main',
+    conventionalWorktreePathFn: () => '/wt-tst',
+    ensureRepoExistsFn: () => true,
+    resolveTaskFileFn: () => ({ ok: true, taskFile: '/main/backlog/tasks/task-tst.md', matches: [] }),
+    checkBacklogIntegrityFn: () => [],
+    detectLaunchBaseBranchFn: () => null,
+    ensureMissionBranchFn: () => {},
+    ensureWorktreeFn: () => {},
+    ensureGraphifyWorkspaceFn: () => {},
+    ensureMissionFileFn: () => '/wt-tst/docs/missions/2026/task-tst/MISSION.md',
+    bootstrapBacklogTaskFn: () => true,
+    validateDraftClassificationFn: () => ({ ok: true }),
+    [normalizeKey]: () => ({ ok: true, [typeKey]: 'ai_sdlc' }),
+    readAgentConfigOrExitFn: () => ({}),
+    selectAgentFn: () => 'codex',
+    startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
+    recordDraftImplementerFn: () => {},
+    enforceDraftCommitSafetyFn: () => false,
+    logFn: () => {},
+  }, overrides);
+}
+
+test('runDraftCommand materializes the Mission in SQLite before transitioning the Backlog task', async () => {
+  const calls = [];
+  const requests = [];
+  // Composition canonicalizes a mission worktree back to its primary checkout,
+  // so the services it returns carry `main` — not the `<repo>-<slug>` worktree
+  // basename that `targetWorktree` (`/wt-tst`) would yield.
+  mock.method(composition, 'createMissionApplicationServices', async () => ({
+    authority: 'sqlite',
+    repositoryId: 'main',
+    intake: {
+      execute: async (request) => {
+        calls.push(`intake:${request.missionId}`);
+        requests.push(request);
+        return { status: 'completed', value: { version: 1 }, durableEvidence: [] };
+      },
+    },
+  }));
+
+  try {
+    await runDraftCommand(['task-tst'], draftDepsForIntake({
+      transitionTaskFn: (slug, status) => { calls.push(`transition:${status}`); return true; },
+      exitFn: (code) => { throw new Error(`unexpected exit ${code}`); },
+      errorFn: (msg) => { throw new Error(`unexpected error: ${msg}`); },
+    }));
+  } finally {
+    mock.restoreAll();
+  }
+
+  assert.equal(calls[0], 'intake:task-tst', 'intake must run before any Backlog task mutation');
+  assert.equal(calls[1], 'transition:backlog');
+  assert.equal(
+    requests[0].repositoryId,
+    'main',
+    'the Mission must be keyed to the primary checkout identity composition resolved, not the mission worktree path',
+  );
+  assert.notEqual(requests[0].repositoryId, 'wt-tst', 'the <repo>-<slug> worktree basename must never become the repository identity');
+});
+
+test('runDraftCommand keys the intake request to the identity the composition root resolved', async () => {
+  // The regression guarded here: deriving the ID from `targetWorktree` yields
+  // `<repo>-<slug>`, which no other command path resolves to, so the Mission's
+  // later lifecycle data would be attributed to a repository that does not exist.
+  const requests = [];
+  mock.method(composition, 'createMissionApplicationServices', async (rootDir) => {
+    assert.equal(rootDir, '/wt-tst', 'composition still receives the mission worktree and canonicalizes it itself');
+    return {
+      authority: 'sqlite',
+      repositoryId: 'parallix',
+      intake: {
+        execute: async (request) => {
+          requests.push(request);
+          return { status: 'completed', value: { version: 1 }, durableEvidence: [] };
+        },
+      },
+    };
+  });
+
+  try {
+    await runDraftCommand(['task-tst'], draftDepsForIntake({
+      transitionTaskFn: () => true,
+      exitFn: (code) => { throw new Error(`unexpected exit ${code}`); },
+      errorFn: (msg) => { throw new Error(`unexpected error: ${msg}`); },
+    }));
+  } finally {
+    mock.restoreAll();
+  }
+
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].repositoryId, 'parallix');
+});
+
+test('runDraftCommand fails closed and leaves the Backlog task untouched when Mission intake is unavailable', async () => {
+  const transitions = [];
+  const errors = [];
+  const exitCodes = [];
+  mock.method(composition, 'createMissionApplicationServices', async () => ({
+    authority: 'sqlite',
+    intake: {
+      execute: async () => ({
+        status: 'failed',
+        error: { kind: 'unavailable', message: 'database is locked' },
+        durableEvidence: [],
+      }),
+    },
+  }));
+
+  try {
+    await runDraftCommand(['task-tst'], draftDepsForIntake({
+      transitionTaskFn: (slug, status) => { transitions.push(status); return true; },
+      exitFn: (code) => { exitCodes.push(code); },
+      errorFn: (msg) => { errors.push(String(msg)); },
+    }));
+  } finally {
+    mock.restoreAll();
+  }
+
+  assert.deepEqual(exitCodes, [1], 'an unavailable Mission store must abort the draft');
+  assert.deepEqual(transitions, [], 'no Backlog task transition may happen after a failed intake');
+  assert.ok(errors.some((message) => message.includes('database is locked')));
+});
+
+test('runDraftCommand fails closed when the Mission store cannot be constructed', async () => {
+  const transitions = [];
+  const errors = [];
+  const exitCodes = [];
+  mock.method(composition, 'createMissionApplicationServices', async () => {
+    throw new Error('SQLITE_CANTOPEN: unable to open database file');
+  });
+
+  try {
+    await runDraftCommand(['task-tst'], draftDepsForIntake({
+      transitionTaskFn: (slug, status) => { transitions.push(status); return true; },
+      exitFn: (code) => { exitCodes.push(code); },
+      errorFn: (msg) => { errors.push(String(msg)); },
+    }));
+  } finally {
+    mock.restoreAll();
+  }
+
+  assert.deepEqual(exitCodes, [1]);
+  assert.deepEqual(transitions, [], 'database unavailability must not fall back to file-only lifecycle state');
+  assert.ok(errors.some((message) => message.includes('SQLITE_CANTOPEN')));
+});
+
+test('runDraftCommand treats an already-recorded Mission as idempotent and continues the draft', async () => {
+  const transitions = [];
+  mock.method(composition, 'createMissionApplicationServices', async () => ({
+    authority: 'sqlite',
+    intake: {
+      execute: async () => ({
+        status: 'failed',
+        error: { kind: 'conflict', message: 'mission task-tst is already recorded' },
+        durableEvidence: [],
+      }),
+    },
+  }));
+
+  try {
+    await runDraftCommand(['task-tst'], draftDepsForIntake({
+      transitionTaskFn: (slug, status) => { transitions.push(status); return true; },
+      exitFn: (code) => { throw new Error(`unexpected exit ${code}`); },
+      errorFn: (msg) => { throw new Error(`unexpected error: ${msg}`); },
+    }));
+  } finally {
+    mock.restoreAll();
+  }
+
+  assert.ok(transitions.includes('backlog'), 're-drafting a recorded Mission must not block the draft');
+});

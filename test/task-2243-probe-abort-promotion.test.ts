@@ -13,6 +13,7 @@ const missionUtils = require('../.test-runtime/lib/core/mission-utils');
 const backlog = require('../.test-runtime/lib/tools/backlog');
 const forgejo = require('../.test-runtime/lib/tools/forgejo');
 const stats = require('../.test-runtime/lib/commands/stats');
+const composition = require('../.test-runtime/lib/composition/application-services');
 
 const TEST_SLUG = 'task-2243-probe-abort';
 
@@ -90,6 +91,18 @@ test('Variant B rejects a failed probe abort without promoting the review-approv
     });
     mock.method(process, 'cwd', () => root);
     mock.method(process, 'exit', (code: number) => exitCodes.push(code));
+    mock.method(composition, 'createMissionApplicationServices', async () => ({
+      store: {
+        _repoId: 'default',
+        load: async () => ({ kind: 'found', mission: { status: 'review', review: null }, version: 1 }),
+      },
+      lifecycle: {
+        transition: async () => ({ status: 'completed', value: { to: 'review', version: 2 } }),
+      },
+      handoff: {
+        recordNel: async () => ({}),
+      },
+    }));
 
     const integrate = loadIntegrate();
     await integrate([TEST_SLUG, '--no-integration-gates']);

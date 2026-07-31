@@ -154,6 +154,13 @@ test('status prints mission details and agent matrix for inferred slug', async (
     findMissionDirFn: () => '/tmp/docs/missions/2026/task-1031',
     findCheckpointsFn: () => ['/tmp/docs/missions/2026/task-1031/CP-2.md'],
     getFirstLineFn: () => 'Checkpoint 2',
+    // TASK-2322.07: Mission state comes from the SQLite-backed board projection,
+    // never from the task file or CP-N.md.
+    buildProjectionFn: async () => ({
+      build: async () => ({
+        stages: [{ cards: [{ id: 'task-1031', status: 'active', rawStatus: 'active', checkpoint: 'CP-2.md', checkpointDescription: 'Checkpoint 2' }] }],
+      }),
+    }),
     getPrStatusFn: () => ({ exists: true, number: 83, state: 'open' }),
     readAgentConfigOrExitFn: () => ({ reviewers: true }),
     eligibleAgentsForStepFn: step => step === 'draft' ? ['codex', 'claude'] : ['codex', 'gemini'],
@@ -189,6 +196,7 @@ test('status agent matrix includes every workflow launcher even when not step-el
     readAgentConfigOrExitFn: () => ({}),
     eligibleAgentsForStepFn: step => step === 'draft' ? ['codex'] : ['claude'],
     allWorkflowAgentNamesFn: () => ['codex', 'future-agent'],
+    buildProjectionFn: async () => ({ build: async () => ({ stages: [] }) }),
     workflowLauncherStatusFn: agent => ({ supported: agent === 'future-agent' }),
     getLastThreeCommitsFn: () => [],
     getUncommittedCountFn: () => 0,
@@ -212,6 +220,7 @@ test('status prints stale worktrees only when no explicit slug is provided', asy
     findMissionDirFn: () => null,
     getPrStatusFn: () => ({ exists: false }),
     findStaleMissionWorktreesFn: () => [{ path: '/tmp/stale', taskStatus: 'done', cleanupCommand: 'cleanup it' }],
+    buildProjectionFn: async () => ({ build: async () => ({ stages: [] }) }),
     readAgentConfigOrExitFn: () => ({}),
     eligibleAgentsForStepFn: () => [],
     workflowLauncherStatusFn: () => ({ supported: false }),
@@ -224,7 +233,10 @@ test('status prints stale worktrees only when no explicit slug is provided', asy
 
   assert.equal(exitCode, 0);
   assert.equal(lines.some(line => line.includes('Stale worktree')), false);
-  assert.ok(lines.includes('Last checkpoint: unknown'));
+  // TASK-2322.07: an unknown Mission reports the SQLite projection gap directly
+  // instead of falling back to CP-N.md.
+  assert.ok(lines.includes('Backlog status: unknown (projection unavailable)'));
+  assert.ok(lines.includes('Last checkpoint: none'));
   assert.ok(lines.includes('Forgejo PR: none'));
 });
 

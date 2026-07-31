@@ -1,9 +1,6 @@
 import { detectRebaseState, getCurrentBranch, getUncommittedCount, getLastThreeCommits, run } from '../core/git.js';
 import { findTaskFile, getTaskStatus } from '../tools/backlog.js';
 import {
-  findCheckpoints,
-  findMissionDir,
-  getFirstLine,
   getPrimaryWorktree,
   inferSlug,
   missionBranchName,
@@ -11,7 +8,6 @@ import {
 } from '../core/mission-utils.js';
 import { WORKFLOW_AGENT_NAMES, eligibleAgentsForStep, readAgentConfigOrExit, workflowLauncherStatus } from '../agents/agents.js';
 import { getPrStatus } from '../tools/forgejo.js';
-import * as path from 'node:path';
 import * as fmt from '../core/fmt.js';
 
 // SC8 / SC9 — projection wiring (dynamic imports for CJS rollback compat)
@@ -173,17 +169,16 @@ async function buildProjectionBuilder(rootDir: string): Promise<BoardProjectionB
   });
 }
 
-/** @param {string[]} args @param {{exit?: Function, log?: Function, inferSlugFn?: Function, getCurrentBranchFn?: Function, findTaskFileFn?: Function, getTaskStatusFn?: Function, findMissionDirFn?: Function, findCheckpointsFn?: Function, getFirstLineFn?: Function, getPrStatusFn?: Function, findStaleMissionWorktreesFn?: Function, readAgentConfigOrExitFn?: Function, eligibleAgentsForStepFn?: Function, allWorkflowAgentNamesFn?: Function, workflowLauncherStatusFn?: Function, getLastThreeCommitsFn?: Function, getUncommittedCountFn?: Function, detectRebaseStateFn?: Function}} opts */
-async function status(args: string[], opts: {exit?: Function, log?: Function, inferSlugFn?: Function, getCurrentBranchFn?: Function, findTaskFileFn?: Function, getTaskStatusFn?: Function, findMissionDirFn?: Function, findCheckpointsFn?: Function, getFirstLineFn?: Function, getPrStatusFn?: Function, findStaleMissionWorktreesFn?: Function, readAgentConfigOrExitFn?: Function, eligibleAgentsForStepFn?: Function, allWorkflowAgentNamesFn?: Function, workflowLauncherStatusFn?: Function, getLastThreeCommitsFn?: Function, getUncommittedCountFn?: Function, detectRebaseStateFn?: Function}) {
+/** @param {string[]} args @param {{exit?: Function, log?: Function, inferSlugFn?: Function, getCurrentBranchFn?: Function, findTaskFileFn?: Function, getTaskStatusFn?: Function, findMissionDirFn?: Function, findCheckpointsFn?: Function, getFirstLineFn?: Function, getPrStatusFn?: Function, findStaleMissionWorktreesFn?: Function, readAgentConfigOrExitFn?: Function, eligibleAgentsForStepFn?: Function, allWorkflowAgentNamesFn?: Function, workflowLauncherStatusFn?: Function, getLastThreeCommitsFn?: Function, getUncommittedCountFn?: Function, detectRebaseStateFn?: Function, buildProjectionFn?: Function}} opts */
+async function status(args: string[], opts: {exit?: Function, log?: Function, inferSlugFn?: Function, getCurrentBranchFn?: Function, findTaskFileFn?: Function, getTaskStatusFn?: Function, findMissionDirFn?: Function, findCheckpointsFn?: Function, getFirstLineFn?: Function, getPrStatusFn?: Function, findStaleMissionWorktreesFn?: Function, readAgentConfigOrExitFn?: Function, eligibleAgentsForStepFn?: Function, allWorkflowAgentNamesFn?: Function, workflowLauncherStatusFn?: Function, getLastThreeCommitsFn?: Function, getUncommittedCountFn?: Function, detectRebaseStateFn?: Function, buildProjectionFn?: Function}) {
   const exit = opts.exit || process.exit;
   const log = opts.log || fmt.log.plain;
   const inferSlugFn = opts.inferSlugFn || inferSlug;
   const getCurrentBranchFn = opts.getCurrentBranchFn || getCurrentBranch;
-  const findTaskFileFn = opts.findTaskFileFn || findTaskFile;
-  const getTaskStatusFn = opts.getTaskStatusFn || getTaskStatus;
-  const findMissionDirFn = opts.findMissionDirFn || findMissionDir;
-  const findCheckpointsFn = opts.findCheckpointsFn || findCheckpoints;
-  const getFirstLineFn = opts.getFirstLineFn || getFirstLine;
+  // findTaskFileFn/getTaskStatusFn/findMissionDirFn/findCheckpointsFn/getFirstLineFn
+  // remain on the options type for existing callers, but the TASK-2322.07 cutover
+  // reads Mission state from SqliteMissionStore, so status no longer resolves the
+  // legacy task/checkpoint files.
   const getPrStatusFn = opts.getPrStatusFn || getPrStatus;
   const findStaleMissionWorktreesFn = opts.findStaleMissionWorktreesFn || findStaleMissionWorktrees;
   const readAgentConfigOrExitFn = opts.readAgentConfigOrExitFn || readAgentConfigOrExit;
@@ -193,6 +188,7 @@ async function status(args: string[], opts: {exit?: Function, log?: Function, in
   const getLastThreeCommitsFn = opts.getLastThreeCommitsFn || getLastThreeCommits;
   const getUncommittedCountFn = opts.getUncommittedCountFn || getUncommittedCount;
   const detectRebaseStateFn = opts.detectRebaseStateFn || detectRebaseState;
+  const buildProjectionFn = opts.buildProjectionFn || buildProjectionBuilder;
 
   const explicitSlug = args[0];
   const slug = inferSlugFn(explicitSlug);
@@ -214,29 +210,17 @@ async function status(args: string[], opts: {exit?: Function, log?: Function, in
     // SC9 — route mission-specific output through the BoardProjectionBuilder.
     // The projection is the single materialization path; parse primitives are
     // called internally by the concrete adapters, not directly here.
-    const projection = await buildProjectionBuilder(process.cwd()).then(
-      (builder) => builder.build(),
-    ).catch(() => null);
+    const projection: Awaited<ReturnType<BoardProjectionBuilder['build']>> | null =
+      await buildProjectionFn(process.cwd()).then(
+        (builder: BoardProjectionBuilder) => builder.build(),
+      ).catch(() => null);
 
-    function logParsePrimitiveFallback() {
-      const taskFile = findTaskFileFn(slug);
-      const taskStatus = taskFile ? getTaskStatusFn(taskFile) : null;
-      log(`Backlog status: ${taskStatus || 'unknown'}`);
-
-      const missionDir = findMissionDirFn(slug);
-      if (!missionDir) {
-        log('Last checkpoint: unknown');
-        return;
-      }
-
-      const checkpoints = findCheckpointsFn(missionDir);
-      if (checkpoints.length === 0) {
-        log('Last checkpoint: none');
-        return;
-      }
-
-      const lastCheckpoint = checkpoints[checkpoints.length - 1];
-      log(`Last checkpoint: ${path.basename(lastCheckpoint)} - ${getFirstLineFn(lastCheckpoint)}`);
+    // SC3: do not fall back to legacy file reads (task frontmatter,
+    // CP-N.md) for Mission domain state — the SQLite store is the sole
+    // authority. When the projection is unavailable, report that directly.
+    function logSqliteFallback() {
+      log(`Backlog status: unknown (projection unavailable)`);
+      log('Last checkpoint: none');
     }
 
     if (projection) {
@@ -251,10 +235,10 @@ async function status(args: string[], opts: {exit?: Function, log?: Function, in
           log('Last checkpoint: none');
         }
       } else {
-        logParsePrimitiveFallback();
+        logSqliteFallback();
       }
     } else {
-      logParsePrimitiveFallback();
+      logSqliteFallback();
     }
 
     // Forgejo PR state

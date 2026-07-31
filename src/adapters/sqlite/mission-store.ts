@@ -1,10 +1,13 @@
 import type {
   MissionLoadResult,
+  MissionNelRecordReceipt,
+  MissionNelRecorder,
   MissionStore,
   MissionVersion,
 } from '../../application/domain-ports.js';
 import { missionVersion } from '../../application/domain-ports.js';
 import type { LaneTransitionEvent } from '../../domain/board-event.js';
+import type { MissionNelRecord } from '../../domain/net-engineering-lines.js';
 import type { Mission, MissionId } from '../../domain/mission.js';
 import type { KnownRepository, RepositoryId } from '../../domain/repository.js';
 import type { SqliteDatabaseAdapter } from './database-adapter.js';
@@ -51,7 +54,7 @@ export interface KnownRepositoryObservation {
  * connection. Version compare-and-swap catches stale writers even when two
  * writers keep the same lifecycle status.
  */
-export class SqliteMissionStore implements MissionStore {
+export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
   private readonly eventRepo: SqliteBoardLaneEventRepository;
 
   constructor(private readonly db: SqliteDatabaseAdapter) {
@@ -228,6 +231,30 @@ export class SqliteMissionStore implements MissionStore {
       },
       path: row.path,
       lastAccessed: row.last_accessed,
+    };
+  }
+
+  // -----------------------------------------------------------------------
+  // MissionNelRecorder
+  // -----------------------------------------------------------------------
+
+  /**
+   * Record the structured NEL report in the missions table.
+   *
+   * The `net_engineering_lines` column is the authoritative NEL field.
+   * The additional structured fields (predicted bucket, actual bucket,
+   * review rounds, capturedAt, artifacts) are recorded as part of the
+   * Mission aggregate through the `save()` call in MissionHandoffService.
+   * This method persists the NEL measurement and returns a row reference.
+   */
+  async recordNel(record: MissionNelRecord): Promise<MissionNelRecordReceipt> {
+    await this.db.execute(
+      'UPDATE missions SET net_engineering_lines = ? WHERE id = ?',
+      [record.netEngineeringLines, record.missionId],
+    );
+    return {
+      reference: `missions:${record.missionId}`,
+      authority: 'sqlite',
     };
   }
 
