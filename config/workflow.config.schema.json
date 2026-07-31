@@ -61,14 +61,6 @@
             "defaultArea": { "type": "string", "description": "Default verification area." }
           }
         },
-        "stats": {
-          "type": "object",
-          "description": "Repository mission statistics data.",
-          "additionalProperties": true,
-          "properties": {
-            "path": { "type": "string", "description": "Repo-relative path to the workflow stats CSV." }
-          }
-        },
         "integrate": {
           "type": "object",
           "description": "Optional post-integrate hook. When postIntegrateCommand is unset, `px integrate` behaves exactly as it does without this section.",

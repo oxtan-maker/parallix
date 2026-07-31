@@ -20,11 +20,11 @@ test('task-1380: STATS_HEADERS includes the closed column', () => {
 });
 
 test('task-1380: recordIntegrationStats sets closed: yes', () => {
-  const csvFile = path.join(
+  const dbFile = path.join(
     fs.mkdtempSync(path.join(os.tmpdir(), 'task-1380-integration-')),
-    'stats.csv'
+    'parallix.db'
   );
-  const root = path.dirname(csvFile);
+  const root = path.dirname(dbFile);
   fs.mkdirSync(path.join(root, 'backlog', 'tasks'), { recursive: true });
   fs.mkdirSync(path.join(root, 'docs', 'missions', '2026', 'task-2000'), { recursive: true });
 
@@ -43,7 +43,7 @@ test('task-1380: recordIntegrationStats sets closed: yes', () => {
     const result = stats.recordIntegrationStats({
       slug: 'task-2000',
       rootDir: root,
-      filePath: csvFile,
+      dbPath: dbFile,
       date: '2026-06-23',
     });
 
@@ -124,10 +124,10 @@ test('task-1380: renderRangeStatsReport excludes in-progress missions', () => {
     'range report should count 0 AI SDLC missions (closed mission is user_value)');
 });
 
-test('task-1380: backward compat — CSV without closed column treats all rows as closed', () => {
+test('task-1380: backward compat — legacy CSV without closed column treats all rows as closed', () => {
   const csvFile = path.join(
     fs.mkdtempSync(path.join(os.tmpdir(), 'task-1380-backward-')),
-    'stats.csv'
+    'legacy-stats.csv'
   );
 
   // Write CSV without closed column (legacy schema)
@@ -141,11 +141,11 @@ test('task-1380: backward compat — CSV without closed column treats all rows a
   ].join('\n'), 'utf8');
 
   try {
-    const data = stats.loadStatsCsv(csvFile);
+    const data = stats.readLegacyStatsCsv(csvFile);
     assert.equal(data.rows.length, 1);
     // Missing closed should default to 'yes' for backward compat
     assert.equal(data.rows[0].closed, 'yes',
-      'loadStatsCsv should default missing closed to yes for backward compatibility');
+      'readLegacyStatsCsv should default missing closed to yes for backward compatibility');
 
     const report = stats.renderWeeklyStatsReport(data.rows, { today: '2026-06-23' });
     assert.match(report, /# missions\s*[^\d]*1\s/,
@@ -161,11 +161,11 @@ test('task-1380: backward compat — CSV without closed column treats all rows a
 // (recordActiveStats → upsertStatsRow → canonicalizeStatsRow → normalizeStatsRow)
 // rather than bypassing it with hand-built row objects.
 test('task-1380: recordActiveStats does not set closed on in-progress rows (regression for Finding 1)', () => {
-  const csvFile = path.join(
+  const dbFile = path.join(
     fs.mkdtempSync(path.join(os.tmpdir(), 'task-1380-regression-')),
-    'stats.csv'
+    'parallix.db'
   );
-  const root = path.dirname(csvFile);
+  const root = path.dirname(dbFile);
   fs.mkdirSync(path.join(root, 'backlog', 'tasks'), { recursive: true });
   fs.mkdirSync(path.join(root, 'docs', 'missions', '2026', 'task-5001'), { recursive: true });
 
@@ -185,7 +185,7 @@ test('task-1380: recordActiveStats does not set closed on in-progress rows (regr
     const result = stats.recordActiveStats({
       slug: 'task-5001',
       rootDir: root,
-      filePath: csvFile,
+      dbPath: dbFile,
       model: 'codex',
       date: '2026-07-01',
     });
@@ -195,7 +195,7 @@ test('task-1380: recordActiveStats does not set closed on in-progress rows (regr
       'recordActiveStats should NOT set closed: yes on in-progress rows');
 
     // Load the CSV back and verify the row was written without closed: 'yes'
-    const data = stats.loadStatsCsv(csvFile);
+    const data = stats.loadMeasurementRows({ dbPath: dbFile });
     assert.equal(data.rows.length, 1);
     assert.notEqual(data.rows[0].closed, 'yes',
       'loaded row should not have closed: yes');

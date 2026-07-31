@@ -4,10 +4,18 @@ import type { DurableEvidence } from '../../../../application/contracts.js';
 import type { StatsBackfillPort, StatsProjection, StatsRow } from '../../../../application/ports.js';
 
 export class LegacyStatsBackfillAdapter implements StatsBackfillPort {
-  constructor(private readonly _rootDir: string) {}
+  /**
+   * @param _rootDir Repository root the historical missions are read from.
+   * @param _measurementStore Optional measurement-store selection so isolated
+   *   tests bind a temporary database instead of `<PARALLIX_HOME>`.
+   */
+  constructor(
+    private readonly _rootDir: string,
+    private readonly _measurementStore: { dbPath?: string; store?: unknown } = {},
+  ) {}
 
-  async readProjection(options: { readonly filePath?: string | null } = {}): Promise<StatsProjection> {
-    const report = collectHistoricalStatsBackfill(this._rootDir, options.filePath ?? null);
+  async readProjection(_options: { readonly filePath?: string | null } = {}): Promise<StatsProjection> {
+    const report = collectHistoricalStatsBackfill(this._rootDir, this._measurementStore);
     const rows: StatsRow[] = report.rows.map(row => ({ ...row }));
     return {
       rows,
@@ -17,11 +25,13 @@ export class LegacyStatsBackfillAdapter implements StatsBackfillPort {
     };
   }
 
-  async applyRows(rows: readonly StatsRow[], options: { readonly filePath?: string | null } = {}): Promise<readonly DurableEvidence[]> {
-    const filePath = options.filePath || stats.resolveStatsPath({ ensureDir: true });
+  async applyRows(rows: readonly StatsRow[], _options: { readonly filePath?: string | null } = {}): Promise<readonly DurableEvidence[]> {
+    // TASK-2322.08: rows are persisted through the measurement store, never a
+    // CSV file. `options.filePath` is accepted for port compatibility and
+    // deliberately ignored — no default execution resolves or writes stats.csv.
     const evidence: DurableEvidence[] = [];
     for (const row of rows) {
-      const result = stats.upsertStatsRow(row as Record<string, string>, { filePath, rootDir: this._rootDir });
+      const result = stats.upsertMeasurementRow(row as Record<string, string>, { rootDir: this._rootDir, ...this._measurementStore });
       if (result.changed) {
         evidence.push({ id: row.mission, source: 'stats', detail: `legacy stats row applied for ${row.mission}` });
       }

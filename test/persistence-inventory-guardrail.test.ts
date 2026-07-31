@@ -340,7 +340,11 @@ test('SC4: compatibility pathType entries are exceptions with cutover tasks or p
     if (entry.pathType === 'compatibility') {
       // SQLite adapter paths are permanent (no cutover needed)
       const isSqliteAdapter = entry.fileLocation.startsWith('src/adapters/sqlite/');
-      if (!isSqliteAdapter) {
+      // An `explicit-one-way-legacy-input` boundary is also permanent by
+      // design: ADR 0053 keeps operator-invoked, read-only legacy import as a
+      // standing capability, so it has no cutover task to name (TASK-2322.08).
+      const isExplicitLegacyInput = entry.classification === 'explicit-one-way-legacy-input';
+      if (!isSqliteAdapter && !isExplicitLegacyInput) {
         assert.ok(
           entry.cutoverTask !== null,
           `${entry.id} is a compatibility path in application/UI code and must name a cutover task`,

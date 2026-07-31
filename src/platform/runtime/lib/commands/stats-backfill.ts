@@ -16,11 +16,10 @@ import type { StatsBackfillService } from '../../../../application/stats-backfil
 interface StatsAugmented {
   resolveMissionClassification: (_slug: string, _rootDir?: string) => { classification?: string; source?: string };
   _internals: Record<string, (..._args: unknown[]) => unknown>;
-  resolveStatsPath: (_options?: { ensureDir?: boolean }) => string;
   resolveStatsRepoName: (_rootDir: string) => string;
-  loadStatsCsv: (_filePath: string, _options?: { rootDir?: string }) => { rows: Record<string, string>[] };
+  loadMeasurementRows: (_options?: { rootDir?: string; dbPath?: string; store?: unknown }) => { rows: Record<string, string>[] };
   deriveImplementerAndFixRounds: (_slug: string, _rootDir?: string) => { implementer: string; prFixRounds: number; source: string };
-  upsertStatsRow: (_row: Record<string, string>, _options: { filePath: string; rootDir?: string }) => { changed: boolean };
+  upsertMeasurementRow: (_row: Record<string, string>, _options?: { rootDir?: string; dbPath?: string; store?: unknown }) => { changed: boolean };
 }
 
 function getStats(): StatsAugmented {
@@ -188,12 +187,21 @@ function resolveHistoricalClassification(slug: string, taskFile: string, rootDir
   return { value: null, source: null };
 }
 
-function collectHistoricalStatsBackfill(rootDir = process.cwd(), filePath: string | null = null) {
+/**
+ * @param rootDir Repository root the historical missions are read from.
+ * @param options Measurement-store selection. `dbPath`/`store` let fast
+ *   isolated tests bind a temporary database instead of `<PARALLIX_HOME>`.
+ */
+function collectHistoricalStatsBackfill(
+  rootDir = process.cwd(),
+  options: { dbPath?: string; store?: unknown } = {},
+) {
   const s = getStats();
-  filePath = filePath || s.resolveStatsPath();
+  // TASK-2322.08: the already-recorded missions come from the measurement
+  // database, not from a resolved stats.csv.
   const repoName = s.resolveStatsRepoName(rootDir);
   const existingMissions = new Set(
-    s.loadStatsCsv(filePath, { rootDir }).rows
+    s.loadMeasurementRows({ rootDir, dbPath: options.dbPath, store: options.store }).rows
       .filter((row: Record<string, string>) => String(row.repo || '').trim() === repoName)
       .map((row: Record<string, string>) => row.mission)
   );
@@ -323,7 +331,7 @@ function renderBackfillSummary(report: { rows: readonly any[]; unresolved: reado
 }
 
 function printUsage(log = fmt.log.plain) {
-  log(`Usage: px stats-backfill [--apply] [--json] [--csv-file <path>]
+  log(`Usage: px stats-backfill [--apply] [--json]
 
 Examples:
   px stats-backfill
@@ -332,7 +340,9 @@ Examples:
 
 Notes:
   - This command is for historical stats recovery only.
-  - With no --csv-file, reads and writes <PARALLIX_HOME>/stats.csv.
+  - It reads and writes the measurement database (<PARALLIX_HOME>/parallix.db),
+    which is the authority for statistics. It never reads or writes a legacy CSV.
+    To import a historical CSV instead, use "px stats import-legacy --csv-file <path>".
   - It uses strict workflow stats derivation for implementer/fix rounds and historical fallbacks for classification.
   - Non-done missions are skipped and unresolved missions are reported without being written.`);
 }
@@ -359,7 +369,6 @@ async function statsBackfill(args: string[], options: BackfillOptions = {}) {
 
   let apply = false;
   let json = false;
-  let filePath = null;
 
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
@@ -369,15 +378,8 @@ async function statsBackfill(args: string[], options: BackfillOptions = {}) {
     }
     if (arg === '--json') {
       json = true;
-      continue;
-    }
-    if (arg === '--csv-file' && i + 1 < args.length) {
-      filePath = args[i + 1];
-      i += 1;
     }
   }
-  const s = getStats();
-  filePath = filePath || s.resolveStatsPath({ ensureDir: apply });
   const service = opts.service || (await createProductionApplicationServices(
     rootDir,
     undefined,
@@ -386,7 +388,6 @@ async function statsBackfill(args: string[], options: BackfillOptions = {}) {
   const outcome = await service.execute({
     operationId: `stats-backfill:${Date.now()}`,
     apply,
-    filePath,
     capabilities: apply ? new Set(['stats:apply'] as const) : new Set(),
   });
 
@@ -418,7 +419,7 @@ async function statsBackfill(args: string[], options: BackfillOptions = {}) {
     log(renderBackfillSummary(report));
     if (apply) {
       log('');
-      log(fmt.status('PASS', `Applied ${changed} stats rows to ${filePath}`));
+      log(fmt.status('PASS', `Applied ${changed} stats rows to the measurement database`));
     }
   }
 

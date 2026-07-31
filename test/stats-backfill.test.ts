@@ -39,7 +39,6 @@ function withFixture(fn) {
       review: { agents: ['codex', 'claude', 'gemini', 'custom'] },
     },
   }));
-  fs.writeFileSync(path.join(root, 'workflow', 'data', 'stats.csv'), 'date,repo,mission,classification,implementer,pr_fix_rounds\n', 'utf8');
 
   try {
     const result = fn(root);
@@ -159,7 +158,7 @@ test('collectHistoricalStatsBackfill resolves done missions, skips non-done miss
 
     commitAll(root, 'fixture');
 
-    const report = collectHistoricalStatsBackfill(root, path.join(root, 'workflow', 'data', 'stats.csv'));
+    const report = collectHistoricalStatsBackfill(root, { dbPath: path.join(root, 'parallix.db') });
     const repoName = stats.resolveStatsRepoName(root);
 
     assert.equal(report.rows.length, 2);
@@ -215,7 +214,7 @@ test('collectHistoricalStatsBackfill falls back to git history for date and huma
 
     commitAll(root, 'task-2003 fixture');
 
-    const report = collectHistoricalStatsBackfill(root, path.join(root, 'workflow', 'data', 'stats.csv'));
+    const report = collectHistoricalStatsBackfill(root, { dbPath: path.join(root, 'parallix.db') });
     const row = report.rows.find(item => item.mission === 'task-2003');
 
     assert.ok(row);
@@ -255,7 +254,7 @@ test('collectHistoricalStatsBackfill reports unresolved task resolution and lega
 
     commitAll(root, 'task-2006 task-2007 fixture');
 
-    const report = collectHistoricalStatsBackfill(root, path.join(root, 'workflow', 'data', 'stats.csv'));
+    const report = collectHistoricalStatsBackfill(root, { dbPath: path.join(root, 'parallix.db') });
     const resolved = report.rows.find(item => item.mission === 'task-2007');
 
     assert.ok(resolved);
@@ -307,80 +306,73 @@ test('statsBackfill supports help, json output, summary output, and apply mode',
 
     commitAll(root, 'task-2008 task-2009 fixture');
 
-    const logs = [];
-    await statsBackfill(['--help'], {
-      rootDir: root,
-      log: line => logs.push(line),
-      error: line => logs.push(`ERR:${line}`),
-      exit: code => {
-        throw new Error(`unexpected exit ${code}`);
-      },
-    });
-    assert.match(logs.join('\n'), /Usage: px stats-backfill/);
-
-    const jsonLogs = [];
-    const isolatedHome = path.join(root, 'unused-parallix-home');
-    const previousExplicitHome = process.env.PARALLIX_HOME;
+    // The whole command run is bound to an isolated PARALLIX_HOME so the
+    // measurement database it reads and writes is a temporary one.
+    const parallixHome = path.join(root, 'parallix-home');
+    const previousHome = process.env.PARALLIX_HOME;
+    process.env.PARALLIX_HOME = parallixHome;
     try {
-      process.env.PARALLIX_HOME = isolatedHome;
-      await statsBackfill(['--json', '--csv-file', path.join(root, 'workflow', 'data', 'stats.csv')], {
+      const logs = [];
+      await statsBackfill(['--help'], {
+        rootDir: root,
+        log: line => logs.push(line),
+        error: line => logs.push(`ERR:${line}`),
+        exit: code => { throw new Error(`unexpected exit ${code}`); },
+      });
+      assert.match(logs.join('\n'), /Usage: px stats-backfill/);
+      // SC4: the help names the database, not a CSV, as the authority.
+      assert.match(logs.join('\n'), /measurement database \(<PARALLIX_HOME>\/parallix\.db\)/);
+
+      const jsonLogs = [];
+      await statsBackfill(['--json'], {
         rootDir: root,
         log: line => jsonLogs.push(line),
         error: line => jsonLogs.push(`ERR:${line}`),
-        exit: code => {
-          throw new Error(`unexpected exit ${code}`);
-        },
+        exit: code => { throw new Error(`unexpected exit ${code}`); },
       });
-      assert.equal(fs.existsSync(isolatedHome), false);
-    } finally {
-      if (previousExplicitHome === undefined) delete process.env.PARALLIX_HOME;
-      else process.env.PARALLIX_HOME = previousExplicitHome;
-    }
-    const payload = JSON.parse(jsonLogs.join('\n'));
-    assert.equal(payload.resolved, 1);
-    assert.equal(payload.skipped, 1);
+      const payload = JSON.parse(jsonLogs.join('\n'));
+      assert.equal(payload.resolved, 1);
+      assert.equal(payload.skipped, 1);
 
-    const summaryLogs = [];
-    await statsBackfill(['--csv-file', path.join(root, 'workflow', 'data', 'stats.csv')], {
-      rootDir: root,
-      log: line => summaryLogs.push(line),
-      error: line => summaryLogs.push(`ERR:${line}`),
-      exit: code => {
-        throw new Error(`unexpected exit ${code}`);
-      },
-    });
-    assert.match(summaryLogs.join('\n'), /Resolved rows: 1/);
-    assert.match(summaryLogs.join('\n'), /Skipped:\n- task-2009 status=active/);
+      const summaryLogs = [];
+      await statsBackfill([], {
+        rootDir: root,
+        log: line => summaryLogs.push(line),
+        error: line => summaryLogs.push(`ERR:${line}`),
+        exit: code => { throw new Error(`unexpected exit ${code}`); },
+      });
+      assert.match(summaryLogs.join('\n'), /Resolved rows: 1/);
+      assert.match(summaryLogs.join('\n'), /Skipped:\n- task-2009 status=active/);
 
-    const applyLogs = [];
-    await statsBackfill(['--apply', '--csv-file', path.join(root, 'workflow', 'data', 'stats.csv')], {
-      rootDir: root,
-      log: line => applyLogs.push(line),
-      error: line => applyLogs.push(`ERR:${line}`),
-      exit: code => {
-        throw new Error(`unexpected exit ${code}`);
-      },
-    });
-    assert.match(applyLogs.join('\n'), /Applied 1 stats rows/);
-
-    const csv = fs.readFileSync(path.join(root, 'workflow', 'data', 'stats.csv'), 'utf8');
-    assert.match(csv, new RegExp(`2026-05-05,${stats.resolveStatsRepoName(root)},task-2008,ai_sdlc,codex,0`));
-
-    const previousHome = process.env.PARALLIX_HOME;
-    const parallixHome = path.join(root, 'parallix-home');
-    try {
-      process.env.PARALLIX_HOME = parallixHome;
-      const defaultLogs = [];
+      const applyLogs = [];
       await statsBackfill(['--apply'], {
         rootDir: root,
-        log: line => defaultLogs.push(line),
-        error: line => defaultLogs.push(`ERR:${line}`),
-        exit: code => {
-          throw new Error(`unexpected exit ${code}`);
-        },
+        log: line => applyLogs.push(line),
+        error: line => applyLogs.push(`ERR:${line}`),
+        exit: code => { throw new Error(`unexpected exit ${code}`); },
       });
-      assert.match(defaultLogs.join('\n'), new RegExp(path.join(parallixHome, 'stats.csv')));
-      assert.match(fs.readFileSync(path.join(parallixHome, 'stats.csv'), 'utf8'), /task-2008/);
+      assert.match(applyLogs.join('\n'), /Applied 1 stats rows to the measurement database/);
+
+      // The row landed in the database, and no stats.csv was written anywhere.
+      const stored = stats.loadMeasurementRows({ dbPath: path.join(parallixHome, 'parallix.db') }).rows;
+      const row = stored.find(candidate => candidate.mission === 'task-2008');
+      assert.ok(row, 'expected the backfilled mission in the measurement database');
+      assert.equal(row.date, '2026-05-05');
+      assert.equal(row.repo, stats.resolveStatsRepoName(root));
+      assert.equal(row.classification, 'ai_sdlc');
+      assert.equal(row.implementer, 'codex');
+      assert.deepEqual(fs.readdirSync(parallixHome).filter(name => name.endsWith('.csv')), []);
+      assert.equal(fs.existsSync(path.join(root, 'workflow', 'data', 'stats.csv')), false);
+
+      // Re-applying is idempotent: no duplicate mission rows appear.
+      await statsBackfill(['--apply'], {
+        rootDir: root,
+        log: () => {},
+        error: () => {},
+        exit: code => { throw new Error(`unexpected exit ${code}`); },
+      });
+      const afterSecond = stats.loadMeasurementRows({ dbPath: path.join(parallixHome, 'parallix.db') }).rows;
+      assert.equal(afterSecond.filter(candidate => candidate.mission === 'task-2008').length, 1);
     } finally {
       if (previousHome === undefined) delete process.env.PARALLIX_HOME;
       else process.env.PARALLIX_HOME = previousHome;

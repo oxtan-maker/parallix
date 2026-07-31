@@ -102,7 +102,6 @@ const MIGRATED_ASSETS = [
   { rel: 'config/agents.json', mustExist: true },                // agent-config.ts, runtime-matrix.ts
   { rel: 'config/state-map.json', mustExist: true },             // state-map.ts
   { rel: 'scripts/bootstrap.sh', mustExist: false },             // review-loop.ts
-  { rel: 'data/stats.seed.csv', mustExist: false },              // stats.ts
   { rel: 'config/mutation-baseline.json', mustExist: false },    // mutation-gate.ts
 ];
 
@@ -146,10 +145,12 @@ test('every migrated call site resolves its package asset from a temp CWD', asyn
     assert.equal(runtimeMatrix.buildAutonomousReviewMatrix().configPath, path.join(ROOT, 'config', 'agents.json'));
 
     // These leaves are intentionally absent in the current source layout. The
-    // exported baseline path and stats migration still prove their real call
-    // sites anchor to the package, not the temporary CWD.
+    // exported baseline path still proves its real call site anchors to the
+    // package, not the temporary CWD.
     assert.equal(mutationGate.DEFAULT_BASELINE_PATH, path.join(ROOT, 'config', 'mutation-baseline.json'));
-    assert.doesNotThrow(() => stats.resolveStatsPath({ rootDir: process.cwd(), ensureDir: false }));
+    // TASK-2322.08: stats.ts no longer resolves any shipped package asset —
+    // `data/stats.seed.csv` and the whole stats-path resolver chain are gone.
+    assert.equal(stats.resolveStatsPath, undefined);
 
     // The bootstrap path is used only when the provider is unavailable. Drive
     // that branch with injected dependencies and assert the actual command.

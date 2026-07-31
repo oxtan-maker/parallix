@@ -91,23 +91,10 @@ export function resolveParallixHome(
   return home;
 }
 
-/**
- * Resolve the effective stats CSV path.
- *
- * Returns `<PARALLIX_HOME>/stats.csv` (creating PARALLIX_HOME if `ensureDir`
- * is true). Callers that pass an explicit `--csv-file` path bypass this
- * resolver entirely — the caller supplies the path before calling here.
- */
-export interface ResolveStatsOptions {
-  ensureDir?: boolean;
-  warn?: (..._args: unknown[]) => void;
-}
-
-export function resolveStatsPath(options: ResolveStatsOptions = {}): string {
-  const opts = options as ResolveStatsOptions;
-  const home = resolveParallixHome({ ensureDir: opts.ensureDir !== false });
-  return path.join(home, 'stats.csv');
-}
+// `resolveStatsPath` was removed by TASK-2322.08. Statistics live in the
+// measurement database resolved by
+// `src/adapters/sqlite/database-path-resolver.ts`, and no runtime path
+// resolves `<PARALLIX_HOME>/stats.csv` any more (ADR 0053).
 
 /**
  * Resolve the effective agent blocklist path.

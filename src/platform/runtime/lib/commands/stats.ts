@@ -4,8 +4,8 @@
 
 // NOTE: @ts-nocheck retained for stats.ts due to its 2200+ line size and 60+ functions
 // with complex callback patterns. All JSDoc typedefs have been converted to TypeScript
-// interfaces above. The main function signatures (resolveStatsPath, resolveStatsCsvPath,
-// loadStatsCsv, normalizeStatsRow) have proper TypeScript types. Removing @ts-nocheck
+// interfaces above. The main function signatures (loadMeasurementRows,
+// readLegacyStatsCsv, normalizeStatsRow) have proper TypeScript types. Removing @ts-nocheck
 // would surface 180+ implicit-any errors on callback parameters that would require
 // adding type annotations to every .map/.filter/.reduce callback throughout the file.
 // This is a mechanical exercise rather than a type-safety improvement.
@@ -16,6 +16,10 @@ interface StatsOptions {
   configuredPath?: string;
   rootDir?: string;
   ensureDir?: boolean;
+  /** Inject a `MeasurementStorePort` (fast isolated tests use a temp database). */
+  store?: unknown;
+  /** Override the measurement database path instead of `<PARALLIX_HOME>/parallix.db`. */
+  dbPath?: string;
   groupBy?: string;
   forWrite?: boolean;
   config?: unknown;
@@ -71,16 +75,8 @@ interface StatsRow {
   missions?: number;
 }
 
-interface StatsCsvPathOptions {
-  filePath?: string;
-  rootDir?: string;
-  config?: unknown;
-  forWrite?: boolean;
-}
-
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import * as fmt from '../core/fmt.js';
 import { resolveTaskFile, getTaskClassification, getTaskImplementer, getTaskAssignee } from '../tools/backlog.js';
@@ -88,11 +84,9 @@ import { isForgejoReviewEnabled, loadEffectiveConfig } from '../core/product-con
 import { readReviewState } from '../review/review-state.js';
 import * as reviewEvents from '../review/review-events.js';
 import { git } from '../core/git.js';
-import { migrateStats } from '../core/persistent-data-migration.js';
 import { findMissionDir } from '../core/mission-utils.js';
-import { packageRoot } from '../core/package-root.js';
 import * as forgejo from '../tools/forgejo.js';
-import * as storage from '../core/storage.js';
+import { resolveMeasurementStore } from '../../../../adapters/sqlite/measurement-store.js';
 
 // The original 5-column schema. Retained for backward-compatible CSV detection
 // and one-time header migration of legacy stats files (task-1251).
@@ -121,11 +115,6 @@ const USAGE_NUMBERS = new Set([
 ]);
 
 const VALID_CLASSIFICATIONS = new Set(['ai_sdlc', 'user_value', 'unknown']);
-const MODULE_DIR = import.meta.url ? path.dirname(fileURLToPath(import.meta.url)) : __dirname;
-const SHIPPED_STATS_CSV_PATH = path.join(packageRoot(MODULE_DIR), 'data', 'stats.seed.csv');
-function getStorage() {
-  return storage;
-}
 
 function resolveStatsRepoName(rootDir = process.cwd()) {
   const config = loadEffectiveConfig(rootDir);
@@ -135,54 +124,114 @@ function resolveStatsRepoName(rootDir = process.cwd()) {
   return productName || path.basename(rootDir) || 'parallix';
 }
 
-function resolveRepoStatsCsvPath(rootDir = process.cwd()) {
-  return path.join(rootDir, 'stats.csv');
-}
-
 /**
- * Resolve the effective stats CSV path.
+ * The measurement authority is `<PARALLIX_HOME>/parallix.db` (ADR 0053,
+ * TASK-2322.08). It is parallix-owned cross-repository agent telemetry, so one
+ * runtime working across several repos accumulates ONE shared statistic. The
+ * database path is never derived from a runtime checkout, installed package,
+ * or consuming repository, and there is no `stats.csv` fallback: when the
+ * database is unavailable the command fails with
+ * `MeasurementStoreUnavailableError`.
  *
- * Callers that pass an explicit `filePath` (e.g. `--csv-file`) bypass this
- * resolver entirely.
+ * `options.store` lets callers (and fast isolated tests) inject a store bound
+ * to a temporary database.
  */
-function resolveStatsPath(options: StatsOptions = {}) {
-  if (options.filePath) {return options.filePath;}
-  if (options.configuredPath) {return options.configuredPath;}
-
-  const storage = getStorage();
-  const rootDir = options.rootDir || process.cwd();
-  const destinationPath = storage.resolveStatsPath({ ensureDir: options.ensureDir !== false });
-  migrateStats(
-    {
-      sourcePaths: [resolveRepoStatsCsvPath(rootDir), SHIPPED_STATS_CSV_PATH],
-      destinationPath,
-      defaultRepo: resolveStatsRepoName(rootDir),
-    } as unknown as Parameters<typeof migrateStats>[0]
-  );
-  return destinationPath;
+function getMeasurementStore(options: StatsOptions = {}) {
+  if (options.store) {return options.store;}
+  return resolveMeasurementStore(options.dbPath ? { dbPath: options.dbPath } : {});
 }
 
 /**
- * The effective `<PARALLIX_HOME>/stats.csv` is parallix-owned cross-repository agent telemetry,
- * not consuming-repo state (task-1246 classification correction). It records how
- * agent families perform across the missions a single parallix runtime drives, so
- * one runtime working across several repos accumulates ONE shared statistic.
- *
- * The destination path is never derived from a runtime checkout, installed
- * package, or consuming repository. When a root is supplied, it is used only
- * as the legacy repo-root import source during one-time migration.
+ * Read every stored measurement back as the string-shaped `StatsRow` the
+ * report renderers consume. The mapping restores the historical CSV-era
+ * defaults ('' for text, '0' for numeric) so filtering, totals, grouping,
+ * formatting, and missing-data behavior are unchanged by the cut-over.
  */
-/**
- * @param {string} legacyRuntimeRoot
- */
-function resolveStatsFilePath(legacyRuntimeRoot) {
-  return resolveStatsPath({ rootDir: legacyRuntimeRoot });
+function measurementToStatsRow(record): StatsRow {
+  const numeric = (value) => (value === null || value === undefined ? '0' : String(value));
+  return {
+    date: record.date || '',
+    repo: record.repo || '',
+    mission: record.mission || '',
+    classification: record.classification || '',
+    implementer: record.implementer || '',
+    pr_fix_rounds: numeric(record.pr_fix_rounds),
+    provider: record.provider || '',
+    model: record.model || '',
+    implementer_agent: record.implementer_agent || '',
+    reviewer_agent: record.reviewer_agent || '',
+    stage: record.stage || 'default',
+    input_tokens: numeric(record.input_tokens),
+    output_tokens: numeric(record.output_tokens),
+    cached_tokens: numeric(record.cached_tokens),
+    context_tokens: numeric(record.context_tokens),
+    tool_calls: numeric(record.tool_calls),
+    openai_usage_before: numeric(record.openai_usage_before),
+    openai_usage_after: numeric(record.openai_usage_after),
+    openai_usage_delta: numeric(record.openai_usage_delta),
+    duration_minutes: numeric(record.duration_minutes),
+    cost_usd: numeric(record.cost_usd),
+    closed: record.closed || '',
+  };
 }
 
 /**
- * Legacy retrospective CSV/report support is retained for compatibility with
- * task-1099 style inputs, while the default command path now reads the
- * workflow-owned integration CSV.
+ * Map a canonicalized `StatsRow` onto the checked measurement record.
+ * `actorKey` is computed here — by the module that owns the attribution rule —
+ * so no adapter has to infer an identity (TASK-2322.02: `Attempt` excluded).
+ */
+function statsRowToMeasurement(row: StatsRow) {
+  const int = (value) => {
+    const parsed = Number.parseInt(String(value), 10);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+  const dec = (value) => {
+    const parsed = Number.parseFloat(String(value));
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+  return {
+    repo: String(row.repo || ''),
+    mission: String(row.mission || ''),
+    stage: String(row.stage || 'default'),
+    actorKey: statsRowActorKey(row),
+    date: row.date || '',
+    classification: row.classification || '',
+    implementer: row.implementer || '',
+    pr_fix_rounds: int(row.pr_fix_rounds),
+    provider: row.provider || '',
+    model: row.model || '',
+    implementer_agent: row.implementer_agent || '',
+    reviewer_agent: row.reviewer_agent || '',
+    input_tokens: int(row.input_tokens),
+    output_tokens: int(row.output_tokens),
+    cached_tokens: int(row.cached_tokens),
+    context_tokens: int(row.context_tokens),
+    tool_calls: int(row.tool_calls),
+    openai_usage_before: int(row.openai_usage_before),
+    openai_usage_after: int(row.openai_usage_after),
+    openai_usage_delta: int(row.openai_usage_delta),
+    duration_minutes: int(row.duration_minutes),
+    cost_usd: dec(row.cost_usd),
+    closed: row.closed || '',
+  };
+}
+
+/**
+ * The default statistics read. Returns `{ headers, rows }` in the same shape
+ * the former CSV loader returned, so every renderer is untouched.
+ */
+function loadMeasurementRows(options: StatsOptions = {}) {
+  const store = getMeasurementStore(options);
+  return {
+    headers: [...STATS_HEADERS],
+    rows: store.listMeasurements().map(measurementToStatsRow),
+  };
+}
+
+/**
+ * Legacy CSV support is the EXPLICIT import/analysis boundary only
+ * (`px stats --csv-file <path>` and `px stats import-legacy`). Nothing below
+ * this point is reachable from a default command run, and none of it writes.
  */
 
 /**
@@ -210,53 +259,6 @@ function parseCsvLine(line) {
   }
   result.push(current.trim());
   return result;
-}
-
-/**
- * @param {*} value
- */
-function escapeCsvValue(value) {
-  const stringValue = String(value ?? '');
-  if (!/[",\n]/.test(stringValue)) {return stringValue;}
-  return `"${stringValue.replace(/"/g, '""')}"`;
-}
-
-/**
- * @param {string} rootDir
- * @param {string} repoRelativePath
- */
-function resolveRepoRelativePath(rootDir, repoRelativePath) {
-  if (!repoRelativePath || typeof repoRelativePath !== 'string') {return null;}
-  return path.isAbsolute(repoRelativePath)
-    ? repoRelativePath
-    : path.join(rootDir, repoRelativePath);
-}
-
-/**
- * Backwards-compatible resolver for configured stats CSV paths.
- * Respects `adapters.stats.path` from workflow.config.json and otherwise
- * resolves to the repo-root legacy import path. When PARALLIX_HOME is
- * initialized the effective parallix-owned path is via the storage resolver.
- */
-/**
- * @param {string|StatsCsvPathOptions} options
- */
-function resolveStatsCsvPath(options: StatsCsvPathOptions | string = {}) {
-  if (typeof options === 'string') {return options;}
-
-  const opts = options as StatsCsvPathOptions;
-  const filePath = opts.filePath;
-  if (filePath) {return filePath;}
-
-  const rootDir = opts.rootDir || process.cwd();
-  const config = opts.config || loadEffectiveConfig(rootDir);
-  const configuredPath = config.adapters?.stats?.path;
-  const repoPath = resolveRepoRelativePath(rootDir, configuredPath);
-
-  if (repoPath && (opts.forWrite || fs.existsSync(repoPath))) {
-    return repoPath;
-  }
-  return resolveRepoStatsCsvPath(rootDir);
 }
 
 /**
@@ -288,12 +290,20 @@ function loadCsv(filePath) {
   return { headers, rows };
 }
 
-function loadStatsCsv(filePath: string | null = null, options: LoadStatsCsvOptions = {}) {
-  // Resolve effective path: explicit filePath > config > PARALLIX_HOME
-  let effectivePath = filePath;
-  if (!effectivePath) {
-    effectivePath = resolveStatsPath({ rootDir: options.rootDir });
+/**
+ * EXPLICIT legacy CSV boundary — read-only.
+ *
+ * Only reachable when the operator names a file
+ * (`px stats <file>`, `px stats --csv-file <path>`, `px stats import-legacy`).
+ * `filePath` is required: there is no default resolution and therefore no
+ * implicit `stats.csv` read. The source file is never written, moved, or
+ * rewritten by this function or any of its callers.
+ */
+function readLegacyStatsCsv(filePath: string, options: LoadStatsCsvOptions = {}) {
+  if (!filePath) {
+    throw new Error('readLegacyStatsCsv requires an explicit CSV path; the database is the statistics authority.');
   }
+  const effectivePath = filePath;
 
   if (!fs.existsSync(effectivePath)) {
     return { headers: [...STATS_HEADERS], rows: [] };
@@ -330,7 +340,7 @@ function loadStatsCsv(filePath: string | null = null, options: LoadStatsCsvOptio
  * missing text columns to '' and numeric columns to '0'. `stage` defaults to
  * 'default' so legacy rows and integration rows share the (repo, mission, stage)
  * upsert key. `closed` defaults to '' (unset) — the backward-compat default of
- * 'yes' for legacy CSV rows is applied exclusively in `loadStatsCsv`.
+ * 'yes' for legacy CSV rows is applied exclusively in `readLegacyStatsCsv`.
  */
 function normalizeStatsRow(row: StatsRow = {} as StatsRow, options: NormalizeStatsRowOptions = {} as NormalizeStatsRowOptions) {
   const repo = String(row.repo || options.repo || resolveStatsRepoName(options.rootDir)).trim();
@@ -360,22 +370,8 @@ function normalizeStatsRow(row: StatsRow = {} as StatsRow, options: NormalizeSta
   };
 }
 
-/**
- * @param {string} filePath
- * @param {StatsRow[]} rows
- */
-function saveStatsCsv(filePath, rows) {
-  let effectivePath = filePath;
-  if (!effectivePath) {
-    effectivePath = resolveStatsPath({ ensureDir: true });
-  }
-  const lines = [STATS_HEADERS.join(',')];
-  for (const row of rows) {
-    lines.push(STATS_HEADERS.map(header => escapeCsvValue(row[header] || '')).join(','));
-  }
-  getStorage().writeFileAtomic(effectivePath, `${lines.join('\n')}\n`);
-  return effectivePath;
-}
+// `saveStatsCsv` was removed by TASK-2322.08: no production path writes CSV.
+// The measurement database is the sole authority (ADR 0053).
 
 /**
  * @param {string} dateStr
@@ -1826,14 +1822,21 @@ function rowsEqual(a: StatsRow, b: StatsRow) {
 }
 
 /**
+ * Persist one measurement through the `MeasurementStorePort`.
+ *
+ * The canonicalization and validation rules are unchanged; only the sink
+ * moved from `<PARALLIX_HOME>/stats.csv` to the measurement database
+ * (ADR 0053, TASK-2322.08). The returned `data.rows` are read back from the
+ * store in the same `date, repo, mission, stage` order the file authority
+ * produced, so `recordIntegrationStats` and `px integrate` render identically.
+ *
  * @param {StatsRow} row
  * @param {UpsertStatsRowOptions} options
  */
 // @ts-expect-error JSDoc param types for options
-function upsertStatsRow(row: StatsRow, options: {filePath?: string, rootDir?: string} = {}) {
+function upsertMeasurementRow(row: StatsRow, options: {rootDir?: string, store?: unknown, dbPath?: string} = {}) {
   /** @type {UpsertStatsRowOptions} */
   const opts = options;
-  const filePath = opts.filePath || resolveStatsPath({ ensureDir: true });
   const canonicalRow = canonicalizeStatsRow(row, /** @type {any} */ ({ rootDir: opts.rootDir }));
   if (!canonicalRow.classification) {
     throw new Error(`Invalid classification for ${canonicalRow.mission}.`);
@@ -1842,34 +1845,9 @@ function upsertStatsRow(row: StatsRow, options: {filePath?: string, rootDir?: st
     throw new Error(`Invalid implementer for ${canonicalRow.mission}.`);
   }
 
-  const data = loadStatsCsv(filePath, { rootDir: opts.rootDir });
-  const existingIndex = data.rows.findIndex(existing =>
-    existing.repo === canonicalRow.repo &&
-    existing.mission === canonicalRow.mission &&
-    (existing.stage || 'default') === canonicalRow.stage &&
-    statsRowActorKey(existing) === statsRowActorKey(canonicalRow)
-  );
-  let changed = false;
-
-  if (existingIndex === -1) {
-    // @ts-expect-error canonicalRow type mismatch
-    data.rows.push(canonicalRow);
-    changed = true;
-  } else if (!rowsEqual(data.rows[existingIndex], canonicalRow)) {
-      // @ts-expect-error canonicalRow type mismatch
-      data.rows[existingIndex] = canonicalRow;
-    changed = true;
-  }
-
-  data.rows.sort((a, b) =>
-    String(a.date).localeCompare(String(b.date)) ||
-    String(a.repo || '').localeCompare(String(b.repo || '')) ||
-    String(a.mission).localeCompare(String(b.mission)) ||
-    String(a.stage || 'default').localeCompare(String(b.stage || 'default'))
-  );
-  if (changed) {
-    saveStatsCsv(filePath, data.rows);
-  }
+  const store = getMeasurementStore(opts);
+  const { changed } = store.upsertMeasurement(statsRowToMeasurement(canonicalRow));
+  const data = { headers: [...STATS_HEADERS], rows: store.listMeasurements().map(measurementToStatsRow) };
 
   return { changed, row: canonicalRow, data };
 }
@@ -1882,7 +1860,7 @@ function upsertStatsRow(row: StatsRow, options: {filePath?: string, rootDir?: st
 function recordIntegrationStats(options = {}) {
   /** @type {RecordIntegrationStatsOptions} */
   const opts = options;
-  const { slug, rootDir = process.cwd(), filePath = resolveStatsPath({ rootDir, forWrite: true }), date = formatDateOnly(new Date()) } = opts;
+  const { slug, rootDir = process.cwd(), date = formatDateOnly(new Date()), store = undefined, dbPath = undefined } = opts;
   if (!slug) {
     throw new Error('recordIntegrationStats requires a mission slug.');
   }
@@ -1893,14 +1871,14 @@ function recordIntegrationStats(options = {}) {
   }
   const { classification } = resolution;
   const implementerInfo = deriveImplementerAndFixRounds(slug, rootDir);
-  const result = upsertStatsRow({
+  const result = upsertMeasurementRow({
     date,
     mission: slug,
     classification,
     implementer: implementerInfo.implementer,
     pr_fix_rounds: implementerInfo.prFixRounds,
     closed: 'yes',
-  }, { filePath, rootDir });
+  }, { rootDir, store, dbPath });
 
   return {
     ...result,
@@ -2014,10 +1992,10 @@ function mergeLabel(existing: string, incoming: string) {
  * @param {RecordStageStatsOptions} options
  */
 // @ts-expect-error recordStageStats options missing slug/stage
-function recordStageStats(options: {slug: string, stage: string, rootDir?: string, filePath?: string, date?: string, implementer?: string, reviewer?: string, prFixRounds?: string, telemetry?: any, durationMinutes?: number, model?: string} = {}) {
+function recordStageStats(options: {slug: string, stage: string, rootDir?: string, date?: string, implementer?: string, reviewer?: string, prFixRounds?: string, telemetry?: any, durationMinutes?: number, model?: string} = {}) {
   /** @type {any} */
   const opts = options;
-  const { slug, stage, rootDir = process.cwd(), filePath = resolveStatsPath({ rootDir, forWrite: true }), date = formatDateOnly(new Date()), implementer, reviewer = '', prFixRounds = '0', telemetry = null, durationMinutes = 0, model = null } = opts;
+  const { slug, stage, rootDir = process.cwd(), date = formatDateOnly(new Date()), implementer, reviewer = '', prFixRounds = '0', telemetry = null, durationMinutes = 0, model = null, store = undefined, dbPath = undefined } = opts;
   if (!slug) {throw new Error('recordStageStats requires a mission slug.');}
   if (!stage) {throw new Error('recordStageStats requires a stage.');}
 
@@ -2027,7 +2005,7 @@ function recordStageStats(options: {slug: string, stage: string, rootDir?: strin
   }
   const agentFamily = implementer || reviewer || 'unknown';
 
-  return upsertStatsRow({
+  return upsertMeasurementRow({
     date,
     mission: slug,
     classification,
@@ -2037,14 +2015,14 @@ function recordStageStats(options: {slug: string, stage: string, rootDir?: strin
     reviewer_agent: reviewer || '',
     stage,
     ...telemetryToStatsFields(telemetry, { agentFamily, durationMinutes, model }),
-  }, { filePath, rootDir });
+  }, { rootDir, store, dbPath });
 }
 
 /**
- * @param {{slug: string, stage: string, rootDir?: string, filePath?: string, date?: string, implementer?: string, reviewer?: string, prFixRounds?: string, telemetry?: {provider?: string, model?: string, inputTokens?: number, outputTokens?: number, cachedTokens?: number, totalTokens?: number, toolCalls?: number, usagePercent?: number, cost_usd?: number} | null, durationMinutes?: number, model?: string}} options
+ * @param {{slug: string, stage: string, rootDir?: string, date?: string, implementer?: string, reviewer?: string, prFixRounds?: string, telemetry?: {provider?: string, model?: string, inputTokens?: number, outputTokens?: number, cachedTokens?: number, totalTokens?: number, toolCalls?: number, usagePercent?: number, cost_usd?: number} | null, durationMinutes?: number, model?: string}} options
  */
-function accumulateStageStats(options: {slug: string, stage: string, rootDir?: string, filePath?: string, date?: string, implementer?: string, reviewer?: string, prFixRounds?: string, telemetry?: any, durationMinutes?: number, model?: string}) {
-  const { slug, stage, rootDir = process.cwd(), filePath = resolveStatsPath({ rootDir, forWrite: true }), date = formatDateOnly(new Date()), implementer, reviewer = '', prFixRounds = '0', telemetry = null, durationMinutes = 0, model = null } = options;
+function accumulateStageStats(options: {slug: string, stage: string, rootDir?: string, date?: string, implementer?: string, reviewer?: string, prFixRounds?: string, telemetry?: any, durationMinutes?: number, model?: string}) {
+  const { slug, stage, rootDir = process.cwd(), date = formatDateOnly(new Date()), implementer, reviewer = '', prFixRounds = '0', telemetry = null, durationMinutes = 0, model = null, store = undefined, dbPath = undefined } = options;
   if (!slug) {throw new Error('accumulateStageStats requires a mission slug.');}
   if (!stage) {throw new Error('accumulateStageStats requires a stage.');}
 
@@ -2065,10 +2043,10 @@ function accumulateStageStats(options: {slug: string, stage: string, rootDir?: s
     ...telemetryToStatsFields(telemetry, { agentFamily, durationMinutes, model: model || undefined }),
   }, { rootDir });
 
-  const data = loadStatsCsv(filePath, { rootDir });
+  const data = loadMeasurementRows({ rootDir, store, dbPath });
   const existing = data.rows.find(row => sameStatsIdentity(row, incomingRow));
   if (!existing) {
-    return upsertStatsRow(incomingRow, { filePath, rootDir });
+    return upsertMeasurementRow(incomingRow, { rootDir, store, dbPath });
   }
 
   const mergedRow = {
@@ -2093,7 +2071,7 @@ function accumulateStageStats(options: {slug: string, stage: string, rootDir?: s
     cost_usd: accumulateDecimalStrings(String(existing.cost_usd), String(incomingRow.cost_usd)),
   };
 
-  return upsertStatsRow(mergedRow, { filePath, rootDir });
+  return upsertMeasurementRow(mergedRow, { rootDir, store, dbPath });
 }
 
 /**
@@ -2159,29 +2137,250 @@ function isIntegrationStatsDataset(data: {headers: string[], rows: any[]}) {
   return LEGACY_HEADERS.every(header => data.headers.includes(header));
 }
 
+// ---------------------------------------------------------------------------
+// Explicit legacy CSV import/analysis boundary (TASK-2322.08, SC3)
+//
+// This is the ONLY place a `stats.csv`-shaped file may enter the runtime, and
+// it is reachable only from `px stats import-legacy --csv-file <path>`. The
+// named file is opened read-only: nothing here writes, renames, truncates, or
+// rewrites the source. Malformed and ambiguous rows are reported, and a batch
+// containing any of them is refused whole — no partial import is committed.
+// ---------------------------------------------------------------------------
+
+const IMPORT_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Classify every row of an explicitly named legacy CSV without touching the
+ * database or the source file.
+ *
+ * @param {string} filePath
+ * @param {{rootDir?: string}} options
+ */
+function analyzeLegacyStatsCsv(filePath: string, options: {rootDir?: string} = {}) {
+  if (!filePath) {
+    throw new Error('analyzeLegacyStatsCsv requires an explicit --csv-file path.');
+  }
+  if (!fs.existsSync(filePath)) {
+    throw new Error(`Legacy stats CSV not found: ${filePath}`);
+  }
+  const rootDir = options.rootDir || process.cwd();
+  const data = loadCsv(filePath);
+  if (data.headers.length === 0) {
+    return { filePath, totalRows: 0, importable: [], malformed: [], ambiguous: [] };
+  }
+  if (!isIntegrationStatsDataset(data)) {
+    throw new Error(
+      `Not a stats dataset: ${filePath} is missing required columns (${LEGACY_HEADERS.join(', ')}).`
+    );
+  }
+
+  const hasClosedColumn = data.headers.includes('closed');
+  const importable = [];
+  const malformed = [];
+  const seen = new Map();
+
+  data.rows.forEach((raw, index) => {
+    // CSV line number: +1 for the header row, +1 for 1-based counting.
+    const line = index + 2;
+    const reasons = [];
+
+    const mission = String(raw.mission || '').trim();
+    if (!mission) {reasons.push('missing mission');}
+
+    const date = String(raw.date || '').trim();
+    if (!date) {
+      reasons.push('missing date');
+    } else if (!IMPORT_DATE_RE.test(date)) {
+      reasons.push(`unparseable date "${date}" (expected YYYY-MM-DD)`);
+    }
+
+    const classification = normalizeClassification(raw.classification);
+    if (!classification) {
+      reasons.push(`unknown classification "${String(raw.classification || '')}"`);
+    }
+
+    const implementer = normalizeImplementer(raw.implementer);
+    if (!implementer) {reasons.push('missing implementer');}
+
+    for (const column of USAGE_NUMBERS) {
+      const value = raw[column];
+      if (value === undefined || String(value).trim() === '') {continue;}
+      if (!/^-?\d+(?:\.\d+)?$/.test(String(value).trim())) {
+        reasons.push(`non-numeric ${column} "${String(value)}"`);
+      }
+    }
+
+    if (reasons.length > 0) {
+      malformed.push({ line, mission: mission || '(none)', reasons });
+      return;
+    }
+
+    const normalized = normalizeStatsRow(raw, { rootDir });
+    const canonical = canonicalizeStatsRow(
+      { ...normalized, closed: hasClosedColumn ? (raw.closed || '') : 'yes' },
+      { rootDir }
+    );
+    const identity = `${canonical.repo}::${canonical.mission}::${canonical.stage}::${statsRowActorKey(canonical)}`;
+    const previous = seen.get(identity);
+    if (previous) {
+      // Two rows of the SAME file claim one identity. Equal rows are a benign
+      // repeat; conflicting values are ambiguous and cannot be resolved here.
+      if (!rowsEqual(previous.row, canonical)) {
+        previous.conflicts.push(line);
+      }
+      return;
+    }
+    const entry = { line, row: canonical, conflicts: [] };
+    seen.set(identity, entry);
+    importable.push(entry);
+  });
+
+  const ambiguous = importable
+    .filter(entry => entry.conflicts.length > 0)
+    .map(entry => ({
+      line: entry.line,
+      mission: entry.row.mission,
+      stage: entry.row.stage,
+      conflictingLines: entry.conflicts,
+    }));
+
+  return { filePath, totalRows: data.rows.length, importable, malformed, ambiguous };
+}
+
+/**
+ * Apply a clean analysis in ONE transaction. Refuses the whole batch when any
+ * row is malformed or ambiguous, so no partial import can be committed.
+ * Re-applying the same file is idempotent: identities already stored are
+ * updated in place, never duplicated.
+ *
+ * @param {ReturnType<typeof analyzeLegacyStatsCsv>} analysis
+ * @param {StatsOptions} options
+ */
+function applyLegacyStatsCsv(analysis, options: StatsOptions = {}) {
+  if (analysis.malformed.length > 0 || analysis.ambiguous.length > 0) {
+    throw new Error(
+      `Refusing to import ${analysis.filePath}: ${analysis.malformed.length} malformed and ` +
+      `${analysis.ambiguous.length} ambiguous rows. No records were written.`
+    );
+  }
+  if (analysis.importable.length === 0) {
+    return { applied: 0, changed: 0, unchanged: 0 };
+  }
+  const store = getMeasurementStore(options);
+  const results = store.upsertAll(analysis.importable.map(entry => statsRowToMeasurement(entry.row)));
+  const changed = results.filter(result => result.changed).length;
+  return { applied: results.length, changed, unchanged: results.length - changed };
+}
+
+/**
+ * `px stats import-legacy --csv-file <path> [--apply] [--json]`
+ *
+ * @param {string[]} args
+ * @param {StatsCmdOptions} options
+ */
+function runLegacyCsvImportCommand(args: string[], options: StatsOptions = {}) {
+  const log = options.log || fmt.log.plain;
+  const error = options.error || fmt.log.plainError;
+  const exit = options.exit || process.exit;
+  const rootDir = options.rootDir || process.cwd();
+
+  let filePath = null;
+  let apply = false;
+  let json = false;
+  for (let i = 0; i < args.length; i += 1) {
+    if (args[i] === '--apply') {apply = true; continue;}
+    if (args[i] === '--json') {json = true; continue;}
+    if (args[i] === '--csv-file' && i + 1 < args.length) {filePath = args[i + 1]; i += 1; continue;}
+    if (!args[i].startsWith('--') && !filePath) {filePath = args[i];}
+  }
+
+  if (!filePath) {
+    error(fmt.status('FAIL', 'px stats import-legacy requires --csv-file <path>.'));
+    exit(1);
+    return;
+  }
+
+  let analysis;
+  try {
+    analysis = analyzeLegacyStatsCsv(filePath, { rootDir });
+  } catch (err: any) {
+    error(fmt.status('FAIL', err.message));
+    exit(1);
+    return;
+  }
+
+  let applied = null;
+  if (apply) {
+    try {
+      applied = applyLegacyStatsCsv(analysis, options);
+    } catch (err: any) {
+      error(fmt.status('FAIL', err.message));
+      exit(1);
+      return;
+    }
+  }
+
+  if (json) {
+    log(JSON.stringify({
+      filePath: analysis.filePath,
+      totalRows: analysis.totalRows,
+      importable: analysis.importable.length,
+      malformed: analysis.malformed,
+      ambiguous: analysis.ambiguous,
+      applied,
+    }, null, 2));
+    return;
+  }
+
+  log(fmt.status('INFO', `Legacy stats CSV: ${analysis.filePath} (read-only)`));
+  log(fmt.status('INFO', `${analysis.totalRows} rows read, ${analysis.importable.length} importable`));
+  for (const row of analysis.malformed) {
+    log(fmt.status('WARN', `line ${row.line} (${row.mission}): ${row.reasons.join('; ')}`));
+  }
+  for (const row of analysis.ambiguous) {
+    log(fmt.status('WARN', `line ${row.line} (${row.mission}/${row.stage}) conflicts with line(s) ${row.conflictingLines.join(', ')}`));
+  }
+  if (!apply) {
+    log(fmt.status('INFO', 'Dry run: nothing was written. Re-run with --apply to import.'));
+    return;
+  }
+  log(fmt.status('PASS', `Imported ${applied.applied} measurements (${applied.changed} changed, ${applied.unchanged} already current). Source CSV unchanged.`));
+}
+
 /**
  * @param {Function} [log]
  */
 function printStatsUsage(log: typeof fmt.log.plain = fmt.log.plain) {
   log(`Usage: px stats [<csv_file>|--csv-file <path>] [--today YYYY-MM-DD] [--from YYYY-MM-DD --to YYYY-MM-DD] [--output <file>] [--group-by implementer|period|merged]
+       px stats import-legacy --csv-file <path> [--apply] [--json]
 
 Examples:
   px stats
   px stats --today 2026-05-18
   px stats --from 2026-05-01 --to 2026-05-31
-  px stats --csv-file stats.csv --today 2026-05-18
-  px stats --csv-file stats.csv --from 2026-05-01 --to 2026-05-31 --output /tmp/workflow-stats.txt
+  px stats --csv-file legacy-stats.csv --today 2026-05-18
+  px stats --csv-file legacy-stats.csv --from 2026-05-01 --to 2026-05-31 --output /tmp/workflow-stats.txt
   px stats legacy-report.csv --group-by period --output retrospective.md
   px stats task-1285
   px stats --mission task-1285
+  px stats import-legacy --csv-file ~/old-stats.csv
+  px stats import-legacy --csv-file ~/old-stats.csv --apply
 
 Notes:
+  - The measurement DATABASE is the authority for statistics:
+    <PARALLIX_HOME>/parallix.db. With no CSV path, the command reads the
+    database. No default run resolves, reads, or writes stats.csv, and an
+    unavailable database fails the command instead of falling back to a file.
   - Pass a mission slug (e.g. task-1285) or --mission <slug> to print a single
     mission broken down by phase (draft, execute, review, follow-up).
-  - With no CSV path, the command reads <PARALLIX_HOME>/stats.csv.
-  - Legacy repo-root stats.csv rows are imported when that file is present in the checkout.
-  - Workflow-owned stats CSVs print the current/previous-week summary tables by default.
-  - Use --from and --to together to print one inclusive arbitrary-range report for workflow-owned stats CSVs.
+  - A CSV path is accepted only as EXPLICIT read-only input for one-off
+    analysis; the named file is never modified.
+  - "px stats import-legacy --csv-file <path>" reports what a historical CSV
+    would add (dry run). Add --apply to import it in one atomic, idempotent
+    transaction; re-running the same file creates no duplicate records and
+    never writes to the source CSV.
+  - Workflow-owned stats datasets print the current/previous-week summary tables by default.
+  - Use --from and --to together to print one inclusive arbitrary-range report.
   - Legacy retrospective CSVs still render the markdown report.`);
 }
 
@@ -2189,7 +2388,7 @@ Notes:
  * @param {string[]} args
  * @param {StatsCmdOptions} options
  */
-function stats(args: string[], options: {log?: Function, error?: Function, exit?: Function, rootDir?: string} = {}) {
+function stats(args: string[], options: {log?: Function, error?: Function, exit?: Function, rootDir?: string, store?: unknown, dbPath?: string} = {}) {
   /** @type {StatsCmdOptions} */
   const opts = options;
   const log = opts.log || fmt.log.plain;
@@ -2200,6 +2399,11 @@ function stats(args: string[], options: {log?: Function, error?: Function, exit?
   if (args.includes('--help') || args.includes('-h')) {
     printStatsUsage(log);
     return;
+  }
+
+  // Explicit legacy-CSV import/analysis boundary. Never reached by a default run.
+  if (args[0] === 'import-legacy') {
+    return runLegacyCsvImportCommand(args.slice(1), opts);
   }
 
   const positionalArgs = [];
@@ -2268,18 +2472,49 @@ function stats(args: string[], options: {log?: Function, error?: Function, exit?
   if (positionalArgs.length > 0) {
     inputFile = positionalArgs[0];
   }
-  if (!inputFile) {
-    inputFile = resolveStatsPath({ rootDir });
+
+  // `inputFile` is set only when the operator NAMED a file. When it is null the
+  // command reads the measurement database — it never resolves a default CSV.
+  const explicitCsv = Boolean(inputFile);
+
+  // Mission-phase breakdown: read the database (or an explicitly named CSV) and
+  // render one mission grouped by phase.
+  if (mission) {
+    let rows;
+    try {
+      rows = explicitCsv
+        ? readLegacyStatsCsv(inputFile, { rootDir }).rows
+        : loadMeasurementRows({ rootDir, store: opts.store, dbPath: opts.dbPath }).rows;
+    } catch (err: any) {
+      error(fmt.status('FAIL', err.message));
+      exit(1);
+      return;
+    }
+    const report = renderMissionPhaseReport(rows, mission, { rootDir });
+    if (outputFile) {
+      fs.writeFileSync(outputFile, `${report}\n`, 'utf8');
+      log(fmt.status('PASS', `Report written to ${outputFile}`));
+    } else {
+      log(report);
+    }
+    return;
   }
 
-  // Mission-phase breakdown: read the workflow stats CSV (or the explicit
-  // --csv-file override) and render one mission grouped by phase.
-  if (mission) {
-    const statsPath = positionalArgs.length > 0 || args.includes('--csv-file')
-      ? inputFile
-      : resolveStatsPath({ rootDir });
-    const rows = fs.existsSync(statsPath) ? loadStatsCsv(statsPath, { rootDir }).rows : [];
-    const report = renderMissionPhaseReport(rows, mission, { rootDir });
+  let report;
+  if (!explicitCsv) {
+    // Default path: the measurement database is the authority. A failure here
+    // is reported, never silently downgraded to a CSV read.
+    try {
+      const rows = loadMeasurementRows({ rootDir, store: opts.store, dbPath: opts.dbPath }).rows;
+      log(fmt.status('INFO', `Loaded ${rows.length} measurements from the statistics database`));
+      report = from !== null || to !== null
+        ? renderRangeStatsReport(rows, { from: from || undefined, to: to || undefined, rootDir })
+        : renderWeeklyStatsReport(rows, { today, rootDir });
+    } catch (err: any) {
+      error(fmt.status('FAIL', err.message));
+      exit(1);
+      return;
+    }
     if (outputFile) {
       fs.writeFileSync(outputFile, `${report}\n`, 'utf8');
       log(fmt.status('PASS', `Report written to ${outputFile}`));
@@ -2295,14 +2530,14 @@ function stats(args: string[], options: {log?: Function, error?: Function, exit?
     return;
   }
 
+  // Explicit read-only legacy CSV analysis. The named file is only read.
   log(fmt.status('INFO', `Loading CSV: ${inputFile}`));
   const data = loadCsv(inputFile);
   log(fmt.status('INFO', `Loaded ${data.rows.length} rows with headers: ${data.headers.join(', ')}`));
 
-  let report;
   try {
     if (isIntegrationStatsDataset(data)) {
-      const rows = loadStatsCsv(inputFile, { rootDir }).rows;
+      const rows = readLegacyStatsCsv(inputFile, { rootDir }).rows;
       report = from !== null || to !== null
         ? renderRangeStatsReport(rows, { from: from || undefined, to: to || undefined, rootDir })
         : renderWeeklyStatsReport(rows, { today, rootDir });
@@ -2324,19 +2559,13 @@ function stats(args: string[], options: {log?: Function, error?: Function, exit?
 }
 
 export default stats;
-export { stats, STATS_HEADERS, resolveRepoStatsCsvPath, resolveStatsRepoName, resolveStatsFilePath, resolveStatsCsvPath, resolveStatsPath, recordIntegrationStats, renderWeeklyStatsReport, renderMissionPhaseReport, renderRangeStatsReport, buildWeeklyWindows, resolveMissionClassification, deriveImplementerAndFixRounds, upsertStatsRow, loadStatsCsv, saveStatsCsv, normalizeStatsRow, canonicalizeStatsRow, recordStageStats, accumulateStageStats, recordActiveStats, recordReviewStats, telemetryToStatsFields, formatDateOnly, LEGACY_HEADERS, USAGE_NUMBERS };
+export { stats, STATS_HEADERS, resolveStatsRepoName, recordIntegrationStats, renderWeeklyStatsReport, renderMissionPhaseReport, renderRangeStatsReport, buildWeeklyWindows, resolveMissionClassification, deriveImplementerAndFixRounds, upsertMeasurementRow, loadMeasurementRows, readLegacyStatsCsv, analyzeLegacyStatsCsv, applyLegacyStatsCsv, runLegacyCsvImportCommand, measurementToStatsRow, statsRowToMeasurement, normalizeStatsRow, canonicalizeStatsRow, recordStageStats, accumulateStageStats, recordActiveStats, recordReviewStats, telemetryToStatsFields, formatDateOnly, LEGACY_HEADERS, USAGE_NUMBERS };
 
 // CJS compat: ensure require() returns the function directly
 declare const module: { exports: any } | undefined;
 if (typeof module !== 'undefined') { module.exports = stats; }
 (stats as any).STATS_HEADERS = STATS_HEADERS;
-(stats as any).STATS_CSV_PATH = resolveRepoStatsCsvPath();
-(stats as any).LEGACY_STATS_CSV_PATH = resolveRepoStatsCsvPath();
-(stats as any).resolveRepoStatsCsvPath = resolveRepoStatsCsvPath;
 (stats as any).resolveStatsRepoName = resolveStatsRepoName;
-(stats as any).resolveStatsFilePath = resolveStatsFilePath;
-(stats as any).resolveStatsCsvPath = resolveStatsCsvPath;
-(stats as any).resolveStatsPath = resolveStatsPath;
 (stats as any).recordIntegrationStats = recordIntegrationStats;
 (stats as any).renderWeeklyStatsReport = renderWeeklyStatsReport;
 (stats as any).renderMissionPhaseReport = renderMissionPhaseReport;
@@ -2344,9 +2573,13 @@ if (typeof module !== 'undefined') { module.exports = stats; }
 (stats as any).buildWeeklyWindows = buildWeeklyWindows;
 (stats as any).resolveMissionClassification = resolveMissionClassification;
 (stats as any).deriveImplementerAndFixRounds = deriveImplementerAndFixRounds;
-(stats as any).upsertStatsRow = upsertStatsRow;
-(stats as any).loadStatsCsv = loadStatsCsv;
-(stats as any).saveStatsCsv = saveStatsCsv;
+(stats as any).upsertMeasurementRow = upsertMeasurementRow;
+(stats as any).loadMeasurementRows = loadMeasurementRows;
+(stats as any).readLegacyStatsCsv = readLegacyStatsCsv;
+(stats as any).analyzeLegacyStatsCsv = analyzeLegacyStatsCsv;
+(stats as any).applyLegacyStatsCsv = applyLegacyStatsCsv;
+(stats as any).measurementToStatsRow = measurementToStatsRow;
+(stats as any).statsRowToMeasurement = statsRowToMeasurement;
 (stats as any).normalizeStatsRow = normalizeStatsRow;
 (stats as any).canonicalizeStatsRow = canonicalizeStatsRow;
 (stats as any).recordStageStats = recordStageStats;
@@ -2364,7 +2597,6 @@ if (typeof module !== 'undefined') { module.exports = stats; }
   normalizeRows,
   parseBooleanish,
   parseCsvLine,
-  escapeCsvValue,
   normalizeClassification,
   canonicalizeStatsRow,
   parseDateOnlyStrict,
@@ -2383,4 +2615,7 @@ if (typeof module !== 'undefined') { module.exports = stats; }
   colorAverageFixRounds,
   colorMissionCounts,
   printStatsUsage,
+  analyzeLegacyStatsCsv,
+  applyLegacyStatsCsv,
+  readLegacyStatsCsv,
 };

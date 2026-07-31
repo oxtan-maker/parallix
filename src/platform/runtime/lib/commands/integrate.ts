@@ -1707,12 +1707,12 @@ function recordPostIntegrationStats(
   // stats writer already defaults its `date` to "today"; omitting `date` here
   // lets recordIntegrationStats use that same default instead of a stale commit
   // timestamp.
-  const statsCsvPath = (stats as any).resolveStatsFilePath(rootDir);
-
+  // TASK-2322.08: the completed-mission row is persisted through the
+  // measurement store (<PARALLIX_HOME>/parallix.db). Integration no longer
+  // resolves a stats CSV path.
   const outcome = recordIntegrationStatsFn({
     slug,
     rootDir,
-    filePath: statsCsvPath,
   });
 
   fmt.log.info(`Workflow stats recorded: ${formatRecordedStatsRow(outcome.row)}`);

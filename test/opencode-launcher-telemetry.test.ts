@@ -107,7 +107,7 @@ test('startOpencodeAgent does not hang when the real export capture times out', 
   assert.equal(hangingChild.killed, true, 'the hung export child must be killed');
 });
 
-test('startOpencodeAgent telemetry flows through to a non-zero stats CSV row', async () => {
+test('startOpencodeAgent telemetry flows through to a non-zero stored measurement', async () => {
   // End-to-end (criterion 6): launcher export attachment -> telemetry ->
   // stats-row creation, asserting durable non-zero token columns.
   const exportJson = fs.readFileSync(FIXTURE, 'utf8');
@@ -122,13 +122,13 @@ test('startOpencodeAgent telemetry flows through to a non-zero stats CSV row', a
   const result = await resultPromise;
 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-stats-'));
-  const csv = path.join(dir, 'stats.csv');
+  const dbFile = path.join(dir, 'parallix.db');
   try {
     const fields = stats.telemetryToStatsFields(result.telemetry, {
       agentFamily: 'custom',
       durationMinutes: 5,
     });
-    stats.upsertStatsRow(
+    stats.upsertMeasurementRow(
       {
         date: '2026-06-15',
         mission: 'task-1316',
@@ -137,18 +137,18 @@ test('startOpencodeAgent telemetry flows through to a non-zero stats CSV row', a
         implementer: 'custom',
         ...fields,
       },
-      { filePath: csv, rootDir: dir },
+      { dbPath: dbFile, rootDir: dir },
     );
 
-    const lines = fs.readFileSync(csv, 'utf8').trim().split('\n');
-    const header = lines[0].split(',');
-    const row = lines[1].split(',');
-    const cell = (name) => row[header.indexOf(name)];
+    const rows = stats.loadMeasurementRows({ dbPath: dbFile }).rows;
+    assert.equal(rows.length, 1);
+    const cell = (name) => rows[0][name];
 
-    assert.ok(Number(cell('input_tokens')) > 0, 'input_tokens must be non-zero in the CSV');
-    assert.ok(Number(cell('output_tokens')) > 0, 'output_tokens must be non-zero in the CSV');
+    assert.ok(Number(cell('input_tokens')) > 0, 'input_tokens must be non-zero in the database');
+    assert.ok(Number(cell('output_tokens')) > 0, 'output_tokens must be non-zero in the database');
     assert.equal(cell('tool_calls'), '59');
     assert.equal(cell('provider'), 'opencode');
+    assert.deepEqual(fs.readdirSync(dir).filter(name => name.endsWith('.csv')), []);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

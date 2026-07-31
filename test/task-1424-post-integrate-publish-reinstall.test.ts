@@ -107,10 +107,8 @@ test('installed bundle-layout tarball runs read-only commands outside the checko
 
     const px = path.join(prefix, 'bin', 'px');
     fs.mkdirSync(parallixHome, { recursive: true });
-    // The published package no longer exposes importable modules, so the CSV
-    // header comes from the checkout's test runtime rather than the install.
-    const { STATS_HEADERS } = require(path.join(PACKAGE_ROOT, '.test-runtime', 'lib', 'commands', 'stats.js'));
-    fs.writeFileSync(path.join(parallixHome, 'stats.csv'), `${STATS_HEADERS.join(',')}\n`);
+    // TASK-2322.08: `px stats` reads the measurement database and creates it on
+    // first access, so no seed file is needed and none may be a CSV.
     const pxVersion = run(px, ['--version'], { cwd: target });
     assert.equal(pxVersion.status, 0, `installed px --version failed\nstdout:\n${pxVersion.stdout}\nstderr:\n${pxVersion.stderr}`);
     assert.match(pxVersion.stdout, new RegExp(`${installedRoot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/build/px\\.mjs`));
@@ -119,6 +117,12 @@ test('installed bundle-layout tarball runs read-only commands outside the checko
       const result = run(px, [command], { cwd: target, tempHome: npmHome, env: { PARALLIX_HOME: parallixHome } });
       assert.equal(result.status, 0, `installed px ${command} failed\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
     }
+    assert.ok(fs.existsSync(path.join(parallixHome, 'parallix.db')), 'px stats must create the measurement database under PARALLIX_HOME');
+    assert.deepEqual(
+      fs.readdirSync(parallixHome).filter(name => name.endsWith('.csv')),
+      [],
+      'the installed CLI must not write a stats CSV'
+    );
   } finally {
     for (const entry of fs.readdirSync(PACKAGE_ROOT)) {
       if (entry.endsWith('.tgz') && !rootTarballsBefore.has(entry)) {

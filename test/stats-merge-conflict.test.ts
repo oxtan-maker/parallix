@@ -142,16 +142,16 @@ test('loadCsv correctly skips empty lines and only parses valid data rows', () =
   }
 });
 
-test('loadStatsCsv returns expected schema with cleaned data', () => {
+test('readLegacyStatsCsv returns expected schema with cleaned data', () => {
   const csv = writeCsv([
     'date,mission,classification,implementer,pr_fix_rounds',
     '2026-05-06,task-1054,ai_sdlc,claude,1',
     '2026-05-06,task-1055,ai_sdlc,codex,0',
   ].join('\n'));
   try {
-    const data = stats.loadStatsCsv(csv);
+    const data = stats.readLegacyStatsCsv(csv);
 
-  // loadStatsCsv migrates legacy 5-column rows to the full 22-column schema
+  // readLegacyStatsCsv migrates legacy 5-column rows to the full 22-column schema
   // (task-1251 + task-1380): legacy columns preserved, new columns defaulted.
   // Legacy rows without a `closed` column default to 'yes' (task-1380).
   assert.deepEqual(data.headers, stats.STATS_HEADERS);
@@ -163,7 +163,7 @@ test('loadStatsCsv returns expected schema with cleaned data', () => {
     implementer: 'claude',
     pr_fix_rounds: '1',
   });
-  // Legacy CSV rows get closed: 'yes' from loadStatsCsv migration
+  // Legacy CSV rows get closed: 'yes' from readLegacyStatsCsv migration
   expected.closed = 'yes';
   assert.deepEqual(data.rows[0], expected);
   } finally {
@@ -171,10 +171,15 @@ test('loadStatsCsv returns expected schema with cleaned data', () => {
   }
 });
 
-test('loadStatsCsv handles missing file gracefully', () => {
+test('readLegacyStatsCsv handles missing file gracefully', () => {
   const nonExistentPath = '/tmp/non-existent-stats-' + Date.now() + '.csv';
-  const data = stats.loadStatsCsv(nonExistentPath);
+  const data = stats.readLegacyStatsCsv(nonExistentPath);
 
   assert.deepEqual(data.headers, stats.STATS_HEADERS);
   assert.equal(data.rows.length, 0);
+});
+
+test('readLegacyStatsCsv refuses to resolve a default path (no implicit stats.csv read)', () => {
+  assert.throws(() => stats.readLegacyStatsCsv(), /requires an explicit CSV path/);
+  assert.throws(() => stats.readLegacyStatsCsv(''), /requires an explicit CSV path/);
 });

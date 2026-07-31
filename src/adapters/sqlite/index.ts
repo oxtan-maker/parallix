@@ -38,6 +38,11 @@ export type {
 // Repository implementations
 export { SqliteBlocklistRepository } from './blocklist-repository.js';
 export { SqliteUsageRepository } from './usage-repository.js';
+export {
+  SqliteMeasurementStore,
+  resolveMeasurementStore,
+  closeMeasurementStores,
+} from './measurement-store.js';
 export { SqliteKnownRepositoriesRepository } from './repository-repository.js';
 export { SqliteUIPreferencesRepository } from './ui-preferences-repository.js';
 export { SqliteOperationalHistoryRepository } from './operational-history-repository.js';

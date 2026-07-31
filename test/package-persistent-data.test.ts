@@ -53,7 +53,7 @@ function run(command: string, args: string[], options: RunOptions = {}) {
   return result;
 }
 
-test('global tarball reinstall preserves PARALLIX_HOME stats and agent blocklist', () => {
+test('global tarball reinstall preserves PARALLIX_HOME measurements and agent blocklist', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-reinstall-'));
   const packDir = path.join(root, 'pack');
   const prefix = path.join(root, 'npm-prefix');
@@ -104,18 +104,21 @@ test('global tarball reinstall preserves PARALLIX_HOME stats and agent blocklist
     const writeScript = [
       `const stats = require(${JSON.stringify(path.join(PACKAGE_ROOT, 'src', 'platform', 'runtime', 'lib', 'commands', 'stats.ts'))});`,
       `const agents = require(${JSON.stringify(path.join(PACKAGE_ROOT, 'src', 'platform', 'runtime', 'lib', 'agents', 'agents.ts'))});`,
-      "stats.upsertStatsRow({date:'2026-06-06',mission:'task-reinstall-proof',classification:'ai_sdlc',implementer:'codex',pr_fix_rounds:'2'});",
+      "stats.upsertMeasurementRow({date:'2026-06-06',mission:'task-reinstall-proof',classification:'ai_sdlc',implementer:'codex',pr_fix_rounds:'2',closed:'yes'});",
       "agents.updateAgentBlock('custom', '2026-07-01 12');"
     ].join('');
     run(process.execPath, ['--import', TSX_IMPORT, '-e', writeScript], { cwd: repoOne, env });
 
-    const statsPath = path.join(parallixHome, 'stats.csv');
+    // TASK-2322.08: the operator's statistics live in the measurement database.
+    const measurementDbPath = path.join(parallixHome, 'parallix.db');
     const agentsPath = path.join(parallixHome, 'agents.local.json');
-    const statsBefore = fs.readFileSync(statsPath, 'utf8');
+    assert.ok(fs.existsSync(measurementDbPath), 'measurements must be written to <PARALLIX_HOME>/parallix.db');
+    assert.equal(fs.existsSync(path.join(parallixHome, 'stats.csv')), false, 'no stats.csv may be written');
+    const measurementsBefore = fs.readFileSync(measurementDbPath);
     const agentsBefore = fs.readFileSync(agentsPath, 'utf8');
     const readFromSecondRepo = [
       `const stats = require(${JSON.stringify(path.join(PACKAGE_ROOT, 'src', 'platform', 'runtime', 'lib', 'commands', 'stats.ts'))});`,
-      "const row = stats.loadStatsCsv().rows.find(item => item.mission === 'task-reinstall-proof');",
+      "const row = stats.loadMeasurementRows().rows.find(item => item.mission === 'task-reinstall-proof');",
       "if (!row || row.pr_fix_rounds !== '2') process.exit(1);"
     ].join('');
     run(process.execPath, ['--import', TSX_IMPORT, '-e', readFromSecondRepo], { cwd: repoTwo, env });
@@ -124,19 +127,21 @@ test('global tarball reinstall preserves PARALLIX_HOME stats and agent blocklist
       [path.join(installedRoot, 'build', 'px.mjs'), 'stats', '--today', '2026-06-06'],
       { cwd: repoTwo, env }
     );
-    assert.match(pxStats.stdout, new RegExp(`Loading CSV: ${statsPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+    assert.match(pxStats.stdout, /Loaded \d+ measurements from the statistics database/);
+    assert.doesNotMatch(pxStats.stdout, /Loading CSV/);
 
     run('npm', installArgs, { tempHome: npmHome });
 
-    assert.equal(fs.readFileSync(statsPath, 'utf8'), statsBefore);
+    // A reinstall preserves operator state: the same measurement is still there.
+    assert.deepEqual(fs.readFileSync(measurementDbPath), measurementsBefore);
     assert.equal(fs.readFileSync(agentsPath, 'utf8'), agentsBefore);
-    assert.match(statsBefore, /task-reinstall-proof,ai_sdlc,codex,2/);
+    run(process.execPath, ['--import', TSX_IMPORT, '-e', readFromSecondRepo], { cwd: repoTwo, env });
     assert.deepEqual(
       JSON.parse(agentsBefore).blocklist.custom,
       { until: '2026-07-01 12' }
     );
-    assert.equal(fs.existsSync(path.join(installedRoot, 'data', 'stats.seed.csv')), false);
     assert.equal(fs.existsSync(path.join(installedRoot, 'data', 'stats.csv')), false);
+    assert.equal(fs.existsSync(path.join(installedRoot, 'parallix.db')), false);
     assert.equal(fs.existsSync(path.join(installedRoot, 'agents.local.json')), false);
     assert.equal(fs.existsSync(path.join(installedRoot, 'config', 'agents.local.json')), false);
     assert.equal(fs.existsSync(path.join(repoOne, 'stats.csv')), false);
