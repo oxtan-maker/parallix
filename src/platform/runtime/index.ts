@@ -297,7 +297,7 @@ ${fmt.bold('Core Commands:')}
   resolve-conflict [<slug>]       Detect merge conflicts in the mission worktree and emit resolution guidance.
   rebase [<slug>] [--push]          Rebase mission branch onto the primary integration branch (main) with auto-resolution of mission-specific conflicts.
   diff [<slug>]                Launch the primary local diff tool for branch-vs-main review.
-  stats [<csv_file>|--csv-file <path>] [--today YYYY-MM-DD|--from YYYY-MM-DD --to YYYY-MM-DD] [--output <file>]  Print parallix weekly or range tables from <PARALLIX_HOME>/stats.csv; legacy retrospective CSVs remain supported.
+  stats [<csv_file>|--csv-file <path>] [--today YYYY-MM-DD|--from YYYY-MM-DD --to YYYY-MM-DD] [--output <file>]  Print parallix weekly or range tables from the measurement database (<PARALLIX_HOME>/parallix.db); a named CSV is read-only legacy analysis.
   config                Print the effective configuration (built-in defaults merged with workflow.config.json). Read-only.
   ui                    Render the static Ink TUI board shell. Read-only; press q or Ctrl+C to exit.
   aliases               Print the derived command-alias table (state-map virtual states → canonical commands).

@@ -17,7 +17,6 @@ const DEFAULT_CONFIG = Object.freeze({
       worktreePattern: '../<repo>-<slug>',
     },
     verification: { defaultArea: 'docs' },
-    stats: { path: 'stats.csv' },
     review: {},
     agents: {},
     integrate: {},

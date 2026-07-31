@@ -33,6 +33,7 @@ const CLI_ENTRY = path.resolve(__dirname, '..', 'build', 'px.mjs');
 // explicitly (config route), so the smoke run never depends on the developer's
 // ambient PARALLIX_HOME/global state.
 const workflowConfig = require('../workflow.config.json');
+const { SqliteMeasurementStore } = require('../.test-runtime/adapters/sqlite/measurement-store');
 const CUSTOM_MODEL = workflowConfig?.adapters?.agents?.models?.custom;
 const OVERRIDE_AGENT = process.env.PARALLIX_REAL_AGENT || null;
 const OVERRIDE_MODEL = process.env.PARALLIX_REAL_AGENT_MODEL || null;
@@ -588,7 +589,7 @@ const DEFAULT_PARALLIX_HOMES = [
 function snapshotDefaultParallixState() {
   const snapshots = new Map();
   for (const home of DEFAULT_PARALLIX_HOMES) {
-    for (const file of ['stats.csv', 'agents.local.json']) {
+    for (const file of ['parallix.db', 'agents.local.json']) {
       const filePath = path.join(home, file);
       if (fs.existsSync(filePath)) {
         snapshots.set(filePath, fs.readFileSync(filePath, 'utf8'));
@@ -618,7 +619,7 @@ function runRealAgentSmoke(agent, runner) {
   const worktree = path.resolve(repo.repoRoot, '..', `${path.basename(repo.repoRoot)}-${slug}`);
   // Parallix-owned state isolation goes through configuration, not a hard
   // filesystem sandbox: PARALLIX_HOME is the highest-precedence resolver input
-  // for both <PARALLIX_HOME>/stats.csv and the agent blocking file
+  // for both <PARALLIX_HOME>/parallix.db and the agent blocking file
   // <PARALLIX_HOME>/agents.local.json (lib/core/storage.ts), so temp-scoping it
   // keeps every Parallix write out of the developer's real state root.
   // opencode's own runtime state (XDG data dir) is deliberately NOT overridden:
@@ -777,19 +778,35 @@ function runRealAgentSmoke(agent, runner) {
       assert.ok(statsMatch[2] && statsMatch[2].length > 0, '[parallix-workflow-failure] draft stats reported an empty model name');
     }
 
-    // Verify telemetry isolation: check that stats.csv file exists in isolated PARALLIX_HOME
-    const statsFile = path.join(repo.stateHome, 'stats.csv');
-    assert.ok(fs.existsSync(statsFile), '[parallix-workflow-failure] expected stats.csv file in isolated PARALLIX_HOME at ' + statsFile);
-    const statsContent = fs.readFileSync(statsFile, 'utf8');
-    
-    // Verify stats CSV contains expected content (headers and data)
-    assert.ok(statsContent.includes('mission'), '[parallix-workflow-failure] expected stats.csv to contain mission column');
-    assert.ok(statsContent.includes('stage'), '[parallix-workflow-failure] expected stats.csv to contain stage column');
-    assert.ok(statsContent.includes('model'), '[parallix-workflow-failure] expected stats.csv to contain model column');
-    assert.ok(statsContent.includes('draft'), '[parallix-workflow-failure] expected stats.csv to contain draft stage');
+    // Verify telemetry isolation: the measurement database — the statistics
+    // authority since TASK-2322.08 — exists in the isolated PARALLIX_HOME and
+    // holds the draft-stage measurement. No stats.csv is written anywhere.
+    const measurementDb = path.join(repo.stateHome, 'parallix.db');
+    assert.ok(fs.existsSync(measurementDb), '[parallix-workflow-failure] expected parallix.db in isolated PARALLIX_HOME at ' + measurementDb);
+    assert.equal(
+      fs.existsSync(path.join(repo.stateHome, 'stats.csv')),
+      false,
+      '[parallix-workflow-failure] no stats.csv may be written: the database is the statistics authority'
+    );
+
+    const measurementStore = new SqliteMeasurementStore(measurementDb);
+    let storedMeasurements;
+    try {
+      storedMeasurements = measurementStore.listMeasurements().map((record) => ({ ...record }));
+    } finally {
+      measurementStore.close();
+    }
+    const draftMeasurement = storedMeasurements.find(
+      (record) => record.mission === slug && record.stage === 'draft'
+    );
+    assert.ok(draftMeasurement, '[parallix-workflow-failure] expected a draft-stage measurement for ' + slug);
+    assert.ok(draftMeasurement.model, '[parallix-workflow-failure] expected the stored measurement to record a model');
     if (SMOKE_MODEL) {
       const modelBaseName = SMOKE_MODEL.split('/').pop();
-      assert.ok(statsContent.includes(modelBaseName), `[parallix-workflow-failure] expected stats.csv to contain the selected model (${modelBaseName})`);
+      assert.ok(
+        String(draftMeasurement.model).includes(modelBaseName),
+        `[parallix-workflow-failure] expected the stored measurement to record the selected model (${modelBaseName}), got ${draftMeasurement.model}`
+      );
     }
 
     // Verify no writes escaped to the developer's default Parallix state
@@ -799,17 +816,27 @@ function runRealAgentSmoke(agent, runner) {
     // the gate. resolveParallixHome (lib/core/storage.ts) falls back to
     // ~/.local/state/parallix on Linux and ~/.parallix elsewhere.
     for (const defaultHome of DEFAULT_PARALLIX_HOMES) {
-      const defaultStatsFile = path.join(defaultHome, 'stats.csv');
-      const before = defaultStateSnapshots.get(defaultStatsFile) || '';
-      const after = fs.existsSync(defaultStatsFile) ? fs.readFileSync(defaultStatsFile, 'utf8') : '';
-      const beforeLines = new Set(before.split('\n'));
-      const addedSmokeLines = after.split('\n')
-        .filter((line) => !beforeLines.has(line))
-        .filter((line) => line.includes(slug) || line.includes('real-agent-smoke'));
-      assert.deepEqual(
-        addedSmokeLines,
-        [],
-        `[parallix-workflow-failure] telemetry isolation violated: this run added smoke-run rows to ${defaultStatsFile}: ${addedSmokeLines.join(' | ')}`
+      const defaultMeasurementDb = path.join(defaultHome, 'parallix.db');
+      if (fs.existsSync(defaultMeasurementDb)) {
+        // Delta-based: only measurements for THIS smoke slug count as leakage.
+        const defaultStore = new SqliteMeasurementStore(defaultMeasurementDb);
+        let leaked;
+        try {
+          leaked = defaultStore.findByMission(slug).map((record) => `${record.mission}:${record.stage}`);
+        } finally {
+          defaultStore.close();
+        }
+        assert.deepEqual(
+          leaked,
+          [],
+          `[parallix-workflow-failure] telemetry isolation violated: this run added smoke-run measurements to ${defaultMeasurementDb}: ${leaked.join(' | ')}`
+        );
+      }
+      assert.equal(
+        fs.existsSync(path.join(defaultHome, 'stats.csv')) &&
+          fs.readFileSync(path.join(defaultHome, 'stats.csv'), 'utf8').includes(slug),
+        false,
+        `[parallix-workflow-failure] telemetry isolation violated: smoke-run rows appeared in ${path.join(defaultHome, 'stats.csv')}`
       );
 
       const defaultAgentsLocal = path.join(defaultHome, 'agents.local.json');

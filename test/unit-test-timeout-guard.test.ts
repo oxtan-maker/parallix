@@ -93,7 +93,7 @@ test('unit-test timeout guard: --test-timeout terminates a test exceeding the bo
     // Run the wrapper as a plain Node.js script (no --test flag).
     // Clear NODE_TEST_CONTEXT so the inner `node --test` does not detect
     // a recursive test runner call and skip (task-2326 finding).
-    const childEnv = { ...process.env, NODE_NO_WARNINGS: '1' };
+    const childEnv: NodeJS.ProcessEnv = { ...process.env, NODE_NO_WARNINGS: '1' };
     delete childEnv.NODE_TEST_CONTEXT;
     delete childEnv.NODE_V8_COVERAGE;
     const result = spawnSync(
@@ -148,7 +148,7 @@ test('unit-test timeout guard: fast test passes within the bound', () => {
 
   try {
     // Clear NODE_TEST_CONTEXT for the same recursive-detection reason.
-    const childEnv = { ...process.env, NODE_NO_WARNINGS: '1' };
+    const childEnv: NodeJS.ProcessEnv = { ...process.env, NODE_NO_WARNINGS: '1' };
     delete childEnv.NODE_TEST_CONTEXT;
     delete childEnv.NODE_V8_COVERAGE;
     const result = spawnSync(
@@ -189,7 +189,7 @@ test('unit-test timeout guard: suite budget enforcement fails when exceeded', ()
   // Spawn the runner with the tight budget and this single test file.
   // The runner's --test-timeout=30000 will not trigger (2s < 30s),
   // but the suite budget (500ms) will be exceeded.
-  const runnerEnv = {
+  const runnerEnv: NodeJS.ProcessEnv = {
     ...process.env,
     NODE_NO_WARNINGS: '1',
     PARALLIX_UNIT_TEST_BUDGET_MS: String(budgetMs),

@@ -306,34 +306,50 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     cutoverTask: 'TASK-2322.03',
   },
   {
-    id: 'outcome-stats-csv',
+    // TASK-2322.08: the completed-mission row is written to the measurement
+    // database through `MeasurementStorePort`. The former `stats.csv` writer
+    // is deleted.
+    id: 'outcome-measurement-store-write',
     concept: 'MissionOutcome',
-    pathType: 'compatibility',
-    fileLocation: 'src/platform/runtime/lib/commands/stats.ts',
+    pathType: 'default',
+    fileLocation: 'src/adapters/sqlite/measurement-store.ts',
     operation: 'write',
     classification: 'database-owned-domain-state',
-    cutoverTask: 'TASK-2322.03',
+    cutoverTask: null,
   },
   // -----------------------------------------------------------------------
   // AgentRunMeasurement — operator-local measurement data
   // -----------------------------------------------------------------------
   {
-    id: 'measurement-stats-csv-read',
+    // TASK-2322.08: `px stats` and every stage recorder read the measurement
+    // database. No default path resolves or reads `stats.csv`.
+    id: 'measurement-store-read',
     concept: 'AgentRunMeasurement',
     pathType: 'default',
-    fileLocation: 'src/platform/runtime/lib/commands/stats.ts',
+    fileLocation: 'src/adapters/sqlite/measurement-store.ts',
     operation: 'read',
     classification: 'database-owned-domain-state',
-    cutoverTask: 'TASK-2322.03',
+    cutoverTask: null,
   },
   {
-    id: 'measurement-stats-csv-write',
+    id: 'measurement-store-write',
     concept: 'AgentRunMeasurement',
     pathType: 'default',
-    fileLocation: 'src/platform/runtime/lib/commands/stats.ts',
+    fileLocation: 'src/adapters/sqlite/measurement-store.ts',
     operation: 'write',
     classification: 'database-owned-domain-state',
-    cutoverTask: 'TASK-2322.03',
+    cutoverTask: null,
+  },
+  {
+    // The ONLY remaining CSV boundary: `px stats import-legacy --csv-file`
+    // and `px stats <file>` analysis. Explicit, read-only, one-way.
+    id: 'measurement-legacy-csv-import',
+    concept: 'AgentRunMeasurement',
+    pathType: 'compatibility',
+    fileLocation: 'src/platform/runtime/lib/commands/stats.ts',
+    operation: 'read',
+    classification: 'explicit-one-way-legacy-input',
+    cutoverTask: null,
   },
   {
     id: 'measurement-sqlite-usage-repo',
@@ -356,11 +372,11 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
   {
     id: 'measurement-stats-backfill-read',
     concept: 'AgentRunMeasurement',
-    pathType: 'compatibility',
+    pathType: 'default',
     fileLocation: 'src/platform/runtime/lib/commands/stats-backfill.ts',
     operation: 'read',
     classification: 'database-owned-domain-state',
-    cutoverTask: 'TASK-2322.03',
+    cutoverTask: null,
   },
   {
     id: 'measurement-codex-telemetry-read',
@@ -708,13 +724,14 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     cutoverTask: 'TASK-2322.02',
   },
   {
+    // `px stats --output <file>` writes a rendered REPORT, not persistence.
     id: 'artifacts-stats-output',
     concept: 'LargeArtifacts',
-    pathType: 'compatibility',
+    pathType: 'default',
     fileLocation: 'src/platform/runtime/lib/commands/stats.ts',
     operation: 'write',
     classification: 'generated-artifact',
-    cutoverTask: 'TASK-2322.02',
+    cutoverTask: null,
   },
   {
     id: 'artifacts-handoff-nel',

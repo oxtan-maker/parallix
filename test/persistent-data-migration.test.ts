@@ -5,10 +5,8 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const {
-  migrateStats,
-  migrateAgentBlocklists
-} = require('../.test-runtime/lib/core/persistent-data-migration');
+const persistentDataMigration = require('../.test-runtime/lib/core/persistent-data-migration');
+const { migrateAgentBlocklists } = persistentDataMigration;
 
 function withTempRoot(run) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-migration-'));
@@ -19,107 +17,13 @@ function withTempRoot(run) {
   }
 }
 
-test('migrateStats merges repo and shared sources, deduplicates full rows, and is byte-idempotent', () => {
-  withTempRoot(root => {
-    const sourcePath = path.join(root, 'workflow', 'data', 'stats.csv');
-    const destinationPath = path.join(root, 'parallix', 'stats.csv');
-    fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
-    fs.mkdirSync(path.dirname(destinationPath), { recursive: true });
-    fs.writeFileSync(sourcePath,
-      'date,mission,classification,implementer,pr_fix_rounds\n' +
-      '2026-06-01,task-1,ai_sdlc,codex,0\n' +
-      '2026-06-02,task-2,user_value,claude,1\n'
-    );
-    fs.writeFileSync(destinationPath,
-      'date,mission,classification,implementer,pr_fix_rounds\n' +
-      '2026-06-01,task-1,ai_sdlc,codex,0\n' +
-      '2026-06-03,task-3,ai_sdlc,custom,2\n'
-    );
-
-    migrateStats({ sourcePaths: [sourcePath], destinationPath });
-    const first = fs.readFileSync(destinationPath, 'utf8');
-    migrateStats({ sourcePaths: [sourcePath], destinationPath });
-    const second = fs.readFileSync(destinationPath, 'utf8');
-
-    assert.equal(second, first);
-    assert.equal(first.match(/task-1/g).length, 1);
-    assert.equal(first.match(/task-2/g).length, 1);
-    assert.match(first, /task-2/);
-    assert.match(first, /task-3/);
-    assert.ok(fs.existsSync(sourcePath));
-  });
-});
-
-test('migrateStats imports source rows into fresh install (destination does not exist)', () => {
-  withTempRoot(root => {
-    const sourcePath = path.join(root, 'workflow', 'data', 'stats.csv');
-    const destinationPath = path.join(root, 'parallix', 'stats.csv');
-    fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
-    fs.mkdirSync(path.dirname(destinationPath), { recursive: true });
-    fs.writeFileSync(sourcePath,
-      'date,mission,classification,implementer,pr_fix_rounds\n' +
-      '2026-06-01,task-1,ai_sdlc,codex,0\n' +
-      '2026-06-02,task-2,user_value,claude,1\n'
-    );
-
-    assert.ok(!fs.existsSync(destinationPath));
-
-    const result = migrateStats({ sourcePaths: [sourcePath], destinationPath });
-
-    assert.equal(result.imported, 2);
-    assert.equal(result.rows, 2);
-    const content = fs.readFileSync(destinationPath, 'utf8');
-    const statsHeaders = require('../.test-runtime/lib/commands/stats').STATS_HEADERS.join(',');
-    assert.ok(content.startsWith(`${statsHeaders}\n`));
-    assert.equal(content.split('\n').filter(Boolean).length, 3);
-  });
-});
-
-test('migrateStats does not write a header-only file when no source data is available', () => {
-  withTempRoot(root => {
-    const destinationPath = path.join(root, 'parallix', 'stats.csv');
-    fs.mkdirSync(path.dirname(destinationPath), { recursive: true });
-    const missingSource = path.join(root, 'workflow', 'data', 'stats.csv');
-    const emptySource = path.join(root, 'empty.csv');
-    fs.writeFileSync(emptySource, '');
-
-    assert.ok(!fs.existsSync(missingSource));
-
-    const result = migrateStats({ sourcePaths: [missingSource, emptySource], destinationPath });
-
-    assert.equal(result.imported, 0);
-    assert.equal(result.rows, 0);
-    assert.equal(result.warn, 'no source data available');
-    assert.ok(!fs.existsSync(destinationPath), 'destination must not be created when no source data exists');
-  });
-});
-
-test('migrateStats merges sources into existing header-only destination', () => {
-  withTempRoot(root => {
-    const sourcePath = path.join(root, 'workflow', 'data', 'stats.csv');
-    const destinationPath = path.join(root, 'parallix', 'stats.csv');
-    fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
-    fs.mkdirSync(path.dirname(destinationPath), { recursive: true });
-    fs.writeFileSync(sourcePath,
-      'date,mission,classification,implementer,pr_fix_rounds\n' +
-      '2026-06-01,task-1,ai_sdlc,codex,0\n' +
-      '2026-06-02,task-2,user_value,claude,1\n'
-    );
-    // Destination exists with only a header (empty data rows)
-    fs.writeFileSync(destinationPath,
-      'date,mission,classification,implementer,pr_fix_rounds\n'
-    );
-
-    const result = migrateStats({ sourcePaths: [sourcePath], destinationPath });
-
-    assert.equal(result.imported, 2);
-    assert.equal(result.rows, 2);
-    const content = fs.readFileSync(destinationPath, 'utf8');
-    assert.ok(content.includes('task-1'));
-    assert.ok(content.includes('task-2'));
-    const statsHeaders = require('../.test-runtime/lib/commands/stats').STATS_HEADERS.join(',');
-    assert.match(content, new RegExp(`^${statsHeaders}\\n`));
-  });
+// TASK-2322.08 deleted `migrateStats` and its CSV reader/writer helpers:
+// `<PARALLIX_HOME>/stats.csv` is no longer a runtime authority or migration
+// destination, so this module must expose no stats CSV migration at all.
+test('no stats CSV migration survives the measurement cut-over', () => {
+  assert.equal(persistentDataMigration.migrateStats, undefined);
+  assert.equal(persistentDataMigration._internals, undefined);
+  assert.equal(typeof persistentDataMigration.migrateAgentBlocklists, 'function');
 });
 
 test('migrateAgentBlocklists covers all three legacy sources and preserves schema variants', () => {

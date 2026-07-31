@@ -179,12 +179,13 @@ test (TASK-2201) adds explicit validation of:
 
 - **Parallix-owned state isolation (config route)**: `PARALLIX_HOME` is the
   highest-precedence input to `resolveParallixHome` (`lib/core/storage.ts`),
-  which anchors both `stats.csv` and the agent blocking file
-  `agents.local.json`. The test points `PARALLIX_HOME` at a temp directory and
-  validates that:
-  - Stats files are written to the isolated `PARALLIX_HOME` (temp directory)
-  - Stats file content includes the expected model and provider fields
-  - Neither `stats.csv` nor `agents.local.json` in the developer's default
+  which anchors both the measurement database `parallix.db` and the agent
+  blocking file `agents.local.json`. The test points `PARALLIX_HOME` at a temp
+  directory and validates that:
+  - Measurements are written to the isolated `PARALLIX_HOME` (temp directory)
+  - The stored draft-stage measurement records the expected model
+  - No `stats.csv` is written at all — the database is the statistics authority
+  - Neither `parallix.db` nor `agents.local.json` in the developer's default
     Parallix state roots (`~/.local/state/parallix` on Linux, `~/.parallix`
     fallback) contains any smoke-run data
   - `opencode`'s own runtime state (`XDG_DATA_HOME`) is deliberately **not**

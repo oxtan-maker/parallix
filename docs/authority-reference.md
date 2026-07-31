@@ -272,7 +272,16 @@ View the current alias table: `px aliases`
 
 Use `px stats` before integration when you want to validate the weekly tables from committed workflow data, or add `--from` and `--to` to inspect one larger inclusive date range.
 
-**Classification:** `<PARALLIX_HOME>/stats.csv` is **parallix-owned cross-repository agent telemetry** — one statistic about how agent families perform across every repo a single parallix runtime drives. It is operator-owned and independent of both the installed package and selected consuming repo, so one runtime working in several repositories accumulates one shared statistic rather than a split per-repo file. The five-column schema (`date,mission,classification,implementer,pr_fix_rounds`) carries no repository identity by design.
+**Authority:** the **measurement database** `<PARALLIX_HOME>/parallix.db` is the sole authority for statistics (ADR 0053, TASK-2322.08). It holds checked `AgentRunMeasurement` and `MissionOutcome` data, reached through `MeasurementStorePort` (`src/application/measurement-ports.ts`) and its SQLite adapter (`src/adapters/sqlite/measurement-store.ts`). `stats.csv` is **not** an authority, a fallback, an output target, or an auto-discovered input: no default run resolves, reads, or writes it, and when the database is unavailable the command fails with a database error rather than reading a file.
+
+**Classification:** the measurement database is **parallix-owned cross-repository agent telemetry** — one statistic about how agent families perform across every repo a single parallix runtime drives. It is operator-owned and independent of both the installed package and the selected consuming repo, so one runtime working in several repositories accumulates one shared statistic rather than a split per-repo store. A measurement is identified by `(repo, mission, stage, actor)`; per TASK-2322.02 there is no per-launch (`Attempt`) identity.
+
+**Legacy CSV import:** a historical `stats.csv` may be imported explicitly and read-only:
+
+- Inspect what would be imported (dry run, writes nothing): `px stats import-legacy --csv-file <path>`
+- Import it in one atomic transaction: `px stats import-legacy --csv-file <path> --apply`
+
+The apply is idempotent — re-running the same file creates no duplicate records — and the source CSV is never modified. Malformed rows (bad date, missing mission, unknown classification, non-numeric measurement) and ambiguous rows (two rows claiming one identity with different values) are reported with their line numbers, and a file containing any of them is refused whole: no partial import is committed.
 
 ## Persistent operator data
 
@@ -282,11 +291,12 @@ uses `~/.local/state/parallix` on Linux,
 `%LOCALAPPDATA%\parallix` on Windows. If the platform-specific base cannot be
 resolved, it falls back to `~/.parallix`.
 
-The root contains `stats.csv` and `agents.local.json`. Missing directories and
+The root contains `parallix.db` and `agents.local.json`. Missing directories and
 files are created on first write; read-only paths tolerate absence. The first
-default access migrates the repo-root legacy `stats.csv` and the three legacy
-blocklist locations without deleting them. Statistics rows are
-deduplicated by all five columns. Blocklist precedence remains
+default access migrates the three legacy blocklist locations without deleting
+them; historical statistics are migrated only by the explicit
+`px stats import-legacy` command. Statistics rows are deduplicated by their
+`(repo, mission, stage, actor)` identity. Blocklist precedence remains
 runtime-config, repo-root, main-worktree; conflicts are logged with both values
 and their sources. Malformed legacy blocklists are reported and skipped, while
 a malformed effective file is a hard failure and is never overwritten.
@@ -297,14 +307,15 @@ inside, restored by, or removed with the globally installed npm package.
 - Default preview: `px stats`
 - Freeze the reporting window for reproducible checks: `px stats --today 2026-05-18`
 - Preview one inclusive workflow-owned range: `px stats --from 2026-05-01 --to 2026-05-31`
-- Be explicit about the source file: `px stats --csv-file stats.csv --today 2026-05-18`
+- Analyze a legacy CSV read-only instead of the database: `px stats --csv-file legacy-stats.csv --today 2026-05-18`
+- Import a legacy CSV into the database: `px stats import-legacy --csv-file legacy-stats.csv --apply`
 - Write the output to a file for inspection or sharing: `px stats --from 2026-05-01 --to 2026-05-31 --output /tmp/workflow-stats.txt`
 - Break one mission down by phase: `px stats task-1285` (or `px stats --mission task-1285`)
 - Show command help and examples: `px stats --help`
 
 Behavior:
-- Workflow-owned stats datasets (`stats.csv` schema) print the current-week and previous-week mission tables, the two agent-performance tables, and — for the current week only — an agent spend-by-stage table (columns `draft`, `execute`, `review`, `follow-up`, `default`, `total`) showing each agent's tracked spend per stage as `<metric> (<share %>)`: Codex/OpenAI rows use usage-percentage snapshots (`openai_usage_after`), Claude and Mistral rows use dollar cost (`cost_usd`), and Custom/local-model rows use clock duration (`duration_minutes`). Rows with no non-zero spend for their metric family show `—` instead of misleading `0%` math.
-- With `--from YYYY-MM-DD --to YYYY-MM-DD`, workflow-owned stats datasets instead print one mission table and one agent-performance table for rows whose `date` is within the inclusive range.
+- Workflow-owned stats datasets print the current-week and previous-week mission tables, the two agent-performance tables, and — for the current week only — an agent spend-by-stage table (columns `draft`, `execute`, `review`, `follow-up`, `default`, `total`) showing each agent's tracked spend per stage as `<metric> (<share %>)`: Codex/OpenAI rows use usage-percentage snapshots (`openai_usage_after`), Claude and Mistral rows use dollar cost (`cost_usd`), and Custom/local-model rows use clock duration (`duration_minutes`). Rows with no non-zero spend for their metric family show `—` instead of misleading `0%` math.
+- With `--from YYYY-MM-DD --to YYYY-MM-DD`, the command instead prints one mission table and one agent-performance table for rows whose `date` is within the inclusive range.
 - With a mission slug (`px stats task-1285`) or `--mission <slug>`, the command prints one mission broken down by phase — `draft`, `execute` (stored as the `active` stage), and `review` are always shown, plus any `follow-up`/extra recorded stages, with per-phase provider, model, implementer, token, tool-call, and duration columns and a totals row. The output is a pure function of the stored rows, so re-running it does not change the data.
 
 Telemetry capture contract (task-1285):

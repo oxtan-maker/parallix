@@ -25,10 +25,10 @@ const SHARED_FILE_REBASE_CONFLICT_RE = /shared file(?:\(s\))? require agent-assi
 
 /**
  * Auto-commit safe mission artifacts before rebase.
- * Only touches mission-generated files, task files, and stats CSV.
+ * Only touches mission-generated files and task files.
  * @param {string} slug
  * @param {string} worktree
- * @param {{taskFile?: string|null, gitFn?: Function, log?: Function, error?: Function, isMissionArtifactFn?: Function, isWorkflowGeneratedArtifactFn?: Function, resolveStatsRelPathFn?: Function}} [options]
+ * @param {{taskFile?: string|null, gitFn?: Function, log?: Function, error?: Function, isMissionArtifactFn?: Function, isWorkflowGeneratedArtifactFn?: Function}} [options]
  * @returns {Promise<{ok: boolean, dirty: boolean, unsafe?: boolean}>}
  */
 export async function commitSafeMissionArtifacts(slug: string, worktree: string, {
@@ -38,7 +38,6 @@ export async function commitSafeMissionArtifacts(slug: string, worktree: string,
   error = fmt.log.plainError,
   isMissionArtifactFn = isMissionArtifact,
   isWorkflowGeneratedArtifactFn = isWorkflowGeneratedArtifact,
-  resolveStatsRelPathFn = () => null
 }: {
   taskFile?: string | null;
   gitFn?: typeof git;
@@ -46,7 +45,6 @@ export async function commitSafeMissionArtifacts(slug: string, worktree: string,
   error?: (_msg: string) => void;
   isMissionArtifactFn?: (_file: string, _slug: string, _rootDir: string) => boolean;
   isWorkflowGeneratedArtifactFn?: (_file: string) => boolean;
-  resolveStatsRelPathFn?: (_rootDir: string) => string | null;
 } = {}): Promise<{ ok: boolean; dirty: boolean; unsafe?: boolean }> {
   const rootDir = worktree || process.cwd();
   const statusResult = gitFn(['-C', rootDir, 'status', '--porcelain=v1', '-z']);
@@ -81,13 +79,13 @@ export async function commitSafeMissionArtifacts(slug: string, worktree: string,
     return { ok: false, dirty: true, unsafe: true };
   }
 
+  // TASK-2322.08: there is no stats CSV to auto-commit any more — measurements
+  // live in the operator-local database, outside every repository.
   const resolvedTaskFile = taskFile ? path.relative(rootDir, taskFile) : null;
-  const statsRelPath = resolveStatsRelPathFn(rootDir);
   const isSafeToCommit = (file: string) =>
     isWorkflowGeneratedArtifactFn(file)
     || isMissionArtifactFn(file, slug, rootDir)
-    || !!(resolvedTaskFile && file === resolvedTaskFile)
-    || !!(statsRelPath && file === statsRelPath);
+    || !!(resolvedTaskFile && file === resolvedTaskFile);
 
   const unsafeFiles = dirtyFiles
     .flatMap((f: { paths: string[] }) => f.paths)

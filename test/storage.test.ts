@@ -121,18 +121,12 @@ test('resolveParallixHome uses ~/.parallix for unsupported platforms', () => {
   );
 });
 
-// ---------- resolveStatsPath & resolveAgentsLocalPath ----------
+// ---------- resolveAgentsLocalPath ----------
 
-test('resolveStatsPath returns <PARALLIX_HOME>/stats.csv', () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'storage-stats-'));
-  const savedHome = process.env.PARALLIX_HOME;
-  try {
-    process.env.PARALLIX_HOME = tmpDir;
-    assert.equal(storage.resolveStatsPath(), path.join(tmpDir, 'stats.csv'));
-  } finally {
-    process.env.PARALLIX_HOME = savedHome;
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
+// TASK-2322.08 removed `storage.resolveStatsPath`: statistics live in the
+// measurement database, and no runtime path resolves <PARALLIX_HOME>/stats.csv.
+test('storage exposes no stats.csv resolver after the measurement cut-over', () => {
+  assert.equal(storage.resolveStatsPath, undefined);
 });
 
 test('resolveAgentsLocalPath returns <PARALLIX_HOME>/agents.local.json', () => {

@@ -69,52 +69,56 @@ test('stats report normalizes date/has_pr CSVs across summary, implementer, and 
   }
 });
 
-test('upsertStatsRow writes the workflow stats schema and updates existing missions idempotently', () => {
-  const csvFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-stats-upsert-')), 'stats.csv');
+test('upsertMeasurementRow persists the workflow stats schema and updates existing missions idempotently', () => {
+  const dbFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-stats-upsert-')), 'parallix.db');
   try {
-    const first = stats.upsertStatsRow({
+    const first = stats.upsertMeasurementRow({
     date: '2026-05-18',
     repo: 'parallix',
     mission: 'task-2000',
     classification: 'ai_sdlc',
     implementer: 'codex',
     pr_fix_rounds: 2,
-  }, { filePath: csvFile });
+  }, { dbPath: dbFile });
 
   assert.equal(first.changed, true);
   assert.equal(first.data.rows.length, 1);
-  assert.equal(fs.readFileSync(csvFile, 'utf8').split('\n')[0], stats.STATS_HEADERS.join(','));
+  // The measurement database is the sink; no CSV is created next to it.
+  assert.deepEqual(
+    fs.readdirSync(path.dirname(dbFile)).filter(name => name.endsWith('.csv')),
+    []
+  );
 
-  const second = stats.upsertStatsRow({
+  const second = stats.upsertMeasurementRow({
     date: '2026-05-18',
     repo: 'parallix',
     mission: 'task-2000',
     classification: 'ai_sdlc',
     implementer: 'codex',
     pr_fix_rounds: 2,
-  }, { filePath: csvFile });
+  }, { dbPath: dbFile });
   assert.equal(second.changed, false);
   assert.equal(second.data.rows.length, 1);
 
-  const third = stats.upsertStatsRow({
+  const third = stats.upsertMeasurementRow({
     date: '2026-05-18',
     repo: 'parallix',
     mission: 'task-2000',
     classification: 'ai_sdlc',
     implementer: 'codex',
     pr_fix_rounds: 3,
-  }, { filePath: csvFile });
+  }, { dbPath: dbFile });
   assert.equal(third.changed, true);
   assert.equal(third.data.rows[0].pr_fix_rounds, '3');
   } finally {
-    fs.rmSync(path.dirname(csvFile), { recursive: true, force: true });
+    fs.rmSync(path.dirname(dbFile), { recursive: true, force: true });
   }
 });
 
-test('task-1314: upsertStatsRow keys on (repo, mission, stage) so same mission in different repos stays distinct', () => {
-  const csvFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-stats-repo-stage-')), 'stats.csv');
+test('task-1314: upsertMeasurementRow keys on (repo, mission, stage) so same mission in different repos stays distinct', () => {
+  const dbFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-stats-repo-stage-')), 'parallix.db');
   try {
-    stats.upsertStatsRow({
+    stats.upsertMeasurementRow({
     date: '2026-06-07',
     repo: 'visualboard',
     mission: 'task-3000',
@@ -122,8 +126,8 @@ test('task-1314: upsertStatsRow keys on (repo, mission, stage) so same mission i
     implementer: 'codex',
     stage: 'draft',
     input_tokens: '100',
-  }, { filePath: csvFile });
-  stats.upsertStatsRow({
+  }, { dbPath: dbFile });
+  stats.upsertMeasurementRow({
     date: '2026-06-07',
     repo: 'parallix',
     mission: 'task-3000',
@@ -131,12 +135,12 @@ test('task-1314: upsertStatsRow keys on (repo, mission, stage) so same mission i
     implementer: 'codex',
     stage: 'draft',
     input_tokens: '200',
-  }, { filePath: csvFile });
+  }, { dbPath: dbFile });
 
-  let data = stats.loadStatsCsv(csvFile);
+  let data = stats.loadMeasurementRows({ dbPath: dbFile });
   assert.equal(data.rows.length, 2);
 
-  stats.upsertStatsRow({
+  stats.upsertMeasurementRow({
     date: '2026-06-07',
     repo: 'visualboard',
     mission: 'task-3000',
@@ -144,22 +148,22 @@ test('task-1314: upsertStatsRow keys on (repo, mission, stage) so same mission i
     implementer: 'codex',
     stage: 'draft',
     input_tokens: '999',
-  }, { filePath: csvFile });
-  data = stats.loadStatsCsv(csvFile);
+  }, { dbPath: dbFile });
+  data = stats.loadMeasurementRows({ dbPath: dbFile });
   assert.equal(data.rows.length, 2);
   const visualboardRow = data.rows.find(r => r.repo === 'visualboard');
   const parallixRow = data.rows.find(r => r.repo === 'parallix');
   assert.equal(visualboardRow.input_tokens, '999');
   assert.equal(parallixRow.input_tokens, '200');
   } finally {
-    fs.rmSync(path.dirname(csvFile), { recursive: true, force: true });
+    fs.rmSync(path.dirname(dbFile), { recursive: true, force: true });
   }
 });
 
-test('task-1342: upsertStatsRow keeps same mission/stage separate by acting agent family', () => {
-  const csvFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-stats-stage-actor-')), 'stats.csv');
+test('task-1342: upsertMeasurementRow keeps same mission/stage separate by acting agent family', () => {
+  const dbFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-stats-stage-actor-')), 'parallix.db');
   try {
-    stats.upsertStatsRow({
+    stats.upsertMeasurementRow({
     date: '2026-06-24',
     repo: 'parallix',
     mission: 'task-1342',
@@ -168,8 +172,8 @@ test('task-1342: upsertStatsRow keeps same mission/stage separate by acting agen
     implementer_agent: 'codex',
     stage: 'follow-up',
     input_tokens: '100',
-  }, { filePath: csvFile });
-  stats.upsertStatsRow({
+  }, { dbPath: dbFile });
+  stats.upsertMeasurementRow({
     date: '2026-06-24',
     repo: 'parallix',
     mission: 'task-1342',
@@ -178,14 +182,14 @@ test('task-1342: upsertStatsRow keeps same mission/stage separate by acting agen
     implementer_agent: 'custom',
     stage: 'follow-up',
     input_tokens: '200',
-  }, { filePath: csvFile });
+  }, { dbPath: dbFile });
 
-  const data = stats.loadStatsCsv(csvFile);
+  const data = stats.loadMeasurementRows({ dbPath: dbFile });
   assert.equal(data.rows.length, 2);
   assert.ok(data.rows.some(r => r.stage === 'follow-up' && r.implementer_agent === 'codex' && r.input_tokens === '100'));
   assert.ok(data.rows.some(r => r.stage === 'follow-up' && r.implementer_agent === 'custom' && r.input_tokens === '200'));
   } finally {
-    fs.rmSync(path.dirname(csvFile), { recursive: true, force: true });
+    fs.rmSync(path.dirname(dbFile), { recursive: true, force: true });
   }
 });
 
@@ -202,13 +206,13 @@ test('task-1342: accumulateStageStats sums repeated launches for the same missio
       '---',
       '',
     ].join('\n'));
-    const csvFile = path.join(root, 'workflow', 'data', 'stats.csv');
+    const dbFile = path.join(root, 'workflow', 'data', 'parallix.db');
 
     stats.accumulateStageStats({
       slug: 'task-2000',
       stage: 'follow-up',
       rootDir: root,
-      filePath: csvFile,
+      dbPath: dbFile,
       implementer: 'custom',
       telemetry: { provider: 'openai', model: 'gpt-5', inputTokens: 100, outputTokens: 10, cachedTokens: 5, totalTokens: 115, toolCalls: 2, usagePercent: 7, cost_usd: 0.25 },
       durationMinutes: 3,
@@ -218,7 +222,7 @@ test('task-1342: accumulateStageStats sums repeated launches for the same missio
       slug: 'task-2000',
       stage: 'follow-up',
       rootDir: root,
-      filePath: csvFile,
+      dbPath: dbFile,
       implementer: 'custom',
       telemetry: { provider: 'openai', model: 'gpt-5', inputTokens: 40, outputTokens: 4, cachedTokens: 1, totalTokens: 45, toolCalls: 1, usagePercent: 9, cost_usd: 0.5 },
       durationMinutes: 2,
@@ -253,10 +257,10 @@ test('resolveMissionClassification returns null classification with error when n
   }
 });
 
-test('upsertStatsRow accepts unknown classification rows and weekly report counts them', () => {
-  const csvFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-stats-unknown-')), 'stats.csv');
+test('upsertMeasurementRow accepts unknown classification rows and weekly report counts them', () => {
+  const dbFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-stats-unknown-')), 'parallix.db');
   try {
-    stats.upsertStatsRow({
+    stats.upsertMeasurementRow({
       date: '2026-06-23',
       repo: 'parallix',
       mission: 'task-unknown',
@@ -264,106 +268,94 @@ test('upsertStatsRow accepts unknown classification rows and weekly report count
       implementer: 'unknown',
       pr_fix_rounds: 0,
       closed: 'yes',
-    }, { filePath: csvFile });
+    }, { dbPath: dbFile });
 
-    const rows = stats.loadStatsCsv(csvFile).rows;
+    const rows = stats.loadMeasurementRows({ dbPath: dbFile }).rows;
     const report = stats.renderWeeklyStatsReport(rows, { today: '2026-06-23' });
     assert.match(report, /# unknown missions/);
     assert.match(report, /\b1\b/);
   } finally {
-    fs.rmSync(path.dirname(csvFile), { recursive: true, force: true });
+    fs.rmSync(path.dirname(dbFile), { recursive: true, force: true });
   }
 });
 
-test('resolveStatsCsvPath resolves configured stats CSV from target repo root', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-stats-resolve-'));
-  const csv = path.join(root, 'metrics', 'missions.csv');
-  fs.mkdirSync(path.dirname(csv), { recursive: true });
-  fs.writeFileSync(csv, 'date,mission,classification,implementer,pr_fix_rounds\n', 'utf8');
-
-  try {
-    const resolved = stats.resolveStatsCsvPath({
-      rootDir: root,
-      config: { adapters: { stats: { path: 'metrics/missions.csv' } } },
-    });
-    assert.equal(resolved, csv);
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
+// TASK-2322.08 removed every stats-path resolver (`resolveStatsCsvPath`,
+// `resolveStatsPath`, `resolveStatsFilePath`, `resolveRepoStatsCsvPath`) and the
+// `adapters.stats.path` config knob. The measurement database is the authority,
+// so no default run can resolve a CSV to read from or write to.
+test('no stats CSV path resolver survives the measurement cut-over', () => {
+  for (const removed of [
+    'resolveStatsCsvPath',
+    'resolveStatsPath',
+    'resolveStatsFilePath',
+    'resolveRepoStatsCsvPath',
+    'saveStatsCsv',
+    'loadStatsCsv',
+    'upsertStatsRow',
+  ]) {
+    assert.equal(stats[removed], undefined, `${removed} must not be reachable from the stats module`);
   }
 });
 
-test('resolveStatsCsvPath falls back to repo-root stats CSV when target repo file is absent', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-stats-missing-'));
-
-  try {
-    const resolved = stats.resolveStatsCsvPath({
-      rootDir: root,
-      config: { adapters: { stats: { path: 'missing-stats.csv' } } },
-    });
-    assert.equal(resolved, path.join(root, 'stats.csv'));
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test('resolveStatsCsvPath returns target repo path for writes even before stats CSV exists', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-stats-write-path-'));
-
-  try {
-    const resolved = stats.resolveStatsCsvPath({
-      rootDir: root,
-      config: { adapters: { stats: { path: 'new-stats.csv' } } },
-      forWrite: true,
-    });
-    assert.equal(resolved, path.join(root, 'new-stats.csv'));
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test('resolveStatsPath migrates repo-root stats rows into an existing shared stats file', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-stats-migrate-root-'));
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-stats-migrate-home-'));
+test('recording a measurement with no explicit path writes no CSV under PARALLIX_HOME (task-1246)', () => {
   const previousHome = process.env.PARALLIX_HOME;
-  const repoStatsPath = path.join(root, 'stats.csv');
-  const sharedStatsPath = path.join(home, 'stats.csv');
-
-  fs.writeFileSync(repoStatsPath, [
-    'date,mission,classification,implementer,pr_fix_rounds',
-    '2026-06-14,task-root,ai_sdlc,codex,0',
-  ].join('\n'), 'utf8');
-  stats.saveStatsCsv(sharedStatsPath, [
-    { date: '2026-06-13', mission: 'task-shared', classification: 'user_value', implementer: 'gemini', pr_fix_rounds: '1' },
-  ]);
-
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'px-stats-home-'));
+  const repoA = fs.mkdtempSync(path.join(os.tmpdir(), 'px-stats-share-a-'));
+  const repoB = fs.mkdtempSync(path.join(os.tmpdir(), 'px-stats-share-b-'));
   try {
     process.env.PARALLIX_HOME = home;
-    const resolved = stats.resolveStatsPath({ rootDir: root });
-    assert.equal(resolved, sharedStatsPath);
-    const content = fs.readFileSync(sharedStatsPath, 'utf8');
-    assert.match(content, /task-root/);
-    assert.match(content, /task-shared/);
+    fs.writeFileSync(path.join(repoA, 'workflow.config.json'), JSON.stringify({
+      product: { name: 'visualboard' },
+    }), 'utf8');
+    fs.writeFileSync(path.join(repoB, 'workflow.config.json'), JSON.stringify({
+      product: { name: 'parallix' },
+    }), 'utf8');
+
+    // Two distinct target repos driven by one runtime accumulate ONE shared
+    // statistic — now in <PARALLIX_HOME>/parallix.db rather than stats.csv.
+    const dbFile = path.join(home, 'parallix.db');
+    stats.upsertMeasurementRow(
+      { date: '2026-05-18', mission: 'task-a', classification: 'ai_sdlc', implementer: 'codex', pr_fix_rounds: '1' },
+      { dbPath: dbFile, rootDir: repoA }
+    );
+    stats.upsertMeasurementRow(
+      { date: '2026-05-19', mission: 'task-b', classification: 'user_value', implementer: 'gemini', pr_fix_rounds: '2' },
+      { dbPath: dbFile, rootDir: repoB }
+    );
+
+    const loaded = stats.loadMeasurementRows({ dbPath: dbFile });
+    assert.equal(loaded.rows.length, 2);
+    assert.equal(loaded.rows.find(r => r.mission === 'task-a').repo, 'visualboard');
+    assert.equal(loaded.rows.find(r => r.mission === 'task-b').repo, 'parallix');
+
+    // No CSV was created anywhere: not in PARALLIX_HOME, not in either repo.
+    assert.deepEqual(fs.readdirSync(home).filter(name => name.endsWith('.csv')), []);
+    assert.equal(fs.existsSync(path.join(repoA, 'stats.csv')), false);
+    assert.equal(fs.existsSync(path.join(repoB, 'stats.csv')), false);
+    assert.equal(fs.existsSync(path.join(repoA, 'workflow', 'data', 'stats.csv')), false);
+    assert.equal(fs.existsSync(path.join(repoB, 'workflow', 'data', 'stats.csv')), false);
   } finally {
     if (previousHome === undefined) delete process.env.PARALLIX_HOME;
     else process.env.PARALLIX_HOME = previousHome;
-    fs.rmSync(root, { recursive: true, force: true });
     fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(repoA, { recursive: true, force: true });
+    fs.rmSync(repoB, { recursive: true, force: true });
   }
 });
 
-test('stats command defaults to shared PARALLIX_HOME stats across target repos', () => {
+test('stats command defaults to the shared PARALLIX_HOME database across target repos', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-stats-command-default-'));
   const repoOne = path.join(root, 'repo-one');
   const repoTwo = path.join(root, 'repo-two');
   const home = path.join(root, 'parallix-home');
-  const csv = path.join(home, 'stats.csv');
   fs.mkdirSync(repoOne);
   fs.mkdirSync(repoTwo);
   fs.mkdirSync(home);
-  fs.writeFileSync(csv, [
-    'date,mission,classification,implementer,pr_fix_rounds',
-    '2026-05-18,task-shared,user_value,codex,1',
-  ].join('\n'), 'utf8');
+  const dbFile = path.join(home, 'parallix.db');
+  stats.upsertMeasurementRow(
+    { date: '2026-05-18', mission: 'task-shared', classification: 'user_value', implementer: 'codex', pr_fix_rounds: '1', closed: 'yes' },
+    { dbPath: dbFile, rootDir: repoOne }
+  );
   const logs = [];
   const previousHome = process.env.PARALLIX_HOME;
 
@@ -379,8 +371,9 @@ test('stats command defaults to shared PARALLIX_HOME stats across target repos',
     });
 
     const output = logs.join('\n');
-    assert.match(output, new RegExp(`Loading CSV: ${csv.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
-    assert.match(output, /Loaded \d+ rows/);
+    // SC4: the default run reads the database and announces no CSV at all.
+    assert.match(output, /Loaded \d+ measurements from the statistics database/);
+    assert.doesNotMatch(output, /Loading CSV/);
     assert.match(output, /Current week \(2026-05-12 → 2026-05-18\)/);
 
     const secondLogs = [];
@@ -392,7 +385,9 @@ test('stats command defaults to shared PARALLIX_HOME stats across target repos',
         throw new Error(`unexpected exit ${code}`);
       },
     });
-    assert.match(secondLogs.join('\n'), new RegExp(`Loading CSV: ${csv.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+    // The same shared statistic is visible from the second target repo.
+    assert.match(secondLogs.join('\n'), /Loaded 1 measurements from the statistics database/);
+    assert.deepEqual(fs.readdirSync(home).filter(name => name.endsWith('.csv')), []);
   } finally {
     if (previousHome === undefined) delete process.env.PARALLIX_HOME;
     else process.env.PARALLIX_HOME = previousHome;
@@ -789,7 +784,12 @@ test('stats command help documents the pre-integration preview workflow', () => 
   assert.match(output, /Usage: px stats/);
   assert.match(output, /px stats --today 2026-05-18/);
   assert.match(output, /px stats --from 2026-05-01 --to 2026-05-31/);
-  assert.match(output, /Workflow-owned stats CSVs print the current\/previous-week summary tables by default/);
+  assert.match(output, /Workflow-owned stats datasets print the current\/previous-week summary tables by default/);
+  // SC4: the help text names the database as the statistics authority.
+  assert.match(output, /The measurement DATABASE is the authority for statistics/);
+  assert.match(output, /<PARALLIX_HOME>\/parallix\.db/);
+  assert.match(output, /No default run resolves, reads, or writes stats\.csv/);
+  assert.match(output, /px stats import-legacy --csv-file/);
 });
 
 test('recordIntegrationStats reads backlog classification and review-state final implementer/fix rounds', () => {
@@ -815,11 +815,11 @@ test('recordIntegrationStats reads backlog classification and review-state final
       JSON.stringify({ reviewer: 'claude', implementer: 'gemini', round: 4, startedAt: '2026-05-18T10:00:00Z' }, null, 2)
     );
 
-    const csvFile = path.join(root, 'workflow', 'data', 'stats.csv');
+    const dbFile = path.join(root, 'workflow', 'data', 'parallix.db');
     const result = stats.recordIntegrationStats({
       slug: 'task-2000',
       rootDir: root,
-      filePath: csvFile,
+      dbPath: dbFile,
       date: '2026-05-18',
     });
     const repoName = stats.resolveStatsRepoName(root);
@@ -829,88 +829,17 @@ test('recordIntegrationStats reads backlog classification and review-state final
     assert.equal(result.row.pr_fix_rounds, '3');
     assert.equal(result.row.repo, repoName);
     assert.equal(result.metadataSource.implementer, 'review-state');
-    assert.match(fs.readFileSync(csvFile, 'utf8'), new RegExp(`2026-05-18,${repoName},task-2000,ai_sdlc,gemini,3`));
+    // The completed-mission row is readable from the database, not a CSV.
+    const stored = stats.loadMeasurementRows({ dbPath: dbFile }).rows
+      .find(candidate => candidate.mission === 'task-2000');
+    assert.equal(stored.date, '2026-05-18');
+    assert.equal(stored.repo, repoName);
+    assert.equal(stored.classification, 'ai_sdlc');
+    assert.equal(stored.implementer, 'gemini');
+    assert.equal(stored.pr_fix_rounds, '3');
+    assert.equal(stored.closed, 'yes');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test('resolveStatsFilePath is the parallix-owned shared path, independent of any consuming repo (task-1246)', () => {
-  const previousHome = process.env.PARALLIX_HOME;
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'px-stats-home-'));
-  const repoA = fs.mkdtempSync(path.join(os.tmpdir(), 'px-stats-resolve-a-'));
-  const repoB = fs.mkdtempSync(path.join(os.tmpdir(), 'px-stats-resolve-b-'));
-  try {
-    process.env.PARALLIX_HOME = home;
-    assert.equal(stats.resolveStatsFilePath(), path.join(home, 'stats.csv'));
-    assert.equal(stats.resolveStatsFilePath(repoA), stats.resolveStatsFilePath(repoB));
-    assert.notEqual(stats.resolveStatsFilePath(repoA), path.join(repoA, 'workflow', 'data', 'stats.csv'));
-    assert.notEqual(stats.resolveStatsFilePath(repoB), path.join(repoB, 'workflow', 'data', 'stats.csv'));
-  } finally {
-    if (previousHome === undefined) delete process.env.PARALLIX_HOME;
-    else process.env.PARALLIX_HOME = previousHome;
-    fs.rmSync(home, { recursive: true, force: true });
-    fs.rmSync(repoA, { recursive: true, force: true });
-    fs.rmSync(repoB, { recursive: true, force: true });
-  }
-});
-
-test('two non-shared target repos upsert into one shared parallix-owned stats file (task-1246)', () => {
-  // Two distinct target repos with separate .git directories must resolve to the
-  // same parallix-owned stats source when driven by the same runtime. The path
-  // is computed via resolveStatsFilePath(runtimeRoot), not derived from either
-  // target repo root, proving the production resolver drives location.
-  const repoA = fs.mkdtempSync(path.join(os.tmpdir(), 'px-stats-share-a-'));
-  const repoB = fs.mkdtempSync(path.join(os.tmpdir(), 'px-stats-share-b-'));
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'px-stats-home-'));
-  const previousHome = process.env.PARALLIX_HOME;
-  try {
-    process.env.PARALLIX_HOME = home;
-    fs.writeFileSync(path.join(repoA, 'workflow.config.json'), JSON.stringify({
-      product: { name: 'visualboard' },
-    }), 'utf8');
-    fs.writeFileSync(path.join(repoB, 'workflow.config.json'), JSON.stringify({
-      product: { name: 'parallix' },
-    }), 'utf8');
-    fs.writeFileSync(
-      path.join(home, 'stats.csv'),
-      'date,repo,mission,classification,implementer,pr_fix_rounds\n'
-    );
-    fs.mkdirSync(path.join(repoA, '.git'));
-    fs.mkdirSync(path.join(repoB, '.git'));
-
-    const sharedStatsFile = stats.resolveStatsFilePath(repoA);
-    assert.equal(stats.resolveStatsFilePath(repoB), sharedStatsFile);
-
-    // Each target repo records one agent-performance row through the resolver.
-    stats.upsertStatsRow(
-      { date: '2026-05-18', mission: 'task-a', classification: 'ai_sdlc', implementer: 'codex', pr_fix_rounds: '1' },
-      { filePath: sharedStatsFile, rootDir: repoA }
-    );
-    stats.upsertStatsRow(
-      { date: '2026-05-19', mission: 'task-b', classification: 'user_value', implementer: 'gemini', pr_fix_rounds: '2' },
-      { filePath: sharedStatsFile, rootDir: repoB }
-    );
-
-    const loaded = stats.loadStatsCsv(sharedStatsFile, { rootDir: repoA });
-    // Seed file is included in migration, so rows >= 2 (2 upserted + seed rows).
-    assert.ok(loaded.rows.length >= 2);
-    assert.ok(loaded.rows.map(r => r.mission).sort().includes('task-a'));
-    assert.ok(loaded.rows.map(r => r.mission).sort().includes('task-b'));
-    assert.equal(loaded.rows.find(r => r.mission === 'task-a').repo, 'visualboard');
-    assert.equal(loaded.rows.find(r => r.mission === 'task-b').repo, 'parallix');
-
-    assert.equal(sharedStatsFile, path.join(home, 'stats.csv'));
-
-    // No per-repo stats file was created under either consuming repo.
-    assert.equal(fs.existsSync(path.join(repoA, 'workflow', 'data', 'stats.csv')), false);
-    assert.equal(fs.existsSync(path.join(repoB, 'workflow', 'data', 'stats.csv')), false);
-  } finally {
-    if (previousHome === undefined) delete process.env.PARALLIX_HOME;
-    else process.env.PARALLIX_HOME = previousHome;
-    fs.rmSync(repoA, { recursive: true, force: true });
-    fs.rmSync(repoB, { recursive: true, force: true });
-    fs.rmSync(home, { recursive: true, force: true });
   }
 });
 
@@ -928,16 +857,18 @@ test('recordIntegrationStats returns the unchanged weekly report labels for inte
       '',
     ].join('\n'));
 
-    const csvFile = path.join(root, 'workflow', 'data', 'stats.csv');
-    stats.saveStatsCsv(csvFile, [
+    const dbFile = path.join(root, 'workflow', 'data', 'parallix.db');
+    for (const seed of [
       { date: '2026-05-12', mission: 'task-1000', classification: 'user_value', implementer: 'gemini', pr_fix_rounds: '1' },
       { date: '2026-05-11', mission: 'task-0999', classification: 'ai_sdlc', implementer: 'claude', pr_fix_rounds: '2' },
-    ]);
+    ]) {
+      stats.upsertMeasurementRow(seed, { dbPath: dbFile, rootDir: root });
+    }
 
     const result = stats.recordIntegrationStats({
       slug: 'task-2000',
       rootDir: root,
-      filePath: csvFile,
+      dbPath: dbFile,
       date: '2026-05-18',
     });
 
@@ -1007,11 +938,11 @@ test('recordIntegrationStats counts only final implementer review-state rounds a
       JSON.stringify({ reviewer: 'claude', implementer: 'gemini', round: 4, startedAt: '2026-05-18T10:00:00Z' }, null, 2)
     );
 
-    const csvFile = path.join(root, 'workflow', 'data', 'stats.csv');
+    const dbFile = path.join(root, 'workflow', 'data', 'parallix.db');
     const result = stats.recordIntegrationStats({
       slug: 'task-2000',
       rootDir: root,
-      filePath: csvFile,
+      dbPath: dbFile,
       date: '2026-05-18',
     });
 
@@ -1058,11 +989,11 @@ test('recordIntegrationStats prefers branch-history implementer when review-stat
       JSON.stringify({ reviewer: 'codex', implementer: 'custom', round: 1, startedAt: '2026-05-18T10:00:00Z' }, null, 2)
     );
 
-    const csvFile = path.join(root, 'workflow', 'data', 'stats.csv');
+    const dbFile = path.join(root, 'workflow', 'data', 'parallix.db');
     const result = stats.recordIntegrationStats({
       slug: 'task-2000',
       rootDir: root,
-      filePath: csvFile,
+      dbPath: dbFile,
       date: '2026-05-18',
     });
 
@@ -1107,11 +1038,11 @@ test('recordIntegrationStats prefers PR round-resolution comments for final impl
       JSON.stringify({ reviewer: 'codex', implementer: 'custom', round: 3, startedAt: '2026-05-18T10:00:00Z' }, null, 2)
     );
 
-    const csvFile = path.join(root, 'workflow', 'data', 'stats.csv');
+    const dbFile = path.join(root, 'workflow', 'data', 'parallix.db');
     const result = stats.recordIntegrationStats({
       slug: 'task-2000',
       rootDir: root,
-      filePath: csvFile,
+      dbPath: dbFile,
       date: '2026-05-18',
     });
 
@@ -1161,11 +1092,11 @@ test('recordIntegrationStats derives non-standard resolution rounds from review 
       JSON.stringify({ reviewer: 'codex', implementer: 'gemini', round: 2, startedAt: '2026-05-18T10:00:00Z' }, null, 2)
     );
 
-    const csvFile = path.join(root, 'workflow', 'data', 'stats.csv');
+    const dbFile = path.join(root, 'workflow', 'data', 'parallix.db');
     const result = stats.recordIntegrationStats({
       slug: 'task-2000',
       rootDir: root,
-      filePath: csvFile,
+      dbPath: dbFile,
       date: '2026-05-18',
     });
 
@@ -1209,11 +1140,11 @@ test('recordIntegrationStats ignores reviewer round headings and counts only exp
       '',
     ].join('\n'));
 
-    const csvFile = path.join(root, 'workflow', 'data', 'stats.csv');
+    const dbFile = path.join(root, 'workflow', 'data', 'parallix.db');
     const result = stats.recordIntegrationStats({
       slug: 'task-2000',
       rootDir: root,
-      filePath: csvFile,
+      dbPath: dbFile,
       date: '2026-05-18',
     });
 
@@ -1257,11 +1188,11 @@ test('recordIntegrationStats counts review-attempt resolution comments as fix ro
       '',
     ].join('\n'));
 
-    const csvFile = path.join(root, 'workflow', 'data', 'stats.csv');
+    const dbFile = path.join(root, 'workflow', 'data', 'parallix.db');
     const result = stats.recordIntegrationStats({
       slug: 'task-2000',
       rootDir: root,
-      filePath: csvFile,
+      dbPath: dbFile,
       date: '2026-05-18',
     });
 
@@ -1291,11 +1222,11 @@ test('recordIntegrationStats uses bounded backlog fallback when review-state is 
       '',
     ].join('\n'));
 
-    const csvFile = path.join(root, 'workflow', 'data', 'stats.csv');
+    const dbFile = path.join(root, 'workflow', 'data', 'parallix.db');
     const result = stats.recordIntegrationStats({
       slug: 'task-2000',
       rootDir: root,
-      filePath: csvFile,
+      dbPath: dbFile,
       date: '2026-05-18',
     });
 
@@ -1347,11 +1278,11 @@ test('recordIntegrationStats prefers PR comments over branch history for final i
       '',
     ].join('\n'));
 
-    const csvFile = path.join(root, 'workflow', 'data', 'stats.csv');
+    const dbFile = path.join(root, 'workflow', 'data', 'parallix.db');
     const result = stats.recordIntegrationStats({
       slug: 'task-2000',
       rootDir: root,
-      filePath: csvFile,
+      dbPath: dbFile,
       date: '2026-05-18',
     });
 
@@ -1418,23 +1349,23 @@ test('task-1314: stats mission reports filter to the active repo', () => {
   }
 });
 
-test('task-1251: upsertStatsRow keys on (mission, stage) so stages do not collide', () => {
-  const csvFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-stats-stage-')), 'stats.csv');
+test('task-1251: upsertMeasurementRow keys on (mission, stage) so stages do not collide', () => {
+  const dbFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-stats-stage-')), 'parallix.db');
   try {
-    stats.upsertStatsRow({ date: '2026-06-07', mission: 'task-3000', classification: 'ai_sdlc', implementer: 'codex', stage: 'draft', input_tokens: '100' }, { filePath: csvFile });
-    stats.upsertStatsRow({ date: '2026-06-07', mission: 'task-3000', classification: 'ai_sdlc', implementer: 'codex', stage: 'active', input_tokens: '200' }, { filePath: csvFile });
+    stats.upsertMeasurementRow({ date: '2026-06-07', mission: 'task-3000', classification: 'ai_sdlc', implementer: 'codex', stage: 'draft', input_tokens: '100' }, { dbPath: dbFile });
+    stats.upsertMeasurementRow({ date: '2026-06-07', mission: 'task-3000', classification: 'ai_sdlc', implementer: 'codex', stage: 'active', input_tokens: '200' }, { dbPath: dbFile });
 
-    let data = stats.loadStatsCsv(csvFile);
+    let data = stats.loadMeasurementRows({ dbPath: dbFile });
     assert.equal(data.rows.length, 2); // distinct stages -> distinct rows
 
     // Re-upserting the same (mission, stage) updates in place, not append.
-    stats.upsertStatsRow({ date: '2026-06-07', mission: 'task-3000', classification: 'ai_sdlc', implementer: 'codex', stage: 'draft', input_tokens: '999' }, { filePath: csvFile });
-    data = stats.loadStatsCsv(csvFile);
+    stats.upsertMeasurementRow({ date: '2026-06-07', mission: 'task-3000', classification: 'ai_sdlc', implementer: 'codex', stage: 'draft', input_tokens: '999' }, { dbPath: dbFile });
+    data = stats.loadMeasurementRows({ dbPath: dbFile });
     assert.equal(data.rows.length, 2);
     const draftRow = data.rows.find(r => r.stage === 'draft');
     assert.equal(draftRow.input_tokens, '999');
   } finally {
-    fs.rmSync(path.dirname(csvFile), { recursive: true, force: true });
+    fs.rmSync(path.dirname(dbFile), { recursive: true, force: true });
   }
 });
 
@@ -1509,11 +1440,11 @@ test('recordReviewStats keeps the mission implementer for grouping and records t
       '',
     ].join('\n'));
 
-    const csvFile = path.join(root, 'workflow', 'data', 'stats.csv');
+    const dbFile = path.join(root, 'workflow', 'data', 'parallix.db');
     const result = stats.recordReviewStats({
       slug: 'task-2000',
       rootDir: root,
-      filePath: csvFile,
+      dbPath: dbFile,
       reviewer: 'claude',
       implementer: 'gemini',
       date: '2026-06-15',
@@ -1544,11 +1475,11 @@ test('recordReviewStats records the reviewer-session telemetry on the review row
       '',
     ].join('\n'));
 
-    const csvFile = path.join(root, 'workflow', 'data', 'stats.csv');
+    const dbFile = path.join(root, 'workflow', 'data', 'parallix.db');
     const result = stats.recordReviewStats({
       slug: 'task-2000',
       rootDir: root,
-      filePath: csvFile,
+      dbPath: dbFile,
       reviewer: 'codex',
       implementer: 'claude',
       telemetry: { provider: 'openai', model: 'gpt-5-codex', inputTokens: 800, outputTokens: 150, cachedTokens: 20, toolCalls: 3 },

@@ -103,6 +103,74 @@ export class SqliteDatabaseAdapter {
   }
 
   /**
+   * Open (or create) the database synchronously.
+   *
+   * `node:sqlite` is a synchronous driver; the `Promise` surface above exists
+   * so adapter work can later move to a worker thread. Callers that must stay
+   * synchronous — the measurement producers cut over by TASK-2322.08 run
+   * inside synchronous command code — use this entry point instead of
+   * importing `node:sqlite` themselves, keeping the driver import confined to
+   * this module.
+   */
+  openSync(config: DatabaseConfig): void {
+    this.config = config;
+    const rawTimeout = typeof config.busyTimeoutMs === 'number' ? config.busyTimeoutMs : 5000;
+    const busyTimeout = Math.min(5000, Math.max(0, Math.floor(rawTimeout)));
+    const enableWal = config.enableWal !== false;
+
+    const parentDir = path.dirname(config.path);
+    if (!fs.existsSync(parentDir)) {
+      fs.mkdirSync(parentDir, { recursive: true });
+    }
+
+    this.db = new DatabaseSync(config.path);
+    this.db.exec('PRAGMA foreign_keys = ON;');
+    this.db.exec(`PRAGMA busy_timeout = ${busyTimeout};`);
+    if (enableWal) {
+      try {
+        this.db.exec('PRAGMA journal_mode = WAL;');
+      } catch {
+        // WAL not supported on this filesystem; continue with default journal mode.
+      }
+    }
+
+    this.inTransaction = false;
+    this.transactionDepth = 0;
+  }
+
+  /** Synchronous counterpart of `execute`. */
+  executeSync(sql: string, params?: readonly unknown[]): number {
+    this.assertOpen();
+    if (params && params.length > 0) {
+      const result = this.db!.prepare(sql).run(...params as any);
+      return (result as { changes?: number }).changes ?? 0;
+    }
+    this.db!.exec(sql);
+    return 0;
+  }
+
+  /** Synchronous counterpart of `query`. */
+  querySync<T extends QueryRow>(sql: string, params?: readonly unknown[]): readonly T[] {
+    this.assertOpen();
+    const stmt = this.db!.prepare(sql);
+    const rows = (params && params.length > 0
+      ? stmt.all(...params as any) as T[]
+      : stmt.all() as T[]);
+    return Object.freeze(rows);
+  }
+
+  /** Synchronous counterpart of `close`. */
+  closeSync(): void {
+    if (this.db) {
+      this.db.close();
+      this.db = null;
+    }
+    this.config = null;
+    this.inTransaction = false;
+    this.transactionDepth = 0;
+  }
+
+  /**
    * Close the database connection.
    */
   async close(): Promise<void> {

@@ -683,9 +683,10 @@ describe('migration 0005 — repository-scoped session markers', () => {
         'execute',
       );
       assert.equal(preserved?.sessionId, 'legacy-session');
+      // The highest-id applied migration, which advances as the schema grows.
       assert.equal(
         await runner.getCurrentVersion(),
-        '0006-session-markers',
+        [...migrations].map(m => m.id).sort().at(-1),
       );
     } finally {
       await db.close();

@@ -8,6 +8,7 @@ const path = require('path');
 const childProcess = require('node:child_process');
 
 const stats = require('../.test-runtime/lib/commands/stats');
+const { resolveDatabasePath } = require('../.test-runtime/adapters/sqlite/database-path-resolver');
 const backlog = require('../.test-runtime/lib/tools/backlog');
 const verification = require('../.test-runtime/lib/core/verification');
 const postIntegrateHookModule = require('../.test-runtime/lib/core/post-integrate-hook');
@@ -685,7 +686,8 @@ test('recordPostIntegrationStats records an unknown classification row for a mis
       recordIntegrationStatsFn({ slug, rootDir, filePath, date }) {
         assert.equal(slug, 'task-unknown');
         assert.equal(rootDir, FAKE_ROOT);
-        assert.ok(filePath.includes('stats.csv'));
+        // TASK-2322.08: no stats file path is passed at all.
+        assert.equal(filePath, undefined);
         // task-1415: no explicit date is passed anymore — recordIntegrationStats
         // defaults it to "today" itself, rather than trusting a stale
         // `git log -1 --format=%cs` committer date.
@@ -713,23 +715,20 @@ test('recordPostIntegrationStats records an unknown classification row for a mis
   assert.match(logs.join('\n'), /\[INFO\] Workflow stats recorded: task-unknown: implementer=unknown, pr_fix_rounds=0, classification=unknown, date=2026-06-24/);
 });
 
-test('recordPostIntegrationStats routes stats through PARALLIX_HOME, not a consuming-repo path', () => {
+// TASK-2322.08: integration no longer resolves any stats file path. It records
+// the completed mission through the measurement store, which is anchored to
+// PARALLIX_HOME by `resolveDatabasePath`, never to a consuming-repo path.
+test('recordPostIntegrationStats passes no file path and stays anchored to PARALLIX_HOME', () => {
   const runtimeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'px-runtime-root-'));
   const parallixHome = fs.mkdtempSync(path.join(os.tmpdir(), 'px-stats-home-'));
   const previousHome = process.env.PARALLIX_HOME;
   process.env.PARALLIX_HOME = parallixHome;
-  const originalResolveStatsFilePath = stats.resolveStatsFilePath;
-  const resolverRoots = [];
-  stats.resolveStatsFilePath = (rootDir) => {
-    resolverRoots.push(rootDir);
-    return originalResolveStatsFilePath(rootDir);
-  };
   try {
-    const capturedFilePaths = [];
+    const capturedOptions = [];
     const runOnce = () => recordPostIntegrationStats('task-2046', {
       rootDir: runtimeRoot,
-      recordIntegrationStatsFn({ filePath }) {
-        capturedFilePaths.push(filePath);
+      recordIntegrationStatsFn(options) {
+        capturedOptions.push(options);
         return {
           changed: false,
           row: {
@@ -754,13 +753,16 @@ test('recordPostIntegrationStats routes stats through PARALLIX_HOME, not a consu
       console.log = originalLog;
     }
 
-    assert.equal(capturedFilePaths.length, 2);
-    assert.deepEqual(resolverRoots, [runtimeRoot, runtimeRoot]);
-    assert.equal(capturedFilePaths[0], capturedFilePaths[1]);
-    assert.equal(capturedFilePaths[0], stats.resolveStatsFilePath(runtimeRoot));
-    assert.equal(capturedFilePaths[0], path.join(parallixHome, 'stats.csv'));
+    assert.equal(capturedOptions.length, 2);
+    // No `filePath` is supplied and no stats CSV is created anywhere.
+    assert.equal(capturedOptions[0].filePath, undefined);
+    assert.equal(capturedOptions[1].filePath, undefined);
+    assert.deepEqual(capturedOptions.map(o => o.rootDir), [runtimeRoot, runtimeRoot]);
+    assert.deepEqual(fs.readdirSync(parallixHome).filter(name => name.endsWith('.csv')), []);
+    assert.equal(fs.existsSync(path.join(runtimeRoot, 'stats.csv')), false);
+    // The measurement database resolves under PARALLIX_HOME, not the repo root.
+    assert.equal(resolveDatabasePath({}), path.join(parallixHome, 'parallix.db'));
   } finally {
-    stats.resolveStatsFilePath = originalResolveStatsFilePath;
     if (previousHome === undefined) delete process.env.PARALLIX_HOME;
     else process.env.PARALLIX_HOME = previousHome;
     fs.rmSync(runtimeRoot, { recursive: true, force: true });

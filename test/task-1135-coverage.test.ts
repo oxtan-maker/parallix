@@ -34,13 +34,13 @@ test('commitSafeMissionArtifacts handles commit failure', async () => {
   assert.ok(errors.some(e => e.includes('Failed to commit mission artifacts: commit failed')), `Expected commit failure error; got: ${errors.join(' | ')}`);
 });
 
-test('commitSafeMissionArtifacts commits the configured stats CSV the review loop writes', async () => {
-  // Regression: the review loop's own recordStageStatsSafe writes a row to the
-  // configured stats CSV; without treating it as a safe artifact the pre-rebase
-  // auto-commit aborts every multi-round mission with "non-mission paths".
+test('commitSafeMissionArtifacts no longer treats a repo stats CSV as a safe mission artifact', async () => {
+  // task-1135 auto-committed the configured stats CSV because the review loop
+  // wrote one into the checkout. TASK-2322.08 moved measurements to the
+  // operator-local database, so a stats.csv in a repository is now ordinary
+  // untracked user content and must NOT be auto-committed before rebase.
   const { commitSafeMissionArtifacts } = require('../.test-runtime/lib/review/review');
   const added = [];
-  const logs = [];
   const errors = [];
 
   const result = await commitSafeMissionArtifacts(TEST_SLUG, '/tmp/worktree', {
@@ -52,13 +52,12 @@ test('commitSafeMissionArtifacts commits the configured stats CSV the review loo
     },
     isMissionArtifactFn: () => false,
     isWorkflowGeneratedArtifactFn: () => false,
-    resolveStatsRelPathFn: () => 'stats.csv',
-    log: m => logs.push(m),
     error: m => errors.push(m)
   });
 
-  assert.equal(result.ok, true, `Should commit the stats CSV; errors: ${errors.join(' | ')}`);
-  assert.ok(added.includes('stats.csv'), `Expected stats.csv to be git-added; got: ${added.join(', ')}`);
+  assert.equal(result.ok, false, 'a repo stats.csv is no longer a workflow-owned artifact');
+  assert.deepEqual(added, [], 'nothing may be staged for a non-mission path');
+  assert.ok(errors.some(e => e.includes('stats.csv')), `Expected stats.csv to be reported; got: ${errors.join(' | ')}`);
 });
 
 test('commitSafeMissionArtifacts still rejects genuinely non-mission paths', async () => {
@@ -72,7 +71,6 @@ test('commitSafeMissionArtifacts still rejects genuinely non-mission paths', asy
     },
     isMissionArtifactFn: () => false,
     isWorkflowGeneratedArtifactFn: () => false,
-    resolveStatsRelPathFn: () => 'stats.csv',
     error: m => errors.push(m)
   });
 

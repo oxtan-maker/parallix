@@ -20,7 +20,7 @@ function git(args, cwd) {
 // task-1415: "px stats shows stale mission counts when missions are closed."
 //
 // Investigation across `summarizeMissionWindow`, `summarizeAgentWindow`,
-// `rowInWindow`, `canonicalizeStatsRow`, and `upsertStatsRow` found all of
+// `rowInWindow`, `canonicalizeStatsRow`, and `upsertMeasurementRow` found all of
 // them already correct on main:
 //   - `summarizeMissionWindow` filters to `closed: 'yes'` rows (task-1380).
 //   - `summarizeAgentWindow` intentionally does NOT filter by `closed`
@@ -30,7 +30,7 @@ function git(args, cwd) {
 //     agent counts either.
 //   - `rowInWindow` is inclusive on both boundaries; `buildWeeklyWindows`
 //     has no gap/overlap.
-//   - `upsertStatsRow`'s dedup key includes `stage`, so an integration row
+//   - `upsertMeasurementRow`'s dedup key includes `stage`, so an integration row
 //     (`stage: 'default'`, `closed: 'yes'`) never collides with an earlier
 //     stage row (`stage: 'active'|'draft'|'review'|'follow-up'`).
 //
@@ -63,7 +63,7 @@ function git(args, cwd) {
 
 test('task-1415: recordPostIntegrationStats counts a closed mission in the current week even when the base worktree tip commit is stale', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1415-integrate-'));
-  const csvFile = path.join(root, 'stats.csv');
+  const dbFile = path.join(root, 'parallix.db');
 
   git(['init'], root);
   git(['config', 'user.email', 'task-1415@example.com'], root);
@@ -105,10 +105,10 @@ test('task-1415: recordPostIntegrationStats counts a closed mission in the curre
   try {
     recordPostIntegrationStats('task-1388', {
       rootDir: root,
-      recordIntegrationStatsFn: (opts) => stats.recordIntegrationStats({ ...opts, filePath: csvFile }),
+      recordIntegrationStatsFn: (opts) => stats.recordIntegrationStats({ ...opts, dbPath: dbFile }),
     });
 
-    const csvData = stats.loadStatsCsv(csvFile, { rootDir: root });
+    const csvData = stats.loadMeasurementRows({ dbPath: dbFile, rootDir: root });
     assert.equal(csvData.rows.length, 1);
     assert.equal(csvData.rows[0].closed, 'yes');
     assert.notEqual(csvData.rows[0].date, '2026-06-13',
