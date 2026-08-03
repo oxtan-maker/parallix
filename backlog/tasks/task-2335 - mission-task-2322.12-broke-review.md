@@ -1,12 +1,16 @@
 ---
 id: TASK-2335
 title: mission/task-2322.12 broke review
-status: active
-assignee: [custom]
+status: review
+assignee:
+  - custom
 created_date: '2026-08-03 09:13'
-labels: [ai_sdlc, bug]
+updated_date: '2026-08-03 16:21'
+labels:
+  - ai_sdlc
+  - bug
 dependencies: []
-ordinal: 70900
+ordinal: 68000
 ---
 
 ## Description
