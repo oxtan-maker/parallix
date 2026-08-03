@@ -87,8 +87,14 @@ function withPathLaunchers(entries, run) {
   return run().finally(cleanup);
 }
 
-test('codex exit 1 with real rollout telemetry is misclassified as a launch failure', async () => {
+test('codex exit 1 with real rollout telemetry is misclassified as a launch failure', async (t) => {
   const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1416-codex-wt-'));
+  const originalCodexHome = process.env.CODEX_HOME;
+  delete process.env.CODEX_HOME;
+  t.after(() => {
+    if (originalCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = originalCodexHome;
+  });
   let blockCalls = [];
   const fakeBlockFn = (agent, until) => {
     blockCalls.push({ agent, until });
@@ -103,7 +109,7 @@ test('codex exit 1 with real rollout telemetry is misclassified as a launch fail
     if (process.argv.includes('--help')) { process.exit(0); }
     const fs = require('fs');
     const path = require('path');
-    const dir = path.join(process.cwd(), '.workflow', 'codex-home', '.codex', 'sessions', '2026', '07', '04');
+    const dir = path.join(process.env.CODEX_HOME, 'sessions', '2026', '07', '04');
     fs.mkdirSync(dir, { recursive: true });
     const lines = [
       JSON.stringify({ type: 'session_meta', payload: { id: 'sess-1416', model_provider: 'openai', model: 'gpt-5.4' } }),
@@ -215,8 +221,14 @@ test('mistral exit 1 with real session telemetry is misclassified as a launch fa
 // all — must still reroute to the next eligible agent and persist a
 // blocklist entry exactly as before. Proves the new isSpuriousCodexExit gate
 // does not swallow real failures.
-test('codex exit 1 with no telemetry still reroutes and blocklists (real-failure path unchanged)', async () => {
+test('codex exit 1 with no telemetry still reroutes and blocklists (real-failure path unchanged)', async (t) => {
   const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1416-codex-real-fail-'));
+  const originalCodexHome = process.env.CODEX_HOME;
+  delete process.env.CODEX_HOME;
+  t.after(() => {
+    if (originalCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = originalCodexHome;
+  });
   let blockCalls = [];
   const fakeBlockFn = (agent, until) => {
     blockCalls.push({ agent, until });
