@@ -6,6 +6,8 @@ assignee: [codex]
 created_date: '2026-07-30 09:25'
 labels:
   - resource_usage
+  - ai_sdlc
+  - bug
 dependencies:
   - TASK-2326
 ordinal: 67900
