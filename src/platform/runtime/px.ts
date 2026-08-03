@@ -251,7 +251,7 @@ export async function run(argv = process.argv.slice(2), options: RunOptions = {}
 
     if (parsed.command === 'review-event') {
       const eventArgs = parseReviewEventArgs(parsed.args);
-      const result = createEvent(
+      const result = await createEvent(
         eventArgs.slug,
         eventArgs.type || '',
         {

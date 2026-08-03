@@ -277,6 +277,24 @@ async function status(args: string[], opts: {exit?: Function, log?: Function, in
         } else {
           log('Last checkpoint: none');
         }
+        // The review loop's own state, so an agent never has to open a
+        // mission-directory file to learn which round or phase it is in.
+        if (card.reviewPhase) {
+          const disposition = card.reviewDisposition ?? 'none';
+          log(`Review: round ${card.reviewRound ?? 1}, phase ${card.reviewPhase}, disposition ${disposition}`);
+          // Prior rounds, so a reviewer that did not review the last round —
+          // after a usage block reroutes the launch to another agent family —
+          // still sees the settled verdicts and the implementer's pushbacks.
+          for (const round of card.reviewHistory) {
+            log(`  Round ${round.number} [${round.reviewer} -> ${round.implementer}]: ${round.disposition ?? 'pending'}`);
+            if (round.comment) { log(`    comment: ${round.comment}`); }
+            for (const summary of round.findingSummaries) { log(`    finding: ${summary}`); }
+            for (const fix of round.fixes) { log(`    fixed: ${fix}`); }
+            for (const pushback of round.pushbacks) { log(`    pushback: ${pushback}`); }
+          }
+        } else {
+          log('Review: not started');
+        }
       } else {
         logSqliteFallback();
       }

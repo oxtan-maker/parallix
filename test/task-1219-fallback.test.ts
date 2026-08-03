@@ -198,7 +198,7 @@ test('printIntegrationPreflight PASS for approval when token and forgejo report 
 });
 
 // SC 5a: buildIntegrationContext returns local-approved approval when readToken returns null but review-state.json has phase=approved
-test('buildIntegrationContext returns local-review-state approval when token missing but review-state is approved', () => {
+test('buildIntegrationContext returns local-review-state approval when token missing but review-state is approved', async () => {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1219-bic-test-'));
   const missionDir = path.join(tmpRoot, 'docs', 'missions', '2026', 'task-1219');
   fs.mkdirSync(missionDir, { recursive: true });
@@ -218,12 +218,17 @@ test('buildIntegrationContext returns local-review-state approval when token mis
   const previous = process.cwd();
   try {
     process.chdir(tmpRoot);
-    const result = buildIntegrationContext('task-1219', {
+    const result = await buildIntegrationContext('task-1219', {
       baseBranch: 'main',
       baseWorktree: tmpRoot,
       isForgejoReviewEnabledFn: () => true,
       readTokenFn: () => null,
       getPrStatusFn: () => ({ exists: true, state: 'open', merged: false, number: 1219 }),
+      readReviewStateFn: (slug, rootDir) => {
+        const statePath = path.join(rootDir, 'docs', 'missions', '2026', slug, 'review-state.json');
+        try { return JSON.parse(fs.readFileSync(statePath, 'utf8')); }
+        catch { return null; }
+      },
       getLatestReviewDecisionFn: () => ({ ok: false, error: 'connection-refused', reviewState: null }),
       getCurrentBranchFn: () => 'mission/task-1219',
       gitFn: () => ({ status: 0, stdout: 'main', stderr: '' })
@@ -241,7 +246,7 @@ test('buildIntegrationContext returns local-review-state approval when token mis
 });
 
 // SC 5a negation: no local fallback when review-state.json is missing and Forgejo is down
-test('buildIntegrationContext does not fallback when review-state.json is absent', () => {
+test('buildIntegrationContext does not fallback when review-state.json is absent', async () => {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1219-bic-no-rs-'));
   const missionDir = path.join(tmpRoot, 'docs', 'missions', '2026', 'task-1219');
   fs.mkdirSync(missionDir, { recursive: true });
@@ -253,12 +258,17 @@ test('buildIntegrationContext does not fallback when review-state.json is absent
   const previous = process.cwd();
   try {
     process.chdir(tmpRoot);
-    const result = buildIntegrationContext('task-1219', {
+    const result = await buildIntegrationContext('task-1219', {
       baseBranch: 'main',
       baseWorktree: tmpRoot,
       isForgejoReviewEnabledFn: () => true,
       readTokenFn: () => null,
       getPrStatusFn: () => ({ exists: true, state: 'open', merged: false, number: 1219 }),
+      readReviewStateFn: (slug, rootDir) => {
+        const statePath = path.join(rootDir, 'docs', 'missions', '2026', slug, 'review-state.json');
+        try { return JSON.parse(fs.readFileSync(statePath, 'utf8')); }
+        catch { return null; }
+      },
       getLatestReviewDecisionFn: () => ({ ok: false, error: 'connection-refused', reviewState: null }),
       getCurrentBranchFn: () => 'mission/task-1219',
       gitFn: () => ({ status: 0, stdout: 'main', stderr: '' })
@@ -272,7 +282,7 @@ test('buildIntegrationContext does not fallback when review-state.json is absent
 });
 
 // SC 5a disposition guard: phase=approved but disposition=REQUEST_CHANGES should NOT produce local fallback
-test('buildIntegrationContext requires disposition=APPROVED not just phase=approved', () => {
+test('buildIntegrationContext requires disposition=APPROVED not just phase=approved', async () => {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1219-disposition-'));
   const missionDir = path.join(tmpRoot, 'docs', 'missions', '2026', 'task-1219');
   fs.mkdirSync(missionDir, { recursive: true });
@@ -288,12 +298,17 @@ test('buildIntegrationContext requires disposition=APPROVED not just phase=appro
   const previous = process.cwd();
   try {
     process.chdir(tmpRoot);
-    const result = buildIntegrationContext('task-1219', {
+    const result = await buildIntegrationContext('task-1219', {
       baseBranch: 'main',
       baseWorktree: tmpRoot,
       isForgejoReviewEnabledFn: () => true,
       readTokenFn: () => null,
       getPrStatusFn: () => ({ exists: true, state: 'open', merged: false, number: 1219 }),
+      readReviewStateFn: (slug, rootDir) => {
+        const statePath = path.join(rootDir, 'docs', 'missions', '2026', slug, 'review-state.json');
+        try { return JSON.parse(fs.readFileSync(statePath, 'utf8')); }
+        catch { return null; }
+      },
       getLatestReviewDecisionFn: () => ({ ok: false, error: 'connection-refused', reviewState: null }),
       getCurrentBranchFn: () => 'mission/task-1219',
       gitFn: () => ({ status: 0, stdout: 'main', stderr: '' })

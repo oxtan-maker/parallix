@@ -25,6 +25,8 @@ function loadIntegrate() {
 
 function setupMocks() {
   statsCalls = [];
+  // TASK-2322.12: Allow --no-integration-gates in tests
+  process.env.PARALLIX_TEST_ALLOW_INTEGRATION_GATE_BYPASS = '1';
   mock.method(backlog, 'getTaskClassification', () => 'ai_sdlc');
   mock.method(missionUtils, 'getPrimaryBranch', () => 'main');
   mock.method(missionUtils, 'inferSlug', (s) => s || TEST_SLUG);
@@ -45,7 +47,7 @@ function setupMocks() {
     return { status: 0, stdout: '', stderr: '' };
   });
   mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile: path.join(FAKE_ROOT, 'backlog/tasks/task.md') }));
-  mock.method(backlog, 'getTaskStatus', () => 'ready-for-integration');
+  mock.method(backlog, 'getTaskStatus', () => 'approved');
   mock.method(backlog, 'getTaskAssignee', () => 'claude');
   mock.method(backlog, 'setTaskStatus', () => true);
   mock.method(backlog, 'completeTask', () => true);
@@ -57,12 +59,12 @@ function setupMocks() {
   mock.method(forgejo, 'syncMerged', () => ({ ok: true }));
   mock.method(stats, 'recordIntegrationStats', (args) => {
     statsCalls.push(args);
-    return {
+    return Promise.resolve({
       changed: false,
       row: { mission: TEST_SLUG },
       data: { rows: [] },
       report: 'Current week (2026-05-12 → 2026-05-18)\nnone',
-    };
+    });
   });
   mock.method(stats, 'resolveMissionClassification', () => ({ classification: 'ai_sdlc' }));
   mock.method(forgejo, 'resolveTrackingBranchSha', () => ({ ok: true, ref: 'refs/remotes/origin/main', sha: 'deadbeef' }));
@@ -542,13 +544,13 @@ test('evaluateTaskStatusForIntegration edge cases', (t) => {
   assert.strictEqual(res3.ok, false);
 });
 
-test('recordPostIntegrationStats keeps operator-owned stats outside git', () => {
+test('recordPostIntegrationStats keeps operator-owned stats outside git', async () => {
   setupMocks();
   const gitCalls = [];
 
   try {
     const { recordPostIntegrationStats } = loadIntegrate();
-    const outcome = recordPostIntegrationStats('task-1109', {
+    const outcome = await recordPostIntegrationStats('task-1109', {
       rootDir: FAKE_ROOT,
       gitRunner(args) {
         gitCalls.push(args);

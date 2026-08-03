@@ -13,11 +13,19 @@ import { repositoryId } from '../../domain/repository.js';
 import {
   changeRevision,
   reviewFindingId,
+  REVIEW_DISPOSITIONS,
+  REVIEW_PHASES,
   type FindingResolution,
   type Review,
+  type ReviewDisposition,
+  type ReviewEventRecord,
+  type ReviewEventType,
   type ReviewFinding,
+  type ReviewItemDisposition,
+  type ReviewPhase,
   type ReviewRound,
   type ReviewerDecision,
+  type StageLaunchWindow,
 } from '../../domain/review.js';
 import { missionVersion, type MissionVersion } from '../../application/domain-ports.js';
 
@@ -63,6 +71,7 @@ export interface MissionReviewRecord {
   readonly intervention_requested_at: string | null;
   readonly intervention_requested_by: string | null;
   readonly intervention_reason: string | null;
+  readonly gate_failure_retry_count: number;
 }
 
 export interface MissionReviewRoundRecord {
@@ -86,6 +95,21 @@ export interface MissionReviewRoundRecord {
   readonly approval_source_provider: string | null;
   readonly responded_at: string | null;
   readonly resulting_revision: string | null;
+  readonly phase: string;
+  readonly disposition: string | null;
+  readonly reviewer_retry_count: number;
+  readonly implementer_retry_count: number;
+  readonly implementer_response_content: string | null;
+  /** JSON array of {kind: 'fixed'|'pushed_back'|'parked', findingId: string} */
+  readonly item_dispositions: string | null;
+  readonly blocked_reason: string | null;
+}
+
+export interface MissionReviewStageLaunchRecord {
+  readonly mission_id: string;
+  readonly stage_key: string;
+  readonly position: number;
+  readonly fingerprint: string;
 }
 
 export interface MissionReviewFindingRecord {
@@ -113,6 +137,23 @@ export interface MissionExternalTaskRefRecord {
   readonly url: string | null;
 }
 
+export interface MissionReviewEventRecord {
+  readonly mission_id: string;
+  readonly position: number;
+  readonly event_type: string;
+  readonly round_number: number | null;
+  readonly phase: string | null;
+  readonly actor: string | null;
+  readonly content: string;
+  readonly disposition: string | null;
+  readonly verdict: string | null;
+  /** JSON array of {kind: 'fixed'|'pushed_back'|'parked', findingId: string} */
+  readonly item_dispositions: string | null;
+  readonly blocked_reason: string | null;
+  readonly followup_reference: string | null;
+  readonly created_at: string;
+}
+
 export interface MissionAggregateRecords {
   readonly mission: MissionRecord;
   readonly externalTaskRef?: MissionExternalTaskRefRecord | null;
@@ -123,6 +164,8 @@ export interface MissionAggregateRecords {
   readonly reviewRounds: readonly MissionReviewRoundRecord[];
   readonly findings: readonly MissionReviewFindingRecord[];
   readonly resolutions: readonly MissionReviewResolutionRecord[];
+  readonly stageLaunches: readonly MissionReviewStageLaunchRecord[];
+  readonly reviewEvents: readonly MissionReviewEventRecord[];
 }
 
 export interface HydratedMission {
@@ -287,6 +330,11 @@ function reviewRoundFrom(
       ),
     };
 
+  // The optional implementer-response fields are omitted rather than set to
+  // `undefined`, so a round that never carried them reloads value-identical to
+  // the one that was saved.
+  const itemDispositions = parseItemDispositions(row.item_dispositions);
+
   return {
     number: requiredInteger(row.round_number, 'review round number', 1),
     subject: { change, revision: changeRevision(row.revision) },
@@ -295,7 +343,89 @@ function reviewRoundFrom(
     startedAt: requiredText(row.started_at, 'review start time'),
     decision: decisionFor(row, records),
     response,
+    phase: reviewPhaseFrom(row.phase),
+    disposition: reviewDispositionFrom(row.disposition),
+    reviewerRetryCount: requiredInteger(row.reviewer_retry_count, 'reviewer retry count', 0),
+    implementerRetryCount: requiredInteger(
+      row.implementer_retry_count, 'implementer retry count', 0,
+    ),
+    ...(row.implementer_response_content === null
+      ? {}
+      : { implementerResponseContent: row.implementer_response_content }),
+    ...(itemDispositions === null ? {} : { itemDispositions }),
+    ...(row.blocked_reason === null ? {} : { blockedReason: row.blocked_reason }),
   };
+}
+
+/**
+ * Parse the item_dispositions JSON column into a typed array.
+ *
+ * Accepts both the new format [{kind, findingId}] and the legacy format
+ * where fixedItems, pushedBackItems, parkedItems were separate arrays of
+ * findingId strings. Returns null on empty or malformed input.
+ */
+function parseItemDispositions(value: string | null): ReviewItemDisposition[] | null {
+  if (!value || !value.trim()) { return null; }
+  try {
+    const parsed = JSON.parse(value);
+    if (!Array.isArray(parsed)) { return null; }
+    const dispositions: ReviewItemDisposition[] = [];
+    for (const item of parsed) {
+      if (typeof item === 'object' && item !== null && 'kind' in item && 'findingId' in item) {
+        const kind = item.kind as string;
+        if (kind === 'fixed' || kind === 'pushed_back' || kind === 'parked') {
+          dispositions.push({ kind, findingId: reviewFindingId(String(item.findingId)) });
+        }
+      }
+    }
+    return dispositions.length > 0 ? dispositions : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Parse review events from the records. */
+function reviewEventsFrom(records: MissionAggregateRecords): readonly ReviewEventRecord[] {
+  return records.reviewEvents.map((row) => ({
+    position: requiredInteger(row.position, 'review event position'),
+    eventType: requiredText(row.event_type, 'review event type') as ReviewEventType,
+    roundNumber: row.round_number,
+    phase: row.phase,
+    actor: row.actor,
+    content: requiredText(row.content, 'review event content'),
+    disposition: row.disposition,
+    verdict: row.verdict,
+    itemDispositions: parseItemDispositions(row.item_dispositions),
+    blockedReason: row.blocked_reason,
+    followUpReference: row.followup_reference,
+    createdAt: requiredText(row.created_at, 'review event created_at'),
+  }));
+}
+
+function reviewPhaseFrom(value: string): ReviewPhase {
+  if (!(REVIEW_PHASES as readonly string[]).includes(value)) {
+    throw new Error(`Persisted review phase is invalid: ${value}`);
+  }
+  return value as ReviewPhase;
+}
+
+function reviewDispositionFrom(value: string | null): ReviewDisposition | null {
+  if (value === null) { return null; }
+  if (!(REVIEW_DISPOSITIONS as readonly string[]).includes(value)) {
+    throw new Error(`Persisted review disposition is invalid: ${value}`);
+  }
+  return value as ReviewDisposition;
+}
+
+/** Rebuild the stage-launch windows, preserving per-window insertion order. */
+function stageLaunchesFrom(records: MissionAggregateRecords): readonly StageLaunchWindow[] {
+  const windows = new Map<string, string[]>();
+  for (const row of [...records.stageLaunches].sort((a, b) => a.position - b.position)) {
+    const fingerprints = windows.get(row.stage_key) ?? [];
+    fingerprints.push(requiredText(row.fingerprint, 'stage launch fingerprint'));
+    windows.set(row.stage_key, fingerprints);
+  }
+  return [...windows.entries()].map(([stageKey, fingerprints]) => ({ stageKey, fingerprints }));
 }
 
 function reviewFrom(records: MissionAggregateRecords): Review | null {
@@ -323,6 +453,9 @@ function reviewFrom(records: MissionAggregateRecords): Review | null {
   return {
     rounds: rounds as [ReviewRound, ...ReviewRound[]],
     intervention,
+    stageLaunches: stageLaunchesFrom(records),
+    gateFailureRetryCount: Math.max(0, Number(reviewRow.gate_failure_retry_count ?? 0) || 0),
+    reviewEvents: reviewEventsFrom(records),
   };
 }
 

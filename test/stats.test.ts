@@ -8,6 +8,7 @@ const path = require('path');
 const stats = require('../.test-runtime/lib/commands/stats');
 const forgejo = require('../.test-runtime/lib/tools/forgejo');
 const gitLib = require('../.test-runtime/lib/core/git');
+const { agentFamily } = require('../.test-runtime/domain/agents');
 
 function writeCsv(contents) {
   const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-stats-')), 'input.csv');
@@ -792,8 +793,11 @@ test('stats command help documents the pre-integration preview workflow', () => 
   assert.match(output, /px stats import-legacy --csv-file/);
 });
 
-test('recordIntegrationStats reads backlog classification and review-state final implementer/fix rounds', () => {
+test('recordIntegrationStats reads backlog classification and Review aggregate final implementer/fix rounds', async () => {
+  const { seedMissionDatabase } = require('./fixtures/review-state-db.js');
+  const { reviewFindingId } = require('../.test-runtime/domain/review');
   const root = createRepoFixture();
+  let restoreHome = () => {};
   try {
     const taskFile = path.join(root, 'backlog', 'tasks', 'task-2000 - Example.md');
     fs.writeFileSync(taskFile, [
@@ -810,13 +814,37 @@ test('recordIntegrationStats reads backlog classification and review-state final
       '',
     ].join('\n'));
 
-    fs.writeFileSync(
-      path.join(root, 'docs', 'missions', '2026', 'task-2000', 'review-state.json'),
-      JSON.stringify({ reviewer: 'claude', implementer: 'gemini', round: 4, startedAt: '2026-05-18T10:00:00Z' }, null, 2)
+    // Four rounds, three of which the reviewer sent back: the aggregate records
+    // the fix-round count directly, so nothing has to be reconstructed.
+    const sentBack = (at) => ({
+      implementer: agentFamily('gemini'),
+      decision: {
+        kind: 'changes-requested',
+        decidedAt: at,
+        comment: null,
+        findings: [{ id: reviewFindingId('F1'), summary: 'sent back', location: null }],
+      },
+      disposition: 'REQUEST_CHANGES',
+      phase: 'fixing',
+    });
+    restoreHome = await seedMissionDatabase(
+      path.join(root, 'parallix-home'),
+      'task-2000',
+      root,
+      sentBack('2026-05-18T11:00:00.000Z'),
+      [
+        sentBack('2026-05-18T12:00:00.000Z'),
+        sentBack('2026-05-18T13:00:00.000Z'),
+        {
+          implementer: agentFamily('gemini'),
+          decision: { kind: 'approved', decidedAt: '2026-05-18T14:00:00.000Z', comment: null, source: { kind: 'local' } },
+          phase: 'approved',
+        },
+      ],
     );
 
     const dbFile = path.join(root, 'workflow', 'data', 'parallix.db');
-    const result = stats.recordIntegrationStats({
+    const result = await stats.recordIntegrationStats({
       slug: 'task-2000',
       rootDir: root,
       dbPath: dbFile,
@@ -828,7 +856,7 @@ test('recordIntegrationStats reads backlog classification and review-state final
     assert.equal(result.row.implementer, 'gemini');
     assert.equal(result.row.pr_fix_rounds, '3');
     assert.equal(result.row.repo, repoName);
-    assert.equal(result.metadataSource.implementer, 'review-state');
+    assert.equal(result.metadataSource.implementer, 'review-aggregate');
     // The completed-mission row is readable from the database, not a CSV.
     const stored = stats.loadMeasurementRows({ dbPath: dbFile }).rows
       .find(candidate => candidate.mission === 'task-2000');
@@ -839,11 +867,12 @@ test('recordIntegrationStats reads backlog classification and review-state final
     assert.equal(stored.pr_fix_rounds, '3');
     assert.equal(stored.closed, 'yes');
   } finally {
+    restoreHome();
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
-test('recordIntegrationStats returns the unchanged weekly report labels for integration output', () => {
+test('recordIntegrationStats returns the unchanged weekly report labels for integration output', async () => {
   const root = createRepoFixture();
   try {
     const taskFile = path.join(root, 'backlog', 'tasks', 'task-2000 - Example.md');
@@ -865,7 +894,7 @@ test('recordIntegrationStats returns the unchanged weekly report labels for inte
       stats.upsertMeasurementRow(seed, { dbPath: dbFile, rootDir: root });
     }
 
-    const result = stats.recordIntegrationStats({
+    const result = await stats.recordIntegrationStats({
       slug: 'task-2000',
       rootDir: root,
       dbPath: dbFile,
@@ -885,8 +914,13 @@ test('recordIntegrationStats returns the unchanged weekly report labels for inte
   }
 });
 
-test('recordIntegrationStats counts only final implementer review-state rounds after handoff', (t) => {
+// A mission with no Review in the operator database — imported history, or one
+// whose loop ran before the TASK-2322.12 cutover and was never backfilled. The
+// commit history is then the only round record there is, so the latest round is
+// read from it too rather than from a review-state file.
+test('recordIntegrationStats counts only final implementer rounds after handoff when the mission has no Review', async (t) => {
   const root = createRepoFixture();
+
   t.mock.method(gitLib, 'git', (args) => {
     if (args[3] === '--format=%s') {
       assert.deepEqual(args, ['-C', root, 'log', '--format=%s', 'mission/task-2000']);
@@ -933,13 +967,8 @@ test('recordIntegrationStats counts only final implementer review-state rounds a
       '',
     ].join('\n'));
 
-    fs.writeFileSync(
-      path.join(root, 'docs', 'missions', '2026', 'task-2000', 'review-state.json'),
-      JSON.stringify({ reviewer: 'claude', implementer: 'gemini', round: 4, startedAt: '2026-05-18T10:00:00Z' }, null, 2)
-    );
-
     const dbFile = path.join(root, 'workflow', 'data', 'parallix.db');
-    const result = stats.recordIntegrationStats({
+    const result = await stats.recordIntegrationStats({
       slug: 'task-2000',
       rootDir: root,
       dbPath: dbFile,
@@ -954,20 +983,20 @@ test('recordIntegrationStats counts only final implementer review-state rounds a
   }
 });
 
-test('recordIntegrationStats prefers branch-history implementer when review-state is stale', (t) => {
+test('recordIntegrationStats prefers branch-history implementer over the last recorded review round', async (t) => {
   const root = createRepoFixture();
+  const subjects = [
+    'mission/task-2000: task-2000',
+    'review-state(task-2000): round 1 (codex reviewing custom)',
+    'backlog(task-2000): transition to review and implementer=claude',
+    'backlog(task-2000): transition to active and implementer=claude',
+  ];
   t.mock.method(gitLib, 'git', (args) => {
     if (args[3] === '--format=%s') {
-      return {
-        status: 0,
-        stdout: [
-          'mission/task-2000: task-2000',
-          'review-state(task-2000): round 1 (codex reviewing custom)',
-          'backlog(task-2000): transition to review and implementer=claude',
-          'backlog(task-2000): transition to active and implementer=claude',
-        ].join('\n'),
-        stderr: '',
-      };
+      return { status: 0, stdout: subjects.join('\n'), stderr: '' };
+    }
+    if (args[3] === '--reverse') {
+      return { status: 0, stdout: [...subjects].reverse().join('\n'), stderr: '' };
     }
     throw new Error(`unexpected git args: ${JSON.stringify(args)}`);
   });
@@ -984,13 +1013,8 @@ test('recordIntegrationStats prefers branch-history implementer when review-stat
       '',
     ].join('\n'));
 
-    fs.writeFileSync(
-      path.join(root, 'docs', 'missions', '2026', 'task-2000', 'review-state.json'),
-      JSON.stringify({ reviewer: 'codex', implementer: 'custom', round: 1, startedAt: '2026-05-18T10:00:00Z' }, null, 2)
-    );
-
     const dbFile = path.join(root, 'workflow', 'data', 'parallix.db');
-    const result = stats.recordIntegrationStats({
+    const result = await stats.recordIntegrationStats({
       slug: 'task-2000',
       rootDir: root,
       dbPath: dbFile,
@@ -1005,7 +1029,7 @@ test('recordIntegrationStats prefers branch-history implementer when review-stat
   }
 });
 
-test('recordIntegrationStats prefers PR round-resolution comments for final implementer handoffs', (t) => {
+test('recordIntegrationStats prefers PR round-resolution comments for final implementer handoffs', async (t) => {
   const root = createRepoFixture();
   enableForgejoReview(root);
   t.mock.method(forgejo, 'readToken', () => 'token');
@@ -1039,7 +1063,7 @@ test('recordIntegrationStats prefers PR round-resolution comments for final impl
     );
 
     const dbFile = path.join(root, 'workflow', 'data', 'parallix.db');
-    const result = stats.recordIntegrationStats({
+    const result = await stats.recordIntegrationStats({
       slug: 'task-2000',
       rootDir: root,
       dbPath: dbFile,
@@ -1054,7 +1078,7 @@ test('recordIntegrationStats prefers PR round-resolution comments for final impl
   }
 });
 
-test('recordIntegrationStats derives non-standard resolution rounds from review events and ignores stale correction reposts', (t) => {
+test('recordIntegrationStats derives non-standard resolution rounds from review events and ignores stale correction reposts', async (t) => {
   const root = createRepoFixture();
   enableForgejoReview(root);
   t.mock.method(forgejo, 'readToken', () => 'token');
@@ -1093,7 +1117,7 @@ test('recordIntegrationStats derives non-standard resolution rounds from review 
     );
 
     const dbFile = path.join(root, 'workflow', 'data', 'parallix.db');
-    const result = stats.recordIntegrationStats({
+    const result = await stats.recordIntegrationStats({
       slug: 'task-2000',
       rootDir: root,
       dbPath: dbFile,
@@ -1108,7 +1132,7 @@ test('recordIntegrationStats derives non-standard resolution rounds from review 
   }
 });
 
-test('recordIntegrationStats ignores reviewer round headings and counts only explicit resolution comments', (t) => {
+test('recordIntegrationStats ignores reviewer round headings and counts only explicit resolution comments', async (t) => {
   const root = createRepoFixture();
   enableForgejoReview(root);
   t.mock.method(forgejo, 'readToken', () => 'token');
@@ -1141,7 +1165,7 @@ test('recordIntegrationStats ignores reviewer round headings and counts only exp
     ].join('\n'));
 
     const dbFile = path.join(root, 'workflow', 'data', 'parallix.db');
-    const result = stats.recordIntegrationStats({
+    const result = await stats.recordIntegrationStats({
       slug: 'task-2000',
       rootDir: root,
       dbPath: dbFile,
@@ -1156,7 +1180,7 @@ test('recordIntegrationStats ignores reviewer round headings and counts only exp
   }
 });
 
-test('recordIntegrationStats counts review-attempt resolution comments as fix rounds', (t) => {
+test('recordIntegrationStats counts review-attempt resolution comments as fix rounds', async (t) => {
   const root = createRepoFixture();
   enableForgejoReview(root);
   t.mock.method(forgejo, 'readToken', () => 'token');
@@ -1189,7 +1213,7 @@ test('recordIntegrationStats counts review-attempt resolution comments as fix ro
     ].join('\n'));
 
     const dbFile = path.join(root, 'workflow', 'data', 'parallix.db');
-    const result = stats.recordIntegrationStats({
+    const result = await stats.recordIntegrationStats({
       slug: 'task-2000',
       rootDir: root,
       dbPath: dbFile,
@@ -1204,7 +1228,7 @@ test('recordIntegrationStats counts review-attempt resolution comments as fix ro
   }
 });
 
-test('recordIntegrationStats uses bounded backlog fallback when review-state is missing', () => {
+test('recordIntegrationStats uses bounded backlog fallback when review-state is missing', async () => {
   const root = createRepoFixture();
   try {
     const taskFile = path.join(root, 'backlog', 'tasks', 'task-2000 - Example.md');
@@ -1223,7 +1247,7 @@ test('recordIntegrationStats uses bounded backlog fallback when review-state is 
     ].join('\n'));
 
     const dbFile = path.join(root, 'workflow', 'data', 'parallix.db');
-    const result = stats.recordIntegrationStats({
+    const result = await stats.recordIntegrationStats({
       slug: 'task-2000',
       rootDir: root,
       dbPath: dbFile,
@@ -1239,7 +1263,7 @@ test('recordIntegrationStats uses bounded backlog fallback when review-state is 
   }
 });
 
-test('recordIntegrationStats prefers PR comments over branch history for final implementer handoffs', (t) => {
+test('recordIntegrationStats prefers PR comments over branch history for final implementer handoffs', async (t) => {
   const root = createRepoFixture();
   enableForgejoReview(root);
   t.mock.method(forgejo, 'readToken', () => 'token');
@@ -1279,7 +1303,7 @@ test('recordIntegrationStats prefers PR comments over branch history for final i
     ].join('\n'));
 
     const dbFile = path.join(root, 'workflow', 'data', 'parallix.db');
-    const result = stats.recordIntegrationStats({
+    const result = await stats.recordIntegrationStats({
       slug: 'task-2000',
       rootDir: root,
       dbPath: dbFile,
@@ -1512,111 +1536,107 @@ function writeReviewEvent(root, slug, { type, round, actor, verdict, timestamp, 
   fs.writeFileSync(path.join(dir, `${fileTs}-${type}-${round}-${actor}-${seq}.md`), fm.join('\n'));
 }
 
-test('deriveFixRoundsFromReviewEvents counts request-changes rounds resolved by the final implementer (task-1318)', () => {
+test('deriveImplementerAndFixRounds counts the rounds the reviewer sent back to the final implementer (task-1318)', async () => {
+  const { seedMissionDatabase } = require('./fixtures/review-state-db.js');
+  const { agentFamily } = require('../.test-runtime/domain/agents');
+  const { reviewFindingId } = require('../.test-runtime/domain/review');
   const root = createRepoFixture();
+
+  const sentBack = (at) => ({
+    decision: {
+      kind: 'changes-requested',
+      decidedAt: at,
+      comment: null,
+      findings: [{ id: reviewFindingId('F1'), summary: 'sent back', location: null }],
+    },
+    disposition: 'REQUEST_CHANGES',
+    phase: 'fixing',
+    implementer: agentFamily('codex'),
+  });
+
+  // Two rounds the reviewer sent back, then an approval: two fix rounds, owned
+  // by the implementer who finished the mission.
+  const restoreHome = await seedMissionDatabase(
+    path.join(root, 'parallix-home'),
+    'task-3000',
+    root,
+    sentBack('2026-06-16T01:00:00.000Z'),
+    [
+      sentBack('2026-06-16T02:00:00.000Z'),
+      {
+        implementer: agentFamily('codex'),
+        decision: { kind: 'approved', decidedAt: '2026-06-16T03:00:00.000Z', comment: null, source: { kind: 'local' } },
+        phase: 'approved',
+      },
+    ],
+  );
   try {
-// @ts-expect-error -- Legacy fixture deliberately exercises a duplicate or partial object-literal runtime shape.
-    writeReviewEvent(root, 'task-3000', { type: 'reviewer_outcome', round: 1, actor: 'custom', verdict: 'request-changes' });
-// @ts-expect-error -- Legacy fixture deliberately exercises a duplicate or partial object-literal runtime shape.
-    writeReviewEvent(root, 'task-3000', { type: 'implementer_disposition', round: 1, actor: 'codex' });
-// @ts-expect-error -- Legacy fixture deliberately exercises a duplicate or partial object-literal runtime shape.
-    writeReviewEvent(root, 'task-3000', { type: 'reviewer_outcome', round: 2, actor: 'claude', verdict: 'request-changes' });
-// @ts-expect-error -- Legacy fixture deliberately exercises a duplicate or partial object-literal runtime shape.
-    writeReviewEvent(root, 'task-3000', { type: 'implementer_disposition', round: 2, actor: 'codex' });
-// @ts-expect-error -- Legacy fixture deliberately exercises a duplicate or partial object-literal runtime shape.
-    writeReviewEvent(root, 'task-3000', { type: 'reviewer_outcome', round: 3, actor: 'custom', verdict: 'approve' });
-
-    const derived = stats._internals.deriveFixRoundsFromReviewEvents('task-3000', root);
-    assert.ok(derived);
-    assert.equal(derived.implementer, 'codex');
-    assert.equal(derived.prFixRounds, 2);
-    assert.equal(derived.source, 'review-events');
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test('deriveFixRoundsFromReviewEvents attributes a mid-round handoff to the LATEST disposition (task-1318)', () => {
-  const root = createRepoFixture();
-  try {
-    // Round 2 has a mid-round handoff: custom responds first, then claude takes
-    // over and actually resolves the round. The round must be owned by claude
-    // (latest disposition), not custom — otherwise the fix-round count and final
-    // implementer are both wrong.
-// @ts-expect-error -- Legacy fixture deliberately exercises a duplicate or partial object-literal runtime shape.
-    writeReviewEvent(root, 'task-3002', { type: 'reviewer_outcome', round: 1, actor: 'codex', verdict: 'request-changes' });
-// @ts-expect-error -- Legacy fixture deliberately exercises a duplicate or partial object-literal runtime shape.
-    writeReviewEvent(root, 'task-3002', { type: 'implementer_disposition', round: 1, actor: 'custom', timestamp: '2026-06-16T01:00:00.000Z' });
-// @ts-expect-error -- Legacy fixture deliberately exercises a duplicate or partial object-literal runtime shape.
-    writeReviewEvent(root, 'task-3002', { type: 'reviewer_outcome', round: 2, actor: 'codex', verdict: 'request-changes' });
-// @ts-expect-error -- Legacy fixture deliberately exercises a duplicate or partial object-literal runtime shape.
-    writeReviewEvent(root, 'task-3002', { type: 'implementer_disposition', round: 2, actor: 'custom', timestamp: '2026-06-16T02:00:00.000Z', seq: 1 });
-// @ts-expect-error -- Legacy fixture deliberately exercises a duplicate or partial object-literal runtime shape.
-    writeReviewEvent(root, 'task-3002', { type: 'implementer_disposition', round: 2, actor: 'claude', timestamp: '2026-06-16T02:30:00.000Z', seq: 2 });
-// @ts-expect-error -- Legacy fixture deliberately exercises a duplicate or partial object-literal runtime shape.
-    writeReviewEvent(root, 'task-3002', { type: 'reviewer_outcome', round: 3, actor: 'codex', verdict: 'approve' });
-
-    const derived = stats._internals.deriveFixRoundsFromReviewEvents('task-3002', root);
-    assert.equal(derived.implementer, 'claude', 'final implementer is the latest round-2 responder');
-    // claude owns round 2 (its request-changes counts); round 1 was custom's and is
-    // excluded from claude's count.
-    assert.equal(derived.prFixRounds, 1);
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test('deriveImplementerAndFixRounds prefers the review event store over other sources (task-1318)', () => {
-  const root = createRepoFixture();
-  try {
-    const taskFile = path.join(root, 'backlog', 'tasks', 'task-3000 - Example.md');
-    fs.writeFileSync(taskFile, ['---', 'id: TASK-3000', 'labels: [ai_sdlc]', 'assignee: [codex]', 'status: review', '---', ''].join('\n'));
-// @ts-expect-error -- Legacy fixture deliberately exercises a duplicate or partial object-literal runtime shape.
-    writeReviewEvent(root, 'task-3000', { type: 'reviewer_outcome', round: 1, actor: 'custom', verdict: 'request-changes' });
-// @ts-expect-error -- Legacy fixture deliberately exercises a duplicate or partial object-literal runtime shape.
-    writeReviewEvent(root, 'task-3000', { type: 'implementer_disposition', round: 1, actor: 'codex' });
-// @ts-expect-error -- Legacy fixture deliberately exercises a duplicate or partial object-literal runtime shape.
-    writeReviewEvent(root, 'task-3000', { type: 'reviewer_outcome', round: 2, actor: 'custom', verdict: 'approve' });
-
-    const info = stats._internals.deriveImplementerAndFixRounds('task-3000', root);
-    assert.equal(info.source, 'review-events');
+    const info = await stats._internals.deriveImplementerAndFixRounds('task-3000', root);
+    assert.equal(info.source, 'review-aggregate');
     assert.equal(info.implementer, 'codex');
-    assert.equal(info.prFixRounds, 1);
+    assert.equal(info.prFixRounds, 2);
   } finally {
+    restoreHome();
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
-test('summarizeAgentWindow trusts local ground truth over a stale zero in the CSV (task-1318)', () => {
+test('deriveImplementerAndFixRounds prefers the Review aggregate over the event files (TASK-2322.12)', async () => {
+  const { seedMissionDatabase } = require('./fixtures/review-state-db.js');
+  const { agentFamily } = require('../.test-runtime/domain/agents');
+  const { reviewFindingId } = require('../.test-runtime/domain/review');
   const root = createRepoFixture();
+  // A review-events file that disagrees with the database: the aggregate wins.
+// @ts-expect-error -- Legacy fixture deliberately exercises a duplicate or partial object-literal runtime shape.
+  writeReviewEvent(root, 'task-3010', { type: 'reviewer_outcome', round: 1, actor: 'custom', verdict: 'request-changes' });
+  const restoreHome = await seedMissionDatabase(
+    path.join(root, 'parallix-home'),
+    'task-3010',
+    root,
+    {
+      implementer: agentFamily('gemini'),
+      decision: {
+        kind: 'changes-requested',
+        decidedAt: '2026-08-02T11:00:00.000Z',
+        comment: null,
+        findings: [{ id: reviewFindingId('F1'), summary: 'Reviewer sent this round back', location: null }],
+      },
+      disposition: 'REQUEST_CHANGES',
+      phase: 'fixing',
+    },
+  );
   try {
-// @ts-expect-error -- Legacy fixture deliberately exercises a duplicate or partial object-literal runtime shape.
-    writeReviewEvent(root, 'task-3000', { type: 'reviewer_outcome', round: 1, actor: 'custom', verdict: 'request-changes' });
-// @ts-expect-error -- Legacy fixture deliberately exercises a duplicate or partial object-literal runtime shape.
-    writeReviewEvent(root, 'task-3000', { type: 'implementer_disposition', round: 1, actor: 'codex' });
-// @ts-expect-error -- Legacy fixture deliberately exercises a duplicate or partial object-literal runtime shape.
-    writeReviewEvent(root, 'task-3000', { type: 'reviewer_outcome', round: 2, actor: 'custom', verdict: 'request-changes' });
-// @ts-expect-error -- Legacy fixture deliberately exercises a duplicate or partial object-literal runtime shape.
-    writeReviewEvent(root, 'task-3000', { type: 'implementer_disposition', round: 2, actor: 'codex' });
-// @ts-expect-error -- Legacy fixture deliberately exercises a duplicate or partial object-literal runtime shape.
-    writeReviewEvent(root, 'task-3000', { type: 'reviewer_outcome', round: 3, actor: 'custom', verdict: 'approve' });
-
-    const window = { start: new Date('2026-06-10T00:00:00Z'), end: new Date('2026-06-16T00:00:00Z') };
-    const rows = [
-      { date: '2026-06-13', repo: '', mission: 'task-3000', implementer: 'codex', stage: 'active', classification: 'ai_sdlc', pr_fix_rounds: '0', closed: 'yes' },
-      { date: '2026-06-13', repo: '', mission: 'task-3000', implementer: 'codex', stage: 'review', classification: 'ai_sdlc', pr_fix_rounds: '0', closed: 'yes' },
-    ];
-
-    const stored = stats._internals.summarizeAgentWindow(rows, window);
-    assert.equal(stored[0].averageFixRounds, '0.00', 'without rootDir, stored value is used');
-
-    const authoritative = stats._internals.summarizeAgentWindow(rows, window, { rootDir: root });
-    assert.equal(authoritative[0].implementer, 'codex');
-    assert.equal(authoritative[0].missions, 1);
-    assert.equal(authoritative[0].averageFixRounds, '2.00', 'with rootDir, ground truth overrides the stale zero');
+    const info = await stats._internals.deriveImplementerAndFixRounds('task-3010', root);
+    assert.equal(info.source, 'review-aggregate');
+    assert.equal(info.implementer, 'gemini');
+    assert.equal(info.prFixRounds, 1, 'one round the reviewer sent back');
   } finally {
+    restoreHome();
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('summarizeAgentWindow reports the stored fix-round count, and honors an injected derivation (task-1318)', () => {
+  // The stored count is what the review loop stamped from the Review
+  // aggregate, so the renderer reports it rather than re-deriving it from
+  // mission-local files (which no longer exist). A caller that has already
+  // derived a count can still inject one.
+  const window = { start: new Date('2026-06-10T00:00:00Z'), end: new Date('2026-06-16T00:00:00Z') };
+  const rows = [
+    { date: '2026-06-13', repo: '', mission: 'task-3000', implementer: 'codex', stage: 'active', classification: 'ai_sdlc', pr_fix_rounds: '2', closed: 'yes' },
+    { date: '2026-06-13', repo: '', mission: 'task-3000', implementer: 'codex', stage: 'review', classification: 'ai_sdlc', pr_fix_rounds: '0', closed: 'yes' },
+  ];
+
+  const stored = stats._internals.summarizeAgentWindow(rows, window);
+  assert.equal(stored[0].implementer, 'codex');
+  assert.equal(stored[0].missions, 1);
+  assert.equal(stored[0].averageFixRounds, '2.00', 'the highest stored count for the mission is used');
+
+  const injected = stats._internals.summarizeAgentWindow(rows, window, {
+    rootDir: '/does-not-matter',
+    deriveFixRoundsFn: () => 5,
+  });
+  assert.equal(injected[0].averageFixRounds, '5.00', 'an injected derivation overrides the stored value');
 });
 
 // task-1342: weekly classification count reconciliation regression

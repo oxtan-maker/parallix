@@ -1,22 +1,35 @@
 /**
  * Review event persistence for autonomous review rounds.
  *
- * Stores classified review events under mission-local directories:
- *   missions/<slug>/review-events/ by default, or the configured legacy layout
- *
- * Each event is a structured markdown file with bounded fields, not full
- * transient agent context (to avoid noisy diffs per ADR 0039).
+ * Review events live in the operator database (mission_review_events, part of
+ * the Review aggregate) and only there. The Markdown files under
+ * missions/<slug>/review-events/ are exports of those rows — written so humans
+ * and agents can read a mission's review conversation from its directory, and
+ * never read back by production. Losing them loses nothing; losing the database
+ * row loses the event.
  *
  * Owned by the Node workflow harness (task-1145).
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
 import { git } from '../core/git.js';
 import { findMissionDir, missionBranchName, resolveWorktree } from '../core/mission-utils.js';
-import { readReviewState } from './review-state.js';
+import { missionId } from '../../../../domain/mission.js';
+import type { Review, ReviewEventType, ReviewItemDisposition } from '../../../../domain/review.js';
+import { readReviewState, ReviewState } from './review-state.js';
 import * as fmt from '../core/fmt.js';
+
+/**
+ * Open the Mission authority through the composition root.
+ */
+async function resolveMissionStore(rootDir: string) {
+  const { createProductionApplicationServices } = await import(
+    '../composition/application-services.js'
+  );
+  const services = await createProductionApplicationServices(rootDir);
+  return services.mission?.store ?? null;
+}
 
 // -------- Event Taxonomy --------
 
@@ -106,13 +119,6 @@ function eventFilePath(slug: string, eventType: string, round: number, actor: st
   return path.join(eventsDir, filename);
 }
 
-/**
- * Returns the legacy /tmp/ artifact path for compatibility.
- */
-function legacyArtifactPath(slug: string, artifactName: string, tmpDir = os.tmpdir()): string {
-  return path.join(tmpDir, `${slug}-${artifactName}`);
-}
-
 // -------- Timestamp & Sanitization --------
 
 /**
@@ -182,9 +188,7 @@ interface NormalizedEvent {
   actor?: string;
   disposition?: string;
   verdict?: string;
-  fixedItems?: unknown[];
-  pushedBackItems?: unknown[];
-  parkedItems?: unknown[];
+  itemDispositions?: ReviewItemDisposition[];
   blockedReason?: string;
   followUpReference?: string;
 }
@@ -196,9 +200,7 @@ export interface CreateEventParams {
   actor?: string;
   disposition?: string;
   verdict?: string;
-  fixedItems?: unknown[];
-  pushedBackItems?: unknown[];
-  parkedItems?: unknown[];
+  itemDispositions?: ReviewItemDisposition[];
   blockedReason?: string;
   followUpReference?: string;
   timestamp?: string;
@@ -220,16 +222,6 @@ export interface CreateEventResult {
   error?: string;
 }
 
-export interface CreateEventResultWithLegacy {
-  ok: boolean;
-  path: string | null;
-  importedFrom?: string;
-  event?: NormalizedEvent;
-  legacyPath?: string;
-  error?: string;
-  skipped?: boolean;
-}
-
 export interface ConsumeHumanNotesResult {
   ok: boolean;
   created: unknown[];
@@ -237,26 +229,9 @@ export interface ConsumeHumanNotesResult {
   error?: string;
 }
 
-export interface ImportAllLegacyResult {
-  ok: boolean;
-  imported: unknown[];
-  errors: unknown[];
-}
-
 export interface ReadAllEventsOptions {
   rootDir?: string;
-  readdirSync?: typeof fs.readdirSync;
-  readFileSync?: typeof fs.readFileSync;
   error?: (_msg: string) => void;
-}
-
-export interface ParseEventResult {
-  event_type?: string;
-  [key: string]: unknown;
-  content: string;
-  filePath: string;
-  fileCreated: string;
-  fileModified: string;
 }
 
 /**
@@ -306,14 +281,8 @@ function buildEventFrontmatter(event: NormalizedEvent): string {
   if (event.verdict !== undefined) {
     lines.push(`verdict: ${event.verdict}`);
   }
-  if (event.fixedItems !== undefined) {
-    lines.push(`fixed_items: ${JSON.stringify(event.fixedItems)}`);
-  }
-  if (event.pushedBackItems !== undefined) {
-    lines.push(`pushed_back_items: ${JSON.stringify(event.pushedBackItems)}`);
-  }
-  if (event.parkedItems !== undefined) {
-    lines.push(`parked_items: ${JSON.stringify(event.parkedItems)}`);
+  if (event.itemDispositions !== undefined && event.itemDispositions.length > 0) {
+    lines.push(`item_dispositions: ${JSON.stringify(event.itemDispositions)}`);
   }
   if (event.blockedReason !== undefined) {
     lines.push(`blocked_reason: "${event.blockedReason.replace(/"/g, '\\"')}"`);
@@ -405,7 +374,7 @@ async function consumeHumanNotes(slug: string, actor: string, options: ConsumeHu
   const created: unknown[] = [];
   const skipped: unknown[] = [];
 
-  const currentState = readReviewState(slug, worktree || process.cwd());
+  const currentState = await readReviewState(slug, worktree || process.cwd());
   const round = currentState ? currentState.round : 1;
   const phase = currentState ? currentState.phase : 'reviewing';
 
@@ -421,7 +390,7 @@ async function consumeHumanNotes(slug: string, actor: string, options: ConsumeHu
       continue;
     }
 
-    const result = createEventFn(slug, classification, {
+    const result = await createEventFn(slug, classification, {
       content: (comment as { body?: string }).body || '',
       round,
       phase,
@@ -470,8 +439,15 @@ function renderEventFile(event: NormalizedEvent): string {
 
 /**
  * Create and persist a classified review event.
+ *
+ * Storage is the operator database (`mission_review_events`, part of the Review
+ * aggregate) and nothing else: a mission whose Review is not in the database
+ * fails here rather than acquiring a second, file-backed copy of its review
+ * conversation. The Markdown file under `missions/<slug>/review-events/` is an
+ * export of the stored event — written for humans and for the agents that read
+ * the mission directory, never read back by production.
  */
-function createEvent(slug: string, eventType: string, params: CreateEventParams, options: CreateEventOptions = {}): CreateEventResult {
+async function createEvent(slug: string, eventType: string, params: CreateEventParams, options: CreateEventOptions = {}): Promise<CreateEventResult> {
   const {
     skipGit = false,
     gitFn = git,
@@ -509,9 +485,9 @@ function createEvent(slug: string, eventType: string, params: CreateEventParams,
     }
   }
 
-  let state: ReturnType<typeof readReviewState> | null;
+  let state: ReviewState | null;
   if (params.round === undefined || params.phase === undefined) {
-    state = readReviewState(slug, rootDir);
+    state = await readReviewState(slug, rootDir);
   } else {
     state = null;
   }
@@ -532,19 +508,64 @@ function createEvent(slug: string, eventType: string, params: CreateEventParams,
       timestamp: params.timestamp as string | undefined,
       disposition: params.disposition as string | undefined,
       verdict: params.verdict as string | undefined,
-      fixedItems: params.fixedItems as unknown[] | undefined,
-      pushedBackItems: params.pushedBackItems as unknown[] | undefined,
-      parkedItems: params.parkedItems as unknown[] | undefined,
+      itemDispositions: params.itemDispositions as ReviewItemDisposition[] | undefined,
       blockedReason: params.blockedReason as string | undefined,
       followUpReference: params.followUpReference as string | undefined
     }
   );
 
-  const ts = (params.timestamp as string | undefined) ?? null;
-  const filePath = eventFilePath(slug, eventType, round, actor, ts, rootDir);
+  const stored = await persistEventInStore(slug, event, rootDir, {
+    log: logger,
+    error,
+  });
+  if (!stored.ok) {
+    error(fmt.status(
+      'FAIL',
+      `Cannot store review event for "${slug}": no Review in the operator database. ` +
+      `px handoff starts a review; px review ${slug} --backfill-review migrates a pre-cutover mission.`,
+    ));
+    return { ok: false, path: null, error: `No Review in the operator database for ${slug}` };
+  }
+
+  const exportedPath = exportEventFile(slug, event, rootDir, {
+    timestamp: (params.timestamp as string | undefined) ?? null,
+    skipGit,
+    gitFn,
+    log: logger,
+    error,
+  });
+
+  return { ok: true, path: exportedPath ?? stored.path, event };
+}
+
+/**
+ * Render a stored review event as Markdown under `missions/<slug>/review-events/`.
+ *
+ * This is an export of state the operator database already holds, so a failure
+ * here is reported and otherwise ignored: the event is stored either way, and
+ * no production reader depends on the file. Returns the written path, or null
+ * when the mission directory could not be resolved.
+ */
+function exportEventFile(
+  slug: string,
+  event: NormalizedEvent,
+  rootDir: string,
+  options: {
+    timestamp: string | null;
+    skipGit: boolean;
+    gitFn: typeof git;
+    log: (_msg: string) => void;
+    error: (_msg: string) => void;
+  }
+): string | null {
+  const { timestamp, skipGit, gitFn, log: logger, error } = options;
+  const round = event.round ?? 1;
+  const phase = event.phase ?? 'reviewing';
+
+  const filePath = eventFilePath(slug, event.eventType, round, event.actor ?? 'unknown', timestamp, rootDir);
   if (!filePath) {
-    error(fmt.status('FAIL', `Cannot resolve mission directory for slug "${slug}"`));
-    return { ok: false, path: null, error: `Mission directory not found` };
+    error(fmt.status('WARN', `Stored review event for "${slug}", but its mission directory could not be resolved for export`));
+    return null;
   }
 
   const dir = path.dirname(filePath);
@@ -552,9 +573,7 @@ function createEvent(slug: string, eventType: string, params: CreateEventParams,
     fs.mkdirSync(dir, { recursive: true });
   }
 
-  const content = renderEventFile(event);
-  fs.writeFileSync(filePath, content, 'utf8');
-
+  fs.writeFileSync(filePath, renderEventFile(event), 'utf8');
   logger(fmt.status('PASS', `Created review event: ${path.basename(filePath)}`));
 
   if (!skipGit) {
@@ -563,7 +582,7 @@ function createEvent(slug: string, eventType: string, params: CreateEventParams,
     if (result.status !== 0) {
       error(fmt.status('WARN', `Failed to git add event file: ${result.stderr}`));
     } else {
-      const commitMsg = `review-event(${slug}): ${eventType} round ${round} (${phase}) [${actor}]`;
+      const commitMsg = `review-event(${slug}): ${event.eventType} round ${round} (${phase}) [${event.actor ?? 'unknown'}]`;
       const commitResult = gitFn(['-C', rootDir, 'commit', '-m', commitMsg, '--allow-empty']);
       if (commitResult.status !== 0) {
         error(fmt.status('WARN', `Failed to commit event file: ${commitResult.stderr}`));
@@ -573,317 +592,123 @@ function createEvent(slug: string, eventType: string, params: CreateEventParams,
     }
   }
 
-  return { ok: true, path: filePath, event };
+  return filePath;
 }
 
-export interface ImportLegacyArtifactOptions {
-  tmpDir?: string;
-  log?: (_msg: string) => void;
-  error?: (_msg: string) => void;
-  worktree?: string;
+interface PersistEventResult {
+  ok: boolean;
+  path: string | null;
 }
 
 /**
- * Import an event from a legacy /tmp/ artifact file.
+ * Persist a review event in the SQLite operator database.
+ *
+ * Appends the event to the Review aggregate's reviewEvents collection and
+ * saves the mission. Returns { ok: true, path: 'sqlite:<mission_id>:<position>' }
+ * on success, or { ok: false, path: null } when the store is unavailable.
  */
-function importLegacyArtifact(slug: string, artifactName: string, eventType: string, params: CreateEventParams = {}, options: ImportLegacyArtifactOptions = {}): CreateEventResultWithLegacy {
-  const {
-    tmpDir = os.tmpdir(),
-    log: logger = fmt.log.plain,
-    error = fmt.log.plainError,
-    worktree
-  } = options;
-
-  const legacyPath = legacyArtifactPath(slug, artifactName, tmpDir);
-
-  if (!fs.existsSync(legacyPath)) {
-    logger(fmt.status('INFO', `Legacy artifact not found: ${legacyPath}`));
-    return { ok: true, path: null, importedFrom: legacyPath, skipped: true };
-  }
-
-  let content;
+async function persistEventInStore(
+  slug: string,
+  event: NormalizedEvent,
+  rootDir: string,
+  opts: { log?: (_msg: string) => void; error?: (_msg: string) => void }
+): Promise<PersistEventResult> {
+  let store: Awaited<ReturnType<typeof resolveMissionStore>>;
   try {
-    content = fs.readFileSync(legacyPath, 'utf8');
-  } catch (err) {
-    error(fmt.status('FAIL', `Failed to read legacy artifact: ${(err as Error).message}`));
-    return { ok: false, path: null, importedFrom: legacyPath, error: (err as Error).message };
+    store = await resolveMissionStore(rootDir);
+  } catch {
+    return { ok: false, path: null };
+  }
+  if (!store) {
+    return { ok: false, path: null };
   }
 
-  const result = createEvent(slug, eventType, {
-    ...params,
-    content,
-    actor: params.actor || inferActorFromArtifact()
-  }, { ...options, worktree: worktree || undefined, allowMissingRequiredFields: true });
+  try {
+    const result = await store.load(missionId(slug));
+    if (result.kind !== 'found' || !result.mission.review) {
+      return { ok: false, path: null };
+    }
 
-  if (!result.ok) {
-    return { ok: false, path: null, importedFrom: legacyPath, error: result.error ?? undefined };
+    const mission = result.mission;
+    const review = mission.review!; // narrowed above
+    const eventRecord = {
+      position: review.reviewEvents.length,
+      eventType: event.eventType as ReviewEventType,
+      roundNumber: event.round ?? null,
+      phase: event.phase ?? null,
+      actor: event.actor ?? null,
+      content: event.content,
+      disposition: event.disposition ?? null,
+      verdict: event.verdict ?? null,
+      itemDispositions: event.itemDispositions ?? null,
+      blockedReason: event.blockedReason ?? null,
+      followUpReference: event.followUpReference ?? null,
+      createdAt: event.timestamp || new Date().toISOString(),
+    };
+
+    const updatedReview: Review = {
+      ...review,
+      reviewEvents: [...review.reviewEvents, eventRecord],
+    };
+
+    await store.save({ ...mission, review: updatedReview }, result.version);
+    opts.log?.(fmt.status('PASS', `Persisted review event to SQLite: ${event.eventType} round ${event.round ?? 'n/a'}`));
+    return { ok: true, path: `sqlite:${slug}:${eventRecord.position}` };
+  } catch {
+    return { ok: false, path: null };
   }
-
-  logger(fmt.status('PASS', `Imported legacy artifact ${artifactName} to ${path.basename(result.path || '')}`));
-
-  return {
-    ok: true,
-    path: result.path,
-    importedFrom: legacyPath,
-    event: result.event,
-    legacyPath
-  };
-}
-
-/**
- * Infer actor from legacy artifact name (best guess).
- */
-function inferActorFromArtifact() {
-  return 'unknown';
-}
-
-/**
- * Map legacy artifact names to event types.
- */
-const LEGACY_ARTIFACT_TO_EVENT_TYPE: Readonly<Record<string, string>> = Object.freeze({
-  'review-findings.md': VALID_EVENT_TYPES.REVIEWER_FINDINGS,
-  'review-outcome.md': VALID_EVENT_TYPES.REVIEWER_OUTCOME,
-  'review-verdict.txt': VALID_EVENT_TYPES.REVIEWER_OUTCOME,
-  'round-resolution.md': VALID_EVENT_TYPES.IMPLEMENTER_ROUND_SUMMARY,
-  'review-disposition.txt': VALID_EVENT_TYPES.IMPLEMENTER_DISPOSITION,
-});
-
-export interface ImportAllLegacyOptions {
-  tmpDir?: string;
-  error?: (_msg: string) => void;
-  worktree?: string;
-  log?: (_msg: string) => void;
-}
-
-/**
- * Import all legacy /tmp/ artifacts for a mission.
- */
-function importAllLegacyArtifacts(slug: string, options: ImportAllLegacyOptions = {}): ImportAllLegacyResult {
-  const {
-    tmpDir = os.tmpdir(),
-    error = fmt.log.plainError,
-    worktree
-  } = options;
-
-  const rootDir = worktree || resolveWorktree(slug) || process.cwd();
-  const imported = [];
-  const errors = [];
-
-  const state = readReviewState(slug, rootDir);
-  const round = state ? state.round : 1;
-  const phase = state ? state.phase : 'reviewing';
-
-  const legacyFiles: Record<string, string | null> = {};
-  for (const artifactName of Object.keys(LEGACY_ARTIFACT_TO_EVENT_TYPE)) {
-    const legacyPath = legacyArtifactPath(slug, artifactName, tmpDir);
-    legacyFiles[artifactName] = fs.existsSync(legacyPath) ? legacyPath : null;
-  }
-
-  const outcomePath = legacyFiles['review-outcome.md'];
-  const verdictPath = legacyFiles['review-verdict.txt'];
-
-  if (outcomePath && fs.existsSync(outcomePath)) {
-    let verdictContent = null;
-    if (verdictPath) {
-      try {
-        if (fs.existsSync(verdictPath)) {
-          verdictContent = fs.readFileSync(verdictPath, 'utf8').trim();
-        }
-      } catch (err) {
-        error(fmt.status('WARN', `Failed to read verdict file: ${(err as Error).message}`));
-      }
-    }
-
-    const outcomeParams: CreateEventParams = { round, phase, actor: 'legacy' };
-    if (verdictContent && isValidVerdict(verdictContent)) {
-      outcomeParams.verdict = verdictContent;
-    }
-
-    const result = importLegacyArtifact(slug, 'review-outcome.md', VALID_EVENT_TYPES.REVIEWER_OUTCOME,
-      outcomeParams,
-      { ...options, worktree: rootDir });
-
-    if (result.ok) {
-      if (result.path) {
-        imported.push({ artifactName: 'review-outcome.md', eventType: VALID_EVENT_TYPES.REVIEWER_OUTCOME, path: result.path, legacyPath: result.legacyPath });
-        if (verdictPath && fs.existsSync(verdictPath)) {
-          imported.push({ artifactName: 'review-verdict.txt', eventType: VALID_EVENT_TYPES.REVIEWER_OUTCOME, path: result.path, legacyPath: verdictPath, asMetadata: true });
-        }
-      }
-    } else {
-      errors.push({ artifactName: 'review-outcome.md', eventType: VALID_EVENT_TYPES.REVIEWER_OUTCOME, error: result.error });
-      if (verdictPath && fs.existsSync(verdictPath)) {
-        const verdictResult = importLegacyArtifact(slug, 'review-verdict.txt', VALID_EVENT_TYPES.REVIEWER_OUTCOME,
-          { round, phase, actor: 'legacy' },
-          { ...options, worktree: rootDir });
-        if (verdictResult.ok && verdictResult.path) {
-          imported.push({ artifactName: 'review-verdict.txt', eventType: VALID_EVENT_TYPES.REVIEWER_OUTCOME, path: verdictResult.path, legacyPath: verdictResult.legacyPath });
-        } else if (!verdictResult.ok) {
-          errors.push({ artifactName: 'review-verdict.txt', eventType: VALID_EVENT_TYPES.REVIEWER_OUTCOME, error: verdictResult.error });
-        }
-      }
-    }
-  } else if (verdictPath && fs.existsSync(verdictPath)) {
-    let verdictContent = null;
-    try {
-      verdictContent = fs.readFileSync(verdictPath, 'utf8').trim();
-    } catch (err) {
-        error(fmt.status('WARN', `Failed to read verdict file: ${(err as Error).message}`));
-    }
-
-    const outcomeParams: CreateEventParams = { round, phase, actor: 'legacy' };
-    if (verdictContent && isValidVerdict(verdictContent)) {
-      outcomeParams.verdict = verdictContent;
-    }
-
-    const result = importLegacyArtifact(slug, 'review-verdict.txt', VALID_EVENT_TYPES.REVIEWER_OUTCOME,
-      outcomeParams,
-      { ...options, worktree: rootDir });
-
-    if (result.ok) {
-      if (result.path) {
-        imported.push({ artifactName: 'review-verdict.txt', eventType: VALID_EVENT_TYPES.REVIEWER_OUTCOME, path: result.path, legacyPath: result.legacyPath });
-      }
-    } else {
-      errors.push({ artifactName: 'review-verdict.txt', eventType: VALID_EVENT_TYPES.REVIEWER_OUTCOME, error: result.error });
-    }
-  }
-
-  for (const artifactName of Object.keys(LEGACY_ARTIFACT_TO_EVENT_TYPE)) {
-    if (artifactName === 'review-outcome.md' || artifactName === 'review-verdict.txt') {
-      continue;
-    }
-
-    const result = importLegacyArtifact(slug, artifactName, LEGACY_ARTIFACT_TO_EVENT_TYPE[artifactName],
-      { round, phase, actor: 'legacy' },
-      { ...options, worktree: rootDir });
-
-    if (result.ok) {
-      if (result.path) {
-        imported.push({ artifactName, eventType: LEGACY_ARTIFACT_TO_EVENT_TYPE[artifactName], path: result.path, legacyPath: result.legacyPath });
-      }
-    } else {
-      errors.push({ artifactName, eventType: LEGACY_ARTIFACT_TO_EVENT_TYPE[artifactName], error: result.error });
-    }
-  }
-
-  return { ok: errors.length === 0, imported, errors };
 }
 
 // -------- Event Reading --------
 
 /**
- * Read all review events for a mission.
+ * Read all review events for a mission from the operator database.
+ *
+ * The exported Markdown files are not a second source: a mission with no Review
+ * in the database has no events, and reading the export back would resurrect the
+ * dual authority the cutover removed. A pre-cutover mission is migrated once
+ * with `px review <slug> --backfill-review`.
  */
-function readAllEvents(slug: string, options: ReadAllEventsOptions = {}): unknown[] {
-  const {
-    rootDir = process.cwd(),
-    readdirSync = fs.readdirSync,
-    readFileSync = fs.readFileSync,
-    error = fmt.log.plainError
-  } = options;
-
-  const eventsDir = reviewEventsDir(slug, rootDir);
-  if (!eventsDir || !fs.existsSync(eventsDir)) {
-    return [];
-  }
-
-  const events = [];
-  let files;
-
-  try {
-    files = readdirSync(eventsDir);
-  } catch (err) {
-    error(fmt.status('WARN', `Failed to read review-events directory: ${(err as Error).message}`));
-    return [];
-  }
-
-  for (const filename of files) {
-    if (!filename.endsWith('.md')) { continue; }
-
-    const filePath = path.join(eventsDir, filename);
-    let content;
-
-    try {
-      content = readFileSync(filePath, 'utf8');
-    } catch (err) {
-      error(fmt.status('WARN', `Failed to read event file ${filename}: ${(err as Error).message}`));
-      continue;
-    }
-
-    const event = parseEventFile(content, filePath);
-    if (event) {
-      events.push(event);
-    }
-  }
-
-  events.sort((a, b) => {
-    const aTime = (a.timestamp as string) || (a.fileCreated as string) || '';
-    const bTime = (b.timestamp as string) || (b.fileCreated as string) || '';
-    return bTime.localeCompare(aTime);
-  });
-
-  return events;
+async function readAllEvents(slug: string, options: ReadAllEventsOptions = {}): Promise<unknown[]> {
+  const { rootDir = process.cwd() } = options;
+  return readAllEventsFromStore(slug, rootDir);
 }
 
 /**
- * Parse an event file into a structured object.
+ * Read all review events from the SQLite operator database.
  */
-function parseEventFile(content: string, filePath: string): ParseEventResult {
-  const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/);
-
-  const metadata: Record<string, unknown> = {};
-  let body = content;
-
-  if (frontmatterMatch) {
-    const frontmatterText = frontmatterMatch[1];
-    body = content.slice(frontmatterMatch[0].length);
-
-    const lines = frontmatterText.split('\n');
-    for (const line of lines) {
-      if (!line.trim()) { continue; }
-      const colonIdx = line.indexOf(':');
-      if (colonIdx === -1) { continue; }
-
-      const key = line.slice(0, colonIdx).trim().toLowerCase();
-      const value = line.slice(colonIdx + 1).trim();
-
-      if ((value.startsWith('"') && value.endsWith('"')) ||
-          (value.startsWith("'") && value.endsWith("'"))) {
-        metadata[key] = value.slice(1, -1);
-      } else if (value.startsWith('[') && value.endsWith(']')) {
-        try {
-          metadata[key] = JSON.parse(value);
-        } catch {
-          metadata[key] = value;
-        }
-      } else if (value === 'true') { metadata[key] = true; }
-      else if (value === 'false') { metadata[key] = false; }
-      else if (value !== '' && !isNaN(Number(value))) { metadata[key] = Number(value); }
-      else { metadata[key] = value; }
-    }
+async function readAllEventsFromStore(slug: string, rootDir: string): Promise<unknown[]> {
+  let store: Awaited<ReturnType<typeof resolveMissionStore>>;
+  try {
+    store = await resolveMissionStore(rootDir);
+  } catch {
+    return [];
+  }
+  if (!store) {
+    return [];
   }
 
-  if (!metadata.event_type && filePath) {
-    const basename = path.basename(filePath, '.md');
-    const parts = basename.split('-');
-    if (parts.length >= 4) {
-      const possibleType = parts.slice(1, -2).join('-');
-      if (isValidEventType(possibleType)) {
-        metadata.event_type = possibleType;
-      }
+  try {
+    const result = await store.load(missionId(slug));
+    if (result.kind !== 'found' || !result.mission.review) {
+      return [];
     }
+    return result.mission.review.reviewEvents.map((event) => ({
+      event_type: event.eventType,
+      timestamp: event.createdAt,
+      content: event.content,
+      round: event.roundNumber,
+      phase: event.phase,
+      actor: event.actor,
+      disposition: event.disposition,
+      verdict: event.verdict,
+      item_dispositions: event.itemDispositions,
+      blocked_reason: event.blockedReason,
+      followup_reference: event.followUpReference,
+    }));
+  } catch {
+    return [];
   }
-
-  const stat = fs.statSync(filePath);
-
-  return {
-    ...metadata,
-    content: body.trim(),
-    filePath,
-    fileCreated: stat.birthtime.toISOString(),
-    fileModified: stat.mtime.toISOString()
-  };
 }
 
 export { shouldMirrorToProvider as shouldMirrorToForgejo };
@@ -910,8 +735,7 @@ export {
 // Path resolution
 export {
   reviewEventsDir,
-  eventFilePath,
-  legacyArtifactPath
+  eventFilePath
 };
 
 // Event creation
@@ -920,17 +744,9 @@ export {
   normalizeEventContent
 };
 
-// Legacy compatibility
-export {
-  importLegacyArtifact,
-  importAllLegacyArtifacts,
-  LEGACY_ARTIFACT_TO_EVENT_TYPE
-};
-
 // Event reading
 export {
-  readAllEvents,
-  parseEventFile
+  readAllEvents
 };
 
 // Rendering

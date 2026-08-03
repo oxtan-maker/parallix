@@ -575,6 +575,37 @@ function shouldKeepTmp() {
   return process.env.PARALLIX_E2E_KEEP_TMP === '1';
 }
 
+// After the TASK-2322.12 cutover the review loop's state lives on the Review
+// aggregate in the operator database, not in missions/<slug>/review-state.json.
+// The smoke run stays black-box about that: it asks the CLI through
+// `px review <slug> --status`, which reads the same authority the loop writes,
+// so a loop that never persisted its state still fails here.
+function readReviewStateViaCli(worktree, env, slug) {
+  const result = runWorkflowAllowFail(worktree, env, ['review', slug, '--status'], RUN_TIMEOUT_MS);
+  const output = `${result.stdout || ''}${result.stderr || ''}`.replace(/\x1B\[[0-9;]*m/g, '');
+  assert.equal(
+    result.status,
+    0,
+    `[parallix-workflow-failure] px review ${slug} --status failed (status=${result.status}): ${output}`
+  );
+  assert.ok(
+    !/No persisted review state found/.test(output),
+    `[parallix-workflow-failure] expected persisted review state after active phase (review loop should have completed) for ${slug}:\n${output}`
+  );
+  const field = label => {
+    const match = output.match(new RegExp(`^\\s*${label}:\\s*(.+)$`, 'm'));
+    return match ? match[1].trim() : null;
+  };
+  return {
+    round: field('Round') === null ? null : Number(field('Round')),
+    phase: field('Phase'),
+    reviewer: field('Reviewer'),
+    implementer: field('Implementer'),
+    startedAt: field('Started at'),
+    disposition: field('Disposition')
+  };
+}
+
 // Default Parallix state roots that must never receive smoke-run writes
 // (resolveParallixHome fallbacks when PARALLIX_HOME is unset: Linux default
 // and the generic-UNIX fallback).
@@ -895,10 +926,8 @@ function runRealAgentSmoke(agent, runner) {
     console.log(`[benchmark] runner=${runner} phase=active duration_ms=${activeDurationMs}`);
 
     // px active autostarts the autonomous review loop - verify it completed successfully
-    const reviewStateFile = path.join(worktree, 'missions', slug, 'review-state.json');
-    assert.ok(fs.existsSync(reviewStateFile), `[parallix-workflow-failure] expected review-state.json after active phase (review loop should have completed) at ${reviewStateFile}`);
-    const reviewState = JSON.parse(fs.readFileSync(reviewStateFile, 'utf8'));
-    
+    const reviewState = readReviewStateViaCli(worktree, env, slug);
+
     // Reviewer forcing (SC: "force custom as reviewer on its own PR"): the
     // isolated PARALLIX_HOME's agents.local.json blocks every family except
     // `custom`, so startReviewLoop's selection cannot find a different-family

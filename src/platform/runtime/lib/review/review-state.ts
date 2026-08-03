@@ -1,17 +1,30 @@
 /**
  * Reviewer-family persistence for the autonomous review loop.
  *
- * State is stored under the adapter-resolved mission directory on the mission branch.
- * Writing and committing state before each round ensures session-restart safety.
+ * After the TASK-2322.12 cutover the `Review` aggregate in the operator
+ * database is the sole write authority for review-loop state (ADR 0053).
+ * `ReviewState` is the loop's flat view of that aggregate; the field-by-field
+ * correspondence lives in `review-state-mapping.ts`.
+ *
+ * `review-state.json` is no longer written, and the loop never reads it. A
+ * mission's Review is created by `px handoff` (`startReview`), so a loop that
+ * finds no Review is reported as a failure rather than inventing one without a
+ * reviewed revision or a configured reviewer eligibility.
+ *
+ * Missions handed off before the cutover are the exception: they carry a
+ * `review-state.json` and no Review, and fail closed forever without a way
+ * across. `backfillReviewFromLegacyState` is that way — an explicit operator
+ * command (`px review <slug> --backfill-review`), so the loop itself keeps
+ * failing closed rather than self-healing behind the operator's back.
  *
  * Owned by the Node workflow harness (ADR 0037 / task-089).
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { git } from '../core/git.js';
-import { findMissionDir, resolveWorktree } from '../core/mission-utils.js';
-import { writeFileAtomic } from '../core/storage.js';
+import { findMissionDir, getPrimaryBranch, resolveWorktree } from '../core/mission-utils.js';
+import { missionId } from '../../../../domain/mission.js';
+import { applyReviewStateToReview, reviewStateDataFrom } from './review-state-mapping.js';
 
 export type ReviewStatePersistenceResult =
   | { outcome: 'committed' }
@@ -20,8 +33,6 @@ export type ReviewStatePersistenceResult =
   | { outcome: 'add-failed'; stage: 'add'; diagnostic: string }
   | { outcome: 'commit-failed-dirty'; stage: 'commit'; diagnostic: string };
 
-type GitFn = typeof git;
-type AtomicWriteFn = typeof writeFileAtomic;
 
 interface ReviewStatePersistenceContext {
   slug: string;
@@ -33,10 +44,6 @@ function diagnosticFrom(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message.trim()) { return error.message.trim(); }
   const text = String(error || '').trim();
   return text || fallback;
-}
-
-function gitDiagnostic(result: ReturnType<GitFn>, fallback: string): string {
-  return String(result.stderr || result.stdout || '').trim() || fallback;
 }
 
 export function assertReviewStatePersisted(
@@ -55,13 +62,22 @@ export function assertReviewStatePersisted(
   );
 }
 
-export function persistReviewStateOrThrow(
+/**
+ * Persist review state, throwing when persistence did not commit.
+ *
+ * @param {typeof writeReviewState} writeFn
+ * @param {string} slug
+ * @param {ReviewState|Record<string, unknown>} state
+ * @param {string} worktree
+ * @returns {Promise<ReviewStatePersistenceResult>}
+ */
+export async function persistReviewStateOrThrow(
   writeFn: typeof writeReviewState,
   slug: string,
   state: ReviewState | Record<string, unknown>,
   worktree: string
-): ReviewStatePersistenceResult {
-  const result = writeFn(slug, state, worktree);
+): Promise<ReviewStatePersistenceResult> {
+  const result = await writeFn(slug, state, worktree);
   assertReviewStatePersisted(result, {
     slug,
     phase: state instanceof ReviewState ? state.phase : String(state.phase || 'unknown'),
@@ -71,12 +87,14 @@ export function persistReviewStateOrThrow(
 }
 
 /**
- * Return the path to the review-state file for a given slug.
- * Resolves using the same mission-dir discovery as other workflow commands.
+ * Return the mission directory for a slug, or null when it is not resolvable.
+ *
+ * The review loop reports the mission directory in its diagnostics, and the
+ * event log still lives under it. Review state itself no longer has a file.
  *
  * @param {string} slug
  * @param {string} [rootDir]
- * @returns {string|null}  Absolute path, or null if mission dir not found
+ * @returns {string|null}
  */
 export function reviewStateFile(slug: string, rootDir = process.cwd()): string | null {
   const missionDir = findMissionDir(slug, rootDir);
@@ -85,53 +103,110 @@ export function reviewStateFile(slug: string, rootDir = process.cwd()): string |
 }
 
 /**
- * Read the persisted review state for a mission.
+ * Open the Mission authority through the composition root.
+ *
+ * Deliberately not a module-level cached connection: the composition root owns
+ * the SQLite handle, so routing through it keeps the review loop on the one
+ * connection every other command path already uses.
+ *
+ * The concrete store type is inferred from the composition root rather than
+ * named here: the review loop knows the port, not the adapter.
+ *
+ * @param {string} rootDir
+ */
+async function resolveMissionStore(rootDir: string) {
+  const { createProductionApplicationServices } = await import(
+    '../composition/application-services.js'
+  );
+  const services = await createProductionApplicationServices(rootDir);
+  return services.mission?.store ?? null;
+}
+
+/**
+ * Read the persisted review state for a mission from the operator database.
+ *
+ * Returns null when the mission has no Review yet — the loop treats that as
+ * "no round has started", which is what an absent `review-state.json` used to
+ * mean.
  *
  * @param {string} slug
  * @param {string} [rootDir]  Directory to resolve the mission from (defaults to process.cwd())
- * @returns {ReviewState|null}
+ * @returns {Promise<ReviewState|null>}
  */
-export function readReviewState(slug: string, rootDir = process.cwd()): ReviewState | null {
-  const statePath = reviewStateFile(slug, rootDir);
-  if (!statePath || !fs.existsSync(statePath)) { return null; }
-
+export async function readReviewState(slug: string, rootDir = process.cwd()): Promise<ReviewState | null> {
   try {
-    const raw = fs.readFileSync(statePath, 'utf8');
-    const parsed = JSON.parse(raw);
-    if (parsed && parsed.reviewer && parsed.implementer) {
-      return new ReviewState(slug, parsed);
-    }
-    return null;
+    const store = await resolveMissionStore(rootDir);
+    if (!store) { return null; }
+    const result = await store.load(missionId(slug));
+    if (result.kind !== 'found' || !result.mission.review) { return null; }
+    return new ReviewState(slug, reviewStateDataFrom(result.mission.review));
   } catch {
     return null;
+  }
+}
+
+/** One completed round, flattened for consumers that need round history. */
+export interface ReviewRoundSummary {
+  readonly number: number;
+  readonly reviewer: string;
+  readonly implementer: string;
+  readonly decision: 'approved' | 'changes-requested' | null;
+  readonly disposition: string | null;
+}
+
+/**
+ * Read every review round for a mission from the operator database.
+ *
+ * The statistics projection needs the whole conversation, not just the current
+ * round: "pr fix rounds" is a count over rounds the reviewer sent back. Before
+ * the TASK-2322.12 cutover that count was reconstructed by parsing the mission's
+ * `review-events/*.md` files and `review-state(...)` commit subjects; the
+ * aggregate records it directly.
+ *
+ * @param {string} slug
+ * @param {string} [rootDir]
+ * @returns {Promise<readonly ReviewRoundSummary[]>}  Empty when there is no review.
+ */
+export async function readReviewRounds(slug: string, rootDir = process.cwd()): Promise<readonly ReviewRoundSummary[]> {
+  try {
+    const store = await resolveMissionStore(rootDir);
+    if (!store) { return []; }
+    const result = await store.load(missionId(slug));
+    if (result.kind !== 'found' || !result.mission.review) { return []; }
+    return result.mission.review.rounds.map((round) => ({
+      number: round.number,
+      reviewer: round.reviewer,
+      implementer: round.implementer,
+      decision: round.decision ? round.decision.kind : null,
+      disposition: round.disposition,
+    }));
+  } catch {
+    return [];
   }
 }
 
 /**
  * Resolve the review-provider identity for a review workflow path.
  *
- * The normal contract is review-state-backed so standard review/handoff/rebase
- * paths do not require a provider identity env var to be exported.
- *
  * @param {string} slug
  * @param {string} [rootDir]
  * @param {{readReviewStateFn?: Function}} [options]
- * @returns {{ identityUser: string|null, commentIdentityUser: string|null, forgejoUser: string|null, commentForgejoUser: string|null, reviewState: ReviewState|null, source: 'review-state'|null }}
+ * @returns {Promise<{ identityUser: string|null, commentIdentityUser: string|null, forgejoUser: string|null, commentForgejoUser: string|null, reviewState: ReviewState|null, source: 'review-state'|null }>}
  */
-export function resolveReviewIdentity(
+export async function resolveReviewIdentity(
   slug: string,
   rootDir = process.cwd(),
-  options: { readReviewStateFn?: (_s: string, _r: string) => ReviewState | null } = {}
-): {
+  options: { readReviewStateFn?: (_s: string, _r: string) => Promise<ReviewState | null> | ReviewState | null } = {}
+): Promise<{
   identityUser: string | null;
   commentIdentityUser: string | null;
   forgejoUser: string | null;
   commentForgejoUser: string | null;
   reviewState: ReviewState | null;
   source: 'review-state' | null;
-} {
+}> {
   const readReviewStateFn = options.readReviewStateFn || readReviewState;
-  const reviewState = readReviewStateFn(slug, rootDir);
+  const reviewState = await Promise.resolve(readReviewStateFn(slug, rootDir));
   const reviewerUser = reviewState ? (reviewState.reviewer || reviewState.implementer || null) : null;
   const implementerUser = reviewState ? (reviewState.implementer || reviewState.reviewer || null) : null;
 
@@ -143,6 +218,119 @@ export function resolveReviewIdentity(
     reviewState,
     source: reviewerUser ? 'review-state' : null
   };
+}
+
+export type ReviewBackfillResult =
+  | { outcome: 'backfilled'; rounds: number; round: number; phase: string }
+  | { outcome: 'would-backfill'; rounds: number; round: number; phase: string }
+  | { outcome: 'already-present' }
+  | { outcome: 'no-legacy-state' }
+  | { outcome: 'failed'; diagnostic: string };
+
+/**
+ * Seed a mission's Review aggregate from a surviving `review-state.json`.
+ *
+ * A mission handed off before the TASK-2322.12 cutover has review-loop state in
+ * `missions/<slug>/review-state.json` but no Review in the operator database.
+ * `save()` fails closed for those missions rather than inventing a Review, so
+ * without a migration path the loop can never be resumed. This is that path:
+ * an explicit, operator-invoked one-shot, not an implicit self-heal.
+ *
+ * The reviewed revision cannot be recovered from the legacy file — it never
+ * recorded one — so the subject is reconstructed the way `px handoff` builds it
+ * (the mission branch against the primary branch) with a revision marking the
+ * change as backfilled. The historical reviewer is taken as eligible: this
+ * replays a review that already happened rather than starting a new one.
+ *
+ * @param {string} slug
+ * @param {string} [rootDir]
+ * @param {{apply?: boolean}} [options]  `apply: false` reports without writing.
+ * @returns {Promise<ReviewBackfillResult>}
+ */
+export async function backfillReviewFromLegacyState(
+  slug: string,
+  rootDir = process.cwd(),
+  options: { apply?: boolean } = {}
+): Promise<ReviewBackfillResult> {
+  const apply = options.apply !== false;
+
+  const statePath = reviewStateFile(slug, rootDir);
+  if (!statePath || !fs.existsSync(statePath)) { return { outcome: 'no-legacy-state' }; }
+
+  let legacy: Record<string, unknown>;
+  try {
+    legacy = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+  } catch (error) {
+    return { outcome: 'failed', diagnostic: diagnosticFrom(error, `Could not parse ${statePath}`) };
+  }
+  if (!legacy || typeof legacy !== 'object') {
+    return { outcome: 'failed', diagnostic: `${statePath} is not a review-state object` };
+  }
+
+  const reviewer = typeof legacy.reviewer === 'string' ? legacy.reviewer.trim() : '';
+  const implementer = typeof legacy.implementer === 'string' ? legacy.implementer.trim() : '';
+  const startedAt = typeof legacy.startedAt === 'string' ? legacy.startedAt.trim() : '';
+  if (!reviewer || !implementer || !startedAt) {
+    return {
+      outcome: 'failed',
+      diagnostic: `${statePath} is missing reviewer, implementer or startedAt; cannot reconstruct a review round`,
+    };
+  }
+
+  let store: Awaited<ReturnType<typeof resolveMissionStore>>;
+  try {
+    store = await resolveMissionStore(rootDir);
+  } catch (error) {
+    return { outcome: 'failed', diagnostic: diagnosticFrom(error, 'Operator database unavailable') };
+  }
+  if (!store) { return { outcome: 'failed', diagnostic: `Operator database unavailable for ${slug}` }; }
+
+  try {
+    const result = await store.load(missionId(slug));
+    if (result.kind !== 'found') {
+      return { outcome: 'failed', diagnostic: `Mission ${slug} is not in the operator database` };
+    }
+    if (result.mission.review) { return { outcome: 'already-present' }; }
+
+    const { startReview, ConfiguredReviewerEligibility, changeRevision } = await import(
+      '../../../../domain/review.js'
+    );
+    const { agentFamily } = await import('../../../../domain/agents.js');
+    const reviewerFamily = agentFamily(reviewer);
+
+    let targetBranch = 'main';
+    try { targetBranch = getPrimaryBranch(rootDir) || 'main'; } catch { targetBranch = 'main'; }
+
+    const seed = startReview(
+      {
+        change: {
+          kind: 'local-branch' as const,
+          sourceBranch: `mission/${slug}`,
+          targetBranch,
+        },
+        revision: changeRevision(`backfill-${slug}`),
+      },
+      reviewerFamily,
+      agentFamily(implementer),
+      startedAt,
+      // The historical reviewer is eligible by construction: this replays a
+      // review that already ran, it does not select a reviewer for a new one.
+      ConfiguredReviewerEligibility.fromReviewStep({
+        eligible: [reviewerFamily],
+        strategy: 'random',
+      }),
+    );
+
+    const review = applyReviewStateToReview(seed, legacy as never);
+    const current = review.rounds[review.rounds.length - 1];
+    const summary = { rounds: review.rounds.length, round: current.number, phase: current.phase };
+
+    if (!apply) { return { outcome: 'would-backfill', ...summary }; }
+    await store.save({ ...result.mission, review }, result.version);
+    return { outcome: 'backfilled', ...summary };
+  } catch (error) {
+    return { outcome: 'failed', diagnostic: diagnosticFrom(error, 'Review backfill failed') };
+  }
 }
 
 /**
@@ -333,121 +521,135 @@ export class ReviewState {
     return payload;
   }
 
-  save(
-    worktree = resolveWorktree(this.slug) || process.cwd(),
-    gitFn: GitFn = git,
-    writeFileAtomicFn: AtomicWriteFn = writeFileAtomic
-  ): ReviewStatePersistenceResult {
-    const statePath = reviewStateFile(this.slug, worktree);
-    if (!statePath) {
-      return { outcome: 'write-failed', stage: 'write', diagnostic: `Mission directory not found for ${this.slug}` };
-    }
-
-    const payload = this.toJSON();
+  /**
+   * Persist review state to the operator database.
+   *
+   * Retries once on a version conflict: several loop paths read, mutate and
+   * write in quick succession, and losing a phase transition to a concurrent
+   * bookkeeping write would strand the loop. A second conflict is reported
+   * rather than retried forever, so a genuinely contended mission fails loudly.
+   *
+   * @param {string} [worktree]
+   * @returns {Promise<ReviewStatePersistenceResult>}
+   */
+  async save(
+    worktree = resolveWorktree(this.slug) || process.cwd()
+  ): Promise<ReviewStatePersistenceResult> {
+    let store: Awaited<ReturnType<typeof resolveMissionStore>>;
     try {
-      writeFileAtomicFn(statePath, JSON.stringify(payload, null, 2) + '\n');
+      store = await resolveMissionStore(worktree);
     } catch (error) {
-      return { outcome: 'write-failed', stage: 'write', diagnostic: diagnosticFrom(error, 'Atomic review-state write failed') };
+      return { outcome: 'write-failed', stage: 'write', diagnostic: diagnosticFrom(error, 'Operator database unavailable') };
+    }
+    if (!store) {
+      return { outcome: 'write-failed', stage: 'write', diagnostic: `Operator database unavailable for ${this.slug}` };
     }
 
-    const relPath = path.relative(worktree, statePath);
-    let addResult: ReturnType<GitFn>;
-    try {
-      addResult = gitFn(['-C', worktree, 'add', relPath]);
-    } catch (error) {
-      return { outcome: 'add-failed', stage: 'add', diagnostic: diagnosticFrom(error, 'git add failed') };
-    }
-    if (addResult.status !== 0) {
-      return { outcome: 'add-failed', stage: 'add', diagnostic: gitDiagnostic(addResult, 'git add failed') };
-    }
-
-    const msg = `review-state(${this.slug}): round ${this.round} (${this.phase}) [${this.reviewer} -> ${this.implementer}]${this.disposition ? ` disposition=${this.disposition}` : ''}`;
-    let commitResult: ReturnType<GitFn>;
-    try {
-      commitResult = gitFn(['-C', worktree, 'commit', '-m', msg]);
-    } catch (error) {
-      return { outcome: 'commit-failed-dirty', stage: 'commit', diagnostic: diagnosticFrom(error, 'git commit failed') };
-    }
-
-    if (commitResult.status !== 0) {
-      let statusResult: ReturnType<GitFn>;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
-        statusResult = gitFn(['-C', worktree, 'status', '--porcelain', relPath]);
+        const result = await store.load(missionId(this.slug));
+        if (result.kind !== 'found') {
+          return { outcome: 'write-failed', stage: 'write', diagnostic: `Mission ${this.slug} is not in the operator database` };
+        }
+        const mission = result.mission;
+        if (!mission.review) {
+          return {
+            outcome: 'write-failed',
+            stage: 'write',
+            diagnostic: `Mission ${this.slug} has no review to update; px handoff starts the review, or px review ${this.slug} --backfill-review migrates a pre-cutover review-state.json`,
+          };
+        }
+
+        const review = applyReviewStateToReview(mission.review, this.toJSON());
+        await store.save({ ...mission, review }, result.version);
+        return { outcome: 'committed' };
       } catch (error) {
-        return { outcome: 'commit-failed-dirty', stage: 'commit', diagnostic: diagnosticFrom(error, gitDiagnostic(commitResult, 'git commit failed')) };
+        // A stale write means someone else committed between our load and save.
+        // Reload and reapply once; the review-state fields are last-writer-wins
+        // per field, so a replay onto the newer version is well defined.
+        const stale = error instanceof Error && error.name === 'MissionStaleWriteError';
+        if (stale && attempt === 0) { continue; }
+        return { outcome: 'write-failed', stage: 'write', diagnostic: diagnosticFrom(error, 'Review-state write failed') };
       }
-      if (statusResult.status === 0 && statusResult.stdout.trim() === '') {
-        return { outcome: 'unchanged' };
-      }
-      return { outcome: 'commit-failed-dirty', stage: 'commit', diagnostic: gitDiagnostic(commitResult, 'git commit failed and review state remains dirty') };
     }
 
-    return { outcome: 'committed' };
+    return {
+      outcome: 'write-failed',
+      stage: 'write',
+      diagnostic: `Review state for ${this.slug} lost a version race twice; another process is writing this mission`,
+    };
   }
+
 }
 
 /**
  * Write and commit the review state for a mission.
- * Commits to the current branch so the state is visible after session restarts.
  *
  * @param {string} slug
  * @param {ReviewState|object} state
- * @returns {ReviewStatePersistenceResult}
+ * @param {string} [worktree]
+ * @returns {Promise<ReviewStatePersistenceResult>}
  */
-export function writeReviewState(
+export async function writeReviewState(
   slug: string,
   state: ReviewState | Record<string, unknown>,
-  worktree = resolveWorktree(slug) || process.cwd(),
-  gitFn: GitFn = git,
-  writeFileAtomicFn: AtomicWriteFn = writeFileAtomic
-): ReviewStatePersistenceResult {
+  worktree = resolveWorktree(slug) || process.cwd()
+): Promise<ReviewStatePersistenceResult> {
   const instance = state instanceof ReviewState ? state : new ReviewState(slug, state as ReviewStateData);
-  return instance.save(worktree, gitFn, writeFileAtomicFn);
+  return instance.save(worktree);
 }
 
 /**
- * Delete the review state file for a mission (used by --reset).
- * Commits the deletion if the file was tracked.
+ * Clear the loop's bookkeeping for a mission (used by `--reset`).
+ *
+ * Resets the current round to `reviewing` with no disposition and no retries,
+ * and drops the review-level scratch: stage-launch windows, the gate retry
+ * budget, and any human-intervention request.
+ *
+ * It deliberately does not erase the review conversation. Before the cutover,
+ * `--reset` deleted a file that only ever held loop scratch; the reviewer's
+ * decisions and findings lived in Forgejo. They are now durable domain state on
+ * the same aggregate, and discarding a recorded decision is not what "reset the
+ * review state" ever meant.
  *
  * @param {string} slug
- * @returns {ReviewStatePersistenceResult}
+ * @param {string} [worktree]
+ * @returns {Promise<ReviewStatePersistenceResult>}
  */
-export function resetReviewState(
+export async function resetReviewState(
   slug: string,
-  worktree = resolveWorktree(slug) || process.cwd(),
-  gitFn: GitFn = git
-): ReviewStatePersistenceResult {
-  const statePath = reviewStateFile(slug, worktree);
-  if (!statePath || !fs.existsSync(statePath)) { return { outcome: 'unchanged' }; }
-
-  const relPath = path.relative(worktree, statePath);
-  const tombstonePath = path.join(path.dirname(statePath), `.${path.basename(statePath)}.${process.pid}.${Date.now()}.deleted`);
+  worktree = resolveWorktree(slug) || process.cwd()
+): Promise<ReviewStatePersistenceResult> {
   try {
-    fs.renameSync(statePath, tombstonePath);
-  } catch (error) {
-    return { outcome: 'write-failed', stage: 'write', diagnostic: diagnosticFrom(error, 'Atomic review-state deletion failed') };
-  }
-
-  try {
-    const addResult = gitFn(['-C', worktree, 'add', '-u', '--', relPath]);
-    if (addResult.status !== 0) {
-      const statusResult = gitFn(['-C', worktree, 'status', '--porcelain', relPath]);
-      if (statusResult.status === 0 && statusResult.stdout.trim() === '') {
-        return { outcome: 'unchanged' };
-      }
-      return { outcome: 'add-failed', stage: 'add', diagnostic: gitDiagnostic(addResult, 'git add deletion failed') };
+    const store = await resolveMissionStore(worktree);
+    if (!store) {
+      return { outcome: 'write-failed', stage: 'write', diagnostic: `Operator database unavailable for ${slug}` };
     }
-    const commitResult = gitFn(['-C', worktree, 'commit', '-m', `review-state(${slug}): reset (--reset flag)`]);
-    if (commitResult.status === 0) { return { outcome: 'committed' }; }
+    const result = await store.load(missionId(slug));
+    if (result.kind !== 'found' || !result.mission.review) { return { outcome: 'unchanged' }; }
 
-    const statusResult = gitFn(['-C', worktree, 'status', '--porcelain', relPath]);
-    if (statusResult.status === 0 && statusResult.stdout.trim() === '') {
-      return { outcome: 'unchanged' };
-    }
-    return { outcome: 'commit-failed-dirty', stage: 'commit', diagnostic: gitDiagnostic(commitResult, 'git commit failed and review-state deletion remains dirty') };
+    const review = result.mission.review;
+    const rounds = [...review.rounds];
+    rounds[rounds.length - 1] = {
+      ...rounds[rounds.length - 1],
+      phase: 'reviewing',
+      disposition: null,
+      reviewerRetryCount: 0,
+      implementerRetryCount: 0,
+    };
+
+    await store.save({
+      ...result.mission,
+      review: {
+        ...review,
+        rounds: rounds as unknown as typeof review.rounds,
+        intervention: null,
+        stageLaunches: [],
+        gateFailureRetryCount: 0,
+      },
+    }, result.version);
+    return { outcome: 'committed' };
   } catch (error) {
-    return { outcome: 'commit-failed-dirty', stage: 'commit', diagnostic: diagnosticFrom(error, 'Review-state reset commit failed') };
-  } finally {
-    if (fs.existsSync(tombstonePath)) { fs.unlinkSync(tombstonePath); }
+    return { outcome: 'write-failed', stage: 'write', diagnostic: diagnosticFrom(error, 'Review-state reset failed') };
   }
 }

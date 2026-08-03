@@ -61,7 +61,7 @@ function git(args, cwd) {
 // 2026-06-13 and excluded from both weekly windows); after the fix it
 // passes (the row is dated "today" via the system clock).
 
-test('task-1415: recordPostIntegrationStats counts a closed mission in the current week even when the base worktree tip commit is stale', () => {
+test('task-1415: recordPostIntegrationStats counts a closed mission in the current week even when the base worktree tip commit is stale', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1415-integrate-'));
   const dbFile = path.join(root, 'parallix.db');
 
@@ -103,7 +103,7 @@ test('task-1415: recordPostIntegrationStats counts a closed mission in the curre
     'fixture setup: base worktree tip commit must carry the stale committer date');
 
   try {
-    recordPostIntegrationStats('task-1388', {
+    await recordPostIntegrationStats('task-1388', {
       rootDir: root,
       recordIntegrationStatsFn: (opts) => stats.recordIntegrationStats({ ...opts, dbPath: dbFile }),
     });

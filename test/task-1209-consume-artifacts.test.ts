@@ -1,5 +1,6 @@
 
 const test = require('node:test');
+const { before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
@@ -11,6 +12,7 @@ const childProcess = require('node:child_process');
 // ============================================================================
 
 const { consumeArtifacts } = require('../.test-runtime/lib/review/review-commands');
+const { seedMissionDatabase } = require('./fixtures/review-state-db.js');
 
 function runGitOrThrow(args, options = {}) {
   const result = childProcess.spawnSync('git', args, {
@@ -110,53 +112,70 @@ assignee: [custom]
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
+// The operator database is seeded in `before`, ahead of every test in this
+// file: a test that ran earlier can still have fire-and-forget work in flight
+// (backlog transitions, commits), and that work opens the database at whatever
+// PARALLIX_HOME is current — which collides with an exclusive migration.
+const cleanRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1327-consume-clean-'));
+const cleanArtifactDir = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1327-consume-artifacts-'));
+let restoreCleanHome = () => {};
+
+before(async () => {
+  const missionDir = path.join(cleanRoot, 'missions', 'task-2200');
+  const taskFile = path.join(cleanRoot, 'backlog', 'tasks', 'task-2200 - consume-clean.md');
+
+  fs.mkdirSync(missionDir, { recursive: true });
+  fs.mkdirSync(path.dirname(taskFile), { recursive: true });
+  fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Mission\n');
+  fs.writeFileSync(taskFile, [
+    '---',
+    'id: TASK-2200',
+    'title: consume clean',
+    'status: active',
+    'assignee: [custom]',
+    '---',
+    '',
+    'Status: ○ active',
+    ''
+  ].join('\n'));
+  fs.writeFileSync(path.join(cleanArtifactDir, 'task-2200-review-findings.md'), '## Findings\nLooks good.');
+  fs.writeFileSync(path.join(cleanArtifactDir, 'task-2200-review-outcome.md'), 'Verdict: approve');
+  fs.writeFileSync(path.join(cleanArtifactDir, 'task-2200-review-verdict.txt'), 'approve');
+
+  runGitOrThrow(['init'], { cwd: cleanRoot });
+  runGitOrThrow(['config', 'user.email', 'task-1327@example.com'], { cwd: cleanRoot });
+  runGitOrThrow(['config', 'user.name', 'Task 1327'], { cwd: cleanRoot });
+  runGitOrThrow(['add', '.'], { cwd: cleanRoot });
+  runGitOrThrow(['commit', '-m', 'fixture'], { cwd: cleanRoot });
+
+  // Review events live on the Review aggregate, so the mission needs a Review
+  // in the operator database for the consume flow to run at all.
+  restoreCleanHome = await seedMissionDatabase(
+    fs.mkdtempSync(path.join(os.tmpdir(), 'task-1327-consume-home-')),
+    'task-2200',
+    cleanRoot,
+  );
+});
+
+after(() => {
+  restoreCleanHome();
+  fs.rmSync(cleanRoot, { recursive: true, force: true });
+  fs.rmSync(cleanArtifactDir, { recursive: true, force: true });
+});
+
 test('consumeArtifacts leaves no untracked review-events files after a successful transition', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1327-consume-clean-'));
-  const missionDir = path.join(root, 'missions', 'task-2200');
-  const artifactDir = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1327-consume-artifacts-'));
-  const taskFile = path.join(root, 'backlog', 'tasks', 'task-2200 - consume-clean.md');
+  const result = await consumeArtifacts('task-2200', {
+    log: () => {},
+    error: msg => { throw new Error(msg); },
+    exit: code => { throw new Error(`exit ${code}`); },
+    resolveWorktreeFn: () => cleanRoot,
+    resolveArtifactDirFn: () => cleanArtifactDir,
+    getTaskAssigneeFn: () => 'custom',
+  });
 
-  try {
-    fs.mkdirSync(missionDir, { recursive: true });
-    fs.mkdirSync(path.dirname(taskFile), { recursive: true });
-    fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Mission\n');
-    fs.writeFileSync(taskFile, [
-      '---',
-      'id: TASK-2200',
-      'title: consume clean',
-      'status: active',
-      'assignee: [custom]',
-      '---',
-      '',
-      'Status: ○ active',
-      ''
-    ].join('\n'));
-    fs.writeFileSync(path.join(artifactDir, 'task-2200-review-findings.md'), '## Findings\nLooks good.');
-    fs.writeFileSync(path.join(artifactDir, 'task-2200-review-outcome.md'), 'Verdict: approve');
-    fs.writeFileSync(path.join(artifactDir, 'task-2200-review-verdict.txt'), 'approve');
-
-    runGitOrThrow(['init'], { cwd: root });
-    runGitOrThrow(['config', 'user.email', 'task-1327@example.com'], { cwd: root });
-    runGitOrThrow(['config', 'user.name', 'Task 1327'], { cwd: root });
-    runGitOrThrow(['add', '.'], { cwd: root });
-    runGitOrThrow(['commit', '-m', 'fixture'], { cwd: root });
-
-    const result = await consumeArtifacts('task-2200', {
-      log: () => {},
-      error: msg => { throw new Error(msg); },
-      exit: code => { throw new Error(`exit ${code}`); },
-      resolveWorktreeFn: () => root,
-      resolveArtifactDirFn: () => artifactDir,
-      getTaskAssigneeFn: () => 'custom',
-    });
-
-    assert.equal(result.ok, true);
-    const status = runGitOrThrow(['status', '--short'], { cwd: root });
-    assert.equal(status.trim(), '');
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-    fs.rmSync(artifactDir, { recursive: true, force: true });
-  }
+  assert.equal(result.ok, true);
+  const status = runGitOrThrow(['status', '--short'], { cwd: cleanRoot });
+  assert.equal(status.trim(), '');
 });
 
 // ============================================================================

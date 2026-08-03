@@ -704,7 +704,7 @@ async function integrate(args: string[]) {
 
     try {
       const executionDir = process.cwd();
-      context = buildIntegrationContext(slug);
+      context = await buildIntegrationContext(slug);
 
       // SC3/SC5: Read authoritative Mission state from SqliteMissionStore.
       // Database unavailability fails the operation (SC5: fail-closed).
@@ -900,7 +900,7 @@ async function integrate(args: string[]) {
           if (fs.existsSync(baseWorktree)) {
             nextActionMessage = `Next: cd ${baseWorktree}`;
           }
-          (recordPostIntegrationStatsOrAbort as any)(slug, { rootDir: baseWorktree });
+          await (recordPostIntegrationStatsOrAbort as any)(slug, { rootDir: baseWorktree });
           fmt.log.info('Step 7 (resume): Cleaning up the local mission worktree...');
           if (!cleanupMissionWorktree(slug)) {
             fmt.log.fail('Mission worktree cleanup failed.');
@@ -1016,7 +1016,7 @@ async function integrate(args: string[]) {
       if (fs.existsSync(baseWorktree)) {
         nextActionMessage = `Next: cd ${baseWorktree}`;
       }
-      (recordPostIntegrationStatsOrAbort as any)(slug, { rootDir: baseWorktree });
+      await (recordPostIntegrationStatsOrAbort as any)(slug, { rootDir: baseWorktree });
       fmt.log.info('Step 7: Cleaning up the local mission worktree...');
       if (!cleanupMissionWorktree(slug)) {
         fmt.log.fail('Mission worktree cleanup failed.');
@@ -1075,7 +1075,7 @@ async function integrate(args: string[]) {
 }
 
 /** @param {string} slug @param{{baseBranch?: string|null, baseWorktree?: string|null, isForgejoReviewEnabledFn?: Function}} opts */
-function buildIntegrationContext(slug: string, {
+async function buildIntegrationContext(slug: string, {
   baseBranch = null,
   baseWorktree = null,
   isForgejoReviewEnabledFn = isForgejoReviewEnabled,
@@ -1161,11 +1161,11 @@ function buildIntegrationContext(slug: string, {
   }
 
   // Local review-state fallback: when forgejo token/API is unavailable but the
-  // mission's review-state.json shows approved, populate approval from local state
+  // mission's Review shows approved, populate approval from local state
   // so that integrate can proceed without a live Forgejo connection.
   // Only applies when Forgejo was enabled but approval could not be obtained.
   if (forgejoEnabled && !approval.ok) {
-    const localStateFallback = readReviewStateFn(slug, /** @type {string} */ (resolvedBaseWorktree));
+    const localStateFallback = await Promise.resolve(readReviewStateFn(slug, /** @type {string} */ (resolvedBaseWorktree)));
     if (localStateFallback && localStateFallback.phase === 'approved' && localStateFallback.disposition === 'APPROVED') {
       approval = /** @type {any} */ ({ ok: true, reviewState: 'APPROVED', source: 'local-review-state' });
     }
@@ -1432,7 +1432,7 @@ function printIntegrationPreflight(
     if (context.pr.exists && context.pr.state === 'open') {
       log(fmt.status('PASS', `Forgejo PR: PR #${context.pr.number} open`));
       if (localApprovalFallback) {
-        log(fmt.status('INFO', `Forgejo approval: token unavailable, approval sourced from local review-state.json (phase=approved)`));
+        log(fmt.status('INFO', `Forgejo approval: token unavailable, approval sourced from the local Review (phase=approved)`));
       } else if (!context.approval.ok) {
         failures.push('pr-approval');
         log(fmt.status('FAIL', `Forgejo approval: could not verify an approved review (${context.approval.error})`));
@@ -1472,7 +1472,7 @@ function printIntegrationPreflight(
     if (token) {
       log(fmt.status('PASS', `Forgejo token: resolved for ${context.forgejoUser} (${tokenPath || 'env:FORGEJO_TOKEN'})`));
     } else if (localApprovalFallback) {
-      log(fmt.status('INFO', `Forgejo token: no token file found for ${context.forgejoUser} (approval sourced from local review-state.json)`));
+      log(fmt.status('INFO', `Forgejo token: no token file found for ${context.forgejoUser} (approval sourced from the local Review)`));
     } else {
       failures.push('forgejo-token');
       log(fmt.status('FAIL', `Forgejo token: no token file found for ${context.forgejoUser}`));
@@ -1693,7 +1693,7 @@ function isNoMergeToAbortResult(result: any) {
  * @param {string} slug
  * @param{{rootDir?: string, recordIntegrationStatsFn?: Function}} options
  */
-function recordPostIntegrationStats(
+async function recordPostIntegrationStats(
   slug: string,
   {
     rootDir = getPrimaryWorktree(),
@@ -1710,7 +1710,7 @@ function recordPostIntegrationStats(
   // TASK-2322.08: the completed-mission row is persisted through the
   // measurement store (<PARALLIX_HOME>/parallix.db). Integration no longer
   // resolves a stats CSV path.
-  const outcome = recordIntegrationStatsFn({
+  const outcome = await recordIntegrationStatsFn({
     slug,
     rootDir,
   });
@@ -1729,9 +1729,9 @@ function recordPostIntegrationStats(
 }
 
 /** @param {string} slug @param{{rootDir?: string}} options */
-function recordPostIntegrationStatsOrAbort(slug: string, options: {rootDir?: string} = {}) {
+async function recordPostIntegrationStatsOrAbort(slug: string, options: {rootDir?: string} = {}) {
   try {
-    return recordPostIntegrationStats(slug, options);
+    return await recordPostIntegrationStats(slug, options);
   } catch (error: any) {
     const detail = error && error.message ? error.message : String(error);
     fmt.log.fail(`Post-integration workflow stats failed for ${slug}: ${detail}`);

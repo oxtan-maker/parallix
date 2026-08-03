@@ -455,8 +455,35 @@ function missionDir(rootDir, slug) {
   return path.join(rootDir, 'missions', slug);
 }
 
-function reviewState(rootDir, slug) {
-  return JSON.parse(fs.readFileSync(path.join(missionDir(rootDir, slug), 'review-state.json'), 'utf8'));
+// After the TASK-2322.12 cutover the review loop's state lives on the Review
+// aggregate in the operator database, not in missions/<slug>/review-state.json.
+// This suite stays black-box about that: it asks the CLI for the state through
+// `px review <slug> --status`, which reads the same authority the loop writes.
+// A mission whose loop never persisted its state therefore still fails here,
+// exactly as the missing-file read used to.
+function reviewState(rootDir, slug, env) {
+  const result = runWorkflow(rootDir, env, ['review', slug, '--status']);
+  const output = `${result.stdout}${result.stderr}`.replace(/\x1B\[[0-9;]*m/g, '');
+  if (/No persisted review state found/.test(output)) {
+    throw new Error(`px review ${slug} --status found no persisted review state\n${output}`);
+  }
+  const field = label => {
+    const match = output.match(new RegExp(`^\\s*${label}:\\s*(.+)$`, 'm'));
+    return match ? match[1].trim() : null;
+  };
+  const round = field('Round');
+  const phase = field('Phase');
+  if (phase === null) {
+    throw new Error(`px review ${slug} --status did not report a review phase\n${output}`);
+  }
+  return {
+    round: round === null ? null : Number(round),
+    phase,
+    reviewer: field('Reviewer'),
+    implementer: field('Implementer'),
+    startedAt: field('Started at'),
+    disposition: field('Disposition')
+  };
 }
 
 function reviewEventFiles(rootDir, slug) {
@@ -558,7 +585,7 @@ function runScenario({ launchFromFeatureBranch = false, integrate = true, postIn
 
     runWorkflow(worktree, env, ['active', slug, '--implementer', 'custom']);
 
-    const state = reviewState(worktree, slug);
+    const state = reviewState(worktree, slug, env);
     summary.active = {
       taskStatus: taskStatus(worktreeTask),
       checkpointFiles: checkpointFiles(worktree, slug),

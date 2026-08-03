@@ -70,10 +70,10 @@ function stageLaunchFingerprint(agentFamily: string, result: { sessionId?: strin
   ].join('|');
 }
 
-function markStageLaunchRecorded(
+async function markStageLaunchRecorded(
   state: Record<string, any> | null,
   opts: { stage: string; agentFamily: string; result?: Record<string, any>; slug: string; worktree?: string; writeReviewStateFn?: typeof writeReviewState }
-): boolean {
+): Promise<boolean> {
   const { stage, agentFamily, result, slug, worktree, writeReviewStateFn = writeReviewState } = opts || {};
   if (!state || !agentFamily) { return true; }
   const key = stageWindowKey(stage, agentFamily);
@@ -92,11 +92,11 @@ function markStageLaunchRecorded(
     ...(state.metadata.recordedStageLaunches || {}),
     [key]: [...recorded, fingerprint].slice(-20),
   };
-  persistReviewStateOrThrow(writeReviewStateFn, slug, state as ReviewState, worktree || process.cwd());
+  await persistReviewStateOrThrow(writeReviewStateFn, slug, state as ReviewState, worktree || process.cwd());
   return true;
 }
 
-export function recordStageStatsSafe(
+export async function recordStageStatsSafe(
   kind: 'review' | 'active',
   opts: {
     stage: string;
@@ -113,7 +113,7 @@ export function recordStageStatsSafe(
     writeReviewStateFn?: typeof writeReviewState;
     model?: string | null;
   }
-): void {
+): Promise<void> {
   const { stage, slug, rootDir, worktree, implementer, reviewer, result, sinceMs, log, state, writeReviewStateFn = writeReviewState, model = null } = opts;
   let durationMinutes = 0;
   if (result && result.startedAt && result.endedAt) {
@@ -122,14 +122,14 @@ export function recordStageStatsSafe(
   const telemetry = resolveStageTelemetry({ worktree: worktree || '', result: result || {}, sinceMs: sinceMs || 0 });
   try {
     const actorFamily = kind === 'review' ? reviewer : implementer;
-    if (state && actorFamily && !markStageLaunchRecorded(state, {
+    if (state && actorFamily && !(await markStageLaunchRecorded(state, {
       stage,
       agentFamily: actorFamily,
       result,
       slug,
       worktree,
       writeReviewStateFn
-    })) {
+    }))) {
       return;
     }
     try { getStats().accumulateStageStats({ stage, slug, rootDir, implementer, reviewer, telemetry, durationMinutes, model }); } catch { /* best-effort */ }
@@ -177,7 +177,7 @@ export function maybeUpdateGraphifyBeforeReview(
 // fallback identity selected by the launcher.
 // This helper detects the fallback, persists the new identity to review state
 // and the Backlog assignee, and returns the identity that should be polled for.
-export function applyAgentFallback(opts: {
+export async function applyAgentFallback(opts: {
   role: string;
   original: string;
   launchResult?: Record<string, any>;
@@ -188,7 +188,7 @@ export function applyAgentFallback(opts: {
   log?: (_msg: string) => void;
   writeReviewStateFn?: typeof writeReviewState;
   enforceTaskAssigneeFn?: typeof enforceTaskAssignee;
-}): string {
+}): Promise<string> {
   const { role, original, launchResult, state, slug, worktree, taskResolution, log = fmt.log.plain, writeReviewStateFn = writeReviewState, enforceTaskAssigneeFn } = opts;
   if (!launchResult || !launchResult.agent || launchResult.agent === original) {
     return original;
@@ -200,7 +200,7 @@ export function applyAgentFallback(opts: {
   } else {
     state.implementer = fallback;
   }
-  persistReviewStateOrThrow(writeReviewStateFn, slug, state as ReviewState, worktree || process.cwd());
+  await persistReviewStateOrThrow(writeReviewStateFn, slug, state as ReviewState, worktree || process.cwd());
   if (role === 'implementer' && taskResolution && taskResolution.ok) {
     if (enforceTaskAssigneeFn && !enforceTaskAssigneeFn(taskResolution.taskFile, fallback)) {
       log(fmt.status('WARN', `Could not enforce fallback implementer ${fallback} in backlog task.`));
@@ -209,17 +209,17 @@ export function applyAgentFallback(opts: {
   return fallback;
 }
 
-export function persistNormalizedPhaseRepair(
+export async function persistNormalizedPhaseRepair(
   slug: string,
   state: ReviewState,
   worktree: string,
   { log = fmt.log.plain, writeReviewStateFn = writeReviewState }: { log?: (_msg: string) => void; writeReviewStateFn?: typeof writeReviewState } = {}
-): void {
+): Promise<void> {
   if (!state || !state.phaseOriginal || (VALID_PHASES as readonly string[]).includes(state.phaseOriginal)) {
     return;
   }
   log(fmt.status('WARN', `Persisted review phase "${state.phaseOriginal}" is invalid. Repairing to "${state.phase}".`));
-  persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree);
+  await persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree);
   state.phaseOriginal = null;
 }
 
@@ -385,7 +385,7 @@ export async function handleGateFailureAutoBounce(
   const MAX_GATE_RETRY = 2;
 
   // Read persisted state to get current retry count
-  const persisted = readReviewStateFn(slug, worktree);
+  const persisted = await Promise.resolve(readReviewStateFn(slug, worktree));
   const retryCount = persisted && persisted.metadata && typeof persisted.metadata === 'object'
     ? (Number((persisted.metadata as any).gateFailureRetryCount) || 0)
     : 0;
@@ -463,9 +463,9 @@ export async function handleGateFailureAutoBounce(
   // Update review state with incremented retry count
   if (persisted) {
     const updatedState = { ...persisted, metadata };
-    persistReviewStateOrThrow(writeReviewStateFn, slug, updatedState as any, worktree);
+    await persistReviewStateOrThrow(writeReviewStateFn, slug, updatedState as any, worktree);
   } else {
-    persistReviewStateOrThrow(writeReviewStateFn, slug, { metadata } as any, worktree);
+    await persistReviewStateOrThrow(writeReviewStateFn, slug, { metadata } as any, worktree);
   }
 
   // Transition task back to active (implementer phase) without consuming reviewer cycle
@@ -484,7 +484,7 @@ export async function handleGateFailureAutoBounce(
     });
 
     // Apply any agent fallback if needed
-    implementer = applyAgentFallbackFn({
+    implementer = await applyAgentFallbackFn({
       role: 'implementer',
       original: implementer,
       launchResult,
@@ -688,7 +688,7 @@ export async function startReviewLoop(slug: string, opts: {
 
   // --reset: clear persisted state before starting
   if (reset) {
-    const resetResult = resetReviewStateFn(slug, worktree);
+    const resetResult = await resetReviewStateFn(slug, worktree);
     assertReviewStatePersisted(resetResult, { slug, phase: 'reset', round: null });
     if (resetResult.outcome === 'committed') {
       log(fmt.status('INFO', `Review state reset for ${slug}.`));
@@ -697,7 +697,7 @@ export async function startReviewLoop(slug: string, opts: {
 
   const agents = eligibleAgentsForStepFn('review');
 
-  const persisted = readReviewStateFn(slug, worktree);
+  const persisted = await Promise.resolve(readReviewStateFn(slug, worktree));
 
   if (!implementer) {
     // Try to resume from persisted state
@@ -805,13 +805,13 @@ export async function startReviewLoop(slug: string, opts: {
           await transitionTaskFn(slug, 'active', { rootDir: worktree, log });
           log(fmt.status('INFO', `Auto-bounced ${slug} to active: declared-gate validation failure. Fix the gate in MISSION.md and retry.`));
           // Persist rejection reason for follow-up action
-          const persisted = readReviewStateFn(slug, worktree);
+          const persisted = await Promise.resolve(readReviewStateFn(slug, worktree));
           const metadata = persisted && persisted.metadata && typeof persisted.metadata === 'object'
             ? { ...persisted.metadata }
             : {};
           metadata.gateFailureReason = 'validation-failed';
           metadata.gateFailureError = handoffObj.error;
-          persistReviewStateOrThrow(
+          await persistReviewStateOrThrow(
             writeReviewStateFn,
             slug,
             { ...(persisted || {}), metadata } as any,
@@ -1040,11 +1040,11 @@ export async function startReviewLoop(slug: string, opts: {
     // Commit the resume snapshot before entering the loop. This makes a
     // reviewer/implementer selection change durable without waiting for the
     // next state transition (which may advance the round first).
-    persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree);
+    await persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree);
   } else {
     state = new ReviewState(slug, { reviewer, implementer });
   }
-  persistNormalizedPhaseRepair(slug, state, worktree, { log, writeReviewStateFn });
+  await persistNormalizedPhaseRepair(slug, state, worktree, { log, writeReviewStateFn });
 
   if (persisted && state.round > 1 && !dryRun) {
     log(fmt.status('INFO', `Resuming review loop from round ${state.round} (${state.phase}).`));
@@ -1053,14 +1053,14 @@ export async function startReviewLoop(slug: string, opts: {
   // Human review is a terminal escape hatch for a reviewer-specific failure or
   // for the configured review-attempt budget. Keep the reason in durable state
   // so an implementer response can never be mistaken for a reviewer approval.
-  const escalateToHumanReview = (reason: string, disposition = state.disposition) => {
+  const escalateToHumanReview = async (reason: string, disposition = state.disposition) => {
     state.disposition = disposition || reason;
     state.metadata = {
       ...state.metadata,
       humanEscalationReason: reason,
       humanEscalatedAt: new Date().toISOString()
     };
-    persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree);
+    await persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree);
     log(fmt.status('INFO', `Autonomous review stopped: human review required after reviewer ${reason}.`));
   };
 
@@ -1161,7 +1161,7 @@ export async function startReviewLoop(slug: string, opts: {
 
           if (!dryRun) { await transitionTaskFn(slug, 'review', { rootDir: worktree, log }); }
           state.phase = 'reviewing';
-          persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree);
+          await persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree);
 
         }
 
@@ -1220,11 +1220,11 @@ export async function startReviewLoop(slug: string, opts: {
               });
             } catch (err: unknown) {
               error(fmt.status('FAIL', `Could not launch reviewer agent (${reviewer}): ${(err as Error).message}`));
-              escalateToHumanReview('REVIEWER_LAUNCH_FAILURE');
+              await escalateToHumanReview('REVIEWER_LAUNCH_FAILURE');
               return;
             }
 
-            reviewer = applyAgentFallbackFn({
+            reviewer = await applyAgentFallbackFn({
               role: 'reviewer', original: reviewer!, launchResult: reviewerLaunchResult,
               state: state as unknown as Record<string, any>, slug, worktree, taskResolution, log, writeReviewStateFn, enforceTaskAssigneeFn
             });
@@ -1246,7 +1246,6 @@ export async function startReviewLoop(slug: string, opts: {
           const reviewerArtifacts = await consumeReviewerArtifactsFn(slug, reviewer!, {
             worktree,
             tmpDir: artifactDir,
-            fallbackToTmp: true,
             readTokenFn,
             getCommentsFn: getCommentsFn as any,
             postCommentFn,
@@ -1286,7 +1285,7 @@ export async function startReviewLoop(slug: string, opts: {
           const stateAny = state as unknown as Record<string, any>;
           while ((stateAny['reviewerRetryCount'] || 0) < 2) {
             stateAny['reviewerRetryCount'] = (stateAny['reviewerRetryCount'] || 0) + 1;
-            persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree);
+            await persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree);
             const elapsedStr = formatElapsed(Date.now() - Date.parse(stateAny['startedAt'] as string));
             const recoveryPrompt = `RECOVERY: Reviewer timeout after ${elapsedStr}. Before resuming, compact the failed-attempt context and reload the locked mission goal and scope; committed checkpoint or gate evidence when present; current round and disposition; unresolved findings and implementer resolutions; the exact revision and review baseline; and reviewer retry ${stateAny['reviewerRetryCount']}/2. Please complete the review for ${branch}.`;
             log(fmt.status('INFO', `Round ${attempt}: relaunching reviewer (${reviewer}) with recovery prompt (retry ${stateAny['reviewerRetryCount']}/3)...`));
@@ -1300,11 +1299,11 @@ export async function startReviewLoop(slug: string, opts: {
               });
             } catch (err: unknown) {
               error(fmt.status('FAIL', `Could not relaunch reviewer agent (${reviewer}): ${(err as Error).message}`));
-              escalateToHumanReview('REVIEWER_LAUNCH_FAILURE');
+              await escalateToHumanReview('REVIEWER_LAUNCH_FAILURE');
               return;
             }
 
-            reviewer = applyAgentFallbackFn({
+            reviewer = await applyAgentFallbackFn({
               role: 'reviewer', original: reviewer!, launchResult: relaunchResult,
               state: state as unknown as Record<string, any>, slug, worktree, taskResolution, log, writeReviewStateFn, enforceTaskAssigneeFn
             });
@@ -1317,7 +1316,6 @@ export async function startReviewLoop(slug: string, opts: {
             const retryArtifacts = await consumeReviewerArtifactsFn(slug, reviewer!, {
               worktree,
               tmpDir: artifactDir,
-              fallbackToTmp: true,
               readTokenFn,
               getCommentsFn: getCommentsFn as any,
               postCommentFn,
@@ -1353,7 +1351,7 @@ export async function startReviewLoop(slug: string, opts: {
           if (isPollTimeout(reviewState) || !reviewState) {
             error(fmt.status('FAIL', `Reviewer ${reviewer} did not submit a usable formal review outcome after ${stateAny['reviewerRetryCount']} recovery retries.`));
             error('       Human intervention is required to complete or repair the review.');
-            escalateToHumanReview('REVIEWER_NON_APPROVAL');
+            await escalateToHumanReview('REVIEWER_NON_APPROVAL');
             return;
           }
         }
@@ -1369,7 +1367,7 @@ export async function startReviewLoop(slug: string, opts: {
       if (reviewState === 'APPROVED') {
         state.transitionTo('approved');
         state.disposition = reviewState as string;
-        persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree);
+        await persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree);
         log(fmt.status('PASS', 'Autonomous review stopped: reviewer approved the PR. Hand off to human review/integration.'));
         await transitionVirtualFn(transitionTaskFn, slug, 'approved', { log });
         return;
@@ -1465,7 +1463,7 @@ export async function startReviewLoop(slug: string, opts: {
         return;
       }
 
-      persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree);
+      await persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree);
       await transitionTaskFn(slug, 'active', { implementer, rootDir: worktree, log });
       if (implementer === 'autonomous' && !forgejoEnabled) {
         log(fmt.status('INFO', `Round ${attempt}: implementer identity is autonomous; skipping implementer launch and using local review artifacts only.`));
@@ -1484,7 +1482,7 @@ export async function startReviewLoop(slug: string, opts: {
           exit(1); return;
         }
 
-        implementer = applyAgentFallbackFn({
+        implementer = await applyAgentFallbackFn({
           role: 'implementer', original: implementer!, launchResult: implementerLaunchResult,
           state: state as unknown as Record<string, any>, slug, worktree, taskResolution, log, writeReviewStateFn, enforceTaskAssigneeFn
         });
@@ -1505,7 +1503,6 @@ export async function startReviewLoop(slug: string, opts: {
       const implementerArtifacts = await consumeImplementerArtifactsFn(slug, implementer!, {
         worktree,
         tmpDir: artifactDir,
-        fallbackToTmp: true,
         readTokenFn,
         getCommentsFn: getCommentsFn as any,
         postCommentFn,
@@ -1529,7 +1526,7 @@ export async function startReviewLoop(slug: string, opts: {
         const stateAny = state as unknown as Record<string, any>;
         while ((stateAny['implementerRetryCount'] || 0) < 2) {
           stateAny['implementerRetryCount'] = (stateAny['implementerRetryCount'] || 0) + 1;
-          persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree);
+          await persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree);
           const elapsedStr = formatElapsed(Date.now() - Date.parse(stateAny['startedAt'] as string));
           const recoveryPrompt = `RECOVERY: Implementer disposition timeout after ${elapsedStr}. Before resuming, compact the failed-attempt context and reload the locked mission goal and scope; committed checkpoint or gate evidence when present; current round and disposition; unresolved findings and implementer resolutions; the exact revision under review; and implementer retry ${stateAny['implementerRetryCount']}/2. Please provide a disposition (PUSHBACK_ALL, BLOCKED, PARKED, or continue with fixes) for ${branch}.`;
           log(fmt.status('INFO', `Round ${attempt}: relaunching implementer (${implementer}) with recovery prompt (retry ${stateAny['implementerRetryCount']}/3)...`));
@@ -1546,7 +1543,7 @@ export async function startReviewLoop(slug: string, opts: {
             exit(1); return;
           }
 
-          implementer = applyAgentFallbackFn({
+          implementer = await applyAgentFallbackFn({
             role: 'implementer', original: implementer!, launchResult: relaunchResult,
             state: state as unknown as Record<string, any>, slug, worktree, taskResolution, log, writeReviewStateFn, enforceTaskAssigneeFn
           });
@@ -1554,7 +1551,6 @@ export async function startReviewLoop(slug: string, opts: {
           const retryArtifacts = await consumeImplementerArtifactsFn(slug, implementer!, {
             worktree,
             tmpDir: artifactDir,
-            fallbackToTmp: true,
             readTokenFn,
             getCommentsFn: getCommentsFn as any,
             postCommentFn,
@@ -1577,7 +1573,7 @@ export async function startReviewLoop(slug: string, opts: {
         }
 
         if (isPollTimeout(disposition)) {
-          persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree);
+          await persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree);
           log(fmt.status('INFO', `Autonomous review stopped: excessive implementer timeout retries`));
           return;
         }
@@ -1608,7 +1604,7 @@ export async function startReviewLoop(slug: string, opts: {
     }
 
     if (isPollTimeout(disposition)) {
-      persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree);
+      await persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree);
       log(fmt.status('INFO', `Autonomous review stopped: excessive implementer timeout retries`));
       return;
     }
@@ -1621,14 +1617,14 @@ export async function startReviewLoop(slug: string, opts: {
       // decision. Preserve the response, return to reviewing, and let the
       // same persisted reviewer make the next decision in the next round.
       try { state.transitionTo('reviewing'); } catch (_) { /* ignore */ }
-      persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree);
+      await persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree);
       log(fmt.status('INFO', `Round ${attempt}: implementer responded to all findings. Continuing to reviewer re-review round ${attempt + 1}.`));
       continue;
     }
 
     if (disposition === 'BLOCKED' || disposition === 'PARKED') {
       state.disposition = disposition as string;
-      persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree);
+      await persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree);
       log(fmt.status('INFO', `Autonomous review stopped: implementer reported ${disposition}. Hand off to human review.`));
       return;
     }
@@ -1684,7 +1680,7 @@ export async function startReviewLoop(slug: string, opts: {
       }
     }
 
-    persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree);
+    await persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree);
     log(fmt.status('INFO', `Round ${attempt}: implementer made changes. Continuing to round ${attempt + 1}.`));
   }
 
@@ -1694,7 +1690,7 @@ export async function startReviewLoop(slug: string, opts: {
     humanEscalationReason: 'MAX_ATTEMPTS',
     humanEscalatedAt: new Date().toISOString()
   };
-  persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree);
+  await persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree);
   log(fmt.status('INFO', `Autonomous review stopped: reached ${maxAttempts} attempts. Hand off to human review.`));
 }
 

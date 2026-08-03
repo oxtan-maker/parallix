@@ -142,7 +142,7 @@ test('printIntegrationPreflight refuses to run with a null mission slug instead 
   assert.doesNotMatch(output, /expected mission\/null/);
 });
 
-test('buildIntegrationContext refuses to build a context for a null mission slug', () => {
-  assert.throws(() => buildIntegrationContext(null), /non-null mission slug/);
-  assert.throws(() => buildIntegrationContext(undefined), /non-null mission slug/);
+test('buildIntegrationContext refuses to build a context for a null mission slug', async () => {
+  await assert.rejects(() => buildIntegrationContext(null), /non-null mission slug/);
+  await assert.rejects(() => buildIntegrationContext(undefined), /non-null mission slug/);
 });

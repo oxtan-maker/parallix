@@ -115,6 +115,12 @@ const knownIntegrationTestFiles = new Set([
   'review-identity-placeholder.test.ts',
   'review.test.ts',
   'review-prompts.test.ts',
+  // TASK-2322.12: review state moved onto the operator database, so these open
+  // a real migrated SQLite file and a real git worktree. Their boundary markers
+  // live in test/fixtures/review-state-db.js, which the content heuristic above
+  // does not scan, so they are declared here instead.
+  'review-state.test.ts',
+  'review-state-class.test.ts',
   'task-1416-repro.test.ts',
   // TASK-2326: relocated from default suite — these cross a real process,
   // Git, or packaging boundary and are not hermetic unit tests.

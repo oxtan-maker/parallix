@@ -192,7 +192,7 @@ function resolveHistoricalClassification(slug: string, taskFile: string, rootDir
  * @param options Measurement-store selection. `dbPath`/`store` let fast
  *   isolated tests bind a temporary database instead of `<PARALLIX_HOME>`.
  */
-function collectHistoricalStatsBackfill(
+async function collectHistoricalStatsBackfill(
   rootDir = process.cwd(),
   options: { dbPath?: string; store?: unknown } = {},
 ) {
@@ -235,7 +235,7 @@ function collectHistoricalStatsBackfill(
     let implementerInfo: { implementer: string; prFixRounds: number; source: string } | null = null;
     let implementerError: string | null = null;
     try {
-      implementerInfo = s.deriveImplementerAndFixRounds(slug, rootDir);
+      implementerInfo = await s.deriveImplementerAndFixRounds(slug, rootDir);
     } catch (error) {
       implementerError = error instanceof Error ? error.message : String(error);
     }

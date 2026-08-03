@@ -346,12 +346,12 @@ function findUnverifiableGoalCheckRow(evidenceRows: string[], rootDir: string): 
   const isForgejoReviewEnabledFn = opts.isForgejoReviewEnabledFn || isForgejoReviewEnabled;
   const forgejoEnabled = isForgejoReviewEnabledFn(rootDir);
 
-  const { forgejoUser: reviewStateUser } = resolveReviewIdentity(slug, rootDir, {
+  const { forgejoUser: reviewStateUser } = await resolveReviewIdentity(slug, rootDir, {
   });
   const forgejoUser = reviewStateUser || backlog.getTaskImplementer(/** @type {string} */(taskResolution.taskFile));
 
   if (!forgejoUser) {
-    error('forgejoUser is required for performHandoff. Ensure review-state.json or the Backlog task has an agent family assigned.');
+    error('forgejoUser is required for performHandoff. Ensure the mission Review or the Backlog task has an agent family assigned.');
     return { ok: false, error: 'forgejoUser is required' };
   }
 
@@ -1134,7 +1134,7 @@ function buildAutoCheckpointContent(slug) {
  *
  * Computes actual NEL from the merge diff (primary..HEAD), reads the predicted
  * bucket from the mission's Refinement Signals, resolves review rounds from
- * review-state.json, and records the result through the checked Mission
+ * the Mission store, and records the result through the checked Mission
  * boundary. This command module stays an interface adapter: it observes Git and
  * the repository-owned mission documents, then hands domain values to
  * `MissionHandoffService`, which owns the rule and the durable write.

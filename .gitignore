@@ -32,3 +32,4 @@ reports/mutation/
 .build-staging.*
 build.retired.*
 /NOTICES
+parallix.db*

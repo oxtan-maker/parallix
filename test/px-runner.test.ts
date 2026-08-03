@@ -81,7 +81,24 @@ function runPx(args, options = {}) {
 // @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `cwd` absent from its inferred mock shape.
     cwd: options.cwd || repoRoot,
     encoding: 'utf8',
+// @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `env` absent from its inferred mock shape.
+    env: { ...process.env, ...(options.env || {}) },
   });
+}
+
+/**
+ * A review event is stored on the Review aggregate, so `px review-event` needs
+ * an operator database holding the mission's Review. Seed one under its own
+ * PARALLIX_HOME and hand that home to the spawned process.
+ */
+async function seedTargetReview(target) {
+  const { seedMissionDatabase } = require('./fixtures/review-state-db.js');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'px-target-home-'));
+  const restore = await seedMissionDatabase(home, target.slug, target.root);
+  // The seed points this process at the temp home; the spawned px reads it from
+  // the environment we pass explicitly, so restore ours immediately.
+  restore();
+  return home;
 }
 
 function skipIfSandboxBlocked(result) {
@@ -139,9 +156,10 @@ test('px version is equivalent to --version', () => {
   assert.match(output, /px: /);
 });
 
-test('px review-event writes only inside the caller cwd repo mission artifacts', () => {
+test('px review-event writes only inside the caller cwd repo mission artifacts', async () => {
   const target = makeTargetRepo({ slug: 'task-px-002' });
   try {
+    const home = await seedTargetReview(target);
     const result = runPx([
       'review-event', target.slug,
       '--type', 'human_note',
@@ -149,7 +167,7 @@ test('px review-event writes only inside the caller cwd repo mission artifacts',
       '--content', 'px proof content',
       '--timestamp', '2026-01-02T030405',
       '--skip-git',
-    ], { cwd: target.root });
+    ], { cwd: target.root, env: { PARALLIX_HOME: home } });
     const output = `${result.stdout}${result.stderr}`;
 
     assert.equal(result.status, 0, output);
@@ -168,9 +186,10 @@ test('px review-event writes only inside the caller cwd repo mission artifacts',
   }
 });
 
-test('px works from a different caller cwd without copying workflow source', () => {
+test('px works from a different caller cwd without copying workflow source', async () => {
   const target = makeTargetRepo({ slug: 'task-px-003' });
   try {
+    const home = await seedTargetReview(target);
     const result = runPx([
       'review-event', target.slug,
       '--type', 'human_note',
@@ -178,7 +197,7 @@ test('px works from a different caller cwd without copying workflow source', () 
       '--content', 'relative target proof',
       '--timestamp', '2026-01-02T030406',
       '--skip-git',
-    ], { cwd: target.root });
+    ], { cwd: target.root, env: { PARALLIX_HOME: home } });
     const output = `${result.stdout}${result.stderr}`;
 
     assert.equal(result.status, 0, output);
@@ -195,9 +214,10 @@ test('px works from a different caller cwd without copying workflow source', () 
   }
 });
 
-test('px defaults to the caller cwd when no target option is provided', () => {
+test('px defaults to the caller cwd when no target option is provided', async () => {
   const target = makeTargetRepo({ slug: 'task-px-004' });
   try {
+    const home = await seedTargetReview(target);
     const result = runPx([
       'review-event', target.slug,
       '--type', 'human_note',
@@ -205,7 +225,7 @@ test('px defaults to the caller cwd when no target option is provided', () => {
       '--content', 'cwd target proof',
       '--timestamp', '2026-01-02T030407',
       '--skip-git',
-    ], { cwd: target.root });
+    ], { cwd: target.root, env: { PARALLIX_HOME: home } });
     const output = `${result.stdout}${result.stderr}`;
 
     assert.equal(result.status, 0, output);

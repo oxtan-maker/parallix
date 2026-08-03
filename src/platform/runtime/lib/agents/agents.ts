@@ -311,7 +311,7 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
       }
     } else if (isAgentBlockedFn(chosen)) {
       // Pre-launch blocklist gate. An explicit `agent:` override (e.g. a pinned
-      // reviewer/implementer carried over from review-state.json) bypasses
+      // reviewer/implementer carried over from the mission's Review) bypasses
       // selectAgent's blocklist filter. Without this check, a known-blocked
       // family is relaunched immediately and the harness wastes a retry hitting
       // the same limit. Reroute through normal selection on the next iteration.

@@ -2,66 +2,38 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 const { ReviewState, readReviewState, normalizeReviewPhase } = require('../.test-runtime/lib/review/review-state');
+const { withMissionDatabase } = require('./fixtures/review-state-db.js');
+const { clearOperatorStateCache } = require('../.test-runtime/adapters/sqlite/adapter-factory');
 const { stageLaunchSinceMs } = require('../.test-runtime/lib/review/review-loop');
 const fmt = require('../.test-runtime/lib/core/fmt');
 
-function withTempMissionDir(slug, fn) {
-  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'review-state-class-test-'));
-
-  const missionDir = path.join(tmpRoot, 'docs', 'missions', '2026', slug);
-  fs.mkdirSync(missionDir, { recursive: true });
-  fs.writeFileSync(path.join(missionDir, 'MISSION.md'), `# Mission: ${slug}\n`);
-
-  const tasksDir = path.join(tmpRoot, 'backlog', 'tasks');
-  fs.mkdirSync(tasksDir, { recursive: true });
-
-  const { spawnSync } = require('child_process');
-  spawnSync('git', ['init'], { cwd: tmpRoot });
-  spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: tmpRoot });
-  spawnSync('git', ['config', 'user.name', 'Test'], { cwd: tmpRoot });
-  spawnSync('git', ['checkout', '-b', `mission/${slug}`], { cwd: tmpRoot });
-  spawnSync('git', ['add', '.'], { cwd: tmpRoot });
-  spawnSync('git', ['commit', '-m', 'init', '--allow-empty'], { cwd: tmpRoot });
-
-  const prev = process.cwd();
-  process.chdir(tmpRoot);
-
-  try {
-    fn(tmpRoot, missionDir, slug);
-  } finally {
-    process.chdir(prev);
-    fs.rmSync(tmpRoot, { recursive: true, force: true });
-  }
-}
-
-test('ReviewState class can be instantiated and saved', () => {
-  withTempMissionDir('task-class-1', (root, missionDir, slug) => {
+test('ReviewState class can be instantiated and saved', async () => {
+  await withMissionDatabase('task-class-1', async ({ root, slug }) => {
     const state = new ReviewState(slug, {
       reviewer: 'gemini',
       implementer: 'claude',
       round: 2,
       phase: 'fixing',
       disposition: 'REQUEST_CHANGES',
-      metadata: { foo: 'bar' }
+      metadata: { recordedStageLaunches: { 'review:gemini': ['gemini|s1|t0|t1|0'] } }
     });
 
     assert.equal(state.reviewer, 'gemini');
     assert.equal(state.phase, 'fixing');
     assert.equal(state.disposition, 'REQUEST_CHANGES');
-    assert.deepEqual(state.metadata, { foo: 'bar' });
+    assert.deepEqual(state.metadata, { recordedStageLaunches: { 'review:gemini': ['gemini|s1|t0|t1|0'] } });
 
-    const result = state.save(root);
+    const result = await state.save(root);
     assert.deepEqual(result, { outcome: 'committed' });
 
-    const loaded = readReviewState(slug, root);
+    const loaded = await readReviewState(slug, root);
     assert.ok(loaded instanceof ReviewState);
     assert.equal(loaded.reviewer, 'gemini');
     assert.equal(loaded.phase, 'fixing');
     assert.equal(loaded.disposition, 'REQUEST_CHANGES');
-    assert.deepEqual(loaded.metadata, { foo: 'bar' });
+    assert.deepEqual(loaded.metadata, { recordedStageLaunches: { 'review:gemini': ['gemini|s1|t0|t1|0'] } });
   });
 });
 
@@ -202,62 +174,49 @@ test('stageLaunchSinceMs windows the read to the current launch start (per-round
   assert.equal(stageLaunchSinceMs({ startedAt: 'not-a-date' }), 0);
 });
 
-test('ReviewState save returns unchanged when commit is non-zero and state path is clean', () => {
-  withTempMissionDir('task-save-noop', (root, missionDir, slug) => {
+test('ReviewState save reports write-failed when the mission has no review', async () => {
+  await withMissionDatabase('task-save-noreview', async ({ root, slug }) => {
     const state = new ReviewState(slug, {
-      reviewer: 'gemini',
+      reviewer: 'codex',
       implementer: 'claude',
       phase: 'fixing'
     });
-    const gitCalls = [];
-    const gitFn = (args) => {
-      gitCalls.push(args);
-      if (args.includes('commit')) return { status: 1, stderr: 'nothing to commit, working tree clean' };
-      if (args.includes('status')) return { status: 0, stdout: '' };
-      return { status: 0, stdout: '', stderr: '' };
-    };
+    const result = await state.save(root);
+    assert.equal(result.outcome, 'write-failed');
+    assert.match(result.diagnostic, /px handoff starts the review/);
+  }, { seedReview: false });
+});
 
-    assert.deepEqual(state.save(root, gitFn), { outcome: 'unchanged' });
-    assert.ok(gitCalls.some(args => args.includes('status') && args.includes('--porcelain')));
+test('ReviewState save reports write-failed when the operator database is unreachable', async () => {
+  await withMissionDatabase('task-save-nodb', async ({ root, slug, home }) => {
+    // Point PARALLIX_HOME at a file so opening the database cannot succeed.
+    const blocked = path.join(path.dirname(home), 'not-a-directory');
+    fs.writeFileSync(blocked, 'not a home\n');
+    const previous = process.env.PARALLIX_HOME;
+    process.env.PARALLIX_HOME = blocked;
+    await clearOperatorStateCache();
+    try {
+      const state = new ReviewState(slug, { reviewer: 'codex', implementer: 'claude' });
+      const result = await state.save(root);
+      assert.equal(result.outcome, 'write-failed');
+      assert.equal(result.stage, 'write');
+    } finally {
+      process.env.PARALLIX_HOME = previous;
+      await clearOperatorStateCache();
+    }
   });
 });
 
-test('ReviewState save returns commit-failed-dirty when git commit fails and file remains dirty', () => {
-  withTempMissionDir('task-save-fail', (root, missionDir, slug) => {
-    const state = new ReviewState(slug, {
-      reviewer: 'gemini',
-      implementer: 'claude',
-      phase: 'fixing'
-    });
-    const gitFn = (args) => {
-      if (args.includes('commit')) return { status: 1, stderr: 'commit failed' };
-      if (args.includes('status')) return { status: 0, stdout: 'M docs/missions/2026/task-save-fail/review-state.json\n' };
-      return { status: 0, stdout: '', stderr: '' };
-    };
+test('ReviewState save persists the phase transition the loop just made', async () => {
+  await withMissionDatabase('task-save-phase', async ({ root, slug }) => {
+    const state = await readReviewState(slug, root);
+    state.transitionTo('fixing');
+    state.disposition = 'REQUEST_CHANGES';
+    assert.deepEqual(await state.save(root), { outcome: 'committed' });
 
-    assert.deepEqual(state.save(root, gitFn), {
-      outcome: 'commit-failed-dirty',
-      stage: 'commit',
-      diagnostic: 'commit failed'
-    });
-  });
-});
-
-test('ReviewState save returns write-failed when atomic write throws', () => {
-  withTempMissionDir('task-save-write-fail', (root, missionDir, slug) => {
-    const state = new ReviewState(slug, { reviewer: 'codex', implementer: 'claude' });
-    const result = state.save(root, () => { throw new Error('git must not run'); }, () => { throw new Error('rename denied'); });
-    assert.deepEqual(result, { outcome: 'write-failed', stage: 'write', diagnostic: 'rename denied' });
-  });
-});
-
-test('ReviewState save returns add-failed when git add exits non-zero', () => {
-  withTempMissionDir('task-save-add-fail', (root, missionDir, slug) => {
-    const state = new ReviewState(slug, { reviewer: 'codex', implementer: 'claude' });
-    const gitFn = (args) => args.includes('add')
-      ? { status: 1, stdout: '', stderr: 'index locked' }
-      : { status: 0, stdout: '', stderr: '' };
-    assert.deepEqual(state.save(root, gitFn), { outcome: 'add-failed', stage: 'add', diagnostic: 'index locked' });
+    const reloaded = await readReviewState(slug, root);
+    assert.equal(reloaded.phase, 'fixing');
+    assert.equal(reloaded.disposition, 'REQUEST_CHANGES');
   });
 });
 
@@ -318,7 +277,7 @@ test('startReviewLoop preserves persisted round data when the reviewer identity 
       applyAgentFallbackFn: ({ original }) => original
     });
   } catch (err) {
-    if (!err.message.startsWith('process.exit(')) throw err;
+    if (!err.message.startsWith('process.exit(')) { throw err; }
   } finally {
     process.exit = originalExit;
     fmt.setLogger(previousLogger);

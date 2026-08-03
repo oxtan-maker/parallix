@@ -69,21 +69,22 @@ process.on('exit', () => {
 function publishTree(staging: string, published: string): void {
   // Preserve build/sea (owned by the SEA build script) so a bundle rebuild
   // does not wipe out the native executable while its smoke test runs in
-  // parallel (task-2286 integration suite).
-  const seaDir = path.join(published, 'sea');
-  const seaExists = fs.existsSync(seaDir);
-  const savedSea = seaExists ? path.join(root, `.sea-preserve.${process.pid}`) : null;
-  if (seaExists) { fs.renameSync(seaDir, savedSea!); }
-
+  // parallel (task-2286 integration suite). It is carried through inside the
+  // staging tree rather than parked outside and restored afterwards: restoring
+  // after the swap left build/sea/px missing for the whole duration of the
+  // retired-tree delete, and a concurrent spawn of the executable in that
+  // window failed with ENOENT.
   const retired = `${published}.retired.${process.pid}`;
   fs.rmSync(retired, RM_OPTIONS);
+
+  // From here to the second rename build/sea is unpublished; both steps are
+  // metadata-only renames within the same directory.
+  const seaDir = path.join(published, 'sea');
+  if (fs.existsSync(seaDir)) { fs.renameSync(seaDir, path.join(staging, 'sea')); }
   if (fs.existsSync(published)) { fs.renameSync(published, retired); }
   fs.renameSync(staging, published);
-  fs.rmSync(retired, RM_OPTIONS);
 
-  if (seaExists && savedSea) {
-    fs.renameSync(savedSea, path.join(published, 'sea'));
-  }
+  fs.rmSync(retired, RM_OPTIONS);
 }
 
 fs.rmSync(buildDir, RM_OPTIONS);

@@ -19,9 +19,11 @@ import {
   type MissionGoalCheckRecord,
   type MissionLabelRecord,
   type MissionRecord,
+  type MissionReviewEventRecord,
   type MissionReviewFindingRecord,
   type MissionReviewRecord,
   type MissionReviewResolutionRecord,
+  type MissionReviewStageLaunchRecord,
   type MissionReviewRoundRecord,
 } from './mission-serialization.js';
 
@@ -81,6 +83,8 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
       findings,
       resolutions,
       externalRefs,
+      stageLaunches,
+      reviewEvents,
     ] =
       await Promise.all([
         this.db.query<MissionLabelRecord>(
@@ -101,7 +105,7 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
         ),
         this.db.query<MissionReviewRecord>(
           `SELECT mission_id, intervention_requested_at, intervention_requested_by,
-                  intervention_reason
+                  intervention_reason, gate_failure_retry_count
            FROM mission_reviews WHERE mission_id = ?`,
           [id],
         ),
@@ -110,7 +114,9 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
                   provider_change_id, provider_url, source_branch, target_branch,
                   revision, reviewer, implementer, started_at, decision_kind,
                   decided_at, decision_comment, approval_source_kind,
-                  approval_source_provider, responded_at, resulting_revision
+                  approval_source_provider, responded_at, resulting_revision,
+                  phase, disposition, reviewer_retry_count, implementer_retry_count,
+                  implementer_response_content, item_dispositions, blocked_reason
            FROM mission_review_rounds WHERE mission_id = ? ORDER BY position`,
           [id],
         ),
@@ -131,6 +137,19 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
            FROM mission_external_task_refs WHERE mission_id = ?`,
           [id],
         ),
+        this.db.query<MissionReviewStageLaunchRecord>(
+          `SELECT mission_id, stage_key, position, fingerprint
+           FROM mission_review_stage_launches
+           WHERE mission_id = ? ORDER BY stage_key, position`,
+          [id],
+        ),
+        this.db.query<MissionReviewEventRecord>(
+          `SELECT mission_id, position, event_type, round_number, phase, actor,
+                  content, disposition, verdict, item_dispositions, blocked_reason, followup_reference, created_at
+           FROM mission_review_events
+           WHERE mission_id = ? ORDER BY position`,
+          [id],
+        ),
       ]);
 
     const hydrated = hydrateMission({
@@ -143,6 +162,8 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
       reviewRounds,
       findings,
       resolutions,
+      stageLaunches,
+      reviewEvents,
     });
     return { kind: 'found', ...hydrated };
   }
@@ -326,6 +347,8 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
     await this.db.execute('DELETE FROM mission_reviews WHERE mission_id = ?', [id]);
     await this.db.execute('DELETE FROM mission_checkpoints WHERE mission_id = ?', [id]);
     await this.db.execute('DELETE FROM mission_labels WHERE mission_id = ?', [id]);
+    // mission_review_events, findings, resolutions, stage_launches are
+    // cascade-deleted via FK to mission_reviews.
   }
 
   private async insertAggregateValues(mission: Mission): Promise<void> {
@@ -385,13 +408,14 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
     await this.db.execute(
       `INSERT INTO mission_reviews
          (mission_id, intervention_requested_at, intervention_requested_by,
-          intervention_reason)
-       VALUES (?, ?, ?, ?)`,
+          intervention_reason, gate_failure_retry_count)
+       VALUES (?, ?, ?, ?, ?)`,
       [
         mission.id,
         review.intervention?.requestedAt ?? null,
         review.intervention?.requestedBy ?? null,
         review.intervention?.reason ?? null,
+        review.gateFailureRetryCount,
       ],
     );
 
@@ -405,8 +429,10 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
             provider_change_id, provider_url, source_branch, target_branch,
             revision, reviewer, implementer, started_at, decision_kind,
             decided_at, decision_comment, approval_source_kind,
-            approval_source_provider, responded_at, resulting_revision)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            approval_source_provider, responded_at, resulting_revision,
+            phase, disposition, reviewer_retry_count, implementer_retry_count,
+            implementer_response_content, item_dispositions, blocked_reason)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           mission.id,
           roundPosition,
@@ -428,6 +454,13 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
           approval?.kind === 'provider' ? approval.provider : null,
           round.response?.respondedAt ?? null,
           round.response?.resultingRevision ?? null,
+          round.phase,
+          round.disposition,
+          round.reviewerRetryCount,
+          round.implementerRetryCount,
+          round.implementerResponseContent ?? null,
+          round.itemDispositions ? JSON.stringify(round.itemDispositions) : null,
+          round.blockedReason ?? null,
         ],
       );
 
@@ -465,6 +498,42 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
           );
         }
       }
+    }
+
+    for (const window of review.stageLaunches) {
+      for (const [position, fingerprint] of window.fingerprints.entries()) {
+        await this.db.execute(
+          `INSERT INTO mission_review_stage_launches
+             (mission_id, stage_key, position, fingerprint)
+           VALUES (?, ?, ?, ?)`,
+          [mission.id, window.stageKey, position, fingerprint],
+        );
+      }
+    }
+
+    // Insert review events (audit trail, replaces .md files)
+    for (const [position, event] of review.reviewEvents.entries()) {
+      await this.db.execute(
+        `INSERT INTO mission_review_events
+           (mission_id, position, event_type, round_number, phase, actor,
+            content, disposition, verdict, item_dispositions, blocked_reason, followup_reference, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          mission.id,
+          position,
+          event.eventType,
+          event.roundNumber,
+          event.phase,
+          event.actor,
+          event.content,
+          event.disposition,
+          event.verdict,
+          event.itemDispositions ? JSON.stringify(event.itemDispositions) : null,
+          event.blockedReason,
+          event.followUpReference,
+          event.createdAt,
+        ],
+      );
     }
   }
 }

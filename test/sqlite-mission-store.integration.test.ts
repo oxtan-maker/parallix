@@ -92,6 +92,10 @@ function completeReview(): Review {
         }],
         resultingRevision: changeRevision('def456'),
       },
+      phase: 'pending-approval',
+      disposition: 'CHANGES_MADE',
+      reviewerRetryCount: 2,
+      implementerRetryCount: 1,
     }, {
       number: 2,
       subject: {
@@ -112,12 +116,23 @@ function completeReview(): Review {
         source: { kind: 'provider', provider: 'forgejo' },
       },
       response: null,
+      phase: 'approved',
+      disposition: 'APPROVED',
+      reviewerRetryCount: 0,
+      implementerRetryCount: 0,
     }],
     intervention: {
       requestedAt: '2026-07-29T10:50:00Z',
       requestedBy: 'workflow',
       reason: 'Awaiting operator confirmation',
     },
+    // Canonical (stage-key sorted) order, matching what a reload produces.
+    stageLaunches: [
+      { stageKey: 'fix:custom', fingerprints: ['custom|s3|t4|t5|0'] },
+      { stageKey: 'review:codex', fingerprints: ['codex|s1|t0|t1|0', 'codex|s2|t2|t3|0'] },
+    ],
+    gateFailureRetryCount: 2,
+    reviewEvents: [],
   };
 }
 

@@ -23,12 +23,12 @@ const { buildCompactReviewPrompt } = require('../.test-runtime/lib/review/review
 // buildMetadataFooter tests
 // ============================================================================
 
-test('buildMetadataFooter returns empty string when no review state exists', () => {
-  const result = buildMetadataFooter('test-slug', '/nonexistent');
+test('buildMetadataFooter returns empty string when no review state exists', async () => {
+  const result = await buildMetadataFooter('test-slug', '/nonexistent');
   assert.equal(result, '');
 });
 
-test('buildMetadataFooter returns footer with round and phase from state', () => {
+test('buildMetadataFooter returns footer with round and phase from state', async () => {
   // Create a temporary review-state.json
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-metadata-'));
   const statePath = path.join(tmpDir, 'review-state.json');
@@ -41,7 +41,7 @@ test('buildMetadataFooter returns footer with round and phase from state', () =>
   }, null, 2));
 
   // Override readReviewStateFn to read from our custom path
-  const result = buildMetadataFooter('test-slug', tmpDir);
+  const result = await buildMetadataFooter('test-slug', tmpDir);
   // This will use the real readReviewState which looks in tmpDir
   // But since we're not in a mission directory structure, we need to mock it
   // For now, just verify the function doesn't crash
@@ -159,16 +159,16 @@ test('normalizeDisposition works', () => {
 // postWorkflowComment tests
 // ============================================================================
 
-test('postWorkflowComment returns ok:false when no forgejoUser can be determined', () => {
-  const result = postWorkflowComment('test-slug', 'test message', {
+test('postWorkflowComment returns ok:false when no forgejoUser can be determined', async () => {
+  const result = await postWorkflowComment('test-slug', 'test message', {
     readReviewStateFn: () => null,
     rootDir: '/nonexistent'
   });
   assert.equal(result.ok, false);
 });
 
-test('postWorkflowComment returns ok:false when no token found', () => {
-  const result = postWorkflowComment('test-slug', 'test message', {
+test('postWorkflowComment returns ok:false when no token found', async () => {
+  const result = await postWorkflowComment('test-slug', 'test message', {
     forgejoUser: 'test-user',
     readTokenFn: () => null,
     rootDir: '/nonexistent'
@@ -176,7 +176,7 @@ test('postWorkflowComment returns ok:false when no token found', () => {
   assert.equal(result.ok, false);
 });
 
-test('postWorkflowComment infers forgejoUser from review state', () => {
+test('postWorkflowComment infers forgejoUser from review state', async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-comment-'));
   const statePath = path.join(tmpDir, 'review-state.json');
   fs.writeFileSync(statePath, JSON.stringify({
@@ -185,7 +185,7 @@ test('postWorkflowComment infers forgejoUser from review state', () => {
   }, null, 2));
 
   let capturedUser = null;
-  const result = postWorkflowComment('test-slug', 'test message', {
+  const result = await postWorkflowComment('test-slug', 'test message', {
     rootDir: tmpDir,
     readTokenFn: (user) => {
       capturedUser = user;
@@ -207,8 +207,8 @@ test('postWorkflowComment infers forgejoUser from review state', () => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
-test('postWorkflowComment handles postComment failure', () => {
-  const result = postWorkflowComment('test-slug', 'test message', {
+test('postWorkflowComment handles postComment failure', async () => {
+  const result = await postWorkflowComment('test-slug', 'test message', {
     forgejoUser: 'test-user',
     readTokenFn: () => 'mock-token',
     postCommentFn: () => ({ ok: false, error: 'API error' }),
@@ -223,16 +223,16 @@ test('postWorkflowComment handles postComment failure', () => {
 // postWorkflowReview tests
 // ============================================================================
 
-test('postWorkflowReview returns ok:false when no forgejoUser can be determined', () => {
-  const result = postWorkflowReview('test-slug', 'approve', 'test message', {
+test('postWorkflowReview returns ok:false when no forgejoUser can be determined', async () => {
+  const result = await postWorkflowReview('test-slug', 'approve', 'test message', {
     readReviewStateFn: () => null,
     worktree: '/nonexistent'
   });
   assert.equal(result.ok, false);
 });
 
-test('postWorkflowReview returns ok:false when no token found', () => {
-  const result = postWorkflowReview('test-slug', 'approve', 'test message', {
+test('postWorkflowReview returns ok:false when no token found', async () => {
+  const result = await postWorkflowReview('test-slug', 'approve', 'test message', {
     forgejoUser: 'test-user',
     readTokenFn: () => null,
     worktree: '/nonexistent'
@@ -240,7 +240,7 @@ test('postWorkflowReview returns ok:false when no token found', () => {
   assert.equal(result.ok, false);
 });
 
-test('postWorkflowReview infers forgejoUser from review state (reviewer first)', () => {
+test('postWorkflowReview infers forgejoUser from review state (reviewer first)', async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-review-'));
   const statePath = path.join(tmpDir, 'review-state.json');
   fs.writeFileSync(statePath, JSON.stringify({
@@ -250,7 +250,7 @@ test('postWorkflowReview infers forgejoUser from review state (reviewer first)',
   }, null, 2));
 
   let capturedUser = null;
-  const result = postWorkflowReview('test-slug', 'approve', 'test message', {
+  const result = await postWorkflowReview('test-slug', 'approve', 'test message', {
     worktree: tmpDir,
     readTokenFn: (user) => {
       capturedUser = user;
@@ -272,8 +272,8 @@ test('postWorkflowReview infers forgejoUser from review state (reviewer first)',
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
-test('postWorkflowReview handles postReview failure', () => {
-  const result = postWorkflowReview('test-slug', 'approve', 'test message', {
+test('postWorkflowReview handles postReview failure', async () => {
+  const result = await postWorkflowReview('test-slug', 'approve', 'test message', {
     forgejoUser: 'test-user',
     readTokenFn: () => 'mock-token',
     getPrAuthorFn: () => null,
@@ -286,12 +286,12 @@ test('postWorkflowReview handles postReview failure', () => {
 });
 
 // task-1255: reviewer==author self-approval short-circuit + 422 passthrough
-test('postWorkflowReview skips the Forgejo POST when reviewer is the PR author', () => {
+test('postWorkflowReview skips the Forgejo POST when reviewer is the PR author', async () => {
   let postCalled = false;
   let writtenState = null;
   let recordedEvent = null;
   const warnings = [];
-  const result = postWorkflowReview('test-slug', 'approve', 'looks good', {
+  const result = await postWorkflowReview('test-slug', 'approve', 'looks good', {
     readTokenFn: () => 'mock-token',
     getPrAuthorFn: () => 'custom', // reviewer == PR author
     postReviewFn: () => { postCalled = true; return { ok: true }; },
@@ -322,8 +322,8 @@ test('postWorkflowReview skips the Forgejo POST when reviewer is the PR author',
   assert.ok(/different agent or .*human|human/i.test(warn), `WARN should instruct a different agent or human: ${warn}`);
 });
 
-test('postWorkflowReview surfaces real 422 status and body instead of "API error"', () => {
-  const result = postWorkflowReview('test-slug', 'approve', 'looks good', {
+test('postWorkflowReview surfaces real 422 status and body instead of "API error"', async () => {
+  const result = await postWorkflowReview('test-slug', 'approve', 'looks good', {
     forgejoUser: 'reviewer-agent',
     readTokenFn: () => 'mock-token',
     getPrAuthorFn: () => 'some-other-author', // not self => proceeds to POST
@@ -338,9 +338,9 @@ test('postWorkflowReview surfaces real 422 status and body instead of "API error
   assert.notEqual(result.error, 'API error');
 });
 
-test('postWorkflowReview posts normally when reviewer differs from PR author', () => {
+test('postWorkflowReview posts normally when reviewer differs from PR author', async () => {
   let postArgs = null;
-  const result = postWorkflowReview('test-slug', 'approve', 'looks good', {
+  const result = await postWorkflowReview('test-slug', 'approve', 'looks good', {
     forgejoUser: 'reviewer-agent',
     readTokenFn: () => 'mock-token',
     getPrAuthorFn: () => 'author-agent', // different => normal path
@@ -484,9 +484,11 @@ test('consumeReviewerArtifacts handles all three artifact files', async () => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
-// task-1264 SC1: TMPDIR != /tmp (explicit non-/tmp tmpDir) but artifacts were
-// written to /tmp by an old prompt. With fallbackToTmp the loop still finds them.
-test('consumeReviewerArtifacts recovers /tmp artifacts when fallbackToTmp is set and tmpDir != /tmp', async () => {
+// task-1264 / TASK-2322.12: artifacts are read from the configured artifact
+// directory only. The /tmp recovery path is gone, so an artifact written to
+// /tmp when the loop is looking elsewhere is not found — there is one place to
+// look, and the loop reports it plainly instead of guessing.
+test('consumeReviewerArtifacts does not recover artifacts written to /tmp when the artifact dir is elsewhere', async () => {
   const readFromTmpOnly = (p) => {
     if (!p.startsWith('/tmp/')) return null;
     if (p.includes('review-findings.md')) return 'test findings';
@@ -498,7 +500,6 @@ test('consumeReviewerArtifacts recovers /tmp artifacts when fallbackToTmp is set
   const result = await consumeReviewerArtifacts('test-slug', 'test-reviewer', {
     readArtifactFn: readFromTmpOnly,
     tmpDir: '/var/tmp',
-    fallbackToTmp: true,
     worktree: '/var/tmp',
     readReviewStateFn: () => null,
     createEventFn: () => ({ ok: true, path: '/mock/path' }),
@@ -508,15 +509,12 @@ test('consumeReviewerArtifacts recovers /tmp artifacts when fallbackToTmp is set
     error: () => {}
   });
 
-  assert.equal(result.consumed, true);
-  assert.equal(result.ok, true);
-  assert.equal(result.reviewState, 'APPROVED');
+  assert.equal(result.consumed, false);
 });
 
-// Mirror negative: without fallbackToTmp, an explicit non-/tmp tmpDir suppresses
-// the /tmp fallback (preserves scratch-dir test isolation), so /tmp artifacts are
-// not consumed.
-test('consumeReviewerArtifacts ignores /tmp artifacts when fallbackToTmp is not set (test isolation preserved)', async () => {
+// The same, stated from the other side: an explicit artifact dir is the only
+// place looked at, which is also what keeps a scratch-dir test isolated.
+test('consumeReviewerArtifacts ignores /tmp artifacts when the artifact dir is explicit (test isolation preserved)', async () => {
   const readFromTmpOnly = (p) => {
     if (!p.startsWith('/tmp/')) return null;
     if (p.includes('review-findings.md')) return 'test findings';
@@ -542,7 +540,7 @@ test('consumeReviewerArtifacts ignores /tmp artifacts when fallbackToTmp is not 
 
 // task-1264 SC1 (implementer side): same /tmp recovery for round-resolution /
 // review-disposition artifacts.
-test('consumeImplementerArtifacts recovers /tmp artifacts when fallbackToTmp is set and tmpDir != /tmp', async () => {
+test('consumeImplementerArtifacts does not recover artifacts written to /tmp when the artifact dir is elsewhere', async () => {
   const readFromTmpOnly = (p) => {
     if (!p.startsWith('/tmp/')) return null;
     if (p.includes('round-resolution.md')) return 'resolution body';
@@ -553,7 +551,6 @@ test('consumeImplementerArtifacts recovers /tmp artifacts when fallbackToTmp is 
   const result = await consumeImplementerArtifacts('test-slug', 'test-implementer', {
     readArtifactFn: readFromTmpOnly,
     tmpDir: '/var/tmp',
-    fallbackToTmp: true,
     worktree: '/var/tmp',
     readReviewStateFn: () => null,
     createEventFn: () => ({ ok: true, path: '/mock/path' }),
@@ -563,9 +560,7 @@ test('consumeImplementerArtifacts recovers /tmp artifacts when fallbackToTmp is 
     error: () => {}
   });
 
-  assert.equal(result.consumed, true);
-  assert.equal(result.ok, true);
-  assert.equal(result.disposition, 'CHANGES_MADE');
+  assert.equal(result.consumed, false);
 });
 
 test('consumeReviewerArtifacts returns REQUEST_CHANGES reviewState for request-changes verdict', async () => {
@@ -694,9 +689,12 @@ test('consumeImplementerArtifacts parses structured resolution content', async (
   assert.equal(result.consumed, true);
   assert.equal(result.ok, true);
   assert.equal(result.disposition, 'CHANGES_MADE');
-  assert.deepEqual(eventPayload.fixedItems, ['F1', 'F2']);
-  assert.deepEqual(eventPayload.pushedBackItems, ['P1']);
-  assert.deepEqual(eventPayload.parkedItems, []);
+  // The event carries the domain's item dispositions, not three parallel lists.
+  assert.deepEqual(eventPayload.itemDispositions, [
+    { kind: 'fixed', findingId: 'F1' },
+    { kind: 'fixed', findingId: 'F2' },
+    { kind: 'pushed_back', findingId: 'P1' },
+  ]);
 
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
@@ -736,7 +734,7 @@ test('consumeImplementerArtifacts handles BLOCKED disposition with blockedReason
 // Additional tests for uncovered branches in review-artifacts.js
 // ============================================================================
 
-test('postWorkflowComment falls back to human when review-state has no identity', () => {
+test('postWorkflowComment falls back to human when review-state has no identity', async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-comment-'));
   const statePath = path.join(tmpDir, 'review-state.json');
   fs.writeFileSync(statePath, JSON.stringify({
@@ -746,7 +744,7 @@ test('postWorkflowComment falls back to human when review-state has no identity'
   }, null, 2));
 
   let capturedUser = null;
-  const result = postWorkflowComment('test-slug', 'test message', {
+  const result = await postWorkflowComment('test-slug', 'test message', {
     rootDir: tmpDir,
     readTokenFn: (user) => {
       capturedUser = user;
@@ -764,7 +762,7 @@ test('postWorkflowComment falls back to human when review-state has no identity'
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
-test('postWorkflowReview falls back to human when review-state has no identity', () => {
+test('postWorkflowReview falls back to human when review-state has no identity', async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-review-'));
   const statePath = path.join(tmpDir, 'review-state.json');
   fs.writeFileSync(statePath, JSON.stringify({
@@ -774,7 +772,7 @@ test('postWorkflowReview falls back to human when review-state has no identity',
   }, null, 2));
 
   let capturedUser = null;
-  const result = postWorkflowReview('test-slug', 'approve', 'test message', {
+  const result = await postWorkflowReview('test-slug', 'approve', 'test message', {
     worktree: tmpDir,
     readTokenFn: (user) => {
       capturedUser = user;
@@ -792,7 +790,7 @@ test('postWorkflowReview falls back to human when review-state has no identity',
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
-test('postWorkflowComment handles forgejoUser from review-state implementer fallback', () => {
+test('postWorkflowComment handles forgejoUser from review-state implementer fallback', async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-comment-impl-'));
   const statePath = path.join(tmpDir, 'review-state.json');
   fs.writeFileSync(statePath, JSON.stringify({
@@ -805,7 +803,7 @@ test('postWorkflowComment handles forgejoUser from review-state implementer fall
   try {
     process.env.FORGEJO_USER = '';
     let capturedUser = null;
-    const result = postWorkflowComment('test-slug', 'test message', {
+    const result = await postWorkflowComment('test-slug', 'test message', {
       rootDir: tmpDir,
       forgejoUser: '',
       readTokenFn: (user) => {
@@ -827,7 +825,7 @@ test('postWorkflowComment handles forgejoUser from review-state implementer fall
   }
 });
 
-test('postWorkflowReview handles forgejoUser from review-state reviewer fallback', () => {
+test('postWorkflowReview handles forgejoUser from review-state reviewer fallback', async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-review-rev-'));
   const statePath = path.join(tmpDir, 'review-state.json');
   fs.writeFileSync(statePath, JSON.stringify({
@@ -840,7 +838,7 @@ test('postWorkflowReview handles forgejoUser from review-state reviewer fallback
   try {
     process.env.FORGEJO_USER = '';
     let capturedUser = null;
-    const result = postWorkflowReview('test-slug', 'approve', 'test message', {
+    const result = await postWorkflowReview('test-slug', 'approve', 'test message', {
       worktree: tmpDir,
       forgejoUser: '',
       readTokenFn: (user) => {
@@ -862,8 +860,8 @@ test('postWorkflowReview handles forgejoUser from review-state reviewer fallback
   }
 });
 
-test('postWorkflowComment fails when token not found', () => {
-  const result = postWorkflowComment('test-slug', 'test message', {
+test('postWorkflowComment fails when token not found', async () => {
+  const result = await postWorkflowComment('test-slug', 'test message', {
     forgejoUser: 'test-user',
     readTokenFn: () => null,
     postCommentFn: () => ({ ok: true }),
@@ -876,8 +874,8 @@ test('postWorkflowComment fails when token not found', () => {
   assert.equal(result.ok, false);
 });
 
-test('postWorkflowReview fails when token not found', () => {
-  const result = postWorkflowReview('test-slug', 'approve', 'test message', {
+test('postWorkflowReview fails when token not found', async () => {
+  const result = await postWorkflowReview('test-slug', 'approve', 'test message', {
     forgejoUser: 'test-user',
     readTokenFn: () => null,
     postReviewFn: () => ({ ok: true }),
@@ -1423,7 +1421,6 @@ test('REGRESSION task-1264: os.tmpdir() != /tmp + Forgejo off -> reviewer artifa
     // Consume with the real file reader (no readArtifactFn override).
     const result = await consumeReviewerArtifacts(slug, 'claude', {
       tmpDir: consumerDir,
-      fallbackToTmp: true,
       worktree: scratch,
       forgejoEnabled: false,
       readReviewStateFn: () => null,

@@ -107,8 +107,8 @@ test('inferHistoricalClassificationFromMissionDoc uses title fallback and return
   });
 });
 
-test('collectHistoricalStatsBackfill resolves done missions, skips non-done missions, and reports unresolved items', () => {
-  withFixture(root => {
+test('collectHistoricalStatsBackfill resolves done missions, skips non-done missions, and reports unresolved items', async () => {
+  await withFixture(async root => {
     initGitRepo(root);
 
     fs.writeFileSync(path.join(root, 'backlog', 'completed', 'task-2000 - Workflow fix.md'), [
@@ -158,7 +158,7 @@ test('collectHistoricalStatsBackfill resolves done missions, skips non-done miss
 
     commitAll(root, 'fixture');
 
-    const report = collectHistoricalStatsBackfill(root, { dbPath: path.join(root, 'parallix.db') });
+    const report = await collectHistoricalStatsBackfill(root, { dbPath: path.join(root, 'parallix.db') });
     const repoName = stats.resolveStatsRepoName(root);
 
     assert.equal(report.rows.length, 2);
@@ -194,8 +194,8 @@ test('collectHistoricalStatsBackfill resolves done missions, skips non-done miss
   });
 });
 
-test('collectHistoricalStatsBackfill falls back to git history for date and human implementer', () => {
-  withFixture(root => {
+test('collectHistoricalStatsBackfill falls back to git history for date and human implementer', async () => {
+  await withFixture(async root => {
     initGitRepo(root);
 
     fs.writeFileSync(path.join(root, 'backlog', 'completed', 'task-2003 - Human workflow cleanup.md'), [
@@ -214,7 +214,7 @@ test('collectHistoricalStatsBackfill falls back to git history for date and huma
 
     commitAll(root, 'task-2003 fixture');
 
-    const report = collectHistoricalStatsBackfill(root, { dbPath: path.join(root, 'parallix.db') });
+    const report = await collectHistoricalStatsBackfill(root, { dbPath: path.join(root, 'parallix.db') });
     const row = report.rows.find(item => item.mission === 'task-2003');
 
     assert.ok(row);
@@ -226,8 +226,8 @@ test('collectHistoricalStatsBackfill falls back to git history for date and huma
   });
 });
 
-test('collectHistoricalStatsBackfill reports unresolved task resolution and legacy classification fallback', () => {
-  withFixture(root => {
+test('collectHistoricalStatsBackfill reports unresolved task resolution and legacy classification fallback', async () => {
+  await withFixture(async root => {
     initGitRepo(root);
 
     writeMission(root, 'task-2006', [
@@ -254,7 +254,7 @@ test('collectHistoricalStatsBackfill reports unresolved task resolution and lega
 
     commitAll(root, 'task-2006 task-2007 fixture');
 
-    const report = collectHistoricalStatsBackfill(root, { dbPath: path.join(root, 'parallix.db') });
+    const report = await collectHistoricalStatsBackfill(root, { dbPath: path.join(root, 'parallix.db') });
     const resolved = report.rows.find(item => item.mission === 'task-2007');
 
     assert.ok(resolved);

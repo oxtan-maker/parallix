@@ -19,7 +19,7 @@ test('task-1380: STATS_HEADERS includes the closed column', () => {
     'STATS_HEADERS should include the "closed" column');
 });
 
-test('task-1380: recordIntegrationStats sets closed: yes', () => {
+test('task-1380: recordIntegrationStats sets closed: yes', async () => {
   const dbFile = path.join(
     fs.mkdtempSync(path.join(os.tmpdir(), 'task-1380-integration-')),
     'parallix.db'
@@ -40,7 +40,7 @@ test('task-1380: recordIntegrationStats sets closed: yes', () => {
   ].join('\n'));
 
   try {
-    const result = stats.recordIntegrationStats({
+    const result = await stats.recordIntegrationStats({
       slug: 'task-2000',
       rootDir: root,
       dbPath: dbFile,

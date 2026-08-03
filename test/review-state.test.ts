@@ -1,192 +1,137 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
 
-// We test the state file path resolution and the read/write contract
-// by temporarily pointing the module at a fake mission directory tree.
-
-function withTempMissionDir(slug, fn) {
-  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'review-state-test-'));
-
-  // Create a minimal docs/missions/2026/<slug>/ layout
-  const missionDir = path.join(tmpRoot, 'docs', 'missions', '2026', slug);
-  fs.mkdirSync(missionDir, { recursive: true });
-
-  // Minimal MISSION.md so findMissionDir can locate it
-  fs.writeFileSync(path.join(missionDir, 'MISSION.md'), `# Mission: ${slug}\n`);
-
-  // Minimal backlog/tasks dir
-  const tasksDir = path.join(tmpRoot, 'backlog', 'tasks');
-  fs.mkdirSync(tasksDir, { recursive: true });
-
-  // Git init so git commands work in the temp repo
-  const { spawnSync } = require('child_process');
-  spawnSync('git', ['init'], { cwd: tmpRoot });
-  spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: tmpRoot });
-  spawnSync('git', ['config', 'user.name', 'Test'], { cwd: tmpRoot });
-  spawnSync('git', ['checkout', '-b', `mission/${slug}`], { cwd: tmpRoot });
-  spawnSync('git', ['add', '.'], { cwd: tmpRoot });
-  spawnSync('git', ['commit', '-m', 'init', '--allow-empty'], { cwd: tmpRoot });
-
-  const prev = process.cwd();
-  process.chdir(tmpRoot);
-
-  try {
-    fn(tmpRoot, missionDir, slug);
-  } finally {
-    process.chdir(prev);
-    fs.rmSync(tmpRoot, { recursive: true, force: true });
-  }
-}
+const { withMissionDatabase } = require('./fixtures/review-state-db.js');
+const {
+  reviewStateFile,
+  readReviewState,
+  writeReviewState,
+  resetReviewState,
+} = require('../.test-runtime/lib/review/review-state');
 
 test('reviewStateFile returns null for unknown slug', () => {
-  const { reviewStateFile } = require('../.test-runtime/lib/review/review-state');
-  // Non-existent slug in the real repo
-  const result = reviewStateFile('task-nonexistent-zzz');
-  assert.equal(result, null);
+  assert.equal(reviewStateFile('task-nonexistent-zzz'), null);
 });
 
-test('readReviewState returns null when file does not exist', () => {
-  withTempMissionDir('task-rs-1', (root, missionDir, slug) => {
-    const { readReviewState } = require('../.test-runtime/lib/review/review-state');
-    assert.equal(readReviewState(slug), null);
+test('readReviewState returns null when the mission has no review', async () => {
+  await withMissionDatabase('task-rs-1', async ({ root, slug }) => {
+    assert.equal(await readReviewState(slug, root), null);
+  }, { seedReview: false });
+});
+
+test('readReviewState returns null for a mission the database does not hold', async () => {
+  await withMissionDatabase('task-rs-2', async ({ root }) => {
+    assert.equal(await readReviewState('task-rs-absent', root), null);
   });
 });
 
-test('readReviewState returns null for malformed JSON', () => {
-  withTempMissionDir('task-rs-2', (root, missionDir, slug) => {
-    const stateFile = path.join(missionDir, 'review-state.json');
-    fs.writeFileSync(stateFile, '{not valid json}', 'utf8');
-
-    const { readReviewState } = require('../.test-runtime/lib/review/review-state');
-    assert.equal(readReviewState(slug), null);
+test('readReviewState hydrates the loop view from the Review aggregate', async () => {
+  await withMissionDatabase('task-rs-3', async ({ root, slug }) => {
+    const state = await readReviewState(slug, root);
+    assert.ok(state, 'a seeded review should be readable');
+    assert.equal(state.reviewer, 'codex');
+    assert.equal(state.implementer, 'claude');
+    assert.equal(state.round, 1);
+    assert.equal(state.phase, 'reviewing');
+    assert.equal(state.disposition, null);
   });
 });
 
-test('readReviewState returns null for JSON missing reviewer/implementer', () => {
-  withTempMissionDir('task-rs-3', (root, missionDir, slug) => {
-    const stateFile = path.join(missionDir, 'review-state.json');
-    fs.writeFileSync(stateFile, JSON.stringify({ round: 1 }), 'utf8');
-
-    const { readReviewState } = require('../.test-runtime/lib/review/review-state');
-    assert.equal(readReviewState(slug), null);
-  });
-});
-
-test('writeReviewState writes a valid JSON file', () => {
-  withTempMissionDir('task-rs-4', (root, missionDir, slug) => {
-    // Stage initial commit so git commit has something
-    const { spawnSync } = require('child_process');
-    spawnSync('git', ['add', '-A'], { cwd: root });
-    spawnSync('git', ['commit', '-m', 'mission init', '--allow-empty-message'], { cwd: root });
-
-    const { writeReviewState, readReviewState } = require('../.test-runtime/lib/review/review-state');
-
-    const state = { reviewer: 'codex', implementer: 'claude', round: 1 };
-    const result = writeReviewState(slug, state);
+test('writeReviewState round-trips workflow state through the operator database', async () => {
+  await withMissionDatabase('task-rs-4', async ({ root, slug }) => {
+    const result = await writeReviewState(slug, {
+      reviewer: 'codex',
+      implementer: 'claude',
+      round: 2,
+      phase: 'fixing',
+      disposition: 'REQUEST_CHANGES',
+      reviewerRetryCount: 1,
+      implementerRetryCount: 2,
+      metadata: {
+        recordedStageLaunches: { 'review:codex': ['codex|s1|t0|t1|0'] },
+        gateFailureRetryCount: 1,
+      },
+    }, root);
     assert.deepEqual(result, { outcome: 'committed' });
 
-    const read = readReviewState(slug);
+    const read = await readReviewState(slug, root);
     assert.ok(read, 'state should be readable after write');
-    assert.equal(read.reviewer, 'codex');
-    assert.equal(read.implementer, 'claude');
-    assert.equal(read.round, 1);
-    assert.ok(read.startedAt, 'startedAt should be set');
+    assert.equal(read.round, 2, 'the loop advancing a round appends one to the aggregate');
+    assert.equal(read.phase, 'fixing');
+    assert.equal(read.disposition, 'REQUEST_CHANGES');
+    assert.equal(read.reviewerRetryCount, 1);
+    assert.equal(read.implementerRetryCount, 2);
+    assert.deepEqual(read.metadata.recordedStageLaunches, { 'review:codex': ['codex|s1|t0|t1|0'] });
+    assert.equal(read.metadata.gateFailureRetryCount, 1);
   });
 });
 
-test('writeReviewState reports commit failure if state remains dirty', () => {
-  withTempMissionDir('task-rs-4c', (root, missionDir, slug) => {
-    const { writeReviewState } = require('../.test-runtime/lib/review/review-state');
-    const logs = [];
-    const originalLog = console.log;
-    console.log = (msg) => logs.push(msg);
+test('writeReviewState records a human escalation as a review intervention', async () => {
+  await withMissionDatabase('task-rs-5', async ({ root, slug }) => {
+    await writeReviewState(slug, {
+      reviewer: 'codex',
+      implementer: 'claude',
+      round: 1,
+      phase: 'reviewing',
+      // Not a ReviewDisposition: the loop invents this one for the escalation.
+      disposition: 'MAX_ATTEMPTS',
+      metadata: {
+        humanEscalationReason: 'MAX_ATTEMPTS',
+        humanEscalatedAt: '2026-08-02T12:00:00.000Z',
+      },
+    }, root);
 
-    try {
-      const gitFn = (args) => {
-        if (args.includes('commit')) {
-          return { status: 1, stderr: 'commit failed' };
-        }
-        if (args.includes('status')) {
-          return { status: 0, stdout: 'M docs/missions/2026/task-rs-4c/review-state.json\n', stderr: '' };
-        }
-        return { status: 0, stdout: '', stderr: '' };
-      };
-      const state = { reviewer: 'codex', implementer: 'claude', round: 1 };
-      const result = writeReviewState(slug, state, root, gitFn);
-      assert.deepEqual(result, { outcome: 'commit-failed-dirty', stage: 'commit', diagnostic: 'commit failed' });
-    } finally {
-      console.log = originalLog;
-    }
+    const read = await readReviewState(slug, root);
+    assert.equal(read.metadata.humanEscalationReason, 'MAX_ATTEMPTS');
+    assert.equal(read.metadata.humanEscalatedAt, '2026-08-02T12:00:00.000Z');
   });
 });
 
-test('writeReviewState commits in the provided worktree even from the wrong cwd', () => {
-  withTempMissionDir('task-rs-4b', (root, missionDir, slug) => {
-    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'review-state-outside-'));
-    const previous = process.cwd();
+test('writeReviewState reports write-failed when the mission has no review', async () => {
+  await withMissionDatabase('task-rs-6', async ({ root, slug }) => {
+    const result = await writeReviewState(slug, { reviewer: 'codex', implementer: 'claude' }, root);
+    assert.equal(result.outcome, 'write-failed');
+    assert.match(result.diagnostic, /px handoff starts the review/);
+  }, { seedReview: false });
+});
 
-    try {
-      process.chdir(outsideDir);
-      const { writeReviewState } = require('../.test-runtime/lib/review/review-state');
-      const result = writeReviewState(slug, { reviewer: 'codex', implementer: 'claude', round: 2 }, root);
-      assert.deepEqual(result, { outcome: 'committed' });
-
-      const { spawnSync } = require('child_process');
-      const status = spawnSync('git', ['status', '--short'], { cwd: root, encoding: 'utf8' });
-      assert.equal(status.stdout.trim(), '');
-    } finally {
-      process.chdir(previous);
-      fs.rmSync(outsideDir, { recursive: true, force: true });
-    }
+test('writeReviewState reports write-failed for a mission the database does not hold', async () => {
+  await withMissionDatabase('task-rs-7', async ({ root }) => {
+    const result = await writeReviewState('task-rs-absent', { reviewer: 'codex', implementer: 'claude' }, root);
+    assert.equal(result.outcome, 'write-failed');
+    assert.match(result.diagnostic, /not in the operator database/);
   });
 });
 
-test('readReviewState reads from the provided rootDir, not process.cwd()', () => {
-  withTempMissionDir('task-rs-cross-cwd', (root, missionDir, slug) => {
-    const stateFile = path.join(missionDir, 'review-state.json');
-    fs.writeFileSync(stateFile, JSON.stringify({ reviewer: 'codex', implementer: 'gemini', round: 2, startedAt: '2026-01-01T00:00:00.000Z' }), 'utf8');
-
-    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'review-state-cross-'));
-    const previous = process.cwd();
-    try {
-      process.chdir(outsideDir);
-      const { readReviewState } = require('../.test-runtime/lib/review/review-state');
-      // Without rootDir: should return null (outsideDir has no mission)
-      assert.equal(readReviewState(slug), null);
-      // With rootDir pointing at the worktree: should find the state
-      const state = readReviewState(slug, root);
-      assert.ok(state, 'state should be readable via explicit rootDir even when cwd is wrong');
-      assert.equal(state.reviewer, 'codex');
-      assert.equal(state.implementer, 'gemini');
-      assert.equal(state.round, 2);
-    } finally {
-      process.chdir(previous);
-      fs.rmSync(outsideDir, { recursive: true, force: true });
-    }
-  });
+test('resetReviewState returns unchanged when the mission has no review', async () => {
+  await withMissionDatabase('task-rs-8', async ({ root, slug }) => {
+    assert.deepEqual(await resetReviewState(slug, root), { outcome: 'unchanged' });
+  }, { seedReview: false });
 });
 
-test('resetReviewState returns unchanged when no state exists', () => {
-  withTempMissionDir('task-rs-5', (root, missionDir, slug) => {
-    const { resetReviewState } = require('../.test-runtime/lib/review/review-state');
-    assert.deepEqual(resetReviewState(slug), { outcome: 'unchanged' });
-  });
-});
+test('resetReviewState clears loop bookkeeping but keeps the review conversation', async () => {
+  await withMissionDatabase('task-rs-9', async ({ root, slug }) => {
+    await writeReviewState(slug, {
+      reviewer: 'codex',
+      implementer: 'claude',
+      round: 1,
+      phase: 'fixing',
+      disposition: 'REQUEST_CHANGES',
+      reviewerRetryCount: 2,
+      metadata: {
+        recordedStageLaunches: { 'review:codex': ['codex|s1|t0|t1|0'] },
+        gateFailureRetryCount: 2,
+      },
+    }, root);
 
-test('resetReviewState removes the state file', () => {
-  withTempMissionDir('task-rs-6', (root, missionDir, slug) => {
-    const stateFile = path.join(missionDir, 'review-state.json');
-    fs.writeFileSync(stateFile, JSON.stringify({ reviewer: 'codex', implementer: 'claude', round: 1 }), 'utf8');
+    assert.deepEqual(await resetReviewState(slug, root), { outcome: 'committed' });
 
-    const { resetReviewState, readReviewState } = require('../.test-runtime/lib/review/review-state');
-
-    const deleted = resetReviewState(slug);
-    assert.deepEqual(deleted, { outcome: 'unchanged' });
-    assert.equal(fs.existsSync(stateFile), false);
-    assert.equal(readReviewState(slug), null);
+    const read = await readReviewState(slug, root);
+    assert.ok(read, 'the review itself survives a reset');
+    assert.equal(read.phase, 'reviewing');
+    assert.equal(read.disposition, null);
+    assert.equal(read.reviewerRetryCount, 0);
+    assert.deepEqual(read.metadata, {}, 'stage launches and the gate budget are cleared');
   });
 });

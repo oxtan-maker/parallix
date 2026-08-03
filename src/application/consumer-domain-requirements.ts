@@ -196,7 +196,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'retry-review-round-counters',
     family: 'retry',
     fileLocation: 'src/platform/runtime/lib/review/review-commands.ts',
-    line: 980,
+    line: 1072,
     anchor: 'state.reviewerRetryCount',
     reads: ['Review'],
     requirement:
@@ -259,7 +259,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'usage-stats-row-columns',
     family: 'usage-statistics',
     fileLocation: 'src/platform/runtime/lib/commands/stats.ts',
-    line: 102,
+    line: 101,
     anchor: 'const STATS_HEADERS',
     reads: ['AgentRunMeasurement'],
     requirement:
@@ -270,7 +270,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'usage-mission-key',
     family: 'usage-statistics',
     fileLocation: 'src/platform/runtime/lib/commands/stats.ts',
-    line: 437,
+    line: 436,
     anchor: 'function statsMissionKey',
     reads: ['Mission', 'MissionOutcome'],
     requirement:
@@ -296,7 +296,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'review-round-state',
     family: 'review',
     fileLocation: 'src/platform/runtime/lib/review/review-state.ts',
-    line: 223,
+    line: 411,
     anchor: 'export class ReviewState',
     reads: ['Review', 'Mission'],
     requirement:
@@ -318,7 +318,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'review-checkpoint-evidence',
     family: 'review',
     fileLocation: 'src/platform/runtime/lib/review/review-commands.ts',
-    line: 407,
+    line: 499,
     anchor: 'findCheckpointsFn(missionDir)',
     reads: ['CheckpointData', 'Mission'],
     requirement:
@@ -333,7 +333,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'ui-board-card',
     family: 'ui-board',
     fileLocation: 'src/application/projections/mission-board.ts',
-    line: 101,
+    line: 158,
     anchor: 'function projectMissionCard',
     reads: ['Mission', 'CheckpointData', 'Review'],
     requirement:
