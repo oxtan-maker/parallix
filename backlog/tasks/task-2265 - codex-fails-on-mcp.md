@@ -2,7 +2,7 @@
 id: TASK-2265
 title: codex fails on mcp
 status: backlog
-assignee: []
+assignee: [codex]
 created_date: '2026-07-10 09:33'
 labels: []
 dependencies: []
