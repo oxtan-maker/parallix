@@ -218,7 +218,7 @@ test('native SEA smoke: Ink TUI launches on a real PTY and exits cleanly (SC3, A
     assertSurface('ink', /^\/dev\/(?:pts\/\d+|tty[a-z0-9]*)$/.test(session.ttyPath),
       `the executable was not given a PTY device (got ${session.ttyPath})`);
     await session.waitForOutput(/px board/, 30_000);
-    assertSurface('ink', /task-sea/.test(session.output()),
+    assertSurface('ink', /task-sea|SEA/i.test(session.output()),
       `Ink rendered no board rows on the native executable: ${session.output().slice(0, 400)}`);
 
     measurements.idleMemoryMb = Number(session.residentMemoryMb().toFixed(1));

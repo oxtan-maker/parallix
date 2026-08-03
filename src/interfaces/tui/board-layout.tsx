@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, useStdout } from 'ink';
+import { Box, Text, useStdout } from 'ink';
 import type { BoardProjection, BoardStage } from '../../application/projections/board.js';
 import type { BoardLane } from '../../application/projections/mission-board.js';
 import { BOARD_LANES, LaneColumn, DEFAULT_VISIBLE_CARDS } from './lane-column.js';
@@ -113,6 +113,15 @@ function wipCountFor(projection: BoardProjection, lane: BoardLane): number {
   return projection.wipCounts.find((entry) => entry.lane === lane)?.count ?? 0;
 }
 
+function wipLimitFor(projection: BoardProjection, lane: BoardLane): number | undefined {
+  return projection.wipCounts.find((entry) => entry.lane === lane)?.wipLimit;
+}
+
+function medianCycleTimeFor(projection: BoardProjection, lane: BoardLane): number | null | undefined {
+  const entry = projection.metrics.medianCycleTimeByState.series.find((s) => s.lane === lane);
+  return entry?.value;
+}
+
 export interface BoardLayoutProps {
   readonly projection: BoardProjection;
   /** Board width. Defaults to the live terminal width. */
@@ -128,6 +137,8 @@ export interface BoardLayoutProps {
   readonly mode?: LayoutMode;
   readonly selectedMissionId?: string | null;
   readonly visibleStarts?: Partial<Record<BoardLane, number>>;
+  /** When true, the done lane renders as a narrow "DONE · N" strip. */
+  readonly doneCollapsed?: boolean;
 }
 
 /**
@@ -136,7 +147,7 @@ export interface BoardLayoutProps {
  * `columns`/`rows` exist so a caller (and the layout tests) can drive an exact
  * terminal size; when omitted the live dimensions are used.
  */
-export function BoardLayout({ projection, columns, rows, mode: modeOverride, selectedMissionId, visibleStarts }: BoardLayoutProps): React.ReactElement {
+export function BoardLayout({ projection, columns, rows, mode: modeOverride, selectedMissionId, visibleStarts, doneCollapsed = false }: BoardLayoutProps): React.ReactElement {
   // BoardShell supplies both dimensions in the live tree, leaving it as the
   // only resize subscriber. Standalone BoardLayout users retain live sizing.
   const detected = useTerminalDimensions(columns === undefined || rows === undefined);
@@ -148,25 +159,46 @@ export function BoardLayout({ projection, columns, rows, mode: modeOverride, sel
 
   return (
     <Box flexDirection={mode === 'wide' ? 'row' : 'column'} flexGrow={1}>
-      {BOARD_LANES.map((lane) => (
-        <Box
-          key={lane}
-          flexDirection="column"
-          flexBasis={mode === 'wide' ? 0 : undefined}
-          flexGrow={mode === 'wide' ? 1 : 0}
-          marginRight={mode === 'wide' ? 1 : 0}
-          marginBottom={mode === 'wide' ? 0 : 1}
-        >
-          <LaneColumn
-            stage={stageFor(projection, lane)}
-            count={wipCountFor(projection, lane)}
-            width={columnWidth}
-            maxVisibleCards={maxVisibleCards}
-            selectedMissionId={selectedMissionId}
-            visibleStart={visibleStarts?.[lane] ?? 0}
-          />
-        </Box>
-      ))}
+      {BOARD_LANES.map((lane) => {
+        /* When doneCollapsed is true, render the done lane as a narrow strip. */
+        if (lane === 'done' && doneCollapsed) {
+          const doneCount = wipCountFor(projection, 'done');
+          return (
+            <Box
+              key={lane}
+              flexDirection="column"
+              width={8}
+              justifyContent="center"
+              borderColor="gray"
+              borderStyle="single"
+            >
+              <Text bold color="gray">{'DONE'}</Text>
+              <Text color="gray">{` · ${doneCount}`}</Text>
+            </Box>
+          );
+        }
+        return (
+          <Box
+            key={lane}
+            flexDirection="column"
+            flexBasis={mode === 'wide' ? 0 : undefined}
+            flexGrow={mode === 'wide' ? 1 : 0}
+            marginRight={mode === 'wide' ? 1 : 0}
+            marginBottom={mode === 'wide' ? 0 : 1}
+          >
+            <LaneColumn
+              stage={stageFor(projection, lane)}
+              count={wipCountFor(projection, lane)}
+              wipLimit={wipLimitFor(projection, lane)}
+              medianCycleTime={medianCycleTimeFor(projection, lane)}
+              width={columnWidth}
+              maxVisibleCards={maxVisibleCards}
+              selectedMissionId={selectedMissionId}
+              visibleStart={visibleStarts?.[lane] ?? 0}
+            />
+          </Box>
+        );
+      })}
     </Box>
   );
 }

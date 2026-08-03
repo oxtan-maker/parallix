@@ -75,6 +75,8 @@ export interface BottleneckNarrative {
 export interface WipCountMetric {
   readonly lane: BoardLane;
   readonly count: number;
+  /** Optional configured WIP limit. When present, header renders "count/limit". */
+  readonly wipLimit?: number;
 }
 
 export interface OperationLogEntry {

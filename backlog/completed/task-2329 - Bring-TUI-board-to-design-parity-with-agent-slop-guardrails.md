@@ -1,11 +1,10 @@
 ---
 id: TASK-2329
 title: Bring TUI board to design parity with agent slop guardrails
-status: ready-for-integration
-assignee:
-  - custom
+status: done
+assignee: [custom]
 created_date: '2026-07-30 00:00'
-updated_date: '2026-08-03 16:39'
+updated_date: '2026-07-30 02:00'
 labels:
   - tui
   - board
@@ -25,14 +24,9 @@ references:
   - src/application/projections/agent-status.ts
   - src/application/controller/board-command.ts
   - src/application/controller/board-controller.ts
-  - >-
-    backlog/tasks/task-2283 -
-    Implement-local-web-operator-board-over-shared-contracts.md
-  - >-
-    backlog/tasks/task-2322.11 -
-    Complete-operator-state-repositories-and-shared-UI-projection-wiring.md
+  - backlog/tasks/task-2283 - Implement-local-web-operator-board-over-shared-contracts.md
+  - backlog/tasks/task-2322.11 - Complete-operator-state-repositories-and-shared-UI-projection-wiring.md
 priority: high
-ordinal: 69900
 ---
 
 ## Description

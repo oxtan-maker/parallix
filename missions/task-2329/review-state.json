@@ -1,0 +1,23 @@
+{
+  "reviewer": "claude",
+  "implementer": "custom",
+  "round": 4,
+  "startedAt": "2026-07-30T20:45:48.652Z",
+  "phase": "approved",
+  "disposition": "APPROVED",
+  "metadata": {
+    "recordedStageLaunches": {
+      "review:claude": [
+        "claude|c93d355c-4034-4c51-94e3-a4c7fd8b6dc3|2026-07-30T20:02:34.999Z|2026-07-30T20:07:20.803Z|0",
+        "claude|c93d355c-4034-4c51-94e3-a4c7fd8b6dc3|2026-07-30T20:20:24.724Z|2026-07-30T20:24:24.309Z|0",
+        "claude|c93d355c-4034-4c51-94e3-a4c7fd8b6dc3|2026-07-30T20:34:04.520Z|2026-07-30T20:38:30.903Z|0",
+        "claude|c93d355c-4034-4c51-94e3-a4c7fd8b6dc3|2026-07-30T20:46:21.222Z|2026-07-30T20:48:57.654Z|0"
+      ],
+      "follow-up:custom": [
+        "custom|019fb4a3-82f3-73f1-b3bb-6d64de924105|2026-07-30T20:19:50.649Z|2026-07-30T20:19:50.649Z|0",
+        "custom|019fb4a3-82f3-73f1-b3bb-6d64de924105|2026-07-30T20:33:30.179Z|2026-07-30T20:33:30.179Z|0",
+        "custom|019fb4a3-82f3-73f1-b3bb-6d64de924105|2026-07-30T20:45:47.561Z|2026-07-30T20:45:47.561Z|0"
+      ]
+    }
+  }
+}

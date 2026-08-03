@@ -1,0 +1,15 @@
+{
+  "slug": "task-2329",
+  "predictedBucket": "Large",
+  "actualNel": 740,
+  "actualBucket": "Large",
+  "reviewRounds": 1,
+  "capturedAt": "2026-07-30T20:01:08.820Z",
+  "artifacts": [
+    {
+      "kind": "git-range",
+      "location": "main..HEAD",
+      "byteSize": null
+    }
+  ]
+}

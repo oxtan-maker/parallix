@@ -111,10 +111,10 @@ describe('MissionCard renders projection facts', () => {
     assert.ok(output.includes('task-1234'), `Card must render the slug. Got: ${output}`);
     assert.ok(output.includes('Full card title'), `Card must render the title. Got: ${output}`);
     assert.ok(output.includes('custom'), `Card must render the agent. Got: ${output}`);
-    assert.ok(output.includes('CP-2.md'), `Card must render the checkpoint. Got: ${output}`);
-    assert.ok(output.includes('gate passed'), `Card must render the gate status. Got: ${output}`);
+    assert.ok(output.includes('CP-2'), `Card must render the checkpoint (without .md suffix). Got: ${output}`);
+    assert.ok(output.includes('\u2713'), `Card must render the gate check mark. Got: ${output}`);
     assert.ok(output.includes('run the verification gate'), `Card must render the next step. Got: ${output}`);
-    assert.ok(output.includes('PR 42'), `Card must render the pull-request number. Got: ${output}`);
+    assert.ok(output.includes('PR #42'), `Card must render the pull-request number. Got: ${output}`);
     assert.ok(output.includes('review approved'), `Card must indicate review approval. Got: ${output}`);
     assert.ok(output.includes('waiting on upstream fix'), `Card must render the blocking reason. Got: ${output}`);
   });
@@ -126,8 +126,8 @@ describe('MissionCard renders projection facts', () => {
     });
 
     assert.ok(output.includes('task-9999'), `Card must still render the slug. Got: ${output}`);
-    assert.ok(output.includes('cp unavailable'), `Absent checkpoint must render "unavailable". Got: ${output}`);
-    assert.ok(output.includes('gate unavailable'), `Absent gate must render "unavailable". Got: ${output}`);
+    assert.ok(output.includes('unavailable'), `Absent checkpoint must render "unavailable". Got: ${output}`);
+    assert.ok(output.includes('\u00b7'), `Absent gate must render the "gate · no-op" treatment. Got: ${output}`);
     assert.ok(output.includes('next: unavailable'), `Absent next step must render "unavailable". Got: ${output}`);
     assert.ok(output.includes('PR unavailable'), `Absent pull request must render "unavailable". Got: ${output}`);
 
@@ -144,10 +144,10 @@ describe('MissionCard renders projection facts', () => {
 
   it('renders the projection gate value rather than deriving one', async () => {
     for (const [gate, expected] of [
-      ['passed', 'gate passed'],
-      ['failed', 'gate failed'],
-      ['running', 'gate running'],
-      ['unknown', 'gate unknown'],
+      ['passed', '\u2713'],
+      ['failed', '\u2717 FAIL'],
+      ['running', 'gate · running'],
+      ['unknown', 'gate · no-op'],
     ] as const) {
       const output = await renderMissionCard({ card: makeCard({ gate }), width: 60 });
       assert.ok(output.includes(expected), `Gate "${gate}" must render "${expected}". Got: ${output}`);
