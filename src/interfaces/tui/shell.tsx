@@ -3,23 +3,23 @@ import { useApp, useInput, Box, Text } from 'ink';
 import type { Key } from 'ink';
 import type { BoardProjection } from '../../application/projections/board.js';
 import type { MissionCard } from '../../application/projections/mission-board.js';
-import type { MissionDetail } from '../../application/projections/mission-detail.js';
+import type { Capability } from '../../application/contracts.js';
 import type {
   BoardCommandDispatcher,
   BoardCommandKind,
   BoardCommandResult,
   BoardProgressSink,
 } from '../../application/controller/board-command.js';
-import { cancelledOutcome } from '../../application/controller/board-command.js';
+import { cancelledOutcome, unavailableCapability, isIntegratedCapability, unavailableReason } from '../../application/controller/board-command.js';
 import { BoardLayout, selectLayoutMode, useTerminalDimensions, MIN_LANE_WIDTH } from './board-layout.js';
 import { BOARD_LANES } from './lane-column.js';
-import { MissionDetailPanel } from './mission-detail-panel.js';
 import { createNavigationState, moveSelection, type NavigationKey } from './navigation.js';
 import { visibleCardsForHeight } from './board-layout.js';
-import { ActionBar, canDispatchAction } from './action-bar.js';
+import { canDispatchAction } from './action-bar.js';
 import { ConfirmationDialog } from './confirmation-dialog.js';
 import { OutcomeBanner } from './outcome-banner.js';
 import { FlowPanel } from './flow-panel.js';
+import { AgentStrip } from './agent-strip.js';
 
 // ---------------------------------------------------------------------------
 // TUI Shell — static read-only board from a BoardProjection
@@ -79,8 +79,6 @@ export interface BoardShellProps {
   readonly columns?: number;
   /** Terminal height override; defaults to the live terminal height. */
   readonly rows?: number;
-  /** Shared application projections keyed by mission id; the TUI never loads them itself. */
-  readonly missionDetails?: ReadonlyMap<string, MissionDetail>;
   /** Test and embedding override for initial view-only selection. */
   readonly initialSelectedMissionId?: string | null;
   /** Supplied by the composition root; the shell never constructs an effect adapter. */
@@ -98,7 +96,7 @@ export interface BoardShellProps {
  * Narrow terminal: attention rail above a single stacked column of lanes.
  * In headless mode (piped): Ink renders as static text dump.
  */
-export function BoardShell({ projection, columns, rows, missionDetails, initialSelectedMissionId, commandControllerFactory, refreshProjection, initialFlowOpen = false }: BoardShellProps): React.ReactElement {
+export function BoardShell({ projection, columns, rows, initialSelectedMissionId, commandControllerFactory, refreshProjection, initialFlowOpen = false }: BoardShellProps): React.ReactElement {
   const { exit } = useApp();
   const detected = useTerminalDimensions();
   const width = columns ?? detected.columns;
@@ -123,6 +121,7 @@ export function BoardShell({ projection, columns, rows, missionDetails, initialS
   const attnCount = projection.attentionQueue.filter(
     (item) => item.reason.kind !== 'none',
   ).length;
+  const throughput = projection.metrics.weeklyThroughput.series.at(-1)?.value ?? null;
   const maxVisibleCards = visibleCardsForHeight(mode, height);
   const [navigation, setNavigation] = React.useState(() => {
     const initial = createNavigationState(projection);
@@ -139,47 +138,81 @@ export function BoardShell({ projection, columns, rows, missionDetails, initialS
   const confirmationRef = React.useRef<{ kind: BoardCommandKind; mission: MissionCard } | null>(null);
   /** Which area the keyboard is focused on: rail or board. Defaults to board for backward compat. */
   const [focusedArea, setFocusedArea] = React.useState<'rail' | 'board'>('board');
+  /** Done lane collapsed to a narrow strip. Toggled with Shift+S. */
+  const [doneCollapsed, setDoneCollapsed] = React.useState(false);
   const controller = React.useMemo(() => commandControllerFactory?.((event) => {
     setLiveEvents((previous) => [...previous, event].sort((left, right) => left.sequence - right.sequence));
   }), [commandControllerFactory]);
-  const selectedMission = navigation.selectedMissionId
-    ? projection.stages.flatMap((stage) => stage.cards).find((card) => card.id === navigation.selectedMissionId) ?? null
-    : null;
 
   const startAction = (missionId: string): boolean => {
     const mission = projection.stages.flatMap((stage) => stage.cards).find((card) => card.id === missionId) ?? null;
     if (!mission || !canDispatchAction('active:execute', mission)) { return false; }
     setOutcome(null);
-    const nextConfirmation = { kind: 'active:execute', mission } as const;
+    const nextConfirmation = { kind: 'active:execute' as BoardCommandKind, mission };
     confirmationRef.current = nextConfirmation;
     setConfirmation(nextConfirmation);
     return true;
   };
 
+  /** Dispatch a lifecycle shortcut command.
+   * Integrated capabilities (active:execute) go through ConfirmationDialog
+   * with the same canDispatchAction guard as Enter.
+   * Unavailable capabilities report immediately without confirmation (R4). */
+  const dispatchLifecycle = (kind: BoardCommandKind) => {
+    if (!navigation.selectedMissionId) { return; }
+    const mission = projection.stages.flatMap((stage) => stage.cards).find((card) => card.id === navigation.selectedMissionId) ?? null;
+    if (!mission) { return; }
+    if (isIntegratedCapability(kind)) {
+      /* Integrated: gate on enablement (same check as Enter/startAction). */
+      if (!canDispatchAction(kind, mission)) { return; }
+      setOutcome(null);
+      const nextConfirmation = { kind, mission };
+      confirmationRef.current = nextConfirmation;
+      setConfirmation(nextConfirmation);
+    } else {
+      /* Unavailable capability — report immediately without confirmation dialog (R4). */
+      const reason = unavailableReason(kind) ?? `${kind} is not yet available`;
+      setOutcome(unavailableCapability(kind, reason));
+    }
+  };
+
   const confirmAction = async () => {
     const pendingConfirmation = confirmationRef.current;
     if (!pendingConfirmation || !controller) { return; }
-    const request = {
-      operationId: `board-${Date.now()}`,
-      kind: pendingConfirmation.kind,
-      missionId: pendingConfirmation.mission.id,
-      missionStatusAtRequest: pendingConfirmation.mission.status,
-      agent: pendingConfirmation.mission.agent,
-      capabilities: new Set(['active:execute'] as const),
-      cancellation: { requested: false },
-    } as const;
-    confirmationRef.current = null;
-    setConfirmation(null);
-    const result = await controller.dispatchWithStatus(request, pendingConfirmation.mission.status);
-    setOutcome(result);
-    if (result.error?.kind === 'conflict' && refreshProjection) {
-      const refreshed = await refreshProjection();
-      const refreshedMission = refreshed.stages.flatMap((stage) => stage.cards)
-        .find((card) => card.id === pendingConfirmation.mission.id) ?? pendingConfirmation.mission;
-      const nextConfirmation = { kind: 'active:execute', mission: refreshedMission } as const;
-      // Re-present, rather than retrying, with a fresh request on the next Enter.
-      confirmationRef.current = nextConfirmation;
-      setConfirmation(nextConfirmation);
+    const kind = pendingConfirmation.kind;
+    if (isIntegratedCapability(kind)) {
+      const request = {
+        operationId: `board-${Date.now()}`,
+        kind,
+        missionId: pendingConfirmation.mission.id,
+        missionStatusAtRequest: pendingConfirmation.mission.status,
+        agent: pendingConfirmation.mission.agent,
+        capabilities: new Set([kind as Capability] as const),
+        cancellation: { requested: false },
+      } as const;
+      confirmationRef.current = null;
+      setConfirmation(null);
+      const result = await controller.dispatchWithStatus(request, pendingConfirmation.mission.status);
+      setOutcome(result);
+      if (result.error?.kind === 'conflict' && refreshProjection) {
+        const refreshed = await refreshProjection();
+        const refreshedMission = refreshed.stages.flatMap((stage) => stage.cards)
+          .find((card) => card.id === pendingConfirmation.mission.id) ?? pendingConfirmation.mission;
+        const nextConfirmation = { kind, mission: refreshedMission };
+        // Re-present, rather than retrying, with a fresh request on the next Enter.
+        confirmationRef.current = nextConfirmation;
+        setConfirmation(nextConfirmation);
+      }
+    } else {
+      /* Defensive: unavailable capability after confirmation.
+       * Currently unreachable because dispatchLifecycle gates non-integrated
+       * kinds before creating the confirmation (shell.tsx:178-183), and
+       * startAction hardcodes active:execute. Kept for safety if the
+       * confirmation contract changes. */
+      const reason = unavailableReason(kind) ?? `${kind} is not yet available`;
+      confirmationRef.current = null;
+      setConfirmation(null);
+      setOutcome(unavailableCapability(kind, reason));
     }
   };
 
@@ -203,10 +236,6 @@ export function BoardShell({ projection, columns, rows, missionDetails, initialS
     return map;
   }, [projection.sourceFacts]);
 
-  const detailSourceState: 'current' | 'stale' | 'unavailable' = hasUnavailable
-    ? 'unavailable'
-    : hasStale ? 'stale' : 'current';
-
   return (
     <Box flexDirection="column" flexGrow={1}>
       {/* ═══ TOP BAR ═══ */}
@@ -217,6 +246,11 @@ export function BoardShell({ projection, columns, rows, missionDetails, initialS
           <Text color="gray">{` wip ${wipCount}`}</Text>
           <Text color="gray">{` · attention `}</Text>
           <Text color="yellow">{String(attnCount)}</Text>
+          {throughput !== null && (
+            <>
+              <Text color="gray">{` · ${throughput}/wk`}</Text>
+            </>
+          )}
         </Box>
         <Box>
           {(hasStale || hasUnavailable) && (
@@ -233,6 +267,12 @@ export function BoardShell({ projection, columns, rows, missionDetails, initialS
 
       {flowOpen && <FlowPanel metrics={projection.metrics} columns={width} />}
 
+      {/* ═══ AGENT STRIP ═══ */}
+      <AgentStrip
+        agentAvailability={projection.metrics.agentAvailability}
+        cards={projection.stages.flatMap((stage) => stage.cards)}
+      />
+
       {/* ═══ MAIN: attention rail + board, side by side or stacked ═══ */}
       <Box flexDirection={railBeside ? 'row' : 'column'} flexGrow={1} minHeight={15}>
         {/* ── ATTENTION RAIL ── */}
@@ -243,8 +283,9 @@ export function BoardShell({ projection, columns, rows, missionDetails, initialS
           borderColor="gray"
           paddingX={1}
         >
-          <Box>
+          <Box flexDirection="row" alignItems="center">
             <Text bold color="yellow">▲ NEEDS YOU NEXT</Text>
+            <Text color="gray">{' '}{attnCount}</Text>
           </Box>
           <Box flexDirection="column" flexGrow={1} paddingTop={1}>
             <AttentionItems
@@ -268,16 +309,10 @@ export function BoardShell({ projection, columns, rows, missionDetails, initialS
             rows={height}
             selectedMissionId={navigation.selectedMissionId}
             visibleStarts={navigation.visibleStarts}
+            doneCollapsed={doneCollapsed}
           />
         </Box>
       </Box>
-
-      <MissionDetailPanel
-        detail={navigation.selectedMissionId ? missionDetails?.get(navigation.selectedMissionId) ?? null : null}
-        sourceState={detailSourceState}
-      />
-
-      <ActionBar mission={selectedMission} selectedKind={confirmation?.kind ?? null} />
 
       {confirmation && <ConfirmationDialog kind={confirmation.kind} missionId={confirmation.mission.id} />}
       {outcome && <OutcomeBanner outcome={outcome} />}
@@ -299,8 +334,8 @@ export function BoardShell({ projection, columns, rows, missionDetails, initialS
         </Box>
         <Text color="gray">
           {showKeyboardHelp
-            ? 'arrows or WASD: move selection · f: toggle FLOW · ?: hide help · q / Ctrl+C: quit'
-            : 'arrows or WASD: move selection · f: FLOW · ?: keyboard help · q: quit'}
+            ? 'arrows/WASD: move · Enter: execute · Ctrl+D/A/R: lifecycle · Shift+S: done · f: FLOW · ?: hide help · q/Ctrl+C: quit'
+            : 'arrows/WASD: move · Enter: execute · Ctrl+D/A/R: lifecycle · Shift+S: done · f: FLOW · ?: help · q: quit'}
         </Text>
       </Box>
 
@@ -313,6 +348,7 @@ export function BoardShell({ projection, columns, rows, missionDetails, initialS
         }}
         onToggleHelp={() => setShowKeyboardHelp((visible) => !visible)}
         onToggleFlow={() => setFlowOpen((visible) => !visible)}
+        onToggleDone={() => setDoneCollapsed((c) => !c)}
         onEnterAttention={(missionId) => {
           setNavigation((previous) => ({ ...previous, selectedMissionId: missionId }));
           startAction(missionId);
@@ -326,6 +362,7 @@ export function BoardShell({ projection, columns, rows, missionDetails, initialS
           setConfirmation(null);
           setOutcome(cancelledOutcome('cancelled before dispatch'));
         }}
+        onLifecycle={dispatchLifecycle}
         queueItems={queueItems}
         focusedAttentionIndex={focusedAttentionIndex}
         setFocusedIdx={setFocusedAttentionIndex}
@@ -381,8 +418,11 @@ export function AttentionItems({ queue, selectedMissionId, focusedIndex, sourceS
             <Box>
               <Text wrap="end" dimColor>{attentionWhy(item.reason)}</Text>
             </Box>
-            <Box>
-              <Text wrap="end" color="gray">{`$ ${attentionCommand(item.card, item.reason)}`}</Text>
+            <Box flexDirection="row">
+              <Box flexGrow={1}>
+                <Text wrap="end" color="gray">{`$ ${attentionCommand(item.card, item.reason)}`}</Text>
+              </Box>
+              <Text color="green">{' run \u25b6'}</Text>
             </Box>
           </Box>
         );
@@ -450,17 +490,19 @@ function isUnmodifiedEnter(input: string, key: Pick<Key, 'return' | 'ctrl' | 'me
   return (input === '\r' || input === '\n' || key.return) && !key.ctrl && !key.meta;
 }
 
-function KeyHandler({ onExit, onNavigate, onToggleHelp, onToggleFlow, onEnterAttention, onStartAction, selectedMissionId, confirmationOpen, onConfirm, onCancel, queueItems: queueItemsList, focusedAttentionIndex: focusedIdx, setFocusedIdx, focusedArea, setFocusedArea }: {
+function KeyHandler({ onExit, onNavigate, onToggleHelp, onToggleFlow, onToggleDone, onEnterAttention, onStartAction, selectedMissionId, confirmationOpen, onConfirm, onCancel, onLifecycle, queueItems: queueItemsList, focusedAttentionIndex: focusedIdx, setFocusedIdx, focusedArea, setFocusedArea }: {
   readonly onExit: () => void;
   readonly onNavigate: (_key: NavigationKey | 'self') => void;
   readonly onToggleHelp: () => void;
   readonly onToggleFlow: () => void;
+  readonly onToggleDone: () => void;
   readonly onEnterAttention: (_missionId: string) => void;
   readonly onStartAction: (_missionId: string) => boolean;
   readonly selectedMissionId: string | null;
   readonly confirmationOpen: boolean;
   readonly onConfirm: () => void;
   readonly onCancel: () => void;
+  readonly onLifecycle: (_kind: BoardCommandKind) => void;
   readonly queueItems: readonly BoardProjection['attentionQueue'][number][];
   readonly focusedAttentionIndex: number;
   readonly setFocusedIdx: React.Dispatch<React.SetStateAction<number>>;
@@ -519,6 +561,30 @@ function KeyHandler({ onExit, onNavigate, onToggleHelp, onToggleFlow, onEnterAtt
 
     if ((input === 'f' || input === 'F') && !key.ctrl && !key.meta) {
       onToggleFlow();
+      return;
+    }
+
+    /* Lifecycle shortcuts: Ctrl+D = draft, Ctrl+A = activate, Ctrl+R = review.
+     * Ctrl+I (integrate) is excluded: Ink reports Ctrl+I as Tab (0x09) with ctrl:false,
+     * so it cannot be distinguished from the Tab focus-toggle binding. Confirmed limitation
+     * recorded in CP-4. */
+    if (key.ctrl && !key.meta && selectedMissionId) {
+      const lifecycleMap: Readonly<Record<string, BoardCommandKind>> = {
+        d: 'draft:create',
+        a: 'active:execute',
+        r: 'review:submit',
+      };
+      const kind = lifecycleMap[input];
+      if (kind) {
+        onLifecycle(kind);
+        return;
+      }
+    }
+
+    /* Shift+S: toggle done lane collapse.
+     * Ink reports Shift+S as input 'S' with no dedicated shift flag. */
+    if (input === 'S' && !key.ctrl && !key.meta) {
+      onToggleDone();
       return;
     }
 

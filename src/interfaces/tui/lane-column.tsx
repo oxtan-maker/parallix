@@ -35,6 +35,10 @@ export interface LaneColumnProps {
   readonly stage: BoardStage;
   /** WIP count for this lane, taken from `BoardProjection.wipCounts`. */
   readonly count: number;
+  /** Optional configured WIP limit. When present, header renders "count/limit". */
+  readonly wipLimit?: number;
+  /** Median cycle time for this lane (minutes). When present, rendered in header. */
+  readonly medianCycleTime?: number | null;
   /** Content width of the column, in columns. */
   readonly width?: number;
   /** Maximum cards rendered before the "+N more" indicator. */
@@ -55,6 +59,8 @@ export interface LaneColumnProps {
 export function LaneColumn({
   stage,
   count,
+  wipLimit,
+  medianCycleTime,
   width = DEFAULT_CARD_WIDTH,
   maxVisibleCards = DEFAULT_VISIBLE_CARDS,
   visibleStart = 0,
@@ -65,12 +71,18 @@ export function LaneColumn({
   const visible = cards.slice(start, start + Math.max(0, maxVisibleCards));
   const hidden = cards.length - start - visible.length;
 
+  const overLimit = wipLimit !== undefined && count > wipLimit;
+  const wipText = wipLimit !== undefined ? `${count}/${wipLimit}` : String(count);
+
   return (
     <Box flexDirection="column">
       <Box flexDirection="row">
         <Text color="gray">{'── '}</Text>
         <Text bold>{LANE_LABELS[stage.lane]}</Text>
-        <Text color="gray">{` ${count}`}</Text>
+        <Text color={overLimit ? 'yellow' : 'gray'} bold={overLimit}>{` ${wipText}`}</Text>
+        {medianCycleTime !== undefined && medianCycleTime !== null && (
+          <Text color="gray">{` med ${medianCycleTime}m`}</Text>
+        )}
       </Box>
 
       <Box flexDirection="column" paddingTop={1}>

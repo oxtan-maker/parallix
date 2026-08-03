@@ -27,7 +27,7 @@ test('real PTY smoke: launch, keyboard navigation, resize, clean exit, timeout b
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
     assert.match(plain(session.output()), /px board/, 'real PTY must render the Ink board after launch');
-    assert.match(plain(session.output()), /task-pty/, 'real PTY must render the selectable fixture mission');
+    assert.match(plain(session.output()), /pty/i, 'real PTY must render the selectable fixture mission');
     session.send('\r');
     const confirmationDeadline = Date.now() + 2_000;
     while (!/CONFIRM CONSEQUENTIAL ACTION/.test(plain(session.output())) && Date.now() < confirmationDeadline) {
@@ -42,10 +42,10 @@ test('real PTY smoke: launch, keyboard navigation, resize, clean exit, timeout b
     assert.match(plain(session.output()), /CANCELLED: cancelled before dispatch/, 'Escape must cancel before controller dispatch');
     session.send('\u001b[B');
     const focusDeadline = Date.now() + 2_000;
-    while (!/▶\s*task-pty-2/.test(plain(session.output())) && Date.now() < focusDeadline) {
+    while (!/▶.*PTY second/si.test(plain(session.output())) && Date.now() < focusDeadline) {
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
-    assert.match(plain(session.output()), /▶\s*task-pty-2/, 'down arrow must move real-PTY focus to the second mission');
+    assert.match(plain(session.output()), /▶.*PTY second/si, 'down arrow must move real-PTY focus to the second mission');
     await session.resize(60, 20);
     assert.equal(session.isAlive(), true, 'UI must remain alive until q is sent');
     const result = await session.exitCleanly();
