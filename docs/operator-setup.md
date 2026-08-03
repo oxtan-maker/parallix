@@ -153,24 +153,27 @@ The install is idempotent — re-running any command overwrites the target with 
 - **Claude**: Honors `$CLAUDE_CONFIG_DIR` to change the base config path.
 - **Opencode**: No env-var overrides; always writes to `~/.config/opencode/skills/graphify/`.
 
-## Codex isolated state — copy-seed
+## Codex configuration and isolated state
 
-Codex runs with `CODEX_HOME` set to `<worktree>/.workflow/codex-home/.codex`, so its config, auth, sessions, and rollout telemetry stay in the mission worktree. The operator `HOME` and `PATH` are retained, allowing nested commands such as `opencode` and `pi` to resolve operator-local installations. The global `~/.agents/skills/graphify/` is copied into the worktree-local Codex area so the mission keeps an explicit, isolated skill seed.
+Codex runs each mission with a worktree-local `CODEX_HOME`, preserving separate sessions, rollouts, and cache. When an originating Codex configuration or file-based auth file exists, the harness links it into that state root instead of copying its contents. This keeps configured MCP servers available while avoiding secret values in the mission worktree. The installed Graphify skill remains copied into the mission's Codex area, as before. The operator `HOME` and `PATH` remain available for nested commands such as `opencode` and `pi`.
 
-The Parallix harness handles this automatically. In `ensureCodexHome` (`lib/agents/codex.ts`), a plain `fs.cpSync` copies the global skill into the worktree-local Codex area. This mirrors the existing `auth.json` copy pattern:
+The Parallix harness handles this automatically in `ensureCodexHome`
+(`src/platform/runtime/lib/agents/codex.ts`):
 
 ```
-Source (operator's real HOME):
-  ~/.agents/skills/graphify/SKILL.md
+Source (originating CODEX_HOME):
+  config.toml and, when present, auth.json
 
-Target (worktree-local Codex seed):
-  <worktree>/.workflow/codex-home/.agents/skills/graphify/SKILL.md
+Targets (worktree-local Codex state):
+  <worktree>/.workflow/codex-home/.codex/config.toml
+  <worktree>/.workflow/codex-home/.codex/auth.json
 ```
 
-The copy is:
-- **Idempotent**: re-running `ensureCodexHome` leaves the target unchanged.
-- **Clean skip**: if no global skill is installed (`fs.existsSync` returns false), the copy step is silently skipped — config is still written, but no skill directory is created.
-- **Not a per-launch install**: this is a filesystem copy of an already-installed skill. No subprocess is spawned.
+The links are replaced safely on a repeat bootstrap. If the originating files
+do not exist, the mission still launches with its isolated Codex state root.
+When installed, `~/.agents/skills/graphify/` is also copied to
+`<worktree>/.workflow/codex-home/.agents/skills/graphify/`; it is instruction
+content and not a Codex configuration or credential file.
 
 ## Mistral Exclusion
 
@@ -183,7 +186,7 @@ After setup, an operator should be able to:
 1. Run `graphify install --platform claude` → skill at `~/.claude/skills/graphify/`
 2. Run `graphify install --platform codex` → skill at `~/.agents/skills/graphify/`
 3. Run `graphify install --platform opencode` → skill at `~/.config/opencode/skills/graphify/`
-4. Launch any mission — codex will receive the skill via the copy-seed in `ensureCodexHome`
+4. Launch any mission — Codex keeps isolated session state while linked MCP configuration remains available
 5. mistral agents will not receive a Graphify skill (by design)
 6. Switch custom runner to pi in workflow.config.json → uses Pi with configured vLLM models
 7. Add `"skills": ["~/.claude/skills"]` to `~/.pi/agent/settings.json` → pi custom runner gets Graphify too (no `graphify install --platform pi` needed)

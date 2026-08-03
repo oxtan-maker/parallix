@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-test('codex isolation repro keeps operator-home nested tool resolution while isolating Codex state', () => {
+test('codex launcher keeps operator-home nested tool resolution while isolating Codex state', () => {
   const { buildCodexDraftInvocation, codexStateRoot } = require('../.test-runtime/lib/agents/codex');
   const operatorHome = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2211-operator-home-'));
   const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2211-worktree-'));
@@ -30,34 +30,32 @@ test('codex isolation repro keeps operator-home nested tool resolution while iso
   }
 });
 
-test('Codex config, auth, skill seed, and rollout telemetry remain under the worktree state directory', () => {
+test('Codex setup links operator config and auth without copying their contents', () => {
   const codex = require('../.test-runtime/lib/agents/codex');
   const operatorHome = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2211-state-operator-home-'));
   const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2211-state-worktree-'));
   const originalHome = process.env.HOME;
+  const originalCodexHome = process.env.CODEX_HOME;
 
   try {
     process.env.HOME = operatorHome;
-    const operatorAuth = path.join(operatorHome, '.codex', 'auth.json');
-    const operatorSkill = path.join(operatorHome, '.agents', 'skills', 'graphify', 'SKILL.md');
-    fs.mkdirSync(path.dirname(operatorAuth), { recursive: true });
-    fs.mkdirSync(path.dirname(operatorSkill), { recursive: true });
-    fs.writeFileSync(operatorAuth, '{"token":"test"}\n');
-    fs.writeFileSync(operatorSkill, '# graphify\n');
+    const operatorCodexHome = path.join(operatorHome, '.codex');
+    fs.mkdirSync(operatorCodexHome, { recursive: true });
+    fs.writeFileSync(path.join(operatorCodexHome, 'config.toml'), '[mcp_servers.slack]\n');
+    fs.writeFileSync(path.join(operatorCodexHome, 'auth.json'), '{"token":"test"}\n');
+    process.env.CODEX_HOME = operatorCodexHome;
 
     codex.ensureCodexHome(worktree);
 
-    assert.ok(fs.existsSync(codex.codexConfigPath(worktree)), 'config must be worktree-local');
-    assert.equal(fs.readFileSync(codex.codexAuthPath(worktree), 'utf8'), '{"token":"test"}\n', 'auth copy must be worktree-local');
-    assert.ok(fs.existsSync(path.join(codex.codexHomeRoot(worktree), '.agents', 'skills', 'graphify', 'SKILL.md')), 'skill seed must be worktree-local');
-
-    const rollout = path.join(codex.codexStateRoot(worktree), 'sessions', '2026', '07', '10', 'rollout-test.jsonl');
-    fs.mkdirSync(path.dirname(rollout), { recursive: true });
-    fs.writeFileSync(rollout, JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { total_tokens: 3 } } } }) + '\n');
-    assert.equal(codex.extractCodexTelemetry(codex.codexHomeRoot(worktree)).totalTokens, 3, 'telemetry must be read from worktree-local CODEX_HOME');
+    assert.ok(fs.lstatSync(codex.codexConfigPath(worktree)).isSymbolicLink(), 'config must be linked, not copied into the worktree');
+    assert.ok(fs.lstatSync(codex.codexAuthPath(worktree)).isSymbolicLink(), 'auth must be linked, not copied into the worktree');
+    assert.equal(fs.readlinkSync(codex.codexConfigPath(worktree)), path.join(operatorCodexHome, 'config.toml'));
+    assert.equal(fs.readlinkSync(codex.codexAuthPath(worktree)), path.join(operatorCodexHome, 'auth.json'));
   } finally {
     if (originalHome === undefined) delete process.env.HOME;
     else process.env.HOME = originalHome;
+    if (originalCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = originalCodexHome;
     fs.rmSync(operatorHome, { recursive: true, force: true });
     fs.rmSync(worktree, { recursive: true, force: true });
   }

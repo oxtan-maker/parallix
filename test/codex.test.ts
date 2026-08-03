@@ -70,10 +70,17 @@ test('buildCodexDraftInvocation uses --last when resume is true but no sessionId
   assert.ok(inv.args.includes('--last'));
 });
 
-test('buildCodexDraftInvocation sets CODEX_HOME for non-interactive', () => {
+test('buildCodexDraftInvocation isolates CODEX_HOME for non-interactive launches', () => {
   const { buildCodexDraftInvocation, codexStateRoot } = require('../.test-runtime/lib/agents/codex');
-  const inv = buildCodexDraftInvocation({ prompt: 'test', worktree: '/tmp', interactive: false });
-  assert.equal(inv.options.env.CODEX_HOME, codexStateRoot('/tmp'));
+  const originalCodexHome = process.env.CODEX_HOME;
+  try {
+    process.env.CODEX_HOME = '/tmp/originating-codex-home';
+    const inv = buildCodexDraftInvocation({ prompt: 'test', worktree: '/tmp', interactive: false });
+    assert.equal(inv.options.env.CODEX_HOME, codexStateRoot('/tmp'));
+  } finally {
+    if (originalCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = originalCodexHome;
+  }
 });
 
 // ---------- codex home helpers ----------
@@ -93,149 +100,24 @@ test('codexAuthPath returns the expected path', () => {
   assert.ok(codexAuthPath('/tmp/worktree').includes('.codex/auth.json'));
 });
 
-test('headlessCodexConfig produces valid TOML', () => {
-  const { headlessCodexConfig } = require('../.test-runtime/lib/agents/codex');
-  const config = headlessCodexConfig('/tmp/worktree');
-  assert.ok(config.includes('sandbox_mode = "danger-full-access"'));
-  assert.ok(config.includes('trust_level = "trusted"'));
-  assert.ok(config.includes('approval_policy = "never"'));
+test('buildCodexDraftInvocation applies headless multi-agent and trust overrides', () => {
+  const { buildCodexDraftInvocation } = require('../.test-runtime/lib/agents/codex');
+  const inv = buildCodexDraftInvocation({ prompt: 'test', worktree: '/tmp/work"tree', interactive: false });
+  assert.ok(inv.args.includes('features.multi_agent=true'));
+  assert.ok(inv.args.includes('approval_policy="never"'));
+  assert.ok(inv.args.some(arg => arg.includes('trust_level="trusted"')));
+  assert.ok(inv.args.some(arg => arg.includes('\\"')));
 });
 
-test('headlessCodexConfig includes multi_agent = true for Graphify subagent support', () => {
-  const { headlessCodexConfig } = require('../.test-runtime/lib/agents/codex');
-  const config = headlessCodexConfig('/tmp/worktree');
-  assert.ok(config.includes('[features]'), 'must include [features] section');
-  assert.ok(config.includes('multi_agent = true'), 'must include multi_agent = true for Graphify Codex subagent dispatch');
-});
-
-test('headlessCodexConfig escapes double quotes in worktree path', () => {
-  const { headlessCodexConfig } = require('../.test-runtime/lib/agents/codex');
-  const config = headlessCodexConfig('/tmp/work"tree');
-  assert.ok(config.includes('\\"'));
-});
-
-// ---------- ensureCodexHome graphify skill copy-seed ----------
-
-test('ensureCodexHome seeds the global graphify skill into the worktree HOME', () => {
-  const { ensureCodexHome, codexHomeRoot } = require('../.test-runtime/lib/agents/codex');
-  const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-fakehome-'));
-  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-wt-'));
-  const origHome = process.env.HOME;
-  try {
-    // Seed a fake global install at $HOME/.agents/skills/graphify (os.homedir()
-    // honors $HOME on POSIX), mirroring `graphify install --platform codex`.
-    const globalSkill = path.join(fakeHome, '.agents', 'skills', 'graphify');
-    fs.mkdirSync(globalSkill, { recursive: true });
-    fs.writeFileSync(path.join(globalSkill, 'SKILL.md'), '# graphify', 'utf8');
-    process.env.HOME = fakeHome;
-
-    ensureCodexHome(worktree);
-
-    const seeded = path.join(codexHomeRoot(worktree), '.agents', 'skills', 'graphify', 'SKILL.md');
-    assert.ok(fs.existsSync(seeded), 'skill must be copied into the worktree-local HOME');
-
-    // Idempotent: a second call leaves the same target without throwing.
-    const contentBefore = fs.readFileSync(seeded, 'utf8');
-    ensureCodexHome(worktree);
-    const contentAfter = fs.readFileSync(seeded, 'utf8');
-    assert.equal(contentBefore, contentAfter, 'skill content must be identical after re-run');
-    assert.ok(fs.existsSync(seeded), 'skill must still be present after re-run');
-  } finally {
-    process.env.HOME = origHome;
-    fs.rmSync(fakeHome, { recursive: true, force: true });
-    fs.rmSync(worktree, { recursive: true, force: true });
-  }
-});
-
-test('ensureCodexHome skips skill seeding when no global skill is installed', () => {
-  const { ensureCodexHome, codexHomeRoot, codexConfigPath } = require('../.test-runtime/lib/agents/codex');
+test('ensureCodexHome completes without optional source config', () => {
+  const { ensureCodexHome, codexConfigPath } = require('../.test-runtime/lib/agents/codex');
   const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-nohome-'));
   const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-wt2-'));
   const origHome = process.env.HOME;
   try {
-    process.env.HOME = fakeHome; // no .agents/skills/graphify present
-    ensureCodexHome(worktree);
-    assert.ok(fs.existsSync(codexConfigPath(worktree)), 'config must still be written');
-    const seeded = path.join(codexHomeRoot(worktree), '.agents', 'skills', 'graphify');
-    assert.ok(!fs.existsSync(seeded), 'no skill should be seeded when none is installed globally');
-  } finally {
-    process.env.HOME = origHome;
-    fs.rmSync(fakeHome, { recursive: true, force: true });
-    fs.rmSync(worktree, { recursive: true, force: true });
-  }
-});
-
-// ---------- ensureCodexHome MCP config copy (task-2209) ----------
-
-test('ensureCodexHome merges MCP sections from the operator config when present', () => {
-  const { ensureCodexHome, codexConfigPath } = require('../.test-runtime/lib/agents/codex');
-  const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-mcp-present-'));
-  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-mcp-wt-'));
-  const origHome = process.env.HOME;
-  try {
-    const codexDir = path.join(fakeHome, '.codex');
-    fs.mkdirSync(codexDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(codexDir, 'config.toml'),
-      ['[mcp]', 'enabled = true', '', '[mcp.servers.slack]', 'command = "npx"', ''].join('\n'),
-      'utf8'
-    );
     process.env.HOME = fakeHome;
-
-    ensureCodexHome(worktree);
-
-    const config = fs.readFileSync(codexConfigPath(worktree), 'utf8');
-    assert.ok(config.includes('[mcp]'), 'worktree config must include the operator [mcp] section');
-    assert.ok(config.includes('[mcp.servers.slack]'), 'worktree config must include operator MCP server definitions');
-    assert.ok(config.includes('sandbox_mode = "danger-full-access"'), 'base headless config must still be present');
-  } finally {
-    process.env.HOME = origHome;
-    fs.rmSync(fakeHome, { recursive: true, force: true });
-    fs.rmSync(worktree, { recursive: true, force: true });
-  }
-});
-
-test('ensureCodexHome skips MCP merge without throwing when operator config.toml is absent', () => {
-  const { ensureCodexHome, codexConfigPath } = require('../.test-runtime/lib/agents/codex');
-  const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-mcp-absent-'));
-  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-mcp-wt2-'));
-  const origHome = process.env.HOME;
-  try {
-    process.env.HOME = fakeHome; // no .codex/config.toml at all
-    assert.doesNotThrow(() => ensureCodexHome(worktree));
-
-    const config = fs.readFileSync(codexConfigPath(worktree), 'utf8');
-    assert.ok(!config.includes('[mcp'), 'no MCP section should appear when operator config is absent');
-    assert.ok(config.includes('sandbox_mode = "danger-full-access"'), 'base headless config must remain intact');
-  } finally {
-    process.env.HOME = origHome;
-    fs.rmSync(fakeHome, { recursive: true, force: true });
-    fs.rmSync(worktree, { recursive: true, force: true });
-  }
-});
-
-test('ensureCodexHome MCP merge is idempotent across re-runs', () => {
-  const { ensureCodexHome, codexConfigPath } = require('../.test-runtime/lib/agents/codex');
-  const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-mcp-idem-'));
-  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-mcp-wt3-'));
-  const origHome = process.env.HOME;
-  try {
-    const codexDir = path.join(fakeHome, '.codex');
-    fs.mkdirSync(codexDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(codexDir, 'config.toml'),
-      ['[mcp]', 'enabled = true', '', '[mcp.servers.datadog]', 'command = "npx"', ''].join('\n'),
-      'utf8'
-    );
-    process.env.HOME = fakeHome;
-
-    ensureCodexHome(worktree);
-    const firstRun = fs.readFileSync(codexConfigPath(worktree), 'utf8');
-
-    ensureCodexHome(worktree);
-    const secondRun = fs.readFileSync(codexConfigPath(worktree), 'utf8');
-
-    assert.equal(firstRun, secondRun, 'config content must be stable across repeated ensureCodexHome calls');
+    ensureCodexHome(worktree, { CODEX_HOME: path.join(fakeHome, '.codex') });
+    assert.ok(!fs.existsSync(codexConfigPath(worktree)), 'mission setup must not write a Codex config');
   } finally {
     process.env.HOME = origHome;
     fs.rmSync(fakeHome, { recursive: true, force: true });

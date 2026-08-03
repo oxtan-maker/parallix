@@ -1124,6 +1124,14 @@ test('buildCodexDraftInvocation uses exec --sandbox danger-full-access in the wo
   });
 
   assert.deepEqual(invocation.args, [
+    '--config',
+    'features.multi_agent=true',
+    '--config',
+    'approval_policy="never"',
+    '--config',
+    'projects."/tmp".trust_level="trusted"',
+    '--config',
+    'projects."/tmp/mission-task-088".trust_level="trusted"',
     'exec',
     '--sandbox',
     'danger-full-access',

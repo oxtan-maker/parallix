@@ -2,8 +2,7 @@
 
 // Codex telemetry is read from the per-session rollout JSONL that the Codex CLI
 // always writes under `$CODEX_HOME/sessions/<YYYY>/<MM>/<DD>/rollout-*.jsonl`.
-// The headless launcher (codex.js) points `HOME` at `<worktree>/.workflow/codex-home`,
-// so each mission worktree owns an isolated `…/.codex/sessions` tree. Reading the
+// The launcher isolates `CODEX_HOME` per worktree, so reading the
 // rollout — rather than parsing the `--json` stdout stream — keeps the human-readable
 // transcript and session-resume behaviour intact while still yielding real usage data.
 //
