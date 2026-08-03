@@ -4,7 +4,7 @@ title: codex fails on mcp
 status: backlog
 assignee: [codex]
 created_date: '2026-07-10 09:33'
-labels: []
+labels: [ai_sdlc, bug]
 dependencies: []
 ---
 
