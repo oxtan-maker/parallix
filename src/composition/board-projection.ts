@@ -15,7 +15,7 @@ import { BoardProjectionBuilder } from '../application/projections/board-readers
 import { ConcreteMetricsReadAdapter } from '../application/projections/metrics-read-adapter.js';
 import { MissionProjectionQuery } from '../application/projections/mission-query.js';
 import { BoardCommandController } from '../application/controller/board-controller.js';
-import type { ActivePort } from '../application/ports.js';
+import type { ExecuteMissionPorts } from '../application/ports/execute-mission.js';
 import type { TuiCapabilities } from '../application/tui-capabilities.js';
 
 export interface BoardProjectionCompositionDeps {
@@ -45,12 +45,12 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
 
 export function composeTuiCapabilities(
   deps: BoardProjectionCompositionDeps,
-  activePort: ActivePort,
+  executePorts: ExecuteMissionPorts,
 ): TuiCapabilities {
   const board = composeBoardProjection(deps);
   return {
     boardProjection: board.builder,
     missionDetails: board.missionQuery,
-    commandControllerFactory: (progress) => new BoardCommandController(activePort, progress),
+    commandControllerFactory: (progress) => new BoardCommandController(executePorts, progress),
   };
 }

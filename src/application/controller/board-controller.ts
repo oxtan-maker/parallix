@@ -1,5 +1,9 @@
-import type { ActivePort } from '../ports.js';
-import { ActiveService, type ActiveRequest, type ActiveResult } from '../active-service.js';
+import type { ExecuteMissionPorts } from '../ports/execute-mission.js';
+import {
+  ExecuteMissionService,
+  type ExecuteMissionRequest,
+  type ExecuteMissionResult,
+} from '../execute-mission-service.js';
 import { rejected } from '../contracts.js';
 import type { MissionCheckpointService } from '../mission-checkpoint-service.js';
 import type { MissionHandoffService } from '../mission-handoff-service.js';
@@ -40,16 +44,16 @@ export interface BoardMissionServices {
 // ---------------------------------------------------------------------------
 
 export class BoardCommandController implements BoardCommandDispatcher {
-  private readonly activeService: ActiveService;
+  private readonly executeMission: ExecuteMissionService;
   private readonly progressPort?: BoardProgressSink;
   private readonly missionServices: BoardMissionServices;
 
   constructor(
-    activePort: ActivePort,
+    executePorts: ExecuteMissionPorts,
     progressPort?: BoardProgressSink,
     missionServices: BoardMissionServices = {},
   ) {
-    this.activeService = new ActiveService(activePort, progressPort);
+    this.executeMission = new ExecuteMissionService(executePorts, progressPort);
     this.progressPort = progressPort;
     this.missionServices = missionServices;
   }
@@ -158,15 +162,15 @@ export class BoardCommandController implements BoardCommandDispatcher {
     });
   }
 
-  private async dispatchActive(request: BoardCommandRequest): Promise<BoardCommandResult<ActiveResult>> {
-    const activeRequest: ActiveRequest = {
+  private async dispatchActive(request: BoardCommandRequest): Promise<BoardCommandResult<ExecuteMissionResult>> {
+    const executeRequest: ExecuteMissionRequest = {
       operationId: request.operationId,
       slug: request.missionId,
       agent: request.agent ?? undefined,
       capabilities: request.capabilities,
       cancellation: request.cancellation,
     };
-    return this.activeService.execute(activeRequest);
+    return this.executeMission.execute(executeRequest);
   }
 
   /**

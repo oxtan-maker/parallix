@@ -151,9 +151,9 @@ unproven behaviour or a separate decision; `✗` = contradicts the criterion.
 |---|---|---|---|
 | C0: Bug-frequency reduction | Hard constraint | Centralize policy and effects behind enforceable, regression-tested seams; continue measuring completed `bug` missions versus completed non-`bug` missions after the change. | Since label observation began, 39 of 129 unique completed missions carry `bug`; ADR 0048 and TASK-1268 identify recurring fail-open and lifecycle clusters. |
 | C1: Single authoritative writer | Hard constraint | No UI cache, event stream, or new store can independently change lifecycle state during migration. | `transitionTask` writes task state on the integration branch (`lib/tools/backlog.ts:676-760`). |
-| C2: Transition correctness | Hard constraint | Preserve launch → record → rollback ordering and do not represent an incomplete operation as complete. | `active` launch/rollback code and ordering tests (`lib/commands/active.ts:195-299`; `test/active.test.ts:301-323`). |
+| C2: Transition correctness | Hard constraint | Preserve launch → record → rollback ordering and do not represent an incomplete operation as complete. | `ExecuteMissionService` owns that ordering; rollback stays in the launcher (`src/application/execute-mission-service.ts`; `lib/commands/active.ts:195-299`; `test/active.test.ts:301-323`; `test/execute-mission-characterization.test.ts`). |
 | C3: Automation compatibility | Hard constraint | Preserve CLI text, existing JSON schemas, and exit codes. | `px` captures command exit codes; `stats-backfill` and `active` tests cover their distinct contracts (`px.ts:157-260`; `test/stats-backfill.test.ts:268-389`; `test/active.test.ts:385-406`). |
-| C4: Isolated effects | Hard constraint | Unit-test use-case behavior without real Git, Forgejo, filesystem, or agent processes. | Existing command tests inject collaborators, but the seam is not yet an application boundary (`lib/commands/active.ts:24-40`). |
+| C4: Isolated effects | Hard constraint | Unit-test use-case behavior without real Git, Forgejo, filesystem, or agent processes. | The execute workflow runs against in-memory mechanism ports (`test/execute-mission-service.test.ts`); command families that are not yet extracted still inject collaborators (`lib/commands/active.ts:24-40`). |
 | C5: Interface independence | Benefit | CLI, Ink, and web can invoke the same behavior without parsing terminal output or reproducing lifecycle policy. | This ADR requires one application core for these clients. |
 | C6: Operational truth and recovery | Benefit | Long-running work can report progress, reconnect by re-querying, and distinguish durable evidence from UI liveness. | `active` can launch agents and defer synchronization; ADR 0048 requires fail-closed handling. |
 | C7: Authority evolution and rollback | Benefit | The ADR 0053 store can replace the current task adapter without a dual-write steady state; this boundary change can be removed before cutover without persisted-data migration. | Task storage is already behind `resolveTaskFile`/`transitionTask`; ADR 0053 owns the authority change. |
@@ -227,6 +227,16 @@ The first proof slices are deliberately different:
 - the `active` execute-launch lifecycle, including preflight, launch-before-
   record, rollback, post-launch synchronization, handoff, and exit semantics.
 
+The `active` slice is extracted: `ExecuteMissionService`
+(`src/application/execute-mission-service.ts`) owns the ordering, the
+partial-failure policy, and both cancellation boundaries, and drives the
+mechanism ports declared in `src/application/ports/execute-mission.ts`
+(workspace, agent execution, telemetry, handoff/review) plus the checked
+`MissionTransitionStore`. The adapters behind them
+(`src/platform/runtime/lib/adapters/execute-mission-adapters.ts`) each implement
+exactly one port and perform only their own effect; none sequences the workflow
+or chooses a lifecycle transition.
+
 They exercise read projection, controlled mutation, long-running work, task
 authority, and compatibility without making a command-family rewrite the
 price of entry.
@@ -262,7 +272,7 @@ services now live at `src/application/` — the canonical home for the applicati
 layer. The legacy runtime tree (`src/platform/runtime/lib/`) depends on
 `src/application/`, not the reverse. Four modules were relocated from
 `src/platform/runtime/lib/application/` to `src/application/`:
-`contracts.ts`, `ports.ts`, `active-service.ts`, and `stats-backfill-service.ts`.
+`contracts.ts`, `ports.ts`, the execute use case, and `stats-backfill-service.ts`.
 No file beneath `src/application/` or `src/adapters/` imports the legacy
 `src/platform/runtime/lib/application/` path. A directory-scoped import-boundary
 test (`test/application-boundaries.test.ts`) enforces this rule across the full
@@ -293,8 +303,9 @@ Git/worktree state, preflight, and handoff—dependencies that are not honest
 repositories. If a later web board is a conventional Spring-style backend,
 its controllers may simply be inbound adapters over these same use cases.
 
-For this incremental extraction, existing policy stays where it is until a
-named use case moves it with characterization tests. Do not manufacture a
+For an incremental extraction, existing policy stays where it is until a
+named use case moves it with characterization tests — as the `active` workflow
+did, behind `test/execute-mission-characterization.test.ts`. Do not manufacture a
 "domain" wrapper around every existing helper. The application layer may call
 a narrow adapter over established behavior while the policy remains unproven;
 that adapter is a migration seam, not evidence that the legacy module is pure.
