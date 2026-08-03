@@ -22,11 +22,9 @@ const ALLOWED_ASSEMBLERS = new Set([
   'src/adapters/backlog/concrete-git-read-adapter.ts',
   'src/adapters/backlog/mission-materialization.ts',
   'src/application/projections/board-readers.ts',
-  'src/application/projections/create-board-projection-builder.ts',
+  'src/composition/board-projection.ts',
   // SC8/SC9: status.ts now routes through BoardProjectionBuilder
   'src/platform/runtime/lib/commands/status.ts',
-  // TUI shell assembles a read-only projection via BoardProjectionBuilder
-  'src/interfaces/tui/ui-command.ts',
 ]);
 
 // ---------------------------------------------------------------------------
@@ -79,15 +77,15 @@ test('SC10: status.ts routes mission output through BoardProjectionBuilder (sing
   const statusPath = path.join(repoRoot, 'src/platform/runtime/lib/commands/status.ts');
   const content = fs.readFileSync(statusPath, 'utf8');
 
-  // status.ts must import createBoardProjectionBuilder
+  // status.ts must import the composition-owned projection builder.
   assert.ok(
-    content.includes('createBoardProjectionBuilder'),
-    'status.ts must import createBoardProjectionBuilder for SC8/SC9',
+    content.includes('composeBoardProjection'),
+    'status.ts must import composeBoardProjection for SC8/SC9',
   );
 
-  // status.ts must build the projection (call buildProjectionBuilder or createBoardProjectionBuilder)
+  // status.ts must build the projection through composition.
   assert.ok(
-    content.includes('buildProjectionBuilder') || content.includes('createBoardProjectionBuilder('),
+    content.includes('buildProjectionBuilder') || content.includes('composeBoardProjection('),
     'status.ts must instantiate BoardProjectionBuilder for SC8',
   );
 
@@ -126,17 +124,16 @@ test('SC10: no module outside the allowed set assembles a board projection', () 
     const content = fs.readFileSync(fullPath, 'utf8');
 
     // A module assembles a projection if it:
-    // 1. Imports BoardProjectionBuilder or createBoardProjectionBuilder
+    // 1. Constructs BoardProjectionBuilder
     // 2. OR imports MissionReadAdapter/ReviewReadAdapter etc. and constructs Mission objects
     const importsBuilder =
       content.includes('BoardProjectionBuilder') &&
       content.includes('new BoardProjectionBuilder');
-    const importsCreateBuilder = content.includes('createBoardProjectionBuilder');
     const constructsMission =
       content.includes('materializeBacklogMission') &&
       !content.includes('import.*materializeBacklogMission.*from.*mission-materialization');
 
-    if (importsBuilder || importsCreateBuilder || constructsMission) {
+    if (importsBuilder || constructsMission) {
       violators.push(relPath);
     }
   }
@@ -145,6 +142,18 @@ test('SC10: no module outside the allowed set assembles a board projection', () 
     violators.length,
     0,
     `Modules outside the allowed set that assemble projections: ${violators.join(', ')}`,
+  );
+});
+
+test('SC1: BoardProjectionBuilder construction is limited to src/composition/', () => {
+  const offenders = findTsFiles(path.join(repoRoot, 'src'))
+    .filter((relPath) => !relPath.startsWith('src/composition/'))
+    .filter((relPath) => fs.readFileSync(path.join(repoRoot, relPath), 'utf8').includes('new BoardProjectionBuilder'));
+
+  assert.deepEqual(
+    offenders,
+    [],
+    `BoardProjectionBuilder must be constructed only by src/composition/: ${offenders.join(', ')}`,
   );
 });
 

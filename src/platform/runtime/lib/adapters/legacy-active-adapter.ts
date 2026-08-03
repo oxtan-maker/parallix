@@ -4,7 +4,6 @@ import missionStart from '../commands/mission-start.js';
 import { buildCheckpointContext, buildExecutePrompt, enforceExecuteCommitSafety, runHandoffAndReview, selectLaunchAndRecord } from '../commands/active.js';
 import { getTaskStatus, resolveTaskFile } from '../tools/backlog.js';
 import { resolveAgentModel } from '../core/product-config.js';
-import { createMissionApplicationServices } from '../composition/application-services.js';
 import { MissionLifecycleService } from '../../../../application/mission-lifecycle-service.js';
 import type { MissionTransitionStore } from '../../../../application/domain-ports.js';
 import { agentFamily } from '../../../../domain/agents.js';
@@ -21,6 +20,8 @@ import type { OperatorBlocklistOverlay } from '../../../../adapters/sqlite/block
 export type { OperatorBlocklistOverlay };
 
 export interface LegacyActiveAdapterOptions {
+  /** Application-owned Mission transition authority supplied by composition. */
+  readonly missionTransitionStore: MissionTransitionStore;
   readonly operatorBlocklist?: OperatorBlocklistOverlay | null;
   /**
    * Shared session-marker authority from the composition root. When provided,
@@ -36,6 +37,7 @@ export class LegacyActiveAdapter implements ActivePort {
   private readonly _runtime: LegacyActiveRuntime;
   private readonly _operatorBlocklist: OperatorBlocklistOverlay | null;
   private readonly _sessionMarkerPort: SessionMarkerPort | null;
+  private readonly _missionTransitionStore: MissionTransitionStore;
 
   constructor(
     private readonly _rootDir: string,
@@ -48,6 +50,10 @@ export class LegacyActiveAdapter implements ActivePort {
     this._runtime = runtime || createDefaultLegacyActiveRuntime();
     this._operatorBlocklist = options?.operatorBlocklist ?? null;
     this._sessionMarkerPort = options?.sessionMarkerPort ?? null;
+    if (!options?.missionTransitionStore) {
+      throw new Error('composition must supply a mission transition store');
+    }
+    this._missionTransitionStore = options.missionTransitionStore;
   }
 
   async validateSlug(slug: string): Promise<string | null> {
@@ -101,7 +107,7 @@ export class LegacyActiveAdapter implements ActivePort {
       // writes through the selected Mission authority with the exact revision
       // it read.
       if (run.launch.rebaseDeferred || (status && status !== 'active')) {
-        await this.synchronizeLifecycle(slug, agent, run.worktree);
+        await this.synchronizeLifecycle(slug, agent);
       }
     }
     try {
@@ -136,9 +142,8 @@ export class LegacyActiveAdapter implements ActivePort {
    * The failure message is unchanged so the command layer's fail-closed
    * behavior and its existing operator text are preserved.
    */
-  private async synchronizeLifecycle(slug: string, agent: string, worktree: string): Promise<void> {
-    const store = await this._runtime.missionStore(worktree);
-    const outcome = await new MissionLifecycleService(store).activate({
+  private async synchronizeLifecycle(slug: string, agent: string): Promise<void> {
+    const outcome = await new MissionLifecycleService(this._missionTransitionStore).activate({
       operationId: `active-${slug}`,
       missionId: missionId(slug),
       capabilities: new Set(['mission:transition']),
@@ -182,13 +187,6 @@ export interface LegacyActiveRuntime {
   readonly selectLaunchAndRecord: typeof selectLaunchAndRecord;
   readonly enforceExecuteCommitSafety: typeof enforceExecuteCommitSafety;
   readonly getTaskStatus: typeof getTaskStatus;
-  /**
-   * The selected Mission authority for the launched worktree. This replaced the
-   * adapter's direct `transitionTask` call: the write now happens inside the
-   * store, behind the application port. Async after the TASK-2322.07 SQLite
-   * cutover (preflight import gate runs at construction time).
-   */
-  readonly missionStore: (_rootDir: string) => Promise<MissionTransitionStore>;
   readonly recordActiveStats: typeof stats.recordActiveStats;
   readonly resolveAgentModel: typeof resolveAgentModel;
   readonly resolveStageTelemetry: typeof resolveStageTelemetry;
@@ -206,7 +204,6 @@ function createDefaultLegacyActiveRuntime(): LegacyActiveRuntime {
     selectLaunchAndRecord,
     enforceExecuteCommitSafety,
     getTaskStatus,
-    missionStore: async (rootDir: string) => (await createMissionApplicationServices(rootDir)).store,
     recordActiveStats: stats.recordActiveStats,
     resolveAgentModel,
     resolveStageTelemetry,
