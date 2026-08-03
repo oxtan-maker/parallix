@@ -1,7 +1,7 @@
 ---
 id: TASK-2327
 title: fix coverage-gate temp directory leaks on SIGKILL
-status: open
+status: refined
 assignee: [codex]
 created_date: '2026-07-30 09:25'
 labels:
