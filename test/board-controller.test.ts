@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { BoardCommandController } from '../src/application/controller/board-controller.js';
+import { makeExecutePorts } from './fixtures/execute-mission-ports.js';
 import type { BoardCommandRequest } from '../src/application/controller/board-command.js';
 import {
   INTEGRATED_CAPABILITIES,
@@ -13,24 +14,6 @@ import {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function makeActivePort(overrides: Record<string, unknown> = {}) {
-  const calls: string[] = [];
-  const port = {
-    async validateSlug(slug: string) { calls.push(`validate:${slug}`); return null; },
-    async launch(slug: string, agent: string) {
-      calls.push(`launch:${slug}:${agent ?? 'default'}`);
-      return { agent: agent ?? 'codex', evidence: { id: 'launch-1', source: 'task-markdown' as const, detail: 'agent launched' } };
-    },
-    async recordLaunch(_slug: string, _agent: string) {
-      calls.push(`record:${_slug}:${_agent}`);
-      return { id: 'record-1', source: 'task-markdown' as const, detail: 'active recorded' };
-    },
-    async handoff(slug: string, agent: string) { calls.push(`handoff:${slug}:${agent}`); },
-    ...overrides,
-  };
-  return { port, calls };
-}
 
 function makeRequest(overrides: Partial<BoardCommandRequest> = {}): BoardCommandRequest {
   return {
@@ -49,17 +32,17 @@ function makeRequest(overrides: Partial<BoardCommandRequest> = {}): BoardCommand
 // SC4: Guarded command controller exposes active:execute, rejects others
 // ---------------------------------------------------------------------------
 
-test('controller dispatches active:execute through ActiveService', async () => {
-  const { port, calls } = makeActivePort();
-  const controller = new BoardCommandController(port);
+test('controller dispatches active:execute through ExecuteMissionService', async () => {
+  const { ports, calls } = makeExecutePorts();
+  const controller = new BoardCommandController(ports);
   const result = await controller.dispatch(makeRequest());
   assert.equal(result.status, 'completed');
   assert.deepEqual(calls, ['validate:task-0001', 'launch:task-0001:codex', 'record:task-0001:codex', 'handoff:task-0001:codex']);
 });
 
 test('controller rejects draft:create with capability kind', async () => {
-  const { port } = makeActivePort();
-  const controller = new BoardCommandController(port);
+  const { ports } = makeExecutePorts();
+  const controller = new BoardCommandController(ports);
   const result = await controller.dispatch(makeRequest({ kind: 'draft:create' }));
   assert.equal(result.status, 'rejected');
   assert.equal(result.error.kind, 'capability');
@@ -70,40 +53,40 @@ test('controller rejects draft:create with capability kind', async () => {
 // without a Mission authority still gets a typed rejection rather than a
 // filesystem or SQL path, and a payload-less request is a validation rejection.
 test('controller rejects checkpoint:record without a payload', async () => {
-  const { port } = makeActivePort();
-  const controller = new BoardCommandController(port);
+  const { ports } = makeExecutePorts();
+  const controller = new BoardCommandController(ports);
   const result = await controller.dispatch(makeRequest({ kind: 'checkpoint:record' }));
   assert.equal(result.status, 'rejected');
   assert.equal(result.error.kind, 'validation');
 });
 
 test('controller rejects review:submit with capability kind', async () => {
-  const { port } = makeActivePort();
-  const controller = new BoardCommandController(port);
+  const { ports } = makeExecutePorts();
+  const controller = new BoardCommandController(ports);
   const result = await controller.dispatch(makeRequest({ kind: 'review:submit' }));
   assert.equal(result.status, 'rejected');
   assert.equal(result.error.kind, 'capability');
 });
 
 test('controller rejects review:act-on-findings with capability kind', async () => {
-  const { port } = makeActivePort();
-  const controller = new BoardCommandController(port);
+  const { ports } = makeExecutePorts();
+  const controller = new BoardCommandController(ports);
   const result = await controller.dispatch(makeRequest({ kind: 'review:act-on-findings' }));
   assert.equal(result.status, 'rejected');
   assert.equal(result.error.kind, 'capability');
 });
 
 test('controller rejects approve:review with capability kind', async () => {
-  const { port } = makeActivePort();
-  const controller = new BoardCommandController(port);
+  const { ports } = makeExecutePorts();
+  const controller = new BoardCommandController(ports);
   const result = await controller.dispatch(makeRequest({ kind: 'approve:review' }));
   assert.equal(result.status, 'rejected');
   assert.equal(result.error.kind, 'capability');
 });
 
 test('controller rejects integrate:merge with capability kind', async () => {
-  const { port } = makeActivePort();
-  const controller = new BoardCommandController(port);
+  const { ports } = makeExecutePorts();
+  const controller = new BoardCommandController(ports);
   const result = await controller.dispatch(makeRequest({ kind: 'integrate:merge' }));
   assert.equal(result.status, 'rejected');
   assert.equal(result.error.kind, 'capability');
@@ -114,9 +97,9 @@ test('controller rejects integrate:merge with capability kind', async () => {
 // ---------------------------------------------------------------------------
 
 test('progress events carry stable operationId', async () => {
-  const { port } = makeActivePort();
+  const { ports } = makeExecutePorts();
   const events: unknown[] = [];
-  const controller = new BoardCommandController(port, (event) => events.push(event));
+  const controller = new BoardCommandController(ports, (event) => events.push(event));
   await controller.dispatch(makeRequest({ operationId: 'stable-op-id' }));
   assert.ok(events.length > 0);
   for (const event of events as Array<{ operationId: string }>) {
@@ -125,9 +108,9 @@ test('progress events carry stable operationId', async () => {
 });
 
 test('progress events have monotonically increasing sequence numbers', async () => {
-  const { port } = makeActivePort();
+  const { ports } = makeExecutePorts();
   const events: unknown[] = [];
-  const controller = new BoardCommandController(port, (event) => events.push(event));
+  const controller = new BoardCommandController(ports, (event) => events.push(event));
   await controller.dispatch(makeRequest());
   const sequences = (events as Array<{ sequence: number }>).map((e) => e.sequence);
   for (let i = 1; i < sequences.length; i++) {
@@ -136,8 +119,8 @@ test('progress events have monotonically increasing sequence numbers', async () 
 });
 
 test('cancellation before launch returns cancelled outcome', async () => {
-  const { port, calls } = makeActivePort();
-  const controller = new BoardCommandController(port);
+  const { ports, calls } = makeExecutePorts();
+  const controller = new BoardCommandController(ports);
   const result = await controller.dispatch(makeRequest({
     cancellation: { requested: true },
   }));
@@ -146,15 +129,14 @@ test('cancellation before launch returns cancelled outcome', async () => {
   assert.deepEqual(calls, []);
 });
 
-test('controller passes cancellation to ActiveService for post-boundary cancellation', async () => {
+test('controller passes cancellation to ExecuteMissionService for post-boundary cancellation', async () => {
   const cancellation = { requested: false };
-  const { port } = makeActivePort({
-    async recordLaunch(_slug: string, _agent: string) {
-      cancellation.requested = true;
-      return { id: 'record-1', source: 'task-markdown', detail: 'active recorded' };
+  const { ports } = makeExecutePorts({
+    telemetry: {
+      async recordLaunchTelemetry() { cancellation.requested = true; },
     },
   });
-  const controller = new BoardCommandController(port);
+  const controller = new BoardCommandController(ports);
   const result = await controller.dispatch(makeRequest({
     cancellation,
   }));
@@ -168,8 +150,8 @@ test('controller passes cancellation to ActiveService for post-boundary cancella
 // ---------------------------------------------------------------------------
 
 test('dispatchWithStatus rejects stale command with conflict kind', async () => {
-  const { port } = makeActivePort();
-  const controller = new BoardCommandController(port);
+  const { ports } = makeExecutePorts();
+  const controller = new BoardCommandController(ports);
   const result = await controller.dispatchWithStatus(
     makeRequest({ missionStatusAtRequest: 'refined' }),
     'active',
@@ -181,8 +163,8 @@ test('dispatchWithStatus rejects stale command with conflict kind', async () => 
 });
 
 test('dispatchWithStatus proceeds when status matches', async () => {
-  const { port, calls } = makeActivePort();
-  const controller = new BoardCommandController(port);
+  const { ports, calls } = makeExecutePorts();
+  const controller = new BoardCommandController(ports);
   const result = await controller.dispatchWithStatus(
     makeRequest({ missionStatusAtRequest: 'refined' }),
     'refined',

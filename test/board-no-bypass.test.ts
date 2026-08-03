@@ -106,10 +106,10 @@ test('board controller does not implement lifecycle transitions not owned by int
   const controllerSource = readSource(
     path.join(root, 'src', 'application', 'controller', 'board-controller.ts'),
   );
-  // The controller should dispatch through ActiveService, not call transition functions directly
+  // The controller should dispatch through ExecuteMissionService, not call transition functions directly
   const imports = importsFrom(controllerSource);
   const hasWorkflowImport = imports.some((s) => s.includes('mission-workflow'));
-  assert.equal(hasWorkflowImport, false, 'Controller must not import mission-workflow (delegates to ActiveService)');
+  assert.equal(hasWorkflowImport, false, 'Controller must not import mission-workflow (delegates to ExecuteMissionService)');
 });
 
 test('board projections do not implement lifecycle transitions', () => {
@@ -127,16 +127,16 @@ test('board projections do not implement lifecycle transitions', () => {
   }
 });
 
-test('board controller uses ActiveService for active:execute dispatch', () => {
+test('board controller uses ExecuteMissionService for active:execute dispatch', () => {
   const controllerSource = readSource(
     path.join(root, 'src', 'application', 'controller', 'board-controller.ts'),
   );
   assert.ok(
-    controllerSource.includes('ActiveService'),
-    'Controller must use ActiveService for active:execute dispatch',
+    controllerSource.includes('ExecuteMissionService'),
+    'Controller must use ExecuteMissionService for active:execute dispatch',
   );
   assert.ok(
-    controllerSource.includes('this.activeService.execute'),
-    'Controller must delegate to ActiveService.execute',
+    controllerSource.includes('this.executeMission.execute'),
+    'Controller must delegate to ExecuteMissionService.execute',
   );
 });

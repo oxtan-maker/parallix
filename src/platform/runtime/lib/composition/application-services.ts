@@ -1,6 +1,6 @@
 import * as path from 'node:path';
 
-import { ActiveService } from '../../../../application/active-service.js';
+import { ExecuteMissionService } from '../../../../application/execute-mission-service.js';
 import { StatsBackfillService } from '../../../../application/stats-backfill-service.js';
 import { MissionCheckpointService } from '../../../../application/mission-checkpoint-service.js';
 import { MissionHandoffService } from '../../../../application/mission-handoff-service.js';
@@ -14,10 +14,10 @@ import { SqliteMissionStore } from '../../../../adapters/sqlite/mission-store.js
 import { MissionCompatibilityImporter } from '../../../../adapters/sqlite/mission-importer.js';
 import { repositoryId, type RepositoryId } from '../../../../domain/repository.js';
 import { git } from '../core/git.js';
-import { LegacyActiveAdapter } from '../adapters/legacy-active-adapter.js';
+import { createExecuteMissionPorts } from '../adapters/execute-mission-adapters.js';
 import { LegacyStatsBackfillAdapter } from '../adapters/legacy-stats-backfill-adapter.js';
 import type { ProgressPort } from '../../../../application/ports.js';
-import type { ActivePort } from '../../../../application/ports.js';
+import type { ExecuteMissionPorts } from '../../../../application/ports/execute-mission.js';
 import type { OperatorBlocklistOverlay } from '../../../../adapters/sqlite/blocklist-snapshot.js';
 import type {
   AgentBlocklistRepository,
@@ -90,9 +90,9 @@ export interface MissionApplicationServices {
 }
 
 export interface ProductionApplicationServices {
-  readonly active: ActiveService;
-  /** Shared active port; presentation composition uses this exact instance. */
-  readonly activePort: ActivePort;
+  readonly executeMission: ExecuteMissionService;
+  /** Shared execute mechanism set; presentation composition uses these exact instances. */
+  readonly executePorts: ExecuteMissionPorts;
   /** Shared CLI/TUI board-read and active-dispatch capabilities from this graph. */
   readonly presentationCapabilities: ProductionCapabilities | null;
   readonly statsBackfill: StatsBackfillService;
@@ -182,7 +182,7 @@ export async function createProductionApplicationServices(
     : await createMissionApplicationServices(rootDir, {
       skipImportGate: options.skipImportGate,
     });
-  const activePort = new LegacyActiveAdapter(rootDir, undefined, {
+  const executePorts = createExecuteMissionPorts(rootDir, {
     missionTransitionStore: mission?.store ?? unavailableMissionTransitionStore(),
     operatorBlocklist: operatorState.blocklist,
     sessionMarkerPort,
@@ -191,12 +191,12 @@ export async function createProductionApplicationServices(
     ? (await import('../../../../composition/production-capabilities.js')).composeProductionCapabilities(
       rootDir,
       operatorState.repositories,
-      activePort,
+      executePorts,
     )
     : null;
   return {
-    active: new ActiveService(activePort, activeProgress),
-    activePort,
+    executeMission: new ExecuteMissionService(executePorts, activeProgress),
+    executePorts,
     presentationCapabilities,
     statsBackfill: new StatsBackfillService(new LegacyStatsBackfillAdapter(rootDir)),
     operatorState,

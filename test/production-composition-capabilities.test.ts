@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { composeProductionCapabilities } from '../src/composition/production-capabilities.js';
-import type { ActivePort } from '../src/application/ports.js';
+import { makeExecutePorts } from './fixtures/execute-mission-ports.js';
 
 const repositories = {
   agentBlocklist: { async findAll() { return []; }, async findByAgent() { return undefined; }, async save() {}, async deleteByAgent() {}, async clear() {} },
@@ -12,16 +12,11 @@ const repositories = {
 };
 
 test('production composition gives CLI and TUI identical board and active capability instances', () => {
-  const activePort: ActivePort = {
-    async validateSlug() { return null; },
-    async launch() { return { agent: 'codex', evidence: { id: 'test', source: 'task-markdown', detail: 'test' } }; },
-    async recordLaunch() { return { id: 'test', source: 'task-markdown', detail: 'test' }; },
-    async handoff() {},
-  };
+  const { ports } = makeExecutePorts();
 
-  const capabilities = composeProductionCapabilities('/fixture-repository', repositories, activePort);
+  const capabilities = composeProductionCapabilities('/fixture-repository', repositories, ports);
 
   assert.strictEqual(capabilities.boardProjection, capabilities.tui.boardProjection);
   assert.strictEqual(capabilities.missionDetails, capabilities.tui.missionDetails);
-  assert.strictEqual(capabilities.activePort, activePort);
+  assert.strictEqual(capabilities.executePorts, ports);
 });

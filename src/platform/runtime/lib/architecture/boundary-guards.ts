@@ -130,7 +130,10 @@ export function findForbiddenApplicationDependencies(entryFiles: readonly string
 export function findCompositionViolations(rootDir: string): string[] {
   return walk(path.resolve(rootDir)).flatMap(file => {
     const source = fs.readFileSync(file, 'utf8');
-    const makesCompleteGraph = /new\s+LegacyActiveAdapter\s*\(/.test(source) && /new\s+LegacyStatsBackfillAdapter\s*\(/.test(source);
+    // The execute mechanism set is built by a factory (TASK-2332.04) rather
+    // than a single adapter constructor; detecting that factory keeps the
+    // "only the composition root builds the complete graph" rule enforced.
+    const makesCompleteGraph = /createExecuteMissionPorts\s*\(/.test(source) && /new\s+LegacyStatsBackfillAdapter\s*\(/.test(source);
     const usesLocator = /(?:serviceLocator|services)\s*\[/.test(source);
     return (makesCompleteGraph && !file.endsWith(path.join('lib', 'composition', 'application-services.ts'))) || usesLocator ? [file] : [];
   });

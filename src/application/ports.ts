@@ -18,6 +18,21 @@ export type {
   UsageRepository,
   UsageRecord,
 } from './ports/mission-measurements.js';
+// Mechanism ports for the execute workflow (TASK-2332.04). They replace the
+// legacy phase-named `ActivePort`; see `ports/execute-mission.ts`.
+export type {
+  MissionWorkspacePort,
+  TaskFileResolution,
+  AgentExecutionPort,
+  AgentLaunchPlan,
+  AgentLaunchRequest,
+  AgentLaunchOutcome,
+  ExecuteTelemetryPort,
+  ExecuteTelemetryRecord,
+  HandoffReviewPort,
+  HandoffReviewRequest,
+  ExecuteMissionPorts,
+} from './ports/execute-mission.js';
 
 export interface StatsRow {
   readonly mission: string;
@@ -35,18 +50,6 @@ export interface StatsProjection {
 export interface StatsBackfillPort {
   readProjection(_options?: { readonly filePath?: string | null }): Promise<StatsProjection>;
   applyRows(_rows: readonly StatsRow[], _options?: { readonly filePath?: string | null }): Promise<readonly DurableEvidence[]>;
-}
-
-export interface ActiveLaunch {
-  readonly agent: string;
-  readonly evidence: DurableEvidence;
-}
-
-export interface ActivePort {
-  validateSlug(_slug: string): Promise<string | null>;
-  launch(_slug: string, _agent?: string | null): Promise<ActiveLaunch>;
-  recordLaunch(_slug: string, _agent: string): Promise<DurableEvidence>;
-  handoff(_slug: string, _agent: string): Promise<void>;
 }
 
 export type ProgressPort = (_event: ProgressEvent) => void;

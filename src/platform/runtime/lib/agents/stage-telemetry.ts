@@ -18,7 +18,9 @@ import { codexHomeRoot, extractCodexTelemetry } from './codex.js';
 
 interface StageTelemetryOptions {
   worktree: string;
-  result: { telemetry?: { provider?: string } & Record<string, any> };
+  // Optional: a launcher that produced no run record still resolves to null
+  // through the guard below rather than forcing callers to fabricate one.
+  result?: { telemetry?: { provider?: string } & Record<string, any> };
   sinceMs?: number;
 }
 

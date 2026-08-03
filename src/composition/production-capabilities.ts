@@ -1,4 +1,4 @@
-import type { ActivePort } from '../application/ports.js';
+import type { ExecuteMissionPorts } from '../application/ports/execute-mission.js';
 import type { TuiCapabilities } from '../application/tui-capabilities.js';
 import type { BoardProjectionBuilder } from '../application/projections/board-readers.js';
 import type { MissionProjectionQuery } from '../application/projections/mission-query.js';
@@ -23,7 +23,7 @@ export interface ProductionCapabilities {
   readonly tui: TuiCapabilities;
   readonly boardProjection: BoardProjectionBuilder;
   readonly missionDetails: MissionProjectionQuery;
-  readonly activePort: ActivePort;
+  readonly executePorts: ExecuteMissionPorts;
 }
 
 /**
@@ -33,7 +33,7 @@ export interface ProductionCapabilities {
 export function composeProductionCapabilities(
   rootDir: string,
   repositories: ProductionBoardRepositories,
-  activePort: ActivePort,
+  executePorts: ExecuteMissionPorts,
 ): ProductionCapabilities {
   const tui = composeTuiCapabilities({
     rootDir,
@@ -43,11 +43,11 @@ export function composeProductionCapabilities(
     laneEventRepo: repositories.boardLaneEvents,
     usageRepo: repositories.usage,
     knownAgentFamilies: resolveKnownAgentFamilies(rootDir),
-  }, activePort);
+  }, executePorts);
   return {
     tui,
     boardProjection: tui.boardProjection,
     missionDetails: tui.missionDetails,
-    activePort,
+    executePorts,
   };
 }

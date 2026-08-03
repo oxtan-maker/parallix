@@ -38,7 +38,8 @@ test('application import guard accepts every file under src/application/', () =>
 test('application import guard scans all canonical application modules', () => {
   const names = applicationFiles().map(file => path.relative(APPLICATION_DIR, file));
   for (const required of [
-    'contracts.ts', 'ports.ts', 'active-service.ts', 'stats-backfill-service.ts',
+    'contracts.ts', 'ports.ts', 'execute-mission-service.ts', 'ports/execute-mission.ts',
+    'stats-backfill-service.ts',
     'domain-ports.ts', 'mission-authority.ts',
     'controller/board-command.ts', 'controller/board-controller.ts',
     'projections/board.ts', 'projections/board-readers.ts',
@@ -99,7 +100,7 @@ test('boundary guard permits src/adapters/sqlite/ repository adapter path', () =
 test('composition guard accepts the sole production composition root', async () => {
   assert.deepEqual(findCompositionViolations(path.join(root, 'src', 'platform', 'runtime', 'lib')), []);
   const graph = await createProductionApplicationServices(root, undefined, { skipImportGate: true });
-  assert.equal(graph.active.constructor.name, 'ActiveService');
+  assert.equal(graph.executeMission.constructor.name, 'ExecuteMissionService');
   assert.equal(graph.statsBackfill.constructor.name, 'StatsBackfillService');
   assert.equal(graph.mission.store.constructor.name, 'SqliteMissionStore');
 });

@@ -60,7 +60,7 @@ async function active(args, options = {}) {
 
   logFn('Running execute preflight...');
   const renderProgress = event => renderActiveProgress(event, logFn);
-  const outcome = await (service || (await createProductionApplicationServices(rootDir, renderProgress)).active).execute({
+  const outcome = await (service || (await createProductionApplicationServices(rootDir, renderProgress)).executeMission).execute({
     operationId: `active:${normalizedSlug}`,
     slug: normalizedSlug,
     agent: preselectedImplementer,
