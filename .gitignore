@@ -18,9 +18,9 @@ dist/
 build/
 release-artifacts/
 # Stray tsc emit to repo root (noEmit=true, these are dead artifacts)
-index.js
-px.js
-lib/
+/index.js
+/px.js
+/lib/
 # tsc incremental build cache
 tsconfig.tsbuildinfo
 .test-runtime/

@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { git, run } from '../core/git.js';
+import { findIgnoredSourceFiles, git, run } from '../core/git.js';
 import { findMissionDir, findMissionArea, inferSlug, resolveWorktree } from '../core/mission-utils.js';
 import * as fmt from '../core/fmt.js';
 import { formatVerificationCommand, runVerificationGate } from '../core/verification.js';
@@ -50,6 +50,15 @@ function checkpoint(args) {
   // Step 2: Stage
   fmt.log.info('Step 2: Staging all tracked changes...');
   git(['-C', rootDir, 'add', '-A']);
+
+  const ignoredSourceFiles = findIgnoredSourceFiles(rootDir);
+  if (ignoredSourceFiles.length > 0) {
+    fmt.log.fail(
+      `Checkpoint refused: source files are ignored and would be absent from the commit: ${ignoredSourceFiles.join(', ')}. `
+      + 'Fix .gitignore or add the intended files explicitly, then retry.'
+    );
+    process.exit(1);
+  }
 
   // Step 3: Commit
   fmt.log.info('Step 3: Committing checkpoint...');
