@@ -44,6 +44,7 @@ const expectedIntegrationFiles = [
   'task-2286-native-sea-smoke.test.ts',
   'task-2234-push-to-reviewer-autobounce.test.ts',
   'task-2270-graphify-exclusion.test.ts',
+  'task-2322.12-review-recovery.integration.test.ts',
   'task-2273-review-gate-ownership.test.ts', 'task-2311-console-empty-repro.test.ts',
   'task-2312-label-sync.test.ts', 'task-2313-repro.test.ts',
   'task-2318-temp-directory-leaks.test.js',

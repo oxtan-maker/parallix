@@ -11,20 +11,23 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const sourceRoot = path.join(root, 'src', 'platform', 'runtime', 'lib');
 // Keep mutable CommonJS test modules in their own ignored tree. Integration
 // tests may invoke `npm run build` concurrently, which rewrites build/px.mjs;
-// the test runtime must not race with that product artifact.
+// the test runtime must not race with that product artifact or another test
+// runtime build. Generate into a private staging tree and swap it into place
+// only after every emitted module is complete.
 const testRuntimeRoot = path.join(root, '.test-runtime');
-const outputRoot = path.join(testRuntimeRoot, 'lib');
+const stagingRoot = fs.mkdtempSync(path.join(root, '.test-runtime.staging-'));
+const outputRoot = path.join(stagingRoot, 'lib');
 const assetSourceRoot = path.join(root, 'src', 'platform', 'assets');
-const assetOutputRoot = path.join(testRuntimeRoot, 'assets');
+const assetOutputRoot = path.join(stagingRoot, 'assets');
 const applicationSourceRoot = path.join(root, 'src', 'application');
-const applicationOutputRoot = path.join(testRuntimeRoot, 'application');
+const applicationOutputRoot = path.join(stagingRoot, 'application');
 const adapterSourceRoot = path.join(root, 'src', 'adapters');
-const adapterOutputRoot = path.join(testRuntimeRoot, 'adapters');
+const adapterOutputRoot = path.join(stagingRoot, 'adapters');
 // The application and adapter layers import domain *values* (rule violations,
 // factories, policy), not only erasable types, so the domain tree must be part
 // of the CommonJS test runtime as well.
 const domainSourceRoot = path.join(root, 'src', 'domain');
-const domainOutputRoot = path.join(testRuntimeRoot, 'domain');
+const domainOutputRoot = path.join(stagingRoot, 'domain');
 
 function collectFilesWithExtension(directory: string, extension: string): string[] {
   const files: string[] = [];
@@ -45,8 +48,7 @@ function collectTypeScriptFiles(directory: string): string[] {
 
 // The root package is ESM after TASK-2285; these emitted modules are CommonJS
 // .js, so the test runtime carries its own type marker.
-fs.mkdirSync(testRuntimeRoot, { recursive: true });
-fs.writeFileSync(path.join(testRuntimeRoot, 'package.json'), `${JSON.stringify({ type: 'commonjs' }, null, 2)}\n`);
+fs.writeFileSync(path.join(stagingRoot, 'package.json'), `${JSON.stringify({ type: 'commonjs' }, null, 2)}\n`);
 
 for (const [inputRoot, outputRootForSource] of [
   [sourceRoot, outputRoot],
@@ -95,4 +97,23 @@ for (const [inputRoot, outputRootForSource] of [
     fs.mkdirSync(path.dirname(outputPath), { recursive: true });
     fs.copyFileSync(sourcePath, outputPath);
   }
+}
+
+// Keep readers on the previous complete runtime until the replacement is
+// ready. The rename of the staging directory is atomic on the supported local
+// filesystems, so readers cannot observe a partially emitted runtime.
+const previousRoot = `${testRuntimeRoot}.previous-${process.pid}`;
+try {
+  fs.rmSync(previousRoot, { recursive: true, force: true });
+  if (fs.existsSync(testRuntimeRoot)) {
+    fs.renameSync(testRuntimeRoot, previousRoot);
+  }
+  fs.renameSync(stagingRoot, testRuntimeRoot);
+  fs.rmSync(previousRoot, { recursive: true, force: true });
+} catch (error) {
+  fs.rmSync(stagingRoot, { recursive: true, force: true });
+  if (!fs.existsSync(testRuntimeRoot) && fs.existsSync(previousRoot)) {
+    fs.renameSync(previousRoot, testRuntimeRoot);
+  }
+  throw error;
 }

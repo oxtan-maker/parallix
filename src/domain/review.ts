@@ -19,6 +19,18 @@ export interface ReviewFinding {
   readonly location: string | null;
 }
 
+/**
+ * A single finding disposition recorded by the implementer during a round.
+ *
+ * Replaces the previous three-column blob model (fixedItems, pushedBackItems,
+ * parkedItems: unknown[]) with a typed collection. The implementer's round
+ * summary classifies each finding as fixed, pushed_back, or parked.
+ */
+export interface ReviewItemDisposition {
+  readonly kind: 'fixed' | 'pushed_back' | 'parked';
+  readonly findingId: ReviewFindingId;
+}
+
 export interface PullRequestReference {
   readonly kind: 'pull-request';
   /** Local review-surface key; for example, Forgejo running in local Docker. */
@@ -82,6 +94,98 @@ export interface ImplementerResolution {
   readonly resultingRevision: ChangeRevision;
 }
 
+/**
+ * The reviewer's verdict vocabulary.
+ *
+ * This is deliberately richer than {@link ReviewerDecision}: `BLOCKED` and
+ * `PUSHBACK_ALL` both imply `changes-requested`, but the loop needs to tell them
+ * apart. Inferring one from the other is lossy in the direction that matters, so
+ * the disposition is stored rather than derived.
+ */
+export type ReviewDisposition =
+  | 'APPROVED'
+  | 'REQUEST_CHANGES'
+  | 'COMMENT'
+  | 'PUSHBACK_ALL'
+  | 'BLOCKED'
+  | 'PARKED'
+  | 'CHANGES_MADE';
+
+export const REVIEW_DISPOSITIONS: readonly ReviewDisposition[] =
+  ['APPROVED', 'REQUEST_CHANGES', 'COMMENT', 'PUSHBACK_ALL', 'BLOCKED', 'PARKED', 'CHANGES_MADE'];
+
+/**
+ * Workflow phase of the review loop.
+ *
+ * Not derivable from {@link reviewStatus}: `pending-approval` and
+ * `ready-for-next-round` describe the same decision history but drive different
+ * loop behavior, and the phase survives a restart that has no decision to replay.
+ */
+export type ReviewPhase = 'reviewing' | 'fixing' | 'pending-approval' | 'approved';
+
+export const REVIEW_PHASES: readonly ReviewPhase[] =
+  ['reviewing', 'fixing', 'pending-approval', 'approved'];
+
+const REVIEW_PHASE_TRANSITIONS: Record<ReviewPhase, readonly ReviewPhase[]> = {
+  'reviewing': ['fixing', 'approved'],
+  'fixing': ['reviewing', 'pending-approval'],
+  'pending-approval': ['reviewing'],
+  'approved': [],
+};
+
+/** Coerce untrusted text to a phase, or null when it names none. */
+export function parseReviewPhase(value: string | null | undefined): ReviewPhase | null {
+  const candidate = String(value ?? '').trim().toLowerCase();
+  return (REVIEW_PHASES as readonly string[]).includes(candidate)
+    ? candidate as ReviewPhase
+    : null;
+}
+
+/** Coerce untrusted text to a disposition, or null when it names none. */
+export function parseReviewDisposition(
+  value: string | null | undefined,
+): ReviewDisposition | null {
+  const candidate = String(value ?? '').trim().toUpperCase();
+  return (REVIEW_DISPOSITIONS as readonly string[]).includes(candidate)
+    ? candidate as ReviewDisposition
+    : null;
+}
+
+/** Upper bound on retained fingerprints per stage window. */
+export const STAGE_LAUNCH_HISTORY_LIMIT = 20;
+
+/**
+ * De-duplication record for agent launches within one stage window.
+ *
+ * The loop records a launch fingerprint before acting on it so that a restart
+ * mid-stage does not double-count the same agent run.
+ */
+export interface StageLaunchWindow {
+  readonly stageKey: string;
+  readonly fingerprints: readonly string[];
+}
+
+/**
+ * Build stage-launch windows from an untyped `{ stageKey: fingerprints[] }` bag.
+ *
+ * Both legacy read paths carry this shape in an untyped metadata blob, so the
+ * coercion lives here rather than being duplicated per adapter. Malformed
+ * windows are dropped instead of throwing: a corrupt de-duplication hint costs
+ * at worst one repeated launch, which is not worth failing a mission read over.
+ */
+export function stageLaunchWindowsFrom(source: unknown): readonly StageLaunchWindow[] {
+  if (!source || typeof source !== 'object') { return []; }
+  const windows: StageLaunchWindow[] = [];
+  for (const [stageKey, value] of Object.entries(source as Record<string, unknown>)) {
+    if (!stageKey.trim() || !Array.isArray(value)) { continue; }
+    const fingerprints = value
+      .filter((entry): entry is string => typeof entry === 'string' && entry.length > 0)
+      .slice(-STAGE_LAUNCH_HISTORY_LIMIT);
+    if (fingerprints.length > 0) { windows.push({ stageKey, fingerprints }); }
+  }
+  return sortStageLaunchWindows(windows);
+}
+
 export interface ReviewRound {
   readonly number: number;
   readonly subject: ReviewedRevision;
@@ -90,12 +194,57 @@ export interface ReviewRound {
   readonly startedAt: string;
   readonly decision: ReviewerDecision | null;
   readonly response: ImplementerResolution | null;
+  /** Workflow phase of this round. Reset to `reviewing` when a round begins. */
+  readonly phase: ReviewPhase;
+  /** Reviewer's verdict for this round, richer than `decision.kind`. */
+  readonly disposition: ReviewDisposition | null;
+  /** Gate retries consumed by the reviewer in this round. Reset per round. */
+  readonly reviewerRetryCount: number;
+  /** Gate retries consumed by the implementer in this round. Reset per round. */
+  readonly implementerRetryCount: number;
+  /** Full text of the implementer's round summary (from implementer artifact). */
+  readonly implementerResponseContent?: string;
+  /**
+   * How the implementer classified each finding in this round.
+   * Populated from the implementer's round summary artifact.
+   */
+  readonly itemDispositions?: readonly ReviewItemDisposition[];
+  /** Reason the round was blocked, if BLOCKED disposition. */
+  readonly blockedReason?: string;
 }
 
 export interface ReviewIntervention {
   readonly requestedAt: string;
   readonly requestedBy: 'reviewer' | 'implementer' | 'workflow';
   readonly reason: string;
+}
+
+/** Canonical event types stored in the review audit trail. */
+export type ReviewEventType =
+  | 'reviewer_findings'
+  | 'reviewer_outcome'
+  | 'implementer_round_summary'
+  | 'implementer_disposition'
+  | 'neutral_discussion'
+  | 'human_note'
+  | 'blocked_publication'
+  | 'parked_followup';
+
+/** One review event from the audit trail (replaces .md files). */
+export interface ReviewEventRecord {
+  readonly position: number;
+  readonly eventType: ReviewEventType;
+  readonly roundNumber: number | null;
+  readonly phase: string | null;
+  readonly actor: string | null;
+  readonly content: string;
+  readonly disposition: string | null;
+  readonly verdict: string | null;
+  /** How the implementer classified findings in this event (round summary). */
+  readonly itemDispositions: readonly ReviewItemDisposition[] | null;
+  readonly blockedReason: string | null;
+  readonly followUpReference: string | null;
+  readonly createdAt: string;
 }
 
 /**
@@ -105,6 +254,27 @@ export interface ReviewIntervention {
 export interface Review {
   readonly rounds: readonly [ReviewRound, ...ReviewRound[]];
   readonly intervention: ReviewIntervention | null;
+  /**
+   * Stage-launch de-duplication windows, cumulative across rounds. A round
+   * boundary does not clear these: the same agent run must not be recorded twice
+   * even if the loop advances between the launch and its bookkeeping.
+   */
+  readonly stageLaunches: readonly StageLaunchWindow[];
+  /**
+   * Pre-review gate failures that auto-bounced the mission to the implementer.
+   *
+   * Cumulative across rounds, and distinct from the per-round retry counters: a
+   * gate bounce does not consume a reviewer cycle, so it cannot share a counter
+   * with the agent-timeout retries without changing when the loop gives up.
+   */
+  readonly gateFailureRetryCount: number;
+  /**
+   * Full audit trail for review events (replaces .md files under
+   * missions/<slug>/review-events/). Stores reviewer findings/outcomes,
+   * implementer summaries/dispositions, human notes, and blocked/parked
+   * publication records.
+   */
+  readonly reviewEvents: readonly ReviewEventRecord[];
 }
 
 export type ReviewStatus =
@@ -160,6 +330,12 @@ export type ReviewerCommand =
     readonly decidedAt: string;
     readonly comment: string | null;
     readonly findings: readonly ReviewFinding[];
+    /**
+     * Which flavour of "changes requested" this is. Omitted means the generic
+     * `REQUEST_CHANGES`; `BLOCKED`, `PUSHBACK_ALL`, `COMMENT` and `PARKED` all
+     * imply the same decision kind but drive the loop differently.
+     */
+    readonly disposition?: Exclude<ReviewDisposition, 'APPROVED' | 'CHANGES_MADE'>;
   };
 
 export type ImplementerCommand =
@@ -246,8 +422,15 @@ export function startReview(
       startedAt,
       decision: null,
       response: null,
+      phase: 'reviewing',
+      disposition: null,
+      reviewerRetryCount: 0,
+      implementerRetryCount: 0,
     }],
     intervention: null,
+    stageLaunches: [],
+    gateFailureRetryCount: 0,
+    reviewEvents: [],
   };
 }
 
@@ -285,10 +468,105 @@ export function applyReviewerCommand(review: Review, command: ReviewerCommand): 
       comment: command.comment,
       findings: command.findings,
     };
+  const disposition: ReviewDisposition = command.type === 'approve'
+    ? 'APPROVED'
+    : command.disposition ?? 'REQUEST_CHANGES';
   return {
     ...review,
-    rounds: replaceCurrentRound(review, { ...current, decision }),
+    rounds: replaceCurrentRound(review, {
+      ...current,
+      decision,
+      disposition,
+      phase: command.type === 'approve' ? 'approved' : 'fixing',
+    }),
   };
+}
+
+/**
+ * Move the current round to `phase`, enforcing the loop's transition table.
+ *
+ * The phase is workflow state, not a projection of the decision history, so it
+ * is advanced explicitly rather than inferred.
+ */
+export function transitionReviewPhase(review: Review, phase: ReviewPhase): Review {
+  const current = currentReviewRound(review);
+  if (!REVIEW_PHASES.includes(phase)) {
+    throw new Error(`Invalid review phase: "${phase}". Valid: ${REVIEW_PHASES.join(', ')}`);
+  }
+  const allowed = REVIEW_PHASE_TRANSITIONS[current.phase];
+  if (!allowed.includes(phase)) {
+    // Worded so the phase never follows the word "from" in quotes: the domain
+    // import-boundary scanner reads that as an import specifier
+    // (test/domain-import-boundary.test.ts).
+    throw new Error(
+      `Review phase "${current.phase}" cannot move to "${phase}". Allowed: ${allowed.join(', ') || 'none'}`,
+    );
+  }
+  return { ...review, rounds: replaceCurrentRound(review, { ...current, phase }) };
+}
+
+/** Consume one gate retry for `actor` in the current round. */
+export function recordReviewRetry(review: Review, actor: 'reviewer' | 'implementer'): Review {
+  const current = currentReviewRound(review);
+  const updated: ReviewRound = actor === 'reviewer'
+    ? { ...current, reviewerRetryCount: current.reviewerRetryCount + 1 }
+    : { ...current, implementerRetryCount: current.implementerRetryCount + 1 };
+  return { ...review, rounds: replaceCurrentRound(review, updated) };
+}
+
+/** Whether `fingerprint` was already recorded in the `stageKey` window. */
+export function hasRecordedStageLaunch(
+  review: Review,
+  stageKey: string,
+  fingerprint: string,
+): boolean {
+  const window = review.stageLaunches.find((entry) => entry.stageKey === stageKey);
+  return window ? window.fingerprints.includes(fingerprint) : false;
+}
+
+/**
+ * Record `fingerprint` in the `stageKey` window.
+ *
+ * Returns the review unchanged when the fingerprint is already present, so the
+ * caller can treat identity of the result as "already recorded" and skip the
+ * duplicate launch.
+ */
+export function recordStageLaunch(
+  review: Review,
+  stageKey: string,
+  fingerprint: string,
+): Review {
+  if (!stageKey.trim()) { throw new Error('Stage launch requires a stage key'); }
+  if (hasRecordedStageLaunch(review, stageKey, fingerprint)) { return review; }
+  const existing = review.stageLaunches.find((entry) => entry.stageKey === stageKey);
+  const fingerprints = [...(existing?.fingerprints ?? []), fingerprint]
+    .slice(-STAGE_LAUNCH_HISTORY_LIMIT);
+  const others = review.stageLaunches.filter((entry) => entry.stageKey !== stageKey);
+  return {
+    ...review,
+    stageLaunches: sortStageLaunchWindows([...others, { stageKey, fingerprints }]),
+  };
+}
+
+/**
+ * Windows are an unordered set keyed by stage. Sorting them makes the aggregate
+ * representation canonical, so a persist/reload cycle is value-identical.
+ */
+function sortStageLaunchWindows(
+  windows: readonly StageLaunchWindow[],
+): readonly StageLaunchWindow[] {
+  return [...windows].sort((left, right) => left.stageKey.localeCompare(right.stageKey));
+}
+
+/**
+ * Consume one pre-review gate retry.
+ *
+ * Counted on the review rather than the round: an auto-bounce hands the mission
+ * back to the implementer without starting a new round, so a per-round counter
+ * would reset the budget every time the gate bounced.
+ */
+export function recordGateFailureRetry(review: Review): Review {
+  return { ...review, gateFailureRetryCount: review.gateFailureRetryCount + 1 };
 }
 
 function validateResolutions(
@@ -345,6 +623,8 @@ export function applyImplementerCommand(review: Review, command: ImplementerComm
   changeRevision(command.resultingRevision);
   const completedRound: ReviewRound = {
     ...current,
+    phase: 'pending-approval',
+    disposition: 'CHANGES_MADE',
     response: {
       kind: 'resolved',
       respondedAt: command.respondedAt,
@@ -353,6 +633,7 @@ export function applyImplementerCommand(review: Review, command: ImplementerComm
     },
   };
   return {
+    ...review,
     rounds: replaceCurrentRound(review, completedRound),
     intervention: null,
   };
@@ -373,6 +654,7 @@ export function beginNextReviewRound(
   const current = currentReviewRound(review);
   if (!current.response) { throw new Error('New review round requires an implementer resolution'); }
   return {
+    ...review,
     rounds: [...review.rounds, {
       number: current.number + 1,
       subject: {
@@ -384,6 +666,10 @@ export function beginNextReviewRound(
       startedAt,
       decision: null,
       response: null,
+      phase: 'reviewing',
+      disposition: null,
+      reviewerRetryCount: 0,
+      implementerRetryCount: 0,
     }],
     intervention: null,
   };

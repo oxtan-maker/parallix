@@ -15,7 +15,7 @@ export class LegacyStatsBackfillAdapter implements StatsBackfillPort {
   ) {}
 
   async readProjection(_options: { readonly filePath?: string | null } = {}): Promise<StatsProjection> {
-    const report = collectHistoricalStatsBackfill(this._rootDir, this._measurementStore);
+    const report = await collectHistoricalStatsBackfill(this._rootDir, this._measurementStore);
     const rows: StatsRow[] = report.rows.map(row => ({ ...row }));
     return {
       rows,

@@ -25,15 +25,19 @@ const forgejo = require('../.test-runtime/lib/tools/forgejo');
 const setupReview = require('../.test-runtime/lib/tools/setup-review');
 const gatekeeper = require('../.test-runtime/lib/tools/gatekeeper');
 
+/**
+ * Give the mission an identity for the handoff to act under.
+ *
+ * This used to write a `review-state.json`; after the TASK-2322.12 cutover the
+ * review identity comes from the Review aggregate, and where there is no
+ * Review yet — which is exactly the case at handoff — it comes from the Backlog
+ * task's implementer. These tests mock the Backlog module, so that is where the
+ * identity is stated.
+ */
 function writeReviewState(missionDir, reviewer, implementer) {
   fs.mkdirSync(missionDir, { recursive: true });
-  fs.writeFileSync(path.join(missionDir, 'review-state.json'), JSON.stringify({
-    mission: 'task-098',
-    reviewer,
-    implementer,
-    round: 1,
-    phase: 'reviewing'
-  }, null, 2));
+  mock.method(backlog, 'getTaskImplementer', () => implementer);
+  mock.method(backlog, 'getTaskAssignee', () => implementer);
 }
 
 test('verifyHandoff fails when mission directory is not found', () => {
@@ -245,7 +249,7 @@ test('performHandoff falls back to magnus and persists bootstrap failure summary
       rebaseFn: mockRebase,
     });
 
-    assert.equal(result.ok, true);
+    assert.equal(result.ok, true, String(result.error));
     const taskContent = fs.readFileSync(taskFile, 'utf8');
     assert.match(taskContent, /## Fallback: PR submitted as human/);
     assert.match(taskContent, /Original user: custom/);
@@ -1309,11 +1313,18 @@ test('performHandoff no longer stages or commits a legacy NEL record before tran
       error: () => {},
     });
     assert.equal(result.ok, true);
-    // SC3: the NEL lives in SQLite, so handoff stages and commits nothing for it.
-    // The only git call is the review target-branch lookup for the Mission transition.
-    assert.deepEqual(gitCalls, [
-      ['-C', worktree, 'branch', '--list', '--format=%(refname:short)', 'main', 'master'],
-    ]);
+    // SC3: the NEL lives in SQLite, so handoff stages and commits nothing for
+    // it. Everything git is asked here is a read — the review target-branch
+    // lookup for the Mission transition, and worktree resolution.
+    assert.deepEqual(
+      gitCalls.filter(args => args.includes('add') || args.includes('commit')),
+      [],
+      'no NEL record may be staged or committed',
+    );
+    assert.ok(
+      gitCalls.some(args => args.includes('branch') && args.includes('--list')),
+      'the review target branch is still resolved for the Mission transition',
+    );
     assert.equal(transitions, 1);
   } finally {
     fs.rmSync(worktree, { recursive: true, force: true });

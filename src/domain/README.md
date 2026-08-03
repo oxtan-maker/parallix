@@ -53,7 +53,7 @@ The other requested state surfaces have these roles:
 |---|---|---|---|
 | Mission lifecycle | Aggregate state and commands | Status, assignment, checkpoint, and review rules must change consistently | `src/platform/runtime/lib/tools/backlog.ts:526` |
 | Checkpoints | Replaceable entity within a mission, keyed by checkpoint name | A mission redo replaces stale CP evidence; Git retains revisions | `src/platform/runtime/lib/commands/checkpoint.ts:8` |
-| Review | Ordered round conversation inside a mission | Reviewer decisions, implementer responses, exact revisions, and findings must remain attributable across rounds | `prompts/review.md`, `prompts/act-on-review.md`, `src/platform/runtime/lib/review/review-loop.ts:1375-1696` |
+| Review | Ordered round conversation inside a mission, stored in the operator database | Reviewer decisions, implementer responses, exact revisions, and findings must remain attributable across rounds; the loop's own workflow state and event history belong to the same aggregate, so a restart resumes from one authority | `prompts/review.md`, `prompts/act-on-review.md`, `src/platform/runtime/lib/review/review-loop.ts:1375-1696`, `src/adapters/sqlite/mission-store.ts` |
 | Agents and eligibility | Value objects plus pure selection policy | Eligibility is evaluated from configuration, explicit blocks, and launcher availability | `src/platform/runtime/lib/agents/launcher-selection.ts:127` |
 | Usage/statistics | Agent work measurements plus a completed-mission projection | Statistics need closure, final implementer, model attribution, cost, time, tokens, fix rounds, and change size; the measurement database is the authority | `src/platform/runtime/lib/commands/stats.ts:102`, `:862`, `:1918` |
 | Known repositories | Repository identity plus an application selector projection | No repository registry or last-used signal is authoritative today | `src/domain/repository.ts`, `src/application/projections/repository-selector.ts` |
@@ -62,7 +62,12 @@ The other requested state surfaces have these roles:
 
 Checkpoint content is not immutable. `recordCheckpoint()` replaces an existing
 checkpoint with the same name and rejects cross-mission evidence
-(`checkpoint.ts:45`). Review is not a mutable phase enum. `Review` records an
+(`checkpoint.ts:45`). Review is not a mutable phase enum, and it is not a file:
+`<PARALLIX_HOME>/parallix.db` is the sole live authority for every review value
+above (ADR 0053). What remains outside it is a write-only Markdown export of
+each stored event under `missions/<slug>/review-events/`, the single-use `/tmp`
+artifacts an agent process hands to the loop, and the review provider, which is
+a projection. `Review` records an
 ordered sequence of rounds; each round names the exact revision, reviewer
 decision, findings, and implementer response (`review.ts`). Agent family names
 are open values, but reviewer assignment succeeds only when the family appears
@@ -253,7 +258,7 @@ agent-family label or inventing a zero.
 | Replace checkpoint by name | Immutable checkpoint value object | Missions are redone and CP documents are revised; `px checkpoint` commits the current tracked tree (`checkpoint.ts:51-58`) |
 | `nextActionText` as display guidance | Executable `nextAction` | The checkpoint command writes `Next action:` into commit/document evidence but does not dispatch it (`checkpoint.ts:57`) |
 | Domain `integration` queue vs adapter status and board lane | Encoding `approved`, `ready-for-integration`, and `integrate` as three domain states | `config/state-map.json` maps adapter vocabulary; live work distinguishes queued from active integration |
-| Review as reviewer/implementer commands over exact revisions | Copying the mutable `review-state.json` phase/disposition snapshot | Prompts expose two reviewer decisions and implementer resolution/intervention; runtime phase and disposition can legitimately disagree (`review-loop.ts:1375-1696`) |
+| Review as reviewer/implementer commands over exact revisions | Copying a mutable phase/disposition snapshot into a file beside the mission | Prompts expose two reviewer decisions and implementer resolution/intervention; runtime phase and disposition can legitimately disagree (`review-loop.ts:1375-1696`) |
 | Explicit configured reviewer eligibility passed into round creation | Built-in reviewer names, the default step policy, or fallback families | `config/agents.json` owns the eligible `review` families; missing or empty review eligibility makes assignment unavailable |
 | Stable finding IDs and per-finding resolutions | Global `CHANGES_MADE`/`PUSHBACK_ALL` transitions | The implementer prompt already requires a response for every finding, while the current file format cannot reliably join them; durable storage needs stable IDs |
 | One human-intervention state | Separate `PARKED` and `BLOCKED` domain states | Both legacy dispositions stop the autonomous loop and hand control to a human (`review-loop.ts:1637-1641`) |

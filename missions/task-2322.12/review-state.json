@@ -1,0 +1,27 @@
+{
+  "reviewer": "codex",
+  "implementer": "custom",
+  "round": 3,
+  "startedAt": "2026-08-02T17:32:19.903Z",
+  "phase": "fixing",
+  "disposition": "BLOCKED",
+  "metadata": {
+    "recordedStageLaunches": {
+      "review:custom": [
+        "custom|019fb70b-097e-7319-b107-efae39cd6909|2026-07-31T07:22:41.535Z|2026-07-31T07:22:41.535Z|0"
+      ],
+      "follow-up:codex": [
+        "codex||2026-07-31T07:22:42.672Z|2026-07-31T07:23:16.338Z|0"
+      ],
+      "follow-up:custom": [
+        "custom|019fc35c-b117-7132-8273-aebef2001aef|2026-08-02T17:10:38.378Z|2026-08-02T17:10:38.378Z|0",
+        "custom|019fb778-6e10-7e4c-97f6-339e2a24d64a|2026-08-02T17:20:52.117Z|2026-08-02T17:20:52.117Z|0",
+        "custom|019fb778-6e10-7e4c-97f6-339e2a24d64a|2026-08-02T17:38:57.654Z|2026-08-02T17:38:57.654Z|0"
+      ],
+      "review:codex": [
+        "codex||2026-08-02T17:11:13.178Z|2026-08-02T17:14:11.460Z|0",
+        "codex||2026-08-02T17:32:54.159Z|2026-08-02T17:34:52.025Z|0"
+      ]
+    }
+  }
+}

@@ -4,9 +4,9 @@ const assert = require('node:assert/strict');
 const { pushRound, commentRound, submitReviewRound } = require('../.test-runtime/lib/review/review-commands');
 const mockRootDir = '/mock';
 
-test('pushRound exits when no forgejoUser', () => {
+test('pushRound exits when no forgejoUser', async () => {
   let exited = false;
-  pushRound('test-slug', {
+  await pushRound('test-slug', {
     resolveWorktreeFn: () => mockRootDir,
     readReviewStateFn: () => null,
     resolveTaskFileFn: () => ({ ok: false }),
@@ -17,9 +17,9 @@ test('pushRound exits when no forgejoUser', () => {
   assert.equal(exited, true);
 });
 
-test('commentRound exits when no forgejoUser', () => {
+test('commentRound exits when no forgejoUser', async () => {
   let exited = false;
-  commentRound('test-slug', 'msg', {
+  await commentRound('test-slug', 'msg', {
     readReviewStateFn: () => null,
     exit: (code) => { exited = true; },
     log: () => {},
@@ -29,9 +29,9 @@ test('commentRound exits when no forgejoUser', () => {
   assert.equal(exited, true);
 });
 
-test('submitReviewRound exits when no forgejoUser', () => {
+test('submitReviewRound exits when no forgejoUser', async () => {
   let exited = false;
-  submitReviewRound('test-slug', 'approve', 'msg', {
+  await submitReviewRound('test-slug', 'approve', 'msg', {
     readReviewStateFn: () => null,
     exit: (code) => { exited = true; },
     log: () => {},

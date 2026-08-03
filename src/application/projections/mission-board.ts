@@ -5,7 +5,10 @@ import {
   currentReviewRound,
   sameReviewedRevision,
   type PullRequestReference,
+  type Review,
+  type ReviewDisposition,
   type ReviewedRevision,
+  type ReviewPhase,
 } from '../../domain/review.js';
 
 /**
@@ -60,10 +63,64 @@ export interface MissionCard {
   readonly gate: MissionOperationalFacts['latestGate'];
   readonly pullRequest: PullRequestReference | null;
   readonly reviewApproved: boolean;
+  /**
+   * Review-loop workflow state for the current round, null when the mission has
+   * no review. Every surface (CLI, TUI, web board) reads the loop's phase from
+   * here rather than from a mission-directory file.
+   */
+  readonly reviewRound: number | null;
+  readonly reviewPhase: ReviewPhase | null;
+  readonly reviewDisposition: ReviewDisposition | null;
+  /**
+   * Every round so far, oldest first.
+   *
+   * A reviewer is not guaranteed to be the agent family that reviewed the
+   * previous round — a usage block reroutes the launch to another family. The
+   * incoming reviewer needs the prior verdicts, comments, and the implementer's
+   * pushbacks to avoid re-raising settled findings, so the history travels with
+   * the card rather than living in the previous reviewer's context.
+   */
+  readonly reviewHistory: readonly ReviewRoundSummary[];
   readonly currentWork: LiveMissionWork | null;
   readonly blockingReason: string | null;
   readonly flags: readonly string[];
   readonly commands: readonly CommandAvailability[];
+}
+
+/** One past round, flattened for display and for handing to the next reviewer. */
+export interface ReviewRoundSummary {
+  readonly number: number;
+  readonly reviewer: AgentFamily;
+  readonly implementer: AgentFamily;
+  readonly phase: ReviewPhase;
+  readonly disposition: ReviewDisposition | null;
+  readonly comment: string | null;
+  readonly findingSummaries: readonly string[];
+  /** Findings the implementer disputed rather than fixed, with their rationale. */
+  readonly pushbacks: readonly string[];
+  /** Findings the implementer fixed, with the evidence they cited. */
+  readonly fixes: readonly string[];
+}
+
+export function projectReviewHistory(review: Review | null): readonly ReviewRoundSummary[] {
+  if (!review) { return []; }
+  return review.rounds.map((round) => ({
+    number: round.number,
+    reviewer: round.reviewer,
+    implementer: round.implementer,
+    phase: round.phase,
+    disposition: round.disposition,
+    comment: round.decision?.comment ?? null,
+    findingSummaries: round.decision?.kind === 'changes-requested'
+      ? round.decision.findings.map((finding) => finding.summary)
+      : [],
+    pushbacks: (round.response?.resolutions ?? [])
+      .filter((resolution) => resolution.kind === 'disputed')
+      .map((resolution) => `${resolution.findingId}: ${resolution.rationale}`),
+    fixes: (round.response?.resolutions ?? [])
+      .filter((resolution) => resolution.kind === 'fixed')
+      .map((resolution) => `${resolution.findingId}: ${resolution.evidence}`),
+  }));
 }
 
 export function boardLane(mission: Mission): BoardLane {
@@ -104,6 +161,7 @@ export function projectMissionCard(mission: Mission, facts: MissionOperationalFa
     ? currentReviewRound(mission.review).subject
     : null;
   const reviewedChange = reviewedSubject?.change ?? null;
+  const currentRound = mission.review ? currentReviewRound(mission.review) : null;
   return {
     id: mission.id,
     repositoryId: mission.repositoryId,
@@ -122,6 +180,10 @@ export function projectMissionCard(mission: Mission, facts: MissionOperationalFa
     reviewApproved: facts.reviewApproval !== null
       && reviewedSubject !== null
       && sameReviewedRevision(reviewedSubject, facts.reviewApproval.subject),
+    reviewRound: currentRound?.number ?? null,
+    reviewPhase: currentRound?.phase ?? null,
+    reviewDisposition: currentRound?.disposition ?? null,
+    reviewHistory: projectReviewHistory(mission.review),
     currentWork: facts.currentWork,
     blockingReason: facts.blockingReason,
     flags: facts.flags,

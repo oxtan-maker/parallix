@@ -75,7 +75,13 @@ function run(argv: readonly string[], options: { cwd?: string; env?: NodeJS.Proc
     env: artifactEnv(options.env),
     timeout: 120_000,
   });
-  return { status: result.status, stdout: result.stdout || '', stderr: result.stderr || '' };
+  // A spawn failure (the executable missing, ETXTBSY, a resource limit) yields
+  // status null and an empty stderr, which asserts as a bare `null !== 0`.
+  // Fold the error into stderr so the message names the actual cause.
+  const stderr = result.error
+    ? `${result.stderr || ''}spawn ${argv[0]} failed: ${result.error.message}`
+    : result.stderr || '';
+  return { status: result.status, stdout: result.stdout || '', stderr };
 }
 
 /** Argv prefix for the native executable and for the npm fallback (SC8). */

@@ -471,7 +471,7 @@ describe('SQLite adapter — CP1: schema and migration runner', () => {
   // --- Singleton cache: shared connection per database path ---
 
   it('initOperatorState returns the same cached adapter for repeated calls on the same path', async () => {
-    clearOperatorStateCache();
+    await clearOperatorStateCache();
     const home = createTempDir('home');
     try {
       const first = await initOperatorState({ homeDir: home });
@@ -484,7 +484,7 @@ describe('SQLite adapter — CP1: schema and migration runner', () => {
   });
 
   it('initOperatorState creates separate cached adapters for different home directories', async () => {
-    clearOperatorStateCache();
+    await clearOperatorStateCache();
     const homeA = createTempDir('home-a');
     const homeB = createTempDir('home-b');
     try {
@@ -499,7 +499,7 @@ describe('SQLite adapter — CP1: schema and migration runner', () => {
   });
 
   it('initOperatorState evicts cache entry on initialization failure', async () => {
-    clearOperatorStateCache();
+    await clearOperatorStateCache();
     // Use a file path as homeDir — resolveDatabasePath treats it as a directory
     // and the database open fails because the path is a file, not a directory.
     const badHome = path.join(os.tmpdir(), `parallix-bad-home-${Date.now()}`);

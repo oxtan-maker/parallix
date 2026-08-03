@@ -235,7 +235,7 @@ test('px integrate rejects malformed real-agent options before preflight or gate
   }
 });
 
-test('buildIntegrationContext reads task file and status from the base worktree only', (t) => {
+test('buildIntegrationContext reads task file and status from the base worktree only', async (t) => {
   const backlog = require('../.test-runtime/lib/tools/backlog');
   const worktree = '/tmp/project-task-2200';
   const baseWorktree = '/tmp/project-main';
@@ -281,7 +281,7 @@ test('buildIntegrationContext reads task file and status from the base worktree 
     mockedGetTaskAssignee.mock.restore();
   });
 
-  const context = buildIntegrationContext('task-2200', {
+  const context = await buildIntegrationContext('task-2200', {
     baseBranch: 'main',
     baseWorktree,
     isForgejoReviewEnabledFn: () => false
@@ -293,7 +293,7 @@ test('buildIntegrationContext reads task file and status from the base worktree 
   assert.equal(context.taskStatus, 'ready-for-integration');
 });
 
-test('buildIntegrationContext does not let a mission-worktree status replace the base status (task-2244 regression)', (t) => {
+test('buildIntegrationContext does not let a mission-worktree status replace the base status (task-2244 regression)', async (t) => {
   const backlog = require('../.test-runtime/lib/tools/backlog');
   const worktree = '/tmp/project-task-2244';
   const baseWorktree = '/tmp/project-main-2244';
@@ -337,7 +337,7 @@ test('buildIntegrationContext does not let a mission-worktree status replace the
     mockedGetTaskAssignee.mock.restore();
   });
 
-  const context = buildIntegrationContext('task-2244', {
+  const context = await buildIntegrationContext('task-2244', {
     baseBranch: 'main',
     baseWorktree,
     isForgejoReviewEnabledFn: () => false
@@ -642,12 +642,12 @@ test('formatRecordedStatsRow renders the persisted review-round count', () => {
   );
 });
 
-test('recordPostIntegrationStats logs the persisted stats row including pr_fix_rounds', () => {
+test('recordPostIntegrationStats logs the persisted stats row including pr_fix_rounds', async () => {
   const logs = [];
   const originalLog = console.log;
   console.log = message => logs.push(message);
   try {
-    const outcome = recordPostIntegrationStats('task-2000', {
+    const outcome = await recordPostIntegrationStats('task-2000', {
       rootDir: FAKE_ROOT,
       recordIntegrationStatsFn() {
         return {
@@ -676,12 +676,12 @@ test('recordPostIntegrationStats logs the persisted stats row including pr_fix_r
   assert.match(logs.join('\n'), /\[INFO\] Mission telemetry by phase: task-2000/);
 });
 
-test('recordPostIntegrationStats records an unknown classification row for a missing-task mission', () => {
+test('recordPostIntegrationStats records an unknown classification row for a missing-task mission', async () => {
   const logs = [];
   const originalLog = console.log;
   console.log = message => logs.push(message);
   try {
-    const outcome = recordPostIntegrationStats('task-unknown', {
+    const outcome = await recordPostIntegrationStats('task-unknown', {
       rootDir: FAKE_ROOT,
       recordIntegrationStatsFn({ slug, rootDir, filePath, date }) {
         assert.equal(slug, 'task-unknown');
@@ -718,7 +718,7 @@ test('recordPostIntegrationStats records an unknown classification row for a mis
 // TASK-2322.08: integration no longer resolves any stats file path. It records
 // the completed mission through the measurement store, which is anchored to
 // PARALLIX_HOME by `resolveDatabasePath`, never to a consuming-repo path.
-test('recordPostIntegrationStats passes no file path and stays anchored to PARALLIX_HOME', () => {
+test('recordPostIntegrationStats passes no file path and stays anchored to PARALLIX_HOME', async () => {
   const runtimeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'px-runtime-root-'));
   const parallixHome = fs.mkdtempSync(path.join(os.tmpdir(), 'px-stats-home-'));
   const previousHome = process.env.PARALLIX_HOME;
@@ -770,7 +770,7 @@ test('recordPostIntegrationStats passes no file path and stays anchored to PARAL
   }
 });
 
-test('recordPostIntegrationStats prints mission-phase telemetry after weekly stats', () => {
+test('recordPostIntegrationStats prints mission-phase telemetry after weekly stats', async () => {
   const logs = [];
   const originalLog = console.log;
   console.log = message => logs.push(message);
@@ -779,7 +779,7 @@ test('recordPostIntegrationStats prints mission-phase telemetry after weekly sta
       { mission: 'task-3000', stage: 'draft', provider: 'openai', model: 'gpt-4', implementer: 'claude', input_tokens: '1000', output_tokens: '500', cached_tokens: '100', tool_calls: '50', duration_minutes: '10', cost_usd: '1.50' },
       { mission: 'task-3000', stage: 'execute', provider: 'openai', model: 'gpt-4', implementer: 'claude', input_tokens: '2000', output_tokens: '1000', cached_tokens: '200', tool_calls: '100', duration_minutes: '20', cost_usd: '3.00' },
     ];
-    recordPostIntegrationStats('task-3000', {
+    await recordPostIntegrationStats('task-3000', {
       rootDir: FAKE_ROOT,
       recordIntegrationStatsFn() {
         return {
@@ -808,12 +808,12 @@ test('recordPostIntegrationStats prints mission-phase telemetry after weekly sta
   }
 });
 
-test('recordPostIntegrationStats handles empty mission-phase rows gracefully', () => {
+test('recordPostIntegrationStats handles empty mission-phase rows gracefully', async () => {
   const logs = [];
   const originalLog = console.log;
   console.log = message => logs.push(message);
   try {
-    recordPostIntegrationStats('task-4000', {
+    await recordPostIntegrationStats('task-4000', {
       rootDir: FAKE_ROOT,
       recordIntegrationStatsFn() {
         return {
@@ -1003,7 +1003,7 @@ test('evaluateTaskStatusForIntegration accepts review when the latest formal rev
   assert.match(result.message, /APPROVED/);
 });
 
-test('provider-backed approval repair leaves integration preflight with review instead of stale active', () => {
+test('provider-backed approval repair leaves integration preflight with review instead of stale active', async () => {
   const { submitReviewRound } = require('../.test-runtime/lib/review/review');
   const { ReviewState } = require('../.test-runtime/lib/review/review-state');
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1327-integrate-preflight-'));
@@ -1031,7 +1031,7 @@ test('provider-backed approval repair leaves integration preflight with review i
     runGitOrThrow(['add', '.'], { cwd: root });
     runGitOrThrow(['commit', '-m', 'fixture'], { cwd: root });
 
-    submitReviewRound('task-2199', 'approve', 'LGTM', {
+    await submitReviewRound('task-2199', 'approve', 'LGTM', {
       isForgejoReviewEnabledFn: () => true,
       readTokenFn: () => 'token',
       postReviewFn: () => ({ ok: true }),

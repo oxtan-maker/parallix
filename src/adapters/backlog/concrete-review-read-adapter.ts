@@ -10,7 +10,12 @@ import type {
   ReviewedChange,
   ReviewedRevision,
 } from '../../domain/review.js';
-import { changeRevision } from '../../domain/review.js';
+import {
+  changeRevision,
+  parseReviewDisposition,
+  parseReviewPhase,
+  stageLaunchWindowsFrom,
+} from '../../domain/review.js';
 import type { ReviewReadAdapter } from '../../application/projections/board-readers.js';
 import type { ReviewState } from '../../platform/runtime/lib/review/review-state.js';
 import { findMissionDir } from '../../platform/runtime/lib/core/mission-utils.js';
@@ -20,7 +25,7 @@ import { readReviewState } from '../../platform/runtime/lib/review/review-state.
 // Parse-primitive types
 // ---------------------------------------------------------------------------
 
-type ReadReviewStateFn = (_slug: string, _rootDir?: string) => ReviewState | null;
+type ReadReviewStateFn = (_slug: string, _rootDir?: string) => ReviewState | null | Promise<ReviewState | null>;
 type FindMissionDirFn = (_slug: string, _rootDir?: string, _options?: { missionPath?: string }) => string | null;
 
 // ---------------------------------------------------------------------------
@@ -29,6 +34,12 @@ type FindMissionDirFn = (_slug: string, _rootDir?: string, _options?: { missionP
 
 function defaultReadReviewState(): ReadReviewStateFn {
   return readReviewState as ReadReviewStateFn;
+}
+
+/** Coerce an untyped metadata counter to a non-negative integer. */
+function nonNegativeGateRetries(value: unknown): number {
+  const count = Number(value);
+  return Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
 }
 
 function defaultFindMissionDir(): FindMissionDirFn {
@@ -49,7 +60,7 @@ export interface ConcreteReviewReadAdapterOptions {
 
 /**
  * Concrete `ReviewReadAdapter` that materialises domain `Review` objects
- * from Git-owned review-state artifacts (`review-state.json` in mission dirs).
+ * from the review state the operator database holds for a mission.
  *
  * Returns typed unavailable/missing results rather than inventing lifecycle
  * state. No review exists → null.
@@ -70,7 +81,7 @@ export class ConcreteReviewReadAdapter implements ReviewReadAdapter {
   // -----------------------------------------------------------------------
 
   async loadReview(_missionId: MissionId): Promise<Review | null> {
-    const state = this.readReviewState(_missionId, this.rootDir);
+    const state = await Promise.resolve(this.readReviewState(_missionId, this.rootDir)) as ReviewState | null;
     if (!state) {
       return null;
     }
@@ -78,7 +89,7 @@ export class ConcreteReviewReadAdapter implements ReviewReadAdapter {
   }
 
   async loadReviewApproval(_missionId: MissionId): Promise<{ subject: ReviewedRevision; approvedAt: string | null } | null> {
-    const state = this.readReviewState(_missionId, this.rootDir);
+    const state = await Promise.resolve(this.readReviewState(_missionId, this.rootDir)) as ReviewState | null;
     if (!state) {
       return null;
     }
@@ -136,11 +147,18 @@ export class ConcreteReviewReadAdapter implements ReviewReadAdapter {
       startedAt: state.startedAt || new Date().toISOString(),
       decision,
       response: null,
+      phase: parseReviewPhase(state.phase) ?? 'reviewing',
+      disposition: parseReviewDisposition(state.disposition),
+      reviewerRetryCount: state.reviewerRetryCount || 0,
+      implementerRetryCount: state.implementerRetryCount || 0,
     };
 
     return {
       rounds: [round] as [ReviewRound, ...ReviewRound[]],
       intervention: null,
+      stageLaunches: stageLaunchWindowsFrom(state.metadata?.recordedStageLaunches),
+      gateFailureRetryCount: nonNegativeGateRetries(state.metadata?.gateFailureRetryCount),
+      reviewEvents: [],
     };
   }
 

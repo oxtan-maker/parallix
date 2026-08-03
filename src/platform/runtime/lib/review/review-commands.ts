@@ -14,14 +14,15 @@ import { resolveTaskFile, getTaskStatus, getAcceptanceCriteria, getTaskAssignee,
 import { toVirtual } from '../core/state-map.js';
 import { getPrStatus, readToken, postComment, postReview, createPr, getComments, closePr, resolveReviewUser, isProviderEnabled } from './review-adapter.js';
 import { buildAutonomousReviewMatrix, formatMatrixSummary } from '../core/runtime-matrix.js';
-import { readReviewState, writeReviewState, resolveReviewIdentity, ReviewState, persistReviewStateOrThrow } from './review-state.js';
-import { createEvent, importAllLegacyArtifacts, ALL_EVENT_TYPES, isValidEventType, shouldMirrorToProvider, readAllEvents } from './review-events.js';
+import { readReviewState, writeReviewState, resolveReviewIdentity, ReviewState, persistReviewStateOrThrow, backfillReviewFromLegacyState } from './review-state.js';
+import { createEvent, ALL_EVENT_TYPES, isValidEventType, shouldMirrorToProvider, readAllEvents } from './review-events.js';
 import { startAgent } from '../agents/agents.js';
 import { formatVerificationCommand, runVerificationGate } from '../core/verification.js';
 import { bootstrapReviewSurface } from '../tools/setup-review.js';
 import { resolveReviewAdapter } from '../core/product-config.js';
 import { buildMetadataFooter, reviewArtifactPath, postWorkflowComment, postWorkflowReview, consumeReviewerArtifacts, resolveArtifactDir } from './review-artifacts.js';
 import { startReviewLoop, recordStageStatsSafe, commitSafeMissionArtifacts } from './review-loop.js';
+import { suggestFlag } from '../core/cli-flags.js';
 
 /** Lazily loaded handoff module. */
 let _handoff: any = null;
@@ -42,11 +43,102 @@ async function getHandoff(): Promise<any> {
 
 const DEFAULT_MAX_ATTEMPTS = 5;
 
+/**
+ * Every flag `px review` understands. Anything else is a typo: unknown flags
+ * used to be dropped silently, so `--max-attempt` (missing the "s") ran the
+ * loop at the default attempt budget instead of the requested one.
+ */
+export const REVIEW_FLAGS = new Set([
+  '--actor',
+  '--backfill-review',
+  '--close',
+  '--comment',
+  '--comment-file',
+  '--comments',
+  '--consume-artifacts',
+  '--continue',
+  '--create-event',
+  '--disposition',
+  '--dry-run',
+  '--focus',
+  '--force',
+  '--implementer',
+  '--import-legacy',
+  '--input-file',
+  '--max-attempts',
+  '--message',
+  '--message-file',
+  '--mission',
+  '--no-gate',
+  '--phase',
+  '--poll-timeout-seconds',
+  '--push',
+  '--reset',
+  '--reviewer',
+  '--round',
+  '--start',
+  '--status',
+  '--submit',
+  '--submit-review',
+  '--tmp-dir',
+  '--type',
+  '--verbose',
+  '--verdict',
+  '--verify'
+]);
+
+/** Flags whose next argument is a value, not another flag. */
+const REVIEW_VALUE_FLAGS = new Set([
+  '--actor',
+  '--comment',
+  '--comment-file',
+  '--disposition',
+  '--focus',
+  '--implementer',
+  '--input-file',
+  '--max-attempts',
+  '--message',
+  '--message-file',
+  '--mission',
+  '--phase',
+  '--poll-timeout-seconds',
+  '--reviewer',
+  '--round',
+  '--submit-review',
+  '--tmp-dir',
+  '--type',
+  '--verdict'
+]);
+
+/**
+ * Flag-shaped tokens that are not values of a value-taking flag, so a message
+ * body like `--comment "--not a flag"` is not mistaken for one.
+ */
+export function unknownReviewFlags(args: string[]): string[] {
+  const unknown: string[] = [];
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (!arg.startsWith('--')) { continue; }
+    const eq = arg.indexOf('=');
+    const name = eq === -1 ? arg : arg.slice(0, eq);
+    if (REVIEW_FLAGS.has(name)) {
+      // Skip the operand unconditionally: a message body may itself start with
+      // "--", and it must not be mistaken for a misspelled flag.
+      if (eq === -1 && REVIEW_VALUE_FLAGS.has(name) && args[i + 1] !== undefined) { i += 1; }
+      continue;
+    }
+    unknown.push(name);
+  }
+  return unknown;
+}
+
 // ============================================================================
 // Internal Helpers
 // ============================================================================
 
 export function flagValue(args: string[], flag: string): string | null {
+  const inline = args.find(a => a.startsWith(`${flag}=`));
+  if (inline) { return inline.slice(flag.length + 1) || null; }
   const idx = args.indexOf(flag);
   if (idx === -1) { return null; }
   const val = args[idx + 1];
@@ -298,7 +390,7 @@ async function commitPersistedReviewOutputs(
   });
 }
 
-export function postStaticReviewComment(
+export async function postStaticReviewComment(
   slug: string,
   message: string,
   options: {
@@ -315,7 +407,7 @@ export function postStaticReviewComment(
     buildMetadataFooterFn?: typeof buildMetadataFooter;
     rootDir?: string;
   } = {}
-): { ok: boolean; error?: string } {
+): Promise<{ ok: boolean; error?: string }> {
   const log = options.log || fmt.log.plain;
   const error = options.error || fmt.log.plainError;
   const resolveTaskFileFn = options.resolveTaskFileFn || resolveTaskFile;
@@ -329,7 +421,7 @@ export function postStaticReviewComment(
 
   const rootDir = options.rootDir || resolveWorktreeFn(slug) || process.cwd();
   const branch = missionBranchName(slug, rootDir);
-  const { identityUser } = resolveReviewIdentity(slug, rootDir, {
+  const { identityUser } = await resolveReviewIdentity(slug, rootDir, {
     readReviewStateFn,
   });
   let resolvedUser = identityUser;
@@ -341,7 +433,7 @@ export function postStaticReviewComment(
     }
   }
   if (!resolvedUser) {
-    error('Cannot determine review identity. Set FORGEJO_USER, persist review-state.json, or assign the task implementer.');
+    error('Cannot determine review identity. Set FORGEJO_USER, start the review with px handoff, or assign the task implementer.');
     return { ok: false, error: 'missing-user' };
   }
   resolvedUser = resolveReviewUserFn(resolvedUser!);
@@ -475,7 +567,7 @@ export function performStaticReview(
 // Command: verifyReview
 // ============================================================================
 
-export function verifyReview(
+export async function verifyReview(
   slug: string,
   skipGate: boolean | string,
   options: {
@@ -502,7 +594,7 @@ export function verifyReview(
     missionPath?: string;
     skipGate?: boolean;
   } = {}
-): void {
+): Promise<void> {
   const log = options.log || fmt.log.plain;
   const error = options.error || fmt.log.plainError;
   const exit = options.exit || process.exit;
@@ -639,7 +731,7 @@ export function verifyReview(
   formatMatrixSummaryFn(buildAutonomousReviewMatrixFn()).forEach((line: string) => log(line));
 
   // Show persisted reviewer state if present
-  const persisted = readReviewStateFn(slug, rootDir);
+  const persisted = await Promise.resolve(readReviewStateFn(slug, rootDir));
   if (persisted) {
     log(`Persisted reviewer state: reviewer=${fmt.agent(persisted.reviewer ?? '')} implementer=${fmt.agent(persisted.implementer ?? '')} round=${persisted.round} startedAt=${persisted.startedAt}`);
   }
@@ -690,7 +782,7 @@ export async function submitForReview(
   const worktree = resolveWorktreeFn(slug) || process.cwd();
   const providerEnabled = isReviewProviderEnabledFn(worktree);
 
-  const { identityUser: reviewStateUser } = resolveReviewIdentity(slug, worktree, {
+  const { identityUser: reviewStateUser } = await resolveReviewIdentity(slug, worktree, {
     readReviewStateFn,
   });
   let reviewIdentity = reviewStateUser;
@@ -706,7 +798,7 @@ export async function submitForReview(
   // 3. Mode-specific final fallback: named identity (provider-backed) vs "autonomous" (provider=none) (SC 6)
   if (!reviewIdentity) {
     if (providerEnabled) {
-      log(fmt.status('FAIL', `No review identity resolved for ${slug}. Persist review-state.json or set the task implementer before submitting for review.`));
+      log(fmt.status('FAIL', `No review identity resolved for ${slug}. Start the review with px handoff, or set the task implementer, before submitting for review.`));
       exit(1);
       return;
     } else {
@@ -763,7 +855,7 @@ export async function readComments(
   // Avoids resolving a provider token (which would FAIL/exit) when the provider is off.
   if (!isReviewProviderEnabledFn(worktree)) {
     log(fmt.status('INFO', `Review provider disabled; reading local review events for ${slug}...`));
-    const events = readAllEventsFn(slug, { rootDir: worktree, error });
+    const events = await Promise.resolve(readAllEventsFn(slug, { rootDir: worktree, error }));
     if (!events || events.length === 0) {
       log('no comments');
       return;
@@ -778,12 +870,12 @@ export async function readComments(
     return;
   }
 
-  let reviewIdentity = resolveReviewIdentity(slug, worktree, {
+  let reviewIdentity = (await resolveReviewIdentity(slug, worktree, {
     readReviewStateFn,
-  }).identityUser;
+  })).identityUser;
 
   if (!reviewIdentity) {
-    error(fmt.status('FAIL', `Cannot determine review identity for ${slug}. Persist review-state.json or set FORGEJO_USER.`));
+    error(fmt.status('FAIL', `Cannot determine review identity for ${slug}. Start the review with px handoff, or set FORGEJO_USER.`));
     exit(1);
     return;
   }
@@ -867,7 +959,7 @@ export async function pushRound(
   const branch = missionBranchName(slug, rootDir);
   const providerEnabled = isReviewProviderEnabledFn(rootDir);
 
-  const { identityUser: reviewStateUser } = resolveReviewIdentity(slug, rootDir, {
+  const { identityUser: reviewStateUser } = await resolveReviewIdentity(slug, rootDir, {
     readReviewStateFn,
   });
   let reviewIdentity = reviewStateUser;
@@ -883,7 +975,7 @@ export async function pushRound(
   // 2. Mode-specific final fallback: named identity (provider-backed) vs "autonomous" (provider=none) (SC 6)
   if (!reviewIdentity) {
     if (providerEnabled) {
-      error(fmt.status('FAIL', `No review identity resolved for --push on ${slug}. Persist review-state.json or set the task implementer.`));
+      error(fmt.status('FAIL', `No review identity resolved for --push on ${slug}. Start the review with px handoff, or set the task implementer.`));
       exit(1);
       return;
     } else {
@@ -947,20 +1039,20 @@ export async function pushRound(
 // Command: showReviewStatus
 // ============================================================================
 
-export function showReviewStatus(
+export async function showReviewStatus(
   slug: string,
   options: {
     log?: (_msg: string) => void;
     readReviewStateFn?: typeof readReviewState;
     resolveWorktreeFn?: typeof resolveWorktree;
   } = {}
-): void {
+): Promise<void> {
   const log = options.log || fmt.log.plain;
   const readReviewStateFn = options.readReviewStateFn || readReviewState;
   const resolveWorktreeFn = options.resolveWorktreeFn || resolveWorktree;
 
   const worktree = resolveWorktreeFn(slug) || process.cwd();
-  const state = readReviewStateFn(slug, worktree);
+  const state = await Promise.resolve(readReviewStateFn(slug, worktree));
 
   log(fmt.status('INFO', `Review status for mission: ${fmt.slug(slug)}`));
 
@@ -989,7 +1081,7 @@ export function showReviewStatus(
 // Command: commentRound
 // ============================================================================
 
-export function commentRound(
+export async function commentRound(
   slug: string,
   message: string,
   options: {
@@ -1005,7 +1097,7 @@ export function commentRound(
     postCommentFn?: typeof postComment;
     buildMetadataFooterFn?: typeof buildMetadataFooter;
   } = {}
-): void {
+): Promise<void> {
   const log = options.log || fmt.log.plain;
   const error = options.error || fmt.log.plainError;
   const exit = options.exit || process.exit;
@@ -1014,17 +1106,17 @@ export function commentRound(
   const resolveReviewUserFn = options.resolveReviewUserFn || options.resolveForgejoUserFn || resolveReviewUser;
   const rootDir = options.rootDir || resolveWorktree(slug) || process.cwd();
 
-  let reviewIdentity = resolveReviewIdentity(slug, rootDir, {
+  let reviewIdentity = (await resolveReviewIdentity(slug, rootDir, {
     readReviewStateFn,
-  }).identityUser;
+  })).identityUser;
 
   if (!reviewIdentity) {
-    error(fmt.status('FAIL', `Cannot determine review identity for ${slug}. Persist review-state.json or set FORGEJO_USER.`));
+    error(fmt.status('FAIL', `Cannot determine review identity for ${slug}. Start the review with px handoff, or set FORGEJO_USER.`));
     exit(1);
     return;
   }
   reviewIdentity = resolveReviewUserFn(reviewIdentity);
-  const result = postWorkflowComment(slug, message, {
+  const result = await postWorkflowComment(slug, message, {
     rootDir,
     reviewIdentity: reviewIdentity || undefined,
     readTokenFn: options.readTokenFn,
@@ -1039,9 +1131,9 @@ export function commentRound(
     return;
   }
 
-  const currentState = readReviewStateFn(slug, rootDir);
+  const currentState = await Promise.resolve(readReviewStateFn(slug, rootDir));
   if (currentState) {
-    persistReviewStateOrThrow(writeReviewStateFn, slug, currentState, rootDir);
+    await persistReviewStateOrThrow(writeReviewStateFn, slug, currentState, rootDir);
   }
 }
 
@@ -1089,7 +1181,7 @@ export async function consumeArtifacts(
   log(fmt.status('INFO', `Consuming reviewer artifacts for ${slug} from ${artifactDir}`));
 
   // Determine reviewer identity from review-state first, then task assignee.
-  const { identityUser: stateReviewer } = resolveReviewIdentity(slug, worktree, {
+  const { identityUser: stateReviewer } = await resolveReviewIdentity(slug, worktree, {
     readReviewStateFn,
   });
   let reviewer = stateReviewer;
@@ -1123,7 +1215,7 @@ export async function consumeArtifacts(
     return { ok: false, consumed: true };
   }
 
-  // Persist the artifact location to review-state.json if it doesn't exist yet
+  // Record the artifact location on the Review if it isn't there yet
   const persisted = readReviewStateFn(slug, worktree);
   if (!persisted) {
     const initialState = new ReviewState(slug, {
@@ -1132,14 +1224,16 @@ export async function consumeArtifacts(
       phase: 'reviewing',
     });
     persistReviewStateOrThrow(writeReviewStateFn, slug, initialState, worktree);
-    log(fmt.status('INFO', 'Created review-state.json for artifact consumption.'));
+    log(fmt.status('INFO', 'Started a review for artifact consumption.'));
   }
 
   // Transition backlog task to review status
   if (taskResolution.ok) {
     const currentStatus = getTaskStatusFn ? getTaskStatusFn(taskResolution.taskFile!) : null;
     if (!currentStatus || currentStatus !== 'review') {
-      void transitionTaskFn(slug, 'review', { rootDir, log }).catch(() => {});
+      // The transition is fire-and-forget, and the injected function may be
+      // sync or async — normalize before attaching the handler.
+      void Promise.resolve(transitionTaskFn(slug, 'review', { rootDir, log })).catch(() => {});
     } else {
       log(fmt.status('INFO', `Backlog task for ${slug} already at review status.`));
     }
@@ -1212,7 +1306,7 @@ export async function submitReviewRound(
   // For provider=none (standalone), skip provider posting and only update review-state
   if (!providerEnabled) {
     log(fmt.status('INFO', `Review provider is none — skipping provider posting, updating review-state only for ${slug}.`));
-    const currentState = readReviewStateFn(slug, worktree);
+    const currentState = await Promise.resolve(readReviewStateFn(slug, worktree));
 
     let stateToWrite: ReviewState;
     if (currentState) {
@@ -1235,7 +1329,7 @@ export async function submitReviewRound(
         phase: phaseForOutcome,
       });
     }
-    persistReviewStateOrThrow(writeReviewStateFn, slug, stateToWrite, worktree);
+    await persistReviewStateOrThrow(writeReviewStateFn, slug, stateToWrite, worktree);
 
     // Also transition the backlog task for provider=none so integrate preflight passes
     const backlogStatusMap: Record<string, string> = {
@@ -1245,7 +1339,7 @@ export async function submitReviewRound(
     };
     const backlogStatus = backlogStatusMap[outcome];
     if (backlogStatus) {
-      void transitionTaskFn(slug, backlogStatus, { rootDir: worktree, log }).catch(() => {
+      void Promise.resolve(transitionTaskFn(slug, backlogStatus, { rootDir: worktree, log })).catch(() => {
         log(fmt.status('WARN', `Could not transition backlog task ${slug} to ${backlogStatus}.`));
       });
     }
@@ -1255,17 +1349,17 @@ export async function submitReviewRound(
   }
 
   // For provider-backed reviews, post through the adapter. Review-state is the normal source.
-  let reviewIdentity = resolveReviewIdentity(slug, worktree, {
+  let reviewIdentity = (await resolveReviewIdentity(slug, worktree, {
     readReviewStateFn,
-  }).identityUser;
+  })).identityUser;
 
   if (!reviewIdentity) {
-    error(fmt.status('FAIL', `Cannot determine review identity for ${slug}. Persist review-state.json or set FORGEJO_USER.`));
+    error(fmt.status('FAIL', `Cannot determine review identity for ${slug}. Start the review with px handoff, or set FORGEJO_USER.`));
     exit(1);
     return;
   }
   reviewIdentity = resolveReviewUserFn(reviewIdentity);
-  const result = postWorkflowReview(slug, outcome, message, {
+  const result = await postWorkflowReview(slug, outcome, message, {
     worktree,
     reviewIdentity: reviewIdentity || undefined,
     readTokenFn: options.readTokenFn,
@@ -1300,7 +1394,7 @@ export async function submitReviewRound(
     return;
   }
 
-  const currentState = readReviewStateFn(slug, worktree);
+  const currentState = await Promise.resolve(readReviewStateFn(slug, worktree));
   if (currentState) {
     if (outcome === 'approve') {
       currentState.disposition = 'APPROVED';
@@ -1309,7 +1403,7 @@ export async function submitReviewRound(
       currentState.disposition = 'REQUEST_CHANGES';
       try { currentState.transitionTo('fixing'); } catch (_) { /* ignore */ }
     }
-    persistReviewStateOrThrow(writeReviewStateFn, slug, currentState, worktree);
+    await persistReviewStateOrThrow(writeReviewStateFn, slug, currentState, worktree);
   }
 
   const taskResolution = resolveTaskFileFn(slug, worktree);
@@ -1323,7 +1417,7 @@ export async function submitReviewRound(
   }
 
   if (backlogStatus) {
-    void transitionTaskFn(slug, backlogStatus, { rootDir: worktree, log }).catch(() => {
+    void Promise.resolve(transitionTaskFn(slug, backlogStatus, { rootDir: worktree, log })).catch(() => {
       log(fmt.status('WARN', `Could not transition backlog task ${slug} to ${backlogStatus}.`));
     });
   }
@@ -1357,12 +1451,12 @@ export async function closeMissionPr(
   const worktree = options.worktree || resolveWorktree(slug) || process.cwd();
   const branch = missionBranchName(slug, worktree);
 
-  let reviewIdentity = resolveReviewIdentity(slug, worktree, {
+  let reviewIdentity = (await resolveReviewIdentity(slug, worktree, {
     readReviewStateFn,
-  }).identityUser;
+  })).identityUser;
 
   if (!reviewIdentity) {
-    error(fmt.status('FAIL', `Cannot determine review identity for ${slug}. Persist review-state.json or set FORGEJO_USER.`));
+    error(fmt.status('FAIL', `Cannot determine review identity for ${slug}. Start the review with px handoff, or set FORGEJO_USER.`));
     exit(1);
     return;
   }
@@ -1387,7 +1481,7 @@ export async function closeMissionPr(
 // Event CLI Handlers
 // ============================================================================
 
-export function createEventHandler(
+export async function createEventHandler(
   slug: string,
   args: string[],
   options: {
@@ -1397,7 +1491,7 @@ export function createEventHandler(
     resolveWorktreeFn?: typeof resolveWorktree;
     readReviewStateFn?: typeof readReviewState;
   } = {}
-): void {
+): Promise<void> {
   const log = options.log || fmt.log.plain;
   const error = options.error || fmt.log.plainError;
   const exit = options.exit || process.exit;
@@ -1454,40 +1548,53 @@ export function createEventHandler(
   if (verdict) { params.verdict = verdict; }
 
   const readReviewStateFn = options.readReviewStateFn || readReviewState;
-  const { identityUser: stateReviewIdentity } = resolveReviewIdentity(slug, worktree, {
+  const { identityUser: stateReviewIdentity } = await resolveReviewIdentity(slug, worktree, {
     readReviewStateFn,
   });
   const reviewIdentity = actor || stateReviewIdentity;
 
   // SC 4: For mirrored event types, a provider identity is required before creating the event.
   if (shouldMirrorToProvider(eventType) && !reviewIdentity) {
-    error(fmt.status('FAIL', 'Cannot determine review identity for a mirrored event. Validate review-state.json or use --actor.'));
+    error(fmt.status('FAIL', 'Cannot determine review identity for a mirrored event. Start the review with px handoff, or use --actor.'));
     exit(1);
     return;
   }
 
   // Extract fields from content if structured
+  const itemDispositions: import('../../../../domain/review.js').ReviewItemDisposition[] = [];
   if (content.includes('fixed_items:') || content.includes('fixedItems:')) {
     try {
       const frontmatterMatch = content.match(/fixed_items:\s*(\[[^\]]*\])/i);
-      if (frontmatterMatch) { params.fixedItems = JSON.parse(frontmatterMatch[1]); }
+      if (frontmatterMatch) {
+        const ids = JSON.parse(frontmatterMatch[1]) as string[];
+        itemDispositions.push(...ids.map((id) => ({ kind: 'fixed' as const, findingId: id as import('../../../../domain/review.js').ReviewFindingId })));
+      }
     } catch (_) { /* ignore */ }
     try {
       const frontmatterMatch = content.match(/pushed_back_items:\s*(\[[^\]]*\])/i);
-      if (frontmatterMatch) { params.pushedBackItems = JSON.parse(frontmatterMatch[1]); }
+      if (frontmatterMatch) {
+        const ids = JSON.parse(frontmatterMatch[1]) as string[];
+        itemDispositions.push(...ids.map((id) => ({ kind: 'pushed_back' as const, findingId: id as import('../../../../domain/review.js').ReviewFindingId })));
+      }
     } catch (_) { /* ignore */ }
     try {
       const frontmatterMatch = content.match(/parked_items:\s*(\[[^\]]*\])/i);
-      if (frontmatterMatch) { params.parkedItems = JSON.parse(frontmatterMatch[1]); }
+      if (frontmatterMatch) {
+        const ids = JSON.parse(frontmatterMatch[1]) as string[];
+        itemDispositions.push(...ids.map((id) => ({ kind: 'parked' as const, findingId: id as import('../../../../domain/review.js').ReviewFindingId })));
+      }
     } catch (_) { /* ignore */ }
     try {
       const frontmatterMatch = content.match(/blocked_reason:\s*"([^"]*)"/i);
       if (frontmatterMatch) { params.blockedReason = frontmatterMatch[1]; }
     } catch (_) { /* ignore */ }
   }
+  if (itemDispositions.length > 0) {
+    (params as Record<string, unknown>).itemDispositions = itemDispositions;
+  }
 
   // Create the event
-  const result = createEvent(slug, eventType, params as any, {
+  const result = await createEvent(slug, eventType, params as any, {
     worktree,
     skipGit: false,
     log,
@@ -1514,23 +1621,67 @@ export function importLegacyHandler(
   } = {}
 ): void {
   const log = options.log || fmt.log.plain;
+  const _error = options.error || fmt.log.plainError;
+  const _exit = options.exit || process.exit;
+  const resolveWorktreeFn = options.resolveWorktreeFn || resolveWorktree;
+
+  const _tmpDir = flagValue(args, '--tmp-dir') || process.env.WORKFLOW_TMP_DIR || os.tmpdir();
+  const _worktree = resolveWorktreeFn(slug) || process.cwd();
+
+  // TASK-2322.12: the legacy /tmp/ artifact import path is removed. Review
+  // events remain file-backed under missions/<slug>/review-events/ until the
+  // TASK-2322.13 cutover moves them onto the SQLite Review aggregate.
+  log(fmt.status('INFO', `Legacy /tmp artifact import was removed by TASK-2322.12.`));
+  log(fmt.status('PASS', `Legacy import handler completed for ${slug} (no artifacts to migrate).`));
+}
+
+/**
+ * `px review <slug> --backfill-review [--dry-run]`
+ *
+ * Seed the Review aggregate for a mission handed off before the TASK-2322.12
+ * cutover, so `px review --continue` can resume it. Reports and writes nothing
+ * when the mission already has a Review or has no legacy state to migrate.
+ */
+export async function backfillReviewHandler(
+  slug: string,
+  args: string[],
+  options: {
+    log?: (_msg: string) => void;
+    error?: (_msg: string) => void;
+    exit?: (_code: number) => never;
+    resolveWorktreeFn?: typeof resolveWorktree;
+    backfillReviewFn?: typeof backfillReviewFromLegacyState;
+  } = {}
+): Promise<void> {
+  const log = options.log || fmt.log.plain;
   const error = options.error || fmt.log.plainError;
   const exit = options.exit || process.exit;
   const resolveWorktreeFn = options.resolveWorktreeFn || resolveWorktree;
+  const backfillReviewFn = options.backfillReviewFn || backfillReviewFromLegacyState;
 
-  const tmpDir = flagValue(args, '--tmp-dir') || process.env.WORKFLOW_TMP_DIR || os.tmpdir();
+  const apply = !args.includes('--dry-run');
   const worktree = resolveWorktreeFn(slug) || process.cwd();
+  const result = await backfillReviewFn(slug, worktree, { apply });
 
-  const result = importAllLegacyArtifacts(slug, { tmpDir, worktree, log, error }) as unknown as Record<string, unknown>;
-
-  const errors = (result.errors as string[]) || [];
-  if (!result.ok) {
-    error(fmt.status('FAIL', `Legacy import failed: ${errors.join(', ')}`));
+  switch (result.outcome) {
+  case 'backfilled':
+    log(fmt.status('PASS', `Backfilled review for ${slug}: ${result.rounds} round(s), now at round ${result.round} (${result.phase}).`));
+    return;
+  case 'would-backfill':
+    log(fmt.status('INFO', `Would backfill review for ${slug}: ${result.rounds} round(s), resuming at round ${result.round} (${result.phase}).`));
+    log(fmt.status('INFO', 'Dry run — re-run without --dry-run to write.'));
+    return;
+  case 'already-present':
+    log(fmt.status('INFO', `Mission ${slug} already has a review; nothing to backfill.`));
+    return;
+  case 'no-legacy-state':
+    log(fmt.status('INFO', `Mission ${slug} has no review-state.json to migrate.`));
+    return;
+  case 'failed':
+    error(fmt.status('FAIL', `Could not backfill review for ${slug}: ${result.diagnostic}`));
     exit(1);
     return;
   }
-
-  log(fmt.status('PASS', `Imported ${result.imported ? (result.imported as unknown[]).length : 0} legacy artifacts for ${slug}`));
 }
 
 // ============================================================================
@@ -1590,7 +1741,17 @@ export async function review(
   const resolveWorktreeFn = options.resolveWorktreeFn || resolveWorktree;
   const runFn = options.run || run;
 
-  const flags = args.filter(a => a.startsWith('--'));
+  const unknownFlags = unknownReviewFlags(args);
+  if (unknownFlags.length > 0) {
+    for (const flag of unknownFlags) {
+      const suggestion = suggestFlag(flag, REVIEW_FLAGS);
+      error(fmt.status('FAIL', `Unknown flag for px review: ${flag}${suggestion ? ` — did you mean ${suggestion}?` : ''}`));
+    }
+    exit(1);
+    return;
+  }
+
+  const flags = args.filter(a => a.startsWith('--')).map(a => (a.includes('=') ? a.slice(0, a.indexOf('=')) : a));
   const params = args.filter(a => !a.startsWith('--'));
 
   const explicitSlug = params[0];
@@ -1611,11 +1772,12 @@ export async function review(
   const isReset       = flags.includes('--reset');
   const isCreateEvent = flags.includes('--create-event');
   const isImportLegacy = flags.includes('--import-legacy');
+  const isBackfillReview = flags.includes('--backfill-review');
   const isConsumeArtifacts = flags.includes('--consume-artifacts');
   const missionPath = flagValue(args, '--mission');
 
   if (!slug) {
-    error('Usage: px review [<slug>] [--verify] [--submit] [--push] [--force] [--start] [--continue] [--no-gate] [--status] [--comments] [--comment "<msg>"|--comment-file <path>] [--submit-review <outcome> [--message "<summary>"|--message-file <path>] [--close] [--create-event --type <classification> [--input-file <path>] [--actor <name>] [--round <n>] [--phase <phase>] [--mission <path>]] [--import-legacy [--tmp-dir <dir>]] [--consume-artifacts]');
+    error('Usage: px review [<slug>] [--verify] [--submit] [--push] [--force] [--start|--continue [--implementer <a>] [--reviewer <a>] [--focus <f>] [--max-attempts <n>]] [--no-gate] [--status] [--comments] [--comment "<msg>"|--comment-file <path>] [--submit-review <outcome> [--message "<summary>"|--message-file <path>] [--close] [--create-event --type <classification> [--input-file <path>] [--actor <name>] [--round <n>] [--phase <phase>] [--mission <path>]] [--import-legacy [--tmp-dir <dir>]] [--backfill-review [--dry-run]] [--consume-artifacts]');
     exit(1);
     return;
   }
@@ -1667,11 +1829,20 @@ export async function review(
   } else if (isImportLegacy) {
     importLegacyHandler(slug, args, options);
     return;
+  } else if (isBackfillReview) {
+    await backfillReviewHandler(slug, args, options);
+    return;
   } else if (isStart || isContinue) {
     const implementer = flagValue(args, '--implementer');
     const reviewer    = flagValue(args, '--reviewer');
     const focus       = flagValue(args, '--focus') || 'all';
-    const maxAttempts = parseInt(flagValue(args, '--max-attempts') || String(DEFAULT_MAX_ATTEMPTS), 10);
+    const maxAttemptsRaw = flagValue(args, '--max-attempts');
+    const maxAttempts = maxAttemptsRaw === null ? DEFAULT_MAX_ATTEMPTS : parseInt(maxAttemptsRaw, 10);
+    if (!Number.isInteger(maxAttempts) || maxAttempts < 1) {
+      error(fmt.status('FAIL', `--max-attempts requires a positive integer (got "${maxAttemptsRaw}").`));
+      exit(1);
+      return;
+    }
     const verbose     = flags.includes('--verbose');
     const pollTimeoutRaw = flagValue(args, '--poll-timeout-seconds');
     const pollTimeoutSeconds = pollTimeoutRaw ? parseInt(pollTimeoutRaw, 10) : null;
@@ -1729,7 +1900,7 @@ export async function review(
         );
       }
     }
-    const persisted = readReviewStateFn(slug);
+    const persisted = await Promise.resolve(readReviewStateFn(slug));
     if (persisted) {
       log(fmt.status('INFO', `Persisted reviewer state: reviewer=${fmt.agent(persisted.reviewer ?? '')} implementer=${fmt.agent(persisted.implementer ?? '')} round=${persisted.round}`));
     }

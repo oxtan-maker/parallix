@@ -261,6 +261,9 @@ test('consumeReviewerArtifacts does not call Forgejo helpers when forgejoEnabled
     postCommentFn: () => { postCommentCalled = true; throw new Error('postComment called'); },
     postReviewFn: () => { postReviewCalled = true; throw new Error('postReview called'); },
     buildMetadataFooterFn: () => '',
+    // This test is about Forgejo independence, not event storage: stub the
+    // event writer so it does not need an operator database with a Review.
+    createEventFn: () => ({ ok: true, path: '/mock/event' }),
     log: () => {},
     error: () => {},
   });
@@ -335,6 +338,9 @@ test('consumeImplementerArtifacts does not call Forgejo helpers when forgejoEnab
     getCommentsFn: () => { throw new Error('getComments called'); },
     postCommentFn: () => { postCommentCalled = true; throw new Error('postComment called'); },
     buildMetadataFooterFn: () => '',
+    // This test is about Forgejo independence, not event storage: stub the
+    // event writer so it does not need an operator database with a Review.
+    createEventFn: () => ({ ok: true, path: '/mock/event' }),
     log: () => {},
     error: () => {},
   });

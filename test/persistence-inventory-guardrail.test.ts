@@ -538,6 +538,10 @@ test('SC1 reverse: all durable-IO files under src/ are present in the inventory'
     'src/platform/runtime/lib/core/verification.ts',
     // Red-green reproduction test tracking — reads mission docs for test markers
     'src/platform/runtime/lib/tools/redgreen.ts',
+    // Review command surface — reads mission documents, checkpoints, ADRs and
+    // operator-named input files. Its Review state is the SQLite aggregate;
+    // none of these reads are of a database-owned concept (TASK-2322.12).
+    'src/platform/runtime/lib/review/review-commands.ts',
   ]);
 
   const durableIoFiles = new Set<string>();

@@ -81,10 +81,9 @@ import * as path from 'node:path';
 import * as fmt from '../core/fmt.js';
 import { resolveTaskFile, getTaskClassification, getTaskImplementer, getTaskAssignee } from '../tools/backlog.js';
 import { isForgejoReviewEnabled, loadEffectiveConfig } from '../core/product-config.js';
-import { readReviewState } from '../review/review-state.js';
-import * as reviewEvents from '../review/review-events.js';
+import { missionId } from '../../../../domain/mission.js';
+import { currentReviewRound } from '../../../../domain/review.js';
 import { git } from '../core/git.js';
-import { findMissionDir } from '../core/mission-utils.js';
 import * as forgejo from '../tools/forgejo.js';
 import { resolveMeasurementStore } from '../../../../adapters/sqlite/measurement-store.js';
 
@@ -812,36 +811,6 @@ function summarizeMissionWindow(rows, window) {
 }
 
 /**
- * Re-derive a mission's fix-round count from COMPLETE local ground truth — the
- * mission-local review event store — for use as a render-time override of a
- * stale/zero stored value. We deliberately use ONLY the event store here, not
- * branch-history: the event store is self-contained per mission directory, so a
- * non-null result is trustworthy. Branch-history derivation depends on
- * `review-state.json` being present in this checkout, which is not guaranteed for
- * arbitrary other missions during a cross-mission report and could yield a
- * misleading 0 — so we never let it override a stored value. Returns null when
- * the event store isn't available (different repo / not checked out), leaving the
- * caller on the stored value.
- */
-/**
- * @param {string} slug
- * @param {string} rootDir
- * @param {string} repo
- */
-function deriveFixRoundsLocalAuthoritative(slug, rootDir, repo) {
-  if (!slug || !rootDir) {return null;}
-  // Only derive for missions belonging to the current checkout's repo.
-  if (repo && String(repo).trim() && String(repo).trim() !== resolveStatsRepoName(rootDir)) {
-    return null;
-  }
-  const fromEvents = deriveFixRoundsFromReviewEvents(slug, rootDir);
-  if (fromEvents && Number.isInteger(fromEvents.prFixRounds)) {
-    return fromEvents.prFixRounds;
-  }
-  return null;
-}
-
-/**
  * @param {StatsRow[]} rows
  * @param {{start: Date, end: Date}} window
  * @param {{rootDir?: string|null, deriveFixRoundsFn?: Function}} [options]
@@ -972,20 +941,26 @@ function computeAgentMissionGroups(rows, window, options = {}) {
 function summarizeAgentWindow(rows, window, options = {}) {
   /** @type {{rootDir?: string|null, deriveFixRoundsFn?: Function}} */
   const opts = options;
-  const { rootDir = null, deriveFixRoundsFn = deriveFixRoundsLocalAuthoritative } = opts;
+  const { rootDir = null, deriveFixRoundsFn = null } = opts;
   // Mission counts and repair-round averages describe completed missions only.
   // Other report sections reuse the grouping helper without this filter so
   // their live stage telemetry remains unchanged.
   const { allValidWindowRows, groups } = computeAgentMissionGroups(rows, window, { completedOnly: true });
   // Build agent groups from the globally deduplicated missions.
-  // For each mission, trust local ground truth (events/branch history) over
-  // the stored value when available — this is what makes the report reflect
-  // the review loop rather than the (untrusted) CSV. `pr_fix_rounds` is a
-  // review-loop quantity, independent of whether the mission was integrated.
-  // The stored fallback is the highest pr_fix_rounds across all of the
-  // completed mission's window rows: the dedup winner is the model-labeled
-  // stage row, but the final fix-round count is usually recorded on the
-  // blank-model rollup row.
+  //
+  // `pr_fix_rounds` comes off the stored measurement rows. This used to be
+  // re-derived here from the mission-local review event files, because those
+  // files were the only complete record of the loop and the stored value could
+  // lag them. After the TASK-2322.12 cutover the Review aggregate in the
+  // operator database is that record, and it is what stamps the stored value —
+  // so there is nothing left for a render-time override to correct, and a
+  // synchronous renderer has no business reading the database behind the
+  // application's back to try. `deriveFixRoundsFn` stays as an injection point
+  // for a caller that has already derived a count.
+  //
+  // The stored value is the highest pr_fix_rounds across all of the completed
+  // mission's window rows: the dedup winner is the model-labeled stage row, but
+  // the final fix-round count is usually recorded on the blank-model rollup row.
   /** @type {Record<string, number>} */
   const storedRoundsByMission = {};
   for (const row of allValidWindowRows) {
@@ -996,7 +971,7 @@ function summarizeAgentWindow(rows, window, options = {}) {
     }
   }
   const roundsFor = (/** @type {any} */ row) => {
-    if (rootDir) {
+    if (rootDir && deriveFixRoundsFn) {
       const authoritative = deriveFixRoundsFn(row.mission, rootDir, row.repo);
       if (authoritative !== null && authoritative !== undefined) {
         return Number.parseInt(authoritative, 10) || 0;
@@ -1455,18 +1430,22 @@ function deriveFixRoundsFromTaskText(taskFilePath) {
  */
 function deriveFixRoundsFromReviewStateHistory(slug, finalImplementer, latestRound, rootDir = process.cwd()) {
   const normalizedImplementer = normalizeImplementer(finalImplementer);
-  const round = Number.parseInt(latestRound, 10) || 1;
-  if (!slug || !normalizedImplementer || round <= 1) {
+  const declaredRound = Number.parseInt(latestRound, 10) || 0;
+  if (!slug || !normalizedImplementer) {
     return 0;
   }
 
   const branch = `mission/${slug}`;
   const result = git(['-C', rootDir, 'log', '--reverse', '--format=%s', branch]);
   if (result.status !== 0) {
-    return Math.max(0, round - 1);
+    return Math.max(0, declaredRound - 1);
   }
 
   let firstFinalImplementerRound = null;
+  // This path only runs for a mission with no Review in the database, so there
+  // is no round counter to read: the highest round in the commit history is
+  // the mission's latest round.
+  let highestRound = 0;
   // review-state commit subjects are formatted as:
   //   review-state(<slug>): round N (<phase>) [<reviewer> -> <implementer>] ...
   // The implementer sits on the right of the `->`. Match the earliest reviewing
@@ -1481,16 +1460,29 @@ function deriveFixRoundsFromReviewStateHistory(slug, finalImplementer, latestRou
     `^review-state\\(${esc(slug)}\\):\\s*round\\s+(\\d+)\\s+\\([^)]*reviewing\\s+${esc(normalizedImplementer)}\\)`,
     'i'
   );
+  const anyRoundPattern = new RegExp(`^review-state\\(${esc(slug)}\\):\\s*round\\s+(\\d+)\\b`, 'i');
 
   for (const line of result.stdout.split('\n')) {
     const trimmed = line.trim();
+
+    const anyRound = trimmed.match(anyRoundPattern);
+    if (anyRound) {
+      const seen = Number.parseInt(anyRound[1], 10);
+      if (Number.isInteger(seen) && seen > highestRound) { highestRound = seen; }
+    }
+
+    if (firstFinalImplementerRound !== null) {continue;}
     const match = trimmed.match(reviewStatePattern) || trimmed.match(legacyPattern);
     if (!match) {continue;}
     const candidateRound = Number.parseInt(match[1], 10);
     if (Number.isInteger(candidateRound) && candidateRound > 0) {
       firstFinalImplementerRound = candidateRound;
-      break;
     }
+  }
+
+  const round = declaredRound || highestRound || 1;
+  if (round <= 1) {
+    return 0;
   }
 
   if (!firstFinalImplementerRound) {
@@ -1613,105 +1605,54 @@ function deriveImplementerAndFixRoundsFromPrComments(slug, rootDir = process.cwd
 }
 
 /**
- * Derive the final implementer and fix-round count from the mission-local review
- * event store (`missions/<slug>/review-events/*.md`). This is the most reliable
- * LOCAL source of review-loop ground truth: each round records a
- * `reviewer_outcome` (with a verdict) and, when the implementer responds, an
- * `implementer_disposition`/`implementer_round_summary` authored by the
- * implementer.
+ * Load a mission's `Review` aggregate from the operator database.
  *
- * A "fix round" is a round in which the reviewer returned `request-changes` and
- * the FINAL implementer was the one resolving it (so a mid-mission implementer
- * handoff only counts rounds owned by the agent who finished the mission).
+ * The statistics projection reads review data through `SqliteMissionStore`
+ * (ADR 0053 / TASK-2322.12) rather than through the review modules' readers,
+ * so no statistics path can reintroduce a file-backed round history.
  *
- * Returns `{ implementer, prFixRounds, source: 'review-events' }` or null when no
- * usable round events exist.
- */
-/**
  * @param {string} slug
  * @param {string} [rootDir]
+ * @returns {Promise<import('../../../../domain/review.js').Review|null>}  Null when the mission has no Review.
  */
-function deriveFixRoundsFromReviewEvents(slug, rootDir = process.cwd()) {
-  if (!slug) {return null;}
-  let events;
+async function loadMissionReview(slug, rootDir = process.cwd()) {
   try {
-    // Guard against reading (and, as a side effect, creating) an events dir that
-    // doesn't exist yet — this runs on every active-stage recording.
-    // findMissionDir already imported at top
-    const missionDir = findMissionDir(slug, rootDir);
-    if (!missionDir || !fs.existsSync(path.join(missionDir, 'review-events'))) {return null;}
-    events = reviewEvents.readAllEvents(slug, /** @type{any} */({ rootDir, log: () => {}, error: () => {} }));
-  } catch (/** @type{any} */ _err) {
+    const { createProductionApplicationServices } = await import(
+      '../composition/application-services.js'
+    );
+    const services = await createProductionApplicationServices(rootDir);
+    const store = services.mission?.store ?? null;
+    if (!store) { return null; }
+    const result = await store.load(missionId(slug));
+    if (result.kind !== 'found' || !result.mission.review) { return null; }
+    return result.mission.review;
+  } catch {
     return null;
   }
-  if (!Array.isArray(events) || events.length === 0) {return null;}
-
-  // Collapse events into per-round facts: did the reviewer request changes, and
-  // which implementer OWNED the round. A round can contain a mid-round handoff
-  // (multiple implementer dispositions by different agents); the agent who
-  // actually resolved the round is the one with the LATEST disposition, so we
-  // track timestamps and keep the most recent — never just the last one iterated
-  // (event order is not guaranteed and `readAllEvents` is newest-first).
-  const rounds = new Map();
-  for (const event of events) {
-    const round = Number.parseInt(event.round, 10);
-    if (!Number.isInteger(round) || round <= 0) {continue;}
-    if (!rounds.has(round)) {rounds.set(round, { requestedChanges: false, implementer: null, implementerTs: '' });}
-    const entry = rounds.get(round);
-    if (event.event_type === reviewEvents.VALID_EVENT_TYPES.REVIEWER_OUTCOME
-      && String(event.verdict || '').toLowerCase() === 'request-changes') {
-      entry.requestedChanges = true;
-    }
-    if (event.event_type === reviewEvents.VALID_EVENT_TYPES.IMPLEMENTER_DISPOSITION
-      || event.event_type === reviewEvents.VALID_EVENT_TYPES.IMPLEMENTER_ROUND_SUMMARY) {
-      const impl = normalizeImplementer(event.actor);
-      const ts = String(event.timestamp || '');
-      if (impl && (entry.implementer === null || ts >= entry.implementerTs)) {
-        entry.implementer = impl;
-        entry.implementerTs = ts;
-      }
-    }
-  }
-  if (rounds.size === 0) {return null;}
-
-  // Final implementer = implementer of the highest-numbered round that names one.
-  let finalImplementer = null;
-  for (const round of [...rounds.keys()].sort((a, b) => b - a)) {
-    const impl = rounds.get(round).implementer;
-    if (impl) { finalImplementer = impl; break; }
-  }
-
-  // Count request-changes rounds owned by the final implementer (or all such
-  // rounds when no implementer could be attributed).
-  let prFixRounds = 0;
-  for (const [, entry] of rounds) {
-    if (!entry.requestedChanges) {continue;}
-    if (!finalImplementer || !entry.implementer || entry.implementer === finalImplementer) {
-      prFixRounds += 1;
-    }
-  }
-
-  return { implementer: finalImplementer, prFixRounds, source: 'review-events' };
 }
 
 /**
  * @param {string} slug
  * @param {string} [rootDir]
  */
-function deriveImplementerAndFixRounds(slug, rootDir = process.cwd()) {
-  const reviewState = readReviewState(slug, rootDir);
+async function deriveImplementerAndFixRounds(slug, rootDir = process.cwd()) {
+  const review = await loadMissionReview(slug, rootDir);
+  const currentRound = review ? currentReviewRound(review) : null;
 
-  // Prefer the mission-local review event store — the most reliable local record
-  // of review-loop ground truth — over the network (Forgejo) and over fragile
-  // commit-subject/text heuristics. Fall back to branch-history for the final
-  // implementer when the events record rounds but not an implementer.
-  const eventImplementer = deriveFixRoundsFromReviewEvents(slug, rootDir);
-  if (eventImplementer && Number.isInteger(eventImplementer.prFixRounds)) {
-    const implementer = eventImplementer.implementer
+  // The Review aggregate is the authority for the round conversation: a fix
+  // round is one the reviewer sent back, which the rounds record directly. The
+  // network and commit-subject derivations below are for missions with no
+  // Review in the database at all — imported history, or a mission whose loop
+  // ran before the cutover and has not been backfilled.
+  const rounds = review ? review.rounds : [];
+  if (rounds.length > 0) {
+    const owner = rounds[rounds.length - 1].implementer;
+    const implementer = normalizeImplementer(owner)
       || deriveFinalImplementerFromBranchHistory(slug, rootDir)
-      || (reviewState?.implementer ? normalizeImplementer(reviewState.implementer) : null);
+      || (currentRound?.implementer ? normalizeImplementer(currentRound.implementer) : null);
     if (implementer) {
-      return { implementer, prFixRounds: eventImplementer.prFixRounds, source: 'review-events' };
+      const prFixRounds = rounds.filter((round) => round.decision?.kind === 'changes-requested').length;
+      return { implementer, prFixRounds, source: 'review-aggregate' };
     }
   }
 
@@ -1724,20 +1665,14 @@ function deriveImplementerAndFixRounds(slug, rootDir = process.cwd()) {
   if (historyImplementer) {
     return {
       implementer: historyImplementer,
-      prFixRounds: deriveFixRoundsFromReviewStateHistory(slug, historyImplementer, String(/** @type {any} */ (reviewState)?.round ?? ''), rootDir),
+      prFixRounds: deriveFixRoundsFromReviewStateHistory(slug, historyImplementer, String(currentRound?.number ?? ''), rootDir),
       source: 'branch-history',
     };
   }
 
-  if (reviewState?.implementer) {
-    const implementer = normalizeImplementer(reviewState.implementer);
-    return {
-      implementer,
-      // @ts-expect-error reviewState.round may be null
-      prFixRounds: deriveFixRoundsFromReviewStateHistory(slug, implementer, String(/** @type {any} */ (reviewState)?.round ?? '') || '', rootDir),
-      source: 'review-state',
-    };
-  }
+  // No `review-state` source follows: a mission with a Review always has at
+  // least one round, so the aggregate branch above already owns every case a
+  // review-state read used to cover.
 
   const resolution = resolveTaskFile(slug, rootDir);
   if (resolution.ok) {
@@ -1857,7 +1792,7 @@ function upsertMeasurementRow(row: StatsRow, options: {rootDir?: string, store?:
  */
 // @ts-expect-error recordIntegrationStats options missing slug
 // @ts-expect-error
-function recordIntegrationStats(options = {}) {
+async function recordIntegrationStats(options = {}) {
   /** @type {RecordIntegrationStatsOptions} */
   const opts = options;
   const { slug, rootDir = process.cwd(), date = formatDateOnly(new Date()), store = undefined, dbPath = undefined } = opts;
@@ -1870,7 +1805,7 @@ function recordIntegrationStats(options = {}) {
     throw new Error(`Cannot record integration stats for ${slug}: ${resolution.error || 'missing classification'}`);
   }
   const { classification } = resolution;
-  const implementerInfo = deriveImplementerAndFixRounds(slug, rootDir);
+  const implementerInfo = await deriveImplementerAndFixRounds(slug, rootDir);
   const result = upsertMeasurementRow({
     date,
     mission: slug,
@@ -2075,12 +2010,18 @@ function accumulateStageStats(options: {slug: string, stage: string, rootDir?: s
 }
 
 /**
- * Default the per-mission fix-round count from the mission-local review event
- * store when the caller didn't supply one. Fix rounds are a property of the
- * mission/implementer (NOT of integration), so we stamp the running count of
- * request-changes rounds onto the implementer-attributed stage rows as the loop
+ * Default the per-mission fix-round count when the caller didn't supply one.
+ *
+ * Fix rounds are a property of the mission/implementer (NOT of integration), so
+ * the count is stamped onto the implementer-attributed stage rows as the loop
  * progresses; the final round's row then carries the true count even if the
- * mission is never integrated. The weekly summary reads it back per mission.
+ * mission is never integrated. A stage row written without a count carries the
+ * highest count already recorded for the mission forward, so an intermediate
+ * row can't silently reset it to zero.
+ *
+ * This reads the measurement store (SQLite), synchronously, on the same port
+ * the row is about to be written through — the review event files it used to
+ * read are gone, and the Review aggregate is only reachable asynchronously.
  */
 /**
  * @param {string} slug
@@ -2090,8 +2031,14 @@ function accumulateStageStats(options: {slug: string, stage: string, rootDir?: s
 function defaultPrFixRounds(slug: string, rootDir: string, provided: string | null | undefined) {
   if (provided !== undefined && provided !== null) {return provided;}
   if (!slug) {return '0';}
-  const derived = deriveFixRoundsFromReviewEvents(slug, rootDir);
-  return derived ? String(derived.prFixRounds) : '0';
+  try {
+    const store = getMeasurementStore({ rootDir });
+    const recorded = store.findByMission(slug)
+      .map((record) => Number.parseInt(String(record.pr_fix_rounds ?? 0), 10) || 0);
+    return String(recorded.length > 0 ? Math.max(...recorded) : 0);
+  } catch {
+    return '0';
+  }
 }
 
 /**
@@ -2603,7 +2550,6 @@ if (typeof module !== 'undefined') { module.exports = stats; }
   createRangeWindow,
   deriveFixRoundsFromTaskText,
   deriveFixRoundsFromReviewStateHistory,
-  deriveFixRoundsFromReviewEvents,
   deriveFinalImplementerFromBranchHistory,
   deriveImplementerAndFixRoundsFromPrComments,
   deriveImplementerAndFixRounds,

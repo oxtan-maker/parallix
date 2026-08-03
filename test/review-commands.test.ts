@@ -419,3 +419,82 @@ test('no-PR + static review findings with unresolvable implementer logs WARN and
     `expected a WARN log about unresolved implementer; got: ${logs.join(' | ')}`
   );
 });
+
+// ============================================================================
+// Unknown-flag guard (--max-attempt typo silently ignored the override)
+// ============================================================================
+
+test('flagValue supports --flag=value form', () => {
+  assert.equal(flagValue(['--max-attempts=7'], '--max-attempts'), '7');
+  assert.equal(flagValue(['a', '--focus=tests', 'b'], '--focus'), 'tests');
+  assert.equal(flagValue(['--max-attempts='], '--max-attempts'), null);
+});
+
+test('unknownReviewFlags flags typos but not values of value-taking flags', () => {
+  const { unknownReviewFlags } = require('../.test-runtime/lib/review/review-commands');
+  assert.deepEqual(
+    unknownReviewFlags(['--continue', '--implementer', 'claude', '--reviewer', 'codex', '--max-attempt', '7']),
+    ['--max-attempt']
+  );
+  assert.deepEqual(unknownReviewFlags(['--comment', '--not-a-flag but a message body']), []);
+  assert.deepEqual(unknownReviewFlags(['task-1', '--start', '--max-attempts=7']), []);
+});
+
+test('review rejects an unknown flag with a suggestion instead of ignoring it', async () => {
+  const { review } = require('../.test-runtime/lib/review/review-commands');
+  const errors = [];
+  let exitCode = null;
+  let startReviewLoopCalled = 0;
+
+  await review(['task-2322', '--continue', '--max-attempt', '7'], {
+    inferSlugFn: (s) => s || 'task-2322',
+    log: () => {},
+    error: (m) => errors.push(m),
+    exit: (c) => { exitCode = c; },
+    startReviewLoopFn: async () => { startReviewLoopCalled += 1; }
+  });
+
+  assert.equal(startReviewLoopCalled, 0, 'the loop must not start when a flag is misspelled');
+  assert.equal(exitCode, 1);
+  assert.ok(
+    errors.some(e => e.includes('--max-attempt') && e.includes('--max-attempts')),
+    `expected a suggestion for --max-attempts; got: ${errors.join(' | ')}`
+  );
+});
+
+test('review passes an explicit --max-attempts through to the review loop', async () => {
+  const { review } = require('../.test-runtime/lib/review/review-commands');
+  let received = null;
+
+  await review(['task-2322', '--continue', '--max-attempts', '7'], {
+    inferSlugFn: (s) => s || 'task-2322',
+    log: () => {},
+    error: () => {},
+    exit: () => {},
+    startReviewLoopFn: async (_slug, opts) => { received = opts; }
+  });
+
+  assert.equal(received && received.maxAttempts, 7);
+});
+
+test('review rejects a non-numeric --max-attempts', async () => {
+  const { review } = require('../.test-runtime/lib/review/review-commands');
+  const errors = [];
+  let exitCode = null;
+  let startReviewLoopCalled = 0;
+
+  await review(['task-2322', '--continue', '--max-attempts', 'lots'], {
+    inferSlugFn: (s) => s || 'task-2322',
+    log: () => {},
+    error: (m) => errors.push(m),
+    exit: (c) => { exitCode = c; },
+    startReviewLoopFn: async () => { startReviewLoopCalled += 1; }
+  });
+
+  assert.equal(startReviewLoopCalled, 0);
+  assert.equal(exitCode, 1);
+  assert.ok(
+    errors.some(e => /--max-attempts requires a positive integer/.test(e)),
+    `expected a positive-integer error; got: ${errors.join(' | ')}`
+  );
+});

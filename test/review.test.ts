@@ -1875,7 +1875,7 @@ test('getLatestReview correctly sorts mixed-precision ISO timestamps', () => {
 
 // ---------- applyAgentFallback (regression: pinned reviewer falls back to another family) ----------
 
-test('applyAgentFallback returns the original agent when startAgent did not fall back', () => {
+test('applyAgentFallback returns the original agent when startAgent did not fall back', async () => {
   const { applyAgentFallback } = require('../.test-runtime/lib/review/review');
   const writeReviewStateFn = () => { throw new Error('writeReviewState should not run when no fallback'); };
   const enforceTaskAssigneeFn = () => { throw new Error('enforceTaskAssignee should not run when no fallback'); };
@@ -1883,7 +1883,7 @@ test('applyAgentFallback returns the original agent when startAgent did not fall
   const { ReviewState } = require('../.test-runtime/lib/review/review-state');
   const state = new ReviewState('task-test-fallback', { reviewer: 'codex', implementer: 'custom', round: 1 });
 
-  const next = applyAgentFallback({
+  const next = await applyAgentFallback({
     role: 'reviewer',
     original: 'codex',
     launchResult: { agent: 'codex' },
@@ -1899,13 +1899,13 @@ test('applyAgentFallback returns the original agent when startAgent did not fall
   assert.equal(next, 'codex');
 });
 
-test('applyAgentFallback rewrites reviewer identity and persists state but does NOT update backlog assignee', () => {
+test('applyAgentFallback rewrites reviewer identity and persists state but does NOT update backlog assignee', async () => {
   const { applyAgentFallback } = require('../.test-runtime/lib/review/review');
   const { ReviewState } = require('../.test-runtime/lib/review/review-state');
   const writes = [];
   const state = new ReviewState('task-test-fallback', { reviewer: 'claude', implementer: 'custom', round: 2 });
 
-  const next = applyAgentFallback({
+  const next = await applyAgentFallback({
     role: 'reviewer',
     original: 'claude',
     launchResult: { agent: 'codex' },
@@ -1927,13 +1927,13 @@ test('applyAgentFallback rewrites reviewer identity and persists state but does 
   assert.equal(writes[0].state.round, 2);
 });
 
-test('applyAgentFallback rewrites implementer identity on fallback without touching reviewer', () => {
+test('applyAgentFallback rewrites implementer identity on fallback without touching reviewer', async () => {
   const { applyAgentFallback } = require('../.test-runtime/lib/review/review');
   const { ReviewState } = require('../.test-runtime/lib/review/review-state');
   const writes = [];
   const state = new ReviewState('task-test-fallback', { reviewer: 'codex', implementer: 'custom', round: 3 });
 
-  const next = applyAgentFallback({
+  const next = await applyAgentFallback({
     role: 'implementer',
     original: 'custom',
     launchResult: { agent: 'gemini' },
@@ -1951,14 +1951,14 @@ test('applyAgentFallback rewrites implementer identity on fallback without touch
   assert.equal(writes[0].state.implementer, 'gemini');
 });
 
-test('applyAgentFallback enforces implementer in backlog when implementer falls back', () => {
+test('applyAgentFallback enforces implementer in backlog when implementer falls back', async () => {
   const { applyAgentFallback } = require('../.test-runtime/lib/review/review');
   const { ReviewState } = require('../.test-runtime/lib/review/review-state');
   const writes = [];
   const enforced = [];
   const state = new ReviewState('task-test-fallback', { reviewer: 'custom', implementer: 'claude', round: 2 });
 
-  const next = applyAgentFallback({
+  const next = await applyAgentFallback({
     role: 'implementer',
     original: 'claude',
     launchResult: { agent: 'codex' },
@@ -1975,11 +1975,11 @@ test('applyAgentFallback enforces implementer in backlog when implementer falls 
   assert.deepEqual(enforced, [{ file: '/tmp/task.md', agent: 'codex' }]);
 });
 
-test('applyAgentFallback handles a missing launchResult gracefully (catastrophic launch failure)', () => {
+test('applyAgentFallback handles a missing launchResult gracefully (catastrophic launch failure)', async () => {
   const { applyAgentFallback } = require('../.test-runtime/lib/review/review');
   const { ReviewState } = require('../.test-runtime/lib/review/review-state');
   const state = new ReviewState('task-test-fallback', { reviewer: 'codex', implementer: 'custom', round: 1 });
-  const next = applyAgentFallback({
+  const next = await applyAgentFallback({
     role: 'reviewer',
     original: 'codex',
     launchResult: undefined,
@@ -1994,7 +1994,7 @@ test('applyAgentFallback handles a missing launchResult gracefully (catastrophic
   assert.equal(next, 'codex');
 });
 
-test('applyAgentFallback preserves the original roundStartedAt when rewriting state', () => {
+test('applyAgentFallback preserves the original roundStartedAt when rewriting state', async () => {
   // Regression: a crash after the fallback rewrite but before pollFor* completes
   // must leave review-state.json pinned to the original round start so the resumed
   // run still picks up comments the fallback agent already posted in this round.
@@ -2004,7 +2004,7 @@ test('applyAgentFallback preserves the original roundStartedAt when rewriting st
   const roundStartedAt = '2026-04-27T17:00:00.000Z';
   const state = new ReviewState('task-test-fallback', { reviewer: 'claude', implementer: 'custom', round: 4, startedAt: roundStartedAt });
 
-  const next = applyAgentFallback({
+  const next = await applyAgentFallback({
     role: 'reviewer',
     original: 'claude',
     launchResult: { agent: 'codex' },
@@ -2237,12 +2237,12 @@ test('review posts zero-finding artifact but does NOT transition task when stati
   assert.ok(calls[1].message.includes('found zero issues'));
 });
 
-test('verifyReview reports success path with gate pass and persisted state', () => {
+test('verifyReview reports success path with gate pass and persisted state', async () => {
   const review = require('../.test-runtime/lib/review/review');
   const lines = [];
   let exitCode = null;
 
-  review.verifyReview('task-1031', false, {
+  await review.verifyReview('task-1031', false, {
     resolveWorktreeFn: () => '/tmp/mission-task-1031',
     findMissionDirFn: () => '/tmp/mission-task-1031/docs/missions/2026/task-1031',
     getCurrentBranchFn: () => 'mission/task-1031',
@@ -2268,12 +2268,12 @@ test('verifyReview reports success path with gate pass and persisted state', () 
   assert.ok(lines.includes('\n[PASS] Review verification complete.'));
 });
 
-test('verifyReview reports failure path and exits when blockers exist', () => {
+test('verifyReview reports failure path and exits when blockers exist', async () => {
   const review = require('../.test-runtime/lib/review/review');
   const lines = [];
   let exitCode = null;
 
-  review.verifyReview('task-1031', true, {
+  await review.verifyReview('task-1031', true, {
     resolveWorktreeFn: () => null,
     cwdFn: () => '/tmp/random',
     isForgejoReviewEnabledFn: () => true,
@@ -2346,19 +2346,19 @@ test('pushRound resolves forgejo user from backlog assignee and reports success'
   assert.ok(lines.includes('[PASS] Branch pushed and PR updated for mission/task-1031.'));
 });
 
-test('commentRound and submitReviewRound fail loudly on API errors', () => {
+test('commentRound and submitReviewRound fail loudly on API errors', async () => {
   const review = require('../.test-runtime/lib/review/review');
   const errors = [];
   const exits = [];
   const readReviewStateFn = () => ({ reviewer: 'codex', implementer: 'codex' });
-  review.commentRound('task-1031', 'body', {
+  await review.commentRound('task-1031', 'body', {
     readTokenFn: () => 'token',
     postCommentFn: () => ({ ok: false, error: 'boom' }),
     readReviewStateFn,
     error: line => errors.push(line),
     exit: code => exits.push(code)
   });
-  review.submitReviewRound('task-1031', 'approve', 'ship it', {
+  await review.submitReviewRound('task-1031', 'approve', 'ship it', {
     readTokenFn: () => 'token',
     getPrAuthorFn: () => 'claude',
     postReviewFn: () => ({ ok: false, error: 'nope' }),
@@ -3020,16 +3020,16 @@ test('review.js does not update Backlog task assignee on reviewer fallback (SC 5
 
 // ---------- CP-3: metadata footer and --status ----------
 
-test('buildMetadataFooter returns empty string when no state exists', () => {
+test('buildMetadataFooter returns empty string when no state exists', async () => {
   const { buildMetadataFooter } = require('../.test-runtime/lib/review/review');
-  const footer = buildMetadataFooter('no-state-slug', '/tmp/nonexistent');
+  const footer = await buildMetadataFooter('no-state-slug', '/tmp/nonexistent');
   assert.equal(footer, '');
 });
 
-test('commentRound appends metadata footer to message', () => {
+test('commentRound appends metadata footer to message', async () => {
   const { commentRound } = require('../.test-runtime/lib/review/review');
   let posted = null;
-  commentRound('task-meta-2', 'Test comment body', {
+  await commentRound('task-meta-2', 'Test comment body', {
     readTokenFn: () => 'token',
     postCommentFn: (branch, token, message) => { posted = message; return { ok: true }; },
     readReviewStateFn: () => ({ reviewer: 'codex', implementer: 'codex' }),
@@ -3045,10 +3045,10 @@ test('commentRound appends metadata footer to message', () => {
   assert.ok(posted.includes('[workflow-round:2, workflow-phase:reviewing]'));
 });
 
-test('submitReviewRound appends metadata footer to review message', () => {
+test('submitReviewRound appends metadata footer to review message', async () => {
   const { submitReviewRound } = require('../.test-runtime/lib/review/review');
   let posted = null;
-  submitReviewRound('task-meta-3', 'approve', 'Looks good', {
+  await submitReviewRound('task-meta-3', 'approve', 'Looks good', {
     readTokenFn: () => 'token',
     postReviewFn: (branch, token, outcome, message) => { posted = message; return { ok: true }; },
     readReviewStateFn: () => ({ reviewer: 'codex', implementer: 'codex' }),
@@ -3065,12 +3065,12 @@ test('submitReviewRound appends metadata footer to review message', () => {
   assert.ok(posted.includes('[workflow-round:1, workflow-phase:reviewing]'));
 });
 
-test('showReviewStatus prints state details when state exists', () => {
+test('showReviewStatus prints state details when state exists', async () => {
   const { showReviewStatus } = require('../.test-runtime/lib/review/review');
   const { ReviewState } = require('../.test-runtime/lib/review/review-state');
   const lines = [];
 
-  showReviewStatus('task-status-1', {
+  await showReviewStatus('task-status-1', {
     readReviewStateFn: () => new ReviewState('task-status-1', {
       reviewer: 'codex', implementer: 'claude', round: 2, phase: 'fixing',
       disposition: 'CHANGES_REQUESTED', startedAt: '2026-05-25T10:00:00Z'
@@ -3087,11 +3087,11 @@ test('showReviewStatus prints state details when state exists', () => {
   assert.ok(lines.some(l => l.includes('CHANGES_REQUESTED')));
 });
 
-test('showReviewStatus prints no-state message when state is absent', () => {
+test('showReviewStatus prints no-state message when state is absent', async () => {
   const { showReviewStatus } = require('../.test-runtime/lib/review/review');
   const lines = [];
 
-  showReviewStatus('task-status-2', {
+  await showReviewStatus('task-status-2', {
     readReviewStateFn: () => null,
     resolveWorktreeFn: () => null,
     log: line => lines.push(line)
@@ -3102,7 +3102,7 @@ test('showReviewStatus prints no-state message when state is absent', () => {
 
 // ---------- State persistence after comment/review posts (Finding 2) ----------
 
-test('commentRound persists review state after successful post', () => {
+test('commentRound persists review state after successful post', async () => {
   const { commentRound } = require('../.test-runtime/lib/review/review');
   const { ReviewState } = require('../.test-runtime/lib/review/review-state');
   let stateWritten = null;
@@ -3110,7 +3110,7 @@ test('commentRound persists review state after successful post', () => {
   process.env.FORGEJO_USER = 'codex';
 
   try {
-    commentRound('task-persist-1', 'Test body', {
+    await commentRound('task-persist-1', 'Test body', {
       readTokenFn: () => 'token',
       postCommentFn: () => ({ ok: true }),
       buildMetadataFooterFn: () => '',
@@ -3132,14 +3132,14 @@ test('commentRound persists review state after successful post', () => {
   assert.equal(stateWritten.slug, 'task-persist-1');
 });
 
-test('commentRound does not persist state when no state exists', () => {
+test('commentRound does not persist state when no state exists', async () => {
   const { commentRound } = require('../.test-runtime/lib/review/review');
   let writeCount = 0;
   const prev = process.env.FORGEJO_USER;
   process.env.FORGEJO_USER = 'codex';
 
   try {
-    commentRound('task-persist-2', 'Test body', {
+    await commentRound('task-persist-2', 'Test body', {
       readTokenFn: () => 'token',
       postCommentFn: () => ({ ok: true }),
       buildMetadataFooterFn: () => '',
@@ -3158,7 +3158,7 @@ test('commentRound does not persist state when no state exists', () => {
   assert.equal(writeCount, 0, 'writeReviewStateFn must not be called when no state exists');
 });
 
-test('submitReviewRound persists state with REQUEST_CHANGES disposition after request-changes', () => {
+test('submitReviewRound persists state with REQUEST_CHANGES disposition after request-changes', async () => {
   const { submitReviewRound } = require('../.test-runtime/lib/review/review');
   const { ReviewState } = require('../.test-runtime/lib/review/review-state');
   let stateWritten = null;
@@ -3167,7 +3167,7 @@ test('submitReviewRound persists state with REQUEST_CHANGES disposition after re
   process.env.FORGEJO_USER = 'codex';
 
   try {
-    submitReviewRound('task-persist-3', 'request-changes', 'Needs work', {
+    await submitReviewRound('task-persist-3', 'request-changes', 'Needs work', {
       readTokenFn: () => 'token',
       postReviewFn: () => ({ ok: true }),
       buildMetadataFooterFn: () => '',
@@ -3195,7 +3195,7 @@ test('submitReviewRound persists state with REQUEST_CHANGES disposition after re
   assert.deepEqual(backlogTransitioned, { slug: 'task-persist-3', status: 'review' });
 });
 
-test('submitReviewRound persists state with APPROVED disposition after approve', () => {
+test('submitReviewRound persists state with APPROVED disposition after approve', async () => {
   const { submitReviewRound } = require('../.test-runtime/lib/review/review');
   const { ReviewState } = require('../.test-runtime/lib/review/review-state');
   let stateWritten = null;
@@ -3204,7 +3204,7 @@ test('submitReviewRound persists state with APPROVED disposition after approve',
   process.env.FORGEJO_USER = 'codex';
 
   try {
-    submitReviewRound('task-persist-4', 'approve', 'LGTM', {
+    await submitReviewRound('task-persist-4', 'approve', 'LGTM', {
       readTokenFn: () => 'token',
       postReviewFn: () => ({ ok: true }),
       buildMetadataFooterFn: () => '',
@@ -3232,7 +3232,7 @@ test('submitReviewRound persists state with APPROVED disposition after approve',
   assert.deepEqual(backlogTransitioned, { slug: 'task-persist-4', status: 'approved' });
 });
 
-test('submitReviewRound promotes an active backlog task to review after provider-backed approval', () => {
+test('submitReviewRound promotes an active backlog task to review after provider-backed approval', async () => {
   const { submitReviewRound } = require('../.test-runtime/lib/review/review');
   const { ReviewState } = require('../.test-runtime/lib/review/review-state');
   let transitioned = null;
@@ -3240,7 +3240,7 @@ test('submitReviewRound promotes an active backlog task to review after provider
   process.env.FORGEJO_USER = 'codex';
 
   try {
-    submitReviewRound('task-2197', 'approve', 'LGTM', {
+    await submitReviewRound('task-2197', 'approve', 'LGTM', {
       isForgejoReviewEnabledFn: () => true,
       readTokenFn: () => 'token',
       postReviewFn: () => ({ ok: true }),
@@ -3271,7 +3271,7 @@ test('submitReviewRound promotes an active backlog task to review after provider
   });
 });
 
-test('submitReviewRound keeps YAML and rendered task status aligned when provider-backed approval repairs active', () => {
+test('submitReviewRound keeps YAML and rendered task status aligned when provider-backed approval repairs active', async () => {
   const fs = require('node:fs');
   const os = require('node:os');
   const path = require('node:path');
@@ -3304,7 +3304,7 @@ test('submitReviewRound keeps YAML and rendered task status aligned when provide
     runGitOrThrow(['add', '.'], { cwd: root });
     runGitOrThrow(['commit', '-m', 'fixture'], { cwd: root });
 
-    submitReviewRound('task-2198', 'approve', 'LGTM', {
+    await submitReviewRound('task-2198', 'approve', 'LGTM', {
       isForgejoReviewEnabledFn: () => true,
       readTokenFn: () => 'token',
       postReviewFn: () => ({ ok: true }),
@@ -3329,7 +3329,7 @@ test('submitReviewRound keeps YAML and rendered task status aligned when provide
   }
 });
 
-test('submitReviewRound skips Forgejo and updates review-state only when provider=none', () => {
+test('submitReviewRound skips Forgejo and updates review-state only when provider=none', async () => {
   const { submitReviewRound } = require('../.test-runtime/lib/review/review');
   const { ReviewState } = require('../.test-runtime/lib/review/review-state');
   const path = require('path');
@@ -3360,7 +3360,7 @@ test('submitReviewRound skips Forgejo and updates review-state only when provide
   process.env.WORKFLOW_AGENT = 'custom';
 
   try {
-    submitReviewRound('task-test', 'approve', 'Test approval', {
+    await submitReviewRound('task-test', 'approve', 'Test approval', {
       isForgejoReviewEnabledFn: () => false, // Simulate provider=none
       readReviewStateFn: () => null, // No existing state
       writeReviewStateFn: (slug, state) => {
@@ -3396,7 +3396,7 @@ test('submitReviewRound skips Forgejo and updates review-state only when provide
   assert.equal(backlogTransitioned.status, 'approved');
 });
 
-test('submitReviewRound updates existing state when provider=none', () => {
+test('submitReviewRound updates existing state when provider=none', async () => {
   const { submitReviewRound } = require('../.test-runtime/lib/review/review');
   const { ReviewState } = require('../.test-runtime/lib/review/review-state');
 
@@ -3415,7 +3415,7 @@ test('submitReviewRound updates existing state when provider=none', () => {
   const prevAgent = process.env.WORKFLOW_AGENT;
 
   try {
-    submitReviewRound('task-exist', 'request-changes', 'Needs work', {
+    await submitReviewRound('task-exist', 'request-changes', 'Needs work', {
       isForgejoReviewEnabledFn: () => false, // Simulate provider=none
       readReviewStateFn: () => existingState,
       writeReviewStateFn: (slug, state) => {
@@ -3859,14 +3859,15 @@ test('createEventHandler requires review-state or --actor for mirrored event typ
 
     try {
       // This should fail because mirrored events need persisted identity or --actor.
-      createEventHandler('task-test', ['--type', 'reviewer_outcome', '--verdict', 'approve'], options);
+      await createEventHandler('task-test', ['--type', 'reviewer_outcome', '--verdict', 'approve'], options);
       assert.fail('Expected createEventHandler to exit with code 1');
     } catch (err) {
       assert.match(err.message, /exit\(1\)/);
     }
 
-    // Verify that the error message mentions the review-state / actor contract.
-    assert.ok(errorMessages.some(msg => msg.includes('review-state.json') && msg.includes('--actor')));
+    // Verify the error names both ways to give the event an identity: start the
+    // review (which creates the Review the identity comes from), or pass --actor.
+    assert.ok(errorMessages.some(msg => msg.includes('px handoff') && msg.includes('--actor')));
     assert.equal(exitCode, 1);
 
     // Verify that no event file was created
@@ -4160,7 +4161,7 @@ test('createEventHandler allows non-mirrored event types without FORGEJO_USER', 
 
     try {
       // neutral_discussion is NOT mirrored, so this should succeed even without FORGEJO_USER
-      createEventHandler('task-test', ['--type', 'neutral_discussion', '--content', 'test discussion'], options);
+      await createEventHandler('task-test', ['--type', 'neutral_discussion', '--content', 'test discussion'], options);
       assert.fail('Expected createEventHandler to exit with code 1');
     } catch (err) {
       // This will fail because it tries to create the event in a non-existent directory structure

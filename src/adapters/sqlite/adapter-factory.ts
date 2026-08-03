@@ -123,9 +123,22 @@ async function createOperatorState(
 /**
  * Clear the singleton cache. Intended for test fixtures that need a fresh
  * database connection after closing a cached adapter.
+ *
+ * Closes each cached adapter's SQLite connection so that file-level operations
+ * (e.g., backup restore, file replacement) see the updated database image
+ * rather than a stale page cache held by an orphaned handle.
  */
-export function clearOperatorStateCache(): void {
+export async function clearOperatorStateCache(): Promise<void> {
+  const adapters = [...operatorStateCache.values()];
   operatorStateCache.clear();
+  for (const adapterPromise of adapters) {
+    try {
+      const { db } = await adapterPromise;
+      await db.close();
+    } catch {
+      /* best-effort close */
+    }
+  }
 }
 
 /**

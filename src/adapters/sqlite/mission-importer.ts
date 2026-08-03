@@ -8,7 +8,17 @@ import { missionVersion, type MissionVersion } from '../../application/domain-po
 import type { CheckpointData, GoalCheckRow } from '../../domain/checkpoint.js';
 import { isCheckpointName } from '../../domain/checkpoint.js';
 import type { Review, ReviewerDecision } from '../../domain/review.js';
-import { changeRevision } from '../../domain/review.js';
+import {
+  changeRevision,
+  parseReviewDisposition,
+  parseReviewPhase,
+  stageLaunchWindowsFrom,
+} from '../../domain/review.js';
+
+/** Read an untrusted retry counter, treating anything unusable as zero. */
+function nonNegativeCount(value: unknown): number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : 0;
+}
 import type { AgentFamily } from '../../domain/agents.js';
 import { agentFamily } from '../../domain/agents.js';
 import type { RepositoryId } from '../../domain/repository.js';
@@ -26,6 +36,7 @@ import {
   type MissionReviewRecord,
   type MissionReviewResolutionRecord,
   type MissionReviewRoundRecord,
+  type MissionReviewStageLaunchRecord,
 } from './mission-serialization.js';
 import {
   missionStatusFromBacklog,
@@ -679,6 +690,7 @@ export class MissionCompatibilityImporter {
       findings,
       resolutions,
       externalRefs,
+      stageLaunches,
     ] = await Promise.all([
       this.db.query<MissionRecord>(
         `SELECT id, repository_id, title, status, raw_status, assignee,
@@ -715,7 +727,8 @@ export class MissionCompatibilityImporter {
                 provider_change_id, provider_url, source_branch, target_branch,
                 revision, reviewer, implementer, started_at, decision_kind,
                 decided_at, decision_comment, approval_source_kind,
-                approval_source_provider, responded_at, resulting_revision
+                approval_source_provider, responded_at, resulting_revision,
+                phase, disposition, reviewer_retry_count, implementer_retry_count
          FROM mission_review_rounds WHERE mission_id IN (${placeholders})
          ORDER BY position;`,
         params,
@@ -737,6 +750,12 @@ export class MissionCompatibilityImporter {
          FROM mission_external_task_refs WHERE mission_id IN (${placeholders});`,
         params,
       ),
+      this.db.query<MissionReviewStageLaunchRecord>(
+        `SELECT mission_id, stage_key, position, fingerprint
+         FROM mission_review_stage_launches WHERE mission_id IN (${placeholders})
+         ORDER BY stage_key, position;`,
+        params,
+      ),
     ]);
 
     const byMission = <T extends { readonly mission_id: string }>(
@@ -756,6 +775,8 @@ export class MissionCompatibilityImporter {
           reviewRounds: byMission(reviewRounds, mission.id),
           findings: byMission(findings, mission.id),
           resolutions: byMission(resolutions, mission.id),
+          stageLaunches: byMission(stageLaunches, mission.id),
+          reviewEvents: [],
         });
         result.set(hydrated.mission.id, hydrated.mission);
       } catch {
@@ -1339,12 +1360,23 @@ export class MissionCompatibilityImporter {
       startedAt,
       decision,
       response: null,
+      phase: parseReviewPhase(phase) ?? 'reviewing',
+      disposition: parseReviewDisposition(disposition),
+      reviewerRetryCount: nonNegativeCount(data.reviewerRetryCount),
+      implementerRetryCount: nonNegativeCount(data.implementerRetryCount),
     };
 
     return {
       review: {
         rounds: [roundObj],
         intervention: null,
+        stageLaunches: stageLaunchWindowsFrom(
+          (data.metadata as Record<string, unknown> | undefined)?.recordedStageLaunches,
+        ),
+        gateFailureRetryCount: nonNegativeCount(
+          (data.metadata as Record<string, unknown> | undefined)?.gateFailureRetryCount,
+        ),
+        reviewEvents: [],
       },
       errors,
     };

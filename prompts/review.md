@@ -8,6 +8,12 @@ Load before reviewing:
 - locked mission at `{{missionPath}}`
 - final checkpoint document, if present
 - diff: `git diff {{reviewBaseline}}..HEAD`
+- review history: `px status {{slug}}`, whose `Review:` block reports the current round, phase, and disposition, then every prior round with its reviewer and implementer families, verdict, comment, findings, fixes, and pushbacks. This is projected from the operator database, not from your own context.
+
+Review history is not optional context:
+- You may not be the agent family that reviewed the previous round. When a family is usage-blocked the workflow reroutes the launch, so the round-1 reviewer's context is simply gone. `px status {{slug}}` is how that continuity is preserved.
+- Do not re-raise a finding a previous round already settled. If the implementer fixed it, verify the fix instead of restating the finding. If the implementer pushed back, engage with their rationale — accept it, or explain specifically why it does not hold.
+- Treat a `PUSHBACK_ALL` in the history as a response awaiting your decision, not as an approval and not as a fresh set of findings.
 
 Minimum loop contract:
 - When `{{attempt}}` is 2 or later, before beginning this review round compact the prior-round working context. Reload the locked mission goal and scope; committed checkpoint or gate evidence when present; current round and disposition; unresolved findings and implementer resolutions; and the exact post-rebase revision and review baseline shown by `git diff {{reviewBaseline}}..HEAD`. This review-loop compaction is independent of `MISSION.md` gates.

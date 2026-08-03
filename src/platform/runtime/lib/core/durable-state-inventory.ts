@@ -233,65 +233,41 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     classification: 'database-owned-domain-state',
     cutoverTask: null,
   },
-  // review-state.ts, review-artifacts.ts, review-events.ts, stats.ts,
-  // review-commands.ts: review *workflow* state (round/disposition tracking,
-  // artifact management, event persistence), not the Review domain data nested
-  // in the Mission aggregate — that authority is SqliteMissionStore (entries
-  // above) after the TASK-2322.07 cutover. Retiring these remaining workflow
-  // files is owned by TASK-2322.12 (eliminate stray legacy persistence).
+  // TASK-2322.12 cutover complete. The review loop's round, phase, disposition,
+  // retry counters and stage-launch windows are served by the Review aggregate
+  // through SqliteMissionStore; review events are rows in mission_review_events
+  // and implementer response details (pushed_back_items, fixed_items, ...) are
+  // columns on mission_review_rounds. No review module reads or writes a file
+  // for any of it: review-state.json is gone, the review-event Markdown is a
+  // one-way export (below), and the /tmp artifacts review-artifacts.ts consumes
+  // are scratch transport from the agent process — read once, deleted, never a
+  // source of truth. A mission handed off before the cutover is migrated once
+  // with `px review <slug> --backfill-review`.
   {
-    id: 'review-read-review-state',
+    // `px review <slug> --backfill-review` reads a surviving review-state.json
+    // once, to seed the Review of a mission handed off before the cutover. It
+    // is operator-invoked, never part of a loop read, and writes nothing back
+    // to the file — the one-way door ADR 0053 allows for legacy input.
+    id: 'review-import-legacy-review-state',
     concept: 'Review',
     pathType: 'compatibility',
     fileLocation: 'src/platform/runtime/lib/review/review-state.ts',
     operation: 'read',
-    classification: 'database-owned-domain-state',
-    cutoverTask: 'TASK-2322.12',
+    classification: 'explicit-one-way-legacy-input',
+    cutoverTask: null,
   },
   {
-    id: 'review-write-review-state',
+    // The Markdown files under missions/<slug>/review-events/ are rendered from
+    // the stored event so a mission directory reads as its own review history.
+    // Write-only: nothing in production reads them back, and deleting them
+    // loses no state.
+    id: 'review-export-review-events',
     concept: 'Review',
-    pathType: 'compatibility',
-    fileLocation: 'src/platform/runtime/lib/review/review-state.ts',
-    operation: 'write',
-    classification: 'database-owned-domain-state',
-    cutoverTask: 'TASK-2322.12',
-  },
-  {
-    id: 'review-read-review-artifacts',
-    concept: 'Review',
-    pathType: 'compatibility',
-    fileLocation: 'src/platform/runtime/lib/review/review-artifacts.ts',
-    operation: 'read',
-    classification: 'database-owned-domain-state',
-    cutoverTask: 'TASK-2322.12',
-  },
-  {
-    id: 'review-write-review-events',
-    concept: 'Review',
-    pathType: 'compatibility',
+    pathType: 'default',
     fileLocation: 'src/platform/runtime/lib/review/review-events.ts',
     operation: 'write',
-    classification: 'database-owned-domain-state',
-    cutoverTask: 'TASK-2322.12',
-  },
-  {
-    id: 'review-read-stats',
-    concept: 'Review',
-    pathType: 'compatibility',
-    fileLocation: 'src/platform/runtime/lib/commands/stats.ts',
-    operation: 'read',
-    classification: 'database-owned-domain-state',
-    cutoverTask: 'TASK-2322.12',
-  },
-  {
-    id: 'review-read-review-commands',
-    concept: 'Review',
-    pathType: 'compatibility',
-    fileLocation: 'src/platform/runtime/lib/review/review-commands.ts',
-    operation: 'read',
-    classification: 'database-owned-domain-state',
-    cutoverTask: 'TASK-2322.12',
+    classification: 'generated-artifact',
+    cutoverTask: null,
   },
   // -----------------------------------------------------------------------
   // MissionOutcome — derived from Mission + AgentRunMeasurement
@@ -790,7 +766,7 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
  * the TASK-2222 migration plan. Cross-references for shared boundaries:
  * - `session-metadata` ↔ `session-read-sessions` / `session-write-sessions`
  * - `nel-record` ↔ `artifacts-handoff-nel`
- * - `review-state` ↔ `review-read-review-state` / `review-write-review-state`
+ * - `review-state` ↔ retired by the TASK-2322.12 cutover (Review aggregate)
  * - `agent-blocklist` ↔ `agent-block-file-read` / `agent-block-file-write`
  * - `mutation-baseline` ↔ `artifacts-mutation-baseline`
  * - `forgejo-token` ↔ `secrets-forgejo-token`

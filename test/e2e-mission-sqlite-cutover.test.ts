@@ -110,7 +110,14 @@ function createReviewWithRounds(rounds: number): Review {
         }],
         resultingRevision: changeRevision(`rev-${i + 1}`),
       } : undefined,
+      phase: i === 0 ? 'pending-approval' as const : 'fixing' as const,
+      disposition: i === 0 ? 'CHANGES_MADE' as const : 'REQUEST_CHANGES' as const,
+      reviewerRetryCount: 0,
+      implementerRetryCount: 0,
     })),
+    stageLaunches: [],
+    gateFailureRetryCount: 0,
+    reviewEvents: [],
   } as unknown as Review;
 }
 
