@@ -17,6 +17,7 @@ import { git } from '../core/git.js';
 import { LegacyActiveAdapter } from '../adapters/legacy-active-adapter.js';
 import { LegacyStatsBackfillAdapter } from '../adapters/legacy-stats-backfill-adapter.js';
 import type { ProgressPort } from '../../../../application/ports.js';
+import type { ActivePort } from '../../../../application/ports.js';
 import type { OperatorBlocklistOverlay } from '../../../../adapters/sqlite/blocklist-snapshot.js';
 import type {
   AgentBlocklistRepository,
@@ -27,6 +28,7 @@ import type {
   UsageRepository,
 } from '../../../../adapters/sqlite/ports.js';
 import type { SqliteDatabaseAdapter } from '../../../../adapters/sqlite/database-adapter.js';
+import type { ProductionCapabilities } from '../../../../composition/production-capabilities.js';
 
 export interface OperatorStateServices {
   readonly db: unknown;
@@ -45,6 +47,8 @@ export interface OperatorStateServices {
    * independently. `null` when the adapter is unavailable.
    */
   readonly repositories: OperatorStateRepositories | null;
+  /** Idempotent, composition-owned close operation for process shutdown. */
+  readonly close: () => Promise<void>;
 }
 
 /**
@@ -90,6 +94,10 @@ export interface MissionApplicationServices {
 
 export interface ProductionApplicationServices {
   readonly active: ActiveService;
+  /** Shared active port; presentation composition uses this exact instance. */
+  readonly activePort: ActivePort;
+  /** Shared CLI/TUI board-read and active-dispatch capabilities from this graph. */
+  readonly presentationCapabilities: ProductionCapabilities | null;
   readonly statsBackfill: StatsBackfillService;
   /** Operator-local SQLite state (blocklist authority + adapter handles). */
   readonly operatorState: OperatorStateServices;
@@ -141,7 +149,7 @@ export async function createProductionApplicationServices(
   options: ProductionApplicationServiceOptions = {},
 ): Promise<ProductionApplicationServices> {
   const operatorState = options.includeOperatorState === false
-    ? { db: null, migrations: null, blocklist: null, repositories: null }
+    ? { db: null, migrations: null, blocklist: null, repositories: null, close: async () => {} }
     : await materializeOperatorState();
 
   const operatorServices = options.includeOperatorState === false
@@ -172,23 +180,37 @@ export async function createProductionApplicationServices(
     );
   }
 
+  const mission = options.includeOperatorState === false
+    ? null
+    : await createMissionApplicationServices(rootDir, {
+      skipImportGate: options.skipImportGate,
+    });
+  const activePort = new LegacyActiveAdapter(rootDir, undefined, {
+    missionTransitionStore: mission?.store ?? unavailableMissionTransitionStore(),
+    operatorBlocklist: operatorState.blocklist,
+    sessionMarkerPort,
+  });
+  const presentationCapabilities = operatorState.repositories
+    ? (await import('../../../../composition/production-capabilities.js')).composeProductionCapabilities(
+      rootDir,
+      operatorState.repositories,
+      activePort,
+    )
+    : null;
   return {
-    active: new ActiveService(
-      new LegacyActiveAdapter(rootDir, undefined, {
-        operatorBlocklist: operatorState.blocklist,
-        sessionMarkerPort,
-      }),
-      activeProgress,
-    ),
+    active: new ActiveService(activePort, activeProgress),
+    activePort,
+    presentationCapabilities,
     statsBackfill: new StatsBackfillService(new LegacyStatsBackfillAdapter(rootDir)),
     operatorState,
-    mission: options.includeOperatorState === false
-      ? null
-      : await createMissionApplicationServices(rootDir, {
-        skipImportGate: options.skipImportGate,
-      }),
+    mission,
     operatorServices,
   };
+}
+
+function unavailableMissionTransitionStore(): import('../../../../application/domain-ports.js').MissionTransitionStore {
+  const unavailable = async () => ({ kind: 'missing' as const });
+  return { load: unavailable, save: async () => { throw new Error('Mission authority is unavailable'); }, saveWithTransition: async () => { throw new Error('Mission authority is unavailable'); } };
 }
 
 /**
@@ -313,7 +335,8 @@ async function materializeOperatorState(): Promise<OperatorStateServices> {
     // loaded runtime graph so the CJS rollback bundle (which lacks these
     // modules) degrades gracefully through the catch below rather than failing
     // to load. The adapter layer is the only place that binds the SQLite driver.
-    const { initOperatorState } = await import('../../../../adapters/sqlite/adapter-factory.js');
+    const { initOperatorState, clearOperatorStateCache, clearOperatorStateCacheSync } = await import('../../../../adapters/sqlite/adapter-factory.js');
+    const { registerOperatorStateShutdown } = await import('../../../../composition/operator-state-lifecycle.js');
     const { SqliteBlocklistRepository } = await import('../../../../adapters/sqlite/blocklist-repository.js');
     const { SqliteKnownRepositoriesRepository } = await import('../../../../adapters/sqlite/repository-repository.js');
     const { SqliteUIPreferencesRepository } = await import('../../../../adapters/sqlite/ui-preferences-repository.js');
@@ -341,8 +364,14 @@ async function materializeOperatorState(): Promise<OperatorStateServices> {
       usage: new SqliteUsageRepository(db),
     };
 
-    return { db, migrations, blocklist: materializeBlocklistSnapshot(entries), repositories };
+    return {
+      db,
+      migrations,
+      blocklist: materializeBlocklistSnapshot(entries),
+      repositories,
+      close: registerOperatorStateShutdown(clearOperatorStateCache, clearOperatorStateCacheSync),
+    };
   } catch {
-    return { db: null, migrations: null, blocklist: null, repositories: null };
+    return { db: null, migrations: null, blocklist: null, repositories: null, close: async () => {} };
   }
 }

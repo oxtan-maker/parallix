@@ -18,6 +18,7 @@ import { resolveDatabasePath } from './database-path-resolver.js';
  * fixtures that need a fresh connection.
  */
 const operatorStateCache = new Map<string, Promise<OperatorStateAdapter>>();
+const resolvedOperatorStates = new Map<string, OperatorStateAdapter>();
 
 /**
  * Configuration for initializing the SQLite operator-state adapter.
@@ -90,7 +91,9 @@ export async function initOperatorState(
     }
   }
   try {
-    return await adapter;
+    const resolved = await adapter;
+    resolvedOperatorStates.set(dbPath, resolved);
+    return resolved;
   } catch (error) {
     operatorStateCache.delete(dbPath);
     if (debug) {
@@ -131,12 +134,33 @@ async function createOperatorState(
 export async function clearOperatorStateCache(): Promise<void> {
   const adapters = [...operatorStateCache.values()];
   operatorStateCache.clear();
+  resolvedOperatorStates.clear();
   for (const adapterPromise of adapters) {
     try {
       const { db } = await adapterPromise;
       await db.close();
     } catch {
       /* best-effort close */
+    }
+  }
+}
+
+/**
+ * Synchronously close every initialized operator-state connection.
+ *
+ * This is the process-exit counterpart to `clearOperatorStateCache()`: Node
+ * does not await promises from an `exit` listener, so only adapters that have
+ * already completed initialization can be closed there.
+ */
+export function clearOperatorStateCacheSync(): void {
+  const adapters = [...resolvedOperatorStates.values()];
+  operatorStateCache.clear();
+  resolvedOperatorStates.clear();
+  for (const { db } of adapters) {
+    try {
+      db.closeSync();
+    } catch {
+      /* best-effort close during process termination */
     }
   }
 }

@@ -12,3 +12,9 @@ test('TUI modules perform no task-file write, Git call, SQL, Forgejo call, or su
     assert.doesNotMatch(source, forbidden, `${name} must delegate effects through application ports`);
   }
 });
+
+test('TUI command receives application capabilities and imports no composition or adapter module', () => {
+  const source = readFileSync(join(process.cwd(), 'src/interfaces/tui/ui-command.ts'), 'utf8');
+  assert.doesNotMatch(source, /from ['"][^'"]*(?:composition|adapters|platform\/runtime)[^'"]*['"]/);
+  assert.match(source, /TuiCapabilities/);
+});

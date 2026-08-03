@@ -4,7 +4,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
 
-import { createBoardProjectionBuilder } from '../../src/application/projections/create-board-projection-builder.js';
+import { composeBoardProjection } from '../../src/composition/board-projection.js';
 import { BoardProjectionBuilder } from '../../src/application/projections/board-readers.js';
 import { ConcreteMissionReadAdapter } from '../../src/adapters/backlog/concrete-mission-read-adapter.js';
 import { ConcreteReviewReadAdapter } from '../../src/adapters/backlog/concrete-review-read-adapter.js';
@@ -85,7 +85,7 @@ test('BoardProjectionBuilder is wired in composition root over all six concrete 
     }),
   });
   try {
-    const builder = createBoardProjectionBuilder({
+    const builder = composeBoardProjection({
       rootDir: tmp,
       repositoryId: repositoryId('test-repo'),
       blocklistRepo: new MockBlocklistRepo(),
@@ -93,7 +93,7 @@ test('BoardProjectionBuilder is wired in composition root over all six concrete 
       laneEventRepo: new MockLaneEventRepo(),
       usageRepo: new MockUsageRepo(),
       knownAgentFamilies: [agentFamily('codex'), agentFamily('claude')],
-    });
+    }).builder;
 
     assert.ok(builder instanceof BoardProjectionBuilder);
 
@@ -125,7 +125,7 @@ test('BoardProjectionBuilder.build() returns BoardProjection with missions from 
     }),
   });
   try {
-    const builder = createBoardProjectionBuilder({
+    const builder = composeBoardProjection({
       rootDir: tmp,
       repositoryId: repositoryId('test-repo'),
       blocklistRepo: new MockBlocklistRepo(),
@@ -133,7 +133,7 @@ test('BoardProjectionBuilder.build() returns BoardProjection with missions from 
       laneEventRepo: new MockLaneEventRepo(),
       usageRepo: new MockUsageRepo(),
       knownAgentFamilies: [agentFamily('codex')],
-    });
+    }).builder;
 
     const projection = await builder.build();
 
@@ -301,8 +301,8 @@ test('Integration-base vs worktree reconciliation: done + worktree absent + clos
   }
 });
 
-test('createBoardProjectionBuilder wires all eight adapters into BoardProjectionBuilder', () => {
-  const builder = createBoardProjectionBuilder({
+test('composeBoardProjection wires all eight adapters into BoardProjectionBuilder', () => {
+  const builder = composeBoardProjection({
     rootDir: '/tmp',
     repositoryId: repositoryId('test-repo'),
     blocklistRepo: new MockBlocklistRepo(),
@@ -310,7 +310,7 @@ test('createBoardProjectionBuilder wires all eight adapters into BoardProjection
     laneEventRepo: new MockLaneEventRepo(),
     usageRepo: new MockUsageRepo(),
     knownAgentFamilies: [agentFamily('codex')],
-  });
+  }).builder;
 
   // Verify the builder is a BoardProjectionBuilder instance
   assert.ok(builder instanceof BoardProjectionBuilder);

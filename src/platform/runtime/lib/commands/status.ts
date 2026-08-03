@@ -131,6 +131,7 @@ function logRebaseDiagnostics(log: Function, label: string, rebaseState: {detach
  * Uses dynamic imports for CJS rollback bundle compatibility.
  */
 async function createProjectionDeps(rootDir: string): Promise<{
+  builder: BoardProjectionBuilder | null;
   rootDir: string;
   blocklistRepo: AgentBlocklistRepository;
   historyRepo: OperationalHistoryRepository;
@@ -143,15 +144,14 @@ async function createProjectionDeps(rootDir: string): Promise<{
     );
 
     const services = await createProductionApplicationServices(rootDir);
-    const repos = services.operatorState.repositories;
-    if (repos) {
-      // Real repositories from the composition root
+    if (services.presentationCapabilities) {
       return {
+        builder: services.presentationCapabilities.boardProjection,
         rootDir,
-        blocklistRepo: repos.agentBlocklist,
-        historyRepo: repos.operationalHistory,
-        laneEventRepo: repos.boardLaneEvents,
-        usageRepo: repos.usage,
+        blocklistRepo: services.operatorState.repositories!.agentBlocklist,
+        historyRepo: services.operatorState.repositories!.operationalHistory,
+        laneEventRepo: services.operatorState.repositories!.boardLaneEvents,
+        usageRepo: services.operatorState.repositories!.usage,
       };
     }
   } catch {
@@ -187,6 +187,7 @@ async function createProjectionDeps(rootDir: string): Promise<{
   };
 
   return {
+    builder: null,
     rootDir,
     blocklistRepo: emptyBlocklist,
     historyRepo: emptyHistory,
@@ -197,19 +198,20 @@ async function createProjectionDeps(rootDir: string): Promise<{
 
 /** Build BoardProjectionBuilder from production concrete adapters (SC8). */
 async function buildProjectionBuilder(rootDir: string): Promise<BoardProjectionBuilder> {
-  const deps = await createProjectionDeps(rootDir);
-  const { createBoardProjectionBuilder } = await import('../../../../application/projections/create-board-projection-builder.js');
+  const composed = await createProjectionDeps(rootDir);
+  if (composed.builder) { return composed.builder; }
+  const { composeBoardProjection } = await import('../../../../composition/board-projection.js');
   const { repositoryId } = await import('../../../../domain/repository.js');
   const { agentFamily } = await import('../../../../domain/agents.js');
-  return createBoardProjectionBuilder({
+  return composeBoardProjection({
     rootDir,
     repositoryId: repositoryId(rootDir),
-    blocklistRepo: deps.blocklistRepo,
-    historyRepo: deps.historyRepo,
-    laneEventRepo: deps.laneEventRepo,
-    usageRepo: deps.usageRepo,
+    blocklistRepo: composed.blocklistRepo,
+    historyRepo: composed.historyRepo,
+    laneEventRepo: composed.laneEventRepo,
+    usageRepo: composed.usageRepo,
     knownAgentFamilies: WORKFLOW_AGENT_NAMES.map((name: string) => agentFamily(name)),
-  });
+  }).builder;
 }
 
 /** @param {string[]} args @param {{exit?: Function, log?: Function, inferSlugFn?: Function, getCurrentBranchFn?: Function, findTaskFileFn?: Function, getTaskStatusFn?: Function, findMissionDirFn?: Function, findCheckpointsFn?: Function, getFirstLineFn?: Function, getPrStatusFn?: Function, findStaleMissionWorktreesFn?: Function, readAgentConfigOrExitFn?: Function, eligibleAgentsForStepFn?: Function, allWorkflowAgentNamesFn?: Function, workflowLauncherStatusFn?: Function, getLastThreeCommitsFn?: Function, getUncommittedCountFn?: Function, detectRebaseStateFn?: Function, buildProjectionFn?: Function}} opts */

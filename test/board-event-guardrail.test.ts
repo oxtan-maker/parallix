@@ -42,13 +42,14 @@ const REPOSITORY_MODULE = 'src/adapters/sqlite/board-lane-event-repository.ts';
 const PORTS_MODULE = 'src/adapters/sqlite/ports.ts';
 const AUTHORITY_MAP_MODULE = 'src/adapters/sqlite/authority-map.ts';
 const METRICS_ADAPTER_MODULE = 'src/application/projections/metrics-read-adapter.ts';
-const CREATION_ROOT_MODULE = 'src/application/projections/create-board-projection-builder.ts';
 const STATUS_COMMAND_MODULE = 'src/platform/runtime/lib/commands/status.ts';
 const TUI_COMMAND_MODULE = 'src/interfaces/tui/ui-command.ts';
 const INDEX_MODULE = 'src/adapters/sqlite/index.ts';
 const MISSION_STORE_MODULE = 'src/adapters/sqlite/mission-store.ts';
 const APPLICATION_PORTS_MODULE = 'src/application/ports.ts';
 const COMPOSITION_ROOT_MODULE = 'src/platform/runtime/lib/composition/application-services.ts';
+const BOARD_COMPOSITION_MODULE = 'src/composition/board-projection.ts';
+const PRODUCTION_CAPABILITIES_MODULE = 'src/composition/production-capabilities.ts';
 
 test('SC2: only the designated write-path module imports BoardEventRecorder outside the recorder package', () => {
   const srcDir = path.join(repoRoot, 'src');
@@ -162,13 +163,14 @@ test('SC2: no source file writes lane-transition events outside backlog.ts', () 
       || relPath === PORTS_MODULE
       || relPath === AUTHORITY_MAP_MODULE
       || relPath === METRICS_ADAPTER_MODULE
-      || relPath === CREATION_ROOT_MODULE
       || relPath === STATUS_COMMAND_MODULE
       || relPath === TUI_COMMAND_MODULE
       || relPath === INDEX_MODULE
       || relPath === MISSION_STORE_MODULE
       || relPath === APPLICATION_PORTS_MODULE
       || relPath === COMPOSITION_ROOT_MODULE
+      || relPath === BOARD_COMPOSITION_MODULE
+      || relPath === PRODUCTION_CAPABILITIES_MODULE
       || relPath === DESIGNATED_WRITER
     ) {
       continue;

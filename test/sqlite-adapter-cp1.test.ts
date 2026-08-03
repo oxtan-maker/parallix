@@ -8,7 +8,7 @@ import crypto from 'node:crypto';
 import { SqliteDatabaseAdapter } from '../src/adapters/sqlite/database-adapter.js';
 import { SqliteMigrationRunner, loadDefaultMigrations } from '../src/adapters/sqlite/migration-runner.js';
 import { resolveDatabasePath, verifyDatabasePathIsolation } from '../src/adapters/sqlite/database-path-resolver.js';
-import { initOperatorState, clearOperatorStateCache } from '../src/adapters/sqlite/adapter-factory.js';
+import { initOperatorState, clearOperatorStateCache, clearOperatorStateCacheSync } from '../src/adapters/sqlite/adapter-factory.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -478,6 +478,21 @@ describe('SQLite adapter — CP1: schema and migration runner', () => {
       const second = await initOperatorState({ homeDir: home });
       assert.strictEqual(first, second, 'Repeated calls must return the same cached instance');
       assert.strictEqual(first.db.getPath(), second.db.getPath(), 'Cached adapter must share database path');
+    } finally {
+      cleanupTempDir(home);
+    }
+  });
+
+  it('clearOperatorStateCacheSync closes initialized cached adapters for process exit', async () => {
+    await clearOperatorStateCache();
+    const home = createTempDir('sync-close');
+    try {
+      const adapter = await initOperatorState({ homeDir: home });
+      assert.ok(adapter.db.isOpen(), 'Database should be open before process-exit close');
+
+      clearOperatorStateCacheSync();
+
+      assert.equal(adapter.db.isOpen(), false, 'Synchronous cache close must close the initialized database');
     } finally {
       cleanupTempDir(home);
     }

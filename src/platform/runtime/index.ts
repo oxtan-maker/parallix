@@ -69,8 +69,13 @@ const COMMANDS: Record<string, Command> = {
   'resolve-conflict': resolveConflict, review, setup, 'setup-review': setupReview,
   stats, status, verify,
   ui: async (...args: any[]) => {
+    const rootDir = process.cwd();
+    const { createProductionApplicationServices } = await import('./lib/composition/application-services.js');
+    const services = await createProductionApplicationServices(rootDir);
+    const capabilities = services.presentationCapabilities?.tui;
+    if (!capabilities) { throw new Error('operator-state capabilities are unavailable'); }
     const { runUiCommand } = await import('../../interfaces/tui/ui-command.js');
-    return runUiCommand(...args);
+    return runUiCommand(capabilities, ...args);
   },
 };
 
