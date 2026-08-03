@@ -101,7 +101,6 @@ test('composition guard accepts the sole production composition root', async () 
   const graph = await createProductionApplicationServices(root, undefined, { skipImportGate: true });
   assert.equal(graph.active.constructor.name, 'ActiveService');
   assert.equal(graph.statsBackfill.constructor.name, 'StatsBackfillService');
-  assert.equal(graph.mission.authority, 'sqlite');
   assert.equal(graph.mission.store.constructor.name, 'SqliteMissionStore');
 });
 

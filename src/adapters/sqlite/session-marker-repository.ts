@@ -5,11 +5,7 @@ import { repositoryId } from '../../domain/repository.js';
 import type { RepositoryId } from '../../domain/repository.js';
 import { sessionRole } from '../../domain/session.js';
 import type { SessionRole } from '../../domain/session.js';
-import type {
-  SessionMarkerEntry,
-  SessionMarkerRepository,
-  SessionMarkerWrite,
-} from './ports.js';
+import type { SessionMarkerEntry, SessionMarkerRepository, SessionMarkerWrite } from '../../application/ports/mission-store.js';
 
 type SessionMarkerRow = {
   repository_id: unknown;

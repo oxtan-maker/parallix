@@ -17,7 +17,7 @@ import { SqliteMigrationRunner, loadDefaultMigrations } from '../src/adapters/sq
 import { SqliteSessionMarkerRepository } from '../src/adapters/sqlite/session-marker-repository.js';
 import { SqliteSessionMarkerAdapter } from '../src/adapters/sqlite/session-marker-adapter.js';
 import { importSessionMarkers } from '../src/adapters/sqlite/session-marker-import.js';
-import type { SessionMarkerEntry, SessionMarkerWrite } from '../src/adapters/sqlite/ports.js';
+import type { SessionMarkerEntry, SessionMarkerWrite } from '../src/application/ports/mission-store.js';
 import { agentFamily } from '../src/domain/agents.js';
 import { missionId } from '../src/domain/mission.js';
 import { repositoryId } from '../src/domain/repository.js';

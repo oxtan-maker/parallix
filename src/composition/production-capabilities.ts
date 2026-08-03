@@ -6,10 +6,9 @@ import { repositoryId } from '../domain/repository.js';
 import { resolveKnownAgentFamilies } from '../interfaces/tui/agent-config-resolver.js';
 import type {
   AgentBlocklistRepository,
-  BoardLaneEventRepository,
-  OperationalHistoryRepository,
-  UsageRepository,
-} from '../adapters/sqlite/ports.js';
+} from '../application/ports/agent-blocklist.js';
+import type { BoardLaneEventRepository, OperationalHistoryRepository } from '../application/ports/operation-history.js';
+import type { UsageRepository } from '../application/ports/mission-measurements.js';
 import { composeTuiCapabilities } from './board-projection.js';
 
 export interface ProductionBoardRepositories {

@@ -1,5 +1,5 @@
 import type { OperationLogReadAdapter } from '../../application/projections/board-readers.js';
-import type { OperationalHistoryRepository } from '../sqlite/ports.js';
+import type { OperationalHistoryRepository } from '../../application/ports/operation-history.js';
 
 // ---------------------------------------------------------------------------
 // Concrete OperationLogReadAdapter

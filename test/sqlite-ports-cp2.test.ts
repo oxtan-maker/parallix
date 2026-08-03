@@ -11,8 +11,17 @@ import { SqliteUsageRepository } from '../src/adapters/sqlite/usage-repository.j
 import { SqliteKnownRepositoriesRepository } from '../src/adapters/sqlite/repository-repository.js';
 import { SqliteUIPreferencesRepository } from '../src/adapters/sqlite/ui-preferences-repository.js';
 import { SqliteOperationalHistoryRepository } from '../src/adapters/sqlite/operational-history-repository.js';
+import { SqliteBoardLaneEventRepository } from '../src/adapters/sqlite/board-lane-event-repository.js';
 import { SqliteMigrationLedgerRepository } from '../src/adapters/sqlite/migration-ledger-repository.js';
+import { SqliteSessionMarkerRepository } from '../src/adapters/sqlite/session-marker-repository.js';
 import { SQLITE_ENTITY_AUTHORITY } from '../src/adapters/sqlite/authority-map.js';
+import { repositoryId } from '../src/domain/repository.js';
+import type { AgentBlocklistRepository } from '../src/application/ports/agent-blocklist.js';
+import type { UsageRepository } from '../src/application/ports/mission-measurements.js';
+import type { UIPreferencesRepository } from '../src/application/ports/operator-preferences.js';
+import type { KnownRepositoriesRepository } from '../src/application/ports/repository-catalog.js';
+import type { BoardLaneEventRepository, OperationalHistoryRepository } from '../src/application/ports/operation-history.js';
+import type { SessionMarkerRepository } from '../src/application/ports/mission-store.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -50,6 +59,27 @@ async function createDbWithSchema(): Promise<{
 // ---------------------------------------------------------------------------
 
 describe('SQLite repository ports — CP2: domain mappings and authority', () => {
+  it('implements the six application-owned capability contracts', async () => {
+    const { db, dir } = await createDbWithSchema();
+    try {
+      const blocklist: AgentBlocklistRepository = new SqliteBlocklistRepository(db);
+      const usage: UsageRepository = new SqliteUsageRepository(db);
+      const preferences: UIPreferencesRepository = new SqliteUIPreferencesRepository(db);
+      const catalog: KnownRepositoriesRepository = new SqliteKnownRepositoriesRepository(db);
+      const history: OperationalHistoryRepository = new SqliteOperationalHistoryRepository(db);
+      const laneEvents: BoardLaneEventRepository = new SqliteBoardLaneEventRepository(db);
+      const sessionMarkers: SessionMarkerRepository = new SqliteSessionMarkerRepository(db, repositoryId('repository-id'));
+
+      await Promise.all([
+        blocklist.findAll(), usage.findAll(), preferences.findAll(), catalog.findAll(),
+        history.findAll(), laneEvents.findAll(), sessionMarkers.findAll(),
+      ]);
+    } finally {
+      await db.close();
+      cleanupTempDir(dir);
+    }
+  });
+
   // --- Agent blocklist repository ---
 
   it('blocklist: findAll returns empty array on fresh database', async () => {

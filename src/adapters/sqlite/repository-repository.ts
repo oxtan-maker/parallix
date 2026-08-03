@@ -1,8 +1,5 @@
 import type { SqliteDatabaseAdapter } from './database-adapter.js';
-import type {
-  KnownRepositoryEntry,
-  KnownRepositoriesRepository,
-} from './ports.js';
+import type { KnownRepositoryEntry, KnownRepositoriesRepository } from '../../application/ports/repository-catalog.js';
 
 /**
  * SQLite-backed known repositories repository.

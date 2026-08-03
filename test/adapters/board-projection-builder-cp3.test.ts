@@ -17,10 +17,9 @@ import { missionId, missionLabels } from '../../src/domain/mission.js';
 import { repositoryId } from '../../src/domain/repository.js';
 import type {
   AgentBlocklistRepository,
-  BoardLaneEventRepository,
-  OperationalHistoryRepository,
-  UsageRepository,
-} from '../../src/adapters/sqlite/ports.js';
+} from '../../src/application/ports/agent-blocklist.js';
+import type { BoardLaneEventRepository, OperationalHistoryRepository } from '../../src/application/ports/operation-history.js';
+import type { UsageRepository } from '../../src/application/ports/mission-measurements.js';
 
 // ---------------------------------------------------------------------------
 // Helpers

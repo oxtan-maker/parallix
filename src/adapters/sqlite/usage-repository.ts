@@ -1,5 +1,5 @@
 import type { SqliteDatabaseAdapter } from './database-adapter.js';
-import type { UsageRecord, UsageRepository } from './ports.js';
+import type { UsageRecord, UsageRepository } from '../../application/ports/mission-measurements.js';
 
 /**
  * SQLite-backed usage statistics repository.

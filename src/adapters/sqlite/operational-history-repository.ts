@@ -1,8 +1,5 @@
 import type { SqliteDatabaseAdapter } from './database-adapter.js';
-import type {
-  OperationalHistoryEntry,
-  OperationalHistoryRepository,
-} from './ports.js';
+import type { OperationalHistoryEntry, OperationalHistoryRepository } from '../../application/ports/operation-history.js';
 
 /**
  * SQLite-backed operational history repository.

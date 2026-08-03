@@ -1,8 +1,5 @@
 import type { SqliteDatabaseAdapter } from './database-adapter.js';
-import type {
-  BoardLaneEventEntry,
-  BoardLaneEventRepository,
-} from './ports.js';
+import type { BoardLaneEventEntry, BoardLaneEventRepository } from '../../application/ports/operation-history.js';
 
 /**
  * SQLite-backed board lane-event repository.

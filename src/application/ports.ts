@@ -6,10 +6,18 @@ import type { DurableEvidence, ProgressEvent, SourceFact } from './contracts.js'
 // UI modules delegate through application ports.
 export type {
   AgentBlocklistRepository,
+  AgentBlockEntry,
+} from './ports/agent-blocklist.js';
+export type {
   OperationalHistoryRepository,
   BoardLaneEventRepository,
+  OperationalHistoryEntry,
+  BoardLaneEventEntry,
+} from './ports/operation-history.js';
+export type {
   UsageRepository,
-} from '../adapters/sqlite/ports.js';
+  UsageRecord,
+} from './ports/mission-measurements.js';
 
 export interface StatsRow {
   readonly mission: string;

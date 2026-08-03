@@ -47,9 +47,8 @@ export interface MissionTransitionStore extends MissionStore {
 /**
  * Durable recording of the structured NEL report produced at handoff.
  *
- * The record itself is derived Mission data. The port exists so the use case
- * never learns whether the selected authority writes a compatibility JSON
- * document or a database row, and so a stale expected version is still refused.
+ * The record itself is derived Mission data. The port returns only the durable
+ * reference the use case needs, and stale expected versions remain refused.
  */
 export interface MissionNelRecorder {
   recordNel(
@@ -57,12 +56,10 @@ export interface MissionNelRecorder {
   ): Promise<MissionNelRecordReceipt>;
 }
 
-/** Where the recorded NEL report landed. A reference, never the payload. */
+/** The durable reference for a recorded NEL report, never the payload. */
 export interface MissionNelRecordReceipt {
-  /** Locator of the durable record, e.g. a document path or a row identity. */
+  /** Locator of the durable record. */
   readonly reference: string;
-  /** Authority that accepted the write. */
-  readonly authority: 'compatibility' | 'sqlite';
 }
 
 /** A write refused because the caller's expected revision is no longer current. */

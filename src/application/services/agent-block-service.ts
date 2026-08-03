@@ -1,4 +1,4 @@
-import type { AgentBlockEntry, AgentBlocklistRepository } from '../../adapters/sqlite/ports.js';
+import type { AgentBlockEntry, AgentBlocklistRepository } from '../ports/agent-blocklist.js';
 
 export interface AgentBlockState {
   readonly agent: string;
