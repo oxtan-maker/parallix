@@ -4,7 +4,7 @@ title: mission/task-2322.12 broke review
 status: backlog
 assignee: [codex]
 created_date: '2026-08-03 09:13'
-labels: []
+labels: [ai_sdlc, bug]
 dependencies: []
 ordinal: 70900
 ---
