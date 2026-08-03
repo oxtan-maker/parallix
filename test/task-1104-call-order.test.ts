@@ -195,7 +195,16 @@ test('performHandoff follows the sequence: createPr -> gatekeeper -> transitionT
 
   try {
     const mockRebase = async () => ({ ok: true, sharedFileConflicts: false });
-    await performHandoff(slug, { skipGate: true, isForgejoReviewEnabledFn: () => true, rebaseFn: mockRebase, missionServicesFn: stubMissionServices() });
+    await performHandoff(slug, {
+      skipGate: true,
+      isForgejoReviewEnabledFn: () => true,
+      rebaseFn: mockRebase,
+      missionServicesFn: stubMissionServices(),
+      // The blanket readFileSync mock above supplies checkpoint content. Keep
+      // agent selection independent of filesystem-backed configuration.
+      eligibleAgentsForStepFn: () => ['codex', 'claude'],
+      selectAgentFn: () => 'claude',
+    });
 
     const relevantEvents = events.filter(e => e.type === 'createPr' || e.type === 'gatekeeper' || e.type === 'transition' || e.type === 'push');
     

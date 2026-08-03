@@ -20,9 +20,42 @@ import { artifactReference } from '../../../../domain/net-engineering-lines.js';
 import { attemptAgentRelaunch } from './active.js';
 import { startReview, ConfiguredReviewerEligibility, changeRevision } from '../../../../domain/review.js';
 import { agentFamily } from '../../../../domain/agents.js';
+import { eligibleAgentsForStep, selectAgent } from '../agents/agents.js';
 
 // Export for testing
 export { evidenceCellHasVerifiableReference as _evidenceCellHasVerifiableReference };
+
+function resolveHandoffReviewAssignment(
+  implementerName: string,
+  options: {
+    worktree?: string;
+    eligibleAgentsForStepFn?: typeof eligibleAgentsForStep;
+    selectAgentFn?: typeof selectAgent;
+  } = {},
+) {
+  const implementer = agentFamily(implementerName);
+  const eligibleFn = options.eligibleAgentsForStepFn || eligibleAgentsForStep;
+  const selectFn = options.selectAgentFn || selectAgent;
+  const configured = eligibleFn('review', { worktree: options.worktree });
+  const reviewerEligibility = ConfiguredReviewerEligibility.fromReviewStep({
+    eligible: configured.map((candidate: string) => agentFamily(candidate)),
+    strategy: 'random',
+  });
+
+  let reviewer;
+  try {
+    reviewer = agentFamily(selectFn('review', {
+      exclude: new Set([implementerName]),
+      worktree: options.worktree,
+    }));
+  } catch {
+    // Preserve the documented single-family escape hatch when this workstation
+    // genuinely has no configured, runnable reviewer from another family.
+    reviewer = implementer;
+  }
+
+  return { reviewer, implementer, reviewerEligibility };
+}
 
 /**
   * Verifies that the current environment is ready for handoff.
@@ -213,11 +246,11 @@ function findUnverifiableGoalCheckRow(evidenceRows: string[], rootDir: string): 
   * 4. Commits and pushes the Backlog state change to Forgejo.
   *
   * @param {string} slug - Mission slug
-  * @param {{skipGate?: boolean, worktree?: string|null, force?: boolean, forceWithLease?: boolean, log?: Function, error?: Function, rebaseFn?: Function, isForgejoReviewEnabledFn?: Function, captureNelFn?: Function}} [options]
+  * @param {{skipGate?: boolean, worktree?: string|null, force?: boolean, forceWithLease?: boolean, log?: Function, error?: Function, rebaseFn?: Function, isForgejoReviewEnabledFn?: Function, captureNelFn?: Function, eligibleAgentsForStepFn?: Function, selectAgentFn?: Function}} [options]
   * @returns {Promise<{ ok: boolean, error?: string, gatekeeperPushedBack?: boolean }>}
   */
   async function performHandoff(slug, options = {}) {
-      /** @type{{skipGate?: boolean, worktree?: string|null, force?: boolean, forceWithLease?: boolean, log?: Function, error?: Function, rebaseFn?: Function, isForgejoReviewEnabledFn?: Function, runVerificationGateFn?: Function, maxAttempts?: number, attemptAgentRelaunchFn?: Function, remainingRetries?: number, runGatekeeperFn?: Function, captureNelFn?: Function, missionServicesFn?: Function}} */
+      /** @type{{skipGate?: boolean, worktree?: string|null, force?: boolean, forceWithLease?: boolean, log?: Function, error?: Function, rebaseFn?: Function, isForgejoReviewEnabledFn?: Function, runVerificationGateFn?: Function, maxAttempts?: number, attemptAgentRelaunchFn?: Function, remainingRetries?: number, runGatekeeperFn?: Function, captureNelFn?: Function, missionServicesFn?: Function, eligibleAgentsForStepFn?: Function, selectAgentFn?: Function}} */
        const opts = options;
        const {
          skipGate = false,
@@ -233,7 +266,9 @@ function findUnverifiableGoalCheckRow(evidenceRows: string[], rootDir: string): 
          remainingRetries,
          runGatekeeperFn = gatekeeper.runGatekeeper,
          captureNelFn = captureNelAtHandoff,
-         missionServicesFn = createMissionApplicationServices
+         missionServicesFn = createMissionApplicationServices,
+         eligibleAgentsForStepFn = eligibleAgentsForStep,
+         selectAgentFn = selectAgent
        } = opts;
 
     // Recursion guard: prevent infinite retry loops when gatekeeper pushback
@@ -653,9 +688,11 @@ function findUnverifiableGoalCheckRow(evidenceRows: string[], rootDir: string): 
   } catch {
     targetBranch = 'main';
   }
-  const reviewer = agentFamily(typeof forgejoUser === 'string' ? forgejoUser : 'codex');
-  const implementer = agentFamily(forgejoUser || 'custom');
-  const reviewerEligibility = new ConfiguredReviewerEligibility([reviewer]);
+  const { reviewer, implementer, reviewerEligibility } = resolveHandoffReviewAssignment(forgejoUser, {
+    worktree: rootDir,
+    eligibleAgentsForStepFn,
+    selectAgentFn,
+  });
   const review = startReview({
     change: {
       kind: 'local-branch' as const,
@@ -1243,10 +1280,11 @@ const _exports = {
   /** @returns {...} */
   get performHandoff() { return _handoffExport.performHandoff; }
 };
-/** @type {{verifyHandoff: typeof verifyHandoff, performHandoff: typeof performHandoff, gatekeeper: typeof gatekeeper, runDeclaredGates: typeof runDeclaredGates, captureNelAtHandoff: typeof captureNelAtHandoff, validateDeclaredGates: typeof validateDeclaredGates, _buildAutoCheckpointContent: typeof buildAutoCheckpointContent, _findUnverifiableGoalCheckRow: typeof findUnverifiableGoalCheckRow, _collectGoalCheckEvidenceRows: typeof collectGoalCheckEvidenceRows}} */
+/** @type {{verifyHandoff: typeof verifyHandoff, performHandoff: typeof performHandoff, resolveHandoffReviewAssignment: typeof resolveHandoffReviewAssignment, gatekeeper: typeof gatekeeper, runDeclaredGates: typeof runDeclaredGates, captureNelAtHandoff: typeof captureNelAtHandoff, validateDeclaredGates: typeof validateDeclaredGates, _buildAutoCheckpointContent: typeof buildAutoCheckpointContent, _findUnverifiableGoalCheckRow: typeof findUnverifiableGoalCheckRow, _collectGoalCheckEvidenceRows: typeof collectGoalCheckEvidenceRows}} */
 const _namedExports = {
   verifyHandoff,
   performHandoff,
+  resolveHandoffReviewAssignment,
   gatekeeper,
   runDeclaredGates,
   captureNelAtHandoff,
@@ -1261,7 +1299,7 @@ const _namedExports = {
 /** @type {typeof handoffCommand & {verifyHandoff: typeof verifyHandoff, performHandoff: typeof performHandoff, gatekeeper: typeof gatekeeper, runDeclaredGates: typeof runDeclaredGates, captureNelAtHandoff: typeof captureNelAtHandoff, validateDeclaredGates: typeof validateDeclaredGates}} */
 const _handoffExport = Object.assign(handoffCommand, _namedExports);
 export default _handoffExport;
-export { _handoffExport as handoff, verifyHandoff, performHandoff, gatekeeper, runDeclaredGates, captureNelAtHandoff, validateDeclaredGates };
+export { _handoffExport as handoff, verifyHandoff, performHandoff, resolveHandoffReviewAssignment, gatekeeper, runDeclaredGates, captureNelAtHandoff, validateDeclaredGates };
 
 // CJS compat: ensure require() returns the function directly
 declare const module: { exports: any } | undefined;
