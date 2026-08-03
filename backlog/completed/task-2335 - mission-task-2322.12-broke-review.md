@@ -1,7 +1,7 @@
 ---
 id: TASK-2335
 title: mission/task-2322.12 broke review
-status: ready-for-integration
+status: done
 assignee:
   - custom
 created_date: '2026-08-03 09:13'
