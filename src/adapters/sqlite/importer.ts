@@ -2,7 +2,8 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { SqliteDatabaseAdapter } from './database-adapter.js';
-import type { AgentBlockEntry, ImportRecord } from './ports.js';
+import type { AgentBlockEntry } from '../../application/ports/agent-blocklist.js';
+import type { ImportRecord } from './ports.js';
 
 export interface LegacyBlockImportConflict {
   readonly agent: string;

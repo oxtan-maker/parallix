@@ -1,4 +1,4 @@
-import type { UIPreferenceEntry, UIPreferencesRepository } from '../../adapters/sqlite/ports.js';
+import type { UIPreferenceEntry, UIPreferencesRepository } from '../ports/operator-preferences.js';
 
 /**
  * Application boundary for UI preferences.

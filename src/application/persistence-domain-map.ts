@@ -156,7 +156,7 @@ export const TECHNICAL_PERSISTENCE_METADATA: readonly TechnicalPersistenceMetada
     id: 'sqlite-import-identity',
     kind: 'import-identity',
     fileLocation: 'src/adapters/sqlite/importer.ts',
-    line: 58,
+    line: 59,
     anchor: 'export class SqliteImporter',
     whyNotDomain:
       'Source path plus content digest exist to make an import idempotent. They identify a file that was read, not a domain entity, and are never surfaced to a consumer.',
@@ -174,7 +174,7 @@ export const TECHNICAL_PERSISTENCE_METADATA: readonly TechnicalPersistenceMetada
     id: 'ui-preferences-key-value',
     kind: 'opaque-operator-setting',
     fileLocation: 'src/adapters/sqlite/ui-preferences-repository.ts',
-    line: 15,
+    line: 12,
     anchor: 'export class SqliteUIPreferencesRepository',
     whyNotDomain:
       'An opaque (key, value, updatedAt) settings store with no validation, no relationship to Mission, and no production consumer outside the adapter itself. It carries an operator display choice, not a domain rule.',

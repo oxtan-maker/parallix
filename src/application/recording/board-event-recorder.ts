@@ -1,4 +1,4 @@
-import type { BoardLaneEventEntry, BoardLaneEventRepository } from '../../adapters/sqlite/ports.js';
+import type { BoardLaneEventEntry, BoardLaneEventRepository } from '../ports/operation-history.js';
 import type { LaneTransitionEvent } from '../../domain/board-event.js';
 import { parseMissionStatus } from '../../domain/board-event.js';
 import type { MissionId } from '../../domain/mission.js';

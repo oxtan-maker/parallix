@@ -168,6 +168,7 @@ test('SC2: no source file writes lane-transition events outside backlog.ts', () 
       || relPath === INDEX_MODULE
       || relPath === MISSION_STORE_MODULE
       || relPath === APPLICATION_PORTS_MODULE
+      || relPath === 'src/application/ports/operation-history.ts'
       || relPath === COMPOSITION_ROOT_MODULE
       || relPath === BOARD_COMPOSITION_MODULE
       || relPath === PRODUCTION_CAPABILITIES_MODULE

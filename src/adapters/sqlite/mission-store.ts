@@ -275,7 +275,6 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
     );
     return {
       reference: `missions:${record.missionId}`,
-      authority: 'sqlite',
     };
   }
 

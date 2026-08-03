@@ -1,4 +1,4 @@
-import type { OperationalHistoryEntry, OperationalHistoryRepository } from '../../adapters/sqlite/ports.js';
+import type { OperationalHistoryEntry, OperationalHistoryRepository } from '../ports/operation-history.js';
 
 /**
  * Application boundary for operational history recording and querying.

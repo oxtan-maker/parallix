@@ -1,5 +1,5 @@
 import type { KnownRepository, RepositoryId } from '../../domain/repository.js';
-import type { KnownRepositoryEntry, KnownRepositoriesRepository } from '../../adapters/sqlite/ports.js';
+import type { KnownRepositoryEntry, KnownRepositoriesRepository } from '../ports/repository-catalog.js';
 
 /**
  * Application boundary for KnownRepository observations.

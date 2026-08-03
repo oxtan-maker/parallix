@@ -1208,7 +1208,6 @@ test('runDraftCommand materializes the Mission in SQLite before transitioning th
   // so the services it returns carry `main` — not the `<repo>-<slug>` worktree
   // basename that `targetWorktree` (`/wt-tst`) would yield.
   mock.method(composition, 'createMissionApplicationServices', async () => ({
-    authority: 'sqlite',
     repositoryId: 'main',
     intake: {
       execute: async (request) => {
@@ -1247,7 +1246,6 @@ test('runDraftCommand keys the intake request to the identity the composition ro
   mock.method(composition, 'createMissionApplicationServices', async (rootDir) => {
     assert.equal(rootDir, '/wt-tst', 'composition still receives the mission worktree and canonicalizes it itself');
     return {
-      authority: 'sqlite',
       repositoryId: 'parallix',
       intake: {
         execute: async (request) => {
@@ -1277,7 +1275,6 @@ test('runDraftCommand fails closed and leaves the Backlog task untouched when Mi
   const errors = [];
   const exitCodes = [];
   mock.method(composition, 'createMissionApplicationServices', async () => ({
-    authority: 'sqlite',
     intake: {
       execute: async () => ({
         status: 'failed',
@@ -1328,7 +1325,6 @@ test('runDraftCommand fails closed when the Mission store cannot be constructed'
 test('runDraftCommand treats an already-recorded Mission as idempotent and continues the draft', async () => {
   const transitions = [];
   mock.method(composition, 'createMissionApplicationServices', async () => ({
-    authority: 'sqlite',
     intake: {
       execute: async () => ({
         status: 'failed',

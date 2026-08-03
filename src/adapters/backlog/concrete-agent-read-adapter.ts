@@ -2,7 +2,7 @@ import type { AgentAvailability, AgentBlock, AgentFamily } from '../../domain/ag
 import { agentFamily } from '../../domain/agents.js';
 import { AgentBlockService, parseAgentBlockUntil } from '../../application/services/agent-block-service.js';
 import type { AgentReadAdapter } from '../../application/projections/board-readers.js';
-import type { AgentBlocklistRepository } from '../sqlite/ports.js';
+import type { AgentBlocklistRepository } from '../../application/ports/agent-blocklist.js';
 import type { MissionId } from '../../domain/mission.js';
 import { getTaskAssignee, resolveTaskFile } from '../../platform/runtime/lib/tools/backlog.js';
 

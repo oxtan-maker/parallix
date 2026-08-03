@@ -1,8 +1,5 @@
 import type { SqliteDatabaseAdapter } from './database-adapter.js';
-import type {
-  AgentBlockEntry,
-  AgentBlocklistRepository,
-} from './ports.js';
+import type { AgentBlockEntry, AgentBlocklistRepository } from '../../application/ports/agent-blocklist.js';
 
 /**
  * SQLite-backed agent blocklist repository.

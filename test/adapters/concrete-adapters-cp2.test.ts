@@ -12,7 +12,8 @@ import { ConcreteGitReadAdapter } from '../../src/adapters/backlog/concrete-git-
 import { agentFamily } from '../../src/domain/agents.js';
 import { missionId } from '../../src/domain/mission.js';
 import { repositoryId } from '../../src/domain/repository.js';
-import type { AgentBlocklistRepository, OperationalHistoryRepository } from '../../src/adapters/sqlite/ports.js';
+import type { AgentBlocklistRepository } from '../../src/application/ports/agent-blocklist.js';
+import type { OperationalHistoryRepository } from '../../src/application/ports/operation-history.js';
 
 // ---------------------------------------------------------------------------
 // Mock repositories

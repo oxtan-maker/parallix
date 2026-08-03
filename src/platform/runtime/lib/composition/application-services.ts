@@ -21,12 +21,11 @@ import type { ActivePort } from '../../../../application/ports.js';
 import type { OperatorBlocklistOverlay } from '../../../../adapters/sqlite/blocklist-snapshot.js';
 import type {
   AgentBlocklistRepository,
-  KnownRepositoriesRepository,
-  UIPreferencesRepository,
-  OperationalHistoryRepository,
-  BoardLaneEventRepository,
-  UsageRepository,
-} from '../../../../adapters/sqlite/ports.js';
+} from '../../../../application/ports/agent-blocklist.js';
+import type { KnownRepositoriesRepository } from '../../../../application/ports/repository-catalog.js';
+import type { UIPreferencesRepository } from '../../../../application/ports/operator-preferences.js';
+import type { OperationalHistoryRepository, BoardLaneEventRepository } from '../../../../application/ports/operation-history.js';
+import type { UsageRepository } from '../../../../application/ports/mission-measurements.js';
 import type { SqliteDatabaseAdapter } from '../../../../adapters/sqlite/database-adapter.js';
 import type { ProductionCapabilities } from '../../../../composition/production-capabilities.js';
 
@@ -65,7 +64,7 @@ export interface OperatorStateRepositories {
 }
 
 /**
- * The checked Mission use cases, bound to the SQLite authority.
+ * The checked Mission use cases, bound to the canonical repository.
  *
  * After the TASK-2322.07 cutover, `SqliteMissionStore` is the sole production
  * authority. The preflight import gate (MissionCompatibilityImporter) runs at
@@ -88,8 +87,6 @@ export interface MissionApplicationServices {
   readonly integration: MissionIntegrationService;
   readonly checkpoints: MissionCheckpointService;
   readonly handoff: MissionHandoffService;
-  /** Which authority the graph selected. */
-  readonly authority: 'sqlite';
 }
 
 export interface ProductionApplicationServices {
@@ -325,7 +322,6 @@ export async function createMissionApplicationServices(
     integration: new MissionIntegrationService(store),
     checkpoints: new MissionCheckpointService(store),
     handoff: new MissionHandoffService(store, store),
-    authority: 'sqlite',
   };
 }
 

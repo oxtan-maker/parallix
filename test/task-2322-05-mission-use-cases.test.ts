@@ -458,7 +458,7 @@ test('SC4: handoff records NEL through the boundary and reports the derived reco
   const recorder = {
     async recordNel(record: { netEngineeringLines: number }): Promise<MissionNelRecordReceipt> {
       receipts.push(`recorded:${record.netEngineeringLines}`);
-      return { reference: 'missions/task-2322-05/nel-record.json', authority: 'compatibility' };
+      return { reference: 'missions/task-2322-05/nel-record.json' };
     },
   };
   const outcome = await new MissionHandoffService(store, recorder).recordNel({
@@ -486,6 +486,11 @@ test('SC4: handoff records NEL through the boundary and reports the derived reco
     artifacts: [{ kind: 'git-range', location: 'main..HEAD', byteSize: 1_048_576 }],
   });
   assert.equal(outcome.value!.recordReference, 'missions/task-2322-05/nel-record.json');
+  assert.deepEqual(outcome.durableEvidence.at(-1), {
+    id: `${MISSION}:handoff:nel-report`,
+    source: 'mission-store',
+    detail: 'structured NEL report recorded at missions/task-2322-05/nel-record.json',
+  });
 });
 
 test('SC4: a large generated artifact is carried as a locator, never as content', () => {

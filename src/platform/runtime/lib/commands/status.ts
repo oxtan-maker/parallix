@@ -15,10 +15,9 @@ import * as fmt from '../core/fmt.js';
 import type { BoardProjectionBuilder } from '../../../../application/projections/board-readers.js';
 import type {
   AgentBlocklistRepository,
-  OperationalHistoryRepository,
-  BoardLaneEventRepository,
-  UsageRepository,
-} from '../../../../adapters/sqlite/ports.js';
+} from '../../../../application/ports/agent-blocklist.js';
+import type { OperationalHistoryRepository, BoardLaneEventRepository } from '../../../../application/ports/operation-history.js';
+import type { UsageRepository } from '../../../../application/ports/mission-measurements.js';
 
 /** @param {string} porcelain */
 function parseWorktreeList(porcelain: string) {

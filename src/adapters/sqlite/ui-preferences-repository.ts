@@ -1,8 +1,5 @@
 import type { SqliteDatabaseAdapter } from './database-adapter.js';
-import type {
-  UIPreferenceEntry,
-  UIPreferencesRepository,
-} from './ports.js';
+import type { UIPreferenceEntry, UIPreferencesRepository } from '../../application/ports/operator-preferences.js';
 
 /**
  * SQLite-backed UI preferences repository.

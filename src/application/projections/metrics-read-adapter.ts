@@ -1,4 +1,5 @@
-import type { BoardLaneEventEntry, BoardLaneEventRepository, UsageRecord, UsageRepository } from '../../adapters/sqlite/ports.js';
+import type { UsageRecord, UsageRepository } from '../ports/mission-measurements.js';
+import type { BoardLaneEventEntry, BoardLaneEventRepository } from '../ports/operation-history.js';
 import type { MissionId, MissionStatus } from '../../domain/mission.js';
 import type { MissionTransition } from '../../domain/mission-workflow.js';
 import type { MissionOutcome } from '../../domain/usage.js';

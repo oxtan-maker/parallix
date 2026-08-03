@@ -254,7 +254,7 @@ describe('Mission application boundary over isolated SQLite adapters', () => {
       const outcome = await new MissionHandoffService(store, {
         async recordNel(record) {
           receipts.push(`${record.netEngineeringLines}:${record.artifacts.map((a) => a.location).join(',')}`);
-          return { reference: 'missions/task-2322-05/nel-record.json', authority: 'compatibility' };
+          return { reference: 'missions/task-2322-05/nel-record.json' };
         },
       }).recordNel({
         operationId: 'op-handoff',
@@ -299,11 +299,10 @@ describe('Mission application boundary over isolated SQLite adapters', () => {
     }
   });
 
-  it('SC6: production selects exactly one SQLite authority for every Mission use case', async () => {
+  it('SC6: production wires one Mission store for every Mission use case', async () => {
     const services = await createMissionApplicationServices(process.cwd(), {
       skipImportGate: true,
     });
-    assert.equal(services.authority, 'sqlite');
     assert.equal(services.store.constructor.name, 'SqliteMissionStore');
 
     const compositionSource = fs.readFileSync(
@@ -313,7 +312,6 @@ describe('Mission application boundary over isolated SQLite adapters', () => {
     // One SQLite store construction, and no CompatibilityMissionStore in the graph.
     assert.ok(compositionSource.includes('new SqliteMissionStore('));
     assert.ok(!compositionSource.includes('new CompatibilityMissionStore('));
-    assert.equal(services.authority, 'sqlite');
     assert.equal(services.intake.constructor.name, 'MissionIntakeService');
     assert.equal(services.lifecycle.constructor.name, 'MissionLifecycleService');
     assert.equal(services.integration.constructor.name, 'MissionIntegrationService');

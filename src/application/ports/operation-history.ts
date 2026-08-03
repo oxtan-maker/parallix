@@ -1,0 +1,31 @@
+export interface OperationalHistoryEntry {
+  readonly id?: number;
+  readonly eventType: string;
+  readonly eventData: string;
+  readonly createdAt: string;
+}
+
+export interface OperationalHistoryRepository {
+  findAll(): Promise<readonly OperationalHistoryEntry[]>;
+  findByType(_type: string): Promise<readonly OperationalHistoryEntry[]>;
+  append(_entry: OperationalHistoryEntry): Promise<void>;
+  clear(): Promise<void>;
+}
+
+export interface BoardLaneEventEntry {
+  readonly id?: number;
+  readonly missionId: string;
+  readonly fromStatus: string | null;
+  readonly toStatus: string;
+  readonly trigger: string;
+  readonly agent: string;
+  readonly occurredAt: string;
+  readonly idempotencyKey: string;
+}
+
+export interface BoardLaneEventRepository {
+  append(_entry: BoardLaneEventEntry): Promise<boolean>;
+  findByMissionId(_missionId: string): Promise<readonly BoardLaneEventEntry[]>;
+  findAll(): Promise<readonly BoardLaneEventEntry[]>;
+  clear(): Promise<void>;
+}

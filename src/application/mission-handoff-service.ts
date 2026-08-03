@@ -116,7 +116,7 @@ export class MissionHandoffService {
       evidence.push(storeEvidence(
         updated.id,
         'handoff:nel-report',
-        `structured NEL report recorded at ${receipt.reference} (${receipt.authority})`,
+        `structured NEL report recorded at ${receipt.reference}`,
       ));
       return completed(
         { mission: updated, version: nextVersion, record, recordReference: receipt.reference },

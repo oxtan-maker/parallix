@@ -8,7 +8,7 @@ import type { RepositoryId } from '../../domain/repository.js';
 import { ConcreteGitReadAdapter } from '../backlog/concrete-git-read-adapter.js';
 import type { SqliteDatabaseAdapter } from './database-adapter.js';
 import { SqliteSessionMarkerRepository } from './session-marker-repository.js';
-import type { SessionMarkerEntry, SessionMarkerWrite } from './ports.js';
+import type { SessionMarkerEntry, SessionMarkerWrite } from '../../application/ports/mission-store.js';
 
 // ---------------------------------------------------------------------------
 // Types for import results

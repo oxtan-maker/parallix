@@ -415,7 +415,6 @@ test('composition root: createMissionApplicationServices uses SqliteMissionStore
   fs.mkdirSync(missionDir, { recursive: true });
 
   const services = await createMissionApplicationServices(dir);
-  assert.equal(services.authority, 'sqlite', 'authority should be sqlite');
   assert.ok(services.store instanceof SqliteMissionStore, 'store should be SqliteMissionStore');
   // Callers building an intake request must be able to read the canonicalized
   // repository identity back rather than deriving their own from a worktree path.

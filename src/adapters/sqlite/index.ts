@@ -13,27 +13,34 @@ export { resolveDatabasePath, verifyDatabasePathIsolation } from './database-pat
 export { initOperatorState, clearOperatorStateCache } from './adapter-factory.js';
 export type { AdapterInitOptions, OperatorStateAdapter } from './adapter-factory.js';
 
-// Repository ports
 export type {
   AgentBlockEntry,
   AgentBlocklistRepository,
+} from '../../application/ports/agent-blocklist.js';
+export type {
   UsageRecord,
   UsageRepository,
+} from '../../application/ports/mission-measurements.js';
+export type {
   KnownRepositoryEntry,
   KnownRepositoriesRepository,
+} from '../../application/ports/repository-catalog.js';
+export type {
   UIPreferenceEntry,
   UIPreferencesRepository,
+} from '../../application/ports/operator-preferences.js';
+export type {
   OperationalHistoryEntry,
   OperationalHistoryRepository,
-  MigrationLedgerEntry,
-  MigrationLedgerRepository,
-  ImportRecord,
   BoardLaneEventEntry,
   BoardLaneEventRepository,
+} from '../../application/ports/operation-history.js';
+export type {
   SessionMarkerEntry,
   SessionMarkerWrite,
   SessionMarkerRepository,
-} from './ports.js';
+} from '../../application/ports/mission-store.js';
+export type { MigrationLedgerEntry, MigrationLedgerRepository, ImportRecord } from './ports.js';
 
 // Repository implementations
 export { SqliteBlocklistRepository } from './blocklist-repository.js';

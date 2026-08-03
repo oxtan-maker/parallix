@@ -2,10 +2,9 @@ import type { AgentFamily } from '../domain/agents.js';
 import type { RepositoryId } from '../domain/repository.js';
 import type {
   AgentBlocklistRepository,
-  BoardLaneEventRepository,
-  OperationalHistoryRepository,
-  UsageRepository,
-} from '../adapters/sqlite/ports.js';
+} from '../application/ports/agent-blocklist.js';
+import type { BoardLaneEventRepository, OperationalHistoryRepository } from '../application/ports/operation-history.js';
+import type { UsageRepository } from '../application/ports/mission-measurements.js';
 import { ConcreteAgentReadAdapter } from '../adapters/backlog/concrete-agent-read-adapter.js';
 import { ConcreteGateReadAdapter } from '../adapters/backlog/concrete-gate-read-adapter.js';
 import { ConcreteGitReadAdapter } from '../adapters/backlog/concrete-git-read-adapter.js';
