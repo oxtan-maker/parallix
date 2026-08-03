@@ -59,6 +59,31 @@ export function getWorktreeStatus(cwd: string = process.cwd()): string[] {
     .filter(Boolean);
 }
 
+const SOURCE_EXTENSIONS = /(?:\.(?:c|m)?js|\.ts|\.tsx|\.jsx)$/;
+const IGNORED_GENERATED_DIRS = new Set(['node_modules', '.test-runtime', 'build', 'dist', 'coverage', 'graphify-out']);
+
+/**
+ * Find source files that exist in a worktree but are ignored and therefore
+ * cannot enter a commit. This deliberately runs against the selected
+ * worktree; it does not inspect or build the primary checkout.
+ */
+export function findIgnoredSourceFiles(cwd: string = process.cwd()): string[] {
+  const candidates: string[] = [];
+  const visit = (absoluteDir: string, relativeDir: string): void => {
+    let entries: fsMod.Dirent[];
+    try { entries = fsMod.readdirSync(absoluteDir, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+      const relative = relativeDir ? `${relativeDir}/${entry.name}` : entry.name;
+      if (IGNORED_GENERATED_DIRS.has(entry.name) || entry.name === '.git') { continue; }
+      const absolute = pathMod.join(absoluteDir, entry.name);
+      if (entry.isDirectory()) { visit(absolute, relative); }
+      else if (entry.isFile() && SOURCE_EXTENSIONS.test(relative)) { candidates.push(relative); }
+    }
+  };
+  visit(cwd, '');
+  return candidates.filter(entry => git(['-C', cwd, 'check-ignore', '-q', '--', entry]).status === 0);
+}
+
 export function isDirty(cwd: string = process.cwd()): boolean {
   const result = git(['-C', cwd, 'status', '--porcelain']);
   return result.stdout.trim().length > 0;
