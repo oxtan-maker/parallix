@@ -2,10 +2,15 @@
 id: TASK-2265
 title: codex fails on mcp
 status: ready-for-integration
-assignee: [codex]
+assignee:
+  - codex
 created_date: '2026-07-10 09:33'
-labels: [ai_sdlc, bug]
+updated_date: '2026-08-03 16:39'
+labels:
+  - ai_sdlc
+  - bug
 dependencies: []
+ordinal: 68900
 ---
 
 ## Description

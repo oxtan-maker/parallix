@@ -2,9 +2,10 @@
 id: TASK-2329
 title: Bring TUI board to design parity with agent slop guardrails
 status: ready-for-integration
-assignee: [custom]
+assignee:
+  - custom
 created_date: '2026-07-30 00:00'
-updated_date: '2026-07-30 00:00'
+updated_date: '2026-08-03 16:39'
 labels:
   - tui
   - board
@@ -24,9 +25,14 @@ references:
   - src/application/projections/agent-status.ts
   - src/application/controller/board-command.ts
   - src/application/controller/board-controller.ts
-  - backlog/tasks/task-2283 - Implement-local-web-operator-board-over-shared-contracts.md
-  - backlog/tasks/task-2322.11 - Complete-operator-state-repositories-and-shared-UI-projection-wiring.md
+  - >-
+    backlog/tasks/task-2283 -
+    Implement-local-web-operator-board-over-shared-contracts.md
+  - >-
+    backlog/tasks/task-2322.11 -
+    Complete-operator-state-repositories-and-shared-UI-projection-wiring.md
 priority: high
+ordinal: 69900
 ---
 
 ## Description
@@ -162,6 +168,11 @@ author: magnus
 created: 2026-07-30 00:00
 ---
 Design source is the HTML mockup in `/tmp/Parallix Kanban Board Controller.zip`. The actual code in the zip (dc-runtime, React web components) is NOT the target — we use only the information hierarchy and operator experience. The TUI implementation already covers ~60% of the design's features; this task completes the remaining ~40% by extending existing code paths rather than creating new ones.
+---
+author: codex
+created: 2026-07-30 02:00
+---
+Implementation complete. All 8 capabilities delivered across 4 checkpoints: agent strip (new `agent-strip.tsx`, justified: shell.tsx > 300 lines), on-card action buttons (informational labels; dispatch via Enter/Ctrl+D/A/R/I through BoardCommandController), WIP limit + median cycle in lane headers, label badges with narrow-width guard, Ctrl+D/A/R/I lifecycle shortcuts via ConfirmationDialog, Shift+S shipped collapse, and review details from flags. Verification gate: 1537 pass, 0 fail. Files changed: `board.ts`, `agent-strip.tsx` (new), `board-layout.tsx`, `lane-column.tsx`, `mission-card.tsx`, `shell.tsx`. Characterization tests in `test/tui-characterization-cp1.test.ts` (24 tests) with positive assertions for all SC1-SC8.
 ---
 <!-- COMMENTS:END -->
 
