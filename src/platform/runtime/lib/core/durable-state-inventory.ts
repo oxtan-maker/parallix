@@ -818,6 +818,13 @@ export const MACHINE_WRITTEN_PATH_INVENTORY: readonly MachineWrittenPathInventor
     persistencePolicy: 'Generated ratchet output; documented direct-write exception, not migrated.',
   },
   {
+    id: 'coverage-manifest',
+    pathPattern: '<tmp>/coverage-gate-manifests-*/<pid>.json',
+    writer: 'lib/commands/coverage-gate.ts#flushCoverageManifest',
+    classification: 'cache-scratch-data',
+    persistencePolicy: 'PID-scoped scratch manifest for SIGKILL orphan recovery; documented direct-write exception.',
+  },
+  {
     id: 'mutation-run-config',
     pathPattern: '<tmp>/mutation-gate-*/stryker.conf.json',
     writer: 'lib/commands/mutation-gate.ts#run',

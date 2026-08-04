@@ -70,6 +70,7 @@ export type LegacyInventoryId =
   | 'review-state'
   | 'agent-blocklist'
   | 'backlog-task'
+  | 'coverage-manifest'
   | 'mutation-baseline'
   | 'mutation-run-config'
   | 'forgejo-token'
@@ -84,6 +85,7 @@ export const LEGACY_INVENTORY_AUTHORITY = {
   'backlog-task': MISSION_FIELD_AUTHORITY.status,
   'mutation-baseline': targetSource,
   'mutation-run-config': { owner: 'operator-local', role: 'cache' } as const,
+  'coverage-manifest': { owner: 'operator-local', role: 'cache' } as const,
   'forgejo-token': localSource,
   'workflow-config': targetSource,
 } as const satisfies Readonly<Record<LegacyInventoryId, Authority>>;

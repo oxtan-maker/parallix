@@ -93,6 +93,82 @@ const COVERAGE_EXCLUDES = [
 // override while still failing on real hangs.
 const DEFAULT_TEST_TIMEOUT_MS = 3_600_000;
 const PER_RUN_SCRATCH: string[] = [];
+
+// Per-run manifest for SIGKILL orphan recovery (task-2327).
+// Each coverage-gate process writes its scratch directories to a PID-scoped
+// manifest file under a shared manifest directory. On startup, the recovery
+// path scans the directory for orphaned manifests (dead PIDs) and reclaims
+// their registered scratch roots. This survives SIGKILL because the manifest
+// is flushed synchronously before any child work begins.
+// PARALLIX_COVERAGE_GATE_MANIFEST_DIR can override the default auto-created
+// directory (used by tests and workflow runners).
+const COVERAGE_GATE_MANIFEST_DIR = (process.env.PARALLIX_COVERAGE_GATE_MANIFEST_DIR
+  || fs.mkdtempSync(path.join(os.tmpdir(), 'coverage-gate-manifests-')));
+
+if (!process.env.PARALLIX_COVERAGE_GATE_MANIFEST_DIR) {
+  // Ensure the auto-created directory exists (mkdtempSync creates it, but
+  // the env-override path may point to a pre-created directory)
+  if (!fs.existsSync(COVERAGE_GATE_MANIFEST_DIR)) {
+    fs.mkdirSync(COVERAGE_GATE_MANIFEST_DIR, { recursive: true });
+  }
+}
+
+function coverageManifestPath() {
+  return path.join(COVERAGE_GATE_MANIFEST_DIR, `${process.pid}.json`);
+}
+
+function flushCoverageManifest() {
+  try {
+    fs.writeFileSync(coverageManifestPath(), JSON.stringify(PER_RUN_SCRATCH));
+  } catch (_) {
+    // best-effort manifest write
+  }
+}
+
+/**
+ * Recover orphaned scratch directories from terminated coverage-gate runs.
+ *
+ * Scans the manifest directory for PID-scoped files, checks if each PID is
+ * still alive (signal 0), and removes registered scratch directories from
+ * processes that are no longer running. This is the designated recovery
+ * entry point for SIGKILL orphan cleanup (task-2327).
+ *
+ * @param manifestDir - Override manifest directory (for testing). Defaults to COVERAGE_GATE_MANIFEST_DIR.
+ */
+function recoverOrphanedScratchDirs(manifestDir: string = COVERAGE_GATE_MANIFEST_DIR) {
+  try {
+    if (!fs.existsSync(manifestDir)) {return;}
+    for (const entry of fs.readdirSync(manifestDir)) {
+      if (!entry.endsWith('.json')) {continue;}
+      const manifestFile = path.join(manifestDir, entry);
+      const pid = Number(path.basename(entry, '.json'));
+      // Check if the process is still alive (signal 0 succeeds for living PIDs)
+      let isAlive = false;
+      try {
+        process.kill(pid, 0);
+        isAlive = true;
+      } catch (_) {
+        // Process is dead — reclaim its registered roots
+      }
+      if (!isAlive) {
+        try {
+          const roots: string[] = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+          for (const dir of roots) {
+            try {
+              if (fs.existsSync(dir)) {
+                fs.rmSync(dir, { recursive: true, force: true });
+              }
+            } catch (_) { /* best-effort */ }
+          }
+          fs.unlinkSync(manifestFile);
+        } catch (_) { /* best-effort */ }
+      }
+    }
+  } catch (_) {
+    // best-effort recovery only
+  }
+}
+
 let threshold = 90;
 let dryRun = false;
 let lcov = false;
@@ -149,18 +225,21 @@ function cleanupNewTempDirs(beforeEntries: Set<string>, tmpRoot: string = os.tmp
 function createPerRunScratchDirs() {
   const coverageDir = fs.mkdtempSync(path.join(os.tmpdir(), 'node-coverage-'));
   PER_RUN_SCRATCH.push(coverageDir);
+  flushCoverageManifest();
   return coverageDir;
 }
 
 function createPerRunTmpRoot() {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'coverage-gate-tmp-'));
   PER_RUN_SCRATCH.push(tmpRoot);
+  flushCoverageManifest();
   return tmpRoot;
 }
 
 function createMockGraphifyBin() {
   const graphifyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'graphify-'));
   PER_RUN_SCRATCH.push(graphifyDir);
+  flushCoverageManifest();
   const graphifyBin = path.join(graphifyDir, 'graphify');
   fs.writeFileSync(graphifyBin, `#!/usr/bin/env bash
 set -euo pipefail
@@ -279,6 +358,9 @@ function runTests(testFiles: string[], coverageThreshold = threshold, _spawnSync
 }
 
 function main() {
+  // Recover orphaned scratch directories from any previous SIGKILL'd run
+  recoverOrphanedScratchDirs();
+
   const testFiles = discoverTestFiles();
   if (testFiles.length === 0) {
     fmt.log.fail('no parallix test files found under test/');
@@ -361,19 +443,24 @@ function run(args: string[], options: CoverageGateOptions = {}) {
 (run as any).buildCoverageArgs = buildCoverageArgs;
 (run as any).cleanupNewTempDirs = cleanupNewTempDirs;
 (run as any).cleanupPerRunScratch = cleanupPerRunScratch;
+(run as any).createMockGraphifyBin = createMockGraphifyBin;
 (run as any).createPerRunScratchDirs = createPerRunScratchDirs;
+(run as any).createPerRunTmpRoot = createPerRunTmpRoot;
 (run as any).COVERAGE_EXCLUDES = COVERAGE_EXCLUDES;
 (run as any).COVERAGE_INCLUDES = COVERAGE_INCLUDES;
 (run as any).DEFAULT_TEST_TIMEOUT_MS = DEFAULT_TEST_TIMEOUT_MS;
 (run as any).discoverTestFiles = discoverTestFiles;
+(run as any).COVERAGE_GATE_MANIFEST_DIR = COVERAGE_GATE_MANIFEST_DIR;
+(run as any).flushCoverageManifest = flushCoverageManifest;
 (run as any).listTempEntries = listTempEntries;
+(run as any).recoverOrphanedScratchDirs = recoverOrphanedScratchDirs;
 (run as any).registerExitHandlers = registerExitHandlers;
 (run as any).resetPerRunScratchState = resetPerRunScratchState;
 (run as any).resolveTestTimeoutMs = resolveTestTimeoutMs;
 (run as any).runTests = runTests;
 (run as any).shouldCleanTempDir = shouldCleanTempDir;
 export default run;
-export { run, cleanupPerRunScratch, createPerRunScratchDirs, COVERAGE_EXCLUDES, COVERAGE_INCLUDES, DEFAULT_TEST_TIMEOUT_MS, discoverTestFiles, listTempEntries, registerExitHandlers, resetPerRunScratchState, resolveTestTimeoutMs, runTests, shouldCleanTempDir };
+export { run, cleanupPerRunScratch, createMockGraphifyBin, createPerRunScratchDirs, createPerRunTmpRoot, COVERAGE_EXCLUDES, COVERAGE_GATE_MANIFEST_DIR, COVERAGE_INCLUDES, DEFAULT_TEST_TIMEOUT_MS, discoverTestFiles, flushCoverageManifest, listTempEntries, recoverOrphanedScratchDirs, registerExitHandlers, resetPerRunScratchState, resolveTestTimeoutMs, runTests, shouldCleanTempDir };
 
 // CJS compat: ensure require() returns the function directly
 declare const module: { exports: any } | undefined;

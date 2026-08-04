@@ -49,6 +49,7 @@ const expectedIntegrationFiles = [
   'task-2312-label-sync.test.ts', 'task-2313-repro.test.ts',
   'task-2318-temp-directory-leaks.test.js',
   'task-2319-notices-git-tracking.test.ts',
+  'task-2327-coverage-gate-tmp-leaks.test.js',
   'test-hygiene.test.ts',
   'tui-action-bar.test.ts',
   'tui-confirmation.test.ts',

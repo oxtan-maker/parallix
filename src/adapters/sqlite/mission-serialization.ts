@@ -392,7 +392,7 @@ function reviewEventsFrom(records: MissionAggregateRecords): readonly ReviewEven
     roundNumber: row.round_number,
     phase: row.phase,
     actor: row.actor,
-    content: requiredText(row.content, 'review event content'),
+    content: row.content ?? '',
     disposition: row.disposition,
     verdict: row.verdict,
     itemDispositions: parseItemDispositions(row.item_dispositions),

@@ -9,6 +9,7 @@ const { MACHINE_WRITTEN_PATH_INVENTORY } = require('../.test-runtime/lib/core/du
 const ROOT = path.resolve(__dirname, '..');
 const RUNTIME_LIB = path.join(ROOT, 'src', 'platform', 'runtime', 'lib');
 const DIRECT_JSON_EXCEPTIONS = new Map([
+  ['lib/commands/coverage-gate.ts:coverageManifestPath()', 'coverage-manifest'],
   ['lib/commands/mutation-gate.ts:baselinePath', 'mutation-baseline'],
   ['lib/commands/mutation-gate.ts:configPath', 'mutation-run-config'],
   ['lib/tools/setup-review.ts:configPath', 'workflow-config'],
