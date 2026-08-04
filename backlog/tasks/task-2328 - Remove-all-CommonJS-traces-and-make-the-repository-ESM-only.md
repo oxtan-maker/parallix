@@ -1,8 +1,8 @@
 ---
 id: TASK-2328
 title: Remove all CommonJS traces and make the repository ESM-only
-status: active
-assignee: [codex]
+status: review
+assignee: [custom]
 created_date: '2026-07-29 12:43'
 labels:
   - ai_sdlc
