@@ -1,21 +1,28 @@
 ---
 id: TASK-2331
 title: Audit and harden SQLite connection strategy
-status: backlog
+status: done
 assignee: []
 created_date: '2026-07-31 07:30'
-updated_date: '2026-07-31 07:30'
+updated_date: '2026-08-04 06:40'
 labels:
   - ai_sdlc
 dependencies: []
 references:
   - src/adapters/sqlite/adapter-factory.ts (initOperatorState singleton cache)
-  - src/adapters/sqlite/database-adapter.ts (SqliteDatabaseAdapter, busy timeout clamp)
-  - src/platform/runtime/lib/composition/application-services.ts (materializeOperatorState, createMissionApplicationServices)
-  - src/platform/runtime/lib/agents/agents.ts (defaultSessionMarkerPort, startAgent retry)
+  - >-
+    src/adapters/sqlite/database-adapter.ts (SqliteDatabaseAdapter, busy timeout
+    clamp)
+  - >-
+    src/platform/runtime/lib/composition/application-services.ts
+    (materializeOperatorState, createMissionApplicationServices)
+  - >-
+    src/platform/runtime/lib/agents/agents.ts (defaultSessionMarkerPort,
+    startAgent retry)
   - src/platform/runtime/lib/agents/pi.ts (SDK session spawning)
-  - backlog/tasks/task-2330 - Harden-e2e-test-coverage-for-SQLite-persistence-paths.md (coverage gap)
-parent_task_id: null
+  - >-
+    backlog/tasks/task-2330 -
+    Harden-e2e-test-coverage-for-SQLite-persistence-paths.md (coverage gap)
 priority: medium
 ---
 
