@@ -1,16 +1,18 @@
 ---
 id: TASK-2327
 title: fix coverage-gate temp directory leaks on SIGKILL
-status: active
-assignee: [custom]
+status: ready-for-integration
+assignee:
+  - custom
 created_date: '2026-07-30 09:25'
+updated_date: '2026-08-04 04:54'
 labels:
   - resource_usage
   - ai_sdlc
   - bug
 dependencies:
   - TASK-2326
-ordinal: 67900
+ordinal: 68000
 ---
 
 ## Description
