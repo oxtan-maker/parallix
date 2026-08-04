@@ -4,7 +4,7 @@ title: Review code bug
 status: backlog
 assignee: [custom]
 created_date: '2026-08-04 12:27'
-labels: []
+labels: [bug, ai_sdlc]
 dependencies: []
 ordinal: 75900
 ---
