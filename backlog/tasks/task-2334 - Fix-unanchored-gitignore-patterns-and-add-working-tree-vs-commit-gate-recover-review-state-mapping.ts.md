@@ -3,9 +3,10 @@ id: TASK-2334
 title: >-
   Fix unanchored gitignore patterns and add working-tree-vs-commit gate (recover
   review-state-mapping.ts)
-status: backlog
+status: done
 assignee: []
 created_date: '2026-08-03 06:10'
+updated_date: '2026-08-04 06:38'
 labels:
   - bug
   - main-broken
