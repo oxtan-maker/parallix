@@ -8,7 +8,7 @@
  * different agent family than the PR author.
  *
  * This test exercises the actual launch path: the real `selectAgent` function
- * from `launcher-selection.ts` (via `.test-runtime/lib/agents/agents.js`),
+ * from `launcher-selection.ts` (via `.test-runtime/adapters/agents/agents.js`),
  * called with the same arguments the review-loop uses:
  *   selectAgent('review', { exclude: new Set([implementer]) })
  *
@@ -30,14 +30,14 @@ const {
   setCommandPathProbe,
   readAgentConfig,
   workflowLauncherStatus
-} = require('../.test-runtime/lib/agents/agents');
+} = require('../.test-runtime/adapters/agents/agents.js');
 
 const {
   startReviewLoop
-} = require('../.test-runtime/lib/review/review-loop');
+} = require('../.test-runtime/adapters/review/review-loop.js');
 const {
   resolveHandoffReviewAssignment
-} = require('../.test-runtime/lib/commands/handoff');
+} = require('../.test-runtime/adapters/cli/commands/handoff.js');
 
 const originalPath = process.env.PATH;
 const originalWorkflowAgent = process.env.WORKFLOW_AGENT;

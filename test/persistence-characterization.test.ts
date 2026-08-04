@@ -21,7 +21,7 @@ import * as os from 'node:os';
 import {
   ADR0053_PERSISTENCE_INVENTORY,
   type ADR0053BoundaryEntry,
-} from '../src/platform/runtime/lib/core/durable-state-inventory.js';
+} from './fixtures/durable-state-inventory.js';
 import {
   BoardProjectionBuilder,
   checkProjectionStaleness,
@@ -38,7 +38,7 @@ import { repositoryId, type RepositoryId } from '../src/domain/repository.js';
 import { shouldResume, type SessionMarker } from '../src/domain/session.js';
 import { triggerFromTransition, parseMissionStatus } from '../src/domain/board-event.js';
 import { completedMissionStatistics, type MissionOutcome } from '../src/domain/usage.js';
-import statsBackfill from '../src/platform/runtime/lib/commands/stats-backfill.js';
+import statsBackfill from '../src/adapters/cli/commands/stats-backfill.js';
 import { resolveKnownAgentFamilies } from '../src/interfaces/tui/agent-config-resolver.js';
 
 const ROOT = process.cwd();

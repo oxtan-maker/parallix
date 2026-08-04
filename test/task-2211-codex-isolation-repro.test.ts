@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 test('codex launcher keeps operator-home nested tool resolution while isolating Codex state', () => {
-  const { buildCodexDraftInvocation, codexStateRoot } = require('../.test-runtime/lib/agents/codex');
+  const { buildCodexDraftInvocation, codexStateRoot } = require('../.test-runtime/adapters/agents/codex.js');
   const operatorHome = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2211-operator-home-'));
   const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2211-worktree-'));
   const originalHome = process.env.HOME;
@@ -31,7 +31,7 @@ test('codex launcher keeps operator-home nested tool resolution while isolating 
 });
 
 test('Codex setup links operator config and auth without copying their contents', () => {
-  const codex = require('../.test-runtime/lib/agents/codex');
+  const codex = require('../.test-runtime/adapters/agents/codex.js');
   const operatorHome = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2211-state-operator-home-'));
   const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2211-state-worktree-'));
   const originalHome = process.env.HOME;

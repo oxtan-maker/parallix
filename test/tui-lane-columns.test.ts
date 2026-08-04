@@ -272,7 +272,7 @@ describe('SC6: TUI components stay pure over the projection', () => {
   const forbidden = [
     'node:fs', 'node:child_process', 'node:os', 'node:net',
     'simple-git', 'sqlite', 'better-sqlite3',
-    '../../adapters/', '../../workflow/', '../../platform/runtime/',
+    '../../adapters/', '../../workflow/',
   ];
 
   it('no lane, card, or layout module imports fs, subprocess, git, sqlite, or an adapter', () => {

@@ -529,7 +529,7 @@ describe('SQLite Mission aggregate integration', () => {
     // adapter: after the TASK-2322.07 cutover it constructs SqliteMissionStore
     // as the sole production authority. Everything else stays behind the ports.
     const compositionRoot = path.join(
-      sourceRoot, 'platform', 'runtime', 'lib', 'composition', 'application-services.ts',
+      sourceRoot, 'composition', 'application-services.ts',
     );
     const forbidden = files
       .filter((file) => !file.startsWith(sqliteRoot) && file !== compositionRoot)

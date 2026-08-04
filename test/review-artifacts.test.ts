@@ -16,8 +16,8 @@ const {
   consumeReviewerArtifacts,
   consumeImplementerArtifacts,
   resolveArtifactDir
-} = require('../.test-runtime/lib/review/review-artifacts');
-const { buildCompactReviewPrompt } = require('../.test-runtime/lib/review/review-prompts');
+} = require('../.test-runtime/adapters/review/review-artifacts.js');
+const { buildCompactReviewPrompt } = require('../.test-runtime/adapters/review/review-prompts.js');
 
 // ============================================================================
 // buildMetadataFooter tests

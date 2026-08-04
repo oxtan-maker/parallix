@@ -10,9 +10,9 @@ const {
   buildAutonomousReviewMatrix,
   formatMatrixSummary,
   runnableDifferentFamilyExists,
-} = require('../.test-runtime/lib/core/runtime-matrix');
+} = require('../.test-runtime/adapters/agents/runtime-matrix.js');
 
-const { selectAgent, setCommandPathProbe } = require('../.test-runtime/lib/agents/agents');
+const { selectAgent, setCommandPathProbe } = require('../.test-runtime/adapters/agents/agents.js');
 
 // A launcher that exits 0 for any args (including the `--help` health probe used
 // by workflowLauncherStatus), so an agent whose bare command resolves to it on

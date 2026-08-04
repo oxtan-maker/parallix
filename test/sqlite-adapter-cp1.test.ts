@@ -566,15 +566,15 @@ describe('SQLite adapter — CP1: schema and migration runner', () => {
     );
   });
 
-  it('no module under src/platform/runtime/lib imports node:sqlite (SC2 negative)', () => {
-    // The application/runtime layer must never bind the SQLite driver directly;
-    // it reaches operator state only through the async composition-root boundary.
+  it('no production module outside the SQLite adapter imports node:sqlite', () => {
+    // Canonical layers reach operator state only through application ports.
     // The boundary-guards.ts file references 'node:sqlite' as a forbidden token
     // (not an import), so we check for actual import statements.
-    const libDir = path.resolve('src/platform/runtime/lib');
+    const libDir = path.resolve('src');
     const files = fs.readdirSync(libDir, { recursive: true })
       .filter((f): f is string => typeof f === 'string' && f.endsWith('.ts'))
-      .map((f) => path.join(libDir, f));
+      .map((f) => path.join(libDir, f))
+      .filter((f) => !f.includes(`${path.sep}adapters${path.sep}sqlite${path.sep}`));
 
     const offenders = files.filter((f) => {
       const content = fs.readFileSync(f, 'utf8');

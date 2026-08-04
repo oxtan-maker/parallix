@@ -5,7 +5,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const ensureWorkflowGitignore = require('../.test-runtime/lib/core/gitignore');
+const ensureWorkflowGitignore = require('../.test-runtime/adapters/filesystem/gitignore.js');
 
 function mktempDir(prefix = 'gitignore-test-') {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));

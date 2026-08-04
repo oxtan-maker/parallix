@@ -28,7 +28,7 @@ const {
   setupReview,
   setupWizard,
   writeWorkflowConfig,
-} = require('../.test-runtime/lib/tools/setup-review');
+} = require('../.test-runtime/adapters/review/setup-review.js');
 
 async function withTempDir(fn) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-setup-review-'));
@@ -40,11 +40,11 @@ async function withTempDir(fn) {
 }
 
 function loadSetupReviewWithSpawn(spawnImpl) {
-  const modulePath = require.resolve('../.test-runtime/lib/tools/setup-review');
+  const modulePath = require.resolve('../.test-runtime/adapters/review/setup-review');
   const mocked = mock.method(childProcess, 'spawnSync', spawnImpl);
   delete require.cache[modulePath];
   try {
-    return require('../.test-runtime/lib/tools/setup-review');
+    return require('../.test-runtime/adapters/review/setup-review.js');
   } finally {
     mocked.mock.restore();
     delete require.cache[modulePath];
@@ -610,8 +610,8 @@ test('promptLine supports visible and hidden prompts', async () => {
   }));
 
   try {
-    const visible = await require('../.test-runtime/lib/tools/setup-review').promptLine('Prompt: ', { output });
-    const hidden = await require('../.test-runtime/lib/tools/setup-review').promptLine('Secret: ', { hidden: true, output });
+    const visible = await require('../.test-runtime/adapters/review/setup-review.js').promptLine('Prompt: ', { output });
+    const hidden = await require('../.test-runtime/adapters/review/setup-review.js').promptLine('Secret: ', { hidden: true, output });
     assert.equal(visible, 'visible');
     assert.equal(hidden, 'secret');
     assert.ok(writes.includes('typed'));

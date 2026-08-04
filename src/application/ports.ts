@@ -18,7 +18,7 @@ export type {
   UsageRepository,
   UsageRecord,
 } from './ports/mission-measurements.js';
-// Mechanism ports for the execute workflow (TASK-2332.04). They replace the
+// Mechanism ports for the execute workflow (architecture migration). They replace the
 // legacy phase-named `ActivePort`; see `ports/execute-mission.ts`.
 export type {
   MissionWorkspacePort,

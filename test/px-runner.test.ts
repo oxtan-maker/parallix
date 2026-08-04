@@ -18,7 +18,7 @@ if (major < 24) {
 
 const repoRoot = path.resolve(__dirname, '..');
 const pxPath = path.join(repoRoot, 'src', 'entry', 'px.ts');
-const runtimePxPath = path.join(repoRoot, 'src', 'platform', 'runtime', 'px.ts');
+const runtimePxPath = path.join(repoRoot, 'src', 'composition', 'create-cli.ts');
 const tsxLoaderPath = require.resolve('tsx');
 // Read the version from the manifest so version bumps do not break these tests.
 const pkgVersion = require('../package.json').version;

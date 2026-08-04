@@ -22,7 +22,7 @@ import { SqliteDatabaseAdapter } from '../src/adapters/sqlite/database-adapter.j
 import { loadDefaultMigrations, SqliteMigrationRunner } from '../src/adapters/sqlite/migration-runner.js';
 import { SqliteMissionStore } from '../src/adapters/sqlite/mission-store.js';
 import { SQLITE_ENTITY_AUTHORITY } from '../src/adapters/sqlite/authority-map.js';
-import { createMissionApplicationServices } from '../src/platform/runtime/lib/composition/application-services.js';
+import { createMissionApplicationServices } from '../src/composition/application-services.js';
 import { agentFamily } from '../src/domain/agents.js';
 import { externalTaskRef } from '../src/domain/external-task.js';
 import { missionId, missionLabels } from '../src/domain/mission.js';
@@ -306,7 +306,7 @@ describe('Mission application boundary over isolated SQLite adapters', () => {
     assert.equal(services.store.constructor.name, 'SqliteMissionStore');
 
     const compositionSource = fs.readFileSync(
-      path.join(process.cwd(), 'src/platform/runtime/lib/composition/application-services.ts'),
+      path.join(process.cwd(), 'src/composition/application-services.ts'),
       'utf8',
     );
     // One SQLite store construction, and no CompatibilityMissionStore in the graph.

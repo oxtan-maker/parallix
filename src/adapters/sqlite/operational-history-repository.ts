@@ -7,7 +7,7 @@ import type { OperationalHistoryEntry, OperationalHistoryRepository } from '../.
  * Implements `OperationalHistoryRepository` using parameterized SQL.
  *
  * Authority mapping: operator-local source-of-truth for operational events.
- * Maps to TASK-2294 domain: local operational history.
+ * Maps to architecture migration domain: local operational history.
  */
 export class SqliteOperationalHistoryRepository implements OperationalHistoryRepository {
   private db: SqliteDatabaseAdapter;

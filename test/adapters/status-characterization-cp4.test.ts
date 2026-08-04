@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import status, { parseWorktreeList, findStaleMissionWorktrees } from '../../src/platform/runtime/lib/commands/status.js';
+import status, { parseWorktreeList, findStaleMissionWorktrees } from '../../src/adapters/cli/commands/status.js';
 
 // ---------------------------------------------------------------------------
 // Characterization tests — prove output contract is preserved (SC9)
@@ -191,7 +191,7 @@ test('SC9: getFirstLine primitive strips markdown heading markers (output contra
   // Verify that the adapter uses getFirstLine (not hand-rolled extraction),
   // which strips leading markdown heading markers (e.g. "# ") from checkpoint files.
   // This ensures px status output matches legacy: "CP-5.md - CP-5: ..." not "CP-5.md - # CP-5: ..."
-  const { getFirstLine } = await import('../../src/platform/runtime/lib/core/mission-utils.js');
+  const { getFirstLine } = await import('../../src/adapters/filesystem/mission-utils.js');
   const fs = await import('node:fs');
   const path = await import('node:path');
 

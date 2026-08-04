@@ -23,7 +23,7 @@ const path = require('path');
 // Variant B closeout path.
 // ---------------------------------------------------------------------------
 
-const { resolvePostIntegrateCommand } = require('../.test-runtime/lib/core/post-integrate-hook');
+const { resolvePostIntegrateCommand } = require('../.test-runtime/adapters/process/post-integrate-hook.js');
 
 function withTempDir(fn) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2203-proof-order-'));
@@ -80,7 +80,7 @@ test('refresh-global-px.sh builds dist (task-2203 prerequisite)', () => {
 // ---------------------------------------------------------------------------
 test('Variant B: post-integrate hook runs before proof capture (task-2203 fix)', () => {
   const REPO_ROOT = path.join(__dirname, '..');
-  const integratePath = path.join(REPO_ROOT, 'src', 'platform', 'runtime', 'lib', 'commands', 'integrate.ts');
+  const integratePath = path.join(REPO_ROOT, 'src', 'adapters', 'cli', 'commands', 'integrate.ts');
   const content = fs.readFileSync(integratePath, 'utf8');
 
   // Find the positions of the key function calls in the source.

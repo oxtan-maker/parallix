@@ -48,7 +48,7 @@
     "test:integration": "FORCE_COLOR=0 tsx test/run-default-tests.ts --integration",
     "test:package-content": "tsx scripts/package-content-audit.ts",
     "test:reproducible-output": "tsx scripts/verify-reproducible-build.ts",
-    "test:coverage": "FORCE_COLOR=0 tsx src/platform/runtime/lib/commands/coverage-gate.ts --lcov",
+    "test:coverage": "FORCE_COLOR=0 tsx src/adapters/verification/coverage-gate.ts --lcov",
     "typecheck": "tsc --noEmit && tsc --noEmit --project tsconfig.scripts.json",
     "test:bundle": "node --enable-source-maps build/px.mjs --version"
   },

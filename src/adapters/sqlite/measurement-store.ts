@@ -18,7 +18,7 @@ import { resolveDatabasePath } from './database-path-resolver.js';
  * data (ADR 0053). It never reads or writes a CSV file, and it never derives
  * an identity: `(repo, mission, stage, actorKey)` arrives from the caller that
  * owns the attribution rule, matching the `Attempt`-excluded decision checked
- * by TASK-2322.02.
+ * by architecture migration.
  *
  * Synchronous by design — `node:sqlite` `DatabaseSync` is a synchronous
  * driver, and every measurement producer in the runtime is a synchronous call.

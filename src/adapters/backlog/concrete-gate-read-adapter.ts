@@ -3,7 +3,7 @@ import path from 'node:path';
 
 import type { MissionId } from '../../domain/mission.js';
 import type { GateReadAdapter } from '../../application/projections/board-readers.js';
-import { findMissionDir } from '../../platform/runtime/lib/core/mission-utils.js';
+import { findMissionDir } from '../filesystem/mission-utils.js';
 
 // ---------------------------------------------------------------------------
 // Parse-primitive types

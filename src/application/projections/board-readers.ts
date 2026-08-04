@@ -72,7 +72,7 @@ export type { MetricsReadAdapter } from './metrics-read-adapter.js';
 // ---------------------------------------------------------------------------
 
 export interface BoardProjectionOptions {
-  /** Time-based metrics (from CP-3). Prefer MetricsReadAdapter for production use. */
+  /** Time-based metrics. Prefer MetricsReadAdapter for production use. */
   metrics?: BoardMetrics;
   /** Derives metrics from board_lane_events + usage_statistics. */
   metricsAdapter?: MetricsReadAdapter;

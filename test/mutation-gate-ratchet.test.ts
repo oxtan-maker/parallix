@@ -5,8 +5,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const fmt = require('../.test-runtime/lib/core/fmt');
-const mutationGate = require('../.test-runtime/lib/commands/mutation-gate');
+const fmt = require('../.test-runtime/application/presentation/cli-format.js');
+const mutationGate = require('../.test-runtime/adapters/verification/mutation-gate.js');
 
 const STRONG_TEST = `const test = require('node:test');
 const assert = require('node:assert');

@@ -10,7 +10,7 @@ const {
   getTaskClassification,
   setTaskLabels,
   syncTaskLabelsToBaseWorktree,
-} = require('../.test-runtime/lib/tools/backlog');
+} = require('../.test-runtime/adapters/backlog/backlog.js');
 
 // These exports are required — the test file goes red if they are missing.
 assert.ok(typeof setTaskLabels === 'function', 'setTaskLabels must be exported');

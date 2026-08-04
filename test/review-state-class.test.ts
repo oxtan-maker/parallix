@@ -3,14 +3,14 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
-const { ReviewState, readReviewState, normalizeReviewPhase } = require('../.test-runtime/lib/review/review-state');
+const { ReviewState, readReviewState, normalizeReviewPhase } = require('../.test-runtime/adapters/review/review-state.js');
 const { withMissionDatabase } = require('./fixtures/review-state-db.js');
-const { clearOperatorStateCache } = require('../.test-runtime/adapters/sqlite/adapter-factory');
-const { stageLaunchSinceMs } = require('../.test-runtime/lib/review/review-loop');
-const fmt = require('../.test-runtime/lib/core/fmt');
+const { clearOperatorStateCache } = require('../.test-runtime/adapters/sqlite/adapter-factory.js');
+const { stageLaunchSinceMs } = require('../.test-runtime/adapters/review/review-loop.js');
+const fmt = require('../.test-runtime/application/presentation/cli-format.js');
 
 test('ReviewState class can be instantiated and saved', async () => {
-  await withMissionDatabase('task-class-1', async ({ root, slug }) => {
+  await withMissionDatabase('task-class-1', async ({ root, slug, store }) => {
     const state = new ReviewState(slug, {
       reviewer: 'gemini',
       implementer: 'claude',
@@ -25,10 +25,10 @@ test('ReviewState class can be instantiated and saved', async () => {
     assert.equal(state.disposition, 'REQUEST_CHANGES');
     assert.deepEqual(state.metadata, { recordedStageLaunches: { 'review:gemini': ['gemini|s1|t0|t1|0'] } });
 
-    const result = await state.save(root);
+    const result = await state.save(root, store);
     assert.deepEqual(result, { outcome: 'committed' });
 
-    const loaded = await readReviewState(slug, root);
+    const loaded = await readReviewState(slug, root, store);
     assert.ok(loaded instanceof ReviewState);
     assert.equal(loaded.reviewer, 'gemini');
     assert.equal(loaded.phase, 'fixing');
@@ -175,13 +175,13 @@ test('stageLaunchSinceMs windows the read to the current launch start (per-round
 });
 
 test('ReviewState save reports write-failed when the mission has no review', async () => {
-  await withMissionDatabase('task-save-noreview', async ({ root, slug }) => {
+  await withMissionDatabase('task-save-noreview', async ({ root, slug, store }) => {
     const state = new ReviewState(slug, {
       reviewer: 'codex',
       implementer: 'claude',
       phase: 'fixing'
     });
-    const result = await state.save(root);
+    const result = await state.save(root, store);
     assert.equal(result.outcome, 'write-failed');
     assert.match(result.diagnostic, /px handoff starts the review/);
   }, { seedReview: false });
@@ -208,13 +208,13 @@ test('ReviewState save reports write-failed when the operator database is unreac
 });
 
 test('ReviewState save persists the phase transition the loop just made', async () => {
-  await withMissionDatabase('task-save-phase', async ({ root, slug }) => {
-    const state = await readReviewState(slug, root);
+  await withMissionDatabase('task-save-phase', async ({ root, slug, store }) => {
+    const state = await readReviewState(slug, root, store);
     state.transitionTo('fixing');
     state.disposition = 'REQUEST_CHANGES';
-    assert.deepEqual(await state.save(root), { outcome: 'committed' });
+    assert.deepEqual(await state.save(root, store), { outcome: 'committed' });
 
-    const reloaded = await readReviewState(slug, root);
+    const reloaded = await readReviewState(slug, root, store);
     assert.equal(reloaded.phase, 'fixing');
     assert.equal(reloaded.disposition, 'REQUEST_CHANGES');
   });
@@ -226,7 +226,7 @@ test('ReviewState save persists the phase transition the loop just made', async 
 // ReviewState from scratch, dropping round/startedAt/phase/disposition back to
 // fresh-start defaults instead of carrying the persisted round data forward.
 test('startReviewLoop preserves persisted round data when the reviewer identity changes on resume', async () => {
-  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
   const writes = [];
 
   // Drive the real loop with injected mocks (no live provider / agents) and capture

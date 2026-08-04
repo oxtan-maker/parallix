@@ -6,7 +6,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const childProcess = require('child_process');
-const { rebaseBeforeReviewRound } = require('../.test-runtime/lib/review/review');
+const { rebaseBeforeReviewRound } = require('../.test-runtime/adapters/review/review-loop.js');
 
 async function withTempGitRepo(fn) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-test-rebase-'));

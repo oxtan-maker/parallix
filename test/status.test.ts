@@ -3,9 +3,9 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 process.env.NO_COLOR = '1';
 
-const { stripAnsi } = require('../.test-runtime/lib/core/fmt');
-const { parseWorktreeList, findStaleMissionWorktrees } = require('../.test-runtime/lib/commands/status');
-const status = require('../.test-runtime/lib/commands/status');
+const { stripAnsi } = require('../.test-runtime/application/presentation/cli-format.js');
+const { parseWorktreeList, findStaleMissionWorktrees } = require('../.test-runtime/adapters/cli/commands/status.js');
+const status = require('../.test-runtime/adapters/cli/commands/status.js');
 
 // ---------- parseWorktreeList edge cases ----------
 

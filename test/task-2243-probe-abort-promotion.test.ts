@@ -8,18 +8,18 @@ const path = require('node:path');
 // replaces module methods with mock.method(), which needs writable exports.
 // An ESM namespace object is read-only, so the same mocks throw there.
 // scripts/build-test-runtime.ts emits .test-runtime/ for exactly this purpose.
-const git = require('../.test-runtime/lib/core/git');
-const missionUtils = require('../.test-runtime/lib/core/mission-utils');
-const backlog = require('../.test-runtime/lib/tools/backlog');
-const forgejo = require('../.test-runtime/lib/tools/forgejo');
-const stats = require('../.test-runtime/lib/commands/stats');
-const composition = require('../.test-runtime/lib/composition/application-services');
+const git = require('../.test-runtime/adapters/git/git.js');
+const missionUtils = require('../.test-runtime/adapters/filesystem/mission-utils.js');
+const backlog = require('../.test-runtime/adapters/backlog/backlog.js');
+const forgejo = require('../.test-runtime/adapters/forgejo/forgejo.js');
+const stats = require('../.test-runtime/adapters/cli/commands/stats.js');
+const composition = require('../.test-runtime/composition/application-services.js');
 
 const TEST_SLUG = 'task-2243-probe-abort';
 
 function loadIntegrate() {
   // Drop the cached module so each run re-reads the mocked dependencies.
-  const modulePath = require.resolve('../.test-runtime/lib/commands/integrate');
+  const modulePath = require.resolve('../.test-runtime/adapters/cli/commands/integrate');
   delete require.cache[modulePath];
   const loaded = require(modulePath);
   return loaded.default || loaded;
@@ -105,7 +105,7 @@ test('Variant B rejects a failed probe abort without promoting the review-approv
     }));
 
     const integrate = loadIntegrate();
-    await integrate([TEST_SLUG, '--no-integration-gates']);
+    await integrate([TEST_SLUG, '--no-integration-gates'], { missionServicesFn: composition.createMissionApplicationServices });
 
     assert.deepEqual(exitCodes, [1], 'integration must reject the unsafe checkout with a nonzero result');
     assert.ok(errors.some((message) => message.includes('Dry-run merge could not be aborted cleanly')));

@@ -5,39 +5,39 @@ const assert = require('node:assert/strict');
 // ---------- resolveClaudeCommand ----------
 
 test('resolveClaudeCommand returns bare "claude"', () => {
-  const { resolveClaudeCommand } = require('../.test-runtime/lib/agents/claude');
+  const { resolveClaudeCommand } = require('../.test-runtime/adapters/agents/claude.js');
   assert.equal(resolveClaudeCommand(), 'claude');
 });
 
 // ---------- extractClaudeSessionId ----------
 
 test('extractClaudeSessionId matches claude --resume pattern', () => {
-  const { extractClaudeSessionId } = require('../.test-runtime/lib/agents/claude');
+  const { extractClaudeSessionId } = require('../.test-runtime/adapters/agents/claude.js');
   const id = extractClaudeSessionId('Some text\nclaude --resume abc123-def456\nend');
   assert.equal(id, 'abc123-def456');
 });
 
 test('extractClaudeSessionId returns null for no match', () => {
-  const { extractClaudeSessionId } = require('../.test-runtime/lib/agents/claude');
+  const { extractClaudeSessionId } = require('../.test-runtime/adapters/agents/claude.js');
   assert.equal(extractClaudeSessionId('no session here'), null);
   assert.equal(extractClaudeSessionId(null), null);
   assert.equal(extractClaudeSessionId(''), null);
 });
 
 test('extractClaudeSessionId extracts session_id from stream-json result event', () => {
-  const { extractClaudeSessionId } = require('../.test-runtime/lib/agents/claude');
+  const { extractClaudeSessionId } = require('../.test-runtime/adapters/agents/claude.js');
   const jsonl = '{"type":"result","session_id":"sess-abc123","content":"done"}\n{"type":"ping"}\n';
   assert.equal(extractClaudeSessionId(jsonl), 'sess-abc123');
 });
 
 test('extractClaudeSessionId falls back to regex when no stream-json result', () => {
-  const { extractClaudeSessionId } = require('../.test-runtime/lib/agents/claude');
+  const { extractClaudeSessionId } = require('../.test-runtime/adapters/agents/claude.js');
   const jsonl = '{"type":"tool_use","name":"read_file"}\n{"type":"assistant_text","text":"checking"}\nclaude --resume def789-abc012\n';
   assert.equal(extractClaudeSessionId(jsonl), 'def789-abc012');
 });
 
 test('extractClaudeSessionId prefers stream-json result over regex fallback', () => {
-  const { extractClaudeSessionId } = require('../.test-runtime/lib/agents/claude');
+  const { extractClaudeSessionId } = require('../.test-runtime/adapters/agents/claude.js');
   const jsonl = '{"type":"result","session_id":"sess-preferred"}\nclaude --resume sess-regex\n';
   assert.equal(extractClaudeSessionId(jsonl), 'sess-preferred');
 });
@@ -45,7 +45,7 @@ test('extractClaudeSessionId prefers stream-json result over regex fallback', ()
 // ---------- buildClaudeInvocation ----------
 
 test('buildClaudeInvocation includes --resume when resume and sessionId provided', () => {
-  const { buildClaudeInvocation } = require('../.test-runtime/lib/agents/claude');
+  const { buildClaudeInvocation } = require('../.test-runtime/adapters/agents/claude.js');
   const inv = buildClaudeInvocation({ prompt: 'test', worktree: '/tmp', resume: true, sessionId: 'abc123' });
   assert.equal(inv.command, 'claude');
   assert.ok(inv.args.includes('--resume'));
@@ -53,7 +53,7 @@ test('buildClaudeInvocation includes --resume when resume and sessionId provided
 });
 
 test('buildClaudeInvocation includes --continue when resume but no sessionId', () => {
-  const { buildClaudeInvocation } = require('../.test-runtime/lib/agents/claude');
+  const { buildClaudeInvocation } = require('../.test-runtime/adapters/agents/claude.js');
   const inv = buildClaudeInvocation({ prompt: 'test', worktree: '/tmp', resume: true });
   assert.equal(inv.command, 'claude');
   assert.ok(inv.args.includes('--continue'));
@@ -61,7 +61,7 @@ test('buildClaudeInvocation includes --continue when resume but no sessionId', (
 });
 
 test('buildClaudeInvocation omits resume flags when resume is false', () => {
-  const { buildClaudeInvocation } = require('../.test-runtime/lib/agents/claude');
+  const { buildClaudeInvocation } = require('../.test-runtime/adapters/agents/claude.js');
   const inv = buildClaudeInvocation({ prompt: 'test', worktree: '/tmp', resume: false });
   assert.equal(inv.command, 'claude');
   assert.ok(!inv.args.includes('--resume'));
@@ -69,7 +69,7 @@ test('buildClaudeInvocation omits resume flags when resume is false', () => {
 });
 
 test('buildClaudeInvocation passes prompt via -p flag', () => {
-  const { buildClaudeInvocation } = require('../.test-runtime/lib/agents/claude');
+  const { buildClaudeInvocation } = require('../.test-runtime/adapters/agents/claude.js');
   const inv = buildClaudeInvocation({ prompt: 'hello world', worktree: '/tmp' });
   assert.equal(inv.command, 'claude');
   assert.ok(inv.args.includes('-p'));
@@ -77,7 +77,7 @@ test('buildClaudeInvocation passes prompt via -p flag', () => {
 });
 
 test('buildClaudeInvocation includes --output-format stream-json --verbose --include-partial-messages for streaming progress', () => {
-  const { buildClaudeInvocation } = require('../.test-runtime/lib/agents/claude');
+  const { buildClaudeInvocation } = require('../.test-runtime/adapters/agents/claude.js');
   const inv = buildClaudeInvocation({ prompt: 'test', worktree: '/tmp' });
   assert.ok(inv.args.includes('--output-format'));
   assert.ok(inv.args.includes('stream-json'));
@@ -86,7 +86,7 @@ test('buildClaudeInvocation includes --output-format stream-json --verbose --inc
 });
 
 test('buildClaudeInvocation places streaming flags before -p', () => {
-  const { buildClaudeInvocation } = require('../.test-runtime/lib/agents/claude');
+  const { buildClaudeInvocation } = require('../.test-runtime/adapters/agents/claude.js');
   const inv = buildClaudeInvocation({ prompt: 'test', worktree: '/tmp' });
   const fmtIdx = inv.args.indexOf('--output-format');
   const verboseIdx = inv.args.indexOf('--verbose');
@@ -97,7 +97,7 @@ test('buildClaudeInvocation places streaming flags before -p', () => {
 });
 
 test('buildClaudeInvocation sets cwd to worktree', () => {
-  const { buildClaudeInvocation } = require('../.test-runtime/lib/agents/claude');
+  const { buildClaudeInvocation } = require('../.test-runtime/adapters/agents/claude.js');
   const inv = buildClaudeInvocation({ prompt: 'test', worktree: '/custom/worktree' });
   assert.equal(inv.command, 'claude');
   assert.equal(inv.options.cwd, '/custom/worktree');
@@ -106,7 +106,7 @@ test('buildClaudeInvocation sets cwd to worktree', () => {
 // ---------- model override ----------
 
 test('buildClaudeInvocation adds --model flag when model is provided', () => {
-  const { buildClaudeInvocation } = require('../.test-runtime/lib/agents/claude');
+  const { buildClaudeInvocation } = require('../.test-runtime/adapters/agents/claude.js');
   const inv = buildClaudeInvocation({ prompt: 'test', worktree: '/tmp', model: 'sonnet-4-20250514' });
   const i = inv.args.indexOf('--model');
   assert.ok(i !== -1);
@@ -114,7 +114,7 @@ test('buildClaudeInvocation adds --model flag when model is provided', () => {
 });
 
 test('buildClaudeInvocation omits --model flag when model is null/undefined', () => {
-  const { buildClaudeInvocation } = require('../.test-runtime/lib/agents/claude');
+  const { buildClaudeInvocation } = require('../.test-runtime/adapters/agents/claude.js');
   assert.ok(!buildClaudeInvocation({ prompt: 't', worktree: '/tmp' }).args.includes('--model'));
   assert.ok(!buildClaudeInvocation({ prompt: 't', worktree: '/tmp', model: null }).args.includes('--model'));
 });
@@ -122,14 +122,14 @@ test('buildClaudeInvocation omits --model flag when model is null/undefined', ()
 // ---------- extractClaudeTelemetryFromStdout (task-1318) ----------
 
 test('extractClaudeTelemetryFromStdout returns null for empty content', () => {
-  const { extractClaudeTelemetryFromStdout } = require('../.test-runtime/lib/agents/claude-telemetry');
+  const { extractClaudeTelemetryFromStdout } = require('../.test-runtime/adapters/agents/claude-telemetry.js');
   assert.equal(extractClaudeTelemetryFromStdout(''), null);
   assert.equal(extractClaudeTelemetryFromStdout(null), null);
   assert.equal(extractClaudeTelemetryFromStdout(undefined), null);
 });
 
 test('extractClaudeTelemetryFromStdout handles normal multi-turn stream correctly', () => {
-  const { extractClaudeTelemetryFromStdout } = require('../.test-runtime/lib/agents/claude-telemetry');
+  const { extractClaudeTelemetryFromStdout } = require('../.test-runtime/adapters/agents/claude-telemetry.js');
   const jsonl = [
     '{"type":"stream_event","event":{"type":"message_start","message":{"usage":{"input_tokens":5000,"cache_read_input_tokens":4000,"cache_creation_input_tokens":0}}}}',
     '{"type":"stream_event","event":{"type":"content_block_start","content_block":{"type":"tool_use","name":"read_file"}}}',
@@ -145,7 +145,7 @@ test('extractClaudeTelemetryFromStdout handles normal multi-turn stream correctl
 });
 
 test('extractClaudeTelemetryFromStdout falls back to resultUsage when partial events are truncated (zero input/output)', () => {
-  const { extractClaudeTelemetryFromStdout } = require('../.test-runtime/lib/agents/claude-telemetry');
+  const { extractClaudeTelemetryFromStdout } = require('../.test-runtime/adapters/agents/claude-telemetry.js');
   // Only a result event survives — no message_start or message_delta
   const jsonl = '{"type":"result","session_id":"sess-truncated","usage":{"input_tokens":6000,"output_tokens":1200,"cache_read_input_tokens":5000}}\n';
   const tel = extractClaudeTelemetryFromStdout(jsonl);
@@ -156,7 +156,7 @@ test('extractClaudeTelemetryFromStdout falls back to resultUsage when partial ev
 });
 
 test('extractClaudeTelemetryFromStdout preserves a tiny input alongside a large cache read (prompt caching, not an artifact) (task-1318)', () => {
-  const { extractClaudeTelemetryFromStdout } = require('../.test-runtime/lib/agents/claude-telemetry');
+  const { extractClaudeTelemetryFromStdout } = require('../.test-runtime/adapters/agents/claude-telemetry.js');
   // Reproduces the real "1 input token" row: input_tokens=1 is the UNCACHED
   // prompt delta; the bulk of the re-sent context (462739) is billed under
   // cache_read_input_tokens. This is legitimate prompt caching, so the parser
@@ -175,7 +175,7 @@ test('extractClaudeTelemetryFromStdout preserves a tiny input alongside a large 
 });
 
 test('extractClaudeTelemetryFromStdout still falls back to resultUsage only when partial events are entirely absent (task-1318)', () => {
-  const { extractClaudeTelemetryFromStdout } = require('../.test-runtime/lib/agents/claude-telemetry');
+  const { extractClaudeTelemetryFromStdout } = require('../.test-runtime/adapters/agents/claude-telemetry.js');
   // No message_start/message_delta survived; the genuine truncation fallback to
   // the result event's aggregate usage still applies (this is the ONLY rewrite).
   const jsonl = [
@@ -189,7 +189,7 @@ test('extractClaudeTelemetryFromStdout still falls back to resultUsage only when
 });
 
 test('extractClaudeTelemetryFromStdout records input/output verbatim for a normal turn (input=15, output=2000) (task-1318)', () => {
-  const { extractClaudeTelemetryFromStdout } = require('../.test-runtime/lib/agents/claude-telemetry');
+  const { extractClaudeTelemetryFromStdout } = require('../.test-runtime/adapters/agents/claude-telemetry.js');
   // Parsed token counts are reported as-is — no ratio-based rewriting.
   const jsonl = [
     '{"type":"stream_event","event":{"type":"message_start","message":{"usage":{"input_tokens":15,"cache_read_input_tokens":10,"cache_creation_input_tokens":0}}}}',
@@ -203,7 +203,7 @@ test('extractClaudeTelemetryFromStdout records input/output verbatim for a norma
 });
 
 test('extractClaudeTelemetryFromStdout records input/output verbatim for a small turn (task-1318)', () => {
-  const { extractClaudeTelemetryFromStdout } = require('../.test-runtime/lib/agents/claude-telemetry');
+  const { extractClaudeTelemetryFromStdout } = require('../.test-runtime/adapters/agents/claude-telemetry.js');
   // Small uncached input + small output is recorded as-is.
   const jsonl = [
     '{"type":"stream_event","event":{"type":"message_start","message":{"usage":{"input_tokens":5,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}}',
@@ -217,7 +217,7 @@ test('extractClaudeTelemetryFromStdout records input/output verbatim for a small
 });
 
 test('extractClaudeTelemetryFromStdout handles raw (non-wrapped) stream-json events', () => {
-  const { extractClaudeTelemetryFromStdout } = require('../.test-runtime/lib/agents/claude-telemetry');
+  const { extractClaudeTelemetryFromStdout } = require('../.test-runtime/adapters/agents/claude-telemetry.js');
   const jsonl = [
     '{"type":"message_start","message":{"usage":{"input_tokens":3000,"cache_read_input_tokens":2000,"cache_creation_input_tokens":0}}}',
     '{"type":"message_delta","usage":{"output_tokens":500}}',
@@ -233,7 +233,7 @@ test('extractClaudeTelemetryFromStdout handles raw (non-wrapped) stream-json eve
 // ---------- startClaudeAgent stale session detection (task-1322) ----------
 
 test('startClaudeAgent retries without --resume when spawn returns "Session not found"', async () => {
-  const claude = require('../.test-runtime/lib/agents/claude');
+  const claude = require('../.test-runtime/adapters/agents/claude.js');
   const mockSessionPort = { deleted: null, async delete(missionId, role) { this.deleted = { missionId, role }; } };
   let spawnCount = 0;
   const mockSpawn = (cmd, args, opts) => {
@@ -263,7 +263,7 @@ test('startClaudeAgent retries without --resume when spawn returns "Session not 
 });
 
 test('startClaudeAgent does NOT retry when resume is false', async () => {
-  const claude = require('../.test-runtime/lib/agents/claude');
+  const claude = require('../.test-runtime/adapters/agents/claude.js');
   let spawnCount = 0;
   const mockSpawn = (cmd, args, opts) => {
     spawnCount++;
@@ -284,7 +284,7 @@ test('startClaudeAgent does NOT retry when resume is false', async () => {
 });
 
 test('startClaudeAgent healthy resume still uses --resume flag', async () => {
-  const claude = require('../.test-runtime/lib/agents/claude');
+  const claude = require('../.test-runtime/adapters/agents/claude.js');
   let spawnCount = 0;
   const mockSpawn = (cmd, args, opts) => {
     spawnCount++;

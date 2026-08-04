@@ -5,9 +5,18 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const { runDraftCommand, ensureDraftRepoConfigCommitted } = require('../.test-runtime/lib/commands/draft');
+const { runDraftCommand, ensureDraftRepoConfigCommitted } = require('../.test-runtime/adapters/cli/commands/draft.js');
 const typeKey = ['class', 'ification'].join('');
 const normalizeKey = `normalizeDraft${typeKey[0].toUpperCase()}${typeKey.slice(1)}Fn`;
+
+const missionServicesFn = async () => ({
+  repositoryId: 'test-repository',
+  intake: {
+    async execute() {
+      return { status: 'completed', value: { version: 1 }, durableEvidence: [] };
+    },
+  },
+});
 
 test('runDraftCommand top-level flows are covered with injected dependencies', async () => {
   {
@@ -65,6 +74,7 @@ test('runDraftCommand top-level flows are covered with injected dependencies', a
         [normalizeKey]: () => ({ ok: true, [typeKey]: 'ai_sdlc' }),
         enforceDraftCommitSafetyFn: (opts) => calls.push(['safety', opts.slug, opts.worktree]),
         transitionTaskFn: (slug, status) => calls.push(['transition', slug, status]),
+        missionServicesFn,
         exitFn: (code) => { throw new Error(`unexpected exit ${code}`); },
         logFn: (msg) => logs.push(msg),
         errorFn: (msg) => { throw new Error(`unexpected error ${msg}`); }
@@ -193,6 +203,7 @@ test('runDraftCommand top-level flows are covered with injected dependencies', a
       selectAgentFn: () => 'codex',
       startDraftAgentFn: async () => ({ agent: 'codex', result: { error: new Error('Launch failed') } }),
       transitionTaskFn: () => true,
+      missionServicesFn,
       validateDraftClassificationFn: () => ({ ok: true }),
       exitFn: (code) => { exitCode = code; },
       logFn: () => {},
@@ -224,6 +235,7 @@ test('runDraftCommand top-level flows are covered with injected dependencies', a
       selectAgentFn: () => 'codex',
       startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 23 } }),
       transitionTaskFn: () => true,
+      missionServicesFn,
       validateDraftClassificationFn: () => ({ ok: true }),
       exitFn: (code) => { exitCode = code; },
       logFn: () => {},
@@ -255,6 +267,7 @@ test('runDraftCommand top-level flows are covered with injected dependencies', a
       selectAgentFn: () => 'codex',
       startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
       transitionTaskFn: () => true,
+      missionServicesFn,
 // @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `md` absent from its inferred mock shape.
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
       recordDraftImplementerFn: () => {},
@@ -292,6 +305,7 @@ test('runDraftCommand top-level flows are covered with injected dependencies', a
       selectAgentFn: () => 'codex',
       startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
       transitionTaskFn: () => true,
+      missionServicesFn,
       recordDraftImplementerFn: () => {},
       recordDraftStatsFn: () => {},
       validateDraftClassificationFn: () => ({ ok: true }),
@@ -339,6 +353,7 @@ test('runDraftCommand top-level flows are covered with injected dependencies', a
       selectAgentFn: () => 'codex',
       startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
       transitionTaskFn: () => true,
+      missionServicesFn,
       recordDraftImplementerFn: () => {},
       recordDraftStatsFn: () => {},
       validateDraftClassificationFn: () => ({ ok: true }),
@@ -397,6 +412,7 @@ test('runDraftCommand accepts free-text intent and synthesizes a task slug', asy
     },
     validateDraftClassificationFn: () => ({ ok: true, classification: 'unknown' }),
     transitionTaskFn: () => true,
+    missionServicesFn,
     readAgentConfigOrExitFn: () => ({}),
     selectAgentFn: () => 'codex',
     startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
@@ -449,6 +465,7 @@ test('runDraftCommand honors an explicit --agent override without consulting sel
       [normalizeKey]: () => ({ ok: true, [typeKey]: 'ai_sdlc' }),
       enforceDraftCommitSafetyFn: () => {},
       transitionTaskFn: () => true,
+      missionServicesFn,
       exitFn: (code) => { throw new Error(`unexpected exit ${code}`); },
       logFn: () => {},
       errorFn: (msg) => { throw new Error(`unexpected error ${msg}`); }

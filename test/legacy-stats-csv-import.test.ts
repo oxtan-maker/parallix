@@ -6,7 +6,7 @@ const crypto = require('node:crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const stats = require('../.test-runtime/lib/commands/stats');
+const stats = require('../.test-runtime/adapters/cli/commands/stats.js');
 
 /**
  * TASK-2322.08 CP-3: the explicit legacy CSV import/analysis boundary.

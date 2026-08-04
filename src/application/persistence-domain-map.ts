@@ -1,4 +1,4 @@
-// Checked inventory → domain resolution map (TASK-2322.02, CP 2).
+// Checked inventory → domain resolution map.
 //
 // Every `ADR0053_PERSISTENCE_INVENTORY` entry classified
 // `database-owned-domain-state` must resolve to exactly one of:
@@ -164,8 +164,8 @@ export const TECHNICAL_PERSISTENCE_METADATA: readonly TechnicalPersistenceMetada
   {
     id: 'stage-launch-fingerprint',
     kind: 'idempotency-key',
-    fileLocation: 'src/platform/runtime/lib/review/review-loop.ts',
-    line: 63,
+    fileLocation: 'src/adapters/review/review-loop.ts',
+    line: 62,
     anchor: 'function stageLaunchFingerprint',
     whyNotDomain:
       'An opaque token kept in review-state metadata, bounded to the last 20 per stage window, whose only use is refusing to accumulate the same measurement twice. Nothing resolves it back to a launch, so it is not an Attempt identity (see PER_LAUNCH_IDENTITY_DECISION).',

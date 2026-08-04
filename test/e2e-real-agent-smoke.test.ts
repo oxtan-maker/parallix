@@ -33,7 +33,7 @@ const CLI_ENTRY = path.resolve(__dirname, '..', 'build', 'px.mjs');
 // explicitly (config route), so the smoke run never depends on the developer's
 // ambient PARALLIX_HOME/global state.
 const workflowConfig = require('../workflow.config.json');
-const { SqliteMeasurementStore } = require('../.test-runtime/adapters/sqlite/measurement-store');
+const { SqliteMeasurementStore } = require('../.test-runtime/adapters/sqlite/measurement-store.js');
 const CUSTOM_MODEL = workflowConfig?.adapters?.agents?.models?.custom;
 const OVERRIDE_AGENT = process.env.PARALLIX_REAL_AGENT || null;
 const OVERRIDE_MODEL = process.env.PARALLIX_REAL_AGENT_MODEL || null;

@@ -2,7 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const repairHandoff = require('../.test-runtime/lib/commands/repair-handoff');
+const repairHandoff = require('../.test-runtime/adapters/cli/commands/repair-handoff.js');
 
 test('repairHandoff auto-commits bounded implementation files for active-step handoff repair', async () => {
   const adds = [];

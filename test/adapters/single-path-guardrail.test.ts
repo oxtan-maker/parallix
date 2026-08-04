@@ -24,7 +24,7 @@ const ALLOWED_ASSEMBLERS = new Set([
   'src/application/projections/board-readers.ts',
   'src/composition/board-projection.ts',
   // SC8/SC9: status.ts now routes through BoardProjectionBuilder
-  'src/platform/runtime/lib/commands/status.ts',
+  'src/adapters/cli/commands/status.ts',
 ]);
 
 // ---------------------------------------------------------------------------
@@ -34,22 +34,22 @@ const ALLOWED_ASSEMBLERS = new Set([
 // ---------------------------------------------------------------------------
 
 const NON_BOARD_CONSUMERS = new Set([
-  'src/platform/runtime/lib/commands/handoff.ts',
-  'src/platform/runtime/lib/commands/checkpoint.ts',
-  'src/platform/runtime/lib/commands/active.ts',
-  'src/platform/runtime/lib/commands/draft.ts',
-  'src/platform/runtime/lib/commands/review.ts',
-  'src/platform/runtime/lib/commands/integrate.ts',
-  'src/platform/runtime/lib/commands/rebase.ts',
-  'src/platform/runtime/lib/commands/repair-handoff.ts',
-  'src/platform/runtime/lib/commands/resolve-conflict.ts',
-  'src/platform/runtime/lib/core/mission-utils.ts',
-  'src/platform/runtime/lib/tools/backlog.ts',
-  'src/platform/runtime/lib/review/review-state.ts',
-  'src/platform/runtime/lib/review/review-loop.ts',
-  'src/platform/runtime/lib/commands/mutation-gate.ts',
-  'src/platform/runtime/lib/commands/setup-review.ts',
-  'src/platform/runtime/lib/commands/verify.ts',
+  'src/adapters/cli/commands/handoff.ts',
+  'src/adapters/cli/commands/checkpoint.ts',
+  'src/adapters/cli/commands/active.ts',
+  'src/adapters/cli/commands/draft.ts',
+  'src/adapters/cli/commands/review.ts',
+  'src/adapters/cli/commands/integrate.ts',
+  'src/adapters/cli/commands/rebase.ts',
+  'src/adapters/cli/commands/repair-handoff.ts',
+  'src/adapters/cli/commands/resolve-conflict.ts',
+  'src/adapters/filesystem/mission-utils.ts',
+  'src/adapters/backlog/backlog.ts',
+  'src/adapters/review/review-state.ts',
+  'src/adapters/review/review-loop.ts',
+  'src/adapters/verification/mutation-gate.ts',
+  'src/adapters/cli/commands/setup-review.ts',
+  'src/adapters/cli/commands/verify.ts',
 ]);
 
 // Resolve repo root from the known test/adapters/ location
@@ -74,19 +74,20 @@ function findTsFiles(dir: string): string[] {
 // ---------------------------------------------------------------------------
 
 test('SC10: status.ts routes mission output through BoardProjectionBuilder (single-path guardrail)', () => {
-  const statusPath = path.join(repoRoot, 'src/platform/runtime/lib/commands/status.ts');
+  const statusPath = path.join(repoRoot, 'src/adapters/cli/commands/status.ts');
   const content = fs.readFileSync(statusPath, 'utf8');
 
-  // status.ts must import the composition-owned projection builder.
+  // The adapter must declare the projection dependency instead of importing
+  // the composition root that constructs it.
   assert.ok(
-    content.includes('composeBoardProjection'),
-    'status.ts must import composeBoardProjection for SC8/SC9',
+    content.includes('buildProjectionFn'),
+    'status.ts must accept an injected projection builder for SC8/SC9',
   );
 
   // status.ts must build the projection through composition.
   assert.ok(
-    content.includes('buildProjectionBuilder') || content.includes('composeBoardProjection('),
-    'status.ts must instantiate BoardProjectionBuilder for SC8',
+    content.includes('await buildProjectionFn('),
+    'status.ts must obtain BoardProjectionBuilder through its injected dependency for SC8',
   );
 
   // status.ts must use the projection for mission output (projection.stages or projection.cards)
@@ -158,7 +159,7 @@ test('SC1: BoardProjectionBuilder construction is limited to src/composition/', 
 });
 
 test('SC10: status-projection.ts removed (dead code eliminated)', () => {
-  const statusProjPath = path.join(repoRoot, 'src/platform/runtime/lib/commands/status-projection.ts');
+  const statusProjPath = path.join(repoRoot, 'src/adapters/cli/commands/status-projection.ts');
 
   // status-projection.ts should no longer exist (merged into status.ts)
   assert.ok(
@@ -166,11 +167,11 @@ test('SC10: status-projection.ts removed (dead code eliminated)', () => {
     'status-projection.ts should be removed (dead code eliminated, SC9)',
   );
 
-  // index.ts should import status.ts (the dispatched command)
-  const indexPath = path.join(repoRoot, 'src/platform/runtime/lib/index.ts');
+  // Composition should register the canonical status command.
+  const indexPath = path.join(repoRoot, 'src/composition/create-cli.ts');
   const indexContent = fs.readFileSync(indexPath, 'utf8');
   assert.ok(
-    indexContent.includes('./commands/status') || indexContent.includes('./commands/status.js'),
-    'index.ts must import status.ts (the dispatched command)',
+    indexContent.includes('../adapters/cli/commands/status.js'),
+    'CLI composition must import status.ts (the dispatched command)',
   );
 });

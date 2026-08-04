@@ -5,7 +5,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const persistentDataMigration = require('../.test-runtime/lib/core/persistent-data-migration');
+const persistentDataMigration = require('../.test-runtime/adapters/storage/persistent-data-migration.js');
 const { migrateAgentBlocklists } = persistentDataMigration;
 
 function withTempRoot(run) {

@@ -28,7 +28,7 @@ import {
   readReviewState,
   writeReviewState,
   reviewStateFile,
-} from '../src/platform/runtime/lib/review/review-state.js';
+} from '../src/adapters/review/review-state.js';
 
 const SLUG = 'task-recovery-review';
 
@@ -51,7 +51,7 @@ function databasePathOf(root: string): string {
   return path.join(homeOf(root), 'parallix.db');
 }
 
-/** Point the composition root at this root's home for the duration of `fn`. */
+/** Point operator-state recovery checks at this root's home for `fn`. */
 async function withHome<T>(root: string, fn: () => Promise<T>): Promise<T> {
   const previous = process.env.PARALLIX_HOME;
   process.env.PARALLIX_HOME = homeOf(root);
@@ -118,6 +118,15 @@ async function seed(root: string, review: Partial<Review> = {}): Promise<void> {
   await db.close();
 }
 
+async function withMissionStore<T>(root: string, fn: (store: SqliteMissionStore) => Promise<T>): Promise<T> {
+  const db = await openMigrated(root);
+  try {
+    return await fn(new SqliteMissionStore(db));
+  } finally {
+    await db.close();
+  }
+}
+
 /** SC7's standing invariant: no scenario may fall back to the JSON file. */
 function assertNoFileFallback(root: string): void {
   const statePath = reviewStateFile(SLUG, root);
@@ -141,15 +150,15 @@ describe('TASK-2322.12 CP5: review-loop state survives every recovery scenario (
     const root = createTempRoot('cold');
     await seed(root);
 
-    await withHome(root, async () => {
+    await withMissionStore(root, async (store) => {
       assert.deepEqual(
         await writeReviewState(SLUG, {
           reviewer: 'codex', implementer: 'claude', round: 1, phase: 'fixing',
           disposition: 'REQUEST_CHANGES',
-        }, root),
+        }, root, store),
         { outcome: 'committed' },
       );
-      const state = await readReviewState(SLUG, root);
+      const state = await readReviewState(SLUG, root, store);
       assert.equal(state?.phase, 'fixing');
       assert.equal(state?.disposition, 'REQUEST_CHANGES');
     });
@@ -195,8 +204,8 @@ describe('TASK-2322.12 CP5: review-loop state survives every recovery scenario (
     const upgraded = await openMigrated(root, all);
     await upgraded.close();
 
-    await withHome(root, async () => {
-      const state = await readReviewState(SLUG, root);
+    await withMissionStore(root, async (store) => {
+      const state = await readReviewState(SLUG, root, store);
       assert.ok(state, 'the upgraded row is still readable');
       assert.equal(state?.phase, 'reviewing', 'phase backfills to the value the decision history implies');
 
@@ -204,10 +213,10 @@ describe('TASK-2322.12 CP5: review-loop state survives every recovery scenario (
         await writeReviewState(SLUG, {
           reviewer: 'codex', implementer: 'claude', round: 1, phase: 'fixing',
           metadata: { gateFailureRetryCount: 2 },
-        }, root),
+        }, root, store),
         { outcome: 'committed' },
       );
-      assert.equal((await readReviewState(SLUG, root))?.metadata.gateFailureRetryCount, 2);
+      assert.equal((await readReviewState(SLUG, root, store))?.metadata.gateFailureRetryCount, 2);
     });
     assertNoFileFallback(root);
   });
@@ -243,8 +252,8 @@ describe('TASK-2322.12 CP5: review-loop state survives every recovery scenario (
     }), null);
     await db.close();
 
-    await withHome(root, async () => {
-      const state = await readReviewState(SLUG, root);
+    await withMissionStore(root, async (store) => {
+      const state = await readReviewState(SLUG, root, store);
       assert.deepEqual(state?.metadata.recordedStageLaunches, { 'review:codex': ['codex|s1|t0|t1|0'] });
       assert.equal(state?.metadata.gateFailureRetryCount, 1);
     });
@@ -252,8 +261,8 @@ describe('TASK-2322.12 CP5: review-loop state survives every recovery scenario (
     // The legacy file is inert after import: reading review state does not
     // consult it, so deleting it changes nothing.
     fs.rmSync(legacyPath);
-    await withHome(root, async () => {
-      assert.equal((await readReviewState(SLUG, root))?.round, 1);
+    await withMissionStore(root, async (store) => {
+      assert.equal((await readReviewState(SLUG, root, store))?.round, 1);
     });
   });
 
@@ -262,17 +271,17 @@ describe('TASK-2322.12 CP5: review-loop state survives every recovery scenario (
     const root = createTempRoot('restart');
     await seed(root);
 
-    await withHome(root, async () => {
+    await withMissionStore(root, async (store) => {
       await writeReviewState(SLUG, {
         reviewer: 'codex', implementer: 'claude', round: 3, phase: 'fixing',
         disposition: 'BLOCKED',
         metadata: { recordedStageLaunches: { 'fix:claude': ['claude|s9|t0|t1|0'] } },
-      }, root);
+      }, root, store);
     });
 
     // A new "process": fresh adapter cache, fresh connection.
-    await withHome(root, async () => {
-      const state = await readReviewState(SLUG, root);
+    await withMissionStore(root, async (store) => {
+      const state = await readReviewState(SLUG, root, store);
       assert.equal(state?.round, 3);
       assert.equal(state?.phase, 'fixing');
       assert.equal(state?.disposition, 'BLOCKED');
@@ -286,7 +295,7 @@ describe('TASK-2322.12 CP5: review-loop state survives every recovery scenario (
     const root = createTempRoot('stale');
     await seed(root);
 
-    await withHome(root, async () => {
+    await withMissionStore(root, async (store) => {
       // Simulate the competing writer: bump the mission version behind our back
       // between the loop's read and its write.
       const competitor = new SqliteDatabaseAdapter();
@@ -301,9 +310,9 @@ describe('TASK-2322.12 CP5: review-loop state survives every recovery scenario (
 
       const result = await writeReviewState(SLUG, {
         reviewer: 'codex', implementer: 'claude', round: 1, phase: 'fixing',
-      }, root);
+      }, root, store);
       assert.deepEqual(result, { outcome: 'committed' }, 'the retry reapplies onto the newer version');
-      assert.equal((await readReviewState(SLUG, root))?.phase, 'fixing');
+      assert.equal((await readReviewState(SLUG, root, store))?.phase, 'fixing');
     });
     assertNoFileFallback(root);
   });
@@ -325,8 +334,8 @@ describe('TASK-2322.12 CP5: review-loop state survives every recovery scenario (
     );
     await db.close();
 
-    await withHome(root, async () => {
-      const state = await readReviewState(SLUG, root);
+    await withMissionStore(root, async (store) => {
+      const state = await readReviewState(SLUG, root, store);
       assert.ok(state, 'the rolled-back migration left committed review state intact');
       assert.equal(state?.round, 1);
     });
@@ -393,8 +402,8 @@ describe('TASK-2322.12 CP5: review-loop state survives every recovery scenario (
     await restoreDb.close();
 
     // Also verify through the production path (readReviewState).
-    await withHome(root, async () => {
-      const state = await readReviewState(SLUG, root);
+    await withMissionStore(root, async (store) => {
+      const state = await readReviewState(SLUG, root, store);
       assert.equal(state?.disposition, 'REQUEST_CHANGES',
         'readReviewState sees the restored disposition');
     });

@@ -10,14 +10,14 @@ const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
-const { SqliteDatabaseAdapter } = require('../../.test-runtime/adapters/sqlite/database-adapter');
-const { SqliteMigrationRunner, loadDefaultMigrations } = require('../../.test-runtime/adapters/sqlite/migration-runner');
-const { SqliteMissionStore } = require('../../.test-runtime/adapters/sqlite/mission-store');
-const { clearOperatorStateCache } = require('../../.test-runtime/adapters/sqlite/adapter-factory');
-const { missionId, missionLabels } = require('../../.test-runtime/domain/mission');
-const { repositoryId } = require('../../.test-runtime/domain/repository');
-const { agentFamily } = require('../../.test-runtime/domain/agents');
-const { changeRevision } = require('../../.test-runtime/domain/review');
+const { SqliteDatabaseAdapter } = require('../../.test-runtime/adapters/sqlite/database-adapter.js');
+const { SqliteMigrationRunner, loadDefaultMigrations } = require('../../.test-runtime/adapters/sqlite/migration-runner.js');
+const { SqliteMissionStore } = require('../../.test-runtime/adapters/sqlite/mission-store.js');
+const { clearOperatorStateCache } = require('../../.test-runtime/adapters/sqlite/adapter-factory.js');
+const { missionId, missionLabels } = require('../../.test-runtime/domain/mission.js');
+const { repositoryId } = require('../../.test-runtime/domain/repository.js');
+const { agentFamily } = require('../../.test-runtime/domain/agents.js');
+const { changeRevision } = require('../../.test-runtime/domain/review.js');
 
 /** A Mission carrying a round-1 Review, the shape `px handoff` produces. */
 function missionWithReview(slug, rootDir, overrides = {}) {
@@ -94,15 +94,14 @@ async function withMissionDatabase(slug, fn, { seedReview = true, reviewOverride
 
   const mission = missionWithReview(slug, tmpRoot, reviewOverrides);
   await store.save(seedReview ? mission : { ...mission, review: null }, null);
-  await database.close();
-
   try {
-    await fn({ root: tmpRoot, missionDir, slug, home, openStore: async () => {
+    await fn({ root: tmpRoot, missionDir, slug, home, store, openStore: async () => {
       const db = new SqliteDatabaseAdapter();
       await db.open({ path: path.join(home, 'parallix.db') });
       return { db, store: new SqliteMissionStore(db) };
     } });
   } finally {
+    await database.close();
     process.chdir(previousCwd);
     if (previousHome === undefined) { delete process.env.PARALLIX_HOME; }
     else { process.env.PARALLIX_HOME = previousHome; }
@@ -152,13 +151,15 @@ async function seedMissionDatabase(home, slug, rootDir, roundOverrides = {}, lat
      VALUES (?, ?, ?, ?, ?, ?)`,
     [rootDir, `seeded-${slug}`, 1, 0, new Date().toISOString(), null],
   );
-  await database.close();
-
-  return () => {
+  const store = new SqliteMissionStore(database);
+  const restore = async () => {
+    await database.close();
     if (previousHome === undefined) { delete process.env.PARALLIX_HOME; }
     else { process.env.PARALLIX_HOME = previousHome; }
     clearOperatorStateCache();
   };
+  restore.store = store;
+  return restore;
 }
 
 module.exports = { withMissionDatabase, missionWithReview, seedMissionDatabase };

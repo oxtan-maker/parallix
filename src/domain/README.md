@@ -51,14 +51,14 @@ The other requested state surfaces have these roles:
 
 | Surface | Model shape | Why | Current evidence |
 |---|---|---|---|
-| Mission lifecycle | Aggregate state and commands | Status, assignment, checkpoint, and review rules must change consistently | `src/platform/runtime/lib/tools/backlog.ts:526` |
-| Checkpoints | Replaceable entity within a mission, keyed by checkpoint name | A mission redo replaces stale CP evidence; Git retains revisions | `src/platform/runtime/lib/commands/checkpoint.ts:8` |
-| Review | Ordered round conversation inside a mission, stored in the operator database | Reviewer decisions, implementer responses, exact revisions, and findings must remain attributable across rounds; the loop's own workflow state and event history belong to the same aggregate, so a restart resumes from one authority | `prompts/review.md`, `prompts/act-on-review.md`, `src/platform/runtime/lib/review/review-loop.ts:1375-1696`, `src/adapters/sqlite/mission-store.ts` |
-| Agents and eligibility | Value objects plus pure selection policy | Eligibility is evaluated from configuration, explicit blocks, and launcher availability | `src/platform/runtime/lib/agents/launcher-selection.ts:127` |
-| Usage/statistics | Agent work measurements plus a completed-mission projection | Statistics need closure, final implementer, model attribution, cost, time, tokens, fix rounds, and change size; the measurement database is the authority | `src/platform/runtime/lib/commands/stats.ts:102`, `:862`, `:1918` |
+| Mission lifecycle | Aggregate state and commands | Status, assignment, checkpoint, and review rules must change consistently | `src/adapters/backlog/backlog.ts:526` |
+| Checkpoints | Replaceable entity within a mission, keyed by checkpoint name | A mission redo replaces stale CP evidence; Git retains revisions | `src/adapters/cli/commands/checkpoint.ts:8` |
+| Review | Ordered round conversation inside a mission, stored in the operator database | Reviewer decisions, implementer responses, exact revisions, and findings must remain attributable across rounds; the loop's own workflow state and event history belong to the same aggregate, so a restart resumes from one authority | `prompts/review.md`, `prompts/act-on-review.md`, `src/adapters/review/review-loop.ts:1375-1696`, `src/adapters/sqlite/mission-store.ts` |
+| Agents and eligibility | Value objects plus pure selection policy | Eligibility is evaluated from configuration, explicit blocks, and launcher availability | `src/adapters/agents/launcher-selection.ts:127` |
+| Usage/statistics | Agent work measurements plus a completed-mission projection | Statistics need closure, final implementer, model attribution, cost, time, tokens, fix rounds, and change size; the measurement database is the authority | `src/adapters/cli/commands/stats.ts:102`, `:862`, `:1918` |
 | Known repositories | Repository identity plus an application selector projection | No repository registry or last-used signal is authoritative today | `src/domain/repository.ts`, `src/application/projections/repository-selector.ts` |
-| NEL | Replaceable numeric attribute on `Mission` | It describes the mission's change size and is captured at handoff; it has no independent identity | `src/platform/runtime/lib/commands/handoff.ts:1098`, `src/platform/runtime/lib/core/nels.ts:184`, `src/domain/net-engineering-lines.ts:36` |
-| Session/resume | Value object scoped to mission, role, and agent family | Resume is allowed only when all three match | `src/domain/session.ts`, `src/platform/runtime/lib/agents/agents.ts:327`, `src/adapters/sqlite/session-marker-repository.ts` |
+| NEL | Replaceable numeric attribute on `Mission` | It describes the mission's change size and is captured at handoff; it has no independent identity | `src/adapters/cli/commands/handoff.ts:1098`, `src/domain/net-engineering-lines.ts:184`, `src/domain/net-engineering-lines.ts:36` |
+| Session/resume | Value object scoped to mission, role, and agent family | Resume is allowed only when all three match | `src/domain/session.ts`, `src/adapters/agents/agents.ts:327`, `src/adapters/sqlite/session-marker-repository.ts` |
 
 Checkpoint content is not immutable. `recordCheckpoint()` replaces an existing
 checkpoint with the same name and rejects cross-mission evidence
@@ -113,7 +113,7 @@ update. Operation without a review surface uses the local-branch variant. The
 application may expose Integrate while a mission is still `review` only when
 the approval fact names that same reviewed revision. It must first apply the
 approval/promotion transition, matching `px integrate` preflight behavior
-(`src/platform/runtime/lib/commands/integrate.ts:1071-1152`). Invalid
+(`src/adapters/cli/commands/integrate.ts:1071-1152`). Invalid
 commands throw `MissionRuleViolation` with the ADR 0048 human-only disposition.
 
 ## Persistence seam
@@ -121,18 +121,16 @@ commands throw `MissionRuleViolation` with the ADR 0048 human-only disposition.
 The domain does not depend on repository interfaces. Application-owned ports
 live in `src/application/domain-ports.ts`; a Markdown/Git adapter can implement
 `MissionStore` without changing `Mission` or `decideMission()`. Markdown/Git is
-the current compatibility adapter. ADR 0053 exclusively defines the target
-SQLite location, persisted domain concepts, authority, and cutover rules.
+the current SQLite adapter. ADR 0053 defines the persisted domain concepts and
+authority rules.
 
 Intake, activation, checkpoint recording, and handoff NEL recording run through
 checked application use cases over that port
 (`src/application/mission-intake-service.ts`,
 `mission-lifecycle-service.ts`, `mission-checkpoint-service.ts`,
-`mission-handoff-service.ts`). Production selects exactly one authority — the
-compatibility store over the task document, `CP-N.md` evidence, and
-`nel-record.json` (`src/adapters/backlog/compatibility-mission-store.ts`) —
-until TASK-2322.07. The SQLite Mission adapter satisfies the same port and is
-exercised only by isolated test fixtures, so no command dual-writes.
+`mission-handoff-service.ts`). Production selects exactly one authority:
+`SqliteMissionStore`. Compatibility documents are one-shot import inputs or
+human-readable exports; no command dual-writes lifecycle state.
 
 Two value objects keep persistence out of the model. `ExternalTaskRef` carries
 intake traceability for accepted external material and rejects embedded task
@@ -170,7 +168,7 @@ closure only after the same integration and worktree-removal conditions.
 | Integration base is missing, even if a worktree copy exists | Unavailable: lifecycle authority is missing |
 
 Agent selection proves the sync/async boundary on the consumer that caused the
-TASK-2280 cascade. An `AgentSelectionSnapshotPort` asynchronously materializes
+agent-selection migration. An `AgentSelectionSnapshotPort` asynchronously materializes
 configuration, block, and launcher-availability facts once.
 `PreparedAgentSelection.prepare()` crosses that boundary; subsequent `select()`
 calls are synchronous pure reads (`src/application/services/agent-selection.ts:6-15`).
@@ -235,9 +233,8 @@ gate, and static-review repairs are review preparation; act-on-review is a
 review response. `default` remains only as an explicit debt sentinel for an
 imported measurement whose producer supplied no stage. No known activity maps
 to it (`AGENT_WORK_STAGE_BY_ACTIVITY`). Conflict resolution is implementer
-work; TASK-2294.01 owns the runtime correction that will pin both conflict
-entrypoints to the recorded mission implementer and remove their separate agent
-pool.
+work; both conflict entrypoints use the recorded mission implementer rather
+than a separate agent pool.
 
 `completedMissionStatistics()` requires a validated `ClosedMission`, rejects an identity
 mismatch or missing mission NEL, and returns the final implementer and every
@@ -276,9 +273,8 @@ agent-family label or inventing a zero.
 
 ## Implementation status
 
-- The checked `MissionStore` implementation still uses the compatibility
-  adapter; ADR 0053 cutover is not implemented by this README.
-- `Attempt` is absent from the checked domain, and TASK-2322.02 re-tested that
+- The checked production `MissionStore` implementation is SQLite-backed.
+- `Attempt` is absent from the checked domain, and consumer tracing confirms that
   exclusion against real consumers rather than restating it: the durable
   consequences of a launch are a family-keyed `AgentBlock`, one replaceable
   `SessionMarker` per (mission, role), and measurement rows grouped by

@@ -32,7 +32,7 @@ function findTsFiles(dir: string): string[] {
 }
 
 // The single allowed write-path module for BoardEventRecorder
-const DESIGNATED_WRITER = 'src/platform/runtime/lib/tools/backlog.ts';
+const DESIGNATED_WRITER = 'src/adapters/backlog/backlog.ts';
 
 // Files that define or test the recorder (allowed to import it without
 // violating the guardrail — they are the recorder itself or its tests)
@@ -42,12 +42,12 @@ const REPOSITORY_MODULE = 'src/adapters/sqlite/board-lane-event-repository.ts';
 const PORTS_MODULE = 'src/adapters/sqlite/ports.ts';
 const AUTHORITY_MAP_MODULE = 'src/adapters/sqlite/authority-map.ts';
 const METRICS_ADAPTER_MODULE = 'src/application/projections/metrics-read-adapter.ts';
-const STATUS_COMMAND_MODULE = 'src/platform/runtime/lib/commands/status.ts';
+const STATUS_COMMAND_MODULE = 'src/adapters/cli/commands/status.ts';
 const TUI_COMMAND_MODULE = 'src/interfaces/tui/ui-command.ts';
 const INDEX_MODULE = 'src/adapters/sqlite/index.ts';
 const MISSION_STORE_MODULE = 'src/adapters/sqlite/mission-store.ts';
 const APPLICATION_PORTS_MODULE = 'src/application/ports.ts';
-const COMPOSITION_ROOT_MODULE = 'src/platform/runtime/lib/composition/application-services.ts';
+const COMPOSITION_ROOT_MODULE = 'src/composition/application-services.ts';
 const BOARD_COMPOSITION_MODULE = 'src/composition/board-projection.ts';
 const PRODUCTION_CAPABILITIES_MODULE = 'src/composition/production-capabilities.ts';
 

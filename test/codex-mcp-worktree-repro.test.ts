@@ -11,7 +11,7 @@ const path = require('path');
 // its contents into the worktree-local Codex state directory.
 
 test('MCP config is linked, not copied, into worktree codex-home (reproduction)', () => {
-  const { ensureCodexHome, codexConfigPath } = require('../.test-runtime/lib/agents/codex');
+  const { ensureCodexHome, codexConfigPath } = require('../.test-runtime/adapters/agents/codex.js');
 
   const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-mcp-repro-'));
   const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-mcp-wt-'));

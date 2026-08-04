@@ -13,7 +13,7 @@ const {
   checkBacklogIntegrity,
   pruneStaleBacklogDuplicates,
   resolveTaskFile,
-} = require('../.test-runtime/lib/tools/backlog');
+} = require('../.test-runtime/adapters/backlog/backlog.js');
 
 function withTempRepo(fn) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-reorder-dup-'));

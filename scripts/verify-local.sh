@@ -188,7 +188,7 @@ const {
   parseFilesToAreas,
   orderIntegrationGates,
   gateMatchesChangedAreas,
-} = require('./src/platform/runtime/lib/commands/integrate.ts');
+} = require('./src/adapters/cli/commands/integrate.ts');
 
 function log(message = '') {
   process.stdout.write(`${message}\n`);
@@ -320,7 +320,7 @@ gate_mutation() {
   # Run the TypeScript source through tsx. The transpiled .test-runtime/ tree is
   # CommonJS for node:test's writable-export mocks and retains `import.meta`,
   # so it is loadable only under a TS loader — not as a bare `node` entry point.
-  npx --yes tsx src/platform/runtime/lib/commands/mutation-gate.ts "$@"
+  npx --yes tsx src/adapters/verification/mutation-gate.ts "$@"
 }
 
 case "$subcommand" in

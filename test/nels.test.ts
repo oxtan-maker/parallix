@@ -14,7 +14,7 @@ const {
   EXCLUSION_PATTERNS,
   BUCKET_SMALL_MAX,
   BUCKET_MEDIUM_MAX,
-} = require('../.test-runtime/lib/core/nels');
+} = require('../.test-runtime/adapters/git/net-engineering-lines.js');
 
 // ---------- exclude-path tests ----------
 

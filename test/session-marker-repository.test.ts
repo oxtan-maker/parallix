@@ -21,7 +21,7 @@ import type { SessionMarkerEntry, SessionMarkerWrite } from '../src/application/
 import { agentFamily } from '../src/domain/agents.js';
 import { missionId } from '../src/domain/mission.js';
 import { repositoryId } from '../src/domain/repository.js';
-import { startAgent } from '../src/platform/runtime/lib/agents/agents.js';
+import { startAgent } from '../src/adapters/agents/agents.js';
 
 // ---------------------------------------------------------------------------
 // Helpers

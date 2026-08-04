@@ -8,7 +8,7 @@ import type { AgentBlockEntry, AgentBlocklistRepository } from '../../applicatio
  * explicit transactions for multi-statement writes.
  *
  * Authority mapping: each stored field is owned by operator-local authority.
- * Maps to TASK-2294 domain entity: `AgentBlock` in `src/domain/agents.ts`.
+ * Maps to architecture migration domain entity: `AgentBlock` in `src/domain/agents.ts`.
  */
 export class SqliteBlocklistRepository implements AgentBlocklistRepository {
   private db: SqliteDatabaseAdapter;

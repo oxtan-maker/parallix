@@ -6,14 +6,14 @@ const path = require('node:path');
 const {
   buildCompactReviewPrompt,
   buildCompactActOnReviewPrompt,
-} = require('../.test-runtime/lib/review/review-prompts');
+} = require('../.test-runtime/adapters/review/review-prompts.js');
 const {
   handleGateFailureAutoBounce,
-} = require('../.test-runtime/lib/review/review-loop');
+} = require('../.test-runtime/adapters/review/review-loop.js');
 
 const repoRoot = path.resolve(__dirname, '..');
 const reviewLoopSource = fs.readFileSync(
-  path.join(repoRoot, 'src/platform/runtime/lib/review/review-loop.ts'),
+  path.join(repoRoot, 'src/adapters/review/review-loop.ts'),
   'utf8'
 );
 

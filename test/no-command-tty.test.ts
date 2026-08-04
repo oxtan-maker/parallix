@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { main, printUsage, shouldLaunchDefaultUi } from '../src/platform/runtime/index.js';
+import { main, printUsage, shouldLaunchDefaultUi } from '../src/interfaces/cli/runtime.js';
 
 type MainOverrides = Parameters<typeof main>[1];
 

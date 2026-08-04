@@ -6,13 +6,13 @@ import type { OperationalHistoryRepository } from '../../application/ports/opera
 // ---------------------------------------------------------------------------
 
 export interface ConcreteOperationLogReadAdapterOptions {
-  /** SQLite operational history repository (TASK-2295 snapshot). */
+  /** SQLite operational history repository (architecture migration snapshot). */
   readonly historyRepo: OperationalHistoryRepository;
 }
 
 /**
  * Concrete `OperationLogReadAdapter` that reads from
- * `SqliteOperationalHistoryRepository.findAll()`, the TASK-2295 snapshot.
+ * `SqliteOperationalHistoryRepository.findAll()`, the architecture migration snapshot.
  *
  * Maps operational history entries to the board's `OperationLogEntry` format.
  */

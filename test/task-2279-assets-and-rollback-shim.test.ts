@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const ROOT = path.resolve(__dirname, '..');
-const assetStoreSource = fs.readFileSync(path.join(ROOT, 'src/platform/assets/runtime-assets.ts'), 'utf8');
+const assetStoreSource = fs.readFileSync(path.join(ROOT, 'src/adapters/assets/runtime-assets.ts'), 'utf8');
 
 test('task-2279 routes shipped prompts and configuration through the runtime AssetStore', () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'build', 'asset-manifest.json'), 'utf8'));
@@ -19,11 +19,11 @@ test('task-2279 routes shipped prompts and configuration through the runtime Ass
   }
 
   for (const file of [
-    'src/platform/runtime/lib/commands/draft.ts',
-    'src/platform/runtime/lib/commands/active.ts',
-    'src/platform/runtime/lib/review/review-prompts.ts',
-    'src/platform/runtime/lib/agents/agent-config.ts',
-    'src/platform/runtime/lib/core/state-map.ts',
+    'src/adapters/cli/commands/draft.ts',
+    'src/adapters/cli/commands/active.ts',
+    'src/adapters/review/review-prompts.ts',
+    'src/adapters/agents/agent-config.ts',
+    'src/adapters/config/state-map.ts',
   ]) {
     const source = fs.readFileSync(path.join(ROOT, file), 'utf8');
     assert.match(source, /runtimeAssetStore\.readText/);

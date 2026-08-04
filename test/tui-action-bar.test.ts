@@ -14,7 +14,7 @@ test('action bar renders the declared command kinds with only active:execute ena
   for (const kind of BOARD_ACTION_KINDS.filter((kind) => kind !== 'active:execute')) {
     assert.match(output, new RegExp(`○ ${kind.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
   }
-  assert.match(output, /Draft extraction not yet integrated \(TASK-2289\)/);
+  assert.match(output, /Draft is not available from the board/);
 });
 
 test('action bar cannot dispatch a disabled command', async () => {

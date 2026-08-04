@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const redgreen = require('../.test-runtime/lib/tools/redgreen');
+const redgreen = require('../.test-runtime/adapters/verification/redgreen.js');
 
 function withTempRoot(run) {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'redgreen-test-'));

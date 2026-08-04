@@ -567,7 +567,7 @@ function KeyHandler({ onExit, onNavigate, onToggleHelp, onToggleFlow, onToggleDo
     /* Lifecycle shortcuts: Ctrl+D = draft, Ctrl+A = activate, Ctrl+R = review.
      * Ctrl+I (integrate) is excluded: Ink reports Ctrl+I as Tab (0x09) with ctrl:false,
      * so it cannot be distinguished from the Tab focus-toggle binding. Confirmed limitation
-     * recorded in CP-4. */
+     * retained as a defensive guard if the confirmation contract changes. */
     if (key.ctrl && !key.meta && selectedMissionId) {
       const lifecycleMap: Readonly<Record<string, BoardCommandKind>> = {
         d: 'draft:create',

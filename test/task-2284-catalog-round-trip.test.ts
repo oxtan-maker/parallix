@@ -16,7 +16,7 @@ const root = process.cwd();
 const MISSION_TASK = 'backlog/completed/task-2284 - Decide-future-task-catalog-authority-and-board-authorship-migration.md';
 
 // A synthetic record that carries every frontmatter key named by the mission
-// plus two extension keys no reader in src/platform/runtime/lib/tools/backlog.ts
+// plus two extension keys no reader in src/adapters/backlog/backlog.ts
 // consumes: `source` (written by px draft) and `x_operator_channel`.
 const FIXTURE = [
   '---',

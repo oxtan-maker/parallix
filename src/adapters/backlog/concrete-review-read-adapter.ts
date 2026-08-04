@@ -17,9 +17,9 @@ import {
   stageLaunchWindowsFrom,
 } from '../../domain/review.js';
 import type { ReviewReadAdapter } from '../../application/projections/board-readers.js';
-import type { ReviewState } from '../../platform/runtime/lib/review/review-state.js';
-import { findMissionDir } from '../../platform/runtime/lib/core/mission-utils.js';
-import { readReviewState } from '../../platform/runtime/lib/review/review-state.js';
+import type { ReviewState } from '../review/review-state.js';
+import { findMissionDir } from '../filesystem/mission-utils.js';
+import { readReviewState } from '../review/review-state.js';
 
 // ---------------------------------------------------------------------------
 // Parse-primitive types

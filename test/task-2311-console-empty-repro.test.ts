@@ -10,7 +10,7 @@
 // the fix lands.
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const pi = require('../.test-runtime/lib/agents/pi');
+const pi = require('../.test-runtime/adapters/agents/pi.js');
 
 test.afterEach(() => {
   pi.__setSdkForTest(null);

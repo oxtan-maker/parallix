@@ -5,7 +5,7 @@
  * over the SQLite schema columns defined in `0001-initial-schema.sql` and
  * `0002-import-history.sql`.
  *
- * Authority owners mirror TASK-2294 `OPERATOR_CONCERN_AUTHORITY`:
+ * Authority owners mirror architecture migration `OPERATOR_CONCERN_AUTHORITY`:
  * - `operator-local` — source of truth for operator-local state
  * - `operator-local-cache` — cached projection (repository state wins on conflict)
  *
@@ -23,7 +23,7 @@ export interface FieldAuthority {
 
 /**
  * Exhaustive authority mapping for the `agent_blocklist` table.
- * Maps to TASK-2294 domain entity: `AgentBlock` in `src/domain/agents.ts`.
+ * Maps to architecture migration domain entity: `AgentBlock` in `src/domain/agents.ts`.
  */
 export const AGENT_BLOCKLIST_AUTHORITY = {
   agent: { owner: 'operator-local' } as const,
@@ -35,7 +35,7 @@ export const AGENT_BLOCKLIST_AUTHORITY = {
 
 /**
  * Exhaustive authority mapping for the `usage_statistics` table.
- * Maps to TASK-2294 domain entities: `AgentRunMeasurement`,
+ * Maps to architecture migration domain entities: `AgentRunMeasurement`,
  * `CompletedMissionStatistics` in `src/domain/usage.ts`.
  */
 export const USAGE_STATISTICS_AUTHORITY = {
@@ -66,7 +66,7 @@ export const USAGE_STATISTICS_AUTHORITY = {
 
 /**
  * Exhaustive authority mapping for the `known_repositories` table.
- * Maps to TASK-2294 domain entity: `KnownRepository` in `src/domain/repository.ts`.
+ * Maps to architecture migration domain entity: `KnownRepository` in `src/domain/repository.ts`.
  *
  * Note: These are cached values. Repository identity is ultimately
  * owned by the target repository (Git), but the local cache entry is
@@ -81,7 +81,7 @@ export const KNOWN_REPOSITORIES_AUTHORITY = {
 
 /**
  * Exhaustive authority mapping for the `ui_preferences` table.
- * Maps to TASK-2294 domain: operator-local cache (board projections).
+ * Maps to architecture migration domain: operator-local cache (board projections).
  */
 export const UI_PREFERENCES_AUTHORITY = {
   key: { owner: 'operator-local' } as const,
@@ -91,7 +91,7 @@ export const UI_PREFERENCES_AUTHORITY = {
 
 /**
  * Exhaustive authority mapping for the `operational_history` table.
- * Maps to TASK-2294 domain: local operational history.
+ * Maps to architecture migration domain: local operational history.
  */
 export const OPERATIONAL_HISTORY_AUTHORITY = {
   id: { owner: 'operator-local' } as const,
@@ -102,7 +102,7 @@ export const OPERATIONAL_HISTORY_AUTHORITY = {
 
 /**
  * Exhaustive authority mapping for the `schema_migrations` table.
- * Maps to TASK-2294 domain: migration metadata.
+ * Maps to architecture migration domain: migration metadata.
  */
 export const SCHEMA_MIGRATIONS_AUTHORITY = {
   id: { owner: 'operator-local' } as const,
@@ -137,7 +137,7 @@ export const SESSION_MARKERS_AUTHORITY = {
 /**
  * Exhaustive authority mapping for the `import_mission_versions` table:
  * the per-Mission version snapshot a compatibility import records alongside
- * its `import_history` entry (TASK-2322.04).
+ * its `import_history` entry (architecture migration).
  */
 export const IMPORT_MISSION_VERSIONS_AUTHORITY = {
   import_id: { owner: 'operator-local' } as const,
@@ -148,7 +148,7 @@ export const IMPORT_MISSION_VERSIONS_AUTHORITY = {
 /**
  * Exhaustive authority mapping for the `board_lane_events` table.
  *
- * Maps to TASK-2303 domain entity: `LaneTransitionEvent` in
+ * Maps to architecture migration domain entity: `LaneTransitionEvent` in
  * `src/domain/board-event.ts`. Operator-local telemetry only (ADR 0051).
  *
  * Relationship to usage_statistics:
@@ -170,7 +170,7 @@ export const BOARD_LANE_EVENTS_AUTHORITY = {
 /**
  * Exhaustive authority mapping for the `missions` table.
  *
- * Maps to TASK-2322 domain entity: `Mission` in `src/domain/mission.ts`.
+ * Maps to architecture migration domain entity: `Mission` in `src/domain/mission.ts`.
  * Authority: operator-local source-of-truth after cutover (ADR 0053).
  *
  * `repository_id` is the stable identity reference. Replaceable repository

@@ -368,8 +368,8 @@ test('native SEA smoke: uncaught diagnostics map back to TypeScript sources (SC3
     timeout: 60_000,
   });
   const diagnostics = `${result.stdout}${result.stderr}`;
-  assertSurface('sourcemaps', /at run \(.*src\/platform\/runtime\/px\.ts:\d+:\d+\)/.test(diagnostics),
-    `the native stack trace did not map to src/platform/runtime/px.ts: ${diagnostics.slice(0, 600)}`);
+  assertSurface('sourcemaps', /at run \(.*src\/composition\/create-cli\.ts:\d+:\d+\)/.test(diagnostics),
+    `the native stack trace did not map to src/composition/create-cli.ts: ${diagnostics.slice(0, 600)}`);
   assertSurface('sourcemaps', /src\/entry\/px\.ts:\d+:\d+/.test(diagnostics),
     `the native stack trace did not map to src/entry/px.ts: ${diagnostics.slice(0, 600)}`);
   assertSurface('sourcemaps', !/build\/sea\/px:\d+:\d+/.test(diagnostics),
@@ -518,7 +518,7 @@ test('native SEA smoke: the npm fallback passes the same headless smoke set (SC8
     env: { PATH: process.env.PATH, HOME: workspace, PARALLIX_HOME: npmHome, NODE_OPTIONS: '--enable-source-maps', NO_COLOR: '1' },
     timeout: 60_000,
   });
-  assert.match(`${diagnostics.stdout}${diagnostics.stderr}`, /src\/platform\/runtime\/px\.ts:\d+:\d+/,
+  assert.match(`${diagnostics.stdout}${diagnostics.stderr}`, /src\/entry\/px\.ts:\d+:\d+/,
     'npm fallback diagnostics must map to TypeScript sources too');
 });
 

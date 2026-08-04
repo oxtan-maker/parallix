@@ -4,15 +4,15 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const ts = require('typescript');
-const { MACHINE_WRITTEN_PATH_INVENTORY } = require('../.test-runtime/lib/core/durable-state-inventory');
+const { MACHINE_WRITTEN_PATH_INVENTORY } = require('./fixtures/durable-state-inventory.ts');
 
 const ROOT = path.resolve(__dirname, '..');
-const RUNTIME_LIB = path.join(ROOT, 'src', 'platform', 'runtime', 'lib');
+const RUNTIME_LIB = path.join(ROOT, 'src');
 const DIRECT_JSON_EXCEPTIONS = new Map([
-  ['lib/commands/coverage-gate.ts:coverageManifestPath()', 'coverage-manifest'],
-  ['lib/commands/mutation-gate.ts:baselinePath', 'mutation-baseline'],
-  ['lib/commands/mutation-gate.ts:configPath', 'mutation-run-config'],
-  ['lib/tools/setup-review.ts:configPath', 'workflow-config'],
+  ['src/adapters/verification/coverage-gate.ts:coverageManifestPath()', 'coverage-manifest'],
+  ['src/adapters/verification/mutation-gate.ts:baselinePath', 'mutation-baseline'],
+  ['src/adapters/verification/mutation-gate.ts:configPath', 'mutation-run-config'],
+  ['src/adapters/review/setup-review.ts:configPath', 'workflow-config'],
 ]);
 
 function directJsonWrites(file, source) {
@@ -64,7 +64,7 @@ test('durable-state inventory assigns every required path exactly one recognized
 
 test('direct durable JSON write guard passes only inventory-documented exceptions', () => {
   // The guard intentionally covers every authored runtime TypeScript source in
-  // src/platform/runtime/lib/. It detects
+  // the canonical production layers. It detects
   // inline JSON.stringify/writeFileSync pairs, not pre-serialized or async writes.
   const writes = directJsonWritesInLib(RUNTIME_LIB);
   assert.deepEqual(writes.sort(), [...DIRECT_JSON_EXCEPTIONS.keys()].sort());

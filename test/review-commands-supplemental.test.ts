@@ -14,7 +14,7 @@ const {
   submitReviewRound,
   pushRound,
   showReviewStatus
-} = require('../.test-runtime/lib/review/review-commands');
+} = require('../.test-runtime/adapters/review/review-commands.js');
 
 const mockWorktree = '/mock/worktree';
 const mockSlug = 'test-slug';
@@ -93,7 +93,7 @@ test('performStaticReview fails when Goal Check missing', () => {
 
 // Skipping this test for now - it requires complex mocking of git operations
 // test('performStaticReview passes with valid Goal Check', () => {
-//   const missionUtils = require('../.test-runtime/lib/core/mission-utils');
+//   const missionUtils = require('../.test-runtime/adapters/filesystem/mission-utils.js');
 //   const originalGetPrimaryBranch = missionUtils.getPrimaryBranch;
 //   missionUtils.getPrimaryBranch = () => 'main';
 //

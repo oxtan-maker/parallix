@@ -1,6 +1,6 @@
 # ADR 0053 Persistence Inventory
 
-The executable inventory at `src/platform/runtime/lib/core/durable-state-inventory.ts`
+The certification fixture at `test/fixtures/durable-state-inventory.ts`
 records every production reader and writer for the 15 durable-state concepts named in
 ADR 0053. It is the contract that the ADR 0053 cutover tasks (TASK-2322.02, TASK-2322.03)
 consume when migrating file-backed persistence to SQLite.
@@ -98,17 +98,17 @@ because they are infrastructure, not domain-boundary readers or writers
 (13 files, maintained in the `infrastructureExclusions` set in
 `test/persistence-inventory-guardrail.test.ts`):
 
-- `src/platform/runtime/lib/core/storage.ts` — defines the persistence API itself
-- `src/platform/runtime/lib/architecture/boundary-guards.ts` — internal guard helper
-- `src/platform/runtime/lib/core/package-root.ts` — reads `package.json` for name resolution
-- `src/platform/runtime/lib/core/mutation-scoper.ts` — reads files to detect mutations
+- `src/adapters/storage/storage.ts` — defines the persistence API itself
+- `src/adapters/architecture/boundary-guards.ts` — internal guard helper
+- `src/adapters/filesystem/package-root.ts` — reads `package.json` for name resolution
+- `src/adapters/git/mutation-scoper.ts` — reads files to detect mutations
 - `src/adapters/sqlite/database-adapter.ts` — SQLite infrastructure
-- `src/platform/runtime/lib/agents/codex.ts`, `vibe.ts` — write agent runtime config
-- `src/platform/runtime/lib/agents/opencode-export.ts` — writes temporary scratch files
-- `src/platform/runtime/lib/core/mission-utils/paths.ts`, `worktree.ts` — read mission files for path resolution
-- `src/platform/runtime/lib/core/verification.ts` — reads/writes verification proofs (infrastructure metadata)
-- `src/platform/runtime/lib/tools/redgreen.ts` — reads mission docs for reproduction-test markers
-- `src/platform/runtime/lib/core/durable-state-inventory.ts` — the inventory file itself
+- `src/adapters/agents/codex.ts`, `vibe.ts` — write agent runtime config
+- `src/adapters/agents/opencode-export.ts` — writes temporary scratch files
+- `src/adapters/filesystem/mission-paths.ts`, `src/adapters/git/worktree.ts` — read mission files for path resolution
+- `src/adapters/verification/verification.ts` — reads/writes verification proofs (infrastructure metadata)
+- `src/adapters/verification/redgreen.ts` — reads mission docs for reproduction-test markers
+- `test/fixtures/durable-state-inventory.ts` — certification-only inventory data
 
 ## Cross-reference: MACHINE_WRITTEN_PATH_INVENTORY
 

@@ -14,7 +14,7 @@ const TEST_SLUG = 'task-1135-coverage';
 // impractical to fully mock; the identity-fallback behaviour is verified manually.
 
 test('commitSafeMissionArtifacts handles commit failure', async () => {
-  const { commitSafeMissionArtifacts } = require('../.test-runtime/lib/review/review');
+  const { commitSafeMissionArtifacts } = require('../.test-runtime/adapters/review/review-loop.js');
   const logs = [];
   const errors = [];
 
@@ -39,7 +39,7 @@ test('commitSafeMissionArtifacts no longer treats a repo stats CSV as a safe mis
   // wrote one into the checkout. TASK-2322.08 moved measurements to the
   // operator-local database, so a stats.csv in a repository is now ordinary
   // untracked user content and must NOT be auto-committed before rebase.
-  const { commitSafeMissionArtifacts } = require('../.test-runtime/lib/review/review');
+  const { commitSafeMissionArtifacts } = require('../.test-runtime/adapters/review/review-loop.js');
   const added = [];
   const errors = [];
 
@@ -61,7 +61,7 @@ test('commitSafeMissionArtifacts no longer treats a repo stats CSV as a safe mis
 });
 
 test('commitSafeMissionArtifacts still rejects genuinely non-mission paths', async () => {
-  const { commitSafeMissionArtifacts } = require('../.test-runtime/lib/review/review');
+  const { commitSafeMissionArtifacts } = require('../.test-runtime/adapters/review/review-loop.js');
   const errors = [];
 
   const result = await commitSafeMissionArtifacts(TEST_SLUG, '/tmp/worktree', {
@@ -79,7 +79,7 @@ test('commitSafeMissionArtifacts still rejects genuinely non-mission paths', asy
 });
 
 test('postStaticReviewComment handles missing token', async () => {
-  const { postStaticReviewComment } = require('../.test-runtime/lib/review/review');
+  const { postStaticReviewComment } = require('../.test-runtime/adapters/review/review-commands.js');
   const errors = [];
 
   const result = await postStaticReviewComment(TEST_SLUG, 'message', {
@@ -97,7 +97,7 @@ test('postStaticReviewComment handles missing token', async () => {
 });
 
 test('performStaticReview handles missing Goal Check section', async () => {
-  const { performStaticReview } = require('../.test-runtime/lib/review/review');
+  const { performStaticReview } = require('../.test-runtime/adapters/review/review-commands.js');
   const logs = [];
 
   const result = performStaticReview(TEST_SLUG, {
@@ -113,7 +113,7 @@ test('performStaticReview handles missing Goal Check section', async () => {
 });
 
 test('performStaticReview handles Goal Check section with no evidence rows', async () => {
-  const { performStaticReview } = require('../.test-runtime/lib/review/review');
+  const { performStaticReview } = require('../.test-runtime/adapters/review/review-commands.js');
   const logs = [];
 
   const result = performStaticReview(TEST_SLUG, {

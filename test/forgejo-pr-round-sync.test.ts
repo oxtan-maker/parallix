@@ -4,7 +4,7 @@ import childProcess from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { startReviewLoop } from '../src/platform/runtime/lib/review/review.js';
+import { startReviewLoop } from '../src/adapters/review/review-loop.js';
 
 // Reproduction test for task-2240: when Forgejo is activated, the mission
 // pull request is not updated between agent rounds. Each round's committed

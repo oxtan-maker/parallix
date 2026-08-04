@@ -5,8 +5,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { detectAreasFromChangedFiles, detectMissionChangedArea } = require('../.test-runtime/lib/core/verification');
-const { runPreReviewGate } = require('../.test-runtime/lib/review/review-loop');
+const { detectAreasFromChangedFiles, detectMissionChangedArea } = require('../.test-runtime/adapters/verification/verification.js');
+const { runPreReviewGate } = require('../.test-runtime/adapters/review/review-loop.js');
 
 test('detectAreasFromChangedFiles maps changed lib files to the lib verification area', () => {
   assert.deepEqual(detectAreasFromChangedFiles('lib/review/review-loop.ts\ntest/review.test.js\n'), ['lib', 'workflow']);

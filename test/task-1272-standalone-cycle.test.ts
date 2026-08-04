@@ -19,8 +19,8 @@ const os = require('os');
 const path = require('path');
 const childProcess = require('child_process');
 
-const { startReviewLoop } = require('../.test-runtime/lib/review/review');
-const { findMissionDir, missionDirForSlug, missionPathForSlug } = require('../.test-runtime/lib/core/mission-utils');
+const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
+const { findMissionDir, missionDirForSlug, missionPathForSlug } = require('../.test-runtime/adapters/filesystem/mission-utils.js');
 
 async function withTempGitRepo(fn) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-test-1272-cycle-'));

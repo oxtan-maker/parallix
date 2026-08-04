@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
-import { run } from '../platform/runtime/px.js';
+import { run } from '../composition/create-cli.js';
 
-process.setSourceMapsEnabled(true);
+export * from '../composition/create-cli.js';
 
 run().then(code => {
   process.exitCode = code;

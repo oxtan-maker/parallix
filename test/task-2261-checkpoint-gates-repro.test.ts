@@ -12,8 +12,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { runHandoffAndReview } = require('../.test-runtime/lib/commands/active');
-const repairHandoff = require('../.test-runtime/lib/commands/repair-handoff');
+const { runHandoffAndReview } = require('../.test-runtime/adapters/cli/commands/active.js');
+const repairHandoff = require('../.test-runtime/adapters/cli/commands/repair-handoff.js');
 
 // ── CP-1: Missing checkpoint → repairable relaunch (not stranded instruction) ──
 

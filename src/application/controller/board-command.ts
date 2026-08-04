@@ -145,11 +145,11 @@ export const INTEGRATED_CAPABILITIES = new Set<BoardCommandKind>([
  * the board but cannot be executed until separate bounded extraction missions land.
  */
 export const UNAVAILABLE_CAPABILITIES: ReadonlyMap<BoardCommandKind, string> = new Map([
-  ['draft:create', 'Draft extraction not yet integrated (TASK-2289)'],
-  ['review:submit', 'Review extraction not yet integrated (TASK-2289)'],
-  ['review:act-on-findings', 'Review findings extraction not yet integrated (TASK-2290)'],
-  ['approve:review', 'Approve extraction not yet integrated (TASK-2289)'],
-  ['integrate:merge', 'Integrate extraction not yet integrated (TASK-2290)'],
+  ['draft:create', 'Draft is not available from the board'],
+  ['review:submit', 'Review submission is not available from the board'],
+  ['review:act-on-findings', 'Acting on review findings is not available from the board'],
+  ['approve:review', 'Review approval is not available from the board'],
+  ['integrate:merge', 'Integration is not available from the board'],
 ]);
 
 export function isIntegratedCapability(kind: BoardCommandKind): boolean {

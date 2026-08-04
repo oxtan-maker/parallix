@@ -11,7 +11,7 @@ const {
   parseVibeMeta,
   extractVibeTelemetry,
   getVibeProviderModel,
-} = require('../.test-runtime/lib/agents/vibe-telemetry');
+} = require('../.test-runtime/adapters/agents/vibe-telemetry.js');
 
 // ---------- parseVibeMeta ----------
 

@@ -8,7 +8,7 @@ import type { UsageRecord, UsageRepository } from '../../application/ports/missi
  * explicit transactions for multi-statement writes.
  *
  * Authority mapping: each stored field is owned by operator-local authority.
- * Maps to TASK-2294 domain entities: `AgentRunMeasurement`,
+ * Maps to architecture migration domain entities: `AgentRunMeasurement`,
  * `CompletedMissionStatistics` in `src/domain/usage.ts`.
  */
 export class SqliteUsageRepository implements UsageRepository {

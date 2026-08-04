@@ -1,12 +1,12 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const missionUtils = require('../.test-runtime/lib/core/mission-utils');
+const missionUtils = require('../.test-runtime/adapters/filesystem/mission-utils.js');
 const previousPrimaryWorktree = process.env.PRIMARY_WORKTREE;
 if (previousPrimaryWorktree === undefined) {
   process.env.PRIMARY_WORKTREE = `/tmp/visualBoard-${process.pid}`;
 }
-const integrate = require('../.test-runtime/lib/commands/integrate');
+const integrate = require('../.test-runtime/adapters/cli/commands/integrate.js');
 if (previousPrimaryWorktree === undefined) {
   delete process.env.PRIMARY_WORKTREE;
 } else {

@@ -1,0 +1,566 @@
+import { git, getCurrentBranch } from '../../git/git.js';
+import * as missionUtils from '../../filesystem/mission-utils.js';
+import rebase from './rebase.js';
+import * as fmt from '../../../application/presentation/cli-format.js';
+
+// ── FailureClass: 8 classes from ADR 0048 ────────────────────────────────────
+const FailureClass = {
+  UnverifiableClaims: 'UnverifiableClaims',
+  MalformedGates: 'MalformedGates',
+  MissingArtifacts: 'MissingArtifacts',
+  IncompleteEvidence: 'IncompleteEvidence',
+  GitBlockers: 'GitBlockers',
+  GateFailure: 'GateFailure',
+  InfraBlocker: 'InfraBlocker',
+  StateMachineViolation: 'StateMachineViolation',
+} as const;
+
+type FailureClassType = (typeof FailureClass)[keyof typeof FailureClass];
+
+// ── DispatchAction: 3 actions from ADR 0048 ──────────────────────────────────
+const DispatchAction = {
+  AutoRepair: 'AutoRepair',
+  AutoSendBack: 'AutoSendBack',
+  HumanOnly: 'HumanOnly',
+} as const;
+
+type DispatchActionType = (typeof DispatchAction)[keyof typeof DispatchAction];
+
+// ── Dispatch table: maps each failure class to its prescribed action (ADR 0048) ─
+const DISPATCH_TABLE: Record<FailureClassType, DispatchActionType> = {
+  [FailureClass.UnverifiableClaims]: DispatchAction.AutoSendBack,
+  [FailureClass.MalformedGates]: DispatchAction.AutoRepair,
+  [FailureClass.MissingArtifacts]: DispatchAction.AutoSendBack,
+  [FailureClass.IncompleteEvidence]: DispatchAction.AutoSendBack,
+  [FailureClass.GitBlockers]: DispatchAction.AutoRepair,
+  [FailureClass.GateFailure]: DispatchAction.AutoSendBack,
+  [FailureClass.InfraBlocker]: DispatchAction.HumanOnly,
+  [FailureClass.StateMachineViolation]: DispatchAction.HumanOnly,
+};
+
+/**
+ * Look up the dispatch action for a given failure class.
+ *
+ * @param failureClass - One of the 8 failure class values from ADR 0048
+ * @returns The prescribed dispatch action, or null if unknown
+ */
+export function getDispatchAction(failureClass: FailureClassType): DispatchActionType | null {
+  return DISPATCH_TABLE[failureClass] ?? null;
+}
+
+/**
+ * Sub-reason for GitBlockers classification: distinguishes dirty-artifact from behind-branch errors.
+ * Used by repairHandoff() to decide whether to auto-rebase (behind) vs auto-commit only (dirty).
+ */
+type GitBlockerReason = 'dirty' | 'behind' | 'other';
+
+/**
+ * Classify an error message into one of the 8 failure classes from ADR 0048
+ * and return the associated dispatch action.
+ *
+ * Patterns are checked in order of specificity to avoid collisions.
+ * Returns a `reason` field for GitBlockers to distinguish dirty-artifact from behind-branch errors,
+ * allowing callers to derive repair-strategy flags without duplicating pattern matching.
+ *
+ * @param errorMsg - The error message to classify
+ * @returns Object with failureClass, dispatchAction, and (for GitBlockers) reason
+ */
+export function classifyError(errorMsg: string): { failureClass: FailureClassType; dispatchAction: DispatchActionType; reason?: GitBlockerReason } {
+  if (!errorMsg || typeof errorMsg !== 'string') {
+    return { failureClass: FailureClass.InfraBlocker, dispatchAction: DispatchAction.HumanOnly };
+  }
+
+  // 1. IncompleteEvidence: goal-check table missing or lacking evidence rows
+  // (most specific — checked before generic gate patterns).
+  // Covers both "missing section" and "section present but no valid evidence".
+  if (errorMsg.includes('"## Goal Check"') &&
+      errorMsg.includes('required before handoff')) {
+    return { failureClass: FailureClass.IncompleteEvidence, dispatchAction: DispatchAction.AutoSendBack };
+  }
+
+  // 1b. IncompleteEvidence: checkpoint missing Goal Check section entirely
+  // (architecture migration: handoff.ts emits "missing a \"## Goal Check\" section" for
+  // checkpoints that lack the required heading).
+  if (errorMsg.includes('missing a') && errorMsg.includes('"## Goal Check" section')) {
+    return { failureClass: FailureClass.IncompleteEvidence, dispatchAction: DispatchAction.AutoSendBack };
+  }
+
+  // 1c. IncompleteEvidence: no checkpoint documents found at all
+  // (architecture migration: validateCheckpointsBeforeHandoff emits "No checkpoint documents
+  // found" — classify as IncompleteEvidence so the lifecycle can relaunch the
+  // implementer with a targeted repair prompt rather than stranding on manual
+  // instructions).
+  if (errorMsg.includes('No checkpoint documents found') &&
+      errorMsg.includes('Goal Check table')) {
+    return { failureClass: FailureClass.IncompleteEvidence, dispatchAction: DispatchAction.AutoSendBack };
+  }
+
+  // 2. GitBlockers: dirty/uncommitted mission artifacts (mechanical git blocker — auto-repairable)
+  if (errorMsg.includes('is modified but uncommitted') ||
+      errorMsg.includes('Commit the mission contract before handoff') ||
+      errorMsg.includes('Commit the implementation evidence before handoff')) {
+    return { failureClass: FailureClass.GitBlockers, dispatchAction: DispatchAction.AutoRepair, reason: 'dirty' };
+  }
+
+  // 3. GitBlockers: branch behind primary / push rejected (mechanical git blocker — auto-repairable via rebase)
+  if (errorMsg.includes('Updates were rejected') ||
+      errorMsg.includes('fetch first') ||
+      errorMsg.includes('non-fast-forward') ||
+      errorMsg.includes('behind its remote') ||
+      (errorMsg.includes('git push failed') && (
+        errorMsg.includes('rejected') ||
+        errorMsg.includes('remote contains work')
+      ))) {
+    return { failureClass: FailureClass.GitBlockers, dispatchAction: DispatchAction.AutoRepair, reason: 'behind' };
+  }
+
+  // 4. GateFailure: verification gate failed
+  if (/verification gate failed/i.test(errorMsg)) {
+    return { failureClass: FailureClass.GateFailure, dispatchAction: DispatchAction.AutoSendBack };
+  }
+
+  // 5. GateFailure: declared gate failed
+  if (/\bdeclared gate\b/i.test(errorMsg) && /\bfailed\b/i.test(errorMsg)) {
+    return { failureClass: FailureClass.GateFailure, dispatchAction: DispatchAction.AutoSendBack };
+  }
+
+  // 6. UnverifiableClaims: test claims that cannot be verified
+  if (/test(s?\s+)?passed/i.test(errorMsg) && /cannot\s+verify|unverifiable|proof\s+(not\s+)?found|stale\s+proof/i.test(errorMsg)) {
+    return { failureClass: FailureClass.UnverifiableClaims, dispatchAction: DispatchAction.AutoSendBack };
+  }
+
+  // 7. MalformedGates: malformed or non-runnable declared gates
+  if (/malformed\s+gate|invalid\s+gate\s+config|gate\s+command\s+(not\s+found|syntax\s+error|not\s+runnable)/i.test(errorMsg) ||
+      (/gate/i.test(errorMsg) && /syntax\s+error|not\s+found|missing\s+(file|command)/i.test(errorMsg))) {
+    return { failureClass: FailureClass.MalformedGates, dispatchAction: DispatchAction.AutoRepair };
+  }
+
+  // 8. MissingArtifacts: mandatory mission artifacts missing.
+  // The "even after auto-remediation" substring is the stable marker of the
+  // handoff checkpoint failure (handoff.ts emits "No checkpoint documents
+  // found in ... even after auto-remediation."): checkpoint evidence is a
+  // mandatory artifact, so the implementer is auto-sent-back per ADR 0048.
+  if (errorMsg.includes('even after auto-remediation') ||
+      /mandatory\s+(artifact|file|document)|missing\s+(mission\s+)?(artifact|file|document)|required\s+(artifact|file|document)\s+(not\s+)?found/i.test(errorMsg) ||
+      (/gatekeeper/i.test(errorMsg) && /missing\s+(artifact|file|document)/i.test(errorMsg))) {
+    return { failureClass: FailureClass.MissingArtifacts, dispatchAction: DispatchAction.AutoSendBack };
+  }
+
+  // 9. StateMachineViolation: task state machine violations
+  if (/state\s+violation|invalid\s+state|transition\s+not\s+allowed|cannot\s+(move|transition)\s+(from|to)\s+\w+\s+(to|from)/i.test(errorMsg) ||
+      (/task\s+state/i.test(errorMsg) && /invalid|violation|incorrect/i.test(errorMsg))) {
+    return { failureClass: FailureClass.StateMachineViolation, dispatchAction: DispatchAction.HumanOnly };
+  }
+
+  // 10. InfraBlocker: forgejo/infrastructure blockers
+  if (/forgejo|infrastructure|authentication\s+failed|token\s+(expired|invalid|missing)|forbidden|unauthorized\s+(access|request)|rate\s+limit|connection\s+(refused|timed?\s*out)|network\s+error/i.test(errorMsg)) {
+    return { failureClass: FailureClass.InfraBlocker, dispatchAction: DispatchAction.HumanOnly };
+  }
+
+  // 11. InfraBlocker: reviewer non-submission (ADR 0048 — human-only after bounded retries)
+  // Matches: "Reviewer X did not submit a formal review outcome" and
+  // "Reviewer X did not leave a complete local review handoff".
+  if (/did not (submit|leave).*(review (outcome|handoff)|formal review)/i.test(errorMsg)) {
+    return { failureClass: FailureClass.InfraBlocker, dispatchAction: DispatchAction.HumanOnly };
+  }
+
+  // Default: human-only for unrecognized errors
+  return { failureClass: FailureClass.InfraBlocker, dispatchAction: DispatchAction.HumanOnly };
+}
+
+/**
+ * Check if an error message indicates a relaunchable content error (missing/empty goal-check table).
+ * Delegates to classifyError for backward-compatible classification.
+ *
+ * @param errorMsg - The error message to check
+ * @returns True if the error is relaunchable (IncompleteEvidence or GateFailure)
+ */
+function isRelaunchableError(errorMsg: string): boolean {
+  if (!errorMsg || typeof errorMsg !== 'string') {
+    return false;
+  }
+  const { failureClass } = classifyError(errorMsg);
+  // IncompleteEvidence and GateFailure are the only classes that were relaunchable under the old logic
+  return failureClass === FailureClass.IncompleteEvidence
+    || failureClass === FailureClass.GateFailure;
+}
+
+/**
+ * Build a relaunch prompt for an agent to fix a relaunchable error.
+ *
+ * @param {string} errorMsg - The error message from the failed handoff
+ * @param {string} slug - Mission slug
+ * @param {string} worktree - Path to the mission worktree
+ * @returns {string} The relaunch prompt
+  */
+function buildRelaunchPrompt(errorMsg: string, slug: string, worktree: string, gateOutput?: { stdout: string; stderr: string }) {
+  const { failureClass } = classifyError(errorMsg);
+  if (failureClass === FailureClass.GateFailure) {
+    return buildGateFailurePrompt(errorMsg, slug, worktree, gateOutput);
+  }
+  return buildGoalCheckRepairPrompt(errorMsg, slug, worktree, gateOutput);
+}
+
+/**
+ * Build a state-aware fix prompt for a verification-gate/test failure: points the
+ * agent at the captured failing-test output and asks for a code fix, not a
+ * checkpoint edit.
+ *
+ * @param {string} errorMsg - The error message from the failed handoff
+ * @param {string} slug - Mission slug
+ * @param {string} worktree - Path to the mission worktree
+ * @param {{stdout: string, stderr: string}} [gateOutput] - Captured verification gate output
+ */
+function buildGateFailurePrompt(errorMsg: string, slug: string, worktree: string, gateOutput?: { stdout: string; stderr: string }) {
+  let prompt = `Automated handoff failed for mission ${slug} because the verification gate reported failing tests: ${errorMsg}
+
+` +
+          `This is a verification/test failure, not missing checkpoint evidence. Do NOT edit the checkpoint's ` +
+          `evidence table to work around this — fix the failing tests themselves.
+
+` +
+          `Steps:
+` +
+          `1. Review the captured gate output below to identify the failing test names and error/stack traces.
+` +
+          `2. Fix the code in ${worktree} so the failing verification tests pass.
+` +
+          `3. Re-run the verification gate locally to confirm it now passes.
+` +
+          `4. Commit the fix with a descriptive commit message.
+` +
+          `5. Re-run: px review ${slug} --submit`;
+
+  if (gateOutput && (gateOutput.stdout || gateOutput.stderr)) {
+    const totalOutput = (gateOutput.stdout || '') + (gateOutput.stderr || '');
+    const truncated = totalOutput.length > 16000
+      ? `[truncated — total ${totalOutput.length} chars, showing last 8000]\n` + totalOutput.slice(-8000)
+      : totalOutput;
+    prompt += `\n\n--- Captured Gate Output ---\n${truncated}`;
+  }
+
+  return prompt;
+}
+
+/**
+ * Build the incomplete-evidence repair prompt: instructs the agent to add a
+ * Goal Check table with real evidence to the final checkpoint document.
+ *
+ * @param {string} errorMsg - The error message from the failed handoff
+ * @param {string} slug - Mission slug
+ * @param {string} worktree - Path to the mission worktree
+ * @param {{stdout: string, stderr: string}} [gateOutput] - Captured verification gate output
+ */
+function buildGoalCheckRepairPrompt(errorMsg: string, slug: string, worktree: string, gateOutput?: { stdout: string; stderr: string }) {
+  const year = missionUtils.getMissionYear(slug, worktree);
+  const missionDir = missionUtils.findMissionDir(slug, worktree) || missionUtils.missionDirForSlug(worktree, slug);
+
+  // Extract the offending row from the error message, if present.
+  // The handoff validator appends "Offending row: <row>" to IncompleteEvidence errors.
+  const offendingRowMatch = errorMsg.match(/Offending row:\s*(.+)$/m);
+  const offendingRow = offendingRowMatch ? offendingRowMatch[1].trim() : null;
+
+  // Detect whether this is a missing-checkpoint error (no CP-N.md exists)
+  // vs an existing-checkpoint-with-bad-evidence error.
+  const isMissingCheckpoint = errorMsg.includes('No checkpoint documents found');
+
+  let prompt = `Automated handoff failed for mission ${slug} with a repairable error: ${errorMsg}
+
+`;
+  if (isMissingCheckpoint) {
+    prompt += `Please create a checkpoint document (CP-1.md) in ${missionDir} with a ` +
+          `## Goal Check section and its evidence rows.
+
+`;
+  } else {
+    prompt += `Please fix the final checkpoint document in ${missionDir} by updating the ` +
+          `## Goal Check section and its evidence rows.
+
+`;
+  }
+  prompt += `Use one canonical heading: ## Goal Check
+
+` +
+          `Use this exact table shape:
+` +
+          `| Criterion | Evidence | Status |
+` +
+          `|---|---|---|
+
+` +
+          `Accepted evidence forms include:
+` +
+          `- file:line references such as "src/adapters/cli/commands/handoff.ts:292"
+` +
+          `- exact test names already present in the repo
+` +
+          `- ADR references such as "ADR 0048"
+` +
+          `- test file paths such as "test/e2e-real-agent-smoke.test.ts"
+` +
+          `- recognized repo commands or paths already accepted by Parallix, such as \`npm test -- test/repair-handoff.test.ts\`, \`px review ${slug} --verify\`, or \`./scripts/verify-local.sh all\`
+
+` +
+          `For an integration handoff, \`./scripts/verify-local.sh integrate\` is mandatory; \`./scripts/verify-local.sh all\` alone is not sufficient.
+
+` +
+          `Do not rely on raw \`stat\`/\`ls\` output or generic prose by themselves. If you keep shell output, pair it with one of the accepted references above.
+
+`;
+
+  if (offendingRow) {
+    prompt += `**What was rejected:** The validator flagged this row as unverifiable:
+${offendingRow}
+
+` +
+          `**Fix strategy:** Replace the evidence value in the offending row with an accepted reference from the list above. ` +
+          `Do not retry with only shell output or file metadata. If you want to keep a command like \`stat -c '%A' bin/hello.sh\`, pair it with a file:line reference, a repo test reference, or a recognized repo command/path in the same cell.
+`;
+  } else {
+    prompt += `**Fix strategy:** Add at least one evidence row per criterion using the accepted forms listed above. ` +
+          `Do NOT use placeholder text, generic claims, or unverifiable statements.
+`;
+  }
+
+  prompt += `
+Steps:
+1. Open the final checkpoint document (CP-N.md) in ${missionDir}
+2. Ensure the "## Goal Check" section exists with the exact heading "## Goal Check"
+3. Create or update the pipe-delimited table with columns: Criterion | Evidence | Status
+4. Add at least one evidence row per criterion using the accepted forms above
+5. Commit the updated checkpoint with a descriptive commit message
+6. Re-run: px review ${slug} --submit
+
+Example Goal Check table:
+| Criterion | Evidence | Status |
+|---|---|---|
+| Final checkpoint has Goal Check section | docs/missions/${year}/${slug}/CP-1.md:15 | PASS |
+| Tests pass | "buildRelaunchPrompt returns string containing Goal Check table and mission slug", test/repair-handoff.test.ts | PASS |
+| Verification gate ran | \`./scripts/verify-local.sh all\` | PASS |
+| Mandatory integration gate ran | \`./scripts/verify-local.sh integrate\` | PASS |
+| ADR 0048 exists | ADR 0048 | PASS |
+
+Do NOT add placeholder or generic evidence. Each row must cite real, verifiable artifacts.
+`;
+
+  // Append captured gate output if available (architecture migration)
+  if (gateOutput && (gateOutput.stdout || gateOutput.stderr)) {
+    const totalOutput = (gateOutput.stdout || '') + (gateOutput.stderr || '');
+    // Truncate if total output exceeds 16000 chars; keep last 8000 chars
+    const truncated = totalOutput.length > 16000
+      ? `[truncated — total ${totalOutput.length} chars, showing last 8000]\n` + totalOutput.slice(-8000)
+      : totalOutput;
+    prompt += `\n\n--- Captured Gate Output ---\n${truncated}`;
+  }
+
+  return prompt;
+}
+
+/** @param {string} file */
+function isRepoLocalImplementationPath(file: string): boolean {
+  if (!file || typeof file !== 'string') {return false;}
+
+  const normalized = file.replace(/\\/g, '/');
+  if (!normalized || normalized === '.' || normalized.startsWith('/') || /^[A-Za-z]:\//.test(normalized)) {
+    return false;
+  }
+  if (normalized === '..' || normalized.startsWith('../') || normalized.includes('/../')) {
+    return false;
+  }
+  if (normalized === '.git' || normalized.startsWith('.git/')) {
+    return false;
+  }
+  if (missionUtils.isWorkflowGeneratedArtifact(normalized)) {
+    return false;
+  }
+  const implementationDirs = new Set([
+    'lib',
+    'test',
+    'scripts',
+    'config',
+    'prompts',
+    'templates',
+    'examples',
+    'data'
+  ]);
+  const implementationRootFiles = new Set([
+    'px.ts',
+    'px.js',
+    'index.js',
+    'package.json',
+    'package-lock.json',
+    'tsconfig.json',
+    'eslint.config.js'
+  ]);
+  const pathParts = normalized.split('/');
+  const topLevel = pathParts[0];
+  if (!topLevel || topLevel.startsWith('.')) {
+    return false;
+  }
+  if (pathParts.length === 1) {
+    return implementationRootFiles.has(normalized);
+  }
+  return implementationDirs.has(topLevel);
+}
+
+/**
+ * Attempt to repair a failed automated handoff by auto-committing mission
+ * artifacts or rebasing.
+ *
+ * @param {string} slug - Mission slug
+ * @param {string} worktree - Path to the mission worktree
+ * @param {string} errorMsg - The error message from the failed handoff
+ * @param {object} [options]
+ * @returns {Promise<{repaired: boolean, blocker: string|null}>} Result and optional blocker reason
+  */
+async function repairHandoff(slug: string, worktree: string, errorMsg: string, options: { gitFn?: Function, rebaseFn?: Function, log?: Function, error?: Function } = {}) {
+  /** @type {{gitFn?: Function, rebaseFn?: Function, log?: Function, error?: Function}} */
+  const opts = options;
+  const {
+    gitFn = git,
+    rebaseFn = rebase,
+    log = fmt.log.plain,
+    error = fmt.log.plainError
+  } = opts;
+
+  const rootDir = worktree || process.cwd();
+  let repaired = false;
+  let blocker: string | null = null;
+
+  /** @param {string} line */
+  function parsePorcelainPath(line: string) {
+    const xy = line.slice(0, 2);
+    const rawPath = line.slice(3).trim();
+    const pathPart = rawPath.includes('->') ? (rawPath.split('->').pop() || '').trim() : rawPath;
+    const cleanPath = (pathPart.startsWith('"') && pathPart.endsWith('"')) ? pathPart.slice(1, -1) : pathPart;
+    return { xy, file: cleanPath };
+  }
+
+  // 0. Check if error is repairable via classifyError
+  const classification = classifyError(errorMsg);
+  const isGitBlocker = classification.failureClass === FailureClass.GitBlockers;
+  // Derive isBehind from classification result (avoids duplicating classifyError's behind-branch patterns)
+  const isBehind = classification.reason === 'behind';
+
+  if (!isGitBlocker) {
+    if (classification.failureClass === FailureClass.InfraBlocker) {
+      blocker = `Infrastructure blocker detected: the handoff error is infrastructure-related (likely Forgejo credentials, connectivity, or rate limits). No agent relaunch will resolve this — the operator must check the Forgejo instance, verify credentials/token validity, and confirm network connectivity before retrying.`;
+      log(blocker);
+      return { repaired: false, blocker };
+    }
+    log(`Handoff error is not automatically repairable: ${errorMsg}`);
+    return { repaired: false, blocker: null };
+  }
+
+  // 1. Auto-commit mission artifacts if uncommitted
+  if (isGitBlocker) {
+    const statusResult = gitFn(['-C', rootDir, 'status', '--porcelain']);
+    if (statusResult.status === 0 && statusResult.stdout) {
+      const dirtyLines = statusResult.stdout.split('\n')
+        .filter((line: string) => line.trim().length > 0);
+
+      const dirtyFilesWithStatus = dirtyLines.map(parsePorcelainPath);
+
+      const unmerged = dirtyFilesWithStatus.filter((f: { xy: string; file: string }) =>
+        ['DD', 'AU', 'UD', 'UA', 'DU', 'AA', 'UU'].includes(f.xy)
+      );
+
+      if (unmerged.length > 0) {
+        blocker = `Conflicted files detected:\n${unmerged.map((f: { xy: string; file: string }) => `       - ${f.file}`).join('\n')}`;
+        log(`Cannot auto-commit: ${blocker}`);
+        return { repaired: false, blocker };
+      }
+
+      const dirtyFiles = dirtyFilesWithStatus.map((f: { xy: string; file: string }) => f.file);
+
+      const isSafeToCommit = (/** @type{string} */ file: string) =>
+        missionUtils.isMissionArtifact(file, slug, rootDir)
+        || isRepoLocalImplementationPath(file);
+
+      const safeFiles = dirtyFiles.filter(isSafeToCommit);
+      const unsafeFiles = dirtyFiles.filter((f: string) => !isSafeToCommit(f));
+
+      if (unsafeFiles.length > 0) {
+        log(`Cannot auto-commit: dirty files include non-mission paths:`);
+        unsafeFiles.forEach((f: string) => log(`       - ${f}`));
+        blocker = `dirty files include non-mission paths: ${unsafeFiles.join(', ')}`;
+        return { repaired: false, blocker };
+      } else if (safeFiles.length > 0) {
+        log(`Auto-committing mission artifacts:`);
+        const stageFailures: string[] = [];
+        safeFiles.forEach((f: string) => {
+          log(`       - ${f}`);
+          const addResult = gitFn(['-C', rootDir, 'add', '--', f]);
+          if (addResult.status === 0) {
+            return;
+          } else {
+            const failureText = [addResult.stderr, addResult.stdout].filter(Boolean).join('\n').trim();
+            stageFailures.push(`${f}${failureText ? `: ${failureText}` : ''}`);
+          }
+        });
+        if (stageFailures.length > 0) {
+          blocker = `failed to stage mission artifacts: ${stageFailures.join(', ')}`;
+          error(fmt.status('FAIL', blocker));
+          return { repaired: false, blocker };
+        }
+        const commitRes = gitFn(['-C', rootDir, 'commit', '-m', `workflow(${slug}): auto-commit mission artifacts before handoff`]);
+        if (commitRes.status === 0) {
+          log(fmt.status('PASS', 'Mission artifacts committed.'));
+          repaired = true;
+        } else {
+          error(fmt.status('WARN', `Failed to commit mission artifacts: ${commitRes.stderr}`));
+          blocker = `failed to commit mission artifacts: ${commitRes.stderr}`;
+          return { repaired: false, blocker };
+        }
+      }
+    }
+  }
+
+  // 2. Auto-rebase if branch is behind
+  if (isBehind) {
+    log('Branch appears behind primary branch. Calling rebase...');
+    let rebaseSuccess = false;
+    let rebaseError: string | null = null;
+    try {
+      await rebaseFn([slug], {
+        gitFn: (args: string[], opts: { cwd?: string }) => gitFn(args, { ...opts, cwd: rootDir }),
+        getCurrentBranchFn: () => getCurrentBranch(rootDir),
+        exitFn: (code: number) => {
+          if (code === 0) {
+            rebaseSuccess = true;
+          } else {
+            rebaseError = `rebase exited with code ${code}`;
+          }
+        }
+      });
+    } catch (err) {
+      rebaseError = (err instanceof Error) ? err.message : String(err);
+    }
+
+    if (!rebaseSuccess) {
+      const msg = rebaseError || 'unknown rebase failure';
+      error(fmt.status('WARN', `Auto-rebase failed: ${msg}`));
+      blocker = `Auto-rebase failed: ${msg}`;
+      repaired = false; // Reset repaired if rebase fails, even if auto-commit succeeded
+    } else {
+      repaired = true;
+    }
+  }
+
+  return { repaired, blocker };
+}
+
+(repairHandoff as any).isRelaunchableError = isRelaunchableError;
+(repairHandoff as any).buildRelaunchPrompt = buildRelaunchPrompt;
+(repairHandoff as any).classifyError = classifyError;
+(repairHandoff as any).getDispatchAction = getDispatchAction;
+(repairHandoff as any).FailureClass = FailureClass;
+(repairHandoff as any).DispatchAction = DispatchAction;
+
+export default repairHandoff;
+export { repairHandoff, isRelaunchableError, buildRelaunchPrompt };
+export { FailureClass, DispatchAction };
+
+// CJS compat: ensure require() returns the function directly
+declare const module: { exports: any } | undefined;
+if (typeof module !== 'undefined') { module.exports = repairHandoff; }

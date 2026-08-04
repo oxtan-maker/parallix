@@ -12,8 +12,8 @@ import { materializeBlocklistSnapshot } from '../src/adapters/sqlite/blocklist-s
 // The REAL production consumers — the same functions `px active` selection runs
 // through. These must stay synchronous while honoring the SQLite-materialized
 // blocklist overlay.
-import { eligibleAgentsForStep } from '../src/platform/runtime/lib/agents/launcher-selection.js';
-import { isAgentBlocked } from '../src/platform/runtime/lib/agents/agent-config.js';
+import { eligibleAgentsForStep } from '../src/adapters/agents/launcher-selection.js';
+import { isAgentBlocked } from '../src/adapters/agents/agent-config.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -129,7 +129,7 @@ describe('SQLite operator blocklist — CP3: real consumer wiring with no async 
 
   it('agent-config.ts consumer functions are not async', () => {
     const content = fs.readFileSync(
-      path.resolve('src/platform/runtime/lib/agents/agent-config.ts'),
+      path.resolve('src/adapters/agents/agent-config.ts'),
       'utf8',
     );
     for (const fn of ['readAgentConfig', 'isAgentBlocked', 'parseBlockUntil', 'readAgentConfigOrExit', 'parseAgentConfigFile']) {
@@ -141,7 +141,7 @@ describe('SQLite operator blocklist — CP3: real consumer wiring with no async 
 
   it('launcher-selection.ts selection functions are not async', () => {
     const content = fs.readFileSync(
-      path.resolve('src/platform/runtime/lib/agents/launcher-selection.ts'),
+      path.resolve('src/adapters/agents/launcher-selection.ts'),
       'utf8',
     );
     for (const fn of ['selectAgent', 'eligibleAgentsForStep']) {

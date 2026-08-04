@@ -5,18 +5,18 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const childProcess = require('node:child_process');
-const { performHandoff } = require('../.test-runtime/lib/commands/handoff');
-const missionUtils = require('../.test-runtime/lib/core/mission-utils');
-const git = require('../.test-runtime/lib/core/git');
-const backlog = require('../.test-runtime/lib/tools/backlog');
+const { performHandoff } = require('../.test-runtime/adapters/cli/commands/handoff.js');
+const missionUtils = require('../.test-runtime/adapters/filesystem/mission-utils.js');
+const git = require('../.test-runtime/adapters/git/git.js');
+const backlog = require('../.test-runtime/adapters/backlog/backlog.js');
 
 const REPO_ROOT = path.join(__dirname, '..');
-const RUNTIME_LIB = path.join(REPO_ROOT, 'src', 'platform', 'runtime', 'lib');
+const SOURCE_ROOT = path.join(REPO_ROOT, 'src');
 
-const { stubMissionServices } = require('./helpers/stub-mission-services');
+const { stubMissionServices } = require('./helpers/stub-mission-services.js');
 
 test('task-2273 baseline: handoff owns two commit-equivalent general-gate invocations', () => {
-  const handoff = fs.readFileSync(path.join(RUNTIME_LIB, 'commands', 'handoff.ts'), 'utf8');
+  const handoff = fs.readFileSync(path.join(SOURCE_ROOT, 'adapters', 'cli', 'commands', 'handoff.ts'), 'utf8');
 
   const owners = [
     { boundary: 'handoff-final', invocation: handoff.indexOf('runVerificationGateFn(area || \'docs\'') },
@@ -30,7 +30,7 @@ test('task-2273 baseline: handoff owns two commit-equivalent general-gate invoca
 });
 
 test('task-2273 baseline: no repository-managed review-remote pre-push verifier exists', () => {
-  const trackedFiles = fs.readdirSync(RUNTIME_LIB);
+  const trackedFiles = fs.readdirSync(SOURCE_ROOT);
   assert.ok(trackedFiles.length > 0, 'repository fixture is available');
   assert.equal(fs.existsSync(path.join(REPO_ROOT, '.githooks', 'pre-push')), false,
     'the review-remote pre-push hook described by the backlog is local-only, not a tracked gate owner');

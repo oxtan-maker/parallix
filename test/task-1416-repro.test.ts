@@ -30,7 +30,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 process.env.NO_COLOR = '1';
 
-const { startAgent, setCommandPathProbe } = require('../.test-runtime/lib/agents/agents');
+const { startAgent, setCommandPathProbe } = require('../.test-runtime/adapters/agents/agents.js');
 if (previousHome === undefined) delete process.env.HOME;
 else process.env.HOME = previousHome;
 

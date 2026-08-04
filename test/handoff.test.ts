@@ -4,8 +4,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { verifyHandoff, performHandoff, _findUnverifiableGoalCheckRow } = require('../.test-runtime/lib/commands/handoff');
-const { stubMissionServices } = require('./helpers/stub-mission-services');
+const { verifyHandoff, performHandoff, _findUnverifiableGoalCheckRow } = require('../.test-runtime/adapters/cli/commands/handoff.js');
+const { stubMissionServices } = require('./helpers/stub-mission-services.js');
 const { mock } = test;
 
 test('evidence shell commands require an existing file argument', () => {
@@ -32,12 +32,12 @@ test('evidence accepts git commands inside escaped-backtick markdown cells', () 
 });
 
 // Mock external modules
-const git = require('../.test-runtime/lib/core/git');
-const missionUtils = require('../.test-runtime/lib/core/mission-utils');
-const backlog = require('../.test-runtime/lib/tools/backlog');
-const forgejo = require('../.test-runtime/lib/tools/forgejo');
-const setupReview = require('../.test-runtime/lib/tools/setup-review');
-const gatekeeper = require('../.test-runtime/lib/tools/gatekeeper');
+const git = require('../.test-runtime/adapters/git/git.js');
+const missionUtils = require('../.test-runtime/adapters/filesystem/mission-utils.js');
+const backlog = require('../.test-runtime/adapters/backlog/backlog.js');
+const forgejo = require('../.test-runtime/adapters/forgejo/forgejo.js');
+const setupReview = require('../.test-runtime/adapters/review/setup-review.js');
+const gatekeeper = require('../.test-runtime/adapters/verification/gatekeeper.js');
 
 /**
  * Give the mission an identity for the handoff to act under.
@@ -767,7 +767,7 @@ test('performHandoff accepts file:line evidence with supporting shell context in
 
 test('handoffCommand normalizes uppercase explicit slugs', async (t) => {
   const { mock } = t;
-  const handoff = require('../.test-runtime/lib/commands/handoff');
+  const handoff = require('../.test-runtime/adapters/cli/commands/handoff.js');
 
   // We need to mock performHandoff which is exported from the same module
   // Actually, handoffCommand calls performHandoff from the same file.
@@ -1008,7 +1008,7 @@ test('performHandoff proceeds normally when rebase is a no-op (branch already up
 
 // ---------- runDeclaredGates (generic ## Gates runner) ----------
 
-const { runDeclaredGates } = require('../.test-runtime/lib/commands/handoff');
+const { runDeclaredGates } = require('../.test-runtime/adapters/cli/commands/handoff.js');
 
 test('runDeclaredGates returns skipped when no ## Gates section exists', () => {
   const missionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gates-test-'));
@@ -1112,13 +1112,13 @@ function writeCompatibilityTaskRecord(rootDir, slug, status = 'active') {
   return taskFile;
 }
 
-const { captureNelAtHandoff } = require('../.test-runtime/lib/commands/handoff');
+const { captureNelAtHandoff } = require('../.test-runtime/adapters/cli/commands/handoff.js');
 
 test('captureNelAtHandoff returns error when primary branch not detected', async () => {
-  const origGetPrimaryBranch = require('../.test-runtime/lib/core/mission-utils').getPrimaryBranch;
+  const origGetPrimaryBranch = require('../.test-runtime/adapters/filesystem/mission-utils.js').getPrimaryBranch;
   const { mock } = test;
 
-  const mockFn = mock.method(require('../.test-runtime/lib/core/mission-utils'), 'getPrimaryBranch', () => {
+  const mockFn = mock.method(require('../.test-runtime/adapters/filesystem/mission-utils.js'), 'getPrimaryBranch', () => {
     throw new Error('no branch');
   });
 
@@ -1157,7 +1157,7 @@ test('captureNelAtHandoff records the NEL through the Mission store and writes n
 
     // Mock getPrimaryBranch to return 'main'
     const { mock } = test;
-    const mockFn = mock.method(require('../.test-runtime/lib/core/mission-utils'), 'getPrimaryBranch', () => 'main');
+    const mockFn = mock.method(require('../.test-runtime/adapters/filesystem/mission-utils.js'), 'getPrimaryBranch', () => 'main');
 
     // TASK-2322.07: review rounds come from the Mission store, not review-state.json.
     const recorded = [];
@@ -1219,7 +1219,7 @@ test('captureNelAtHandoff reports a refused Mission write and leaves no legacy r
   const primaryMock = mock.method(missionUtils, 'getPrimaryBranch', () => 'main');
   const errors = [];
   try {
-    const result = await require('../.test-runtime/lib/commands/handoff').captureNelAtHandoff('task-nel-fail', {
+    const result = await require('../.test-runtime/adapters/cli/commands/handoff.js').captureNelAtHandoff('task-nel-fail', {
       rootDir: tmpDir,
       missionDir,
       log: () => {},
@@ -1363,7 +1363,7 @@ test('captureNelAtHandoff reads predicted bucket from MISSION.md Refinement Sign
     ].join('\n'));
 
     const { mock } = test;
-    const mockFn = mock.method(require('../.test-runtime/lib/core/mission-utils'), 'getPrimaryBranch', () => 'main');
+    const mockFn = mock.method(require('../.test-runtime/adapters/filesystem/mission-utils.js'), 'getPrimaryBranch', () => 'main');
     const recorded = [];
 
     try {
@@ -1479,7 +1479,7 @@ test('runDeclaredGates captures stdout and stderr on gate failure (SC2)', async 
 
 // ---------- validateDeclaredGates (pre-validation of gate commands) ----------
 
-const { validateDeclaredGates } = require('../.test-runtime/lib/commands/handoff');
+const { validateDeclaredGates } = require('../.test-runtime/adapters/cli/commands/handoff.js');
 
 test('validateDeclaredGates passes for valid commands with existing files', () => {
   const rootDir = path.join(__dirname, '..');
@@ -1617,7 +1617,7 @@ test('validateDeclaredGates passes glob patterns (no false positive on /*)', () 
 test('validateDeclaredGates passes directory references with trailing slash', () => {
   const rootDir = path.join(__dirname, '..');
   const result = validateDeclaredGates(
-    ["npm run prepublishOnly && npm pack --dry-run 2>&1 | grep -q 'src/platform/runtime/lib/agents/'"],
+    ["npm run prepublishOnly && npm pack --dry-run 2>&1 | grep -q 'src/adapters/agents/'"],
     rootDir
   );
   assert.strictEqual(result.ok, true);
@@ -2114,12 +2114,12 @@ test('performHandoff relaunch prompt lists all missing artifact types', async (t
 // ── task-2215: auto-generated checkpoint must pass evidence validation ────────
 
 test('buildAutoCheckpointContent produces verifiable evidence rows', () => {
-  const handoffModule = require('../.test-runtime/lib/commands/handoff');
+  const handoffModule = require('../.test-runtime/adapters/cli/commands/handoff.js');
   const rootDir = path.join(__dirname, '..');
 
   const content = handoffModule._buildAutoCheckpointContent('task-2215');
   assert.match(content, /^## Goal Check$/m, 'template must contain the ## Goal Check heading');
-  assert.ok(content.includes('src/platform/runtime/lib/commands/handoff.ts:277'),
+  assert.ok(content.includes('src/adapters/cli/commands/handoff.ts:277'),
     'evidence must cite the auto-remediation source file:line, not the removed handoff.js');
   assert.ok(!content.includes('handoff.js auto-remediation'),
     'template must not cite the non-existent handoff.js');

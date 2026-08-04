@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { failure, rejected } = require('../.test-runtime/application/contracts');
+const { failure, rejected } = require('../.test-runtime/application/contracts.js');
 
 test('application outcomes have one terminal status and typed error variants', () => {
   const validation = rejected('validation', 'bad request');

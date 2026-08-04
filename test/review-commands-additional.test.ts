@@ -1,7 +1,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { pushRound, commentRound, submitReviewRound } = require('../.test-runtime/lib/review/review-commands');
+const { pushRound, commentRound, submitReviewRound } = require('../.test-runtime/adapters/review/review-commands.js');
 const mockRootDir = '/mock';
 
 test('pushRound exits when no forgejoUser', async () => {

@@ -14,7 +14,7 @@ const {
   levenshteinDistance,
   deriveAliases,
   resolveAlias,
-} = require('../src/platform/runtime/index.ts');
+} = require('../src/interfaces/cli/runtime.ts');
 
 // ---------- KNOWN_COMMANDS ----------
 
@@ -291,28 +291,19 @@ test('resolveAlias returns null for unknown alias', () => {
   assert.equal(resolveAlias('draft', {}), null);
 });
 
-test('deriveAliases returns base aliases when state-map is missing', () => {
-  const result = deriveAliases('/nonexistent/path/state-map.json');
+test('deriveAliases returns base aliases when state-map is unavailable', () => {
+  const result = deriveAliases();
   assert.equal(result['ready'], 'draft');
   assert.equal(result['approved'], 'integrate');
   assert.equal(result['done'], 'integrate');
 });
 
-test('deriveAliases derives actual-name aliases from state-map file', () => {
-  const fs = require('fs');
-  const os = require('os');
-  const p = require('path');
-  const tmpFile = p.join(os.tmpdir(), `state-map-test-${process.pid}.json`);
-  fs.writeFileSync(tmpFile, JSON.stringify({ ready: 'refined', approved: 'ready-for-integration' }));
-  try {
-    const result = deriveAliases(tmpFile);
-    assert.equal(result['refined'], 'draft');
-    assert.equal(result['ready-for-integration'], 'integrate');
-    assert.equal(result['ready'], 'draft');
-    assert.equal(result['approved'], 'integrate');
-  } finally {
-    fs.rmSync(tmpFile, { force: true });
-  }
+test('deriveAliases derives actual-name aliases from injected state-map data', () => {
+  const result = deriveAliases({ ready: 'refined', approved: 'ready-for-integration' });
+  assert.equal(result['refined'], 'draft');
+  assert.equal(result['ready-for-integration'], 'integrate');
+  assert.equal(result['ready'], 'draft');
+  assert.equal(result['approved'], 'integrate');
 });
 
 test('printAliases prints sorted alias table', () => {

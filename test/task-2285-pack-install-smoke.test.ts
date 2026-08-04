@@ -169,7 +169,7 @@ test('task-2285 install: SC7 — the installed bin is byte-identical to the buil
 
 test('task-2285 install: bare `px` on a non-TTY prints help (SC3)', () => {
   // ADR 0044: without a command or interactive TTY, `px` prints normal help.
-  // Fixed in src/platform/runtime/px.ts — returns empty command and prints usage
+  // Fixed in src/entry/px.ts — returns empty command and prints usage
   // before the target-path check.
   const result = px(path.join(globalPrefix, 'bin', 'px'), []);
   assert.equal(result.status, 0);

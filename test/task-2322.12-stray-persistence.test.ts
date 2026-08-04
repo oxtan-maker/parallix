@@ -22,7 +22,7 @@ import * as path from 'node:path';
 
 import {
   ADR0053_PERSISTENCE_INVENTORY,
-} from '../src/platform/runtime/lib/core/durable-state-inventory.js';
+} from './fixtures/durable-state-inventory.js';
 
 const ROOT = process.cwd();
 
@@ -150,11 +150,11 @@ test('SC2/SC3: no review module or statistics path declares database-owned file 
   // `generated-artifact`, not domain state, so it is not caught here — and the
   // next test is what keeps it write-only.
   const cutOver = [
-    'src/platform/runtime/lib/review/review-state.ts',
-    'src/platform/runtime/lib/review/review-events.ts',
-    'src/platform/runtime/lib/review/review-artifacts.ts',
-    'src/platform/runtime/lib/review/review-commands.ts',
-    'src/platform/runtime/lib/commands/stats.ts',
+    'src/adapters/review/review-state.ts',
+    'src/adapters/review/review-events.ts',
+    'src/adapters/review/review-artifacts.ts',
+    'src/adapters/review/review-commands.ts',
+    'src/adapters/cli/commands/stats.ts',
   ];
   const declared = ADR0053_PERSISTENCE_INVENTORY
     .filter((entry) => entry.classification === 'database-owned-domain-state')
@@ -184,7 +184,7 @@ test('SC2/SC3: no production file reads the review-event export back', () => {
 
 test('SC3: statistics do not import the review modules\' event or state readers', () => {
   const source = fs.readFileSync(
-    path.join(ROOT, 'src/platform/runtime/lib/commands/stats.ts'),
+    path.join(ROOT, 'src/adapters/cli/commands/stats.ts'),
     'utf8',
   );
   const code = withoutComments(source);
