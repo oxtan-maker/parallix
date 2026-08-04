@@ -1,8 +1,8 @@
 ---
 id: TASK-2339
 title: handoff idempotency key not stable across retries
-status: refined
-assignee: [custom]
+status: active
+assignee: [claude]
 created_date: '2026-08-04 10:42'
 updated_date: '2026-08-04 10:42'
 labels: [ai_sdlc, bug]
