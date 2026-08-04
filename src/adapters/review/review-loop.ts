@@ -569,7 +569,7 @@ export async function startReviewLoop(slug: string, opts: {
   isReviewProviderEnabledFn?: ((_rootDir?: string) => boolean) | null | undefined;
   legacyIsForgejoReviewEnabledFn?: ((_rootDir?: string) => boolean) | null;
   isForgejoReviewEnabledFn?: ((_rootDir?: string) => boolean) | null;
-  recordStageStatsSafeFn?: (..._args: any[]) => void;
+  recordStageStatsSafeFn?: (..._args: any[]) => void | Promise<void>;
   runPreReviewGateFn?: typeof runPreReviewGate;
   handleGateFailureAutoBounceFn?: typeof handleGateFailureAutoBounce;
   pushReviewRefFn?: typeof pushReviewRef;
@@ -1234,7 +1234,10 @@ export async function startReviewLoop(slug: string, opts: {
             // only its own usage; accumulateStageStats sums the rounds into one
             // cumulative row per reviewer family.
             const reviewSinceMs = stageLaunchSinceMs(reviewerLaunchResult?.result);
-            recordStageStatsSafeFn('review', {
+            // Awaited, not fired and forgotten: this writes the Review aggregate.
+            // Leaving it in flight raced the artifact consumer that runs next on
+            // the same connection, and could outlive the database handle itself.
+            await recordStageStatsSafeFn('review', {
               stage: 'review', slug, rootDir: worktree, worktree, reviewer, implementer,
               result: reviewerLaunchResult?.result,
               sinceMs: reviewSinceMs || 0, log, error, state, writeReviewStateFn,
@@ -1491,7 +1494,8 @@ export async function startReviewLoop(slug: string, opts: {
         // execute/active launch. The window is bounded to this round's launch
         // so each act-on-review round adds only its own usage.
         const followUpSinceMs = stageLaunchSinceMs(implementerLaunchResult?.result);
-        recordStageStatsSafeFn('active', {
+        // Awaited for the same reason as the review-stage record above.
+        await recordStageStatsSafeFn('active', {
           stage: 'follow-up', slug, rootDir: worktree, worktree, implementer, reviewer,
           result: implementerLaunchResult?.result,
           sinceMs: followUpSinceMs || 0, log, error, state, writeReviewStateFn,

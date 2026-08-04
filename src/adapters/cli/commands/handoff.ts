@@ -24,36 +24,69 @@ import { eligibleAgentsForStep, selectAgent } from '../../agents/agents.js';
 // Export for testing
 export { evidenceCellHasVerifiableReference as _evidenceCellHasVerifiableReference };
 
+/**
+ * A selection failure that means "no other family is available right now",
+ * as opposed to a broken configuration or an unreadable agent policy.
+ *
+ * Only exhaustion may fall back to self-review. Every other failure — an
+ * unreadable agent config, no eligible agents at all, no working launcher —
+ * must propagate: silently reviewing your own work is not the right answer to
+ * a machine that is misconfigured.
+ */
+function isReviewerPoolExhausted(error: unknown): boolean {
+  const message = (error instanceof Error ? error.message : String(error)) || '';
+  return message.includes('exhausted') || message.includes('No agents available');
+}
+
 function resolveHandoffReviewAssignment(
   implementerName: string,
   options: {
     worktree?: string;
     eligibleAgentsForStepFn?: typeof eligibleAgentsForStep;
     selectAgentFn?: typeof selectAgent;
+    log?: (_msg: string) => void;
   } = {},
 ) {
   const implementer = agentFamily(implementerName);
   const eligibleFn = options.eligibleAgentsForStepFn || eligibleAgentsForStep;
   const selectFn = options.selectAgentFn || selectAgent;
+  const log = options.log || fmt.log.plain;
   const configured = eligibleFn('review', { worktree: options.worktree });
-  const reviewerEligibility = ConfiguredReviewerEligibility.fromReviewStep({
-    eligible: configured.map((candidate: string) => agentFamily(candidate)),
-    strategy: 'random',
-  });
+  const configuredFamilies = configured.map((candidate: string) => agentFamily(candidate));
 
-  let reviewer;
   try {
-    reviewer = agentFamily(selectFn('review', {
+    const reviewer = agentFamily(selectFn('review', {
       exclude: new Set([implementerName]),
       worktree: options.worktree,
     }));
-  } catch {
-    // Preserve the documented single-family escape hatch when this workstation
-    // genuinely has no configured, runnable reviewer from another family.
-    reviewer = implementer;
+    return {
+      reviewer,
+      implementer,
+      reviewerEligibility: ConfiguredReviewerEligibility.fromReviewStep({
+        eligible: configuredFamilies,
+        strategy: 'random',
+      }),
+    };
+  } catch (error) {
+    if (!isReviewerPoolExhausted(error)) { throw error; }
+    // The documented single-family escape hatch: this workstation has no other
+    // runnable reviewer at this moment. Record the eligibility that actually
+    // applied — the implementer's own family — so the round states plainly that
+    // it was self-reviewed instead of claiming a reviewer pool it never had.
+    log(fmt.status(
+      'WARN',
+      `No reviewer available besides ${fmt.agent(implementer)}; falling back to self-review for this handoff. `
+      + `${(error as Error).message}`,
+    ));
+    return {
+      reviewer: implementer,
+      implementer,
+      reviewerEligibility: ConfiguredReviewerEligibility.fromReviewStep({
+        eligible: [implementer],
+        strategy: 'random',
+      }),
+    };
   }
-
-  return { reviewer, implementer, reviewerEligibility };
 }
 
 /**
@@ -714,6 +747,7 @@ function findUnverifiableGoalCheckRow(evidenceRows: string[], rootDir: string): 
     worktree: rootDir,
     eligibleAgentsForStepFn,
     selectAgentFn,
+    log,
   });
   const review = startReview({
     change: {
@@ -735,7 +769,9 @@ function findUnverifiableGoalCheckRow(evidenceRows: string[], rootDir: string): 
     },
     actor: reviewer,
     occurredAt: new Date().toISOString(),
-    idempotencyKey: `handoff-${slug}-${Date.now()}`,
+    // Stable across relaunches so the lane-event UNIQUE constraint deduplicates
+    // a retried handoff instead of recording a second entry per attempt.
+    idempotencyKey: `handoff-${slug}`,
   });
   if (transitionResult.status !== 'completed') {
     const msg = `Mission state transition failed: ${transitionResult.error?.message || 'unknown'}.`;

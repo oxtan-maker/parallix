@@ -55,15 +55,64 @@ export interface KnownRepositoryObservation {
  * The aggregate root and its value collections are committed on one
  * connection. Version compare-and-swap catches stale writers even when two
  * writers keep the same lifecycle status.
+ *
+ * Aggregate reads and writes are serialized on this store. A write rewrites the
+ * value collections as DELETE-then-INSERT, and composition shares a single
+ * `DatabaseSync` handle process-wide, so a transaction gives a concurrent read
+ * on that same handle no isolation whatsoever: a `load` that interleaves with a
+ * `save` observes the aggregate mid-rewrite and reports a mission whose Review
+ * has vanished. The review loop does exactly that — recording a stage launch
+ * while consuming reviewer artifacts — and the reviewer's verdict was dropped
+ * with "no Review in the operator database" while the Review was on disk the
+ * whole time. Concurrency between *processes* keeps SQLite's own isolation;
+ * this queue closes the in-process window that shared handle opens.
  */
 export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
   private readonly eventRepo: SqliteBoardLaneEventRepository;
+  /** Tail of the serialized aggregate-operation chain. */
+  private aggregateQueue: Promise<unknown> = Promise.resolve();
 
   constructor(private readonly db: SqliteDatabaseAdapter) {
     this.eventRepo = new SqliteBoardLaneEventRepository(db);
   }
 
+  /**
+   * Run an aggregate operation after every operation already queued.
+   *
+   * A rejected operation must not poison the chain: the next caller waits for
+   * this one to settle, not to succeed.
+   */
+  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.aggregateQueue.then(operation, operation);
+    this.aggregateQueue = result.then(() => undefined, () => undefined);
+    return result;
+  }
+
+  /** Resolve once every queued aggregate operation has settled. */
+  async drain(): Promise<void> {
+    await this.aggregateQueue;
+  }
+
   async load(id: MissionId): Promise<MissionLoadResult> {
+    return this.enqueue(() => this.loadAggregate(id));
+  }
+
+  async save(
+    mission: Mission,
+    expectedVersion: MissionVersion | null,
+  ): Promise<MissionVersion> {
+    return this.enqueue(() => this.saveAggregate(mission, expectedVersion));
+  }
+
+  async saveWithTransition(
+    mission: Mission,
+    expectedVersion: MissionVersion,
+    event: LaneTransitionEvent,
+  ): Promise<MissionVersion> {
+    return this.enqueue(() => this.saveAggregateWithTransition(mission, expectedVersion, event));
+  }
+
+  private async loadAggregate(id: MissionId): Promise<MissionLoadResult> {
     const missionRows = await this.db.query<MissionRecord>(
       `SELECT id, repository_id, title, status, raw_status, assignee,
               net_engineering_lines, closed_at, version
@@ -168,7 +217,7 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
     return { kind: 'found', ...hydrated };
   }
 
-  async save(
+  private async saveAggregate(
     mission: Mission,
     expectedVersion: MissionVersion | null,
   ): Promise<MissionVersion> {
@@ -183,7 +232,7 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
     }
   }
 
-  async saveWithTransition(
+  private async saveAggregateWithTransition(
     mission: Mission,
     expectedVersion: MissionVersion,
     event: LaneTransitionEvent,
@@ -326,7 +375,7 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
         );
       }
       nextVersion = missionVersion(expectedVersion + 1);
-      await this.clearAggregateValues(mission.id);
+      await this.clearAggregateValues(mission);
     }
 
     await this.insertAggregateValues(mission);
@@ -341,13 +390,30 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
     return rows.length === 0 ? null : missionVersion(rows[0].version);
   }
 
-  private async clearAggregateValues(id: MissionId): Promise<void> {
+  /**
+   * Clear the value collections a write is about to rewrite.
+   *
+   * The `mission_reviews` row is kept whenever the mission still has a Review:
+   * every other review table cascades from it, so deleting it discards the
+   * rounds, findings, resolutions, stage launches and the whole review-event
+   * audit trail on every unrelated save. The row is updated in place by
+   * `insertReview` instead, and its children are cleared explicitly here.
+   */
+  private async clearAggregateValues(mission: Mission): Promise<void> {
+    const id = mission.id;
     await this.db.execute('DELETE FROM mission_external_task_refs WHERE mission_id = ?', [id]);
-    await this.db.execute('DELETE FROM mission_reviews WHERE mission_id = ?', [id]);
     await this.db.execute('DELETE FROM mission_checkpoints WHERE mission_id = ?', [id]);
     await this.db.execute('DELETE FROM mission_labels WHERE mission_id = ?', [id]);
-    // mission_review_events, findings, resolutions, stage_launches are
-    // cascade-deleted via FK to mission_reviews.
+    if (!mission.review) {
+      // No Review to keep: the cascade clears every review table.
+      await this.db.execute('DELETE FROM mission_reviews WHERE mission_id = ?', [id]);
+      return;
+    }
+    await this.db.execute('DELETE FROM mission_review_events WHERE mission_id = ?', [id]);
+    await this.db.execute('DELETE FROM mission_review_stage_launches WHERE mission_id = ?', [id]);
+    await this.db.execute('DELETE FROM mission_review_resolutions WHERE mission_id = ?', [id]);
+    await this.db.execute('DELETE FROM mission_review_findings WHERE mission_id = ?', [id]);
+    await this.db.execute('DELETE FROM mission_review_rounds WHERE mission_id = ?', [id]);
   }
 
   private async insertAggregateValues(mission: Mission): Promise<void> {
@@ -404,11 +470,18 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
     if (!review) {
       return;
     }
+    // Upsert, never delete-and-reinsert: the review children cascade from this
+    // row, and a concurrent reader must never observe the mission without it.
     await this.db.execute(
       `INSERT INTO mission_reviews
          (mission_id, intervention_requested_at, intervention_requested_by,
           intervention_reason, gate_failure_retry_count)
-       VALUES (?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(mission_id) DO UPDATE SET
+         intervention_requested_at = excluded.intervention_requested_at,
+         intervention_requested_by = excluded.intervention_requested_by,
+         intervention_reason = excluded.intervention_reason,
+         gate_failure_retry_count = excluded.gate_failure_retry_count`,
       [
         mission.id,
         review.intervention?.requestedAt ?? null,

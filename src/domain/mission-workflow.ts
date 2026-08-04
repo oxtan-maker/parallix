@@ -72,7 +72,15 @@ export function decideMission(mission: Mission, command: MissionCommand): Missio
     requireStatus(mission, ['backlog', 'refined', 'active'], command);
     return { ...mission, status: 'active', assignee: command.agent };
   case 'submit-for-review':
-    requireStatus(mission, ['active'], command);
+    requireStatus(mission, ['active', 'review'], command);
+    // A handoff that relaunches (gatekeeper pushback, crashed agent, retried
+    // CLI invocation) replays this transition against a mission that already
+    // reached review. Submission is therefore idempotent: the mission is
+    // returned untouched, so the recorded review round cannot be rewritten and
+    // no lane event is emitted for a lane that did not move.
+    if (mission.status === 'review') {
+      return mission;
+    }
     if (!command.gatesPassed) {
       throw new MissionRuleViolation('Cannot submit for review before declared gates pass');
     }

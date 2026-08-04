@@ -101,7 +101,10 @@ backlog/refined --activate--> active --submit-for-review--> review
 ```
 
 `submit-for-review` requires passed gates, checkpoint evidence, and a review
-awaiting a reviewer decision. `request-changes` requires that same exact
+awaiting a reviewer decision. Replaying it against a mission already in
+`review` is an idempotent no-op that returns the mission unchanged, so a
+relaunched handoff retries safely instead of failing the transition.
+`request-changes` requires that same exact
 revision to be awaiting an implementer response; `approve` requires it to be
 approved. `integrate` requires the durable `integration` queue state.
 Pull-request identity represents the local review conversation: an optional
