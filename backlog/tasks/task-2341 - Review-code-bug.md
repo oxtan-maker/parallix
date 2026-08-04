@@ -1,7 +1,7 @@
 ---
 id: TASK-2341
 title: Review code bug
-status: backlog
+status: refined
 assignee: [custom]
 created_date: '2026-08-04 12:27'
 labels: [bug, ai_sdlc]
