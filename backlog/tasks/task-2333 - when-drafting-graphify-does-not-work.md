@@ -1,7 +1,7 @@
 ---
 id: TASK-2333
 title: when drafting graphify does not work
-status: backlog
+status: refined
 assignee: [custom]
 created_date: '2026-08-03 05:41'
 labels: [ai_sdlc]
