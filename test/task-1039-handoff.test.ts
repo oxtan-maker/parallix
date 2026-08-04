@@ -4,15 +4,15 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { verifyHandoff, performHandoff } = require('../.test-runtime/lib/commands/handoff');
-const { stubMissionServices } = require('./helpers/stub-mission-services');
+const { verifyHandoff, performHandoff } = require('../.test-runtime/adapters/cli/commands/handoff.js');
+const { stubMissionServices } = require('./helpers/stub-mission-services.js');
 const { mock } = test;
 
-const git = require('../.test-runtime/lib/core/git');
-const missionUtils = require('../.test-runtime/lib/core/mission-utils');
-const backlog = require('../.test-runtime/lib/tools/backlog');
-const forgejo = require('../.test-runtime/lib/tools/forgejo');
-const gatekeeper = require('../.test-runtime/lib/tools/gatekeeper');
+const git = require('../.test-runtime/adapters/git/git.js');
+const missionUtils = require('../.test-runtime/adapters/filesystem/mission-utils.js');
+const backlog = require('../.test-runtime/adapters/backlog/backlog.js');
+const forgejo = require('../.test-runtime/adapters/forgejo/forgejo.js');
+const gatekeeper = require('../.test-runtime/adapters/verification/gatekeeper.js');
 
 const TEST_SLUG = 'task-handoff-test';
 const WORKTREE = path.join(os.tmpdir(), `handoff-test-worktree-${process.pid}`);

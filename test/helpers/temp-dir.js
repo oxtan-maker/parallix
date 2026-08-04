@@ -21,7 +21,7 @@ function mkdtemp(prefix = 'parallix-test-') {
   // The bootstrap exposes registerTempRoot when loaded via --require.
   // When running outside the bootstrap (e.g., integration solo runs),
   // this is a no-op — the test's own afterEach handles cleanup.
-  const bootstrap = require('../bootstrap-parallix-home');
+  const bootstrap = require('../bootstrap-parallix-home.js');
   if (typeof bootstrap.registerTempRoot === 'function') {
     bootstrap.registerTempRoot(dir);
   }

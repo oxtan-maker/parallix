@@ -3,7 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
-const { printIntegrationPreflight } = require('../.test-runtime/lib/commands/integrate');
+const { printIntegrationPreflight } = require('../.test-runtime/adapters/cli/commands/integrate.js');
 const { mock } = test;
 
 const TEST_SLUG = 'task-preflight-test';
@@ -176,7 +176,7 @@ test('printIntegrationPreflight main-dirty warning', (t) => {
 });
 
 test('getUnresolvedIndexConflicts failure path', (t) => {
-  const { getUnresolvedIndexConflicts } = require('../.test-runtime/lib/commands/integrate');
+  const { getUnresolvedIndexConflicts } = require('../.test-runtime/adapters/cli/commands/integrate.js');
   const result = getUnresolvedIndexConflicts('/tmp/dir', {
     gitRunner: () => ({ status: 1, stdout: 'git error' })
   });
@@ -185,7 +185,7 @@ test('getUnresolvedIndexConflicts failure path', (t) => {
 });
 
 test('promoteTaskForIntegrationIfNeeded failure path', async (t) => {
-  const { promoteTaskForIntegrationIfNeeded } = require('../.test-runtime/lib/commands/integrate');
+  const { promoteTaskForIntegrationIfNeeded } = require('../.test-runtime/adapters/cli/commands/integrate.js');
   const context = {
     task: { ok: true, taskFile: '/tmp/task.md' },
     taskStatus: 'review',
@@ -197,12 +197,12 @@ test('promoteTaskForIntegrationIfNeeded failure path', async (t) => {
   };
 
   // Mock backlog.setTaskStatus to fail
-  const backlog = require('../.test-runtime/lib/tools/backlog');
+  const backlog = require('../.test-runtime/adapters/backlog/backlog.js');
   const originalSetTaskStatus = backlog.setTaskStatus;
   backlog.setTaskStatus = () => false;
 
   // Mock createMissionApplicationServices for SQLite-first transitions
-  const composition = require('../.test-runtime/lib/composition/application-services');
+  const composition = require('../.test-runtime/composition/application-services.js');
   const originalCreate = composition.createMissionApplicationServices;
   composition.createMissionApplicationServices = async () => ({
     store: {
@@ -220,7 +220,9 @@ test('promoteTaskForIntegrationIfNeeded failure path', async (t) => {
   try {
     let threw = false;
     try {
-      await promoteTaskForIntegrationIfNeeded(context);
+      await promoteTaskForIntegrationIfNeeded(context, {
+        missionServicesFn: composition.createMissionApplicationServices,
+      });
     } catch (err) {
       threw = true;
       assert.equal(err.constructor.name, 'IntegrationAbort', 'should throw IntegrationAbort');

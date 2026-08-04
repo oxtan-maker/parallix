@@ -7,11 +7,11 @@ const os = require('os');
 const path = require('path');
 const childProcess = require('node:child_process');
 
-const stats = require('../.test-runtime/lib/commands/stats');
-const { resolveDatabasePath } = require('../.test-runtime/adapters/sqlite/database-path-resolver');
-const backlog = require('../.test-runtime/lib/tools/backlog');
-const verification = require('../.test-runtime/lib/core/verification');
-const postIntegrateHookModule = require('../.test-runtime/lib/core/post-integrate-hook');
+const stats = require('../.test-runtime/adapters/cli/commands/stats.js');
+const { resolveDatabasePath } = require('../.test-runtime/adapters/sqlite/database-path-resolver.js');
+const backlog = require('../.test-runtime/adapters/backlog/backlog.js');
+const verification = require('../.test-runtime/adapters/verification/verification.js');
+const postIntegrateHookModule = require('../.test-runtime/adapters/process/post-integrate-hook.js');
 mock.method(backlog, 'getTaskClassification', () => 'ai_sdlc');
 
 function installVerificationMocks() {
@@ -53,7 +53,7 @@ const previousPrimaryWorktree = process.env.PRIMARY_WORKTREE;
 process.env.PRIMARY_WORKTREE = FAKE_ROOT;
 
 // Mock getPrimaryBranch BEFORE requiring dependent modules to ensure they use the mock.
-const missionUtils = require('../.test-runtime/lib/core/mission-utils');
+const missionUtils = require('../.test-runtime/adapters/filesystem/mission-utils.js');
 if (previousPrimaryWorktree === undefined) delete process.env.PRIMARY_WORKTREE;
 else process.env.PRIMARY_WORKTREE = previousPrimaryWorktree;
 
@@ -102,13 +102,13 @@ const {
   parseIntegrateArgs,
   runPostIntegrateHookOrAbort,
   prepareNoisePatchForSquash
-} = require('../.test-runtime/lib/commands/integrate');
-const integrateCommand = require('../.test-runtime/lib/commands/integrate');
+} = require('../.test-runtime/adapters/cli/commands/integrate.js');
+const integrateCommand = require('../.test-runtime/adapters/cli/commands/integrate.js');
 const { conventionalWorktreePath, getPrimaryBranch } = missionUtils;
 
 const PRIMARY = getPrimaryBranch();
 
-const { stubMissionServices } = require('./helpers/stub-mission-services');
+const { stubMissionServices } = require('./helpers/stub-mission-services.js');
 
 test('prepareNoisePatchForSquash cleans only its owned patch directory when reset fails', () => {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'integrate-noise-cleanup-'));
@@ -185,7 +185,7 @@ test('final integration gate identity rejects a dirty or wrong selected root bef
   const dirty = captureFinalIntegrationTree(root, {
     gitRunner(args) {
       assert.deepEqual(args.slice(1), [path.resolve(root), 'status', '--porcelain']);
-      return { status: 0, stdout: ' M src/platform/runtime/lib/commands/integrate.ts', stderr: '' };
+      return { status: 0, stdout: ' M src/adapters/cli/commands/integrate.ts', stderr: '' };
     }
   });
   assert.equal(dirty.ok, false);
@@ -236,7 +236,7 @@ test('px integrate rejects malformed real-agent options before preflight or gate
 });
 
 test('buildIntegrationContext reads task file and status from the base worktree only', async (t) => {
-  const backlog = require('../.test-runtime/lib/tools/backlog');
+  const backlog = require('../.test-runtime/adapters/backlog/backlog.js');
   const worktree = '/tmp/project-task-2200';
   const baseWorktree = '/tmp/project-main';
   const worktreeTask = `${worktree}/backlog/tasks/task-2200 - fix.md`;
@@ -247,8 +247,8 @@ test('buildIntegrationContext reads task file and status from the base worktree 
   const mockedFindMissionArea = mock.method(missionUtils, 'findMissionArea', () => 'lib');
   const mockedResolveMissionBaseBranch = mock.method(missionUtils, 'resolveMissionBaseBranch', () => 'main');
   const mockedResolveBaseWorktree = mock.method(missionUtils, 'resolveBaseWorktree', () => baseWorktree);
-  const mockedGetCurrentBranch = mock.method(require('../.test-runtime/lib/core/git'), 'getCurrentBranch', () => 'mission/task-2200');
-  const mockedGit = mock.method(require('../.test-runtime/lib/core/git'), 'git', (args) => {
+  const mockedGetCurrentBranch = mock.method(require('../.test-runtime/adapters/git/git.js'), 'getCurrentBranch', () => 'mission/task-2200');
+  const mockedGit = mock.method(require('../.test-runtime/adapters/git/git.js'), 'git', (args) => {
     if (args.includes('branch') && args.includes('--show-current')) {
       return { status: 0, stdout: 'main', stderr: '' };
     }
@@ -294,7 +294,7 @@ test('buildIntegrationContext reads task file and status from the base worktree 
 });
 
 test('buildIntegrationContext does not let a mission-worktree status replace the base status (task-2244 regression)', async (t) => {
-  const backlog = require('../.test-runtime/lib/tools/backlog');
+  const backlog = require('../.test-runtime/adapters/backlog/backlog.js');
   const worktree = '/tmp/project-task-2244';
   const baseWorktree = '/tmp/project-main-2244';
   const worktreeTask = `${worktree}/backlog/tasks/task-2244 - fix.md`;
@@ -305,8 +305,8 @@ test('buildIntegrationContext does not let a mission-worktree status replace the
   const mockedFindMissionArea = mock.method(missionUtils, 'findMissionArea', () => 'lib');
   const mockedResolveMissionBaseBranch = mock.method(missionUtils, 'resolveMissionBaseBranch', () => 'main');
   const mockedResolveBaseWorktree = mock.method(missionUtils, 'resolveBaseWorktree', () => baseWorktree);
-  const mockedGetCurrentBranch = mock.method(require('../.test-runtime/lib/core/git'), 'getCurrentBranch', () => 'mission/task-2244');
-  const mockedGit = mock.method(require('../.test-runtime/lib/core/git'), 'git', (args) => {
+  const mockedGetCurrentBranch = mock.method(require('../.test-runtime/adapters/git/git.js'), 'getCurrentBranch', () => 'mission/task-2244');
+  const mockedGit = mock.method(require('../.test-runtime/adapters/git/git.js'), 'git', (args) => {
     if (args.includes('branch') && args.includes('--show-current')) {
       return { status: 0, stdout: 'main', stderr: '' };
     }
@@ -348,7 +348,7 @@ test('buildIntegrationContext does not let a mission-worktree status replace the
 });
 
 test('printIntegrationPreflight reads classification from the selected task file, not by re-resolving in the base checkout', (t) => {
-  const backlog = require('../.test-runtime/lib/tools/backlog');
+  const backlog = require('../.test-runtime/adapters/backlog/backlog.js');
   const logs = [];
   const worktreeTask = '/tmp/project-task-2200/backlog/tasks/task-2200 - fix.md';
 
@@ -937,7 +937,7 @@ test('px integrate --dry-run never invokes the post-integrate hook (SC4)', async
   console.log = () => {};
   try {
     try {
-      await integrateCommand(['task-integrate-hook-dry-run-does-not-exist', '--dry-run']);
+      await integrateCommand(['task-integrate-hook-dry-run-does-not-exist', '--dry-run'], { missionServicesFn: stubMissionServices() });
     } catch (err) {
       if (err.message !== 'process.exit called') throw err;
     }
@@ -961,7 +961,7 @@ test('px integrate never invokes the post-integrate hook when preflight fails (S
   console.log = () => {};
   try {
     try {
-      await integrateCommand(['task-integrate-hook-preflight-fails-does-not-exist']);
+      await integrateCommand(['task-integrate-hook-preflight-fails-does-not-exist'], { missionServicesFn: stubMissionServices() });
     } catch (err) {
       if (err.message !== 'process.exit called') throw err;
     }
@@ -1004,8 +1004,8 @@ test('evaluateTaskStatusForIntegration accepts review when the latest formal rev
 });
 
 test('provider-backed approval repair leaves integration preflight with review instead of stale active', async () => {
-  const { submitReviewRound } = require('../.test-runtime/lib/review/review');
-  const { ReviewState } = require('../.test-runtime/lib/review/review-state');
+  const { submitReviewRound } = require('../.test-runtime/adapters/review/review-commands.js');
+  const { ReviewState } = require('../.test-runtime/adapters/review/review-state.js');
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1327-integrate-preflight-'));
   const taskFile = path.join(root, 'backlog', 'tasks', 'task-2199 - stale-active.md');
   const previousUser = process.env.FORGEJO_USER;
@@ -1372,7 +1372,7 @@ test('printIntegrationPreflight fails fast on an in-progress rebase in the integ
 });
 
 test('maybeUpdateGraphifyOnPrimary skips cleanly when graphify is missing', () => {
-  const { maybeUpdateGraphifyOnPrimary } = require('../.test-runtime/lib/commands/integrate');
+  const { maybeUpdateGraphifyOnPrimary } = require('../.test-runtime/adapters/cli/commands/integrate.js');
   const logs = [];
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'integrate-graphify-missing-'));
   fs.mkdirSync(path.join(root, 'graphify-out'));
@@ -1400,7 +1400,7 @@ test('maybeUpdateGraphifyOnPrimary skips cleanly when graphify is missing', () =
 });
 
 test('maybeUpdateGraphifyOnPrimary runs graphify update in the primary worktree when available', () => {
-  const { maybeUpdateGraphifyOnPrimary } = require('../.test-runtime/lib/commands/integrate');
+  const { maybeUpdateGraphifyOnPrimary } = require('../.test-runtime/adapters/cli/commands/integrate.js');
   const calls = [];
   const logs = [];
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'integrate-graphify-update-'));

@@ -1,7 +1,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const opencode = require('../.test-runtime/lib/agents/opencode');
+const opencode = require('../.test-runtime/adapters/agents/opencode.js');
 
 // Reset the feature-detect cache after each test so subsequent tests don't
 // inherit stale results from a real opencode binary on the host.
@@ -183,7 +183,7 @@ test('buildOpencodeInvocation accepts preferJson:false to omit --format json (ta
 // ---------- startOpencodeAgent stale session detection (task-1322) ----------
 
 test('startOpencodeAgent retries without -s when spawn returns "Session not found" in stderr', async () => {
-  const opencode = require('../.test-runtime/lib/agents/opencode');
+  const opencode = require('../.test-runtime/adapters/agents/opencode.js');
   const mockSessionPort = { deleted: null, async delete(missionId, role) { this.deleted = { missionId, role }; } };
   let spawnCount = 0;
   const mockSpawn = (cmd, args, opts) => {

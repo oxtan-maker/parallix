@@ -6,9 +6,9 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const stats = require('../.test-runtime/lib/commands/stats');
-const { SqliteMeasurementStore } = require('../.test-runtime/adapters/sqlite/measurement-store');
-const { ADR0053_PERSISTENCE_INVENTORY } = require('../.test-runtime/lib/core/durable-state-inventory');
+const stats = require('../.test-runtime/adapters/cli/commands/stats.js');
+const { SqliteMeasurementStore } = require('../.test-runtime/adapters/sqlite/measurement-store.js');
+const { ADR0053_PERSISTENCE_INVENTORY } = require('./fixtures/durable-state-inventory.ts');
 
 /**
  * TASK-2322.08 CP-4: prove no UNCLASSIFIED `stats.csv` read or write survives.
@@ -44,7 +44,7 @@ test('no source file outside the named legacy boundary references stats.csv in e
   // `stats.ts` owns `readLegacyStatsCsv` / `analyzeLegacyStatsCsv`, the single
   // explicit read-only boundary. Everything else must be silent about stats.csv.
   const allowed = new Set([
-    path.join(SRC_ROOT, 'platform', 'runtime', 'lib', 'commands', 'stats.ts'),
+    path.join(SRC_ROOT, 'adapters', 'cli', 'commands', 'stats.ts'),
   ]);
 
   const offenders: string[] = [];
@@ -83,7 +83,7 @@ test('no source file resolves a default stats CSV path or writes CSV for statist
 
 test('the only stats CSV boundary in the ADR 0053 inventory is an explicit one-way legacy input', () => {
   const statsEntries = ADR0053_PERSISTENCE_INVENTORY.filter(
-    (entry: any) => entry.fileLocation === 'src/platform/runtime/lib/commands/stats.ts'
+    (entry: any) => entry.fileLocation === 'src/adapters/cli/commands/stats.ts'
       && (entry.concept === 'AgentRunMeasurement' || entry.concept === 'MissionOutcome'),
   );
   assert.deepEqual(

@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
-const { findForbiddenApplicationDependencies, findCompositionViolations } = require('../.test-runtime/lib/architecture/boundary-guards');
-const { createProductionApplicationServices } = require('../.test-runtime/lib/composition/application-services');
+const { findForbiddenApplicationDependencies, findCompositionViolations } = require('../.test-runtime/adapters/architecture/boundary-guards.js');
+const { createProductionApplicationServices } = require('../.test-runtime/composition/application-services.js');
 
 const root = process.cwd();
 const fixture = (name: string) => path.join(root, 'test', 'fixtures', 'application-boundary', name);
@@ -98,7 +98,7 @@ test('boundary guard permits src/adapters/sqlite/ repository adapter path', () =
 });
 
 test('composition guard accepts the sole production composition root', async () => {
-  assert.deepEqual(findCompositionViolations(path.join(root, 'src', 'platform', 'runtime', 'lib')), []);
+  assert.deepEqual(findCompositionViolations(path.join(root, 'src', 'composition')), []);
   const graph = await createProductionApplicationServices(root, undefined, { skipImportGate: true });
   assert.equal(graph.executeMission.constructor.name, 'ExecuteMissionService');
   assert.equal(graph.statsBackfill.constructor.name, 'StatsBackfillService');

@@ -25,9 +25,9 @@ const {
   generateEventTimestamp,
   sanitizeFilename,
   consumeHumanNotes,
-} = require('../.test-runtime/lib/review/review-events');
+} = require('../.test-runtime/adapters/review/review-events.js');
 const { seedMissionDatabase } = require('./fixtures/review-state-db.js');
-const { agentFamily } = require('../.test-runtime/domain/agents');
+const { agentFamily } = require('../.test-runtime/domain/agents.js');
 
 // Test slug that is guaranteed not to exist
 const NONEXISTENT_SLUG = 'task-test-review-events-nonexistent';
@@ -50,9 +50,9 @@ async function withSeededReview(fn) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'review-events-home-'));
   const restoreHome = await seedMissionDatabase(home, TEST_SLUG, tempDir);
   try {
-    return await fn();
+    return await fn(restoreHome.store);
   } finally {
-    restoreHome();
+    await restoreHome();
     fs.rmSync(home, { recursive: true, force: true });
   }
 }
@@ -182,7 +182,7 @@ test('createEvent fails for invalid verdict', async () => {
 });
 
 test('createEvent succeeds for valid event', async () => {
-  await withSeededReview(async () => {
+  await withSeededReview(async (missionStore) => {
   const result = await createEvent(TEST_SLUG, VALID_EVENT_TYPES.REVIEWER_FINDINGS, {
     content: '# Review Findings\n\n## Finding 1\n- File: workflow/lib/test.js\n- Severity: HIGH',
     round: 1,
@@ -190,7 +190,8 @@ test('createEvent succeeds for valid event', async () => {
     actor: 'claude'
   }, {
     worktree: tempDir,
-    skipGit: true
+    skipGit: true,
+    missionStore,
   });
   
   assert.ok(result.ok);
@@ -211,7 +212,7 @@ test('createEvent succeeds for valid event', async () => {
 });
 
 test('createEvent adds workflow metadata footer', async () => {
-  await withSeededReview(async () => {
+  await withSeededReview(async (missionStore) => {
   const result = await createEvent(TEST_SLUG, VALID_EVENT_TYPES.IMPLEMENTER_ROUND_SUMMARY, {
     content: '# Resolution Summary',
     round: 2,
@@ -219,7 +220,8 @@ test('createEvent adds workflow metadata footer', async () => {
     actor: 'gemini'
   }, {
     worktree: tempDir,
-    skipGit: true
+    skipGit: true,
+    missionStore,
   });
   
   assert.ok(result.ok);
@@ -262,7 +264,7 @@ test('createEvent requires disposition for implementer_disposition', async () =>
 });
 
 test('createEvent succeeds with required fields for reviewer_outcome', async () => {
-  await withSeededReview(async () => {
+  await withSeededReview(async (missionStore) => {
   const result = await createEvent(TEST_SLUG, VALID_EVENT_TYPES.REVIEWER_OUTCOME, {
     content: '# Review Outcome',
     round: 1,
@@ -271,7 +273,8 @@ test('createEvent succeeds with required fields for reviewer_outcome', async () 
     verdict: 'approve'
   }, {
     worktree: tempDir,
-    skipGit: true
+    skipGit: true,
+    missionStore,
   });
   
   assert.ok(result.ok);
@@ -285,7 +288,7 @@ test('createEvent succeeds with required fields for reviewer_outcome', async () 
 });
 
 test('createEvent succeeds with required fields for implementer_disposition', async () => {
-  await withSeededReview(async () => {
+  await withSeededReview(async (missionStore) => {
   const result = await createEvent(TEST_SLUG, VALID_EVENT_TYPES.IMPLEMENTER_DISPOSITION, {
     content: '# Disposition',
     round: 1,
@@ -294,7 +297,8 @@ test('createEvent succeeds with required fields for implementer_disposition', as
     disposition: 'CHANGES_MADE'
   }, {
     worktree: tempDir,
-    skipGit: true
+    skipGit: true,
+    missionStore,
   });
   
   assert.ok(result.ok);
@@ -400,7 +404,7 @@ test('readAllEvents returns empty array for nonexistent directory', async () => 
 });
 
 test('readAllEvents reads the stored events, not the exported files', async () => {
-  await withSeededReview(async () => {
+  await withSeededReview(async (missionStore) => {
     const eventsDir = path.join(testMissionDir, 'review-events');
     fs.mkdirSync(eventsDir, { recursive: true });
     for (const f of fs.readdirSync(eventsDir)) { fs.unlinkSync(path.join(eventsDir, f)); }
@@ -414,17 +418,17 @@ test('readAllEvents reads the stored events, not the exported files', async () =
       'utf8',
     );
 
-    assert.deepEqual(await readAllEvents(TEST_SLUG, { rootDir: tempDir }), []);
+    assert.deepEqual(await readAllEvents(TEST_SLUG, { rootDir: tempDir, missionStore }), []);
 
     const created = await createEvent(TEST_SLUG, VALID_EVENT_TYPES.REVIEWER_FINDINGS, {
       content: '# Test Finding',
       round: 1,
       phase: 'reviewing',
       actor: 'claude',
-    }, { worktree: tempDir, skipGit: true });
+    }, { worktree: tempDir, skipGit: true, missionStore });
     assert.ok(created.ok);
 
-    const events = await readAllEvents(TEST_SLUG, { rootDir: tempDir });
+    const events = await readAllEvents(TEST_SLUG, { rootDir: tempDir, missionStore });
     assert.equal(events.length, 1);
     assert.equal(events[0].event_type, 'reviewer_findings');
     assert.equal(events[0].round, 1);
@@ -435,7 +439,7 @@ test('readAllEvents reads the stored events, not the exported files', async () =
 });
 
 test('classifyComment identifies human notes (no workflow footer)', () => {
-  const { classifyComment, VALID_EVENT_TYPES } = require('../.test-runtime/lib/review/review-events');
+  const { classifyComment, VALID_EVENT_TYPES } = require('../.test-runtime/adapters/review/review-events.js');
   
   // Human comment (no footer)
   const humanComment = { body: 'This is a human comment' };
@@ -451,7 +455,7 @@ test('classifyComment identifies human notes (no workflow footer)', () => {
 });
 
 test('hasWorkflowFooter detects workflow metadata footer', () => {
-  const { hasWorkflowFooter } = require('../.test-runtime/lib/review/review-events');
+  const { hasWorkflowFooter } = require('../.test-runtime/adapters/review/review-events.js');
   
   // Has footer
   assert.ok(hasWorkflowFooter('Some content\n\n---\n`[workflow-round:1, workflow-phase:reviewing]`'));
@@ -473,12 +477,15 @@ test('consumeHumanNotes creates human_note events and skips workflow comments', 
     tempDir,
     { number: 3, reviewer: agentFamily('claude'), implementer: agentFamily('mistral'), phase: 'reviewing' },
   );
+  const missionStore = restoreHome.store;
 
   const seen = { branch: null, token: null };
   const result = await consumeHumanNotes(TEST_SLUG, 'claude', {
     worktree: tempDir,
     forgejoUser: 'claude',
     readTokenFn: () => 'token-123',
+    readReviewStateFn: (slug, rootDir) => require('../.test-runtime/adapters/review/review-state.js').readReviewState(slug, rootDir, missionStore),
+    createEventFn: (slug, eventType, params, options) => createEvent(slug, eventType, params, { ...options, missionStore }),
     getCommentsFn: async (branch, token) => {
       seen.branch = branch;
       seen.token = token;
@@ -508,7 +515,7 @@ test('consumeHumanNotes creates human_note events and skips workflow comments', 
   // The .md file path remains as a compatibility fallback.
   if (typeof eventPath === 'string' && eventPath.startsWith('sqlite:')) {
     // Verify the event was persisted in the Review aggregate
-    const events = await readAllEvents(TEST_SLUG, { rootDir: tempDir });
+    const events = await readAllEvents(TEST_SLUG, { rootDir: tempDir, missionStore });
     assert.ok(Array.isArray(events) && events.length > 0);
     const lastEvent = events[events.length - 1];
     assert.equal(lastEvent.event_type, 'human_note');
@@ -527,7 +534,7 @@ test('consumeHumanNotes creates human_note events and skips workflow comments', 
 
     try { fs.unlinkSync(eventPath); } catch (_) {}
   }
-  restoreHome();
+  await restoreHome();
 });
 
 // Run with cleanup

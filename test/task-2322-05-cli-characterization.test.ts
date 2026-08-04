@@ -14,11 +14,11 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-const missionUtils = require('../.test-runtime/lib/core/mission-utils');
-const gitModule = require('../.test-runtime/lib/core/git');
-const verification = require('../.test-runtime/lib/core/verification');
-const checkpointCommand = require('../.test-runtime/lib/commands/checkpoint');
-const handoffModule = require('../.test-runtime/lib/commands/handoff');
+const missionUtils = require('../.test-runtime/adapters/filesystem/mission-utils.js');
+const gitModule = require('../.test-runtime/adapters/git/git.js');
+const verification = require('../.test-runtime/adapters/verification/verification.js');
+const checkpointCommand = require('../.test-runtime/adapters/cli/commands/checkpoint.js');
+const handoffModule = require('../.test-runtime/adapters/cli/commands/handoff.js');
 
 // ---------------------------------------------------------------------------
 // `px checkpoint` — gate, then stage, then commit

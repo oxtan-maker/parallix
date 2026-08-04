@@ -7,8 +7,8 @@ const path = require('node:path');
 // Enforced against TypeScript source rather than a generated tree: the source
 // is authoritative after the transitional dist/ emitter was retired, and the
 // check no longer needs a build to have run first.
-const RUNTIME_LIB = path.join(__dirname, '..', 'src', 'platform', 'runtime', 'lib');
-const RUNTIME_INDEX = path.join(__dirname, '..', 'src', 'platform', 'runtime', 'index.ts');
+const RUNTIME_LIB = path.join(__dirname, '..', 'src', 'adapters', 'cli');
+const RUNTIME_INDEX = path.join(__dirname, '..', 'src', 'interfaces', 'cli', 'runtime.ts');
 // fmt.ts is the centralized terminal sink — the one place allowed to call console.*
 const EXCLUDED = new Set(['fmt.ts']);
 const CONSOLE_RE = /console\.(log|error)/;
@@ -37,7 +37,7 @@ function walkSourceFiles(rootDir) {
   });
 }
 
-test('no direct console.log/error calls in src/platform/runtime/lib/**/*.ts except fmt.ts', () => {
+test('no direct console.log/error calls in CLI adapter modules', () => {
   const files = walkSourceFiles(RUNTIME_LIB)
     .filter(f => path.basename(f) !== 'index.ts')
     .filter(f => !EXCLUDED.has(path.basename(f)));
@@ -47,7 +47,7 @@ test('no direct console.log/error calls in src/platform/runtime/lib/**/*.ts exce
     `Formatter violations found (use fmt.status/fmt.log.* instead):\n${violations.join('\n')}`);
 });
 
-test('no direct console.log/error calls in src/platform/runtime/index.ts', () => {
+test('no direct console.log/error calls in src/interfaces/cli/runtime.ts', () => {
   const violations = findViolations(RUNTIME_INDEX);
   assert.deepEqual(violations, [],
     `Formatter violations found in index.ts (use fmt.status/fmt.log.* instead):\n${violations.join('\n')}`);

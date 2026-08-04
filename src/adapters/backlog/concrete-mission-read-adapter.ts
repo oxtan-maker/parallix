@@ -6,8 +6,8 @@ import { agentFamily, type AgentFamily } from '../../domain/agents.js';
 import type { RepositoryId } from '../../domain/repository.js';
 import type { SourceFact } from '../../application/contracts.js';
 import type { MissionReadAdapter } from '../../application/projections/board-readers.js';
-import { getFirstLine, findCheckpoints, findMissionDir, resolveWorktree } from '../../platform/runtime/lib/core/mission-utils.js';
-import { getTaskAssignee, getTaskFrontmatterValue, getTaskLabels, getTaskStatus, getTaskStorage, resolveTaskFile } from '../../platform/runtime/lib/tools/backlog.js';
+import { getFirstLine, findCheckpoints, findMissionDir, resolveWorktree } from '../filesystem/mission-utils.js';
+import { getTaskAssignee, getTaskFrontmatterValue, getTaskLabels, getTaskStatus, getTaskStorage, resolveTaskFile } from './backlog.js';
 import {
   materializeBacklogMission,
   missionStatusFromBacklog,

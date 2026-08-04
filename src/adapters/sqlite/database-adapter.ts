@@ -107,7 +107,7 @@ export class SqliteDatabaseAdapter {
    *
    * `node:sqlite` is a synchronous driver; the `Promise` surface above exists
    * so adapter work can later move to a worker thread. Callers that must stay
-   * synchronous — the measurement producers cut over by TASK-2322.08 run
+   * synchronous — the measurement producers cut over by architecture migration run
    * inside synchronous command code — use this entry point instead of
    * importing `node:sqlite` themselves, keeping the driver import confined to
    * this module.

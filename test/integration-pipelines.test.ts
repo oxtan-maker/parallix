@@ -7,7 +7,7 @@ const os = require('os');
 const path = require('path');
 
 // Mock getPrimaryWorktree and getPrimaryBranch before requiring integrate.js
-const missionUtils = require('../.test-runtime/lib/core/mission-utils');
+const missionUtils = require('../.test-runtime/adapters/filesystem/mission-utils.js');
 mock.method(missionUtils, 'getPrimaryWorktree', () => '/tmp/mission');
 mock.method(missionUtils, 'getPrimaryBranch', () => 'main');
 mock.method(missionUtils, 'resolveWorktree', (slug) => `/tmp/mission-${slug}`);
@@ -24,7 +24,7 @@ const {
   executeIntegrationGates,
   orderIntegrationGates,
   gateMatchesChangedAreas
-} = require('../.test-runtime/lib/commands/integrate');
+} = require('../.test-runtime/adapters/cli/commands/integrate.js');
 
 // task-1302 (standalone extraction): the tests below invoke the WrGroceries monorepo
 // gate runner scripts/verify-local.sh, which lives outside the parallix tree and is

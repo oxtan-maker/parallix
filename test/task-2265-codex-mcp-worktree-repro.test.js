@@ -5,7 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 test('mission Codex launcher retains the originating CODEX_HOME MCP configuration without copying it', async () => {
-  const codex = require('../.test-runtime/lib/agents/codex');
+  const codex = require('../.test-runtime/adapters/agents/codex.js');
   const parentCodexHome = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2265-parent-codex-home-'));
   const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2265-worktree-'));
   const originalCodexHome = process.env.CODEX_HOME;
@@ -44,7 +44,7 @@ test('mission Codex launcher retains the originating CODEX_HOME MCP configuratio
 });
 
 test('mission Codex launcher completes when optional CODEX_HOME MCP configuration is absent', async () => {
-  const codex = require('../.test-runtime/lib/agents/codex');
+  const codex = require('../.test-runtime/adapters/agents/codex.js');
   const originatingCodexHome = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2265-no-mcp-origin-'));
   const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2265-no-mcp-worktree-'));
   let launchedInvocation;
@@ -75,7 +75,7 @@ test('mission Codex launcher completes when optional CODEX_HOME MCP configuratio
 });
 
 test('mission bootstrap removes stale configuration links when a repeated launch has no optional input', () => {
-  const codex = require('../.test-runtime/lib/agents/codex');
+  const codex = require('../.test-runtime/adapters/agents/codex.js');
   const configuredOrigin = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2265-configured-origin-'));
   const absentOrigin = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2265-absent-origin-'));
   const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2265-repeat-worktree-'));
@@ -100,7 +100,7 @@ test('mission bootstrap removes stale configuration links when a repeated launch
 });
 
 test('concurrent mission launches isolate Codex session state while linking one originating config', () => {
-  const codex = require('../.test-runtime/lib/agents/codex');
+  const codex = require('../.test-runtime/adapters/agents/codex.js');
   const parentCodexHome = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2265-shared-config-'));
   const firstWorktree = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2265-first-worktree-'));
   const secondWorktree = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2265-second-worktree-'));
@@ -127,7 +127,7 @@ test('concurrent mission launches isolate Codex session state while linking one 
 });
 
 test('mission bootstrap retains the installed Graphify skill seed', () => {
-  const codex = require('../.test-runtime/lib/agents/codex');
+  const codex = require('../.test-runtime/adapters/agents/codex.js');
   const operatorHome = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2265-graphify-home-'));
   const originatingCodexHome = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2265-graphify-codex-home-'));
   const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2265-graphify-worktree-'));

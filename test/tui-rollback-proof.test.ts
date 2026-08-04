@@ -14,15 +14,14 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 const root = process.cwd();
-const indexPath = path.join(root, 'src', 'platform', 'runtime', 'index.ts');
+const indexPath = path.join(root, 'src', 'composition', 'create-cli.ts');
 const indexSource = fs.readFileSync(indexPath, 'utf8');
 
 test('rollback-proof: ui command uses dynamic import (not static require)', () => {
   // The 'ui' command must use import() or a lazy wrapper so that removing
   // src/interfaces/tui/ does not break the headless entry module graph.
-  const hasDynamicImport = /await\s+import\s*\(\s*['"]\.\.\/\.\.\/interfaces\/tui\/ui-command\.js['"]\s*\)/.test(indexSource)
-    || /import\s*\(\s*['"]\.\.\/\.\.\/interfaces\/tui\/ui-command\.js['"]\s*\)/.test(indexSource);
-  const hasStaticImport = /^import\s+.*from\s+['"]\.\.\/\.\.\/interfaces\/tui\/ui-command/m.test(indexSource);
+  const hasDynamicImport = /await\s+import\s*\(\s*['"]\.\.\/interfaces\/tui\/ui-command\.js['"]\s*\)/.test(indexSource);
+  const hasStaticImport = /^import\s+.*from\s+['"]\.\.\/interfaces\/tui\/ui-command/m.test(indexSource);
 
   assert.ok(hasDynamicImport, 'ui command must use dynamic import() for rollback safety');
   assert.ok(!hasStaticImport, 'ui command must not use static import (breaks rollback)');
@@ -31,8 +30,8 @@ test('rollback-proof: ui command uses dynamic import (not static require)', () =
 test('rollback-proof: COMMANDS map structure is valid without ui entry', () => {
   // Extract the COMMANDS map and verify it can function without 'ui'.
   // The map is an object with command keys and function values.
-  const commandsMatch = indexSource.match(/const COMMANDS[^;]*;\s*\n/);
-  assert.ok(commandsMatch, 'COMMANDS map must be present in index.ts');
+  const commandsMatch = indexSource.match(/return\s+\{[\s\S]*?\n  \};/);
+  assert.ok(commandsMatch, 'composed command registry must be present in create-cli.ts');
 
   const commandsBlock = commandsMatch[0];
 

@@ -3,7 +3,7 @@
 // This is decision evidence, not a product surface: it proves that a candidate
 // canonical task record can be parsed out of today's Markdown task files and
 // re-serialized without losing a field. It deliberately does not import
-// `src/platform/runtime/lib/tools/backlog.ts` — that module is a set of
+// `src/adapters/backlog/backlog.ts` — that module is a set of
 // single-field regex readers and in-place patchers with no record type, and the
 // mission's Restricted Areas forbid changing it. The parsing shapes accepted
 // here mirror the spellings that module accepts (inline array, block sequence,

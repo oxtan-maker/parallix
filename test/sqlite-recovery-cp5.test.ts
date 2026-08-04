@@ -13,8 +13,8 @@ import { SqliteUsageRepository } from '../src/adapters/sqlite/usage-repository.j
 import { SqliteImporter } from '../src/adapters/sqlite/importer.js';
 import { materializeBlocklistSnapshot } from '../src/adapters/sqlite/blocklist-snapshot.js';
 // Real production consumers, for the rollback / repository-wins proofs.
-import { eligibleAgentsForStep } from '../src/platform/runtime/lib/agents/launcher-selection.js';
-import { readAgentConfig } from '../src/platform/runtime/lib/agents/agent-config.js';
+import { eligibleAgentsForStep } from '../src/adapters/agents/launcher-selection.js';
+import { readAgentConfig } from '../src/adapters/agents/agent-config.js';
 
 // ---------------------------------------------------------------------------
 // Helpers

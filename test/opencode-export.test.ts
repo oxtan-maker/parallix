@@ -8,7 +8,7 @@ const { spawn: realSpawn } = require('child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { captureOpencodeExport } = require('../.test-runtime/lib/agents/opencode-export');
+const { captureOpencodeExport } = require('../.test-runtime/adapters/agents/opencode-export.js');
 
 function makeFakeChild() {
   const child = new EventEmitter();

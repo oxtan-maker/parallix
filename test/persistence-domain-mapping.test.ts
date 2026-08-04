@@ -17,7 +17,7 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
-import { ADR0053_PERSISTENCE_INVENTORY } from '../src/platform/runtime/lib/core/durable-state-inventory.js';
+import { ADR0053_PERSISTENCE_INVENTORY } from './fixtures/durable-state-inventory.js';
 import {
   DOMAIN_CONCEPT_INVARIANTS,
   TECHNICAL_INVENTORY_RESOLUTIONS,

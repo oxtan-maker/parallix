@@ -5,7 +5,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const storage = require('../.test-runtime/lib/core/storage');
+const storage = require('../.test-runtime/adapters/storage/storage.js');
 
 // ---------- resolveParallixHome ----------
 

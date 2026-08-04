@@ -1,4 +1,4 @@
-// Checked consumer → domain-concept requirement mapping (TASK-2322.02, CP 1).
+// Checked consumer → domain-concept requirement mapping.
 //
 // Purpose: prove, in checked TypeScript rather than prose, that every current
 // launch, retry, failover, usage/statistics, review, and UI/board consumer
@@ -59,7 +59,7 @@ export const DOMAIN_CONCEPT_NAMES = [
   'AgentBlock',
 ] as const satisfies readonly DomainConceptName[];
 
-/** The six consumer families TASK-2322.02 traces. */
+/** The six consumer families covered by the domain requirement map. */
 export type ConsumerFamily =
   | 'launch'
   | 'retry'
@@ -125,7 +125,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
   {
     id: 'launch-agent-selection',
     family: 'launch',
-    fileLocation: 'src/platform/runtime/lib/agents/launcher-selection.ts',
+    fileLocation: 'src/adapters/agents/launcher-selection.ts',
     line: 150,
     anchor: 'function selectAgent',
     reads: ['AgentBlock'],
@@ -136,7 +136,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
   {
     id: 'launch-blocklist-filter',
     family: 'launch',
-    fileLocation: 'src/platform/runtime/lib/agents/launcher-selection.ts',
+    fileLocation: 'src/adapters/agents/launcher-selection.ts',
     line: 137,
     anchor: 'isAgentBlocked',
     reads: ['AgentBlock'],
@@ -147,7 +147,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
   {
     id: 'launch-session-resume',
     family: 'launch',
-    fileLocation: 'src/platform/runtime/lib/agents/agents.ts',
+    fileLocation: 'src/adapters/agents/agents.ts',
     line: 380,
     anchor: 'await launchSessionMarkerPort.shouldResume(',
     reads: ['SessionMarker', 'Mission'],
@@ -158,7 +158,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
   {
     id: 'launch-session-marker-write',
     family: 'launch',
-    fileLocation: 'src/platform/runtime/lib/agents/agents.ts',
+    fileLocation: 'src/adapters/agents/agents.ts',
     line: 589,
     anchor: 'await launchSessionMarkerPort.save({',
     reads: ['SessionMarker'],
@@ -173,7 +173,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
   {
     id: 'retry-in-process-tried-set',
     family: 'retry',
-    fileLocation: 'src/platform/runtime/lib/agents/agents.ts',
+    fileLocation: 'src/adapters/agents/agents.ts',
     line: 271,
     anchor: 'const tried = new Set(',
     reads: ['AgentBlock'],
@@ -184,7 +184,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
   {
     id: 'retry-launch-failure-reselect',
     family: 'retry',
-    fileLocation: 'src/platform/runtime/lib/agents/agents.ts',
+    fileLocation: 'src/adapters/agents/agents.ts',
     line: 544,
     anchor: 'retrying with next eligible agent',
     reads: ['AgentBlock'],
@@ -195,8 +195,8 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
   {
     id: 'retry-review-round-counters',
     family: 'retry',
-    fileLocation: 'src/platform/runtime/lib/review/review-commands.ts',
-    line: 1077,
+    fileLocation: 'src/adapters/review/review-commands.ts',
+    line: 1089,
     anchor: 'state.reviewerRetryCount',
     reads: ['Review'],
     requirement:
@@ -206,8 +206,8 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
   {
     id: 'retry-stage-launch-dedupe',
     family: 'retry',
-    fileLocation: 'src/platform/runtime/lib/review/review-loop.ts',
-    line: 63,
+    fileLocation: 'src/adapters/review/review-loop.ts',
+    line: 62,
     anchor: 'function stageLaunchFingerprint',
     reads: ['AgentRunMeasurement', 'Review'],
     requirement:
@@ -221,7 +221,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
   {
     id: 'failover-limit-hit-block',
     family: 'failover',
-    fileLocation: 'src/platform/runtime/lib/agents/agents.ts',
+    fileLocation: 'src/adapters/agents/agents.ts',
     line: 486,
     anchor: 'await updateAgentBlockFn(chosen',
     reads: ['AgentBlock'],
@@ -232,7 +232,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
   {
     id: 'failover-transient-failure-block',
     family: 'failover',
-    fileLocation: 'src/platform/runtime/lib/agents/agents.ts',
+    fileLocation: 'src/adapters/agents/agents.ts',
     line: 568,
     anchor: 'await updateAgentBlockFn(chosen',
     reads: ['AgentBlock'],
@@ -243,7 +243,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
   {
     id: 'failover-block-write',
     family: 'failover',
-    fileLocation: 'src/platform/runtime/lib/agents/agent-config.ts',
+    fileLocation: 'src/adapters/agents/agent-config.ts',
     line: 159,
     anchor: 'function updateAgentBlock',
     reads: ['AgentBlock'],
@@ -258,8 +258,8 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
   {
     id: 'usage-stats-row-columns',
     family: 'usage-statistics',
-    fileLocation: 'src/platform/runtime/lib/commands/stats.ts',
-    line: 101,
+    fileLocation: 'src/adapters/cli/commands/stats.ts',
+    line: 103,
     anchor: 'const STATS_HEADERS',
     reads: ['AgentRunMeasurement'],
     requirement:
@@ -269,8 +269,8 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
   {
     id: 'usage-mission-key',
     family: 'usage-statistics',
-    fileLocation: 'src/platform/runtime/lib/commands/stats.ts',
-    line: 436,
+    fileLocation: 'src/adapters/cli/commands/stats.ts',
+    line: 438,
     anchor: 'function statsMissionKey',
     reads: ['Mission', 'MissionOutcome'],
     requirement:
@@ -295,8 +295,8 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
   {
     id: 'review-round-state',
     family: 'review',
-    fileLocation: 'src/platform/runtime/lib/review/review-state.ts',
-    line: 411,
+    fileLocation: 'src/adapters/review/review-state.ts',
+    line: 402,
     anchor: 'export class ReviewState',
     reads: ['Review', 'Mission'],
     requirement:
@@ -306,8 +306,8 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
   {
     id: 'review-loop-round-progression',
     family: 'review',
-    fileLocation: 'src/platform/runtime/lib/review/review-loop.ts',
-    line: 512,
+    fileLocation: 'src/adapters/review/review-loop.ts',
+    line: 511,
     anchor: 'function startReviewLoop',
     reads: ['Review', 'Mission'],
     requirement:
@@ -317,8 +317,8 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
   {
     id: 'review-checkpoint-evidence',
     family: 'review',
-    fileLocation: 'src/platform/runtime/lib/review/review-commands.ts',
-    line: 504,
+    fileLocation: 'src/adapters/review/review-commands.ts',
+    line: 515,
     anchor: 'findCheckpointsFn(missionDir)',
     reads: ['CheckpointData', 'Mission'],
     requirement:
@@ -413,7 +413,7 @@ export const PER_LAUNCH_IDENTITY_DECISION: PerLaunchIdentityDecision = {
     'usage-mission-key',
   ],
   rationale:
-    'No current consumer requires durable per-launch identity or lifecycle. Retry and failover bookkeeping lives in local variables of one startAgent call; the only durable consequences of a launch are a family-keyed AgentBlock, one replaceable SessionMarker per (mission, role), and measurement rows grouped by (repo, mission). The single durable per-launch value is an opaque stats de-duplication fingerprint with no identity, lifecycle, or reader. ADR 0053 therefore keeps Attempt excluded, and TASK-2322.02 implements the not-required branch.',
+    'No current consumer requires durable per-launch identity or lifecycle. Retry and failover bookkeeping lives in local variables of one startAgent call; the only durable consequences of a launch are a family-keyed AgentBlock, one replaceable SessionMarker per (mission, role), and measurement rows grouped by (repo, mission). The single durable per-launch value is an opaque stats de-duplication fingerprint with no identity, lifecycle, or reader. ADR 0053 therefore keeps Attempt excluded.',
 } as const;
 
 /** All consumers in one family. */

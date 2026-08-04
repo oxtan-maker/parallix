@@ -8,7 +8,7 @@ import {
   ADR0053_PERSISTENCE_INVENTORY,
   type ADR0053BoundaryEntry,
   type ADR0053ConceptName,
-} from '../src/platform/runtime/lib/core/durable-state-inventory.js';
+} from './fixtures/durable-state-inventory.js';
 
 const ROOT = process.cwd();
 const APPLICATION_DIR = path.join(ROOT, 'src', 'application');
@@ -16,7 +16,7 @@ const INTERFACES_DIR = path.join(ROOT, 'src', 'interfaces');
 const ADAPTERS_SQLITE_DIR = path.join(ROOT, 'src', 'adapters', 'sqlite');
 
 // ---------------------------------------------------------------------------
-// Helpers (reuses patterns from src/platform/runtime/lib/architecture/boundary-guards.ts)
+// Helpers (reuses patterns from src/adapters/architecture/boundary-guards.ts)
 // ---------------------------------------------------------------------------
 
 function tsFiles(dir: string): string[] {
@@ -514,34 +514,35 @@ test('SC1 reverse: all durable-IO files under src/ are present in the inventory'
 
   // Files that do durable IO but are infrastructure (not concept entries)
   const infrastructureExclusions = new Set([
-    // Internal test helper / guard infrastructure
-    'src/platform/runtime/lib/architecture/boundary-guards.ts',
+    // Adapter-layer boundary guard scans source files to enforce dependency rules,
+    // rather than reading or writing an ADR 0053 durable-state concept.
+    'src/adapters/architecture/boundary-guards.ts',
     // The inventory file itself
-    'src/platform/runtime/lib/core/durable-state-inventory.ts',
+    'test/fixtures/durable-state-inventory.ts',
     // Core storage abstraction (defines the API, not a concept reader/writer)
-    'src/platform/runtime/lib/core/storage.ts',
+    'src/adapters/storage/storage.ts',
     // Package root detection (reads package.json for name, not a durable-state concept)
-    'src/platform/runtime/lib/core/package-root.ts',
+    'src/adapters/filesystem/package-root.ts',
     // Mutation scoper (reads files to detect mutations, not a concept)
-    'src/platform/runtime/lib/core/mutation-scoper.ts',
+    'src/adapters/git/mutation-scoper.ts',
     // Database adapter (SQLite infrastructure)
     'src/adapters/sqlite/database-adapter.ts',
     // Agent launchers — write config files for the agent runtime, not domain state
-    'src/platform/runtime/lib/agents/codex.ts',
-    'src/platform/runtime/lib/agents/vibe.ts',
+    'src/adapters/agents/codex.ts',
+    'src/adapters/agents/vibe.ts',
     // Opencode export — writes temporary scratch files
-    'src/platform/runtime/lib/agents/opencode-export.ts',
+    'src/adapters/agents/opencode-export.ts',
     // Mission utility helpers — read mission files for path resolution
-    'src/platform/runtime/lib/core/mission-utils/paths.ts',
-    'src/platform/runtime/lib/core/mission-utils/worktree.ts',
+    'src/adapters/filesystem/mission-paths.ts',
+    'src/adapters/git/worktree.ts',
     // Verification proofs — infrastructure metadata, not a domain concept
-    'src/platform/runtime/lib/core/verification.ts',
+    'src/adapters/verification/verification.ts',
     // Red-green reproduction test tracking — reads mission docs for test markers
-    'src/platform/runtime/lib/tools/redgreen.ts',
+    'src/adapters/verification/redgreen.ts',
     // Review command surface — reads mission documents, checkpoints, ADRs and
     // operator-named input files. Its Review state is the SQLite aggregate;
     // none of these reads are of a database-owned concept (TASK-2322.12).
-    'src/platform/runtime/lib/review/review-commands.ts',
+    'src/adapters/review/review-commands.ts',
   ]);
 
   const durableIoFiles = new Set<string>();

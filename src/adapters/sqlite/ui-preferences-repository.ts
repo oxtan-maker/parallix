@@ -7,7 +7,7 @@ import type { UIPreferenceEntry, UIPreferencesRepository } from '../../applicati
  * Implements `UIPreferencesRepository` using parameterized SQL.
  *
  * Authority mapping: operator-local source-of-truth for UI settings.
- * Maps to TASK-2294 domain: operator-local cache (board projections).
+ * Maps to architecture migration domain: operator-local cache (board projections).
  */
 export class SqliteUIPreferencesRepository implements UIPreferencesRepository {
   private db: SqliteDatabaseAdapter;

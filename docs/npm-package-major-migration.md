@@ -105,7 +105,7 @@ migrations under their payload root and apply them before operator-state reads.
 ## Optional agent SDK: `@earendil-works/pi-coding-agent`
 
 The pi coding-agent SDK used to be a hard `dependency`. It is loaded through an
-opaque dynamic import (`src/platform/runtime/lib/agents/pi.ts`), so esbuild cannot
+opaque dynamic import (`src/adapters/agents/pi.ts`), so esbuild cannot
 inline it and it is **not** part of the bundle; shipping it as a dependency only
 pulled ~140 transitive packages — and their published advisories — into every
 install without putting a single byte into the payload.

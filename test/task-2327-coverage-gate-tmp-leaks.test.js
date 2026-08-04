@@ -25,8 +25,8 @@ const REPO_ROOT = path.resolve(__dirname, '..');
 const COVERAGE_GATE_SRC = path.join(
   REPO_ROOT,
   '.test-runtime',
-  'lib',
-  'commands',
+  'adapters',
+  'verification',
   'coverage-gate.js'
 );
 

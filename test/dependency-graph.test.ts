@@ -8,9 +8,9 @@ const {
   allowedDependencyGraph,
   findDependencyViolations,
   findProductionDependencyViolations,
+  findPlatformPaths,
   layerRoots,
-  legacyLayerRoots,
-} = require('../.test-runtime/lib/architecture/boundary-guards');
+} = require('../.test-runtime/adapters/architecture/boundary-guards.js');
 
 function withFixture(source: string, target: string, run: (root: string) => void): void {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dependency-graph-'));
@@ -56,13 +56,8 @@ test('dependency graph validates interfaces layer imports without unallowlisted 
 
 test('dependency graph validates composition layer imports without unallowlisted violations', () => {
   assert.deepEqual(layerRoots.composition, ['src/composition']);
-  assert.deepEqual(legacyLayerRoots.composition, ['src/platform/runtime', 'src/platform/assets']);
   assert.deepEqual(allowedDependencyGraph.composition, ['domain', 'application', 'adapters', 'interfaces', 'composition']);
   assertPermitted('composition', 'src/composition/source.ts', 'src/adapters/target.ts');
-});
-
-test('dependency graph keeps legacy package runtime assets classified during migration', () => {
-  assertPermitted('composition assets', 'src/platform/runtime/source.ts', 'src/platform/assets/target.ts');
 });
 
 test('dependency graph validates entry layer imports without unallowlisted violations', () => {
@@ -97,4 +92,16 @@ test('dependency graph honors an explicitly owned legacy exception', () => {
 
 test('dependency graph production scan has no violation outside the owned allowlist', () => {
   assert.deepEqual(findProductionDependencyViolations(process.cwd()), []);
+});
+
+test('platform-path guard rejects a production legacy directory even without an import edge', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'platform-path-'));
+  try {
+    const legacyFile = path.join(root, 'src', 'platform', 'runtime', 'legacy.ts');
+    fs.mkdirSync(path.dirname(legacyFile), { recursive: true });
+    fs.writeFileSync(legacyFile, 'export const legacy = true;\n');
+    assert.deepEqual(findPlatformPaths(root), ['src/platform/runtime/legacy.ts']);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });

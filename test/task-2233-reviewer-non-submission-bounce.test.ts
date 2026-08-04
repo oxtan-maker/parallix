@@ -14,8 +14,8 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const { startReviewLoop } = require('../.test-runtime/lib/review/review-loop');
-const { POLL_TIMEOUT, isPollTimeout } = require('../.test-runtime/lib/review/review-polling');
+const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
+const { POLL_TIMEOUT, isPollTimeout } = require('../.test-runtime/adapters/review/review-polling.js');
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 

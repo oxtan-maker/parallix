@@ -6,7 +6,7 @@ const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
-const { findMissionDir, getMissionYear, findCheckpoints, getFirstLine, missionTitle, missionPathForSlug, missionDirForSlug } = require('../.test-runtime/lib/core/mission-utils');
+const { findMissionDir, getMissionYear, findCheckpoints, getFirstLine, missionTitle, missionPathForSlug, missionDirForSlug } = require('../.test-runtime/adapters/filesystem/mission-utils.js');
 
 // Resolve REPO_ROOT dynamically so the leak-detention test does not reference
 // a concrete absolute path that would be operator-local.

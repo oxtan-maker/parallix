@@ -5,19 +5,19 @@ const fs = require('fs');
 const path = require('path');
 const { mock } = test;
 
-const git = require('../.test-runtime/lib/core/git');
-const missionUtils = require('../.test-runtime/lib/core/mission-utils');
-const backlog = require('../.test-runtime/lib/tools/backlog');
-const forgejo = require('../.test-runtime/lib/tools/forgejo');
-const stats = require('../.test-runtime/lib/commands/stats');
-const composition = require('../.test-runtime/lib/composition/application-services');
+const git = require('../.test-runtime/adapters/git/git.js');
+const missionUtils = require('../.test-runtime/adapters/filesystem/mission-utils.js');
+const backlog = require('../.test-runtime/adapters/backlog/backlog.js');
+const forgejo = require('../.test-runtime/adapters/forgejo/forgejo.js');
+const stats = require('../.test-runtime/adapters/cli/commands/stats.js');
+const composition = require('../.test-runtime/composition/application-services.js');
 
 const TEST_SLUG = 'task-2204';
 const FAKE_ROOT = '/tmp/task-2204-integrate-root';
 
 function loadIntegrate() {
-  delete require.cache[require.resolve('../.test-runtime/lib/commands/integrate')];
-  return require('../.test-runtime/lib/commands/integrate');
+  delete require.cache[require.resolve('../.test-runtime/adapters/cli/commands/integrate')];
+  return require('../.test-runtime/adapters/cli/commands/integrate.js');
 }
 
 function setupMocks() {
@@ -155,7 +155,7 @@ test('integrate rejects merged Forgejo PRs during preflight with recovery guidan
   mock.method(process, 'exit', (code) => exitCodes.push(code));
 
   try {
-    await integrate([TEST_SLUG, '--no-integration-gates']);
+    await integrate([TEST_SLUG, '--no-integration-gates'], { missionServicesFn: composition.createMissionApplicationServices });
 
     const output = [...logs, ...errors].join('\n');
     assert.deepEqual(exitCodes, [1]);

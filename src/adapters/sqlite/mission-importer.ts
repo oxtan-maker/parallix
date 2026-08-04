@@ -301,7 +301,7 @@ export class MissionCompatibilityImporter {
    * Validate the complete candidate set, create a backup, and atomically
    * persist all importable Missions. Idempotent on replay with unchanged source.
    *
-   * Divergent Missions (SC4) are reported in the conflict list and the import
+   * Divergent Missions (architecture invariant) are reported in the conflict list and the import
    * proceeds for non-conflicting missions.
    */
   async apply(): Promise<MissionImportReport> {
@@ -310,7 +310,7 @@ export class MissionCompatibilityImporter {
     const omissions = this.detectOmissions();
     const digest = this.computeDigest();
 
-    // SC2: Validate complete candidate set before any database write
+    // architecture invariant: Validate complete candidate set before any database write
     const validationErrors = this.validateCandidates(candidates);
     if (validationErrors.length > 0) {
       const conflicts = validationErrors.map((err) => ({
@@ -332,11 +332,11 @@ export class MissionCompatibilityImporter {
       };
     }
 
-    // SC3 idempotent replay: digest check via raw SQL (no MissionStore.load()).
+    // architecture invariant idempotent replay: digest check via raw SQL (no MissionStore.load()).
     // If source digest matches, check for database divergence before skipping.
     const lastImport = await this.getLastImport();
     if (lastImport && lastImport.digest === digest) {
-      // SC4: Detect database divergence even when source is unchanged.
+      // architecture invariant: Detect database divergence even when source is unchanged.
       // Compare current DB versions against the snapshot stored at last import.
       const dbConflicts = await this.detectDatabaseDivergence(
         candidates,
@@ -368,7 +368,7 @@ export class MissionCompatibilityImporter {
       };
     }
 
-    // SC8: Detect divergence and obtain versions via raw SQL (no MissionStore.load()).
+    // architecture invariant: Detect divergence and obtain versions via raw SQL (no MissionStore.load()).
     // detectDivergenceViaSQL compares candidate fields against DB rows directly.
     const existingVersions = await this.getExistingMissionVersions(candidates);
     const divergenceResults = await this.detectDivergenceViaSQL(
@@ -380,7 +380,7 @@ export class MissionCompatibilityImporter {
     );
 
     // Classify candidates into imported vs skipped (unchanged).
-    // SC8 compliant: no MissionStore.load() calls.
+    // architecture invariant compliant: no MissionStore.load() calls.
     const toImport: Array<{
       candidate: MissionImportCandidate;
       mission: Mission;
@@ -407,13 +407,13 @@ export class MissionCompatibilityImporter {
       toImport.push({ candidate, mission, expectedVersion: existingVersion ?? null });
     }
 
-    // SC6: Create pre-import backup of parallix.db
+    // architecture invariant: Create pre-import backup of parallix.db
     const backupPath = await this.db.backup();
 
     // Atomic persist: all Mission aggregates + provenance in one transaction.
     // Each store.save() participates in the outer transaction (nested begin/
     // commit are no-ops via transaction depth tracking in SqliteDatabaseAdapter).
-    // SC4: Divergent Missions from SQL detection + stale-write errors from save().
+    // architecture invariant: Divergent Missions from SQL detection + stale-write errors from save().
     const imported: MissionId[] = [];
     const existingConflicts: Array<{
       missionId: MissionId;
@@ -431,7 +431,7 @@ export class MissionCompatibilityImporter {
           imported.push(candidate.missionId);
         } catch (error) {
           if (error instanceof MissionStaleWriteError) {
-            // SC4: Divergent Mission — report and skip
+            // architecture invariant: Divergent Mission — report and skip
             existingConflicts.push({
               missionId: candidate.missionId,
               sourcePath: candidate.sourcePath,
@@ -444,10 +444,10 @@ export class MissionCompatibilityImporter {
         }
       }
 
-      // SC9: Record import provenance in import_history (inside same transaction).
+      // architecture invariant: Record import provenance in import_history (inside same transaction).
       // Snapshot the post-save version of every Mission this import vouches for
       // — imported and unchanged-skipped alike — so the next replay can tell an
-      // out-of-band database edit from its own writes (SC4). Conflicted
+      // out-of-band database edit from its own writes (architecture invariant). Conflicted
       // Missions are excluded: their current version is the divergence, and
       // recording it would hide the conflict from the following run.
       const conflictedIds = new Set(existingConflicts.map((c) => c.missionId));
@@ -488,7 +488,7 @@ export class MissionCompatibilityImporter {
   }
 
   // -----------------------------------------------------------------------
-  // SC8: Raw SQL helpers (no MissionStore.load())
+  // architecture invariant: Raw SQL helpers (no MissionStore.load())
   // -----------------------------------------------------------------------
 
   /**
@@ -500,7 +500,7 @@ export class MissionCompatibilityImporter {
    * database opened some other way — or an explicitly truncated migration list
    * — gets a named precondition failure here instead of a bare SQLite
    * `no such table` part-way through the apply path.
-   * SC8 compliant: read-only introspection, not MissionStore.load().
+   * architecture invariant compliant: read-only introspection, not MissionStore.load().
    */
   private async assertSchemaPresent(): Promise<void> {
     const placeholders = REQUIRED_IMPORTER_TABLES.map(() => '?').join(', ');
@@ -522,10 +522,10 @@ export class MissionCompatibilityImporter {
    *
    * `import_history` is a shared ledger — the blocklist and stats importers
    * write to it too, as does a Mission import of a different repository root.
-   * Scoping by `source_path` keeps idempotency (SC3) tied to this root: an
+   * Scoping by `source_path` keeps idempotency (architecture invariant) tied to this root: an
    * unrelated import landing between two unchanged applies must not hide this
    * root's version snapshot and cause a needless re-save/version bump.
-   * SC8 compliant: raw SQL query, not MissionStore.load().
+   * architecture invariant compliant: raw SQL query, not MissionStore.load().
    */
   private async getLastImport(): Promise<{
     digest: string;
@@ -552,7 +552,7 @@ export class MissionCompatibilityImporter {
   /**
    * Return a map of missionId → version for all missions that exist in the
    * database among the given candidates.
-   * SC8 compliant: raw SQL query, not MissionStore.load().
+   * architecture invariant compliant: raw SQL query, not MissionStore.load().
    */
   private async getExistingMissionVersions(
     candidates: readonly MissionImportCandidate[],
@@ -576,7 +576,7 @@ export class MissionCompatibilityImporter {
   /**
    * Detect database divergence when source digest is unchanged.
    * Compares current DB versions against the snapshot stored at last import.
-   * SC8 compliant: raw SQL query, not MissionStore.load().
+   * architecture invariant compliant: raw SQL query, not MissionStore.load().
    */
   private async detectDatabaseDivergence(
     candidates: readonly MissionImportCandidate[],
@@ -623,7 +623,7 @@ export class MissionCompatibilityImporter {
    * findings, resolutions, intervention) and the external task ref — rather
    * than a hand-picked subset that silently ignores the rest.
    *
-   * SC8 compliant: no MissionStore.load() calls.
+   * architecture invariant compliant: no MissionStore.load() calls.
    */
   private async detectDivergenceViaSQL(
     candidates: readonly MissionImportCandidate[],
@@ -665,7 +665,7 @@ export class MissionCompatibilityImporter {
   /**
    * Read the persisted Mission aggregates for the given ids and rehydrate them
    * through `hydrateMission()` — the same serializer `SqliteMissionStore.load()`
-   * uses, without calling that port (SC8).
+   * uses, without calling that port (architecture invariant).
    *
    * A row set that cannot be rehydrated is omitted from the result; the caller
    * treats a missing entry as "nothing comparable in the database".
@@ -796,7 +796,7 @@ export class MissionCompatibilityImporter {
   /**
    * Restore the database from a pre-import backup file.
    * Recovers the prior database state after an interrupted or rejected import.
-   * Implements the restore(backupPath) API required by SC6.
+   * Implements the restore(backupPath) API required by architecture invariant.
    */
   async restore(backupPath: string): Promise<void> {
     if (!fs.existsSync(backupPath)) {
@@ -889,7 +889,7 @@ export class MissionCompatibilityImporter {
       return null;
     }
 
-    // Validate missionId using domain constructor (SC7)
+    // Validate missionId using domain constructor (architecture invariant)
     let missionIdValue: MissionId;
     const validationErrors: string[] = [];
     try {
@@ -905,7 +905,7 @@ export class MissionCompatibilityImporter {
     const rawStatus = frontmatter.status || '';
     const title = frontmatter.title || path.basename(taskFile, '.md');
 
-    // Map status using missionStatusFromBacklog (SC7)
+    // Map status using missionStatusFromBacklog (architecture invariant)
     const mappedStatus = missionStatusFromBacklog(rawStatus);
     if (!mappedStatus) {
       validationErrors.push(`unmappable-status: "${rawStatus}" does not map to a valid MissionStatus`);
@@ -953,7 +953,7 @@ export class MissionCompatibilityImporter {
     const review = reviewResult.review;
     validationErrors.push(...reviewResult.errors);
 
-    // NEL: validate supplied values through recordNetEngineeringLines (SC2)
+    // NEL: validate supplied values through recordNetEngineeringLines (architecture invariant)
     const netEngineeringLinesRaw = frontmatter.netEngineeringLines;
     let netEngineeringLines: number | null = null;
     if (netEngineeringLinesRaw !== undefined && netEngineeringLinesRaw !== '') {
@@ -1072,7 +1072,7 @@ export class MissionCompatibilityImporter {
    * Find the mission directory for a given slug.
    *
    * The directory name must equal the mission id exactly. A prefix match is
-   * not identity-safe — `missions/task-2322-10` starts with `task-2322-1`
+   * not identity-safe — `missions/architecture migration-10` starts with `architecture migration-1`
    * without belonging to it — so directories that merely start with the slug
    * are reported as an ambiguous source identity rather than guessed at.
    */
@@ -1480,7 +1480,7 @@ export class MissionCompatibilityImporter {
         continue;
       }
 
-      // SC4: Check for divergent Mission state
+      // architecture invariant: Check for divergent Mission state
       const divergenceDetails = this.getDivergenceDetails(candidate, existing.mission);
       if (divergenceDetails) {
         conflicts.push({
@@ -1553,7 +1553,7 @@ export class MissionCompatibilityImporter {
   // Domain conversion
   // -----------------------------------------------------------------------
 
-  /** Convert a validated candidate to a checked Mission domain object (SC7). */
+  /** Convert a validated candidate to a checked Mission domain object (architecture invariant). */
   private toMission(candidate: MissionImportCandidate): Mission {
     const base: BacklogMissionRecord = {
       id: candidate.missionId,
@@ -1658,7 +1658,7 @@ export class MissionCompatibilityImporter {
 
   /**
    * Record import provenance in import_history, plus the per-Mission version
-   * snapshot in import_mission_versions (SC9).
+   * snapshot in import_mission_versions (architecture invariant).
    *
    * `source_path` keeps its documented meaning — the source root and nothing
    * else; the snapshot lives in its own relational table with an INTEGER

@@ -158,7 +158,7 @@ The install is idempotent — re-running any command overwrites the target with 
 Codex runs each mission with a worktree-local `CODEX_HOME`, preserving separate sessions, rollouts, and cache. When an originating Codex configuration or file-based auth file exists, the harness links it into that state root instead of copying its contents. This keeps configured MCP servers available while avoiding secret values in the mission worktree. The installed Graphify skill remains copied into the mission's Codex area, as before. The operator `HOME` and `PATH` remain available for nested commands such as `opencode` and `pi`.
 
 The Parallix harness handles this automatically in `ensureCodexHome`
-(`src/platform/runtime/lib/agents/codex.ts`):
+(`src/adapters/agents/codex.ts`):
 
 ```
 Source (originating CODEX_HOME):

@@ -6,7 +6,7 @@ import { agentFamily } from '../src/domain/agents.js';
 import { externalTaskRef } from '../src/domain/external-task.js';
 import { missionId, missionLabels, type Mission } from '../src/domain/mission.js';
 import { repositoryId } from '../src/domain/repository.js';
-import { MACHINE_WRITTEN_PATH_INVENTORY } from '../src/platform/runtime/lib/core/durable-state-inventory.js';
+import { MACHINE_WRITTEN_PATH_INVENTORY } from './fixtures/durable-state-inventory.js';
 
 const repositoryMission: Mission = {
   id: missionId('task-2294'), repositoryId: repositoryId('parallix'), title: 'authoritative',

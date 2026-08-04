@@ -25,11 +25,6 @@ const FORBIDDEN_IMPORTS = [
   'process.exit',         // no process termination
 ];
 
-/** Legacy command handler paths that must not be imported by the controller. */
-const FORBIDDEN_LEGACY_PATHS = [
-  'src/platform/runtime/lib/commands/',
-];
-
 function readSource(filePath: string): string {
   return fs.readFileSync(filePath, 'utf8');
 }
@@ -45,12 +40,6 @@ function hasForbiddenImport(source: string, filePath: string): string[] {
     for (const forbidden of FORBIDDEN_IMPORTS) {
       if (specifier.includes(forbidden)) {
         violations.push(`${filePath}: imports "${specifier}" (forbidden: ${forbidden})`);
-      }
-    }
-    // Check for legacy command handler imports
-    for (const legacyPath of FORBIDDEN_LEGACY_PATHS) {
-      if (specifier.includes(legacyPath)) {
-        violations.push(`${filePath}: imports "${specifier}" (forbidden legacy handler)`);
       }
     }
   }

@@ -16,7 +16,7 @@ const assert = require('node:assert/strict');
 const TEST_SLUG = 'task-test-1079-blocked-fallback';
 
 test('startReviewLoop falls back when the auto-derived reviewer is blocked but a different-family agent is available', async () => {
-  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
   const logs = [];
   const errors = [];
   const exitCodes = [];
@@ -53,7 +53,7 @@ test('startReviewLoop falls back when the auto-derived reviewer is blocked but a
 });
 
 test('startReviewLoop iterates past a blocked deterministic fallback to a third unblocked agent (Mission SC #3 — "Mistral or Claude")', async () => {
-  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
   const logs = [];
   const errors = [];
   const exitCodes = [];
@@ -93,7 +93,7 @@ test('startReviewLoop iterates past a blocked deterministic fallback to a third 
 });
 
 test('startReviewLoop still rejects with a clear error when the explicit reviewer is blocked and no fallback path exists', async () => {
-  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
   const errors = [];
   const exitCodes = [];
 

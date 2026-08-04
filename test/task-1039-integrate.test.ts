@@ -5,21 +5,21 @@ const fs = require('fs');
 const path = require('path');
 const { mock } = test;
 
-const git = require('../.test-runtime/lib/core/git');
-const missionUtils = require('../.test-runtime/lib/core/mission-utils');
-const backlog = require('../.test-runtime/lib/tools/backlog');
-const forgejo = require('../.test-runtime/lib/tools/forgejo');
-const stats = require('../.test-runtime/lib/commands/stats');
-const verification = require('../.test-runtime/lib/core/verification');
-const composition = require('../.test-runtime/lib/composition/application-services');
+const git = require('../.test-runtime/adapters/git/git.js');
+const missionUtils = require('../.test-runtime/adapters/filesystem/mission-utils.js');
+const backlog = require('../.test-runtime/adapters/backlog/backlog.js');
+const forgejo = require('../.test-runtime/adapters/forgejo/forgejo.js');
+const stats = require('../.test-runtime/adapters/cli/commands/stats.js');
+const verification = require('../.test-runtime/adapters/verification/verification.js');
+const composition = require('../.test-runtime/composition/application-services.js');
 
 const TEST_SLUG = 'task-integrate-test';
 const FAKE_ROOT = '/tmp/integrate-test-root';
 const WORKTREE = path.join(FAKE_ROOT, '..', TEST_SLUG);
 
 function loadIntegrate() {
-  delete require.cache[require.resolve('../.test-runtime/lib/commands/integrate')];
-  return require('../.test-runtime/lib/commands/integrate');
+  delete require.cache[require.resolve('../.test-runtime/adapters/cli/commands/integrate')];
+  return require('../.test-runtime/adapters/cli/commands/integrate.js');
 }
 
 function setupMocks() {
@@ -113,7 +113,7 @@ test('integrate preflight failure stops execution', async (t) => {
   console.error = (msg) => { if (msg && msg.includes('Integration preflight failed')) errorLogged = true; };
 
   try {
-    await integrate([TEST_SLUG, '--no-integration-gates']);
+    await integrate([TEST_SLUG, '--no-integration-gates'], { missionServicesFn: composition.createMissionApplicationServices });
   } catch {
     // Expected to throw
   }
@@ -131,7 +131,7 @@ test('integrate dry-run mode', async (t) => {
   console.log = (msg) => { if (msg && msg.includes('Dry run complete')) logLogged = true; };
 
   try {
-    await integrate([TEST_SLUG, '--dry-run', '--no-integration-gates']);
+    await integrate([TEST_SLUG, '--dry-run', '--no-integration-gates'], { missionServicesFn: composition.createMissionApplicationServices });
   } catch {
     // Expected to throw
   }

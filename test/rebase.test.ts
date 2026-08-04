@@ -1,7 +1,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const rebase = require('../.test-runtime/lib/commands/rebase');
+const rebase = require('../.test-runtime/adapters/cli/commands/rebase.js');
 
 // ---------------------------------------------------------------------------
 // Test-local Git argument normalization
@@ -872,9 +872,9 @@ test('rebase agent-assisted rebase rechecks ancestry after conflict resolution',
     resolveMissionBaseBranchFn: () => 'main',
     resolveConflictsFn: () => ({
       ok: true,
-      conflictFiles: ['src/platform/runtime/lib/core/git.ts'],
+      conflictFiles: ['src/adapters/git/git.ts'],
       missionSpecificFiles: [],
-      sharedFiles: ['src/platform/runtime/lib/core/git.ts'],
+      sharedFiles: ['src/adapters/git/git.ts'],
     }),
     startAgentFn: async () => {
       agentLaunched = true;
@@ -887,7 +887,7 @@ test('rebase agent-assisted rebase rechecks ancestry after conflict resolution',
       }
       const tail = gitSubcommandArgs(args);
       if (tail[0] === 'rebase' && tail[1] === 'main') {
-        return { status: 1, stdout: '', stderr: 'CONFLICT (content): Merge conflict in src/platform/runtime/lib/core/git.ts\n' };
+        return { status: 1, stdout: '', stderr: 'CONFLICT (content): Merge conflict in src/adapters/git/git.ts\n' };
       }
       if (tail[0] === 'rebase' && tail[1] === '--show-current') {
         return { status: 0, stdout: '', stderr: '' };
@@ -921,9 +921,9 @@ test('rebase agent-assisted rebase exits 1 when ancestry fails after conflict re
       resolveMissionBaseBranchFn: () => 'main',
       resolveConflictsFn: () => ({
         ok: true,
-        conflictFiles: ['src/platform/runtime/lib/core/git.ts'],
+        conflictFiles: ['src/adapters/git/git.ts'],
         missionSpecificFiles: [],
-        sharedFiles: ['src/platform/runtime/lib/core/git.ts'],
+        sharedFiles: ['src/adapters/git/git.ts'],
       }),
       startAgentFn: async () => ({ agent: 'test-agent', result: { status: 0 } }),
       gitFn: args => {
@@ -931,7 +931,7 @@ test('rebase agent-assisted rebase exits 1 when ancestry fails after conflict re
         const tail = gitSubcommandArgs(args);
         if (tail[0] === 'rev-parse') return { status: 0, stdout: 'cafe4242\n', stderr: '' };
         if (tail[0] === 'rebase' && tail[1] === 'main') {
-          return { status: 1, stdout: '', stderr: 'CONFLICT (content): Merge conflict in src/platform/runtime/lib/core/git.ts\n' };
+          return { status: 1, stdout: '', stderr: 'CONFLICT (content): Merge conflict in src/adapters/git/git.ts\n' };
         }
         if (tail[0] === 'rebase' && tail[1] === '--show-current') {
           return { status: 0, stdout: '', stderr: '' };

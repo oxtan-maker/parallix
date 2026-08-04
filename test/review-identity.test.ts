@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { readComments, commentRound, submitReviewRound, closeMissionPr, readTextFlag } = require('../.test-runtime/lib/review/review');
+const { readComments, commentRound, submitReviewRound, closeMissionPr, readTextFlag } = require('../.test-runtime/adapters/review/review-commands.js');
 
 const TEST_SLUG = 'task-test-identity-fail';
 

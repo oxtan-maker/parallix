@@ -45,7 +45,7 @@ test.afterEach(() => {
   fs.rmSync(_tmpHome, { recursive: true, force: true });
 });
 
-const fmt = require('../.test-runtime/lib/core/fmt');
+const fmt = require('../.test-runtime/application/presentation/cli-format.js');
 
 // Artifact files that consumeReviewerArtifacts / consumeImplementerArtifacts look for.
 // Partial sets (e.g. only review-findings.md without review-outcome.md) cause the
@@ -141,7 +141,7 @@ async function captureExit(fn) {
 }
 
 test('startReviewLoop allows explicit same-family reviewer after rejection block removal', async () => {
-  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
 
   const { exitCode, errors, logs } = await captureExit(() => {
     return startReviewLoop(TEST_SLUG, {
@@ -163,7 +163,7 @@ test('startReviewLoop allows explicit same-family reviewer after rejection block
 });
 
 test('startReviewLoop allows implementer not in eligible agents with explicit reviewer (SC 4)', async () => {
-  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
 
   const { exitCode, errors } = await captureExit(() => {
     return startReviewLoop(TEST_SLUG, {
@@ -191,7 +191,7 @@ test('startReviewLoop allows implementer not in eligible agents with explicit re
 });
 
 test('startReviewLoop fails for unsupported reviewer', async () => {
-  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
 
   const { exitCode, errors } = await captureExit(() => {
     return startReviewLoop(TEST_SLUG, {
@@ -212,7 +212,7 @@ test('startReviewLoop fails for unsupported reviewer', async () => {
 });
 
 test('startReviewLoop validates reviewer and implementer from injected review eligibility', async () => {
-  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
   const logs = [];
   const exitCodes = [];
 
@@ -246,7 +246,7 @@ test('startReviewLoop validates reviewer and implementer from injected review el
 });
 
 test('startReviewLoop defaults to autonomous when no implementer and no persisted state', async () => {
-  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
 
   const { exitCode, errors, logs } = await captureExit(() => {
     return startReviewLoop(TEST_SLUG, {
@@ -279,7 +279,7 @@ test('startReviewLoop defaults to autonomous when no implementer and no persiste
 });
 
 test('startReviewLoop reset path removes state file', async () => {
-  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
   let resetCalled = false;
 
   const { exitCode } = await captureExit(() => {
@@ -304,7 +304,7 @@ test('startReviewLoop reset path removes state file', async () => {
 });
 
 test('startReviewLoop dryRun path skips agent launch', async () => {
-  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
 
   const { exitCode } = await captureExit(() => {
     return startReviewLoop(TEST_SLUG, {
@@ -326,7 +326,7 @@ test('startReviewLoop dryRun path skips agent launch', async () => {
 });
 
 test('verifyReview handles task status edge cases', async () => {
-  const { verifyReview } = require('../.test-runtime/lib/review/review');
+  const { verifyReview } = require('../.test-runtime/adapters/review/review-commands.js');
   const logs = [];
   const errors = [];
   const exitCodes = [];
@@ -398,7 +398,7 @@ test('verifyReview handles task status edge cases', async () => {
 });
 
 test('verifyReview handles PR state edge cases', async () => {
-  const { verifyReview } = require('../.test-runtime/lib/review/review');
+  const { verifyReview } = require('../.test-runtime/adapters/review/review-commands.js');
   const logs = [];
   const errors = [];
   const exitCodes = [];
@@ -444,7 +444,7 @@ test('verifyReview handles gate failures', async () => {
   const fs = require('node:fs');
   const os = require('node:os');
   const path = require('node:path');
-  const { verifyReview } = require('../.test-runtime/lib/review/review');
+  const { verifyReview } = require('../.test-runtime/adapters/review/review-commands.js');
   const logs = [];
   const exitCodes = [];
 
@@ -488,7 +488,7 @@ test('verifyReview handles gate failures', async () => {
 });
 
 test('startReviewLoop handles reviewer launcher fallback', async () => {
-  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
   const logs = [];
   const errors = [];
   const exitCodes = [];
@@ -559,7 +559,7 @@ test('startReviewLoop handles reviewer launcher fallback', async () => {
 });
 
 test('startReviewLoop handles Forgejo bootstrap failure', async () => {
-  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
   const errors = [];
   const exitCodes = [];
 
@@ -582,7 +582,7 @@ test('startReviewLoop handles Forgejo bootstrap failure', async () => {
 });
 
 test('startReviewLoop handles missing PR', async () => {
-  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
   const errors = [];
 
   const { exitCode } = await captureExit(() => startReviewLoop(TEST_SLUG, {
@@ -608,7 +608,7 @@ test('startReviewLoop handles missing PR', async () => {
 });
 
 test('startReviewLoop full loop success and exit cases', async () => {
-  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
   const logs = [];
   const rebaseCalls = [];
   let preReviewGateCalls = 0;
@@ -698,8 +698,8 @@ test('startReviewLoop full loop success and exit cases', async () => {
 });
 
 test('review helper functions and error paths', async () => {
-  const review = require('../.test-runtime/lib/review/review');
-  const { pollForReview, pollForDisposition } = review;
+  const { review } = require('../.test-runtime/adapters/review/review-commands.js');
+  const { pollForReview, pollForDisposition } = require('../.test-runtime/adapters/review/review-polling.js');
   const logs = [];
   const errors = [];
   const exitCodes = [];
@@ -751,7 +751,7 @@ test('review helper functions and error paths', async () => {
 });
 
 test('review function missing argument and env var error paths', async () => {
-  const review = require('../.test-runtime/lib/review/review');
+  const { review } = require('../.test-runtime/adapters/review/review-commands.js');
   const errors = [];
   const exitCodes = [];
 
@@ -781,7 +781,7 @@ test('review function missing argument and env var error paths', async () => {
 });
 
 test('polling configuration logic', async () => {
-  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
   
   // Test env overrides
   process.env.AUTONOMOUS_REVIEW_POLL_INTERVAL_MS = '500';
@@ -830,7 +830,7 @@ test('polling configuration logic', async () => {
 });
 
 test('startReviewLoop explicit same-family path covers all four families', async () => {
-  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
 
   for (const agent of ['codex', 'claude', 'gemini']) {
     const { exitCode, errors, logs } = await captureExit(() => {
@@ -859,7 +859,7 @@ test('startReviewLoop explicit same-family path covers all four families', async
 });
 
 test('startReviewLoop same-family explicit reviewer logs the agent name', async () => {
-  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
 
   const { exitCode, errors, logs } = await captureExit(() => {
     return startReviewLoop(TEST_SLUG, {
@@ -886,7 +886,7 @@ test('startReviewLoop same-family explicit reviewer logs the agent name', async 
 });
 
 test('startReviewLoop rebases immediately before each reviewer round', async () => {
-  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
   const events = [];
   const reviewOutcomes = ['REQUEST_CHANGES', 'APPROVED'];
   const dispositions = ['CHANGES_MADE'];
@@ -938,7 +938,7 @@ test('startReviewLoop rebases immediately before each reviewer round', async () 
 });
 
 test('startReviewLoop continue consumes existing fixing disposition before next reviewer round', async () => {
-  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
   const launches = [];
   const reviews = [];
   const dispositions = [];
@@ -998,7 +998,7 @@ test('startReviewLoop continue consumes existing fixing disposition before next 
 });
 
 test('startReviewLoop isContinue waits long enough for delayed existing fixing disposition', async () => {
-  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
   const launches = [];
   const startedAt = '2026-05-20T04:41:14.637Z';
   const originalNow = Date.now;
@@ -1061,7 +1061,7 @@ test('startReviewLoop isContinue waits long enough for delayed existing fixing d
 });
 
 test('startReviewLoop continue handles existing fixing dispositions', async () => {
-  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
   const startedAt = '2026-05-20T17:10:00.000Z';
 
   for (const terminalDisposition of ['PUSHBACK_ALL', 'PARKED', 'BLOCKED']) {
@@ -1123,7 +1123,7 @@ test('startReviewLoop continue handles existing fixing dispositions', async () =
 });
 
 test('startReviewLoop continue reviewing phase skips only when existing review is found', async () => {
-  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
   const startedAt = '2026-05-20T17:10:00.000Z';
 
   for (const existingReview of [true, false]) {
@@ -1181,7 +1181,7 @@ test('startReviewLoop continue reviewing phase skips only when existing review i
 });
 
 test('rebaseBeforeReviewRound succeeds after a clean rebase', async () => {
-  const { rebaseBeforeReviewRound } = require('../.test-runtime/lib/review/review');
+  const { rebaseBeforeReviewRound } = require('../.test-runtime/adapters/review/review-loop.js');
   const logs = [];
   const errors = [];
 
@@ -1200,7 +1200,7 @@ test('rebaseBeforeReviewRound succeeds after a clean rebase', async () => {
 });
 
 test('rebaseBeforeReviewRound reports shared-file conflicts with recovery instructions', async () => {
-  const { rebaseBeforeReviewRound } = require('../.test-runtime/lib/review/review');
+  const { rebaseBeforeReviewRound } = require('../.test-runtime/adapters/review/review-loop.js');
   const logs = [];
   const errors = [];
   const sharedFileOutput = '[INFO] 1 shared file(s) require agent-assisted resolution:\n  - src/shared.js';
@@ -1234,7 +1234,7 @@ test('rebaseBeforeReviewRound reports shared-file conflicts with recovery instru
 });
 
 test('rebaseBeforeReviewRound reports non-conflict rebase failures', async () => {
-  const { rebaseBeforeReviewRound } = require('../.test-runtime/lib/review/review');
+  const { rebaseBeforeReviewRound } = require('../.test-runtime/adapters/review/review-loop.js');
   const logs = [];
   const errors = [];
 
@@ -1256,7 +1256,7 @@ test('rebaseBeforeReviewRound reports non-conflict rebase failures', async () =>
 });
 
 test('startReviewLoop aborts on shared-file rebase conflicts before reviewer launch', async () => {
-  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
   const logs = [];
   const errors = [];
   let reviewerLaunched = false;
@@ -1307,7 +1307,7 @@ test('startReviewLoop aborts on shared-file rebase conflicts before reviewer lau
 });
 
 test('startReviewLoop aborts on non-shared-file rebase failure (e.g. push stale info)', async () => {
-  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
   const errors = [];
   let reviewerLaunched = false;
   let exitCode = null;
@@ -1350,7 +1350,7 @@ test('startReviewLoop aborts on non-shared-file rebase failure (e.g. push stale 
 });
 
 test('pollForReview waits asynchronously between retries', async () => {
-  const { pollForReview } = require('../.test-runtime/lib/review/review');
+  const { pollForReview } = require('../.test-runtime/adapters/review/review-polling.js');
   const sleeps = [];
   let attempts = 0;
 
@@ -1370,7 +1370,7 @@ test('pollForReview waits asynchronously between retries', async () => {
 });
 
 test('pollForDisposition waits asynchronously between retries', async () => {
-  const { pollForDisposition } = require('../.test-runtime/lib/review/review');
+  const { pollForDisposition } = require('../.test-runtime/adapters/review/review-polling.js');
   const sleeps = [];
   let attempts = 0;
 
@@ -1390,7 +1390,7 @@ test('pollForDisposition waits asynchronously between retries', async () => {
 });
 
 test('pollForReview honours caller intervalMs and timeoutMs and returns timeout sentinel on timeout', async () => {
-  const { pollForReview, POLL_TIMEOUT, isPollTimeout } = require('../.test-runtime/lib/review/review');
+  const { pollForReview, POLL_TIMEOUT, isPollTimeout } = require('../.test-runtime/adapters/review/review-polling.js');
   const sleeps = [];
 
   // Simulated clock so the "timeout" fires after a few iterations without real time passing.
@@ -1419,7 +1419,7 @@ test('pollForReview honours caller intervalMs and timeoutMs and returns timeout 
 });
 
 test('pollForReview emits a progress line on every tick when verbose=true', async () => {
-  const { pollForReview } = require('../.test-runtime/lib/review/review');
+  const { pollForReview } = require('../.test-runtime/adapters/review/review-polling.js');
   const logs = [];
   const originalLog = console.log;
   console.log = (msg) => logs.push(String(msg));
@@ -1447,7 +1447,7 @@ test('pollForReview emits a progress line on every tick when verbose=true', asyn
 });
 
 test('resolvePollTimeoutMs honours AUTONOMOUS_REVIEW_POLL_TIMEOUT_MS env override', async () => {
-  const { pollForReview, isPollTimeout } = require('../.test-runtime/lib/review/review');
+  const { pollForReview, isPollTimeout } = require('../.test-runtime/adapters/review/review-polling.js');
   const previous = process.env.AUTONOMOUS_REVIEW_POLL_TIMEOUT_MS;
   process.env.AUTONOMOUS_REVIEW_POLL_TIMEOUT_MS = '500';
 
@@ -1476,7 +1476,7 @@ test('resolvePollTimeoutMs honours AUTONOMOUS_REVIEW_POLL_TIMEOUT_MS env overrid
 });
 
 test('maybeUpdateGraphifyBeforeReview skips cleanly when graphify is missing', () => {
-  const { maybeUpdateGraphifyBeforeReview } = require('../.test-runtime/lib/review/review');
+  const { maybeUpdateGraphifyBeforeReview } = require('../.test-runtime/adapters/review/review-loop.js');
   const logs = [];
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'review-graphify-missing-'));
   fs.mkdirSync(path.join(root, 'graphify-out'));
@@ -1504,7 +1504,7 @@ test('maybeUpdateGraphifyBeforeReview skips cleanly when graphify is missing', (
 });
 
 test('maybeUpdateGraphifyBeforeReview runs graphify update in the mission worktree when available', () => {
-  const { maybeUpdateGraphifyBeforeReview } = require('../.test-runtime/lib/review/review');
+  const { maybeUpdateGraphifyBeforeReview } = require('../.test-runtime/adapters/review/review-loop.js');
   const calls = [];
   const logs = [];
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'review-graphify-update-'));
@@ -1545,7 +1545,7 @@ test('maybeUpdateGraphifyBeforeReview runs graphify update in the mission worktr
 });
 
 test('pollForDisposition misses comment if created_at is slightly before sinceIso (clock skew)', async () => {
-  const { pollForDisposition, isPollTimeout } = require('../.test-runtime/lib/review/review');
+  const { pollForDisposition, isPollTimeout } = require('../.test-runtime/adapters/review/review-polling.js');
   const prNumber = 41;
   const implementerUser = 'gemini';
   const sinceIso = '2026-04-26T10:00:05.000Z';
@@ -1581,7 +1581,7 @@ test('pollForDisposition misses comment if created_at is slightly before sinceIs
 });
 
 test('pollForDisposition finds comment with stable round start time despite clock skew from launch', async () => {
-  const { pollForDisposition } = require('../.test-runtime/lib/review/review');
+  const { pollForDisposition } = require('../.test-runtime/adapters/review/review-polling.js');
   const prNumber = 41;
   const implementerUser = 'gemini';
   const token = 'fake-token';
@@ -1618,7 +1618,7 @@ test('pollForDisposition finds comment with stable round start time despite cloc
 });
 
 test('pollForDisposition finds already-posted comment when resuming a round', async () => {
-  const { pollForDisposition, POLL_TIMEOUT, isPollTimeout } = require('../.test-runtime/lib/review/review');
+  const { pollForDisposition, POLL_TIMEOUT, isPollTimeout } = require('../.test-runtime/adapters/review/review-polling.js');
   const prNumber = 41;
   const implementerUser = 'gemini';
   const token = 'fake-token';
@@ -1666,7 +1666,7 @@ test('pollForDisposition finds already-posted comment when resuming a round', as
 });
 
 test('getLatestReviewForPr correctly handles mixed-precision ISO timestamps', async () => {
-  const { getLatestReviewForPr } = require('../.test-runtime/lib/tools/forgejo');
+  const { getLatestReviewForPr } = require('../.test-runtime/adapters/forgejo/forgejo.js');
   
   // sinceIso is without milliseconds
   const sinceIso = '2026-04-26T10:00:00Z';
@@ -1687,7 +1687,7 @@ test('getLatestReviewForPr correctly handles mixed-precision ISO timestamps', as
 });
 
 test('getLatestReviewForPr correctly sorts mixed-precision ISO timestamps', async () => {
-  const { getLatestReviewForPr } = require('../.test-runtime/lib/tools/forgejo');
+  const { getLatestReviewForPr } = require('../.test-runtime/adapters/forgejo/forgejo.js');
   
   const sinceIso = '2026-04-26T10:00:00Z';
   
@@ -1713,7 +1713,7 @@ test('getLatestReviewForPr correctly sorts mixed-precision ISO timestamps', asyn
 });
 
 test('getLatestDispositionForPr correctly handles mixed-precision ISO timestamps', async () => {
-  const { getLatestDispositionForPr } = require('../.test-runtime/lib/tools/forgejo');
+  const { getLatestDispositionForPr } = require('../.test-runtime/adapters/forgejo/forgejo.js');
   
   const sinceIso = '2026-04-26T10:00:00Z';
   
@@ -1732,7 +1732,7 @@ test('getLatestDispositionForPr correctly handles mixed-precision ISO timestamps
 });
 
 test('getLatestDispositionForPr correctly sorts mixed-precision ISO timestamps', async () => {
-  const { getLatestDispositionForPr } = require('../.test-runtime/lib/tools/forgejo');
+  const { getLatestDispositionForPr } = require('../.test-runtime/adapters/forgejo/forgejo.js');
   
   const sinceIso = '2026-04-26T10:00:00Z';
   
@@ -1757,7 +1757,7 @@ test('getLatestDispositionForPr correctly sorts mixed-precision ISO timestamps',
 });
 
 test('getLatestDisposition correctly handles mixed-precision ISO timestamps', () => {
-  const { getLatestDisposition } = require('../.test-runtime/lib/tools/forgejo');
+  const { getLatestDisposition } = require('../.test-runtime/adapters/forgejo/forgejo.js');
   
   const sinceIso = '2026-04-26T10:00:00Z';
   
@@ -1781,7 +1781,7 @@ test('getLatestDisposition correctly handles mixed-precision ISO timestamps', ()
 });
 
 test('getLatestDisposition correctly sorts mixed-precision ISO timestamps', () => {
-  const { getLatestDisposition } = require('../.test-runtime/lib/tools/forgejo');
+  const { getLatestDisposition } = require('../.test-runtime/adapters/forgejo/forgejo.js');
   
   const sinceIso = '2026-04-26T10:00:00Z';
   
@@ -1811,7 +1811,7 @@ test('getLatestDisposition correctly sorts mixed-precision ISO timestamps', () =
 });
 
 test('getLatestReview correctly handles mixed-precision ISO timestamps', () => {
-  const { getLatestReview } = require('../.test-runtime/lib/tools/forgejo');
+  const { getLatestReview } = require('../.test-runtime/adapters/forgejo/forgejo.js');
   
   const sinceIso = '2026-04-26T10:00:00Z';
   
@@ -1839,7 +1839,7 @@ test('getLatestReview correctly handles mixed-precision ISO timestamps', () => {
 });
 
 test('getLatestReview correctly sorts mixed-precision ISO timestamps', () => {
-  const { getLatestReview } = require('../.test-runtime/lib/tools/forgejo');
+  const { getLatestReview } = require('../.test-runtime/adapters/forgejo/forgejo.js');
   
   const sinceIso = '2026-04-26T10:00:00Z';
   
@@ -1876,11 +1876,11 @@ test('getLatestReview correctly sorts mixed-precision ISO timestamps', () => {
 // ---------- applyAgentFallback (regression: pinned reviewer falls back to another family) ----------
 
 test('applyAgentFallback returns the original agent when startAgent did not fall back', async () => {
-  const { applyAgentFallback } = require('../.test-runtime/lib/review/review');
+  const { applyAgentFallback } = require('../.test-runtime/adapters/review/review-loop.js');
   const writeReviewStateFn = () => { throw new Error('writeReviewState should not run when no fallback'); };
   const enforceTaskAssigneeFn = () => { throw new Error('enforceTaskAssignee should not run when no fallback'); };
 
-  const { ReviewState } = require('../.test-runtime/lib/review/review-state');
+  const { ReviewState } = require('../.test-runtime/adapters/review/review-state.js');
   const state = new ReviewState('task-test-fallback', { reviewer: 'codex', implementer: 'custom', round: 1 });
 
   const next = await applyAgentFallback({
@@ -1900,8 +1900,8 @@ test('applyAgentFallback returns the original agent when startAgent did not fall
 });
 
 test('applyAgentFallback rewrites reviewer identity and persists state but does NOT update backlog assignee', async () => {
-  const { applyAgentFallback } = require('../.test-runtime/lib/review/review');
-  const { ReviewState } = require('../.test-runtime/lib/review/review-state');
+  const { applyAgentFallback } = require('../.test-runtime/adapters/review/review-loop.js');
+  const { ReviewState } = require('../.test-runtime/adapters/review/review-state.js');
   const writes = [];
   const state = new ReviewState('task-test-fallback', { reviewer: 'claude', implementer: 'custom', round: 2 });
 
@@ -1928,8 +1928,8 @@ test('applyAgentFallback rewrites reviewer identity and persists state but does 
 });
 
 test('applyAgentFallback rewrites implementer identity on fallback without touching reviewer', async () => {
-  const { applyAgentFallback } = require('../.test-runtime/lib/review/review');
-  const { ReviewState } = require('../.test-runtime/lib/review/review-state');
+  const { applyAgentFallback } = require('../.test-runtime/adapters/review/review-loop.js');
+  const { ReviewState } = require('../.test-runtime/adapters/review/review-state.js');
   const writes = [];
   const state = new ReviewState('task-test-fallback', { reviewer: 'codex', implementer: 'custom', round: 3 });
 
@@ -1952,8 +1952,8 @@ test('applyAgentFallback rewrites implementer identity on fallback without touch
 });
 
 test('applyAgentFallback enforces implementer in backlog when implementer falls back', async () => {
-  const { applyAgentFallback } = require('../.test-runtime/lib/review/review');
-  const { ReviewState } = require('../.test-runtime/lib/review/review-state');
+  const { applyAgentFallback } = require('../.test-runtime/adapters/review/review-loop.js');
+  const { ReviewState } = require('../.test-runtime/adapters/review/review-state.js');
   const writes = [];
   const enforced = [];
   const state = new ReviewState('task-test-fallback', { reviewer: 'custom', implementer: 'claude', round: 2 });
@@ -1976,8 +1976,8 @@ test('applyAgentFallback enforces implementer in backlog when implementer falls 
 });
 
 test('applyAgentFallback handles a missing launchResult gracefully (catastrophic launch failure)', async () => {
-  const { applyAgentFallback } = require('../.test-runtime/lib/review/review');
-  const { ReviewState } = require('../.test-runtime/lib/review/review-state');
+  const { applyAgentFallback } = require('../.test-runtime/adapters/review/review-loop.js');
+  const { ReviewState } = require('../.test-runtime/adapters/review/review-state.js');
   const state = new ReviewState('task-test-fallback', { reviewer: 'codex', implementer: 'custom', round: 1 });
   const next = await applyAgentFallback({
     role: 'reviewer',
@@ -1998,8 +1998,8 @@ test('applyAgentFallback preserves the original roundStartedAt when rewriting st
   // Regression: a crash after the fallback rewrite but before pollFor* completes
   // must leave review-state.json pinned to the original round start so the resumed
   // run still picks up comments the fallback agent already posted in this round.
-  const { applyAgentFallback } = require('../.test-runtime/lib/review/review');
-  const { ReviewState } = require('../.test-runtime/lib/review/review-state');
+  const { applyAgentFallback } = require('../.test-runtime/adapters/review/review-loop.js');
+  const { ReviewState } = require('../.test-runtime/adapters/review/review-state.js');
   const writes = [];
   const roundStartedAt = '2026-04-27T17:00:00.000Z';
   const state = new ReviewState('task-test-fallback', { reviewer: 'claude', implementer: 'custom', round: 4, startedAt: roundStartedAt });
@@ -2027,7 +2027,7 @@ test('applyAgentFallback preserves the original roundStartedAt when rewriting st
 });
 
 test('startReviewLoop polls for the fallback reviewer identity after a limit-hit reroute', async () => {
-  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
   const writes = [];
   const reviewPolls = [];
 
@@ -2080,7 +2080,7 @@ test('startReviewLoop polls for the fallback reviewer identity after a limit-hit
 });
 
 test('startReviewLoop polls for the fallback implementer identity after a limit-hit reroute', async () => {
-  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
   const writes = [];
   const dispositionPolls = [];
   const assigneeWrites = [];
@@ -2141,7 +2141,7 @@ test('startReviewLoop polls for the fallback implementer identity after a limit-
 });
 
 test('review dispatches to verifyReview with inferred slug and no-gate flag', async () => {
-  const review = require('../.test-runtime/lib/review/review');
+  const { review } = require('../.test-runtime/adapters/review/review-commands.js');
   const calls = [];
 
   await review(['task-1031', '--verify', '--no-gate'], {
@@ -2153,7 +2153,7 @@ test('review dispatches to verifyReview with inferred slug and no-gate flag', as
 });
 
 test('review dispatches to commentRound with file-backed message', async () => {
-  const review = require('../.test-runtime/lib/review/review');
+  const { review } = require('../.test-runtime/adapters/review/review-commands.js');
   const calls = [];
 
   await review(['task-1031', '--comment-file', '/tmp/review-comment.txt'], {
@@ -2166,7 +2166,7 @@ test('review dispatches to commentRound with file-backed message', async () => {
 });
 
 test('review prints status when no action flag is provided', async () => {
-  const review = require('../.test-runtime/lib/review/review');
+  const { review } = require('../.test-runtime/adapters/review/review-commands.js');
   const lines = [];
 
   await review(['task-1031'], {
@@ -2182,7 +2182,7 @@ test('review prints status when no action flag is provided', async () => {
 });
 
 test('review re-launches the implementer on static findings instead of starting the autonomous loop', async () => {
-  const review = require('../.test-runtime/lib/review/review');
+  const { review } = require('../.test-runtime/adapters/review/review-commands.js');
   const calls = [];
 
   await review(['task-1031'], {
@@ -2213,7 +2213,7 @@ test('review re-launches the implementer on static findings instead of starting 
 });
 
 test('review posts zero-finding artifact but does NOT transition task when static review passes', async () => {
-  const review = require('../.test-runtime/lib/review/review');
+  const { review } = require('../.test-runtime/adapters/review/review-commands.js');
   const calls = [];
 
   await review(['task-1031'], {
@@ -2238,11 +2238,11 @@ test('review posts zero-finding artifact but does NOT transition task when stati
 });
 
 test('verifyReview reports success path with gate pass and persisted state', async () => {
-  const review = require('../.test-runtime/lib/review/review');
+  const { verifyReview } = require('../.test-runtime/adapters/review/review-commands.js');
   const lines = [];
   let exitCode = null;
 
-  await review.verifyReview('task-1031', false, {
+  await verifyReview('task-1031', false, {
     resolveWorktreeFn: () => '/tmp/mission-task-1031',
     findMissionDirFn: () => '/tmp/mission-task-1031/docs/missions/2026/task-1031',
     getCurrentBranchFn: () => 'mission/task-1031',
@@ -2269,11 +2269,11 @@ test('verifyReview reports success path with gate pass and persisted state', asy
 });
 
 test('verifyReview reports failure path and exits when blockers exist', async () => {
-  const review = require('../.test-runtime/lib/review/review');
+  const { verifyReview } = require('../.test-runtime/adapters/review/review-commands.js');
   const lines = [];
   let exitCode = null;
 
-  await review.verifyReview('task-1031', true, {
+  await verifyReview('task-1031', true, {
     resolveWorktreeFn: () => null,
     cwdFn: () => '/tmp/random',
     isForgejoReviewEnabledFn: () => true,
@@ -2298,10 +2298,10 @@ test('verifyReview reports failure path and exits when blockers exist', async ()
 });
 
 test('readComments renders comment list when token and comments exist', async () => {
-  const review = require('../.test-runtime/lib/review/review');
+  const { readComments } = require('../.test-runtime/adapters/review/review-commands.js');
   const lines = [];
   let exitCode = null;
-  await review.readComments('task-1031', {
+  await readComments('task-1031', {
     readTokenFn: () => 'token',
     getCommentsFn: async () => [
       { kind: 'inline', location: 'workflow/lib/review/review.js:10', user: 'claude', created: 'today', body: 'Looks good' }
@@ -2320,13 +2320,13 @@ test('readComments renders comment list when token and comments exist', async ()
 });
 
 test('pushRound resolves forgejo user from backlog assignee and reports success', async () => {
-  const review = require('../.test-runtime/lib/review/review');
+  const { pushRound } = require('../.test-runtime/adapters/review/review-commands.js');
   const previous = process.env.FORGEJO_USER;
   delete process.env.FORGEJO_USER;
   const lines = [];
   let exitCode = null;
   try {
-    await review.pushRound('task-1031', {
+    await pushRound('task-1031', {
       isForgejoReviewEnabledFn: () => false,
       resolveWorktreeFn: () => '/tmp/mission-task-1031',
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-1031.md' }),
@@ -2347,18 +2347,18 @@ test('pushRound resolves forgejo user from backlog assignee and reports success'
 });
 
 test('commentRound and submitReviewRound fail loudly on API errors', async () => {
-  const review = require('../.test-runtime/lib/review/review');
+  const { commentRound, submitReviewRound } = require('../.test-runtime/adapters/review/review-commands.js');
   const errors = [];
   const exits = [];
   const readReviewStateFn = () => ({ reviewer: 'codex', implementer: 'codex' });
-  await review.commentRound('task-1031', 'body', {
+  await commentRound('task-1031', 'body', {
     readTokenFn: () => 'token',
     postCommentFn: () => ({ ok: false, error: 'boom' }),
     readReviewStateFn,
     error: line => errors.push(line),
     exit: code => exits.push(code)
   });
-  await review.submitReviewRound('task-1031', 'approve', 'ship it', {
+  await submitReviewRound('task-1031', 'approve', 'ship it', {
     readTokenFn: () => 'token',
     getPrAuthorFn: () => 'claude',
     postReviewFn: () => ({ ok: false, error: 'nope' }),
@@ -2374,13 +2374,13 @@ test('commentRound and submitReviewRound fail loudly on API errors', async () =>
 });
 
 test('submitForReview exits when no forgejo user and no task implementer (task-1105)', async () => {
-  const review = require('../.test-runtime/lib/review/review');
+  const { submitForReview } = require('../.test-runtime/adapters/review/review-commands.js');
   const previous = process.env.FORGEJO_USER;
   delete process.env.FORGEJO_USER;
   const calls = [];
   let exitCode = null;
   try {
-    await review.submitForReview('task-1105', true, {
+    await submitForReview('task-1105', true, {
       resolveTaskFileFn: () => ({ ok: false }),
       getTaskImplementerFn: () => null,
       resolveWorktreeFn: () => '/tmp/mission-task-1105',
@@ -2400,7 +2400,7 @@ test('submitForReview exits when no forgejo user and no task implementer (task-1
 });
 
 test('unwrapHandoffModule supports the tsx default-export wrapper', () => {
-  const { unwrapHandoffModule } = require('../.test-runtime/lib/review/review-commands');
+  const { unwrapHandoffModule } = require('../.test-runtime/adapters/review/review-commands.js');
   const handoff = { performHandoff: async () => ({ ok: true }) };
 
   assert.equal(unwrapHandoffModule({ default: handoff }), handoff);
@@ -2408,13 +2408,13 @@ test('unwrapHandoffModule supports the tsx default-export wrapper', () => {
 });
 
 test('submitForReview and closeMissionPr use injected handoff and close functions', async () => {
-  const review = require('../.test-runtime/lib/review/review');
+  const { closeMissionPr, submitForReview } = require('../.test-runtime/adapters/review/review-commands.js');
   const previous = process.env.FORGEJO_USER;
   delete process.env.FORGEJO_USER;
   const calls = [];
   let exitCode = null;
   try {
-    await review.submitForReview('task-1031', true, {
+    await submitForReview('task-1031', true, {
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-1031.md' }),
       getTaskImplementerFn: () => 'gemini',
       resolveWorktreeFn: () => '/tmp/mission-task-1031',
@@ -2426,7 +2426,7 @@ test('submitForReview and closeMissionPr use injected handoff and close function
       exit: code => { exitCode = code; }
       });
 
-    await review.closeMissionPr('task-1031', {
+    await closeMissionPr('task-1031', {
       readTokenFn: () => 'token',
       readReviewStateFn: () => ({ reviewer: 'codex', implementer: 'gemini' }),
       closePrFn: async (branch, token, user) => {
@@ -2447,7 +2447,7 @@ test('submitForReview and closeMissionPr use injected handoff and close function
 });
 
 test('startReviewLoop handles reviewer launch failure', async () => {
-  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
   const errors = [];
   const exitCodes = [];
 
@@ -2478,7 +2478,8 @@ test('startReviewLoop handles reviewer launch failure', async () => {
 });
 
 test('startReviewLoop handles reviewer polling timeout with recovery', async () => {
-  const { startReviewLoop, POLL_TIMEOUT } = require('../.test-runtime/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
+  const { POLL_TIMEOUT } = require('../.test-runtime/adapters/review/review-polling.js');
   const logs = [];
   const errors = [];
   const exitCodes = [];
@@ -2521,7 +2522,8 @@ test('startReviewLoop handles reviewer polling timeout with recovery', async () 
 });
 
 test('startReviewLoop persists reviewer retry count before recovery relaunch', async () => {
-  const { startReviewLoop, POLL_TIMEOUT } = require('../.test-runtime/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
+  const { POLL_TIMEOUT } = require('../.test-runtime/adapters/review/review-polling.js');
   const events = [];
   let reviewPolls = 0;
 
@@ -2572,7 +2574,8 @@ test('startReviewLoop persists reviewer retry count before recovery relaunch', a
 });
 
 test('startReviewLoop persists implementer retry count before recovery relaunch', async () => {
-  const { startReviewLoop, POLL_TIMEOUT } = require('../.test-runtime/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
+  const { POLL_TIMEOUT } = require('../.test-runtime/adapters/review/review-polling.js');
   const events = [];
   let dispositionPolls = 0;
 
@@ -2630,7 +2633,7 @@ test('startReviewLoop persists implementer retry count before recovery relaunch'
 
 test('startReviewLoop does not crash with ReferenceError when taskResolution is used in loop body', async () => {
   const fallbackCalls = [];
-  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
 
   const { exitCode } = await captureExit(() => {
     return startReviewLoop(TEST_SLUG, {
@@ -2673,7 +2676,7 @@ test('startReviewLoop does not crash with ReferenceError when taskResolution is 
 
 test('startReviewLoop passes taskResolution to applyAgentFallback for both reviewer and implementer', async () => {
   const fallbackCalls = [];
-  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
 
   const { exitCode } = await captureExit(() => {
     return startReviewLoop(TEST_SLUG, {
@@ -2717,7 +2720,7 @@ test('startReviewLoop passes taskResolution to applyAgentFallback for both revie
 });
 
 test('startReviewLoop repairs a persisted rewiewing typo and resumes on the reviewer path', async () => {
-  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
   const launches = [];
   const writes = [];
   let reviewPolls = 0;
@@ -2770,7 +2773,7 @@ test('startReviewLoop repairs a persisted rewiewing typo and resumes on the revi
 });
 
 test('startReviewLoop does not crash with ReferenceError in dry-run mode', async () => {
-  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
 
   const { exitCode } = await captureExit(() => {
     return startReviewLoop(TEST_SLUG, {
@@ -2793,7 +2796,7 @@ test('startReviewLoop does not crash with ReferenceError in dry-run mode', async
 // ---------- single-family fallback (task-1069) ----------
 
 test('startReviewLoop allows single-family fallback when only implementer family is runnable', async () => {
-  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
   const logs = [];
   const errors = [];
   const exitCodes = [];
@@ -2829,7 +2832,7 @@ test('startReviewLoop allows single-family fallback when only implementer family
 });
 
 test('startReviewLoop accepts same-family when explicit even if a different-family reviewer is available', async () => {
-  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
 
   const { exitCode, errors, logs } = await captureExit(() => {
     return startReviewLoop(TEST_SLUG, {
@@ -2852,7 +2855,7 @@ test('startReviewLoop accepts same-family when explicit even if a different-fami
 });
 
 test('startReviewLoop rejects when no different-family reviewer and implementer is also not runnable', async () => {
-  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
 
   const { exitCode, errors } = await captureExit(() => {
     return startReviewLoop(TEST_SLUG, {
@@ -2879,7 +2882,7 @@ test('startReviewLoop rejects when no different-family reviewer and implementer 
 });
 
 test('startReviewLoop keeps persisted same-family reviewer after re-derive block removal', async () => {
-  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
   const logs = [];
   const exitCodes = [];
 
@@ -2913,7 +2916,7 @@ test('startReviewLoop keeps persisted same-family reviewer after re-derive block
 });
 
 test('startReviewLoop continue falls back to the persisted reviewer when an explicit override is unsupported', async () => {
-  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
   const launches = [];
 
   const { exitCode, errors, logs } = await captureExit(() => {
@@ -2964,7 +2967,7 @@ test('startReviewLoop continue falls back to the persisted reviewer when an expl
 });
 
 test('startReviewLoop resolves task file from the mission worktree (regression)', async () => {
-  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
   let resolvedWorktree = null;
 
   const { exitCode } = await captureExit(() => startReviewLoop(TEST_SLUG, {
@@ -2992,8 +2995,8 @@ test('startReviewLoop resolves task file from the mission worktree (regression)'
 test('startReviewLoop uses selectAgent for unsupported reviewer fallback (SC 4)', async () => {
   const fs = require('fs');
   const path = require('path');
-  // startReviewLoop lives in the platform runtime source tree.
-  const reviewLoopSource = fs.readFileSync(path.join(__dirname, '../src/platform/runtime/lib/review/review-loop.ts'), 'utf8');
+  // startReviewLoop lives in the review-loop adapter module.
+  const reviewLoopSource = fs.readFileSync(path.join(__dirname, '../src/adapters/review/review-loop.ts'), 'utf8');
   assert.ok(reviewLoopSource.includes("selectAgentFn('review', { exclude: excludeSet })"), 'startReviewLoop should select reviewer fallback from review eligibility');
   assert.ok(!reviewLoopSource.includes('fallbackForFn(reviewer, implementer)'), 'startReviewLoop should not call fallbackFor for reviewer fallback');
 });
@@ -3001,18 +3004,18 @@ test('startReviewLoop uses selectAgent for unsupported reviewer fallback (SC 4)'
 test('startReviewLoop removes implementer eligibility check (SC 4)', async () => {
   const fs = require('fs');
   const path = require('path');
-  const reviewSource = fs.readFileSync(path.join(__dirname, '../src/platform/runtime/lib/review/review.ts'), 'utf8');
+  const reviewSource = fs.readFileSync(path.join(__dirname, '../src/adapters/review/review-loop.ts'), 'utf8');
   // The old code had: if (!agents.includes(implementer)) { ... exit(1) ... }
   // This should be removed or commented out
   const hasStrictImplementerCheck = /if\s*\(\s*!agents\.includes\(implementer\)\s*\)\s*\{[\s\S]*?exit\(1\);[\s\S]*?\}/.test(reviewSource);
   assert.equal(hasStrictImplementerCheck, false, 'The strict implementer eligibility check that exits should be removed');
 });
 
-test('review.js does not update Backlog task assignee on reviewer fallback (SC 5)', async () => {
+test('review-loop does not update Backlog task assignee on reviewer fallback (SC 5)', async () => {
   const fs = require('fs');
   const path = require('path');
-  // applyAgentFallback lives in the platform runtime source tree.
-  const reviewLoopSource = fs.readFileSync(path.join(__dirname, '../src/platform/runtime/lib/review/review-loop.ts'), 'utf8');
+  // applyAgentFallback lives in the review-loop adapter module.
+  const reviewLoopSource = fs.readFileSync(path.join(__dirname, '../src/adapters/review/review-loop.ts'), 'utf8');
   assert.ok(!reviewLoopSource.includes('workflow(${slug}): fallback reviewer from'), 'Should not contain reviewer fallback commit message pattern');
   assert.ok(reviewLoopSource.includes("if (role === 'implementer' && taskResolution && taskResolution.ok)"), 'Backlog assignee enforcement should be guarded to implementer fallback');
   assert.ok(reviewLoopSource.includes('enforceTaskAssigneeFn(taskResolution.taskFile, fallback)'), 'Implementer fallback should still enforce Backlog assignee');
@@ -3021,13 +3024,13 @@ test('review.js does not update Backlog task assignee on reviewer fallback (SC 5
 // ---------- CP-3: metadata footer and --status ----------
 
 test('buildMetadataFooter returns empty string when no state exists', async () => {
-  const { buildMetadataFooter } = require('../.test-runtime/lib/review/review');
+  const { buildMetadataFooter } = require('../.test-runtime/adapters/review/review-artifacts.js');
   const footer = await buildMetadataFooter('no-state-slug', '/tmp/nonexistent');
   assert.equal(footer, '');
 });
 
 test('commentRound appends metadata footer to message', async () => {
-  const { commentRound } = require('../.test-runtime/lib/review/review');
+  const { commentRound } = require('../.test-runtime/adapters/review/review-commands.js');
   let posted = null;
   await commentRound('task-meta-2', 'Test comment body', {
     readTokenFn: () => 'token',
@@ -3046,7 +3049,7 @@ test('commentRound appends metadata footer to message', async () => {
 });
 
 test('submitReviewRound appends metadata footer to review message', async () => {
-  const { submitReviewRound } = require('../.test-runtime/lib/review/review');
+  const { submitReviewRound } = require('../.test-runtime/adapters/review/review-commands.js');
   let posted = null;
   await submitReviewRound('task-meta-3', 'approve', 'Looks good', {
     readTokenFn: () => 'token',
@@ -3066,8 +3069,8 @@ test('submitReviewRound appends metadata footer to review message', async () => 
 });
 
 test('showReviewStatus prints state details when state exists', async () => {
-  const { showReviewStatus } = require('../.test-runtime/lib/review/review');
-  const { ReviewState } = require('../.test-runtime/lib/review/review-state');
+  const { showReviewStatus } = require('../.test-runtime/adapters/review/review-commands.js');
+  const { ReviewState } = require('../.test-runtime/adapters/review/review-state.js');
   const lines = [];
 
   await showReviewStatus('task-status-1', {
@@ -3088,7 +3091,7 @@ test('showReviewStatus prints state details when state exists', async () => {
 });
 
 test('showReviewStatus prints no-state message when state is absent', async () => {
-  const { showReviewStatus } = require('../.test-runtime/lib/review/review');
+  const { showReviewStatus } = require('../.test-runtime/adapters/review/review-commands.js');
   const lines = [];
 
   await showReviewStatus('task-status-2', {
@@ -3103,8 +3106,8 @@ test('showReviewStatus prints no-state message when state is absent', async () =
 // ---------- State persistence after comment/review posts (Finding 2) ----------
 
 test('commentRound persists review state after successful post', async () => {
-  const { commentRound } = require('../.test-runtime/lib/review/review');
-  const { ReviewState } = require('../.test-runtime/lib/review/review-state');
+  const { commentRound } = require('../.test-runtime/adapters/review/review-commands.js');
+  const { ReviewState } = require('../.test-runtime/adapters/review/review-state.js');
   let stateWritten = null;
   const prev = process.env.FORGEJO_USER;
   process.env.FORGEJO_USER = 'codex';
@@ -3133,7 +3136,7 @@ test('commentRound persists review state after successful post', async () => {
 });
 
 test('commentRound does not persist state when no state exists', async () => {
-  const { commentRound } = require('../.test-runtime/lib/review/review');
+  const { commentRound } = require('../.test-runtime/adapters/review/review-commands.js');
   let writeCount = 0;
   const prev = process.env.FORGEJO_USER;
   process.env.FORGEJO_USER = 'codex';
@@ -3159,8 +3162,8 @@ test('commentRound does not persist state when no state exists', async () => {
 });
 
 test('submitReviewRound persists state with REQUEST_CHANGES disposition after request-changes', async () => {
-  const { submitReviewRound } = require('../.test-runtime/lib/review/review');
-  const { ReviewState } = require('../.test-runtime/lib/review/review-state');
+  const { submitReviewRound } = require('../.test-runtime/adapters/review/review-commands.js');
+  const { ReviewState } = require('../.test-runtime/adapters/review/review-state.js');
   let stateWritten = null;
   let backlogTransitioned = null;
   const prev = process.env.FORGEJO_USER;
@@ -3196,8 +3199,8 @@ test('submitReviewRound persists state with REQUEST_CHANGES disposition after re
 });
 
 test('submitReviewRound persists state with APPROVED disposition after approve', async () => {
-  const { submitReviewRound } = require('../.test-runtime/lib/review/review');
-  const { ReviewState } = require('../.test-runtime/lib/review/review-state');
+  const { submitReviewRound } = require('../.test-runtime/adapters/review/review-commands.js');
+  const { ReviewState } = require('../.test-runtime/adapters/review/review-state.js');
   let stateWritten = null;
   let backlogTransitioned = null;
   const prev = process.env.FORGEJO_USER;
@@ -3233,8 +3236,8 @@ test('submitReviewRound persists state with APPROVED disposition after approve',
 });
 
 test('submitReviewRound promotes an active backlog task to review after provider-backed approval', async () => {
-  const { submitReviewRound } = require('../.test-runtime/lib/review/review');
-  const { ReviewState } = require('../.test-runtime/lib/review/review-state');
+  const { submitReviewRound } = require('../.test-runtime/adapters/review/review-commands.js');
+  const { ReviewState } = require('../.test-runtime/adapters/review/review-state.js');
   let transitioned = null;
   const prev = process.env.FORGEJO_USER;
   process.env.FORGEJO_USER = 'codex';
@@ -3275,8 +3278,8 @@ test('submitReviewRound keeps YAML and rendered task status aligned when provide
   const fs = require('node:fs');
   const os = require('node:os');
   const path = require('node:path');
-  const { submitReviewRound } = require('../.test-runtime/lib/review/review');
-  const { ReviewState } = require('../.test-runtime/lib/review/review-state');
+  const { submitReviewRound } = require('../.test-runtime/adapters/review/review-commands.js');
+  const { ReviewState } = require('../.test-runtime/adapters/review/review-state.js');
 
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1327-review-round-'));
   const taskFile = path.join(root, 'backlog', 'tasks', 'task-2198 - stale-active.md');
@@ -3330,8 +3333,8 @@ test('submitReviewRound keeps YAML and rendered task status aligned when provide
 });
 
 test('submitReviewRound skips Forgejo and updates review-state only when provider=none', async () => {
-  const { submitReviewRound } = require('../.test-runtime/lib/review/review');
-  const { ReviewState } = require('../.test-runtime/lib/review/review-state');
+  const { submitReviewRound } = require('../.test-runtime/adapters/review/review-commands.js');
+  const { ReviewState } = require('../.test-runtime/adapters/review/review-state.js');
   const path = require('path');
   const fs = require('fs');
 
@@ -3397,8 +3400,8 @@ test('submitReviewRound skips Forgejo and updates review-state only when provide
 });
 
 test('submitReviewRound updates existing state when provider=none', async () => {
-  const { submitReviewRound } = require('../.test-runtime/lib/review/review');
-  const { ReviewState } = require('../.test-runtime/lib/review/review-state');
+  const { submitReviewRound } = require('../.test-runtime/adapters/review/review-commands.js');
+  const { ReviewState } = require('../.test-runtime/adapters/review/review-state.js');
 
   let stateWritten = null;
   let backlogTransitioned = null;
@@ -3451,7 +3454,7 @@ test('submitReviewRound updates existing state when provider=none', async () => 
 // ---------- Terminal disposition state persistence (Finding 3) ----------
 
 test('startReviewLoop persists PUSHBACK_ALL before returning to reviewing', async () => {
-  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
   const stateWrites = [];
 
   await startReviewLoop(TEST_SLUG, {
@@ -3491,7 +3494,7 @@ test('startReviewLoop persists PUSHBACK_ALL before returning to reviewing', asyn
 });
 
 test('startReviewLoop persists BLOCKED disposition before returning', async () => {
-  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
   const stateWrites = [];
 
   await startReviewLoop(TEST_SLUG, {
@@ -3531,7 +3534,7 @@ test('startReviewLoop persists BLOCKED disposition before returning', async () =
 });
 
 test('startReviewLoop persists PARKED disposition before returning', async () => {
-  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
   const stateWrites = [];
 
   await startReviewLoop(TEST_SLUG, {
@@ -3571,7 +3574,7 @@ test('startReviewLoop persists PARKED disposition before returning', async () =>
 });
 
 test('startReviewLoop persists CHANGES_MADE disposition before continuing', async () => {
-  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
   const stateWrites = [];
 
   await startReviewLoop(TEST_SLUG, {
@@ -3611,7 +3614,7 @@ test('startReviewLoop persists CHANGES_MADE disposition before continuing', asyn
 });
 
 test('startReviewLoop consumes reviewer and implementer artifacts before polling Forgejo', async () => {
-  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
   let reviewPolls = 0;
   let dispositionPolls = 0;
 
@@ -3651,7 +3654,7 @@ test('startReviewLoop consumes reviewer and implementer artifacts before polling
 });
 
 test('consumeImplementerArtifacts posts resolution and normalized disposition from files', async () => {
-  const { consumeImplementerArtifacts } = require('../.test-runtime/lib/review/review');
+  const { consumeImplementerArtifacts } = require('../.test-runtime/adapters/review/review-artifacts.js');
   const posted = [];
   const deleted = [];
   const artifactMap = new Map([
@@ -3689,7 +3692,7 @@ test('consumeImplementerArtifacts posts resolution and normalized disposition fr
 });
 
 test('consumeReviewerArtifacts deletes artifacts only after successful comment and review posts', async () => {
-  const { consumeReviewerArtifacts } = require('../.test-runtime/lib/review/review');
+  const { consumeReviewerArtifacts } = require('../.test-runtime/adapters/review/review-artifacts.js');
   const deleted = [];
   const artifactMap = new Map([
     ['/tmp/task-089-review-findings.md', '# findings'],
@@ -3722,7 +3725,7 @@ test('consumeReviewerArtifacts deletes artifacts only after successful comment a
 });
 
 test('consumeImplementerArtifacts leaves artifacts in place when posting fails', async () => {
-  const { consumeImplementerArtifacts } = require('../.test-runtime/lib/review/review');
+  const { consumeImplementerArtifacts } = require('../.test-runtime/adapters/review/review-artifacts.js');
   const deleted = [];
   const artifactMap = new Map([
     ['/tmp/task-089-round-resolution.md', '# resolution'],
@@ -3751,7 +3754,7 @@ test('consumeImplementerArtifacts leaves artifacts in place when posting fails',
 
 // SC 1: Regression test proving persist-before-mirror ordering for reviewer artifacts
 test('consumeReviewerArtifacts proves persist-before-mirror ordering', async () => {
-  const { consumeReviewerArtifacts } = require('../.test-runtime/lib/review/review');
+  const { consumeReviewerArtifacts } = require('../.test-runtime/adapters/review/review-artifacts.js');
   const calls = [];
   const artifactMap = new Map([
     ['/tmp/task-089-review-findings.md', '# findings'],
@@ -3791,7 +3794,7 @@ test('consumeReviewerArtifacts proves persist-before-mirror ordering', async () 
 
 // SC 1: Regression test proving persist-before-mirror ordering for implementer artifacts
 test('consumeImplementerArtifacts proves persist-before-mirror ordering', async () => {
-  const { consumeImplementerArtifacts } = require('../.test-runtime/lib/review/review');
+  const { consumeImplementerArtifacts } = require('../.test-runtime/adapters/review/review-artifacts.js');
   const calls = [];
   const artifactMap = new Map([
     ['/tmp/task-089-round-resolution.md', '# resolution'],
@@ -3829,7 +3832,7 @@ test('consumeImplementerArtifacts proves persist-before-mirror ordering', async 
 });
 
 test('createEventHandler requires review-state or --actor for mirrored event types', async () => {
-  const { createEventHandler } = require('../.test-runtime/lib/review/review');
+  const { createEventHandler } = require('../.test-runtime/adapters/review/review-commands.js');
   const fs = require('node:fs');
   const path = require('node:path');
 
@@ -3892,7 +3895,7 @@ test('createEventHandler requires review-state or --actor for mirrored event typ
 // ============================================================================
 
 test('startReviewLoop returns early with guidance when task is active and no PR exists', async () => {
-  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
 
   let handoffCalled = false;
   const { exitCode, errors, logs } = await captureExit(() => {
@@ -3922,7 +3925,7 @@ test('startReviewLoop returns early with guidance when task is active and no PR 
 });
 
 test('startReviewLoop returns early with guidance when task maps to virtual active and no PR exists', async () => {
-  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
 
   const { exitCode, logs } = await captureExit(() => {
     return startReviewLoop(TEST_SLUG, {
@@ -3951,7 +3954,7 @@ test('startReviewLoop returns early with guidance when task maps to virtual acti
 // the corrected `--push` fallback (never `--submit`); a *succeeding* one that produces an
 // open PR lets the loop proceed.
 test('startReviewLoop self-heals via handoff and recovers when task is review and a PR appears (crit. 1)', async () => {
-  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
 
   let handoffArgs = null;
   let prCalls = 0;
@@ -3995,7 +3998,7 @@ test('startReviewLoop self-heals via handoff and recovers when task is review an
 });
 
 test('startReviewLoop emits --push fallback (not --submit) when handoff fails for a review task (crit. 2)', async () => {
-  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
 
   const { exitCode, errors } = await captureExit(() => {
     return startReviewLoop(TEST_SLUG, {
@@ -4022,7 +4025,7 @@ test('startReviewLoop emits --push fallback (not --submit) when handoff fails fo
 });
 
 test('startReviewLoop emits --push fallback when handoff ok but no PR appears (crit. 3)', async () => {
-  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
 
   const { exitCode, errors } = await captureExit(() => {
     return startReviewLoop(TEST_SLUG, {
@@ -4049,7 +4052,7 @@ test('startReviewLoop emits --push fallback when handoff ok but no PR appears (c
 });
 
 test('startReviewLoop short-circuits on gatekeeper pushback without launching reviewer (crit. 4)', async () => {
-  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
 
   let reviewerLaunched = false;
   const { exitCode, errors } = await captureExit(() => {
@@ -4076,7 +4079,7 @@ test('startReviewLoop short-circuits on gatekeeper pushback without launching re
 });
 
 test('startReviewLoop never self-heals in dry-run (crit. 7)', async () => {
-  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
 
   let handoffCalled = false;
   const { logs } = await captureExit(() => {
@@ -4103,7 +4106,7 @@ test('startReviewLoop never self-heals in dry-run (crit. 7)', async () => {
 });
 
 test('startReviewLoop hard-fails when task cannot be resolved and no PR exists', async () => {
-  const { startReviewLoop } = require('../.test-runtime/lib/review/review');
+  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
 
   const { exitCode, errors, logs } = await captureExit(() => {
     return startReviewLoop(TEST_SLUG, {
@@ -4127,7 +4130,7 @@ test('startReviewLoop hard-fails when task cannot be resolved and no PR exists',
 });
 
 test('createEventHandler allows non-mirrored event types without FORGEJO_USER', async () => {
-  const { createEventHandler } = require('../.test-runtime/lib/review/review');
+  const { createEventHandler } = require('../.test-runtime/adapters/review/review-commands.js');
   const fs = require('node:fs');
   const path = require('node:path');
 

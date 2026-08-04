@@ -25,7 +25,7 @@ import { repositoryId } from '../src/domain/repository.js';
 import { SqliteDatabaseAdapter } from '../src/adapters/sqlite/database-adapter.js';
 import { loadDefaultMigrations, SqliteMigrationRunner } from '../src/adapters/sqlite/migration-runner.js';
 import { SqliteMissionStore } from '../src/adapters/sqlite/mission-store.js';
-import { createMissionApplicationServices } from '../src/platform/runtime/lib/composition/application-services.js';
+import { createMissionApplicationServices } from '../src/composition/application-services.js';
 
 // ---------------------------------------------------------------------------
 // Helpers

@@ -10,7 +10,7 @@ import type { BoardLaneEventEntry, BoardLaneEventRepository } from '../../applic
  * no JSON encoding.
  *
  * Authority mapping: operator-local event history (ADR 0053).
- * Maps to TASK-2303 domain: `LaneTransitionEvent` in `src/domain/board-event.ts`.
+ * Maps to architecture migration domain: `LaneTransitionEvent` in `src/domain/board-event.ts`.
  */
 export class SqliteBoardLaneEventRepository implements BoardLaneEventRepository {
   private db: SqliteDatabaseAdapter;

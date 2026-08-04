@@ -5,7 +5,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const config = require('../.test-runtime/lib/commands/config');
+const config = require('../.test-runtime/adapters/cli/commands/config.js');
 
 async function withTempDir(fn) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-config-command-'));

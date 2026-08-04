@@ -233,7 +233,7 @@ partial-failure policy, and both cancellation boundaries, and drives the
 mechanism ports declared in `src/application/ports/execute-mission.ts`
 (workspace, agent execution, telemetry, handoff/review) plus the checked
 `MissionTransitionStore`. The adapters behind them
-(`src/platform/runtime/lib/adapters/execute-mission-adapters.ts`) each implement
+(`src/adapters/mission/execute-mission-adapters.ts`) each implement
 exactly one port and perform only their own effect; none sequences the workflow
 or chooses a lifecycle transition.
 
@@ -267,16 +267,13 @@ Domain policy contains only rules that can be expressed without interface or
 infrastructure dependencies. Adapters perform effects and translate external
 failures; they do not choose lifecycle transitions or authorization policy.
 
-**Canonical application home (TASK-2314).** The shared contracts, ports, and
-services now live at `src/application/` — the canonical home for the application
-layer. The legacy runtime tree (`src/platform/runtime/lib/`) depends on
-`src/application/`, not the reverse. Four modules were relocated from
-`src/platform/runtime/lib/application/` to `src/application/`:
-`contracts.ts`, `ports.ts`, the execute use case, and `stats-backfill-service.ts`.
-No file beneath `src/application/` or `src/adapters/` imports the legacy
-`src/platform/runtime/lib/application/` path. A directory-scoped import-boundary
-test (`test/application-boundaries.test.ts`) enforces this rule across the full
-`src/application/` tree.
+**Canonical layer homes.** Shared contracts, ports, and services live under
+`src/application/`; concrete mechanisms live under `src/adapters/`; CLI and TUI
+translation live under `src/interfaces/`; object wiring lives under
+`src/composition/`; and `src/entry/px.ts` is the minimal process host. There is
+no secondary runtime or platform tree. `test/dependency-graph.test.ts` enforces
+the complete layer DAG without exceptions, while
+`test/application-boundaries.test.ts` scans the full application tree.
 
 ### Relationship to controller/service/repository
 

@@ -1,6 +1,6 @@
 # Parallix Authority Reference
 
-Consolidated parallix workflow authority for the parallix AI mission lifecycle. The executable authority is the `parallix/` code (in this repository, the root `index.js`/`px.js` and `lib/`); this file is its canonical markdown companion.
+Consolidated workflow authority for the Parallix AI mission lifecycle. The executable authority is the canonical source tree under `src/`; this file is its Markdown companion.
 
 > This document holds the internal operator and authority detail that previously lived in `README.md`. It was moved here during the task-1336 README rewrite so the landing page stays focused while none of the operational detail is lost. The public-facing overview is in [`README.md`](../README.md).
 
@@ -14,8 +14,9 @@ Mission flow: `backlog → draft → ready → active → review → approved �
 
 ## Entrypoints
 
-- `src/platform/runtime/index.ts` is the dispatcher (TypeScript source).
-- `src/platform/runtime/px.ts` is the `px` binary wrapper and shell-init helper (TypeScript source).
+- `src/entry/px.ts` is the minimal process host.
+- `src/composition/create-cli.ts` assembles the command registry and concrete dependencies.
+- `src/interfaces/cli/runtime.ts` parses and dispatches CLI requests.
 - `build/px.mjs` is the canonical ESM bundle produced by `npm run build`; it is the sole executable artifact and the `bin.px` entry in `package.json`.
 
 ## Config Boundary
@@ -380,7 +381,7 @@ identifies the executing `px.js` path so an accidental PATH collision with an
 unrelated `px` is visible.
 
 **Local development and built runtime.** From a checkout, run `npm run dev --
-<command>` to execute `src/platform/runtime/px.ts` directly through `tsx`. For the built runtime,
+<command>` to execute `src/entry/px.ts` directly through `tsx`. For the built runtime,
 run `npm run build` followed by `node build/px.mjs <command>`. The tarball
 uses the same `build/` bundle and adds a versioned, globally linked `px`.
 

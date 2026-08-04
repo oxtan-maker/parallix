@@ -9,8 +9,8 @@ import assert from 'node:assert/strict';
 // `LegacyActiveAdapter` into an application-owned `ExecuteMission` use case,
 // and the contract of that move is that only this factory changes while every
 // expectation below stays byte-identical.
-const { ExecuteMissionService } = require('../.test-runtime/application/execute-mission-service');
-const { createExecuteMissionPorts } = require('../.test-runtime/lib/adapters/execute-mission-adapters');
+const { ExecuteMissionService } = require('../.test-runtime/application/execute-mission-service.js');
+const { createExecuteMissionPorts } = require('../.test-runtime/adapters/mission/execute-mission-adapters.js');
 
 function buildExecuteWorkflow(
   runtime: Record<string, unknown>,

@@ -76,7 +76,7 @@ function validateWrite(entry: SessionMarkerWrite): void {
  * repository-scoped upserts.
  *
  * Authority mapping: `database-owned-domain-state` (ADR 0053).
- * Maps to TASK-2322.02 domain concept: `SessionMarker` in `src/domain/session.ts`.
+ * Maps to architecture migration domain concept: `SessionMarker` in `src/domain/session.ts`.
  */
 export class SqliteSessionMarkerRepository implements SessionMarkerRepository {
   private db: SqliteDatabaseAdapter;

@@ -14,7 +14,21 @@ function withFixture(source, assertion) {
   try {
     fs.mkdirSync(path.join(repoRoot, 'test'));
     fs.writeFileSync(path.join(repoRoot, 'test', 'fixture.test.ts'), source);
-    assertion(spawnSync('bash', [HYGIENE_SCRIPT], { cwd: repoRoot, encoding: 'utf8' }));
+    // The hygiene script also checks /tmp inode usage. Stub df here so these
+    // source-scanning fixtures do not inherit the host's transient disk state.
+    const binDir = path.join(repoRoot, 'bin');
+    fs.mkdirSync(binDir);
+    const dfScript = path.join(binDir, 'df');
+    fs.writeFileSync(dfScript, `#!/usr/bin/env bash
+echo "Filesystem     Inodes  IUsed   IFree IUse% Mounted"
+echo "tmpfs  524288  1  524287  1%  /tmp"
+`, 'utf8');
+    fs.chmodSync(dfScript, 0o755);
+    assertion(spawnSync('bash', [HYGIENE_SCRIPT], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      env: { ...process.env, PATH: `${binDir}:${process.env.PATH}` },
+    }));
   } finally {
     fs.rmSync(repoRoot, { recursive: true, force: true });
   }

@@ -12,7 +12,7 @@ const {
   softResetTrailingBacklogNoise,
   findMissionDocInBranches,
   isMissionArtifact,
-} = require('../.test-runtime/lib/core/mission-utils');
+} = require('../.test-runtime/adapters/filesystem/mission-utils.js');
 
 test('parseConflictFilesFromMergeOutput parses content and modify/delete conflicts and deduplicates paths', () => {
   const output = [

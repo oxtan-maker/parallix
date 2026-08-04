@@ -4,8 +4,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { rebaseBeforeReviewRound } = require('../.test-runtime/lib/review/review');
-const { isMissionArtifact, isWorkflowGeneratedArtifact } = require('../.test-runtime/lib/core/mission-utils');
+const { rebaseBeforeReviewRound } = require('../.test-runtime/adapters/review/review-loop.js');
+const { isMissionArtifact, isWorkflowGeneratedArtifact } = require('../.test-runtime/adapters/filesystem/mission-utils.js');
 
 function porcelainZ(entries) {
   return `${entries.join('\0')}\0`;

@@ -11,7 +11,9 @@ const childProcess = require('node:child_process');
 // SC4: --consume-artifacts integration test
 // ============================================================================
 
-const { consumeArtifacts } = require('../.test-runtime/lib/review/review-commands');
+const { consumeArtifacts } = require('../.test-runtime/adapters/review/review-commands.js');
+const { createEvent } = require('../.test-runtime/adapters/review/review-events.js');
+const { readReviewState, writeReviewState } = require('../.test-runtime/adapters/review/review-state.js');
 const { seedMissionDatabase } = require('./fixtures/review-state-db.js');
 
 function runGitOrThrow(args, options = {}) {
@@ -119,6 +121,7 @@ assignee: [custom]
 const cleanRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1327-consume-clean-'));
 const cleanArtifactDir = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1327-consume-artifacts-'));
 let restoreCleanHome = () => {};
+let cleanMissionStore = null;
 
 before(async () => {
   const missionDir = path.join(cleanRoot, 'missions', 'task-2200');
@@ -155,6 +158,8 @@ before(async () => {
     'task-2200',
     cleanRoot,
   );
+  // @ts-expect-error -- The JS fixture attaches the seeded port to its restore callback.
+  cleanMissionStore = restoreCleanHome.store;
 });
 
 after(() => {
@@ -171,6 +176,12 @@ test('consumeArtifacts leaves no untracked review-events files after a successfu
     resolveWorktreeFn: () => cleanRoot,
     resolveArtifactDirFn: () => cleanArtifactDir,
     getTaskAssigneeFn: () => 'custom',
+    readReviewStateFn: (slug, rootDir) => readReviewState(slug, rootDir, cleanMissionStore),
+    writeReviewStateFn: (slug, state, rootDir) => writeReviewState(slug, state, rootDir, cleanMissionStore),
+    createEventFn: (slug, type, params, options) => createEvent(slug, type, params, {
+      ...options,
+      missionStore: cleanMissionStore,
+    }),
   });
 
   assert.equal(result.ok, true);
@@ -182,7 +193,7 @@ test('consumeArtifacts leaves no untracked review-events files after a successfu
 // SC5: consumeReviewerArtifacts distinguishes "no artifacts" from "artifacts but no verdict"
 // ============================================================================
 
-const { consumeReviewerArtifacts } = require('../.test-runtime/lib/review/review-artifacts');
+const { consumeReviewerArtifacts } = require('../.test-runtime/adapters/review/review-artifacts.js');
 
 test('consumeReviewerArtifacts returns consumed:false when no artifact files exist (task-1209 SC5a)', async () => {
   const result = await consumeReviewerArtifacts('test-slug', 'test-reviewer', {

@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { resolveTaskFile, checkBacklogIntegrity } = require('../.test-runtime/lib/tools/backlog');
+const { resolveTaskFile, checkBacklogIntegrity } = require('../.test-runtime/adapters/backlog/backlog.js');
 
 function withTempRepo(fn) {
   const previous = process.cwd();
@@ -59,7 +59,7 @@ test('resolveTaskFile handles slugs with suffixes by falling back to base task I
 
 test('findMissionDir and getMissionYear handle slugs with suffixes', () => {
   withTempRepo(root => {
-    const { findMissionDir, getMissionYear } = require('../.test-runtime/lib/core/mission-utils');
+    const { findMissionDir, getMissionYear } = require('../.test-runtime/adapters/filesystem/mission-utils.js');
     const missionDir = path.join(root, 'docs', 'missions', '2026', 'task-1004');
     fs.mkdirSync(missionDir, { recursive: true });
     fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Mission\n');

@@ -4,7 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 process.env.NO_COLOR = '1';
-const active = require('../.test-runtime/lib/commands/active');
+const active = require('../.test-runtime/adapters/cli/commands/active.js');
 
 const {
   buildExecutePrompt,
@@ -14,9 +14,9 @@ const {
   selectLaunchAndRecord,
   enforceExecuteCommitSafety,
   renderActiveProgress
-} = require('../.test-runtime/lib/commands/active');
-const { resolveWorktree } = require('../.test-runtime/lib/core/mission-utils');
-const { completePreflightOrExit } = require('../.test-runtime/lib/commands/mission-start');
+} = require('../.test-runtime/adapters/cli/commands/active.js');
+const { resolveWorktree } = require('../.test-runtime/adapters/filesystem/mission-utils.js');
+const { completePreflightOrExit } = require('../.test-runtime/adapters/cli/mission-start.js');
 
 test('active progress renderer preserves launch and handoff status order', () => {
   const logs = [];
@@ -26,6 +26,36 @@ test('active progress renderer preserves launch and handoff status order', () =>
   assert.deepEqual(logs, [
     'Launching execute agent...',
     '\nExecute agent (codex) completed successfully. Starting automated handoff...'
+  ]);
+});
+
+test('active() passes its progress renderer into a deferred execute-service factory', async () => {
+  const logs = [];
+  let receivedProgress = null;
+
+  await active(['task-1038', '--implementer', 'custom'], {
+    inferSlugFn: () => 'task-1038',
+    rootDir: '/tmp/project-task-1038',
+    serviceFactory: async (_rootDir, progress) => {
+      receivedProgress = progress;
+      return {
+        execute: async () => {
+          progress({ phase: 'launch' });
+          progress({ phase: 'handoff', agent: 'custom' });
+          return { status: 'completed', value: { agent: 'custom' }, durableEvidence: [] };
+        },
+      };
+    },
+    exitFn: (code) => { throw new Error(`unexpected exit ${code}`); },
+    logFn: (message) => logs.push(message),
+    errorFn: (message) => { throw new Error(`unexpected error: ${message}`); },
+  });
+
+  assert.equal(typeof receivedProgress, 'function');
+  assert.deepEqual(logs, [
+    'Running execute preflight...',
+    'Launching execute agent...',
+    '\nExecute agent (custom) completed successfully. Starting automated handoff...',
   ]);
 });
 
@@ -146,7 +176,7 @@ test('completePreflightOrExit returns {pass:true} on success when returnResult i
 test('mission-start verify mode reports diagnostics and open-ended success without slug', () => {
   const lines = [];
   const errors = [];
-  const missionStart = require('../.test-runtime/lib/commands/mission-start');
+  const missionStart = require('../.test-runtime/adapters/cli/mission-start.js');
 
   const result = missionStart([], {
     returnResult: true,
@@ -179,7 +209,7 @@ test('mission-start verify mode reports diagnostics and open-ended success witho
 test('mission-start mission mode reports failures for wrong branch, ambiguous task, and missing mission dir', () => {
   const lines = [];
   const errors = [];
-  const missionStart = require('../.test-runtime/lib/commands/mission-start');
+  const missionStart = require('../.test-runtime/adapters/cli/mission-start.js');
 
   const result = missionStart(['task-1031'], {
     returnResult: true,
@@ -571,7 +601,7 @@ test('active() synchronizes a launch-deferred rebase after execute output is com
 // `.default` resolves to the function. This test fails loudly if that export
 // shape ever changes without updating active.ts's accessor to match.
 test('repair-handoff module exposes its default export as callable under CJS require+importStar interop', () => {
-  const repairHandoffModule = require('../.test-runtime/lib/commands/repair-handoff');
+  const repairHandoffModule = require('../.test-runtime/adapters/cli/commands/repair-handoff.js');
   assert.equal(typeof repairHandoffModule, 'function', 'require(repair-handoff) must return the function directly (CJS compat line)');
 
   // Replicate tsc's __importStar interop exactly (module lacks __esModule
@@ -1350,7 +1380,7 @@ test('active() state-ordering contract: does not write Backlog before launch (re
 
 // CP-2 tests for attemptAgentRelaunch
 
-const { attemptAgentRelaunch } = require('../.test-runtime/lib/commands/active');
+const { attemptAgentRelaunch } = require('../.test-runtime/adapters/cli/commands/active.js');
 
 test('attemptAgentRelaunch function exists', () => {
   assert.ok(typeof attemptAgentRelaunch === 'function', 'attemptAgentRelaunch should be exported');

@@ -4,7 +4,7 @@ import { AgentBlockService, parseAgentBlockUntil } from '../../application/servi
 import type { AgentReadAdapter } from '../../application/projections/board-readers.js';
 import type { AgentBlocklistRepository } from '../../application/ports/agent-blocklist.js';
 import type { MissionId } from '../../domain/mission.js';
-import { getTaskAssignee, resolveTaskFile } from '../../platform/runtime/lib/tools/backlog.js';
+import { getTaskAssignee, resolveTaskFile } from './backlog.js';
 
 // ---------------------------------------------------------------------------
 // Parse-primitive types
@@ -31,7 +31,7 @@ function defaultGetTaskAssignee(): GetTaskAssigneeFn {
 
 export interface ConcreteAgentReadAdapterOptions {
   readonly rootDir: string;
-  /** SQLite blocklist repository (TASK-2295 snapshot). */
+  /** SQLite blocklist repository (architecture migration snapshot). */
   readonly blocklistRepo: AgentBlocklistRepository;
   /** Known agent families to report availability for. */
   readonly knownAgentFamilies: readonly AgentFamily[];
@@ -45,7 +45,7 @@ export interface ConcreteAgentReadAdapterOptions {
 
 /**
  * Concrete `AgentReadAdapter` that reads agent availability and timed-block
- * countdown from the TASK-2295 operator-local SQLite snapshot (blocklist
+ * countdown from the architecture migration operator-local SQLite snapshot (blocklist
  * repository), not by re-reading files ad hoc.
  */
 export class ConcreteAgentReadAdapter implements AgentReadAdapter {

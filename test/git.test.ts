@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const childProcess = require('child_process');
 const { mock } = test;
 
-const git = require('../.test-runtime/lib/core/git');
+const git = require('../.test-runtime/adapters/git/git.js');
 
 test('git returns successful output when spawnSync reports status 0 with a non-fatal error object', () => {
   const spawnMock = mock.method(childProcess, 'spawnSync', () => ({

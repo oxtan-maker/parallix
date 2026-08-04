@@ -45,7 +45,7 @@ function importsFrom(source: string): string[] {
 }
 
 test('headless-isolation: headless entry module graph contains no react or ink', () => {
-  const headlessEntry = path.join(root, 'src', 'platform', 'runtime', 'index.ts');
+  const headlessEntry = path.join(root, 'src', 'composition', 'create-cli.ts');
   const visited = new Set<string>();
   const violations: string[] = [];
 
@@ -83,28 +83,28 @@ test('headless-isolation: headless entry module graph contains no react or ink',
   assert.deepEqual(violations, [], `Headless entry module graph must not import UI packages. Violations: ${violations.join('\n')}`);
 });
 
-test('headless-isolation: ui command is imported in index.ts', () => {
+test('headless-isolation: ui command is composed lazily in create-cli.ts', () => {
   const indexSource = fs.readFileSync(
-    path.join(root, 'src', 'platform', 'runtime', 'index.ts'),
+    path.join(root, 'src', 'composition', 'create-cli.ts'),
     'utf8',
   );
 
   // The ui command is imported from the TUI module
   assert.ok(
     /runUiCommand/.test(indexSource),
-    'index.ts must import runUiCommand from the TUI module',
+    'create-cli.ts must load runUiCommand from the TUI module',
   );
 });
 
-test('headless-isolation: ui command is in the COMMANDS map', () => {
+test('headless-isolation: ui command is in the composed command registry', () => {
   const indexSource = fs.readFileSync(
-    path.join(root, 'src', 'platform', 'runtime', 'index.ts'),
+    path.join(root, 'src', 'composition', 'create-cli.ts'),
     'utf8',
   );
 
   // The COMMANDS map includes 'ui'
-  const commandsBlockMatch = indexSource.match(/const COMMANDS[^;]*;\s*\n/);
-  assert.ok(commandsBlockMatch, 'COMMANDS map should be present in index.ts');
+  const commandsBlockMatch = indexSource.match(/return\s+\{[\s\S]*?\n  \};/);
+  assert.ok(commandsBlockMatch, 'composed command registry should be present in create-cli.ts');
   assert.ok(
     commandsBlockMatch[0].includes('ui'),
     'ui must be in the COMMANDS map',

@@ -1,8 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const missionUtils = require('../.test-runtime/lib/core/mission-utils');
-const { areAllBacklogOnlyConflicts } = require('../.test-runtime/lib/commands/integrate');
+const missionUtils = require('../.test-runtime/adapters/filesystem/mission-utils.js');
+const { areAllBacklogOnlyConflicts } = require('../.test-runtime/adapters/cli/commands/integrate.js');
 
 // ---------------------------------------------------------------------------
 // Tier 1: Classification tests (areAllBacklogOnlyConflicts)
@@ -26,7 +26,7 @@ test('areAllBacklogOnlyConflicts returns false when a non-backlog file is presen
   assert.equal(
     areAllBacklogOnlyConflicts([
       'backlog/tasks/task-100 - feature.md',
-      'src/platform/runtime/lib/commands/handoff.ts',
+      'src/adapters/cli/commands/handoff.ts',
     ]),
     false
   );
@@ -175,7 +175,7 @@ test('non-backlog conflict fails without retry and skips fetch/pull', () => {
   const gitRunner = createGitRunner({
     onMergeNoCommit: () => ({
       status: 1,
-      stdout: 'CONFLICT (content): Merge conflict in src/platform/runtime/lib/commands/handoff.ts\n',
+      stdout: 'CONFLICT (content): Merge conflict in src/adapters/cli/commands/handoff.ts\n',
       stderr: '',
     }),
     onMergeAbort: () => ({ status: 0, stdout: '', stderr: '' }),
@@ -183,7 +183,7 @@ test('non-backlog conflict fails without retry and skips fetch/pull', () => {
 
   const result = simulateStep2Probe(
     gitRunner,
-    'CONFLICT (content): Merge conflict in src/platform/runtime/lib/commands/handoff.ts\n'
+    'CONFLICT (content): Merge conflict in src/adapters/cli/commands/handoff.ts\n'
   );
 
   assert.equal(result.ok, true, 'simulation completed');
@@ -305,20 +305,20 @@ test('happy path: probe merge succeeds on first try with no conflicts', () => {
 
 const path = require('node:path');
 const { mock } = test;
-const git = require('../.test-runtime/lib/core/git');
-const backlog = require('../.test-runtime/lib/tools/backlog');
-const forgejo = require('../.test-runtime/lib/tools/forgejo');
-const productConfig = require('../.test-runtime/lib/core/product-config');
-const runtimeMatrix = require('../.test-runtime/lib/core/runtime-matrix');
-const stats = require('../.test-runtime/lib/commands/stats');
-const composition = require('../.test-runtime/lib/composition/application-services');
+const git = require('../.test-runtime/adapters/git/git.js');
+const backlog = require('../.test-runtime/adapters/backlog/backlog.js');
+const forgejo = require('../.test-runtime/adapters/forgejo/forgejo.js');
+const productConfig = require('../.test-runtime/adapters/config/product-config.js');
+const runtimeMatrix = require('../.test-runtime/adapters/agents/runtime-matrix.js');
+const stats = require('../.test-runtime/adapters/cli/commands/stats.js');
+const composition = require('../.test-runtime/composition/application-services.js');
 
 const TEST_SLUG = 'task-2242';
 const FAKE_ROOT = '/tmp/task-2242-integrate-root';
 
 function loadIntegrate() {
-  delete require.cache[require.resolve('../.test-runtime/lib/commands/integrate')];
-  return require('../.test-runtime/lib/commands/integrate');
+  delete require.cache[require.resolve('../.test-runtime/adapters/cli/commands/integrate')];
+  return require('../.test-runtime/adapters/cli/commands/integrate.js');
 }
 
 // Base git responses shared by all production integration tests.
@@ -384,7 +384,7 @@ test('integrate SC2b: non-backlog conflict exits with conflict files and helper 
   const gitMockFn = (args) => {
     if (args.includes('merge') && args.includes('--no-commit')) {
       mergeNoCommitCalls.push(args);
-      return { status: 1, stdout: 'CONFLICT (content): Merge conflict in src/platform/runtime/lib/commands/handoff.ts\n', stderr: '' };
+      return { status: 1, stdout: 'CONFLICT (content): Merge conflict in src/adapters/cli/commands/handoff.ts\n', stderr: '' };
     }
     if (args.includes('merge') && args.includes('--abort')) return { status: 0, stdout: '', stderr: '' };
     return baseGitFn(args);
@@ -394,7 +394,7 @@ test('integrate SC2b: non-backlog conflict exits with conflict files and helper 
   mock.method(process, 'exit', () => {});
   const integrate = loadIntegrate();
 
-  await integrate([TEST_SLUG, '--no-integration-gates']);
+  await integrate([TEST_SLUG, '--no-integration-gates'], { missionServicesFn: composition.createMissionApplicationServices });
 
   console.log = originalLog;
   mock.reset();
@@ -426,7 +426,7 @@ test('integrate SC2c: mission backlog task overlap retries and falls through wit
   mock.method(process, 'exit', () => {});
   const integrate = loadIntegrate();
 
-  await integrate([TEST_SLUG, '--no-integration-gates']);
+  await integrate([TEST_SLUG, '--no-integration-gates'], { missionServicesFn: composition.createMissionApplicationServices });
 
   console.log = originalLog;
   mock.reset();
@@ -466,7 +466,7 @@ test('integrate P1: recovered abort failure uses normal conflict output after re
   mock.method(process, 'exit', () => {});
   const integrate = loadIntegrate();
 
-  await integrate([TEST_SLUG, '--no-integration-gates']);
+  await integrate([TEST_SLUG, '--no-integration-gates'], { missionServicesFn: composition.createMissionApplicationServices });
 
   console.log = originalLog;
   mock.reset();
@@ -509,7 +509,7 @@ test('integrate P1: retry abort failure routes to inspect-checkout path (not reb
   mock.method(process, 'exit', () => {});
   const integrate = loadIntegrate();
 
-  await integrate([TEST_SLUG, '--no-integration-gates']);
+  await integrate([TEST_SLUG, '--no-integration-gates'], { missionServicesFn: composition.createMissionApplicationServices });
 
   console.log = originalLog;
   console.error = originalError;

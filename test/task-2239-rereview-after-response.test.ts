@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { startReviewLoop } from '../src/platform/runtime/lib/review/review.js';
+import { startReviewLoop } from '../src/adapters/review/review-loop.js';
 
 function reviewLoopHarness(overrides: Record<string, unknown> = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2239-rereview-'));

@@ -4,8 +4,8 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const childProcess = require('child_process');
-const { WORKFLOW_AGENT_NAMES } = require('../.test-runtime/lib/agents/agents');
-const fmt = require('../.test-runtime/lib/core/fmt');
+const { WORKFLOW_AGENT_NAMES } = require('../.test-runtime/adapters/agents/agents.js');
+const fmt = require('../.test-runtime/application/presentation/cli-format.js');
 const typeKey = ['class', 'ification'].join('');
 
 const {
@@ -28,8 +28,8 @@ const {
    clearTaskAgentAssignee,
    hasBugLabel,
    getTaskLabels,
-} = require('../.test-runtime/lib/tools/backlog');
-const { [`getTask${typeKey[0].toUpperCase()}${typeKey.slice(1)}`]: getTaskMissionType } = require('../.test-runtime/lib/tools/backlog');
+} = require('../.test-runtime/adapters/backlog/backlog.js');
+const { [`getTask${typeKey[0].toUpperCase()}${typeKey.slice(1)}`]: getTaskMissionType } = require('../.test-runtime/adapters/backlog/backlog.js');
 
 async function withTempRepo(fn) {
   const previous = process.cwd();

@@ -102,8 +102,8 @@ test('global tarball reinstall preserves PARALLIX_HOME measurements and agent bl
     // The assertions that matter here — where that state lives, that the installed CLI
     // reads it, and that a reinstall preserves it — are unchanged.
     const writeScript = [
-      `const stats = require(${JSON.stringify(path.join(PACKAGE_ROOT, 'src', 'platform', 'runtime', 'lib', 'commands', 'stats.ts'))});`,
-      `const agents = require(${JSON.stringify(path.join(PACKAGE_ROOT, 'src', 'platform', 'runtime', 'lib', 'agents', 'agents.ts'))});`,
+      `const stats = require(${JSON.stringify(path.join(PACKAGE_ROOT, 'src', 'adapters', 'cli', 'commands', 'stats.ts'))});`,
+      `const agents = require(${JSON.stringify(path.join(PACKAGE_ROOT, 'src', 'adapters', 'agents', 'agents.ts'))});`,
       "stats.upsertMeasurementRow({date:'2026-06-06',mission:'task-reinstall-proof',classification:'ai_sdlc',implementer:'codex',pr_fix_rounds:'2',closed:'yes'});",
       "agents.updateAgentBlock('custom', '2026-07-01 12');"
     ].join('');
@@ -117,7 +117,7 @@ test('global tarball reinstall preserves PARALLIX_HOME measurements and agent bl
     const measurementsBefore = fs.readFileSync(measurementDbPath);
     const agentsBefore = fs.readFileSync(agentsPath, 'utf8');
     const readFromSecondRepo = [
-      `const stats = require(${JSON.stringify(path.join(PACKAGE_ROOT, 'src', 'platform', 'runtime', 'lib', 'commands', 'stats.ts'))});`,
+      `const stats = require(${JSON.stringify(path.join(PACKAGE_ROOT, 'src', 'adapters', 'cli', 'commands', 'stats.ts'))});`,
       "const row = stats.loadMeasurementRows().rows.find(item => item.mission === 'task-reinstall-proof');",
       "if (!row || row.pr_fix_rounds !== '2') process.exit(1);"
     ].join('');

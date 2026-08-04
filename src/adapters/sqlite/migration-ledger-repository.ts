@@ -7,7 +7,7 @@ import type { MigrationLedgerEntry, MigrationLedgerRepository } from './ports.js
  * Implements `MigrationLedgerRepository` using parameterized SQL.
  *
  * Authority mapping: operator-local source-of-truth for migration metadata.
- * Maps to TASK-2294 domain: migration metadata.
+ * Maps to architecture migration domain: migration metadata.
  */
 export class SqliteMigrationLedgerRepository implements MigrationLedgerRepository {
   private db: SqliteDatabaseAdapter;

@@ -18,8 +18,8 @@ const {
   parseBaseBranchLine,
   resolveMissionBaseBranch,
   resolveBaseWorktree,
-} = require('../.test-runtime/lib/core/mission-utils');
-const git = require('../.test-runtime/lib/core/git');
+} = require('../.test-runtime/adapters/filesystem/mission-utils.js');
+const git = require('../.test-runtime/adapters/git/git.js');
 
 function withTempRepo(fn) {
   const previous = process.cwd();

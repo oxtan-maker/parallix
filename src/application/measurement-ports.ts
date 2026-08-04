@@ -1,12 +1,12 @@
 /**
  * Application port for the checked `AgentRunMeasurement` / `MissionOutcome`
- * persistence boundary (ADR 0053, TASK-2322.08).
+ * persistence boundary (ADR 0053, architecture migration).
  *
  * The database is the sole authority for runtime statistics. There is no file
  * fallback: an unavailable store raises `MeasurementStoreUnavailableError`
  * rather than resolving, reading, or writing a CSV.
  *
- * Identity: TASK-2322.02 excluded `Attempt`, so measurements carry no per-run
+ * Identity: architecture migration excluded `Attempt`, so measurements carry no per-run
  * identity. `MeasurementIdentity` is the grouping the domain already models —
  * `(repo, mission, stage, actorKey)`. The caller that owns the attribution
  * rule supplies `actorKey`; no adapter derives or invents one.
@@ -96,7 +96,7 @@ export interface MeasurementStorePort {
  * Raised when the measurement database cannot be opened, migrated, or written.
  *
  * Callers must surface this failure. Falling back to a CSV file is forbidden
- * by ADR 0053 and by this mission's SC4.
+ * by ADR 0053 and by this mission's architecture invariant.
  */
 export class MeasurementStoreUnavailableError extends Error {
   readonly cause?: unknown;

@@ -11,7 +11,7 @@ const {
   updateGraphifyKnowledgeGraph,
   resolveGraphPath,
   queryGraph,
-} = require('../.test-runtime/lib/core/mission-utils');
+} = require('../.test-runtime/adapters/filesystem/mission-utils.js');
 
 test('probeGraphifyAvailability and graphifyAvailable distinguish missing commands from probe failures', () => {
   const missing = probeGraphifyAvailability({

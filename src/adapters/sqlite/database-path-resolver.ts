@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { resolveParallixHome } from '../../platform/runtime/lib/core/storage.js';
+import { resolveParallixHome } from '../storage/storage.js';
 
 /**
  * Resolve the SQLite database path to `<PARALLIX_HOME>/parallix.db`.

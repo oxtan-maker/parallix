@@ -8,9 +8,9 @@ const {
   eligibleAgentsForStep,
   startAgent,
   selectAgent
-} = require('../.test-runtime/lib/agents/agents');
+} = require('../.test-runtime/adapters/agents/agents.js');
 
-const { fakeLauncher } = require('./lib/agent-mock');
+const { fakeLauncher } = require('./lib/agent-mock.js');
 
 function withStubbedMathRandom(value, fn) {
   const previousRandom = Math.random;

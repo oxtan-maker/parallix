@@ -21,7 +21,7 @@ test.afterEach(() => {
   fs.rmSync(_tmpHome, { recursive: true, force: true });
 });
 
-const { startReviewLoop } = require('../.test-runtime/lib/review/review');
+const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
 
 const TEST_SLUG = 'task-1104-test';
 
@@ -111,7 +111,7 @@ test('startReviewLoop follows the transition contract: review before reviewer, a
   assert.ok(firstActiveTransitionIdx > reviewTransitionIdx, "Initial transition should not be 'active'");
 });
 
-const { pushRound } = require('../.test-runtime/lib/review/review');
+const { pushRound } = require('../.test-runtime/adapters/review/review-commands.js');
 
 test('pushRound follows the transition contract: review before createPr', async () => {
   const events = [];
@@ -145,13 +145,13 @@ test('pushRound follows the transition contract: review before createPr', async 
   assert.ok(reviewTransitionIdx < createPrIdx, "Transition to 'review' must occur BEFORE createPr");
 });
 
-const { performHandoff } = require('../.test-runtime/lib/commands/handoff');
-const { stubMissionServices } = require('./helpers/stub-mission-services');
-const forgejo = require('../.test-runtime/lib/tools/forgejo');
-const gatekeeper = require('../.test-runtime/lib/tools/gatekeeper');
-const backlog = require('../.test-runtime/lib/tools/backlog');
-const missionUtils = require('../.test-runtime/lib/core/mission-utils');
-const git = require('../.test-runtime/lib/core/git');
+const { performHandoff } = require('../.test-runtime/adapters/cli/commands/handoff.js');
+const { stubMissionServices } = require('./helpers/stub-mission-services.js');
+const forgejo = require('../.test-runtime/adapters/forgejo/forgejo.js');
+const gatekeeper = require('../.test-runtime/adapters/verification/gatekeeper.js');
+const backlog = require('../.test-runtime/adapters/backlog/backlog.js');
+const missionUtils = require('../.test-runtime/adapters/filesystem/mission-utils.js');
+const git = require('../.test-runtime/adapters/git/git.js');
 
 test('performHandoff follows the sequence: createPr -> gatekeeper -> transitionTask -> push', async () => {
   const events = [];

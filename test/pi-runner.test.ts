@@ -1,9 +1,9 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const pi = require('../.test-runtime/lib/agents/pi');
-const productConfig = require('../.test-runtime/lib/core/product-config');
-const launcherSelection = require('../.test-runtime/lib/agents/launcher-selection');
+const pi = require('../.test-runtime/adapters/agents/pi.js');
+const productConfig = require('../.test-runtime/adapters/config/product-config.js');
+const launcherSelection = require('../.test-runtime/adapters/agents/launcher-selection.js');
 const os = require('node:os');
 
 test.afterEach(() => {

@@ -12,7 +12,7 @@ import type { KnownRepositoryEntry, KnownRepositoriesRepository } from '../../ap
  * - `path`: operator-local cache (filesystem observation)
  * - `last_accessed`: operator-local cache (runtime timestamp)
  *
- * Maps to TASK-2294 domain entity: `KnownRepository` in `src/domain/repository.ts`.
+ * Maps to architecture migration domain entity: `KnownRepository` in `src/domain/repository.ts`.
  */
 export class SqliteKnownRepositoriesRepository implements KnownRepositoriesRepository {
   private db: SqliteDatabaseAdapter;

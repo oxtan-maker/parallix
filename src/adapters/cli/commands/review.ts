@@ -1,0 +1,19 @@
+import { review } from '../../review/review-commands.js';
+
+/**
+ * Workflow command entry point for `review`.
+ * Delegates to the review subsystem (review-commands.js).
+ *
+ * Usage: node parallix review [<slug>] [--verify] [--submit] [--push] ...
+ */
+/** @param {string[]} args */
+async function reviewCommand(args: string[], options = {}) {
+  await review(args, options);
+}
+
+export default reviewCommand;
+export { reviewCommand };
+
+// CJS compat: ensure require() returns the function directly
+declare const module: { exports: any } | undefined;
+if (typeof module !== 'undefined') { module.exports = reviewCommand; }

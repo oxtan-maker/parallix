@@ -6,21 +6,21 @@ const os = require('node:os');
 const path = require('path');
 const { mock } = test;
 
-const git = require('../.test-runtime/lib/core/git');
-const missionUtils = require('../.test-runtime/lib/core/mission-utils');
-const backlog = require('../.test-runtime/lib/tools/backlog');
-const forgejo = require('../.test-runtime/lib/tools/forgejo');
-const runtimeMatrix = require('../.test-runtime/lib/core/runtime-matrix');
-const stats = require('../.test-runtime/lib/commands/stats');
-const composition = require('../.test-runtime/lib/composition/application-services');
+const git = require('../.test-runtime/adapters/git/git.js');
+const missionUtils = require('../.test-runtime/adapters/filesystem/mission-utils.js');
+const backlog = require('../.test-runtime/adapters/backlog/backlog.js');
+const forgejo = require('../.test-runtime/adapters/forgejo/forgejo.js');
+const runtimeMatrix = require('../.test-runtime/adapters/agents/runtime-matrix.js');
+const stats = require('../.test-runtime/adapters/cli/commands/stats.js');
+const composition = require('../.test-runtime/composition/application-services.js');
 
 const TEST_SLUG = 'task-integrate-v2';
 const FAKE_ROOT = path.join(os.tmpdir(), `integrate-v2-root-${process.pid}`);
 let statsCalls = [];
 
 function loadIntegrate() {
-  delete require.cache[require.resolve('../.test-runtime/lib/commands/integrate')];
-  return require('../.test-runtime/lib/commands/integrate');
+  delete require.cache[require.resolve('../.test-runtime/adapters/cli/commands/integrate')];
+  return require('../.test-runtime/adapters/cli/commands/integrate.js');
 }
 
 function setupMocks() {
@@ -104,7 +104,7 @@ test('integrate full squash-merge (Variant B) success path', async (t) => {
   console.log = (msg) => logs.push(msg);
 
   try {
-    await integrate([TEST_SLUG, '--no-integration-gates']);
+    await integrate([TEST_SLUG, '--no-integration-gates'], { missionServicesFn: composition.createMissionApplicationServices });
   } catch { /* expected */ }
 
   assert.ok(logs.some(l => l.includes('Selecting integration variant: Variant B')));
@@ -153,7 +153,7 @@ test('integrate Variant B promotes and completes a review-approved task in the l
   const integrate = loadIntegrate();
 
   try {
-    await integrate([TEST_SLUG, '--no-integration-gates']);
+    await integrate([TEST_SLUG, '--no-integration-gates'], { missionServicesFn: composition.createMissionApplicationServices });
   } catch { /* expected */ }
 
   assert.deepEqual(events, ['abort', 'squash', 'promote', 'complete', 'commit']);
@@ -181,7 +181,7 @@ test('integrate Variant B preserves soft-reset backlog noise across squash merge
   const integrate = loadIntegrate();
 
   try {
-    await integrate([TEST_SLUG, '--no-integration-gates']);
+    await integrate([TEST_SLUG, '--no-integration-gates'], { missionServicesFn: composition.createMissionApplicationServices });
   } catch { /* expected */ }
 
   const diffIndex = gitCalls.findIndex(call => call.includes('diff --cached --binary'));
@@ -240,7 +240,7 @@ test('integrate resolves PR and approval using the task assignee Forgejo identit
   mock.method(process, 'exit', (code) => exitCodes.push(code));
 
   try {
-    await integrate([TEST_SLUG, '--dry-run', '--no-integration-gates']);
+    await integrate([TEST_SLUG, '--dry-run', '--no-integration-gates'], { missionServicesFn: composition.createMissionApplicationServices });
 
     assert.equal(captured.prForgejoUser, 'gemini');
     assert.equal(captured.approvalForgejoUser, 'gemini');
@@ -285,7 +285,7 @@ test('integrate passes the pre-resolved Forgejo token into syncMerged', async ()
   console.log = (msg) => logs.push(msg);
 
   try {
-    await integrate([TEST_SLUG, '--no-integration-gates']);
+    await integrate([TEST_SLUG, '--no-integration-gates'], { missionServicesFn: composition.createMissionApplicationServices });
 
     assert.equal(captured.prToken, 'preflight-token');
     assert.equal(captured.approvalToken, 'preflight-token');
@@ -311,7 +311,7 @@ test('integrate rejects a Forgejo PR that is already merged', async () => {
   mock.method(process, 'exit', (code) => exitCodes.push(code));
 
   try {
-    await integrate([TEST_SLUG, '--no-integration-gates']);
+    await integrate([TEST_SLUG, '--no-integration-gates'], { missionServicesFn: composition.createMissionApplicationServices });
   } catch { /* expected */ }
   
   const output = [...logs, ...errors].join('\n');
@@ -334,7 +334,7 @@ test('integrate warns that --no-gate is ignored', async () => {
   console.log = (msg) => logs.push(msg);
 
   try {
-    await integrate([TEST_SLUG, '--dry-run', '--no-gate', '--no-integration-gates']);
+    await integrate([TEST_SLUG, '--dry-run', '--no-gate', '--no-integration-gates'], { missionServicesFn: composition.createMissionApplicationServices });
   } catch { /* expected */ }
 
   assert.ok(logs.some(l => l.includes('integrate ignores --no-gate')));
@@ -358,7 +358,7 @@ test('integrate exits non-zero when post-integration stats recording fails', asy
   mock.method(process, 'exit', (code) => exitCodes.push(code));
 
   try {
-    await integrate([TEST_SLUG, '--no-integration-gates']);
+    await integrate([TEST_SLUG, '--no-integration-gates'], { missionServicesFn: composition.createMissionApplicationServices });
   } catch { /* expected */ }
 
   assert.equal(statsCalls.length, 1);
@@ -384,7 +384,7 @@ test('integrate reports merged-PR recovery guidance before any closeout work', a
   mock.method(process, 'exit', (code) => exitCodes.push(code));
 
   try {
-    await integrate([TEST_SLUG, '--no-integration-gates']);
+    await integrate([TEST_SLUG, '--no-integration-gates'], { missionServicesFn: composition.createMissionApplicationServices });
   } catch { /* expected */ }
 
   const output = [...logs, ...errors].join('\n');
@@ -423,7 +423,7 @@ test('integrate Variant B stops when dry-run merge cannot be aborted cleanly', a
   mock.method(process, 'exit', (code) => exitCodes.push(code));
 
   try {
-    await integrate([TEST_SLUG, '--no-integration-gates']);
+    await integrate([TEST_SLUG, '--no-integration-gates'], { missionServicesFn: composition.createMissionApplicationServices });
   } catch { /* expected */ }
 
   assert.ok(errors.some(l => l.includes('Dry-run merge could not be aborted cleanly')));
@@ -458,7 +458,7 @@ test('integrate Variant B resumed partial state prints sync diagnostics on sync 
   mock.method(process, 'exit', (code) => exitCodes.push(code));
 
   try {
-    await integrate([TEST_SLUG, '--no-integration-gates']);
+    await integrate([TEST_SLUG, '--no-integration-gates'], { missionServicesFn: composition.createMissionApplicationServices });
   } catch { /* expected */ }
 
   assert.ok(logs.some(l => l.includes('Resuming from sync-merged step')));
@@ -497,7 +497,7 @@ test('integrate Variant B conflict path prints conflicting files and helper guid
   mock.method(process, 'exit', (code) => exitCodes.push(code));
 
   try {
-    await integrate([TEST_SLUG, '--no-integration-gates']);
+    await integrate([TEST_SLUG, '--no-integration-gates'], { missionServicesFn: composition.createMissionApplicationServices });
   } catch { /* expected */ }
 
   assert.ok(errors.some(l => l.includes('Merge conflicts detected. Rebase the mission branch before integrating.')));

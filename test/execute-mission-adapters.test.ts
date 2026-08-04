@@ -10,7 +10,7 @@ const {
   AgentExecutionAdapter,
   ExecuteTelemetryAdapter,
   HandoffReviewAdapter,
-} = require('../.test-runtime/lib/adapters/execute-mission-adapters');
+} = require('../.test-runtime/adapters/mission/execute-mission-adapters.js');
 
 function runtimeStub(overrides: Record<string, unknown> = {}) {
   return {

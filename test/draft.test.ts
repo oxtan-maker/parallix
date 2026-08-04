@@ -7,11 +7,11 @@ const os = require('os');
 const path = require('path');
 
 // Mock getPrimaryBranch BEFORE requiring dependent modules to ensure they use the mock.
-const missionUtils = require('../.test-runtime/lib/core/mission-utils');
+const missionUtils = require('../.test-runtime/adapters/filesystem/mission-utils.js');
 mock.method(missionUtils, 'getPrimaryBranch', () => 'main');
 
-const draftLib = require('../.test-runtime/lib/commands/draft');
-const stats = require('../.test-runtime/lib/commands/stats');
+const draftLib = require('../.test-runtime/adapters/cli/commands/draft.js');
+const stats = require('../.test-runtime/adapters/cli/commands/stats.js');
 const {
   buildDraftPrompt,
   recordDraftImplementer,
@@ -1036,6 +1036,10 @@ test('runDraftCommand transitions task to backlog after setup completes', async 
       readAgentConfigOrExitFn: () => ({}),
       selectAgentFn: () => 'codex',
       startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
+      missionServicesFn: async () => ({
+        repositoryId: 'main',
+        intake: { execute: async () => ({ status: 'completed', value: { version: 1 }, durableEvidence: [] }) },
+      }),
       recordDraftImplementerFn: () => {},
       enforceDraftCommitSafetyFn: () => false,
       validateDraftClassificationFn: () => ({ ok: true }),
@@ -1079,6 +1083,10 @@ test('runDraftCommand transitions task to refined after draft agent succeeds and
       readAgentConfigOrExitFn: () => ({}),
       selectAgentFn: () => 'codex',
       startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
+      missionServicesFn: async () => ({
+        repositoryId: 'main',
+        intake: { execute: async () => ({ status: 'completed', value: { version: 1 }, durableEvidence: [] }) },
+      }),
       recordDraftImplementerFn: () => {},
       enforceDraftCommitSafetyFn: () => false,
       validateDraftClassificationFn: () => ({ ok: true }),
@@ -1123,6 +1131,10 @@ test('runDraftCommand does not transition to refined when draft agent exits non-
     readAgentConfigOrExitFn: () => ({}),
     selectAgentFn: () => 'codex',
     startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 1 } }),
+    missionServicesFn: async () => ({
+      repositoryId: 'main',
+      intake: { execute: async () => ({ status: 'completed', value: { version: 1 }, durableEvidence: [] }) },
+    }),
     recordDraftImplementerFn: () => {},
     enforceDraftCommitSafetyFn: () => false,
     exitFn: (code) => { exitCode = code; },
@@ -1155,6 +1167,10 @@ test('runDraftCommand does not transition to refined when safety harness throws'
     readAgentConfigOrExitFn: () => ({}),
     selectAgentFn: () => 'codex',
     startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
+    missionServicesFn: async () => ({
+      repositoryId: 'main',
+      intake: { execute: async () => ({ status: 'completed', value: { version: 1 }, durableEvidence: [] }) },
+    }),
     recordDraftImplementerFn: () => {},
     normalizeDraftClassificationFn: () => ({ ok: true, classification: 'user_value' }),
     enforceDraftCommitSafetyFn: () => { throw new Error('shared-file conflicts: lib/common.js'); },
@@ -1173,8 +1189,6 @@ test('runDraftCommand does not transition to refined when safety harness throws'
 // that produced only Markdown would leave a Mission that the lifecycle and
 // integration services reject as `missing`, so intake must succeed BEFORE the
 // external Backlog task is touched.
-
-const composition = require('../.test-runtime/lib/composition/application-services');
 
 function draftDepsForIntake(overrides) {
   return Object.assign({
@@ -1197,6 +1211,10 @@ function draftDepsForIntake(overrides) {
     startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
     recordDraftImplementerFn: () => {},
     enforceDraftCommitSafetyFn: () => false,
+    missionServicesFn: async () => ({
+      repositoryId: 'main',
+      intake: { execute: async () => ({ status: 'completed', value: { version: 1 }, durableEvidence: [] }) },
+    }),
     logFn: () => {},
   }, overrides);
 }
@@ -1207,7 +1225,7 @@ test('runDraftCommand materializes the Mission in SQLite before transitioning th
   // Composition canonicalizes a mission worktree back to its primary checkout,
   // so the services it returns carry `main` — not the `<repo>-<slug>` worktree
   // basename that `targetWorktree` (`/wt-tst`) would yield.
-  mock.method(composition, 'createMissionApplicationServices', async () => ({
+  const missionServicesFn = async () => ({
     repositoryId: 'main',
     intake: {
       execute: async (request) => {
@@ -1216,16 +1234,17 @@ test('runDraftCommand materializes the Mission in SQLite before transitioning th
         return { status: 'completed', value: { version: 1 }, durableEvidence: [] };
       },
     },
-  }));
+  });
 
   try {
     await runDraftCommand(['task-tst'], draftDepsForIntake({
       transitionTaskFn: (slug, status) => { calls.push(`transition:${status}`); return true; },
+      missionServicesFn,
       exitFn: (code) => { throw new Error(`unexpected exit ${code}`); },
       errorFn: (msg) => { throw new Error(`unexpected error: ${msg}`); },
     }));
   } finally {
-    mock.restoreAll();
+    // The injected capability is local to this test; no global composition mock to restore.
   }
 
   assert.equal(calls[0], 'intake:task-tst', 'intake must run before any Backlog task mutation');
@@ -1243,7 +1262,7 @@ test('runDraftCommand keys the intake request to the identity the composition ro
   // `<repo>-<slug>`, which no other command path resolves to, so the Mission's
   // later lifecycle data would be attributed to a repository that does not exist.
   const requests = [];
-  mock.method(composition, 'createMissionApplicationServices', async (rootDir) => {
+  const missionServicesFn = async (rootDir) => {
     assert.equal(rootDir, '/wt-tst', 'composition still receives the mission worktree and canonicalizes it itself');
     return {
       repositoryId: 'parallix',
@@ -1254,16 +1273,17 @@ test('runDraftCommand keys the intake request to the identity the composition ro
         },
       },
     };
-  });
+  };
 
   try {
     await runDraftCommand(['task-tst'], draftDepsForIntake({
       transitionTaskFn: () => true,
+      missionServicesFn,
       exitFn: (code) => { throw new Error(`unexpected exit ${code}`); },
       errorFn: (msg) => { throw new Error(`unexpected error: ${msg}`); },
     }));
   } finally {
-    mock.restoreAll();
+    // The injected capability is local to this test; no global composition mock to restore.
   }
 
   assert.equal(requests.length, 1);
@@ -1274,7 +1294,7 @@ test('runDraftCommand fails closed and leaves the Backlog task untouched when Mi
   const transitions = [];
   const errors = [];
   const exitCodes = [];
-  mock.method(composition, 'createMissionApplicationServices', async () => ({
+  const missionServicesFn = async () => ({
     intake: {
       execute: async () => ({
         status: 'failed',
@@ -1282,16 +1302,17 @@ test('runDraftCommand fails closed and leaves the Backlog task untouched when Mi
         durableEvidence: [],
       }),
     },
-  }));
+  });
 
   try {
     await runDraftCommand(['task-tst'], draftDepsForIntake({
       transitionTaskFn: (slug, status) => { transitions.push(status); return true; },
+      missionServicesFn,
       exitFn: (code) => { exitCodes.push(code); },
       errorFn: (msg) => { errors.push(String(msg)); },
     }));
   } finally {
-    mock.restoreAll();
+    // The injected capability is local to this test; no global composition mock to restore.
   }
 
   assert.deepEqual(exitCodes, [1], 'an unavailable Mission store must abort the draft');
@@ -1303,18 +1324,19 @@ test('runDraftCommand fails closed when the Mission store cannot be constructed'
   const transitions = [];
   const errors = [];
   const exitCodes = [];
-  mock.method(composition, 'createMissionApplicationServices', async () => {
+  const missionServicesFn = async () => {
     throw new Error('SQLITE_CANTOPEN: unable to open database file');
-  });
+  };
 
   try {
     await runDraftCommand(['task-tst'], draftDepsForIntake({
       transitionTaskFn: (slug, status) => { transitions.push(status); return true; },
+      missionServicesFn,
       exitFn: (code) => { exitCodes.push(code); },
       errorFn: (msg) => { errors.push(String(msg)); },
     }));
   } finally {
-    mock.restoreAll();
+    // The injected capability is local to this test; no global composition mock to restore.
   }
 
   assert.deepEqual(exitCodes, [1]);
@@ -1324,7 +1346,7 @@ test('runDraftCommand fails closed when the Mission store cannot be constructed'
 
 test('runDraftCommand treats an already-recorded Mission as idempotent and continues the draft', async () => {
   const transitions = [];
-  mock.method(composition, 'createMissionApplicationServices', async () => ({
+  const missionServicesFn = async () => ({
     intake: {
       execute: async () => ({
         status: 'failed',
@@ -1332,16 +1354,17 @@ test('runDraftCommand treats an already-recorded Mission as idempotent and conti
         durableEvidence: [],
       }),
     },
-  }));
+  });
 
   try {
     await runDraftCommand(['task-tst'], draftDepsForIntake({
       transitionTaskFn: (slug, status) => { transitions.push(status); return true; },
+      missionServicesFn,
       exitFn: (code) => { throw new Error(`unexpected exit ${code}`); },
       errorFn: (msg) => { throw new Error(`unexpected error: ${msg}`); },
     }));
   } finally {
-    mock.restoreAll();
+    // The injected capability is local to this test; no global composition mock to restore.
   }
 
   assert.ok(transitions.includes('backlog'), 're-drafting a recorded Mission must not block the draft');

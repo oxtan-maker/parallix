@@ -39,7 +39,7 @@ test('active delegates without invoking a legacy missionStartFn namespace object
   // has `const missionStart = __importStar(require('./mission-start.js'))`
   // which produces a namespace object — not a function.
   // We simulate that by passing a namespace object as missionStartFn.
-  const active = require('../.test-runtime/lib/commands/active.js');
+  const active = require('../.test-runtime/adapters/cli/commands/active.js');
 
   const namespaceObj = makeNamespaceObj(stubMissionStart);
 
@@ -73,7 +73,7 @@ test('active delegates without invoking a legacy missionStartFn namespace object
 });
 
 test('active succeeds when missionStartFn is the default export function (task-1396 fix verified)', async () => {
-  const active = require('../.test-runtime/lib/commands/active.js');
+  const active = require('../.test-runtime/adapters/cli/commands/active.js');
 
   // Pass the actual function (what the fix should provide).
   const fn = stubMissionStart;

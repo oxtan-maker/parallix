@@ -1,7 +1,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { syncMerged } = require('../.test-runtime/lib/tools/forgejo.js');
+const { syncMerged } = require('../.test-runtime/adapters/forgejo/forgejo.js');
 
 test('syncMerged retries twice on stale info rejection with strong assertions', (t) => {
   const branch = 'mission/task-1080';

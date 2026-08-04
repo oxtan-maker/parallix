@@ -5,7 +5,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const { loadStateMap, resolveStateMapPath, SHIPPED_STATE_MAP_PATH, toVirtual } = require('../.test-runtime/lib/core/state-map');
+const { loadStateMap, resolveStateMapPath, SHIPPED_STATE_MAP_PATH, toVirtual } = require('../.test-runtime/adapters/config/state-map.js');
 
 test('toVirtual matches mapped statuses case-insensitively', () => {
   const map = {

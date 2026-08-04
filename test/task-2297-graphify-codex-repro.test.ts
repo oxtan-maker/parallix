@@ -85,7 +85,7 @@ test('queryGraph from worktree without graph returns actionable missing-graph re
     );
 
     // Load from source (ESM)
-    const { resolveGraphPath, queryGraph } = await import('../src/platform/runtime/lib/core/mission-utils.js');
+    const { resolveGraphPath, queryGraph } = await import('../src/adapters/filesystem/mission-utils.js');
 
     // --- Scenario 1: active worktree has NO graph ---
     // resolveGraphPath must return null for the active worktree (no graph)
@@ -192,7 +192,7 @@ test('Codex launcher sets cwd to active worktree so $(pwd)/graphify-out resolves
     );
 
     // Load from source (ESM)
-    const codex = await import('../src/platform/runtime/lib/agents/codex.js');
+    const codex = await import('../src/adapters/agents/codex.js');
     const { __setSpawnAndTeeForTest, __setSessionsForTest, startCodexDraftAgent } = codex;
 
     // Capture the spawnAndTee call to inspect cwd and env

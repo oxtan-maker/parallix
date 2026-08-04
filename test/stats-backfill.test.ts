@@ -9,14 +9,16 @@ const childProcess = require('child_process');
 const {
   collectHistoricalStatsBackfill,
   inferHistoricalClassificationFromMissionDoc,
-} = require('../.test-runtime/lib/commands/stats-backfill');
-const statsBackfill = require('../.test-runtime/lib/commands/stats-backfill');
-const stats = require('../.test-runtime/lib/commands/stats');
+} = require('../.test-runtime/adapters/cli/commands/stats-backfill.js');
+const statsBackfill = require('../.test-runtime/adapters/cli/commands/stats-backfill.js');
+const stats = require('../.test-runtime/adapters/cli/commands/stats.js');
+const { LegacyStatsBackfillAdapter } = require('../.test-runtime/adapters/mission/stats-backfill-adapter.js');
+const { StatsBackfillService } = require('../.test-runtime/application/stats-backfill-service.js');
 
 test('stats-backfill module loads without a parse-time SyntaxError', () => {
   assert.doesNotThrow(() => {
-    delete require.cache[require.resolve('../.test-runtime/lib/commands/stats-backfill')];
-    require('../.test-runtime/lib/commands/stats-backfill');
+    delete require.cache[require.resolve('../.test-runtime/adapters/cli/commands/stats-backfill')];
+    require('../.test-runtime/adapters/cli/commands/stats-backfill.js');
   });
 });
 
@@ -312,6 +314,7 @@ test('statsBackfill supports help, json output, summary output, and apply mode',
     const previousHome = process.env.PARALLIX_HOME;
     process.env.PARALLIX_HOME = parallixHome;
     try {
+      const service = new StatsBackfillService(new LegacyStatsBackfillAdapter(root));
       const logs = [];
       await statsBackfill(['--help'], {
         rootDir: root,
@@ -326,6 +329,7 @@ test('statsBackfill supports help, json output, summary output, and apply mode',
       const jsonLogs = [];
       await statsBackfill(['--json'], {
         rootDir: root,
+        service,
         log: line => jsonLogs.push(line),
         error: line => jsonLogs.push(`ERR:${line}`),
         exit: code => { throw new Error(`unexpected exit ${code}`); },
@@ -337,6 +341,7 @@ test('statsBackfill supports help, json output, summary output, and apply mode',
       const summaryLogs = [];
       await statsBackfill([], {
         rootDir: root,
+        service,
         log: line => summaryLogs.push(line),
         error: line => summaryLogs.push(`ERR:${line}`),
         exit: code => { throw new Error(`unexpected exit ${code}`); },
@@ -347,6 +352,7 @@ test('statsBackfill supports help, json output, summary output, and apply mode',
       const applyLogs = [];
       await statsBackfill(['--apply'], {
         rootDir: root,
+        service,
         log: line => applyLogs.push(line),
         error: line => applyLogs.push(`ERR:${line}`),
         exit: code => { throw new Error(`unexpected exit ${code}`); },
@@ -367,6 +373,7 @@ test('statsBackfill supports help, json output, summary output, and apply mode',
       // Re-applying is idempotent: no duplicate mission rows appear.
       await statsBackfill(['--apply'], {
         rootDir: root,
+        service,
         log: () => {},
         error: () => {},
         exit: code => { throw new Error(`unexpected exit ${code}`); },
