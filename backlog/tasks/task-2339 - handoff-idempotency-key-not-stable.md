@@ -1,7 +1,7 @@
 ---
 id: TASK-2339
 title: handoff idempotency key not stable across retries
-status: review
+status: ready-for-integration
 assignee: [custom]
 created_date: '2026-08-04 10:42'
 updated_date: '2026-08-04 10:42'
