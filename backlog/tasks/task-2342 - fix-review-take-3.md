@@ -1,7 +1,7 @@
 ---
 id: TASK-2342
 title: fix review take 3
-status: refined
+status: active
 assignee: [custom]
 created_date: '2026-08-04 17:21'
 labels: [ai_sdlc, bug]
