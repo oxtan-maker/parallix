@@ -86,6 +86,7 @@ test('BoardProjectionBuilder is wired in composition root over all six concrete 
   try {
     const builder = composeBoardProjection({
       rootDir: tmp,
+      missionStore: null,
       repositoryId: repositoryId('test-repo'),
       blocklistRepo: new MockBlocklistRepo(),
       historyRepo: new MockHistoryRepo(),
@@ -126,6 +127,7 @@ test('BoardProjectionBuilder.build() returns BoardProjection with missions from 
   try {
     const builder = composeBoardProjection({
       rootDir: tmp,
+      missionStore: null,
       repositoryId: repositoryId('test-repo'),
       blocklistRepo: new MockBlocklistRepo(),
       historyRepo: new MockHistoryRepo(),
@@ -303,6 +305,7 @@ test('Integration-base vs worktree reconciliation: done + worktree absent + clos
 test('composeBoardProjection wires all eight adapters into BoardProjectionBuilder', () => {
   const builder = composeBoardProjection({
     rootDir: '/tmp',
+    missionStore: null,
     repositoryId: repositoryId('test-repo'),
     blocklistRepo: new MockBlocklistRepo(),
     historyRepo: new MockHistoryRepo(),

@@ -213,6 +213,7 @@ export async function createProductionApplicationServices(
       rootDir,
       operatorState.repositories,
       executePorts,
+      mission?.store ?? null,
     )
     : null;
   return {

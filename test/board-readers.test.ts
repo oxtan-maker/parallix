@@ -13,6 +13,7 @@ import {
 } from '../src/application/projections/board-readers.js';
 import { agentFamily, type AgentFamily } from '../src/domain/agents.js';
 import { missionId, missionLabels, type Mission } from '../src/domain/mission.js';
+import { changeRevision, type Review } from '../src/domain/review.js';
 import { repositoryId } from '../src/domain/repository.js';
 
 const repo = repositoryId('parallix');
@@ -35,9 +36,9 @@ function makeMissionAdapter(missions: Mission[] | null = null): MissionReadAdapt
   };
 }
 
-function makeReviewAdapter(): ReviewReadAdapter {
+function makeReviewAdapter(review: Review | null = null): ReviewReadAdapter {
   return {
-    async loadReview() { return null; },
+    async loadReview() { return review; },
     async loadReviewApproval() { return null; },
   };
 }
@@ -91,6 +92,43 @@ test('BoardProjectionBuilder builds projection with repository identity and stag
   assert.equal(projection.stages.length, 6);
   assert.equal(projection.stages.find((s) => s.lane === 'active')?.count, 1);
   assert.equal(projection.stages.find((s) => s.lane === 'backlog')?.count, 1);
+});
+
+test('BoardProjectionBuilder projects the review loaded by its review adapter', async () => {
+  const missions = [
+    { id: id1, repositoryId: repo, title: 'Mission 1', labels: missionLabels(['bug']), status: 'review' as const, closedAt: null, assignee: agentFamily('codex'), checkpoints: [], review: null, netEngineeringLines: null },
+  ];
+  const builder = new BoardProjectionBuilder(
+    makeMissionAdapter(missions),
+    makeReviewAdapter({
+      rounds: [{
+        number: 2,
+        subject: { change: { kind: 'local-branch', sourceBranch: 'mission/task-0001', targetBranch: 'main' }, revision: changeRevision('reviewed-revision') },
+        reviewer: agentFamily('codex'),
+        implementer: agentFamily('custom'),
+        startedAt: '2026-08-04T12:00:00.000Z',
+        decision: null,
+        response: null,
+        phase: 'reviewing',
+        disposition: null,
+        reviewerRetryCount: 0,
+        implementerRetryCount: 0,
+      }],
+      intervention: null,
+      stageLaunches: [],
+      gateFailureRetryCount: 0,
+      reviewEvents: [],
+    }),
+    makeGateAdapter(),
+    makeAgentAdapter(),
+    makeGitAdapter(),
+    makeOperationLogAdapter(),
+  );
+
+  const projection = await builder.build();
+
+  assert.equal(projection.attentionQueue[0].card.reviewPhase, 'reviewing');
+  assert.equal(projection.attentionQueue[0].card.reviewRound, 2);
 });
 
 test('BoardProjectionBuilder attentionQueue orders by rank then missionId', async () => {

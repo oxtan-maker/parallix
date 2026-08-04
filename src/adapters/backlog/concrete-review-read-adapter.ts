@@ -17,6 +17,7 @@ import {
   stageLaunchWindowsFrom,
 } from '../../domain/review.js';
 import type { ReviewReadAdapter } from '../../application/projections/board-readers.js';
+import type { MissionStore } from '../../application/domain-ports.js';
 import type { ReviewState } from '../review/review-state.js';
 import { findMissionDir } from '../filesystem/mission-utils.js';
 import { readReviewState } from '../review/review-state.js';
@@ -25,7 +26,7 @@ import { readReviewState } from '../review/review-state.js';
 // Parse-primitive types
 // ---------------------------------------------------------------------------
 
-type ReadReviewStateFn = (_slug: string, _rootDir?: string) => ReviewState | null | Promise<ReviewState | null>;
+type ReadReviewStateFn = (_slug: string, _rootDir?: string, _missionStore?: MissionStore | null) => ReviewState | null | Promise<ReviewState | null>;
 type FindMissionDirFn = (_slug: string, _rootDir?: string, _options?: { missionPath?: string }) => string | null;
 
 // ---------------------------------------------------------------------------
@@ -52,6 +53,8 @@ function defaultFindMissionDir(): FindMissionDirFn {
 
 export interface ConcreteReviewReadAdapterOptions {
   readonly rootDir: string;
+  /** Mission authority used to read persisted review state. */
+  readonly missionStore: MissionStore | null;
   /** Read persisted review state for a mission. */
   readonly readReviewState?: ReadReviewStateFn;
   /** Find mission directory for a slug. */
@@ -67,11 +70,13 @@ export interface ConcreteReviewReadAdapterOptions {
  */
 export class ConcreteReviewReadAdapter implements ReviewReadAdapter {
   private readonly rootDir: string;
+  private readonly missionStore: MissionStore | null;
   private readonly readReviewState: ReadReviewStateFn;
   private readonly findMissionDir: FindMissionDirFn;
 
   constructor(options: ConcreteReviewReadAdapterOptions) {
     this.rootDir = options.rootDir;
+    this.missionStore = options.missionStore;
     this.readReviewState = options.readReviewState ?? defaultReadReviewState();
     this.findMissionDir = options.findMissionDir ?? defaultFindMissionDir();
   }
@@ -81,7 +86,7 @@ export class ConcreteReviewReadAdapter implements ReviewReadAdapter {
   // -----------------------------------------------------------------------
 
   async loadReview(_missionId: MissionId): Promise<Review | null> {
-    const state = await Promise.resolve(this.readReviewState(_missionId, this.rootDir)) as ReviewState | null;
+    const state = await Promise.resolve(this.readReviewState(_missionId, this.rootDir, this.missionStore)) as ReviewState | null;
     if (!state) {
       return null;
     }
@@ -89,7 +94,7 @@ export class ConcreteReviewReadAdapter implements ReviewReadAdapter {
   }
 
   async loadReviewApproval(_missionId: MissionId): Promise<{ subject: ReviewedRevision; approvedAt: string | null } | null> {
-    const state = await Promise.resolve(this.readReviewState(_missionId, this.rootDir)) as ReviewState | null;
+    const state = await Promise.resolve(this.readReviewState(_missionId, this.rootDir, this.missionStore)) as ReviewState | null;
     if (!state) {
       return null;
     }

@@ -50,6 +50,7 @@ class MockHistoryRepo implements OperationalHistoryRepository {
 test('ReviewReadAdapter loadReview returns null when no review state exists', async () => {
   const adapter = new ConcreteReviewReadAdapter({
     rootDir: '/tmp',
+    missionStore: null,
     readReviewState: () => null,
     findMissionDir: () => null,
   });
@@ -61,6 +62,7 @@ test('ReviewReadAdapter loadReview returns null when no review state exists', as
 test('ReviewReadAdapter loadReview returns domain Review from review state', async () => {
   const adapter = new ConcreteReviewReadAdapter({
     rootDir: '/tmp',
+    missionStore: null,
     readReviewState: () => ({
       slug: 'task-1001',
       reviewer: 'codex',
@@ -88,6 +90,7 @@ test('ReviewReadAdapter loadReview returns domain Review from review state', asy
 test('ReviewReadAdapter loadReview returns Review with approved decision', async () => {
   const adapter = new ConcreteReviewReadAdapter({
     rootDir: '/tmp',
+    missionStore: null,
     readReviewState: () => ({
       slug: 'task-1001',
       reviewer: 'codex',
@@ -112,6 +115,7 @@ test('ReviewReadAdapter loadReview returns Review with approved decision', async
 test('ReviewReadAdapter loadReviewApproval returns null for non-approved phase', async () => {
   const adapter = new ConcreteReviewReadAdapter({
     rootDir: '/tmp',
+    missionStore: null,
     readReviewState: () => ({
       slug: 'task-1001',
       reviewer: 'codex',
@@ -135,6 +139,7 @@ test('ReviewReadAdapter loadReviewApproval returns null for non-approved phase',
 test('ReviewReadAdapter loadReviewApproval returns approval data for approved phase', async () => {
   const adapter = new ConcreteReviewReadAdapter({
     rootDir: '/tmp',
+    missionStore: null,
     readReviewState: () => ({
       slug: 'task-1001',
       reviewer: 'codex',
@@ -159,6 +164,7 @@ test('ReviewReadAdapter loadReviewApproval returns approval data for approved ph
 test('ReviewReadAdapter loadReview returns null when no mission dir exists', async () => {
   const adapter = new ConcreteReviewReadAdapter({
     rootDir: '/tmp',
+    missionStore: null,
     readReviewState: () => null,
     findMissionDir: () => null,
   });

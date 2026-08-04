@@ -17,9 +17,11 @@ import { MissionProjectionQuery } from '../application/projections/mission-query
 import { BoardCommandController } from '../application/controller/board-controller.js';
 import type { ExecuteMissionPorts } from '../application/ports/execute-mission.js';
 import type { TuiCapabilities } from '../application/tui-capabilities.js';
+import type { MissionStore } from '../application/domain-ports.js';
 
 export interface BoardProjectionCompositionDeps {
   readonly rootDir: string;
+  readonly missionStore: MissionStore | null;
   readonly repositoryId: RepositoryId;
   readonly blocklistRepo: AgentBlocklistRepository;
   readonly historyRepo: OperationalHistoryRepository;
@@ -33,7 +35,7 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
   const missions = new ConcreteMissionReadAdapter({ rootDir: deps.rootDir, repositoryId: deps.repositoryId });
   const builder = new BoardProjectionBuilder(
     missions,
-    new ConcreteReviewReadAdapter({ rootDir: deps.rootDir }),
+    new ConcreteReviewReadAdapter({ rootDir: deps.rootDir, missionStore: deps.missionStore }),
     new ConcreteGateReadAdapter({ rootDir: deps.rootDir }),
     new ConcreteAgentReadAdapter({ rootDir: deps.rootDir, blocklistRepo: deps.blocklistRepo, knownAgentFamilies: deps.knownAgentFamilies }),
     new ConcreteGitReadAdapter({ rootDir: deps.rootDir, repositoryId: deps.repositoryId }),
