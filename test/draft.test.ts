@@ -350,6 +350,66 @@ test('ensureGraphifyWorkspace returns false when graphify-out exists but is not 
   }
 });
 
+test('ensureGraphifyWorkspace copies graph.json from primary worktree when directory is new', () => {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'graphify-test-'));
+  const tmpMain = fs.mkdtempSync(path.join(os.tmpdir(), 'graphify-main-'));
+  try {
+    // Create graph.json in primary worktree
+    const primaryGraphPath = path.join(tmpMain, 'graphify-out');
+    fs.mkdirSync(primaryGraphPath, { recursive: true });
+    fs.writeFileSync(path.join(primaryGraphPath, 'graph.json'), '{"nodes":[]}');
+
+    // Call with mainRepo — target directory does not exist yet
+    const result = ensureGraphifyWorkspace(tmpRoot, tmpMain);
+    assert.equal(result, true);
+    assert.ok(fs.existsSync(path.join(tmpRoot, 'graphify-out', 'graph.json')));
+  } finally {
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+    fs.rmSync(tmpMain, { recursive: true, force: true });
+  }
+});
+
+test('ensureGraphifyWorkspace skips copy when directory already exists (no clobber)', () => {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'graphify-test-'));
+  const tmpMain = fs.mkdtempSync(path.join(os.tmpdir(), 'graphify-main-'));
+  try {
+    // Pre-create mission worktree graphify-out with its own data
+    const missionPath = path.join(tmpRoot, 'graphify-out');
+    fs.mkdirSync(missionPath, { recursive: true });
+    fs.writeFileSync(path.join(missionPath, 'graph.json'), '{"mission":"data"}');
+
+    // Create different graph.json in primary worktree
+    const primaryGraphPath = path.join(tmpMain, 'graphify-out');
+    fs.mkdirSync(primaryGraphPath, { recursive: true });
+    fs.writeFileSync(path.join(primaryGraphPath, 'graph.json'), '{"primary":"data"}');
+
+    // Call with mainRepo — target directory already exists
+    const result = ensureGraphifyWorkspace(tmpRoot, tmpMain);
+    assert.equal(result, true);
+    // Mission data should be preserved (not clobbered)
+    const content = fs.readFileSync(path.join(missionPath, 'graph.json'), 'utf8');
+    assert.equal(content, '{"mission":"data"}');
+  } finally {
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+    fs.rmSync(tmpMain, { recursive: true, force: true });
+  }
+});
+
+test('ensureGraphifyWorkspace skips gracefully when source graphify-out absent', () => {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'graphify-test-'));
+  const tmpMain = fs.mkdtempSync(path.join(os.tmpdir(), 'graphify-main-'));
+  try {
+    // Primary worktree has no graphify-out directory
+    const result = ensureGraphifyWorkspace(tmpRoot, tmpMain);
+    assert.equal(result, true);
+    // Empty directory still created
+    assert.ok(fs.existsSync(path.join(tmpRoot, 'graphify-out')));
+  } finally {
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+    fs.rmSync(tmpMain, { recursive: true, force: true });
+  }
+});
+
 // ---------- ensureMissionBranch ----------
 
 test('ensureMissionBranch creates branch from main when absent', () => {
