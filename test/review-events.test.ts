@@ -377,9 +377,9 @@ test('renderEventFile does not duplicate an existing workflow metadata footer', 
   assert.equal(footerMatches.length, 1);
 });
 
-test('createEvent fails loudly when the mission has no Review in the database', async () => {
-  // No seeded database: there is no Review to append the event to. The event
-  // must not be written anywhere else — a mission that quietly acquires a
+test('createEvent fails loudly when no Mission store was supplied', async () => {
+  // No injected store: this call site has no Mission authority at all. The
+  // event must not be written anywhere else — a mission that quietly acquires a
   // file-backed review conversation is the dual authority the cutover removed.
   const eventsDir = path.join(testMissionDir, 'review-events');
   fs.mkdirSync(eventsDir, { recursive: true });
@@ -391,6 +391,31 @@ test('createEvent fails loudly when the mission has no Review in the database', 
     phase: 'reviewing',
     actor: 'claude',
   }, { worktree: tempDir, skipGit: true, error: () => {} });
+
+  assert.ok(!result.ok);
+  assert.match(result.error, /No Mission store supplied/i);
+  assert.equal(result.path, null);
+  assert.deepEqual(fs.readdirSync(eventsDir), before, 'no event file may be written without a stored event');
+});
+
+test('createEvent fails loudly when the mission has no Review in the database', async () => {
+  // The store is present and the Mission is there, but no review has started.
+  // That is the case --backfill-review repairs, and only that case may say so.
+  const eventsDir = path.join(testMissionDir, 'review-events');
+  fs.mkdirSync(eventsDir, { recursive: true });
+  const before = fs.readdirSync(eventsDir);
+  const missionStore = {
+    async load() { return { kind: 'found', mission: { id: TEST_SLUG, review: null }, version: 1 }; },
+    async save() { throw new Error('must not save without a Review'); },
+    async saveWithTransition() { throw new Error('must not save without a Review'); },
+  };
+
+  const result = await createEvent(TEST_SLUG, VALID_EVENT_TYPES.REVIEWER_FINDINGS, {
+    content: '# Findings',
+    round: 1,
+    phase: 'reviewing',
+    actor: 'claude',
+  }, { worktree: tempDir, skipGit: true, error: () => {}, missionStore });
 
   assert.ok(!result.ok);
   assert.match(result.error, /no Review in the operator database/i);

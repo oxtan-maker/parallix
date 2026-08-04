@@ -301,6 +301,7 @@ async function consumeReviewerArtifacts(
     postReviewFn?: (_branch: string, _token: string, _outcome: string, _body: string, _opts?: Record<string, unknown>) => unknown;
     buildMetadataFooterFn?: (_s: string, _r?: string) => string | Promise<string>;
     createEventFn?: (_s: string, _t: string, _p: CreateEventParams, _o: CreateEventOptions) => CreateEventResult | Promise<CreateEventResult>;
+    readReviewStateFn?: (_s: string, _r?: string) => any;
   } = {}
 ): Promise<{ consumed: boolean; ok?: boolean; reviewState?: string | null }> {
   const log = options.log || fmt.log.plain;
@@ -358,7 +359,7 @@ async function consumeReviewerArtifacts(
     return { consumed: true, ok: false };
   }
 
-  const currentState = await readReviewState(slug, worktree);
+  const currentState = await Promise.resolve((options.readReviewStateFn || readReviewState)(slug, worktree));
   const round = currentState ? currentState.round : 1;
   const phase = currentState ? currentState.phase : 'reviewing';
 
@@ -457,6 +458,7 @@ async function consumeImplementerArtifacts(
     postCommentFn?: (_branch: string, _token: string, _body: string, _opts?: Record<string, unknown>) => unknown;
     buildMetadataFooterFn?: (_s: string, _r?: string) => string | Promise<string>;
     createEventFn?: (_s: string, _t: string, _p: CreateEventParams, _o: CreateEventOptions) => CreateEventResult | Promise<CreateEventResult>;
+    readReviewStateFn?: (_s: string, _r?: string) => any;
   } = {}
 ): Promise<{ consumed: boolean; ok?: boolean; disposition?: string | null }> {
   const log = options.log || fmt.log.plain;
@@ -493,7 +495,7 @@ async function consumeImplementerArtifacts(
     return { consumed: true, ok: false };
   }
 
-  const currentState = await readReviewState(slug, worktree);
+  const currentState = await Promise.resolve((options.readReviewStateFn || readReviewState)(slug, worktree));
   const round = currentState ? currentState.round : 1;
   const phase = currentState ? currentState.phase : 'fixing';
 

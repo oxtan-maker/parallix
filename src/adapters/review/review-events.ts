@@ -521,6 +521,21 @@ async function createEvent(slug: string, eventType: string, params: CreateEventP
     missionStore: options.missionStore,
   });
   if (!stored.ok) {
+    // A caller that was never handed the Mission store has a wiring defect. Say
+    // so: reporting it as a missing Review sends the operator to --backfill-review,
+    // which cannot repair a Review that is already there.
+    if (stored.reason === 'no-store') {
+      error(fmt.status(
+        'FAIL',
+        `Cannot store review event for "${slug}": no Mission store was supplied to this call. ` +
+        'The composition root must bind the review-event writer to the operator database.',
+      ));
+      return { ok: false, path: null, error: `No Mission store supplied for ${slug}` };
+    }
+    if (stored.reason === 'write-failed') {
+      error(fmt.status('FAIL', `Cannot store review event for "${slug}": the operator database rejected the write.`));
+      return { ok: false, path: null, error: `Review event write failed for ${slug}` };
+    }
     error(fmt.status(
       'FAIL',
       `Cannot store review event for "${slug}": no Review in the operator database. ` +
@@ -600,6 +615,12 @@ function exportEventFile(
 interface PersistEventResult {
   ok: boolean;
   path: string | null;
+  /**
+   * Why a failed persist failed. `no-store` means this call site was never
+   * given the Mission authority — a wiring defect, not mission state — and must
+   * not be reported as a missing Review.
+   */
+  reason?: 'no-store' | 'no-review' | 'write-failed';
 }
 
 /**
@@ -619,16 +640,16 @@ async function persistEventInStore(
   try {
     store = await resolveMissionStore(rootDir, opts.missionStore);
   } catch {
-    return { ok: false, path: null };
+    return { ok: false, path: null, reason: 'no-store' };
   }
   if (!store) {
-    return { ok: false, path: null };
+    return { ok: false, path: null, reason: 'no-store' };
   }
 
   try {
     const result = await store.load(missionId(slug));
     if (result.kind !== 'found' || !result.mission.review) {
-      return { ok: false, path: null };
+      return { ok: false, path: null, reason: 'no-review' };
     }
 
     const mission = result.mission;
@@ -657,7 +678,7 @@ async function persistEventInStore(
     opts.log?.(fmt.status('PASS', `Persisted review event to SQLite: ${event.eventType} round ${event.round ?? 'n/a'}`));
     return { ok: true, path: `sqlite:${slug}:${eventRecord.position}` };
   } catch {
-    return { ok: false, path: null };
+    return { ok: false, path: null, reason: 'write-failed' };
   }
 }
 

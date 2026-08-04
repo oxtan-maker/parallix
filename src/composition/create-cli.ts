@@ -27,7 +27,7 @@ import status from '../adapters/cli/commands/status.js';
 import verify from '../adapters/cli/commands/verify.js';
 import { deriveAliases, type Command, type MainOptions } from '../interfaces/cli/runtime.js';
 import { createProductionApplicationServices } from './application-services.js';
-import { bindReviewPersistence } from './review-persistence.js';
+import { bindReviewPersistence, reviewLoopBindings } from './review-persistence.js';
 import { startReviewLoop } from '../adapters/review/review-loop.js';
 
 declare const __filename: string | undefined;
@@ -144,9 +144,7 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
         backfillReviewFn: persistence.backfillReview,
         startReviewLoopFn: (slug: string, loopOptions: Record<string, unknown>) => startReviewLoop(slug, {
           ...loopOptions,
-          readReviewStateFn: persistence.readReviewState,
-          writeReviewStateFn: persistence.writeReviewState,
-          resetReviewStateFn: persistence.resetReviewState,
+          ...reviewLoopBindings(services.mission!.store),
         } as any),
       } as any);
     }),

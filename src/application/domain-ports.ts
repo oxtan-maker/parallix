@@ -27,6 +27,14 @@ export interface MissionStore {
    * aggregate revision returned by load().
    */
   save(_mission: Mission, _expectedVersion: MissionVersion | null): Promise<MissionVersion>;
+  /**
+   * Resolve once no store operation is in flight.
+   *
+   * Composition awaits this before closing the database so a write that a
+   * command left running cannot fail against a closed handle. Stores that
+   * cannot have work in flight may omit it.
+   */
+  drain?(): Promise<void>;
 }
 
 /**

@@ -402,6 +402,31 @@ function requireEligibleReviewer(
   }
 }
 
+/**
+ * An agent family may not review its own work.
+ *
+ * The single exception is the workstation that has no second family to ask:
+ * when the eligibility recorded on the round is exactly the implementer's own
+ * family, self-review is the only review available and is recorded as such.
+ * Callers must therefore narrow the eligibility they pass to that one family
+ * rather than keep a multi-family policy and quietly reuse the implementer —
+ * a round that names four eligible reviewers and picks the implementer is not
+ * an escape hatch, it is a selection defect.
+ */
+function requireSeparateReviewer(
+  reviewer: AgentFamily,
+  implementer: AgentFamily,
+  eligibility: ConfiguredReviewerEligibility,
+): void {
+  if (reviewer !== implementer) { return; }
+  const soleEligible = eligibility.reviewers.length === 1 && eligibility.reviewers[0] === reviewer;
+  if (soleEligible) { return; }
+  throw new Error(
+    `Reviewer ${reviewer} may not review its own work: the configured review policy `
+    + `also allows ${eligibility.reviewers.filter((family) => family !== reviewer).join(', ')}`,
+  );
+}
+
 export function startReview(
   subject: ReviewedRevision,
   reviewer: AgentFamily,
@@ -412,6 +437,7 @@ export function startReview(
   assertReviewedChange(subject.change);
   changeRevision(subject.revision);
   requireEligibleReviewer(reviewer, reviewerEligibility);
+  requireSeparateReviewer(reviewer, implementer, reviewerEligibility);
   if (!startedAt.trim()) { throw new Error('Review round requires a start time'); }
   return {
     rounds: [{
@@ -650,6 +676,7 @@ export function beginNextReviewRound(
     throw new Error(`Cannot begin a new round while review is ${reviewStatus(review)}`);
   }
   requireEligibleReviewer(reviewer, reviewerEligibility);
+  requireSeparateReviewer(reviewer, implementer, reviewerEligibility);
   if (!startedAt.trim()) { throw new Error('Review round requires a start time'); }
   const current = currentReviewRound(review);
   if (!current.response) { throw new Error('New review round requires an implementer resolution'); }

@@ -1296,7 +1296,9 @@ async function promoteTaskForIntegrationIfNeeded(
       command: { type: 'integrate' },
       actor: context.forgejoUser || 'custom',
       occurredAt: new Date().toISOString(),
-      idempotencyKey: `integrate-${context.slug}-${Date.now()}`,
+      // Stable across retries for the same reason as the handoff key: the
+      // integration lane event must not multiply per invocation.
+      idempotencyKey: `integrate-${context.slug}`,
     });
     if (transitionResult.status !== 'completed' || !transitionResult.value) {
       fmt.log.fail(`Mission state transition failed: ${transitionResult.error?.message || 'unknown'}.`);

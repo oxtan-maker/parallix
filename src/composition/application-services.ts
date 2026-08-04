@@ -18,8 +18,7 @@ import { git } from '../adapters/git/git.js';
 import { createDefaultExecuteMissionRuntime, createExecuteMissionPorts } from '../adapters/mission/execute-mission-adapters.js';
 import { performHandoff } from '../adapters/cli/commands/handoff.js';
 import { startReviewLoop } from '../adapters/review/review-loop.js';
-import { consumeImplementerArtifacts, consumeReviewerArtifacts } from '../adapters/review/review-artifacts.js';
-import { bindReviewPersistence } from './review-persistence.js';
+import { reviewLoopBindings } from './review-persistence.js';
 import { LegacyStatsBackfillAdapter } from '../adapters/mission/stats-backfill-adapter.js';
 import type { ProgressPort } from '../application/ports.js';
 import type { MissionTransitionStore } from '../application/domain-ports.js';
@@ -185,8 +184,7 @@ export async function createProductionApplicationServices(
       skipImportGate: options.skipImportGate,
     });
   const defaultExecuteRuntime = createDefaultExecuteMissionRuntime();
-  const reviewPersistence = mission ? bindReviewPersistence(mission.store) : null;
-  const executeRuntime = reviewPersistence && mission ? {
+  const executeRuntime = mission ? {
     ...defaultExecuteRuntime,
     runHandoffAndReview: (slug: string, worktree: string, agent: string, runtimeOptions: Record<string, unknown> = {}) =>
       defaultExecuteRuntime.runHandoffAndReview(slug, worktree, agent, {
@@ -197,23 +195,11 @@ export async function createProductionApplicationServices(
         }),
         startReviewLoop: (reviewSlug: string, loopOptions: Record<string, unknown>) => startReviewLoop(reviewSlug, {
           ...loopOptions,
-          readReviewStateFn: reviewPersistence.readReviewState,
-          writeReviewStateFn: reviewPersistence.writeReviewState,
-          resetReviewStateFn: reviewPersistence.resetReviewState,
-          // Artifact consumers persist review events. Bind their event writer
-          // to this composition root's Mission store just as we do the
-          // review-state projections above; otherwise they have no authority
-          // to find the freshly created Review aggregate.
-          consumeReviewerArtifactsFn: (artifactSlug: string, reviewer: string, artifactOptions: Record<string, unknown>) =>
-            consumeReviewerArtifacts(artifactSlug, reviewer, {
-              ...artifactOptions,
-              createEventFn: reviewPersistence.createEvent,
-            }),
-          consumeImplementerArtifactsFn: (artifactSlug: string, implementer: string, artifactOptions: Record<string, unknown>) =>
-            consumeImplementerArtifacts(artifactSlug, implementer, {
-              ...artifactOptions,
-              createEventFn: reviewPersistence.createEvent,
-            }),
+          // Every Mission-authority injection the loop needs, including the
+          // artifact consumers that persist review events: an omitted binding
+          // leaves the adapter default, which resolves no store and reports the
+          // mission as having no Review.
+          ...reviewLoopBindings(mission.store),
         } as any),
       }),
   } : defaultExecuteRuntime;
@@ -234,7 +220,18 @@ export async function createProductionApplicationServices(
     executePorts,
     presentationCapabilities,
     statsBackfill: new StatsBackfillService(new LegacyStatsBackfillAdapter(rootDir)),
-    operatorState,
+    // Closing the shared handle is the last thing a command does, but a Mission
+    // write can still be settling when it happens — that is how a review-loop
+    // stats write ended up reporting "Database is not open. Call open() before
+    // using the adapter." Drain the store first so every accepted write reaches
+    // the database it was accepted by.
+    operatorState: {
+      ...operatorState,
+      close: async () => {
+        await mission?.store.drain?.();
+        await operatorState.close();
+      },
+    },
     mission,
     operatorServices,
   };
