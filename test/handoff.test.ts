@@ -17,6 +17,20 @@ test('evidence shell commands require an existing file argument', () => {
   assert.equal(_findUnverifiableGoalCheckRow([fileCommandRow], rootDir), null);
 });
 
+test('evidence accepts git commands inside escaped-backtick markdown cells', () => {
+  const rootDir = path.join(__dirname, '..');
+  // Markdown cells often escape the outer backticks, producing `` `git diff --name-only` ``.
+  // The evidence regex must not span across the escaped pair and treat the leading
+  // backtick as part of the command (which would break the `git` prefix check).
+  const escapedBacktickRow =
+    '| SC3: No other files modified | `` `git diff --name-only` `` shows only `hello.sh` | PASS |';
+  assert.equal(
+    _findUnverifiableGoalCheckRow([escapedBacktickRow], rootDir),
+    null,
+    'escaped-backtick cell with `git` command should be accepted as verifiable evidence',
+  );
+});
+
 // Mock external modules
 const git = require('../.test-runtime/lib/core/git');
 const missionUtils = require('../.test-runtime/lib/core/mission-utils');

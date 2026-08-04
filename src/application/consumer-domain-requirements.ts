@@ -196,7 +196,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'retry-review-round-counters',
     family: 'retry',
     fileLocation: 'src/platform/runtime/lib/review/review-commands.ts',
-    line: 1072,
+    line: 1077,
     anchor: 'state.reviewerRetryCount',
     reads: ['Review'],
     requirement:
@@ -318,7 +318,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'review-checkpoint-evidence',
     family: 'review',
     fileLocation: 'src/platform/runtime/lib/review/review-commands.ts',
-    line: 499,
+    line: 504,
     anchor: 'findCheckpointsFn(missionDir)',
     reads: ['CheckpointData', 'Mission'],
     requirement:

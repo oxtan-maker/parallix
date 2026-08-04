@@ -301,9 +301,14 @@ function evidenceCellHasVerifiableReference(cell: string, rootDir: string, known
     return true;
   }
 
+  // Normalize escaped backticks (`` `` ``) so the inline-command regex does not
+  // span across them. A markdown cell like `` `git diff --name-only` `` would
+  // otherwise match from the first ` to the third, capturing a leading backtick
+  // that breaks the `git` prefix check.
+  const cellForCommands = cell.replace(/``/g, '  ');
   const inlineCommandPattern = /`([^`]+)`/g;
   let commandMatch: RegExpExecArray | null;
-  while ((commandMatch = inlineCommandPattern.exec(cell)) !== null) {
+  while ((commandMatch = inlineCommandPattern.exec(cellForCommands)) !== null) {
     const command = commandMatch[1].trim();
     if (/^(npm|npx|node|git|px)\s+/i.test(command)) {
       return true;
