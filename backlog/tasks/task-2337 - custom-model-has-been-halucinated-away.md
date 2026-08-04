@@ -4,7 +4,7 @@ title: custom model has been halucinated away
 status: backlog
 assignee: [custom]
 created_date: '2026-08-04 06:28'
-labels: []
+labels: [user_value, bug]
 dependencies: []
 ordinal: 72900
 ---
