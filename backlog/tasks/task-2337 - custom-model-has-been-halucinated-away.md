@@ -2,7 +2,7 @@
 id: TASK-2337
 title: custom model has been halucinated away
 status: backlog
-assignee: []
+assignee: [custom]
 created_date: '2026-08-04 06:28'
 labels: []
 dependencies: []
