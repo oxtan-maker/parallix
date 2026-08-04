@@ -1,10 +1,12 @@
 ---
 id: TASK-2272
 title: separate command-line integration tests from the unit test suite
-status: backlog
+status: done
 assignee: []
 created_date: '2026-07-16 08:03'
-labels: [ai_sdlc]
+updated_date: '2026-08-04 05:21'
+labels:
+  - ai_sdlc
 dependencies: []
 ---
 
