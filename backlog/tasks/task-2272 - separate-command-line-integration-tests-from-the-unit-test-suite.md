@@ -4,10 +4,11 @@ title: separate command-line integration tests from the unit test suite
 status: done
 assignee: []
 created_date: '2026-07-16 08:03'
-updated_date: '2026-08-04 05:21'
+updated_date: '2026-08-04 15:25'
 labels:
   - ai_sdlc
 dependencies: []
+ordinal: 74900
 ---
 
 ## Description

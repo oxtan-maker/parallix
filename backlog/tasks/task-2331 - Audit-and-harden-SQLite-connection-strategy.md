@@ -4,7 +4,7 @@ title: Audit and harden SQLite connection strategy
 status: done
 assignee: []
 created_date: '2026-07-31 07:30'
-updated_date: '2026-08-04 06:40'
+updated_date: '2026-08-04 15:25'
 labels:
   - ai_sdlc
 dependencies: []
@@ -24,6 +24,7 @@ references:
     backlog/tasks/task-2330 -
     Harden-e2e-test-coverage-for-SQLite-persistence-paths.md (coverage gap)
 priority: medium
+ordinal: 72900
 ---
 
 ## Description
