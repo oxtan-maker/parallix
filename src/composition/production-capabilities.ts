@@ -9,6 +9,7 @@ import type {
 } from '../application/ports/agent-blocklist.js';
 import type { BoardLaneEventRepository, OperationalHistoryRepository } from '../application/ports/operation-history.js';
 import type { UsageRepository } from '../application/ports/mission-measurements.js';
+import type { MissionStore } from '../application/domain-ports.js';
 import { composeTuiCapabilities } from './board-projection.js';
 
 export interface ProductionBoardRepositories {
@@ -34,9 +35,11 @@ export function composeProductionCapabilities(
   rootDir: string,
   repositories: ProductionBoardRepositories,
   executePorts: ExecuteMissionPorts,
+  missionStore: MissionStore | null,
 ): ProductionCapabilities {
   const tui = composeTuiCapabilities({
     rootDir,
+    missionStore,
     repositoryId: repositoryId(rootDir),
     blocklistRepo: repositories.agentBlocklist,
     historyRepo: repositories.operationalHistory,

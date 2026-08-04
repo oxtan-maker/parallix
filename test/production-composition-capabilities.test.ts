@@ -14,7 +14,7 @@ const repositories = {
 test('production composition gives CLI and TUI identical board and active capability instances', () => {
   const { ports } = makeExecutePorts();
 
-  const capabilities = composeProductionCapabilities('/fixture-repository', repositories, ports);
+  const capabilities = composeProductionCapabilities('/fixture-repository', repositories, ports, null);
 
   assert.strictEqual(capabilities.boardProjection, capabilities.tui.boardProjection);
   assert.strictEqual(capabilities.missionDetails, capabilities.tui.missionDetails);

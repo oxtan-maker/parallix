@@ -136,6 +136,7 @@ test('SC11: ConcreteReviewReadAdapter returns null when no review state exists (
   try {
     const adapter = new ConcreteReviewReadAdapter({
       rootDir: tmp,
+      missionStore: null,
     });
 
     const review = await adapter.loadReview('TASK-999' as MissionId);

@@ -106,7 +106,8 @@ export class BoardProjectionBuilder {
 
     // Build mission cards with operational facts
     const cards = await Promise.all(missions.map(async (mission) => {
-      const [reviewApproval, gateStatus] = await Promise.all([
+      const [review, reviewApproval, gateStatus] = await Promise.all([
+        this._reviews.loadReview(mission.id),
         this._reviews.loadReviewApproval(mission.id),
         this._gates.loadGateStatus(mission.id),
       ]);
@@ -119,7 +120,7 @@ export class BoardProjectionBuilder {
         flags: [],
       };
 
-      return projectMissionCard(mission, facts);
+      return projectMissionCard({ ...mission, review }, facts);
     }));
 
     // Build available actions from application policy
