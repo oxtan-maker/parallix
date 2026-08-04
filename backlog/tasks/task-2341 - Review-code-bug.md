@@ -1,8 +1,8 @@
 ---
 id: TASK-2341
 title: Review code bug
-status: refined
-assignee: [custom]
+status: active
+assignee: [codex]
 created_date: '2026-08-04 12:27'
 labels: [bug, ai_sdlc]
 dependencies: []
