@@ -4,7 +4,7 @@ title: when drafting graphify does not work
 status: backlog
 assignee: [custom]
 created_date: '2026-08-03 05:41'
-labels: []
+labels: [ai_sdlc]
 dependencies: []
 ordinal: 68900
 ---
