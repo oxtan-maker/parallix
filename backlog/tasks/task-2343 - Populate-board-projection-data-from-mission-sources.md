@@ -6,7 +6,7 @@ assignee: [codex]
 created_date: '2026-07-30 21:18'
 labels:
   - bug
-  - board
+  - user_value
 dependencies: []
 priority: high
 ---
