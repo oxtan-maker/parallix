@@ -1,14 +1,17 @@
 ---
 id: TASK-2343
 title: Populate board projection data from mission sources
-status: active
-assignee: [claude]
+status: ready-for-integration
+assignee:
+  - claude
 created_date: '2026-07-30 21:18'
+updated_date: '2026-08-07 19:10'
 labels:
   - bug
   - user_value
 dependencies: []
 priority: high
+ordinal: 82900
 ---
 
 ## Description
