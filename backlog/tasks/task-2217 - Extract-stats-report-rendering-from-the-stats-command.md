@@ -1,15 +1,18 @@
 ---
 id: TASK-2217
 title: Extract stats report rendering from the stats command
-status: active
-assignee: [custom]
+status: ready-for-integration
+assignee:
+  - custom
 created_date: '2026-07-11 00:00'
+updated_date: '2026-08-08 18:00'
 labels:
   - refactor
   - maintainability
   - user_value
 dependencies: []
 priority: medium
+ordinal: 69000
 ---
 
 ## Description
