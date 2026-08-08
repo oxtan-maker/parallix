@@ -248,3 +248,67 @@ test('px stats import-legacy --apply reports the import and leaves the source un
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('import-legacy preserves model column for custom-agent rows (task-2337)', () => {
+  const { dir, csvPath, dbPath } = fixture('task-2337-model', [
+    HEADERS,
+    row({ implementer: 'custom', model: 'qwen3.6-27b-q8', implementer_agent: 'custom', mission: 'task-custom-1' }),
+    row({ implementer: 'custom', model: 'cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit', implementer_agent: 'custom', mission: 'task-custom-2' }),
+    row({ implementer: 'custom', model: '', implementer_agent: 'custom', mission: 'task-custom-3' }),
+  ]);
+  try {
+    const { exitCode } = runImport(['--csv-file', csvPath, '--apply'], dbPath);
+    assert.equal(exitCode, null);
+
+    const { rows } = stats.loadMeasurementRows({ dbPath });
+    assert.equal(rows.length, 3);
+
+    // Row with populated model retains it
+    assert.equal(rows[0].model, 'qwen3.6-27b-q8', 'qwen3.6-27b-q8 model preserved');
+    assert.equal(rows[0].implementer, 'custom');
+
+    // Row with long model name retains it
+    assert.equal(rows[1].model, 'cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit', 'cyankiwi model preserved');
+    assert.equal(rows[1].implementer, 'custom');
+
+    // Row with empty model retains empty string
+    assert.equal(rows[2].model, '', 'empty model preserved');
+    assert.equal(rows[2].implementer, 'custom');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('import-legacy fixture import preserves model for custom-agent rows (task-2337)', () => {
+  const csvPath = path.join(__dirname, '..', 'test', 'fixtures', 'sample-legacy-stats.csv');
+  const { dir, dbPath } = fixture('task-2337-fixture', []);
+  try {
+    const { exitCode } = runImport(['--csv-file', csvPath, '--apply'], dbPath);
+    assert.equal(exitCode, null);
+
+    const { rows } = stats.loadMeasurementRows({ dbPath });
+    assert.equal(rows.length, 8, 'should import 8 rows from fixture');
+
+    // Verify custom-agent rows preserve model column
+    const customRows = rows.filter(r => r.implementer === 'custom');
+    assert.equal(customRows.length, 5, 'should have 5 custom-agent rows');
+
+    // Each custom row should have a populated model (not 'custom' or empty)
+    for (const row of customRows) {
+      assert.ok(
+        row.model && row.model !== 'custom',
+        `custom-agent row ${row.mission} should have populated model, got: ${row.model}`
+      );
+    }
+
+    // Specific model assertions
+    const modelsByMission = Object.fromEntries(customRows.map(r => [r.mission, r.model]));
+    assert.equal(modelsByMission['task-2210'], 'qwen3.6-27b-q8', 'task-2210 model preserved');
+    assert.equal(modelsByMission['task-2215'], 'cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit', 'task-2215 model preserved');
+    assert.equal(modelsByMission['task-2225'], 'qwen3.6-27b-q8', 'task-2225 model preserved');
+    assert.equal(modelsByMission['task-2230'], 'granite-3.2-8b', 'task-2230 model preserved');
+    assert.equal(modelsByMission['task-2240'], 'qwen3.6-27b-q8', 'task-2240 model preserved');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

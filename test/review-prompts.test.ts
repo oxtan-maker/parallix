@@ -422,3 +422,20 @@ test('builders honor adapters.review.tmpDir so prompt path == consumer read path
     fs.rmSync(repoRoot, { recursive: true, force: true });
   }
 });
+
+test('task-2337: review prompt exempts read-only px status from its px ban', () => {
+  const prompt = buildCompactReviewPrompt({
+    reviewer: 'codex',
+    branch: 'mission/task-2337',
+    implementer: 'custom',
+    attempt: 5
+  });
+
+  assert.match(prompt, /`px status task-2337` is read-only and is the required way to load review history/);
+  assert.match(prompt, /Do not call px directly[^\n]*except for the read-only `px status task-2337`/);
+  for (const line of prompt.split('\n')) {
+    if (!/\bpx\b/.test(line)) continue;
+    if (!/(Do not|MUST NOT|never|Never)/.test(line)) continue;
+    assert.match(line, /px status task-2337|px review task-2337|Forgejo/, `px prohibition without a px status carve-out: ${line}`);
+  }
+});

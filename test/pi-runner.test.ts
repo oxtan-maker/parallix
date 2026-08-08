@@ -655,3 +655,98 @@ test('startPiAgent invokes teeOptions.noOutputWatchdog.onNoOutput when no text a
   assert.ok(watchdogEvent.elapsedMs >= 10, `elapsedMs (${watchdogEvent.elapsedMs}) should be >= initialDelayMs (10)`);
   assert.equal(result.status, 0);
 });
+
+// ---------- Pi launcher model propagation (task-2337) ----------
+
+test('startPiAgent result includes session.model.id in result.model and result.telemetry.model (task-2337)', async () => {
+  const sdk = await new Function('return import("@earendil-works/pi-coding-agent")')();
+  const expectedModelId = 'qwen3.6-27b-q8';
+
+  pi.__setCreateAgentSessionForTest(async () => {
+    const session = {
+      sessionId: 'model-prop-session',
+      model: { id: expectedModelId, provider: 'ollama' },
+      prompt: async () => {},
+      subscribe: () => () => {},
+      waitForIdle: async () => {},
+      dispose: () => {},
+      getLastAssistantText: () => 'OK',
+      getSessionStats: () => ({
+        sessionId: 'model-prop-session',
+        userMessages: 1,
+        assistantMessages: 1,
+        toolCalls: 0,
+        toolResults: 0,
+        totalMessages: 2,
+        tokens: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0, total: 150 },
+        cost: 0,
+      }),
+    };
+    return { session, extensionsResult: { extensions: [], diagnostics: [] } };
+  });
+
+  pi.__setSdkForTest(sdk);
+
+  try {
+    const { resultPromise } = pi.startPiAgent({
+      prompt: 'Test',
+      worktree: '/tmp/test',
+    });
+    const result = await resultPromise;
+
+    assert.equal(
+      result.model,
+      expectedModelId,
+      'result.model should contain session.model.id'
+    );
+    assert.equal(
+      result.telemetry?.model,
+      expectedModelId,
+      'result.telemetry.model should contain session.model.id'
+    );
+  } finally {
+    pi.__setSdkForTest(null);
+  }
+});
+
+test('startPiAgent result.model is undefined when session.model is absent (task-2337)', async () => {
+  const sdk = await new Function('return import("@earendil-works/pi-coding-agent")')();
+
+  pi.__setCreateAgentSessionForTest(async () => {
+    const session = {
+      sessionId: 'no-model-session',
+      // No model property — simulates SDK version without model
+      prompt: async () => {},
+      subscribe: () => () => {},
+      waitForIdle: async () => {},
+      dispose: () => {},
+      getLastAssistantText: () => 'OK',
+      getSessionStats: () => ({
+        sessionId: 'no-model-session',
+        userMessages: 1,
+        assistantMessages: 1,
+        toolCalls: 0,
+        toolResults: 0,
+        totalMessages: 2,
+        tokens: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0, total: 150 },
+        cost: 0,
+      }),
+    };
+    return { session, extensionsResult: { extensions: [], diagnostics: [] } };
+  });
+
+  pi.__setSdkForTest(sdk);
+
+  try {
+    const { resultPromise } = pi.startPiAgent({
+      prompt: 'Test',
+      worktree: '/tmp/test',
+    });
+    const result = await resultPromise;
+
+    assert.equal(result.model, undefined, 'result.model should be undefined when session.model is absent');
+    assert.equal(result.telemetry?.model, undefined, 'result.telemetry.model should be undefined when session.model is absent');
+  } finally {
+    pi.__setSdkForTest(null);
+  }
+});

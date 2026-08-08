@@ -499,3 +499,21 @@ test('resolveAgentModel returns null for empty-string or missing agent family', 
     }
   );
 });
+
+test('resolveAgentModel returns the configured model for the custom family (task-2337)', () => {
+  withConfigDir(
+    { adapters: { agents: { models: { custom: 'qwen3.6-27b-q8', codex: 'gpt-5.6-terra' } } } },
+    root => {
+      assert.equal(resolveAgentModel('custom', root), 'qwen3.6-27b-q8');
+    }
+  );
+});
+
+test('resolveAgentModel returns null for custom when adapters.agents.models.custom is absent (task-2337)', () => {
+  withConfigDir(
+    { adapters: { agents: { models: { codex: 'gpt-5.6-terra' } } } },
+    root => {
+      assert.equal(resolveAgentModel('custom', root), null);
+    }
+  );
+});

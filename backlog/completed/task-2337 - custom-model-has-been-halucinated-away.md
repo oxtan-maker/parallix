@@ -1,7 +1,7 @@
 ---
 id: TASK-2337
 title: custom model has been halucinated away
-status: ready-for-integration
+status: done
 assignee:
   - custom
 created_date: '2026-08-04 06:28'
