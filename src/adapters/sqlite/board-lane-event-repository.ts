@@ -23,9 +23,10 @@ export class SqliteBoardLaneEventRepository implements BoardLaneEventRepository 
     try {
       await this.db.execute(
         `INSERT INTO board_lane_events
-          (mission_id, from_status, to_status, trigger, agent, occurred_at, idempotency_key)
-          VALUES (?, ?, ?, ?, ?, ?, ?);`,
+          (repository_id, mission_id, from_status, to_status, trigger, agent, occurred_at, idempotency_key)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?);`,
         [
+          entry.repositoryId,
           entry.missionId,
           entry.fromStatus ?? null,
           entry.toStatus,
@@ -48,6 +49,7 @@ export class SqliteBoardLaneEventRepository implements BoardLaneEventRepository 
   async findByMissionId(missionId: string): Promise<readonly BoardLaneEventEntry[]> {
     const rows = await this.db.query<{
       id: unknown;
+      repository_id: unknown;
       mission_id: unknown;
       from_status: unknown;
       to_status: unknown;
@@ -56,7 +58,7 @@ export class SqliteBoardLaneEventRepository implements BoardLaneEventRepository 
       occurred_at: unknown;
       idempotency_key: unknown;
     }>(
-      `SELECT id, mission_id, from_status, to_status, trigger, agent, occurred_at, idempotency_key
+      `SELECT id, repository_id, mission_id, from_status, to_status, trigger, agent, occurred_at, idempotency_key
        FROM board_lane_events
        WHERE mission_id = ?
        ORDER BY occurred_at ASC;`,
@@ -69,6 +71,7 @@ export class SqliteBoardLaneEventRepository implements BoardLaneEventRepository 
   async findAll(): Promise<readonly BoardLaneEventEntry[]> {
     const rows = await this.db.query<{
       id: unknown;
+      repository_id: unknown;
       mission_id: unknown;
       from_status: unknown;
       to_status: unknown;
@@ -77,9 +80,31 @@ export class SqliteBoardLaneEventRepository implements BoardLaneEventRepository 
       occurred_at: unknown;
       idempotency_key: unknown;
     }>(
-      `SELECT id, mission_id, from_status, to_status, trigger, agent, occurred_at, idempotency_key
+      `SELECT id, repository_id, mission_id, from_status, to_status, trigger, agent, occurred_at, idempotency_key
        FROM board_lane_events
        ORDER BY occurred_at ASC;`,
+    );
+
+    return rows.map((row) => rowToEntry(row));
+  }
+
+  async findByRepositoryId(repositoryId: string): Promise<readonly BoardLaneEventEntry[]> {
+    const rows = await this.db.query<{
+      id: unknown;
+      repository_id: unknown;
+      mission_id: unknown;
+      from_status: unknown;
+      to_status: unknown;
+      trigger: unknown;
+      agent: unknown;
+      occurred_at: unknown;
+      idempotency_key: unknown;
+    }>(
+      `SELECT id, repository_id, mission_id, from_status, to_status, trigger, agent, occurred_at, idempotency_key
+       FROM board_lane_events
+       WHERE repository_id = ?
+       ORDER BY occurred_at ASC;`,
+      [repositoryId],
     );
 
     return rows.map((row) => rowToEntry(row));
@@ -93,6 +118,7 @@ export class SqliteBoardLaneEventRepository implements BoardLaneEventRepository 
 function rowToEntry(row: Record<string, unknown>): BoardLaneEventEntry {
   return {
     id: Number(row.id),
+    repositoryId: String(row.repository_id),
     missionId: String(row.mission_id),
     fromStatus: row.from_status === null || row.from_status === undefined
       ? null

@@ -244,6 +244,7 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
     try {
       const version = await this.persistAggregate(mission, expectedVersion);
       const appended = await this.eventRepo.append({
+        repositoryId: event.repositoryId,
         missionId: event.missionId,
         fromStatus: event.from,
         toStatus: event.to,

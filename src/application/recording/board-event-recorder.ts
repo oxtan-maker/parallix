@@ -2,6 +2,7 @@ import type { BoardLaneEventEntry, BoardLaneEventRepository } from '../ports/ope
 import type { LaneTransitionEvent } from '../../domain/board-event.js';
 import { parseMissionStatus } from '../../domain/board-event.js';
 import type { MissionId } from '../../domain/mission.js';
+import type { RepositoryId } from '../../domain/repository.js';
 import type { MissionCommand, MissionTransition } from '../../domain/mission-workflow.js';
 
 /**
@@ -61,6 +62,7 @@ export async function recordLaneTransitionSafely(
  */
 export function eventToEntry(event: LaneTransitionEvent): BoardLaneEventEntry {
   return {
+    repositoryId: event.repositoryId,
     missionId: event.missionId,
     fromStatus: event.from,
     toStatus: event.to,
@@ -89,7 +91,7 @@ export function entryToEvent(
   const trigger = entry.trigger as MissionCommand['type'];
   return {
     missionId: entry.missionId as MissionId,
-    repositoryId: '' as never, // not stored in lane_events; caller provides context
+    repositoryId: entry.repositoryId as RepositoryId,
     from: fromStatus,
     to: toStatus,
     trigger,

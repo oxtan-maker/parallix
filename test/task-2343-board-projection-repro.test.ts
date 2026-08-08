@@ -56,12 +56,13 @@ class MemoryBlocklistRepo implements AgentBlocklistRepository {
 class MemoryLaneEventRepo implements BoardLaneEventRepository {
   readonly entries: BoardLaneEventEntry[] = [];
   async append(entry: BoardLaneEventEntry) {
-    if (this.entries.some(e => e.idempotencyKey === entry.idempotencyKey)) { return false; }
+    if (this.entries.some(e => e.idempotencyKey === entry.idempotencyKey && e.repositoryId === entry.repositoryId)) { return false; }
     this.entries.push(entry);
     return true;
   }
   async findByMissionId(id: string) { return this.entries.filter(e => e.missionId === id); }
   async findAll() { return this.entries as readonly BoardLaneEventEntry[]; }
+  async findByRepositoryId(repoId: string) { return this.entries.filter(e => e.repositoryId === repoId); }
   async clear() { this.entries.length = 0; }
 }
 
@@ -164,11 +165,11 @@ function composeBoard(fixture: Fixture): BuiltBoard {
 
   void blocklist.save({ agent: 'claude', blocked: true, until: new Date(Date.now() + 3_600_000).toISOString(), reason: 'usage limit' });
   void laneEvents.append({
-    missionId: SLUG, fromStatus: 'active', toStatus: 'review', trigger: 'submit-for-review',
+    repositoryId: repoId, missionId: SLUG, fromStatus: 'active', toStatus: 'review', trigger: 'submit-for-review',
     agent: 'codex', occurredAt: '2026-08-01T09:00:00.000Z', idempotencyKey: `${SLUG}-active-review`,
   });
   void laneEvents.append({
-    missionId: SLUG, fromStatus: 'backlog', toStatus: 'active', trigger: 'activate',
+    repositoryId: repoId, missionId: SLUG, fromStatus: 'backlog', toStatus: 'active', trigger: 'activate',
     agent: 'codex', occurredAt: '2026-07-31T09:00:00.000Z', idempotencyKey: `${SLUG}-backlog-active`,
   });
   void history.append({ eventType: 'mission.active', eventData: JSON.stringify({ missionId: SLUG }), createdAt: '2026-07-31T09:00:00.000Z' });
@@ -197,7 +198,7 @@ function composeBoard(fixture: Fixture): BuiltBoard {
     }),
     new ConcreteGitReadAdapter({ rootDir: fixture.rootDir, repositoryId: repoId }),
     new ConcreteOperationLogReadAdapter({ historyRepo: history }),
-    { metricsAdapter: new ConcreteMetricsReadAdapter({ laneEventRepo: laneEvents, usageRepo: new MemoryUsageRepo() }) },
+    { metricsAdapter: new ConcreteMetricsReadAdapter({ laneEventRepo: laneEvents, usageRepo: new MemoryUsageRepo(), repositoryId: repoId }) },
   );
 
   return { laneEvents, history, build: () => builder.build() };

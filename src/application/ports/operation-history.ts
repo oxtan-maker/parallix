@@ -14,6 +14,7 @@ export interface OperationalHistoryRepository {
 
 export interface BoardLaneEventEntry {
   readonly id?: number;
+  readonly repositoryId: string;
   readonly missionId: string;
   readonly fromStatus: string | null;
   readonly toStatus: string;
@@ -27,5 +28,6 @@ export interface BoardLaneEventRepository {
   append(_entry: BoardLaneEventEntry): Promise<boolean>;
   findByMissionId(_missionId: string): Promise<readonly BoardLaneEventEntry[]>;
   findAll(): Promise<readonly BoardLaneEventEntry[]>;
+  findByRepositoryId(_repositoryId: string): Promise<readonly BoardLaneEventEntry[]>;
   clear(): Promise<void>;
 }
