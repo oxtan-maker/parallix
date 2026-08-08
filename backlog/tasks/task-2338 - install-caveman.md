@@ -1,13 +1,13 @@
 ---
 id: TASK-2338
 title: install caveman
-status: review
+status: done
 assignee: []
 created_date: '2026-08-04 07:17'
-updated_date: '2026-08-04 07:18'
+updated_date: '2026-08-08 08:17'
 labels: []
 dependencies: []
-ordinal: 73900
+ordinal: 81900
 ---
 
 ## Description
