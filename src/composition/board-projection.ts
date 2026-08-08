@@ -56,7 +56,7 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
     }),
     new ConcreteGitReadAdapter({ rootDir: deps.rootDir, repositoryId: deps.repositoryId }),
     new ConcreteOperationLogReadAdapter({ historyRepo: deps.historyRepo }),
-    { metricsAdapter: new ConcreteMetricsReadAdapter({ laneEventRepo: deps.laneEventRepo, usageRepo: deps.usageRepo }) },
+    { metricsAdapter: new ConcreteMetricsReadAdapter({ laneEventRepo: deps.laneEventRepo, usageRepo: deps.usageRepo, repositoryId: deps.repositoryId }) },
   );
   return { builder, missionQuery: new MissionProjectionQuery(missions) };
 }

@@ -169,6 +169,7 @@ async function createProjectionDeps(rootDir: string, servicesFn?: Function): Pro
     async append() { return false; },
     async findByMissionId() { return []; },
     async findAll() { return []; },
+    async findByRepositoryId() { return []; },
     async clear() {},
   };
   const emptyUsage: UsageRepository = {

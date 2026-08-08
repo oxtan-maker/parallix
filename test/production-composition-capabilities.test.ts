@@ -7,7 +7,7 @@ import { makeExecutePorts } from './fixtures/execute-mission-ports.js';
 const repositories = {
   agentBlocklist: { async findAll() { return []; }, async findByAgent() { return undefined; }, async save() {}, async deleteByAgent() {}, async clear() {} },
   operationalHistory: { async findAll() { return []; }, async findByType() { return []; }, async append() {}, async clear() {} },
-  boardLaneEvents: { async findAll() { return []; }, async findByMissionId() { return []; }, async append() { return true; }, async clear() {} },
+  boardLaneEvents: { async findAll() { return []; }, async findByMissionId() { return []; }, async findByRepositoryId() { return []; }, async append() { return true; }, async clear() {} },
   usage: { async findAll() { return []; }, async findWhere() { return []; }, async save() {}, async saveAll() {}, async clear() {} },
 };
 

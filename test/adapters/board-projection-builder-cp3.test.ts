@@ -58,6 +58,7 @@ class MockHistoryRepo implements OperationalHistoryRepository {
 class MockLaneEventRepo implements BoardLaneEventRepository {
   async findAll() { return []; }
   async findByMissionId() { return []; }
+  async findByRepositoryId() { return []; }
   async append() { return true; }
   async clear() {}
 }

@@ -90,6 +90,7 @@ describe('0003-board-lane-events migration — schema and ledger', () => {
       // Verify the typed columns exist (following usage_statistics pattern)
       const columns = await columnNames(db, 'board_lane_events');
       assert.ok(columns.includes('id'), 'should have id column');
+      assert.ok(columns.includes('repository_id'), 'should have repository_id column (migration 0011)');
       assert.ok(columns.includes('mission_id'), 'should have mission_id column');
       assert.ok(columns.includes('from_status'), 'should have from_status column');
       assert.ok(columns.includes('to_status'), 'should have to_status column');
@@ -98,15 +99,15 @@ describe('0003-board-lane-events migration — schema and ledger', () => {
       assert.ok(columns.includes('occurred_at'), 'should have occurred_at column');
       assert.ok(columns.includes('idempotency_key'), 'should have idempotency_key column');
 
-      // Verify indexes were created
+      // Verify indexes were created (scoped by repository after migration 0011)
       const names = await indexNames(db);
       assert.ok(
-        names.includes('idx_board_lane_events_idempotency'),
-        'unique idempotency index should exist after clean install',
+        names.includes('idx_board_lane_events_repo_idempotency'),
+        'unique idempotency index (scoped by repo) should exist after clean install',
       );
       assert.ok(
-        names.includes('idx_board_lane_events_mission'),
-        'mission query index should exist after clean install',
+        names.includes('idx_board_lane_events_repo_mission'),
+        'mission query index (scoped by repo) should exist after clean install',
       );
       assert.ok(
         names.includes('idx_board_lane_events_time'),
@@ -140,18 +141,18 @@ describe('0003-board-lane-events migration — schema and ledger', () => {
 
       await db.execute(
         `INSERT INTO board_lane_events
-          (mission_id, from_status, to_status, trigger, agent, occurred_at, idempotency_key)
-          VALUES ('task-1', 'backlog', 'active', 'activate', 'codex', '2026-07-24T00:00:00Z', 'op-1');`,
+          (repository_id, mission_id, from_status, to_status, trigger, agent, occurred_at, idempotency_key)
+          VALUES ('test-repo', 'task-1', 'backlog', 'active', 'activate', 'codex', '2026-07-24T00:00:00Z', 'op-1');`,
       );
 
       await assert.rejects(
         db.execute(
           `INSERT INTO board_lane_events
-            (mission_id, from_status, to_status, trigger, agent, occurred_at, idempotency_key)
-            VALUES ('task-1', 'backlog', 'active', 'activate', 'codex', '2026-07-24T00:00:01Z', 'op-1');`,
+            (repository_id, mission_id, from_status, to_status, trigger, agent, occurred_at, idempotency_key)
+            VALUES ('test-repo', 'task-1', 'backlog', 'active', 'activate', 'codex', '2026-07-24T00:00:01Z', 'op-1');`,
         ),
         /UNIQUE constraint failed/,
-        'the unique index must reject a duplicate idempotency key',
+        'the unique index must reject a duplicate idempotency key within same repo',
       );
 
       const rows = await db.query<{ c: unknown }>(
@@ -173,20 +174,23 @@ describe('0003-board-lane-events migration — schema and ledger', () => {
 
       await db.execute(
         `INSERT INTO board_lane_events
-          (mission_id, from_status, to_status, trigger, agent, occurred_at, idempotency_key)
-          VALUES ('task-1', 'backlog', 'active', 'activate', 'codex', '2026-07-24T00:00:00Z', 'op-1');`,
+          (repository_id, mission_id, from_status, to_status, trigger, agent, occurred_at, idempotency_key)
+          VALUES ('test-repo', 'task-1', 'backlog', 'active', 'activate', 'codex', '2026-07-24T00:00:00Z', 'op-1');`,
       );
 
       // Read back typed columns directly (no JSON parsing needed)
       const rows = await db.query<{
+        repository_id: unknown;
         mission_id: unknown;
         from_status: unknown;
         to_status: unknown;
         trigger: unknown;
         agent: unknown;
       }>(
-        'SELECT mission_id, from_status, to_status, trigger, agent FROM board_lane_events;',
+        'SELECT repository_id, mission_id, from_status, to_status, trigger, agent FROM board_lane_events;',
       );
+
+      assert.equal(String(rows[0].repository_id), 'test-repo');
 
       assert.equal(String(rows[0].mission_id), 'task-1');
       assert.equal(String(rows[0].from_status), 'backlog');
@@ -208,8 +212,8 @@ describe('0003-board-lane-events migration — schema and ledger', () => {
 
       await db.execute(
         `INSERT INTO board_lane_events
-          (mission_id, from_status, to_status, trigger, agent, occurred_at, idempotency_key)
-          VALUES ('task-new', NULL, 'active', 'activate', 'codex', '2026-07-24T00:00:00Z', 'op-new');`,
+          (repository_id, mission_id, from_status, to_status, trigger, agent, occurred_at, idempotency_key)
+          VALUES ('test-repo', 'task-new', NULL, 'active', 'activate', 'codex', '2026-07-24T00:00:00Z', 'op-new');`,
       );
 
       const rows = await db.query<{ from_status: unknown }>(
@@ -278,15 +282,15 @@ describe('0003-board-lane-events migration — schema and ledger', () => {
 
       const namesAfter = await indexNames(db);
       assert.ok(
-        namesAfter.includes('idx_board_lane_events_idempotency'),
-        'idempotency index should exist after 0003 upgrade',
+        namesAfter.includes('idx_board_lane_events_repo_idempotency'),
+        'idempotency index (scoped by repo) should exist after upgrade',
       );
 
       // Verify the table works with typed inserts after upgrade
       await db.execute(
         `INSERT INTO board_lane_events
-          (mission_id, from_status, to_status, trigger, agent, occurred_at, idempotency_key)
-          VALUES ('task-1', 'backlog', 'active', 'activate', 'codex', '2026-07-24T00:00:00Z', 'op-upgrade');`,
+          (repository_id, mission_id, from_status, to_status, trigger, agent, occurred_at, idempotency_key)
+          VALUES ('test-repo', 'task-1', 'backlog', 'active', 'activate', 'codex', '2026-07-24T00:00:00Z', 'op-upgrade');`,
       );
 
       const rows = await db.query<{ c: unknown }>(

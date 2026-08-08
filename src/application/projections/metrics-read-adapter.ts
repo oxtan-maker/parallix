@@ -34,6 +34,9 @@ export interface MetricsReadAdapter {
 export interface ConcreteMetricsReadAdapterOptions {
   readonly laneEventRepo: BoardLaneEventRepository;
   readonly usageRepo: UsageRepository;
+  /** Repository this projection is scoped to. Lane events and usage records
+      for other repositories are excluded. */
+  readonly repositoryId: RepositoryId;
 }
 
 /**
@@ -44,10 +47,12 @@ export interface ConcreteMetricsReadAdapterOptions {
 export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
   private readonly laneEventRepo: BoardLaneEventRepository;
   private readonly usageRepo: UsageRepository;
+  private readonly repositoryId: RepositoryId;
 
   constructor(options: ConcreteMetricsReadAdapterOptions) {
     this.laneEventRepo = options.laneEventRepo;
     this.usageRepo = options.usageRepo;
+    this.repositoryId = options.repositoryId;
   }
 
   async buildMetrics(
@@ -55,12 +60,12 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
     agentAvailability: readonly AgentAvailabilityRow[] = [],
   ): Promise<BoardMetrics> {
     const [entries, usageRecords] = await Promise.all([
-      this.laneEventRepo.findAll(),
+      this.laneEventRepo.findByRepositoryId(this.repositoryId),
       this.usageRepo.findAll(),
     ]);
 
     const transitions = this.entriesToTransitions(entries);
-    const outcomes = this.usageRecordsToOutcomes(usageRecords);
+    const outcomes = this.usageRecordsToOutcomes(usageRecords, this.repositoryId);
 
     // Derive instants from transition timestamps
     const instants = this.deriveInstants(transitions, usageRecords);
@@ -93,7 +98,13 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
 
   private usageRecordsToOutcomes(
     records: readonly UsageRecord[],
+    repositoryId: RepositoryId,
   ): readonly MissionOutcome[] {
+    // Filter to this repository's records
+    const scopedRecords = records.filter(
+      (r) => (r.repo ?? '') === repositoryId,
+    );
+
     const outcomeMap = new Map<string, {
       missionId: MissionId;
       repositoryId: RepositoryId;
@@ -101,20 +112,22 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
       reviewFixRounds: number;
     }>();
 
-    for (const record of records) {
+    for (const record of scopedRecords) {
       if (!record.mission) {
         continue;
       }
-      const key = record.mission;
+      // Key by (repository, mission) so same mission slug in different repos
+      // does not collide. Precedent: statsMissionKey in stats.ts:438.
+      const key = `${repositoryId}::${record.mission}`;
       const existing = outcomeMap.get(key);
       if (existing) {
-        // Aggregate multiple records for the same mission
+        // Aggregate multiple records for the same (repo, mission)
         existing.cycleTimeMinutes = existing.cycleTimeMinutes + (record.duration_minutes ?? 0);
         existing.reviewFixRounds = Math.max(existing.reviewFixRounds, record.pr_fix_rounds ?? 0);
       } else {
         outcomeMap.set(key, {
           missionId: record.mission as MissionId,
-          repositoryId: (record.repo ?? '') as RepositoryId,
+          repositoryId,
           cycleTimeMinutes: record.duration_minutes ?? 0,
           reviewFixRounds: record.pr_fix_rounds ?? 0,
         });

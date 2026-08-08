@@ -6,6 +6,45 @@ import * as fmt from '../../application/presentation/cli-format.js';
 import { resolveTaskStorage } from '../config/product-config.js';
 import { isMissionArtifact, missionPathForSlug, resolveBaseWorktree, resolveMissionBaseBranch, resolveWorktree } from '../filesystem/mission-utils.js';
 
+/**
+ * Derive a stable repository id from a directory path.
+ *
+ * Prefers the repo name extracted from `remote.origin.url` so the same
+ * repository produces the same id regardless of worktree path. Falls back
+ * to the toplevel directory basename when no remote exists.
+ */
+function resolveStableRepositoryId(rootDir: string): string {
+  // Try remote.origin.url first
+  const urlResult = git(['-C', rootDir, 'config', '--get', 'remote.origin.url']);
+  if (urlResult.status === 0 && urlResult.stdout.trim()) {
+    const url = urlResult.stdout.trim();
+    const name = extractRepoNameFromUrl(url);
+    if (name) { return name; }
+  }
+
+  // Fallback: toplevel directory basename (works for worktrees too)
+  const toplevelResult = git(['-C', rootDir, 'rev-parse', '--show-toplevel']);
+  if (toplevelResult.status === 0 && toplevelResult.stdout.trim()) {
+    return path.basename(toplevelResult.stdout.trim());
+  }
+
+  // Last resort: rootDir basename
+  return path.basename(rootDir);
+}
+
+/** Extract repo name from a git remote URL (e.g. "parallix" from "git@github.com:user/parallix.git"). */
+function extractRepoNameFromUrl(url: string): string | null {
+  // git@host:user/repo.git or git@host:user/repo
+  const sshMatch = url.match(/[^/:]+\/([^/]+?)(?:\.git)?$/);
+  if (sshMatch) { return sshMatch[1] || null; }
+
+  // https://host/user/repo.git or https://host/user/repo
+  const httpsMatch = url.match(/\/([^/]+?)(?:\.git)?$/);
+  if (httpsMatch) { return httpsMatch[1] || null; }
+
+  return null;
+}
+
 /** @returns {readonly string[]} */
 function getSupportedAgents() {
   return WORKFLOW_AGENT_NAMES;
@@ -796,7 +835,7 @@ async function transitionTaskOnIntegrationBranch(
           try {
             const appended = await recordLaneTransitionSafely(recorder, {
               missionId: missionId(slug),
-              repositoryId: repositoryId(rootDir),
+              repositoryId: repositoryId(resolveStableRepositoryId(rootDir)),
               from: fromStatus,
               to: toStatus,
               trigger,
@@ -1241,4 +1280,5 @@ export { enforceTaskAssignee };
 export { getAcceptanceCriteria };
 export { parseAssigneeFamilies };
 export { clearTaskAgentAssignee };
+export { resolveStableRepositoryId };
 ;

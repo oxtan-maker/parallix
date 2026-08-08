@@ -158,6 +158,7 @@ export const IMPORT_MISSION_VERSIONS_AUTHORITY = {
  */
 export const BOARD_LANE_EVENTS_AUTHORITY = {
   id: { owner: 'operator-local' } as const,
+  repository_id: { owner: 'operator-local' } as const,
   mission_id: { owner: 'operator-local' } as const,
   from_status: { owner: 'operator-local' } as const,
   to_status: { owner: 'operator-local' } as const,
