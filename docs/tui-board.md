@@ -61,6 +61,30 @@ A fact the projection does not have reads `unavailable`. That is deliberate: the
 card distinguishes "we know there is nothing" from "we could not read this", and
 it never guesses a value the workflow has not recorded.
 
+## Where each fact comes from
+
+The board reads what the lifecycle already recorded. It never queries the review
+provider and never launches an agent of its own, so a field stays `unavailable`
+until the step that produces it has run.
+
+| Field | Source | Appears after |
+|---|---|---|
+| checkpoint, next step, Goal Check | the latest `CP-N.md` in the mission directory | `px checkpoint` |
+| gate | the verifier exit code recorded in `<mission>/.workflow/gate-result.json`, read from the mission's own worktree | `px checkpoint` |
+| pull request | the pull-request reference the review loop records on the round once it confirms an open PR | `px review` with a review provider configured |
+| agent availability | the `agent_blocklist` table | an agent hits a provider usage limit |
+| cycle time | the `board_lane_events` table | any lane transition |
+| operations | the `operational_history` table | `px active`, `px checkpoint`, `px review`, or `px integrate` |
+
+The gate cell reports an exit code and nothing else. An agent's own account of a
+gate run — including a `PASS` row in its Goal Check table — is never promoted to
+gate state; ADR 0048 classifies that as an unverifiable claim. `.workflow/` is
+ignored by Git, so the recorded result describes the local run that produced it
+rather than travelling with the branch as a committed assertion.
+
+Missions whose lifecycle steps predate this wiring are not backfilled. Their
+fields stay `unavailable` until the next step of that kind runs.
+
 ## Overflow
 
 A lane shows as many cards as the terminal height allows, up to eight, and folds

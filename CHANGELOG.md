@@ -31,6 +31,29 @@ cycle (pre-integrate bump + post-integrate reinstall).
 
 ## [Unreleased]
 
+### Fixed
+
+- **`px ui` board cards report real checkpoint, gate, pull-request and operation
+  data instead of `unavailable`** (TASK-2343). The concrete read adapters were
+  disconnected from the sources the lifecycle already writes: the checkpoint
+  `Next action:` line and `## Goal Check` table were never parsed, no command
+  wrote the gate artifact the gate adapter looks for, a review carrying a
+  Forgejo PR reference projected no `pullRequest`, and nothing appended to
+  `operational_history`. `ConcreteMissionReadAdapter` now materialises
+  checkpoints through the existing `checkpoint-document` compatibility parser;
+  `px checkpoint` records the verifier exit code to
+  `<mission>/.workflow/gate-result.json` and the gate adapter resolves the
+  mission's worktree before reading it — the artifact is gitignored and stays
+  in the worktree the checkpoint ran in — preferring that exit code over any
+  surrounding prose (ADR 0048); the review loop
+  records the confirmed pull request as the round's reviewed change, which the
+  Mission store already persists in typed columns; and each lifecycle
+  transition appends its operation to `operational_history` in the same
+  transaction as its `board_lane_events` row (ADR 0053 transaction rule 1).
+  No board projection field, read-adapter interface, SQLite table or migration
+  changed. Missions whose lifecycle steps predate this change are not
+  backfilled.
+
 ### Changed
 
 - **Mission intake, activation, checkpoint, and handoff run through checked

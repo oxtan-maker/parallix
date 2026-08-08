@@ -24,7 +24,7 @@ const handoffModule = require('../.test-runtime/adapters/cli/commands/handoff.js
 // `px checkpoint` — gate, then stage, then commit
 // ---------------------------------------------------------------------------
 
-test('SC5 characterization: checkpoint runs the gate, then stages, then commits, in that order', (t) => {
+test('SC5 characterization: checkpoint runs the gate, then stages, then commits, in that order', async (t) => {
   const { mock } = t;
   const effects: string[] = [];
   mock.method(missionUtils, 'resolveWorktree', () => '/mission-root');
@@ -39,7 +39,7 @@ test('SC5 characterization: checkpoint runs the gate, then stages, then commits,
     return { status: 0 };
   });
 
-  checkpointCommand(['task-4242', 'CP-1', 'continue the mission']);
+  await checkpointCommand(['task-4242', 'CP-1', 'continue the mission']);
 
   assert.deepEqual(effects, [
     'gate',
@@ -48,7 +48,7 @@ test('SC5 characterization: checkpoint runs the gate, then stages, then commits,
   ]);
 });
 
-test('SC5 characterization: a failed gate stops checkpoint before any Git effect', (t) => {
+test('SC5 characterization: a failed gate stops checkpoint before any Git effect', async (t) => {
   const { mock } = t;
   const effects: string[] = [];
   mock.method(missionUtils, 'resolveWorktree', () => '/mission-root');
@@ -65,7 +65,7 @@ test('SC5 characterization: a failed gate stops checkpoint before any Git effect
   class FakeExit extends Error {}
   mock.method(process, 'exit', () => { throw new FakeExit(); });
 
-  assert.throws(() => checkpointCommand(['task-4242', 'CP-1', 'continue']), FakeExit);
+  await assert.rejects(() => checkpointCommand(['task-4242', 'CP-1', 'continue']), FakeExit);
   assert.deepEqual(effects, ['gate']);
 });
 

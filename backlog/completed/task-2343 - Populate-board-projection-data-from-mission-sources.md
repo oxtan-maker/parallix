@@ -1,7 +1,7 @@
 ---
 id: TASK-2343
 title: Populate board projection data from mission sources
-status: ready-for-integration
+status: done
 assignee:
   - claude
 created_date: '2026-07-30 21:18'

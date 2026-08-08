@@ -1,7 +1,7 @@
 import type { AgentFamily } from '../../domain/agents.js';
 import { agentFamily } from '../../domain/agents.js';
-import type { Review, ReviewRound, ReviewerDecision, ReviewPhase } from '../../domain/review.js';
-import { parseReviewDisposition, parseReviewPhase } from '../../domain/review.js';
+import type { PullRequestReference, Review, ReviewRound, ReviewerDecision, ReviewPhase } from '../../domain/review.js';
+import { assertReviewedChange, parseReviewDisposition, parseReviewPhase } from '../../domain/review.js';
 import type { ReviewStateData } from './review-state.js';
 
 /** Return a valid agent family, retaining the aggregate value when input is stale. */
@@ -31,10 +31,23 @@ function metadataFromReview(review: Review): Record<string, unknown> {
   return metadata;
 }
 
+/**
+ * The reviewed change of the current round, when it is a provider pull request.
+ *
+ * Flattened as a typed value so a consumer of the loop-state view reads the
+ * same `PullRequestReference` the aggregate holds instead of reconstructing a
+ * branch reference from the slug.
+ */
+function pullRequestFrom(review: Review): PullRequestReference | null {
+  const change = review.rounds[review.rounds.length - 1].subject.change;
+  return change.kind === 'pull-request' ? change : null;
+}
+
 /** Flatten the current Review round into the legacy loop-state view. */
 export function reviewStateDataFrom(review: Review): ReviewStateData {
   const current = review.rounds[review.rounds.length - 1];
   return {
+    pullRequest: pullRequestFrom(review),
     reviewer: current.reviewer,
     implementer: current.implementer,
     round: current.number,
@@ -66,6 +79,27 @@ function decisionFromState(
   return null;
 }
 
+/**
+ * The subject of the updated round.
+ *
+ * A flattened writer that has confirmed a provider pull request promotes the
+ * round's change to that reference; a writer that carries none leaves the
+ * aggregate's existing change untouched. An invalid reference is ignored rather
+ * than written onto the round.
+ */
+function subjectFromState(state: ReviewStateData, previous: ReviewRound): ReviewRound['subject'] {
+  if (!state.pullRequest) {
+    return previous.subject;
+  }
+  const change: PullRequestReference = { ...state.pullRequest, kind: 'pull-request' };
+  try {
+    assertReviewedChange(change);
+  } catch {
+    return previous.subject;
+  }
+  return { ...previous.subject, change };
+}
+
 function roundFromState(state: ReviewStateData, previous: ReviewRound): ReviewRound {
   const phase = parseReviewPhase(state.phase) ?? 'reviewing';
   const disposition = parseReviewDisposition(state.disposition);
@@ -77,6 +111,7 @@ function roundFromState(state: ReviewStateData, previous: ReviewRound): ReviewRo
     number: typeof state.round === 'number' && state.round > 0 ? Math.floor(state.round) : previous.number,
     reviewer: familyFrom(state.reviewer, previous.reviewer),
     implementer: familyFrom(state.implementer, previous.implementer),
+    subject: subjectFromState(state, previous),
     startedAt,
     decision: decisionFromState(phase, state.disposition ?? null, startedAt, previous.decision),
     response: null,

@@ -181,6 +181,55 @@ export function runVerificationGate(area: string | undefined, options: { rootDir
   return runFn('bash', ['-c', command.replaceAll('{{area}}', effectiveArea)], { cwd: rootDir, stdio });
 }
 
+/** The gate-result artifact a lifecycle command leaves for the board to read. */
+export interface GateResultRecord {
+  /** Verification area the gate ran for. */
+  readonly area: string;
+  /** Gate command line, recorded so the status can be traced to what ran. */
+  readonly command: string;
+  /** Process exit code. `0` is the only passing value. */
+  readonly exitCode: number;
+  readonly status: 'passed' | 'failed';
+  readonly recordedAt: string;
+}
+
+/** Relative location of the gate-result artifact inside a mission directory. */
+export const GATE_RESULT_RELATIVE_PATH = pathMod.join('.workflow', 'gate-result.json');
+
+/**
+ * Record the outcome of a verification gate run beside the mission.
+ *
+ * The status is the process exit code and nothing else — ADR 0048 classifies an
+ * agent's own prose about a gate as an unverifiable claim (failure class 1), so
+ * the board must never derive gate state from checkpoint narrative. `.workflow/`
+ * is ignored by Git, which keeps this an operator-local observation of a local
+ * run rather than a committed assertion about the tree.
+ *
+ * Returns the written record, or `null` when the artifact could not be written;
+ * recording never blocks the command that produced the result.
+ */
+export function recordGateResult(
+  missionDir: string,
+  result: { area: string; command: string; exitCode: number | null },
+  options: { now?: () => Date } = {},
+): GateResultRecord | null {
+  const exitCode = typeof result.exitCode === 'number' ? result.exitCode : 1;
+  const record: GateResultRecord = {
+    area: result.area,
+    command: result.command,
+    exitCode,
+    status: exitCode === 0 ? 'passed' : 'failed',
+    recordedAt: (options.now ? options.now() : new Date()).toISOString(),
+  };
+  const target = pathMod.join(missionDir, GATE_RESULT_RELATIVE_PATH);
+  try {
+    writeJson(target, record);
+    return record;
+  } catch {
+    return null;
+  }
+}
+
 function digest(value: string): string {
   return createHash('sha256').update(value).digest('hex');
 }
