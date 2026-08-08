@@ -2,7 +2,7 @@
 id: TASK-2348
 title: implementer attribution is wrong
 status: backlog
-assignee: []
+assignee: [claude]
 created_date: '2026-08-08 18:05'
 labels: []
 dependencies: []
