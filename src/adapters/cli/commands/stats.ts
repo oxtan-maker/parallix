@@ -87,6 +87,7 @@ import { isForgejoReviewEnabled, loadEffectiveConfig } from '../../config/produc
 import { currentReviewRound } from '../../../domain/review.js';
 import { git } from '../../git/git.js';
 import * as forgejo from '../../forgejo/forgejo.js';
+import * as statsReport from './stats-report.js';
 import { resolveMeasurementStore } from '../../sqlite/measurement-store.js';
 
 // The original 5-column schema. Retained for backward-compatible CSV detection
@@ -1157,122 +1158,10 @@ function colorMissionCounts(rows) {
   });
 }
 
-/**
- * @param {string[]} headers
- * @param {string[][]} rows
- */
-function formatStatsTable(headers, rows) {
-  const headerRow = headers.map(header => fmt.bold(header));
-  const renderedRows = rows.map(row => row.map((cell, index) => {
-    if (index === 0 && headers[0] === 'Agent family' && cell !== 'none') {
-      return fmt.agent(String(cell), String(cell));
-    }
-    return String(cell ?? '');
-  }));
-
-  return fmt.table([headerRow, ...renderedRows], {
-    indent: 0,
-    colPadding: 2,
-  });
-}
-
-/**
- * @param {StatsRow[]} rows
- * @param {RenderWeeklyStatsReportOptions} options
- */
-function renderWeeklyStatsReport(rows, options = {}) {
-  const today = options.today || new Date();
-  const rootDir = options.rootDir || null;
-  const windows = buildWeeklyWindows(/** @type{Date} */(typeof today === 'string' ? parseDateOnly(today) : today));
-  const currentMissionStats = summarizeMissionWindow(rows, windows.current);
-  const previousMissionStats = summarizeMissionWindow(rows, windows.previous);
-  const currentAgentStats = summarizeAgentWindow(rows, windows.current, { rootDir });
-  const previousAgentStats = summarizeAgentWindow(rows, windows.previous, { rootDir });
-  const currentMissionColors = colorMissionCounts(currentAgentStats);
-  const currentAgentColors = colorAverageFixRounds(currentAgentStats);
-  const previousMissionColors = colorMissionCounts(previousAgentStats);
-  const previousAgentColors = colorAverageFixRounds(previousAgentStats);
-
-  const lines = [];
-  lines.push(fmt.bold(`Current week (${windows.current.label})`));
-  lines.push(formatStatsTable(
-    ['# missions', '# user value missions', '# AI SDLC missions', '# unknown missions'],
-    [[String(currentMissionStats.total), String(currentMissionStats.userValue), String(currentMissionStats.aiSdlc), String(currentMissionStats.unknown)]]
-  ));
-  lines.push('');
-  lines.push(fmt.bold(`Previous week (${windows.previous.label})`));
-  lines.push(formatStatsTable(
-    ['# missions', '# user value missions', '# AI SDLC missions', '# unknown missions'],
-    [[String(previousMissionStats.total), String(previousMissionStats.userValue), String(previousMissionStats.aiSdlc), String(previousMissionStats.unknown)]]
-  ));
-  lines.push('');
-  lines.push(fmt.bold(`Agent performance this week (${windows.current.label})`));
-  lines.push(formatStatsTable(
-    ['Agent family', '# missions as implementer', 'Average PR fix rounds to complete mission'],
-    currentAgentStats.length > 0
-      ? currentAgentStats.map((row, index) => [row.implementer, currentMissionColors[index], currentAgentColors[index]])
-      : [['none', '0', '0.00']]
-  ));
-  lines.push('');
-  const currentAgentSpend = summarizeAgentStageSpend(rows, windows.current);
-  lines.push(fmt.bold(`Agent spend by stage this week (${windows.current.label})`));
-  lines.push(formatStatsTable(
-    ['Agent family', ...AGENT_SPEND_STAGE_COLUMNS.map(entry => entry.label), 'total'],
-    currentAgentSpend.length > 0
-      ? currentAgentSpend.map(row => [
-        row.implementer,
-        ...AGENT_SPEND_STAGE_COLUMNS.map(entry => formatAgentSpendCell(row.byStage[entry.stage], row.total, row.family)),
-        formatAgentSpendCell(row.total, row.total, row.family),
-      ])
-      : [['none', ...AGENT_SPEND_STAGE_COLUMNS.map(() => '—'), '—']]
-  ));
-  lines.push('');
-  lines.push(fmt.bold(`Agent performance previous week (${windows.previous.label})`));
-  lines.push(formatStatsTable(
-    ['Agent family', '# missions as implementer', 'Average PR fix rounds to complete mission'],
-    previousAgentStats.length > 0
-      ? previousAgentStats.map((row, index) => [row.implementer, previousMissionColors[index], previousAgentColors[index]])
-      : [['none', '0', '0.00']]
-  ));
-  return lines.join('\n');
-}
-
-/**
- * @param {StatsRow[]} rows
- * @param {RenderRangeStatsReportOptions} options
- */
-function renderRangeStatsReport(rows, options = {}) {
-  const from = options.from;
-  const to = options.to;
-  const rootDir = options.rootDir || null;
-  const window = createRangeWindow({ from, to });
-  const missionStats = summarizeMissionWindow(rows, window);
-  const agentStats = summarizeAgentWindow(rows, window, { rootDir });
-  const missionColors = colorMissionCounts(agentStats);
-  const agentColors = colorAverageFixRounds(agentStats);
-
-  const lines = [];
-  lines.push(fmt.bold(`Missions (${window.label})`));
-  lines.push(formatStatsTable(
-    ['# missions', '# user value missions', '# AI SDLC missions', '# unknown missions'],
-    [[String(missionStats.total), String(missionStats.userValue), String(missionStats.aiSdlc), String(missionStats.unknown)]]
-  ));
-  lines.push('');
-  lines.push(fmt.bold(`Agent performance (${window.label})`));
-  lines.push(formatStatsTable(
-    ['Agent family', '# missions as implementer', 'Average PR fix rounds to complete mission'],
-    agentStats.length > 0
-      ? agentStats.map((row, index) => [row.implementer, missionColors[index], agentColors[index]])
-      : [['none', '0', '0.00']]
-  ));
-  return lines.join('\n');
-}
+ // Core renderers from stats-report.ts (task-2217)
+const { formatStatsTable, renderWeeklyStatsReport, renderRangeStatsReport, renderMissionPhaseReport: _renderMissionPhaseReport } = statsReport;
 
 // Maps the stored `stage` value to the phase label used in the mission report.
-// The execute phase is persisted as stage `active` (the active-launch hook), but
-// the mission contract and the backlog item both ask for an "execute" breakdown,
-// so we surface it under that name. Canonical order is draft → execute → review,
-// then any follow-up/extra stages discovered in the data.
 const MISSION_PHASE_ORDER = [
   { stage: 'draft', label: 'draft' },
   { stage: 'active', label: 'execute' },
@@ -1281,130 +1170,21 @@ const MISSION_PHASE_ORDER = [
 ];
 
 /**
- * Render a single-mission, per-phase telemetry breakdown. Rows are filtered to
- * the requested mission slug and indexed by their stored `stage`. The draft,
- * execute, and review phases are always printed (zeros when no row exists) so
- * the output is comparable across missions; any additional recorded stages
- * (e.g. follow-up, default) are appended in stable alphabetical order. Output is
- * a pure function of the supplied rows — re-running with the same stored rows
- * produces identical text.
- */
-/**
+ * Render a single-mission, per-phase telemetry breakdown.
+ * Delegates to stats-report.ts (task-2217 extraction).
+ *
  * @param {StatsRow[]} rows
  * @param {string} slug
  * @param {StatsOptions} options
  */
 function renderMissionPhaseReport(rows, slug, options = {}) {
-  const wanted = String(slug || '').trim().toLowerCase();
-  /** @type {StatsOptions} */
-  const opts = options;
-  const wantedRepo = String(opts.repo || resolveStatsRepoName(opts.rootDir)).trim();
-  const missionRows = (rows || []).filter(row =>
-    String(row.mission || '').trim().toLowerCase() === wanted &&
-    String(row.repo || '').trim() === wantedRepo
-  );
-
-  const byStage = new Map();
-  for (const row of missionRows) {
-    const stage = String(row.stage || 'default').trim().toLowerCase() || 'default';
-    if (!byStage.has(stage)) {byStage.set(stage, []);}
-    byStage.get(stage).push(row);
-  }
-
-  for (const stageRows of byStage.values()) {
-    stageRows.sort((/** @type{StatsRow} */ a, /** @type{StatsRow} */ b) =>
-      statsRowActorKey(a).localeCompare(statsRowActorKey(b))
-      || String(a.provider || '').localeCompare(String(b.provider || ''))
-      || String(a.model || '').localeCompare(String(b.model || ''))
-    );
-  }
-
-  const orderedStages = MISSION_PHASE_ORDER.map(entry => entry.stage);
-  const extraStages = [...byStage.keys()]
-    .filter(stage => !orderedStages.includes(stage))
-    .sort();
-  const phases = [
-    ...MISSION_PHASE_ORDER,
-    ...extraStages.map(stage => ({ stage, label: stage })),
-  ];
-
-  const lines = [];
-  lines.push(fmt.bold(`Mission telemetry by phase: ${wanted}`));
-
-  if (missionRows.length === 0) {
-    lines.push(formatStatsTable(
-      ['Phase', 'Provider', 'Model', 'Implementer', 'Input', 'Output', 'Cached', 'Tool calls', 'Duration (min)', 'Usage %', 'Cost ($)'],
-      MISSION_PHASE_ORDER.map(entry => [entry.label, '—', '—', '—', '0', '0', '0', '0', '0', '—', '0'])
-    ));
-    lines.push('');
-    lines.push(`No telemetry rows recorded for mission "${wanted}".`);
-    return lines.join('\n');
-  }
-
-  const num = (/** @type{StatsRow} */ row, /** @type{string} */ key) => String(Number.parseInt(String(row[key] as any), 10) || 0);
-  // cost_usd is a fractional dollar value; parseInt would truncate (e.g.
-  // 1.42 -> "1", 0.46 -> "0"), silently discarding sub-dollar costs. Format
-  // as a rounded decimal, collapsing exact zeros to "0".
-  const cost = (/** @type {string | number} */ value) => {
-    const n = Number.parseFloat(String(value));
-    if (!Number.isFinite(n) || n === 0) {return '0';}
-    return String(Math.round(n * 100) / 100);
-  };
-  const tableRows = [];
-  for (const { stage, label } of phases) {
-    const stageRows = byStage.get(stage) || [];
-    if (stageRows.length === 0) {
-      tableRows.push([label, '—', '—', '—', '0', '0', '0', '0', '0', '—', '0']);
-      continue;
-    }
-    for (const row of stageRows) {
-      const actor = stage === 'review'
-        ? (row.reviewer_agent || row.implementer_agent || row.implementer || '—')
-        : (row.implementer_agent || row.implementer || '—');
-      tableRows.push([
-        label,
-        row.provider || '—',
-        row.model || '—',
-        actor,
-        num(row, 'input_tokens'),
-        num(row, 'output_tokens'),
-        num(row, 'cached_tokens'),
-        num(row, 'tool_calls'),
-        num(row, 'duration_minutes'),
-        (() => {
-          const displayActor = (stage === 'review'
-            ? (row.reviewer_agent || row.implementer_agent || row.implementer || '')
-            : (row.implementer_agent || row.implementer || ''));
-          const actorLower = displayActor.trim().toLowerCase();
-          if (actorLower === 'claude') {return '—';}
-          return (row.provider && row.provider.toLowerCase() === 'openai')
-            ? num(row, 'openai_usage_after')
-            : '—';
-        })(),
-        cost(row.cost_usd),
-      ]);
-    }
-  }
-
-  const totals = ['input_tokens', 'output_tokens', 'cached_tokens', 'tool_calls', 'duration_minutes']
-    .map(key => missionRows.reduce((sum, row) => sum + (Number.parseInt(String(row[key] as any), 10) || 0), 0));
-  // Compute total cost from rounded individual costs so the total equals
-  // the sum of displayed phase costs (avoids floating-point rounding drift).
-  const totalCost = tableRows
-    .filter(r => r[0] !== 'total')
-    .reduce((sum, r) => sum + (Number.parseFloat(cost(r[10])) || 0), 0);
-  tableRows.push(['total', '', '', '', String(totals[0]), String(totals[1]), String(totals[2]), String(totals[3]), String(totals[4]), '—', cost(totalCost)]);
-
-  lines.push(formatStatsTable(
-    ['Phase', 'Provider', 'Model', 'Implementer', 'Input', 'Output', 'Cached', 'Tool calls', 'Duration (min)', 'Usage %', 'Cost ($)'],
-    tableRows
-  ));
-  return lines.join('\n');
+  const opts = options || {};
+  return _renderMissionPhaseReport(rows, slug, {
+    ...opts,
+    repo: opts.repo || resolveStatsRepoName(opts.rootDir),
+  });
 }
 
-/**
- * @param {string} taskFilePath
- */
 function deriveFixRoundsFromTaskText(taskFilePath) {
   if (!taskFilePath || !fs.existsSync(taskFilePath)) {return 0;}
   const content = fs.readFileSync(taskFilePath, 'utf8');
@@ -2502,7 +2282,7 @@ function stats(args: string[], options: {log?: Function, error?: Function, exit?
 }
 
 export default stats;
-export { stats, STATS_HEADERS, resolveStatsRepoName, recordIntegrationStats, renderWeeklyStatsReport, renderMissionPhaseReport, renderRangeStatsReport, buildWeeklyWindows, resolveMissionClassification, deriveImplementerAndFixRounds, upsertMeasurementRow, loadMeasurementRows, readLegacyStatsCsv, analyzeLegacyStatsCsv, applyLegacyStatsCsv, runLegacyCsvImportCommand, measurementToStatsRow, statsRowToMeasurement, normalizeStatsRow, canonicalizeStatsRow, recordStageStats, accumulateStageStats, recordActiveStats, recordReviewStats, telemetryToStatsFields, formatDateOnly, LEGACY_HEADERS, USAGE_NUMBERS };
+export { stats, STATS_HEADERS, resolveStatsRepoName, recordIntegrationStats, renderWeeklyStatsReport, renderMissionPhaseReport, renderRangeStatsReport, buildWeeklyWindows, resolveMissionClassification, deriveImplementerAndFixRounds, upsertMeasurementRow, loadMeasurementRows, readLegacyStatsCsv, analyzeLegacyStatsCsv, applyLegacyStatsCsv, runLegacyCsvImportCommand, measurementToStatsRow, statsRowToMeasurement, normalizeStatsRow, canonicalizeStatsRow, recordStageStats, accumulateStageStats, recordActiveStats, recordReviewStats, telemetryToStatsFields, formatDateOnly, LEGACY_HEADERS, USAGE_NUMBERS, formatStatsTable, computeAgentMissionGroups, createRangeWindow, summarizeMissionWindow, summarizeAgentWindow, summarizeAgentStageSpend, formatAgentSpendCell, colorAverageFixRounds, colorMissionCounts, AGENT_SPEND_STAGE_COLUMNS, MISSION_PHASE_ORDER, statsRowActorKey };
 
 // CJS compat: ensure require() returns the function directly
 declare const module: { exports: any } | undefined;
@@ -2531,6 +2311,19 @@ if (typeof module !== 'undefined') { module.exports = stats; }
 (stats as any).recordReviewStats = recordReviewStats;
 (stats as any).telemetryToStatsFields = telemetryToStatsFields;
 (stats as any).formatDateOnly = formatDateOnly;
+(stats as any).formatStatsTable = formatStatsTable;
+(stats as any).computeAgentMissionGroups = computeAgentMissionGroups;
+(stats as any).createRangeWindow = createRangeWindow;
+(stats as any).summarizeMissionWindow = summarizeMissionWindow;
+(stats as any).summarizeAgentWindow = summarizeAgentWindow;
+(stats as any).summarizeAgentStageSpend = summarizeAgentStageSpend;
+(stats as any).formatAgentSpendCell = formatAgentSpendCell;
+(stats as any).colorAverageFixRounds = colorAverageFixRounds;
+(stats as any).colorMissionCounts = colorMissionCounts;
+(stats as any).AGENT_SPEND_STAGE_COLUMNS = AGENT_SPEND_STAGE_COLUMNS;
+(stats as any).MISSION_PHASE_ORDER = MISSION_PHASE_ORDER;
+(stats as any).statsRowActorKey = statsRowActorKey;
+(stats as any).createWindow = createWindow;
 (stats as any).LEGACY_HEADERS = LEGACY_HEADERS;
 (stats as any).USAGE_NUMBERS = USAGE_NUMBERS;
 (stats as any)._internals = {
