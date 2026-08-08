@@ -1,7 +1,7 @@
 ---
 id: TASK-2217
 title: Extract stats report rendering from the stats command
-status: ready-for-integration
+status: done
 assignee:
   - custom
 created_date: '2026-07-11 00:00'
