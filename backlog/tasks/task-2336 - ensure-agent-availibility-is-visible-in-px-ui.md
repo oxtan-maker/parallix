@@ -1,7 +1,7 @@
 ---
 id: TASK-2336
 title: ensure agent availibility is visible in px ui
-status: active
+status: review
 assignee: [claude]
 created_date: '2026-08-04 05:33'
 labels: [user_value, bug]
