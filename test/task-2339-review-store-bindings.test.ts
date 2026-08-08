@@ -81,6 +81,7 @@ test('reviewLoopBindings supplies the artifact consumers, not only the review-st
   assert.deepEqual(Object.keys(bindings).sort(), [
     'consumeImplementerArtifactsFn',
     'consumeReviewerArtifactsFn',
+    'missionStore',
     'readReviewStateFn',
     'resetReviewStateFn',
     'writeReviewStateFn',

@@ -20,6 +20,8 @@ Codex bug: persistReviewStateOrThrow drops missionStore
  Events persist to SQLite because createEvent receives missionStore through CreateEventOptions (injected by caller). State persistence has no such path.                                                                                                                                                
                                                                                                                                                                                                                                                                                                         
  Secondary: consumeHumanNotes no dedup. Fetches ALL PR comments every call. No dedup key → same comments re-processed each round. 19 events = 19 PR comments lacking workflow footer.
+
+**Resolution:** `persistReviewStateOrThrow` now accepts `missionStore` as 5th param, forwards to `writeFn(slug, state, worktree, missionStore)`. All 24 call sites updated (19 in `review-loop.ts`, 4 in `review-commands.ts`, 1 in `review-artifacts.ts`). `consumeHumanNotes` dedup via `processedComments` Set keyed by `user:created`. Red-to-green repro test + dedup unit test. Verification gate: 1721/1723 pass (2 pre-existing stale citation failures).
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Definition of Done

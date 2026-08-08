@@ -17,7 +17,8 @@ import { git } from '../git/git.js';
 import { findMissionDir, missionBranchName, resolveWorktree } from '../filesystem/mission-utils.js';
 import { missionId } from '../../domain/mission.js';
 import type { Review, ReviewEventType, ReviewItemDisposition } from '../../domain/review.js';
-import { readReviewState, ReviewState } from './review-state.js';
+import * as crypto from 'node:crypto';
+import { readReviewState, writeReviewState, ReviewState } from './review-state.js';
 import * as fmt from '../../application/presentation/cli-format.js';
 import type { MissionStore } from '../../application/domain-ports.js';
 
@@ -329,6 +330,10 @@ export interface ConsumeHumanNotesOptions {
   worktree?: string;
   log?: (_msg: string) => void;
   error?: (_msg: string) => void;
+  writeReviewStateFn?: typeof writeReviewState;
+  /** Current review state object — dedup metadata is merged into this in place
+      so the caller's subsequent persist includes the updated dedup list. */
+  currentState?: { round?: number; phase?: string; metadata?: Record<string, unknown> } | null;
 }
 
 /**
@@ -339,12 +344,14 @@ async function consumeHumanNotes(slug: string, actor: string, options: ConsumeHu
     getCommentsFn,
     createEventFn = createEvent,
     readReviewStateFn = readReviewState,
+    writeReviewStateFn = writeReviewState,
     readTokenFn,
     reviewIdentity = null,
     forgejoUser = null,
     worktree,
     log: logger = fmt.log.plain,
-    error = fmt.log.plainError
+    error = fmt.log.plainError,
+    currentState
   } = options;
 
   const actorIdentity = reviewIdentity || forgejoUser;
@@ -374,39 +381,89 @@ async function consumeHumanNotes(slug: string, actor: string, options: ConsumeHu
 
   const created: unknown[] = [];
   const skipped: unknown[] = [];
+  const rootDir = worktree || process.cwd();
 
-  const currentState = await readReviewStateFn(slug, worktree || process.cwd());
-  const round = currentState ? currentState.round : 1;
-  const phase = currentState ? currentState.phase : 'reviewing';
+  // Load current state for round/phase and dedup metadata.
+  // If caller provides currentState, we merge dedup into it in-place so the
+  // caller's subsequent persist includes the updated dedup list (avoids the
+  // stale-state overwrite problem when the review loop re-persists its state).
+  // When no state exists yet, create minimal state so dedup keys are recorded
+  // and persisted (N1: durable from first invocation).
+  let stateForRound = currentState ?? (await readReviewStateFn(slug, rootDir));
+  if (!stateForRound) {
+    stateForRound = { round: 1, phase: 'reviewing', metadata: {} };
+  }
+  const round = (stateForRound as { round?: number }).round ?? 1;
+  const phase = (stateForRound as { phase?: string }).phase ?? 'reviewing';
+
+  // Load previously processed dedup keys from metadata.
+  const existingMetadata = (stateForRound as { metadata?: Record<string, unknown> })?.metadata as Record<string, unknown> | undefined;
+  const existingProcessed = existingMetadata?.processedCommentBodies;
+  const processedKeys = new Set<string>(Array.isArray(existingProcessed) ? existingProcessed : []);
 
   for (const comment of comments) {
-    if (hasWorkflowFooter((comment as { body?: string }).body || '')) {
-      skipped.push({ user: (comment as { user?: string }).user, created: (comment as { created?: string }).created, reason: 'workflow-generated' });
+    const commentUser = (comment as { user?: string }).user;
+    const commentCreated = (comment as { created?: string }).created;
+    const commentBody = (comment as { body?: string }).body || '';
+
+    // Dedup key: author + sha256(body) — includes author to avoid collisions
+    // when different users post identical text (N4), and hashes body to keep
+    // metadata bounded (N3).
+    const bodyHash = crypto.createHash('sha256').update(commentBody).digest('hex').slice(0, 16);
+    const dedupKey = `${commentUser}\t${bodyHash}`;
+
+    if (processedKeys.has(dedupKey)) {
+      skipped.push({ user: commentUser, created: commentCreated, reason: 'already-processed' });
+      continue;
+    }
+
+    if (hasWorkflowFooter(commentBody)) {
+      skipped.push({ user: commentUser, created: commentCreated, reason: 'workflow-generated' });
+      processedKeys.add(dedupKey);
       continue;
     }
 
     const classification = classifyComment(comment as { body?: string });
     if (!classification) {
-      skipped.push({ user: (comment as { user?: string }).user, created: (comment as { created?: string }).created, reason: 'already-classified' });
+      skipped.push({ user: commentUser, created: commentCreated, reason: 'already-classified' });
+      processedKeys.add(dedupKey);
       continue;
     }
 
     const result = await createEventFn(slug, classification, {
-      content: (comment as { body?: string }).body || '',
+      content: commentBody,
       round,
       phase,
-      actor: actor || (comment as { user?: string }).user || 'human'
+      actor: actor || commentUser || 'human'
     }, {
-      worktree: worktree || process.cwd(),
+      worktree: rootDir,
       skipGit: true,
       log: logger,
       error
     });
 
     if (result.ok) {
-      created.push({ path: result.path, user: (comment as { user?: string }).user, created: (comment as { created?: string }).created });
+      created.push({ path: result.path, user: commentUser, created: commentCreated });
+      processedKeys.add(dedupKey);
     } else {
-      error(fmt.status('WARN', `Failed to create human_note event for comment by ${(comment as { user?: string }).user}: ${(result as { error?: string }).error}`));
+      error(fmt.status('WARN', `Failed to create human_note event for comment by ${commentUser}: ${(result as { error?: string }).error}`));
+    }
+  }
+
+  // Merge dedup keys into state metadata in-place.
+  // No cap — each key is a compact "author\thex16" string (~22 bytes).
+  // Even 500 comments ≈ 11 KB, well within reasonable metadata size.
+  // SC4 requires all already-seen comments to be skipped on re-invocation.
+  if (stateForRound && processedKeys.size > 0) {
+    const targetMetadata = (stateForRound as { metadata?: Record<string, unknown> }).metadata || {};
+    (targetMetadata as Record<string, unknown>).processedCommentBodies = [...processedKeys];
+    (stateForRound as { metadata?: Record<string, unknown> }).metadata = targetMetadata;
+
+    // When currentState was not provided by caller, persist standalone so dedup
+    // survives to next invocation (N2: CLI --consume path).
+    // When currentState WAS provided, caller owns the persist (N1: review loop).
+    if (!currentState) {
+      await writeReviewStateFn(slug, stateForRound as any, rootDir);
     }
   }
 

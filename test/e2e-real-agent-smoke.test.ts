@@ -374,7 +374,8 @@ function setupRepository({ slug, title, agent = 'custom', runner = 'opencode' })
     }
     const piModelsPath = path.join(piAgentHome, 'models.json');
     if (fs.existsSync(piModelsPath)) {
-      const piModels = JSON.parse(fs.readFileSync(piModelsPath, 'utf8'));
+      const raw = fs.readFileSync(piModelsPath, 'utf8');
+      const piModels = JSON.parse(raw.replace(/,\s*([\]}])/g, '$1'));
       for (const provider of Object.values(piModels.providers || {})) {
 // @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `apiKey` absent from its inferred mock shape.
         if (typeof provider?.apiKey === 'string' && /^(?:dummy|placeholder)/i.test(provider.apiKey)) {
