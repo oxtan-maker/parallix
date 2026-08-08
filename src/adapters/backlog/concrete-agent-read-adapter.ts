@@ -1,8 +1,11 @@
 import type { AgentAvailability, AgentBlock, AgentFamily } from '../../domain/agents.js';
 import { agentFamily } from '../../domain/agents.js';
 import { AgentBlockService, parseAgentBlockUntil } from '../../application/services/agent-block-service.js';
-import type { AgentReadAdapter } from '../../application/projections/board-readers.js';
+import type { AgentReadAdapter, RunningAgentSession } from '../../application/projections/board-readers.js';
+import type { SessionMarkerRepository } from '../../application/ports/mission-store.js';
+import { detectRunningMissionSessions, type RunningMissionSession } from '../agents/running-sessions.js';
 import type { AgentBlocklistRepository } from '../../application/ports/agent-blocklist.js';
+import type { LauncherProbeResult } from '../agents/launcher-availability.js';
 import type { MissionId } from '../../domain/mission.js';
 import { getTaskAssignee, resolveTaskFile } from './backlog.js';
 
@@ -25,6 +28,16 @@ function defaultGetTaskAssignee(): GetTaskAssigneeFn {
   return getTaskAssignee as GetTaskAssigneeFn;
 }
 
+/** An agent family from untrusted text, or null when it is not one. */
+function parseAgentFamily(value: string | null): AgentFamily | null {
+  if (value === null) { return null; }
+  try {
+    return agentFamily(value);
+  } catch {
+    return null;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Concrete AgentReadAdapter
 // ---------------------------------------------------------------------------
@@ -35,12 +48,26 @@ export interface ConcreteAgentReadAdapterOptions {
   readonly blocklistRepo: AgentBlocklistRepository;
   /** Known agent families to report availability for. */
   readonly knownAgentFamilies: readonly AgentFamily[];
-  /** Launcher availability probe (per agent). */
-  readonly launcherAvailable?: (_family: AgentFamily) => boolean;
+  /**
+   * Launcher availability probe (per agent). Production passes a cached probe
+   * (`createLauncherProbe`); tests may pass a stub. When omitted the adapter
+   * reports launcher state as unknown-but-present, which is only safe in tests
+   * — a board that never probes claims families are available when their CLI
+   * is not installed.
+   */
+  readonly launcherAvailable?: (_family: AgentFamily) => LauncherProbeResult;
   /** Resolve task file for a mission slug. */
   readonly resolveTaskFile?: ResolveTaskFileFn;
   /** Read assignee from a task file. */
   readonly getTaskAssignee?: GetTaskAssigneeFn;
+  /**
+   * Session markers, used only to attribute a running mission to the family
+   * that launched it. Omitted (or absent rows) means the running session
+   * cannot be attributed, which is reported as unknown rather than as zero.
+   */
+  readonly sessionMarkers?: SessionMarkerRepository | null;
+  /** Running-session detection seam; defaults to the live process scan. */
+  readonly detectRunningSessions?: () => readonly RunningMissionSession[] | null;
 }
 
 /**
@@ -52,17 +79,22 @@ export class ConcreteAgentReadAdapter implements AgentReadAdapter {
   private readonly rootDir: string;
   private readonly blocklistRepo: AgentBlocklistRepository;
   private readonly knownAgentFamilies: readonly AgentFamily[];
-  private readonly launcherAvailable: (_family: AgentFamily) => boolean;
+  private readonly launcherAvailable: (_family: AgentFamily) => LauncherProbeResult;
   private readonly resolveTaskFile: ResolveTaskFileFn;
   private readonly getTaskAssignee: GetTaskAssigneeFn;
+  private readonly sessionMarkers: SessionMarkerRepository | null;
+  private readonly detectRunningSessions: () => readonly RunningMissionSession[] | null;
 
   constructor(options: ConcreteAgentReadAdapterOptions) {
     this.rootDir = options.rootDir;
     this.blocklistRepo = options.blocklistRepo;
     this.knownAgentFamilies = options.knownAgentFamilies;
-    this.launcherAvailable = options.launcherAvailable ?? (() => true);
+    this.launcherAvailable = options.launcherAvailable ?? (() => ({ available: true, detail: null }));
     this.resolveTaskFile = options.resolveTaskFile ?? defaultResolveTaskFile();
     this.getTaskAssignee = options.getTaskAssignee ?? defaultGetTaskAssignee();
+    this.sessionMarkers = options.sessionMarkers ?? null;
+    this.detectRunningSessions = options.detectRunningSessions
+      ?? (() => detectRunningMissionSessions({ rootDir: options.rootDir }));
   }
 
   // -----------------------------------------------------------------------
@@ -80,14 +112,60 @@ export class ConcreteAgentReadAdapter implements AgentReadAdapter {
           ? { kind: 'until', untilMs: parseAgentBlockUntil(state.until), reason: state.reason }
           : { kind: 'indefinite', reason: state?.reason ?? null })
         : { kind: 'none' };
+      const launcher = this.launcherAvailable(family);
       return {
         family,
-        launcherAvailable: this.launcherAvailable(family),
+        launcherAvailable: launcher.available,
+        launcherDetail: launcher.detail,
         block,
       };
     });
 
     return availability;
+  }
+
+  /**
+   * Missions with a live agent-launching `px` process, attributed to the family
+   * running them.
+   *
+   * Attribution uses only evidence about *this* process:
+   *
+   *  1. a session marker for that (mission, role) written after the process
+   *     started — proof that this run launched that family. A marker older
+   *     than the process describes a previous run and is ignored, because the
+   *     launcher writes the marker after a launch exits, so the stored family
+   *     lags by one launch and can name a family that already fell back;
+   *  2. otherwise the family pinned on the command line
+   *     (`--agent`/`--implementer`/`--reviewer`), which is what a fresh
+   *     `px draft <slug> --agent <family>` has before any marker exists.
+   *
+   * Commands with an ambiguous role (`px review`, which runs the reviewer and
+   * then the act-on-review implementer in one process; `px resolve-conflict`,
+   * which writes no marker) reach neither source and stay unattributed. The
+   * mission assignee is deliberately not used as a fallback: it says who owns
+   * the mission, not who is running.
+   *
+   * Returns `null` when liveness cannot be determined, so the board renders
+   * unknown rather than a fabricated zero.
+   */
+  async loadRunningSessions(): Promise<readonly RunningAgentSession[] | null> {
+    const running = this.detectRunningSessions();
+    if (running === null) { return null; }
+    if (running.length === 0) { return []; }
+
+    const markers = this.sessionMarkers ? await this.sessionMarkers.findAll() : [];
+    const byMissionRole = new Map(markers.map((marker) => [`${marker.missionId}:${marker.role}`, marker]));
+    return running.map((session) => {
+      const marker = session.role === null
+        ? undefined
+        : byMissionRole.get(`${session.missionId}:${session.role}`);
+      const launchedInThisProcess = marker !== undefined
+        && Date.parse(marker.lastLaunched) >= session.startedAtMs;
+      return {
+        missionId: session.missionId,
+        family: (launchedInThisProcess ? marker.agent : null) ?? parseAgentFamily(session.pinnedAgent),
+      };
+    });
   }
 
   async loadAssignedAgent(_missionId: MissionId): Promise<AgentFamily | null> {

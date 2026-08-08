@@ -355,7 +355,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'ui-agent-status',
     family: 'ui-board',
     fileLocation: 'src/application/projections/agent-status.ts',
-    line: 12,
+    line: 25,
     anchor: 'function projectAgentAvailability',
     reads: ['AgentBlock'],
     requirement:

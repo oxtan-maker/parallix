@@ -12,7 +12,7 @@ import {
   type MissionOperationalFacts,
 } from './mission-board.js';
 import type { MetricsReadAdapter } from './metrics-read-adapter.js';
-import { projectAgentAvailability } from './agent-status.js';
+import { countUnattributedSessions, projectAgentAvailability, type RunningAgentSession } from './agent-status.js';
 
 // ---------------------------------------------------------------------------
 // Read adapters — each adapter reads from one authority
@@ -42,12 +42,20 @@ export interface GateReadAdapter {
   loadGateStatus(_missionId: MissionId): Promise<'passed' | 'failed' | 'running' | 'unknown'>;
 }
 
+export type { RunningAgentSession } from './agent-status.js';
+
 /** Read adapter for agent availability from operator-local state. */
 export interface AgentReadAdapter {
   /** Load agent availability for all configured agents. */
   loadAgentAvailability(): Promise<readonly AgentAvailability[]>;
   /** Load the agent assigned to a mission (from mission assignee or selection policy). */
   loadAssignedAgent(_missionId: MissionId): Promise<AgentFamily | null>;
+  /**
+   * Load the currently running agent sessions, or `null` when liveness cannot
+   * be determined. Adapters that cannot observe running processes omit this
+   * method; the board then reports the running count as unknown, never zero.
+   */
+  loadRunningSessions?(): Promise<readonly RunningAgentSession[] | null>;
 }
 
 /** Read adapter for Git state (current branch, HEAD, etc.). */
@@ -95,11 +103,12 @@ export class BoardProjectionBuilder {
 
   /** Build the full BoardProjection from all authority adapters. */
   async build(): Promise<BoardProjection> {
-    const [repositoryId, missions, operationLog, agentAvailability] = await Promise.all([
+    const [repositoryId, missions, operationLog, agentAvailability, runningSessions] = await Promise.all([
       this._git.loadRepositoryId(),
       this._missions.loadAllMissions(),
       this._operationLog.loadOperationLog(),
       this._agents.loadAgentAvailability(),
+      this._agents.loadRunningSessions?.() ?? Promise.resolve(null),
     ]);
 
     const sourceFacts = this._missions.getSourceFacts();
@@ -127,7 +136,13 @@ export class BoardProjectionBuilder {
     const availableActions = this.deriveAvailableActions(cards);
 
     // Build metrics from event history (or use provided/default)
-    const metrics = await this.buildMetrics(missions, projectAgentAvailability(agentAvailability, Date.now()));
+    const metrics = {
+      ...await this.buildMetrics(
+        missions,
+        projectAgentAvailability(agentAvailability, Date.now(), runningSessions),
+      ),
+      unattributedRunningSessions: countUnattributedSessions(runningSessions),
+    };
 
     return buildBoardProjection(
       repositoryId,

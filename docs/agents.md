@@ -106,10 +106,10 @@ Eligibility is controlled by `parallix/config/agents.json`. The default config c
 ```json
 {
   "steps": {
-    "draft": { "eligible": ["codex", "custom", "mistral"], "selection": "random" },
-    "active": { "eligible": ["codex", "claude", "custom", "mistral"], "selection": "random" },
-    "conflict-resolution": { "eligible": ["claude", "codex", "mistral"], "selection": "random" },
-    "review": { "eligible": ["codex", "claude", "custom", "mistral"], "selection": "random" }
+    "draft": { "eligible": ["codex", "custom", "vibe"], "selection": "random" },
+    "active": { "eligible": ["codex", "claude", "custom", "vibe"], "selection": "random" },
+    "conflict-resolution": { "eligible": ["claude", "codex", "vibe"], "selection": "random" },
+    "review": { "eligible": ["codex", "claude", "custom", "vibe"], "selection": "random" }
   }
 }
 ```
@@ -129,6 +129,91 @@ CLI flags (`--agent`, `--implementer`) take precedence over both the config and 
 WORKFLOW_AGENT=codex px draft task-XXX
 WORKFLOW_AGENT=claude px active task-XXX
 ```
+
+## Agent availability in the board (px UI)
+
+The `px` board renders an agent strip above the lanes with one entry per known
+agent family:
+
+```
+● claude 0 running   ● codex 39m · 0 running exit 1   ● custom 1 running   ● vibe 39m · 0 running exit 1   1 running · family unknown
+```
+
+- a green dot when the family is usable, a red dot when it is not;
+- for a red dot, the reason: the remaining-block countdown plus the block
+  reason for a blocked family, or the launcher probe's explanation
+  (`launcher missing`, `launcher probe-failed: exit 1`) when the family's CLI
+  is not usable on this workstation;
+- `N running` — missions this family is running right now.
+
+Only current and future state is shown. A block whose `until` has elapsed
+releases the family for the launcher and leaves no trace on the strip — no
+lapsed countdown, no past block reason.
+
+### Running sessions are observed, not inferred
+
+`N running` counts missions with a live agent-launching `px` process
+(`detectRunningMissionSessions`, `src/adapters/agents/running-sessions.ts`).
+Live processes come from `ps`, and each one is placed like this:
+
+- the mission is the slug on the command line (`px draft task-2217`) — that
+  works before the mission worktree exists, which matters because `px draft`
+  runs from the main repository;
+- for slug-less commands (`px review --continue`) the mission is the worktree
+  the process runs in, matched from `git worktree list --porcelain` by working
+  directory, or by a worktree path in the arguments where `/proc` is
+  unavailable;
+- the family is the `session_markers` row for that (mission, role) **written
+  after the process started**, else the family pinned on the command line
+  (`--agent`/`--implementer`/`--reviewer`). The marker is written after a
+  launch exits, so an older one describes a previous run and may name a family
+  that has since fallen back; the mission assignee is not used at all, because
+  it says who owns the mission, not who is running it.
+
+Roles follow the subcommand: `draft` → draft, `active`/`execute` → execute.
+Two commands carry no usable role and stay **unattributed**:
+
+- `px review` runs the reviewer and then the act-on-review implementer in one
+  process (`review-loop.ts` passes `role: 'reviewer'`, later
+  `role: 'implementer'`), so a live `px review` proves nothing about which
+  family is at work;
+- `px resolve-conflict` launches without a slug or role, so it writes no marker
+  at all.
+
+Unattributed sessions are not dropped and not guessed: they are counted in a
+trailing `N running · family unknown` entry, so the strip's total still matches
+what is running. `px board` and other non-launching commands are not sessions,
+and the shell, parent, and child node processes of one command count once.
+
+Nothing durable records that an agent is running: `session_markers` holds only
+the last launch per (mission, role) and is never cleared on exit, and board
+lanes describe mission state, not process state. So when the process table, the
+worktree list, or the session markers cannot answer, the strip prints
+`running unknown` — the count is never derived from board cards and an
+unobserved state is never rendered as `0 running`.
+
+The known-family list comes from `config/agents.json`
+(`resolveKnownAgentFamilies`, `src/interfaces/tui/agent-config-resolver.ts`):
+
+- an explicit top-level `families` array is used when the config declares one;
+- otherwise the list is the de-duplicated, sorted union of every
+  `steps.<step>.eligible` entry — the shape the shipped config uses, so no extra
+  configuration is required;
+- entries that are not valid agent family names are dropped;
+- a missing or malformed `config/agents.json` yields an empty list, and the
+  strip then renders `agents: unavailable` instead of per-family entries.
+
+Block state itself is read from the operator blocklist, so an automatically
+persisted usage-limit block (see *Usage-limit handling* below) becomes visible
+on the board as a red dot with its countdown and reason.
+
+Launcher state comes from the same probe the launcher itself uses
+(`workflowLauncherStatus`), wrapped by `createLauncherProbe`
+(`src/adapters/agents/launcher-availability.ts`) and wired at the composition
+root (`src/composition/board-projection.ts`). The probe shells out per family,
+so results are cached for `DEFAULT_LAUNCHER_PROBE_TTL_MS` (5 minutes) — a
+launcher installed or removed while the board is open is picked up on the next
+refresh after that window, not instantly.
 
 ## Local blocklist overrides
 

@@ -8,6 +8,7 @@ import type {
   AgentBlocklistRepository,
 } from '../application/ports/agent-blocklist.js';
 import type { BoardLaneEventRepository, OperationalHistoryRepository } from '../application/ports/operation-history.js';
+import type { SessionMarkerRepository } from '../application/ports/mission-store.js';
 import type { UsageRepository } from '../application/ports/mission-measurements.js';
 import type { MissionStore } from '../application/domain-ports.js';
 import { composeTuiCapabilities } from './board-projection.js';
@@ -17,6 +18,8 @@ export interface ProductionBoardRepositories {
   readonly operationalHistory: OperationalHistoryRepository;
   readonly boardLaneEvents: BoardLaneEventRepository;
   readonly usage: UsageRepository;
+  /** Optional: attributes running missions to the family that launched them. */
+  readonly sessionMarkers?: SessionMarkerRepository | null;
 }
 
 /** Shared presentation capabilities from one production composition graph. */
@@ -46,6 +49,7 @@ export function composeProductionCapabilities(
     laneEventRepo: repositories.boardLaneEvents,
     usageRepo: repositories.usage,
     knownAgentFamilies: resolveKnownAgentFamilies(rootDir),
+    sessionMarkers: repositories.sessionMarkers ?? null,
   }, executePorts);
   return {
     tui,

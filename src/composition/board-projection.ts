@@ -4,7 +4,9 @@ import type {
   AgentBlocklistRepository,
 } from '../application/ports/agent-blocklist.js';
 import type { BoardLaneEventRepository, OperationalHistoryRepository } from '../application/ports/operation-history.js';
+import type { SessionMarkerRepository } from '../application/ports/mission-store.js';
 import type { UsageRepository } from '../application/ports/mission-measurements.js';
+import { createLauncherProbe, type LauncherProbeResult } from '../adapters/agents/launcher-availability.js';
 import { ConcreteAgentReadAdapter } from '../adapters/backlog/concrete-agent-read-adapter.js';
 import { ConcreteGateReadAdapter } from '../adapters/backlog/concrete-gate-read-adapter.js';
 import { ConcreteGitReadAdapter } from '../adapters/backlog/concrete-git-read-adapter.js';
@@ -28,6 +30,10 @@ export interface BoardProjectionCompositionDeps {
   readonly laneEventRepo: BoardLaneEventRepository;
   readonly usageRepo: UsageRepository;
   readonly knownAgentFamilies: readonly AgentFamily[];
+  /** Launcher availability probe; defaults to the cached real probe. */
+  readonly launcherProbe?: (_family: AgentFamily) => LauncherProbeResult;
+  /** Session markers, used to attribute running missions to agent families. */
+  readonly sessionMarkers?: SessionMarkerRepository | null;
 }
 
 /** The sole production constructor for board reads and mission details. */
@@ -37,7 +43,17 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
     missions,
     new ConcreteReviewReadAdapter({ rootDir: deps.rootDir, missionStore: deps.missionStore }),
     new ConcreteGateReadAdapter({ rootDir: deps.rootDir }),
-    new ConcreteAgentReadAdapter({ rootDir: deps.rootDir, blocklistRepo: deps.blocklistRepo, knownAgentFamilies: deps.knownAgentFamilies }),
+    new ConcreteAgentReadAdapter({
+      rootDir: deps.rootDir,
+      blocklistRepo: deps.blocklistRepo,
+      knownAgentFamilies: deps.knownAgentFamilies,
+      // Without a probe the board would report every configured family as
+      // available even when its CLI is absent from this workstation.
+      launcherAvailable: deps.launcherProbe ?? createLauncherProbe(),
+      // Attributes a live `px` process to the family that launched it. Without
+      // it the strip cannot report running sessions and says so.
+      sessionMarkers: deps.sessionMarkers ?? null,
+    }),
     new ConcreteGitReadAdapter({ rootDir: deps.rootDir, repositoryId: deps.repositoryId }),
     new ConcreteOperationLogReadAdapter({ historyRepo: deps.historyRepo }),
     { metricsAdapter: new ConcreteMetricsReadAdapter({ laneEventRepo: deps.laneEventRepo, usageRepo: deps.usageRepo }) },

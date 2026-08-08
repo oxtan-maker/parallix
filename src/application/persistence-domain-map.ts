@@ -114,7 +114,7 @@ export const DOMAIN_CONCEPT_INVARIANTS: Readonly<
     invariant:
       'A block is time-bounded, indefinite, or absent; an expired `until` block yields zero remaining time and therefore stops excluding its family from selection.',
     fileLocation: 'src/domain/agents.ts',
-    line: 42,
+    line: 48,
     anchor: 'export function blockedForMs',
   },
 } as const;

@@ -173,6 +173,8 @@ test('agent availability exposes a timed-block countdown', () => {
     reason: 'limit',
     expiresAtMs: 2_000,
     limit: 'limit',
+    // Liveness was not observed by this call, so the running count is unknown.
+    runningSessions: null,
   }]);
 });
 
