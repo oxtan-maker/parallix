@@ -37,6 +37,25 @@ function defaultReadReviewState(): ReadReviewStateFn {
   return readReviewState as ReadReviewStateFn;
 }
 
+/**
+ * The change the review round is about.
+ *
+ * One helper serves `loadReview` and `loadReviewApproval` so the approval
+ * subject and the round subject stay the same value — `sameReviewedRevision`
+ * compares them, and a card only reports `reviewApproved` when they match.
+ */
+function reviewedChangeFrom(state: ReviewState): ReviewedChange {
+  const pullRequest = state.pullRequest;
+  if (pullRequest) {
+    return { ...pullRequest, kind: 'pull-request' };
+  }
+  return {
+    kind: 'local-branch',
+    sourceBranch: `mission/${state.slug}`,
+    targetBranch: 'main',
+  };
+}
+
 /** Coerce an untyped metadata counter to a non-negative integer. */
 function nonNegativeGateRetries(value: unknown): number {
   const count = Number(value);
@@ -106,11 +125,7 @@ export class ConcreteReviewReadAdapter implements ReviewReadAdapter {
 
     // Build a minimal ReviewedRevision from the review state data
     const subject: ReviewedRevision = {
-      change: {
-        kind: 'local-branch',
-        sourceBranch: `mission/${_missionId}`,
-        targetBranch: 'main',
-      } as ReviewedChange,
+      change: reviewedChangeFrom(state),
       revision: changeRevision(state.startedAt || 'unknown'),
     };
 
@@ -140,11 +155,7 @@ export class ConcreteReviewReadAdapter implements ReviewReadAdapter {
     const round: ReviewRound = {
       number: state.round || 1,
       subject: {
-        change: {
-          kind: 'local-branch',
-          sourceBranch: `mission/${state.slug}`,
-          targetBranch: 'main',
-        } as ReviewedChange,
+        change: reviewedChangeFrom(state),
         revision: changeRevision(state.startedAt || 'unknown'),
       },
       reviewer,

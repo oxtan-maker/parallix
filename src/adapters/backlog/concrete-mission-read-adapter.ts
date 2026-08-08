@@ -1,12 +1,14 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
+import type { CheckpointData } from '../../domain/checkpoint.js';
 import type { Mission, MissionId, MissionLabel, MissionStatus } from '../../domain/mission.js';
 import { agentFamily, type AgentFamily } from '../../domain/agents.js';
 import type { RepositoryId } from '../../domain/repository.js';
 import type { SourceFact } from '../../application/contracts.js';
 import type { MissionReadAdapter } from '../../application/projections/board-readers.js';
 import { getFirstLine, findCheckpoints, findMissionDir, resolveWorktree } from '../filesystem/mission-utils.js';
+import { parseCheckpointDocument } from './checkpoint-document.js';
 import { getTaskAssignee, getTaskFrontmatterValue, getTaskLabels, getTaskStatus, getTaskStorage, resolveTaskFile } from './backlog.js';
 import {
   materializeBacklogMission,
@@ -31,6 +33,7 @@ type FindMissionDirFn = (_slug: string, _rootDir?: string, _options?: { missionP
 type FindCheckpointsFn = (_missionDir: string) => string[];
 type ResolveWorktreeFn = (_slug: string, _options?: { cwd?: string; gitFn?: Function | null }) => string | null;
 type GetFirstLineFn = (_filePath: string) => string;
+type ReadCheckpointFileFn = (_filePath: string) => string;
 
 // ---------------------------------------------------------------------------
 // Defaults — use static imports (no circular deps with backlog/mission-utils)
@@ -76,6 +79,10 @@ function defaultGetFirstLine(): GetFirstLineFn {
   return getFirstLine as GetFirstLineFn;
 }
 
+function defaultReadCheckpointFile(): ReadCheckpointFileFn {
+  return (filePath: string) => fs.readFileSync(filePath, 'utf8');
+}
+
 // ---------------------------------------------------------------------------
 // Concrete MissionReadAdapter
 // ---------------------------------------------------------------------------
@@ -103,6 +110,8 @@ export interface ConcreteMissionReadAdapterOptions {
   readonly resolveWorktree?: ResolveWorktreeFn;
   /** Get first line of a file (strips markdown heading markers). */
   readonly getFirstLine?: GetFirstLineFn;
+  /** Read a checkpoint document's text. */
+  readonly readCheckpointFile?: ReadCheckpointFileFn;
 }
 
 /**
@@ -126,6 +135,7 @@ export class ConcreteMissionReadAdapter implements MissionReadAdapter {
   private readonly findCheckpoints: FindCheckpointsFn;
   private readonly resolveWorktree: ResolveWorktreeFn;
   private readonly getFirstLine: GetFirstLineFn;
+  private readonly readCheckpointFile: ReadCheckpointFileFn;
 
   /** Cached source facts from the last loadAllMissions call. */
   private _sourceFacts: SourceFact<string>[] = [];
@@ -143,6 +153,7 @@ export class ConcreteMissionReadAdapter implements MissionReadAdapter {
     this.findCheckpoints = options.findCheckpoints ?? defaultFindCheckpoints();
     this.resolveWorktree = options.resolveWorktree ?? defaultResolveWorktree();
     this.getFirstLine = options.getFirstLine ?? defaultGetFirstLine();
+    this.readCheckpointFile = options.readCheckpointFile ?? defaultReadCheckpointFile();
   }
 
   // -----------------------------------------------------------------------
@@ -272,24 +283,7 @@ export class ConcreteMissionReadAdapter implements MissionReadAdapter {
     const labels: MissionLabel[] = rawLabels.map((l: string) => l as MissionLabel);
 
     const checkpoints = _missionDir
-      ? this.findCheckpoints(_missionDir).map((cp) => {
-          const rawFilename = path.basename(cp);
-          // Use getFirstLine primitive for legacy output contract (strips markdown heading markers)
-          let firstLine = '';
-          try {
-            firstLine = this.getFirstLine(cp);
-          } catch {
-            firstLine = '';
-          }
-          return {
-            missionId: id,
-            name: path.basename(cp, '.md'),
-            rawFilename,
-            firstLine,
-            goalCheck: [],
-            nextActionText: '',
-          };
-        })
+      ? this.findCheckpoints(_missionDir).map((cp) => this.readCheckpoint(cp, id))
       : [];
 
     return {
@@ -304,6 +298,38 @@ export class ConcreteMissionReadAdapter implements MissionReadAdapter {
       status: status as MissionStatus,
       rawStatus,
     };
+  }
+
+  /**
+   * Materialise one `CP-N.md` document into the checked `CheckpointData` shape.
+   *
+   * The document translation lives in `checkpoint-document.ts` — the same
+   * compatibility parser the checkpoint write path renders through — so the
+   * board and the application boundary agree on what a Goal Check row is.
+   * An unreadable or non-`CP-N` document degrades to the empty contract rather
+   * than dropping the checkpoint from the board.
+   */
+  private readCheckpoint(checkpointPath: string, id: MissionId): CheckpointData {
+    const rawFilename = path.basename(checkpointPath);
+    try {
+      return parseCheckpointDocument(id, rawFilename, this.readCheckpointFile(checkpointPath));
+    } catch {
+      // Use getFirstLine primitive for legacy output contract (strips markdown heading markers)
+      let firstLine = '';
+      try {
+        firstLine = this.getFirstLine(checkpointPath);
+      } catch {
+        firstLine = '';
+      }
+      return {
+        missionId: id,
+        name: path.basename(checkpointPath, '.md'),
+        rawFilename,
+        firstLine,
+        goalCheck: [],
+        nextActionText: '',
+      };
+    }
   }
 
   /** Build MissionWorktreeRead for a slug. */

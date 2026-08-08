@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import * as fmt from '../../application/presentation/cli-format.js';
 import { git, run } from '../git/git.js';
 import { findMissionDir, findMissionArea, resolveWorktree, missionBranchName, getPrimaryBranch } from '../filesystem/mission-utils.js';
+import type { PullRequestReference } from '../../domain/review.js';
 import { formatVerificationCommand, resolveEffectiveArea } from '../verification/verification.js';
 import { resolveTaskFile, getTaskImplementer, getTaskStatus, enforceTaskAssignee, transitionTask, reportTaskResolution } from '../backlog/backlog.js';
 import { toVirtual, transitionVirtual } from '../config/state-map.js';
@@ -649,6 +650,27 @@ export async function startReviewLoop(slug: string, opts: {
   const performHandoffFn = opts.performHandoffFn || (await getHandoff()).performHandoff;
 
   let prNumber: number | null = null;
+  // The reviewed change, once a provider PR is confirmed open for this branch.
+  // Recorded on the round so every surface reads `PR #N` from the review
+  // aggregate rather than re-querying the provider.
+  let confirmedPullRequest: PullRequestReference | null = null;
+  const pullRequestReference = (number: unknown, url: unknown): PullRequestReference | null => {
+    const id = String(number ?? '').trim();
+    if (!id) { return null; }
+    return {
+      kind: 'pull-request',
+      provider: 'forgejo',
+      id,
+      url: typeof url === 'string' && url.trim() ? url : null,
+      sourceBranch: branch,
+      // The reference must not depend on being able to name the primary
+      // branch: a checkout without one still has a valid PR to record.
+      targetBranch: (() => {
+        try { return getPrimaryBranch(worktree, gitFn) || 'main'; }
+        catch { return 'main'; }
+      })(),
+    };
+  };
   isContinue = Boolean(isContinue || continueFlag);
 
   const pollIntervalMs = resolvePollIntervalMs();
@@ -834,10 +856,12 @@ export async function startReviewLoop(slug: string, opts: {
 
       log(fmt.status('INFO', `Self-heal succeeded: review PR #${healedPr.number} confirmed open for ${branch}. Continuing review loop.`));
       prNumber = healedPr.number as number | null;
+      confirmedPullRequest = pullRequestReference(healedPr.number, healedPr.url);
       // Fall through into the normal loop with the recovered PR number.
     } else {
       log(fmt.status('INFO', `Review PR #${pr.number} confirmed open for ${branch}.`));
       prNumber = pr.number as number | null;
+      confirmedPullRequest = pullRequestReference(pr.number, pr.url);
     }
   } else if (!dryRun && !forgejoEnabled) {
     log(fmt.status('INFO', 'Forgejo validation skipped (review provider is not forgejo). Using workflow-owned review surfaces.'));
@@ -1042,6 +1066,9 @@ export async function startReviewLoop(slug: string, opts: {
     await persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree);
   } else {
     state = new ReviewState(slug, { reviewer, implementer });
+  }
+  if (confirmedPullRequest) {
+    state.pullRequest = confirmedPullRequest;
   }
   await persistNormalizedPhaseRepair(slug, state, worktree, { log, writeReviewStateFn });
 

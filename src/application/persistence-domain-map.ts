@@ -165,7 +165,7 @@ export const TECHNICAL_PERSISTENCE_METADATA: readonly TechnicalPersistenceMetada
     id: 'stage-launch-fingerprint',
     kind: 'idempotency-key',
     fileLocation: 'src/adapters/review/review-loop.ts',
-    line: 62,
+    line: 63,
     anchor: 'function stageLaunchFingerprint',
     whyNotDomain:
       'An opaque token kept in review-state metadata, bounded to the last 20 per stage window, whose only use is refusing to accumulate the same measurement twice. Nothing resolves it back to a launch, so it is not an Attempt identity (see PER_LAUNCH_IDENTITY_DECISION).',

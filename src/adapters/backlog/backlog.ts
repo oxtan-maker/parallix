@@ -682,6 +682,52 @@ function reconcileMissionRebase({ slug, missionWorktree, authoritativeTaskFile, 
  * Transition a task to a new status on the integration branch.
  * Awaits lane-event recording so the write is not dropped in short-lived CLI processes.
  */
+/**
+ * Record a lifecycle operation that changes no lane.
+ *
+ * `px checkpoint` records evidence without moving the mission between lanes, so
+ * it has no `LaneTransitionEvent` to commit alongside. It still appends one
+ * `operational_history` row through the same recorder and the same operator
+ * database as the transition seam below, so the board's operation log carries
+ * every lifecycle step rather than only the ones that changed lane.
+ *
+ * Operator-local telemetry never blocks the command that produced it
+ * (ADR 0051): a database that cannot be opened is a silent no-op.
+ */
+export async function recordLifecycleOperation(
+  slug: string,
+  options: { trigger: string; toStatus: string; agent?: string | null; occurredAt?: string } ,
+): Promise<boolean> {
+  try {
+    const { SqliteDatabaseAdapter } = await import('../sqlite/database-adapter.js');
+    const { SqliteMigrationRunner, loadDefaultMigrations } = await import('../sqlite/migration-runner.js');
+    const { SqliteOperationalHistoryRepository } = await import('../sqlite/operational-history-repository.js');
+    const { resolveDatabasePath } = await import('../sqlite/database-path-resolver.js');
+    const { OperationEventRecorder } = await import('../../application/recording/operation-event-recorder.js');
+    const { missionId } = await import('../../domain/mission.js');
+
+    const db = new SqliteDatabaseAdapter();
+    await db.open({ path: resolveDatabasePath() });
+    try {
+      const runner = new SqliteMigrationRunner(db);
+      await runner.applyPending(loadDefaultMigrations());
+      const recorder = new OperationEventRecorder(new SqliteOperationalHistoryRepository(db));
+      await recorder.append({
+        missionId: missionId(slug),
+        trigger: options.trigger as never,
+        toStatus: options.toStatus,
+        agent: options.agent ?? 'unknown',
+        occurredAt: options.occurredAt ?? new Date().toISOString(),
+      });
+      return true;
+    } finally {
+      await db.close();
+    }
+  } catch {
+    return false;
+  }
+}
+
 async function transitionTaskOnIntegrationBranch(
   slug: string,
   newStatus: string,
@@ -717,6 +763,8 @@ async function transitionTaskOnIntegrationBranch(
         const { SqliteBoardLaneEventRepository } = await import('../sqlite/board-lane-event-repository.js');
         const { resolveDatabasePath } = await import('../sqlite/database-path-resolver.js');
         const { BoardEventRecorder, recordLaneTransitionSafely } = await import('../../application/recording/board-event-recorder.js');
+        const { SqliteOperationalHistoryRepository } = await import('../sqlite/operational-history-repository.js');
+        const { OperationEventRecorder } = await import('../../application/recording/operation-event-recorder.js');
         const { missionId } = await import('../../domain/mission.js');
         const { repositoryId } = await import('../../domain/repository.js');
         const { triggerFromTransition, parseMissionStatus } = await import('../../domain/board-event.js');
@@ -738,16 +786,39 @@ async function transitionTaskOnIntegrationBranch(
           await runner.applyPending(loadDefaultMigrations());
           const repo = new SqliteBoardLaneEventRepository(db);
           const recorder = new BoardEventRecorder(repo);
-          await recordLaneTransitionSafely(recorder, {
-            missionId: missionId(slug),
-            repositoryId: repositoryId(rootDir),
-            from: fromStatus,
-            to: toStatus,
-            trigger,
-            agent: (implementer ?? 'unknown'),
-            occurredAt: new Date().toISOString(),
-            idempotencyKey: `${slug}-${fromStatus ?? 'null'}-${toStatus}-${Date.now() / 1000 | 0}`,
-          });
+          const agent = implementer ?? 'unknown';
+          const occurredAt = new Date().toISOString();
+          // The lane event and the operation-log entry describe the same
+          // transition, so they commit as one unit (ADR 0053 transaction
+          // rule 1). A failure rolls both back rather than leaving the board
+          // with an operation that has no lane history, or the reverse.
+          await db.beginTransaction();
+          try {
+            const appended = await recordLaneTransitionSafely(recorder, {
+              missionId: missionId(slug),
+              repositoryId: repositoryId(rootDir),
+              from: fromStatus,
+              to: toStatus,
+              trigger,
+              agent,
+              occurredAt,
+              idempotencyKey: `${slug}-${fromStatus ?? 'null'}-${toStatus}-${Date.now() / 1000 | 0}`,
+            });
+            if (appended) {
+              const operations = new OperationEventRecorder(new SqliteOperationalHistoryRepository(db));
+              await operations.append({
+                missionId: missionId(slug),
+                trigger,
+                toStatus,
+                agent,
+                occurredAt,
+              });
+            }
+            await db.commitTransaction();
+          } catch (error) {
+            await db.rollbackTransaction();
+            throw error;
+          }
         } finally {
           await db.close();
         }

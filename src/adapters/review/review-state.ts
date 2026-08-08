@@ -26,6 +26,7 @@ import { findMissionDir, getPrimaryBranch, resolveWorktree } from '../filesystem
 import { missionId } from '../../domain/mission.js';
 import { applyReviewStateToReview, reviewStateDataFrom } from './review-state-mapping.js';
 import type { MissionStore } from '../../application/domain-ports.js';
+import type { PullRequestReference } from '../../domain/review.js';
 
 export type ReviewStatePersistenceResult =
   | { outcome: 'committed' }
@@ -397,6 +398,14 @@ export interface ReviewStateData {
   reviewerRetryCount?: number;
   implementerRetryCount?: number;
   metadata?: Record<string, unknown>;
+  /**
+   * The change under review when it is a provider pull request.
+   *
+   * Typed rather than a `metadata` key: `PullRequestReference` is a checked
+   * domain value the Mission store already persists in dedicated round columns,
+   * so the board reads the reviewed change instead of inferring one.
+   */
+  pullRequest?: PullRequestReference | null;
 }
 
 export class ReviewState {
@@ -410,6 +419,7 @@ export class ReviewState {
   reviewerRetryCount: number;
   implementerRetryCount: number;
   metadata: Record<string, unknown>;
+  pullRequest: PullRequestReference | null;
   phaseOriginal: string | null;
   private readonly missionStore: MissionStore | null;
 
@@ -429,6 +439,7 @@ export class ReviewState {
     this.reviewerRetryCount = data.reviewerRetryCount || 0;
     this.implementerRetryCount = data.implementerRetryCount || 0;
     this.metadata = data.metadata || {};
+    this.pullRequest = data.pullRequest ?? null;
     this.phaseOriginal = phaseInfo.normalized ? phaseInfo.original : null;
     this.missionStore = missionStore;
   }
@@ -487,6 +498,7 @@ export class ReviewState {
     reviewerRetryCount?: number;
     implementerRetryCount?: number;
     metadata?: Record<string, unknown>;
+    pullRequest?: PullRequestReference | null;
   } {
     const payload: {
       reviewer?: string;
@@ -498,6 +510,7 @@ export class ReviewState {
       reviewerRetryCount?: number;
       implementerRetryCount?: number;
       metadata?: Record<string, unknown>;
+      pullRequest?: PullRequestReference | null;
     } = {
       reviewer: this.reviewer,
       implementer: this.implementer,
@@ -510,6 +523,7 @@ export class ReviewState {
     if (this.reviewerRetryCount > 0) { payload.reviewerRetryCount = this.reviewerRetryCount; }
     if (this.implementerRetryCount > 0) { payload.implementerRetryCount = this.implementerRetryCount; }
     if (Object.keys(this.metadata || {}).length > 0) { payload.metadata = this.metadata; }
+    if (this.pullRequest) { payload.pullRequest = this.pullRequest; }
 
     return payload;
   }

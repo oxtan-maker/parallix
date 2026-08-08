@@ -1,11 +1,12 @@
 // @ts-nocheck
 import { findIgnoredSourceFiles, git, run } from '../../git/git.js';
+import { getTaskAssignee, recordLifecycleOperation, resolveTaskFile } from '../../backlog/backlog.js';
 import { findMissionDir, findMissionArea, inferSlug, resolveWorktree } from '../../filesystem/mission-utils.js';
 import * as fmt from '../../../application/presentation/cli-format.js';
-import { formatVerificationCommand, runVerificationGate } from '../../verification/verification.js';
+import { formatVerificationCommand, recordGateResult, runVerificationGate } from '../../verification/verification.js';
 
 /** @param {string[]} args */
-function checkpoint(args) {
+async function checkpoint(args) {
   /** @param {string} a */
   const params = args.filter(a => !a.startsWith('--'));
 
@@ -41,6 +42,14 @@ function checkpoint(args) {
   // Step 1: Verify
   fmt.log.info(`Step 1: Running verification gate for area: ${fmt.bold(area)}...`);
   const verifyResult = runVerificationGate(area, { rootDir, stdio: 'inherit', runFn: run });
+  // Record the exit code beside the mission so the board reports the gate that
+  // actually ran instead of `unavailable`. `.workflow/` is gitignored, so this
+  // is an operator-local observation, not a committed claim (ADR 0048).
+  recordGateResult(missionDir, {
+    area,
+    command: formatVerificationCommand(area, rootDir),
+    exitCode: verifyResult.status,
+  });
   if (verifyResult.status !== 0) {
     fmt.log.fail(`Verification gate failed for area: ${fmt.bold(area)}. Fix errors and retry ${fmt.command(formatVerificationCommand(area, rootDir))}.`);
     process.exit(1);
@@ -69,6 +78,19 @@ function checkpoint(args) {
     fmt.log.fail('Commit failed.');
     process.exit(1);
   }
+
+  // Step 4: Record the operation so the board's operation log shows the
+  // checkpoint alongside the lane transitions. Recorded after the commit, so
+  // only a checkpoint that exists is reported.
+  const taskResolution = resolveTaskFile(slug, rootDir);
+  const assignee = taskResolution.ok && taskResolution.taskFile
+    ? getTaskAssignee(taskResolution.taskFile)
+    : null;
+  await recordLifecycleOperation(slug, {
+    trigger: 'checkpoint',
+    toStatus: cpName,
+    agent: assignee,
+  });
 
   fmt.log.pass('Checkpoint complete (local-only — branch not pushed to origin).');
 }
