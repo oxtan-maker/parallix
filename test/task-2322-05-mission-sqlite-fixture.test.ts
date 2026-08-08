@@ -94,17 +94,27 @@ describe('Mission application boundary over isolated SQLite adapters', () => {
       ]);
 
       // The intake flow persists nothing that could act as a second lifecycle
-      // authority: no checkpoint, review, lane-event, or statistics row.
+      // authority: no checkpoint, review, or statistics row.
       for (const table of [
         'mission_checkpoints',
         'mission_checkpoint_goal_checks',
         'mission_reviews',
-        'board_lane_events',
         'usage_statistics',
       ]) {
         const rows = await db.query<{ total: number }>(`SELECT COUNT(*) AS total FROM ${table}`);
         assert.equal(rows[0].total, 0, `${table} must stay empty at intake`);
       }
+      // Entry into the first lane is itself a lifecycle step and carries one
+      // lane event, committed with the insert (TASK-2347.02). The event is
+      // history, never a competing authority: the mission row above still
+      // decides the current lane.
+      const entry = await db.query<{ from_status: string | null; to_status: string; trigger: string }>(
+        'SELECT from_status, to_status, trigger FROM board_lane_events WHERE mission_id = ?',
+        [MISSION],
+      );
+      assert.deepEqual(entry.map((row) => ({ ...row })), [
+        { from_status: null, to_status: 'backlog', trigger: 'intake' },
+      ]);
       assert.ok('mission_external_task_refs' in SQLITE_ENTITY_AUTHORITY);
 
       const reloaded = await store.load(MISSION);
@@ -144,6 +154,7 @@ describe('Mission application boundary over isolated SQLite adapters', () => {
         [MISSION],
       );
       assert.deepEqual(events.map((row) => ({ ...row })), [
+        { from_status: null, to_status: 'backlog', trigger: 'intake' },
         { from_status: 'backlog', to_status: 'active', trigger: 'activate' },
       ]);
     } finally {
@@ -186,7 +197,9 @@ describe('Mission application boundary over isolated SQLite adapters', () => {
         'SELECT COUNT(*) AS total FROM board_lane_events WHERE mission_id = ?',
         [MISSION],
       );
-      assert.equal(events[0].total, 1);
+      // The intake entry event plus the one accepted activation; the refused
+      // writer added nothing.
+      assert.equal(events[0].total, 2);
     } finally {
       await db.close();
     }

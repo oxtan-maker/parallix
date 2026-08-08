@@ -73,7 +73,7 @@ until the step that produces it has run.
 | gate | the verifier exit code recorded in `<mission>/.workflow/gate-result.json`, read from the mission's own worktree | `px checkpoint` |
 | pull request | the pull-request reference the review loop records on the round once it confirms an open PR | `px review` with a review provider configured |
 | agent availability | the `agent_blocklist` table | an agent hits a provider usage limit |
-| cycle time | the `board_lane_events` table | any lane transition |
+| cycle time | the `board_lane_events` table | any lifecycle step: mission intake (entry into `backlog`), every lane transition, `integration → done`, and closure |
 | operations | the `operational_history` table | `px active`, `px checkpoint`, `px review`, or `px integrate` |
 
 The gate cell reports an exit code and nothing else. An agent's own account of a
