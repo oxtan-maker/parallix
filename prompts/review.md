@@ -18,7 +18,7 @@ Review history is not optional context:
 Minimum loop contract:
 - When `{{attempt}}` is 2 or later, before beginning this review round compact the prior-round working context. Reload the locked mission goal and scope; committed checkpoint or gate evidence when present; current round and disposition; unresolved findings and implementer resolutions; and the exact post-rebase revision and review baseline shown by `git diff {{reviewBaseline}}..HEAD`. This review-loop compaction is independent of `MISSION.md` gates.
 - Load the locked mission at `{{missionPath}}` and `AGENTS.md` before reviewing.
-- The workflow runs the declared verification gate before this review. Do not invoke `px` yourself.
+- The workflow runs the declared verification gate before this review. Do not invoke `px` yourself, with one exception: `px status {{slug}}` is read-only and is the required way to load review history. Never run any other `px` subcommand.
 - Review as an independent senior engineer. Approve only if the mission is satisfied, verification is credible for the risk level, and the diff is safe to integrate.
 - Request changes for actionable issues introduced or materially worsened by this mission.
 - Confirm the final checkpoint document in the mission directory contains a Goal Check table citing real evidence (file:line, test names).
@@ -44,7 +44,7 @@ Check:
 - Write findings to `{{artifactDir}}/{{slug}}-review-findings.md`, then write the outcome and verdict files alongside it.
 - The findings file must contain findings (write No findings. when approving). The outcome file must state `Outcome: approve` or `Outcome: request-changes`. The verdict file must contain exactly `approve` or `request-changes` and a newline. `comment` is not valid.
 - After writing them, run `ls -l {{artifactDir}}/{{slug}}-review-findings.md {{artifactDir}}/{{slug}}-review-outcome.md {{artifactDir}}/{{slug}}-review-verdict.txt` and read back the verdict file. If any file is absent or the verdict is not exact, fix the files before stopping.
-- Do not call px directly, the workflow will do that for you
+- Do not call px directly, the workflow will do that for you — except for the read-only `px status {{slug}}` above, which you must run to load review history
 - Do not post to Forgejo directly; `px review {{slug}} --start` or `--submit` publishes the artifacts.
 - Do not edit repo files; do not switch into implementer behavior.
 - If workflow state, prompts, or PR history are inconsistent, report that inconsistency as a finding rather than fixing it.

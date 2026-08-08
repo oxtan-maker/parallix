@@ -168,11 +168,11 @@ function isTransientPiFailure(error: any) {
 }
 
 /** Extract telemetry from SDK session stats. */
-function extractTelemetryFromStats(stats: any) {
+function extractTelemetryFromStats(stats: any, model?: string) {
   if (!stats || !stats.tokens) { return null; }
   return {
     provider: 'pi',
-    model: undefined,
+    model,
     inputTokens: stats.tokens.input || 0,
     outputTokens: stats.tokens.output || 0,
     cachedTokens: stats.tokens.cacheRead || 0,
@@ -394,7 +394,7 @@ function startPiAgent({
           const lastText = session.getLastAssistantText?.() || assistantText;
           const sdkSessionId = session.sessionId || null;
 
-          const telemetry = extractTelemetryFromStats(stats);
+          const telemetry = extractTelemetryFromStats(stats, session.model?.id);
 
           return {
             status: 0,
@@ -404,7 +404,7 @@ function startPiAgent({
             signal: null,
             sessionId: sdkSessionId,
             telemetry,
-            model: undefined,
+            model: session.model?.id || undefined,
             provider: 'pi',
             transientRetries: attempts,
             startedAt: new Date().toISOString(),
@@ -427,7 +427,7 @@ function startPiAgent({
           // Build result from error state.
           const stats = session?.getSessionStats?.() || {};
           const sdkSessionId = session?.sessionId || null;
-          const telemetry = extractTelemetryFromStats(stats);
+          const telemetry = extractTelemetryFromStats(stats, session?.model?.id);
 
           return {
             status: errorResult.status,
@@ -437,7 +437,7 @@ function startPiAgent({
             signal: errorResult.signal,
             sessionId: sdkSessionId,
             telemetry,
-            model: undefined,
+            model: session?.model?.id || undefined,
             provider: 'pi',
             transientRetries: attempts,
             startedAt: new Date().toISOString(),
