@@ -9,7 +9,8 @@
 
 import type { ApplicationOutcome, Capability, DurableEvidence } from './contracts.js';
 import { completed, failure, rejected } from './contracts.js';
-import type { MissionStore, MissionVersion } from './domain-ports.js';
+import type { MissionTransitionStore, MissionVersion } from './domain-ports.js';
+import { isDuplicateLaneEvent, lifecycleLaneEvent } from './lifecycle-lane-event.js';
 import { storeEvidence, writeFailure } from './mission-command-support.js';
 import type { AgentFamily } from '../domain/agents.js';
 import type { ExternalTaskRef } from '../domain/external-task.js';
@@ -33,6 +34,10 @@ export interface MissionIntakeRequest {
   readonly rawStatus?: string;
   /** Traceability only; the external system keeps owning the material. */
   readonly externalTaskRef?: ExternalTaskRef | null;
+  /** Occurrence time recorded on the entry lane event; defaults to now. */
+  readonly occurredAt?: string;
+  /** Supplying the same key twice records the entry event once. */
+  readonly idempotencyKey?: string;
   readonly capabilities: ReadonlySet<Capability>;
 }
 
@@ -42,7 +47,7 @@ export interface MissionIntakeResult {
 }
 
 export class MissionIntakeService {
-  constructor(private readonly _store: MissionStore) {}
+  constructor(private readonly _store: MissionTransitionStore) {}
 
   async execute(
     request: MissionIntakeRequest,
@@ -77,12 +82,27 @@ export class MissionIntakeService {
       return existing;
     }
 
+    // Entry into the first lane is a lifecycle step, so it carries the same
+    // lane event every later transition does. Without it a mission that has
+    // never moved has no recorded entry time at all, and backlog age cannot be
+    // derived from the event stream.
+    const event = lifecycleLaneEvent({
+      mission,
+      from: null,
+      trigger: 'intake',
+      agent: mission.assignee ?? 'unknown',
+      occurredAt: request.occurredAt ?? new Date().toISOString(),
+      idempotencyKey: request.idempotencyKey,
+    });
     try {
       // `null` expected version is the insert contract: a second intake of the
       // same identity is refused as a conflict rather than overwriting.
-      const version = await this._store.save(mission, null);
+      const version = await this._store.saveWithTransition(mission, null, event);
       return completed({ mission, version }, [this.evidence(mission)]);
     } catch (error) {
+      if (isDuplicateLaneEvent(error)) {
+        return failure('conflict', (error as Error).message);
+      }
       return writeFailure<MissionIntakeResult>(error);
     }
   }

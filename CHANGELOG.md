@@ -33,6 +33,24 @@ cycle (pre-integrate bump + post-integrate reinstall).
 
 ### Fixed
 
+- **Mission intake, `integration → done` and closure now appear in the lane
+  event history** (TASK-2347.02). Those three lifecycle steps persisted the
+  Mission aggregate with a plain save, so `board_lane_events` never recorded
+  entry into `backlog`, the done transition or the closure: backlog age had no
+  start, throughput and end-to-end cycle time could not be derived from events,
+  and the final lane dwell of every mission was left open. All three now commit
+  the aggregate change and its lane event as one unit through
+  `saveWithTransition`, which also accepts the insert (`null` expected version)
+  case so intake writes both rows in one transaction. The Markdown transition
+  seam in `backlog.ts` no longer builds lane events of its own — it mirrors the
+  authoritative status onto the aggregate and delegates to the store, so exactly
+  one code path writes lane events. Idempotency keys are derived from the
+  transition identity (`missionId:trigger:occurredAt`) instead of
+  `Date.now() / 1000`, which dropped two transitions that fell inside the same
+  second and duplicated a replay that did not. No board projection field,
+  SQLite table or migration changed, and missions completed before this change
+  are not backfilled.
+
 - **`px ui` board cards report real checkpoint, gate, pull-request and operation
   data instead of `unavailable`** (TASK-2343). The concrete read adapters were
   disconnected from the sources the lifecycle already writes: the checkpoint

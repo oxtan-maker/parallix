@@ -45,9 +45,15 @@ export interface MissionStore {
  * use cases never learn which one they hold.
  */
 export interface MissionTransitionStore extends MissionStore {
+  /**
+   * `expectedVersion` follows the `save()` contract: `null` inserts, a value
+   * compare-and-swaps. Mission intake is a lifecycle step like any other — the
+   * insert and the lane event that records entry into `backlog` commit as one
+   * unit rather than through a plain `save()` that leaves no history.
+   */
   saveWithTransition(
     _mission: Mission,
-    _expectedVersion: MissionVersion,
+    _expectedVersion: MissionVersion | null,
     _event: LaneTransitionEvent,
   ): Promise<MissionVersion>;
 }

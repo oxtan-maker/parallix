@@ -160,11 +160,20 @@ test('SC1: intake materializes a Mission with its RepositoryId and external trac
     url: 'backlog/tasks/task-2322.05.md',
   });
   // No checkpoint, review, or change-size claim is manufactured at intake, and
-  // exactly one aggregate write happens — there is no second task record.
+  // exactly one aggregate write happens — there is no second task record. That
+  // write is the transition-aware one: entry into the first lane carries its
+  // lane event (TASK-2347.02).
   assert.deepEqual(mission.checkpoints, []);
   assert.equal(mission.review, null);
   assert.equal(mission.netEngineeringLines, null);
-  assert.deepEqual(store.calls, [`load:${MISSION}`, `save:${MISSION}:insert`]);
+  assert.deepEqual(store.calls, [
+    `load:${MISSION}`,
+    'transition:null->backlog:intake',
+    `save:${MISSION}:insert`,
+  ]);
+  assert.deepEqual(store.events.map((event) => ({ from: event.from, to: event.to, trigger: event.trigger })), [
+    { from: null, to: 'backlog', trigger: 'intake' },
+  ]);
   assert.equal(outcome.value!.version, missionVersion(1));
   assert.equal(outcome.durableEvidence[0].source, 'mission-store');
 });

@@ -106,7 +106,7 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
 
   async saveWithTransition(
     mission: Mission,
-    expectedVersion: MissionVersion,
+    expectedVersion: MissionVersion | null,
     event: LaneTransitionEvent,
   ): Promise<MissionVersion> {
     return this.enqueue(() => this.saveAggregateWithTransition(mission, expectedVersion, event));
@@ -234,7 +234,7 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
 
   private async saveAggregateWithTransition(
     mission: Mission,
-    expectedVersion: MissionVersion,
+    expectedVersion: MissionVersion | null,
     event: LaneTransitionEvent,
   ): Promise<MissionVersion> {
     if (event.missionId !== mission.id || event.repositoryId !== mission.repositoryId) {

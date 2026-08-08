@@ -3,12 +3,16 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 
-// SC2: Guardrail test — only the designated write-path module (backlog.ts)
-// calls the BoardEventRecorder. Any other source file writing lane-transition
-// events or importing the recorder violates the single-path contract.
+// Single-writer guardrail for lane-transition events (TASK-2347.02, SC5).
 //
-// SC3: The recorder is called from exactly one location in
-// transitionTaskOnIntegrationBranch; no other function calls it.
+// `SqliteMissionStore.saveWithTransition` is the only code path that appends a
+// `board_lane_events` row: it commits the aggregate change and the event that
+// describes it as one unit (ADR 0053 transaction rule 1). Before this mission
+// the designated writer was `src/adapters/backlog/backlog.ts`, which opened its
+// own database and built its own event in parallel with the aggregate path —
+// two writers that could disagree on agent, timestamp and idempotency key for
+// the same transition. That block now delegates to the store, and these tests
+// fail if any second writer reappears.
 
 const repoRoot = path.resolve(process.cwd());
 
@@ -31,11 +35,14 @@ function findTsFiles(dir: string): string[] {
   return results;
 }
 
-// The single allowed write-path module for BoardEventRecorder
-const DESIGNATED_WRITER = 'src/adapters/backlog/backlog.ts';
+/** The single module allowed to append lane events. */
+const DESIGNATED_WRITER = 'src/adapters/sqlite/mission-store.ts';
 
-// Files that define or test the recorder (allowed to import it without
-// violating the guardrail — they are the recorder itself or its tests)
+/** The seam that used to write lane events itself and now delegates. */
+const MARKDOWN_TRANSITION_MODULE = 'src/adapters/backlog/backlog.ts';
+
+// Files that define, wire or read the event contract. They may name the
+// recorder, repository or table without being a write path.
 const RECORDER_MODULE = 'src/application/recording/board-event-recorder.ts';
 const DOMAIN_MODULE = 'src/domain/board-event.ts';
 const REPOSITORY_MODULE = 'src/adapters/sqlite/board-lane-event-repository.ts';
@@ -45,170 +52,134 @@ const METRICS_ADAPTER_MODULE = 'src/application/projections/metrics-read-adapter
 const STATUS_COMMAND_MODULE = 'src/adapters/cli/commands/status.ts';
 const TUI_COMMAND_MODULE = 'src/interfaces/tui/ui-command.ts';
 const INDEX_MODULE = 'src/adapters/sqlite/index.ts';
-const MISSION_STORE_MODULE = 'src/adapters/sqlite/mission-store.ts';
 const APPLICATION_PORTS_MODULE = 'src/application/ports.ts';
+const OPERATION_HISTORY_PORT_MODULE = 'src/application/ports/operation-history.ts';
 const COMPOSITION_ROOT_MODULE = 'src/composition/application-services.ts';
 const BOARD_COMPOSITION_MODULE = 'src/composition/board-projection.ts';
 const PRODUCTION_CAPABILITIES_MODULE = 'src/composition/production-capabilities.ts';
 
-test('SC2: only the designated write-path module imports BoardEventRecorder outside the recorder package', () => {
-  const srcDir = path.join(repoRoot, 'src');
-  const allTsFiles = findTsFiles(srcDir);
+const CONTRACT_MODULES = new Set([
+  RECORDER_MODULE,
+  DOMAIN_MODULE,
+  REPOSITORY_MODULE,
+  PORTS_MODULE,
+  AUTHORITY_MAP_MODULE,
+  METRICS_ADAPTER_MODULE,
+  STATUS_COMMAND_MODULE,
+  TUI_COMMAND_MODULE,
+  INDEX_MODULE,
+  APPLICATION_PORTS_MODULE,
+  OPERATION_HISTORY_PORT_MODULE,
+  COMPOSITION_ROOT_MODULE,
+  BOARD_COMPOSITION_MODULE,
+  PRODUCTION_CAPABILITIES_MODULE,
+]);
 
+function sourceFiles(): string[] {
+  return findTsFiles(path.join(repoRoot, 'src'));
+}
+
+function read(relPath: string): string {
+  return fs.readFileSync(path.join(repoRoot, relPath), 'utf8');
+}
+
+/** Drop comment lines so a mention in prose is not read as a write. */
+function codeOnly(content: string): string {
+  return content
+    .split('\n')
+    .filter((line) => {
+      const trimmed = line.trim();
+      return !trimmed.startsWith('//') && !trimmed.startsWith('*') && !trimmed.startsWith('/*');
+    })
+    .join('\n');
+}
+
+test('SC5: only SqliteMissionStore appends lane events', () => {
   const offenders: string[] = [];
 
-  for (const relPath of allTsFiles) {
-    // Skip the recorder module itself, domain definitions, repository,
-    // ports, and authority map (infrastructure files that define the contract)
-    if (
-      relPath === RECORDER_MODULE
-      || relPath === DOMAIN_MODULE
-      || relPath === REPOSITORY_MODULE
-      || relPath === PORTS_MODULE
-      || relPath === AUTHORITY_MAP_MODULE
-    ) {
+  for (const relPath of sourceFiles()) {
+    if (relPath === DESIGNATED_WRITER || CONTRACT_MODULES.has(relPath)) {
       continue;
     }
-
-    const fullPath = path.join(repoRoot, relPath);
-    const content = fs.readFileSync(fullPath, 'utf8');
-
-    // Check if this file imports BoardEventRecorder or recordLaneTransitionSafely
-    // (the two exported names from the recorder module)
-    const importsRecorder = content.includes('BoardEventRecorder')
-      || content.includes('recordLaneTransitionSafely')
-      || content.includes('eventToEntry')
-      || content.includes('entryToEvent')
-      || content.includes('laneTransitionEventToMissionTransition');
-
-    if (importsRecorder && relPath !== DESIGNATED_WRITER) {
-      // Verify it's an actual import (not just a comment or string literal)
-      const importLine = content.match(/import.*(?:BoardEventRecorder|recordLaneTransitionSafely|eventToEntry|entryToEvent|laneTransitionEventToMissionTransition)/);
-      if (importLine) {
-        offenders.push(relPath);
-      }
-    }
-  }
-
-  assert.strictEqual(
-    offenders.length,
-    0,
-    `Modules importing the board-event recorder outside the designated write path: ${offenders.join(', ')}. Only ${DESIGNATED_WRITER} may call the recorder.`,
-  );
-});
-
-test('SC3: transitionTaskOnIntegrationBranch contains the recorder call and is the single call site', () => {
-  const backlogPath = path.join(repoRoot, DESIGNATED_WRITER);
-  const content = fs.readFileSync(backlogPath, 'utf8');
-
-  // The function must contain a call to recordLaneTransitionSafely
-  assert.ok(
-    content.includes('recordLaneTransitionSafely'),
-    'transitionTaskOnIntegrationBranch must call recordLaneTransitionSafely',
-  );
-
-  // The recorder import must be present (dynamic import)
-  assert.ok(
-    content.includes('board-event-recorder'),
-    'backlog.ts must import the board-event-recorder module',
-  );
-
-  // Verify the call is inside transitionTaskOnIntegrationBranch (not in another function)
-  const functionStart = content.indexOf('function transitionTaskOnIntegrationBranch(');
-  assert.ok(functionStart !== -1, 'transitionTaskOnIntegrationBranch function must exist');
-
-  // Find the next function declaration after transitionTaskOnIntegrationBranch
-  const afterStart = content.slice(functionStart);
-  // Look for the next 'function ' or 'export function ' after the first line
-  const nextFunctionMatch = afterStart.slice(1).match(/^\s*(?:export\s+)?function\s+/m);
-  const functionEnd = nextFunctionMatch ? functionStart + 1 + nextFunctionMatch.index : content.length;
-  const functionBody = afterStart.slice(0, functionEnd);
-
-  assert.ok(
-    functionBody.includes('recordLaneTransitionSafely'),
-    'recordLaneTransitionSafely must be called inside transitionTaskOnIntegrationBranch',
-  );
-});
-
-test('SC3: no other function in backlog.ts calls the recorder', () => {
-  const backlogPath = path.join(repoRoot, DESIGNATED_WRITER);
-  const content = fs.readFileSync(backlogPath, 'utf8');
-
-  // Count occurrences of recordLaneTransitionSafely in the file
-  const matches = content.match(/recordLaneTransitionSafely/g);
-  assert.ok(matches, 'recordLaneTransitionSafely must appear in backlog.ts');
-
-  // There should be exactly two occurrences (the import reference + the call)
-  assert.equal(
-    matches.length,
-    2,
-    `recordLaneTransitionSafely should appear exactly twice (import + call), found ${matches.length}`,
-  );
-});
-
-test('SC2: no source file writes lane-transition events outside backlog.ts', () => {
-  const srcDir = path.join(repoRoot, 'src');
-  const allTsFiles = findTsFiles(srcDir);
-
-  const offenders: string[] = [];
-
-  for (const relPath of allTsFiles) {
-    // Skip the recorder module, domain module, repository, ports,
-    // authority map, metrics adapter, composition root, status command,
-    // and designated writer (all are infrastructure or read-path files)
-    if (
-      relPath === RECORDER_MODULE
-      || relPath === DOMAIN_MODULE
-      || relPath === REPOSITORY_MODULE
-      || relPath === PORTS_MODULE
-      || relPath === AUTHORITY_MAP_MODULE
-      || relPath === METRICS_ADAPTER_MODULE
-      || relPath === STATUS_COMMAND_MODULE
-      || relPath === TUI_COMMAND_MODULE
-      || relPath === INDEX_MODULE
-      || relPath === MISSION_STORE_MODULE
-      || relPath === APPLICATION_PORTS_MODULE
-      || relPath === 'src/application/ports/operation-history.ts'
-      || relPath === COMPOSITION_ROOT_MODULE
-      || relPath === BOARD_COMPOSITION_MODULE
-      || relPath === PRODUCTION_CAPABILITIES_MODULE
-      || relPath === DESIGNATED_WRITER
-    ) {
-      continue;
-    }
-
-    const fullPath = path.join(repoRoot, relPath);
-    const content = fs.readFileSync(fullPath, 'utf8');
-
-    // Check if this file references the board_lane_events table directly
-    // (bypassing the BoardLaneEventRepository)
-    const writesLaneEvents = content.includes('board_lane_events')
+    const content = codeOnly(read(relPath));
+    // Appending an event means reaching the recorder or the repository/table
+    // directly. Building a `LaneTransitionEvent` value is not a write: the
+    // event still has to be handed to the store to become a row.
+    const appendsLaneEvents = content.includes('board_lane_events')
       || content.includes('BoardLaneEventRepository')
-      || content.includes('BoardLaneEventEntry');
+      || content.includes('BoardLaneEventEntry')
+      || content.includes('BoardEventRecorder')
+      || content.includes('recordLaneTransitionSafely');
 
-    if (writesLaneEvents) {
-      // Verify it's not just a comment
-      const lines = content.split('\n');
-      const codeLines = lines.filter((line) => {
-        const trimmed = line.trim();
-        return !trimmed.startsWith('//') && !trimmed.startsWith('*') && !trimmed.startsWith('/*');
-      });
-      const codeContent = codeLines.join('\n');
-      if (
-        codeContent.includes('board_lane_events')
-        || codeContent.includes('BoardLaneEventRepository')
-        || codeContent.includes('BoardLaneEventEntry')
-      ) {
-        offenders.push(relPath);
-      }
+    if (appendsLaneEvents) {
+      offenders.push(relPath);
     }
   }
 
-  assert.strictEqual(
-    offenders.length,
-    0,
-    `Source files writing lane-transition events outside backlog.ts: ${offenders.join(', ')}`,
+  assert.deepEqual(
+    offenders,
+    [],
+    `Source files appending lane events outside ${DESIGNATED_WRITER}: ${offenders.join(', ')}`,
   );
+});
+
+test('SC5: the designated writer appends the event inside saveWithTransition', () => {
+  const content = read(DESIGNATED_WRITER);
+
+  assert.ok(
+    content.includes('saveWithTransition'),
+    `${DESIGNATED_WRITER} must expose saveWithTransition`,
+  );
+
+  const appendCalls = content.match(/this\.eventRepo\.append\(/g) ?? [];
+  assert.equal(
+    appendCalls.length,
+    1,
+    `the lane event must be appended from exactly one place in ${DESIGNATED_WRITER}, found ${appendCalls.length}`,
+  );
+
+  const transitionStart = content.indexOf('private async saveAggregateWithTransition(');
+  assert.ok(transitionStart !== -1, 'saveAggregateWithTransition must exist');
+  const appendIndex = content.indexOf('this.eventRepo.append(');
+  assert.ok(
+    appendIndex > transitionStart,
+    'the append call must live inside saveAggregateWithTransition',
+  );
+});
+
+test('SC5: the Markdown transition seam delegates instead of writing its own event', () => {
+  const content = codeOnly(read(MARKDOWN_TRANSITION_MODULE));
+
+  assert.ok(
+    content.includes('saveWithTransition'),
+    `${MARKDOWN_TRANSITION_MODULE} must record lane changes through saveWithTransition`,
+  );
+  for (const forbidden of [
+    'board_lane_events',
+    'BoardEventRecorder',
+    'recordLaneTransitionSafely',
+    'SqliteBoardLaneEventRepository',
+  ]) {
+    assert.ok(
+      !content.includes(forbidden),
+      `${MARKDOWN_TRANSITION_MODULE} must not reach ${forbidden} directly; the store owns lane events`,
+    );
+  }
+});
+
+test('SC6: no lane-event idempotency key is derived from the wall clock', () => {
+  for (const relPath of sourceFiles()) {
+    const content = codeOnly(read(relPath));
+    const keyLines = content
+      .split('\n')
+      .filter((line) => line.includes('idempotencyKey'));
+    for (const line of keyLines) {
+      assert.ok(
+        !line.includes('Date.now()'),
+        `${relPath} derives an idempotency key from the wall clock: ${line.trim()}`,
+      );
+    }
+  }
 });
 
 test('domain model: board_lane_events uses dedicated table (not operational_history JSON blobs)', () => {
