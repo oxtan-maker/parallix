@@ -1,12 +1,16 @@
 ---
 id: TASK-2337
 title: custom model has been halucinated away
-status: active
-assignee: [custom]
+status: ready-for-integration
+assignee:
+  - custom
 created_date: '2026-08-04 06:28'
-labels: [user_value, bug]
+updated_date: '2026-08-08 07:38'
+labels:
+  - user_value
+  - bug
 dependencies: []
-ordinal: 72900
+ordinal: 82900
 ---
 
 ## Description
