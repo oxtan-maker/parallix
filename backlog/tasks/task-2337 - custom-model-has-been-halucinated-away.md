@@ -1,7 +1,7 @@
 ---
 id: TASK-2337
 title: custom model has been halucinated away
-status: review
+status: active
 assignee: [custom]
 created_date: '2026-08-04 06:28'
 labels: [user_value, bug]
