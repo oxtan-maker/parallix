@@ -1,16 +1,21 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import type { AgentAvailabilityMetric } from '../../application/projections/board.js';
-import type { AgentFamily } from '../../domain/agents.js';
-import type { MissionCard } from '../../application/projections/mission-board.js';
 
 // ---------------------------------------------------------------------------
 // AgentStrip — horizontal strip of agent availability entries
 //
-// Renders above the board (below top bar / FLOW panel). Each entry shows:
-//   ● family-name  sessions:N  [countdown]
-// Green dot for available, red dot for blocked.
-// Session count is aggregated from card agent fields (display-only).
+// Follows the board design's agent family strip: one entry per known family,
+//   ● family-name  [countdown ·] N running  [reason]
+// green dot when the family is usable, red dot when it is blocked or its
+// launcher is not usable on this workstation.
+//
+// "N running" counts missions with a live agent process, observed from the
+// process table (see `detectRunningMissionSessions`). When liveness cannot be
+// observed the entry says `running unknown` — the strip never renders an
+// unobserved count as zero, and never derives one from board cards. A session
+// that runs but cannot be attributed to a family is counted in a trailing
+// `N running · family unknown` entry rather than assigned to a guess.
 // ---------------------------------------------------------------------------
 
 /** Format a countdown from milliseconds into a human-readable string. */
@@ -28,34 +33,30 @@ function formatCountdown(ms: number): string {
   return `${days}d`;
 }
 
-/** Count active sessions for each agent family from the board's cards. */
-function aggregateSessions(
-  cards: readonly MissionCard[],
-  families: readonly AgentFamily[],
-): ReadonlyMap<AgentFamily, number> {
-  const counts = new Map<AgentFamily, number>();
-  for (const family of families) { counts.set(family, 0); }
-  for (const card of cards) {
-    if (card.agent && counts.has(card.agent)) {
-      counts.set(card.agent, counts.get(card.agent)! + 1);
-    }
-  }
-  return counts;
+/** The running-session text for one family: a count, or an honest unknown. */
+function formatRunning(runningSessions: number | null | undefined): string {
+  return typeof runningSessions === 'number' ? `${runningSessions} running` : 'running unknown';
 }
 
 export interface AgentStripProps {
   readonly agentAvailability: readonly AgentAvailabilityMetric[];
-  /** All cards on the board, used for session aggregation. */
-  readonly cards: readonly MissionCard[];
+  /**
+   * Running sessions no source could attribute to a family. Shown as its own
+   * trailing entry so the strip's total matches what is actually running: a
+   * `px review` process runs the reviewer and then the act-on-review
+   * implementer, and `px resolve-conflict` writes no session marker at all, so
+   * neither can be claimed by a family.
+   */
+  readonly unattributedRunningSessions?: number | null;
 }
 
 /**
  * AgentStrip — one entry per agent family from BoardMetrics.agentAvailability.
  *
- * Each entry: [dot] family-name sessions:N [countdown]
- * Dot color: green=available, red=blocked.
+ * Each entry: [dot] family-name [countdown ·] N running [reason]
+ * Dot color: green=available, red=blocked or launcher unavailable.
  */
-export function AgentStrip({ agentAvailability, cards }: AgentStripProps): React.ReactElement {
+export function AgentStrip({ agentAvailability, unattributedRunningSessions }: AgentStripProps): React.ReactElement {
   if (agentAvailability.length === 0) {
     return (
       <Box marginBottom={1}>
@@ -64,24 +65,27 @@ export function AgentStrip({ agentAvailability, cards }: AgentStripProps): React
     );
   }
 
-  const families = agentAvailability.map((a) => a.family);
-  const sessions = aggregateSessions(cards, families);
-
   return (
     <Box flexDirection="row" justifyContent="flex-start" marginBottom={1}>
       {agentAvailability.map((agent) => {
         const dotColor = agent.available ? 'green' : 'red';
-        const sessionCount = sessions.get(agent.family) ?? 0;
         const countdown = !agent.available && agent.blockedForMs > 0 ? formatCountdown(agent.blockedForMs) : '';
+        const reason = !agent.available && agent.reason ? agent.reason : '';
         return (
           <Box key={agent.family} marginRight={3}>
             <Text color={dotColor}>{'●'}</Text>
             <Text color="gray">{` ${agent.family}`}</Text>
-            <Text dimColor>{` sessions:${sessionCount}`}</Text>
-            {countdown && <Text dimColor color="yellow">{` ${countdown}`}</Text>}
+            {countdown && <Text dimColor color="yellow">{` ${countdown} ·`}</Text>}
+            <Text dimColor>{` ${formatRunning(agent.runningSessions)}`}</Text>
+            {reason && <Text dimColor color="red">{` ${reason}`}</Text>}
           </Box>
         );
       })}
+      {typeof unattributedRunningSessions === 'number' && unattributedRunningSessions > 0 && (
+        <Box>
+          <Text dimColor>{`${unattributedRunningSessions} running · family unknown`}</Text>
+        </Box>
+      )}
     </Box>
   );
 }

@@ -13,6 +13,8 @@ import { OperationalHistoryService } from '../application/services/operational-h
 import { SqliteMissionStore } from '../adapters/sqlite/mission-store.js';
 import { MissionCompatibilityImporter } from '../adapters/sqlite/mission-importer.js';
 import { SqliteSessionMarkerAdapter } from '../adapters/sqlite/session-marker-adapter.js';
+import { SqliteSessionMarkerRepository } from '../adapters/sqlite/session-marker-repository.js';
+import type { SessionMarkerRepository } from '../application/ports/mission-store.js';
 import { repositoryId, type RepositoryId } from '../domain/repository.js';
 import { git } from '../adapters/git/git.js';
 import { createDefaultExecuteMissionRuntime, createExecuteMissionPorts } from '../adapters/mission/execute-mission-adapters.js';
@@ -169,10 +171,17 @@ export async function createProductionApplicationServices(
   // a second independent connection (avoids "database is locked" contention
   // between DatabaseSync handles on the same file).
   let sessionMarkerPort: import('../application/domain-ports.js').SessionMarkerPort | null = null;
+  // The board reads the same markers to attribute a running mission to the
+  // family that launched it.
+  let sessionMarkers: SessionMarkerRepository | null = null;
   if (operatorState.repositories) {
     const sourceRoot = resolvePrimaryRoot(rootDir);
     const repoId = repositoryId(path.basename(sourceRoot) || sourceRoot);
     sessionMarkerPort = new SqliteSessionMarkerAdapter(
+      operatorState.db as SqliteDatabaseAdapter,
+      repoId,
+    );
+    sessionMarkers = new SqliteSessionMarkerRepository(
       operatorState.db as SqliteDatabaseAdapter,
       repoId,
     );
@@ -211,7 +220,7 @@ export async function createProductionApplicationServices(
   const presentationCapabilities = operatorState.repositories
     ? (await import('./production-capabilities.js')).composeProductionCapabilities(
       rootDir,
-      operatorState.repositories,
+      { ...operatorState.repositories, sessionMarkers },
       executePorts,
       mission?.store ?? null,
     )

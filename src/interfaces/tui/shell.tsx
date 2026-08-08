@@ -270,7 +270,7 @@ export function BoardShell({ projection, columns, rows, initialSelectedMissionId
       {/* ═══ AGENT STRIP ═══ */}
       <AgentStrip
         agentAvailability={projection.metrics.agentAvailability}
-        cards={projection.stages.flatMap((stage) => stage.cards)}
+        unattributedRunningSessions={projection.metrics.unattributedRunningSessions}
       />
 
       {/* ═══ MAIN: attention rail + board, side by side or stacked ═══ */}

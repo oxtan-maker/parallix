@@ -17,6 +17,12 @@ export interface AgentAvailability {
   readonly family: AgentFamily;
   readonly launcherAvailable: boolean;
   readonly block: AgentBlock;
+  /**
+   * Why the launcher is unavailable (`launcher missing`, `launcher
+   * probe-failed: exit 1`, …), when the probe reported a cause. Read-only
+   * explanation for operators; selection never branches on it.
+   */
+  readonly launcherDetail?: string | null;
 }
 
 export interface StepSelectionPolicy {

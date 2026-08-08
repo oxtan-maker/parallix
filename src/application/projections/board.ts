@@ -59,6 +59,13 @@ export interface AgentAvailabilityMetric {
   readonly family: AgentFamily;
   readonly available: boolean;
   readonly blockedForMs: number;
+  /** Why the family is blocked, when the block carries a reason. */
+  readonly reason?: string | null;
+  /**
+   * Missions this family is running right now, or `null` when liveness could
+   * not be observed. Null is unknown and must not be rendered as zero.
+   */
+  readonly runningSessions?: number | null;
 }
 
 /** A fixed, projection-owned explanation of the constraint identified by FLOW. */
@@ -103,6 +110,12 @@ export interface BoardProjection {
 
 export interface BoardMetrics {
   readonly cumulativeFlow: MetricSeries;
+  /**
+   * Running agent sessions that could not be attributed to a family, or `null`
+   * when liveness was not observed. Kept beside `agentAvailability` so the
+   * per-family counts never have to absorb a session they cannot claim.
+   */
+  readonly unattributedRunningSessions?: number | null;
   readonly cumulativeFlowByState: StateFlowSeries;
   readonly medianStateTimes: MetricSeries;
   readonly medianCycleTimeByState: LaneMetricSeries;
