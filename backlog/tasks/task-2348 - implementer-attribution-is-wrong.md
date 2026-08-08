@@ -4,7 +4,7 @@ title: implementer attribution is wrong
 status: backlog
 assignee: [claude]
 created_date: '2026-08-08 18:05'
-labels: []
+labels: [ai_sdlc, bug]
 dependencies: []
 ordinal: 83900
 ---
