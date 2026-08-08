@@ -129,7 +129,7 @@ export function decideMission(mission: Mission, command: MissionCommand): Missio
     }
     return { ...mission, status: 'integration', review: command.review };
   case 'integrate':
-    requireStatus(mission, ['integration'], command);
+    requireStatus(mission, ['review', 'integration'], command);
     return { ...mission, status: 'done', closedAt: null };
   }
 }
