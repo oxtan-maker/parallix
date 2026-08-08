@@ -71,15 +71,17 @@ export function assertReviewStatePersisted(
  * @param {string} slug
  * @param {ReviewState|Record<string, unknown>} state
  * @param {string} worktree
+ * @param {MissionStore|null|undefined} [missionStore]
  * @returns {Promise<ReviewStatePersistenceResult>}
  */
 export async function persistReviewStateOrThrow(
   writeFn: typeof writeReviewState,
   slug: string,
   state: ReviewState | Record<string, unknown>,
-  worktree: string
+  worktree: string,
+  missionStore?: MissionStore | null,
 ): Promise<ReviewStatePersistenceResult> {
-  const result = await writeFn(slug, state, worktree);
+  const result = await writeFn(slug, state, worktree, missionStore);
   assertReviewStatePersisted(result, {
     slug,
     phase: state instanceof ReviewState ? state.phase : String(state.phase || 'unknown'),

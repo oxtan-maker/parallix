@@ -20,11 +20,12 @@ export function bindReviewPersistence(store: MissionStore) {
     params: Parameters<typeof createEvent>[2],
     options: Parameters<typeof createEvent>[3] = {},
   ) => createEvent(slug, eventType, params, { ...options, missionStore: store });
+  const boundWriteReviewState = (slug: string, state: Parameters<typeof writeReviewState>[1], rootDir?: string, _missionStore?: MissionStore | null) =>
+    writeReviewState(slug, state, rootDir, store);
   return {
     readReviewState: boundReadReviewState,
     readReviewRounds: (slug: string, rootDir?: string) => readReviewRounds(slug, rootDir, store),
-    writeReviewState: (slug: string, state: Parameters<typeof writeReviewState>[1], rootDir?: string) =>
-      writeReviewState(slug, state, rootDir, store),
+    writeReviewState: boundWriteReviewState,
     resetReviewState: (slug: string, rootDir?: string) => resetReviewState(slug, rootDir, store),
     backfillReview: (slug: string, rootDir?: string, options: { apply?: boolean } = {}) =>
       backfillReviewFromLegacyState(slug, rootDir, { ...options, missionStore: store }),
@@ -42,6 +43,7 @@ export function bindReviewPersistence(store: MissionStore) {
       ...options,
       createEventFn: boundCreateEvent,
       readReviewStateFn: boundReadReviewState,
+      writeReviewStateFn: boundWriteReviewState,
     }),
     consumeImplementerArtifacts: (
       slug: string,
@@ -51,6 +53,7 @@ export function bindReviewPersistence(store: MissionStore) {
       ...options,
       createEventFn: boundCreateEvent,
       readReviewStateFn: boundReadReviewState,
+      writeReviewStateFn: boundWriteReviewState,
     }),
   };
 }
@@ -71,5 +74,6 @@ export function reviewLoopBindings(store: MissionStore) {
     resetReviewStateFn: persistence.resetReviewState,
     consumeReviewerArtifactsFn: persistence.consumeReviewerArtifacts,
     consumeImplementerArtifactsFn: persistence.consumeImplementerArtifacts,
+    missionStore: store,
   };
 }

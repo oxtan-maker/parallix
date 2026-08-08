@@ -14,6 +14,7 @@ import { toVirtual } from '../config/state-map.js';
 import { getPrStatus, readToken, postComment, postReview, createPr, getComments, closePr, resolveReviewUser, isProviderEnabled } from './review-adapter.js';
 import { buildAutonomousReviewMatrix, formatMatrixSummary } from '../agents/runtime-matrix.js';
 import { readReviewState, writeReviewState, resolveReviewIdentity, ReviewState, persistReviewStateOrThrow, backfillReviewFromLegacyState } from './review-state.js';
+import type { MissionStore } from '../../application/domain-ports.js';
 import { createEvent, ALL_EVENT_TYPES, isValidEventType, shouldMirrorToProvider, readAllEvents } from './review-events.js';
 import { startAgent } from '../agents/agents.js';
 import { formatVerificationCommand, runVerificationGate } from '../verification/verification.js';
@@ -1117,6 +1118,7 @@ export async function commentRound(
     readTokenFn?: typeof readToken;
     postCommentFn?: typeof postComment;
     buildMetadataFooterFn?: typeof buildMetadataFooter;
+    missionStore?: MissionStore | null;
   } = {}
 ): Promise<void> {
   const log = options.log || fmt.log.plain;
@@ -1126,6 +1128,7 @@ export async function commentRound(
   const writeReviewStateFn = options.writeReviewStateFn || writeReviewState;
   const resolveReviewUserFn = options.resolveReviewUserFn || options.resolveForgejoUserFn || resolveReviewUser;
   const rootDir = options.rootDir || resolveWorktree(slug) || process.cwd();
+  const missionStore = options.missionStore;
 
   let reviewIdentity = (await resolveReviewIdentity(slug, rootDir, {
     readReviewStateFn,
@@ -1154,7 +1157,7 @@ export async function commentRound(
 
   const currentState = await Promise.resolve(readReviewStateFn(slug, rootDir));
   if (currentState) {
-    await persistReviewStateOrThrow(writeReviewStateFn, slug, currentState, rootDir);
+    await persistReviewStateOrThrow(writeReviewStateFn, slug, currentState, rootDir, missionStore);
   }
 }
 
@@ -1179,6 +1182,7 @@ export async function consumeArtifacts(
     createEventFn?: typeof createEvent;
     readArtifactFn?: unknown;
     deleteArtifactFn?: unknown;
+    missionStore?: MissionStore | null;
   } = {}
 ): Promise<{ ok: boolean; consumed: boolean; reviewState?: string | null }> {
   const log = options.log || fmt.log.plain;
@@ -1214,6 +1218,18 @@ export async function consumeArtifacts(
     log(fmt.status('WARN', `No reviewer identity resolved; defaulting to "${reviewer}"`));
   }
 
+  // Read current state so consumeHumanNotes can merge dedup metadata in-place.
+  // Create initial state BEFORE consuming so dedup keys are recorded even on
+  // the very first invocation (N1: dedup durable from first run).
+  let currentState = await readReviewStateFn(slug, worktree);
+  if (!currentState) {
+    currentState = new ReviewState(slug, {
+      reviewer,
+      round: 1,
+      phase: 'reviewing',
+    });
+  }
+
   // Consume artifacts - this will create reviewer_findings and reviewer_outcome events
   const result = await consumeReviewerArtifactsFn(slug, reviewer, {
     worktree,
@@ -1224,6 +1240,7 @@ export async function consumeArtifacts(
     createEventFn: options.createEventFn as any,
     readArtifactFn: options.readArtifactFn as any,
     deleteArtifactFn: options.deleteArtifactFn as any,
+    currentState,
   });
 
   if (!result.consumed) {
@@ -1236,17 +1253,10 @@ export async function consumeArtifacts(
     return { ok: false, consumed: true };
   }
 
-  // Record the artifact location on the Review if it isn't there yet
-  const persisted = await readReviewStateFn(slug, worktree);
-  if (!persisted) {
-    const initialState = new ReviewState(slug, {
-      reviewer,
-      round: 1,
-      phase: 'reviewing',
-    });
-    await persistReviewStateOrThrow(writeReviewStateFn, slug, initialState, worktree);
-    log(fmt.status('INFO', 'Started a review for artifact consumption.'));
-  }
+  // Persist state (includes dedup metadata merged by consumeHumanNotes).
+  // If this was the first invocation, the initial state is now populated with
+  // dedup keys and review data from artifact consumption.
+  await persistReviewStateOrThrow(writeReviewStateFn, slug, currentState as any, worktree, options.missionStore);
 
   // Transition backlog task to review status
   if (taskResolution.ok) {
@@ -1302,6 +1312,7 @@ export async function submitReviewRound(
     getPrAuthorFn?: unknown;
     createEventFn?: typeof createEvent;
     buildMetadataFooterFn?: typeof buildMetadataFooter;
+    missionStore?: MissionStore | null;
   } = {}
 ): Promise<void> {
   const log = options.log || fmt.log.plain;
@@ -1350,7 +1361,7 @@ export async function submitReviewRound(
         phase: phaseForOutcome,
       });
     }
-    await persistReviewStateOrThrow(writeReviewStateFn, slug, stateToWrite, worktree);
+    await persistReviewStateOrThrow(writeReviewStateFn, slug, stateToWrite, worktree, options.missionStore);
 
     // Also transition the backlog task for provider=none so integrate preflight passes
     const backlogStatusMap: Record<string, string> = {
@@ -1424,7 +1435,7 @@ export async function submitReviewRound(
       currentState.disposition = 'REQUEST_CHANGES';
       try { currentState.transitionTo('fixing'); } catch (_) { /* ignore */ }
     }
-    await persistReviewStateOrThrow(writeReviewStateFn, slug, currentState, worktree);
+    await persistReviewStateOrThrow(writeReviewStateFn, slug, currentState, worktree, options.missionStore);
   }
 
   const taskResolution = resolveTaskFileFn(slug, worktree);

@@ -142,6 +142,8 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
         createEventFn: persistence.createEvent,
         readAllEventsFn: persistence.readAllEvents,
         backfillReviewFn: persistence.backfillReview,
+        consumeReviewerArtifactsFn: persistence.consumeReviewerArtifacts,
+        consumeImplementerArtifactsFn: persistence.consumeImplementerArtifacts,
         startReviewLoopFn: (slug: string, loopOptions: Record<string, unknown>) => startReviewLoop(slug, {
           ...loopOptions,
           ...reviewLoopBindings(services.mission!.store),

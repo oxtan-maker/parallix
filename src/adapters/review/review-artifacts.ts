@@ -9,6 +9,7 @@ import * as path from 'path';
 import * as fmt from '../../application/presentation/cli-format.js';
 import { missionBranchName, resolveWorktree } from '../filesystem/mission-utils.js';
 import { readReviewState, writeReviewState, reviewStateFile, ReviewState, resolveReviewIdentity, persistReviewStateOrThrow } from './review-state.js';
+import type { MissionStore } from '../../application/domain-ports.js';
 import { readToken, postComment, postReview, getPrAuthor, isEnabled, resolveArtifactDir as resolveConfiguredArtifactDir } from './review-adapter.js';
 import { createEvent, consumeHumanNotes, VALID_EVENT_TYPES, CreateEventParams, CreateEventOptions, CreateEventResult } from './review-events.js';
 
@@ -172,6 +173,7 @@ async function recordLocalReviewVerdict(
     log?: (_msg: string) => void;
     error?: (_msg: string) => void;
     reviewer?: string;
+    missionStore?: MissionStore | null;
   } = {}
 ): Promise<void> {
   const worktree = options.worktree || resolveWorktree(slug) || process.cwd();
@@ -197,7 +199,7 @@ async function recordLocalReviewVerdict(
     state.disposition = 'REQUEST_CHANGES';
     try { state.transitionTo('fixing'); } catch { /* ignore */ }
   }
-  await persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree);
+  await persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree, options.missionStore);
 
   createEventFn(slug, VALID_EVENT_TYPES.REVIEWER_OUTCOME, { verdict: outcome, content: `Review verdict: ${outcome}` }, { worktree, log: log, error });
 }
@@ -302,6 +304,8 @@ async function consumeReviewerArtifacts(
     buildMetadataFooterFn?: (_s: string, _r?: string) => string | Promise<string>;
     createEventFn?: (_s: string, _t: string, _p: CreateEventParams, _o: CreateEventOptions) => CreateEventResult | Promise<CreateEventResult>;
     readReviewStateFn?: (_s: string, _r?: string) => any;
+    writeReviewStateFn?: typeof writeReviewState;
+    currentState?: { metadata?: Record<string, unknown> } | null;
   } = {}
 ): Promise<{ consumed: boolean; ok?: boolean; reviewState?: string | null }> {
   const log = options.log || fmt.log.plain;
@@ -391,6 +395,8 @@ async function consumeReviewerArtifacts(
       readTokenFn: options.readTokenFn,
       reviewIdentity: reviewer,
       worktree,
+      writeReviewStateFn: options.writeReviewStateFn,
+      currentState: options.currentState,
       log: log,
       error
     });
@@ -459,6 +465,8 @@ async function consumeImplementerArtifacts(
     buildMetadataFooterFn?: (_s: string, _r?: string) => string | Promise<string>;
     createEventFn?: (_s: string, _t: string, _p: CreateEventParams, _o: CreateEventOptions) => CreateEventResult | Promise<CreateEventResult>;
     readReviewStateFn?: (_s: string, _r?: string) => any;
+    writeReviewStateFn?: typeof writeReviewState;
+    currentState?: { metadata?: Record<string, unknown> } | null;
   } = {}
 ): Promise<{ consumed: boolean; ok?: boolean; disposition?: string | null }> {
   const log = options.log || fmt.log.plain;
@@ -561,6 +569,8 @@ async function consumeImplementerArtifacts(
       readTokenFn: options.readTokenFn,
       reviewIdentity: implementer,
       worktree,
+      writeReviewStateFn: options.writeReviewStateFn,
+      currentState: options.currentState,
       log: log,
       error
     });
