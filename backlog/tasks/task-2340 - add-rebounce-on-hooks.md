@@ -1,12 +1,15 @@
 ---
 id: TASK-2340
 title: add rebounce on hooks
-status: active
-assignee: [codex]
+status: ready-for-integration
+assignee:
+  - codex
 created_date: '2026-08-04 11:33'
-labels: [user_value]
+updated_date: '2026-08-09 17:40'
+labels:
+  - user_value
 dependencies: []
-ordinal: 74900
+ordinal: 69000
 ---
 
 ## Description
