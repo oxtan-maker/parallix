@@ -5,7 +5,7 @@ status: review
 assignee:
   - custom
 created_date: '2026-08-08 18:05'
-updated_date: '2026-08-09 04:09'
+updated_date: '2026-08-09 04:16'
 labels:
   - ai_sdlc
   - bug
@@ -16,6 +16,8 @@ ordinal: 2000
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
+`px stats` conflates three identities in one "Agent family" column: agent family (`codex`/`claude`/`custom`/`vibe`), concrete model (`gpt-5.6-terra`, `qwen3.6-27b`, `mistral`), and the merge sentinel `mixed`. Review-stage rows also store the reviewer in the `implementer` field (`src/adapters/cli/commands/stats.ts:1717`), so reviewers are counted as implementers. Evidence below.
+
 Current week (2026-08-02 → 2026-08-08)
 # missions  # user value missions  # AI SDLC missions  # unknown missions  
 19          5                      14                  0                   

@@ -1418,32 +1418,34 @@ test('task-1251: telemetryToStatsFields maps codex telemetry, with honest-zero f
 test('task-1301: renderRangeStatsReport counts unique missions when a mission has multiple stage rows', () => {
   // task-alpha has 3 stage rows (draft, active, review) — should count as 1 mission
   // task-beta has 2 stage rows (active, review) — should count as 1 mission
+  // Only the final stage row per mission is closed (matches real data shape).
   const rows = [
-    { date: '2026-06-10', mission: 'task-alpha', classification: 'ai_sdlc', implementer: 'custom', pr_fix_rounds: '0', stage: 'draft', closed: 'yes' },
-    { date: '2026-06-10', mission: 'task-alpha', classification: 'ai_sdlc', implementer: 'custom', pr_fix_rounds: '0', stage: 'active', closed: 'yes' },
+    { date: '2026-06-10', mission: 'task-alpha', classification: 'ai_sdlc', implementer: 'custom', pr_fix_rounds: '0', stage: 'draft', closed: 'no' },
+    { date: '2026-06-10', mission: 'task-alpha', classification: 'ai_sdlc', implementer: 'custom', pr_fix_rounds: '0', stage: 'active', closed: 'no' },
     { date: '2026-06-10', mission: 'task-alpha', classification: 'ai_sdlc', implementer: 'custom', pr_fix_rounds: '1', stage: 'review', closed: 'yes' },
-    { date: '2026-06-10', mission: 'task-beta', classification: 'user_value', implementer: 'codex', pr_fix_rounds: '0', stage: 'active', closed: 'yes' },
+    { date: '2026-06-10', mission: 'task-beta', classification: 'user_value', implementer: 'codex', pr_fix_rounds: '0', stage: 'active', closed: 'no' },
     { date: '2026-06-10', mission: 'task-beta', classification: 'user_value', implementer: 'codex', pr_fix_rounds: '2', stage: 'review', closed: 'yes' },
   ];
   const report = stats.renderRangeStatsReport(rows, { from: '2026-06-10', to: '2026-06-10' });
   const plain = require('../.test-runtime/application/presentation/cli-format.js').stripAnsi(report);
   assert.match(plain, /2\s+1\s+1/); // 2 missions total, 1 user_value, 1 ai_sdlc
   assert.match(plain, /codex\s+1\s+2\.00/); // 1 unique codex mission with pr_fix_rounds=2
-  assert.match(plain, /\bcustom\s+1\s+1\.00/); // 1 unique custom mission with highest pr_fix_rounds=1
+  assert.match(plain, /\bcustom\s+1\s+1\.00/); // 1 unique custom mission with pr_fix_rounds=1
 });
 
 test('task-1314: renderRangeStatsReport counts same mission separately across repos', () => {
+  // Only the final stage row per (repo, mission) is closed (matches real data shape).
   const rows = [
-    { date: '2026-06-10', repo: 'visualboard', mission: 'task-alpha', classification: 'ai_sdlc', implementer: 'custom', pr_fix_rounds: '0', stage: 'draft', closed: 'yes' },
+    { date: '2026-06-10', repo: 'visualboard', mission: 'task-alpha', classification: 'ai_sdlc', implementer: 'custom', pr_fix_rounds: '0', stage: 'draft', closed: 'no' },
     { date: '2026-06-10', repo: 'visualboard', mission: 'task-alpha', classification: 'ai_sdlc', implementer: 'custom', pr_fix_rounds: '1', stage: 'review', closed: 'yes' },
-    { date: '2026-06-10', repo: 'parallix', mission: 'task-alpha', classification: 'user_value', implementer: 'codex', pr_fix_rounds: '2', stage: 'draft', closed: 'yes' },
+    { date: '2026-06-10', repo: 'parallix', mission: 'task-alpha', classification: 'user_value', implementer: 'codex', pr_fix_rounds: '2', stage: 'draft', closed: 'no' },
     { date: '2026-06-10', repo: 'parallix', mission: 'task-alpha', classification: 'user_value', implementer: 'codex', pr_fix_rounds: '3', stage: 'review', closed: 'yes' },
   ];
   const report = stats.renderRangeStatsReport(rows, { from: '2026-06-10', to: '2026-06-10' });
   const plain = require('../.test-runtime/application/presentation/cli-format.js').stripAnsi(report);
   assert.match(plain, /2\s+1\s+1/); // two repo-distinct missions with the same slug
-  assert.match(plain, /codex\s+1\s+3\.00/); // repo-distinct custom/codex rows stay separate
-  assert.match(plain, /\bcustom\s+1\s+1\.00/);
+  assert.match(plain, /codex\s+1\s+3\.00/); // repo-distinct codex mission with pr_fix_rounds=3
+  assert.match(plain, /\bcustom\s+1\s+1\.00/); // repo-distinct custom mission with pr_fix_rounds=1
 });
 
 // task-1318: review rows keep the MISSION implementer for grouping while
@@ -1622,16 +1624,18 @@ test('summarizeAgentWindow reports the stored fix-round count, and honors an inj
   // aggregate, so the renderer reports it rather than re-deriving it from
   // mission-local files (which no longer exist). A caller that has already
   // derived a count can still inject one.
+  // Only the closed rollup row carries the authoritative pr_fix_rounds.
   const window = { start: new Date('2026-06-10T00:00:00Z'), end: new Date('2026-06-16T00:00:00Z') };
   const rows = [
-    { date: '2026-06-13', repo: '', mission: 'task-3000', implementer: 'codex', stage: 'active', classification: 'ai_sdlc', pr_fix_rounds: '2', closed: 'yes' },
-    { date: '2026-06-13', repo: '', mission: 'task-3000', implementer: 'codex', stage: 'review', classification: 'ai_sdlc', pr_fix_rounds: '0', closed: 'yes' },
+    { date: '2026-06-13', repo: '', mission: 'task-3000', implementer: 'codex', stage: 'active', classification: 'ai_sdlc', pr_fix_rounds: '0', closed: 'no' },
+    { date: '2026-06-13', repo: '', mission: 'task-3000', implementer: 'codex', stage: 'review', classification: 'ai_sdlc', pr_fix_rounds: '0', closed: 'no' },
+    { date: '2026-06-13', repo: '', mission: 'task-3000', implementer: 'codex', stage: 'default', classification: 'ai_sdlc', pr_fix_rounds: '2', closed: 'yes' },
   ];
 
   const stored = stats._internals.summarizeAgentWindow(rows, window);
   assert.equal(stored[0].implementer, 'codex');
   assert.equal(stored[0].missions, 1);
-  assert.equal(stored[0].averageFixRounds, '2.00', 'the highest stored count for the mission is used');
+  assert.equal(stored[0].averageFixRounds, '2.00', 'pr_fix_rounds from closed rollup row');
 
   const injected = stats._internals.summarizeAgentWindow(rows, window, {
     rootDir: '/does-not-matter',
