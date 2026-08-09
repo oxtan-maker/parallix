@@ -39,6 +39,7 @@ export interface LaneColumnProps {
   readonly wipLimit?: number;
   /** Median cycle time for this lane (minutes). When present, rendered in header. */
   readonly medianCycleTime?: number | null;
+  readonly medianSampleSize?: number;
   /** Content width of the column, in columns. */
   readonly width?: number;
   /** Maximum cards rendered before the "+N more" indicator. */
@@ -61,6 +62,7 @@ export function LaneColumn({
   count,
   wipLimit,
   medianCycleTime,
+  medianSampleSize,
   width = DEFAULT_CARD_WIDTH,
   maxVisibleCards = DEFAULT_VISIBLE_CARDS,
   visibleStart = 0,
@@ -81,7 +83,7 @@ export function LaneColumn({
         <Text bold>{LANE_LABELS[stage.lane]}</Text>
         <Text color={overLimit ? 'yellow' : 'gray'} bold={overLimit}>{` ${wipText}`}</Text>
         {medianCycleTime !== undefined && medianCycleTime !== null && (
-          <Text color="gray">{` med ${medianCycleTime}m`}</Text>
+          <Text color="gray">{` med ${medianCycleTime}m (n=${medianSampleSize ?? 0})`}</Text>
         )}
       </Box>
 

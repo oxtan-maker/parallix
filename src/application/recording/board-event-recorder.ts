@@ -21,6 +21,7 @@ import type { MissionCommand, MissionTransition } from '../../domain/mission-wor
  */
 export class BoardEventRecorder {
   private readonly laneEventRepo: BoardLaneEventRepository;
+  private _failureCount = 0;
 
   constructor(laneEventRepo: BoardLaneEventRepository) {
     this.laneEventRepo = laneEventRepo;
@@ -35,6 +36,10 @@ export class BoardEventRecorder {
   async append(event: LaneTransitionEvent): Promise<boolean> {
     return await this.laneEventRepo.append(eventToEntry(event));
   }
+
+  get failureCount(): number { return this._failureCount; }
+
+  recordFailure(): void { this._failureCount += 1; }
 }
 
 /**
@@ -46,12 +51,13 @@ export class BoardEventRecorder {
  * the caller proceeds. Returns `true` only when a new row was written.
  */
 export async function recordLaneTransitionSafely(
-  recorder: Pick<BoardEventRecorder, 'append'>,
+  recorder: Pick<BoardEventRecorder, 'append'> & Partial<Pick<BoardEventRecorder, 'recordFailure'>>,
   event: LaneTransitionEvent,
 ): Promise<boolean> {
   try {
     return await recorder.append(event);
   } catch {
+    recorder.recordFailure?.();
     return false;
   }
 }

@@ -10,6 +10,7 @@ import {
   loadDefaultMigrations,
 } from '../src/adapters/sqlite/migration-runner.js';
 import { SqliteBoardLaneEventRepository } from '../src/adapters/sqlite/board-lane-event-repository.js';
+import type { BoardLaneEventRepository } from '../src/application/ports/operation-history.js';
 import {
   BoardEventRecorder,
   recordLaneTransitionSafely,
@@ -214,6 +215,17 @@ describe('recordLaneTransitionSafely — telemetry never blocks (SC4)', () => {
       result = await recordLaneTransitionSafely(throwingRecorder, event());
     });
     assert.equal(result, false, 'a recording failure is swallowed and reported as not-written');
+  });
+
+  it('counts a failed write while preserving the non-blocking result', async () => {
+    const recorder = new BoardEventRecorder({
+      async append() { throw new Error('storage unavailable'); },
+    } as unknown as BoardLaneEventRepository);
+
+    const wrote = await recordLaneTransitionSafely(recorder, event());
+
+    assert.equal(wrote, false);
+    assert.equal(recorder.failureCount, 1);
   });
 
   it('propagates a successful write result', async () => {

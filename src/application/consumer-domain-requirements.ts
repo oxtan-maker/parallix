@@ -377,7 +377,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'ui-lane-transition-history',
     family: 'ui-board',
     fileLocation: 'src/application/recording/board-event-recorder.ts',
-    line: 35,
+    line: 36,
     anchor: 'append(event: LaneTransitionEvent)',
     reads: ['LaneTransitionEvent', 'Mission'],
     requirement:

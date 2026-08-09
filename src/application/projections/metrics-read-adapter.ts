@@ -4,7 +4,7 @@ import type { MissionId, MissionStatus } from '../../domain/mission.js';
 import type { MissionTransition } from '../../domain/mission-workflow.js';
 import type { MissionOutcome } from '../../domain/usage.js';
 import type { RepositoryId } from '../../domain/repository.js';
-import type { BoardMetrics } from './board.js';
+import type { BoardMetrics, MetricsProvenance, StatisticsHealth } from './board.js';
 import type { AgentAvailabilityRow } from './agent-status.js';
 import { buildMetrics } from './metrics.js';
 
@@ -64,13 +64,16 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
       this.usageRepo.findAll(),
     ]);
 
-    const transitions = this.entriesToTransitions(entries);
-    const outcomes = this.usageRecordsToOutcomes(usageRecords, this.repositoryId);
+    const transitionRows = this.entriesToTransitions(entries);
+    const outcomeRows = this.usageRecordsToOutcomes(usageRecords, this.repositoryId);
+    const transitions = transitionRows.transitions;
+    const outcomes = outcomeRows.outcomes;
+    const scopedUsageRecords = usageRecords.filter((record) => record.repo === this.repositoryId);
 
     // Derive instants from transition timestamps
-    const instants = this.deriveInstants(transitions, usageRecords);
+    const instants = this.deriveInstants(transitions, scopedUsageRecords);
 
-    return buildMetrics({
+    const metrics = buildMetrics({
       initialStates,
       transitions,
       outcomes,
@@ -78,6 +81,24 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
       agentAvailability,
       asOf: instants.at(-1),
     });
+    const timestamps = this.eventTimestamps(entries, scopedUsageRecords);
+    const rejectedOrMissingIdentityRowCount = transitionRows.rejected + outcomeRows.rejected;
+    const completedMissions = [...initialStates.values()].filter((status) => status === 'done').length;
+    const health: StatisticsHealth = {
+      state: rejectedOrMissingIdentityRowCount > 0 ? 'partial'
+        : timestamps.length === 0 && completedMissions > 0 ? 'pre-lifecycle'
+          : timestamps.length === 0 ? 'no-telemetry'
+            : outcomes.length === 0 ? 'no-completions' : 'healthy',
+    };
+    const provenance: MetricsProvenance = {
+      repositoryId: this.repositoryId,
+      evaluatedWindow: { startedAt: timestamps[0] ?? null, endedAt: timestamps.at(-1) ?? null },
+      sampleSize: outcomes.length,
+      newestEventTimestamp: timestamps.at(-1) ?? null,
+      rejectedOrMissingIdentityRowCount,
+      adapterSucceeded: true,
+    };
+    return { ...metrics, health, provenance };
   }
 
   // -----------------------------------------------------------------------
@@ -86,10 +107,9 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
 
   private entriesToTransitions(
     entries: readonly BoardLaneEventEntry[],
-  ): readonly MissionTransition[] {
-    return entries
-      .map((entry) => entryToMissionTransition(entry))
-      .filter((t): t is MissionTransition => t !== null);
+  ): { readonly transitions: readonly MissionTransition[]; readonly rejected: number } {
+    const mapped = entries.map((entry) => entryToMissionTransition(entry));
+    return { transitions: mapped.filter((t): t is MissionTransition => t !== null), rejected: mapped.filter((t) => t === null).length };
   }
 
   // -----------------------------------------------------------------------
@@ -99,7 +119,7 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
   private usageRecordsToOutcomes(
     records: readonly UsageRecord[],
     repositoryId: RepositoryId,
-  ): readonly MissionOutcome[] {
+  ): { readonly outcomes: readonly MissionOutcome[]; readonly rejected: number } {
     // Filter to this repository's records
     const scopedRecords = records.filter(
       (r) => (r.repo ?? '') === repositoryId,
@@ -112,8 +132,10 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
       reviewFixRounds: number;
     }>();
 
+    let rejected = 0;
     for (const record of scopedRecords) {
       if (!record.mission) {
+        rejected += 1;
         continue;
       }
       // Key by (repository, mission) so same mission slug in different repos
@@ -134,10 +156,10 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
       }
     }
 
-    return [...outcomeMap.values()].map((o) => ({
+    return { outcomes: [...outcomeMap.values()].map((o) => ({
       ...o,
       runs: [],
-    }));
+    })), rejected };
   }
 
   // -----------------------------------------------------------------------
@@ -169,6 +191,13 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
     }
 
     return [...seen].sort();
+  }
+
+  private eventTimestamps(entries: readonly BoardLaneEventEntry[], usageRecords: readonly UsageRecord[]): readonly string[] {
+    return [...new Set([
+      ...entries.map((entry) => entry.occurredAt).filter(Boolean),
+      ...usageRecords.filter((record) => record.date).map((record) => `${record.date}T00:00:00Z`),
+    ])].sort();
   }
 }
 

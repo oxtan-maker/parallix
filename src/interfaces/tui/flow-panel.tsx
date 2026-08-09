@@ -19,11 +19,11 @@ function legend(flow: BoardMetrics['cumulativeFlowByState']['series'][number] | 
   return `Legend: ${Object.keys(flow.counts).map((lane) => `${lane} ■`).join(' · ')}`;
 }
 
-function LaneRows({ label, metric, suffix = '' }: { label: string; metric: LaneMetricSeries; suffix?: string }): React.ReactElement {
+function LaneRows({ label, metric, sampleSize, suffix = '' }: { label: string; metric: LaneMetricSeries; sampleSize: number; suffix?: string }): React.ReactElement {
   return (
     <Box flexDirection="column">
       <Text bold>{label}</Text>
-      {metric.series.map((entry) => <Text key={entry.lane}>{`${entry.lane}: ${display(entry.value, suffix)}`}</Text>)}
+      {metric.series.map((entry) => <Text key={entry.lane}>{`${entry.lane}: ${display(entry.value, suffix)} (n=${sampleSize})`}</Text>)}
       <Text dimColor>{history(label, metric.missingHistoryFallback)}</Text>
     </Box>
   );
@@ -41,24 +41,29 @@ export function FlowPanel({ metrics, columns }: { readonly metrics: BoardMetrics
   const flow = metrics.cumulativeFlowByState.series.at(-1);
   const throughput = metrics.weeklyThroughput.series.at(-1)?.value;
   const loopRate = metrics.reviewLoopRate.series.at(-1)?.value;
+  // Older cached projections can lack the new provenance contract; render a
+  // neutral zero sample rather than making the board unavailable.
+  const sampleSize = metrics.provenance?.sampleSize ?? 0;
+  const healthState = metrics.health?.state ?? 'no-telemetry';
 
   return (
     <Box flexDirection="column" marginTop={1}>
       <Text bold color="cyan">FLOW{narrow ? ' · textual' : ''}</Text>
+      <Text color={healthState === 'unavailable' ? 'red' : healthState === 'partial' ? 'yellow' : 'gray'}>{`Statistics: ${healthState} · n=${sampleSize}`}</Text>
       <Box flexDirection={narrow ? 'column' : 'row'}>
         <Box flexDirection="column" marginRight={narrow ? 0 : 4}>
           <Text bold>CUMULATIVE FLOW</Text>
           <Text>{flow ? Object.entries(flow.counts).map(([lane, count]) => `${lane} ${count}`).join(' · ') : 'unavailable'}</Text>
           <Text dimColor>{history('Cumulative flow', metrics.cumulativeFlowByState.missingHistoryFallback)}</Text>
           <Text dimColor>{legend(flow)}</Text>
-          <Text>{`Weekly throughput: ${display(throughput)}`}</Text>
+          <Text>{`Weekly throughput: ${display(throughput)} (n=${sampleSize})`}</Text>
           <Text dimColor>{history('Weekly throughput', metrics.weeklyThroughput.missingHistoryFallback)}</Text>
-          <Text>{`Review-to-active loop rate: ${display(loopRate)}`}</Text>
+          <Text>{`Review-to-active loop rate: ${display(loopRate)} (n=${sampleSize})`}</Text>
           <Text dimColor>{history('Review-to-active loop rate', metrics.reviewLoopRate.missingHistoryFallback)}</Text>
         </Box>
         <Box flexDirection="column" marginRight={narrow ? 0 : 4}>
-          <LaneRows label="Median cycle time" metric={metrics.medianCycleTimeByState} suffix=" min" />
-          <LaneRows label="Median lane age" metric={metrics.medianAgeByLane} suffix=" min" />
+          <LaneRows label="Median cycle time" metric={metrics.medianCycleTimeByState} sampleSize={sampleSize} suffix=" min" />
+          <LaneRows label="Median lane age" metric={metrics.medianAgeByLane} sampleSize={sampleSize} suffix=" min" />
         </Box>
         <Box flexDirection="column">
           <Text bold>READ</Text>

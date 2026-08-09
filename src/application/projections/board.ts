@@ -109,6 +109,10 @@ export interface BoardProjection {
 }
 
 export interface BoardMetrics {
+  /** Collection health is separate from metric-level missing-history fallbacks. */
+  readonly health: StatisticsHealth;
+  /** The exact data set used to derive this metrics projection. */
+  readonly provenance: MetricsProvenance;
   readonly cumulativeFlow: MetricSeries;
   /**
    * Running agent sessions that could not be attributed to a family, or `null`
@@ -125,6 +129,21 @@ export interface BoardMetrics {
   readonly medianAgeByLane: LaneMetricSeries;
   readonly agentAvailability: readonly AgentAvailabilityMetric[];
   readonly bottleneck: BottleneckNarrative;
+}
+
+export type StatisticsHealthState = 'healthy' | 'partial' | 'unavailable' | 'no-completions' | 'no-telemetry' | 'pre-lifecycle';
+
+export interface StatisticsHealth {
+  readonly state: StatisticsHealthState;
+}
+
+export interface MetricsProvenance {
+  readonly repositoryId: RepositoryId;
+  readonly evaluatedWindow: { readonly startedAt: string | null; readonly endedAt: string | null };
+  readonly sampleSize: number;
+  readonly newestEventTimestamp: string | null;
+  readonly rejectedOrMissingIdentityRowCount: number;
+  readonly adapterSucceeded: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -160,6 +179,20 @@ function emptyFlowMetrics(): Pick<BoardMetrics, 'cumulativeFlowByState' | 'media
   };
 }
 
+function defaultHealth(): Pick<BoardMetrics, 'health' | 'provenance'> {
+  return {
+    health: { state: 'no-telemetry' },
+    provenance: {
+      repositoryId: '' as RepositoryId,
+      evaluatedWindow: { startedAt: null, endedAt: null },
+      sampleSize: 0,
+      newestEventTimestamp: null,
+      rejectedOrMissingIdentityRowCount: 0,
+      adapterSucceeded: true,
+    },
+  };
+}
+
 /** Build BoardMetrics with explicit missing-history fallback behavior. */
 export function buildBoardMetrics(
   _cumulativeFlow: MetricSeries,
@@ -189,6 +222,7 @@ export function buildBoardMetrics(
   if (extensions.length === 0) {
     const defaults = emptyFlowMetrics();
     return {
+      ...defaultHealth(),
       cumulativeFlow,
       ...defaults,
       medianStateTimes: stateFlowOrMedianStateTimes as MetricSeries,
@@ -198,6 +232,7 @@ export function buildBoardMetrics(
   }
   const [throughput, weeklyThroughput, reviewLoopRate, medianAgeByLane, agentAvailability, bottleneck] = extensions as readonly [MetricSeries, MetricSeries, MetricSeries, LaneMetricSeries, readonly AgentAvailabilityMetric[], BottleneckNarrative];
   return {
+    ...defaultHealth(),
     cumulativeFlow,
     cumulativeFlowByState: stateFlowOrMedianStateTimes as StateFlowSeries,
     medianStateTimes: medianStateTimesOrThroughput,
