@@ -38,9 +38,7 @@ interface StartPiAgentOptions {
   sessionMarkerPort?: SessionMarkerPort;
 }
 
-// Lazily-loaded SDK (ESM-only, loaded via dynamic import in CJS context).
-// TypeScript compiles `await import('...')` to `require('...')` for CJS output,
-// which fails for ESM-only packages. Use a raw dynamic import instead.
+// Lazily-loaded SDK, using native dynamic import to avoid startup cost.
 let _sdk: any = null;
 async function loadSdk() {
   if (!_sdk) {

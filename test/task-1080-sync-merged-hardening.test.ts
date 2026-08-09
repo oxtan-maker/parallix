@@ -1,8 +1,13 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const { syncMerged } = require('../.test-runtime/adapters/forgejo/forgejo.js');
 
+
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const syncMergedModule = mockModule<typeof import('../src/adapters/forgejo/forgejo.js')>('../src/adapters/forgejo/forgejo.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const { syncMerged } = syncMergedModule;
 test('syncMerged retries twice on stale info rejection with strong assertions', (t) => {
   const branch = 'mission/task-1080';
   const mergedCommit = 'abc1234';
@@ -20,18 +25,18 @@ test('syncMerged retries twice on stale info rejection with strong assertions', 
       }
       if (pushCalls.length === 2) {
         // Second push: mission branch (FAIL - stale)
-        return { 
-          status: 1, 
-          stdout: '', 
-          stderr: 'error: failed to push some refs to ... stale info' 
+        return {
+          status: 1,
+          stdout: '',
+          stderr: 'error: failed to push some refs to ... stale info'
         };
       }
       if (pushCalls.length === 3) {
         // Third push: mission branch retry after fetch (FAIL - still stale)
-        return { 
-          status: 1, 
-          stdout: '', 
-          stderr: 'error: failed to push some refs to ... fetch first' 
+        return {
+          status: 1,
+          stdout: '',
+          stderr: 'error: failed to push some refs to ... fetch first'
         };
       }
       // Fourth push: mission branch retry with force (SUCCESS)
@@ -52,13 +57,13 @@ test('syncMerged retries twice on stale info rejection with strong assertions', 
   const result = syncMerged(branch, mergedCommit, options);
 
   assert.strictEqual(result.ok, true, 'syncMerged should succeed after retries');
-  
+
   // Verify push sequence
   assert.strictEqual(pushCalls.length, 4, 'Should have 4 push calls (primary, mission, retry1, retry2)');
-  
+
   // Call 1: Primary branch push
   assert.ok(pushCalls[0].dest.endsWith('main') || pushCalls[0].dest.endsWith('master'), `First push should be to primary branch (actual: ${pushCalls[0].dest})`);
-  
+
   // Call 2: Mission branch push (initial)
   assert.strictEqual(pushCalls[1].dest, 'refs/heads/mission/task-1080');
   assert.strictEqual(pushCalls[1].opts.forceWithLease, true);
@@ -66,7 +71,7 @@ test('syncMerged retries twice on stale info rejection with strong assertions', 
   // Call 3: Mission branch retry 1 (force-with-lease again)
   assert.strictEqual(pushCalls[2].dest, 'refs/heads/mission/task-1080');
   assert.strictEqual(pushCalls[2].opts.forceWithLease, true);
-  
+
   // Call 4: Mission branch retry 2 (force)
   assert.strictEqual(pushCalls[3].dest, 'refs/heads/mission/task-1080');
   assert.strictEqual(pushCalls[3].opts.force, true);

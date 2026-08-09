@@ -5,6 +5,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { agentFamily } from '../src/domain/agents.js';
 import { resolveKnownAgentFamilies } from '../src/interfaces/tui/agent-config-resolver.js';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // ---------------------------------------------------------------------------
 // task-2336 reproduction — the px board agent strip renders the literal

@@ -1,16 +1,12 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
 
-const {
-  resolvePostIntegrateCommand,
-  buildPostIntegrateHookEnv,
-  runPostIntegrateHook,
-} = require('../.test-runtime/adapters/process/post-integrate-hook.js');
 
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { resolvePostIntegrateCommand, buildPostIntegrateHookEnv, runPostIntegrateHook, } from '../src/adapters/process/post-integrate-hook.js';
 function withTempDir(fn) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-post-integrate-hook-'));
   try {

@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { eligibleAgentsForStep, workflowLauncherStatus } from './agents.js';
 import { packageRoot } from '../filesystem/package-root.js';
 
-const MODULE_DIR = import.meta.url ? path.dirname(fileURLToPath(import.meta.url)) : __dirname;
+const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 const CONFIG_PATH = path.join(packageRoot(MODULE_DIR), 'config', 'agents.json');
 
 interface LauncherStatusResult {

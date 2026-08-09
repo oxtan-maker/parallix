@@ -1,11 +1,4 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-
-const stats = require('../.test-runtime/adapters/cli/commands/stats.js');
 
 // Reproduction test for task-1380: stats is counting started missions
 // instead of closed missions. This test verifies that:
@@ -13,6 +6,16 @@ const stats = require('../.test-runtime/adapters/cli/commands/stats.js');
 // 2. recordIntegrationStats sets closed: 'yes'
 // 3. summarizeMissionWindow filters out non-closed rows
 // 4. renderWeeklyStatsReport excludes in-progress missions from counts
+
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const stats = mockModule<typeof import('../src/adapters/cli/commands/stats.js')>('../src/adapters/cli/commands/stats.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
 
 test('task-1380: STATS_HEADERS includes the closed column', () => {
   assert.ok(stats.STATS_HEADERS.includes('closed'),
@@ -71,6 +74,7 @@ test('task-1380: summarizeMissionWindow excludes non-closed rows', () => {
     label: '2026-06-16 → 2026-06-23',
   };
 
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
   const result = stats._internals.summarizeMissionWindow(rows, window);
 
   assert.equal(result.total, 1,
@@ -185,6 +189,7 @@ test('task-1380: recordActiveStats does not set closed on in-progress rows (regr
     const result = stats.recordActiveStats({
       slug: 'task-5001',
       rootDir: root,
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
       dbPath: dbFile,
       model: 'codex',
       date: '2026-07-01',

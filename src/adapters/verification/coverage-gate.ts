@@ -5,12 +5,12 @@
  * and enforce a configurable line-coverage threshold (default 90%).
  *
  * Usage:
- *   node .test-runtime/adapters/verification/coverage-gate.js [--threshold <pct>] [--dry-run]
+ *   npx tsx src/adapters/verification/coverage-gate.ts [--threshold <pct>] [--dry-run]
  *
  * Exit 0 when tests pass and coverage >= threshold.
  * Exit 1 otherwise.
  *
- * Denominator: all production modules in the canonical .test-runtime mirror.
+ * Denominator: all production modules under the canonical src/ layer roots.
  * Excludes: parallix/test/*, parallix/prompts/*, parallix/config/*.json,
  *           coverage output dirs, node_modules, generated/temp files.
  *
@@ -56,7 +56,7 @@ import { fileURLToPath } from 'node:url';
 import * as fmt from '../../application/presentation/cli-format.js';
 import { packageRoot } from '../filesystem/package-root.js';
 
-const MODULE_DIR = import.meta.url ? path.dirname(fileURLToPath(import.meta.url)) : __dirname;
+const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = packageRoot(MODULE_DIR);
 const SELF_TEST_FILE = 'coverage-gate.test.ts';
 const TEMP_DIR_PREFIXES = [
@@ -78,7 +78,7 @@ const TEMP_DIR_PREFIXES = [
   'backlog-'
 ];
 const COVERAGE_INCLUDES = [
-  '.test-runtime/**/*.js'
+  'src/**/*.ts'
 ];
 const COVERAGE_EXCLUDES = [
   'test/**',
@@ -370,7 +370,7 @@ function main() {
 
   if (dryRun) {
     fmt.log.info(`DRY-RUN mode — threshold=${threshold}%`);
-    fmt.log.info('Denominator: .test-runtime/**/*.js');
+    fmt.log.info('Denominator: src/**/*.ts');
     fmt.log.info(`Include globs: ${COVERAGE_INCLUDES.join(', ')}`);
     fmt.log.info(`Exclude globs: ${COVERAGE_EXCLUDES.join(', ')}`);
     fmt.log.info(`Would run: ${fmt.command(`${process.execPath} ${buildCoverageArgs(testFiles, threshold).join(' ')}`)}`);
@@ -381,16 +381,14 @@ function main() {
   process.exit(runTests(testFiles, threshold));
 }
 
-// Entry detection for both module systems: `require.main` under the CommonJS
-// test runtime, and the invoked script path when run as an ESM script
+// Entry detection: the invoked script path when run as an ESM script
 // (`tsx src/adapters/verification/coverage-gate.ts`).
 //
 // Deliberately NOT compared against import.meta.url: this module is inlined
 // into the canonical bundle, where every inlined module reports the bundle's
 // own URL. That would make the gate run on every `px` command.
-const isCjsEntry = typeof require !== 'undefined' && require.main === module;
 const isEsmEntry = Boolean(process.argv[1]) && /[\\/]coverage-gate\.ts$/.test(process.argv[1]);
-if (isCjsEntry || isEsmEntry) {
+if (isEsmEntry) {
   main();
 }
 
@@ -422,7 +420,7 @@ function run(args: string[], options: CoverageGateOptions = {}) {
       } else {
         fmt.log.info(`Found ${testFiles.length} test file(s)`);
         fmt.log.info(`DRY-RUN mode — threshold=${threshold}%`);
-        fmt.log.info('Denominator: .test-runtime/**/*.js');
+        fmt.log.info('Denominator: src/**/*.ts');
         fmt.log.info(`Include globs: ${COVERAGE_INCLUDES.join(', ')}`);
         fmt.log.info(`Exclude globs: ${COVERAGE_EXCLUDES.join(', ')}`);
         fmt.log.info(`Would run: ${fmt.command(`${process.execPath} ${buildCoverageArgs(testFiles, threshold).join(' ')}`)}`);
@@ -460,7 +458,3 @@ function run(args: string[], options: CoverageGateOptions = {}) {
 (run as any).shouldCleanTempDir = shouldCleanTempDir;
 export default run;
 export { run, cleanupPerRunScratch, createMockGraphifyBin, createPerRunScratchDirs, createPerRunTmpRoot, COVERAGE_EXCLUDES, COVERAGE_GATE_MANIFEST_DIR, COVERAGE_INCLUDES, DEFAULT_TEST_TIMEOUT_MS, discoverTestFiles, flushCoverageManifest, listTempEntries, recoverOrphanedScratchDirs, registerExitHandlers, resetPerRunScratchState, resolveTestTimeoutMs, runTests, shouldCleanTempDir };
-
-// CJS compat: ensure require() returns the function directly
-declare const module: { exports: any } | undefined;
-if (typeof module !== 'undefined') { module.exports = run; }

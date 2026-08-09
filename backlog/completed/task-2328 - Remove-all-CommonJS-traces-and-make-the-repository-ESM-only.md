@@ -1,7 +1,7 @@
 ---
 id: TASK-2328
 title: Remove all CommonJS traces and make the repository ESM-only
-status: ready-for-integration
+status: done
 assignee: [custom]
 created_date: '2026-07-29 12:43'
 labels:
@@ -14,6 +14,9 @@ references:
   - test/run-default-tests.ts
   - src/entry/esm-globals.ts
   - scripts/build-canonical-bundle.ts
+  - TASK-2332.06
+  - src/adapters/architecture/boundary-guards.ts
+  - test/dependency-graph.test.ts
 priority: high
 ordinal: 67000
 ---
@@ -33,6 +36,7 @@ Complete the ESM cutover begun by TASK-2279. Eliminate the remaining CommonJS co
 - [ ] #5 Canonical bundle, npm package, native executable, default tests, integration tests, static analysis, and mutation defenses pass with no CommonJS compatibility runtime present.
 - [ ] #6 A repository guard fails when project code reintroduces CommonJS syntax, configuration, generated output, or references to the retired `.test-runtime` tree.
 - [ ] #7 Developer and architecture documentation describes the repository and test strategy as ESM-only and contains no active CommonJS migration guidance.
+- [ ] #8 The migration preserves the TASK-2332.06 ports-and-adapters layout: no file exists under `src/platform/`, no project-authored file names a `src/platform/` specifier, every ESM test seam and rewritten import resolves under one of the six canonical layer roots, and `test/dependency-graph.test.ts` asserts at repository level that no retired platform path survives.
 <!-- AC:END -->
 
 ## Definition of Done

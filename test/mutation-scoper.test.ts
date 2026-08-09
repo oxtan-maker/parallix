@@ -1,18 +1,15 @@
-
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
-
-const {
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {
   scopeMutationTargets,
   getChangedFiles,
   resolveCallees,
   extractLocalDependencies,
   isInScope,
-  toRuntimePath,
-} = require('../.test-runtime/adapters/git/mutation-scoper.js');
+} from '../src/adapters/git/mutation-scoper.js';
 
 const mockGit = (responses) => (args) => {
   const cmd = args.join(' ');
@@ -24,57 +21,47 @@ const mockGit = (responses) => (args) => {
   return { status: 0, stdout: '', stderr: '' };
 };
 
-// Mirrors the canonical layer tree emitted by scripts/build-test-runtime.ts.
+// Mirrors the canonical `src/` layer tree the scoper targets after TASK-2328
+// retired the transpiled CommonJS mirror. ESM specifiers name the emitted
+// `.js`, which the scoper resolves back onto the authored `.ts`.
 function makeFixtureRepo() {
   const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mutation-scoper-'));
-  const runtimeRoot = path.join(repoRoot, '.test-runtime');
-  fs.mkdirSync(path.join(runtimeRoot, 'adapters', 'cli', 'commands'), { recursive: true });
-  fs.mkdirSync(path.join(runtimeRoot, 'adapters', 'filesystem'), { recursive: true });
-  fs.writeFileSync(path.join(runtimeRoot, 'composition.js'), "const cmd = require('./adapters/cli/commands/foo.js');\n");
+  const srcRoot = path.join(repoRoot, 'src');
+  fs.mkdirSync(path.join(srcRoot, 'adapters', 'cli', 'commands'), { recursive: true });
+  fs.mkdirSync(path.join(srcRoot, 'adapters', 'filesystem'), { recursive: true });
   fs.writeFileSync(
-    path.join(runtimeRoot, 'adapters', 'cli', 'commands', 'foo.js'),
-    "const helper = require('../../filesystem/helper.js');\nmodule.exports = { helper };\n"
+    path.join(srcRoot, 'composition.ts'),
+    "import { foo } from './adapters/cli/commands/foo.js';\nexport { foo };\n",
   );
   fs.writeFileSync(
-    path.join(runtimeRoot, 'adapters', 'filesystem', 'helper.js'),
-    "const deep = require('./deep.js');\nmodule.exports = { deep };\n"
+    path.join(srcRoot, 'adapters', 'cli', 'commands', 'foo.ts'),
+    "import { helper } from '../../filesystem/helper.js';\nexport const foo = helper;\n",
   );
-  fs.writeFileSync(path.join(runtimeRoot, 'adapters', 'filesystem', 'deep.js'), "module.exports = { deep: true };\n");
-  fs.writeFileSync(path.join(runtimeRoot, 'adapters', 'filesystem', 'unused.js'), "module.exports = {};\n");
+  fs.writeFileSync(
+    path.join(srcRoot, 'adapters', 'filesystem', 'helper.ts'),
+    "import { deep } from './deep.js';\nexport const helper = deep;\n",
+  );
+  fs.writeFileSync(path.join(srcRoot, 'adapters', 'filesystem', 'deep.ts'), 'export const deep = true;\n');
+  fs.writeFileSync(path.join(srcRoot, 'adapters', 'filesystem', 'unused.ts'), 'export const unused = true;\n');
   fs.mkdirSync(path.join(repoRoot, 'test'), { recursive: true });
-  fs.writeFileSync(path.join(repoRoot, 'test', 'foo.test.js'), "require('../.test-runtime/lib/commands/foo.js');\n");
+  fs.writeFileSync(
+    path.join(repoRoot, 'test', 'foo.test.ts'),
+    "import { foo } from '../src/adapters/cli/commands/foo.js';\nexport { foo };\n",
+  );
   return repoRoot;
 }
 
-test('isInScope accepts canonical .test-runtime layer modules and rejects source, test/ and non-js', () => {
-  assert.equal(isInScope('.test-runtime/adapters/cli/commands/index.js'), true);
-  assert.equal(isInScope('.test-runtime/lib/commands/foo.js'), true);
-  assert.equal(isInScope('src/adapters/git/mutation-scoper.ts'), false);
-  assert.equal(isInScope('test/foo.test.js'), false);
+test('isInScope accepts canonical src/ layer modules and rejects test/, config and build output', () => {
+  assert.equal(isInScope('src/adapters/cli/commands/index.ts'), true);
+  assert.equal(isInScope('src/adapters/git/mutation-scoper.ts'), true);
+  assert.equal(isInScope('src/domain/mission.d.ts'), false);
+  assert.equal(isInScope('test/foo.test.ts'), false);
   assert.equal(isInScope('config/mutation-baseline.json'), false);
-  assert.equal(isInScope('dist/index.js'), false);
-  assert.equal(isInScope('dist/lib/commands/foo.js'), false);
+  assert.equal(isInScope('build/px.mjs'), false);
+  assert.equal(isInScope('scripts/build-canonical-bundle.ts'), false);
 });
 
-test('getChangedFiles filters diff output to in-scope files only', () => {
-  const gitFn = mockGit([
-    [/diff --name-only/, {
-      status: 0,
-      stdout: [
-        '.test-runtime/lib/commands/foo.js',
-        '.test-runtime/lib/core/helper.js',
-        'test/foo.test.js',
-        'README.md',
-        'config/mutation-baseline.json',
-      ].join('\n') + '\n',
-    }],
-  ]);
-
-  const result = getChangedFiles('main', 'HEAD', { gitFn, repoRoot: '/repo' });
-  assert.deepEqual(result, ['.test-runtime/lib/commands/foo.js', '.test-runtime/lib/core/helper.js']);
-});
-
-test('getChangedFiles maps tracked .ts sources to their test-runtime .js path', () => {
+test('getChangedFiles filters diff output to in-scope source files only', () => {
   const gitFn = mockGit([
     [/diff --name-only/, {
       status: 0,
@@ -82,28 +69,19 @@ test('getChangedFiles maps tracked .ts sources to their test-runtime .js path', 
         'src/adapters/cli/commands/foo.ts',
         'src/adapters/filesystem/helper.ts',
         'src/application/services/example.ts',
-        'test/foo.test.js',
+        'test/foo.test.ts',
+        'README.md',
+        'config/mutation-baseline.json',
       ].join('\n') + '\n',
     }],
   ]);
 
   const result = getChangedFiles('main', 'HEAD', { gitFn, repoRoot: '/repo' });
   assert.deepEqual(result, [
-    '.test-runtime/adapters/cli/commands/foo.js',
-    '.test-runtime/adapters/filesystem/helper.js',
-    '.test-runtime/application/services/example.js',
+    'src/adapters/cli/commands/foo.ts',
+    'src/adapters/filesystem/helper.ts',
+    'src/application/services/example.ts',
   ]);
-});
-
-test('toRuntimePath maps runtime-library .ts to .test-runtime .js and passes through everything else', () => {
-  assert.equal(
-    toRuntimePath('src/adapters/cli/commands/foo.ts'),
-    '.test-runtime/adapters/cli/commands/foo.js'
-  );
-  assert.equal(toRuntimePath('.test-runtime/lib/commands/foo.js'), '.test-runtime/lib/commands/foo.js');
-  assert.equal(toRuntimePath('README.md'), 'README.md');
-  assert.equal(toRuntimePath('src/entry/px.ts'), '.test-runtime/entry/px.js');
-  assert.equal(isInScope(toRuntimePath('src/entry/px.ts')), true);
 });
 
 test('getChangedFiles returns empty array when git diff fails', () => {
@@ -112,11 +90,11 @@ test('getChangedFiles returns empty array when git diff fails', () => {
   assert.deepEqual(result, []);
 });
 
-test('extractLocalDependencies resolves relative require() specifiers', () => {
+test('extractLocalDependencies resolves relative ESM import specifiers back onto TypeScript sources', () => {
   const repoRoot = makeFixtureRepo();
   try {
-    const deps = extractLocalDependencies('.test-runtime/adapters/cli/commands/foo.js', { repoRoot });
-    assert.deepEqual(deps, ['.test-runtime/adapters/filesystem/helper.js']);
+    const deps = extractLocalDependencies('src/adapters/cli/commands/foo.ts', { repoRoot });
+    assert.deepEqual(deps, ['src/adapters/filesystem/helper.ts']);
   } finally {
     fs.rmSync(repoRoot, { recursive: true, force: true });
   }
@@ -125,11 +103,11 @@ test('extractLocalDependencies resolves relative require() specifiers', () => {
 test('resolveCallees returns only direct callees (depth-1), not transitive', () => {
   const repoRoot = makeFixtureRepo();
   try {
-    const callees = resolveCallees(['.test-runtime/composition.js'], { repoRoot });
-    assert.deepEqual(callees, ['.test-runtime/adapters/cli/commands/foo.js']);
-    assert.ok(!callees.includes('.test-runtime/adapters/filesystem/helper.js'));
-    assert.ok(!callees.includes('.test-runtime/adapters/filesystem/deep.js'));
-    assert.ok(!callees.includes('.test-runtime/adapters/filesystem/unused.js'));
+    const callees = resolveCallees(['src/composition.ts'], { repoRoot });
+    assert.deepEqual(callees, ['src/adapters/cli/commands/foo.ts']);
+    assert.ok(!callees.includes('src/adapters/filesystem/helper.ts'));
+    assert.ok(!callees.includes('src/adapters/filesystem/deep.ts'));
+    assert.ok(!callees.includes('src/adapters/filesystem/unused.ts'));
   } finally {
     fs.rmSync(repoRoot, { recursive: true, force: true });
   }
@@ -142,11 +120,11 @@ test('scopeMutationTargets unions changed files and their direct callees only', 
       [/diff --name-only/, { status: 0, stdout: 'src/composition.ts\n' }],
     ]);
     const result = scopeMutationTargets('main', 'HEAD', { gitFn, repoRoot });
-    assert.deepEqual(result.changedFiles, ['.test-runtime/composition.js']);
-    assert.deepEqual(result.calleeFiles, ['.test-runtime/adapters/cli/commands/foo.js']);
+    assert.deepEqual(result.changedFiles, ['src/composition.ts']);
+    assert.deepEqual(result.calleeFiles, ['src/adapters/cli/commands/foo.ts']);
     assert.deepEqual(result.targetFiles, [
-      '.test-runtime/adapters/cli/commands/foo.js',
-      '.test-runtime/composition.js',
+      'src/adapters/cli/commands/foo.ts',
+      'src/composition.ts',
     ]);
   } finally {
     fs.rmSync(repoRoot, { recursive: true, force: true });

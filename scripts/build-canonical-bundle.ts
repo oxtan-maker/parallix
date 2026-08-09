@@ -119,7 +119,10 @@ const bundleResult = esbuild.buildSync({
     '.tsx': 'tsx',
   },
   banner: {
-    js: "import { fileURLToPath as __pxFileURLToPath } from 'node:url'; import { dirname as __pxDirname } from 'node:path'; import { createRequire as __pxCreateRequire } from 'node:module'; const __filename = __pxFileURLToPath(import.meta.url); const __dirname = __pxDirname(__filename); const module = { exports: {} }; const require = __pxCreateRequire(import.meta.url);",
+    // esbuild's ESM output delegates dynamic imports from bundled third-party
+    // CommonJS packages (for example Ink's signal-exit) through `require`.
+    // This is bundler interop only: do not add project-facing CJS globals here.
+    js: "import { createRequire as __pxCreateRequire } from 'node:module'; const require = __pxCreateRequire(import.meta.url);",
   },
 });
 

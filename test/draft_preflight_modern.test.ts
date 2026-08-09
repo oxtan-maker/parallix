@@ -1,9 +1,15 @@
+// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const path = require('path');
-const { runDraftCommand } = require('../.test-runtime/adapters/cli/commands/draft.js');
 
+
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import path from 'path';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const runDraftCommandModule = mockModule<typeof import('../src/adapters/cli/commands/draft.js')>('../src/adapters/cli/commands/draft.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const { runDraftCommand } = runDraftCommandModule;
 test('runDraftCommand bails early if backlog task resolution is not ok', async () => {
   const logs = [];
   const errors = [];

@@ -1,11 +1,17 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
 
-const mutationGate = require('../.test-runtime/adapters/verification/mutation-gate.js');
+
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+import { createRequire } from 'node:module';
+const _require = createRequire(import.meta.url);
+const mutationGate = mockModule<typeof import('../src/adapters/verification/mutation-gate.js')>('../src/adapters/verification/mutation-gate.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
 const {
   parseArgs,
   loadBaseline,
@@ -20,7 +26,7 @@ function makeRepo() {
   fs.mkdirSync(path.join(repoRoot, 'test'), { recursive: true });
   fs.mkdirSync(path.join(repoRoot, 'lib', 'core'), { recursive: true });
   fs.writeFileSync(path.join(repoRoot, 'lib', 'core', 'widget.js'), 'module.exports = {};\n');
-  fs.writeFileSync(path.join(repoRoot, 'test', 'widget.test.ts'), "require('node:test');\n");
+  fs.writeFileSync(path.join(repoRoot, 'test', 'widget.test.ts'), "_require('node:test');\n");
   return repoRoot;
 }
 
@@ -74,7 +80,7 @@ test('findTestFiles matches by basename convention before falling back to the fu
 test('findTestFiles falls back to the full test/ suite when no basename matches', () => {
   const repoRoot = makeRepo();
   try {
-    fs.writeFileSync(path.join(repoRoot, 'test', 'other.test.ts'), "require('node:test');\n");
+    fs.writeFileSync(path.join(repoRoot, 'test', 'other.test.ts'), "_require('node:test');\n");
     const matched = findTestFiles(['lib/core/unrelated.js'], repoRoot);
     assert.deepEqual(matched, [
       path.join(repoRoot, 'test', 'other.test.ts'),
@@ -92,7 +98,7 @@ test('buildStrykerConfig loads TypeScript tests through tsx', () => {
     [path.join(repoRoot, 'test', 'widget.test.ts')],
     repoRoot,
   );
-  assert.equal(config.commandRunner.command, `${process.execPath} --import tsx --test test/widget.test.ts`);
+  assert.equal(config.commandRunner.command, `${process.execPath} --import tsx --experimental-test-module-mocks --test test/widget.test.ts`);
 });
 
 test('computeScoresFromReport derives killed/(killed+survived+timeout) per file', () => {
@@ -148,9 +154,10 @@ test('run: first-run with no baseline entries passes the ratchet and seeds the b
     };
 
     let exitCode = null;
-    mutationGate(['--base', 'main', '--baseline-path', baselinePath], {
+    mutationGate.default(['--base', 'main', '--baseline-path', baselinePath], {
       exitFn: code => { exitCode = code; },
       scopeFn,
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
       spawnSyncFn,
       getPrimaryBranchFn: () => 'main',
       repoRoot,
@@ -178,9 +185,10 @@ test('run: --dry-run never invokes spawnSyncFn and exits 0', () => {
     });
     let spawned = false;
     let exitCode = null;
-    mutationGate(['--dry-run', '--base', 'main'], {
+    mutationGate.default(['--dry-run', '--base', 'main'], {
       exitFn: code => { exitCode = code; },
       scopeFn,
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
       spawnSyncFn: () => { spawned = true; return { status: 0, error: null }; },
       getPrimaryBranchFn: () => 'main',
       repoRoot,

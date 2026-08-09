@@ -427,7 +427,3 @@ async function statsBackfill(args: string[], options: BackfillOptions = {}) {
 (statsBackfill as any).extractDateOnly = extractDateOnly;
 export default statsBackfill;
 export { statsBackfill, collectHistoricalStatsBackfill, inferHistoricalClassificationFromMissionDoc, extractDateOnly };
-
-// CJS compat: ensure require() returns the function directly
-declare const module: { exports: any } | undefined;
-if (typeof module !== 'undefined') { module.exports = statsBackfill; }

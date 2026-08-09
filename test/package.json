@@ -1,4 +1,0 @@
-{
-  "//": "The root package is ESM (ADR 0044). The test harness preloads CommonJS modules with `node --require` and the .test.ts suites use `require()`; this marker keeps test/ CommonJS after the root switched to \"type\": \"module\". It is never published.",
-  "type": "commonjs"
-}

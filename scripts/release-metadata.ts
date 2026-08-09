@@ -274,18 +274,3 @@ export {
   renderSbom,
 };
 export type { BundledPackage };
-
-// CJS compat: consumed via require() from the CommonJS test files.
-declare const module: { exports: any } | undefined;
-if (typeof module !== 'undefined') {
-  module.exports = {
-    ALLOWED_LICENSES,
-    bundledPackages,
-    generateReleaseMetadata,
-    licenseViolations,
-    normalizeLicense,
-    owningPackageLocation,
-    renderNotices,
-    renderSbom,
-  };
-}

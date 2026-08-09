@@ -1,14 +1,22 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const { spawnSync } = require('child_process');
-const { findLastNonNoiseCommit } = require('../.test-runtime/adapters/filesystem/mission-utils.js');
 
+
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { spawnSync } from 'child_process';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const findLastNonNoiseCommitModule = mockModule<typeof import('../src/adapters/filesystem/mission-utils.js')>('../src/adapters/filesystem/mission-utils.js', import.meta.url);
+const squashTrailingBacklogNoiseIntoPreviousMissionModule = mockModule<typeof import('../src/adapters/filesystem/mission-utils.js')>('../src/adapters/filesystem/mission-utils.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const { findLastNonNoiseCommit } = findLastNonNoiseCommitModule;
+const { squashTrailingBacklogNoiseIntoPreviousMission, softResetTrailingBacklogNoise } = squashTrailingBacklogNoiseIntoPreviousMissionModule;
 function git(args, cwd) {
   const result = spawnSync('git', args, { cwd, encoding: 'utf8' });
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
   if (result.error && !(result.error.code === 'EPERM' && result.status === 0)) {
     throw result.error;
   }
@@ -169,8 +177,6 @@ test('findLastNonNoiseCommit returns null if the non-noise commit is shared', ()
     assert.equal(result, null);
   });
 });
-
-const { squashTrailingBacklogNoiseIntoPreviousMission, softResetTrailingBacklogNoise } = require('../.test-runtime/adapters/filesystem/mission-utils.js');
 
 test('squashTrailingBacklogNoiseIntoPreviousMission skips when worktree is dirty', () => {
   withTempRepo(root => {

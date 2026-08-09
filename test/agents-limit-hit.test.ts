@@ -1,8 +1,18 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
+// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
+
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { spawnSync } from 'child_process';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const selectAgentModule = mockModule<typeof import('../src/adapters/agents/agents.js')>('../src/adapters/agents/agents.js', import.meta.url);
+const detectLimitHitModule = mockModule<typeof import('../src/application/services/agent-limit.js')>('../src/application/services/agent-limit.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const { selectAgent } = selectAgentModule;
+const { detectLimitHit } = detectLimitHitModule;
 const originalPath = process.env.PATH;
 const originalCodexHome = process.env.CODEX_HOME;
 
@@ -14,17 +24,7 @@ if (process.env.PARALLIX_HOME) {
   }
 }
 
-const { spawnSync } = require('child_process');
-
-const {
-  isAgentBlocked,
-  readAgentConfig,
-  selectAgent,
-  setCommandPathProbe,
-  startAgent,
-  updateAgentBlock,
-  shouldPersistLaunchFailureBlock
-} = require('../.test-runtime/adapters/agents/agents.js');
+const { isAgentBlocked, readAgentConfig, setCommandPathProbe, startAgent, updateAgentBlock, shouldPersistLaunchFailureBlock } = selectAgentModule;
 
 function makeFakeLauncher(scriptedResults, recorder) {
   let attempt = 0;
@@ -50,7 +50,7 @@ function installPathLaunchers(tmpRoot) {
   // This fixture only needs an executable which accepts `--help`. Reuse the
   // checked-in deterministic runner so no host-specific system binary or
   // freshly created executable is involved.
-  const launcherRunner = path.join(__dirname, 'lib', 'agent-script-runner.js');
+  const launcherRunner = path.join(import.meta.dirname, 'lib', 'agent-script-runner.js');
   for (const name of ['codex', 'claude', 'gemini', 'opencode', 'vibe']) {
     fs.symlinkSync(launcherRunner, path.join(binDir, name));
   }
@@ -201,7 +201,6 @@ test('startAgent does not loop forever when WORKFLOW_AGENT is pinned and that ag
       const config = {
         steps: { review: { eligible: ['claude', 'codex'], selection: 'random' } }
       };
-      const { selectAgent } = require('../.test-runtime/adapters/agents/agents.js');
       const selectAgentFn = (step, opts: { exclude?: Set<string> } = {}) => selectAgent(step, { ...opts, config });
 
       const detectLimitHitFn = ({ agent }) => {
@@ -917,7 +916,6 @@ test('shouldPersistLaunchFailureBlock returns false for token limit exceeded', (
 });
 
 // (j) detectLimitHit guard for status === undefined
-const { detectLimitHit } = require('../.test-runtime/application/services/agent-limit.js');
 
 test('detectLimitHit returns null when status is undefined (legacy caller)', () => {
   // Legacy callers that don't pass exit metadata must not trigger false-positive

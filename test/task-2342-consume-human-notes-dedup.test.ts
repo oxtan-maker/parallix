@@ -1,7 +1,8 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
+// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
+import test from 'node:test';
+import assert from 'node:assert/strict';
 
-const { consumeHumanNotes } = require('../.test-runtime/adapters/review/review-events.js');
+import { consumeHumanNotes } from '../src/adapters/review/review-events.js';
 
 function makeComment(user, created, body) {
   return { user, created, body };

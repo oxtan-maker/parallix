@@ -1,11 +1,17 @@
+// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const { readComments, commentRound, submitReviewRound, closeMissionPr, readTextFlag } = require('../.test-runtime/adapters/review/review-commands.js');
 
+
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const readCommentsModule = mockModule<typeof import('../src/adapters/review/review-commands.js')>('../src/adapters/review/review-commands.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const { readComments, commentRound, submitReviewRound, closeMissionPr, readTextFlag } = readCommentsModule;
 const TEST_SLUG = 'task-test-identity-fail';
 
 function reviewStateStub(reviewer = 'claude', implementer = 'mistral') {
@@ -30,7 +36,7 @@ async function captureExit(fn) {
     throw new Error(`process.exit(${code})`);
   };
   console.error = (...args) => errors.push(args.join(' '));
-  console.log = () => {}; 
+  console.log = () => {};
 
   try {
     await fn();

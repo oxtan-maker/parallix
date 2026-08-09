@@ -1,9 +1,12 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
 
-const repairHandoff = require('../.test-runtime/adapters/cli/commands/repair-handoff.js');
 
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const repairHandoff = mockModule<typeof import('../src/adapters/cli/commands/repair-handoff.js')>('../src/adapters/cli/commands/repair-handoff.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
 test('repairHandoff auto-commits bounded implementation files for active-step handoff repair', async () => {
   const adds = [];
   const commits = [];
@@ -33,7 +36,7 @@ test('repairHandoff auto-commits bounded implementation files for active-step ha
     return { status: 0 };
   };
 
-  const { repaired, blocker } = await repairHandoff(
+  const { repaired, blocker } = await repairHandoff.default(
     'task-2202',
     '/tmp/worktree',
     'MISSION.md is modified but uncommitted',

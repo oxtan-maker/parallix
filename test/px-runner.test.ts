@@ -1,27 +1,30 @@
 
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
-const { spawnSync } = require('node:child_process');
-const test = require('node:test');
 
 // This source-checkout runner launches the source entrypoint from a separate caller CWD.
 // Use the project's tsx loader so module classification stays tied to the
 // source entrypoint rather than the caller's temporary CommonJS package.
 // Skip the entire file on older runtimes.
+
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import test from 'node:test';
+import { fileURLToPath } from 'node:url';
+import { seedMissionDatabase } from './fixtures/review-state-db.js';
 const major = Number(process.versions.node.split('.')[0]);
 if (major < 24) {
   console.warn(`px-runner tests require Node >= 24 (got ${process.version}); skipping all tests.`);
   process.exit(0);
 }
 
-const repoRoot = path.resolve(__dirname, '..');
+const repoRoot = path.resolve(import.meta.dirname, '..');
 const pxPath = path.join(repoRoot, 'src', 'entry', 'px.ts');
 const runtimePxPath = path.join(repoRoot, 'src', 'composition', 'create-cli.ts');
-const tsxLoaderPath = require.resolve('tsx');
+const tsxLoaderPath = fileURLToPath(import.meta.resolve('tsx'));
 // Read the version from the manifest so version bumps do not break these tests.
-const pkgVersion = require('../package.json').version;
+const pkgVersion = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')).version;
 const versionRe = new RegExp(`parallix ${pkgVersion.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`);
 
 function runGit(args, cwd) {
@@ -92,7 +95,6 @@ function runPx(args, options = {}) {
  * PARALLIX_HOME and hand that home to the spawned process.
  */
 async function seedTargetReview(target) {
-  const { seedMissionDatabase } = require('./fixtures/review-state-db.js');
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'px-target-home-'));
   const restore = await seedMissionDatabase(home, target.slug, target.root);
   // The seed points this process at the temp home; the spawned px reads it from

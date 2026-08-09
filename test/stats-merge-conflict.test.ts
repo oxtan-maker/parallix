@@ -1,12 +1,15 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
 
-const stats = require('../.test-runtime/adapters/cli/commands/stats.js');
 
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const stats = mockModule<typeof import('../src/adapters/cli/commands/stats.js')>('../src/adapters/cli/commands/stats.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
 function writeCsv(contents) {
   const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-stats-merge-conflict-')), 'input.csv');
   fs.writeFileSync(file, contents, 'utf8');
@@ -25,6 +28,7 @@ test('loadCsv parses cleaned CSV (after merge conflict resolution) with valid da
     '2026-05-06,task-1057,ai_sdlc,claude,2',
   ].join('\n'));
   try {
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     const data = stats._internals.loadCsv(csv);
 
     assert.deepEqual(data.headers, ['date', 'mission', 'classification', 'implementer', 'pr_fix_rounds']);
@@ -66,6 +70,7 @@ test('loadCsv handles CSV with merge conflict markers by treating them as malfor
     '2026-05-06,task-1057,ai_sdlc,claude,2',
   ].join('\n'));
   try {
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     const data = stats._internals.loadCsv(csv);
 
     // Conflict markers are treated as data rows since they appear after the header
@@ -88,6 +93,7 @@ test('loadCsv parses CSV with merge conflict markers at the top after conflict r
     '2026-05-06,task-1057,ai_sdlc,claude,2',
   ].join('\n'));
   try {
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     const data = stats._internals.loadCsv(csv);
 
     assert.deepEqual(data.headers, ['date', 'mission', 'classification', 'implementer', 'pr_fix_rounds']);
@@ -130,6 +136,7 @@ test('loadCsv correctly skips empty lines and only parses valid data rows', () =
     '',
   ].join('\n'));
   try {
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     const data = stats._internals.loadCsv(csv);
 
     assert.deepEqual(data.headers, ['date', 'mission', 'classification', 'implementer', 'pr_fix_rounds']);
@@ -180,6 +187,7 @@ test('readLegacyStatsCsv handles missing file gracefully', () => {
 });
 
 test('readLegacyStatsCsv refuses to resolve a default path (no implicit stats.csv read)', () => {
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
   assert.throws(() => stats.readLegacyStatsCsv(), /requires an explicit CSV path/);
   assert.throws(() => stats.readLegacyStatsCsv(''), /requires an explicit CSV path/);
 });

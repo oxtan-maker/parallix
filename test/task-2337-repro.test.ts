@@ -1,10 +1,14 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
+// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
-const stats = require('../.test-runtime/adapters/cli/commands/stats.js');
+// The helpers this file exercises hang off the default export object rather
+// than the module's named exports, so this must be the default import.
+import stats from '../src/adapters/cli/commands/stats.js';
+import { stripAnsi } from '../src/application/presentation/cli-format.js';
 
 function createRepoFixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2337-fixture-'));
@@ -76,7 +80,7 @@ test('task-2337: weekly stats report renders model name for custom agent rows', 
     { date: '2026-08-03', repo: 'r', mission: 'task-custom-3', classification: 'user_value', implementer: 'custom', model: 'cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit', stage: 'active', pr_fix_rounds: '0', duration_minutes: '12', closed: 'yes' },
   ];
   const report = stats.renderWeeklyStatsReport(rows, { today: '2026-08-04' });
-  const plain = require('../.test-runtime/application/presentation/cli-format.js').stripAnsi(report);
+  const plain = stripAnsi(report);
 
   // Agent performance table should show the actual model names
   assert.match(plain, /Agent performance this week[\s\S]*qwen3\.6-27b-q8/, 'should render qwen3.6-27b-q8 in agent performance table');

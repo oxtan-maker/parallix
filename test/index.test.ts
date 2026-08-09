@@ -1,10 +1,10 @@
 // @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
+import test from 'node:test';
+import assert from 'node:assert/strict';
 process.env.NO_COLOR = '1';
 
-const {
+import {
   KNOWN_COMMANDS,
   main,
   printUsage,
@@ -14,7 +14,7 @@ const {
   levenshteinDistance,
   deriveAliases,
   resolveAlias,
-} = require('../src/interfaces/cli/runtime.ts');
+} from '../src/interfaces/cli/runtime.js';
 
 // ---------- KNOWN_COMMANDS ----------
 

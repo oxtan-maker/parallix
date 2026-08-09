@@ -6,9 +6,9 @@ import path from 'node:path';
 /**
  * Package-owned runtime assets are addressed by logical keys at their callers.
  * The filesystem adapter is intentionally confined here so the canonical bundle
- * and the CommonJS rollback shim share one asset boundary.
+ * and the bundled executable share one asset boundary.
  */
-const MODULE_DIR = import.meta.url ? path.dirname(fileURLToPath(import.meta.url)) : __dirname;
+const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 export const runtimeAssetStore: AssetStore = new FilesystemAssetStore(packageRoot(MODULE_DIR));
 
 export const RUNTIME_ASSET_KEYS = [

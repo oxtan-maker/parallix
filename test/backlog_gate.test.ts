@@ -1,13 +1,18 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const path = require('path');
-const { checkBacklogIntegrity } = require('../.test-runtime/adapters/backlog/backlog.js');
 
+
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import path from 'path';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const checkBacklogIntegrityModule = mockModule<typeof import('../src/adapters/backlog/backlog.js')>('../src/adapters/backlog/backlog.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const { checkBacklogIntegrity } = checkBacklogIntegrityModule;
 test('Backlog integrity check passes', () => {
   // Use REPO_ROOT if available, otherwise assume we are in workflow/test/
-  const rootDir = process.env.REPO_ROOT || path.join(__dirname, '..', '..');
+  const rootDir = process.env.REPO_ROOT || path.join(import.meta.dirname, '..', '..');
   const issues = checkBacklogIntegrity(rootDir);
-  
+
   if (issues.length > 0) {
     console.error('[FAIL] Backlog integrity issues found:');
     issues.forEach(issue => {
@@ -18,6 +23,6 @@ test('Backlog integrity check passes', () => {
       }
     });
   }
-  
+
   assert.equal(issues.length, 0, 'Backlog should have no integrity issues');
 });

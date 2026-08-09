@@ -8,9 +8,13 @@
 // that process.stdout.write IS called with text content during a mocked
 // SDK session. It fails (red) on the parent commit and turns green once
 // the fix lands.
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const pi = require('../.test-runtime/adapters/agents/pi.js');
+
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const pi = mockModule<typeof import('../src/adapters/agents/pi.js')>('../src/adapters/agents/pi.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
 
 test.afterEach(() => {
   pi.__setSdkForTest(null);

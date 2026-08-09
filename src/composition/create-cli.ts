@@ -30,23 +30,8 @@ import { createProductionApplicationServices } from './application-services.js';
 import { bindReviewPersistence, reviewLoopBindings } from './review-persistence.js';
 import { startReviewLoop } from '../adapters/review/review-loop.js';
 
-declare const __filename: string | undefined;
-declare const require: {
-  main?: unknown;
-  (_id: string): any;
-} | undefined;
-declare const module: unknown;
-
 function resolveRuntimePath(): string {
-  if (import.meta.url) { return fileURLToPath(import.meta.url); }
-  // A CommonJS host (the test runtime, or any consumer that require()s this
-  // module) has no import.meta. Its bin wrapper invokes the module through a
-  // symlink, so argv[1] names the wrapper rather than this file; __filename is
-  // the only stable anchor in that layout.
-  if (typeof __filename === 'string') { return __filename; }
-  const arg1 = typeof process.argv[1] === 'string' ? process.argv[1] : '';
-  if (arg1.endsWith('/px.ts') || arg1.endsWith('/px.js')) { return arg1; }
-  return path.resolve(process.cwd(), 'px.ts');
+  return fileURLToPath(import.meta.url);
 }
 
 const runtimePath = resolveRuntimePath();
@@ -422,11 +407,10 @@ export async function run(argv = process.argv.slice(2), options: RunOptions = {}
   }
 }
 
-const _cjsMain = typeof require !== 'undefined' && require.main === module;
 const _arg1 = typeof process.argv[1] === 'string' && process.argv[1] ? process.argv[1] : undefined;
 // The ESM source entry imports this compatibility module.  Only the legacy
 // root source file is directly executable; the canonical entry owns startup.
 const _esmMain = _arg1 && _arg1.endsWith('/px.ts') && !_arg1.endsWith('/src/entry/px.ts');
-if (_esmMain || _cjsMain) {
+if (_esmMain) {
   run().then(code => { process.exitCode = code; });
 }

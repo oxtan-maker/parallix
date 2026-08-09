@@ -268,9 +268,4 @@ ${fmt.bold('Notes:')}
 `);
 }
 
-// Run main when executed directly (compiled to CJS, require.main === module applies)
-if (typeof require !== 'undefined' && require.main === module) {
-  main();
-}
-
 export { main };

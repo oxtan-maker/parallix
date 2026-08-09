@@ -854,12 +854,6 @@ function resolveMissionClassificationResolver(resolveMissionClassificationFn) {
   if (typeof stats.resolveMissionClassification === 'function') {
     return stats.resolveMissionClassification;
   }
-  // CJS fallback for edge cases where an import-star snapshot was created
-  // before stats attached its helper methods.
-  const statsModule = require('./stats.js');
-  if (statsModule && typeof statsModule.resolveMissionClassification === 'function') {
-    return statsModule.resolveMissionClassification;
-  }
   throw new TypeError('resolveMissionClassificationFn is not a function');
 }
 
@@ -1140,7 +1134,3 @@ function recordDraftStats({ slug, rootDir, agentFamily, result, log = fmt.log.pl
 const _draftExport = Object.assign(draft, { draft, runDraftCommand, recordDraftStats, buildDraftPrompt, recordDraftImplementer, enforceDraftCommitSafety, fallbackDraftCommitMessage, bootstrapBacklogTask, ensureGraphifyWorkspace, ensureGraphifyIgnore, ensureMissionBranch, ensureMissionBaseBranchRecorded, ensureWorktree, ensureMissionFile, ensureDraftRepoConfigCommitted, ensureRepoExists, classifyDraftEntries, isUnmergedStatus, isDeletedStatus, isMissionTaskPath, isExpectedDraftPath, validateDraftClassification, normalizeDraftClassification, buildRestartPrompt, restartDraftAgent });
 export default _draftExport;
 export { _draftExport as draft, runDraftCommand, recordDraftStats, buildDraftPrompt, recordDraftImplementer, enforceDraftCommitSafety, fallbackDraftCommitMessage, bootstrapBacklogTask, ensureGraphifyWorkspace, ensureGraphifyIgnore, ensureMissionBranch, ensureMissionBaseBranchRecorded, ensureWorktree, ensureMissionFile, ensureDraftRepoConfigCommitted, ensureRepoExists, classifyDraftEntries, isUnmergedStatus, isDeletedStatus, isMissionTaskPath, isExpectedDraftPath, validateDraftClassification, normalizeDraftClassification, buildRestartPrompt, restartDraftAgent };
-
-// CJS compat: ensure require() returns the function directly
-declare const module: { exports: any } | undefined;
-if (typeof module !== 'undefined') { module.exports = _draftExport; }

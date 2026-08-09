@@ -116,17 +116,3 @@ export {
   nodeMajor,
 };
 export type { SeaRuntimeEvaluation };
-
-// CJS compat: consumed via require() from the CommonJS test files.
-declare const module: { exports: any } | undefined;
-if (typeof module !== 'undefined') {
-  module.exports = {
-    MINIMUM_SEA_NODE_MAJOR,
-    SEA_SURFACES,
-    SEA_THRESHOLDS,
-    SeaStopAndReassessError,
-    assertSurface,
-    evaluateSeaRuntime,
-    nodeMajor,
-  };
-}

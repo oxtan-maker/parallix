@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PACKAGE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-PACKAGE_VERSION="$(node -p "require('$PACKAGE_ROOT/package.json').version")"
+PACKAGE_VERSION="$(node --input-type=module -e "import metadata from '$PACKAGE_ROOT/package.json' with { type: 'json' }; console.log(metadata.version)")"
 SLUG="${1:-task-enterprise-hello}"
 TRANSFER_DIR="$(mktemp -d "${TMPDIR:-/tmp}/px-enterprise-transfer-XXXXXX")"
 RUNTIME_DIR="$(mktemp -d "${TMPDIR:-/tmp}/px-enterprise-runtime-XXXXXX")"

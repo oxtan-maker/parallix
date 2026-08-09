@@ -1,21 +1,20 @@
-'use strict';
-
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const { spawn } = require('child_process');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-
+// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 /**
  * Regression test for task-2318: bootstrap temp-directory leaks.
  *
- * The bootstrap (`test/bootstrap-parallix-home.js`) creates temp directories
+ * The bootstrap (`test/bootstrap-parallix-home.ts`) creates temp directories
  * per test process via `fs.mkdtempSync()`. This test launches a child process
  * that loads the bootstrap, records which directories it creates, and then
  * terminates the child via SIGTERM. It asserts that all created directories
  * are removed after termination — proving the cleanup path fires.
  */
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { spawn } from 'child_process';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+
 
 // Unique prefix so the test can identify the directories its child created
 // among any other `parallix-test-*` directories on the host.
@@ -52,15 +51,16 @@ test('bootstrap temp directories are cleaned up after SIGTERM termination', asyn
   // Record directories that exist BEFORE the child spawns
   const before = new Set(getExistingMarkers());
 
-  // Spawn a child that loads the bootstrap, writes its directory list, then
-  // sends SIGTERM to itself.
+  // Spawn a child that loads the bootstrap (side-effect import), writes its
+  // directory list, then sends SIGTERM to itself.
   const child = spawn(process.execPath, [
+    '--import', 'tsx',
+    '--import', './test/bootstrap-parallix-home.ts',
+    '--input-type=module',
     '-e',
     [
-      // Load the bootstrap (creates temp dirs + registers cleanup)
-      `require('./test/bootstrap-parallix-home.js');`,
       // Write the list of temp directories to the marker file
-      `const fs = require('fs');`,
+      `const fs = await import('node:fs');`,
       `const marker = ${JSON.stringify(markerPath)};`,
       `fs.writeFileSync(marker, JSON.stringify({`,
       `  pid: process.pid,`,
@@ -119,12 +119,15 @@ test('bootstrap temp directories are cleaned up after SIGKILL termination', asyn
   // Spawn a child that loads the bootstrap and writes its directory list,
   // then waits briefly before the parent sends SIGKILL.
   const child = spawn(process.execPath, [
+    '--import', 'tsx',
+    '--import', './test/bootstrap-parallix-home.ts',
+    '--input-type=module',
     '-e',
     [
-      // Load the bootstrap and capture all temp roots it creates
-      `const bootstrap = require('./test/bootstrap-parallix-home.js');`,
+      // Load the bootstrap exports and capture all temp roots it creates
+      `const bootstrap = await import('./test/bootstrap-parallix-home.ts');`,
       // Write the full list of temp directories to the marker file
-      `const fs = require('fs');`,
+      `const fs = await import('node:fs');`,
       `const marker = ${JSON.stringify(markerPath)};`,
       `fs.writeFileSync(marker, JSON.stringify({`,
       `  pid: process.pid,`,
@@ -194,9 +197,11 @@ test('runner orphan cleanup reclaims SIGKILL temp directories', async () => {
   // Spawn a child that loads the bootstrap with manifest dir env var.
   // The bootstrap writes per-worker manifest synchronously (before any workers).
   const child = spawn(process.execPath, [
+    '--import', 'tsx',
+    '--import', './test/bootstrap-parallix-home.ts',
+    '--input-type=module',
     '-e',
     [
-      `require('./test/bootstrap-parallix-home.js');`,
       `setTimeout(() => {}, 30000);`,
     ].join('\n'),
   ], {
@@ -263,17 +268,21 @@ test('runner orphan cleanup is safe with concurrent test runs', async () => {
 
   // Spawn two children with separate manifest dirs (bootstrap writes synchronously)
   const childA = spawn(process.execPath, [
+    '--import', 'tsx',
+    '--import', './test/bootstrap-parallix-home.ts',
+    '--input-type=module',
     '-e',
     [
-      `require('./test/bootstrap-parallix-home.js');`,
       `setTimeout(() => {}, 30000);`,
     ].join('\n'),
   ], { stdio: 'pipe', env: { ...process.env, PARALLIX_TEST_MANIFEST_DIR: manifestDirA } });
 
   const childB = spawn(process.execPath, [
+    '--import', 'tsx',
+    '--import', './test/bootstrap-parallix-home.ts',
+    '--input-type=module',
     '-e',
     [
-      `require('./test/bootstrap-parallix-home.js');`,
       `setTimeout(() => {}, 30000);`,
     ].join('\n'),
   ], { stdio: 'pipe', env: { ...process.env, PARALLIX_TEST_MANIFEST_DIR: manifestDirB } });
@@ -333,12 +342,16 @@ test('registerTempRoot adds test-created directories to the manifest', async () 
   fs.mkdirSync(manifestDir, { recursive: true });
 
   const child = spawn(process.execPath, [
+    '--import', 'tsx',
+    '--import', './test/bootstrap-parallix-home.ts',
+    '--input-type=module',
     '-e',
     [
-      `const bootstrap = require('./test/bootstrap-parallix-home.js');`,
-      `const fs = require('fs');`,
-      `const os = require('os');`,
-      `const path = require('path');`,
+      // Import bootstrap exports for registerTempRoot
+      `const bootstrap = await import('./test/bootstrap-parallix-home.ts');`,
+      `const fs = await import('node:fs');`,
+      `const os = await import('node:os');`,
+      `const path = await import('node:path');`,
       // Create a custom temp directory (simulates test file creating its own dir)
       `const customDir = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2318-custom-'));`,
       // Register it with the bootstrap manifest
@@ -396,17 +409,19 @@ test('registerTempRoot adds test-created directories to the manifest', async () 
   );
 });
 
-test('test/helpers/temp-dir.js mkdtemp registers directory with manifest', async () => {
+test('test/helpers/temp-dir.ts mkdtemp registers directory with manifest', async () => {
   // Verify the temp-dir helper module registers directories with the manifest.
 
   const manifestDir = path.join(os.tmpdir(), MARKER_PREFIX + Date.now() + '-' + process.pid + '-helper');
   fs.mkdirSync(manifestDir, { recursive: true });
 
   const child = spawn(process.execPath, [
+    '--import', 'tsx',
+    '--import', './test/bootstrap-parallix-home.ts',
+    '--input-type=module',
     '-e',
     [
-      `require('./test/bootstrap-parallix-home.js');`,
-      `const { mkdtemp } = require('./test/helpers/temp-dir.js');`,
+      `const { mkdtemp } = await import('./test/helpers/temp-dir.ts');`,
       `const dir = mkdtemp('task-2318-helper-');`,
       `process.env._TEST_TEMP_DIR = dir;`,
       `setTimeout(() => {}, 30000);`,
@@ -429,7 +444,7 @@ test('test/helpers/temp-dir.js mkdtemp registers directory with manifest', async
   const hasHelperDir = allRoots.some(dir => dir.includes('task-2318-helper-'));
   assert.ok(
     hasHelperDir,
-    'temp-dir.js mkdtemp must register directory with manifest',
+    'temp-dir.ts mkdtemp must register directory with manifest',
   );
 
   child.kill('SIGKILL');
@@ -454,9 +469,11 @@ test('parallel workers each write their own manifest file in shared directory', 
   const children = [];
   for (let i = 0; i < 3; i++) {
     children.push(spawn(process.execPath, [
+      '--import', 'tsx',
+      '--import', './test/bootstrap-parallix-home.ts',
+      '--input-type=module',
       '-e',
       [
-        `require('./test/bootstrap-parallix-home.js');`,
         `setTimeout(() => {}, 30000);`,
       ].join('\n'),
     ], { stdio: 'pipe', env: { ...process.env, PARALLIX_TEST_MANIFEST_DIR: manifestDir } }));

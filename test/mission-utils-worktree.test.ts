@@ -1,10 +1,17 @@
+// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
 
+
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const git = mockModule<typeof import('../src/adapters/git/git.js')>('../src/adapters/git/git.js', import.meta.url);
+const __mm1 = mockModule<typeof import('../src/adapters/filesystem/mission-utils.js')>('../src/adapters/filesystem/mission-utils.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
 const {
   conventionalWorktreePath,
   conventionalBaseWorktreePath,
@@ -18,8 +25,7 @@ const {
   parseBaseBranchLine,
   resolveMissionBaseBranch,
   resolveBaseWorktree,
-} = require('../.test-runtime/adapters/filesystem/mission-utils.js');
-const git = require('../.test-runtime/adapters/git/git.js');
+} = __mm1;
 
 function withTempRepo(fn) {
   const previous = process.cwd();

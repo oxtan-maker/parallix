@@ -15,16 +15,15 @@
  * After the fix, all import-equals declarations are replaced with standard ESM
  * imports and all export = statements are replaced with ESM named/default exports.
  */
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import test from 'node:test';
 
-const test = require('node:test');
 
-const repoRoot = path.resolve(__dirname, '..');
-const runtimeRoot = path.join(repoRoot, 'src', 'platform', 'runtime');
-const pxTsPath = path.join(runtimeRoot, 'px.ts');
-const libIndexPath = path.join(runtimeRoot, 'lib', 'index.ts');
+const repoRoot = path.resolve(import.meta.dirname, '..');
+const pxTsPath = path.join(repoRoot, 'src', 'entry', 'px.ts');
+const libIndexPath = path.join(repoRoot, 'src', 'interfaces', 'cli', 'runtime.ts');
 
 // Regex matches TypeScript import-equals: `import X = require('...')`
 // Also matches the variant: `import X = require("...")`

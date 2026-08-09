@@ -1,15 +1,23 @@
+// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-
-const stats = require('../.test-runtime/adapters/cli/commands/stats.js');
-const forgejo = require('../.test-runtime/adapters/forgejo/forgejo.js');
-const gitLib = require('../.test-runtime/adapters/git/git.js');
-const { agentFamily } = require('../.test-runtime/domain/agents.js');
-
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+import { createRequire } from 'node:module';
+import { seedMissionDatabase } from './fixtures/review-state-db.js';
+const _require = createRequire(import.meta.url);
+const stats = mockModule<typeof import('../src/adapters/cli/commands/stats.js')>('../src/adapters/cli/commands/stats.js', import.meta.url);
+const forgejo = mockModule<typeof import('../src/adapters/forgejo/forgejo.js')>('../src/adapters/forgejo/forgejo.js', import.meta.url);
+const gitLib = mockModule<typeof import('../src/adapters/git/git.js')>('../src/adapters/git/git.js', import.meta.url);
+const __mm1 = mockModule<typeof import('../src/domain/agents.js')>('../src/domain/agents.js', import.meta.url);
+const __mm2 = mockModule<typeof import('../src/application/presentation/cli-format.js')>('../src/application/presentation/cli-format.js', import.meta.url);
+const __mm3 = mockModule<typeof import('../src/domain/review.js')>('../src/domain/review.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const { agentFamily } = __mm1;
 function writeCsv(contents) {
   const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-stats-')), 'input.csv');
   fs.writeFileSync(file, contents, 'utf8');
@@ -362,7 +370,7 @@ test('stats command defaults to the shared PARALLIX_HOME database across target 
 
   try {
     process.env.PARALLIX_HOME = home;
-    stats(['--today', '2026-05-18'], {
+    stats.default(['--today', '2026-05-18'], {
       rootDir: repoOne,
       log: line => logs.push(line),
       error: line => logs.push(`ERR:${line}`),
@@ -378,7 +386,7 @@ test('stats command defaults to the shared PARALLIX_HOME database across target 
     assert.match(output, /Current week \(2026-05-12 → 2026-05-18\)/);
 
     const secondLogs = [];
-    stats(['--today', '2026-05-18'], {
+    stats.default(['--today', '2026-05-18'], {
       rootDir: repoTwo,
       log: line => secondLogs.push(line),
       error: line => secondLogs.push(`ERR:${line}`),
@@ -408,7 +416,6 @@ test('stats command defaults to the shared PARALLIX_HOME database across target 
   assert.match(report, /Previous week \(2026-05-05 → 2026-05-11\)/);
   assert.match(report, /# missions\s+# user value missions\s+# AI SDLC missions/);
   assert.match(report, /2\s+1\s+1/);
-  assert.match(report, /2\s+1\s+1/);
   assert.match(report, /Agent performance this week \(2026-05-12 → 2026-05-18\)/);
   assert.match(report, /codex\s+1\s+2\.00/);
   assert.match(report, /gemini\s+1\s+1\.00/);
@@ -426,7 +433,7 @@ test('renderRangeStatsReport filters inclusive boundary dates and summarizes mis
     { date: '2026-06-01', mission: 'task-after', classification: 'user_value', implementer: 'claude', pr_fix_rounds: '0' },
   ], { from: '2026-05-01', to: '2026-05-31' });
 
-  const plain = require('../.test-runtime/application/presentation/cli-format.js').stripAnsi(report);
+  const plain = __mm2.stripAnsi(report);
   assert.match(plain, /Missions \(2026-05-01 → 2026-05-31\)/);
   assert.match(plain, /# missions\s+# user value missions\s+# AI SDLC missions/);
   assert.match(plain, /3\s+2\s+1/);
@@ -462,7 +469,7 @@ test('renderWeeklyStatsReport sorts agent tables alphabetically by family name',
     { date: '2026-05-16', mission: 'task-c', classification: 'ai_sdlc', implementer: 'codex', pr_fix_rounds: '3', closed: 'yes' },
   ], { today: '2026-05-18' });
 
-  const plain = require('../.test-runtime/application/presentation/cli-format.js').stripAnsi(report);
+  const plain = __mm2.stripAnsi(report);
   const claudeIndex = plain.indexOf('claude');
   const codexIndex = plain.indexOf('codex');
   const geminiIndex = plain.indexOf('gemini');
@@ -508,7 +515,7 @@ test('task-1414: renderWeeklyStatsReport adds an agent spend-by-stage table with
     { date: '2026-05-18', repo: 'r', mission: 'task-codex', classification: 'ai_sdlc', implementer: 'codex', provider: 'openai', stage: 'draft', pr_fix_rounds: '0', openai_usage_after: '0' },
   ], { today: '2026-05-18' });
 
-  const plain = require('../.test-runtime/application/presentation/cli-format.js').stripAnsi(report);
+  const plain = __mm2.stripAnsi(report);
   assert.match(plain, /Agent spend by stage this week/);
   assert.match(plain, /Agent family\s+draft\s+execute\s+review\s+follow-up\s+default\s+total/);
 });
@@ -520,7 +527,7 @@ test('task-1414: renderWeeklyStatsReport aggregates a Codex row from openai_usag
     { date: '2026-05-18', repo: 'r', mission: 'task-codex', classification: 'ai_sdlc', implementer: 'codex', provider: 'openai', stage: 'review', pr_fix_rounds: '0', openai_usage_after: '50', cost_usd: '0', duration_minutes: '0', closed: 'yes' },
   ], { today: '2026-05-18' });
 
-  const plain = require('../.test-runtime/application/presentation/cli-format.js').stripAnsi(report);
+  const plain = __mm2.stripAnsi(report);
   const spendSection = plain.slice(plain.indexOf('Agent spend by stage this week'));
   assert.match(spendSection, /codex\s+20% \(20%\)\s+30% \(30%\)\s+50% \(50%\)\s+0% \(0%\)\s+0% \(0%\)\s+100% \(100%\)/);
   // Not fed by cost_usd or duration_minutes for a Codex/OpenAI row.
@@ -535,7 +542,7 @@ test('task-1414: renderWeeklyStatsReport aggregates a Claude row from cost_usd, 
     { date: '2026-05-18', repo: 'r', mission: 'task-claude', classification: 'ai_sdlc', implementer: 'claude', stage: 'review', pr_fix_rounds: '0', openai_usage_after: '999', cost_usd: '6', duration_minutes: '999', closed: 'yes' },
   ], { today: '2026-05-18' });
 
-  const plain = require('../.test-runtime/application/presentation/cli-format.js').stripAnsi(report);
+  const plain = __mm2.stripAnsi(report);
   const spendSection = plain.slice(plain.indexOf('Agent spend by stage this week'));
   assert.match(spendSection, /claude\s+\$1 \(10%\)\s+\$3 \(30%\)\s+\$6 \(60%\)\s+\$0 \(0%\)\s+\$0 \(0%\)\s+\$10 \(100%\)/);
   assert.doesNotMatch(spendSection, /999/);
@@ -548,7 +555,7 @@ test('task-1414: renderWeeklyStatsReport aggregates a Custom/local row from dura
     { date: '2026-05-18', repo: 'r', mission: 'task-custom', classification: 'ai_sdlc', implementer: 'custom', stage: 'review', pr_fix_rounds: '0', openai_usage_after: '999', cost_usd: '999', duration_minutes: '30', closed: 'yes' },
   ], { today: '2026-05-18' });
 
-  const plain = require('../.test-runtime/application/presentation/cli-format.js').stripAnsi(report);
+  const plain = __mm2.stripAnsi(report);
   const spendSection = plain.slice(plain.indexOf('Agent spend by stage this week'));
   assert.match(spendSection, /custom\s+5m \(10%\)\s+15m \(30%\)\s+30m \(60%\)\s+0m \(0%\)\s+0m \(0%\)\s+50m \(100%\)/);
   assert.doesNotMatch(spendSection, /999/);
@@ -560,7 +567,7 @@ test('task-2213: renderWeeklyStatsReport spend table groups a mission by its mod
     { date: '2026-05-18', repo: 'r', mission: 'task-model', classification: 'ai_sdlc', implementer: 'custom', model: 'qwen3.5', stage: 'active', pr_fix_rounds: '0', duration_minutes: '10', closed: 'yes' },
   ];
   const report = stats.renderWeeklyStatsReport(rows, { today: '2026-05-18' });
-  const plain = require('../.test-runtime/application/presentation/cli-format.js').stripAnsi(report);
+  const plain = __mm2.stripAnsi(report);
 
   assert.match(plain, /Agent performance this week[\s\S]*qwen3\.5/);
   const spendSection = plain.slice(plain.indexOf('Agent spend by stage this week'));
@@ -573,7 +580,7 @@ test('task-1414: renderWeeklyStatsReport spend table renders a stable empty stat
     { date: '2026-05-18', repo: 'r', mission: 'task-none', classification: 'ai_sdlc', implementer: 'custom', stage: 'draft', pr_fix_rounds: '0', openai_usage_after: '0', cost_usd: '0', duration_minutes: '0', closed: 'yes' },
   ], { today: '2026-05-18' });
 
-  const plain = require('../.test-runtime/application/presentation/cli-format.js').stripAnsi(report);
+  const plain = __mm2.stripAnsi(report);
   const spendSection = plain.slice(plain.indexOf('Agent spend by stage this week'));
   assert.match(spendSection, /custom\s+—\s+—\s+—\s+—\s+—\s+—/);
   assert.doesNotMatch(spendSection, /0%/);
@@ -589,7 +596,7 @@ test('stats command prints workflow weekly tables from the integration stats sch
   try {
     const logs = [];
 
-    stats(['--csv-file', csv, '--today', '2026-05-18'], {
+    stats.default(['--csv-file', csv, '--today', '2026-05-18'], {
       log: line => logs.push(line),
       error: line => logs.push(`ERR:${line}`),
       exit: code => {
@@ -614,7 +621,7 @@ test('stats --csv-file does not initialize PARALLIX_HOME', () => {
   const previousHome = process.env.PARALLIX_HOME;
   try {
     process.env.PARALLIX_HOME = home;
-    stats(['--csv-file', csv], {
+    stats.default(['--csv-file', csv], {
       log: () => {},
       error: message => {
         throw new Error(message);
@@ -643,7 +650,7 @@ test('stats command prints workflow arbitrary range tables from the integration 
   try {
     const logs = [];
 
-    stats(['--csv-file', csv, '--from', '2026-05-01', '--to', '2026-05-31'], {
+    stats.default(['--csv-file', csv, '--from', '2026-05-01', '--to', '2026-05-31'], {
       log: line => logs.push(line),
       error: line => logs.push(`ERR:${line}`),
       exit: code => {
@@ -651,7 +658,7 @@ test('stats command prints workflow arbitrary range tables from the integration 
       },
     });
 
-    const output = require('../.test-runtime/application/presentation/cli-format.js').stripAnsi(logs.join('\n'));
+    const output = __mm2.stripAnsi(logs.join('\n'));
     assert.match(output, /Missions \(2026-05-01 → 2026-05-31\)/);
     assert.match(output, /3\s+2\s+1/);
     assert.match(output, /Agent performance \(2026-05-01 → 2026-05-31\)/);
@@ -673,7 +680,7 @@ test('stats command does not treat --today value as a positional CSV path', () =
   try {
     const logs = [];
 
-    stats(['--csv-file', csv, '--today', '2026-05-18', '--output', outputFile], {
+    stats.default(['--csv-file', csv, '--today', '2026-05-18', '--output', outputFile], {
       log: line => logs.push(line),
       error: line => logs.push(`ERR:${line}`),
       exit: code => {
@@ -698,7 +705,7 @@ test('stats command writes arbitrary range report to --output without printing r
   try {
     const logs = [];
 
-    stats(['--csv-file', csv, '--from', '2026-05-01', '--to', '2026-05-31', '--output', outputFile], {
+    stats.default(['--csv-file', csv, '--from', '2026-05-01', '--to', '2026-05-31', '--output', outputFile], {
       log: line => logs.push(line),
       error: line => logs.push(`ERR:${line}`),
       exit: code => {
@@ -706,7 +713,7 @@ test('stats command writes arbitrary range report to --output without printing r
       },
     });
 
-    const stdout = require('../.test-runtime/application/presentation/cli-format.js').stripAnsi(logs.join('\n'));
+    const stdout = __mm2.stripAnsi(logs.join('\n'));
     assert.match(stdout, new RegExp(`Report written to ${outputFile.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
     assert.doesNotMatch(stdout, /Missions \(2026-05-01 → 2026-05-31\)/);
     assert.match(fs.readFileSync(outputFile, 'utf8'), /Missions \(2026-05-01 → 2026-05-31\)/);
@@ -725,13 +732,13 @@ test('stats command exits non-zero and prints date-range diagnostics for invalid
     const logs = [];
     const exits = [];
 
-    stats(['--csv-file', csv, '--from', '2026-05-01'], {
+    stats.default(['--csv-file', csv, '--from', '2026-05-01'], {
       log: line => logs.push(line),
       error: line => logs.push(`ERR:${line}`),
       exit: code => exits.push(code),
     });
 
-    stats(['--csv-file', csv, '--from', '2026-06-01', '--to', '2026-05-31'], {
+    stats.default(['--csv-file', csv, '--from', '2026-06-01', '--to', '2026-05-31'], {
       log: line => logs.push(line),
       error: line => logs.push(`ERR:${line}`),
       exit: code => exits.push(code),
@@ -754,7 +761,7 @@ test('stats command keeps legacy retrospective CSVs on the markdown report path 
   try {
     const logs = [];
 
-    stats(['--csv-file', csv, '--from', '2026-05-01', '--to', '2026-05-31'], {
+    stats.default(['--csv-file', csv, '--from', '2026-05-01', '--to', '2026-05-31'], {
       log: line => logs.push(line),
       error: line => logs.push(`ERR:${line}`),
       exit: code => {
@@ -773,7 +780,7 @@ test('stats command keeps legacy retrospective CSVs on the markdown report path 
 test('stats command help documents the pre-integration preview workflow', () => {
   const logs = [];
 
-  stats(['--help'], {
+  stats.default(['--help'], {
     log: line => logs.push(line),
     error: line => logs.push(`ERR:${line}`),
     exit: code => {
@@ -794,8 +801,8 @@ test('stats command help documents the pre-integration preview workflow', () => 
 });
 
 test('recordIntegrationStats reads backlog classification and Review aggregate final implementer/fix rounds', async () => {
-  const { seedMissionDatabase } = require('./fixtures/review-state-db.js');
-  const { reviewFindingId } = require('../.test-runtime/domain/review.js');
+
+  const { reviewFindingId } = __mm3;
   const root = createRepoFixture();
   let restoreHome: (() => Promise<void>) & { store?: unknown } = Object.assign(async () => {}, { store: undefined });
   try {
@@ -902,7 +909,7 @@ test('recordIntegrationStats returns the unchanged weekly report labels for inte
       date: '2026-05-18',
     });
 
-    const report = require('../.test-runtime/application/presentation/cli-format.js').stripAnsi(result.report);
+    const report = __mm2.stripAnsi(result.report);
     assert.match(report, /Current week \(2026-05-12 → 2026-05-18\)/);
     assert.match(report, /Previous week \(2026-05-05 → 2026-05-11\)/);
     assert.match(report, /Agent performance this week \(2026-05-12 → 2026-05-18\)/);
@@ -1356,7 +1363,7 @@ test('task-1314: stats mission reports filter to the active repo', () => {
     ].join('\n'), 'utf8');
 
     const logs = [];
-    stats(['--csv-file', csvFile, '--mission', 'task-alpha'], {
+    stats.default(['--csv-file', csvFile, '--mission', 'task-alpha'], {
       rootDir: root,
       log: line => logs.push(line),
       error: line => logs.push(`ERR:${line}`),
@@ -1365,7 +1372,7 @@ test('task-1314: stats mission reports filter to the active repo', () => {
       },
     });
 
-    const output = require('../.test-runtime/application/presentation/cli-format.js').stripAnsi(logs.join('\n'));
+    const output = __mm2.stripAnsi(logs.join('\n'));
     assert.match(output, /Mission telemetry by phase: task-alpha/);
     assert.match(output, /draft\s+openai\s+gpt-5\.4-mini\s+codex\s+11\s+12\s+13\s+15\s+2\s+1/);
     assert.doesNotMatch(output, /google\s+gemini-2\.5-pro\s+gemini\s+21\s+22\s+23\s+25\s+3\s+2/);
@@ -1427,7 +1434,7 @@ test('task-1301: renderRangeStatsReport counts unique missions when a mission ha
     { date: '2026-06-10', mission: 'task-beta', classification: 'user_value', implementer: 'codex', pr_fix_rounds: '2', stage: 'review', closed: 'yes' },
   ];
   const report = stats.renderRangeStatsReport(rows, { from: '2026-06-10', to: '2026-06-10' });
-  const plain = require('../.test-runtime/application/presentation/cli-format.js').stripAnsi(report);
+  const plain = __mm2.stripAnsi(report);
   assert.match(plain, /2\s+1\s+1/); // 2 missions total, 1 user_value, 1 ai_sdlc
   assert.match(plain, /codex\s+1\s+2\.00/); // 1 unique codex mission with pr_fix_rounds=2
   assert.match(plain, /\bcustom\s+1\s+1\.00/); // 1 unique custom mission with pr_fix_rounds=1
@@ -1442,7 +1449,7 @@ test('task-1314: renderRangeStatsReport counts same mission separately across re
     { date: '2026-06-10', repo: 'parallix', mission: 'task-alpha', classification: 'user_value', implementer: 'codex', pr_fix_rounds: '3', stage: 'review', closed: 'yes' },
   ];
   const report = stats.renderRangeStatsReport(rows, { from: '2026-06-10', to: '2026-06-10' });
-  const plain = require('../.test-runtime/application/presentation/cli-format.js').stripAnsi(report);
+  const plain = __mm2.stripAnsi(report);
   assert.match(plain, /2\s+1\s+1/); // two repo-distinct missions with the same slug
   assert.match(plain, /codex\s+1\s+3\.00/); // repo-distinct codex mission with pr_fix_rounds=3
   assert.match(plain, /\bcustom\s+1\s+1\.00/); // repo-distinct custom mission with pr_fix_rounds=1
@@ -1540,9 +1547,9 @@ function writeReviewEvent(root, slug, { type, round, actor, verdict, timestamp, 
 }
 
 test('deriveImplementerAndFixRounds counts the rounds the reviewer sent back to the final implementer (task-1318)', async () => {
-  const { seedMissionDatabase } = require('./fixtures/review-state-db.js');
-  const { agentFamily } = require('../.test-runtime/domain/agents.js');
-  const { reviewFindingId } = require('../.test-runtime/domain/review.js');
+
+  const { agentFamily } = __mm1;
+  const { reviewFindingId } = __mm3;
   const root = createRepoFixture();
 
   const sentBack = (at) => ({
@@ -1585,9 +1592,9 @@ test('deriveImplementerAndFixRounds counts the rounds the reviewer sent back to 
 });
 
 test('deriveImplementerAndFixRounds prefers the Review aggregate over the event files (TASK-2322.12)', async () => {
-  const { seedMissionDatabase } = require('./fixtures/review-state-db.js');
-  const { agentFamily } = require('../.test-runtime/domain/agents.js');
-  const { reviewFindingId } = require('../.test-runtime/domain/review.js');
+
+  const { agentFamily } = __mm1;
+  const { reviewFindingId } = __mm3;
   const root = createRepoFixture();
   // A review-events file that disagrees with the database: the aggregate wins.
 // @ts-expect-error -- Legacy fixture deliberately exercises a duplicate or partial object-literal runtime shape.
@@ -1672,7 +1679,7 @@ test('task-1342: weekly summary total equals user_value + ai_sdlc even with uncl
   }
 
   const report = stats.renderWeeklyStatsReport(rows, { today: '2026-06-24' });
-  const plain = require('../.test-runtime/application/presentation/cli-format.js').stripAnsi(report);
+  const plain = __mm2.stripAnsi(report);
 
   // The current week (2026-06-18 to 2026-06-24) contains all 35 rows.
   // total should equal userValue + aiSdlc = 3 + 12 = 15, NOT 35.
@@ -1690,7 +1697,7 @@ test('task-1342: weekly summary total equals user_value + ai_sdlc + unknown when
   ];
 
   const report = stats.renderWeeklyStatsReport(rows, { today: '2026-06-24' });
-  const plain = require('../.test-runtime/application/presentation/cli-format.js').stripAnsi(report);
+  const plain = __mm2.stripAnsi(report);
 
   // 'USER_VALUE' is lowercased by normalizeClassification, so it counts as user_value.
   // 'unknown' is a valid classification and counts toward the total; null does not.
@@ -1860,7 +1867,7 @@ test('task-2213: renderWeeklyStatsReport displays model rows in the Agent family
     { date: '2026-05-17', mission: 'task-b', classification: 'user_value', implementer: 'codex', model: 'gpt-5', pr_fix_rounds: '1', closed: 'yes' },
   ], { today: '2026-05-18' });
 
-  const plain = require('../.test-runtime/application/presentation/cli-format.js').stripAnsi(report);
+  const plain = __mm2.stripAnsi(report);
   assert.match(plain, /qwen3\.5\s+1\s+2\.00/);
   assert.match(plain, /gpt-5\s+1\s+1\.00/);
 });
@@ -1871,7 +1878,7 @@ test('task-2213: renderRangeStatsReport displays model rows in the Agent family 
     { date: '2026-05-15', mission: 'task-b', classification: 'user_value', implementer: 'custom', model: 'llama3', pr_fix_rounds: '0', closed: 'yes' },
   ], { from: '2026-05-01', to: '2026-05-31' });
 
-  const plain = require('../.test-runtime/application/presentation/cli-format.js').stripAnsi(report);
+  const plain = __mm2.stripAnsi(report);
   assert.match(plain, /qwen3\.5\s+1\s+2\.00/);
   assert.match(plain, /llama3\s+1\s+0\.00/);
 });

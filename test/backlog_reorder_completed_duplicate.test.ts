@@ -3,18 +3,14 @@
 // canonical record already lives in backlog/completed/ (or backlog/archive/).
 // The integrity gate must flag the duplicate; pruning must drop the stale
 // backlog/tasks/ copy while keeping the completed copy canonical.
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
 
-const {
-  checkBacklogIntegrity,
-  pruneStaleBacklogDuplicates,
-  resolveTaskFile,
-} = require('../.test-runtime/adapters/backlog/backlog.js');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
+import { checkBacklogIntegrity, pruneStaleBacklogDuplicates, resolveTaskFile, } from '../src/adapters/backlog/backlog.js';
 function withTempRepo(fn) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-reorder-dup-'));
   fs.mkdirSync(path.join(root, 'backlog', 'tasks'), { recursive: true });

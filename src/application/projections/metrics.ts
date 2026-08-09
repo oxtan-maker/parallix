@@ -326,7 +326,7 @@ export function deriveLaneIntervals(
   }
 
   // Remaining open intervals are current lanes (exitedAt: null)
-  for (const [missionId, [state, enteredAt]] of openByMission) {
+  for (const [, [state, enteredAt]] of openByMission) {
     intervals.push({ state, enteredAt, exitedAt: null });
   }
 

@@ -1,5 +1,3 @@
-'use strict';
-
 /**
  * Regression test for task-2327: coverage-gate temporary directory leaks on SIGKILL.
  *
@@ -14,28 +12,33 @@
  * reclaims only the orphaned registered roots.
  */
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const { spawn } = require('child_process');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const _require = createRequire(import.meta.url);
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const COVERAGE_GATE_SRC = path.join(
   REPO_ROOT,
-  '.test-runtime',
+  'src',
   'adapters',
   'verification',
-  'coverage-gate.js'
+  'coverage-gate.ts'
 );
 
 /**
  * Read all roots from manifest files for a given PID in a manifest directory.
  */
-function readManifestRoots(manifestDir, pid) {
+function readManifestRoots(manifestDir: string, pid: number): string[] {
   const manifestPath = path.join(manifestDir, `${pid}.json`);
-  if (!fs.existsSync(manifestPath)) {return [];}
+  if (!fs.existsSync(manifestPath)) { return []; }
   const data = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
   return Array.isArray(data) ? data : [];
 }
@@ -43,7 +46,7 @@ function readManifestRoots(manifestDir, pid) {
 /**
  * Wait for a child process to close, with a timeout that force-kills on expiry.
  */
-function waitForClose(child, timeoutMs = 10000) {
+function waitForClose(child: ReturnType<typeof spawn>, timeoutMs = 10000): Promise<{ code: number | null; signal: NodeJS.Signals | null }> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       try { child.kill('SIGKILL'); } catch (_) {}
@@ -60,18 +63,20 @@ function waitForClose(child, timeoutMs = 10000) {
  * Spawn a child that loads coverage-gate with a shared manifest directory,
  * creates scratch dirs, and writes a marker file with its PID and dir paths.
  */
-function spawnCoverageChild(manifestDir, markerPath) {
+function spawnCoverageChild(manifestDir: string, markerPath: string) {
   return spawn(process.execPath, [
+    '--import', 'tsx',
+    '--input-type=module',
     '-e',
     [
-      `const coverageGate = require(${JSON.stringify(COVERAGE_GATE_SRC)});`,
-      `const fs = require('fs');`,
-      `const path = require('path');`,
+      `const coverageGate = await import(${JSON.stringify(COVERAGE_GATE_SRC)});`,
+      `const fs = await import('node:fs');`,
+      `const path = await import('node:path');`,
       `const markerPath = ${JSON.stringify(markerPath)};`,
       // Create the three scratch directory types
-      `const coverageDir = coverageGate.createPerRunScratchDirs();`,
-      `const tmpRoot = coverageGate.createPerRunTmpRoot();`,
-      `const graphifyBin = coverageGate.createMockGraphifyBin();`,
+      `const coverageDir = coverageGate.default.createPerRunScratchDirs();`,
+      `const tmpRoot = coverageGate.default.createPerRunTmpRoot();`,
+      `const graphifyBin = coverageGate.default.createMockGraphifyBin();`,
       `const graphifyDir = path.dirname(graphifyBin);`,
       // Write the marker with dir info for parent verification
       `fs.writeFileSync(markerPath, JSON.stringify({`,
@@ -151,7 +156,7 @@ test('coverage-gate SIGKILL orphan recovery reclaims registered scratch roots', 
   );
 
   // Run the recovery path — this is the fix that reclaims orphaned roots
-  const { recoverOrphanedScratchDirs } = require(COVERAGE_GATE_SRC);
+  const { recoverOrphanedScratchDirs } = _require(COVERAGE_GATE_SRC);
   recoverOrphanedScratchDirs(manifestDir);
 
   // SC3: All registered roots must be removed by recovery
@@ -184,12 +189,14 @@ test('recovery does not remove roots belonging to a live concurrent run', async 
   // Spawn a "live" child that creates scratch dirs and stays alive
   const liveMarker = path.join(os.tmpdir(), `task2327-live-marker-${uniqueSuffix}`);
   const liveChild = spawn(process.execPath, [
+    '--import', 'tsx',
+    '--input-type=module',
     '-e',
     [
-      `const coverageGate = require(${JSON.stringify(COVERAGE_GATE_SRC)});`,
-      `const fs = require('fs');`,
+      `const coverageGate = await import(${JSON.stringify(COVERAGE_GATE_SRC)});`,
+      `const fs = await import('node:fs');`,
       `const markerPath = ${JSON.stringify(liveMarker)};`,
-      `const dir = coverageGate.createPerRunScratchDirs();`,
+      `const dir = coverageGate.default.createPerRunScratchDirs();`,
       `fs.writeFileSync(markerPath, JSON.stringify({ pid: process.pid, dir }));`,
       `setTimeout(() => {}, 30000);`,
     ].join('\n'),
@@ -207,12 +214,14 @@ test('recovery does not remove roots belonging to a live concurrent run', async 
   // Spawn a "dead" child (gets SIGKILL'd) with its own manifest entry
   const deadMarker = path.join(os.tmpdir(), `task2327-dead-marker-${uniqueSuffix}`);
   const deadChild = spawn(process.execPath, [
+    '--import', 'tsx',
+    '--input-type=module',
     '-e',
     [
-      `const coverageGate = require(${JSON.stringify(COVERAGE_GATE_SRC)});`,
-      `const fs = require('fs');`,
+      `const coverageGate = await import(${JSON.stringify(COVERAGE_GATE_SRC)});`,
+      `const fs = await import('node:fs');`,
       `const markerPath = ${JSON.stringify(deadMarker)};`,
-      `const dir = coverageGate.createPerRunScratchDirs();`,
+      `const dir = coverageGate.default.createPerRunScratchDirs();`,
       `fs.writeFileSync(markerPath, JSON.stringify({ pid: process.pid, dir }));`,
       `setTimeout(() => {}, 30000);`,
     ].join('\n'),
@@ -237,7 +246,7 @@ test('recovery does not remove roots belonging to a live concurrent run', async 
   await waitForClose(deadChild);
 
   // Run recovery
-  const { recoverOrphanedScratchDirs } = require(COVERAGE_GATE_SRC);
+  const { recoverOrphanedScratchDirs } = _require(COVERAGE_GATE_SRC);
   recoverOrphanedScratchDirs(manifestDir);
 
   // SC4: Live child's directory must survive recovery
@@ -276,12 +285,14 @@ test('recovery does not remove unregistered directories with matching prefixes',
   // Spawn a child that creates and registers its own directories
   const childMarker = path.join(os.tmpdir(), `task2327-unreg-child-${uniqueSuffix}`);
   const child = spawn(process.execPath, [
+    '--import', 'tsx',
+    '--input-type=module',
     '-e',
     [
-      `const coverageGate = require(${JSON.stringify(COVERAGE_GATE_SRC)});`,
-      `const fs = require('fs');`,
+      `const coverageGate = await import(${JSON.stringify(COVERAGE_GATE_SRC)});`,
+      `const fs = await import('node:fs');`,
       `const markerPath = ${JSON.stringify(childMarker)};`,
-      `const dir = coverageGate.createPerRunScratchDirs();`,
+      `const dir = coverageGate.default.createPerRunScratchDirs();`,
       `fs.writeFileSync(markerPath, JSON.stringify({ pid: process.pid, dir }));`,
       `setTimeout(() => {}, 30000);`,
     ].join('\n'),
@@ -301,7 +312,7 @@ test('recovery does not remove unregistered directories with matching prefixes',
   await waitForClose(child);
 
   // Run recovery
-  const { recoverOrphanedScratchDirs } = require(COVERAGE_GATE_SRC);
+  const { recoverOrphanedScratchDirs } = await import(COVERAGE_GATE_SRC);
   recoverOrphanedScratchDirs(manifestDir);
 
   // Child's registered directory must be removed

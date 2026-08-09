@@ -1,10 +1,11 @@
 
-const assert = require('node:assert/strict');
-const path = require('node:path');
-const { spawnSync } = require('node:child_process');
-const test = require('node:test');
 
-const repoRoot = path.resolve(__dirname, '..');
+
+import assert from 'node:assert/strict';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import test from 'node:test';
+const repoRoot = path.resolve(import.meta.dirname, '..');
 const nodeMajor = Number.parseInt(process.versions.node.split('.')[0], 10);
 
 test('px runtime smoke test verifies the source entrypoint executes without module resolution errors', (t) => {

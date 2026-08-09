@@ -1,26 +1,42 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('node:os');
-const path = require('path');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import os from 'node:os';
+import path from 'path';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+import { createRequire } from 'node:module';
+const _require = createRequire(import.meta.url);
+const gitModule = mockModule<typeof import('../src/adapters/git/git.js')>('../src/adapters/git/git.js', import.meta.url);
+const missionUtilsModule = mockModule<typeof import('../src/adapters/filesystem/mission-utils.js')>('../src/adapters/filesystem/mission-utils.js', import.meta.url);
+const backlogModule = mockModule<typeof import('../src/adapters/backlog/backlog.js')>('../src/adapters/backlog/backlog.js', import.meta.url);
+const forgejoModule = mockModule<typeof import('../src/adapters/forgejo/forgejo.js')>('../src/adapters/forgejo/forgejo.js', import.meta.url);
+const runtimeMatrixModule = mockModule<typeof import('../src/adapters/agents/runtime-matrix.js')>('../src/adapters/agents/runtime-matrix.js', import.meta.url);
+const statsModule = mockModule<typeof import('../src/adapters/cli/commands/stats.js')>('../src/adapters/cli/commands/stats.js', import.meta.url);
+const __mm1 = mockModule<typeof import('../src/composition/application-services.js')>('../src/composition/application-services.js', import.meta.url);
+const __mm2 = mockModule<typeof import('../src/adapters/cli/commands/integrate.js')>('../src/adapters/cli/commands/integrate.js', import.meta.url);
+await installModuleMocks();
 const { mock } = test;
 
-const git = require('../.test-runtime/adapters/git/git.js');
-const missionUtils = require('../.test-runtime/adapters/filesystem/mission-utils.js');
-const backlog = require('../.test-runtime/adapters/backlog/backlog.js');
-const forgejo = require('../.test-runtime/adapters/forgejo/forgejo.js');
-const runtimeMatrix = require('../.test-runtime/adapters/agents/runtime-matrix.js');
-const stats = require('../.test-runtime/adapters/cli/commands/stats.js');
-const composition = require('../.test-runtime/composition/application-services.js');
+const git = gitModule;
+const missionUtils = missionUtilsModule;
+const backlog = backlogModule;
+const forgejo = forgejoModule;
+const runtimeMatrix = runtimeMatrixModule;
+const stats = statsModule;
+const composition = __mm1;
 
 const TEST_SLUG = 'task-integrate-v2';
 const FAKE_ROOT = path.join(os.tmpdir(), `integrate-v2-root-${process.pid}`);
 let statsCalls = [];
 
+// The integrate module's command entry point is its default export; its
+// helpers are named exports. Expose both through the ESM mock facade so the
+// existing call sites (`integrate([...])` and `integrate.resolveConflicts...`)
+// keep working without a writable CommonJS `exports` object.
 function loadIntegrate() {
-  delete require.cache[require.resolve('../.test-runtime/adapters/cli/commands/integrate')];
-  return require('../.test-runtime/adapters/cli/commands/integrate.js');
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
+  return Object.assign((...args) => __mm2.default(...args), __mm2);
 }
 
 function setupMocks() {
@@ -320,7 +336,7 @@ test('integrate rejects a Forgejo PR that is already merged', async () => {
   assert.match(output, new RegExp(`px integrate ${TEST_SLUG} --dry-run`));
   assert.equal(statsCalls.length, 0);
   assert.equal(exitCodes.at(-1), 1);
-  
+
   console.log = originalLog;
   console.error = originalError;
   cleanup();
@@ -346,6 +362,7 @@ test('integrate warns that --no-gate is ignored', async () => {
 
 test('integrate exits non-zero when post-integration stats recording fails', async () => {
   setupMocks();
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
   stats.recordIntegrationStats.mock.mockImplementation((args) => {
     statsCalls.push(args);
     throw new Error('stats write failed');
@@ -516,7 +533,7 @@ test('evaluateTaskStatusForIntegration edge cases', (t) => {
   setupMocks();
   const integrate = loadIntegrate();
   const { evaluateTaskStatusForIntegration } = integrate;
-  
+
   // Case 1: Status review, PR merged
   const res1 = evaluateTaskStatusForIntegration({
     taskStatus: 'review',
@@ -552,6 +569,7 @@ test('recordPostIntegrationStats keeps operator-owned stats outside git', async 
     const { recordPostIntegrationStats } = loadIntegrate();
     const outcome = await recordPostIntegrationStats('task-1109', {
       rootDir: FAKE_ROOT,
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
       gitRunner(args) {
         gitCalls.push(args);
         if (args.join(' ').includes('log -1 --format=%cs')) {

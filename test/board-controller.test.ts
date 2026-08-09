@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
+const _require = createRequire(import.meta.url);
 
 import { BoardCommandController } from '../src/application/controller/board-controller.js';
 import { makeExecutePorts } from './fixtures/execute-mission-ports.js';
@@ -210,8 +212,8 @@ test('UNAVAILABLE_CAPABILITIES has reasons for all five unextracted commands', (
 // ---------------------------------------------------------------------------
 
 test('controller does not import ink, react, or node:react', () => {
-  const fs = require('node:fs');
-  const path = require('node:path');
+  const fs = _require('node:fs');
+  const path = _require('node:path');
   const controllerPath = path.join(process.cwd(), 'src', 'application', 'controller', 'board-controller.ts');
   const commandPath = path.join(process.cwd(), 'src', 'application', 'controller', 'board-command.ts');
   const boardPath = path.join(process.cwd(), 'src', 'application', 'projections', 'board.ts');

@@ -1,12 +1,13 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
-const childProcess = require('node:child_process');
 
-const repoRoot = path.resolve(__dirname, '..');
+
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import childProcess from 'node:child_process';
+const repoRoot = path.resolve(import.meta.dirname, '..');
 const scriptPath = path.join(repoRoot, 'scripts', 'verify-local.sh');
 
 function runScript(args, env = {}) {

@@ -1,12 +1,16 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const missionUtils = require('../.test-runtime/adapters/filesystem/mission-utils.js');
+
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const missionUtils = mockModule<typeof import('../src/adapters/filesystem/mission-utils.js')>('../src/adapters/filesystem/mission-utils.js', import.meta.url);
+const integrate = mockModule<typeof import('../src/adapters/cli/commands/integrate.js')>('../src/adapters/cli/commands/integrate.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
 const previousPrimaryWorktree = process.env.PRIMARY_WORKTREE;
 if (previousPrimaryWorktree === undefined) {
   process.env.PRIMARY_WORKTREE = `/tmp/visualBoard-${process.pid}`;
 }
-const integrate = require('../.test-runtime/adapters/cli/commands/integrate.js');
 if (previousPrimaryWorktree === undefined) {
   delete process.env.PRIMARY_WORKTREE;
 } else {
@@ -52,7 +56,7 @@ test('integrate guard', async (t) => {
     errorOutput = '';
 
     try {
-      await integrate(['task-1086']);
+      await integrate.default(['task-1086']);
     } catch (err) {
       if (err.message !== 'process.exit called') throw err;
     } finally {
@@ -81,7 +85,7 @@ test('integrate guard', async (t) => {
     errorOutput = '';
 
     try {
-      await integrate(['task-1086']);
+      await integrate.default(['task-1086']);
     } catch (err) {
       if (err.message !== 'process.exit called') throw err;
     } finally {
@@ -114,7 +118,7 @@ test('integrate guard', async (t) => {
       // A missing slug reaches the usage guard immediately after the agent
       // authorization check. This test covers authorization only and must not
       // proceed into integration preflight or Forgejo discovery.
-      await integrate([]);
+      await integrate.default([]);
     } catch (err) {
       // It might call process.exit for other reasons (preflight fail), which is fine
     } finally {

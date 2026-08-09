@@ -3,9 +3,8 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
-const { findForbiddenApplicationDependencies, findCompositionViolations } = require('../.test-runtime/adapters/architecture/boundary-guards.js');
-const { createProductionApplicationServices } = require('../.test-runtime/composition/application-services.js');
-
+import { findForbiddenApplicationDependencies, findCompositionViolations } from '../src/adapters/architecture/boundary-guards.js';
+import { createProductionApplicationServices } from '../src/composition/application-services.js';
 const root = process.cwd();
 const fixture = (name: string) => path.join(root, 'test', 'fixtures', 'application-boundary', name);
 const APPLICATION_DIR = path.join(root, 'src', 'application');

@@ -6,14 +6,15 @@
 //
 // It is the falsifiable evidence for SC3 (install-and-run), SC4 (no runtime
 // node_modules) and SC7 (the bin target is the bundler's SEA-shared entry point).
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
-const { execFileSync, spawnSync } = require('node:child_process');
 
-const ROOT = path.resolve(__dirname, '..');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { execFileSync, spawnSync } from 'node:child_process';
+
+const ROOT = path.resolve(import.meta.dirname, '..');
 const PACKAGE_NAME = '@magnusekdahl/parallix';
 
 let work: string;

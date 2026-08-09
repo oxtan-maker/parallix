@@ -1,12 +1,24 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
 
-const missionUtils = require('../.test-runtime/adapters/filesystem/mission-utils.js');
-const { areAllBacklogOnlyConflicts } = require('../.test-runtime/adapters/cli/commands/integrate.js');
 
 // ---------------------------------------------------------------------------
 // Tier 1: Classification tests (areAllBacklogOnlyConflicts)
 // ---------------------------------------------------------------------------
+
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import path from 'node:path';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const missionUtils = mockModule<typeof import('../src/adapters/filesystem/mission-utils.js')>('../src/adapters/filesystem/mission-utils.js', import.meta.url);
+const areAllBacklogOnlyConflictsModule = mockModule<typeof import('../src/adapters/cli/commands/integrate.js')>('../src/adapters/cli/commands/integrate.js', import.meta.url);
+const git = mockModule<typeof import('../src/adapters/git/git.js')>('../src/adapters/git/git.js', import.meta.url);
+const backlog = mockModule<typeof import('../src/adapters/backlog/backlog.js')>('../src/adapters/backlog/backlog.js', import.meta.url);
+const forgejo = mockModule<typeof import('../src/adapters/forgejo/forgejo.js')>('../src/adapters/forgejo/forgejo.js', import.meta.url);
+const productConfig = mockModule<typeof import('../src/adapters/config/product-config.js')>('../src/adapters/config/product-config.js', import.meta.url);
+const runtimeMatrix = mockModule<typeof import('../src/adapters/agents/runtime-matrix.js')>('../src/adapters/agents/runtime-matrix.js', import.meta.url);
+const stats = mockModule<typeof import('../src/adapters/cli/commands/stats.js')>('../src/adapters/cli/commands/stats.js', import.meta.url);
+const __mm1 = mockModule<typeof import('../src/composition/application-services.js')>('../src/composition/application-services.js', import.meta.url);
+await installModuleMocks();
+const { areAllBacklogOnlyConflicts } = areAllBacklogOnlyConflictsModule;
 
 test('areAllBacklogOnlyConflicts returns true for empty file list', () => {
   assert.equal(areAllBacklogOnlyConflicts([]), true);
@@ -303,22 +315,29 @@ test('happy path: probe merge succeeds on first try with no conflicts', () => {
 // Verifies the actual control flow, logged output, and exit behavior.
 // ---------------------------------------------------------------------------
 
-const path = require('node:path');
 const { mock } = test;
-const git = require('../.test-runtime/adapters/git/git.js');
-const backlog = require('../.test-runtime/adapters/backlog/backlog.js');
-const forgejo = require('../.test-runtime/adapters/forgejo/forgejo.js');
-const productConfig = require('../.test-runtime/adapters/config/product-config.js');
-const runtimeMatrix = require('../.test-runtime/adapters/agents/runtime-matrix.js');
-const stats = require('../.test-runtime/adapters/cli/commands/stats.js');
-const composition = require('../.test-runtime/composition/application-services.js');
+import { createRequire } from 'node:module';
+const _require = createRequire(import.meta.url);
+const gitCjs = git;
+const missionUtilsCjs = missionUtils;
+const backlogCjs = backlog;
+const forgejoCjs = forgejo;
+const productConfigCjs = productConfig;
+const runtimeMatrixCjs = runtimeMatrix;
+const statsCjs = stats;
+const compositionCjs = __mm1;
 
 const TEST_SLUG = 'task-2242';
 const FAKE_ROOT = '/tmp/task-2242-integrate-root';
 
+// The integrate command entry point is the module's default export; its helpers
+// are named exports. Expose both through the ESM mock facade.
 function loadIntegrate() {
-  delete require.cache[require.resolve('../.test-runtime/adapters/cli/commands/integrate')];
-  return require('../.test-runtime/adapters/cli/commands/integrate.js');
+  return Object.assign(
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
+    (...args) => areAllBacklogOnlyConflictsModule.default(...args),
+    areAllBacklogOnlyConflictsModule,
+  );
 }
 
 // Base git responses shared by all production integration tests.
@@ -334,34 +353,34 @@ function baseGitFn(args) {
 }
 
 function setupBaseMocks(gitMockFn) {
-  mock.method(backlog, 'getTaskClassification', () => 'ai_sdlc');
-  mock.method(missionUtils, 'getPrimaryBranch', () => 'main');
-  mock.method(missionUtils, 'inferSlug', (s) => s || TEST_SLUG);
-  mock.method(missionUtils, 'findMissionDir', () => path.join(FAKE_ROOT, 'missions', TEST_SLUG));
-  mock.method(missionUtils, 'findMissionArea', () => 'lib');
-  mock.method(missionUtils, 'getPrimaryWorktree', () => FAKE_ROOT);
-  mock.method(missionUtils, 'conventionalWorktreePath', () => path.join(FAKE_ROOT, '..', TEST_SLUG));
-  mock.method(missionUtils, 'resolveMainRepo', () => FAKE_ROOT);
-  mock.method(missionUtils, 'missionTitle', () => 'Test Mission');
-  mock.method(missionUtils, 'updateGraphifyKnowledgeGraph', () => false);
-  mock.method(git, 'getCurrentBranch', () => 'mission/' + TEST_SLUG);
-  mock.method(git, 'git', gitMockFn);
-  mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile: path.join(FAKE_ROOT, 'backlog/tasks/task.md') }));
-  mock.method(backlog, 'getTaskStatus', () => 'ready-for-integration');
-  mock.method(backlog, 'getTaskAssignee', () => 'agent');
-  mock.method(backlog, 'setTaskStatus', () => true);
-  mock.method(backlog, 'completeTask', () => true);
-  mock.method(forgejo, 'getPrStatus', () => ({ exists: true, state: 'open', merged: false, number: 41 }));
-  mock.method(forgejo, 'listOpenPrsForSlug', () => []);
-  mock.method(forgejo, 'getLatestReviewDecision', () => ({ ok: true, reviewState: 'APPROVED' }));
-  mock.method(forgejo, 'readToken', () => 'token');
-  mock.method(forgejo, 'resolveTokenFile', () => 'token-file');
-  mock.method(forgejo, 'syncMerged', () => ({ ok: true }));
-  mock.method(stats, 'recordIntegrationStats', () => ({ changed: false, row: { mission: TEST_SLUG } }));
-  mock.method(productConfig, 'isForgejoReviewEnabled', () => false);
-  mock.method(runtimeMatrix, 'buildAutonomousReviewMatrix', () => ({}));
-  mock.method(runtimeMatrix, 'formatMatrixSummary', () => ['matrix-line']);
-  mock.method(composition, 'createMissionApplicationServices', async () => ({
+  mock.method(backlogCjs, 'getTaskClassification', () => 'ai_sdlc');
+  mock.method(missionUtilsCjs, 'getPrimaryBranch', () => 'main');
+  mock.method(missionUtilsCjs, 'inferSlug', (s) => s || TEST_SLUG);
+  mock.method(missionUtilsCjs, 'findMissionDir', () => path.join(FAKE_ROOT, 'missions', TEST_SLUG));
+  mock.method(missionUtilsCjs, 'findMissionArea', () => 'lib');
+  mock.method(missionUtilsCjs, 'getPrimaryWorktree', () => FAKE_ROOT);
+  mock.method(missionUtilsCjs, 'conventionalWorktreePath', () => path.join(FAKE_ROOT, '..', TEST_SLUG));
+  mock.method(missionUtilsCjs, 'resolveMainRepo', () => FAKE_ROOT);
+  mock.method(missionUtilsCjs, 'missionTitle', () => 'Test Mission');
+  mock.method(missionUtilsCjs, 'updateGraphifyKnowledgeGraph', () => false);
+  mock.method(gitCjs, 'getCurrentBranch', () => 'mission/' + TEST_SLUG);
+  mock.method(gitCjs, 'git', gitMockFn);
+  mock.method(backlogCjs, 'resolveTaskFile', () => ({ ok: true, taskFile: path.join(FAKE_ROOT, 'backlog/tasks/task.md') }));
+  mock.method(backlogCjs, 'getTaskStatus', () => 'ready-for-integration');
+  mock.method(backlogCjs, 'getTaskAssignee', () => 'agent');
+  mock.method(backlogCjs, 'setTaskStatus', () => true);
+  mock.method(backlogCjs, 'completeTask', () => true);
+  mock.method(forgejoCjs, 'getPrStatus', () => ({ exists: true, state: 'open', merged: false, number: 41 }));
+  mock.method(forgejoCjs, 'listOpenPrsForSlug', () => []);
+  mock.method(forgejoCjs, 'getLatestReviewDecision', () => ({ ok: true, reviewState: 'APPROVED' }));
+  mock.method(forgejoCjs, 'readToken', () => 'token');
+  mock.method(forgejoCjs, 'resolveTokenFile', () => 'token-file');
+  mock.method(forgejoCjs, 'syncMerged', () => ({ ok: true }));
+  mock.method(statsCjs, 'recordIntegrationStats', () => ({ changed: false, row: { mission: TEST_SLUG } }));
+  mock.method(productConfigCjs, 'isForgejoReviewEnabled', () => false);
+  mock.method(runtimeMatrixCjs, 'buildAutonomousReviewMatrix', () => ({}));
+  mock.method(runtimeMatrixCjs, 'formatMatrixSummary', () => ['matrix-line']);
+  mock.method(compositionCjs, 'createMissionApplicationServices', async () => ({
     store: {
       _repoId: 'default',
       load: async () => ({ kind: 'found', mission: { status: 'review', review: null }, version: 1 }),
@@ -394,7 +413,7 @@ test('integrate SC2b: non-backlog conflict exits with conflict files and helper 
   mock.method(process, 'exit', () => {});
   const integrate = loadIntegrate();
 
-  await integrate([TEST_SLUG, '--no-integration-gates'], { missionServicesFn: composition.createMissionApplicationServices });
+  await integrate([TEST_SLUG, '--no-integration-gates'], { missionServicesFn: compositionCjs.createMissionApplicationServices });
 
   console.log = originalLog;
   mock.reset();
@@ -426,7 +445,7 @@ test('integrate SC2c: mission backlog task overlap retries and falls through wit
   mock.method(process, 'exit', () => {});
   const integrate = loadIntegrate();
 
-  await integrate([TEST_SLUG, '--no-integration-gates'], { missionServicesFn: composition.createMissionApplicationServices });
+  await integrate([TEST_SLUG, '--no-integration-gates'], { missionServicesFn: compositionCjs.createMissionApplicationServices });
 
   console.log = originalLog;
   mock.reset();
@@ -466,7 +485,7 @@ test('integrate P1: recovered abort failure uses normal conflict output after re
   mock.method(process, 'exit', () => {});
   const integrate = loadIntegrate();
 
-  await integrate([TEST_SLUG, '--no-integration-gates'], { missionServicesFn: composition.createMissionApplicationServices });
+  await integrate([TEST_SLUG, '--no-integration-gates'], { missionServicesFn: compositionCjs.createMissionApplicationServices });
 
   console.log = originalLog;
   mock.reset();
@@ -509,7 +528,7 @@ test('integrate P1: retry abort failure routes to inspect-checkout path (not reb
   mock.method(process, 'exit', () => {});
   const integrate = loadIntegrate();
 
-  await integrate([TEST_SLUG, '--no-integration-gates'], { missionServicesFn: composition.createMissionApplicationServices });
+  await integrate([TEST_SLUG, '--no-integration-gates'], { missionServicesFn: compositionCjs.createMissionApplicationServices });
 
   console.log = originalLog;
   console.error = originalError;

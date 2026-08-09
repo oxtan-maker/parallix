@@ -1,17 +1,14 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const {
-  eligibleAgentsForStep,
-  startAgent,
-  selectAgent
-} = require('../.test-runtime/adapters/agents/agents.js');
 
-const { fakeLauncher } = require('./lib/agent-mock.js');
 
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
+import { fakeLauncher } from './lib/agent-mock';
+import { eligibleAgentsForStep, startAgent, selectAgent } from '../src/adapters/agents/agents.js';
 function withStubbedMathRandom(value, fn) {
   const previousRandom = Math.random;
   Math.random = () => value;
@@ -116,6 +113,7 @@ test('startAgent review fallback selects vibe when claude hits limit and review 
         assertAgentSupportedFn: () => {},
 // @ts-expect-error -- Legacy fixture deliberately exercises a duplicate or partial object-literal runtime shape.
         isAgentBlockedFn: () => false,
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
         config: configWithoutReview,
         log: () => {}
       });
@@ -179,6 +177,7 @@ test('startAgent act-on-review fallback selects vibe when implementer hits limit
         assertAgentSupportedFn: () => {},
 // @ts-expect-error -- Legacy fixture deliberately exercises a duplicate or partial object-literal runtime shape.
         isAgentBlockedFn: () => false,
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
         config: configWithoutActOnReview,
         log: () => {}
       });

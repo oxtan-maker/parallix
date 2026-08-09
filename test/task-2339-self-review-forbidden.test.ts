@@ -1,13 +1,13 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
+import test from 'node:test';
+import assert from 'node:assert/strict';
 
-const {
+import {
   ConfiguredReviewerEligibility,
   beginNextReviewRound,
   changeRevision,
   startReview,
-} = require('../.test-runtime/domain/review.js');
-const { resolveHandoffReviewAssignment } = require('../.test-runtime/adapters/cli/commands/handoff.js');
+} from '../src/domain/review.js';
+import { resolveHandoffReviewAssignment } from '../src/adapters/cli/commands/handoff.js';
 
 const SUBJECT = {
   change: { kind: 'local-branch', sourceBranch: 'mission/task-9001', targetBranch: 'main' },
@@ -16,6 +16,7 @@ const SUBJECT = {
 const STARTED_AT = '2026-08-04T09:00:00.000Z';
 
 function eligibility(families: string[]) {
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
   return ConfiguredReviewerEligibility.fromReviewStep({ eligible: families, strategy: 'random' });
 }
 
@@ -25,12 +26,14 @@ function eligibility(families: string[]) {
 
 test('startReview rejects a reviewer who is the implementer while other families are eligible', () => {
   assert.throws(
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     () => startReview(SUBJECT, 'claude', 'claude', STARTED_AT, eligibility(['codex', 'claude', 'custom', 'vibe'])),
     /may not review its own work/,
   );
 });
 
 test('startReview allows self-review only when the implementer is the sole eligible family', () => {
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
   const review = startReview(SUBJECT, 'claude', 'claude', STARTED_AT, eligibility(['claude']));
   assert.equal(review.rounds[0].reviewer, 'claude');
   assert.equal(review.rounds[0].implementer, 'claude');
@@ -58,6 +61,7 @@ test('beginNextReviewRound rejects a self-reviewing round the same way', () => {
   };
 
   assert.throws(
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     () => beginNextReviewRound(readyForNextRound, 'claude', 'claude', STARTED_AT, eligibility(['codex', 'claude'])),
     /may not review its own work/,
   );
@@ -98,6 +102,7 @@ test('handoff falls back to self-review only on an exhausted pool, and records t
   // four-family policy here is what let a self-reviewed round look legitimate.
   assert.deepEqual([...result.reviewerEligibility.reviewers], ['claude']);
   assert.match(logged.join('\n'), /falling back to self-review/i);
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
   assert.doesNotThrow(() => startReview(SUBJECT, result.reviewer, result.implementer, STARTED_AT, result.reviewerEligibility));
 });
 

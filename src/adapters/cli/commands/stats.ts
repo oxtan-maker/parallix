@@ -2336,9 +2336,6 @@ function stats(args: string[], options: {log?: Function, error?: Function, exit?
 export default stats;
 export { stats, STATS_HEADERS, resolveStatsRepoName, recordIntegrationStats, renderWeeklyStatsReport, renderMissionPhaseReport, renderRangeStatsReport, buildWeeklyWindows, resolveMissionClassification, deriveImplementerAndFixRounds, upsertMeasurementRow, loadMeasurementRows, readLegacyStatsCsv, analyzeLegacyStatsCsv, applyLegacyStatsCsv, runLegacyCsvImportCommand, measurementToStatsRow, statsRowToMeasurement, normalizeStatsRow, canonicalizeStatsRow, recordStageStats, accumulateStageStats, recordActiveStats, recordReviewStats, telemetryToStatsFields, formatDateOnly, LEGACY_HEADERS, USAGE_NUMBERS, formatStatsTable, computeAgentMissionGroups, createRangeWindow, summarizeMissionWindow, summarizeAgentWindow, summarizeAgentStageSpend, formatAgentSpendCell, colorAverageFixRounds, colorMissionCounts, AGENT_SPEND_STAGE_COLUMNS, MISSION_PHASE_ORDER, statsRowActorKey };
 
-// CJS compat: ensure require() returns the function directly
-declare const module: { exports: any } | undefined;
-if (typeof module !== 'undefined') { module.exports = stats; }
 (stats as any).STATS_HEADERS = STATS_HEADERS;
 (stats as any).resolveStatsRepoName = resolveStatsRepoName;
 (stats as any).recordIntegrationStats = recordIntegrationStats;

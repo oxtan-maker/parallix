@@ -662,6 +662,3 @@ function buildRebasePrompt({ slug, area, worktreePath, missionSpecificFiles, sha
 (rebase as any).parseConflictFilesFromGitStatus = parseConflictFilesFromGitStatus;
 export default rebase;
 export { rebase, buildRebasePrompt, parseConflictFilesFromRebaseOutput, parseConflictFilesFromGitStatus };
-// CJS compat: ensure require() returns the function directly
-declare const module: { exports: any } | undefined;
-if (typeof module !== 'undefined') { module.exports = rebase; }

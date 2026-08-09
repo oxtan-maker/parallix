@@ -1,11 +1,18 @@
+// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
+
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const stripAnsiModule = mockModule<typeof import('../src/application/presentation/cli-format.js')>('../src/application/presentation/cli-format.js', import.meta.url);
+const parseWorktreeListModule = mockModule<typeof import('../src/adapters/cli/commands/status.js')>('../src/adapters/cli/commands/status.js', import.meta.url);
+const statusModule = mockModule<typeof import('../src/adapters/cli/commands/status.js')>('../src/adapters/cli/commands/status.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const status = statusModule.default;
+const { stripAnsi } = stripAnsiModule;
+const { parseWorktreeList, findStaleMissionWorktrees } = parseWorktreeListModule;
 process.env.NO_COLOR = '1';
-
-const { stripAnsi } = require('../.test-runtime/application/presentation/cli-format.js');
-const { parseWorktreeList, findStaleMissionWorktrees } = require('../.test-runtime/adapters/cli/commands/status.js');
-const status = require('../.test-runtime/adapters/cli/commands/status.js');
 
 // ---------- parseWorktreeList edge cases ----------
 

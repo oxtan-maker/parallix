@@ -7,13 +7,17 @@
 //
 // This test must be RED at the mission parent commit and GREEN after the repair.
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
-const { runHandoffAndReview } = require('../.test-runtime/adapters/cli/commands/active.js');
-const repairHandoff = require('../.test-runtime/adapters/cli/commands/repair-handoff.js');
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const runHandoffAndReviewModule = mockModule<typeof import('../src/adapters/cli/commands/active.js')>('../src/adapters/cli/commands/active.js', import.meta.url);
+const repairHandoff = mockModule<typeof import('../src/adapters/cli/commands/repair-handoff.js')>('../src/adapters/cli/commands/repair-handoff.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const { runHandoffAndReview } = runHandoffAndReviewModule;
 
 // ── CP-1: Missing checkpoint → repairable relaunch (not stranded instruction) ──
 

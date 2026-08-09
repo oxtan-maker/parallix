@@ -1,15 +1,21 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
-const childProcess = require('child_process');
-const { mock } = test;
 
-const { runDeclaredGates } = require('../.test-runtime/adapters/cli/commands/handoff.js');
-const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
-const { submitForReview } = require('../.test-runtime/adapters/review/review-commands.js');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import childProcess from 'child_process';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const runDeclaredGatesModule = mockModule<typeof import('../src/adapters/cli/commands/handoff.js')>('../src/adapters/cli/commands/handoff.js', import.meta.url);
+const startReviewLoopModule = mockModule<typeof import('../src/adapters/review/review-loop.js')>('../src/adapters/review/review-loop.js', import.meta.url);
+const reviewCommandsModule = mockModule<typeof import('../src/adapters/review/review-commands.js')>('../src/adapters/review/review-commands.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const { runDeclaredGates } = runDeclaredGatesModule;
+const { startReviewLoop } = startReviewLoopModule;
+const { submitForReview } = reviewCommandsModule;
+const { mock } = test;
 
 // Reproduction tests for task-2234 (push-to-reviewer autobounce).
 //
@@ -140,7 +146,7 @@ function baseLoopHarness(root, overrides = {}) {
     buildCompactActOnReviewPromptFn: () => 'act-on-review prompt',
     log: (m) => logs.push(m),
     error: (m) => errors.push(m),
-    exit: (c) => exitCodes.push(c),
+    exit: (c) => { exitCodes.push(c); },
     ...overrides
   };
   return { opts, logs, errors, exitCodes };
@@ -168,6 +174,7 @@ test('task-2234 repro: review-loop self-heal auto-bounces to active on validatio
       writeReviewStateFn: (slug, state) => { writtenStates.push({ slug, state }); },
     });
 
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     await startReviewLoop('task-2234', opts);
 
     assertSelfHealAttempted(logs);
@@ -210,6 +217,7 @@ test('task-2234 repro: review-loop self-heal fails closed when validation-failur
     });
 
     await assert.rejects(
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
       () => startReviewLoop('task-2234', opts),
       /Review-state persistence failed for mission task-2234, phase unknown, round unknown, stage commit: simulated commit failure/
     );
@@ -231,6 +239,7 @@ test('task-2234 repro: review-loop self-heal does NOT bounce on gate-failed (exe
       transitionTaskFn: (slug, status) => { transitions.push({ slug, status }); },
     });
 
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     await startReviewLoop('task-2234', opts);
 
     assertSelfHealAttempted(logs);
@@ -261,6 +270,7 @@ test('task-2234 repro: infra/auth errors do NOT bounce (mission risk: narrow cla
       transitionTaskFn: (slug, status) => { transitions.push({ slug, status }); },
     });
 
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     await startReviewLoop('task-2234', opts);
 
     assertSelfHealAttempted(logs);
@@ -296,7 +306,7 @@ function submitHarness(root, performHandoffResult) {
     performHandoffFn: async () => performHandoffResult,
     transitionTaskFn: (slug, status) => { transitions.push({ slug, status }); return true; },
     log: (m) => logs.push(m),
-    exit: (c) => exitCodes.push(c),
+    exit: (c) => { exitCodes.push(c); },
   };
   return { options, transitions, logs, exitCodes };
 }
@@ -309,6 +319,7 @@ test('task-2234 repro: submitForReview auto-bounces to active on validation-fail
       error: 'Declared gate "true — some description" failed for task-2234: Gate declaration must contain an exact runnable command only.'
     });
 
+    // @ts-expect-error -- test stub captures exit code instead of calling process.exit()
     await submitForReview('task-2234', false, options);
 
     assert.deepEqual(
@@ -332,6 +343,7 @@ test('task-2234 repro: submitForReview does NOT bounce on gate-failed (execution
       error: 'Declared gate "./scripts/verify-local.sh all" failed for task-2234: Gate exited with status 1.'
     });
 
+    // @ts-expect-error -- test stub captures exit code instead of calling process.exit()
     await submitForReview('task-2234', false, options);
 
     assert.deepEqual(

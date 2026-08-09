@@ -41,7 +41,7 @@
   "scripts": {
     "build": "npm run bundle",
     "bundle": "tsx scripts/build-canonical-bundle.ts",
-    "dev": "tsx --import ./src/entry/esm-globals.ts src/entry/px.ts",
+    "dev": "tsx src/entry/px.ts",
     "prepack": "npm run build",
     "prepublishOnly": "npm run test:package-content && npm audit --omit=dev",
     "test": "FORCE_COLOR=0 tsx test/run-default-tests.ts",

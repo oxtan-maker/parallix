@@ -1,13 +1,15 @@
-'use strict';
+// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const crypto = require('node:crypto');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const stats = require('../.test-runtime/adapters/cli/commands/stats.js');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import stats from '../src/adapters/cli/commands/stats.js';
+import { fileURLToPath } from 'node:url';
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 /**
  * TASK-2322.08 CP-3: the explicit legacy CSV import/analysis boundary.
  *

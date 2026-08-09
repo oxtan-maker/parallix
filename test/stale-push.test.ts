@@ -1,8 +1,13 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const { pushReviewRef, isStaleInfoPushRejection } = require('../.test-runtime/adapters/forgejo/forgejo.js');
-const git = require('../.test-runtime/adapters/git/git.js');
+
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const pushReviewRefModule = mockModule<typeof import('../src/adapters/forgejo/forgejo.js')>('../src/adapters/forgejo/forgejo.js', import.meta.url);
+const git = mockModule<typeof import('../src/adapters/git/git.js')>('../src/adapters/git/git.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const { pushReviewRef, isStaleInfoPushRejection } = pushReviewRefModule;
 const { mock } = test;
 
 test('pushReviewRef captures output allowing stale info detection (FIXED)', (t) => {
@@ -19,7 +24,7 @@ test('pushReviewRef captures output allowing stale info detection (FIXED)', (t) 
   mock.method(process.stderr, 'write', () => {});
 
   const result = pushReviewRef('src', 'dest');
-  
+
   const isStale = isStaleInfoPushRejection(result);
   assert.strictEqual(isStale, true, 'FIXED: Should now be detectable as stale');
 });

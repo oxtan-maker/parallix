@@ -1,17 +1,22 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
 
 // Reproduction test for task-2209: codex fails on mcp
 //
 // The launcher must retain MCP configuration through a link rather than copy
 // its contents into the worktree-local Codex state directory.
 
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const ensureCodexHomeModule = mockModule<typeof import('../src/adapters/agents/codex.js')>('../src/adapters/agents/codex.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const { ensureCodexHome, codexConfigPath } = ensureCodexHomeModule;
+
 test('MCP config is linked, not copied, into worktree codex-home (reproduction)', () => {
-  const { ensureCodexHome, codexConfigPath } = require('../.test-runtime/adapters/agents/codex.js');
 
   const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-mcp-repro-'));
   const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-mcp-wt-'));

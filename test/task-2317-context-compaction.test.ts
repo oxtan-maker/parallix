@@ -1,17 +1,12 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
 
-const {
-  buildCompactReviewPrompt,
-  buildCompactActOnReviewPrompt,
-} = require('../.test-runtime/adapters/review/review-prompts.js');
-const {
-  handleGateFailureAutoBounce,
-} = require('../.test-runtime/adapters/review/review-loop.js');
 
-const repoRoot = path.resolve(__dirname, '..');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { buildCompactReviewPrompt, buildCompactActOnReviewPrompt, } from '../src/adapters/review/review-prompts.js';
+import { handleGateFailureAutoBounce, } from '../src/adapters/review/review-loop.js';
+const repoRoot = path.resolve(import.meta.dirname, '..');
 const reviewLoopSource = fs.readFileSync(
   path.join(repoRoot, 'src/adapters/review/review-loop.ts'),
   'utf8'
@@ -65,10 +60,15 @@ test('task-2317: repairable gate-error bounce compacts before repair and retains
     stderr: 'assertion failed',
     error: 'verification gate failed with exit code 1',
   }, 'codex', {
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     readReviewStateFn: () => ({ round: 2, disposition: 'REQUEST_CHANGES', metadata: { gateFailureRetryCount: 0 } }),
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     writeReviewStateFn: () => {},
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     transitionTaskFn: async () => {},
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     applyAgentFallbackFn: ({ original }: { original: string }) => original,
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     startAgentFn: async (_step: string, options: { prompt: (agent: string) => string }) => {
       repairPrompt = options.prompt('codex');
       return { agent: 'codex' };

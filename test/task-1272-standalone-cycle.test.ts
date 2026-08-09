@@ -11,16 +11,21 @@
  *  - SC7: findMissionDir reads the contract from a caller-supplied --mission path
  *         (outside docs/missions/) and preserves slug-derived behaviour when absent.
  */
-const test = require('node:test');
-const { mock } = test;
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const childProcess = require('child_process');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import childProcess from 'child_process';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const startReviewLoopModule = mockModule<typeof import('../src/adapters/review/review-loop.js')>('../src/adapters/review/review-loop.js', import.meta.url);
+const findMissionDirModule = mockModule<typeof import('../src/adapters/filesystem/mission-utils.js')>('../src/adapters/filesystem/mission-utils.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const { startReviewLoop } = startReviewLoopModule;
+const { findMissionDir, missionDirForSlug, missionPathForSlug } = findMissionDirModule;
 
-const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
-const { findMissionDir, missionDirForSlug, missionPathForSlug } = require('../.test-runtime/adapters/filesystem/mission-utils.js');
+const { mock } = test;
 
 async function withTempGitRepo(fn) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-test-1272-cycle-'));
@@ -167,6 +172,7 @@ test('startReviewLoop threads --mission override into the launched reviewer prom
       consumeReviewerArtifactsFn: async () => ({ consumed: true, ok: true, reviewState: 'APPROVED' })
     });
 
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     await startReviewLoop('task-1272', opts);
 
     assert.ok(capturedPrompt, 'reviewer prompt should have been built');
@@ -198,6 +204,7 @@ test('startReviewLoop uses the slug-derived mission path when --mission is absen
       consumeReviewerArtifactsFn: async () => ({ consumed: true, ok: true, reviewState: 'APPROVED' })
     });
 
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     await startReviewLoop('task-1272', opts);
 
     assert.ok(capturedPrompt, 'reviewer prompt should have been built');
@@ -215,6 +222,7 @@ test('standalone review loop completes a first round to APPROVED with no Forgejo
       consumeReviewerArtifactsFn: async () => ({ consumed: true, ok: true, reviewState: 'APPROVED' })
     });
 
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     await startReviewLoop('task-1272', opts);
 
     assert.deepEqual(exitCodes, [], `loop must not exit(1); errors=${errors.join(' | ')}`);
@@ -241,6 +249,7 @@ test('standalone loop survives REQUEST_CHANGES -> CHANGES_MADE -> APPROVED acros
       })
     });
 
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     await startReviewLoop('task-1272', opts);
 
     assert.deepEqual(exitCodes, [], `multi-round loop must not exit(1); errors=${errors.join(' | ')}`);

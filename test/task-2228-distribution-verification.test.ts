@@ -1,10 +1,13 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const { violationsFor, parsePackReport } = require('../scripts/package-content-audit.ts');
-const { artifactDifferences, compareFileLists } = require('../scripts/verify-reproducible-build.ts');
 
 // The published package shape after TASK-2285: the canonical ESM bundle plus
 // release metadata, with runtime assets staged under the bundle's payload root.
+
+import test from 'node:test';
+import assert from 'node:assert/strict';
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
+import { violationsFor, parsePackReport } from '../scripts/package-content-audit.ts';
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
+import { artifactDifferences, compareFileLists } from '../scripts/verify-reproducible-build.ts';
 const VALID_PACKAGE_FILES = [
   'build/asset-manifest.json',
   'build/config/agents.json',

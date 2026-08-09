@@ -1,12 +1,13 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const { spawnSync } = require('child_process');
-const fs = require('fs');
-const path = require('path');
-const os = require('os');
 
-const SCRIPT_DIR = path.join(__dirname, '..', '..', 'scripts');
+
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { spawnSync } from 'child_process';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
+const SCRIPT_DIR = path.join(import.meta.dirname, '..', '..', 'scripts');
 const INSTALLER = path.join(SCRIPT_DIR, 'install-workflow.sh');
 
 // task-1302 (standalone extraction): install-workflow.sh is a WrGroceries monorepo
@@ -238,7 +239,7 @@ hostTest('installer refuses to overwrite existing shim without --force', () => {
 
 hostTest('installer fallback copy (no rsync) produces correct directory structure', () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'install-wf-'));
-  
+
   try {
     const result = runInstaller([tmpDir, 'wf'], {
       env: { ...process.env, FORCE_NO_RSYNC: '1' }

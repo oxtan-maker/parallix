@@ -3,18 +3,14 @@
 // task-1233 (parallix phase 3) decision: schema deferred, and the example +
 // placeholder-sentinel model retired in favor of code-owned defaults. An absent
 // config is a valid 'default' state. See docs/missions/2026/task-1233/CP-3.md.
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
 
-const {
-  configCandidates,
-  evaluateRepositoryReadiness,
-  findWorkflowConfig,
-} = require('../.test-runtime/adapters/config/product-config.js');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
+import { configCandidates, evaluateRepositoryReadiness, findWorkflowConfig, } from '../src/adapters/config/product-config.js';
 function withTempDir(fn) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-config-deferral-'));
   try {

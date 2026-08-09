@@ -1,11 +1,15 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const path = require('path');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 
-const stats = require('../.test-runtime/adapters/cli/commands/stats.js');
-const { agentFamily } = require('../.test-runtime/domain/agents.js');
-const { reviewFindingId } = require('../.test-runtime/domain/review.js');
+// The helpers this file exercises hang off the default export object rather
+// than the module's named exports, so this must be the default import.
+import stats from '../src/adapters/cli/commands/stats.js';
+import { agentFamily } from '../src/domain/agents.js';
+import { reviewFindingId } from '../src/domain/review.js';
+import os from 'node:os';
+import { seedMissionDatabase } from './fixtures/review-state-db.js';
 
 // ---------------------------------------------------------------------------
 // CP 1 (red): Reproduction tests for implementer attribution defects
@@ -71,6 +75,7 @@ test('task-2348: mission with two implementers credits reported implementer not 
     },
   ];
 
+  // @ts-expect-error -- TASK-2328: runtime-only property/partial test double absent from the inferred type.
   const result = stats._internals.summarizeAgentWindow(rows, window);
   // Mission should be grouped under 'custom' (the reported implementer),
   // not 'claude-opus-5' (the earlier implementer's model).
@@ -94,8 +99,7 @@ test('task-2348: review-aggregate pr_fix_rounds counts only reported implementer
   // changes-requested rounds (3), not filtering by the reported implementer.
   //
   // Expected: pr_fix_rounds should be 2 (only rounds belonging to `custom`).
-  const { seedMissionDatabase } = require('./fixtures/review-state-db.js');
-  const root = fs.mkdtempSync(path.join(require('os').tmpdir(), 'task-2348-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2348-'));
   fs.mkdirSync(path.join(root, 'backlog', 'tasks'), { recursive: true });
   fs.mkdirSync(path.join(root, 'docs', 'missions', '2026', 'task-2348-b'), { recursive: true });
 
@@ -137,6 +141,7 @@ test('task-2348: review-aggregate pr_fix_rounds counts only reported implementer
   );
 
   try {
+    // @ts-expect-error -- TASK-2328: runtime-only property/partial test double absent from the inferred type.
     const info = await stats._internals.deriveImplementerAndFixRounds(
       'task-2348-b',
       root,
@@ -208,6 +213,7 @@ test('task-2348: summarizeAgentWindow reads pr_fix_rounds from closed row not ma
     },
   ];
 
+  // @ts-expect-error -- TASK-2328: runtime-only property/partial test double absent from the inferred type.
   const result = stats._internals.summarizeAgentWindow(rows, window);
   assert.equal(result[0].implementer, 'custom');
   assert.equal(

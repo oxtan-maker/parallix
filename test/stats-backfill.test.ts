@@ -1,25 +1,31 @@
+// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const childProcess = require('child_process');
 
+
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import childProcess from 'child_process';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const statsBackfill = mockModule<typeof import('../src/adapters/cli/commands/stats-backfill.js')>('../src/adapters/cli/commands/stats-backfill.js', import.meta.url);
+const stats = mockModule<typeof import('../src/adapters/cli/commands/stats.js')>('../src/adapters/cli/commands/stats.js', import.meta.url);
+const statsBackfillAdapterModule = mockModule<typeof import('../src/adapters/mission/stats-backfill-adapter.js')>('../src/adapters/mission/stats-backfill-adapter.js', import.meta.url);
+const statsBackfillServiceModule = mockModule<typeof import('../src/application/stats-backfill-service.js')>('../src/application/stats-backfill-service.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
 const {
   collectHistoricalStatsBackfill,
   inferHistoricalClassificationFromMissionDoc,
-} = require('../.test-runtime/adapters/cli/commands/stats-backfill.js');
-const statsBackfill = require('../.test-runtime/adapters/cli/commands/stats-backfill.js');
-const stats = require('../.test-runtime/adapters/cli/commands/stats.js');
-const { LegacyStatsBackfillAdapter } = require('../.test-runtime/adapters/mission/stats-backfill-adapter.js');
-const { StatsBackfillService } = require('../.test-runtime/application/stats-backfill-service.js');
+} = statsBackfill;
+const { LegacyStatsBackfillAdapter } = statsBackfillAdapterModule;
+const { StatsBackfillService } = statsBackfillServiceModule;
+// The command entry point is the module's default export.
+const statsBackfillCommand = statsBackfill.default;
 
-test('stats-backfill module loads without a parse-time SyntaxError', () => {
-  assert.doesNotThrow(() => {
-    delete require.cache[require.resolve('../.test-runtime/adapters/cli/commands/stats-backfill')];
-    require('../.test-runtime/adapters/cli/commands/stats-backfill.js');
-  });
+test('stats-backfill module loads without a parse-time SyntaxError', async () => {
+  await assert.doesNotReject(() => import('../src/adapters/cli/commands/stats-backfill.js'));
 });
 
 function withFixture(fn) {
@@ -316,7 +322,7 @@ test('statsBackfill supports help, json output, summary output, and apply mode',
     try {
       const service = new StatsBackfillService(new LegacyStatsBackfillAdapter(root));
       const logs = [];
-      await statsBackfill(['--help'], {
+      await statsBackfillCommand(['--help'], {
         rootDir: root,
         log: line => logs.push(line),
         error: line => logs.push(`ERR:${line}`),
@@ -327,7 +333,7 @@ test('statsBackfill supports help, json output, summary output, and apply mode',
       assert.match(logs.join('\n'), /measurement database \(<PARALLIX_HOME>\/parallix\.db\)/);
 
       const jsonLogs = [];
-      await statsBackfill(['--json'], {
+      await statsBackfillCommand(['--json'], {
         rootDir: root,
         service,
         log: line => jsonLogs.push(line),
@@ -339,7 +345,7 @@ test('statsBackfill supports help, json output, summary output, and apply mode',
       assert.equal(payload.skipped, 1);
 
       const summaryLogs = [];
-      await statsBackfill([], {
+      await statsBackfillCommand([], {
         rootDir: root,
         service,
         log: line => summaryLogs.push(line),
@@ -350,7 +356,7 @@ test('statsBackfill supports help, json output, summary output, and apply mode',
       assert.match(summaryLogs.join('\n'), /Skipped:\n- task-2009 status=active/);
 
       const applyLogs = [];
-      await statsBackfill(['--apply'], {
+      await statsBackfillCommand(['--apply'], {
         rootDir: root,
         service,
         log: line => applyLogs.push(line),
@@ -371,7 +377,7 @@ test('statsBackfill supports help, json output, summary output, and apply mode',
       assert.equal(fs.existsSync(path.join(root, 'workflow', 'data', 'stats.csv')), false);
 
       // Re-applying is idempotent: no duplicate mission rows appear.
-      await statsBackfill(['--apply'], {
+      await statsBackfillCommand(['--apply'], {
         rootDir: root,
         service,
         log: () => {},
@@ -392,7 +398,7 @@ test('statsBackfill maps a delegated write failure to stderr and exit 1 without 
   const logs = [];
   let exitCode = null;
 
-  await statsBackfill(['--apply'], {
+  await statsBackfillCommand(['--apply'], {
     rootDir: process.cwd(),
     service: {
       async execute() {

@@ -1,13 +1,13 @@
 // @ts-nocheck -- TASK-2277: preserve legacy CommonJS mock behavior while mock-shape typings are hardened separately.
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
-const { spawnSync } = require('node:child_process');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 
-const HYGIENE_SCRIPT = path.join(__dirname, '..', 'scripts', 'test-hygiene.sh');
+const HYGIENE_SCRIPT = path.join(import.meta.dirname, '..', 'scripts', 'test-hygiene.sh');
 
 function withFixture(source, assertion) {
   const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'test-hygiene-'));

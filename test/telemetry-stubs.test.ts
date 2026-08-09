@@ -1,18 +1,12 @@
 
-'use strict';
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
-const {
-  parseVibeMeta,
-  extractVibeTelemetry,
-  getVibeProviderModel,
-} = require('../.test-runtime/adapters/agents/vibe-telemetry.js');
-
+import { parseVibeMeta, extractVibeTelemetry, getVibeProviderModel, } from '../src/adapters/agents/vibe-telemetry.js';
 // ---------- parseVibeMeta ----------
 
 // Sample meta.json content for fixture-backed tests.
@@ -87,6 +81,7 @@ test('parseVibeMeta returns null for missing stats block', () => {
 test('parseVibeMeta returns null for empty/garbage input', () => {
   assert.equal(parseVibeMeta(null), null);
   assert.equal(parseVibeMeta(undefined), null);
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
   assert.equal(parseVibeMeta('not json'), null);
 });
 

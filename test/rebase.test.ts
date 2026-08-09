@@ -1,7 +1,5 @@
+// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const rebase = require('../.test-runtime/adapters/cli/commands/rebase.js');
 
 // ---------------------------------------------------------------------------
 // Test-local Git argument normalization
@@ -12,6 +10,14 @@ const rebase = require('../.test-runtime/adapters/cli/commands/rebase.js');
 // those leading global options so a fake can check the Git subcommand at a
 // fixed index again, without loose whole-array matching that would also accept
 // a malformed command. Returns the tail whose index 0 is the Git subcommand.
+
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const rebaseModule = mockModule<typeof import('../src/adapters/cli/commands/rebase.js')>('../src/adapters/cli/commands/rebase.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const rebase = rebaseModule.default;
 function gitSubcommandArgs(args: string[]): string[] {
   let i = 0;
   while (i + 1 < args.length && (args[i] === '-C' || args[i] === '-c')) {

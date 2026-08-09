@@ -1,5 +1,4 @@
-'use strict';
-
+// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 /**
  * TASK-2335: Reproduce the task-2322.12 reviewer-selection regression.
  *
@@ -8,7 +7,7 @@
  * different agent family than the PR author.
  *
  * This test exercises the actual launch path: the real `selectAgent` function
- * from `launcher-selection.ts` (via `.test-runtime/adapters/agents/agents.js`),
+ * from `launcher-selection.ts` (via `src/adapters/agents/launcher-selection.ts`),
  * called with the same arguments the review-loop uses:
  *   selectAgent('review', { exclude: new Set([implementer]) })
  *
@@ -18,32 +17,23 @@
  * It also covers the documented no-cross-family fallback.
  */
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const {
-  selectAgent,
-  eligibleAgentsForStep,
-  setCommandPathProbe,
-  readAgentConfig,
-  workflowLauncherStatus
-} = require('../.test-runtime/adapters/agents/agents.js');
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const {
-  startReviewLoop
-} = require('../.test-runtime/adapters/review/review-loop.js');
-const {
-  resolveHandoffReviewAssignment
-} = require('../.test-runtime/adapters/cli/commands/handoff.js');
-
+import { selectAgent, eligibleAgentsForStep, setCommandPathProbe, readAgentConfig, workflowLauncherStatus, } from '../src/adapters/agents/agents.js';
+import { startReviewLoop, } from '../src/adapters/review/review-loop.js';
+import { resolveHandoffReviewAssignment, } from '../src/adapters/cli/commands/handoff.js';
 const originalPath = process.env.PATH;
 const originalWorkflowAgent = process.env.WORKFLOW_AGENT;
 const originalCodexHome = process.env.CODEX_HOME;
 
-function installPathLaunchers(tmpRoot) {
+function installPathLaunchers(tmpRoot: string) {
   const binDir = path.join(tmpRoot, 'bin');
   fs.mkdirSync(binDir, { recursive: true });
   const launcherRunner = path.join(__dirname, 'lib', 'agent-script-runner.js');
@@ -52,7 +42,7 @@ function installPathLaunchers(tmpRoot) {
   }
   process.env.PATH = `${binDir}${path.delimiter}${process.env.PATH}`;
   process.env.CODEX_HOME ||= path.join(tmpRoot, 'glm-codex-home');
-  setCommandPathProbe(name => fs.existsSync(path.join(binDir, name)));
+  setCommandPathProbe((name: string) => fs.existsSync(path.join(binDir, name)));
 }
 
 test.after(() => {
@@ -67,14 +57,14 @@ test.after(() => {
 // =============================================================================
 
 test('handoff persists a configured cross-family reviewer instead of the PR author', () => {
-  const calls = [];
+  const calls: unknown[][] = [];
   const assignment = resolveHandoffReviewAssignment('claude', {
     worktree: '/tmp/task-2335',
-    eligibleAgentsForStepFn: (step) => {
+    eligibleAgentsForStepFn: (step: string) => {
       calls.push(['eligible', step]);
       return ['codex', 'claude', 'custom', 'vibe'];
     },
-    selectAgentFn: (step, options) => {
+    selectAgentFn: (step: string, options: { exclude: Set<string> }) => {
       calls.push(['select', step, [...options.exclude]]);
       return 'custom';
     }
@@ -237,10 +227,10 @@ test('startReviewLoop reviewer selection excludes the author family (review-loop
     installPathLaunchers(tmpRoot);
     delete process.env.WORKFLOW_AGENT;
 
-    const logs = [];
-    const errors = [];
-    let selectedReviewer = null;
-    let selectAgentCallArgs = null;
+    const logs: string[] = [];
+    const errors: string[] = [];
+    let selectedReviewer: string | null = null;
+    let selectAgentCallArgs: { step: string; exclude: string[] } | null = null;
 
     // Stub Math.random so selectAgent returns a deterministic agent
     const originalRandom = Math.random;
@@ -256,12 +246,12 @@ test('startReviewLoop reviewer selection excludes the author family (review-loop
       getTaskImplementerFn: () => 'codex',
       readReviewStateFn: () => null,
       eligibleAgentsForStepFn: () => ['codex', 'claude', 'custom', 'vibe'],
-      workflowLauncherStatusFn: (agent) => ({ agent, supported: true, detail: 'mock' }),
+      workflowLauncherStatusFn: (agent: string) => ({ agent, supported: true, detail: 'mock' }),
       // Use the real selectAgent (no custom wrapper) so the production
       // config-reading and launcher-availability path is exercised.
       // The review-loop calls selectAgentFn('review', { exclude: new Set([implementer]) }).
       // We wrap it to capture the call arguments.
-      selectAgentFn: (step, opts) => {
+      selectAgentFn: (step: string, opts: { exclude: Set<string> }) => {
         selectAgentCallArgs = { step, exclude: opts && opts.exclude ? [...opts.exclude] : [] };
         // Real selectAgent — reads config/agents.json from disk
         const result = selectAgent(step, { exclude: opts && opts.exclude });
@@ -275,9 +265,9 @@ test('startReviewLoop reviewer selection excludes the author family (review-loop
       transitionTaskFn: () => true,
       transitionVirtualFn: () => true,
       writeReviewStateFn: () => {},
-      log: (msg) => logs.push(msg),
-      error: (msg) => errors.push(msg),
-      exit: (code) => { throw new Error(`exit(${code})`); }
+      log: (msg: string) => logs.push(msg),
+      error: (msg: string) => errors.push(msg),
+      exit: (code: number) => { throw new Error(`exit(${code})`); }
     });
 
     Math.random = originalRandom;
@@ -297,7 +287,7 @@ test('startReviewLoop reviewer selection excludes the author family (review-loop
       `selected reviewer must NOT be the implementer family 'codex'; got '${selectedReviewer}'`
     );
     assert.ok(
-      ['claude', 'custom', 'vibe'].includes(selectedReviewer),
+      ['claude', 'custom', 'vibe'].includes(selectedReviewer!),
       `selected reviewer must be an eligible cross-family agent; got '${selectedReviewer}'`
     );
   } finally {
@@ -334,11 +324,11 @@ test('startReviewLoop single-family fallback when no cross-family reviewer is ru
     // commandPathProbe returns truthy only for codex — this is the single
     // consistency seam: both real selectAgent and the review-loop fallback
     // check see the same launcher availability.
-    setCommandPathProbe(name => name === 'codex' ? fs.existsSync(path.join(binDir, name)) : null);
+    setCommandPathProbe((name: string) => name === 'codex' ? fs.existsSync(path.join(binDir, name)) : null);
     delete process.env.WORKFLOW_AGENT;
 
-    const logs = [];
-    const errors = [];
+    const logs: string[] = [];
+    const errors: string[] = [];
     let selectAgentThrew = false;
 
     await startReviewLoop('task-999', {
@@ -353,8 +343,8 @@ test('startReviewLoop single-family fallback when no cross-family reviewer is ru
       eligibleAgentsForStepFn: () => ['codex', 'claude', 'custom', 'vibe'],
       // Inject the real workflowLauncherStatus so the review-loop fallback
       // check uses the same launcher availability as selectAgent.
-      workflowLauncherStatusFn: (agent) => workflowLauncherStatus(agent, tmpRoot),
-      selectAgentFn: (step, opts) => {
+      workflowLauncherStatusFn: (agent: string) => workflowLauncherStatus(agent, tmpRoot),
+      selectAgentFn: (step: string, opts: { exclude: Set<string>; worktree?: string }) => {
         try {
           // Real selectAgent — uses commandPathProbe (only codex found),
           // so cross-family agents are all unavailable. Throws because
@@ -372,9 +362,9 @@ test('startReviewLoop single-family fallback when no cross-family reviewer is ru
       transitionTaskFn: () => true,
       transitionVirtualFn: () => true,
       writeReviewStateFn: () => {},
-      log: (msg) => logs.push(msg),
-      error: (msg) => errors.push(msg),
-      exit: (code) => { throw new Error(`exit(${code})`); }
+      log: (msg: string) => logs.push(msg),
+      error: (msg: string) => errors.push(msg),
+      exit: (code: number) => { throw new Error(`exit(${code})`); }
     });
 
     // selectAgent should have thrown (no cross-family launcher available)

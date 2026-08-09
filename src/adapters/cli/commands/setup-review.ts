@@ -13,7 +13,3 @@ async function setupReviewCommand(args: string[], options?: {[key: string]: any}
 
 export default setupReviewCommand;
 export { setupReviewCommand };
-
-// CJS compat: ensure require() returns the function directly
-declare const module: { exports: any } | undefined;
-if (typeof module !== 'undefined') { module.exports = setupReviewCommand; }

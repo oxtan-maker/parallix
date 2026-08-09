@@ -1,10 +1,14 @@
 
+
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const opencode = mockModule<typeof import('../src/adapters/agents/opencode.js')>('../src/adapters/agents/opencode.js', import.meta.url);
+const detectLimitHitModule = mockModule<typeof import('../src/application/services/agent-limit.js')>('../src/application/services/agent-limit.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const { detectLimitHit } = detectLimitHitModule;
 'use strict';
-
-const test = require('node:test');
-const assert = require('node:assert/strict');
-
-const opencode = require('../.test-runtime/adapters/agents/opencode.js');
 
 function resetInjections() {
   opencode.__setSpawnAndTeeForTest(null);
@@ -88,7 +92,6 @@ test('shouldRetryOpencodeFailure does NOT retry plain 429 (classified as limit-h
 });
 
 test('detectLimitHit classifies plain 429 as a limit-hit for custom', () => {
-  const { detectLimitHit } = require('../.test-runtime/application/services/agent-limit.js');
   const result = detectLimitHit({ agent: 'custom', status: 1, stderr: '429 Too Many Requests' });
   assert.ok(result, 'plain 429 should be detected as a limit-hit');
   assert.equal(result.source, 'fallback', 'no reset-time info in plain 429, uses fallback block');

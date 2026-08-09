@@ -1,14 +1,12 @@
 
+
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 'use strict';
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const {
-  extractOpencodeTelemetryFromExport,
-  extractOpencodeTelemetry,
-  getOpencodeProviderModel,
-} = require('../.test-runtime/adapters/agents/opencode-telemetry.js');
-
+import { extractOpencodeTelemetryFromExport, extractOpencodeTelemetry, getOpencodeProviderModel, } from '../src/adapters/agents/opencode-telemetry.js';
 // --- extractOpencodeTelemetryFromExport tests ---
 
 test('extractOpencodeTelemetryFromExport parses valid export JSON with total_token_usage', () => {
@@ -192,12 +190,10 @@ test('extractOpencodeTelemetryFromExport counts tool calls in messages[].parts[]
 });
 
 test('extractOpencodeTelemetryFromExport parses the real opencode v2 export fixture', () => {
-  const fs = require('node:fs');
-  const path = require('node:path');
   // Real opencode v2.0.0 export, session ses_132f470d8ffexge85esdX0nzCs,
   // model cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit, reduced to the parser-relevant
   // fields (see opencode-launcher-telemetry.test.js for the fixture origin note).
-  const fixture = path.join(__dirname, 'fixtures', 'opencode-export-v2.json');
+  const fixture = path.join(import.meta.dirname, 'fixtures', 'opencode-export-v2.json');
   const result = extractOpencodeTelemetryFromExport(fs.readFileSync(fixture, 'utf8'));
   assert.ok(result);
   assert.equal(result.sessionId, 'ses_132f470d8ffexge85esdX0nzCs');

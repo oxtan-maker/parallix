@@ -1,8 +1,13 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const rebase = require('../.test-runtime/adapters/cli/commands/rebase.js');
 
+
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const rebaseModule = mockModule<typeof import('../src/adapters/cli/commands/rebase.js')>('../src/adapters/cli/commands/rebase.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const rebase = rebaseModule.default;
 test('rebase applies core.editor=true to initial rebase call', async () => {
   let capturedArgs = null;
   await rebase(['task-1077'], {

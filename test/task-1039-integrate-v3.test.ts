@@ -1,9 +1,20 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const path = require('path');
-const { printIntegrationPreflight } = require('../.test-runtime/adapters/cli/commands/integrate.js');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import path from 'path';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+import { createRequire } from 'node:module';
+const printIntegrationPreflightModule = mockModule<typeof import('../src/adapters/cli/commands/integrate.js')>('../src/adapters/cli/commands/integrate.js', import.meta.url);
+const getUnresolvedIndexConflictsModule = mockModule<typeof import('../src/adapters/cli/commands/integrate.js')>('../src/adapters/cli/commands/integrate.js', import.meta.url);
+const promoteTaskForIntegrationIfNeededModule = mockModule<typeof import('../src/adapters/cli/commands/integrate.js')>('../src/adapters/cli/commands/integrate.js', import.meta.url);
+const backlog = mockModule<typeof import('../src/adapters/backlog/backlog.js')>('../src/adapters/backlog/backlog.js', import.meta.url);
+const __mm1 = mockModule<typeof import('../src/composition/application-services.js')>('../src/composition/application-services.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const { printIntegrationPreflight } = printIntegrationPreflightModule;
+const { getUnresolvedIndexConflicts } = getUnresolvedIndexConflictsModule;
+const { promoteTaskForIntegrationIfNeeded } = promoteTaskForIntegrationIfNeededModule;
 const { mock } = test;
 
 const TEST_SLUG = 'task-preflight-test';
@@ -22,13 +33,13 @@ test('printIntegrationPreflight branch failure', (t) => {
     mainDirty: false,
     mainDirtyEntries: []
   };
-  
+
   const result = printIntegrationPreflight(context, {
     readTokenFn: () => 'token',
     resolveTokenFileFn: () => 'file',
     getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
   });
-  
+
   assert.ok(result.failures.includes('branch'));
 });
 
@@ -46,13 +57,13 @@ test('printIntegrationPreflight mission-doc failure', (t) => {
     mainDirty: false,
     mainDirtyEntries: []
   };
-  
+
   const result = printIntegrationPreflight(context, {
     readTokenFn: () => 'token',
     resolveTokenFileFn: () => 'file',
     getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
   });
-  
+
   assert.ok(result.failures.includes('mission-doc'));
 });
 
@@ -70,7 +81,7 @@ test('printIntegrationPreflight task failures', (t) => {
     mainDirty: false,
     mainDirtyEntries: []
   };
-  
+
   const res1 = printIntegrationPreflight(context1, {
     readTokenFn: () => 'token',
     resolveTokenFileFn: () => 'file',
@@ -103,7 +114,7 @@ test('printIntegrationPreflight PR approval failures', (t) => {
     mainDirty: false,
     mainDirtyEntries: []
   };
-  
+
   const res1 = printIntegrationPreflight(context1, {
     isForgejoReviewEnabledFn: () => true,
     readTokenFn: () => 'token',
@@ -141,13 +152,14 @@ test('printIntegrationPreflight main-index-conflict-check failure', (t) => {
     mainDirty: false,
     mainDirtyEntries: []
   };
-  
+
   const result = printIntegrationPreflight(context, {
     readTokenFn: () => 'token',
     resolveTokenFileFn: () => 'file',
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     getUnresolvedIndexConflictsFn: () => ({ ok: false, error: 'git error' })
   });
-  
+
   assert.ok(result.failures.includes('main-index-conflict-check'));
 });
 
@@ -165,18 +177,17 @@ test('printIntegrationPreflight main-dirty warning', (t) => {
     mainDirty: true,
     mainDirtyEntries: ['modified.js']
   };
-  
+
   const result = printIntegrationPreflight(context, {
     readTokenFn: () => 'token',
     resolveTokenFileFn: () => 'file',
     getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
   });
-  
+
   assert.ok(result.warnings.includes('main-dirty'));
 });
 
 test('getUnresolvedIndexConflicts failure path', (t) => {
-  const { getUnresolvedIndexConflicts } = require('../.test-runtime/adapters/cli/commands/integrate.js');
   const result = getUnresolvedIndexConflicts('/tmp/dir', {
     gitRunner: () => ({ status: 1, stdout: 'git error' })
   });
@@ -185,7 +196,6 @@ test('getUnresolvedIndexConflicts failure path', (t) => {
 });
 
 test('promoteTaskForIntegrationIfNeeded failure path', async (t) => {
-  const { promoteTaskForIntegrationIfNeeded } = require('../.test-runtime/adapters/cli/commands/integrate.js');
   const context = {
     task: { ok: true, taskFile: '/tmp/task.md' },
     taskStatus: 'review',
@@ -197,13 +207,13 @@ test('promoteTaskForIntegrationIfNeeded failure path', async (t) => {
   };
 
   // Mock backlog.setTaskStatus to fail
-  const backlog = require('../.test-runtime/adapters/backlog/backlog.js');
   const originalSetTaskStatus = backlog.setTaskStatus;
   backlog.setTaskStatus = () => false;
 
   // Mock createMissionApplicationServices for SQLite-first transitions
-  const composition = require('../.test-runtime/composition/application-services.js');
+  const composition = __mm1;
   const originalCreate = composition.createMissionApplicationServices;
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
   composition.createMissionApplicationServices = async () => ({
     store: {
       _repoId: 'default',

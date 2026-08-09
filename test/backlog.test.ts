@@ -1,11 +1,17 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const childProcess = require('child_process');
-const { WORKFLOW_AGENT_NAMES } = require('../.test-runtime/adapters/agents/agents.js');
-const fmt = require('../.test-runtime/application/presentation/cli-format.js');
+
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import childProcess from 'child_process';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const WORKFLOW_AGENT_NAMESModule = mockModule<typeof import('../src/adapters/agents/agents.js')>('../src/adapters/agents/agents.js', import.meta.url);
+const fmt = mockModule<typeof import('../src/application/presentation/cli-format.js')>('../src/application/presentation/cli-format.js', import.meta.url);
+const __mm1 = mockModule<typeof import('../src/adapters/backlog/backlog.js')>('../src/adapters/backlog/backlog.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const { WORKFLOW_AGENT_NAMES } = WORKFLOW_AGENT_NAMESModule;
 const typeKey = ['class', 'ification'].join('');
 
 const {
@@ -28,8 +34,9 @@ const {
    clearTaskAgentAssignee,
    hasBugLabel,
    getTaskLabels,
-} = require('../.test-runtime/adapters/backlog/backlog.js');
-const { [`getTask${typeKey[0].toUpperCase()}${typeKey.slice(1)}`]: getTaskMissionType } = require('../.test-runtime/adapters/backlog/backlog.js');
+} = __mm1;
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
+const { [`getTask${typeKey[0].toUpperCase()}${typeKey.slice(1)}`]: getTaskMissionType } = __mm1;
 
 async function withTempRepo(fn) {
   const previous = process.cwd();
@@ -688,37 +695,37 @@ test('transitionTask commits a Backlog task update when invoked from a sibling m
     fs.mkdirSync(taskDir, { recursive: true });
     const taskPath = path.join(taskDir, 'task-2104-sibling.md');
     fs.writeFileSync(taskPath, 'id: TASK-2104\nstatus: backlog\nassignee: [gemini]\n');
-    
+
     childProcess.spawnSync('git', ['add', '.'], { cwd: root, encoding: 'utf8' });
     childProcess.spawnSync('git', ['commit', '-m', 'seed task'], { cwd: root, encoding: 'utf8' });
-    
+
     // 2. Create a sibling worktree
     const worktreePath = path.join(os.tmpdir(), `workflow-worktree-${Date.now()}`);
     childProcess.spawnSync('git', ['worktree', 'add', '-b', 'mission/task-2104-sibling', worktreePath, 'HEAD'], { cwd: root, encoding: 'utf8' });
-    
+
     try {
       // The task file path inside the worktree
       const worktreeTaskPath = path.join(worktreePath, 'backlog', 'tasks', 'task-2104-sibling.md');
-      
+
       const logs = [];
       // Transition the task using the worktree as rootDir (exact slug, no suffix)
-      const ok = transitionTask('task-2104', 'active', { 
-        implementer: 'codex', 
-        rootDir: worktreePath, 
-        log: msg => logs.push(msg) 
+      const ok = transitionTask('task-2104', 'active', {
+        implementer: 'codex',
+        rootDir: worktreePath,
+        log: msg => logs.push(msg)
       });
-      
+
       assert.equal(ok, true, 'transitionTask should return true');
-      
+
       // The durable task state is committed on the primary checkout, then the
       // mission worktree is rebased onto it.
       const content = fs.readFileSync(path.join(root, 'backlog', 'tasks', 'task-2104-sibling.md'), 'utf8');
       assert.match(content, /^status: active$/m);
-      
+
       // Verify the commit in the worktree repo
       const lastSubject = childProcess.spawnSync('git', ['log', '-1', '--format=%s'], { cwd: root, encoding: 'utf8' }).stdout.trim();
       assert.equal(lastSubject, 'backlog(task-2104): transition to active and implementer=codex');
-      
+
     } finally {
       // Cleanup worktree
       childProcess.spawnSync('git', ['worktree', 'remove', '--force', worktreePath], { cwd: root, encoding: 'utf8' });

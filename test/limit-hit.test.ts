@@ -1,25 +1,9 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
 
-const {
-  getPatternsForAgent,
-  findLimitHitMatch,
-  clipContext,
-  parseIsoOffset,
-  parseIso,
-  parseTwelveHour,
-  parseTwentyFourHour,
-  parseRelative,
-  parseRetryAfter,
-  parseRetryAtDate,
-  projectClockTime,
-  parseResetTime,
-  formatBlockUntil,
-  ceilToNextHour,
-  detectLimitHit
-} = require('../.test-runtime/application/services/agent-limit.js');
 
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { getPatternsForAgent, findLimitHitMatch, clipContext, parseIsoOffset, parseIso, parseTwelveHour, parseTwentyFourHour, parseRelative, parseRetryAfter, parseRetryAtDate, projectClockTime, parseResetTime, formatBlockUntil, ceilToNextHour, detectLimitHit } from '../src/application/services/agent-limit.js';
 // ---------- getPatternsForAgent ----------
 
 test('getPatternsForAgent returns patterns for claude', () => {
@@ -59,6 +43,7 @@ test('findLimitHitMatch finds matching phrase in stdout', () => {
 });
 
 test('findLimitHitMatch returns null when no match', () => {
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
   const match = findLimitHitMatch('Hello world', ['claude'], 'stdout');
   assert.equal(match, null);
 });
@@ -226,6 +211,7 @@ test('detectLimitHit returns null when error is set (spawn error)', () => {
     stderr: '',
     status: null,
     signal: null,
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     error: new Error('ENOENT')
   });
   assert.equal(result, null);

@@ -12,7 +12,7 @@ import * as path from 'node:path';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 
-const root = path.resolve(__dirname, '..');
+const root = path.resolve(import.meta.dirname, '..');
 
 function runArtifact(args: string[], options: Parameters<typeof execFileSync>[2]): string | null {
   try {

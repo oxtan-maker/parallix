@@ -1,10 +1,15 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const path = require('path');
-const { getPrNumber } = require('../.test-runtime/adapters/forgejo/forgejo.js');
 
+
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import path from 'path';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const getPrNumberModule = mockModule<typeof import('../src/adapters/forgejo/forgejo.js')>('../src/adapters/forgejo/forgejo.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const { getPrNumber } = getPrNumberModule;
 test('getPrNumber robust matching', (t) => {
   const apiCall = (method, apiPath) => {
     if (apiPath.includes('state=open')) return { ok: true, data: [] };
@@ -29,7 +34,7 @@ test('getPrNumber pagination and sorting', (t) => {
   };
 
   getPrNumber('any', 'token', { apiCall });
-  
+
   assert.ok(calls[0].includes('state=open'), 'Should check open PRs first');
   assert.ok(calls[0].includes('sort=recentupdate'), 'Should use sorting');
   assert.ok(calls[1].includes('state=all'), 'Should check all PRs if open check fails');

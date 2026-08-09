@@ -14,8 +14,12 @@
  * `import missionStart`), this test will fail because the namespace
  * object will no longer be passed — proving the regression is gone.
  */
-const assert = require('node:assert/strict');
-const test = require('node:test');
+import assert from 'node:assert/strict';
+import test, { mock } from 'node:test';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const active = mockModule<typeof import('../src/adapters/cli/commands/active.js')>('../src/adapters/cli/commands/active.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
 
 // Build a namespace-like object that mirrors what `import * as` produces
 // after esModuleInterop compilation of a CJS module with `module.exports = fn`.
@@ -39,7 +43,6 @@ test('active delegates without invoking a legacy missionStartFn namespace object
   // has `const missionStart = __importStar(require('./mission-start.js'))`
   // which produces a namespace object — not a function.
   // We simulate that by passing a namespace object as missionStartFn.
-  const active = require('../.test-runtime/adapters/cli/commands/active.js');
 
   const namespaceObj = makeNamespaceObj(stubMissionStart);
 
@@ -52,13 +55,13 @@ test('active delegates without invoking a legacy missionStartFn namespace object
   );
 
   // Now invoke active with the namespace as missionStartFn.
-  // active() should propagate the TypeError when it tries to call missionStartFn.
+  // active.default() should propagate the TypeError when it tries to call missionStartFn.
   let threw = false;
   let error;
   try {
-    // active() calls missionStartFn([slug], { returnResult: true }) at the
+    // active.default() calls missionStartFn([slug], { returnResult: true }) at the
     // preflight step. With a namespace object, this throws TypeError.
-    await active(['task-1396'], {
+    await active.default(['task-1396'], {
       missionStartFn: namespaceObj,
       service: { execute: async () => ({ status: 'completed', value: { agent: 'codex' }, durableEvidence: [] }) },
       inferSlugFn: () => 'task-1396',
@@ -73,16 +76,15 @@ test('active delegates without invoking a legacy missionStartFn namespace object
 });
 
 test('active succeeds when missionStartFn is the default export function (task-1396 fix verified)', async () => {
-  const active = require('../.test-runtime/adapters/cli/commands/active.js');
 
   // Pass the actual function (what the fix should provide).
   const fn = stubMissionStart;
   fn.completePreflightOrExit = () => {};
 
-  // active() should call fn([slug], { returnResult: true }) and get { pass: true },
+  // active.default() should call fn([slug], { returnResult: true }) and get { pass: true },
   // then continue to resolveWorktreeFn which we also stub.
   let launched = false;
-  await active(['task-1396'], {
+  await active.default(['task-1396'], {
     missionStartFn: fn,
     service: { execute: async () => {
       launched = true;
@@ -103,5 +105,5 @@ test('active succeeds when missionStartFn is the default export function (task-1
     exitFn: () => { /* suppress process.exit */ },
   });
 
-  assert.ok(launched, 'active() must proceed to launch when missionStartFn is callable');
+  assert.ok(launched, 'active.default() must proceed to launch when missionStartFn is callable');
 });

@@ -33,7 +33,7 @@ import { pushReviewRef, isStaleInfoPushRejection, fetchReviewBranch } from '../f
 
 /** Lazily loaded stats module — loaded on first use to avoid circular dependency. */
 let _stats: any = null;
-const MODULE_DIR = import.meta.url ? path.dirname(fileURLToPath(import.meta.url)) : __dirname;
+const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 function getStats(): any {
   if (!_stats) {
     _stats = statsModule;

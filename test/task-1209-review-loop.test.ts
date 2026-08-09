@@ -1,12 +1,16 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
 
-const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
 
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const startReviewLoopModule = mockModule<typeof import('../src/adapters/review/review-loop.js')>('../src/adapters/review/review-loop.js', import.meta.url);
+await installModuleMocks();
+const { startReviewLoop } = startReviewLoopModule;
+test.afterEach(() => mock.restoreAll());
 test('startReviewLoop skips reviewer and implementer launches for autonomous fallback in provider=none mode', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1209-review-loop-'));
   const logs = [];
@@ -23,11 +27,13 @@ test('startReviewLoop skips reviewer and implementer launches for autonomous fal
       worktree: root,
       maxAttempts: 1,
       maybeUpdateGraphifyBeforeReviewFn: () => {},
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-999.md' }),
       getTaskImplementerFn: () => null,
       readReviewStateFn: () => null,
       eligibleAgentsForStepFn: () => ['codex'],
       selectAgentFn: () => { throw new Error('No agents available'); },
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
       rebaseBeforeReviewRoundFn: async () => ({ ok: true }),
       startAgentFn: async (mode) => {
         launches.push(mode);
@@ -35,8 +41,10 @@ test('startReviewLoop skips reviewer and implementer launches for autonomous fal
       },
       consumeReviewerArtifactsFn: async () => ({ consumed: true, ok: true, reviewState: 'REQUEST_CHANGES' }),
       consumeImplementerArtifactsFn: async () => ({ consumed: true, ok: true, disposition: 'CHANGES_MADE' }),
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
       transitionTaskFn: () => true,
       transitionVirtualFn: () => true,
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
       writeReviewStateFn: () => {},
       log: (msg) => logs.push(msg),
       error: (msg) => errors.push(msg),

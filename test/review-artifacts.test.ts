@@ -1,9 +1,17 @@
+// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
+
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const buildCompactReviewPromptModule = mockModule<typeof import('../src/adapters/review/review-prompts.js')>('../src/adapters/review/review-prompts.js', import.meta.url);
+const __mm1 = mockModule<typeof import('../src/adapters/review/review-artifacts.js')>('../src/adapters/review/review-artifacts.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const { buildCompactReviewPrompt } = buildCompactReviewPromptModule;
 const {
   buildMetadataFooter,
   reviewArtifactPath,
@@ -16,8 +24,7 @@ const {
   consumeReviewerArtifacts,
   consumeImplementerArtifacts,
   resolveArtifactDir
-} = require('../.test-runtime/adapters/review/review-artifacts.js');
-const { buildCompactReviewPrompt } = require('../.test-runtime/adapters/review/review-prompts.js');
+} = __mm1;
 
 // ============================================================================
 // buildMetadataFooter tests
@@ -944,8 +951,6 @@ test('consumeReviewerArtifacts fails when outcome event creation fails', async (
 
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
-
-
 
 test('consumeReviewerArtifacts with non-approve/non-request-changes verdict', async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-consume-other-'));

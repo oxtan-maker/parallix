@@ -1,11 +1,11 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
-const vm = require('node:vm');
-const ts = require('typescript');
 
+
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { buildTestRunPlan } from './lib/test-run-plan.js';
 const expectedIntegrationFiles = [
   'active.test.ts', 'agents-limit-hit.test.ts', 'agents.test.ts', 'backlog.test.ts',
   'bootstrap-isolation.test.ts', 'draft-command.test.ts', 'draft.test.ts',
@@ -47,9 +47,9 @@ const expectedIntegrationFiles = [
   'task-2322.12-review-recovery.integration.test.ts',
   'task-2273-review-gate-ownership.test.ts', 'task-2311-console-empty-repro.test.ts',
   'task-2312-label-sync.test.ts', 'task-2313-repro.test.ts',
-  'task-2318-temp-directory-leaks.test.js',
+  'task-2318-temp-directory-leaks.test.ts',
   'task-2319-notices-git-tracking.test.ts',
-  'task-2327-coverage-gate-tmp-leaks.test.js',
+  'task-2327-coverage-gate-tmp-leaks.test.ts',
   'task-2347.10-repro.test.ts',
   'test-hygiene.test.ts',
   'tui-action-bar.test.ts',
@@ -64,51 +64,24 @@ const expectedIntegrationFiles = [
 ].sort();
 
 function selectedFiles(args, version = process.version) {
-  const runnerPath = path.join(__dirname, 'run-default-tests.ts');
-  // The runner is TypeScript; strip its type annotations before running it in a
-  // bare vm context, which understands only plain JavaScript.
-  const runner = ts.transpileModule(fs.readFileSync(runnerPath, 'utf8'), {
-    compilerOptions: { target: ts.ScriptTarget.ES2024, module: ts.ModuleKind.CommonJS },
-    fileName: runnerPath,
-  }).outputText;
-  /** @type {string[] | undefined} */
-  let spawnedTestArgs;
-  const childProcess = {
-    ['spawn' + 'Sync'](command, commandArgs) {
-      if (commandArgs[0] === '--version') {
-        return { status: 0, stdout: version };
-      }
-      spawnedTestArgs = commandArgs;
-      return { status: 0 };
-    }
-  };
-  const sandbox = {
-    __dirname,
-    require(id) {
-      if (id === 'node:child_process') return childProcess;
-      return require(id);
-    },
-    process: {
-      argv: ['node', runnerPath, ...args],
-      env: process.env,
-      execPath: process.execPath,
-      exit() {},
-      kill() {}
-    }
-  };
-  vm.runInNewContext(runner, sandbox, { filename: runnerPath });
-  if (!spawnedTestArgs) {
-    throw new Error('Expected the default test runner to spawn a test process');
-  }
+  // TASK-2328: the runner's suite selection and argv assembly live in
+  // test/lib/test-run-plan.ts, so this guard calls the same ESM module the
+  // runner calls instead of transpiling the runner into a CommonJS vm sandbox.
+  const plan = buildTestRunPlan({
+    executionRoot: path.join(import.meta.dirname, '..'),
+    requestedArgs: args,
+    probeNodeVersion: () => version,
+  });
   return {
-    files: Array.from(spawnedTestArgs.slice(spawnedTestArgs.indexOf('--test') + 1), file => path.basename(file)).sort(),
-    args: spawnedTestArgs
+    files: Array.from(plan.nodeArgs.slice(plan.nodeArgs.indexOf('--test') + 1), file => path.basename(file)).sort(),
+    args: plan.nodeArgs,
   };
 }
 
 test('default test runner routes every moved group to integration and excludes it from default', () => {
-  const runner = fs.readFileSync(path.join(__dirname, 'run-default-tests.ts'), 'utf8');
-  const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+  const runner = fs.readFileSync(path.join(import.meta.dirname, 'run-default-tests.ts'), 'utf8')
+    + fs.readFileSync(path.join(import.meta.dirname, 'lib', 'test-run-plan.ts'), 'utf8');
+  const pkg = JSON.parse(fs.readFileSync(path.join(import.meta.dirname, '..', 'package.json'), 'utf8'));
 
   const defaultRun = selectedFiles([]);
   const integrationRun = selectedFiles(['--integration']);
@@ -135,7 +108,7 @@ test('default test runner routes every moved group to integration and excludes i
 });
 
 test('default test runner selects a Node version that supports node:test', () => {
-  const runner = fs.readFileSync(path.join(__dirname, 'run-default-tests.ts'), 'utf8');
+  const runner = fs.readFileSync(path.join(import.meta.dirname, 'lib', 'test-run-plan.ts'), 'utf8');
   assert.match(runner, /MINIMUM_TEST_NODE_MAJOR = 20/);
   assert.match(runner, /MINIMUM_TEST_NODE_MINOR = 6/);
   assert.match(runner, /PARALLIX_TEST_NODE/);
@@ -147,14 +120,13 @@ test('default test runner selects a Node version that supports node:test', () =>
 });
 
 test('default test runner preserves an explicitly selected execution root for every child process', () => {
-  const runner = fs.readFileSync(path.join(__dirname, 'run-default-tests.ts'), 'utf8');
+  const runner = fs.readFileSync(path.join(import.meta.dirname, 'run-default-tests.ts'), 'utf8');
   assert.match(runner, /PARALLIX_EXECUTION_ROOT/);
   assert.match(runner, /cwd: executionRoot/);
   assert.match(runner, /env: \{[\s\S]*?\.\.\.process\.env[\s\S]*?PARALLIX_EXECUTION_ROOT: executionRoot[\s\S]*?PARALLIX_TEST_MANIFEST_DIR/);
 });
 
-test('default test runner classifies tui-spawn as integration and pins bootstrap bypass', () => {
-  const runner = fs.readFileSync(path.join(__dirname, 'run-default-tests.ts'), 'utf8');
+test('default test runner classifies tui-spawn as default (not integration) and pins bootstrap bypass', () => {
   const defaultRun = selectedFiles([]);
   const integrationRun = selectedFiles(['--integration']);
   const defaultFiles = defaultRun.files;

@@ -1,10 +1,10 @@
-// @ts-nocheck
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
 
-const ROOT = path.resolve(__dirname, '..');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+
+const ROOT = path.resolve(import.meta.dirname, '..');
 const assetStoreSource = fs.readFileSync(path.join(ROOT, 'src/adapters/assets/runtime-assets.ts'), 'utf8');
 
 test('task-2279 routes shipped prompts and configuration through the runtime AssetStore', () => {
@@ -27,7 +27,7 @@ test('task-2279 routes shipped prompts and configuration through the runtime Ass
   ]) {
     const source = fs.readFileSync(path.join(ROOT, file), 'utf8');
     assert.match(source, /runtimeAssetStore\.readText/);
-    assert.doesNotMatch(source, /packageRoot\(__dirname\).*'(prompts|templates|config)'/);
+    assert.doesNotMatch(source, /packageRoot\(import.meta.dirname\).*'(prompts|templates|config)'/);
   }
 });
 

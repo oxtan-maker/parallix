@@ -6,8 +6,8 @@ ADR 0046 (npm publish process and security), TASK-2285, TASK-2286 (native SEA)
 
 The npm package now executes the canonical ESM bundle. The published tarball is
 `build/` plus `package.json`, `LICENSE`, `README.md`, `CHANGELOG.md` and `NOTICES`
-— 18 files. It contains no source tree, no tests, no CommonJS `dist/` output, and
-no dependency closure.
+— 18 files. It contains no source tree, no tests, no alternate runtime output,
+and no dependency closure.
 
 Verify the shape at any time with `npm run test:package-content`.
 
@@ -49,8 +49,7 @@ Consequences for operators:
 
 ## Removal of the root programmatic export
 
-`main` and `exports` are gone. `require('@magnusekdahl/parallix')` and
-`import parallix from '@magnusekdahl/parallix'` no longer resolve.
+`main` and `exports` are gone. Parallix has no root programmatic import.
 
 Parallix is a CLI application, not a supported JavaScript SDK (ADR 0044:
 "Parallix is a CLI application, not a supported JavaScript SDK. The long-term
@@ -140,17 +139,9 @@ outside the approved set (`scripts/release-metadata.js`).
 `prepublishOnly` runs `npm run test:package-content` (content + checksum audit)
 and `npm audit --omit=dev` before any publish.
 
-## Rollback
+## Module strategy
 
-The transitional CommonJS `dist/` tree has been retired (task-2288). The
-published package ships the canonical ESM bundle (`build/px.mjs`) as the sole
-executable artifact. `scripts/rollback-commonjs-package.js` and
-`test/task-2285-rollback.test.ts` were removed as part of the retirement.
-
-A rollback to the CommonJS `dist/` shape is still possible as a coordinated
-change — it would restore the `dist/` emitter in `scripts/build-canonical-bundle.ts`,
-update `package.json` metadata (`"type": "commonjs"`, `main`, `bin.px`, `exports`),
-and re-add runtime `dependencies`. The TypeScript source (`src/`) remains the
-sole source authority in both shapes. This is a single coherent rollback phase
-covering the emitter, package entries, exports, and dependencies together;
-partial restoration of individual shims is not coherent.
+The published package and repository tooling are ESM-only. The canonical bundle
+(`build/px.mjs`) is the sole executable artifact, and the source tree has no
+alternate module-format build or test runtime. Tests isolate dependencies with
+the native ESM module-mocking seam in `test/lib/module-mock.ts`.

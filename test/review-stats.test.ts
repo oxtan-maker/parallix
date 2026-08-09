@@ -1,9 +1,14 @@
+// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
 
-const stats = require('../.test-runtime/adapters/cli/commands/stats.js');
 
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const stats = mockModule<typeof import('../src/adapters/cli/commands/stats.js')>('../src/adapters/cli/commands/stats.js', import.meta.url);
+const __mm1 = mockModule<typeof import('../src/application/presentation/cli-format.js')>('../src/application/presentation/cli-format.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
 const WINDOW = {
   start: new Date('2026-07-05T00:00:00Z'),
   end: new Date('2026-07-11T23:59:59Z'),
@@ -84,7 +89,7 @@ test('task-2213: completion on the blank-model rollup row keeps the mission in i
 });
 
 test('task-2213: weekly report retains live active-stage spend while excluding that mission from agent performance', () => {
-  const report = require('../.test-runtime/application/presentation/cli-format.js').stripAnsi(stats.renderWeeklyStatsReport([
+  const report = __mm1.stripAnsi(stats.renderWeeklyStatsReport([
     row({ mission: 'task-complete', pr_fix_rounds: '2', duration_minutes: '5', stage: 'default' }),
     row({ mission: 'task-active', pr_fix_rounds: '9', duration_minutes: '15', stage: 'active', closed: '' }),
   ], { today: '2026-07-11' }));

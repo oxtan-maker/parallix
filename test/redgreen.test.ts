@@ -1,11 +1,15 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
-const redgreen = require('../.test-runtime/adapters/verification/redgreen.js');
 
+
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const redgreen = mockModule<typeof import('../src/adapters/verification/redgreen.js')>('../src/adapters/verification/redgreen.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
 function withTempRoot(run) {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'redgreen-test-'));
   try {

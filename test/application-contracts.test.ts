@@ -1,8 +1,13 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
 
-const { failure, rejected } = require('../.test-runtime/application/contracts.js');
 
+
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const failureModule = mockModule<typeof import('../src/application/contracts.js')>('../src/application/contracts.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const { failure, rejected } = failureModule;
 test('application outcomes have one terminal status and typed error variants', () => {
   const validation = rejected('validation', 'bad request');
   const capability = rejected('capability', 'not allowed');

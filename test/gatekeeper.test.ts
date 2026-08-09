@@ -1,11 +1,15 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const os = require('os');
-const path = require('path');
-const fs = require('fs');
 
-const gatekeeper = require('../.test-runtime/adapters/verification/gatekeeper.js');
+
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import os from 'os';
+import path from 'path';
+import fs from 'fs';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const gatekeeper = mockModule<typeof import('../src/adapters/verification/gatekeeper.js')>('../src/adapters/verification/gatekeeper.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
 const { DEFAULT_GATEKEEPER_USER } = gatekeeper;
 
 function withTempRoot(run) {

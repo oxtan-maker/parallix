@@ -1,11 +1,12 @@
+// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const path = require('path');
-const os = require('os');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
 
-const {
+import {
   VALID_EVENT_TYPES,
   ALL_EVENT_TYPES,
   MIRRORED_EVENT_TYPES,
@@ -25,9 +26,11 @@ const {
   generateEventTimestamp,
   sanitizeFilename,
   consumeHumanNotes,
-} = require('../.test-runtime/adapters/review/review-events.js');
-const { seedMissionDatabase } = require('./fixtures/review-state-db.js');
-const { agentFamily } = require('../.test-runtime/domain/agents.js');
+} from '../src/adapters/review/review-events.js';
+import { seedMissionDatabase } from './fixtures/review-state-db.js';
+import { agentFamily } from '../src/domain/agents.js';
+import { classifyComment, hasWorkflowFooter } from '../src/adapters/review/review-events.js';
+import { readReviewState } from '../src/adapters/review/review-state.js';
 
 // Test slug that is guaranteed not to exist
 const NONEXISTENT_SLUG = 'task-test-review-events-nonexistent';
@@ -464,7 +467,6 @@ test('readAllEvents reads the stored events, not the exported files', async () =
 });
 
 test('classifyComment identifies human notes (no workflow footer)', () => {
-  const { classifyComment, VALID_EVENT_TYPES } = require('../.test-runtime/adapters/review/review-events.js');
   
   // Human comment (no footer)
   const humanComment = { body: 'This is a human comment' };
@@ -480,7 +482,6 @@ test('classifyComment identifies human notes (no workflow footer)', () => {
 });
 
 test('hasWorkflowFooter detects workflow metadata footer', () => {
-  const { hasWorkflowFooter } = require('../.test-runtime/adapters/review/review-events.js');
   
   // Has footer
   assert.ok(hasWorkflowFooter('Some content\n\n---\n`[workflow-round:1, workflow-phase:reviewing]`'));
@@ -509,7 +510,7 @@ test('consumeHumanNotes creates human_note events and skips workflow comments', 
     worktree: tempDir,
     forgejoUser: 'claude',
     readTokenFn: () => 'token-123',
-    readReviewStateFn: (slug, rootDir) => require('../.test-runtime/adapters/review/review-state.js').readReviewState(slug, rootDir, missionStore),
+    readReviewStateFn: (slug, rootDir) => readReviewState(slug, rootDir, missionStore),
     createEventFn: (slug, eventType, params, options) => createEvent(slug, eventType, params, { ...options, missionStore }),
     getCommentsFn: async (branch, token) => {
       seen.branch = branch;

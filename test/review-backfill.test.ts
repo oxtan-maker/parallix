@@ -1,3 +1,6 @@
+import { createRequire } from 'node:module';
+const _require = createRequire(import.meta.url);
+
 // Backfill of the Review aggregate from a pre-cutover review-state.json.
 //
 // TASK-2322.12 made the Review aggregate the sole write authority for
@@ -6,19 +9,14 @@
 // loop can never resume them. These tests pin the migration path that carries
 // those missions across.
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const path = require('path');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import path from 'path';
 
-const { withMissionDatabase } = require('./fixtures/review-state-db.js');
-const {
-  backfillReviewFromLegacyState,
-  readReviewState,
-  writeReviewState,
-} = require('../.test-runtime/adapters/review/review-state.js');
-const { review } = require('../.test-runtime/adapters/review/review-commands.js');
-
+import { withMissionDatabase } from './fixtures/review-state-db.js';
+import { backfillReviewFromLegacyState, readReviewState, writeReviewState, } from '../src/adapters/review/review-state.js';
+import { review } from '../src/adapters/review/review-commands.js';
 /** The shape the file-backed loop left behind: round 3, mid-fix, blocked. */
 const LEGACY_STATE = {
   reviewer: 'codex',
@@ -164,6 +162,7 @@ test('px review <slug> --backfill-review dispatches the migration', async () => 
     const out: string[] = [];
     await review([slug, '--backfill-review', '--dry-run'], {
       log: (m: string) => out.push(m), error: (m: string) => out.push(m),
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
       backfillReviewFn: (target: string, worktree: string, options: any) => backfillReviewFromLegacyState(target, worktree, { ...options, missionStore: store }),
     });
     assert.equal(await readReviewState(slug, root, store), null, '--dry-run writes nothing');
@@ -172,6 +171,7 @@ test('px review <slug> --backfill-review dispatches the migration', async () => 
     out.length = 0;
     await review([slug, '--backfill-review'], {
       log: (m: string) => out.push(m), error: (m: string) => out.push(m),
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
       backfillReviewFn: (target: string, worktree: string, options: any) => backfillReviewFromLegacyState(target, worktree, { ...options, missionStore: store }),
     });
     assert.ok(out.join('\n').includes('Backfilled review'), `expected a backfill report, got:\n${out.join('\n')}`);

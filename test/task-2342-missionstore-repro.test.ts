@@ -1,7 +1,7 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
+import test from 'node:test';
+import assert from 'node:assert/strict';
 
-const { persistReviewStateOrThrow, ReviewState } = require('../.test-runtime/adapters/review/review-state.js');
+import { persistReviewStateOrThrow, ReviewState } from '../src/adapters/review/review-state.js';
 
 test('persistReviewStateOrThrow passes missionStore to writeFn', async () => {
   let receivedArgs: unknown[] = [];
@@ -15,6 +15,7 @@ test('persistReviewStateOrThrow passes missionStore to writeFn', async () => {
   const state = new ReviewState(slug, { reviewer: 'codex', implementer: 'claude' });
   const worktree = '/tmp/worktree';
 
+  // @ts-expect-error -- TASK-2328: runtime-only property/partial test double absent from the inferred type.
   await persistReviewStateOrThrow(mockWriteFn, slug, state, worktree, mockStore);
 
   // writeFn must be called with 4 args: (slug, state, worktree, missionStore)
@@ -37,6 +38,7 @@ test('persistReviewStateOrThrow calls writeFn with 4 args even when missionStore
   const worktree = '/tmp/worktree';
 
   // Call with only 4 args (no missionStore) — missionStore param omitted by caller
+  // @ts-expect-error -- TASK-2328: runtime-only property/partial test double absent from the inferred type.
   await persistReviewStateOrThrow(mockWriteFn, slug, state, worktree);
 
   // After fix: always 4 args (missionStore = undefined when omitted)

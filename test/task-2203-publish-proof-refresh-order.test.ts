@@ -1,9 +1,4 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
 
 // ---------------------------------------------------------------------------
 // Regression test for task-2203: publish-proof must be captured AFTER the
@@ -23,7 +18,17 @@ const path = require('path');
 // Variant B closeout path.
 // ---------------------------------------------------------------------------
 
-const { resolvePostIntegrateCommand } = require('../.test-runtime/adapters/process/post-integrate-hook.js');
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import childProcess from 'child_process';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const resolvePostIntegrateCommandModule = mockModule<typeof import('../src/adapters/process/post-integrate-hook.js')>('../src/adapters/process/post-integrate-hook.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const { resolvePostIntegrateCommand } = resolvePostIntegrateCommandModule;
 
 function withTempDir(fn) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2203-proof-order-'));
@@ -60,7 +65,7 @@ test('post-integrate hook runs the configured distribution rebuild (task-2203 pr
 // Test 2: The post-integrate script rebuilds the dist tree via npm run build.
 // ---------------------------------------------------------------------------
 test('refresh-global-px.sh builds dist (task-2203 prerequisite)', () => {
-  const REPO_ROOT = path.join(__dirname, '..');
+  const REPO_ROOT = path.join(import.meta.dirname, '..');
   const scriptPath = path.join(REPO_ROOT, 'scripts', 'refresh-global-px.sh');
   const content = fs.readFileSync(scriptPath, 'utf8');
   assert.match(content, /npm run build/,
@@ -79,7 +84,7 @@ test('refresh-global-px.sh builds dist (task-2203 prerequisite)', () => {
 // After the fix:  runPostIntegrateHook appears BEFORE captureVerifiedTreeProof.
 // ---------------------------------------------------------------------------
 test('Variant B: post-integrate hook runs before proof capture (task-2203 fix)', () => {
-  const REPO_ROOT = path.join(__dirname, '..');
+  const REPO_ROOT = path.join(import.meta.dirname, '..');
   const integratePath = path.join(REPO_ROOT, 'src', 'adapters', 'cli', 'commands', 'integrate.ts');
   const content = fs.readFileSync(integratePath, 'utf8');
 
@@ -106,7 +111,6 @@ test('Variant B: post-integrate hook runs before proof capture (task-2203 fix)',
 test('proof captured before rebuild is stale after post-integrate hook (task-2200 symptom)', () => {
   withTempDir(root => {
     // Setup: create a minimal git repo with stale compiled output.
-    const childProcess = require('child_process');
     const runGit = (args) => {
       const res = childProcess.spawnSync('git', ['-C', root, ...args], { encoding: 'utf8' });
       if (res.status !== 0) {

@@ -60,7 +60,7 @@ export function getWorktreeStatus(cwd: string = process.cwd()): string[] {
 }
 
 const SOURCE_EXTENSIONS = /(?:\.(?:c|m)?js|\.ts|\.tsx|\.jsx)$/;
-const IGNORED_GENERATED_DIRS = new Set(['node_modules', '.test-runtime', 'build', 'dist', 'coverage', 'graphify-out']);
+const IGNORED_GENERATED_DIRS = new Set(['node_modules', 'build', 'dist', 'coverage', 'graphify-out']);
 
 /**
  * Find source files that exist in a worktree but are ignored and therefore

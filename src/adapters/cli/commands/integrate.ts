@@ -1471,15 +1471,20 @@ function printIntegrationPreflight(
       });
     }
 
-    const tokenPath = resolveTokenFileFn(/** @type {string} */ (context.forgejoUser));
-    const token = readTokenFn(/** @type {string} */ (context.forgejoUser));
-    if (token) {
-      log(fmt.status('PASS', `Forgejo token: resolved for ${context.forgejoUser} (${tokenPath || 'env:FORGEJO_TOKEN'})`));
-    } else if (localApprovalFallback) {
-      log(fmt.status('INFO', `Forgejo token: no token file found for ${context.forgejoUser} (approval sourced from the local Review)`));
-    } else {
+    if (context.forgejoUser) {
+      const tokenPath = resolveTokenFileFn(/** @type {string} */ (context.forgejoUser));
+      const token = readTokenFn(/** @type {string} */ (context.forgejoUser));
+      if (token) {
+        log(fmt.status('PASS', `Forgejo token: resolved for ${context.forgejoUser} (${tokenPath || 'env:FORGEJO_TOKEN'})`));
+      } else if (localApprovalFallback) {
+        log(fmt.status('INFO', `Forgejo token: no token file found for ${context.forgejoUser} (approval sourced from the local Review)`));
+      } else {
+        failures.push('forgejo-token');
+        log(fmt.status('FAIL', `Forgejo token: no token file found for ${context.forgejoUser}`));
+      }
+    } else if (!localApprovalFallback) {
       failures.push('forgejo-token');
-      log(fmt.status('FAIL', `Forgejo token: no token file found for ${context.forgejoUser}`));
+      log(fmt.status('FAIL', 'Forgejo token: no forgejoUser configured'));
     }
   } else {
     log(fmt.status('INFO', 'Forgejo PR/approval checks skipped (review provider is not forgejo).'));
@@ -2035,6 +2040,3 @@ function buildConflictResolutionPrompt(slug: string = '<slug>', area: string = '
 (integrate as any).getPrimaryWorktree = getPrimaryWorktree;
 export default integrate;
 export { integrate, formatRecordedStatsRow, detectChangedAreas, parseFilesToAreas, loadIntegrationConfig, getIntegrationGatePlan, printIntegrationGatePlan, buildIntegrationGateEnv, captureFinalIntegrationTree, parseIntegrateArgs, resolveIntegrationVerificationWorktree, buildIntegrationVerificationInvocation, executeIntegrationGates, orderIntegrationGates, gateMatchesChangedAreas, buildIntegrationContext, getPrimaryWorktree, resolveConflictsForMission, cleanupMissionWorktree, rewriteWorktreePaths, isNoMergeToAbortResult, buildConflictResolutionPrompt, VARIANT_B_AUTOMATION_SUMMARY, stashMainCheckoutIfNeeded, restoreMainCheckoutStash, evaluateTaskStatusForIntegration, promoteTaskForIntegrationIfNeeded, findExistingSquashCommit, printIntegrationPreflight, resolveForgejoUserForIntegration, getUnresolvedIndexConflicts, parseStashPopCollisionFiles, reportStashPopFailure, maybeUpdateGraphifyOnPrimary, SYNC_MERGED_DIAGNOSTICS, printDiagnosticTable, recordPostIntegrationStats, recordPostIntegrationStatsOrAbort, reportSyncMergedFailure, runPostIntegrateHookOrAbort, prepareNoisePatchForSquash, areAllBacklogOnlyConflicts };
-// CJS compat: ensure require() returns the function directly
-declare const module: { exports: any } | undefined;
-if (typeof module !== 'undefined') { module.exports = integrate; }

@@ -1,14 +1,14 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
+import test from 'node:test';
+import assert from 'node:assert/strict';
 
-const { withMissionDatabase } = require('./fixtures/review-state-db.js');
-const {
+import { withMissionDatabase } from './fixtures/review-state-db.js';
+import {
   reviewStateFile,
   readReviewState,
   writeReviewState,
   resetReviewState,
-} = require('../.test-runtime/adapters/review/review-state.js');
+} from '../src/adapters/review/review-state.js';
 
 test('reviewStateFile returns null for unknown slug', () => {
   assert.equal(reviewStateFile('task-nonexistent-zzz'), null);
