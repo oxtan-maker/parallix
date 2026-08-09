@@ -1,8 +1,8 @@
 ---
 id: TASK-2340
 title: add rebounce on hooks
-status: review
-assignee: [vibe]
+status: active
+assignee: [custom]
 created_date: '2026-08-04 11:33'
 labels: [user_value]
 dependencies: []
