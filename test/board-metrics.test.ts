@@ -28,30 +28,27 @@ const later = '2026-07-22T12:00:00Z';
 // SC3: Cumulative-flow with missingHistoryFallback
 // ---------------------------------------------------------------------------
 
-test('cumulativeFlowSeries returns estimate fallback', () => {
+test('cumulativeFlowSeries returns completed mission count with estimate fallback', () => {
   const series = cumulativeFlowSeries(
     new Map([[id1, 'backlog']]),
     [],
     [now],
   );
   assert.equal(series.missingHistoryFallback, 'estimate');
-  assert.equal(series.series[0]?.value, 1);
+  assert.equal(series.series[0]?.value, 0);
 });
 
-test('cumulativeFlowSeries tracks state transitions over time', () => {
+test('cumulativeFlowSeries tracks completed transitions over time', () => {
   const transitions = [
-    { missionId: id1, from: 'backlog' as const, to: 'active' as const, trigger: 'activate' as const, actor: 'codex', occurredAt: now },
+    { missionId: id1, from: 'backlog' as const, to: 'done' as const, trigger: 'close' as const, actor: 'codex', occurredAt: now },
   ];
   const series = cumulativeFlowSeries(
     new Map([[id1, 'backlog']]),
     transitions,
     [earlier, now, later],
   );
-  // Before transition: 1 mission (backlog)
-  assert.equal(series.series[0]?.value, 1);
-  // At transition time: 1 mission (now active)
+  assert.equal(series.series[0]?.value, 0);
   assert.equal(series.series[1]?.value, 1);
-  // After transition: 1 mission (still active)
   assert.equal(series.series[2]?.value, 1);
 });
 
@@ -65,9 +62,9 @@ test('cumulativeFlowSeries with multiple missions and transitions', () => {
     transitions,
     [earlier, now, later],
   );
-  assert.equal(series.series[0]?.value, 2); // both in initial state
-  assert.equal(series.series[1]?.value, 2); // id1 moved to active
-  assert.equal(series.series[2]?.value, 2); // id2 moved to active
+  assert.equal(series.series[0]?.value, 0);
+  assert.equal(series.series[1]?.value, 0);
+  assert.equal(series.series[2]?.value, 0);
 });
 
 test('cumulativeFlowByStateSeries exposes per-state counts from BoardMetrics inputs', () => {
@@ -93,9 +90,9 @@ test('medianStateTimes returns null fallback when no outcomes', () => {
 
 test('medianStateTimes computes median from outcomes', () => {
   const outcomes = [
-    { missionId: id1, repositoryId: 'parallix' as never, cycleTimeMinutes: 10, reviewFixRounds: 1, runs: [] },
-    { missionId: id2, repositoryId: 'parallix' as never, cycleTimeMinutes: 30, reviewFixRounds: 2, runs: [] },
-    { missionId: id3, repositoryId: 'parallix' as never, cycleTimeMinutes: 20, reviewFixRounds: 1, runs: [] },
+    { missionId: id1, repositoryId: 'parallix' as never, createdAt: earlier, closedAt: earlier, cycleTimeMinutes: 10, reviewFixRounds: 1, runs: [] },
+    { missionId: id2, repositoryId: 'parallix' as never, createdAt: earlier, closedAt: earlier, cycleTimeMinutes: 30, reviewFixRounds: 2, runs: [] },
+    { missionId: id3, repositoryId: 'parallix' as never, createdAt: earlier, closedAt: earlier, cycleTimeMinutes: 20, reviewFixRounds: 1, runs: [] },
   ];
   const series = medianStateTimes(outcomes, [now]);
   assert.equal(series.missingHistoryFallback, 'null');
@@ -105,8 +102,8 @@ test('medianStateTimes computes median from outcomes', () => {
 
 test('medianStateTimes handles even number of outcomes', () => {
   const outcomes = [
-    { missionId: id1, repositoryId: 'parallix' as never, cycleTimeMinutes: 10, reviewFixRounds: 1, runs: [] },
-    { missionId: id2, repositoryId: 'parallix' as never, cycleTimeMinutes: 30, reviewFixRounds: 2, runs: [] },
+    { missionId: id1, repositoryId: 'parallix' as never, createdAt: earlier, closedAt: earlier, cycleTimeMinutes: 10, reviewFixRounds: 1, runs: [] },
+    { missionId: id2, repositoryId: 'parallix' as never, createdAt: earlier, closedAt: earlier, cycleTimeMinutes: 30, reviewFixRounds: 2, runs: [] },
   ];
   const series = medianStateTimes(outcomes, [now]);
   // Sorted: 10, 30 → median = (10 + 30) / 2 = 20
@@ -115,7 +112,7 @@ test('medianStateTimes handles even number of outcomes', () => {
 
 test('medianStateTimes handles single outcome', () => {
   const outcomes = [
-    { missionId: id1, repositoryId: 'parallix' as never, cycleTimeMinutes: 45, reviewFixRounds: 1, runs: [] },
+    { missionId: id1, repositoryId: 'parallix' as never, createdAt: earlier, closedAt: earlier, cycleTimeMinutes: 45, reviewFixRounds: 1, runs: [] },
   ];
   const series = medianStateTimes(outcomes, [now]);
   assert.equal(series.series[0]?.value, 45);
@@ -133,8 +130,8 @@ test('throughputSeries returns skip fallback when no outcomes', () => {
 
 test('throughputSeries counts completed missions', () => {
   const outcomes = [
-    { missionId: id1, repositoryId: 'parallix' as never, cycleTimeMinutes: 10, reviewFixRounds: 1, runs: [] },
-    { missionId: id2, repositoryId: 'parallix' as never, cycleTimeMinutes: 30, reviewFixRounds: 2, runs: [] },
+    { missionId: id1, repositoryId: 'parallix' as never, createdAt: earlier, closedAt: earlier, cycleTimeMinutes: 10, reviewFixRounds: 1, runs: [] },
+    { missionId: id2, repositoryId: 'parallix' as never, createdAt: earlier, closedAt: earlier, cycleTimeMinutes: 30, reviewFixRounds: 2, runs: [] },
   ];
   const series = throughputSeries(outcomes, [earlier, now, later]);
   assert.equal(series.missingHistoryFallback, 'skip');
@@ -160,9 +157,9 @@ test('reviewLoopRateSeries returns estimate fallback when no outcomes', () => {
 
 test('reviewLoopRateSeries computes average review-fix rounds', () => {
   const outcomes = [
-    { missionId: id1, repositoryId: 'parallix' as never, cycleTimeMinutes: 10, reviewFixRounds: 1, runs: [] },
-    { missionId: id2, repositoryId: 'parallix' as never, cycleTimeMinutes: 30, reviewFixRounds: 3, runs: [] },
-    { missionId: id3, repositoryId: 'parallix' as never, cycleTimeMinutes: 20, reviewFixRounds: 2, runs: [] },
+    { missionId: id1, repositoryId: 'parallix' as never, createdAt: earlier, closedAt: earlier, cycleTimeMinutes: 10, reviewFixRounds: 1, runs: [] },
+    { missionId: id2, repositoryId: 'parallix' as never, createdAt: earlier, closedAt: earlier, cycleTimeMinutes: 30, reviewFixRounds: 3, runs: [] },
+    { missionId: id3, repositoryId: 'parallix' as never, createdAt: earlier, closedAt: earlier, cycleTimeMinutes: 20, reviewFixRounds: 2, runs: [] },
   ];
   const series = reviewLoopRateSeries(outcomes, [now]);
   assert.equal(series.missingHistoryFallback, 'estimate');
@@ -172,8 +169,8 @@ test('reviewLoopRateSeries computes average review-fix rounds', () => {
 
 test('reviewLoopRateSeries handles zero review rounds', () => {
   const outcomes = [
-    { missionId: id1, repositoryId: 'parallix' as never, cycleTimeMinutes: 10, reviewFixRounds: 0, runs: [] },
-    { missionId: id2, repositoryId: 'parallix' as never, cycleTimeMinutes: 30, reviewFixRounds: 0, runs: [] },
+    { missionId: id1, repositoryId: 'parallix' as never, createdAt: earlier, closedAt: earlier, cycleTimeMinutes: 10, reviewFixRounds: 0, runs: [] },
+    { missionId: id2, repositoryId: 'parallix' as never, createdAt: earlier, closedAt: earlier, cycleTimeMinutes: 30, reviewFixRounds: 0, runs: [] },
   ];
   const series = reviewLoopRateSeries(outcomes, [now]);
   assert.equal(series.series[0]?.value, 0);
@@ -232,7 +229,7 @@ test('buildMetrics with data populates all series', () => {
     { missionId: id1, from: 'backlog' as const, to: 'active' as const, trigger: 'activate' as const, actor: 'codex', occurredAt: now },
   ];
   const outcomes = [
-    { missionId: id1, repositoryId: 'parallix' as never, cycleTimeMinutes: 10, reviewFixRounds: 1, runs: [] },
+    { missionId: id1, repositoryId: 'parallix' as never, createdAt: earlier, closedAt: earlier, cycleTimeMinutes: 10, reviewFixRounds: 1, runs: [] },
   ];
   const input: MetricsInput = {
     initialStates: new Map([[id1, 'backlog']]),
@@ -243,7 +240,7 @@ test('buildMetrics with data populates all series', () => {
   const metrics = buildMetrics(input);
 
   assert.equal(metrics.cumulativeFlow.series.length, 1);
-  assert.equal(metrics.cumulativeFlow.series[0]?.value, 1);
+  assert.equal(metrics.cumulativeFlow.series[0]?.value, 0);
   assert.equal(metrics.medianStateTimes.series[0]?.value, 10);
   assert.equal(metrics.throughput.series[0]?.value, 1);
   assert.equal(metrics.reviewLoopRate.series[0]?.value, 1);
@@ -258,8 +255,8 @@ test('FLOW projection derives lane rows, agent availability, and a deterministic
     { missionId: id2, from: 'active' as const, to: 'review' as const, trigger: 'submit-for-review' as const, actor: 'codex', occurredAt: '2026-07-22T10:00:00Z' },
   ];
   const outcomes = [
-    { missionId: id1, repositoryId: 'parallix' as never, cycleTimeMinutes: 10, reviewFixRounds: 1, runs: [] },
-    { missionId: id2, repositoryId: 'parallix' as never, cycleTimeMinutes: 20, reviewFixRounds: 3, runs: [] },
+    { missionId: id1, repositoryId: 'parallix' as never, createdAt: earlier, closedAt: earlier, cycleTimeMinutes: 10, reviewFixRounds: 1, runs: [] },
+    { missionId: id2, repositoryId: 'parallix' as never, createdAt: earlier, closedAt: earlier, cycleTimeMinutes: 20, reviewFixRounds: 3, runs: [] },
   ];
   const metrics = buildMetrics({
     initialStates: new Map([[id1, 'active'], [id2, 'review']]),
@@ -281,7 +278,7 @@ test('FLOW projection derives lane rows, agent availability, and a deterministic
   assert.equal(metrics.medianAgeByLane.series.find((entry) => entry.lane === 'review')?.value, 120);
   assert.equal(metrics.weeklyThroughput.series[0]?.value, 2);
   assert.deepEqual(metrics.agentAvailability.map((agent) => [agent.family, agent.available]), [['codex', true], ['claude', false]]);
-  assert.equal(metrics.bottleneck.sentence, 'review is the oldest lane at 120 min median age; review loop 2.0; 2 completed this week.');
+  assert.equal(metrics.bottleneck.sentence, 'review is the oldest lane at 120 min median age; review loop 2.0; 2 completed in the latest recorded week.');
 });
 
 test('FLOW projection reports explicit missing history without fabricated values', () => {

@@ -149,6 +149,7 @@ describe('task-2347.01 — repository identity through lane events and board met
           duration_minutes: 45,
           pr_fix_rounds: 1,
           date: '2026-07-24',
+          closed: 'yes',
         });
         await usageRepo.save({
           repo: 'beta',
@@ -156,6 +157,7 @@ describe('task-2347.01 — repository identity through lane events and board met
           duration_minutes: 120,
           pr_fix_rounds: 3,
           date: '2026-07-24',
+          closed: 'yes',
         });
 
         // Build metrics scoped to alpha
@@ -171,15 +173,14 @@ describe('task-2347.01 — repository identity through lane events and board met
 
         const metrics = await adapter.buildMetrics(initialStates);
 
-        // (a) cumulativeFlow = total WIP. Alpha has 1 mission, beta has 1.
-        // Without scoping: WIP includes beta's mission (2 total).
-        // With scoping: only alpha's mission (1 total).
-        const lastFlow = metrics.cumulativeFlow.series.at(-1);
-        assert.ok(lastFlow, 'cumulativeFlow must have data points');
+        // (a) State flow is scoped: Alpha has 1 mission, beta has 1.
+        // Without scoping it would include two missions.
+        const lastFlow = metrics.cumulativeFlowByState.series.at(-1);
+        assert.ok(lastFlow, 'cumulativeFlowByState must have data points');
         assert.equal(
-          lastFlow.value,
+          Object.values(lastFlow.counts).reduce((total, count) => total + count, 0),
           1,
-          'alpha WIP must be 1 (alpha only), not 2 (alpha + beta contamination)',
+          'alpha state flow must contain 1 mission (alpha only), not 2 (alpha + beta contamination)',
         );
 
         // (b) medianStateTimes uses cycleTimeMinutes from outcomes.
@@ -294,8 +295,8 @@ describe('task-2347.01 — repository identity through lane events and board met
         // Legacy-unscoped rows must not count toward alpha's metrics
         // At parent commit, there is no repository scoping at all,
         // so this test structure validates the scoping is in place
-        const lastFlow = metrics.cumulativeFlow.series.at(-1);
-        assert.ok(lastFlow && lastFlow.value === 1, 'alpha must have exactly 1 transition in metrics');
+        const lastFlow = metrics.cumulativeFlowByState.series.at(-1);
+        assert.ok(lastFlow && Object.values(lastFlow.counts).reduce((total, count) => total + count, 0) === 1, 'alpha must have exactly 1 mission in state flow');
       });
     });
   });

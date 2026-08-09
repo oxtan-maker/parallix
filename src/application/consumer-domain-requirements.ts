@@ -281,7 +281,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'usage-completed-statistics',
     family: 'usage-statistics',
     fileLocation: 'src/domain/usage.ts',
-    line: 152,
+    line: 156,
     anchor: 'function completedMissionStatistics',
     reads: ['Mission', 'MissionOutcome', 'AgentRunMeasurement'],
     requirement:

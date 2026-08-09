@@ -128,6 +128,8 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
     const outcomeMap = new Map<string, {
       missionId: MissionId;
       repositoryId: RepositoryId;
+      createdAt: string;
+      closedAt: string | null;
       cycleTimeMinutes: number;
       reviewFixRounds: number;
     }>();
@@ -138,28 +140,41 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
         rejected += 1;
         continue;
       }
+      if (!record.date) {
+        continue;
+      }
       // Key by (repository, mission) so same mission slug in different repos
       // does not collide. Precedent: statsMissionKey in stats.ts:438.
       const key = `${repositoryId}::${record.mission}`;
       const existing = outcomeMap.get(key);
+      const timestamp = `${record.date}T00:00:00Z`;
       if (existing) {
         // Aggregate multiple records for the same (repo, mission)
         existing.cycleTimeMinutes = existing.cycleTimeMinutes + (record.duration_minutes ?? 0);
         existing.reviewFixRounds = Math.max(existing.reviewFixRounds, record.pr_fix_rounds ?? 0);
+        existing.createdAt = existing.createdAt < timestamp ? existing.createdAt : timestamp;
+        if (record.closed === 'yes') {
+          existing.closedAt = existing.closedAt === null || existing.closedAt < timestamp ? timestamp : existing.closedAt;
+        }
       } else {
         outcomeMap.set(key, {
           missionId: record.mission as MissionId,
           repositoryId,
+          createdAt: timestamp,
+          closedAt: record.closed === 'yes' ? timestamp : null,
           cycleTimeMinutes: record.duration_minutes ?? 0,
           reviewFixRounds: record.pr_fix_rounds ?? 0,
         });
       }
     }
 
-    return { outcomes: [...outcomeMap.values()].map((o) => ({
-      ...o,
-      runs: [],
-    })), rejected };
+    const outcomes = [...outcomeMap.values()]
+      .filter((outcome): outcome is Omit<typeof outcome, 'closedAt'> & { closedAt: string } => outcome.closedAt !== null)
+      .map((o) => ({
+        ...o,
+        runs: [],
+      }));
+    return { outcomes, rejected };
   }
 
   // -----------------------------------------------------------------------
