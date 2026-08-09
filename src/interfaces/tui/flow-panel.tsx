@@ -56,8 +56,8 @@ export function FlowPanel({ metrics, columns }: { readonly metrics: BoardMetrics
           <Text>{flow ? Object.entries(flow.counts).map(([lane, count]) => `${lane} ${count}`).join(' · ') : 'unavailable'}</Text>
           <Text dimColor>{history('Cumulative flow', metrics.cumulativeFlowByState.missingHistoryFallback)}</Text>
           <Text dimColor>{legend(flow)}</Text>
-          <Text>{`Weekly throughput: ${display(throughput)} (n=${sampleSize})`}</Text>
-          <Text dimColor>{history('Weekly throughput', metrics.weeklyThroughput.missingHistoryFallback)}</Text>
+          <Text>{`Weekly completions: ${display(throughput)} (n=${sampleSize})`}</Text>
+          <Text dimColor>{history('Weekly completions', metrics.weeklyThroughput.missingHistoryFallback)}</Text>
           <Text>{`Review-to-active loop rate: ${display(loopRate)} (n=${sampleSize})`}</Text>
           <Text dimColor>{history('Review-to-active loop rate', metrics.reviewLoopRate.missingHistoryFallback)}</Text>
         </Box>

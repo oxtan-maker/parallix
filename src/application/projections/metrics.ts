@@ -16,7 +16,7 @@ export interface WipSnapshot {
   readonly counts: Readonly<Record<MissionStatus, number>>;
 }
 
-/** Cumulative flow data point. */
+/** Cumulative completed-mission data point. */
 export interface FlowPoint {
   readonly at: string;
   readonly counts: Readonly<Record<MissionStatus, number>>;
@@ -119,7 +119,10 @@ export function medianStateTimes(
   const sorted = [...outcomes].sort((a, b) => a.missionId.localeCompare(b.missionId));
   return {
     series: instants.map((through) => {
-      const values = sorted.map((o) => o.cycleTimeMinutes).sort((a, b) => a - b);
+      const values = sorted
+        .filter((outcome) => outcome.closedAt <= through)
+        .map((outcome) => outcome.cycleTimeMinutes)
+        .sort((a, b) => a - b);
       if (values.length === 0) { return { at: through, value: null }; }
       const middle = Math.floor(values.length / 2);
       const median = values.length % 2 === 0
@@ -136,7 +139,7 @@ export function medianStateTimes(
 // ---------------------------------------------------------------------------
 
 /**
- * Compute cumulative flow points from initial state and transitions.
+ * Compute cumulative completed-mission counts from initial state and transitions.
  *
  * missingHistoryFallback: 'estimate' — when transitions are missing,
  * returns initial state as the best estimate of current distribution.
@@ -153,7 +156,7 @@ export function cumulativeFlowSeries(
       for (const transition of ordered) {
         if (transition.occurredAt <= at) { state.set(transition.missionId, transition.to); }
       }
-      return { at, value: state.size };
+      return { at, value: [...state.values()].filter((status) => status === 'done').length };
     }),
     missingHistoryFallback: 'estimate',
   };
@@ -199,7 +202,7 @@ export function throughputSeries(
   }
   return {
     series: instants.map((at) => {
-      const completed = outcomes.filter(() => true).length;
+      const completed = outcomes.filter((outcome) => outcome.closedAt <= at).length;
       return { at, value: completed };
     }),
     missingHistoryFallback: 'skip',
@@ -225,7 +228,10 @@ export function reviewLoopRateSeries(
   }
   return {
     series: instants.map((at) => {
-      const rounds = outcomes.map((o) => o.reviewFixRounds);
+      const rounds = outcomes
+        .filter((outcome) => outcome.closedAt <= at)
+        .map((outcome) => outcome.reviewFixRounds);
+      if (rounds.length === 0) { return { at, value: null }; }
       const total = rounds.reduce((sum, r) => sum + r, 0);
       return { at, value: total / rounds.length };
     }),
@@ -315,10 +321,29 @@ export function medianCycleTimeByStateSeries(
   };
 }
 
+/** Return the UTC ISO-week start for a timestamp. */
+function isoWeekStart(timestamp: string): string {
+  const date = new Date(timestamp);
+  const day = date.getUTCDay() || 7;
+  date.setUTCDate(date.getUTCDate() - day + 1);
+  date.setUTCHours(0, 0, 0, 0);
+  return date.toISOString();
+}
+
 /** Completed outcomes grouped into ISO weeks; no outcomes means the series is skipped. */
 export function weeklyThroughputSeries(outcomes: readonly MissionOutcome[]): MetricSeries {
   if (outcomes.length === 0) { return { series: [], missingHistoryFallback: 'skip' }; }
-  return { series: [{ at: 'available-history', value: outcomes.length }], missingHistoryFallback: 'skip' };
+  const byWeek = new Map<string, number>();
+  for (const outcome of outcomes) {
+    const week = isoWeekStart(outcome.closedAt);
+    byWeek.set(week, (byWeek.get(week) ?? 0) + 1);
+  }
+  return {
+    series: [...byWeek.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([at, value]) => ({ at, value })),
+    missingHistoryFallback: 'skip',
+  };
 }
 
 /** Median age in each current lane, derived solely from the last recorded transition. */
@@ -362,7 +387,7 @@ export function bottleneckNarrative(
     };
   }
   const reviewText = loopRate === null ? 'unavailable review-loop data' : `review loop ${loopRate.toFixed(1)}`;
-  const throughputText = throughput === null ? 'unavailable throughput' : `${throughput} completed this week`;
+  const throughputText = throughput === null ? 'unavailable weekly completions' : `${throughput} completed in the latest recorded week`;
   return {
     sentence: `${oldest.lane} is the oldest lane at ${oldest.value} min median age; ${reviewText}; ${throughputText}.`,
     inputs: { lane: oldest.lane, medianAgeMinutes: oldest.value, reviewLoopRate: loopRate, weeklyThroughput: throughput },

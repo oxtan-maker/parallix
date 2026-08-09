@@ -138,6 +138,8 @@ describe('SC6: metrics fixture — lane transitions produce populated board metr
         {
           missionId: missionId(task),
           repositoryId: {} as never,
+          createdAt: t1,
+          closedAt: t1,
           cycleTimeMinutes: 240,
           reviewFixRounds: 1,
           runs: [],
@@ -160,8 +162,8 @@ describe('SC6: metrics fixture — lane transitions produce populated board metr
       );
       for (const point of metrics.cumulativeFlow.series) {
         assert.ok(
-          point.value != null && point.value > 0,
-          'cumulativeFlow point must have a positive value',
+          typeof point.value === 'number',
+          'cumulativeFlow point must be a numeric completed-mission count',
         );
       }
 
@@ -211,7 +213,7 @@ describe('SC6: metrics fixture — lane transitions produce populated board metr
     });
   });
 
-  it('multiple missions produce correct cumulative flow counts', async () => {
+  it('multiple incomplete missions produce zero completed cumulative flow', async () => {
     await withRepo(async (repo, recorder) => {
       const t1 = '2026-07-24T08:00:00Z';
       const t2 = '2026-07-24T10:00:00Z';
@@ -244,10 +246,10 @@ describe('SC6: metrics fixture — lane transitions produce populated board metr
         instants,
       });
 
-      // cumulativeFlow should track 2 missions at each instant
+      // No transition reaches done, so completed cumulative flow stays zero.
       assert.equal(metrics.cumulativeFlow.series.length, 2);
-      assert.equal(metrics.cumulativeFlow.series[0]?.value, 2);
-      assert.equal(metrics.cumulativeFlow.series[1]?.value, 2);
+      assert.equal(metrics.cumulativeFlow.series[0]?.value, 0);
+      assert.equal(metrics.cumulativeFlow.series[1]?.value, 0);
     });
   });
 
@@ -276,6 +278,8 @@ describe('SC6: metrics fixture — lane transitions produce populated board metr
         {
           missionId: missionId(task),
           repositoryId: {} as never,
+          createdAt: t1,
+          closedAt: t1,
           cycleTimeMinutes: 120,
           reviewFixRounds: 0,
           runs: [],
@@ -304,7 +308,7 @@ describe('SC6: metrics fixture — lane transitions produce populated board metr
 
       // cumulativeFlow: estimate fallback becomes real data
       assert.ok(populatedMetrics.cumulativeFlow.series.length > 0);
-      assert.ok(populatedMetrics.cumulativeFlow.series.every((p) => p.value != null && p.value > 0));
+      assert.ok(populatedMetrics.cumulativeFlow.series.every((p) => typeof p.value === 'number'));
 
       // medianStateTimes: null fallback becomes real values
       assert.ok(populatedMetrics.medianStateTimes.series.every((p) => p.value !== null));

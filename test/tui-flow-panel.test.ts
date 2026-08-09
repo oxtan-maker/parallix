@@ -17,7 +17,7 @@ function populatedMetrics() {
       { missionId: id, from: 'backlog', to: 'active', trigger: 'activate', actor: 'codex', occurredAt: '2026-07-22T08:00:00Z' },
       { missionId: id, from: 'active', to: 'review', trigger: 'submit-for-review', actor: 'codex', occurredAt: '2026-07-22T10:00:00Z' },
     ],
-    outcomes: [{ missionId: id, repositoryId: 'test' as never, cycleTimeMinutes: 50, reviewFixRounds: 2, runs: [] }],
+    outcomes: [{ missionId: id, repositoryId: 'test' as never, createdAt: '2026-07-21T00:00:00Z', closedAt: '2026-07-21T00:00:00Z', cycleTimeMinutes: 50, reviewFixRounds: 2, runs: [] }],
     instants: ['2026-07-22T12:00:00Z'],
     asOf: '2026-07-22T12:00:00Z',
     agentAvailability: [
@@ -52,13 +52,13 @@ test('FLOW panel renders projection labels, values, unavailable agent, and bottl
 
   for (const expected of [
     'FLOW', 'CUMULATIVE FLOW', 'Legend', 'Median cycle time', 'Median lane age',
-    'Weekly throughput: 1', 'Review-to-active loop rate: 2', 'codex available',
+    'Weekly completions: 1', 'Review-to-active loop rate: 2', 'codex available',
     'claude unavailable',
   ]) {
     assert.ok(output.includes(expected), `FLOW panel must display ${expected}. Got: ${output}`);
   }
   assert.match(output, /review is the oldest lane at 120 min median age;/, `FLOW panel must display the bottleneck lead. Got: ${output}`);
-  assert.match(output, /review loop 2\.0; 1 completed this week\./, `FLOW panel must display the bottleneck detail. Got: ${output}`);
+  assert.match(output, /loop 2\.0; 1 completed in the latest recorded week\./, `FLOW panel must display the bottleneck detail. Got: ${output}`);
 });
 
 test('FLOW panel states every fallback and survives a zero-history projection', async () => {
@@ -68,7 +68,7 @@ test('FLOW panel states every fallback and survives a zero-history projection', 
   const metrics = buildMetrics({ initialStates: new Map(), transitions: [], outcomes: [], instants: ['2026-07-22T12:00:00Z'] });
   const output = plain(ink.renderToString(React.createElement(FlowPanel, { metrics, columns: 60 }), { columns: 60 }));
 
-  for (const expected of ['Cumulative flow history: estimate', 'Median cycle time history: null', 'Median lane age history: null', 'Weekly throughput history: skip', 'Review-to-active loop rate history: estimate', 'Bottleneck unavailable: history is missing.']) {
+  for (const expected of ['Cumulative flow history: estimate', 'Median cycle time history: null', 'Median lane age history: null', 'Weekly completions history: skip', 'Review-to-active loop rate history: estimate', 'Bottleneck unavailable: history is missing.']) {
     assert.ok(output.includes(expected), `Zero-history FLOW panel must display ${expected}. Got: ${output}`);
   }
 });
@@ -86,7 +86,7 @@ test('FLOW panel visibly labels unavailable and partial health and places sample
 
   assert.match(unavailableOutput, /Statistics: unavailable · n=3/);
   assert.match(partialOutput, /Statistics: partial · n=3/);
-  assert.match(partialOutput, /Weekly throughput: 1 \(n=3\)/);
+  assert.match(partialOutput, /Weekly completions: 1 \(n=3\)/);
   assert.match(partialOutput, /Review-to-active loop rate: 2 \(n=3\)/);
   assert.match(partialOutput, /review: 120 min \(n=3\)/);
 });
@@ -109,6 +109,6 @@ test('FLOW panel switches to textual layout at narrow width and after a resize',
   const output = stdout.lastFrame();
   instance.unmount();
   assert.match(output, /FLOW · textual/, `Resized FLOW layout must expose textual mode. Got: ${output}`);
-  assert.match(output, /Weekly throughput: 1/, `Textual FLOW layout must retain its value. Got: ${output}`);
+  assert.match(output, /Weekly completions: 1/, `Textual FLOW layout must retain its value. Got: ${output}`);
   assert.match(output, /Median lane age/, `Textual FLOW layout must retain its label. Got: ${output}`);
 });

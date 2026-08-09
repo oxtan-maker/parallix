@@ -96,6 +96,10 @@ export interface AgentRunMeasurement {
 export interface MissionOutcome {
   readonly missionId: MissionId;
   readonly repositoryId: RepositoryId;
+  /** Earliest dated telemetry recorded for this completed mission. */
+  readonly createdAt: string;
+  /** Date on the telemetry row that records this mission's closure. */
+  readonly closedAt: string;
   readonly cycleTimeMinutes: number;
   /** Number of request-changes rounds, persisted today as pr_fix_rounds. */
   readonly reviewFixRounds: number;
