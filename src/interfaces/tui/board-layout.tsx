@@ -191,6 +191,7 @@ export function BoardLayout({ projection, columns, rows, mode: modeOverride, sel
               count={wipCountFor(projection, lane)}
               wipLimit={wipLimitFor(projection, lane)}
               medianCycleTime={medianCycleTimeFor(projection, lane)}
+              medianSampleSize={projection.metrics.provenance?.sampleSize ?? 0}
               width={columnWidth}
               maxVisibleCards={maxVisibleCards}
               selectedMissionId={selectedMissionId}

@@ -73,6 +73,24 @@ test('FLOW panel states every fallback and survives a zero-history projection', 
   }
 });
 
+test('FLOW panel visibly labels unavailable and partial health and places sample size beside rates and medians', async () => {
+  const ink = await import('ink');
+  const React = await import('react');
+  const { FlowPanel } = await import('../src/interfaces/tui/flow-panel.js');
+  const base = populatedMetrics();
+  const unavailable = { ...base, health: { state: 'unavailable' as const }, provenance: { ...base.provenance, sampleSize: 3, adapterSucceeded: false } };
+  const partial = { ...base, health: { state: 'partial' as const }, provenance: { ...base.provenance, sampleSize: 3 } };
+
+  const unavailableOutput = plain(ink.renderToString(React.createElement(FlowPanel, { metrics: unavailable, columns: 240 }), { columns: 240 }));
+  const partialOutput = plain(ink.renderToString(React.createElement(FlowPanel, { metrics: partial, columns: 240 }), { columns: 240 }));
+
+  assert.match(unavailableOutput, /Statistics: unavailable · n=3/);
+  assert.match(partialOutput, /Statistics: partial · n=3/);
+  assert.match(partialOutput, /Weekly throughput: 1 \(n=3\)/);
+  assert.match(partialOutput, /Review-to-active loop rate: 2 \(n=3\)/);
+  assert.match(partialOutput, /review: 120 min \(n=3\)/);
+});
+
 test('FLOW panel switches to textual layout at narrow width and after a resize', async () => {
   const ink = await import('ink');
   const React = await import('react');

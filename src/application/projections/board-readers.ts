@@ -3,7 +3,7 @@ import type { Mission, MissionId, MissionStatus } from '../../domain/mission.js'
 import type { RepositoryId } from '../../domain/repository.js';
 import type { Review, ReviewedRevision } from '../../domain/review.js';
 import type { SourceFact } from '../contracts.js';
-import type { BoardProjection, BoardMetrics } from './board.js';
+import type { BoardProjection, BoardMetrics, MetricsProvenance, StatisticsHealth } from './board.js';
 import { buildBoardMetrics, buildBoardProjection } from './board.js';
 import {
   projectMissionCard,
@@ -138,6 +138,7 @@ export class BoardProjectionBuilder {
     // Build metrics from event history (or use provided/default)
     const metrics = {
       ...await this.buildMetrics(
+        repositoryId,
         missions,
         projectAgentAvailability(agentAvailability, Date.now(), runningSessions),
       ),
@@ -159,6 +160,7 @@ export class BoardProjectionBuilder {
    * Priority: explicit metrics > MetricsReadAdapter > default fallback.
    */
   private async buildMetrics(
+    repositoryId: RepositoryId,
     missions: readonly Mission[],
     agentAvailability: BoardMetrics['agentAvailability'],
   ): Promise<BoardMetrics> {
@@ -176,7 +178,16 @@ export class BoardProjectionBuilder {
       try {
         return await this._options.metricsAdapter.buildMetrics(initialStates, agentAvailability);
       } catch {
-        // Adapter failure — fall through to defaults
+        return this.metricsWithHealth(this.defaultMetrics(agentAvailability), {
+          state: 'unavailable',
+        }, {
+          repositoryId,
+          evaluatedWindow: { startedAt: null, endedAt: null },
+          sampleSize: 0,
+          newestEventTimestamp: null,
+          rejectedOrMissingIdentityRowCount: 0,
+          adapterSucceeded: false,
+        });
       }
     }
 
@@ -222,6 +233,10 @@ export class BoardProjectionBuilder {
         inputs: { lane: null, medianAgeMinutes: null, reviewLoopRate: null, weeklyThroughput: null },
       },
     );
+  }
+
+  private metricsWithHealth(metrics: BoardMetrics, health: StatisticsHealth, provenance: MetricsProvenance): BoardMetrics {
+    return { ...metrics, health, provenance };
   }
 }
 

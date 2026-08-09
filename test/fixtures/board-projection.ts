@@ -20,6 +20,15 @@ import type { RepositoryId } from '../../src/domain/repository.js';
 const emptySeries: MetricSeries = { series: [], missingHistoryFallback: 'skip' };
 
 export const emptyMetrics: BoardMetrics = {
+  health: { state: 'no-telemetry' },
+  provenance: {
+    repositoryId: 'test-repo' as RepositoryId,
+    evaluatedWindow: { startedAt: null, endedAt: null },
+    sampleSize: 0,
+    newestEventTimestamp: null,
+    rejectedOrMissingIdentityRowCount: 0,
+    adapterSucceeded: true,
+  },
   cumulativeFlow: emptySeries,
   cumulativeFlowByState: emptySeries as unknown as BoardMetrics['cumulativeFlowByState'],
   medianStateTimes: emptySeries,
