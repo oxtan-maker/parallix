@@ -918,7 +918,12 @@ function computeAgentMissionGroups(rows, window, options = {}) {
 
       // With no implementation telemetry, retain the closed row so its
       // implementer value (rather than inventing a reviewer model) is shown.
-      byMission[key] = modelRow || completion;
+      // The closed rollup row's `implementer` is the reported implementer
+      // (from deriveImplementerAndFixRounds) — the authority for mission
+      // attribution. Model display can still come from the stage row.
+      const selected = modelRow || completion;
+      selected.reportedImplementer = completion.implementer;
+      byMission[key] = selected;
     }
   }
   const uniqueMissions = Object.values(byMission);
@@ -928,7 +933,23 @@ function computeAgentMissionGroups(rows, window, options = {}) {
   /** @type {Record<string, string>} */
   const missionKeyToDisplayKey = {};
   for (const row of uniqueMissions) {
-    const displayKey = (row.model && String(row.model).trim()) || (row.implementer || 'unknown');
+    // Completed missions: reportedImplementer (from closed rollup row) is the
+    // authority for grouping. Display key uses the model only when it belongs
+    // to the reported implementer's family (preserves task-2213 model display
+    // for single-implementer missions). When the model belongs to a different
+    // implementer (e.g. earlier implementer's model), show the reported
+    // implementer name instead.
+    const modelTrimmed = (row.model && String(row.model).trim()) || '';
+    let displayKey;
+    if (row.reportedImplementer) {
+      if (modelTrimmed && modelBelongsToImplFamily(modelTrimmed, row.reportedImplementer)) {
+        displayKey = modelTrimmed;
+      } else {
+        displayKey = row.reportedImplementer;
+      }
+    } else {
+      displayKey = modelTrimmed || (row.implementer || 'unknown');
+    }
     missionKeyToDisplayKey[statsMissionKey(row)] = displayKey;
     if (!groups[displayKey]) {groups[displayKey] = [];}
     groups[displayKey].push(row);
@@ -961,16 +982,17 @@ function summarizeAgentWindow(rows, window, options = {}) {
   // application's back to try. `deriveFixRoundsFn` stays as an injection point
   // for a caller that has already derived a count.
   //
-  // The stored value is the highest pr_fix_rounds across all of the completed
-  // mission's window rows: the dedup winner is the model-labeled stage row, but
-  // the final fix-round count is usually recorded on the blank-model rollup row.
+  // The authoritative pr_fix_rounds lives on the closed rollup row
+  // (stamped by deriveImplementerAndFixRounds). Reading the closed row
+  // directly avoids picking up stale values from stage rows that may
+  // include a previous implementer's rounds. When multiple rows are
+  // closed, the last one wins (rollup row is appended last).
   /** @type {Record<string, number>} */
   const storedRoundsByMission = {};
   for (const row of allValidWindowRows) {
-    const key = statsMissionKey(row);
-    const rounds = Number.parseInt(String(row.pr_fix_rounds), 10) || 0;
-    if (!(key in storedRoundsByMission) || rounds > storedRoundsByMission[key]) {
-      storedRoundsByMission[key] = rounds;
+    if (row.closed === 'yes') {
+      const key = statsMissionKey(row);
+      storedRoundsByMission[key] = Number.parseInt(String(row.pr_fix_rounds), 10) || 0;
     }
   }
   const roundsFor = (/** @type {any} */ row) => {
@@ -1438,8 +1460,9 @@ async function deriveImplementerAndFixRounds(slug, rootDir = process.cwd(), miss
 
       // Fallback: rounds[].decision.kind === 'changes-requested' for
       // pre-cutover missions or missions seeded via applyReviewerCommand.
+      // Filter by implementer to ensure we count rounds for the correct implementer.
       const decisionCount = rounds.filter(
-        (round) => round.decision?.kind === 'changes-requested',
+        (round) => round.decision?.kind === 'changes-requested' && round.implementer === implementer,
       ).length;
 
       if (eventCount > 0) {
