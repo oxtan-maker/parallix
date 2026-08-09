@@ -34,6 +34,13 @@ export interface ReviewLoopPoint {
   readonly averageRounds: number | null;
 }
 
+/** Time interval a mission spent in a single lane. Open intervals (exitedAt: null) track the current lane. */
+export interface LaneInterval {
+  readonly state: BoardLane;
+  readonly enteredAt: string;
+  readonly exitedAt: string | null;
+}
+
 const BOARD_LANES: readonly BoardLane[] = ['backlog', 'refined', 'active', 'review', 'integration', 'done'];
 
 function emptyCounts(): Record<BoardLane, number> {
@@ -226,22 +233,82 @@ export function reviewLoopRateSeries(
   };
 }
 
-/** Median minutes between recorded transitions into each state. */
+/**
+ * Derive lane intervals from ordered mission transitions.
+ *
+ * For each mission, replays transitions sorted by occurredAt and builds
+ * `{ state, enteredAt, exitedAt | null }` records. The state field is the
+ * lane the mission *occupied* during the interval (transition.from for the
+ * dwell between two transitions, transition.to for the current open lane).
+ * Duplicates (same missionId + from + to + occurredAt) are collapsed.
+ * Open intervals (exitedAt: null) mark the mission's current lane.
+ */
+export function deriveLaneIntervals(
+  transitions: readonly MissionTransition[],
+): LaneInterval[] {
+  // Sort by time, then missionId for deterministic ordering
+  const sorted = [...transitions].sort(
+    (left, right) => left.occurredAt.localeCompare(right.occurredAt)
+    || left.missionId.localeCompare(right.missionId),
+  );
+
+  // Deduplicate: same missionId + from + to + occurredAt
+  const seen = new Set<string>();
+  const unique: MissionTransition[] = [];
+  for (const t of sorted) {
+    const key = `${t.missionId}|${t.from}|${t.to}|${t.occurredAt}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      unique.push(t);
+    }
+  }
+
+  const intervals: LaneInterval[] = [];
+  // Track open interval per mission: [state, enteredAt]
+  const openByMission = new Map<MissionId, [BoardLane, string]>();
+
+  for (const transition of unique) {
+    // Close any open interval for this mission
+    const open = openByMission.get(transition.missionId);
+    if (open) {
+      intervals.push({ state: open[0], enteredAt: open[1], exitedAt: transition.occurredAt });
+    }
+    // Open new interval for the state the mission enters
+    openByMission.set(transition.missionId, [transition.to as BoardLane, transition.occurredAt]);
+  }
+
+  // Remaining open intervals are current lanes (exitedAt: null)
+  for (const [missionId, [state, enteredAt]] of openByMission) {
+    intervals.push({ state, enteredAt, exitedAt: null });
+  }
+
+  return intervals;
+}
+
+/**
+ * Median cycle time per lane, computed from closed lane intervals only.
+ *
+ * Dwell time is attributed to the state the mission *occupied* during the
+ * interval (interval.state), not the state it entered. Open intervals
+ * (missions still in a lane) are excluded from dwell calculations.
+ */
 export function medianCycleTimeByStateSeries(
   transitions: readonly MissionTransition[],
 ): LaneMetricSeries {
+  const intervals = deriveLaneIntervals(transitions);
   const byLane = new Map<BoardLane, number[]>();
-  const byMission = new Map<MissionId, MissionTransition>();
-  for (const transition of [...transitions].sort((left, right) => left.occurredAt.localeCompare(right.occurredAt))) {
-    const previous = byMission.get(transition.missionId);
-    if (previous) {
-      const minutes = (Date.parse(transition.occurredAt) - Date.parse(previous.occurredAt)) / 60_000;
-      if (Number.isFinite(minutes) && minutes >= 0) {
-        byLane.set(transition.to, [...(byLane.get(transition.to) ?? []), minutes]);
-      }
+
+  for (const interval of intervals) {
+    // Closed intervals only — open intervals (current lane) excluded from dwell
+    if (interval.exitedAt === null) {
+      continue;
     }
-    byMission.set(transition.missionId, transition);
+    const minutes = (Date.parse(interval.exitedAt) - Date.parse(interval.enteredAt)) / 60_000;
+    if (Number.isFinite(minutes) && minutes >= 0) {
+      byLane.set(interval.state, [...(byLane.get(interval.state) ?? []), minutes]);
+    }
   }
+
   return {
     series: BOARD_LANES.map((lane) => ({ lane, value: median(byLane.get(lane) ?? []) })),
     missingHistoryFallback: 'null',
