@@ -200,6 +200,14 @@ describe('SC6: metrics fixture — lane transitions produce populated board metr
           'reviewLoopRate point must have a numeric value',
         );
       }
+
+      // SC5: medianCycleTimeByState attributes dwell to state occupied (not state entered)
+      // Transitions: backlog->active (08:00), active->review (10:00), review->integration (12:00)
+      // Closed intervals: active 08:00->10:00 = 120min, review 10:00->12:00 = 120min
+      const cycleActive = metrics.medianCycleTimeByState.series.find((entry) => entry.lane === 'active')?.value;
+      const cycleReview = metrics.medianCycleTimeByState.series.find((entry) => entry.lane === 'review')?.value;
+      assert.equal(cycleActive, 120, 'active dwell (08:00->10:00) attributed to active, not review');
+      assert.equal(cycleReview, 120, 'review dwell (10:00->12:00) attributed to review, not integration');
     });
   });
 

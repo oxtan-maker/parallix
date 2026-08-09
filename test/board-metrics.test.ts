@@ -273,7 +273,11 @@ test('FLOW projection derives lane rows, agent availability, and a deterministic
     ],
   });
 
-  assert.equal(metrics.medianCycleTimeByState.series.find((entry) => entry.lane === 'review')?.value, 90);
+  // SC4: dwell attributed to state occupied (not state entered)
+  // active: median([60, 120]) = 90 (id1: 08:00->09:00, id2: 08:00->10:00)
+  // review: median([120]) = 120 (id1: 09:00->11:00)
+  assert.equal(metrics.medianCycleTimeByState.series.find((entry) => entry.lane === 'active')?.value, 90);
+  assert.equal(metrics.medianCycleTimeByState.series.find((entry) => entry.lane === 'review')?.value, 120);
   assert.equal(metrics.medianAgeByLane.series.find((entry) => entry.lane === 'review')?.value, 120);
   assert.equal(metrics.weeklyThroughput.series[0]?.value, 2);
   assert.deepEqual(metrics.agentAvailability.map((agent) => [agent.family, agent.available]), [['codex', true], ['claude', false]]);
