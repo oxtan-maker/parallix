@@ -1,7 +1,7 @@
 ---
 id: TASK-2340
 title: add rebounce on hooks
-status: active
+status: review
 assignee: [vibe]
 created_date: '2026-08-04 11:33'
 labels: [user_value]
