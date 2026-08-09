@@ -61,6 +61,21 @@ A fact the projection does not have reads `unavailable`. That is deliberate: the
 card distinguishes "we know there is nothing" from "we could not read this", and
 it never guesses a value the workflow has not recorded.
 
+## Cycle time and agent runtime are different numbers
+
+FLOW reports both, under labels that do not overlap:
+
+- **Median lifecycle cycle time** — how long a mission took from its first lane
+  event to closure, waiting included. It measures the delivery system.
+- **Median agent runtime** — how many minutes the agents actually ran on a
+  mission, summed across its recorded runs. It measures the agents.
+
+A mission that activates on Monday morning, runs an agent for 22 minutes, waits
+overnight, and closes after 15 minutes of review on Tuesday has 37 minutes of
+agent runtime and about 26 hours of cycle time. Reading either number as the
+other hides exactly the gap worth managing, so no FLOW label uses "cycle time"
+for execution minutes.
+
 ## Where each fact comes from
 
 The board reads what the lifecycle already recorded. It never queries the review
@@ -74,6 +89,7 @@ until the step that produces it has run.
 | pull request | the pull-request reference the review loop records on the round once it confirms an open PR | `px review` with a review provider configured |
 | agent availability | the `agent_blocklist` table | an agent hits a provider usage limit |
 | cycle time | the `board_lane_events` table | any lifecycle step: mission intake (entry into `backlog`), every lane transition, `integration → done`, and closure |
+| agent runtime | the `duration_minutes` column of the `usage_statistics` table, summed per mission over its recorded runs | an agent finishes a run and its measurement is written |
 | operations | the `operational_history` table | `px active`, `px checkpoint`, `px review`, or `px integrate` |
 
 The gate cell reports an exit code and nothing else. An agent's own account of a

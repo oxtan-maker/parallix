@@ -104,11 +104,15 @@ export function wipSeries(
 }
 
 // ---------------------------------------------------------------------------
-// Median state times — cycle time from outcomes
+// Median state times — lifecycle cycle time from outcomes
 // ---------------------------------------------------------------------------
 
 /**
- * Compute median cycle time from completed mission outcomes.
+ * Compute the median lifecycle cycle time of completed missions.
+ *
+ * `MissionOutcome.cycleTimeMinutes` is the mission's wall-clock lifetime,
+ * derived from its lane events. It is not the agents' execution time — that is
+ * `medianAgentRuntime`, which reads `outcome.runs`.
  *
  * missingHistoryFallback: 'null' — returns null when no outcomes are available.
  */
@@ -130,6 +134,44 @@ export function medianStateTimes(
         : values[middle];
       return { at: through, value: median };
     }),
+    missingHistoryFallback: 'null',
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Median agent runtime — execution minutes from the runs on each outcome
+// ---------------------------------------------------------------------------
+
+/** Total measured execution minutes an outcome's agents spent. */
+export function agentRuntimeMinutes(outcome: MissionOutcome): number | null {
+  const measured = outcome.runs
+    .map((run) => run.durationMinutes)
+    .filter((duration): duration is { readonly kind: 'measured'; readonly value: number } => duration.kind === 'measured');
+  return measured.length === 0 ? null : measured.reduce((sum, duration) => sum + duration.value, 0);
+}
+
+/**
+ * Compute the median agent runtime of completed missions — how long the agents
+ * actually ran, with queueing and review waits excluded. Its counterpart is
+ * `medianStateTimes`, which measures the lifecycle those runs sit inside.
+ *
+ * missingHistoryFallback: 'null' — returns null when no outcome has a measured
+ * run duration, so an unmeasured mission never reads as zero minutes of work.
+ */
+export function medianAgentRuntime(
+  outcomes: readonly MissionOutcome[],
+  instants: readonly string[],
+): MetricSeries {
+  return {
+    series: instants.map((through) => ({
+      at: through,
+      value: median(
+        outcomes
+          .filter((outcome) => outcome.closedAt <= through)
+          .map((outcome) => agentRuntimeMinutes(outcome))
+          .filter((minutes): minutes is number => minutes !== null),
+      ),
+    })),
     missingHistoryFallback: 'null',
   };
 }
@@ -418,16 +460,19 @@ export function buildMetrics(input: MetricsInput): ReturnType<typeof buildBoardM
   const weeklyThroughput = weeklyThroughputSeries(input.outcomes);
   const medianAgeByLane = medianAgeByLaneSeries(input.transitions, input.asOf ?? input.instants.at(-1) ?? new Date(0).toISOString());
   const reviewLoopRate = reviewLoopRateSeries(input.outcomes, input.instants);
-  return buildBoardMetrics(
-    cumulativeFlowSeries(input.initialStates, input.transitions, input.instants),
-    stateFlow,
-    medianStateTimes(input.outcomes, input.instants),
-    cycleByState,
-    throughputSeries(input.outcomes, input.instants),
-    weeklyThroughput,
-    reviewLoopRate,
-    medianAgeByLane,
-    input.agentAvailability ?? [],
-    bottleneckNarrative(medianAgeByLane, reviewLoopRate, weeklyThroughput),
-  );
+  return {
+    ...buildBoardMetrics(
+      cumulativeFlowSeries(input.initialStates, input.transitions, input.instants),
+      stateFlow,
+      medianStateTimes(input.outcomes, input.instants),
+      cycleByState,
+      throughputSeries(input.outcomes, input.instants),
+      weeklyThroughput,
+      reviewLoopRate,
+      medianAgeByLane,
+      input.agentAvailability ?? [],
+      bottleneckNarrative(medianAgeByLane, reviewLoopRate, weeklyThroughput),
+    ),
+    medianAgentRuntime: medianAgentRuntime(input.outcomes, input.instants),
+  };
 }

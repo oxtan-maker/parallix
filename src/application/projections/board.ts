@@ -121,7 +121,15 @@ export interface BoardMetrics {
    */
   readonly unattributedRunningSessions?: number | null;
   readonly cumulativeFlowByState: StateFlowSeries;
+  /** Median mission lifetime in minutes: lane entry to closure, waiting included. */
   readonly medianStateTimes: MetricSeries;
+  /**
+   * Median agent execution minutes per completed mission, summed from the
+   * outcome's runs. Deliberately separate from `medianStateTimes`: one measures
+   * how efficiently the agents work, the other how efficiently the delivery
+   * system moves missions through the board.
+   */
+  readonly medianAgentRuntime: MetricSeries;
   readonly medianCycleTimeByState: LaneMetricSeries;
   readonly throughput: MetricSeries;
   readonly weeklyThroughput: MetricSeries;
@@ -165,9 +173,10 @@ export function buildBoardStage(lane: BoardLane, cards: readonly MissionCard[]):
   return { lane, cards: laneCards, count: laneCards.length };
 }
 
-function emptyFlowMetrics(): Pick<BoardMetrics, 'cumulativeFlowByState' | 'medianCycleTimeByState' | 'weeklyThroughput' | 'medianAgeByLane' | 'agentAvailability' | 'bottleneck'> {
+function emptyFlowMetrics(): Pick<BoardMetrics, 'cumulativeFlowByState' | 'medianCycleTimeByState' | 'medianAgentRuntime' | 'weeklyThroughput' | 'medianAgeByLane' | 'agentAvailability' | 'bottleneck'> {
   return {
     cumulativeFlowByState: { series: [], missingHistoryFallback: 'skip' },
+    medianAgentRuntime: { series: [], missingHistoryFallback: 'null' },
     medianCycleTimeByState: { series: [], missingHistoryFallback: 'skip' },
     weeklyThroughput: { series: [], missingHistoryFallback: 'skip' },
     medianAgeByLane: { series: [], missingHistoryFallback: 'skip' },
@@ -236,6 +245,8 @@ export function buildBoardMetrics(
     cumulativeFlow,
     cumulativeFlowByState: stateFlowOrMedianStateTimes as StateFlowSeries,
     medianStateTimes: medianStateTimesOrThroughput,
+    // Callers that carry run measurements override this via buildMetrics().
+    medianAgentRuntime: { series: [], missingHistoryFallback: 'null' },
     medianCycleTimeByState: cycleTimesOrReviewLoopRate as LaneMetricSeries,
     throughput,
     weeklyThroughput,
