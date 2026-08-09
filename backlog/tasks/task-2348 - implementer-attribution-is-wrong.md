@@ -1,12 +1,16 @@
 ---
 id: TASK-2348
 title: implementer attribution is wrong
-status: active
-assignee: [custom]
+status: review
+assignee:
+  - custom
 created_date: '2026-08-08 18:05'
-labels: [ai_sdlc, bug]
+updated_date: '2026-08-09 04:09'
+labels:
+  - ai_sdlc
+  - bug
 dependencies: []
-ordinal: 83900
+ordinal: 2000
 ---
 
 ## Description
