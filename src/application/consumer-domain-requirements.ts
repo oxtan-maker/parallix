@@ -196,7 +196,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'retry-review-round-counters',
     family: 'retry',
     fileLocation: 'src/adapters/review/review-commands.ts',
-    line: 1094,
+    line: 1095,
     anchor: 'state.reviewerRetryCount',
     reads: ['Review'],
     requirement:

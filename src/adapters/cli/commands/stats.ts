@@ -1427,8 +1427,37 @@ async function deriveImplementerAndFixRounds(slug, rootDir = process.cwd(), miss
       || deriveFinalImplementerFromBranchHistory(slug, rootDir)
       || (currentRound?.implementer ? normalizeImplementer(currentRound.implementer) : null);
     if (implementer) {
-      const prFixRounds = rounds.filter((round) => round.decision?.kind === 'changes-requested').length;
-      return { implementer, prFixRounds, source: 'review-aggregate' };
+      // Primary: count from reviewEvents — the live review loop writes
+      // reviewer_outcome events with verdict 'request-changes' via
+      // persistEventInStore. This is the authoritative source.
+      const events = review.reviewEvents || [];
+      const hasOutcomes = events.some((e) => e.eventType === 'reviewer_outcome');
+      const eventCount = events.filter(
+        (e) => e.eventType === 'reviewer_outcome' && e.verdict === 'request-changes',
+      ).length;
+
+      // Fallback: rounds[].decision.kind === 'changes-requested' for
+      // pre-cutover missions or missions seeded via applyReviewerCommand.
+      const decisionCount = rounds.filter(
+        (round) => round.decision?.kind === 'changes-requested',
+      ).length;
+
+      if (eventCount > 0) {
+        return { implementer, prFixRounds: eventCount, source: 'review-aggregate' };
+      }
+      if (decisionCount > 0) {
+        return { implementer, prFixRounds: decisionCount, source: 'review-aggregate' };
+      }
+
+      // reviewEvents has outcomes (live loop ran) but none requested changes.
+      // This is a determined zero — approved first time or comment-only.
+      if (hasOutcomes) {
+        return { implementer, prFixRounds: 0, source: 'review-aggregate' };
+      }
+
+      // No fix-round signal from either source — count cannot be determined.
+      // Return null so callers exclude this mission from averages.
+      return { implementer, prFixRounds: null, source: 'review-aggregate' };
     }
   }
 
