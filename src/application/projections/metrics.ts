@@ -120,13 +120,16 @@ export function medianStateTimes(
   outcomes: readonly MissionOutcome[],
   instants: readonly string[],
 ): MetricSeries {
-  const sorted = [...outcomes].sort((a, b) => a.missionId.localeCompare(b.missionId));
+  const ordered = [...outcomes].sort((a, b) => a.closedAt.localeCompare(b.closedAt));
+  const values: number[] = [];
+  let index = 0;
   return {
-    series: instants.map((through) => {
-      const values = sorted
-        .filter((outcome) => outcome.closedAt <= through)
-        .map((outcome) => outcome.cycleTimeMinutes)
-        .sort((a, b) => a - b);
+    series: [...instants].sort().map((through) => {
+      while (index < ordered.length && ordered[index]!.closedAt <= through) {
+        const value = ordered[index++]!.cycleTimeMinutes;
+        const insertion = values.findIndex((existing) => existing > value);
+        values.splice(insertion === -1 ? values.length : insertion, 0, value);
+      }
       if (values.length === 0) { return { at: through, value: null }; }
       const middle = Math.floor(values.length / 2);
       const median = values.length % 2 === 0
@@ -192,13 +195,19 @@ export function cumulativeFlowSeries(
   instants: readonly string[],
 ): MetricSeries {
   const ordered = [...transitions].sort((left, right) => left.occurredAt.localeCompare(right.occurredAt));
+  const state = new Map(initial);
+  let completed = [...state.values()].filter((status) => status === 'done').length;
+  let index = 0;
   return {
-    series: instants.map((at) => {
-      const state = new Map(initial);
-      for (const transition of ordered) {
-        if (transition.occurredAt <= at) { state.set(transition.missionId, transition.to); }
+    series: [...instants].sort().map((at) => {
+      while (index < ordered.length && ordered[index]!.occurredAt <= at) {
+        const transition = ordered[index++]!;
+        const previous = state.get(transition.missionId);
+        if (previous === 'done') { completed -= 1; }
+        if (transition.to === 'done') { completed += 1; }
+        state.set(transition.missionId, transition.to);
       }
-      return { at, value: [...state.values()].filter((status) => status === 'done').length };
+      return { at, value: completed };
     }),
     missingHistoryFallback: 'estimate',
   };
@@ -461,18 +470,18 @@ export function buildMetrics(input: MetricsInput): ReturnType<typeof buildBoardM
   const medianAgeByLane = medianAgeByLaneSeries(input.transitions, input.asOf ?? input.instants.at(-1) ?? new Date(0).toISOString());
   const reviewLoopRate = reviewLoopRateSeries(input.outcomes, input.instants);
   return {
-    ...buildBoardMetrics(
-      cumulativeFlowSeries(input.initialStates, input.transitions, input.instants),
-      stateFlow,
-      medianStateTimes(input.outcomes, input.instants),
-      cycleByState,
-      throughputSeries(input.outcomes, input.instants),
+    ...buildBoardMetrics({
+      cumulativeFlow: cumulativeFlowSeries(input.initialStates, input.transitions, input.instants),
+      cumulativeFlowByState: stateFlow,
+      medianStateTimes: medianStateTimes(input.outcomes, input.instants),
+      medianCycleTimeByState: cycleByState,
+      throughput: throughputSeries(input.outcomes, input.instants),
       weeklyThroughput,
       reviewLoopRate,
       medianAgeByLane,
-      input.agentAvailability ?? [],
-      bottleneckNarrative(medianAgeByLane, reviewLoopRate, weeklyThroughput),
-    ),
+      agentAvailability: input.agentAvailability ?? [],
+      bottleneck: bottleneckNarrative(medianAgeByLane, reviewLoopRate, weeklyThroughput),
+    }),
     medianAgentRuntime: medianAgentRuntime(input.outcomes, input.instants),
   };
 }

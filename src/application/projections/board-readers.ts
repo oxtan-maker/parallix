@@ -218,21 +218,21 @@ export class BoardProjectionBuilder {
 
   /** Default metrics with skip fallback (no event history available). */
   private defaultMetrics(agentAvailability: BoardMetrics['agentAvailability']): BoardMetrics {
-    return buildBoardMetrics(
-      { series: [], missingHistoryFallback: 'skip' },
-      { series: [], missingHistoryFallback: 'skip' },
-      { series: [], missingHistoryFallback: 'skip' },
-      { series: [], missingHistoryFallback: 'skip' },
-      { series: [], missingHistoryFallback: 'skip' },
-      { series: [], missingHistoryFallback: 'skip' },
-      { series: [], missingHistoryFallback: 'skip' },
-      { series: [], missingHistoryFallback: 'skip' },
+    return buildBoardMetrics({
+      cumulativeFlow: { series: [], missingHistoryFallback: 'skip' },
+      cumulativeFlowByState: { series: [], missingHistoryFallback: 'skip' },
+      medianStateTimes: { series: [], missingHistoryFallback: 'skip' },
+      medianCycleTimeByState: { series: [], missingHistoryFallback: 'skip' },
+      throughput: { series: [], missingHistoryFallback: 'skip' },
+      weeklyThroughput: { series: [], missingHistoryFallback: 'skip' },
+      reviewLoopRate: { series: [], missingHistoryFallback: 'skip' },
+      medianAgeByLane: { series: [], missingHistoryFallback: 'skip' },
       agentAvailability,
-      {
+      bottleneck: {
         sentence: 'Bottleneck unavailable: history is missing.',
         inputs: { lane: null, medianAgeMinutes: null, reviewLoopRate: null, weeklyThroughput: null },
       },
-    );
+    });
   }
 
   private metricsWithHealth(metrics: BoardMetrics, health: StatisticsHealth, provenance: MetricsProvenance): BoardMetrics {
