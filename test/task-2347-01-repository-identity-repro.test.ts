@@ -120,7 +120,17 @@ describe('task-2347.01 — repository identity through lane events and board met
           from: 'active' as MissionStatus,
           to: 'review' as MissionStatus,
           trigger: 'submit-for-review',
-          occurredAt: '2026-07-24T10:00:00Z',
+          occurredAt: '2026-07-24T08:15:00Z',
+        }));
+        // Alpha closes 45 minutes after it was activated. Cycle time is this
+        // lane window (task-2347.05), so the probe below reads a lifecycle
+        // span rather than alpha's usage-row duration.
+        await recorder.append(laneEvent({
+          idempotencyKey: 'alpha-done',
+          from: 'review' as MissionStatus,
+          to: 'done' as MissionStatus,
+          trigger: 'integrate',
+          occurredAt: '2026-07-24T08:45:00Z',
         }));
 
         // Seed beta transitions (different repo, different mission)
@@ -183,10 +193,11 @@ describe('task-2347.01 — repository identity through lane events and board met
           'alpha state flow must contain 1 mission (alpha only), not 2 (alpha + beta contamination)',
         );
 
-        // (b) medianStateTimes uses cycleTimeMinutes from outcomes.
-        // Without scoping: both usage records merge by mission key,
-        // cycleTimeMinutes = 45 + 120 = 165.
-        // With scoping: only alpha's record, cycleTimeMinutes = 45.
+        // (b) medianStateTimes uses cycleTimeMinutes from outcomes, which is
+        // the mission's lane-event lifetime (08:00 → 08:45 = 45 minutes for
+        // alpha). Beta's window is 09:00 → 11:00 = 120 minutes; without
+        // repository scoping beta's lane events and usage row would reach
+        // alpha's outcome and move this median off 45.
         const lastMedian = metrics.medianStateTimes.series.at(-1);
         assert.ok(lastMedian, 'medianStateTimes must have data points');
         assert.equal(

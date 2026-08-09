@@ -45,6 +45,11 @@ export function FlowPanel({ metrics, columns }: { readonly metrics: BoardMetrics
   // neutral zero sample rather than making the board unavailable.
   const sampleSize = metrics.provenance?.sampleSize ?? 0;
   const healthState = metrics.health?.state ?? 'no-telemetry';
+  // Lifecycle time and agent execution time are different quantities and are
+  // never labelled with each other's words. Projections cached before the two
+  // were split carry no runtime series at all.
+  const lifecycleCycleTime = metrics.medianStateTimes?.series.at(-1)?.value;
+  const agentRuntime = metrics.medianAgentRuntime?.series.at(-1)?.value;
 
   return (
     <Box flexDirection="column" marginTop={1}>
@@ -60,6 +65,10 @@ export function FlowPanel({ metrics, columns }: { readonly metrics: BoardMetrics
           <Text dimColor>{history('Weekly completions', metrics.weeklyThroughput.missingHistoryFallback)}</Text>
           <Text>{`Review-to-active loop rate: ${display(loopRate)} (n=${sampleSize})`}</Text>
           <Text dimColor>{history('Review-to-active loop rate', metrics.reviewLoopRate.missingHistoryFallback)}</Text>
+          <Text>{`Median lifecycle cycle time: ${display(lifecycleCycleTime, ' min')} (n=${sampleSize})`}</Text>
+          <Text dimColor>{history('Median lifecycle cycle time', metrics.medianStateTimes?.missingHistoryFallback ?? 'null')}</Text>
+          <Text>{`Median agent runtime: ${display(agentRuntime, ' min')} (n=${sampleSize})`}</Text>
+          <Text dimColor>{history('Median agent runtime', metrics.medianAgentRuntime?.missingHistoryFallback ?? 'null')}</Text>
         </Box>
         <Box flexDirection="column" marginRight={narrow ? 0 : 4}>
           <LaneRows label="Median cycle time" metric={metrics.medianCycleTimeByState} sampleSize={sampleSize} suffix=" min" />
