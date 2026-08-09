@@ -1,19 +1,13 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const path = require('path');
 
-const {
-  parseConflictFilesFromMergeOutput,
-  getConflictFiles,
-  findLastNonNoiseCommit,
-  squashTrailingBacklogNoiseIntoPreviousMission,
-  softResetTrailingBacklogNoise,
-  findMissionDocInBranches,
-  isMissionArtifact,
-} = require('../.test-runtime/adapters/filesystem/mission-utils.js');
 
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import path from 'path';
+import { createRequire } from 'node:module';
+const _require = createRequire(import.meta.url);
+import { parseConflictFilesFromMergeOutput, getConflictFiles, findLastNonNoiseCommit, squashTrailingBacklogNoiseIntoPreviousMission, softResetTrailingBacklogNoise, findMissionDocInBranches, isMissionArtifact, } from '../src/adapters/filesystem/mission-utils.js';
 test('parseConflictFilesFromMergeOutput parses content and modify/delete conflicts and deduplicates paths', () => {
   const output = [
     'CONFLICT (content): Merge conflict in workflow/lib/file.js',
@@ -167,7 +161,7 @@ test('findMissionDocInBranches finds mission docs on slug and base-slug branches
 // ============================================================
 
 test('isMissionArtifact respects adapter baseDir instead of hardcoded docs/missions', () => {
-  const root = fs.mkdtempSync(path.join(require('os').tmpdir(), 'workflow-mission-utils-'));
+  const root = fs.mkdtempSync(path.join(_require('os').tmpdir(), 'workflow-mission-utils-'));
   try {
     // Create a custom adapter config that sets baseDir to 'missions' (without docs/)
     fs.mkdirSync(path.join(root, 'workflow'), { recursive: true });

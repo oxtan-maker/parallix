@@ -13,7 +13,3 @@ async function reviewCommand(args: string[], options = {}) {
 
 export default reviewCommand;
 export { reviewCommand };
-
-// CJS compat: ensure require() returns the function directly
-declare const module: { exports: any } | undefined;
-if (typeof module !== 'undefined') { module.exports = reviewCommand; }

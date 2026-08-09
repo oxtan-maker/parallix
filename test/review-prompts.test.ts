@@ -1,10 +1,17 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
 
+
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const resolveArtifactDirModule = mockModule<typeof import('../src/adapters/review/review-artifacts.js')>('../src/adapters/review/review-artifacts.js', import.meta.url);
+const __mm1 = mockModule<typeof import('../src/adapters/review/review-prompts.js')>('../src/adapters/review/review-prompts.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const { resolveArtifactDir } = resolveArtifactDirModule;
 const {
   PROMPT_ENTRYPOINTS,
   reviewEntrypoint,
@@ -13,8 +20,7 @@ const {
   buildActOnReviewPrompt,
   buildCompactReviewPrompt,
   buildCompactActOnReviewPrompt
-} = require('../.test-runtime/adapters/review/review-prompts.js');
-const { resolveArtifactDir } = require('../.test-runtime/adapters/review/review-artifacts.js');
+} = __mm1;
 
 test('PROMPT_ENTRYPOINTS covers all supported agent families', () => {
   for (const agent of ['codex', 'claude', 'vibe', 'custom', 'autonomous']) {
@@ -291,7 +297,6 @@ test('review prompts distinguish committed checkpoint records from live diff out
   }
 });
 
-
 test('buildCompactActOnReviewPrompt reads from template and substitutes all variables', () => {
   const prompt = buildCompactActOnReviewPrompt({
     implementer: 'claude',
@@ -379,8 +384,6 @@ test('act-on-review prompts provide pushback text for rebasing artifacts (task-1
     assert.match(prompt, /Not a mission change - will be resolved by parallix rebase\./);
   }
 });
-
-
 
 // task-1264: all four builders must substitute the resolved {{artifactDir}} so
 // neither the loop nor the dry-run/manual path leaks a literal placeholder.

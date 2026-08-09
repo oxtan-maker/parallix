@@ -1,12 +1,16 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const repairHandoff = require('../.test-runtime/adapters/cli/commands/repair-handoff.js');
 
 // task-1383: when a verification-gate failure carries captured failing-test
 // output, the relaunch prompt must be a state-aware fix prompt that cites the
 // failing tests and asks for a code fix — not the generic Goal Check /
 // checkpoint-repair prompt used for incomplete-evidence failures.
+
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const repairHandoff = mockModule<typeof import('../src/adapters/cli/commands/repair-handoff.js')>('../src/adapters/cli/commands/repair-handoff.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
 
 const GATE_ERROR_MSG = 'Final verification gate failed. Fix errors before submitting or use --no-gate if appropriate.';
 const GATE_OUTPUT = {

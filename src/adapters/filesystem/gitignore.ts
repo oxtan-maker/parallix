@@ -102,7 +102,3 @@ function ensureWorkflowGitignore(rootDir: string, options: EnsureOptions = {}): 
 
 export default ensureWorkflowGitignore;
 export { ensureWorkflowGitignore, WORKFLOW_ENTRIES, ensureWorkflowGitignore as ensureWorkflowGitignoreFn };
-
-// CJS compat: ensure require() returns the function directly
-declare const module: { exports: any } | undefined;
-if (typeof module !== 'undefined') { module.exports = ensureWorkflowGitignore; }

@@ -1,8 +1,7 @@
-'use strict';
-
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import * as bootstrap from '../bootstrap-parallix-home.js';
 
 /**
  * Creates a temporary directory and registers it with the test harness
@@ -18,14 +17,13 @@ const path = require('node:path');
 function mkdtemp(prefix = 'parallix-test-') {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   // Register with the bootstrap manifest if available (task-2326).
-  // The bootstrap exposes registerTempRoot when loaded via --require.
+  // The bootstrap exposes registerTempRoot when loaded via --import.
   // When running outside the bootstrap (e.g., integration solo runs),
   // this is a no-op — the test's own afterEach handles cleanup.
-  const bootstrap = require('../bootstrap-parallix-home.js');
   if (typeof bootstrap.registerTempRoot === 'function') {
     bootstrap.registerTempRoot(dir);
   }
   return dir;
 }
 
-module.exports = { mkdtemp };
+export { mkdtemp };

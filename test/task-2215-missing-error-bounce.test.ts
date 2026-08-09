@@ -1,10 +1,15 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const path = require('node:path');
-const repairHandoff = require('../.test-runtime/adapters/cli/commands/repair-handoff.js');
+
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import path from 'node:path';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const repairHandoff = mockModule<typeof import('../src/adapters/cli/commands/repair-handoff.js')>('../src/adapters/cli/commands/repair-handoff.js', import.meta.url);
+const handoff = mockModule<typeof import('../src/adapters/cli/commands/handoff.js')>('../src/adapters/cli/commands/handoff.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
 const { classifyError, FailureClass, DispatchAction } = repairHandoff;
-const handoff = require('../.test-runtime/adapters/cli/commands/handoff.js');
+const handoffDefault = handoff.default;
 
 // Reproduction tests for task-2215 (missing error bounce).
 //
@@ -28,17 +33,17 @@ test('task-2215 repro: classifyError classifies auto-remediation checkpoint fail
 });
 
 test('task-2215 repro: buildAutoCheckpointContent evidence rows pass findUnverifiableGoalCheckRow validation', () => {
-  const rootDir = path.join(__dirname, '..');
-  const content = handoff._buildAutoCheckpointContent('task-2215');
+  const rootDir = path.join(import.meta.dirname, '..');
+  const content = handoffDefault._buildAutoCheckpointContent('task-2215');
 
   const goalCheckMatch = content.match(/^## Goal Check(?: Table)?\s*$/m);
   assert.ok(goalCheckMatch, 'auto-generated checkpoint must contain a "## Goal Check" section');
 
   const afterHeader = content.slice((goalCheckMatch.index ?? 0) + goalCheckMatch[0].length);
-  const evidenceRows = handoff._collectGoalCheckEvidenceRows(afterHeader);
+  const evidenceRows = handoffDefault._collectGoalCheckEvidenceRows(afterHeader);
   assert.ok(evidenceRows.length > 0, 'auto-generated Goal Check table must contain evidence rows');
 
-  const offendingRow = handoff._findUnverifiableGoalCheckRow(evidenceRows, rootDir);
+  const offendingRow = handoffDefault._findUnverifiableGoalCheckRow(evidenceRows, rootDir);
   assert.equal(offendingRow, null,
     `auto-generated evidence rows must cite verifiable references; offending row: ${offendingRow}`);
 });

@@ -1,17 +1,22 @@
+// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 
+
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
+import childProcess from 'node:child_process';
+import { Writable } from 'node:stream';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const spawnAndTeeModule = mockModule<typeof import('../src/adapters/process/spawn-tee.js')>('../src/adapters/process/spawn-tee.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const { spawnAndTee, DEFAULT_MAX_TAIL_BYTES } = spawnAndTeeModule;
 'use strict';
 
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const { EventEmitter } = require('node:events');
-const childProcess = require('node:child_process');
 const { mock } = test;
-const { Writable } = require('node:stream');
-
-const { spawnAndTee, DEFAULT_MAX_TAIL_BYTES } = require('../.test-runtime/adapters/process/spawn-tee.js');
 
 function noopSink() {
   return new Writable({ write(chunk, enc, cb) { cb(); } });

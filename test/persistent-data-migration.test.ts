@@ -1,13 +1,12 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-
-const persistentDataMigration = require('../.test-runtime/adapters/storage/persistent-data-migration.js');
-const { migrateAgentBlocklists } = persistentDataMigration;
-
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
+import { migrateStats, migrateAgentBlocklists, } from '../src/adapters/storage/persistent-data-migration.js';
+import * as persistentDataMigration from '../src/adapters/storage/persistent-data-migration.js';
 function withTempRoot(run) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-migration-'));
   try {
@@ -21,7 +20,9 @@ function withTempRoot(run) {
 // `<PARALLIX_HOME>/stats.csv` is no longer a runtime authority or migration
 // destination, so this module must expose no stats CSV migration at all.
 test('no stats CSV migration survives the measurement cut-over', () => {
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
   assert.equal(persistentDataMigration.migrateStats, undefined);
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
   assert.equal(persistentDataMigration._internals, undefined);
   assert.equal(typeof persistentDataMigration.migrateAgentBlocklists, 'function');
 });

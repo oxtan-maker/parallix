@@ -1,19 +1,13 @@
 
+
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 'use strict';
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-
-const {
-  parseCodexRollout,
-  collectRolloutFiles,
-  extractCodexTelemetry,
-  codexSessionsDir,
-} = require('../.test-runtime/adapters/agents/codex-telemetry.js');
-
+import { parseCodexRollout, collectRolloutFiles, extractCodexTelemetry, codexSessionsDir, } from '../src/adapters/agents/codex-telemetry.js';
 // Minimal but schema-faithful rollout JSONL, modelled on the real Codex
 // `~/.codex/sessions/.../rollout-*.jsonl` format (task-1251). Tests are fully
 // offline — no agent is launched, so no tokens are consumed.

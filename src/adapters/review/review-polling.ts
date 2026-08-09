@@ -44,9 +44,22 @@ function formatElapsed(startMs: number): string {
   return `${secs}s`;
 }
 
-/** @param {*} result */
+/**
+ * Identify the poll-timeout sentinel.
+ *
+ * Reference equality alone is not sufficient: a module graph can hold more than
+ * one evaluation of this file (the ESM test seam re-links modules past the
+ * import cache, and the canonical bundle inlines it alongside the source tree),
+ * which yields structurally identical but non-identical frozen sentinels. The
+ * `__isPollTimeout` brand exists for exactly that case, so recognise it too.
+ *
+ * @param {*} result
+ */
 function isPollTimeout(result: unknown): boolean {
-  return result === POLL_TIMEOUT;
+  if (result === POLL_TIMEOUT) { return true; }
+  return typeof result === 'object'
+    && result !== null
+    && (result as { __isPollTimeout?: unknown }).__isPollTimeout === true;
 }
 
 /**

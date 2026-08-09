@@ -1,7 +1,11 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const repairHandoff = require('../.test-runtime/adapters/cli/commands/repair-handoff.js');
+
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const repairHandoff = mockModule<typeof import('../src/adapters/cli/commands/repair-handoff.js')>('../src/adapters/cli/commands/repair-handoff.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
 const { classifyError, getDispatchAction, FailureClass, DispatchAction } = repairHandoff;
 
 test('repairHandoff auto-commits safe mission files', async () => {
@@ -11,8 +15,8 @@ test('repairHandoff auto-commits safe mission files', async () => {
 
   const gitFn = (args) => {
     if (args.includes('status')) {
-      return { 
-        status: 0, 
+      return {
+        status: 0,
         stdout: [
           ' M missions/task-1037/MISSION.md',
           '?? missions/task-1037/CP-1.md',
@@ -31,7 +35,8 @@ test('repairHandoff auto-commits safe mission files', async () => {
     return { status: 0 };
   };
 
-  const { repaired, blocker } = await repairHandoff('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', {
+  const { repaired, blocker } = await repairHandoff.default('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', {
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     taskFile: '/tmp/worktree/backlog/tasks/task-1037 - some task.md',
     gitFn,
     log: (msg) => logs.push(msg)
@@ -71,7 +76,7 @@ test('repairHandoff stages renamed mission files by destination path', async () 
     return { status: 0 };
   };
 
-  const { repaired, blocker } = await repairHandoff('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', {
+  const { repaired, blocker } = await repairHandoff.default('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', {
     gitFn,
     log: () => {}
   });
@@ -88,8 +93,8 @@ test('repairHandoff refuses to commit when operator-local or generated paths are
 
   const gitFn = (args) => {
     if (args.includes('status')) {
-      return { 
-        status: 0, 
+      return {
+        status: 0,
         stdout: [
           ' M missions/task-1037/MISSION.md',
           ' M .workflow/codex-home/.codex/logs_2.sqlite',
@@ -106,7 +111,7 @@ test('repairHandoff refuses to commit when operator-local or generated paths are
     return { status: 0 };
   };
 
-  const { repaired, blocker } = await repairHandoff('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', {
+  const { repaired, blocker } = await repairHandoff.default('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', {
     gitFn,
     log: (msg) => logs.push(msg)
   });
@@ -147,7 +152,7 @@ test('repairHandoff refuses to commit when arbitrary non-mission repo files are 
     return { status: 0 };
   };
 
-  const { repaired, blocker } = await repairHandoff('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', {
+  const { repaired, blocker } = await repairHandoff.default('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', {
     gitFn,
     log: (msg) => logs.push(msg)
   });
@@ -185,7 +190,7 @@ test('repairHandoff reports staging failures and stops before commit', async () 
     return { status: 0 };
   };
 
-  const { repaired, blocker } = await repairHandoff('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', {
+  const { repaired, blocker } = await repairHandoff.default('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', {
     gitFn,
     error: (msg) => errors.push(msg),
     log: () => {}
@@ -204,8 +209,8 @@ test('repairHandoff refuses to commit when mission files are conflicted', async 
 
   const gitFn = (args) => {
     if (args.includes('status')) {
-      return { 
-        status: 0, 
+      return {
+        status: 0,
         stdout: [
           'UU missions/task-1037/MISSION.md'
         ].join('\n')
@@ -214,7 +219,7 @@ test('repairHandoff refuses to commit when mission files are conflicted', async 
     return { status: 0 };
   };
 
-  const { repaired, blocker } = await repairHandoff('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', {
+  const { repaired, blocker } = await repairHandoff.default('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', {
     gitFn,
     log: (msg) => logs.push(msg)
   });
@@ -241,7 +246,7 @@ test('repairHandoff calls rebase when branch is behind', async () => {
     opts.exitFn(0);
   };
 
-  const { repaired, blocker } = await repairHandoff('task-1037', '/tmp/worktree', 'git push failed: Updates were rejected', {
+  const { repaired, blocker } = await repairHandoff.default('task-1037', '/tmp/worktree', 'git push failed: Updates were rejected', {
     gitFn,
     rebaseFn,
     log: (msg) => logs.push(msg)
@@ -266,7 +271,7 @@ test('repairHandoff returns false when rebase fails', async () => {
     opts.exitFn(1);
   };
 
-  const { repaired, blocker } = await repairHandoff('task-1037', '/tmp/worktree', 'git push failed: Updates were rejected', {
+  const { repaired, blocker } = await repairHandoff.default('task-1037', '/tmp/worktree', 'git push failed: Updates were rejected', {
     gitFn,
     rebaseFn,
     log: (msg) => logs.push(msg),
@@ -282,8 +287,8 @@ test('repairHandoff auto-commits safe mission files including completed tasks', 
   const adds = [];
   const gitFn = (args) => {
     if (args.includes('status')) {
-      return { 
-        status: 0, 
+      return {
+        status: 0,
         stdout: [
           ' M backlog/completed/task-1037 - some task.md'
         ].join('\n')
@@ -296,7 +301,8 @@ test('repairHandoff auto-commits safe mission files including completed tasks', 
     return { status: 0 };
   };
 
-  const { repaired } = await repairHandoff('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', {
+  const { repaired } = await repairHandoff.default('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', {
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     taskFile: '/tmp/worktree/backlog/completed/task-1037 - some task.md',
     gitFn,
     log: () => {}
@@ -320,7 +326,7 @@ test('repairHandoff returns repaired:false when rebase fails after successful au
     opts.exitFn(1); // Rebase fails
   };
 
-  const { repaired, blocker } = await repairHandoff('task-1037', '/tmp/worktree', 'Updates were rejected', {
+  const { repaired, blocker } = await repairHandoff.default('task-1037', '/tmp/worktree', 'Updates were rejected', {
     gitFn,
     rebaseFn,
     log: () => {},
@@ -332,7 +338,7 @@ test('repairHandoff returns repaired:false when rebase fails after successful au
 });
 
 test('repairHandoff returns repaired:false for generic git push failed (auth/transport)', async () => {
-  const { repaired } = await repairHandoff('task-1037', '/tmp/worktree', 'git push failed with status 128: fatal: Authentication failed', {
+  const { repaired } = await repairHandoff.default('task-1037', '/tmp/worktree', 'git push failed with status 128: fatal: Authentication failed', {
     log: () => {}
   });
 
@@ -349,9 +355,10 @@ test('isRelaunchableError returns true for goal-check table missing evidence row
 
 test('isRelaunchableError returns false for non-relaunchable errors', () => {
   const { isRelaunchableError } = repairHandoff;
-  
+
   assert.equal(isRelaunchableError(null), false);
   assert.equal(isRelaunchableError(undefined), false);
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
   assert.equal(isRelaunchableError(123), false);
   assert.equal(isRelaunchableError(''), false);
   assert.equal(isRelaunchableError('Some other error'), false);
@@ -361,7 +368,7 @@ test('isRelaunchableError returns false for non-relaunchable errors', () => {
 
 test('isRelaunchableError returns false for partial match', () => {
   const { isRelaunchableError } = repairHandoff;
-  
+
   // Missing the second part of the required message
   assert.equal(isRelaunchableError('has a "## Goal Check" section but no evidence rows'), false);
   // Missing the first part
@@ -372,7 +379,7 @@ test('buildRelaunchPrompt returns string containing Goal Check table and mission
   const { buildRelaunchPrompt } = repairHandoff;
   const errorMsg = 'The final checkpoint at docs/missions/2026/task-1121/CP-3.md has a "## Goal Check" section but no evidence rows. A goal-check table with real evidence is required before handoff.';
   const prompt = buildRelaunchPrompt(errorMsg, 'task-1124', '/tmp/worktree');
-  
+
   assert.ok(typeof prompt === 'string', 'Prompt should be a string');
   assert.ok(prompt.includes('Goal Check table'), 'Prompt should contain "Goal Check table"');
   assert.ok(prompt.includes('task-1124'), 'Prompt should contain the mission slug');
@@ -394,7 +401,7 @@ test('buildRelaunchPrompt includes example table', () => {
   const { buildRelaunchPrompt } = repairHandoff;
   const errorMsg = 'The final checkpoint at docs/missions/2026/task-1121/CP-3.md has a "## Goal Check" section but no evidence rows. A goal-check table with real evidence is required before handoff.';
   const prompt = buildRelaunchPrompt(errorMsg, 'task-1124', '/tmp/worktree');
-  
+
   assert.ok(prompt.includes('| Criterion | Evidence | Status |'), 'Prompt should include example table header');
   assert.ok(prompt.includes('|---|---|---|'), 'Prompt should include example table separator');
 });
@@ -661,7 +668,8 @@ test('repairHandoff uses classifyError internally for dirty errors', async () =>
     return { status: 0 };
   };
 
-  const { repaired, blocker } = await repairHandoff('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', {
+  const { repaired, blocker } = await repairHandoff.default('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', {
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     taskFile: '/tmp/worktree/backlog/tasks/task-1037 - some task.md',
     gitFn,
     log: (msg) => logs.push(msg)
@@ -686,7 +694,7 @@ test('repairHandoff uses classifyError internally for behind errors', async () =
     opts.exitFn(0);
   };
 
-  const { repaired, blocker } = await repairHandoff('task-1037', '/tmp/worktree', 'git push failed: Updates were rejected', {
+  const { repaired, blocker } = await repairHandoff.default('task-1037', '/tmp/worktree', 'git push failed: Updates were rejected', {
     gitFn,
     rebaseFn,
     log: (msg) => logs.push(msg)
@@ -698,7 +706,7 @@ test('repairHandoff uses classifyError internally for behind errors', async () =
 });
 
 test('repairHandoff returns false for non-GitBlocker errors', async () => {
-  const { repaired } = await repairHandoff('task-1037', '/tmp/worktree', 'verification gate failed: exit code 1', {
+  const { repaired } = await repairHandoff.default('task-1037', '/tmp/worktree', 'verification gate failed: exit code 1', {
     log: () => {}
   });
 
@@ -709,7 +717,7 @@ test('repairHandoff returns false for non-GitBlocker errors', async () => {
 
 test('repairHandoff returns InfraBlocker-specific blocker message for infrastructure errors', async () => {
   const logs = [];
-  const { repaired, blocker } = await repairHandoff('task-1037', '/tmp/worktree', 'connection timed out', {
+  const { repaired, blocker } = await repairHandoff.default('task-1037', '/tmp/worktree', 'connection timed out', {
     log: (msg) => logs.push(msg)
   });
 
@@ -723,7 +731,7 @@ test('repairHandoff returns InfraBlocker-specific blocker message for infrastruc
 
 test('repairHandoff returns InfraBlocker-specific blocker for token expired errors', async () => {
   const logs = [];
-  const { repaired, blocker } = await repairHandoff('task-1037', '/tmp/worktree', 'Authentication failed for Forgejo: token expired', {
+  const { repaired, blocker } = await repairHandoff.default('task-1037', '/tmp/worktree', 'Authentication failed for Forgejo: token expired', {
     log: (msg) => logs.push(msg)
   });
 
@@ -761,7 +769,7 @@ test('repairHandoff derives isBehind from classifyError reason (dirty only, no r
 
   const rebaseFn = async () => { rebaseCalled = true; };
 
-  const { repaired } = await repairHandoff('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', {
+  const { repaired } = await repairHandoff.default('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', {
     gitFn,
     rebaseFn,
     log: () => {}

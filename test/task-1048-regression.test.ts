@@ -1,9 +1,14 @@
 
-const test = require('node:test');
-const assert = require('node:assert');
-const { execSync } = require('child_process');
-const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
 
+
+import test, { mock } from 'node:test';
+import assert from 'node:assert';
+import { execSync } from 'child_process';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const startReviewLoopModule = mockModule<typeof import('../src/adapters/review/review-loop.js')>('../src/adapters/review/review-loop.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const { startReviewLoop } = startReviewLoopModule;
 test('TASK-1048: startReviewLoop does not crash when taskResolution is needed for fallback', async () => {
   const writes = [];
   const assigneeWrites = [];
@@ -29,7 +34,9 @@ test('TASK-1048: startReviewLoop does not crash when taskResolution is needed fo
     exit: (c) => { throw new Error(`exit(${c})`); },
     maybeUpdateGraphifyBeforeReviewFn: () => ({ updated: false, skipped: true }),
     readReviewStateFn: () => null,
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-1048.md' }),
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     workflowLauncherStatusFn: () => ({ supported: true }),
     isForgejoReviewEnabledFn: () => true,
     forgejoAvailableFn: async () => true,
@@ -47,8 +54,10 @@ test('TASK-1048: startReviewLoop does not crash when taskResolution is needed fo
       stdout: '',
       stderr: '',
     }),
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     writeReviewStateFn: (slug, state) => writes.push({ slug, state }),
     rebaseBeforeReviewRoundFn: async () => ({ ok: true, sharedFileConflicts: false }),
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     startAgentFn: async (step, options) => {
       if (step === 'review') {
         return { agent: 'codex', result: { status: 0 } };
@@ -68,6 +77,7 @@ test('TASK-1048: startReviewLoop does not crash when taskResolution is needed fo
       assigneeWrites.push({ file, agent });
       return true;
     },
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     transitionTaskFn: () => true,
     buildCompactReviewPromptFn: () => 'prompt',
     buildCompactActOnReviewPromptFn: () => 'prompt',

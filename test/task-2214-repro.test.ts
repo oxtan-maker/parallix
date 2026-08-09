@@ -1,12 +1,16 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
 
-const { runDeclaredGates } = require('../.test-runtime/adapters/cli/commands/handoff.js');
 
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const runDeclaredGatesModule = mockModule<typeof import('../src/adapters/cli/commands/handoff.js')>('../src/adapters/cli/commands/handoff.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const { runDeclaredGates } = runDeclaredGatesModule;
 test('runDeclaredGates rejects prose-appended commands before execution', () => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2214-gates-'));
   const missionDir = path.join(rootDir, 'missions', 'task-2214');

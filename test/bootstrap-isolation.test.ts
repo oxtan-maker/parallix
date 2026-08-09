@@ -1,11 +1,12 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const { spawnSync } = require('child_process');
 
+
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { spawnSync } from 'child_process';
 test('bootstrap forces a temp PARALLIX_HOME with an isolated agents.local.json', () => {
   assert.match(process.env.PARALLIX_HOME || '', new RegExp(`^${os.tmpdir().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
   assert.ok(fs.existsSync(path.join(process.env.PARALLIX_HOME, 'agents.local.json')));

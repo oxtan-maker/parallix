@@ -175,10 +175,11 @@ gate_integrate() {
     fi
   fi
 
-  PARALLIX_REAL_AGENT="$real_agent" PARALLIX_REAL_AGENT_MODEL="$real_agent_model" node --import tsx <<'NODE'
-const fs = require('node:fs');
-const path = require('node:path');
-const childProcess = require('node:child_process');
+  PARALLIX_REAL_AGENT="$real_agent" PARALLIX_REAL_AGENT_MODEL="$real_agent_model" node --input-type=module --import tsx <<'NODE'
+import fs from 'node:fs';
+import path from 'node:path';
+import childProcess from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 
 const repoRoot = process.cwd();
 const realAgent = String(process.env.PARALLIX_REAL_AGENT || '');
@@ -188,7 +189,7 @@ const {
   parseFilesToAreas,
   orderIntegrationGates,
   gateMatchesChangedAreas,
-} = require('./src/adapters/cli/commands/integrate.ts');
+} = await import(pathToFileURL(path.join(repoRoot, 'src/adapters/cli/commands/integrate.ts')).href);
 
 function log(message = '') {
   process.stdout.write(`${message}\n`);
@@ -317,9 +318,8 @@ NODE
 # integration pipeline at config/integration-pipelines.json (order 40).
 gate_mutation() {
   npm run --silent build
-  # Run the TypeScript source through tsx. The transpiled .test-runtime/ tree is
-  # CommonJS for node:test's writable-export mocks and retains `import.meta`,
-  # so it is loadable only under a TS loader — not as a bare `node` entry point.
+  # Run the TypeScript source through tsx: the repository is ESM-only and the
+  # gate entry point is authored TypeScript, not a bare `node` entry point.
   npx --yes tsx src/adapters/verification/mutation-gate.ts "$@"
 }
 

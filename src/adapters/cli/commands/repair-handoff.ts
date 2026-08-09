@@ -560,7 +560,3 @@ async function repairHandoff(slug: string, worktree: string, errorMsg: string, o
 export default repairHandoff;
 export { repairHandoff, isRelaunchableError, buildRelaunchPrompt };
 export { FailureClass, DispatchAction };
-
-// CJS compat: ensure require() returns the function directly
-declare const module: { exports: any } | undefined;
-if (typeof module !== 'undefined') { module.exports = repairHandoff; }

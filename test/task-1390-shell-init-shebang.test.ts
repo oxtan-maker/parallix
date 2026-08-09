@@ -19,13 +19,14 @@
  *   shell-init bash fails to produce valid output.
  * Green after fix: the entry has a shebang and shell-init bash works.
  */
-const assert = require('node:assert/strict');
-const { spawnSync } = require('node:child_process');
-const fs = require('node:fs');
-const path = require('node:path');
-const test = require('node:test');
+import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+import test from 'node:test';
 
-const PX_ENTRY = path.resolve(__dirname, '..', 'build', 'px.mjs');
+
+const PX_ENTRY = path.resolve(import.meta.dirname, '..', 'build', 'px.mjs');
 
 test('build/px.mjs has shebang for direct execution (task-1390)', () => {
   assert.ok(fs.existsSync(PX_ENTRY), 'build/px.mjs must exist after npm run build');

@@ -1,18 +1,20 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
-const { verifyHandoff, performHandoff } = require('../.test-runtime/adapters/cli/commands/handoff.js');
-const { stubMissionServices } = require('./helpers/stub-mission-services.js');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+import { stubMissionServices } from './helpers/stub-mission-services.js';
+const verifyHandoffModule = mockModule<typeof import('../src/adapters/cli/commands/handoff.js')>('../src/adapters/cli/commands/handoff.js', import.meta.url);
+const git = mockModule<typeof import('../src/adapters/git/git.js')>('../src/adapters/git/git.js', import.meta.url);
+const missionUtils = mockModule<typeof import('../src/adapters/filesystem/mission-utils.js')>('../src/adapters/filesystem/mission-utils.js', import.meta.url);
+const backlog = mockModule<typeof import('../src/adapters/backlog/backlog.js')>('../src/adapters/backlog/backlog.js', import.meta.url);
+const forgejo = mockModule<typeof import('../src/adapters/forgejo/forgejo.js')>('../src/adapters/forgejo/forgejo.js', import.meta.url);
+const gatekeeper = mockModule<typeof import('../src/adapters/verification/gatekeeper.js')>('../src/adapters/verification/gatekeeper.js', import.meta.url);
+await installModuleMocks();
 const { mock } = test;
-
-const git = require('../.test-runtime/adapters/git/git.js');
-const missionUtils = require('../.test-runtime/adapters/filesystem/mission-utils.js');
-const backlog = require('../.test-runtime/adapters/backlog/backlog.js');
-const forgejo = require('../.test-runtime/adapters/forgejo/forgejo.js');
-const gatekeeper = require('../.test-runtime/adapters/verification/gatekeeper.js');
+const { verifyHandoff, performHandoff } = verifyHandoffModule;
 
 const TEST_SLUG = 'task-handoff-test';
 const WORKTREE = path.join(os.tmpdir(), `handoff-test-worktree-${process.pid}`);
@@ -32,7 +34,7 @@ function setupMocks() {
   mock.method(forgejo, 'createPr', () => ({ ok: true }));
   mock.method(forgejo, 'resolveTrackingBranchSha', () => ({ ok: true, sha: 'fake-sha' }));
   mock.method(gatekeeper, 'runGatekeeper', () => ({ ok: true }));
-  
+
   const missionDir = path.join(WORKTREE, 'docs/missions/2026', TEST_SLUG);
   fs.mkdirSync(missionDir, { recursive: true });
   // visualBoard's Ways of Working use Forgejo review (the code default is off

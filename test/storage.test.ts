@@ -1,13 +1,16 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-
-const storage = require('../.test-runtime/adapters/storage/storage.js');
 
 // ---------- resolveParallixHome ----------
+
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const storage = mockModule<typeof import('../src/adapters/storage/storage.js')>('../src/adapters/storage/storage.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
 
 test('resolveParallixHome honors PARALLIX_HOME env var', () => {
   const original = process.env.PARALLIX_HOME;
@@ -126,6 +129,7 @@ test('resolveParallixHome uses ~/.parallix for unsupported platforms', () => {
 // TASK-2322.08 removed `storage.resolveStatsPath`: statistics live in the
 // measurement database, and no runtime path resolves <PARALLIX_HOME>/stats.csv.
 test('storage exposes no stats.csv resolver after the measurement cut-over', () => {
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
   assert.equal(storage.resolveStatsPath, undefined);
 });
 
@@ -156,6 +160,7 @@ test('readJson returns { ok: true } for valid JSON', () => {
     fs.writeFileSync(file, JSON.stringify({ blocklist: { gemini: true } }), 'utf8');
     const result = storage.readJson(file);
     assert.equal(result.ok, true);
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     assert.equal(result.data.blocklist.gemini, true);
   } finally {
     process.env.PARALLIX_HOME = savedHome;
@@ -192,6 +197,7 @@ test('readJson accepts a resolver function instead of a path', () => {
     fs.writeFileSync(file, JSON.stringify({ key: 'val' }), 'utf8');
     const result = storage.readJson(() => file);
     assert.equal(result.ok, true);
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     assert.equal(result.data.key, 'val');
   } finally {
     process.env.PARALLIX_HOME = savedHome;

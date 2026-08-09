@@ -1,31 +1,19 @@
+// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
 
-const {
-  DEFAULT_CONFIG,
-  commitWorkflowBaseline,
-  detectLegacyRepoLayout,
-  ensureStandaloneMissionBaseline,
-  ensureStandaloneGitRepo,
-  evaluateRepositoryReadiness,
-  hasGitRepository,
-  initializeGitRepository,
-  isStandaloneWorkflowLayout,
-  loadAdapterConfig,
-  loadEffectiveConfig,
-  loadWorkflowConfig,
-  resolveAgentAdapter,
-  resolveAgentModel,
-  resolveMaxConcurrentCustom,
-  resolveReviewAdapter,
-  resolveTaskStorage,
-  validateWorkflowConfig,
-} = require('../.test-runtime/adapters/config/product-config.js');
-const { spawnSync } = require('child_process');
+
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { spawnSync } from 'child_process';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const resolveAgentAdapterModule = mockModule<typeof import('../src/adapters/config/product-config.js')>('../src/adapters/config/product-config.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const { resolveAgentAdapter } = resolveAgentAdapterModule;
+const { DEFAULT_CONFIG, commitWorkflowBaseline, detectLegacyRepoLayout, ensureStandaloneMissionBaseline, ensureStandaloneGitRepo, evaluateRepositoryReadiness, hasGitRepository, initializeGitRepository, isStandaloneWorkflowLayout, loadAdapterConfig, loadEffectiveConfig, loadWorkflowConfig, resolveAgentModel, resolveMaxConcurrentCustom, resolveReviewAdapter, resolveTaskStorage, validateWorkflowConfig } = resolveAgentAdapterModule;
 
 function withTempDir(fn) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-product-config-'));
@@ -427,7 +415,6 @@ test('resolveTaskStorage supports string storage paths and invalid storage types
 });
 
 test('resolveAgentAdapter returns empty object (command env prefix removed)', () => {
-  const { resolveAgentAdapter } = require('../.test-runtime/adapters/config/product-config.js');
   assert.deepEqual(resolveAgentAdapter('/tmp'), {});
 });
 

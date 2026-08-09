@@ -1,9 +1,12 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
 
-const fmt = require('../.test-runtime/application/presentation/cli-format.js');
 
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const fmt = mockModule<typeof import('../src/application/presentation/cli-format.js')>('../src/application/presentation/cli-format.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
 function withForcedColor(run) {
   const previousForceColor = process.env.FORCE_COLOR;
   const previousNoColor = process.env.NO_COLOR;
@@ -56,7 +59,9 @@ test('fmt.bold and fmt.dim', () => {
 
 test('fmt.table preserves falsy values like 0 and false', () => {
   const rendered = fmt.table([
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     ['count', 0],
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     ['flag', false]
   ], { indent: 0, colPadding: 1 });
   assert.ok(rendered.includes('0'), 'expected "0" to be rendered');

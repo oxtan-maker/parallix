@@ -1,13 +1,17 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const path = require('path');
-const { spawnSync } = require('child_process');
 
-const { resolvePostIntegrateCommand } = require('../.test-runtime/adapters/process/post-integrate-hook.js');
 
-const REPO_ROOT = path.join(__dirname, '..');
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import path from 'path';
+import { spawnSync } from 'child_process';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const resolvePostIntegrateCommandModule = mockModule<typeof import('../src/adapters/process/post-integrate-hook.js')>('../src/adapters/process/post-integrate-hook.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const { resolvePostIntegrateCommand } = resolvePostIntegrateCommandModule;
+const REPO_ROOT = path.join(import.meta.dirname, '..');
 const SCRIPT_PATH = path.join(REPO_ROOT, 'scripts', 'refresh-global-px.sh');
 
 // These tests only prove the script is wired up, syntactically valid, and reads

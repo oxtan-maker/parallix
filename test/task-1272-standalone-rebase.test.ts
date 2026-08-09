@@ -6,14 +6,19 @@
  * commit safe worktree state (so the reviewer sees a clean tree) but skip the
  * Forgejo-backed rebase entirely. See MISSION.md Scope (CP-1) and the Risk note.
  */
-const test = require('node:test');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import childProcess from 'child_process';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const rebaseBeforeReviewRoundModule = mockModule<typeof import('../src/adapters/review/rebase.js')>('../src/adapters/review/rebase.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const { rebaseBeforeReviewRound } = rebaseBeforeReviewRoundModule;
+
 const { mock } = test;
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const childProcess = require('child_process');
-const { rebaseBeforeReviewRound } = require('../.test-runtime/adapters/review/review-loop.js');
 
 function runGit(root, args) {
   const result = childProcess.spawnSync('git', ['-C', root, ...args], { encoding: 'utf8' });
@@ -56,6 +61,7 @@ test('rebaseBeforeReviewRound commits safe artifacts and skips rebase when Forge
     const result = await rebaseBeforeReviewRound(slug, {
       worktree: root,
       runFn,
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
       gitFn: (args) => runGit(root, args),
       isForgejoReviewEnabledFn: () => false,
       log: m => logs.push(m)
@@ -93,6 +99,7 @@ test('rebaseBeforeReviewRound still blocks on unsafe dirty files in standalone m
     const result = await rebaseBeforeReviewRound(slug, {
       worktree: root,
       runFn,
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
       gitFn: (args) => runGit(root, args),
       isForgejoReviewEnabledFn: () => false,
       error: m => errors.push(m)

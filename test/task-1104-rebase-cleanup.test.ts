@@ -1,12 +1,17 @@
 
-const test = require('node:test');
+
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import childProcess from 'child_process';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const rebaseBeforeReviewRoundModule = mockModule<typeof import('../src/adapters/review/rebase.js')>('../src/adapters/review/rebase.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const { rebaseBeforeReviewRound } = rebaseBeforeReviewRoundModule;
 const { mock } = test;
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const childProcess = require('child_process');
-const { rebaseBeforeReviewRound } = require('../.test-runtime/adapters/review/review-loop.js');
 
 async function withTempGitRepo(fn) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-test-rebase-'));
@@ -27,7 +32,7 @@ test('rebaseBeforeReviewRound auto-commits safe mission artifacts', async () => 
     fs.mkdirSync(missionDir, { recursive: true });
     const missionPath = path.join(missionDir, 'MISSION.md');
     fs.writeFileSync(missionPath, '# MISSION');
-    
+
     const taskDir = path.join(root, 'backlog', 'tasks');
     fs.mkdirSync(taskDir, { recursive: true });
     const taskPath = path.join(taskDir, 'task-1104.md');
@@ -38,7 +43,7 @@ test('rebaseBeforeReviewRound auto-commits safe mission artifacts', async () => 
 
     // Make MISSION.md dirty
     fs.writeFileSync(missionPath, '# MISSION - modified');
-    
+
     const logs = [];
     const runFn = mock.fn(() => ({ status: 0, stdout: 'success', stderr: '' }));
 
@@ -52,16 +57,16 @@ test('rebaseBeforeReviewRound auto-commits safe mission artifacts', async () => 
     });
 
     assert.equal(result.ok, true);
-    
+
     // Verify auto-commit
     const statusRes = childProcess.spawnSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' });
     const status = (statusRes.stdout || '').trim();
     assert.equal(status, '', 'Worktree should be clean after auto-commit');
-    
+
     const lastCommitRes = childProcess.spawnSync('git', ['log', '-1', '--format=%s'], { cwd: root, encoding: 'utf8' });
     const lastCommit = (lastCommitRes.stdout || '').trim();
     assert.equal(lastCommit, 'workflow(task-1104): auto-commit mission artifacts before pre-review rebase');
-    
+
     assert.ok(logs.some(m => m.includes('Auto-committing safe mission artifacts')));
     assert.equal(runFn.mock.callCount(), 1, 'Should have called rebase CLI');
   });
@@ -78,7 +83,7 @@ test('rebaseBeforeReviewRound does NOT auto-commit unsafe files', async () => {
 
     // Make unsafe file dirty
     fs.writeFileSync(unsafePath, 'console.log(2)');
-    
+
     const errors = [];
     const runFn = mock.fn(() => ({ status: 1, stdout: '', stderr: 'dirty worktree' }));
 
@@ -89,12 +94,12 @@ test('rebaseBeforeReviewRound does NOT auto-commit unsafe files', async () => {
     });
 
     assert.equal(result.ok, false);
-    
+
     // Verify NOT auto-committed
     const statusRes = childProcess.spawnSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' });
     const status = (statusRes.stdout || '').trim();
     assert.ok(status.includes('unsafe.js'), 'Unsafe file should still be dirty');
-    
+
     assert.ok(errors.some(m => m.includes('Worktree is dirty with unsafe or conflicted files')));
   });
 });

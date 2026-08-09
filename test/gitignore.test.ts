@@ -1,12 +1,16 @@
+// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
 
-const ensureWorkflowGitignore = require('../.test-runtime/adapters/filesystem/gitignore.js');
 
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const ensureWorkflowGitignore = mockModule<typeof import('../src/adapters/filesystem/gitignore.js')>('../src/adapters/filesystem/gitignore.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
 function mktempDir(prefix = 'gitignore-test-') {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
 }
@@ -43,7 +47,7 @@ test('creates .gitignore when missing in a git repo', async () => {
   try {
     initGitRepo(dir);
     const logs = [];
-    const result = ensureWorkflowGitignore(dir, {
+    const result = ensureWorkflowGitignore.default(dir, {
       logFn: msg => logs.push(msg),
     });
 
@@ -70,7 +74,7 @@ test('appends only missing entries and leaves existing untouched', async () => {
     initGitRepo(dir);
     writeGitignore(dir, '.workflow/\n# some comment\nnode_modules/\n');
 
-    const result = ensureWorkflowGitignore(dir);
+    const result = ensureWorkflowGitignore.default(dir);
 
     assert.equal(result.ok, true);
     assert.equal(result.created, false);
@@ -101,7 +105,7 @@ test('no-op when all entries already present (zero duplicates)', async () => {
     const content = ensureWorkflowGitignore.WORKFLOW_ENTRIES.join('\n') + '\n';
     writeGitignore(dir, content);
 
-    const result = ensureWorkflowGitignore(dir);
+    const result = ensureWorkflowGitignore.default(dir);
 
     assert.equal(result.ok, true);
     assert.equal(result.created, false);
@@ -123,7 +127,7 @@ test('detects symlinked .gitignore and skips without crashing', async () => {
     fs.writeFileSync(realFile, 'real-content\n', 'utf8');
     fs.symlinkSync(realFile, path.join(dir, '.gitignore'));
 
-    const result = ensureWorkflowGitignore(dir);
+    const result = ensureWorkflowGitignore.default(dir);
 
     assert.equal(result.ok, true);
     assert.equal(result.created, false);
@@ -144,7 +148,7 @@ test('skips gracefully when not a git repository', async () => {
     // No .git directory
     writeGitignore(dir, '.workflow/\n');
 
-    const result = ensureWorkflowGitignore(dir);
+    const result = ensureWorkflowGitignore.default(dir);
 
     assert.equal(result.ok, true);
     assert.equal(result.created, false);
@@ -163,7 +167,7 @@ test('skips gracefully when not a git repository', async () => {
 test('skips gracefully when .gitignore does not exist and no .git directory', async () => {
   const dir = mktempDir();
   try {
-    const result = ensureWorkflowGitignore(dir);
+    const result = ensureWorkflowGitignore.default(dir);
 
     assert.equal(result.ok, true);
     assert.equal(result.created, false);
@@ -182,7 +186,7 @@ test('handles partial overlap - only some entries present', async () => {
     initGitRepo(dir);
     writeGitignore(dir, '.workflow/\n.sessions/\n');
 
-    const result = ensureWorkflowGitignore(dir);
+    const result = ensureWorkflowGitignore.default(dir);
 
     assert.equal(result.ok, true);
     assert.equal(result.created, false);
@@ -203,13 +207,13 @@ test('idempotent - running twice produces same result', async () => {
   try {
     initGitRepo(dir);
 
-    const result1 = ensureWorkflowGitignore(dir);
+    const result1 = ensureWorkflowGitignore.default(dir);
     assert.equal(result1.created, true);
     assert.equal(result1.appended, 7);
 
     const contentAfterFirst = readGitignore(dir);
 
-    const result2 = ensureWorkflowGitignore(dir);
+    const result2 = ensureWorkflowGitignore.default(dir);
     assert.equal(result2.created, false);
     assert.equal(result2.appended, 0);
 
@@ -228,7 +232,7 @@ test('injectable dependencies work correctly', async () => {
     let writeCalled = false;
     let readCalled = false;
 
-    const result = ensureWorkflowGitignore(dir, {
+    const result = ensureWorkflowGitignore.default(dir, {
       existsSyncFn: (p) => p.endsWith('.git') || p.endsWith('.gitignore'),
       lstatSyncFn: (p) => ({ isSymbolicLink: () => false }),
       readFileSyncFn: (p) => {
@@ -256,7 +260,7 @@ test('preserves comment lines in existing .gitignore', async () => {
     const existing = '# Workflow ignores\n.workflow/\n\n# Build artifacts\nnode_modules/\n';
     writeGitignore(dir, existing);
 
-    const result = ensureWorkflowGitignore(dir);
+    const result = ensureWorkflowGitignore.default(dir);
 
     assert.equal(result.ok, true);
     const content = readGitignore(dir);
@@ -274,7 +278,7 @@ test('handles .gitignore with Windows line endings', async () => {
     initGitRepo(dir);
     writeGitignore(dir, '.workflow/\r\nnode_modules/\r\n');
 
-    const result = ensureWorkflowGitignore(dir);
+    const result = ensureWorkflowGitignore.default(dir);
 
     assert.equal(result.ok, true);
     assert.equal(result.appended, 6);
@@ -296,7 +300,7 @@ test('handles .gitignore with blank lines', async () => {
     initGitRepo(dir);
     writeGitignore(dir, '\n\n.workflow/\n\n.sessions/\n\n');
 
-    const result = ensureWorkflowGitignore(dir);
+    const result = ensureWorkflowGitignore.default(dir);
 
     assert.equal(result.ok, true);
     assert.equal(result.appended, 5);

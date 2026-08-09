@@ -1,14 +1,21 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
 
 /**
  * Test for startReviewLoop auto-derivation from Backlog task.
  * Requires a temporary repo with a task file.
  */
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { execSync } from 'child_process';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const startReviewLoopModule = mockModule<typeof import('../src/adapters/review/review-loop.js')>('../src/adapters/review/review-loop.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const { startReviewLoop } = startReviewLoopModule;
+
 
 async function withTempRepo(fn) {
   const previous = process.cwd();
@@ -19,7 +26,6 @@ async function withTempRepo(fn) {
   // Initialize git repo with main branch so getPrimaryWorktree() works.
   // Use the portable two-step form because the verification environment also
   // supports Git versions predating `git init -b`.
-  const { execSync } = require('child_process');
   execSync('git init', { cwd: root, stdio: 'pipe' });
   execSync('git checkout -b main', { cwd: root, stdio: 'pipe' });
   execSync('git config user.email "test@test.com"', { cwd: root, stdio: 'pipe' });
@@ -75,7 +81,6 @@ async function captureExit(fn) {
 }
 
 test('startReviewLoop auto-derives implementer from backlog task', { concurrency: false }, async () => {
-  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
 
   await withTempRepo(async root => {
     const slug = 'task-999';
@@ -100,7 +105,6 @@ test('startReviewLoop auto-derives implementer from backlog task', { concurrency
 });
 
 test('startReviewLoop prioritizes explicit implementer over backlog task', { concurrency: false }, async () => {
-  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
 
   await withTempRepo(async root => {
     const slug = 'task-999';
@@ -111,6 +115,7 @@ test('startReviewLoop prioritizes explicit implementer over backlog task', { con
       return startReviewLoop(slug, {
         implementer: 'gemini',
         eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini'],
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
         workflowLauncherStatusFn: () => ({ supported: true, detail: 'mock' }),
         selectAgentFn: () => 'claude',
         dryRun: true

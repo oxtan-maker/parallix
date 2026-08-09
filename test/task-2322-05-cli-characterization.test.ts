@@ -7,18 +7,22 @@
  * against the injected seams the commands already expose, so they hold for the
  * behavior as it was before this mission's rerouting and afterwards.
  */
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const missionUtils = mockModule<typeof import('../src/adapters/filesystem/mission-utils.js')>('../src/adapters/filesystem/mission-utils.js', import.meta.url);
+const gitModule = mockModule<typeof import('../src/adapters/git/git.js')>('../src/adapters/git/git.js', import.meta.url);
+const verification = mockModule<typeof import('../src/adapters/verification/verification.js')>('../src/adapters/verification/verification.js', import.meta.url);
+const checkpointModule = mockModule<typeof import('../src/adapters/cli/commands/checkpoint.js')>('../src/adapters/cli/commands/checkpoint.js', import.meta.url);
+const handoffModule = mockModule<typeof import('../src/adapters/cli/commands/handoff.js')>('../src/adapters/cli/commands/handoff.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const checkpointCommand = checkpointModule.default;
 
-import test from 'node:test';
+
+import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-
-const missionUtils = require('../.test-runtime/adapters/filesystem/mission-utils.js');
-const gitModule = require('../.test-runtime/adapters/git/git.js');
-const verification = require('../.test-runtime/adapters/verification/verification.js');
-const checkpointCommand = require('../.test-runtime/adapters/cli/commands/checkpoint.js');
-const handoffModule = require('../.test-runtime/adapters/cli/commands/handoff.js');
 
 // ---------------------------------------------------------------------------
 // `px checkpoint` — gate, then stage, then commit

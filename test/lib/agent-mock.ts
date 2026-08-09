@@ -1,6 +1,6 @@
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 interface MockResult {
   status: number;
@@ -143,18 +143,3 @@ export {
   fakeLauncher
 };
 export type { MockResult };
-
-// CJS compat: the test files consume this helper via require().
-declare const module: { exports: any } | undefined;
-if (typeof module !== 'undefined') {
-  module.exports = {
-    buildMockResult,
-    cleanupLauncher,
-    createDummyLauncher,
-    createFailLauncher,
-    createLauncherWithScript,
-    createLauncherWithOutput,
-    createSpawnErrorLauncher,
-    fakeLauncher
-  };
-}

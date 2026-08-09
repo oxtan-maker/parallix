@@ -1,10 +1,16 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const opencode = require('../.test-runtime/adapters/agents/opencode.js');
-
 // Reset the feature-detect cache after each test so subsequent tests don't
 // inherit stale results from a real opencode binary on the host.
+
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const opencode = mockModule<typeof import('../src/adapters/agents/opencode.js')>('../src/adapters/agents/opencode.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
 test.afterEach(() => {
   opencode.__setJsonFormatSupportForTest(null);
   opencode.__setSpawnAndTeeForTest(null);
@@ -16,9 +22,6 @@ test.afterEach(() => {
 
 test('resolveOpencodeCommand prefers OPENCODE_BIN when it points to an executable', () => {
   const { resolveOpencodeCommand } = opencode;
-  const fs = require('node:fs');
-  const os = require('node:os');
-  const path = require('node:path');
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-bin-'));
   const customBin = path.join(tmpDir, 'opencode');
   fs.writeFileSync(customBin, '#!/usr/bin/env bash\nexit 0\n', 'utf8');
@@ -39,9 +42,6 @@ test('resolveOpencodeCommand prefers OPENCODE_BIN when it points to an executabl
 
 test('resolveOpencodeCommand falls back to bare "opencode" when no candidate exists', () => {
   const { resolveOpencodeCommand } = opencode;
-  const os = require('node:os');
-  const path = require('node:path');
-  const fs = require('node:fs');
   const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-home-'));
   const originalHome = process.env.HOME;
   const originalPath = process.env.PATH;
@@ -183,7 +183,6 @@ test('buildOpencodeInvocation accepts preferJson:false to omit --format json (ta
 // ---------- startOpencodeAgent stale session detection (task-1322) ----------
 
 test('startOpencodeAgent retries without -s when spawn returns "Session not found" in stderr', async () => {
-  const opencode = require('../.test-runtime/adapters/agents/opencode.js');
   const mockSessionPort = { deleted: null, async delete(missionId, role) { this.deleted = { missionId, role }; } };
   let spawnCount = 0;
   const mockSpawn = (cmd, args, opts) => {
@@ -199,6 +198,7 @@ test('startOpencodeAgent retries without -s when spawn returns "Session not foun
 
   opencode.__setSpawnAndTeeForTest(mockSpawn);
   opencode.__setExportCaptureForTest(mockExport);
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
   opencode.__setSessionPortForTest(mockSessionPort);
 
   const { invocation, resultPromise } = opencode.startOpencodeAgent({
@@ -207,7 +207,9 @@ test('startOpencodeAgent retries without -s when spawn returns "Session not foun
     env: {},
     resume: true,
     sessionId: 'ses_stale',
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     slug: 'task-1322',
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     role: 'reviewer'
   });
 

@@ -6,13 +6,14 @@
 // tracking verification (spawnSync). Red-to-green: fails when NOTICES is
 // tracked (pre-mission) and when the ignore pattern is unanchored (round-1
 // defect); passes only with the committed /NOTICES root-anchored rule.
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
-const { spawnSync } = require('node:child_process');
 
-const ROOT = path.resolve(__dirname, '..');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+
+const ROOT = path.resolve(import.meta.dirname, '..');
 const GITIGNORE = fs.readFileSync(path.join(ROOT, '.gitignore'), 'utf8');
 const GITIGNORE_LINES = GITIGNORE.split('\n').map(line => line.trim()).filter(Boolean);
 

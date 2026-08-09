@@ -5,19 +5,19 @@
 // migrated database rather than writing a JSON file. Everything is resolved
 // through PARALLIX_HOME, which is what the composition root keys off.
 
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const { spawnSync } = require('child_process');
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 
-const { SqliteDatabaseAdapter } = require('../../.test-runtime/adapters/sqlite/database-adapter.js');
-const { SqliteMigrationRunner, loadDefaultMigrations } = require('../../.test-runtime/adapters/sqlite/migration-runner.js');
-const { SqliteMissionStore } = require('../../.test-runtime/adapters/sqlite/mission-store.js');
-const { clearOperatorStateCache } = require('../../.test-runtime/adapters/sqlite/adapter-factory.js');
-const { missionId, missionLabels } = require('../../.test-runtime/domain/mission.js');
-const { repositoryId } = require('../../.test-runtime/domain/repository.js');
-const { agentFamily } = require('../../.test-runtime/domain/agents.js');
-const { changeRevision } = require('../../.test-runtime/domain/review.js');
+import { SqliteDatabaseAdapter } from '../../src/adapters/sqlite/database-adapter.js';
+import { SqliteMigrationRunner, loadDefaultMigrations } from '../../src/adapters/sqlite/migration-runner.js';
+import { SqliteMissionStore } from '../../src/adapters/sqlite/mission-store.js';
+import { clearOperatorStateCache } from '../../src/adapters/sqlite/adapter-factory.js';
+import { missionId, missionLabels } from '../../src/domain/mission.js';
+import { repositoryId } from '../../src/domain/repository.js';
+import { agentFamily } from '../../src/domain/agents.js';
+import { changeRevision } from '../../src/domain/review.js';
 
 /** A Mission carrying a round-1 Review, the shape `px handoff` produces. */
 function missionWithReview(slug, rootDir, overrides = {}) {
@@ -92,7 +92,7 @@ async function withMissionDatabase(slug, fn, { seedReview = true, reviewOverride
   await new SqliteMigrationRunner(database).applyPending(loadDefaultMigrations());
   const store = new SqliteMissionStore(database);
 
-  const mission = missionWithReview(slug, tmpRoot, reviewOverrides);
+  const mission = missionWithReview(slug, tmpRoot, reviewOverrides) as unknown as import('../../src/domain/mission.js').Mission;
   await store.save(seedReview ? mission : { ...mission, review: null }, null);
   try {
     await fn({ root: tmpRoot, missionDir, slug, home, store, openStore: async () => {
@@ -139,8 +139,8 @@ async function seedMissionDatabase(home, slug, rootDir, roundOverrides = {}, lat
   ];
   await new SqliteMissionStore(database).save({
     ...mission,
-    review: { ...mission.review, rounds },
-  }, null);
+    review: { ...mission.review, rounds: rounds as unknown as import('../../src/domain/review.js').Review['rounds'] },
+  } as unknown as import('../../src/domain/mission.js').Mission, null);
 
   // The fixture seeds the post-cutover database directly, so `rootDir` has
   // already been imported by construction. Without the ledger row the
@@ -162,4 +162,4 @@ async function seedMissionDatabase(home, slug, rootDir, roundOverrides = {}, lat
   return restore;
 }
 
-module.exports = { withMissionDatabase, missionWithReview, seedMissionDatabase };
+export { withMissionDatabase, missionWithReview, seedMissionDatabase };

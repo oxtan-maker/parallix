@@ -1,8 +1,13 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const { buildCompactReviewPrompt, buildCompactActOnReviewPrompt } = require('../.test-runtime/adapters/review/review-prompts.js');
 
+
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const buildCompactReviewPromptModule = mockModule<typeof import('../src/adapters/review/review-prompts.js')>('../src/adapters/review/review-prompts.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const { buildCompactReviewPrompt, buildCompactActOnReviewPrompt } = buildCompactReviewPromptModule;
 test('buildCompactReviewPrompt uses actualReviewer when provided', () => {
   const prompt = buildCompactReviewPrompt({
     reviewer: 'claude',

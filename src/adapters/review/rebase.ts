@@ -19,7 +19,7 @@ import { spawnSync } from 'child_process';
 type RunFn = (_cmd: string, _args: string[], _opts: { cwd?: string; encoding?: string; stdio?: unknown[] }) => { status: number | null; stdout?: string; stderr?: string };
 
 const _spawnSync = spawnSync as unknown as RunFn;
-const MODULE_DIR = import.meta.url ? path.dirname(fileURLToPath(import.meta.url)) : __dirname;
+const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 
 const SHARED_FILE_REBASE_CONFLICT_RE = /shared file(?:\(s\))? require agent-assisted resolution|shared-file-conflicts/i;
 
@@ -169,10 +169,7 @@ export async function rebaseBeforeReviewRound(slug: string, {
     ? path.resolve(worktree, 'node_modules', '.bin', 'tsx')
     : process.execPath;
   const workflowArgs = usesSourceRuntime
-    ? [
-      '--import', path.resolve(worktree, 'src', 'entry', 'esm-globals.ts'),
-      sourceCli, 'rebase', slug, '--push'
-    ]
+    ? [sourceCli, 'rebase', slug, '--push']
     : [path.resolve(MODULE_DIR, 'px.mjs'), 'rebase', slug, '--push'];
 
   log(`Rebasing ${fmt.branch(`mission/${slug}`)} onto the latest primary branch before reviewer launch...`);

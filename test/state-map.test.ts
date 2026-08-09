@@ -1,12 +1,16 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
 
-const { loadStateMap, resolveStateMapPath, SHIPPED_STATE_MAP_PATH, toVirtual } = require('../.test-runtime/adapters/config/state-map.js');
 
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const loadStateMapModule = mockModule<typeof import('../src/adapters/config/state-map.js')>('../src/adapters/config/state-map.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const { loadStateMap, resolveStateMapPath, SHIPPED_STATE_MAP_PATH, toVirtual } = loadStateMapModule;
 test('toVirtual matches mapped statuses case-insensitively', () => {
   const map = {
     draft: 'To Do',

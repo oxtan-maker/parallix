@@ -348,7 +348,3 @@ async function status(args: string[], opts: {exit?: Function, log?: Function, in
 (status as any).buildProjectionBuilder = buildProjectionBuilder;
 export default status;
 export { status, parseWorktreeList, findStaleMissionWorktrees, createProjectionDeps, buildProjectionBuilder };
-
-// CJS compat: ensure require() returns the function directly
-declare const module: { exports: any } | undefined;
-if (typeof module !== 'undefined') { module.exports = status; }

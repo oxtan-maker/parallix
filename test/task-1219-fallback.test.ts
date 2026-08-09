@@ -1,14 +1,20 @@
 
-const test = require('node:test');
-const { mock } = test;
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
 
-require('../.test-runtime/adapters/cli/commands/stats.js');
-const backlog = require('../.test-runtime/adapters/backlog/backlog.js');
-const missionUtils = require('../.test-runtime/adapters/filesystem/mission-utils.js');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const backlog = mockModule<typeof import('../src/adapters/backlog/backlog.js')>('../src/adapters/backlog/backlog.js', import.meta.url);
+const missionUtils = mockModule<typeof import('../src/adapters/filesystem/mission-utils.js')>('../src/adapters/filesystem/mission-utils.js', import.meta.url);
+const evaluateTaskStatusForIntegrationModule = mockModule<typeof import('../src/adapters/cli/commands/integrate.js')>('../src/adapters/cli/commands/integrate.js', import.meta.url);
+const __mm1 = mockModule<typeof import('../src/adapters/cli/commands/stats.js')>('../src/adapters/cli/commands/stats.js', import.meta.url);
+await installModuleMocks();
+const { evaluateTaskStatusForIntegration, printIntegrationPreflight, buildIntegrationContext } = evaluateTaskStatusForIntegrationModule;
+const { mock } = test;
+
+__mm1;
 const FAKE_ROOT = `/tmp/mission-${process.pid}`;
 function installCommonMocks() {
   mock.method(backlog, 'getTaskClassification', () => 'ai_sdlc');
@@ -26,8 +32,6 @@ test.afterEach(() => {
   else process.env.PRIMARY_WORKTREE = previousPrimaryWorktree;
   mock.reset();
 });
-
-const { evaluateTaskStatusForIntegration, printIntegrationPreflight, buildIntegrationContext } = require('../.test-runtime/adapters/cli/commands/integrate.js');
 
 // SC 1a: evaluateTaskStatusForIntegration accepts locally-derived reviewState: 'APPROVED' for tasks in status 'review'
 test('evaluateTaskStatusForIntegration accepts local-review-state approval for review status', () => {

@@ -1,6 +1,4 @@
-
-const test = require('node:test');
-const assert = require('node:assert/strict');
+// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 
 // Reproduction test for TASK-1079.
 //
@@ -13,10 +11,17 @@ const assert = require('node:assert/strict');
 // must also gate on `agents.includes(reviewer)` so a blocked auto-derived
 // reviewer is treated as needing a fallback, not as a hard failure.
 
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const startReviewLoopModule = mockModule<typeof import('../src/adapters/review/review-loop.js')>('../src/adapters/review/review-loop.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const { startReviewLoop } = startReviewLoopModule;
+
 const TEST_SLUG = 'task-test-1079-blocked-fallback';
 
 test('startReviewLoop falls back when the auto-derived reviewer is blocked but a different-family agent is available', async () => {
-  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
   const logs = [];
   const errors = [];
   const exitCodes = [];
@@ -53,7 +58,6 @@ test('startReviewLoop falls back when the auto-derived reviewer is blocked but a
 });
 
 test('startReviewLoop iterates past a blocked deterministic fallback to a third unblocked agent (Mission SC #3 — "Mistral or Claude")', async () => {
-  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
   const logs = [];
   const errors = [];
   const exitCodes = [];
@@ -93,12 +97,11 @@ test('startReviewLoop iterates past a blocked deterministic fallback to a third 
 });
 
 test('startReviewLoop still rejects with a clear error when the explicit reviewer is blocked and no fallback path exists', async () => {
-  const { startReviewLoop } = require('../.test-runtime/adapters/review/review-loop.js');
   const errors = [];
   const exitCodes = [];
 
   await startReviewLoop(TEST_SLUG, {
-    eligibleAgentsForStepFn: () => ['claude', 'gemini', 'custom', 'codex'], 
+    eligibleAgentsForStepFn: () => ['claude', 'gemini', 'custom', 'codex'],
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     implementer: 'custom',
     reviewer: 'codex',

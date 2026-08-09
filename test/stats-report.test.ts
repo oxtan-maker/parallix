@@ -1,10 +1,10 @@
-'use strict';
+import test from 'node:test';
+import assert from 'node:assert/strict';
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-
-const statsReport = require('../.test-runtime/adapters/cli/commands/stats-report.js');
-const stats = require('../.test-runtime/adapters/cli/commands/stats.js');
+import * as statsReport from '../src/adapters/cli/commands/stats-report.js';
+// `createWindow` and friends hang off the default export object, not the
+// module's named exports, so this must be the default import.
+import stats from '../src/adapters/cli/commands/stats.js';
 
 test('formatStatsTable returns formatted table with bold headers', () => {
   const result = statsReport.formatStatsTable(['A', 'B'], [['1', '2']]);
@@ -48,21 +48,26 @@ test('renderMissionPhaseReport shows zeros for unknown mission', () => {
 });
 
 test('buildWeeklyWindows returns two week windows', () => {
+  // @ts-expect-error -- TASK-2328: runtime-only property/partial test double absent from the inferred type.
   const w = stats.buildWeeklyWindows(new Date('2026-06-20'));
   assert.ok(w.current && w.previous && w.current.start instanceof Date);
 });
 
 test('summarizeMissionWindow counts unique closed missions', () => {
+  // @ts-expect-error -- TASK-2328: runtime-only property/partial test double absent from the inferred type.
   const window = stats.createWindow('2026-06-20', 7);
   const rows = [
     { date: '2026-06-15', repo: 'r', mission: 'm1', classification: 'user_value', closed: 'yes' },
     { date: '2026-06-16', repo: 'r', mission: 'm2', classification: 'ai_sdlc', closed: 'yes' },
   ];
+  // @ts-expect-error -- TASK-2328: runtime-only property/partial test double absent from the inferred type.
   const s = stats.summarizeMissionWindow(rows, window);
   assert.equal(s.total, 2);
 });
 
 test('formatAgentSpendCell formats metric families', () => {
+  // @ts-expect-error -- TASK-2328: runtime-only property/partial test double absent from the inferred type.
   assert.equal(stats.formatAgentSpendCell(50, 100, 'usage'), '50% (50%)');
+  // @ts-expect-error -- TASK-2328: runtime-only property/partial test double absent from the inferred type.
   assert.equal(stats.formatAgentSpendCell(0, 0, 'duration'), '\u2014');
 });

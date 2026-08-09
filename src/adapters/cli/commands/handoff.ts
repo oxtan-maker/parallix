@@ -1359,7 +1359,3 @@ const _namedExports = {
 const _handoffExport = Object.assign(handoffCommand, _namedExports);
 export default _handoffExport;
 export { _handoffExport as handoff, verifyHandoff, performHandoff, resolveHandoffReviewAssignment, gatekeeper, runDeclaredGates, captureNelAtHandoff, validateDeclaredGates };
-
-// CJS compat: ensure require() returns the function directly
-declare const module: { exports: any } | undefined;
-if (typeof module !== 'undefined') { module.exports = _handoffExport; }

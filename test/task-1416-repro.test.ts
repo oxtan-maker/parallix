@@ -1,4 +1,15 @@
 
+
+import os from 'os';
+import fs from 'fs';
+import path from 'path';
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const startAgentModule = mockModule<typeof import('../src/adapters/agents/agents.js')>('../src/adapters/agents/agents.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const { startAgent, setCommandPathProbe } = startAgentModule;
 'use strict';
 
 // Reproduction for task-1416: Codex and Mistral launches that exit with
@@ -18,19 +29,12 @@
 // HOME is redirected to a per-test tmp dir before requiring the mistral
 // modules so the mistral case never touches the real user home directory.
 
-const os = require('os');
-const fs = require('fs');
-const path = require('path');
-
 const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1416-home-'));
 const previousHome = process.env.HOME;
 process.env.HOME = tmpHome;
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
 process.env.NO_COLOR = '1';
 
-const { startAgent, setCommandPathProbe } = require('../.test-runtime/adapters/agents/agents.js');
 if (previousHome === undefined) delete process.env.HOME;
 else process.env.HOME = previousHome;
 
@@ -44,6 +48,7 @@ for (const name of ['codex', 'claude', 'opencode', 'vibe']) {
 function withSharedLaunchers(run) {
   const previousPath = process.env.PATH;
   process.env.PATH = `${sharedLauncherBin}${path.delimiter}${previousPath}`;
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
   setCommandPathProbe(name => fs.existsSync(path.join(sharedLauncherBin, name)));
   const cleanup = () => {
     process.env.PATH = previousPath;
@@ -174,8 +179,6 @@ test('mistral exit 1 with real session telemetry is misclassified as a launch fa
   // Vibe run followed by a non-zero exit.
   const vibeScript = `
     if (process.argv.includes('--help')) { process.exit(0); }
-    const fs = require('fs');
-    const path = require('path');
     const sessionDir = path.join(process.cwd(), '.workflow', 'vibe-home', 'logs', 'session', 'session_20260704_000000_task1416');
     fs.mkdirSync(sessionDir, { recursive: true });
     fs.writeFileSync(path.join(sessionDir, 'meta.json'), JSON.stringify({

@@ -262,7 +262,3 @@ function completePreflightOrExit(overallFail: boolean, returnResult: boolean, op
 
 export default missionStart;
 export { missionStart, completePreflightOrExit };
-
-// CJS compat: ensure require() returns the function directly
-declare const module: { exports: any } | undefined;
-if (typeof module !== 'undefined') { module.exports = missionStart; }

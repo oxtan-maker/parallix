@@ -1,13 +1,18 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
 
-const { detectAreasFromChangedFiles, detectMissionChangedArea } = require('../.test-runtime/adapters/verification/verification.js');
-const { runPreReviewGate } = require('../.test-runtime/adapters/review/review-loop.js');
 
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const detectAreasFromChangedFilesModule = mockModule<typeof import('../src/adapters/verification/verification.js')>('../src/adapters/verification/verification.js', import.meta.url);
+const runPreReviewGateModule = mockModule<typeof import('../src/adapters/review/review-loop.js')>('../src/adapters/review/review-loop.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const { detectAreasFromChangedFiles, detectMissionChangedArea } = detectAreasFromChangedFilesModule;
+const { runPreReviewGate } = runPreReviewGateModule;
 test('detectAreasFromChangedFiles maps changed lib files to the lib verification area', () => {
   assert.deepEqual(detectAreasFromChangedFiles('lib/review/review-loop.ts\ntest/review.test.js\n'), ['lib', 'workflow']);
 });
@@ -49,6 +54,7 @@ test('runPreReviewGate runs the diff-scoped resolver and executes its selected a
         resolverCalls.push({ area, worktree, resolvedMissionDir });
         return 'all';
       },
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
       runFn: (_command, args) => {
         commands.push(args[1]);
         return { status: 0, stdout: 'area=all\n', stderr: '' };

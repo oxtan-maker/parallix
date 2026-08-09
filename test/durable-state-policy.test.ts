@@ -1,12 +1,19 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
-const ts = require('typescript');
-const { MACHINE_WRITTEN_PATH_INVENTORY } = require('./fixtures/durable-state-inventory.ts');
 
-const ROOT = path.resolve(__dirname, '..');
+
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import ts from 'typescript';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+import { createRequire } from 'node:module';
+const _require = createRequire(import.meta.url);
+const MACHINE_WRITTEN_PATH_INVENTORYModule = mockModule<typeof import('./fixtures/durable-state-inventory.js')>('./fixtures/durable-state-inventory.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const { MACHINE_WRITTEN_PATH_INVENTORY } = MACHINE_WRITTEN_PATH_INVENTORYModule;
+const ROOT = path.resolve(import.meta.dirname, '..');
 const RUNTIME_LIB = path.join(ROOT, 'src');
 const DIRECT_JSON_EXCEPTIONS = new Map([
   ['src/adapters/verification/coverage-gate.ts:coverageManifestPath()', 'coverage-manifest'],
@@ -75,7 +82,7 @@ test('direct durable JSON write guard passes only inventory-documented exception
 });
 
 test('direct durable JSON write guard rejects a new non-inventoried lib writer', () => {
-  const fixtureRoot = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'durable-policy-'));
+  const fixtureRoot = fs.mkdtempSync(path.join(_require('node:os').tmpdir(), 'durable-policy-'));
   const fixture = path.join(fixtureRoot, 'lib', 'tools', 'new-state.ts');
   try {
     fs.mkdirSync(path.dirname(fixture), { recursive: true });

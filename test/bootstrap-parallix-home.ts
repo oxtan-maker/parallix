@@ -1,11 +1,12 @@
-'use strict';
+import fs from 'node:fs';
+import http from 'node:http';
+import https from 'node:https';
+import os from 'node:os';
+import path from 'node:path';
+import childProcess from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
-const fs = require('fs');
-const http = require('node:http');
-const https = require('node:https');
-const os = require('os');
-const path = require('path');
-const childProcess = require('child_process');
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const tempRoots = [];
 
@@ -88,25 +89,10 @@ const realGit = process.env.PARALLIX_TEST_REAL_GIT || commandPath('git');
 if (realGit) {
   const gitBin = makeTempDir('parallix-test-git-');
   const gitShim = path.join(gitBin, 'git');
-  fs.writeFileSync(gitShim, `#!${process.execPath}
-const cp = require('child_process');
-const args = process.argv.slice(2);
-const realGit = process.env.PARALLIX_TEST_REAL_GIT;
-const initIndex = args.indexOf('init');
-if (initIndex !== -1 && args[initIndex + 1] === '-b' && args[initIndex + 2]) {
-  const branch = args[initIndex + 2];
-  const initArgs = [...args.slice(0, initIndex), 'init', ...args.slice(initIndex + 3)];
-  const init = cp.spawnSync(realGit, initArgs, { stdio: 'inherit' });
-  if (init.status !== 0) process.exit(init.status || 1);
-  const cwdIndex = initArgs.indexOf('-C');
-  const target = cwdIndex !== -1 ? initArgs[cwdIndex + 1] : (initArgs.length > 1 ? initArgs[initArgs.length - 1] : process.cwd());
-  const checkout = cp.spawnSync(realGit, ['-C', target, 'checkout', '-b', branch], { stdio: 'inherit' });
-  process.exit(checkout.status || 0);
-}
-
-const result = cp.spawnSync(realGit, args, { stdio: 'inherit' });
-process.exit(result.status || 0);
-`, 'utf8');
+  // The PATH entry must be an extensionless executable named `git`, which Node
+  // would load as CommonJS. Keep the shim itself an ESM module
+  // (test/lib/git-compat-shim.mjs) and put a POSIX exec wrapper on PATH.
+  fs.writeFileSync(gitShim, `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(path.join(__dirname, 'lib', 'git-compat-shim.mjs'))} "$@"\n`, 'utf8');
   fs.chmodSync(gitShim, 0o755);
   process.env.PARALLIX_TEST_REAL_GIT = realGit;
   process.env.PATH = `${gitBin}${path.delimiter}${process.env.PATH || ''}`;
@@ -121,18 +107,9 @@ if (realCurl) {
   const curlBin = makeTempDir('parallix-test-curl-');
   const curlShim = path.join(curlBin, 'curl');
   const curlMarker = path.join(curlBin, 'unmocked-request');
-  fs.writeFileSync(curlShim, `#!${process.execPath}
-const fs = require('node:fs');
-const cp = require('node:child_process');
-const args = process.argv.slice(2);
-if (args.length === 1 && args[0] === '--version') {
-  const result = cp.spawnSync(process.env.PARALLIX_TEST_REAL_CURL, args, { stdio: 'inherit' });
-  process.exit(result.status || 0);
-}
-fs.writeFileSync(${JSON.stringify(curlMarker)}, args.join(' ') + '\\n', { flag: 'a' });
-process.stderr.write('Unit test attempted an unmocked Forgejo curl request\\n');
-process.exit(97);
-`, 'utf8');
+  // Same ESM constraint as the git shim: PATH gets a POSIX exec wrapper that
+  // runs the checked-in ESM guard (test/lib/curl-guard-shim.mjs).
+  fs.writeFileSync(curlShim, `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(path.join(__dirname, 'lib', 'curl-guard-shim.mjs'))} "$@"\n`, 'utf8');
   fs.chmodSync(curlShim, 0o755);
   process.env.PARALLIX_TEST_REAL_CURL = realCurl;
   process.env.PATH = `${curlBin}${path.delimiter}${process.env.PATH || ''}`;
@@ -236,4 +213,4 @@ process.on('exit', () => {
 
 // Expose tempRoots and registerTempRoot so child processes and test files
 // can record every directory and ensure cleanup on SIGKILL (task-2326).
-module.exports = { tempRoots, registerTempRoot };
+export { tempRoots, registerTempRoot };

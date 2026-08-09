@@ -1,12 +1,13 @@
 
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
-const childProcess = require('node:child_process');
-const test = require('node:test');
-const assert = require('node:assert/strict');
 
-const repoRoot = path.resolve(__dirname, '..');
+
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import childProcess from 'node:child_process';
+import test from 'node:test';
+import assert from 'node:assert/strict';
+const repoRoot = path.resolve(import.meta.dirname, '..');
 
 function removeTestRepository(root) {
   try {
@@ -82,6 +83,8 @@ test('interrupted review fixture leaves no TASK-2198 stale-active task behind (S
   const hookDir = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2212-review-hook-'));
   const readyFile = path.join(hookDir, 'fixture-ready');
   const hookFile = path.join(hookDir, 'pause-after-fixture.js');
+  // The hook is loaded through `--require`, so it is CommonJS and resolves its
+  // own `fs` regardless of the module system of this file.
   fs.writeFileSync(hookFile, `
 const fs = require('node:fs');
 const original = fs.writeFileSync;
@@ -94,7 +97,11 @@ fs.writeFileSync = function (file, data, ...rest) {
   return result;
 };
 `, 'utf8');
+  // `review.test.ts` imports TypeScript helpers by their `.js` specifier and
+  // installs `mock.module()` seams, so the child needs the same loader and
+  // module-mock flag the integration runner uses.
   const child = childProcess.spawn(process.execPath, [
+    '--import', 'tsx', '--experimental-test-module-mocks',
     '--test', '--test-name-pattern=repairs active', 'test/review.test.ts'
   ], {
     cwd: repoRoot,

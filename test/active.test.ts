@@ -1,10 +1,26 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
+
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+import { createRequire } from 'node:module';
+const _require = createRequire(import.meta.url);
+const activeModule = mockModule<typeof import('../src/adapters/cli/commands/active.js')>('../src/adapters/cli/commands/active.js', import.meta.url);
+const resolveWorktreeModule = mockModule<typeof import('../src/adapters/filesystem/mission-utils.js')>('../src/adapters/filesystem/mission-utils.js', import.meta.url);
+const completePreflightOrExitModule = mockModule<typeof import('../src/adapters/cli/mission-start.js')>('../src/adapters/cli/mission-start.js', import.meta.url);
+const missionStartModule = mockModule<typeof import('../src/adapters/cli/mission-start.js')>('../src/adapters/cli/mission-start.js', import.meta.url);
+const repairHandoffModule = mockModule<typeof import('../src/adapters/cli/commands/repair-handoff.js')>('../src/adapters/cli/commands/repair-handoff.js', import.meta.url);
+const attemptAgentRelaunchModule = mockModule<typeof import('../src/adapters/cli/commands/active.js')>('../src/adapters/cli/commands/active.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const active = activeModule.default;
+const missionStart = missionStartModule.default;
+const { resolveWorktree } = resolveWorktreeModule;
+const { completePreflightOrExit } = completePreflightOrExitModule;
+const { attemptAgentRelaunch } = attemptAgentRelaunchModule;
 process.env.NO_COLOR = '1';
-const active = require('../.test-runtime/adapters/cli/commands/active.js');
 
 const {
   buildExecutePrompt,
@@ -14,9 +30,7 @@ const {
   selectLaunchAndRecord,
   enforceExecuteCommitSafety,
   renderActiveProgress
-} = require('../.test-runtime/adapters/cli/commands/active.js');
-const { resolveWorktree } = require('../.test-runtime/adapters/filesystem/mission-utils.js');
-const { completePreflightOrExit } = require('../.test-runtime/adapters/cli/mission-start.js');
+} = attemptAgentRelaunchModule;
 
 test('active progress renderer preserves launch and handoff status order', () => {
   const logs = [];
@@ -176,7 +190,6 @@ test('completePreflightOrExit returns {pass:true} on success when returnResult i
 test('mission-start verify mode reports diagnostics and open-ended success without slug', () => {
   const lines = [];
   const errors = [];
-  const missionStart = require('../.test-runtime/adapters/cli/mission-start.js');
 
   const result = missionStart([], {
     returnResult: true,
@@ -209,7 +222,6 @@ test('mission-start verify mode reports diagnostics and open-ended success witho
 test('mission-start mission mode reports failures for wrong branch, ambiguous task, and missing mission dir', () => {
   const lines = [];
   const errors = [];
-  const missionStart = require('../.test-runtime/adapters/cli/mission-start.js');
 
   const result = missionStart(['task-1031'], {
     returnResult: true,
@@ -588,30 +600,16 @@ test('active() synchronizes a launch-deferred rebase after execute output is com
 
 // ---------- runHandoffAndReview wiring ----------
 
-// Regression guard for the repairHandoffFn default in runHandoffAndReview
-// (lib/commands/active.ts:433). repair-handoff.ts is imported via
-// `import * as repairHandoff from './repair-handoff.js'`, but repair-handoff.ts
-// also does `module.exports = repairHandoff` for CJS compat, which makes
-// `require('./repair-handoff.js')` return the function directly (with
-// isRelaunchableError/buildRelaunchPrompt attached as properties, no
-// `.repairHandoff` property). Under the compiled CJS runtime that `bin.px`
-// actually ships, tsc's `__importStar` interop wraps that into
-// `{ isRelaunchableError, buildRelaunchPrompt, default: <fn> }` — so the
-// bare namespace object and `.repairHandoff` are both non-callable, and only
-// `.default` resolves to the function. This test fails loudly if that export
-// shape ever changes without updating active.ts's accessor to match.
-test('repair-handoff module exposes its default export as callable under CJS require+importStar interop', () => {
-  const repairHandoffModule = require('../.test-runtime/adapters/cli/commands/repair-handoff.js');
-  assert.equal(typeof repairHandoffModule, 'function', 'require(repair-handoff) must return the function directly (CJS compat line)');
-
-  // Replicate tsc's __importStar interop exactly (module lacks __esModule
-  // since `module.exports = repairHandoff` overwrites it at runtime).
-  const ns: Record<string, unknown> & { default?: unknown; repairHandoff?: unknown } = {};
-  for (const k of Object.keys(repairHandoffModule)) { ns[k] = repairHandoffModule[k]; }
-  ns.default = repairHandoffModule;
-
-  assert.equal(typeof ns.default, 'function', 'namespace.default must be callable — this is what active.ts:433 relies on');
-  assert.equal(typeof ns.repairHandoff, 'undefined', 'namespace.repairHandoff is NOT set by importStar interop under CJS — using it as the accessor silently breaks handoff repair');
+// Regression guard for the repairHandoffFn default in runHandoffAndReview.
+// Under ESM, `import * as repairHandoff from './repair-handoff.js'` yields a
+// namespace with `.default` (the callable function) and named exports.
+// active.ts uses `repairHandoff.default` as the callable.
+test('repair-handoff ESM namespace exposes callable default and named exports', () => {
+  assert.equal(typeof repairHandoffModule.default, 'function', 'namespace.default must be callable');
+  assert.equal(typeof repairHandoffModule.repairHandoff, 'function', 'named export repairHandoff must be callable');
+  assert.equal(repairHandoffModule.default, repairHandoffModule.repairHandoff, 'default and named repairHandoff must be same function');
+  assert.equal(typeof repairHandoffModule.isRelaunchableError, 'function', 'isRelaunchableError must be exported');
+  assert.equal(typeof repairHandoffModule.buildRelaunchPrompt, 'function', 'buildRelaunchPrompt must be exported');
 });
 
 test('runHandoffAndReview passes worktree and implementer to startReviewLoop', async () => {
@@ -717,7 +715,7 @@ test('runHandoffAndReview reports specific blocker when repair fails', async () 
   });
 
   assert.equal(result, false);
-  assert.ok(errors.some(l => l.includes('Automated handoff failed: specific rebase blocker')), 
+  assert.ok(errors.some(l => l.includes('Automated handoff failed: specific rebase blocker')),
     'Should report the specific blocker instead of the original error');
 });
 
@@ -1380,8 +1378,6 @@ test('active() state-ordering contract: does not write Backlog before launch (re
 
 // CP-2 tests for attemptAgentRelaunch
 
-const { attemptAgentRelaunch } = require('../.test-runtime/adapters/cli/commands/active.js');
-
 test('attemptAgentRelaunch function exists', () => {
   assert.ok(typeof attemptAgentRelaunch === 'function', 'attemptAgentRelaunch should be exported');
 });
@@ -1395,7 +1391,7 @@ test('attemptAgentRelaunch returns relaunched:false for non-relaunchable error',
       error: () => {}
     }
   );
-  
+
   assert.equal(relaunched, false);
   assert.ok(error);
   assert.ok(error.includes('not relaunchable'));
@@ -1415,7 +1411,7 @@ test('attemptAgentRelaunch returns relaunched:false when agent is not available'
       error: (msg) => errors.push(msg)
     }
   );
-  
+
   assert.equal(relaunched, false);
   assert.ok(error);
   assert.ok(error.includes('launcher is not available'));
@@ -1426,7 +1422,7 @@ test('attemptAgentRelaunch calls startAgent with correct parameters', async () =
   let startAgentCalled = false;
   let stepArg = null;
   let optsArg = null;
-  
+
   const { relaunched } = await attemptAgentRelaunch(
     'task-1124', '/tmp/worktree',
     'The final checkpoint at docs/missions/2026/task-1121/CP-3.md has a "## Goal Check" section but no evidence rows. A goal-check table with real evidence is required before handoff.',
@@ -1445,7 +1441,7 @@ test('attemptAgentRelaunch calls startAgent with correct parameters', async () =
       error: () => {}
     }
   );
-  
+
   assert.equal(relaunched, true);
   assert.equal(startAgentCalled, true);
   assert.equal(stepArg, 'active');

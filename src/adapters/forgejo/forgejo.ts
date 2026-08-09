@@ -3,7 +3,7 @@ import * as http from 'http';
 import * as https from 'https';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
-import { git } from '../git/git.js'; // NOTE: Original JS used `const git = require('../git/git.js')` and called `git.git(...)`. TS migration extracts the callable `git` function directly; `git(args, opts)` is functionally equivalent to the old `git.git(args, opts)`.
+import { git } from '../git/git.js';
 import { getPrimaryBranch, getPrimaryWorktree, resolveMissionBaseBranch } from '../filesystem/mission-utils.js';
 import { resolveReviewAdapter } from '../config/product-config.js';
 import { getTaskImplementer, findTaskFile } from '../backlog/backlog.js';

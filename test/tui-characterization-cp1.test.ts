@@ -9,6 +9,8 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
+const _require = createRequire(import.meta.url);
 import {
   makeCard,
   makeCards,
@@ -511,8 +513,8 @@ describe('SC9: Characterization tests exist for all capabilities', () => {
   const capabilities = ['SC1', 'SC2', 'SC3', 'SC4', 'SC5', 'SC6', 'SC7', 'SC8'];
 
   it('every success criterion has a dedicated describe block in this file', () => {
-    const fs = require('node:fs');
-    const path = require('node:path');
+    const fs = _require('node:fs');
+    const path = _require('node:path');
     const source = fs.readFileSync(path.join(process.cwd(), 'test', 'tui-characterization-cp1.test.ts'), 'utf8');
 
     for (const sc of capabilities) {
@@ -531,8 +533,8 @@ describe('SC9: Characterization tests exist for all capabilities', () => {
 
 describe('SC10: TUI file count and size guardrails', () => {
   it('no TUI module exceeds 300 lines except shell.tsx', () => {
-    const fs = require('node:fs');
-    const path = require('node:path');
+    const fs = _require('node:fs');
+    const path = _require('node:path');
     const tuiDir = path.join(process.cwd(), 'src', 'interfaces', 'tui');
     const files = fs.readdirSync(tuiDir).filter((f: string) => f.endsWith('.tsx'));
 

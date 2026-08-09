@@ -1,11 +1,17 @@
+// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
 
-const { runDraftCommand, ensureDraftRepoConfigCommitted } = require('../.test-runtime/adapters/cli/commands/draft.js');
+
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const runDraftCommandModule = mockModule<typeof import('../src/adapters/cli/commands/draft.js')>('../src/adapters/cli/commands/draft.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const { runDraftCommand, ensureDraftRepoConfigCommitted } = runDraftCommandModule;
 const typeKey = ['class', 'ification'].join('');
 const normalizeKey = `normalizeDraft${typeKey[0].toUpperCase()}${typeKey.slice(1)}Fn`;
 

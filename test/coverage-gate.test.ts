@@ -1,13 +1,20 @@
+// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const fmt = require('../.test-runtime/application/presentation/cli-format.js');
 
-const REPO_ROOT = path.join(__dirname, '..');
-const coverageGate = require('../.test-runtime/adapters/verification/coverage-gate.js');
+
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+// cli-format is observed, not patched: import it directly so the logger this
+// test installs is the same module instance coverage-gate writes through.
+import * as fmt from '../src/application/presentation/cli-format.js';
+const coverageGate = mockModule<typeof import('../src/adapters/verification/coverage-gate.js')>('../src/adapters/verification/coverage-gate.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const REPO_ROOT = path.join(import.meta.dirname, '..');
 const {
   buildCoverageArgs,
   cleanupNewTempDirs,
@@ -22,7 +29,7 @@ const {
   resetPerRunScratchState,
   resolveTestTimeoutMs,
   runTests
-} = require('../.test-runtime/adapters/verification/coverage-gate.js');
+} = coverageGate;
 
 function runGate(args = []) {
   const logs = [];
@@ -33,7 +40,7 @@ function runGate(args = []) {
     error: message => errors.push(fmt.stripAnsi(message)),
   });
   try {
-    coverageGate(args, { exitFn: code => { exitCode = code; } });
+    coverageGate.default(args, { exitFn: code => { exitCode = code; } });
     return { status: exitCode, stdout: logs.join('\n'), stderr: errors.join('\n') };
   } finally {
     fmt.setLogger(previousLogger);
@@ -55,7 +62,7 @@ test('coverage-gate excludes its own test file from authoritative discovery', ()
 
 test('coverage-gate reports denominator and metric in output', () => {
   const result = runGate(['--dry-run']);
-  assert.match(result.stdout, /Denominator: \.test-runtime\/\*\*\/\*\.js/);
+  assert.match(result.stdout, /Denominator: src\/\*\*\/\*\.ts/);
   assert.match(result.stdout, /Include globs:/);
 });
 

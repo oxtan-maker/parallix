@@ -4,21 +4,22 @@
 // building or running an executable, so they belong in the fast default suite.
 // The native proof that consumes this contract lives in
 // test/task-2286-native-sea-smoke.test.ts.
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
 
-const {
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+
+import {
   MINIMUM_SEA_NODE_MAJOR,
   SEA_SURFACES,
   SEA_THRESHOLDS,
   SeaStopAndReassessError,
   assertSurface,
   evaluateSeaRuntime,
-} = require('../scripts/sea-surfaces.ts');
+} from '../scripts/sea-surfaces.js';
 
-const ROOT = path.resolve(__dirname, '..');
+const ROOT = path.resolve(import.meta.dirname, '..');
 
 test('SEA runtime gate: Node 25 and newer are accepted, Node 22/24 are refused before artifact creation (SC1)', () => {
   assert.equal(MINIMUM_SEA_NODE_MAJOR, 25);

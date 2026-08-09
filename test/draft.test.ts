@@ -1,17 +1,23 @@
+// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 
-const test = require('node:test');
+
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const missionUtils = mockModule<typeof import('../src/adapters/filesystem/mission-utils.js')>('../src/adapters/filesystem/mission-utils.js', import.meta.url);
+const draftLib = mockModule<typeof import('../src/adapters/cli/commands/draft.js')>('../src/adapters/cli/commands/draft.js', import.meta.url);
+const stats = mockModule<typeof import('../src/adapters/cli/commands/stats.js')>('../src/adapters/cli/commands/stats.js', import.meta.url);
+const __mm1 = mockModule<typeof import('../src/composition/application-services.js')>('../src/composition/application-services.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
 const { mock } = test;
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
 
 // Mock getPrimaryBranch BEFORE requiring dependent modules to ensure they use the mock.
-const missionUtils = require('../.test-runtime/adapters/filesystem/mission-utils.js');
 mock.method(missionUtils, 'getPrimaryBranch', () => 'main');
 
-const draftLib = require('../.test-runtime/adapters/cli/commands/draft.js');
-const stats = require('../.test-runtime/adapters/cli/commands/stats.js');
 const {
   buildDraftPrompt,
   recordDraftImplementer,
@@ -307,7 +313,6 @@ test('recordDraftImplementer logs warning when the shared transition fails', asy
   });
   assert.ok(logLines.some(l => l.includes('Could not enforce draft agent')));
 });
-
 
 // ---------- fallbackDraftCommitMessage ----------
 
@@ -647,7 +652,7 @@ test('bootstrapBacklogTask copies task from main repo and commits', () => {
   const worktree = path.join(tmpRoot, 'worktree');
   fs.mkdirSync(path.join(mainRepo, 'backlog', 'tasks'), { recursive: true });
   fs.mkdirSync(path.join(worktree, 'backlog', 'tasks'), { recursive: true });
-  
+
   const taskFile = path.join(mainRepo, 'backlog', 'tasks', 'task-test.md');
   fs.writeFileSync(taskFile, '# Task Test');
   const gitCalls = [];
@@ -1249,6 +1254,8 @@ test('runDraftCommand does not transition to refined when safety harness throws'
 // that produced only Markdown would leave a Mission that the lifecycle and
 // integration services reject as `missing`, so intake must succeed BEFORE the
 // external Backlog task is touched.
+
+const composition = __mm1;
 
 function draftDepsForIntake(overrides) {
   return Object.assign({

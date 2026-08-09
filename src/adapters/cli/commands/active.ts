@@ -707,7 +707,3 @@ function enforceExecuteCommitSafety(opts) {
 const _activeExport = Object.assign(active, { buildExecutePrompt, buildCheckpointContext, runHandoffAndReview, applyExecuteFallback, selectLaunchAndRecord, validateCheckpointsBeforeHandoff, attemptAgentRelaunch, enforceExecuteCommitSafety, unquoteGitStatusPath, renderActiveProgress });
 export default _activeExport;
 export { _activeExport as active, buildExecutePrompt, buildCheckpointContext, runHandoffAndReview, applyExecuteFallback, selectLaunchAndRecord, validateCheckpointsBeforeHandoff, attemptAgentRelaunch, enforceExecuteCommitSafety, unquoteGitStatusPath, renderActiveProgress };
-
-// CJS compat: ensure require() returns the function directly
-declare const module: { exports: any } | undefined;
-if (typeof module !== 'undefined') { module.exports = _activeExport; }

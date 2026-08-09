@@ -1,17 +1,21 @@
 
-const test = require('node:test');
+
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import childProcess from 'node:child_process';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const missionUtils = mockModule<typeof import('../src/adapters/filesystem/mission-utils.js')>('../src/adapters/filesystem/mission-utils.js', import.meta.url);
+const printIntegrationPreflightModule = mockModule<typeof import('../src/adapters/cli/commands/integrate.js')>('../src/adapters/cli/commands/integrate.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const { printIntegrationPreflight } = printIntegrationPreflightModule;
 const { mock } = test;
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const childProcess = require('node:child_process');
 
 // Setup mocks BEFORE requiring integrate
-const missionUtils = require('../.test-runtime/adapters/filesystem/mission-utils.js');
 mock.method(missionUtils, 'getPrimaryBranch', () => 'main');
-
-const { printIntegrationPreflight } = require('../.test-runtime/adapters/cli/commands/integrate.js');
 
 // Helpers ---------------------------------------------------------------
 

@@ -1,9 +1,28 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
+// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
+
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
+import { execFileSync } from 'node:child_process';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const buildClaudeInvocationModule = mockModule<typeof import('../src/adapters/agents/claude.js')>('../src/adapters/agents/claude.js', import.meta.url);
+const buildCodexDraftInvocationModule = mockModule<typeof import('../src/adapters/agents/codex.js')>('../src/adapters/agents/codex.js', import.meta.url);
+const buildVibeInvocationModule = mockModule<typeof import('../src/adapters/agents/vibe.js')>('../src/adapters/agents/vibe.js', import.meta.url);
+const buildOpencodeInvocationModule = mockModule<typeof import('../src/adapters/agents/opencode.js')>('../src/adapters/agents/opencode.js', import.meta.url);
+const activeCustomCapacityCountModule = mockModule<typeof import('../src/adapters/agents/custom-capacity.js')>('../src/adapters/agents/custom-capacity.js', import.meta.url);
+const agents = mockModule<typeof import('../src/adapters/agents/agents.js')>('../src/adapters/agents/agents.js', import.meta.url);
+const resolveNoOutputWatchdogConfigModule = mockModule<typeof import('../src/adapters/agents/agents.js')>('../src/adapters/agents/agents.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const { buildClaudeInvocation, resolveClaudeCommand, extractClaudeSessionId } = buildClaudeInvocationModule;
+const { buildCodexDraftInvocation, resolveCodexCommand, extractCodexSessionId } = buildCodexDraftInvocationModule;
+const { buildVibeInvocation, resolveVibeCommand, extractVibeSessionId } = buildVibeInvocationModule;
+const { buildOpencodeInvocation, resolveOpencodeCommand, extractOpencodeSessionId, __setJsonFormatSupportForTest } = buildOpencodeInvocationModule;
+const { activeCustomCapacityCount, resetCustomCapacity, tryAcquireCustomCapacity } = activeCustomCapacityCountModule;
+const { resolveNoOutputWatchdogConfig } = resolveNoOutputWatchdogConfigModule;
 process.env.NO_COLOR = '1';
-const fs = require('fs');
-const path = require('path');
-const os = require('os');
 const originalPath = process.env.PATH;
 const originalPiBin = process.env.PI_BIN;
 
@@ -25,14 +44,7 @@ const {
   workflowLauncherStatus,
   isAgentBlocked,
   setCommandPathProbe
-} = require('../.test-runtime/adapters/agents/agents.js');
-
-const { buildClaudeInvocation, resolveClaudeCommand, extractClaudeSessionId } = require('../.test-runtime/adapters/agents/claude.js');
-const { buildCodexDraftInvocation, resolveCodexCommand, extractCodexSessionId } = require('../.test-runtime/adapters/agents/codex.js');
-const { buildVibeInvocation, resolveVibeCommand, extractVibeSessionId } = require('../.test-runtime/adapters/agents/vibe.js');
-const { buildOpencodeInvocation, resolveOpencodeCommand, extractOpencodeSessionId, __setJsonFormatSupportForTest } = require('../.test-runtime/adapters/agents/opencode.js');
-const { activeCustomCapacityCount, resetCustomCapacity, tryAcquireCustomCapacity } = require('../.test-runtime/adapters/agents/custom-capacity.js');
-
+} = resolveNoOutputWatchdogConfigModule;
 
 function formatBlockUntil(date) {
   const year = date.getFullYear();
@@ -43,7 +55,7 @@ function formatBlockUntil(date) {
 }
 
 const sharedLauncherBin = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-test-launchers-'));
-const sharedLauncherRunner = path.join(__dirname, 'lib', 'agent-script-runner.js');
+const sharedLauncherRunner = path.join(import.meta.dirname, 'lib', 'agent-script-runner.js');
 for (const name of ['codex', 'claude', 'opencode', 'pi', 'vibe']) {
   fs.symlinkSync(sharedLauncherRunner, path.join(sharedLauncherBin, name));
 }
@@ -134,7 +146,7 @@ function withPathLaunchers(entries, run) {
   if (launchers.opencode && !launchers.pi) {
     launchers.pi = launchers.opencode;
   }
-  const runner = path.join(__dirname, 'lib', 'agent-script-runner.js');
+  const runner = path.join(import.meta.dirname, 'lib', 'agent-script-runner.js');
   for (const name of Object.keys(launchers)) {
     fs.symlinkSync(runner, path.join(binDir, name));
   }
@@ -320,7 +332,7 @@ test('readAgentConfig migrates blocklist from multiple legacy locations', () => 
 // against `../..` (the monorepo root). In the standalone parallix repo `../..` is the
 // parent code directory, not a git repo, so the assertion does not apply — skip when
 // the monorepo host (a .git at `../..`) is not present; it still runs in the monorepo.
-const MONOREPO_HOST_PRESENT = fs.existsSync(path.join(__dirname, '..', '..', '.git'));
+const MONOREPO_HOST_PRESENT = fs.existsSync(path.join(import.meta.dirname, '..', '..', '.git'));
 test('all three agents.local.json blocklist locations are gitignored operator-local state (task-1246)', {
   skip: MONOREPO_HOST_PRESENT ? false : 'monorepo-host gitignore assertion; ../.. is not a git repo in standalone parallix (task-1302)'
 }, () => {
@@ -328,8 +340,7 @@ test('all three agents.local.json blocklist locations are gitignored operator-lo
   // one physically under the runtime tree (workflow/config/). Physical location does
   // not change classification: each is per-operator, gitignored, never committed —
   // distinct from the committed runtime asset workflow/config/agents.json.
-  const { execFileSync } = require('node:child_process');
-  const repoRoot = path.resolve(__dirname, '..', '..');
+  const repoRoot = path.resolve(import.meta.dirname, '..', '..');
   const locations = [
     path.join('workflow', 'config', 'agents.local.json'),
     'agents.local.json', // repo-root
@@ -453,7 +464,7 @@ test('readAgentConfig can merge local blocklists when caller passes the default 
   try {
     const targetPath = path.join(tmpRoot, 'agents.local.json');
     fs.writeFileSync(targetPath, JSON.stringify({ blocklist: { custom: true } }));
-    const explicitPath = path.join(__dirname, '..', 'config', 'agents.json');
+    const explicitPath = path.join(import.meta.dirname, '..', 'config', 'agents.json');
     const config = readAgentConfig(explicitPath, { mainWorktreePath: null, targetPath });
     assert.ok(config);
     assert.ok(config.blocklist);
@@ -1231,8 +1242,6 @@ test('resolveOpencodeCommand returns bare opencode', () => {
   assert.equal(resolveOpencodeCommand(), 'opencode');
 });
 
-
-
 // ---------- session-reuse threading ----------
 
 test('startAgent passes resume:false to claude on the first launch and writes a marker', async () => {
@@ -1454,7 +1463,6 @@ test('startAgent rejects unsupported session marker roles before launching', asy
 });
 
 test('custom is registered in LAUNCHERS and RESOLVERS', () => {
-  const agents = require('../.test-runtime/adapters/agents/agents.js');
   // LAUNCHERS and RESOLVERS are module-private; verify custom is known by checking KNOWN_AGENT_NAMES
   assert.ok(agents.KNOWN_AGENT_NAMES.includes('custom'), 'custom should be in KNOWN_AGENT_NAMES');
   // workflowLauncherStatus resolves "custom" to its configured runner (opencode/pi)
@@ -1725,7 +1733,7 @@ test('startAgent launch failure includes stderr snippet in log', async () => {
       const log = [];
 
       const result = await withPathLaunchers({
-        opencode: 'if (process.argv.includes("--help")) process.exit(0); require("fs").writeSync(2, "Error: Model not found\\n"); process.exit(1);',
+        opencode: 'if (process.argv.includes("--help")) process.exit(0); process.stderr.write("Error: Model not found\\n"); process.exit(1);',
         vibe: 'if (process.argv.includes("--help")) process.exit(0); process.exit(0);'
       }, () => startAgent('draft', {
         prompt: 'Execute.',
@@ -1771,7 +1779,7 @@ test('startAgent launch failure does not retry when limit-hit is detected', asyn
         },
         updateAgentBlockFn: () => ({ path: 'noop' }),
         log: msg => log.push(msg),
-        
+
       });
 
       assert.equal(result.agent, 'vibe');
@@ -1821,7 +1829,6 @@ test('startAgent launch failure with signal retries next agent', async () => {
 // ---------- Draft-specific no-output watchdog (task-1214) ----------
 
 test('resolveNoOutputWatchdogConfig returns draft-specific defaults when step is draft', () => {
-  const { resolveNoOutputWatchdogConfig } = require('../.test-runtime/adapters/agents/agents.js');
 
   // Draft step defaults must be 15s initial / 30s interval.
   const draftConfig = resolveNoOutputWatchdogConfig({}, 'draft');
@@ -1883,7 +1890,7 @@ test('draft launch preserves the mission worktree in cwd and PWD for child CLIs'
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-draft-pwd-'));
   try {
     await withPathLaunchers({
-      opencode: 'if (process.argv.includes("--help")) process.exit(0); require("fs").writeSync(1, JSON.stringify({ cwd: process.cwd(), pwd: process.env.PWD })); process.exit(0);'
+      opencode: 'if (process.argv.includes("--help")) process.exit(0); process.stdout.write(JSON.stringify({ cwd: process.cwd(), pwd: process.env.PWD })); process.exit(0);'
     }, async () => {
       const result = await startAgent('draft', {
         agent: 'custom',
@@ -2081,7 +2088,7 @@ test('invalid-model launch failure retries without persisting a blocklist entry'
     };
 
     const result = await withPathLaunchers({
-      codex: 'if (process.argv.includes("--help")) process.exit(0); require("fs").writeSync(2, "Error: invalid model \\"typo-model\\"\\n"); process.exit(1);',
+      codex: 'if (process.argv.includes("--help")) process.exit(0); process.stderr.write("Error: invalid model \\"typo-model\\"\\n"); process.exit(1);',
       vibe: 'if (process.argv.includes("--help")) process.exit(0); process.exit(0);'
     }, () => startAgent('draft', {
       prompt: 'Execute.',

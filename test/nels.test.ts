@@ -1,21 +1,13 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const os = require('node:os');
-const fs = require('node:fs');
-const path = require('node:path');
-const { spawnSync } = require('node:child_process');
 
-const {
-  computeNEL,
-  computeNELRecord,
-  classifyBucket,
-  isExcluded,
-  EXCLUSION_PATTERNS,
-  BUCKET_SMALL_MAX,
-  BUCKET_MEDIUM_MAX,
-} = require('../.test-runtime/adapters/git/net-engineering-lines.js');
 
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import os from 'node:os';
+import fs from 'node:fs';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { computeNEL, computeNELRecord, classifyBucket, isExcluded, EXCLUSION_PATTERNS, BUCKET_SMALL_MAX, BUCKET_MEDIUM_MAX, } from '../src/adapters/git/net-engineering-lines.js';
 // ---------- exclude-path tests ----------
 
 test('isExcluded filters missions/** paths', () => {

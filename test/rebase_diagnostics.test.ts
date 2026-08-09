@@ -1,9 +1,4 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const status = require('../.test-runtime/adapters/cli/commands/status.js');
-const rebase = require('../.test-runtime/adapters/cli/commands/rebase.js');
-const { printIntegrationPreflight } = require('../.test-runtime/adapters/cli/commands/integrate.js');
 
 // ---------------------------------------------------------------------------
 // Test-local Git argument normalization
@@ -14,6 +9,18 @@ const { printIntegrationPreflight } = require('../.test-runtime/adapters/cli/com
 // those leading global options so a fake can check the Git subcommand at a
 // fixed index again, without loose whole-array matching that would also accept
 // a malformed command. Returns the tail whose index 0 is the Git subcommand.
+
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const statusModule = mockModule<typeof import('../src/adapters/cli/commands/status.js')>('../src/adapters/cli/commands/status.js', import.meta.url);
+const rebaseModule = mockModule<typeof import('../src/adapters/cli/commands/rebase.js')>('../src/adapters/cli/commands/rebase.js', import.meta.url);
+const printIntegrationPreflightModule = mockModule<typeof import('../src/adapters/cli/commands/integrate.js')>('../src/adapters/cli/commands/integrate.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const status = statusModule.default;
+const rebase = rebaseModule.default;
+const { printIntegrationPreflight } = printIntegrationPreflightModule;
 function gitSubcommandArgs(args: string[]): string[] {
   let i = 0;
   while (i + 1 < args.length && (args[i] === '-C' || args[i] === '-c')) {

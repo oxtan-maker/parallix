@@ -1,14 +1,19 @@
+// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 
+
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
+import { spawn as realSpawn } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const captureOpencodeExportModule = mockModule<typeof import('../src/adapters/agents/opencode-export.js')>('../src/adapters/agents/opencode-export.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const { captureOpencodeExport } = captureOpencodeExportModule;
 'use strict';
-
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const { EventEmitter } = require('node:events');
-const { spawn: realSpawn } = require('child_process');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
-const { captureOpencodeExport } = require('../.test-runtime/adapters/agents/opencode-export.js');
 
 function makeFakeChild() {
   const child = new EventEmitter();

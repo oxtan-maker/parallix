@@ -1,23 +1,13 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const childProcess = require('child_process');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
 
-const {
-  captureVerifiedTreeProof,
-  NO_GATE_NOTICE,
-  formatVerificationCommand,
-  resolveVerificationAdapter,
-  readPublishedTreeState,
-  runVerificationGate,
-  createVerificationProofIdentity,
-  readReusableVerificationProof,
-  writeReusableVerificationProof,
-} = require('../.test-runtime/adapters/verification/verification.js');
 
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import childProcess from 'child_process';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { captureVerifiedTreeProof, NO_GATE_NOTICE, formatVerificationCommand, resolveVerificationAdapter, readPublishedTreeState, runVerificationGate, createVerificationProofIdentity, readReusableVerificationProof, writeReusableVerificationProof, } from '../src/adapters/verification/verification.js';
 function withTempDir(fn) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-verification-'));
   try {
@@ -146,6 +136,7 @@ test('readPublishedTreeState uses the git-style runner by default', () => {
   withTempDir(root => {
     const realpathRoot = fs.realpathSync(root);
     const state = readPublishedTreeState(root, {
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
       gitRunner(args) {
         assert.ok(Array.isArray(args), 'expected git-style argv array');
         if (args.includes('HEAD^{tree}')) {

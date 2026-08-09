@@ -46,7 +46,3 @@ async function config(_args: string[] = [], opts: ConfigOptions = {}) {
 
 export default config;
 export { config };
-
-// CJS compat: ensure require() returns the function directly
-declare const module: { exports: any } | undefined;
-if (typeof module !== 'undefined') { module.exports = config; }

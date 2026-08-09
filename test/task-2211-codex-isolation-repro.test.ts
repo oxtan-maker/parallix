@@ -1,12 +1,16 @@
-
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const codexModule = mockModule<typeof import('../src/adapters/agents/codex.js')>('../src/adapters/agents/codex.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const { buildCodexDraftInvocation, codexStateRoot } = codexModule;
+const codex = codexModule;
 
 test('codex launcher keeps operator-home nested tool resolution while isolating Codex state', () => {
-  const { buildCodexDraftInvocation, codexStateRoot } = require('../.test-runtime/adapters/agents/codex.js');
   const operatorHome = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2211-operator-home-'));
   const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2211-worktree-'));
   const originalHome = process.env.HOME;
@@ -18,6 +22,7 @@ test('codex launcher keeps operator-home nested tool resolution while isolating 
     process.env.HOME = operatorHome;
 
     const invocation = buildCodexDraftInvocation({ prompt: 'Execute.', worktree, interactive: false });
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     const resolvedNestedTool = path.join(invocation.options.env.HOME, '.local', 'bin', 'opencode');
 
     assert.ok(fs.existsSync(resolvedNestedTool), 'a nested command must retain the operator HOME used to resolve its installation');
@@ -31,7 +36,6 @@ test('codex launcher keeps operator-home nested tool resolution while isolating 
 });
 
 test('Codex setup links operator config and auth without copying their contents', () => {
-  const codex = require('../.test-runtime/adapters/agents/codex.js');
   const operatorHome = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2211-state-operator-home-'));
   const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2211-state-worktree-'));
   const originalHome = process.env.HOME;

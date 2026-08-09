@@ -1,11 +1,17 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const pi = require('../.test-runtime/adapters/agents/pi.js');
-const productConfig = require('../.test-runtime/adapters/config/product-config.js');
-const launcherSelection = require('../.test-runtime/adapters/agents/launcher-selection.js');
-const os = require('node:os');
 
+
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import os from 'node:os';
+import fs from 'node:fs';
+import path from 'node:path';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const pi = mockModule<typeof import('../src/adapters/agents/pi.js')>('../src/adapters/agents/pi.js', import.meta.url);
+const productConfig = mockModule<typeof import('../src/adapters/config/product-config.js')>('../src/adapters/config/product-config.js', import.meta.url);
+const launcherSelection = mockModule<typeof import('../src/adapters/agents/launcher-selection.js')>('../src/adapters/agents/launcher-selection.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
 test.afterEach(() => {
   // Reset Pi module test hooks
   pi.__setSdkForTest(null);
@@ -17,9 +23,6 @@ test.afterEach(() => {
 
 test('resolvePiCommand prefers PI_BIN when it points to an executable', () => {
   const { resolvePiCommand } = pi;
-  const fs = require('node:fs');
-  const os = require('node:os');
-  const path = require('node:path');
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-bin-'));
   const customBin = path.join(tmpDir, 'pi');
   fs.writeFileSync(customBin, '#!/usr/bin/env bash\nexit 0\n', 'utf8');
@@ -40,8 +43,6 @@ test('resolvePiCommand prefers PI_BIN when it points to an executable', () => {
 
 test('resolvePiCommand finds Pi through NVM_BIN when PATH is isolated', () => {
   const { resolvePiCommand } = pi;
-  const fs = require('node:fs');
-  const path = require('node:path');
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-nvm-bin-'));
   const nvmPi = path.join(tmpDir, 'pi');
   fs.writeFileSync(nvmPi, '#!/usr/bin/env bash\nexit 0\n', 'utf8');
@@ -72,9 +73,6 @@ test('resolvePiCommand finds Pi through NVM_BIN when PATH is isolated', () => {
 
 test('resolvePiCommand falls back to bare "pi" when no candidate exists', () => {
   const { resolvePiCommand } = pi;
-  const os = require('node:os');
-  const path = require('node:path');
-  const fs = require('node:fs');
   const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-home-'));
   const originalHome = process.env.HOME;
   const originalPath = process.env.PATH;
@@ -110,8 +108,6 @@ test('resolvePiCommand falls back to bare "pi" when no candidate exists', () => 
 
 test('resolveCustomRunner defaults to opencode when no config', () => {
   const { resolveCustomRunner } = productConfig;
-  const fs = require('node:fs');
-  const path = require('node:path');
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'no-config-'));
   assert.equal(resolveCustomRunner(tmpDir), 'opencode');
   fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -119,8 +115,6 @@ test('resolveCustomRunner defaults to opencode when no config', () => {
 
 test('resolveCustomRunner reads custom runner from workflow config', () => {
   const { resolveCustomRunner } = productConfig;
-  const fs = require('node:fs');
-  const path = require('node:path');
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'with-config-'));
 
   // Write a workflow config with custom runner set to pi
@@ -141,8 +135,6 @@ test('resolveCustomRunner reads custom runner from workflow config', () => {
 
 test('resolveCustomRunner defaults to opencode for invalid runner value', () => {
   const { resolveCustomRunner } = productConfig;
-  const fs = require('node:fs');
-  const path = require('node:path');
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'invalid-config-'));
 
   // Write a workflow config with invalid custom runner

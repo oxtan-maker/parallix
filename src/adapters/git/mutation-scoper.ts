@@ -3,14 +3,14 @@
  *
  * Computes the files changed between a base branch and a head ref, then
  * resolves their direct (depth-1) local callees by scanning
- * `require()`/`import ... from` statements — a lightweight regex-based scan,
+ * static import statements — a lightweight regex-based scan,
  * not a full TypeScript compiler pass (see docs/adr/adr-mutation-testing.md
  * for why: a full compiler-services pass was ruled out by the mission's stop
  * rules as unacceptable added complexity for a diff-scoping utility).
  *
- * Scope is restricted to the canonical CommonJS mirror under .test-runtime/,
- * matching coverage-gate.ts's denominator and the mission's "production source, not
- * test/ files" boundary.
+ * Scope is restricted to the TypeScript production source under `src/`,
+ * matching coverage-gate.ts's denominator and the mission's "production source,
+ * not test/ files" boundary (TASK-2328 retired the CommonJS mirror).
  */
 
 import * as fs from 'node:fs';
@@ -18,10 +18,9 @@ import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { git as gitFnDefault } from './git.js';
 
-const MODULE_DIR = import.meta.url ? path.dirname(fileURLToPath(import.meta.url)) : __dirname;
+const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(MODULE_DIR, '..', '..');
 
-const REQUIRE_RE = /require\(\s*['"](\.\.?\/[^'"]+)['"]\s*\)/g;
 const IMPORT_FROM_RE = /(?:import|export)[^'"]*from\s+['"](\.\.?\/[^'"]+)['"]/g;
 
 interface GitLike {
@@ -42,32 +41,16 @@ interface ScopeResult {
   targetFiles: string[];
 }
 
-function isInScope(relPath: string): boolean {
-  return relPath.startsWith('.test-runtime/') && relPath.endsWith('.js');
-}
-
-/**
- * Git tracks TypeScript under the canonical `src/` layers while
- * `scripts/build-test-runtime.ts` mirrors them as CommonJS below
- * `.test-runtime/`. Map a changed source path to its built `.js`
- * counterpart; pass through an already-.test-runtime path unchanged, and leave
- * anything outside the runtime library source root alone so `isInScope` drops
- * it.
- */
+/** The production source root; everything mutation testing may target. */
 const RUNTIME_SOURCE_ROOT = 'src/';
 
-function toRuntimePath(relPath: string): string {
-  if (!relPath.endsWith('.ts') || relPath.endsWith('.d.ts')) {
-    return relPath;
-  }
-  if (!relPath.startsWith(RUNTIME_SOURCE_ROOT)) {
-    return relPath;
-  }
-  const withinSource = relPath.slice(RUNTIME_SOURCE_ROOT.length, -3);
-  return `.test-runtime/${withinSource}.js`;
+function isInScope(relPath: string): boolean {
+  return relPath.startsWith(RUNTIME_SOURCE_ROOT)
+    && relPath.endsWith('.ts')
+    && !relPath.endsWith('.d.ts');
 }
 
-/** Compute the set of in-scope files changed between baseBranch and headRef, mapped to their runtime .js paths. */
+/** Compute the set of in-scope source files changed between baseBranch and headRef. */
 function getChangedFiles(baseBranch: string, headRef = 'HEAD', options: ScoperOptions = {}): string[] {
   const { gitFn = gitFnDefault, repoRoot = REPO_ROOT } = options;
   const result = gitFn(['-C', repoRoot, 'diff', '--name-only', '--diff-filter=ACMR', `${baseBranch}...${headRef}`]);
@@ -79,17 +62,22 @@ function getChangedFiles(baseBranch: string, headRef = 'HEAD', options: ScoperOp
       .split('\n')
       .map(line => line.trim())
       .filter(Boolean)
-      .map(toRuntimePath)
       .filter(isInScope)
   )).sort();
 }
 
-/** Resolve a single relative require/import specifier to a repo-relative .js path, if it exists in-scope. */
+/**
+ * Resolve a single relative import specifier to a repo-relative `.ts` path, if
+ * it exists in-scope. ESM specifiers name the emitted `.js` file, so the `.js`
+ * suffix is rewritten back onto the authored TypeScript.
+ */
 function resolveSpecifier(fromAbsFile: string, specifier: string, repoRoot: string, fsModule: typeof fs): string | null {
   const fromDir = path.dirname(fromAbsFile);
   let candidate = path.resolve(fromDir, specifier);
-  if (!candidate.endsWith('.js')) {
-    candidate = `${candidate}.js`;
+  if (candidate.endsWith('.js')) {
+    candidate = `${candidate.slice(0, -3)}.ts`;
+  } else if (!candidate.endsWith('.ts')) {
+    candidate = `${candidate}.ts`;
   }
   if (!fsModule.existsSync(candidate)) {
     return null;
@@ -98,14 +86,14 @@ function resolveSpecifier(fromAbsFile: string, specifier: string, repoRoot: stri
   return isInScope(rel) ? rel : null;
 }
 
-/** Scan a file's source for local require()/import specifiers, resolved to repo-relative paths. */
+/** Scan a file's source for local import specifiers, resolved to repo-relative paths. */
 function extractLocalDependencies(relFile: string, options: ScoperOptions = {}): string[] {
   const { repoRoot = REPO_ROOT, fsModule = fs } = options;
   const absFile = path.join(repoRoot, relFile);
   if (!fsModule.existsSync(absFile)) {return [];}
   const source = fsModule.readFileSync(absFile, 'utf8');
   const found = new Set<string>();
-  for (const re of [REQUIRE_RE, IMPORT_FROM_RE]) {
+  for (const re of [IMPORT_FROM_RE]) {
     re.lastIndex = 0;
     let match: RegExpExecArray | null;
     while ((match = re.exec(source)) !== null) {
@@ -144,17 +132,4 @@ export {
   resolveCallees,
   extractLocalDependencies,
   isInScope,
-  toRuntimePath,
 };
-
-// CJS compat: ensure require() returns the function directly
-declare const module: { exports: any } | undefined;
-if (typeof module !== 'undefined') {
-  module.exports = scopeMutationTargets;
-  module.exports.scopeMutationTargets = scopeMutationTargets;
-  module.exports.getChangedFiles = getChangedFiles;
-  module.exports.resolveCallees = resolveCallees;
-  module.exports.extractLocalDependencies = extractLocalDependencies;
-  module.exports.isInScope = isInScope;
-  module.exports.toRuntimePath = toRuntimePath;
-}

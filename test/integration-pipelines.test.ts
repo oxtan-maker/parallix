@@ -1,13 +1,19 @@
+// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 
-const test = require('node:test');
+
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import child_process from 'child_process';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const missionUtils = mockModule<typeof import('../src/adapters/filesystem/mission-utils.js')>('../src/adapters/filesystem/mission-utils.js', import.meta.url);
+const __mm1 = mockModule<typeof import('../src/adapters/cli/commands/integrate.js')>('../src/adapters/cli/commands/integrate.js', import.meta.url);
+await installModuleMocks();
 const { mock } = test;
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
 
 // Mock getPrimaryWorktree and getPrimaryBranch before requiring integrate.js
-const missionUtils = require('../.test-runtime/adapters/filesystem/mission-utils.js');
 mock.method(missionUtils, 'getPrimaryWorktree', () => '/tmp/mission');
 mock.method(missionUtils, 'getPrimaryBranch', () => 'main');
 mock.method(missionUtils, 'resolveWorktree', (slug) => `/tmp/mission-${slug}`);
@@ -24,14 +30,14 @@ const {
   executeIntegrationGates,
   orderIntegrationGates,
   gateMatchesChangedAreas
-} = require('../.test-runtime/adapters/cli/commands/integrate.js');
+} = __mm1;
 
 // task-1302 (standalone extraction): the tests below invoke the WrGroceries monorepo
 // gate runner scripts/verify-local.sh, which lives outside the parallix tree and is
 // NOT carried into the standalone repo (scope item 9 — it stays in WrGroceries and is
 // repointed to the global `px` runner). When the script is absent we skip these
 // host-coupled tests; in the monorepo (where it exists) they still run unchanged.
-const VERIFY_LOCAL_SH = path.join(__dirname, '..', '..', 'scripts', 'verify-local.sh');
+const VERIFY_LOCAL_SH = path.join(import.meta.dirname, '..', '..', 'scripts', 'verify-local.sh');
 const VERIFY_LOCAL_PRESENT = fs.existsSync(VERIFY_LOCAL_SH);
 const verifyLocalTest = (name, fn) => test(name, {
   skip: VERIFY_LOCAL_PRESENT ? false : 'requires monorepo scripts/verify-local.sh (absent in standalone parallix — task-1302)'
@@ -55,9 +61,9 @@ auth-server/src/main/java/bar.java
 web-client/src/App.tsx
 docs/README.md
 workflow/lib/test.js`;
-  
+
   const areas = parseFilesToAreas(files);
-  
+
   assert.deepEqual(areas.sort(), ['auth-server', 'docs', 'server', 'web-client', 'workflow']);
 });
 
@@ -65,9 +71,9 @@ test('parseFilesToAreas ignores unknown directories', () => {
   const files = `node_modules/some-package
 .git/config
 random-file.txt`;
-  
+
   const areas = parseFilesToAreas(files);
-  
+
   assert.deepEqual(areas, []);
 });
 
@@ -79,11 +85,11 @@ test('parseFilesToAreas handles empty input', () => {
 test('detectChangedAreas returns server and web-client for multi-area mission', () => {
   const changedFiles = `server/src/main/java/foo.java
 web-client/src/App.tsx`;
-  
+
   const areas = detectChangedAreas('task-123', {
     gitRunner: createMockGitRunner(changedFiles)
   });
-  
+
   assert.deepEqual(areas.sort(), ['server', 'web-client']);
 });
 
@@ -91,7 +97,7 @@ test('detectChangedAreas returns empty array for no changes', () => {
   const areas = detectChangedAreas('task-123', {
     gitRunner: createMockGitRunner('')
   });
-  
+
   assert.deepEqual(areas, []);
 });
 
@@ -109,16 +115,16 @@ test('loadIntegrationConfig parses valid JSON config', () => {
       web_client: { command: './web-client/updateStaging.sh', order: 2, run_last: false }
     }
   };
-  
+
   // Create temp file
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-'));
   const tmpConfigPath = path.join(tmpDir, 'integration-pipelines.json');
   fs.writeFileSync(tmpConfigPath, JSON.stringify(config, null, 2));
-  
+
   const result = loadIntegrationConfig({ configPath: tmpConfigPath });
   assert.equal(result.ok, true);
   assert.deepEqual(result.config, config);
-  
+
   // Cleanup
   fs.unlinkSync(tmpConfigPath);
   fs.rmdirSync(tmpDir);
@@ -160,7 +166,7 @@ test('getIntegrationGatePlan returns empty gates when config missing', () => {
     runIntegrationGates: true,
     gitRunner: createMockGitRunner('server/foo.java')
   });
-  
+
   assert.deepEqual(plan.gates, []);
   assert.equal(plan.configError, 'no config present');
 });
@@ -172,19 +178,19 @@ test('printIntegrationGatePlan outputs gate plan lines', () => {
     { key: 'web-client', command: 'SKIP_E2E=1 ./web-client/updateStaging.sh', order: 3, run_last: false },
     { key: 'web-e2e', command: './web-client/scripts/run-playwright-stage.sh', order: 4, run_last: true }
   ];
-  
+
   // Mock console.log to capture output
   const logs = [];
   const originalLog = console.log;
   mock.method(console, 'log', (msg) => { logs.push(msg); }, { restoreAfterAll: true });
-  
+
   printIntegrationGatePlan(gates);
-  
+
   // Verify output contains the gates in order
   assert.ok(logs.some(l => l.includes('Integration gate plan:')));
   assert.ok(logs.some(l => l.includes('server:') && l.includes('./server/updateStaging.sh')));
   assert.ok(logs.some(l => l.includes('web-e2e:') && l.includes('run-playwright-stage.sh')));
-  
+
   mock.restoreAll();
 });
 
@@ -417,8 +423,7 @@ test('script integrate area: run_last ordering is respected', () => {
   // This test verifies that when called via the script, gates with run_last: true
   // are executed after gates without run_last, regardless of order value
   // We test this by creating a temp repo setup and calling the script
-  const child_process = require('child_process');
-  
+
   // The script's gate_integrate uses jq to sort gates
   // We verify the jq logic produces correct ordering
   const gatesJson = {
@@ -429,7 +434,7 @@ test('script integrate area: run_last ordering is respected', () => {
       e2e: { command: './web-client/scripts/run-playwright-stage.sh', order: 0, run_last: true }
     }
   };
-  
+
   // Simulate the jq sorting logic from the script
   const nonRunLast = Object.entries(gatesJson.gates)
     .filter(([k, v]) => v.run_last !== true)
@@ -438,9 +443,9 @@ test('script integrate area: run_last ordering is respected', () => {
     .filter(([k, v]) => v.run_last === true)
     .sort((a, b) => (a[1].order || 0) - (b[1].order || 0));
   const ordered = [...nonRunLast, ...runLast];
-  
+
   const keys = ordered.map(([k]) => k);
-  
+
   // e2e (run_last=true, order=0) should be last
   assert.equal(keys[keys.length - 1], 'e2e');
   // server (order=1) should be first
@@ -460,7 +465,7 @@ test('script integrate area: changed area filtering works', () => {
     { key: 'web-client', command: 'SKIP_E2E=1 ./web-client/updateStaging.sh' },
     { key: 'web-e2e', command: './web-client/scripts/run-playwright-stage.sh' }
   ];
-  
+
   // Simulate the filtering logic from the script
   const shouldRun = (gateKey) => {
     if (changedAreas.includes(gateKey)) return true;
@@ -469,9 +474,9 @@ test('script integrate area: changed area filtering works', () => {
     }
     return false;
   };
-  
+
   const filtered = gates.filter(gate => shouldRun(gate.key));
-  
+
   // Only server should match (workflow is not a gate key)
   assert.equal(filtered.length, 1);
   assert.equal(filtered[0].key, 'server');
@@ -485,7 +490,7 @@ test('script integrate area: web-e2e special case works', () => {
     { key: 'web-client', command: 'SKIP_E2E=1 ./web-client/updateStaging.sh' },
     { key: 'web-e2e', command: './web-client/scripts/run-playwright-stage.sh' }
   ];
-  
+
   const shouldRun = (gateKey) => {
     if (changedAreas.includes(gateKey)) return true;
     if (gateKey === 'web-e2e') {
@@ -493,9 +498,9 @@ test('script integrate area: web-e2e special case works', () => {
     }
     return false;
   };
-  
+
   const filtered = gates.filter(gate => shouldRun(gate.key));
-  
+
   // Both web-client and web-e2e should match
   assert.equal(filtered.length, 2);
   assert.ok(filtered.some(g => g.key === 'web-client'));
@@ -615,7 +620,7 @@ px.ts`;
 });
 
 test('repo integration config keeps workflow gate on the targeted mission-lifecycle suite', () => {
-  const configPath = path.join(__dirname, '..', 'config', 'integration-pipelines.json');
+  const configPath = path.join(import.meta.dirname, '..', 'config', 'integration-pipelines.json');
   const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
 
   assert.equal(
@@ -691,29 +696,27 @@ test('executeIntegrationGates succeeds when lib gate command passes (task-1362)'
 // so these tests use test fixtures via INTEGRATION_CONFIG_PATH env var to avoid
 // touching the real repo config file.
 verifyLocalTest('script integrate: is callable and handles missing config gracefully', () => {
-  const child_process = require('child_process');
-  const os = require('os');
-  const scriptPath = path.join(__dirname, '..', '..', 'scripts', 'verify-local.sh');
-  
+  const scriptPath = path.join(import.meta.dirname, '..', '..', 'scripts', 'verify-local.sh');
+
   // Create a temp directory without a config file
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-integrate-no-config-'));
-  
+
   // Run the script with INTEGRATION_CONFIG_PATH pointing to non-existent file
   // The script should handle missing config gracefully
-  const env = { 
+  const env = {
     ...process.env,
     WORKFLOW_SUITE_CONTEXT: '1',
     INTEGRATION_CONFIG_PATH: path.join(tmpDir, 'nonexistent', 'integration-pipelines.json')
   };
-  const result = child_process.spawnSync(scriptPath, ['integrate'], { 
-    cwd: __dirname,
+  const result = child_process.spawnSync(scriptPath, ['integrate'], {
+    cwd: import.meta.dirname,
     env,
     encoding: 'utf8'
   });
-  
+
   // Cleanup temp dir
   fs.rmdirSync(tmpDir, { recursive: true, force: true });
-  
+
   // The script should succeed (exit 0) with no config
   assert.equal(result.status, 0);
   const output = result.stdout + result.stderr;
@@ -721,25 +724,24 @@ verifyLocalTest('script integrate: is callable and handles missing config gracef
 });
 
 verifyLocalTest('script integrate: dry-run with INTEGRATE_DRY_RUN env var works', () => {
-  const child_process = require('child_process');
-  const scriptPath = path.join(__dirname, '..', '..', 'scripts', 'verify-local.sh');
-  const fixturePath = path.join(__dirname, 'fixtures', 'integration-pipelines-test.json');
-  
+  const scriptPath = path.join(import.meta.dirname, '..', '..', 'scripts', 'verify-local.sh');
+  const fixturePath = path.join(import.meta.dirname, 'fixtures', 'integration-pipelines-test.json');
+
   // Run the script with INTEGRATE_DRY_RUN=true, custom config, and override changed areas
   // This ensures the test is deterministic regardless of git state
-  const env = { 
+  const env = {
     ...process.env,
     WORKFLOW_SUITE_CONTEXT: '1',
     INTEGRATE_DRY_RUN: 'true',
     INTEGRATION_CONFIG_PATH: fixturePath,
     INTEGRATE_CHANGED_AREAS: 'server auth-server web-client'
   };
-  const result = child_process.spawnSync(scriptPath, ['integrate'], { 
-    cwd: __dirname,
+  const result = child_process.spawnSync(scriptPath, ['integrate'], {
+    cwd: import.meta.dirname,
     env,
     encoding: 'utf8'
   });
-  
+
   // The script should succeed
   assert.equal(result.status, 0);
   const output = result.stdout + result.stderr;
@@ -753,10 +755,8 @@ verifyLocalTest('script integrate: dry-run with INTEGRATE_DRY_RUN env var works'
 });
 
 verifyLocalTest('script integrate: failure output prints command', () => {
-  const child_process = require('child_process');
-  const os = require('os');
-  const scriptPath = path.join(__dirname, '..', '..', 'scripts', 'verify-local.sh');
-  
+  const scriptPath = path.join(import.meta.dirname, '..', '..', 'scripts', 'verify-local.sh');
+
   // Create a temp config with a failing command (exit 1)
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-integrate-fail-'));
   const tmpConfigPath = path.join(tmpDir, 'integration-pipelines.json');
@@ -766,29 +766,29 @@ verifyLocalTest('script integrate: failure output prints command', () => {
     }
   };
   fs.writeFileSync(tmpConfigPath, JSON.stringify(failConfig, null, 2));
-  
+
   // Run the script with the failing config and override changed areas to include server
   // This ensures the server gate runs regardless of git state
-  const env = { 
+  const env = {
     ...process.env,
     WORKFLOW_SUITE_CONTEXT: '1',
     INTEGRATION_CONFIG_PATH: tmpConfigPath,
     INTEGRATE_CHANGED_AREAS: 'server'
   };
-  const result = child_process.spawnSync(scriptPath, ['integrate'], { 
-    cwd: __dirname,
+  const result = child_process.spawnSync(scriptPath, ['integrate'], {
+    cwd: import.meta.dirname,
     env,
     encoding: 'utf8'
   });
-  
+
   // Cleanup temp dir
   fs.unlinkSync(tmpConfigPath);
   fs.rmdirSync(tmpDir, { recursive: true, force: true });
-  
+
   // The script should fail (non-zero exit)
   assert.notEqual(result.status, 0);
   const output = result.stdout + result.stderr;
-  
+
   // Verify failure output includes the area name and command
   assert.match(output, /=== FAIL: integration:server ===/);
   assert.match(output, /Command: exit 1/);
@@ -796,11 +796,9 @@ verifyLocalTest('script integrate: failure output prints command', () => {
 
 // Test for Finding 1: node parallix integrate sanitizes env vars (INTEGRATION_CONFIG_PATH, INTEGRATE_CHANGED_AREAS)
 verifyLocalTest('integrate command ignores INTEGRATION_CONFIG_PATH and INTEGRATE_CHANGED_AREAS env overrides', () => {
-  const child_process = require('child_process');
-  const os = require('os');
-  const scriptPath = path.join(__dirname, '..', '..', 'scripts', 'verify-local.sh');
-  const integratePath = path.join(__dirname, '..', 'src', 'platform', 'runtime', 'lib', 'commands', 'integrate.ts');
-  
+  const scriptPath = path.join(import.meta.dirname, '..', '..', 'scripts', 'verify-local.sh');
+  const integratePath = path.join(import.meta.dirname, '..', 'src', 'adapters', 'cli', 'commands', 'integrate.ts');
+
   // Create a temp config with harmless commands
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-integrate-env-sanitize-'));
   const tmpConfigPath = path.join(tmpDir, 'integration-pipelines.json');
@@ -810,82 +808,80 @@ verifyLocalTest('integrate command ignores INTEGRATION_CONFIG_PATH and INTEGRATE
     }
   };
   fs.writeFileSync(tmpConfigPath, JSON.stringify(testConfig, null, 2));
-  
+
   // Create a fake mission worktree for the test
   const worktreeDir = path.join(tmpDir, 'mission-test-123');
   fs.mkdirSync(worktreeDir, { recursive: true });
-  
+
   // We need to test that node parallix integrate does NOT use the env overrides
   // This means: when we set INTEGRATION_CONFIG_PATH to a non-existent or different config,
   // and INTEGRATE_CHANGED_AREAS to 'server', the integrate command should still
   // use the real repo config (which has server, auth-server, web-client, web-e2e gates)
   // and real changed area detection.
-  
+
   // However, since we're in a test environment without a real git repo setup,
   // we test the script directly with the env vars set, and then separately verify
   // that node parallix integrate strips these vars.
-  
+
   // First, verify that the script WITHOUT env sanitization would use the overrides
   // (this proves the env vars DO work when passed through)
-  const envWithOverrides = { 
-    ...process.env, 
+  const envWithOverrides = {
+    ...process.env,
     INTEGRATION_CONFIG_PATH: tmpConfigPath,
     INTEGRATE_CHANGED_AREAS: 'server'
   };
-  const resultWithOverrides = child_process.spawnSync(scriptPath, ['integrate'], { 
-    cwd: __dirname,
+  const resultWithOverrides = child_process.spawnSync(scriptPath, ['integrate'], {
+    cwd: import.meta.dirname,
     env: envWithOverrides,
     encoding: 'utf8'
   });
-  
+
   // With overrides, it should use our temp config and only run server gate
   // (and since our temp config has 'echo should-not-run', it won't actually fail)
   const outputWithOverrides = resultWithOverrides.stdout + resultWithOverrides.stderr;
   assert.match(outputWithOverrides, /should-not-run/);
-  
+
   // Now verify that the script with the repo's default config works normally
   // (without the test-only env vars)
-  const resultWithoutOverrides = child_process.spawnSync(scriptPath, ['integrate'], { 
-    cwd: __dirname,
+  const resultWithoutOverrides = child_process.spawnSync(scriptPath, ['integrate'], {
+    cwd: import.meta.dirname,
     env: process.env,
     encoding: 'utf8'
   });
-  
+
   // Cleanup temp dir
   fs.rmdirSync(tmpDir, { recursive: true, force: true });
-  
+
   // The result without overrides should use the repo's real config
   // It should either succeed (if no changed areas match) or run the real gates
   // The key point: output should NOT contain 'should-not-run'
   const outputWithoutOverrides = resultWithoutOverrides.stdout + resultWithoutOverrides.stderr;
-  assert.ok(!outputWithoutOverrides.includes('should-not-run'), 
+  assert.ok(!outputWithoutOverrides.includes('should-not-run'),
     'node parallix integrate should not use INTEGRATION_CONFIG_PATH override');
 });
 
 // Test for Finding 2: docs-only changes emit "no applicable gates" message in non-dry-run
 verifyLocalTest('script integrate: docs-only changed areas prints no applicable gates message (non-dry-run)', () => {
-  const child_process = require('child_process');
-  const os = require('os');
-  const scriptPath = path.join(__dirname, '..', '..', 'scripts', 'verify-local.sh');
-  
+  const scriptPath = path.join(import.meta.dirname, '..', '..', 'scripts', 'verify-local.sh');
+
   // Use the real repo config (which has server, auth-server, web-client, web-e2e gates)
   // Set changed areas to only 'docs' - none of the configured gates match 'docs'
-  const env = { 
+  const env = {
     ...process.env,
     WORKFLOW_SUITE_CONTEXT: '1',
     INTEGRATE_DRY_RUN: 'false',  // Non-dry-run
     INTEGRATE_CHANGED_AREAS: 'docs'
   };
-  const result = child_process.spawnSync(scriptPath, ['integrate'], { 
-    cwd: __dirname,
+  const result = child_process.spawnSync(scriptPath, ['integrate'], {
+    cwd: import.meta.dirname,
     env,
     encoding: 'utf8'
   });
-  
+
   // The script should succeed (exit 0) since no gates ran means success
   assert.equal(result.status, 0);
   const output = result.stdout + result.stderr;
-  
+
   // Should print the explicit "no applicable gates" message
   assert.match(output, /integration-gates: no applicable gates for changed areas/);
 });
@@ -894,8 +890,7 @@ verifyLocalTest('script integrate: docs-only changed areas prints no applicable 
 // The workflow area additionally triggers the direct workflow-suite gate. In
 // workflow-suite test context we skip the nested gate to avoid recursion.
 verifyLocalTest('script integrate: docs+workflow only changed areas prints no applicable gates message', () => {
-  const child_process = require('child_process');
-  const scriptPath = path.join(__dirname, '..', '..', 'scripts', 'verify-local.sh');
+  const scriptPath = path.join(import.meta.dirname, '..', '..', 'scripts', 'verify-local.sh');
 
   const env = {
     ...process.env,
@@ -904,7 +899,7 @@ verifyLocalTest('script integrate: docs+workflow only changed areas prints no ap
     INTEGRATE_CHANGED_AREAS: 'docs workflow'
   };
   const result = child_process.spawnSync(scriptPath, ['integrate'], {
-    cwd: __dirname,
+    cwd: import.meta.dirname,
     env,
     encoding: 'utf8'
   });
@@ -919,10 +914,8 @@ verifyLocalTest('script integrate: docs+workflow only changed areas prints no ap
 });
 
 verifyLocalTest('script integrate: dirty checkout with no gated area changes does not widen to staging', () => {
-  const child_process = require('child_process');
-  const os = require('os');
-  const scriptPath = path.join(__dirname, '..', '..', 'scripts', 'verify-local.sh');
-  const repoRoot = path.resolve(__dirname, '..', '..');
+  const scriptPath = path.join(import.meta.dirname, '..', '..', 'scripts', 'verify-local.sh');
+  const repoRoot = path.resolve(import.meta.dirname, '..', '..');
 
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-integrate-empty-'));
   const binDir = path.join(tmpDir, 'bin');
@@ -971,7 +964,7 @@ esac
   };
 
   const result = child_process.spawnSync(scriptPath, ['integrate'], {
-    cwd: __dirname,
+    cwd: import.meta.dirname,
     env,
     encoding: 'utf8'
   });
@@ -985,10 +978,8 @@ esac
 });
 
 verifyLocalTest('script integrate: explicit empty changed areas skip without widening from dirty checkout', () => {
-  const child_process = require('child_process');
-  const os = require('os');
-  const scriptPath = path.join(__dirname, '..', '..', 'scripts', 'verify-local.sh');
-  const repoRoot = path.resolve(__dirname, '..', '..');
+  const scriptPath = path.join(import.meta.dirname, '..', '..', 'scripts', 'verify-local.sh');
+  const repoRoot = path.resolve(import.meta.dirname, '..', '..');
 
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-integrate-explicit-empty-'));
   const binDir = path.join(tmpDir, 'bin');
@@ -1029,7 +1020,7 @@ esac
   };
 
   const result = child_process.spawnSync(scriptPath, ['integrate'], {
-    cwd: __dirname,
+    cwd: import.meta.dirname,
     env,
     encoding: 'utf8'
   });
@@ -1248,8 +1239,7 @@ test('getIntegrationGatePlan preserves run_last ordering with build gate inserte
 // Script-level tests for verify-local.sh integrate with build gate metadata
 
 verifyLocalTest('script integrate: dry-run shows build gate when lib area present (task-1419)', () => {
-  const child_process = require('child_process');
-  const scriptPath = path.join(__dirname, '..', 'scripts', 'verify-local.sh');
+  const scriptPath = path.join(import.meta.dirname, '..', 'scripts', 'verify-local.sh');
 
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-1419-script-dry-'));
   const tmpConfigPath = path.join(tmpDir, 'integration-pipelines.json');
@@ -1270,7 +1260,7 @@ verifyLocalTest('script integrate: dry-run shows build gate when lib area presen
   };
 
   const result = child_process.spawnSync(scriptPath, ['integrate'], {
-    cwd: __dirname,
+    cwd: import.meta.dirname,
     env,
     encoding: 'utf8'
   });
@@ -1285,8 +1275,7 @@ verifyLocalTest('script integrate: dry-run shows build gate when lib area presen
 });
 
 verifyLocalTest('script integrate: dry-run omits build gate for docs-only changes (task-1419)', () => {
-  const child_process = require('child_process');
-  const scriptPath = path.join(__dirname, '..', 'scripts', 'verify-local.sh');
+  const scriptPath = path.join(import.meta.dirname, '..', 'scripts', 'verify-local.sh');
 
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-1419-script-docs-'));
   const tmpConfigPath = path.join(tmpDir, 'integration-pipelines.json');
@@ -1308,7 +1297,7 @@ verifyLocalTest('script integrate: dry-run omits build gate for docs-only change
   };
 
   const result = child_process.spawnSync(scriptPath, ['integrate'], {
-    cwd: __dirname,
+    cwd: import.meta.dirname,
     env,
     encoding: 'utf8'
   });
@@ -1324,7 +1313,7 @@ verifyLocalTest('script integrate: dry-run omits build gate for docs-only change
 // task-1419: Verify the actual repo config declares the build gate correctly
 
 test('repo config declares build gate with correct metadata (task-1419)', () => {
-  const configPath = path.join(__dirname, '..', 'config', 'integration-pipelines.json');
+  const configPath = path.join(import.meta.dirname, '..', 'config', 'integration-pipelines.json');
   const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
 
   const buildGate = config?.gates?.build;
@@ -1337,7 +1326,7 @@ test('repo config declares build gate with correct metadata (task-1419)', () => 
 });
 
 test('repo config preserves existing gate orders (task-1419)', () => {
-  const configPath = path.join(__dirname, '..', 'config', 'integration-pipelines.json');
+  const configPath = path.join(import.meta.dirname, '..', 'config', 'integration-pipelines.json');
   const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
 
   assert.equal(config.gates.lib.order, 1, 'lib gate remains order 1');
@@ -1349,7 +1338,7 @@ test('repo config preserves existing gate orders (task-1419)', () => {
 });
 
 test('every representative changed-area plan includes the unconditional integration-suite gate (task-2292)', () => {
-  const configPath = path.join(__dirname, '..', 'config', 'integration-pipelines.json');
+  const configPath = path.join(import.meta.dirname, '..', 'config', 'integration-pipelines.json');
   const cases = [
     ['lib', 'lib/commands/integrate.ts', true],
     ['workflow', 'scripts/verify-local.sh', true],
@@ -1385,7 +1374,7 @@ test('every representative changed-area plan includes the unconditional integrat
 });
 
 test('getIntegrationGatePlan with repo config selects lib and build for lib changes (task-1419)', () => {
-  const configPath = path.join(__dirname, '..', 'config', 'integration-pipelines.json');
+  const configPath = path.join(import.meta.dirname, '..', 'config', 'integration-pipelines.json');
 
   const plan = getIntegrationGatePlan('task-1419', {
     runIntegrationGates: true,
@@ -1410,7 +1399,7 @@ test('getIntegrationGatePlan with repo config selects lib and build for lib chan
 });
 
 test('getIntegrationGatePlan with repo config excludes build for docs-only changes (task-1419)', () => {
-  const configPath = path.join(__dirname, '..', 'config', 'integration-pipelines.json');
+  const configPath = path.join(import.meta.dirname, '..', 'config', 'integration-pipelines.json');
 
   const plan = getIntegrationGatePlan('task-1419', {
     runIntegrationGates: true,

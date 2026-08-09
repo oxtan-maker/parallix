@@ -1,16 +1,19 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
-const fmt = require('../.test-runtime/application/presentation/cli-format.js');
-const mutationGate = require('../.test-runtime/adapters/verification/mutation-gate.js');
+import * as fmt from '../src/application/presentation/cli-format.js';
+import mutationGate from '../src/adapters/verification/mutation-gate.js';
 
-const STRONG_TEST = `const test = require('node:test');
-const assert = require('node:assert');
-const { add } = require('../.test-runtime/lib/core/widget.js');
+// Fixture sources written into a throwaway repository. They are read for a
+// substring check, never executed (the Stryker spawn is stubbed below), and are
+// ESM like the rest of the repository.
+const STRONG_TEST = `import test from 'node:test';
+import assert from 'node:assert';
+import { add } from '../lib/core/widget.js';
 test('add sums two numbers correctly', () => {
   assert.strictEqual(add(2, 3), 5);
   assert.strictEqual(add(-1, 1), 0);
@@ -21,9 +24,9 @@ test('add sums two numbers correctly', () => {
 // pass without actually validating behavior) — it exercises `add` but
 // never asserts on its return value, so every mutation to the function
 // body survives.
-const WEAK_TEST = `const test = require('node:test');
-const assert = require('node:assert');
-const { add } = require('../.test-runtime/lib/core/widget.js');
+const WEAK_TEST = `import test from 'node:test';
+import assert from 'node:assert';
+import { add } from '../lib/core/widget.js';
 test('add is callable', () => {
   assert.strictEqual(typeof add, 'function');
 });
@@ -35,7 +38,7 @@ function makeFixtureRepo() {
   fs.mkdirSync(path.join(repoRoot, 'test'), { recursive: true });
   fs.writeFileSync(
     path.join(repoRoot, 'lib', 'core', 'widget.js'),
-    'function add(a, b) {\n  return a + b;\n}\nmodule.exports = { add };\n'
+    'export function add(a, b) {\n  return a + b;\n}\n'
   );
   return repoRoot;
 }
@@ -53,7 +56,9 @@ function runGate(repoRoot, baselinePath, extraArgs = []) {
   const errors = [];
   let exitCode = null;
   const previousLogger = fmt.setLogger({
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     log: message => logs.push(fmt.stripAnsi(message)),
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     error: message => errors.push(fmt.stripAnsi(message)),
   });
   try {
@@ -63,6 +68,7 @@ function runGate(repoRoot, baselinePath, extraArgs = []) {
       // The ratchet is about how mutation scores affect the baseline, not
       // Stryker's own process execution. Simulate its report so this remains
       // a hermetic unit test on machines without the Stryker binary.
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
       spawnSyncFn: () => {
         const testSource = fs.readFileSync(path.join(repoRoot, 'test', 'widget.test.ts'), 'utf8');
         const mutants = testSource.includes('add is callable')

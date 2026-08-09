@@ -1,12 +1,15 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
 
-const config = require('../.test-runtime/adapters/cli/commands/config.js');
 
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const config = mockModule<typeof import('../src/adapters/cli/commands/config.js')>('../src/adapters/cli/commands/config.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
 async function withTempDir(fn) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-config-command-'));
   try {
@@ -20,7 +23,7 @@ function runConfig(root) {
   const logs = [];
   const errors = [];
   let exitCode = null;
-  return config([], {
+  return config.default([], {
     rootDir: root,
     logFn: message => logs.push(message),
     errorFn: message => errors.push(message),
@@ -56,7 +59,7 @@ test('config leaves a non-git standalone directory unchanged', () => {
     fs.writeFileSync(path.join(root, 'workflow.config.json'), '{}\n');
     fs.writeFileSync(path.join(root, 'existing.txt'), 'unrelated adopter content\n');
 
-    const result = await config([], {
+    const result = await config.default([], {
       rootDir: root,
       logFn: () => {},
       errorFn: () => {},

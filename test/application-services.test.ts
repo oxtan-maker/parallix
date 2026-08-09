@@ -1,8 +1,10 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
-
-const { StatsBackfillService } = require('../.test-runtime/application/stats-backfill-service.js');
-
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const StatsBackfillServiceModule = mockModule<typeof import('../src/application/stats-backfill-service.js')>('../src/application/stats-backfill-service.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const { StatsBackfillService } = StatsBackfillServiceModule;
 function strictStatsPort(overrides: Record<string, unknown> = {}) {
   const calls: string[] = [];
   const port = {
@@ -16,6 +18,7 @@ function strictStatsPort(overrides: Record<string, unknown> = {}) {
 test('stats service reads a source-labelled projection without mutation in query mode', async () => {
   const { port, calls } = strictStatsPort();
   const events: unknown[] = [];
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
   const result = await new StatsBackfillService(port, event => events.push(event)).execute({ operationId: 'stats-1', apply: false, capabilities: new Set() });
   assert.equal(result.status, 'completed');
   assert.deepEqual(calls, ['readProjection']);
@@ -24,6 +27,7 @@ test('stats service reads a source-labelled projection without mutation in query
 
 test('stats service rejects apply capability before any mutation-port call', async () => {
   const { port, calls } = strictStatsPort();
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
   const result = await new StatsBackfillService(port).execute({ operationId: 'stats-1', apply: true, capabilities: new Set() });
   assert.equal(result.status, 'rejected');
   assert.equal(result.error.kind, 'capability');
@@ -33,6 +37,7 @@ test('stats service rejects apply capability before any mutation-port call', asy
 test('stats service cancels at the safe boundary before applying rows', async () => {
   const cancellation = { requested: false };
   const { port, calls } = strictStatsPort({ async readProjection() { calls.push('readProjection'); cancellation.requested = true; return { rows: [], sources: [] }; } });
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
   const result = await new StatsBackfillService(port).execute({ operationId: 'stats-1', apply: true, capabilities: new Set(['stats:apply']), cancellation });
   assert.equal(result.status, 'cancelled');
   assert.deepEqual(calls, ['readProjection']);

@@ -26,7 +26,9 @@ class InMemoryUsageRepository implements UsageRepository {
 
 test('throughput excludes active and review telemetry, and weekly buckets use closure week', async () => {
   const adapter = new ConcreteMetricsReadAdapter({
-    laneEventRepo: { findByRepositoryId: async () => [] } as BoardLaneEventRepository,
+    // Partial double: this test only reads lane events, so the writing half of
+    // the port is deliberately absent and the cast goes through `unknown`.
+    laneEventRepo: { findByRepositoryId: async () => [] } as unknown as BoardLaneEventRepository,
     usageRepo: new InMemoryUsageRepository([
       { repo: 'parallix', mission: 'task-closed', date: '2026-06-01', closed: 'yes', duration_minutes: 10 },
       { repo: 'parallix', mission: 'task-active', date: '2026-07-27', stage: 'active', closed: 'no', duration_minutes: 20 },

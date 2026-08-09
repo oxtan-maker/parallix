@@ -1,7 +1,4 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const missionStart = require('../.test-runtime/adapters/cli/mission-start.js');
 
 // Reproduces task-2200: mission-start's primary classification lookup
 // (mission-start.ts:148) calls resolveMissionClassificationFn(slug) without
@@ -9,12 +6,19 @@ const missionStart = require('../.test-runtime/adapters/cli/mission-start.js');
 // process.cwd() instead of the mission's actual worktree. When the process is
 // not physically cwd'd into the worktree (e.g. driven from the primary
 // checkout), classification resolution silently looks in the wrong root.
+
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const missionStart = mockModule<typeof import('../src/adapters/cli/mission-start.js')>('../src/adapters/cli/mission-start.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
 test('missionStart resolves classification using the mission worktree cwd, not process.cwd()', () => {
   const lines = [];
   const errors = [];
   const seenRootDirs = [];
 
-  const result = missionStart(['task-2200'], {
+  const result = missionStart.default(['task-2200'], {
     returnResult: true,
     cwdFn: () => '/tmp/project-task-2200',
     getCurrentBranchFn: () => 'mission/task-2200',

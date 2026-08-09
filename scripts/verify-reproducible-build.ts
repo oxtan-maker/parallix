@@ -80,13 +80,6 @@ function main(rootDir: string = process.cwd()): number {
 export { artifactDifferences, buildClean, compareFileLists, listFiles, main };
 export type { BuildArtifact };
 
-// Run as a script (`tsx scripts/verify-reproducible-build.ts`) and also consumed
-// via require() from the CommonJS test files.
-declare const module: { exports: any } | undefined;
-declare const require: { main?: unknown } | undefined;
-if (typeof module !== 'undefined') {
-  if (typeof require !== 'undefined' && require.main === module) { process.exitCode = main(); }
-  module.exports = { artifactDifferences, buildClean, compareFileLists, listFiles, main };
-} else if (process.argv[1] && path.basename(process.argv[1]).startsWith('verify-reproducible-build')) {
+if (process.argv[1] && path.basename(process.argv[1]).startsWith('verify-reproducible-build')) {
   process.exitCode = main();
 }

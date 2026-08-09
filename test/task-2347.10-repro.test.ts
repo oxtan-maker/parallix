@@ -7,15 +7,24 @@
 // This test seeds reviewEvents (the live source) and asserts prFixRounds > 0.
 // It FAILS on the current implementation (returns 0) and PASSES after the fix.
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const path = require('path');
-const { spawnSync } = require('child_process');
-const os = require('os');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import os from 'node:os';
 
-const stats = require('../.test-runtime/adapters/cli/commands/stats.js');
-const { agentFamily } = require('../.test-runtime/domain/agents.js');
+// The helpers this file exercises hang off the default export object rather
+// than the module's named exports, so this must be the default import.
+import stats from '../src/adapters/cli/commands/stats.js';
+import { agentFamily } from '../src/domain/agents.js';
+import { SqliteDatabaseAdapter } from '../src/adapters/sqlite/database-adapter.js';
+import { SqliteMigrationRunner, loadDefaultMigrations } from '../src/adapters/sqlite/migration-runner.js';
+import { SqliteMissionStore } from '../src/adapters/sqlite/mission-store.js';
+import { clearOperatorStateCache } from '../src/adapters/sqlite/adapter-factory.js';
+import { missionId } from '../src/domain/mission.js';
+import { repositoryId } from '../src/domain/repository.js';
+import { changeRevision } from '../src/domain/review.js';
 
 function createRepoFixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2347.10-'));
@@ -31,14 +40,6 @@ function createRepoFixture() {
 // Helper: seed a mission with reviewEvents (live source) but rounds[].decision = null.
 // This matches the actual live loop: events written, decision never set to 'changes-requested'.
 async function seedMissionWithEvents(home, slug, rootDir, reviewEvents, roundOverrides = {}) {
-  const { SqliteDatabaseAdapter } = require('../.test-runtime/adapters/sqlite/database-adapter.js');
-  const { SqliteMigrationRunner, loadDefaultMigrations } = require('../.test-runtime/adapters/sqlite/migration-runner.js');
-  const { SqliteMissionStore } = require('../.test-runtime/adapters/sqlite/mission-store.js');
-  const { clearOperatorStateCache } = require('../.test-runtime/adapters/sqlite/adapter-factory.js');
-  const { missionId } = require('../.test-runtime/domain/mission.js');
-  const { repositoryId } = require('../.test-runtime/domain/repository.js');
-  const { changeRevision } = require('../.test-runtime/domain/review.js');
-
   fs.mkdirSync(home, { recursive: true });
   const previousHome = process.env.PARALLIX_HOME;
   process.env.PARALLIX_HOME = home;
@@ -88,6 +89,7 @@ async function seedMissionWithEvents(home, slug, rootDir, reviewEvents, roundOve
     },
   };
 
+  // @ts-expect-error -- TASK-2328: runtime-only property/partial test double absent from the inferred type.
   await store.save(mission, null);
 
   // Seed import history to avoid re-import conflicts
@@ -153,6 +155,7 @@ test('deriveImplementerAndFixRounds counts fix rounds from reviewEvents (task-23
   );
 
   try {
+    // @ts-expect-error -- TASK-2328: runtime-only property/partial test double absent from the inferred type.
     const info = await stats._internals.deriveImplementerAndFixRounds(
       'task-2347.10-repro',
       root,
@@ -230,6 +233,7 @@ test('deriveImplementerAndFixRounds counts two fix rounds from reviewEvents (tas
   );
 
   try {
+    // @ts-expect-error -- TASK-2328: runtime-only property/partial test double absent from the inferred type.
     const info = await stats._internals.deriveImplementerAndFixRounds(
       'task-2347.10-two-rounds',
       root,
@@ -273,6 +277,7 @@ test('deriveImplementerAndFixRounds returns 0 for approved-first-time mission (t
   );
 
   try {
+    // @ts-expect-error -- TASK-2328: runtime-only property/partial test double absent from the inferred type.
     const info = await stats._internals.deriveImplementerAndFixRounds(
       'task-2347.10-approved-first',
       root,
@@ -301,6 +306,7 @@ test('deriveImplementerAndFixRounds returns unknown when no reviewEvents and no 
   );
 
   try {
+    // @ts-expect-error -- TASK-2328: runtime-only property/partial test double absent from the inferred type.
     const info = await stats._internals.deriveImplementerAndFixRounds(
       'task-2347.10-unknown',
       root,

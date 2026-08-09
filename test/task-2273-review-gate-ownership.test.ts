@@ -1,19 +1,24 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
-const os = require('node:os');
-const childProcess = require('node:child_process');
-const { performHandoff } = require('../.test-runtime/adapters/cli/commands/handoff.js');
-const missionUtils = require('../.test-runtime/adapters/filesystem/mission-utils.js');
-const git = require('../.test-runtime/adapters/git/git.js');
-const backlog = require('../.test-runtime/adapters/backlog/backlog.js');
 
-const REPO_ROOT = path.join(__dirname, '..');
+
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import childProcess from 'node:child_process';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const performHandoffModule = mockModule<typeof import('../src/adapters/cli/commands/handoff.js')>('../src/adapters/cli/commands/handoff.js', import.meta.url);
+const missionUtils = mockModule<typeof import('../src/adapters/filesystem/mission-utils.js')>('../src/adapters/filesystem/mission-utils.js', import.meta.url);
+const git = mockModule<typeof import('../src/adapters/git/git.js')>('../src/adapters/git/git.js', import.meta.url);
+const backlog = mockModule<typeof import('../src/adapters/backlog/backlog.js')>('../src/adapters/backlog/backlog.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const { performHandoff } = performHandoffModule;
+const REPO_ROOT = path.join(import.meta.dirname, '..');
 const SOURCE_ROOT = path.join(REPO_ROOT, 'src');
 
-const { stubMissionServices } = require('./helpers/stub-mission-services.js');
+import { stubMissionServices } from './helpers/stub-mission-services.js';
 
 test('task-2273 baseline: handoff owns two commit-equivalent general-gate invocations', () => {
   const handoff = fs.readFileSync(path.join(SOURCE_ROOT, 'adapters', 'cli', 'commands', 'handoff.ts'), 'utf8');

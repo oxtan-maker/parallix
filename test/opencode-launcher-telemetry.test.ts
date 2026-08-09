@@ -1,16 +1,20 @@
+// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 
+
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { EventEmitter } from 'node:events';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const opencode = mockModule<typeof import('../src/adapters/agents/opencode.js')>('../src/adapters/agents/opencode.js', import.meta.url);
+const captureOpencodeExportModule = mockModule<typeof import('../src/adapters/agents/opencode-export.js')>('../src/adapters/agents/opencode-export.js', import.meta.url);
+const stats = mockModule<typeof import('../src/adapters/cli/commands/stats.js')>('../src/adapters/cli/commands/stats.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const { captureOpencodeExport } = captureOpencodeExportModule;
 'use strict';
-
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
-const { EventEmitter } = require('node:events');
-
-const opencode = require('../.test-runtime/adapters/agents/opencode.js');
-const { captureOpencodeExport } = require('../.test-runtime/adapters/agents/opencode-export.js');
-const stats = require('../.test-runtime/adapters/cli/commands/stats.js');
 
 // Captured from a real `opencode export` (opencode v2.0.0, session
 // ses_132f470d8ffexge85esdX0nzCs, model cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit,
@@ -18,7 +22,7 @@ const stats = require('../.test-runtime/adapters/cli/commands/stats.js');
 // the message/part skeleton (bulky tool input/output/preview payloads stripped),
 // so the real export schema and the 59 tool-part count are preserved without
 // committing a ~565 KB blob.
-const FIXTURE = path.join(__dirname, 'fixtures', 'opencode-export-v2.json');
+const FIXTURE = path.join(import.meta.dirname, 'fixtures', 'opencode-export-v2.json');
 
 function resetInjections() {
   opencode.__setSpawnAndTeeForTest(null);

@@ -1,14 +1,18 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const { spawnSync } = require('child_process');
 
-const stats = require('../.test-runtime/adapters/cli/commands/stats.js');
-const { recordPostIntegrationStats } = require('../.test-runtime/adapters/cli/commands/integrate.js');
 
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { spawnSync } from 'child_process';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const stats = mockModule<typeof import('../src/adapters/cli/commands/stats.js')>('../src/adapters/cli/commands/stats.js', import.meta.url);
+const recordPostIntegrationStatsModule = mockModule<typeof import('../src/adapters/cli/commands/integrate.js')>('../src/adapters/cli/commands/integrate.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const { recordPostIntegrationStats } = recordPostIntegrationStatsModule;
 function git(args, cwd) {
   const result = spawnSync('git', args, { cwd, encoding: 'utf8' });
   if (result.status !== 0) {

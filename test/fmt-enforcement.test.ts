@@ -1,14 +1,15 @@
 
-const assert = require('node:assert');
-const test = require('node:test');
-const fs = require('node:fs');
-const path = require('node:path');
 
 // Enforced against TypeScript source rather than a generated tree: the source
 // is authoritative after the transitional dist/ emitter was retired, and the
 // check no longer needs a build to have run first.
-const RUNTIME_LIB = path.join(__dirname, '..', 'src', 'adapters', 'cli');
-const RUNTIME_INDEX = path.join(__dirname, '..', 'src', 'interfaces', 'cli', 'runtime.ts');
+
+import assert from 'node:assert';
+import test from 'node:test';
+import fs from 'node:fs';
+import path from 'node:path';
+const RUNTIME_LIB = path.join(import.meta.dirname, '..', 'src', 'adapters', 'cli');
+const RUNTIME_INDEX = path.join(import.meta.dirname, '..', 'src', 'interfaces', 'cli', 'runtime.ts');
 // fmt.ts is the centralized terminal sink — the one place allowed to call console.*
 const EXCLUDED = new Set(['fmt.ts']);
 const CONSOLE_RE = /console\.(log|error)/;

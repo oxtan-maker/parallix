@@ -7,7 +7,7 @@
  * the rationale and lifecycle placement (pre-integrate, not per-checkpoint).
  *
  * Usage:
- *   node .test-runtime/adapters/verification/mutation-gate.js [--dry-run] [--base <branch>] [--head <ref>]
+ *   npx tsx src/adapters/verification/mutation-gate.ts [--dry-run] [--base <branch>] [--head <ref>]
  *     [--baseline-path <path>] [--threshold <pct>]
  *
  * Exit 0 when every diff-scoped file's mutation score is >= its baseline
@@ -25,7 +25,7 @@ import { getPrimaryBranch as getPrimaryBranchDefault } from '../filesystem/missi
 import * as fmt from '../../application/presentation/cli-format.js';
 import { packageRoot } from '../filesystem/package-root.js';
 
-const MODULE_DIR = import.meta.url ? path.dirname(fileURLToPath(import.meta.url)) : __dirname;
+const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = packageRoot(MODULE_DIR);
 const DEFAULT_BASELINE_PATH = path.join(REPO_ROOT, 'config', 'mutation-baseline.json');
 // Rough per-mutant wall-clock budget for --dry-run's predicted-runtime estimate,
@@ -102,7 +102,11 @@ function findTestFiles(targetFiles: string[], repoRoot: string, fsModule: typeof
   if (!fsModule.existsSync(testDir)) {return [];}
   const matched = new Set<string>();
   for (const target of targetFiles) {
-    const base = path.basename(target, '.js');
+    // Targets are authored TypeScript, so strip whatever extension the scoper
+    // produced rather than assuming an emitted `.js` name — stripping the wrong
+    // extension leaves `<name>.ts` and matches nothing, which silently widens
+    // the run to the entire `test/` tree.
+    const base = path.basename(target, path.extname(target));
     const candidate = path.join(testDir, `${base}.test.ts`);
     if (fsModule.existsSync(candidate)) {matched.add(candidate);}
   }
@@ -121,7 +125,10 @@ function buildStrykerConfig(targetFiles: string[], testFiles: string[], repoRoot
     mutate: targetFiles,
     testRunner: 'command',
     commandRunner: {
-      command: `${process.execPath} --import tsx --test ${relTestFiles.join(' ')}`,
+      // The test seam replaces dependencies with `mock.module()`, which Node
+      // only enables behind `--experimental-test-module-mocks`; without it every
+      // seam-using file throws on import and every mutant reads as survived.
+      command: `${process.execPath} --import tsx --experimental-test-module-mocks --test ${relTestFiles.join(' ')}`,
     },
     reporters: ['json'],
     coverageAnalysis: 'off',
@@ -309,16 +316,14 @@ function run(args: string[] = [], options: MutationGateOptions = {}) {
   }
 }
 
-// Entry detection for both module systems: `require.main` under the CommonJS
-// test runtime, and the invoked script path when run as an ESM script
+// Entry detection: the invoked script path when run as an ESM script
 // (`tsx src/adapters/verification/mutation-gate.ts`).
 //
 // Deliberately NOT compared against import.meta.url: this module is inlined
 // into the canonical bundle, where every inlined module reports the bundle's
 // own URL. That would make the gate run on every `px` command.
-const isCjsEntry = typeof require !== 'undefined' && require.main === module;
 const isEsmEntry = Boolean(process.argv[1]) && /[\\/]mutation-gate\.ts$/.test(process.argv[1]);
-if (isCjsEntry || isEsmEntry) {
+if (isEsmEntry) {
   run(process.argv.slice(2));
 }
 
@@ -343,7 +348,3 @@ export {
   DEFAULT_BASELINE_PATH,
   SECONDS_PER_TARGET_FILE,
 };
-
-// CJS compat: ensure require() returns the function directly
-declare const module: { exports: any } | undefined;
-if (typeof module !== 'undefined') { module.exports = run; }

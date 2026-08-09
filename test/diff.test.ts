@@ -1,9 +1,14 @@
-
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const path = require('path');
+// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 
 // Mock child_process and other dependencies
+
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import path from 'path';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const diff = mockModule<typeof import('../src/adapters/cli/commands/diff.js')>('../src/adapters/cli/commands/diff.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
 const mockGit = (responses) => (args, options = {}) => {
   const cmd = args.join(' ');
   for (const [pattern, response] of responses) {
@@ -15,7 +20,6 @@ const mockGit = (responses) => (args, options = {}) => {
 };
 
 test('node parallix diff resolves correct target branches', async (t) => {
-  const diff = require('../.test-runtime/adapters/cli/commands/diff.js');
   const calls = [];
   const worktree = '/tmp/mission-task-1147';
 
@@ -29,7 +33,7 @@ test('node parallix diff resolves correct target branches', async (t) => {
     return { status: 0 };
   };
 
-  await diff(['task-1147'], {
+  await diff.default(['task-1147'], {
     gitFn,
     spawnSyncFn: spawnSync,
     inferSlugFn: () => 'task-1147',
@@ -46,7 +50,6 @@ test('node parallix diff resolves correct target branches', async (t) => {
 });
 
 test('node parallix diff detects pager.diff', async (t) => {
-  const diff = require('../.test-runtime/adapters/cli/commands/diff.js');
   const calls = [];
   const worktree = '/tmp/mission-task-1147';
 
@@ -61,7 +64,7 @@ test('node parallix diff detects pager.diff', async (t) => {
     return { status: 0 };
   };
 
-  await diff(['task-1147'], {
+  await diff.default(['task-1147'], {
     gitFn,
     spawnSyncFn: spawnSync,
     inferSlugFn: () => 'task-1147',
@@ -78,7 +81,6 @@ test('node parallix diff detects pager.diff', async (t) => {
 });
 
 test('node parallix diff detects core.pager', async (t) => {
-  const diff = require('../.test-runtime/adapters/cli/commands/diff.js');
   const calls = [];
   const worktree = '/tmp/mission-task-1147';
 
@@ -94,7 +96,7 @@ test('node parallix diff detects core.pager', async (t) => {
     return { status: 0 };
   };
 
-  await diff(['task-1147'], {
+  await diff.default(['task-1147'], {
     gitFn,
     spawnSyncFn: spawnSync,
     inferSlugFn: () => 'task-1147',
@@ -111,7 +113,6 @@ test('node parallix diff detects core.pager', async (t) => {
 });
 
 test('node parallix diff rejects less variants', async (t) => {
-  const diff = require('../.test-runtime/adapters/cli/commands/diff.js');
   const calls = [];
 
   const gitFn = mockGit([
@@ -121,7 +122,7 @@ test('node parallix diff rejects less variants', async (t) => {
     [/branch --list --format/, { status: 0, stdout: 'main\n' }]
   ]);
 
-  await diff(['task-1147'], {
+  await diff.default(['task-1147'], {
     gitFn,
     spawnSyncFn: () => ({ status: 0 }),
     inferSlugFn: () => 'task-1147',
@@ -137,7 +138,6 @@ test('node parallix diff rejects less variants', async (t) => {
 });
 
 test('node parallix diff fails on spawn error', async (t) => {
-  const diff = require('../.test-runtime/adapters/cli/commands/diff.js');
   const calls = [];
 
   const gitFn = mockGit([
@@ -145,7 +145,7 @@ test('node parallix diff fails on spawn error', async (t) => {
     [/branch --list --format/, { status: 0, stdout: 'main\n' }]
   ]);
 
-  await diff(['task-1147'], {
+  await diff.default(['task-1147'], {
     gitFn,
     spawnSyncFn: () => ({ error: new Error('spawn failed'), status: null }),
     inferSlugFn: () => 'task-1147',
@@ -161,7 +161,6 @@ test('node parallix diff fails on spawn error', async (t) => {
 });
 
 test('node parallix diff fails on spawn signal', async (t) => {
-  const diff = require('../.test-runtime/adapters/cli/commands/diff.js');
   const calls = [];
 
   const gitFn = mockGit([
@@ -169,7 +168,7 @@ test('node parallix diff fails on spawn signal', async (t) => {
     [/branch --list --format/, { status: 0, stdout: 'main\n' }]
   ]);
 
-  await diff(['task-1147'], {
+  await diff.default(['task-1147'], {
     gitFn,
     spawnSyncFn: () => ({ signal: 'SIGKILL', status: null }),
     inferSlugFn: () => 'task-1147',
@@ -185,10 +184,9 @@ test('node parallix diff fails on spawn signal', async (t) => {
 });
 
 test('node parallix diff fails when slug cannot be inferred', async (t) => {
-  const diff = require('../.test-runtime/adapters/cli/commands/diff.js');
   const calls = [];
 
-  await diff([], {
+  await diff.default([], {
     gitFn: () => ({ status: 0 }),
     spawnSyncFn: () => ({ status: 0 }),
     inferSlugFn: () => null,
@@ -201,10 +199,9 @@ test('node parallix diff fails when slug cannot be inferred', async (t) => {
 });
 
 test('node parallix diff fails when primary branch detection fails', async (t) => {
-  const diff = require('../.test-runtime/adapters/cli/commands/diff.js');
   const calls = [];
 
-  await diff(['task-1147'], {
+  await diff.default(['task-1147'], {
     gitFn: () => ({ status: 0 }),
     spawnSyncFn: () => ({ status: 0 }),
     inferSlugFn: () => 'task-1147',
@@ -219,7 +216,6 @@ test('node parallix diff fails when primary branch detection fails', async (t) =
 });
 
 test('node parallix diff fails when no tool is configured', async (t) => {
-  const diff = require('../.test-runtime/adapters/cli/commands/diff.js');
   const calls = [];
 
   const gitFn = mockGit([
@@ -228,7 +224,7 @@ test('node parallix diff fails when no tool is configured', async (t) => {
     [/config --get core.pager/, { status: 0, stdout: 'less\n' }]
   ]);
 
-  await diff(['task-1147'], {
+  await diff.default(['task-1147'], {
     gitFn,
     spawnSyncFn: () => ({ status: 0 }),
     inferSlugFn: () => 'task-1147',
@@ -244,10 +240,9 @@ test('node parallix diff fails when no tool is configured', async (t) => {
 });
 
 test('node parallix diff fails when mission worktree cannot be resolved', async (t) => {
-  const diff = require('../.test-runtime/adapters/cli/commands/diff.js');
   const calls = [];
 
-  await diff(['task-1147'], {
+  await diff.default(['task-1147'], {
     gitFn: () => ({ status: 0 }),
     spawnSyncFn: () => ({ status: 0 }),
     inferSlugFn: () => 'task-1147',

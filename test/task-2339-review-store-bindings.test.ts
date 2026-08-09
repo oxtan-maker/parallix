@@ -1,14 +1,14 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
-const {
+import {
   bindReviewPersistence,
   reviewLoopBindings,
-} = require('../.test-runtime/composition/review-persistence.js');
-const { createEvent } = require('../.test-runtime/adapters/review/review-events.js');
+} from '../src/composition/review-persistence.js';
+import { createEvent } from '../src/adapters/review/review-events.js';
 
 /**
  * A Mission with a Review on round 3, so a bound consumer is distinguishable

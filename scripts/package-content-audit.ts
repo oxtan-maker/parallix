@@ -144,13 +144,6 @@ function main(rootDir: string = process.cwd()): number {
 
 export { checksumViolations, main, packageFiles, parsePackReport, violationsFor };
 
-// Run as a script (`tsx scripts/package-content-audit.ts`) and also consumed via
-// require() from the CommonJS test files, so both entry shapes are handled.
-declare const module: { exports: any } | undefined;
-declare const require: { main?: unknown } | undefined;
-if (typeof module !== 'undefined') {
-  if (typeof require !== 'undefined' && require.main === module) { process.exitCode = main(); }
-  module.exports = { checksumViolations, main, packageFiles, parsePackReport, violationsFor };
-} else if (process.argv[1] && path.basename(process.argv[1]).startsWith('package-content-audit')) {
+if (process.argv[1] && path.basename(process.argv[1]).startsWith('package-content-audit')) {
   process.exitCode = main();
 }

@@ -1,12 +1,13 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
-const childProcess = require('node:child_process');
 
-const REPO_ROOT = path.join(__dirname, '..');
+
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import childProcess from 'node:child_process';
+const REPO_ROOT = path.join(import.meta.dirname, '..');
 const SCRIPT_SOURCE = path.join(REPO_ROOT, 'scripts', 'refresh-global-px.sh');
 
 function writeExecutable(filePath, content) {
@@ -38,7 +39,6 @@ process.stdout.write('1.0.1\\n');
 
   writeExecutable(path.join(binDir, 'npm'), `#!/usr/bin/env node
 const fs = require('node:fs');
-const path = require('node:path');
 const logPath = ${JSON.stringify(logPath)};
 const args = process.argv.slice(2);
 fs.appendFileSync(logPath, 'npm ' + args.join(' ') + '\\n');

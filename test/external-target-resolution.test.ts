@@ -1,16 +1,20 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const { spawnSync } = require('child_process');
-
-const { findMissionDir, getMissionYear, findCheckpoints, getFirstLine, missionTitle, missionPathForSlug, missionDirForSlug } = require('../.test-runtime/adapters/filesystem/mission-utils.js');
 
 // Resolve REPO_ROOT dynamically so the leak-detention test does not reference
 // a concrete absolute path that would be operator-local.
-const REPO_ROOT = path.resolve(__dirname, '..');
+
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { spawnSync } from 'child_process';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const findMissionDirModule = mockModule<typeof import('../src/adapters/filesystem/mission-utils.js')>('../src/adapters/filesystem/mission-utils.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const { findMissionDir, getMissionYear, findCheckpoints, getFirstLine, missionTitle, missionPathForSlug, missionDirForSlug } = findMissionDirModule;
+const REPO_ROOT = path.resolve(import.meta.dirname, '..');
 
 // ============================================================
 // CP-2: External-target resolution — proves a command handler
@@ -190,12 +194,13 @@ test('node parallix mission-start verify-env resolves from a temp dir without re
     }, null, 2));
 
     // Run mission-start verify-env from a temp directory that does NOT contain parallix source tree
-    const result = spawnSync(process.execPath, [path.join(__dirname, '..', 'build', 'px.mjs'), 'mission-start', 'verify-env'], {
+    const result = spawnSync(process.execPath, [path.join(import.meta.dirname, '..', 'build', 'px.mjs'), 'mission-start', 'verify-env'], {
       cwd: tempDir,
       encoding: 'utf8',
       timeout: 15000,
     });
     const output = `${result.stdout || ''}${result.stderr || ''}`;
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     if (result.error && result.error.code === 'EPERM' && !output) {
       return;
     }
@@ -219,6 +224,7 @@ function runCommand(command, args, options = {}) {
     encoding: 'utf8',
     ...options
   });
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
   if (result.error && !(result.error.code === 'EPERM' && result.status === 0)) {
     throw result.error;
   }

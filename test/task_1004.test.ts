@@ -1,11 +1,18 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const { resolveTaskFile, checkBacklogIntegrity } = require('../.test-runtime/adapters/backlog/backlog.js');
 
+
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const resolveTaskFileModule = mockModule<typeof import('../src/adapters/backlog/backlog.js')>('../src/adapters/backlog/backlog.js', import.meta.url);
+const findMissionDirModule = mockModule<typeof import('../src/adapters/filesystem/mission-utils.js')>('../src/adapters/filesystem/mission-utils.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const { resolveTaskFile, checkBacklogIntegrity } = resolveTaskFileModule;
+const { findMissionDir, getMissionYear } = findMissionDirModule;
 function withTempRepo(fn) {
   const previous = process.cwd();
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-task-1004-'));
@@ -23,11 +30,11 @@ function withTempRepo(fn) {
 test('resolveTaskFile prefers exact frontmatter id: match over filename-prefix matches', () => {
   withTempRepo(root => {
     const taskDir = path.join(root, 'backlog', 'tasks');
-    
+
     // Create two files with the same filename prefix but different frontmatter IDs
     const file1 = path.join(taskDir, 'task-093 - gemini-draft-bug.md');
     fs.writeFileSync(file1, '---\nid: TASK-093\n---\n');
-    
+
     const file2 = path.join(taskDir, 'task-093 - Non-UI-Login-Helper.md');
     fs.writeFileSync(file2, '---\nid: TASK-099\n---\n');
 
@@ -35,7 +42,7 @@ test('resolveTaskFile prefers exact frontmatter id: match over filename-prefix m
     const result = resolveTaskFile('task-093');
     assert.equal(result.ok, true);
     assert.equal(result.taskFile, fs.realpathSync(file1));
-    
+
     // Searching for task-099 should resolve to file2 even if its filename starts with task-093
     const result2 = resolveTaskFile('task-099');
     assert.equal(result2.ok, true, `Expected task-099 to resolve via frontmatter ID, got: ${result2.reason}`);
@@ -46,10 +53,10 @@ test('resolveTaskFile prefers exact frontmatter id: match over filename-prefix m
 test('resolveTaskFile handles slugs with suffixes by falling back to base task ID', () => {
   withTempRepo(root => {
     const taskDir = path.join(root, 'backlog', 'tasks');
-    
+
     const file1 = path.join(taskDir, 'task-1004 - harden-workflow.md');
     fs.writeFileSync(file1, '---\nid: TASK-1004\n---\n');
-    
+
     // Searching for task-1004-modern should resolve to file1 because it starts with task-1004
     const result = resolveTaskFile('task-1004-modern');
     assert.equal(result.ok, true);
@@ -59,7 +66,6 @@ test('resolveTaskFile handles slugs with suffixes by falling back to base task I
 
 test('findMissionDir and getMissionYear handle slugs with suffixes', () => {
   withTempRepo(root => {
-    const { findMissionDir, getMissionYear } = require('../.test-runtime/adapters/filesystem/mission-utils.js');
     const missionDir = path.join(root, 'docs', 'missions', '2026', 'task-1004');
     fs.mkdirSync(missionDir, { recursive: true });
     fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Mission\n');

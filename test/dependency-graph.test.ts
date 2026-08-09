@@ -4,14 +4,8 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-const {
-  allowedDependencyGraph,
-  findDependencyViolations,
-  findProductionDependencyViolations,
-  findPlatformPaths,
-  layerRoots,
-} = require('../.test-runtime/adapters/architecture/boundary-guards.js');
-
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
+import { allowedDependencyGraph, findDependencyViolations, findProductionDependencyViolations, findPlatformPaths, layerRoots, legacyLayerRoots, } from '../src/adapters/architecture/boundary-guards.js';
 function withFixture(source: string, target: string, run: (root: string) => void): void {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dependency-graph-'));
   try {
@@ -104,4 +98,8 @@ test('platform-path guard rejects a production legacy directory even without an 
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('repository has no retired src/platform paths', () => {
+  assert.deepEqual(findPlatformPaths(process.cwd()), []);
 });

@@ -1,20 +1,20 @@
 
-'use strict';
 
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
-const test = require('node:test');
-const assert = require('node:assert/strict');
-
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import test from 'node:test';
+import assert from 'node:assert/strict';
 const originalOpenSync = fs.openSync;
 const originalTmpdir = os.tmpdir;
 
+// Import the smoke suite for its helpers only. The flag is set before the
+// dynamic import so the smoke tests themselves do not register here.
+process.env.PARALLIX_E2E_SMOKE_TEST_HELPERS = '1';
+const smokeHelpers = await import('./e2e-real-agent-smoke.test.js');
+
 function loadSmokeHelpers() {
-  process.env.PARALLIX_E2E_SMOKE_TEST_HELPERS = '1';
-  const smokePath = require.resolve('./e2e-real-agent-smoke.test.ts');
-  delete require.cache[smokePath];
-  return require(smokePath);
+  return smokeHelpers;
 }
 
 test('real-agent smoke capture removes its first stdout file when stderr capture setup fails', () => {
@@ -117,6 +117,7 @@ test('real-agent smoke preflight reports temporary-storage exhaustion before fix
   const result = temporaryCapacityPreflight({
     tmpDir: '/owned-test-temp',
     requiredBytes: 1024,
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     statfs: () => ({ bavail: 1, bsize: 512 })
   });
   assert.deepEqual(result, {

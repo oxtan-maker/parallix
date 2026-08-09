@@ -1,18 +1,12 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
 
-const {
-  graphifyAvailable,
-  probeGraphifyAvailability,
-  updateGraphifyKnowledgeGraph,
-  resolveGraphPath,
-  queryGraph,
-} = require('../.test-runtime/adapters/filesystem/mission-utils.js');
 
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { graphifyAvailable, probeGraphifyAvailability, updateGraphifyKnowledgeGraph, resolveGraphPath, queryGraph, } from '../src/adapters/filesystem/mission-utils.js';
 test('probeGraphifyAvailability and graphifyAvailable distinguish missing commands from probe failures', () => {
   const missing = probeGraphifyAvailability({
     commandRunner: () => {
@@ -33,6 +27,7 @@ test('probeGraphifyAvailability and graphifyAvailable distinguish missing comman
   });
   assert.equal(failure.available, false);
   assert.equal(failure.reason, 'probe-failed');
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
   assert.match(failure.error.message, /permission denied/);
 });
 

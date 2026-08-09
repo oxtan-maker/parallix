@@ -1,25 +1,41 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const path = require('path');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import path from 'path';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+import { createRequire } from 'node:module';
+const _require = createRequire(import.meta.url);
+const gitModule = mockModule<typeof import('../src/adapters/git/git.js')>('../src/adapters/git/git.js', import.meta.url);
+const missionUtilsModule = mockModule<typeof import('../src/adapters/filesystem/mission-utils.js')>('../src/adapters/filesystem/mission-utils.js', import.meta.url);
+const backlogModule = mockModule<typeof import('../src/adapters/backlog/backlog.js')>('../src/adapters/backlog/backlog.js', import.meta.url);
+const forgejoModule = mockModule<typeof import('../src/adapters/forgejo/forgejo.js')>('../src/adapters/forgejo/forgejo.js', import.meta.url);
+const statsModule = mockModule<typeof import('../src/adapters/cli/commands/stats.js')>('../src/adapters/cli/commands/stats.js', import.meta.url);
+const verificationModule = mockModule<typeof import('../src/adapters/verification/verification.js')>('../src/adapters/verification/verification.js', import.meta.url);
+const __mm1 = mockModule<typeof import('../src/composition/application-services.js')>('../src/composition/application-services.js', import.meta.url);
+const __mm2 = mockModule<typeof import('../src/adapters/cli/commands/integrate.js')>('../src/adapters/cli/commands/integrate.js', import.meta.url);
+await installModuleMocks();
 const { mock } = test;
 
-const git = require('../.test-runtime/adapters/git/git.js');
-const missionUtils = require('../.test-runtime/adapters/filesystem/mission-utils.js');
-const backlog = require('../.test-runtime/adapters/backlog/backlog.js');
-const forgejo = require('../.test-runtime/adapters/forgejo/forgejo.js');
-const stats = require('../.test-runtime/adapters/cli/commands/stats.js');
-const verification = require('../.test-runtime/adapters/verification/verification.js');
-const composition = require('../.test-runtime/composition/application-services.js');
+const git = gitModule;
+const missionUtils = missionUtilsModule;
+const backlog = backlogModule;
+const forgejo = forgejoModule;
+const stats = statsModule;
+const verification = verificationModule;
+const composition = __mm1;
 
 const TEST_SLUG = 'task-integrate-test';
 const FAKE_ROOT = '/tmp/integrate-test-root';
 const WORKTREE = path.join(FAKE_ROOT, '..', TEST_SLUG);
 
+// The integrate module's command entry point is its default export; its
+// helpers are named exports. Expose both through the ESM mock facade so the
+// existing call sites (`integrate([...])` and `integrate.resolveConflicts...`)
+// keep working without a writable CommonJS `exports` object.
 function loadIntegrate() {
-  delete require.cache[require.resolve('../.test-runtime/adapters/cli/commands/integrate')];
-  return require('../.test-runtime/adapters/cli/commands/integrate.js');
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
+  return Object.assign((...args) => __mm2.default(...args), __mm2);
 }
 
 function setupMocks() {
@@ -96,10 +112,10 @@ test('integrate fails when slug is missing', (t) => {
   const originalError = console.error;
   let errorLogged = false;
   console.error = () => { errorLogged = true; };
-  
+
   integrate([]);
   assert.ok(errorLogged);
-  
+
   console.error = originalError;
   cleanup();
 });
@@ -148,16 +164,16 @@ test('resolveConflictsForMission - worktree missing', (t) => {
   const originalError = console.error;
   let errorLogged = false;
   console.error = (msg) => { if (msg && msg.includes('Mission worktree not found')) errorLogged = true; };
-  
+
   const result = integrate.resolveConflictsForMission(TEST_SLUG, 'docs', {
     resolveWorktreeFn: () => null,
     rootDir: FAKE_ROOT
   });
-  
+
   assert.strictEqual(result.ok, false);
   assert.strictEqual(result.error, 'worktree-missing');
   assert.ok(errorLogged);
-  
+
   console.error = originalError;
   cleanup();
 });
@@ -167,16 +183,17 @@ test('resolveConflictsForMission - merge check failed', (t) => {
   const integrate = loadIntegrate();
   const wt = WORKTREE;
   if (!fs.existsSync(wt)) fs.mkdirSync(wt, { recursive: true });
-  
+
   const result = integrate.resolveConflictsForMission(TEST_SLUG, 'docs', {
     resolveWorktreeFn: () => wt,
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     getConflictFilesFn: () => { throw new Error('git error'); },
     rootDir: FAKE_ROOT
   });
-  
+
   assert.strictEqual(result.ok, false);
   assert.strictEqual(result.error, 'merge-failed');
-  
+
   fs.rmSync(wt, { recursive: true, force: true });
   cleanup();
 });
@@ -186,10 +203,11 @@ test('resolveConflictsForMission - shared vs mission-specific classification', (
   const integrate = loadIntegrate();
   const wt = WORKTREE;
   if (!fs.existsSync(wt)) fs.mkdirSync(wt, { recursive: true });
-  
+
   // Case 1: Shared file conflict
   const res1 = integrate.resolveConflictsForMission(TEST_SLUG, 'docs', {
     resolveWorktreeFn: () => wt,
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     getConflictFilesFn: () => ['workflow/lib/commands/integrate.js'],
     rootDir: FAKE_ROOT
   });
@@ -199,6 +217,7 @@ test('resolveConflictsForMission - shared vs mission-specific classification', (
   // Case 2: Mission-specific conflict
   const res2 = integrate.resolveConflictsForMission(TEST_SLUG, 'docs', {
     resolveWorktreeFn: () => wt,
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     getConflictFilesFn: () => [`docs/missions/2026/${TEST_SLUG}/CP-1.md`],
     rootDir: FAKE_ROOT
   });

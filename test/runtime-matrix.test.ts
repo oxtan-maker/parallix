@@ -1,18 +1,24 @@
+// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
 
+
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const selectAgentModule = mockModule<typeof import('../src/adapters/agents/agents.js')>('../src/adapters/agents/agents.js', import.meta.url);
+const __mm1 = mockModule<typeof import('../src/adapters/agents/runtime-matrix.js')>('../src/adapters/agents/runtime-matrix.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const { selectAgent, setCommandPathProbe } = selectAgentModule;
 const {
   launcherStatus,
   buildAutonomousReviewMatrix,
   formatMatrixSummary,
   runnableDifferentFamilyExists,
-} = require('../.test-runtime/adapters/agents/runtime-matrix.js');
-
-const { selectAgent, setCommandPathProbe } = require('../.test-runtime/adapters/agents/agents.js');
+} = __mm1;
 
 // A launcher that exits 0 for any args (including the `--help` health probe used
 // by workflowLauncherStatus), so an agent whose bare command resolves to it on

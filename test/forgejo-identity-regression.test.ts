@@ -1,7 +1,12 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const { getPrStatus, getPrNumber } = require('../.test-runtime/adapters/forgejo/forgejo.js');
+
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const getPrStatusModule = mockModule<typeof import('../src/adapters/forgejo/forgejo.js')>('../src/adapters/forgejo/forgejo.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const { getPrStatus, getPrNumber } = getPrStatusModule;
 const { mock } = test;
 
 // Regression test for task-1121: ensure that when a token for a specific agent

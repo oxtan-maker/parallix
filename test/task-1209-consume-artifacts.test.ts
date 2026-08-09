@@ -1,20 +1,28 @@
 
-const test = require('node:test');
-const { before, after } = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const childProcess = require('node:child_process');
+import test, { mock } from 'node:test';
+import { before, after } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import childProcess from 'node:child_process';
 
 // ============================================================================
 // SC4: --consume-artifacts integration test
 // ============================================================================
 
-const { consumeArtifacts } = require('../.test-runtime/adapters/review/review-commands.js');
-const { createEvent } = require('../.test-runtime/adapters/review/review-events.js');
-const { readReviewState, writeReviewState } = require('../.test-runtime/adapters/review/review-state.js');
-const { seedMissionDatabase } = require('./fixtures/review-state-db.js');
+import { seedMissionDatabase } from './fixtures/review-state-db.js';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const consumeArtifactsModule = mockModule<typeof import('../src/adapters/review/review-commands.js')>('../src/adapters/review/review-commands.js', import.meta.url);
+const consumeReviewerArtifactsModule = mockModule<typeof import('../src/adapters/review/review-artifacts.js')>('../src/adapters/review/review-artifacts.js', import.meta.url);
+const __mm1 = mockModule<typeof import('../src/adapters/review/review-events.js')>('../src/adapters/review/review-events.js', import.meta.url);
+const __mm2 = mockModule<typeof import('../src/adapters/review/review-state.js')>('../src/adapters/review/review-state.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const { consumeArtifacts } = consumeArtifactsModule;
+const { createEvent } = __mm1;
+const { readReviewState, writeReviewState } = __mm2;
+const { consumeReviewerArtifacts } = consumeReviewerArtifactsModule;
 
 function runGitOrThrow(args, options = {}) {
   const result = childProcess.spawnSync('git', args, {
@@ -67,11 +75,13 @@ assignee: [custom]
   const logs = [];
 
   const result = await consumeArtifacts('task-999', {
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     writeReviewStateFn: () => ({ outcome: 'committed' }),
     log: msg => logs.push(msg),
     error: msg => logs.push('[ERROR] ' + msg),
     exit: () => { throw new Error('exit called'); },
     resolveWorktreeFn: () => tmpDir,
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     resolveTaskFileFn: () => ({ ok: true, taskFile: taskFile }),
     resolveArtifactDirFn: () => artifactDir,
     readArtifactFn: (p) => {
@@ -80,6 +90,7 @@ assignee: [custom]
       if (p.includes('review-verdict.txt')) return 'approve';
       return null;
     },
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     createEventFn: (taskSlug, type, params, opts) => {
       const evtPath = path.join(eventDir, `${taskSlug}-${type}-${Date.now()}.md`);
       fs.writeFileSync(evtPath, [
@@ -172,6 +183,7 @@ test('consumeArtifacts leaves no untracked review-events files after a successfu
   const result = await consumeArtifacts('task-2200', {
     log: () => {},
     error: msg => { throw new Error(msg); },
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     exit: code => { throw new Error(`exit ${code}`); },
     resolveWorktreeFn: () => cleanRoot,
     resolveArtifactDirFn: () => cleanArtifactDir,
@@ -192,8 +204,6 @@ test('consumeArtifacts leaves no untracked review-events files after a successfu
 // ============================================================================
 // SC5: consumeReviewerArtifacts distinguishes "no artifacts" from "artifacts but no verdict"
 // ============================================================================
-
-const { consumeReviewerArtifacts } = require('../.test-runtime/adapters/review/review-artifacts.js');
 
 test('consumeReviewerArtifacts returns consumed:false when no artifact files exist (task-1209 SC5a)', async () => {
   const result = await consumeReviewerArtifacts('test-slug', 'test-reviewer', {

@@ -1,28 +1,30 @@
-const { test, mock } = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
 
-// Loaded from the CommonJS test runtime rather than from src/: this test
-// replaces module methods with mock.method(), which needs writable exports.
-// An ESM namespace object is read-only, so the same mocks throw there.
-// scripts/build-test-runtime.ts emits .test-runtime/ for exactly this purpose.
-const git = require('../.test-runtime/adapters/git/git.js');
-const missionUtils = require('../.test-runtime/adapters/filesystem/mission-utils.js');
-const backlog = require('../.test-runtime/adapters/backlog/backlog.js');
-const forgejo = require('../.test-runtime/adapters/forgejo/forgejo.js');
-const stats = require('../.test-runtime/adapters/cli/commands/stats.js');
-const composition = require('../.test-runtime/composition/application-services.js');
+// Module dependencies are replaced with mock.method() through the ESM-native
+// seam in test/lib/module-mock.ts: an ESM namespace object is read-only, so the
+// helper registers a mutable delegating facade per module URL instead.
+import { test, mock } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const git = mockModule<typeof import('../src/adapters/git/git.js')>('../src/adapters/git/git.js', import.meta.url);
+const missionUtils = mockModule<typeof import('../src/adapters/filesystem/mission-utils.js')>('../src/adapters/filesystem/mission-utils.js', import.meta.url);
+const backlog = mockModule<typeof import('../src/adapters/backlog/backlog.js')>('../src/adapters/backlog/backlog.js', import.meta.url);
+const forgejo = mockModule<typeof import('../src/adapters/forgejo/forgejo.js')>('../src/adapters/forgejo/forgejo.js', import.meta.url);
+const stats = mockModule<typeof import('../src/adapters/cli/commands/stats.js')>('../src/adapters/cli/commands/stats.js', import.meta.url);
+const composition = mockModule<typeof import('../src/composition/application-services.js')>('../src/composition/application-services.js', import.meta.url);
+const integrateModule = mockModule<typeof import('../src/adapters/cli/commands/integrate.js')>('../src/adapters/cli/commands/integrate.js', import.meta.url);
+await installModuleMocks();
+
+
 
 const TEST_SLUG = 'task-2243-probe-abort';
 
+// The mock facade re-links integrate against the mocked dependencies once, so
+// there is no per-call reload; the command entry point is the default export.
 function loadIntegrate() {
-  // Drop the cached module so each run re-reads the mocked dependencies.
-  const modulePath = require.resolve('../.test-runtime/adapters/cli/commands/integrate');
-  delete require.cache[modulePath];
-  const loaded = require(modulePath);
-  return loaded.default || loaded;
+  return integrateModule.default;
 }
 
 test('Variant B rejects a failed probe abort without promoting the review-approved task fixture (task-2243)', async () => {

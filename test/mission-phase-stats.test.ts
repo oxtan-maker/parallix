@@ -1,9 +1,14 @@
+// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
 
+
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const renderMissionPhaseReportModule = mockModule<typeof import('../src/adapters/cli/commands/stats.js')>('../src/adapters/cli/commands/stats.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const { renderMissionPhaseReport, normalizeStatsRow } = renderMissionPhaseReportModule;
 'use strict';
-
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const { renderMissionPhaseReport, normalizeStatsRow } = require('../.test-runtime/adapters/cli/commands/stats.js');
 
 // task-1285: prove `node parallix stats <mission>` breaks one mission down by
 // phase (draft / execute / review) from stored telemetry rows, and that the

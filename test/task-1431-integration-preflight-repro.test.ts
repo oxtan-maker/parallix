@@ -13,17 +13,14 @@
 //   3. A null mission slug must never leak into preflight output ("Integration
 //      preflight for null" / "expected mission/null") when the caller is
 //      integrating a real mission.
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
 
-const {
-  printIntegrationPreflight,
-  buildIntegrationContext
-} = require('../.test-runtime/adapters/cli/commands/integrate.js');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
+import { printIntegrationPreflight, buildIntegrationContext } from '../src/adapters/cli/commands/integrate.js';
 function withTempBaseWorktree(fn) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1431-base-'));
   try {
@@ -80,6 +77,7 @@ test('printIntegrationPreflight resolves classification from the mission base wo
     // context.baseWorktree and defaults to process.cwd() must fail.
     assert.notEqual(process.cwd(), root);
 
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     const result = printIntegrationPreflight(context, Object.assign({ log }, defaultPreflightOpts));
 
     const output = lines.join('\n');
@@ -96,6 +94,7 @@ test('printIntegrationPreflight still hard-fails on an ambiguous slug rather tha
     taskStatus: null
   });
 
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
   const result = printIntegrationPreflight(context, Object.assign({ log }, defaultPreflightOpts));
 
   const output = lines.join('\n');
@@ -114,6 +113,7 @@ test('printIntegrationPreflight still warns and falls back to unknown classifica
     taskStatus: null
   });
 
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
   const result = printIntegrationPreflight(context, Object.assign({ log }, defaultPreflightOpts));
 
   const output = lines.join('\n');
@@ -133,6 +133,7 @@ test('printIntegrationPreflight refuses to run with a null mission slug instead 
   });
 
   assert.throws(
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     () => printIntegrationPreflight(context, Object.assign({ log }, defaultPreflightOpts)),
     /non-null mission slug/
   );

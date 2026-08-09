@@ -1,17 +1,20 @@
 
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
-const childProcess = require('node:child_process');
-const test = require('node:test');
-const assert = require('node:assert/strict');
 
 // This is a source-level lifecycle suite. Run the canonical TypeScript
 // entrypoint so concurrent package/publish tests rebuilding build/ cannot
 // remove the CLI while a fixture is being created.
-const CLI_LOADER = path.resolve(__dirname, '..', 'src', 'entry', 'esm-globals.ts');
-const CLI_ENTRY = path.resolve(__dirname, '..', 'src', 'entry', 'px.ts');
-const TSX_LOADER = require.resolve('tsx');
+
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import childProcess from 'node:child_process';
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
+const CLI_ENTRY = path.resolve(import.meta.dirname, '..', 'src', 'entry', 'px.ts');
+// This file is ESM, so `require` is not in scope. Resolve the tsx loader the
+// ESM way; the child processes below pass the result to `node --import`.
+const TSX_LOADER = createRequire(import.meta.url).resolve('tsx');
 
 function runCommand(command, args, options = {}) {
   const result = childProcess.spawnSync(command, args, {
@@ -61,6 +64,9 @@ function writeExecutable(filePath, content) {
 }
 
 function lifecycleStubSource() {
+  // The stub is written to an extensionless file on the fixture PATH, so Node
+  // loads it as CommonJS. Its own `require` calls are part of the generated
+  // script and are unrelated to this file's module system.
   return `#!${process.execPath}
 const fs = require('node:fs');
 const path = require('node:path');
@@ -341,7 +347,7 @@ function runWorkflow(repoRoot, env, args, timeout = 60000, { allowFailure = fals
   const stderrFd = fs.openSync(stderrPath, 'w');
   let result;
   try {
-    result = childProcess.spawnSync(process.execPath, ['--import', TSX_LOADER, '--import', CLI_LOADER, CLI_ENTRY, ...args], {
+    result = childProcess.spawnSync(process.execPath, ['--import', TSX_LOADER, CLI_ENTRY, ...args], {
       cwd: repoRoot,
       env,
       timeout,
@@ -392,31 +398,43 @@ function pauseAfterWorktreeFixture(repo, worktree) {
   }
 }
 
-function cleanInterruptedFixture(parentPid, root, repoRoot, worktree, cleanupMarker) {
-  const fs = require('node:fs');
-  const childProcess = require('node:child_process');
-  const isAlive = () => {
-    try {
-      process.kill(parentPid, 0);
-      return true;
-    } catch (_) {
-      return false;
+// The watcher body runs in a separate `node -e` process, so it is written as
+// source text rather than as a function serialized with `toString()`: this file
+// is transpiled before it runs, and the transpiler rewrites function bodies
+// (name-preserving `__name(...)` wrappers) into a form that no longer evaluates
+// standalone. It is plain CommonJS with no closure over this module.
+function cleanInterruptedFixtureSource(parentPid, root, repoRoot, worktree, cleanupMarker) {
+  return `
+    const fs = require('node:fs');
+    const childProcess = require('node:child_process');
+    const parentPid = ${JSON.stringify(parentPid)};
+    const root = ${JSON.stringify(root)};
+    const repoRoot = ${JSON.stringify(repoRoot)};
+    const worktree = ${JSON.stringify(worktree)};
+    const cleanupMarker = ${JSON.stringify(cleanupMarker)};
+    const isAlive = () => {
+      try {
+        process.kill(parentPid, 0);
+        return true;
+      } catch (_) {
+        return false;
+      }
+    };
+    while (isAlive()) {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
     }
-  };
-  while (isAlive()) {
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
-  }
-  childProcess.spawnSync('git', ['-C', repoRoot, 'worktree', 'remove', '--force', worktree], { stdio: 'ignore' });
-  fs.rmSync(root, { recursive: true, force: true });
-  if (cleanupMarker) {
-    fs.writeFileSync(cleanupMarker, 'cleaned\n', 'utf8');
-  }
+    childProcess.spawnSync('git', ['-C', repoRoot, 'worktree', 'remove', '--force', worktree], { stdio: 'ignore' });
+    fs.rmSync(root, { recursive: true, force: true });
+    if (cleanupMarker) {
+      fs.writeFileSync(cleanupMarker, 'cleaned\\n', 'utf8');
+    }
+  `;
 }
 
 function watchInterruptedFixture(root, repoRoot, worktree) {
   const cleanupMarker = process.env.PARALLIX_E2E_CLEANUP_MARKER || '';
   const watcher = childProcess.spawn(process.execPath, [
-    '-e', `(${cleanInterruptedFixture.toString()})(${process.pid}, ${JSON.stringify(root)}, ${JSON.stringify(repoRoot)}, ${JSON.stringify(worktree)}, ${JSON.stringify(cleanupMarker)})`
+    '-e', cleanInterruptedFixtureSource(process.pid, root, repoRoot, worktree, cleanupMarker)
   ], { detached: true, stdio: 'ignore' });
   watcher.unref();
 }
@@ -685,8 +703,8 @@ function runScenarioInChild(options) {
   const stderrFd = fs.openSync(stderrPath, 'w');
   let result;
   try {
-    result = childProcess.spawnSync(process.execPath, [__filename, '--scenario', encoded], {
-      cwd: path.resolve(__dirname, '..'),
+    result = childProcess.spawnSync(process.execPath, [import.meta.filename, '--scenario', encoded], {
+      cwd: path.resolve(import.meta.dirname, '..'),
       encoding: 'utf8',
       timeout: 120000,
       env: { ...process.env, FORCE_COLOR: '0' },

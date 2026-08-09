@@ -24,6 +24,7 @@ release-artifacts/
 # tsc incremental build cache
 tsconfig.tsbuildinfo
 .test-runtime/
+.test-runtime.staging-*/
 # StrykerJS scratch/report output (mutation-gate.ts)
 .stryker-tmp*/
 reports/mutation/

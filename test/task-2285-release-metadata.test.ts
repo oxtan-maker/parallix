@@ -5,12 +5,14 @@
 // Covers ADR 0044 release gate 9 (license audit, checksums, SBOM, third-party
 // notices) and the package-shape criteria that the audit script cannot express:
 // package.json metadata, the bundle payload root, and the SEA-shared entry point.
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
-const crypto = require('node:crypto');
-const {
+
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import {
   ALLOWED_LICENSES,
   bundledPackages,
   licenseViolations,
@@ -18,9 +20,9 @@ const {
   owningPackageLocation,
   renderNotices,
   renderSbom,
-} = require('../scripts/release-metadata.ts');
+} from '../scripts/release-metadata.js';
 
-const ROOT = path.resolve(__dirname, '..');
+const ROOT = path.resolve(import.meta.dirname, '..');
 const packageJson = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
 
 test('task-2285 package metadata declares the CLI-only ESM boundary', () => {
@@ -139,6 +141,7 @@ test('task-2285 every bundled package carries an approved license', () => {
 test('task-2285 license audit rejects an unapproved dependency license', () => {
   assert.equal(ALLOWED_LICENSES.has('GPL-3.0-only'), false);
   assert.deepEqual(
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     licenseViolations([{ name: 'copyleft-lib', version: '1.0.0', license: 'GPL-3.0-only' }]),
     ['copyleft-lib@1.0.0: unapproved license GPL-3.0-only'],
   );
@@ -159,17 +162,19 @@ test('task-2285 bundled-package discovery attributes nested copies to themselves
 
 test('task-2285 release metadata requires the bundle metafile', () => {
   assert.throws(() => bundledPackages(ROOT, undefined), /requires the esbuild metafile/);
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
   assert.throws(() => bundledPackages(ROOT, {}), /requires the esbuild metafile/);
 });
 
 test('task-2285 notices deduplicate a shared license text across packages', () => {
-  const fixture = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'px-notices-'));
+  const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'px-notices-'));
   const packages = ['alpha', 'beta'].map(name => {
     const packageDir = path.join(fixture, 'node_modules', name);
     fs.mkdirSync(packageDir, { recursive: true });
     fs.writeFileSync(path.join(packageDir, 'LICENSE'), 'MIT License\n\nShared body.\n');
     return { name, version: '1.0.0', license: 'MIT', homepage: null, packageDir };
   });
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
   const notices = renderNotices(packages, packageJson);
   assert.equal(notices.split('Shared body.').length - 1, 1, 'identical texts appear once');
   assert.match(notices, /alpha@1\.0\.0 \(MIT\)\nbeta@1\.0\.0 \(MIT\)/);
@@ -178,6 +183,7 @@ test('task-2285 notices deduplicate a shared license text across packages', () =
 
 test('task-2285 SBOM records subresource hashes from the lockfile integrity', () => {
   const sbom = renderSbom(
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     [{
       name: 'ink', version: '6.8.0', license: 'MIT', homepage: null,
       integrity: 'sha512-AAAAAA==',

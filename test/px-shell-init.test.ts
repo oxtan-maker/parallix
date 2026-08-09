@@ -9,13 +9,15 @@
  * These tests put a fake `px` on PATH so `command px` inside the function is
  * exercised without needing a global install.
  */
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
-const { spawnSync } = require('node:child_process');
-const test = require('node:test');
-const { shellInit } = require('../src/entry/px.ts');
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import test from 'node:test';
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
+import { shellInit } from '../src/entry/px.ts';
+
 
 // Builds a fake `px` executable that prints the given transition signal.
 function makeFakePx({ signalPath, exitCode = 0, signal = 'next' }) {

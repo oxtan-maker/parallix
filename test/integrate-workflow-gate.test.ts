@@ -1,13 +1,14 @@
 
-const test = require('node:test');
-const { mock } = test;
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const child_process = require('child_process');
 
-const repoRoot = path.join(__dirname, '..', '..');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import child_process from 'child_process';
+const { mock } = test;
+
+const repoRoot = path.join(import.meta.dirname, '..', '..');
 const scriptPath = path.join(repoRoot, 'scripts', 'verify-local.sh');
 
 const testFixtureConfig = {
@@ -30,7 +31,7 @@ function makeEnv(tmpDir, { changedAreas, suiteContext = false }) {
 
 function runIntegrate(env) {
   return child_process.spawnSync(scriptPath, ['integrate'], {
-    cwd: __dirname,
+    cwd: import.meta.dirname,
     env,
     encoding: 'utf8'
   });

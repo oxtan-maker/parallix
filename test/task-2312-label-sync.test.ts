@@ -1,17 +1,12 @@
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const childProcess = require('child_process');
 
-const {
-  getTaskLabels,
-  getTaskClassification,
-  setTaskLabels,
-  syncTaskLabelsToBaseWorktree,
-} = require('../.test-runtime/adapters/backlog/backlog.js');
 
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import childProcess from 'child_process';
+import { getTaskLabels, getTaskClassification, setTaskLabels, syncTaskLabelsToBaseWorktree, } from '../src/adapters/backlog/backlog.js';
 // These exports are required — the test file goes red if they are missing.
 assert.ok(typeof setTaskLabels === 'function', 'setTaskLabels must be exported');
 assert.ok(typeof syncTaskLabelsToBaseWorktree === 'function', 'syncTaskLabelsToBaseWorktree must be exported');

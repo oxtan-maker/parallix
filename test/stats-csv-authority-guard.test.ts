@@ -1,15 +1,18 @@
-'use strict';
+// @ts-nocheck -- TASK-2328: partial test doubles from ESM seam migration; resolve in follow-up
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
+const _require = createRequire(import.meta.url);
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const stats = require('../.test-runtime/adapters/cli/commands/stats.js');
-const { SqliteMeasurementStore } = require('../.test-runtime/adapters/sqlite/measurement-store.js');
-const { ADR0053_PERSISTENCE_INVENTORY } = require('./fixtures/durable-state-inventory.ts');
-
+import stats from '../src/adapters/cli/commands/stats.js';
+import { SqliteMeasurementStore } from '../src/adapters/sqlite/measurement-store.js';
+import { ADR0053_PERSISTENCE_INVENTORY } from './fixtures/durable-state-inventory';
 /**
  * TASK-2322.08 CP-4: prove no UNCLASSIFIED `stats.csv` read or write survives.
  *

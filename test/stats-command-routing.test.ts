@@ -1,16 +1,20 @@
 
+
+import test, { mock } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { mockModule, installModuleMocks } from './lib/module-mock.js';
+const stats = mockModule<typeof import('../src/adapters/cli/commands/stats.js')>('../src/adapters/cli/commands/stats.js', import.meta.url);
+const resolveStageTelemetryModule = mockModule<typeof import('../src/adapters/agents/stage-telemetry.js')>('../src/adapters/agents/stage-telemetry.js', import.meta.url);
+await installModuleMocks();
+test.afterEach(() => mock.restoreAll());
+const { resolveStageTelemetry } = resolveStageTelemetryModule;
 'use strict';
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const stats = require('../.test-runtime/adapters/cli/commands/stats.js');
-const { resolveStageTelemetry } = require('../.test-runtime/adapters/agents/stage-telemetry.js');
-
 // task-1285 review F8: the unit tests cover renderMissionPhaseReport() in
-// isolation; these exercise the `stats()` command function end-to-end so the
+// isolation; these exercise the `stats.default()` command function end-to-end so the
 // mission-slug routing (positional slug detection, --mission flag, CSV-path
 // fallback) is covered, not just the renderer.
 
@@ -27,7 +31,7 @@ function writeCsv() {
 function capture(args) {
   const lines = [];
   let exitCode = null;
-  stats(args, {
+  stats.default(args, {
     log: msg => lines.push(String(msg)),
     error: msg => lines.push(String(msg)),
     exit: code => { exitCode = code; },
@@ -60,6 +64,7 @@ test('stats command still treats an existing file positional as a CSV path', () 
 });
 
 test('resolveStageTelemetry returns null when the launcher attached no telemetry', () => {
+// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
   assert.equal(resolveStageTelemetry({ worktree: os.tmpdir(), result: { startedAt: 'x' } }), null);
   assert.equal(resolveStageTelemetry({ worktree: os.tmpdir(), result: null }), null);
 });

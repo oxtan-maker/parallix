@@ -1,18 +1,24 @@
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
 
+
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 test('task-2236 repro: npm test forwards the requested pi e2e smoke file', () => {
+  // TASK-2328 moved suite selection and argv assembly into
+  // test/lib/test-run-plan.ts; the runner delegates to it.
   const runnerSource = fs.readFileSync(
-    path.join(__dirname, 'run-default-tests.ts'),
+    path.join(import.meta.dirname, 'run-default-tests.ts'),
+    'utf8'
+  ) + fs.readFileSync(
+    path.join(import.meta.dirname, 'lib', 'test-run-plan.ts'),
     'utf8'
   );
 
   assert.match(
     runnerSource,
-    /const requestedArgs = process\.argv\.slice\(2\);/,
+    /requestedArgs: process\.argv\.slice\(2\)/,
     'npm test positional arguments must be read by the default test runner'
   );
   assert.match(
@@ -32,7 +38,7 @@ test('task-2236 repro: npm test forwards the requested pi e2e smoke file', () =>
   );
 
   const smokeSource = fs.readFileSync(
-    path.join(__dirname, 'e2e-real-agent-smoke.test.ts'),
+    path.join(import.meta.dirname, 'e2e-real-agent-smoke.test.ts'),
     'utf8'
   );
   assert.match(
