@@ -27,6 +27,8 @@ Backlog.md's commit helper runs a bare `["commit","-m",message]` with no pathspe
 
 Observed on 2026-08-09 with task-2348: the whole mission — `src/adapters/cli/commands/stats.ts`, `test/stats.test.ts`, `test/task-2348-implementer-attribution.test.ts`, `missions/task-2348/*` — landed on main as commit `6d57896be` with the message `Reorder tasks in review` at 06:16:56, interleaved with task-2347.03 and task-2347.07 transitions at 06:15:02 and 06:17:01. Integrate's own `git commit` then found nothing to commit, took the `commitResult.status !== 0` branch, printed "Could not create the squash commit in the local integration checkout." and aborted.
 
+The same defect fires in the opposite direction, and did so while this ticket was being written. This task file was created as an untracked file in the primary checkout at 06:51 on 2026-08-09 and was swept into commit `d9e568809` — `mission/task-2347.07: task-2347.07` — by that mission's own `git add -A`, alongside `missions/task-2347.07/*`, `src/application/projections/board.ts` and eleven other files that do belong to it. An unrelated file in the working tree therefore lands inside a mission's squash commit with no trace in that mission's review surface. This is the concrete scenario acceptance criterion #2 must reproduce.
+
 The failure is inverted and silent: integrate reports failure while the work actually shipped. The natural operator recovery — re-run integrate, or re-draft the mission as lost — is wrong and risks duplicating work already on main. For contrast, commit `314ca626c` carries the same `Reorder tasks in review` message with a backlog-only diff; that is the innocent shape of the same message.
 
 Two fixes are in scope:
