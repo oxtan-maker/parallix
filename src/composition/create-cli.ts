@@ -131,25 +131,28 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
     'mutation-gate': mutationGate,
     rebase,
     'resolve-conflict': resolveConflict,
-    review: (args, options) => withGraph(services => {
-      if (!services.mission) { throw new Error('mission services are unavailable'); }
-      const persistence = bindReviewPersistence(services.mission.store);
-      return review(args, {
-        ...options,
-        readReviewStateFn: persistence.readReviewState,
-        writeReviewStateFn: persistence.writeReviewState,
-        resetReviewStateFn: persistence.resetReviewState,
-        createEventFn: persistence.createEvent,
-        readAllEventsFn: persistence.readAllEvents,
-        backfillReviewFn: persistence.backfillReview,
-        consumeReviewerArtifactsFn: persistence.consumeReviewerArtifacts,
-        consumeImplementerArtifactsFn: persistence.consumeImplementerArtifacts,
-        startReviewLoopFn: (slug: string, loopOptions: Record<string, unknown>) => startReviewLoop(slug, {
-          ...loopOptions,
-          ...reviewLoopBindings(services.mission!.store),
-        } as any),
-      } as any);
-    }),
+    review: (args, options) => withMissionFactories(missionServicesFn =>
+      withGraph(async services => {
+        if (!services.mission) { throw new Error('mission services are unavailable'); }
+        const persistence = bindReviewPersistence(services.mission.store);
+        return review(args, {
+          ...options,
+          missionServicesFn,
+          readReviewStateFn: persistence.readReviewState,
+          writeReviewStateFn: persistence.writeReviewState,
+          resetReviewStateFn: persistence.resetReviewState,
+          createEventFn: persistence.createEvent,
+          readAllEventsFn: persistence.readAllEvents,
+          backfillReviewFn: persistence.backfillReview,
+          consumeReviewerArtifactsFn: persistence.consumeReviewerArtifacts,
+          consumeImplementerArtifactsFn: persistence.consumeImplementerArtifacts,
+          startReviewLoopFn: (slug: string, loopOptions: Record<string, unknown>) => startReviewLoop(slug, {
+            ...loopOptions,
+            ...reviewLoopBindings(services.mission!.store),
+          } as any),
+        } as any);
+      })
+    ),
     setup,
     'setup-review': setupReview,
     stats,

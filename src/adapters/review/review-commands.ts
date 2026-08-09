@@ -788,6 +788,7 @@ export async function submitForReview(
     transitionTaskFn?: typeof transitionTask;
     isReviewProviderEnabledFn?: typeof isProviderEnabled;
     isForgejoReviewEnabledFn?: typeof isProviderEnabled;
+    missionServicesFn?: Function;
     log?: (_msg: string) => void;
   } = {}
 ): Promise<void> {
@@ -829,7 +830,7 @@ export async function submitForReview(
     }
   }
 
-  const result = await performHandoffFn(slug, { skipGate, reviewIdentity, forgejoUser: reviewIdentity, worktree });
+  const result = await performHandoffFn(slug, { skipGate, reviewIdentity, forgejoUser: reviewIdentity, worktree, missionServicesFn: options.missionServicesFn });
   if (!result.ok) {
     // Auto-bounce for declared-gate validation failures
     if (result.reason === 'validation-failed') {
