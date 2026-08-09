@@ -202,58 +202,36 @@ function defaultHealth(): Pick<BoardMetrics, 'health' | 'provenance'> {
   };
 }
 
-/** Build BoardMetrics with explicit missing-history fallback behavior. */
-export function buildBoardMetrics(
-  _cumulativeFlow: MetricSeries,
-  _medianStateTimes: MetricSeries,
-  _throughput: MetricSeries,
-  _reviewLoopRate: MetricSeries,
-): BoardMetrics;
-export function buildBoardMetrics(
-  _cumulativeFlow: MetricSeries,
-  _cumulativeFlowByState: StateFlowSeries,
-  _medianStateTimes: MetricSeries,
-  _medianCycleTimeByState: LaneMetricSeries,
-  _throughput: MetricSeries,
-  _weeklyThroughput: MetricSeries,
-  _reviewLoopRate: MetricSeries,
-  _medianAgeByLane: LaneMetricSeries,
-  _agentAvailability: readonly AgentAvailabilityMetric[],
-  _bottleneck: BottleneckNarrative,
-): BoardMetrics;
-export function buildBoardMetrics(
-  cumulativeFlow: MetricSeries,
-  stateFlowOrMedianStateTimes: StateFlowSeries | MetricSeries,
-  medianStateTimesOrThroughput: MetricSeries,
-  cycleTimesOrReviewLoopRate: LaneMetricSeries | MetricSeries,
-  ...extensions: readonly unknown[]
-): BoardMetrics {
-  if (extensions.length === 0) {
-    const defaults = emptyFlowMetrics();
-    return {
-      ...defaultHealth(),
-      cumulativeFlow,
-      ...defaults,
-      medianStateTimes: stateFlowOrMedianStateTimes as MetricSeries,
-      throughput: medianStateTimesOrThroughput,
-      reviewLoopRate: cycleTimesOrReviewLoopRate as MetricSeries,
-    };
-  }
-  const [throughput, weeklyThroughput, reviewLoopRate, medianAgeByLane, agentAvailability, bottleneck] = extensions as readonly [MetricSeries, MetricSeries, MetricSeries, LaneMetricSeries, readonly AgentAvailabilityMetric[], BottleneckNarrative];
+export interface BoardMetricsInput {
+  readonly cumulativeFlow: MetricSeries;
+  readonly cumulativeFlowByState?: StateFlowSeries;
+  readonly medianStateTimes: MetricSeries;
+  readonly medianCycleTimeByState?: LaneMetricSeries;
+  readonly throughput: MetricSeries;
+  readonly weeklyThroughput?: MetricSeries;
+  readonly reviewLoopRate: MetricSeries;
+  readonly medianAgeByLane?: LaneMetricSeries;
+  readonly agentAvailability?: readonly AgentAvailabilityMetric[];
+  readonly bottleneck?: BottleneckNarrative;
+}
+
+/** Build BoardMetrics from named series so a metric cannot be silently swapped. */
+export function buildBoardMetrics(input: BoardMetricsInput): BoardMetrics {
+  const defaults = emptyFlowMetrics();
   return {
     ...defaultHealth(),
-    cumulativeFlow,
-    cumulativeFlowByState: stateFlowOrMedianStateTimes as StateFlowSeries,
-    medianStateTimes: medianStateTimesOrThroughput,
-    // Callers that carry run measurements override this via buildMetrics().
-    medianAgentRuntime: { series: [], missingHistoryFallback: 'null' },
-    medianCycleTimeByState: cycleTimesOrReviewLoopRate as LaneMetricSeries,
-    throughput,
-    weeklyThroughput,
-    reviewLoopRate,
-    medianAgeByLane,
-    agentAvailability,
-    bottleneck,
+    ...defaults,
+    ...input,
+    cumulativeFlow: input.cumulativeFlow,
+    cumulativeFlowByState: input.cumulativeFlowByState ?? defaults.cumulativeFlowByState,
+    medianStateTimes: input.medianStateTimes,
+    medianCycleTimeByState: input.medianCycleTimeByState ?? defaults.medianCycleTimeByState,
+    throughput: input.throughput,
+    weeklyThroughput: input.weeklyThroughput ?? defaults.weeklyThroughput,
+    reviewLoopRate: input.reviewLoopRate,
+    medianAgeByLane: input.medianAgeByLane ?? defaults.medianAgeByLane,
+    agentAvailability: input.agentAvailability ?? defaults.agentAvailability,
+    bottleneck: input.bottleneck ?? defaults.bottleneck,
   };
 }
 

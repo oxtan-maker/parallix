@@ -68,12 +68,7 @@ test('BoardProjection has version field and all required shape members', () => {
     [makeCard(id1, 'active')],
     [{ command: 'active', enabled: true, reason: null }],
     [],
-    buildBoardMetrics(
-      { series: [], missingHistoryFallback: 'null' },
-      { series: [], missingHistoryFallback: 'null' },
-      { series: [], missingHistoryFallback: 'skip' },
-      { series: [], missingHistoryFallback: 'estimate' },
-    ),
+    buildBoardMetrics({ cumulativeFlow: { series: [], missingHistoryFallback: 'null' }, medianStateTimes: { series: [], missingHistoryFallback: 'null' }, throughput: { series: [], missingHistoryFallback: 'skip' }, reviewLoopRate: { series: [], missingHistoryFallback: 'estimate' } }),
     [{ source: 'task-markdown', status: 'fresh', value: 'now' }],
   );
 
@@ -104,12 +99,7 @@ test('BoardStage filters to correct lane only', () => {
 });
 
 test('BoardMetrics has all four metric series with missingHistoryFallback', () => {
-  const metrics = buildBoardMetrics(
-    { series: [{ at: 'now', value: 5 }], missingHistoryFallback: 'null' },
-    { series: [{ at: 'now', value: 30 }], missingHistoryFallback: 'null' },
-    { series: [], missingHistoryFallback: 'skip' },
-    { series: [{ at: 'now', value: 1.5 }], missingHistoryFallback: 'estimate' },
-  );
+  const metrics = buildBoardMetrics({ cumulativeFlow: { series: [{ at: 'now', value: 5 }], missingHistoryFallback: 'null' }, medianStateTimes: { series: [{ at: 'now', value: 30 }], missingHistoryFallback: 'null' }, throughput: { series: [], missingHistoryFallback: 'skip' }, reviewLoopRate: { series: [{ at: 'now', value: 1.5 }], missingHistoryFallback: 'estimate' } });
   assert.equal(metrics.cumulativeFlow.missingHistoryFallback, 'null');
   assert.equal(metrics.medianStateTimes.missingHistoryFallback, 'null');
   assert.equal(metrics.throughput.missingHistoryFallback, 'skip');
@@ -230,12 +220,7 @@ test('buildBoardProjection attentionQueue is sorted by rank then missionId', () 
     cards,
     [],
     [],
-    buildBoardMetrics(
-      { series: [], missingHistoryFallback: 'null' },
-      { series: [], missingHistoryFallback: 'null' },
-      { series: [], missingHistoryFallback: 'skip' },
-      { series: [], missingHistoryFallback: 'estimate' },
-    ),
+    buildBoardMetrics({ cumulativeFlow: { series: [], missingHistoryFallback: 'null' }, medianStateTimes: { series: [], missingHistoryFallback: 'null' }, throughput: { series: [], missingHistoryFallback: 'skip' }, reviewLoopRate: { series: [], missingHistoryFallback: 'estimate' } }),
     [],
   );
 
@@ -259,12 +244,7 @@ test('buildBoardProjection wipCounts reflects all lanes', () => {
     cards,
     [],
     [],
-    buildBoardMetrics(
-      { series: [], missingHistoryFallback: 'null' },
-      { series: [], missingHistoryFallback: 'null' },
-      { series: [], missingHistoryFallback: 'skip' },
-      { series: [], missingHistoryFallback: 'estimate' },
-    ),
+    buildBoardMetrics({ cumulativeFlow: { series: [], missingHistoryFallback: 'null' }, medianStateTimes: { series: [], missingHistoryFallback: 'null' }, throughput: { series: [], missingHistoryFallback: 'skip' }, reviewLoopRate: { series: [], missingHistoryFallback: 'estimate' } }),
     [],
   );
 
@@ -283,12 +263,7 @@ test('buildBoardProjection stages cover all six lanes', () => {
     [makeCard(id1, 'active')],
     [],
     [],
-    buildBoardMetrics(
-      { series: [], missingHistoryFallback: 'null' },
-      { series: [], missingHistoryFallback: 'null' },
-      { series: [], missingHistoryFallback: 'skip' },
-      { series: [], missingHistoryFallback: 'estimate' },
-    ),
+    buildBoardMetrics({ cumulativeFlow: { series: [], missingHistoryFallback: 'null' }, medianStateTimes: { series: [], missingHistoryFallback: 'null' }, throughput: { series: [], missingHistoryFallback: 'skip' }, reviewLoopRate: { series: [], missingHistoryFallback: 'estimate' } }),
     [],
   );
 

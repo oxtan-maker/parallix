@@ -16,6 +16,11 @@ import type { RepositoryId } from '../../domain/repository.js';
 import type { BoardMetrics, MetricsProvenance, StatisticsHealth } from './board.js';
 import type { AgentAvailabilityRow } from './agent-status.js';
 import { buildMetrics } from './metrics.js';
+import {
+  isCompletedStatisticsRow,
+  statisticsMissionKey,
+  utcHourBucket,
+} from '../services/statistics-service.js';
 
 // ---------------------------------------------------------------------------
 // MetricsReadAdapter — derives BoardMetrics from event history
@@ -181,16 +186,14 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
       if (!record.date) {
         continue;
       }
-      // Key by (repository, mission) so same mission slug in different repos
-      // does not collide. Precedent: statsMissionKey in stats.ts:438.
-      const key = `${repositoryId}::${record.mission}`;
+      const key = statisticsMissionKey({ repo: repositoryId, mission: record.mission });
       const existing = outcomeMap.get(key);
       const timestamp = `${record.date}T00:00:00Z`;
       if (existing) {
         // Aggregate multiple records for the same (repo, mission)
         existing.reviewFixRounds = Math.max(existing.reviewFixRounds, record.pr_fix_rounds ?? 0);
         existing.createdAt = existing.createdAt < timestamp ? existing.createdAt : timestamp;
-        if (record.closed === 'yes') {
+        if (isCompletedStatisticsRow(record)) {
           existing.closedAt = existing.closedAt === null || existing.closedAt < timestamp ? timestamp : existing.closedAt;
         }
         existing.runs.push(usageRecordToRun(record));
@@ -199,7 +202,7 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
           missionId: record.mission as MissionId,
           repositoryId,
           createdAt: timestamp,
-          closedAt: record.closed === 'yes' ? timestamp : null,
+          closedAt: isCompletedStatisticsRow(record) ? timestamp : null,
           cycleTimeMinutes: 0,
           reviewFixRounds: record.pr_fix_rounds ?? 0,
           runs: [usageRecordToRun(record)],
@@ -241,10 +244,10 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
   ): readonly string[] {
     const seen = new Set<string>();
 
-    // Add transition timestamps (truncated to hour for granularity)
+    // Add transition timestamps normalized to UTC-hour granularity.
     for (const t of transitions) {
-      const hour = t.occurredAt.slice(0, 13); // "2026-07-24T08"
-      seen.add(hour + ':00:00Z');
+      const hour = utcHourBucket(t.occurredAt);
+      if (hour !== null) { seen.add(hour); }
     }
 
     // Add usage record dates
@@ -266,7 +269,9 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
       return [new Date().toISOString()];
     }
 
-    return [...seen].sort();
+    // Closure instants stay exact so a completion appears in the point that
+    // closes it; only event timestamps above are UTC-hour bucketed.
+    return [...seen].sort((left, right) => left.localeCompare(right));
   }
 
   private eventTimestamps(entries: readonly BoardLaneEventEntry[], usageRecords: readonly UsageRecord[]): readonly string[] {

@@ -89,6 +89,12 @@ import { git } from '../../git/git.js';
 import * as forgejo from '../../forgejo/forgejo.js';
 import * as statsReport from './stats-report.js';
 import { resolveMeasurementStore } from '../../sqlite/measurement-store.js';
+import {
+  isCompletedStatisticsRow,
+  statisticsMissionKey,
+  statisticsRowInWindow,
+  summarizeCompletedMissionWindow,
+} from '../../../application/services/statistics-service.js';
 
 // The original 5-column schema. Retained for backward-compatible CSV detection
 // and one-time header migration of legacy stats files (architecture migration).
@@ -437,7 +443,7 @@ function normalizeRows(rows) {
  * @param {StatsRow} row
  */
 function statsMissionKey(row) {
-  return `${String(row.repo || '').trim()}::${String(row.mission || '').trim().toLowerCase()}`;
+  return statisticsMissionKey(row);
 }
 
 /**
@@ -776,9 +782,7 @@ function buildWeeklyWindows(today = new Date()) {
  * @param {{start: Date, end: Date}} window
  */
 function rowInWindow(row, window) {
-  if (!row.date) {return false;}
-  const date = parseDateOnly(String(row.date));
-  return date >= window.start && date <= window.end;
+  return statisticsRowInWindow(row, window);
 }
 
 /**
@@ -786,20 +790,7 @@ function rowInWindow(row, window) {
  * @param {{start: Date, end: Date}} window
  */
 function summarizeMissionWindow(rows, window) {
-  const windowRows = rows.filter(row => rowInWindow(row, window));
-  // Filter to only closed missions (architecture migration): rows without closed:'yes' are
-  // in-progress stage rows and should not inflate mission counts.
-  const closedRows = windowRows.filter(row => row.closed === 'yes');
-  // Deduplicate by mission so multi-stage telemetry rows don't inflate counts.
-  // One row per unique repo+mission pair is kept (first occurrence is sufficient
-  // since classification is stable across stages for the same mission in a repo).
-  const seenMissions = new Set();
-  const uniqueMissions = closedRows.filter(row => {
-    const key = statsMissionKey(row);
-    if (seenMissions.has(key)) {return false;}
-    seenMissions.add(key);
-    return true;
-  });
+  const { rows: closedRows, missions: uniqueMissions } = summarizeCompletedMissionWindow(rows, window);
   const userValue = uniqueMissions.filter(row => normalizeClassification(row.classification) === 'user_value').length;
   const aiSdlc = uniqueMissions.filter(row => normalizeClassification(row.classification) === 'ai_sdlc').length;
   const unknown = uniqueMissions.filter(row => normalizeClassification(row.classification) === 'unknown').length;
