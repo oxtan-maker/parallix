@@ -259,7 +259,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'usage-stats-row-columns',
     family: 'usage-statistics',
     fileLocation: 'src/adapters/cli/commands/stats.ts',
-    line: 110,
+    line: 112,
     anchor: 'const STATS_HEADERS',
     reads: ['AgentRunMeasurement'],
     requirement:
@@ -270,7 +270,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'usage-mission-key',
     family: 'usage-statistics',
     fileLocation: 'src/adapters/cli/commands/stats.ts',
-    line: 445,
+    line: 458,
     anchor: 'function statsMissionKey',
     reads: ['Mission', 'MissionOutcome'],
     requirement:

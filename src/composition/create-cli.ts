@@ -17,6 +17,7 @@ import handoff from '../adapters/cli/commands/handoff.js';
 import integrate from '../adapters/cli/commands/integrate.js';
 import { DraftCommandUseCase } from '../application/draft-command-use-case.js';
 import { IntegrateCommandUseCase } from '../application/integrate-command-use-case.js';
+import { StatsCommandUseCase } from '../application/stats-command-use-case.js';
 import { createDraftCommand } from '../interfaces/cli/draft.js';
 import { createIntegrateCommand } from '../interfaces/cli/integrate.js';
 import missionStart from '../adapters/cli/mission-start.js';
@@ -27,7 +28,7 @@ import resolveConflict from '../adapters/cli/commands/resolve-conflict.js';
 import review from '../adapters/cli/commands/review.js';
 import setup from '../adapters/cli/commands/setup.js';
 import setupReview from '../adapters/cli/commands/setup-review.js';
-import stats from '../adapters/cli/commands/stats.js';
+import { createStatsCommand, createStatsWorkflowAdapter } from '../adapters/cli/commands/stats.js';
 import status from '../adapters/cli/commands/status.js';
 import verify from '../adapters/cli/commands/verify.js';
 import { deriveAliases, type Command, type MainOptions } from '../interfaces/cli/runtime.js';
@@ -157,7 +158,7 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
     ),
     setup,
     'setup-review': setupReview,
-    stats,
+    stats: createStatsCommand(new StatsCommandUseCase(createStatsWorkflowAdapter())),
     status: (args, options) => withGraph(services => status(args, {
       ...options,
       buildProjectionFn: async () => {
