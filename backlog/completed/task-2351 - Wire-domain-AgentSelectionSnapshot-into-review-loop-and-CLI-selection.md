@@ -1,7 +1,7 @@
 ---
 id: TASK-2351
 title: Agent selection ignores runtime blocks stored in SQLite
-status: ready-for-integration
+status: done
 assignee: [codex]
 created_date: '2026-08-09 15:25'
 labels:
