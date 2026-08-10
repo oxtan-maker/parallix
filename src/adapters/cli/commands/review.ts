@@ -1,4 +1,5 @@
-import { review } from '../../review/review-commands.js';
+import { ReviewCommandUseCase } from '../../../application/review-command-use-case.js';
+import { createReviewWorkflowAdapter } from '../../review/review-commands.js';
 
 /**
  * Workflow command entry point for `review`.
@@ -8,7 +9,8 @@ import { review } from '../../review/review-commands.js';
  */
 /** @param {string[]} args */
 async function reviewCommand(args: string[], options = {}) {
-  await review(args, options);
+  const useCase = new ReviewCommandUseCase(createReviewWorkflowAdapter(options));
+  await useCase.execute(args, options);
 }
 
 export default reviewCommand;

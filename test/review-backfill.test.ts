@@ -16,7 +16,10 @@ import path from 'path';
 
 import { withMissionDatabase } from './fixtures/review-state-db.js';
 import { backfillReviewFromLegacyState, readReviewState, writeReviewState, } from '../src/adapters/review/review-state.js';
-import { review } from '../src/adapters/review/review-commands.js';
+import { ReviewCommandUseCase } from '../src/application/review-command-use-case.js';
+import { createReviewCommand } from '../src/interfaces/cli/review.js';
+import { createReviewWorkflowAdapter } from '../src/adapters/review/review-commands.js';
+const review = (args, options = {}) => createReviewCommand(new ReviewCommandUseCase(createReviewWorkflowAdapter(options)))(args, options);
 /** The shape the file-backed loop left behind: round 3, mid-fix, blocked. */
 const LEGACY_STATE = {
   reviewer: 'codex',

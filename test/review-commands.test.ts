@@ -7,6 +7,8 @@ import os from 'os';
 import path from 'path';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
 import { createRequire } from 'node:module';
+import { ReviewCommandUseCase } from '../src/application/review-command-use-case.js';
+import { createReviewCommand } from '../src/interfaces/cli/review.js';
 const _require = createRequire(import.meta.url);
 const missionUtils = mockModule<typeof import('../src/adapters/filesystem/mission-utils.js')>('../src/adapters/filesystem/mission-utils.js', import.meta.url);
 const reviewModule = mockModule<typeof import('../src/adapters/review/review-commands.js')>('../src/adapters/review/review-commands.js', import.meta.url);
@@ -17,9 +19,10 @@ const {
   readTextFlag,
   formatStaticReviewFindings,
   formatStaticReviewSuccess,
-  performStaticReview,
-  review
+  performStaticReview
 } = reviewModule;
+const review = (args, options = {}) =>
+  createReviewCommand(new ReviewCommandUseCase(reviewModule.createReviewWorkflowAdapter(options)))(args, options);
 
 // ============================================================================
 // flagValue tests
@@ -445,7 +448,6 @@ test('unknownReviewFlags flags typos but not values of value-taking flags', () =
 });
 
 test('review rejects an unknown flag with a suggestion instead of ignoring it', async () => {
-  const { review } = reviewModule;
   const errors = [];
   let exitCode = null;
   let startReviewLoopCalled = 0;
@@ -467,7 +469,6 @@ test('review rejects an unknown flag with a suggestion instead of ignoring it', 
 });
 
 test('review passes an explicit --max-attempts through to the review loop', async () => {
-  const { review } = reviewModule;
   let received = null;
 
   await review(['task-2322', '--continue', '--max-attempts', '7'], {
@@ -482,7 +483,6 @@ test('review passes an explicit --max-attempts through to the review loop', asyn
 });
 
 test('review rejects a non-numeric --max-attempts', async () => {
-  const { review } = reviewModule;
   const errors = [];
   let exitCode = null;
   let startReviewLoopCalled = 0;
