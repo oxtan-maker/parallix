@@ -1,17 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createRequire } from 'node:module';
 
 import { ConcreteMetricsReadAdapter } from '../src/application/projections/metrics-read-adapter.js';
 import type { UsageRecord, UsageRepository } from '../src/application/ports/mission-measurements.js';
 import type { BoardLaneEventEntry, BoardLaneEventRepository } from '../src/application/ports/operation-history.js';
 import type { MissionId, MissionStatus } from '../src/domain/mission.js';
 import type { RepositoryId } from '../src/domain/repository.js';
-
-const require = createRequire(import.meta.url);
-const stats = require('../.test-runtime/adapters/cli/commands/stats.js');
+// `createWindow` and friends hang off the default export object, not the
+// module's named exports, so this must be the default import.
+import stats from '../src/adapters/cli/commands/stats.js';
 
 const REPOSITORY = 'acme/widgets' as RepositoryId;
+// @ts-expect-error -- TASK-2328: runtime-only property absent from the inferred type.
 const WINDOW = stats.createWindow('2026-08-03', 1);
 
 class MemoryUsageRepository implements UsageRepository {
@@ -37,6 +37,7 @@ const ROWS: readonly UsageRecord[] = [
 ];
 
 test('task-2347.08 repro: CLI and board agree on identity, completions, and cycle time', async () => {
+  // @ts-expect-error -- TASK-2328: runtime-only property absent from the inferred type.
   const cli = stats.summarizeMissionWindow(ROWS, WINDOW);
   const board = new ConcreteMetricsReadAdapter({
     laneEventRepo: new EmptyLaneEventRepository(),

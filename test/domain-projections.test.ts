@@ -10,6 +10,7 @@ import { projectRepositorySelector } from '../src/application/projections/reposi
 import { agentFamily } from '../src/domain/agents.js';
 import { missionId, missionLabels, requireClosedMission } from '../src/domain/mission.js';
 import { repositoryId } from '../src/domain/repository.js';
+import { missionOutcome } from './fixtures/mission-outcome.js';
 import {
   applyReviewerCommand,
   changeRevision,
@@ -149,7 +150,7 @@ test('flow and median cycle projections operate on domain facts', () => {
   assert.equal(flow[0]?.counts.backlog, 1);
   assert.equal(flow[1]?.counts.active, 1);
   const baseMission = { id, repositoryId: repo, title: 'x', labels: missionLabels(['unknown']), status: 'done' as const, rawStatus: 'done', closedAt: '2026-07-21T10:00:00Z', assignee: implementer, checkpoints: [], review: null, netEngineeringLines: 1 };
-  const baseOutcome = { missionId: id, repositoryId: repo, cycleTimeMinutes: 10, reviewFixRounds: 1, runs: [] };
+  const baseOutcome = missionOutcome({ missionId: id, repositoryId: repo, cycleTimeMinutes: 10, reviewFixRounds: 1 });
   const series = medianCycleTimeSeries([
     { mission: requireClosedMission(baseMission), outcome: baseOutcome },
     { mission: requireClosedMission({ ...baseMission, id: missionId('task-other'), closedAt: '2026-07-22T10:00:00Z' }), outcome: { ...baseOutcome, missionId: missionId('task-other'), cycleTimeMinutes: 30 } },

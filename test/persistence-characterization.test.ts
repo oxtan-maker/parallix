@@ -38,6 +38,7 @@ import { repositoryId, type RepositoryId } from '../src/domain/repository.js';
 import { shouldResume, type SessionMarker } from '../src/domain/session.js';
 import { triggerFromTransition, parseMissionStatus } from '../src/domain/board-event.js';
 import { completedMissionStatistics, type MissionOutcome } from '../src/domain/usage.js';
+import { missionOutcome } from './fixtures/mission-outcome.js';
 import statsBackfill from '../src/adapters/cli/commands/stats-backfill.js';
 import { resolveKnownAgentFamilies } from '../src/interfaces/tui/agent-config-resolver.js';
 
@@ -387,7 +388,7 @@ test('SC3: completedMissionStatistics derives correct statistics from closed mis
     review: null,
     netEngineeringLines: 42,
   };
-  const outcome: MissionOutcome = {
+  const outcome: MissionOutcome = missionOutcome({
     missionId: missionId('task-0001'),
     repositoryId: repo,
     cycleTimeMinutes: 120,
@@ -415,7 +416,7 @@ test('SC3: completedMissionStatistics derives correct statistics from closed mis
         costUsd: { kind: 'measured', value: 0.50 },
       },
     ],
-  };
+  });
 
   const stats = completedMissionStatistics(closedMission, outcome);
   assert.equal(stats.missionId, 'task-0001');
@@ -440,13 +441,13 @@ test('SC3: completedMissionStatistics rejects mismatched mission identity', () =
     review: null,
     netEngineeringLines: 10,
   };
-  const outcome: MissionOutcome = {
+  const outcome: MissionOutcome = missionOutcome({
     missionId: missionId('task-9999'),
     repositoryId: repo,
     cycleTimeMinutes: 60,
     reviewFixRounds: 0,
     runs: [],
-  };
+  });
 
   assert.throws(
     () => completedMissionStatistics(closedMission, outcome),

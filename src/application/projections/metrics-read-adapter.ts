@@ -1,6 +1,7 @@
 import type { UsageRecord, UsageRepository } from '../ports/mission-measurements.js';
 import type { BoardLaneEventEntry, BoardLaneEventRepository, OperationalHistoryRepository } from '../ports/operation-history.js';
-import type { MissionId, MissionStatus } from '../../domain/mission.js';
+import type { MissionId, MissionLabel, MissionStatus } from '../../domain/mission.js';
+import { missionLabels } from '../../domain/mission.js';
 import type { MissionTransition } from '../../domain/mission-workflow.js';
 import type {
   AgentRunMeasurement,
@@ -9,13 +10,19 @@ import type {
   Measurement,
   MissionOutcome,
 } from '../../domain/usage.js';
-import { AGENT_WORK_STAGES } from '../../domain/usage.js';
+import {
+  AGENT_WORK_STAGES,
+  modelInvolvement,
+  sumMeasured,
+  totalInputAndOutputTokens,
+} from '../../domain/usage.js';
 import type { AgentFamily } from '../../domain/agents.js';
 import { agentFamily } from '../../domain/agents.js';
 import type { RepositoryId } from '../../domain/repository.js';
 import type { BoardMetrics, MetricsProvenance, StatisticsHealth } from './board.js';
 import type { AgentAvailabilityRow } from './agent-status.js';
 import { buildMetrics } from './metrics.js';
+import { compareCohorts, type CohortDimension } from './cohorts.js';
 import {
   isCompletedStatisticsRow,
   statisticsMissionKey,
@@ -56,6 +63,18 @@ export interface ConcreteMetricsReadAdapterOptions {
   readonly clock?: () => string;
   /** Operational history for lifecycle entry timestamps of missions without transitions. */
   readonly historyRepo?: OperationalHistoryRepository;
+  /**
+   * The experiment dimension the board's cohort comparison slices on.
+   * Defaults to `label`, the dimension the mission board already carries.
+   */
+  readonly cohortDimension?: CohortDimension;
+  /**
+   * Net engineering lines per mission, read by the caller from `ClosedMission`
+   * data. Called once per projection build. Absent when the composition has no
+   * mission adapter; the cohort then reports no NEL rather than a fabricated
+   * one.
+   */
+  readonly netEngineeringLines?: () => Promise<ReadonlyMap<MissionId, number | null>>;
 }
 
 /**
@@ -69,6 +88,8 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
   private readonly repositoryId: RepositoryId;
   private readonly clock: () => string;
   private readonly historyRepo: OperationalHistoryRepository | undefined;
+  private readonly cohortDimension: CohortDimension;
+  private readonly netEngineeringLines: () => Promise<ReadonlyMap<MissionId, number | null>>;
 
   constructor(options: ConcreteMetricsReadAdapterOptions) {
     this.laneEventRepo = options.laneEventRepo;
@@ -76,6 +97,8 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
     this.repositoryId = options.repositoryId;
     this.clock = options.clock ?? (() => new Date().toISOString());
     this.historyRepo = options.historyRepo;
+    this.cohortDimension = options.cohortDimension ?? 'label';
+    this.netEngineeringLines = options.netEngineeringLines ?? (async () => new Map());
   }
 
   async buildMetrics(
@@ -125,7 +148,13 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
       rejectedOrMissingIdentityRowCount,
       adapterSucceeded: true,
     };
-    return { ...metrics, health, provenance };
+    const cohorts = compareCohorts({
+      outcomes,
+      transitions,
+      dimension: this.cohortDimension,
+      netEngineeringLines: await this.netEngineeringLines(),
+    });
+    return { ...metrics, health, provenance, cohorts };
   }
 
   // -----------------------------------------------------------------------
@@ -187,6 +216,8 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
       closedAt: string | null;
       cycleTimeMinutes: number;
       reviewFixRounds: number;
+      /** Raw classification strings; normalised to `MissionLabel` on emit. */
+      labelValues: string[];
       runs: AgentRunMeasurement[];
     }>();
 
@@ -209,6 +240,7 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
         if (isCompletedStatisticsRow(record)) {
           existing.closedAt = existing.closedAt === null || existing.closedAt < timestamp ? timestamp : existing.closedAt;
         }
+        existing.labelValues.push(...recordLabelValues(record));
         existing.runs.push(usageRecordToRun(record));
       } else {
         outcomeMap.set(key, {
@@ -218,6 +250,7 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
           closedAt: isCompletedStatisticsRow(record) ? timestamp : null,
           cycleTimeMinutes: 0,
           reviewFixRounds: record.pr_fix_rounds ?? 0,
+          labelValues: [...recordLabelValues(record)],
           runs: [usageRecordToRun(record)],
         });
       }
@@ -235,12 +268,20 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
         const laneWindow = lifecycle !== undefined && lifecycle.closedAt !== null ? lifecycle : null;
         const createdAt = laneWindow?.createdAt ?? outcome.createdAt;
         const closedAt = laneWindow?.closedAt ?? outcome.closedAt;
+        const runs = outcome.runs as readonly AgentRunMeasurement[];
+        const { labelValues: _labelValues, ...identity } = outcome;
         return {
-          ...outcome,
+          ...identity,
           createdAt,
           closedAt,
           cycleTimeMinutes: elapsedMinutes(createdAt, closedAt),
-          runs: outcome.runs as readonly AgentRunMeasurement[],
+          labels: outcomeLabels(outcome.labelValues),
+          implementer: outcomeImplementer(runs),
+          modelsInvolved: modelInvolvement(runs),
+          totalInputAndOutputTokens: totalInputAndOutputTokens(runs),
+          totalCostUsd: sumMeasured(runs.map((run) => run.costUsd)),
+          totalToolCalls: sumMeasured(runs.map((run) => run.toolCalls)),
+          runs,
         };
       });
     return { outcomes, rejected };
@@ -381,6 +422,34 @@ function missionLifecycles(
     }
   }
   return lifecycles;
+}
+
+/**
+ * The mission labels a usage row carries. `classification` is where the board's
+ * label dimension (`ai_sdlc`, `user_value`, …) reaches telemetry, so it is the
+ * label source; an unclassified row contributes nothing rather than a guess.
+ */
+function recordLabelValues(record: UsageRecord): readonly string[] {
+  const classification = (record.classification ?? '').trim();
+  return classification.length === 0 ? [] : [classification];
+}
+
+/** Distinct, normalised labels; an unlabelled mission gets an empty list. */
+function outcomeLabels(values: readonly string[]): readonly MissionLabel[] {
+  return missionLabels(values.filter((value) => value.trim().length > 0));
+}
+
+/**
+ * The agent family that did the implementation work. Reviewer runs are excluded
+ * so a cohort keyed on implementer is not split by who reviewed it, and an
+ * unparseable name stays `null` instead of becoming the `unknown` family.
+ */
+function outcomeImplementer(runs: readonly AgentRunMeasurement[]): AgentFamily | null {
+  const named = runs
+    .filter((run) => run.role === 'implementer')
+    .map((run) => run.agent)
+    .filter((agent) => agent !== agentFamily('unknown'));
+  return named[0] ?? null;
 }
 
 /** Whole minutes between two ISO instants, never negative. */
