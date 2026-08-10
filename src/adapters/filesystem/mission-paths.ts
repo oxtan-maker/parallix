@@ -253,6 +253,11 @@ export function getFirstLine(filePath: string): string {
   return content.split('\n')[0].replace(/^#+\s*/, '').trim();
 }
 
+/** @param {string} missionDir */
+export function readMissionFile(missionDir: string): string {
+  return fs.readFileSync(path.join(missionDir, 'MISSION.md'), 'utf8');
+}
+
 /** @param {string} [slug] */
 export function missionTitle(slug: string | undefined): string | null {
   if (!slug) {return null;}

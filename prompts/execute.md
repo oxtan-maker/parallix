@@ -12,6 +12,8 @@ Harness preflight already confirmed:
 Execution requirements:
 - execute checkpoint-by-checkpoint per the contract in `{{missionPath}}`
 - after each completed checkpoint, write `CP-N.md` in `{{missionDir}}` containing: a summary of work done, a Goal Check table with file:line and test-name evidence, and a non-generic `Next action:` line
+- Completing a checkpoint is **non-terminal**: after committing its `CP-N.md`, immediately continue to the next incomplete checkpoint declared in the mission. Do not send a final response or exit merely because one checkpoint is complete; break large checkpoints into safe slices and keep progressing.
+- You may terminate this execution only when exactly one of these conditions applies: (a) every declared checkpoint is committed and every mission-declared gate passes, (b) a mission stop rule applies, or (c) a genuine external dependency blocks progress. Checkpoint size, uncertainty, or needing further investigation are not terminal conditions.
 - Keep Goal Check evidence durable: prefer stable file references and commands that can be rerun against the committed tree. Do not claim that `git diff HEAD` proves a committed change—its expected output is empty after committing. If historical diff evidence is needed, state the exact non-HEAD baseline or describe the observed change without implying that an empty post-commit diff will reproduce it.
 - the final checkpoint document MUST contain a Goal Check table citing real evidence (file:line, test names)
 - **Heading requirement:** Use the exact section header `## Goal Check`.

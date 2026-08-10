@@ -28,6 +28,7 @@ export const findCheckpoints = paths.findCheckpoints;
 export const compareCheckpointFiles = paths.compareCheckpointFiles;
 export const checkpointOrder = paths.checkpointOrder;
 export const getFirstLine = paths.getFirstLine;
+export const readMissionFile = paths.readMissionFile;
 export const missionTitle = paths.missionTitle;
 export const SUPPORTED_VERIFY_AREAS = paths.SUPPORTED_VERIFY_AREAS;
 export const normalizeVerifyArea = paths.normalizeVerifyArea;
