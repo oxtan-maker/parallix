@@ -7,6 +7,7 @@ created_date: '2026-08-10 08:20'
 updated_date: '2026-08-10 08:20'
 labels:
   - bug
+  - ai_sdlc
   - agents
   - workflow
   - reliability
