@@ -3,7 +3,7 @@ import { git, getWorktreeStatus } from '../../git/git.js';
 import * as path from 'node:path';
 import * as fmt from '../../../application/presentation/cli-format.js';
 import * as agents from '../../agents/agents.js';
-import { findMissionDir, findCheckpoints, getFirstLine, inferSlug, getMissionYear, missionDirForSlug, isWorkflowGeneratedArtifact } from '../../filesystem/mission-utils.js';
+import { findMissionDir, findCheckpoints, getFirstLine, readMissionFile, inferSlug, getMissionYear, missionDirForSlug, isWorkflowGeneratedArtifact } from '../../filesystem/mission-utils.js';
 import * as handoff from './handoff.js';
 import { resolveTaskFile, transitionTask, getTaskStatus, getTaskImplementer } from '../../backlog/backlog.js';
 import { recordStageStatsSafe, startReviewLoop } from '../../review/review-loop.js';
@@ -246,7 +246,7 @@ function applyExecuteFallback(opts) {
   * @param {string} worktree
   * @param {string} errorMsg
   * @param {string} agent
-  * @param {{isRelaunchableErrorFn?: Function, buildRelaunchPromptFn?: Function, workflowLauncherStatusFn?: Function, startAgentFn?: Function, log?: Function, error?: Function, gateOutput?: {stdout: string, stderr: string}, promptOverride?: string}} [options]
+ * @param {{isRelaunchableErrorFn?: Function, buildRelaunchPromptFn?: Function, workflowLauncherStatusFn?: Function, startAgentFn?: Function, log?: Function, error?: Function, gateOutput?: {stdout: string, stderr: string}, promptOverride?: string}} [options]
   */
  async function attemptAgentRelaunch(slug, worktree, errorMsg, agent, options = {}) {
    const {
@@ -259,10 +259,14 @@ function applyExecuteFallback(opts) {
      gateOutput,
      promptOverride
    } = options;
+   // A declared checkpoint gap has an explicit continuation contract and is
+   // therefore relaunchable even though generic error classification does not
+   // recognize its diagnostic text.
+   const nextCheckpoint = nextMissingCheckpointFromError(errorMsg);
    // When a custom prompt is provided (e.g. gatekeeper pushback), bypass the
    // relaunchability check so the agent can act on explicit artifact-creation
    // instructions even when the error message doesn't match known patterns.
-   if (!promptOverride && !isRelaunchableErrorFn(errorMsg)) {
+   if (!promptOverride && !nextCheckpoint && !isRelaunchableErrorFn(errorMsg)) {
      log(`Error is not relaunchable: ${errorMsg}`);
      return { relaunched: false, error: 'Error is not relaunchable for agent relaunch' };
    }
@@ -274,9 +278,13 @@ function applyExecuteFallback(opts) {
      return { relaunched: false, error: `Agent ${agent} launcher is not available` };
    }
 
+   // A missing declared checkpoint means the agent must continue the same mission,
+   // not repair a generic Goal Check artifact and terminate again.
    // Build the relaunch prompt, passing captured gate output if available (architecture migration).
    // promptOverride (e.g. gatekeeper pushback) takes precedence over the derived prompt.
-   const prompt = promptOverride || buildRelaunchPromptFn(errorMsg, slug, worktree, gateOutput);
+   const prompt = promptOverride || (nextCheckpoint
+     ? buildCheckpointContinuationPrompt(slug, worktree, nextCheckpoint)
+     : buildRelaunchPromptFn(errorMsg, slug, worktree, gateOutput));
 
   log(`Attempting to relaunch ${fmt.agent(agent)} to fix repairable handoff error...`);
   // startAgent handles resume flags internally for resume-capable agents (codex, claude, gemini, custom)
@@ -312,11 +320,52 @@ function applyExecuteFallback(opts) {
   }
 }
 
-/** @param {string} slug @param {string} worktree @param {{findMissionDirFn?: Function, findCheckpointsFn?: Function, runFn?: Function, log?: Function, error?: Function}} [options] */
+/** @param {string} errorMsg */
+function nextMissingCheckpointFromError(errorMsg) {
+  const match = /Declared checkpoint documents are missing before handoff:\s*([^.]*)\./.exec(errorMsg);
+  return match ? /CP-\d+/.exec(match[1])?.[0] || null : null;
+}
+
+/** @param {string} slug @param {string} worktree @param {string} nextCheckpoint */
+function buildCheckpointContinuationPrompt(slug, worktree, nextCheckpoint) {
+  return `Mission ${slug} is incomplete: ${nextCheckpoint}. Continue the existing execute mission in ${worktree} from ${nextCheckpoint}. ` +
+    `Complete and commit ${nextCheckpoint}.md, then immediately continue to every remaining declared checkpoint and mission gate. ` +
+    `Do not exit or send a final response until every declared checkpoint is committed and every mission-declared gate passes, unless a mission stop rule applies or a genuine external dependency blocks progress.`;
+}
+
+/** @param {string} missionText */
+function parseDeclaredCheckpointNames(missionText) {
+  const section = /^## Checkpoints\s*$/m.exec(missionText);
+  if (!section || section.index === undefined) {
+    return { names: [], error: 'MISSION.md must contain a ## Checkpoints section with declarations such as "- CP 1: <name>".' };
+  }
+
+  // Checkpoint Documentation Requirements is a level-3 subsection of the
+  // checkpoint section. Stop before it so its prose bullets are not parsed as
+  // declarations.
+  const sectionBody = missionText.slice(section.index + section[0].length).split(/^#{2,3}\s/m, 1)[0];
+  const checkpointLines = sectionBody.split('\n').filter(line => /^\s*-\s*(?:\*\*|__|\*)?CP(?:\s*-\s*|\s*)\d/i.test(line));
+  const names = [];
+  for (const line of checkpointLines) {
+    const match = /^\s*-\s*(?:\*\*|__|\*)?CP(?:\s*-\s*|\s*)(\d+)(?:\s*\([^)]*\))?(?:\*\*|__|\*)?\s*(?::|—|–|-)\s*\S/i.exec(line);
+    if (!match) {
+      return { names: [], error: `Malformed checkpoint declaration in MISSION.md: ${line.trim()}. Use a CP number followed by :, —, –, or -.` };
+    }
+    names.push(`CP-${match[1]}`);
+  }
+
+  if (names.length === 0) {
+    return { names: [], error: 'MISSION.md ## Checkpoints section contains no checkpoint declarations. Use "- CP N: <name>" or "- CP-N: <name>".' };
+  }
+  return { names: [...new Set(names)] };
+}
+
+/** @param {string} slug @param {string} worktree @param {{findMissionDirFn?: Function, findCheckpointsFn?: Function, readMissionFileFn?: Function, runFn?: Function, log?: Function, error?: Function}} [options] */
 function validateCheckpointsBeforeHandoff(slug, worktree, options = {}) {
   const {
     findMissionDirFn = findMissionDir,
     findCheckpointsFn = findCheckpoints,
+    readMissionFileFn = readMissionFile,
     runFn = git,
     log = fmt.log.plain,
     error = fmt.log.plainError
@@ -329,7 +378,31 @@ function validateCheckpointsBeforeHandoff(slug, worktree, options = {}) {
     return { ok: false, error: msg };
   }
 
+  let declared;
+  try {
+    declared = parseDeclaredCheckpointNames(readMissionFileFn(missionDir));
+  } catch (err) {
+    const msg = `Could not read ${fmt.path(path.join(missionDir, 'MISSION.md'))} to validate declared checkpoints: ${/** @type{Error} */(err).message}`;
+    error(msg);
+    return { ok: false, error: msg };
+  }
+  if (declared.error) {
+    error(declared.error);
+    return { ok: false, error: declared.error };
+  }
+
   const checkpoints = findCheckpointsFn(missionDir);
+  const checkpointNames = new Set(checkpoints
+    .map((/** @type{string} */ checkpoint) => /(?:CP-|CHECKPOINT_)(\d+)/i.exec(path.basename(checkpoint))?.[1])
+    .filter(Boolean)
+    .map((/** @type{string} */ number) => `CP-${number}`));
+  const missing = declared.names.filter((/** @type{string} */ name) => !checkpointNames.has(name));
+  if (missing.length > 0) {
+    const msg = `Declared checkpoint documents are missing before handoff: ${missing.join(', ')}. Create and commit ${missing.map((/** @type{string} */ name) => `${name}.md`).join(', ')} in ${fmt.path(missionDir)} before handoff.`;
+    error(msg);
+    return { ok: false, error: msg, missingCheckpoints: missing, nextCheckpoint: missing[0] };
+  }
+
   if (checkpoints.length === 0) {
     const msg = `No checkpoint documents found in ${fmt.path(missionDir)}. The execute agent must create checkpoint documents (CP-N.md) with a Goal Check table before handoff. Create at least CP-1 documenting your implementation, including a Goal Check table with real evidence (file:line, test names).`;
     error(msg);
@@ -359,8 +432,16 @@ function validateCheckpointsBeforeHandoff(slug, worktree, options = {}) {
     return { ok: false, error: msg };
   }
 
-  log(fmt.status('PASS', `Found ${checkpoints.length} checkpoint document(s) in ${fmt.path(missionDir)}.`));
-  return { ok: true };
+  log(fmt.status('PASS', `Found all ${declared.names.length} declared checkpoint document(s) in ${fmt.path(missionDir)}.`));
+  return { ok: true, declaredCheckpoints: declared.names };
+}
+
+/** @param {string} errorMsg @param {string} slug @param {string} worktree */
+function checkpointValidationNextAction(errorMsg, slug, worktree) {
+  if (/MISSION\.md.*## Checkpoints|Malformed checkpoint declaration/i.test(errorMsg)) {
+    return `Update ${fmt.path(path.join(missionDirForSlug(worktree, slug), 'MISSION.md'))} with valid - CP N: <name> or - CP-N: <name> declarations, then re-run: ${fmt.command(`px review ${slug} --submit`)}.`;
+  }
+  return `Create a checkpoint document (CP-N.md) in ${fmt.path(missionDirForSlug(worktree, slug))} with a Goal Check table. Then re-run: ${fmt.command(`px review ${slug} --submit`)}.`;
 }
 
 /**
@@ -395,9 +476,9 @@ async function runHandoffAndReview(slug, worktree, agent, options = {}) {
     // architecture migration: restrict targeted relaunch to IncompleteEvidence only.
     // Non-incomplete-evidence errors (e.g. GitBlockers/dirty checkpoints,
     // InfraBlockers) retain their existing handling paths.
-    const isCheckpointRelaunchable = checkpointClassification
+    const isCheckpointRelaunchable = validation.nextCheckpoint || (checkpointClassification
       ? checkpointClassification.failureClass === repairHandoff.FailureClass.IncompleteEvidence
-      : false;
+      : false);
 
     if (isCheckpointRelaunchable) {
       // architecture migration: bounded retry loop for pre-handoff checkpoint validation.
@@ -408,7 +489,7 @@ async function runHandoffAndReview(slug, worktree, agent, options = {}) {
 
       while (checkpointRelaunchCount < maxCheckpointRelaunches) {
         checkpointRelaunchCount++;
-        log(`Checkpoint validation failed (${checkpointClassification.failureClass}). Targeted repair relaunch attempt ${checkpointRelaunchCount}/${maxCheckpointRelaunches}...`);
+        log(`Checkpoint validation failed (${checkpointClassification?.failureClass ?? 'DeclaredCheckpointGap'}). Targeted repair relaunch attempt ${checkpointRelaunchCount}/${maxCheckpointRelaunches}...`);
         const { relaunched, error: relaunchError } = await attemptAgentRelaunchFn(
           slug, worktree, /** @type{string} */(validation.error), agent,
           { log, error }
@@ -434,15 +515,13 @@ async function runHandoffAndReview(slug, worktree, agent, options = {}) {
       const finalValidation = validateCheckpointsBeforeHandoffFn(slug, worktree, { log, error });
       if (!finalValidation.ok) {
         // Checkpoint still missing/invalid after all relaunch attempts — exhaustion
-        error(`       Create a checkpoint document (CP-N.md) in ${fmt.path(missionDirForSlug(worktree, slug))} with a Goal Check table.`);
-        error(`       Then re-run: ${fmt.command(`px review ${slug} --submit`)}`);
+        error(`       ${checkpointValidationNextAction(/** @type {string} */ (finalValidation.error), slug, worktree)}`);
         return false;
       }
       // Fall through to performHandoff below
     } else {
       // Non-relaunchable checkpoint error — emit manual instruction
-      error(`       Create a checkpoint document (CP-N.md) in ${fmt.path(missionDirForSlug(worktree, slug))} with a Goal Check table.`);
-      error(`       Then re-run: ${fmt.command(`px review ${slug} --submit`)}`);
+      error(`       ${checkpointValidationNextAction(/** @type {string} */ (validation.error), slug, worktree)}`);
       return false;
     }
   }

@@ -629,6 +629,51 @@ test('runHandoffAndReview passes worktree and implementer to startReviewLoop', a
   assert.equal(reviewLoopCalls[0].opts.implementer, 'codex');
 });
 
+test('runHandoffAndReview does not hand off or start review when CP-2 is missing', async () => {
+  let handoffCalls = 0;
+  let reviewCalls = 0;
+  const result = await runHandoffAndReview('task-incomplete', '/tmp/project-task-incomplete', 'codex', {
+    validateCheckpointsBeforeHandoffFn: () => ({
+      ok: false,
+      error: 'Declared checkpoint documents are missing before handoff: CP-2. Create and commit CP-2.md before handoff.',
+      nextCheckpoint: 'CP-2'
+    }),
+    attemptAgentRelaunchFn: async () => ({ relaunched: false, error: 'test relaunch declined' }),
+    performHandoff: async () => { handoffCalls++; return { ok: true }; },
+    startReviewLoop: async () => { reviewCalls++; },
+    log: () => {},
+    error: () => {}
+  });
+  assert.equal(result, false);
+  assert.equal(handoffCalls, 0);
+  assert.equal(reviewCalls, 0);
+});
+
+test('runHandoffAndReview completes a successful relaunch for a declared checkpoint gap', async () => {
+  let validations = 0;
+  let relaunches = 0;
+  let handoffCalls = 0;
+  const logs = [];
+  const result = await runHandoffAndReview('task-incomplete', '/tmp/project-task-incomplete', 'codex', {
+    validateCheckpointsBeforeHandoffFn: () => {
+      validations++;
+      return validations === 1
+        ? { ok: false, nextCheckpoint: 'CP-2' }
+        : { ok: true };
+    },
+    attemptAgentRelaunchFn: async () => { relaunches++; return { relaunched: true }; },
+    performHandoff: async () => { handoffCalls++; return { ok: true }; },
+    startReviewLoop: async () => {},
+    log: message => logs.push(message),
+    error: () => {}
+  });
+
+  assert.equal(result, true);
+  assert.equal(relaunches, 1);
+  assert.equal(handoffCalls, 1);
+  assert.ok(logs.some(message => message.includes('DeclaredCheckpointGap')));
+});
+
 test('runHandoffAndReview waits for the autonomous review loop to complete', async () => {
   let resolveReview;
   const reviewComplete = new Promise(resolve => { resolveReview = resolve; });
@@ -1309,34 +1354,122 @@ test('validateCheckpointsBeforeHandoff returns { ok: false } when mission dir is
   assert.ok(result.error.includes('Mission directory not found'));
 });
 
-test('validateCheckpointsBeforeHandoff returns { ok: false } when dir exists but no CP files', () => {
+test('validateCheckpointsBeforeHandoff rejects a declared checkpoint when its document is missing', () => {
   const result = active.validateCheckpointsBeforeHandoff('task-empty', '/tmp/project-task-empty', {
     findMissionDirFn: () => '/tmp/project-task-empty/docs/missions/2026/task-empty',
     findCheckpointsFn: () => [],
+    readMissionFileFn: () => '## Checkpoints\n- CP 1: first checkpoint\n',
     log: () => {},
     error: () => {}
   });
   assert.equal(result.ok, false);
-  assert.ok(result.error.includes('No checkpoint documents found'));
+  assert.ok(result.error.includes('Declared checkpoint documents are missing'));
+  assert.ok(result.error.includes('CP-1'));
 });
 
-test('validateCheckpointsBeforeHandoff returns { ok: true } when at least one CP file exists', () => {
+test('validateCheckpointsBeforeHandoff accepts a single declared checkpoint when it is committed', () => {
   const logs = [];
   const result = active.validateCheckpointsBeforeHandoff('task-ok', '/tmp/project-task-ok', {
     findMissionDirFn: () => '/tmp/project-task-ok/docs/missions/2026/task-ok',
     findCheckpointsFn: () => ['/tmp/project-task-ok/docs/missions/2026/task-ok/CP-1.md'],
+    readMissionFileFn: () => '## Checkpoints\n- CP 1: first checkpoint\n',
     runFn: () => ({ status: 0, stdout: '' }),
     log: (msg) => logs.push(msg),
     error: () => {}
   });
   assert.equal(result.ok, true);
-  assert.ok(logs.some(l => l.includes('Found 1 checkpoint')));
+  assert.ok(logs.some(l => l.includes('Found all 1 declared checkpoint')));
+});
+
+test('validateCheckpointsBeforeHandoff rejects a multi-checkpoint mission with only CP-1', () => {
+  const result = active.validateCheckpointsBeforeHandoff('task-incomplete', '/tmp/project-task-incomplete', {
+    findMissionDirFn: () => '/tmp/project-task-incomplete/missions/task-incomplete',
+    findCheckpointsFn: () => ['/tmp/project-task-incomplete/missions/task-incomplete/CP-1.md'],
+    readMissionFileFn: () => '## Checkpoints\n- CP 1: first checkpoint\n- CP-2: second checkpoint\n',
+    log: () => {},
+    error: () => {}
+  });
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.missingCheckpoints, ['CP-2']);
+  assert.equal(result.nextCheckpoint, 'CP-2');
+  assert.match(result.error, /CP-2/);
+});
+
+test('validateCheckpointsBeforeHandoff accepts complete declared checkpoint coverage', () => {
+  const result = active.validateCheckpointsBeforeHandoff('task-complete', '/tmp/project-task-complete', {
+    findMissionDirFn: () => '/tmp/project-task-complete/missions/task-complete',
+    findCheckpointsFn: () => [
+      '/tmp/project-task-complete/missions/task-complete/CP-1.md',
+      '/tmp/project-task-complete/missions/task-complete/CP-2.md'
+    ],
+    readMissionFileFn: () => '## Checkpoints\n- CP 1: first checkpoint\n- CP-2: second checkpoint\n',
+    runFn: () => ({ status: 0, stdout: '' }),
+    log: () => {},
+    error: () => {}
+  });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.declaredCheckpoints, ['CP-1', 'CP-2']);
+});
+
+test('validateCheckpointsBeforeHandoff rejects a section with no parsable checkpoint declarations', () => {
+  const result = active.validateCheckpointsBeforeHandoff('task-malformed', '/tmp/project-task-malformed', {
+    findMissionDirFn: () => '/tmp/project-task-malformed/missions/task-malformed',
+    findCheckpointsFn: () => [],
+    readMissionFileFn: () => '## Checkpoints\n- CP two: invalid declaration\n',
+    log: () => {},
+    error: () => {}
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.error, /contains no checkpoint declarations/);
+});
+
+test('validateCheckpointsBeforeHandoff rejects malformed declarations missing a separator', () => {
+  const result = active.validateCheckpointsBeforeHandoff('task-malformed', '/tmp/project-task-malformed', {
+    findMissionDirFn: () => '/tmp/project-task-malformed/missions/task-malformed',
+    findCheckpointsFn: () => [],
+    readMissionFileFn: () => '## Checkpoints\n- CP 1 must cite an ADR\n',
+    log: () => {},
+    error: () => {}
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.error, /Malformed checkpoint declaration/);
+});
+
+test('validateCheckpointsBeforeHandoff accepts compatible declaration and filename variants before its documentation sub-block', () => {
+  const result = active.validateCheckpointsBeforeHandoff('task-compatible', '/tmp/project-task-compatible', {
+    findMissionDirFn: () => '/tmp/project-task-compatible/missions/task-compatible',
+    findCheckpointsFn: () => [
+      '/tmp/project-task-compatible/missions/task-compatible/CP-1-parser.md',
+      '/tmp/project-task-compatible/missions/task-compatible/CHECKPOINT_2.md',
+      '/tmp/project-task-compatible/missions/task-compatible/CP-3.md',
+      '/tmp/project-task-compatible/missions/task-compatible/CP-4.md',
+      '/tmp/project-task-compatible/missions/task-compatible/CP-5.md'
+    ],
+    readMissionFileFn: () => [
+      '## Checkpoints',
+      '- CP1: parser',
+      '- **CP 2:** implementation',
+      '- **CP-3**: tests',
+      '- *CP 4 – evidence*',
+      '- CP-5 (red): verification',
+      '',
+      '### Checkpoint Documentation Requirements',
+      '- CP 1 must cite an ADR when applicable.'
+    ].join('\n'),
+    runFn: () => ({ status: 0, stdout: '' }),
+    log: () => {},
+    error: () => {}
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.declaredCheckpoints, ['CP-1', 'CP-2', 'CP-3', 'CP-4', 'CP-5']);
 });
 
 test('validateCheckpointsBeforeHandoff returns { ok: false } when checkpoint files are uncommitted', () => {
   const result = active.validateCheckpointsBeforeHandoff('task-dirty', '/tmp/project-task-dirty', {
     findMissionDirFn: () => '/tmp/project-task-dirty/docs/missions/2026/task-dirty',
     findCheckpointsFn: () => ['/tmp/project-task-dirty/docs/missions/2026/task-dirty/CP-1.md'],
+    readMissionFileFn: () => '## Checkpoints\n- CP 1: first checkpoint\n',
     runFn: () => ({ status: 0, stdout: '?? docs/missions/2026/task-dirty/CP-1.md\n' }),
     log: () => {},
     error: () => {}
@@ -1450,6 +1583,45 @@ test('attemptAgentRelaunch calls startAgent with correct parameters', async () =
   assert.equal(optsArg.agent, 'codex');
   assert.equal(optsArg.worktree, '/tmp/worktree');
   assert.equal(optsArg.prompt, 'test prompt');
+});
+
+test('attemptAgentRelaunch gives incomplete missions a continuation prompt naming the next checkpoint', async () => {
+  let prompt = '';
+  const result = await attemptAgentRelaunch(
+    'task-incomplete', '/tmp/worktree',
+    'Declared checkpoint documents are missing before handoff: CP-2, CP-3. Create and commit CP-2.md in /tmp/worktree before handoff.',
+    'codex',
+    {
+      workflowLauncherStatusFn: () => ({ supported: true }),
+      startAgentFn: async (_step, options) => {
+        prompt = options.prompt;
+        return { agent: 'codex', result: { status: 0 } };
+      },
+      log: () => {},
+      error: () => {}
+    }
+  );
+  assert.equal(result.relaunched, true);
+  assert.match(prompt, /CP-2/);
+  assert.match(prompt, /Do not exit/);
+  assert.match(prompt, /final response/);
+});
+
+test('runHandoffAndReview gives malformed checkpoint declarations corrective operator guidance', async () => {
+  const errors = [];
+  const result = await runHandoffAndReview('task-malformed', '/tmp/worktree', 'codex', {
+    validateCheckpointsBeforeHandoffFn: () => ({
+      ok: false,
+      error: 'MISSION.md must contain a ## Checkpoints section with declarations such as "- CP 1: <name>".'
+    }),
+    performHandoff: async () => { throw new Error('must not hand off'); },
+    error: message => errors.push(message),
+    log: () => {}
+  });
+
+  assert.equal(result, false);
+  assert.ok(errors.some(message => message.includes('Update') && message.includes('MISSION.md')));
+  assert.ok(errors.some(message => message.includes('CP N: <name>')));
 });
 
 // ---------- enforceExecuteCommitSafety: task-1211 fallback-commit regression ----------
