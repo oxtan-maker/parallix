@@ -36,6 +36,8 @@ export interface ReviewLoopPoint {
 
 /** Time interval a mission spent in a single lane. Open intervals (exitedAt: null) track the current lane. */
 export interface LaneInterval {
+  /** The mission that occupied the lane, so dwell can be attributed per mission. */
+  readonly missionId: MissionId;
   readonly state: BoardLane;
   readonly enteredAt: string;
   readonly exitedAt: string | null;
@@ -340,15 +342,15 @@ export function deriveLaneIntervals(
     // Close any open interval for this mission
     const open = openByMission.get(transition.missionId);
     if (open) {
-      intervals.push({ state: open[0], enteredAt: open[1], exitedAt: transition.occurredAt });
+      intervals.push({ missionId: transition.missionId, state: open[0], enteredAt: open[1], exitedAt: transition.occurredAt });
     }
     // Open new interval for the state the mission enters
     openByMission.set(transition.missionId, [transition.to as BoardLane, transition.occurredAt]);
   }
 
   // Remaining open intervals are current lanes (exitedAt: null)
-  for (const [, [state, enteredAt]] of openByMission) {
-    intervals.push({ state, enteredAt, exitedAt: null });
+  for (const [missionId, [state, enteredAt]] of openByMission) {
+    intervals.push({ missionId, state, enteredAt, exitedAt: null });
   }
 
   return intervals;

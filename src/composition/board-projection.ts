@@ -56,7 +56,19 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
     }),
     new ConcreteGitReadAdapter({ rootDir: deps.rootDir, repositoryId: deps.repositoryId }),
     new ConcreteOperationLogReadAdapter({ historyRepo: deps.historyRepo }),
-    { metricsAdapter: new ConcreteMetricsReadAdapter({ laneEventRepo: deps.laneEventRepo, usageRepo: deps.usageRepo, repositoryId: deps.repositoryId, historyRepo: deps.historyRepo }) },
+    {
+      metricsAdapter: new ConcreteMetricsReadAdapter({
+        laneEventRepo: deps.laneEventRepo,
+        usageRepo: deps.usageRepo,
+        repositoryId: deps.repositoryId,
+        historyRepo: deps.historyRepo,
+        // Net engineering lines are a mission fact, not telemetry, so the
+        // cohort comparison reads them from the same adapter the board does.
+        netEngineeringLines: async () => new Map(
+          (await missions.loadAllMissions()).map((mission) => [mission.id, mission.netEngineeringLines]),
+        ),
+      }),
+    },
   );
   return { builder, missionQuery: new MissionProjectionQuery(missions) };
 }

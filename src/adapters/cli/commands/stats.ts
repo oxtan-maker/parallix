@@ -82,6 +82,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 import * as fmt from '../../../application/presentation/cli-format.js';
+import { statsCohorts } from './stats-cohorts.js';
 import { resolveTaskFile, getTaskClassification, getTaskImplementer, getTaskAssignee } from '../../backlog/backlog.js';
 import { isForgejoReviewEnabled, loadEffectiveConfig } from '../../config/product-config.js';
 import { currentReviewRound } from '../../../domain/review.js';
@@ -90,7 +91,6 @@ import * as forgejo from '../../forgejo/forgejo.js';
 import * as statsReport from './stats-report.js';
 import { resolveMeasurementStore } from '../../sqlite/measurement-store.js';
 import {
-  isCompletedStatisticsRow,
   statisticsMissionKey,
   statisticsRowInWindow,
   summarizeCompletedMissionWindow,
@@ -2118,6 +2118,7 @@ function runLegacyCsvImportCommand(args: string[], options: StatsOptions = {}) {
  */
 function printStatsUsage(log: typeof fmt.log.plain = fmt.log.plain) {
   log(`Usage: px stats [<csv_file>|--csv-file <path>] [--today YYYY-MM-DD] [--from YYYY-MM-DD --to YYYY-MM-DD] [--output <file>] [--group-by implementer|period|merged]
+       px stats cohorts [--by label|implementer|model|provider] [--min-sample <n>]
        px stats import-legacy --csv-file <path> [--apply] [--json]
 
 Examples:
@@ -2129,6 +2130,8 @@ Examples:
   px stats legacy-report.csv --group-by period --output retrospective.md
   px stats architecture migration
   px stats --mission architecture migration
+  px stats cohorts
+  px stats cohorts --by implementer --min-sample 8
   px stats import-legacy --csv-file ~/old-stats.csv
   px stats import-legacy --csv-file ~/old-stats.csv --apply
 
@@ -2145,6 +2148,10 @@ Notes:
     would add (dry run). Add --apply to import it in one atomic, idempotent
     transaction; re-running the same file creates no duplicate records and
     never writes to the source CSV.
+  - "px stats cohorts" compares completed missions along one experiment
+    dimension. Every cohort figure is printed beside its sample size n, and a
+    cohort with too few completed missions is marked low-sample rather than
+    presented as a comparable result. Run "px stats cohorts --help" for detail.
   - Workflow-owned stats datasets print the current/previous-week summary tables by default.
   - Use --from and --to together to print one inclusive arbitrary-range report.
   - Legacy retrospective CSVs still render the markdown report.`);
@@ -2154,13 +2161,25 @@ Notes:
  * @param {string[]} args
  * @param {StatsCmdOptions} options
  */
-function stats(args: string[], options: {log?: Function, error?: Function, exit?: Function, rootDir?: string, store?: unknown, dbPath?: string} = {}) {
+function stats(args: string[], options: {log?: Function, error?: Function, exit?: Function, rootDir?: string, store?: unknown, dbPath?: string, laneEventRepo?: unknown, usageRepo?: unknown, repositoryId?: string} = {}) {
   /** @type {StatsCmdOptions} */
   const opts = options;
   const log = opts.log || fmt.log.plain;
   const error = opts.error || fmt.log.plainError;
   const exit = opts.exit || process.exit;
   const rootDir = opts.rootDir || process.cwd();
+
+  // Cohort comparison reads lane-event history as well as measurements, so it
+  // owns its own module — including its own --help. The weekly, range, and
+  // mission paths below are untouched by it.
+  if (args[0] === 'cohorts') {
+    return statsCohorts(args.slice(1), {
+      log, error, exit, rootDir,
+      laneEventRepo: opts.laneEventRepo,
+      usageRepo: opts.usageRepo,
+      repositoryId: opts.repositoryId,
+    });
+  }
 
   if (args.includes('--help') || args.includes('-h')) {
     printStatsUsage(log);
@@ -2325,8 +2344,9 @@ function stats(args: string[], options: {log?: Function, error?: Function, exit?
 }
 
 export default stats;
-export { stats, STATS_HEADERS, resolveStatsRepoName, recordIntegrationStats, renderWeeklyStatsReport, renderMissionPhaseReport, renderRangeStatsReport, buildWeeklyWindows, resolveMissionClassification, deriveImplementerAndFixRounds, upsertMeasurementRow, loadMeasurementRows, readLegacyStatsCsv, analyzeLegacyStatsCsv, applyLegacyStatsCsv, runLegacyCsvImportCommand, measurementToStatsRow, statsRowToMeasurement, normalizeStatsRow, canonicalizeStatsRow, recordStageStats, accumulateStageStats, recordActiveStats, recordReviewStats, telemetryToStatsFields, formatDateOnly, LEGACY_HEADERS, USAGE_NUMBERS, formatStatsTable, computeAgentMissionGroups, createRangeWindow, summarizeMissionWindow, summarizeAgentWindow, summarizeAgentStageSpend, formatAgentSpendCell, colorAverageFixRounds, colorMissionCounts, AGENT_SPEND_STAGE_COLUMNS, MISSION_PHASE_ORDER, statsRowActorKey };
+export { stats, statsCohorts, STATS_HEADERS, resolveStatsRepoName, recordIntegrationStats, renderWeeklyStatsReport, renderMissionPhaseReport, renderRangeStatsReport, buildWeeklyWindows, resolveMissionClassification, deriveImplementerAndFixRounds, upsertMeasurementRow, loadMeasurementRows, readLegacyStatsCsv, analyzeLegacyStatsCsv, applyLegacyStatsCsv, runLegacyCsvImportCommand, measurementToStatsRow, statsRowToMeasurement, normalizeStatsRow, canonicalizeStatsRow, recordStageStats, accumulateStageStats, recordActiveStats, recordReviewStats, telemetryToStatsFields, formatDateOnly, LEGACY_HEADERS, USAGE_NUMBERS, formatStatsTable, computeAgentMissionGroups, createRangeWindow, summarizeMissionWindow, summarizeAgentWindow, summarizeAgentStageSpend, formatAgentSpendCell, colorAverageFixRounds, colorMissionCounts, AGENT_SPEND_STAGE_COLUMNS, MISSION_PHASE_ORDER, statsRowActorKey };
 
+(stats as any).statsCohorts = statsCohorts;
 (stats as any).STATS_HEADERS = STATS_HEADERS;
 (stats as any).resolveStatsRepoName = resolveStatsRepoName;
 (stats as any).recordIntegrationStats = recordIntegrationStats;

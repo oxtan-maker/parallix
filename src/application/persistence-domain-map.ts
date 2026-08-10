@@ -74,7 +74,7 @@ export const DOMAIN_CONCEPT_INVARIANTS: Readonly<
     invariant:
       'Completed statistics require a validated ClosedMission whose identity matches the outcome and whose NEL is recorded; a mismatch or missing NEL throws StatisticsRuleViolation.',
     fileLocation: 'src/domain/usage.ts',
-    line: 156,
+    line: 197,
     anchor: 'export function completedMissionStatistics',
   },
   AgentRunMeasurement: {

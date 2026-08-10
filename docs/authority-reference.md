@@ -312,12 +312,18 @@ inside, restored by, or removed with the globally installed npm package.
 - Import a legacy CSV into the database: `px stats import-legacy --csv-file legacy-stats.csv --apply`
 - Write the output to a file for inspection or sharing: `px stats --from 2026-05-01 --to 2026-05-31 --output /tmp/workflow-stats.txt`
 - Break one mission down by phase: `px stats task-1285` (or `px stats --mission task-1285`)
-- Show command help and examples: `px stats --help`
+- Compare completed missions by experiment dimension: `px stats cohorts` (add `--by implementer|model|provider`, or `--min-sample <n>`)
+- Show command help and examples: `px stats --help` (cohort flags: `px stats cohorts --help`)
 
 Behavior:
 - Workflow-owned stats datasets print the current-week and previous-week mission tables, the two agent-performance tables, and — for the current week only — an agent spend-by-stage table (columns `draft`, `execute`, `review`, `follow-up`, `default`, `total`) showing each agent's tracked spend per stage as `<metric> (<share %>)`: Codex/OpenAI rows use usage-percentage snapshots (`openai_usage_after`), Claude and Mistral rows use dollar cost (`cost_usd`), and Custom/local-model rows use clock duration (`duration_minutes`). Rows with no non-zero spend for their metric family show `—` instead of misleading `0%` math.
 - With `--from YYYY-MM-DD --to YYYY-MM-DD`, the command instead prints one mission table and one agent-performance table for rows whose `date` is within the inclusive range.
 - With a mission slug (`px stats task-1285`) or `--mission <slug>`, the command prints one mission broken down by phase — `draft`, `execute` (stored as the `active` stage), and `review` are always shown, plus any `follow-up`/extra recorded stages, with per-phase provider, model, implementer, token, tool-call, and duration columns and a totals row. The output is a pure function of the stored rows, so re-running it does not change the data.
+
+- With the `cohorts` subcommand, the command groups completed missions by one experiment dimension — mission label by default, or `implementer`, `model`, `provider` — and prints per cohort: the sample size `n`, median and p75 end-to-end cycle time, median dwell in `active` and in `review`, review bounce rate, median fix rounds, and tokens, agent runtime, cost and net engineering lines per completed mission. It reads the lane-event history as well as the measurement database and writes nothing.
+  - Every cohort figure is printed beside its `n`. A cohort with fewer than 5 completed missions is marked `low-sample` and named in a trailing note, because a median over three missions is not a comparable result; `--min-sample <n>` raises that threshold.
+  - The review bounce rate counts recorded `review → active` lane transitions per mission that entered review. It is deliberately not `pr_fix_rounds`, which counts what a usage row claimed about a review rather than what the board did.
+  - A quantity nothing measured prints as `n/a`, never as `0`.
 
 Telemetry capture contract (task-1285):
 - Stage rows are keyed by `(mission, stage)`; `draft.js`, `active.js`, and the review loop each record their phase via `recordStageStats`/`recordActiveStats`/`recordReviewStats`.

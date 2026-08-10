@@ -92,7 +92,13 @@ export interface AgentRunMeasurement {
   readonly costUsd: Measurement<number>;
 }
 
-/** Outcome measurements that do not duplicate mission-owned facts. */
+/**
+ * Outcome measurements that do not duplicate mission-owned facts.
+ *
+ * The cohort dimensions (`labels`, `implementer`, `modelsInvolved`) and the
+ * per-mission totals are carried here rather than recomputed by every reader,
+ * so a comparison can slice completed missions without re-reading telemetry.
+ */
 export interface MissionOutcome {
   readonly missionId: MissionId;
   readonly repositoryId: RepositoryId;
@@ -103,6 +109,16 @@ export interface MissionOutcome {
   readonly cycleTimeMinutes: number;
   /** Number of request-changes rounds, persisted today as pr_fix_rounds. */
   readonly reviewFixRounds: number;
+  /** Backlog labels carried by this mission's telemetry; the first cohort dimension. */
+  readonly labels: readonly MissionLabel[];
+  /** Agent family that owned the implementation work, or null when unnamed. */
+  readonly implementer: AgentFamily | null;
+  /** Every provider/model pairing observed on this mission's runs. */
+  readonly modelsInvolved: readonly ModelInvolvement[];
+  /** Null rather than a partial sum when any run lacks a token measurement. */
+  readonly totalInputAndOutputTokens: number | null;
+  readonly totalCostUsd: number | null;
+  readonly totalToolCalls: number | null;
   readonly runs: readonly AgentRunMeasurement[];
 }
 
@@ -139,7 +155,11 @@ export class StatisticsRuleViolation extends Error {
   }
 }
 
-function sumMeasured(values: readonly Measurement<number>[]): number | null {
+/**
+ * Sum only when every value was measured. A partial sum would read as a smaller
+ * true total, so an unmeasured run makes the whole quantity unavailable.
+ */
+export function sumMeasured(values: readonly Measurement<number>[]): number | null {
   if (values.length === 0) { return null; }
   const measured = values.filter(
     (value): value is { readonly kind: 'measured'; readonly value: number } => value.kind === 'measured',
@@ -149,8 +169,29 @@ function sumMeasured(values: readonly Measurement<number>[]): number | null {
     : null;
 }
 
-function measuredValue<T>(measurement: Measurement<T>): T | null {
+export function measuredValue<T>(measurement: Measurement<T>): T | null {
   return measurement.kind === 'measured' ? measurement.value : null;
+}
+
+/** The provider/model pairings a set of runs used, in run order. */
+export function modelInvolvement(
+  runs: readonly AgentRunMeasurement[],
+): readonly ModelInvolvement[] {
+  return runs.map((run) => ({
+    recordedOn: run.recordedOn,
+    stage: run.stage,
+    role: run.role,
+    agent: run.agent,
+    provider: measuredValue(run.runtime.provider),
+    model: measuredValue(run.runtime.model),
+  }));
+}
+
+/** Input plus output tokens across runs; cached and context stay separate. */
+export function totalInputAndOutputTokens(
+  runs: readonly AgentRunMeasurement[],
+): number | null {
+  return sumMeasured(runs.flatMap((run) => [run.tokens.input, run.tokens.output]));
 }
 
 export function completedMissionStatistics(
@@ -163,24 +204,16 @@ export function completedMissionStatistics(
   if (mission.netEngineeringLines === null) {
     throw new StatisticsRuleViolation(`Mission ${mission.id} has no NEL measurement`);
   }
-  const tokenMeasurements = outcome.runs.flatMap((run) => [run.tokens.input, run.tokens.output]);
   return {
     missionId: outcome.missionId,
     repositoryId: mission.repositoryId,
     labels: mission.labels,
     closedAt: mission.closedAt,
     implementer: mission.assignee,
-    modelsInvolved: outcome.runs.map((run) => ({
-      recordedOn: run.recordedOn,
-      stage: run.stage,
-      role: run.role,
-      agent: run.agent,
-      provider: measuredValue(run.runtime.provider),
-      model: measuredValue(run.runtime.model),
-    })),
+    modelsInvolved: modelInvolvement(outcome.runs),
     totalDurationMinutes: sumMeasured(outcome.runs.map((run) => run.durationMinutes)),
     totalCostUsd: sumMeasured(outcome.runs.map((run) => run.costUsd)),
-    totalInputAndOutputTokens: sumMeasured(tokenMeasurements),
+    totalInputAndOutputTokens: totalInputAndOutputTokens(outcome.runs),
     totalCachedTokens: sumMeasured(outcome.runs.map((run) => run.tokens.cached)),
     totalContextTokens: sumMeasured(outcome.runs.map((run) => run.tokens.context)),
     totalToolCalls: sumMeasured(outcome.runs.map((run) => run.toolCalls)),

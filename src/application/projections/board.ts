@@ -1,4 +1,5 @@
 import type { MissionId } from '../../domain/mission.js';
+import type { CohortComparison } from './cohorts.js';
 import type { RepositoryId } from '../../domain/repository.js';
 import type { AgentFamily } from '../../domain/agents.js';
 import type { SourceFact } from '../contracts.js';
@@ -137,6 +138,12 @@ export interface BoardMetrics {
   readonly medianAgeByLane: LaneMetricSeries;
   readonly agentAvailability: readonly AgentAvailabilityMetric[];
   readonly bottleneck: BottleneckNarrative;
+  /**
+   * Completed missions compared along one experiment dimension. Optional
+   * because a board without lifecycle history has no cohort to report; when
+   * present, every cohort carries the sample size it was computed from.
+   */
+  readonly cohorts?: CohortComparison;
 }
 
 export type StatisticsHealthState = 'healthy' | 'partial' | 'unavailable' | 'no-completions' | 'no-telemetry' | 'pre-lifecycle';

@@ -16,6 +16,7 @@ import {
 } from '../src/application/projections/metrics.js';
 import { agentFamily } from '../src/domain/agents.js';
 import { missionId } from '../src/domain/mission.js';
+import { missionOutcome } from './fixtures/mission-outcome.js';
 
 const id1 = missionId('task-0001');
 const id2 = missionId('task-0002');
@@ -40,7 +41,7 @@ test('cumulativeFlowSeries returns completed mission count with estimate fallbac
 
 test('cumulativeFlowSeries tracks completed transitions over time', () => {
   const transitions = [
-    { missionId: id1, from: 'backlog' as const, to: 'done' as const, trigger: 'close' as const, actor: 'codex', occurredAt: now },
+    { missionId: id1, from: 'backlog' as const, to: 'done' as const, trigger: 'integrate' as const, actor: 'codex', occurredAt: now },
   ];
   const series = cumulativeFlowSeries(
     new Map([[id1, 'backlog']]),
@@ -90,9 +91,9 @@ test('medianStateTimes returns null fallback when no outcomes', () => {
 
 test('medianStateTimes computes median from outcomes', () => {
   const outcomes = [
-    { missionId: id1, repositoryId: 'parallix' as never, createdAt: earlier, closedAt: earlier, cycleTimeMinutes: 10, reviewFixRounds: 1, runs: [] },
-    { missionId: id2, repositoryId: 'parallix' as never, createdAt: earlier, closedAt: earlier, cycleTimeMinutes: 30, reviewFixRounds: 2, runs: [] },
-    { missionId: id3, repositoryId: 'parallix' as never, createdAt: earlier, closedAt: earlier, cycleTimeMinutes: 20, reviewFixRounds: 1, runs: [] },
+    missionOutcome({ missionId: id1, createdAt: earlier, closedAt: earlier, cycleTimeMinutes: 10, reviewFixRounds: 1 }),
+    missionOutcome({ missionId: id2, createdAt: earlier, closedAt: earlier, cycleTimeMinutes: 30, reviewFixRounds: 2 }),
+    missionOutcome({ missionId: id3, createdAt: earlier, closedAt: earlier, cycleTimeMinutes: 20, reviewFixRounds: 1 }),
   ];
   const series = medianStateTimes(outcomes, [now]);
   assert.equal(series.missingHistoryFallback, 'null');
@@ -102,8 +103,8 @@ test('medianStateTimes computes median from outcomes', () => {
 
 test('medianStateTimes handles even number of outcomes', () => {
   const outcomes = [
-    { missionId: id1, repositoryId: 'parallix' as never, createdAt: earlier, closedAt: earlier, cycleTimeMinutes: 10, reviewFixRounds: 1, runs: [] },
-    { missionId: id2, repositoryId: 'parallix' as never, createdAt: earlier, closedAt: earlier, cycleTimeMinutes: 30, reviewFixRounds: 2, runs: [] },
+    missionOutcome({ missionId: id1, createdAt: earlier, closedAt: earlier, cycleTimeMinutes: 10, reviewFixRounds: 1 }),
+    missionOutcome({ missionId: id2, createdAt: earlier, closedAt: earlier, cycleTimeMinutes: 30, reviewFixRounds: 2 }),
   ];
   const series = medianStateTimes(outcomes, [now]);
   // Sorted: 10, 30 → median = (10 + 30) / 2 = 20
@@ -112,7 +113,7 @@ test('medianStateTimes handles even number of outcomes', () => {
 
 test('medianStateTimes handles single outcome', () => {
   const outcomes = [
-    { missionId: id1, repositoryId: 'parallix' as never, createdAt: earlier, closedAt: earlier, cycleTimeMinutes: 45, reviewFixRounds: 1, runs: [] },
+    missionOutcome({ missionId: id1, createdAt: earlier, closedAt: earlier, cycleTimeMinutes: 45, reviewFixRounds: 1 }),
   ];
   const series = medianStateTimes(outcomes, [now]);
   assert.equal(series.series[0]?.value, 45);
@@ -130,8 +131,8 @@ test('throughputSeries returns skip fallback when no outcomes', () => {
 
 test('throughputSeries counts completed missions', () => {
   const outcomes = [
-    { missionId: id1, repositoryId: 'parallix' as never, createdAt: earlier, closedAt: earlier, cycleTimeMinutes: 10, reviewFixRounds: 1, runs: [] },
-    { missionId: id2, repositoryId: 'parallix' as never, createdAt: earlier, closedAt: earlier, cycleTimeMinutes: 30, reviewFixRounds: 2, runs: [] },
+    missionOutcome({ missionId: id1, createdAt: earlier, closedAt: earlier, cycleTimeMinutes: 10, reviewFixRounds: 1 }),
+    missionOutcome({ missionId: id2, createdAt: earlier, closedAt: earlier, cycleTimeMinutes: 30, reviewFixRounds: 2 }),
   ];
   const series = throughputSeries(outcomes, [earlier, now, later]);
   assert.equal(series.missingHistoryFallback, 'skip');
@@ -157,9 +158,9 @@ test('reviewLoopRateSeries returns estimate fallback when no outcomes', () => {
 
 test('reviewLoopRateSeries computes average review-fix rounds', () => {
   const outcomes = [
-    { missionId: id1, repositoryId: 'parallix' as never, createdAt: earlier, closedAt: earlier, cycleTimeMinutes: 10, reviewFixRounds: 1, runs: [] },
-    { missionId: id2, repositoryId: 'parallix' as never, createdAt: earlier, closedAt: earlier, cycleTimeMinutes: 30, reviewFixRounds: 3, runs: [] },
-    { missionId: id3, repositoryId: 'parallix' as never, createdAt: earlier, closedAt: earlier, cycleTimeMinutes: 20, reviewFixRounds: 2, runs: [] },
+    missionOutcome({ missionId: id1, createdAt: earlier, closedAt: earlier, cycleTimeMinutes: 10, reviewFixRounds: 1 }),
+    missionOutcome({ missionId: id2, createdAt: earlier, closedAt: earlier, cycleTimeMinutes: 30, reviewFixRounds: 3 }),
+    missionOutcome({ missionId: id3, createdAt: earlier, closedAt: earlier, cycleTimeMinutes: 20, reviewFixRounds: 2 }),
   ];
   const series = reviewLoopRateSeries(outcomes, [now]);
   assert.equal(series.missingHistoryFallback, 'estimate');
@@ -169,8 +170,8 @@ test('reviewLoopRateSeries computes average review-fix rounds', () => {
 
 test('reviewLoopRateSeries handles zero review rounds', () => {
   const outcomes = [
-    { missionId: id1, repositoryId: 'parallix' as never, createdAt: earlier, closedAt: earlier, cycleTimeMinutes: 10, reviewFixRounds: 0, runs: [] },
-    { missionId: id2, repositoryId: 'parallix' as never, createdAt: earlier, closedAt: earlier, cycleTimeMinutes: 30, reviewFixRounds: 0, runs: [] },
+    missionOutcome({ missionId: id1, createdAt: earlier, closedAt: earlier, cycleTimeMinutes: 10, reviewFixRounds: 0 }),
+    missionOutcome({ missionId: id2, createdAt: earlier, closedAt: earlier, cycleTimeMinutes: 30, reviewFixRounds: 0 }),
   ];
   const series = reviewLoopRateSeries(outcomes, [now]);
   assert.equal(series.series[0]?.value, 0);
@@ -229,7 +230,7 @@ test('buildMetrics with data populates all series', () => {
     { missionId: id1, from: 'backlog' as const, to: 'active' as const, trigger: 'activate' as const, actor: 'codex', occurredAt: now },
   ];
   const outcomes = [
-    { missionId: id1, repositoryId: 'parallix' as never, createdAt: earlier, closedAt: earlier, cycleTimeMinutes: 10, reviewFixRounds: 1, runs: [] },
+    missionOutcome({ missionId: id1, createdAt: earlier, closedAt: earlier, cycleTimeMinutes: 10, reviewFixRounds: 1 }),
   ];
   const input: MetricsInput = {
     initialStates: new Map([[id1, 'backlog']]),
@@ -255,8 +256,8 @@ test('FLOW projection derives lane rows, agent availability, and a deterministic
     { missionId: id2, from: 'active' as const, to: 'review' as const, trigger: 'submit-for-review' as const, actor: 'codex', occurredAt: '2026-07-22T10:00:00Z' },
   ];
   const outcomes = [
-    { missionId: id1, repositoryId: 'parallix' as never, createdAt: earlier, closedAt: earlier, cycleTimeMinutes: 10, reviewFixRounds: 1, runs: [] },
-    { missionId: id2, repositoryId: 'parallix' as never, createdAt: earlier, closedAt: earlier, cycleTimeMinutes: 20, reviewFixRounds: 3, runs: [] },
+    missionOutcome({ missionId: id1, createdAt: earlier, closedAt: earlier, cycleTimeMinutes: 10, reviewFixRounds: 1 }),
+    missionOutcome({ missionId: id2, createdAt: earlier, closedAt: earlier, cycleTimeMinutes: 20, reviewFixRounds: 3 }),
   ];
   const metrics = buildMetrics({
     initialStates: new Map([[id1, 'active'], [id2, 'review']]),

@@ -16,6 +16,7 @@ import {
   entryToEvent,
 } from '../src/application/recording/board-event-recorder.js';
 import { buildMetrics } from '../src/application/projections/metrics.js';
+import { missionOutcome } from './fixtures/mission-outcome.js';
 import type { LaneTransitionEvent } from '../src/domain/board-event.js';
 import { triggerFromTransition } from '../src/domain/board-event.js';
 import type { MissionId, MissionStatus } from '../src/domain/mission.js';
@@ -135,15 +136,13 @@ describe('SC6: metrics fixture — lane transitions produce populated board metr
 
       // Create outcomes for median state times, throughput, review loop rate
       const outcomes: MissionOutcome[] = [
-        {
+        missionOutcome({
           missionId: missionId(task),
-          repositoryId: {} as never,
           createdAt: t1,
           closedAt: t1,
           cycleTimeMinutes: 240,
           reviewFixRounds: 1,
-          runs: [],
-        },
+        }),
       ];
 
       // Feed to buildMetrics
@@ -275,15 +274,13 @@ describe('SC6: metrics fixture — lane transitions produce populated board metr
       ]);
 
       const outcomes: MissionOutcome[] = [
-        {
+        missionOutcome({
           missionId: missionId(task),
-          repositoryId: {} as never,
           createdAt: t1,
           closedAt: t1,
           cycleTimeMinutes: 120,
           reviewFixRounds: 0,
-          runs: [],
-        },
+        }),
       ];
 
       // With empty transitions/outcomes, metrics use fallbacks

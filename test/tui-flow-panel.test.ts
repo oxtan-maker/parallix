@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { buildMetrics } from '../src/application/projections/metrics.js';
 import { agentFamily } from '../src/domain/agents.js';
 import { missionId } from '../src/domain/mission.js';
+import { missionOutcome } from './fixtures/mission-outcome.js';
 
 const id = missionId('task-flow');
 const ESC = String.fromCharCode(27);
@@ -17,7 +18,7 @@ function populatedMetrics() {
       { missionId: id, from: 'backlog', to: 'active', trigger: 'activate', actor: 'codex', occurredAt: '2026-07-22T08:00:00Z' },
       { missionId: id, from: 'active', to: 'review', trigger: 'submit-for-review', actor: 'codex', occurredAt: '2026-07-22T10:00:00Z' },
     ],
-    outcomes: [{ missionId: id, repositoryId: 'test' as never, createdAt: '2026-07-21T00:00:00Z', closedAt: '2026-07-21T00:00:00Z', cycleTimeMinutes: 50, reviewFixRounds: 2, runs: [] }],
+    outcomes: [missionOutcome({ missionId: id, createdAt: '2026-07-21T00:00:00Z', closedAt: '2026-07-21T00:00:00Z', cycleTimeMinutes: 50, reviewFixRounds: 2 })],
     instants: ['2026-07-22T12:00:00Z'],
     asOf: '2026-07-22T12:00:00Z',
     agentAvailability: [

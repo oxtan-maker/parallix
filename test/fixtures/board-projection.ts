@@ -32,6 +32,7 @@ export const emptyMetrics: BoardMetrics = {
   cumulativeFlow: emptySeries,
   cumulativeFlowByState: emptySeries as unknown as BoardMetrics['cumulativeFlowByState'],
   medianStateTimes: emptySeries,
+  medianAgentRuntime: emptySeries,
   medianCycleTimeByState: emptySeries as unknown as BoardMetrics['medianCycleTimeByState'],
   throughput: emptySeries,
   weeklyThroughput: emptySeries,
