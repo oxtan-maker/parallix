@@ -155,7 +155,7 @@ The verification gate that runs at each phase is whatever you declare in `workfl
 
 ## Use cases
 
-The full evidence-backed inventory is in [`docs/use-cases.md`](docs/use-cases.md). The README focuses on the three claims that are best supported by the current code and retrospective data:
+The durable capability guide and confidence boundaries are in [`docs/use-cases.md`](docs/use-cases.md). The README highlights three representative claims:
 
 1. **Parallel multi-agent execution (UC-1).** The isolated worktree-per-mission model is the *specific* mechanic an internal retrospective measured as the only configuration to beat a human baseline. Depending on whether you frame output as direct user-value missions or total completed missions in an already-productized setup, the observed gain ranges from roughly **+57%** to about **+1,280%**.
 2. **Usage-limit auto-failover (UC-2).** Family-specific limit detection → timed blocklist → retry-next-eligible is a tested control loop, not a retry button.
@@ -182,8 +182,8 @@ This is a tool for a local-first developer workflow on one machine, driven by an
 
 ## Documentation
 
-- [`docs/use-cases.md`](docs/use-cases.md) — evidence-backed use-case inventory with confidence levels and red-team analysis (primary source of truth for what Parallix actually does today).
-- [`docs/authority-reference.md`](docs/authority-reference.md) — the internal operator reference: workflow modes, the authority model, agent selection, the layered validation model, checkpoint model, state mapping, command aliases, stats, persistent operator data, and the full public-distribution story.
+- [`docs/use-cases.md`](docs/use-cases.md) — durable capability identities, confidence levels, and positioning boundaries.
+- [`docs/authority-reference.md`](docs/authority-reference.md) — the internal operator reference for workflow, authority, review, verification, backlog integrity, and measurement boundaries.
 - [`docs/forgejo-setup.md`](docs/forgejo-setup.md) — how the Forgejo review surface, tokens, and `review` remote are bootstrapped.
 - [`docs/operator-setup.md`](docs/operator-setup.md) — one-time Graphify skill installation for codex, claude, and custom/opencode.
 - [`docs/readme-rewrite-benchmark.md`](docs/readme-rewrite-benchmark.md) — how comparable developer-tool READMEs are structured, and the decisions behind this one.
@@ -193,7 +193,7 @@ This is a tool for a local-first developer workflow on one machine, driven by an
 ## Development
 
 ```sh
-npm test     # FORCE_COLOR=0 tsx test/run-default-tests.ts
+npm test
 npm run test:integration  # real process, Git/worktree, package, and local-network boundary coverage
 ```
 

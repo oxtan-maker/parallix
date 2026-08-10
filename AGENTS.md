@@ -14,6 +14,21 @@ Rules:
 
 Before editing any `.md` file in the repo root or `docs/` directory, consult `docs/doc-standards.md` for the full standard.
 
+## Documentation
+
+Authored documentation has one job: explain durable user-facing concepts,
+architectural invariants, supported behavior, limitations, and rationale. Do
+not reproduce volatile implementation facts such as source paths, line-number
+evidence, test inventories, or copied command/configuration inventories.
+Executable facts remain owned by commands, schemas, configuration, source, and
+tests. Checkpoint documents may cite exact evidence for a completed mission;
+that evidence must not become live documentation.
+
+An internal refactor with unchanged behavior and invariants normally has no
+documentation impact. Update authored documentation when user-visible meaning,
+supported behavior, constraints, or rationale changes. Run
+`./scripts/verify-local.sh docs` after editing live authored documentation.
+
 ## Local-only development
 
 Mission branches must never be pushed to the `origin` (GitHub) remote. Only the `main` branch may be pushed to `origin`. The `review` (Forgejo) remote is the sole push target for code review on mission branches. The `px checkpoint` command stages and commits locally without pushing to `origin`. A `pre-push` hook (`.git/hooks/pre-push`) provides local enforcement — any attempt to `git push origin <non-main-branch>` will be rejected on machines where the hook is installed. The hook is local-only metadata (not tracked in git), so instruction-based enforcement via this AGENTS.md section is the team-wide mechanism for all clones.

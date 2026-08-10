@@ -1,6 +1,8 @@
 # Documentation Standard
 
-Rules for writing and editing README.md and subdirectory READMEs in this repository. Derived from `docs/readme-rewrite-benchmark.md` (task-1336) and applied to the current product state.
+Rules for writing and editing README.md and authored documentation in this
+repository. Derived from the README rewrite benchmark and applied to the
+current product state.
 
 ---
 
@@ -68,15 +70,40 @@ Subdirectory READMEs follow a simplified variant: H1 with capability statement, 
 - **Plain, anti-hype, engineer-to-engineer.** Write like an engineer wrote it for engineers, not a marketing team.
 - Precise and sober. Casual is fine but do not drift into jokes or bluntness that undermines credibility with a skeptical engineering manager.
 - Use active voice. Prefer concrete verbs over abstract nouns.
-- When describing capabilities, tie them to evidence: use-case IDs, file paths, test names, or config references.
+- When describing capabilities, tie them to durable evidence: a use-case ID,
+  stable command or configuration identity, ADR, or a concise explanation of
+  the invariant. Do not turn live prose into an implementation index.
 
-## 9. Link Hygiene
+## 9. Single-source documentation
 
-- All relative links in README.md must resolve to existing files.
-- Before editing any README, verify: `docs/use-cases.md`, `docs/authority-reference.md`, `docs/forgejo-setup.md`, `docs/operator-setup.md`, `docs/readme-rewrite-benchmark.md`, `AGENTS.md`, `LICENSE`, `docs/adr/`.
+- Authored documentation explains durable user-facing concepts, architectural
+  invariants, supported behavior, limitations, and rationale.
+- Commands, schemas, configuration, source, and tests own executable facts.
+  Do not reproduce source paths, line-number citations, test filenames, or
+  exhaustive command/configuration inventories in authored prose.
+- A stable command, schema, configuration identity, or ADR may be named when
+  it helps a reader act; it is a pointer to the authority, not a copied
+  implementation fact.
+- Checkpoint documents may use file-and-line or test evidence to demonstrate a
+  completed mission. That historical evidence must not be promoted into live
+  authored documentation.
+- Internal refactors with unchanged user-visible behavior and architectural
+  invariants normally have no documentation impact. Update authored docs when
+  meaning, supported behavior, constraints, or rationale changes.
+- Prefer deleting duplicated prose over building a second registry, generator,
+  or synchronization rule. Generated reference material is justified only when
+  it has clear user value and derives from one machine-readable authority.
+
+## 10. Link Hygiene
+
+- All relative links in README.md and live authored documentation must resolve
+  to existing files.
+- Run `./scripts/verify-local.sh docs` after editing live authored
+  documentation. It checks the supported authored surfaces for relative-link
+  resolution and volatile implementation-evidence drift.
 - Broken links are defects, not acceptable trade-offs.
 
-## 10. Subdirectory READMEs
+## 11. Subdirectory READMEs
 
 - `examples/README.md`, and any future subdirectory READMEs must begin with a one-line capability statement (no internal jargon).
 - Use consistent heading hierarchy: H1 for the directory name, H2 for sections, H3 for subsections.
