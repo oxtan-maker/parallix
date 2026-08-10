@@ -5,6 +5,7 @@ title: Make mission statistics trustworthy end-to-end for experiment decisions
 status: backlog
 assignee: [codex]
 created_date: 2026-08-08 00:00
+labels: [ai_sdlc]
 labels:
 
 * ai_sdlc
