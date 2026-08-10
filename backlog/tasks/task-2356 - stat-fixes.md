@@ -1,10 +1,13 @@
 ---
 id: TASK-2356
 title: stat fixes
-status: active
-assignee: [codex]
+status: ready-for-integration
+assignee:
+  - codex
 created_date: '2026-08-10 12:30'
-labels: [user_value]
+updated_date: '2026-08-10 15:27'
+labels:
+  - user_value
 dependencies: []
 ordinal: 91911
 ---
