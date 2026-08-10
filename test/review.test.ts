@@ -23,6 +23,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import childProcess from 'node:child_process';
+import { ReviewCommandUseCase } from '../src/application/review-command-use-case.js';
+import { createReviewCommand } from '../src/interfaces/cli/review.js';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
 const fmt = mockModule<typeof import('../src/application/presentation/cli-format.js')>('../src/application/presentation/cli-format.js', import.meta.url);
 const startReviewLoopModule = mockModule<typeof import('../src/adapters/review/review-loop.js')>('../src/adapters/review/review-loop.js', import.meta.url);
@@ -49,7 +51,9 @@ const createEventHandlerModule = mockModule<typeof import('../src/adapters/revie
 await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
 const { startReviewLoop } = startReviewLoopModule;
-const { review, verifyReview, readComments, pushRound } = verifyReviewModule;
+const { verifyReview, readComments, pushRound } = verifyReviewModule;
+const review = (args, options = {}) =>
+  createReviewCommand(new ReviewCommandUseCase(verifyReviewModule.createReviewWorkflowAdapter(options)))(args, options);
 const { rebaseBeforeReviewRound } = rebaseBeforeReviewRoundModule;
 const { pollForReview } = pollForReviewModule;
 const { pollForDisposition } = pollForDispositionModule;

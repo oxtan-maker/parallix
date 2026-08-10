@@ -5,7 +5,10 @@ import path from 'node:path';
 
 import { withMissionDatabase } from './fixtures/review-state-db.js';
 import { readReviewState, writeReviewState } from '../src/adapters/review/review-state.js';
-import { review } from '../src/adapters/review/review-commands.js';
+import { ReviewCommandUseCase } from '../src/application/review-command-use-case.js';
+import { createReviewCommand } from '../src/interfaces/cli/review.js';
+import { createReviewWorkflowAdapter } from '../src/adapters/review/review-commands.js';
+const review = (args, options = {}) => createReviewCommand(new ReviewCommandUseCase(createReviewWorkflowAdapter(options)))(args, options);
 import { status } from '../src/adapters/cli/commands/status.js';
 
 const canonicalHandoff = {

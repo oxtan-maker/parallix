@@ -4,6 +4,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'path';
+import { ReviewCommandUseCase } from '../src/application/review-command-use-case.js';
+import { createReviewCommand } from '../src/interfaces/cli/review.js';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
 const createPrModule = mockModule<typeof import('../src/adapters/forgejo/forgejo.js')>('../src/adapters/forgejo/forgejo.js', import.meta.url);
 const git = mockModule<typeof import('../src/adapters/git/git.js')>('../src/adapters/git/git.js', import.meta.url);
@@ -14,7 +16,8 @@ await installModuleMocks();
 const { createPr, pushReviewRef } = createPrModule;
 const handoffCommand = handoffModule.default;
 const rebase = rebaseModule.default;
-const { review } = reviewModule;
+const review = (args, options = {}) =>
+  createReviewCommand(new ReviewCommandUseCase(reviewModule.createReviewWorkflowAdapter(options)))(args, options);
 const { mock } = test;
 const serialTest = (name, fn) => test(name, { concurrency: false }, fn);
 
