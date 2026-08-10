@@ -58,7 +58,7 @@ export interface PtySmokeSession {
  */
 export async function launchPtySmoke(
   command: readonly string[],
-  options: { readonly cwd: string; readonly timeoutMs: number },
+  options: { readonly cwd: string; readonly timeoutMs: number; readonly env?: NodeJS.ProcessEnv },
 ): Promise<PtySmokeSession> {
   if (command.length === 0) { throw new Error('PTY smoke command is required'); }
   const temp = await mkdtemp(join(tmpdir(), 'parallix-pty-smoke-'));
@@ -77,6 +77,7 @@ export async function launchPtySmoke(
   ].join('; ');
   const child = spawn(SCRIPT, ['-qefc', shell, '/dev/null'], {
     cwd: options.cwd,
+    env: options.env,
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   const output: string[] = [];

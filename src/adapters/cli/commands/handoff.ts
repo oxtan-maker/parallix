@@ -20,6 +20,7 @@ import { attemptAgentRelaunch } from './active.js';
 import { startReview, ConfiguredReviewerEligibility, changeRevision } from '../../../domain/review.js';
 import { agentFamily } from '../../../domain/agents.js';
 import { eligibleAgentsForStep, selectAgent } from '../../agents/agents.js';
+import type { PreparedAgentSelection } from '../../../application/services/agent-selection.js';
 
 // Export for testing
 export { evidenceCellHasVerifiableReference as _evidenceCellHasVerifiableReference };
@@ -44,6 +45,7 @@ function resolveHandoffReviewAssignment(
     worktree?: string;
     eligibleAgentsForStepFn?: typeof eligibleAgentsForStep;
     selectAgentFn?: typeof selectAgent;
+    preparedSelection?: PreparedAgentSelection | null;
     log?: (_msg: string) => void;
   } = {},
 ) {
@@ -55,7 +57,9 @@ function resolveHandoffReviewAssignment(
   const configuredFamilies = configured.map((candidate: string) => agentFamily(candidate));
 
   try {
-    const reviewer = agentFamily(selectFn('review', {
+    const reviewer = agentFamily(options.preparedSelection
+      ? options.preparedSelection.select('review', { excluded: new Set([implementer]) })
+      : selectFn('review', {
       exclude: new Set([implementerName]),
       worktree: options.worktree,
     }));

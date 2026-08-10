@@ -45,6 +45,30 @@ function waitForExit(child, timeoutMs) {
   });
 }
 
+async function waitFor(condition, description, timeoutMs = 5_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (condition()) return;
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+  assert.fail(`Timed out waiting for ${description}`);
+}
+
+function manifestEntries(manifestDir) {
+  return fs.readdirSync(manifestDir).filter(entry => entry.endsWith('.json'));
+}
+
+function manifestRoots(manifestDir) {
+  return manifestEntries(manifestDir).flatMap(entry => {
+    try {
+      const roots = JSON.parse(fs.readFileSync(path.join(manifestDir, entry), 'utf8'));
+      return Array.isArray(roots) ? roots : [];
+    } catch (_) {
+      return [];
+    }
+  });
+}
+
 test('bootstrap temp directories are cleaned up after SIGTERM termination', async () => {
   const markerPath = path.join(os.tmpdir(), MARKER_PREFIX + Date.now() + '-' + process.pid);
 
@@ -140,8 +164,7 @@ test('bootstrap temp directories are cleaned up after SIGKILL termination', asyn
     stdio: 'pipe',
   });
 
-  // Wait a moment for the child to write the marker file
-  await new Promise(resolve => setTimeout(resolve, 500));
+  await waitFor(() => fs.existsSync(markerPath), 'SIGKILL child marker');
 
   // Send SIGKILL to the child (simulates --test-force-exit timeout behavior)
   child.kill('SIGKILL');
@@ -209,11 +232,10 @@ test('runner orphan cleanup reclaims SIGKILL temp directories', async () => {
     env: { ...process.env, PARALLIX_TEST_MANIFEST_DIR: manifestDir },
   });
 
-  // Wait briefly for bootstrap to complete (manifest written synchronously)
-  await new Promise(resolve => setTimeout(resolve, 500));
+  await waitFor(() => manifestEntries(manifestDir).length > 0, 'bootstrap manifest');
 
   // Verify the manifest directory has a file written by the bootstrap
-  const entries = fs.readdirSync(manifestDir).filter(e => e.endsWith('.json'));
+  const entries = manifestEntries(manifestDir);
   assert.ok(entries.length > 0, 'Bootstrap must write per-worker manifest synchronously');
 
   // Union all roots from all manifest files (matches runner cleanup)
@@ -287,8 +309,10 @@ test('runner orphan cleanup is safe with concurrent test runs', async () => {
     ].join('\n'),
   ], { stdio: 'pipe', env: { ...process.env, PARALLIX_TEST_MANIFEST_DIR: manifestDirB } });
 
-  // Wait for both bootstraps to complete (manifests written synchronously)
-  await new Promise(resolve => setTimeout(resolve, 500));
+  await waitFor(
+    () => manifestEntries(manifestDirA).length > 0 && manifestEntries(manifestDirB).length > 0,
+    'both bootstrap manifests',
+  );
 
   // Read all manifest files from each directory
   const readManifestDir = (dir) => {
@@ -363,11 +387,13 @@ test('registerTempRoot adds test-created directories to the manifest', async () 
     env: { ...process.env, PARALLIX_TEST_MANIFEST_DIR: manifestDir },
   });
 
-  // Wait for bootstrap + registration to complete
-  await new Promise(resolve => setTimeout(resolve, 500));
+  await waitFor(
+    () => manifestRoots(manifestDir).some(dir => dir.includes('task-2318-custom-')),
+    'registered custom temp directory in manifest',
+  );
 
   // Read the manifest and verify the custom dir is included
-  const entries = fs.readdirSync(manifestDir).filter(e => e.endsWith('.json'));
+  const entries = manifestEntries(manifestDir);
   assert.ok(entries.length > 0, 'Manifest file must exist');
 
   const allRoots = [];
@@ -431,10 +457,13 @@ test('test/helpers/temp-dir.ts mkdtemp registers directory with manifest', async
     env: { ...process.env, PARALLIX_TEST_MANIFEST_DIR: manifestDir },
   });
 
-  await new Promise(resolve => setTimeout(resolve, 500));
+  await waitFor(
+    () => manifestRoots(manifestDir).some(dir => dir.includes('task-2318-helper-')),
+    'helper temp directory in manifest',
+  );
 
   // Read manifest
-  const entries = fs.readdirSync(manifestDir).filter(e => e.endsWith('.json'));
+  const entries = manifestEntries(manifestDir);
   const allRoots = [];
   for (const entry of entries) {
     const roots = JSON.parse(fs.readFileSync(path.join(manifestDir, entry), 'utf8'));
@@ -479,11 +508,10 @@ test('parallel workers each write their own manifest file in shared directory', 
     ], { stdio: 'pipe', env: { ...process.env, PARALLIX_TEST_MANIFEST_DIR: manifestDir } }));
   }
 
-  // Wait for all bootstraps to complete
-  await new Promise(resolve => setTimeout(resolve, 1000));
+  await waitFor(() => manifestEntries(manifestDir).length === 3, 'all worker manifests');
 
   // Verify each worker wrote its own manifest file
-  const entries = fs.readdirSync(manifestDir).filter(e => e.endsWith('.json'));
+  const entries = manifestEntries(manifestDir);
   assert.equal(
     entries.length,
     3,

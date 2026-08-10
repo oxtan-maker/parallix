@@ -18,6 +18,9 @@ import { buildAutonomousReviewMatrix, formatMatrixSummary } from '../agents/runt
 import { buildReviewPrompt, buildActOnReviewPrompt, buildCompactReviewPrompt, buildCompactActOnReviewPrompt } from './review-prompts.js';
 import { ReviewState, readReviewState, writeReviewState, resetReviewState, VALID_PHASES, persistReviewStateOrThrow, assertReviewStatePersisted } from './review-state.js';
 import type { MissionStore } from '../../application/domain-ports.js';
+import type { AgentSelectionSnapshotPort } from '../../application/domain-ports.js';
+import { PreparedAgentSelection } from '../../application/services/agent-selection.js';
+import { recordAgentSelectionOutcome } from '../../application/services/agent-selection-telemetry.js';
 import { workflowLauncherStatus, startAgent, eligibleAgentsForStep, selectAgent } from '../agents/agents.js';
 import { commitSafeMissionArtifacts, rebaseBeforeReviewRound } from './rebase.js';
 import { packageRoot } from '../filesystem/package-root.js';
@@ -225,6 +228,11 @@ export async function persistNormalizedPhaseRepair(
   log(fmt.status('WARN', `Persisted review phase "${state.phaseOriginal}" is invalid. Repairing to "${state.phase}".`));
   await persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree, missionStore);
   state.phaseOriginal = null;
+}
+
+/** Synchronous reviewer selection from the snapshot materialized for this loop. */
+export function selectPreparedReviewer(selection: PreparedAgentSelection, excluded: ReadonlySet<string>): string {
+  return selection.select('review', { excluded: new Set([...excluded].map((family) => family as any)) });
 }
 
 function stageWindowKey(stage: string, agentFamily: string): string {
@@ -592,6 +600,7 @@ export async function startReviewLoop(slug: string, opts: {
   fetchReviewBranchFn?: typeof fetchReviewBranch;
   hasNewCommittedChangeFn?: ((_branch: string, _rootDir: string) => boolean) | null;
   missionStore?: MissionStore | null;
+  agentSelectionSnapshotPort?: AgentSelectionSnapshotPort | null;
 } = {}): Promise<void> {
   let {
     implementer,
@@ -661,6 +670,7 @@ export async function startReviewLoop(slug: string, opts: {
     fetchReviewBranchFn = fetchReviewBranch,
     hasNewCommittedChangeFn = null,
     missionStore = null,
+    agentSelectionSnapshotPort = null,
   } = opts;
 
   const performHandoffFn = opts.performHandoffFn || (await getHandoff()).performHandoff;
@@ -732,6 +742,12 @@ export async function startReviewLoop(slug: string, opts: {
     }
   }
 
+  const preparedSelection = agentSelectionSnapshotPort
+    ? await PreparedAgentSelection.prepare(agentSelectionSnapshotPort)
+    : null;
+  const selectReviewer = (excluded: Set<string>) => preparedSelection
+    ? selectPreparedReviewer(preparedSelection, excluded)
+    : selectAgentFn('review', { exclude: excluded });
   const agents = eligibleAgentsForStepFn('review');
 
   const persisted = await Promise.resolve(readReviewStateFn(slug, worktree));
@@ -902,7 +918,8 @@ export async function startReviewLoop(slug: string, opts: {
       log(fmt.status('INFO', `Resuming persisted reviewer: ${reviewer} (round ${persisted.round})`));
     } else {
       try {
-        reviewer = selectAgentFn('review', { exclude: new Set([implementer]) });
+        reviewer = selectReviewer(new Set([implementer]));
+        recordAgentSelectionOutcome(log, 'nominated', { agent: reviewer, step: 'review' });
       } catch (err: unknown) {
         selectErr = err as Error;
         reviewer = undefined;
@@ -917,7 +934,8 @@ export async function startReviewLoop(slug: string, opts: {
     if (!anyDifferentFamilyRunnable && implementerRunnable) {
       log(fmt.status('WARN', `No supported different-family reviewer found for implementer "${implementer}".`));
       log(fmt.status('WARN', `Single-family fallback: reviewer="${implementer}" (same as implementer) — no different-family agent is runnable or unblocked on this workstation.`));
-      reviewer = implementer;
+        reviewer = implementer;
+        recordAgentSelectionOutcome(log, 'fallback', { agent: reviewer, step: 'review', reason: 'single-family' });
       reviewerSource = 'single-family-fallback';
     } else if (!anyDifferentFamilyRunnable) {
       if (!forgejoEnabled) {
@@ -999,6 +1017,9 @@ export async function startReviewLoop(slug: string, opts: {
     let reviewerStatus = workflowLauncherStatusFn(reviewer);
     const triedReviewers = new Set<string>();
     while (!agents.includes(reviewer) || !reviewerStatus.supported) {
+      if (!agents.includes(reviewer)) {
+        recordAgentSelectionOutcome(log, 'skipped-blocked', { agent: reviewer, step: 'review' });
+      }
       triedReviewers.add(reviewer);
       if (reviewerSource === 'explicit') {
         if (maybeFallbackToPersistedContinueReviewer()) {
@@ -1019,7 +1040,10 @@ export async function startReviewLoop(slug: string, opts: {
       let fallback: string | undefined;
       let fallbackStatus: { agent: string; supported: boolean; detail: string } | null;
       try {
-        fallback = selectAgentFn('review', { exclude: excludeSet });
+        // Legacy fallback seam retained when no prepared snapshot is supplied:
+        // selectAgentFn('review', { exclude: excludeSet })
+        fallback = selectReviewer(excludeSet);
+        if (fallback) { recordAgentSelectionOutcome(log, 'nominated', { agent: fallback, step: 'review', retry: true }); }
         if (excludeSet.has(fallback!)) {
           fallback = undefined;
           fallbackStatus = null;
@@ -1297,6 +1321,7 @@ export async function startReviewLoop(slug: string, opts: {
                 worktree, slug, role: 'reviewer', exclude: [implementer]
               });
             } catch (err: unknown) {
+              recordAgentSelectionOutcome(log, 'launch-failed', { agent: reviewer, step: 'review', error: (err as Error).message });
               error(fmt.status('FAIL', `Could not launch reviewer agent (${reviewer}): ${(err as Error).message}`));
               await escalateToHumanReview('REVIEWER_LAUNCH_FAILURE');
               return;
@@ -1381,6 +1406,7 @@ export async function startReviewLoop(slug: string, opts: {
                 worktree, slug, role: 'reviewer', exclude: [implementer]
               });
             } catch (err: unknown) {
+              recordAgentSelectionOutcome(log, 'launch-failed', { agent: reviewer, step: 'review', retry: true, error: (err as Error).message });
               error(fmt.status('FAIL', `Could not relaunch reviewer agent (${reviewer}): ${(err as Error).message}`));
               await escalateToHumanReview('REVIEWER_LAUNCH_FAILURE');
               return;

@@ -13,6 +13,7 @@ function plain(output: string): string { return output.replace(ANSI, ''); }
 
 test('real PTY smoke: launch, keyboard navigation, resize, clean exit, timeout bound, and terminal restoration', async () => {
   const fixtureRoot = await mkdtemp(path.join(tmpdir(), 'parallix-pty-ui-fixture-'));
+  const stateRoot = await mkdtemp(path.join(tmpdir(), 'parallix-pty-ui-state-'));
   try {
     await mkdir(path.join(fixtureRoot, 'backlog', 'tasks'), { recursive: true });
     await writeFile(path.join(fixtureRoot, 'backlog', 'tasks', 'task-pty-1.md'), [
@@ -21,7 +22,13 @@ test('real PTY smoke: launch, keyboard navigation, resize, clean exit, timeout b
     await writeFile(path.join(fixtureRoot, 'backlog', 'tasks', 'task-pty-2.md'), [
       '---', 'id: TASK-PTY-2', 'title: PTY second mission', 'status: active', 'assignee: []', 'labels: []', '---', '',
     ].join('\n'));
-    const session = await launchPtySmoke([process.execPath, path.join(root, 'build/px.mjs'), 'ui'], { cwd: fixtureRoot, timeoutMs: TIMEOUT_MS });
+    const session = await launchPtySmoke([process.execPath, path.join(root, 'build/px.mjs'), 'ui'], {
+      cwd: fixtureRoot,
+      timeoutMs: TIMEOUT_MS,
+      // The fixture reuses stable task ids. Give the real child a dedicated
+      // SQLite home so another PTY fixture cannot make its import conflict.
+      env: { ...process.env, PARALLIX_HOME: stateRoot },
+    });
     const deadline = Date.now() + 4_000;
     while (!/px board/.test(plain(session.output())) && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 50));
@@ -53,6 +60,7 @@ test('real PTY smoke: launch, keyboard navigation, resize, clean exit, timeout b
     assert.equal(result.terminalRestored, true, 'Ink raw-mode cleanup must restore PTY terminal state');
   } finally {
     await rm(fixtureRoot, { recursive: true, force: true });
+    await rm(stateRoot, { recursive: true, force: true });
   }
 });
 
