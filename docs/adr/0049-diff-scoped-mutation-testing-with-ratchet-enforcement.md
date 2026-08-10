@@ -7,8 +7,8 @@ Related: ADR 0041 (integration pipeline gates), task-1269 (mutation testing miss
 
 ## Context
 
-`lib/commands/coverage-gate.ts` enforces 90% **line** coverage on
-`index.js` + `lib/**/*.js`, and is currently the only automated test-quality
+`src/adapters/verification/coverage-gate.ts` enforces 90% **line** coverage on
+`src/**/*.ts`, and is currently the only automated test-quality
 gate in parallix. Line coverage answers "did any test execute this line?",
 not "does any test notice if this line's behavior breaks?". Those are
 different questions, and the gap between them matters more than it used to:
@@ -37,7 +37,7 @@ Task-1269 keeps the existing 90% line-coverage gate unchanged and adds
 mutation score as a second, orthogonal signal.
 
 **Scope limitation:** Mutation testing via `verify-local.sh mutation-gate` is
-**parallix-internal-only**. It exercises StrykerJS against `lib/` source files
+**parallix-internal-only**. It exercises StrykerJS against `src/` source files
 and their test files within the parallix development checkout. It does not and
 cannot run when parallix is used to develop a different repository — the gate
 targets parallix's own test suite and source tree. This is not a feature
@@ -50,20 +50,20 @@ arbitrary user repository.
 
 | Option | Scope | Framework | Ratchet | Fit |
 |--------|-------|-----------|---------|-----|
-| **A. Full-repo mutation testing on every gate** | All `lib/` files | StrykerJS + `node --test` | No (absolute floor) | Low — thousands of mutants, far outside runtime budget |
+| **A. Full-repo mutation testing on every gate** | All `src/` files | StrykerJS + `node --test` | No (absolute floor) | Low — thousands of mutants, far outside runtime budget |
 | **B. Diff-scoped mutation testing with ratchet** | Changed files + direct callees | StrykerJS + `node --test` | Yes (per-file baseline) | High — bounded target set, additive enforcement |
 | **C. No mutation testing** | — | — | — | Low — line coverage alone is insufficient for AI-generated tests |
 
 ### Option A: Full-repo mutation testing
 
-Run StrykerJS against the entire `lib/` tree on every gate invocation.
+Run StrykerJS against the entire `src/` tree on every gate invocation.
 
 **Pros:**
 - Maximum mutation coverage
 - No scoping logic needed
 
 **Cons:**
-- Thousands of mutants across ~120 `lib/` files
+- Thousands of mutants across ~120 `src/` files
 - Runtime far exceeds the 60s pre-integrate budget (TASK-1133)
 - Forces a big-bang baseline backfill before any mission could land
 - Conflicts with the mission's own Out-of-Scope declaration ("Full-repo mutation testing (too slow)")
@@ -127,7 +127,7 @@ Keep the existing 90% line-coverage gate as the sole automated quality signal.
 
 **1. Diff-scoped, not full-repo.** The mutation target set is: files changed
 between the mission branch and its base branch
-(`lib/core/mutation-scoper.ts:getChangedFiles`), plus their **direct** (depth-1)
+(`src/adapters/git/mutation-scoper.ts:getChangedFiles`), plus their **direct** (depth-1)
 local callees (`resolveCallees`). Full transitive BFS was found to over-scope
 on hub files (e.g. a changed `handoff.ts` pulling in `agents/*`, `review/*`,
 `tools/*` into the target set, ballooning from ~15 to ~34 files and ~170s
@@ -143,18 +143,14 @@ over-scope in a way that breaks anything — a missed callee just means that
 file's baseline isn't updated this run, which self-corrects the next time a
 mission touches it directly.
 
-Git tracks `.ts` sources; the compiled `.js` under `lib/` (produced by `npm
-run build:cjs`) is gitignored and is what actually executes under `node
---test`. `getChangedFiles` maps a changed `.ts` path to its `.js` runtime
-counterpart (`toRuntimePath`) before scoping, so the mutation target set
-always reflects what will actually run, not what's tracked in git.
+Git tracks `.ts` sources under `src/`. The mutation scoper operates on these
+`.ts` files directly through `tsx` — no separate compilation step is needed
+for the mutation target set.
 
-**2026-07-18 correction (ADR 0044 T4/T5):** The sibling-layout description
-above is superseded for the repository source checkout. `npm run build` emits
-the executing runtime under `dist/`; tests and mutation targets use
-`dist/index.js` and `dist/lib/**/*.js`. T5 removed `build:cjs` and the mtime
-freshness guard after adding reproducible-output and package-content gates.
-Reverting the T5 phase commit restores both legacy mechanisms together.
+**2026-07-18 correction (ADR 0044 T4/T5):** `npm run build` emits the ESM
+bundle to `build/px.mjs`; the `build/` directory is gitignored. Source files
+live in `src/` and are executed directly through `tsx` for testing and
+mutation runs.
 
 **2. StrykerJS via the `command` test runner.** `@stryker-mutator/core` has no
 dedicated plugin for Node's built-in `--test` runner (confirmed: no
@@ -205,12 +201,12 @@ than its recorded baseline score. `--threshold <pct>` is available as an
 *additional* absolute floor, but the default is no threshold — ratchet-only,
 matching the backlog task's explicit design goal: "a mission may not LOWER
 the mutation score on the files it touches," not "every file must clear 80%."
-This avoids forcing a big-bang backfill across the whole `lib/` tree before
+This avoids forcing a big-bang backfill across the whole `src/` tree before
 any mission could land, and keeps enforcement strictly diff-local.
 
 **Baseline initialization is incremental, not eager.** The mission's CP-4
 checkpoint text describes "initializ[ing] `config/mutation-baseline.json`
-with current scores for all `lib/` files" on first run — but that would
+with current scores for all `src/` files" on first run — but that would
 require an eager full-repo mutation pass, which directly conflicts with the
 mission's own Out-of-Scope declaration ("Full-repo mutation testing (too
 slow; explicitly scoped to mission diff)"). Where a checkpoint's literal
@@ -297,7 +293,7 @@ tsc clean, test-hygiene clean)
   bounded, a single changed hub file (e.g. `handoff.ts` importing from
   `tools/`, `review/`, `core/`) can still pull in 12+ direct callees, pushing
   predicted runtime to ~75s for that specific diff — over the 60s budget. This
-  was observed when `lib/commands/handoff.ts` was modified after CP-8 was
+  was observed when `src/adapters/cli/commands/handoff.ts` was modified after CP-8 was
   written (the fix for the gate-command parser). Typical smaller diffs
   (1-2 non-hub files) remain well under 60s. The ADR recommends avoiding
   modifications to hub-adjacent files late in a mission without re-verifying
@@ -315,13 +311,13 @@ tsc clean, test-hygiene clean)
   changed-area matcher because `"mutation"` is not a recognized area. The gate
   is fully runnable standalone (`./scripts/verify-local.sh mutation-gate`).
   Wiring it into automatic dispatch would require modifying
-  `lib/commands/integrate.ts`, which was forbidden by this mission's Restricted
+  `src/adapters/cli/commands/integrate.ts`, which was forbidden by this mission's Restricted
   Areas.
 
 ## Deliverables
 
-1. **Diff scoper:** `lib/core/mutation-scoper.ts` — computes changed files + direct callees
-2. **Gate CLI:** `lib/commands/mutation-gate.ts` — StrykerJS runner with `--dry-run`, ratchet enforcement, baseline I/O
+1. **Diff scoper:** `src/adapters/git/mutation-scoper.ts` — computes changed files + direct callees
+2. **Gate CLI:** `src/adapters/verification/mutation-gate.ts` — StrykerJS runner with `--dry-run`, ratchet enforcement, baseline I/O
 3. **Unit tests:** `test/mutation-scoper.test.ts`, `test/mutation-gate.test.ts`
 4. **Regression test:** `test/mutation-gate-ratchet.test.ts` — strong test seeds baseline, weak test regresses score, ratchet rejects (exit 1)
 5. **Verification script:** `scripts/verify-local.sh` — added `mutation-gate` subcommand (`gate_mutation()`)
@@ -334,9 +330,9 @@ tsc clean, test-hygiene clean)
 
 - ADR 0041: Integration-time pipeline gates
 - ADR 0047: NEL budget (change-size estimation)
-- `lib/commands/coverage-gate.ts`: Complementary 90% line-coverage gate (unchanged)
-- `lib/core/mutation-scoper.ts`: Diff-scoped callee resolver
-- `lib/commands/mutation-gate.ts`: Gate CLI implementation
+- `src/adapters/verification/coverage-gate.ts`: Complementary 90% line-coverage gate (unchanged)
+- `src/adapters/git/mutation-scoper.ts`: Diff-scoped callee resolver
+- `src/adapters/verification/mutation-gate.ts`: Gate CLI implementation
 - `test/mutation-gate-ratchet.test.ts`: Regression test (CP-5)
 - `missions/task-1269/MISSION.md`: Mission specification
 - `missions/task-1269/CP-1.md`: POC verification

@@ -134,13 +134,13 @@ un-started and `task_list` surfaces the stale backlog copy (TASK-1343).
 
 Parallix enforces the invariant **"never keep a `backlog/tasks/` file for a task
 id that already exists in `backlog/completed/` or `backlog/archive/`"** in two
-places, both in `lib/tools/backlog.js`:
+places, both in `src/adapters/backlog/backlog.ts`:
 
 - **Guard / gate:** `checkBacklogIntegrity()` emits a `duplicate-completed` issue
   for any task id present in both `backlog/tasks/` and a canonical
   (`completed/` or `archive/`) location. The gate is exercised by
   `test/backlog_gate.test.ts` (fails when a recurrence ships) and by the `px draft`
-  preflight (`lib/commands/draft.js`), which refuses to draft while the duplicate
+  preflight (`src/adapters/cli/commands/draft.ts`), which refuses to draft while the duplicate
   exists. This is in addition to the existing filename-vs-frontmatter id check.
 - **Mutation hygiene:** `pruneStaleBacklogDuplicates()` treats the completed/archive
   copy as canonical and removes the stale `backlog/tasks/` copy, so a board

@@ -78,7 +78,7 @@ Subdirectory READMEs follow a simplified variant: H1 with capability statement, 
 
 ## 10. Subdirectory READMEs
 
-- `lib/README.md`, `examples/README.md`, and any future subdirectory READMEs must begin with a one-line capability statement (no internal jargon).
+- `examples/README.md`, and any future subdirectory READMEs must begin with a one-line capability statement (no internal jargon).
 - Use consistent heading hierarchy: H1 for the directory name, H2 for sections, H3 for subsections.
 - Keep them concise — they are navigation aids, not deep documentation.
 
