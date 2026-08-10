@@ -1,7 +1,7 @@
 ---
 id: TASK-2352
 title: Keep execute agents running until the full mission is complete
-status: active
+status: review
 assignee: [codex]
 created_date: '2026-08-10 08:20'
 updated_date: '2026-08-10 08:20'
