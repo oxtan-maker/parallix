@@ -2,7 +2,7 @@
 id: TASK-2351
 title: Agent selection ignores runtime blocks stored in SQLite
 status: backlog
-assignee: []
+assignee: [codex]
 created_date: '2026-08-09 15:25'
 labels:
   - ai_sdlc
