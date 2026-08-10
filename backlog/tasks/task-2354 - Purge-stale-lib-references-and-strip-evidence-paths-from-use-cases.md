@@ -1,7 +1,7 @@
 ---
 id: TASK-2354
 title: Purge stale lib/ references and strip evidence paths from use-cases.md
-status: backlog
+status: refined
 assignee: [codex]
 created_date: '2026-08-10 10:00'
 updated_date: '2026-08-10 10:00'
