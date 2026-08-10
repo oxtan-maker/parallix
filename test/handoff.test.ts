@@ -6,6 +6,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import childProcess from 'node:child_process';
+import { HandoffCommandUseCase } from '../src/application/handoff-command-use-case.js';
+import { createHandoffCommand } from '../src/interfaces/cli/handoff.js';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
 import { stubMissionServices } from './helpers/stub-mission-services.js';
 const handoffModule = mockModule<typeof import('../src/adapters/cli/commands/handoff.js')>('../src/adapters/cli/commands/handoff.js', import.meta.url);
@@ -17,7 +19,7 @@ const setupReview = mockModule<typeof import('../src/adapters/review/setup-revie
 const gatekeeper = mockModule<typeof import('../src/adapters/verification/gatekeeper.js')>('../src/adapters/verification/gatekeeper.js', import.meta.url);
 const worktree = mockModule<typeof import('../src/adapters/git/worktree.js')>('../src/adapters/git/worktree.js', import.meta.url);
 await installModuleMocks();
-const { verifyHandoff, performHandoff, _findUnverifiableGoalCheckRow, runDeclaredGates, captureNelAtHandoff, validateDeclaredGates } = handoffModule;
+const { createHandoffPorts, verifyHandoff, performHandoff, _findUnverifiableGoalCheckRow, runDeclaredGates, captureNelAtHandoff, validateDeclaredGates } = handoffModule;
 const { mock } = test;
 test.afterEach(() => mock.restoreAll());
 
@@ -775,26 +777,18 @@ test('performHandoff accepts file:line evidence with supporting shell context in
   }
 });
 
-test('handoffCommand normalizes uppercase explicit slugs', async (t) => {
+test('handoff CLI normalizes uppercase explicit slugs', async (t) => {
   const { mock } = t;
 
-  // We need to mock performHandoff which is exported from the same module
-  // Actually, handoffCommand calls performHandoff from the same file.
-  // We can't easily mock it unless we mock the whole module or its internal dependencies.
-
-  // Let's mock missionUtils.inferSlug to see if it's called with the uppercase slug
+  // The composition root binds the adapter ports to the CLI interface.
+  // Stub the workflow method rather than bypassing that boundary.
   const inferSlugMock = mock.method(missionUtils, 'inferSlug', (s) => s.toLowerCase());
-
-  // We don't want to actually run performHandoff because it has many dependencies.
-  // We can mock performHandoff by overriding the export temporarily or just mocking its dependencies.
-
-  mock.method(handoffModule, 'performHandoff', () => ({ ok: true }));
-  mock.method(handoffModule.default, 'performHandoff', () => ({ ok: true }));
+  mock.method(HandoffCommandUseCase.prototype, 'performHandoff', async () => ({ ok: true }));
 
   // Mock process.exit to avoid crashing the test runner
   const exitMock = mock.method(process, 'exit', () => {});
 
-  await handoffModule.default(['TASK-1022']);
+  await createHandoffCommand(new HandoffCommandUseCase(createHandoffPorts()))(['TASK-1022']);
 
   assert.strictEqual(inferSlugMock.mock.calls[0].arguments[0], 'TASK-1022');
   assert.strictEqual(exitMock.mock.calls.length, 0, 'Should not exit on success');

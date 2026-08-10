@@ -158,21 +158,23 @@ export function BoardShell({ projection, columns, rows, initialSelectedMissionId
    * Integrated capabilities (active:execute) go through ConfirmationDialog
    * with the same canDispatchAction guard as Enter.
    * Unavailable capabilities report immediately without confirmation (R4). */
-  const dispatchLifecycle = (kind: BoardCommandKind) => {
-    if (!navigation.selectedMissionId) { return; }
+  const dispatchLifecycle = (kind: BoardCommandKind): boolean => {
+    if (!navigation.selectedMissionId) { return false; }
     const mission = projection.stages.flatMap((stage) => stage.cards).find((card) => card.id === navigation.selectedMissionId) ?? null;
-    if (!mission) { return; }
+    if (!mission) { return false; }
     if (isIntegratedCapability(kind)) {
       /* Integrated: gate on enablement (same check as Enter/startAction). */
-      if (!canDispatchAction(kind, mission)) { return; }
+      if (!canDispatchAction(kind, mission)) { return false; }
       setOutcome(null);
       const nextConfirmation = { kind, mission };
       confirmationRef.current = nextConfirmation;
       setConfirmation(nextConfirmation);
+      return true;
     } else {
       /* Unavailable capability — report immediately without confirmation dialog (R4). */
       const reason = unavailableReason(kind) ?? `${kind} is not yet available`;
       setOutcome(unavailableCapability(kind, reason));
+      return false;
     }
   };
 
@@ -355,7 +357,6 @@ export function BoardShell({ projection, columns, rows, initialSelectedMissionId
         }}
         onStartAction={startAction}
         selectedMissionId={navigation.selectedMissionId}
-        confirmationOpen={confirmation !== null}
         onConfirm={() => { void confirmAction(); }}
         onCancel={() => {
           confirmationRef.current = null;
@@ -490,7 +491,7 @@ function isUnmodifiedEnter(input: string, key: Pick<Key, 'return' | 'ctrl' | 'me
   return (input === '\r' || input === '\n' || key.return) && !key.ctrl && !key.meta;
 }
 
-function KeyHandler({ onExit, onNavigate, onToggleHelp, onToggleFlow, onToggleDone, onEnterAttention, onStartAction, selectedMissionId, confirmationOpen, onConfirm, onCancel, onLifecycle, queueItems: queueItemsList, focusedAttentionIndex: focusedIdx, setFocusedIdx, focusedArea, setFocusedArea }: {
+function KeyHandler({ onExit, onNavigate, onToggleHelp, onToggleFlow, onToggleDone, onEnterAttention, onStartAction, selectedMissionId, onConfirm, onCancel, onLifecycle, queueItems: queueItemsList, focusedAttentionIndex: focusedIdx, setFocusedIdx, focusedArea, setFocusedArea }: {
   readonly onExit: () => void;
   readonly onNavigate: (_key: NavigationKey | 'self') => void;
   readonly onToggleHelp: () => void;
@@ -499,22 +500,41 @@ function KeyHandler({ onExit, onNavigate, onToggleHelp, onToggleFlow, onToggleDo
   readonly onEnterAttention: (_missionId: string) => void;
   readonly onStartAction: (_missionId: string) => boolean;
   readonly selectedMissionId: string | null;
-  readonly confirmationOpen: boolean;
   readonly onConfirm: () => void;
   readonly onCancel: () => void;
-  readonly onLifecycle: (_kind: BoardCommandKind) => void;
+  /** Returns whether this shortcut opened a confirmation dialog. */
+  readonly onLifecycle: (_kind: BoardCommandKind) => boolean;
   readonly queueItems: readonly BoardProjection['attentionQueue'][number][];
   readonly focusedAttentionIndex: number;
   readonly setFocusedIdx: React.Dispatch<React.SetStateAction<number>>;
   readonly focusedArea: 'rail' | 'board';
   readonly setFocusedArea: React.Dispatch<React.SetStateAction<'rail' | 'board'>>;
 }): React.ReactElement {
-  const confirmationArmedRef = React.useRef(confirmationOpen);
-  React.useEffect(() => {
-    confirmationArmedRef.current = confirmationOpen;
-  }, [confirmationOpen]);
+  // Keep Ink's subscription alive across renders. `useInput` resubscribes when
+  // its callback identity changes; the shell intentionally re-renders when a
+  // confirmation opens or the done lane toggles, so a changing callback can
+  // drop the immediately following keypress.
+  const latest = React.useRef({
+    onExit, onNavigate, onToggleHelp, onToggleFlow, onToggleDone,
+    onEnterAttention, onStartAction, selectedMissionId, onConfirm, onCancel,
+    onLifecycle, queueItemsList, focusedIdx, setFocusedIdx, focusedArea,
+    setFocusedArea,
+  });
+  latest.current = {
+    onExit, onNavigate, onToggleHelp, onToggleFlow, onToggleDone,
+    onEnterAttention, onStartAction, selectedMissionId, onConfirm, onCancel,
+    onLifecycle, queueItemsList, focusedIdx, setFocusedIdx, focusedArea,
+    setFocusedArea,
+  };
+  const confirmationArmedRef = React.useRef(false);
 
-  useInput((input, key) => {
+  useInput(React.useCallback((input, key) => {
+    const {
+      onExit, onNavigate, onToggleHelp, onToggleFlow, onToggleDone,
+      onEnterAttention, onStartAction, selectedMissionId, onConfirm, onCancel,
+      onLifecycle, queueItemsList, focusedIdx, setFocusedIdx, focusedArea,
+      setFocusedArea,
+    } = latest.current;
     if (confirmationArmedRef.current) {
       if (isUnmodifiedEnter(input, key)) {
         confirmationArmedRef.current = false;
@@ -576,7 +596,7 @@ function KeyHandler({ onExit, onNavigate, onToggleHelp, onToggleFlow, onToggleDo
       };
       const kind = lifecycleMap[input];
       if (kind) {
-        onLifecycle(kind);
+        confirmationArmedRef.current = onLifecycle(kind);
         return;
       }
     }
@@ -613,7 +633,7 @@ function KeyHandler({ onExit, onNavigate, onToggleHelp, onToggleFlow, onToggleDo
         confirmationArmedRef.current = onStartAction(selectedMissionId);
       }
     }
-  });
+  }, []));
 
   return <></>;
 }

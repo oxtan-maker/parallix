@@ -13,15 +13,18 @@ import checkpoint from '../adapters/cli/commands/checkpoint.js';
 import config from '../adapters/cli/commands/config.js';
 import diff from '../adapters/cli/commands/diff.js';
 import { createDraftWorkflowAdapter } from '../adapters/cli/commands/draft.js';
-import handoff from '../adapters/cli/commands/handoff.js';
+import { createHandoffPorts } from '../adapters/cli/commands/handoff.js';
 import integrate from '../adapters/cli/commands/integrate.js';
 import { DraftCommandUseCase } from '../application/draft-command-use-case.js';
 import { IntegrateCommandUseCase } from '../application/integrate-command-use-case.js';
 import { ReviewCommandUseCase } from '../application/review-command-use-case.js';
 import { StatsCommandUseCase } from '../application/stats-command-use-case.js';
+import { HandoffCommandUseCase } from '../application/handoff-command-use-case.js';
 import { createDraftCommand } from '../interfaces/cli/draft.js';
+import type { HandoffMissionServicesPort } from '../application/ports/handoff-workflow.js';
 import { createIntegrateCommand } from '../interfaces/cli/integrate.js';
 import { createReviewCommand } from '../interfaces/cli/review.js';
+import { createHandoffCommand } from '../interfaces/cli/handoff.js';
 import missionStart from '../adapters/cli/mission-start.js';
 import mutationGate from '../adapters/verification/mutation-gate.js';
 import rebase from '../adapters/cli/commands/rebase.js';
@@ -125,7 +128,11 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
         return cmd(args, { ...options, missionServicesFn });
       });
     },
-    handoff: (args, options) => withMissionFactories(missionServicesFn => handoff(args, { ...options, missionServicesFn })),
+    handoff: (args, options) => withMissionFactories(missionServicesFn =>
+      createHandoffCommand(new HandoffCommandUseCase({
+        ...createHandoffPorts(),
+        missionServices: missionServicesFn as HandoffMissionServicesPort,
+      }))(args, { ...options, missionServicesFn })),
     integrate: createIntegrateCommand(new IntegrateCommandUseCase({
       execute: (args, options) => withMissionFactories(missionServicesFn => integrate(args, { ...options, missionServicesFn })),
     })),
@@ -153,6 +160,11 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
           consumeImplementerArtifactsFn: persistence.consumeImplementerArtifacts,
           startReviewLoopFn: (slug: string, loopOptions: Record<string, unknown>) => startReviewLoop(slug, {
             ...loopOptions,
+            performHandoffFn: (handoffSlug: string, handoffOptions: Record<string, unknown>) =>
+              new HandoffCommandUseCase({
+                ...createHandoffPorts(),
+                missionServices: missionServicesFn as HandoffMissionServicesPort,
+              }).performHandoff(handoffSlug, { ...handoffOptions, missionServicesFn }),
             ...reviewLoopBindings(services.mission!.store),
           } as any),
         } as any);

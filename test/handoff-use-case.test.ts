@@ -1,0 +1,486 @@
+/**
+ * Hermetic mocked-port tests for the re-homed handoff workflow (TASK-2332.09).
+ *
+ * Every collaborator is a plain in-memory stub supplied through
+ * `HandoffWorkflowPorts`. No test here touches Forgejo, an agent CLI, a real
+ * git repository, or a recursive workflow command.
+ */
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { HandoffCommandUseCase } from '../src/application/handoff-command-use-case.js';
+import { createHandoffCommand, parseHandoffCliRequest, handoffExitCode } from '../src/interfaces/cli/handoff.js';
+import type { HandoffWorkflowPorts } from '../src/application/ports/handoff-workflow.js';
+
+const SLUG = 'task-2332.09';
+const ROOT = '/root';
+const MISSION_DIR = '/root/missions/task-2332.09';
+const CHECKPOINT = '/root/missions/task-2332.09/CP-1.md';
+const BRANCH = 'mission/task-2332.09';
+
+const CHECKPOINT_CONTENT = [
+  '# CP-1: Example',
+  '',
+  '## Goal Check',
+  '',
+  '| Criterion | Evidence | Status |',
+  '|---|---|---|',
+  '| Workflow re-homed | src/application/handoff-command-use-case.ts:1 | PASS |',
+  '',
+  'Next action: hand off.',
+  '',
+].join('\n');
+
+const MISSION_CONTENT = [
+  '# Mission',
+  '',
+  '## Gates',
+  '',
+  '- [ ] `npm run typecheck`',
+  '',
+  '## Stop Rules',
+  '',
+].join('\n');
+
+interface Recorder {
+  readonly log: string[];
+  readonly errors: string[];
+  readonly relaunches: number[];
+  readonly transitions: string[];
+  readonly gatekeeperCalls: number[];
+  readonly spawned: string[];
+}
+
+function makeRecorder(): Recorder {
+  return { log: [], errors: [], relaunches: [], transitions: [], gatekeeperCalls: [], spawned: [] };
+}
+
+/**
+ * A fully stubbed port bag whose defaults drive a successful handoff.
+ * Each test overrides only the ports its scenario needs.
+ */
+function makePorts(recorder: Recorder, overrides: Record<string, unknown> = {}): HandoffWorkflowPorts {
+  const files: Record<string, string> = {
+    [CHECKPOINT]: CHECKPOINT_CONTENT,
+    [`${MISSION_DIR}/MISSION.md`]: MISSION_CONTENT,
+  };
+  const base = {
+    fileSystem: {
+      existsSync: () => true,
+      readText: (target: string) => files[target] ?? '',
+      writeText: (target: string, content: string) => { files[target] = content; },
+      listNames: () => [],
+      listEntries: () => [],
+    },
+    git: {
+      git: () => ({ status: 0, stdout: '', stderr: '' }),
+      run: () => ({ status: 0 }),
+      getCurrentBranch: () => BRANCH,
+      getWorktreeStatus: () => [] as string[],
+    },
+    missionUtils: {
+      inferSlug: (explicit?: string) => explicit,
+      resolveWorktree: () => ROOT,
+      findMissionDir: () => MISSION_DIR,
+      findMissionArea: () => 'docs',
+      missionBranchName: () => BRANCH,
+      findCheckpoints: () => [CHECKPOINT],
+      getPrimaryBranch: () => 'main',
+    },
+    backlog: {
+      resolveTaskFile: () => ({ ok: true, taskFile: '/root/backlog/tasks/task-2332.09.md' }),
+      getTaskImplementer: () => 'claude',
+      transitionTask: (_slug: string, status: string) => { recorder.transitions.push(status); return true; },
+    },
+    forgejo: {
+      readToken: () => 'token',
+      resolveForgejoSettings: () => ({ url: 'http://localhost', repo: 'human/parallix' }),
+      createPr: () => ({ ok: true }),
+      authenticatedReviewUrl: () => 'http://localhost/human/parallix.git',
+      resolveTrackingBranchSha: () => ({ ok: true, sha: 'abc123' }),
+    },
+    reviewIdentity: {
+      resolveReviewIdentity: async () => ({ forgejoUser: 'claude' }),
+    },
+    setupReview: {
+      bootstrapReviewSurface: async () => ({ ok: true }),
+      apiRequest: () => ({ ok: true }),
+    },
+    rebase: {
+      rebaseBeforeReviewRound: async () => ({ ok: true }),
+    },
+    gatekeeper: {
+      runGatekeeper: () => { recorder.gatekeeperCalls.push(1); return { ok: true }; },
+    },
+    verification: {
+      formatVerificationCommand: () => 'npm run typecheck',
+      createVerificationProofIdentity: () => ({ ok: true, identity: 'proof-1' }),
+      readReusableVerificationProof: () => ({ ok: false, error: 'no proof' }),
+      writeReusableVerificationProof: () => ({ ok: true, identity: 'proof-1' }),
+      runVerificationGate: () => ({ status: 0, stdout: '', stderr: '' }),
+    },
+    nel: {
+      computeNELRecord: () => ({ nel: 120, bucket: { label: 'Medium' } }),
+    },
+    documentWriter: { writeJson: () => undefined },
+    productConfig: { isForgejoReviewEnabled: () => false },
+    agentRelaunch: {
+      attemptAgentRelaunch: async () => { recorder.relaunches.push(1); return { relaunched: false, error: 'no launcher' }; },
+    },
+    agentSelection: {
+      eligibleAgentsForStep: () => ['claude', 'codex'],
+      selectAgent: () => 'codex',
+    },
+    process: {
+      spawnSync: (_cmd: string, args: string[]) => { recorder.spawned.push(args[1]); return { status: 0, stdout: '', stderr: '' }; },
+    },
+    missionServices: async () => ({
+      checkpoints: { record: async () => ({ status: 'completed' }) },
+      lifecycle: { transition: async () => ({ status: 'completed', value: { version: 3 } }) },
+      store: { load: async () => ({ kind: 'not-found' }) },
+      handoff: { recordNel: async () => ({ status: 'completed' }) },
+    }),
+  };
+  return { ...base, ...overrides } as unknown as HandoffWorkflowPorts;
+}
+
+function runOptions(recorder: Recorder, extra: Record<string, unknown> = {}) {
+  return {
+    worktree: ROOT,
+    log: (line: string) => recorder.log.push(String(line)),
+    error: (line: string) => recorder.errors.push(String(line)),
+    ...extra,
+  };
+}
+
+// --- CLI interface tests (SC3) ---
+
+test('handoff CLI interface parses public flags without adapter dependencies', () => {
+  assert.deepEqual(parseHandoffCliRequest([SLUG, '--no-gate', '--force']), {
+    slug: SLUG,
+    skipGate: true,
+    force: true,
+  });
+});
+
+test('handoff CLI interface rejects unknown flags', () => {
+  assert.throws(
+    () => parseHandoffCliRequest(['task-999', '--unknown']),
+    { message: 'Unknown handoff option: --unknown' },
+  );
+});
+
+test('handoff CLI interface rejects duplicate --no-gate', () => {
+  assert.throws(
+    () => parseHandoffCliRequest(['task-999', '--no-gate', '--no-gate']),
+    { message: '--no-gate may be supplied only once.' },
+  );
+});
+
+test('handoff CLI interface maps success to exit code 0 and failure to 1', () => {
+  assert.equal(handoffExitCode({ ok: true }), 0);
+  assert.equal(handoffExitCode({ ok: false }), 1);
+});
+
+test('handoff CLI interface leaves the slug optional so the use case can infer it', async () => {
+  const recorder = makeRecorder();
+  const seen: Array<{ slug?: string; skipGate: boolean; force: boolean }> = [];
+  const useCase = new HandoffCommandUseCase(makePorts(recorder));
+  useCase.execute = async (request) => { seen.push(request); return { ok: true }; };
+  await createHandoffCommand(useCase)([], {});
+  assert.deepEqual(seen, [{ slug: undefined, skipGate: false, force: false }]);
+});
+
+test('handoff CLI interface translates flags before invoking the use case', async () => {
+  const recorder = makeRecorder();
+  const seen: Array<{ slug?: string; skipGate: boolean; force: boolean }> = [];
+  const useCase = new HandoffCommandUseCase(makePorts(recorder));
+  useCase.execute = async (request) => { seen.push(request); return { ok: true }; };
+
+  await createHandoffCommand(useCase)([SLUG, '--no-gate', '--force'], {});
+
+  assert.deepEqual(seen, [{ slug: SLUG, skipGate: true, force: true }]);
+});
+
+test('handoff CLI interface exits with code 1 when no slug can be inferred', async () => {
+  const recorder = makeRecorder();
+  const ports = makePorts(recorder, {
+    missionUtils: { ...makePorts(recorder).missionUtils, inferSlug: () => undefined },
+  });
+  const originalExit = process.exit;
+  let observed = -1;
+  process.exit = ((code?: number) => { observed = code ?? 0; throw new Error('exit'); }) as never;
+  try {
+    await createHandoffCommand(new HandoffCommandUseCase(ports))([], {});
+    assert.fail('Should have called process.exit');
+  } catch (err) {
+    if (!(err instanceof Error) || err.message !== 'exit') { throw err; }
+    assert.equal(observed, 1);
+  } finally {
+    process.exit = originalExit;
+  }
+});
+
+// --- SC5a: successful handoff over mocked ports ---
+
+test('handoff use case completes the full workflow over mocked ports', async () => {
+  const recorder = makeRecorder();
+  const useCase = new HandoffCommandUseCase(makePorts(recorder));
+  const result = await useCase.performHandoff(SLUG, runOptions(recorder));
+
+  assert.equal(result.ok, true, recorder.errors.join('\n'));
+  assert.equal(result.gatekeeperPushedBack, false);
+  assert.deepEqual(recorder.transitions, ['review'], 'backlog task transitions to review');
+  assert.deepEqual(recorder.spawned, ['npm run typecheck'], 'declared MISSION.md gate ran once');
+  assert.ok(recorder.log.some(line => line.includes('NEL captured: 120 NEL')), 'NEL capture is reported');
+});
+
+test('handoff use case skips the final verification gate under --no-gate', async () => {
+  const recorder = makeRecorder();
+  let gateRuns = 0;
+  const ports = makePorts(recorder);
+  const useCase = new HandoffCommandUseCase(ports);
+  const result = await useCase.performHandoff(SLUG, runOptions(recorder, {
+    skipGate: true,
+    runVerificationGateFn: () => { gateRuns += 1; return { status: 0 }; },
+  }));
+
+  assert.equal(result.ok, true, recorder.errors.join('\n'));
+  assert.equal(gateRuns, 0);
+});
+
+// --- SC5b: gate failure ---
+
+test('handoff use case fails closed when the final verification gate fails', async () => {
+  const recorder = makeRecorder();
+  const useCase = new HandoffCommandUseCase(makePorts(recorder));
+  const result = await useCase.performHandoff(SLUG, runOptions(recorder, {
+    runVerificationGateFn: () => ({ status: 1, stdout: 'out', stderr: 'boom' }),
+  }));
+
+  assert.equal(result.ok, false);
+  assert.match(result.error ?? '', /Final verification gate failed/);
+  assert.deepEqual(result.gateOutput, { stdout: 'out', stderr: 'boom' });
+  assert.deepEqual(recorder.transitions, [], 'no backlog transition after a failed gate');
+});
+
+test('handoff use case fails closed when a declared MISSION.md gate fails', async () => {
+  const recorder = makeRecorder();
+  const ports = makePorts(recorder, {
+    process: { spawnSync: () => ({ status: 2, stdout: '', stderr: 'gate exploded' }) },
+  });
+  const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
+
+  assert.equal(result.ok, false);
+  assert.match(result.error ?? '', /Declared gate "npm run typecheck" failed/);
+  assert.deepEqual(recorder.transitions, []);
+});
+
+// --- SC5c: retry/relaunch after gatekeeper pushback ---
+
+test('handoff use case relaunches the agent and succeeds after gatekeeper pushback clears', async () => {
+  const recorder = makeRecorder();
+  let gatekeeperCall = 0;
+  const ports = makePorts(recorder, {
+    gatekeeper: {
+      runGatekeeper: () => {
+        gatekeeperCall += 1;
+        recorder.gatekeeperCalls.push(gatekeeperCall);
+        return gatekeeperCall === 1
+          ? { ok: false, posted: true, missing: ['missions/task-2332.09/CP-1.md'] }
+          : { ok: true };
+      },
+    },
+    agentRelaunch: {
+      attemptAgentRelaunch: async () => { recorder.relaunches.push(1); return { relaunched: true }; },
+    },
+  });
+  const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
+
+  assert.equal(result.ok, true, recorder.errors.join('\n'));
+  assert.equal(result.gatekeeperPushedBack, true, 'the pushback is reported even on eventual success');
+  assert.equal(recorder.relaunches.length, 1, 'exactly one relaunch was needed');
+  assert.equal(recorder.gatekeeperCalls.length, 2, 'gatekeeper re-ran on the retry');
+});
+
+test('handoff use case stops after the bounded relaunch budget when pushback persists', async () => {
+  const recorder = makeRecorder();
+  const ports = makePorts(recorder, {
+    gatekeeper: {
+      runGatekeeper: () => {
+        recorder.gatekeeperCalls.push(1);
+        return { ok: false, posted: true, missing: ['MISSION.md'] };
+      },
+    },
+    agentRelaunch: {
+      attemptAgentRelaunch: async () => { recorder.relaunches.push(1); return { relaunched: true }; },
+    },
+  });
+  const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
+
+  assert.equal(result.ok, false);
+  assert.equal(result.gatekeeperPushedBack, true);
+  assert.match(result.error ?? '', /Gatekeeper pushback persisted after 2 relaunch attempts/);
+  assert.ok(recorder.relaunches.length <= 3, 'the recursion guard bounds total relaunches');
+  assert.deepEqual(recorder.transitions, [], 'the task never reaches review while artifacts are missing');
+});
+
+test('handoff use case blocks handoff when the gatekeeper cannot post its pushback', async () => {
+  const recorder = makeRecorder();
+  const ports = makePorts(recorder, {
+    gatekeeper: {
+      runGatekeeper: () => ({ ok: false, posted: false, skipped: true, missing: ['MISSION.md'] }),
+    },
+  });
+  const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
+
+  assert.equal(result.ok, false);
+  assert.match(result.error ?? '', /could not post pushback/);
+  assert.equal(recorder.relaunches.length, 0, 'no relaunch when the pushback was never posted');
+});
+
+// --- SC5d: NEL persistence failure ---
+
+test('handoff use case stops before review state advances when NEL persistence fails', async () => {
+  const recorder = makeRecorder();
+  const ports = makePorts(recorder, {
+    missionServices: async () => ({
+      checkpoints: { record: async () => ({ status: 'completed' }) },
+      lifecycle: { transition: async () => ({ status: 'completed', value: { version: 1 } }) },
+      store: { load: async () => ({ kind: 'not-found' }) },
+      handoff: { recordNel: async () => ({ status: 'failed', error: { message: 'database is locked' } }) },
+    }),
+  });
+  const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
+
+  assert.equal(result.ok, false);
+  assert.match(result.error ?? '', /NEL persistence failed; handoff stopped before review state advanced/);
+  assert.match(result.error ?? '', /database is locked/);
+  assert.deepEqual(recorder.transitions, []);
+});
+
+test('handoff use case continues when NEL is merely uncomputable', async () => {
+  const recorder = makeRecorder();
+  const ports = makePorts(recorder, {
+    nel: { computeNELRecord: () => { throw new Error('no merge base'); } },
+  });
+  const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
+
+  assert.equal(result.ok, true, recorder.errors.join('\n'));
+  assert.ok(recorder.log.some(line => line.includes('NEL capture skipped')));
+});
+
+// --- SC5e: checkpoint recording failure ---
+
+test('handoff use case fails when checkpoint recording is not completed', async () => {
+  const recorder = makeRecorder();
+  const ports = makePorts(recorder, {
+    missionServices: async () => ({
+      checkpoints: { record: async () => ({ status: 'rejected', error: { message: 'evidence missing' } }) },
+      lifecycle: { transition: async () => ({ status: 'completed', value: { version: 1 } }) },
+      store: { load: async () => ({ kind: 'not-found' }) },
+      handoff: { recordNel: async () => ({ status: 'completed' }) },
+    }),
+  });
+  const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
+
+  assert.equal(result.ok, false);
+  assert.match(result.error ?? '', /Recording checkpoint CP-1 failed: evidence missing/);
+  assert.deepEqual(recorder.transitions, [], 'backlog is untouched when checkpoint evidence is not durable');
+});
+
+test('handoff use case fails when the mission lifecycle transition is rejected', async () => {
+  const recorder = makeRecorder();
+  const ports = makePorts(recorder, {
+    missionServices: async () => ({
+      checkpoints: { record: async () => ({ status: 'completed' }) },
+      lifecycle: { transition: async () => ({ status: 'rejected', error: { message: 'not in active' } }) },
+      store: { load: async () => ({ kind: 'not-found' }) },
+      handoff: { recordNel: async () => ({ status: 'completed' }) },
+    }),
+  });
+  const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
+
+  assert.equal(result.ok, false);
+  assert.match(result.error ?? '', /Mission state transition failed: not in active/);
+  assert.deepEqual(recorder.transitions, []);
+});
+
+// --- Pre-flight guards over mocked ports ---
+
+test('handoff use case refuses to hand off from the wrong branch', async () => {
+  const recorder = makeRecorder();
+  const ports = makePorts(recorder, {
+    git: { ...makePorts(recorder).git, getCurrentBranch: () => 'main' },
+  });
+  const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
+
+  assert.equal(result.ok, false);
+  assert.match(result.error ?? '', /Not on mission branch\. Current: main, Expected: mission\/task-2332\.09/);
+});
+
+test('handoff use case rejects a checkpoint whose Goal Check rows cite nothing verifiable', async () => {
+  const recorder = makeRecorder();
+  const bare = [
+    '# CP-1',
+    '',
+    '## Goal Check',
+    '',
+    '| Criterion | Evidence | Status |',
+    '|---|---|---|',
+    '| It works | trust me | PASS |',
+    '',
+  ].join('\n');
+  const ports = makePorts(recorder, {
+    fileSystem: {
+      existsSync: (target: string) => target.endsWith('MISSION.md'),
+      readText: (target: string) => (target === CHECKPOINT ? bare : MISSION_CONTENT),
+      writeText: () => undefined,
+      listNames: () => [],
+      listEntries: () => [],
+    },
+  });
+  const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
+
+  assert.equal(result.ok, false);
+  assert.match(result.error ?? '', /no evidence rows that cite a verifiable reference/);
+});
+
+test('handoff use case refuses when MISSION.md is modified but uncommitted', async () => {
+  const recorder = makeRecorder();
+  const ports = makePorts(recorder, {
+    git: { ...makePorts(recorder).git, getWorktreeStatus: () => [' M missions/task-2332.09/MISSION.md'] },
+  });
+  const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
+
+  assert.equal(result.ok, false);
+  assert.match(result.error ?? '', /is modified but uncommitted/);
+});
+
+// --- SC2: the use case reaches the outside world only through ports ---
+
+test('handoff use case never creates a Forgejo PR when the review provider is off', async () => {
+  const recorder = makeRecorder();
+  let prCalls = 0;
+  const ports = makePorts(recorder, {
+    productConfig: { isForgejoReviewEnabled: () => false },
+    forgejo: { ...makePorts(recorder).forgejo, createPr: () => { prCalls += 1; return { ok: true }; } },
+  });
+  const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
+
+  assert.equal(result.ok, true, recorder.errors.join('\n'));
+  assert.equal(prCalls, 0);
+  assert.ok(recorder.log.some(line => line.includes('Skipping Forgejo PR')));
+});
+
+test('handoff use case creates the Forgejo PR through the port when the provider is on', async () => {
+  const recorder = makeRecorder();
+  const created: string[] = [];
+  const ports = makePorts(recorder, {
+    productConfig: { isForgejoReviewEnabled: () => true },
+    forgejo: { ...makePorts(recorder).forgejo, createPr: (branch: string) => { created.push(branch); return { ok: true }; } },
+  });
+  const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder, { force: false }));
+
+  assert.equal(result.ok, true, recorder.errors.join('\n'));
+  assert.deepEqual(created, [BRANCH]);
+});

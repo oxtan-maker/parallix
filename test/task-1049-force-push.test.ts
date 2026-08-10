@@ -7,14 +7,13 @@ import path from 'path';
 import { ReviewCommandUseCase } from '../src/application/review-command-use-case.js';
 import { createReviewCommand } from '../src/interfaces/cli/review.js';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
+import { parseHandoffCliRequest } from '../src/interfaces/cli/handoff.js';
 const createPrModule = mockModule<typeof import('../src/adapters/forgejo/forgejo.js')>('../src/adapters/forgejo/forgejo.js', import.meta.url);
 const git = mockModule<typeof import('../src/adapters/git/git.js')>('../src/adapters/git/git.js', import.meta.url);
-const handoffModule = mockModule<typeof import('../src/adapters/cli/commands/handoff.js')>('../src/adapters/cli/commands/handoff.js', import.meta.url);
 const rebaseModule = mockModule<typeof import('../src/adapters/cli/commands/rebase.js')>('../src/adapters/cli/commands/rebase.js', import.meta.url);
 const reviewModule = mockModule<typeof import('../src/adapters/review/review-commands.js')>('../src/adapters/review/review-commands.js', import.meta.url);
 await installModuleMocks();
 const { createPr, pushReviewRef } = createPrModule;
-const handoffCommand = handoffModule.default;
 const rebase = rebaseModule.default;
 const review = (args, options = {}) =>
   createReviewCommand(new ReviewCommandUseCase(reviewModule.createReviewWorkflowAdapter(options)))(args, options);
@@ -179,25 +178,9 @@ serialTest('review --push --force passes force:true to pushRound', async (t) => 
   assert.strictEqual(pushRoundArgs.force, false);
 });
 
-serialTest('handoff --force passes force:true to performHandoff', async (t) => {
-  let performHandoffArgs = null;
-
-  // Mock performHandoff on the module exports
-  const originalPerformHandoff = handoffCommand.performHandoff;
-  handoffCommand.performHandoff = (slug, opts) => {
-    performHandoffArgs = opts;
-    return { ok: true };
-  };
-
-  try {
-    await handoffCommand(['task-1049', '--force']);
-    assert.strictEqual(performHandoffArgs.force, true);
-
-    await handoffCommand(['task-1049']);
-    assert.strictEqual(performHandoffArgs.force, false);
-  } finally {
-    handoffCommand.performHandoff = originalPerformHandoff;
-  }
+serialTest('handoff --force translates force:true at the CLI boundary', async () => {
+  assert.strictEqual(parseHandoffCliRequest(['task-1049', '--force']).force, true);
+  assert.strictEqual(parseHandoffCliRequest(['task-1049']).force, false);
 });
 
 serialTest('rebase --push calls createPrFn with forceWithLease:true on success', async (t) => {
