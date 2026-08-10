@@ -61,3 +61,51 @@ test('historical metrics exclude outcomes closed after each instant', () => {
   assert.deepEqual(medianStateTimes(outcomes, instants).series.map((point) => point.value), [10, 20]);
   assert.deepEqual(reviewLoopRateSeries(outcomes, instants).series.map((point) => point.value), [1, 2]);
 });
+
+test('lifecycle completion survives absent telemetry, ignores later close, and emits current-week zero', async () => {
+  const laneEventRepo = {
+    async findByRepositoryId() {
+      return [
+        { repositoryId: 'parallix', missionId: 'task-lifecycle-only', fromStatus: null, toStatus: 'backlog', trigger: 'intake', agent: 'codex', occurredAt: '2026-07-01T08:00:00Z', idempotencyKey: 'intake' },
+        { repositoryId: 'parallix', missionId: 'task-lifecycle-only', fromStatus: 'integration', toStatus: 'done', trigger: 'integrate', agent: 'codex', occurredAt: '2026-07-06T23:30:00-02:00', idempotencyKey: 'done' },
+        { repositoryId: 'parallix', missionId: 'task-lifecycle-only', fromStatus: 'done', toStatus: 'done', trigger: 'close', agent: 'codex', occurredAt: '2026-07-20T00:00:00Z', idempotencyKey: 'close' },
+      ];
+    },
+  } as unknown as BoardLaneEventRepository;
+  const adapter = new ConcreteMetricsReadAdapter({
+    laneEventRepo,
+    usageRepo: new InMemoryUsageRepository([]),
+    repositoryId: 'parallix' as never,
+    clock: () => '2026-07-27T12:00:00Z',
+  });
+
+  const outcomes = await adapter.readOutcomes();
+  assert.deepEqual(outcomes.map((outcome) => ({ closedAt: outcome.closedAt, cycleTimeMinutes: outcome.cycleTimeMinutes })), [
+    { closedAt: '2026-07-06T23:30:00-02:00', cycleTimeMinutes: 8250 },
+  ]);
+  const metrics = await adapter.buildMetrics(new Map([['task-lifecycle-only' as never, 'done' as never]]));
+  assert.deepEqual(metrics.weeklyThroughput.series, [
+    { at: '2026-07-06T00:00:00.000Z', value: 1 },
+    { at: '2026-07-27T00:00:00.000Z', value: 0 },
+  ]);
+});
+
+test('cohort labels and implementer come from canonical Mission metadata, not telemetry', async () => {
+  const laneEventRepo = {
+    async findByRepositoryId() {
+      return [
+        { repositoryId: 'parallix', missionId: 'task-canonical', fromStatus: null, toStatus: 'backlog', trigger: 'intake', agent: 'codex', occurredAt: '2026-07-01T08:00:00Z', idempotencyKey: 'intake' },
+        { repositoryId: 'parallix', missionId: 'task-canonical', fromStatus: 'integration', toStatus: 'done', trigger: 'integrate', agent: 'codex', occurredAt: '2026-07-02T08:00:00Z', idempotencyKey: 'done' },
+      ];
+    },
+  } as unknown as BoardLaneEventRepository;
+  const adapter = new ConcreteMetricsReadAdapter({
+    laneEventRepo,
+    usageRepo: new InMemoryUsageRepository([{ repo: 'parallix', mission: 'task-canonical', date: '2026-07-02', closed: 'yes', classification: 'wrong-label', implementer: 'claude' }]),
+    repositoryId: 'parallix' as never,
+    cohortMetadata: async () => new Map([['task-canonical' as never, { labels: ['ai_sdlc' as never], assignee: 'codex' as never }]]),
+  });
+  const [outcome] = await adapter.readOutcomes();
+  assert.deepEqual(outcome?.labels, ['ai_sdlc']);
+  assert.equal(outcome?.implementer, 'codex');
+});

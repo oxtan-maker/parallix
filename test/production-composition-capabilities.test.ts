@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { composeProductionCapabilities } from '../src/composition/production-capabilities.js';
+import { repositoryId } from '../src/domain/repository.js';
 import { makeExecutePorts } from './fixtures/execute-mission-ports.js';
 
 const repositories = {
@@ -14,7 +15,7 @@ const repositories = {
 test('production composition gives CLI and TUI identical board and active capability instances', () => {
   const { ports } = makeExecutePorts();
 
-  const capabilities = composeProductionCapabilities('/fixture-repository', repositories, ports, null);
+  const capabilities = composeProductionCapabilities('/fixture-repository', repositoryId('fixture-repository'), repositories, ports, null);
 
   assert.strictEqual(capabilities.boardProjection, capabilities.tui.boardProjection);
   assert.strictEqual(capabilities.missionDetails, capabilities.tui.missionDetails);

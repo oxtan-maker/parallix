@@ -67,6 +67,9 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
         netEngineeringLines: async () => new Map(
           (await missions.loadAllMissions()).map((mission) => [mission.id, mission.netEngineeringLines]),
         ),
+        cohortMetadata: async () => new Map(
+          (await missions.loadAllMissions()).map((mission) => [mission.id, { labels: mission.labels, assignee: mission.assignee }]),
+        ),
       }),
     },
   );

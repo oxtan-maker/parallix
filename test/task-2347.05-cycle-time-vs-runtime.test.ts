@@ -197,15 +197,12 @@ test('SC2: cycle time falls back to usage-row dates when lane events are missing
   assert.equal(outcomes[0]!.cycleTimeMinutes, 24 * 60);
 });
 
-test('SC2: a lane history with no closure event does not produce an inverted span', async () => {
-  // Opening from lane events (10:00) and closure from a usage date (00:00)
-  // would run backwards. Both ends must come from the same clock.
+test('SC2: a lane history with no completion event excludes telemetry-only completion', async () => {
+  // A telemetry closure cannot complete a mission whose lifecycle is known but
+  // has not entered done.
   const openLaneHistory = LANE_EVENTS.filter((event) => event.toStatus !== 'done');
   const outcomes = await adapter(openLaneHistory, USAGE_RECORDS).readOutcomes();
-  assert.equal(outcomes.length, 1);
-  assert.equal(outcomes[0]!.createdAt, '2026-08-01T00:00:00Z');
-  assert.equal(outcomes[0]!.closedAt, '2026-08-02T00:00:00Z');
-  assert.equal(outcomes[0]!.cycleTimeMinutes, 24 * 60);
+  assert.equal(outcomes.length, 0);
 });
 
 test('SC4: medianStateTimes reports the lifecycle cycle time', async () => {
