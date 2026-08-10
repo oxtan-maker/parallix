@@ -56,7 +56,7 @@ test('TASK-1048: startReviewLoop does not crash when taskResolution is needed fo
     }),
 // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     writeReviewStateFn: (slug, state) => writes.push({ slug, state }),
-    rebaseBeforeReviewRoundFn: async () => ({ ok: true, sharedFileConflicts: false }),
+    rebaseBeforeReviewRoundFn: async () => ({ ok: true, sharedFileConflicts: false, hookFailure: false }),
 // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     startAgentFn: async (step, options) => {
       if (step === 'review') {

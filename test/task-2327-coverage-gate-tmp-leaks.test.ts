@@ -60,6 +60,25 @@ function waitForClose(child: ReturnType<typeof spawn>, timeoutMs = 10000): Promi
 }
 
 /**
+ * Wait until a child has completed its synchronous marker write. A fixed
+ * delay is insufficient under a busy integration suite: tsx startup can
+ * legitimately take longer than the old 500ms allowance.
+ */
+async function waitForMarker(markerPath: string, child: ReturnType<typeof spawn>, timeoutMs = 10000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!fs.existsSync(markerPath)) {
+    if (child.exitCode !== null || child.signalCode !== null) {
+      throw new Error(`Child process ${child.pid} exited before writing marker ${markerPath}`);
+    }
+    if (Date.now() >= deadline) {
+      try { child.kill('SIGKILL'); } catch (_) {}
+      throw new Error(`Child process ${child.pid} did not write marker ${markerPath} within ${timeoutMs}ms`);
+    }
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+}
+
+/**
  * Spawn a child that loads coverage-gate with a shared manifest directory,
  * creates scratch dirs, and writes a marker file with its PID and dir paths.
  */
@@ -111,8 +130,7 @@ test('coverage-gate SIGKILL orphan recovery reclaims registered scratch roots', 
   // Spawn child with shared manifest directory
   const child = spawnCoverageChild(manifestDir, markerPath);
 
-  // Wait for child to write marker
-  await new Promise(resolve => setTimeout(resolve, 500));
+  await waitForMarker(markerPath, child);
 
   // Read the marker to find the child's scratch directories
   const markerData = JSON.parse(fs.readFileSync(markerPath, 'utf8'));
@@ -206,7 +224,7 @@ test('recovery does not remove roots belonging to a live concurrent run', async 
     env: { ...process.env, PARALLIX_COVERAGE_GATE_MANIFEST_DIR: manifestDir },
   });
 
-  await new Promise(resolve => setTimeout(resolve, 500));
+  await waitForMarker(liveMarker, liveChild);
   const liveData = JSON.parse(fs.readFileSync(liveMarker, 'utf8'));
   fs.unlinkSync(liveMarker);
   const liveDir = liveData.dir;
@@ -231,7 +249,7 @@ test('recovery does not remove roots belonging to a live concurrent run', async 
     env: { ...process.env, PARALLIX_COVERAGE_GATE_MANIFEST_DIR: manifestDir },
   });
 
-  await new Promise(resolve => setTimeout(resolve, 500));
+  await waitForMarker(deadMarker, deadChild);
   const deadData = JSON.parse(fs.readFileSync(deadMarker, 'utf8'));
   fs.unlinkSync(deadMarker);
   const deadDir = deadData.dir;
@@ -302,7 +320,7 @@ test('recovery does not remove unregistered directories with matching prefixes',
     env: { ...process.env, PARALLIX_COVERAGE_GATE_MANIFEST_DIR: manifestDir },
   });
 
-  await new Promise(resolve => setTimeout(resolve, 500));
+  await waitForMarker(childMarker, child);
   const childData = JSON.parse(fs.readFileSync(childMarker, 'utf8'));
   fs.unlinkSync(childMarker);
   const childDir = childData.dir;

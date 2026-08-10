@@ -44,6 +44,13 @@ function makeFakeLauncher(scriptedResults, recorder) {
   };
 }
 
+function fakeStartAgentOptions(scriptedResults = [{ status: 0, stdout: '', stderr: '' }]) {
+  return {
+    launchAgentFn: makeFakeLauncher(scriptedResults, { calls: [] }),
+    assertAgentSupportedFn: () => {}
+  };
+}
+
 function installPathLaunchers(tmpRoot) {
   const binDir = path.join(tmpRoot, 'bin');
   fs.mkdirSync(binDir, { recursive: true });
@@ -173,7 +180,8 @@ test('startAgent persists a block via updateAgentBlock when limit-hit detector f
         updateAgentBlockFn,
         selectAgentFn,
         isAgentBlockedFn: () => false,
-        log: () => {}
+        log: () => {},
+        ...fakeStartAgentOptions()
       });
       assert.equal(result.agent, 'codex');
       assert.equal(blocks.length, 1);
@@ -220,7 +228,8 @@ test('startAgent does not loop forever when WORKFLOW_AGENT is pinned and that ag
         detectLimitHitFn,
         updateAgentBlockFn,
         selectAgentFn,
-        log: () => {}
+        log: () => {},
+        ...fakeStartAgentOptions()
       });
       assert.equal(result.agent, 'codex');
       assert.deepEqual(blocks, [{ agent: 'claude', until: '2026-05-01 18' }]);
@@ -262,7 +271,8 @@ test('startAgent throws when every eligible agent hits the limit', async () => {
           detectLimitHitFn,
           updateAgentBlockFn,
           selectAgentFn,
-          log: () => {}
+          log: () => {},
+          ...fakeStartAgentOptions()
         }),
         /exhausted/i
       );
@@ -519,7 +529,8 @@ test('startAgent forwards launcher exit metadata to the limit-hit detector', asy
         detectLimitHitFn,
         updateAgentBlockFn,
         selectAgentFn: () => 'claude',
-        log: () => {}
+        log: () => {},
+        ...fakeStartAgentOptions()
       });
 
       assert.equal(seenDetectArgs.length, 1, 'detector must be called exactly once');
@@ -579,7 +590,8 @@ test('startAgent reroutes an explicit agent override that is already in the bloc
         detectLimitHitFn,
         updateAgentBlockFn,
         selectAgentFn,
-        log: () => {}
+        log: () => {},
+        ...fakeStartAgentOptions()
       });
 
       assert.equal(result.agent, 'codex', 'blocked override must reroute through selectAgent');
@@ -631,7 +643,8 @@ test('startAgent honours opts.exclude as a seed for the tried set (family-separa
         detectLimitHitFn,
         updateAgentBlockFn,
         selectAgentFn,
-        log: () => {}
+        log: () => {},
+        ...fakeStartAgentOptions()
       });
 
       // Fallback must be vibe (NOT claude — claude is the implementer).

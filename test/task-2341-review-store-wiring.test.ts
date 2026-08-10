@@ -39,6 +39,7 @@ const reviewMission: Mission = {
     intervention: null,
     stageLaunches: [],
     gateFailureRetryCount: 0,
+    hookFailureRetryCount: 0,
     reviewEvents: [],
   },
 };

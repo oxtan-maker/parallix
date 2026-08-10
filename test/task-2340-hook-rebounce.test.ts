@@ -4,6 +4,7 @@ import { classifyHookFailure, handleHookFailureAutoBounce } from '../src/adapter
 import rebase from '../src/adapters/cli/commands/rebase.js';
 import { classifyHookFailure as classifyHookFailureIntegrate, handleHookFailureAutoBounce as handleHookFailureAutoBounceIntegrate } from '../src/adapters/cli/commands/integrate.js';
 import { handleGateFailureAutoBounce } from '../src/adapters/review/review-loop.js';
+import { ReviewState } from '../src/adapters/review/review-state.js';
 
 describe('classifyHookFailure (rebase.ts) — SC1/SC7', () => {
   it('detects pre-commit hook failure', () => {
@@ -428,7 +429,7 @@ describe('Handler mirrors reference pattern — F4', () => {
 });
 
 describe('Rebase retry budget — regression coverage', () => {
-  const rebaseOptions = (gitFn: Function, handleHookFailureAutoBounceFn: Function, exitFn: Function) => ({
+  const rebaseOptions = (gitFn: Function, handleHookFailureAutoBounceFn: Function, exitFn: (_code: number) => void) => ({
     inferSlugFn: () => 'task-2340',
     findMissionDirFn: () => '/worktree/missions/task-2340',
     findMissionAreaFn: () => 'docs',
@@ -490,12 +491,15 @@ describe('Pre-review lifecycle hook rebounce', () => {
       stdout: 'pre-commit hook failed: lint error',
       stderr: '',
     }, 'claude', {
-      readReviewStateFn: async () => ({ metadata: {} }),
-      writeReviewStateFn: async (_slug: string, state: any) => { persistedMetadata = state.metadata; },
-      transitionTaskFn: async () => {},
+      readReviewStateFn: async () => new ReviewState('task-2340', { metadata: {} }),
+      writeReviewStateFn: async (_slug: string, state: any) => {
+        persistedMetadata = state.metadata;
+        return { outcome: 'committed' as const };
+      },
+      transitionTaskFn: async () => true,
       startAgentFn: async (_step: string, options: any) => {
         prompt = options.prompt('claude');
-        return { agent: 'claude', result: { status: 0 } };
+        return { agent: 'claude', invocation: {}, result: { status: 0 } };
       },
       applyAgentFallbackFn: async ({ original }: any) => original,
       taskResolution: { ok: true, taskFile: '/worktree/backlog/tasks/task-2340.md' },
