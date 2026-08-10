@@ -3,7 +3,7 @@
 `test/e2e-real-agent-smoke.test.ts` is a **blocking** integration gate
 (`custom-agent-smoke` in `config/integration-pipelines.json`) that launches
 the real `opencode` binary against a pinned local model through the
-production launcher path in `lib/agents/opencode.ts`. It exists specifically
+production launcher path in `src/adapters/agents/opencode.ts`. It exists specifically
 to fail closed when Parallix breaks its own local-agent launch path while
 developing itself — see `missions/task-1359/MISSION.md` and `missions/task-2201/MISSION.md`
 for the original implementation and the retake that corrected the lifecycle coverage.
@@ -100,7 +100,7 @@ a genuine Parallix regression.
 ## Lifecycle depth covered
 
 The gate runs the full `draft -> active -> review` lifecycle with the real
-`custom` agent family, through the production launcher path in `lib/agents/opencode.ts`.
+`custom` agent family, through the production launcher path in `src/adapters/agents/opencode.ts`.
 
 While the original implementation stopped at `draft` (because `draft` and `active` both
 funnel through the same launcher code path), the corrected smoke test exercises
@@ -142,7 +142,7 @@ A failing run prefixes its assertion message with one of three buckets:
 - `[opencode-launcher-failure]` — the real `opencode` invocation rejected
   the launch itself (bad `-m` argument, auth failure, missing binary). This
   is the `TASK-1351` class of bug: a launcher-argument regression in
-  `lib/agents/opencode.ts` or `lib/agents/agents.ts`.
+  `src/adapters/agents/opencode.ts` or `src/adapters/agents/agents.ts`.
 - `[parallix-workflow-failure]` — `opencode` launched and produced output,
   but Parallix could not parse it into the required mission artifact
   contract (missing `## Goal` / `## Scope` / `## Success Criteria`
@@ -178,7 +178,7 @@ test (TASK-2201) adds explicit validation of:
   we test the actual code under test rather than a stale global/installed `px`.
 
 - **Parallix-owned state isolation (config route)**: `PARALLIX_HOME` is the
-  highest-precedence input to `resolveParallixHome` (`lib/core/storage.ts`),
+  highest-precedence input to `resolveParallixHome` (`src/adapters/storage/storage.ts`),
   which anchors both the measurement database `parallix.db` and the agent
   blocking file `agents.local.json`. The test points `PARALLIX_HOME` at a temp
   directory and validates that:
