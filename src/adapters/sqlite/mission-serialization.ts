@@ -72,6 +72,7 @@ export interface MissionReviewRecord {
   readonly intervention_requested_by: string | null;
   readonly intervention_reason: string | null;
   readonly gate_failure_retry_count: number;
+  readonly hook_failure_retry_count: number;
 }
 
 export interface MissionReviewRoundRecord {
@@ -455,6 +456,7 @@ function reviewFrom(records: MissionAggregateRecords): Review | null {
     intervention,
     stageLaunches: stageLaunchesFrom(records),
     gateFailureRetryCount: Math.max(0, Number(reviewRow.gate_failure_retry_count ?? 0) || 0),
+    hookFailureRetryCount: Math.max(0, Number(reviewRow.hook_failure_retry_count ?? 0) || 0),
     reviewEvents: reviewEventsFrom(records),
   };
 }

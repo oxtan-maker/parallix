@@ -24,6 +24,9 @@ function metadataFromReview(review: Review): Record<string, unknown> {
   if (review.gateFailureRetryCount > 0) {
     metadata.gateFailureRetryCount = review.gateFailureRetryCount;
   }
+  if (review.hookFailureRetryCount > 0) {
+    metadata.hookFailureRetryCount = review.hookFailureRetryCount;
+  }
   if (review.intervention) {
     metadata.humanEscalationReason = review.intervention.reason;
     metadata.humanEscalatedAt = review.intervention.requestedAt;
@@ -164,6 +167,9 @@ export function applyReviewStateToReview(review: Review, state: ReviewStateData)
   const gateFailureRetryCount = metadata.gateFailureRetryCount === undefined
     ? review.gateFailureRetryCount
     : nonNegativeCount(metadata.gateFailureRetryCount, review.gateFailureRetryCount);
+  const hookFailureRetryCount = metadata.hookFailureRetryCount === undefined
+    ? review.hookFailureRetryCount
+    : nonNegativeCount(metadata.hookFailureRetryCount, review.hookFailureRetryCount);
 
   const escalationReason = typeof metadata.humanEscalationReason === 'string'
     ? metadata.humanEscalationReason.trim() : '';
@@ -173,5 +179,5 @@ export function applyReviewStateToReview(review: Review, state: ReviewStateData)
     ? { requestedAt: escalationAt, requestedBy: 'workflow' as const, reason: escalationReason }
     : review.intervention;
 
-  return { ...review, rounds: rounds as unknown as Review['rounds'], intervention, stageLaunches, gateFailureRetryCount };
+  return { ...review, rounds: rounds as unknown as Review['rounds'], intervention, stageLaunches, gateFailureRetryCount, hookFailureRetryCount };
 }

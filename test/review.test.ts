@@ -1221,7 +1221,7 @@ test('rebaseBeforeReviewRound succeeds after a clean rebase', async () => {
     error: message => errors.push(message)
   });
 
-  assert.deepEqual(result, { ok: true, sharedFileConflicts: false });
+  assert.deepEqual(result, { ok: true, sharedFileConflicts: false, hookFailure: false });
   assert.ok(logs.some(message => message.includes('Rebasing mission/task-1087')));
   assert.ok(logs.some(message => message.includes('Pre-review rebase completed')));
   assert.deepEqual(errors, []);
@@ -1244,7 +1244,7 @@ test('rebaseBeforeReviewRound reports shared-file conflicts with recovery instru
     error: message => errors.push(message)
   });
 
-  assert.deepEqual(result, { ok: false, sharedFileConflicts: true });
+  assert.deepEqual(result, { ok: false, sharedFileConflicts: true, hookFailure: false });
   assert.ok(
     errors.some(message => message.includes(sharedFileOutput)),
     `Expected raw conflict output, got: ${errors.join(' | ')}`
@@ -1272,7 +1272,7 @@ test('rebaseBeforeReviewRound reports non-conflict rebase failures', async () =>
     error: message => errors.push(message)
   });
 
-  assert.deepEqual(result, { ok: false, sharedFileConflicts: false });
+  assert.deepEqual(result, { ok: false, sharedFileConflicts: false, hookFailure: false });
   assert.ok(errors.some(message => message.includes('stale info')));
   assert.ok(errors.some(message => message.includes('Rebase failed before launching reviewer')));
   assert.ok(

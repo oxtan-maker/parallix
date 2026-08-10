@@ -72,7 +72,7 @@ test('rebaseBeforeReviewRound auto-commits safe mission artifacts before rebase'
     error: message => assert.fail(`Should not have errored: ${message}`)
   });
 
-  assert.deepEqual(result, { ok: true, sharedFileConflicts: false });
+  assert.deepEqual(result, { ok: true, sharedFileConflicts: false, hookFailure: false });
   assert.ok(logs.some(m => m.includes('Auto-committing safe mission artifacts')), 'Should log auto-commit start');
   assert.ok(logs.some(m => m.includes('Mission artifacts committed')), 'Should log auto-commit success');
 
@@ -103,7 +103,7 @@ test('rebaseBeforeReviewRound invokes the TypeScript entrypoint through tsx in a
       error: message => assert.fail(`Should not have errored: ${message}`)
     });
 
-    assert.deepEqual(result, { ok: true, sharedFileConflicts: false });
+    assert.deepEqual(result, { ok: true, sharedFileConflicts: false, hookFailure: false });
     assert.match(calls[0].command, /node_modules\/\.bin\/tsx$/, 'Source checkouts must launch tsx');
     assert.deepEqual(calls[0].args, [
       path.join(root, 'src', 'entry', 'px.ts'), 'rebase', slug, '--push'
@@ -142,7 +142,7 @@ test('rebaseBeforeReviewRound parses rename, copy, and space paths from porcelai
     error: message => assert.fail(`Should not have errored: ${message}`)
   });
 
-  assert.deepEqual(result, { ok: true, sharedFileConflicts: false });
+  assert.deepEqual(result, { ok: true, sharedFileConflicts: false, hookFailure: false });
   assert.ok(gitCalls.some(args => args.includes('add') && args.includes(`docs/missions/2026/${slug}/Renamed File.md`)));
   assert.ok(gitCalls.some(args => args.includes('add') && args.includes(`backlog/tasks/${slug} - copied title.md`)));
   assert.ok(gitCalls.some(args => args.includes('add') && args.includes(`docs/missions/2026/${slug}/path with space.md`)));
@@ -173,7 +173,7 @@ test('rebaseBeforeReviewRound refuses rename or copy records with unsafe sources
     error: message => errors.push(message)
   });
 
-  assert.deepEqual(result, { ok: false, sharedFileConflicts: false });
+  assert.deepEqual(result, { ok: false, sharedFileConflicts: false, hookFailure: false });
   assert.ok(errors.some(m => m.includes('workflow/lib/review/review.js')), 'Should list the unsafe rename source');
 });
 
@@ -196,7 +196,7 @@ test('rebaseBeforeReviewRound refuses to auto-commit when unsafe files are prese
     error: message => errors.push(message)
   });
 
-  assert.deepEqual(result, { ok: false, sharedFileConflicts: false });
+  assert.deepEqual(result, { ok: false, sharedFileConflicts: false, hookFailure: false });
   assert.ok(errors.some(m => m.includes('Cannot auto-commit: dirty files include non-mission paths')), 'Should report unsafe files');
   assert.ok(errors.some(m => m.includes('workflow/lib/review/review.js')), 'Should list the unsafe file');
 });
@@ -227,7 +227,7 @@ test('rebaseBeforeReviewRound ignores workflow-generated runtime state when chec
     error: message => assert.fail(`Should not have errored: ${message}`)
   });
 
-  assert.deepEqual(result, { ok: true, sharedFileConflicts: false });
+  assert.deepEqual(result, { ok: true, sharedFileConflicts: false, hookFailure: false });
 });
 
 test('rebaseBeforeReviewRound refuses to auto-commit when unmerged conflicts exist', async () => {
@@ -249,7 +249,7 @@ test('rebaseBeforeReviewRound refuses to auto-commit when unmerged conflicts exi
     error: message => errors.push(message)
   });
 
-  assert.deepEqual(result, { ok: false, sharedFileConflicts: false });
+  assert.deepEqual(result, { ok: false, sharedFileConflicts: false, hookFailure: false });
   assert.ok(errors.some(m => m.includes('Cannot auto-commit: unmerged/conflicting files detected')), 'Should report unmerged conflicts');
 });
 
@@ -271,7 +271,7 @@ test('rebaseBeforeReviewRound reports shared-file rebase conflicts', async () =>
     error: message => errors.push(message)
   });
 
-  assert.deepEqual(result, { ok: false, sharedFileConflicts: true });
+  assert.deepEqual(result, { ok: false, sharedFileConflicts: true, hookFailure: false });
   assert.ok(errors.some(m => m.includes('Shared-file rebase conflicts detected')), 'Should report shared-file conflicts');
 });
 
@@ -289,7 +289,7 @@ test('rebaseBeforeReviewRound uses the tsx source runtime in a checkout', async 
     error: message => assert.fail(`Should not have errored: ${message}`)
   });
 
-  assert.deepEqual(result, { ok: true, sharedFileConflicts: false });
+  assert.deepEqual(result, { ok: true, sharedFileConflicts: false, hookFailure: false });
   assert.deepEqual(calls, [{
     command: path.join(process.cwd(), 'node_modules', '.bin', 'tsx'),
     args: [
@@ -312,7 +312,7 @@ test('rebaseBeforeReviewRound uses the compiled CLI outside a source checkout', 
     error: message => assert.fail(`Should not have errored: ${message}`)
   });
 
-  assert.deepEqual(result, { ok: true, sharedFileConflicts: false });
+  assert.deepEqual(result, { ok: true, sharedFileConflicts: false, hookFailure: false });
   assert.equal(calls.length, 1);
   assert.equal(calls[0].command, process.execPath);
   // The CLI path resolves from MODULE_DIR (this module's own directory),
@@ -342,7 +342,7 @@ test('rebaseBeforeReviewRound reports missing Forgejo token failure from rebase 
     error: message => errors.push(message)
   });
 
-  assert.deepEqual(result, { ok: false, sharedFileConflicts: false });
+  assert.deepEqual(result, { ok: false, sharedFileConflicts: false, hookFailure: false });
   assert.ok(errors.some(m => m.includes('No Forgejo token found for user "codex"')), 'Should surface missing token failure');
   assert.ok(errors.some(m => m.includes('Rebase failed before launching reviewer')), 'Should keep missing-token failure blocking');
 });
@@ -365,6 +365,6 @@ test('rebaseBeforeReviewRound reports generic rebase failure', async () => {
     error: message => errors.push(message)
   });
 
-  assert.deepEqual(result, { ok: false, sharedFileConflicts: false });
+  assert.deepEqual(result, { ok: false, sharedFileConflicts: false, hookFailure: false });
   assert.ok(errors.some(m => m.includes('Rebase failed before launching reviewer')), 'Should report generic failure');
 });

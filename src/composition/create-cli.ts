@@ -114,7 +114,7 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
     'mission-start': missionStart,
     'verify-env': missionStart,
     'mutation-gate': mutationGate,
-    rebase,
+    rebase: (args, options) => withMissionFactories(missionServicesFn => rebase(args, { ...options, missionServicesFn })),
     'resolve-conflict': resolveConflict,
     review: (args, options) => withMissionFactories(missionServicesFn =>
       withGraph(async services => {

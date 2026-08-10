@@ -389,23 +389,28 @@ export async function handleGateFailureAutoBounce(
   } = opts;
 
   const MAX_GATE_RETRY = 2;
+  const diagnosticOutput = [gateResult.stdout, gateResult.stderr, gateResult.error].filter(Boolean).join('\n');
+  const isHookFailure = /pre-commit|pre-push|post-commit|hook.*(failed|failure|error)/i.test(diagnosticOutput);
+  const retryMetadataKey = isHookFailure ? 'hookFailureRetryCount' : 'gateFailureRetryCount';
+  const failureLabel = isHookFailure ? 'GIT HOOK FAILURE' : 'PRE-REVIEW GATE FAILURE';
 
   // Read persisted state to get current retry count
   const persisted = await Promise.resolve(readReviewStateFn(slug, worktree));
   const retryCount = persisted && persisted.metadata && typeof persisted.metadata === 'object'
-    ? (Number((persisted.metadata as any).gateFailureRetryCount) || 0)
+    ? (Number((persisted.metadata as any)[retryMetadataKey]) || 0)
     : 0;
 
   if (retryCount >= MAX_GATE_RETRY) {
-    error(fmt.status('FAIL', `Pre-review gate failure: max retries exceeded (${MAX_GATE_RETRY}). Mission stranded for ${slug}.`));
-    error(fmt.status('FAIL', `Area "${gateResult.area}" verification failed ${retryCount} times. Human intervention required.`));
+    error(fmt.status('FAIL', `${failureLabel}: max retries exceeded (${MAX_GATE_RETRY}). Mission stranded for ${slug}.`));
+    error(fmt.status('FAIL', `${isHookFailure ? 'Git hook' : `Area "${gateResult.area}" verification`} failed ${retryCount} times. Human intervention required.`));
     error(fmt.status('FAIL', `Gate output:\n${gateResult.stdout || gateResult.stderr || '(no output)'}\n`));
     return { bounced: false, stranded: true };
   }
 
   // Classify the failure
-  const diagnosticOutput = [gateResult.stdout, gateResult.stderr].filter(Boolean).join('\n');
-  const diagnosticClassification = classifyGateFailure(diagnosticOutput);
+  const diagnosticClassification = isHookFailure
+    ? { classification: 'GitHookFailure', action: 'RelaunchImplementer', isRelaunchable: true }
+    : classifyGateFailure(diagnosticOutput);
   // A non-zero gate exit is authoritative evidence of a genuine verification
   // failure. Arbitrary test/linter diagnostics have no classifier keyword and
   // default to InfraBlocker, which used to strand a repairable mission. Keep
@@ -434,7 +439,7 @@ export async function handleGateFailureAutoBounce(
 
   // Build fix prompt with captured gate output
   const fixPrompt = [
-    `PRE-REVIEW GATE FAILURE — FIX REQUIRED`,
+    `${failureLabel} — FIX REQUIRED`,
     ``,
     `Mission: ${slug}`,
     `Area: ${gateResult.area}`,
@@ -453,8 +458,10 @@ export async function handleGateFailureAutoBounce(
     ``,
     `Before repair work, compact the aborted working context. Reload the locked mission goal and scope; committed checkpoint or gate evidence when present; this exact gate diagnostic and classification; retry attempt ${retryCount + 1}/${MAX_GATE_RETRY}; current review round and disposition; unresolved findings and implementer resolutions; and the current branch revision.`,
     ``,
-    `Fix the underlying issue so the verification gate passes for area "${gateResult.area}".`,
-    `After fixing, restart the review loop; it will re-run the gate before the next review round.`,
+    isHookFailure
+      ? `Fix the underlying issue so the Git hook passes when Parallix commits or rebases this mission.`
+      : `Fix the underlying issue so the verification gate passes for area "${gateResult.area}".`,
+    `After fixing, restart the review loop; it will re-run the rebase and gate before the next review round.`,
   ].join('\n');
 
   // Increment retry count in metadata
@@ -464,7 +471,7 @@ export async function handleGateFailureAutoBounce(
   const metadata = persisted && persisted.metadata && typeof persisted.metadata === 'object'
     ? { ...persisted.metadata }
     : {};
-  metadata.gateFailureRetryCount = retryCount + 1;
+  metadata[retryMetadataKey] = retryCount + 1;
 
   // Update review state with incremented retry count
   if (persisted) {
@@ -1188,7 +1195,41 @@ export async function startReviewLoop(slug: string, opts: {
             gitFn,
             isReviewProviderEnabledFn: forgejoEnabledFn
           });
-          if (!rebaseResult.ok) { exit(1); return; }
+          if (!rebaseResult.ok) {
+            // The pre-review helper creates a safety commit before it invokes
+            // `px rebase`. Its hook failure is otherwise outside the command
+            // rebounce path, so normalize it into the same bounded lifecycle
+            // bounce used for failures from the per-round verification gate.
+            if (rebaseResult.hookFailure) {
+              const hookResult: PreReviewGateResult = {
+                ok: false,
+                area: 'git-hook',
+                command: 'git commit (pre-review safety commit)',
+                exitCode: 1,
+                stdout: rebaseResult.hookOutput || '',
+                stderr: rebaseResult.hookOutput || '',
+                error: 'Git hook failed while committing pre-review mission artifacts',
+              };
+              const bounceResult = await handleGateFailureAutoBounceFn(slug, worktree, hookResult, implementer, {
+                startAgentFn,
+                writeReviewStateFn,
+                readReviewStateFn,
+                transitionTaskFn,
+                applyAgentFallbackFn,
+                taskResolution,
+                enforceTaskAssigneeFn,
+                log,
+                error,
+                sleepFn,
+                missionStore,
+              });
+              if (bounceResult.bounced) {
+                log(fmt.status('INFO', `Autonomous review stopped: pre-review Git hook failure auto-bounced to implementer.`));
+                return;
+              }
+            }
+            exit(1); return;
+          }
 
           // Re-capture after rebase: HEAD is now rebased onto primary's tip,
           // so the pre-rebase snapshot above is stale and must be replaced

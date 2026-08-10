@@ -1,7 +1,7 @@
 ---
 id: TASK-2340
 title: add rebounce on hooks
-status: ready-for-integration
+status: done
 assignee:
   - codex
 created_date: '2026-08-04 11:33'
