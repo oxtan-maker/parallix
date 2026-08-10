@@ -24,7 +24,7 @@ const ADAPTERS = path.join(import.meta.dirname, '..', 'src', 'adapters');
 // once, before any of them is linked.
 const productConfig = mockModule<typeof import('../src/adapters/config/product-config.js')>('../src/adapters/config/product-config.js', import.meta.url);
 const missionStartModule = mockModule<typeof import('../src/adapters/cli/mission-start.js')>('../src/adapters/cli/mission-start.js', import.meta.url);
-const handoffModule = mockModule<typeof import('../src/adapters/cli/commands/handoff.js')>('../src/adapters/cli/commands/handoff.js', import.meta.url);
+import { HandoffCommandUseCase } from '../src/application/handoff-command-use-case.js';
 const setupReviewModule = mockModule<typeof import('../src/adapters/review/setup-review.js')>('../src/adapters/review/setup-review.js', import.meta.url);
 const reviewCommandsModule = mockModule<typeof import('../src/adapters/review/review-commands.js')>('../src/adapters/review/review-commands.js', import.meta.url);
 const reviewArtifactsModule = mockModule<typeof import('../src/adapters/review/review-artifacts.js')>('../src/adapters/review/review-artifacts.js', import.meta.url);
@@ -127,8 +127,9 @@ test('mission-start accepts isForgejoReviewEnabledFn option and skips PR check w
 // =============================================================================
 
 test('performHandoff gates Forgejo PR creation behind isForgejoReviewEnabled', () => {
-  const handoff = handoffModule;
-  const src = handoff.performHandoff.toString();
+  // TASK-2332.09 re-homed the handoff workflow into HandoffCommandUseCase; the
+  // CLI adapter now only delegates, so the provider gate lives on the use case.
+  const src = HandoffCommandUseCase.prototype.performHandoff.toString();
   assert.ok(src.includes('isForgejoReviewEnabled'),
     'performHandoff should check isForgejoReviewEnabled to skip Forgejo PR creation');
 });

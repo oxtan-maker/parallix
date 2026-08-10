@@ -204,6 +204,10 @@ export async function createProductionApplicationServices(
         }),
         startReviewLoop: (reviewSlug: string, loopOptions: Record<string, unknown>) => startReviewLoop(reviewSlug, {
           ...loopOptions,
+          performHandoffFn: (handoffSlug: string, handoffOptions: Record<string, unknown>) => performHandoff(handoffSlug, {
+            ...handoffOptions,
+            missionServicesFn: async () => mission,
+          }),
           // Every Mission-authority injection the loop needs, including the
           // artifact consumers that persist review events: an omitted binding
           // leaves the adapter default, which resolves no store and reports the

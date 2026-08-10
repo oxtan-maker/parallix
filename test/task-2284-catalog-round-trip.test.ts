@@ -214,7 +214,7 @@ const KNOWN_CORRUPT: ReadonlyMap<string, string> = new Map([
 // conflicting task identity like the records above.
 const KNOWN_LEGACY_SERIALIZATION_EXCEPTIONS: ReadonlyMap<string, string> = new Map([
   [
-    'backlog/tasks/task-2347 - Make-mission-statistics-production-ready.md',
+    'backlog/completed/task-2347 - Make-mission-statistics-production-ready.md',
     'duplicate labels keys intentionally preserve locked mission metadata in inline and block forms',
   ],
 ]);

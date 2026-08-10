@@ -3,7 +3,7 @@ export type AgentSelectionOutcome = typeof AGENT_SELECTION_OUTCOMES[number];
 
 /** Emit one structured, machine-searchable selection outcome without owning storage. */
 export function recordAgentSelectionOutcome(
-  log: (message: string) => void,
+  log: (_message: string) => void,
   outcome: AgentSelectionOutcome,
   fields: Record<string, unknown> = {},
 ): void {
