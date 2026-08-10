@@ -123,12 +123,14 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
         return review(args, {
           ...options,
           missionServicesFn,
+          requireReviewAggregate: true,
           readReviewStateFn: persistence.readReviewState,
           writeReviewStateFn: persistence.writeReviewState,
           resetReviewStateFn: persistence.resetReviewState,
           createEventFn: persistence.createEvent,
           readAllEventsFn: persistence.readAllEvents,
           backfillReviewFn: persistence.backfillReview,
+          reconcileInterruptedHandoffFn: persistence.reconcileInterruptedHandoff,
           consumeReviewerArtifactsFn: persistence.consumeReviewerArtifacts,
           consumeImplementerArtifactsFn: persistence.consumeImplementerArtifacts,
           startReviewLoopFn: (slug: string, loopOptions: Record<string, unknown>) => startReviewLoop(slug, {
