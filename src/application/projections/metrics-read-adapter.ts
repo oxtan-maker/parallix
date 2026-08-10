@@ -75,6 +75,8 @@ export interface ConcreteMetricsReadAdapterOptions {
    * one.
    */
   readonly netEngineeringLines?: () => Promise<ReadonlyMap<MissionId, number | null>>;
+  /** Canonical Mission metadata for cohort labels and implementers. */
+  readonly cohortMetadata?: () => Promise<ReadonlyMap<MissionId, { readonly labels: readonly MissionLabel[]; readonly assignee: AgentFamily | null }>>;
 }
 
 /**
@@ -90,6 +92,7 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
   private readonly historyRepo: OperationalHistoryRepository | undefined;
   private readonly cohortDimension: CohortDimension;
   private readonly netEngineeringLines: () => Promise<ReadonlyMap<MissionId, number | null>>;
+  private readonly cohortMetadata: () => Promise<ReadonlyMap<MissionId, { readonly labels: readonly MissionLabel[]; readonly assignee: AgentFamily | null }>>;
 
   constructor(options: ConcreteMetricsReadAdapterOptions) {
     this.laneEventRepo = options.laneEventRepo;
@@ -99,6 +102,7 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
     this.historyRepo = options.historyRepo;
     this.cohortDimension = options.cohortDimension ?? 'label';
     this.netEngineeringLines = options.netEngineeringLines ?? (async () => new Map());
+    this.cohortMetadata = options.cohortMetadata ?? (async () => new Map());
   }
 
   async buildMetrics(
@@ -113,7 +117,7 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
     const transitionRows = this.entriesToTransitions(entries);
     const outcomeRows = this.usageRecordsToOutcomes(usageRecords, this.repositoryId, entries);
     const transitions = transitionRows.transitions;
-    const outcomes = outcomeRows.outcomes;
+    const outcomes = this.withCanonicalCohortMetadata(outcomeRows.outcomes, await this.cohortMetadata());
     const scopedUsageRecords = usageRecords.filter((record) => record.repo === this.repositoryId);
 
     // Derive instants from transition timestamps
@@ -182,7 +186,22 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
       this.laneEventRepo.findByRepositoryId(this.repositoryId),
       this.usageRepo.findAll(),
     ]);
-    return this.usageRecordsToOutcomes(usageRecords, this.repositoryId, entries).outcomes;
+    return this.withCanonicalCohortMetadata(
+      this.usageRecordsToOutcomes(usageRecords, this.repositoryId, entries).outcomes,
+      await this.cohortMetadata(),
+    );
+  }
+
+  private withCanonicalCohortMetadata(
+    outcomes: readonly MissionOutcome[],
+    metadata: ReadonlyMap<MissionId, { readonly labels: readonly MissionLabel[]; readonly assignee: AgentFamily | null }>,
+  ): readonly MissionOutcome[] {
+    return outcomes.map((outcome) => {
+      const canonical = metadata.get(outcome.missionId);
+      return canonical === undefined
+        ? outcome
+        : { ...outcome, labels: canonical.labels, implementer: canonical.assignee };
+    });
   }
 
   /**
@@ -256,21 +275,50 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
       }
     }
 
-    const outcomes = [...outcomeMap.values()]
-      .filter((outcome): outcome is Omit<typeof outcome, 'closedAt'> & { closedAt: string } => outcome.closedAt !== null)
-      .map((outcome) => {
+    const outcomes: MissionOutcome[] = [];
+    // Lifecycle is the delivery authority. A mission that reaches `done`
+    // counts even when no agent emitted telemetry; telemetry cannot complete a
+    // mission whose lifecycle exists but has not reached done.
+    const missionIds = new Set<MissionId>([
+      ...[...outcomeMap.values()].map((outcome) => outcome.missionId),
+      ...lifecycles.keys(),
+    ]);
+    for (const missionId of missionIds) {
+      const outcome = outcomeMap.get(statisticsMissionKey({ repo: repositoryId, mission: missionId }));
+      const lifecycle = lifecycles.get(missionId);
+      // Telemetry-only closure is an explicit legacy fallback only when no
+      // lifecycle is recorded for that mission at all.
+      const completedAt = lifecycle?.completedAt ?? (lifecycle === undefined ? outcome?.closedAt ?? null : null);
+      if (completedAt === null) { continue; }
+      if (!outcome) {
+        outcomes.push({
+          missionId,
+          repositoryId,
+          createdAt: lifecycle!.createdAt,
+          closedAt: completedAt,
+          cycleTimeMinutes: elapsedMinutes(lifecycle!.createdAt, completedAt),
+          reviewFixRounds: 0,
+          labels: [],
+          implementer: null,
+          modelsInvolved: [],
+          totalInputAndOutputTokens: null,
+          totalCostUsd: null,
+          totalToolCalls: null,
+          runs: [],
+        });
+        continue;
+      }
         // Lane events are the lifecycle authority, but only when they describe
         // a whole window. Taking the opening from lane events and the closure
         // from a usage date mixes clocks and can invert the span, so a mission
         // whose closure was never recorded as a lane event falls back to usage
         // dates for both ends.
-        const lifecycle = lifecycles.get(outcome.missionId);
-        const laneWindow = lifecycle !== undefined && lifecycle.closedAt !== null ? lifecycle : null;
+        const laneWindow = lifecycle !== undefined && lifecycle.completedAt !== null ? lifecycle : null;
         const createdAt = laneWindow?.createdAt ?? outcome.createdAt;
-        const closedAt = laneWindow?.closedAt ?? outcome.closedAt;
+        const closedAt = laneWindow?.completedAt ?? completedAt;
         const runs = outcome.runs as readonly AgentRunMeasurement[];
         const { labelValues: _labelValues, ...identity } = outcome;
-        return {
+        outcomes.push({
           ...identity,
           createdAt,
           closedAt,
@@ -282,8 +330,8 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
           totalCostUsd: sumMeasured(runs.map((run) => run.costUsd)),
           totalToolCalls: sumMeasured(runs.map((run) => run.toolCalls)),
           runs,
-        };
-      });
+        });
+    }
     return { outcomes, rejected };
   }
 
@@ -389,36 +437,38 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
 /** The wall-clock span a mission occupied, read from its lane events. */
 interface MissionLifecycle {
   readonly createdAt: string;
-  readonly closedAt: string | null;
+  readonly completedAt: string | null;
 }
 
 /**
  * Index each mission's lifecycle window: the earliest lane event it has, and
- * the event that moved it to `done`. Both are lane facts, so cycle time never
+ * the first event that moved it to `done`. Both are lane facts, so cycle time never
  * depends on how much telemetry an agent happened to emit.
  */
 function missionLifecycles(
   entries: readonly BoardLaneEventEntry[],
   repositoryId: RepositoryId,
 ): ReadonlyMap<MissionId, MissionLifecycle> {
-  const lifecycles = new Map<MissionId, { createdAt: string; closedAt: string | null }>();
+  const lifecycles = new Map<MissionId, { createdAt: string; completedAt: string | null }>();
   for (const entry of entries) {
     if (!entry.missionId || !entry.occurredAt || entry.repositoryId !== repositoryId) {
       continue;
     }
     const id = entry.missionId as MissionId;
     const existing = lifecycles.get(id);
-    const closedAt = entry.toStatus === 'done' ? entry.occurredAt : null;
+    const completedAt = entry.fromStatus !== 'done' && entry.toStatus === 'done'
+      ? entry.occurredAt
+      : null;
     if (!existing) {
-      lifecycles.set(id, { createdAt: entry.occurredAt, closedAt });
+      lifecycles.set(id, { createdAt: entry.occurredAt, completedAt });
       continue;
     }
     if (entry.occurredAt < existing.createdAt) {
       existing.createdAt = entry.occurredAt;
     }
-    // A mission can be reopened and closed again; the last closure wins.
-    if (closedAt !== null && (existing.closedAt === null || closedAt > existing.closedAt)) {
-      existing.closedAt = closedAt;
+    // Administrative close and a later reopen never move delivery completion.
+    if (completedAt !== null && existing.completedAt === null) {
+      existing.completedAt = completedAt;
     }
   }
   return lifecycles;

@@ -179,6 +179,25 @@ test('px stats cohorts groups by the requested dimension and honours --min-sampl
   assert.match(byImplementer.output, /All cohorts have at least 2 completed missions\./);
 });
 
+test('px stats cohorts uses canonical Mission labels and implementer instead of telemetry values', async () => {
+  const lines: string[] = [];
+  await statsCohorts(['--by', 'label', '--min-sample', '1'], {
+    log: (message: string) => { lines.push(message); return null; },
+    error: () => null,
+    exit: () => null,
+    laneEventRepo: new FakeLaneEventRepository(LANE_EVENTS),
+    usageRepo: new FakeUsageRepository(USAGE_RECORDS),
+    repositoryId: REPO,
+    cohortMetadata: async () => new Map(SEEDS.map((seed) => [
+      missionId(seed.slug),
+      { labels: missionLabels(['canonical_experiment']), assignee: agentFamily('custom') },
+    ])),
+  });
+  const report = lines.join('\n');
+  assert.match(report, /canonical_experiment/);
+  assert.doesNotMatch(report, /ai_sdlc|user_value/);
+});
+
 test('px stats cohorts rejects an unknown dimension instead of reporting a wrong one', async () => {
   const { output, exits } = await runCohortsCommand(['--by', 'phase-of-moon']);
   assert.deepEqual(exits, [1]);

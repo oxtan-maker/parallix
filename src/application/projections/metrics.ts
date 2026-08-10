@@ -396,12 +396,18 @@ function isoWeekStart(timestamp: string): string {
 }
 
 /** Completed outcomes grouped into ISO weeks; no outcomes means the series is skipped. */
-export function weeklyThroughputSeries(outcomes: readonly MissionOutcome[]): MetricSeries {
+export function weeklyThroughputSeries(outcomes: readonly MissionOutcome[], asOf?: string): MetricSeries {
   if (outcomes.length === 0) { return { series: [], missingHistoryFallback: 'skip' }; }
   const byWeek = new Map<string, number>();
   for (const outcome of outcomes) {
     const week = isoWeekStart(outcome.closedAt);
     byWeek.set(week, (byWeek.get(week) ?? 0) + 1);
+  }
+  // The injected projection clock makes the current operational week explicit
+  // when nothing has completed in it.
+  if (asOf !== undefined) {
+    const currentWeek = isoWeekStart(asOf);
+    if (!byWeek.has(currentWeek)) { byWeek.set(currentWeek, 0); }
   }
   return {
     series: [...byWeek.entries()]
@@ -496,9 +502,17 @@ export interface MetricsInput {
  * Each metric declares its missingHistoryFallback behavior.
  */
 export function buildMetrics(input: MetricsInput): ReturnType<typeof buildBoardMetrics> {
-  const stateFlow = cumulativeFlowByStateSeries(input.initialStates, input.transitions, input.instants);
+  // A mission with lifecycle history starts at its recorded entry event, not
+  // at today's board state. Current state is a legacy fallback only when the
+  // event stream is absent for that mission.
+  const historicalInitialStates = new Map(
+    [...input.initialStates].filter(([missionId]) => !input.transitions.some(
+      (transition) => transition.missionId === missionId && transition.from === null,
+    )),
+  );
+  const stateFlow = cumulativeFlowByStateSeries(historicalInitialStates, input.transitions, input.instants);
   const cycleByState = medianCycleTimeByStateSeries(input.transitions);
-  const weeklyThroughput = weeklyThroughputSeries(input.outcomes);
+  const weeklyThroughput = weeklyThroughputSeries(input.outcomes, input.asOf);
   const medianAgeByLane = medianAgeByLaneSeries(
     input.transitions,
     input.asOf ?? input.instants.at(-1) ?? new Date(0).toISOString(),
@@ -508,7 +522,7 @@ export function buildMetrics(input: MetricsInput): ReturnType<typeof buildBoardM
   const reviewLoopRate = reviewLoopRateSeries(input.outcomes, input.instants);
   return {
     ...buildBoardMetrics({
-      cumulativeFlow: cumulativeFlowSeries(input.initialStates, input.transitions, input.instants),
+      cumulativeFlow: cumulativeFlowSeries(historicalInitialStates, input.transitions, input.instants),
       cumulativeFlowByState: stateFlow,
       medianStateTimes: medianStateTimes(input.outcomes, input.instants),
       medianCycleTimeByState: cycleByState,

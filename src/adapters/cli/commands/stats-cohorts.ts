@@ -7,7 +7,10 @@ import {
   type CohortDimension,
 } from '../../../application/projections/cohorts.js';
 import { ConcreteMetricsReadAdapter } from '../../../application/projections/metrics-read-adapter.js';
+import { ConcreteMissionReadAdapter } from '../../backlog/concrete-mission-read-adapter.js';
 import type { MissionId } from '../../../domain/mission.js';
+import type { MissionLabel } from '../../../domain/mission.js';
+import type { AgentFamily } from '../../../domain/agents.js';
 import type { MissionStatus } from '../../../domain/mission.js';
 import type { MissionTransition } from '../../../domain/mission-workflow.js';
 import { repositoryId as toRepositoryId, type RepositoryId } from '../../../domain/repository.js';
@@ -35,6 +38,8 @@ export interface StatsCohortsOptions {
   readonly repositoryId?: RepositoryId;
   /** Net engineering lines per mission, when the caller can supply them. */
   readonly netEngineeringLines?: ReadonlyMap<MissionId, number | null>;
+  /** Canonical Mission metadata; injected by fast isolated tests. */
+  readonly cohortMetadata?: () => Promise<ReadonlyMap<MissionId, { readonly labels: readonly MissionLabel[]; readonly assignee: AgentFamily | null }>>;
 }
 
 export function printCohortsUsage(log: (_message: string) => unknown = fmt.log.plain): void {
@@ -149,11 +154,13 @@ export async function buildCohortComparison(options: {
   readonly dimension: CohortDimension;
   readonly lowSampleThreshold: number;
   readonly netEngineeringLines?: ReadonlyMap<MissionId, number | null>;
+  readonly cohortMetadata?: () => Promise<ReadonlyMap<MissionId, { readonly labels: readonly MissionLabel[]; readonly assignee: AgentFamily | null }>>;
 }): Promise<CohortComparison> {
   const adapter = new ConcreteMetricsReadAdapter({
     laneEventRepo: options.laneEventRepo,
     usageRepo: options.usageRepo,
     repositoryId: options.repositoryId,
+    cohortMetadata: options.cohortMetadata,
   });
   const [outcomes, entries] = await Promise.all([
     adapter.readOutcomes(),
@@ -196,13 +203,20 @@ export async function statsCohorts(
     const repositories = options.laneEventRepo && options.usageRepo
       ? { laneEventRepo: options.laneEventRepo, usageRepo: options.usageRepo }
       : await resolveRepositories();
+    const repositoryId = options.repositoryId ?? toRepositoryId(parsed.repositoryId ?? rootDir);
+    const cohortMetadata = options.cohortMetadata ?? (() => {
+      const missions = new ConcreteMissionReadAdapter({ rootDir, repositoryId });
+      return missions.loadAllMissions().then((loaded) => new Map(
+        loaded.map((mission) => [mission.id, { labels: mission.labels, assignee: mission.assignee }]),
+      ));
+    });
     const comparison = await buildCohortComparison({
       ...repositories,
-      repositoryId: options.repositoryId
-        ?? toRepositoryId(parsed.repositoryId ?? rootDir),
+      repositoryId,
       dimension: parsed.dimension,
       lowSampleThreshold: parsed.lowSampleThreshold,
       netEngineeringLines: options.netEngineeringLines,
+      cohortMetadata,
     });
     log(renderCohortComparison(comparison));
   } catch (failure) {

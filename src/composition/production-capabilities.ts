@@ -2,7 +2,7 @@ import type { ExecuteMissionPorts } from '../application/ports/execute-mission.j
 import type { TuiCapabilities } from '../application/tui-capabilities.js';
 import type { BoardProjectionBuilder } from '../application/projections/board-readers.js';
 import type { MissionProjectionQuery } from '../application/projections/mission-query.js';
-import { repositoryId } from '../domain/repository.js';
+import type { RepositoryId } from '../domain/repository.js';
 import { resolveKnownAgentFamilies } from '../interfaces/tui/agent-config-resolver.js';
 import type {
   AgentBlocklistRepository,
@@ -36,6 +36,7 @@ export interface ProductionCapabilities {
  */
 export function composeProductionCapabilities(
   rootDir: string,
+  owningRepositoryId: RepositoryId,
   repositories: ProductionBoardRepositories,
   executePorts: ExecuteMissionPorts,
   missionStore: MissionStore | null,
@@ -43,7 +44,7 @@ export function composeProductionCapabilities(
   const tui = composeTuiCapabilities({
     rootDir,
     missionStore,
-    repositoryId: repositoryId(rootDir),
+    repositoryId: owningRepositoryId,
     blocklistRepo: repositories.agentBlocklist,
     historyRepo: repositories.operationalHistory,
     laneEventRepo: repositories.boardLaneEvents,

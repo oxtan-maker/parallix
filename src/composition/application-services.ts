@@ -220,6 +220,7 @@ export async function createProductionApplicationServices(
   const presentationCapabilities = operatorState.repositories
     ? (await import('./production-capabilities.js')).composeProductionCapabilities(
       rootDir,
+      mission?.repositoryId ?? repositoryId(path.basename(resolvePrimaryRoot(rootDir)) || resolvePrimaryRoot(rootDir)),
       { ...operatorState.repositories, sessionMarkers },
       executePorts,
       mission?.store ?? null,
