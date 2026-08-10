@@ -32,7 +32,6 @@ const VALID_PACKAGE_FILES = [
   'package.json',
   'README.md',
   'LICENSE',
-  'CHANGELOG.md',
   'NOTICES',
 ];
 
@@ -47,7 +46,7 @@ test('package-content audit enforces ADR 0044 section 8 inclusion and exclusion 
 test('package-content audit rejects the pre-TASK-2285 CommonJS dist package shape', () => {
   const violations = violationsFor([
     'dist/index.js', 'dist/index.js.map', 'dist/px.js', 'dist/px.js.map',
-    'package.json', 'README.md', 'LICENSE', 'CHANGELOG.md',
+    'package.json', 'README.md', 'LICENSE',
     'config/agents.json', 'prompts/draft.md', 'templates/mission-scaffold.md',
     'tools/setup-forgejo-docker.sh',
   ]).join('\n');

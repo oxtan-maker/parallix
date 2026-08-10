@@ -371,7 +371,7 @@ verification runs `npm run test:package-content` to audit the package list and
 bytes. There is no sibling-JavaScript compatibility build or mtime freshness
 guard.
 
-`CHANGELOG.md` is the versioning authority. Until the first public release,
+The `version` field in `package.json` is the versioning authority. Until the first public release,
 PATCH bumps are the release discipline: bump before each `px integrate`, then
 reinstall from the new tarball after the integrate succeeds. That policy is not
 built into the `px integrate` CLI itself — it is opt-in per repo via the generic

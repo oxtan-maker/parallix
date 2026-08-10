@@ -1,7 +1,7 @@
 // Package-content audit for the canonical ESM bundle (ADR 0044 §8, TASK-2285).
 //
 // The published tarball is the bundle payload plus release metadata: build/,
-// package.json, LICENSE, README.md, CHANGELOG.md, NOTICES. It carries no
+// package.json, LICENSE, README.md, NOTICES. It carries no
 // unbundled source tree, no CommonJS dist/ output, no tests, and no operator
 // state. TASK-2288 retired the transitional CommonJS dist/ tree entirely; the
 // `dist/` prefix stays in the forbidden list so a reintroduced tree can never
@@ -22,7 +22,6 @@ const REQUIRED_PATHS = [
   'package.json',
   'README.md',
   'LICENSE',
-  'CHANGELOG.md',
   'NOTICES',
 ];
 // Runtime assets are staged under the bundle's own package root so they resolve
@@ -62,7 +61,7 @@ function violationsFor(files: string[]): string[] {
   }
   // Every published payload file lives under build/ except the four root
   // metadata files; anything else means the `files` allowlist has drifted.
-  const rootAllowed = new Set(['package.json', 'README.md', 'LICENSE', 'CHANGELOG.md', 'NOTICES']);
+  const rootAllowed = new Set(['package.json', 'README.md', 'LICENSE', 'NOTICES']);
   for (const file of files) {
     if (!file.startsWith('build/') && !rootAllowed.has(file)) {
       violations.push(`unexpected package file outside build/: ${file}`);

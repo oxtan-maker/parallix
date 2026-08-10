@@ -5,8 +5,7 @@ Related: ADR 0044 (runtime, persistence, UI, and distribution architecture),
 ADR 0046 (npm publish process and security), TASK-2285, TASK-2286 (native SEA)
 
 The npm package now executes the canonical ESM bundle. The published tarball is
-`build/` plus `package.json`, `LICENSE`, `README.md`, `CHANGELOG.md` and `NOTICES`
-— 18 files. It contains no source tree, no tests, no alternate runtime output,
+`build/` plus `package.json`, `LICENSE`, `README.md` and `NOTICES`. It contains no source tree, no tests, no alternate runtime output,
 and no dependency closure.
 
 Verify the shape at any time with `npm run test:package-content`.
@@ -21,7 +20,7 @@ Verify the shape at any time with `npm run test:package-content`.
 | `exports` | `{".": "./dist/index.js", …}` | removed |
 | `engines.node` | `>=23.0.0` | `>=22.23.1` |
 | `dependencies` | ink, react, @types/react, pi SDK | removed |
-| Published files | `dist/` + `config/`, `data/`, `docs/`, `examples/`, `prompts/`, `templates/`, `tools/` | `build/` + LICENSE, README, CHANGELOG, NOTICES |
+| Published files | `dist/` + `config/`, `data/`, `docs/`, `examples/`, `prompts/`, `templates/`, `tools/` | `build/` + LICENSE, README, NOTICES |
 | Runtime `node_modules` | required | none |
 
 ## Node floor: 23.0.0 → 22.23.1

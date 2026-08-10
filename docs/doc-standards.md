@@ -73,7 +73,7 @@ Subdirectory READMEs follow a simplified variant: H1 with capability statement, 
 ## 9. Link Hygiene
 
 - All relative links in README.md must resolve to existing files.
-- Before editing any README, verify: `docs/use-cases.md`, `docs/authority-reference.md`, `docs/forgejo-setup.md`, `docs/operator-setup.md`, `docs/readme-rewrite-benchmark.md`, `AGENTS.md`, `CHANGELOG.md`, `LICENSE`, `docs/adr/`.
+- Before editing any README, verify: `docs/use-cases.md`, `docs/authority-reference.md`, `docs/forgejo-setup.md`, `docs/operator-setup.md`, `docs/readme-rewrite-benchmark.md`, `AGENTS.md`, `LICENSE`, `docs/adr/`.
 - Broken links are defects, not acceptable trade-offs.
 
 ## 10. Subdirectory READMEs
