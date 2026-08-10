@@ -3,7 +3,7 @@
 id: TASK-2347
 title: Make mission statistics trustworthy end-to-end for experiment decisions
 status: backlog
-assignee: []
+assignee: [codex]
 created_date: 2026-08-08 00:00
 labels:
 
