@@ -90,6 +90,8 @@ import { git } from '../../git/git.js';
 import * as forgejo from '../../forgejo/forgejo.js';
 import * as statsReport from './stats-report.js';
 import { resolveMeasurementStore } from '../../sqlite/measurement-store.js';
+import { StatsCommandUseCase } from '../../../application/stats-command-use-case.js';
+import type { StatsWorkflowPort } from '../../../application/ports/cli-workflows.js';
 import {
   statisticsMissionKey,
   statisticsRowInWindow,
@@ -233,6 +235,17 @@ function loadMeasurementRows(options: StatsOptions = {}) {
   return {
     headers: [...STATS_HEADERS],
     rows: store.listMeasurements().map(measurementToStatsRow),
+  };
+}
+
+/** Infrastructure implementation supplied to the application workflow. */
+export function createStatsWorkflowAdapter(): StatsWorkflowPort<StatsRow> {
+  return {
+    loadMeasurements: (options) => loadMeasurementRows(options as StatsOptions).rows,
+    resolveClassification: (slug, options) => resolveMissionClassification(slug, String(options.rootDir || process.cwd())),
+    deriveImplementerAndFixRounds: (slug, options) => deriveImplementerAndFixRounds(slug, String(options.rootDir || process.cwd())),
+    resolveRepositoryName: (options) => resolveStatsRepoName(String(options.rootDir || process.cwd())),
+    lookupForgejo: (slug, options) => forgejo.getPrStatus(slug, String(options.rootDir || process.cwd())),
   };
 }
 
@@ -2161,7 +2174,8 @@ Notes:
  * @param {string[]} args
  * @param {StatsCmdOptions} options
  */
-function stats(args: string[], options: {log?: Function, error?: Function, exit?: Function, rootDir?: string, store?: unknown, dbPath?: string, laneEventRepo?: unknown, usageRepo?: unknown, repositoryId?: string} = {}) {
+export function createStatsCommand(useCase: StatsCommandUseCase<StatsRow>) {
+  return function stats(args: string[], options: {log?: Function, error?: Function, exit?: Function, rootDir?: string, store?: unknown, dbPath?: string, laneEventRepo?: unknown, usageRepo?: unknown, repositoryId?: string} = {}) {
   /** @type {StatsCmdOptions} */
   const opts = options;
   const log = opts.log || fmt.log.plain;
@@ -2269,7 +2283,11 @@ function stats(args: string[], options: {log?: Function, error?: Function, exit?
     try {
       rows = explicitCsv
         ? readLegacyStatsCsv(inputFile, { rootDir }).rows
-        : loadMeasurementRows({ rootDir, store: opts.store, dbPath: opts.dbPath }).rows;
+        : useCase.execute({
+          mode: 'mission',
+          mission,
+          options: { rootDir, store: opts.store, dbPath: opts.dbPath },
+        }).rows;
     } catch (err: any) {
       error(fmt.status('FAIL', err.message));
       exit(1);
@@ -2290,7 +2308,14 @@ function stats(args: string[], options: {log?: Function, error?: Function, exit?
     // Default path: the measurement database is the authority. A failure here
     // is reported, never silently downgraded to a CSV read.
     try {
-      const rows = loadMeasurementRows({ rootDir, store: opts.store, dbPath: opts.dbPath }).rows;
+      const result = useCase.execute({
+        mode: from !== null || to !== null ? 'range' : 'weekly',
+        from: from || undefined,
+        to: to || undefined,
+        today,
+        options: { rootDir, store: opts.store, dbPath: opts.dbPath },
+      });
+      const rows = result.rows;
       log(fmt.status('INFO', `Loaded ${rows.length} measurements from the statistics database`));
       report = from !== null || to !== null
         ? renderRangeStatsReport(rows, { from: from || undefined, to: to || undefined, rootDir })
@@ -2341,7 +2366,10 @@ function stats(args: string[], options: {log?: Function, error?: Function, exit?
   } else {
     log(report);
   }
+  };
 }
+
+const stats = createStatsCommand(new StatsCommandUseCase(createStatsWorkflowAdapter()));
 
 export default stats;
 export { stats, statsCohorts, STATS_HEADERS, resolveStatsRepoName, recordIntegrationStats, renderWeeklyStatsReport, renderMissionPhaseReport, renderRangeStatsReport, buildWeeklyWindows, resolveMissionClassification, deriveImplementerAndFixRounds, upsertMeasurementRow, loadMeasurementRows, readLegacyStatsCsv, analyzeLegacyStatsCsv, applyLegacyStatsCsv, runLegacyCsvImportCommand, measurementToStatsRow, statsRowToMeasurement, normalizeStatsRow, canonicalizeStatsRow, recordStageStats, accumulateStageStats, recordActiveStats, recordReviewStats, telemetryToStatsFields, formatDateOnly, LEGACY_HEADERS, USAGE_NUMBERS, formatStatsTable, computeAgentMissionGroups, createRangeWindow, summarizeMissionWindow, summarizeAgentWindow, summarizeAgentStageSpend, formatAgentSpendCell, colorAverageFixRounds, colorMissionCounts, AGENT_SPEND_STAGE_COLUMNS, MISSION_PHASE_ORDER, statsRowActorKey };
