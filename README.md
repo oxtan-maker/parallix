@@ -174,7 +174,6 @@ The full evidence-backed inventory is in [`docs/use-cases.md`](docs/use-cases.md
 
 - **Distribution:** Published to the public npm registry as `@magnusekdahl/parallix`. Local tarball install (`npm pack`) is also supported. No Homebrew, no Docker image, no standalone binary, and no CI/release automation today.
 - **Review surface:** Forgejo is supported as the hosted PR viewer/publication surface, but the workflow remains local-first and can run without Forgejo when that provider is disabled.
-- **Versioning:** `CHANGELOG.md` is the versioning authority; PATCH bumps are the release discipline.
 - **Telemetry:** structured token/usage telemetry exists for the codex and claude families; the local-custom and mistral paths record honest zeros by design rather than fabricated numbers.
 - **Graphify:** the knowledge-graph path is supported for codex, claude, and custom/opencode after one-time operator setup. It is optional, not a workflow prerequisite. The credible claim today is better-scoped context retrieval, not a proven token-savings benchmark.
 - **Review coverage** is best-effort, not guaranteed — see UC-4's caveats in [`docs/use-cases.md`](docs/use-cases.md).

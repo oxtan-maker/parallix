@@ -20,7 +20,7 @@ Mission branches must never be pushed to the `origin` (GitHub) remote. Only the 
 
 ## Integration Gates
 
-Static-analysis (`./scripts/verify-local.sh static-analysis`: ESLint + tsc --checkJs + test-hygiene) is a required integration gate for any mission that modifies files under `lib/`. The gate configuration lives in `config/integration-pipelines.json` and is enforced by `px integrate` before the squash-merge step. Missions touching `lib/` cannot merge while the static-analysis gate fails. Use `--no-integration-gates` to opt out in emergencies.
+Static-analysis (`./scripts/verify-local.sh static-analysis`: ESLint + tsc --checkJs + test-hygiene) is a required integration gate for any mission that modifies code files.
 
 This repo routes verification through `./scripts/verify-local.sh {{area}}`. Earlier phases use the fast general verifier (`all`), while `integrate` resolves the stricter pre-merge gate plan from `config/integration-pipelines.json`. The standalone workflow E2E suite is part of that integration-only layer via the `workflow` gate.
 
