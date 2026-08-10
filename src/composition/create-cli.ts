@@ -22,6 +22,7 @@ import { createIntegrateCommand } from '../interfaces/cli/integrate.js';
 import missionStart from '../adapters/cli/mission-start.js';
 import mutationGate from '../adapters/verification/mutation-gate.js';
 import rebase from '../adapters/cli/commands/rebase.js';
+import { createRebaseCommand } from '../interfaces/cli/rebase.js';
 import resolveConflict from '../adapters/cli/commands/resolve-conflict.js';
 import review from '../adapters/cli/commands/review.js';
 import setup from '../adapters/cli/commands/setup.js';
@@ -128,7 +129,7 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
     'mission-start': missionStart,
     'verify-env': missionStart,
     'mutation-gate': mutationGate,
-    rebase: (args, options) => withMissionFactories(missionServicesFn => rebase(args, { ...options, missionServicesFn })),
+    rebase: createRebaseCommand((args, options) => withMissionFactories(missionServicesFn => rebase(args, { ...options, missionServicesFn }))),
     'resolve-conflict': resolveConflict,
     review: (args, options) => withMissionFactories(missionServicesFn =>
       withGraph(async services => {

@@ -1,0 +1,110 @@
+/** Application-owned ports for the rebase workflow (TASK-2332.12).
+ *
+ * Every external dependency the rebase policy needs — Git, agents, Forgejo,
+ * Backlog, review state, product configuration, mission filesystem layout and
+ * verification formatting — is declared here as a port method. Concrete
+ * implementations are supplied by `src/adapters/rebase/rebase-workflow-adapter.ts`
+ * and, through it, by the composition root. The application layer never imports
+ * an adapter module directly.
+ */
+
+export interface GitCommandResult {
+  status: number;
+  stdout: string;
+  stderr: string;
+}
+
+export type GitRunner = (_args: string[], _options?: Record<string, unknown>) => GitCommandResult;
+
+export interface RebaseStateSnapshot {
+  inProgress: boolean;
+  rebaseHead?: string | null;
+  unmergedFiles: string[];
+}
+
+export interface MissionConflictClassification {
+  ok: boolean;
+  error?: string;
+  conflictFiles: string[];
+  missionSpecificFiles: string[];
+  sharedFiles: string[];
+}
+
+export interface AgentLaunchResult {
+  agent: string;
+  result: { status: number };
+}
+
+/** Complete external surface of the rebase workflow. */
+export interface RebaseWorkflowPort {
+  // --- git adapter -------------------------------------------------------
+  git: GitRunner;
+  detectRebaseState(_root: string): RebaseStateSnapshot;
+  getCurrentBranch(_root: string): string;
+
+  // --- mission filesystem adapter ---------------------------------------
+  /** Working directory the command was launched from. */
+  cwd(): string;
+  inferSlug(_explicitSlug?: string): string | null;
+  findMissionDir(_slug: string, _root: string): string | null;
+  findMissionArea(_missionDir: string): string;
+  resolveWorktree(_slug: string, _options: { cwd: string }): string | null;
+  conventionalWorktreePath(_slug: string, _root: string): string;
+  missionBranchName(_slug: string, _root: string): string;
+  resolveMissionBaseBranch(_slug: string, _root: string, _options: { gitFn: GitRunner }): string;
+  /**
+   * Repository-relative prefix that marks a conflicted path as mission-owned.
+   * Kept as its own port method because the pre-extraction command resolved it
+   * from the real mission layout even when the `findMissionDir` seam was
+   * overridden; routing it separately preserves that behavior exactly.
+   */
+  missionConflictPathPrefix(_slug: string, _worktreePath: string): string;
+  /** Base branch shown in the conflict-resolution prompt (never throws). */
+  resolvePromptBaseBranch(_slug: string, _worktreePath: string, _gitFn?: GitRunner): string;
+
+  // --- agents adapter ----------------------------------------------------
+  startAgent(_step: string, _options: Record<string, unknown>): Promise<AgentLaunchResult>;
+  selectAgent(_options: { role: string }): string | null;
+  workflowLauncherStatus(): { available: boolean; agent: string | null };
+  applyAgentFallback(_options: Record<string, unknown>): Promise<unknown>;
+
+  // --- forgejo adapter ---------------------------------------------------
+  createPr(_branch: string, _user: string, _token: string, _options: Record<string, unknown>): { ok: boolean; error?: string };
+  readToken(_user: string): string | null;
+  resolveForgejoUser(_user: string | null): string | null;
+  fetchReviewBranch(..._args: unknown[]): unknown;
+
+  // --- backlog adapter ---------------------------------------------------
+  resolveTaskFile(_slug: string, _root: string): { ok: boolean; taskFile?: string; task?: unknown };
+  getTaskImplementer(_task: unknown): string | null;
+  transitionTask(_slug: string, _status: string, _options: Record<string, unknown>): Promise<unknown> | unknown;
+
+  // --- review adapter ----------------------------------------------------
+  resolveReviewIdentity(_slug: string, _root: string): { forgejoUser?: string | null };
+  readReviewState(_slug: string, _worktree: string, _missionStore?: unknown): unknown;
+  writeReviewState(_slug: string, _state: unknown, _worktree: string, _missionStore?: unknown): unknown;
+  /** Persist-or-throw wrapper around `writeReviewState`. */
+  persistReviewState(_slug: string, _state: unknown, _worktree: string, _missionStore?: unknown): Promise<unknown>;
+
+  // --- product configuration adapter ------------------------------------
+  isForgejoReviewEnabled(_root: string): boolean;
+
+  // --- verification adapter ---------------------------------------------
+  formatVerificationCommand(_area: string, _root: string): string;
+
+  // --- integrate application contract (TASK-2332.07) --------------------
+  resolveConflictsForMission(_slug: string, _area: string, _options: { worktreePathOverride?: string }): MissionConflictClassification;
+
+  // --- runtime seams -----------------------------------------------------
+  /** Mission persistence services for the selected root; absent for callers that did not compose them. */
+  missionServices?: ((_root: string) => Promise<{ store: unknown }>) | null;
+  /** Hook-failure rebounce policy; overridable so tests can drive the retry budget. */
+  handleHookFailureAutoBounce?: (
+    _slug: string,
+    _worktree: string,
+    _hookOutput: string,
+    _classification: { hookType: string | null },
+    _options: { missionStore?: unknown },
+  ) => Promise<boolean>;
+  exit(_code: number): void;
+}

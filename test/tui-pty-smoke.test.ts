@@ -8,8 +8,29 @@ import { launchPtySmoke } from './helpers/pty-smoke-harness.js';
 
 const root = process.cwd();
 const TIMEOUT_MS = 12_000;
-const ANSI = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
+// The integration suite runs test files on concurrent workers, so booting the
+// real bundled CLI inside the PTY competes for CPU. Wait against the session
+// timeout budget rather than a short fixed delay, and fail fast if the child
+// dies instead of burning the whole budget.
+const RENDER_TIMEOUT_MS = TIMEOUT_MS;
+const INTERACTION_TIMEOUT_MS = 4_000;
+const ANSI =/\u001b\[[0-9;?]*[ -/]*[@-~]/g;
 function plain(output: string): string { return output.replace(ANSI, ''); }
+
+async function waitForOutput(
+  session: { readonly output: () => string; readonly isAlive: () => boolean },
+  pattern: RegExp,
+  milliseconds: number,
+  message: string,
+): Promise<void> {
+  const deadline = Date.now() + milliseconds;
+  while (!pattern.test(plain(session.output()))) {
+    if (!session.isAlive() || Date.now() >= deadline) { break; }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  const output = plain(session.output());
+  assert.match(output, pattern, `${message} (alive=${session.isAlive()}; output: ${JSON.stringify(output)})`);
+}
 
 test('real PTY smoke: launch, keyboard navigation, resize, clean exit, timeout bound, and terminal restoration', async () => {
   const fixtureRoot = await mkdtemp(path.join(tmpdir(), 'parallix-pty-ui-fixture-'));
@@ -29,30 +50,14 @@ test('real PTY smoke: launch, keyboard navigation, resize, clean exit, timeout b
       // SQLite home so another PTY fixture cannot make its import conflict.
       env: { ...process.env, PARALLIX_HOME: stateRoot },
     });
-    const deadline = Date.now() + 4_000;
-    while (!/px board/.test(plain(session.output())) && Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-    assert.match(plain(session.output()), /px board/, 'real PTY must render the Ink board after launch');
+    await waitForOutput(session, /px board/, RENDER_TIMEOUT_MS, 'real PTY must render the Ink board after launch');
     assert.match(plain(session.output()), /pty/i, 'real PTY must render the selectable fixture mission');
     session.send('\r');
-    const confirmationDeadline = Date.now() + 2_000;
-    while (!/CONFIRM CONSEQUENTIAL ACTION/.test(plain(session.output())) && Date.now() < confirmationDeadline) {
-      await new Promise((resolve) => setTimeout(resolve, 25));
-    }
-    assert.match(plain(session.output()), /CONFIRM CONSEQUENTIAL ACTION/, 'Enter must show guarded confirmation without launching an agent');
+    await waitForOutput(session, /CONFIRM CONSEQUENTIAL ACTION/, INTERACTION_TIMEOUT_MS, 'Enter must show guarded confirmation without launching an agent');
     session.send('\u001b');
-    const cancellationDeadline = Date.now() + 2_000;
-    while (!/CANCELLED: cancelled before dispatch/.test(plain(session.output())) && Date.now() < cancellationDeadline) {
-      await new Promise((resolve) => setTimeout(resolve, 25));
-    }
-    assert.match(plain(session.output()), /CANCELLED: cancelled before dispatch/, 'Escape must cancel before controller dispatch');
+    await waitForOutput(session, /CANCELLED: cancelled before dispatch/, INTERACTION_TIMEOUT_MS, 'Escape must cancel before controller dispatch');
     session.send('\u001b[B');
-    const focusDeadline = Date.now() + 2_000;
-    while (!/▶.*PTY second/si.test(plain(session.output())) && Date.now() < focusDeadline) {
-      await new Promise((resolve) => setTimeout(resolve, 25));
-    }
-    assert.match(plain(session.output()), /▶.*PTY second/si, 'down arrow must move real-PTY focus to the second mission');
+    await waitForOutput(session, /▶.*PTY second/si, INTERACTION_TIMEOUT_MS, 'down arrow must move real-PTY focus to the second mission');
     await session.resize(60, 20);
     assert.equal(session.isAlive(), true, 'UI must remain alive until q is sent');
     const result = await session.exitCleanly();
