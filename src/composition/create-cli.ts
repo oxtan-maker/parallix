@@ -15,6 +15,8 @@ import diff from '../adapters/cli/commands/diff.js';
 import draft from '../adapters/cli/commands/draft.js';
 import handoff from '../adapters/cli/commands/handoff.js';
 import integrate from '../adapters/cli/commands/integrate.js';
+import { IntegrateCommandUseCase } from '../application/integrate-command-use-case.js';
+import { createIntegrateCommand } from '../interfaces/cli/integrate.js';
 import missionStart from '../adapters/cli/mission-start.js';
 import mutationGate from '../adapters/verification/mutation-gate.js';
 import rebase from '../adapters/cli/commands/rebase.js';
@@ -110,7 +112,9 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
     diff,
     draft: (args, options) => withMissionFactories(missionServicesFn => draft(args, { ...options, missionServicesFn })),
     handoff: (args, options) => withMissionFactories(missionServicesFn => handoff(args, { ...options, missionServicesFn })),
-    integrate: (args, options) => withMissionFactories(missionServicesFn => integrate(args, { ...options, missionServicesFn })),
+    integrate: createIntegrateCommand(new IntegrateCommandUseCase({
+      execute: (args, options) => withMissionFactories(missionServicesFn => integrate(args, { ...options, missionServicesFn })),
+    })),
     'mission-start': missionStart,
     'verify-env': missionStart,
     'mutation-gate': mutationGate,
