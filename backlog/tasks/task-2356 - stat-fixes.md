@@ -1,7 +1,7 @@
 ---
 id: TASK-2356
 title: stat fixes
-status: active
+status: review
 assignee: [codex]
 created_date: '2026-08-10 12:30'
 labels: [user_value]
