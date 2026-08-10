@@ -1,7 +1,7 @@
 ---
 id: TASK-1294
 title: documentation update hook
-status: active
+status: review
 assignee: [codex]
 created_date: '2026-06-13 18:24'
 updated_date: '2026-07-02 18:12'
