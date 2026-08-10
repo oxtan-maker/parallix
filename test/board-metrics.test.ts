@@ -278,7 +278,7 @@ test('FLOW projection derives lane rows, agent availability, and a deterministic
   assert.equal(metrics.medianAgeByLane.series.find((entry) => entry.lane === 'review')?.value, 120);
   assert.equal(metrics.weeklyThroughput.series[0]?.value, 2);
   assert.deepEqual(metrics.agentAvailability.map((agent) => [agent.family, agent.available]), [['codex', true], ['claude', false]]);
-  assert.equal(metrics.bottleneck.sentence, 'review is the oldest lane at 120 min median age; review loop 2.0; 2 completed in the latest recorded week.');
+  assert.equal(metrics.bottleneck.sentence, 'review is the oldest lane at 2.0h median age; review loop 2.0; 2 completed in the latest recorded week.');
 });
 
 test('FLOW projection reports explicit missing history without fabricated values', () => {

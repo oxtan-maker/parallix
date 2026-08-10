@@ -42,6 +42,18 @@ export interface LaneInterval {
 }
 
 const BOARD_LANES: readonly BoardLane[] = ['backlog', 'refined', 'active', 'review', 'integration', 'done'];
+const TERMINAL_LANES: readonly BoardLane[] = ['done', 'integration'];
+
+/** Convert minutes to human-readable duration string. */
+export function formatDuration(minutes: number): string {
+  if (minutes < 60) {
+    return `${Math.round(minutes)} min`;
+  }
+  if (minutes < 1440) {
+    return `${(minutes / 60).toFixed(1)}h`;
+  }
+  return `${(minutes / 1440).toFixed(1)}d`;
+}
 
 function emptyCounts(): Record<BoardLane, number> {
   return { backlog: 0, refined: 0, active: 0, review: 0, integration: 0, done: 0 };
@@ -397,10 +409,12 @@ export function weeklyThroughputSeries(outcomes: readonly MissionOutcome[]): Met
   };
 }
 
-/** Median age in each current lane, derived solely from the last recorded transition. */
+/** Median age in each current lane, derived from transitions and lifecycle entries. */
 export function medianAgeByLaneSeries(
   transitions: readonly MissionTransition[],
   asOf: string,
+  initialStates?: ReadonlyMap<MissionId, MissionStatus>,
+  lifecycleEntries?: ReadonlyMap<MissionId, string>,
 ): LaneMetricSeries {
   const latestByMission = new Map<MissionId, MissionTransition>();
   for (const transition of transitions) {
@@ -412,6 +426,20 @@ export function medianAgeByLaneSeries(
     const minutes = (Date.parse(asOf) - Date.parse(transition.occurredAt)) / 60_000;
     if (Number.isFinite(minutes) && minutes >= 0) {
       ages.set(transition.to, [...(ages.get(transition.to) ?? []), minutes]);
+    }
+  }
+  // Missions with no transition: use lifecycle entry timestamp as enteredAt
+  if (initialStates && lifecycleEntries) {
+    for (const [missionId, status] of initialStates) {
+      if (!latestByMission.has(missionId)) {
+        const enteredAt = lifecycleEntries.get(missionId);
+        if (enteredAt) {
+          const minutes = (Date.parse(asOf) - Date.parse(enteredAt)) / 60_000;
+          if (Number.isFinite(minutes) && minutes >= 0) {
+            ages.set(status as BoardLane, [...(ages.get(status as BoardLane) ?? []), minutes]);
+          }
+        }
+      }
     }
   }
   return {
@@ -427,7 +455,7 @@ export function bottleneckNarrative(
   weeklyThroughput: MetricSeries,
 ): BottleneckNarrative {
   const oldest = medianAgeByLane.series
-    .filter((entry): entry is { lane: BoardLane; value: number } => entry.value !== null)
+    .filter((entry): entry is { lane: BoardLane; value: number } => entry.value !== null && !TERMINAL_LANES.includes(entry.lane))
     .sort((left, right) => right.value - left.value)[0] ?? null;
   const loopRate = reviewLoopRate.series.at(-1)?.value ?? null;
   const throughput = weeklyThroughput.series.at(-1)?.value ?? null;
@@ -440,7 +468,7 @@ export function bottleneckNarrative(
   const reviewText = loopRate === null ? 'unavailable review-loop data' : `review loop ${loopRate.toFixed(1)}`;
   const throughputText = throughput === null ? 'unavailable weekly completions' : `${throughput} completed in the latest recorded week`;
   return {
-    sentence: `${oldest.lane} is the oldest lane at ${oldest.value} min median age; ${reviewText}; ${throughputText}.`,
+    sentence: `${oldest.lane} is the oldest lane at ${formatDuration(oldest.value)} median age; ${reviewText}; ${throughputText}.`,
     inputs: { lane: oldest.lane, medianAgeMinutes: oldest.value, reviewLoopRate: loopRate, weeklyThroughput: throughput },
   };
 }
@@ -457,6 +485,8 @@ export interface MetricsInput {
   readonly agentAvailability?: readonly AgentAvailabilityRow[];
   /** Injected by the read adapter so deterministic tests never depend on wall-clock time. */
   readonly asOf?: string;
+  /** Lifecycle entry timestamps for missions without transitions (missionId → enteredAt ISO string). */
+  readonly lifecycleEntries?: ReadonlyMap<MissionId, string>;
 }
 
 /**
@@ -467,7 +497,12 @@ export function buildMetrics(input: MetricsInput): ReturnType<typeof buildBoardM
   const stateFlow = cumulativeFlowByStateSeries(input.initialStates, input.transitions, input.instants);
   const cycleByState = medianCycleTimeByStateSeries(input.transitions);
   const weeklyThroughput = weeklyThroughputSeries(input.outcomes);
-  const medianAgeByLane = medianAgeByLaneSeries(input.transitions, input.asOf ?? input.instants.at(-1) ?? new Date(0).toISOString());
+  const medianAgeByLane = medianAgeByLaneSeries(
+    input.transitions,
+    input.asOf ?? input.instants.at(-1) ?? new Date(0).toISOString(),
+    input.initialStates,
+    input.lifecycleEntries,
+  );
   const reviewLoopRate = reviewLoopRateSeries(input.outcomes, input.instants);
   return {
     ...buildBoardMetrics({

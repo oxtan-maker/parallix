@@ -1,5 +1,5 @@
 import type { UsageRecord, UsageRepository } from '../ports/mission-measurements.js';
-import type { BoardLaneEventEntry, BoardLaneEventRepository } from '../ports/operation-history.js';
+import type { BoardLaneEventEntry, BoardLaneEventRepository, OperationalHistoryRepository } from '../ports/operation-history.js';
 import type { MissionId, MissionStatus } from '../../domain/mission.js';
 import type { MissionTransition } from '../../domain/mission-workflow.js';
 import type {
@@ -51,6 +51,11 @@ export interface ConcreteMetricsReadAdapterOptions {
   /** Repository this projection is scoped to. Lane events and usage records
       for other repositories are excluded. */
   readonly repositoryId: RepositoryId;
+  /** Projection clock — returns ISO timestamp for deterministic `asOf`.
+      Defaults to wall-clock `Date.now()`. Tests pin this to a fixed value. */
+  readonly clock?: () => string;
+  /** Operational history for lifecycle entry timestamps of missions without transitions. */
+  readonly historyRepo?: OperationalHistoryRepository;
 }
 
 /**
@@ -62,11 +67,15 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
   private readonly laneEventRepo: BoardLaneEventRepository;
   private readonly usageRepo: UsageRepository;
   private readonly repositoryId: RepositoryId;
+  private readonly clock: () => string;
+  private readonly historyRepo: OperationalHistoryRepository | undefined;
 
   constructor(options: ConcreteMetricsReadAdapterOptions) {
     this.laneEventRepo = options.laneEventRepo;
     this.usageRepo = options.usageRepo;
     this.repositoryId = options.repositoryId;
+    this.clock = options.clock ?? (() => new Date().toISOString());
+    this.historyRepo = options.historyRepo;
   }
 
   async buildMetrics(
@@ -87,13 +96,17 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
     // Derive instants from transition timestamps
     const instants = this.deriveInstants(transitions, scopedUsageRecords, outcomes);
 
+    // Build lifecycle entry map for missions without transitions
+    const lifecycleEntries = await this.deriveLifecycleEntries(initialStates, transitions);
+
     const metrics = buildMetrics({
       initialStates,
       transitions,
       outcomes,
       instants,
       agentAvailability,
-      asOf: instants.at(-1),
+      asOf: this.clock(),
+      lifecycleEntries,
     });
     const timestamps = this.eventTimestamps(entries, scopedUsageRecords);
     const rejectedOrMissingIdentityRowCount = transitionRows.rejected + outcomeRows.rejected;
@@ -279,6 +292,52 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
       ...entries.map((entry) => entry.occurredAt).filter(Boolean),
       ...usageRecords.filter((record) => record.date).map((record) => `${record.date}T00:00:00Z`),
     ])].sort();
+  }
+
+  // -----------------------------------------------------------------------
+  // Derive lifecycle entry timestamps for missions without transitions
+  // -----------------------------------------------------------------------
+
+  private async deriveLifecycleEntries(
+    initialStates: ReadonlyMap<MissionId, MissionStatus>,
+    transitions: readonly MissionTransition[],
+  ): Promise<Map<MissionId, string>> {
+    if (!this.historyRepo) {
+      return new Map();
+    }
+    // Find missions with no transitions
+    const missionIdsWithTransitions = new Set(transitions.map((t) => t.missionId));
+    const missionsWithoutTransitions = [...initialStates.keys()].filter(
+      (id) => !missionIdsWithTransitions.has(id),
+    );
+
+    if (missionsWithoutTransitions.length === 0) {
+      return new Map();
+    }
+
+    // Query operational history for entry timestamps
+    const historyEntries = await this.historyRepo.findAll();
+    const entries = new Map<MissionId, string>();
+
+    for (const missionId of missionsWithoutTransitions) {
+      // Find earliest history entry for this mission
+      const missionEntries = historyEntries
+        .filter((entry) => {
+          try {
+            const data = JSON.parse(entry.eventData);
+            return data.missionId === missionId;
+          } catch {
+            return false;
+          }
+        })
+        .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+
+      if (missionEntries.length > 0) {
+        entries.set(missionId, missionEntries[0]!.createdAt);
+      }
+    }
+
+    return entries;
   }
 }
 
