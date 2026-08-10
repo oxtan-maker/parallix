@@ -2,7 +2,7 @@
 id: TASK-2356
 title: stat fixes
 status: backlog
-assignee: []
+assignee: [codex]
 created_date: '2026-08-10 12:30'
 labels: []
 dependencies: []
