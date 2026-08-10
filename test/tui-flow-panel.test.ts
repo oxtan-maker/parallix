@@ -57,7 +57,7 @@ test('FLOW panel renders projection labels, values, unavailable agent, and bottl
   ]) {
     assert.ok(output.includes(expected), `FLOW panel must display ${expected}. Got: ${output}`);
   }
-  assert.match(output, /review is the oldest lane at 120 min median age;/, `FLOW panel must display the bottleneck lead. Got: ${output}`);
+  assert.match(output, /review is the oldest lane at 2\.0h median age;/, `FLOW panel must display the bottleneck lead. Got: ${output}`);
   assert.match(output, /loop 2\.0; 1 completed in the latest recorded week\./, `FLOW panel must display the bottleneck detail. Got: ${output}`);
 });
 
