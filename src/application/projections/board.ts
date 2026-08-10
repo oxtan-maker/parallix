@@ -36,7 +36,12 @@ export type AttentionReason =
   | { readonly kind: 'none' };
 
 export interface MetricSeries {
-  readonly series: readonly { readonly at: string; readonly value: number | null }[];
+  readonly series: readonly {
+    readonly at: string;
+    readonly value: number | null;
+    /** Number of observations that contributed to this point. */
+    readonly observationCount?: number;
+  }[];
   /** Exact behavior when event history is incomplete. */
   readonly missingHistoryFallback: 'null' | 'estimate' | 'skip';
 }
@@ -44,6 +49,8 @@ export interface MetricSeries {
 export interface StateFlowPoint {
   readonly at: string;
   readonly counts: Readonly<Record<BoardLane, number>>;
+  /** Number of lifecycle observations represented in this snapshot. */
+  readonly observationCount?: number;
 }
 
 export interface StateFlowSeries {
@@ -52,7 +59,12 @@ export interface StateFlowSeries {
 }
 
 export interface LaneMetricSeries {
-  readonly series: readonly { readonly lane: BoardLane; readonly value: number | null }[];
+  readonly series: readonly {
+    readonly lane: BoardLane;
+    readonly value: number | null;
+    /** Number of observations that contributed to this lane value. */
+    readonly observationCount?: number;
+  }[];
   readonly missingHistoryFallback: MetricSeries['missingHistoryFallback'];
 }
 
@@ -75,7 +87,7 @@ export interface BottleneckNarrative {
   readonly inputs: {
     readonly lane: BoardLane | null;
     readonly medianAgeMinutes: number | null;
-    readonly reviewLoopRate: number | null;
+    readonly reviewBounceRate: number | null;
     readonly weeklyThroughput: number | null;
   };
 }
@@ -134,7 +146,8 @@ export interface BoardMetrics {
   readonly medianCycleTimeByState: LaneMetricSeries;
   readonly throughput: MetricSeries;
   readonly weeklyThroughput: MetricSeries;
-  readonly reviewLoopRate: MetricSeries;
+  /** Lifecycle `review → active` bounces per mission that entered review. */
+  readonly reviewBounceRate: MetricSeries;
   readonly medianAgeByLane: LaneMetricSeries;
   readonly agentAvailability: readonly AgentAvailabilityMetric[];
   readonly bottleneck: BottleneckNarrative;
@@ -190,7 +203,7 @@ function emptyFlowMetrics(): Pick<BoardMetrics, 'cumulativeFlowByState' | 'media
     agentAvailability: [],
     bottleneck: {
       sentence: 'Bottleneck unavailable: history is missing.',
-      inputs: { lane: null, medianAgeMinutes: null, reviewLoopRate: null, weeklyThroughput: null },
+      inputs: { lane: null, medianAgeMinutes: null, reviewBounceRate: null, weeklyThroughput: null },
     },
   };
 }
@@ -216,7 +229,7 @@ export interface BoardMetricsInput {
   readonly medianCycleTimeByState?: LaneMetricSeries;
   readonly throughput: MetricSeries;
   readonly weeklyThroughput?: MetricSeries;
-  readonly reviewLoopRate: MetricSeries;
+  readonly reviewBounceRate: MetricSeries;
   readonly medianAgeByLane?: LaneMetricSeries;
   readonly agentAvailability?: readonly AgentAvailabilityMetric[];
   readonly bottleneck?: BottleneckNarrative;
@@ -235,7 +248,7 @@ export function buildBoardMetrics(input: BoardMetricsInput): BoardMetrics {
     medianCycleTimeByState: input.medianCycleTimeByState ?? defaults.medianCycleTimeByState,
     throughput: input.throughput,
     weeklyThroughput: input.weeklyThroughput ?? defaults.weeklyThroughput,
-    reviewLoopRate: input.reviewLoopRate,
+    reviewBounceRate: input.reviewBounceRate,
     medianAgeByLane: input.medianAgeByLane ?? defaults.medianAgeByLane,
     agentAvailability: input.agentAvailability ?? defaults.agentAvailability,
     bottleneck: input.bottleneck ?? defaults.bottleneck,

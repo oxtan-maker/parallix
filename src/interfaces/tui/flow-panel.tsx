@@ -14,17 +14,41 @@ function history(label: string, fallback: MetricSeries['missingHistoryFallback']
   return `${label} history: ${fallback}`;
 }
 
+function coverage(point: { readonly observationCount?: number } | undefined): string {
+  return ` (n=${point?.observationCount ?? 0})`;
+}
+
 function legend(flow: BoardMetrics['cumulativeFlowByState']['series'][number] | undefined): string {
   if (!flow) { return 'Legend: unavailable'; }
   return `Legend: ${Object.keys(flow.counts).map((lane) => `${lane} ■`).join(' · ')}`;
 }
 
-function LaneRows({ label, metric, sampleSize, suffix = '' }: { label: string; metric: LaneMetricSeries; sampleSize: number; suffix?: string }): React.ReactElement {
+function LaneRows({ label, metric, suffix = '' }: { label: string; metric: LaneMetricSeries; suffix?: string }): React.ReactElement {
   return (
     <Box flexDirection="column">
       <Text bold>{label}</Text>
-      {metric.series.map((entry) => <Text key={entry.lane}>{`${entry.lane}: ${display(entry.value, suffix)} (n=${sampleSize})`}</Text>)}
+      {metric.series.map((entry) => <Text key={entry.lane}>{`${entry.lane}: ${display(entry.value, suffix)}${coverage(entry)}`}</Text>)}
       <Text dimColor>{history(label, metric.missingHistoryFallback)}</Text>
+    </Box>
+  );
+}
+
+/** Render projection-supplied experiment figures; no statistics are calculated here. */
+function CohortRows({ metrics }: { readonly metrics: BoardMetrics }): React.ReactElement | null {
+  const comparison = metrics.cohorts;
+  if (!comparison || comparison.cohorts.length === 0) { return null; }
+  return (
+    <Box flexDirection="column" marginTop={1}>
+      <Text bold>{`EXPERIMENT COHORTS · ${comparison.dimension}`}</Text>
+      {comparison.cohorts.map((cohort) => (
+        <Box key={cohort.key} flexDirection="column">
+          <Text>{`${cohort.key}${cohort.lowSample ? ' · low-sample' : ''} · population n=${cohort.n}`}</Text>
+          <Text dimColor>{`cycle median ${display(cohort.medianCycleTimeMinutes, ' min')} (n=${cohort.observationCounts.cycleTime}) · p75 ${display(cohort.p75CycleTimeMinutes, ' min')} (n=${cohort.observationCounts.cycleTime})`}</Text>
+          <Text dimColor>{`active ${display(cohort.medianActiveDwellMinutes, ' min')} (n=${cohort.observationCounts.activeDwell}) · review ${display(cohort.medianReviewDwellMinutes, ' min')} (n=${cohort.observationCounts.reviewDwell}) · bounces ${display(cohort.reviewBounceRate)} (n=${cohort.observationCounts.reviewBounce})`}</Text>
+          <Text dimColor>{`fix rounds ${display(cohort.medianReviewFixRounds)} (n=${cohort.observationCounts.reviewFixRounds}) · runtime ${display(cohort.agentRuntimeMinutesPerMission, ' min')} (n=${cohort.observationCounts.runtime}) · tokens ${display(cohort.tokensPerMission)} (n=${cohort.observationCounts.tokens})`}</Text>
+          <Text dimColor>{`cost ${display(cohort.costUsdPerMission, ' USD')} (n=${cohort.observationCounts.cost}) · NEL ${display(cohort.netEngineeringLinesPerMission)} (n=${cohort.observationCounts.netEngineeringLines})`}</Text>
+        </Box>
+      ))}
     </Box>
   );
 }
@@ -40,9 +64,9 @@ export function FlowPanel({ metrics, columns }: { readonly metrics: BoardMetrics
   const narrow = width < FLOW_NARROW_COLUMNS;
   const flow = metrics.cumulativeFlowByState.series.at(-1);
   const throughput = metrics.weeklyThroughput.series.at(-1)?.value;
-  const loopRate = metrics.reviewLoopRate.series.at(-1)?.value;
-  // Older cached projections can lack the new provenance contract; render a
-  // neutral zero sample rather than making the board unavailable.
+  const bounceRatePoint = metrics.reviewBounceRate.series.at(-1);
+  // Provenance population is deliberately not displayed beside individual
+  // statistics: it is not their observation count.
   const sampleSize = metrics.provenance?.sampleSize ?? 0;
   const healthState = metrics.health?.state ?? 'no-telemetry';
   // Lifecycle time and agent execution time are different quantities and are
@@ -54,25 +78,25 @@ export function FlowPanel({ metrics, columns }: { readonly metrics: BoardMetrics
   return (
     <Box flexDirection="column" marginTop={1}>
       <Text bold color="cyan">FLOW{narrow ? ' · textual' : ''}</Text>
-      <Text color={healthState === 'unavailable' ? 'red' : healthState === 'partial' ? 'yellow' : 'gray'}>{`Statistics: ${healthState} · n=${sampleSize}`}</Text>
+      <Text color={healthState === 'unavailable' ? 'red' : healthState === 'partial' ? 'yellow' : 'gray'}>{`Statistics: ${healthState} · population n=${sampleSize}`}</Text>
       <Box flexDirection={narrow ? 'column' : 'row'}>
         <Box flexDirection="column" marginRight={narrow ? 0 : 4}>
           <Text bold>CUMULATIVE FLOW</Text>
           <Text>{flow ? Object.entries(flow.counts).map(([lane, count]) => `${lane} ${count}`).join(' · ') : 'unavailable'}</Text>
           <Text dimColor>{history('Cumulative flow', metrics.cumulativeFlowByState.missingHistoryFallback)}</Text>
           <Text dimColor>{legend(flow)}</Text>
-          <Text>{`Weekly completions: ${display(throughput)} (n=${sampleSize})`}</Text>
+          <Text>{`Weekly completions: ${display(throughput)}${coverage(metrics.weeklyThroughput.series.at(-1))}`}</Text>
           <Text dimColor>{history('Weekly completions', metrics.weeklyThroughput.missingHistoryFallback)}</Text>
-          <Text>{`Review-to-active loop rate: ${display(loopRate)} (n=${sampleSize})`}</Text>
-          <Text dimColor>{history('Review-to-active loop rate', metrics.reviewLoopRate.missingHistoryFallback)}</Text>
-          <Text>{`Median lifecycle cycle time: ${display(lifecycleCycleTime, ' min')} (n=${sampleSize})`}</Text>
+          <Text>{`Lifecycle review-bounce rate: ${display(bounceRatePoint?.value)}${coverage(bounceRatePoint)}`}</Text>
+          <Text dimColor>{history('Lifecycle review-bounce rate', metrics.reviewBounceRate.missingHistoryFallback)}</Text>
+          <Text>{`Median lifecycle cycle time: ${display(lifecycleCycleTime, ' min')}${coverage(metrics.medianStateTimes.series.at(-1))}`}</Text>
           <Text dimColor>{history('Median lifecycle cycle time', metrics.medianStateTimes?.missingHistoryFallback ?? 'null')}</Text>
-          <Text>{`Median agent runtime: ${display(agentRuntime, ' min')} (n=${sampleSize})`}</Text>
+          <Text>{`Median agent runtime: ${display(agentRuntime, ' min')}${coverage(metrics.medianAgentRuntime?.series.at(-1))}`}</Text>
           <Text dimColor>{history('Median agent runtime', metrics.medianAgentRuntime?.missingHistoryFallback ?? 'null')}</Text>
         </Box>
         <Box flexDirection="column" marginRight={narrow ? 0 : 4}>
-          <LaneRows label="Median cycle time" metric={metrics.medianCycleTimeByState} sampleSize={sampleSize} suffix=" min" />
-          <LaneRows label="Median lane age" metric={metrics.medianAgeByLane} sampleSize={sampleSize} suffix=" min" />
+          <LaneRows label="Median cycle time" metric={metrics.medianCycleTimeByState} suffix=" min" />
+          <LaneRows label="Median lane age" metric={metrics.medianAgeByLane} suffix=" min" />
         </Box>
         <Box flexDirection="column">
           <Text bold>READ</Text>
@@ -85,6 +109,7 @@ export function FlowPanel({ metrics, columns }: { readonly metrics: BoardMetrics
             ))}
         </Box>
       </Box>
+      <CohortRows metrics={metrics} />
     </Box>
   );
 }

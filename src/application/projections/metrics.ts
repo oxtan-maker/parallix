@@ -44,7 +44,7 @@ export interface LaneInterval {
 }
 
 const BOARD_LANES: readonly BoardLane[] = ['backlog', 'refined', 'active', 'review', 'integration', 'done'];
-const TERMINAL_LANES: readonly BoardLane[] = ['done', 'integration'];
+const TERMINAL_LANES: readonly BoardLane[] = ['done'];
 
 /** Convert minutes to human-readable duration string. */
 export function formatDuration(minutes: number): string {
@@ -144,12 +144,12 @@ export function medianStateTimes(
         const insertion = values.findIndex((existing) => existing > value);
         values.splice(insertion === -1 ? values.length : insertion, 0, value);
       }
-      if (values.length === 0) { return { at: through, value: null }; }
+      if (values.length === 0) { return { at: through, value: null, observationCount: 0 }; }
       const middle = Math.floor(values.length / 2);
       const median = values.length % 2 === 0
         ? (values[middle - 1] + values[middle]) / 2
         : values[middle];
-      return { at: through, value: median };
+      return { at: through, value: median, observationCount: values.length };
     }),
     missingHistoryFallback: 'null',
   };
@@ -180,15 +180,13 @@ export function medianAgentRuntime(
   instants: readonly string[],
 ): MetricSeries {
   return {
-    series: instants.map((through) => ({
-      at: through,
-      value: median(
-        outcomes
-          .filter((outcome) => outcome.closedAt <= through)
-          .map((outcome) => agentRuntimeMinutes(outcome))
-          .filter((minutes): minutes is number => minutes !== null),
-      ),
-    })),
+    series: instants.map((through) => {
+      const measured = outcomes
+        .filter((outcome) => outcome.closedAt <= through)
+        .map((outcome) => agentRuntimeMinutes(outcome))
+        .filter((minutes): minutes is number => minutes !== null);
+      return { at: through, value: median(measured), observationCount: measured.length };
+    }),
     missingHistoryFallback: 'null',
   };
 }
@@ -221,7 +219,7 @@ export function cumulativeFlowSeries(
         if (transition.to === 'done') { completed += 1; }
         state.set(transition.missionId, transition.to);
       }
-      return { at, value: completed };
+      return { at, value: completed, observationCount: state.size };
     }),
     missingHistoryFallback: 'estimate',
   };
@@ -242,7 +240,7 @@ export function cumulativeFlowByStateSeries(
       }
       const counts = emptyCounts();
       for (const lane of state.values()) { counts[lane] += 1; }
-      return { at, counts };
+      return { at, counts, observationCount: state.size };
     }),
     missingHistoryFallback: 'estimate',
   };
@@ -268,37 +266,45 @@ export function throughputSeries(
   return {
     series: instants.map((at) => {
       const completed = outcomes.filter((outcome) => outcome.closedAt <= at).length;
-      return { at, value: completed };
+      return { at, value: completed, observationCount: completed };
     }),
     missingHistoryFallback: 'skip',
   };
 }
 
 // ---------------------------------------------------------------------------
-// Review loop rate — average review-fix rounds
+// Review bounce rate — lifecycle review → active transitions
 // ---------------------------------------------------------------------------
 
 /**
- * Compute review loop rate (average review-fix rounds per mission).
+ * Compute lifecycle review bounces per mission that entered review.
  *
  * missingHistoryFallback: 'estimate' — when some outcomes are missing,
  * computes average from available data (partial estimate).
  */
-export function reviewLoopRateSeries(
-  outcomes: readonly MissionOutcome[],
+export function reviewBounceRateSeries(
+  transitions: readonly MissionTransition[],
   instants: readonly string[],
 ): MetricSeries {
-  if (outcomes.length === 0) {
+  if (transitions.length === 0) {
     return { series: [], missingHistoryFallback: 'estimate' };
   }
   return {
     series: instants.map((at) => {
-      const rounds = outcomes
-        .filter((outcome) => outcome.closedAt <= at)
-        .map((outcome) => outcome.reviewFixRounds);
-      if (rounds.length === 0) { return { at, value: null }; }
-      const total = rounds.reduce((sum, r) => sum + r, 0);
-      return { at, value: total / rounds.length };
+      const passages = new Map<MissionId, { enteredReview: boolean; bounces: number }>();
+      for (const transition of transitions) {
+        if (transition.occurredAt > at) { continue; }
+        const passage = passages.get(transition.missionId) ?? { enteredReview: false, bounces: 0 };
+        if (transition.to === 'review') { passage.enteredReview = true; }
+        if (transition.from === 'review' && transition.to === 'active') {
+          passage.enteredReview = true;
+          passage.bounces += 1;
+        }
+        passages.set(transition.missionId, passage);
+      }
+      const entered = [...passages.values()].filter((passage) => passage.enteredReview);
+      const bounces = entered.reduce((total, passage) => total + passage.bounces, 0);
+      return { at, value: entered.length === 0 ? null : bounces / entered.length, observationCount: entered.length };
     }),
     missingHistoryFallback: 'estimate',
   };
@@ -381,7 +387,10 @@ export function medianCycleTimeByStateSeries(
   }
 
   return {
-    series: BOARD_LANES.map((lane) => ({ lane, value: median(byLane.get(lane) ?? []) })),
+    series: BOARD_LANES.map((lane) => {
+      const observations = byLane.get(lane) ?? [];
+      return { lane, value: median(observations), observationCount: observations.length };
+    }),
     missingHistoryFallback: 'null',
   };
 }
@@ -412,7 +421,7 @@ export function weeklyThroughputSeries(outcomes: readonly MissionOutcome[], asOf
   return {
     series: [...byWeek.entries()]
       .sort(([left], [right]) => left.localeCompare(right))
-      .map(([at, value]) => ({ at, value })),
+      .map(([at, value]) => ({ at, value, observationCount: value })),
     missingHistoryFallback: 'skip',
   };
 }
@@ -451,7 +460,10 @@ export function medianAgeByLaneSeries(
     }
   }
   return {
-    series: BOARD_LANES.map((lane) => ({ lane, value: median(ages.get(lane) ?? []) })),
+    series: BOARD_LANES.map((lane) => {
+      const observations = ages.get(lane) ?? [];
+      return { lane, value: median(observations), observationCount: observations.length };
+    }),
     missingHistoryFallback: 'null',
   };
 }
@@ -459,25 +471,25 @@ export function medianAgeByLaneSeries(
 /** Select the largest observed lane age and state the named inputs without UI involvement. */
 export function bottleneckNarrative(
   medianAgeByLane: LaneMetricSeries,
-  reviewLoopRate: MetricSeries,
+  reviewBounceRate: MetricSeries,
   weeklyThroughput: MetricSeries,
 ): BottleneckNarrative {
   const oldest = medianAgeByLane.series
     .filter((entry): entry is { lane: BoardLane; value: number } => entry.value !== null && !TERMINAL_LANES.includes(entry.lane))
     .sort((left, right) => right.value - left.value)[0] ?? null;
-  const loopRate = reviewLoopRate.series.at(-1)?.value ?? null;
+  const bounceRate = reviewBounceRate.series.at(-1)?.value ?? null;
   const throughput = weeklyThroughput.series.at(-1)?.value ?? null;
   if (!oldest) {
     return {
       sentence: 'Bottleneck unavailable: history is missing.',
-      inputs: { lane: null, medianAgeMinutes: null, reviewLoopRate: loopRate, weeklyThroughput: throughput },
+      inputs: { lane: null, medianAgeMinutes: null, reviewBounceRate: bounceRate, weeklyThroughput: throughput },
     };
   }
-  const reviewText = loopRate === null ? 'unavailable review-loop data' : `review loop ${loopRate.toFixed(1)}`;
-  const throughputText = throughput === null ? 'unavailable weekly completions' : `${throughput} completed in the latest recorded week`;
+  const reviewText = bounceRate === null ? 'unavailable review-bounce data' : `review bounce ${bounceRate.toFixed(1)}`;
+  const throughputText = throughput === null ? 'unavailable weekly completions' : `${throughput} completed in the current reporting week`;
   return {
     sentence: `${oldest.lane} is the oldest lane at ${formatDuration(oldest.value)} median age; ${reviewText}; ${throughputText}.`,
-    inputs: { lane: oldest.lane, medianAgeMinutes: oldest.value, reviewLoopRate: loopRate, weeklyThroughput: throughput },
+    inputs: { lane: oldest.lane, medianAgeMinutes: oldest.value, reviewBounceRate: bounceRate, weeklyThroughput: throughput },
   };
 }
 
@@ -519,7 +531,7 @@ export function buildMetrics(input: MetricsInput): ReturnType<typeof buildBoardM
     input.initialStates,
     input.lifecycleEntries,
   );
-  const reviewLoopRate = reviewLoopRateSeries(input.outcomes, input.instants);
+  const reviewBounceRate = reviewBounceRateSeries(input.transitions, input.instants);
   return {
     ...buildBoardMetrics({
       cumulativeFlow: cumulativeFlowSeries(historicalInitialStates, input.transitions, input.instants),
@@ -528,10 +540,10 @@ export function buildMetrics(input: MetricsInput): ReturnType<typeof buildBoardM
       medianCycleTimeByState: cycleByState,
       throughput: throughputSeries(input.outcomes, input.instants),
       weeklyThroughput,
-      reviewLoopRate,
+      reviewBounceRate,
       medianAgeByLane,
       agentAvailability: input.agentAvailability ?? [],
-      bottleneck: bottleneckNarrative(medianAgeByLane, reviewLoopRate, weeklyThroughput),
+      bottleneck: bottleneckNarrative(medianAgeByLane, reviewBounceRate, weeklyThroughput),
     }),
     medianAgentRuntime: medianAgentRuntime(input.outcomes, input.instants),
   };

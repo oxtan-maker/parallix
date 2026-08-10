@@ -1,11 +1,9 @@
 ---
 id: TASK-2356
-title: stat fixes
-status: ready-for-integration
-assignee:
-  - codex
+title: Close remaining mission-statistics correctness gaps after TASK-2347
+status: done
+assignee: [codex]
 created_date: '2026-08-10 12:30'
-updated_date: '2026-08-10 15:27'
 labels:
   - user_value
 dependencies: []
@@ -15,40 +13,6 @@ ordinal: 91911
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
----
-
-id: TASK-2353
-title: Close the remaining mission-statistics correctness gaps after TASK-2347
-status: backlog
-assignee: []
-created_date: '2026-08-10 14:25'
-labels:
-
-* statistics
-* correctness
-* ai_sdlc
-* cleanup
-  priority: high
-  dependencies:
-* TASK-2347
-  references:
-* src/application/projections/metrics.ts
-* src/application/projections/metrics-read-adapter.ts
-* src/application/projections/cohorts.ts
-* src/application/projections/board.ts
-* src/application/projections/board-readers.ts
-* src/application/services/statistics-service.ts
-* src/adapters/cli/commands/stats.ts
-* src/adapters/cli/commands/stats-cohorts.ts
-* src/adapters/sqlite/usage-repository.ts
-* src/interfaces/tui/flow-panel.tsx
-* docs/authority-reference.md
-* test/
-
----
-
-## Description
-
 TASK-2347 substantially repaired mission-statistics authority and lifecycle semantics, but its post-completion review found a smaller set of residual defects that still prevent the statistics surface from being trusted for experiment decisions.
 
 This mission closes those residual defects.
@@ -75,6 +39,37 @@ The mission is successful when Parallix can use the board and CLI to compare exp
 * or maintaining alternate statistics writers/readers with incompatible identity or completion semantics.
 
 This is a **correctness closure mission**, not a feature wave.
+
+## Audit correction — binding before implementation
+
+This task is `TASK-2356`. Earlier text accidentally embedded unrelated
+`TASK-2353` frontmatter inside this description; it is not a second task and
+does not override this task's metadata, dependencies, or lifecycle state.
+
+An audit of the current mission branch found that the following work is still
+open. These are not documentation-only concerns and must be included in the
+red-to-green baseline and the final certification fixture:
+
+1. The existing FLOW line named `Review-to-active loop rate` still reads the
+   review-fix telemetry series (`reviewFixRounds`) instead of lifecycle
+   `review → active` events. Correct the shared board metric or rename it as
+   telemetry; cohort-only bounce calculations do not close this defect.
+2. Per-metric observation coverage currently exists only for cohort figures.
+   Every other displayed board statistic must carry and render its own count;
+   deleting a misleading population `n` is not sufficient.
+3. The writable `UsageRepository.save/saveAll` API still exists without the
+   authoritative actor/run identity. Remove it if unused, or replace it with
+   the authoritative writer contract and prove collisions cannot alias data.
+4. No single persisted-facts → production projection → `BoardMetrics` → FLOW
+   fixture also proves shared CLI semantics. Existing helper tests, manually
+   constructed board metrics, telemetry-only parity, and same-worktree identity
+   checks are insufficient.
+5. Obsolete wording such as “latest recorded week” must be removed when the
+   presentation is explicitly for the current reporting week.
+
+The task must not be treated as ready for integration until those audit items
+and every acceptance criterion below have concrete evidence from the final
+tree.
 
 ---
 

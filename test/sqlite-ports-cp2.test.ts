@@ -18,6 +18,7 @@ import { SQLITE_ENTITY_AUTHORITY } from '../src/adapters/sqlite/authority-map.js
 import { repositoryId } from '../src/domain/repository.js';
 import type { AgentBlocklistRepository } from '../src/application/ports/agent-blocklist.js';
 import type { UsageRepository } from '../src/application/ports/mission-measurements.js';
+import type { UsageRecord } from '../src/application/ports/mission-measurements.js';
 import type { UIPreferencesRepository } from '../src/application/ports/operator-preferences.js';
 import type { KnownRepositoriesRepository } from '../src/application/ports/repository-catalog.js';
 import type { BoardLaneEventRepository, OperationalHistoryRepository } from '../src/application/ports/operation-history.js';
@@ -52,6 +53,17 @@ async function createDbWithSchema(): Promise<{
   const runner = new SqliteMigrationRunner(db);
   await runner.applyPending(loadDefaultMigrations());
   return { db, dir, dbPath };
+}
+
+/** Test-only seed: production writes go through MeasurementStorePort with actorKey. */
+async function seedUsage(db: SqliteDatabaseAdapter, records: readonly UsageRecord[]): Promise<void> {
+  for (const [index, record] of records.entries()) {
+    await db.execute(
+      `INSERT INTO usage_statistics (date, repo, mission, stage, actor_key, input_tokens, output_tokens, tool_calls, cost_usd, pr_fix_rounds)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [record.date ?? null, record.repo ?? '', record.mission ?? `seed-${index}`, record.stage ?? 'default', record.implementer_agent ?? 'seed', record.input_tokens ?? null, record.output_tokens ?? null, record.tool_calls ?? null, record.cost_usd ?? null, record.pr_fix_rounds ?? null],
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -170,11 +182,11 @@ describe('SQLite repository ports — CP2: domain mappings and authority', () =>
 
   // --- Usage statistics repository ---
 
-  it('usage: save and findAll round-trip', async () => {
+  it('usage: read repository maps authoritative persisted measurement rows', async () => {
     const { db, dir } = await createDbWithSchema();
     try {
       const repo = new SqliteUsageRepository(db);
-      await repo.save({
+      await seedUsage(db, [{
         date: '2026-07-20',
         repo: 'parallix',
         mission: 'task-2294',
@@ -182,7 +194,7 @@ describe('SQLite repository ports — CP2: domain mappings and authority', () =>
         implementer_agent: 'claude',
         input_tokens: 1000,
         output_tokens: 500,
-      });
+      }]);
 
       const all = await repo.findAll();
       assert.equal(all.length, 1);
@@ -202,14 +214,14 @@ describe('SQLite repository ports — CP2: domain mappings and authority', () =>
     try {
       const repo = new SqliteUsageRepository(db);
       // A fully-measured record: integer counts and a fractional cost.
-      await repo.save({
+      await seedUsage(db, [{
         date: '2026-07-20', repo: 'parallix', stage: 'execute',
         input_tokens: 1000, tool_calls: 12, cost_usd: 0.42, pr_fix_rounds: 3,
-      });
+      }]);
       // A record with an unmeasured cost: it must stay unavailable, not become 0.
-      await repo.save({
+      await seedUsage(db, [{
         date: '2026-07-21', repo: 'parallix', stage: 'draft', input_tokens: 0,
-      });
+      }]);
 
       const [measured, partial] = await repo.findAll();
 
@@ -242,11 +254,11 @@ describe('SQLite repository ports — CP2: domain mappings and authority', () =>
     }
   });
 
-  it('usage: saveAll persists multiple records in transaction', async () => {
+  it('usage: findAll reads multiple authoritative measurement rows', async () => {
     const { db, dir } = await createDbWithSchema();
     try {
       const repo = new SqliteUsageRepository(db);
-      await repo.saveAll([
+      await seedUsage(db, [
         { date: '2026-07-20', repo: 'parallix', stage: 'draft' },
         { date: '2026-07-21', repo: 'parallix', stage: 'execute' },
         { date: '2026-07-22', repo: 'parallix', stage: 'review' },
@@ -264,7 +276,7 @@ describe('SQLite repository ports — CP2: domain mappings and authority', () =>
     const { db, dir } = await createDbWithSchema();
     try {
       const repo = new SqliteUsageRepository(db);
-      await repo.saveAll([
+      await seedUsage(db, [
         { date: '2026-07-20', repo: 'parallix', stage: 'draft' },
         { date: '2026-07-21', repo: 'other', stage: 'execute' },
         { date: '2026-07-22', repo: 'parallix', stage: 'review' },
@@ -272,21 +284,6 @@ describe('SQLite repository ports — CP2: domain mappings and authority', () =>
 
       const filtered = await repo.findWhere((r) => r.repo === 'parallix');
       assert.equal(filtered.length, 2);
-    } finally {
-      await db.close();
-      cleanupTempDir(dir);
-    }
-  });
-
-  it('usage: clear removes all records', async () => {
-    const { db, dir } = await createDbWithSchema();
-    try {
-      const repo = new SqliteUsageRepository(db);
-      await repo.save({ date: '2026-07-20', repo: 'parallix' });
-      await repo.clear();
-
-      const all = await repo.findAll();
-      assert.equal(all.length, 0);
     } finally {
       await db.close();
       cleanupTempDir(dir);
@@ -504,9 +501,6 @@ describe('SQLite repository ports — CP2: domain mappings and authority', () =>
 
       assert.ok(usage.findAll() instanceof Promise);
       assert.ok(usage.findWhere(() => true) instanceof Promise);
-      assert.ok(usage.save({}) instanceof Promise);
-      assert.ok(usage.saveAll([]) instanceof Promise);
-      assert.ok(usage.clear() instanceof Promise);
 
       assert.ok(repos.findAll() instanceof Promise);
       assert.ok(repos.findById('x') instanceof Promise);

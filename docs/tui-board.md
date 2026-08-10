@@ -76,6 +76,11 @@ agent runtime and about 26 hours of cycle time. Reading either number as the
 other hides exactly the gap worth managing, so no FLOW label uses "cycle time"
 for execution minutes.
 
+When lifecycle history supplies experiment cohorts, FLOW also shows the supplied
+cohort comparison. It labels cohort population separately from the observation
+count for each cycle-time, review, runtime, and cost figure; unavailable facts
+remain unavailable rather than becoming zero.
+
 ## Where each fact comes from
 
 The board reads what the lifecycle already recorded. It never queries the review

@@ -54,6 +54,18 @@ export interface CohortMetrics {
   readonly agentRuntimeMinutesPerMission: number | null;
   readonly costUsdPerMission: number | null;
   readonly netEngineeringLinesPerMission: number | null;
+  /** Observation counts are metric-specific; cohort population is not a proxy. */
+  readonly observationCounts: Readonly<{
+    cycleTime: number;
+    activeDwell: number;
+    reviewDwell: number;
+    reviewBounce: number;
+    reviewFixRounds: number;
+    tokens: number;
+    runtime: number;
+    cost: number;
+    netEngineeringLines: number;
+  }>;
 }
 
 export interface CohortComparison {
@@ -240,6 +252,12 @@ export function compareCohorts(input: CohortComparisonInput): CohortComparison {
 
   const cohorts = [...groups.entries()].map(([key, members]) => {
     const cycleTimes = members.map((outcome) => outcome.cycleTimeMinutes);
+    const activeDwells = dwellOf(members, activeDwell);
+    const reviewDwells = dwellOf(members, reviewDwell);
+    const tokens = members.map((outcome) => outcome.totalInputAndOutputTokens).filter((value): value is number => value !== null);
+    const runtimes = members.map(agentRuntimeMinutes).filter((value): value is number => value !== null);
+    const costs = members.map((outcome) => outcome.totalCostUsd).filter((value): value is number => value !== null);
+    const nels = members.map((outcome) => netEngineeringLines.get(outcome.missionId) ?? null).filter((value): value is number => value !== null);
     const entered = members.filter((outcome) => passages.get(outcome.missionId)?.enteredReview === true);
     const bounces = entered.reduce(
       (sum, outcome) => sum + (passages.get(outcome.missionId)?.bounces ?? 0),
@@ -251,8 +269,8 @@ export function compareCohorts(input: CohortComparisonInput): CohortComparison {
       lowSample: members.length < threshold,
       medianCycleTimeMinutes: median(cycleTimes),
       p75CycleTimeMinutes: percentile75(cycleTimes),
-      medianActiveDwellMinutes: median(dwellOf(members, activeDwell)),
-      medianReviewDwellMinutes: median(dwellOf(members, reviewDwell)),
+      medianActiveDwellMinutes: median(activeDwells),
+      medianReviewDwellMinutes: median(reviewDwells),
       // Null, not zero: a cohort where nothing reached review has no bounce
       // rate to report, which is a different claim from "never bounced".
       reviewBounceRate: entered.length === 0 ? null : bounces / entered.length,
@@ -263,6 +281,17 @@ export function compareCohorts(input: CohortComparisonInput): CohortComparison {
       netEngineeringLinesPerMission: meanOfMeasured(
         members.map((outcome) => netEngineeringLines.get(outcome.missionId) ?? null),
       ),
+      observationCounts: {
+        cycleTime: cycleTimes.length,
+        activeDwell: activeDwells.length,
+        reviewDwell: reviewDwells.length,
+        reviewBounce: entered.length,
+        reviewFixRounds: members.length,
+        tokens: tokens.length,
+        runtime: runtimes.length,
+        cost: costs.length,
+        netEngineeringLines: nels.length,
+      },
     };
   });
 

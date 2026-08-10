@@ -27,7 +27,4 @@ export interface UsageRecord {
 export interface UsageRepository {
   findAll(): Promise<readonly UsageRecord[]>;
   findWhere(_predicate: (_record: UsageRecord) => boolean): Promise<readonly UsageRecord[]>;
-  save(_record: UsageRecord): Promise<void>;
-  saveAll(_records: readonly UsageRecord[]): Promise<void>;
-  clear(): Promise<void>;
 }
