@@ -12,10 +12,12 @@ import active from '../adapters/cli/commands/active.js';
 import checkpoint from '../adapters/cli/commands/checkpoint.js';
 import config from '../adapters/cli/commands/config.js';
 import diff from '../adapters/cli/commands/diff.js';
-import draft from '../adapters/cli/commands/draft.js';
+import { createDraftWorkflowAdapter } from '../adapters/cli/commands/draft.js';
 import handoff from '../adapters/cli/commands/handoff.js';
 import integrate from '../adapters/cli/commands/integrate.js';
+import { DraftCommandUseCase } from '../application/draft-command-use-case.js';
 import { IntegrateCommandUseCase } from '../application/integrate-command-use-case.js';
+import { createDraftCommand } from '../interfaces/cli/draft.js';
 import { createIntegrateCommand } from '../interfaces/cli/integrate.js';
 import missionStart from '../adapters/cli/mission-start.js';
 import mutationGate from '../adapters/verification/mutation-gate.js';
@@ -110,7 +112,15 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
     checkpoint,
     config,
     diff,
-    draft: (args, options) => withMissionFactories(missionServicesFn => draft(args, { ...options, missionServicesFn })),
+    draft: (args, options) => {
+      // Create adapter with missionServicesFn injected via withMissionFactories
+      return withMissionFactories(missionServicesFn => {
+        const adapter = createDraftWorkflowAdapter({ missionServicesFn });
+        const useCase = new DraftCommandUseCase(adapter);
+        const cmd = createDraftCommand(useCase);
+        return cmd(args, { ...options, missionServicesFn });
+      });
+    },
     handoff: (args, options) => withMissionFactories(missionServicesFn => handoff(args, { ...options, missionServicesFn })),
     integrate: createIntegrateCommand(new IntegrateCommandUseCase({
       execute: (args, options) => withMissionFactories(missionServicesFn => integrate(args, { ...options, missionServicesFn })),

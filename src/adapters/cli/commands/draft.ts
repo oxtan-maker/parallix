@@ -1,4 +1,6 @@
 // @ts-nocheck
+import type { DraftWorkflowPort, DraftWorkflowContext } from '../../../application/ports/cli-workflows.js';
+import { DraftCommandUseCase } from '../../../application/draft-command-use-case.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
@@ -125,338 +127,46 @@ async function runDraftCommand(/** @type {string[]} */ args, {
   logFn = fmt.log.plain,
   errorFn = fmt.log.plainError
 } = {}) {
-  const explicitInput = args[0];
-  const draftTarget = resolveDraftTarget(explicitInput) || { slug: inferSlugFn(explicitInput), syntheticTask: null };
-  const slug = draftTarget.slug;
-  if (!slug) {
-    errorFn(fmt.status('FAIL', 'Usage: px draft <slug> [--agent <family>]'));
-    exitFn(1);
-    return;
-  }
+  // Delegate to the use case/port. Injected dependencies are forwarded
+  // through the adapter so characterization tests retain their seams.
+  const deps = {
+    inferSlugFn,
+    resolveMainRepoFn,
+    conventionalWorktreePathFn,
+    ensureMissionBranchFn,
+    ensureWorktreeFn,
+    ensureGraphifyWorkspaceFn,
+    ensureGraphifyIgnoreFn,
+    ensureMissionFileFn,
+    detectLaunchBaseBranchFn,
+    ensureMissionBaseBranchRecordedFn,
+    bootstrapBacklogTaskFn,
+    ensureStandaloneMissionBaselineFn,
+    ensureDraftRepoConfigCommittedFn,
+    readAgentConfigOrExitFn,
+    selectAgentFn,
+    startDraftAgentFn,
+    resolveTaskFileFn,
+    reportTaskResolutionFn,
+    checkBacklogIntegrityFn,
+    ensureRepoExistsFn,
+    transitionTaskFn,
+    transitionVirtualFn,
+    recordDraftImplementerFn,
+    recordDraftStatsFn,
+    enforceDraftCommitSafetyFn,
+    validateDraftClassificationFn,
+    normalizeDraftClassificationFn,
+    restartDraftAgentFn,
+    missionServicesFn,
+    exitFn,
+    logFn,
+    errorFn,
+  };
+  const adapter = createDraftWorkflowAdapter(deps);
+  const useCase = new DraftCommandUseCase(adapter);
+  return useCase.execute(args, deps);
 
-  const normalizedSlug = slug.toLowerCase();
-  const syntheticTask = draftTarget.syntheticTask;
-
-  // Allow operators to pin the agent family via CLI flag instead of WORKFLOW_AGENT env var.
-  function flagValue(/** @type {string[]} */ arr, /** @type {string} */ flag, /** @type {string} */ name) {
-    const i = arr.indexOf(flag);
-    if (i === -1) {return null;}
-    const v = arr[i + 1];
-    if (!v || v.startsWith('--')) {
-      errorFn(fmt.status('FAIL', `Missing value for --${name}. Usage: px draft <slug> --${name} <family>`));
-      exitFn(1);
-      return null;
-    }
-    return v;
-  }
-  const preselectedAgent = flagValue(args, '--agent', 'agent');
-  logFn(fmt.bold(`Starting mission draft automation for: ${fmt.slug(normalizedSlug)}`));
-
-  const mainRepo = resolveMainRepoFn();
-  if (ensureRepoExistsFn(mainRepo, exitFn, errorFn) === false) {
-    return;
-  }
-
-  const baselineResult = ensureStandaloneMissionBaselineFn(mainRepo);
-  if (baselineResult && baselineResult.failed) {
-    errorFn(fmt.status('FAIL', `Standalone mission baseline: ${baselineResult.message}`));
-    exitFn(1);
-    return;
-  }
-  if (baselineResult && baselineResult.committed) {
-    logFn(fmt.status('PASS', 'Standalone mission baseline committed in the primary checkout.'));
-  }
-
-  if (!ensureDraftRepoConfigCommittedFn(mainRepo, { errorFn })) {
-    exitFn(1);
-    return;
-  }
-
-  // Detect the branch HEAD is on at draft time (where the human stands). This is
-  // the single source of truth for the mission's base. A non-primary feature
-  // branch is recorded as the mission base; the primary branch (or a detached
-  // HEAD) leaves no record and keeps the byte-identical legacy behaviour.
-  let launchBase = null;
-  try {
-    launchBase = detectLaunchBaseBranchFn(process.cwd());
-  } catch (error) {
-    errorFn(fmt.status('FAIL', /** @type {any} */ (error).message));
-    exitFn(1);
-    return;
-  }
-  let recordedBase = null;
-  if (launchBase && launchBase !== getPrimaryBranch(mainRepo)) {
-    recordedBase = launchBase;
-    logFn(fmt.status('INFO', `Feature-branch mission: base branch detected as ${fmt.branch(recordedBase)}.`));
-  }
-
-  // A feature-branch mission may reference a task that was only committed on that
-  // feature branch, so it is absent from the primary checkout (mainRepo). In that
-  // case the task lives in the current worktree (where HEAD is on the feature
-  // branch), which the mission branch is cut from. Resolve preflight checks there.
-  const taskLookupRoot = recordedBase ? process.cwd() : mainRepo;
-
-  // Preflight: Ensure Backlog task exists and is unambiguous before side effects
-  const mainResolution = resolveTaskFileFn(normalizedSlug, taskLookupRoot);
-  if (!mainResolution.ok && !syntheticTask) {
-    reportTaskResolutionFn(mainResolution, normalizedSlug, errorFn);
-    exitFn(1);
-    return;
-  }
-
-  // Preflight: Backlog integrity check (filename vs frontmatter ID)
-  const relevantIssues = syntheticTask ? [] : checkBacklogIntegrityFn(taskLookupRoot, normalizedSlug);
-  if (relevantIssues.length > 0) {
-    errorFn(fmt.status('FAIL', `Backlog integrity issues detected for ${normalizedSlug}:`));
-    relevantIssues.forEach(issue => {
-      if (issue.type === 'duplicate-completed') {
-        logFn(`  - ${fmt.path(/** @type {any} */ (issue).file)}: task ${fmt.bold(/** @type {any} */ (issue).taskId)} already has a canonical copy in ${fmt.path(/** @type {any} */ (issue).canonicalFile)}; this backlog/tasks copy is stale.`);
-      } else {
-        logFn(`  - ${fmt.path(/** @type {any} */ (issue).file)}: filename ID (${fmt.bold(/** @type {any} */ (issue).filenameId)}) does not match frontmatter ID (${fmt.bold(/** @type {any} */ (issue).frontmatterId)})`);
-      }
-    });
-    logFn('Repair: Fix filename/id mismatch, or remove the stale backlog/tasks copy of a completed/archived task, before drafting.');
-    exitFn(1);
-    return;
-  }
-
-  const branchName = missionBranchName(normalizedSlug, mainRepo);
-  logFn(fmt.bold(`Step 1: Setting up branch ${fmt.branch(branchName)}...`));
-  ensureMissionBranchFn(mainRepo, branchName, { logFn, baseBranch: recordedBase });
-
-  const targetWorktree = conventionalWorktreePathFn(normalizedSlug, mainRepo);
-  logFn(fmt.bold(`Step 2: Ensuring dedicated worktree at ${fmt.path(targetWorktree)}...`));
-  ensureWorktreeFn(mainRepo, targetWorktree, branchName, { logFn, errorFn });
-  ensureGraphifyWorkspaceFn(targetWorktree, mainRepo, { logFn });
-  ensureGraphifyIgnoreFn(targetWorktree, { logFn });
-
-  const gitignoreResult = ensureWorkflowGitignore(targetWorktree, { logFn });
-  if (gitignoreResult.created) {
-    logFn(fmt.status('PASS', `Created .gitignore with ${gitignoreResult.appended} workflow entries in ${fmt.path(targetWorktree)}`));
-  } else if (gitignoreResult.appended > 0) {
-    logFn(fmt.status('PASS', `Appended ${gitignoreResult.appended} workflow entries to .gitignore in ${fmt.path(targetWorktree)}`));
-  } else if (gitignoreResult.skipped) {
-    logFn(fmt.status('INFO', `.gitignore in ${fmt.path(targetWorktree)}: ${gitignoreResult.reason === 'symlink' ? 'symbolic link (skipped)' : 'not a git repo (skipped)'}`));
-  } else {
-    logFn(fmt.status('PASS', `.gitignore in ${fmt.path(targetWorktree)} already contains all workflow entries`));
-  }
-
-  logFn(fmt.bold('Step 3: Scaffolding MISSION.md...'));
-  const missionFile = ensureMissionFileFn(targetWorktree, normalizedSlug, { logFn });
-  ensureMissionBaseBranchRecordedFn(missionFile, recordedBase, { logFn });
-
-  logFn(fmt.bold('Step 4: Ensuring Backlog task exists in worktree...'));
-  if (!bootstrapBacklogTaskFn(targetWorktree, mainRepo, normalizedSlug, { logFn, errorFn, syntheticTask: /** @type {null | undefined} */ (syntheticTask) })) {
-    const { tasksDir } = getTaskStorage(targetWorktree);
-    const taskDirHint = path.relative(targetWorktree, tasksDir).split(path.sep).join('/');
-    errorFn(fmt.status('FAIL', `Backlog task for ${normalizedSlug} could not be prepared in the mission worktree.`));
-    logFn(`Repair: create the task with your task adapter, or add ${fmt.path(`${taskDirHint}/${normalizedSlug} - <title>.md`)} manually.`);
-    exitFn(1);
-    return;
-  }
-
-  const classificationCheck = validateDraftClassificationFn(normalizedSlug, targetWorktree, {
-    errorFn
-  });
-  if (!classificationCheck.ok) {
-    exitFn(1);
-    return;
-  }
-
-  logFn('\n' + fmt.status('PASS', 'Draft setup complete.'));
-  logFn(`Worktree: ${fmt.path(targetWorktree)}`);
-  logFn(`Mission doc: ${fmt.path(missionFile)}`);
-
-  // Materialize the Mission aggregate in SQLite through the intake boundary
-  // BEFORE the external Backlog task is transitioned. After cutover
-  // (architecture migration) SQLite is the sole lifecycle authority, so a Mission that
-  // exists only as Markdown is not a valid post-draft state: the lifecycle and
-  // integration services fail closed on a missing aggregate. Intake is
-  // idempotent — a second intake of the same identity is refused as a
-  // `conflict`, which is the expected result on a re-draft. Every other
-  // outcome (database unavailable, validation, write failure) aborts the draft
-  // before any external effect, per architecture invariant.
-  // Title and labels are descriptive metadata: read them best-effort so a
-  // missing document never becomes the reason a Mission is not materialized.
-  let missionTitle = normalizedSlug;
-  try {
-    const firstLine = fs.readFileSync(missionFile, 'utf8').split('\n')[0] || '';
-    missionTitle = firstLine.replace(/^#\s*Mission:\s*/i, '').trim() || normalizedSlug;
-  } catch {
-    missionTitle = normalizedSlug;
-  }
-  let taskLabels = [];
-  try {
-    const taskResolution = resolveTaskFileFn(normalizedSlug, targetWorktree);
-    taskLabels = taskResolution?.ok && taskResolution?.taskFile
-      ? getTaskLabels(taskResolution.taskFile)
-      : [];
-  } catch {
-    taskLabels = [];
-  }
-
-  let intakeOutcome;
-  try {
-    if (typeof missionServicesFn !== 'function') { throw new Error('draft command requires injected mission services'); }
-    const missionServices = await missionServicesFn(targetWorktree);
-    intakeOutcome = await missionServices.intake.execute({
-      operationId: `draft-intake-${normalizedSlug}`,
-      missionId: missionId(normalizedSlug),
-      // Read the identity back from composition rather than deriving it from
-      // `targetWorktree`: that path is the `<repo>-<slug>` mission worktree,
-      // and keying the Mission off it would persist a repository no other
-      // command resolves to. Composition canonicalizes to the primary checkout.
-      repositoryId: missionServices.repositoryId,
-      title: missionTitle,
-      labels: taskLabels,
-      rawStatus: 'backlog',
-      externalTaskRef: null,
-      capabilities: new Set(['mission:intake']),
-    });
-  } catch (intakeError) {
-    errorFn(fmt.status('FAIL', `Mission intake to SQLite failed for ${normalizedSlug}: ${/** @type {any} */ (intakeError).message}`));
-    logFn('Repair: ensure the operator-local database is reachable, then re-run the draft. The Backlog task was not transitioned.');
-    exitFn(1);
-    return;
-  }
-
-  if (intakeOutcome.status === 'completed') {
-    logFn(fmt.status('PASS', `Mission materialized in SQLite (v${intakeOutcome.value.version})`));
-  } else if (intakeOutcome.error?.kind === 'conflict') {
-    logFn(fmt.status('INFO', `Mission already recorded in SQLite: ${intakeOutcome.error.message}`));
-  } else {
-    errorFn(fmt.status('FAIL', `Mission intake to SQLite failed for ${normalizedSlug}: ${intakeOutcome.error?.message || 'unknown error'}`));
-    logFn('Repair: resolve the intake failure above, then re-run the draft. The Backlog task was not transitioned.');
-    exitFn(1);
-    return;
-  }
-
-  if (!await transitionTaskFn(normalizedSlug, 'backlog', { rootDir: targetWorktree, log: logFn })) {
-    errorFn(fmt.status('FAIL', `Could not transition task ${normalizedSlug} to backlog status.`));
-    exitFn(1);
-    return;
-  }
-
-  // Pre-select the initial family; bookkeeping commit is deferred until after the
-  // launch settles so a failed launch cannot leave a stale assignee commit behind.
-  const agentConfig = readAgentConfigOrExitFn();
-  const agent = preselectedAgent || selectAgentFn('draft', { config: agentConfig });
-
-  // @ts-expect-error buildDraftPrompt type mismatch
-  const prompt = buildDraftPrompt(normalizedSlug, { rootDir: mainRepo, worktree: targetWorktree || '' });
-  logFn('Launching draft agent...');
-  const { agent: actualAgent, result } = await startDraftAgentFn({
-    prompt,
-    // @ts-expect-error worktree not in type
-    worktree: targetWorktree,
-    agent
-  });
-  logFn(`Draft agent family: ${fmt.agent(/** @type {any} */ (actualAgent))}`);
-
-  if (result.error) {
-    errorFn(fmt.status('FAIL', `Could not start draft agent (${fmt.agent(/** @type {any} */ (actualAgent))}): ${/** @type {any} */ (result.error).message}`));
-    exitFn(1);
-    return;
-  }
-
-  if (typeof /** @type {any} */ (result).status === 'number' && /** @type {any} */ (result).status !== 0) {
-    errorFn(fmt.status('FAIL', `Draft agent (${fmt.agent(/** @type {any} */ (actualAgent))}) exited with status ${/** @type {any} */ (result).status}.`));
-    exitFn(result.status || 1);
-    return;
-  }
-
-  const taskResolutionAfter = resolveTaskFileFn(normalizedSlug, targetWorktree);
-  recordDraftImplementerFn({
-    selected: agent,
-    actual: actualAgent,
-    taskResolution: taskResolutionAfter,
-    slug: normalizedSlug,
-    worktree: targetWorktree
-  });
-
-  // Record stats from the mission worktree, where the backlog task always lives
-  // (a feature-branch task is absent from mainRepo/the primary checkout). This
-  // matches how the review and active stages record stats (rootDir: worktree).
-  recordDraftStatsFn({
-    slug: normalizedSlug,
-    rootDir: targetWorktree,
-    agentFamily: actualAgent,
-    result,
-    log: logFn,
-    // @ts-expect-error reportTaskResolutionFn accepts extra properties
-    error: errorFn
-  });
-
-  // Post-draft mission type repair: if the agent did not produce valid labels,
-  // relaunch it once with a targeted fix prompt and validate again.
-  const normalizationResult = normalizeDraftClassificationFn(normalizedSlug, targetWorktree, {
-    errorFn
-  });
-  if (!normalizationResult.ok) {
-    logFn(fmt.status('WARN', `Post-draft mission type labels are not valid (${normalizationResult.reason}). Relaunching draft agent to repair them.`));
-    const restartOk = await restartDraftAgentFn(normalizedSlug, targetWorktree, {
-      logFn,
-      errorFn,
-      // @ts-expect-error restartDraftAgentFn accepts extra properties
-      exitFn
-    });
-    if (!restartOk) {
-      exitFn(1);
-      return;
-    }
-    const postRestartNorm = normalizeDraftClassificationFn(normalizedSlug, targetWorktree, {
-      errorFn
-    });
-    if (!postRestartNorm.ok) {
-      errorFn(fmt.status('FAIL', `Post-draft mission type labels are still invalid after restart (${postRestartNorm.reason}).`));
-      exitFn(1);
-      return;
-    } else {
-      logFn(fmt.status('PASS', `Post-draft mission type labels validated after restart: ${postRestartNorm.classification}`));
-    }
-  } else {
-    logFn(fmt.status('PASS', `Post-draft mission type labels validated: ${normalizationResult.classification}`));
-  }
-
-  // Post-draft label sync: copy validated labels from the mission worktree
-  // task file to the base worktree task file so integration preflight can
-  // find them. See architecture migration.
-  try {
-    const missionTaskResolution = resolveTaskFileFn(normalizedSlug, targetWorktree);
-    if (missionTaskResolution.ok && missionTaskResolution.taskFile) {
-      const missionLabels = getTaskLabels(missionTaskResolution.taskFile);
-      if (missionLabels.length > 0) {
-        const syncOk = syncTaskLabelsToBaseWorktree(normalizedSlug, targetWorktree);
-        if (syncOk) {
-          logFn(fmt.status('PASS', `Classification labels synced to base worktree: [${missionLabels.join(', ')}]`));
-        } else {
-          logFn(fmt.status('WARN', `Could not sync labels to base worktree for ${normalizedSlug}. Labels remain valid on mission worktree.`));
-        }
-      }
-    }
-  } catch (labelSyncError) {
-    logFn(fmt.status('WARN', `Label sync skipped: ${/** @type {any} */ (labelSyncError).message}`));
-  }
-
-  // Re-assert the Base-Branch record after the agent runs so a full MISSION.md
-  // rewrite cannot drop it; the safety-harness commit below captures the change.
-  ensureMissionBaseBranchRecordedFn(missionFile, recordedBase, { logFn });
-
-  try {
-    enforceDraftCommitSafetyFn({ slug: normalizedSlug, worktree: targetWorktree, logFn, errorFn });
-  } catch (error) {
-    errorFn(fmt.status('FAIL', /** @type {any} */ (error).message));
-    exitFn(1);
-    return;
-  }
-
-  if (!(await transitionVirtualFn(transitionTaskFn, normalizedSlug, 'ready', /** @type {{ rootDir: string, log: Function }} */ ({ rootDir: targetWorktree, log: logFn })))) {
-    errorFn(fmt.status('FAIL', `Could not transition task ${normalizedSlug} to ready status.`));
-    exitFn(1);
-    return;
-  }
-
-  logFn('\n' + fmt.status('INFO', `Next: ${fmt.command(`cd ${targetWorktree}`)}`));
 }
 
 // @ts-expect-error implicit any on args/deps
@@ -1131,6 +841,453 @@ function recordDraftStats({ slug, rootDir, agentFamily, result, log = fmt.log.pl
 }
 
 /** @type {typeof draft & {draft: typeof draft, runDraftCommand: typeof runDraftCommand, recordDraftStats: typeof recordDraftStats, buildDraftPrompt: typeof buildDraftPrompt, recordDraftImplementer: typeof recordDraftImplementer, enforceDraftCommitSafety: typeof enforceDraftCommitSafety, fallbackDraftCommitMessage: typeof fallbackDraftCommitMessage, bootstrapBacklogTask: typeof bootstrapBacklogTask, ensureGraphifyWorkspace: typeof ensureGraphifyWorkspace, ensureGraphifyIgnore: typeof ensureGraphifyIgnore, ensureMissionBranch: typeof ensureMissionBranch, ensureMissionBaseBranchRecorded: typeof ensureMissionBaseBranchRecorded, ensureWorktree: typeof ensureWorktree, ensureMissionFile: typeof ensureMissionFile, ensureDraftRepoConfigCommitted: typeof ensureDraftRepoConfigCommitted, ensureRepoExists: typeof ensureRepoExists, classifyDraftEntries: typeof classifyDraftEntries, isUnmergedStatus: typeof isUnmergedStatus, isDeletedStatus: typeof isDeletedStatus, isMissionTaskPath: typeof isMissionTaskPath, isExpectedDraftPath: typeof isExpectedDraftPath, validateDraftClassification: typeof validateDraftClassification, normalizeDraftClassification: typeof normalizeDraftClassification, buildRestartPrompt: typeof buildRestartPrompt, restartDraftAgent: typeof restartDraftAgent}} */
-const _draftExport = Object.assign(draft, { draft, runDraftCommand, recordDraftStats, buildDraftPrompt, recordDraftImplementer, enforceDraftCommitSafety, fallbackDraftCommitMessage, bootstrapBacklogTask, ensureGraphifyWorkspace, ensureGraphifyIgnore, ensureMissionBranch, ensureMissionBaseBranchRecorded, ensureWorktree, ensureMissionFile, ensureDraftRepoConfigCommitted, ensureRepoExists, classifyDraftEntries, isUnmergedStatus, isDeletedStatus, isMissionTaskPath, isExpectedDraftPath, validateDraftClassification, normalizeDraftClassification, buildRestartPrompt, restartDraftAgent });
+/**
+ * Create a DraftWorkflowPort implementation backed by the adapter's functions.
+ * Each port method performs its actual workflow step using the adapter's helper
+ * functions. Composition merges `missionServicesFn` into deps at call time.
+ */
+// @ts-expect-error return type matches DraftWorkflowPort
+function createDraftWorkflowAdapter(deps: Record<string, unknown> = {}) {
+  const exitFn = (deps.exitFn || process.exit) as (_code?: number) => never;
+  const logFn = (deps.logFn || fmt.log.plain) as (_msg: string) => void;
+  const errorFn = (deps.errorFn || fmt.log.plainError) as (_msg: string) => void;
+
+  // Helper to create an "exited" context when a step needs to abort
+  function exitedContext(partial: Partial<DraftWorkflowContext>): DraftWorkflowContext {
+    return {
+      exited: true,
+      slug: partial.slug || '',
+      mainRepo: partial.mainRepo || '',
+      targetWorktree: partial.targetWorktree || '',
+      missionFile: partial.missionFile || '',
+      recordedBase: partial.recordedBase || null,
+      syntheticTask: partial.syntheticTask || null,
+      agent: partial.agent || '',
+      actualAgent: partial.actualAgent || null,
+      agentResult: null,
+      exitFn,
+      logFn,
+      errorFn,
+      missionServicesFn: partial.missionServicesFn || ((() => {}) as Function),
+      options: partial.options || {},
+    } as DraftWorkflowContext;
+  }
+
+  // Helper: safe exit — call exitFn but return (for testability)
+  function safeExit(code: number): boolean {
+    try { exitFn(code); } catch { /* exit may throw in tests */ }
+    return true;
+  }
+
+  return {
+    // Preflight: resolve slug, validate repo, baseline, config, task resolution, classification
+    preflight: (args: string[], options: Record<string, unknown> = {}): DraftWorkflowContext => {
+      const merged = { ...deps, ...options };
+      const inferSlugFn = merged.inferSlugFn || inferSlug;
+      const resolveMainRepoFn = merged.resolveMainRepoFn || resolveMainRepo;
+      const ensureRepoExistsFn = merged.ensureRepoExistsFn || ensureRepoExists;
+      const ensureStandaloneMissionBaselineFn = merged.ensureStandaloneMissionBaselineFn || ensureStandaloneMissionBaseline;
+      const ensureDraftRepoConfigCommittedFn = merged.ensureDraftRepoConfigCommittedFn || ensureDraftRepoConfigCommitted;
+      const detectLaunchBaseBranchFn = merged.detectLaunchBaseBranchFn || detectLaunchBaseBranch;
+      const resolveTaskFileFn = merged.resolveTaskFileFn || resolveTaskFile;
+      const reportTaskResolutionFn = merged.reportTaskResolutionFn || reportTaskResolution;
+      const checkBacklogIntegrityFn = merged.checkBacklogIntegrityFn || checkBacklogIntegrity;
+
+      const explicitInput = args[0];
+      const draftTarget = resolveDraftTarget(explicitInput) || { slug: inferSlugFn(explicitInput), syntheticTask: null };
+      const slug = draftTarget.slug;
+      if (!slug) {
+        errorFn(fmt.status('FAIL', 'Usage: px draft <slug> [--agent <family>]'));
+        safeExit(1);
+        return exitedContext({ slug: '', options });
+      }
+
+      const normalizedSlug = slug.toLowerCase();
+      const syntheticTask = draftTarget.syntheticTask;
+
+      // Allow operators to pin the agent family via CLI flag
+      function flagValue(arr: string[], flag: string, name: string) {
+        const i = arr.indexOf(flag);
+        if (i === -1) { return null; }
+        const v = arr[i + 1];
+        if (!v || v.startsWith('--')) {
+          errorFn(fmt.status('FAIL', `Missing value for --${name}. Usage: px draft <slug> --${name} <family>`));
+          safeExit(1);
+          return null;
+        }
+        return v;
+      }
+      const preselectedAgent = flagValue(args, '--agent', 'agent');
+      logFn(fmt.bold(`Starting mission draft automation for: ${fmt.slug(normalizedSlug)}`));
+
+      const mainRepo = resolveMainRepoFn();
+      if (ensureRepoExistsFn(mainRepo, exitFn, errorFn) === false) {
+        return exitedContext({ slug: normalizedSlug, mainRepo, options });
+      }
+
+      const baselineResult = ensureStandaloneMissionBaselineFn(mainRepo);
+      if (baselineResult && baselineResult.failed) {
+        errorFn(fmt.status('FAIL', `Standalone mission baseline: ${baselineResult.message}`));
+        safeExit(1);
+        return exitedContext({ slug: normalizedSlug, mainRepo, options });
+      }
+      if (baselineResult && baselineResult.committed) {
+        logFn(fmt.status('PASS', 'Standalone mission baseline committed in the primary checkout.'));
+      }
+
+      if (!ensureDraftRepoConfigCommittedFn(mainRepo, { errorFn })) {
+        safeExit(1);
+        return exitedContext({ slug: normalizedSlug, mainRepo, options });
+      }
+
+      let launchBase: string | null = null;
+      try {
+        launchBase = detectLaunchBaseBranchFn(process.cwd());
+      } catch (error) {
+        errorFn(fmt.status('FAIL', /** @type {any} */ (error).message));
+        safeExit(1);
+        return exitedContext({ slug: normalizedSlug, mainRepo, options });
+      }
+      let recordedBase: string | null = null;
+      if (launchBase && launchBase !== getPrimaryBranch(mainRepo)) {
+        recordedBase = launchBase;
+        logFn(fmt.status('INFO', `Feature-branch mission: base branch detected as ${fmt.branch(recordedBase)}.`));
+      }
+
+      const taskLookupRoot = recordedBase ? process.cwd() : mainRepo;
+      const mainResolution = resolveTaskFileFn(normalizedSlug, taskLookupRoot);
+      if (!mainResolution.ok && !syntheticTask) {
+        reportTaskResolutionFn(mainResolution, normalizedSlug, errorFn);
+        safeExit(1);
+        return exitedContext({ slug: normalizedSlug, mainRepo, options });
+      }
+
+      const relevantIssues = syntheticTask ? [] : checkBacklogIntegrityFn(taskLookupRoot, normalizedSlug);
+      if (relevantIssues.length > 0) {
+        errorFn(fmt.status('FAIL', `Backlog integrity issues detected for ${normalizedSlug}:`));
+        relevantIssues.forEach((issue: any) => {
+          if (issue.type === 'duplicate-completed') {
+            logFn(`  - ${fmt.path(issue.file)}: task ${fmt.bold(issue.taskId)} already has a canonical copy in ${fmt.path(issue.canonicalFile)}; this backlog/tasks copy is stale.`);
+          } else {
+            logFn(`  - ${fmt.path(issue.file)}: filename ID (${fmt.bold(issue.filenameId)}) does not match frontmatter ID (${fmt.bold(issue.frontmatterId)})`);
+          }
+        });
+        logFn('Repair: Fix filename/id mismatch, or remove the stale backlog/tasks copy of a completed/archived task, before drafting.');
+        safeExit(1);
+        return exitedContext({ slug: normalizedSlug, mainRepo, options });
+      }
+
+      return {
+        exited: false,
+        slug: normalizedSlug,
+        mainRepo,
+        targetWorktree: '',
+        missionFile: '',
+        recordedBase,
+        syntheticTask,
+        agent: preselectedAgent || '',
+        actualAgent: null,
+        agentResult: null,
+        exitFn,
+        logFn,
+        errorFn,
+        missionServicesFn: merged.missionServicesFn || ((() => {}) as Function),
+        options: merged,
+      } as DraftWorkflowContext;
+    },
+
+    // Setup: create branch, worktree, graphify workspace, gitignore
+    setup: (ctx: DraftWorkflowContext): DraftWorkflowContext => {
+      const merged = ctx.options as Record<string, unknown>;
+      const ensureMissionBranchFn = merged.ensureMissionBranchFn || ensureMissionBranch;
+      const ensureWorktreeFn = merged.ensureWorktreeFn || ensureWorktree;
+      const ensureGraphifyWorkspaceFn = merged.ensureGraphifyWorkspaceFn || ensureGraphifyWorkspace;
+      const ensureGraphifyIgnoreFn = merged.ensureGraphifyIgnoreFn || ensureGraphifyIgnore;
+      const conventionalWorktreePathFn = merged.conventionalWorktreePathFn || conventionalWorktreePath;
+      const missionBranchNameFn = missionBranchName;
+
+      const branchName = missionBranchNameFn(ctx.slug, ctx.mainRepo);
+      logFn(fmt.bold(`Step 1: Setting up branch ${fmt.branch(branchName)}...`));
+      ensureMissionBranchFn(ctx.mainRepo, branchName, { logFn, baseBranch: ctx.recordedBase });
+
+      const targetWorktree = conventionalWorktreePathFn(ctx.slug, ctx.mainRepo);
+      logFn(fmt.bold(`Step 2: Ensuring dedicated worktree at ${fmt.path(targetWorktree)}...`));
+      ensureWorktreeFn(ctx.mainRepo, targetWorktree, branchName, { logFn, errorFn });
+      ensureGraphifyWorkspaceFn(targetWorktree, ctx.mainRepo, { logFn });
+      ensureGraphifyIgnoreFn(targetWorktree, { logFn });
+
+      const gitignoreResult = ensureWorkflowGitignore(targetWorktree, { logFn });
+      if (gitignoreResult.created) {
+        logFn(fmt.status('PASS', `Created .gitignore with ${gitignoreResult.appended} workflow entries in ${fmt.path(targetWorktree)}`));
+      } else if (gitignoreResult.appended > 0) {
+        logFn(fmt.status('PASS', `Appended ${gitignoreResult.appended} workflow entries to .gitignore in ${fmt.path(targetWorktree)}`));
+      } else if (gitignoreResult.skipped) {
+        logFn(fmt.status('INFO', `.gitignore in ${fmt.path(targetWorktree)}: ${gitignoreResult.reason === 'symlink' ? 'symbolic link (skipped)' : 'not a git repo (skipped)'}`));
+      } else {
+        logFn(fmt.status('PASS', `.gitignore in ${fmt.path(targetWorktree)} already contains all workflow entries`));
+      }
+
+      return { ...ctx, targetWorktree, missionFile: ctx.missionFile };
+    },
+
+    // Scaffold: MISSION.md, base branch record, backlog bootstrap
+    scaffold: (ctx: DraftWorkflowContext): DraftWorkflowContext => {
+      const merged = ctx.options as Record<string, unknown>;
+      const ensureMissionFileFn = merged.ensureMissionFileFn || ensureMissionFile;
+      const ensureMissionBaseBranchRecordedFn = merged.ensureMissionBaseBranchRecordedFn || ensureMissionBaseBranchRecorded;
+      const bootstrapBacklogTaskFn = merged.bootstrapBacklogTaskFn || bootstrapBacklogTask;
+
+      logFn(fmt.bold('Step 3: Scaffolding MISSION.md...'));
+      const missionFile = ensureMissionFileFn(ctx.targetWorktree, ctx.slug, { logFn });
+      ensureMissionBaseBranchRecordedFn(missionFile, ctx.recordedBase, { logFn });
+
+      logFn(fmt.bold('Step 4: Ensuring Backlog task exists in worktree...'));
+      if (!bootstrapBacklogTaskFn(ctx.targetWorktree, ctx.mainRepo, ctx.slug, { logFn, errorFn, syntheticTask: ctx.syntheticTask })) {
+        const { tasksDir } = getTaskStorage(ctx.targetWorktree);
+        const taskDirHint = path.relative(ctx.targetWorktree, tasksDir).split(path.sep).join('/');
+        errorFn(fmt.status('FAIL', `Backlog task for ${ctx.slug} could not be prepared in the mission worktree.`));
+        logFn(`Repair: create the task with your task adapter, or add ${fmt.path(`${taskDirHint}/${ctx.slug} - <title>.md`)} manually.`);
+        safeExit(1);
+        return exitedContext({ ...ctx, missionFile });
+      }
+
+      // Validate classification after task is bootstrapped in worktree
+      const validateDraftClassificationFn = merged.validateDraftClassificationFn || validateDraftClassification;
+      const classificationCheck = validateDraftClassificationFn(ctx.slug, ctx.targetWorktree, {
+        errorFn
+      });
+      if (!classificationCheck.ok) {
+        safeExit(1);
+        return exitedContext({ ...ctx, missionFile });
+      }
+
+      logFn('\n' + fmt.status('PASS', 'Draft setup complete.'));
+      logFn(`Worktree: ${fmt.path(ctx.targetWorktree)}`);
+      logFn(`Mission doc: ${fmt.path(missionFile)}`);
+
+      return { ...ctx, missionFile };
+    },
+
+    // Intake: materialize mission in SQLite
+    intake: async (ctx: DraftWorkflowContext): Promise<DraftWorkflowContext> => {
+      const resolveTaskFileFn = (ctx.options as any).resolveTaskFileFn || resolveTaskFile;
+      const getTaskLabelsFn = getTaskLabels;
+
+      let missionTitle = ctx.slug;
+      try {
+        const firstLine = fs.readFileSync(ctx.missionFile, 'utf8').split('\n')[0] || '';
+        missionTitle = firstLine.replace(/^#\s*Mission:\s*/i, '').trim() || ctx.slug;
+      } catch {
+        missionTitle = ctx.slug;
+      }
+      let taskLabels: string[] = [];
+      try {
+        const taskResolution = resolveTaskFileFn(ctx.slug, ctx.targetWorktree);
+        taskLabels = taskResolution?.ok && taskResolution?.taskFile
+          ? getTaskLabelsFn(taskResolution.taskFile)
+          : [];
+      } catch {
+        taskLabels = [];
+      }
+
+      let intakeOutcome: any;
+      try {
+        if (typeof ctx.missionServicesFn !== 'function') { throw new Error('draft command requires injected mission services'); }
+        const missionServices = await ctx.missionServicesFn(ctx.targetWorktree);
+        intakeOutcome = await missionServices.intake.execute({
+          operationId: `draft-intake-${ctx.slug}`,
+          missionId: missionId(ctx.slug),
+          repositoryId: missionServices.repositoryId,
+          title: missionTitle,
+          labels: taskLabels,
+          rawStatus: 'backlog',
+          externalTaskRef: null,
+          capabilities: new Set(['mission:intake']),
+        });
+      } catch (intakeError) {
+        errorFn(fmt.status('FAIL', `Mission intake to SQLite failed for ${ctx.slug}: ${/** @type {any} */ (intakeError).message}`));
+        logFn('Repair: ensure the operator-local database is reachable, then re-run the draft. The Backlog task was not transitioned.');
+        safeExit(1);
+        return exitedContext({ ...ctx });
+      }
+
+      if (intakeOutcome.status === 'completed') {
+        logFn(fmt.status('PASS', `Mission materialized in SQLite (v${intakeOutcome.value.version})`));
+      } else if (intakeOutcome.error?.kind === 'conflict') {
+        logFn(fmt.status('INFO', `Mission already recorded in SQLite: ${intakeOutcome.error.message}`));
+      } else {
+        errorFn(fmt.status('FAIL', `Mission intake to SQLite failed for ${ctx.slug}: ${intakeOutcome.error?.message || 'unknown error'}`));
+        logFn('Repair: resolve the intake failure above, then re-run the draft. The Backlog task was not transitioned.');
+        safeExit(1);
+        return exitedContext({ ...ctx });
+      }
+
+      return ctx;
+    },
+
+    // Transition: backlog task to target status
+    transition: async (ctx: DraftWorkflowContext): Promise<DraftWorkflowContext> => {
+      const transitionTaskFn = (ctx.options as any).transitionTaskFn || transitionTask;
+
+      if (!await transitionTaskFn(ctx.slug, 'backlog', { rootDir: ctx.targetWorktree, log: ctx.logFn })) {
+        errorFn(fmt.status('FAIL', `Could not transition task ${ctx.slug} to backlog status.`));
+        safeExit(1);
+        return exitedContext({ ...ctx });
+      }
+
+      return ctx;
+    },
+
+    // Launch agent: read config, select, launch, record
+    launchAgent: async (ctx: DraftWorkflowContext): Promise<DraftWorkflowContext> => {
+      const merged = ctx.options as Record<string, unknown>;
+      const readAgentConfigOrExitFn = merged.readAgentConfigOrExitFn || readAgentConfigOrExit;
+      const selectAgentFn = merged.selectAgentFn || selectAgent;
+      const startDraftAgentFn = merged.startDraftAgentFn || startDraftAgent;
+      const resolveTaskFileFn = merged.resolveTaskFileFn || resolveTaskFile;
+      const recordDraftImplementerFn = merged.recordDraftImplementerFn || recordDraftImplementer;
+      const recordDraftStatsFn = merged.recordDraftStatsFn || recordDraftStats;
+
+      const agentConfig = readAgentConfigOrExitFn();
+      const agent = ctx.agent || selectAgentFn('draft', { config: agentConfig });
+
+      // @ts-expect-error buildDraftPrompt type mismatch
+      const prompt = buildDraftPrompt(ctx.slug, { rootDir: ctx.mainRepo, worktree: ctx.targetWorktree || '' });
+      logFn('Launching draft agent...');
+      const { agent: actualAgent, result } = await startDraftAgentFn({
+        prompt,
+        // @ts-expect-error worktree not in type
+        worktree: ctx.targetWorktree,
+        agent
+      });
+      logFn(`Draft agent family: ${fmt.agent(/** @type {any} */ (actualAgent))}`);
+
+      if (result.error) {
+        errorFn(fmt.status('FAIL', `Could not start draft agent (${fmt.agent(/** @type {any} */ (actualAgent))}): ${/** @type {any} */ (result.error).message}`));
+        safeExit(1);
+        return exitedContext({ ...ctx, agent, actualAgent: actualAgent, agentResult: result });
+      }
+
+      if (typeof /** @type {any} */ (result).status === 'number' && /** @type {any} */ (result).status !== 0) {
+        errorFn(fmt.status('FAIL', `Draft agent (${fmt.agent(/** @type {any} */ (actualAgent))}) exited with status ${/** @type {any} */ (result).status}.`));
+        safeExit(result.status || 1);
+        return exitedContext({ ...ctx, agent, actualAgent: actualAgent, agentResult: result });
+      }
+
+      const taskResolutionAfter = resolveTaskFileFn(ctx.slug, ctx.targetWorktree);
+      recordDraftImplementerFn({
+        selected: agent,
+        actual: actualAgent,
+        taskResolution: taskResolutionAfter,
+        slug: ctx.slug,
+        worktree: ctx.targetWorktree
+      });
+
+      recordDraftStatsFn({
+        slug: ctx.slug,
+        rootDir: ctx.targetWorktree,
+        agentFamily: actualAgent,
+        result,
+        log: logFn,
+        // @ts-expect-error reportTaskResolutionFn accepts extra properties
+        error: errorFn
+      });
+
+      return { ...ctx, agent, actualAgent: actualAgent, agentResult: result };
+    },
+
+    // Post-process: classification normalize, label sync, re-assert base
+    postProcess: async (ctx: DraftWorkflowContext): Promise<DraftWorkflowContext> => {
+      const merged = ctx.options as Record<string, unknown>;
+      const normalizeDraftClassificationFn = merged.normalizeDraftClassificationFn || normalizeDraftClassification;
+      const restartDraftAgentFn = merged.restartDraftAgentFn || restartDraftAgent;
+      const resolveTaskFileFn = merged.resolveTaskFileFn || resolveTaskFile;
+      const ensureMissionBaseBranchRecordedFn = merged.ensureMissionBaseBranchRecordedFn || ensureMissionBaseBranchRecorded;
+
+      const normalizationResult = normalizeDraftClassificationFn(ctx.slug, ctx.targetWorktree, {
+        errorFn
+      });
+      if (!normalizationResult.ok) {
+        logFn(fmt.status('WARN', `Post-draft mission type labels are not valid (${normalizationResult.reason}). Relaunching draft agent to repair them.`));
+        const restartOk = await restartDraftAgentFn(ctx.slug, ctx.targetWorktree, {
+          logFn,
+          errorFn,
+          // @ts-expect-error restartDraftAgentFn accepts extra properties
+          exitFn
+        });
+        if (!restartOk) {
+          safeExit(1);
+          return exitedContext({ ...ctx });
+        }
+        const postRestartNorm = normalizeDraftClassificationFn(ctx.slug, ctx.targetWorktree, {
+          errorFn
+        });
+        if (!postRestartNorm.ok) {
+          errorFn(fmt.status('FAIL', `Post-draft mission type labels are still invalid after restart (${postRestartNorm.reason}).`));
+          safeExit(1);
+          return exitedContext({ ...ctx });
+        } else {
+          logFn(fmt.status('PASS', `Post-draft mission type labels validated after restart: ${postRestartNorm.classification}`));
+        }
+      } else {
+        logFn(fmt.status('PASS', `Post-draft mission type labels validated: ${normalizationResult.classification}`));
+      }
+
+      // Label sync
+      try {
+        const missionTaskResolution = resolveTaskFileFn(ctx.slug, ctx.targetWorktree);
+        if (missionTaskResolution.ok && missionTaskResolution.taskFile) {
+          const missionLabels = getTaskLabels(missionTaskResolution.taskFile);
+          if (missionLabels.length > 0) {
+            const syncOk = syncTaskLabelsToBaseWorktree(ctx.slug, ctx.targetWorktree);
+            if (syncOk) {
+              logFn(fmt.status('PASS', `Classification labels synced to base worktree: [${missionLabels.join(', ')}]`));
+            } else {
+              logFn(fmt.status('WARN', `Could not sync labels to base worktree for ${ctx.slug}. Labels remain valid on mission worktree.`));
+            }
+          }
+        }
+      } catch (labelSyncError) {
+        logFn(fmt.status('WARN', `Label sync skipped: ${/** @type {any} */ (labelSyncError).message}`));
+      }
+
+      // Re-assert base branch
+      ensureMissionBaseBranchRecordedFn(ctx.missionFile, ctx.recordedBase, { logFn });
+
+      return ctx;
+    },
+
+    // Commit safety: capture uncommitted changes
+    commitSafety: (ctx: DraftWorkflowContext): DraftWorkflowContext => {
+      const enforceDraftCommitSafetyFn = (ctx.options as any).enforceDraftCommitSafetyFn || enforceDraftCommitSafety;
+
+      try {
+        enforceDraftCommitSafetyFn({ slug: ctx.slug, worktree: ctx.targetWorktree, logFn, errorFn });
+      } catch (error) {
+        errorFn(fmt.status('FAIL', /** @type {any} */ (error).message));
+        safeExit(1);
+        return exitedContext({ ...ctx });
+      }
+
+      return ctx;
+    },
+
+    // Final transition to 'ready'
+    finalTransition: async (ctx: DraftWorkflowContext): Promise<void> => {
+      const transitionTaskFn = (ctx.options as any).transitionTaskFn || transitionTask;
+      const transitionVirtualFn = (ctx.options as any).transitionVirtualFn || transitionVirtual;
+
+      if (!(await transitionVirtualFn(transitionTaskFn, ctx.slug, 'ready', /** @type {{ rootDir: string, log: Function }} */ ({ rootDir: ctx.targetWorktree, log: ctx.logFn })))) {
+        errorFn(fmt.status('FAIL', `Could not transition task ${ctx.slug} to ready status.`));
+        safeExit(1);
+        return;
+      }
+
+      logFn('\n' + fmt.status('INFO', `Next: ${fmt.command(`cd ${ctx.targetWorktree}`)}`));
+    },
+  } as DraftWorkflowPort;
+}
+
+const _draftExport = Object.assign(draft, { draft, runDraftCommand, recordDraftStats, buildDraftPrompt, recordDraftImplementer, enforceDraftCommitSafety, fallbackDraftCommitMessage, bootstrapBacklogTask, ensureGraphifyWorkspace, ensureGraphifyIgnore, ensureMissionBranch, ensureMissionBaseBranchRecorded, ensureWorktree, ensureMissionFile, ensureDraftRepoConfigCommitted, ensureRepoExists, classifyDraftEntries, isUnmergedStatus, isDeletedStatus, isMissionTaskPath, isExpectedDraftPath, validateDraftClassification, normalizeDraftClassification, buildRestartPrompt, restartDraftAgent, createDraftWorkflowAdapter });
 export default _draftExport;
-export { _draftExport as draft, runDraftCommand, recordDraftStats, buildDraftPrompt, recordDraftImplementer, enforceDraftCommitSafety, fallbackDraftCommitMessage, bootstrapBacklogTask, ensureGraphifyWorkspace, ensureGraphifyIgnore, ensureMissionBranch, ensureMissionBaseBranchRecorded, ensureWorktree, ensureMissionFile, ensureDraftRepoConfigCommitted, ensureRepoExists, classifyDraftEntries, isUnmergedStatus, isDeletedStatus, isMissionTaskPath, isExpectedDraftPath, validateDraftClassification, normalizeDraftClassification, buildRestartPrompt, restartDraftAgent };
+export { _draftExport as draft, runDraftCommand, recordDraftStats, buildDraftPrompt, recordDraftImplementer, enforceDraftCommitSafety, fallbackDraftCommitMessage, bootstrapBacklogTask, ensureGraphifyWorkspace, ensureGraphifyIgnore, ensureMissionBranch, ensureMissionBaseBranchRecorded, ensureWorktree, ensureMissionFile, ensureDraftRepoConfigCommitted, ensureRepoExists, classifyDraftEntries, isUnmergedStatus, isDeletedStatus, isMissionTaskPath, isExpectedDraftPath, validateDraftClassification, normalizeDraftClassification, buildRestartPrompt, restartDraftAgent, createDraftWorkflowAdapter };
