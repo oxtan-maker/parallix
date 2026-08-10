@@ -4,7 +4,7 @@ title: stat fixes
 status: backlog
 assignee: [codex]
 created_date: '2026-08-10 12:30'
-labels: []
+labels: [user_value]
 dependencies: []
 ordinal: 91911
 ---
