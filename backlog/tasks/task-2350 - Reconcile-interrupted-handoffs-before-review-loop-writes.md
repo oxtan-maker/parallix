@@ -1,7 +1,7 @@
 ---
 id: TASK-2350
 title: Reconcile interrupted handoffs before review-loop writes
-status: active
+status: review
 assignee: [codex]
 created_date: '2026-08-09 13:00'
 labels:
