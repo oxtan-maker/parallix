@@ -2,7 +2,7 @@
 id: TASK-2352
 title: Keep execute agents running until the full mission is complete
 status: backlog
-assignee: []
+assignee: [custom]
 created_date: '2026-08-10 08:20'
 updated_date: '2026-08-10 08:20'
 labels:
@@ -26,7 +26,7 @@ ordinal: 72300
 <!-- SECTION:DESCRIPTION:BEGIN -->
 `px active` treats an execute-agent process exit as eligible for handoff once any committed `CP-N.md` exists. The execute prompt says to work checkpoint-by-checkpoint but does not make clear that completing one checkpoint must not end the one continuous mission invocation. On TASK-2332.07, Codex committed CP-1, returned a final response, was resumed, and then returned again during CP-2 without a mission stop rule or an external blocker.
 
-Make execution fail closed on incomplete missions and make the prompt's terminal condition unambiguous. The execute agent must continue from each committed checkpoint to the next incomplete checkpoint in the same mission invocation; it may finish only after every declared checkpoint and mission gate passes, or after a stated stop rule or a genuine external blocker. A checkpoint that is large must be decomposed into safe slices rather than treated as a terminal condition.
+Make execution fail closed on incomplete missions with rebounce similar to other errors and make the prompt's terminal condition unambiguous. The execute agent must continue from each committed checkpoint to the next incomplete checkpoint in the same mission invocation; it may finish only after every declared checkpoint and mission gate passes, or after a stated stop rule or a genuine external blocker. A checkpoint that is large must be decomposed into safe slices rather than treated as a terminal condition.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
