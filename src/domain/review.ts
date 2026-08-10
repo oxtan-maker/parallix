@@ -269,6 +269,12 @@ export interface Review {
    */
   readonly gateFailureRetryCount: number;
   /**
+   * Hook failure auto-bounce retries (pre-commit, pre-push, etc.).
+   * Separate from gateFailureRetryCount: hook bounces happen during
+   * rebase/integrate operations, not during the pre-review gate.
+   */
+  readonly hookFailureRetryCount: number;
+  /**
    * Full audit trail for review events (replaces .md files under
    * missions/<slug>/review-events/). Stores reviewer findings/outcomes,
    * implementer summaries/dispositions, human notes, and blocked/parked
@@ -456,6 +462,7 @@ export function startReview(
     intervention: null,
     stageLaunches: [],
     gateFailureRetryCount: 0,
+    hookFailureRetryCount: 0,
     reviewEvents: [],
   };
 }
@@ -593,6 +600,16 @@ function sortStageLaunchWindows(
  */
 export function recordGateFailureRetry(review: Review): Review {
   return { ...review, gateFailureRetryCount: review.gateFailureRetryCount + 1 };
+}
+
+/**
+ * Consume one hook failure retry.
+ *
+ * Counted on the review rather than the round: a hook auto-bounce hands the
+ * mission back to the implementer without starting a new round.
+ */
+export function recordHookFailureRetry(review: Review): Review {
+  return { ...review, hookFailureRetryCount: review.hookFailureRetryCount + 1 };
 }
 
 function validateResolutions(

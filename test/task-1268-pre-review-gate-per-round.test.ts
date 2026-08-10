@@ -107,3 +107,46 @@ test('startReviewLoop stops after a gate-failure bounce without launching a revi
   assert.equal(gateCalls, 1);
   assert.equal(events.filter((event) => event === 'review:reviewer').length, 0);
 });
+
+test('startReviewLoop rebounces a pre-review safety-commit hook failure before gate or reviewer launch', async () => {
+  const events = [];
+  let hookBounce = null;
+  let gateCalls = 0;
+
+  await startReviewLoop(TEST_SLUG, {
+    eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
+    resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
+    implementer: 'claude', reviewer: 'codex', dryRun: false,
+    workflowLauncherStatusFn: () => ({ supported: true }),
+    isForgejoReviewEnabledFn: () => true,
+    forgejoAvailableFn: async () => true,
+    getPrStatusFn: () => ({ exists: true, state: 'open', number: 41 }),
+    maybeUpdateGraphifyBeforeReviewFn: () => {},
+    enforceTaskAssigneeFn: () => true,
+    resolveForgejoUserFn: () => 'gemini', readTokenFn: () => 'token',
+    readReviewStateFn: () => null, writeReviewStateFn: () => {},
+    rebaseBeforeReviewRoundFn: async () => ({
+      ok: false, sharedFileConflicts: false, hookFailure: true, hookOutput: 'pre-commit hook failed: lint error',
+    }),
+    runPreReviewGateFn: async () => { gateCalls++; return { ok: true, area: 'lib', command: 'true', exitCode: 0, stdout: '', stderr: '' }; },
+    handleGateFailureAutoBounceFn: async (_slug, _worktree, result) => {
+      hookBounce = result;
+      return { bounced: true, stranded: false };
+    },
+    startAgentFn: async (step, options) => {
+      events.push(`${step}:${options.role}`);
+      return { agent: null };
+    },
+    applyAgentFallbackFn: ({ original }) => original,
+    buildCompactReviewPromptFn: () => 'review prompt',
+    buildCompactActOnReviewPromptFn: () => 'act-on-review prompt',
+    log: () => {}, error: () => {}, exit: () => {},
+    consumeReviewerArtifactsFn: async () => ({ consumed: false }),
+    consumeImplementerArtifactsFn: async () => ({ consumed: false }),
+  });
+
+  assert.equal(hookBounce.command, 'git commit (pre-review safety commit)');
+  assert.match(hookBounce.stdout, /pre-commit hook failed/);
+  assert.equal(gateCalls, 0, 'the gate must wait until the rebounced safety commit succeeds');
+  assert.equal(events.filter((event) => event === 'review:reviewer').length, 0);
+});

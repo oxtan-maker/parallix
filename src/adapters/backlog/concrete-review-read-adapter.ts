@@ -174,6 +174,7 @@ export class ConcreteReviewReadAdapter implements ReviewReadAdapter {
       intervention: null,
       stageLaunches: stageLaunchWindowsFrom(state.metadata?.recordedStageLaunches),
       gateFailureRetryCount: nonNegativeGateRetries(state.metadata?.gateFailureRetryCount),
+      hookFailureRetryCount: nonNegativeGateRetries(state.metadata?.hookFailureRetryCount),
       reviewEvents: [],
     };
   }

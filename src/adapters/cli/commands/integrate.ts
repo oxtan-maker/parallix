@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import child_process from 'node:child_process';
 import { detectRebaseState, git, getCurrentBranch, run } from '../../git/git.js';
-import { resolveTaskFile, getTaskStatus, setTaskStatus, completeTask, getTaskAssignee, getTaskClassification } from '../../backlog/backlog.js';
+import { resolveTaskFile, getTaskStatus, setTaskStatus, completeTask, getTaskAssignee, getTaskClassification, getTaskImplementer, transitionTask } from '../../backlog/backlog.js';
 import { toVirtual, toActual } from '../../config/state-map.js';
 import { getPrStatus, getLatestReviewDecision, syncMerged, readToken, resolveTokenFile, resolveForgejoUser, resolveForgejoHome, isForgejoPath, listOpenPrsForSlug } from '../../forgejo/forgejo.js';
 import * as fmt from '../../../application/presentation/cli-format.js';
@@ -15,10 +15,186 @@ import * as verification from '../../verification/verification.js';
 const { formatVerificationCommand } = verification;
 import * as postIntegrateHook from '../../process/post-integrate-hook.js';
 import { isForgejoReviewEnabled } from '../../config/product-config.js';
-import { readReviewState } from '../../review/review-state.js';
+import { readReviewState, writeReviewState, persistReviewStateOrThrow } from '../../review/review-state.js';
+import { startAgent, selectAgent, workflowLauncherStatus } from '../../agents/agents.js';
+import { applyAgentFallback } from '../../review/review-loop.js';
 import { missionId } from '../../../domain/mission.js';
 
 const VARIANT_B_AUTOMATION_SUMMARY = 'Variant B automation: Backlog task closeout, worktree-path rewrite, squash commit with hook-enforced validation, Forgejo sync-merged, and mission worktree cleanup.';
+
+/**
+ * Classify git hook failure from command output.
+ * Detects pre-commit, pre-push, post-commit, and generic hook failures.
+ * Returns structured result for SC2/SC8.
+ *
+ * @param {string} output - Combined stdout+stderr from git command
+ * @returns {{ isHookFailure: boolean, hookType: string | null }}
+ */
+export function classifyHookFailure(output: string): { isHookFailure: boolean; hookType: string | null } {
+  if (!output) {
+    return { isHookFailure: false, hookType: null };
+  }
+  const lower = output.toLowerCase();
+  if (/pre-commit/i.test(lower)) {
+    return { isHookFailure: true, hookType: 'pre-commit' };
+  }
+  if (/pre-push/i.test(lower)) {
+    return { isHookFailure: true, hookType: 'pre-push' };
+  }
+  if (/post-commit/i.test(lower)) {
+    return { isHookFailure: true, hookType: 'post-commit' };
+  }
+  // Generic hook keyword match — require failure phrasing to avoid
+  // false positives from paths like "post-integrate-hook.ts"
+  if (/hook.*(failed|failure|error)/i.test(lower)) {
+    return { isHookFailure: true, hookType: 'hook' };
+  }
+  return { isHookFailure: false, hookType: null };
+}
+
+// Max retries for hook failure auto-bounce
+const MAX_HOOK_RETRY = 2;
+
+/**
+ * Handle git hook failure with auto-bounce to implementer.
+ * Mirrors handleGateFailureAutoBounce pattern. Used by integrate squash commit path.
+ * Returns true if auto-bounced (caller should retry), false if stranded.
+ *
+ * @param {string} slug
+ * @param {string} worktree
+ * @param {string} hookOutput
+ * @param {{ hookType: string | null }} classification
+ * @param {{ startAgentFn?: Function, readReviewStateFn?: Function, writeReviewStateFn?: Function, transitionTaskFn?: Function, applyAgentFallbackFn?: Function, selectAgentFn?: Function, workflowLauncherStatusFn?: Function, missionStore?: any }} opts
+ * @returns {Promise<boolean>} true if should retry, false if stranded
+ */
+export async function handleHookFailureAutoBounce(
+  slug: string,
+  worktree: string,
+  hookOutput: string,
+  classification: { hookType: string | null },
+  {
+    startAgentFn = startAgent,
+    readReviewStateFn = readReviewState,
+    writeReviewStateFn = writeReviewState,
+    transitionTaskFn = transitionTask,
+    applyAgentFallbackFn = applyAgentFallback,
+    selectAgentFn = selectAgent,
+    workflowLauncherStatusFn = workflowLauncherStatus,
+    missionStore = null,
+  }: {
+    startAgentFn?: Function;
+    readReviewStateFn?: Function;
+    writeReviewStateFn?: Function;
+    transitionTaskFn?: Function;
+    applyAgentFallbackFn?: Function;
+    selectAgentFn?: Function;
+    workflowLauncherStatusFn?: Function;
+    missionStore?: any;
+  } = {}
+): Promise<boolean> {
+  const persisted = await Promise.resolve(readReviewStateFn(slug, worktree, missionStore));
+  const retryCount = persisted && persisted.metadata && typeof persisted.metadata === 'object'
+    ? (Number((persisted.metadata as any).hookFailureRetryCount) || 0)
+    : 0;
+
+  if (retryCount >= MAX_HOOK_RETRY) {
+    fmt.log.fail(`Hook failure: max retries exceeded (${MAX_HOOK_RETRY}). Mission stranded for ${slug}.`);
+    fmt.log.fail(`Hook ${classification.hookType || 'failure'} failed ${retryCount} times. Human intervention required.`);
+    fmt.log.fail(`Hook output:\n${hookOutput}`);
+    return false;
+  }
+
+  const newRetryCount = retryCount + 1;
+
+  const fixPrompt = [
+    `GIT HOOK FAILURE — FIX REQUIRED`,
+    ``,
+    `Mission: ${slug}`,
+    `Hook type: ${classification.hookType || 'unknown'}`,
+    ``,
+    `Hook output (use this to diagnose and fix):`,
+    `---`,
+    hookOutput,
+    `---`,
+    ``,
+    `Retry attempt: ${newRetryCount}/${MAX_HOOK_RETRY}`,
+    ``,
+    `Fix the underlying issue so the git hook passes.`,
+    `After fixing, the integration will be retried automatically.`,
+  ].join('\n');
+
+  const metadata = persisted && persisted.metadata && typeof persisted.metadata === 'object'
+    ? { ...persisted.metadata }
+    : {};
+  metadata.hookFailureRetryCount = newRetryCount;
+
+  try {
+    if (persisted) {
+      const updatedState = { ...persisted, metadata };
+      await persistReviewStateOrThrow(writeReviewStateFn as any, slug, updatedState as any, worktree, missionStore);
+    } else {
+      await persistReviewStateOrThrow(writeReviewStateFn as any, slug, { metadata } as any, worktree, missionStore);
+    }
+  } catch (err: any) {
+    fmt.log.fail(`Could not persist hook retry state: ${err.message || String(err)}. Falling back to manual recovery.`);
+    return false;
+  }
+
+  // Resolve implementer
+  const taskResolution = resolveTaskFile(slug, worktree);
+  let implementer = taskResolution.ok && (taskResolution as any).task ? getTaskImplementer((taskResolution as any).task) : null;
+
+  if (!implementer) {
+    const status = workflowLauncherStatusFn?.() ?? { available: false, agent: null };
+    if (status.available && status.agent) {
+      implementer = selectAgentFn?.({ role: 'implementer' }) || status.agent;
+    }
+  }
+
+  if (!implementer) {
+    fmt.log.fail(`Could not determine implementer for ${slug}. Cannot auto-bounce.`);
+    return false;
+  }
+
+  // Transition task back to active (implementer phase) without consuming reviewer cycle
+  await transitionTaskFn(slug, 'active', { rootDir: worktree, log: fmt.log.plain });
+  fmt.log.info(`Auto-bouncing to implementer (${implementer}) with hook fix prompt. Retry ${newRetryCount}/${MAX_HOOK_RETRY}.`);
+
+  try {
+    const launchResult = await startAgentFn('act-on-review', {
+      agent: implementer,
+      prompt: fixPrompt,
+      worktree,
+      slug,
+      role: 'implementer',
+      exclude: [],
+    });
+
+    // Apply any agent fallback if needed
+    await applyAgentFallbackFn({
+      role: 'implementer',
+      original: implementer,
+      launchResult,
+      state: persisted || {},
+      slug,
+      worktree,
+      taskResolution: { ok: taskResolution.ok, taskFile: taskResolution.taskFile },
+      log: fmt.log.plain,
+      writeReviewStateFn,
+      missionStore,
+    });
+
+    if (launchResult.result && launchResult.result.status !== 0) {
+      fmt.log.fail(`Implementer (${launchResult.agent}) exited with status ${launchResult.result.status}. Mission stranded.`);
+      return false;
+    }
+  } catch (err: any) {
+    fmt.log.fail(`Could not launch implementer for hook fix: ${err.message || String(err)}.`);
+    return false;
+  }
+
+  return true;
+}
 
 /** @type{{symptom: string, cause: string, fix: string}[]} */
 const SYNC_MERGED_DIAGNOSTICS = [
@@ -657,6 +833,8 @@ export interface IntegrateFn extends Function {
   parseIntegrateArgs: typeof parseIntegrateArgs;
   resolveIntegrationVerificationWorktree: typeof resolveIntegrationVerificationWorktree;
   buildIntegrationVerificationInvocation: typeof buildIntegrationVerificationInvocation;
+  classifyHookFailure: typeof classifyHookFailure;
+  handleHookFailureAutoBounce: typeof handleHookFailureAutoBounce;
   executeIntegrationGates: typeof executeIntegrationGates;
   orderIntegrationGates: typeof orderIntegrationGates;
   gateMatchesChangedAreas: typeof gateMatchesChangedAreas;
@@ -979,22 +1157,51 @@ async function integrate(args: string[], options: { missionServicesFn?: Function
 
       git(['-C', baseWorktree, 'add', '-A']);
       fmt.log.info('Step 5: Creating the landed squash commit in the local integration checkout...');
-      const commitResult = git([
+      let commitResult = git([
         '-C',
         /** @type {string} */ (baseWorktree),
         'commit',
         '-m',
         `${branch}: ${summary}`
       ]);
-      if (commitResult.status !== 0) {
+      let retriedCommit = false;
+      while (commitResult.status !== 0) {
         const output = [commitResult.stdout, commitResult.stderr].filter(Boolean).join('\n').trim();
         fmt.log.fail('Could not create the squash commit in the local integration checkout.');
         if (output) {
           fmt.log.fail(output);
         }
-        fmt.log.info(`The squash commit runs the repo git hooks. Fix the reported hook failure in ${baseWorktree} and retry integrate.`);
-        fmt.log.info(`For this mission, the relevant verification command is ${formatVerificationCommand(context.area, baseWorktree)}`);
-        throw new IntegrationAbort();
+
+        // SC2/SC4: Classify hook failure and auto-bounce to implementer
+        const hookClassification = classifyHookFailure(output);
+        if (hookClassification.isHookFailure) {
+          const shouldRetry = await handleHookFailureAutoBounce(slug, baseWorktree, output, hookClassification, { missionStore: missionServices.store });
+          if (shouldRetry) {
+            fmt.log.info('Retrying squash commit after implementer hook fix...');
+            // Stage implementer's fix before retrying commit
+            git(['-C', baseWorktree, 'add', '-A']);
+            retriedCommit = true;
+            commitResult = git([
+              '-C',
+              /** @type {string} */ (baseWorktree),
+              'commit',
+              '-m',
+              `${branch}: ${summary}`
+            ]);
+            continue;
+          } else {
+            // Stranded - max retries exceeded or agent failed
+            fmt.log.info(`The squash commit runs the repo git hooks. Fix the reported hook failure in ${baseWorktree} and retry integrate.`);
+            throw new IntegrationAbort();
+          }
+        } else {
+          fmt.log.info(`The squash commit runs the repo git hooks. Fix the reported hook failure in ${baseWorktree} and retry integrate.`);
+          fmt.log.info(`For this mission, the relevant verification command is ${formatVerificationCommand(context.area, baseWorktree)}`);
+          throw new IntegrationAbort();
+        }
+      }
+      if (retriedCommit) {
+        fmt.log.pass('Squash commit created after hook fix.');
       }
       const mergedCommit = git(['-C', baseWorktree, 'rev-parse', 'HEAD']).stdout.trim();
 
@@ -2030,6 +2237,8 @@ function buildConflictResolutionPrompt(slug: string = '<slug>', area: string = '
 (integrate as any).parseIntegrateArgs = parseIntegrateArgs;
 (integrate as any).resolveIntegrationVerificationWorktree = resolveIntegrationVerificationWorktree;
 (integrate as any).buildIntegrationVerificationInvocation = buildIntegrationVerificationInvocation;
+(integrate as any).classifyHookFailure = classifyHookFailure;
+(integrate as any).handleHookFailureAutoBounce = handleHookFailureAutoBounce;
 (integrate as any).executeIntegrationGates = executeIntegrationGates;
 (integrate as any).orderIntegrationGates = orderIntegrationGates;
 (integrate as any).gateMatchesChangedAreas = gateMatchesChangedAreas;

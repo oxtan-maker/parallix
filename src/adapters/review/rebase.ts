@@ -22,6 +22,7 @@ const _spawnSync = spawnSync as unknown as RunFn;
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 
 const SHARED_FILE_REBASE_CONFLICT_RE = /shared file(?:\(s\))? require agent-assisted resolution|shared-file-conflicts/i;
+const HOOK_FAILURE_RE = /pre-commit|pre-push|post-commit|hook.*(failed|failure|error)/i;
 
 /**
  * Auto-commit safe mission artifacts before rebase.
@@ -29,7 +30,7 @@ const SHARED_FILE_REBASE_CONFLICT_RE = /shared file(?:\(s\))? require agent-assi
  * @param {string} slug
  * @param {string} worktree
  * @param {{taskFile?: string|null, gitFn?: Function, log?: Function, error?: Function, isMissionArtifactFn?: Function, isWorkflowGeneratedArtifactFn?: Function}} [options]
- * @returns {Promise<{ok: boolean, dirty: boolean, unsafe?: boolean}>}
+ * @returns {Promise<{ok: boolean, dirty: boolean, unsafe?: boolean, hookFailure?: boolean, output?: string}>}
  */
 export async function commitSafeMissionArtifacts(slug: string, worktree: string, {
   taskFile = null,
@@ -45,7 +46,7 @@ export async function commitSafeMissionArtifacts(slug: string, worktree: string,
   error?: (_msg: string) => void;
   isMissionArtifactFn?: (_file: string, _slug: string, _rootDir: string) => boolean;
   isWorkflowGeneratedArtifactFn?: (_file: string) => boolean;
-} = {}): Promise<{ ok: boolean; dirty: boolean; unsafe?: boolean }> {
+} = {}): Promise<{ ok: boolean; dirty: boolean; unsafe?: boolean; hookFailure?: boolean; output?: string }> {
   const rootDir = worktree || process.cwd();
   const statusResult = gitFn(['-C', rootDir, 'status', '--porcelain=v1', '-z']);
   if (statusResult.status !== 0 || !statusResult.stdout) {
@@ -109,17 +110,17 @@ export async function commitSafeMissionArtifacts(slug: string, worktree: string,
   } else {
     const failureMsg = [commitRes.stderr, commitRes.stdout].filter(Boolean).join('\n').trim();
     error(fmt.status('FAIL', `Failed to commit mission artifacts: ${failureMsg}`));
-    return { ok: false, dirty: true };
+    return { ok: false, dirty: true, hookFailure: HOOK_FAILURE_RE.test(failureMsg), output: failureMsg };
   }
 }
 
-/** @typedef {{ok: boolean, sharedFileConflicts: boolean}} RebaseResult */
+/** @typedef {{ok: boolean, sharedFileConflicts: boolean, hookFailure: boolean, hookOutput?: string}} RebaseResult */
 
 /**
  * Rebase the mission branch onto the latest primary/main branch before launching a reviewer.
  * @param {string} slug
  * @param {{runFn?: Function, gitFn?: Function, taskFile?: string|null, worktree?: string, log?: Function, error?: Function, isReviewProviderEnabledFn?: Function|null, legacyIsForgejoReviewEnabledFn?: Function|null, isForgejoReviewEnabledFn?: Function|null}} [options]
- * @returns {Promise<{ok: boolean, sharedFileConflicts: boolean}>}
+ * @returns {Promise<{ok: boolean, sharedFileConflicts: boolean, hookFailure: boolean, hookOutput?: string}>}
  */
 export async function rebaseBeforeReviewRound(slug: string, {
   runFn = _spawnSync,
@@ -141,11 +142,13 @@ export async function rebaseBeforeReviewRound(slug: string, {
   isReviewProviderEnabledFn?: ((_wt: string) => boolean) | undefined | null;
   legacyIsForgejoReviewEnabledFn?: ((_wt: string) => boolean) | null;
   isForgejoReviewEnabledFn?: ((_wt: string) => boolean) | null;
-} = {}): Promise<{ ok: boolean; sharedFileConflicts: boolean }> {
+} = {}): Promise<{ ok: boolean; sharedFileConflicts: boolean; hookFailure: boolean; hookOutput?: string }> {
   const cleanup = await commitSafeMissionArtifacts(slug, worktree, { taskFile, gitFn, log, error });
   if (!cleanup.ok) {
     error(fmt.status('WARN', 'Worktree is dirty with unsafe or conflicted files. Rebase may fail.'));
-    return { ok: false, sharedFileConflicts: false };
+    return cleanup.hookFailure
+      ? { ok: false, sharedFileConflicts: false, hookFailure: true, hookOutput: cleanup.output }
+      : { ok: false, sharedFileConflicts: false, hookFailure: false };
   }
 
   const forgejoEnabledFn = isReviewProviderEnabledFn
@@ -155,7 +158,7 @@ export async function rebaseBeforeReviewRound(slug: string, {
   const forgejoEnabled = forgejoEnabledFn(worktree);
   if (!forgejoEnabled) {
     log(fmt.status('INFO', `Review provider disabled; committed worktree state and skipping pre-review rebase for ${fmt.branch(`mission/${slug}`)}.`));
-    return { ok: true, sharedFileConflicts: false };
+    return { ok: true, sharedFileConflicts: false, hookFailure: false };
   }
 
   // A checkout is TypeScript-first: its CLI is src/entry/px.ts, so nested
@@ -183,18 +186,23 @@ export async function rebaseBeforeReviewRound(slug: string, {
 
   if (result.status === 0) {
     log(fmt.status('PASS', `Pre-review rebase completed for ${fmt.branch(`mission/${slug}`)}.`));
-    return { ok: true, sharedFileConflicts: false };
+    return { ok: true, sharedFileConflicts: false, hookFailure: false };
   }
 
   if (output) {
     error(output);
   }
   const sharedFileConflicts = SHARED_FILE_REBASE_CONFLICT_RE.test(output);
+  const hookFailure = HOOK_FAILURE_RE.test(output);
   if (sharedFileConflicts) {
     error(fmt.status('FAIL', 'Shared-file rebase conflicts detected. Autonomous review loop cannot continue safely.'));
     log(fmt.status('INFO', `Resolve the conflicts in the worktree, then re-run: px review ${slug} --start`));
+  } else if (hookFailure) {
+    error(fmt.status('FAIL', 'Git hook failure detected during pre-review rebase. Hook rebounce available in CLI rebase command.'));
   } else {
     error(fmt.status('FAIL', `Rebase failed before launching reviewer for ${fmt.branch(`mission/${slug}`)}.`));
   }
-  return { ok: false, sharedFileConflicts };
+  return hookFailure
+    ? { ok: false, sharedFileConflicts, hookFailure: true, hookOutput: output }
+    : { ok: false, sharedFileConflicts, hookFailure: false };
 }
