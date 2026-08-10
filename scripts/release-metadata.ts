@@ -2,7 +2,7 @@
 // and release gates" item 9: "locked dependencies, vulnerability/license audits,
 // checksums, SBOM, and third-party notices").
 //
-// The published tarball ships only build/ plus LICENSE, README.md, CHANGELOG.md and
+// The published tarball ships only build/ plus LICENSE, README.md and
 // NOTICES; it installs no node_modules. The third-party code that reaches a user is
 // therefore exactly the set esbuild inlined into build/px.mjs, and the build's
 // metafile is the authoritative record of that set — not package.json's dependency

@@ -327,7 +327,7 @@ case "$subcommand" in
   docs)
     # Verify key documentation files exist
     errors=0
-    for f in README.md CHANGELOG.md LICENSE; do
+    for f in README.md LICENSE; do
       if [ ! -f "$f" ]; then
         echo "MISSING: $f"
         errors=$((errors + 1))

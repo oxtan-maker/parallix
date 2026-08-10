@@ -9,22 +9,32 @@ import packageJson from '../../package.json' with { type: 'json' };
 import { ensureStandaloneGitRepo } from '../adapters/config/product-config.js';
 import { loadStateMap } from '../adapters/config/state-map.js';
 import active from '../adapters/cli/commands/active.js';
-import checkpoint from '../adapters/cli/commands/checkpoint.js';
+import {
+  createCheckpointVerificationAdapter,
+  createCheckpointGitAdapter,
+  createCheckpointLifecycleAdapter,
+  createCheckpointLifecycleAuthorizationAdapter,
+  createCheckpointMissionAdapter,
+} from '../adapters/cli/commands/checkpoint-adapter.js';
 import config from '../adapters/cli/commands/config.js';
 import diff from '../adapters/cli/commands/diff.js';
 import { createDraftWorkflowAdapter } from '../adapters/cli/commands/draft.js';
 import { createHandoffPorts } from '../adapters/cli/commands/handoff.js';
 import integrate from '../adapters/cli/commands/integrate.js';
+import { CheckpointCommandUseCase } from '../application/checkpoint-command-use-case.js';
 import { DraftCommandUseCase } from '../application/draft-command-use-case.js';
 import { IntegrateCommandUseCase } from '../application/integrate-command-use-case.js';
 import { ReviewCommandUseCase } from '../application/review-command-use-case.js';
 import { StatsCommandUseCase } from '../application/stats-command-use-case.js';
 import { HandoffCommandUseCase } from '../application/handoff-command-use-case.js';
+import { StatusCommandUseCase } from '../application/status-command-use-case.js';
+import { createCheckpointCommand } from '../interfaces/cli/checkpoint.js';
 import { createDraftCommand } from '../interfaces/cli/draft.js';
 import type { HandoffMissionServicesPort } from '../application/ports/handoff-workflow.js';
 import { createIntegrateCommand } from '../interfaces/cli/integrate.js';
 import { createReviewCommand } from '../interfaces/cli/review.js';
 import { createHandoffCommand } from '../interfaces/cli/handoff.js';
+import { createStatusCommand } from '../interfaces/cli/status.js';
 import missionStart from '../adapters/cli/mission-start.js';
 import mutationGate from '../adapters/verification/mutation-gate.js';
 import rebase from '../adapters/cli/commands/rebase.js';
@@ -34,7 +44,13 @@ import { createReviewWorkflowAdapter } from '../adapters/review/review-commands.
 import setup from '../adapters/cli/commands/setup.js';
 import setupReview from '../adapters/cli/commands/setup-review.js';
 import { createStatsCommand, createStatsWorkflowAdapter } from '../adapters/cli/commands/stats.js';
-import status from '../adapters/cli/commands/status.js';
+import {
+  createStatusBoardAdapter,
+  createStatusGitAdapter,
+  createStatusPrAdapter,
+  createStatusAgentAdapter,
+  createStatusStaleWorktreesAdapter,
+} from '../adapters/cli/commands/status-adapter.js';
 import verify from '../adapters/cli/commands/verify.js';
 import { deriveAliases, type Command, type MainOptions } from '../interfaces/cli/runtime.js';
 import { createProductionApplicationServices } from './application-services.js';
@@ -116,7 +132,16 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
   };
   return {
     active: withActiveService,
-    checkpoint,
+    checkpoint: (args, options) => {
+      const verification = createCheckpointVerificationAdapter();
+      const gitPort = createCheckpointGitAdapter();
+      const lifecycle = createCheckpointLifecycleAdapter();
+      const lifecycleAuth = createCheckpointLifecycleAuthorizationAdapter();
+      const mission = createCheckpointMissionAdapter();
+      const useCase = new CheckpointCommandUseCase(verification, gitPort, lifecycle, lifecycleAuth, mission);
+      const cmd = createCheckpointCommand(useCase);
+      return cmd(args, options);
+    },
     config,
     diff,
     draft: (args, options) => {
@@ -174,14 +199,22 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
     setup,
     'setup-review': setupReview,
     stats: createStatsCommand(new StatsCommandUseCase(createStatsWorkflowAdapter())),
-    status: (args, options) => withGraph(services => status(args, {
-      ...options,
-      buildProjectionFn: async () => {
-        const builder = services.presentationCapabilities?.boardProjection;
-        if (!builder) { throw new Error('board projection is unavailable'); }
-        return builder;
-      },
-    })),
+    status: (args, options) => withGraph(services => {
+      const board = createStatusBoardAdapter({
+        buildProjectionFn: async () => {
+          const builder = services.presentationCapabilities?.boardProjection;
+          if (!builder) { throw new Error('board projection is unavailable'); }
+          return builder;
+        },
+      });
+      const gitPort = createStatusGitAdapter();
+      const prPort = createStatusPrAdapter();
+      const agentPort = createStatusAgentAdapter();
+      const staleWorktrees = createStatusStaleWorktreesAdapter();
+      const useCase = new StatusCommandUseCase(board, gitPort, prPort, agentPort, staleWorktrees);
+      const cmd = createStatusCommand(useCase);
+      return cmd(args, options);
+    }),
     verify,
     ui: async (...args: any[]) => {
       const { runUiCommand } = await import('../interfaces/tui/ui-command.js');

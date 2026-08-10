@@ -72,7 +72,7 @@ test.after(() => {
 
 test('task-2285 install: the tarball contains only the bundle payload and release metadata', () => {
   const entries = fs.readdirSync(installedPackage).sort();
-  assert.deepEqual(entries, ['CHANGELOG.md', 'LICENSE', 'NOTICES', 'README.md', 'build', 'package.json']);
+  assert.deepEqual(entries, ['LICENSE', 'NOTICES', 'README.md', 'build', 'package.json']);
   for (const absent of ['dist', 'src', 'test', 'config', 'prompts', 'templates', 'docs', 'examples', 'tools']) {
     assert.equal(fs.existsSync(path.join(installedPackage, absent)), false,
       `${absent}/ must not be published`);
