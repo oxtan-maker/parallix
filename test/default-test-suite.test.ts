@@ -8,7 +8,8 @@ import path from 'node:path';
 import { buildTestRunPlan } from './lib/test-run-plan.js';
 const expectedIntegrationFiles = [
   'active.test.ts', 'agents-limit-hit.test.ts', 'agents.test.ts', 'backlog.test.ts',
-  'bootstrap-isolation.test.ts', 'draft-command.test.ts', 'draft.test.ts',
+  'bootstrap-isolation.test.ts', 'documentation-verification.test.ts',
+  'draft-command.test.ts', 'draft.test.ts',
   'draft_preflight_modern.test.ts', 'durable-state-policy.test.ts',
   'external-target-resolution.test.ts', 'forgejo-independence.test.ts',
   'forgejo-pr-round-sync.test.ts', 'forgejo.test.ts', 'handoff.test.ts', 'install.test.ts',

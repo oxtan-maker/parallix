@@ -83,6 +83,7 @@ export PARALLIX_REAL_GIT="$(command -v git)"
 export PATH="${SCRIPT_DIR}:$PATH"
 
 gate_all() {
+  node scripts/verify-docs.mjs
   npm test
 }
 
@@ -341,7 +342,7 @@ case "$subcommand" in
       echo "FAIL: $errors documentation item(s) missing"
       exit 1
     fi
-    echo "PASS: all required documentation present"
+    node scripts/verify-docs.mjs
     exit 0
     ;;
   static-analysis)

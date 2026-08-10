@@ -1,7 +1,7 @@
 ---
 id: TASK-1294
 title: documentation update hook
-status: ready-for-integration
+status: done
 assignee: [codex]
 created_date: '2026-06-13 18:24'
 updated_date: '2026-07-02 18:12'
@@ -18,7 +18,7 @@ status: backlog
 assignee: []
 created_date: '2026-06-13 18:24'
 updated_date: '2026-08-10 20:00'
-labels: []
+labels: [user_value]
 dependencies: []
 ordinal: 27000
 --------------

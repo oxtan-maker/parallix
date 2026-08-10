@@ -1,149 +1,108 @@
-# Parallix — Primary Use-Case Inventory (evidence-backed)
+# Parallix Use Cases
 
-**Author role:** Skeptical PM doing discovery, not advocacy.
-**Question answered:** Which use cases does Parallix actually support today, and which are strong enough for public positioning?
-**Method:** Every claim is sourced to repository code, tests, or configs — never to a README assertion — and any throughput claim is tied to the visualBoard measured retro figures *with their caveats*. See [CP-1.md](CP-1.md) for the raw evidence base.
+This is a capability guide, not a test catalog. Confidence labels communicate
+the current product boundary; executable details remain with their canonical
+commands, configuration, source, and tests.
 
-> **How to read a confidence level.**
-> **Confirmed** = the capability is executable code *and* exercised by a passing test cited by path.
-> **Partial** = the mechanism exists in code but enforcement, coverage, or measured value is incomplete (caveat stated).
-> **Aspirational** = documented intent only; not delivered today. All aspirational items live in their own section (§3).
+## Confirmed capabilities
 
----
+### UC-1 — Run multiple missions without shared-worktree collisions
 
-## 1. Confirmed and Partial use cases
+For a maintainer coordinating several agents, Parallix creates an isolated
+mission workspace for each piece of work. The practical outcome is that agents
+can progress independently instead of competing for one branch and index.
 
-Each use case carries the four required parts: **(P) persona/buyer**, **(B) before→after pain**, **(E) non-README evidence**, **(C) confidence + one-line justification.**
+**Confidence:** Confirmed for isolated mission execution. Throughput gains vary
+with task mix, review coverage, and operator overhead; isolation is a workflow
+control, not a promise of a fixed productivity multiplier.
 
-### UC-1 — Run several AI coding agents on one repo at once without them clobbering each other
+### UC-2 — Continue after an agent usage limit
 
-- **(P)** Solo maintainer or small-team lead driving more than one AI coding agent against a single repository.
-- **(B)** *Before:* two agents in one working tree fight over the index, branch, and uncommitted files, so you serialize them (one agent idle while the other runs) or you hand-manage `git worktree` and branch naming yourself. *After:* each mission is given its own branch (`mission/<slug>`) and its own sibling checkout (`../<repo>-<slug>`) automatically, so N agents make progress independently and each lands by squash-merge.
-- **(E)** Pattern declared in `workflow.config.json` (`adapters.missions.worktreePattern: "../<repo>-<slug>"`, `branchPrefix: "mission/"`). Tested: `test/draft.test.ts` — `ensureWorktree creates worktree when target directory is absent`, `ensureMissionBranch creates branch from main when absent`. **Measured value:** the observed mission-output gain depends on the comparison surface. In strict user-value terms, the visualBoard parallel-model periods ranged from `0.44/day` to `0.58/day` over a `0.28/day` human baseline — roughly **+57% to +107%** (`../visualBoard/docs/missions/2026/ai-workflow-retrospective-since-october/EVALUATION_SUMMARY.md:46-52`, `../visualBoard/docs/missions/2026/task-1023/RETROSPECTIVE_P5.md:20-30`). A later productized workflow window recorded **58 completed missions in 15 days** — about **27/week** or `~3.86/day` — which is roughly **+1,280%** versus the same `0.28/day` baseline if you frame the comparison as total completed mission throughput in a setup where the buyer no longer has to build the AI-SDLC machinery first (`../visualBoard/docs/missions/2026/task-1247/research.md:55-75`). The later Q2 normalization keeps the user-value story in the middle of that spread, at `0.54/day` in P4 and `0.48/day` in P6 (`../visualBoard/docs/missions/2026/task-1099/RETROSPECTIVE_Q2_2026.md:18-29`). **Caveats that travel with the range:** the low-end user-value periods carried heavy AI-workflow overhead (34% in the early summary; 85% AI-SDLC mix in P5), C2/external review coverage was only 7% against a 100% rule (`EVALUATION_SUMMARY.md:66`), the comparison METR study found AI *slowed* experienced devs 19% and carries a model-currency caveat (`:70-72`), and the high-end `27/week` figure is a different mission-output metric from user-value/day.
-- **(C)** **Confirmed** for the mechanic (worktree/branch isolation is tested code); the throughput *value* is **measured but caveated** — real and attributable to the parallel model, but highly dependent on whether you measure user-value delivery only or general completed-mission output in a productized workflow.
+For an operator using metered providers, Parallix can recognize a temporary
+limit, preserve the mission state, and try another eligible agent family. If no
+eligible family remains, it reports that condition clearly.
 
-### UC-2 — Don't lose a run when one AI provider hits its usage cap
+**Confidence:** Confirmed for configured families. It depends on accurate
+provider signals and an available eligible fallback.
 
-- **(P)** Anyone driving agents on metered/rate-limited LLM subscriptions (Claude, Codex/GPT, Mistral, local custom).
-- **(B)** *Before:* the agent prints "usage limit reached", the run dies, and you babysit it — manually restarting later or hand-switching to a different model. *After:* the limit message is pattern-detected, that agent family is written to a timed blocklist, and the run retries with the next eligible, unblocked family; only when all are exhausted does it fail loudly.
-- **(E)** Tested: `test/agents-limit-hit.test.ts` — `startAgent persists a block via updateAgentBlock when limit-hit detector fires`, `startAgent throws when every eligible agent hits the limit`, `startAgent does not loop forever when WORKFLOW_AGENT is pinned and that agent hits limit`.
-- **(C)** **Confirmed** — detection, timed-block persistence, and next-agent retry are each covered by named passing tests.
+### UC-3 — Resume a long-running mission
 
-### UC-3 — Resume a long agent task exactly where it stopped, deterministically
+For work that crosses a session or context boundary, checkpoint records state
+what was completed and what must happen next. A later agent continues from
+committed evidence instead of reconstructing intent from a partial workspace.
 
-- **(P)** Operator running multi-step missions that outlast a single session or context window, possibly across machines.
-- **(B)** *Before:* a crashed or context-exhausted agent leaves you reconstructing what was already done by re-reading diffs. *After:* every checkpoint runs the gate, commits a checkpoint document, and pushes it with a literal `Next action:` line, so a later session (or a different agent) resumes from a written instruction rather than a guess.
-- **(E)** Tested: `test/handoff.test.ts` (checkpoint discovery + auto-remediation).
-- **(C)** **Confirmed** — the commit/push + `Next action:` contract is code and the handoff path is tested.
+**Confidence:** Confirmed for missions that follow the checkpoint contract.
 
-### UC-4 — Require a second review pass before merge (different AI preferred, same-family fallback when no other is runnable)
+### UC-4 — Add a second review pass before integration
 
-- **(P)** Lead who distrusts single-agent self-approval — exactly the unverified-AI risk METR quantifies.
-- **(B)** *Before:* the agent that wrote the change also declares it done; nobody independent looks. *After:* review is a separate workflow step whose reviewer selection actively excludes the implementer (preferring a different agent family, falling back to the same family only when no other is runnable), and a self-approval is explicitly skipped at the provider and flagged as requiring a different agent or a human.
-- **(E)** Reviewer separation begins at handoff: the configured review pool is resolved with the implementer excluded, and that assignment is persisted in the durable Review. The review loop repeats the exclusion when it must derive or replace a reviewer. Both boundaries retain the explicit same-family fallback only when no different-family launcher is runnable. The provider also refuses to post a formal self-review. Regression coverage: `handoff persists a configured cross-family reviewer instead of the PR author` and `handoff uses same-family reviewer only when cross-family selection is exhausted` in `test/task-2335-reviewer-family-repro.test.js`.
-- **(C)** **Partial.** The *mechanism* (separate step + code-level self-approval block + implementer-exclusion at reviewer selection) exists in `test/review.test.ts`, but two honesty constraints hold it below Confirmed: (a) the guarantee is incomplete *by design* — reviewer selection falls back to the *same* family when no other is runnable (`review-loop.js:484-485`), and measured C2 review coverage was only **7%** against the 100% rule (`EVALUATION_SUMMARY.md:66`); (b) that test suite is **timing-flaky** — it is async-poll/timeout-sensitive and non-deterministic across runs (observed both all-pass and 11–15 failures depending on machine load), so it is not a dependable green signal. Position this as "forces a second, preferentially-different review pass," **not** "guarantees a different reviewer or coverage."
+For teams concerned that an author is grading its own change, Parallix separates
+implementation from review and prefers a different reviewer family where the
+configured pool allows it.
 
-### UC-5 — Adopt the mission workflow without rewriting your existing CI
+**Confidence:** Partial. The workflow can fall back to the same family when no
+different reviewer is runnable, so it does not guarantee independent-family
+coverage.
 
-- **(P)** Team with an established `make`/`npm`/script-based verification setup that wants the mission lifecycle without replacing its gate.
-- **(B)** *Before:* workflow tools assume their own gate runner, so adopting them means re-plumbing verification. *After:* the gate is a configured shell command with `{{area}}` substitution and a **no-op default** — declare your existing command in `workflow.config.json` and it runs verbatim; declare nothing and verification is a documented no-op pass rather than an invented gate.
-- **(E)** This repo configures `npm test` / area `all` (`workflow.config.json` `adapters.verification`). Tested: `test/verification.test.ts`.
-- **(C)** **Confirmed** — adapter resolution, substitution, and the no-op default are tested code.
+### UC-5 — Use an existing verification gate
 
-### UC-6 — See which agent family actually pays off, across every repo one runtime drives
+For a repository with established checks, Parallix invokes the configured gate
+rather than asking an agent to invent a substitute validation story.
 
-- **(P)** Operator/buyer deciding which paid agent subscriptions to keep or cut.
-- **(B)** *Before:* no durable, cross-repo record of how each agent performs, so the keep/cut decision is a hunch. *After:* a single parallix-owned measurement database (`<PARALLIX_HOME>/parallix.db`) accumulates per-agent telemetry (`classification, implementer, pr_fix_rounds`, plus the extended 22-field measurement schema including a `closed` flag) across every repository one runtime drives, keyed by `(repo, mission, stage, actor)` so the same mission in different repos stays distinct.
-- **(E)** Tested: `test/stats.test.ts` — `upsertStatsRow writes the workflow stats schema and updates existing missions idempotently`, `task-1314: upsertStatsRow keys on (repo, mission, stage) so same mission in different repos stays distinct`. The kind of agent-comparison this enables is demonstrated in `../visualBoard/docs/missions/2026/task-1023/RETROSPECTIVE_P5.md:198-243` (per-family PRs, reviews/PR, durations).
-- **(C)** **Partial.** Schema and measurement upsert are tested, but the value is bounded: the richest per-agent comparison in the evidence came from Forgejo PR data, not `stats.csv`, and two of four families record honest zeros for token usage (`opencode`/local custom and `mistral`/vibe telemetry are zeroed by design, per `README.md:230-231` describing `opencode-telemetry.js`/`mistral-telemetry.js`). So cross-agent *cost/value* comparison is complete only for `codex` and `claude` today.
+**Confidence:** Confirmed for declared gates. The strength of the result is the
+strength of the repository's configured verification, not the workflow alone.
 
-### UC-7 — Review an agent's whole mission as one branch diff, in your own tool or a PR web view
+### UC-6 — Compare operational outcomes across missions
 
-- **(P)** Operator/reviewer who has to read what an AI agent actually changed before approving a merge, and wants it in the diff tool they already trust (delta/difftastic/vimdiff) or a browser PR view — not a wall of inline terminal text.
-- **(B)** *Before:* you reconstruct an agent's work by hand — `git log`, ad-hoc `git diff main`, guessing the base branch, scrolling raw diff through a default pager. *After:* `px diff [<slug>]` resolves the mission worktree and the correct base, computes `primary..HEAD`, and launches your configured specialized diff tool (`git difftool` when `diff.tool` is set, otherwise a non-default `pager.diff`/`core.pager` such as delta or difftastic); when the review provider is Forgejo, the same change is also viewable as a PR in the browser.
-- **(E)** Tested: `test/diff.test.ts` — `node parallix diff resolves correct target branches`, `node parallix diff detects pager.diff`, `node parallix diff detects core.pager`; Forgejo PR flows in `test/forgejo.test.ts`.
-- **(C)** **Confirmed** for the `px diff` mechanic — base resolution and specialized-tool launch are tested code. The Forgejo PR-viewer half is **Partial**: it only renders when the review provider is Forgejo and a Forgejo instance is reachable (`review-adapter.js` no-ops to a "skipped" status otherwise), so position UC-7 as "local mission-branch diff in your own tool, *plus* an optional PR web view when Forgejo is configured."
+For an operator deciding where agent effort pays off, the workflow can retain
+mission measurements in an operator-owned store and expose them as reports.
 
-### UC-8 — Sustain feature-scale mission throughput at roughly the rate of a dedicated AI factory
+**Confidence:** Partial. Comparison quality is bounded by the completeness and
+consistency of the available measurements.
 
-- **(P)** Operator/buyer judging whether the Parallix workflow actually moves more work than a serial single-agent setup, and how it compares to a purpose-built agent factory.
-- **(B)** *Before:* "AI makes me faster" is a vibe with no denominator. *After:* completed missions are counted directly from the measurement database, giving a defensible per-week figure that can be compared like-for-like against both a human baseline and an external automated factory.
-- **(E)** Measured ceiling: **58 completed missions in a 15-day window = ~27 missions/week** (`~3.86/day`), counted from `stats.csv` via `node workflow stats` (`../visualBoard/docs/missions/2026/task-1247/research.md:51-57`). The Q2 normalization shows the acceleration that produced it: P5 total `2.96/day`, P6 total `3.29/day`, with user-value delivery at `0.44/day` (P5) and `0.48/day` (P6) over a `0.28/day` human baseline (`../visualBoard/docs/missions/2026/task-1099/RETROSPECTIVE_Q2_2026.md:18-23`). **Reconciling the operator's ~30/week:** the operator's reported ~30 missions/week is the same completed-mission metric as the measured 58-missions/15-day window (~27/week), reported at the recent peak; it sits just above the highest measured 15-day window and within the sampling error of a 15-day count, so the honest framing is "~27/week measured, ~30/week at recent peak," not a single rounded "30." The like-for-like external comparison: an upstream AI factory (`you-agent-factory`) shipped ~26–35 PRD-scale mission-equivalents/week against Parallix's ~27/week — **roughly parity (~1×) on feature-scale work** (`research.md:70-75`).
-- **(C)** **Partial.** The throughput is real and counted from telemetry, but it is **measured-but-caveated**: the figure is completed-mission throughput (not user-value-only delivery, which is `0.44–0.54/day`), it carried 85% AI-SDLC overhead in P5/P6 and only 7% C2 review coverage (`EVALUATION_SUMMARY.md:66`), and the parity comparison is low-medium confidence (where to draw the PRD/micro-task line — `research.md:75`). Do not state "~30/week" without the ~27/week measured anchor and these caveats.
+### UC-7 — Review a whole mission diff in familiar tools
 
-### UC-9 — Start a mission from a feature branch, not just from main
+For a reviewer who wants the actual mission change rather than a transcript,
+Parallix resolves the mission comparison for a local diff tool and can publish a
+review surface when the optional provider is configured.
 
-- **(P)** Developer mid-way through a feature branch who wants to hand a sub-task to an agent without first merging or rebasing onto main, and without the agent's mission branch silently forking from the wrong base.
-- **(B)** *Before:* tools that assume every branch cuts from `main` either refuse to start on a feature branch or cut the agent's branch from the wrong base, so the diff is polluted with unrelated `main` changes. *After:* `draft` detects whatever branch HEAD is on at draft time, records it as the mission's base, cuts the `mission/<slug>` branch from that recorded base, and writes a machine-readable `Base-Branch:` line into MISSION.md so later steps resolve against the right base.
-- **(E)** Tested: `test/draft.test.ts` — `ensureMissionBranch creates the mission branch from the recorded feature base`, `ensureMissionBaseBranchRecorded inserts a machine-readable Base-Branch line under the title`, `ensureMissionBaseBranchRecorded replaces a stale Base-Branch line in place`.
-- **(C)** **Confirmed** — feature-base detection, the branch cut from the recorded base, and the idempotent `Base-Branch:` recording are all covered by named passing tests. Note this is not a separate code path: it is the *same* draft flow with explicit base-branch resolution, which falls back to primary-branch behaviour when launched from main.
+**Confidence:** Confirmed for local diff preparation; provider-backed browser
+review is conditional on a reachable, configured provider.
 
-### UC-10 — Catch agent mistakes with your standard QA gates before a human reviews
+### UC-9 — Start from the branch that contains the work
 
-- **(P)** Lead who knows AI agents introduce lint slips, type errors, and test-hygiene violations, and wants those caught by automated QA *before* burning reviewer attention on them.
-- **(B)** *Before:* an agent's change reaches review with mechanical defects (unused vars, `==` vs `===`, untyped JS, skipped/forced tests) that a human reviewer wastes time flagging. *After:* a configured verification gate runs static analysis as a hard checkpoint — ESLint at `--max-warnings 0`, `tsc --checkJs`, and a test-hygiene scan — so agent-introduced defects fail the gate before review.
-- **(E)** A configured verification gate runs static analysis as a hard checkpoint — ESLint at `--max-warnings 0`, `tsc --checkJs --noEmit`, and a test-hygiene scan — so agent-introduced defects fail the gate before review. The gate is a configurable adapter command with `{{area}}` substitution and a no-op default so any repo can wire its own runner; this repo wires `npm test` (`workflow.config.json`). Tested: `test/verification.test.ts` — `runVerificationGate is a no-op pass when no command is configured`, `runVerificationGate executes the configured command via bash`.
-- **(C)** **Confirmed** — the gate script stages, adapter resolution, `{{area}}` substitution, and no-op default are all tested code. UC-10 is the *agent-error-reduction* angle (QA gates catch agent mistakes before review); it is deliberately distinct from UC-5, which is the *CI-adoption* angle (run your existing gate verbatim rather than replumb it).
+For a developer already working on a feature branch, a new mission can retain
+that branch as its recorded base rather than silently assuming the primary
+branch.
 
----
+**Confidence:** Confirmed. The normal primary-branch behavior remains the
+fallback when no feature base is in use.
 
-## 2. Ranking — top 3 for immediate public positioning
+### UC-8 — Measure mission throughput honestly
 
-Ranked by *credibility as a public claim given cited evidence*, each naming the single competing tool/workflow a user would otherwise reach for, and each carrying a claim that is **only true of Parallix** given the evidence.
+For an operator assessing capacity, Parallix can report mission outcomes from
+its configured measurement store without converting a local observation into a
+universal productivity promise.
 
-| Rank | Use case | What the user reaches for instead | The claim only Parallix can make (with evidence) |
-|---|---|---|---|
-| **1** | UC-1 Parallel multi-agent execution | A single Cursor / Claude Code / Aider session run serially, or hand-rolled `git worktree` juggling | It is the *specific* mechanic an internal retro measured as the only one to beat a human baseline, with observed mission-output gains ranging from roughly **+57%** on strict user-value delivery up to about **+1,280%** on later completed-mission throughput in a productized setup (`EVALUATION_SUMMARY.md:46-52`, `RETROSPECTIVE_P5.md:20-30`, `task-1247/research.md:55-75`). No generic AI tool ships that attached measurement. |
-| **2** | UC-2 Usage-limit auto-failover across families | Manually restarting with a different model when you hit a cap | Family-specific limit detection → timed blocklist → retry-next-eligible is a tested control loop (`limit-hit.js:8-36`, `test/agents-limit-hit.test.ts`), not a retry button. |
-| **3** | UC-4 Second review gate (prefers a different agent family, with same-family fallback) | Single-agent self-review, or waiting on a human PR reviewer | A self-approval is *code-blocked* and rerouted to a different family or human (`review-commands.js:902`), and reviewer selection actively excludes the implementer family (`review-loop.js:427`). (Marked Partial — there is a documented same-family fallback at `review-loop.js:484-485`, so this is "forces a second *attempt*," not "guarantees a different agent or coverage.") |
+**Confidence:** Partial. Any comparison must retain its metric, time window,
+and operational caveats; a report is not proof that every team will see the
+same result.
 
-**Re-evaluation with UC-7 through UC-10 (task-1378):** the four new use cases were scored against the top-3 and **none displaces UC-1/UC-2/UC-4.** UC-8 (throughput) is the same measured story as UC-1, not an independent claim — it sharpens UC-1's denominator (~27/week measured, parity with an external AI factory) rather than competing with it. UC-7 (`px diff`/PR view) and UC-10 (QA gates) are Confirmed but are convenience/adoption features whose competing tools (any diff viewer; any CI lint gate) make them weak *public differentiators*. UC-9 (feature-branch start) is Confirmed and fairly distinctive but narrow, and ranks below UC-2's failover control loop on credibility-as-a-public-claim. The table therefore retains UC-1, UC-2, UC-4.
+### UC-10 — Catch mechanical errors with configured QA
 
-**Genericness check (value-bar §3):** strike "Parallix" and substitute any other AI coding tool — rank 1 fails to read identically because the +57% to +107% user-value figures, and the later +1,280% completed-mission figure, are specific repository data; rank 2 fails because per-family limit regexes + timed blocklist is a named tested behavior, not a generic "retry"; rank 3 fails because a code-level self-approval block is specific behavior, not a slogan.
+For a maintainer who wants mechanical defects found before review, Parallix
+runs the repository's configured validation gate at the relevant mission
+checkpoint.
 
-**Feature-list strike check (value-bar §1):** removing every Parallix-internal noun still leaves a user situation in each top-3: (1) "run several AI agents on one repo at once without them overwriting each other"; (2) "when one provider hits its cap mid-task, continue on another automatically"; (3) "a second review pass by a preferentially different AI is forced before the author's own approval counts (though same-family fallback applies when no other agent is available)."
+**Confidence:** Confirmed for declared gates. Coverage is bounded by what the
+repository chooses to verify.
 
----
+## Positioning boundaries
 
-## 3. Aspirational / not-yet-supported (do NOT position as live)
+Parallix is a local-first workflow harness, not a coding model, IDE, or
+guaranteed autonomous engineer. It improves isolation, continuity, and
+verification discipline; it does not remove the need for operator judgment,
+meaningful tests, or honest review.
 
-- **Public distribution (registry/Homebrew/Docker/signed binaries/CI-release automation).** Explicitly out of the near-term model — supported path is a local `npm pack` + global install only (`README.md:281-285`, cited here as the thing being *tested*, corroborated by `package.json:10-11` `publishConfig.access: "restricted"`). **Aspirational.**
-- **"Sustained 2× throughput at scale."** The observed range is context-dependent, not flat. Strict user-value throughput moved between `0.44/day` (+57%) and `0.58/day` (+107%), while a later productized window reached about `27/week` (`~3.86/day`, roughly +1,280% vs `0.28/day`) on completed-mission throughput (`RETROSPECTIVE_P5.md:20-30`, `RETROSPECTIVE_Q2_2026.md:18-29`, `task-1247/research.md:55-75`). A "consistently 2× faster" claim is **Aspirational** and hides the fact that these are different mission-output measures.
-- **Full structured telemetry for all four agent families.** `mistral`/`vibe` telemetry is blocked in-environment and records honest zeros, tracked as follow-up (`README.md:231`). Cross-agent cost comparison for all families is **Aspirational** until those sources exist.
-
----
-
-## 4. Red-team (required adversarial self-review)
-
-The two weakest use cases and the single strongest objection a skeptical senior PM would raise against each:
-
-1. **UC-4 (Cross-agent review) is the weakest "confirmed-sounding" claim.**
-   *Objection:* "Even framed as a 'second-agent review gate that prefers a different family,' you still rank it as a differentiator — but the eligibility config lists the *same* families for `active` and `review` (`config/agents.json:9-20`), reviewer selection has a documented same-family fallback (`review-loop.js:484-485`), and your own cited retro puts real C2 coverage at **7%** against a 100% rule (`EVALUATION_SUMMARY.md:66`). The separation is preferential and best-effort, so even the softened claim leans on a control that often doesn't bind."
-   *How the evidence answers it:* It mostly concedes. The *self-approval block* (`review-commands.js:902`) and the *implementer-exclusion at reviewer selection* (`review-loop.js:427`) are real and present, so the mechanism is honestly "supported/forced at the point of approval." But it is not a guarantee: `config/agents.json:9-20` lists the **same** families for `active` and `review` (no dedicated reviewer pool), and there is an explicit **same-family fallback** (`review-loop.js:484-485`) when no other family is runnable. That is exactly why UC-4 is marked **Partial** and kept out of any "guarantee" framing. A PM should ship it as "forces a second review attempt by a *preferentially* different agent," not as a coverage or different-agent guarantee.
-
-2. **UC-6 (Cross-repo agent telemetry) over-reaches on value.**
-   *Objection:* "Your richest agent comparison (`RETROSPECTIVE_P5.md:198-243`) came from Forgejo PR data, not `stats.csv`, and two of four families log zero tokens by design. So 'know which agent pays off' is true only for codex and claude — the CSV alone can't make the buyer's decision you imply."
-   *How the evidence answers it:* It partially answers. The schema and idempotent upsert are tested (`test/stats.test.ts`), so the *plumbing* claim holds; but the *decision-grade comparison* claim is bounded to families with structured telemetry. UC-6 is marked **Partial** with that boundary stated, and it is deliberately excluded from the top-3.
-
-### New objections raised by UC-7 through UC-10 (task-1378)
-
-3. **UC-8 (throughput) is UC-1's number wearing a second hat — and "~30/week" inflates it.**
-   *Objection:* "You list a separate 'velocity' use case, but its evidence is the same `58 missions/15 days` figure UC-1 already cites, and you headline the operator's `~30/week` when the measured window is `~27/week`. That's double-counting one result and rounding it up."
-   *How the evidence answers it:* It concedes both points by construction. UC-8 is marked **Partial** and explicitly excluded from the ranking *because* it is the same measured story as UC-1, not an independent claim; the §2 re-evaluation states this. The `~30/week` is presented only alongside the `~27/week` measured anchor (`research.md:51-57`) as a recent-peak report within a 15-day sample's error, never as a standalone number.
-
-4. **UC-10 (QA gates) is just UC-5 (adopt your CI) renamed.**
-   *Objection:* "Both use cases point at the same `verification.js` adapter and `verify-local.sh`. Splitting 'adopt your gate' from 'catch agent errors' is positioning, not capability."
-   *How the evidence answers it:* The mechanism is indeed shared (`scripts/verify-local.sh`), and this is stated in UC-10's confidence line. The distinction is the *buyer's reason*: UC-5 sells "you don't have to replumb verification to adopt the workflow"; UC-10 sells "the gate that runs is a defect filter on agent output before review." Same code, two different purchase motivations — which is why UC-10 stays out of the top-3 rather than being claimed as a new mechanism.
-
----
-
-## 5. Limitations & honesty constraints (carried into any downstream positioning)
-
-- Throughput framing is permitted **only** with the cited observed ranges and their metric labels: `0.44-0.58/day` over a `0.28/day` baseline for user-value throughput, or `58 missions / 15 days` (`~27/week`, `~3.86/day`) for later completed-mission throughput. Do not blur those into one number. All such framing must travel with its caveats (34% overhead in the early summary, 7% C2 coverage, METR −19%/model-currency, P5 erosion under 85% AI-SDLC mix). A bare "2× faster" is a defect.
-- The README is treated as the artifact under test, never as proof — every value claim above is anchored to code/tests/configs/measured retro data.
-- visualBoard's human baseline carries acknowledged confounds (2022 codebase was simpler); rate comparisons are directional (`EVALUATION_SUMMARY.md:9`). The latest metrics-bearing retro is `../visualBoard/docs/missions/2026/task-1099/RETROSPECTIVE_Q2_2026.md`, which reports P4 `0.54/day`, P5 `0.44/day`, and P6 `0.48/day`.
-- **UC-7 (px diff / PR view):** the `px diff` mechanic is fully local and Confirmed, but the browser PR-review half depends on a reachable **Forgejo** instance with the review provider set to forgejo; with any other provider the adapter no-ops to a "skipped" status. Position the PR-web-view as conditional, not always-on. `px diff` also requires the operator to have a specialized diff tool configured in Git — it deliberately fails rather than fall back to a plain pager.
-- **UC-8 (velocity):** the only permitted throughput figures are `~27/week` measured (`58 missions / 15 days`) and `~0.44–0.54/day` user-value; the operator's `~30/week` may appear **only** as a recent-peak report stated next to the `~27/week` anchor, never alone. It carries every UC-1 caveat (85% AI-SDLC overhead, 7% C2 coverage, different mission-output metrics) and the parity-with-`you-agent-factory` comparison is low-medium confidence (`research.md:75`).
-- **UC-9 (feature-branch start):** this is **not a separate code path** — it is the standard `draft` flow with explicit base-branch resolution that falls back to primary-branch behaviour when launched from main. Do not position it as a distinct "feature-branch mode."
-- **UC-10 (QA gates):** the gate is only as strong as what each repo configures; the default adapter is a documented **no-op pass**, so "catches agent errors" is true only when a real gate command (like this repo's `npm test` or `verify-local.sh static-analysis`) is wired. It shares its mechanism with UC-5 and must not be claimed as a second, independent capability.
-- History coverage backing this analysis: parallix — 14 `MISSION.md` files + 25 backlog tasks (≥10 ✓); visualBoard — `EVALUATION_SUMMARY.md`, `RETROSPECTIVE.md`, `BENCHMARK.md`, `RETROSPECTIVE_P5.md` among 18 retro files (≥3 ✓).
+When describing these capabilities elsewhere, preserve their limitations. Do
+not turn a configured fallback into a guarantee, a measurement into a universal
+benchmark, or a passing gate into proof of product value.
