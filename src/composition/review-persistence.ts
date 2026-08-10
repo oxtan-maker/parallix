@@ -1,6 +1,7 @@
 import type { MissionStore } from '../application/domain-ports.js';
 import {
   backfillReviewFromLegacyState,
+  reconcileInterruptedHandoff,
   readReviewRounds,
   readReviewState,
   resetReviewState,
@@ -29,6 +30,11 @@ export function bindReviewPersistence(store: MissionStore) {
     resetReviewState: (slug: string, rootDir?: string) => resetReviewState(slug, rootDir, store),
     backfillReview: (slug: string, rootDir?: string, options: { apply?: boolean } = {}) =>
       backfillReviewFromLegacyState(slug, rootDir, { ...options, missionStore: store }),
+    reconcileInterruptedHandoff: (
+      slug: string,
+      inputs: Parameters<typeof reconcileInterruptedHandoff>[1],
+      rootDir?: string,
+    ) => reconcileInterruptedHandoff(slug, inputs, rootDir, { missionStore: store }),
     createEvent: boundCreateEvent,
     readAllEvents: (slug: string, options: Parameters<typeof readAllEvents>[1] = {}) =>
       readAllEvents(slug, { ...options, missionStore: store }),

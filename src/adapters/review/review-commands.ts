@@ -13,7 +13,7 @@ import { resolveTaskFile, getTaskStatus, getAcceptanceCriteria, getTaskAssignee,
 import { toVirtual } from '../config/state-map.js';
 import { getPrStatus, readToken, postComment, postReview, createPr, getComments, closePr, resolveReviewUser, isProviderEnabled } from './review-adapter.js';
 import { buildAutonomousReviewMatrix, formatMatrixSummary } from '../agents/runtime-matrix.js';
-import { readReviewState, writeReviewState, resolveReviewIdentity, ReviewState, persistReviewStateOrThrow, backfillReviewFromLegacyState } from './review-state.js';
+import { readReviewState, writeReviewState, resolveReviewIdentity, ReviewState, persistReviewStateOrThrow, backfillReviewFromLegacyState, reconcileInterruptedHandoff } from './review-state.js';
 import type { MissionStore } from '../../application/domain-ports.js';
 import { createEvent, ALL_EVENT_TYPES, isValidEventType, shouldMirrorToProvider, readAllEvents } from './review-events.js';
 import { startAgent } from '../agents/agents.js';
@@ -51,6 +51,7 @@ const DEFAULT_MAX_ATTEMPTS = 5;
 export const REVIEW_FLAGS = new Set([
   '--actor',
   '--backfill-review',
+  '--branch',
   '--close',
   '--comment',
   '--comment-file',
@@ -60,6 +61,7 @@ export const REVIEW_FLAGS = new Set([
   '--create-event',
   '--disposition',
   '--dry-run',
+  '--eligible-reviewer',
   '--focus',
   '--force',
   '--implementer',
@@ -73,9 +75,12 @@ export const REVIEW_FLAGS = new Set([
   '--phase',
   '--poll-timeout-seconds',
   '--push',
+  '--reconcile-review',
+  '--revision',
   '--reset',
   '--reviewer',
   '--round',
+  '--target',
   '--start',
   '--status',
   '--submit',
@@ -90,9 +95,11 @@ export const REVIEW_FLAGS = new Set([
 /** Flags whose next argument is a value, not another flag. */
 const REVIEW_VALUE_FLAGS = new Set([
   '--actor',
+  '--branch',
   '--comment',
   '--comment-file',
   '--disposition',
+  '--eligible-reviewer',
   '--focus',
   '--implementer',
   '--input-file',
@@ -104,7 +111,9 @@ const REVIEW_VALUE_FLAGS = new Set([
   '--poll-timeout-seconds',
   '--reviewer',
   '--round',
+  '--revision',
   '--submit-review',
+  '--target',
   '--tmp-dir',
   '--type',
   '--verdict'
@@ -144,6 +153,16 @@ export function flagValue(args: string[], flag: string): string | null {
   const val = args[idx + 1];
   if (!val || val.startsWith('--')) { return null; }
   return val;
+}
+
+function repeatedFlagValues(args: string[], flag: string): string[] {
+  const values: string[] = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const value = args[index];
+    if (value === flag && args[index + 1] && !args[index + 1].startsWith('--')) { values.push(args[index + 1]); }
+    if (value.startsWith(`${flag}=`) && value.slice(flag.length + 1)) { values.push(value.slice(flag.length + 1)); }
+  }
+  return values;
 }
 
 export function readTextFlag(
@@ -419,8 +438,13 @@ export async function postStaticReviewComment(
     log?: (_msg: string) => void;
     error?: (_msg: string) => void;
     resolveTaskFileFn?: typeof resolveTaskFile;
+    getTaskStatusFn?: typeof getTaskStatus;
     getTaskImplementerFn?: typeof getTaskImplementer;
     resolveWorktreeFn?: typeof resolveWorktree;
+    reconcileInterruptedHandoffFn?: typeof reconcileInterruptedHandoff;
+    /** Production composition enables the pre-launch aggregate guard. */
+    requireReviewAggregate?: boolean;
+    missionStore?: MissionStore | null;
     readTokenFn?: typeof readToken;
     postCommentFn?: typeof postComment;
     resolveReviewUserFn?: typeof resolveReviewUser;
@@ -1718,6 +1742,57 @@ export async function backfillReviewHandler(
   }
 }
 
+/** Rebuild a missing round-one aggregate from an operator-supplied handoff record. */
+export async function reconcileInterruptedHandoffHandler(
+  slug: string,
+  args: string[],
+  options: {
+    log?: (_msg: string) => void;
+    error?: (_msg: string) => void;
+    exit?: (_code: number) => never;
+    resolveWorktreeFn?: typeof resolveWorktree;
+    resolveTaskFileFn?: typeof resolveTaskFile;
+    getTaskStatusFn?: typeof getTaskStatus;
+    reconcileInterruptedHandoffFn?: typeof reconcileInterruptedHandoff;
+    missionStore?: MissionStore | null;
+  } = {},
+): Promise<void> {
+  const log = options.log || fmt.log.plain;
+  const error = options.error || fmt.log.plainError;
+  const exit = options.exit || process.exit;
+  const worktree = (options.resolveWorktreeFn || resolveWorktree)(slug) || process.cwd();
+  const taskResolution = (options.resolveTaskFileFn || resolveTaskFile)(slug, worktree);
+  if (!taskResolution.ok) {
+    error(fmt.status('FAIL', `Cannot reconcile ${slug}: Backlog task is missing or ambiguous. Restore the task in review, then retry.`));
+    exit(1);
+    return;
+  }
+  if ((options.getTaskStatusFn || getTaskStatus)(taskResolution.taskFile!) !== 'review') {
+    error(fmt.status('FAIL', `Cannot reconcile ${slug}: Backlog task is not in review. Restore its review status before retrying.`));
+    exit(1);
+    return;
+  }
+  const result = await (options.reconcileInterruptedHandoffFn || reconcileInterruptedHandoff)(slug, {
+    sourceBranch: flagValue(args, '--branch') || '',
+    targetBranch: flagValue(args, '--target') || '',
+    reviewer: flagValue(args, '--reviewer') || '',
+    implementer: flagValue(args, '--implementer') || '',
+    revision: flagValue(args, '--revision') || '',
+    eligibleReviewers: repeatedFlagValues(args, '--eligible-reviewer'),
+    startedAt: new Date().toISOString(),
+  }, worktree, { missionStore: options.missionStore });
+  if (result.outcome === 'reconciled') {
+    log(fmt.status('PASS', `Reconciled round-one review for ${slug}. Re-run px review ${slug} --start to launch the reviewer.`));
+    return;
+  }
+  if (result.outcome === 'already-present') {
+    log(fmt.status('INFO', `Mission ${slug} already has a valid Review aggregate; nothing to reconcile.`));
+    return;
+  }
+  error(fmt.status('FAIL', `Cannot reconcile ${slug}: ${result.diagnostic}`));
+  exit(1);
+}
+
 // ============================================================================
 // Main Dispatcher
 // ============================================================================
@@ -1741,12 +1816,17 @@ export async function review(
     recordStageStatsSafeFn?: typeof recordStageStatsSafe;
     startAgentFn?: typeof startAgent;
     resolveTaskFileFn?: typeof resolveTaskFile;
+    getTaskStatusFn?: typeof getTaskStatus;
     getTaskImplementerFn?: typeof getTaskImplementer;
     getPrStatusFn?: typeof getPrStatus;
     readReviewStateFn?: typeof readReviewState;
     performStaticReviewFn?: typeof performStaticReview;
     postStaticReviewCommentFn?: typeof postStaticReviewComment;
     resolveWorktreeFn?: typeof resolveWorktree;
+    reconcileInterruptedHandoffFn?: typeof reconcileInterruptedHandoff;
+    /** Production composition enables the pre-launch aggregate guard. */
+    requireReviewAggregate?: boolean;
+    missionStore?: MissionStore | null;
     run?: typeof run;
     missionPath?: string;
   } = {}
@@ -1807,11 +1887,12 @@ export async function review(
   const isCreateEvent = flags.includes('--create-event');
   const isImportLegacy = flags.includes('--import-legacy');
   const isBackfillReview = flags.includes('--backfill-review');
+  const isReconcileReview = flags.includes('--reconcile-review');
   const isConsumeArtifacts = flags.includes('--consume-artifacts');
   const missionPath = flagValue(args, '--mission');
 
   if (!slug) {
-    error('Usage: px review [<slug>] [--verify] [--submit] [--push] [--force] [--start|--continue [--implementer <a>] [--reviewer <a>] [--focus <f>] [--max-attempts <n>]] [--no-gate] [--status] [--comments] [--comment "<msg>"|--comment-file <path>] [--submit-review <outcome> [--message "<summary>"|--message-file <path>] [--close] [--create-event --type <classification> [--input-file <path>] [--actor <name>] [--round <n>] [--phase <phase>] [--mission <path>]] [--import-legacy [--tmp-dir <dir>]] [--backfill-review [--dry-run]] [--consume-artifacts]');
+    error('Usage: px review [<slug>] [--verify] [--submit] [--push] [--force] [--start|--continue [--implementer <a>] [--reviewer <a>] [--focus <f>] [--max-attempts <n>]] [--reconcile-review --branch <branch> --target <branch> --reviewer <agent> --implementer <agent> --revision <revision> --eligible-reviewer <agent>] [--no-gate] [--status] [--comments] [--comment "<msg>"|--comment-file <path>] [--submit-review <outcome> [--message "<summary>"|--message-file <path>] [--close] [--create-event --type <classification> [--input-file <path>] [--actor <name>] [--round <n>] [--phase <phase>] [--mission <path>]] [--import-legacy [--tmp-dir <dir>]] [--backfill-review [--dry-run]] [--consume-artifacts]');
     exit(1);
     return;
   }
@@ -1866,6 +1947,9 @@ export async function review(
   } else if (isBackfillReview) {
     await backfillReviewHandler(slug, args, options);
     return;
+  } else if (isReconcileReview) {
+    await reconcileInterruptedHandoffHandler(slug, args, options);
+    return;
   } else if (isStart || isContinue) {
     const implementer = flagValue(args, '--implementer');
     const reviewer    = flagValue(args, '--reviewer');
@@ -1874,6 +1958,11 @@ export async function review(
     const maxAttempts = maxAttemptsRaw === null ? DEFAULT_MAX_ATTEMPTS : parseInt(maxAttemptsRaw, 10);
     if (!Number.isInteger(maxAttempts) || maxAttempts < 1) {
       error(fmt.status('FAIL', `--max-attempts requires a positive integer (got "${maxAttemptsRaw}").`));
+      exit(1);
+      return;
+    }
+    if (options.requireReviewAggregate && !await Promise.resolve(readReviewStateFn(slug, resolveWorktreeFn(slug) || process.cwd(), options.missionStore))) {
+      error(fmt.status('FAIL', `Mission ${slug} has no valid Review aggregate. Stop before reviewer launch and run px review ${slug} --reconcile-review --branch <branch> --target <branch> --reviewer <agent> --implementer <agent> --revision <revision> --eligible-reviewer <agent>.`));
       exit(1);
       return;
     }
