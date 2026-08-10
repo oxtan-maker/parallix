@@ -162,6 +162,10 @@ test('SC3: the ai_sdlc cohort reports every figure with its sample size', () => 
   assert.equal(metrics.agentRuntimeMinutesPerMission, 30);
   // NEL 10/20/30/40/50 — mean 30.
   assert.equal(metrics.netEngineeringLinesPerMission, 30);
+  assert.deepEqual(metrics.observationCounts, {
+    cycleTime: 5, activeDwell: 5, reviewDwell: 5, reviewBounce: 5,
+    reviewFixRounds: 5, tokens: 5, runtime: 5, cost: 5, netEngineeringLines: 5,
+  });
 });
 
 test('SC3: the user_value cohort is computed from its own three missions', () => {
@@ -180,6 +184,12 @@ test('SC3: the user_value cohort is computed from its own three missions', () =>
   assert.equal(metrics.costUsdPerMission, 1.5);
   assert.equal(metrics.agentRuntimeMinutesPerMission, 10);
   assert.equal(metrics.netEngineeringLinesPerMission, 200);
+  // Population is 3, but task-0007 has no tokens. The count must follow the
+  // two observations used by tokensPerMission rather than cohort population.
+  assert.deepEqual(metrics.observationCounts, {
+    cycleTime: 3, activeDwell: 3, reviewDwell: 3, reviewBounce: 3,
+    reviewFixRounds: 3, tokens: 2, runtime: 3, cost: 3, netEngineeringLines: 3,
+  });
 });
 
 test('SC3: the two label cohorts partition the eight seeded missions', () => {

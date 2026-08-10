@@ -21,7 +21,7 @@ import type { RepositoryId } from './repository.js';
  *   for completed missions (cycle time, tokens, cost, review rounds).
  *   Together they feed buildMetrics():
  *     - board_lane_events → MissionTransition[] → cumulativeFlow, wipSeries
- *     - usage_statistics  → MissionOutcome[]    → throughput, reviewLoopRate
+ *     - usage_statistics  → MissionOutcome[]    → throughput and runtime metrics
  */
 export interface LaneTransitionEvent {
   /** Mission id / slug whose lane changed. */

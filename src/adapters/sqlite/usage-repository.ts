@@ -4,8 +4,7 @@ import type { UsageRecord, UsageRepository } from '../../application/ports/missi
 /**
  * SQLite-backed usage statistics repository.
  *
- * Implements `UsageRepository` using parameterized SQL and
- * explicit transactions for multi-statement writes.
+ * Implements the read-only `UsageRepository` over persisted measurements.
  *
  * Authority mapping: each stored field is owned by operator-local authority.
  * Maps to architecture migration domain entities: `AgentRunMeasurement`,
@@ -32,62 +31,6 @@ export class SqliteUsageRepository implements UsageRepository {
     return all.filter(predicate);
   }
 
-  async save(record: UsageRecord): Promise<void> {
-    await this.db.execute(
-      `INSERT INTO usage_statistics (
-        date, repo, mission, classification, implementer, pr_fix_rounds,
-        provider, model, implementer_agent, reviewer_agent, stage,
-        input_tokens, output_tokens, cached_tokens, context_tokens,
-        tool_calls, openai_usage_before, openai_usage_after,
-        openai_usage_delta, duration_minutes, cost_usd, closed
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
-      [
-        record.date ?? null,
-        record.repo ?? '',
-        record.mission ?? '',
-        record.classification ?? null,
-        record.implementer ?? null,
-        record.pr_fix_rounds ?? null,
-        record.provider ?? null,
-        record.model ?? null,
-        record.implementer_agent ?? null,
-        record.reviewer_agent ?? null,
-        record.stage ?? 'default',
-        record.input_tokens ?? null,
-        record.output_tokens ?? null,
-        record.cached_tokens ?? null,
-        record.context_tokens ?? null,
-        record.tool_calls ?? null,
-        record.openai_usage_before ?? null,
-        record.openai_usage_after ?? null,
-        record.openai_usage_delta ?? null,
-        record.duration_minutes ?? null,
-        record.cost_usd ?? null,
-        record.closed ?? null,
-      ],
-    );
-  }
-
-  async saveAll(records: readonly UsageRecord[]): Promise<void> {
-    if (records.length === 0) {
-      return;
-    }
-
-    await this.db.beginTransaction();
-    try {
-      for (const record of records) {
-        await this.save(record);
-      }
-      await this.db.commitTransaction();
-    } catch {
-      await this.db.rollbackTransaction();
-      throw new Error('Failed to save usage records in batch');
-    }
-  }
-
-  async clear(): Promise<void> {
-    await this.db.execute('DELETE FROM usage_statistics;');
-  }
 }
 
 /** SQL NULL → undefined (unavailable); otherwise coerce to a finite number. */

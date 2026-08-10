@@ -29,24 +29,24 @@ export const COHORT_REPORT_COLUMNS = [
 ] as const;
 
 /** An unmeasured figure prints as `n/a`; it is never rendered as a zero. */
-function figure(value: number | null, fractionDigits = 0): string {
-  return value === null ? 'n/a' : value.toFixed(fractionDigits);
+function figure(value: number | null, observations: number, fractionDigits = 0): string {
+  return value === null ? 'n/a' : `${value.toFixed(fractionDigits)} (n=${observations})`;
 }
 
 function cohortRow(metrics: CohortMetrics): readonly string[] {
   return [
     metrics.lowSample ? `${metrics.key} (${LOW_SAMPLE_MARKER})` : metrics.key,
     String(metrics.n),
-    figure(metrics.medianCycleTimeMinutes),
-    figure(metrics.p75CycleTimeMinutes),
-    figure(metrics.medianActiveDwellMinutes),
-    figure(metrics.medianReviewDwellMinutes),
-    figure(metrics.reviewBounceRate, 2),
-    figure(metrics.medianReviewFixRounds, 1),
-    figure(metrics.tokensPerMission),
-    figure(metrics.agentRuntimeMinutesPerMission, 1),
-    figure(metrics.costUsdPerMission, 2),
-    figure(metrics.netEngineeringLinesPerMission),
+    figure(metrics.medianCycleTimeMinutes, metrics.observationCounts.cycleTime),
+    figure(metrics.p75CycleTimeMinutes, metrics.observationCounts.cycleTime),
+    figure(metrics.medianActiveDwellMinutes, metrics.observationCounts.activeDwell),
+    figure(metrics.medianReviewDwellMinutes, metrics.observationCounts.reviewDwell),
+    figure(metrics.reviewBounceRate, metrics.observationCounts.reviewBounce, 2),
+    figure(metrics.medianReviewFixRounds, metrics.observationCounts.reviewFixRounds, 1),
+    figure(metrics.tokensPerMission, metrics.observationCounts.tokens),
+    figure(metrics.agentRuntimeMinutesPerMission, metrics.observationCounts.runtime, 1),
+    figure(metrics.costUsdPerMission, metrics.observationCounts.cost, 2),
+    figure(metrics.netEngineeringLinesPerMission, metrics.observationCounts.netEngineeringLines),
   ];
 }
 
@@ -87,6 +87,6 @@ export function renderCohortComparison(comparison: CohortComparison): string {
       : `Low-sample (n < ${comparison.lowSampleThreshold}), not comparable results: ${
         lowSample.map((cohort) => `${cohort.key} (n=${cohort.n})`).join(', ')}.`,
   );
-  lines.push('Figures are per completed mission; n/a means nothing measured the quantity.');
+  lines.push('Every figure carries its own observation n; cohort n is population only. n/a means nothing measured the quantity.');
   return lines.join('\n');
 }

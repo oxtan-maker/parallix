@@ -9,7 +9,7 @@ import {
   medianCycleTimeByStateSeries,
   cumulativeFlowSeries,
   medianStateTimes,
-  reviewLoopRateSeries,
+  reviewBounceRateSeries,
   throughputSeries,
   wipSeries,
   type MetricsInput,
@@ -147,34 +147,33 @@ test('throughputSeries skip fallback produces empty series', () => {
 });
 
 // ---------------------------------------------------------------------------
-// SC3: Review loop rate with missingHistoryFallback
+// SC3: Lifecycle review-bounce rate with missingHistoryFallback
 // ---------------------------------------------------------------------------
 
-test('reviewLoopRateSeries returns estimate fallback when no outcomes', () => {
-  const series = reviewLoopRateSeries([], [now]);
+test('reviewBounceRateSeries returns estimate fallback when no lifecycle history exists', () => {
+  const series = reviewBounceRateSeries([], [now]);
   assert.equal(series.missingHistoryFallback, 'estimate');
   assert.equal(series.series.length, 0);
 });
 
-test('reviewLoopRateSeries computes average review-fix rounds', () => {
-  const outcomes = [
-    missionOutcome({ missionId: id1, createdAt: earlier, closedAt: earlier, cycleTimeMinutes: 10, reviewFixRounds: 1 }),
-    missionOutcome({ missionId: id2, createdAt: earlier, closedAt: earlier, cycleTimeMinutes: 30, reviewFixRounds: 3 }),
-    missionOutcome({ missionId: id3, createdAt: earlier, closedAt: earlier, cycleTimeMinutes: 20, reviewFixRounds: 2 }),
+test('reviewBounceRateSeries derives bounces from lifecycle events, not review-fix telemetry', () => {
+  const transitions = [
+    { missionId: id1, from: 'active' as const, to: 'review' as const, trigger: 'submit-for-review' as const, actor: 'codex', occurredAt: earlier },
+    { missionId: id1, from: 'review' as const, to: 'active' as const, trigger: 'request-changes' as const, actor: 'codex', occurredAt: now },
+    { missionId: id2, from: 'active' as const, to: 'review' as const, trigger: 'submit-for-review' as const, actor: 'codex', occurredAt: earlier },
   ];
-  const series = reviewLoopRateSeries(outcomes, [now]);
+  const series = reviewBounceRateSeries(transitions, [now]);
   assert.equal(series.missingHistoryFallback, 'estimate');
-  // Average: (1 + 3 + 2) / 3 = 2
-  assert.equal(series.series[0]?.value, 2);
+  assert.equal(series.series[0]?.value, 0.5);
+  assert.equal(series.series[0]?.observationCount, 2);
 });
 
-test('reviewLoopRateSeries handles zero review rounds', () => {
-  const outcomes = [
-    missionOutcome({ missionId: id1, createdAt: earlier, closedAt: earlier, cycleTimeMinutes: 10, reviewFixRounds: 0 }),
-    missionOutcome({ missionId: id2, createdAt: earlier, closedAt: earlier, cycleTimeMinutes: 30, reviewFixRounds: 0 }),
-  ];
-  const series = reviewLoopRateSeries(outcomes, [now]);
-  assert.equal(series.series[0]?.value, 0);
+test('reviewBounceRateSeries reports no value when no mission has entered review', () => {
+  const series = reviewBounceRateSeries([
+    { missionId: id1, from: 'backlog' as const, to: 'active' as const, trigger: 'activate' as const, actor: 'codex', occurredAt: earlier },
+  ], [now]);
+  assert.equal(series.series[0]?.value, null);
+  assert.equal(series.series[0]?.observationCount, 0);
 });
 
 // ---------------------------------------------------------------------------
@@ -222,7 +221,7 @@ test('buildMetrics produces all four metric series with correct fallbacks', () =
   assert.equal(metrics.cumulativeFlow.missingHistoryFallback, 'estimate');
   assert.equal(metrics.medianStateTimes.missingHistoryFallback, 'null');
   assert.equal(metrics.throughput.missingHistoryFallback, 'skip');
-  assert.equal(metrics.reviewLoopRate.missingHistoryFallback, 'estimate');
+  assert.equal(metrics.reviewBounceRate.missingHistoryFallback, 'estimate');
 });
 
 test('buildMetrics with data populates all series', () => {
@@ -244,7 +243,7 @@ test('buildMetrics with data populates all series', () => {
   assert.equal(metrics.cumulativeFlow.series[0]?.value, 0);
   assert.equal(metrics.medianStateTimes.series[0]?.value, 10);
   assert.equal(metrics.throughput.series[0]?.value, 1);
-  assert.equal(metrics.reviewLoopRate.series[0]?.value, 1);
+  assert.equal(metrics.reviewBounceRate.series[0]?.value, null);
 });
 
 test('FLOW projection derives lane rows, agent availability, and a deterministic bottleneck sentence', () => {
@@ -279,7 +278,7 @@ test('FLOW projection derives lane rows, agent availability, and a deterministic
   assert.equal(metrics.medianAgeByLane.series.find((entry) => entry.lane === 'review')?.value, 120);
   assert.equal(metrics.weeklyThroughput.series[0]?.value, 2);
   assert.deepEqual(metrics.agentAvailability.map((agent) => [agent.family, agent.available]), [['codex', true], ['claude', false]]);
-  assert.equal(metrics.bottleneck.sentence, 'review is the oldest lane at 2.0h median age; review loop 2.0; 2 completed in the latest recorded week.');
+  assert.equal(metrics.bottleneck.sentence, 'review is the oldest lane at 2.0h median age; review bounce 0.5; 2 completed in the current reporting week.');
 });
 
 test('FLOW projection reports explicit missing history without fabricated values', () => {
@@ -291,7 +290,7 @@ test('FLOW projection reports explicit missing history without fabricated values
   assert.equal(metrics.bottleneck.sentence, 'Bottleneck unavailable: history is missing.');
   assert.deepEqual(medianAgeByLaneSeries([], now).series.map((entry) => entry.value), [null, null, null, null, null, null]);
   assert.equal(medianCycleTimeByStateSeries([]).missingHistoryFallback, 'null');
-  assert.equal(bottleneckNarrative(metrics.medianAgeByLane, metrics.reviewLoopRate, metrics.weeklyThroughput).sentence, 'Bottleneck unavailable: history is missing.');
+  assert.equal(bottleneckNarrative(metrics.medianAgeByLane, metrics.reviewBounceRate, metrics.weeklyThroughput).sentence, 'Bottleneck unavailable: history is missing.');
 });
 
 // ---------------------------------------------------------------------------
@@ -316,8 +315,8 @@ test('throughput fallback: skip produces empty series when outcomes are empty', 
   assert.equal(series.series.length, 0);
 });
 
-test('reviewLoopRate fallback: estimate produces empty series when outcomes are empty', () => {
-  const series = reviewLoopRateSeries([], [now, later]);
+test('reviewBounceRate fallback: estimate produces empty series when lifecycle history is empty', () => {
+  const series = reviewBounceRateSeries([], [now, later]);
   assert.equal(series.missingHistoryFallback, 'estimate');
   assert.equal(series.series.length, 0);
 });

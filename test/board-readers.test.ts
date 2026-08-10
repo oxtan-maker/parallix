@@ -204,7 +204,7 @@ test('BoardProjectionBuilder includes default metrics with skip fallback', async
   assert.equal(projection.metrics.cumulativeFlow.missingHistoryFallback, 'skip');
   assert.equal(projection.metrics.medianStateTimes.missingHistoryFallback, 'skip');
   assert.equal(projection.metrics.throughput.missingHistoryFallback, 'skip');
-  assert.equal(projection.metrics.reviewLoopRate.missingHistoryFallback, 'skip');
+  assert.equal(projection.metrics.reviewBounceRate.missingHistoryFallback, 'skip');
 });
 
 // ---------------------------------------------------------------------------

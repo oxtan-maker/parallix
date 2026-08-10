@@ -79,10 +79,10 @@ test('bottleneck: done lane NOT selected as bottleneck when active has stall (SC
   ];
 
   const ageSeries = medianAgeByLaneSeries(transitions, asOf);
-  const reviewLoopRate: MetricSeries = { series: [{ at: asOf, value: 1.5 }], missingHistoryFallback: 'estimate' };
+  const reviewBounceRate: MetricSeries = { series: [{ at: asOf, value: 1.5 }], missingHistoryFallback: 'estimate' };
   const weeklyThroughput: MetricSeries = { series: [{ at: asOf, value: 3 }], missingHistoryFallback: 'skip' };
 
-  const narrative = bottleneckNarrative(ageSeries, reviewLoopRate, weeklyThroughput);
+  const narrative = bottleneckNarrative(ageSeries, reviewBounceRate, weeklyThroughput);
 
   // Bottleneck should name 'active', NOT 'done'
   assert.ok(
@@ -91,7 +91,7 @@ test('bottleneck: done lane NOT selected as bottleneck when active has stall (SC
   );
 });
 
-test('bottleneck: integration lane NOT selected as bottleneck (SC4)', () => {
+test('bottleneck: integration lane is selected when it is the oldest unfinished mission (SC4)', () => {
   const integrationTransition = '2026-07-01T10:00:00Z'; // 21 days ago
   const activeTransition = '2026-07-22T08:00:00Z'; // 120 min ago
   const asOf = '2026-07-22T10:00:00Z';
@@ -102,14 +102,14 @@ test('bottleneck: integration lane NOT selected as bottleneck (SC4)', () => {
   ];
 
   const ageSeries = medianAgeByLaneSeries(transitions, asOf);
-  const reviewLoopRate: MetricSeries = { series: [{ at: asOf, value: 2.0 }], missingHistoryFallback: 'estimate' };
+  const reviewBounceRate: MetricSeries = { series: [{ at: asOf, value: 2.0 }], missingHistoryFallback: 'estimate' };
   const weeklyThroughput: MetricSeries = { series: [{ at: asOf, value: 1 }], missingHistoryFallback: 'skip' };
 
-  const narrative = bottleneckNarrative(ageSeries, reviewLoopRate, weeklyThroughput);
+  const narrative = bottleneckNarrative(ageSeries, reviewBounceRate, weeklyThroughput);
 
   assert.ok(
-    narrative.inputs.lane === 'active',
-    `bottleneck lane should be 'active', not 'integration'. Got '${narrative.inputs.lane}'`,
+    narrative.inputs.lane === 'integration',
+    `bottleneck lane should be 'integration'. Got '${narrative.inputs.lane}'`,
   );
 });
 
@@ -125,10 +125,10 @@ test('bottleneck: unavailable when all non-terminal lanes have no age (SC5)', ()
   const asOf = '2026-07-22T10:00:00Z';
 
   const ageSeries = medianAgeByLaneSeries(transitions, asOf);
-  const reviewLoopRate: MetricSeries = { series: [{ at: asOf, value: 1.0 }], missingHistoryFallback: 'estimate' };
+  const reviewBounceRate: MetricSeries = { series: [{ at: asOf, value: 1.0 }], missingHistoryFallback: 'estimate' };
   const weeklyThroughput: MetricSeries = { series: [{ at: asOf, value: 2 }], missingHistoryFallback: 'skip' };
 
-  const narrative = bottleneckNarrative(ageSeries, reviewLoopRate, weeklyThroughput);
+  const narrative = bottleneckNarrative(ageSeries, reviewBounceRate, weeklyThroughput);
 
   // Only 'done' has age, but it's terminal — so bottleneck unavailable
   assert.ok(

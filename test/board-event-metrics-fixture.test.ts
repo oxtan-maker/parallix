@@ -190,15 +190,15 @@ describe('SC6: metrics fixture — lane transitions produce populated board metr
         );
       }
 
-      // Assert reviewLoopRate.series has numeric values
+      // Assert lifecycle review-bounce series has numeric values
       assert.ok(
-        metrics.reviewLoopRate.series.length > 0,
-        'reviewLoopRate.series must be non-empty',
+        metrics.reviewBounceRate.series.length > 0,
+        'reviewBounceRate.series must be non-empty',
       );
-      for (const point of metrics.reviewLoopRate.series) {
+      for (const point of metrics.reviewBounceRate.series) {
         assert.ok(
-          typeof point.value === 'number',
-          'reviewLoopRate point must have a numeric value',
+          point.value === null || typeof point.value === 'number',
+          'reviewBounceRate is unavailable until a mission enters review, then numeric',
         );
       }
 
@@ -293,7 +293,7 @@ describe('SC6: metrics fixture — lane transitions produce populated board metr
       assert.equal(emptyMetrics.cumulativeFlow.missingHistoryFallback, 'estimate');
       assert.equal(emptyMetrics.medianStateTimes.missingHistoryFallback, 'null');
       assert.equal(emptyMetrics.throughput.missingHistoryFallback, 'skip');
-      assert.equal(emptyMetrics.reviewLoopRate.missingHistoryFallback, 'estimate');
+      assert.equal(emptyMetrics.reviewBounceRate.missingHistoryFallback, 'estimate');
 
       // With recorded events, metrics are populated (no longer relying on fallbacks)
       const populatedMetrics = buildMetrics({
@@ -314,9 +314,9 @@ describe('SC6: metrics fixture — lane transitions produce populated board metr
       assert.ok(populatedMetrics.throughput.series.length > 0);
       assert.ok(populatedMetrics.throughput.series.every((p) => p.value != null && p.value > 0));
 
-      // reviewLoopRate: estimate fallback becomes real values
-      assert.ok(populatedMetrics.reviewLoopRate.series.length > 0);
-      assert.ok(populatedMetrics.reviewLoopRate.series.every((p) => typeof p.value === 'number'));
+      // reviewBounceRate: estimate fallback becomes real lifecycle values
+      assert.ok(populatedMetrics.reviewBounceRate.series.length > 0);
+      assert.ok(populatedMetrics.reviewBounceRate.series.some((p) => typeof p.value === 'number'));
     });
   });
 });

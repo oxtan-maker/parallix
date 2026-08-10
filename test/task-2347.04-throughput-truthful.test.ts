@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { ConcreteMetricsReadAdapter } from '../src/application/projections/metrics-read-adapter.js';
 import {
   medianStateTimes,
-  reviewLoopRateSeries,
+  reviewBounceRateSeries,
   throughputSeries,
   weeklyThroughputSeries,
 } from '../src/application/projections/metrics.js';
@@ -45,8 +45,8 @@ test('throughput excludes active and review telemetry, and weekly buckets use cl
     { missionId: 'task-current' as never, repositoryId: 'parallix' as never, createdAt: '2026-07-27T00:00:00Z', closedAt: '2026-08-02T00:00:00Z', cycleTimeMinutes: 10, reviewFixRounds: 0, runs: [] },
   ] as unknown as readonly MissionOutcome[]);
   assert.deepEqual(weeks.series, [
-    { at: '2026-06-01T00:00:00.000Z', value: 1 },
-    { at: '2026-07-27T00:00:00.000Z', value: 1 },
+    { at: '2026-06-01T00:00:00.000Z', value: 1, observationCount: 1 },
+    { at: '2026-07-27T00:00:00.000Z', value: 1, observationCount: 1 },
   ]);
 });
 
@@ -59,7 +59,12 @@ test('historical metrics exclude outcomes closed after each instant', () => {
 
   assert.deepEqual(throughputSeries(outcomes, instants).series.map((point) => point.value), [1, 2]);
   assert.deepEqual(medianStateTimes(outcomes, instants).series.map((point) => point.value), [10, 20]);
-  assert.deepEqual(reviewLoopRateSeries(outcomes, instants).series.map((point) => point.value), [1, 2]);
+  const transitions = [
+    { missionId: 'task-early' as never, from: 'active' as const, to: 'review' as const, trigger: 'submit-for-review' as const, actor: 'codex', occurredAt: '2026-07-10T00:00:00Z' },
+    { missionId: 'task-early' as never, from: 'review' as const, to: 'active' as const, trigger: 'request-changes' as const, actor: 'codex', occurredAt: '2026-07-11T00:00:00Z' },
+    { missionId: 'task-late' as never, from: 'active' as const, to: 'review' as const, trigger: 'submit-for-review' as const, actor: 'codex', occurredAt: '2026-07-20T00:00:00Z' },
+  ];
+  assert.deepEqual(reviewBounceRateSeries(transitions, instants).series.map((point) => point.value), [1, 0.5]);
 });
 
 test('lifecycle completion survives absent telemetry, ignores later close, and emits current-week zero', async () => {
@@ -85,8 +90,8 @@ test('lifecycle completion survives absent telemetry, ignores later close, and e
   ]);
   const metrics = await adapter.buildMetrics(new Map([['task-lifecycle-only' as never, 'done' as never]]));
   assert.deepEqual(metrics.weeklyThroughput.series, [
-    { at: '2026-07-06T00:00:00.000Z', value: 1 },
-    { at: '2026-07-27T00:00:00.000Z', value: 0 },
+    { at: '2026-07-06T00:00:00.000Z', value: 1, observationCount: 1 },
+    { at: '2026-07-27T00:00:00.000Z', value: 0, observationCount: 0 },
   ]);
 });
 
