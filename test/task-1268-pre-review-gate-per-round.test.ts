@@ -37,6 +37,8 @@ test('startReviewLoop runs the pre-review gate before every reviewer round', asy
   await startReviewLoop(TEST_SLUG, {
     eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
+    transitionTaskFn: async () => {},
+    transitionVirtualFn: async () => {},
     implementer: 'claude', reviewer: 'codex', dryRun: false,
     workflowLauncherStatusFn: () => ({ supported: true }),
     isForgejoReviewEnabledFn: () => true,
@@ -77,6 +79,8 @@ test('startReviewLoop stops after a gate-failure bounce without launching a revi
   await startReviewLoop(TEST_SLUG, {
     eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
+    transitionTaskFn: async () => {},
+    transitionVirtualFn: async () => {},
     implementer: 'claude', reviewer: 'codex', dryRun: false,
     workflowLauncherStatusFn: () => ({ supported: true }),
     isForgejoReviewEnabledFn: () => true,
@@ -91,7 +95,7 @@ test('startReviewLoop stops after a gate-failure bounce without launching a revi
       gateCalls += 1;
       return { ok: false, area: 'lib', command: 'false', exitCode: 1, stdout: '', stderr: '' };
     },
-    handleGateFailureAutoBounceFn: async () => ({ bounced: true, stranded: false }),
+    handleGateFailureAutoBounceFn: async () => ({ bounced: false, stranded: true }),
     startAgentFn: async (step, options) => {
       events.push(`${step}:${options.role}`);
       return { agent: null };
@@ -116,6 +120,8 @@ test('startReviewLoop rebounces a pre-review safety-commit hook failure before g
   await startReviewLoop(TEST_SLUG, {
     eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
+    transitionTaskFn: async () => {},
+    transitionVirtualFn: async () => {},
     implementer: 'claude', reviewer: 'codex', dryRun: false,
     workflowLauncherStatusFn: () => ({ supported: true }),
     isForgejoReviewEnabledFn: () => true,
@@ -131,7 +137,7 @@ test('startReviewLoop rebounces a pre-review safety-commit hook failure before g
     runPreReviewGateFn: async () => { gateCalls++; return { ok: true, area: 'lib', command: 'true', exitCode: 0, stdout: '', stderr: '' }; },
     handleGateFailureAutoBounceFn: async (_slug, _worktree, result) => {
       hookBounce = result;
-      return { bounced: true, stranded: false };
+      return { bounced: false, stranded: true };
     },
     startAgentFn: async (step, options) => {
       events.push(`${step}:${options.role}`);

@@ -1,37 +1,29 @@
 ---
-
 id: TASK-2357
 title: Close the remaining statistics correctness defects and certify the real production path
 status: review
 assignee: [claude]
 created_date: 2026-08-10 00:00
 labels: [bug, user_value, stats, correctness]
-labels:
-
-* bug
-* stats
-* correctness
-* ai_sdlc
-  priority: high
-  dependencies:
-* TASK-2353
-  references:
-* backlog/tasks/task-2355 - Add-production-composition-statistics-fixture.md
-* src/application/projections/metrics.ts
-* src/application/projections/metrics-read-adapter.ts
-* src/application/projections/cohorts.ts
-* src/application/projections/board.ts
-* src/application/projections/board-readers.ts
-* src/application/services/statistics-service.ts
-* src/composition/application-services.ts
-* src/composition/production-capabilities.ts
-* src/adapters/cli/commands/stats.ts
-* src/adapters/cli/commands/stats-cohorts.ts
-* src/adapters/sqlite/
-* src/interfaces/tui/flow-panel.tsx
-* docs/authority-reference.md
-* test/
-
+priority: high
+dependencies:
+  - TASK-2353
+references:
+  - backlog/tasks/task-2355 - Add-production-composition-statistics-fixture.md
+  - src/application/projections/metrics.ts
+  - src/application/projections/metrics-read-adapter.ts
+  - src/application/projections/cohorts.ts
+  - src/application/projections/board.ts
+  - src/application/projections/board-readers.ts
+  - src/application/services/statistics-service.ts
+  - src/composition/application-services.ts
+  - src/composition/production-capabilities.ts
+  - src/adapters/cli/commands/stats.ts
+  - src/adapters/cli/commands/stats-cohorts.ts
+  - src/adapters/sqlite/
+  - src/interfaces/tui/flow-panel.tsx
+  - docs/authority-reference.md
+  - test/
 ---
 
 ## Description
