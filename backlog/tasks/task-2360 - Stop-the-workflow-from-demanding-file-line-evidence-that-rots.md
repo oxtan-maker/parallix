@@ -2,7 +2,7 @@
 id: TASK-2360
 title: 'Stop the workflow from demanding file:line evidence that rots'
 status: backlog
-assignee: []
+assignee: [custom]
 created_date: '2026-08-11 07:35'
 labels:
   - ai_sdlc
