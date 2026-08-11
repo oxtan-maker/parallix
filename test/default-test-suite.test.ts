@@ -20,7 +20,7 @@ const expectedIntegrationFiles = [
   'pi-runner.test.ts',
   'product-config.test.ts',
   'px-runner.test.ts', 'px-runtime-smoke.test.ts', 'px-shell-init.test.ts',
-  'rebase.test.ts', 'rebase_diagnostics.test.ts', 'rebase_hardening.test.ts',
+  'rebase-use-case.test.ts', 'rebase.test.ts', 'rebase_diagnostics.test.ts', 'rebase_hardening.test.ts',
   'refresh-global-px-script.test.ts', 'resolve-conflict.test.ts',
   'review-artifacts.test.ts', 'review-autoderive.test.ts',
   'review-commands-additional.test.ts', 'review-commands-supplemental.test.ts',

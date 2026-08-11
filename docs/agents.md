@@ -9,7 +9,7 @@
 | mistral | `vibe` | Fixed |
 | custom    | `opencode` or `pi` | Configurable via `adapters.agents.runners.custom` |
 
-All four listed launchers are supported on this workstation. The `custom` agent family can switch between `opencode` and `pi` runners via configuration. Step eligibility for all workflow steps (`draft`, `active`, `conflict-resolution`, `review`) is controlled by `parallix/config/agents.json`. If a launcher is missing from `PATH`, the harness fails loudly with the exact blocker before launching.
+All four listed launchers are supported on this workstation. The `custom` agent family can switch between `opencode` and `pi` runners via configuration. Step eligibility for the configurable workflow steps (`draft`, `active`, `review`) is controlled by `parallix/config/agents.json`. Conflict resolution is not a separately configurable step — it always runs as the mission's recorded implementer (TASK-2294.01). If a launcher is missing from `PATH`, the harness fails loudly with the exact blocker before launching.
 
 ### Custom Runner Configuration
 
@@ -108,7 +108,6 @@ Eligibility is controlled by `parallix/config/agents.json`. The default config c
   "steps": {
     "draft": { "eligible": ["codex", "custom", "vibe"], "selection": "random" },
     "active": { "eligible": ["codex", "claude", "custom", "vibe"], "selection": "random" },
-    "conflict-resolution": { "eligible": ["claude", "codex", "vibe"], "selection": "random" },
     "review": { "eligible": ["codex", "claude", "custom", "vibe"], "selection": "random" }
   }
 }
@@ -177,8 +176,8 @@ Two commands carry no usable role and stay **unattributed**:
   process (`review-loop.ts` passes `role: 'reviewer'`, later
   `role: 'implementer'`), so a live `px review` proves nothing about which
   family is at work;
-- `px resolve-conflict` launches without a slug or role, so it writes no marker
-  at all.
+- `px resolve-conflict` launches as the mission implementer with `slug` and
+  `role: 'implementer'`, so its session marker is attributed.
 
 Unattributed sessions are not dropped and not guessed: they are counted in a
 trailing `N running · family unknown` entry, so the strip's total still matches

@@ -1,6 +1,7 @@
 import integrate from './integrate.js';
 import { findMissionDir, findMissionArea, inferSlug, getPrimaryBranch } from '../../filesystem/mission-utils.js';
 import { startAgent } from '../../agents/agents.js';
+import { resolveTaskFile, getTaskImplementer } from '../../backlog/backlog.js';
 import * as fmt from '../../../application/presentation/cli-format.js';
 import { formatVerificationCommand } from '../../verification/verification.js';
 
@@ -43,12 +44,26 @@ function buildAgentResolutionPrompt({ slug, area, worktreePath, missionSpecificF
   ].join('\n');
 }
 
-/** @param {string[]} args @param {{resolveConflictsFn?: Function, startAgentFn?: Function, exitFn?: Function}} opts */
+/**
+ * @param {string[]} args
+ * @param {{resolveConflictsFn?: Function, startAgentFn?: Function, exitFn?: Function,
+ *   resolveTaskFileFn?: Function, getTaskImplementerFn?: Function, rootDir?: string}} opts
+ */
 async function resolveConflict(args: string[], {
   resolveConflictsFn = (integrate as any).resolveConflictsForMission,
   startAgentFn = startAgent,
   exitFn = ((_code: number) => process.exit(_code)) as (_code: number) => void,
-}: {resolveConflictsFn?: Function, startAgentFn?: Function, exitFn?: (_code: number) => void} = {}) {
+  resolveTaskFileFn = resolveTaskFile,
+  getTaskImplementerFn = getTaskImplementer,
+  rootDir = process.cwd(),
+}: {
+  resolveConflictsFn?: Function,
+  startAgentFn?: Function,
+  exitFn?: (_code: number) => void,
+  resolveTaskFileFn?: Function,
+  getTaskImplementerFn?: Function,
+  rootDir?: string,
+} = {}) {
   const explicitSlug = args[0];
   const slug = inferSlug(explicitSlug);
   if (!slug) {
@@ -84,6 +99,21 @@ async function resolveConflict(args: string[], {
     return;
   }
 
+  // Conflict resolution is implementation work owned by the mission's recorded
+  // implementer (TASK-2294.01). Resolve that family before launching; there is
+  // no separate conflict-resolution pool to fall back on.
+  const taskResolution = resolveTaskFileFn(slug, rootDir) as {ok: boolean, taskFile?: string};
+  const implementer = taskResolution && taskResolution.ok && taskResolution.taskFile
+    ? getTaskImplementerFn(taskResolution.taskFile) as string | null
+    : null;
+  if (!implementer) {
+    fmt.log.fail(`No recorded implementer for ${fmt.slug(slug)}; cannot launch conflict resolution.`);
+    fmt.log.info('Conflict resolution runs as the mission implementer. Set the task assignee to a supported agent family, then re-run.');
+    fmt.log.info(`Recovery: ${fmt.command(`px resolve-conflict ${slug}`)}`);
+    exitFn(1);
+    return;
+  }
+
   // All conflicts are mission-specific: launch an agent to execute the --theirs rebase.
   const prompt = buildAgentResolutionPrompt({
     slug,
@@ -92,11 +122,25 @@ async function resolveConflict(args: string[], {
     missionSpecificFiles: result.missionSpecificFiles,
   });
 
-  fmt.log.info('Launching agent to execute mission-specific conflict resolution...');
-  const { agent, result: agentResult } = await startAgentFn('conflict-resolution', {
-    prompt,
-    worktree: result.worktreePath,
-  });
+  fmt.log.info(`Launching implementer (${fmt.agent(implementer)}) to execute mission-specific conflict resolution...`);
+  let agent: string;
+  let agentResult: {status: number};
+  try {
+    ({ agent, result: agentResult } = await startAgentFn('conflict-resolution', {
+      prompt,
+      worktree: result.worktreePath,
+      agent: implementer,
+      slug,
+      role: 'implementer',
+      pinnedAgent: true,
+    }));
+  } catch (err: any) {
+    fmt.log.fail(`Implementer (${fmt.agent(implementer)}) cannot run conflict resolution: ${err.message || String(err)}`);
+    fmt.log.info('Parallix does not substitute another agent family for the mission implementer.');
+    fmt.log.info(`Recovery: clear the blocker for ${fmt.agent(implementer)}, then re-run ${fmt.command(`px resolve-conflict ${slug}`)}`);
+    exitFn(1);
+    return;
+  }
 
   if (agentResult.status !== 0) {
     fmt.log.fail(`Agent (${fmt.agent(agent)}) exited with status ${agentResult.status}.`);

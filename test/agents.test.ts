@@ -1100,6 +1100,100 @@ test('startAgent reroutes when the selected agent fails its health probe', async
   }
 });
 
+// ---------- pinnedAgent: work an actor owns outright (TASK-2294.01) ----------
+
+test('startAgent with pinnedAgent fails instead of rerouting when the launcher is missing', async () => {
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-pinned-missing-'));
+  try {
+    let reselected = false;
+    await withCommandPathProbe(['claude'], async () => {
+      await assert.rejects(
+        () => startAgent('conflict-resolution', {
+          prompt: 'Execute',
+          worktree,
+          agent: 'codex',
+          pinnedAgent: true,
+          selectAgentFn: () => { reselected = true; return 'claude'; },
+          isAgentBlockedFn: () => false,
+          log: () => {}
+        }),
+        (err) => {
+          assert.equal(err.code, 'PINNED_AGENT_UNAVAILABLE');
+          assert.match(err.message, /codex/);
+          assert.match(err.message, /launcher is not available/);
+          return true;
+        },
+      );
+    });
+    assert.equal(reselected, false, 'a pinned agent must never fall through to selectAgent');
+  } finally {
+    fs.rmSync(worktree, { recursive: true, force: true });
+  }
+});
+
+test('startAgent with pinnedAgent fails instead of rerouting when the agent is blocked', async () => {
+  let reselected = false;
+  await assert.rejects(
+    () => startAgent('conflict-resolution', {
+      prompt: 'Execute',
+      worktree: '/tmp/mission-task-2294',
+      agent: 'codex',
+      pinnedAgent: true,
+      selectAgentFn: () => { reselected = true; return 'claude'; },
+      isAgentBlockedFn: () => true,
+      log: () => {}
+    }),
+    (err) => {
+      assert.equal(err.code, 'PINNED_AGENT_UNAVAILABLE');
+      assert.match(err.message, /codex/);
+      assert.match(err.message, /blocked/);
+      return true;
+    },
+  );
+  assert.equal(reselected, false);
+});
+
+test('startAgent with pinnedAgent returns the pinned agent failure instead of retrying another family', async () => {
+  const log = [];
+  let reselected = false;
+  const result = await startAgent('conflict-resolution', {
+    prompt: 'Execute',
+    worktree: '/tmp/mission-task-2294',
+    agent: 'codex',
+    pinnedAgent: true,
+    selectAgentFn: () => { reselected = true; return 'claude'; },
+    isAgentBlockedFn: () => false,
+    detectLimitHitFn: () => null,
+    updateAgentBlockFn: async () => ({ reason: 'transient crash' }),
+    launchAgentFn: () => ({ invocation: null, result: { status: 3, stdout: '', stderr: 'boom' } }),
+    log: msg => log.push(msg)
+  });
+
+  assert.equal(result.agent, 'codex');
+  assert.equal(result.result.status, 3);
+  assert.equal(reselected, false);
+  assert.ok(log.some(m => m.includes('no fallback is permitted for this step')));
+});
+
+test('startAgent without pinnedAgent keeps rerouting a pinned-by-override agent', async () => {
+  // Guard: the explicit-fail branch is opt-in. Reviewer/implementer overrides
+  // elsewhere still get their one fallback retry.
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-unpinned-missing-'));
+  try {
+    const result = await withCommandPathProbe(['claude'], () => startAgent('draft', {
+      prompt: 'Execute',
+      worktree,
+      agent: 'codex',
+      selectAgentFn: () => 'claude',
+      isAgentBlockedFn: () => false,
+      log: () => {}
+    }));
+    assert.equal(result.agent, 'claude');
+  } finally {
+    fs.rmSync(worktree, { recursive: true, force: true });
+  }
+});
+
 test('startAgent fails loudly when an unknown agent is requested', async () => {
   try {
     await startAgent('draft', {

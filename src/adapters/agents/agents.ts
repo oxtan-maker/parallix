@@ -65,6 +65,27 @@ interface StartAgentOptions {
   noOutputWatchdog?: {initialDelayMs?: number, intervalMs?: number} | boolean;
   launchAgentFn?: Function;
   assertAgentSupportedFn?: Function;
+  /**
+   * Refuse every fallback for the pinned `agent`. Used by work that a specific
+   * actor owns outright — conflict resolution belongs to the mission
+   * implementer (TASK-2294.01), so a blocked, saturated, unavailable,
+   * limit-hit or failed implementer must surface as an error instead of
+   * silently rerouting through `selectAgent`.
+   */
+  pinnedAgent?: boolean;
+}
+
+/** Thrown when `pinnedAgent` is set and the pinned family cannot run the step. */
+class PinnedAgentUnavailableError extends Error {
+  code = 'PINNED_AGENT_UNAVAILABLE';
+  agent: string;
+  detail: string;
+  constructor(agent: string, detail: string) {
+    super(`Pinned agent "${agent}" cannot run this step: ${detail}`);
+    this.name = 'PinnedAgentUnavailableError';
+    this.agent = agent;
+    this.detail = detail;
+  }
 }
 
 const NON_BLOCKING_LAUNCH_ERROR_PATTERNS = Object.freeze([
@@ -262,7 +283,8 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
     log = fmt.log.plain,
     noOutputWatchdog = {},
     launchAgentFn = null,
-    assertAgentSupportedFn = assertAgentSupported
+    assertAgentSupportedFn = assertAgentSupported,
+    pinnedAgent = false
   } = opts;
 
   // `exclude` seeds the tried-set so callers can reserve agents (e.g. exclude
@@ -275,6 +297,15 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
   const launched = new Set();
   let iteration = 0;
   let chosen = agentOverride;
+
+  // Single explicit-fail branch for pinned work (TASK-2294.01). Every reroute
+  // point below calls it before clearing `chosen`, so a pinned agent never
+  // reaches `selectAgent` and the caller sees why the owner could not run.
+  const refuseFallbackWhenPinned = (detail: string) => {
+    if (pinnedAgent && agentOverride) {
+      throw new PinnedAgentUnavailableError(agentOverride, detail);
+    }
+  };
 
   while (true) {
     iteration += 1;
@@ -310,6 +341,7 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
         );
       }
     } else if (isAgentBlockedFn(chosen)) {
+      refuseFallbackWhenPinned('currently blocked in agents.local.json');
       // Pre-launch blocklist gate. An explicit `agent:` override (e.g. a pinned
       // reviewer/implementer carried over from the mission's Review) bypasses
       // selectAgent's blocklist filter. Without this check, a known-blocked
@@ -329,6 +361,7 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
       if (e.code !== 'LAUNCHER_UNAVAILABLE') {
         throw err;
       }
+      refuseFallbackWhenPinned(e.message || 'launcher unavailable');
       log(fmt.status('WARN', (err as any).message));
       // Only reroute for launcher-availability failures (missing or probe-failed).
       tried.add(chosen || '');
@@ -412,6 +445,7 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
       ? tryAcquireCustomCapacity(worktree)
       : null;
     if (chosen === 'custom' && !customReservation) {
+      refuseFallbackWhenPinned('custom-agent capacity is saturated');
       log(fmt.status('WARN', 'Custom-agent capacity is saturated; selecting another eligible agent.'));
       tried.add(chosen);
       chosen = undefined;
@@ -491,6 +525,7 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
       if (typeof onLimitHit === 'function') {
         onLimitHit({ agent: chosen, until: limitHit.until, source: limitHit.source });
       }
+      refuseFallbackWhenPinned(`usage limit hit; blocked until ${limitHit.until}`);
       // Reset chosen so next iteration reselects, but only when no explicit override.
       // If the caller pinned a specific agent, fail loudly — there is no fallback.
       if (agentOverride && agentOverride === chosen && iteration === 1) {
@@ -504,6 +539,7 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
 
     // Reroute if the launcher binary could not be started (ENOENT = not found, EACCES = not executable).
     if (result && result.error && (result.error.code === 'ENOENT' || result.error.code === 'EACCES')) {
+      refuseFallbackWhenPinned(`launcher could not be started (${result.error.code})`);
       log(fmt.status('WARN', `Launcher for "${chosen || ''}" could not be started (${result.error.code}); rerouting.`));
       tried.add(chosen || '');
       if (agentOverride && agentOverride === chosen && iteration === 1) {
@@ -541,6 +577,12 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
       const stderrSnippet = result && result.stderr
         ? ` (${result.stderr.trim().split('\n')[0]})`
         : '';
+      // Pinned work has no next eligible agent: hand the failed result back so
+      // the caller reports the owner's own exit status (TASK-2294.01).
+      if (pinnedAgent && agentOverride) {
+        log(fmt.status('WARN', `Pinned agent ${fmt.agent(chosen || '')} failed to complete (${exitInfo}${stderrSnippet}); no fallback is permitted for this step.`));
+        return { agent: chosen, invocation, result };
+      }
       log(fmt.status('WARN', `Agent ${fmt.agent(chosen || '')} failed to complete (${exitInfo}${stderrSnippet}); retrying with next eligible agent.`));
       agentErrors.set(chosen || '', {
         exitInfo,
@@ -619,6 +661,7 @@ async function startDraftAgent(opts: StartAgentOptions = { prompt: '' }) {
 export {
   KNOWN_AGENT_NAMES,
   WORKFLOW_AGENT_NAMES,
+  PinnedAgentUnavailableError,
   startAgent,
   startDraftAgent,
   selectAgent,
