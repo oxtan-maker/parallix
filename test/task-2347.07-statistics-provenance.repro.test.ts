@@ -96,7 +96,7 @@ function laneRepo(entries: readonly BoardLaneEventEntry[]): BoardLaneEventReposi
 
 function usageRepo(records: readonly UsageRecord[]): UsageRepository {
   return {
-    async findAll() { return records; }, async findWhere() { return records; }, async save() {}, async saveAll() {}, async clear() {},
+    async findAll() { return records; }, async findWhere() { return records; },
   };
 }
 

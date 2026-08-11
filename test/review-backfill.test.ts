@@ -165,7 +165,6 @@ test('px review <slug> --backfill-review dispatches the migration', async () => 
     const out: string[] = [];
     await review([slug, '--backfill-review', '--dry-run'], {
       log: (m: string) => out.push(m), error: (m: string) => out.push(m),
-// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
       backfillReviewFn: (target: string, worktree: string, options: any) => backfillReviewFromLegacyState(target, worktree, { ...options, missionStore: store }),
     });
     assert.equal(await readReviewState(slug, root, store), null, '--dry-run writes nothing');
@@ -174,7 +173,6 @@ test('px review <slug> --backfill-review dispatches the migration', async () => 
     out.length = 0;
     await review([slug, '--backfill-review'], {
       log: (m: string) => out.push(m), error: (m: string) => out.push(m),
-// @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
       backfillReviewFn: (target: string, worktree: string, options: any) => backfillReviewFromLegacyState(target, worktree, { ...options, missionStore: store }),
     });
     assert.ok(out.join('\n').includes('Backfilled review'), `expected a backfill report, got:\n${out.join('\n')}`);

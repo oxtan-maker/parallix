@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { ReviewCommandUseCase } from '../src/application/review-command-use-case.js';
 
 function mockedPort(calls: Array<{ operation: string; args: string[] }>) {
-  const record = (operation: string) => async (context: { args: string[] }) => calls.push({ operation, args: context.args });
+  const record = (operation: string) => async (context: { args: string[] }) => { calls.push({ operation, args: context.args }); };
   return {
     preflight: async (args: string[], options: Record<string, unknown> = {}) => ({ slug: 'task-2332.14', args, options }),
     verify: record('verify'), submit: record('submit'), push: record('push'), start: record('start'), continue: record('continue'),

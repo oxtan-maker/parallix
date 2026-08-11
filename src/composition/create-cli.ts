@@ -8,7 +8,8 @@ import { packageRoot } from '../adapters/filesystem/package-root.js';
 import packageJson from '../../package.json' with { type: 'json' };
 import { ensureStandaloneGitRepo } from '../adapters/config/product-config.js';
 import { loadStateMap } from '../adapters/config/state-map.js';
-import active from '../adapters/cli/commands/active.js';
+import activeWorkflow from '../adapters/cli/commands/active.js';
+import { createActiveCommand } from '../interfaces/cli/active.js';
 import {
   createCheckpointVerificationAdapter,
   createCheckpointGitAdapter,
@@ -16,8 +17,10 @@ import {
   createCheckpointLifecycleAuthorizationAdapter,
   createCheckpointMissionAdapter,
 } from '../adapters/cli/commands/checkpoint-adapter.js';
-import config from '../adapters/cli/commands/config.js';
-import diff from '../adapters/cli/commands/diff.js';
+import configWorkflow from '../adapters/cli/commands/config.js';
+import { createConfigCommand } from '../interfaces/cli/config.js';
+import diffWorkflow from '../adapters/cli/commands/diff.js';
+import { createDiffCommand } from '../interfaces/cli/diff.js';
 import { createDraftWorkflowAdapter } from '../adapters/cli/commands/draft.js';
 import { createHandoffPorts } from '../adapters/cli/commands/handoff.js';
 import integrate from '../adapters/cli/commands/integrate.js';
@@ -39,9 +42,11 @@ import missionStart from '../adapters/cli/mission-start.js';
 import mutationGate from '../adapters/verification/mutation-gate.js';
 import rebase from '../adapters/cli/commands/rebase.js';
 import { createRebaseCommand } from '../interfaces/cli/rebase.js';
-import resolveConflict from '../adapters/cli/commands/resolve-conflict.js';
+import resolveConflictWorkflow from '../adapters/cli/commands/resolve-conflict.js';
+import { createResolveConflictCommand } from '../interfaces/cli/resolve-conflict.js';
 import { createReviewWorkflowAdapter } from '../adapters/review/review-commands.js';
-import setup from '../adapters/cli/commands/setup.js';
+import { setupWizard } from '../adapters/review/setup-review.js';
+import { createSetupCommand } from '../interfaces/cli/setup.js';
 import setupReview from '../adapters/cli/commands/setup-review.js';
 import { createStatsCommand, createStatsWorkflowAdapter } from '../adapters/cli/commands/stats.js';
 import {
@@ -51,7 +56,8 @@ import {
   createStatusAgentAdapter,
   createStatusStaleWorktreesAdapter,
 } from '../adapters/cli/commands/status-adapter.js';
-import verify from '../adapters/cli/commands/verify.js';
+import verifyWorkflow from '../adapters/verification/verification.js';
+import { createVerifyCommand } from '../interfaces/cli/verify.js';
 import { deriveAliases, type Command, type MainOptions } from '../interfaces/cli/runtime.js';
 import { createProductionApplicationServices } from './application-services.js';
 import { bindReviewPersistence, reviewLoopBindings } from './review-persistence.js';
@@ -97,6 +103,12 @@ interface RunOptions {
 }
 
 function createCommandRegistry(rootDir: string): Record<string, Command> {
+  const active = createActiveCommand((request, options) => activeWorkflow([...request.args], options));
+  const config = createConfigCommand((request, options) => configWorkflow([...request.args], options));
+  const diff = createDiffCommand((request, options) => diffWorkflow([...request.args], options));
+  const resolveConflict = createResolveConflictCommand((request, options) => resolveConflictWorkflow([...request.args], options));
+  const setup = createSetupCommand((request, options) => setupWizard([...request.args], options));
+  const verify = createVerifyCommand((request, options) => verifyWorkflow([...request.args], options));
   const withGraph = async (invoke: (_services: Awaited<ReturnType<typeof createProductionApplicationServices>>) => unknown) => {
     const services = await createProductionApplicationServices(rootDir);
     try { return await invoke(services); } finally { await services.operatorState.close(); }
