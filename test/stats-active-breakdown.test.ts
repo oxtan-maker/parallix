@@ -125,7 +125,7 @@ test('task-2213: weekly agent performance table excludes active-stage agents', (
   );
 
   // Mission count: only 1 closed mission
-  assert.match(plain, /# missions\s+[^\d]*1\s/,
+  assert.match(plain, /# missions with telemetry\s+[^\d]*1\s/,
     'weekly report should count only closed missions');
 
   // Agent performance: only closed missions appear
@@ -175,7 +175,7 @@ test('task-2213: range agent performance table excludes active-stage agents', ()
   const plain = __mm1.stripAnsi(report);
 
   // Mission count: 0 (no closed missions)
-  assert.match(plain, /# missions\s+[^\d]*0\s/,
+  assert.match(plain, /# missions with telemetry\s+[^\d]*0\s/,
     'range report should count 0 closed missions');
 
   // Active-stage agents must NOT appear in agent performance
@@ -265,7 +265,7 @@ test('task-1409: active and closed rows coexist without double-counting', () => 
   const plain = __mm1.stripAnsi(report);
 
   // Mission count: only the closed row counts, so 1 mission
-  assert.match(plain, /# missions\s+[^\d]*1\s/,
+  assert.match(plain, /# missions with telemetry\s+[^\d]*1\s/,
     'mission count should be 1 (only closed rows count)');
 
   // Agent performance: gpt-5 shows 1 mission (only the closed row)

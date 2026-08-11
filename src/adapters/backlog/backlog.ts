@@ -750,9 +750,19 @@ export async function recordLifecycleOperation(
     try {
       const runner = new SqliteMigrationRunner(db);
       await runner.applyPending(loadDefaultMigrations());
+      // The Mission aggregate owns the repository this operation belongs to.
+      // Recording the row without it would leave a history entry that no
+      // repository-scoped reader can attribute, and mission ids collide across
+      // repositories.
+      const { SqliteMissionStore } = await import('../sqlite/mission-store.js');
+      const read = await new SqliteMissionStore(db).load(missionId(slug));
+      if (read.kind !== 'found') {
+        return false;
+      }
       const recorder = new OperationEventRecorder(new SqliteOperationalHistoryRepository(db));
       await recorder.append({
         missionId: missionId(slug),
+        repositoryId: read.mission.repositoryId,
         trigger: options.trigger as never,
         toStatus: options.toStatus,
         agent: options.agent ?? 'unknown',
@@ -859,6 +869,7 @@ async function transitionTaskOnIntegrationBranch(
             const operations = new OperationEventRecorder(new SqliteOperationalHistoryRepository(db));
             await operations.append({
               missionId: missionId(slug),
+              repositoryId: read.mission.repositoryId,
               trigger,
               toStatus,
               agent,

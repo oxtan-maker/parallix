@@ -95,10 +95,10 @@ test('task-1380: renderWeeklyStatsReport excludes in-progress missions', () => {
   const report = stats.renderWeeklyStatsReport(rows, { today: '2026-06-23' });
 
   // Should report 1 mission (only the closed one), not 3
-  assert.match(report, /# missions\s*[^\d]*1\s/,
+  assert.match(report, /# missions with telemetry\s*[^\d]*1\s/,
     'weekly report should count only closed missions in current week');
   // Previous week should have 0 missions — split into sections and check
-  const prevSection = report.split('Previous week')[1] || '';
+  const prevSection = report.split('Agent telemetry — previous week')[1] || '';
   const prevDataLine = prevSection.split('\n').find(l => /^\d/.test(l));
   const prevValues = (prevDataLine || '').trim().split(/\s+/);
   assert.equal(Number(prevValues[0]), 0,
@@ -116,7 +116,7 @@ test('task-1380: renderRangeStatsReport excludes in-progress missions', () => {
   const report = stats.renderRangeStatsReport(rows, { from: '2026-05-01', to: '2026-05-31' });
 
   // Should report 1 mission (only the closed one)
-  assert.match(report, /# missions\s*[^\d]*1\s/,
+  assert.match(report, /# missions with telemetry\s*[^\d]*1\s/,
     'range report should count only closed missions');
   assert.match(report, /# user value missions\s*[^\d]*1\s/,
     'range report should count 1 user value mission');
@@ -152,7 +152,7 @@ test('task-1380: backward compat — legacy CSV without closed column treats all
       'readLegacyStatsCsv should default missing closed to yes for backward compatibility');
 
     const report = stats.renderWeeklyStatsReport(data.rows, { today: '2026-06-23' });
-    assert.match(report, /# missions\s*[^\d]*1\s/,
+    assert.match(report, /# missions with telemetry\s*[^\d]*1\s/,
       'weekly report on legacy CSV should count the row as 1 mission');
   } finally {
     fs.rmSync(csvFile, { force: true });
@@ -207,7 +207,7 @@ test('task-1380: recordActiveStats does not set closed on in-progress rows (regr
 
     // The weekly report should count 0 missions (the only row is in-progress)
     const report = stats.renderWeeklyStatsReport(data.rows, { today: '2026-07-01' });
-    const currentSection = report.split('Current week')[1] || '';
+    const currentSection = report.split('Agent telemetry — current week')[1] || '';
     const currentDataLine = currentSection.split('\n').find(l => /^\d/.test(l));
     const currentValues = (currentDataLine || '').trim().split(/\s+/);
     assert.equal(Number(currentValues[0]), 0,

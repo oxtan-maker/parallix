@@ -383,7 +383,6 @@ test('stats command defaults to the shared PARALLIX_HOME database across target 
     // SC4: the default run reads the database and announces no CSV at all.
     assert.match(output, /Loaded \d+ measurements from the statistics database/);
     assert.doesNotMatch(output, /Loading CSV/);
-    assert.match(output, /Current week \(2026-05-12 → 2026-05-18\)/);
 
     const secondLogs = [];
     stats.default(['--today', '2026-05-18'], {
@@ -412,9 +411,9 @@ test('stats command defaults to the shared PARALLIX_HOME database across target 
      { date: '2026-05-05', mission: 'task-d', classification: 'user_value', implementer: 'custom', pr_fix_rounds: '0', closed: 'yes' },
    ], { today: '2026-05-18' });
 
-  assert.match(report, /Current week \(2026-05-12 → 2026-05-18\)/);
-  assert.match(report, /Previous week \(2026-05-05 → 2026-05-11\)/);
-  assert.match(report, /# missions\s+# user value missions\s+# AI SDLC missions/);
+  assert.match(report, /Agent telemetry — current week \(2026-05-12 → 2026-05-18\)/);
+  assert.match(report, /Agent telemetry — previous week \(2026-05-05 → 2026-05-11\)/);
+  assert.match(report, /# missions with telemetry\s+# user value missions\s+# AI SDLC missions/);
   assert.match(report, /2\s+1\s+1/);
   assert.match(report, /Agent performance this week \(2026-05-12 → 2026-05-18\)/);
   assert.match(report, /codex\s+1\s+2\.00/);
@@ -434,8 +433,8 @@ test('renderRangeStatsReport filters inclusive boundary dates and summarizes mis
   ], { from: '2026-05-01', to: '2026-05-31' });
 
   const plain = __mm2.stripAnsi(report);
-  assert.match(plain, /Missions \(2026-05-01 → 2026-05-31\)/);
-  assert.match(plain, /# missions\s+# user value missions\s+# AI SDLC missions/);
+  assert.match(plain, /Mission flow \(2026-05-01 → 2026-05-31\)/);
+  assert.match(plain, /# missions with telemetry\s+# user value missions\s+# AI SDLC missions/);
   assert.match(plain, /3\s+2\s+1/);
   assert.match(plain, /Agent performance \(2026-05-01 → 2026-05-31\)/);
   assert.match(plain, /codex\s+2\s+3\.00/);
@@ -605,8 +604,8 @@ test('stats command prints workflow weekly tables from the integration stats sch
     });
 
     const output = logs.join('\n');
-    assert.match(output, /Current week \(2026-05-12 → 2026-05-18\)/);
-    assert.match(output, /Previous week \(2026-05-05 → 2026-05-11\)/);
+    assert.match(output, /Agent telemetry — current week \(2026-05-12 → 2026-05-18\)/);
+    assert.match(output, /Agent telemetry — previous week \(2026-05-05 → 2026-05-11\)/);
     assert.match(output, /Agent performance this week \(2026-05-12 → 2026-05-18\)/);
   } finally {
     fs.rmSync(path.dirname(csv), { recursive: true, force: true });
@@ -659,13 +658,13 @@ test('stats command prints workflow arbitrary range tables from the integration 
     });
 
     const output = __mm2.stripAnsi(logs.join('\n'));
-    assert.match(output, /Missions \(2026-05-01 → 2026-05-31\)/);
+    assert.match(output, /Mission flow \(2026-05-01 → 2026-05-31\)/);
     assert.match(output, /3\s+2\s+1/);
     assert.match(output, /Agent performance \(2026-05-01 → 2026-05-31\)/);
     assert.match(output, /codex\s+2\s+3\.00/);
     assert.match(output, /gemini\s+1\s+1\.00/);
     assert.doesNotMatch(output, /task-before/);
-    assert.doesNotMatch(output, /Current week/);
+    assert.doesNotMatch(output, /Agent telemetry — current week/);
   } finally {
     fs.rmSync(path.dirname(csv), { recursive: true, force: true });
   }
@@ -715,8 +714,8 @@ test('stats command writes arbitrary range report to --output without printing r
 
     const stdout = __mm2.stripAnsi(logs.join('\n'));
     assert.match(stdout, new RegExp(`Report written to ${outputFile.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
-    assert.doesNotMatch(stdout, /Missions \(2026-05-01 → 2026-05-31\)/);
-    assert.match(fs.readFileSync(outputFile, 'utf8'), /Missions \(2026-05-01 → 2026-05-31\)/);
+    assert.doesNotMatch(stdout, /Mission flow \(2026-05-01 → 2026-05-31\)/);
+    assert.match(fs.readFileSync(outputFile, 'utf8'), /Mission flow \(2026-05-01 → 2026-05-31\)/);
   } finally {
     fs.rmSync(path.dirname(outputFile), { recursive: true, force: true });
     fs.rmSync(path.dirname(csv), { recursive: true, force: true });
@@ -771,7 +770,7 @@ test('stats command keeps legacy retrospective CSVs on the markdown report path 
 
     const output = logs.join('\n');
     assert.match(output, /# Forgejo Stats Report/);
-    assert.doesNotMatch(output, /Missions \(2026-05-01 → 2026-05-31\)/);
+    assert.doesNotMatch(output, /Mission flow \(2026-05-01 → 2026-05-31\)/);
   } finally {
     fs.rmSync(path.dirname(csv), { recursive: true, force: true });
   }
@@ -910,13 +909,13 @@ test('recordIntegrationStats returns the unchanged weekly report labels for inte
     });
 
     const report = __mm2.stripAnsi(result.report);
-    assert.match(report, /Current week \(2026-05-12 → 2026-05-18\)/);
-    assert.match(report, /Previous week \(2026-05-05 → 2026-05-11\)/);
+    assert.match(report, /Agent telemetry — current week \(2026-05-12 → 2026-05-18\)/);
+    assert.match(report, /Agent telemetry — previous week \(2026-05-05 → 2026-05-11\)/);
     assert.match(report, /Agent performance this week \(2026-05-12 → 2026-05-18\)/);
     assert.match(report, /Agent performance previous week \(2026-05-05 → 2026-05-11\)/);
-    assert.match(report, /# missions\s+# user value missions\s+# AI SDLC missions/);
+    assert.match(report, /# missions with telemetry\s+# user value missions\s+# AI SDLC missions/);
     assert.match(report, /Agent family\s+# missions as implementer\s+Average PR fix rounds to complete mission/);
-    assert.doesNotMatch(report, /Missions \(2026-05-12 → 2026-05-18\)/);
+    assert.doesNotMatch(report, /Mission flow \(2026-05-12 → 2026-05-18\)/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -1683,7 +1682,7 @@ test('task-1342: weekly summary total equals user_value + ai_sdlc even with uncl
 
   // The current week (2026-06-18 to 2026-06-24) contains all 35 rows.
   // total should equal userValue + aiSdlc = 3 + 12 = 15, NOT 35.
-  assert.match(plain, /# missions\s+# user value missions\s+# AI SDLC missions/);
+  assert.match(plain, /# missions with telemetry\s+# user value missions\s+# AI SDLC missions/);
   assert.match(plain, /15\s+3\s+12/);
 });
 

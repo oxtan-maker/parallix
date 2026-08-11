@@ -119,7 +119,7 @@ test('task-1415: recordPostIntegrationStats counts a closed mission in the curre
       'the closed row must not be stamped with the stale base-worktree committer date');
 
     const todayReport = stats.renderWeeklyStatsReport(csvData.rows, { today: csvData.rows[0].date });
-    const currentSection = todayReport.split('Current week')[1] || '';
+    const currentSection = todayReport.split('Agent telemetry — current week')[1] || '';
     const currentDataLine = currentSection.split('\n').find(l => /^\d/.test(l));
     const missionCount = Number((currentDataLine || '').trim().split(/\s+/)[0]);
 

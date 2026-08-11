@@ -32,7 +32,14 @@ export type MissionCommand =
 
 export interface MissionTransition {
   readonly missionId: MissionId;
-  readonly from: MissionStatus;
+  /**
+   * The lane the mission left, or `null` when this transition is its intake —
+   * the first authoritative entry, with no prior lane to leave. Null is the
+   * intake identity itself, not a missing value: a reader that substitutes
+   * `to` for it can no longer tell an intake from a self-transition, and every
+   * mission then looks as though it existed for the whole history.
+   */
+  readonly from: MissionStatus | null;
   readonly to: MissionStatus;
   readonly trigger: MissionCommand['type'];
   readonly actor: string;

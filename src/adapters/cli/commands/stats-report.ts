@@ -23,6 +23,69 @@ import {
   statsRowActorKey,
 } from './stats.js';
 
+// ---------------------------------------------------------------------------
+// Mission flow vs agent telemetry
+//
+// These are two different quantities and this file no longer lets them share a
+// heading. Mission flow counts missions whose lifecycle entered `done` — the
+// same population `BoardMetrics` and `px stats cohorts` report, supplied by the
+// caller as `MissionOutcome[]`. The telemetry tables below count what agents
+// wrote about their own work; a mission with no telemetry is invisible to them,
+// and a telemetry row claiming closure does not complete a mission.
+// ---------------------------------------------------------------------------
+
+/** The label buckets the mission-flow table reports, in render order. */
+const MISSION_FLOW_LABELS = ['user_value', 'ai_sdlc'];
+
+/**
+ * Count lifecycle completions inside one window, bucketed by mission label.
+ *
+ * @param {{closedAt: string, labels: readonly string[]}[]} outcomes
+ * @param {{start: Date, end: Date}} window
+ */
+function summarizeMissionFlowWindow(outcomes, window) {
+  const inWindow = outcomes.filter(outcome => {
+    const closed = Date.parse(outcome.closedAt);
+    return Number.isFinite(closed)
+      && closed >= window.start.getTime()
+      && closed <= window.end.getTime();
+  });
+  const withLabel = label => inWindow.filter(outcome => outcome.labels.includes(label)).length;
+  return {
+    total: inWindow.length,
+    userValue: withLabel('user_value'),
+    aiSdlc: withLabel('ai_sdlc'),
+    unclassified: inWindow.filter(
+      outcome => !outcome.labels.some(label => MISSION_FLOW_LABELS.includes(label)),
+    ).length,
+  };
+}
+
+/**
+ * Render one mission-flow section.
+ *
+ * `outcomes` is null when the caller could not read lifecycle history. That is
+ * reported as unavailable rather than as a zero: an unread lane history and a
+ * week in which nothing completed are different facts.
+ *
+ * @param {string} heading
+ * @param {{closedAt: string, labels: readonly string[]}[] | null} outcomes
+ * @param {{start: Date, end: Date, label: string}} window
+ */
+function missionFlowSection(heading, outcomes, window) {
+  const lines = [fmt.bold(`${heading} (${window.label})`)];
+  if (outcomes === null) {
+    lines.push('Mission flow unavailable: lifecycle history was not read.');
+    return lines;
+  }
+  const flow = summarizeMissionFlowWindow(outcomes, window);
+  lines.push(formatStatsTable(
+    ['# completed missions', '# user value missions', '# AI SDLC missions', '# unclassified missions'],
+    [[String(flow.total), String(flow.userValue), String(flow.aiSdlc), String(flow.unclassified)]],
+  ));
+  return lines;
+}
+
 /**
  * @param {string[]} headers
  * @param {string[][]} rows
@@ -59,16 +122,22 @@ function renderWeeklyStatsReport(rows, options = {}) {
   const previousMissionColors = colorMissionCounts(previousAgentStats);
   const previousAgentColors = colorAverageFixRounds(previousAgentStats);
 
+  const missionFlow = options.missionFlow ?? null;
+
   const lines = [];
-  lines.push(fmt.bold(`Current week (${windows.current.label})`));
+  lines.push(...missionFlowSection('Mission flow — current week', missionFlow, windows.current));
+  lines.push('');
+  lines.push(...missionFlowSection('Mission flow — previous week', missionFlow, windows.previous));
+  lines.push('');
+  lines.push(fmt.bold(`Agent telemetry — current week (${windows.current.label})`));
   lines.push(formatStatsTable(
-    ['# missions', '# user value missions', '# AI SDLC missions', '# unknown missions'],
+    ['# missions with telemetry', '# user value missions', '# AI SDLC missions', '# unknown missions'],
     [[String(currentMissionStats.total), String(currentMissionStats.userValue), String(currentMissionStats.aiSdlc), String(currentMissionStats.unknown)]]
   ));
   lines.push('');
-  lines.push(fmt.bold(`Previous week (${windows.previous.label})`));
+  lines.push(fmt.bold(`Agent telemetry — previous week (${windows.previous.label})`));
   lines.push(formatStatsTable(
-    ['# missions', '# user value missions', '# AI SDLC missions', '# unknown missions'],
+    ['# missions with telemetry', '# user value missions', '# AI SDLC missions', '# unknown missions'],
     [[String(previousMissionStats.total), String(previousMissionStats.userValue), String(previousMissionStats.aiSdlc), String(previousMissionStats.unknown)]]
   ));
   lines.push('');
@@ -118,9 +187,11 @@ function renderRangeStatsReport(rows, options = {}) {
   const agentColors = colorAverageFixRounds(agentStats);
 
   const lines = [];
-  lines.push(fmt.bold(`Missions (${window.label})`));
+  lines.push(...missionFlowSection('Mission flow', options.missionFlow ?? null, window));
+  lines.push('');
+  lines.push(fmt.bold(`Agent telemetry missions (${window.label})`));
   lines.push(formatStatsTable(
-    ['# missions', '# user value missions', '# AI SDLC missions', '# unknown missions'],
+    ['# missions with telemetry', '# user value missions', '# AI SDLC missions', '# unknown missions'],
     [[String(missionStats.total), String(missionStats.userValue), String(missionStats.aiSdlc), String(missionStats.unknown)]]
   ));
   lines.push('');

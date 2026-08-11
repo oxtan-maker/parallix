@@ -17,7 +17,7 @@ test('renderWeeklyStatsReport produces current and previous week sections', () =
     { date: '2026-06-13', repo: 'r', mission: 'm2', classification: 'ai_sdlc', implementer: 'codex', closed: 'yes' },
   ];
   const report = statsReport.renderWeeklyStatsReport(rows, { today: '2026-06-20' });
-  assert.ok(report.includes('Current week') && report.includes('Previous week'));
+  assert.ok(report.includes('Agent telemetry — current week') && report.includes('Agent telemetry — previous week'));
 });
 
 test('renderRangeStatsReport filters by date range', () => {
@@ -26,7 +26,7 @@ test('renderRangeStatsReport filters by date range', () => {
     { date: '2026-05-25', repo: 'r', mission: 'm3', classification: 'user_value', implementer: 'a', closed: 'yes' },
   ];
   const report = statsReport.renderRangeStatsReport(rows, { from: '2026-05-10', to: '2026-05-20' });
-  assert.ok(report.includes('Missions'));
+  assert.ok(report.includes('Agent telemetry missions'));
 });
 
 test('renderRangeStatsReport rejects invalid ranges', () => {

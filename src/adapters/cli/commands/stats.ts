@@ -82,11 +82,13 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 import * as fmt from '../../../application/presentation/cli-format.js';
-import { statsCohorts } from './stats-cohorts.js';
+import { statsCohorts, resolveOperatorRepositories } from './stats-cohorts.js';
+import { ConcreteMetricsReadAdapter } from '../../../application/projections/metrics-read-adapter.js';
 import { resolveTaskFile, getTaskClassification, getTaskImplementer, getTaskAssignee } from '../../backlog/backlog.js';
 import { isForgejoReviewEnabled, loadEffectiveConfig } from '../../config/product-config.js';
 import { currentReviewRound } from '../../../domain/review.js';
 import { git } from '../../git/git.js';
+import { resolveCanonicalRepositoryId } from '../../git/repository-identity.js';
 import * as forgejo from '../../forgejo/forgejo.js';
 import * as statsReport from './stats-report.js';
 import { resolveMeasurementStore } from '../../sqlite/measurement-store.js';
@@ -126,12 +128,21 @@ const USAGE_NUMBERS = new Set([
 
 const VALID_CLASSIFICATIONS = new Set(['ai_sdlc', 'user_value', 'unknown']);
 
+/**
+ * The repository identity statistics rows are written under.
+ *
+ * A configured `product.name` is an explicit operator declaration and stays
+ * authoritative — it is what every already-persisted row was written with.
+ * Everything else defers to the single canonical owner, which resolves a
+ * mission worktree back to the checkout it was branched from. The old
+ * `path.basename(rootDir)` fallback made `<repo>-<slug>` its own repository.
+ */
 function resolveStatsRepoName(rootDir = process.cwd()) {
   const config = loadEffectiveConfig(rootDir);
   const productName = config && config.product && typeof config.product.name === 'string'
     ? config.product.name.trim()
     : '';
-  return productName || path.basename(rootDir) || 'parallix';
+  return productName || resolveCanonicalRepositoryId(rootDir);
 }
 
 /**
@@ -207,7 +218,7 @@ function statsRowToMeasurement(row: StatsRow) {
     date: row.date || '',
     classification: row.classification || '',
     implementer: row.implementer || '',
-    pr_fix_rounds: int(row.pr_fix_rounds),
+    pr_fix_rounds: row.pr_fix_rounds === undefined ? null : int(row.pr_fix_rounds),
     provider: row.provider || '',
     model: row.model || '',
     implementer_agent: row.implementer_agent || '',
@@ -236,6 +247,47 @@ function loadMeasurementRows(options: StatsOptions = {}) {
     headers: [...STATS_HEADERS],
     rows: store.listMeasurements().map(measurementToStatsRow),
   };
+}
+
+/** One lifecycle-completed mission, as the mission-flow report reads it. */
+export interface MissionFlowCompletion {
+  readonly closedAt: string;
+  readonly labels: readonly string[];
+}
+
+/**
+ * The lifecycle-completed mission population behind the mission-flow report.
+ *
+ * This is deliberately the same `MissionOutcome[]` that `BoardMetrics` and
+ * `px stats cohorts` report, read through `ConcreteMetricsReadAdapter`, so the
+ * board and the CLI cannot disagree about which missions completed. Telemetry
+ * rows answer a different question and are counted separately.
+ *
+ * Returns `null` — not an empty population — when lane history cannot be read
+ * at all (the rollback bundle has no SQLite driver). The report then states
+ * that mission flow is unavailable, because "not read" and "nothing completed"
+ * are different facts.
+ */
+async function readMissionFlowPopulation(options: {
+  rootDir: string;
+  laneEventRepo?: unknown;
+  usageRepo?: unknown;
+  repositoryId?: string;
+}): Promise<MissionFlowCompletion[] | null> {
+  try {
+    const repositories = options.laneEventRepo && options.usageRepo
+      ? { laneEventRepo: options.laneEventRepo as any, usageRepo: options.usageRepo as any }
+      : await resolveOperatorRepositories();
+    const repositoryId = (options.repositoryId ?? resolveCanonicalRepositoryId(options.rootDir)) as any;
+    const outcomes = await new ConcreteMetricsReadAdapter({
+      laneEventRepo: repositories.laneEventRepo,
+      usageRepo: repositories.usageRepo,
+      repositoryId,
+    }).readOutcomes();
+    return outcomes.map((outcome) => ({ closedAt: outcome.closedAt, labels: outcome.labels }));
+  } catch {
+    return null;
+  }
 }
 
 /** Infrastructure implementation supplied to the application workflow. */
@@ -371,7 +423,9 @@ function normalizeStatsRow(row: StatsRow = {} as StatsRow, options: NormalizeSta
     mission: row.mission || '',
     classification: row.classification || '',
     implementer: row.implementer || '',
-    pr_fix_rounds: row.pr_fix_rounds || '0',
+    pr_fix_rounds: row.pr_fix_rounds === null || row.pr_fix_rounds === undefined
+      ? undefined
+      : String(row.pr_fix_rounds),
     provider: row.provider || '',
     model: row.model || '',
     implementer_agent: row.implementer_agent || '',
@@ -1575,7 +1629,10 @@ function canonicalizeStatsRow(row, options = {}) {
     closed: row.closed || '',
   };
   for (const key of USAGE_NUMBERS) {
-    canonical[key] = String(Math.max(0, Number.parseInt(String(/** @type{any} */(normalized)[key]), 10) || 0));
+    const value = /** @type{any} */(normalized)[key];
+    // pr_fix_rounds: undefined means "unknown" — must not become '0'
+    if (key === 'pr_fix_rounds' && canonical[key] === undefined) { continue; }
+    canonical[key] = String(Math.max(0, Number.parseInt(String(value), 10) || 0));
   }
   return canonical;
 }
@@ -2175,7 +2232,7 @@ Notes:
  * @param {StatsCmdOptions} options
  */
 export function createStatsCommand(useCase: StatsCommandUseCase<StatsRow>) {
-  return function stats(args: string[], options: {log?: Function, error?: Function, exit?: Function, rootDir?: string, store?: unknown, dbPath?: string, laneEventRepo?: unknown, usageRepo?: unknown, repositoryId?: string} = {}) {
+  return async function stats(args: string[], options: {log?: Function, error?: Function, exit?: Function, rootDir?: string, store?: unknown, dbPath?: string, laneEventRepo?: unknown, usageRepo?: unknown, repositoryId?: string} = {}) {
   /** @type {StatsCmdOptions} */
   const opts = options;
   const log = opts.log || fmt.log.plain;
@@ -2317,9 +2374,18 @@ export function createStatsCommand(useCase: StatsCommandUseCase<StatsRow>) {
       });
       const rows = result.rows;
       log(fmt.status('INFO', `Loaded ${rows.length} measurements from the statistics database`));
+      // Mission flow is a lifecycle fact and telemetry is an agent fact. Both
+      // are read here so the report can state them side by side instead of
+      // letting one stand in for the other.
+      const missionFlow = await readMissionFlowPopulation({
+        rootDir,
+        laneEventRepo: opts.laneEventRepo,
+        usageRepo: opts.usageRepo,
+        repositoryId: opts.repositoryId,
+      });
       report = from !== null || to !== null
-        ? renderRangeStatsReport(rows, { from: from || undefined, to: to || undefined, rootDir })
-        : renderWeeklyStatsReport(rows, { today, rootDir });
+        ? renderRangeStatsReport(rows, { from: from || undefined, to: to || undefined, rootDir, missionFlow })
+        : renderWeeklyStatsReport(rows, { today, rootDir, missionFlow });
     } catch (err: any) {
       error(fmt.status('FAIL', err.message));
       exit(1);
