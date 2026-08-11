@@ -3,7 +3,7 @@ id: TASK-2358
 title: >-
   Board review projection discards all prior review rounds, so px status and the
   TUI report only the current round
-status: review
+status: ready-for-integration
 assignee: [custom]
 created_date: '2026-08-10 00:00'
 labels:
