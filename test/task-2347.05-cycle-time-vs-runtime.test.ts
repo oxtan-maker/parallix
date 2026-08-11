@@ -128,6 +128,9 @@ function adapter(
     laneEventRepo: new FakeLaneEventRepository(entries),
     usageRepo: new FakeUsageRepository(records),
     repositoryId: REPO,
+    // Completed-mission metrics report a rolling seven-day window (TASK-2363);
+    // the clock is pinned beside the fixture's fixed closure date.
+    clock: () => '2026-08-02T18:00:00Z',
   });
 }
 
@@ -228,18 +231,20 @@ test('SC5: FLOW panel labels lifecycle cycle time and agent runtime distinctly',
     .renderToString(React.createElement(FlowPanel, { metrics, columns: 200 }), { columns: 200 })
     .replace(new RegExp(`${ESC}\\[[0-9;?]*[ -/]*[@-~]`, 'g'), '');
 
-  assert.ok(output.includes('Median lifecycle cycle time'), `FLOW must label lifecycle cycle time. Got: ${output}`);
-  assert.ok(output.includes('Median agent runtime'), `FLOW must label agent runtime. Got: ${output}`);
-  assert.ok(
-    output.includes(`Median agent runtime: ${RUNTIME_MINUTES} min`),
+  assert.ok(output.includes('Lifecycle cycle median'), `FLOW must label lifecycle cycle time. Got: ${output}`);
+  assert.ok(output.includes('Agent runtime median'), `FLOW must label agent runtime. Got: ${output}`);
+  assert.match(
+    output,
+    new RegExp(`Agent runtime median\\s+${RUNTIME_MINUTES} min`),
     `agent runtime must render ${RUNTIME_MINUTES} min. Got: ${output}`,
   );
-  assert.ok(
-    output.includes(`Median lifecycle cycle time: ${LIFECYCLE_MINUTES} min`),
+  assert.match(
+    output,
+    new RegExp(`Lifecycle cycle median\\s+${LIFECYCLE_MINUTES} min`),
     `lifecycle cycle time must render ${LIFECYCLE_MINUTES} min. Got: ${output}`,
   );
   // No label may present the agent's execution minutes under a "cycle time" name.
-  const runtimeLine = output.split('\n').find((line) => line.includes('Median agent runtime'))!;
+  const runtimeLine = output.split('\n').find((line) => line.includes('Agent runtime median'))!;
   assert.ok(!/cycle time/i.test(runtimeLine), `runtime line must not say "cycle time": ${runtimeLine}`);
 });
 

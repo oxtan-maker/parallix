@@ -217,7 +217,9 @@ test('parseCohortArgs defaults to the label dimension and the standard threshold
 });
 
 test('the board read model exposes the cohort comparison with sample sizes', async () => {
-  const metrics = await metricsAdapter(REPO, LANE_EVENTS, USAGE_RECORDS)
+  // The seeds complete on 2026-08-01; the board's cohort comparison is a rolling
+  // seven-day window, so the projection clock is pinned to that day.
+  const metrics = await metricsAdapter(REPO, LANE_EVENTS, USAGE_RECORDS, () => '2026-08-01T13:00:00Z')
     .buildMetrics(new Map(SEEDS.map((seed) => [missionId(seed.slug), 'done' as const])));
   assert.ok(metrics.cohorts, 'BoardMetrics must carry the cohort comparison');
   assert.equal(metrics.cohorts.dimension, 'label');

@@ -79,7 +79,6 @@ interface StatsRow {
 }
 
 import * as fs from 'node:fs';
-import * as path from 'node:path';
 
 import * as fmt from '../../../application/presentation/cli-format.js';
 import { statsCohorts, resolveOperatorRepositories } from './stats-cohorts.js';
@@ -99,6 +98,10 @@ import {
   statisticsRowInWindow,
   summarizeCompletedMissionWindow,
 } from '../../../application/services/statistics-service.js';
+import {
+  decisionWindowEndingOn,
+  weeklyDecisionWindows,
+} from '../../../application/services/decision-window.js';
 
 // The original 5-column schema. Retained for backward-compatible CSV detection
 // and one-time header migration of legacy stats files (architecture migration).
@@ -131,18 +134,43 @@ const VALID_CLASSIFICATIONS = new Set(['ai_sdlc', 'user_value', 'unknown']);
 /**
  * The repository identity statistics rows are written under.
  *
- * A configured `product.name` is an explicit operator declaration and stays
- * authoritative — it is what every already-persisted row was written with.
- * Everything else defers to the single canonical owner, which resolves a
- * mission worktree back to the checkout it was branched from. The old
- * `path.basename(rootDir)` fallback made `<repo>-<slug>` its own repository.
+ * There is exactly one owner: `resolveCanonicalRepositoryId`, which resolves a
+ * mission worktree back to the checkout it was branched from. Mission lifecycle
+ * lane events already use it, and measurement rows must join against them.
+ *
+ * A configured `product.name` is a display alias, not an identity (TASK-2363).
+ * Preferring it here wrote new measurement rows under a name the lifecycle never
+ * used, so those missions silently disappeared from every completed-mission
+ * statistic. Read-side access to rows already persisted under that alias goes
+ * through `legacyStatsRepoAliases` below.
  */
 function resolveStatsRepoName(rootDir = process.cwd()) {
+  return resolveCanonicalRepositoryId(rootDir);
+}
+
+/**
+ * Identities that older telemetry may legitimately have been persisted under.
+ *
+ * Narrowly scoped on purpose: exactly the configured `product.name`, and only
+ * when it differs from the canonical id. It is a read-side fallback for
+ * historical rows. New writes never use it, so no further split identity can be
+ * created, and no query is broadened beyond this one declared alias.
+ */
+function legacyStatsRepoAliases(rootDir = process.cwd()): readonly string[] {
   const config = loadEffectiveConfig(rootDir);
   const productName = config && config.product && typeof config.product.name === 'string'
     ? config.product.name.trim()
     : '';
-  return productName || resolveCanonicalRepositoryId(rootDir);
+  const canonical = String(resolveCanonicalRepositoryId(rootDir));
+  return productName && productName !== canonical ? [productName] : [];
+}
+
+/** The canonical identity plus any legacy alias, for read-side row matching. */
+function statsRepoIdentities(rootDir = process.cwd(), explicitRepo?: string): readonly string[] {
+  const explicit = String(explicitRepo || '').trim();
+  return explicit
+    ? [explicit]
+    : [String(resolveStatsRepoName(rootDir)), ...legacyStatsRepoAliases(rootDir)];
 }
 
 /**
@@ -777,16 +805,6 @@ function formatDateOnly(date) {
 }
 
 /**
- * @param {Date} date
- * @param {number} days
- */
-function addDays(date, days) {
-  const next = new Date(date.getTime());
-  next.setUTCDate(next.getUTCDate() + days);
-  return next;
-}
-
-/**
  * @param {Date|string} today
  */
 function parseToday(today = new Date()) {
@@ -801,13 +819,7 @@ function parseToday(today = new Date()) {
  * @param {number} days
  */
 function createWindow(endDate, days) {
-  const end = parseToday(endDate);
-  const start = addDays(end, -(days - 1));
-  return {
-    start,
-    end,
-    label: `${formatDateOnly(start)} → ${formatDateOnly(end)}`,
-  };
+  return decisionWindowEndingOn(parseToday(endDate), days);
 }
 
 /**
@@ -839,9 +851,9 @@ function createRangeWindow(range = {}) {
  * @param {Date} today
  */
 function buildWeeklyWindows(today = new Date()) {
-  const current = createWindow(today, 7);
-  const previous = createWindow(addDays(current.start, -1), 7);
-  return { current, previous };
+  // The application layer owns the rolling-window definition; the board reads
+  // the same one, so the CLI's decision cadence and FLOW's cannot drift apart.
+  return weeklyDecisionWindows(parseToday(today));
 }
 
 /**
@@ -1262,6 +1274,9 @@ function renderMissionPhaseReport(rows, slug, options = {}) {
   return _renderMissionPhaseReport(rows, slug, {
     ...opts,
     repo: opts.repo || resolveStatsRepoName(opts.rootDir),
+    // Rows persisted under a historic `product.name` are still readable here.
+    // New writes only ever use the canonical id (TASK-2363).
+    repos: statsRepoIdentities(opts.rootDir, opts.repo),
   });
 }
 
@@ -1819,7 +1834,10 @@ function mergeLabel(existing: string, incoming: string) {
 function recordStageStats(options: {slug: string, stage: string, rootDir?: string, date?: string, implementer?: string, reviewer?: string, prFixRounds?: string, telemetry?: any, durationMinutes?: number, model?: string} = {}) {
   /** @type {any} */
   const opts = options;
-  const { slug, stage, rootDir = process.cwd(), date = formatDateOnly(new Date()), implementer, reviewer = '', prFixRounds = '0', telemetry = null, durationMinutes = 0, model = null, store = undefined, dbPath = undefined } = opts;
+  // `prFixRounds` is deliberately not defaulted to '0'. A draft or active stage
+  // row has no review-fix count yet, and writing a zero there fabricates a
+  // measured zero that the board can no longer tell from unknown (TASK-2363).
+  const { slug, stage, rootDir = process.cwd(), date = formatDateOnly(new Date()), implementer, reviewer = '', prFixRounds = undefined, telemetry = null, durationMinutes = 0, model = null, store = undefined, dbPath = undefined } = opts;
   if (!slug) {throw new Error('recordStageStats requires a mission slug.');}
   if (!stage) {throw new Error('recordStageStats requires a stage.');}
 
@@ -1834,7 +1852,7 @@ function recordStageStats(options: {slug: string, stage: string, rootDir?: strin
     mission: slug,
     classification,
     implementer: agentFamily,
-    pr_fix_rounds: prFixRounds ?? '0',
+    pr_fix_rounds: prFixRounds,
     implementer_agent: implementer || '',
     reviewer_agent: reviewer || '',
     stage,
@@ -1846,7 +1864,8 @@ function recordStageStats(options: {slug: string, stage: string, rootDir?: strin
  * @param {{slug: string, stage: string, rootDir?: string, date?: string, implementer?: string, reviewer?: string, prFixRounds?: string, telemetry?: {provider?: string, model?: string, inputTokens?: number, outputTokens?: number, cachedTokens?: number, totalTokens?: number, toolCalls?: number, usagePercent?: number, cost_usd?: number} | null, durationMinutes?: number, model?: string}} options
  */
 function accumulateStageStats(options: {slug: string, stage: string, rootDir?: string, date?: string, implementer?: string, reviewer?: string, prFixRounds?: string, telemetry?: any, durationMinutes?: number, model?: string}) {
-  const { slug, stage, rootDir = process.cwd(), date = formatDateOnly(new Date()), implementer, reviewer = '', prFixRounds = '0', telemetry = null, durationMinutes = 0, model = null, store = undefined, dbPath = undefined } = options;
+  // Unknown stays unknown here too; see recordStageStats above.
+  const { slug, stage, rootDir = process.cwd(), date = formatDateOnly(new Date()), implementer, reviewer = '', prFixRounds = undefined, telemetry = null, durationMinutes = 0, model = null, store = undefined, dbPath = undefined } = options;
   if (!slug) {throw new Error('accumulateStageStats requires a mission slug.');}
   if (!stage) {throw new Error('accumulateStageStats requires a stage.');}
 
@@ -1860,7 +1879,7 @@ function accumulateStageStats(options: {slug: string, stage: string, rootDir?: s
     mission: slug,
     classification,
     implementer: agentFamily,
-    pr_fix_rounds: prFixRounds ?? '0',
+    pr_fix_rounds: prFixRounds,
     implementer_agent: implementer || '',
     reviewer_agent: reviewer || '',
     stage,

@@ -91,6 +91,10 @@ test('task-2337: weekly stats report renders model name for custom agent rows', 
 
 test('task-2337: accumulateStageStats preserves model for custom agent', () => {
   const root = createRepoFixture();
+  // An isolated database. Measurement rows are keyed by the canonical repository
+  // id (TASK-2363), so a shared database also holds the rows other tests in this
+  // file wrote from their own fixture checkouts.
+  const dbPath = path.join(root, 'parallix.db');
   try {
     // First recording
     stats.accumulateStageStats({
@@ -101,6 +105,7 @@ test('task-2337: accumulateStageStats preserves model for custom agent', () => {
       model: 'qwen3.6-27b-q8',
       telemetry: { inputTokens: 100, outputTokens: 50, cachedTokens: 0, totalTokens: 150, toolCalls: 3, usagePercent: 10 },
       durationMinutes: 5,
+      dbPath,
     });
 
     // Second recording (should accumulate)
@@ -112,9 +117,10 @@ test('task-2337: accumulateStageStats preserves model for custom agent', () => {
       model: 'qwen3.6-27b-q8',
       telemetry: { inputTokens: 200, outputTokens: 100, cachedTokens: 0, totalTokens: 300, toolCalls: 5, usagePercent: 20 },
       durationMinutes: 8,
+      dbPath,
     });
 
-    const data = stats.loadMeasurementRows({ rootDir: root });
+    const data = stats.loadMeasurementRows({ rootDir: root, dbPath });
     assert.equal(data.rows.length, 1, 'should have exactly one accumulated row');
     assert.equal(data.rows[0].model, 'qwen3.6-27b-q8', 'accumulated row should preserve model name');
     assert.equal(data.rows[0].implementer, 'custom');

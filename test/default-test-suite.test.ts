@@ -56,6 +56,7 @@ const expectedIntegrationFiles = [
   // canonical repository identity it certifies is resolved by shelling out to
   // Git (TASK-2357 defect B).
   'task-2357.b-canonical-repository-identity.test.ts',
+  'task-2363-production-certification.test.ts',
   'test-hygiene.test.ts',
   'tui-action-bar.test.ts',
   'tui-confirmation.test.ts',

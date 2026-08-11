@@ -3,8 +3,18 @@ import type { MissionTransition } from '../../domain/mission-workflow.js';
 import type { MissionOutcome } from '../../domain/usage.js';
 import type { AgentAvailabilityRow } from './agent-status.js';
 import type { BoardLane } from './mission-board.js';
-import type { BottleneckNarrative, LaneMetricSeries, MetricSeries, StateFlowSeries } from './board.js';
+import type {
+  BottleneckNarrative,
+  DecisionMetric,
+  DecisionWindowComparison,
+  DecisionWindowMetrics,
+  LaneMetricSeries,
+  MetricSeries,
+  StateFlowSeries,
+} from './board.js';
 import { buildBoardMetrics } from './board.js';
+import type { DecisionWindow, DecisionWindows } from '../services/decision-window.js';
+import { decisionWindowContains } from '../services/decision-window.js';
 
 // ---------------------------------------------------------------------------
 // Time-based metrics — derived from recorded events
@@ -71,6 +81,45 @@ function median(values: readonly number[]): number | null {
 }
 
 // ---------------------------------------------------------------------------
+// The decision cohort — completed missions selected by a rolling window
+//
+// The window selects whole missions by their lifecycle completion, never pieces
+// of a lifecycle. Once a mission is selected, its full history is used: a
+// mission that entered backlog in July and completed on August 6 contributes
+// its whole dwell, and an agent run it made eight days ago is still its run.
+// ---------------------------------------------------------------------------
+
+/** Outcomes whose lifecycle completed inside the window. */
+export function outcomesCompletedInWindow(
+  outcomes: readonly MissionOutcome[],
+  window: DecisionWindow | undefined,
+): readonly MissionOutcome[] {
+  return window === undefined
+    ? outcomes
+    : outcomes.filter((outcome) => decisionWindowContains(window, outcome.closedAt));
+}
+
+/** The missions a window selects; `undefined` means every mission is in scope. */
+export function missionsCompletedInWindow(
+  outcomes: readonly MissionOutcome[],
+  window: DecisionWindow | undefined,
+): ReadonlySet<MissionId> | undefined {
+  return window === undefined
+    ? undefined
+    : new Set(outcomesCompletedInWindow(outcomes, window).map((outcome) => outcome.missionId));
+}
+
+/** Lifecycle history of the selected missions, kept whole. */
+function transitionsOf(
+  transitions: readonly MissionTransition[],
+  missions: ReadonlySet<MissionId> | undefined,
+): readonly MissionTransition[] {
+  return missions === undefined
+    ? transitions
+    : transitions.filter((transition) => missions.has(transition.missionId));
+}
+
+// ---------------------------------------------------------------------------
 // WIP counts — current state snapshot
 // ---------------------------------------------------------------------------
 
@@ -128,13 +177,19 @@ export function wipSeries(
  * derived from its lane events. It is not the agents' execution time — that is
  * `medianAgentRuntime`, which reads `outcome.runs`.
  *
+ * When a decision `window` is supplied, only missions that completed inside it
+ * are measured, so the reported median and `observationCount` describe the
+ * weekly decision population rather than every mission ever completed.
+ *
  * missingHistoryFallback: 'null' — returns null when no outcomes are available.
  */
 export function medianStateTimes(
   outcomes: readonly MissionOutcome[],
   instants: readonly string[],
+  window?: DecisionWindow,
 ): MetricSeries {
-  const ordered = [...outcomes].sort((a, b) => a.closedAt.localeCompare(b.closedAt));
+  const ordered = [...outcomesCompletedInWindow(outcomes, window)]
+    .sort((a, b) => a.closedAt.localeCompare(b.closedAt));
   const values: number[] = [];
   let index = 0;
   return {
@@ -172,16 +227,22 @@ export function agentRuntimeMinutes(outcome: MissionOutcome): number | null {
  * actually ran, with queueing and review waits excluded. Its counterpart is
  * `medianStateTimes`, which measures the lifecycle those runs sit inside.
  *
+ * A decision `window` selects the missions, never the individual runs: a
+ * mission completed today keeps the runtime of a run it made eight days ago,
+ * because that work is part of the outcome the window selected.
+ *
  * missingHistoryFallback: 'null' — returns null when no outcome has a measured
  * run duration, so an unmeasured mission never reads as zero minutes of work.
  */
 export function medianAgentRuntime(
   outcomes: readonly MissionOutcome[],
   instants: readonly string[],
+  window?: DecisionWindow,
 ): MetricSeries {
+  const selected = outcomesCompletedInWindow(outcomes, window);
   return {
     series: instants.map((through) => {
-      const measured = outcomes
+      const measured = selected
         .filter((outcome) => outcome.closedAt <= through)
         .map((outcome) => agentRuntimeMinutes(outcome))
         .filter((minutes): minutes is number => minutes !== null);
@@ -285,14 +346,16 @@ export function throughputSeries(
 export function reviewBounceRateSeries(
   transitions: readonly MissionTransition[],
   instants: readonly string[],
+  missions?: ReadonlySet<MissionId>,
 ): MetricSeries {
-  if (transitions.length === 0) {
+  const scoped = transitionsOf(transitions, missions);
+  if (scoped.length === 0) {
     return { series: [], missingHistoryFallback: 'estimate' };
   }
   return {
     series: instants.map((at) => {
       const passages = new Map<MissionId, { enteredReview: boolean; bounces: number }>();
-      for (const transition of transitions) {
+      for (const transition of scoped) {
         if (transition.occurredAt > at) { continue; }
         const passage = passages.get(transition.missionId) ?? { enteredReview: false, bounces: 0 };
         if (transition.to === 'review') { passage.enteredReview = true; }
@@ -368,11 +431,18 @@ export function deriveLaneIntervals(
  * Dwell time is attributed to the state the mission *occupied* during the
  * interval (interval.state), not the state it entered. Open intervals
  * (missions still in a lane) are excluded from dwell calculations.
+ *
+ * `missions` restricts the calculation to a decision cohort. The restriction is
+ * applied to whole missions before the intervals are derived, so a selected
+ * mission contributes every interval of its lifecycle — including the days it
+ * spent in a lane before the window opened. Filtering intervals by their own
+ * timestamps instead would truncate exactly the missions the window is about.
  */
 export function medianCycleTimeByStateSeries(
   transitions: readonly MissionTransition[],
+  missions?: ReadonlySet<MissionId>,
 ): LaneMetricSeries {
-  const intervals = deriveLaneIntervals(transitions);
+  const intervals = deriveLaneIntervals(transitionsOf(transitions, missions));
   const byLane = new Map<BoardLane, number[]>();
 
   for (const interval of intervals) {
@@ -538,6 +608,59 @@ export interface MetricsInput {
   readonly asOf?: string;
   /** Lifecycle entry timestamps for missions without transitions (missionId → enteredAt ISO string). */
   readonly lifecycleEntries?: ReadonlyMap<MissionId, string>;
+  /**
+   * The rolling decision windows the completed-mission metrics report. Supplied
+   * by the read adapter from the same injected clock as `asOf`. Absent means
+   * "no window": every completed mission is measured, which is the pre-TASK-2363
+   * behavior and is what callers that build metrics from a hand-picked outcome
+   * list still want.
+   */
+  readonly decisionWindows?: DecisionWindows;
+}
+
+function decisionMetric(values: readonly number[]): DecisionMetric {
+  return { value: median(values), observationCount: values.length };
+}
+
+/** Total closed dwell in one lane across the cohort's full lifecycle intervals. */
+function laneDwell(dwell: LaneMetricSeries, lane: BoardLane): DecisionMetric {
+  const entry = dwell.series.find((point) => point.lane === lane);
+  return { value: entry?.value ?? null, observationCount: entry?.observationCount ?? 0 };
+}
+
+/**
+ * The completed-mission statistics of one decision window.
+ *
+ * Deliberately built from the same windowed functions the main series use, so
+ * FLOW's current column and FLOW's previous column cannot be computed by two
+ * different definitions of the same figure.
+ */
+function decisionWindowMetrics(
+  window: DecisionWindow,
+  outcomes: readonly MissionOutcome[],
+  transitions: readonly MissionTransition[],
+): DecisionWindowMetrics {
+  const selected = outcomesCompletedInWindow(outcomes, window);
+  const missions = missionsCompletedInWindow(outcomes, window);
+  const dwell = medianCycleTimeByStateSeries(transitions, missions);
+  // Every selected mission completed on or before the window's last day, so its
+  // whole review passage is recorded by the end of that day.
+  const bounce = reviewBounceRateSeries(transitions, [`${window.endDate}T23:59:59.999Z`], missions)
+    .series.at(-1);
+  return {
+    label: window.label,
+    startDate: window.startDate,
+    endDate: window.endDate,
+    completedMissions: selected.length,
+    cycleTime: decisionMetric(selected.map((outcome) => outcome.cycleTimeMinutes)),
+    agentRuntime: decisionMetric(
+      selected.map(agentRuntimeMinutes).filter((minutes): minutes is number => minutes !== null),
+    ),
+    activeDwell: laneDwell(dwell, 'active'),
+    reviewDwell: laneDwell(dwell, 'review'),
+    integrationDwell: laneDwell(dwell, 'integration'),
+    reviewBounce: { value: bounce?.value ?? null, observationCount: bounce?.observationCount ?? 0 },
+  };
 }
 
 /**
@@ -552,8 +675,14 @@ export function buildMetrics(input: MetricsInput): ReturnType<typeof buildBoardM
   const historicalInitialStates = new Map(
     [...input.initialStates].filter(([missionId]) => !hasRecordedIntake(input.transitions, missionId)),
   );
+  // The current rolling window selects the completed-mission decision metrics.
+  // Current-state operational metrics below (lane age, WIP, bottleneck) and the
+  // historical cumulative flow deliberately stay unwindowed: they answer "what
+  // does the board look like now", not "how did last week go".
+  const currentWindow = input.decisionWindows?.current;
+  const currentMissions = missionsCompletedInWindow(input.outcomes, currentWindow);
   const stateFlow = cumulativeFlowByStateSeries(historicalInitialStates, input.transitions, input.instants);
-  const cycleByState = medianCycleTimeByStateSeries(input.transitions);
+  const cycleByState = medianCycleTimeByStateSeries(input.transitions, currentMissions);
   // Recorded lane transitions are the evidence that there was lifecycle to
   // measure, so a week without completions can be reported as the zero it is.
   const weeklyThroughput = weeklyThroughputSeries(input.outcomes, input.asOf, input.transitions.length > 0);
@@ -563,12 +692,19 @@ export function buildMetrics(input: MetricsInput): ReturnType<typeof buildBoardM
     input.initialStates,
     input.lifecycleEntries,
   );
-  const reviewBounceRate = reviewBounceRateSeries(input.transitions, input.instants);
+  const reviewBounceRate = reviewBounceRateSeries(input.transitions, input.instants, currentMissions);
+  const decisionWindow: DecisionWindowComparison | undefined = input.decisionWindows === undefined
+    ? undefined
+    : {
+      current: decisionWindowMetrics(input.decisionWindows.current, input.outcomes, input.transitions),
+      previous: decisionWindowMetrics(input.decisionWindows.previous, input.outcomes, input.transitions),
+    };
   return {
+    ...(decisionWindow === undefined ? {} : { decisionWindow }),
     ...buildBoardMetrics({
       cumulativeFlow: cumulativeFlowSeries(historicalInitialStates, input.transitions, input.instants),
       cumulativeFlowByState: stateFlow,
-      medianStateTimes: medianStateTimes(input.outcomes, input.instants),
+      medianStateTimes: medianStateTimes(input.outcomes, input.instants, currentWindow),
       medianCycleTimeByState: cycleByState,
       throughput: throughputSeries(input.outcomes, input.instants),
       weeklyThroughput,
@@ -577,6 +713,6 @@ export function buildMetrics(input: MetricsInput): ReturnType<typeof buildBoardM
       agentAvailability: input.agentAvailability ?? [],
       bottleneck: bottleneckNarrative(medianAgeByLane, reviewBounceRate, weeklyThroughput),
     }),
-    medianAgentRuntime: medianAgentRuntime(input.outcomes, input.instants),
+    medianAgentRuntime: medianAgentRuntime(input.outcomes, input.instants, currentWindow),
   };
 }

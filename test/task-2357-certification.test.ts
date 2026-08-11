@@ -9,7 +9,6 @@ import { SqliteMigrationRunner, loadDefaultMigrations } from '../src/adapters/sq
 import { SqliteBoardLaneEventRepository } from '../src/adapters/sqlite/board-lane-event-repository.js';
 import { SqliteUsageRepository } from '../src/adapters/sqlite/usage-repository.js';
 import { ConcreteMetricsReadAdapter } from '../src/application/projections/metrics-read-adapter.js';
-import type { BoardLaneEventEntry } from '../src/application/ports/operation-history.js';
 import type { MissionId, MissionStatus, MissionLabel } from '../src/domain/mission.js';
 import { missionId } from '../src/domain/mission.js';
 import type { AgentFamily } from '../src/domain/agents.js';
@@ -70,7 +69,11 @@ const REPO_B = repositoryId('unrelated-repo');
 // Expected completed population (lifecycle done): task-100..105, task-107 = 7
 // task-106 excluded (telemetry closed but not lifecycle done).
 //
-// Cohort ai_sdlc: task-100, 101, 104, 105, 107 = 5 missions
+// The board's cohort comparison is the current rolling seven days ending on
+// NOW (2026-05-31 → 2026-06-06), so task-107 — deliberately completed in the
+// previous week — is outside it (TASK-2363).
+//
+// Cohort ai_sdlc: task-100, 101, 104, 105 = 4 missions (task-107 is last week)
 // Cohort user_value: task-102, 103 = 2 missions
 //
 // reviewFixRounds observations: task-100(0), 101(2), 104(1) = 3 known
@@ -86,9 +89,9 @@ const NOW = '2026-06-06T09:00:00.000Z';
 
 // Hand-computed expected values
 const EXPECTED_COMPLETED = 7; // task-100..105 + task-107
-const EXPECTED_AI_SDL_C_N = 5; // task-100, 101, 104, 105, 107
+const EXPECTED_AI_SDL_C_N = 4; // task-100, 101, 104, 105 — task-107 is previous week
 const EXPECTED_USER_VALUE_N = 2; // task-102, 103
-const EXPECTED_REVIEW_FIX_OBS_AI_SDL_C = 4; // task-100(0), 101(2), 104(1), 107(0)
+const EXPECTED_REVIEW_FIX_OBS_AI_SDL_C = 3; // task-100(0), 101(2), 104(1)
 const EXPECTED_REVIEW_FIX_OBS_USER_VALUE = 0; // both unknown
 
 describe('TASK-2357 production certification: full path from persisted facts to BoardMetrics', () => {
@@ -224,24 +227,26 @@ describe('TASK-2357 production certification: full path from persisted facts to 
     const cohorts = metrics.cohorts!;
     const aiSdlc = cohorts.cohorts.find(c => c.key === 'ai_sdlc')!;
     const userValue = cohorts.cohorts.find(c => c.key === 'user_value')!;
-    assert.equal(aiSdlc.n, 5, `ai_sdlc cohort n=5`);
+    assert.equal(aiSdlc.n, EXPECTED_AI_SDL_C_N, `ai_sdlc cohort n=${EXPECTED_AI_SDL_C_N}`);
     assert.equal(userValue.n, EXPECTED_USER_VALUE_N, `user_value cohort n=${EXPECTED_USER_VALUE_N}`);
 
     // 6c. reviewFixRounds observations (known only)
     assert.equal(
       aiSdlc.observationCounts.reviewFixRounds,
-      4,
-      `ai_sdlc reviewFixRounds observationCount=4 (not ${aiSdlc.observationCounts.reviewFixRounds})`,
+      EXPECTED_REVIEW_FIX_OBS_AI_SDL_C,
+      `ai_sdlc reviewFixRounds observationCount=${EXPECTED_REVIEW_FIX_OBS_AI_SDL_C} (not ${aiSdlc.observationCounts.reviewFixRounds})`,
     );
     assert.equal(
       userValue.observationCounts.reviewFixRounds,
-      0,
+      EXPECTED_REVIEW_FIX_OBS_USER_VALUE,
       'user_value reviewFixRounds observationCount=0 (both unknown)',
     );
 
     // 6d. Per-metric low-sample
     assert.equal(userValue.lowSamplePopulation, true, 'user_value (n=2) is low-sample');
-    assert.equal(aiSdlc.lowSamplePopulation, false, 'ai_sdlc (n=5) is not low-sample');
+    // n=4 after TASK-2363 windowed the cohort to the current rolling week, which
+    // is below the five-mission comparability threshold.
+    assert.equal(aiSdlc.lowSamplePopulation, true, 'ai_sdlc (n=4) is low-sample');
 
     // 6e. Cross-repository isolation
     assert.equal(outcomes.filter(o => o.repositoryId === REPO_B).length, 0, 'REPO_B missions absent from REPO outcomes');
