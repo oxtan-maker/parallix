@@ -1,7 +1,7 @@
 ---
 id: TASK-2360
 title: 'Stop the workflow from demanding file:line evidence that rots'
-status: ready-for-integration
+status: review
 assignee: [codex]
 created_date: '2026-08-11 07:35'
 labels:
