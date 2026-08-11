@@ -16,30 +16,25 @@ pretending that the current `lib/` layout already has those layers.
 Today a command module is both an interface adapter and an orchestrator. For
 example, `active` parses a CLI flag, runs preflight, resolves a worktree,
 selects and starts an agent, changes task state, records statistics, starts
-handoff, emits terminal text, and determines the process exit code
-(`lib/commands/active.ts:24-191`). Its injected-function tests make those
-dependencies mockable, but the interface contract and lifecycle policy remain
-mixed together. A TUI or web server that calls these command handlers would
+handoff, emits terminal text, and determines the process exit code. Its
+dependencies are mockable, but the interface contract and lifecycle policy
+remain mixed together. A TUI or web server that calls these command handlers would
 inherit argument parsing, terminal rendering, and `process.exit` semantics;
 one that bypasses them would be likely to reimplement lifecycle behavior.
 
 The existing lifecycle behavior is more consequential than the UI shape. When
 `active` starts an execute agent, it records `status=active` and the actual
 implementer only from the launch callback. If the launch subsequently fails or
-returns a non-zero status, it restores the prior status and assignee
-(`lib/commands/active.ts:195-299`). `transitionTask` writes the authoritative
-task record on the integration branch and only then attempts to synchronize a
-mission worktree; it deliberately defers that rebase while an agent can have
-uncommitted work (`lib/tools/backlog.ts:676-760`). The tests name both the
-ordering and exit-code contracts (`test/active.test.ts:203-244`,
-`test/active.test.ts:301-323`, `test/active.test.ts:385-406`). A new interface
+returns a non-zero status, it restores the prior status and assignee. The
+authoritative task transition writes on the integration branch and only then
+attempts to synchronize a mission worktree; it deliberately defers that rebase
+while an agent can have uncommitted work. A new interface
 must preserve these invariants, not merely expose a convenient button.
 
 Workflow state already has distinct compatibility authorities. Task records are
 currently individual Markdown files in `backlog/tasks/`, `backlog/completed/`,
-and `backlog/archive/`; `resolveTaskFile` searches those stores and
-`getTaskStatus` reads their front matter (`lib/tools/backlog.ts:52-83`,
-`lib/tools/backlog.ts:280-307`). Mission and review artifacts are Git-owned.
+and `backlog/archive/`; the task catalog searches those stores and reads their
+front matter. Mission and review artifacts are Git-owned.
 ADR 0037 retained those surfaces rather than adding a new state store.
 `backlog.md` is an optional legacy aggregate, not the canonical task catalog;
 this ADR neither requires it nor makes preserving writes to it a goal. The
@@ -48,12 +43,11 @@ attention and interaction, not evidence for a browser-owned store, component
 model, database schema, or authority migration.
 
 The proposed boundary also has to retain the CLI's public behavior. The `px`
-entry delegates command dispatch through `index.js` while capturing the command
-exit code (`px.ts:157-260`). `stats-backfill` already distinguishes a read-only
+entry delegates command dispatch while capturing the command exit code.
+`stats-backfill` already distinguishes a read-only
 report from a write: it produces its JSON or text projection first and writes
-rows only when `--apply` is present (`lib/commands/stats-backfill.ts:355-413`).
-Its fixture test asserts help, JSON, summary, skipped records, and apply
-behavior (`test/stats-backfill.test.ts:268-389`). `active` intentionally has no
+rows only when `--apply` is present. Its supported behavior includes help,
+JSON, summary, skipped records, and apply behavior. `active` intentionally has no
 JSON contract. A shared application boundary must not silently normalize these
 differences away.
 
@@ -150,10 +144,10 @@ unproven behaviour or a separate decision; `✗` = contradicts the criterion.
 | Criterion | Type | What is being tested | Repository evidence |
 |---|---|---|---|
 | C0: Bug-frequency reduction | Hard constraint | Centralize policy and effects behind enforceable, regression-tested seams; continue measuring completed `bug` missions versus completed non-`bug` missions after the change. | Since label observation began, 39 of 129 unique completed missions carry `bug`; ADR 0048 and TASK-1268 identify recurring fail-open and lifecycle clusters. |
-| C1: Single authoritative writer | Hard constraint | No UI cache, event stream, or new store can independently change lifecycle state during migration. | `transitionTask` writes task state on the integration branch (`lib/tools/backlog.ts:676-760`). |
-| C2: Transition correctness | Hard constraint | Preserve launch → record → rollback ordering and do not represent an incomplete operation as complete. | `ExecuteMissionService` owns that ordering; rollback stays in the launcher (`src/application/execute-mission-service.ts`; `lib/commands/active.ts:195-299`; `test/active.test.ts:301-323`; `test/execute-mission-characterization.test.ts`). |
-| C3: Automation compatibility | Hard constraint | Preserve CLI text, existing JSON schemas, and exit codes. | `px` captures command exit codes; `stats-backfill` and `active` tests cover their distinct contracts (`px.ts:157-260`; `test/stats-backfill.test.ts:268-389`; `test/active.test.ts:385-406`). |
-| C4: Isolated effects | Hard constraint | Unit-test use-case behavior without real Git, Forgejo, filesystem, or agent processes. | The execute workflow runs against in-memory mechanism ports (`test/execute-mission-service.test.ts`); command families that are not yet extracted still inject collaborators (`lib/commands/active.ts:24-40`). |
+| C1: Single authoritative writer | Hard constraint | No UI cache, event stream, or new store can independently change lifecycle state during migration. | The existing Git-backed task transition remains the sole writer until ADR 0053 changes the authority. |
+| C2: Transition correctness | Hard constraint | Preserve launch → record → rollback ordering and do not represent an incomplete operation as complete. | The execute application service owns this ordering; rollback stays in the launcher. |
+| C3: Automation compatibility | Hard constraint | Preserve CLI text, existing JSON schemas, and exit codes. | The CLI retains command-specific output and exit-code contracts; the report command has JSON output while `active` does not. |
+| C4: Isolated effects | Hard constraint | Unit-test use-case behavior without real Git, Forgejo, filesystem, or agent processes. | The execute workflow uses in-memory mechanism ports, and command families retain injected collaborators. |
 | C5: Interface independence | Benefit | CLI, Ink, and web can invoke the same behavior without parsing terminal output or reproducing lifecycle policy. | This ADR requires one application core for these clients. |
 | C6: Operational truth and recovery | Benefit | Long-running work can report progress, reconnect by re-querying, and distinguish durable evidence from UI liveness. | `active` can launch agents and defer synchronization; ADR 0048 requires fail-closed handling. |
 | C7: Authority evolution and rollback | Benefit | The ADR 0053 store can replace the current task adapter without a dual-write steady state; this boundary change can be removed before cutover without persisted-data migration. | Task storage is already behind `resolveTaskFile`/`transitionTask`; ADR 0053 owns the authority change. |

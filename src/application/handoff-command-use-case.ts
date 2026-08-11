@@ -879,7 +879,7 @@ export class HandoffCommandUseCase {
     }
     const unverifiableRow = findUnverifiableGoalCheckRow(ports.fileSystem, evidenceRows, rootDir);
     if (unverifiableRow) {
-      const msg = `The final checkpoint at ${fmt.path(relativeCheckpointPath)} has a "## Goal Check" section but no evidence rows that cite a verifiable reference such as a file:line, ADR, test reference, or recognized repo command/path. A goal-check table with real evidence is required before handoff. Offending row: ${unverifiableRow}`;
+      const msg = `The final checkpoint at ${fmt.path(relativeCheckpointPath)} has a "## Goal Check" section but no evidence rows that cite a verifiable reference such as a recognized repo command/path, exact test name, test-file path, or ADR reference (or, when necessary, file:line). A goal-check table with real evidence is required before handoff. Offending row: ${unverifiableRow}`;
       error(msg);
       return { ok: false, error: msg };
     }
@@ -1303,7 +1303,7 @@ export class HandoffCommandUseCase {
         .map(() => '- **create** `MISSION.md` with the standard mission contract template (title, goal, scope, checkpoints, gates).'),
       ...missingItems
         .filter(item => item.includes('CP-'))
-        .map(() => '- **create** at least one checkpoint document (e.g. `CP-1.md`) with a `## Goal Check` table containing real evidence (file:line, test names).'),
+        .map(() => '- **create** at least one checkpoint document (e.g. `CP-1.md`) with a `## Goal Check` table containing real evidence such as a backticked command, test name, ADR reference, or test file path.'),
       ...missingItems
         .filter(item => item.includes('backlog/tasks') || item.includes('backlog/task'))
         .map(() => '- **create** a backlog task file at `backlog/tasks/<slug> - <title>.md` with YAML frontmatter (id, title, status, labels) and a description section.'),

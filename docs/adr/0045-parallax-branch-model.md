@@ -5,7 +5,7 @@ Date: 2026-06-14
 
 ## Context
 
-The parallix workflow manages mission branches (`mission/<slug>`) that agents create, develop on, and integrate back into a target branch. This branching model is implicit across multiple command handlers (`forgejo.js`, `draft.js`, `integrate.js`, `mission-start.js`, `mission-utils.js`, `rebase.js`) with no single authoritative reference. ADR 0043 established that local primary branches are the ancestry authority for workflow operations, but did not document the full branch lifecycle (draft → push → review → integrate → cleanup).
+The parallix workflow manages mission branches (`mission/<slug>`) that agents create, develop on, and integrate back into a target branch. ADR 0043 established that local primary branches are the ancestry authority for workflow operations, but did not document the full branch lifecycle (draft → push → review → integrate → cleanup).
 
 Two distinct integration modes coexist in the codebase:
 1. Trunk-based: the mission branch integrates back into the repository's primary branch (`main` or `master`).
@@ -25,7 +25,6 @@ mission/<slug>   (e.g., mission/task-1280)
 
 The prefix is configurable via the `missions.branchPrefix` adapter setting, defaulting to `mission/`. The naming is produced by `missionBranchName(slug)` and referenced throughout the workflow as the canonical mission branch identifier.
 
-Evidence: `parallix/lib/core/mission-utils.js:49-51`.
 
 ### Base worktree naming convention
 
@@ -37,7 +36,6 @@ Base feature-branch worktrees use a conventional path derived from the same `wor
 
 This ensures base worktrees are discoverable and removable with existing worktree tooling, and never collide with mission worktrees.
 
-Evidence: `parallix/lib/core/mission-utils.js:190-193`.
 
 ### Integration mode 1: Trunk-based
 
@@ -58,7 +56,6 @@ main ──────■──────────────────
             ■── mission/<slug> ─■
 ```
 
-Evidence: `parallix/lib/core/mission-utils.js:318-325` (trunk delegation), `parallix/lib/commands/integrate.js:679-685` (integration resolution), `parallix/lib/commands/integrate.js:521-580` (squash-merge in primary worktree).
 
 ### Integration mode 2: Feature-branch
 
@@ -81,13 +78,6 @@ feature ─■────────────────■── feature 
           ■── mission/<slug> ─■
 ```
 
-Detection and recording evidence: `parallix/lib/core/mission-utils.js:207-223` (`detectLaunchBaseBranch`), `parallix/lib/commands/draft.js:327-352` (`ensureMissionBaseBranchRecorded`), `parallix/lib/commands/draft.js:316` (branch creation from base).
-
-Resolution evidence: `parallix/lib/core/mission-utils.js:239-287` (`readRecordedBaseBranch`, `resolveMissionBaseBranch`), `parallix/lib/core/mission-utils.js:318-350` (`resolveBaseWorktree`).
-
-Integration evidence: `parallix/lib/commands/integrate.js:679-685` (integration into base worktree), `parallix/lib/commands/integrate.js:521-580` (squash-merge in base worktree).
-
-Preflight guard evidence: `parallix/lib/commands/mission-start.js:158-188` (verifies base branch exists locally at mission start).
 
 ### Forgejo role: PR viewer, not branch authority
 
@@ -99,7 +89,6 @@ Key behaviors:
 - **PR creation**: `createPr()` resolves the PR base (recorded feature base, else primary), syncs the primary baseline, pushes the mission branch via an authenticated one-off URL, and POSTs the PR with the resolved base.
 - **Bypassable**: When `isForgejoReviewEnabled` is `false`, all Forgejo sync paths in `integrate` and `rebase` are skipped. The workflow operates entirely on local branches and worktrees.
 
-Evidence: `parallix/lib/tools/forgejo.js:379-491` (`createPr`), `parallix/lib/tools/forgejo.js:696-717` (`syncPrimaryBaseline`), `parallix/lib/commands/integrate.js:537-549` and `:619-629` (Forgejo skip paths), `parallix/lib/core/product-config.js:434-436` (provider gate).
 
 ### The `review` remote
 
@@ -114,13 +103,11 @@ Operations:
 
 The remote name is resolved from `adapters.review.remote || 'review'` via `resolveReviewAdapter()`.
 
-Evidence: `workflow.config.json:16`, `parallix/lib/core/product-config.js:423-430` (`resolveReviewAdapter`), `parallix/lib/tools/forgejo.js:719-741` (push/fetch), `:803-810` (delete), `parallix/lib/tools/setup-review.js:386-392`, `:215`, `:781`.
 
 ### Rebase target (ADR 0043 invariant)
 
 The `rebase` command fetches `review/<primary>` for remote visibility updates but rebases the mission branch onto the **local** primary branch. This is the ADR 0043 local-first invariant, ensuring rebase and integrate use the same ancestry target.
 
-Evidence: `parallix/lib/commands/rebase.js:93-117`.
 
 ## Decision matrix
 
@@ -139,7 +126,7 @@ Evidence: `parallix/lib/commands/rebase.js:93-117`.
 
 ### Positive
 
-- **Single source of truth**: The branch model is now documented with explicit file:line references, eliminating the need to trace through multiple command handlers to understand branch behavior.
+- **Single source of truth**: The branch model is documented as a durable lifecycle, rather than as an implementation index.
 - **Forgejo is not a hard dependency**: The workflow can operate entirely offline (local rebase, local squash-merge) when Forgejo is unavailable or disabled.
 - **Feature-branch mode is explicit**: The documented flow clarifies how missions on feature branches integrate back, including the auto-creation of base worktrees.
 - **Backward compatible**: Every pre-existing mission follows the trunk-based path byte-identically, since `resolveMissionBaseBranch` falls back to `getPrimaryBranch()` when no `Base-Branch:` line exists.
@@ -149,7 +136,7 @@ Evidence: `parallix/lib/commands/rebase.js:93-117`.
 
 - **Base worktree management**: Feature-branch mode introduces a second worktree per mission (mission worktree + base worktree), increasing storage and checkout overhead.
 - **Stale base risk**: If the base branch is deleted or the base worktree becomes stale, `resolveBaseWorktree` throws an error rather than recovering gracefully.
-- **Documentation coupling**: Future code changes to branch resolution logic must update this ADR to stay accurate.
+- **Documentation coupling**: Changes to this lifecycle's supported behavior must update this ADR.
 
 ### Open questions
 
@@ -169,14 +156,4 @@ Evidence: `parallix/lib/commands/rebase.js:93-117`.
 
 ## Links
 
-- `parallix/lib/core/mission-utils.js` — branch naming, base detection/recording/resolution, worktree management
-- `parallix/lib/commands/draft.js` — mission branch creation, base branch recording
-- `parallix/lib/commands/integrate.js` — integration merge, variant selection, Forgejo sync
-- `parallix/lib/commands/rebase.js` — rebase target resolution, Forgejo visibility fetch
-- `parallix/lib/commands/mission-start.js` — preflight base-branch verification
-- `parallix/lib/tools/forgejo.js` — PR creation, primary baseline sync, review remote push/fetch/delete
-- `parallix/lib/tools/setup-review.js` — review remote setup
-- `parallix/lib/core/product-config.js` — review adapter resolution, provider gate
-- `parallix/lib/core/git.js` — low-level git CLI wrappers
 - `docs/adr/0043-git-target-resolution-strategy.md` — ADR 0043: local-first git target resolution
-- `parallix/config/workflow.config.schema.json` — workflow runtime configuration schema

@@ -21,7 +21,7 @@ Minimum loop contract:
 - The workflow runs the declared verification gate before this review. Do not invoke `px` yourself, with one exception: `px status {{slug}}` is read-only and is the required way to load review history. Never run any other `px` subcommand.
 - Review as an independent senior engineer. Approve only if the mission is satisfied, verification is credible for the risk level, and the diff is safe to integrate.
 - Request changes for actionable issues introduced or materially worsened by this mission.
-- Confirm the final checkpoint document in the mission directory contains a Goal Check table citing real evidence (file:line, test names).
+- Confirm the final checkpoint document in the mission directory contains a Goal Check table citing real, durable evidence such as backticked commands, test names, ADR references, or test file paths.
 - Treat checkpoint evidence as a record of the work at the time it was performed. A command such as `git diff HEAD` is expected to be empty after a checkpoint is committed; that alone is not a finding. Flag evidence only when it is materially false, unverifiable from the committed tree, or conceals a mission change. Prefer the mission diff against `{{reviewBaseline}}` and stable file/test evidence when checking claims.
 - Write findings to `{{artifactDir}}/{{slug}}-review-findings.md`, outcome to `{{artifactDir}}/{{slug}}-review-outcome.md`, and verdict to `{{artifactDir}}/{{slug}}-review-verdict.txt`.
 

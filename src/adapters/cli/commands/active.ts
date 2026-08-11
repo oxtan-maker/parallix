@@ -404,7 +404,7 @@ function validateCheckpointsBeforeHandoff(slug, worktree, options = {}) {
   }
 
   if (checkpoints.length === 0) {
-    const msg = `No checkpoint documents found in ${fmt.path(missionDir)}. The execute agent must create checkpoint documents (CP-N.md) with a Goal Check table before handoff. Create at least CP-1 documenting your implementation, including a Goal Check table with real evidence (file:line, test names).`;
+    const msg = `No checkpoint documents found in ${fmt.path(missionDir)}. The execute agent must create checkpoint documents (CP-N.md) with a Goal Check table before handoff. Create at least CP-1 documenting your implementation, including a Goal Check table with real evidence such as a backticked command, test name, ADR reference, or test file path.`;
     error(msg);
     return { ok: false, error: msg };
   }

@@ -568,7 +568,7 @@ export function performStaticReview(
         log(fmt.status('PASS', 'Goal Check table contains evidence rows.'));
         const unverifiableRow = findUnverifiableGoalCheckRow(evidenceRows, rootDir);
         if (unverifiableRow) {
-          findings.push(`Final checkpoint ${path.basename(finalCheckpoint)} has a "## Goal Check" section but no evidence rows that cite a verifiable reference such as a file:line, ADR, test reference, or recognized repo command/path. A goal-check table with real evidence is required before handoff. Offending row: ${unverifiableRow}`);
+          findings.push(`Final checkpoint ${path.basename(finalCheckpoint)} has a "## Goal Check" section but no evidence rows that cite a verifiable reference such as a recognized repo command/path, exact test name, test-file path, or ADR reference (or, when necessary, file:line). A goal-check table with real evidence is required before handoff. Offending row: ${unverifiableRow}`);
         }
       }
     }

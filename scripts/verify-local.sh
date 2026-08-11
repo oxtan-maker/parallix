@@ -342,6 +342,12 @@ case "$subcommand" in
       echo "FAIL: $errors documentation item(s) missing"
       exit 1
     fi
+    # Live guidance must not introduce brittle file.ts:<line> citations.
+    # Historical checkpoints are intentionally excluded because they are frozen records.
+    if rg -n '[[:alnum:]_./-]+\.[[:alpha:]_-][[:alnum:]_-]+:[0-9]+' docs/*.md docs/adr/*.md prompts/*.md; then
+      echo "FAIL: file.ts:<line> citations are not allowed in live authored documentation, ADRs, or prompt templates" >&2
+      exit 1
+    fi
     node scripts/verify-docs.mjs
     exit 0
     ;;
