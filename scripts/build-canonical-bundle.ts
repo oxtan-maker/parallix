@@ -65,24 +65,47 @@ process.on('exit', () => {
   try { fs.rmSync(lockDir, RM_OPTIONS); } catch { /* best effort */ }
 });
 
-/** Replace `published` with `staging` as close to atomically as the filesystem allows. */
+/**
+ * Replace the contents of `published` with `staging` as close to atomically as
+ * the filesystem allows, one top-level entry at a time.
+ *
+ * The published directory itself is never renamed aside. build/sea is owned by
+ * the SEA build script, and the native executable resolves its package root by
+ * walking up from build/sea to build/sea/package.json on every run. Moving
+ * build/ (or build/sea) out of the way for even one rename leaves that walk to
+ * find build/package.json instead, and the executable then reports build/ as
+ * its package root — which is how the task-2286 assets smoke failed while a
+ * concurrent `npm pack` rebuilt the bundle. Publishing entry by entry keeps
+ * both build/ and build/sea continuously resolvable for the whole swap.
+ */
 function publishTree(staging: string, published: string): void {
-  // Preserve build/sea (owned by the SEA build script) so a bundle rebuild
-  // does not wipe out the native executable while its smoke test runs in
-  // parallel (task-2286 integration suite). It is carried through inside the
-  // staging tree rather than parked outside and restored afterwards: restoring
-  // after the swap left build/sea/px missing for the whole duration of the
-  // retired-tree delete, and a concurrent spawn of the executable in that
-  // window failed with ENOENT.
   const retired = `${published}.retired.${process.pid}`;
   fs.rmSync(retired, RM_OPTIONS);
+  if (!fs.existsSync(published)) {
+    fs.renameSync(staging, published);
+    return;
+  }
+  fs.mkdirSync(retired, { recursive: true });
 
-  // From here to the second rename build/sea is unpublished; both steps are
-  // metadata-only renames within the same directory.
-  const seaDir = path.join(published, 'sea');
-  if (fs.existsSync(seaDir)) { fs.renameSync(seaDir, path.join(staging, 'sea')); }
-  if (fs.existsSync(published)) { fs.renameSync(published, retired); }
-  fs.renameSync(staging, published);
+  const stagedEntries = fs.readdirSync(staging);
+  const staged = new Set(stagedEntries);
+  // Entries this build no longer publishes are parked, not deleted in place, so
+  // a reader never observes a half-emptied directory. build/sea is not ours.
+  for (const entry of fs.readdirSync(published)) {
+    if (entry === 'sea' || staged.has(entry)) { continue; }
+    fs.renameSync(path.join(published, entry), path.join(retired, entry));
+  }
+  for (const entry of stagedEntries) {
+    const target = path.join(published, entry);
+    // rename() overwrites a regular file atomically, so a reader sees either the
+    // old or the new file. It refuses any other kind of existing destination
+    // (a non-empty directory, a type change), which has to be parked first.
+    const current = fs.existsSync(target) ? fs.statSync(target) : undefined;
+    if (current && !(current.isFile() && fs.statSync(path.join(staging, entry)).isFile())) {
+      fs.renameSync(target, path.join(retired, entry));
+    }
+    fs.renameSync(path.join(staging, entry), target);
+  }
 
   fs.rmSync(retired, RM_OPTIONS);
 }

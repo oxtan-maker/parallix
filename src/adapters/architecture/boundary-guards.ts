@@ -18,14 +18,50 @@ function rootsFor(layer: DependencyLayer): readonly string[] {
   return layerRoots[layer];
 }
 
-/** The complete permitted dependency graph. Local edges are intentionally explicit. */
+/**
+ * The complete permitted dependency graph.
+ *
+ * `adapters` deliberately has **no** self-edge: a blanket adapters-to-adapters
+ * permission lets any adapter reach any other adapter, which is what allowed a
+ * relabeled monolith to pass by directory placement alone. Cross-adapter edges
+ * are governed by the named package rules in `adapterPackageDependencies`
+ * instead; adapters that need behaviour they may not import directly depend on
+ * an application-owned port under `src/application/ports/`.
+ */
 export const allowedDependencyGraph: Readonly<Record<DependencyLayer, readonly DependencyLayer[]>> = {
   domain: ['domain'],
   application: ['domain', 'application'],
-  adapters: ['domain', 'application', 'adapters'],
+  adapters: ['domain', 'application'],
   interfaces: ['domain', 'application', 'interfaces'],
   composition: ['domain', 'application', 'adapters', 'interfaces', 'composition'],
   entry: ['composition', 'interfaces'],
+};
+
+/**
+ * Named package-level cross-adapter dependency rules.
+ *
+ * Each key is an adapter package directly beneath `src/adapters/`; the value is
+ * the exhaustive set of sibling packages it may import. A package may always
+ * import itself. An edge that is absent from this table is a violation — there
+ * is no wildcard, no per-file exception, and no path-based bypass.
+ */
+export const adapterPackageDependencies: Readonly<Record<string, readonly string[]>> = {
+  agents: ['assets', 'backlog', 'config', 'filesystem', 'git', 'process', 'sqlite', 'storage'],
+  architecture: [],
+  assets: ['filesystem'],
+  backlog: ['agents', 'config', 'filesystem', 'git', 'review', 'sqlite'],
+  cli: ['agents', 'assets', 'backlog', 'config', 'filesystem', 'forgejo', 'git', 'process', 'rebase', 'review', 'sqlite', 'storage', 'verification'],
+  config: ['assets'],
+  filesystem: ['config', 'git'],
+  forgejo: ['backlog', 'config', 'filesystem', 'git', 'verification'],
+  git: ['config', 'filesystem'],
+  mission: ['agents', 'backlog', 'cli', 'config', 'filesystem', 'sqlite'],
+  process: ['config'],
+  rebase: ['agents', 'backlog', 'cli', 'config', 'filesystem', 'forgejo', 'git', 'review', 'verification'],
+  review: ['agents', 'assets', 'backlog', 'cli', 'config', 'filesystem', 'forgejo', 'git', 'verification'],
+  sqlite: ['backlog', 'storage'],
+  storage: [],
+  verification: ['backlog', 'config', 'filesystem', 'forgejo', 'git', 'storage'],
 };
 
 export interface DependencyViolation {
@@ -86,6 +122,26 @@ export function classifyDependencyLayer(file: string, repoRoot = process.cwd()):
   return candidates[0]?.[0] ?? null;
 }
 
+/**
+ * The adapter package a file belongs to, i.e. the first directory beneath
+ * `src/adapters/`. Returns `null` for files outside the adapter root and for
+ * loose files directly inside it, which own no package.
+ */
+export function adapterPackageOf(file: string, repoRoot = process.cwd()): string | null {
+  const relative = path.relative(path.resolve(repoRoot, 'src', 'adapters'), path.resolve(file));
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {return null;}
+  const segments = relative.split(path.sep);
+  return segments.length > 1 ? segments[0] : null;
+}
+
+function crossAdapterEdgeIsNamed(source: string, target: string, repoRoot: string): boolean {
+  const sourcePackage = adapterPackageOf(source, repoRoot);
+  const targetPackage = adapterPackageOf(target, repoRoot);
+  if (sourcePackage === null || targetPackage === null) {return false;}
+  if (sourcePackage === targetPackage) {return true;}
+  return (adapterPackageDependencies[sourcePackage] ?? []).includes(targetPackage);
+}
+
 export function findDependencyViolations(repoRoot = process.cwd(), allowlist: readonly LegacyDependencyException[] = []): DependencyViolation[] {
   const root = path.resolve(repoRoot);
   const exceptions = new Set(allowlist.map(entry => `${entry.source}\0${entry.target}`));
@@ -96,7 +152,11 @@ export function findDependencyViolations(repoRoot = process.cwd(), allowlist: re
     for (const specifier of importsFrom(fs.readFileSync(source, 'utf8'))) {
       const target = resolveLocal(source, specifier);
       const targetLayer = target && classifyDependencyLayer(target, root);
-      if (!target || !targetLayer || allowedDependencyGraph[sourceLayer].includes(targetLayer)) {continue;}
+      if (!target || !targetLayer) {continue;}
+      const permitted = sourceLayer === 'adapters' && targetLayer === 'adapters'
+        ? crossAdapterEdgeIsNamed(source, target, root)
+        : allowedDependencyGraph[sourceLayer].includes(targetLayer);
+      if (permitted) {continue;}
       const sourceName = path.relative(root, source);
       const targetName = path.relative(root, target);
       if (!exceptions.has(`${sourceName}\0${targetName}`)) {
@@ -110,6 +170,189 @@ export function findDependencyViolations(repoRoot = process.cwd(), allowlist: re
 /** Production guard: the canonical graph has no exceptions. */
 export function findProductionDependencyViolations(repoRoot = process.cwd()): DependencyViolation[] {
   return findDependencyViolations(repoRoot);
+}
+
+/* ------------------------------------------------------------------ *
+ * Responsibility ownership
+ * ------------------------------------------------------------------ */
+
+/**
+ * A responsibility is a layer. `layerRoots` is the only classification table and
+ * `classifyDependencyLayer` the only classifier; the rules below add *what a
+ * module does* on top of *where it sits* rather than re-deriving the layer model.
+ */
+export type Responsibility = DependencyLayer;
+
+/**
+ * An adapter module that directly imports this many distinct sibling adapter
+ * packages is sequencing a multi-integration workflow rather than providing one
+ * mechanism. Workflow sequencing is an application responsibility, so the module
+ * is reported regardless of where it sits under `src/adapters/`. The threshold
+ * is a rule, not configuration: naming more cross-adapter edges cannot silence
+ * it, and neither can moving or renaming the module.
+ */
+export const multiIntegrationFanOutThreshold = 3;
+
+export type ResponsibilityRule =
+  | 'unclassified-production-module'
+  | 'cross-adapter-dependency-not-named'
+  | 'adapter-owned-workflow-sequencing'
+  | 'hidden-service-location'
+  | 'complete-graph-outside-composition';
+
+export interface ResponsibilityViolation {
+  /** Repository-relative path of the offending module. */
+  readonly file: string;
+  /** The responsibility rule that failed. */
+  readonly rule: ResponsibilityRule;
+  /** The responsibility that must own this code. */
+  readonly expectedOwner: Responsibility;
+  /** The responsibility the module currently claims by its location. */
+  readonly actualOwner: Responsibility | 'unclassified';
+  /** Human-readable statement of what was detected. */
+  readonly detail: string;
+}
+
+/** Renders a violation as a single actionable diagnostic line. */
+export function formatResponsibilityViolation(violation: ResponsibilityViolation): string {
+  return `${violation.file}: rule ${violation.rule} failed — ${violation.detail}; expected owner: ${violation.expectedOwner}, actual owner: ${violation.actualOwner}`;
+}
+
+/** Renders a whole scan as a multi-line diagnostic, newest rule first. */
+export function formatResponsibilityViolations(violations: readonly ResponsibilityViolation[]): string {
+  return violations.map(formatResponsibilityViolation).join('\n');
+}
+
+function productionModules(repoRoot: string): string[] {
+  const src = path.resolve(repoRoot, 'src');
+  if (!fs.existsSync(src)) {return [];}
+  return walk(src).filter(file => !file.endsWith('.d.ts'));
+}
+
+/** The responsibility a module claims by its location, for diagnostics. */
+function ownerOf(file: string, repoRoot: string): Responsibility | 'unclassified' {
+  return classifyDependencyLayer(file, repoRoot) ?? 'unclassified';
+}
+
+/**
+ * SC1: every production module under `src/` must be owned by one of the six
+ * responsibilities. A module in a new top-level directory, or loose at the `src/`
+ * root, is reported with its path and the owners it could have declared.
+ */
+export function findUnclassifiedProductionModules(repoRoot = process.cwd()): ResponsibilityViolation[] {
+  const root = path.resolve(repoRoot);
+  const roots = dependencyLayers.flatMap(layer => rootsFor(layer)).join(', ');
+  return productionModules(root)
+    .filter(file => classifyDependencyLayer(file, root) === null)
+    .map(file => ({
+      file: path.relative(root, file),
+      rule: 'unclassified-production-module' as const,
+      expectedOwner: 'application' as const,
+      actualOwner: 'unclassified' as const,
+      detail: `module is outside every canonical responsibility root (${roots})`,
+    }));
+}
+
+/**
+ * SC2: cross-adapter edges must match a named package rule. Reported per module
+ * so the diagnostic names the importing file rather than only the package pair.
+ */
+export function findCrossAdapterViolations(repoRoot = process.cwd()): ResponsibilityViolation[] {
+  const root = path.resolve(repoRoot);
+  return findDependencyViolations(root)
+    .filter(violation => violation.sourceLayer === 'adapters' && violation.targetLayer === 'adapters')
+    .map(violation => ({
+      file: violation.source,
+      rule: 'cross-adapter-dependency-not-named' as const,
+      expectedOwner: 'application' as const,
+      actualOwner: 'adapters' as const,
+      detail: `imports "${violation.specifier}" (${violation.target}) but package "${adapterPackageOf(path.join(root, violation.source), root)}" declares no named dependency on "${adapterPackageOf(path.join(root, violation.target), root)}"; route it through an application-owned port under src/application/ports/`,
+    }));
+}
+
+/**
+ * SC3: multi-integration command workflow sequencing is application-owned, so an
+ * adapter module that directly wires `multiIntegrationFanOutThreshold` or more
+ * distinct sibling adapter packages fails wherever it is placed.
+ */
+export function findWorkflowOwnershipViolations(repoRoot = process.cwd()): ResponsibilityViolation[] {
+  const root = path.resolve(repoRoot);
+  const adapterRoot = path.resolve(root, 'src', 'adapters');
+  return walk(adapterRoot).flatMap(file => {
+    const ownPackage = adapterPackageOf(file, root);
+    if (ownPackage === null) {return [];}
+    const reached = new Set<string>();
+    for (const specifier of importsFrom(fs.readFileSync(file, 'utf8'))) {
+      const target = resolveLocal(file, specifier);
+      const targetPackage = target && adapterPackageOf(target, root);
+      if (targetPackage && targetPackage !== ownPackage) {reached.add(targetPackage);}
+    }
+    if (reached.size < multiIntegrationFanOutThreshold) {return [];}
+    return [{
+      file: path.relative(root, file),
+      rule: 'adapter-owned-workflow-sequencing' as const,
+      expectedOwner: 'application' as const,
+      actualOwner: 'adapters' as const,
+      detail: `sequences ${reached.size} distinct integration packages (${[...reached].sort().join(', ')}), at or above the ${multiIntegrationFanOutThreshold}-package workflow threshold`,
+    }];
+  });
+}
+
+/**
+ * Hidden service location and complete-graph construction: only the composition
+ * root may assemble the object graph, and no module may resolve collaborators by
+ * dynamic key lookup.
+ *
+ * This is the sole implementation of both rules; `findServiceLocationViolations`
+ * and `findCompositionViolations` differ only in the file set they scan and the
+ * shape they report.
+ */
+function compositionOwnershipViolations(files: readonly string[], root: string): ResponsibilityViolation[] {
+  return files.flatMap(file => {
+    const source = fs.readFileSync(file, 'utf8');
+    const relative = path.relative(root, file);
+    const actualOwner = ownerOf(file, root);
+    const found: ResponsibilityViolation[] = [];
+    // The execute mechanism set is built by a factory rather than a single
+    // adapter constructor; detecting that factory keeps the
+    // "only the composition root builds the complete graph" rule enforced.
+    const makesCompleteGraph = /createExecuteMissionPorts\s*\(/.test(source) && /new\s+LegacyStatsBackfillAdapter\s*\(/.test(source);
+    if (makesCompleteGraph && !file.endsWith(path.join('src', 'composition', 'application-services.ts'))) {
+      found.push({
+        file: relative,
+        rule: 'complete-graph-outside-composition',
+        expectedOwner: 'composition',
+        actualOwner,
+        detail: 'assembles the complete execute-mission object graph outside src/composition/application-services.ts',
+      });
+    }
+    if (/(?:serviceLocator|services)\s*\[/.test(source)) {
+      found.push({
+        file: relative,
+        rule: 'hidden-service-location',
+        expectedOwner: 'composition',
+        actualOwner,
+        detail: 'resolves collaborators by dynamic key lookup instead of receiving them as explicit constructor or function arguments',
+      });
+    }
+    return found;
+  });
+}
+
+/** The composition-ownership rules applied to the whole production tree. */
+export function findServiceLocationViolations(repoRoot = process.cwd()): ResponsibilityViolation[] {
+  const root = path.resolve(repoRoot);
+  return compositionOwnershipViolations(productionModules(root), root);
+}
+
+/** The complete responsibility-ownership scan, in rule order. */
+export function findResponsibilityViolations(repoRoot = process.cwd()): ResponsibilityViolation[] {
+  return [
+    ...findUnclassifiedProductionModules(repoRoot),
+    ...findCrossAdapterViolations(repoRoot),
+    ...findServiceLocationViolations(repoRoot),
+    ...findWorkflowOwnershipViolations(repoRoot),
+  ];
 }
 
 /** Compatibility wrapper retained for the existing application-boundary assertions. */
@@ -134,14 +377,12 @@ export function findForbiddenApplicationDependencies(entryFiles: readonly string
   return violations;
 }
 
+/**
+ * The same composition-ownership rules scoped to one directory, reported as
+ * absolute paths for the existing application-boundary assertions.
+ */
 export function findCompositionViolations(rootDir: string): string[] {
-  return walk(path.resolve(rootDir)).flatMap(file => {
-    const source = fs.readFileSync(file, 'utf8');
-    // The execute mechanism set is built by a factory rather than a single
-    // adapter constructor; detecting that factory keeps the
-    // "only the composition root builds the complete graph" rule enforced.
-    const makesCompleteGraph = /createExecuteMissionPorts\s*\(/.test(source) && /new\s+LegacyStatsBackfillAdapter\s*\(/.test(source);
-    const usesLocator = /(?:serviceLocator|services)\s*\[/.test(source);
-    return (makesCompleteGraph && !file.endsWith(path.join('src', 'composition', 'application-services.ts'))) || usesLocator ? [file] : [];
-  });
+  const root = path.resolve(rootDir);
+  const offending = compositionOwnershipViolations(walk(root), root).map(violation => violation.file);
+  return [...new Set(offending)].map(relative => path.join(root, relative));
 }

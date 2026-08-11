@@ -2115,10 +2115,12 @@ test('buildAutoCheckpointContent produces verifiable evidence rows', () => {
 
   const content = handoffModule._buildAutoCheckpointContent('task-2215');
   assert.match(content, /^## Goal Check$/m, 'template must contain the ## Goal Check heading');
-  assert.ok(content.includes('src/adapters/cli/commands/handoff.ts:277'),
-    'evidence must cite the auto-remediation source file:line, not the removed handoff.js');
+  assert.ok(content.includes('buildAutoCheckpointContent'),
+    'evidence must cite the auto-remediation symbol, not the removed handoff.js');
   assert.ok(!content.includes('handoff.js auto-remediation'),
     'template must not cite the non-existent handoff.js');
+  assert.doesNotMatch(content, /\.ts:\d+/,
+    'evidence must not pin a line number: it goes stale on any unrelated edit to the cited file');
 
   const goalCheckMatch = content.match(/^## Goal Check(?: Table)?\s*$/m);
   const afterHeader = content.slice((goalCheckMatch.index ?? 0) + goalCheckMatch[0].length);
