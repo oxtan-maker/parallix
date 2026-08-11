@@ -1,7 +1,7 @@
 ---
 id: TASK-2357
 title: Close the remaining statistics correctness defects and certify the real production path
-status: review
+status: ready-for-integration
 assignee: [claude]
 created_date: 2026-08-10 00:00
 labels: [bug, user_value, stats, correctness]
