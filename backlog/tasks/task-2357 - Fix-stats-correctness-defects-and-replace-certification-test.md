@@ -5,6 +5,7 @@ title: Close the remaining statistics correctness defects and certify the real p
 status: backlog
 assignee: [claude]
 created_date: 2026-08-10 00:00
+labels: [bug, user_value, stats, correctness]
 labels:
 
 * bug
