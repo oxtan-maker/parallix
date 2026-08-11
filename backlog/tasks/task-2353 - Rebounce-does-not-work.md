@@ -4,7 +4,7 @@ title: Rebounce does not work
 status: backlog
 assignee: [codex]
 created_date: '2026-08-10 08:29'
-labels: []
+labels: [ai_sdlc, bug]
 dependencies: []
 ordinal: 84911
 ---
