@@ -1,8 +1,8 @@
 ---
 id: TASK-2360
 title: 'Stop the workflow from demanding file:line evidence that rots'
-status: ready-for-integration
-assignee: [custom]
+status: active
+assignee: [codex]
 created_date: '2026-08-11 07:35'
 labels:
   - ai_sdlc
