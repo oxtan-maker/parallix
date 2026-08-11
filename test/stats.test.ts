@@ -334,8 +334,12 @@ test('recording a measurement with no explicit path writes no CSV under PARALLIX
 
     const loaded = stats.loadMeasurementRows({ dbPath: dbFile });
     assert.equal(loaded.rows.length, 2);
-    assert.equal(loaded.rows.find(r => r.mission === 'task-a').repo, 'visualboard');
-    assert.equal(loaded.rows.find(r => r.mission === 'task-b').repo, 'parallix');
+    // TASK-2363: the configured `product.name` is a display alias, not an
+    // identity. Each row is written under its checkout's canonical repository
+    // id, which is what the mission lifecycle joins against.
+    assert.equal(loaded.rows.find(r => r.mission === 'task-a').repo, path.basename(repoA));
+    assert.equal(loaded.rows.find(r => r.mission === 'task-b').repo, path.basename(repoB));
+    assert.notEqual(loaded.rows.find(r => r.mission === 'task-a').repo, 'visualboard');
 
     // No CSV was created anywhere: not in PARALLIX_HOME, not in either repo.
     assert.deepEqual(fs.readdirSync(home).filter(name => name.endsWith('.csv')), []);

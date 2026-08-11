@@ -1,6 +1,12 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import type { BoardMetrics, LaneMetricSeries, MetricSeries } from '../../application/projections/board.js';
+import type {
+  BoardMetrics,
+  DecisionMetric,
+  DecisionWindowMetrics,
+  LaneMetricSeries,
+  MetricSeries,
+} from '../../application/projections/board.js';
 import { useTerminalDimensions } from './board-layout.js';
 
 /** FLOW switches to one label/value row per datum below this width. */
@@ -18,6 +24,17 @@ function coverage(point: { readonly observationCount?: number } | undefined): st
   return ` (n=${point?.observationCount ?? 0})`;
 }
 
+/** A projection-supplied figure beside the observations it was computed from. */
+function figure(metric: DecisionMetric | undefined, suffix = ''): string {
+  return `${display(metric?.value, suffix)}${coverage(metric)}`;
+}
+
+/** A projection-supplied rate, shown to two decimals so a column stays readable. */
+function rateFigure(metric: DecisionMetric | undefined): string {
+  const value = metric?.value;
+  return `${value === null || value === undefined ? 'unavailable' : value.toFixed(2)}${coverage(metric)}`;
+}
+
 function legend(flow: BoardMetrics['cumulativeFlowByState']['series'][number] | undefined): string {
   if (!flow) { return 'Legend: unavailable'; }
   return `Legend: ${Object.keys(flow.counts).map((lane) => `${lane} ■`).join(' · ')}`;
@@ -33,13 +50,57 @@ function LaneRows({ label, metric, suffix = '' }: { label: string; metric: LaneM
   );
 }
 
+/**
+ * The weekly decision comparison: how the missions completed in the last seven
+ * days behaved, beside the seven days before them.
+ *
+ * Every number here is read straight off `metrics.decisionWindow`. No filtering,
+ * no median, no date arithmetic, no cohort membership is computed in this file —
+ * the projection decides what the figures are, this only lays them out.
+ */
+function DecisionWindowRows({ metrics, narrow }: { readonly metrics: BoardMetrics; readonly narrow: boolean }): React.ReactElement {
+  const comparison = metrics.decisionWindow;
+  if (!comparison) {
+    return (
+      <Box flexDirection="column">
+        <Text bold>DECISION WINDOW · completed missions</Text>
+        <Text dimColor>Decision window unavailable: this projection predates rolling-window statistics.</Text>
+      </Box>
+    );
+  }
+  const rows: readonly (readonly [string, string, string])[] = [
+    ['Completed missions', `n=${comparison.current.completedMissions}`, `n=${comparison.previous.completedMissions}`],
+    ['Lifecycle cycle median', figure(comparison.current.cycleTime, ' min'), figure(comparison.previous.cycleTime, ' min')],
+    ['Agent runtime median', figure(comparison.current.agentRuntime, ' min'), figure(comparison.previous.agentRuntime, ' min')],
+    ['Active dwell median', figure(comparison.current.activeDwell, ' min'), figure(comparison.previous.activeDwell, ' min')],
+    ['Review dwell median', figure(comparison.current.reviewDwell, ' min'), figure(comparison.previous.reviewDwell, ' min')],
+    ['Integration dwell median', figure(comparison.current.integrationDwell, ' min'), figure(comparison.previous.integrationDwell, ' min')],
+    ['Review bounce rate', rateFigure(comparison.current.reviewBounce), rateFigure(comparison.previous.reviewBounce)],
+  ];
+  return (
+    <Box flexDirection="column">
+      <Text bold>DECISION WINDOW · completed missions</Text>
+      <Text>{`current ${comparison.current.label}`}</Text>
+      <Text dimColor>{`previous ${comparison.previous.label}`}</Text>
+      {rows.map(([label, current, previous]) => (
+        <Text key={label}>
+          {narrow
+            ? `${label}: ${current} · previous ${previous}`
+            : `${label.padEnd(25)}${current.padEnd(20)}${previous}`}
+        </Text>
+      ))}
+    </Box>
+  );
+}
+
 /** Render projection-supplied experiment figures; no statistics are calculated here. */
 function CohortRows({ metrics }: { readonly metrics: BoardMetrics }): React.ReactElement | null {
   const comparison = metrics.cohorts;
   if (!comparison || comparison.cohorts.length === 0) { return null; }
+  const window: DecisionWindowMetrics | undefined = metrics.decisionWindow?.current;
   return (
     <Box flexDirection="column" marginTop={1}>
-      <Text bold>{`EXPERIMENT COHORTS · ${comparison.dimension}`}</Text>
+      <Text bold>{`EXPERIMENT COHORTS · ${comparison.dimension}${window ? ` · ${window.label}` : ''}`}</Text>
       {comparison.cohorts.map((cohort) => (
         <Box key={cohort.key} flexDirection="column">
           <Text>{`${cohort.key}${cohort.lowSample ? ' · low-sample' : ''} · population n=${cohort.n}`}</Text>
@@ -57,6 +118,15 @@ function CohortRows({ metrics }: { readonly metrics: BoardMetrics }): React.Reac
  * Read-only FLOW presentation. Values, fallbacks, and the narrative are
  * supplied by BoardMetrics; this component only selects a terminal layout and
  * formats the supplied values for Ink.
+ *
+ * The panel is split into two kinds of statistic, because they answer different
+ * questions and must not be read as one number:
+ *
+ *   DECISION WINDOW — the missions completed in the last rolling seven days,
+ *                     compared with the seven before them.
+ *   CURRENT FLOW    — what the board looks like right now: lane occupancy, lane
+ *                     age, the bottleneck, agent availability. Deliberately not
+ *                     windowed.
  */
 export function FlowPanel({ metrics, columns }: { readonly metrics: BoardMetrics; readonly columns?: number }): React.ReactElement {
   const dimensions = useTerminalDimensions();
@@ -66,39 +136,34 @@ export function FlowPanel({ metrics, columns }: { readonly metrics: BoardMetrics
   const throughput = metrics.weeklyThroughput.series.at(-1)?.value;
   const bounceRatePoint = metrics.reviewBounceRate.series.at(-1);
   // Provenance population is deliberately not displayed beside individual
-  // statistics: it is not their observation count.
+  // statistics: it is the all-history telemetry the projection was derived from,
+  // not the observation count of any figure and not the decision sample.
   const sampleSize = metrics.provenance?.sampleSize ?? 0;
   const healthState = metrics.health?.state ?? 'no-telemetry';
-  // Lifecycle time and agent execution time are different quantities and are
-  // never labelled with each other's words. Projections cached before the two
-  // were split carry no runtime series at all.
-  const lifecycleCycleTime = metrics.medianStateTimes?.series.at(-1)?.value;
-  const agentRuntime = metrics.medianAgentRuntime?.series.at(-1)?.value;
+  const windowLabel = metrics.decisionWindow?.current.label;
 
   return (
     <Box flexDirection="column" marginTop={1}>
-      <Text bold color="cyan">FLOW{narrow ? ' · textual' : ''}</Text>
-      <Text color={healthState === 'unavailable' ? 'red' : healthState === 'partial' ? 'yellow' : 'gray'}>{`Statistics: ${healthState} · population n=${sampleSize}`}</Text>
+      <Text bold color="cyan">{`FLOW${narrow ? ' · textual' : ''}${windowLabel ? ` · decision window ${windowLabel}` : ''}`}</Text>
+      <Text color={healthState === 'unavailable' ? 'red' : healthState === 'partial' ? 'yellow' : 'gray'}>{`Statistics: ${healthState} · population n=${sampleSize} (all recorded history, not the decision sample)`}</Text>
       <Box flexDirection={narrow ? 'column' : 'row'}>
         <Box flexDirection="column" marginRight={narrow ? 0 : 4}>
+          <DecisionWindowRows metrics={metrics} narrow={narrow} />
+          <Text>{`Lifecycle review-bounce rate: ${display(bounceRatePoint?.value)}${coverage(bounceRatePoint)}`}</Text>
+          <Text dimColor>{history('Lifecycle review-bounce rate', metrics.reviewBounceRate.missingHistoryFallback)}</Text>
+        </Box>
+        <Box flexDirection="column" marginRight={narrow ? 0 : 4}>
+          <LaneRows label="Median cycle time" metric={metrics.medianCycleTimeByState} suffix=" min" />
+          <Text bold color="cyan">CURRENT FLOW · state now</Text>
+          <LaneRows label="Median lane age" metric={metrics.medianAgeByLane} suffix=" min" />
+        </Box>
+        <Box flexDirection="column">
           <Text bold>CUMULATIVE FLOW</Text>
           <Text>{flow ? Object.entries(flow.counts).map(([lane, count]) => `${lane} ${count}`).join(' · ') : 'unavailable'}</Text>
           <Text dimColor>{history('Cumulative flow', metrics.cumulativeFlowByState.missingHistoryFallback)}</Text>
           <Text dimColor>{legend(flow)}</Text>
           <Text>{`Weekly completions: ${display(throughput)}${coverage(metrics.weeklyThroughput.series.at(-1))}`}</Text>
           <Text dimColor>{history('Weekly completions', metrics.weeklyThroughput.missingHistoryFallback)}</Text>
-          <Text>{`Lifecycle review-bounce rate: ${display(bounceRatePoint?.value)}${coverage(bounceRatePoint)}`}</Text>
-          <Text dimColor>{history('Lifecycle review-bounce rate', metrics.reviewBounceRate.missingHistoryFallback)}</Text>
-          <Text>{`Median lifecycle cycle time: ${display(lifecycleCycleTime, ' min')}${coverage(metrics.medianStateTimes.series.at(-1))}`}</Text>
-          <Text dimColor>{history('Median lifecycle cycle time', metrics.medianStateTimes?.missingHistoryFallback ?? 'null')}</Text>
-          <Text>{`Median agent runtime: ${display(agentRuntime, ' min')}${coverage(metrics.medianAgentRuntime?.series.at(-1))}`}</Text>
-          <Text dimColor>{history('Median agent runtime', metrics.medianAgentRuntime?.missingHistoryFallback ?? 'null')}</Text>
-        </Box>
-        <Box flexDirection="column" marginRight={narrow ? 0 : 4}>
-          <LaneRows label="Median cycle time" metric={metrics.medianCycleTimeByState} suffix=" min" />
-          <LaneRows label="Median lane age" metric={metrics.medianAgeByLane} suffix=" min" />
-        </Box>
-        <Box flexDirection="column">
           <Text bold>READ</Text>
           <Text color="yellow">{metrics.bottleneck.sentence}</Text>
           <Text bold>Agents</Text>

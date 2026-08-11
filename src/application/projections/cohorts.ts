@@ -1,7 +1,8 @@
 import type { MissionId } from '../../domain/mission.js';
 import type { MissionTransition } from '../../domain/mission-workflow.js';
 import type { MissionOutcome } from '../../domain/usage.js';
-import { agentRuntimeMinutes, deriveLaneIntervals } from './metrics.js';
+import { agentRuntimeMinutes, deriveLaneIntervals, outcomesCompletedInWindow } from './metrics.js';
+import type { DecisionWindow } from '../services/decision-window.js';
 
 // ---------------------------------------------------------------------------
 // Cohort comparison — "did this workflow change improve delivery?"
@@ -78,7 +79,9 @@ export interface CohortMetrics {
     activeDwell: number;
     reviewDwell: number;
     reviewBounce: number;
-    reviewFixRounds: number | null;
+    /** Missions whose review-fix count was actually measured; unknown ones are
+        excluded, so this is never the cohort population and never null. */
+    reviewFixRounds: number;
     tokens: number;
     runtime: number;
     cost: number;
@@ -106,6 +109,14 @@ export interface CohortComparisonInput {
   readonly lowSampleThreshold?: number;
   /** Required by the `date-range` dimension; ignored by every other one. */
   readonly dateRanges?: readonly CohortDateRange[];
+  /**
+   * Restrict the comparison to missions completed inside this decision window.
+   * A six-month-old mission carrying the same experiment label is not part of
+   * today's experiment, so the board supplies its current rolling week here.
+   * Omitted means every completed mission, which is what a `date-range`
+   * comparison over explicit ranges wants.
+   */
+  readonly window?: DecisionWindow;
 }
 
 // ---------------------------------------------------------------------------
@@ -262,7 +273,10 @@ export function groupIntoCohorts(
 /** Compute every cohort's figures for one experiment dimension. */
 export function compareCohorts(input: CohortComparisonInput): CohortComparison {
   const threshold = input.lowSampleThreshold ?? LOW_SAMPLE_THRESHOLD;
-  const groups = groupIntoCohorts(input.outcomes, input.dimension, input.dateRanges ?? []);
+  // The window selects the missions; their full lifecycle history stays intact,
+  // so a member's dwell and review passage are read from all of its transitions.
+  const outcomes = outcomesCompletedInWindow(input.outcomes, input.window);
+  const groups = groupIntoCohorts(outcomes, input.dimension, input.dateRanges ?? []);
   const activeDwell = dwellMinutesByMission(input.transitions, 'active');
   const reviewDwell = dwellMinutesByMission(input.transitions, 'review');
   const passages = reviewPassagesByMission(input.transitions);

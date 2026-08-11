@@ -215,10 +215,18 @@ function renderRangeStatsReport(rows, options = {}) {
 function renderMissionPhaseReport(rows, slug, options = {}) {
   const wanted = String(slug || '').trim().toLowerCase();
   const opts = options;
-  const wantedRepo = String(opts.repo || resolveStatsRepoName(opts.rootDir)).trim();
+  // The canonical identity, plus any explicitly declared legacy alias this
+  // repository's older rows were persisted under. Never a broadened query: the
+  // caller supplies the exact identities, and new rows only use the canonical one.
+  const wantedRepos = new Set(
+    (opts.repos && opts.repos.length > 0
+      ? opts.repos
+      : [opts.repo || resolveStatsRepoName(opts.rootDir)]
+    ).map(identity => String(identity).trim()),
+  );
   const missionRows = (rows || []).filter(row =>
     String(row.mission || '').trim().toLowerCase() === wanted &&
-    String(row.repo || '').trim() === wantedRepo
+    wantedRepos.has(String(row.repo || '').trim())
   );
 
   const byStage = new Map();

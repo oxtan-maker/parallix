@@ -5,6 +5,7 @@ import {
   summarizeCompletedMissionWindow,
   type StatisticsRow,
 } from './services/statistics-service.js';
+import { weeklyDecisionWindows } from './services/decision-window.js';
 
 export interface StatsCommandRequest {
   readonly mode: 'weekly' | 'range' | 'mission';
@@ -25,18 +26,6 @@ export interface StatsCommandResult<Row extends StatisticsRow = StatisticsRow> {
   readonly completedMissions?: readonly Row[];
   readonly backfilled?: boolean;
   readonly forgejoWarning?: string;
-}
-
-function dateOnly(value: string | Date | undefined): string {
-  if (value instanceof Date) { return value.toISOString().slice(0, 10); }
-  return value || new Date().toISOString().slice(0, 10);
-}
-
-function weeklyWindow(today: string | Date | undefined) {
-  const end = new Date(`${dateOnly(today)}T00:00:00Z`);
-  const start = new Date(end);
-  start.setUTCDate(start.getUTCDate() - 6);
-  return { start, end };
 }
 
 function rangeWindow(from?: string, to?: string) {
@@ -75,7 +64,7 @@ export class StatsCommandUseCase<Row extends StatisticsRow = StatisticsRow> {
 
     const window = request.mode === 'range'
       ? rangeWindow(request.from, request.to)
-      : weeklyWindow(request.today);
+      : weeklyDecisionWindows(request.today ?? new Date()).current;
     const summary = summarizeCompletedMissionWindow(rows, window);
     return {
       mode: request.mode,

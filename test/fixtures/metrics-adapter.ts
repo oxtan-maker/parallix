@@ -64,15 +64,24 @@ export function laneEvent(
   };
 }
 
-/** A metrics read adapter backed entirely by the given in-memory rows. */
+/**
+ * A metrics read adapter backed entirely by the given in-memory rows.
+ *
+ * `clock` pins the projection instant. Completed-mission metrics are reported
+ * over a rolling seven-day decision window, so a test whose fixture carries
+ * fixed dates must pin the clock beside them or the fixture silently ages out
+ * of the window.
+ */
 export function metricsAdapter(
   repositoryId: RepositoryId,
   entries: readonly BoardLaneEventEntry[],
   records: readonly UsageRecord[],
+  clock?: () => string,
 ): ConcreteMetricsReadAdapter {
   return new ConcreteMetricsReadAdapter({
     laneEventRepo: new FakeLaneEventRepository(entries),
     usageRepo: new FakeUsageRepository(records),
     repositoryId,
+    ...(clock === undefined ? {} : { clock }),
   });
 }

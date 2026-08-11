@@ -43,6 +43,10 @@ test('task-2347.08 repro: CLI and board agree on identity, completions, and cycl
     laneEventRepo: new EmptyLaneEventRepository(),
     usageRepo: new MemoryUsageRepository(ROWS),
     repositoryId: REPOSITORY,
+    // Both sides report the same decision window. The CLI window above ends on
+    // 2026-08-03, so the board's rolling window is evaluated on that day too;
+    // otherwise the comparison is between two different weeks.
+    clock: () => '2026-08-03T12:00:00.000Z',
   });
   const outcomes = await board.readOutcomes();
   const metrics = await board.buildMetrics(new Map<MissionId, MissionStatus>());

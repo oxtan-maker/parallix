@@ -28,6 +28,7 @@ import {
   statisticsMissionKey,
   utcHourBucket,
 } from '../services/statistics-service.js';
+import { weeklyDecisionWindows } from '../services/decision-window.js';
 
 // ---------------------------------------------------------------------------
 // MetricsReadAdapter — derives BoardMetrics from event history
@@ -126,14 +127,20 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
     // Build lifecycle entry map for missions without transitions
     const lifecycleEntries = await this.deriveLifecycleEntries(initialStates, transitions);
 
+    // One clock reading feeds both the `asOf` of the current-state metrics and
+    // the rolling decision windows, so the board cannot report a window that
+    // disagrees with the instant it was evaluated at.
+    const asOf = this.clock();
+    const decisionWindows = weeklyDecisionWindows(asOf);
     const metrics = buildMetrics({
       initialStates,
       transitions,
       outcomes,
       instants,
       agentAvailability,
-      asOf: this.clock(),
+      asOf,
       lifecycleEntries,
+      decisionWindows,
     });
     const timestamps = this.eventTimestamps(entries, scopedUsageRecords);
     const rejectedOrMissingIdentityRowCount = transitionRows.rejected + outcomeRows.rejected;
@@ -157,6 +164,7 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
       transitions,
       dimension: this.cohortDimension,
       netEngineeringLines: await this.netEngineeringLines(),
+      window: decisionWindows.current,
     });
     return { ...metrics, health, provenance, cohorts };
   }

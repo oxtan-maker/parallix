@@ -81,6 +81,20 @@ cohort comparison. It labels cohort population separately from the observation
 count for each cycle-time, review, runtime, and cost figure; unavailable facts
 remain unavailable rather than becoming zero.
 
+## Weekly decision window
+
+FLOW separates completed-mission decisions from the board's current operational
+state. Its decision section shows the current rolling seven calendar days and
+the preceding non-overlapping seven days. A mission belongs to a comparison by
+its delivery-completion day, even when it started earlier; once selected, its
+whole lifecycle and recorded agent work are included. Each decision figure
+shows its observation count, so an unavailable or partly measured statistic is
+not mistaken for a zero.
+
+The current-flow section answers a different question: WIP, lane age,
+bottleneck, and agent availability describe the state now and are not forced
+into the completed-mission window.
+
 ## Where each fact comes from
 
 The board reads what the lifecycle already recorded. It never queries the review

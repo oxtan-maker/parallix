@@ -175,6 +175,9 @@ describe('task-2347.01 — repository identity through lane events and board met
           laneEventRepo: laneRepo,
           usageRepo,
           repositoryId: 'alpha' as RepositoryId,
+          // Completed-mission metrics report a rolling seven-day window, so the
+          // projection clock is pinned beside the fixture's fixed dates.
+          clock: () => '2026-07-24T12:00:00Z',
         });
 
         // Only alpha's mission in initial states

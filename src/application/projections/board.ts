@@ -46,6 +46,41 @@ export interface MetricSeries {
   readonly missingHistoryFallback: 'null' | 'estimate' | 'skip';
 }
 
+/** One figure plus the number of observations it was computed from. */
+export interface DecisionMetric {
+  readonly value: number | null;
+  readonly observationCount: number;
+}
+
+/**
+ * The completed-mission statistics of one rolling decision window.
+ *
+ * Every figure is computed from the missions whose lifecycle completion falls
+ * inside `startDate`…`endDate`, using each selected mission's full lifecycle —
+ * intervals are never truncated at the window edge, and agent runs are never
+ * filtered by their own timestamps.
+ */
+export interface DecisionWindowMetrics {
+  /** Operator-facing range, e.g. `2026-08-05 → 2026-08-11`. */
+  readonly label: string;
+  readonly startDate: string;
+  readonly endDate: string;
+  /** Missions whose lifecycle completed inside the window. */
+  readonly completedMissions: number;
+  readonly cycleTime: DecisionMetric;
+  readonly agentRuntime: DecisionMetric;
+  readonly activeDwell: DecisionMetric;
+  readonly reviewDwell: DecisionMetric;
+  readonly integrationDwell: DecisionMetric;
+  readonly reviewBounce: DecisionMetric;
+}
+
+/** The current rolling seven days beside the seven before them. */
+export interface DecisionWindowComparison {
+  readonly current: DecisionWindowMetrics;
+  readonly previous: DecisionWindowMetrics;
+}
+
 export interface StateFlowPoint {
   readonly at: string;
   readonly counts: Readonly<Record<BoardLane, number>>;
@@ -126,6 +161,12 @@ export interface BoardMetrics {
   readonly health: StatisticsHealth;
   /** The exact data set used to derive this metrics projection. */
   readonly provenance: MetricsProvenance;
+  /**
+   * The weekly decision comparison FLOW is built around. Optional because a
+   * projection cached before TASK-2363 carries none; when present, the
+   * completed-mission series below report the same current window.
+   */
+  readonly decisionWindow?: DecisionWindowComparison;
   readonly cumulativeFlow: MetricSeries;
   /**
    * Running agent sessions that could not be attributed to a family, or `null`

@@ -58,7 +58,7 @@ export function missionBranchRef(slug: string, rootDir: string = process.cwd()):
 
 /** @param {unknown} value */
 export function isMissionSlugCandidate(value: unknown): boolean {
-  return typeof value === 'string' && /^(task|adhoc)-[a-z0-9][a-z0-9-]*$/i.test(value.trim());
+  return typeof value === 'string' && /^(task|adhoc)-[a-z0-9][a-z0-9.-]*$/i.test(value.trim());
 }
 
 /** @param {string} branch @param {string} [rootDir] */
@@ -187,7 +187,7 @@ export function inferSlug(slugCandidate: string | undefined): string | null {
   // 3. Check directory name
   const cwd = process.cwd();
   const dirName = path.basename(cwd);
-  const dirSlugMatch = dirName.match(/((?:task|adhoc)-[a-z0-9][a-z0-9-]*)$/i);
+  const dirSlugMatch = dirName.match(/((?:task|adhoc)-[a-z0-9][a-z0-9.-]*)$/i);
   if (dirSlugMatch) {
     return dirSlugMatch[1].toLowerCase();
   }
