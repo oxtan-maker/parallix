@@ -1,7 +1,7 @@
 ---
 id: TASK-1270
 title: Reviewer specialization
-status: active
+status: review
 assignee: [custom]
 created_date: '2026-06-09 04:27'
 updated_date: '2026-06-13 18:14'
