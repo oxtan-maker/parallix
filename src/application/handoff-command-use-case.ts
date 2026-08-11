@@ -213,6 +213,12 @@ export function findUnverifiableGoalCheckRow(fileSystem, evidenceRows: string[],
  * section (matching the regex `^## Goal Check(?: Table)?\s*$`), and a 3-column
  * pipe table with at least one evidence row. It is explicitly marked as
  * auto-generated so a reviewer knows to replace it with real evidence.
+ *
+ * Evidence cells cite a file and a symbol name, never `file:line`: a line number
+ * that another file asserts on goes stale the moment either file is edited,
+ * turning an unrelated change into a random failure. The citation is still
+ * existence-checked against the repository root by
+ * `evidenceCellHasVerifiableReference`, so the row stays verifiable evidence.
  */
 export function buildAutoCheckpointContent(slug: string): string {
   return [
@@ -227,8 +233,8 @@ export function buildAutoCheckpointContent(slug: string): string {
     '',
     '| Criterion | Evidence | Status |',
     '|-----------|----------|--------|',
-    '| Auto-generated checkpoint CP-1.md present | src/adapters/cli/commands/handoff.ts:277 — auto-remediation writes CP-1.md when no checkpoints exist | PASS |',
-    '| Mission contract exists for review | src/adapters/cli/commands/handoff.ts:42 — verifyHandoff requires MISSION.md in the mission directory | PASS |',
+    '| Auto-generated checkpoint CP-1.md present | `cat src/application/handoff-command-use-case.ts` — buildAutoCheckpointContent writes CP-1.md when no checkpoint exists | PASS |',
+    '| Mission contract exists for review | `cat src/application/handoff-command-use-case.ts` — verifyHandoff requires MISSION.md in the mission directory | PASS |',
     '',
     'Next action: Reviewer to replace this placeholder with real implementation evidence before approval.',
     ''
