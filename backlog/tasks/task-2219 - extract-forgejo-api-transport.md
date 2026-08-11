@@ -15,7 +15,7 @@ priority: medium
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-`lib/tools/forgejo.ts` is roughly 1,800 lines and mixes settings/auth resolution, Curl transport, PR operations, Git remote synchronization, review polling, comments, and merge-state reconciliation. Extract the synchronous and asynchronous Forgejo HTTP transport into a focused module such as `lib/tools/forgejo-api.ts`.
+`forgejo.ts` is roughly 1,800+ lines and mixes settings/auth resolution, Curl transport, PR operations, Git remote synchronization, review polling, comments, and merge-state reconciliation. Extract the synchronous and asynchronous Forgejo HTTP transport into a focused module such as `forgejo-api.ts`.
 
 The transport module should own request construction, Curl invocation, response parsing, and normalized transport errors. Domain operations such as creating PRs, posting reviews, polling decisions, and syncing Git refs remain in `forgejo.ts` and consume the extracted transport.
 
@@ -25,7 +25,7 @@ Target change size: 250-500 total added plus deleted lines in the final diff, in
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [ ] #1 Extract `forgejoApi` and `forgejoApiAsync` plus only their transport-specific helpers into one focused module
-- [ ] #2 Keep Forgejo settings/auth resolution, token discovery, PR/review domain operations, Git remote operations, and merge synchronization in `lib/tools/forgejo.ts`
+- [ ] #2 Keep Forgejo settings/auth resolution, token discovery, PR/review domain operations, Git remote operations, and merge synchronization in `forgejo.ts`
 - [ ] #3 Preserve `forgejoApi` and `forgejoApiAsync` as public exports from `lib/tools/forgejo.ts` so existing consumers remain compatible
 - [ ] #4 Preserve request method, URL, authorization header, JSON body behavior, timeout behavior, response parsing, status/statusCode fields, and existing normalized error text
 - [ ] #5 Preserve test injection of the process runner/request implementation without adding real network calls to unit tests
