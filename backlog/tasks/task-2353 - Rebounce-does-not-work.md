@@ -2,7 +2,7 @@
 id: TASK-2353
 title: Rebounce does not work
 status: backlog
-assignee: []
+assignee: [codex]
 created_date: '2026-08-10 08:29'
 labels: []
 dependencies: []
