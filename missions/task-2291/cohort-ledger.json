@@ -1,0 +1,164 @@
+{
+  "boundary": {
+    "task": "TASK-2290",
+    "commit": "8aa9af505ff2f22ac35448dab62b2c7cc7a125cb",
+    "committer_date": "2026-07-21T14:26:24+02:00",
+    "subject": "mission/task-2290: task-2290",
+    "evidence": "git log main --diff-filter=A -- backlog/completed/task-2290*"
+  },
+  "enumeration_command": "git log --reverse --no-renames --diff-filter=A --format=C|%H|%cI|%s --name-only 8aa9af505..main -- backlog/completed/",
+  "tie_breaker": [
+    "committer date ascending (%cI)",
+    "then ancestry order on main (git log --reverse)",
+    "then task ID ascending within the same commit"
+  ],
+  "eligible_unique_total": 103,
+  "cohort_size": 20,
+  "next_after_cohort": {
+    "id": "TASK-2243",
+    "date": "2026-07-26T06:59:40+02:00",
+    "commit": "a60b411089a95de8def9234100a41ecaa33cf386"
+  },
+  "cohort": [
+    {
+      "rank": 1,
+      "id": "TASK-2293",
+      "transition_commit": "502d19b9e6fe95cf3a34b51a02eeee813e436076",
+      "transition_date": "2026-07-21T21:20:13+02:00",
+      "path": "backlog/completed/task-2293 - Harden-legacy-TypeScript-test-mock-shapes.md"
+    },
+    {
+      "rank": 2,
+      "id": "TASK-2279",
+      "transition_commit": "eafdc4d657c9c4649094030850a78d6f96bccb61",
+      "transition_date": "2026-07-21T22:00:49+02:00",
+      "path": "backlog/completed/task-2279 - Move-runtime-to-ESM-src-tree-and-canonical-bundle.md"
+    },
+    {
+      "rank": 3,
+      "id": "TASK-2240",
+      "transition_commit": "8463c6540ba8964a96f4b476e1908d52aef643d0",
+      "transition_date": "2026-07-22T07:13:44+02:00",
+      "path": "backlog/completed/task-2240 - when-forgejo-is-activated-PR-is-not-updated-between-rounds.md"
+    },
+    {
+      "rank": 4,
+      "id": "TASK-2296",
+      "transition_commit": "59b4b9329c1c0f571dfa90577876c076c6c0f17f",
+      "transition_date": "2026-07-22T08:37:55+02:00",
+      "path": "backlog/completed/task-2296 - test-failure.md"
+    },
+    {
+      "rank": 5,
+      "id": "TASK-2298",
+      "transition_commit": "6f401e34a97e111166509206a26430ff6b59ebf6",
+      "transition_date": "2026-07-22T10:03:13+02:00",
+      "path": "backlog/completed/task-2298 - Strengthen-the-defence.md"
+    },
+    {
+      "rank": 6,
+      "id": "TASK-2299",
+      "transition_commit": "4b677373044c66ca85bcca334405142e4aedd810",
+      "transition_date": "2026-07-23T12:00:22+02:00",
+      "path": "backlog/completed/task-2299 - test-fixes.md"
+    },
+    {
+      "rank": 7,
+      "id": "TASK-2294",
+      "transition_commit": "0e47b9938010051e31203da6a2b14d895dc42c12",
+      "transition_date": "2026-07-23T12:05:23+02:00",
+      "path": "backlog/completed/task-2294 - Establish-canonical-Parallix-domain-model-and-settle-the-persistence-sync-async-seam.md"
+    },
+    {
+      "rank": 8,
+      "id": "TASK-2242",
+      "transition_commit": "b6adc649a7f78545d0803786daf3c976b8f29e9a",
+      "transition_date": "2026-07-23T12:23:38+02:00",
+      "path": "backlog/completed/task-2242 - backlog.md-changes-fast.md"
+    },
+    {
+      "rank": 9,
+      "id": "TASK-2300",
+      "transition_commit": "2ae43d87bc68527dc4398f6788fec7becba9a6e8",
+      "transition_date": "2026-07-23T14:59:02+02:00",
+      "path": "backlog/completed/task-2300 - Make-final-integration-gates-unavoidable.md"
+    },
+    {
+      "rank": 10,
+      "id": "TASK-2244",
+      "transition_commit": "78ceae000e184a6162378e8f194c9c53082a26ef",
+      "transition_date": "2026-07-23T15:13:55+02:00",
+      "path": "backlog/completed/task-2244 - backlog.md-check-reading-from-wrong-place.md"
+    },
+    {
+      "rank": 11,
+      "id": "TASK-2295",
+      "transition_commit": "e5d9036bcc704be52cf9a3c2ca90c31715f3eeb3",
+      "transition_date": "2026-07-23T15:22:52+02:00",
+      "path": "backlog/completed/task-2295 - Re-home-bounded-SQLite-operator-state-onto-the-canonical-domain-model-supersedes-task-2280.md"
+    },
+    {
+      "rank": 12,
+      "id": "TASK-2281",
+      "transition_commit": "85cd06759d3f38e65285b8e36230886b30ecaa6a",
+      "transition_date": "2026-07-23T17:36:27+02:00",
+      "path": "backlog/completed/task-2281 - Build-operator-board-projections-events-and-guarded-controller.md"
+    },
+    {
+      "rank": 13,
+      "id": "TASK-2238",
+      "transition_commit": "88c185550f62045a5bec6233d962c6187591fee4",
+      "transition_date": "2026-07-23T18:16:01+02:00",
+      "path": "backlog/completed/task-2238 - change-pi-tech.md"
+    },
+    {
+      "rank": 14,
+      "id": "TASK-2302",
+      "transition_commit": "d4e057d3943772ec94be4c1c333c195dd67bb067",
+      "transition_date": "2026-07-24T06:24:56+02:00",
+      "path": "backlog/completed/task-2302 - Implement-concrete-repository-read-adapters-as-the-single-board-materialization-path.md"
+    },
+    {
+      "rank": 15,
+      "id": "TASK-2310",
+      "transition_commit": "075d94ea9e4864dff9ece85f93e26738def7f10c",
+      "transition_date": "2026-07-24T07:31:52+02:00",
+      "path": "backlog/completed/task-2310 - Fix-ADR-halcuinactions.md"
+    },
+    {
+      "rank": 16,
+      "id": "TASK-2303",
+      "transition_commit": "0dcb2c5662db1b272767e2257638065ebc915c17",
+      "transition_date": "2026-07-25T15:44:06+02:00",
+      "path": "backlog/completed/task-2303 - Record-lifecycle-lane-transition-events-and-typed-board-metrics-schema.md"
+    },
+    {
+      "rank": 17,
+      "id": "TASK-2282",
+      "transition_commit": "026dd79d0a6a048403eb50ada6e0a8ac96bbe4f7",
+      "transition_date": "2026-07-25T21:32:11+02:00",
+      "path": "backlog/completed/task-2282 - Implement-Ink-TUI-over-shared-application-contracts.md"
+    },
+    {
+      "rank": 18,
+      "id": "TASK-2311",
+      "transition_commit": "93afd6641c448d76e8e6bf86ed84b4fc236646ab",
+      "transition_date": "2026-07-25T21:47:07+02:00",
+      "path": "backlog/completed/task-2311 - after-pi-tech-change-console-is-empty.md"
+    },
+    {
+      "rank": 19,
+      "id": "TASK-2304",
+      "transition_commit": "2fdee7315d4a86b89cd6ba346cb5081a9e23c9c7",
+      "transition_date": "2026-07-26T06:47:28+02:00",
+      "path": "backlog/completed/task-2304 - Ink-TUI-wave-2-lane-columns-mission-cards-and-responsive-terminal-layout.md"
+    },
+    {
+      "rank": 20,
+      "id": "TASK-2233",
+      "transition_commit": "1c9e40f419ad4d038c0131183c767583b0c3a3e7",
+      "transition_date": "2026-07-26T06:53:33+02:00",
+      "path": "backlog/completed/task-2233 - check-the-bounce-on-review-errors.md"
+    }
+  ]
+}
