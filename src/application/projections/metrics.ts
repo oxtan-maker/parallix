@@ -395,6 +395,24 @@ export function medianCycleTimeByStateSeries(
   };
 }
 
+/**
+ * Whether the event stream records this mission's intake.
+ *
+ * The intake is the transition with no prior lane (`from === null`), which is
+ * exactly what `board_lane_events.from_status IS NULL` persists. This is
+ * deliberately not `from === to`: a self-transition is a real recorded event
+ * shape, and reading it as an intake would let an accidental normalization
+ * decide when a mission came into existence.
+ */
+function hasRecordedIntake(
+  transitions: readonly MissionTransition[],
+  missionId: MissionId,
+): boolean {
+  return transitions.some(
+    (transition) => transition.missionId === missionId && transition.from === null,
+  );
+}
+
 /** Return the UTC ISO-week start for a timestamp. */
 function isoWeekStart(timestamp: string): string {
   const date = new Date(timestamp);
@@ -404,9 +422,22 @@ function isoWeekStart(timestamp: string): string {
   return date.toISOString();
 }
 
-/** Completed outcomes grouped into ISO weeks; no outcomes means the series is skipped. */
-export function weeklyThroughputSeries(outcomes: readonly MissionOutcome[], asOf?: string): MetricSeries {
-  if (outcomes.length === 0) { return { series: [], missingHistoryFallback: 'skip' }; }
+/**
+ * Completed outcomes grouped into ISO weeks.
+ *
+ * Zero completions is a measurement whenever the board has lifecycle activity
+ * to measure: twelve missions moving through the lanes and none finishing is
+ * the number `0`, not an absent series. The series is skipped only when there
+ * is no lifecycle activity at all, because then nothing has been observed.
+ */
+export function weeklyThroughputSeries(
+  outcomes: readonly MissionOutcome[],
+  asOf?: string,
+  hasLifecycleActivity = false,
+): MetricSeries {
+  if (outcomes.length === 0 && !(hasLifecycleActivity && asOf !== undefined)) {
+    return { series: [], missingHistoryFallback: 'skip' };
+  }
   const byWeek = new Map<string, number>();
   for (const outcome of outcomes) {
     const week = isoWeekStart(outcome.closedAt);
@@ -514,17 +545,18 @@ export interface MetricsInput {
  * Each metric declares its missingHistoryFallback behavior.
  */
 export function buildMetrics(input: MetricsInput): ReturnType<typeof buildBoardMetrics> {
-  // A mission with lifecycle history starts at its recorded entry event, not
-  // at today's board state. Current state is a legacy fallback only when the
-  // event stream is absent for that mission.
+  // A mission with a recorded intake starts at that event, not at today's board
+  // state: seeding it earlier would put it in the history of weeks before it
+  // existed. Current state is a legacy fallback only for a mission whose intake
+  // was never recorded, where there is nothing else to start from.
   const historicalInitialStates = new Map(
-    [...input.initialStates].filter(([missionId]) => !input.transitions.some(
-      (transition) => transition.missionId === missionId && transition.from === null,
-    )),
+    [...input.initialStates].filter(([missionId]) => !hasRecordedIntake(input.transitions, missionId)),
   );
   const stateFlow = cumulativeFlowByStateSeries(historicalInitialStates, input.transitions, input.instants);
   const cycleByState = medianCycleTimeByStateSeries(input.transitions);
-  const weeklyThroughput = weeklyThroughputSeries(input.outcomes, input.asOf);
+  // Recorded lane transitions are the evidence that there was lifecycle to
+  // measure, so a week without completions can be reported as the zero it is.
+  const weeklyThroughput = weeklyThroughputSeries(input.outcomes, input.asOf, input.transitions.length > 0);
   const medianAgeByLane = medianAgeByLaneSeries(
     input.transitions,
     input.asOf ?? input.instants.at(-1) ?? new Date(0).toISOString(),

@@ -16,7 +16,7 @@ import { SqliteSessionMarkerAdapter } from '../adapters/sqlite/session-marker-ad
 import { SqliteSessionMarkerRepository } from '../adapters/sqlite/session-marker-repository.js';
 import type { SessionMarkerRepository } from '../application/ports/mission-store.js';
 import { repositoryId, type RepositoryId } from '../domain/repository.js';
-import { git } from '../adapters/git/git.js';
+import { resolveCanonicalRepositoryId, resolvePrimaryCheckout } from '../adapters/git/repository-identity.js';
 import { createDefaultExecuteMissionRuntime, createExecuteMissionPorts } from '../adapters/mission/execute-mission-adapters.js';
 import { performHandoff } from '../adapters/cli/commands/handoff.js';
 import { startReviewLoop } from '../adapters/review/review-loop.js';
@@ -175,8 +175,7 @@ export async function createProductionApplicationServices(
   // family that launched it.
   let sessionMarkers: SessionMarkerRepository | null = null;
   if (operatorState.repositories) {
-    const sourceRoot = resolvePrimaryRoot(rootDir);
-    const repoId = repositoryId(path.basename(sourceRoot) || sourceRoot);
+    const repoId = resolveCanonicalRepositoryId(rootDir);
     sessionMarkerPort = new SqliteSessionMarkerAdapter(
       operatorState.db as SqliteDatabaseAdapter,
       repoId,
@@ -224,7 +223,7 @@ export async function createProductionApplicationServices(
   const presentationCapabilities = operatorState.repositories
     ? (await import('./production-capabilities.js')).composeProductionCapabilities(
       rootDir,
-      mission?.repositoryId ?? repositoryId(path.basename(resolvePrimaryRoot(rootDir)) || resolvePrimaryRoot(rootDir)),
+      mission?.repositoryId ?? resolveCanonicalRepositoryId(rootDir),
       { ...operatorState.repositories, sessionMarkers },
       executePorts,
       mission?.store ?? null,
@@ -279,26 +278,6 @@ export interface MissionApplicationServiceOverrides {
   readonly skipImportGate?: boolean;
 }
 
-/**
- * The checkout that owns a repository's Mission rows. Mission worktrees resolve
- * back to the checkout they were created from; anything else is its own root.
- */
-function resolvePrimaryRoot(rootDir: string): string {
-  try {
-    // `git worktree list` always reports the main working tree first.
-    const listed = git(['-C', rootDir, 'worktree', 'list', '--porcelain'], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    if (listed.status !== 0) {
-      return rootDir;
-    }
-    const first = (listed.stdout || '').split('\n').find((line) => line.startsWith('worktree '));
-    return first ? first.slice('worktree '.length).trim() : rootDir;
-  } catch {
-    return rootDir;
-  }
-}
-
 export async function createMissionApplicationServices(
   rootDir: string,
   overrides: MissionApplicationServiceOverrides = {},
@@ -309,10 +288,10 @@ export async function createMissionApplicationServices(
   // the importer's source root to the primary worktree, or the two callers
   // would key different rows and every post-handoff import would look like a
   // divergence conflict.
-  const sourceRoot = resolvePrimaryRoot(rootDir);
+  const sourceRoot = resolvePrimaryCheckout(rootDir);
   const repoId = overrides.repositoryId
     ? repositoryId(overrides.repositoryId)
-    : repositoryId(path.basename(sourceRoot) || sourceRoot);
+    : resolveCanonicalRepositoryId(rootDir);
 
   // Dynamic imports keep the built-in SQLite module out of the statically
   // loaded runtime graph so the CJS rollback bundle degrades gracefully.

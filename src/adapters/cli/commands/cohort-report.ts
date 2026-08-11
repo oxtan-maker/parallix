@@ -29,24 +29,27 @@ export const COHORT_REPORT_COLUMNS = [
 ] as const;
 
 /** An unmeasured figure prints as `n/a`; it is never rendered as a zero. */
-function figure(value: number | null, observations: number, fractionDigits = 0): string {
-  return value === null ? 'n/a' : `${value.toFixed(fractionDigits)} (n=${observations})`;
+function figure(value: number | null, observations: number, fractionDigits = 0, isLowSample = false): string {
+  if (value === null) { return 'n/a'; }
+  const lowSampleSuffix = isLowSample ? ', low-sample' : '';
+  return `${value.toFixed(fractionDigits)} (n=${observations}${lowSampleSuffix})`;
 }
 
 function cohortRow(metrics: CohortMetrics): readonly string[] {
+  const low = metrics.lowSampleByMetric;
   return [
-    metrics.lowSample ? `${metrics.key} (${LOW_SAMPLE_MARKER})` : metrics.key,
+    metrics.lowSamplePopulation ? `${metrics.key} (${LOW_SAMPLE_MARKER})` : metrics.key,
     String(metrics.n),
-    figure(metrics.medianCycleTimeMinutes, metrics.observationCounts.cycleTime),
-    figure(metrics.p75CycleTimeMinutes, metrics.observationCounts.cycleTime),
-    figure(metrics.medianActiveDwellMinutes, metrics.observationCounts.activeDwell),
-    figure(metrics.medianReviewDwellMinutes, metrics.observationCounts.reviewDwell),
-    figure(metrics.reviewBounceRate, metrics.observationCounts.reviewBounce, 2),
-    figure(metrics.medianReviewFixRounds, metrics.observationCounts.reviewFixRounds, 1),
-    figure(metrics.tokensPerMission, metrics.observationCounts.tokens),
-    figure(metrics.agentRuntimeMinutesPerMission, metrics.observationCounts.runtime, 1),
-    figure(metrics.costUsdPerMission, metrics.observationCounts.cost, 2),
-    figure(metrics.netEngineeringLinesPerMission, metrics.observationCounts.netEngineeringLines),
+    figure(metrics.medianCycleTimeMinutes, metrics.observationCounts.cycleTime, 0, low.cycleTime),
+    figure(metrics.p75CycleTimeMinutes, metrics.observationCounts.cycleTime, 0, low.cycleTime),
+    figure(metrics.medianActiveDwellMinutes, metrics.observationCounts.activeDwell, 0, low.activeDwell),
+    figure(metrics.medianReviewDwellMinutes, metrics.observationCounts.reviewDwell, 0, low.reviewDwell),
+    figure(metrics.reviewBounceRate, metrics.observationCounts.reviewBounce, 2, low.reviewBounce),
+    figure(metrics.medianReviewFixRounds, metrics.observationCounts.reviewFixRounds, 1, low.reviewFixRounds),
+    figure(metrics.tokensPerMission, metrics.observationCounts.tokens, 0, low.tokens),
+    figure(metrics.agentRuntimeMinutesPerMission, metrics.observationCounts.runtime, 1, low.runtime),
+    figure(metrics.costUsdPerMission, metrics.observationCounts.cost, 2, low.cost),
+    figure(metrics.netEngineeringLinesPerMission, metrics.observationCounts.netEngineeringLines, 0, low.netEngineeringLines),
   ];
 }
 
@@ -79,7 +82,7 @@ export function renderCohortComparison(comparison: CohortComparison): string {
 
   lines.push(...formatTable([...COHORT_REPORT_COLUMNS], comparison.cohorts.map(cohortRow)));
 
-  const lowSample = comparison.cohorts.filter((cohort) => cohort.lowSample);
+  const lowSample = comparison.cohorts.filter((cohort) => cohort.lowSamplePopulation);
   lines.push('');
   lines.push(
     lowSample.length === 0

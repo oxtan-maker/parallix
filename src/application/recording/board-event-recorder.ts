@@ -112,15 +112,15 @@ export function entryToEvent(
  * consumed by `buildMetrics` (`src/application/projections/metrics.ts`).
  *
  * The mapping is lossless: every field in LaneTransitionEvent has a direct
- * counterpart in MissionTransition. The `from` null case is handled by
- * defaulting to `to` (the mission appeared in that lane for the first time).
+ * counterpart in MissionTransition, including the null `from` that marks the
+ * mission's intake.
  */
 export function laneTransitionEventToMissionTransition(
   event: LaneTransitionEvent,
 ): MissionTransition {
   return {
     missionId: event.missionId,
-    from: event.from ?? event.to,
+    from: event.from,
     to: event.to,
     trigger: event.trigger,
     actor: event.agent,

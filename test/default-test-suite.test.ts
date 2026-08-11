@@ -52,6 +52,10 @@ const expectedIntegrationFiles = [
   'task-2319-notices-git-tracking.test.ts',
   'task-2327-coverage-gate-tmp-leaks.test.ts',
   'task-2347.10-repro.test.ts',
+  // Builds a real Git primary checkout and a real linked worktree, because the
+  // canonical repository identity it certifies is resolved by shelling out to
+  // Git (TASK-2357 defect B).
+  'task-2357.b-canonical-repository-identity.test.ts',
   'test-hygiene.test.ts',
   'tui-action-bar.test.ts',
   'tui-confirmation.test.ts',

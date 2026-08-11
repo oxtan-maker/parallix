@@ -41,8 +41,26 @@ export interface CohortMetrics {
   readonly key: string;
   /** Completed missions in the cohort. Never omitted from presentation. */
   readonly n: number;
-  /** True when `n` is below the comparison's threshold. */
+  /** True when cohort population `n` is below the comparison's threshold. */
+  readonly lowSamplePopulation: boolean;
+  /**
+   * Backward-compatible alias for lowSamplePopulation. Consumers that check
+   * `cohort.lowSample` for the cohort-level flag still work.
+   * @deprecated use lowSamplePopulation
+   */
   readonly lowSample: boolean;
+  /** Per-metric low-sample flags — each metric judged by its own observation count. */
+  readonly lowSampleByMetric: Readonly<{
+    cycleTime: boolean;
+    activeDwell: boolean;
+    reviewDwell: boolean;
+    reviewBounce: boolean;
+    reviewFixRounds: boolean;
+    tokens: boolean;
+    runtime: boolean;
+    cost: boolean;
+    netEngineeringLines: boolean;
+  }>;
   readonly medianCycleTimeMinutes: number | null;
   readonly p75CycleTimeMinutes: number | null;
   readonly medianActiveDwellMinutes: number | null;
@@ -60,7 +78,7 @@ export interface CohortMetrics {
     activeDwell: number;
     reviewDwell: number;
     reviewBounce: number;
-    reviewFixRounds: number;
+    reviewFixRounds: number | null;
     tokens: number;
     runtime: number;
     cost: number;
@@ -266,7 +284,19 @@ export function compareCohorts(input: CohortComparisonInput): CohortComparison {
     return {
       key,
       n: members.length,
+      lowSamplePopulation: members.length < threshold,
       lowSample: members.length < threshold,
+      lowSampleByMetric: {
+        cycleTime: cycleTimes.length < threshold,
+        activeDwell: activeDwells.length < threshold,
+        reviewDwell: reviewDwells.length < threshold,
+        reviewBounce: entered.length < threshold,
+        reviewFixRounds: members.filter((outcome) => outcome.reviewFixRounds !== null).length < threshold,
+        tokens: tokens.length < threshold,
+        runtime: runtimes.length < threshold,
+        cost: costs.length < threshold,
+        netEngineeringLines: nels.length < threshold,
+      },
       medianCycleTimeMinutes: median(cycleTimes),
       p75CycleTimeMinutes: percentile75(cycleTimes),
       medianActiveDwellMinutes: median(activeDwells),
@@ -274,7 +304,9 @@ export function compareCohorts(input: CohortComparisonInput): CohortComparison {
       // Null, not zero: a cohort where nothing reached review has no bounce
       // rate to report, which is a different claim from "never bounced".
       reviewBounceRate: entered.length === 0 ? null : bounces / entered.length,
-      medianReviewFixRounds: median(members.map((outcome) => outcome.reviewFixRounds)),
+      medianReviewFixRounds: median(
+        members.map((outcome) => outcome.reviewFixRounds).filter((value): value is number => value !== null),
+      ),
       tokensPerMission: meanOfMeasured(members.map((outcome) => outcome.totalInputAndOutputTokens)),
       agentRuntimeMinutesPerMission: meanOfMeasured(members.map((outcome) => agentRuntimeMinutes(outcome))),
       costUsdPerMission: meanOfMeasured(members.map((outcome) => outcome.totalCostUsd)),
@@ -286,7 +318,7 @@ export function compareCohorts(input: CohortComparisonInput): CohortComparison {
         activeDwell: activeDwells.length,
         reviewDwell: reviewDwells.length,
         reviewBounce: entered.length,
-        reviewFixRounds: members.length,
+        reviewFixRounds: members.filter((outcome) => outcome.reviewFixRounds !== null).length,
         tokens: tokens.length,
         runtime: runtimes.length,
         cost: costs.length,

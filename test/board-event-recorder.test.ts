@@ -188,7 +188,7 @@ describe('BoardEventRecorder — mapping and persistence', () => {
     assert.equal(mt.occurredAt, ev.occurredAt);
   });
 
-  it('laneTransitionEventToMissionTransition handles null from', () => {
+  it('laneTransitionEventToMissionTransition preserves a null from as the intake marker', () => {
     const ev = event({
       from: null,
       to: 'active' as MissionStatus,
@@ -196,8 +196,10 @@ describe('BoardEventRecorder — mapping and persistence', () => {
     });
     const mt = laneTransitionEventToMissionTransition(ev);
 
-    // null from defaults to to value
-    assert.equal(mt.from, 'active');
+    // A null `from` is the mission's intake. Substituting `to` for it would
+    // make the intake indistinguishable from a self-transition, and every
+    // mission would then be seeded into history before it existed (TASK-2357).
+    assert.equal(mt.from, null);
     assert.equal(mt.to, 'active');
   });
 });

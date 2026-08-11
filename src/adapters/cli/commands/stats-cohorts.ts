@@ -14,6 +14,7 @@ import type { AgentFamily } from '../../../domain/agents.js';
 import type { MissionStatus } from '../../../domain/mission.js';
 import type { MissionTransition } from '../../../domain/mission-workflow.js';
 import { repositoryId as toRepositoryId, type RepositoryId } from '../../../domain/repository.js';
+import { resolveCanonicalRepositoryId } from '../../git/repository-identity.js';
 import { renderCohortComparison } from './cohort-report.js';
 import * as fmt from '../../../application/presentation/cli-format.js';
 
@@ -116,7 +117,7 @@ export function parseCohortArgs(args: readonly string[]): ParsedCohortArgs {
  * Imported dynamically for the same reason the composition root does it: the
  * rollback bundle has no SQLite driver and must fail here, not at load time.
  */
-async function resolveRepositories(): Promise<{
+export async function resolveOperatorRepositories(): Promise<{
   laneEventRepo: BoardLaneEventRepository;
   usageRepo: UsageRepository;
 }> {
@@ -138,7 +139,8 @@ function entriesToTransitions(
     .filter((entry) => entry.missionId && entry.toStatus && entry.trigger)
     .map((entry) => ({
       missionId: entry.missionId as MissionId,
-      from: (entry.fromStatus ?? entry.toStatus) as MissionStatus,
+      // Null stays null: it is the mission's intake, not a missing lane.
+      from: (entry.fromStatus ?? null) as MissionStatus | null,
       to: entry.toStatus as MissionStatus,
       trigger: entry.trigger as MissionTransition['trigger'],
       actor: entry.agent,
@@ -202,8 +204,14 @@ export async function statsCohorts(
   try {
     const repositories = options.laneEventRepo && options.usageRepo
       ? { laneEventRepo: options.laneEventRepo, usageRepo: options.usageRepo }
-      : await resolveRepositories();
-    const repositoryId = options.repositoryId ?? toRepositoryId(parsed.repositoryId ?? rootDir);
+      : await resolveOperatorRepositories();
+    // `--repo` is an explicit operator choice. With no override the identity
+    // comes from the canonical owner, never from `rootDir`: run from a mission
+    // worktree, the path itself matches no persisted row.
+    const repositoryId = options.repositoryId
+      ?? (parsed.repositoryId === null
+        ? resolveCanonicalRepositoryId(rootDir)
+        : toRepositoryId(parsed.repositoryId));
     const cohortMetadata = options.cohortMetadata ?? (() => {
       const missions = new ConcreteMissionReadAdapter({ rootDir, repositoryId });
       return missions.loadAllMissions().then((loaded) => new Map(

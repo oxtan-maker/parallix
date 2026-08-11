@@ -1,6 +1,7 @@
 import type { OperationalHistoryEntry, OperationalHistoryRepository } from '../ports/operation-history.js';
 import type { MissionId } from '../../domain/mission.js';
 import type { MissionCommand } from '../../domain/mission-workflow.js';
+import type { RepositoryId } from '../../domain/repository.js';
 
 /**
  * One lifecycle operation an operator ran, as the board's operation log shows
@@ -14,6 +15,12 @@ import type { MissionCommand } from '../../domain/mission-workflow.js';
  */
 export interface LifecycleOperationEvent {
   readonly missionId: MissionId;
+  /**
+   * Repository the mission belongs to. Recorded on the payload because mission
+   * ids collide across repositories: without it, a reader looking for
+   * `TASK-123` here cannot tell this row from another repository's `TASK-123`.
+   */
+  readonly repositoryId: RepositoryId;
   /** The command that caused the transition. */
   readonly trigger: MissionCommand['type'];
   /** Lane the mission moved to — the operator-visible result. */
@@ -39,6 +46,7 @@ export function operationEventToEntry(event: LifecycleOperationEvent): Operation
     eventType: operationEventType(event.trigger),
     eventData: JSON.stringify({
       missionId: event.missionId,
+      repositoryId: event.repositoryId,
       message: `${event.missionId} → ${event.toStatus}`,
       agent: event.agent,
     }),

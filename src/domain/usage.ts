@@ -107,8 +107,8 @@ export interface MissionOutcome {
   /** Date on the telemetry row that records this mission's closure. */
   readonly closedAt: string;
   readonly cycleTimeMinutes: number;
-  /** Number of request-changes rounds, persisted today as pr_fix_rounds. */
-  readonly reviewFixRounds: number;
+  /** Number of request-changes rounds, or null when the count was never derived. */
+  readonly reviewFixRounds: number | null;
   /** Backlog labels carried by this mission's telemetry; the first cohort dimension. */
   readonly labels: readonly MissionLabel[];
   /** Agent family that owned the implementation work, or null when unnamed. */
@@ -144,7 +144,7 @@ export interface CompletedMissionStatistics {
   readonly totalCachedTokens: number | null;
   readonly totalContextTokens: number | null;
   readonly totalToolCalls: number | null;
-  readonly reviewFixRounds: number;
+  readonly reviewFixRounds: number | null;
   readonly netEngineeringLines: number;
 }
 

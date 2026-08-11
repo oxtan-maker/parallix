@@ -17,6 +17,10 @@ export function projectActivityLog(transitions: readonly MissionTransition[]): A
       occurredAt: transition.occurredAt,
       actor: transition.actor,
       action: transition.trigger,
-      summary: `${transition.from} → ${transition.to}`,
+      // An intake has no prior lane, so it reads as an arrival rather than as
+      // a move out of a lane the mission was never in.
+      summary: transition.from === null
+        ? `intake → ${transition.to}`
+        : `${transition.from} → ${transition.to}`,
     }));
 }

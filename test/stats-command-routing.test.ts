@@ -60,7 +60,7 @@ test('stats command still treats an existing file positional as a CSV path', () 
   // report path, not mission mode.
   const { out } = capture([file, '--today', '2026-06-13']);
   assert.doesNotMatch(out, /Mission telemetry by phase/);
-  assert.match(out, /Current week/);
+  assert.match(out, /Agent telemetry — current week/);
 });
 
 test('resolveStageTelemetry returns null when the launcher attached no telemetry', () => {
