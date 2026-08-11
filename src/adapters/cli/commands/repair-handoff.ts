@@ -290,8 +290,6 @@ function buildGoalCheckRepairPrompt(errorMsg: string, slug: string, worktree: st
 ` +
           `Accepted evidence forms include:
 ` +
-          `- file:line references such as "src/adapters/cli/commands/handoff.ts:292"
-` +
           `- exact test names already present in the repo
 ` +
           `- ADR references such as "ADR 0048"
@@ -299,6 +297,9 @@ function buildGoalCheckRepairPrompt(errorMsg: string, slug: string, worktree: st
           `- test file paths such as "test/e2e-real-agent-smoke.test.ts"
 ` +
           `- recognized repo commands or paths already accepted by Parallix, such as \`npm test -- test/repair-handoff.test.ts\`, \`px review ${slug} --verify\`, or \`./scripts/verify-local.sh all\`
+
+` +
+          `- file:line references when necessary (accepted, but line numbers eventually rot)
 
 ` +
           `For an integration handoff, \`./scripts/verify-local.sh integrate\` is mandatory; \`./scripts/verify-local.sh all\` alone is not sufficient.
@@ -314,7 +315,7 @@ ${offendingRow}
 
 ` +
           `**Fix strategy:** Replace the evidence value in the offending row with an accepted reference from the list above. ` +
-          `Do not retry with only shell output or file metadata. If you want to keep a command like \`stat -c '%A' bin/hello.sh\`, pair it with a file:line reference, a repo test reference, or a recognized repo command/path in the same cell.
+          `Do not retry with only shell output or file metadata. If you want to keep a command like \`stat -c '%A' bin/hello.sh\`, pair it with a test name, test file path, ADR reference, or recognized repo command/path in the same cell.
 `;
   } else {
     prompt += `**Fix strategy:** Add at least one evidence row per criterion using the accepted forms listed above. ` +
@@ -334,7 +335,7 @@ Steps:
 Example Goal Check table:
 | Criterion | Evidence | Status |
 |---|---|---|
-| Final checkpoint has Goal Check section | docs/missions/${year}/${slug}/CP-1.md:15 | PASS |
+| Final checkpoint has Goal Check section | docs/missions/${year}/${slug}/CP-1.md | PASS |
 | Tests pass | "buildRelaunchPrompt returns string containing Goal Check table and mission slug", test/repair-handoff.test.ts | PASS |
 | Verification gate ran | \`./scripts/verify-local.sh all\` | PASS |
 | Mandatory integration gate ran | \`./scripts/verify-local.sh integrate\` | PASS |

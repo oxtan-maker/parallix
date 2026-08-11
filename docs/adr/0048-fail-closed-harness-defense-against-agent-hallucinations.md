@@ -35,49 +35,49 @@ The following checks are currently implemented across the harness lifecycle. Eac
 
 | # | Check | Location | Failure Class |
 |---|-------|----------|---------------|
-| 1 | Verification gate at checkpoint | `lib/commands/checkpoint.js:44` | Unverifiable test claims (Class 1) |
-| 2 | Checkpoint existence validation | `lib/commands/active.js:386-391` | Missing artifacts (Class 3) |
-| 3 | Checkpoint committed check | `lib/commands/active.js:407-414` | Uncommitted state (Class 4) |
+| 1 | Verification gate at checkpoint | Checkpoint lifecycle | Unverifiable test claims (Class 1) |
+| 2 | Checkpoint existence validation | Active-mission lifecycle | Missing artifacts (Class 3) |
+| 3 | Checkpoint committed check | Active-mission lifecycle | Uncommitted state (Class 4) |
 
 ### During Handoff
 
 | # | Check | Location | Failure Class |
 |---|-------|----------|---------------|
-| 4 | Mission branch verification | `lib/commands/handoff.js:37-39` | Git blockers (Class 5) |
-| 5 | MISSION.md existence | `lib/commands/handoff.js:42-44` | Missing artifacts (Class 3) |
-| 6 | MISSION.md uncommitted check | `lib/commands/handoff.js:96-99` | Uncommitted state (Class 4) |
-| 7 | Auto-checkpoint generation | `lib/commands/handoff.js:103-126` | Missing artifacts — auto-repair (Class 3) |
-| 8 | Goal Check heading validation | `lib/commands/handoff.js:141-147` | Incomplete evidence (Class 4) |
-| 9 | Goal Check evidence rows | `lib/commands/handoff.js:152-179` | Incomplete evidence (Class 4) |
-| 10 | Verification gate execution | `lib/commands/handoff.js:200-209` | Gate failure (Class 1, 6) |
-| 11 | Rebase onto primary | `lib/commands/handoff.js:214-229` | Git blockers (Class 5) |
-| 12 | Gatekeeper mandatory artifacts | `lib/commands/handoff.js:322-335` | Missing artifacts (Class 3) |
-| 13 | Declared gates execution | `lib/commands/handoff.js:429-480` | Gate failure (Class 2, 6) |
+| 4 | Mission branch verification | Handoff lifecycle | Git blockers (Class 5) |
+| 5 | MISSION.md existence | Handoff lifecycle | Missing artifacts (Class 3) |
+| 6 | MISSION.md uncommitted check | Handoff lifecycle | Uncommitted state (Class 4) |
+| 7 | Auto-checkpoint generation | Handoff lifecycle | Missing artifacts — auto-repair (Class 3) |
+| 8 | Goal Check heading validation | Handoff lifecycle | Incomplete evidence (Class 4) |
+| 9 | Goal Check evidence rows | Handoff lifecycle | Incomplete evidence (Class 4) |
+| 10 | Verification gate execution | Handoff lifecycle | Gate failure (Class 1, 6) |
+| 11 | Rebase onto primary | Handoff lifecycle | Git blockers (Class 5) |
+| 12 | Gatekeeper mandatory artifacts | Handoff lifecycle | Missing artifacts (Class 3) |
+| 13 | Declared gates execution | Handoff lifecycle | Gate failure (Class 2, 6) |
 
 ### Before Review
 
 | # | Check | Location | Failure Class |
 |---|-------|----------|---------------|
-| 14 | Mission dir + branch + status | `lib/review/review-commands.js:367-401` | State violations (Class 8) |
-| 15 | PR existence and state | `lib/review/review-commands.js:403-430` | Infra blockers (Class 7) |
-| 16 | Verification gate | `lib/review/review-commands.js:438-445` | Gate failure (Class 1, 6) |
+| 14 | Mission dir + branch + status | Review lifecycle | State violations (Class 8) |
+| 15 | PR existence and state | Review lifecycle | Infra blockers (Class 7) |
+| 16 | Verification gate | Review lifecycle | Gate failure (Class 1, 6) |
 
 ### During Integration
 
 | # | Check | Location | Failure Class |
 |---|-------|----------|---------------|
-| 17 | Integration preflight | `lib/commands/integrate.js:500-504` | Multiple classes |
-| 18 | Integration gates | `lib/commands/integrate.js:507-534` | Gate failure (Class 6) |
-| 19 | Exact-tree proof capture | `lib/commands/integrate.js:742-749` | Unverifiable claims (Class 1) |
-| 20 | Exact-tree proof assertion | `lib/commands/integrate.js:753-757` | Stale proof (Class 1) |
+| 17 | Integration preflight | Integration lifecycle | Multiple classes |
+| 18 | Integration gates | Integration lifecycle | Gate failure (Class 6) |
+| 19 | Exact-tree proof capture | Integration lifecycle | Unverifiable claims (Class 1) |
+| 20 | Exact-tree proof assertion | Integration lifecycle | Stale proof (Class 1) |
 
 ### Repair Path
 
 | # | Mechanism | Location | Coverage |
 |---|-----------|----------|----------|
-| 21 | Auto-commit mission artifacts | `lib/commands/repair-handoff.js:130-191` | Dirty mission files only (Class 5) |
-| 22 | Auto-rebase | `lib/commands/repair-handoff.js:194-223` | Simple rebase only (Class 5) |
-| 23 | Agent relaunch (empty goal-check) | `lib/commands/active.js:462-483` | Single error sub-class only (Class 4) |
+| 21 | Auto-commit mission artifacts | Repair lifecycle | Dirty mission files only (Class 5) |
+| 22 | Auto-rebase | Repair lifecycle | Simple rebase only (Class 5) |
+| 23 | Agent relaunch (empty goal-check) | Repair lifecycle | Single error sub-class only (Class 4) |
 
 **Total: 23 check points across 5 lifecycle phases.**
 
@@ -114,7 +114,7 @@ Seven candidate controls are evaluated and prioritized. The classification colum
 
 **C1: Pre-review-round gate enforcement** (task-1268 / task-1385). Run the configured verification gate mechanically before each review round. On gate failure, auto-bounce to the implementer with the gate output as a fix prompt. No reviewer cycle consumed. This is the single highest-impact control because it closes the fail-open path where an agent can hand off with a green gate, receive review feedback, "fix" the code, and re-submit without the gate re-running.
 
-**C2: Gate-failure auto-send-back** (task-1387). When the verification gate fails at handoff time (`handoff.js:200-209`), capture the gate stdout/stderr, classify the error as "genuine gate failure — code issue", and relaunch the implementer with the captured output. Limit relaunch attempts to 2 to prevent infinite loops. This is the highest-ROI single control because it eliminates the most common human-intervention scenario: manually copying gate output and re-invoking the agent.
+**C2: Gate-failure auto-send-back** (task-1387). When the verification gate fails at handoff time, capture the gate stdout/stderr, classify the error as "genuine gate failure — code issue", and relaunch the implementer with the captured output. Limit relaunch attempts to 2 to prevent infinite loops. This is the highest-ROI single control because it eliminates the most common human-intervention scenario: manually copying gate output and re-invoking the agent.
 
 **C3: Error classifier and dispatch table** (task-1389). Replace the binary `isRelaunchableError` / `isDirtyError` / `isBehind` classification in `repair-handoff.js` with a structured error classifier that maps each error message pattern to a failure class and a dispatch action (auto-repair, auto-send-back with prompt, or human-only with clear message). This is foundational work that makes C1 and C2 cleaner to implement.
 
@@ -122,7 +122,7 @@ Seven candidate controls are evaluated and prioritized. The classification colum
 
 **C4: Declared-gate pre-validation** (`TASK-1386`). Validate that gate commands reference existing files and are syntactically valid before executing them. This stays after C1-C3 only because the earlier controls close larger fail-open paths first, not because C4 is optional.
 
-**C5: Gatekeeper auto-send-back** (`TASK-1388`). When gatekeeper detects missing mandatory artifacts and the task strands in `active`, auto-send-back to the implementer with explicit artifact creation instructions. The auto-checkpoint generation at `handoff.js:103-126` already covers one sub-case, but the remaining cases still deserve explicit automation and therefore explicit backlog tracking.
+**C5: Gatekeeper auto-send-back** (`TASK-1388`). When gatekeeper detects missing mandatory artifacts and the task strands in `active`, auto-send-back to the implementer with explicit artifact creation instructions. Auto-checkpoint generation already covers one sub-case, but the remaining cases still deserve explicit automation and therefore explicit backlog tracking.
 
 ## Implementation Status
 
@@ -167,5 +167,4 @@ C3 first because it provides the dispatch framework that C1 and C2 plug into. C2
 - Task-1335: Exact-tree verification proof (completed)
 - ADR 0041: Integration pipeline gates
 - ADR 0047: NEL budget (observational pattern)
-- `lib/commands/repair-handoff.js`: Current repair path
-- `lib/commands/active.js:426-498`: Automated handoff-and-repair flow
+- The repair and active-mission lifecycles: current handoff-and-repair behavior

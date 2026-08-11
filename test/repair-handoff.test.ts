@@ -408,13 +408,13 @@ test('buildRelaunchPrompt includes example table', () => {
 
 test('buildRelaunchPrompt gives actionable replacement guidance for shell-only offending rows', () => {
   const { buildRelaunchPrompt } = repairHandoff;
-  const errorMsg = 'The final checkpoint at docs/missions/2026/task-1121/CP-3.md has a "## Goal Check" section but no evidence rows that cite a verifiable reference such as a file:line, ADR, test reference, or recognized repo command/path. A goal-check table with real evidence is required before handoff. Offending row: | `bin/hello.sh` exists as regular file with execute permissions | `stat -c \'%A\' bin/hello.sh` → `-rwxrwxr-x` | PASS |';
+  const errorMsg = 'The final checkpoint at docs/missions/2026/task-1121/CP-3.md has a "## Goal Check" section but no evidence rows that cite a verifiable reference such as a recognized repo command/path, exact test name, test-file path, or ADR reference (or, when necessary, file:line). A goal-check table with real evidence is required before handoff. Offending row: | `bin/hello.sh` exists as regular file with execute permissions | `stat -c \'%A\' bin/hello.sh` → `-rwxrwxr-x` | PASS |';
   const prompt = buildRelaunchPrompt(errorMsg, 'task-1124', '/tmp/worktree');
 
   assert.ok(prompt.includes('Offending row:'), 'Prompt should surface the offending row context');
   assert.ok(prompt.includes("`stat -c '%A' bin/hello.sh`"), 'Prompt should include the rejected shell-only evidence');
   assert.ok(prompt.includes('Do not retry with only shell output or file metadata'), 'Prompt should tell the agent what not to repeat');
-  assert.ok(prompt.includes('file:line reference'), 'Prompt should point the agent at file:line evidence');
+  assert.ok(prompt.includes('test file path'), 'Prompt should point the agent at test-file evidence');
   assert.ok(prompt.includes('ADR reference'), 'Prompt should point the agent at ADR evidence');
   assert.ok(prompt.includes('recognized repo command/path'), 'Prompt should point the agent at accepted repo commands and paths');
   assert.ok(!prompt.includes('wrap it in backticks so the validator recognizes it'), 'Prompt should not repeat the old vague backtick-only advice');

@@ -27,7 +27,7 @@ Drafting requirements:
 - Refinement Signals section must use net engineering lines (NEL) bucket format (`Predicted NEL bucket: Small (0–80) / Medium (81–235) / Large (235+)`) and must NOT use the old agent-percentage-usage format
 - Every generated `MISSION.md` MUST keep the scaffolded `### Checkpoint Documentation Requirements` block under `## Checkpoints` and fill it with concrete instructions for the implementer.
 - That block must tell the agent to use the exact heading `## Goal Check` and the 3-column table `| Criterion | Evidence | Status |`.
-- That block must describe the evidence forms Parallix already verifies today: file:line references, exact test names, ADR references, test file paths, and recognized repo commands/paths such as backticked `npm ...`, `node ...`, `git ...`, `px ...`, or `./...`.
+- That block must lead with durable evidence forms Parallix verifies today: exact test names, ADR references, test file paths, and recognized repo commands/paths such as backticked `npm ...`, `node ...`, `git ...`, `px ...`, or `./...`. It may mention file:line references parenthetically as accepted but discouraged because line numbers rot.
 - That block must make the weak-agent failure mode explicit: raw `stat`/`ls` output or generic prose alone is not enough; pair shell output with one of the accepted references above.
 - Every `## Gates` checklist item must contain only the exact runnable repository command (for example, `- [ ] ./scripts/verify-local.sh all`). Optional Markdown backticks around the whole command are allowed.
 - Never append outcome or explanatory prose to a gate command, including phrases such as "passes on the final tree". Put outcome expectations in Success Criteria or checkpoint documentation instead.

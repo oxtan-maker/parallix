@@ -87,6 +87,10 @@ Subdirectory READMEs follow a simplified variant: H1 with capability statement, 
 - Checkpoint documents may use file-and-line or test evidence to demonstrate a
   completed mission. That historical evidence must not be promoted into live
   authored documentation.
+- New authored documentation, ADRs, prompt templates, and generated evidence
+  must not introduce `file.ts:<line>` citations. Line numbers rot as nearby
+  code changes, so use durable commands, test names, ADR references, or test
+  file paths instead.
 - Internal refactors with unchanged user-visible behavior and architectural
   invariants normally have no documentation impact. Update authored docs when
   meaning, supported behavior, constraints, or rationale changes.

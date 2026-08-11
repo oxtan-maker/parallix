@@ -8,7 +8,7 @@ The repo runs integration via `node workflow integrate`, which currently perform
 
 1. **Missing integration-time gates:** Staging deploy and e2e validation do not run as part of integration. task-1093 recorded that "I have not been running the full e2e web tests flows as part of the mission integration, as a result of this the store tests have been failing." This creates a gap where integration can land code that breaks staging.
 
-2. **Hallucinated per-area web gate:** `scripts/verify-local.sh:41` (inside `gate_web()`) invokes `web-client/scripts/run-playwright-stage.sh` against `https://staging.wrgroceries.com` on every `./scripts/verify-local.sh web` call. The help banner at `scripts/verify-local.sh:196` says `web` covers only "lint + tsc + jest + coverage (85% gate) + Next.js build" — implementation and documentation disagree. Since staging is not redeployed on every agent edit, this gate silently validates the agent's local diff against a stale, unrelated environment, producing **green false positives when the diff is broken** and noise when stage is sick for unrelated reasons.
+2. **Network-dependent per-area web gate:** The `web` verifier used to invoke staging Playwright checks even though its documented contract covered local lint, type checking, tests, coverage, and build work. Since staging is not redeployed on every agent edit, that check can validate a local diff against a stale, unrelated environment, producing **green false positives when the diff is broken** and noise when staging is sick for unrelated reasons.
 
 ADR 0028 (line 58) explicitly noted "the current CI lane currently proves wiring and review visibility more than full clean-checkout confidence; broader PR-time gates remain a follow-up tradeoff decision." This ADR addresses that follow-up.
 
@@ -24,7 +24,7 @@ Task-1063 is extracting `workflow/` as a standalone product. Any integration pip
 
 ### Option A: CLI preflight (in `node workflow integrate`)
 
-Extend `buildIntegrationContext` / `printIntegrationPreflight` (`workflow/lib/integrate.js:400`) to read a repo-side config and dispatch area gates before the dry-merge step.
+Have integration preflight read a repo-side config and dispatch area gates before the dry-merge step.
 
 **Pros:**
 - Same process as the squash; easy abort before merge
@@ -51,7 +51,7 @@ Create new `.forgejo/workflows/integrate.yml` triggered on `mission/**` branch u
 
 ### Option C: Hybrid via a new `integrate` area in `scripts/verify-local.sh`
 
-Add an `integrate` area to `scripts/verify-local.sh` (today's areas: `docs|workflow|web|server|auth|android|k8s|deps|all` per `scripts/verify-local.sh:172-189`) that performs change-detection + per-area dispatch. Both `node workflow integrate` and a future Forgejo workflow file invoke it.
+Add an `integrate` area to `./scripts/verify-local.sh` that performs change detection and per-area dispatch. Both `node workflow integrate` and a future Forgejo workflow file invoke it.
 
 **Pros:**
 - One dispatch surface, no duplication
@@ -71,7 +71,7 @@ Add an `integrate` area to `scripts/verify-local.sh` (today's areas: `docs|workf
 - **Local-first preservation:** Option C keeps execution on the workstation without introducing new credentials or services. Option B would require docker push + kustomize credentials on the runner, which is a material ops burden not justified by current signal.
 - **Workflow-product boundary:** The area-key\u21a6command map lives in a repo-side config file (`config/integration-pipelines.json`). This preserves the task-1063 workflow-product boundary — no visualBoard-specific paths appear in `workflow/lib/*.js`.
 - **Future extensibility:** Once Option C is proven locally, a Forgejo Actions workflow can invoke the same `integrate` area. This defers the runner credential question until we have evidence that the local workstation cannot handle the load.
-- **Abort-before-merge invariant:** The dispatch runs as part of `printIntegrationPreflight` (before the squash-merge at `workflow/lib/integrate.js:319`), so any gate failure aborts before the merge lands.
+- **Abort-before-merge invariant:** The dispatch runs during integration preflight, before squash-merge, so any gate failure aborts before the merge lands.
 
 ### Follow-up trigger
 
@@ -81,34 +81,33 @@ Revisit Option B (Forgejo Actions) when the median `pr_fix_rounds` across a trai
 
 ### 1. Originating incident
 
-> task-1093 (`backlog/completed/task-1093 - The-end-to-end-tests-are-broken.md:18`, closed 2026-05-16):
+> task-1093 (closed 2026-05-16):
 > > "I have not been running the full e2e web tests flows as part of the mission integration, as a result of this the store tests have been failing."
 
-This mission (task-1094) was filed 9 minutes later (`backlog/tasks/task-1094 ...md:6`, `2026-05-16 17:45`). The incident directly links missing integration-time e2e execution to production failures.
+This mission (task-1094) was filed nine minutes later. The incident directly links missing integration-time e2e execution to production failures.
 
 ### 2. Help/implementation drift
 
-The `gate_web` function at `scripts/verify-local.sh:36-42` includes:
+The former `web` verifier included:
 ```bash
 run_gate "web:e2e"      sh -c "cd web-client && ./scripts/run-playwright-stage.sh"
 ```
 
-The help banner at `scripts/verify-local.sh:196` states:
+Its documented contract stated:
 ```
 web      — lint + tsc + jest + coverage (85% gate) + Next.js build
 ```
 
-The help text **excludes** e2e. This is evidence that the stage-e2e line (line 41) is unintentional drift, not a designed gate.
+The help text **excludes** e2e. This shows the staging check was unintentional drift, not a designed gate.
 
 ### 3. Per-area gate audit
 
-Inspection of all other `gate_*` functions (`scripts/verify-local.sh:145-170`) found **no** equivalent network-dependent hallucination:
+The remaining area gates had no equivalent network-dependent check:
 
-- `gate_server` (lines 145-148): checkstyle, spotbugs, compile, test — all local
-- `gate_auth` (lines 150-153): checkstyle, spotbugs, compile, test — all local
-- `gate_android` (lines 155-157): detekt, unit-jacoco — all local
-- `gate_k8s` (lines 159-160): validate-k8s.sh — local dry-run validation
-- `gate_deps` (lines 162-163): dependency-vuln-gate.sh — local scanning
+- server and auth: checkstyle, spotbugs, compile, and test — all local
+- android: detekt and unit-jacoco — all local
+- k8s: dry-run validation
+- deps: dependency scanning
 
 **Result:** The hallucination is isolated to `gate_web:web:e2e`.
 
@@ -151,7 +150,7 @@ Option B (Forgejo Actions) would require runner credentials for docker push and 
 4. **`node workflow integrate` preflight:** Calls the new `integrate` area as part of `printIntegrationPreflight`
 5. **`--no-integration-gates` flag:** Explicit opt-out for emergencies (Hard Rule #2 preserved)
 6. **`--dry-run` enhancement:** Prints the resolved gate plan (ordered list) and exits without executing
-7. **`gate_web()` fix:** Remove the `web:e2e` line (scripts/verify-local.sh:41)
+7. **Web-gate fix:** Remove the staging e2e check from the local `web` gate
 8. **Tests:** Unit tests in `scripts/test/` for change-detection, ordering, missing/empty config, command failure abort, dry-run
 9. **ADR update:** This document, added to `docs/adr/index.md`
 10. **Docs:** Update `AGENTS.md` Section 2 and `workflow/README.md`

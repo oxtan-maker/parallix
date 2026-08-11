@@ -1,7 +1,7 @@
 import type { MissionId } from './mission.js';
 
 /** One Goal Check evidence row. Handoff requires each row to cite a verifiable
- * reference (file:line, test name, ADR, test-file path, or recognized command). */
+ * reference (recognized command, test name, ADR, or test-file path; file:line is accepted when necessary). */
 export interface GoalCheckRow {
   readonly criterion: string;
   readonly evidence: string;

@@ -72,7 +72,7 @@ All workflow agent launches use the shared `startAgent` path and tee child stdou
 | `draft` | 15 seconds | 30 seconds |
 | All other steps | 60 seconds | 60 seconds |
 
-Draft uses shorter defaults so the operator can distinguish agent startup from a hang more quickly during the mission entrypoint (see `DRAFT_NO_OUTPUT_INITIAL_DELAY_MS` and `DRAFT_NO_OUTPUT_INTERVAL_MS` in `parallix/lib/agents/agents.js:54-55`). Other steps retain the generic 60-second defaults (`DEFAULT_NO_OUTPUT_INITIAL_DELAY_MS` and `DEFAULT_NO_OUTPUT_INTERVAL_MS` at `parallix/lib/agents/agents.js:52-53`).
+Draft uses shorter defaults so the operator can distinguish agent startup from a hang more quickly during the mission entrypoint. Other steps retain the generic 60-second defaults.
 
 ### Override environment variables
 
@@ -95,7 +95,7 @@ When the watchdog fires, the harness emits:
 [INFO] No output yet from <agent> for step "<step>" after <elapsed> (pid <pid>, agent <stage>). Launcher is still running; stdout/stderr have not produced visible output.
 ```
 
-The `<stage>` field is `"starting up"` when fewer than the step-specific initial delay have elapsed, and `"running"` once that threshold is crossed (`agents.js:736-738`). For draft, the threshold is 15 seconds; for all other steps it is 60 seconds.
+The `<stage>` field is `"starting up"` before the step-specific initial delay elapses and `"running"` afterwards. For draft, the threshold is 15 seconds; for all other steps it is 60 seconds.
 
 This means the launcher process is alive but silent. It is not a launch failure by itself. A launch failure is still reported separately when the process cannot start, exits non-zero, is killed by a signal, or produces a detected usage-limit transcript that triggers fallback.
 

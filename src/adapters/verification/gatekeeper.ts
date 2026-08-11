@@ -75,7 +75,7 @@ function buildPushbackBody(slug: string, missing: string[]): string {
     instructions.push('- **create** `MISSION.md` with the standard mission contract template (title, goal, scope, checkpoints, gates).');
   }
   if (hasCheckpoints) {
-    instructions.push('- **create** at least one checkpoint document (e.g. `CP-1.md`) with a `## Goal Check` table containing real evidence (file:line, test names).');
+    instructions.push('- **create** at least one checkpoint document (e.g. `CP-1.md`) with a `## Goal Check` table containing real evidence such as a backticked command, test name, ADR reference, or test file path.');
   }
   if (hasTaskFile) {
     instructions.push('- **create** a backlog task file at `backlog/tasks/<slug> - <title>.md` with YAML frontmatter (id, title, status, labels) and a description section.');

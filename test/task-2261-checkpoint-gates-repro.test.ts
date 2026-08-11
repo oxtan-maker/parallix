@@ -33,7 +33,7 @@ test('missing checkpoint: runHandoffAndReview classifies as repairable and relau
   const result = await runHandoffAndReview(slug, worktree, 'codex', {
     validateCheckpointsBeforeHandoffFn: () => ({
       ok: false,
-      error: `No checkpoint documents found in /tmp/worktree-task-2261/missions/task-2261. The execute agent must create checkpoint documents (CP-N.md) with a Goal Check table before handoff. Create at least CP-1 documenting your implementation, including a Goal Check table with real evidence (file:line, test names).`
+      error: `No checkpoint documents found in /tmp/worktree-task-2261/missions/task-2261. The execute agent must create checkpoint documents (CP-N.md) with a Goal Check table before handoff. Create at least CP-1 documenting your implementation, including a Goal Check table with real evidence such as a backticked command, test name, ADR reference, or test file path.`
     }),
     performHandoff: async () => {
       performHandoffCallCount++;
@@ -61,7 +61,7 @@ test('missing checkpoint: runHandoffAndReview classifies as repairable and relau
 
 test('missing checkpoint: classifyError recognizes missing-checkpoint message as IncompleteEvidence', () => {
   const { classifyError, FailureClass } = repairHandoff;
-  const errorMsg = 'No checkpoint documents found in /tmp/worktree/missions/task-2261. The execute agent must create checkpoint documents (CP-N.md) with a Goal Check table before handoff. Create at least CP-1 documenting your implementation, including a Goal Check table with real evidence (file:line, test names).';
+  const errorMsg = 'No checkpoint documents found in /tmp/worktree/missions/task-2261. The execute agent must create checkpoint documents (CP-N.md) with a Goal Check table before handoff. Create at least CP-1 documenting your implementation, including a Goal Check table with real evidence such as a backticked command, test name, ADR reference, or test file path.';
 
   const result = classifyError(errorMsg);
 
