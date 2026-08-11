@@ -8,8 +8,7 @@ assignee: [custom]
 created_date: '2026-08-10 00:00'
 labels:
   - bug
-  - review
-  - board-projection
+  - user_value
 dependencies: []
 references:
   - src/adapters/backlog/concrete-review-read-adapter.ts
