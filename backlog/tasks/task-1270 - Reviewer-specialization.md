@@ -1,8 +1,8 @@
 ---
 id: TASK-1270
 title: Reviewer specialization
-status: refined
-assignee: [codex]
+status: active
+assignee: [claude]
 created_date: '2026-06-09 04:27'
 updated_date: '2026-06-13 18:14'
 labels: [ai_sdlc]
