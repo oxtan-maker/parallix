@@ -1,7 +1,7 @@
 ---
 id: TASK-2363
 title: experimation surface
-status: review
+status: ready-for-integration
 assignee: [codex]
 created_date: '2026-08-11 16:15'
 labels: [user_value]
