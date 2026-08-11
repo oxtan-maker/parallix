@@ -1,9 +1,10 @@
 ---
 id: TASK-2346
 title: install ponytail
-status: backlog
+status: done
 assignee: []
 created_date: '2026-08-08 08:32'
+updated_date: '2026-08-11 13:36'
 labels: []
 dependencies: []
 ordinal: 82900
