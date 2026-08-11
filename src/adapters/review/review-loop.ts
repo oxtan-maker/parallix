@@ -427,13 +427,15 @@ export async function handleGateFailureAutoBounce(
   // by the generic gate-failure marker.
   const hasExplicitHumanOnlyDiagnostic = diagnosticClassification.action === 'HumanOnly'
     && /state\s+violation|invalid\s+state|transition\s+not\s+allowed|cannot\s+(move|transition)\s+(from|to)\s+\w+\s+(to|from)|forgejo|infrastructure|authentication\s+failed|token\s+(expired|invalid|missing)|forbidden|unauthorized\s+(access|request)|rate\s+limit|connection\s+(refused|timed?\s*out)|network\s+error/i.test(diagnosticOutput);
-  const combinedOutput = [
-    gateResult.error || `verification gate failed with exit code ${gateResult.exitCode}`,
-    diagnosticOutput,
-  ].filter(Boolean).join('\n');
+  // A declared gate that has actually run and exited non-zero is a bounded
+  // workflow blocker: retry its implementer repair through the AutoRepair
+  // route. Keep explicit infrastructure and state-machine diagnostics human
+  // only, because their remedy is outside the implementer's working tree.
   const classification = hasExplicitHumanOnlyDiagnostic
     ? diagnosticClassification
-    : classifyGateFailure(combinedOutput);
+    : isHookFailure
+      ? diagnosticClassification
+      : { classification: 'GitBlockers', action: 'AutoRepair', isRelaunchable: true };
 
   log(fmt.status('WARN', `Pre-review gate failed for area "${gateResult.area}" (exit ${gateResult.exitCode}). Classification: ${classification.classification}.`));
 
@@ -1299,8 +1301,19 @@ export async function startReviewLoop(slug: string, opts: {
               exit(1); return;
             }
             if (bounceResult.bounced) {
-              log(fmt.status('INFO', `Autonomous review stopped: gate failure auto-bounced to implementer. Hand off to human review.`));
-              return;
+              log(fmt.status('INFO', `Declared gate repair completed; re-running pre-review setup for ${slug}.`));
+              // startAgentFn completes only after the repair invocation has
+              // returned. Restart with the same injected seams so the rebase,
+              // declared gate, and current round are replayed from persisted
+              // state without consuming a reviewer cycle.
+              return startReviewLoop(slug, {
+                ...opts,
+                implementer,
+                reviewer,
+                reset: false,
+                continue: false,
+                isContinue: false,
+              });
             }
           } else {
             log(fmt.status('PASS', `Pre-review gate passed for area "${preReviewGateResult.area}".`));

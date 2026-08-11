@@ -497,8 +497,8 @@ test('handleGateFailureAutoBounce includes gate output in fix prompt', async () 
     assert.ok(capturedPrompt.includes('verification gate failed'));
     assert.ok(capturedPrompt.includes('Retry attempt: 1/2'));
     assert.ok(capturedPrompt.includes('Classification:'));
-    assert.ok(capturedPrompt.includes('GateFailure'));
-    assert.ok(capturedPrompt.includes('AutoSendBack'));
+    assert.ok(capturedPrompt.includes('GitBlockers'));
+    assert.ok(capturedPrompt.includes('AutoRepair'));
   });
 });
 
