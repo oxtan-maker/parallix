@@ -105,6 +105,25 @@ export class ConcreteReviewReadAdapter implements ReviewReadAdapter {
   // -----------------------------------------------------------------------
 
   async loadReview(_missionId: MissionId): Promise<Review | null> {
+    // Prefer persisted rounds from the mission store (SC1-SC5).
+    // The store's load() returns a fully hydrated Review with all rounds,
+    // findings, resolutions, and events — the flat ReviewState only holds
+    // the current round and collapses history.
+    if (this.missionStore) {
+      try {
+        const result = await this.missionStore.load(_missionId);
+        if (result.kind === 'found' && result.mission.review) {
+          return result.mission.review;
+        }
+      } catch {
+        // Store unavailable — fall through to flat state fallback
+      }
+    }
+
+    // Fallback: flat ReviewState. In production this branch is only reachable
+    // when the store is null (e.g. test doubles or bootstrapping) — the default
+    // readReviewState() returns null whenever mission.review is null, and
+    // reviewFrom() never yields a review with zero rounds.
     const state = await Promise.resolve(this.readReviewState(_missionId, this.rootDir, this.missionStore)) as ReviewState | null;
     if (!state) {
       return null;
@@ -113,6 +132,31 @@ export class ConcreteReviewReadAdapter implements ReviewReadAdapter {
   }
 
   async loadReviewApproval(_missionId: MissionId): Promise<{ subject: ReviewedRevision; approvedAt: string | null } | null> {
+    // When the store is available, read the current round's subject directly
+    // so that loadReviewApproval() and loadReview() return the same revision.
+    // `sameReviewedRevision()` in mission-board.ts compares these two values
+    // to determine reviewApproved and integrate command availability.
+    if (this.missionStore) {
+      try {
+        const result = await this.missionStore.load(_missionId);
+        if (result.kind === 'found' && result.mission.review) {
+          const review = result.mission.review;
+          const currentRound = review.rounds[review.rounds.length - 1];
+          if (currentRound.phase === 'approved') {
+            return {
+              subject: currentRound.subject,
+              approvedAt: currentRound.decision?.kind === 'approved' ? currentRound.decision.decidedAt : null,
+            };
+          }
+          // Not approved — return null
+          return null;
+        }
+      } catch {
+        // Store unavailable — fall through to flat state fallback
+      }
+    }
+
+    // Fallback: flat ReviewState (backward compat for zero-round missions)
     const state = await Promise.resolve(this.readReviewState(_missionId, this.rootDir, this.missionStore)) as ReviewState | null;
     if (!state) {
       return null;
