@@ -1,8 +1,8 @@
 ---
 id: TASK-2219
 title: Extract Forgejo API transport from workflow operations
-status: refined
-assignee: [codex]
+status: active
+assignee: [custom]
 created_date: '2026-07-11 00:00'
 labels:
   - refactor
