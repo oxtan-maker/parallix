@@ -1,7 +1,7 @@
 ---
 id: TASK-2353
 title: Rebounce does not work
-status: backlog
+status: refined
 assignee: [codex]
 created_date: '2026-08-10 08:29'
 labels: [ai_sdlc, bug]
