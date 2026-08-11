@@ -2,7 +2,7 @@
 id: TASK-2362
 title: Add qwen CLI as a new agent family
 status: backlog
-assignee: []
+assignee: [custom]
 created_date: '2026-08-11 16:40'
 labels:
   - ai_sdlc
