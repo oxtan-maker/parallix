@@ -163,6 +163,89 @@ test('rebase use case launches an agent for shared-file conflicts', async () => 
   assert.match(h.lines.join('\n'), /completed conflict resolution/);
 });
 
+/** Harness variant whose shared-file conflict forces the agent-assisted path. */
+function sharedConflictHarness(shared: string, overrides: Partial<RebaseWorkflowPort> = {}): Harness {
+  return harness({
+    git: (args: string[]) => {
+      const tail = subcommand(args);
+      if (tail[0] === 'rebase' && tail[1] === 'main') {
+        return { status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${shared}\n` };
+      }
+      return OK;
+    },
+    resolveConflictsForMission: () => ({
+      ok: true,
+      conflictFiles: [shared],
+      missionSpecificFiles: [],
+      sharedFiles: [shared],
+    }),
+    ...overrides,
+  });
+}
+
+test('rebase use case pins the recorded mission implementer for shared-file conflicts', async () => {
+  const shared = 'src/adapters/git/git.ts';
+  const h = sharedConflictHarness(shared, {
+    getTaskImplementer: () => 'vibe',
+    selectAgent: () => 'pool-selected',
+  });
+  await run(h);
+
+  assert.deepEqual(h.exitCodes, [0]);
+  assert.equal(h.agentLaunches.length, 1);
+  // SC2: the conflict launch carries the implementer, not a pool selection.
+  assert.equal(h.agentLaunches[0].options.agent, 'vibe');
+  // SC7: usage stays attributable to (conflict-resolution stage, implementer role).
+  assert.equal(h.agentLaunches[0].options.slug, 'task-2332.12');
+  assert.equal(h.agentLaunches[0].options.role, 'implementer');
+  // AC #3: no substitute family may be selected after a failure.
+  assert.equal(h.agentLaunches[0].options.pinnedAgent, true);
+});
+
+test('rebase use case exits non-zero when the pinned implementer launcher is unavailable', async () => {
+  const shared = 'src/adapters/git/git.ts';
+  const h = sharedConflictHarness(shared, {
+    getTaskImplementer: () => 'vibe',
+    startAgent: async () => {
+      throw Object.assign(
+        new Error('Pinned agent "vibe" cannot run this step: Agent "vibe" launcher is not available'),
+        { code: 'PINNED_AGENT_UNAVAILABLE' },
+      );
+    },
+  });
+  await run(h);
+
+  // SC5: names the implementer family and leaves a recoverable git state.
+  assert.deepEqual(h.exitCodes, [1]);
+  const output = h.lines.join('\n');
+  assert.match(output, /vibe/);
+  assert.match(output, /does not substitute another agent family/i);
+  assert.match(output, /git rebase --abort/);
+});
+
+test('rebase use case exits non-zero when the mission has no recorded implementer', async () => {
+  const shared = 'src/adapters/git/git.ts';
+  const h = sharedConflictHarness(shared, {
+    resolveTaskFile: () => ({ ok: false }),
+    getTaskImplementer: () => null,
+  });
+  await run(h);
+
+  assert.deepEqual(h.exitCodes, [1]);
+  assert.equal(h.agentLaunches.length, 0, 'no agent may be launched without a recorded implementer');
+  assert.match(h.lines.join('\n'), /no recorded implementer/i);
+});
+
+test('rebase use case passes any configured implementer family through unchanged', async () => {
+  const shared = 'src/adapters/git/git.ts';
+  for (const family of ['claude', 'codex', 'custom', 'vibe', 'future-family']) {
+    const h = sharedConflictHarness(shared, { getTaskImplementer: () => family });
+    await run(h);
+    // AC #4: the conflict path adds no built-in family names.
+    assert.equal(h.agentLaunches[0].options.agent, family);
+  }
+});
+
 test('rebase use case auto-bounces a hook failure and retries the rebase', async () => {
   const bounces: Array<{ hookType: string | null; missionStore: unknown }> = [];
   let continues = 0;

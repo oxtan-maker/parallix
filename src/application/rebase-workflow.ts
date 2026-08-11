@@ -816,11 +816,40 @@ export async function runRebaseWorkflow(args: string[], port: RebaseWorkflowPort
     formatVerificationCommand: (promptArea, promptRoot) => port.formatVerificationCommand(promptArea, promptRoot),
   });
 
-  fmt.log.info('Launching agent for conflict resolution...');
-  const { agent, result: agentResult } = await port.startAgent('conflict-resolution', {
-    prompt,
-    worktree: worktreePath,
-  });
+  // Conflict resolution is implementation work owned by the mission's recorded
+  // implementer (TASK-2294.01). Pin that family; there is no separate
+  // conflict-resolution pool to select a substitute resolver from.
+  const conflictTaskResolution = port.resolveTaskFile(slug, executionRoot);
+  const implementer = conflictTaskResolution.ok && conflictTaskResolution.taskFile
+    ? port.getTaskImplementer(conflictTaskResolution.taskFile)
+    : null;
+  if (!implementer) {
+    fmt.log.fail(`No recorded implementer for ${fmt.slug(slug)}; cannot launch conflict resolution.`);
+    fmt.log.info('Conflict resolution runs as the mission implementer. Set the task assignee to a supported agent family, then re-run.');
+    fmt.log.info(`Recovery: ${fmt.command('git rebase --abort')}`);
+    port.exit(1);
+    return;
+  }
+
+  fmt.log.info(`Launching implementer (${fmt.agent(implementer)}) for conflict resolution...`);
+  let agent: string;
+  let agentResult: { status: number };
+  try {
+    ({ agent, result: agentResult } = await port.startAgent('conflict-resolution', {
+      prompt,
+      worktree: worktreePath,
+      agent: implementer,
+      slug,
+      role: 'implementer',
+      pinnedAgent: true,
+    }));
+  } catch (err: any) {
+    fmt.log.fail(`Implementer (${fmt.agent(implementer)}) cannot run conflict resolution: ${err.message || String(err)}`);
+    fmt.log.info('Parallix does not substitute another agent family for the mission implementer.');
+    fmt.log.info(`You may need to abort the rebase: ${fmt.command('git rebase --abort')}`);
+    port.exit(1);
+    return;
+  }
 
   if (agentResult.status !== 0) {
     fmt.log.fail(`Agent (${fmt.agent(agent)}) exited with status ${agentResult.status}.`);

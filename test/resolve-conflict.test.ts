@@ -436,29 +436,42 @@ test('resolveConflict exits 1 and skips agent for shared-file conflicts', () => 
   assert.match(errs.join('\n'), /cannot guess/i);
 });
 
+// ---------------------------------------------------------------------------
+// resolveConflict — implementer-owned conflict resolution (TASK-2294.01)
+// ---------------------------------------------------------------------------
+
+/** Mission-specific-only conflict classification for the agent-launch path. */
+const MISSION_SPECIFIC_CONFLICTS = () => ({
+  ok: true,
+  conflictFiles: ['docs/missions/2026/task-108/CP-1.md'],
+  sharedFiles: [],
+  missionSpecificFiles: ['docs/missions/2026/task-108/CP-1.md'],
+  worktreePath: '/tmp/wt',
+});
+
+/** Backlog seams that record `implementer` as the mission's assignee. */
+const implementerSeams = (implementer) => ({
+  rootDir: '/repo',
+  resolveTaskFileFn: () => ({ ok: true, taskFile: '/repo/backlog/tasks/task-108.md' }),
+  getTaskImplementerFn: () => implementer,
+});
+
 test('resolveConflict spawns agent for mission-specific-only conflicts and exits 0 on success', async () => {
   let exitCode = null;
   let agentStep = null;
-  let agentPrompt = null;
-  let agentWorktree = null;
+  let agentOptions = null;
   const lines = [];
   const origLog = console.log;
   console.log = l => lines.push(l);
 
   try {
     await resolveConflict(['task-108'], {
-      resolveConflictsFn: () => ({
-        ok: true,
-        conflictFiles: ['docs/missions/2026/task-108/CP-1.md'],
-        sharedFiles: [],
-        missionSpecificFiles: ['docs/missions/2026/task-108/CP-1.md'],
-        worktreePath: '/tmp/wt',
-      }),
-      startAgentFn: async (step, { prompt, worktree }) => {
+      ...implementerSeams('codex'),
+      resolveConflictsFn: MISSION_SPECIFIC_CONFLICTS,
+      startAgentFn: async (step, options) => {
         agentStep = step;
-        agentPrompt = prompt;
-        agentWorktree = worktree;
-        return { agent: 'codex', result: { status: 0 } };
+        agentOptions = options;
+        return { agent: options.agent, result: { status: 0 } };
       },
       exitFn: code => { exitCode = code; },
     });
@@ -468,10 +481,129 @@ test('resolveConflict spawns agent for mission-specific-only conflicts and exits
 
   assert.equal(exitCode, 0);
   assert.equal(agentStep, 'conflict-resolution');
-  assert.equal(agentWorktree, '/tmp/wt');
-  assert.match(agentPrompt, /CP-1\.md/);
-  assert.match(agentPrompt, /--theirs/);
+  assert.equal(agentOptions.worktree, '/tmp/wt');
+  assert.match(agentOptions.prompt, /CP-1\.md/);
+  assert.match(agentOptions.prompt, /--theirs/);
   assert.match(lines.join('\n'), /PASS.*codex/i);
+});
+
+test('resolveConflict pins the recorded mission implementer as the conflict agent', async () => {
+  let agentOptions = null;
+  let exitCode = null;
+  const origLog = console.log;
+  console.log = () => {};
+
+  try {
+    await resolveConflict(['task-108'], {
+      ...implementerSeams('vibe'),
+      resolveConflictsFn: MISSION_SPECIFIC_CONFLICTS,
+      startAgentFn: async (_step, options) => {
+        agentOptions = options;
+        return { agent: options.agent, result: { status: 0 } };
+      },
+      exitFn: code => { exitCode = code; },
+    });
+  } finally {
+    console.log = origLog;
+  }
+
+  assert.equal(exitCode, 0);
+  // SC1: the launch carries the recorded implementer, not a pool selection.
+  assert.equal(agentOptions.agent, 'vibe');
+  // SC7: usage stays attributable to (conflict-resolution stage, implementer role).
+  assert.equal(agentOptions.slug, 'task-108');
+  assert.equal(agentOptions.role, 'implementer');
+  // AC #3: no substitute family may be selected after a failure.
+  assert.equal(agentOptions.pinnedAgent, true);
+});
+
+test('resolveConflict accepts any configured implementer family without hardcoding names', async () => {
+  const seen = [];
+  const origLog = console.log;
+  console.log = () => {};
+
+  try {
+    for (const family of ['claude', 'codex', 'custom', 'vibe', 'future-family']) {
+      await resolveConflict(['task-108'], {
+        ...implementerSeams(family),
+        resolveConflictsFn: MISSION_SPECIFIC_CONFLICTS,
+        startAgentFn: async (_step, options) => {
+          seen.push(options.agent);
+          return { agent: options.agent, result: { status: 0 } };
+        },
+        exitFn: () => {},
+      });
+    }
+  } finally {
+    console.log = origLog;
+  }
+
+  // AC #4: the conflict path passes the recorded family through untouched.
+  assert.deepEqual(seen, ['claude', 'codex', 'custom', 'vibe', 'future-family']);
+});
+
+test('resolveConflict exits non-zero when the mission has no recorded implementer', async () => {
+  let exitCode = null;
+  let agentLaunched = false;
+  const errs = [];
+  const lines = [];
+  const origErr = console.error;
+  const origLog = console.log;
+  console.error = l => errs.push(l);
+  console.log = l => lines.push(l);
+
+  try {
+    await resolveConflict(['task-108'], {
+      rootDir: '/repo',
+      resolveTaskFileFn: () => ({ ok: false }),
+      getTaskImplementerFn: () => null,
+      resolveConflictsFn: MISSION_SPECIFIC_CONFLICTS,
+      startAgentFn: async () => { agentLaunched = true; return { agent: 'codex', result: { status: 0 } }; },
+      exitFn: code => { exitCode = code; },
+    });
+  } finally {
+    console.error = origErr;
+    console.log = origLog;
+  }
+
+  // SC6: missing implementer is a hard stop, never a pool selection.
+  assert.equal(exitCode, 1);
+  assert.equal(agentLaunched, false);
+  assert.match(errs.join('\n'), /no recorded implementer/i);
+  assert.match(lines.join('\n'), /px resolve-conflict task-108/);
+});
+
+test('resolveConflict exits non-zero and names the implementer when its launcher is unavailable', async () => {
+  let exitCode = null;
+  const errs = [];
+  const lines = [];
+  const origErr = console.error;
+  const origLog = console.log;
+  console.error = l => errs.push(l);
+  console.log = l => lines.push(l);
+
+  try {
+    await resolveConflict(['task-108'], {
+      ...implementerSeams('vibe'),
+      resolveConflictsFn: MISSION_SPECIFIC_CONFLICTS,
+      startAgentFn: async () => {
+        throw Object.assign(
+          new Error('Pinned agent "vibe" cannot run this step: launcher "vibe" not found on PATH'),
+          { code: 'PINNED_AGENT_UNAVAILABLE' },
+        );
+      },
+      exitFn: code => { exitCode = code; },
+    });
+  } finally {
+    console.error = origErr;
+    console.log = origLog;
+  }
+
+  // SC4: names the implementer family and the launcher detail.
+  assert.equal(exitCode, 1);
+  assert.match(errs.join('\n'), /vibe/);
+  assert.match(errs.join('\n'), /not found on PATH/);
+  assert.match(lines.join('\n'), /does not substitute another agent family/i);
 });
 
 test('resolveConflict exits with agent status when agent fails', async () => {
@@ -482,13 +614,8 @@ test('resolveConflict exits with agent status when agent fails', async () => {
 
   try {
     await resolveConflict(['task-108'], {
-      resolveConflictsFn: () => ({
-        ok: true,
-        conflictFiles: ['docs/missions/2026/task-108/CP-1.md'],
-        sharedFiles: [],
-        missionSpecificFiles: ['docs/missions/2026/task-108/CP-1.md'],
-        worktreePath: '/tmp/wt',
-      }),
+      ...implementerSeams('claude'),
+      resolveConflictsFn: MISSION_SPECIFIC_CONFLICTS,
       startAgentFn: async () => ({ agent: 'claude', result: { status: 2 } }),
       exitFn: code => { exitCode = code; },
     });

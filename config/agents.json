@@ -10,10 +10,6 @@
       "eligible": ["codex", "claude",  "custom", "vibe"],
       "selection": "random"
     },
-    "conflict-resolution": {
-      "eligible": ["claude", "codex", "vibe"],
-      "selection": "random"
-    },
     "review": {
       "eligible": ["codex", "claude", "custom", "vibe"],
       "selection": "random"

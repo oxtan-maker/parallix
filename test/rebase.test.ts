@@ -449,6 +449,8 @@ test('rebase task-1057 flow: sharedFiles and prompt contain only workflow/docs/a
     findMissionDirFn: () => '/tmp/missions/docs/missions/2026/task-1057',
     findMissionAreaFn: () => 'workflow',
     getCurrentBranchFn: () => 'mission/task-1057',
+    resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-1057.md' }),
+    getTaskImplementerFn: () => 'claude',
     // merge-failed triggers the git status --porcelain fallback
     resolveConflictsFn: () => ({ ok: false, error: 'merge-failed' }),
     startAgentFn: async (_mode, { prompt }) => {
