@@ -1,8 +1,8 @@
 ---
 id: TASK-2363
 title: experimation surface
-status: refined
-assignee: [custom]
+status: active
+assignee: [claude]
 created_date: '2026-08-11 16:15'
 labels: [user_value]
 dependencies: []
