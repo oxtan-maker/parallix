@@ -4,7 +4,8 @@
 
 Application code depends only on `src/domain/` and application-local modules.
 Outbound dependencies are declared under `ports/` or in the checked shared port
-modules; concrete implementations live under `src/adapters/`.
+modules; concrete implementations live under `src/adapters/`. This is the
+application boundary defined by [ADR 0051](../../docs/adr/0051-ui-neutral-application-boundary.md).
 
 ## What this directory is not
 

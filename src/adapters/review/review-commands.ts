@@ -22,7 +22,6 @@ import { bootstrapReviewSurface } from './setup-review.js';
 import { resolveReviewAdapter } from '../config/product-config.js';
 import { buildMetadataFooter, reviewArtifactPath, postWorkflowComment, postWorkflowReview, consumeReviewerArtifacts, resolveArtifactDir } from './review-artifacts.js';
 import { startReviewLoop, recordStageStatsSafe, commitSafeMissionArtifacts } from './review-loop.js';
-import { suggestFlag } from '../../application/presentation/cli-flags.js';
 import type { ReviewWorkflowContext, ReviewWorkflowPort } from '../../application/ports/review-workflow.js';
 
 /** Lazily loaded handoff module. */
@@ -1799,7 +1798,7 @@ export async function reconcileInterruptedHandoffHandler(
 // ============================================================================
 
 export class ReviewWorkflowAdapter implements ReviewWorkflowPort {
-  constructor(private readonly defaults: {
+  constructor(private readonly _defaults: {
     inferSlugFn?: typeof inferSlug;
     log?: (_msg: string) => void;
     error?: (_msg: string) => void;
@@ -1832,7 +1831,7 @@ export class ReviewWorkflowAdapter implements ReviewWorkflowPort {
   } = {}) {}
 
   async preflight(args: string[], suppliedOptions: Record<string, unknown> = {}): Promise<ReviewWorkflowContext | null> {
-    const options = { ...this.defaults, ...suppliedOptions } as typeof this.defaults;
+    const options = { ...this._defaults, ...suppliedOptions } as typeof this._defaults;
     const inferSlugFn = options.inferSlugFn || inferSlug;
     const error = options.error || fmt.log.plainError;
     const exit = options.exit || process.exit;
@@ -1847,12 +1846,12 @@ export class ReviewWorkflowAdapter implements ReviewWorkflowPort {
   }
 
   async verify(context: ReviewWorkflowContext): Promise<void> {
-    const options = context.options as typeof this.defaults;
+    const options = context.options as typeof this._defaults;
     (options.verifyReviewFn || verifyReview)(context.slug, context.args.includes('--no-gate'), { ...options, missionPath: flagValue(context.args, '--mission') || undefined });
   }
 
   async submit(context: ReviewWorkflowContext): Promise<void> {
-    const options = context.options as typeof this.defaults;
+    const options = context.options as typeof this._defaults;
     const artifactDir = resolveArtifactDir((options.resolveWorktreeFn || resolveWorktree)(context.slug) || process.cwd());
     if ([reviewArtifactPath(context.slug, 'review-findings.md', artifactDir), reviewArtifactPath(context.slug, 'review-outcome.md', artifactDir), reviewArtifactPath(context.slug, 'review-verdict.txt', artifactDir)].some(fs.existsSync)) {
       (options.log || fmt.log.plain)(fmt.status('WARN', `Unprocessed review artifacts found at ${artifactDir} for ${context.slug}. Consider using --consume-artifacts to persist them before handoff, or use --submit-review to post a verdict.`));
@@ -1861,7 +1860,7 @@ export class ReviewWorkflowAdapter implements ReviewWorkflowPort {
   }
 
   async push(context: ReviewWorkflowContext): Promise<void> {
-    const options = context.options as typeof this.defaults;
+    const options = context.options as typeof this._defaults;
     await (options.pushRoundFn || pushRound)(context.slug, { ...options, force: context.args.includes('--force') });
   }
 
@@ -1869,7 +1868,7 @@ export class ReviewWorkflowAdapter implements ReviewWorkflowPort {
   async continue(context: ReviewWorkflowContext): Promise<void> { await this.runLoop(context, true); }
 
   private async runLoop(context: ReviewWorkflowContext, isContinue: boolean): Promise<void> {
-    const options = context.options as typeof this.defaults;
+    const options = context.options as typeof this._defaults;
     const error = options.error || fmt.log.plainError;
     const exit = options.exit || process.exit;
     const maxAttemptsRaw = flagValue(context.args, '--max-attempts');
@@ -1890,27 +1889,27 @@ export class ReviewWorkflowAdapter implements ReviewWorkflowPort {
   }
 
   async comment(context: ReviewWorkflowContext): Promise<void> {
-    const options = context.options as typeof this.defaults;
+    const options = context.options as typeof this._defaults;
     const error = options.error || fmt.log.plainError; const exit = options.exit || process.exit;
     const message = readTextFlag(context.args, '--comment', '--comment-file', 'comment', options);
     if (!message) { error(fmt.status('FAIL', '--comment requires text via --comment "<text>" or --comment-file <path>.')); exit(1); return; }
     await (options.commentRoundFn || commentRound)(context.slug, message, options);
   }
-  async readComments(context: ReviewWorkflowContext): Promise<void> { const o = context.options as typeof this.defaults; await (o.readCommentsFn || readComments)(context.slug, o); }
+  async readComments(context: ReviewWorkflowContext): Promise<void> { const o = context.options as typeof this._defaults; await (o.readCommentsFn || readComments)(context.slug, o); }
   async submitReview(context: ReviewWorkflowContext): Promise<void> {
-    const o = context.options as typeof this.defaults; const outcome = flagValue(context.args, '--submit-review'); const error = o.error || fmt.log.plainError; const exit = o.exit || process.exit;
+    const o = context.options as typeof this._defaults; const outcome = flagValue(context.args, '--submit-review'); const error = o.error || fmt.log.plainError; const exit = o.exit || process.exit;
     if (!outcome) { error(fmt.status('FAIL', '--submit-review requires an outcome: px review <slug> --submit-review <approve|request-changes|comment> [--message "<summary>"|--message-file <path>]')); exit(1); return; }
     await (o.submitReviewRoundFn || submitReviewRound)(context.slug, outcome, readTextFlag(context.args, '--message', '--message-file', 'review message', o) || '', o);
   }
-  async consumeArtifacts(context: ReviewWorkflowContext): Promise<void> { const o = context.options as typeof this.defaults; await (o.consumeArtifactsFn || consumeArtifacts)(context.slug, o); }
-  async close(context: ReviewWorkflowContext): Promise<void> { const o = context.options as typeof this.defaults; await (o.closeMissionPrFn || closeMissionPr)(context.slug, o); }
+  async consumeArtifacts(context: ReviewWorkflowContext): Promise<void> { const o = context.options as typeof this._defaults; await (o.consumeArtifactsFn || consumeArtifacts)(context.slug, o); }
+  async close(context: ReviewWorkflowContext): Promise<void> { const o = context.options as typeof this._defaults; await (o.closeMissionPrFn || closeMissionPr)(context.slug, o); }
   async createEvent(context: ReviewWorkflowContext): Promise<void> { createEventHandler(context.slug, context.args, context.options); }
   async importLegacy(context: ReviewWorkflowContext): Promise<void> { importLegacyHandler(context.slug, context.args, context.options); }
   async backfillReview(context: ReviewWorkflowContext): Promise<void> { await backfillReviewHandler(context.slug, context.args, context.options); }
   async reconcileReview(context: ReviewWorkflowContext): Promise<void> { await reconcileInterruptedHandoffHandler(context.slug, context.args, context.options); }
 
   async status(context: ReviewWorkflowContext): Promise<void> {
-    const options = context.options as typeof this.defaults;
+    const options = context.options as typeof this._defaults;
     if (context.args.includes('--status')) { await showReviewStatus(context.slug, { ...options, readReviewStateFn: options.readReviewStateFn || readReviewState }); return; }
     const log = options.log || fmt.log.plain; const resolveWorktreeFn = options.resolveWorktreeFn || resolveWorktree; const getPrStatusFn = options.getPrStatusFn || getPrStatus;
     log(fmt.status('INFO', `Review status for mission: ${fmt.slug(context.slug)}`));
@@ -1922,7 +1921,7 @@ export class ReviewWorkflowAdapter implements ReviewWorkflowPort {
   }
 
   private async staticReview(context: ReviewWorkflowContext, resolveWorktreeFn: typeof resolveWorktree): Promise<void> {
-    const o = context.options as typeof this.defaults; const log = o.log || fmt.log.plain; const error = o.error || fmt.log.plainError; const worktree = resolveWorktreeFn(context.slug) || process.cwd();
+    const o = context.options as typeof this._defaults; const log = o.log || fmt.log.plain; const error = o.error || fmt.log.plainError; const worktree = resolveWorktreeFn(context.slug) || process.cwd();
     const staticResult = (o.performStaticReviewFn || performStaticReview)(context.slug, { log, findMissionDir, findCheckpoints, readFileSync: fs.readFileSync, run: o.run || run, resolveWorktree: resolveWorktreeFn, rootDir: worktree, missionPath: flagValue(context.args, '--mission') || undefined });
     if (staticResult.findings?.length) {
       const resolution = (o.resolveTaskFileFn || resolveTaskFile)(context.slug, worktree); const implementer = resolution?.taskFile ? (o.getTaskImplementerFn || getTaskImplementer)(resolution.taskFile) : null;
