@@ -1,7 +1,7 @@
 ---
 id: TASK-2291
 title: Measure post-boundary bug-frequency cohort
-status: ready-for-integration
+status: done
 assignee: [codex]
 created_date: '2026-07-20 00:00'
 labels:

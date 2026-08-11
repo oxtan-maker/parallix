@@ -1,0 +1,375 @@
+{
+  "cutoff": {
+    "task": "TASK-2290",
+    "commit": "8aa9af505ff2f22ac35448dab62b2c7cc7a125cb",
+    "committer_date": "2026-07-21T14:26:24+02:00",
+    "subject": "mission/task-2290: task-2290",
+    "evidence": "git log main --diff-filter=A -- backlog/completed/task-2290*"
+  },
+  "total": 20,
+  "bug": 4,
+  "nonBug": 16,
+  "bugOverTotal": 0.2,
+  "bugPer100NonBug": 25,
+  "baseline": {
+    "bug": 39,
+    "total": 129,
+    "nonBug": 90,
+    "bugOverTotal": 0.3023255813953488,
+    "bugPer100NonBug": 43.333333333333336,
+    "source": "docs/adr/0051-ui-neutral-application-boundary.md:79"
+  },
+  "bugIds": [
+    "TASK-2240",
+    "TASK-2296",
+    "TASK-2311",
+    "TASK-2233"
+  ],
+  "nonBugIds": [
+    "TASK-2293",
+    "TASK-2279",
+    "TASK-2298",
+    "TASK-2299",
+    "TASK-2294",
+    "TASK-2242",
+    "TASK-2300",
+    "TASK-2244",
+    "TASK-2295",
+    "TASK-2281",
+    "TASK-2238",
+    "TASK-2302",
+    "TASK-2310",
+    "TASK-2303",
+    "TASK-2282",
+    "TASK-2304"
+  ],
+  "warnings": [],
+  "aborts": [
+    "backlog/tasks/task-2359 - Prevent-PR-history-noise-from-blocking-mission-reviews.md:2 filename id TASK-2359 != frontmatter id TASK-2358"
+  ],
+  "rows": [
+    {
+      "id": "TASK-2293",
+      "copies": 1,
+      "copyPaths": [
+        "backlog/completed/task-2293 - Harden-legacy-TypeScript-test-mock-shapes.md:2"
+      ],
+      "labelUnion": [
+        "tech-debt",
+        "tests",
+        "typescript",
+        "user_value"
+      ],
+      "labelEvidence": "backlog/completed/task-2293 - Harden-legacy-TypeScript-test-mock-shapes.md:7",
+      "statusEvidence": "backlog/completed/task-2293 - Harden-legacy-TypeScript-test-mock-shapes.md:4",
+      "status": "done",
+      "bug": false
+    },
+    {
+      "id": "TASK-2279",
+      "copies": 1,
+      "copyPaths": [
+        "backlog/completed/task-2279 - Move-runtime-to-ESM-src-tree-and-canonical-bundle.md:2"
+      ],
+      "labelUnion": [
+        "build",
+        "esm",
+        "migration",
+        "typescript",
+        "user_value"
+      ],
+      "labelEvidence": "backlog/completed/task-2279 - Move-runtime-to-ESM-src-tree-and-canonical-bundle.md:7",
+      "statusEvidence": "backlog/completed/task-2279 - Move-runtime-to-ESM-src-tree-and-canonical-bundle.md:4",
+      "status": "done",
+      "bug": false
+    },
+    {
+      "id": "TASK-2240",
+      "copies": 1,
+      "copyPaths": [
+        "backlog/completed/task-2240 - when-forgejo-is-activated-PR-is-not-updated-between-rounds.md:2"
+      ],
+      "labelUnion": [
+        "ai_sdlc",
+        "bug"
+      ],
+      "labelEvidence": "backlog/completed/task-2240 - when-forgejo-is-activated-PR-is-not-updated-between-rounds.md:8",
+      "statusEvidence": "backlog/completed/task-2240 - when-forgejo-is-activated-PR-is-not-updated-between-rounds.md:4",
+      "status": "done",
+      "bug": true
+    },
+    {
+      "id": "TASK-2296",
+      "copies": 1,
+      "copyPaths": [
+        "backlog/completed/task-2296 - test-failure.md:2"
+      ],
+      "labelUnion": [
+        "ai_sdlc",
+        "bug"
+      ],
+      "labelEvidence": "backlog/completed/task-2296 - test-failure.md:7",
+      "statusEvidence": "backlog/completed/task-2296 - test-failure.md:4",
+      "status": "done",
+      "bug": true
+    },
+    {
+      "id": "TASK-2298",
+      "copies": 1,
+      "copyPaths": [
+        "backlog/completed/task-2298 - Strengthen-the-defence.md:2"
+      ],
+      "labelUnion": [
+        "user_value"
+      ],
+      "labelEvidence": "backlog/completed/task-2298 - Strengthen-the-defence.md:7",
+      "statusEvidence": "backlog/completed/task-2298 - Strengthen-the-defence.md:4",
+      "status": "done",
+      "bug": false
+    },
+    {
+      "id": "TASK-2299",
+      "copies": 1,
+      "copyPaths": [
+        "backlog/completed/task-2299 - test-fixes.md:2"
+      ],
+      "labelUnion": [
+        "user_value"
+      ],
+      "labelEvidence": "backlog/completed/task-2299 - test-fixes.md:7",
+      "statusEvidence": "backlog/completed/task-2299 - test-fixes.md:4",
+      "status": "done",
+      "bug": false
+    },
+    {
+      "id": "TASK-2294",
+      "copies": 1,
+      "copyPaths": [
+        "backlog/completed/task-2294 - Establish-canonical-Parallix-domain-model-and-settle-the-persistence-sync-async-seam.md:2"
+      ],
+      "labelUnion": [
+        "adr",
+        "architecture",
+        "domain-model",
+        "persistence",
+        "user_value"
+      ],
+      "labelEvidence": "backlog/completed/task-2294 - Establish-canonical-Parallix-domain-model-and-settle-the-persistence-sync-async-seam.md:10",
+      "statusEvidence": "backlog/completed/task-2294 - Establish-canonical-Parallix-domain-model-and-settle-the-persistence-sync-async-seam.md:6",
+      "status": "done",
+      "bug": false
+    },
+    {
+      "id": "TASK-2242",
+      "copies": 1,
+      "copyPaths": [
+        "backlog/completed/task-2242 - backlog.md-changes-fast.md:2"
+      ],
+      "labelUnion": [
+        "ai_sdlc"
+      ],
+      "labelEvidence": "backlog/completed/task-2242 - backlog.md-changes-fast.md:7",
+      "statusEvidence": "backlog/completed/task-2242 - backlog.md-changes-fast.md:4",
+      "status": "done",
+      "bug": false
+    },
+    {
+      "id": "TASK-2300",
+      "copies": 1,
+      "copyPaths": [
+        "backlog/completed/task-2300 - Make-final-integration-gates-unavoidable.md:2"
+      ],
+      "labelUnion": [
+        "ai_sdlc"
+      ],
+      "labelEvidence": "backlog/completed/task-2300 - Make-final-integration-gates-unavoidable.md:9",
+      "statusEvidence": "backlog/completed/task-2300 - Make-final-integration-gates-unavoidable.md:4",
+      "status": "done",
+      "bug": false
+    },
+    {
+      "id": "TASK-2244",
+      "copies": 1,
+      "copyPaths": [
+        "backlog/completed/task-2244 - backlog.md-check-reading-from-wrong-place.md:2"
+      ],
+      "labelUnion": [
+        "ai_sdlc"
+      ],
+      "labelEvidence": "backlog/completed/task-2244 - backlog.md-check-reading-from-wrong-place.md:7",
+      "statusEvidence": "backlog/completed/task-2244 - backlog.md-check-reading-from-wrong-place.md:4",
+      "status": "done",
+      "bug": false
+    },
+    {
+      "id": "TASK-2295",
+      "copies": 1,
+      "copyPaths": [
+        "backlog/completed/task-2295 - Re-home-bounded-SQLite-operator-state-onto-the-canonical-domain-model-supersedes-task-2280.md:2"
+      ],
+      "labelUnion": [
+        "user_value"
+      ],
+      "labelEvidence": "backlog/completed/task-2295 - Re-home-bounded-SQLite-operator-state-onto-the-canonical-domain-model-supersedes-task-2280.md:9",
+      "statusEvidence": "backlog/completed/task-2295 - Re-home-bounded-SQLite-operator-state-onto-the-canonical-domain-model-supersedes-task-2280.md:6",
+      "status": "done",
+      "bug": false
+    },
+    {
+      "id": "TASK-2281",
+      "copies": 1,
+      "copyPaths": [
+        "backlog/completed/task-2281 - Build-operator-board-projections-events-and-guarded-controller.md:2"
+      ],
+      "labelUnion": [
+        "application",
+        "architecture",
+        "board",
+        "observability",
+        "user_value"
+      ],
+      "labelEvidence": "backlog/completed/task-2281 - Build-operator-board-projections-events-and-guarded-controller.md:7",
+      "statusEvidence": "backlog/completed/task-2281 - Build-operator-board-projections-events-and-guarded-controller.md:4",
+      "status": "done",
+      "bug": false
+    },
+    {
+      "id": "TASK-2238",
+      "copies": 1,
+      "copyPaths": [
+        "backlog/completed/task-2238 - change-pi-tech.md:2"
+      ],
+      "labelUnion": [
+        "user_value"
+      ],
+      "labelEvidence": "backlog/completed/task-2238 - change-pi-tech.md:7",
+      "statusEvidence": "backlog/completed/task-2238 - change-pi-tech.md:4",
+      "status": "done",
+      "bug": false
+    },
+    {
+      "id": "TASK-2302",
+      "copies": 1,
+      "copyPaths": [
+        "backlog/completed/task-2302 - Implement-concrete-repository-read-adapters-as-the-single-board-materialization-path.md:2"
+      ],
+      "labelUnion": [
+        "adapters",
+        "application",
+        "architecture",
+        "board",
+        "user_value"
+      ],
+      "labelEvidence": "backlog/completed/task-2302 - Implement-concrete-repository-read-adapters-as-the-single-board-materialization-path.md:9",
+      "statusEvidence": "backlog/completed/task-2302 - Implement-concrete-repository-read-adapters-as-the-single-board-materialization-path.md:6",
+      "status": "done",
+      "bug": false
+    },
+    {
+      "id": "TASK-2310",
+      "copies": 1,
+      "copyPaths": [
+        "backlog/completed/task-2310 - Fix-ADR-halcuinactions.md:2"
+      ],
+      "labelUnion": [
+        "ai_sdlc"
+      ],
+      "labelEvidence": "backlog/completed/task-2310 - Fix-ADR-halcuinactions.md:7",
+      "statusEvidence": "backlog/completed/task-2310 - Fix-ADR-halcuinactions.md:4",
+      "status": "done",
+      "bug": false
+    },
+    {
+      "id": "TASK-2303",
+      "copies": 1,
+      "copyPaths": [
+        "backlog/completed/task-2303 - Record-lifecycle-lane-transition-events-and-typed-board-metrics-schema.md:2"
+      ],
+      "labelUnion": [
+        "application",
+        "board",
+        "observability",
+        "persistence",
+        "user_value"
+      ],
+      "labelEvidence": "backlog/completed/task-2303 - Record-lifecycle-lane-transition-events-and-typed-board-metrics-schema.md:8",
+      "statusEvidence": "backlog/completed/task-2303 - Record-lifecycle-lane-transition-events-and-typed-board-metrics-schema.md:5",
+      "status": "done",
+      "bug": false
+    },
+    {
+      "id": "TASK-2282",
+      "copies": 1,
+      "copyPaths": [
+        "backlog/completed/task-2282 - Implement-Ink-TUI-over-shared-application-contracts.md:2"
+      ],
+      "labelUnion": [
+        "ink",
+        "react",
+        "tui",
+        "ui",
+        "user_value"
+      ],
+      "labelEvidence": "backlog/completed/task-2282 - Implement-Ink-TUI-over-shared-application-contracts.md:10",
+      "statusEvidence": "backlog/completed/task-2282 - Implement-Ink-TUI-over-shared-application-contracts.md:6",
+      "status": "done",
+      "bug": false
+    },
+    {
+      "id": "TASK-2311",
+      "copies": 1,
+      "copyPaths": [
+        "backlog/completed/task-2311 - after-pi-tech-change-console-is-empty.md:2"
+      ],
+      "labelUnion": [
+        "ai_sdlc",
+        "bug"
+      ],
+      "labelEvidence": "backlog/completed/task-2311 - after-pi-tech-change-console-is-empty.md:7",
+      "statusEvidence": "backlog/completed/task-2311 - after-pi-tech-change-console-is-empty.md:4",
+      "status": "done",
+      "bug": true
+    },
+    {
+      "id": "TASK-2304",
+      "copies": 1,
+      "copyPaths": [
+        "backlog/completed/task-2304 - Ink-TUI-wave-2-lane-columns-mission-cards-and-responsive-terminal-layout.md:2"
+      ],
+      "labelUnion": [
+        "ink",
+        "react",
+        "tui",
+        "ui",
+        "user_value"
+      ],
+      "labelEvidence": "backlog/completed/task-2304 - Ink-TUI-wave-2-lane-columns-mission-cards-and-responsive-terminal-layout.md:7",
+      "statusEvidence": "backlog/completed/task-2304 - Ink-TUI-wave-2-lane-columns-mission-cards-and-responsive-terminal-layout.md:4",
+      "status": "done",
+      "bug": false
+    },
+    {
+      "id": "TASK-2233",
+      "copies": 1,
+      "copyPaths": [
+        "backlog/completed/task-2233 - check-the-bounce-on-review-errors.md:2"
+      ],
+      "labelUnion": [
+        "ai_sdlc",
+        "bug"
+      ],
+      "labelEvidence": "backlog/completed/task-2233 - check-the-bounce-on-review-errors.md:7",
+      "statusEvidence": "backlog/completed/task-2233 - check-the-bounce-on-review-errors.md:4",
+      "status": "done",
+      "bug": true
+    }
+  ],
+  "notes": {
+    "report_status": "TASK-2289 acceptance criterion #8 (reproducible read-only bug-frequency report) has no implementation in the tree; measurement performed by two independent read-only recomputations instead.",
+    "out_of_cohort_anomaly": "backlog/tasks/task-2359 - Prevent-PR-history-noise-from-blocking-mission-reviews.md:2 declares id TASK-2358; status backlog, outside the cohort and outside backlog/completed/, so it changes no cohort classification.",
+    "method": [
+      "node /tmp/2291_audit.mjs (frontmatter parser, label union across all backlog stores)",
+      "awk cross-check over both block and inline labels forms"
+    ]
+  }
+}
