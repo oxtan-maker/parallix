@@ -8,6 +8,7 @@ labels:
   - refactor
   - maintainability
   - forgejo
+  - user_value
 dependencies: []
 priority: medium
 ---
