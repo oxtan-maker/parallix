@@ -15,6 +15,7 @@ import {
   updateAgentBlock,
   resolveBlocklistTargetPath
 } from './agent-config.js';
+import { resolveAgentBlockAuthority } from './agent-block-authority.js';
 import {
   KNOWN_AGENT_NAMES,
   WORKFLOW_AGENT_NAMES,
@@ -235,10 +236,15 @@ function shouldPersistLaunchFailureBlock(agent: string, result: LaunchResultLike
   return !NON_BLOCKING_LAUNCH_ERROR_PATTERNS.some(pattern => pattern.test(combined));
 }
 
-function defaultIsAgentBlockedNow(agent: string) {
+async function defaultIsAgentBlockedNow(agent: string) {
   try {
+    const { initOperatorState } = await import('../sqlite/adapter-factory.js');
+    const { SqliteBlocklistRepository } = await import('../sqlite/blocklist-repository.js');
+    const { AgentBlockService } = await import('../../application/services/agent-block-service.js');
     const config = readAgentConfig(CONFIG_PATH, {});
-    return isAgentBlocked(agent, config);
+    const state = await initOperatorState();
+    const runtimeBlock = await new AgentBlockService(new SqliteBlocklistRepository(state.db)).query(agent);
+    return resolveAgentBlockAuthority(agent, runtimeBlock, config).blocked;
   } catch (_err) {
     // If the config is malformed, surface that through the launcher path
     // (assertAgentSupported / launch) instead of silently rerouting. Treat as
@@ -341,14 +347,14 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
           `Tried: ${launchedList}. Errors: ${errorDetails}.`
         );
       }
-    } else if (isAgentBlockedFn(chosen)) {
-      refuseFallbackWhenPinned('currently blocked in agents.local.json');
+    } else if (await isAgentBlockedFn(chosen)) {
+      refuseFallbackWhenPinned('currently blocked by the block authority');
       // Pre-launch blocklist gate. An explicit `agent:` override (e.g. a pinned
       // reviewer/implementer carried over from the mission's Review) bypasses
       // selectAgent's blocklist filter. Without this check, a known-blocked
       // family is relaunched immediately and the harness wastes a retry hitting
       // the same limit. Reroute through normal selection on the next iteration.
-      log(fmt.status('WARN', `Pinned agent "${fmt.agent(chosen)}" is currently blocked in agents.local.json; rerouting via selectAgent for step "${step}".`));
+      log(fmt.status('WARN', `Pinned agent "${fmt.agent(chosen)}" is currently blocked; rerouting via selectAgent for step "${step}".`));
       tried.add(chosen);
       chosen = undefined;
       continue;
@@ -691,6 +697,8 @@ export {
   isInvalidAgentConfigError,
   updateAgentBlock,
   resolveBlocklistTargetPath,
+  defaultIsAgentBlockedNow,
+  updateAgentBlockChecked,
   resolveNoOutputWatchdogConfig,
   shouldPersistLaunchFailureBlock
 };
