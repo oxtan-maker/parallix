@@ -2,7 +2,7 @@
 id: TASK-2367
 title: 'Fix integration completion, remove telemetry completion, and repair statistics'
 status: backlog
-assignee: []
+assignee: [codex]
 created_date: '2026-08-12 09:13'
 labels: []
 dependencies: []
