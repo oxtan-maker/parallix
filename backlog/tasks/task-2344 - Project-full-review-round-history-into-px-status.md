@@ -2,7 +2,7 @@
 id: TASK-2344
 title: Project full review round history into px status
 status: backlog
-assignee: []
+assignee: [codex]
 created_date: '2026-08-06 00:00'
 labels:
   - bug
