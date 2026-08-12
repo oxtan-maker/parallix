@@ -172,15 +172,15 @@ describe('TASK-2357 production certification: full path from persisted facts to 
     await laneEventRepo.append(laneEvent({ repositoryId: REPO_B, missionId: task200, from: 'backlog', to: 'done', at: DONE_FRI }));
 
     // 4. Persist usage rows (real SQLite writes)
-    await insertUsageRow(db, { repo: REPO, mission: task100, date: '2026-06-05', classification: 'ai_sdlc', closed: 'yes', prFixRounds: 0, durationMinutes: 45, inputTokens: 5000, costUsd: 2.50 });
-    await insertUsageRow(db, { repo: REPO, mission: task101, date: '2026-06-03', classification: 'ai_sdlc', closed: 'yes', prFixRounds: 2, durationMinutes: 30, inputTokens: 3000, costUsd: 1.75 });
-    await insertUsageRow(db, { repo: REPO, mission: task102, date: '2026-06-04', classification: 'user_value', closed: 'yes', prFixRounds: null, durationMinutes: 60 });
-    await insertUsageRow(db, { repo: REPO, mission: task103, date: '2026-06-05', classification: 'user_value', closed: 'yes', prFixRounds: null });
-    await insertUsageRow(db, { repo: REPO, mission: task104, date: '2026-06-05', classification: 'ai_sdlc', closed: 'yes', prFixRounds: 1, durationMinutes: 20, inputTokens: 2000, costUsd: 0.80 });
+    await insertUsageRow(db, { repo: REPO, mission: task100, date: '2026-06-05', classification: 'ai_sdlc', prFixRounds: 0, durationMinutes: 45, inputTokens: 5000, costUsd: 2.50 });
+    await insertUsageRow(db, { repo: REPO, mission: task101, date: '2026-06-03', classification: 'ai_sdlc', prFixRounds: 2, durationMinutes: 30, inputTokens: 3000, costUsd: 1.75 });
+    await insertUsageRow(db, { repo: REPO, mission: task102, date: '2026-06-04', classification: 'user_value', prFixRounds: null, durationMinutes: 60 });
+    await insertUsageRow(db, { repo: REPO, mission: task103, date: '2026-06-05', classification: 'user_value', prFixRounds: null });
+    await insertUsageRow(db, { repo: REPO, mission: task104, date: '2026-06-05', classification: 'ai_sdlc', prFixRounds: 1, durationMinutes: 20, inputTokens: 2000, costUsd: 0.80 });
     // task-105: no telemetry
-    await insertUsageRow(db, { repo: REPO, mission: task106, date: '2026-06-05', classification: 'user_value', closed: 'yes', prFixRounds: 1, durationMinutes: 25 });
-    await insertUsageRow(db, { repo: REPO, mission: task107, date: '2026-05-25', classification: 'ai_sdlc', closed: 'yes', prFixRounds: 0, durationMinutes: 35, inputTokens: 4000, costUsd: 1.50 });
-    await insertUsageRow(db, { repo: REPO_B, mission: task200, date: '2026-06-05', classification: 'ai_sdlc', closed: 'yes', prFixRounds: 3, durationMinutes: 50 });
+    await insertUsageRow(db, { repo: REPO, mission: task106, date: '2026-06-05', classification: 'user_value', prFixRounds: 1, durationMinutes: 25 });
+    await insertUsageRow(db, { repo: REPO, mission: task107, date: '2026-05-25', classification: 'ai_sdlc', prFixRounds: 0, durationMinutes: 35, inputTokens: 4000, costUsd: 1.50 });
+    await insertUsageRow(db, { repo: REPO_B, mission: task200, date: '2026-06-05', classification: 'ai_sdlc', prFixRounds: 3, durationMinutes: 50 });
 
     // 5. Build metrics through ConcreteMetricsReadAdapter (production path)
     const cohortMetadata = async () => new Map<MissionId, { labels: readonly MissionLabel[]; assignee: AgentFamily | null }>([

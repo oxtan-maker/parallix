@@ -425,7 +425,7 @@ function setupRepository({ slug, title, agent = 'custom', runner = 'opencode' })
   //      asserts explicitly.
   //   2. Cost containment: no fallback or reviewer selection can ever launch
   //      an expensive cloud agent (claude/codex) from this blocking gate.
-  const blocklist = { claude: { blocked: true }, codex: { blocked: true }, vibe: { blocked: true }, custom: { blocked: true } };
+  const blocklist = { claude: { blocked: true }, codex: { blocked: true }, qwen: { blocked: true }, vibe: { blocked: true }, custom: { blocked: true } };
   delete blocklist[agent];
   fs.writeFileSync(path.join(stateHome, 'agents.local.json'), JSON.stringify({ blocklist }, null, 2), 'utf8');
 

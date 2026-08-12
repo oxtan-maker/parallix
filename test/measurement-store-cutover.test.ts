@@ -43,7 +43,6 @@ function measurement(overrides: Record<string, unknown> = {}) {
     openai_usage_delta: 0,
     duration_minutes: 3,
     cost_usd: 0.5,
-    closed: '',
     ...overrides,
   };
 }

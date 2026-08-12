@@ -33,14 +33,14 @@ describe('TASK-2363: the default FLOW cohort is the current rolling week', () =>
       await laneEventRepo.append(laneEvent({ repositoryId: REPO, missionId: RECENT, from: 'backlog', to: 'done', at: '2026-08-06T09:00:00.000Z' }));
       await insertUsageRow(db, {
         repo: REPO, mission: RECENT, date: '2026-08-06',
-        classification: 'ai_sdlc', closed: 'yes', prFixRounds: 1, durationMinutes: 30,
+        classification: 'ai_sdlc', prFixRounds: 1, durationMinutes: 30,
       });
 
       await laneEventRepo.append(laneEvent({ repositoryId: REPO, missionId: SIX_MONTHS_OLD, from: null, to: 'backlog', at: '2026-02-01T09:00:00.000Z' }));
       await laneEventRepo.append(laneEvent({ repositoryId: REPO, missionId: SIX_MONTHS_OLD, from: 'backlog', to: 'done', at: '2026-02-10T09:00:00.000Z' }));
       await insertUsageRow(db, {
         repo: REPO, mission: SIX_MONTHS_OLD, date: '2026-02-10',
-        classification: 'ai_sdlc', closed: 'yes', prFixRounds: 7, durationMinutes: 900,
+        classification: 'ai_sdlc', prFixRounds: 7, durationMinutes: 900,
         actorKey: 'claude|old',
       });
 
@@ -68,7 +68,7 @@ describe('TASK-2363: the default FLOW cohort is the current rolling week', () =>
       await laneEventRepo.append(laneEvent({ repositoryId: REPO, missionId: RECENT, from: 'backlog', to: 'done', at: '2026-08-06T09:00:00.000Z' }));
       await insertUsageRow(db, {
         repo: REPO, mission: RECENT, date: '2026-08-06',
-        classification: 'ai_sdlc', closed: 'yes', prFixRounds: 1, durationMinutes: 30,
+        classification: 'ai_sdlc', prFixRounds: 1, durationMinutes: 30,
       });
 
       const metrics = await new ConcreteMetricsReadAdapter({

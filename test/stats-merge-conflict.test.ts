@@ -160,7 +160,6 @@ test('readLegacyStatsCsv returns expected schema with cleaned data', () => {
 
   // readLegacyStatsCsv migrates legacy 5-column rows to the full 22-column schema
   // (task-1251 + task-1380): legacy columns preserved, new columns defaulted.
-  // Legacy rows without a `closed` column default to 'yes' (task-1380).
   assert.deepEqual(data.headers, stats.STATS_HEADERS);
   assert.equal(data.rows.length, 2);
   const expected = stats.normalizeStatsRow({
@@ -170,8 +169,6 @@ test('readLegacyStatsCsv returns expected schema with cleaned data', () => {
     implementer: 'claude',
     pr_fix_rounds: '1',
   });
-  // Legacy CSV rows get closed: 'yes' from readLegacyStatsCsv migration
-  expected.closed = 'yes';
   assert.deepEqual(data.rows[0], expected);
   } finally {
     cleanupCsv(csv);

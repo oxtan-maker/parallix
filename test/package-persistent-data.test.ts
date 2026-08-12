@@ -106,7 +106,7 @@ test('global tarball reinstall preserves PARALLIX_HOME measurements and agent bl
     const writeScript = [
       `const stats = require(${JSON.stringify(path.join(PACKAGE_ROOT, 'src', 'adapters', 'cli', 'commands', 'stats.ts'))});`,
       `const agents = require(${JSON.stringify(path.join(PACKAGE_ROOT, 'src', 'adapters', 'agents', 'agents.ts'))});`,
-      "stats.upsertMeasurementRow({date:'2026-06-06',mission:'task-reinstall-proof',classification:'ai_sdlc',implementer:'codex',pr_fix_rounds:'2',closed:'yes'});",
+      "stats.upsertMeasurementRow({date:'2026-06-06',mission:'task-reinstall-proof',classification:'ai_sdlc',implementer:'codex',pr_fix_rounds:'2',});",
       "agents.updateAgentBlock('custom', '2026-07-01 12');"
     ].join('');
     run(process.execPath, ['--import', TSX_IMPORT, '-e', writeScript], { cwd: repoOne, env });

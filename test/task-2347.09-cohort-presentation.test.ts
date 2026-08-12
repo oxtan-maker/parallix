@@ -62,7 +62,6 @@ const USAGE_RECORDS: readonly UsageRecord[] = SEEDS.map((seed) => ({
   duration_minutes: seed.minutes,
   cost_usd: 1,
   pr_fix_rounds: 0,
-  closed: 'yes',
 }));
 
 function comparisonOf(threshold = LOW_SAMPLE_THRESHOLD): CohortComparison {

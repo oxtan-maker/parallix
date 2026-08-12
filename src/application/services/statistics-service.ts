@@ -2,13 +2,12 @@
  * Canonical statistics semantics shared by presentation adapters.
  *
  * This is deliberately dependency-light: the CLI's persisted telemetry rows
- * and board's usage rows have compatible identity, completion, and date fields.
+ * and board's usage rows have compatible identity and date fields.
  */
 export interface StatisticsRow {
   readonly repo?: string;
   readonly mission?: string;
   readonly date?: string;
-  readonly closed?: string;
   readonly classification?: string;
 }
 
@@ -27,11 +26,6 @@ export function statisticsMissionKey(row: Pick<StatisticsRow, 'repo' | 'mission'
   return `${String(row.repo ?? '').trim()}::${String(row.mission ?? '').trim().toLowerCase()}`;
 }
 
-/** A mission is complete only when the persisted completion marker is exactly yes. */
-export function isCompletedStatisticsRow(row: Pick<StatisticsRow, 'closed'>): boolean {
-  return row.closed === 'yes';
-}
-
 /** Reporting windows compare date-only telemetry as UTC calendar instants. */
 export function statisticsRowInWindow(row: Pick<StatisticsRow, 'date'>, window: ReportingWindow): boolean {
   if (!row.date) { return false; }
@@ -43,8 +37,11 @@ export function statisticsRowInWindow(row: Pick<StatisticsRow, 'date'>, window: 
 export function summarizeCompletedMissionWindow<Row extends StatisticsRow>(
   rows: readonly Row[],
   window: ReportingWindow,
+  completedMissionKeys: ReadonlySet<string> = new Set(),
 ): MissionWindowSummary<Row> {
-  const completedRows = rows.filter((row) => statisticsRowInWindow(row, window) && isCompletedStatisticsRow(row));
+  const completedRows = rows.filter((row) =>
+    statisticsRowInWindow(row, window) && completedMissionKeys.has(statisticsMissionKey(row)),
+  );
   const seen = new Set<string>();
   const missions = completedRows.filter((row) => {
     const key = statisticsMissionKey(row);

@@ -108,7 +108,6 @@ export interface UsageRowInput {
   readonly inputTokens?: number | null;
   readonly outputTokens?: number | null;
   readonly costUsd?: number | null;
-  readonly closed?: string;
   readonly provider?: string | null;
   readonly model?: string | null;
 }
@@ -130,8 +129,8 @@ export async function insertUsageRow(
        provider, model, implementer_agent, reviewer_agent, stage, actor_key,
        input_tokens, output_tokens, cached_tokens, context_tokens, tool_calls,
        openai_usage_before, openai_usage_after, openai_usage_delta,
-       duration_minutes, cost_usd, closed)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+       duration_minutes, cost_usd)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
     [
       input.date,
       input.repo,
@@ -155,7 +154,6 @@ export async function insertUsageRow(
       null,
       input.durationMinutes ?? null,
       input.costUsd ?? null,
-      input.closed ?? '',
     ],
   );
 }

@@ -107,7 +107,6 @@ export async function persistMission(
     mission: mission.missionId,
     date: closedAt.slice(0, 10),
     classification: mission.classification,
-    closed: 'yes',
     prFixRounds: mission.telemetry.prFixRounds ?? null,
     durationMinutes: mission.telemetry.durationMinutes ?? null,
     inputTokens: mission.telemetry.inputTokens ?? null,

@@ -46,9 +46,10 @@ const MISSION_FLOW_LABELS = ['user_value', 'ai_sdlc'];
 function summarizeMissionFlowWindow(outcomes, window) {
   const inWindow = outcomes.filter(outcome => {
     const closed = Date.parse(outcome.closedAt);
+    const day = String(outcome.closedAt).slice(0, 10);
     return Number.isFinite(closed)
-      && closed >= window.start.getTime()
-      && closed <= window.end.getTime();
+      && day >= window.start.toISOString().slice(0, 10)
+      && day <= window.end.toISOString().slice(0, 10);
   });
   const withLabel = label => inWindow.filter(outcome => outcome.labels.includes(label)).length;
   return {
@@ -113,16 +114,21 @@ function renderWeeklyStatsReport(rows, options = {}) {
   const today = options.today || new Date();
   const rootDir = options.rootDir || null;
   const windows = buildWeeklyWindows(/** @type{Date} */(typeof today === 'string' ? new Date(`${today}T00:00:00Z`) : today));
-  const currentMissionStats = summarizeMissionWindow(rows, windows.current);
-  const previousMissionStats = summarizeMissionWindow(rows, windows.previous);
-  const currentAgentStats = summarizeAgentWindow(rows, windows.current, { rootDir });
-  const previousAgentStats = summarizeAgentWindow(rows, windows.previous, { rootDir });
+  const missionFlow = options.missionFlow ?? null;
+  const completedMissionKeys = new Set((missionFlow || []).map(outcome =>
+    `${String(outcome.repo).trim()}::${String(outcome.mission).trim().toLowerCase()}`,
+  ));
+  const telemetryMissionKeys = new Set(rows.map(row =>
+    `${String(row.repo ?? '').trim()}::${String(row.mission ?? '').trim().toLowerCase()}`,
+  ));
+  const currentMissionStats = summarizeMissionWindow(rows, windows.current, telemetryMissionKeys);
+  const previousMissionStats = summarizeMissionWindow(rows, windows.previous, telemetryMissionKeys);
+  const currentAgentStats = missionFlow === null ? [] : summarizeAgentWindow(rows, windows.current, { rootDir, completedMissionKeys });
+  const previousAgentStats = missionFlow === null ? [] : summarizeAgentWindow(rows, windows.previous, { rootDir, completedMissionKeys });
   const currentMissionColors = colorMissionCounts(currentAgentStats);
   const currentAgentColors = colorAverageFixRounds(currentAgentStats);
   const previousMissionColors = colorMissionCounts(previousAgentStats);
   const previousAgentColors = colorAverageFixRounds(previousAgentStats);
-
-  const missionFlow = options.missionFlow ?? null;
 
   const lines = [];
   lines.push(...missionFlowSection('Mission flow — current week', missionFlow, windows.current));
@@ -142,7 +148,7 @@ function renderWeeklyStatsReport(rows, options = {}) {
   ));
   lines.push('');
   lines.push(fmt.bold(`Agent performance this week (${windows.current.label})`));
-  lines.push(formatStatsTable(
+  lines.push(missionFlow === null ? 'Agent performance unavailable: lifecycle history was not read.' : formatStatsTable(
     ['Agent family', '# missions as implementer', 'Average PR fix rounds to complete mission'],
     currentAgentStats.length > 0
       ? currentAgentStats.map((row, index) => [row.implementer, currentMissionColors[index], currentAgentColors[index]])
@@ -163,7 +169,7 @@ function renderWeeklyStatsReport(rows, options = {}) {
   ));
   lines.push('');
   lines.push(fmt.bold(`Agent performance previous week (${windows.previous.label})`));
-  lines.push(formatStatsTable(
+  lines.push(missionFlow === null ? 'Agent performance unavailable: lifecycle history was not read.' : formatStatsTable(
     ['Agent family', '# missions as implementer', 'Average PR fix rounds to complete mission'],
     previousAgentStats.length > 0
       ? previousAgentStats.map((row, index) => [row.implementer, previousMissionColors[index], previousAgentColors[index]])
@@ -181,13 +187,20 @@ function renderRangeStatsReport(rows, options = {}) {
   const to = options.to;
   const rootDir = options.rootDir || null;
   const window = createRangeWindow({ from, to });
-  const missionStats = summarizeMissionWindow(rows, window);
-  const agentStats = summarizeAgentWindow(rows, window, { rootDir });
+  const missionFlow = options.missionFlow ?? null;
+  const completedMissionKeys = new Set((missionFlow || []).map(outcome =>
+    `${String(outcome.repo).trim()}::${String(outcome.mission).trim().toLowerCase()}`,
+  ));
+  const telemetryMissionKeys = new Set(rows.map(row =>
+    `${String(row.repo ?? '').trim()}::${String(row.mission ?? '').trim().toLowerCase()}`,
+  ));
+  const missionStats = summarizeMissionWindow(rows, window, telemetryMissionKeys);
+  const agentStats = missionFlow === null ? [] : summarizeAgentWindow(rows, window, { rootDir, completedMissionKeys });
   const missionColors = colorMissionCounts(agentStats);
   const agentColors = colorAverageFixRounds(agentStats);
 
   const lines = [];
-  lines.push(...missionFlowSection('Mission flow', options.missionFlow ?? null, window));
+  lines.push(...missionFlowSection('Mission flow', missionFlow, window));
   lines.push('');
   lines.push(fmt.bold(`Agent telemetry missions (${window.label})`));
   lines.push(formatStatsTable(
@@ -196,7 +209,7 @@ function renderRangeStatsReport(rows, options = {}) {
   ));
   lines.push('');
   lines.push(fmt.bold(`Agent performance (${window.label})`));
-  lines.push(formatStatsTable(
+  lines.push(missionFlow === null ? 'Agent performance unavailable: lifecycle history was not read.' : formatStatsTable(
     ['Agent family', '# missions as implementer', 'Average PR fix rounds to complete mission'],
     agentStats.length > 0
       ? agentStats.map((row, index) => [row.implementer, missionColors[index], agentColors[index]])

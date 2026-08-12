@@ -111,16 +111,13 @@ const LEGACY_HEADERS = ['date', 'mission', 'classification', 'implementer', 'pr_
 // Extended 22-column telemetry schema (architecture migration + architecture migration + architecture migration). Legacy
 // 5-column rows are migrated in-memory on load: the legacy columns are preserved
 // and the new columns default to '' (text) or '0' (numeric). On the next write the
-// file header is upgraded and existing rows gain the new columns. The `closed`
-// column (architecture migration) stores 'yes' for closed/integrated missions and is empty for
-// in-progress stage rows; filtering by `closed === 'yes'` excludes in-progress
-// missions from weekly and range mission counts.
+// file header is upgraded and existing rows gain the new columns.
 const STATS_HEADERS = [
   'date', 'repo', 'mission', 'classification', 'implementer', 'pr_fix_rounds',
   'provider', 'model', 'implementer_agent', 'reviewer_agent', 'stage',
   'input_tokens', 'output_tokens', 'cached_tokens', 'thoughts_tokens', 'context_tokens',
   'tool_calls', 'openai_usage_before', 'openai_usage_after',
-  'openai_usage_delta', 'duration_minutes', 'cost_usd', 'closed'
+  'openai_usage_delta', 'duration_minutes', 'cost_usd'
 ];
 
 // Columns coerced to non-negative integers on canonicalization.
@@ -222,7 +219,6 @@ function measurementToStatsRow(record): StatsRow {
     openai_usage_delta: numeric(record.openai_usage_delta),
     duration_minutes: numeric(record.duration_minutes),
     cost_usd: numeric(record.cost_usd),
-    closed: record.closed || '',
   };
 }
 
@@ -264,7 +260,6 @@ function statsRowToMeasurement(row: StatsRow) {
     openai_usage_delta: int(row.openai_usage_delta),
     duration_minutes: int(row.duration_minutes),
     cost_usd: dec(row.cost_usd),
-    closed: row.closed || '',
   };
 }
 
@@ -282,6 +277,8 @@ function loadMeasurementRows(options: StatsOptions = {}) {
 
 /** One lifecycle-completed mission, as the mission-flow report reads it. */
 export interface MissionFlowCompletion {
+  readonly repo: string;
+  readonly mission: string;
   readonly closedAt: string;
   readonly labels: readonly string[];
 }
@@ -315,7 +312,7 @@ async function readMissionFlowPopulation(options: {
       usageRepo: repositories.usageRepo,
       repositoryId,
     }).readOutcomes();
-    return outcomes.map((outcome) => ({ closedAt: outcome.closedAt, labels: outcome.labels }));
+    return outcomes.map((outcome) => ({ repo: String(repositoryId), mission: String(outcome.missionId), closedAt: outcome.closedAt, labels: outcome.labels }));
   } catch {
     return null;
   }
@@ -418,19 +415,9 @@ function readLegacyStatsCsv(filePath: string, options: LoadStatsCsvOptions = {})
     return { headers: [...STATS_HEADERS], rows: [] };
   }
 
-  // Detect whether the loaded CSV already has the `closed` column (architecture migration).
-  // Legacy CSVs (pre-closed) lack the column; their rows represent completed
-  // missions written at integration time, so default `closed` to 'yes' for
-  // backward compatibility. Modern CSVs already have the column set per-row.
-  const hasClosedColumn = data.headers.includes('closed');
-  const migratedRows = data.rows.map((row: Record<string, string>) => {
-    const normalized = normalizeStatsRow(row, { rootDir: options.rootDir });
-    if (!hasClosedColumn) {
-      // Legacy CSV: all rows are from integration time, treat as closed.
-      return { ...normalized, closed: 'yes' };
-    }
-    return { ...normalized, closed: row.closed || '' };
-  });
+  const migratedRows = data.rows.map((row: Record<string, string>) =>
+    normalizeStatsRow(row, { rootDir: options.rootDir }),
+  );
 
   return {
     headers: [...STATS_HEADERS],
@@ -443,8 +430,7 @@ function readLegacyStatsCsv(filePath: string, options: LoadStatsCsvOptions = {})
  * Map any row (legacy 5-column or full 21-column) to the full schema, defaulting
  * missing text columns to '' and numeric columns to '0'. `stage` defaults to
  * 'default' so legacy rows and integration rows share the (repo, mission, stage)
- * upsert key. `closed` defaults to '' (unset) — the backward-compat default of
- * 'yes' for legacy CSV rows is applied exclusively in `readLegacyStatsCsv`.
+ * upsert key.
  */
 function normalizeStatsRow(row: StatsRow = {} as StatsRow, options: NormalizeStatsRowOptions = {} as NormalizeStatsRowOptions) {
   const repo = String(row.repo || options.repo || resolveStatsRepoName(options.rootDir)).trim();
@@ -473,7 +459,6 @@ function normalizeStatsRow(row: StatsRow = {} as StatsRow, options: NormalizeSta
     openai_usage_delta: row.openai_usage_delta || '0',
     duration_minutes: row.duration_minutes || '0',
     cost_usd: row.cost_usd || '0',
-    closed: row.closed || '',
   };
 }
 
@@ -872,8 +857,8 @@ function rowInWindow(row, window) {
  * @param {StatsRow[]} rows
  * @param {{start: Date, end: Date}} window
  */
-function summarizeMissionWindow(rows, window) {
-  const { rows: closedRows, missions: uniqueMissions } = summarizeCompletedMissionWindow(rows, window);
+function summarizeMissionWindow(rows, window, completedMissionKeys = new Set()) {
+  const { rows: closedRows, missions: uniqueMissions } = summarizeCompletedMissionWindow(rows, window, completedMissionKeys);
   const userValue = uniqueMissions.filter(row => normalizeClassification(row.classification) === 'user_value').length;
   const aiSdlc = uniqueMissions.filter(row => normalizeClassification(row.classification) === 'ai_sdlc').length;
   const unknown = uniqueMissions.filter(row => normalizeClassification(row.classification) === 'unknown').length;
@@ -908,21 +893,14 @@ function summarizeMissionWindow(rows, window) {
 function computeAgentMissionGroups(rows, window, options = {}) {
   const windowRows = rows.filter(row => rowInWindow(row, window));
   const validWindowRows = windowRows.filter(row => normalizeClassification(row.classification) !== null);
-  // `completedOnly` keys off the mission, not the row: completion is recorded
-  // on the blank-model rollup row, while the mission's model lives on its
-  // (non-closed) stage rows. Filtering individual rows by closed status would
-  // drop the attribution data and collapse model rows into implementer
-  // families, so keep every row belonging to a completed mission instead.
+  // Completion is supplied by lifecycle readers, never inferred from telemetry.
   let allValidWindowRows = validWindowRows;
   if (options.completedOnly) {
-    const completedMissionKeys = new Set(
-      validWindowRows.filter(row => row.closed === 'yes').map(row => statsMissionKey(row)),
-    );
+    const completedMissionKeys = options.completedMissionKeys || new Set();
     allValidWindowRows = validWindowRows.filter(row => completedMissionKeys.has(statsMissionKey(row)));
   }
   // The non-completed path supports the live spend table, where no final owner
-  // exists yet. It picks a concrete model deterministically. Completed mission
-  // ownership is replaced below from the closed integration rollup instead.
+  // exists yet. It picks a concrete model deterministically.
   /** @type {Record<string, StatsRow>} */
   const byMission = {};
   /** @type {Record<string, StatsRow[]>} */
@@ -973,46 +951,33 @@ function computeAgentMissionGroups(rows, window, options = {}) {
   }
 
   if (options.completedOnly) {
-    // `closed: yes` establishes only that the mission is complete. It can be
-    // stamped on a rollup or on a reviewer row, so it must not determine model
-    // ownership. Credit the latest implementation-stage telemetry instead;
-    // review-stage telemetry belongs to the reviewer, not the implementer.
     for (const [key, missionRows] of Object.entries(rowsByMission)) {
-      const completedRows = missionRows.filter(row => row.closed === 'yes');
-      const completion = completedRows.reduce((latest, row) =>
-        !latest || row.date >= latest.date ? row : latest, null);
-      if (!completion) {continue;}
-
-      const implementationModels = missionRows.filter(row =>
-        String(row.model || '').trim()
+      const rollup = [...missionRows].reverse().find(row => row.stage === 'default');
+      const owner = rollup?.implementer ?? [...missionRows].reverse().find(row =>
+        String(row.stage || 'default').trim().toLowerCase() !== 'review',
+      )?.implementer;
+      const ownerModel = [...missionRows].reverse().find(row =>
+        row.implementer === owner
           && String(row.stage || 'default').trim().toLowerCase() !== 'review'
+          && String(row.model || '').trim(),
       );
-      const modelRow = implementationModels.reduce((latest, row) =>
-        !latest || row.date >= latest.date ? row : latest, null);
-
-      // With no implementation telemetry, retain the closed row so its
-      // implementer value (rather than inventing a reviewer model) is shown.
-      // The closed rollup row's `implementer` is the reported implementer
-      // (from deriveImplementerAndFixRounds) — the authority for mission
-      // attribution. Model display can still come from the stage row.
-      const selected = modelRow || completion;
-      selected.reportedImplementer = completion.implementer;
-      byMission[key] = selected;
+      if (owner && byMission[key]) {
+        byMission[key] = {
+          ...(ownerModel || rollup || byMission[key]),
+          reportedImplementer: owner,
+          pr_fix_rounds: rollup?.pr_fix_rounds ?? byMission[key].pr_fix_rounds,
+        };
+      }
     }
   }
-  const uniqueMissions = Object.values(byMission);
+
+ const uniqueMissions = Object.values(byMission);
 
   /** @type {Record<string, StatsRow[]>} */
   const groups = {};
   /** @type {Record<string, string>} */
   const missionKeyToDisplayKey = {};
   for (const row of uniqueMissions) {
-    // Completed missions: reportedImplementer (from closed rollup row) is the
-    // authority for grouping. Display key uses the model only when it belongs
-    // to the reported implementer's family (preserves task-2213 model display
-    // for single-implementer missions). When the model belongs to a different
-    // implementer (e.g. earlier implementer's model), show the reported
-    // implementer name instead.
     const modelTrimmed = (row.model && String(row.model).trim()) || '';
     let displayKey;
     if (row.reportedImplementer) {
@@ -1043,7 +1008,9 @@ function summarizeAgentWindow(rows, window, options = {}) {
   // Mission counts and repair-round averages describe completed missions only.
   // Other report sections reuse the grouping helper without this filter so
   // their live stage telemetry remains unchanged.
-  const { allValidWindowRows, groups } = computeAgentMissionGroups(rows, window, { completedOnly: true });
+  const { allValidWindowRows, groups } = computeAgentMissionGroups(rows, window, {
+    completedOnly: true, completedMissionKeys: options.completedMissionKeys,
+  });
   // Build agent groups from the globally deduplicated missions.
   //
   // `pr_fix_rounds` comes off the stored measurement rows. This used to be
@@ -1056,17 +1023,19 @@ function summarizeAgentWindow(rows, window, options = {}) {
   // application's back to try. `deriveFixRoundsFn` stays as an injection point
   // for a caller that has already derived a count.
   //
-  // The authoritative pr_fix_rounds lives on the closed rollup row
-  // (stamped by deriveImplementerAndFixRounds). Reading the closed row
-  // directly avoids picking up stale values from stage rows that may
-  // include a previous implementer's rounds. When multiple rows are
-  // closed, the last one wins (rollup row is appended last).
+  // Review-fix values are nullable telemetry observations, keyed by lifecycle
+  // completion rather than a telemetry completion row.
   /** @type {Record<string, number>} */
   const storedRoundsByMission = {};
+  const roundsFromRollupByMission = new Set();
   for (const row of allValidWindowRows) {
-    if (row.closed === 'yes') {
-      const key = statsMissionKey(row);
-      storedRoundsByMission[key] = Number.parseInt(String(row.pr_fix_rounds), 10) || 0;
+    const key = statsMissionKey(row);
+    if (row.pr_fix_rounds !== undefined) {
+      // The default rollup is authoritative; without one, the final row is.
+      if (row.stage === 'default' || !roundsFromRollupByMission.has(key)) {
+        storedRoundsByMission[key] = Number.parseInt(String(row.pr_fix_rounds), 10) || 0;
+        if (row.stage === 'default') { roundsFromRollupByMission.add(key); }
+      }
     }
   }
   const roundsFor = (/** @type {any} */ row) => {
@@ -1645,7 +1614,6 @@ function canonicalizeStatsRow(row, options = {}) {
     classification: /** @type{string|number|boolean|undefined} */(normalizeClassification(row.classification)),
     implementer: /** @type{string|number|boolean|undefined} */(normalizeImplementer(row.implementer)),
     stage: String(row.stage || '').trim().toLowerCase() || 'default',
-    closed: row.closed || '',
   };
   for (const key of USAGE_NUMBERS) {
     const value = /** @type{any} */(normalized)[key];
@@ -1714,18 +1682,18 @@ async function recordIntegrationStats(options = {}) {
   }
   const { classification } = resolution;
   const implementerInfo = await deriveImplementerAndFixRounds(slug, rootDir, missionStore);
-  const result = upsertMeasurementRow({
+ const result = upsertMeasurementRow({
     date,
     mission: slug,
     classification,
     implementer: implementerInfo.implementer,
     pr_fix_rounds: implementerInfo.prFixRounds,
-    closed: 'yes',
-  }, { rootDir, store, dbPath });
+ }, { rootDir, store, dbPath });
+  const missionFlow = await readMissionFlowPopulation({ rootDir });
 
-  return {
-    ...result,
-    report: renderWeeklyStatsReport(result.data.rows, { today: date, rootDir }),
+ return {
+   ...result,
+    report: renderWeeklyStatsReport(result.data.rows, { today: date, rootDir, missionFlow }),
     metadataSource: {
       classification: 'backlog-task',
       implementer: implementerInfo.source,
@@ -2035,7 +2003,6 @@ function analyzeLegacyStatsCsv(filePath: string, options: {rootDir?: string} = {
     );
   }
 
-  const hasClosedColumn = data.headers.includes('closed');
   const importable = [];
   const malformed = [];
   const seen = new Map();
@@ -2077,10 +2044,7 @@ function analyzeLegacyStatsCsv(filePath: string, options: {rootDir?: string} = {
     }
 
     const normalized = normalizeStatsRow(raw, { rootDir });
-    const canonical = canonicalizeStatsRow(
-      { ...normalized, closed: hasClosedColumn ? (raw.closed || '') : 'yes' },
-      { rootDir }
-    );
+    const canonical = canonicalizeStatsRow(normalized, { rootDir });
     const identity = `${canonical.repo}::${canonical.mission}::${canonical.stage}::${statsRowActorKey(canonical)}`;
     const previous = seen.get(identity);
     if (previous) {

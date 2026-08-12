@@ -23,24 +23,26 @@ class MemoryUsageRepository implements UsageRepository {
   async clear(): Promise<void> {}
 }
 
-class EmptyLaneEventRepository implements BoardLaneEventRepository {
+class DoneLaneEventRepository implements BoardLaneEventRepository {
   async append(): Promise<boolean> { return true; }
   async findByMissionId(): Promise<readonly BoardLaneEventEntry[]> { return []; }
   async findAll(): Promise<readonly BoardLaneEventEntry[]> { return []; }
-  async findByRepositoryId(): Promise<readonly BoardLaneEventEntry[]> { return []; }
+  async findByRepositoryId(): Promise<readonly BoardLaneEventEntry[]> {
+    return [{ repositoryId: REPOSITORY, missionId: 'task-2347.08' as MissionId, fromStatus: 'integration', toStatus: 'done', trigger: 'integrate', agent: 'codex', occurredAt: '2026-08-03T00:00:00Z', idempotencyKey: 'task-2347.08-done' }];
+  }
   async clear(): Promise<void> {}
 }
 
 const ROWS: readonly UsageRecord[] = [
-  { repo: REPOSITORY, mission: 'Task-2347.08', date: '2026-08-03', closed: 'yes', classification: 'ai_sdlc', duration_minutes: 30, pr_fix_rounds: 1 },
-  { repo: REPOSITORY, mission: 'task-2347.08', date: '2026-08-03', closed: 'yes', classification: 'ai_sdlc', duration_minutes: 30, pr_fix_rounds: 1 },
+  { repo: REPOSITORY, mission: 'Task-2347.08', date: '2026-08-03', classification: 'ai_sdlc', duration_minutes: 30, pr_fix_rounds: 1 },
+  { repo: REPOSITORY, mission: 'task-2347.08', date: '2026-08-03', classification: 'ai_sdlc', duration_minutes: 30, pr_fix_rounds: 1 },
 ];
 
 test('task-2347.08 repro: CLI and board agree on identity, completions, and cycle time', async () => {
   // @ts-expect-error -- TASK-2328: runtime-only property absent from the inferred type.
-  const cli = stats.summarizeMissionWindow(ROWS, WINDOW);
+  const cli = stats.summarizeMissionWindow(ROWS, WINDOW, new Set([`${REPOSITORY}::task-2347.08`]));
   const board = new ConcreteMetricsReadAdapter({
-    laneEventRepo: new EmptyLaneEventRepository(),
+    laneEventRepo: new DoneLaneEventRepository(),
     usageRepo: new MemoryUsageRepository(ROWS),
     repositoryId: REPOSITORY,
     // Both sides report the same decision window. The CLI window above ends on

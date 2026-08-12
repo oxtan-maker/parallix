@@ -93,8 +93,11 @@ function setupMocks() {
       _repoId: 'default',
       load: async () => ({ kind: 'found', mission: { status: 'review', review: null }, version: 1 }),
     },
-    lifecycle: {
-      transition: async () => ({ status: 'completed', value: { to: 'review', version: 2 } }),
+   lifecycle: {
+     transition: async () => ({ status: 'completed', value: { to: 'review', version: 2 } }),
+   },
+    integration: {
+      decideIntegration: async () => ({ status: 'completed' }),
     },
     handoff: {
       recordNel: async () => ({}),

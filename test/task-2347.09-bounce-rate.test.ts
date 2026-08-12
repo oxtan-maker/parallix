@@ -75,7 +75,6 @@ function usageRecord(mission: string, prFixRounds: number): UsageRecord {
     duration_minutes: 30,
     cost_usd: 1,
     pr_fix_rounds: prFixRounds,
-    closed: 'yes',
   };
 }
 

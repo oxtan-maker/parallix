@@ -1,7 +1,7 @@
 ---
 id: TASK-2367
 title: 'Fix integration completion, remove telemetry completion, and repair statistics'
-status: ready-for-integration
+status: done
 assignee: [codex]
 created_date: '2026-08-12 09:13'
 labels: [ai_sdlc, bug]

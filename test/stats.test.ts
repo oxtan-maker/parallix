@@ -31,6 +31,28 @@ function createRepoFixture() {
   return root;
 }
 
+function completedMissionKeys(rows) {
+  return new Set(rows.filter(row => row.completedForTest === 'yes')
+    .map(row => `${String(row.repo || '')}::${String(row.mission).trim().toLowerCase()}`));
+}
+
+function missionFlow(rows) {
+  return rows.filter(row => row.completedForTest === 'yes')
+    .map(row => ({ repo: String(row.repo || ''), mission: row.mission, closedAt: `${row.date}T00:00:00Z`, labels: [] }));
+}
+
+function renderWeeklyStatsReport(rows, options = {}) {
+  return stats.renderWeeklyStatsReport(rows, { ...options, missionFlow: options.missionFlow ?? missionFlow(rows) });
+}
+
+function renderRangeStatsReport(rows, options = {}) {
+  return stats.renderRangeStatsReport(rows, { ...options, missionFlow: options.missionFlow ?? missionFlow(rows) });
+}
+
+function summarizeAgentWindow(rows, window, options = {}) {
+  return stats._internals.summarizeAgentWindow(rows, window, { ...options, completedMissionKeys: completedMissionKeys(rows) });
+}
+
 // visualBoard's Ways of Working use Forgejo review. Tests that exercise
 // PR-comment-based fix-round derivation declare it on their fixture (the code
 // default is off for config-less distribution repos).
@@ -276,11 +298,14 @@ test('upsertMeasurementRow accepts unknown classification rows and weekly report
       classification: 'unknown',
       implementer: 'unknown',
       pr_fix_rounds: 0,
-      closed: 'yes',
+      completedForTest: 'yes',
     }, { dbPath: dbFile });
 
     const rows = stats.loadMeasurementRows({ dbPath: dbFile }).rows;
-    const report = stats.renderWeeklyStatsReport(rows, { today: '2026-06-23' });
+    const report = renderWeeklyStatsReport(rows, {
+      today: '2026-06-23',
+      missionFlow: [{ repo: 'parallix', mission: 'task-unknown', closedAt: '2026-06-23T00:00:00Z', labels: ['unknown'] }],
+    });
     assert.match(report, /# unknown missions/);
     assert.match(report, /\b1\b/);
   } finally {
@@ -366,7 +391,7 @@ test('stats command defaults to the shared PARALLIX_HOME database across target 
   fs.mkdirSync(home);
   const dbFile = path.join(home, 'parallix.db');
   stats.upsertMeasurementRow(
-    { date: '2026-05-18', mission: 'task-shared', classification: 'user_value', implementer: 'codex', pr_fix_rounds: '1', closed: 'yes' },
+    { date: '2026-05-18', mission: 'task-shared', classification: 'user_value', implementer: 'codex', pr_fix_rounds: '1', completedForTest: 'yes' },
     { dbPath: dbFile, rootDir: repoOne }
   );
   const logs = [];
@@ -408,11 +433,11 @@ test('stats command defaults to the shared PARALLIX_HOME database across target 
 });
 
  test('renderWeeklyStatsReport calculates current and previous seven-day windows from injected today', () => {
-   const report = stats.renderWeeklyStatsReport([
-     { date: '2026-05-18', mission: 'task-a', classification: 'ai_sdlc', implementer: 'codex', pr_fix_rounds: '2', closed: 'yes' },
-     { date: '2026-05-12', mission: 'task-b', classification: 'user_value', implementer: 'gemini', pr_fix_rounds: '1', closed: 'yes' },
-     { date: '2026-05-11', mission: 'task-c', classification: 'ai_sdlc', implementer: 'claude', pr_fix_rounds: '4', closed: 'yes' },
-     { date: '2026-05-05', mission: 'task-d', classification: 'user_value', implementer: 'custom', pr_fix_rounds: '0', closed: 'yes' },
+   const report = renderWeeklyStatsReport([
+     { date: '2026-05-18', mission: 'task-a', classification: 'ai_sdlc', implementer: 'codex', pr_fix_rounds: '2', completedForTest: 'yes' },
+     { date: '2026-05-12', mission: 'task-b', classification: 'user_value', implementer: 'gemini', pr_fix_rounds: '1', completedForTest: 'yes' },
+     { date: '2026-05-11', mission: 'task-c', classification: 'ai_sdlc', implementer: 'claude', pr_fix_rounds: '4', completedForTest: 'yes' },
+     { date: '2026-05-05', mission: 'task-d', classification: 'user_value', implementer: 'custom', pr_fix_rounds: '0', completedForTest: 'yes' },
    ], { today: '2026-05-18' });
 
   assert.match(report, /Agent telemetry — current week \(2026-05-12 → 2026-05-18\)/);
@@ -428,11 +453,11 @@ test('stats command defaults to the shared PARALLIX_HOME database across target 
 });
 
 test('renderRangeStatsReport filters inclusive boundary dates and summarizes mission counts', () => {
-  const report = stats.renderRangeStatsReport([
+  const report = renderRangeStatsReport([
     { date: '2026-04-30', mission: 'task-before', classification: 'ai_sdlc', implementer: 'codex', pr_fix_rounds: '9' },
-    { date: '2026-05-01', mission: 'task-start', classification: 'ai_sdlc', implementer: 'codex', pr_fix_rounds: '2', closed: 'yes' },
-    { date: '2026-05-15', mission: 'task-middle', classification: 'user_value', implementer: 'gemini', pr_fix_rounds: '1', closed: 'yes' },
-    { date: '2026-05-31', mission: 'task-end', classification: 'user_value', implementer: 'codex', pr_fix_rounds: '4', closed: 'yes' },
+    { date: '2026-05-01', mission: 'task-start', classification: 'ai_sdlc', implementer: 'codex', pr_fix_rounds: '2', completedForTest: 'yes' },
+    { date: '2026-05-15', mission: 'task-middle', classification: 'user_value', implementer: 'gemini', pr_fix_rounds: '1', completedForTest: 'yes' },
+    { date: '2026-05-31', mission: 'task-end', classification: 'user_value', implementer: 'codex', pr_fix_rounds: '4', completedForTest: 'yes' },
     { date: '2026-06-01', mission: 'task-after', classification: 'user_value', implementer: 'claude', pr_fix_rounds: '0' },
   ], { from: '2026-05-01', to: '2026-05-31' });
 
@@ -446,30 +471,43 @@ test('renderRangeStatsReport filters inclusive boundary dates and summarizes mis
   assert.doesNotMatch(plain, /claude/);
 });
 
+test('renderRangeStatsReport keeps end-day lifecycle completions and independent telemetry', () => {
+  const report = __mm2.stripAnsi(renderRangeStatsReport([
+    { date: '2026-05-31', repo: 'r', mission: 'task-telemetry', classification: 'ai_sdlc', implementer: 'codex' },
+  ], {
+    from: '2026-05-01',
+    to: '2026-05-31',
+    missionFlow: [{ repo: 'r', mission: 'task-completed', closedAt: '2026-05-31T14:00:00Z', labels: ['user_value'] }],
+  }));
+
+  assert.match(report, /# completed missions\s+# user value missions\s+# AI SDLC missions[\s\S]*\n1\s+1\s+0/);
+  assert.match(report, /# missions with telemetry\s+# user value missions\s+# AI SDLC missions[\s\S]*\n1\s+0\s+1/);
+});
+
 test('renderRangeStatsReport rejects missing, malformed, and inverted range arguments', () => {
   assert.throws(
-    () => stats.renderRangeStatsReport([], { to: '2026-05-31' }),
+    () => renderRangeStatsReport([], { to: '2026-05-31' }),
     /Invalid date range argument --from/
   );
   assert.throws(
-    () => stats.renderRangeStatsReport([], { from: '2026-05-01' }),
+    () => renderRangeStatsReport([], { from: '2026-05-01' }),
     /Invalid date range argument --to/
   );
   assert.throws(
-    () => stats.renderRangeStatsReport([], { from: '2026-05-32', to: '2026-06-01' }),
+    () => renderRangeStatsReport([], { from: '2026-05-32', to: '2026-06-01' }),
     /Invalid date range argument --from/
   );
   assert.throws(
-    () => stats.renderRangeStatsReport([], { from: '2026-06-01', to: '2026-05-31' }),
+    () => renderRangeStatsReport([], { from: '2026-06-01', to: '2026-05-31' }),
     /Invalid date range argument --from\/--to/
   );
 });
 
 test('renderWeeklyStatsReport sorts agent tables alphabetically by family name', () => {
-  const report = stats.renderWeeklyStatsReport([
-    { date: '2026-05-18', mission: 'task-a', classification: 'ai_sdlc', implementer: 'gemini', pr_fix_rounds: '2', closed: 'yes' },
-    { date: '2026-05-17', mission: 'task-b', classification: 'ai_sdlc', implementer: 'claude', pr_fix_rounds: '1', closed: 'yes' },
-    { date: '2026-05-16', mission: 'task-c', classification: 'ai_sdlc', implementer: 'codex', pr_fix_rounds: '3', closed: 'yes' },
+  const report = renderWeeklyStatsReport([
+    { date: '2026-05-18', mission: 'task-a', classification: 'ai_sdlc', implementer: 'gemini', pr_fix_rounds: '2', completedForTest: 'yes' },
+    { date: '2026-05-17', mission: 'task-b', classification: 'ai_sdlc', implementer: 'claude', pr_fix_rounds: '1', completedForTest: 'yes' },
+    { date: '2026-05-16', mission: 'task-c', classification: 'ai_sdlc', implementer: 'codex', pr_fix_rounds: '3', completedForTest: 'yes' },
   ], { today: '2026-05-18' });
 
   const plain = __mm2.stripAnsi(report);
@@ -486,10 +524,10 @@ test('renderWeeklyStatsReport sorts agent tables alphabetically by family name',
 
 test('renderWeeklyStatsReport colors best and worst average fix rounds', () => {
   process.env.FORCE_COLOR = '1';
-  const report = stats.renderWeeklyStatsReport([
-    { date: '2026-05-18', mission: 'task-a', classification: 'ai_sdlc', implementer: 'claude', pr_fix_rounds: '4', closed: 'yes' },
-    { date: '2026-05-17', mission: 'task-b', classification: 'ai_sdlc', implementer: 'codex', pr_fix_rounds: '2', closed: 'yes' },
-    { date: '2026-05-16', mission: 'task-c', classification: 'ai_sdlc', implementer: 'gemini', pr_fix_rounds: '0', closed: 'yes' },
+  const report = renderWeeklyStatsReport([
+    { date: '2026-05-18', mission: 'task-a', classification: 'ai_sdlc', implementer: 'claude', pr_fix_rounds: '4', completedForTest: 'yes' },
+    { date: '2026-05-17', mission: 'task-b', classification: 'ai_sdlc', implementer: 'codex', pr_fix_rounds: '2', completedForTest: 'yes' },
+    { date: '2026-05-16', mission: 'task-c', classification: 'ai_sdlc', implementer: 'gemini', pr_fix_rounds: '0', completedForTest: 'yes' },
   ], { today: '2026-05-18' });
 
   assert.match(report, /\x1b\[31m4\.00\x1b\[39m/);
@@ -499,13 +537,13 @@ test('renderWeeklyStatsReport colors best and worst average fix rounds', () => {
 
 test('renderWeeklyStatsReport colors best and worst mission counts', () => {
   process.env.FORCE_COLOR = '1';
-  const report = stats.renderWeeklyStatsReport([
-    { date: '2026-05-18', mission: 'task-a', classification: 'ai_sdlc', implementer: 'claude', pr_fix_rounds: '1', closed: 'yes' },
-    { date: '2026-05-17', mission: 'task-b', classification: 'ai_sdlc', implementer: 'codex', pr_fix_rounds: '1', closed: 'yes' },
-    { date: '2026-05-16', mission: 'task-c', classification: 'ai_sdlc', implementer: 'codex', pr_fix_rounds: '1', closed: 'yes' },
-    { date: '2026-05-15', mission: 'task-d', classification: 'ai_sdlc', implementer: 'gemini', pr_fix_rounds: '1', closed: 'yes' },
-    { date: '2026-05-14', mission: 'task-e', classification: 'ai_sdlc', implementer: 'gemini', pr_fix_rounds: '1', closed: 'yes' },
-    { date: '2026-05-13', mission: 'task-f', classification: 'ai_sdlc', implementer: 'gemini', pr_fix_rounds: '1', closed: 'yes' },
+  const report = renderWeeklyStatsReport([
+    { date: '2026-05-18', mission: 'task-a', classification: 'ai_sdlc', implementer: 'claude', pr_fix_rounds: '1', completedForTest: 'yes' },
+    { date: '2026-05-17', mission: 'task-b', classification: 'ai_sdlc', implementer: 'codex', pr_fix_rounds: '1', completedForTest: 'yes' },
+    { date: '2026-05-16', mission: 'task-c', classification: 'ai_sdlc', implementer: 'codex', pr_fix_rounds: '1', completedForTest: 'yes' },
+    { date: '2026-05-15', mission: 'task-d', classification: 'ai_sdlc', implementer: 'gemini', pr_fix_rounds: '1', completedForTest: 'yes' },
+    { date: '2026-05-14', mission: 'task-e', classification: 'ai_sdlc', implementer: 'gemini', pr_fix_rounds: '1', completedForTest: 'yes' },
+    { date: '2026-05-13', mission: 'task-f', classification: 'ai_sdlc', implementer: 'gemini', pr_fix_rounds: '1', completedForTest: 'yes' },
   ], { today: '2026-05-18' });
 
   assert.match(report, /\x1b\[34mclaude\x1b\[39m\s+\x1b\[31m1\x1b\[39m/);
@@ -514,7 +552,7 @@ test('renderWeeklyStatsReport colors best and worst mission counts', () => {
 });
 
 test('task-1414: renderWeeklyStatsReport adds an agent spend-by-stage table with the contracted columns', () => {
-  const report = stats.renderWeeklyStatsReport([
+  const report = renderWeeklyStatsReport([
     { date: '2026-05-18', repo: 'r', mission: 'task-codex', classification: 'ai_sdlc', implementer: 'codex', provider: 'openai', stage: 'draft', pr_fix_rounds: '0', openai_usage_after: '0' },
   ], { today: '2026-05-18' });
 
@@ -524,10 +562,10 @@ test('task-1414: renderWeeklyStatsReport adds an agent spend-by-stage table with
 });
 
 test('task-1414: renderWeeklyStatsReport aggregates a Codex row from openai_usage_after with stage active shown as execute', () => {
-  const report = stats.renderWeeklyStatsReport([
-    { date: '2026-05-16', repo: 'r', mission: 'task-codex', classification: 'ai_sdlc', implementer: 'codex', provider: 'openai', stage: 'draft', pr_fix_rounds: '0', openai_usage_after: '20', cost_usd: '0', duration_minutes: '0', closed: 'yes' },
-    { date: '2026-05-17', repo: 'r', mission: 'task-codex', classification: 'ai_sdlc', implementer: 'codex', provider: 'openai', stage: 'active', pr_fix_rounds: '0', openai_usage_after: '30', cost_usd: '0', duration_minutes: '0', closed: 'yes' },
-    { date: '2026-05-18', repo: 'r', mission: 'task-codex', classification: 'ai_sdlc', implementer: 'codex', provider: 'openai', stage: 'review', pr_fix_rounds: '0', openai_usage_after: '50', cost_usd: '0', duration_minutes: '0', closed: 'yes' },
+  const report = renderWeeklyStatsReport([
+    { date: '2026-05-16', repo: 'r', mission: 'task-codex', classification: 'ai_sdlc', implementer: 'codex', provider: 'openai', stage: 'draft', pr_fix_rounds: '0', openai_usage_after: '20', cost_usd: '0', duration_minutes: '0', completedForTest: 'yes' },
+    { date: '2026-05-17', repo: 'r', mission: 'task-codex', classification: 'ai_sdlc', implementer: 'codex', provider: 'openai', stage: 'active', pr_fix_rounds: '0', openai_usage_after: '30', cost_usd: '0', duration_minutes: '0', completedForTest: 'yes' },
+    { date: '2026-05-18', repo: 'r', mission: 'task-codex', classification: 'ai_sdlc', implementer: 'codex', provider: 'openai', stage: 'review', pr_fix_rounds: '0', openai_usage_after: '50', cost_usd: '0', duration_minutes: '0', completedForTest: 'yes' },
   ], { today: '2026-05-18' });
 
   const plain = __mm2.stripAnsi(report);
@@ -539,10 +577,10 @@ test('task-1414: renderWeeklyStatsReport aggregates a Codex row from openai_usag
 });
 
 test('task-1414: renderWeeklyStatsReport aggregates a Claude row from cost_usd, not tokens/duration/usage', () => {
-  const report = stats.renderWeeklyStatsReport([
-    { date: '2026-05-16', repo: 'r', mission: 'task-claude', classification: 'ai_sdlc', implementer: 'claude', stage: 'draft', pr_fix_rounds: '0', openai_usage_after: '999', cost_usd: '1', duration_minutes: '999', closed: 'yes' },
-    { date: '2026-05-17', repo: 'r', mission: 'task-claude', classification: 'ai_sdlc', implementer: 'claude', stage: 'active', pr_fix_rounds: '0', openai_usage_after: '999', cost_usd: '3', duration_minutes: '999', closed: 'yes' },
-    { date: '2026-05-18', repo: 'r', mission: 'task-claude', classification: 'ai_sdlc', implementer: 'claude', stage: 'review', pr_fix_rounds: '0', openai_usage_after: '999', cost_usd: '6', duration_minutes: '999', closed: 'yes' },
+  const report = renderWeeklyStatsReport([
+    { date: '2026-05-16', repo: 'r', mission: 'task-claude', classification: 'ai_sdlc', implementer: 'claude', stage: 'draft', pr_fix_rounds: '0', openai_usage_after: '999', cost_usd: '1', duration_minutes: '999', completedForTest: 'yes' },
+    { date: '2026-05-17', repo: 'r', mission: 'task-claude', classification: 'ai_sdlc', implementer: 'claude', stage: 'active', pr_fix_rounds: '0', openai_usage_after: '999', cost_usd: '3', duration_minutes: '999', completedForTest: 'yes' },
+    { date: '2026-05-18', repo: 'r', mission: 'task-claude', classification: 'ai_sdlc', implementer: 'claude', stage: 'review', pr_fix_rounds: '0', openai_usage_after: '999', cost_usd: '6', duration_minutes: '999', completedForTest: 'yes' },
   ], { today: '2026-05-18' });
 
   const plain = __mm2.stripAnsi(report);
@@ -552,10 +590,10 @@ test('task-1414: renderWeeklyStatsReport aggregates a Claude row from cost_usd, 
 });
 
 test('task-1414: renderWeeklyStatsReport aggregates a Custom/local row from duration_minutes, not cost or usage', () => {
-  const report = stats.renderWeeklyStatsReport([
-    { date: '2026-05-16', repo: 'r', mission: 'task-custom', classification: 'ai_sdlc', implementer: 'custom', stage: 'draft', pr_fix_rounds: '0', openai_usage_after: '999', cost_usd: '999', duration_minutes: '5', closed: 'yes' },
-    { date: '2026-05-17', repo: 'r', mission: 'task-custom', classification: 'ai_sdlc', implementer: 'custom', stage: 'active', pr_fix_rounds: '0', openai_usage_after: '999', cost_usd: '999', duration_minutes: '15', closed: 'yes' },
-    { date: '2026-05-18', repo: 'r', mission: 'task-custom', classification: 'ai_sdlc', implementer: 'custom', stage: 'review', pr_fix_rounds: '0', openai_usage_after: '999', cost_usd: '999', duration_minutes: '30', closed: 'yes' },
+  const report = renderWeeklyStatsReport([
+    { date: '2026-05-16', repo: 'r', mission: 'task-custom', classification: 'ai_sdlc', implementer: 'custom', stage: 'draft', pr_fix_rounds: '0', openai_usage_after: '999', cost_usd: '999', duration_minutes: '5', completedForTest: 'yes' },
+    { date: '2026-05-17', repo: 'r', mission: 'task-custom', classification: 'ai_sdlc', implementer: 'custom', stage: 'active', pr_fix_rounds: '0', openai_usage_after: '999', cost_usd: '999', duration_minutes: '15', completedForTest: 'yes' },
+    { date: '2026-05-18', repo: 'r', mission: 'task-custom', classification: 'ai_sdlc', implementer: 'custom', stage: 'review', pr_fix_rounds: '0', openai_usage_after: '999', cost_usd: '999', duration_minutes: '30', completedForTest: 'yes' },
   ], { today: '2026-05-18' });
 
   const plain = __mm2.stripAnsi(report);
@@ -566,10 +604,10 @@ test('task-1414: renderWeeklyStatsReport aggregates a Custom/local row from dura
 
 test('task-2213: renderWeeklyStatsReport spend table groups a mission by its model row', () => {
   const rows = [
-    { date: '2026-05-17', repo: 'r', mission: 'task-model', classification: 'ai_sdlc', implementer: 'custom', model: 'qwen3.5', stage: 'draft', pr_fix_rounds: '0', duration_minutes: '10', closed: 'yes' },
-    { date: '2026-05-18', repo: 'r', mission: 'task-model', classification: 'ai_sdlc', implementer: 'custom', model: 'qwen3.5', stage: 'active', pr_fix_rounds: '0', duration_minutes: '10', closed: 'yes' },
+    { date: '2026-05-17', repo: 'r', mission: 'task-model', classification: 'ai_sdlc', implementer: 'custom', model: 'qwen3.5', stage: 'draft', pr_fix_rounds: '0', duration_minutes: '10', completedForTest: 'yes' },
+    { date: '2026-05-18', repo: 'r', mission: 'task-model', classification: 'ai_sdlc', implementer: 'custom', model: 'qwen3.5', stage: 'active', pr_fix_rounds: '0', duration_minutes: '10', completedForTest: 'yes' },
   ];
-  const report = stats.renderWeeklyStatsReport(rows, { today: '2026-05-18' });
+  const report = renderWeeklyStatsReport(rows, { today: '2026-05-18' });
   const plain = __mm2.stripAnsi(report);
 
   assert.match(plain, /Agent performance this week[\s\S]*qwen3\.5/);
@@ -579,8 +617,8 @@ test('task-2213: renderWeeklyStatsReport spend table groups a mission by its mod
 });
 
 test('task-1414: renderWeeklyStatsReport spend table renders a stable empty state instead of misleading 0% for a row with no spend', () => {
-  const report = stats.renderWeeklyStatsReport([
-    { date: '2026-05-18', repo: 'r', mission: 'task-none', classification: 'ai_sdlc', implementer: 'custom', stage: 'draft', pr_fix_rounds: '0', openai_usage_after: '0', cost_usd: '0', duration_minutes: '0', closed: 'yes' },
+  const report = renderWeeklyStatsReport([
+    { date: '2026-05-18', repo: 'r', mission: 'task-none', classification: 'ai_sdlc', implementer: 'custom', stage: 'draft', pr_fix_rounds: '0', openai_usage_after: '0', cost_usd: '0', duration_minutes: '0', completedForTest: 'yes' },
   ], { today: '2026-05-18' });
 
   const plain = __mm2.stripAnsi(report);
@@ -608,9 +646,10 @@ test('stats command prints workflow weekly tables from the integration stats sch
     });
 
     const output = logs.join('\n');
-    assert.match(output, /Agent telemetry — current week \(2026-05-12 → 2026-05-18\)/);
-    assert.match(output, /Agent telemetry — previous week \(2026-05-05 → 2026-05-11\)/);
-    assert.match(output, /Agent performance this week \(2026-05-12 → 2026-05-18\)/);
+    assert.match(output, /Mission flow unavailable: lifecycle history was not read/);
+    assert.match(output, /Agent telemetry — current week/);
+    assert.match(output, /Agent spend by stage this week/);
+    assert.match(output, /Agent performance unavailable: lifecycle history was not read/);
   } finally {
     fs.rmSync(path.dirname(csv), { recursive: true, force: true });
   }
@@ -663,10 +702,9 @@ test('stats command prints workflow arbitrary range tables from the integration 
 
     const output = __mm2.stripAnsi(logs.join('\n'));
     assert.match(output, /Mission flow \(2026-05-01 → 2026-05-31\)/);
-    assert.match(output, /3\s+2\s+1/);
-    assert.match(output, /Agent performance \(2026-05-01 → 2026-05-31\)/);
-    assert.match(output, /codex\s+2\s+3\.00/);
-    assert.match(output, /gemini\s+1\s+1\.00/);
+    assert.match(output, /Mission flow unavailable: lifecycle history was not read/);
+    assert.match(output, /Agent telemetry missions \(2026-05-01 → 2026-05-31\)/);
+    assert.match(output, /Agent performance unavailable: lifecycle history was not read/);
     assert.doesNotMatch(output, /task-before/);
     assert.doesNotMatch(output, /Agent telemetry — current week/);
   } finally {
@@ -876,7 +914,7 @@ test('recordIntegrationStats reads backlog classification and Review aggregate f
     assert.equal(stored.classification, 'ai_sdlc');
     assert.equal(stored.implementer, 'gemini');
     assert.equal(stored.pr_fix_rounds, '3');
-    assert.equal(stored.closed, 'yes');
+    assert.equal(stored.closed, undefined);
   } finally {
     await restoreHome();
     fs.rmSync(root, { recursive: true, force: true });
@@ -1428,15 +1466,15 @@ test('task-1251: telemetryToStatsFields maps codex telemetry, with honest-zero f
 test('task-1301: renderRangeStatsReport counts unique missions when a mission has multiple stage rows', () => {
   // task-alpha has 3 stage rows (draft, active, review) — should count as 1 mission
   // task-beta has 2 stage rows (active, review) — should count as 1 mission
-  // Only the final stage row per mission is closed (matches real data shape).
+  // The integration rollup carries final owner and review-fix facts.
   const rows = [
-    { date: '2026-06-10', mission: 'task-alpha', classification: 'ai_sdlc', implementer: 'custom', pr_fix_rounds: '0', stage: 'draft', closed: 'no' },
-    { date: '2026-06-10', mission: 'task-alpha', classification: 'ai_sdlc', implementer: 'custom', pr_fix_rounds: '0', stage: 'active', closed: 'no' },
-    { date: '2026-06-10', mission: 'task-alpha', classification: 'ai_sdlc', implementer: 'custom', pr_fix_rounds: '1', stage: 'review', closed: 'yes' },
-    { date: '2026-06-10', mission: 'task-beta', classification: 'user_value', implementer: 'codex', pr_fix_rounds: '0', stage: 'active', closed: 'no' },
-    { date: '2026-06-10', mission: 'task-beta', classification: 'user_value', implementer: 'codex', pr_fix_rounds: '2', stage: 'review', closed: 'yes' },
+    { date: '2026-06-10', mission: 'task-alpha', classification: 'ai_sdlc', implementer: 'custom', pr_fix_rounds: '0', stage: 'draft', completedForTest: 'no' },
+    { date: '2026-06-10', mission: 'task-alpha', classification: 'ai_sdlc', implementer: 'custom', pr_fix_rounds: '0', stage: 'active', completedForTest: 'no' },
+    { date: '2026-06-10', mission: 'task-alpha', classification: 'ai_sdlc', implementer: 'custom', pr_fix_rounds: '1', stage: 'default', completedForTest: 'yes' },
+    { date: '2026-06-10', mission: 'task-beta', classification: 'user_value', implementer: 'codex', pr_fix_rounds: '0', stage: 'active', completedForTest: 'no' },
+    { date: '2026-06-10', mission: 'task-beta', classification: 'user_value', implementer: 'codex', pr_fix_rounds: '2', stage: 'default', completedForTest: 'yes' },
   ];
-  const report = stats.renderRangeStatsReport(rows, { from: '2026-06-10', to: '2026-06-10' });
+  const report = renderRangeStatsReport(rows, { from: '2026-06-10', to: '2026-06-10' });
   const plain = __mm2.stripAnsi(report);
   assert.match(plain, /2\s+1\s+1/); // 2 missions total, 1 user_value, 1 ai_sdlc
   assert.match(plain, /codex\s+1\s+2\.00/); // 1 unique codex mission with pr_fix_rounds=2
@@ -1444,14 +1482,14 @@ test('task-1301: renderRangeStatsReport counts unique missions when a mission ha
 });
 
 test('task-1314: renderRangeStatsReport counts same mission separately across repos', () => {
-  // Only the final stage row per (repo, mission) is closed (matches real data shape).
+  // The integration rollup is distinct for each (repo, mission).
   const rows = [
-    { date: '2026-06-10', repo: 'visualboard', mission: 'task-alpha', classification: 'ai_sdlc', implementer: 'custom', pr_fix_rounds: '0', stage: 'draft', closed: 'no' },
-    { date: '2026-06-10', repo: 'visualboard', mission: 'task-alpha', classification: 'ai_sdlc', implementer: 'custom', pr_fix_rounds: '1', stage: 'review', closed: 'yes' },
-    { date: '2026-06-10', repo: 'parallix', mission: 'task-alpha', classification: 'user_value', implementer: 'codex', pr_fix_rounds: '2', stage: 'draft', closed: 'no' },
-    { date: '2026-06-10', repo: 'parallix', mission: 'task-alpha', classification: 'user_value', implementer: 'codex', pr_fix_rounds: '3', stage: 'review', closed: 'yes' },
+    { date: '2026-06-10', repo: 'visualboard', mission: 'task-alpha', classification: 'ai_sdlc', implementer: 'custom', pr_fix_rounds: '0', stage: 'draft', completedForTest: 'no' },
+    { date: '2026-06-10', repo: 'visualboard', mission: 'task-alpha', classification: 'ai_sdlc', implementer: 'custom', pr_fix_rounds: '1', stage: 'default', completedForTest: 'yes' },
+    { date: '2026-06-10', repo: 'parallix', mission: 'task-alpha', classification: 'user_value', implementer: 'codex', pr_fix_rounds: '2', stage: 'draft', completedForTest: 'no' },
+    { date: '2026-06-10', repo: 'parallix', mission: 'task-alpha', classification: 'user_value', implementer: 'codex', pr_fix_rounds: '3', stage: 'default', completedForTest: 'yes' },
   ];
-  const report = stats.renderRangeStatsReport(rows, { from: '2026-06-10', to: '2026-06-10' });
+  const report = renderRangeStatsReport(rows, { from: '2026-06-10', to: '2026-06-10' });
   const plain = __mm2.stripAnsi(report);
   assert.match(plain, /2\s+1\s+1/); // two repo-distinct missions with the same slug
   assert.match(plain, /codex\s+1\s+3\.00/); // repo-distinct codex mission with pr_fix_rounds=3
@@ -1637,17 +1675,17 @@ test('summarizeAgentWindow reports the stored fix-round count, and honors an inj
   // Only the closed rollup row carries the authoritative pr_fix_rounds.
   const window = { start: new Date('2026-06-10T00:00:00Z'), end: new Date('2026-06-16T00:00:00Z') };
   const rows = [
-    { date: '2026-06-13', repo: '', mission: 'task-3000', implementer: 'codex', stage: 'active', classification: 'ai_sdlc', pr_fix_rounds: '0', closed: 'no' },
-    { date: '2026-06-13', repo: '', mission: 'task-3000', implementer: 'codex', stage: 'review', classification: 'ai_sdlc', pr_fix_rounds: '0', closed: 'no' },
-    { date: '2026-06-13', repo: '', mission: 'task-3000', implementer: 'codex', stage: 'default', classification: 'ai_sdlc', pr_fix_rounds: '2', closed: 'yes' },
+    { date: '2026-06-13', repo: '', mission: 'task-3000', implementer: 'codex', stage: 'active', classification: 'ai_sdlc', pr_fix_rounds: '0', completedForTest: 'no' },
+    { date: '2026-06-13', repo: '', mission: 'task-3000', implementer: 'codex', stage: 'review', classification: 'ai_sdlc', pr_fix_rounds: '0', completedForTest: 'no' },
+    { date: '2026-06-13', repo: '', mission: 'task-3000', implementer: 'codex', stage: 'default', classification: 'ai_sdlc', pr_fix_rounds: '2', completedForTest: 'yes' },
   ];
 
-  const stored = stats._internals.summarizeAgentWindow(rows, window);
+  const stored = summarizeAgentWindow(rows, window);
   assert.equal(stored[0].implementer, 'codex');
   assert.equal(stored[0].missions, 1);
   assert.equal(stored[0].averageFixRounds, '2.00', 'pr_fix_rounds from closed rollup row');
 
-  const injected = stats._internals.summarizeAgentWindow(rows, window, {
+  const injected = summarizeAgentWindow(rows, window, {
     rootDir: '/does-not-matter',
     deriveFixRoundsFn: () => 5,
   });
@@ -1664,24 +1702,24 @@ test('task-1342: weekly summary total equals user_value + ai_sdlc even with uncl
   for (let i = 0; i < 3; i++) {
     rows.push({
       date: `2026-06-${20 + i}`, mission: `task-u${i}`, classification: 'user_value',
-      implementer: 'codex', pr_fix_rounds: '0', closed: 'yes',
+      implementer: 'codex', pr_fix_rounds: '0', completedForTest: 'yes',
     });
   }
   for (let i = 0; i < 12; i++) {
     rows.push({
       date: `2026-06-${20 + (i % 5)}`, mission: `task-a${i}`, classification: 'ai_sdlc',
-      implementer: 'custom', pr_fix_rounds: '1', closed: 'yes',
+      implementer: 'custom', pr_fix_rounds: '1', completedForTest: 'yes',
     });
   }
   // 20 missions with empty/null/unrecognized classification
   for (let i = 0; i < 20; i++) {
     rows.push({
       date: `2026-06-${20 + (i % 5)}`, mission: `task-x${i}`, classification: '',
-      implementer: 'claude', pr_fix_rounds: '0', closed: 'yes',
+      implementer: 'claude', pr_fix_rounds: '0', completedForTest: 'yes',
     });
   }
 
-  const report = stats.renderWeeklyStatsReport(rows, { today: '2026-06-24' });
+  const report = renderWeeklyStatsReport(rows, { today: '2026-06-24' });
   const plain = __mm2.stripAnsi(report);
 
   // The current week (2026-06-18 to 2026-06-24) contains all 35 rows.
@@ -1692,14 +1730,14 @@ test('task-1342: weekly summary total equals user_value + ai_sdlc even with uncl
 
 test('task-1342: weekly summary total equals user_value + ai_sdlc + unknown when some missions have invalid classification strings', () => {
   const rows = [
-    { date: '2026-06-20', mission: 'task-good1', classification: 'user_value', implementer: 'codex', pr_fix_rounds: '0', closed: 'yes' },
-    { date: '2026-06-20', mission: 'task-good2', classification: 'ai_sdlc', implementer: 'custom', pr_fix_rounds: '1', closed: 'yes' },
-    { date: '2026-06-20', mission: 'task-bad1', classification: 'USER_VALUE', implementer: 'claude', pr_fix_rounds: '0', closed: 'yes' },
-    { date: '2026-06-20', mission: 'task-bad2', classification: 'unknown', implementer: 'gemini', pr_fix_rounds: '0', closed: 'yes' },
-    { date: '2026-06-20', mission: 'task-bad3', classification: null, implementer: 'custom', pr_fix_rounds: '0', closed: 'yes' },
+    { date: '2026-06-20', mission: 'task-good1', classification: 'user_value', implementer: 'codex', pr_fix_rounds: '0', completedForTest: 'yes' },
+    { date: '2026-06-20', mission: 'task-good2', classification: 'ai_sdlc', implementer: 'custom', pr_fix_rounds: '1', completedForTest: 'yes' },
+    { date: '2026-06-20', mission: 'task-bad1', classification: 'USER_VALUE', implementer: 'claude', pr_fix_rounds: '0', completedForTest: 'yes' },
+    { date: '2026-06-20', mission: 'task-bad2', classification: 'unknown', implementer: 'gemini', pr_fix_rounds: '0', completedForTest: 'yes' },
+    { date: '2026-06-20', mission: 'task-bad3', classification: null, implementer: 'custom', pr_fix_rounds: '0', completedForTest: 'yes' },
   ];
 
-  const report = stats.renderWeeklyStatsReport(rows, { today: '2026-06-24' });
+  const report = renderWeeklyStatsReport(rows, { today: '2026-06-24' });
   const plain = __mm2.stripAnsi(report);
 
   // 'USER_VALUE' is lowercased by normalizeClassification, so it counts as user_value.
@@ -1788,14 +1826,14 @@ test('task-1342: review row with OpenAI reviewer shows Usage % even when claude 
       implementer_agent: 'claude', implementer: 'claude',
       input_tokens: '4526019', output_tokens: '21427', cached_tokens: '4072064',
       tool_calls: '76', duration_minutes: '3', cost_usd: '0',
-      openai_usage_after: '29', closed: 'yes',
+      openai_usage_after: '29', completedForTest: 'yes',
     },
     {
       mission: 'task-1339', stage: 'review', provider: 'openai', model: 'gpt-5.4',
       reviewer_agent: 'codex', implementer: 'claude',
       input_tokens: '4526019', output_tokens: '21427', cached_tokens: '4072064',
       tool_calls: '76', duration_minutes: '2', cost_usd: '0',
-      openai_usage_after: '37', closed: 'yes',
+      openai_usage_after: '37', completedForTest: 'yes',
     },
   ].map(stats.normalizeStatsRow);
 
@@ -1814,12 +1852,12 @@ test('task-1342: review row with OpenAI reviewer shows Usage % even when claude 
 test('task-2213: summarizeAgentWindow keeps separate model rows for local AI missions', () => {
   const window = { start: new Date('2026-06-10T00:00:00Z'), end: new Date('2026-06-20T00:00:00Z') };
   const rows = [
-    { date: '2026-06-12', mission: 'task-1001', implementer: 'custom', model: 'qwen3.5', classification: 'ai_sdlc', pr_fix_rounds: '1', closed: 'yes' },
-    { date: '2026-06-13', mission: 'task-1002', implementer: 'custom', model: 'qwen3.5', classification: 'ai_sdlc', pr_fix_rounds: '2', closed: 'yes' },
-    { date: '2026-06-14', mission: 'task-1003', implementer: 'custom', model: 'llama3', classification: 'ai_sdlc', pr_fix_rounds: '0', closed: 'yes' },
+    { date: '2026-06-12', mission: 'task-1001', implementer: 'custom', model: 'qwen3.5', classification: 'ai_sdlc', pr_fix_rounds: '1', completedForTest: 'yes' },
+    { date: '2026-06-13', mission: 'task-1002', implementer: 'custom', model: 'qwen3.5', classification: 'ai_sdlc', pr_fix_rounds: '2', completedForTest: 'yes' },
+    { date: '2026-06-14', mission: 'task-1003', implementer: 'custom', model: 'llama3', classification: 'ai_sdlc', pr_fix_rounds: '0', completedForTest: 'yes' },
   ];
 
-  const result = stats._internals.summarizeAgentWindow(rows, window);
+  const result = summarizeAgentWindow(rows, window);
 
   assert.deepEqual(result, [
     { implementer: 'llama3', missions: 1, averageFixRounds: '0.00' },
@@ -1830,11 +1868,11 @@ test('task-2213: summarizeAgentWindow keeps separate model rows for local AI mis
 test('task-2213: summarizeAgentWindow falls back to the recorded implementer when the telemetry model is blank', () => {
   const window = { start: new Date('2026-06-10T00:00:00Z'), end: new Date('2026-06-20T00:00:00Z') };
   const rows = [
-    { date: '2026-06-12', mission: 'task-2001', implementer: 'claude', model: '', classification: 'user_value', pr_fix_rounds: '3', closed: 'yes' },
-    { date: '2026-06-13', mission: 'task-2002', implementer: 'claude', model: '', classification: 'user_value', pr_fix_rounds: '1', closed: 'yes' },
+    { date: '2026-06-12', mission: 'task-2001', implementer: 'claude', model: '', classification: 'user_value', pr_fix_rounds: '3', completedForTest: 'yes' },
+    { date: '2026-06-13', mission: 'task-2002', implementer: 'claude', model: '', classification: 'user_value', pr_fix_rounds: '1', completedForTest: 'yes' },
   ];
 
-  const result = stats._internals.summarizeAgentWindow(rows, window);
+  const result = summarizeAgentWindow(rows, window);
 
   assert.equal(result.length, 1, 'should have one group when model is empty');
   const claudeEntry = result.find(r => r.implementer === 'claude');
@@ -1846,14 +1884,14 @@ test('task-2213: summarizeAgentWindow falls back to the recorded implementer whe
 test('task-2213: summarizeAgentWindow keeps mixed telemetry models in their own rows', () => {
   const window = { start: new Date('2026-06-10T00:00:00Z'), end: new Date('2026-06-20T00:00:00Z') };
   const rows = [
-    { date: '2026-06-12', mission: 'task-3001', implementer: 'codex', model: 'gpt-5', classification: 'ai_sdlc', pr_fix_rounds: '1', closed: 'yes' },
-    { date: '2026-06-13', mission: 'task-3002', implementer: 'custom', model: 'qwen3.5', classification: 'ai_sdlc', pr_fix_rounds: '2', closed: 'yes' },
-    { date: '2026-06-14', mission: 'task-3003', implementer: 'gemini', model: 'gemini-2.5-pro', classification: 'ai_sdlc', pr_fix_rounds: '0', closed: 'yes' },
-    { date: '2026-06-15', mission: 'task-3004', implementer: 'custom', model: 'llama3', classification: 'ai_sdlc', pr_fix_rounds: '1', closed: 'yes' },
-    { date: '2026-06-16', mission: 'task-3005', implementer: 'claude', model: '', classification: 'user_value', pr_fix_rounds: '3', closed: 'yes' },
+    { date: '2026-06-12', mission: 'task-3001', implementer: 'codex', model: 'gpt-5', classification: 'ai_sdlc', pr_fix_rounds: '1', completedForTest: 'yes' },
+    { date: '2026-06-13', mission: 'task-3002', implementer: 'custom', model: 'qwen3.5', classification: 'ai_sdlc', pr_fix_rounds: '2', completedForTest: 'yes' },
+    { date: '2026-06-14', mission: 'task-3003', implementer: 'gemini', model: 'gemini-2.5-pro', classification: 'ai_sdlc', pr_fix_rounds: '0', completedForTest: 'yes' },
+    { date: '2026-06-15', mission: 'task-3004', implementer: 'custom', model: 'llama3', classification: 'ai_sdlc', pr_fix_rounds: '1', completedForTest: 'yes' },
+    { date: '2026-06-16', mission: 'task-3005', implementer: 'claude', model: '', classification: 'user_value', pr_fix_rounds: '3', completedForTest: 'yes' },
   ];
 
-  const result = stats._internals.summarizeAgentWindow(rows, window);
+  const result = summarizeAgentWindow(rows, window);
 
   assert.deepEqual(result, [
     { implementer: 'claude', missions: 1, averageFixRounds: '3.00' },
@@ -1865,9 +1903,9 @@ test('task-2213: summarizeAgentWindow keeps mixed telemetry models in their own 
 });
 
 test('task-2213: renderWeeklyStatsReport displays model rows in the Agent family column', () => {
-  const report = stats.renderWeeklyStatsReport([
-    { date: '2026-05-18', mission: 'task-a', classification: 'ai_sdlc', implementer: 'custom', model: 'qwen3.5', pr_fix_rounds: '2', closed: 'yes' },
-    { date: '2026-05-17', mission: 'task-b', classification: 'user_value', implementer: 'codex', model: 'gpt-5', pr_fix_rounds: '1', closed: 'yes' },
+  const report = renderWeeklyStatsReport([
+    { date: '2026-05-18', mission: 'task-a', classification: 'ai_sdlc', implementer: 'custom', model: 'qwen3.5', pr_fix_rounds: '2', completedForTest: 'yes' },
+    { date: '2026-05-17', mission: 'task-b', classification: 'user_value', implementer: 'codex', model: 'gpt-5', pr_fix_rounds: '1', completedForTest: 'yes' },
   ], { today: '2026-05-18' });
 
   const plain = __mm2.stripAnsi(report);
@@ -1876,9 +1914,9 @@ test('task-2213: renderWeeklyStatsReport displays model rows in the Agent family
 });
 
 test('task-2213: renderRangeStatsReport displays model rows in the Agent family column', () => {
-  const report = stats.renderRangeStatsReport([
-    { date: '2026-05-10', mission: 'task-a', classification: 'ai_sdlc', implementer: 'custom', model: 'qwen3.5', pr_fix_rounds: '2', closed: 'yes' },
-    { date: '2026-05-15', mission: 'task-b', classification: 'user_value', implementer: 'custom', model: 'llama3', pr_fix_rounds: '0', closed: 'yes' },
+  const report = renderRangeStatsReport([
+    { date: '2026-05-10', mission: 'task-a', classification: 'ai_sdlc', implementer: 'custom', model: 'qwen3.5', pr_fix_rounds: '2', completedForTest: 'yes' },
+    { date: '2026-05-15', mission: 'task-b', classification: 'user_value', implementer: 'custom', model: 'llama3', pr_fix_rounds: '0', completedForTest: 'yes' },
   ], { from: '2026-05-01', to: '2026-05-31' });
 
   const plain = __mm2.stripAnsi(report);

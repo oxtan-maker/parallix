@@ -12,20 +12,20 @@ function port(rows = [], overrides = {}) {
   };
 }
 
-test('StatsCommandUseCase weekly report returns all rows and completed window summary', () => {
+test('StatsCommandUseCase weekly report returns all rows without inferring completion from telemetry', () => {
   const useCase = new StatsCommandUseCase(port([
-    { repo: 'parallix', mission: 'task-1', date: '2026-06-23', closed: 'yes' },
-    { repo: 'parallix', mission: 'task-2', date: '2026-06-10', closed: 'yes' },
+    { repo: 'parallix', mission: 'task-1', date: '2026-06-23', },
+    { repo: 'parallix', mission: 'task-2', date: '2026-06-10', },
   ]));
   const result = useCase.execute({ mode: 'weekly', today: '2026-06-23' });
   assert.equal(result.rows.length, 2);
-  assert.deepEqual(result.completedMissions?.map((row) => row.mission), ['task-1']);
+  assert.deepEqual(result.completedMissions, []);
 });
 
 test('StatsCommandUseCase range report applies inclusive StatisticsService windowing', () => {
   const useCase = new StatsCommandUseCase(port([
-    { repo: 'parallix', mission: 'task-1', date: '2026-06-01', closed: 'yes' },
-    { repo: 'parallix', mission: 'task-2', date: '2026-06-30', closed: 'yes' },
+    { repo: 'parallix', mission: 'task-1', date: '2026-06-01', },
+    { repo: 'parallix', mission: 'task-2', date: '2026-06-30', },
   ]));
   const result = useCase.execute({ mode: 'range', from: '2026-06-01', to: '2026-06-30' });
   assert.deepEqual(result.windowedRows?.map((row) => row.mission), ['task-1', 'task-2']);

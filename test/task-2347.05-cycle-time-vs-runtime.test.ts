@@ -71,7 +71,6 @@ const USAGE_RECORDS: readonly UsageRecord[] = [
     duration_minutes: 22,
     cost_usd: 0.5,
     pr_fix_rounds: 1,
-    closed: 'no',
   },
   {
     date: '2026-08-02',
@@ -90,7 +89,6 @@ const USAGE_RECORDS: readonly UsageRecord[] = [
     duration_minutes: 15,
     cost_usd: 0.25,
     pr_fix_rounds: 2,
-    closed: 'yes',
   },
 ];
 
@@ -193,11 +191,9 @@ test('SC2: lifecycle cycle time survives usage rows whose durations are absent',
   });
 });
 
-test('SC2: cycle time falls back to usage-row dates when lane events are missing', async () => {
+test('SC2: telemetry without lifecycle completion produces no outcome', async () => {
   const outcomes = await adapter([], USAGE_RECORDS).readOutcomes();
-  assert.equal(outcomes.length, 1);
-  // 2026-08-01T00:00:00Z → 2026-08-02T00:00:00Z is one day of best-effort span.
-  assert.equal(outcomes[0]!.cycleTimeMinutes, 24 * 60);
+  assert.equal(outcomes.length, 0);
 });
 
 test('SC2: a lane history with no completion event excludes telemetry-only completion', async () => {

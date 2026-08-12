@@ -159,7 +159,6 @@ describe('task-2347.01 — repository identity through lane events and board met
           duration_minutes: 45,
           pr_fix_rounds: 1,
           date: '2026-07-24',
-          closed: 'yes',
         });
         await usageRepo.save({
           repo: 'beta',
@@ -167,7 +166,6 @@ describe('task-2347.01 — repository identity through lane events and board met
           duration_minutes: 120,
           pr_fix_rounds: 3,
           date: '2026-07-24',
-          closed: 'yes',
         });
 
         // Build metrics scoped to alpha

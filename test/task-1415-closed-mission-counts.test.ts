@@ -26,8 +26,8 @@ function git(args, cwd) {
 // Investigation across `summarizeMissionWindow`, `summarizeAgentWindow`,
 // `rowInWindow`, `canonicalizeStatsRow`, and `upsertMeasurementRow` found all of
 // them already correct on main:
-//   - `summarizeMissionWindow` filters to `closed: 'yes'` rows (task-1380).
-//   - `summarizeAgentWindow` intentionally does NOT filter by `closed`
+//   - `summarizeMissionWindow` receives lifecycle-completed Mission IDs.
+//   - `summarizeAgentWindow` intentionally does NOT infer completion from telemetry
 //     (task-1409) — its per-mission dedup (`byMission`, keyed on
 //     `statsMissionKey` only) already collapses every stage row for a
 //     mission down to one winner, so multiple stage rows can't inflate
@@ -35,7 +35,7 @@ function git(args, cwd) {
 //   - `rowInWindow` is inclusive on both boundaries; `buildWeeklyWindows`
 //     has no gap/overlap.
 //   - `upsertMeasurementRow`'s dedup key includes `stage`, so an integration row
-//     (`stage: 'default'`, `closed: 'yes'`) never collides with an earlier
+//     (`stage: 'default'`) never collides with an earlier
 //     stage row (`stage: 'active'|'draft'|'review'|'follow-up'`).
 //
 // The real defect was in `lib/commands/integrate.ts`:
@@ -114,11 +114,13 @@ test('task-1415: recordPostIntegrationStats counts a closed mission in the curre
 
     const csvData = stats.loadMeasurementRows({ dbPath: dbFile, rootDir: root });
     assert.equal(csvData.rows.length, 1);
-    assert.equal(csvData.rows[0].closed, 'yes');
     assert.notEqual(csvData.rows[0].date, '2026-06-13',
       'the closed row must not be stamped with the stale base-worktree committer date');
 
-    const todayReport = stats.renderWeeklyStatsReport(csvData.rows, { today: csvData.rows[0].date });
+    const todayReport = stats.renderWeeklyStatsReport(csvData.rows, {
+      today: csvData.rows[0].date,
+      missionFlow: [{ repo: csvData.rows[0].repo, mission: csvData.rows[0].mission, closedAt: `${csvData.rows[0].date}T00:00:00Z`, labels: ['ai_sdlc'] }],
+    });
     const currentSection = todayReport.split('Agent telemetry — current week')[1] || '';
     const currentDataLine = currentSection.split('\n').find(l => /^\d/.test(l));
     const missionCount = Number((currentDataLine || '').trim().split(/\s+/)[0]);

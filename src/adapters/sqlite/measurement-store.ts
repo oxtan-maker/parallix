@@ -32,7 +32,7 @@ const MEASUREMENT_COLUMNS = [
   'input_tokens', 'output_tokens', 'cached_tokens', 'thoughts_tokens',
   'context_tokens',
   'tool_calls', 'openai_usage_before', 'openai_usage_after',
-  'openai_usage_delta', 'duration_minutes', 'cost_usd', 'closed',
+  'openai_usage_delta', 'duration_minutes', 'cost_usd',
 ] as const;
 
 /** Fields compared to decide whether an upsert actually changed the row. */
@@ -41,7 +41,7 @@ const COMPARED_FIELDS: readonly (keyof MeasurementRecord)[] = [
   'model', 'implementer_agent', 'reviewer_agent', 'input_tokens',
   'output_tokens', 'cached_tokens', 'thoughts_tokens', 'context_tokens', 'tool_calls',
   'openai_usage_before', 'openai_usage_after', 'openai_usage_delta',
-  'duration_minutes', 'cost_usd', 'closed',
+  'duration_minutes', 'cost_usd',
 ];
 
 const SELECT_ALL =
@@ -70,8 +70,7 @@ const UPSERT_SQL =
      openai_usage_after = excluded.openai_usage_after,
      openai_usage_delta = excluded.openai_usage_delta,
      duration_minutes = excluded.duration_minutes,
-     cost_usd = excluded.cost_usd,
-     closed = excluded.closed;`;
+     cost_usd = excluded.cost_usd;`;
 
 export class SqliteMeasurementStore implements MeasurementStorePort {
   private db: SqliteDatabaseAdapter;
@@ -221,7 +220,6 @@ function rowToRecord(row: Record<string, unknown>): MeasurementRecord {
     openai_usage_delta: num(row.openai_usage_delta),
     duration_minutes: num(row.duration_minutes),
     cost_usd: num(row.cost_usd),
-    closed: text(row.closed),
   };
 }
 
@@ -250,7 +248,6 @@ function bindValues(record: MeasurementRecord): (string | number | null)[] {
     record.openai_usage_delta ?? null,
     record.duration_minutes ?? null,
     record.cost_usd ?? null,
-    record.closed ?? null,
   ];
 }
 

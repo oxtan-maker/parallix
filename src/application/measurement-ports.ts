@@ -55,8 +55,6 @@ export interface MeasurementRecord extends MeasurementIdentity {
   readonly openai_usage_delta?: number;
   readonly duration_minutes?: number;
   readonly cost_usd?: number;
-  /** `'yes'` once the mission closed (a `MissionOutcome` row); `''` while open. */
-  readonly closed?: string;
 }
 
 /** Result of a single upsert. */

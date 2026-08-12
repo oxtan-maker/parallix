@@ -67,6 +67,5 @@ function recordFromRow(row: Record<string, unknown>): UsageRecord {
     openai_usage_delta: num(row.openai_usage_delta),
     duration_minutes: num(row.duration_minutes),
     cost_usd: num(row.cost_usd),
-    closed: row.closed ? String(row.closed) : undefined,
   };
 }

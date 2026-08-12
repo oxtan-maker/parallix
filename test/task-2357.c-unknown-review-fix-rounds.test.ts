@@ -64,7 +64,6 @@ describe('TASK-2357 defect C: unknown review-fix rounds survive to presentation'
             implementer: 'claude',
             pr_fix_rounds: value === null ? null : String(value),
             stage: 'default',
-            closed: 'yes',
           } as never, { store });
         }
       } finally {
@@ -112,11 +111,11 @@ describe('TASK-2357 defect C: unknown review-fix rounds survive to presentation'
       try {
         upsertMeasurementRow({
           date: '2026-06-02', repo: REPO, mission: KNOWN_ZERO, classification: 'ai_sdlc',
-          implementer: 'claude', pr_fix_rounds: '0', stage: 'default', closed: 'yes',
+          implementer: 'claude', pr_fix_rounds: '0', stage: 'default',
         } as never, { store });
         upsertMeasurementRow({
           date: '2026-06-02', repo: REPO, mission: UNKNOWN_A, classification: 'ai_sdlc',
-          implementer: 'claude', pr_fix_rounds: null, stage: 'default', closed: 'yes',
+          implementer: 'claude', pr_fix_rounds: null, stage: 'default',
         } as never, { store });
       } finally {
         store.close();

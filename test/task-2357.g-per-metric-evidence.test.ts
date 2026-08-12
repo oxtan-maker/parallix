@@ -55,7 +55,7 @@ describe('TASK-2357 defect G: low-sample is judged per metric, not per cohort', 
         }
         if (index < RUNTIME_OBSERVATIONS) {
           await insertUsageRow(db, {
-            repo: REPO, mission, date: '2026-06-02', classification: LABEL, closed: 'yes',
+            repo: REPO, mission, date: '2026-06-02', classification: LABEL,
             prFixRounds: 1, durationMinutes: 30 + index,
             costUsd: index < COST_OBSERVATIONS ? 1.5 : null,
           });

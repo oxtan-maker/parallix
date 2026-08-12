@@ -46,7 +46,7 @@ describe('TASK-2357 defect B: canonical repository identity from a worktree', ()
         await laneEventRepo.append(laneEvent({ repositoryId: canonical, missionId: COLLIDING, from: 'active', to: 'done', at: DONE }));
         await insertUsageRow(db, {
           repo: canonical, mission: COLLIDING, date: '2026-06-02',
-          classification: 'user_value', closed: 'yes', prFixRounds: 1,
+          classification: 'user_value', prFixRounds: 1,
         });
 
         // A second, unrelated repository reusing the same mission id.
@@ -54,7 +54,7 @@ describe('TASK-2357 defect B: canonical repository identity from a worktree', ()
         await laneEventRepo.append(laneEvent({ repositoryId: OTHER_REPO, missionId: COLLIDING, from: 'backlog', to: 'done', at: DONE }));
         await insertUsageRow(db, {
           repo: OTHER_REPO, mission: COLLIDING, date: '2026-06-02',
-          classification: 'ai_sdlc', closed: 'yes', prFixRounds: 9,
+          classification: 'ai_sdlc', prFixRounds: 9,
           actorKey: 'claude|other',
         });
 
@@ -88,7 +88,7 @@ describe('TASK-2357 defect B: canonical repository identity from a worktree', ()
         await laneEventRepo.append(laneEvent({ repositoryId: canonical, missionId: COLLIDING, from: 'backlog', to: 'done', at: DONE }));
         await insertUsageRow(db, {
           repo: canonical, mission: COLLIDING, date: '2026-06-02',
-          classification: 'user_value', closed: 'yes', prFixRounds: 1,
+          classification: 'user_value', prFixRounds: 1,
         });
 
         const { resolveCanonicalRepositoryId } = await import('../src/adapters/git/repository-identity.js');

@@ -23,18 +23,36 @@ function row(overrides = {}) {
     model: 'qwen3.5',
     mission: 'task-default',
     pr_fix_rounds: '0',
-    closed: 'yes',
+    completedForTest: 'yes',
     ...overrides,
   };
 }
 
+function completedMissionKeys(rows) {
+  return new Set(rows.filter(row => row.completedForTest === 'yes')
+    .map(row => `${row.repo}::${String(row.mission).trim().toLowerCase()}`));
+}
+
+function missionFlow(rows) {
+  return rows.filter(row => row.completedForTest === 'yes')
+    .map(row => ({ repo: row.repo, mission: row.mission, closedAt: `${row.date}T00:00:00Z`, labels: [] }));
+}
+
+function renderWeeklyStatsReport(rows, options = {}) {
+  return stats.renderWeeklyStatsReport(rows, { ...options, missionFlow: missionFlow(rows) });
+}
+
+function summarizeAgentWindow(rows, window, options = {}) {
+  return stats._internals.summarizeAgentWindow(rows, window, { ...options, completedMissionKeys: completedMissionKeys(rows) });
+}
+
 test('task-2213: agent performance counts and fix-round averages use only each model row\'s completed missions', () => {
-  const summary = stats._internals.summarizeAgentWindow([
+  const summary = summarizeAgentWindow([
     row({ mission: 'task-qwen-fixes', pr_fix_rounds: '4' }),
     row({ mission: 'task-qwen-zero', pr_fix_rounds: '0' }),
     row({ mission: 'task-codex', implementer: 'codex', model: 'gpt-5.4', pr_fix_rounds: '1' }),
     // This in-window mission used to inflate the qwen3.5 row to 3 / 4.33.
-    row({ mission: 'task-qwen-active', pr_fix_rounds: '9', closed: '' }),
+    row({ mission: 'task-qwen-active', pr_fix_rounds: '9', completedForTest: '' }),
     // This completed mission is outside the selected week.
     row({ mission: 'task-qwen-old', date: '2026-07-04', pr_fix_rounds: '8' }),
   ], WINDOW);
@@ -46,7 +64,7 @@ test('task-2213: agent performance counts and fix-round averages use only each m
 });
 
 test('task-2213: models sharing an implementer family keep separate rows and averages', () => {
-  const summary = stats._internals.summarizeAgentWindow([
+  const summary = summarizeAgentWindow([
     row({ mission: 'task-sonnet-a', implementer: 'claude', model: 'claude-sonnet-5', pr_fix_rounds: '3' }),
     row({ mission: 'task-sonnet-b', implementer: 'claude', model: 'claude-sonnet-5', pr_fix_rounds: '1' }),
     row({ mission: 'task-opus', implementer: 'claude', model: 'claude-opus-4', pr_fix_rounds: '0' }),
@@ -59,7 +77,7 @@ test('task-2213: models sharing an implementer family keep separate rows and ave
 });
 
 test('task-2213: completed rows with missing attribution or review-round metadata are explicit, not silent skew', () => {
-  const summary = stats._internals.summarizeAgentWindow([
+  const summary = summarizeAgentWindow([
     // No model and no implementer: must surface as a visible `unknown` row.
     row({ mission: 'task-no-attribution', model: '', implementer: '', pr_fix_rounds: '' }),
     // Missing review-round value: counts as zero rounds, not NaN, and cannot
@@ -76,11 +94,11 @@ test('task-2213: completed rows with missing attribution or review-round metadat
 test('task-2213: completion on the blank-model rollup row keeps the mission in its model row with the rollup fix rounds', () => {
   // Real CSV shape: the model is recorded on non-closed stage rows, while
   // completion and the final pr_fix_rounds live on a blank-model rollup row.
-  const summary = stats._internals.summarizeAgentWindow([
-    row({ mission: 'task-rollup', implementer: 'claude', model: 'claude-fable-5', stage: 'active', pr_fix_rounds: '0', closed: '' }),
-    row({ mission: 'task-rollup', implementer: 'claude', model: '', stage: 'default', pr_fix_rounds: '3', closed: 'yes' }),
+  const summary = summarizeAgentWindow([
+    row({ mission: 'task-rollup', implementer: 'claude', model: 'claude-fable-5', stage: 'active', pr_fix_rounds: '0', completedForTest: '' }),
+    row({ mission: 'task-rollup', implementer: 'claude', model: '', stage: 'default', pr_fix_rounds: '3', completedForTest: 'yes' }),
     // Same implementer, different model, never completed: no row at all.
-    row({ mission: 'task-unfinished', implementer: 'claude', model: 'claude-sonnet-5', stage: 'active', pr_fix_rounds: '5', closed: '' }),
+    row({ mission: 'task-unfinished', implementer: 'claude', model: 'claude-sonnet-5', stage: 'active', pr_fix_rounds: '5', completedForTest: '' }),
   ], WINDOW);
 
   assert.deepEqual(summary, [
@@ -89,9 +107,9 @@ test('task-2213: completion on the blank-model rollup row keeps the mission in i
 });
 
 test('task-2213: weekly report retains live active-stage spend while excluding that mission from agent performance', () => {
-  const report = __mm1.stripAnsi(stats.renderWeeklyStatsReport([
+  const report = __mm1.stripAnsi(renderWeeklyStatsReport([
     row({ mission: 'task-complete', pr_fix_rounds: '2', duration_minutes: '5', stage: 'default' }),
-    row({ mission: 'task-active', pr_fix_rounds: '9', duration_minutes: '15', stage: 'active', closed: '' }),
+    row({ mission: 'task-active', pr_fix_rounds: '9', duration_minutes: '15', stage: 'active', completedForTest: '' }),
   ], { today: '2026-07-11' }));
 
   const performance = report.slice(
@@ -108,11 +126,11 @@ test('task-2213: completing implementer fallback is used when its model telemetr
   // A reviewer model is not ownership evidence. When the completing
   // implementer has no model telemetry in the window, use its recorded family
   // from the closed rollup instead of crediting the reviewer.
-  const summary = stats._internals.summarizeAgentWindow([
+  const summary = summarizeAgentWindow([
     // Implementer was codex; its gpt model row is outside the window.
     // Only the blank-model rollup and a reviewer-model row survive.
-    row({ mission: 'task-reviewer-only', implementer: 'codex', model: '', stage: 'default', pr_fix_rounds: '2', closed: 'yes' }),
-    row({ mission: 'task-reviewer-only', implementer: 'codex', model: 'claude-sonnet-5', stage: 'review', pr_fix_rounds: '0', closed: '' }),
+    row({ mission: 'task-reviewer-only', implementer: 'codex', model: '', stage: 'default', pr_fix_rounds: '2', completedForTest: 'yes' }),
+    row({ mission: 'task-reviewer-only', implementer: 'codex', model: 'claude-sonnet-5', stage: 'review', pr_fix_rounds: '0', completedForTest: '' }),
   ], WINDOW);
 
   // The closed rollup's implementer wins; fix rounds come from that rollup.
@@ -125,13 +143,13 @@ test('task-2213: completing implementer model beats reviewer model in attributio
   // When both the completing implementer's model row and a reviewer's model
   // row are in the window, only the completing implementer's telemetry may
   // determine the model label.
-  const summary = stats._internals.summarizeAgentWindow([
+  const summary = summarizeAgentWindow([
     // Model telemetry from the completing implementer.
-    row({ mission: 'task-impl-vs-reviewer', implementer: 'claude', model: 'claude-sonnet-5', stage: 'active', pr_fix_rounds: '0', closed: '' }),
+    row({ mission: 'task-impl-vs-reviewer', implementer: 'claude', model: 'claude-sonnet-5', stage: 'active', pr_fix_rounds: '0', completedForTest: '' }),
     // Reviewer / different-family model
-    row({ mission: 'task-impl-vs-reviewer', implementer: 'claude', model: 'gpt-5.4', stage: 'review', pr_fix_rounds: '0', closed: '' }),
+    row({ mission: 'task-impl-vs-reviewer', implementer: 'claude', reviewer_agent: 'codex', model: 'gpt-5.4', stage: 'review', pr_fix_rounds: '0', completedForTest: '' }),
     // Blank-model rollup with fix rounds
-    row({ mission: 'task-impl-vs-reviewer', implementer: 'claude', model: '', stage: 'default', pr_fix_rounds: '3', closed: 'yes' }),
+    row({ mission: 'task-impl-vs-reviewer', implementer: 'claude', model: '', stage: 'default', pr_fix_rounds: '3', completedForTest: 'yes' }),
   ], WINDOW);
 
   // Must attribute to claude-sonnet-5, NOT the reviewer's gpt-5.4.
@@ -144,13 +162,13 @@ test('task-2213: completing implementer model beats reviewer model even when rev
   // A later reviewer date does not change the completing implementer's
   // ownership: impl=claude active on July 7, reviewer on July 8, and closed
   // rollup on July 9.
-  const summary = stats._internals.summarizeAgentWindow([
+  const summary = summarizeAgentWindow([
     // Completing implementer's model (earlier date)
-    row({ mission: 'task-date-priority', date: '2026-07-07', implementer: 'claude', model: 'claude-sonnet-5', stage: 'active', pr_fix_rounds: '0', closed: '' }),
+    row({ mission: 'task-date-priority', date: '2026-07-07', implementer: 'claude', model: 'claude-sonnet-5', stage: 'active', pr_fix_rounds: '0', completedForTest: '' }),
     // Reviewer / different-family model (later date)
-    row({ mission: 'task-date-priority', date: '2026-07-08', implementer: 'claude', model: 'gpt-5.4', stage: 'review', pr_fix_rounds: '0', closed: '' }),
+    row({ mission: 'task-date-priority', date: '2026-07-08', implementer: 'claude', reviewer_agent: 'codex', model: 'gpt-5.4', stage: 'review', pr_fix_rounds: '0', completedForTest: '' }),
     // Blank-model rollup with fix rounds (latest date)
-    row({ mission: 'task-date-priority', date: '2026-07-09', implementer: 'claude', model: '', stage: 'default', pr_fix_rounds: '3', closed: 'yes' }),
+    row({ mission: 'task-date-priority', date: '2026-07-09', implementer: 'claude', model: '', stage: 'default', pr_fix_rounds: '3', completedForTest: 'yes' }),
   ], WINDOW);
 
   // Must attribute to claude-sonnet-5, NOT the reviewer's gpt-5.4.
@@ -164,10 +182,10 @@ test('task-2213: the completing implementer owns the model row, not a later revi
   // mission. A reviewer may run later using a model that the old `custom`
   // family heuristic also accepted (mistral), but that telemetry must never
   // reassign credit away from the completing implementer.
-  const summary = stats._internals.summarizeAgentWindow([
-    row({ mission: 'task-final-owner', date: '2026-07-07', implementer: 'custom', model: 'qwen3.6-27b-q8', stage: 'follow-up', pr_fix_rounds: '0', closed: '' }),
-    row({ mission: 'task-final-owner', date: '2026-07-08', implementer: 'custom', reviewer_agent: 'vibe', model: 'mistral', stage: 'review', pr_fix_rounds: '0', closed: '' }),
-    row({ mission: 'task-final-owner', date: '2026-07-09', implementer: 'custom', model: '', stage: 'default', pr_fix_rounds: '3', closed: 'yes' }),
+  const summary = summarizeAgentWindow([
+    row({ mission: 'task-final-owner', date: '2026-07-07', implementer: 'custom', model: 'qwen3.6-27b-q8', stage: 'follow-up', pr_fix_rounds: '0', completedForTest: '' }),
+    row({ mission: 'task-final-owner', date: '2026-07-08', implementer: 'custom', reviewer_agent: 'vibe', model: 'mistral', stage: 'review', pr_fix_rounds: '0', completedForTest: '' }),
+    row({ mission: 'task-final-owner', date: '2026-07-09', implementer: 'custom', model: '', stage: 'default', pr_fix_rounds: '3', completedForTest: 'yes' }),
   ], WINDOW);
 
   assert.deepEqual(summary, [
@@ -176,12 +194,12 @@ test('task-2213: the completing implementer owns the model row, not a later revi
 });
 
 test('task-2213: a closed reviewer row does not replace the final implementer after a handoff', () => {
-  // Completion is mission-wide: a reviewer row may carry `closed: yes`, while
+  // Completion is mission-wide: a reviewer row may carry `completedForTest: yes`, while
   // the last actual implementation was a follow-up by a different agent.
-  const summary = stats._internals.summarizeAgentWindow([
-    row({ mission: 'task-handoff-owner', date: '2026-07-07', implementer: 'claude', model: 'claude-sonnet-5', stage: 'follow-up', closed: '' }),
-    row({ mission: 'task-handoff-owner', date: '2026-07-08', implementer: 'custom', model: 'qwen3.6-27b-q8', stage: 'follow-up', closed: '' }),
-    row({ mission: 'task-handoff-owner', date: '2026-07-09', implementer: 'custom', reviewer_agent: 'vibe', model: 'mistral', stage: 'review', pr_fix_rounds: '3', closed: 'yes' }),
+  const summary = summarizeAgentWindow([
+   row({ mission: 'task-handoff-owner', date: '2026-07-07', implementer: 'claude', model: 'claude-sonnet-5', stage: 'follow-up', completedForTest: '' }),
+   row({ mission: 'task-handoff-owner', date: '2026-07-08', implementer: 'custom', model: 'qwen3.6-27b-q8', stage: 'follow-up', completedForTest: '' }),
+   row({ mission: 'task-handoff-owner', date: '2026-07-09', implementer: 'custom', reviewer_agent: 'vibe', model: 'mistral', stage: 'review', pr_fix_rounds: '3', completedForTest: 'yes' }),
   ], WINDOW);
 
   assert.deepEqual(summary, [
