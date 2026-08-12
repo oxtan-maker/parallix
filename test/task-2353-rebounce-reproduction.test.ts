@@ -18,10 +18,10 @@ test('task-2353 repro: declared pre-review gate rebounces, replays, and resumes 
     implementer: 'codex',
     reviewer: 'claude',
     maxAttempts: 1,
-    resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-2353.md' }),
+    resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task-2353.md', matches: [] }),
     getTaskStatusFn: () => 'review',
     eligibleAgentsForStepFn: () => ['codex', 'claude'],
-    workflowLauncherStatusFn: () => ({ supported: true }),
+    workflowLauncherStatusFn: () => ({ supported: true, agent: 'codex', detail: null }),
     isForgejoReviewEnabledFn: () => true,
     forgejoAvailableFn: async () => true,
     getPrStatusFn: () => ({ exists: true, state: 'open', number: 2353, url: 'http://forgejo.invalid/pr/2353' }),
@@ -36,7 +36,7 @@ test('task-2353 repro: declared pre-review gate rebounces, replays, and resumes 
     transitionTaskFn: async (_slug, status) => { transitions.push(status); return true; },
     rebaseBeforeReviewRoundFn: async () => {
       rebaseRuns++;
-      return { ok: true, sharedFileConflicts: false };
+      return { ok: true, sharedFileConflicts: false, hookFailure: false };
     },
     runPreReviewGateFn: async () => {
       gateRuns++;

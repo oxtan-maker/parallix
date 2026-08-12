@@ -1,7 +1,7 @@
 ---
 id: TASK-2219
 title: Extract Forgejo API transport from workflow operations
-status: ready-for-integration
+status: done
 assignee: [custom]
 created_date: '2026-07-11 00:00'
 labels:
