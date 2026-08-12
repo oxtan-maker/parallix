@@ -35,6 +35,20 @@ as usual. Below 100 columns the rail is above the stacked lanes.
 Resizing the terminal re-lays the board out at the new size. Shrinking the window
 clears the previous frame first, so no stale half-frame is left behind.
 
+## What the attention rail lists
+
+`▲ NEEDS YOU NEXT` lists the missions waiting on a person: a blocked mission
+first, then a failed gate, then a mission in review, then one in integration.
+
+A mission whose agent is running right now is left out of that list, because
+the turn is already being taken — a live `px review <slug>` process is the
+agent doing the review, so the board does not also ask a human for the same
+decision. Two facts still outrank a running agent and keep the mission listed:
+a blocking reason and a failed gate, which hold whether or not an agent is at
+the keyboard. When liveness cannot be observed at all (the process listing is
+unreadable), the mission stays listed — the board never reads "unknown" as
+"someone is on it".
+
 ## What a card shows
 
 Each mission card renders the facts the projection supplies:
