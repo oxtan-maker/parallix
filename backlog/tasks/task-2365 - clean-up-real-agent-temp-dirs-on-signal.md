@@ -1,7 +1,7 @@
 ---
 id: TASK-2365
 title: clean up real-agent temp dirs on signal
-status: review
+status: ready-for-integration
 assignee: [codex]
 created_date: '2026-08-10 00:00'
 updated_date: '2026-08-10 00:00'
