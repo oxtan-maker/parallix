@@ -119,23 +119,29 @@ export function classifyError(errorMsg: string): { failureClass: FailureClassTyp
     return { failureClass: FailureClass.GateFailure, dispatchAction: DispatchAction.AutoSendBack };
   }
 
-  // 5. GateFailure: declared gate failed
+  // 5. GateFailure: pre-handoff rebase failed. This generic wrapper can hide
+  // the verification-gate failure that caused the rebase command to fail.
+  if (/rebase failed before handoff/i.test(errorMsg)) {
+    return { failureClass: FailureClass.GateFailure, dispatchAction: DispatchAction.AutoSendBack };
+  }
+
+  // 6. GateFailure: declared gate failed
   if (/\bdeclared gate\b/i.test(errorMsg) && /\bfailed\b/i.test(errorMsg)) {
     return { failureClass: FailureClass.GateFailure, dispatchAction: DispatchAction.AutoSendBack };
   }
 
-  // 6. UnverifiableClaims: test claims that cannot be verified
+  // 7. UnverifiableClaims: test claims that cannot be verified
   if (/test(s?\s+)?passed/i.test(errorMsg) && /cannot\s+verify|unverifiable|proof\s+(not\s+)?found|stale\s+proof/i.test(errorMsg)) {
     return { failureClass: FailureClass.UnverifiableClaims, dispatchAction: DispatchAction.AutoSendBack };
   }
 
-  // 7. MalformedGates: malformed or non-runnable declared gates
+  // 8. MalformedGates: malformed or non-runnable declared gates
   if (/malformed\s+gate|invalid\s+gate\s+config|gate\s+command\s+(not\s+found|syntax\s+error|not\s+runnable)/i.test(errorMsg) ||
       (/gate/i.test(errorMsg) && /syntax\s+error|not\s+found|missing\s+(file|command)/i.test(errorMsg))) {
     return { failureClass: FailureClass.MalformedGates, dispatchAction: DispatchAction.AutoRepair };
   }
 
-  // 8. MissingArtifacts: mandatory mission artifacts missing.
+  // 9. MissingArtifacts: mandatory mission artifacts missing.
   // The "even after auto-remediation" substring is the stable marker of the
   // handoff checkpoint failure (handoff.ts emits "No checkpoint documents
   // found in ... even after auto-remediation."): checkpoint evidence is a
@@ -146,18 +152,18 @@ export function classifyError(errorMsg: string): { failureClass: FailureClassTyp
     return { failureClass: FailureClass.MissingArtifacts, dispatchAction: DispatchAction.AutoSendBack };
   }
 
-  // 9. StateMachineViolation: task state machine violations
+  // 10. StateMachineViolation: task state machine violations
   if (/state\s+violation|invalid\s+state|transition\s+not\s+allowed|cannot\s+(move|transition)\s+(from|to)\s+\w+\s+(to|from)/i.test(errorMsg) ||
       (/task\s+state/i.test(errorMsg) && /invalid|violation|incorrect/i.test(errorMsg))) {
     return { failureClass: FailureClass.StateMachineViolation, dispatchAction: DispatchAction.HumanOnly };
   }
 
-  // 10. InfraBlocker: forgejo/infrastructure blockers
+  // 11. InfraBlocker: forgejo/infrastructure blockers
   if (/forgejo|infrastructure|authentication\s+failed|token\s+(expired|invalid|missing)|forbidden|unauthorized\s+(access|request)|rate\s+limit|connection\s+(refused|timed?\s*out)|network\s+error/i.test(errorMsg)) {
     return { failureClass: FailureClass.InfraBlocker, dispatchAction: DispatchAction.HumanOnly };
   }
 
-  // 11. InfraBlocker: reviewer non-submission (ADR 0048 — human-only after bounded retries)
+  // 12. InfraBlocker: reviewer non-submission (ADR 0048 — human-only after bounded retries)
   // Matches: "Reviewer X did not submit a formal review outcome" and
   // "Reviewer X did not leave a complete local review handoff".
   if (/did not (submit|leave).*(review (outcome|handoff)|formal review)/i.test(errorMsg)) {
