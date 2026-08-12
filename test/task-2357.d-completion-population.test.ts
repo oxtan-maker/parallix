@@ -50,12 +50,12 @@ async function seed(
 
   await insertUsageRow(db as never, {
     repo: REPO, mission: DONE_WITH_TELEMETRY, date: '2026-06-02',
-    classification: 'user_value', closed: 'yes', prFixRounds: 1,
+    classification: 'user_value', prFixRounds: 1,
   });
   // Telemetry that claims closure for a mission the lifecycle never completed.
   await insertUsageRow(db as never, {
     repo: REPO, mission: TELEMETRY_WITHOUT_DONE, date: '2026-06-02',
-    classification: 'ai_sdlc', closed: 'yes', prFixRounds: 3,
+    classification: 'ai_sdlc', prFixRounds: 3,
   });
 }
 

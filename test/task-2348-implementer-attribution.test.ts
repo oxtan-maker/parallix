@@ -11,6 +11,12 @@ import { reviewFindingId } from '../src/domain/review.js';
 import os from 'node:os';
 import { seedMissionDatabase } from './fixtures/review-state-db.js';
 
+function summarizeAgentWindow(rows, window, options = {}) {
+  const completedMissionKeys = new Set(rows.filter(row => row.completedForTest === 'yes')
+    .map(row => `${String(row.repo || '')}::${String(row.mission).trim().toLowerCase()}`));
+  return (stats as any)._internals.summarizeAgentWindow(rows, window, { ...options, completedMissionKeys });
+}
+
 // ---------------------------------------------------------------------------
 // CP 1 (red): Reproduction tests for implementer attribution defects
 // ---------------------------------------------------------------------------
@@ -44,7 +50,7 @@ test('task-2348: mission with two implementers credits reported implementer not 
       pr_fix_rounds: '0',
       provider: 'anthropic',
       model: 'claude-opus-5',
-      closed: 'no',
+      completedForTest: 'no',
     },
     // Review stage (reviewer_agent=vibe, implementer still claude on this row)
     {
@@ -58,7 +64,7 @@ test('task-2348: mission with two implementers credits reported implementer not 
       provider: 'openai',
       model: 'gpt-5.6-terra',
       reviewer_agent: 'vibe',
-      closed: 'no',
+      completedForTest: 'no',
     },
     // Closed rollup row: deriveImplementerAndFixRounds reported custom as the
     // implementer who completed the mission
@@ -71,12 +77,11 @@ test('task-2348: mission with two implementers credits reported implementer not 
       classification: 'ai_sdlc',
       pr_fix_rounds: '2',
       model: '',
-      closed: 'yes',
+      completedForTest: 'yes',
     },
   ];
 
-  // @ts-expect-error -- TASK-2328: runtime-only property/partial test double absent from the inferred type.
-  const result = stats._internals.summarizeAgentWindow(rows, window);
+  const result = summarizeAgentWindow(rows, window);
   // Mission should be grouped under 'custom' (the reported implementer),
   // not 'claude-opus-5' (the earlier implementer's model).
   const customGroup = result.find(g => g.implementer === 'custom');
@@ -184,7 +189,7 @@ test('task-2348: summarizeAgentWindow reads pr_fix_rounds from closed row not ma
       pr_fix_rounds: '0',
       provider: 'openai',
       model: 'gpt-5.6-terra',
-      closed: 'no',
+      completedForTest: 'no',
     },
     // Review stage: pr_fix_rounds=3 (stale — includes previous implementer's rounds)
     {
@@ -197,7 +202,7 @@ test('task-2348: summarizeAgentWindow reads pr_fix_rounds from closed row not ma
       pr_fix_rounds: '3',
       provider: 'openai',
       model: 'gpt-5.6-terra',
-      closed: 'no',
+      completedForTest: 'no',
     },
     // Closed rollup: pr_fix_rounds=2 (authoritative from deriveImplementerAndFixRounds)
     {
@@ -209,12 +214,11 @@ test('task-2348: summarizeAgentWindow reads pr_fix_rounds from closed row not ma
       classification: 'ai_sdlc',
       pr_fix_rounds: '2',
       model: '',
-      closed: 'yes',
+      completedForTest: 'yes',
     },
   ];
 
-  // @ts-expect-error -- TASK-2328: runtime-only property/partial test double absent from the inferred type.
-  const result = stats._internals.summarizeAgentWindow(rows, window);
+  const result = summarizeAgentWindow(rows, window);
   assert.equal(result[0].implementer, 'custom');
   assert.equal(
     result[0].averageFixRounds,

@@ -28,11 +28,15 @@ test('throughput excludes active and review telemetry, and weekly buckets use cl
   const adapter = new ConcreteMetricsReadAdapter({
     // Partial double: this test only reads lane events, so the writing half of
     // the port is deliberately absent and the cast goes through `unknown`.
-    laneEventRepo: { findByRepositoryId: async () => [] } as unknown as BoardLaneEventRepository,
+    laneEventRepo: {
+      findByRepositoryId: async () => [
+        { repositoryId: 'parallix', missionId: 'task-closed', fromStatus: 'integration', toStatus: 'done', trigger: 'integrate', agent: 'codex', occurredAt: '2026-06-01T00:00:00Z', idempotencyKey: 'task-closed-done' },
+      ],
+    } as unknown as BoardLaneEventRepository,
     usageRepo: new InMemoryUsageRepository([
-      { repo: 'parallix', mission: 'task-closed', date: '2026-06-01', closed: 'yes', duration_minutes: 10 },
-      { repo: 'parallix', mission: 'task-active', date: '2026-07-27', stage: 'active', closed: 'no', duration_minutes: 20 },
-      { repo: 'parallix', mission: 'task-review', date: '2026-07-28', stage: 'review', closed: 'no', duration_minutes: 30 },
+      { repo: 'parallix', mission: 'task-closed', date: '2026-06-01', duration_minutes: 10 },
+      { repo: 'parallix', mission: 'task-active', date: '2026-07-27', stage: 'active', duration_minutes: 20 },
+      { repo: 'parallix', mission: 'task-review', date: '2026-07-28', stage: 'review', duration_minutes: 30 },
     ]),
     repositoryId: 'parallix' as never,
   });
@@ -106,7 +110,7 @@ test('cohort labels and implementer come from canonical Mission metadata, not te
   } as unknown as BoardLaneEventRepository;
   const adapter = new ConcreteMetricsReadAdapter({
     laneEventRepo,
-    usageRepo: new InMemoryUsageRepository([{ repo: 'parallix', mission: 'task-canonical', date: '2026-07-02', closed: 'yes', classification: 'wrong-label', implementer: 'claude' }]),
+    usageRepo: new InMemoryUsageRepository([{ repo: 'parallix', mission: 'task-canonical', date: '2026-07-02', classification: 'wrong-label', implementer: 'claude' }]),
     repositoryId: 'parallix' as never,
     cohortMetadata: async () => new Map([['task-canonical' as never, { labels: ['ai_sdlc' as never], assignee: 'codex' as never }]]),
   });

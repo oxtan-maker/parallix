@@ -144,7 +144,6 @@ test('a recorded measurement survives a full store restart and is still reported
       {
         date: '2026-06-23', repo: 'parallix', mission: 'task-restart',
         classification: 'ai_sdlc', implementer: 'codex', pr_fix_rounds: '2',
-        closed: 'yes',
       },
       { dbPath, rootDir: dir },
     );

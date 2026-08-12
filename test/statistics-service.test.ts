@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  isCompletedStatisticsRow,
   statisticsEvaluationInstants,
   statisticsMissionKey,
   statisticsRowInWindow,
@@ -12,17 +11,19 @@ import {
 
 const window = { start: new Date('2026-08-03T00:00:00Z'), end: new Date('2026-08-03T00:00:00Z') };
 
-test('statistics service owns canonical mission identity, completion, and reporting windows', () => {
+test('statistics service owns canonical mission identity and reporting windows', () => {
   const rows = [
-    { repo: 'acme', mission: 'Task-1', date: '2026-08-03', closed: 'yes' },
-    { repo: 'acme', mission: 'task-1', date: '2026-08-03', closed: 'yes' },
-    { repo: 'acme', mission: 'task-2', date: '2026-08-03', closed: 'true' },
-    { repo: 'acme', mission: 'task-3', date: '2026-08-04', closed: 'yes' },
+    { repo: 'acme', mission: 'Task-1', date: '2026-08-03', },
+    { repo: 'acme', mission: 'task-1', date: '2026-08-03', },
+    { repo: 'acme', mission: 'task-2', date: '2026-08-03', },
+    { repo: 'acme', mission: 'task-3', date: '2026-08-04', },
   ];
   assert.equal(statisticsMissionKey(rows[0]!), 'acme::task-1');
-  assert.equal(isCompletedStatisticsRow(rows[2]!), false);
   assert.equal(statisticsRowInWindow(rows[3]!, window), false);
-  assert.deepEqual(summarizeCompletedMissionWindow(rows, window).missions.map((row) => row.mission), ['Task-1']);
+  assert.deepEqual(
+    summarizeCompletedMissionWindow(rows, window, new Set(['acme::task-1'])).missions.map((row) => row.mission),
+    ['Task-1'],
+  );
 });
 
 test('statistics service buckets equivalent offsets in the same UTC hour', () => {

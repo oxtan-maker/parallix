@@ -10,7 +10,7 @@ test('task-2347.08: CLI delegates identity, completion, and window rules to stat
   const source = fs.readFileSync(path.join(root, 'src/adapters/cli/commands/stats.ts'), 'utf8');
   assert.match(source, /statisticsMissionKey\(row\)/);
   assert.match(source, /statisticsRowInWindow\(row, window\)/);
-  assert.match(source, /summarizeCompletedMissionWindow\(rows, window\)/);
+  assert.match(source, /summarizeCompletedMissionWindow\(rows, window, completedMissionKeys\)/);
   assert.doesNotMatch(source, /return `\$\{String\(row\.repo/);
 });
 

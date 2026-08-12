@@ -23,11 +23,7 @@ import type { BoardMetrics, MetricsProvenance, StatisticsHealth } from './board.
 import type { AgentAvailabilityRow } from './agent-status.js';
 import { buildMetrics } from './metrics.js';
 import { compareCohorts, type CohortDimension } from './cohorts.js';
-import {
-  isCompletedStatisticsRow,
-  statisticsMissionKey,
-  utcHourBucket,
-} from '../services/statistics-service.js';
+import { statisticsMissionKey, utcHourBucket } from '../services/statistics-service.js';
 import { weeklyDecisionWindows } from '../services/decision-window.js';
 
 // ---------------------------------------------------------------------------
@@ -266,9 +262,6 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
           ? Math.max(existing.reviewFixRounds ?? -1, record.pr_fix_rounds)
           : existing.reviewFixRounds;
         existing.createdAt = existing.createdAt < timestamp ? existing.createdAt : timestamp;
-        if (isCompletedStatisticsRow(record)) {
-          existing.closedAt = existing.closedAt === null || existing.closedAt < timestamp ? timestamp : existing.closedAt;
-        }
         existing.labelValues.push(...recordLabelValues(record));
         existing.runs.push(usageRecordToRun(record));
       } else {
@@ -276,7 +269,7 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
           missionId: record.mission as MissionId,
           repositoryId,
           createdAt: timestamp,
-          closedAt: isCompletedStatisticsRow(record) ? timestamp : null,
+          closedAt: null,
           cycleTimeMinutes: 0,
           reviewFixRounds: record.pr_fix_rounds ?? null,
           labelValues: [...recordLabelValues(record)],
@@ -296,9 +289,7 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
     for (const missionId of missionIds) {
       const outcome = outcomeMap.get(statisticsMissionKey({ repo: repositoryId, mission: missionId }));
       const lifecycle = lifecycles.get(missionId);
-      // Telemetry-only closure is an explicit legacy fallback only when no
-      // lifecycle is recorded for that mission at all.
-      const completedAt = lifecycle?.completedAt ?? (lifecycle === undefined ? outcome?.closedAt ?? null : null);
+      const completedAt = lifecycle?.completedAt ?? null;
       if (completedAt === null) { continue; }
       if (!outcome) {
         outcomes.push({

@@ -75,11 +75,19 @@ test('task-2337: recordStageStats records model for custom agent', () => {
 
 test('task-2337: weekly stats report renders model name for custom agent rows', () => {
   const rows = [
-    { date: '2026-08-01', repo: 'r', mission: 'task-custom-1', classification: 'user_value', implementer: 'custom', model: 'qwen3.6-27b-q8', stage: 'active', pr_fix_rounds: '0', duration_minutes: '10', closed: 'yes' },
-    { date: '2026-08-02', repo: 'r', mission: 'task-custom-2', classification: 'user_value', implementer: 'custom', model: 'qwen3.6-27b-q8', stage: 'active', pr_fix_rounds: '0', duration_minutes: '8', closed: 'yes' },
-    { date: '2026-08-03', repo: 'r', mission: 'task-custom-3', classification: 'user_value', implementer: 'custom', model: 'cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit', stage: 'active', pr_fix_rounds: '0', duration_minutes: '12', closed: 'yes' },
+    { date: '2026-08-01', repo: 'r', mission: 'task-custom-1', classification: 'user_value', implementer: 'custom', model: 'qwen3.6-27b-q8', stage: 'active', pr_fix_rounds: '0', duration_minutes: '10', },
+    { date: '2026-08-02', repo: 'r', mission: 'task-custom-2', classification: 'user_value', implementer: 'custom', model: 'qwen3.6-27b-q8', stage: 'active', pr_fix_rounds: '0', duration_minutes: '8', },
+    { date: '2026-08-03', repo: 'r', mission: 'task-custom-3', classification: 'user_value', implementer: 'custom', model: 'cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit', stage: 'active', pr_fix_rounds: '0', duration_minutes: '12', },
   ];
-  const report = stats.renderWeeklyStatsReport(rows, { today: '2026-08-04' });
+  const report = stats.renderWeeklyStatsReport(rows, {
+    today: '2026-08-04',
+    missionFlow: rows.map(row => ({
+      repo: row.repo,
+      mission: row.mission,
+      closedAt: `${row.date}T00:00:00Z`,
+      labels: ['user_value'],
+    })),
+  });
   const plain = stripAnsi(report);
 
   // Agent performance table should show the actual model names

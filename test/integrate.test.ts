@@ -111,6 +111,7 @@ const {
   printDiagnosticTable,
   reportSyncMergedFailure,
   recordPostIntegrationStats,
+  persistLandedIntegrationOrAbort,
   formatRecordedStatsRow,
   resolveIntegrationVerificationWorktree,
   buildIntegrationVerificationInvocation,
@@ -124,6 +125,27 @@ const { conventionalWorktreePath, getPrimaryBranch } = missionUtils;
 const PRIMARY = getPrimaryBranch();
 
 import { stubMissionServices } from './helpers/stub-mission-services.js';
+
+test('persistLandedIntegrationOrAbort records lifecycle completion and closure', async () => {
+  const calls = [];
+  const integration = { status: 'integration', closedAt: null, assignee: 'codex' };
+  const done = { status: 'done', closedAt: null, assignee: 'codex' };
+  const closed = { status: 'done', closedAt: '2026-08-12T12:00:00.000Z', assignee: 'codex' };
+  let state = integration;
+  const services = {
+    store: { load: async () => ({ kind: 'found', mission: state, version: 1 }) },
+    integration: {
+      decideIntegration: async request => { calls.push(['decide', request]); state = done; return { status: 'completed' }; },
+      close: async request => { calls.push(['close', request]); state = closed; return { status: 'completed' }; },
+    },
+  };
+
+  await persistLandedIntegrationOrAbort('task-close', 'abc123', services);
+
+  assert.deepEqual(calls.map(([kind]) => kind), ['decide', 'close']);
+  assert.equal(calls[1][1].expectedVersion, 1);
+  assert.equal(calls[1][1].integration.value.completed, true);
+});
 
 test('prepareNoisePatchForSquash cleans only its owned patch directory when reset fails', () => {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'integrate-noise-cleanup-'));

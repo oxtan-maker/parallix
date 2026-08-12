@@ -28,7 +28,8 @@ test('qwen quota-exceeded: timed block with reason (parseResetTime tried first)'
     stderr: 'Error: 429 Allocated quota exceeded. Your quota will reset at 2026-08-12T10:00:00+00:00.',
     status: 1,
     signal: null,
-    error: null
+    error: null,
+    now: new Date('2026-08-12T09:00:00Z'),
   });
 
   assert.ok(result, 'limit hit detected');

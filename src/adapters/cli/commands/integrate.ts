@@ -1087,6 +1087,7 @@ async function integrate(args: string[], options: { missionServicesFn?: Function
           if (fs.existsSync(baseWorktree)) {
             nextActionMessage = `Next: cd ${baseWorktree}`;
           }
+          await persistLandedIntegrationOrAbort(slug, mergedCommit, missionServices);
           await (recordPostIntegrationStatsOrAbort as any)(slug, { rootDir: baseWorktree, missionStore: missionServices.store });
           fmt.log.info('Step 7 (resume): Cleaning up the local mission worktree...');
           if (!cleanupMissionWorktree(slug)) {
@@ -1259,6 +1260,7 @@ async function integrate(args: string[], options: { missionServicesFn?: Function
       if (fs.existsSync(baseWorktree)) {
         nextActionMessage = `Next: cd ${baseWorktree}`;
       }
+      await persistLandedIntegrationOrAbort(slug, mergedCommit, missionServices);
       await (recordPostIntegrationStatsOrAbort as any)(slug, { rootDir: baseWorktree, missionStore: missionServices.store });
       fmt.log.info('Step 7: Cleaning up the local mission worktree...');
       if (!cleanupMissionWorktree(slug)) {
@@ -1996,6 +1998,53 @@ async function recordPostIntegrationStatsOrAbort(slug: string, options: {rootDir
   }
 }
 
+/** Persist the sole completion authority once the squash commit exists. */
+async function persistLandedIntegrationOrAbort(slug: string, landedCommit: string, missionServices: any) {
+  let loaded = await missionServices.store.load(missionId(slug));
+  if (loaded.kind !== 'found') {
+    fmt.log.fail(`Mission ${missionId(slug)} is unavailable after landing; statistics will not run.`);
+    throw new IntegrationAbort();
+  }
+  if (loaded.mission.status !== 'done') {
+    const result = await missionServices.integration.decideIntegration({
+      operationId: `integrate-closeout:${slug}:${landedCommit}`,
+      missionId: missionId(slug),
+      expectedVersion: loaded.version,
+      capabilities: new Set(['integration:decide']),
+      idempotencyKey: `integrate:${slug}:${landedCommit}`,
+      actor: loaded.mission.assignee ?? 'custom',
+      facts: {
+        git: { source: 'git', status: 'fresh', value: { merged: true } },
+        verification: { source: 'integration-gates', status: 'fresh', value: { passed: true } },
+      },
+    });
+    if (result.status !== 'completed') {
+      fmt.log.fail(`Mission completion failed after landing: ${result.error?.message || 'unknown'}.`);
+      throw new IntegrationAbort();
+    }
+    loaded = await missionServices.store.load(missionId(slug));
+    if (loaded.kind !== 'found') {
+      fmt.log.fail(`Mission ${missionId(slug)} is unavailable for closure after landing.`);
+      throw new IntegrationAbort();
+    }
+  }
+  if (loaded.mission.closedAt !== null) { return; }
+  const result = await missionServices.integration.close({
+    operationId: `integrate-close:${slug}:${landedCommit}`,
+    missionId: missionId(slug),
+    expectedVersion: loaded.version,
+    capabilities: new Set(['closure:record']),
+    idempotencyKey: `close:${slug}:${landedCommit}`,
+    actor: loaded.mission.assignee ?? 'custom',
+    closedAt: new Date().toISOString(),
+    integration: { source: 'git', status: 'fresh', value: { completed: true } },
+  });
+  if (result.status !== 'completed') {
+    fmt.log.fail(`Mission closure failed after landing: ${result.error?.message || 'unknown'}.`);
+    throw new IntegrationAbort();
+  }
+}
+
 /**
  * Runs the repo-configured post-integrate hook (adapters.integrate.postIntegrateCommand)
  * exactly once from the base checkout, after a successful non-dry-run integrate closeout.
@@ -2283,4 +2332,4 @@ function buildConflictResolutionPrompt(slug: string = '<slug>', area: string = '
 // Re-export getPrimaryWorktree from mission-utils
 (integrate as any).getPrimaryWorktree = getPrimaryWorktree;
 export default integrate;
-export { integrate, formatRecordedStatsRow, detectChangedAreas, parseFilesToAreas, loadIntegrationConfig, getIntegrationGatePlan, printIntegrationGatePlan, buildIntegrationGateEnv, captureFinalIntegrationTree, parseIntegrateArgs, resolveIntegrationVerificationWorktree, buildIntegrationVerificationInvocation, executeIntegrationGates, orderIntegrationGates, gateMatchesChangedAreas, buildIntegrationContext, getPrimaryWorktree, resolveConflictsForMission, cleanupMissionWorktree, rewriteWorktreePaths, isNoMergeToAbortResult, buildConflictResolutionPrompt, VARIANT_B_AUTOMATION_SUMMARY, stashMainCheckoutIfNeeded, restoreMainCheckoutStash, evaluateTaskStatusForIntegration, promoteTaskForIntegrationIfNeeded, findExistingSquashCommit, printIntegrationPreflight, resolveForgejoUserForIntegration, getUnresolvedIndexConflicts, parseStashPopCollisionFiles, reportStashPopFailure, maybeUpdateGraphifyOnPrimary, SYNC_MERGED_DIAGNOSTICS, printDiagnosticTable, recordPostIntegrationStats, recordPostIntegrationStatsOrAbort, reportSyncMergedFailure, runPostIntegrateHookOrAbort, prepareNoisePatchForSquash, areAllBacklogOnlyConflicts, isIntendedPayloadAtHead };
+export { integrate, formatRecordedStatsRow, detectChangedAreas, parseFilesToAreas, loadIntegrationConfig, getIntegrationGatePlan, printIntegrationGatePlan, buildIntegrationGateEnv, captureFinalIntegrationTree, parseIntegrateArgs, resolveIntegrationVerificationWorktree, buildIntegrationVerificationInvocation, executeIntegrationGates, orderIntegrationGates, gateMatchesChangedAreas, buildIntegrationContext, getPrimaryWorktree, resolveConflictsForMission, cleanupMissionWorktree, rewriteWorktreePaths, isNoMergeToAbortResult, buildConflictResolutionPrompt, VARIANT_B_AUTOMATION_SUMMARY, stashMainCheckoutIfNeeded, restoreMainCheckoutStash, evaluateTaskStatusForIntegration, promoteTaskForIntegrationIfNeeded, findExistingSquashCommit, printIntegrationPreflight, resolveForgejoUserForIntegration, getUnresolvedIndexConflicts, parseStashPopCollisionFiles, reportStashPopFailure, maybeUpdateGraphifyOnPrimary, SYNC_MERGED_DIAGNOSTICS, printDiagnosticTable, recordPostIntegrationStats, recordPostIntegrationStatsOrAbort, persistLandedIntegrationOrAbort, reportSyncMergedFailure, runPostIntegrateHookOrAbort, prepareNoisePatchForSquash, areAllBacklogOnlyConflicts, isIntendedPayloadAtHead };

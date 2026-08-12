@@ -84,7 +84,7 @@ describe('TASK-2363 defect B: a display product name never splits repository ide
           try {
             upsertMeasurementRow({
               date: '2026-06-02', mission, classification: 'ai_sdlc',
-              implementer: 'claude', pr_fix_rounds: '1', stage: 'default', closed: 'yes',
+              implementer: 'claude', pr_fix_rounds: '1', stage: 'default',
             } as never, { rootDir: root, store });
           } finally {
             store.close();
@@ -125,11 +125,11 @@ describe('TASK-2363 defect B: a display product name never splits repository ide
         }
         await insertUsageRow(db, {
           repo: canonical, mission: COLLIDING, date: '2026-06-02',
-          classification: 'ai_sdlc', closed: 'yes', prFixRounds: 1, durationMinutes: 10,
+          classification: 'ai_sdlc', prFixRounds: 1, durationMinutes: 10,
         });
         await insertUsageRow(db, {
           repo: OTHER_REPO, mission: COLLIDING, date: '2026-06-02',
-          classification: 'user_value', closed: 'yes', prFixRounds: 9, durationMinutes: 900,
+          classification: 'user_value', prFixRounds: 9, durationMinutes: 900,
           actorKey: 'claude|other',
         });
 

@@ -22,7 +22,6 @@ export interface UsageRecord {
   readonly openai_usage_delta?: number;
   readonly duration_minutes?: number;
   readonly cost_usd?: number;
-  readonly closed?: string;
 }
 
 export interface UsageRepository {

@@ -46,7 +46,6 @@ function row(overrides: Record<string, string> = {}) {
     output_tokens: '20', cached_tokens: '5', context_tokens: '200',
     tool_calls: '7', openai_usage_before: '0', openai_usage_after: '12',
     openai_usage_delta: '0', duration_minutes: '3', cost_usd: '0.5',
-    closed: 'yes',
     ...overrides,
   };
   return HEADERS.split(',').map(header => values[header]).join(',');

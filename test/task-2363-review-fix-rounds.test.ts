@@ -91,11 +91,11 @@ describe('TASK-2363 defect A: an unrecorded review-fix count stays unknown', () 
       try {
         upsertMeasurementRow({
           date: '2026-06-02', repo: REPO, mission: KNOWN_ZERO, classification: 'ai_sdlc',
-          implementer: 'claude', pr_fix_rounds: '0', stage: 'default', closed: 'yes',
+          implementer: 'claude', pr_fix_rounds: '0', stage: 'default',
         } as any, { store });
         upsertMeasurementRow({
           date: '2026-06-02', repo: REPO, mission: UNKNOWN, classification: 'ai_sdlc',
-          implementer: 'claude', stage: 'default', closed: 'yes',
+          implementer: 'claude', stage: 'default',
         } as any, { store });
       } finally {
         store.close();

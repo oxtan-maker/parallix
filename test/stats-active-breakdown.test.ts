@@ -12,6 +12,19 @@ await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
 'use strict';
 
+function missionFlow(rows) {
+  return rows.filter(row => row.completedForTest === 'yes')
+    .map(row => ({ repo: String(row.repo || ''), mission: row.mission, closedAt: `${row.date}T00:00:00Z`, labels: [] }));
+}
+
+function renderWeeklyStatsReport(rows, options = {}) {
+  return stats.renderWeeklyStatsReport(rows, { ...options, missionFlow: missionFlow(rows) });
+}
+
+function renderRangeStatsReport(rows, options = {}) {
+  return stats.renderRangeStatsReport(rows, { ...options, missionFlow: missionFlow(rows) });
+}
+
 // Reproduction test for task-1409: active-stage stats rows are invisible in
 // stats reports because the per-mission phase report and the agent performance
 // tables filter to `closed === 'yes'` rows, which excludes in-progress active
@@ -92,7 +105,8 @@ test('task-2213: weekly agent performance table excludes active-stage agents', (
       implementer: 'codex',
       model: 'gpt-5',
       pr_fix_rounds: '2',
-      closed: 'yes',
+      stage: 'default',
+      completedForTest: 'yes',
     },
     // Active-stage missions (must NOT appear in agent performance)
     {
@@ -117,16 +131,15 @@ test('task-2213: weekly agent performance table excludes active-stage agents', (
     },
   ];
 
-  const report = stats.renderWeeklyStatsReport(rows, { today: '2026-06-24' });
+  const report = renderWeeklyStatsReport(rows, { today: '2026-06-24' });
   const plain = __mm1.stripAnsi(report);
   const performance = plain.slice(
     plain.indexOf('Agent performance this week'),
     plain.indexOf('Agent spend by stage this week'),
   );
 
-  // Mission count: only 1 closed mission
-  assert.match(plain, /# missions with telemetry\s+[^\d]*1\s/,
-    'weekly report should count only closed missions');
+  assert.match(plain, /# missions with telemetry[\s\S]*\n3\s+1\s+2/,
+    'weekly report should include all telemetry missions');
 
   // Agent performance: only closed missions appear
   assert.ok(performance.includes('gpt-5'),
@@ -171,19 +184,19 @@ test('task-2213: range agent performance table excludes active-stage agents', ()
     },
   ];
 
-  const report = stats.renderRangeStatsReport(rows, { from: '2026-06-15', to: '2026-06-17' });
+  const report = renderRangeStatsReport(rows, { from: '2026-06-15', to: '2026-06-17' });
   const plain = __mm1.stripAnsi(report);
+  const performance = plain.slice(plain.indexOf('Agent performance'));
 
-  // Mission count: 0 (no closed missions)
-  assert.match(plain, /# missions with telemetry\s+[^\d]*0\s/,
-    'range report should count 0 closed missions');
+  assert.match(plain, /# missions with telemetry[\s\S]*\n3\s+1\s+2/,
+    'range report should include all telemetry missions');
 
   // Active-stage agents must NOT appear in agent performance
-  assert.ok(!plain.includes('vibe'),
+  assert.ok(!performance.includes('vibe'),
     'active-stage agent must NOT appear in agent performance table');
-  assert.ok(!plain.includes('claude-sonnet-4-6'),
+  assert.ok(!performance.includes('claude-sonnet-4-6'),
     'active-stage agent must NOT appear in agent performance table');
-  assert.ok(!plain.includes('claude-sonnet-5'),
+  assert.ok(!performance.includes('claude-sonnet-5'),
     'active-stage agent must NOT appear in agent performance table');
 });
 
@@ -196,7 +209,7 @@ test('task-2213: completed missions keep per-model rows with per-model averages'
       implementer: 'custom',
       model: 'qwen3.5',
       pr_fix_rounds: '1',
-      closed: 'yes',
+      completedForTest: 'yes',
     },
     {
       date: '2026-06-21',
@@ -205,7 +218,7 @@ test('task-2213: completed missions keep per-model rows with per-model averages'
       implementer: 'custom',
       model: 'qwen3.5',
       pr_fix_rounds: '2',
-      closed: 'yes',
+      completedForTest: 'yes',
     },
     {
       date: '2026-06-22',
@@ -214,11 +227,11 @@ test('task-2213: completed missions keep per-model rows with per-model averages'
       implementer: 'codex',
       model: 'gpt-5',
       pr_fix_rounds: '1',
-      closed: 'yes',
+      completedForTest: 'yes',
     },
   ];
 
-  const report = stats.renderWeeklyStatsReport(rows, { today: '2026-06-24' });
+  const report = renderWeeklyStatsReport(rows, { today: '2026-06-24' });
   const plain = __mm1.stripAnsi(report);
 
   assert.match(plain, /qwen3\.5\s+2\s+1\.50/,
@@ -247,7 +260,8 @@ test('task-1409: active and closed rows coexist without double-counting', () => 
       implementer: 'codex',
       model: 'gpt-5',
       pr_fix_rounds: '2',
-      closed: 'yes',
+      stage: 'default',
+      completedForTest: 'yes',
     },
     // Active mission with same model — must NOT appear in agent performance
     {
@@ -261,12 +275,11 @@ test('task-1409: active and closed rows coexist without double-counting', () => 
     },
   ];
 
-  const report = stats.renderWeeklyStatsReport(rows, { today: '2026-06-24' });
+  const report = renderWeeklyStatsReport(rows, { today: '2026-06-24' });
   const plain = __mm1.stripAnsi(report);
 
-  // Mission count: only the closed row counts, so 1 mission
-  assert.match(plain, /# missions with telemetry\s+[^\d]*1\s/,
-    'mission count should be 1 (only closed rows count)');
+  assert.match(plain, /# missions with telemetry[\s\S]*\n2\s+1\s+1/,
+    'telemetry count should deduplicate rows by mission');
 
   // Agent performance: gpt-5 shows 1 mission (only the closed row)
   // Active rows must NOT inflate agent performance counts
@@ -283,7 +296,7 @@ test('task-2213: a blank-model rollup row buckets under the mission\'s model row
       model: 'cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit',
       pr_fix_rounds: '0',
       stage: 'active',
-      closed: 'yes',
+      completedForTest: 'yes',
     },
     {
       date: '2026-06-21',
@@ -293,11 +306,11 @@ test('task-2213: a blank-model rollup row buckets under the mission\'s model row
       model: '',
       pr_fix_rounds: '1',
       stage: 'default',
-      closed: 'yes',
+      completedForTest: 'yes',
     },
   ];
 
-  const report = stats.renderWeeklyStatsReport(rows, { today: '2026-06-24' });
+  const report = renderWeeklyStatsReport(rows, { today: '2026-06-24' });
   const plain = __mm1.stripAnsi(report);
 
   assert.match(plain, /cyankiwi\/Qwen3\.6-35B-A3B-AWQ-4bit\s+1\s+1\.00/,

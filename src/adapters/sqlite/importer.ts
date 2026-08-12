@@ -364,8 +364,8 @@ export class SqliteImporter {
             input_tokens, output_tokens, cached_tokens, thoughts_tokens,
             context_tokens,
             tool_calls, openai_usage_before, openai_usage_after,
-            openai_usage_delta, duration_minutes, cost_usd, closed
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+            openai_usage_delta, duration_minutes, cost_usd
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
           [
             record['date'] ?? null,
             record['repo'] || '',
@@ -389,7 +389,6 @@ export class SqliteImporter {
             numericCell(record['openai_usage_delta']),
             numericCell(record['duration_minutes']),
             numericCell(record['cost_usd']),
-            record['closed'] ?? null,
           ],
         );
       }

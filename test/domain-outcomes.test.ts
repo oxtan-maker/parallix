@@ -181,7 +181,6 @@ test('SC2: usageRecordsToOutcomes populates the cohort dimensions from usage and
         tool_calls: 12,
         duration_minutes: 22,
         cost_usd: 0.5,
-        closed: 'no',
       },
       {
         date: '2026-08-02',
@@ -198,7 +197,6 @@ test('SC2: usageRecordsToOutcomes populates the cohort dimensions from usage and
         tool_calls: 5,
         duration_minutes: 15,
         cost_usd: 0.25,
-        closed: 'yes',
       },
     ],
   ).readOutcomes();
@@ -225,8 +223,8 @@ test('SC2: an unmeasured column leaves the affected total unavailable, not zero'
     repo,
     [laneEvent(repo, task, 'integration', 'done', 'integrate', '2026-08-02T12:00:00Z')],
     [
-      { date: '2026-08-01', repo, mission: task, implementer_agent: 'codex', stage: 'execute', tool_calls: 3, cost_usd: 0.1, closed: 'no' },
-      { date: '2026-08-02', repo, mission: task, implementer_agent: 'codex', stage: 'execute', input_tokens: 10, output_tokens: 5, cost_usd: 0.2, closed: 'yes' },
+      { date: '2026-08-01', repo, mission: task, implementer_agent: 'codex', stage: 'execute', tool_calls: 3, cost_usd: 0.1, },
+      { date: '2026-08-02', repo, mission: task, implementer_agent: 'codex', stage: 'execute', input_tokens: 10, output_tokens: 5, cost_usd: 0.2, },
     ],
   ).readOutcomes();
 
