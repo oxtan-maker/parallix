@@ -1,8 +1,8 @@
 ---
 id: TASK-2345
 title: Reconcile launcher block seam with the SQLite blocklist
-status: refined
-assignee: [custom]
+status: active
+assignee: [codex]
 created_date: '2026-08-08 00:00'
 labels:
   - user_value
