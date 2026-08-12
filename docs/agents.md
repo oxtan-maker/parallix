@@ -234,6 +234,12 @@ whole-root override. Platform defaults are `~/.local/state/parallix` on Linux,
 `~/Library/Application Support/parallix` on macOS, and `%LOCALAPPDATA%\parallix`
 on Windows, with `~/.parallix` as the fallback.
 
+The SQLite blocklist is the runtime authority for every family. A block in
+`agents.local.json` is an operator override: a local block adds or replaces the
+runtime result, and an explicit local `false` unblocks that family even while
+SQLite holds a runtime block. The launcher and the board apply this same rule
+when they report whether a family is blocked.
+
 On first use, if the effective file is absent, parallix migrates these legacy
 locations in order, with later values taking precedence:
 

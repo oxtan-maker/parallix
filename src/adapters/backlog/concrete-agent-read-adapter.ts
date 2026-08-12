@@ -8,6 +8,8 @@ import type { AgentBlocklistRepository } from '../../application/ports/agent-blo
 import type { LauncherProbeResult } from '../agents/launcher-availability.js';
 import type { MissionId } from '../../domain/mission.js';
 import { getTaskAssignee, resolveTaskFile } from './backlog.js';
+import { readAgentConfig, type AgentConfig } from '../agents/agent-config.js';
+import { resolveAgentBlockAuthority } from '../agents/agent-block-authority.js';
 
 // ---------------------------------------------------------------------------
 // Parse-primitive types
@@ -48,6 +50,8 @@ export interface ConcreteAgentReadAdapterOptions {
   readonly blocklistRepo: AgentBlocklistRepository;
   /** Known agent families to report availability for. */
   readonly knownAgentFamilies: readonly AgentFamily[];
+  /** Effective config, including local block overrides. */
+  readonly readAgentConfig?: () => AgentConfig | null;
   /**
    * Launcher availability probe (per agent). Production passes a cached probe
    * (`createLauncherProbe`); tests may pass a stub. When omitted the adapter
@@ -79,6 +83,7 @@ export class ConcreteAgentReadAdapter implements AgentReadAdapter {
   private readonly rootDir: string;
   private readonly blocklistRepo: AgentBlocklistRepository;
   private readonly knownAgentFamilies: readonly AgentFamily[];
+  private readonly readAgentConfig: () => AgentConfig | null;
   private readonly launcherAvailable: (_family: AgentFamily) => LauncherProbeResult;
   private readonly resolveTaskFile: ResolveTaskFileFn;
   private readonly getTaskAssignee: GetTaskAssigneeFn;
@@ -89,6 +94,7 @@ export class ConcreteAgentReadAdapter implements AgentReadAdapter {
     this.rootDir = options.rootDir;
     this.blocklistRepo = options.blocklistRepo;
     this.knownAgentFamilies = options.knownAgentFamilies;
+    this.readAgentConfig = options.readAgentConfig ?? (() => readAgentConfig());
     this.launcherAvailable = options.launcherAvailable ?? (() => ({ available: true, detail: null }));
     this.resolveTaskFile = options.resolveTaskFile ?? defaultResolveTaskFile();
     this.getTaskAssignee = options.getTaskAssignee ?? defaultGetTaskAssignee();
@@ -105,8 +111,10 @@ export class ConcreteAgentReadAdapter implements AgentReadAdapter {
     const nowMs = Date.now();
     const states = await new AgentBlockService(this.blocklistRepo).queryAll(this.knownAgentFamilies, nowMs);
     const stateByAgent = new Map(states.map((state) => [state.agent.toLowerCase(), state]));
+    const config = this.readAgentConfig();
     const availability: AgentAvailability[] = this.knownAgentFamilies.map((family) => {
-      const state = stateByAgent.get(family.toLowerCase());
+      const runtimeState = stateByAgent.get(family.toLowerCase());
+      const state = runtimeState && resolveAgentBlockAuthority(family, runtimeState, config, nowMs);
       const block: AgentBlock = state?.blocked
         ? (state.until
           ? { kind: 'until', untilMs: parseAgentBlockUntil(state.until), reason: state.reason }
