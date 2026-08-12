@@ -2,7 +2,7 @@
 
 **Parallix is a local-first Git workflow CLI for running AI coding agents in isolated, reviewable missions instead of letting one long-lived agent session mutate your main checkout.**
 
-It is for engineers who already use Git and terminal-first coding agents such as Claude Code, Codex, OpenCode/custom, and Vibe/Mistral, and want branch isolation, resumable checkpoints, agent-family failover, and a forced review step without building that harness by hand.
+It is for engineers who already use Git and terminal-first coding agents such as Claude Code, Codex, Qwen Code, OpenCode/custom, and Vibe/Mistral, and want branch isolation, resumable checkpoints, agent-family failover, and a forced review step without building that harness by hand.
 
 It wraps your existing AI coding workflow without replacing it: each mission gets its own branch and worktree, long runs checkpoint to markdown, review is a separate phase, and integration still goes through your repo's own verification command. A human still chooses the mission, launches each phase, reads the output, and decides what lands.
 
@@ -39,7 +39,7 @@ Each capability below is tied to a use case in [`docs/use-cases.md`](docs/use-ca
 - **Publish work to a Forgejo reviewer surface without making Forgejo your branch authority**. When the review provider is enabled, Parallix syncs the local baseline to a dedicated `review` remote and opens or updates the PR there; if Forgejo is disabled, the branch/worktree flow still runs locally.
 - **Use a repo-local Graphify knowledge graph for smaller codebase context pulls**. In repositories where the operator has already installed the Graphify skill, the workflow keeps `graphify-out/` isolated per worktree and refreshes it during review/integration, while the installed agent guidance steers codebase questions toward `graphify query` / `path` / `explain` before full reports or raw grep. That reduces token-usage.
 - **Keep your existing verification gate instead of agent self-reporting**. The gate is a configured shell command with a no-op default: declare your existing `make` / `npm` / script command in `workflow.config.json` and it runs verbatim; declare nothing and verification is a documented no-op pass, not an invented gate.
-- **See which agent family actually pays off across every repo one runtime drives** *(UC-6 — Partial).* A single operator-owned measurement database (`<PARALLIX_HOME>/parallix.db`) accumulates per-agent usage telemetry across repositories. Token-cost comparison is complete today only for the families with structured telemetry (codex, claude, opencode/local AI/custom); vibe/mistral record honest zeros by design.
+- **See which agent family actually pays off across every repo one runtime drives** *(UC-6 — Partial).* A single operator-owned measurement database (`<PARALLIX_HOME>/parallix.db`) accumulates per-agent usage telemetry across repositories. Token-cost comparison is complete today only for the families with structured telemetry (codex, claude, qwen, opencode/local AI/custom); vibe/mistral record honest zeros by design.
 
 ## The core workflow
 

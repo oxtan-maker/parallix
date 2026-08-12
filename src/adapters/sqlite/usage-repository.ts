@@ -59,6 +59,7 @@ function recordFromRow(row: Record<string, unknown>): UsageRecord {
     input_tokens: num(row.input_tokens),
     output_tokens: num(row.output_tokens),
     cached_tokens: num(row.cached_tokens),
+    thoughts_tokens: num(row.thoughts_tokens),
     context_tokens: num(row.context_tokens),
     tool_calls: num(row.tool_calls),
     openai_usage_before: num(row.openai_usage_before),

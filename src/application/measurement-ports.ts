@@ -46,6 +46,8 @@ export interface MeasurementRecord extends MeasurementIdentity {
   readonly input_tokens?: number;
   readonly output_tokens?: number;
   readonly cached_tokens?: number;
+  /** Thinking/reasoning tokens, reported separately by qwen; 0 elsewhere. */
+  readonly thoughts_tokens?: number;
   readonly context_tokens?: number;
   readonly tool_calls?: number;
   readonly openai_usage_before?: number;

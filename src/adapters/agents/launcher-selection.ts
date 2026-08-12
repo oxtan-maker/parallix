@@ -6,6 +6,7 @@ import { startClaudeAgent, resolveClaudeCommand } from './claude.js';
 import { startVibeAgent, resolveVibeCommand } from './vibe.js';
 import { startOpencodeAgent, resolveOpencodeCommand } from './opencode.js';
 import { startPiAgent, resolvePiCommand } from './pi.js';
+import { startQwenAgent, resolveQwenCommand } from './qwen.js';
 import { CONFIG_PATH, readAgentConfig, isAgentBlocked, type AgentConfig, type ReadAgentConfigOptions } from './agent-config.js';
 import { resolveCustomRunner } from '../config/product-config.js';
 import { isCustomCapacityAvailable } from './custom-capacity.js';
@@ -30,7 +31,8 @@ const LAUNCHERS: {[key: string]: Function} = {
   claude: startClaudeAgent,
   vibe: startVibeAgent,
   opencode: startOpencodeAgent,
-  pi: startPiAgent
+  pi: startPiAgent,
+  qwen: startQwenAgent
 };
 
 const RESOLVERS: {[key: string]: () => string} = {
@@ -38,7 +40,8 @@ const RESOLVERS: {[key: string]: () => string} = {
   claude: resolveClaudeCommand,
   vibe: resolveVibeCommand,
   opencode: resolveOpencodeCommand,
-  pi: resolvePiCommand
+  pi: resolvePiCommand,
+  qwen: resolveQwenCommand
 };
 
 // Runtime dispatch for custom agent family based on configured runner
@@ -47,13 +50,14 @@ function resolveCustomLauncher(worktree: string) {
   return LAUNCHERS[runner];
 }
 
-const RESUME_CAPABLE = new Set(['claude', 'codex', 'custom']);
+const RESUME_CAPABLE = new Set(['claude', 'codex', 'custom', 'qwen']);
 const HEALTH_PROBE_ARGS: {[key: string]: string[]} = Object.freeze({
   codex: ['--help'],
   claude: ['--help'],
   vibe: ['--help'],
   opencode: ['--help'],
-  pi: ['--help']
+  pi: ['--help'],
+  qwen: ['--help']
 });
 const LAUNCHER_HEALTH_TIMEOUT_MS = 3000;
 const DEFAULT_NO_OUTPUT_INITIAL_DELAY_MS = 60_000;
@@ -61,7 +65,7 @@ const DEFAULT_NO_OUTPUT_INTERVAL_MS = 60_000;
 const DRAFT_NO_OUTPUT_INITIAL_DELAY_MS = 15_000;
 const DRAFT_NO_OUTPUT_INTERVAL_MS = 30_000;
 
-const WORKFLOW_AGENT_NAMES = Object.freeze(['codex', 'claude', 'vibe', 'custom']);
+const WORKFLOW_AGENT_NAMES = Object.freeze(['codex', 'claude', 'vibe', 'custom', 'qwen']);
 const KNOWN_AGENT_NAMES = Object.freeze([
   ...WORKFLOW_AGENT_NAMES,
   'human'

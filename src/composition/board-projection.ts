@@ -14,6 +14,7 @@ import { ConcreteMissionReadAdapter } from '../adapters/backlog/concrete-mission
 import { ConcreteOperationLogReadAdapter } from '../adapters/backlog/concrete-operation-log-read-adapter.js';
 import { ConcreteReviewReadAdapter } from '../adapters/backlog/concrete-review-read-adapter.js';
 import { BoardProjectionBuilder } from '../application/projections/board-readers.js';
+import type { MissionReadAdapter } from '../application/projections/board-readers.js';
 import { ConcreteMetricsReadAdapter } from '../application/projections/metrics-read-adapter.js';
 import { MissionProjectionQuery } from '../application/projections/mission-query.js';
 import { BoardCommandController } from '../application/controller/board-controller.js';
@@ -38,7 +39,28 @@ export interface BoardProjectionCompositionDeps {
 
 /** The sole production constructor for board reads and mission details. */
 export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
-  const missions = new ConcreteMissionReadAdapter({ rootDir: deps.rootDir, repositoryId: deps.repositoryId });
+  const repositoryMissions = new ConcreteMissionReadAdapter({ rootDir: deps.rootDir, repositoryId: deps.repositoryId });
+  const missions: MissionReadAdapter = {
+    async loadAllMissions() {
+      const loaded = await repositoryMissions.loadAllMissions();
+      return Promise.all(loaded.map((mission) => withPersistedCheckpoints(mission)));
+    },
+    async loadMission(id) {
+      const mission = await repositoryMissions.loadMission(id);
+      return mission ? withPersistedCheckpoints(mission) : null;
+    },
+    getSourceFacts: () => repositoryMissions.getSourceFacts(),
+  };
+
+  async function withPersistedCheckpoints(mission: import('../domain/mission.js').Mission) {
+    if (!deps.missionStore) { return mission; }
+    try {
+      const stored = await deps.missionStore.load(mission.id);
+      return stored.kind === 'found' ? { ...mission, checkpoints: stored.mission.checkpoints } : mission;
+    } catch {
+      return mission;
+    }
+  }
   const builder = new BoardProjectionBuilder(
     missions,
     new ConcreteReviewReadAdapter({ rootDir: deps.rootDir, missionStore: deps.missionStore }),

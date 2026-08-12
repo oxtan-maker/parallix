@@ -14,6 +14,7 @@ export interface UsageRecord {
   readonly input_tokens?: number;
   readonly output_tokens?: number;
   readonly cached_tokens?: number;
+  readonly thoughts_tokens?: number;
   readonly context_tokens?: number;
   readonly tool_calls?: number;
   readonly openai_usage_before?: number;

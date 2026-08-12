@@ -13,13 +13,14 @@ import { runtimeAssetStore } from '../assets/runtime-assets.js';
 import { resolveArtifactDir } from './review-artifacts.js';
 
 type PromptEntry = { review: string; actOnReview: string };
-type PromptEntrypoints = { codex: PromptEntry; claude: PromptEntry; vibe: PromptEntry; custom: PromptEntry; autonomous: PromptEntry };
+type PromptEntrypoints = { codex: PromptEntry; claude: PromptEntry; vibe: PromptEntry; custom: PromptEntry; qwen: PromptEntry; autonomous: PromptEntry };
 
 export const PROMPT_ENTRYPOINTS: PromptEntrypoints = {
   codex:  { review: '$review all',                           actOnReview: '$act-on-review' },
   claude: { review: '/review all',                           actOnReview: '/act-on-review' },
   vibe: { review: '$review all',                           actOnReview: '/act-on-review' },
   custom: { review: '$review all',                           actOnReview: '/act-on-review' },
+  qwen: { review: '$review all',                             actOnReview: '$act-on-review' },
   autonomous: { review: '$review all',                       actOnReview: '/act-on-review' }
 };
 

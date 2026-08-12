@@ -74,7 +74,8 @@ export type LegacyInventoryId =
   | 'mutation-baseline'
   | 'mutation-run-config'
   | 'forgejo-token'
-  | 'workflow-config';
+  | 'workflow-config'
+  | 'qwen-settings';
 
 /** Compatibility routing for the current durable-state inventory. */
 export const LEGACY_INVENTORY_AUTHORITY = {
@@ -88,4 +89,5 @@ export const LEGACY_INVENTORY_AUTHORITY = {
   'coverage-manifest': { owner: 'operator-local', role: 'cache' } as const,
   'forgejo-token': localSource,
   'workflow-config': targetSource,
+  'qwen-settings': { owner: 'operator-local', role: 'cache' } as const,
 } as const satisfies Readonly<Record<LegacyInventoryId, Authority>>;

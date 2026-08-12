@@ -2,6 +2,7 @@ import * as fmt from '../../application/presentation/cli-format.js';
 import { isSpuriousCodexExit } from './codex.js';
 import { isSpuriousVibeExit } from './vibe.js';
 import { isSpuriousOpencodeExit } from './opencode.js';
+import { isSpuriousQwenExit } from './qwen.js';
 import { detectLimitHit, formatBlockUntil, DEFAULT_FALLBACK_HOURS } from '../../application/services/agent-limit.js';
 import { resolveAgentModel } from '../config/product-config.js';
 import {
@@ -515,6 +516,19 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
     });
 
     if (limitHit) {
+      // Reroute signal: transient limit (e.g. qwen rate-limit) — exclude from
+      // current retry cycle without persisting a long block to blocklist.
+      if (limitHit.reroute) {
+        log(fmt.status('WARN', `Transient limit for ${fmt.agent(chosen || '')}; ${limitHit.reason}. Rerouting without block.`));
+        tried.add(chosen || '');
+        if (agentOverride && agentOverride === chosen && iteration === 1) {
+          chosen = undefined;
+          continue;
+        }
+        chosen = undefined;
+        continue;
+      }
+
       log(fmt.status('WARN', `Limit hit detected for ${fmt.agent(chosen || '')}; reset estimate "${limitHit.until}" (${limitHit.source}). Blocking and retrying.`));
       try {
         const blockResult = await updateAgentBlockFn(chosen || '', limitHit.until, { reason: limitHit.reason });
@@ -569,7 +583,8 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
       !limitHit &&
       !isSpuriousOpencodeExit(result) &&
       !(chosen === 'codex' && isSpuriousCodexExit(result)) &&
-      !(chosen === 'vibe' && isSpuriousVibeExit(result));
+      !(chosen === 'vibe' && isSpuriousVibeExit(result)) &&
+      !(chosen === 'qwen' && isSpuriousQwenExit(result));
     if (launchFailed) {
       const exitInfo = result.signal
         ? `signal ${result.signal}`

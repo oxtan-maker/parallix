@@ -29,7 +29,8 @@ const MEASUREMENT_COLUMNS = [
   'date', 'repo', 'mission', 'classification', 'implementer', 'pr_fix_rounds',
   'provider', 'model', 'implementer_agent', 'reviewer_agent', 'stage',
   'actor_key',
-  'input_tokens', 'output_tokens', 'cached_tokens', 'context_tokens',
+  'input_tokens', 'output_tokens', 'cached_tokens', 'thoughts_tokens',
+  'context_tokens',
   'tool_calls', 'openai_usage_before', 'openai_usage_after',
   'openai_usage_delta', 'duration_minutes', 'cost_usd', 'closed',
 ] as const;
@@ -38,7 +39,7 @@ const MEASUREMENT_COLUMNS = [
 const COMPARED_FIELDS: readonly (keyof MeasurementRecord)[] = [
   'date', 'classification', 'implementer', 'pr_fix_rounds', 'provider',
   'model', 'implementer_agent', 'reviewer_agent', 'input_tokens',
-  'output_tokens', 'cached_tokens', 'context_tokens', 'tool_calls',
+  'output_tokens', 'cached_tokens', 'thoughts_tokens', 'context_tokens', 'tool_calls',
   'openai_usage_before', 'openai_usage_after', 'openai_usage_delta',
   'duration_minutes', 'cost_usd', 'closed',
 ];
@@ -62,6 +63,7 @@ const UPSERT_SQL =
      input_tokens = excluded.input_tokens,
      output_tokens = excluded.output_tokens,
      cached_tokens = excluded.cached_tokens,
+     thoughts_tokens = excluded.thoughts_tokens,
      context_tokens = excluded.context_tokens,
      tool_calls = excluded.tool_calls,
      openai_usage_before = excluded.openai_usage_before,
@@ -211,6 +213,7 @@ function rowToRecord(row: Record<string, unknown>): MeasurementRecord {
     input_tokens: num(row.input_tokens),
     output_tokens: num(row.output_tokens),
     cached_tokens: num(row.cached_tokens),
+    thoughts_tokens: num(row.thoughts_tokens),
     context_tokens: num(row.context_tokens),
     tool_calls: num(row.tool_calls),
     openai_usage_before: num(row.openai_usage_before),
@@ -239,6 +242,7 @@ function bindValues(record: MeasurementRecord): (string | number | null)[] {
     record.input_tokens ?? null,
     record.output_tokens ?? null,
     record.cached_tokens ?? null,
+    record.thoughts_tokens ?? null,
     record.context_tokens ?? null,
     record.tool_calls ?? null,
     record.openai_usage_before ?? null,

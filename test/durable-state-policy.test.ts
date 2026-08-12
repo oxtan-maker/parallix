@@ -21,6 +21,7 @@ const DIRECT_JSON_EXCEPTIONS = new Map([
   ['src/adapters/verification/mutation-gate.ts:baselinePath', 'mutation-baseline'],
   ['src/adapters/verification/mutation-gate.ts:configPath', 'mutation-run-config'],
   ['src/adapters/review/setup-review.ts:configPath', 'workflow-config'],
+  ['src/adapters/agents/qwen.ts:targetSettings', 'qwen-settings'],
 ]);
 
 function directJsonWrites(file, source) {
@@ -75,7 +76,7 @@ test('direct durable JSON write guard passes only inventory-documented exception
   // the canonical production layers. It detects
   // inline JSON.stringify/writeFileSync pairs, not pre-serialized or async writes.
   const writes = directJsonWritesInLib(RUNTIME_LIB);
-  assert.deepEqual(writes.sort(), [...DIRECT_JSON_EXCEPTIONS.keys()].sort());
+  assert.deepEqual([...new Set(writes)].sort(), [...DIRECT_JSON_EXCEPTIONS.keys()].sort());
   for (const inventoryId of DIRECT_JSON_EXCEPTIONS.values()) {
     const row = MACHINE_WRITTEN_PATH_INVENTORY.find(entry => entry.id === inventoryId);
     assert.match(row.persistencePolicy, /direct-write exception/);

@@ -167,7 +167,7 @@ test('resolveCustomLauncher returns opencode launcher for default config', () =>
 
 test('WORKFLOW_AGENT_NAMES includes custom as public agent family', () => {
   const { WORKFLOW_AGENT_NAMES } = launcherSelection;
-  assert.deepEqual(WORKFLOW_AGENT_NAMES, ['codex', 'claude', 'vibe', 'custom']);
+  assert.deepEqual(WORKFLOW_AGENT_NAMES, ['codex', 'claude', 'vibe', 'custom', 'qwen']);
   assert(WORKFLOW_AGENT_NAMES.includes('custom'));
 });
 

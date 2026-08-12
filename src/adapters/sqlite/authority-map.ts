@@ -54,6 +54,7 @@ export const USAGE_STATISTICS_AUTHORITY = {
   input_tokens: { owner: 'operator-local' } as const,
   output_tokens: { owner: 'operator-local' } as const,
   cached_tokens: { owner: 'operator-local' } as const,
+  thoughts_tokens: { owner: 'operator-local' } as const,
   context_tokens: { owner: 'operator-local' } as const,
   tool_calls: { owner: 'operator-local' } as const,
   openai_usage_before: { owner: 'operator-local' } as const,

@@ -36,6 +36,10 @@ const PATTERN_SETS = Object.freeze({
     /\bmistral\b[^\n]*?\b(?:quota exceeded|rate limit exceeded)\b/i,
     /\bresource[_ ]has[_ ]been[_ ]exhausted\b/i,
     /\bresource_exhausted\b/i
+  ],
+  qwen: [
+    /(?:\b429\b[^\n]*?\bAllocated quota exceeded\b|\bQuota exhausted:[\s\S]{0,500}\bcause:\s*insufficient_quota:\s*429\b)/i,
+    /\b429\b[^\n]*?\bRequests rate limit exceeded\b/i
   ]
 });
 
@@ -61,6 +65,7 @@ function clipContext(text: string, index: number, length: number) {
 }
 
 const ISO_PATTERN = /(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?(Z|[+-]\d{2}:?\d{2})?/;
+const MONTH_DAY_UTC_PATTERN = /\b(\d{2})-(\d{2})\s+([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?\s*UTC\b/i;
 const TWELVE_HOUR_PATTERN = /\b(\d{1,2})(?::(\d{2}))?\s*(am|pm|AM|PM)\b/;
 const TWENTY_FOUR_HOUR_PATTERN = /\b([01]?\d|2[0-3]):([0-5]\d)\b/;
 const RELATIVE_PATTERN = /\bin\s+(\d+)\s+(hour|hours|minute|minutes|second|seconds)\b/i;
@@ -86,6 +91,18 @@ function parseIso(text: string) {
   }
   const utcMs = Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second || 0), 0);
   return new Date(utcMs - offsetMinutes * 60 * 1000);
+}
+
+function parseMonthDayUtc(text: string, now: Date) {
+  const m = MONTH_DAY_UTC_PATTERN.exec(text);
+  if (!m) {return null;}
+  const [, month, day, hour, minute, second] = m;
+  const candidate = new Date(Date.UTC(now.getUTCFullYear(), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second || 0)));
+  if (candidate.getUTCMonth() !== Number(month) - 1 || candidate.getUTCDate() !== Number(day)) {return null;}
+  if (candidate.getTime() <= now.getTime()) {
+    candidate.setUTCFullYear(candidate.getUTCFullYear() + 1);
+  }
+  return candidate;
 }
 
 function parseTwelveHour(text: string, now: Date) {
@@ -150,6 +167,7 @@ function parseResetTime(text: string, now: Date = new Date()) {
   return (
     parseRetryAtDate(text) ||
     parseIso(text) ||
+    parseMonthDayUtc(text, now) ||
     parseTwelveHour(text, now) ||
     parseTwentyFourHour(text, now) ||
     parseRelative(text, now) ||
@@ -216,6 +234,14 @@ function detectLimitHit({
   let reason;
 
   if (match) {
+    // Qwen rate-limit is transient (retry after ~1 minute) — do NOT write
+    // a long timed block. Return reroute signal so caller excludes agent
+    // from current retry cycle without persisting to blocklist.
+    const matchedText = combined.slice(match.index, match.index + match.length);
+    if (agent === 'qwen' && /Requests rate limit exceeded/i.test(matchedText)) {
+      return { reroute: true, reason: 'rate limit (transient, no block)' };
+    }
+
     const context = clipContext(combined, match.index, match.length);
     const parsed = parseResetTime(context, now);
 
@@ -252,6 +278,7 @@ export {
   clipContext,
   parseIsoOffset,
   parseIso,
+  parseMonthDayUtc,
   parseTwelveHour,
   parseTwentyFourHour,
   parseRelative,
