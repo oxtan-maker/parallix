@@ -5,6 +5,7 @@ status: backlog
 assignee: [custom]
 created_date: '2026-08-08 00:00'
 labels:
+  - user_value
   - bug
 dependencies: []
 priority: medium
