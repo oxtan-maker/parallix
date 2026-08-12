@@ -4,7 +4,7 @@ title: agent running review is not detected
 status: backlog
 assignee: [codex]
 created_date: '2026-08-12 09:24'
-labels: []
+labels: [ai_sdlc, bug]
 dependencies: []
 ordinal: 91913
 ---
