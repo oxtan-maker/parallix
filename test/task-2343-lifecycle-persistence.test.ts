@@ -23,6 +23,7 @@ import { applyReviewStateToReview, reviewStateDataFrom } from '../src/adapters/r
 import { GATE_RESULT_RELATIVE_PATH, recordGateResult } from '../src/adapters/verification/verification.js';
 import { missionId } from '../src/domain/mission.js';
 import { agentFamily } from '../src/domain/agents.js';
+import { repositoryId } from '../src/domain/repository.js';
 import { changeRevision } from '../src/domain/review.js';
 import type { Review } from '../src/domain/review.js';
 import type { OperationalHistoryEntry, OperationalHistoryRepository } from '../src/application/ports/operation-history.js';
@@ -44,6 +45,7 @@ class MemoryHistoryRepo implements OperationalHistoryRepository {
 test('operationEventToEntry maps a lifecycle operation onto the operational_history shape', () => {
   const entry = operationEventToEntry({
     missionId: MISSION,
+    repositoryId: repositoryId('parallix'),
     trigger: 'submit-for-review',
     toStatus: 'review',
     agent: 'codex',
@@ -68,11 +70,11 @@ test('recorded lifecycle events reach operational_history and the operation-log 
   const recorder = new OperationEventRecorder(history);
 
   await recorder.append({
-    missionId: MISSION, trigger: 'activate', toStatus: 'active',
+    missionId: MISSION, repositoryId: repositoryId('parallix'), trigger: 'activate', toStatus: 'active',
     agent: 'codex', occurredAt: '2026-07-31T09:00:00.000Z',
   });
   await recorder.append({
-    missionId: MISSION, trigger: 'submit-for-review', toStatus: 'review',
+    missionId: MISSION, repositoryId: repositoryId('parallix'), trigger: 'submit-for-review', toStatus: 'review',
     agent: 'codex', occurredAt: '2026-08-01T09:00:00.000Z',
   });
 
@@ -88,7 +90,7 @@ test('recorded lifecycle events reach operational_history and the operation-log 
 test('a lifecycle operation that changes no lane still records its own entry', async () => {
   const history = new MemoryHistoryRepo();
   await new OperationEventRecorder(history).append({
-    missionId: MISSION, trigger: 'checkpoint' as never, toStatus: 'CP-3',
+    missionId: MISSION, repositoryId: repositoryId('parallix'), trigger: 'checkpoint' as never, toStatus: 'CP-3',
     agent: 'codex', occurredAt: '2026-08-02T09:00:00.000Z',
   });
 

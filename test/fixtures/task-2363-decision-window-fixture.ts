@@ -1,6 +1,6 @@
 import { missionId, type MissionId, type MissionStatus } from '../../src/domain/mission.js';
 import { repositoryId } from '../../src/domain/repository.js';
-import type { MissionTransition } from '../../src/domain/mission-workflow.js';
+import type { MissionCommand, MissionTransition } from '../../src/domain/mission-workflow.js';
 import type { AgentRunMeasurement, MissionOutcome } from '../../src/domain/usage.js';
 import { agentFamily } from '../../src/domain/agents.js';
 
@@ -126,16 +126,16 @@ export function completedMission(input: {
   const iso = (millis: number): string => new Date(millis).toISOString();
 
   const transitions: MissionTransition[] = [
-    { missionId: id, from: null, to: 'backlog', trigger: 'intake', actor: 'claude', occurredAt: input.createdAt },
+    { missionId: id, from: null, to: 'backlog', trigger: 'intake' as MissionCommand['type'], actor: 'claude', occurredAt: input.createdAt },
     { missionId: id, from: 'backlog', to: 'active', trigger: 'activate', actor: 'claude', occurredAt: iso(activeAt) },
   ];
   let cursor = activeAt + activeDwell;
-  transitions.push({ missionId: id, from: 'active', to: 'review', trigger: 'review', actor: 'claude', occurredAt: iso(cursor) });
+  transitions.push({ missionId: id, from: 'active', to: 'review', trigger: 'review' as MissionCommand['type'], actor: 'claude', occurredAt: iso(cursor) });
   for (let bounce = 0; bounce < (input.bounces ?? 0); bounce += 1) {
     cursor += reviewDwell;
     transitions.push({ missionId: id, from: 'review', to: 'active', trigger: 'activate', actor: 'claude', occurredAt: iso(cursor) });
     cursor += activeDwell;
-    transitions.push({ missionId: id, from: 'active', to: 'review', trigger: 'review', actor: 'claude', occurredAt: iso(cursor) });
+    transitions.push({ missionId: id, from: 'active', to: 'review', trigger: 'review' as MissionCommand['type'], actor: 'claude', occurredAt: iso(cursor) });
   }
   transitions.push({ missionId: id, from: 'review', to: 'done', trigger: 'integrate', actor: 'claude', occurredAt: input.closedAt });
 

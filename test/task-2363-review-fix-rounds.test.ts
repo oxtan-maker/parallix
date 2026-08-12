@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import stats from '../src/adapters/cli/commands/stats.js';
+import stats, { recordStageStats, upsertMeasurementRow } from '../src/adapters/cli/commands/stats.js';
 import { SqliteMeasurementStore } from '../src/adapters/sqlite/measurement-store.js';
 import { ConcreteMetricsReadAdapter } from '../src/application/projections/metrics-read-adapter.js';
 import type { MissionId, MissionStatus } from '../src/domain/mission.js';
@@ -51,7 +51,7 @@ describe('TASK-2363 defect A: an unrecorded review-fix count stays unknown', () 
     await withStatisticsDatabase(async ({ db, databasePath }) => {
       const store = new SqliteMeasurementStore(databasePath);
       try {
-        stats.recordStageStats({ slug: 'task-501', stage: 'active', rootDir: root, date: '2026-06-02', implementer: 'claude', store });
+        recordStageStats({ slug: 'task-501', stage: 'active', rootDir: root, date: '2026-06-02', implementer: 'claude', store } as any);
       } finally {
         store.close();
       }
@@ -69,7 +69,7 @@ describe('TASK-2363 defect A: an unrecorded review-fix count stays unknown', () 
     await withStatisticsDatabase(async ({ db, databasePath }) => {
       const store = new SqliteMeasurementStore(databasePath);
       try {
-        stats.recordStageStats({ slug: 'task-500', stage: 'review', rootDir: root, date: '2026-06-02', reviewer: 'claude', prFixRounds: '0', store });
+        recordStageStats({ slug: 'task-500', stage: 'review', rootDir: root, date: '2026-06-02', reviewer: 'claude', prFixRounds: '0', store } as any);
       } finally {
         store.close();
       }
@@ -89,14 +89,14 @@ describe('TASK-2363 defect A: an unrecorded review-fix count stays unknown', () 
       }
       const store = new SqliteMeasurementStore(databasePath);
       try {
-        stats.upsertMeasurementRow({
+        upsertMeasurementRow({
           date: '2026-06-02', repo: REPO, mission: KNOWN_ZERO, classification: 'ai_sdlc',
           implementer: 'claude', pr_fix_rounds: '0', stage: 'default', closed: 'yes',
-        }, { store });
-        stats.upsertMeasurementRow({
+        } as any, { store });
+        upsertMeasurementRow({
           date: '2026-06-02', repo: REPO, mission: UNKNOWN, classification: 'ai_sdlc',
           implementer: 'claude', stage: 'default', closed: 'yes',
-        }, { store });
+        } as any, { store });
       } finally {
         store.close();
       }

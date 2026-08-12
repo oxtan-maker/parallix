@@ -103,7 +103,8 @@ test('FLOW panel renders supplied cohort values with metric-specific coverage in
       dimension: 'label' as const,
       lowSampleThreshold: 5,
       cohorts: [{
-        key: 'experiment-a', n: 3, lowSample: true,
+        key: 'experiment-a', n: 3, lowSample: true, lowSamplePopulation: true,
+        lowSampleByMetric: { cycleTime: true, activeDwell: true, reviewDwell: true, reviewBounce: true, reviewFixRounds: false, tokens: true, runtime: true, cost: false, netEngineeringLines: true },
         medianCycleTimeMinutes: 30, p75CycleTimeMinutes: 40,
         medianActiveDwellMinutes: 10, medianReviewDwellMinutes: null,
         reviewBounceRate: null, medianReviewFixRounds: 1,
