@@ -1,8 +1,8 @@
 ---
 id: TASK-2266
 title: codex isolation is broken
-status: active
-assignee: [codex]
+status: review
+assignee: [custom]
 created_date: '2026-07-10 19:17'
 updated_date: '2026-07-10 19:17'
 labels: [ai_sdlc, bug]
