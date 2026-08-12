@@ -26,7 +26,7 @@ import { commitSafeMissionArtifacts, rebaseBeforeReviewRound } from './rebase.js
 import { packageRoot } from '../filesystem/package-root.js';
 import { resolveAgentModel } from '../config/product-config.js';
 import { POLL_TIMEOUT, delay, resolvePollIntervalMs, resolvePollTimeoutMs, formatElapsed, isPollTimeout, pollForReview, pollForDisposition } from './review-polling.js';
-import { buildMetadataFooter, resolveArtifactDir, consumeReviewerArtifacts, consumeImplementerArtifacts } from './review-artifacts.js';
+import { buildMetadataFooter, resolveArtifactDir, consumeReviewerArtifacts, consumeImplementerArtifacts, dispatchArtifactFailure, isArtifactInfraDiagnostic } from './review-artifacts.js';
 import { resolveStageTelemetry } from '../agents/stage-telemetry.js';
 import * as statsModule from '../cli/commands/stats.js';
 import * as handoffModule from '../cli/commands/handoff.js';
@@ -1378,7 +1378,24 @@ export async function startReviewLoop(slug: string, opts: {
           });
           if (reviewerArtifacts.consumed) {
             if (!reviewerArtifacts.ok) {
-              log(fmt.status('WARN', `Reviewer ${reviewer} produced incomplete or invalid review artifacts; retrying the reviewer.`));
+              const reviewerDiagnostic = reviewerArtifacts.diagnostic || `Reviewer ${reviewer} produced incomplete or invalid review artifacts`;
+              // Infra failures (post/persist) are HumanOnly — do not relaunch
+              if (isArtifactInfraDiagnostic(reviewerDiagnostic)) {
+                error(fmt.status('FAIL', `Reviewer artifact infrastructure failure: ${reviewerDiagnostic}`));
+                await escalateToHumanReview('REVIEWER_ARTIFACT_INFRA_FAILURE');
+                return;
+              }
+              const reviewerDispatch = await dispatchArtifactFailure('reviewer', reviewerDiagnostic, {
+                slug, worktree, writeReviewStateFn, readReviewStateFn: readReviewStateFn as any, missionStore,
+                log, error,
+                state,
+              });
+              if (reviewerDispatch.action === 'strand') {
+                error(fmt.status('FAIL', `Reviewer artifact recovery exhausted for ${slug}. Human intervention required.`));
+                await escalateToHumanReview('REVIEWER_ARTIFACT_RETRY_EXHAUSTED');
+                return;
+              }
+              log(fmt.status('WARN', `Reviewer ${reviewer} produced incomplete or invalid review artifacts (retry ${reviewerDispatch.retryCount}/${reviewerDispatch.maxRetries}); retrying the reviewer.`));
               reviewState = POLL_TIMEOUT;
             } else {
               reviewState = reviewerArtifacts.reviewState;
@@ -1637,8 +1654,87 @@ export async function startReviewLoop(slug: string, opts: {
         error
       });
       if (implementerArtifacts.consumed) {
-        if (!implementerArtifacts.ok) { exit(1); return; }
-        disposition = implementerArtifacts.disposition;
+        if (!implementerArtifacts.ok) {
+          const implDiagnostic = implementerArtifacts.diagnostic || `Implementer ${implementer} produced incomplete or invalid artifacts`;
+          // Infra failures (post/persist) are HumanOnly — do not relaunch
+          if (isArtifactInfraDiagnostic(implDiagnostic)) {
+            error(fmt.status('FAIL', `Implementer artifact infrastructure failure: ${implDiagnostic}`));
+            await escalateToHumanReview('IMPLEMENTER_ARTIFACT_INFRA_FAILURE');
+            return;
+          }
+          const implDispatch = await dispatchArtifactFailure('implementer', implDiagnostic, {
+            slug, worktree, writeReviewStateFn, readReviewStateFn: readReviewStateFn as any, missionStore,
+            log, error,
+            state,
+          });
+          if (implDispatch.action === 'strand') {
+            error(fmt.status('FAIL', `Implementer artifact recovery exhausted for ${slug}. Human intervention required.`));
+            await escalateToHumanReview('IMPLEMENTER_ARTIFACT_RETRY_EXHAUSTED');
+            return;
+          }
+          // Relaunch implementer with artifact failure recovery prompt
+          const elapsedStr = formatElapsed(Date.now() - Date.parse((state as any).startedAt as string));
+          const implRecoveryPrompt = `RECOVERY: Implementer artifact failure after ${elapsedStr}. ${implDiagnostic}. Before resuming, compact the failed-attempt context and reload the locked mission goal and scope; committed checkpoint or gate evidence when present; current round and disposition; unresolved findings and implementer resolutions; and implementer artifact retry ${implDispatch.retryCount}/${implDispatch.maxRetries}. Please produce complete review-disposition.txt and round-resolution.md artifacts for ${branch}.`;
+          log(fmt.status('INFO', `Round ${attempt}: relaunching implementer (${implementer}) for artifact recovery (retry ${implDispatch.retryCount}/${implDispatch.maxRetries})...`));
+
+          let implRelaunchResult: any;
+          try {
+            implRelaunchResult = await startAgentFn('act-on-review', {
+              agent: implementer,
+              prompt: (actualImplementer: string) => (buildCompactActOnReviewPromptFn as any)({ implementer: implementer!, branch, attempt, reviewOutcome: reviewState, repoRoot: worktree, missionPath: effectiveMissionPath || undefined, actualImplementer, reviewBaseline }) + '\n\n' + implRecoveryPrompt,
+              worktree, slug, role: 'implementer', exclude: [reviewer]
+            });
+          } catch (err: unknown) {
+            error(fmt.status('FAIL', `Could not relaunch implementer agent (${implementer}) for artifact recovery: ${(err as Error).message}`));
+            exit(1); return;
+          }
+
+          implementer = await applyAgentFallbackFn({
+            role: 'implementer', original: implementer!, launchResult: implRelaunchResult,
+            state: state as unknown as Record<string, any>, slug, worktree, taskResolution, log, writeReviewStateFn, enforceTaskAssigneeFn, missionStore
+          });
+
+          // Consume artifacts from relaunch
+          const relaunchArtifacts = await consumeImplementerArtifactsFn(slug, implementer!, {
+            worktree,
+            tmpDir: artifactDir,
+            readTokenFn,
+            getCommentsFn: getCommentsFn as any,
+            postCommentFn,
+            buildMetadataFooterFn: buildMetadataFooter,
+            forgejoEnabled,
+            log,
+            error
+          });
+          if (relaunchArtifacts.consumed) {
+            if (!relaunchArtifacts.ok) {
+              const relaunchDiagnostic = relaunchArtifacts.diagnostic || `Implementer ${implementer} still produced incomplete artifacts after relaunch`;
+              if (isArtifactInfraDiagnostic(relaunchDiagnostic)) {
+                error(fmt.status('FAIL', `Implementer artifact infrastructure failure after relaunch: ${relaunchDiagnostic}`));
+                await escalateToHumanReview('IMPLEMENTER_ARTIFACT_INFRA_FAILURE');
+                return;
+              }
+              const relaunchDispatch = await dispatchArtifactFailure('implementer', relaunchDiagnostic, {
+                slug, worktree, writeReviewStateFn, readReviewStateFn: readReviewStateFn as any, missionStore,
+                log, error,
+                state,
+              });
+              if (relaunchDispatch.action === 'strand') {
+                error(fmt.status('FAIL', `Implementer artifact recovery exhausted for ${slug} after relaunch. Human intervention required.`));
+                await escalateToHumanReview('IMPLEMENTER_ARTIFACT_RETRY_EXHAUSTED');
+                return;
+              }
+              log(fmt.status('WARN', `Implementer artifact recovery continuing (retry ${relaunchDispatch.retryCount}/${relaunchDispatch.maxRetries})...`));
+              disposition = null; // Fall through to timeout poll path
+            } else {
+              disposition = relaunchArtifacts.disposition;
+            }
+          } else {
+            disposition = null; // No artifacts produced, fall through to poll
+          }
+        } else {
+          disposition = implementerArtifacts.disposition;
+        }
       }
       if (!disposition && forgejoEnabled) {
         disposition = await pollForDispositionFn(prNumber as number, implementer!, sinceIso, token!, {
@@ -1685,8 +1781,27 @@ export async function startReviewLoop(slug: string, opts: {
             error
           });
           if (retryArtifacts.consumed) {
-            if (!retryArtifacts.ok) { exit(1); return; }
-            disposition = retryArtifacts.disposition;
+            if (!retryArtifacts.ok) {
+              const retryDiagnostic = retryArtifacts.diagnostic || `Implementer ${implementer} produced incomplete artifacts during retry`;
+              if (isArtifactInfraDiagnostic(retryDiagnostic)) {
+                error(fmt.status('FAIL', `Implementer artifact infrastructure failure during retry: ${retryDiagnostic}`));
+                await escalateToHumanReview('IMPLEMENTER_ARTIFACT_INFRA_FAILURE');
+                return;
+              }
+              const retryDispatch = await dispatchArtifactFailure('implementer', retryDiagnostic, {
+                slug, worktree, writeReviewStateFn, readReviewStateFn: readReviewStateFn as any, missionStore,
+                log, error,
+                state,
+              });
+              if (retryDispatch.action === 'strand') {
+                error(fmt.status('FAIL', `Implementer artifact recovery exhausted for ${slug}. Human intervention required.`));
+                await escalateToHumanReview('IMPLEMENTER_ARTIFACT_RETRY_EXHAUSTED');
+                return;
+              }
+              disposition = null; // Fall through to poll
+            } else {
+              disposition = retryArtifacts.disposition;
+            }
           }
           if (!disposition && forgejoEnabled) {
             disposition = await pollForDispositionFn(prNumber as number, implementer!, sinceIso, token!, {

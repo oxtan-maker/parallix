@@ -584,6 +584,15 @@ export class ReviewState {
     this.disposition = null;
     this.reviewerRetryCount = 0;
     this.implementerRetryCount = 0;
+    // Reset artifact retry counters so each round starts fresh
+    if (this.metadata) {
+      delete this.metadata['reviewerArtifactRetryCount'];
+      delete this.metadata['implementerArtifactRetryCount'];
+      delete this.metadata['reviewerArtifactStrandedAt'];
+      delete this.metadata['reviewerArtifactStrandReason'];
+      delete this.metadata['implementerArtifactStrandedAt'];
+      delete this.metadata['implementerArtifactStrandReason'];
+    }
     this.startedAt = new Date().toISOString();
     return this;
   }

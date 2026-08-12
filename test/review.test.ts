@@ -3703,7 +3703,9 @@ test('consumeImplementerArtifacts leaves artifacts in place when posting fails',
   });
 
   const actualResult = await result;
-  assert.deepEqual(actualResult, { consumed: true, ok: false });
+  assert.equal(actualResult.consumed, true);
+  assert.equal(actualResult.ok, false);
+  assert.ok(typeof actualResult.diagnostic === 'string' && actualResult.diagnostic.length > 0);
   assert.deepEqual(deleted, []);
 });
 

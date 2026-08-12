@@ -307,7 +307,7 @@ async function consumeReviewerArtifacts(
     writeReviewStateFn?: typeof writeReviewState;
     currentState?: { metadata?: Record<string, unknown> } | null;
   } = {}
-): Promise<{ consumed: boolean; ok?: boolean; reviewState?: string | null }> {
+): Promise<{ consumed: boolean; ok?: boolean; reviewState?: string | null; diagnostic?: string | null }> {
   const log = options.log || fmt.log.plain;
   const error = options.error || fmt.log.plainError;
   const readArtifactFn = options.readArtifactFn || readArtifactFile;
@@ -345,13 +345,16 @@ async function consumeReviewerArtifacts(
     return { consumed: false };
   }
   if (!findings || !outcomeMessage) {
+    const missingParts: string[] = [];
+    if (!findings) { missingParts.push('findings'); }
+    if (!outcomeMessage) { missingParts.push('outcome'); }
     if (!providerEnabled) {
       const statePathStr = reviewStatePath ? ` local review state at ${reviewStatePath}; ` : ' ';
       error(fmt.status('FAIL', `Incomplete reviewer artifacts for ${slug}. Expected ${findingsPath} and ${outcomePath}.${statePathStr}No provider review posted (provider=none); add a review-outcome.md with a Verdict line or use \`node parallix review <slug> --submit-review approve\`.`));
     } else {
       error(fmt.status('FAIL', `Incomplete reviewer artifacts for ${slug}. Expected ${findingsPath} and ${outcomePath}.`));
     }
-    return { consumed: true, ok: false };
+    return { consumed: true, ok: false, diagnostic: `Reviewer artifacts incomplete: missing ${missingParts.join(', ')}` };
   }
   if (!verdict) {
     if (!providerEnabled) {
@@ -360,7 +363,7 @@ async function consumeReviewerArtifacts(
     } else {
       error(fmt.status('FAIL', `Reviewer artifacts for ${slug} missing verdict. Expected in ${verdictPath} or in ${outcomePath} content.`));
     }
-    return { consumed: true, ok: false };
+    return { consumed: true, ok: false, diagnostic: `Reviewer artifacts incomplete: missing verdict` };
   }
 
   const currentState = await Promise.resolve((options.readReviewStateFn || readReviewState)(slug, worktree));
@@ -373,8 +376,9 @@ async function consumeReviewerArtifacts(
   }, { worktree, skipGit: true, log: log, error });
 
   if (!findingsEventResult.ok) {
-    error(fmt.status('FAIL', `Failed to persist reviewer findings to repo store: ${(findingsEventResult as { error?: string }).error}`));
-    return { consumed: true, ok: false };
+    const findingsErr = (findingsEventResult as { error?: string }).error;
+    error(fmt.status('FAIL', `Failed to persist reviewer findings to repo store: ${findingsErr}`));
+    return { consumed: true, ok: false, diagnostic: `Reviewer artifact persist failed (findings): ${findingsErr}` };
   }
 
   const outcomeEventResult = await createEventFn(slug, VALID_EVENT_TYPES.REVIEWER_OUTCOME, {
@@ -382,8 +386,9 @@ async function consumeReviewerArtifacts(
   }, { worktree, skipGit: true, log: log, error });
 
   if (!outcomeEventResult.ok) {
-    error(fmt.status('FAIL', `Failed to persist reviewer outcome to repo store: ${(outcomeEventResult as { error?: string }).error}`));
-    return { consumed: true, ok: false };
+    const outcomeErr = (outcomeEventResult as { error?: string }).error;
+    error(fmt.status('FAIL', `Failed to persist reviewer outcome to repo store: ${outcomeErr}`));
+    return { consumed: true, ok: false, diagnostic: `Reviewer artifact persist failed (outcome): ${outcomeErr}` };
   }
 
   log(fmt.status('INFO', `Persisted reviewer artifacts to repo store: ${(findingsEventResult as { path?: string }).path}, ${(outcomeEventResult as { path?: string }).path}`));
@@ -413,7 +418,7 @@ async function consumeReviewerArtifacts(
       error
     });
     if (!commentResult.ok) {
-      return { consumed: true, ok: false };
+      return { consumed: true, ok: false, diagnostic: `Reviewer comment post failed: ${(commentResult as { error?: string }).error}` };
     }
 
     const reviewResult = await postWorkflowReview(slug, verdict, outcomeMessage, {
@@ -426,7 +431,7 @@ async function consumeReviewerArtifacts(
       error
     });
     if (!reviewResult.ok) {
-      return { consumed: true, ok: false };
+      return { consumed: true, ok: false, diagnostic: `Reviewer review post failed: ${(reviewResult as { error?: string }).error}` };
     }
   } else {
     log(fmt.status('INFO', `Review provider disabled; skipping PR mirroring for ${slug}`));
@@ -468,7 +473,7 @@ async function consumeImplementerArtifacts(
     writeReviewStateFn?: typeof writeReviewState;
     currentState?: { metadata?: Record<string, unknown> } | null;
   } = {}
-): Promise<{ consumed: boolean; ok?: boolean; disposition?: string | null }> {
+): Promise<{ consumed: boolean; ok?: boolean; disposition?: string | null; diagnostic?: string | null }> {
   const log = options.log || fmt.log.plain;
   const error = options.error || fmt.log.plainError;
   const readArtifactFn = options.readArtifactFn || readArtifactFile;
@@ -494,13 +499,16 @@ async function consumeImplementerArtifacts(
     return { consumed: false };
   }
   if (!resolution || !disposition) {
+    const missingImplParts: string[] = [];
+    if (!resolution) { missingImplParts.push('round-resolution'); }
+    if (!disposition) { missingImplParts.push('disposition'); }
     if (!providerEnabled) {
       const statePathStr = reviewStatePath ? ` local review state at ${reviewStatePath}; ` : ' ';
       error(fmt.status('FAIL', `Incomplete implementer artifacts for ${slug}. Expected ${resolutionPath} and ${dispositionPath}.${statePathStr}No provider review posted (provider=none); add review-disposition.txt and a round resolution, or use \`node parallix review <slug> --submit-review approve\`.`));
     } else {
       error(fmt.status('FAIL', `Incomplete implementer artifacts for ${slug}. Expected ${resolutionPath} and ${dispositionPath}.`));
     }
-    return { consumed: true, ok: false };
+    return { consumed: true, ok: false, diagnostic: `Implementer artifacts incomplete: missing ${missingImplParts.join(', ')}` };
   }
 
   const currentState = await Promise.resolve((options.readReviewStateFn || readReviewState)(slug, worktree));
@@ -547,8 +555,9 @@ async function consumeImplementerArtifacts(
   }, { worktree, skipGit: true, log: log, error });
 
   if (!summaryEventResult.ok) {
-    error(fmt.status('FAIL', `Failed to persist implementer round summary to repo store: ${(summaryEventResult as { error?: string }).error}`));
-    return { consumed: true, ok: false };
+    const summaryErr = (summaryEventResult as { error?: string }).error;
+    error(fmt.status('FAIL', `Failed to persist implementer round summary to repo store: ${summaryErr}`));
+    return { consumed: true, ok: false, diagnostic: `Implementer artifact persist failed (round-summary): ${summaryErr}` };
   }
 
   const dispositionEventResult = await createEventFn(slug, VALID_EVENT_TYPES.IMPLEMENTER_DISPOSITION, {
@@ -556,8 +565,9 @@ async function consumeImplementerArtifacts(
   }, { worktree, skipGit: true, log: log, error });
 
   if (!dispositionEventResult.ok) {
-    error(fmt.status('FAIL', `Failed to persist implementer disposition to repo store: ${(dispositionEventResult as { error?: string }).error}`));
-    return { consumed: true, ok: false };
+    const dispErr = (dispositionEventResult as { error?: string }).error;
+    error(fmt.status('FAIL', `Failed to persist implementer disposition to repo store: ${dispErr}`));
+    return { consumed: true, ok: false, diagnostic: `Implementer artifact persist failed (disposition): ${dispErr}` };
   }
 
   log(fmt.status('INFO', `Persisted implementer artifacts to repo store: ${(summaryEventResult as { path?: string }).path}, ${(dispositionEventResult as { path?: string }).path}`));
@@ -587,7 +597,7 @@ async function consumeImplementerArtifacts(
       error
     });
     if (!resolutionResult.ok) {
-      return { consumed: true, ok: false };
+      return { consumed: true, ok: false, diagnostic: `Implementer resolution post failed: ${(resolutionResult as { error?: string }).error}` };
     }
 
     const dispositionResult = await postWorkflowComment(slug, `Autonomous review disposition: ${disposition}`, {
@@ -600,7 +610,7 @@ async function consumeImplementerArtifacts(
       error
     });
     if (!dispositionResult.ok) {
-      return { consumed: true, ok: false };
+      return { consumed: true, ok: false, diagnostic: `Implementer disposition post failed: ${(dispositionResult as { error?: string }).error}` };
     }
   } else {
     log(fmt.status('INFO', `Review provider disabled; skipping PR mirroring for ${slug}`));
@@ -610,6 +620,169 @@ async function consumeImplementerArtifacts(
   deleteArtifactFn(dispositionPath);
 
   return { consumed: true, ok: true, disposition };
+}
+
+// ============================================================================
+// Role-Owned Artifact Recovery Dispatcher
+// ============================================================================
+
+/**
+ * Producing role for review-loop artifacts.
+ * Maps artifact categories to the agent role that produces them.
+ */
+export type ArtifactRole = 'reviewer' | 'implementer';
+
+/**
+ * Dispatch decision for an artifact failure.
+ * `relaunch` — relaunch the producing role with a fix prompt
+ * `strand` — retry bound exhausted; record stranded state for human intervention
+ */
+export type ArtifactDispatchAction = 'relaunch' | 'strand';
+
+export interface ArtifactDispatchResult {
+  action: ArtifactDispatchAction;
+  role: ArtifactRole;
+  diagnostic: string;
+  retryCount: number;
+  maxRetries: number;
+  /**
+   * Updated metadata object. Callers should merge this into their in-memory
+   * ReviewState to keep retry counters and strand markers in sync with disk.
+   * Present whenever the dispatcher mutates metadata (relaunch or strand).
+   */
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * Default maximum retry attempts for artifact recovery per role.
+ * Aligned with existing reviewer/implementer timeout retry bounds.
+ */
+const MAX_ARTIFACT_RETRY = 2;
+
+/**
+ * Metadata key for per-role artifact retry counts.
+ * Stored in ReviewState.metadata so counters are independent of timeout retries.
+ */
+const REVIEWER_ARTIFACT_RETRY_KEY = 'reviewerArtifactRetryCount';
+const IMPLEMENTER_ARTIFACT_RETRY_KEY = 'implementerArtifactRetryCount';
+
+/**
+ * Check if a diagnostic string indicates an infrastructure failure
+ * (provider-post or repo-store-persist) rather than an artifact production
+ * failure (missing/malformed content).
+ *
+ * Infrastructure diagnostics contain "post failed" or "persist failed" markers
+ * emitted by consumeReviewerArtifacts / consumeImplementerArtifacts on
+ * downstream Forgejo/network/storage errors. These map to ADR 0048 InfraBlocker
+ * (HumanOnly) and must not be dispatched to the artifact recovery dispatcher.
+ *
+ * @param diagnostic - The diagnostic string from consume*Artifacts
+ * @returns true if this is an infrastructure-level failure
+ */
+export function isArtifactInfraDiagnostic(diagnostic: string | undefined | null): boolean {
+  if (!diagnostic) { return false; }
+  return diagnostic.includes('post failed') || diagnostic.includes('persist failed');
+}
+
+/**
+ * Dispatch an artifact failure to the producing role with bounded retry.
+ *
+ * Reads persisted retry count from ReviewState.metadata, increments it,
+ * persists the updated state, and returns the dispatch decision.
+ * When the retry bound is exhausted, returns `strand` with an actionable
+ * stranded state recorded in metadata.
+ *
+ * ADR 0048: artifact failures (missing/malformed) map to MissingArtifacts
+ * which is AutoSendBack — the producing role relaunches. This dispatcher
+ * does not reinterpret that policy; it enforces the role-aware routing
+ * and retry bound.
+ *
+ * When `options.state` is provided, the function also updates the in-memory
+ * state's metadata so the caller's next persist carries the counters.
+ *
+ * @param role - The producing role ('reviewer' or 'implementer')
+ * @param diagnostic - Captured diagnostic describing the artifact failure
+ * @param options - Dependencies for state persistence and logging
+ * @returns Dispatch decision with retry metadata
+ */
+export async function dispatchArtifactFailure(
+  role: ArtifactRole,
+  diagnostic: string,
+  options: {
+    slug: string;
+    worktree: string;
+    maxRetries?: number;
+    writeReviewStateFn?: typeof writeReviewState;
+    readReviewStateFn?: (_s: string, _r: string) => Promise<any>;
+    missionStore?: MissionStore | null;
+    log?: (_msg: string) => void;
+    error?: (_msg: string) => void;
+    /**
+     * In-memory ReviewState held by the caller. When provided, the dispatcher
+     * syncs metadata mutations (retry count, strand markers) into this object
+     * so the caller's next persist does not clobber disk state.
+     */
+    state?: { metadata?: Record<string, unknown> } | null;
+  }
+): Promise<ArtifactDispatchResult> {
+  const { slug, worktree, maxRetries = MAX_ARTIFACT_RETRY } = options;
+  const writeReviewStateFn = options.writeReviewStateFn || writeReviewState;
+  const readReviewStateFn = options.readReviewStateFn || readReviewState;
+  const log = options.log || fmt.log.plain;
+  const error = options.error || fmt.log.plainError;
+  const missionStore = options.missionStore || null;
+
+  const retryKey = role === 'reviewer' ? REVIEWER_ARTIFACT_RETRY_KEY : IMPLEMENTER_ARTIFACT_RETRY_KEY;
+
+  // Read persisted state
+  const persisted = await Promise.resolve(readReviewStateFn(slug, worktree));
+  const retryCount = persisted && persisted.metadata && typeof persisted.metadata === 'object'
+    ? (Number((persisted.metadata as any)[retryKey]) || 0)
+    : 0;
+
+  if (retryCount >= maxRetries) {
+    // Retry bound exhausted — strand with actionable state
+    const metadata = persisted && persisted.metadata && typeof persisted.metadata === 'object'
+      ? { ...persisted.metadata }
+      : {};
+    metadata[retryKey] = retryCount;
+    metadata[`${role}ArtifactStrandedAt`] = new Date().toISOString();
+    metadata[`${role}ArtifactStrandReason`] = diagnostic;
+    if (persisted) {
+      await persistReviewStateOrThrow(writeReviewStateFn, slug, { ...persisted, metadata } as any, worktree, missionStore);
+    } else {
+      await persistReviewStateOrThrow(writeReviewStateFn, slug, { metadata } as any, worktree, missionStore);
+    }
+
+    // Sync in-memory state so caller's next persist carries strand markers
+    if (options.state && options.state.metadata) {
+      options.state.metadata = { ...options.state.metadata, ...metadata };
+    }
+
+    error(fmt.status('FAIL', `${role === 'reviewer' ? 'Reviewer' : 'Implementer'} artifact recovery exhausted (${retryCount}/${maxRetries}). Mission stranded for ${slug}.`));
+    error(fmt.status('FAIL', `Diagnostic: ${diagnostic}. Human intervention required.`));
+    return { action: 'strand', role, diagnostic, retryCount, maxRetries, metadata };
+  }
+
+  // Increment and persist
+  const newCount = retryCount + 1;
+  const metadata = persisted && persisted.metadata && typeof persisted.metadata === 'object'
+    ? { ...persisted.metadata }
+    : {};
+  metadata[retryKey] = newCount;
+  if (persisted) {
+    await persistReviewStateOrThrow(writeReviewStateFn, slug, { ...persisted, metadata } as any, worktree, missionStore);
+  } else {
+    await persistReviewStateOrThrow(writeReviewStateFn, slug, { metadata } as any, worktree, missionStore);
+  }
+
+  // Sync in-memory state so caller's next persist carries the counter
+  if (options.state && options.state.metadata) {
+    options.state.metadata = { ...options.state.metadata, ...metadata };
+  }
+
+  log(fmt.status('INFO', `${role === 'reviewer' ? 'Reviewer' : 'Implementer'} artifact failure — relaunching ${role} (retry ${newCount}/${maxRetries}). Diagnostic: ${diagnostic}`));
+  return { action: 'relaunch', role, diagnostic, retryCount: newCount, maxRetries, metadata };
 }
 
 // Module exports
@@ -624,5 +797,9 @@ export {
   postWorkflowComment,
   postWorkflowReview,
   consumeReviewerArtifacts,
-  consumeImplementerArtifacts
+  consumeImplementerArtifacts,
+  MAX_ARTIFACT_RETRY,
+  REVIEWER_ARTIFACT_RETRY_KEY,
+  IMPLEMENTER_ARTIFACT_RETRY_KEY,
 };
+
