@@ -3,7 +3,7 @@ id: TASK-2349
 title: >-
   Close the integrate stage-and-commit race that lets concurrent board mutations
   steal the squash payload
-status: review
+status: active
 assignee: [codex]
 created_date: '2026-08-09 04:45'
 labels:
