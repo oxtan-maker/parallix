@@ -1,7 +1,7 @@
 ---
 id: TASK-2365
 title: clean up real-agent temp dirs on signal
-status: backlog
+status: refined
 assignee: [codex]
 created_date: '2026-08-10 00:00'
 updated_date: '2026-08-10 00:00'
