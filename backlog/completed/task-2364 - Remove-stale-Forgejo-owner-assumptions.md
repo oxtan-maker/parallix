@@ -1,7 +1,7 @@
 ---
 id: TASK-2364
 title: Remove stale Forgejo owner assumptions from review setup
-status: ready-for-integration
+status: done
 assignee: [custom]
 created_date: '2026-07-15 00:00'
 labels:

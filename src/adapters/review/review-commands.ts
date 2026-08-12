@@ -1056,7 +1056,7 @@ export async function pushRound(
   let result = createPrFn(branch, reviewIdentity!, token, { rootDir, forceWithLease: true }) as Record<string, unknown>;
   if (!result.ok && /Repository not found/i.test((result.error as string) || '')) {
     const reviewAdapter = resolveReviewAdapterFn(rootDir) as Record<string, any>;
-    const ownerLogin = (reviewAdapter.repo && reviewAdapter.repo.split('/')[0]) || 'magnus';
+    const ownerLogin = (reviewAdapter.repo && reviewAdapter.repo.split('/')[0]) || 'human';
     const bootstrap = await bootstrapReviewSurfaceFn(rootDir, {
       baseUrl: reviewAdapter.baseUrl,
       repo: reviewAdapter.repo,
