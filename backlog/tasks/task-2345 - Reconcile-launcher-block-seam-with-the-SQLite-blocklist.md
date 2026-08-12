@@ -2,7 +2,7 @@
 id: TASK-2345
 title: Reconcile launcher block seam with the SQLite blocklist
 status: backlog
-assignee: []
+assignee: [custom]
 created_date: '2026-08-08 00:00'
 labels:
   - bug
