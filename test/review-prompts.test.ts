@@ -12,6 +12,7 @@ const __mm1 = mockModule<typeof import('../src/adapters/review/review-prompts.js
 await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
 const { resolveArtifactDir } = resolveArtifactDirModule;
+const { WORKFLOW_AGENT_NAMES } = await import('../src/adapters/agents/agents.js');
 const {
   PROMPT_ENTRYPOINTS,
   reviewEntrypoint,
@@ -23,7 +24,10 @@ const {
 } = __mm1;
 
 test('PROMPT_ENTRYPOINTS covers all supported agent families', () => {
-  for (const agent of ['codex', 'claude', 'vibe', 'custom', 'autonomous']) {
+  // Sourced from the launcher registry so a newly added agent family cannot
+  // ship without a review / act-on-review entrypoint (task-2362: qwen was
+  // launchable but had no entrypoint, so every review launch failed).
+  for (const agent of [...WORKFLOW_AGENT_NAMES, 'autonomous']) {
     assert.ok(PROMPT_ENTRYPOINTS[agent], `missing entry for ${agent}`);
     assert.ok(PROMPT_ENTRYPOINTS[agent].review, `missing review entrypoint for ${agent}`);
     assert.ok(PROMPT_ENTRYPOINTS[agent].actOnReview, `missing actOnReview entrypoint for ${agent}`);

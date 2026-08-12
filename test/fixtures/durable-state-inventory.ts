@@ -845,4 +845,11 @@ export const MACHINE_WRITTEN_PATH_INVENTORY: readonly MachineWrittenPathInventor
     classification: 'secrets-configuration',
     persistencePolicy: 'Operator-local configuration; documented direct-write exception outside this tranche.',
   },
+  {
+    id: 'qwen-settings',
+    pathPattern: '<QWEN_HOME>/settings.json',
+    writer: 'src/adapters/agents/qwen.ts#qwenSettingsPath',
+    classification: 'cache-scratch-data',
+    persistencePolicy: 'Agent-local settings file; documented direct-write exception.',
+  },
 ] as const;

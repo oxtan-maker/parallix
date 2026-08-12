@@ -361,10 +361,11 @@ export class SqliteImporter {
           `INSERT INTO usage_statistics (
             date, repo, mission, classification, implementer, pr_fix_rounds,
             provider, model, implementer_agent, reviewer_agent, stage,
-            input_tokens, output_tokens, cached_tokens, context_tokens,
+            input_tokens, output_tokens, cached_tokens, thoughts_tokens,
+            context_tokens,
             tool_calls, openai_usage_before, openai_usage_after,
             openai_usage_delta, duration_minutes, cost_usd, closed
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
           [
             record['date'] ?? null,
             record['repo'] || '',
@@ -380,6 +381,7 @@ export class SqliteImporter {
             numericCell(record['input_tokens']),
             numericCell(record['output_tokens']),
             numericCell(record['cached_tokens']),
+            numericCell(record['thoughts_tokens']),
             numericCell(record['context_tokens']),
             numericCell(record['tool_calls']),
             numericCell(record['openai_usage_before']),

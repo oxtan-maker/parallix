@@ -59,6 +59,7 @@ interface StatsRow {
   input_tokens?: string;
   output_tokens?: string;
   cached_tokens?: string;
+  thoughts_tokens?: string;
   context_tokens?: string;
   tool_calls?: string;
   openai_usage_before?: string;
@@ -117,7 +118,7 @@ const LEGACY_HEADERS = ['date', 'mission', 'classification', 'implementer', 'pr_
 const STATS_HEADERS = [
   'date', 'repo', 'mission', 'classification', 'implementer', 'pr_fix_rounds',
   'provider', 'model', 'implementer_agent', 'reviewer_agent', 'stage',
-  'input_tokens', 'output_tokens', 'cached_tokens', 'context_tokens',
+  'input_tokens', 'output_tokens', 'cached_tokens', 'thoughts_tokens', 'context_tokens',
   'tool_calls', 'openai_usage_before', 'openai_usage_after',
   'openai_usage_delta', 'duration_minutes', 'cost_usd', 'closed'
 ];
@@ -125,7 +126,7 @@ const STATS_HEADERS = [
 // Columns coerced to non-negative integers on canonicalization.
 const USAGE_NUMBERS = new Set([
   'pr_fix_rounds', 'input_tokens', 'output_tokens', 'cached_tokens',
-  'context_tokens', 'tool_calls', 'openai_usage_before', 'openai_usage_after',
+  'thoughts_tokens', 'context_tokens', 'tool_calls', 'openai_usage_before', 'openai_usage_after',
   'openai_usage_delta', 'duration_minutes'
 ]);
 
@@ -213,6 +214,7 @@ function measurementToStatsRow(record): StatsRow {
     input_tokens: numeric(record.input_tokens),
     output_tokens: numeric(record.output_tokens),
     cached_tokens: numeric(record.cached_tokens),
+    thoughts_tokens: numeric(record.thoughts_tokens),
     context_tokens: numeric(record.context_tokens),
     tool_calls: numeric(record.tool_calls),
     openai_usage_before: numeric(record.openai_usage_before),
@@ -254,6 +256,7 @@ function statsRowToMeasurement(row: StatsRow) {
     input_tokens: int(row.input_tokens),
     output_tokens: int(row.output_tokens),
     cached_tokens: int(row.cached_tokens),
+    thoughts_tokens: int(row.thoughts_tokens),
     context_tokens: int(row.context_tokens),
     tool_calls: int(row.tool_calls),
     openai_usage_before: int(row.openai_usage_before),
@@ -462,6 +465,7 @@ function normalizeStatsRow(row: StatsRow = {} as StatsRow, options: NormalizeSta
     input_tokens: row.input_tokens || '0',
     output_tokens: row.output_tokens || '0',
     cached_tokens: row.cached_tokens || '0',
+    thoughts_tokens: row.thoughts_tokens || '0',
     context_tokens: row.context_tokens || '0',
     tool_calls: row.tool_calls || '0',
     openai_usage_before: row.openai_usage_before || '0',
@@ -1764,6 +1768,7 @@ function telemetryToStatsFields(telemetry: any, options: {agentFamily: string, d
     input_tokens: String((t && t.inputTokens) || 0),
     output_tokens: String((t && t.outputTokens) || 0),
     cached_tokens: String((t && t.cachedTokens) || 0),
+    thoughts_tokens: String((t && t.thoughtsTokens) || 0),
     context_tokens: String((t && t.totalTokens) || 0),
     tool_calls: String((t && t.toolCalls) || 0),
     openai_usage_before: '0',
@@ -1905,6 +1910,7 @@ function accumulateStageStats(options: {slug: string, stage: string, rootDir?: s
     input_tokens: accumulateIntegerStrings(String(existing.input_tokens), String(incomingRow.input_tokens)),
     output_tokens: accumulateIntegerStrings(String(existing.output_tokens), String(incomingRow.output_tokens)),
     cached_tokens: accumulateIntegerStrings(String(existing.cached_tokens), String(incomingRow.cached_tokens)),
+    thoughts_tokens: accumulateIntegerStrings(String(existing.thoughts_tokens), String(incomingRow.thoughts_tokens)),
     context_tokens: accumulateIntegerStrings(String(existing.context_tokens), String(incomingRow.context_tokens)),
     tool_calls: accumulateIntegerStrings(String(existing.tool_calls), String(incomingRow.tool_calls)),
     openai_usage_before: accumulateIntegerStrings(String(existing.openai_usage_before), String(incomingRow.openai_usage_before), { mode: 'replace' }),

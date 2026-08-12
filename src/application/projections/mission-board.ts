@@ -102,25 +102,65 @@ export interface ReviewRoundSummary {
   readonly fixes: readonly string[];
 }
 
+function outcomeComment(content: string): string | null {
+  const summary = content.match(/(?:^|\n)## Summary\s*\n+([^\n]+)/);
+  if (summary?.[1]) { return summary[1].trim(); }
+  const lines = content.split('\n').map((line) => line.trim());
+  const outcome = lines.findIndex((line) => /^Outcome:\s*/i.test(line));
+  return outcome >= 0 ? lines.slice(outcome + 1).find((line) => line && !line.startsWith('#')) ?? null : null;
+}
+
+function findingSummaries(content: string): readonly string[] {
+  return content.split('\n').flatMap((line) => {
+    const heading = line.match(/^#{1,3}\s+Finding(?:\s+\d+)?[^—]*—\s*(.+)$/i);
+    const numbered = line.match(/^\d+\.\s+\*\*(?:\[[^\]]+\]\s*)?(.+?)\*\*/);
+    return heading?.[1] ?? numbered?.[1] ?? [];
+  });
+}
+
+function outcomeDisposition(verdict: string | null): ReviewDisposition | null {
+  return verdict?.toLowerCase() === 'request-changes' ? 'REQUEST_CHANGES' : null;
+}
+
 export function projectReviewHistory(review: Review | null): readonly ReviewRoundSummary[] {
   if (!review) { return []; }
-  return review.rounds.map((round) => ({
-    number: round.number,
-    reviewer: round.reviewer,
-    implementer: round.implementer,
-    phase: round.phase,
-    disposition: round.disposition,
-    comment: round.decision?.comment ?? null,
-    findingSummaries: round.decision?.kind === 'changes-requested'
-      ? round.decision.findings.map((finding) => finding.summary)
-      : [],
-    pushbacks: (round.response?.resolutions ?? [])
-      .filter((resolution) => resolution.kind === 'disputed')
-      .map((resolution) => `${resolution.findingId}: ${resolution.rationale}`),
-    fixes: (round.response?.resolutions ?? [])
-      .filter((resolution) => resolution.kind === 'fixed')
-      .map((resolution) => `${resolution.findingId}: ${resolution.evidence}`),
-  }));
+  return review.rounds.map((round) => {
+    const events = review.reviewEvents.filter((event) => event.roundNumber === round.number);
+    const outcome = [...events].reverse().find((event) => event.eventType === 'reviewer_outcome');
+    const findings = [...events].reverse().find((event) => event.eventType === 'reviewer_findings');
+    const summary = [...events].reverse().find((event) => event.eventType === 'implementer_round_summary');
+    const resolutions = round.response?.resolutions;
+    const hasResolutions = resolutions && resolutions.length > 0;
+
+    // itemDispositions is populated from the implementer's round summary
+    // artifact. response.resolutions is the formal domain model path.
+    // Use itemDispositions as fallback when resolutions are not set.
+    const items = hasResolutions ? [] : (round.itemDispositions ?? summary?.itemDispositions ?? []);
+
+    return {
+      number: round.number,
+      reviewer: round.reviewer,
+      implementer: round.implementer,
+      phase: round.phase,
+      disposition: round.disposition === 'CHANGES_MADE'
+        ? outcomeDisposition(outcome?.verdict ?? null) ?? round.disposition
+        : round.disposition,
+      comment: round.decision?.comment ?? outcomeComment(outcome?.content ?? ''),
+      findingSummaries: round.decision?.kind === 'changes-requested'
+        ? round.decision.findings.map((finding) => finding.summary)
+        : findings ? findingSummaries(findings.content) : [],
+      pushbacks: hasResolutions
+        ? resolutions.filter((r) => r.kind === 'disputed')
+            .map((r) => `${r.findingId}: ${r.rationale}`)
+        : items.filter((d) => d.kind === 'pushed_back')
+            .map((d) => `pushed_back: ${d.findingId}`),
+      fixes: hasResolutions
+        ? resolutions.filter((r) => r.kind === 'fixed')
+            .map((r) => `${r.findingId}: ${r.evidence}`)
+        : items.filter((d) => d.kind === 'fixed')
+            .map((d) => `fixed: ${d.findingId}`),
+    };
+  });
 }
 
 export function boardLane(mission: Mission): BoardLane {

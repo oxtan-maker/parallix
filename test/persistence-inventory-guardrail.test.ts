@@ -530,6 +530,8 @@ test('SC1 reverse: all durable-IO files under src/ are present in the inventory'
     // Agent launchers — write config files for the agent runtime, not domain state
     'src/adapters/agents/codex.ts',
     'src/adapters/agents/vibe.ts',
+    'src/adapters/agents/qwen.ts',
+    'src/adapters/agents/qwen-telemetry.ts',
     // Opencode export — writes temporary scratch files
     'src/adapters/agents/opencode-export.ts',
     // Mission utility helpers — read mission files for path resolution

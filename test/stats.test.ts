@@ -1352,12 +1352,12 @@ test('task-1314: stats mission reports filter to the active repo', () => {
       [
         '2026-06-10', 'visualboard', 'task-alpha', 'ai_sdlc', 'codex', '1',
         'openai', 'gpt-5.4-mini', 'codex', '', 'draft',
-        '11', '12', '13', '14', '15', '0', '1', '0', '2', '0', 'yes'
+        '11', '12', '13', '0', '14', '15', '0', '1', '0', '2', '0', 'yes'
       ],
       [
         '2026-06-10', 'parallix', 'task-alpha', 'user_value', 'gemini', '2',
         'google', 'gemini-2.5-pro', 'gemini', '', 'review',
-        '21', '22', '23', '24', '25', '0', '2', '0', '3', '0', 'yes'
+        '21', '22', '23', '0', '24', '25', '0', '2', '0', '3', '0', 'yes'
       ],
     ];
     fs.writeFileSync(csvFile, [
@@ -1884,4 +1884,30 @@ test('task-2213: renderRangeStatsReport displays model rows in the Agent family 
   const plain = __mm2.stripAnsi(report);
   assert.match(plain, /qwen3\.5\s+1\s+2\.00/);
   assert.match(plain, /llama3\s+1\s+0\.00/);
+});
+
+test('task-2362: thoughts_tokens survives telemetryToStatsFields and the measurement store round-trip', () => {
+  const fields = stats.telemetryToStatsFields(
+    { provider: 'openai', model: 'qwen3.8-max', inputTokens: 1000, outputTokens: 200,
+      cachedTokens: 900, thoughtsTokens: 150, totalTokens: 1200, toolCalls: 3 },
+    { agentFamily: 'qwen' }
+  );
+  assert.equal(fields.thoughts_tokens, '150', 'thinking tokens mapped to their own column');
+  assert.equal(fields.output_tokens, '200', 'thinking tokens not folded into output');
+
+  const dbFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-stats-thoughts-')), 'parallix.db');
+  try {
+    const written = stats.upsertMeasurementRow({
+      date: '2026-08-12',
+      repo: 'parallix',
+      mission: 'task-2362',
+      classification: 'ai_sdlc',
+      implementer: 'qwen',
+      stage: 'active',
+      ...fields,
+    }, { dbPath: dbFile });
+    assert.equal(written.data.rows[0].thoughts_tokens, '150', 'column persists through the sqlite store');
+  } finally {
+    fs.rmSync(path.dirname(dbFile), { recursive: true, force: true });
+  }
 });

@@ -7,9 +7,10 @@
 | codex   | `codex` | Fixed |
 | claude  | `claude` | Fixed |
 | mistral | `vibe` | Fixed |
+| qwen    | `qwen` | Fixed |
 | custom    | `opencode` or `pi` | Configurable via `adapters.agents.runners.custom` |
 
-All four listed launchers are supported on this workstation. The `custom` agent family can switch between `opencode` and `pi` runners via configuration. Step eligibility for the configurable workflow steps (`draft`, `active`, `review`) is controlled by `parallix/config/agents.json`. Conflict resolution is not a separately configurable step — it always runs as the mission's recorded implementer (TASK-2294.01). If a launcher is missing from `PATH`, the harness fails loudly with the exact blocker before launching.
+All five listed launchers are supported on this workstation. The `custom` agent family can switch between `opencode` and `pi` runners via configuration. Step eligibility for the configurable workflow steps (`draft`, `active`, `review`) is controlled by `parallix/config/agents.json`. Conflict resolution is not a separately configurable step — it always runs as the mission's recorded implementer (TASK-2294.01). If a launcher is missing from `PATH`, the harness fails loudly with the exact blocker before launching.
 
 ### Custom Runner Configuration
 
@@ -59,7 +60,18 @@ Opencode (custom agent family) may encounter issues with concurrent tool calls o
 | codex   | `codex exec --sandbox danger-full-access --cd <worktree> <prompt>`; resume uses `codex exec resume <session-id-or---last> <prompt>`. `CODEX_HOME` stays worktree-local so sessions and rollouts cannot cross missions. When present, the originating `config.toml` and file-based `auth.json` are linked into that state root, preserving MCP configuration without copying secret values. `HOME` and `PATH` remain available for nested tools such as `opencode` and `pi`. |
 | claude  | `claude --dangerously-skip-permissions --output-format stream-json --verbose --include-partial-messages -p <prompt>` (cwd=worktree) — uses `--output-format stream-json --verbose --include-partial-messages` to stream real-time JSONL events (tool calls, assistant text chunks) to the operator's terminal via the spawn-tee mechanism. `--include-partial-messages` is required: without it, the assistant event contains the full response at once and no intermediate progress is emitted. Session-id extraction parses the `result` event from stream-json output, falling back to the `claude --resume <id>` regex on plain text. |
 | mistral | `vibe --prompt <prompt> --trust --yolo --output text` (cwd=worktree) — `--yolo` approves tool calls non-interactively (mirrors `--dangerously-skip-permissions` for claude/opencode and codex's `trust_level = "trusted"`); `--trust` only bypasses the working-directory trust prompt and does not itself skip tool-call approval. **Note: NOT resume-capable in current Vibe version**; session management uses internal state in `~/.vibe/logs/session/` but does not emit a parseable resume hint to stdout/stderr. |
+| qwen    | `qwen -p <prompt> --output-format text` (cwd=worktree). `QWEN_HOME` set to worktree-local `.workflow/qwen-home` so sessions, chat recordings, and usage artifacts cannot cross missions. Tool-approval bypass via `tools.approvalMode: yolo` in worktree-local `settings.json` (mirrors vibe's `--yolo`; qwen CLI has no `--yolo` flag). `HOME` and `PATH` remain untouched. Resume via `-r <session-id>` (session id extracted from `<QWEN_HOME>/projects/<hash>/chats/<id>.jsonl`) or `-c` for most recent; session-not-found falls back to fresh session. Telemetry extracted from disk artifacts: `usage/token-usage-YYYY-MM.jsonl` (per-call tokens) and `usage_record.jsonl` (session summary with tool calls/duration). |
 | custom    | `opencode run --pure --dangerously-skip-permissions <prompt>` (cwd=worktree) or `pi --print --mode json --approve <prompt>` (cwd=worktree); resume uses `-s <session>` (opencode) or `--session-id <id>` (pi) when a session id is known or `--continue` when only the family marker is known. `pi` uses the Pi SDK (`createAgentSession`) for execution: SDK event subscription in `lib/agents/pi.ts` collects only `text_delta` events from `message_update` as user-facing stdout, filtering out all other SDK events (tool execution, thinking deltas, lifecycle signals). Telemetry (token usage, tool call count, session ID) is extracted from `session.getSessionStats()` and `session.getLastAssistantText()` |
+
+### Qwen plan operating notes
+
+The `qwen` family runs against the Alibaba Cloud Model Studio (Bailian) Token Plan, Personal edition, Lite tier. Operator-facing guidance (not enforced in code):
+
+- **Credit windows**: 7-day fixed window of 2,500 credits from first call (no rollover). A 5-hour rolling window of 700 credits exists but may be suspended.
+- **Concurrency**: Plan recommends 1-2 concurrent agents. Operator manages via step eligibility in `config/agents.json`.
+- **Quota vs rate-limit**: `429 Allocated quota exceeded` writes a timed block (window exhausted). `429 Requests rate limit exceeded` is transient — agent rerouted without a block persist.
+- **Night discount**: qwen3.8-max calls between 22:00 and 08:00 consume credits at 50% discount (cost observation, no scheduler logic).
+- **Telemetry**: Client-side token counts are a lower bound on credit consumption (system prompt, tool schemas, and history also consume credits). Bailian console usage analytics is the authoritative credit source. `thoughts_tokens` column in stats tracks thinking/reasoning tokens separately.
 
 ## Launch output watchdog
 
@@ -106,9 +118,9 @@ Eligibility is controlled by `parallix/config/agents.json`. The default config c
 ```json
 {
   "steps": {
-    "draft": { "eligible": ["codex", "custom", "vibe"], "selection": "random" },
-    "active": { "eligible": ["codex", "claude", "custom", "vibe"], "selection": "random" },
-    "review": { "eligible": ["codex", "claude", "custom", "vibe"], "selection": "random" }
+    "draft": { "eligible": ["codex", "custom", "qwen", "vibe"], "selection": "random" },
+    "active": { "eligible": ["codex", "claude", "custom", "qwen", "vibe"], "selection": "random" },
+    "review": { "eligible": ["codex", "claude", "custom", "qwen", "vibe"], "selection": "random" }
   }
 }
 ```

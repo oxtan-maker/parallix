@@ -200,11 +200,11 @@ test('selectAgent throws when all eligible agents are excluded (no-cross-family 
     installPathLaunchers(tmpRoot);
     delete process.env.WORKFLOW_AGENT;
 
-    // config/agents.json has review eligible: ['codex', 'claude', 'custom', 'vibe'].
-    // Excluding all four should throw "All eligible agents ... are exhausted".
+    // config/agents.json has review eligible: ['codex', 'claude', 'custom', 'qwen', 'vibe'].
+    // Excluding all five should throw "All eligible agents ... are exhausted".
     assert.throws(
       () => selectAgent('review', {
-        exclude: new Set(['codex', 'claude', 'custom', 'vibe'])
+        exclude: new Set(['codex', 'claude', 'custom', 'qwen', 'vibe'])
       }),
       { message: /All eligible agents for step "review" are exhausted/ }
     );

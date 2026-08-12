@@ -237,3 +237,80 @@ test('review history carries prior verdicts and pushbacks across a reviewer fami
   assert.deepEqual(history[0].pushbacks, ['F2: Out of mission scope, tracked separately']);
   assert.deepEqual(history[1].pushbacks, [], 'the open round has no resolutions yet');
 });
+
+test('projectReviewHistory falls back to itemDispositions when response.resolutions is empty', () => {
+  // Regression: implementer round summary artifact populates itemDispositions
+  // but not response.resolutions. Projection must still show fixes/pushbacks.
+  const review = startReview(
+    subject, reviewer, implementer, '2026-08-02T08:00:00Z', reviewerEligibility,
+  );
+
+  // Round 1: reviewer requests changes
+  const r1 = applyReviewerCommand(review, {
+    type: 'request-changes',
+    decidedAt: '2026-08-02T09:00:00Z',
+    comment: 'Telemetry and projection findings',
+    findings: [
+      finding,
+      { ...finding, id: reviewFindingId('F2'), summary: 'Projection incomplete' },
+    ],
+    disposition: 'REQUEST_CHANGES',
+  });
+
+  // Round 1 response: itemDispositions set but response.resolutions empty
+  // (matches the artifact consumption path where itemDispositions is parsed
+  // from the round-resolution.md but formal resolutions not yet converted)
+  const round1 = r1.rounds[0];
+  const roundWithItems = {
+    ...round1,
+    response: null,
+    itemDispositions: [
+      { kind: 'fixed' as const, findingId: finding.id },
+      { kind: 'pushed_back' as const, findingId: reviewFindingId('F2') },
+    ],
+  };
+  const reviewWithItems = {
+    ...r1,
+    rounds: [roundWithItems] as typeof r1.rounds,
+  };
+
+  const history = projectReviewHistory(reviewWithItems);
+  assert.equal(history.length, 1);
+  assert.deepEqual(history[0].fixes, ['fixed: F1'], 'itemDispositions fixed shown');
+  assert.deepEqual(history[0].pushbacks, ['pushed_back: F2'], 'itemDispositions pushed_back shown');
+  assert.deepEqual(history[0].findingSummaries, [finding.summary, 'Projection incomplete']);
+});
+
+test('projectReviewHistory restores legacy detail from persisted review events', () => {
+  const review = startReview(
+    subject, reviewer, implementer, '2026-08-02T08:00:00Z', reviewerEligibility,
+  );
+  const round = review.rounds[0];
+  const history = projectReviewHistory({
+    ...review,
+    rounds: [{ ...round, disposition: 'CHANGES_MADE' }] as typeof review.rounds,
+    reviewEvents: [
+      {
+        position: 0, eventType: 'reviewer_findings', roundNumber: 1, phase: 'reviewing', actor: 'codex',
+        content: '## Finding 1 — Persist review details', disposition: null, verdict: null,
+        itemDispositions: null, blockedReason: null, followUpReference: null, createdAt: '2026-08-02T09:00:00Z',
+      },
+      {
+        position: 1, eventType: 'reviewer_outcome', roundNumber: 1, phase: 'reviewing', actor: 'codex',
+        content: 'Outcome: request-changes\n\n## Summary\nPersist the review continuity.', disposition: null, verdict: 'request-changes',
+        itemDispositions: null, blockedReason: null, followUpReference: null, createdAt: '2026-08-02T09:01:00Z',
+      },
+      {
+        position: 2, eventType: 'implementer_round_summary', roundNumber: 1, phase: 'fixing', actor: 'custom',
+        content: '', disposition: null, verdict: null,
+        itemDispositions: [{ kind: 'fixed', findingId: finding.id }], blockedReason: null, followUpReference: null, createdAt: '2026-08-02T10:00:00Z',
+      },
+    ],
+  });
+
+  assert.deepEqual(history[0], {
+    number: 1, reviewer, implementer, phase: 'reviewing', disposition: 'REQUEST_CHANGES',
+    comment: 'Persist the review continuity.', findingSummaries: ['Persist review details'],
+    fixes: ['fixed: F1'], pushbacks: [],
+  });
+});
