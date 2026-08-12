@@ -1,8 +1,8 @@
 ---
 id: TASK-2368
 title: agent running review is not detected
-status: refined
-assignee: [codex]
+status: active
+assignee: [claude]
 created_date: '2026-08-12 09:24'
 labels: [ai_sdlc, bug]
 dependencies: []
