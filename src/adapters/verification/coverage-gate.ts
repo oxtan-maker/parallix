@@ -55,6 +55,7 @@ import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as fmt from '../../application/presentation/cli-format.js';
 import { packageRoot } from '../filesystem/package-root.js';
+import { defaultManifestDir, ensureManifestDir, recoverRecordedTempRoots } from './temp-root-registry.js';
 
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = packageRoot(MODULE_DIR);
@@ -99,18 +100,12 @@ const PER_RUN_SCRATCH: string[] = [];
 // path scans the directory for orphaned manifests (dead PIDs) and reclaims
 // their registered scratch roots. This survives SIGKILL because the manifest
 // is flushed synchronously before any child work begins.
-// PARALLIX_COVERAGE_GATE_MANIFEST_DIR can override the default auto-created
+// PARALLIX_COVERAGE_GATE_MANIFEST_DIR can override the durable owner-scoped
 // directory (used by tests and workflow runners).
 const COVERAGE_GATE_MANIFEST_DIR = (process.env.PARALLIX_COVERAGE_GATE_MANIFEST_DIR
-  || fs.mkdtempSync(path.join(os.tmpdir(), 'coverage-gate-manifests-')));
+  || defaultManifestDir());
 
-if (!process.env.PARALLIX_COVERAGE_GATE_MANIFEST_DIR) {
-  // Ensure the auto-created directory exists (mkdtempSync creates it, but
-  // the env-override path may point to a pre-created directory)
-  if (!fs.existsSync(COVERAGE_GATE_MANIFEST_DIR)) {
-    fs.mkdirSync(COVERAGE_GATE_MANIFEST_DIR, { recursive: true });
-  }
-}
+ensureManifestDir(COVERAGE_GATE_MANIFEST_DIR);
 
 function coverageManifestPath() {
   return path.join(COVERAGE_GATE_MANIFEST_DIR, `${process.pid}.json`);
@@ -135,37 +130,7 @@ function flushCoverageManifest() {
  * @param manifestDir - Override manifest directory (for testing). Defaults to COVERAGE_GATE_MANIFEST_DIR.
  */
 function recoverOrphanedScratchDirs(manifestDir: string = COVERAGE_GATE_MANIFEST_DIR) {
-  try {
-    if (!fs.existsSync(manifestDir)) {return;}
-    for (const entry of fs.readdirSync(manifestDir)) {
-      if (!entry.endsWith('.json')) {continue;}
-      const manifestFile = path.join(manifestDir, entry);
-      const pid = Number(path.basename(entry, '.json'));
-      // Check if the process is still alive (signal 0 succeeds for living PIDs)
-      let isAlive = false;
-      try {
-        process.kill(pid, 0);
-        isAlive = true;
-      } catch (_) {
-        // Process is dead — reclaim its registered roots
-      }
-      if (!isAlive) {
-        try {
-          const roots: string[] = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
-          for (const dir of roots) {
-            try {
-              if (fs.existsSync(dir)) {
-                fs.rmSync(dir, { recursive: true, force: true });
-              }
-            } catch (_) { /* best-effort */ }
-          }
-          fs.unlinkSync(manifestFile);
-        } catch (_) { /* best-effort */ }
-      }
-    }
-  } catch (_) {
-    // best-effort recovery only
-  }
+  recoverRecordedTempRoots({ manifestDir });
 }
 
 let threshold = 90;
@@ -270,6 +235,7 @@ function cleanupPerRunScratch() {
     } catch (_) {}
   }
   PER_RUN_SCRATCH.length = 0;
+  try { fs.rmSync(coverageManifestPath(), { force: true }); } catch (_) {}
 }
 
 function registerExitHandlers() {
@@ -413,6 +379,7 @@ function run(args: string[], options: CoverageGateOptions = {}) {
   threshold = threshold_;
   dryRun = dryRun_;
   try {
+    recoverOrphanedScratchDirs();
     if (dryRun_) {
       const testFiles = discoverTestFiles();
       if (testFiles.length === 0) {

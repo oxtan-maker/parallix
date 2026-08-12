@@ -21,6 +21,12 @@ import childProcess from 'node:child_process';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { SqliteMeasurementStore } from '../src/adapters/sqlite/measurement-store.js';
+import { createTempRootRegistry } from '../src/adapters/verification/temp-root-registry.js';
+
+const tempRootRegistry = createTempRootRegistry();
+process.on('SIGINT', () => { tempRootRegistry.cleanup(); process.exit(130); });
+process.on('SIGTERM', () => { tempRootRegistry.cleanup(); process.exit(143); });
+process.on('exit', () => tempRootRegistry.cleanup());
 
 // `npm run build` emits the canonical bundle at build/px.mjs, which is also the
 // target of package.json's `bin.px`. TASK-2288 retired the transitional
@@ -353,7 +359,7 @@ function runHealthcheck(agent, runner, repoRoot, env, timeoutMs = HEALTHCHECK_TI
 }
 
 function setupRepository({ slug, title, agent = 'custom', runner = 'opencode' }) {
-  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-real-agent-'));
+  const tmpRoot = tempRootRegistry.register(fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-real-agent-')));
   const repoRoot = path.join(tmpRoot, 'repo');
   const binDir = path.join(repoRoot, 'bin');
   const stateHome = path.join(tmpRoot, 'parallix-home');
@@ -544,7 +550,7 @@ function runWorkflowAllowFail(repoRoot, env, args, timeout, options = {}) {
   // Own a unique directory, rather than independent predictable files under a
   // shared root. This gives this invocation a single safe cleanup target and
   // makes opt-in diagnostics retain only its own captures.
-  const captureDir = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-real-agent-capture-'));
+  const captureDir = tempRootRegistry.register(fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-real-agent-capture-')));
   const stdoutPath = path.join(captureDir, 'stdout.log');
   const stderrPath = path.join(captureDir, 'stderr.log');
   let stdoutFd;
@@ -570,6 +576,7 @@ function runWorkflowAllowFail(repoRoot, env, args, timeout, options = {}) {
     if (!keepCaptureArtifacts) {
       fs.rmSync(captureDir, { recursive: true, force: true });
     }
+    tempRootRegistry.release(captureDir);
   }
 }
 
@@ -1010,6 +1017,7 @@ function runRealAgentSmoke(agent, runner) {
       fs.rmSync(repo.tmpRoot, { recursive: true, force: true });
       fs.rmSync(worktree, { recursive: true, force: true });
     }
+    tempRootRegistry.release(repo.tmpRoot);
   }
 }
 

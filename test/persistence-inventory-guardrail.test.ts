@@ -537,6 +537,8 @@ test('SC1 reverse: all durable-IO files under src/ are present in the inventory'
     'src/adapters/git/worktree.ts',
     // Verification proofs — infrastructure metadata, not a domain concept
     'src/adapters/verification/verification.ts',
+    // Temporary-root cleanup manifests are verification infrastructure, not domain state.
+    'src/adapters/verification/temp-root-registry.ts',
     // Red-green reproduction test tracking — reads mission docs for test markers
     'src/adapters/verification/redgreen.ts',
     // Review command surface — reads mission documents, checkpoints, ADRs and

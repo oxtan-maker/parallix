@@ -17,6 +17,7 @@ const ROOT = path.resolve(import.meta.dirname, '..');
 const RUNTIME_LIB = path.join(ROOT, 'src');
 const DIRECT_JSON_EXCEPTIONS = new Map([
   ['src/adapters/verification/coverage-gate.ts:coverageManifestPath()', 'coverage-manifest'],
+  ['src/adapters/verification/temp-root-registry.ts:manifestPath', 'coverage-manifest'],
   ['src/adapters/verification/mutation-gate.ts:baselinePath', 'mutation-baseline'],
   ['src/adapters/verification/mutation-gate.ts:configPath', 'mutation-run-config'],
   ['src/adapters/review/setup-review.ts:configPath', 'workflow-config'],
