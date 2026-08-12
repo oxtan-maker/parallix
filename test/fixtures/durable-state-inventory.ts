@@ -819,7 +819,7 @@ export const MACHINE_WRITTEN_PATH_INVENTORY: readonly MachineWrittenPathInventor
   },
   {
     id: 'coverage-manifest',
-    pathPattern: '<tmp>/coverage-gate-manifests-*/<pid>.json',
+    pathPattern: '<tmp>/parallix-temp-root-manifests/<pid>.json',
     writer: 'lib/commands/coverage-gate.ts#flushCoverageManifest',
     classification: 'cache-scratch-data',
     persistencePolicy: 'PID-scoped scratch manifest for SIGKILL orphan recovery; documented direct-write exception.',

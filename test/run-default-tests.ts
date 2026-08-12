@@ -1,9 +1,10 @@
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { buildTestRunPlan } from './lib/test-run-plan.js';
+import { defaultManifestDir, ensureManifestDir, recoverRecordedTempRoots } from '../src/adapters/verification/temp-root-registry.js';
+import { cleanupRunnerTempRoots, signalExitCode } from './lib/test-runner-temp-roots.js';
 
 // A verifier may be launched from an operator checkout while it is validating
 // a mission worktree. Capture that selected root once and use it for every
@@ -42,8 +43,21 @@ if (buildResult.status !== 0) {
 // process) writes its own <worker-PID>.json file inside the directory, so
 // concurrent workers do not overwrite each other's root lists (task-2326 round 5).
 // After the suite completes, the runner reads all files and unions the roots.
-const testManifestDir = path.join(os.tmpdir(), `parallix-test-run-${process.pid}`);
+const tempManifestDir = ensureManifestDir(defaultManifestDir());
+const testManifestDir = path.join(tempManifestDir, `test-run-${process.pid}`);
+recoverRecordedTempRoots({ manifestDir: tempManifestDir });
 fs.mkdirSync(testManifestDir, { recursive: true });
+
+let forwardingSignal = false;
+function forwardSignal(signal: NodeJS.Signals) {
+  if (forwardingSignal) return;
+  forwardingSignal = true;
+  cleanupRunnerTempRoots(testManifestDir);
+  process.exit(signalExitCode(signal));
+}
+
+process.on('SIGINT', () => forwardSignal('SIGINT'));
+process.on('SIGTERM', () => forwardSignal('SIGTERM'));
 
 // Measure elapsed time for the suite-level budget check.
 const suiteStart = process.hrtime.bigint();
@@ -66,33 +80,9 @@ if (result.error) {
   throw result.error;
 }
 
-// SIGKILL cleanup: child test workers cannot catch SIGKILL, so their
-// bootstrap temp directories (parallix-test-*) persist after forced exit.
-// The runner reads per-worker manifest files from the manifest directory
-// and unions all roots — safely ignoring roots from concurrent test runs.
-// This is the safe owner/boundary for the SIGKILL artifact class (task-2326).
-function cleanupOrphanedTempDirs() {
-  try {
-    if (!fs.existsSync(testManifestDir)) return;
-    const ownedRoots = new Set();
-    for (const entry of fs.readdirSync(testManifestDir)) {
-      if (!entry.endsWith('.json')) continue;
-      try {
-        const roots = JSON.parse(fs.readFileSync(path.join(testManifestDir, entry), 'utf8'));
-        if (Array.isArray(roots)) roots.forEach(r => ownedRoots.add(r));
-      } catch (_) { /* best-effort */ }
-    }
-    for (const dir of ownedRoots) {
-      try { fs.rmSync(dir as import('node:fs').PathLike, { recursive: true, force: true }); } catch (_) {}
-    }
-    try { fs.rmSync(testManifestDir, { recursive: true, force: true }); } catch (_) {}
-  } catch (_) {
-    // best-effort cleanup only
-  }
-}
-
 if (result.signal) {
-  process.kill(process.pid, result.signal);
+  cleanupRunnerTempRoots(testManifestDir);
+  process.exit(signalExitCode(result.signal));
 }
 
 // Suite-level budget enforcement (unit suite only).
@@ -108,7 +98,7 @@ if (!runsIntegrationSuite) {
   }
 }
 
-// Clean up orphaned temp directories from SIGKILL'd child processes.
-cleanupOrphanedTempDirs();
+// Clean up roots before propagating failure status.
+cleanupRunnerTempRoots(testManifestDir);
 
 process.exit(result.status || (suiteExceeded ? 1 : 0));

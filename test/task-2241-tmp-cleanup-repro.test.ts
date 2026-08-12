@@ -19,14 +19,12 @@ function loadSmokeHelpers() {
 
 test('real-agent smoke capture removes its first stdout file when stderr capture setup fails', () => {
   const tempRoot = fs.mkdtempSync(path.join(originalTmpdir(), 'task-2241-repro-'));
-  let firstCapturePath;
   let openCalls = 0;
   try {
     os.tmpdir = () => tempRoot;
     fs.openSync = (filePath, ...args) => {
       openCalls += 1;
       if (openCalls === 1) {
-        firstCapturePath = filePath;
         return originalOpenSync(filePath, ...args);
       }
       const error = new Error('ENOSPC: no space left while opening stderr capture');
@@ -40,7 +38,7 @@ test('real-agent smoke capture removes its first stdout file when stderr capture
       () => runWorkflowAllowFail(tempRoot, process.env, ['--version'], 100),
       { code: 'ENOSPC' }
     );
-    assert.equal(fs.existsSync(firstCapturePath), false, 'owned stdout capture must be removed after stderr setup failure');
+    assert.deepEqual(fs.readdirSync(tempRoot), [], 'owned capture must be removed after stderr setup failure');
   } finally {
     fs.openSync = originalOpenSync;
     os.tmpdir = originalTmpdir;
