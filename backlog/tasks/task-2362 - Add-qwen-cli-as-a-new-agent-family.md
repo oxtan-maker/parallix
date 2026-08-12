@@ -1,7 +1,7 @@
 ---
 id: TASK-2362
 title: Add qwen CLI as a new agent family
-status: review
+status: active
 assignee: [custom]
 created_date: '2026-08-11 16:40'
 labels:
