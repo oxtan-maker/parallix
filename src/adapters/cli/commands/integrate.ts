@@ -466,6 +466,14 @@ function detectChangedAreas(slug: string, opts: {gitRunner?: Function, rootDir?:
   return parseFilesToAreas(diffResult.stdout);
 }
 
+/** @param {string} rootDir @param {Iterable<string>} paths @param {{gitRunner?: Function}} opts */
+function isIntendedPayloadAtHead(rootDir: string, paths: Iterable<string>, opts: {gitRunner?: Function} = {}) {
+  const payloadPaths = [...paths];
+  if (payloadPaths.length === 0) return false;
+  const runner = (opts.gitRunner || git) as Function;
+  return runner(['-C', rootDir, 'diff', '--quiet', 'HEAD', '--', ...payloadPaths]).status === 0;
+}
+
 /**
  * Parse a list of files (one per line) and extract the top-level area directories
  */
@@ -1141,6 +1149,16 @@ async function integrate(args: string[], options: { missionServicesFn?: Function
         }
       }
 
+      // Capture the squash payload before closeout changes the checkout. The
+      // final commit names this set, so a concurrent bare board commit never
+      // inherits ambient index entries from an earlier `git add -A`.
+      const intendedPayloadPaths = new Set(
+        git(['-C', baseWorktree, 'diff', '--cached', '--name-only', '--']).stdout
+          .split('\n')
+          .map(file => file.trim())
+          .filter(Boolean)
+      );
+
       fmt.log.info('Step 4: Final closeout checks in the local integration checkout...');
       // Do not dirty the primary checkout before the probe merge and squash have
       // completed. The task file is commonly part of the mission branch, so an
@@ -1148,25 +1166,41 @@ async function integrate(args: string[], options: { missionServicesFn?: Function
       await promoteTaskForIntegrationIfNeeded(context, { missionServicesFn });
       if (fs.existsSync(mainTaskFile)) {
         completeTask(slug, baseWorktree);
+        const originalTaskPath = path.relative(baseWorktree as string, mainTaskFile);
+        intendedPayloadPaths.add(originalTaskPath);
         // Re-resolve because it moved
         const updatedResolution = resolveTaskFile(slug, baseWorktree);
         if (updatedResolution.ok) {
+          const completedTaskPath = path.relative(baseWorktree as string, updatedResolution.taskFile as string);
+          intendedPayloadPaths.add(completedTaskPath);
           rewriteWorktreePaths(updatedResolution.taskFile as string, slug, { rootDir: baseWorktree });
+          const stageCloseout = git(['-C', baseWorktree, 'add', '-A', '--', originalTaskPath, completedTaskPath]);
+          if (stageCloseout.status !== 0) {
+            fmt.log.fail('Could not stage backlog closeout for the landed squash commit.');
+            throw new IntegrationAbort();
+          }
         }
       }
 
-      git(['-C', baseWorktree, 'add', '-A']);
       fmt.log.info('Step 5: Creating the landed squash commit in the local integration checkout...');
       let commitResult = git([
         '-C',
         /** @type {string} */ (baseWorktree),
         'commit',
+        '--only',
         '-m',
-        `${branch}: ${summary}`
+        `${branch}: ${summary}`,
+        '--',
+        ...intendedPayloadPaths
       ]);
       let retriedCommit = false;
       while (commitResult.status !== 0) {
         const output = [commitResult.stdout, commitResult.stderr].filter(Boolean).join('\n').trim();
+        if (isIntendedPayloadAtHead(baseWorktree as string, intendedPayloadPaths, { gitRunner: git })) {
+          const carryingCommit = git(['-C', baseWorktree, 'rev-parse', 'HEAD']).stdout.trim();
+          fmt.log.pass(`Integration payload already landed in commit ${carryingCommit}.`);
+          break;
+        }
         fmt.log.fail('Could not create the squash commit in the local integration checkout.');
         if (output) {
           fmt.log.fail(output);
@@ -1178,15 +1212,16 @@ async function integrate(args: string[], options: { missionServicesFn?: Function
           const shouldRetry = await handleHookFailureAutoBounce(slug, baseWorktree, output, hookClassification, { missionStore: missionServices.store });
           if (shouldRetry) {
             fmt.log.info('Retrying squash commit after implementer hook fix...');
-            // Stage implementer's fix before retrying commit
-            git(['-C', baseWorktree, 'add', '-A']);
             retriedCommit = true;
             commitResult = git([
               '-C',
               /** @type {string} */ (baseWorktree),
               'commit',
+              '--only',
               '-m',
-              `${branch}: ${summary}`
+              `${branch}: ${summary}`,
+              '--',
+              ...intendedPayloadPaths
             ]);
             continue;
           } else {
@@ -2248,4 +2283,4 @@ function buildConflictResolutionPrompt(slug: string = '<slug>', area: string = '
 // Re-export getPrimaryWorktree from mission-utils
 (integrate as any).getPrimaryWorktree = getPrimaryWorktree;
 export default integrate;
-export { integrate, formatRecordedStatsRow, detectChangedAreas, parseFilesToAreas, loadIntegrationConfig, getIntegrationGatePlan, printIntegrationGatePlan, buildIntegrationGateEnv, captureFinalIntegrationTree, parseIntegrateArgs, resolveIntegrationVerificationWorktree, buildIntegrationVerificationInvocation, executeIntegrationGates, orderIntegrationGates, gateMatchesChangedAreas, buildIntegrationContext, getPrimaryWorktree, resolveConflictsForMission, cleanupMissionWorktree, rewriteWorktreePaths, isNoMergeToAbortResult, buildConflictResolutionPrompt, VARIANT_B_AUTOMATION_SUMMARY, stashMainCheckoutIfNeeded, restoreMainCheckoutStash, evaluateTaskStatusForIntegration, promoteTaskForIntegrationIfNeeded, findExistingSquashCommit, printIntegrationPreflight, resolveForgejoUserForIntegration, getUnresolvedIndexConflicts, parseStashPopCollisionFiles, reportStashPopFailure, maybeUpdateGraphifyOnPrimary, SYNC_MERGED_DIAGNOSTICS, printDiagnosticTable, recordPostIntegrationStats, recordPostIntegrationStatsOrAbort, reportSyncMergedFailure, runPostIntegrateHookOrAbort, prepareNoisePatchForSquash, areAllBacklogOnlyConflicts };
+export { integrate, formatRecordedStatsRow, detectChangedAreas, parseFilesToAreas, loadIntegrationConfig, getIntegrationGatePlan, printIntegrationGatePlan, buildIntegrationGateEnv, captureFinalIntegrationTree, parseIntegrateArgs, resolveIntegrationVerificationWorktree, buildIntegrationVerificationInvocation, executeIntegrationGates, orderIntegrationGates, gateMatchesChangedAreas, buildIntegrationContext, getPrimaryWorktree, resolveConflictsForMission, cleanupMissionWorktree, rewriteWorktreePaths, isNoMergeToAbortResult, buildConflictResolutionPrompt, VARIANT_B_AUTOMATION_SUMMARY, stashMainCheckoutIfNeeded, restoreMainCheckoutStash, evaluateTaskStatusForIntegration, promoteTaskForIntegrationIfNeeded, findExistingSquashCommit, printIntegrationPreflight, resolveForgejoUserForIntegration, getUnresolvedIndexConflicts, parseStashPopCollisionFiles, reportStashPopFailure, maybeUpdateGraphifyOnPrimary, SYNC_MERGED_DIAGNOSTICS, printDiagnosticTable, recordPostIntegrationStats, recordPostIntegrationStatsOrAbort, reportSyncMergedFailure, runPostIntegrateHookOrAbort, prepareNoisePatchForSquash, areAllBacklogOnlyConflicts, isIntendedPayloadAtHead };
