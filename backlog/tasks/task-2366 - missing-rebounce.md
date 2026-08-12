@@ -1,7 +1,7 @@
 ---
 id: TASK-2366
 title: missing rebounce
-status: review
+status: ready-for-integration
 assignee: [custom]
 created_date: '2026-08-12 04:55'
 labels: [user_value, bug]
