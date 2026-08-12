@@ -184,19 +184,16 @@ export function findProductionDependencyViolations(repoRoot = process.cwd()): De
 export type Responsibility = DependencyLayer;
 
 /**
- * An adapter module that directly imports this many distinct sibling adapter
- * packages is sequencing a multi-integration workflow rather than providing one
- * mechanism. Workflow sequencing is an application responsibility, so the module
- * is reported regardless of where it sits under `src/adapters/`. The threshold
- * is a rule, not configuration: naming more cross-adapter edges cannot silence
- * it, and neither can moving or renaming the module.
+ * The rules below are the complete set the guard enforces. There is deliberately
+ * no rule for adapter-owned workflow sequencing: a count of distinct sibling
+ * packages an adapter imports cannot distinguish a mechanism that legitimately
+ * uses three siblings from a module that sequences a multi-integration workflow,
+ * so the count-threshold rule was retired rather than kept permanently skipped.
+ * `src/adapters/README.md` records the remaining unguarded debt and its owner.
  */
-export const multiIntegrationFanOutThreshold = 3;
-
 export type ResponsibilityRule =
   | 'unclassified-production-module'
   | 'cross-adapter-dependency-not-named'
-  | 'adapter-owned-workflow-sequencing'
   | 'hidden-service-location'
   | 'complete-graph-outside-composition';
 
@@ -271,34 +268,6 @@ export function findCrossAdapterViolations(repoRoot = process.cwd()): Responsibi
 }
 
 /**
- * SC3: multi-integration command workflow sequencing is application-owned, so an
- * adapter module that directly wires `multiIntegrationFanOutThreshold` or more
- * distinct sibling adapter packages fails wherever it is placed.
- */
-export function findWorkflowOwnershipViolations(repoRoot = process.cwd()): ResponsibilityViolation[] {
-  const root = path.resolve(repoRoot);
-  const adapterRoot = path.resolve(root, 'src', 'adapters');
-  return walk(adapterRoot).flatMap(file => {
-    const ownPackage = adapterPackageOf(file, root);
-    if (ownPackage === null) {return [];}
-    const reached = new Set<string>();
-    for (const specifier of importsFrom(fs.readFileSync(file, 'utf8'))) {
-      const target = resolveLocal(file, specifier);
-      const targetPackage = target && adapterPackageOf(target, root);
-      if (targetPackage && targetPackage !== ownPackage) {reached.add(targetPackage);}
-    }
-    if (reached.size < multiIntegrationFanOutThreshold) {return [];}
-    return [{
-      file: path.relative(root, file),
-      rule: 'adapter-owned-workflow-sequencing' as const,
-      expectedOwner: 'application' as const,
-      actualOwner: 'adapters' as const,
-      detail: `sequences ${reached.size} distinct integration packages (${[...reached].sort().join(', ')}), at or above the ${multiIntegrationFanOutThreshold}-package workflow threshold`,
-    }];
-  });
-}
-
-/**
  * Hidden service location and complete-graph construction: only the composition
  * root may assemble the object graph, and no module may resolve collaborators by
  * dynamic key lookup.
@@ -351,7 +320,6 @@ export function findResponsibilityViolations(repoRoot = process.cwd()): Responsi
     ...findUnclassifiedProductionModules(repoRoot),
     ...findCrossAdapterViolations(repoRoot),
     ...findServiceLocationViolations(repoRoot),
-    ...findWorkflowOwnershipViolations(repoRoot),
   ];
 }
 

@@ -3,11 +3,18 @@
 **This directory contains concrete integrations with filesystems, Git, agent processes, review providers, Backlog data, packaged assets, and SQLite.**
 
 Adapters implement application-owned ports or provide concrete mechanisms used
-by composition. Placement in this directory does not grant a module adapter
-responsibility: the guards in `src/adapters/architecture/boundary-guards.ts`
-classify every production module and check what it actually does, so a module
-that is moved or renamed into `src/adapters/` still fails if it owns another
-layer's responsibility.
+by composition. The guards in `src/adapters/architecture/boundary-guards.ts`
+classify every production module by location and then check four specific
+things, listed in full under "Enforced rules" below: that the module sits in a
+canonical root, that each cross-adapter import matches a named package rule,
+that it resolves no collaborator by dynamic key lookup, and that it does not
+assemble the complete object graph. Those four bite regardless of where a module
+is moved or renamed to.
+
+They are not a general test of whether a module owns another layer's
+responsibility. In particular, **an adapter that sequences a multi-integration
+workflow — an application responsibility — is not caught by any of them**; see
+"Known outstanding debt" below.
 
 ## The layer DAG
 
@@ -59,10 +66,10 @@ An adapter that needs behaviour it may not import directly depends on an
 supplies the implementation. The failure diagnostic names that remedy directly.
 
 Naming an edge satisfies the dependency rule but does not grant workflow
-ownership. An adapter module that directly wires
-`multiIntegrationFanOutThreshold` (3) or more distinct sibling packages is
-sequencing a multi-integration workflow, which is an application
-responsibility, and fails wherever it sits in the tree.
+ownership. Workflow sequencing across several integrations remains an
+application responsibility — but no guard currently enforces that, so an adapter
+module that sequences one is caught only in review. See "Known outstanding debt"
+below.
 
 ## Layout
 
@@ -92,7 +99,6 @@ turns that fixture red.
 |---|---|---|
 | `unclassified-production-module` | A module under `src/` outside all six roots, including one loose at the `src/` root | `"responsibility scan reports a new unclassified production module with its path and expected owner"`, `"responsibility scan reports a loose module at the src root as unclassified"` |
 | `cross-adapter-dependency-not-named` | An import between adapter packages with no named rule | `"cross-adapter guard rejects a prohibited direct import between unnamed adapter packages"`, `"cross-adapter rules name every adapter package and grant no wildcard"` |
-| `adapter-owned-workflow-sequencing` | An adapter module wiring 3+ distinct sibling packages, at any path or name | `"workflow guard fails multi-integration command sequencing beneath an arbitrary adapters path"`, `"workflow guard still fails the same sequencing after it is renamed and moved to another adapters path"` |
 | `hidden-service-location` | Resolving collaborators by dynamic key lookup | `"responsibility guard fails hidden service location in an adapter module"` |
 | `complete-graph-outside-composition` | Building the complete object graph outside `src/composition/application-services.ts` | `"responsibility guard fails complete-graph construction outside the composition root"` |
 
@@ -100,10 +106,10 @@ Every diagnostic names the offending file, the failed rule, and the expected
 owner, for example:
 
 ```
-src/adapters/cli/commands/integrate.ts: rule adapter-owned-workflow-sequencing failed —
-sequences 9 distinct integration packages (agents, backlog, config, filesystem, forgejo,
-git, process, review, verification), at or above the 3-package workflow threshold;
-expected owner: application, actual owner: adapters
+src/adapters/alpha/source.ts: rule cross-adapter-dependency-not-named failed —
+imports "../beta/target.js" (src/adapters/beta/target.ts) but package "alpha" declares
+no named dependency on "beta"; route it through an application-owned port under
+src/application/ports/; expected owner: application, actual owner: adapters
 ```
 
 The guards run under the static-analysis workflow and use only `node:fs` and
@@ -112,16 +118,32 @@ process; run them with `npm test -- test/dependency-graph.test.ts`.
 
 ## Known outstanding debt
 
-`cli/commands/` still contains legacy command implementations that combine
-request handling, rendering, and workflow sequencing with concrete
-integrations, and several mechanism adapters wire three or more sibling packages
-directly. The `adapter-owned-workflow-sequencing` rule reports every one of them
-— `src/adapters/cli/commands/integrate.ts` and
-`src/adapters/cli/commands/handoff.ts` each wire 9 integration packages. No
-allowlist, grandfather list, or path exemption was added to hide this: the rule
-runs against the production tree on every test run and its diagnostics are
-asserted there; only the tree-wide zero-violation assertion is annotated-skipped,
-because re-homing that code is not this mission's scope.
+**Multi-integration workflow sequencing under `src/adapters/` is unguarded.**
+`src/adapters/cli/commands/` still contains legacy command implementations that
+combine request handling, rendering, and workflow sequencing with concrete
+integrations — `src/adapters/cli/commands/integrate.ts` and
+`src/adapters/cli/commands/handoff.ts` each wire 9 sibling packages — and several
+mechanism packages (`git`, `forgejo`, `verification`, `agents`) wire three or
+more siblings too. Nothing in CI fails on any of this. The list of enforced rules
+above is exhaustive: it is what the tree is actually protected against, and this
+axis is not on it.
+
+A rule did exist. It flagged any adapter module importing three or more distinct
+sibling packages, and it was retired rather than repaired, because **a fan-out
+count cannot distinguish a mechanism from a workflow sequencer** — a host
+mechanism such as `git` legitimately uses three siblings, so the threshold
+reported 23 production modules and its tree-wide assertion could only ever be
+skipped. A permanently skipped guard is not a guard; removing it makes the repo
+claim strictly less than it enforces rather than more. Raising the threshold or
+adding an allowlist would have been worse: both restore the directory-placement
+bypass the rule was meant to close.
+
+Replacing it needs a structural invariant rather than a count — candidates are
+dependence on the `cli` adapter package, dependence on more than one
+*integration* package as opposed to a host mechanism, or constructing
+collaborators rather than receiving them. That invariant can only be enforced
+after the modules it would flag are re-homed into `src/application/`, and
+**re-homing is tracked by parent TASK-2332**.
 
 `adapterPackageDependencies` is a **ratchet, not a design**. Its entries were
 transcribed from the edges the tree already had, so it does not certify that
