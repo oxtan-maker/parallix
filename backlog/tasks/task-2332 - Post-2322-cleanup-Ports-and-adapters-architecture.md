@@ -1,7 +1,7 @@
 ---
 id: TASK-2332
 title: Post-2322 cleanup — Ports and adapters architecture
-status: active
+status: review
 assignee: [claude]
 created_date: '2026-07-31 08:00'
 updated_date: '2026-07-31 08:00'
