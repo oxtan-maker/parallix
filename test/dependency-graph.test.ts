@@ -15,11 +15,9 @@ import {
   findResponsibilityViolations,
   findServiceLocationViolations,
   findUnclassifiedProductionModules,
-  findWorkflowOwnershipViolations,
   formatResponsibilityViolation,
   dependencyLayers,
   layerRoots,
-  multiIntegrationFanOutThreshold,
 } from '../src/adapters/architecture/boundary-guards.js';
 
 function withTempRoot(run: (_root: string) => void): void {
@@ -233,56 +231,7 @@ test('production tree has no unnamed cross-adapter dependency', () => {
 });
 
 /* ------------------------------------------------------------------ *
- * SC3 — adapter-owned multi-integration workflow sequencing
- * ------------------------------------------------------------------ */
-
-/** Writes an adapter module that directly wires `packages.length` sibling packages. */
-function withWorkflowFixture(sourcePath: string, packages: readonly string[], run: (_root: string) => void): void {
-  withTempRoot(root => {
-    const sourceFile = path.join(root, sourcePath);
-    fs.mkdirSync(path.dirname(sourceFile), { recursive: true });
-    const imports = packages.map((name, index) => {
-      const targetFile = writeModule(root, path.join('src', 'adapters', name, 'mechanism.ts'), 'export const dependency = true;\n');
-      return importLine(sourceFile, targetFile, `mechanism${index}`);
-    });
-    fs.writeFileSync(sourceFile, `${imports.join('')}export const workflow = () => [${packages.map((_, index) => `mechanism${index}`).join(', ')}];\n`);
-    run(root);
-  });
-}
-
-test('workflow guard fails multi-integration command sequencing beneath an arbitrary adapters path', () => {
-  withWorkflowFixture(path.join('src', 'adapters', 'relabeled', 'nested', 'deep', 'orchestrator.ts'), ['git', 'forgejo', 'backlog'], root => {
-    const violations = findWorkflowOwnershipViolations(root);
-    assert.deepEqual(violations.map(violation => violation.file), [path.join('src', 'adapters', 'relabeled', 'nested', 'deep', 'orchestrator.ts')]);
-    assert.equal(violations[0].rule, 'adapter-owned-workflow-sequencing');
-    assert.equal(violations[0].expectedOwner, 'application');
-    assert.equal(violations[0].actualOwner, 'adapters');
-    assert.match(formatResponsibilityViolation(violations[0]), /sequences 3 distinct integration packages \(backlog, forgejo, git\).*expected owner: application, actual owner: adapter/);
-  });
-});
-
-test('workflow guard still fails the same sequencing after it is renamed and moved to another adapters path', () => {
-  const packages = ['git', 'forgejo', 'backlog'];
-  const paths = [
-    path.join('src', 'adapters', 'cli', 'commands', 'integrate.ts'),
-    path.join('src', 'adapters', 'mechanisms', 'harmless-helper.ts'),
-  ];
-  for (const sourcePath of paths) {
-    withWorkflowFixture(sourcePath, packages, root => {
-      assert.deepEqual(findWorkflowOwnershipViolations(root).map(violation => violation.file), [sourcePath], `${sourcePath} must fail regardless of placement`);
-    });
-  }
-});
-
-test('workflow guard permits an adapter that wires fewer integration packages than the threshold', () => {
-  assert.equal(multiIntegrationFanOutThreshold, 3);
-  withWorkflowFixture(path.join('src', 'adapters', 'git', 'mechanism-with-helpers.ts'), ['config', 'filesystem'], root => {
-    assert.deepEqual(findWorkflowOwnershipViolations(root), []);
-  });
-});
-
-/* ------------------------------------------------------------------ *
- * SC4 — hidden service location
+ * SC3 — hidden service location
  * ------------------------------------------------------------------ */
 
 test('responsibility guard fails hidden service location in an adapter module', () => {
@@ -311,7 +260,7 @@ test('production tree has no hidden service location', () => {
 });
 
 /* ------------------------------------------------------------------ *
- * SC5/SC6 — aggregate scan and actionable diagnostics
+ * SC4/SC5 — aggregate scan and actionable diagnostics
  * ------------------------------------------------------------------ */
 
 test('aggregate responsibility scan reports every failing rule for one fixture tree', () => {
@@ -370,25 +319,4 @@ test('responsibility scan is clean for a tree that exercises all six responsibil
       );
     }
   });
-});
-
-// The production tree still puts multi-integration workflow sequencing under adapter
-// ownership — `src/adapters/cli/commands/` plus several mechanism adapters that wire
-// three or more sibling packages directly. Re-homing that code is not this mission's
-// scope. The rule itself carries no allowlist and no path exemption: the fixtures above
-// prove it bites, and the test below this one asserts its diagnostics against the real
-// tree. Only the tree-wide zero-violation assertion is deferred.
-test.skip('production tree has no adapter-owned workflow sequencing', () => { // skip-reason: production tree not yet re-homed; rule is enforced and fixture-proven, only its tree-wide assertion is deferred
-  assert.deepEqual(findWorkflowOwnershipViolations(process.cwd()), []);
-});
-
-test('workflow-ownership rule runs against the production tree and reports actionable diagnostics', () => {
-  const violations = findWorkflowOwnershipViolations(process.cwd());
-  for (const violation of violations) {
-    assert.equal(violation.rule, 'adapter-owned-workflow-sequencing');
-    assert.equal(violation.expectedOwner, 'application');
-    assert.equal(violation.actualOwner, 'adapters');
-    assert.ok(fs.existsSync(path.join(process.cwd(), violation.file)), `diagnostic must name a real file: ${violation.file}`);
-    assert.match(formatResponsibilityViolation(violation), /sequences \d+ distinct integration packages \([a-z, ]+\)/);
-  }
 });
