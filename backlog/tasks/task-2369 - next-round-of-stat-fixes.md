@@ -4,7 +4,7 @@ title: next round of stat fixes
 status: backlog
 assignee: [custom]
 created_date: '2026-08-12 14:48'
-labels: []
+labels: [user_value, bug]
 dependencies: []
 ordinal: 89912
 ---
