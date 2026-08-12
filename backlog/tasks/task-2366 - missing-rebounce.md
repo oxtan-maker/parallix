@@ -2,7 +2,7 @@
 id: TASK-2366
 title: missing rebounce
 status: backlog
-assignee: []
+assignee: [custom]
 created_date: '2026-08-12 04:55'
 labels: []
 dependencies: []
