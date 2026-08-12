@@ -2,8 +2,7 @@
 id: TASK-2335
 title: mission/task-2322.12 broke review
 status: backlog
-assignee:
-  - custom
+assignee: [codex]
 created_date: '2026-08-03 09:13'
 updated_date: '2026-08-03 16:39'
 labels:
