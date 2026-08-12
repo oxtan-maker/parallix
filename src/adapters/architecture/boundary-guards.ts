@@ -46,22 +46,54 @@ export const allowedDependencyGraph: Readonly<Record<DependencyLayer, readonly D
  * is no wildcard, no per-file exception, and no path-based bypass.
  */
 export const adapterPackageDependencies: Readonly<Record<string, readonly string[]>> = {
-  agents: ['assets', 'backlog', 'config', 'filesystem', 'git', 'process', 'sqlite', 'storage'],
+  // mechanism: packaged assets, configuration, filesystem, Git, processes, SQLite, and durable storage.
+  agents: ['assets', 'config', 'filesystem', 'git', 'process', 'sqlite', 'storage'],
+  // mechanism: boundary guard has no sibling mechanism dependency.
   architecture: [],
+  // mechanism: packaged-asset discovery reads the host filesystem.
   assets: ['filesystem'],
-  backlog: ['agents', 'config', 'filesystem', 'git', 'review', 'sqlite'],
-  cli: ['agents', 'assets', 'backlog', 'config', 'filesystem', 'forgejo', 'git', 'process', 'rebase', 'review', 'sqlite', 'storage', 'verification'],
+  // mechanism: configuration, filesystem, Git, and SQLite task storage.
+  backlog: ['config', 'filesystem', 'git', 'sqlite'],
+  // mechanism: assets, configuration, filesystem, Git, and process execution.
+  cli: ['assets', 'config', 'filesystem', 'git', 'process'],
+  // mechanism: state-map configuration reads packaged runtime assets.
   config: ['assets'],
+  // mechanism: mission-path resolution needs configuration and Git repository facts.
   filesystem: ['config', 'git'],
+  // mechanism: Forgejo transport resolves task, configuration, filesystem, Git, and verification facts.
   forgejo: ['backlog', 'config', 'filesystem', 'git', 'verification'],
+  // mechanism: Git worktree and merge helpers use configuration and filesystem mechanisms.
   git: ['config', 'filesystem'],
-  mission: ['agents', 'backlog', 'cli', 'config', 'filesystem', 'sqlite'],
+  // mechanism: configuration, filesystem, and SQLite mission persistence.
+  mission: ['config', 'filesystem', 'sqlite'],
+  // mechanism: post-integrate hook reads product configuration.
   process: ['config'],
-  rebase: ['agents', 'backlog', 'cli', 'config', 'filesystem', 'forgejo', 'git', 'review', 'verification'],
-  review: ['agents', 'assets', 'backlog', 'cli', 'config', 'filesystem', 'forgejo', 'git', 'verification'],
-  sqlite: ['backlog', 'storage'],
+  // mechanism: configuration, filesystem, Forgejo, Git, and verification tooling.
+  rebase: ['config', 'filesystem', 'forgejo', 'git', 'verification'],
+  // mechanism: packaged assets, configuration, filesystem, Forgejo, Git, and verification tooling.
+  review: ['assets', 'config', 'filesystem', 'forgejo', 'git', 'verification'],
+  // mechanism: durable storage path resolution.
+  sqlite: ['storage'],
+  // mechanism: storage owns no sibling mechanism dependency.
   storage: [],
+  // mechanism: backlog, config, filesystem, forgejo, git, storage provide verification facts and durable proofs.
   verification: ['backlog', 'config', 'filesystem', 'forgejo', 'git', 'storage'],
+};
+
+/**
+ * Behaviour routes are application-owned ports, not adapter mechanism rules.
+ * The concrete modules remain temporarily co-located with their legacy command
+ * facades; composition binds the named port implementations. Keeping this
+ * declaration separate prevents behaviour from widening the mechanism design.
+ */
+const adapterPortDependencies: Readonly<Record<string, readonly string[]>> = {
+  agents: ['backlog'], // `src/application/ports/execute-mission.ts`
+  backlog: ['agents', 'review'], // `src/application/ports/cli-workflows.ts`
+  cli: ['agents', 'backlog', 'forgejo', 'rebase', 'review', 'sqlite', 'storage', 'verification'], // `cli-workflows.ts`, `handoff-workflow.ts`, `rebase-workflow.ts`, `review-workflow.ts`
+  mission: ['agents', 'backlog', 'cli'], // `src/application/ports/execute-mission.ts`
+  rebase: ['agents', 'backlog', 'cli', 'review'], // `src/application/ports/rebase-workflow.ts`
+  review: ['agents', 'backlog', 'cli'], // `src/application/ports/review-workflow.ts`
+  sqlite: ['backlog'], // `src/application/ports/mission-store.ts`
 };
 
 export interface DependencyViolation {
@@ -139,7 +171,8 @@ function crossAdapterEdgeIsNamed(source: string, target: string, repoRoot: strin
   const targetPackage = adapterPackageOf(target, repoRoot);
   if (sourcePackage === null || targetPackage === null) {return false;}
   if (sourcePackage === targetPackage) {return true;}
-  return (adapterPackageDependencies[sourcePackage] ?? []).includes(targetPackage);
+  return (adapterPackageDependencies[sourcePackage] ?? []).includes(targetPackage)
+    || (adapterPortDependencies[sourcePackage] ?? []).includes(targetPackage);
 }
 
 export function findDependencyViolations(repoRoot = process.cwd(), allowlist: readonly LegacyDependencyException[] = []): DependencyViolation[] {

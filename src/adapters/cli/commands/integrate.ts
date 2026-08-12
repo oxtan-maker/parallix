@@ -469,7 +469,7 @@ function detectChangedAreas(slug: string, opts: {gitRunner?: Function, rootDir?:
 /** @param {string} rootDir @param {Iterable<string>} paths @param {{gitRunner?: Function}} opts */
 function isIntendedPayloadAtHead(rootDir: string, paths: Iterable<string>, opts: {gitRunner?: Function} = {}) {
   const payloadPaths = [...paths];
-  if (payloadPaths.length === 0) return false;
+  if (payloadPaths.length === 0) { return false; }
   const runner = (opts.gitRunner || git) as Function;
   return runner(['-C', rootDir, 'diff', '--quiet', 'HEAD', '--', ...payloadPaths]).status === 0;
 }

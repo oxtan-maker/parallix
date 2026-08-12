@@ -54,12 +54,13 @@ deliberately omits an `adapters` self-edge, because a blanket permission lets an
 adapter reach any other and is what allows a relabeled monolith to pass on
 directory placement alone.
 
-Every cross-adapter edge must instead match a **named package-level rule** in
-`adapterPackageDependencies` (`src/adapters/architecture/boundary-guards.ts`),
-which lists each package directly beneath `src/adapters/` and the exhaustive set
-of siblings it may import. The table has no wildcard entry and no per-file
-exception, and the guard enumerates `src/adapters/` at run time, so a new
-package cannot be added without declaring its dependencies.
+Every cross-adapter edge must instead match either a **named host-mechanism
+rule** in `adapterPackageDependencies` or an application-owned port route. The
+mechanism table is the enforced design: it contains only the concrete host
+services an adapter may use directly. Workflow behaviour crosses an application
+port, whose concrete implementation composition supplies. Neither route has a
+wildcard or per-file exception, and the guard enumerates `src/adapters/` at run
+time, so a new package cannot add an unnamed dependency.
 
 An adapter that needs behaviour it may not import directly depends on an
 **application-owned port** under `src/application/ports/` instead; composition
@@ -145,10 +146,9 @@ collaborators rather than receiving them. That invariant can only be enforced
 after the modules it would flag are re-homed into `src/application/`, and
 **re-homing is tracked by parent TASK-2332**.
 
-`adapterPackageDependencies` is a **ratchet, not a design**. Its entries were
-transcribed from the edges the tree already had, so it does not certify that
-today's cross-adapter graph is correct; it certifies that no *new* unnamed edge
-can appear without an explicit declaration.
+`adapterPackageDependencies` is the enforced host-mechanism design. It does not
+authorize workflow sequencing: that behaviour must cross an application-owned
+port and be assembled by composition.
 
 New sequencing belongs in application use cases, request translation and
 rendering belong in `src/interfaces/`, and concrete object assembly belongs in
