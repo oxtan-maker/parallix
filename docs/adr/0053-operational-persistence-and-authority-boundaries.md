@@ -76,7 +76,7 @@ named domain type with its invariant or an item on the explicit
 technical-persistence-metadata list
 (`src/application/persistence-domain-map.ts`), enumerated by
 `test/persistence-domain-mapping.test.ts`. The consumers that justify each
-concept are traced with `file:line` citations in
+concept are traced by file-and-symbol anchors in
 `src/application/consumer-domain-requirements.ts`.
 
 Application use cases decide domain transitions. SQLite persists their result;
@@ -130,24 +130,18 @@ interfaces use application ports and never execute lifecycle SQL directly.
 
 ## Cutover
 
-Existing file-backed domains remain compatibility authorities until their
-named migration gate passes. A domain cuts over all reads and writes together.
-There is no steady-state dual-write or fallback writer.
+Each domain cuts over all reads and writes together. There is no steady-state
+dual-write or fallback writer.
 
 `Mission` intake, activation, checkpoint evidence, and NEL recording run through
-checked application use cases over one Mission repository port
-(`src/application/mission-intake-service.ts`,
-`src/application/mission-lifecycle-service.ts`,
-`src/application/mission-checkpoint-service.ts`,
-`src/application/mission-handoff-service.ts`). Production selects exactly one
-implementation of that port — the compatibility store over the task document,
-`CP-N.md` evidence, and `nel-record.json`
-(`src/adapters/backlog/compatibility-mission-store.ts`) — and the SQLite Mission
-adapter is exercised only by isolated test fixtures until the Mission gate
-passes. Accepted external material is carried as one `ExternalTaskRef` value
-(`src/domain/external-task.ts`), and generated evidence is carried as
-`ArtifactReference` locators (`src/domain/net-engineering-lines.ts`), which
-reject inlined content.
+the checked application services `MissionIntakeService`,
+`MissionLifecycleService`, `MissionCheckpointService`, and
+`MissionHandoffService`. Production composition supplies their single
+`SqliteMissionStore` implementation through `createMissionApplicationServices`
+in `src/composition/application-services.ts`. Accepted external material is
+carried as `ExternalTaskRef` in `src/domain/external-task.ts`, and generated
+evidence is carried as `ArtifactReference` locators in
+`src/domain/net-engineering-lines.ts`, which reject inlined content.
 
 `AgentBlock` has passed that gate: `agent_blocklist` is its runtime authority.
 Legacy `agents.local.json` block entries are accepted only by the explicit
@@ -210,7 +204,7 @@ requires revisiting the measurement and session-marker rows in this ADR.
 - `src/domain/board-event.ts`
 - `src/domain/agents.ts`
 - `src/application/domain-ports.ts`
-- `src/adapters/backlog/compatibility-mission-store.ts`
+- `src/adapters/sqlite/mission-store.ts` (`SqliteMissionStore`)
 - `src/application/consumer-domain-requirements.ts`
 - `src/application/persistence-domain-map.ts`
 - `docs/adr/0051-ui-neutral-application-boundary.md`

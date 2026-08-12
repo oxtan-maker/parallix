@@ -9,27 +9,17 @@ TASK-2277, TASK-2278
 ## Context
 
 ADR 0044 establishes the runtime and distribution model for the CLI bundle and
-native executables. This ADR separately defines how the headless CLI, Ink
-terminal UI, and a possible local web board share application behavior without
-pretending that the current `lib/` layout already has those layers.
+native executables. This ADR defines how the headless CLI, Ink terminal UI, and
+a possible local web board share application behavior through the landed
+ports-and-adapters tree.
 
-Today a command module is both an interface adapter and an orchestrator. For
-example, `active` parses a CLI flag, runs preflight, resolves a worktree,
-selects and starts an agent, changes task state, records statistics, starts
-handoff, emits terminal text, and determines the process exit code. Its
-dependencies are mockable, but the interface contract and lifecycle policy
-remain mixed together. A TUI or web server that calls these command handlers would
-inherit argument parsing, terminal rendering, and `process.exit` semantics;
-one that bypasses them would be likely to reimplement lifecycle behavior.
-
-The existing lifecycle behavior is more consequential than the UI shape. When
-`active` starts an execute agent, it records `status=active` and the actual
-implementer only from the launch callback. If the launch subsequently fails or
-returns a non-zero status, it restores the prior status and assignee. The
-authoritative task transition writes on the integration branch and only then
-attempts to synchronize a mission worktree; it deliberately defers that rebase
-while an agent can have uncommitted work. A new interface
-must preserve these invariants, not merely expose a convenient button.
+Command workflows separate interface translation from application policy. For
+example, `ExecuteMissionService` owns execute ordering, partial-failure policy,
+and cancellation boundaries through the ports in
+`src/application/ports/execute-mission.ts`; concrete adapters implement their
+effects without choosing lifecycle transitions. A TUI or web interface sends a
+use-case request instead of inheriting CLI parsing, terminal rendering, or
+process-exit behavior.
 
 Workflow state already has distinct compatibility authorities. Task records are
 currently individual Markdown files in `backlog/tasks/`, `backlog/completed/`,
@@ -144,14 +134,14 @@ unproven behaviour or a separate decision; `✗` = contradicts the criterion.
 | Criterion | Type | What is being tested | Repository evidence |
 |---|---|---|---|
 | C0: Bug-frequency reduction | Hard constraint | Centralize policy and effects behind enforceable, regression-tested seams; continue measuring completed `bug` missions versus completed non-`bug` missions after the change. | Since label observation began, 39 of 129 unique completed missions carry `bug`; ADR 0048 and TASK-1268 identify recurring fail-open and lifecycle clusters. |
-| C1: Single authoritative writer | Hard constraint | No UI cache, event stream, or new store can independently change lifecycle state during migration. | The existing Git-backed task transition remains the sole writer until ADR 0053 changes the authority. |
+| C1: Single authoritative writer | Hard constraint | No UI cache or event stream can independently change lifecycle state. | ADR 0053 defines the persistence authority and application ports are its only workflow access path. |
 | C2: Transition correctness | Hard constraint | Preserve launch → record → rollback ordering and do not represent an incomplete operation as complete. | The execute application service owns this ordering; rollback stays in the launcher. |
 | C3: Automation compatibility | Hard constraint | Preserve CLI text, existing JSON schemas, and exit codes. | The CLI retains command-specific output and exit-code contracts; the report command has JSON output while `active` does not. |
 | C4: Isolated effects | Hard constraint | Unit-test use-case behavior without real Git, Forgejo, filesystem, or agent processes. | The execute workflow uses in-memory mechanism ports, and command families retain injected collaborators. |
 | C5: Interface independence | Benefit | CLI, Ink, and web can invoke the same behavior without parsing terminal output or reproducing lifecycle policy. | This ADR requires one application core for these clients. |
 | C6: Operational truth and recovery | Benefit | Long-running work can report progress, reconnect by re-querying, and distinguish durable evidence from UI liveness. | `active` can launch agents and defer synchronization; ADR 0048 requires fail-closed handling. |
-| C7: Authority evolution and rollback | Benefit | The ADR 0053 store can replace the current task adapter without a dual-write steady state; this boundary change can be removed before cutover without persisted-data migration. | Task storage is already behind `resolveTaskFile`/`transitionTask`; ADR 0053 owns the authority change. |
-| C8: Structural cost and cognitive load | Cost | New abstractions should be limited to behavior with multiple interface/effect boundaries; do not create ceremonial layers around every helper. | Current `lib/` is mixed and only the two selected slices are characterized. |
+| C7: Authority evolution and rollback | Benefit | ADR 0053 defines a single persistence authority without a dual-write steady state. | Application ports isolate the authority from interfaces and concrete mechanisms. |
+| C8: Structural cost and cognitive load | Cost | Abstractions are limited to behavior with multiple interface/effect boundaries; helpers do not need ceremonial layers. | Application ports and composition wiring exist only where a workflow crosses a concrete mechanism. |
 
 | Option | C0 | C1 | C2 | C3 | C4 | C5 | C6 | C7 | C8 | Result |
 |---|---|---|---|---|---|---|---|---|---|---|
@@ -203,25 +193,24 @@ migration requires separate evidence and rollback gates.
 
 ## Decision
 
-Adopt a narrow **Hexagonal Architecture (Ports and Adapters)** boundary for
-newly extracted behavior. The boundary is a target architecture and an
-incremental migration rule; it is not a claim that all existing `lib/` modules
-are already layered, nor authority from this ADR alone to implement a web
-server, Ink UI, SQLite cutover, or a task-record migration.
+Adopt **Hexagonal Architecture (Ports and Adapters)** as the production
+architecture. It defines the current layer responsibilities and does not by
+itself authorize a web transport, a new interface, or a persistence-authority
+change.
 
 This boundary applies Clean Architecture's compatible inward-dependency rule:
 application policy owns the contracts and outer mechanisms depend on them. It
 does not require a distinct entity layer until a selected slice demonstrates
 stable domain policy that is genuinely independent of an application use case.
 
-The first proof slices are deliberately different:
+The landed command workflows are deliberately different:
 
 - the `stats-backfill` report, including its explicit `--apply` mutation
   boundary; and
 - the `active` execute-launch lifecycle, including preflight, launch-before-
   record, rollback, post-launch synchronization, handoff, and exit semantics.
 
-The `active` slice is extracted: `ExecuteMissionService`
+The execute workflow is extracted: `ExecuteMissionService`
 (`src/application/execute-mission-service.ts`) owns the ordering, the
 partial-failure policy, and both cancellation boundaries, and drives the
 mechanism ports declared in `src/application/ports/execute-mission.ts`
@@ -261,13 +250,22 @@ Domain policy contains only rules that can be expressed without interface or
 infrastructure dependencies. Adapters perform effects and translate external
 failures; they do not choose lifecycle transitions or authorization policy.
 
-**Canonical layer homes.** Shared contracts, ports, and services live under
-`src/application/`; concrete mechanisms live under `src/adapters/`; CLI and TUI
-translation live under `src/interfaces/`; object wiring lives under
-`src/composition/`; and `src/entry/px.ts` is the minimal process host. There is
-no secondary runtime or platform tree. `test/dependency-graph.test.ts` enforces
-the complete layer DAG without exceptions, while
-`test/application-boundaries.test.ts` scans the full application tree.
+**Canonical layer homes.** Domain rules and value types live under
+`src/domain/`; shared contracts, ports, and workflow services live under
+`src/application/`; concrete mechanisms live under `src/adapters/`; request
+translation and rendering live under `src/interfaces/`; object wiring lives
+under `src/composition/`; and `src/entry/px.ts` is the minimal process host.
+There is no secondary runtime or platform tree. The `layerRoots` and
+`allowedDependencyGraph` rules in `src/adapters/architecture/boundary-guards.ts`
+enforce the complete layer DAG.
+
+**Adapter mechanisms and workflows.** An adapter may use a named concrete host
+mechanism. That permission does not grant ownership of a workflow that
+sequences integrations. Cross-adapter collaboration for behavior must route
+through an application-owned port, whose concrete implementation composition
+supplies. Request translation is owned by `src/interfaces/`; it validates and
+maps interface input to an application request and renders the resulting
+outcome without taking lifecycle authority.
 
 ### Relationship to controller/service/repository
 
@@ -294,17 +292,13 @@ Git/worktree state, preflight, and handoff—dependencies that are not honest
 repositories. If a later web board is a conventional Spring-style backend,
 its controllers may simply be inbound adapters over these same use cases.
 
-For an incremental extraction, existing policy stays where it is until a
-named use case moves it with characterization tests — as the `active` workflow
-did, behind `test/execute-mission-characterization.test.ts`. Do not manufacture a
-"domain" wrapper around every existing helper. The application layer may call
-a narrow adapter over established behavior while the policy remains unproven;
-that adapter is a migration seam, not evidence that the legacy module is pure.
+Do not manufacture a "domain" wrapper around every helper. The application
+layer may call a narrow adapter over established behavior where that keeps a
+policy boundary honest.
 
 Only a composition root may construct a complete graph of concrete adapters.
-The existing command modules may retain small, injected compatibility seams
-during migration, but application services and their unit tests receive port
-implementations explicitly. Application/domain modules must not import Ink,
+Application services and their unit tests receive port implementations
+explicitly. Application/domain modules must not import Ink,
 React, HTTP frameworks, SQLite, `node:fs`, Git runners, Forgejo clients,
 `node:child_process`, or terminal-rendering modules except as port type
 definitions. An automated import-boundary test enforces this rule.
@@ -438,9 +432,8 @@ steady state.
 - Commands require translation code at both edges: CLI parsing/rendering and
   application request/result mapping. This is intentional compatibility work,
   not incidental boilerplate.
-- The first application modules coexist with legacy orchestration. Boundary
-  enforcement must be scoped to new domain/application paths until migration
-  expands; applying it to all of `lib/` now would be a misleading claim.
+- Boundary enforcement applies to the canonical production roots and their
+  permitted dependency direction.
 - Progress is deliberately weaker than durable state. Interfaces must handle
   reconnect, stale data, and incomplete operations rather than assuming a
   real-time event feed is exact.
