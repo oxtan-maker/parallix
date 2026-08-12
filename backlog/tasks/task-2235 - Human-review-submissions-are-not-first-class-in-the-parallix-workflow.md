@@ -2,7 +2,7 @@
 id: TASK-2235
 title: Human review submissions are not first-class in the parallix workflow
 status: backlog
-assignee: []
+assignee: [codex]
 created_date: '2026-07-12 09:40'
 labels:
   - ai_sdlc
