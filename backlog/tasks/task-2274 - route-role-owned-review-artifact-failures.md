@@ -1,8 +1,8 @@
 ---
 id: TASK-2274
 title: route role-owned review artifact failures to their producing agent
-status: review
-assignee: [codex]
+status: active
+assignee: [custom]
 created_date: '2026-07-17 00:00'
 labels: [ai_sdlc]
 dependencies: []
