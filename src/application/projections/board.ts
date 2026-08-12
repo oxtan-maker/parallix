@@ -223,6 +223,8 @@ export interface MetricsProvenance {
 export function attentionReason(card: MissionCard): AttentionReason {
   if (card.blockingReason) { return { kind: 'blocking', detail: card.blockingReason }; }
   if (card.gate === 'failed') { return { kind: 'gate-failed', detail: `Gate ${card.gate}` }; }
+  // An agent is already taking this lane's turn — see `agentIsWorking`.
+  if (agentIsWorking(card)) { return { kind: 'none' }; }
   if (card.lane === 'review') { return { kind: 'review-lane', detail: 'Awaiting review decision' }; }
   if (card.lane === 'integration') { return { kind: 'integrate-lane', detail: 'Awaiting integration' }; }
   return { kind: 'none' };
@@ -338,5 +340,5 @@ export function buildBoardProjection(
 }
 
 // Re-export for convenience
-import { attentionRank } from './mission-board.js';
+import { agentIsWorking, attentionRank } from './mission-board.js';
 export { attentionRank };

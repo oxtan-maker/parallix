@@ -1,6 +1,7 @@
 import type { AgentFamily } from '../../domain/agents.js';
 import { isClosedMission, type Mission, type MissionId, type MissionLabel, type MissionStatus } from '../../domain/mission.js';
 import type { RepositoryId } from '../../domain/repository.js';
+import type { RunningAgentSession } from './agent-status.js';
 import {
   currentReviewRound,
   sameReviewedRevision,
@@ -29,6 +30,12 @@ export interface LiveMissionWork {
 
 export interface MissionOperationalFacts {
   readonly latestGate: 'passed' | 'failed' | 'running' | 'unknown';
+  /**
+   * The live agent session working this mission right now, or `null` when none
+   * was observed. Absent means liveness was not observed at all, which is not
+   * the same as "nobody is working" and must not suppress attention.
+   */
+  readonly liveSession?: RunningAgentSession | null;
   readonly reviewApproval: {
     readonly subject: ReviewedRevision;
     readonly approvedAt: string | null;
@@ -82,6 +89,13 @@ export interface MissionCard {
    */
   readonly reviewHistory: readonly ReviewRoundSummary[];
   readonly currentWork: LiveMissionWork | null;
+  /**
+   * The live agent session running this mission's current command, or `null`
+   * when none is known — either nothing is running, or liveness could not be
+   * observed at all. Only a non-null session proves an agent is working, so
+   * only a non-null session may keep the mission out of the human lane.
+   */
+  readonly liveSession?: RunningAgentSession | null;
   readonly blockingReason: string | null;
   readonly flags: readonly string[];
   readonly commands: readonly CommandAvailability[];
@@ -225,15 +239,30 @@ export function projectMissionCard(mission: Mission, facts: MissionOperationalFa
     reviewDisposition: currentRound?.disposition ?? null,
     reviewHistory: projectReviewHistory(mission.review),
     currentWork: facts.currentWork,
+    liveSession: facts.liveSession ?? null,
     blockingReason: facts.blockingReason,
     flags: facts.flags,
     commands: availableBoardCommands(mission, facts),
   };
 }
 
+/**
+ * Whether an agent is running this mission's work right now.
+ *
+ * A lane says whose turn it is in the lifecycle; a live session says the turn
+ * is already being taken. `px review <slug>` running for a review-lane mission
+ * is the agent doing the review, so the board must not also ask a human for
+ * the same decision. Blocking reasons and failed gates outrank this: they are
+ * true whether or not an agent is at the keyboard.
+ */
+export function agentIsWorking(card: MissionCard): boolean {
+  return (card.liveSession ?? null) !== null;
+}
+
 export function attentionRank(card: MissionCard): number {
   if (card.blockingReason) { return 0; }
   if (card.gate === 'failed') { return 1; }
+  if (agentIsWorking(card)) { return 4; }
   if (card.lane === 'review') { return 2; }
   if (card.lane === 'integration') { return 3; }
   return 4;

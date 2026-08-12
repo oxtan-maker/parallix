@@ -29,6 +29,9 @@ test('qwen quota-exceeded: timed block with reason (parseResetTime tried first)'
     status: 1,
     signal: null,
     error: null,
+    // Pinned before the transcript's reset time: without it the fixture date
+    // falls into the past once the wall clock passes it, and a parsed reset
+    // that already elapsed is indistinguishable from having none.
     now: new Date('2026-08-12T09:00:00Z'),
   });
 
