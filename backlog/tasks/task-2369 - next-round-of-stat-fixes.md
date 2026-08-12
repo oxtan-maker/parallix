@@ -2,7 +2,7 @@
 id: TASK-2369
 title: next round of stat fixes
 status: backlog
-assignee: []
+assignee: [custom]
 created_date: '2026-08-12 14:48'
 labels: []
 dependencies: []
