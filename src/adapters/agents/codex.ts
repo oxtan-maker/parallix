@@ -59,6 +59,7 @@ function hasLiveTty() {
 
 function buildCodexDraftInvocation({ prompt, worktree, interactive = hasLiveTty(), env = {}, resume = false, sessionId = null, model = null }: CodexInvocationOptions) {
   const configArgs = headlessCodexOverrides(worktree);
+  const baseEnv = { ...process.env };
   if (resume) {
     const args = [...configArgs, 'exec', 'resume'];
     if (sessionId) {
@@ -74,7 +75,7 @@ function buildCodexDraftInvocation({ prompt, worktree, interactive = hasLiveTty(
       options: {
         stdio: 'inherit',
         cwd: worktree,
-        env: { ...process.env, ...env, CODEX_HOME: codexStateRoot(worktree) }
+        env: { ...baseEnv, ...env, ...({ HOME: baseEnv.HOME } as NodeJS.ProcessEnv), CODEX_HOME: codexStateRoot(worktree) }
       }
     };
   }
@@ -84,15 +85,13 @@ function buildCodexDraftInvocation({ prompt, worktree, interactive = hasLiveTty(
     ? [...configArgs, '--full-auto', ...modelArgs, '--cd', worktree, prompt]
     : [...configArgs, 'exec', '--sandbox', 'danger-full-access', ...modelArgs, '--cd', worktree, prompt];
 
-  const baseEnv = { ...process.env };
-
   return {
     command: resolveCodexCommand(),
     args,
     options: {
       stdio: 'inherit',
       cwd: worktree,
-      env: { ...baseEnv, ...env, ...(!interactive ? { CODEX_HOME: codexStateRoot(worktree) } : {}) }
+      env: { ...baseEnv, ...env, ...({ HOME: baseEnv.HOME } as NodeJS.ProcessEnv), ...(!interactive ? { CODEX_HOME: codexStateRoot(worktree) } : {}) }
     }
   };
 }
@@ -180,7 +179,7 @@ function tomlString(value: any) {
 }
 
 function originatingCodexStateRoot(env: {[key: string]: string} = {}) {
-  return env.CODEX_HOME || process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
+  return env.CODEX_HOME || process.env.CODEX_HOME || path.join(process.env.HOME || os.homedir(), '.codex');
 }
 
 function replaceWithLink(source: string, target: string) {

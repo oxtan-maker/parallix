@@ -1,7 +1,7 @@
 ---
 id: TASK-2266
 title: codex isolation is broken
-status: ready-for-integration
+status: done
 assignee: [custom]
 created_date: '2026-07-10 19:17'
 updated_date: '2026-07-10 19:17'
