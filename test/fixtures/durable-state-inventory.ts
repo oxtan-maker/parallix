@@ -317,17 +317,6 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     cutoverTask: null,
   },
   {
-    // The ONLY remaining CSV boundary: `px stats import-legacy --csv-file`
-    // and `px stats <file>` analysis. Explicit, read-only, one-way.
-    id: 'measurement-legacy-csv-import',
-    concept: 'AgentRunMeasurement',
-    pathType: 'compatibility',
-    fileLocation: 'src/adapters/cli/commands/stats.ts',
-    operation: 'read',
-    classification: 'explicit-one-way-legacy-input',
-    cutoverTask: null,
-  },
-  {
     id: 'measurement-sqlite-usage-repo',
     concept: 'AgentRunMeasurement',
     pathType: 'compatibility',
