@@ -1,6 +1,7 @@
 import childProcess from 'node:child_process';
 import type { SpawnOptions, ChildProcess } from 'node:child_process';
 import path from 'node:path';
+import { wrapWithBubblewrap } from './bubblewrap.js';
 
 export const DEFAULT_MAX_TAIL_BYTES = 64 * 1024;
 
@@ -102,10 +103,13 @@ export function spawnAndTee(command: string, args: string[], options: SpawnTeeOp
       ...(spawnOptions.env || {}),
       PWD: resolvedCwd
     };
+    // Guard construction errors deliberately reject this launch. An available
+    // but broken Bubblewrap guard must never retry the child unsandboxed.
+    const launch = wrapWithBubblewrap(command, args, resolvedCwd);
 
     let child: ChildProcess;
     try {
-      child = childProcess.spawn(command, args, {
+      child = childProcess.spawn(launch.command, launch.args, {
         ...spawnOptions,
         env,
         stdio: ['inherit', 'pipe', 'pipe']

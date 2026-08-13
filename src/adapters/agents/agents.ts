@@ -32,6 +32,8 @@ import {
   resolveCustomLauncher
 } from './launcher-selection.js';
 import { resolveCustomRunner } from '../config/product-config.js';
+import { resolveSandboxProfile, withSandboxProfile } from '../process/bubblewrap.js';
+import { resolveArtifactDir } from '../review/review-adapter.js';
 import { tryAcquireCustomCapacity } from './custom-capacity.js';
 import type { SessionMarkerPort } from '../../application/domain-ports.js';
 import type { AgentFamily } from '../../domain/agents.js';
@@ -462,7 +464,12 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
     let invocation;
     let result;
     try {
-      const launchResult = launcher({
+      // This is the sole production policy decision. The AsyncLocalStorage
+      // context reaches the shared process seam through every family launcher.
+      const sandboxProfile = worktree
+        ? resolveSandboxProfile(step, worktree, step === 'review' ? resolveArtifactDir(worktree) : null)
+        : null;
+      const launchResult = withSandboxProfile(sandboxProfile, () => launcher({
         prompt: actualPrompt,
         worktree,
         env: agentEnv,
@@ -488,7 +495,7 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
             }
           }
         } : {}
-      });
+      }));
       const { invocation: launchedInvocation, resultPromise } = launchResult;
       invocation = launchedInvocation;
       if (invocation) {
