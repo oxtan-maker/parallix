@@ -114,6 +114,7 @@ export async function startReviewLoop(slug: string, opts: {
   hasNewCommittedChangeFn?: ((_branch: string, _rootDir: string) => boolean) | null;
   missionStore?: MissionStore | null;
   agentSelectionSnapshotPort?: AgentSelectionSnapshotPort | null;
+  onAgentLaunched?: (_agent: string, _phase: 'review' | 'review-response') => Promise<void> | void;
 } = {}): Promise<void> {
   let {
     implementer,
@@ -184,6 +185,7 @@ export async function startReviewLoop(slug: string, opts: {
     hasNewCommittedChangeFn = null,
     missionStore = null,
     agentSelectionSnapshotPort = null,
+    onAgentLaunched = undefined,
   } = opts;
   const performHandoffFn = opts.performHandoffFn || (await getHandoff()).performHandoff;
   let prNumber: number | null = null;
@@ -542,7 +544,7 @@ export async function startReviewLoop(slug: string, opts: {
               reviewerLaunchResult = await startAgentFn('review', {
                 agent: reviewer,
                 prompt: (actualReviewer: string) => (buildCompactReviewPromptFn as any)({ reviewer: reviewer!, branch, implementer: implementer!, focus, attempt, repoRoot: worktree, missionPath: effectiveMissionPath || undefined, actualReviewer, reviewBaseline }),
-                worktree, slug, role: 'reviewer', exclude: [implementer]
+                worktree, slug, role: 'reviewer', exclude: [implementer], onLaunch: ({ agent }: { agent: string }) => onAgentLaunched?.(agent, 'review')
               });
             } catch (err: unknown) {
               recordAgentSelectionOutcome(log, 'launch-failed', { agent: reviewer, step: 'review', error: (err as Error).message });
@@ -626,7 +628,7 @@ export async function startReviewLoop(slug: string, opts: {
               relaunchResult = await startAgentFn('review', {
                 agent: reviewer,
                 prompt: (actualReviewer: string) => (buildCompactReviewPromptFn as any)({ reviewer: reviewer!, branch, implementer: implementer!, focus, attempt, repoRoot: worktree, missionPath: effectiveMissionPath || undefined, actualReviewer, reviewBaseline }) + '\n\n' + recoveryPrompt,
-                worktree, slug, role: 'reviewer', exclude: [implementer]
+                worktree, slug, role: 'reviewer', exclude: [implementer], onLaunch: ({ agent }: { agent: string }) => onAgentLaunched?.(agent, 'review')
               });
             } catch (err: unknown) {
               recordAgentSelectionOutcome(log, 'launch-failed', { agent: reviewer, step: 'review', retry: true, error: (err as Error).message });
@@ -756,7 +758,7 @@ export async function startReviewLoop(slug: string, opts: {
           implementerLaunchResult = await startAgentFn('act-on-review', {
             agent: implementer,
             prompt: (actualImplementer: string) => (buildCompactActOnReviewPromptFn as any)({ implementer: implementer!, branch, attempt, reviewOutcome: reviewState, repoRoot: worktree, missionPath: effectiveMissionPath || undefined, actualImplementer, reviewBaseline }),
-            worktree, slug, role: 'implementer', exclude: [reviewer]
+            worktree, slug, role: 'implementer', exclude: [reviewer], onLaunch: ({ agent }: { agent: string }) => onAgentLaunched?.(agent, 'review-response')
           });
         } catch (err: unknown) {
           error(fmt.status('FAIL', `Could not launch implementer agent (${implementer}): ${(err as Error).message}`));
@@ -813,7 +815,7 @@ export async function startReviewLoop(slug: string, opts: {
             implRelaunchResult = await startAgentFn('act-on-review', {
               agent: implementer,
               prompt: (actualImplementer: string) => (buildCompactActOnReviewPromptFn as any)({ implementer: implementer!, branch, attempt, reviewOutcome: reviewState, repoRoot: worktree, missionPath: effectiveMissionPath || undefined, actualImplementer, reviewBaseline }) + '\n\n' + implRecoveryPrompt,
-              worktree, slug, role: 'implementer', exclude: [reviewer]
+              worktree, slug, role: 'implementer', exclude: [reviewer], onLaunch: ({ agent }: { agent: string }) => onAgentLaunched?.(agent, 'review-response')
             });
           } catch (err: unknown) {
             error(fmt.status('FAIL', `Could not relaunch implementer agent (${implementer}) for artifact recovery: ${(err as Error).message}`));
@@ -882,7 +884,7 @@ export async function startReviewLoop(slug: string, opts: {
             relaunchResult = await startAgentFn('act-on-review', {
               agent: implementer,
               prompt: (actualImplementer: string) => (buildCompactActOnReviewPromptFn as any)({ implementer: implementer!, branch, attempt, reviewOutcome: reviewState, repoRoot: worktree, missionPath: effectiveMissionPath || undefined, actualImplementer, reviewBaseline }) + '\n\n' + recoveryPrompt,
-              worktree, slug, role: 'implementer', exclude: [reviewer]
+              worktree, slug, role: 'implementer', exclude: [reviewer], onLaunch: ({ agent }: { agent: string }) => onAgentLaunched?.(agent, 'review-response')
             });
           } catch (err: unknown) {
             error(fmt.status('FAIL', `Could not relaunch implementer agent (${implementer}): ${(err as Error).message}`));

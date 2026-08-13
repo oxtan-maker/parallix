@@ -674,6 +674,15 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     cutoverTask: null,
   },
   {
+    id: 'config-read-setup-review-config',
+    concept: 'Configuration',
+    pathType: 'default',
+    fileLocation: 'src/adapters/review/setup-review-config.ts',
+    operation: 'read',
+    classification: 'configuration-or-secret',
+    cutoverTask: null,
+  },
+  {
     id: 'config-read-ui-command',
     concept: 'Configuration',
     pathType: 'default',

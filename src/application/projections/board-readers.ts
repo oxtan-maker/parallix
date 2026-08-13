@@ -13,6 +13,15 @@ import {
 } from './mission-board.js';
 import type { MetricsReadAdapter } from './metrics-read-adapter.js';
 import { countUnattributedSessions, projectAgentAvailability, type RunningAgentSession } from './agent-status.js';
+import {
+  CURRENT_WORK_TTL_MS,
+  reconcileCurrentWork,
+  type CurrentWorkFacts,
+  type CurrentWorkReadAdapter,
+  type ProcessLivenessProbe,
+} from './current-work.js';
+
+export type { CurrentWorkReadAdapter, ProcessLivenessProbe } from './current-work.js';
 
 // ---------------------------------------------------------------------------
 // Read adapters — each adapter reads from one authority
@@ -84,6 +93,21 @@ export interface BoardProjectionOptions {
   metrics?: BoardMetrics;
   /** Derives metrics from board_lane_events + usage_statistics. */
   metricsAdapter?: MetricsReadAdapter;
+  /**
+   * The current-work authority. Omitted means no operation publishes to this
+   * board, so every mission's current work is simply unrecorded — which the
+   * reconciler reports as absent, never as "known idle".
+   */
+  currentWork?: CurrentWorkReadAdapter;
+  /**
+   * Bounded recovery evidence for a published `running` fact. Omitting it
+   * makes unverifiable facts age out on the freshness window alone.
+   */
+  isProcessAlive?: ProcessLivenessProbe;
+  /** Freshness window for an unverifiable running fact. */
+  currentWorkTtlMs?: number;
+  /** Clock seam; defaults to the wall clock. */
+  now?: () => number;
 }
 
 /**
@@ -103,18 +127,29 @@ export class BoardProjectionBuilder {
 
   /** Build the full BoardProjection from all authority adapters. */
   async build(): Promise<BoardProjection> {
-    const [repositoryId, missions, operationLog, agentAvailability, runningSessions] = await Promise.all([
+    const [repositoryId, missions, operationLog, agentAvailability, runningSessions, currentWorkEvents] = await Promise.all([
       this._git.loadRepositoryId(),
       this._missions.loadAllMissions(),
       this._operationLog.loadOperationLog(),
       this._agents.loadAgentAvailability(),
       this._agents.loadRunningSessions?.() ?? Promise.resolve(null),
+      this._options?.currentWork?.loadCurrentWork() ?? Promise.resolve([]),
     ]);
 
     const sourceFacts = this._missions.getSourceFacts();
 
-    // Liveness is per mission, not only a per-family count: a mission whose
-    // agent is running right now is not waiting for a human.
+    // The authoritative answer to "what is being worked on right now?". It is
+    // reconciled once per build so every card sees the same clock reading.
+    const currentWorkByMission = reconcileCurrentWork(currentWorkEvents, {
+      nowMs: (this._options?.now ?? Date.now)(),
+      ttlMs: this._options?.currentWorkTtlMs ?? CURRENT_WORK_TTL_MS,
+      isProcessAlive: this._options?.isProcessAlive,
+    });
+    const noCurrentWork: CurrentWorkFacts = { currentWork: null, blockingReason: null };
+
+    // Bounded recovery only. The published current-work fact above is the
+    // board's authority for who is working; this process scan is consulted by
+    // `agentIsWorking` solely for missions that recorded no fact at all.
     const sessionByMission: Map<MissionId, RunningAgentSession> = new Map(
       (runningSessions ?? []).map((session) => [session.missionId, session]),
     );
@@ -127,12 +162,13 @@ export class BoardProjectionBuilder {
         this._gates.loadGateStatus(mission.id),
       ]);
 
+      const work = currentWorkByMission.get(mission.id) ?? noCurrentWork;
       const facts: MissionOperationalFacts = {
         latestGate: gateStatus,
         reviewApproval,
-        currentWork: null,
+        currentWork: work.currentWork,
         liveSession: sessionByMission.get(mission.id) ?? null,
-        blockingReason: null,
+        blockingReason: work.blockingReason,
         flags: [],
       };
 

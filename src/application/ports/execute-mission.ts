@@ -65,6 +65,15 @@ export interface AgentLaunchRequest {
   readonly taskResolution: TaskFileResolution;
   /** Operator-pinned implementer family, or `null` to let selection choose. */
   readonly preselectedAgent: string | null;
+  /**
+   * Called once per family the launcher actually starts, including every
+   * automatic failover after a usage block.
+   *
+   * The adapter reports the mechanism fact; the use case decides what it means
+   * for the board. This is how a `claude` → `qwen` handoff stays one mission's
+   * current work instead of becoming a lifecycle event or a new run entity.
+   */
+  readonly onAgentChanged?: (_agent: string) => void;
 }
 
 /**

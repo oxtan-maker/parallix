@@ -9,7 +9,9 @@ export interface ConfirmationDialogProps {
 
 /** Exact command text is informational; Enter is still required to dispatch. */
 export function applicationCommandText(kind: BoardCommandKind, missionId: string): string {
-  return kind === 'active:execute' ? `px active ${missionId}` : `px ${kind} ${missionId}`;
+  if (kind === 'review:submit') { return `px review ${missionId}`; }
+  if (kind === 'integrate:merge') { return `px integrate ${missionId}`; }
+  return `px active ${missionId}`;
 }
 
 export function ConfirmationDialog({ kind, missionId }: ConfirmationDialogProps): React.ReactElement {

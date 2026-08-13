@@ -2,6 +2,7 @@ import React from 'react';
 import { render, renderToString } from 'ink';
 import type { TuiCapabilities } from '../../application/tui-capabilities.js';
 import { BoardShell } from './shell.js';
+import { subscribeToBoardProjection } from '../../application/projections/board-subscription.js';
 
 /**
  * Render the static Ink TUI shell.
@@ -25,7 +26,15 @@ export async function runUiCommand(capabilities: TuiCapabilities, _args: string[
   }
 
   const { waitUntilExit } = render(
-    React.createElement(BoardShell, { projection, commandControllerFactory: capabilities.commandControllerFactory, refreshProjection }),
+    React.createElement(BoardShell, {
+      projection,
+      commandControllerFactory: capabilities.commandControllerFactory,
+      refreshProjection,
+      subscribeProjection: (onChange) => subscribeToBoardProjection(
+        () => capabilities.boardProjection.build(),
+        onChange,
+      ),
+    }),
     {
       exitOnCtrlC: true,
     },

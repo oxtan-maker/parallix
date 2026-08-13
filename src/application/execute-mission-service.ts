@@ -10,6 +10,13 @@ import type {
   TaskFileResolution,
 } from './ports/execute-mission.js';
 import type { ProgressPort } from './ports.js';
+import {
+  currentWorkPublication,
+  NO_CURRENT_WORK_PORT,
+  type CurrentWorkPhase,
+  type CurrentWorkPort,
+  type CurrentWorkPublication,
+} from './recording/current-work-recorder.js';
 
 export interface ExecuteMissionRequest {
   readonly operationId: string;
@@ -58,6 +65,7 @@ export class ExecuteMissionService {
   constructor(
     private readonly _ports: ExecuteMissionPorts,
     private readonly _progress?: ProgressPort,
+    private readonly _currentWork: CurrentWorkPort = NO_CURRENT_WORK_PORT,
   ) {}
 
   async execute(request: ExecuteMissionRequest): Promise<ApplicationOutcome<ExecuteMissionResult>> {
@@ -69,6 +77,7 @@ export class ExecuteMissionService {
     if (typeof prepared === 'string') {return rejected('validation', prepared);}
 
     this.emit(request, 1, 'launch', 'launching execute agent');
+    await this.publishWork(request, 'execute', 'launching execute agent', request.agent ?? null);
     try {
       const plan = await this._ports.agentExecution.prepare({
         slug: request.slug,
@@ -83,10 +92,12 @@ export class ExecuteMissionService {
       evidence.push(await this.recordLaunch(request.slug, prepared, launch));
 
       if (request.cancellation?.requested) {
+        await this.endWork(request);
         return failure('cancelled', 'cancelled after durable launch; re-query task state', evidence);
       }
 
       this.emit(request, 3, 'handoff', 'starting handoff', launch.agent);
+      await this.publishWork(request, 'handoff', 'handing off and reviewing', launch.agent);
       const handedOff = await this._ports.handoffReview.runHandoffAndReview({
         slug: request.slug,
         worktree: prepared.worktree,
@@ -95,9 +106,15 @@ export class ExecuteMissionService {
       });
       if (!handedOff) {throw new Error('legacy handoff failed');}
 
+      await this.endWork(request);
       return { status: 'completed', value: { agent: launch.agent }, durableEvidence: evidence };
     } catch (error) {
-      return failure('execution', error instanceof Error ? error.message : 'active execution failed');
+      const message = error instanceof Error ? error.message : 'active execution failed';
+      // The in-call retry/failover loop already tried every eligible family. If
+      // it still could not finish, the run is not "running slowly" — the board
+      // must stop showing it as working and say why an operator is needed.
+      await this.blockWork(request, message);
+      return failure('execution', message);
     }
   }
 
@@ -132,6 +149,12 @@ export class ExecuteMissionService {
       plan,
       taskResolution: prepared.taskResolution,
       preselectedAgent: request.agent || null,
+      // A usage block reroutes the same operation to the next eligible family.
+      // Republishing here keeps that one mission WORKING with an updated agent
+      // instead of producing an attention item for an autonomous handoff.
+      onAgentChanged: (agent) => {
+        void this.publishWork(request, 'execute', `running execute agent (${agent})`, agent);
+      },
     });
     if (launch.errored) {
       throw new Error(`Could not start execute agent (${launch.agent}): ${launch.errorMessage}`);
@@ -202,5 +225,50 @@ export class ExecuteMissionService {
 
   private emit(request: ExecuteMissionRequest, sequence: number, phase: string, message: string, agent?: string) {
     this._progress?.({ operationId: request.operationId, sequence, phase, message, timestamp: new Date().toISOString(), agent });
+  }
+
+  // -----------------------------------------------------------------------
+  // Current work — the board's mission-scoped "who is working on this now?"
+  //
+  // Publication is best-effort in both directions: a recorder outage must not
+  // fail a launch, and a launch failure must not be hidden behind a recorder
+  // error. The reader ages an unterminated fact out on its own.
+  // -----------------------------------------------------------------------
+
+  private publication(request: ExecuteMissionRequest, phase: CurrentWorkPhase, summary: string, agent: string | null): CurrentWorkPublication | null {
+    return currentWorkPublication({
+      slug: request.slug,
+      operationId: request.operationId,
+      phase,
+      summary,
+      agent,
+    });
+  }
+
+  private async publishWork(request: ExecuteMissionRequest, phase: CurrentWorkPhase, summary: string, agent: string | null): Promise<void> {
+    const publication = this.publication(request, phase, summary, agent);
+    if (publication) { await bestEffort(() => this._currentWork.running(publication)); }
+  }
+
+  private async endWork(request: ExecuteMissionRequest): Promise<void> {
+    const publication = this.publication(request, 'execute', 'execute run finished', null);
+    if (publication) { await bestEffort(() => this._currentWork.ended(publication)); }
+  }
+
+  private async blockWork(request: ExecuteMissionRequest, reason: string): Promise<void> {
+    const publication = this.publication(request, 'execute', 'execute run cannot continue', null);
+    if (publication) { await bestEffort(() => this._currentWork.blocked(publication, reason)); }
+  }
+}
+
+/**
+ * Publication is observability, not the operation. A recorder outage must not
+ * turn a completed launch into a failed one.
+ */
+async function bestEffort(publish: () => Promise<void>): Promise<void> {
+  try {
+    await publish();
+  } catch (error) {
+    void error;
   }
 }

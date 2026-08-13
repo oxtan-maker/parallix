@@ -19,13 +19,44 @@ import {
 export type BoardLane = MissionStatus;
 export type BoardCommand = 'active' | 'handoff' | 'review' | 'integrate';
 
-/** Ephemeral operation progress for a live board. It is never mission lifecycle state. */
+/**
+ * How much the board can trust a current-work fact.
+ *
+ * Declared beside the fact it qualifies so the read model has no import cycle
+ * with the reconciler that derives it.
+ *
+ * - `live` — the publishing process was observed running.
+ * - `unverified` — liveness could not be observed, and the fact is still
+ *   inside its freshness window. Still counts as working: a failed
+ *   observation is not evidence that nobody is running.
+ * - `stale` — an unverifiable fact aged past its window. Stops counting as
+ *   working, which bounds what an abnormally terminated process leaves behind.
+ */
+export type CurrentWorkFreshness = 'live' | 'unverified' | 'stale';
+
+/**
+ * Ephemeral operation progress for a live board. It is never mission lifecycle
+ * state.
+ *
+ * This is the mission-scoped answer to "what is being worked on right now?".
+ * It carries everything a UI client needs to say so without going back to a
+ * backing store: which operation and phase, one operator-facing line, the
+ * family doing the work when one applies, and how much the board can trust the
+ * fact. Freshness is derived by `reconcileCurrentWork`
+ * (`src/application/projections/current-work.ts`), never by a UI component.
+ */
 export interface LiveMissionWork {
   readonly operationId: string;
   readonly phase: string;
   readonly summary: string;
   readonly agent: AgentFamily | null;
   readonly updatedAt: string;
+  /**
+   * `live` when the publishing process was observed running, `unverified` when
+   * liveness could not be checked, `stale` when an unverifiable fact aged past
+   * its window. Only `stale` stops the mission from counting as working.
+   */
+  readonly freshness: CurrentWorkFreshness;
 }
 
 export interface MissionOperationalFacts {
@@ -249,13 +280,20 @@ export function projectMissionCard(mission: Mission, facts: MissionOperationalFa
 /**
  * Whether an agent is running this mission's work right now.
  *
- * A lane says whose turn it is in the lifecycle; a live session says the turn
- * is already being taken. `px review <slug>` running for a review-lane mission
- * is the agent doing the review, so the board must not also ask a human for
- * the same decision. Blocking reasons and failed gates outrank this: they are
- * true whether or not an agent is at the keyboard.
+ * A lane says whose turn it is in the lifecycle; current work says the turn is
+ * already being taken. `px review <slug>` running for a review-lane mission is
+ * the agent doing the review, so the board must not also ask a human for the
+ * same decision. Blocking reasons and failed gates outrank this: they are true
+ * whether or not an agent is at the keyboard.
+ *
+ * The authority is `currentWork`, published by the operation itself. The
+ * OS-process scan behind `liveSession` is consulted only when no current-work
+ * fact was recorded at all — bounded recovery for a mission worked by an older
+ * `px` build or by a command that publishes nothing. A recorded fact always
+ * wins, including when it says the work is stale.
  */
 export function agentIsWorking(card: MissionCard): boolean {
+  if (card.currentWork) { return card.currentWork.freshness !== 'stale'; }
   return (card.liveSession ?? null) !== null;
 }
 

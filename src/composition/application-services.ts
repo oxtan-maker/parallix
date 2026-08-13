@@ -10,6 +10,7 @@ import { MissionIntegrationService } from '../application/mission-integration-se
 import { KnownRepositoryService } from '../application/services/known-repository-service.js';
 import { UIPreferencesService } from '../application/services/ui-preferences-service.js';
 import { OperationalHistoryService } from '../application/services/operational-history-service.js';
+import { CurrentWorkRecorder, NO_CURRENT_WORK_PORT, type CurrentWorkPort } from '../application/recording/current-work-recorder.js';
 import { SqliteMissionStore } from '../adapters/sqlite/mission-store.js';
 import { MissionCompatibilityImporter } from '../adapters/sqlite/mission-importer.js';
 import { SqliteSessionMarkerAdapter } from '../adapters/sqlite/session-marker-adapter.js';
@@ -117,6 +118,12 @@ export interface ProductionApplicationServices {
    * observations, UI preferences, and operational history.
    */
   readonly operatorServices: OperatorApplicationServices | null;
+  /**
+   * Publishes the mission-scoped current-work fact the board reads. Falls back
+   * to the no-op port when operator-local state is unavailable, so a command
+   * still runs — the board simply reports that mission's work as unrecorded.
+   */
+  readonly currentWork: CurrentWorkPort;
 }
 
 /**
@@ -220,6 +227,11 @@ export async function createProductionApplicationServices(
     operatorBlocklist: operatorState.blocklist,
     sessionMarkerPort,
   }, executeRuntime);
+  // One publisher per process. The recorder appends to the same operational
+  // history the board reads, so there is no second current-work authority.
+  const currentWork: CurrentWorkPort = operatorState.repositories
+    ? new CurrentWorkRecorder(operatorState.repositories.operationalHistory, { processId: process.pid })
+    : NO_CURRENT_WORK_PORT;
   const presentationCapabilities = operatorState.repositories
     ? (await import('./production-capabilities.js')).composeProductionCapabilities(
       rootDir,
@@ -230,7 +242,8 @@ export async function createProductionApplicationServices(
     )
     : null;
   return {
-    executeMission: new ExecuteMissionService(executePorts, activeProgress),
+    currentWork,
+    executeMission: new ExecuteMissionService(executePorts, activeProgress, currentWork),
     executePorts,
     presentationCapabilities,
     statsBackfill: new StatsBackfillService(new LegacyStatsBackfillAdapter(rootDir)),

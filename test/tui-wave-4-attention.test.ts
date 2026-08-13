@@ -719,3 +719,24 @@ test('attention-items: exact command text matches px <command> <mission-id> patt
     assert.equal(actual, expected, `command for ${reasonKind} must be "${expected}"`);
   }
 });
+
+test('attention action display and its typed confirmation command stay aligned', async () => {
+  const { attentionCommand } = await import('../src/interfaces/tui/shell.js');
+  const { applicationCommandText } = await import('../src/interfaces/tui/confirmation-dialog.js');
+  const reviewCard = makeCard({ id: 'task-2370' as never, lane: 'review', status: 'review' });
+  const item = makeAttentionItem(reviewCard, { kind: 'review-lane', detail: 'Awaiting review decision' }, 2);
+
+  assert.equal(attentionCommand(item.card, item.reason, item.action), item.action.display);
+  assert.equal(applicationCommandText(item.action.kind, item.missionId), item.action.display);
+});
+
+test('working work is separate from NEEDS YOU', async () => {
+  const working = makeCard({
+    id: 'task-working' as never,
+    currentWork: { operationId: 'op', phase: 'review', summary: 'reviewing', agent: 'qwen' as never, updatedAt: new Date().toISOString(), freshness: 'live' },
+  });
+  const output = await renderShell({ projection: makeProjection({ review: [working] }), columns: 120, rows: 30 });
+  assert.match(output, /WORKING/);
+  assert.match(output, /task-working · review · qwen/);
+  assert.match(output, /NEEDS YOU NEXT 0/);
+});
