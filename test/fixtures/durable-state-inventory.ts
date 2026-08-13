@@ -130,6 +130,49 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     cutoverTask: null,
   },
   {
+    // TASK-2369.06: extracted from integrate.ts — persistLandedIntegrationOrAbort
+    // reads Mission via store.load and writes via decideIntegration/close
+    id: 'mission-read-integrate-post',
+    concept: 'Mission',
+    pathType: 'default',
+    fileLocation: 'src/adapters/cli/commands/integrate-post.ts',
+    operation: 'read',
+    classification: 'database-owned-domain-state',
+    cutoverTask: null,
+  },
+  {
+    id: 'mission-write-integrate-post',
+    concept: 'Mission',
+    pathType: 'default',
+    fileLocation: 'src/adapters/cli/commands/integrate-post.ts',
+    operation: 'write',
+    classification: 'database-owned-domain-state',
+    cutoverTask: null,
+  },
+  {
+    // TASK-2369.06: extracted from integrate.ts — reads mission task files
+    // (rewriteWorktreePaths) and noise patches (prepareNoisePatchForSquash)
+    id: 'mission-read-integrate-conflict',
+    concept: 'Mission',
+    pathType: 'default',
+    fileLocation: 'src/adapters/cli/commands/integrate-conflict.ts',
+    operation: 'read',
+    classification: 'database-owned-domain-state',
+    cutoverTask: null,
+  },
+  {
+    // TASK-2369.06: extracted from integrate.ts — writes mission task files
+    // (rewriteWorktreePaths, line 191) and noise patches (prepareNoisePatchForSquash,
+    // line 44) and removes temp patch dir (fs.rmSync, line 43)
+    id: 'mission-write-integrate-conflict',
+    concept: 'Mission',
+    pathType: 'default',
+    fileLocation: 'src/adapters/cli/commands/integrate-conflict.ts',
+    operation: 'write',
+    classification: 'database-owned-domain-state',
+    cutoverTask: null,
+  },
+  {
     // TASK-2322.07 cutover complete: SqliteMissionStore is the sole production
     // authority. Reads the checked Mission aggregate (including CheckpointData,
     // Review, NEL, external task ref) from normalized relational rows.
