@@ -85,7 +85,7 @@ test('refresh-global-px.sh builds dist (task-2203 prerequisite)', () => {
 // ---------------------------------------------------------------------------
 test('Variant B: post-integrate hook runs before proof capture (task-2203 fix)', () => {
   const REPO_ROOT = path.join(import.meta.dirname, '..');
-  const integratePath = path.join(REPO_ROOT, 'src', 'adapters', 'cli', 'commands', 'integrate.ts');
+  const integratePath = path.join(REPO_ROOT, 'src', 'adapters', 'cli', 'commands', 'integrate-command.ts');
   const content = fs.readFileSync(integratePath, 'utf8');
 
   // Find the positions of the key function calls in the source.
