@@ -13,8 +13,9 @@ test('selection telemetry records nominated, skipped-blocked, launch-failed, and
   assert.ok(lines.every((line) => JSON.parse(line).event === 'agent-selection'));
 });
 
-test('review-loop emits skipped-blocked and launch-failed outcomes from production branches', () => {
-  const source = fs.readFileSync(new URL('../src/adapters/review/review-loop.ts', import.meta.url), 'utf8');
-  assert.ok(source.includes("recordAgentSelectionOutcome(log, 'skipped-blocked'"));
-  assert.ok(source.includes("recordAgentSelectionOutcome(log, 'launch-failed'"));
+test('review flow emits skipped-blocked and launch-failed outcomes from production branches', () => {
+  const fallbackSource = fs.readFileSync(new URL('../src/adapters/review/review-agent-fallback.ts', import.meta.url), 'utf8');
+  const loopSource = fs.readFileSync(new URL('../src/adapters/review/review-loop.ts', import.meta.url), 'utf8');
+  assert.ok(fallbackSource.includes("recordAgentSelectionOutcome(log, 'skipped-blocked'"));
+  assert.ok(loopSource.includes("recordAgentSelectionOutcome(log, 'launch-failed'"));
 });
