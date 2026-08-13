@@ -22,11 +22,6 @@ interface StatsOptions {
 import type { MissionStore } from '../../../application/domain-ports.js';
 import { missionId } from '../../../domain/mission.js';
 
-interface NormalizeStatsRowOptions {
-  repo?: string;
-  rootDir?: string;
-}
-
 interface StatsRow {
   date?: string;
   repo?: string;
@@ -77,10 +72,6 @@ import * as statsReport from './stats-report.js';
 import { resolveMeasurementStore } from '../../sqlite/measurement-store.js';
 import { StatsCommandUseCase } from '../../../application/stats-command-use-case.js';
 import type { StatsWorkflowPort } from '../../../application/ports/cli-workflows.js';
-import {
-  decisionWindowEndingOn,
-  weeklyDecisionWindows,
-} from '../../../application/services/decision-window.js';
 // Report rendering lives in its own module (task-2369.02). Re-exported below so
 // every existing caller keeps importing it from `./stats.js`.
 import {
@@ -96,27 +87,13 @@ import {
   renderMissionPhaseReport,
   AGENT_SPEND_STAGE_COLUMNS,
   MISSION_PHASE_ORDER,
-  normalizeClassification,
-  normalizeRow,
-  normalizeRows,
-  parseBooleanish,
 } from './stats-report-rendering.js';
-
-// Extended telemetry schema for measurement rows stored in SQLite.
-const STATS_HEADERS = [
-  'date', 'repo', 'mission', 'classification', 'implementer', 'pr_fix_rounds',
-  'provider', 'model', 'implementer_agent', 'reviewer_agent', 'stage',
-  'input_tokens', 'output_tokens', 'cached_tokens', 'thoughts_tokens', 'context_tokens',
-  'tool_calls', 'openai_usage_before', 'openai_usage_after',
-  'openai_usage_delta', 'duration_minutes', 'cost_usd'
-];
-
-// Columns coerced to non-negative integers on canonicalization.
-const USAGE_NUMBERS = new Set([
-  'pr_fix_rounds', 'input_tokens', 'output_tokens', 'cached_tokens',
-  'thoughts_tokens', 'context_tokens', 'tool_calls', 'openai_usage_before', 'openai_usage_after',
-  'openai_usage_delta', 'duration_minutes'
-]);
+import {
+  STATS_HEADERS, USAGE_NUMBERS, VALID_CLASSIFICATIONS, normalizeStatsRow, normalizeImplementer,
+  parseDateOnly, parseDateOnlyStrict, formatDateOnly, parseToday, createWindow, createRangeWindow, buildWeeklyWindows, canonicalizeStatsRow,
+  sameStatsIdentity, accumulateIntegerStrings, accumulateDecimalStrings, mergeLabel,
+  normalizeClassification, isValidClassification, normalizeRow, normalizeRows, parseBooleanish, statsMissionKey, modelBelongsToImplFamily, rowInWindow,
+} from './stats-normalization.js';
 
 /**
  * The repository identity statistics rows are written under.
@@ -301,53 +278,8 @@ export function createStatsWorkflowAdapter(): StatsWorkflowPort<StatsRow> {
   };
 }
 
-/**
- * Map any row (legacy 5-column or full 21-column) to the full schema, defaulting
- * missing text columns to '' and numeric columns to '0'. `stage` defaults to
- * 'default' so legacy rows and integration rows share the (repo, mission, stage)
- * upsert key.
- */
-function normalizeStatsRow(row: StatsRow = {} as StatsRow, options: NormalizeStatsRowOptions = {} as NormalizeStatsRowOptions) {
-  const repo = String(row.repo || options.repo || resolveStatsRepoName(options.rootDir)).trim();
-  return {
-    date: row.date || '',
-    repo,
-    mission: row.mission || '',
-    classification: row.classification || '',
-    implementer: row.implementer || '',
-    pr_fix_rounds: row.pr_fix_rounds === null || row.pr_fix_rounds === undefined
-      ? undefined
-      : String(row.pr_fix_rounds),
-    provider: row.provider || '',
-    model: row.model || '',
-    implementer_agent: row.implementer_agent || '',
-    reviewer_agent: row.reviewer_agent || '',
-    stage: row.stage || 'default',
-    input_tokens: row.input_tokens || '0',
-    output_tokens: row.output_tokens || '0',
-    cached_tokens: row.cached_tokens || '0',
-    thoughts_tokens: row.thoughts_tokens || '0',
-    context_tokens: row.context_tokens || '0',
-    tool_calls: row.tool_calls || '0',
-    openai_usage_before: row.openai_usage_before || '0',
-    openai_usage_after: row.openai_usage_after || '0',
-    openai_usage_delta: row.openai_usage_delta || '0',
-    duration_minutes: row.duration_minutes || '0',
-    cost_usd: row.cost_usd || '0',
-  };
-}
-
 // `saveStatsCsv` was removed by architecture migration: no production path writes CSV.
 // The measurement database is the sole authority (ADR 0053).
-
-
-/**
- * @param {*} value
- */
-// @ts-ignore -- retained reporting helper is dynamically typed
-function normalizeImplementer(value) {
-  return String(value || '').trim().replace(/^@/, '').toLowerCase() || null;
-}
 
 /**
  * @param {StatsRow} row
@@ -362,97 +294,6 @@ function statsRowActorKey(row = {}) {
 // @ts-ignore -- retained reporting helper is dynamically typed
   return normalizeImplementer(row.implementer_agent || row.implementer || '') || '';
 }
-
-/**
- * @param {string} value
- */
-// @ts-ignore -- retained reporting helper is dynamically typed
-function parseDateOnly(value) {
-  return new Date(`${value}T00:00:00Z`);
-}
-
-/**
- * @param {string} value
- * @param {string} flagName
- */
-// @ts-ignore -- retained reporting helper is dynamically typed
-function parseDateOnlyStrict(value, flagName) {
-  const raw = String(value || '').trim();
-  const label = flagName || 'date';
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
-    throw new Error(`Invalid date range argument ${label}: expected YYYY-MM-DD.`);
-  }
-
-  const date = parseDateOnly(raw);
-  if (Number.isNaN(date.getTime()) || formatDateOnly(date) !== raw) {
-    throw new Error(`Invalid date range argument ${label}: ${raw} is not a valid calendar date.`);
-  }
-
-  return date;
-}
-
-/**
- * @param {Date} date
- */
-// @ts-ignore -- retained reporting helper is dynamically typed
-function formatDateOnly(date) {
-  return date.toISOString().slice(0, 10);
-}
-
-/**
- * @param {Date|string} today
- */
-function parseToday(today = new Date()) {
-  if (today instanceof Date) {
-    return parseDateOnly(formatDateOnly(today));
-  }
-  return parseDateOnly(String(today));
-}
-
-/**
- * @param {Date|string} endDate
- * @param {number} days
- */
-// @ts-ignore -- retained reporting helper is dynamically typed
-function createWindow(endDate, days) {
-  return decisionWindowEndingOn(parseToday(endDate), days);
-}
-
-/**
- * @param {{from?: string, to?: string}} range
- */
-function createRangeWindow(range = {}) {
-// @ts-ignore -- retained reporting helper is dynamically typed
-  const { from, to } = range;
-  if (!from) {
-    throw new Error('Invalid date range argument --from: value is required when using range mode.');
-  }
-  if (!to) {
-    throw new Error('Invalid date range argument --to: value is required when using range mode.');
-  }
-
-  const start = parseDateOnlyStrict(from, '--from');
-  const end = parseDateOnlyStrict(to, '--to');
-  if (start > end) {
-    throw new Error(`Invalid date range argument --from/--to: start date ${formatDateOnly(start)} is after end date ${formatDateOnly(end)}.`);
-  }
-
-  return {
-    start,
-    end,
-    label: `${formatDateOnly(start)} → ${formatDateOnly(end)}`,
-  };
-}
-
-/**
- * @param {Date} today
- */
-function buildWeeklyWindows(today = new Date()) {
-  // The application layer owns the rolling-window definition; the board reads
-  // the same one, so the CLI's decision cadence and FLOW's cannot drift apart.
-  return weeklyDecisionWindows(parseToday(today));
-}
-
 
  // Core renderers from stats-report.ts (task-2217)
 const { formatStatsTable, renderWeeklyStatsReport, renderRangeStatsReport } = statsReport;
@@ -818,36 +659,6 @@ function resolveMissionClassification(slug, rootDir = process.cwd()) {
 }
 
 /**
- * @param {StatsRow} row
- * @param {{normalizeImplementer?: boolean, normalizeClassification?: boolean, rootDir?: string}} options
- */
-// @ts-ignore -- retained reporting helper is dynamically typed
-function canonicalizeStatsRow(row, options = {}) {
-  const normalized = normalizeStatsRow(row, options);
-  /** @type {StatsRow} */
-  const canonical = {
-    ...normalized,
-// @ts-ignore -- retained reporting helper is dynamically typed
-    date: formatDateOnly(parseToday(String(row.date))),
-// @ts-ignore -- retained reporting helper is dynamically typed
-    repo: String(normalized.repo || resolveStatsRepoName(options.rootDir)).trim(),
-    mission: String(row.mission).trim().toLowerCase(),
-    classification: /** @type{string|number|boolean|undefined} */(normalizeClassification(row.classification)),
-    implementer: /** @type{string|number|boolean|undefined} */(normalizeImplementer(row.implementer)),
-    stage: String(row.stage || '').trim().toLowerCase() || 'default',
-  };
-  for (const key of USAGE_NUMBERS) {
-// @ts-ignore -- retained reporting helper is dynamically typed
-    const value = /** @type{any} */(normalized)[key];
-    // pr_fix_rounds: undefined means "unknown" — must not become '0'
-    if (key === 'pr_fix_rounds' && canonical[key] === undefined) { continue; }
-// @ts-ignore -- retained reporting helper is dynamically typed
-    canonical[key] = String(Math.max(0, Number.parseInt(String(value), 10) || 0));
-  }
-  return canonical;
-}
-
-/**
  * Persist one measurement through the `MeasurementStorePort`.
  *
  * The canonicalization and validation rules are unchanged; only the sink
@@ -964,54 +775,6 @@ function telemetryToStatsFields(telemetry: any, options: {agentFamily: string, d
     duration_minutes: String(Math.max(0, Math.round(durationMinutes) || 0)),
     cost_usd: String((t && typeof t.cost_usd === 'number') ? t.cost_usd : 0),
   };
-}
-
-/**
- * @param {StatsRow} a
- * @param {StatsRow} b
- */
-function sameStatsIdentity(a: StatsRow, b: StatsRow) {
-  return a.repo === b.repo
-    && a.mission === b.mission
-    && (a.stage || 'default') === (b.stage || 'default')
-    && statsRowActorKey(a) === statsRowActorKey(b);
-}
-
-/**
- * @param {string} existing
- * @param {string} incoming
- * @param {AccModeOptions} [options]
- */
-function accumulateIntegerStrings(existing: string, incoming: string, options: {mode?: string} = {}) {
-  /** @type {AccModeOptions} */
-  const opts = options;
-  const current = Number.parseInt(existing, 10) || 0;
-  const next = Number.parseInt(incoming, 10) || 0;
-  if (opts.mode === 'max') {return String(Math.max(current, next));}
-  if (opts.mode === 'replace') {return String(next);}
-  return String(current + next);
-}
-
-/**
- * @param {string} existing
- * @param {string} incoming
- */
-function accumulateDecimalStrings(existing: string, incoming: string) {
-  const current = Number.parseFloat(existing) || 0;
-  const next = Number.parseFloat(incoming) || 0;
-  return String(current + next);
-}
-
-/**
- * @param {string} existing
- * @param {string} incoming
- */
-function mergeLabel(existing: string, incoming: string) {
-  const a = String(existing || '').trim();
-  const b = String(incoming || '').trim();
-  if (!a) {return b;}
-  if (!b) {return a;}
-  return a === b ? a : 'mixed';
 }
 
 /**
@@ -1387,7 +1150,7 @@ export function createStatsCommand(useCase: StatsCommandUseCase<StatsRow>) {
 const stats = createStatsCommand(new StatsCommandUseCase(createStatsWorkflowAdapter()));
 
 export default stats;
-export { stats, statsCohorts, STATS_HEADERS, resolveStatsRepoName, recordIntegrationStats, renderWeeklyStatsReport, renderMissionPhaseReport, renderRangeStatsReport, buildWeeklyWindows, resolveMissionClassification, deriveImplementerAndFixRounds, upsertMeasurementRow, loadMeasurementRows, measurementToStatsRow, statsRowToMeasurement, normalizeStatsRow, canonicalizeStatsRow, recordStageStats, accumulateStageStats, defaultPrFixRounds, recordActiveStats, recordReviewStats, telemetryToStatsFields, formatDateOnly, USAGE_NUMBERS, formatStatsTable, computeAgentMissionGroups, createRangeWindow, summarizeMissionWindow, summarizeAgentWindow, summarizeAgentStageSpend, formatAgentSpendCell, colorAverageFixRounds, colorMissionCounts, AGENT_SPEND_STAGE_COLUMNS, MISSION_PHASE_ORDER, statsRowActorKey };
+export { stats, statsCohorts, STATS_HEADERS, USAGE_NUMBERS, VALID_CLASSIFICATIONS, normalizeStatsRow, normalizeImplementer, parseDateOnly, parseDateOnlyStrict, formatDateOnly, parseToday, createWindow, createRangeWindow, buildWeeklyWindows, canonicalizeStatsRow, sameStatsIdentity, accumulateIntegerStrings, accumulateDecimalStrings, mergeLabel, parseBooleanish, normalizeRow, normalizeRows, statsMissionKey, modelBelongsToImplFamily, isValidClassification, normalizeClassification, rowInWindow, resolveStatsRepoName, recordIntegrationStats, renderWeeklyStatsReport, renderMissionPhaseReport, renderRangeStatsReport, resolveMissionClassification, deriveImplementerAndFixRounds, upsertMeasurementRow, loadMeasurementRows, measurementToStatsRow, statsRowToMeasurement, recordStageStats, accumulateStageStats, defaultPrFixRounds, recordActiveStats, recordReviewStats, telemetryToStatsFields, formatStatsTable, computeAgentMissionGroups, summarizeMissionWindow, summarizeAgentWindow, summarizeAgentStageSpend, formatAgentSpendCell, colorAverageFixRounds, colorMissionCounts, AGENT_SPEND_STAGE_COLUMNS, MISSION_PHASE_ORDER, statsRowActorKey };
 
 (stats as any).statsCohorts = statsCohorts;
 (stats as any).STATS_HEADERS = STATS_HEADERS;

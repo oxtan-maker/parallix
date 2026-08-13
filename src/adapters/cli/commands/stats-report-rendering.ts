@@ -7,12 +7,14 @@ import * as fmt from '../../../application/presentation/cli-format.js';
 import * as statsReport from './stats-report.js';
 import { resolveCanonicalRepositoryId } from '../../git/repository-identity.js';
 import {
+  summarizeCompletedMissionWindow,
   statisticsMissionKey,
   statisticsRowInWindow,
-  summarizeCompletedMissionWindow,
 } from '../../../application/services/statistics-service.js';
-
-const VALID_CLASSIFICATIONS = new Set(['ai_sdlc', 'user_value', 'unknown']);
+import {
+  parseBooleanish, normalizeRow, normalizeRows, statsMissionKey, modelBelongsToImplFamily,
+  isValidClassification, normalizeClassification, rowInWindow,
+} from './stats-normalization.js';
 
 // Core single-mission renderer from stats-report.ts (task-2217)
 const { renderMissionPhaseReport: _renderMissionPhaseReport } = statsReport;
@@ -29,95 +31,6 @@ function formatDate(dateStr) {
   } catch (/** @type{any} */ _err) {
     return dateStr;
   }
-}
-
-/**
- * @param {*} value
- */
-// @ts-ignore -- retained reporting helper is dynamically typed
-function parseBooleanish(value) {
-  if (typeof value === 'boolean') {return value;}
-  if (value === null || value === undefined) {return null;}
-
-  const normalized = String(value).trim().toLowerCase();
-  if (!normalized || normalized === '—' || normalized === 'n/a') {return null;}
-  if (['yes', 'true', '1', 'y', 'merged', 'closed'].includes(normalized)) {return true;}
-  if (['no', 'false', '0', 'n', 'open'].includes(normalized)) {return false;}
-  return null;
-}
-
-/**
- * @param {StatsRow} row
- */
-// @ts-ignore -- retained reporting helper is dynamically typed
-function normalizeRow(row) {
-  const reviewCount = Number.parseInt(String(row.review_count || ''), 10) || 0;
-  const mergedValue = Object.prototype.hasOwnProperty.call(row, 'merged')
-    ? String(row.merged)
-    : row.has_pr;
-  let isMerged = parseBooleanish(mergedValue);
-
-  if (isMerged === null && Object.prototype.hasOwnProperty.call(row, 'has_pr')) {
-    const hasPr = parseBooleanish(row.has_pr);
-    isMerged = hasPr !== null ? hasPr : reviewCount > 0;
-  }
-
-  return {
-    ...row,
-    review_count: String(reviewCount),
-    normalizedDate: row.date || row.created_at || '',
-    normalizedMerged: isMerged === true ? 'yes' : 'no',
-    isMerged: isMerged === true,
-  };
-}
-
-/**
- * @param {StatsRow[]} rows
- */
-// @ts-ignore -- retained reporting helper is dynamically typed
-function normalizeRows(rows) {
-  return rows.map(normalizeRow);
-}
-
-/**
- * @param {StatsRow} row
- */
-// @ts-ignore -- retained reporting helper is dynamically typed
-function statsMissionKey(row) {
-  return statisticsMissionKey(row);
-}
-
-/**
- * Checks whether a model name belongs to the given implementer family.
- * The stored `model === implementer` exact match is too strict for
- * family-named implementers (e.g. `claude-sonnet-5` !== `claude`,
- * `gpt-5.4` !== `codex`). This prefix-based check correctly identifies
- * implementer-family models so the dedup logic can prefer them over
- * reviewer-model rows or blank-model rollups.
- *
- * @param {string} model
- * @param {string} impl
- * @returns {boolean}
- */
-// @ts-ignore -- retained reporting helper is dynamically typed
-function modelBelongsToImplFamily(model, impl) {
-  if (!model || !impl) { return false; }
-  const m = String(model).toLowerCase();
-  const i = String(impl).toLowerCase();
-  if (m === i) { return true; }
-  // Named families whose models don't prefix with the family label:
-  // codex → gpt-*, vibe → mistral
-  if (i === 'codex') { return m.startsWith('gpt'); }
-  if (i === 'vibe') { return m === 'mistral'; }
-  // custom family models are named paths/identifiers (cyankiwi/Qwen...,
-  // QuantTrio/Qwen..., qwen3.6-27b-q8) that don't prefix with "custom".
-  // Recognize them as non-blank model names that aren't known reviewer families.
-  if (i === 'custom') {
-    return !m.startsWith('claude') && !m.startsWith('gpt');
-  }
-  // All other families: model starts with the family name
-  // (claude-sonnet-5 → claude, mistral → mistral, qwen3.6-27b-q8 → qwen, etc.)
-  return m.startsWith(i);
 }
 
 /**
@@ -310,32 +223,6 @@ function generateMarkdownReport(data, options = {}) {
 }
 
 /**
- * @param {*} value
- */
-// @ts-ignore -- retained reporting helper is dynamically typed
-function isValidClassification(value) {
-  return VALID_CLASSIFICATIONS.has(String(value || '').trim().toLowerCase());
-}
-
-/**
- * @param {*} value
- */
-// @ts-ignore -- retained reporting helper is dynamically typed
-function normalizeClassification(value) {
-  const normalized = String(value || '').trim().toLowerCase();
-  return isValidClassification(normalized) ? normalized : null;
-}
-
-/**
- * @param {StatsRow} row
- * @param {{start: Date, end: Date}} window
- */
-// @ts-ignore -- retained reporting helper is dynamically typed
-function rowInWindow(row, window) {
-  return statisticsRowInWindow(row, window);
-}
-
-/**
  * @param {StatsRow[]} rows
  * @param {{start: Date, end: Date}} window
  */
@@ -377,7 +264,7 @@ function summarizeMissionWindow(rows, window, completedMissionKeys = new Set()) 
 // @ts-ignore -- retained reporting helper is dynamically typed
 function computeAgentMissionGroups(rows, window, options = {}) {
 // @ts-ignore -- retained reporting helper is dynamically typed
-  const windowRows = rows.filter(row => rowInWindow(row, window));
+  const windowRows = rows.filter(row => statisticsRowInWindow(row, window));
 // @ts-ignore -- retained reporting helper is dynamically typed
   const validWindowRows = windowRows.filter(row => normalizeClassification(row.classification) !== null);
   // Completion is supplied by lifecycle readers, never inferred from telemetry.
@@ -387,7 +274,7 @@ function computeAgentMissionGroups(rows, window, options = {}) {
 // @ts-ignore -- retained reporting helper is dynamically typed
     const completedMissionKeys = options.completedMissionKeys || new Set();
 // @ts-ignore -- retained reporting helper is dynamically typed
-    allValidWindowRows = validWindowRows.filter(row => completedMissionKeys.has(statsMissionKey(row)));
+    allValidWindowRows = validWindowRows.filter(row => completedMissionKeys.has(statisticsMissionKey(row)));
   }
   // The non-completed path supports the live spend table, where no final owner
   // exists yet. It picks a concrete model deterministically.
@@ -396,7 +283,7 @@ function computeAgentMissionGroups(rows, window, options = {}) {
   /** @type {Record<string, StatsRow[]>} */
   const rowsByMission = {};
   for (const row of allValidWindowRows) {
-    const key = statsMissionKey(row);
+    const key = statisticsMissionKey(row);
 // @ts-ignore -- retained reporting helper is dynamically typed
     if (!rowsByMission[key]) {rowsByMission[key] = [];}
 // @ts-ignore -- retained reporting helper is dynamically typed
@@ -497,7 +384,7 @@ function computeAgentMissionGroups(rows, window, options = {}) {
       displayKey = modelTrimmed || (row.implementer || 'unknown');
     }
 // @ts-ignore -- retained reporting helper is dynamically typed
-    missionKeyToDisplayKey[statsMissionKey(row)] = displayKey;
+    missionKeyToDisplayKey[statisticsMissionKey(row)] = displayKey;
 // @ts-ignore -- retained reporting helper is dynamically typed
     if (!groups[displayKey]) {groups[displayKey] = [];}
 // @ts-ignore -- retained reporting helper is dynamically typed
@@ -542,7 +429,7 @@ function summarizeAgentWindow(rows, window, options = {}) {
   const storedRoundsByMission = {};
   const roundsFromRollupByMission = new Set();
   for (const row of allValidWindowRows) {
-    const key = statsMissionKey(row);
+    const key = statisticsMissionKey(row);
     if (row.pr_fix_rounds !== undefined) {
       // The default rollup is authoritative; without one, the final row is.
       if (row.stage === 'default' || !roundsFromRollupByMission.has(key)) {
@@ -561,7 +448,7 @@ function summarizeAgentWindow(rows, window, options = {}) {
       }
     }
 // @ts-ignore -- retained reporting helper is dynamically typed
-    return storedRoundsByMission[statsMissionKey(row)] || 0;
+    return storedRoundsByMission[statisticsMissionKey(row)] || 0;
   };
   return Object.entries(groups)
     .map(([displayKey, group]) => {
@@ -635,7 +522,7 @@ function summarizeAgentStageSpend(rows, window) {
   const rawRowsByDisplayKey = {};
   for (const row of allValidWindowRows) {
 // @ts-ignore -- retained reporting helper is dynamically typed
-    const displayKey = missionKeyToDisplayKey[statsMissionKey(row)];
+    const displayKey = missionKeyToDisplayKey[statisticsMissionKey(row)];
     if (!displayKey) {continue;}
 // @ts-ignore -- retained reporting helper is dynamically typed
     if (!rawRowsByDisplayKey[displayKey]) {rawRowsByDisplayKey[displayKey] = [];}
