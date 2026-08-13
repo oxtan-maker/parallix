@@ -1,7 +1,7 @@
 ---
 id: TASK-2369
 title: next round of stat fixes
-status: active
+status: review
 assignee: [custom]
 created_date: '2026-08-12 14:48'
 labels: [user_value, bug]
