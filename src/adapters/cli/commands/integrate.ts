@@ -1087,7 +1087,7 @@ async function integrate(args: string[], options: { missionServicesFn?: Function
           if (fs.existsSync(baseWorktree)) {
             nextActionMessage = `Next: cd ${baseWorktree}`;
           }
-          await persistLandedIntegrationOrAbort(slug, mergedCommit, missionServices);
+          await persistLandedIntegrationOrAbort(slug, mergedCommit, missionServices, { rootDir: baseWorktree as string });
           await (recordPostIntegrationStatsOrAbort as any)(slug, { rootDir: baseWorktree, missionStore: missionServices.store });
           fmt.log.info('Step 7 (resume): Cleaning up the local mission worktree...');
           if (!cleanupMissionWorktree(slug)) {
@@ -1260,7 +1260,7 @@ async function integrate(args: string[], options: { missionServicesFn?: Function
       if (fs.existsSync(baseWorktree)) {
         nextActionMessage = `Next: cd ${baseWorktree}`;
       }
-      await persistLandedIntegrationOrAbort(slug, mergedCommit, missionServices);
+      await persistLandedIntegrationOrAbort(slug, mergedCommit, missionServices, { rootDir: baseWorktree as string });
       await (recordPostIntegrationStatsOrAbort as any)(slug, { rootDir: baseWorktree, missionStore: missionServices.store });
       fmt.log.info('Step 7: Cleaning up the local mission worktree...');
       if (!cleanupMissionWorktree(slug)) {
@@ -1518,9 +1518,15 @@ async function promoteTaskForIntegrationIfNeeded(
     return { changed: false, dryRun: true };
   }
 
-  // architecture invariant/architecture invariant: Transition Mission state through SqliteMissionStore FIRST.
-  // The durable Mission state must commit before any external Backlog effect.
-  // Database unavailability fails the operation (architecture invariant: fail-closed).
+  // Promotion owns the Backlog representation only. It must NOT complete the
+  // Mission: `integrate` maps `review -> done` in the state machine, and this
+  // runs at Step 4, before the squash commit exists — so completing here made a
+  // failed landing leave a `done` Mission (TASK-2369 defect 1). The single
+  // completion owner is persistLandedIntegrationOrAbort(), after landing.
+  //
+  // The Mission is still read first, and fail-closed: an unreachable or missing
+  // aggregate refuses the external Backlog effect rather than mutating a file
+  // whose durable counterpart cannot be confirmed (architecture invariant).
   if (typeof missionServicesFn !== 'function') { throw new Error('integration promotion requires injected mission services'); }
   const missionServices = await missionServicesFn(context.baseWorktree || process.cwd());
   const missionLoad = await missionServices.store.load(missionId(context.slug));
@@ -1532,27 +1538,8 @@ async function promoteTaskForIntegrationIfNeeded(
     fmt.log.fail(`Mission ${missionId(context.slug)} not found in SQLite. Refusing to promote the Backlog task — file-only lifecycle state is not permitted after cutover.`);
     throw new IntegrationAbort();
   }
-  if (missionLoad.kind === 'found') {
-    const transitionResult = await missionServices.lifecycle.transition({
-      operationId: `integrate-transition-${context.slug}`,
-      missionId: missionId(context.slug),
-      capabilities: new Set(['mission:transition']),
-      command: { type: 'integrate' },
-      actor: context.forgejoUser || 'custom',
-      occurredAt: new Date().toISOString(),
-      // Stable across retries for the same reason as the handoff key: the
-      // integration lane event must not multiply per invocation.
-      idempotencyKey: `integrate-${context.slug}`,
-    });
-    if (transitionResult.status !== 'completed' || !transitionResult.value) {
-      fmt.log.fail(`Mission state transition failed: ${transitionResult.error?.message || 'unknown'}.`);
-      throw new IntegrationAbort();
-    }
-    const transitioned = transitionResult.value;
-    fmt.log.info(`Mission state transitioned to ${transitioned.to} (v${transitioned.version})`);
-  }
 
-  // External boundary effect (Backlog promotion) after durable state committed.
+  // External boundary effect (Backlog promotion) after the durable state read.
   const stateMapOptions = { rootDir: /** @type {string} */ (context.baseWorktree) };
   const approvedStatus = toActual('approved', stateMapOptions) || 'approved';
   const baseTask = context.slug && context.baseWorktree
@@ -1998,11 +1985,47 @@ async function recordPostIntegrationStatsOrAbort(slug: string, options: {rootDir
   }
 }
 
-/** Persist the sole completion authority once the squash commit exists. */
-async function persistLandedIntegrationOrAbort(slug: string, landedCommit: string, missionServices: any) {
+/**
+ * The committer timestamp of the specific landed commit.
+ *
+ * Read with `show -s` against the supplied revision, never `log -1`/HEAD: the
+ * resume path reconciles a squash commit that landed in an earlier run and can
+ * sit well behind the current HEAD, and rolling-window statistics select
+ * missions by this time. Returns null when the revision cannot be read, so the
+ * caller can fall back loudly rather than silently backdating or aborting a
+ * mission whose work has already landed.
+ *
+ * @param {string} landedCommit @param {string} rootDir
+ */
+function resolveLandedCommitTimestamp(landedCommit: string, rootDir: string) {
+  const result = git(['-C', rootDir, 'show', '-s', '--format=%cI', landedCommit]);
+  const timestamp = result.status === 0 ? String(result.stdout || '').trim() : '';
+  if (!timestamp) {
+    fmt.log.warn(`Could not read the landed commit timestamp for ${landedCommit}; recording completion at the current time.`);
+    return null;
+  }
+  return timestamp;
+}
+
+/**
+ * Persist the sole completion authority once the squash commit exists.
+ *
+ * One timestamp resolution serves every caller — normal integration, resume,
+ * and partial-closeout recovery — so no path can record a retry time as the
+ * delivery completion time.
+ *
+ * @param {string} slug @param {string} landedCommit @param {any} missionServices
+ * @param{{rootDir?: string}} options
+ */
+async function persistLandedIntegrationOrAbort(slug: string, landedCommit: string, missionServices: any, { rootDir = process.cwd() }: { rootDir?: string } = {}) {
   let loaded = await missionServices.store.load(missionId(slug));
   if (loaded.kind !== 'found') {
     fmt.log.fail(`Mission ${missionId(slug)} is unavailable after landing; statistics will not run.`);
+    throw new IntegrationAbort();
+  }
+  const landedAt = resolveLandedCommitTimestamp(landedCommit, rootDir);
+  if (landedAt === null) {
+    fmt.log.fail(`Cannot resolve landed commit timestamp for ${landedCommit}; aborting closeout to avoid recording a retry time as delivery completion.`);
     throw new IntegrationAbort();
   }
   if (loaded.mission.status !== 'done') {
@@ -2013,6 +2036,11 @@ async function persistLandedIntegrationOrAbort(slug: string, landedCommit: strin
       capabilities: new Set(['integration:decide']),
       idempotencyKey: `integrate:${slug}:${landedCommit}`,
       actor: loaded.mission.assignee ?? 'custom',
+      // Delivery completion time. Distinct from the administrative `closedAt`
+      // below, which records when the operator ran closeout: a mission resumed
+      // two days later delivered on the landing day but was closed out on the
+      // retry day, and only the delivery time may drive decision windows.
+      occurredAt: landedAt,
       facts: {
         git: { source: 'git', status: 'fresh', value: { merged: true } },
         verification: { source: 'integration-gates', status: 'fresh', value: { passed: true } },
@@ -2036,6 +2064,9 @@ async function persistLandedIntegrationOrAbort(slug: string, landedCommit: strin
     capabilities: new Set(['closure:record']),
     idempotencyKey: `close:${slug}:${landedCommit}`,
     actor: loaded.mission.assignee ?? 'custom',
+    // Administrative closure time, deliberately the closeout/retry time rather
+    // than the landed commit time: it records when the operator ended the last
+    // lane dwell, not when the change was delivered.
     closedAt: new Date().toISOString(),
     integration: { source: 'git', status: 'fresh', value: { completed: true } },
   });

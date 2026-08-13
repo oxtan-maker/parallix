@@ -60,6 +60,7 @@ function setupMocks() {
     if (args.includes('status')) return { status: 0, stdout: '', stderr: '' };
     if (args.includes('merge')) return { status: 0, stdout: '', stderr: '' };
     if (args.includes('rev-parse')) return { status: 0, stdout: 'deadbeef', stderr: '' };
+    if (args.includes('show')) return { status: 0, stdout: '2026-05-15T12:00:00+02:00\n', stderr: '' };
     return { status: 0, stdout: '', stderr: '' };
   });
   mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile: path.join(FAKE_ROOT, 'backlog/tasks/task.md') }));
@@ -167,6 +168,7 @@ test('integrate Variant B promotes and completes a review-approved task in the l
     }
     if (args.includes('merge')) return { status: 0, stdout: '', stderr: '' };
     if (args.includes('rev-parse')) return { status: 0, stdout: 'deadbeef', stderr: '' };
+    if (args.includes('show')) return { status: 0, stdout: '2026-05-15T12:00:00+02:00\n', stderr: '' };
     return { status: 0, stdout: '', stderr: '' };
   });
   const integrate = loadIntegrate();
@@ -195,6 +197,7 @@ test('integrate Variant B preserves soft-reset backlog noise across squash merge
     if (args.includes('merge')) return { status: 0, stdout: '', stderr: '' };
     if (args.includes('apply') && args.includes('--index')) return { status: 0, stdout: '', stderr: '' };
     if (args.includes('rev-parse')) return { status: 0, stdout: 'deadbeef', stderr: '' };
+    if (args.includes('show')) return { status: 0, stdout: '2026-05-15T12:00:00+02:00\n', stderr: '' };
     return { status: 0, stdout: '', stderr: '' };
   });
   const integrate = loadIntegrate();

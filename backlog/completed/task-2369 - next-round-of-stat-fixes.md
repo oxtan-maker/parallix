@@ -1,7 +1,7 @@
 ---
 id: TASK-2369
 title: next round of stat fixes
-status: ready-for-integration
+status: done
 assignee: [codex]
 created_date: '2026-08-12 14:48'
 labels: [user_value, bug]

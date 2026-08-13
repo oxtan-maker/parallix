@@ -41,6 +41,7 @@ test('TASK-2367: a landed approved integration persists done once before statist
     if (args.includes('diff') && args.includes('--cached')) return { status: 0, stdout: 'fixture.ts\n', stderr: '' };
     if (args.includes('commit')) calls.push('landed');
     if (args.includes('rev-parse')) return { status: 0, stdout: 'landed-sha\n', stderr: '' };
+    if (args.includes('show')) return { status: 0, stdout: '2026-05-15T12:00:00+02:00\n', stderr: '' };
     return { status: 0, stdout: '', stderr: '' };
   });
   mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile: path.join(ROOT, 'backlog', 'tasks', 'task.md') }));
