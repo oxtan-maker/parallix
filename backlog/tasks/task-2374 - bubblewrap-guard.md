@@ -1,7 +1,7 @@
 ---
 id: TASK-2374
 title: bubblewrap guard
-status: backlog
+status: refined
 assignee: [custom]
 created_date: '2026-08-13 18:31'
 labels: [user_value]
