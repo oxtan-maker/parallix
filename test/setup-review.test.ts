@@ -34,6 +34,16 @@ async function loadSetupReviewWithSpawn(spawnImpl) {
   }
 }
 
+async function loadSetupReviewAuthWithSpawn(spawnImpl) {
+  const mocked = mock.method(childProcess, 'spawnSync', spawnImpl);
+  try {
+    return await importFresh<typeof import('../src/adapters/review/setup-review-auth.js')>(
+      '../src/adapters/review/setup-review-auth.js', import.meta.url);
+  } finally {
+    mocked.mock.restore();
+  }
+}
+
 function writeConfig(root, review = {}) {
   fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
     product: { name: 'Standalone' },
@@ -541,7 +551,7 @@ test('ensureReviewRemote adds and updates git remotes and readConfiguredReviewRe
 });
 
 test('apiRequest handles success, plain-text payloads, and curl failures', async () => {
-  const setupReviewModule = await loadSetupReviewWithSpawn((_command, args, options = {}) => {
+  const setupReviewModule = await loadSetupReviewAuthWithSpawn((_command, args, options = {}) => {
     if (args.includes('http://localhost:3300/success')) {
 // @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `equal` absent from its inferred mock shape.
       assert.equal(options.input, JSON.stringify({ hello: 'world' }));
@@ -581,10 +591,6 @@ test('promptLine supports visible and hidden prompts', async () => {
   };
 
   const answers = [' visible ', ' secret '];
-  // ESM namespaces are immutable, so patching the `readline` default export no
-  // longer reaches `import * as readline` inside setup-review.ts. Register the
-  // builtin replacement through node:test module mocking and re-evaluate the
-  // module past the ESM cache so it links against the double.
   const createInterface = ({ output: rlOutput }) => ({
     stdoutMuted: false,
     question(_prompt, callback) {
@@ -595,24 +601,14 @@ test('promptLine supports visible and hidden prompts', async () => {
     },
     close() {},
   });
-  const mocked = mock.module('node:readline', {
-    exports: { createInterface, default: { createInterface } },
-  });
-
-  try {
-    const freshModule = await importFresh<typeof import('../src/adapters/review/setup-review.js')>(
-      '../src/adapters/review/setup-review.js', import.meta.url);
-    const visible = await freshModule.promptLine('Prompt: ', { output });
-    const hidden = await freshModule.promptLine('Secret: ', { hidden: true, output });
-    assert.equal(visible, 'visible');
-    assert.equal(hidden, 'secret');
-    assert.ok(writes.includes('typed'));
-    assert.ok(writes.includes('Secret: '));
-    assert.ok(writes.includes('*****'));
-    assert.ok(writes.includes('\n'));
-  } finally {
-    mocked.restore();
-  }
+  const visible = await promptLine('Prompt: ', { output, createInterface });
+  const hidden = await promptLine('Secret: ', { hidden: true, output, createInterface });
+  assert.equal(visible, 'visible');
+  assert.equal(hidden, 'secret');
+  assert.ok(writes.includes('typed'));
+  assert.ok(writes.includes('Secret: '));
+  assert.ok(writes.includes('*****'));
+  assert.ok(writes.includes('\n'));
 });
 
 test('bootstrapReviewSurface reprompts on Forgejo auth failure and succeeds on retry', async () => {

@@ -20,7 +20,7 @@ const DIRECT_JSON_EXCEPTIONS = new Map([
   ['src/adapters/verification/temp-root-registry.ts:manifestPath', 'coverage-manifest'],
   ['src/adapters/verification/mutation-gate.ts:baselinePath', 'mutation-baseline'],
   ['src/adapters/verification/mutation-gate.ts:configPath', 'mutation-run-config'],
-  ['src/adapters/review/setup-review.ts:configPath', 'workflow-config'],
+  ['src/adapters/review/setup-review-config.ts:configPath', 'workflow-config'],
   ['src/adapters/agents/qwen.ts:targetSettings', 'qwen-settings'],
 ]);
 
