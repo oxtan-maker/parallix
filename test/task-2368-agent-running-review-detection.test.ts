@@ -67,7 +67,7 @@ function pendingReview(): Review {
     stageLaunches: [],
     gateFailureRetryCount: 0,
     hookFailureRetryCount: 0,
-  } as Review;
+  } as unknown as Review;
 }
 
 function makeBuilder(runningSessions: readonly RunningAgentSession[] | null): BoardProjectionBuilder {

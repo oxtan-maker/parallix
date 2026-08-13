@@ -12,17 +12,23 @@ import { createReviewCommand } from '../src/interfaces/cli/review.js';
 const _require = createRequire(import.meta.url);
 const missionUtils = mockModule<typeof import('../src/adapters/filesystem/mission-utils.js')>('../src/adapters/filesystem/mission-utils.js', import.meta.url);
 const reviewModule = mockModule<typeof import('../src/adapters/review/review-commands.js')>('../src/adapters/review/review-commands.js', import.meta.url);
+const reviewCliFlags = await import('../src/adapters/review/review-cli-flags.js');
+const reviewWorkflowAdapter = await import('../src/adapters/review/review-workflow-adapter.js');
 await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
 const {
-  flagValue,
-  readTextFlag,
   formatStaticReviewFindings,
   formatStaticReviewSuccess,
   performStaticReview
 } = reviewModule;
+const { flagValue, readTextFlag, unknownReviewFlags } = reviewCliFlags;
+const { ReviewWorkflowAdapter, createReviewWorkflowAdapter } = reviewWorkflowAdapter;
 const review = (args, options = {}) =>
-  createReviewCommand(new ReviewCommandUseCase(reviewModule.createReviewWorkflowAdapter(options)))(args, options);
+  createReviewCommand(new ReviewCommandUseCase(createReviewWorkflowAdapter(options)))(args, options);
+
+test('createReviewWorkflowAdapter returns a ReviewWorkflowAdapter', () => {
+  assert.ok(createReviewWorkflowAdapter() instanceof ReviewWorkflowAdapter);
+});
 
 // ============================================================================
 // flagValue tests
@@ -438,7 +444,6 @@ test('flagValue supports --flag=value form', () => {
 });
 
 test('unknownReviewFlags flags typos but not values of value-taking flags', () => {
-  const { unknownReviewFlags } = reviewModule;
   assert.deepEqual(
     unknownReviewFlags(['--continue', '--implementer', 'claude', '--reviewer', 'codex', '--max-attempt', '7']),
     ['--max-attempt']
