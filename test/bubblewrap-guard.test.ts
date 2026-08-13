@@ -1,13 +1,23 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import childProcess from 'node:child_process';
+import { EventEmitter } from 'node:events';
+import { Writable } from 'node:stream';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fmt from '../src/application/presentation/cli-format.js';
+import { spawnAndTee } from '../src/adapters/process/spawn-tee.js';
 import {
+  BUBBLEWRAP_COMMAND,
   BubblewrapGuardError,
   buildBubblewrapArgs,
   isBubblewrapAvailable,
   isBubblewrapDisabled,
   resolveSandboxProfile,
-  setBubblewrapProbeForTest
+  setBubblewrapProbeForTest,
+  withSandboxProfile,
+  wrapWithBubblewrap
 } from '../src/adapters/process/bubblewrap.js';
 
 test.afterEach(() => {
@@ -103,6 +113,67 @@ test('buildBubblewrapArgs rejects an unusable permitted path without widening a 
     assert.throws(() => buildBubblewrapArgs({ worktree, worktreeWritable: false, writable: [file] }, worktree), BubblewrapGuardError);
   } finally { fs.rmSync(worktree, { recursive: true, force: true }); }
 });
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
+
+test('wrapWithBubblewrap prefixes bwrap and preserves the original argv', () => {
+  setBubblewrapProbeForTest(() => true);
+  const worktree = makeWorktree();
+  try {
+    const wrapped = withSandboxProfile(
+      resolveSandboxProfile('active', worktree),
+      () => wrapWithBubblewrap('codex', ['exec', '--sandbox', 'danger-full-access'], worktree)
+    );
+    assert.equal(wrapped.command, BUBBLEWRAP_COMMAND);
+    assert.deepEqual(wrapped.args.slice(-4), ['codex', 'exec', '--sandbox', 'danger-full-access']);
+    assert.equal(wrapped.args[wrapped.args.indexOf('codex') - 1], '--');
+  } finally { fs.rmSync(worktree, { recursive: true, force: true }); }
+});
+
+test('spawnAndTee preserves stdout and exit status through bwrap', async () => {
+  setBubblewrapProbeForTest(() => true);
+  const worktree = makeWorktree();
+  const observed: { command: string; args: string[] }[] = [];
+  const mocked = test.mock.method(childProcess, 'spawn', (command: string, args: string[]) => {
+    observed.push({ command, args });
+    return fakeChild();
+  });
+  try {
+    const result = await withSandboxProfile(
+      resolveSandboxProfile('active', worktree),
+      () => spawnAndTee('codex', ['exec'], { cwd: worktree, stdoutSink: nullSink(), stderrSink: nullSink() })
+    );
+    assert.equal(observed[0].command, BUBBLEWRAP_COMMAND);
+    assert.deepEqual(observed[0].args.slice(-2), ['codex', 'exec']);
+    assert.equal(result.status, 0);
+    assert.equal(result.signal, null);
+    assert.equal(result.stdout, 'hello');
+  } finally { mocked.mock.restore(); fs.rmSync(worktree, { recursive: true, force: true }); }
+});
+
+test('spawnAndTee fails before spawning when an available guard cannot be built', async () => {
+  setBubblewrapProbeForTest(() => true);
+  const observed: string[] = [];
+  const mocked = test.mock.method(childProcess, 'spawn', (command: string) => {
+    observed.push(command);
+    return fakeChild();
+  });
+  try {
+    await assert.rejects(
+      () => withSandboxProfile(
+        resolveSandboxProfile('active', '/nonexistent/worktree'),
+        () => spawnAndTee('codex', ['exec'], { cwd: '/nonexistent/worktree' })
+      ),
+      BubblewrapGuardError
+    );
+    assert.deepEqual(observed, []);
+  } finally { mocked.mock.restore(); }
+});
+
+function fakeChild(): EventEmitter & { stdout: EventEmitter; stderr: EventEmitter } {
+  const child = Object.assign(new EventEmitter(), { stdout: new EventEmitter(), stderr: new EventEmitter(), pid: 4321 });
+  setImmediate(() => { child.stdout.emit('data', Buffer.from('hello')); child.emit('close', 0, null); });
+  return child;
+}
+
+function nullSink(): NodeJS.WriteStream {
+  return new Writable({ write(_chunk, _encoding, callback) { callback(); } }) as unknown as NodeJS.WriteStream;
+}
