@@ -258,9 +258,12 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
       const timestamp = `${record.date}T00:00:00Z`;
       if (existing) {
         // Aggregate multiple records for the same (repo, mission)
-        existing.reviewFixRounds = record.pr_fix_rounds !== undefined
-          ? Math.max(existing.reviewFixRounds ?? -1, record.pr_fix_rounds)
-          : existing.reviewFixRounds;
+        // A NULL row carries no observation, so it never contributes to the
+        // mission's maximum — otherwise `Math.max(-1, null)` would turn two
+        // unknown rows into a measured zero (TASK-2369 Part D carry-forward).
+        existing.reviewFixRounds = record.pr_fix_rounds === null || record.pr_fix_rounds === undefined
+          ? existing.reviewFixRounds
+          : Math.max(existing.reviewFixRounds ?? -1, record.pr_fix_rounds);
         existing.createdAt = existing.createdAt < timestamp ? existing.createdAt : timestamp;
         existing.labelValues.push(...recordLabelValues(record));
         existing.runs.push(usageRecordToRun(record));

@@ -148,13 +148,17 @@ function getMeasurementStore(options: StatsOptions = {}) {
 function measurementToStatsRow(record): StatsRow {
 // @ts-ignore -- retained reporting helper is dynamically typed
   const numeric = (value) => (value === null || value === undefined ? '0' : String(value));
+  // `pr_fix_rounds` is the one measurement that is genuinely nullable: an
+  // unknown number of review-fix rounds is not a measured zero, and collapsing
+  // it here would inflate every observation count downstream (TASK-2369).
+  const nullableNumeric = (value) => (value === null || value === undefined ? undefined : String(value));
   return {
     date: record.date || '',
     repo: record.repo || '',
     mission: record.mission || '',
     classification: record.classification || '',
     implementer: record.implementer || '',
-    pr_fix_rounds: numeric(record.pr_fix_rounds),
+    pr_fix_rounds: nullableNumeric(record.pr_fix_rounds),
     provider: record.provider || '',
     model: record.model || '',
     implementer_agent: record.implementer_agent || '',
@@ -1531,9 +1535,12 @@ async function deriveImplementerAndFixRounds(slug, rootDir = process.cwd(), miss
     }
   }
 
+  // No implementer and no fix-round signal from any source. The count is
+  // unknown, not zero — a manufactured zero here would enter the integration
+  // rollup row as a real observation (TASK-2369 Part D).
   return {
     implementer: 'unknown',
-    prFixRounds: 0,
+    prFixRounds: null,
     source: 'unknown-fallback',
   };
 }
@@ -1882,22 +1889,36 @@ function accumulateStageStats(options: {slug: string, stage: string, rootDir?: s
  * read are gone, and the Review aggregate is only reachable asynchronously.
  */
 /**
+ * A caller that supplies no count, with no prior KNOWN count on the mission,
+ * has measured nothing — so this returns `undefined` (unknown), never `'0'`.
+ * NULL rows are skipped when searching for the prior maximum: `[NULL, NULL]`
+ * is unknown, `[NULL, 0]` is a known zero, `[NULL, 2]` is a known 2. A store
+ * that cannot be read yields unknown as well, because a read failure is not
+ * evidence of zero rounds (TASK-2369 Part D).
+ *
  * @param {string} slug
  * @param {string} rootDir
  * @param {string|null|undefined} provided
+ * @param{{store?: unknown, dbPath?: string}} storeOptions
  */
-function defaultPrFixRounds(slug: string, rootDir: string, provided: string | null | undefined) {
+function defaultPrFixRounds(slug: string, rootDir: string, provided: string | null | undefined, storeOptions: {store?: unknown, dbPath?: string} = {}) {
   if (provided !== undefined && provided !== null) {return provided;}
-  if (!slug) {return '0';}
+  if (!slug) {return undefined;}
   try {
-    const store = getMeasurementStore({ rootDir });
+    // The same port the row is about to be written through, so a caller writing
+    // to an injected store reads its own history rather than the ambient one.
+    const store = getMeasurementStore({ rootDir, ...storeOptions });
 // @ts-ignore -- retained reporting helper is dynamically typed
     const recorded = store.findByMission(slug)
 // @ts-ignore -- retained reporting helper is dynamically typed
-      .map((record) => Number.parseInt(String(record.pr_fix_rounds ?? 0), 10) || 0);
-    return String(recorded.length > 0 ? Math.max(...recorded) : 0);
+      .map((record) => record.pr_fix_rounds)
+// @ts-ignore -- retained reporting helper is dynamically typed
+      .filter((value) => value !== null && value !== undefined)
+// @ts-ignore -- retained reporting helper is dynamically typed
+      .map((value) => Number.parseInt(String(value), 10) || 0);
+    return recorded.length > 0 ? String(Math.max(...recorded)) : undefined;
   } catch {
-    return '0';
+    return undefined;
   }
 }
 
@@ -1911,7 +1932,7 @@ function recordActiveStats(options: {slug: string, stage?: string, rootDir?: str
   const { stage = 'active', slug, rootDir = process.cwd(), prFixRounds, model, ...rest } = opts;
   return recordStageStats({
     stage, slug, rootDir, model,
-    prFixRounds: defaultPrFixRounds(slug, rootDir, prFixRounds),
+    prFixRounds: defaultPrFixRounds(slug, rootDir, prFixRounds, { store: rest.store, dbPath: rest.dbPath }),
     ...rest,
   });
 }
@@ -1932,7 +1953,7 @@ function recordReviewStats(options: {slug: string, stage?: string, rootDir?: str
   return recordStageStats({
     stage, slug, rootDir, reviewer, model,
     implementer: implementer || reviewer,
-    prFixRounds: defaultPrFixRounds(slug, rootDir, prFixRounds),
+    prFixRounds: defaultPrFixRounds(slug, rootDir, prFixRounds, { store: rest.store, dbPath: rest.dbPath }),
     ...rest,
   });
 }

@@ -127,6 +127,7 @@ const PRIMARY = getPrimaryBranch();
 import { stubMissionServices } from './helpers/stub-mission-services.js';
 
 test('persistLandedIntegrationOrAbort records lifecycle completion and closure', async () => {
+  mock.method(__mm2, 'git', () => ({ status: 0, stdout: '2026-08-12T10:00:00.000Z\n', stderr: '' }));
   const calls = [];
   const integration = { status: 'integration', closedAt: null, assignee: 'codex' };
   const done = { status: 'done', closedAt: null, assignee: 'codex' };
@@ -143,6 +144,7 @@ test('persistLandedIntegrationOrAbort records lifecycle completion and closure',
   await persistLandedIntegrationOrAbort('task-close', 'abc123', services);
 
   assert.deepEqual(calls.map(([kind]) => kind), ['decide', 'close']);
+  assert.equal(calls[0][1].occurredAt, '2026-08-12T10:00:00.000Z');
   assert.equal(calls[1][1].expectedVersion, 1);
   assert.equal(calls[1][1].integration.value.completed, true);
 });

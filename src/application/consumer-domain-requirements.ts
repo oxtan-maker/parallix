@@ -270,7 +270,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'usage-mission-key',
     family: 'usage-statistics',
     fileLocation: 'src/adapters/cli/commands/stats.ts',
-    line: 392,
+    line: 396,
     anchor: 'function statsMissionKey',
     reads: ['Mission', 'MissionOutcome'],
     requirement:
