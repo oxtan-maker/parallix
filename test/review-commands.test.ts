@@ -167,8 +167,6 @@ test('performStaticReview rejects placeholder-only Goal Check evidence rows', (t
 
   fs.mkdirSync(missionDir, { recursive: true });
   fs.writeFileSync(checkpointPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| Works | Tested manually | Looks good |\n');
-  mock.method(missionUtils, 'getPrimaryBranch', () => 'main');
-
   try {
     const result = performStaticReview('task-placeholder', {
       resolveWorktree: () => rootDir,
@@ -176,6 +174,7 @@ test('performStaticReview rejects placeholder-only Goal Check evidence rows', (t
       findCheckpoints: () => [checkpointPath],
       readFileSync: fs.readFileSync,
       run: () => ({ status: 0, stdout: '' }),
+      getPrimaryBranch: () => 'main',
       log: () => {}
     });
 
@@ -194,8 +193,6 @@ test('performStaticReview accepts a shell command that references an existing re
   fs.mkdirSync(missionDir, { recursive: true });
   fs.writeFileSync(path.join(rootDir, 'hello.sh'), '#!/usr/bin/env bash\necho hello\n');
   fs.writeFileSync(checkpointPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| Script works | `bash hello.sh` prints hello | PASS |\n');
-  mock.method(missionUtils, 'getPrimaryBranch', () => 'main');
-
   try {
     const result = performStaticReview('task-shell-command', {
       resolveWorktree: () => rootDir,
@@ -203,6 +200,7 @@ test('performStaticReview accepts a shell command that references an existing re
       findCheckpoints: () => [checkpointPath],
       readFileSync: fs.readFileSync,
       run: () => ({ status: 0, stdout: '' }),
+      getPrimaryBranch: () => 'main',
       log: () => {}
     });
 
@@ -220,8 +218,6 @@ test('performStaticReview rejects separator-only Goal Check tables', (t) => {
 
   fs.mkdirSync(missionDir, { recursive: true });
   fs.writeFileSync(checkpointPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n|---|---|---|\n');
-  mock.method(missionUtils, 'getPrimaryBranch', () => 'main');
-
   try {
     const result = performStaticReview('task-separator', {
       resolveWorktree: () => rootDir,
@@ -229,6 +225,7 @@ test('performStaticReview rejects separator-only Goal Check tables', (t) => {
       findCheckpoints: () => [checkpointPath],
       readFileSync: fs.readFileSync,
       run: () => ({ status: 0, stdout: '' }),
+      getPrimaryBranch: () => 'main',
       log: () => {}
     });
 
@@ -250,8 +247,6 @@ test('performStaticReview accepts Goal Check evidence that cites a real test nam
   fs.writeFileSync(testFilePath, "const test = _require('node:test');\ntest('real evidence title', () => {});\n");
   fs.mkdirSync(missionDir, { recursive: true });
   fs.writeFileSync(checkpointPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| Test title cited | test `real evidence title` | PASS |\n');
-  mock.method(missionUtils, 'getPrimaryBranch', () => 'main');
-
   try {
     const result = performStaticReview('task-test-name', {
       resolveWorktree: () => rootDir,
@@ -259,6 +254,7 @@ test('performStaticReview accepts Goal Check evidence that cites a real test nam
       findCheckpoints: () => [checkpointPath],
       readFileSync: fs.readFileSync,
       run: () => ({ status: 0, stdout: '' }),
+      getPrimaryBranch: () => 'main',
       log: () => {}
     });
 
@@ -270,11 +266,9 @@ test('performStaticReview accepts Goal Check evidence that cites a real test nam
 });
 
 test('performStaticReview accepts an existing repository checkpoint sample', (t) => {
-  const { mock } = t;
   const repoRoot = path.resolve(import.meta.dirname, '..');
   const sampleMissionDir = path.join(repoRoot, 'missions', 'task-1398');
   const sampleCheckpoint = path.join(sampleMissionDir, 'CP-4.md');
-  mock.method(missionUtils, 'getPrimaryBranch', () => 'main');
 
   const result = performStaticReview('task-1398', {
     resolveWorktree: () => repoRoot,
@@ -282,6 +276,7 @@ test('performStaticReview accepts an existing repository checkpoint sample', (t)
     findCheckpoints: () => [sampleCheckpoint],
     readFileSync: fs.readFileSync,
     run: () => ({ status: 0, stdout: '' }),
+    getPrimaryBranch: () => 'main',
     log: () => {}
   });
 
