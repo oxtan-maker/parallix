@@ -39,7 +39,7 @@ function findTsFiles(dir: string): string[] {
 const DESIGNATED_WRITER = 'src/adapters/sqlite/mission-store.ts';
 
 /** The seam that used to write lane events itself and now delegates. */
-const MARKDOWN_TRANSITION_MODULE = 'src/adapters/backlog/backlog.ts';
+const MARKDOWN_TRANSITION_MODULE = 'src/adapters/backlog/task-transitions.ts';
 
 // Files that define, wire or read the event contract. They may name the
 // recorder, repository or table without being a write path.
