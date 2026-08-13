@@ -33,21 +33,19 @@ test('SC 3: active.js runHandoffAndReview calls attemptAgentRelaunch when repair
   assert.ok(activeSource.includes('repairHandoff.isRelaunchableError(handoffResult.error)'), 'Should check isRelaunchableError before calling attemptAgentRelaunch');
 });
 
-test('SC 4: review.js startReviewLoop uses selectAgent for reviewer fallback', () => {
-  // Check review-loop.js since startReviewLoop is now extracted there
-  const reviewLoopSource = fs.readFileSync(path.join(import.meta.dirname, '../src/adapters/review/review-loop.ts'), 'utf8');
-  assert.ok(reviewLoopSource.includes("selectAgentFn('review', { exclude: excludeSet })"), 'Should select reviewer fallback from the review eligibility pool');
-  assert.ok(!reviewLoopSource.includes('fallbackForFn(reviewer, implementer)'), 'Should not call fallbackFor for reviewer fallback');
+test('SC 4: reviewer fallback uses the review eligibility selector', () => {
+  const fallbackSource = fs.readFileSync(path.join(import.meta.dirname, '../src/adapters/review/review-agent-fallback.ts'), 'utf8');
+  assert.ok(fallbackSource.includes('fallback = selectReviewer(excludeSet)'), 'Should select reviewer fallback from the review eligibility pool');
+  assert.ok(!fallbackSource.includes('fallbackForFn(reviewer, implementer)'), 'Should not call fallbackFor for reviewer fallback');
   // Verify the implementer check was removed
-  assert.ok(!reviewLoopSource.includes('if (!agents.includes(implementer))') || reviewLoopSource.includes('// The strict implementer eligibility check was removed'), 'Implementer eligibility check should be removed or commented');
+  assert.ok(!fallbackSource.includes('if (!agents.includes(implementer))') || fallbackSource.includes('// The strict implementer eligibility check was removed'), 'Implementer eligibility check should be removed or commented');
 });
 
-test('SC 5: review.js does not update Backlog task on reviewer fallback', () => {
-  // Check review-loop.js since applyAgentFallback is now extracted there
-  const reviewLoopSource = fs.readFileSync(path.join(import.meta.dirname, '../src/adapters/review/review-loop.ts'), 'utf8');
-  assert.ok(!reviewLoopSource.includes('workflow(${slug}): fallback reviewer from'), 'Should not contain reviewer fallback commit message pattern');
-  assert.ok(reviewLoopSource.includes("if (role === 'implementer' && taskResolution && taskResolution.ok)"), 'Backlog assignee enforcement should be guarded to implementer fallback');
-  assert.ok(reviewLoopSource.includes('enforceTaskAssigneeFn(taskResolution.taskFile, fallback)'), 'Implementer fallback should still enforce Backlog assignee');
+test('SC 5: reviewer fallback does not update the Backlog task', () => {
+  const fallbackSource = fs.readFileSync(path.join(import.meta.dirname, '../src/adapters/review/review-agent-fallback.ts'), 'utf8');
+  assert.ok(!fallbackSource.includes('workflow(${slug}): fallback reviewer from'), 'Should not contain reviewer fallback commit message pattern');
+  assert.ok(fallbackSource.includes("if (role === 'implementer' && taskResolution && taskResolution.ok)"), 'Backlog assignee enforcement should be guarded to implementer fallback');
+  assert.ok(fallbackSource.includes('enforceTaskAssigneeFn(taskResolution.taskFile, fallback)'), 'Implementer fallback should still enforce Backlog assignee');
 });
 
 test('SC 6: resume-capable agents use session persistence via startAgent', () => {

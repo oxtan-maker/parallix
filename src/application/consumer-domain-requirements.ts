@@ -206,8 +206,8 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
   {
     id: 'retry-stage-launch-dedupe',
     family: 'retry',
-    fileLocation: 'src/adapters/review/review-loop.ts',
-    line: 67,
+    fileLocation: 'src/adapters/review/review-agent-fallback.ts',
+    line: 52,
     anchor: 'function stageLaunchFingerprint',
     reads: ['AgentRunMeasurement', 'Review'],
     requirement:
@@ -307,7 +307,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'review-loop-round-progression',
     family: 'review',
     fileLocation: 'src/adapters/review/review-loop.ts',
-    line: 536,
+    line: 47,
     anchor: 'function startReviewLoop',
     reads: ['Review', 'Mission'],
     requirement:

@@ -30,7 +30,9 @@ const GUARDED_DIRS = ['src/domain', 'src/application', 'src/adapters'] as const;
 const ADR_0053 = 'docs/adr/0053-operational-persistence-and-authority-boundaries.md';
 const DOMAIN_README = 'src/domain/README.md';
 
-const ATTEMPT = /attempt/i;
+// Plural retry counters (for example DEFAULT_MAX_ATTEMPTS) are not an Attempt
+// entity. Identity fields and SQL tables are checked separately below.
+const ATTEMPT = /attempt(?!s(?:\b|_))/i;
 
 /** Strip line, block, and SQL comments so prose cannot trip the guard. */
 function stripComments(source: string): string {
@@ -81,7 +83,7 @@ export function attemptShapedDeclarations(rawSource: string): string[] {
   for (const match of source.matchAll(
     /\b(?:CREATE\s+TABLE(?:\s+IF\s+NOT\s+EXISTS)?|ALTER\s+TABLE|DROP\s+TABLE(?:\s+IF\s+EXISTS)?|INSERT\s+INTO|DELETE\s+FROM|UPDATE|FROM|JOIN)\s+[`"'[]?([A-Za-z_][\w$]*)/gi,
   )) {
-    if (ATTEMPT.test(match[1] as string)) {
+    if (/attempts?/i.test(match[1] as string)) {
       findings.push(`SQL table ${match[1]}`);
     }
   }
