@@ -2,7 +2,7 @@
 id: TASK-2370
 title: update liveness
 status: active
-assignee: [vibe]
+assignee: [codex]
 created_date: '2026-08-13 10:24'
 labels: [ai_sdlc, bug]
 dependencies: []
