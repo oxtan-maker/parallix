@@ -21,6 +21,7 @@ import assert from 'node:assert/strict';
 
 import { ExecuteMissionService } from '../src/application/execute-mission-service.js';
 import type { ExecuteMissionPorts } from '../src/application/ports/execute-mission.js';
+import type { ReviewWorkflowContext } from '../src/application/ports/review-workflow.js';
 import { ReviewCommandUseCase } from '../src/application/review-command-use-case.js';
 import { IntegrateCommandUseCase } from '../src/application/integrate-command-use-case.js';
 import {
@@ -298,8 +299,8 @@ test('px review republishes current work with the family that actually launched'
   const { repo, appended } = makeHistoryRepo();
   const workflow = {
     ...makeReviewWorkflow([]),
-    start: async (context: { options: { onAgentLaunched: (_agent: string, _phase: 'review') => Promise<void> } }) => {
-      await context.options.onAgentLaunched('custom', 'review');
+    start: async (context: ReviewWorkflowContext) => {
+      await (context.options.onAgentLaunched as (_agent: string, _phase: 'review') => Promise<void>)('custom', 'review');
     },
   };
   await new ReviewCommandUseCase(workflow, new CurrentWorkRecorder(repo, { processId: 9 }))
