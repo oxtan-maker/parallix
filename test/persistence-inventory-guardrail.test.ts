@@ -549,6 +549,8 @@ test('SC1 reverse: all durable-IO files under src/ are present in the inventory'
     // operator-named input files. Its Review state is the SQLite aggregate;
     // none of these reads are of a database-owned concept (TASK-2322.12).
     'src/adapters/review/review-commands.ts',
+    'src/adapters/review/review-cli-flags.ts',
+    'src/adapters/review/review-workflow-adapter.ts',
   ]);
 
   const durableIoFiles = new Set<string>();
