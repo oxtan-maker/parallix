@@ -4,7 +4,7 @@ title: Unify weekly agent-performance semantics and lifecycle integration dwell
 status: backlog
 assignee: [codex]
 created_date: '2026-08-13 14:58'
-labels: []
+labels: [ai_sdlc]
 dependencies: []
 ordinal: 91912
 ---
