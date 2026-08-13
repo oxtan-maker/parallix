@@ -7,7 +7,12 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 test('task-2347.08: CLI delegates identity, completion, and window rules to statistics service', () => {
-  const source = fs.readFileSync(path.join(root, 'src/adapters/cli/commands/stats.ts'), 'utf8');
+  // The stats command's report rendering lives in stats-report-rendering.ts
+  // (task-2369.02); the delegation rule covers both halves of the command.
+  const source = [
+    'src/adapters/cli/commands/stats.ts',
+    'src/adapters/cli/commands/stats-report-rendering.ts',
+  ].map(file => fs.readFileSync(path.join(root, file), 'utf8')).join('\n');
   assert.match(source, /statisticsMissionKey\(row\)/);
   assert.match(source, /statisticsRowInWindow\(row, window\)/);
   assert.match(source, /summarizeCompletedMissionWindow\(rows, window, completedMissionKeys\)/);
