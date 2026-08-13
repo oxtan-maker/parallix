@@ -19,7 +19,7 @@ test('task-2279 routes shipped prompts and configuration through the runtime Ass
   }
 
   for (const file of [
-    'src/adapters/cli/commands/draft.ts',
+    'src/adapters/cli/commands/draft-prompts.ts',
     'src/adapters/cli/commands/active.ts',
     'src/adapters/review/review-prompts.ts',
     'src/adapters/agents/agent-config.ts',
