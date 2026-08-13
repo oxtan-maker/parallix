@@ -341,7 +341,6 @@ Notes:
   - This command is for historical stats recovery only.
   - It reads and writes the measurement database (<PARALLIX_HOME>/parallix.db),
     which is the authority for statistics. It never reads or writes a legacy CSV.
-    To import a historical CSV instead, use "px stats import-legacy --csv-file <path>".
   - It uses strict workflow stats derivation for implementer/fix rounds and historical fallbacks for classification.
   - Non-done missions are skipped and unresolved missions are reported without being written.`);
 }

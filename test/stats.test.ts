@@ -18,11 +18,6 @@ const __mm3 = mockModule<typeof import('../src/domain/review.js')>('../src/domai
 await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
 const { agentFamily } = __mm1;
-function writeCsv(contents) {
-  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-stats-')), 'input.csv');
-  fs.writeFileSync(file, contents, 'utf8');
-  return file;
-}
 
 function createRepoFixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-stats-fixture-'));
@@ -62,43 +57,6 @@ function enableForgejoReview(root) {
   }), 'utf8');
   return root;
 }
-
-test('stats report preserves merged/open counts for legacy merged/created_at CSVs', () => {
-  const csv = writeCsv([
-    'mission,implementer,reviewer,pr_link,review_count,merged,state,created_at',
-    'task-1,codex,claude,http://example/pr/1,3,yes,merged,2026-05-01T10:00:00Z',
-    'task-2,codex,claude,http://example/pr/2,0,no,open,2026-05-02T10:00:00Z',
-  ].join('\n'));
-  try {
-    const report = stats._internals.generateMarkdownReport(stats._internals.loadCsv(csv), { groupBy: 'implementer' });
-
-    assert.match(report, /- \*\*Merged:\*\* 1/);
-    assert.match(report, /- \*\*Open\/Closed:\*\* 1/);
-    assert.match(report, /\| codex \| 2 \| 1 \| 1 \| 3 \| 1\.50 \| 2\.00 \|/);
-    assert.match(report, /\| task-1 \| codex \| claude \| 3 \| yes \| 2026-05-01 \|/);
-  } finally {
-    fs.rmSync(path.dirname(csv), { recursive: true, force: true });
-  }
-});
-
-test('stats report normalizes date/has_pr CSVs across summary, implementer, and period views', () => {
-  const csv = writeCsv([
-    'mission,date,implementer,reviewer,pr_link,review_count,has_pr,pr_numbers',
-    'task-1,2026-05-10,gemini,codex,http://example/pr/1,4,yes,PR#1',
-    'task-2,2026-05-11,gemini,none,no PR,0,no,—',
-  ].join('\n'));
-  try {
-    const report = stats._internals.generateMarkdownReport(stats._internals.loadCsv(csv), { groupBy: 'period' });
-
-    assert.match(report, /- \*\*Merged:\*\* 1/);
-    assert.match(report, /- \*\*Open\/Closed:\*\* 1/);
-    assert.match(report, /\| task-1 \| gemini \| codex \| 4 \| yes \| 2026-05-10 \|/);
-    assert.match(report, /\| task-2 \| gemini \| none \| 0 \| no \| 2026-05-11 \|/);
-    assert.match(report, /\| 2026-05-10 → 2026-05-11 \| 2 \| 2 \| 1 \| 1 \| 4 \| 2\.00 \|/);
-  } finally {
-    fs.rmSync(path.dirname(csv), { recursive: true, force: true });
-  }
-});
 
 test('upsertMeasurementRow persists the workflow stats schema and updates existing missions idempotently', () => {
   const dbFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-stats-upsert-')), 'parallix.db');
@@ -627,195 +585,26 @@ test('task-1414: renderWeeklyStatsReport spend table renders a stable empty stat
   assert.doesNotMatch(spendSection, /0%/);
 });
 
-test('stats command prints workflow weekly tables from the integration stats schema', () => {
-  const csv = writeCsv([
-    'date,mission,classification,implementer,pr_fix_rounds',
-    '2026-05-18,task-a,ai_sdlc,codex,2',
-    '2026-05-12,task-b,user_value,gemini,1',
-    '2026-05-11,task-c,ai_sdlc,claude,4',
-  ].join('\n'));
-  try {
-    const logs = [];
-
-    stats.default(['--csv-file', csv, '--today', '2026-05-18'], {
-      log: line => logs.push(line),
-      error: line => logs.push(`ERR:${line}`),
-      exit: code => {
-        throw new Error(`unexpected exit ${code}`);
-      },
-    });
-
-    const output = logs.join('\n');
-    assert.match(output, /Mission flow unavailable: lifecycle history was not read/);
-    assert.match(output, /Agent telemetry — current week/);
-    assert.match(output, /Agent spend by stage this week/);
-    assert.match(output, /Agent performance unavailable: lifecycle history was not read/);
-  } finally {
-    fs.rmSync(path.dirname(csv), { recursive: true, force: true });
-  }
-});
-
-test('stats --csv-file does not initialize PARALLIX_HOME', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-stats-explicit-'));
-  const home = path.join(root, 'parallix-home');
-  const csv = path.join(root, 'explicit.csv');
-  fs.writeFileSync(csv, 'date,mission,classification,implementer,pr_fix_rounds\n');
-  const previousHome = process.env.PARALLIX_HOME;
-  try {
-    process.env.PARALLIX_HOME = home;
-    stats.default(['--csv-file', csv], {
-      log: () => {},
-      error: message => {
-        throw new Error(message);
-      },
-      exit: code => {
-        throw new Error(`unexpected exit ${code}`);
-      }
-    });
-    assert.equal(fs.existsSync(home), false);
-  } finally {
-    if (previousHome === undefined) delete process.env.PARALLIX_HOME;
-    else process.env.PARALLIX_HOME = previousHome;
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test('stats command prints workflow arbitrary range tables from the integration stats schema', () => {
-  const csv = writeCsv([
-    'date,mission,classification,implementer,pr_fix_rounds',
-    '2026-04-30,task-before,user_value,claude,5',
-    '2026-05-01,task-start,ai_sdlc,codex,2',
-    '2026-05-20,task-mid,user_value,gemini,1',
-    '2026-05-31,task-end,user_value,codex,4',
-    '2026-06-01,task-after,ai_sdlc,custom,0',
-  ].join('\n'));
-  try {
-    const logs = [];
-
-    stats.default(['--csv-file', csv, '--from', '2026-05-01', '--to', '2026-05-31'], {
-      log: line => logs.push(line),
-      error: line => logs.push(`ERR:${line}`),
-      exit: code => {
-        throw new Error(`unexpected exit ${code}`);
-      },
-    });
-
-    const output = __mm2.stripAnsi(logs.join('\n'));
-    assert.match(output, /Mission flow \(2026-05-01 → 2026-05-31\)/);
-    assert.match(output, /Mission flow unavailable: lifecycle history was not read/);
-    assert.match(output, /Agent telemetry missions \(2026-05-01 → 2026-05-31\)/);
-    assert.match(output, /Agent performance unavailable: lifecycle history was not read/);
-    assert.doesNotMatch(output, /task-before/);
-    assert.doesNotMatch(output, /Agent telemetry — current week/);
-  } finally {
-    fs.rmSync(path.dirname(csv), { recursive: true, force: true });
-  }
-});
-
-test('stats command does not treat --today value as a positional CSV path', () => {
-  const csv = writeCsv([
-    'date,mission,classification,implementer,pr_fix_rounds',
-    '2026-05-18,task-a,ai_sdlc,codex,2',
-  ].join('\n'));
-  const outputFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-stats-output-')), 'report.txt');
-  try {
-    const logs = [];
-
-    stats.default(['--csv-file', csv, '--today', '2026-05-18', '--output', outputFile], {
-      log: line => logs.push(line),
-      error: line => logs.push(`ERR:${line}`),
-      exit: code => {
-        throw new Error(`unexpected exit ${code}`);
-      },
-    });
-
-    const output = logs.join('\n');
-    assert.match(output, new RegExp(`Report written to ${outputFile.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
-  } finally {
-    fs.rmSync(path.dirname(outputFile), { recursive: true, force: true });
-    fs.rmSync(path.dirname(csv), { recursive: true, force: true });
-  }
-});
-
-test('stats command writes arbitrary range report to --output without printing report body', () => {
-  const csv = writeCsv([
-    'date,mission,classification,implementer,pr_fix_rounds',
-    '2026-05-18,task-a,ai_sdlc,codex,2',
-  ].join('\n'));
-  const outputFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-stats-range-output-')), 'report.txt');
-  try {
-    const logs = [];
-
-    stats.default(['--csv-file', csv, '--from', '2026-05-01', '--to', '2026-05-31', '--output', outputFile], {
-      log: line => logs.push(line),
-      error: line => logs.push(`ERR:${line}`),
-      exit: code => {
-        throw new Error(`unexpected exit ${code}`);
-      },
-    });
-
-    const stdout = __mm2.stripAnsi(logs.join('\n'));
-    assert.match(stdout, new RegExp(`Report written to ${outputFile.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
-    assert.doesNotMatch(stdout, /Mission flow \(2026-05-01 → 2026-05-31\)/);
-    assert.match(fs.readFileSync(outputFile, 'utf8'), /Mission flow \(2026-05-01 → 2026-05-31\)/);
-  } finally {
-    fs.rmSync(path.dirname(outputFile), { recursive: true, force: true });
-    fs.rmSync(path.dirname(csv), { recursive: true, force: true });
-  }
-});
-
 test('stats command exits non-zero and prints date-range diagnostics for invalid range flags', () => {
-  const csv = writeCsv([
-    'date,mission,classification,implementer,pr_fix_rounds',
-    '2026-05-18,task-a,ai_sdlc,codex,2',
-  ].join('\n'));
-  try {
-    const logs = [];
-    const exits = [];
+  const logs = [];
+  const exits = [];
 
-    stats.default(['--csv-file', csv, '--from', '2026-05-01'], {
-      log: line => logs.push(line),
-      error: line => logs.push(`ERR:${line}`),
-      exit: code => exits.push(code),
-    });
+  stats.default(['--from', '2026-05-01'], {
+    log: line => logs.push(line),
+    error: line => logs.push(`ERR:${line}`),
+    exit: code => exits.push(code),
+  });
 
-    stats.default(['--csv-file', csv, '--from', '2026-06-01', '--to', '2026-05-31'], {
-      log: line => logs.push(line),
-      error: line => logs.push(`ERR:${line}`),
-      exit: code => exits.push(code),
-    });
+  stats.default(['--from', '2026-06-01', '--to', '2026-05-31'], {
+    log: line => logs.push(line),
+    error: line => logs.push(`ERR:${line}`),
+    exit: code => exits.push(code),
+  });
 
-    const output = logs.join('\n');
-    assert.deepEqual(exits, [1, 1]);
-    assert.match(output, /Invalid date range argument --to/);
-    assert.match(output, /Invalid date range argument --from\/--to/);
-  } finally {
-    fs.rmSync(path.dirname(csv), { recursive: true, force: true });
-  }
-});
-
-test('stats command keeps legacy retrospective CSVs on the markdown report path when range flags are present', () => {
-  const csv = writeCsv([
-    'mission,implementer,reviewer,pr_link,review_count,merged,state,created_at',
-    'task-1,codex,claude,http://example/pr/1,3,yes,merged,2026-05-01T10:00:00Z',
-  ].join('\n'));
-  try {
-    const logs = [];
-
-    stats.default(['--csv-file', csv, '--from', '2026-05-01', '--to', '2026-05-31'], {
-      log: line => logs.push(line),
-      error: line => logs.push(`ERR:${line}`),
-      exit: code => {
-        throw new Error(`unexpected exit ${code}`);
-      },
-    });
-
-    const output = logs.join('\n');
-    assert.match(output, /# Forgejo Stats Report/);
-    assert.doesNotMatch(output, /Mission flow \(2026-05-01 → 2026-05-31\)/);
-  } finally {
-    fs.rmSync(path.dirname(csv), { recursive: true, force: true });
-  }
+  const output = logs.join('\n');
+  assert.deepEqual(exits, [1, 1]);
+  assert.match(output, /Invalid date range argument --to/);
+  assert.match(output, /Invalid date range argument --from\/--to/);
 });
 
 test('stats command help documents the pre-integration preview workflow', () => {
@@ -837,8 +626,7 @@ test('stats command help documents the pre-integration preview workflow', () => 
   // SC4: the help text names the database as the statistics authority.
   assert.match(output, /The measurement DATABASE is the authority for statistics/);
   assert.match(output, /<PARALLIX_HOME>\/parallix\.db/);
-  assert.match(output, /No default run resolves, reads, or writes stats\.csv/);
-  assert.match(output, /px stats import-legacy --csv-file/);
+  assert.doesNotMatch(output, /stats\.csv|import-legacy|--csv-file/);
 });
 
 test('recordIntegrationStats reads backlog classification and Review aggregate final implementer/fix rounds', async () => {
@@ -1381,31 +1169,29 @@ test('task-1251 and task-1314: normalizeStatsRow migrates a legacy 5-column row 
 test('task-1314: stats mission reports filter to the active repo', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-stats-mission-repo-'));
   try {
-    const csvFile = path.join(root, 'stats.csv');
+    const dbPath = path.join(root, 'parallix.db');
+    const repo = stats.resolveStatsRepoName(root);
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
       product: { name: 'visualboard' },
     }), 'utf8');
 
-    const rows = [
-      [
-        '2026-06-10', 'visualboard', 'task-alpha', 'ai_sdlc', 'codex', '1',
-        'openai', 'gpt-5.4-mini', 'codex', '', 'draft',
-        '11', '12', '13', '0', '14', '15', '0', '1', '0', '2', '0', 'yes'
-      ],
-      [
-        '2026-06-10', 'parallix', 'task-alpha', 'user_value', 'gemini', '2',
-        'google', 'gemini-2.5-pro', 'gemini', '', 'review',
-        '21', '22', '23', '0', '24', '25', '0', '2', '0', '3', '0', 'yes'
-      ],
-    ];
-    fs.writeFileSync(csvFile, [
-      stats.STATS_HEADERS.join(','),
-      ...rows.map(values => values.join(',')),
-    ].join('\n'), 'utf8');
+    stats.upsertMeasurementRow({
+      date: '2026-06-10', repo, mission: 'task-alpha', classification: 'ai_sdlc',
+      implementer: 'codex', pr_fix_rounds: '1', provider: 'openai', model: 'gpt-5.4-mini',
+      implementer_agent: 'codex', stage: 'draft', input_tokens: '11', output_tokens: '12',
+      cached_tokens: '13', context_tokens: '14', tool_calls: '15', openai_usage_after: '1', duration_minutes: '2',
+    }, { dbPath });
+    stats.upsertMeasurementRow({
+      date: '2026-06-10', repo: 'parallix', mission: 'task-alpha', classification: 'user_value',
+      implementer: 'gemini', pr_fix_rounds: '2', provider: 'google', model: 'gemini-2.5-pro',
+      implementer_agent: 'gemini', stage: 'review', input_tokens: '21', output_tokens: '22',
+      cached_tokens: '23', context_tokens: '24', tool_calls: '25', openai_usage_after: '2', duration_minutes: '3',
+    }, { dbPath });
 
     const logs = [];
-    stats.default(['--csv-file', csvFile, '--mission', 'task-alpha'], {
+    stats.default(['--mission', 'task-alpha'], {
       rootDir: root,
+      dbPath,
       log: line => logs.push(line),
       error: line => logs.push(`ERR:${line}`),
       exit: code => {

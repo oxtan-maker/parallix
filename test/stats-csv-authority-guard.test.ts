@@ -16,9 +16,7 @@ import { ADR0053_PERSISTENCE_INVENTORY } from './fixtures/durable-state-inventor
 /**
  * TASK-2322.08 CP-4: prove no UNCLASSIFIED `stats.csv` read or write survives.
  *
- * "Classified" means: the only source location that may mention a stats CSV is
- * the explicitly named legacy import/analysis boundary, and that boundary is
- * declared in the ADR 0053 inventory as `explicit-one-way-legacy-input`.
+ * Statistics are SQLite-owned; source code must not retain a stats CSV path.
  */
 
 const SRC_ROOT = path.resolve(__dirname, '..', 'src');
@@ -43,16 +41,9 @@ function stripComments(source: string): string {
     .replace(/^[ \t]*\/\/.*$/gm, '');
 }
 
-test('no source file outside the named legacy boundary references stats.csv in executable code', () => {
-  // `stats.ts` owns `readLegacyStatsCsv` / `analyzeLegacyStatsCsv`, the single
-  // explicit read-only boundary. Everything else must be silent about stats.csv.
-  const allowed = new Set([
-    path.join(SRC_ROOT, 'adapters', 'cli', 'commands', 'stats.ts'),
-  ]);
-
+test('no source file references stats.csv in executable code', () => {
   const offenders: string[] = [];
   for (const file of sourceFiles(SRC_ROOT)) {
-    if (allowed.has(file)) { continue; }
     const code = stripComments(fs.readFileSync(file, 'utf8'));
     if (/stats\.csv/.test(code)) {
       offenders.push(path.relative(SRC_ROOT, file));
@@ -84,14 +75,14 @@ test('no source file resolves a default stats CSV path or writes CSV for statist
   assert.deepEqual(offenders, [], `removed CSV helper still called: ${offenders.join(', ')}`);
 });
 
-test('the only stats CSV boundary in the ADR 0053 inventory is an explicit one-way legacy input', () => {
+test('the ADR 0053 inventory has no stats CSV compatibility boundary', () => {
   const statsEntries = ADR0053_PERSISTENCE_INVENTORY.filter(
     (entry: any) => entry.fileLocation === 'src/adapters/cli/commands/stats.ts'
       && (entry.concept === 'AgentRunMeasurement' || entry.concept === 'MissionOutcome'),
   );
   assert.deepEqual(
     statsEntries.map((entry: any) => [entry.id, entry.operation, entry.classification]),
-    [['measurement-legacy-csv-import', 'read', 'explicit-one-way-legacy-input']],
+    [],
   );
 
   // The default measurement authority is the SQLite store, for both concepts.
