@@ -653,7 +653,7 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     id: 'secrets-forgejo-home',
     concept: 'Secrets',
     pathType: 'default',
-    fileLocation: 'src/adapters/forgejo/forgejo.ts',
+    fileLocation: 'src/adapters/forgejo/forgejo-auth.ts',
     operation: 'read',
     classification: 'configuration-or-secret',
     cutoverTask: null,

@@ -10,6 +10,7 @@ import os from 'os';
 import path from 'path';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
 const getPrStatusModule = mockModule<typeof import('../src/adapters/forgejo/forgejo.js')>('../src/adapters/forgejo/forgejo.js', import.meta.url);
+const forgejoAuthModule = mockModule<typeof import('../src/adapters/forgejo/forgejo-auth.js')>('../src/adapters/forgejo/forgejo-auth.js', import.meta.url);
 const git = mockModule<typeof import('../src/adapters/git/git.js')>('../src/adapters/git/git.js', import.meta.url);
 const backlog = mockModule<typeof import('../src/adapters/backlog/backlog.js')>('../src/adapters/backlog/backlog.js', import.meta.url);
 const missionUtils = mockModule<typeof import('../src/adapters/filesystem/mission-utils.js')>('../src/adapters/filesystem/mission-utils.js', import.meta.url);
@@ -17,7 +18,8 @@ const verification = mockModule<typeof import('../src/adapters/verification/veri
 const authenticatedReviewUrlModule = mockModule<typeof import('../src/adapters/forgejo/forgejo.js')>('../src/adapters/forgejo/forgejo.js', import.meta.url);
 const ensureRemoteBaseBranchModule = mockModule<typeof import('../src/adapters/forgejo/forgejo.js')>('../src/adapters/forgejo/forgejo.js', import.meta.url);
 await installModuleMocks();
-const { getPrStatus, getPrNumber, getPrAuthor, getLatestReviewDecision, syncMerged, createPr, forgejoAvailable, postReview, resolveForgejoUser, getComments, postComment, resolveForgejoHome, resolveTokenFile, readToken, isForgejoPath, fetchReviewBranch } = getPrStatusModule;
+const { getPrStatus, getPrNumber, getPrAuthor, getLatestReviewDecision, syncMerged, createPr, forgejoAvailable, postReview, resolveForgejoUser, getComments, postComment, isForgejoPath, fetchReviewBranch } = getPrStatusModule;
+const { resolveForgejoHome, resolveTokenFile, readToken } = forgejoAuthModule;
 const { authenticatedReviewUrl } = authenticatedReviewUrlModule;
 const { ensureRemoteBaseBranch } = ensureRemoteBaseBranchModule;
 const { mock } = test;
