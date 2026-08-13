@@ -9,6 +9,7 @@ import path from 'path';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
 const missionUtils = mockModule<typeof import('../src/adapters/filesystem/mission-utils.js')>('../src/adapters/filesystem/mission-utils.js', import.meta.url);
 const draftLib = mockModule<typeof import('../src/adapters/cli/commands/draft.js')>('../src/adapters/cli/commands/draft.js', import.meta.url);
+mockModule<typeof import('../src/adapters/cli/commands/draft-prompts.js')>('../src/adapters/cli/commands/draft-prompts.js', import.meta.url);
 const stats = mockModule<typeof import('../src/adapters/cli/commands/stats.js')>('../src/adapters/cli/commands/stats.js', import.meta.url);
 const __mm1 = mockModule<typeof import('../src/composition/application-services.js')>('../src/composition/application-services.js', import.meta.url);
 await installModuleMocks();
