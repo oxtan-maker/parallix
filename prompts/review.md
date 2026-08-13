@@ -8,7 +8,7 @@ Load before reviewing:
 - locked mission at `{{missionPath}}`
 - final checkpoint document, if present
 - diff: `git diff {{reviewBaseline}}..HEAD`
-- review history: `px status {{slug}}`, whose `Review:` block reports the current round, phase, and disposition, then every prior round with its reviewer and implementer families, verdict, comment, findings, fixes, and pushbacks. This is projected from the operator database, not from your own context.
+- review history: `px status {{slug}}`, whose `Review:` block reports the current round, phase, and disposition, then each recorded round with its reviewer and implementer families, verdict, comment, findings, fixes, and pushbacks. This is projected from the operator database, not from your own context.
 
 Review history is not optional context:
 - You may not be the agent family that reviewed the previous round. When a family is usage-blocked the workflow reroutes the launch, so the round-1 reviewer's context is simply gone. `px status {{slug}}` is how that continuity is preserved.
