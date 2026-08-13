@@ -1,10 +1,7 @@
 import * as http from 'node:http';
 import * as https from 'node:https';
 import { spawnSync } from 'node:child_process';
-// Circular import with forgejo.ts — safe because both crossing bindings are
-// hoisted function declarations and neither module runs top-level code that
-// touches the other. Would break if either gains module-level state.
-import { resolveForgejoSettings } from './forgejo.js';
+import { resolveForgejoSettings } from './forgejo-auth.js';
 
 const HTTP_REQUEST_TIMEOUT = 5000;
 

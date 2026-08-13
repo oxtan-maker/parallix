@@ -7,12 +7,12 @@ import EventEmitter from 'events';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
 
 // Register all modules that participate in the dependency chain.
-// forgejo-api.ts imports from node:child_process, node:http, node:https, and forgejo.ts.
+// forgejo-api.ts imports from node:child_process, node:http, node:https, and forgejo-auth.ts.
 // Registering them with mockModule ensures re-linked forgejo-api.ts sees facades.
 const forgejoApiModule = mockModule<typeof import('../src/adapters/forgejo/forgejo-api.js')>(
   '../src/adapters/forgejo/forgejo-api.js', import.meta.url);
-const forgejoModule = mockModule<typeof import('../src/adapters/forgejo/forgejo.js')>(
-  '../src/adapters/forgejo/forgejo.js', import.meta.url);
+const forgejoAuthModule = mockModule<typeof import('../src/adapters/forgejo/forgejo-auth.js')>(
+  '../src/adapters/forgejo/forgejo-auth.js', import.meta.url);
 const childProcessModule = mockModule<typeof import('node:child_process')>('node:child_process', import.meta.url);
 const httpModule = mockModule<typeof import('node:http')>('node:http', import.meta.url);
 const httpsModule = mockModule<typeof import('node:https')>('node:https', import.meta.url);
@@ -26,7 +26,7 @@ const { forgejoApi, forgejoApiAsync, HTTP_REQUEST_TIMEOUT, codexSandboxHint } = 
 // --- Helpers ---
 
 function mockResolveForgejoSettings() {
-  mock.method(forgejoModule, 'resolveForgejoSettings', (_rootDir) => ({
+  mock.method(forgejoAuthModule, 'resolveForgejoSettings', (_rootDir) => ({
     url: 'http://localhost:3300',
     repo: 'magnus/testproj',
   }));
@@ -232,7 +232,7 @@ test('forgejoApi constructs correct URL from settings', () => {
 
 test('forgejoApi uses rootDir option for settings resolution', () => {
   let capturedRootDir = null;
-  mock.method(forgejoModule, 'resolveForgejoSettings', (rootDir) => {
+  mock.method(forgejoAuthModule, 'resolveForgejoSettings', (rootDir) => {
     capturedRootDir = rootDir;
     return { url: 'http://localhost:3300', repo: 'magnus/testproj' };
   });
@@ -429,7 +429,7 @@ test('forgejoApiAsync uses default HTTP_REQUEST_TIMEOUT when no timeout option',
 });
 
 test('forgejoApiAsync uses https transport for https URLs', async () => {
-  mock.method(forgejoModule, 'resolveForgejoSettings', () => ({
+  mock.method(forgejoAuthModule, 'resolveForgejoSettings', () => ({
     url: 'https://forgejo.example.com',
     repo: 'owner/repo',
   }));
