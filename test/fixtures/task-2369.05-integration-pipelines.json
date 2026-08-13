@@ -1,0 +1,6 @@
+{
+  "gates": {
+    "server": { "command": "echo server", "order": 1, "areas": ["server"] },
+    "web-e2e": { "command": "echo e2e", "order": 2, "areas": ["web-client"], "run_last": true }
+  }
+}

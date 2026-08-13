@@ -545,12 +545,19 @@ test('SC1 reverse: all durable-IO files under src/ are present in the inventory'
     'src/adapters/verification/temp-root-registry.ts',
     // Red-green reproduction test tracking — reads mission docs for test markers
     'src/adapters/verification/redgreen.ts',
+    // Gate planning reads pipeline configuration and observes worktrees; it
+    // does not own an ADR 0053 durable-state concept.
+    'src/adapters/cli/commands/integrate-gates.ts',
     // Review command surface — reads mission documents, checkpoints, ADRs and
     // operator-named input files. Its Review state is the SQLite aggregate;
     // none of these reads are of a database-owned concept (TASK-2322.12).
     'src/adapters/review/review-commands.ts',
     'src/adapters/review/review-cli-flags.ts',
     'src/adapters/review/review-workflow-adapter.ts',
+    // Local Forgejo setup writes credentials and product configuration, not
+    // domain state owned by the operator database.
+    'src/adapters/review/setup-review-auth.ts',
+    'src/adapters/review/setup-review-config.ts',
   ]);
 
   const durableIoFiles = new Set<string>();

@@ -147,11 +147,11 @@ function getMeasurementStore(options: StatsOptions = {}) {
 // @ts-ignore -- retained reporting helper is dynamically typed
 function measurementToStatsRow(record): StatsRow {
 // @ts-ignore -- retained reporting helper is dynamically typed
-  const numeric = (value) => (value === null || value === undefined ? '0' : String(value));
+  const numeric = (value: unknown) => (value === null || value === undefined ? '0' : String(value));
   // `pr_fix_rounds` is the one measurement that is genuinely nullable: an
   // unknown number of review-fix rounds is not a measured zero, and collapsing
   // it here would inflate every observation count downstream (TASK-2369).
-  const nullableNumeric = (value) => (value === null || value === undefined ? undefined : String(value));
+  const nullableNumeric = (value: unknown) => (value === null || value === undefined ? undefined : String(value));
   return {
     date: record.date || '',
     repo: record.repo || '',
@@ -1926,7 +1926,7 @@ function defaultPrFixRounds(slug: string, rootDir: string, provided: string | nu
  * @param {RecordActiveStatsOptions} options
  */
 // @ts-expect-error recordActiveStats options missing slug
-function recordActiveStats(options: {slug: string, stage?: string, rootDir?: string, implementer?: string, prFixRounds?: string, telemetry?: any, durationMinutes?: number, model?: string} = {}) {
+function recordActiveStats(options: {slug: string, stage?: string, rootDir?: string, implementer?: string, prFixRounds?: string, telemetry?: any, durationMinutes?: number, model?: string, store?: unknown, dbPath?: string} = {}) {
   /** @type {any} */
   const opts = options;
   const { stage = 'active', slug, rootDir = process.cwd(), prFixRounds, model, ...rest } = opts;
@@ -1941,7 +1941,7 @@ function recordActiveStats(options: {slug: string, stage?: string, rootDir?: str
  * @param {RecordReviewStatsOptions} options
  */
 // @ts-expect-error recordReviewStats options missing slug
-function recordReviewStats(options: {slug: string, stage?: string, rootDir?: string, reviewer?: string, implementer?: string, prFixRounds?: string, model?: string} = {}) {
+function recordReviewStats(options: {slug: string, stage?: string, rootDir?: string, reviewer?: string, implementer?: string, prFixRounds?: string, model?: string, store?: unknown, dbPath?: string} = {}) {
   /** @type {any} */
   const opts = options;
   const { stage = 'review', slug, rootDir = process.cwd(), reviewer, implementer, prFixRounds, model, ...rest } = opts;
