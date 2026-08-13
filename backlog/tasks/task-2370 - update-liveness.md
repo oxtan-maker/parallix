@@ -1,8 +1,8 @@
 ---
 id: TASK-2370
 title: update liveness
-status: refined
-assignee: [codex]
+status: active
+assignee: [claude]
 created_date: '2026-08-13 10:24'
 labels: [ai_sdlc, bug]
 dependencies: []
