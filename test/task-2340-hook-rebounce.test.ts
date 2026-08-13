@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { classifyHookFailure, handleHookFailureAutoBounce } from '../src/adapters/cli/commands/rebase.js';
 import rebase from '../src/adapters/cli/commands/rebase.js';
 import { classifyHookFailure as classifyHookFailureIntegrate, handleHookFailureAutoBounce as handleHookFailureAutoBounceIntegrate } from '../src/adapters/cli/commands/integrate.js';
+import { classifyHookFailure as classifyHookFailureShared, handleHookFailureAutoBounce as handleHookFailureAutoBounceShared, MAX_HOOK_RETRY, type HookRebouncePort } from '../src/application/hook-failure-workflow.js';
 import { handleGateFailureAutoBounce } from '../src/adapters/review/review-loop.js';
 import { ReviewState } from '../src/adapters/review/review-state.js';
 
@@ -509,5 +510,89 @@ describe('Pre-review lifecycle hook rebounce', () => {
     assert.equal(persistedMetadata.hookFailureRetryCount, 1);
     assert.equal(persistedMetadata.gateFailureRetryCount, undefined);
     assert.match(prompt, /GIT HOOK FAILURE/);
+  });
+});
+
+describe('Shared hook-failure-workflow module — TASK-2369.17', () => {
+  it('exports classifyHookFailure identical to rebase and integrate copies', () => {
+    assert.equal(classifyHookFailureShared('pre-commit: error').hookType, 'pre-commit');
+    assert.equal(classifyHookFailureShared('hook failed').hookType, 'hook');
+    assert.equal(classifyHookFailureShared('CONFLICT').isHookFailure, false);
+    // Verify same function via re-export chain
+    assert.equal(classifyHookFailureShared('pre-commit: x').hookType, classifyHookFailure('pre-commit: x').hookType);
+    assert.equal(classifyHookFailureShared('pre-commit: x').hookType, classifyHookFailureIntegrate('pre-commit: x').hookType);
+  });
+
+  it('exports MAX_HOOK_RETRY with value 2', () => {
+    assert.equal(MAX_HOOK_RETRY, 2);
+  });
+
+  it('shared handleHookFailureAutoBounce works with port-based injection', async () => {
+    const port: HookRebouncePort = {
+      startAgent: async () => ({ agent: 'claude', result: { status: 0 } }),
+      readReviewState: async () => ({ metadata: {} }),
+      writeReviewState: async () => {},
+      persistReviewState: async (_s, _state, _wt, _store) => {},
+      exit: () => {},
+      transitionTask: async () => {},
+      applyAgentFallback: async () => {},
+      selectAgent: () => 'claude',
+      workflowLauncherStatus: () => ({ available: true, agent: 'claude' }),
+      resolveTaskFile: () => ({ ok: true, task: { assignee: 'claude' }, taskFile: '/task.md' }),
+      getTaskImplementer: () => 'claude',
+    };
+    const result = await handleHookFailureAutoBounceShared(
+      'test-slug', '/worktree', 'pre-commit: error', { hookType: 'pre-commit' }, port
+    );
+    assert.ok(result);
+  });
+
+  it('shared handleHookFailureAutoBounce strands at max retries', async () => {
+    const port: HookRebouncePort = {
+      startAgent: async () => ({ agent: 'claude', result: { status: 0 } }),
+      readReviewState: async () => ({ metadata: { hookFailureRetryCount: 2 } }),
+      writeReviewState: async () => {},
+      persistReviewState: async () => {},
+      exit: () => {},
+      transitionTask: async () => {},
+      applyAgentFallback: async () => {},
+      selectAgent: () => 'claude',
+      workflowLauncherStatus: () => ({ available: true, agent: 'claude' }),
+      resolveTaskFile: () => ({ ok: true, task: { assignee: 'claude' }, taskFile: '/task.md' }),
+      getTaskImplementer: () => 'claude',
+    };
+    const result = await handleHookFailureAutoBounceShared(
+      'test-slug', '/worktree', 'pre-commit: error', { hookType: 'pre-commit' }, port
+    );
+    assert.ok(!result);
+  });
+
+  it('integrate wrapper delegates to shared module (same classification)', () => {
+    // Both paths use same classifyHookFailure — verify re-export chain
+    assert.strictEqual(classifyHookFailureIntegrate, classifyHookFailureShared);
+  });
+
+  it('integrate squash-commit retry path uses shared classification', async () => {
+    let persistedMetadata: any = null;
+    const port: HookRebouncePort = {
+      startAgent: async () => ({ agent: 'claude', result: { status: 0 } }),
+      readReviewState: async () => ({ metadata: {} }),
+      writeReviewState: async () => {},
+      persistReviewState: async (_s, state: any, _wt, _store) => {
+        persistedMetadata = state.metadata;
+      },
+      exit: () => {},
+      transitionTask: async () => {},
+      applyAgentFallback: async () => {},
+      selectAgent: () => 'claude',
+      workflowLauncherStatus: () => ({ available: true, agent: 'claude' }),
+      resolveTaskFile: () => ({ ok: true, task: { assignee: 'claude' }, taskFile: '/task.md' }),
+      getTaskImplementer: () => 'claude',
+    };
+    const result = await handleHookFailureAutoBounceShared(
+      'task-2369.17', '/worktree', 'pre-commit: lint error', { hookType: 'pre-commit' }, port, { missionStore: {} }
+    );
+    assert.ok(result);
+    assert.equal(persistedMetadata.hookFailureRetryCount, 1);
   });
 });

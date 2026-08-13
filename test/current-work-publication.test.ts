@@ -299,8 +299,8 @@ test('px review republishes current work with the family that actually launched'
   const { repo, appended } = makeHistoryRepo();
   const workflow = {
     ...makeReviewWorkflow([]),
-    start: async (context: ReviewWorkflowContext) => {
-      await (context.options.onAgentLaunched as (_agent: string, _phase: 'review') => Promise<void>)('custom', 'review');
+    start: async (context) => {
+      await (context as any).options.onAgentLaunched('custom', 'review');
     },
   };
   await new ReviewCommandUseCase(workflow, new CurrentWorkRecorder(repo, { processId: 9 }))
