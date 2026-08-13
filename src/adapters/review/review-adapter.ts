@@ -5,9 +5,7 @@
  * this adapter instead of importing Forgejo or product-config directly.
  */
 
-import * as os from 'os';
-import * as path from 'path';
-import { resolveReviewAdapter, isForgejoReviewEnabled, loadAdapterConfig } from '../config/product-config.js';
+import { resolveReviewAdapter, isForgejoReviewEnabled, resolveReviewArtifactDir } from '../config/product-config.js';
 import * as forgejo from '../forgejo/forgejo.js';
 
 const NOOP_PR_STATUS = Object.freeze({
@@ -38,14 +36,7 @@ export function isForgejoProvider(rootDir = process.cwd()): boolean {
 
 /** @param {string} [rootDir] */
 export function resolveArtifactDir(rootDir = process.cwd()): string {
-  const review = (loadAdapterConfig(rootDir).review || {}) as { tmpDir?: string };
-  const configured = typeof review.tmpDir === 'string' && review.tmpDir.trim()
-    ? review.tmpDir.trim()
-    : null;
-  if (!configured) {
-    return os.tmpdir();
-  }
-  return path.isAbsolute(configured) ? configured : path.resolve(rootDir, configured);
+  return resolveReviewArtifactDir(rootDir);
 }
 
 /**

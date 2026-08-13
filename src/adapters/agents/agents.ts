@@ -4,7 +4,7 @@ import { isSpuriousVibeExit } from './vibe.js';
 import { isSpuriousOpencodeExit } from './opencode.js';
 import { isSpuriousQwenExit } from './qwen.js';
 import { detectLimitHit, formatBlockUntil, DEFAULT_FALLBACK_HOURS } from '../../application/services/agent-limit.js';
-import { resolveAgentModel } from '../config/product-config.js';
+import { resolveAgentModel, resolveReviewArtifactDir } from '../config/product-config.js';
 import {
   CONFIG_PATH,
   readAgentConfig,
@@ -33,7 +33,6 @@ import {
 } from './launcher-selection.js';
 import { resolveCustomRunner } from '../config/product-config.js';
 import { resolveSandboxProfile, withSandboxProfile } from '../process/bubblewrap.js';
-import { resolveArtifactDir } from '../review/review-adapter.js';
 import { tryAcquireCustomCapacity } from './custom-capacity.js';
 import type { SessionMarkerPort } from '../../application/domain-ports.js';
 import type { AgentFamily } from '../../domain/agents.js';
@@ -467,7 +466,7 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
       // This is the sole production policy decision. The AsyncLocalStorage
       // context reaches the shared process seam through every family launcher.
       const sandboxProfile = worktree
-        ? resolveSandboxProfile(step, worktree, step === 'review' ? resolveArtifactDir(worktree) : null)
+        ? resolveSandboxProfile(step, worktree, step === 'review' ? resolveReviewArtifactDir(worktree) : null)
         : null;
       const launchResult = withSandboxProfile(sandboxProfile, () => launcher({
         prompt: actualPrompt,

@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
@@ -467,6 +468,15 @@ export function resolveReviewAdapter(rootDir: string = process.cwd()): ReviewAda
     baseUrl: (review.baseUrl as string) || null,
     repo: (review.repo as string) || null,
   };
+}
+
+/** Resolve the review artifact directory from workflow configuration. */
+export function resolveReviewArtifactDir(rootDir: string = process.cwd()): string {
+  const review = loadAdapterConfig(rootDir).review as PlainObject | undefined || {};
+  const configured = typeof review.tmpDir === 'string' && review.tmpDir.trim()
+    ? review.tmpDir.trim()
+    : null;
+  return configured ? (path.isAbsolute(configured) ? configured : path.resolve(rootDir, configured)) : os.tmpdir();
 }
 
 export function isForgejoReviewEnabled(rootDir: string = process.cwd()): boolean {
