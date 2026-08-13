@@ -12,6 +12,19 @@
 
 All five listed launchers are supported on this workstation. The `custom` agent family can switch between `opencode` and `pi` runners via configuration. Step eligibility for the configurable workflow steps (`draft`, `active`, `review`) is controlled by `parallix/config/agents.json`. Conflict resolution is not a separately configurable step — it always runs as the mission's recorded implementer (TASK-2294.01). If a launcher is missing from `PATH`, the harness fails loudly with the exact blocker before launching.
 
+## Bubblewrap agent guard
+
+On Linux, Parallix confines workflow-agent processes with `bwrap` when it is
+available. The sandbox presents the host filesystem read-only and grants write
+access only to the mission worktree. A review agent receives a read-only
+worktree and may write its configured review-artifact directory and temporary
+diagnostics under `/tmp`.
+
+If `bwrap` is unavailable, Parallix emits a warning and preserves the normal
+unsandboxed launch. Set `PARALLIX_NO_BUBBLEWRAP=1` to deliberately opt out for
+one invocation. A present but misconfigured guard fails the launch rather than
+silently running the agent unsandboxed.
+
 ### Custom Runner Configuration
 
 The `custom` agent family supports multiple backends through the `adapters.agents.runners.custom` configuration field in `workflow.config.json`:
