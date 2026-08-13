@@ -4,7 +4,7 @@ title: >-
   Close live-board correctness gaps, improve refresh performance, and guarantee
   TUI shutdown
 status: active
-assignee: [claude]
+assignee: [vibe]
 created_date: '2026-08-13 17:46'
 labels: [user_value]
 dependencies: []
