@@ -2,7 +2,7 @@
 id: TASK-2374
 title: bubblewrap guard
 status: active
-assignee: [claude]
+assignee: [vibe]
 created_date: '2026-08-13 18:31'
 labels: [user_value]
 dependencies: []
