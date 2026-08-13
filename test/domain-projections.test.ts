@@ -73,7 +73,7 @@ test('mission card contains the board decision inputs without changing lifecycle
     reviewApproval: { subject: reviewedSubject, approvedAt: '2026-07-22T09:00:00Z' },
     currentWork: {
       operationId: 'integrate:task-2294', phase: 'gates', summary: 'running integration gates',
-      agent: null, updatedAt: '2026-07-22T10:00:00Z',
+      agent: null, updatedAt: '2026-07-22T10:00:00Z', freshness: 'live',
     },
     blockingReason: null,
     flags: ['human-review'],

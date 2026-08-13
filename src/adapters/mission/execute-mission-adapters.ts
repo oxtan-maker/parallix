@@ -120,6 +120,7 @@ export class AgentExecutionAdapter implements AgentExecutionPort {
       taskResolution: request.taskResolution,
       prompt: request.plan.prompt,
       sessionMarkerPort: this._sessionMarkerPort,
+      onAgentLaunched: request.onAgentChanged,
     });
     const result = launch.result;
     return {

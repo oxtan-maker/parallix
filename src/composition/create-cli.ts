@@ -170,9 +170,10 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
         ...createHandoffPorts(),
         missionServices: missionServicesFn as HandoffMissionServicesPort,
       }))(args, { ...options, missionServicesFn })),
-    integrate: createIntegrateCommand(new IntegrateCommandUseCase({
-      execute: (args, options) => withMissionFactories(missionServicesFn => integrate(args, { ...options, missionServicesFn })),
-    })),
+    integrate: (args, options) => withGraph(services =>
+      createIntegrateCommand(new IntegrateCommandUseCase({
+        execute: (innerArgs, innerOptions) => withMissionFactories(missionServicesFn => integrate(innerArgs, { ...innerOptions, missionServicesFn })),
+      }, services.currentWork))(args, options)),
     'mission-start': missionStart,
     'verify-env': missionStart,
     'mutation-gate': mutationGate,
@@ -205,7 +206,7 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
             ...reviewLoopBindings(services.mission!.store),
           } as any),
         } as any);
-        return createReviewCommand(new ReviewCommandUseCase(adapter))(args, options);
+        return createReviewCommand(new ReviewCommandUseCase(adapter, services.currentWork))(args, options);
       })
     ),
     setup,

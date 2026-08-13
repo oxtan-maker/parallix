@@ -482,6 +482,20 @@ test('review passes an explicit --max-attempts through to the review loop', asyn
   assert.equal(received && received.maxAttempts, 7);
 });
 
+test('review forwards current-work agent publication into the review loop', async () => {
+  let received = null;
+
+  await review(['task-2322', '--continue'], {
+    inferSlugFn: (s) => s || 'task-2322',
+    log: () => {},
+    error: () => {},
+    exit: () => {},
+    startReviewLoopFn: async (_slug, opts) => { received = opts; },
+  });
+
+  assert.equal(typeof received?.onAgentLaunched, 'function');
+});
+
 test('review rejects a non-numeric --max-attempts', async () => {
   const errors = [];
   let exitCode = null;

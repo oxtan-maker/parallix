@@ -94,7 +94,7 @@ async function active(args, options = {}) {
 // immediately after the launcher successfully spawns the process. If the final
 // launch result later fails, we roll the task status back to the prior status.
 /**
- * @param {{slug: string, worktree: string, preselectedAgent?: string | null, agentConfig: object, taskResolution: object, prompt: string, startAgentFn?: Function, transitionTaskFn?: Function, getTaskStatusFn?: Function, getTaskImplementerFn?: Function, selectAgentFn?: Function, log?: Function, sessionMarkerPort?: object | null}} opts
+ * @param {{slug: string, worktree: string, preselectedAgent?: string | null, agentConfig: object, taskResolution: object, prompt: string, startAgentFn?: Function, transitionTaskFn?: Function, getTaskStatusFn?: Function, getTaskImplementerFn?: Function, selectAgentFn?: Function, log?: Function, sessionMarkerPort?: object | null, onAgentLaunched?: (agent: string) => void}} opts
  */
 async function selectLaunchAndRecord(opts) {
   const {
@@ -111,6 +111,10 @@ async function selectLaunchAndRecord(opts) {
     selectAgentFn = agents.selectAgent,
     log = fmt.log.plain,
     sessionMarkerPort = null,
+    // Reports every family the launcher actually starts, including each
+    // automatic failover after a usage block. The application layer turns that
+    // into the mission's current work; this adapter draws no conclusion.
+    onAgentLaunched = null,
   } = opts;
   const preselected = preselectedAgent || selectAgentFn('active', { config: agentConfig });
   const taskResolutionTyped = /** @type{{ok: boolean, taskFile?: string} | undefined} */(taskResolution);
@@ -156,6 +160,7 @@ async function selectLaunchAndRecord(opts) {
       sessionMarkerPort: sessionMarkerPort ?? undefined,
       onLaunch: async (/** @type{{agent: string}} */ { agent }) => {
         launchedAgent = agent;
+        onAgentLaunched?.(agent);
         if (!(taskResolutionTyped && taskResolutionTyped.ok)) {
           return;
         }

@@ -4,6 +4,7 @@
  * These fixtures are plain data — no test that uses them launches an agent,
  * touches Forgejo, reads a repository, or runs a workflow command.
  */
+import { attentionAction, attentionSources } from '../../src/application/projections/board.js';
 import type {
   AttentionItem,
   AttentionReason,
@@ -151,5 +152,7 @@ export function makeAttentionItem(
     rank,
     reason,
     card,
+    action: attentionAction(card, reason),
+    dependsOnSources: attentionSources(reason),
   };
 }

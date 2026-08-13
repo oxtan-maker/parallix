@@ -40,14 +40,13 @@ clears the previous frame first, so no stale half-frame is left behind.
 `▲ NEEDS YOU NEXT` lists the missions waiting on a person: a blocked mission
 first, then a failed gate, then a mission in review, then one in integration.
 
-A mission whose agent is running right now is left out of that list, because
-the turn is already being taken — a live `px review <slug>` process is the
-agent doing the review, so the board does not also ask a human for the same
-decision. Two facts still outrank a running agent and keep the mission listed:
-a blocking reason and a failed gate, which hold whether or not an agent is at
-the keyboard. When liveness cannot be observed at all (the process listing is
-unreadable), the mission stays listed — the board never reads "unknown" as
-"someone is on it".
+A mission with current work is left out of that list, because the turn is
+already being taken. The workflow records the active operation and agent family
+when it launches the agent, so the board does not guess ownership from the
+mission assignment or command line. Two facts still outrank current work and
+keep the mission listed: a blocking reason and a failed gate. Process liveness
+only verifies that a recorded operation has not disappeared; unavailable
+verification is never treated as an idle mission.
 
 ## What a card shows
 

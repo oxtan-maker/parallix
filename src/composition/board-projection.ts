@@ -13,6 +13,8 @@ import { ConcreteGitReadAdapter } from '../adapters/backlog/concrete-git-read-ad
 import { ConcreteMissionReadAdapter } from '../adapters/backlog/concrete-mission-read-adapter.js';
 import { ConcreteOperationLogReadAdapter } from '../adapters/backlog/concrete-operation-log-read-adapter.js';
 import { ConcreteReviewReadAdapter } from '../adapters/backlog/concrete-review-read-adapter.js';
+import { ConcreteCurrentWorkReadAdapter } from '../adapters/backlog/concrete-current-work-read-adapter.js';
+import { processLivenessProbe } from '../adapters/process/process-liveness.js';
 import { BoardProjectionBuilder } from '../application/projections/board-readers.js';
 import type { MissionReadAdapter } from '../application/projections/board-readers.js';
 import { ConcreteMetricsReadAdapter } from '../application/projections/metrics-read-adapter.js';
@@ -79,6 +81,11 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
     new ConcreteGitReadAdapter({ rootDir: deps.rootDir, repositoryId: deps.repositoryId }),
     new ConcreteOperationLogReadAdapter({ historyRepo: deps.historyRepo }),
     {
+      // The authoritative answer to "which mission is being worked on right
+      // now", published by the operations themselves. The OS-process scan in
+      // the agent adapter above is left in place only as bounded recovery.
+      currentWork: new ConcreteCurrentWorkReadAdapter(deps.historyRepo),
+      isProcessAlive: processLivenessProbe,
       metricsAdapter: new ConcreteMetricsReadAdapter({
         laneEventRepo: deps.laneEventRepo,
         usageRepo: deps.usageRepo,

@@ -3,6 +3,7 @@ import type { CohortComparison } from './cohorts.js';
 import type { RepositoryId } from '../../domain/repository.js';
 import type { AgentFamily } from '../../domain/agents.js';
 import type { SourceFact } from '../contracts.js';
+import type { BoardCommandKind } from '../controller/board-command.js';
 import type {
   BoardLane,
   CommandAvailability,
@@ -26,6 +27,26 @@ export interface AttentionItem {
   readonly rank: number;
   readonly reason: AttentionReason;
   readonly card: MissionCard;
+  /**
+   * The typed application command this item stands for, resolved here rather
+   * than guessed by a UI adapter. The operator sees `action.display` and Enter
+   * dispatches `action.kind`, so the advertised and dispatched commands cannot
+   * drift apart (AC #14).
+   */
+  readonly action: AttentionAction;
+  /**
+   * The source facts this item's conclusion actually depends on. A stale
+   * source is only worth warning about on the items it could have misled; a
+   * global banner stamped onto every row tells the operator nothing (AC #15).
+   */
+  readonly dependsOnSources: readonly string[];
+}
+
+/** The command an attention item advertises and dispatches. */
+export interface AttentionAction {
+  readonly kind: BoardCommandKind;
+  /** Exactly what the operator is shown, e.g. `px review task-0001`. */
+  readonly display: string;
 }
 
 export type AttentionReason =
@@ -33,6 +54,8 @@ export type AttentionReason =
   | { readonly kind: 'gate-failed'; readonly detail: string }
   | { readonly kind: 'review-lane'; readonly detail: string }
   | { readonly kind: 'integrate-lane'; readonly detail: string }
+  /** Work was published as running, then stopped being verifiable. */
+  | { readonly kind: 'stale-work'; readonly detail: string }
   | { readonly kind: 'none' };
 
 export interface MetricSeries {
@@ -225,9 +248,53 @@ export function attentionReason(card: MissionCard): AttentionReason {
   if (card.gate === 'failed') { return { kind: 'gate-failed', detail: `Gate ${card.gate}` }; }
   // An agent is already taking this lane's turn — see `agentIsWorking`.
   if (agentIsWorking(card)) { return { kind: 'none' }; }
+  // Published work that stopped being verifiable is not silently forgotten:
+  // the operator is told the mission looked busy and no longer does.
+  if (card.currentWork?.freshness === 'stale') {
+    return { kind: 'stale-work', detail: `${card.currentWork.phase} work is no longer verifiable` };
+  }
   if (card.lane === 'review') { return { kind: 'review-lane', detail: 'Awaiting review decision' }; }
   if (card.lane === 'integration') { return { kind: 'integrate-lane', detail: 'Awaiting integration' }; }
   return { kind: 'none' };
+}
+
+/**
+ * The typed command an attention item resolves to.
+ *
+ * One function owns both halves of the pair the operator sees and presses, so
+ * no surface can render `px review` beside a dispatch of `active:execute`.
+ */
+export function attentionAction(card: MissionCard, reason: AttentionReason): AttentionAction {
+  switch (reason.kind) {
+    case 'integrate-lane':
+      return { kind: 'integrate:merge', display: `px integrate ${card.id}` };
+    case 'review-lane':
+      return { kind: 'review:submit', display: `px review ${card.id}` };
+    default:
+      return { kind: 'active:execute', display: `px active ${card.id}` };
+  }
+}
+
+/**
+ * Which source facts an attention item's conclusion rests on.
+ *
+ * `current-work` and `gate` are named even when the projection carries no
+ * source fact for them: the map is about what the conclusion depends on, not
+ * about what happened to be reported this build.
+ */
+export function attentionSources(reason: AttentionReason): readonly string[] {
+  switch (reason.kind) {
+    case 'blocking':
+    case 'stale-work':
+      return ['current-work'];
+    case 'gate-failed':
+      return ['gate'];
+    case 'review-lane':
+    case 'integrate-lane':
+      return ['task-markdown'];
+    default:
+      return [];
+  }
 }
 
 /** Build a BoardStage from cards in a given lane. */
@@ -310,12 +377,17 @@ export function buildBoardProjection(
   const allLanes: readonly BoardLane[] = ['backlog', 'refined', 'active', 'review', 'integration', 'done'];
   const stages = allLanes.map((lane) => buildBoardStage(lane, cards));
 
-  const ranked = cards.map((card) => ({
-    missionId: card.id,
-    rank: attentionRank(card),
-    reason: attentionReason(card),
-    card,
-  }));
+  const ranked = cards.map((card) => {
+    const reason = attentionReason(card);
+    return {
+      missionId: card.id,
+      rank: attentionRank(card),
+      reason,
+      card,
+      action: attentionAction(card, reason),
+      dependsOnSources: attentionSources(reason),
+    };
+  });
   const attentionQueue = ranked.sort((left, right) => {
     const rank = left.rank - right.rank;
     return rank === 0 ? left.missionId.localeCompare(right.missionId) : rank;

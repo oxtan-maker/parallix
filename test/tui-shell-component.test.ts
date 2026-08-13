@@ -82,6 +82,8 @@ describe('BoardShell component renders with mocked BoardProjection', () => {
     rank: 1,
     reason: { kind: 'review-lane', detail: 'Awaiting review' },
     card: testCard,
+    action: { kind: 'review:submit', display: 'px review task-9999' },
+    dependsOnSources: ['task-markdown'],
   };
 
   /** Minimal BoardProjection matching the actual data model (all required fields). */
