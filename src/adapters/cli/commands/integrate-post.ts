@@ -21,6 +21,13 @@ import { readReviewState, writeReviewState, persistReviewStateOrThrow } from '..
 import { startAgent, selectAgent, workflowLauncherStatus } from '../../agents/agents.js';
 import { applyAgentFallback } from '../../review/review-loop.js';
 import { missionId } from '../../../domain/mission.js';
+import {
+  classifyHookFailure,
+  handleHookFailureAutoBounce as handleHookFailureAutoBouncePolicy,
+  type HookRebouncePort,
+} from '../../../application/hook-failure-workflow.js';
+
+export { classifyHookFailure };
 
 /**
  * Signals that integrate() must unwind to its abort path.
@@ -34,42 +41,7 @@ import { missionId } from '../../../domain/mission.js';
 export class IntegrationAbort extends Error {}
 
 /**
- * Classify git hook failure from command output.
- * Detects pre-commit, pre-push, post-commit, and generic hook failures.
- * Returns structured result for SC2/SC8.
- *
- * @param {string} output - Combined stdout+stderr from git command
- * @returns {{ isHookFailure: boolean, hookType: string | null }}
- */
-export function classifyHookFailure(output: string): { isHookFailure: boolean; hookType: string | null } {
-  if (!output) {
-    return { isHookFailure: false, hookType: null };
-  }
-  const lower = output.toLowerCase();
-  if (/pre-commit/i.test(lower)) {
-    return { isHookFailure: true, hookType: 'pre-commit' };
-  }
-  if (/pre-push/i.test(lower)) {
-    return { isHookFailure: true, hookType: 'pre-push' };
-  }
-  if (/post-commit/i.test(lower)) {
-    return { isHookFailure: true, hookType: 'post-commit' };
-  }
-  // Generic hook keyword match — require failure phrasing to avoid
-  // false positives from paths like "post-integrate-hook.ts"
-  if (/hook.*(failed|failure|error)/i.test(lower)) {
-    return { isHookFailure: true, hookType: 'hook' };
-  }
-  return { isHookFailure: false, hookType: null };
-}
-
-// Max retries for hook failure auto-bounce
-const MAX_HOOK_RETRY = 2;
-
-/**
- * Handle git hook failure with auto-bounce to implementer.
- * Mirrors handleGateFailureAutoBounce pattern. Used by integrate squash commit path.
- * Returns true if auto-bounced (caller should retry), false if stranded.
+ * Thin adapter over the shared hook-failure policy; retains the test seam.
  *
  * @param {string} slug
  * @param {string} worktree
@@ -103,108 +75,24 @@ export async function handleHookFailureAutoBounce(
     missionStore?: any;
   } = {}
 ): Promise<boolean> {
-  const persisted = await Promise.resolve(readReviewStateFn(slug, worktree, missionStore));
-  const retryCount = persisted && persisted.metadata && typeof persisted.metadata === 'object'
-    ? (Number((persisted.metadata as any).hookFailureRetryCount) || 0)
-    : 0;
-
-  if (retryCount >= MAX_HOOK_RETRY) {
-    fmt.log.fail(`Hook failure: max retries exceeded (${MAX_HOOK_RETRY}). Mission stranded for ${slug}.`);
-    fmt.log.fail(`Hook ${classification.hookType || 'failure'} failed ${retryCount} times. Human intervention required.`);
-    fmt.log.fail(`Hook output:\n${hookOutput}`);
-    return false;
-  }
-
-  const newRetryCount = retryCount + 1;
-
-  const fixPrompt = [
-    `GIT HOOK FAILURE — FIX REQUIRED`,
-    ``,
-    `Mission: ${slug}`,
-    `Hook type: ${classification.hookType || 'unknown'}`,
-    ``,
-    `Hook output (use this to diagnose and fix):`,
-    `---`,
-    hookOutput,
-    `---`,
-    ``,
-    `Retry attempt: ${newRetryCount}/${MAX_HOOK_RETRY}`,
-    ``,
-    `Fix the underlying issue so the git hook passes.`,
-    `After fixing, the integration will be retried automatically.`,
-  ].join('\n');
-
-  const metadata = persisted && persisted.metadata && typeof persisted.metadata === 'object'
-    ? { ...persisted.metadata }
-    : {};
-  metadata.hookFailureRetryCount = newRetryCount;
-
-  try {
-    if (persisted) {
-      const updatedState = { ...persisted, metadata };
-      await persistReviewStateOrThrow(writeReviewStateFn as any, slug, updatedState as any, worktree, missionStore);
-    } else {
-      await persistReviewStateOrThrow(writeReviewStateFn as any, slug, { metadata } as any, worktree, missionStore);
-    }
-  } catch (err: any) {
-    fmt.log.fail(`Could not persist hook retry state: ${err.message || String(err)}. Falling back to manual recovery.`);
-    return false;
-  }
-
-  // Resolve implementer
-  const taskResolution = resolveTaskFile(slug, worktree);
-  let implementer = taskResolution.ok && (taskResolution as any).task ? getTaskImplementer((taskResolution as any).task) : null;
-
-  if (!implementer) {
-    const status = workflowLauncherStatusFn?.() ?? { available: false, agent: null };
-    if (status.available && status.agent) {
-      implementer = selectAgentFn?.({ role: 'implementer' }) || status.agent;
-    }
-  }
-
-  if (!implementer) {
-    fmt.log.fail(`Could not determine implementer for ${slug}. Cannot auto-bounce.`);
-    return false;
-  }
-
-  // Transition task back to active (implementer phase) without consuming reviewer cycle
-  await transitionTaskFn(slug, 'active', { rootDir: worktree, log: fmt.log.plain });
-  fmt.log.info(`Auto-bouncing to implementer (${implementer}) with hook fix prompt. Retry ${newRetryCount}/${MAX_HOOK_RETRY}.`);
-
-  try {
-    const launchResult = await startAgentFn('act-on-review', {
-      agent: implementer,
-      prompt: fixPrompt,
-      worktree,
-      slug,
-      role: 'implementer',
-      exclude: [],
-    });
-
-    // Apply any agent fallback if needed
-    await applyAgentFallbackFn({
-      role: 'implementer',
-      original: implementer,
-      launchResult,
-      state: persisted || {},
-      slug,
-      worktree,
-      taskResolution: { ok: taskResolution.ok, taskFile: taskResolution.taskFile },
-      log: fmt.log.plain,
-      writeReviewStateFn,
-      missionStore,
-    });
-
-    if (launchResult.result && launchResult.result.status !== 0) {
-      fmt.log.fail(`Implementer (${launchResult.agent}) exited with status ${launchResult.result.status}. Mission stranded.`);
-      return false;
-    }
-  } catch (err: any) {
-    fmt.log.fail(`Could not launch implementer for hook fix: ${err.message || String(err)}.`);
-    return false;
-  }
-
-  return true;
+  const port: HookRebouncePort = {
+    startAgent: startAgentFn as HookRebouncePort['startAgent'],
+    readReviewState: readReviewStateFn as HookRebouncePort['readReviewState'],
+    writeReviewState: writeReviewStateFn as HookRebouncePort['writeReviewState'],
+    persistReviewState: (s, state, wt, store) =>
+      persistReviewStateOrThrow(writeReviewStateFn as any, s, state as any, wt, store as any),
+    exit: () => {},
+    transitionTask: transitionTaskFn as HookRebouncePort['transitionTask'],
+    applyAgentFallback: applyAgentFallbackFn as HookRebouncePort['applyAgentFallback'],
+    selectAgent: selectAgentFn as HookRebouncePort['selectAgent'],
+    workflowLauncherStatus: workflowLauncherStatusFn as HookRebouncePort['workflowLauncherStatus'],
+    resolveTaskFile: (s, wt) => resolveTaskFile(s, wt) as any,
+    getTaskImplementer: (task: any) => getTaskImplementer(task),
+  };
+  return handleHookFailureAutoBouncePolicy(slug, worktree, hookOutput, classification, port, {
+    missionStore,
+    recoveryCommand: 'try again',
+  });
 }
 
 /** @type{{symptom: string, cause: string, fix: string}[]} */
