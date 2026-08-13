@@ -4,7 +4,7 @@ title: update liveness
 status: backlog
 assignee: [codex]
 created_date: '2026-08-13 10:24'
-labels: []
+labels: [ai_sdlc, bug]
 dependencies: []
 ordinal: 89912
 ---
