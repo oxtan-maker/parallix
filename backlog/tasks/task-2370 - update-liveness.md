@@ -1,7 +1,7 @@
 ---
 id: TASK-2370
 title: update liveness
-status: review
+status: ready-for-integration
 assignee: [codex]
 created_date: '2026-08-13 10:24'
 labels: [ai_sdlc, bug]
