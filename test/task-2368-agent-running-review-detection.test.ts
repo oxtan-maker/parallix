@@ -46,7 +46,10 @@ function pendingReview(): Review {
     rounds: [{
       number: 1,
       subject: {
-        change: { kind: 'pull-request', id: 271, url: 'https://forgejo.local/pr/271' },
+        change: {
+          kind: 'pull-request', provider: 'forgejo', id: '271', url: 'https://forgejo.local/pr/271',
+          sourceBranch: 'mission/task-2368', targetBranch: 'main',
+        },
         revision: changeRevision('reviewed-revision'),
       },
       reviewer: agentFamily('claude'),
@@ -63,6 +66,7 @@ function pendingReview(): Review {
     intervention: null,
     stageLaunches: [],
     gateFailureRetryCount: 0,
+    hookFailureRetryCount: 0,
   } as Review;
 }
 

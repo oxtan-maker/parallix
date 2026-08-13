@@ -115,7 +115,8 @@ export class BoardProjectionBuilder {
 
     // Liveness is per mission, not only a per-family count: a mission whose
     // agent is running right now is not waiting for a human.
-    const sessionByMission = new Map((runningSessions ?? []).map((session) => [session.missionId, session]));
+    const sessions: readonly RunningAgentSession[] = runningSessions ?? [];
+    const sessionByMission = new Map(sessions.map((session) => [session.missionId, session]));
 
     // Build mission cards with operational facts
     const cards = await Promise.all(missions.map(async (mission) => {
