@@ -115,6 +115,7 @@ export interface BoardProjectionOptions {
  * Git and canonical task/mission documents always win over cached projections.
  */
 export class BoardProjectionBuilder {
+  private metricsCache: { readonly key: string; readonly metrics: BoardMetrics } | null = null;
   constructor(
     private readonly _missions: MissionReadAdapter,
     private readonly _reviews: ReviewReadAdapter,
@@ -207,8 +208,14 @@ export class BoardProjectionBuilder {
     missions: readonly Mission[],
     agentAvailability: BoardMetrics['agentAvailability'],
   ): Promise<BoardMetrics> {
+    const key = JSON.stringify({
+      missions: missions.map((mission) => [mission.id, mission.status]),
+      agentAvailability,
+    });
+    if (this.metricsCache?.key === key) { return this.metricsCache.metrics; }
     // Explicit metrics (for testing/fixtures)
     if (this._options?.metrics) {
+      this.metricsCache = { key, metrics: this._options.metrics };
       return this._options.metrics;
     }
 
@@ -219,9 +226,11 @@ export class BoardProjectionBuilder {
         initialStates.set(mission.id, mission.status);
       }
       try {
-        return await this._options.metricsAdapter.buildMetrics(initialStates, agentAvailability);
+        const metrics = await this._options.metricsAdapter.buildMetrics(initialStates, agentAvailability);
+        this.metricsCache = { key, metrics };
+        return metrics;
       } catch {
-        return this.metricsWithHealth(this.defaultMetrics(agentAvailability), {
+        const metrics = this.metricsWithHealth(this.defaultMetrics(agentAvailability), {
           state: 'unavailable',
         }, {
           repositoryId,
@@ -231,10 +240,14 @@ export class BoardProjectionBuilder {
           rejectedOrMissingIdentityRowCount: 0,
           adapterSucceeded: false,
         });
+        this.metricsCache = { key, metrics };
+        return metrics;
       }
     }
 
-    return this.defaultMetrics(agentAvailability);
+    const metrics = this.defaultMetrics(agentAvailability);
+    this.metricsCache = { key, metrics };
+    return metrics;
   }
 
   /** Derive available actions from mission cards' command availability. */

@@ -115,6 +115,7 @@ export async function startReviewLoop(slug: string, opts: {
   missionStore?: MissionStore | null;
   agentSelectionSnapshotPort?: AgentSelectionSnapshotPort | null;
   onAgentLaunched?: (_agent: string, _phase: 'review' | 'review-response') => Promise<void> | void;
+  onAutonomousStop?: (_reason: string) => Promise<void> | void;
 } = {}): Promise<void> {
   let {
     implementer,
@@ -186,6 +187,7 @@ export async function startReviewLoop(slug: string, opts: {
     missionStore = null,
     agentSelectionSnapshotPort = null,
     onAgentLaunched = undefined,
+    onAutonomousStop = undefined,
   } = opts;
   const performHandoffFn = opts.performHandoffFn || (await getHandoff()).performHandoff;
   let prNumber: number | null = null;
@@ -391,6 +393,9 @@ export async function startReviewLoop(slug: string, opts: {
       humanEscalatedAt: new Date().toISOString()
     };
     await persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree, missionStore);
+    // The mission is now waiting on a human. Publish why, so the board says
+    // more than "nothing is running" (TASK-2373 SC10).
+    await onAutonomousStop?.(reason);
     log(fmt.status('INFO', `Autonomous review stopped: human review required after reviewer ${reason}.`));
   };
   log(fmt.status('INFO', `Starting autonomous review loop for mission: ${slug}`));
@@ -970,6 +975,7 @@ export async function startReviewLoop(slug: string, opts: {
     if (disposition === 'BLOCKED' || disposition === 'PARKED') {
       state.disposition = disposition as string;
       await persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree, missionStore);
+      await onAutonomousStop?.(`implementer reported ${disposition}`);
       log(fmt.status('INFO', `Autonomous review stopped: implementer reported ${disposition}. Hand off to human review.`));
       return;
     }

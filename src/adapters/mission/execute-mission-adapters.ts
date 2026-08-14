@@ -188,7 +188,11 @@ export class HandoffReviewAdapter implements HandoffReviewPort {
       request.slug,
       request.worktree,
       request.agent,
-      { taskFile: request.taskFile ?? undefined },
+      {
+        taskFile: request.taskFile ?? undefined,
+        onAgentLaunched: request.onAgentLaunched,
+        onAutonomousStop: request.onAutonomousStop,
+      },
     ));
   }
 }

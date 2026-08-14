@@ -69,9 +69,23 @@ export interface CurrentWorkEvent {
    * a stored Process entity (ADR 0053 excludes one).
    */
   readonly processId: number | null;
+  /**
+   * The publishing process's start identity, when the platform could supply
+   * one. Paired with `processId` it survives pid reuse; absent (legacy rows,
+   * or a platform that cannot report it) degrades reconciliation to the
+   * bare-pid check it used before.
+   */
+  readonly processIdentity?: string | null;
   /** Why the operation cannot continue; `null` unless `state` is `blocked`. */
   readonly blockedReason: string | null;
   readonly occurredAt: string;
+  /**
+   * The operational store's own append order for this event, when the row came
+   * from storage. Two events published inside the same millisecond are ordered
+   * by this and never by timestamp coincidence; a freshly built (unstored)
+   * event has none.
+   */
+  readonly sequence?: number;
 }
 
 /**
@@ -93,6 +107,7 @@ export function currentWorkEventToEntry(event: CurrentWorkEvent): OperationalHis
       message: event.summary,
       agent: event.agent,
       processId: event.processId,
+      processIdentity: event.processIdentity,
       blockedReason: event.blockedReason,
     }),
     createdAt: event.occurredAt,
@@ -120,8 +135,12 @@ export function parseCurrentWorkEntry(entry: OperationalHistoryEntry): CurrentWo
     summary: typeof data.summary === 'string' ? data.summary : '',
     agent: typeof data.agent === 'string' ? data.agent as AgentFamily : null,
     processId: typeof data.processId === 'number' ? data.processId : null,
+    processIdentity: typeof data.processIdentity === 'string' ? data.processIdentity : null,
     blockedReason: typeof data.blockedReason === 'string' ? data.blockedReason : null,
     occurredAt: entry.createdAt,
+    // The store's row id is the only ordering that survives two events written
+    // inside the same millisecond.
+    sequence: entry.id,
   };
 }
 
@@ -199,12 +218,84 @@ function parseFamily(value: string | null): AgentFamily | null {
   }
 }
 
+/**
+ * The phases a nested agent launch inside the review loop can publish.
+ *
+ * Deliberately narrower than `CurrentWorkPhase`: the review loop launches
+ * reviewers and implementers, and nothing else routes through this seam.
+ */
+export type AgentLaunchPhase = Extract<CurrentWorkPhase, 'review' | 'review-response'>;
+
+/** What the review loop reports back to the current-work authority. */
+export interface ReviewLoopPublication {
+  /** A reviewer or implementer was launched for this mission. */
+  readonly onAgentLaunched: (_agent: string, _phase: AgentLaunchPhase) => Promise<void>;
+  /**
+   * The loop stopped because it could not continue autonomously. The reason is
+   * the only sentence that tells the operator why they are needed, so it is
+   * published rather than dropped when the operation ends.
+   */
+  readonly onAutonomousStop: (_reason: string) => Promise<void>;
+}
+
+/**
+ * The single publication seam for work happening inside the review loop.
+ *
+ * Both entry points to that loop — `px review` and the autonomous review
+ * `px active` runs after handoff — build their callbacks here, so the board
+ * learns which family is reviewing (or answering findings), and why the loop
+ * gave up, from the one place that knows. No CLI, TUI, or projection consumer
+ * has to infer any of it.
+ *
+ * The callbacks are awaitable and swallow recorder failures: an authoritative
+ * current-work write must be ordered against the operation's next state
+ * change, but must never fail the operation it describes.
+ */
+export function reviewLoopPublisher(
+  port: CurrentWorkPort,
+  operation: { readonly slug: string; readonly operationId: string },
+): ReviewLoopPublication {
+  const publicationFor = (phase: CurrentWorkPhase, summary: string, agent?: string) => currentWorkPublication({
+    slug: operation.slug,
+    operationId: operation.operationId,
+    phase,
+    summary,
+    agent,
+  });
+  const publish = async (publication: CurrentWorkPublication | null, write: (_p: CurrentWorkPublication) => Promise<void>) => {
+    if (!publication) { return; }
+    try {
+      await write(publication);
+    } catch (error) {
+      void error;
+    }
+  };
+  return {
+    onAgentLaunched: (agent, phase) => publish(
+      publicationFor(
+        phase,
+        phase === 'review-response'
+          ? `implementer ${agent} answering review findings`
+          : `reviewer ${agent} reviewing`,
+        agent,
+      ),
+      (publication) => port.running(publication),
+    ),
+    onAutonomousStop: (reason) => publish(
+      publicationFor('review', `autonomous review stopped: ${reason}`),
+      (publication) => port.blocked(publication, `autonomous review stopped: ${reason}`),
+    ),
+  };
+}
+
 export interface CurrentWorkRecorderOptions {
   /**
    * This process's identifier, supplied by composition. The application layer
    * does not read process globals of its own.
    */
   readonly processId?: number | null;
+  /** This process's start identity, supplied by composition alongside the pid. */
+  readonly processIdentity?: string | null;
   readonly now?: () => Date;
 }
 
@@ -218,6 +309,7 @@ export interface CurrentWorkRecorderOptions {
  */
 export class CurrentWorkRecorder implements CurrentWorkPort {
   private readonly processId: number | null;
+  private readonly processIdentity: string | null;
   private readonly now: () => Date;
 
   constructor(
@@ -225,6 +317,7 @@ export class CurrentWorkRecorder implements CurrentWorkPort {
     options: CurrentWorkRecorderOptions = {},
   ) {
     this.processId = options.processId ?? null;
+    this.processIdentity = options.processIdentity ?? null;
     this.now = options.now ?? (() => new Date());
   }
 
@@ -253,6 +346,7 @@ export class CurrentWorkRecorder implements CurrentWorkPort {
       summary: publication.summary,
       agent: publication.agent ?? null,
       processId: this.processId,
+      processIdentity: this.processIdentity,
       blockedReason,
       occurredAt: this.now().toISOString(),
     }));

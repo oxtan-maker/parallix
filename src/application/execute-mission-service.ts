@@ -11,6 +11,7 @@ import type {
 } from './ports/execute-mission.js';
 import type { ProgressPort } from './ports.js';
 import {
+  reviewLoopPublisher,
   currentWorkPublication,
   NO_CURRENT_WORK_PORT,
   type CurrentWorkPhase,
@@ -103,6 +104,14 @@ export class ExecuteMissionService {
         worktree: prepared.worktree,
         agent: launch.agent,
         taskFile: prepared.taskResolution.ok ? prepared.taskResolution.taskFile ?? null : null,
+        // Autonomous review is real work by other families on this same
+        // mission. It publishes through the same seam `px review` uses, so the
+        // board follows the reviewer and the implementer answering findings
+        // instead of freezing on the original implementer's handoff.
+        ...reviewLoopPublisher(this._currentWork, {
+          slug: request.slug,
+          operationId: request.operationId,
+        }),
       });
       if (!handedOff) {throw new Error('legacy handoff failed');}
 
@@ -152,9 +161,10 @@ export class ExecuteMissionService {
       // A usage block reroutes the same operation to the next eligible family.
       // Republishing here keeps that one mission WORKING with an updated agent
       // instead of producing an attention item for an autonomous handoff.
-      onAgentChanged: (agent) => {
-        void this.publishWork(request, 'execute', `running execute agent (${agent})`, agent);
-      },
+      // Awaited, not fire-and-forget: this write is authoritative for what the
+      // board shows, so it has to land before the run publishes its next
+      // state. A dropped promise here reorders the board behind reality.
+      onAgentChanged: (agent) => this.publishWork(request, 'execute', `running execute agent (${agent})`, agent),
     });
     if (launch.errored) {
       throw new Error(`Could not start execute agent (${launch.agent}): ${launch.errorMessage}`);

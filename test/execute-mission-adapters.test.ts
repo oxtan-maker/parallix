@@ -135,9 +135,17 @@ test('handoff review adapter forwards the resolved task file and returns the pip
   const ports = createExecuteMissionPorts('/repo', { missionTransitionStore: transitionStore }, runtimeStub({
     async runHandoffAndReview(...args: unknown[]) { seen.push(args); return false; },
   }));
+  const onAgentLaunched = async () => {};
+  const onAutonomousStop = async () => {};
   const verdict = await ports.handoffReview.runHandoffAndReview({
     slug: 'task-1', worktree: '/worktree', agent: 'codex', taskFile: '/worktree/task.md',
+    onAgentLaunched, onAutonomousStop,
   });
   assert.equal(verdict, false);
-  assert.deepEqual(seen[0], ['task-1', '/worktree', 'codex', { taskFile: '/worktree/task.md' }]);
+  // The current-work publication seam is forwarded verbatim into the review
+  // loop; the adapter neither builds nor interprets it (TASK-2373 SC5).
+  assert.deepEqual(seen[0], [
+    'task-1', '/worktree', 'codex',
+    { taskFile: '/worktree/task.md', onAgentLaunched, onAutonomousStop },
+  ]);
 });

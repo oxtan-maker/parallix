@@ -1,4 +1,5 @@
 import type { MissionTransitionStore } from '../domain-ports.js';
+import type { AgentLaunchPhase } from '../recording/current-work-recorder.js';
 
 /**
  * Mechanism ports for the execute (`px active`) workflow.
@@ -73,7 +74,7 @@ export interface AgentLaunchRequest {
    * for the board. This is how a `claude` → `qwen` handoff stays one mission's
    * current work instead of becoming a lifecycle event or a new run entity.
    */
-  readonly onAgentChanged?: (_agent: string) => void;
+  readonly onAgentChanged?: (_agent: string) => Promise<void>;
 }
 
 /**
@@ -131,6 +132,18 @@ export interface HandoffReviewRequest {
   readonly worktree: string;
   readonly agent: string;
   readonly taskFile: string | null;
+  /**
+   * Publishes the family and phase of each agent the autonomous review loop
+   * launches. Supplied by the use case and awaited by the loop, so nested
+   * review work reaches the board from the place that performs it.
+   */
+  readonly onAgentLaunched?: (_agent: string, _phase: AgentLaunchPhase) => Promise<void>;
+  /**
+   * Publishes why the autonomous review loop stopped when it cannot continue
+   * on its own. Without it the reason dies with the loop and the operator is
+   * told only that nothing is running.
+   */
+  readonly onAutonomousStop?: (_reason: string) => Promise<void>;
 }
 
 /**

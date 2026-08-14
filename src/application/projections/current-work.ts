@@ -22,8 +22,14 @@ export type { CurrentWorkFreshness };
  * grades.
  */
 
-/** Whether a published process is still running: `null` means unobservable. */
-export type ProcessLivenessProbe = (_processId: number) => boolean | null;
+/**
+ * Whether a published process is still running: `null` means unobservable.
+ *
+ * `identity` is the publisher's recorded process-start identity, when it had
+ * one. It exists so a recycled pid now held by an unrelated process is
+ * reported dead instead of keeping a mission WORKING forever.
+ */
+export type ProcessLivenessProbe = (_processId: number, _identity: string | null) => boolean | null;
 
 /** Read adapter for the current-work authority. */
 export interface CurrentWorkReadAdapter {
@@ -69,27 +75,76 @@ export const CURRENT_WORK_TTL_MS = 5 * 60 * 1000;
 /**
  * Reduce the current-work events to one fact per mission.
  *
- * Newest event wins outright. Older events for the same mission are history —
- * reading them as state would recreate the replay-as-authority model ADR 0053
- * rejects.
+ * The newest *running* event wins, but a terminal event only clears the
+ * operation it belongs to. Wall-clock "newest event for the mission wins"
+ * cannot express that: publications from two overlapping operations complete
+ * out of order, so an old operation ending after newer work started would
+ * silently blank a mission that is still being worked.
+ *
+ * Ordering is the operational store's own row order (`sequence`) whenever the
+ * events came from storage; two events published inside the same millisecond
+ * are then still deterministic. `occurredAt` remains the fallback for events
+ * that never reached the store.
+ *
+ * Only the resulting fact is state. The earlier events stay history, so this is
+ * not the replay-as-authority model ADR 0053 rejects.
  */
 export function reconcileCurrentWork(
   events: readonly CurrentWorkEvent[],
   options: ReconcileCurrentWorkOptions,
 ): Map<MissionId, CurrentWorkFacts> {
-  const newest = new Map<MissionId, CurrentWorkEvent>();
+  const byMission = new Map<MissionId, CurrentWorkEvent[]>();
   for (const event of events) {
-    const previous = newest.get(event.missionId);
-    if (!previous || Date.parse(event.occurredAt) >= Date.parse(previous.occurredAt)) {
-      newest.set(event.missionId, event);
-    }
+    byMission.set(event.missionId, [...(byMission.get(event.missionId) ?? []), event]);
   }
 
   const facts = new Map<MissionId, CurrentWorkFacts>();
-  for (const [missionId, event] of newest) {
-    facts.set(missionId, reconcileOne(event, options));
+  for (const [missionId, missionEvents] of byMission) {
+    const resolved = resolveOperation([...missionEvents].sort(byDurableOrder));
+    if (resolved) { facts.set(missionId, reconcileOne(resolved, options)); }
   }
   return facts;
+}
+
+/** Durable append order, falling back to publication time for unstored events. */
+function byDurableOrder(left: CurrentWorkEvent, right: CurrentWorkEvent): number {
+  if (left.sequence !== undefined && right.sequence !== undefined) {
+    return left.sequence - right.sequence;
+  }
+  return Date.parse(left.occurredAt) - Date.parse(right.occurredAt);
+}
+
+/**
+ * The event that still describes the mission, or `null` when none does.
+ *
+ * A `running` event always replaces what came before it: that is the mission's
+ * current work by definition. A terminal event is accepted only from the
+ * operation that owns the standing work — anything else is a late report about
+ * an operation that has already been superseded.
+ */
+function resolveOperation(ordered: readonly CurrentWorkEvent[]): CurrentWorkEvent | null {
+  let standing: CurrentWorkEvent | null = null;
+  for (const event of ordered) {
+    if (event.state === 'running') { standing = event; continue; }
+    if (standing !== null && !sameOperation(standing, event)) { continue; }
+    // An operation that stopped *with a reason* is the operator's answer to
+    // "why is nobody working this?". The same operation's bracket-closing
+    // `ended` must not overwrite it with silence; only new work can.
+    if (standing?.state === 'blocked' && event.state === 'ended') { continue; }
+    standing = event;
+  }
+  return standing;
+}
+
+/**
+ * Whether two events belong to the same operation.
+ *
+ * A missing `operationId` is a legacy row from before publication carried one.
+ * Those keep the old, correlation-free behaviour rather than being treated as
+ * a distinct operation that can never be cleared.
+ */
+function sameOperation(standing: CurrentWorkEvent, event: CurrentWorkEvent): boolean {
+  return !standing.operationId || !event.operationId || standing.operationId === event.operationId;
 }
 
 function reconcileOne(event: CurrentWorkEvent, options: ReconcileCurrentWorkOptions): CurrentWorkFacts {
@@ -128,7 +183,7 @@ function runningFreshness(
 ): CurrentWorkFreshness | null {
   const alive = event.processId === null || !options.isProcessAlive
     ? null
-    : options.isProcessAlive(event.processId);
+    : options.isProcessAlive(event.processId, event.processIdentity ?? null);
   if (alive === true) { return 'live'; }
   if (alive === false) { return null; }
   const ageMs = options.nowMs - Date.parse(event.occurredAt);

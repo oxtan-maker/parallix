@@ -545,6 +545,9 @@ test('SC1 reverse: all durable-IO files under src/ are present in the inventory'
     'src/adapters/verification/verification.ts',
     // Temporary-root cleanup manifests are verification infrastructure, not domain state.
     'src/adapters/verification/temp-root-registry.ts',
+    // Process liveness reads one named /proc entry as bounded recovery
+    // evidence. It stores nothing and owns no ADR 0053 concept (TASK-2373).
+    'src/adapters/process/process-liveness.ts',
     // Red-green reproduction test tracking — reads mission docs for test markers
     'src/adapters/verification/redgreen.ts',
     // Gate planning reads pipeline configuration and observes worktrees; it
