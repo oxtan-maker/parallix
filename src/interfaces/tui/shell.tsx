@@ -12,6 +12,7 @@ import type {
   BoardProgressSink,
 } from '../../application/controller/board-command.js';
 import { cancelledOutcome, unavailableCapability, isIntegratedCapability, unavailableReason } from '../../application/controller/board-command.js';
+import { agentIsWorking } from '../../application/projections/mission-board.js';
 import { BoardLayout, selectLayoutMode, useTerminalDimensions, MIN_LANE_WIDTH } from './board-layout.js';
 import { BOARD_LANES } from './lane-column.js';
 import { createNavigationState, moveSelection, type NavigationKey } from './navigation.js';
@@ -160,7 +161,14 @@ export function BoardShell({ projection, columns, rows, initialSelectedMissionId
 
   const dispatchMissionAction = (kind: BoardCommandKind, mission: MissionCard): boolean => {
     setOutcome(null);
-    if (kind === 'active:execute' && !canDispatchAction(kind, mission)) { return false; }
+    if (!isIntegratedCapability(kind)) {
+      setOutcome(unavailableCapability(kind, unavailableReason(kind) ?? `${kind} is not available from the board`));
+      return false;
+    }
+    if (!canDispatchAction(kind, mission)) {
+      setOutcome(unavailableCapability(kind, 'Mission cannot be activated from its current state'));
+      return false;
+    }
     const nextConfirmation = { kind, mission };
     confirmationRef.current = nextConfirmation;
     setConfirmation(nextConfirmation);
@@ -287,7 +295,7 @@ export function BoardShell({ projection, columns, rows, initialSelectedMissionId
         >
           <Box flexDirection="row" alignItems="center">
             <Text bold color="green">● WORKING</Text>
-            <Text color="gray">{' '}{projection.stages.flatMap((stage) => stage.cards).filter((card) => card.currentWork && card.currentWork.freshness !== 'stale').length}</Text>
+            <Text color="gray">{' '}{projection.stages.flatMap((stage) => stage.cards).filter(agentIsWorking).length}</Text>
           </Box>
           <WorkingItems cards={projection.stages.flatMap((stage) => stage.cards)} />
           <Box flexDirection="row" paddingTop={1}>
@@ -424,11 +432,13 @@ export function AttentionItems({ queue, selectedMissionId, focusedIndex, sourceS
             <Box>
               <Text wrap="end" dimColor>{attentionWhy(item.reason)}</Text>
             </Box>
-            <Box flexDirection="row">
-              <Box flexGrow={1}>
+            <Box>
               <Text wrap="end" color="gray">{`$ ${attentionCommand(item.card, item.reason, item.action)}`}</Text>
-              </Box>
-              <Text color="green">{' run \u25b6'}</Text>
+            </Box>
+            <Box>
+              <Text color={isIntegratedCapability(item.action.kind) && canDispatchAction(item.action.kind, item.card) ? 'green' : 'gray'}>
+                {isIntegratedCapability(item.action.kind) && canDispatchAction(item.action.kind, item.card) ? ' run \u25b6' : ' unavailable'}
+              </Text>
             </Box>
           </Box>
         );
@@ -441,11 +451,17 @@ export function AttentionItems({ queue, selectedMissionId, focusedIndex, sourceS
 }
 
 function WorkingItems({ cards }: { readonly cards: readonly MissionCard[] }): React.ReactElement | null {
-  const working = cards.filter((card) => card.currentWork && card.currentWork.freshness !== 'stale');
+  const working = cards.filter(agentIsWorking);
   if (working.length === 0) { return <Text dimColor>no live mission work</Text>; }
-  return <Box flexDirection="column">{working.slice(0, 3).map((card) => (
-    <Text key={card.id} color="green">{`${card.id} · ${card.currentWork?.phase} · ${card.currentWork?.agent ?? 'operation'}`}</Text>
-  ))}</Box>;
+  const visible = working.slice(0, 3);
+  return <Box flexDirection="column">
+    {visible.map((card) => (
+      <Text key={card.id} color="green">{card.currentWork
+        ? `${card.id} · ${card.currentWork.phase} · ${card.currentWork.agent ?? 'operation'}`
+        : `${card.id} · recovery evidence · ${card.liveSession?.family ?? 'unknown agent'}`}</Text>
+    ))}
+    {working.length > visible.length && <Text dimColor>{`+${working.length - visible.length} more`}</Text>}
+  </Box>;
 }
 
 // ---------------------------------------------------------------------------
@@ -549,6 +565,11 @@ function KeyHandler({ onExit, onNavigate, onToggleHelp, onToggleFlow, onToggleDo
       onLifecycle, queueItemsList, focusedIdx, setFocusedIdx, focusedArea,
       setFocusedArea,
     } = latest.current;
+    // Quit is process-wide and must not be swallowed by a confirmation modal.
+    if ((input === 'q' && !key.ctrl && !key.meta) || (input === 'c' && key.ctrl)) {
+      onExit();
+      return;
+    }
     if (confirmationArmedRef.current) {
       if (isUnmodifiedEnter(input, key)) {
         confirmationArmedRef.current = false;
@@ -560,11 +581,6 @@ function KeyHandler({ onExit, onNavigate, onToggleHelp, onToggleFlow, onToggleDo
       }
       return;
     }
-    if ((input === 'q' && !key.ctrl && !key.meta) || (input === 'c' && key.ctrl)) {
-      onExit();
-      return;
-    }
-
     const navigation = navigationKeyForInput(input, key);
     if (navigation) {
       /* Arrow keys navigate the focused area. */

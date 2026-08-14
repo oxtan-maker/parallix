@@ -991,8 +991,10 @@ test('selectLaunchAndRecord writes Backlog before the launcher resolves its fina
     log: () => {}
   });
 
-  // transitionTaskFn is now async; yield two microtask turns so onLaunch's
-  // `await transitionTaskFn(...)` settles before startAgentFn captures the count.
+  // onLaunch has two awaits (onAgentLaunched + transitionTaskFn) and startAgentFn
+  // awaits onLaunch, so three microtask turns are needed before startAgentFn
+  // resumes and captures the transition count.
+  await Promise.resolve();
   await Promise.resolve();
   await Promise.resolve();
   assert.equal(transitionCountAtReturn, 1, 'transitionTask must run during onLaunch, before the final result resolves');

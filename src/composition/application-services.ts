@@ -11,6 +11,7 @@ import { KnownRepositoryService } from '../application/services/known-repository
 import { UIPreferencesService } from '../application/services/ui-preferences-service.js';
 import { OperationalHistoryService } from '../application/services/operational-history-service.js';
 import { CurrentWorkRecorder, NO_CURRENT_WORK_PORT, type CurrentWorkPort } from '../application/recording/current-work-recorder.js';
+import { processStartIdentity } from '../adapters/process/process-liveness.js';
 import { SqliteMissionStore } from '../adapters/sqlite/mission-store.js';
 import { MissionCompatibilityImporter } from '../adapters/sqlite/mission-importer.js';
 import { SqliteSessionMarkerAdapter } from '../adapters/sqlite/session-marker-adapter.js';
@@ -230,7 +231,12 @@ export async function createProductionApplicationServices(
   // One publisher per process. The recorder appends to the same operational
   // history the board reads, so there is no second current-work authority.
   const currentWork: CurrentWorkPort = operatorState.repositories
-    ? new CurrentWorkRecorder(operatorState.repositories.operationalHistory, { processId: process.pid })
+    ? new CurrentWorkRecorder(operatorState.repositories.operationalHistory, {
+      processId: process.pid,
+      // Pid plus start identity: a recycled pid must not keep a dead run's
+      // work displayed as live (TASK-2373 SC13).
+      processIdentity: processStartIdentity(process.pid),
+    })
     : NO_CURRENT_WORK_PORT;
   const presentationCapabilities = operatorState.repositories
     ? (await import('./production-capabilities.js')).composeProductionCapabilities(

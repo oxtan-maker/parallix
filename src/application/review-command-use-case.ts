@@ -2,7 +2,7 @@ import { missionId } from '../domain/mission.js';
 import type { ReviewWorkflowContext, ReviewWorkflowPort } from './ports/review-workflow.js';
 import {
   NO_CURRENT_WORK_PORT,
-  currentWorkPublication,
+  reviewLoopPublisher,
   type CurrentWorkPhase,
   type CurrentWorkPort,
 } from './recording/current-work-recorder.js';
@@ -65,6 +65,11 @@ export class ReviewCommandUseCase {
    * guess that "mission is in the review lane" means "a reviewer is running".
    * Publication never changes the operation's outcome: a recorder outage is
    * swallowed, and a failed operation still clears its current work.
+   *
+   * A review operation that *throws* did not simply finish: the review loop
+   * exhausted what it could do autonomously. Clearing that as a bare `ended`
+   * fact throws away the only sentence that tells the operator why they are
+   * needed, so the failure is published as `blocked` carrying its reason.
    */
   private async run(
     context: ReviewWorkflowContext,
@@ -83,22 +88,19 @@ export class ReviewCommandUseCase {
     await bestEffort(() => this._currentWork.running(publication));
     const options = {
       ...context.options,
-      onAgentLaunched: (agent: string, agentPhase: CurrentWorkPhase) => {
-        const update = currentWorkPublication({
-          slug: context.slug,
-          operationId: publication.operationId,
-          phase: agentPhase,
-          summary: publication.summary,
-          agent,
-        });
-        return update ? bestEffort(() => this._currentWork.running(update)) : Promise.resolve();
-      },
+      ...reviewLoopPublisher(this._currentWork, {
+        slug: context.slug,
+        operationId: publication.operationId,
+      }),
     };
     try {
       await this._workflow[operation]({ ...context, options });
-    } finally {
-      await bestEffort(() => this._currentWork.ended(publication));
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : 'review operation cannot continue autonomously';
+      await bestEffort(() => this._currentWork.blocked(publication, reason));
+      throw error;
     }
+    await bestEffort(() => this._currentWork.ended(publication));
   }
 }
 

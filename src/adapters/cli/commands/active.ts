@@ -94,7 +94,7 @@ async function active(args, options = {}) {
 // immediately after the launcher successfully spawns the process. If the final
 // launch result later fails, we roll the task status back to the prior status.
 /**
- * @param {{slug: string, worktree: string, preselectedAgent?: string | null, agentConfig: object, taskResolution: object, prompt: string, startAgentFn?: Function, transitionTaskFn?: Function, getTaskStatusFn?: Function, getTaskImplementerFn?: Function, selectAgentFn?: Function, log?: Function, sessionMarkerPort?: object | null, onAgentLaunched?: (agent: string) => void}} opts
+ * @param {{slug: string, worktree: string, preselectedAgent?: string | null, agentConfig: object, taskResolution: object, prompt: string, startAgentFn?: Function, transitionTaskFn?: Function, getTaskStatusFn?: Function, getTaskImplementerFn?: Function, selectAgentFn?: Function, log?: Function, sessionMarkerPort?: object | null, onAgentLaunched?: (agent: string) => Promise<void>}} opts
  */
 async function selectLaunchAndRecord(opts) {
   const {
@@ -160,7 +160,9 @@ async function selectLaunchAndRecord(opts) {
       sessionMarkerPort: sessionMarkerPort ?? undefined,
       onLaunch: async (/** @type{{agent: string}} */ { agent }) => {
         launchedAgent = agent;
-        onAgentLaunched?.(agent);
+        // Awaited: the caller publishes the mission's current work here, and
+        // that write must land before the run reports its next state.
+        await onAgentLaunched?.(agent);
         if (!(taskResolutionTyped && taskResolutionTyped.ok)) {
           return;
         }
@@ -453,11 +455,13 @@ function checkpointValidationNextAction(errorMsg, slug, worktree) {
  * @param {string} slug
  * @param {string} worktree
  * @param {string} agent
-  * @param {{taskFile?: string | null, validateCheckpointsBeforeHandoffFn?: Function, performHandoff?: Function, startReviewLoop?: Function, repairHandoffFn?: {isRelaunchableError: Function, buildRelaunchPrompt: Function}, attemptAgentRelaunchFn?: Function, log?: Function, error?: Function}} [options]
+  * @param {{taskFile?: string | null, onAgentLaunched?: (agent: string, phase: 'review' | 'review-response') => Promise<void>, onAutonomousStop?: (reason: string) => Promise<void>, validateCheckpointsBeforeHandoffFn?: Function, performHandoff?: Function, startReviewLoop?: Function, repairHandoffFn?: {isRelaunchableError: Function, buildRelaunchPrompt: Function}, attemptAgentRelaunchFn?: Function, log?: Function, error?: Function}} [options]
  */
 async function runHandoffAndReview(slug, worktree, agent, options = {}) {
   const {
     taskFile = null,
+    onAgentLaunched = undefined,
+    onAutonomousStop = undefined,
     validateCheckpointsBeforeHandoffFn = validateCheckpointsBeforeHandoff,
     performHandoff: _performHandoff = (/** @type{string} */ s, /** @type{object} */ o) => handoff.performHandoff(s, o),
     startReviewLoop: _startReviewLoop = (/** @type{string} */ s, /** @type{object} */ o) => startReviewLoop(s, o),
@@ -626,7 +630,10 @@ async function runHandoffAndReview(slug, worktree, agent, options = {}) {
   }
 
   log(`\nStarting autonomous review loop (implementer: ${fmt.agent(agent)})...`);
-  await _startReviewLoop(slug, { implementer: agent, worktree, recordStageStatsSafeFn: recordStageStatsSafe });
+  // The review loop launches other families on this same mission. Hand the
+  // caller's publication seam straight through so the board follows the
+  // reviewer and the implementer answering findings (TASK-2373).
+  await _startReviewLoop(slug, { implementer: agent, worktree, recordStageStatsSafeFn: recordStageStatsSafe, onAgentLaunched, onAutonomousStop });
   return true;
 }
 

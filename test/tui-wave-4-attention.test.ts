@@ -419,7 +419,7 @@ test('attention-items: rendered output contains exact command text "$ px <cmd> <
 
   const output = await renderShell({
     projection: projWithQueue,
-    columns: 120,
+    columns: 200,
     rows: 30,
   });
 

@@ -120,8 +120,11 @@ test('a recorded current-work fact round-trips through the operational-history e
     summary: 'running execute agent',
     agent: 'claude',
     processId: 4242,
+    processIdentity: null,
     blockedReason: null,
     occurredAt: '2026-08-13T10:00:00.000Z',
+    // No durable order yet: the entry has not been through the store.
+    sequence: undefined,
   });
 });
 
@@ -333,7 +336,7 @@ test('a short review read publishes no current work', async () => {
   assert.deepEqual(appended, []);
 });
 
-test('a failing review operation still clears its current work', async () => {
+test('a failing review operation stops claiming work and keeps its reason', async () => {
   const { repo, appended } = makeHistoryRepo();
   const workflow = {
     ...makeReviewWorkflow([]),
@@ -343,7 +346,11 @@ test('a failing review operation still clears its current work', async () => {
     new ReviewCommandUseCase(workflow, new CurrentWorkRecorder(repo, { processId: 9 })).execute(['task-2370', '--start']),
     /review loop failed/,
   );
-  assert.equal(published(appended).at(-1)?.state, 'ended');
+  // The mission stops being WORKING either way; publishing `blocked` keeps the
+  // sentence that explains why an operator is now needed (TASK-2373 SC10).
+  const last = published(appended).at(-1);
+  assert.equal(last?.state, 'blocked');
+  assert.match(String(last?.blockedReason), /review loop failed/);
 });
 
 // ---------------------------------------------------------------------------

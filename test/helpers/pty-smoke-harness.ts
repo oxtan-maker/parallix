@@ -13,10 +13,13 @@ function quote(value: string): string {
 }
 
 function timeout<T>(promise: Promise<T>, milliseconds: number, description: string): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<T>((_resolve, reject) => setTimeout(() => reject(new Error(`PTY smoke timeout after ${milliseconds}ms: ${description}`)), milliseconds)),
-  ]);
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const deadline = new Promise<T>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(`PTY smoke timeout after ${milliseconds}ms: ${description}`)), milliseconds);
+  });
+  return Promise.race([promise, deadline]).finally(() => {
+    if (timer !== null) { clearTimeout(timer); }
+  });
 }
 
 async function waitForFile(path: string, milliseconds: number): Promise<string> {
@@ -45,8 +48,24 @@ function runStty(device: string, columns: number, rows: number): Promise<void> {
 export interface PtySmokeSession {
   readonly output: () => string;
   readonly isAlive: () => boolean;
+  /**
+   * The operating-system process id of the launched command itself (not the
+   * `script` wrapper), so a shutdown test can prove *that* process is gone
+   * rather than that a callback ran.
+   */
+  readonly pid: number;
   send(input: string): void;
   resize(columns: number, rows: number): Promise<void>;
+  /** Send an OS signal to the launched process. */
+  signal(signal: NodeJS.Signals): void;
+  /** Resolve with the exit code once the session ends, or reject on timeout. */
+  waitForExit(milliseconds: number): Promise<number>;
+  /** Whether the launched pid no longer exists. */
+  processGone(): boolean;
+  /** Whether the PTY's terminal settings match the pre-launch capture. */
+  terminalRestored(): Promise<boolean>;
+  /** Remove the session's temporary metadata directory. */
+  cleanup(): Promise<void>;
   exitCleanly(): Promise<{ readonly exitCode: number; readonly terminalRestored: boolean }>;
 }
 
@@ -63,13 +82,17 @@ export async function launchPtySmoke(
   if (command.length === 0) { throw new Error('PTY smoke command is required'); }
   const temp = await mkdtemp(join(tmpdir(), 'parallix-pty-smoke-'));
   const ttyPath = join(temp, 'tty');
+  const pidPath = join(temp, 'pid');
   const beforePath = join(temp, 'stty-before');
   const afterPath = join(temp, 'stty-after');
+  // `sh -c 'echo $$ …; exec …'` publishes the launched process's own pid while
+  // keeping it in the foreground, so the PTY stays wired to its stdin.
+  const launch = `sh -c ${quote(`echo $$ > ${quote(pidPath)}; exec ${command.map(quote).join(' ')}`)}`;
   const shell = [
     `tty > ${quote(ttyPath)}`,
     `${quote(STTY)} -g > ${quote(beforePath)}`,
     `${quote(STTY)} cols 120 rows 30`,
-    command.map(quote).join(' '),
+    launch,
     'status=$?',
     `${quote(STTY)} -g > ${quote(afterPath)}`,
     `${quote(STTY)} "$(cat ${quote(beforePath)})"`,
@@ -89,14 +112,33 @@ export async function launchPtySmoke(
     return Number(code ?? 1);
   });
   let device: string;
+  let pid: number;
   try {
     device = await timeout(waitForFile(ttyPath, options.timeoutMs), options.timeoutMs, 'starting local PTY');
+    pid = Number(await timeout(waitForFile(pidPath, options.timeoutMs), options.timeoutMs, 'reading launched pid'));
   } catch (error) {
     throw new Error(`Could not start local PTY (temporary diagnostics: ${temp}): ${String(error)}; output: ${output.join('')}`);
   }
+  const terminalRestored = async () => {
+    const [before, after] = await Promise.all([readFile(beforePath, 'utf8'), readFile(afterPath, 'utf8')]);
+    return before === after;
+  };
   return {
     output: () => output.join(''),
     isAlive: () => !hasExited,
+    pid,
+    signal: (signal) => { process.kill(pid, signal); },
+    waitForExit: (milliseconds) => timeout(exited, milliseconds, `waiting for pid ${pid} to exit`),
+    processGone: () => {
+      try {
+        process.kill(pid, 0);
+        return false;
+      } catch {
+        return true;
+      }
+    },
+    terminalRestored,
+    cleanup: async () => { await rm(temp, { recursive: true, force: true }); },
     send: (input) => { child.stdin.write(input); },
     resize: async (columns, rows) => {
       await timeout(runStty(device, columns, rows), options.timeoutMs, 'resizing local PTY');
@@ -104,9 +146,9 @@ export async function launchPtySmoke(
     exitCleanly: async () => {
       child.stdin.write('q');
       const exitCode = await timeout(exited, options.timeoutMs, 'clean UI exit');
-      const [before, after] = await Promise.all([readFile(beforePath, 'utf8'), readFile(afterPath, 'utf8')]);
+      const restored = await terminalRestored();
       await rm(temp, { recursive: true, force: true });
-      return { exitCode, terminalRestored: before === after };
+      return { exitCode, terminalRestored: restored };
     },
   };
 }

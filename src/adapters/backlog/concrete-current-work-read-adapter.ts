@@ -19,7 +19,9 @@ export class ConcreteCurrentWorkReadAdapter implements CurrentWorkReadAdapter {
   constructor(private readonly _historyRepo: OperationalHistoryRepository) {}
 
   async loadCurrentWork(): Promise<readonly CurrentWorkEvent[]> {
-    const entries = await this._historyRepo.findByType(CURRENT_WORK_EVENT_TYPE);
+    const entries = this._historyRepo.findLatestByTypePerMission
+      ? await this._historyRepo.findLatestByTypePerMission(CURRENT_WORK_EVENT_TYPE, 2)
+      : await this._historyRepo.findByType(CURRENT_WORK_EVENT_TYPE);
     return entries.flatMap((entry) => parseCurrentWorkEntry(entry) ?? []);
   }
 }
