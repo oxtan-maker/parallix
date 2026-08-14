@@ -4,7 +4,7 @@ title: Finish live-board operation correctness and shutdown semantics
 status: backlog
 assignee: [codex]
 created_date: '2026-08-14 05:33'
-labels: []
+labels: [ai_sdlc, bug]
 dependencies: []
 ordinal: 95912
 ---
