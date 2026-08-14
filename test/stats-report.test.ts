@@ -38,6 +38,25 @@ test('renderWeeklyStatsReport produces current and previous week sections', () =
   assert.ok(report.includes('Agent telemetry — current week') && report.includes('Agent telemetry — previous week'));
 });
 
+test('renderWeeklyStatsReport assigns performance cohorts by lifecycle completion, not telemetry date', () => {
+  const rows = [
+    { date: '2026-08-04', repo: 'r', mission: 'a', classification: 'user_value', implementer: 'alpha', stage: 'default' },
+    { date: '2026-08-08', repo: 'r', mission: 'b', classification: 'ai_sdlc', implementer: 'beta', stage: 'default' },
+  ];
+  const report = statsReport.renderWeeklyStatsReport(rows, {
+    today: '2026-08-12',
+    missionFlow: [
+      { repo: 'r', mission: 'a', closedAt: '2026-08-10T00:00:00Z', labels: [] },
+      { repo: 'r', mission: 'b', closedAt: '2026-08-04T00:00:00Z', labels: [] },
+    ],
+  });
+  const [current, previous] = report.split('Agent performance previous week');
+  assert.match(current, /alpha\s+1/);
+  assert.doesNotMatch(current, /beta\s+1/);
+  assert.match(previous, /beta\s+1/);
+  assert.doesNotMatch(previous, /alpha\s+1/);
+});
+
 test('renderRangeStatsReport filters by date range', () => {
   const rows = [
     { date: '2026-05-10', repo: 'r', mission: 'm1', classification: 'user_value', implementer: 'a', completedForTest: 'yes' },

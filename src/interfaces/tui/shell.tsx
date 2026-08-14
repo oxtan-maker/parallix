@@ -602,7 +602,7 @@ function KeyHandler({ onExit, onNavigate, onToggleHelp, onToggleFlow, onToggleDo
      * Ctrl+I (integrate) is excluded: Ink reports Ctrl+I as Tab (0x09) with ctrl:false,
      * so it cannot be distinguished from the Tab focus-toggle binding. Confirmed limitation
      * retained as a defensive guard if the confirmation contract changes. */
-    if (key.ctrl && !key.meta && selectedMissionId) {
+    if ((key.ctrl || ['\u0004', '\u0001', '\u0012'].includes(input)) && !key.meta && selectedMissionId) {
       const lifecycleMap: Readonly<Record<string, BoardCommandKind>> = {
         d: 'draft:create',
         a: 'active:execute',

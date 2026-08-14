@@ -115,16 +115,17 @@ function renderWeeklyStatsReport(rows, options = {}) {
   const rootDir = options.rootDir || null;
   const windows = buildWeeklyWindows(/** @type{Date} */(typeof today === 'string' ? new Date(`${today}T00:00:00Z`) : today));
   const missionFlow = options.missionFlow ?? null;
-  const completedMissionKeys = new Set((missionFlow || []).map(outcome =>
-    `${String(outcome.repo).trim()}::${String(outcome.mission).trim().toLowerCase()}`,
-  ));
+  const completedMissionKeys = window => new Set((missionFlow || [])
+    .filter(outcome => String(outcome.closedAt).slice(0, 10) >= window.start.toISOString().slice(0, 10)
+      && String(outcome.closedAt).slice(0, 10) <= window.end.toISOString().slice(0, 10))
+    .map(outcome => `${String(outcome.repo).trim()}::${String(outcome.mission).trim().toLowerCase()}`));
   const telemetryMissionKeys = new Set(rows.map(row =>
     `${String(row.repo ?? '').trim()}::${String(row.mission ?? '').trim().toLowerCase()}`,
   ));
   const currentMissionStats = summarizeMissionWindow(rows, windows.current, telemetryMissionKeys);
   const previousMissionStats = summarizeMissionWindow(rows, windows.previous, telemetryMissionKeys);
-  const currentAgentStats = missionFlow === null ? [] : summarizeAgentWindow(rows, windows.current, { rootDir, completedMissionKeys });
-  const previousAgentStats = missionFlow === null ? [] : summarizeAgentWindow(rows, windows.previous, { rootDir, completedMissionKeys });
+  const currentAgentStats = missionFlow === null ? [] : summarizeAgentWindow(rows, windows.current, { rootDir, completedMissionKeys: completedMissionKeys(windows.current) });
+  const previousAgentStats = missionFlow === null ? [] : summarizeAgentWindow(rows, windows.previous, { rootDir, completedMissionKeys: completedMissionKeys(windows.previous) });
   const currentMissionColors = colorMissionCounts(currentAgentStats);
   const currentAgentColors = colorAverageFixRounds(currentAgentStats);
   const previousMissionColors = colorMissionCounts(previousAgentStats);
@@ -147,16 +148,16 @@ function renderWeeklyStatsReport(rows, options = {}) {
     [[String(previousMissionStats.total), String(previousMissionStats.userValue), String(previousMissionStats.aiSdlc), String(previousMissionStats.unknown)]]
   ));
   lines.push('');
-  lines.push(fmt.bold(`Agent performance this week (${windows.current.label})`));
+  lines.push(fmt.bold(`Agent performance this week (${windows.current.label}) — completed Missions`));
   lines.push(missionFlow === null ? 'Agent performance unavailable: lifecycle history was not read.' : formatStatsTable(
-    ['Agent family', '# missions as implementer', 'Average PR fix rounds to complete mission'],
+    ['Agent family', '# missions as implementer', 'Average PR fix rounds to complete mission', 'PR fix n'],
     currentAgentStats.length > 0
-      ? currentAgentStats.map((row, index) => [row.implementer, currentMissionColors[index], currentAgentColors[index]])
-      : [['none', '0', '0.00']]
+      ? currentAgentStats.map((row, index) => [row.implementer, currentMissionColors[index], currentAgentColors[index] ?? 'unavailable', String(row.prFixObservationCount)])
+      : [['none', '0', 'unavailable', '0']]
   ));
   lines.push('');
   const currentAgentSpend = summarizeAgentStageSpend(rows, windows.current);
-  lines.push(fmt.bold(`Agent spend by stage this week (${windows.current.label})`));
+  lines.push(fmt.bold(`Agent spend by stage this week (${windows.current.label}) — resource consumption`));
   lines.push(formatStatsTable(
     ['Agent family', ...AGENT_SPEND_STAGE_COLUMNS.map(entry => entry.label), 'total'],
     currentAgentSpend.length > 0
@@ -168,12 +169,12 @@ function renderWeeklyStatsReport(rows, options = {}) {
       : [['none', ...AGENT_SPEND_STAGE_COLUMNS.map(() => '\u2014'), '\u2014']]
   ));
   lines.push('');
-  lines.push(fmt.bold(`Agent performance previous week (${windows.previous.label})`));
+  lines.push(fmt.bold(`Agent performance previous week (${windows.previous.label}) — completed Missions`));
   lines.push(missionFlow === null ? 'Agent performance unavailable: lifecycle history was not read.' : formatStatsTable(
-    ['Agent family', '# missions as implementer', 'Average PR fix rounds to complete mission'],
+    ['Agent family', '# missions as implementer', 'Average PR fix rounds to complete mission', 'PR fix n'],
     previousAgentStats.length > 0
-      ? previousAgentStats.map((row, index) => [row.implementer, previousMissionColors[index], previousAgentColors[index]])
-      : [['none', '0', '0.00']]
+      ? previousAgentStats.map((row, index) => [row.implementer, previousMissionColors[index], previousAgentColors[index] ?? 'unavailable', String(row.prFixObservationCount)])
+      : [['none', '0', 'unavailable', '0']]
   ));
   return lines.join('\n');
 }
@@ -188,9 +189,10 @@ function renderRangeStatsReport(rows, options = {}) {
   const rootDir = options.rootDir || null;
   const window = createRangeWindow({ from, to });
   const missionFlow = options.missionFlow ?? null;
-  const completedMissionKeys = new Set((missionFlow || []).map(outcome =>
-    `${String(outcome.repo).trim()}::${String(outcome.mission).trim().toLowerCase()}`,
-  ));
+  const completedMissionKeys = new Set((missionFlow || [])
+    .filter(outcome => String(outcome.closedAt).slice(0, 10) >= window.start.toISOString().slice(0, 10)
+      && String(outcome.closedAt).slice(0, 10) <= window.end.toISOString().slice(0, 10))
+    .map(outcome => `${String(outcome.repo).trim()}::${String(outcome.mission).trim().toLowerCase()}`));
   const telemetryMissionKeys = new Set(rows.map(row =>
     `${String(row.repo ?? '').trim()}::${String(row.mission ?? '').trim().toLowerCase()}`,
   ));
@@ -208,12 +210,12 @@ function renderRangeStatsReport(rows, options = {}) {
     [[String(missionStats.total), String(missionStats.userValue), String(missionStats.aiSdlc), String(missionStats.unknown)]]
   ));
   lines.push('');
-  lines.push(fmt.bold(`Agent performance (${window.label})`));
+  lines.push(fmt.bold(`Agent performance (${window.label}) — completed Missions`));
   lines.push(missionFlow === null ? 'Agent performance unavailable: lifecycle history was not read.' : formatStatsTable(
-    ['Agent family', '# missions as implementer', 'Average PR fix rounds to complete mission'],
+    ['Agent family', '# missions as implementer', 'Average PR fix rounds to complete mission', 'PR fix n'],
     agentStats.length > 0
-      ? agentStats.map((row, index) => [row.implementer, missionColors[index], agentColors[index]])
-      : [['none', '0', '0.00']]
+      ? agentStats.map((row, index) => [row.implementer, missionColors[index], agentColors[index] ?? 'unavailable', String(row.prFixObservationCount)])
+      : [['none', '0', 'unavailable', '0']]
   ));
   return lines.join('\n');
 }

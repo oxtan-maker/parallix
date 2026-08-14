@@ -789,15 +789,9 @@ async function promoteTaskForIntegrationIfNeeded(
     return { changed: false, dryRun: true };
   }
 
-  // Promotion owns the Backlog representation only. It must NOT complete the
-  // Mission: `integrate` maps `review -> done` in the state machine, and this
-  // runs at Step 4, before the squash commit exists — so completing here made a
-  // failed landing leave a `done` Mission (TASK-2369 defect 1). The single
-  // completion owner is persistLandedIntegrationOrAbort(), after landing.
-  //
-  // The Mission is still read first, and fail-closed: an unreachable or missing
-  // aggregate refuses the external Backlog effect rather than mutating a file
-  // whose durable counterpart cannot be confirmed (architecture invariant).
+  // Approval owns `review -> integration`; landing alone owns
+  // `integration -> done`. Read the authority first so the Backlog promotion
+  // cannot get ahead of the durable lifecycle transition.
   if (typeof missionServicesFn !== 'function') { throw new Error('integration promotion requires injected mission services'); }
   const missionServices = await missionServicesFn(context.baseWorktree || process.cwd());
   const missionLoad = await missionServices.store.load(missionId(context.slug));
@@ -810,7 +804,31 @@ async function promoteTaskForIntegrationIfNeeded(
     throw new IntegrationAbort();
   }
 
-  // External boundary effect (Backlog promotion) after the durable state read.
+  if (missionLoad.mission.status === 'review') {
+    if (!missionLoad.mission.review) {
+      fmt.log.fail(`Mission ${missionId(context.slug)} is in review without an approved review record.`);
+      throw new IntegrationAbort();
+    }
+    const approval = await missionServices.lifecycle.transition({
+      operationId: `integrate-approve:${context.slug}`,
+      missionId: missionId(context.slug),
+      expectedVersion: missionLoad.version,
+      capabilities: new Set(['mission:transition']),
+      command: { type: 'approve', review: missionLoad.mission.review },
+      actor: missionLoad.mission.assignee ?? 'custom',
+      occurredAt: new Date().toISOString(),
+      idempotencyKey: `approve:${context.slug}`,
+    });
+    if (approval.status !== 'completed') {
+      fmt.log.fail(`Mission approval failed before integration: ${approval.error?.message || 'unknown'}.`);
+      throw new IntegrationAbort();
+    }
+  } else if (missionLoad.mission.status !== 'integration') {
+    fmt.log.fail(`Mission ${missionId(context.slug)} is ${missionLoad.mission.status}; expected review or integration before promotion.`);
+    throw new IntegrationAbort();
+  }
+
+  // External boundary effect after the durable lifecycle transition.
   const stateMapOptions = { rootDir: /** @type {string} */ (context.baseWorktree) };
   const approvedStatus = toActual('approved', stateMapOptions) || 'approved';
   const baseTask = context.slug && context.baseWorktree
