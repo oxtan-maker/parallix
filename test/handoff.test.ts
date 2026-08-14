@@ -14,6 +14,9 @@ const handoffModule = mockModule<typeof import('../src/adapters/cli/commands/han
 const git = mockModule<typeof import('../src/adapters/git/git.js')>('../src/adapters/git/git.js', import.meta.url);
 const missionUtils = mockModule<typeof import('../src/adapters/filesystem/mission-utils.js')>('../src/adapters/filesystem/mission-utils.js', import.meta.url);
 const backlog = mockModule<typeof import('../src/adapters/backlog/backlog.js')>('../src/adapters/backlog/backlog.js', import.meta.url);
+// Sub-modules must be declared so they re-link with the facaded git binding
+const forgejoGit = mockModule<typeof import('../src/adapters/forgejo/forgejo-git.js')>('../src/adapters/forgejo/forgejo-git.js', import.meta.url);
+const forgejoPr = mockModule<typeof import('../src/adapters/forgejo/forgejo-pr.js')>('../src/adapters/forgejo/forgejo-pr.js', import.meta.url);
 const forgejo = mockModule<typeof import('../src/adapters/forgejo/forgejo.js')>('../src/adapters/forgejo/forgejo.js', import.meta.url);
 const setupReview = mockModule<typeof import('../src/adapters/review/setup-review.js')>('../src/adapters/review/setup-review.js', import.meta.url);
 const gatekeeper = mockModule<typeof import('../src/adapters/verification/gatekeeper.js')>('../src/adapters/verification/gatekeeper.js', import.meta.url);

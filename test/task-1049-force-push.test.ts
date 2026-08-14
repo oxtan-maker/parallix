@@ -8,8 +8,13 @@ import { ReviewCommandUseCase } from '../src/application/review-command-use-case
 import { createReviewCommand } from '../src/interfaces/cli/review.js';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
 import { parseHandoffCliRequest } from '../src/interfaces/cli/handoff.js';
-const createPrModule = mockModule<typeof import('../src/adapters/forgejo/forgejo.js')>('../src/adapters/forgejo/forgejo.js', import.meta.url);
 const git = mockModule<typeof import('../src/adapters/git/git.js')>('../src/adapters/git/git.js', import.meta.url);
+// Sub-modules must be declared so they re-link with the facaded git binding
+// (forgejo.ts is a barrel that re-exports from these; without re-linking them,
+// their internal git imports stay bound to the original module).
+const forgejoGit = mockModule<typeof import('../src/adapters/forgejo/forgejo-git.js')>('../src/adapters/forgejo/forgejo-git.js', import.meta.url);
+const forgejoPr = mockModule<typeof import('../src/adapters/forgejo/forgejo-pr.js')>('../src/adapters/forgejo/forgejo-pr.js', import.meta.url);
+const createPrModule = mockModule<typeof import('../src/adapters/forgejo/forgejo.js')>('../src/adapters/forgejo/forgejo.js', import.meta.url);
 const rebaseModule = mockModule<typeof import('../src/adapters/cli/commands/rebase.js')>('../src/adapters/cli/commands/rebase.js', import.meta.url);
 const reviewModule = mockModule<typeof import('../src/adapters/review/review-commands.js')>('../src/adapters/review/review-commands.js', import.meta.url);
 await installModuleMocks();

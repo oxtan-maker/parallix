@@ -117,7 +117,7 @@ test('Ctrl+A on enabled card shows confirmation and dispatches on Enter', async 
   const ui = await renderFlow({ async dispatchWithStatus() { calls += 1; return { status: 'completed', durableEvidence: [] }; } });
   /* Ctrl+A (\x01) triggers lifecycle shortcut for active:execute. */
   ui.stdin.send('\x01');
-  await new Promise((resolve) => setTimeout(resolve, 100));
+  await new Promise((resolve) => setTimeout(resolve, 60));
   /* Confirmation dialog should appear. */
   assert.match(ui.stdout.writes.join(''), /CONFIRM CONSEQUENTIAL ACTION/);
   /* Press Enter to confirm. */
