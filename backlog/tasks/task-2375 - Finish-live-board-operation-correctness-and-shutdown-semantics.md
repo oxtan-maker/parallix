@@ -2,7 +2,7 @@
 id: TASK-2375
 title: Finish live-board operation correctness and shutdown semantics
 status: active
-assignee: [vibe]
+assignee: [custom]
 created_date: '2026-08-14 05:33'
 labels: [ai_sdlc, bug]
 dependencies: []
