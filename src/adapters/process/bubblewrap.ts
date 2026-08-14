@@ -138,7 +138,7 @@ export function resolveSandboxProfile(step: string, worktree: string, artifactDi
     if (!artifactDir) { throw new BubblewrapGuardError('review step requires a resolved artifact directory'); }
     return { worktree, worktreeWritable: false, writable: [artifactDir], optionalWritable: ['/tmp'] };
   }
-  return { worktree, worktreeWritable: true, writable: [] };
+  return { worktree, worktreeWritable: true, writable: [], optionalWritable: ['/tmp'] };
 }
 
 const profileStorage = new AsyncLocalStorage<SandboxProfile>();
