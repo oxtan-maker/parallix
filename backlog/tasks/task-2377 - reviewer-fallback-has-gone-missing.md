@@ -1,7 +1,7 @@
 ---
 id: TASK-2377
 title: reviewer fallback has gone missing
-status: active
+status: review
 assignee: [custom]
 created_date: '2026-08-14 08:49'
 labels: [bug, ai_sdlc]
