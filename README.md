@@ -2,7 +2,7 @@
 
 **Parallix is a local-first Git workflow CLI for running AI coding agents in isolated, reviewable missions instead of letting one long-lived agent session mutate your main checkout.**
 
-It is for engineers who already use Git and terminal-first coding agents such as Claude Code, Codex, Qwen Code, OpenCode/custom, and Vibe/Mistral, and want branch isolation, resumable checkpoints, agent-family failover, and a forced review step without building that harness by hand.
+It is for engineers who already use Git and terminal-first coding agents such as Claude Code, Codex, Qwen Code, Vibe/Mistral, or Local AI, and want branch isolation, resumable checkpoints, agent-family failover, and a forced review step without building that harness by hand.
 
 It wraps your existing AI coding workflow without replacing it: each mission gets its own branch and worktree, long runs checkpoint to markdown, review is a separate phase, and integration still goes through your repo's own verification command. A human still chooses the mission, launches each phase, reads the output, and decides what lands.
 
@@ -30,16 +30,16 @@ Parallix is a mission-based development workflow that addresses each of these di
 
 ## What it does
 
-Each capability below is tied to a use case in [`docs/use-cases.md`](docs/use-cases.md), with the confidence level (Confirmed / Partial) carried through honestly.
+Each capability below is tied to a use case in [`docs/use-cases.md`](docs/use-cases.md)
 
 - **Run several AI coding agents on one repo without clobbering each other**. Every mission gets its own `mission/<slug>` branch and its own sibling git worktree (`../<repo>-<slug>`) automatically, so N agents make progress independently and each lands by squash-merge.
-- **Fail over automatically when an agent hits its usage limit** *(UC-2 — Confirmed).* Per-family limit messages are pattern-detected; the agent family is written to a timed blocklist and the run retries with the next eligible, unblocked family. Only when all are exhausted does it fail loudly. Agent usage limits stop a single session; they don't have to stop the mission.
+- **Fail over automatically when an agent hits its usage limit** Per-family limit messages are pattern-detected; the agent family is written to a timed blocklist and the run retries with the next eligible, unblocked family. Only when all are exhausted does it fail loudly. Agent usage limits stop a single session; they don't have to stop the mission.
 - **Resume a long mission deterministically**. Every checkpoint runs the gate, commits a checkpoint document with a literal `Next action:` line, and pushes it — so a later session or a different agent resumes from a written instruction, not a guess.
-- **Force a second, preferentially-different coding agent review before merge** *(UC-4 — Partial).* Review is a separate step whose reviewer selection excludes the implementer to prefer a different agent family, and a self-approval is code-blocked at the provider. It falls back to the same family when no other agent is runnable, so this forces a second review *attempt* — it does not guarantee a different reviewer.
-- **Publish work to a Forgejo reviewer surface without making Forgejo your branch authority**. When the review provider is enabled, Parallix syncs the local baseline to a dedicated `review` remote and opens or updates the PR there; if Forgejo is disabled, the branch/worktree flow still runs locally.
+- **Force a second, preferentially-different coding agent review before merge** Review is a separate step whose reviewer selection excludes the implementer to prefer a different agent family, and a self-approval is code-blocked at the provider. It falls back to the same family when no other agent is runnable, so this forces a second review *attempt* — it only guarantees a different reviewer when one is availible.
+- **Publish work to a Forgejo reviewer surface without making Forgejo your branch authority**. When the review provider is enabled, Parallix syncs the local baseline to a dedicated `review` ui running locally and opens or updates the PR there; if Forgejo is disabled, the branch/worktree flow still runs without it.
 - **Use a repo-local Graphify knowledge graph for smaller codebase context pulls**. In repositories where the operator has already installed the Graphify skill, the workflow keeps `graphify-out/` isolated per worktree and refreshes it during review/integration, while the installed agent guidance steers codebase questions toward `graphify query` / `path` / `explain` before full reports or raw grep. That reduces token-usage.
 - **Keep your existing verification gate instead of agent self-reporting**. The gate is a configured shell command with a no-op default: declare your existing `make` / `npm` / script command in `workflow.config.json` and it runs verbatim; declare nothing and verification is a documented no-op pass, not an invented gate.
-- **See which agent family actually pays off across every repo one runtime drives** *(UC-6 — Partial).* A single operator-owned measurement database (`<PARALLIX_HOME>/parallix.db`) accumulates per-agent usage telemetry across repositories. Token-cost comparison is complete today only for the families with structured telemetry (codex, claude, qwen, opencode/local AI/custom); vibe/mistral record honest zeros by design.
+- **See which agent family actually pays off across every repo one runtime drives** A single operator-owned measurement database (`<PARALLIX_HOME>/parallix.db`) accumulates per-agent usage telemetry across repositories.
 
 ## The core workflow
 
