@@ -4,7 +4,7 @@ title: >-
   Make lifecycle recovery authoritative and delete obsolete review-stat
   inference
 status: backlog
-assignee: []
+assignee: [custom]
 created_date: '2026-08-14 05:35'
 labels: []
 dependencies: []
