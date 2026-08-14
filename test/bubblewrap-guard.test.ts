@@ -79,6 +79,10 @@ test('resolveSandboxProfile gives review a read-only worktree plus artifact dir 
   assert.deepEqual(profile.optionalWritable, ['/tmp']);
 });
 
+test('resolveSandboxProfile gives non-review steps a writable /tmp', () => {
+  assert.deepEqual(resolveSandboxProfile('active', '/work/tree').optionalWritable, ['/tmp']);
+});
+
 test('buildBubblewrapArgs binds the worktree read-write for implementer steps', () => {
   const worktree = makeWorktree();
   try {
