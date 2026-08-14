@@ -2,7 +2,7 @@
 id: TASK-2375
 title: Finish live-board operation correctness and shutdown semantics
 status: backlog
-assignee: []
+assignee: [codex]
 created_date: '2026-08-14 05:33'
 labels: []
 dependencies: []
