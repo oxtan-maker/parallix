@@ -9,7 +9,7 @@ class Stream extends EventEmitter {
   public readonly isTTY = true;
   public readonly writes: string[] = [];
   private readonly input: string[] = [];
-  write(value: string): boolean { this.writes.push(value); return true; }
+  write(value: string): boolean { this.writes.push(value); this.emit('write'); return true; }
   setRawMode(_enabled: boolean): void {}
   setEncoding(_encoding: string): void {}
   resume(): void {}
@@ -17,6 +17,14 @@ class Stream extends EventEmitter {
   unref(): void {}
   read(): string | null { return this.input.shift() ?? null; }
   send(value: string): void { this.input.push(value); this.emit('readable'); }
+}
+
+async function waitForWrite(stream: Stream, writeCount: number): Promise<void> {
+  if (stream.writes.length > writeCount) { return; }
+  await new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('timed out waiting for TUI re-render')), 1_000);
+    stream.once('write', () => { clearTimeout(timeout); resolve(); });
+  });
 }
 
 async function renderFlow(controller: { dispatchWithStatus: (...args: any[]) => Promise<any> }, refreshProjection?: () => Promise<any>) {
@@ -109,7 +117,7 @@ test('Ctrl+A on enabled card shows confirmation and dispatches on Enter', async 
   const ui = await renderFlow({ async dispatchWithStatus() { calls += 1; return { status: 'completed', durableEvidence: [] }; } });
   /* Ctrl+A (\x01) triggers lifecycle shortcut for active:execute. */
   ui.stdin.send('\x01');
-  await new Promise((resolve) => setTimeout(resolve, 60));
+  await new Promise((resolve) => setTimeout(resolve, 100));
   /* Confirmation dialog should appear. */
   assert.match(ui.stdout.writes.join(''), /CONFIRM CONSEQUENTIAL ACTION/);
   /* Press Enter to confirm. */
@@ -191,7 +199,7 @@ test('Shift+S toggles shipped lane to collapsed strip and back', async () => {
   /* Shift+S (uppercase 'S') toggles to collapsed. */
   const writesBeforeCollapse = stdout.writes.length;
   stdin.send('S');
-  await new Promise((resolve) => setTimeout(resolve, 50));
+  await waitForWrite(stdout, writesBeforeCollapse);
   /* Incremental output since first Shift+S. */
   let incremental = stdout.writes.slice(writesBeforeCollapse).join('');
   assert.match(incremental, /DONE/, 'After Shift+S: incremental output must show collapsed DONE strip');
@@ -199,7 +207,7 @@ test('Shift+S toggles shipped lane to collapsed strip and back', async () => {
   /* Shift+S again toggles back. */
   const writesBeforeRestore = stdout.writes.length;
   stdin.send('S');
-  await new Promise((resolve) => setTimeout(resolve, 50));
+  await waitForWrite(stdout, writesBeforeRestore);
   /* Incremental output since second Shift+S must differ from the collapse output,
    * proving the toggle reversed (not a one-way transition). */
   incremental = stdout.writes.slice(writesBeforeRestore).join('');

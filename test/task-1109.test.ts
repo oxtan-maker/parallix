@@ -92,7 +92,17 @@ function setupMocks() {
   mock.method(composition, 'createMissionApplicationServices', async () => ({
     store: {
       _repoId: 'default',
-      load: async () => ({ kind: 'found', mission: { status: 'review', review: null }, version: 1 }),
+      load: async () => ({ kind: 'found', mission: {
+        status: 'review', assignee: 'claude', review: {
+          rounds: [{
+            number: 1,
+            subject: { change: { kind: 'local-branch', sourceBranch: `mission/${TEST_SLUG}`, targetBranch: 'main' }, revision: 'fixture' },
+            reviewer: 'codex', implementer: 'claude', startedAt: '2026-05-15T10:00:00Z',
+            decision: { kind: 'approved', decidedAt: '2026-05-15T10:30:00Z', comment: null, source: { kind: 'local' } },
+            response: null, phase: 'approved', disposition: 'APPROVED', reviewerRetryCount: 0, implementerRetryCount: 0,
+          }], intervention: null, stageLaunches: [], gateFailureRetryCount: 0, hookFailureRetryCount: 0, reviewEvents: [],
+        },
+      }, version: 1 }),
     },
    lifecycle: {
      transition: async () => ({ status: 'completed', value: { to: 'review', version: 2 } }),

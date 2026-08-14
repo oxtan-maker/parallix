@@ -28,8 +28,8 @@ function row(overrides = {}) {
   };
 }
 
-function completedMissionKeys(rows) {
-  return new Set(rows.filter(row => row.completedForTest === 'yes')
+function completedMissionKeys(rows, window) {
+  return new Set(rows.filter(row => row.completedForTest === 'yes' && row.date >= window.start.toISOString().slice(0, 10) && row.date <= window.end.toISOString().slice(0, 10))
     .map(row => `${row.repo}::${String(row.mission).trim().toLowerCase()}`));
 }
 
@@ -43,7 +43,7 @@ function renderWeeklyStatsReport(rows, options = {}) {
 }
 
 function summarizeAgentWindow(rows, window, options = {}) {
-  return stats._internals.summarizeAgentWindow(rows, window, { ...options, completedMissionKeys: completedMissionKeys(rows) });
+  return stats._internals.summarizeAgentWindow(rows, window, { ...options, completedMissionKeys: completedMissionKeys(rows, window) });
 }
 
 test('task-2213: agent performance counts and fix-round averages use only each model row\'s completed missions', () => {
@@ -80,14 +80,13 @@ test('task-2213: completed rows with missing attribution or review-round metadat
   const summary = summarizeAgentWindow([
     // No model and no implementer: must surface as a visible `unknown` row.
     row({ mission: 'task-no-attribution', model: '', implementer: '', pr_fix_rounds: '' }),
-    // Missing review-round value: counts as zero rounds, not NaN, and cannot
-    // leak into another row's average.
+    // Missing review-round value is unknown and cannot leak into another row's average.
     row({ mission: 'task-no-rounds', pr_fix_rounds: undefined }),
   ], WINDOW);
 
   assert.deepEqual(summary, [
-    { implementer: 'qwen3.5', missions: 1, averageFixRounds: '0.00' },
-    { implementer: 'unknown', missions: 1, averageFixRounds: '0.00' },
+    { implementer: 'qwen3.5', missions: 1, averageFixRounds: null },
+    { implementer: 'unknown', missions: 1, averageFixRounds: null },
   ]);
 });
 

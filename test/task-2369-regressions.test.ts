@@ -75,7 +75,19 @@ function createFakeStore(status: MissionStatus): FakeStore {
     checkpoints: [],
     // An approved last round is what the CLI reads as its approval source when
     // no review provider is reachable (integrate.ts, "mission-store" approval).
-    review: { rounds: [{ decision: { kind: 'approved' } }] },
+    review: {
+      rounds: [{
+        number: 1,
+        subject: {
+          change: { kind: 'local-branch', sourceBranch: `mission/${SLUG}`, targetBranch: 'main' },
+          revision: 'fixture-revision',
+        },
+        reviewer: 'claude', implementer: 'codex', startedAt: '2026-08-04T10:00:00Z',
+        decision: { kind: 'approved', decidedAt: '2026-08-04T10:30:00Z', comment: null, source: { kind: 'local' } },
+        response: null, phase: 'approved', disposition: 'APPROVED', reviewerRetryCount: 0, implementerRetryCount: 0,
+      }],
+      intervention: null, stageLaunches: [], gateFailureRetryCount: 0, hookFailureRetryCount: 0, reviewEvents: [],
+    },
     netEngineeringLines: null,
     status,
     closedAt: null,
@@ -237,7 +249,12 @@ test('R1: backlog promotion cannot complete the Mission when landing fails', asy
   const result = await runIntegrate({ taskStatus: 'review', missionStatus: 'review', commitFails: true });
 
   assert.ok(result.order.includes('promoted'), 'the production promotion path must actually run');
-  assert.notEqual(result.mission.status, 'done', 'a failed landing must leave the Mission incomplete');
+  assert.equal(result.mission.status, 'integration', 'approval moves the authoritative Mission into integration before landing');
+  assert.deepEqual(
+    result.store.events.filter(event => String(event.trigger) !== 'close').map(event => [event.from, event.to, event.trigger]),
+    [['review', 'integration', 'approve']],
+    'failed landing preserves the approved integration lane and records no done event',
+  );
   assert.equal(doneEvents(result.store).length, 0, 'no integration -> done event may exist without a landed commit');
   assert.ok(!result.order.includes('completed'), 'completion must not be reached without a landed commit');
 });
@@ -272,6 +289,14 @@ test('R3: a review-origin integration completes only after the commit has landed
 
   assert.equal(result.mission.status, 'done');
   assert.equal(doneEvents(result.store).length, 1);
+  assert.deepEqual(
+    result.store.events.filter(event => String(event.trigger) !== 'close').map(event => [event.from, event.to, event.trigger]),
+    [
+      ['review', 'integration', 'approve'],
+      ['integration', 'done', 'integrate'],
+    ],
+    'review-origin landing must never record a direct review -> done transition',
+  );
   assert.deepEqual(
     result.order,
     ['promoted', 'landed', 'completed', 'stats'],
@@ -580,4 +605,42 @@ test('R8: new telemetry writes use the canonical repository id, not product.name
   } finally {
     checkout.cleanup();
   }
+});
+
+test('R5/R6: Agent Performance follows completed Missions, not telemetry dates', async () => {
+  const stats = await import('../src/adapters/cli/commands/stats.js');
+  const rows = [
+    { repo: 'parallix', mission: 'task-2371-a', date: '2026-08-04', classification: 'ai_sdlc', implementer: 'terra', stage: 'execute', pr_fix_rounds: '2' },
+    { repo: 'parallix', mission: 'task-2371-a', date: '2026-08-05', classification: 'ai_sdlc', implementer: 'terra', stage: 'review', pr_fix_rounds: '2' },
+    { repo: 'parallix', mission: 'task-2371-b', date: '2026-08-02', classification: 'ai_sdlc', implementer: 'terra', stage: 'execute', pr_fix_rounds: '0' },
+    { repo: 'parallix', mission: 'task-2371-b', date: '2026-08-08', classification: 'ai_sdlc', implementer: 'terra', stage: 'default', pr_fix_rounds: '0' },
+  ];
+  const current = { start: new Date('2026-08-06T00:00:00Z'), end: new Date('2026-08-12T00:00:00Z') };
+  const previous = { start: new Date('2026-07-30T00:00:00Z'), end: new Date('2026-08-05T00:00:00Z') };
+
+  const currentPerformance = stats.summarizeAgentWindow(rows, current, { completedMissionKeys: new Set(['parallix::task-2371-a']) });
+  const previousPerformance = stats.summarizeAgentWindow(rows, previous, { completedMissionKeys: new Set(['parallix::task-2371-b']) });
+
+  assert.deepEqual(currentPerformance.map(row => [row.implementer, row.missions]), [['terra', 1]], 'A completed Aug 10 belongs to current despite Aug 4/5 telemetry');
+  assert.deepEqual(previousPerformance.map(row => [row.implementer, row.missions]), [['terra', 1]], 'B completed Aug 4 belongs to previous despite Aug 8 closeout telemetry');
+  assert.deepEqual(stats.summarizeAgentStageSpend(rows, current).map(row => row.implementer), ['terra'], 'spend remains intentionally telemetry-date windowed');
+});
+
+test('R7/R8: PR-fix averages exclude unknown rounds and retain known zero', async () => {
+  const stats = await import('../src/adapters/cli/commands/stats.js');
+  const window = { start: new Date('2026-08-06T00:00:00Z'), end: new Date('2026-08-12T00:00:00Z') };
+  const rows = [
+    { repo: 'parallix', mission: 'task-2371-zero', date: '2026-08-10', classification: 'ai_sdlc', implementer: 'terra', stage: 'default', pr_fix_rounds: '0' },
+    { repo: 'parallix', mission: 'task-2371-two', date: '2026-08-10', classification: 'ai_sdlc', implementer: 'terra', stage: 'default', pr_fix_rounds: '2' },
+    { repo: 'parallix', mission: 'task-2371-unknown-a', date: '2026-08-10', classification: 'ai_sdlc', implementer: 'terra', stage: 'default' },
+    { repo: 'parallix', mission: 'task-2371-unknown-b', date: '2026-08-10', classification: 'ai_sdlc', implementer: 'terra', stage: 'default' },
+  ];
+  const keys = new Set(rows.map(row => `${row.repo}::${row.mission}`));
+  const [summary] = stats.summarizeAgentWindow(rows, window, { completedMissionKeys: keys });
+  assert.equal(summary.implementer, 'terra');
+  assert.equal(summary.missions, 4);
+  assert.equal((summary as unknown as { prFixObservationCount: number }).prFixObservationCount, 2);
+  assert.equal(summary.averageFixRounds, '1.00');
+  const unavailable = stats.summarizeAgentWindow(rows.slice(2), window, { completedMissionKeys: new Set(['parallix::task-2371-unknown-a', 'parallix::task-2371-unknown-b']) });
+  assert.deepEqual(unavailable.map(row => [(row as unknown as { prFixObservationCount: number }).prFixObservationCount, row.averageFixRounds]), [[0, null]]);
 });

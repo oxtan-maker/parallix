@@ -13,7 +13,7 @@ export function stubMissionServices(overrides: Record<string, unknown> = {}) {
     store: {
       _repoId: 'test-repo',
       async load() {
-        return { kind: 'found' as const, mission: { review: { rounds: [] } }, version: 1 };
+        return { kind: 'found' as const, mission: { status: 'review', review: { rounds: [] } }, version: 1 };
       },
     },
     checkpoints: {
