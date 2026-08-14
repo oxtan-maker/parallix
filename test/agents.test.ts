@@ -154,8 +154,12 @@ function withPathLaunchers(entries, run) {
   const previousPath = process.env.PATH;
   const previousLaunchers = process.env.PARALLIX_TEST_LAUNCHERS;
   const previousPiBin = process.env.PI_BIN;
+  const previousNoBubblewrap = process.env.PARALLIX_NO_BUBBLEWRAP;
   process.env.PATH = `${binDir}${path.delimiter}${previousPath}`;
   process.env.PARALLIX_TEST_LAUNCHERS = JSON.stringify(launchers);
+  // These fixtures exercise the mock CLI directly; bwrap's own exit status
+  // would otherwise mask a mocked child signal.
+  process.env.PARALLIX_NO_BUBBLEWRAP = '1';
   // The global bootstrap pins PI_BIN to a safety launcher. These tests supply
   // their own PATH mock for custom->pi dispatch, so it must take precedence.
   delete process.env.PI_BIN;
@@ -165,6 +169,8 @@ function withPathLaunchers(entries, run) {
     else process.env.PARALLIX_TEST_LAUNCHERS = previousLaunchers;
     if (previousPiBin === undefined) delete process.env.PI_BIN;
     else process.env.PI_BIN = previousPiBin;
+    if (previousNoBubblewrap === undefined) delete process.env.PARALLIX_NO_BUBBLEWRAP;
+    else process.env.PARALLIX_NO_BUBBLEWRAP = previousNoBubblewrap;
     fs.rmSync(tmpRoot, { recursive: true, force: true });
   };
   try {
