@@ -4,7 +4,7 @@ title: reviewer fallback has gone missing
 status: backlog
 assignee: [custom]
 created_date: '2026-08-14 08:49'
-labels: []
+labels: [bug, ai_sdlc]
 dependencies: []
 ordinal: 97912
 ---
