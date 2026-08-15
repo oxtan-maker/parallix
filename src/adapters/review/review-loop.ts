@@ -581,7 +581,8 @@ export async function startReviewLoop(slug: string, opts: {
             forgejoEnabled,
             currentState: state,
             log,
-            error
+            error,
+            missionStore,
           });
           if (reviewerArtifacts.consumed) {
             if (!reviewerArtifacts.ok) {
@@ -656,7 +657,8 @@ export async function startReviewLoop(slug: string, opts: {
               buildMetadataFooterFn: buildMetadataFooter,
               forgejoEnabled,
               log,
-              error
+              error,
+              missionStore,
             });
             if (retryArtifacts.consumed) {
               if (!retryArtifacts.ok) {

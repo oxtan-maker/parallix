@@ -176,6 +176,7 @@ async function recordLocalReviewVerdict(
     missionStore?: MissionStore | null;
   } = {}
 ): Promise<void> {
+  const missionStore = options.missionStore ?? null;
   const worktree = options.worktree || resolveWorktree(slug) || process.cwd();
   const writeReviewStateFn = options.writeReviewStateFn || writeReviewState;
   const createEventFn = options.createEventFn || createEvent;
@@ -199,9 +200,11 @@ async function recordLocalReviewVerdict(
     state.disposition = 'REQUEST_CHANGES';
     try { state.transitionTo('fixing'); } catch { /* ignore */ }
   }
-  await persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree, options.missionStore);
-
-  createEventFn(slug, VALID_EVENT_TYPES.REVIEWER_OUTCOME, { verdict: outcome, content: `Review verdict: ${outcome}` }, { worktree, log: log, error });
+  await persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree, missionStore);
+  const outcomeResult = await createEventFn(slug, VALID_EVENT_TYPES.REVIEWER_OUTCOME, { verdict: outcome, content: `Review verdict: ${outcome}` }, { worktree, log: log, error, missionStore });
+  if (!outcomeResult.ok) {
+    throw new Error(`Cannot store review event for "${slug}": the operator database rejected the write.`);
+  }
 }
 
 /**
@@ -224,6 +227,7 @@ async function postWorkflowReview(
     getPrAuthorFn?: (_branch: string, _token: string, _opts?: Record<string, unknown>) => unknown;
     writeReviewStateFn?: typeof writeReviewState;
     createEventFn?: (_s: string, _t: string, _p: Record<string, unknown>, _o: Record<string, unknown>) => CreateResult;
+    missionStore?: MissionStore | null;
   } = {}
 ): Promise<{ ok: boolean; error?: string; skipped?: boolean; reason?: string; prAuthor?: unknown }> {
   const log = options.log || fmt.log.plain;
@@ -239,6 +243,7 @@ async function postWorkflowReview(
     || (await resolveReviewIdentity(slug, worktree, { readReviewStateFn })).identityUser
     || 'human';
   const reviewIdentity = identityResolved;
+  const missionStore = options.missionStore ?? null;
   const token = readTokenFn(reviewIdentity, { rootDir: worktree });
   if (!token) {
     error(fmt.status('FAIL', `No Forgejo token found for user "${reviewIdentity}". Cannot submit review.`));
@@ -262,6 +267,7 @@ async function postWorkflowReview(
       readReviewStateFn,
       log: log,
       error,
+      missionStore,
     });
     return { ok: true, skipped: true, reason: 'self-author', prAuthor };
   }
@@ -306,6 +312,7 @@ async function consumeReviewerArtifacts(
     readReviewStateFn?: (_s: string, _r?: string) => any;
     writeReviewStateFn?: typeof writeReviewState;
     currentState?: { metadata?: Record<string, unknown> } | null;
+    missionStore?: MissionStore | null;
   } = {}
 ): Promise<{ consumed: boolean; ok?: boolean; reviewState?: string | null; diagnostic?: string | null }> {
   const log = options.log || fmt.log.plain;
@@ -428,7 +435,8 @@ async function consumeReviewerArtifacts(
       postReviewFn: options.postReviewFn,
       buildMetadataFooterFn: options.buildMetadataFooterFn,
       log: log,
-      error
+      error,
+      missionStore: options.missionStore,
     });
     if (!reviewResult.ok) {
       return { consumed: true, ok: false, diagnostic: `Reviewer review post failed: ${(reviewResult as { error?: string }).error}` };

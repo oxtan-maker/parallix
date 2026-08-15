@@ -332,7 +332,16 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
         ) {
           throw err;
         }
-        // Pool exhausted; build clear exhaustion diagnostics with per-agent errors (SC 3)
+        // Pool exhausted — try excluded agents as last resort before throwing.
+        // This restores the single-family escape hatch: when no different-family
+        // reviewer is available, the implementer reviews its own work.
+        const excludeIterableOrig = exclude instanceof Set ? [...exclude] : exclude;
+        const fallbackAgent = excludeIterableOrig.find((a: string) => !launched.has(a));
+        if (fallbackAgent !== undefined) {
+          chosen = fallbackAgent;
+          continue;
+        }
+        // No excluded agent available either; build clear exhaustion diagnostics (SC 3)
         const errorDetails = [...agentErrors.entries()].map(([agent, details]) => {
           const status = details.exitInfo === 'stalled'
             ? 'stalled (no output)'

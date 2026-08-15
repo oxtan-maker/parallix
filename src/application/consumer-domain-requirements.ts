@@ -148,7 +148,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'launch-session-resume',
     family: 'launch',
     fileLocation: 'src/adapters/agents/agents.ts',
-    line: 421,
+    line: 430,
     anchor: 'await launchSessionMarkerPort.shouldResume(',
     reads: ['SessionMarker', 'Mission'],
     requirement:
@@ -159,7 +159,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'launch-session-marker-write',
     family: 'launch',
     fileLocation: 'src/adapters/agents/agents.ts',
-    line: 658,
+    line: 667,
     anchor: 'await launchSessionMarkerPort.save({',
     reads: ['SessionMarker'],
     requirement:
@@ -185,7 +185,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'retry-launch-failure-reselect',
     family: 'retry',
     fileLocation: 'src/adapters/agents/agents.ts',
-    line: 613,
+    line: 622,
     anchor: 'retrying with next eligible agent',
     reads: ['AgentBlock'],
     requirement:
@@ -222,7 +222,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'failover-limit-hit-block',
     family: 'failover',
     fileLocation: 'src/adapters/agents/agents.ts',
-    line: 546,
+    line: 555,
     anchor: 'await updateAgentBlockFn(chosen',
     reads: ['AgentBlock'],
     requirement:
@@ -233,7 +233,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'failover-transient-failure-block',
     family: 'failover',
     fileLocation: 'src/adapters/agents/agents.ts',
-    line: 637,
+    line: 646,
     anchor: 'await updateAgentBlockFn(chosen',
     reads: ['AgentBlock'],
     requirement:
