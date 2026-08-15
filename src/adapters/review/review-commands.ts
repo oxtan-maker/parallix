@@ -963,7 +963,8 @@ export async function submitReviewRound(
     readReviewStateFn: options.readReviewStateFn,
     buildMetadataFooterFn: options.buildMetadataFooterFn,
     log,
-    error
+    error,
+    missionStore: options.missionStore,
   });
 
   // Self-author skip: postWorkflowReview intentionally did not POST to the provider

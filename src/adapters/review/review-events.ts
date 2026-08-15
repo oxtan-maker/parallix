@@ -704,13 +704,13 @@ async function persistEventInStore(
   }
 
   try {
-    const result = await store.load(missionId(slug));
+    let result = await store.load(missionId(slug));
     if (result.kind !== 'found' || !result.mission.review) {
       return { ok: false, path: null, reason: 'no-review' };
     }
 
-    const mission = result.mission;
-    const review = mission.review!; // narrowed above
+    let mission = result.mission;
+    let review = mission.review!; // narrowed above
     const eventRecord = {
       position: review.reviewEvents.length,
       eventType: event.eventType as ReviewEventType,
@@ -726,7 +726,7 @@ async function persistEventInStore(
       createdAt: event.timestamp || new Date().toISOString(),
     };
 
-    const updatedReview: Review = {
+    let updatedReview: Review = {
       ...review,
       reviewEvents: [...review.reviewEvents, eventRecord],
     };
@@ -734,8 +734,44 @@ async function persistEventInStore(
     await store.save({ ...mission, review: updatedReview }, result.version);
     opts.log?.(fmt.status('PASS', `Persisted review event to SQLite: ${event.eventType} round ${event.round ?? 'n/a'}`));
     return { ok: true, path: `sqlite:${slug}:${eventRecord.position}` };
-  } catch {
-    return { ok: false, path: null, reason: 'write-failed' };
+  } catch (error) {
+    // Retry once on stale version: another write (e.g. review-state persist)
+    // may have advanced the mission version between our load and save.
+    const isStale = error instanceof Error && error.name === 'MissionStaleWriteError';
+    if (!isStale) {
+      return { ok: false, path: null, reason: 'write-failed' };
+    }
+    try {
+      const result = await store.load(missionId(slug));
+      if (result.kind !== 'found' || !result.mission.review) {
+        return { ok: false, path: null, reason: 'no-review' };
+      }
+      const mission = result.mission;
+      const review = mission.review!;
+      const eventRecord = {
+        position: review.reviewEvents.length,
+        eventType: event.eventType as ReviewEventType,
+        roundNumber: event.round ?? null,
+        phase: event.phase ?? null,
+        actor: event.actor ?? null,
+        content: event.content,
+        disposition: event.disposition ?? null,
+        verdict: event.verdict ?? null,
+        itemDispositions: event.itemDispositions ?? null,
+        blockedReason: event.blockedReason ?? null,
+        followUpReference: event.followUpReference ?? null,
+        createdAt: event.timestamp || new Date().toISOString(),
+      };
+      const updatedReview: Review = {
+        ...review,
+        reviewEvents: [...review.reviewEvents, eventRecord],
+      };
+      await store.save({ ...mission, review: updatedReview }, result.version);
+      opts.log?.(fmt.status('PASS', `Persisted review event to SQLite: ${event.eventType} round ${event.round ?? 'n/a'}`));
+      return { ok: true, path: `sqlite:${slug}:${eventRecord.position}` };
+    } catch {
+      return { ok: false, path: null, reason: 'write-failed' };
+    }
   }
 }
 
