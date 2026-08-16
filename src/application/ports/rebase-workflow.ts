@@ -35,6 +35,55 @@ export interface AgentLaunchResult {
   result: { status: number };
 }
 
+// --- pre-review rebase result contract (TASK-2377.02) ---------------------
+// The pre-review rebase runs the workflow in-process and reports *typed*
+// evidence. Failure class follows the failing git operation and the inner
+// failing check, never a regex over combined subprocess output.
+
+/** Git operation the pre-review rebase was performing when it failed. */
+export type PreReviewRebaseOperation = 'commit' | 'rebase' | 'push';
+
+/**
+ * Verification-gate evidence. Field names match `PreReviewGateResult` so the
+ * review loop can consume gate failures from either source unchanged.
+ */
+export interface PreReviewRebaseGateEvidence {
+  area: string;
+  command: string;
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+  error?: string;
+}
+
+/** Git hook evidence: the hook identity comes from the failing git operation. */
+export interface PreReviewRebaseHookEvidence {
+  /** `pre-commit`, `pre-push`, `post-commit`, or the generic `hook`. */
+  hook: string;
+  output: string;
+}
+
+/** Discriminated pre-review rebase failure. */
+export type PreReviewRebaseFailure =
+  | { kind: 'hook'; operation: PreReviewRebaseOperation; hook: PreReviewRebaseHookEvidence; bounceRequests: number }
+  | { kind: 'gate'; operation: PreReviewRebaseOperation; gate: PreReviewRebaseGateEvidence }
+  | { kind: 'conflict'; operation: 'rebase'; sharedFiles: string[] }
+  | { kind: 'unsafe-worktree'; operation: 'commit'; unsafeFiles: string[] }
+  | { kind: 'other'; operation: PreReviewRebaseOperation; output: string };
+
+/** Result returned by `rebaseBeforeReviewRound`. */
+export interface PreReviewRebaseResult {
+  ok: boolean;
+  sharedFileConflicts: boolean;
+  hookFailure: boolean;
+  /** Raw hook output, retained so existing prompt builders keep working. */
+  hookOutput?: string;
+  failure?: PreReviewRebaseFailure;
+}
+
+/** Loosened shape accepted from injected pre-review rebase seams. */
+export type PreReviewRebaseOutcome = { ok: boolean } & Partial<PreReviewRebaseResult>;
+
 /** Complete external surface of the rebase workflow. */
 export interface RebaseWorkflowPort {
   // --- git adapter -------------------------------------------------------

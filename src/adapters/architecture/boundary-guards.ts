@@ -92,7 +92,7 @@ const adapterPortDependencies: Readonly<Record<string, readonly string[]>> = {
   cli: ['agents', 'backlog', 'forgejo', 'rebase', 'review', 'sqlite', 'storage', 'verification'], // `cli-workflows.ts`, `handoff-workflow.ts`, `rebase-workflow.ts`, `review-workflow.ts`
   mission: ['agents', 'backlog', 'cli'], // `src/application/ports/execute-mission.ts`
   rebase: ['agents', 'backlog', 'cli', 'review'], // `src/application/ports/rebase-workflow.ts`
-  review: ['agents', 'backlog', 'cli'], // `src/application/ports/review-workflow.ts`
+  review: ['agents', 'backlog', 'cli', 'rebase'], // `review-workflow.ts`, `rebase-workflow.ts` (pre-review rebase runs in-process)
   sqlite: ['backlog'], // `src/application/ports/mission-store.ts`
 };
 

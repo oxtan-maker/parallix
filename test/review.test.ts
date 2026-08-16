@@ -1213,19 +1213,36 @@ test('startReviewLoop continue reviewing phase skips only when existing review i
   }
 });
 
+/**
+ * In-process rebase-workflow seam (TASK-2377.02). `rebaseBeforeReviewRound` no
+ * longer spawns `px rebase`, so these tests drive the `RebaseWorkflowPort`.
+ */
+function inProcessWorkflow(runs, { exitCode = 0, port = {}, onRun = null } = {}) {
+  return {
+    createRebaseWorkflowPortFn: () => ({ exit: () => {}, ...port }),
+    runRebaseWorkflowFn: async (args, workflowPort) => {
+      runs.push(args);
+      if (onRun) { onRun(workflowPort); }
+      workflowPort.exit(exitCode);
+    },
+  };
+}
+
 test('rebaseBeforeReviewRound succeeds after a clean rebase', async () => {
   const logs = [];
   const errors = [];
 
+  const workflowRuns = [];
   const result = await rebaseBeforeReviewRound('task-1087', {
     worktree: '/tmp/worktree',
     isForgejoReviewEnabledFn: () => true,
-    runFn: () => ({ status: 0, stdout: '', stderr: '' }),
+    ...inProcessWorkflow(workflowRuns),
     log: message => logs.push(message),
     error: message => errors.push(message)
   });
 
   assert.deepEqual(result, { ok: true, sharedFileConflicts: false, hookFailure: false });
+  assert.deepEqual(workflowRuns, [['task-1087', '--push']], 'the rebase workflow runs in-process, not as a CLI subprocess');
   assert.ok(logs.some(message => message.includes('Rebasing mission/task-1087')));
   assert.ok(logs.some(message => message.includes('Pre-review rebase completed')));
   assert.deepEqual(errors, []);
@@ -1234,25 +1251,29 @@ test('rebaseBeforeReviewRound succeeds after a clean rebase', async () => {
 test('rebaseBeforeReviewRound reports shared-file conflicts with recovery instructions', async () => {
   const logs = [];
   const errors = [];
-  const sharedFileOutput = '[INFO] 1 shared file(s) require agent-assisted resolution:\n  - src/shared.js';
 
   const result = await rebaseBeforeReviewRound('task-1087', {
     worktree: '/tmp/worktree',
     isForgejoReviewEnabledFn: () => true,
-    runFn: () => ({
-      status: 1,
-      stdout: sharedFileOutput,
-      stderr: '[FAIL] Agent (codex) exited with status 1.'
+    ...inProcessWorkflow([], {
+      exitCode: 1,
+      port: {
+        resolveConflictsForMission: () => ({
+          ok: true, conflictFiles: ['src/shared.js'], missionSpecificFiles: [], sharedFiles: ['src/shared.js'],
+        }),
+      },
+      onRun: (workflowPort) => { workflowPort.resolveConflictsForMission('task-1087', 'lib', {}); },
     }),
     log: message => logs.push(message),
     error: message => errors.push(message)
   });
 
-  assert.deepEqual(result, { ok: false, sharedFileConflicts: true, hookFailure: false });
-  assert.ok(
-    errors.some(message => message.includes(sharedFileOutput)),
-    `Expected raw conflict output, got: ${errors.join(' | ')}`
-  );
+  assert.equal(result.ok, false);
+  assert.equal(result.sharedFileConflicts, true);
+  assert.equal(result.hookFailure, false);
+  assert.deepEqual(result.failure, {
+    kind: 'conflict', operation: 'rebase', sharedFiles: ['src/shared.js'],
+  }, `Expected typed shared-file evidence, got: ${JSON.stringify(result.failure)}`);
   assert.equal(
     errors.filter(message => message.includes('Shared-file rebase conflicts detected')).length,
     1,
@@ -1271,13 +1292,15 @@ test('rebaseBeforeReviewRound reports non-conflict rebase failures', async () =>
   const result = await rebaseBeforeReviewRound('task-1087', {
     worktree: '/tmp/worktree',
     isForgejoReviewEnabledFn: () => true,
-    runFn: () => ({ status: 1, stdout: '', stderr: 'stale info' }),
+    ...inProcessWorkflow([], { exitCode: 1 }),
     log: message => logs.push(message),
     error: message => errors.push(message)
   });
 
-  assert.deepEqual(result, { ok: false, sharedFileConflicts: false, hookFailure: false });
-  assert.ok(errors.some(message => message.includes('stale info')));
+  assert.equal(result.ok, false);
+  assert.equal(result.sharedFileConflicts, false);
+  assert.equal(result.hookFailure, false);
+  assert.equal(result.failure.kind, 'other');
   assert.ok(errors.some(message => message.includes('Rebase failed before launching reviewer')));
   assert.ok(
     logs.every(message => !message.includes('Resolve the conflicts in the worktree')),

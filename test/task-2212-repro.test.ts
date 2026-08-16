@@ -38,10 +38,11 @@ test('interrupted feature lifecycle leaves no e2e branch or worktree behind (SC1
     stdio: 'ignore'
   });
   const childExited = new Promise(resolve => child.once('exit', resolve));
-  // The integration runner executes this alongside other process-heavy suites.
-  // Allow the child to finish its real Git/bootstrap work under contention;
-  // the ready marker still makes the wait finish immediately in isolation.
-  const deadline = Date.now() + 30000;
+  // The integration runner executes this alongside other process-heavy suites,
+  // and shared developer machines can run at many times their core count
+  // (observed load 118 on 16 cores). Give the child's real Git/bootstrap work
+  // real headroom; the ready marker still ends the wait immediately in isolation.
+  const deadline = Date.now() + 120000;
   let fixtureRoot;
   let worktree;
 

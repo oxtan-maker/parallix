@@ -115,7 +115,13 @@ test('custom capacity releases after clean completion, launch failure, signal ca
     agent: 'custom',
     isAgentBlockedFn: () => false,
     detectLimitHitFn: () => null,
-    selectAgentFn: () => { throw new Error('No agents available'); }
+    selectAgentFn: () => { throw new Error('No agents available'); },
+    // Stub the launcher availability gate: the real seam runs a synchronous
+    // spawnSync health probe, which times out under heavy integration-suite
+    // load. A probe timeout reroutes before the result promise is awaited,
+    // leaving the rejected promise unhandled (unhandledRejection crash).
+    // Capacity accounting does not depend on launcher availability.
+    assertAgentSupportedFn: () => {}
   };
   const run = async resultPromise => {
     try {

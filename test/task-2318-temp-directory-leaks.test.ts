@@ -508,7 +508,9 @@ test('parallel workers each write their own manifest file in shared directory', 
     ], { stdio: 'pipe', env: { ...process.env, PARALLIX_TEST_MANIFEST_DIR: manifestDir } }));
   }
 
-  await waitFor(() => manifestEntries(manifestDir).length === 3, 'all worker manifests');
+  // Three tsx children start under a shared, possibly heavily loaded host;
+  // the default 5 s allowance times out under integration-suite contention.
+  await waitFor(() => manifestEntries(manifestDir).length === 3, 'all worker manifests', 30_000);
 
   // Verify each worker wrote its own manifest file
   const entries = manifestEntries(manifestDir);

@@ -60,21 +60,37 @@ function waitForClose(child: ReturnType<typeof spawn>, timeoutMs = 10000): Promi
 }
 
 /**
- * Wait until a child has completed its synchronous marker write. A fixed
- * delay is insufficient under a busy integration suite: tsx startup can
- * legitimately take longer than the old 500ms allowance.
+ * Wait until a child has completed its synchronous marker write and return
+ * the parsed marker. A fixed delay is insufficient under a busy integration
+ * suite: tsx startup can legitimately take longer than the old 500ms
+ * allowance. Waiting on mere file existence is unsafe: existsSync is true in
+ * the window between the child's open and write, so a busy parent can read a
+ * truncated file and fail JSON.parse. Wait for parseable JSON instead.
  */
-async function waitForMarker(markerPath: string, child: ReturnType<typeof spawn>, timeoutMs = 10000): Promise<void> {
+interface ScratchMarker {
+  pid: number;
+  dir: string;
+  coverageDir?: string;
+  tmpRoot?: string;
+  graphifyDir?: string;
+}
+
+async function waitForMarker(markerPath: string, child: ReturnType<typeof spawn>, timeoutMs = 30000): Promise<ScratchMarker> {
   const deadline = Date.now() + timeoutMs;
-  while (!fs.existsSync(markerPath)) {
+  for (;;) {
     if (child.exitCode !== null || child.signalCode !== null) {
       throw new Error(`Child process ${child.pid} exited before writing marker ${markerPath}`);
     }
-    if (Date.now() >= deadline) {
-      try { child.kill('SIGKILL'); } catch (_) {}
-      throw new Error(`Child process ${child.pid} did not write marker ${markerPath} within ${timeoutMs}ms`);
+    try {
+      return JSON.parse(fs.readFileSync(markerPath, 'utf8')) as ScratchMarker;
+    } catch (_err) {
+      // ENOENT or a partially written file: retry until the deadline.
+      if (Date.now() >= deadline) {
+        try { child.kill('SIGKILL'); } catch (_) {}
+        throw new Error(`Child process ${child.pid} did not write marker ${markerPath} within ${timeoutMs}ms`);
+      }
+      await new Promise(resolve => setTimeout(resolve, 25));
     }
-    await new Promise(resolve => setTimeout(resolve, 25));
   }
 }
 
@@ -130,10 +146,8 @@ test('coverage-gate SIGKILL orphan recovery reclaims registered scratch roots', 
   // Spawn child with shared manifest directory
   const child = spawnCoverageChild(manifestDir, markerPath);
 
-  await waitForMarker(markerPath, child);
-
-  // Read the marker to find the child's scratch directories
-  const markerData = JSON.parse(fs.readFileSync(markerPath, 'utf8'));
+  // Wait for the complete marker to find the child's scratch directories
+  const markerData = await waitForMarker(markerPath, child);
   fs.unlinkSync(markerPath);
 
   // Verify the child wrote the manifest
@@ -224,8 +238,7 @@ test('recovery does not remove roots belonging to a live concurrent run', async 
     env: { ...process.env, PARALLIX_COVERAGE_GATE_MANIFEST_DIR: manifestDir },
   });
 
-  await waitForMarker(liveMarker, liveChild);
-  const liveData = JSON.parse(fs.readFileSync(liveMarker, 'utf8'));
+  const liveData = await waitForMarker(liveMarker, liveChild);
   fs.unlinkSync(liveMarker);
   const liveDir = liveData.dir;
 
@@ -249,8 +262,7 @@ test('recovery does not remove roots belonging to a live concurrent run', async 
     env: { ...process.env, PARALLIX_COVERAGE_GATE_MANIFEST_DIR: manifestDir },
   });
 
-  await waitForMarker(deadMarker, deadChild);
-  const deadData = JSON.parse(fs.readFileSync(deadMarker, 'utf8'));
+  const deadData = await waitForMarker(deadMarker, deadChild);
   fs.unlinkSync(deadMarker);
   const deadDir = deadData.dir;
 
@@ -320,8 +332,7 @@ test('recovery does not remove unregistered directories with matching prefixes',
     env: { ...process.env, PARALLIX_COVERAGE_GATE_MANIFEST_DIR: manifestDir },
   });
 
-  await waitForMarker(childMarker, child);
-  const childData = JSON.parse(fs.readFileSync(childMarker, 'utf8'));
+  const childData = await waitForMarker(childMarker, child);
   fs.unlinkSync(childMarker);
   const childDir = childData.dir;
 
