@@ -32,10 +32,12 @@ import { eligibleAgentsForStep, selectAgent } from '../../agents/agents.js';
 import {
   HandoffCommandUseCase,
   buildAutoCheckpointContent,
+} from '../../../application/handoff-command-use-case.js';
+import {
   collectGoalCheckEvidenceRows,
   evidenceCellHasVerifiableReference as evidenceCellHasVerifiableReferenceWithPort,
   findUnverifiableGoalCheckRow as findUnverifiableGoalCheckRowWithPort,
-} from '../../../application/handoff-command-use-case.js';
+} from '../../review/review-static-evidence.js';
 import type { HandoffWorkflowPorts } from '../../../application/ports/handoff-workflow.js';
 
 /**

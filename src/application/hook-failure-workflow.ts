@@ -5,9 +5,10 @@
  * helpers. Owns the classification categories, retry budget, and rebounce
  * prompt template so a future policy change hits one file.
  *
- * Application layer: imports `cli-format` and `ports/rebase-workflow` only.
+ * Application layer: imports `cli-format`, `output-elision`, and `ports/rebase-workflow` only.
  */
 import * as fmt from './presentation/cli-format.js';
+import { elideBounceOutput } from './output-elision.js';
 import type { RebaseWorkflowPort } from './ports/rebase-workflow.js';
 
 /**
@@ -85,7 +86,7 @@ export async function handleHookFailureAutoBounce(
     ``,
     `Hook output (use this to diagnose and fix):`,
     `---`,
-    hookOutput,
+    elideBounceOutput(hookOutput),
     `---`,
     ``,
     `Retry attempt: ${newRetryCount}/${MAX_HOOK_RETRY}`,
