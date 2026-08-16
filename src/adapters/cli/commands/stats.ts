@@ -62,10 +62,7 @@ import * as fs from 'node:fs';
 import * as fmt from '../../../application/presentation/cli-format.js';
 import { statsCohorts, resolveOperatorRepositories } from './stats-cohorts.js';
 import { ConcreteMetricsReadAdapter } from '../../../application/projections/metrics-read-adapter.js';
-import { resolveTaskFile, getTaskClassification, getTaskImplementer, getTaskAssignee } from '../../backlog/backlog.js';
-import { isForgejoReviewEnabled } from '../../config/product-config.js';
-import { currentReviewRound } from '../../../domain/review.js';
-import { git } from '../../git/git.js';
+import { resolveTaskFile, getTaskClassification } from '../../backlog/backlog.js';
 import { resolveCanonicalRepositoryId } from '../../git/repository-identity.js';
 import * as forgejo from '../../forgejo/forgejo.js';
 import * as statsReport from './stats-report.js';
@@ -299,26 +296,6 @@ function statsRowActorKey(row = {}) {
 const { formatStatsTable, renderWeeklyStatsReport, renderRangeStatsReport } = statsReport;
 
 
-// @ts-ignore -- retained reporting helper is dynamically typed
-function deriveFixRoundsFromTaskText(taskFilePath) {
-  if (!taskFilePath || !fs.existsSync(taskFilePath)) {return 0;}
-  const content = fs.readFileSync(taskFilePath, 'utf8');
-  const patterns = [
-    /Review round\s+(\d+)/gi,
-    /round[- ](\d+)\s+(?:fix|re-review|completed)/gi,
-  ];
-
-  let maxRound = 0;
-  for (const pattern of patterns) {
-    let match;
-    while ((match = pattern.exec(content)) !== null) {
-      maxRound = Math.max(maxRound, Number.parseInt(match[1], 10) || 0);
-    }
-  }
-
-  return Math.max(0, maxRound - 1);
-}
-
 /**
  * @param {string} slug
  * @param {string} finalImplementer
@@ -326,186 +303,16 @@ function deriveFixRoundsFromTaskText(taskFilePath) {
  * @param {string} [rootDir]
  */
 // @ts-ignore -- retained reporting helper is dynamically typed
-function deriveFixRoundsFromReviewStateHistory(slug, finalImplementer, latestRound, rootDir = process.cwd()) {
-  const normalizedImplementer = normalizeImplementer(finalImplementer);
-  const declaredRound = Number.parseInt(latestRound, 10) || 0;
-  if (!slug || !normalizedImplementer) {
-    return 0;
-  }
-
-  const branch = `mission/${slug}`;
-  const result = git(['-C', rootDir, 'log', '--reverse', '--format=%s', branch]);
-  if (result.status !== 0) {
-    return Math.max(0, declaredRound - 1);
-  }
-
-  let firstFinalImplementerRound = null;
-  // This path only runs for a mission with no Review in the database, so there
-  // is no round counter to read: the highest round in the commit history is
-  // the mission's latest round.
-  let highestRound = 0;
-  // review-state commit subjects are formatted as:
-  //   review-state(<slug>): round N (<phase>) [<reviewer> -> <implementer>] ...
-  // The implementer sits on the right of the `->`. Match the earliest reviewing
-  // round whose implementer is the final implementer. (An older format placed the
-  // implementer inside the phase parens, e.g. `(reviewing <impl>)`; accept both.)
-// @ts-ignore -- retained reporting helper is dynamically typed
-  const esc = (/** @type{string} */ s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const reviewStatePattern = new RegExp(
-    `^review-state\\(${esc(slug)}\\):\\s*round\\s+(\\d+)\\s+\\(reviewing[^)]*\\)\\s*\\[[^\\]]*->\\s*${esc(normalizedImplementer)}\\b`,
-    'i'
-  );
-  const legacyPattern = new RegExp(
-    `^review-state\\(${esc(slug)}\\):\\s*round\\s+(\\d+)\\s+\\([^)]*reviewing\\s+${esc(normalizedImplementer)}\\)`,
-    'i'
-  );
-  const anyRoundPattern = new RegExp(`^review-state\\(${esc(slug)}\\):\\s*round\\s+(\\d+)\\b`, 'i');
-
-  for (const line of result.stdout.split('\n')) {
-    const trimmed = line.trim();
-
-    const anyRound = trimmed.match(anyRoundPattern);
-    if (anyRound) {
-      const seen = Number.parseInt(anyRound[1], 10);
-      if (Number.isInteger(seen) && seen > highestRound) { highestRound = seen; }
-    }
-
-    if (firstFinalImplementerRound !== null) {continue;}
-    const match = trimmed.match(reviewStatePattern) || trimmed.match(legacyPattern);
-    if (!match) {continue;}
-    const candidateRound = Number.parseInt(match[1], 10);
-    if (Number.isInteger(candidateRound) && candidateRound > 0) {
-      firstFinalImplementerRound = candidateRound;
-    }
-  }
-
-  const round = declaredRound || highestRound || 1;
-  if (round <= 1) {
-    return 0;
-  }
-
-  if (!firstFinalImplementerRound) {
-    return Math.max(0, round - 1);
-  }
-
-  return Math.max(0, round - firstFinalImplementerRound);
-}
-
 /**
  * @param {string} slug
  * @param {string} [rootDir]
  */
 // @ts-ignore -- retained reporting helper is dynamically typed
-function deriveFinalImplementerFromBranchHistory(slug, rootDir = process.cwd()) {
-  if (!slug) {return null;}
-
-  const branches = [`mission/${slug}`, `origin/mission/${slug}`];
-  for (const branch of branches) {
-    const result = git(['-C', rootDir, 'log', '--format=%s', branch]);
-    if (result.status !== 0) {
-      continue;
-    }
-
-    const activeImplementerPattern = new RegExp(
-      `^backlog\\(${slug.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\):\\s*transition to active and implementer=([^\\s)]+)`,
-      'i'
-    );
-
-    for (const line of result.stdout.split('\n')) {
-      const match = line.trim().match(activeImplementerPattern);
-      if (!match) {continue;}
-      const implementer = normalizeImplementer(match[1]);
-      if (implementer) {
-        return implementer;
-      }
-  }
-  }
-
-  return null;
-}
-
 /**
  * @param {string} slug
  * @param {string} [rootDir]
  */
 // @ts-ignore -- retained reporting helper is dynamically typed
-function deriveImplementerAndFixRoundsFromPrComments(slug, rootDir = process.cwd()) {
-  if (!slug) {return null;}
-
-  // Only attempt Forgejo PR comment lookup when Forgejo review is enabled
-  if (!isForgejoReviewEnabled(rootDir)) {return null;}
-
-  // forgejo already imported at top
-  const token = forgejo.readToken(/** @type{string} */(forgejo.resolveForgejoUser()));
-  if (!token) {return null;}
-
-  const comments = forgejo.getCommentsSync(`mission/${slug}`, token);
-  if (!Array.isArray(comments) || comments.length === 0) {
-    return null;
-  }
-
-  const resolutionPattern = /^(?:#|##|###)\s*(?:Review\s+(?:Round|Attempt)\s+\d+\s+Resolution\b|Review\s+Follow-up\s+Resolution\b|Round\s+\d+\s+Resolution(?:\s+Summary)?\b|Round\s+resolution\b|Task-\d+\s+[—-]\s+Act-on-Review Round Resolution\b)/i;
-// @ts-ignore -- retained reporting helper is dynamically typed
-  const isResolutionComment = (/** @type{*} */ comment) => comment.kind === 'issue-comment'
-    && normalizeImplementer(comment.user)
-    && resolutionPattern.test(String(comment.body || '').trim());
-  const resolutionComments = comments
-    .filter(isResolutionComment)
-    .map(comment => ({
-      implementer: normalizeImplementer(comment.user),
-      body: String(comment.body || '').trim(),
-    }));
-
-  if (resolutionComments.length === 0) {
-    return null;
-  }
-
-  const findingPattern = /(^###\s*Finding:|^##\s*Review Findings\b|^Review findings\b|^\d+\.\s+(?:HIGH|MEDIUM|LOW)\s+[—-]|^#\s*Review Round\s+\d+\b(?!.*Resolution)|^#\s*Review Attempt\s+\d+\b(?!.*Resolution)|^Review attempt\s+\d+\s+by\b)/im;
-  const resolvedRounds = [];
-  let pendingRound = null;
-
-  for (const comment of comments) {
-    const isBlockingReview = String(comment.kind || '').startsWith('review')
-      && !String(comment.kind || '').includes('stale')
-      && !String(comment.kind || '').includes('dismissed')
-      && String(comment.state || '').toUpperCase() === 'REQUEST_CHANGES';
-    const isFindingComment = comment.kind === 'issue-comment'
-      && findingPattern.test(String(comment.body || '').trim());
-
-    if (isBlockingReview || isFindingComment) {
-      if (pendingRound?.implementer) {
-        resolvedRounds.push(pendingRound);
-      }
-      pendingRound = {};
-      continue;
-    }
-
-    if (pendingRound && isResolutionComment(comment)) {
-      pendingRound = { implementer: normalizeImplementer(comment.user) };
-    }
-  }
-
-  if (pendingRound?.implementer) {
-    resolvedRounds.push(pendingRound);
-  }
-
-  if (resolvedRounds.length > 0) {
-    const latest = resolvedRounds[resolvedRounds.length - 1];
-    return {
-      implementer: latest.implementer,
-      prFixRounds: resolvedRounds.filter(round => round.implementer === latest.implementer).length,
-      source: 'pr-comments',
-    };
-  }
-
-  const latest = resolutionComments[resolutionComments.length - 1];
-  return {
-    implementer: latest.implementer,
-    prFixRounds: resolutionComments.filter(comment => comment.implementer === latest.implementer).length,
-    source: 'pr-comments',
-  };
-}
-
 /**
  * Load a mission's `Review` aggregate from the operator database.
  *
@@ -535,19 +342,9 @@ async function loadMissionReview(slug, rootDir = process.cwd(), missionStore: Mi
 // @ts-ignore -- retained reporting helper is dynamically typed
 async function deriveImplementerAndFixRounds(slug, rootDir = process.cwd(), missionStore: MissionStore | null = null) {
   const review = await loadMissionReview(slug, rootDir, missionStore);
-  const currentRound = review ? currentReviewRound(review) : null;
-
-  // The Review aggregate is the authority for the round conversation: a fix
-  // round is one the reviewer sent back, which the rounds record directly. The
-  // network and commit-subject derivations below are for missions with no
-  // Review in the database at all — imported history, or a mission whose loop
-  // ran before the cutover and has not been backfilled.
   const rounds = review ? review.rounds : [];
   if (rounds.length > 0) {
-    const owner = rounds[rounds.length - 1].implementer;
-    const implementer = normalizeImplementer(owner)
-      || deriveFinalImplementerFromBranchHistory(slug, rootDir)
-      || (currentRound?.implementer ? normalizeImplementer(currentRound.implementer) : null);
+    const implementer = normalizeImplementer(rounds[rounds.length - 1].implementer);
     if (implementer) {
       // Primary: count from reviewEvents — the live review loop writes
       // reviewer_outcome events with verdict 'request-changes' via
@@ -585,45 +382,13 @@ async function deriveImplementerAndFixRounds(slug, rootDir = process.cwd(), miss
     }
   }
 
-  const prCommentImplementer = deriveImplementerAndFixRoundsFromPrComments(slug, rootDir);
-  if (prCommentImplementer) {
-    return prCommentImplementer;
-  }
-
-  const historyImplementer = deriveFinalImplementerFromBranchHistory(slug, rootDir);
-  if (historyImplementer) {
-    return {
-      implementer: historyImplementer,
-      prFixRounds: deriveFixRoundsFromReviewStateHistory(slug, historyImplementer, String(currentRound?.number ?? ''), rootDir),
-      source: 'branch-history',
-    };
-  }
-
-  // No `review-state` source follows: a mission with a Review always has at
-  // least one round, so the aggregate branch above already owns every case a
-  // review-state read used to cover.
-
-  const resolution = resolveTaskFile(slug, rootDir);
-  if (resolution.ok) {
-// @ts-ignore -- task resolution guarantees a task file for successful lookups
-    const implementer = normalizeImplementer(getTaskImplementer(resolution.taskFile) || getTaskAssignee(resolution.taskFile) || '');
-    if (implementer) {
-      return {
-        implementer,
-// @ts-ignore -- retained reporting helper is dynamically typed
-        prFixRounds: deriveFixRoundsFromTaskText(resolution.taskFile),
-        source: 'backlog-fallback',
-      };
-    }
-  }
-
-  // No implementer and no fix-round signal from any source. The count is
-  // unknown, not zero — a manufactured zero here would enter the integration
-  // rollup row as a real observation (TASK-2369 Part D).
+  // No authoritative Review data available.
+  // Missing MissionStore is a caller bug; absent Review means unknown —
+  // do not fabricate values from PR comments, Git history, or backlog text.
   return {
     implementer: 'unknown',
     prFixRounds: null,
-    source: 'unknown-fallback',
+    source: 'missing-authority',
   };
 }
 
@@ -1197,10 +962,6 @@ export { stats, statsCohorts, STATS_HEADERS, USAGE_NUMBERS, VALID_CLASSIFICATION
   canonicalizeStatsRow,
   parseDateOnlyStrict,
   createRangeWindow,
-  deriveFixRoundsFromTaskText,
-  deriveFixRoundsFromReviewStateHistory,
-  deriveFinalImplementerFromBranchHistory,
-  deriveImplementerAndFixRoundsFromPrComments,
   deriveImplementerAndFixRounds,
   summarizeMissionWindow,
   summarizeAgentWindow,

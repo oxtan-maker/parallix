@@ -219,7 +219,7 @@ export async function createProductionApplicationServices(
           // artifact consumers that persist review events: an omitted binding
           // leaves the adapter default, which resolves no store and reports the
           // mission as having no Review.
-          ...reviewLoopBindings(mission.store),
+          ...reviewLoopBindings(mission.store, mission.lifecycle),
         } as any),
       }),
   } : defaultExecuteRuntime;

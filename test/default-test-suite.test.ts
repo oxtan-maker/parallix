@@ -58,6 +58,10 @@ const expectedIntegrationFiles = [
   // Git (TASK-2357 defect B).
   'task-2357.b-canonical-repository-identity.test.ts',
   'task-2363-production-certification.test.ts',
+  // TASK-2376 CP-2: drives a real temporary Git repository through the
+  // lifecycle transitions, so it crosses the process boundary and runs only
+  // in the integration layer.
+  'task-2376-lifecycle-timing.test.ts',
   'test-hygiene.test.ts',
   'tui-action-bar.test.ts',
   'tui-confirmation.test.ts',

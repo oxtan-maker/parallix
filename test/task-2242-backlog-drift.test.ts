@@ -381,10 +381,12 @@ function setupBaseMocks(gitMockFn) {
   mock.method(productConfigCjs, 'isForgejoReviewEnabled', () => false);
   mock.method(runtimeMatrixCjs, 'buildAutonomousReviewMatrix', () => ({}));
   mock.method(runtimeMatrixCjs, 'formatMatrixSummary', () => ['matrix-line']);
+  // The mission carries an authoritative approved Review so integrate's
+  // lifecycle recovery reaches the probe-merge flow these tests exercise.
   mock.method(compositionCjs, 'createMissionApplicationServices', async () => ({
     store: {
       _repoId: 'default',
-      load: async () => ({ kind: 'found', mission: { status: 'review', review: null }, version: 1 }),
+      load: async () => ({ kind: 'found', mission: { status: 'review', review: { rounds: [{ decision: { kind: 'approved', decidedAt: '2026-01-01T10:30:00Z' } }] } }, version: 1 }),
     },
     lifecycle: {
       transition: async () => ({ status: 'completed', value: { to: 'review', version: 2 } }),

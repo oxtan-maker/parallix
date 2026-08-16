@@ -17,7 +17,7 @@ interface StatsAugmented {
   _internals: Record<string, (..._args: unknown[]) => unknown>;
   resolveStatsRepoName: (_rootDir: string) => string;
   loadMeasurementRows: (_options?: { rootDir?: string; dbPath?: string; store?: unknown }) => { rows: Record<string, string>[] };
-  deriveImplementerAndFixRounds: (_slug: string, _rootDir?: string) => { implementer: string; prFixRounds: number; source: string };
+  deriveImplementerAndFixRounds: (_slug: string, _rootDir?: string, _missionStore?: unknown) => { implementer: string; prFixRounds: number | null; source: string };
   upsertMeasurementRow: (_row: Record<string, string>, _options?: { rootDir?: string; dbPath?: string; store?: unknown }) => { changed: boolean };
 }
 
@@ -231,7 +231,7 @@ async function collectHistoricalStatsBackfill(
     const date = extractDateOnly(getTaskFrontmatterValue(taskFile, 'updated_date') ?? '') || deriveDateFromGitHistory(slug, taskFile, rootDir);
     const classification = resolveHistoricalClassification(slug, taskFile, rootDir);
 
-    let implementerInfo: { implementer: string; prFixRounds: number; source: string } | null = null;
+    let implementerInfo: { implementer: string; prFixRounds: number | null; source: string } | null = null;
     let implementerError: string | null = null;
     try {
       implementerInfo = await s.deriveImplementerAndFixRounds(slug, rootDir);

@@ -27,6 +27,7 @@ import { missionId } from '../../domain/mission.js';
 import { agentFamily } from '../../domain/agents.js';
 import { changeRevision, ConfiguredReviewerEligibility, startReview } from '../../domain/review.js';
 import { applyReviewStateToReview, reviewStateDataFrom } from './review-state-mapping.js';
+import type { MissionLifecycleService } from '../../application/mission-lifecycle-service.js';
 import type { MissionStore } from '../../application/domain-ports.js';
 import type { PullRequestReference } from '../../domain/review.js';
 
@@ -73,7 +74,8 @@ export function assertReviewStatePersisted(
  * @param {string} slug
  * @param {ReviewState|Record<string, unknown>} state
  * @param {string} worktree
- * @param {MissionStore|null|undefined} [missionStore]
+ * @param {MissionStore|null|undefined} [missionStore]  backward-compat positional arg
+ * @param {MissionLifecycleService|null|undefined} [lifecycleService]  TASK-2376 approval boundary
  * @returns {Promise<ReviewStatePersistenceResult>}
  */
 export async function persistReviewStateOrThrow(
@@ -82,8 +84,9 @@ export async function persistReviewStateOrThrow(
   state: ReviewState | Record<string, unknown>,
   worktree: string,
   missionStore?: MissionStore | null,
+  lifecycleService?: MissionLifecycleService | null,
 ): Promise<ReviewStatePersistenceResult> {
-  const result = await writeFn(slug, state, worktree, missionStore);
+  const result = await writeFn(slug, state, worktree, { missionStore, lifecycleService });
   assertReviewStatePersisted(result, {
     slug,
     phase: state instanceof ReviewState ? state.phase : String(state.phase || 'unknown'),
@@ -648,13 +651,25 @@ export class ReviewState {
    * bookkeeping write would strand the loop. A second conflict is reported
    * rather than retried forever, so a genuinely contended mission fails loudly.
    *
+   * When `lifecycleService` is supplied and the review becomes approved,
+   * the `review → integration` lifecycle transition fires at this boundary
+   * using `ReviewerDecision.decidedAt` as the occurrence time (TASK-2376).
+   *
    * @param {string} [worktree]
+   * @param {{ missionStore?: MissionStore | null; lifecycleService?: MissionLifecycleService | null } | MissionStore | null} [options]
    * @returns {Promise<ReviewStatePersistenceResult>}
    */
   async save(
-    worktree = resolveWorktree(this.slug) || process.cwd(),
-    missionStore: MissionStore | null = this.missionStore,
+    worktree: string = resolveWorktree(this.slug) || process.cwd(),
+    options: { missionStore?: MissionStore | null; lifecycleService?: MissionLifecycleService | null } | MissionStore | null = {},
   ): Promise<ReviewStatePersistenceResult> {
+    // Backward-compat: accept MissionStore as positional 2nd arg
+    const opts: { missionStore?: MissionStore | null; lifecycleService?: MissionLifecycleService | null } =
+      options && typeof options === 'object' && 'save' in options
+        ? { missionStore: options as MissionStore }
+        : (options as { missionStore?: MissionStore | null; lifecycleService?: MissionLifecycleService | null } ?? {});
+    const missionStore = opts.missionStore ?? this.missionStore;
+    const lifecycleService = opts.lifecycleService ?? null;
     let store: Awaited<ReturnType<typeof resolveMissionStore>>;
     try {
       store = await resolveMissionStore(worktree, missionStore);
@@ -681,7 +696,30 @@ export class ReviewState {
         }
 
         const review = applyReviewStateToReview(mission.review, this.toJSON());
-        await store.save({ ...mission, review }, result.version);
+        const nextVersion = await store.save({ ...mission, review }, result.version);
+
+        // TASK-2376: fire review → integration at the approval boundary
+        if (lifecycleService && this.phase === 'approved') {
+          const currentRound = review.rounds[review.rounds.length - 1];
+          const decidedAt = currentRound.decision?.kind === 'approved'
+            ? currentRound.decision.decidedAt
+            : this.startedAt;
+          const approveResult = await lifecycleService.transition({
+            operationId: `review-approve:${this.slug}`,
+            missionId: missionId(this.slug),
+            expectedVersion: nextVersion,
+            capabilities: new Set(['mission:transition']),
+            command: { type: 'approve', review },
+            actor: mission.assignee ?? 'custom',
+            occurredAt: decidedAt,
+            idempotencyKey: `approve:${this.slug}:${decidedAt}`,
+          });
+          if (approveResult.status !== 'completed') {
+            // Lifecycle transition failure is non-fatal for review persistence;
+            // px integrate recovery will repair the stale review state.
+          }
+        }
+
         return { outcome: 'committed' };
       } catch (error) {
         // A stale write means someone else committed between our load and save.
@@ -708,16 +746,24 @@ export class ReviewState {
  * @param {string} slug
  * @param {ReviewState|object} state
  * @param {string} [worktree]
+ * @param {{ missionStore?: MissionStore | null; lifecycleService?: MissionLifecycleService | null } | MissionStore | null} [options]
  * @returns {Promise<ReviewStatePersistenceResult>}
  */
 export async function writeReviewState(
   slug: string,
   state: ReviewState | Record<string, unknown>,
-  worktree = resolveWorktree(slug) || process.cwd(),
-  missionStore?: MissionStore | null,
+  worktree: string = resolveWorktree(slug) || process.cwd(),
+  options: { missionStore?: MissionStore | null; lifecycleService?: MissionLifecycleService | null } | MissionStore | null = {},
 ): Promise<ReviewStatePersistenceResult> {
-  const instance = state instanceof ReviewState ? state : new ReviewState(slug, state as ReviewStateData, missionStore);
-  return instance.save(worktree, missionStore);
+  // Backward-compat: accept MissionStore as positional 4th arg
+  const opts: { missionStore?: MissionStore | null; lifecycleService?: MissionLifecycleService | null } =
+    options && typeof options === 'object' && 'save' in options
+      ? { missionStore: options as MissionStore }
+      : (options as { missionStore?: MissionStore | null; lifecycleService?: MissionLifecycleService | null } ?? {});
+  const instance = state instanceof ReviewState
+    ? state
+    : new ReviewState(slug, state as ReviewStateData, opts.missionStore ?? null);
+  return instance.save(worktree, opts);
 }
 
 /**

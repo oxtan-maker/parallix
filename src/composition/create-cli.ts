@@ -182,7 +182,7 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
     review: (args, options) => withMissionFactories(missionServicesFn =>
       withGraph(async services => {
         if (!services.mission) { throw new Error('mission services are unavailable'); }
-        const persistence = bindReviewPersistence(services.mission.store);
+        const persistence = bindReviewPersistence(services.mission.store, services.mission.lifecycle);
         const adapter = createReviewWorkflowAdapter({
           ...options,
           missionServicesFn,
@@ -203,7 +203,7 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
                 ...createHandoffPorts(),
                 missionServices: missionServicesFn as HandoffMissionServicesPort,
               }).performHandoff(handoffSlug, { ...handoffOptions, missionServicesFn }),
-            ...reviewLoopBindings(services.mission!.store),
+            ...reviewLoopBindings(services.mission!.store, services.mission!.lifecycle),
           } as any),
         } as any);
         return createReviewCommand(new ReviewCommandUseCase(adapter, services.currentWork))(args, options);

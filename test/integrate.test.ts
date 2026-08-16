@@ -100,6 +100,7 @@ const {
   VARIANT_B_AUTOMATION_SUMMARY,
   evaluateTaskStatusForIntegration,
   promoteTaskForIntegrationIfNeeded,
+  recoverMissionForIntegration,
   findExistingSquashCommit,
   printIntegrationPreflight,
   buildIntegrationContext,
@@ -1565,6 +1566,118 @@ test('promoteTaskForIntegrationIfNeeded logs the dry-run auto-promotion without 
   }
 });
 
+test('recovery promotes an approved Review with its original decidedAt before integration', async () => {
+  const decidedAt = '2026-01-01T10:30:00Z';
+  const calls = [];
+  let state = {
+    status: 'review', assignee: 'codex', review: {
+      rounds: [{ decision: { kind: 'approved', decidedAt } }],
+    },
+  };
+  const missionServices = {
+    store: { async load() { return { kind: 'found', mission: state, version: 7 }; } },
+    lifecycle: {
+      async transition(request) {
+        calls.push(request);
+        state = { ...state, status: 'integration' };
+        return { status: 'completed' };
+      },
+    },
+  };
+
+  const result = await recoverMissionForIntegration({ slug: 'task-2376' }, { missionServices });
+  assert.deepEqual(result, { recovered: true, status: 'integration', occurredAt: decidedAt });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].command.type, 'approve');
+  assert.equal(calls[0].occurredAt, decidedAt);
+});
+
+test('recovery refuses an active Mission without authoritative Review facts', async () => {
+  const missionServices = {
+    store: { async load() { return { kind: 'found', mission: { status: 'active' }, version: 7 }; } },
+    lifecycle: { async transition() { throw new Error('must not transition'); } },
+  };
+  await assert.rejects(
+    () => recoverMissionForIntegration({ slug: 'task-2376' }, { missionServices }),
+    error => error.constructor.name === 'IntegrationAbort',
+  );
+});
+
+// R4 — stale `active` with authoritative Review facts: recovery must chain the
+// existing operations `submit-for-review` then `approve` (original decidedAt),
+// never patching Mission.status directly.
+test('R4: stale active recovery chains submit-for-review then approve with original decidedAt', async () => {
+  const decidedAt = '2026-01-01T10:30:00Z';
+  const calls = [];
+  const state = {
+    status: 'active', assignee: 'codex',
+    review: { rounds: [{ decision: { kind: 'approved', decidedAt } }] },
+  };
+  const submitForReviewFn = async (slug: string, isContinue: boolean | string) => {
+    calls.push(['submit-for-review', slug, isContinue]);
+    state.status = 'review'; // the existing handoff operation owns active → review
+  };
+  const missionServices = {
+    store: { async load() { return { kind: 'found', mission: state, version: 7 }; } },
+    lifecycle: {
+      async transition(request) {
+        calls.push(['approve', request.occurredAt]);
+        state.status = 'integration';
+        return { status: 'completed' };
+      },
+    },
+  };
+
+  const result = await recoverMissionForIntegration(
+    { slug: 'task-2376' },
+    { missionServices, submitForReviewFn },
+  );
+
+  assert.deepEqual(
+    calls,
+    [['submit-for-review', 'task-2376', false], ['approve', decidedAt]],
+    'recovery invokes the existing transition chain active → review → integration',
+  );
+  assert.deepEqual(result, { recovered: true, status: 'integration', occurredAt: decidedAt });
+});
+
+// R7 — `review` without an authoritative approval and no override: recovery
+// must stop and the Mission must remain in `review` (no invented transition).
+test('R7: review without approval stops — Mission remains review', async () => {
+  const transitionCalls = [];
+  const state = {
+    status: 'review', assignee: 'codex',
+    review: { rounds: [{ decision: { kind: 'changes-requested', decidedAt: '2026-01-01T11:00:00Z' } }] },
+  };
+  const missionServices = {
+    store: { async load() { return { kind: 'found', mission: state, version: 7 }; } },
+    lifecycle: { async transition(request) { transitionCalls.push(request); return { status: 'completed' }; } },
+  };
+
+  await assert.rejects(
+    () => recoverMissionForIntegration({ slug: 'task-2376' }, { missionServices }),
+    error => error.constructor.name === 'IntegrationAbort',
+  );
+  assert.equal(transitionCalls.length, 0, 'no approval transition is invented');
+  assert.equal(state.status, 'review', 'Mission remains in review');
+});
+
+// R9 — normal `integration` state: recovery proceeds without rerunning
+// review/approval logic and creates no duplicate approval event.
+test('R9: normal integration state proceeds without rerunning approval', async () => {
+  const transitionCalls = [];
+  const state = { status: 'integration', assignee: 'codex' };
+  const missionServices = {
+    store: { async load() { return { kind: 'found', mission: state, version: 7 }; } },
+    lifecycle: { async transition(request) { transitionCalls.push(request); return { status: 'completed' }; } },
+  };
+
+  const result = await recoverMissionForIntegration({ slug: 'task-2376' }, { missionServices });
+
+  assert.deepEqual(result, { recovered: false, status: 'integration' });
+  assert.equal(transitionCalls.length, 0, 'no duplicate approval event is created');
+});
+
 test('promoteTaskForIntegrationIfNeeded updates the task file on a real integration run', async () => {
   const taskFile = path.join(os.tmpdir(), `integrate-promote-${process.pid}.md`);
   fs.writeFileSync(taskFile, 'Status: ○ review\n');
@@ -1577,7 +1690,11 @@ test('promoteTaskForIntegrationIfNeeded updates the task file on a real integrat
       pr: { merged: false },
       approval: { ok: true, reviewState: 'APPROVED' }
     };
-    const result = await promoteTaskForIntegrationIfNeeded(context, { missionServicesFn: stubMissionServices() });
+    const result = await promoteTaskForIntegrationIfNeeded(context, {
+      missionServicesFn: stubMissionServices({
+        store: { async load() { return { kind: 'found', mission: { status: 'integration' }, version: 1 }; } },
+      }),
+    });
 
     assert.deepEqual(result, { changed: true, dryRun: false });
     assert.equal(context.taskStatus, 'ready-for-integration');
@@ -1637,7 +1754,11 @@ test('promoteTaskForIntegrationIfNeeded writes the integration checkout instead 
       pr: { merged: false }, approval: { ok: true, reviewState: 'APPROVED' }
     };
     assert.deepEqual(
-      await promoteTaskForIntegrationIfNeeded(context, { missionServicesFn: stubMissionServices() }),
+      await promoteTaskForIntegrationIfNeeded(context, {
+        missionServicesFn: stubMissionServices({
+          store: { async load() { return { kind: 'found', mission: { status: 'integration' }, version: 1 }; } },
+        }),
+      }),
       { changed: true, dryRun: false },
     );
     assert.match(fs.readFileSync(baseTask, 'utf8'), /^status: ready-for-integration$/m);
