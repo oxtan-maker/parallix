@@ -4,9 +4,6 @@
 
 import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
 const rebaseBeforeReviewRoundModule = mockModule<typeof import('../src/adapters/review/rebase.js')>('../src/adapters/review/rebase.js', import.meta.url);
 const isMissionArtifactModule = mockModule<typeof import('../src/adapters/filesystem/mission-utils.js')>('../src/adapters/filesystem/mission-utils.js', import.meta.url);
@@ -16,6 +13,22 @@ const { rebaseBeforeReviewRound } = rebaseBeforeReviewRoundModule;
 const { isMissionArtifact, isWorkflowGeneratedArtifact } = isMissionArtifactModule;
 function porcelainZ(entries) {
   return `${entries.join('\0')}\0`;
+}
+
+/**
+ * In-process rebase-workflow seam (TASK-2377.02). The pre-review rebase no
+ * longer spawns a CLI, so these tests drive the `RebaseWorkflowPort` seam and
+ * record the argv the workflow is asked to run.
+ */
+function inProcessWorkflow(runs, { exitCode = 0, port = {}, onRun = null } = {}) {
+  return {
+    createRebaseWorkflowPortFn: () => ({ exit: () => {}, ...port }),
+    runRebaseWorkflowFn: async (args, workflowPort) => {
+      runs.push(args);
+      if (onRun) { onRun(workflowPort); }
+      workflowPort.exit(exitCode);
+    },
+  };
 }
 
 test('isMissionArtifact identifies safe mission artifacts', () => {
@@ -64,10 +77,7 @@ test('rebaseBeforeReviewRound auto-commits safe mission artifacts before rebase'
       }
       return { status: 0, stdout: '', stderr: '' };
     },
-    runFn: (command, args) => {
-      rebaseCalls.push({ command, args });
-      return { status: 0, stdout: 'success', stderr: '' };
-    },
+    ...inProcessWorkflow(rebaseCalls),
     log: message => logs.push(message),
     error: message => assert.fail(`Should not have errored: ${message}`)
   });
@@ -80,37 +90,7 @@ test('rebaseBeforeReviewRound auto-commits safe mission artifacts before rebase'
   assert.ok(gitCalls.some(args => args.includes('add') && args.includes(`docs/missions/${year}/${slug}/MISSION.md`)));
   assert.ok(gitCalls.some(args => args.includes('add') && args.includes(`backlog/tasks/${slug} - title.md`)));
   assert.ok(gitCalls.some(args => args.includes('commit') && args.includes(`workflow(${slug}): auto-commit mission artifacts before pre-review rebase`)));
-  assert.match(rebaseCalls[0].args[0], /px\.mjs$/, 'Packaged pre-review rebase must invoke the canonical bundle');
-});
-
-test('rebaseBeforeReviewRound invokes the TypeScript entrypoint through tsx in a source checkout', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-source-rebase-'));
-  const calls = [];
-  const slug = 'task-1107';
-
-  try {
-    fs.mkdirSync(path.join(root, 'src', 'entry'), { recursive: true });
-    fs.writeFileSync(path.join(root, 'src', 'entry', 'px.ts'), '// source checkout marker\n');
-    const result = await rebaseBeforeReviewRound(slug, {
-      worktree: root,
-      isForgejoReviewEnabledFn: () => true,
-      gitFn: () => ({ status: 0, stdout: '', stderr: '' }),
-      runFn: (command, args) => {
-        calls.push({ command, args });
-        return { status: 0, stdout: 'success', stderr: '' };
-      },
-      log: () => {},
-      error: message => assert.fail(`Should not have errored: ${message}`)
-    });
-
-    assert.deepEqual(result, { ok: true, sharedFileConflicts: false, hookFailure: false });
-    assert.match(calls[0].command, /node_modules\/\.bin\/tsx$/, 'Source checkouts must launch tsx');
-    assert.deepEqual(calls[0].args, [
-      path.join(root, 'src', 'entry', 'px.ts'), 'rebase', slug, '--push'
-    ]);
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
+  assert.deepEqual(rebaseCalls, [[slug, '--push']], 'Pre-review rebase drives the workflow in-process');
 });
 
 test('rebaseBeforeReviewRound parses rename, copy, and space paths from porcelain z output', async () => {
@@ -137,7 +117,7 @@ test('rebaseBeforeReviewRound parses rename, copy, and space paths from porcelai
       }
       return { status: 0, stdout: '', stderr: '' };
     },
-    runFn: () => ({ status: 0, stdout: 'success', stderr: '' }),
+    ...inProcessWorkflow([]),
     log: () => {},
     error: message => assert.fail(`Should not have errored: ${message}`)
   });
@@ -168,12 +148,15 @@ test('rebaseBeforeReviewRound refuses rename or copy records with unsafe sources
       }
       return { status: 0, stdout: '', stderr: '' };
     },
-    runFn: () => assert.fail('Should not have run rebase'),
+    ...inProcessWorkflow([], { onRun: () => assert.fail('Should not have run rebase') }),
     log: () => {},
     error: message => errors.push(message)
   });
 
-  assert.deepEqual(result, { ok: false, sharedFileConflicts: false, hookFailure: false });
+  assert.equal(result.ok, false);
+  assert.equal(result.sharedFileConflicts, false);
+  assert.equal(result.hookFailure, false);
+  assert.equal(result.failure.kind, 'unsafe-worktree');
   assert.ok(errors.some(m => m.includes('workflow/lib/review/review.js')), 'Should list the unsafe rename source');
 });
 
@@ -191,12 +174,15 @@ test('rebaseBeforeReviewRound refuses to auto-commit when unsafe files are prese
       }
       return { status: 0, stdout: '', stderr: '' };
     },
-    runFn: () => assert.fail('Should not have run rebase'),
+    ...inProcessWorkflow([], { onRun: () => assert.fail('Should not have run rebase') }),
     log: message => logs.push(message),
     error: message => errors.push(message)
   });
 
-  assert.deepEqual(result, { ok: false, sharedFileConflicts: false, hookFailure: false });
+  assert.equal(result.ok, false);
+  assert.equal(result.sharedFileConflicts, false);
+  assert.equal(result.hookFailure, false);
+  assert.equal(result.failure.kind, 'unsafe-worktree');
   assert.ok(errors.some(m => m.includes('Cannot auto-commit: dirty files include non-mission paths')), 'Should report unsafe files');
   assert.ok(errors.some(m => m.includes('workflow/lib/review/review.js')), 'Should list the unsafe file');
 });
@@ -222,7 +208,7 @@ test('rebaseBeforeReviewRound ignores workflow-generated runtime state when chec
       }
       return { status: 0, stdout: '', stderr: '' };
     },
-    runFn: () => ({ status: 0, stdout: 'success', stderr: '' }),
+    ...inProcessWorkflow([]),
     log: () => {},
     error: message => assert.fail(`Should not have errored: ${message}`)
   });
@@ -244,12 +230,15 @@ test('rebaseBeforeReviewRound refuses to auto-commit when unmerged conflicts exi
       }
       return { status: 0, stdout: '', stderr: '' };
     },
-    runFn: () => assert.fail('Should not have run rebase'),
+    ...inProcessWorkflow([], { onRun: () => assert.fail('Should not have run rebase') }),
     log: message => logs.push(message),
     error: message => errors.push(message)
   });
 
-  assert.deepEqual(result, { ok: false, sharedFileConflicts: false, hookFailure: false });
+  assert.equal(result.ok, false);
+  assert.equal(result.sharedFileConflicts, false);
+  assert.equal(result.hookFailure, false);
+  assert.equal(result.failure.kind, 'unsafe-worktree');
   assert.ok(errors.some(m => m.includes('Cannot auto-commit: unmerged/conflicting files detected')), 'Should report unmerged conflicts');
 });
 
@@ -262,67 +251,28 @@ test('rebaseBeforeReviewRound reports shared-file rebase conflicts', async () =>
     worktree: '/tmp/worktree',
     isForgejoReviewEnabledFn: () => true,
     gitFn: () => ({ status: 0, stdout: '', stderr: '' }),
-    runFn: () => ({
-      status: 1,
-      stdout: '1 shared file(s) require agent-assisted resolution:\n  - workflow/lib/review/review.js',
-      stderr: ''
+    ...inProcessWorkflow([], {
+      exitCode: 1,
+      port: {
+        resolveConflictsForMission: () => ({
+          ok: true,
+          conflictFiles: ['workflow/lib/review/review.js'],
+          missionSpecificFiles: [],
+          sharedFiles: ['workflow/lib/review/review.js'],
+        }),
+      },
+      onRun: (workflowPort) => { workflowPort.resolveConflictsForMission(slug, 'lib', {}); },
     }),
     log: message => logs.push(message),
     error: message => errors.push(message)
   });
 
-  assert.deepEqual(result, { ok: false, sharedFileConflicts: true, hookFailure: false });
+  assert.equal(result.ok, false);
+  assert.equal(result.sharedFileConflicts, true);
+  assert.equal(result.hookFailure, false);
+  assert.equal(result.failure.kind, 'conflict');
+  assert.deepEqual(result.failure.sharedFiles, ['workflow/lib/review/review.js']);
   assert.ok(errors.some(m => m.includes('Shared-file rebase conflicts detected')), 'Should report shared-file conflicts');
-});
-
-test('rebaseBeforeReviewRound uses the tsx source runtime in a checkout', async () => {
-  const calls = [];
-  const result = await rebaseBeforeReviewRound('task-1107', {
-    worktree: process.cwd(),
-    isForgejoReviewEnabledFn: () => true,
-    gitFn: () => ({ status: 0, signal: null, stdout: '', stderr: '' }),
-    runFn: (command, args) => {
-      calls.push({ command, args });
-      return { status: 0, stdout: '', stderr: '' };
-    },
-    log: () => {},
-    error: message => assert.fail(`Should not have errored: ${message}`)
-  });
-
-  assert.deepEqual(result, { ok: true, sharedFileConflicts: false, hookFailure: false });
-  assert.deepEqual(calls, [{
-    command: path.join(process.cwd(), 'node_modules', '.bin', 'tsx'),
-    args: [
-      path.join(process.cwd(), 'src', 'entry', 'px.ts'), 'rebase', 'task-1107', '--push'
-    ]
-  }]);
-});
-
-test('rebaseBeforeReviewRound uses the compiled CLI outside a source checkout', async () => {
-  const calls = [];
-  const result = await rebaseBeforeReviewRound('task-1107', {
-    worktree: '/tmp/parallix-packaged-runtime',
-    isForgejoReviewEnabledFn: () => true,
-    gitFn: () => ({ status: 0, signal: null, stdout: '', stderr: '' }),
-    runFn: (command, args) => {
-      calls.push({ command, args });
-      return { status: 0, stdout: '', stderr: '' };
-    },
-    log: () => {},
-    error: message => assert.fail(`Should not have errored: ${message}`)
-  });
-
-  assert.deepEqual(result, { ok: true, sharedFileConflicts: false, hookFailure: false });
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].command, process.execPath);
-  // The CLI path resolves from MODULE_DIR (this module's own directory),
-  // which is the bundle root in a packaged install.
-  // Verify it names the canonical bundle entry and the rebase args are correct.
-  assert.ok(
-    calls[0].args[0].endsWith('px.mjs'),
-    `CLI path must end with px.mjs, got: ${calls[0].args[0]}`,
-  );
-  assert.deepEqual(calls[0].args.slice(1), ['rebase', 'task-1107', '--push']);
 });
 
 test('rebaseBeforeReviewRound reports missing Forgejo token failure from rebase push', async () => {
@@ -333,17 +283,18 @@ test('rebaseBeforeReviewRound reports missing Forgejo token failure from rebase 
     worktree: '/tmp/worktree',
     isForgejoReviewEnabledFn: () => true,
     gitFn: () => ({ status: 0, stdout: '', stderr: '' }),
-    runFn: () => ({
-      status: 1,
-      stdout: '',
-      stderr: 'FAIL No Forgejo token found for user "codex". Push failed.'
-    }),
+    // The workflow reports a missing Forgejo token by exiting non-zero before it
+    // ever reaches `createPr`, so no gate or hook evidence is produced.
+    ...inProcessWorkflow([], { exitCode: 1 }),
     log: () => {},
     error: message => errors.push(message)
   });
 
-  assert.deepEqual(result, { ok: false, sharedFileConflicts: false, hookFailure: false });
-  assert.ok(errors.some(m => m.includes('No Forgejo token found for user "codex"')), 'Should surface missing token failure');
+  assert.equal(result.ok, false);
+  assert.equal(result.sharedFileConflicts, false);
+  assert.equal(result.hookFailure, false);
+  assert.equal(result.failure.kind, 'other');
+  assert.equal(result.failure.operation, 'rebase');
   assert.ok(errors.some(m => m.includes('Rebase failed before launching reviewer')), 'Should keep missing-token failure blocking');
 });
 
@@ -356,15 +307,14 @@ test('rebaseBeforeReviewRound reports generic rebase failure', async () => {
     worktree: '/tmp/worktree',
     isForgejoReviewEnabledFn: () => true,
     gitFn: () => ({ status: 0, stdout: '', stderr: '' }),
-    runFn: () => ({
-      status: 1,
-      stdout: 'error: failed to push some refs',
-      stderr: ''
-    }),
+    ...inProcessWorkflow([], { exitCode: 1 }),
     log: message => logs.push(message),
     error: message => errors.push(message)
   });
 
-  assert.deepEqual(result, { ok: false, sharedFileConflicts: false, hookFailure: false });
+  assert.equal(result.ok, false);
+  assert.equal(result.sharedFileConflicts, false);
+  assert.equal(result.hookFailure, false);
+  assert.equal(result.failure.kind, 'other');
   assert.ok(errors.some(m => m.includes('Rebase failed before launching reviewer')), 'Should report generic failure');
 });

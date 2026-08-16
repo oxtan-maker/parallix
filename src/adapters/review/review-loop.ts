@@ -453,20 +453,33 @@ export async function startReviewLoop(slug: string, opts: {
       } else {
         if (!reviewState) {
           const rebaseResult = await rebaseBeforeReviewRoundFn(slug, {
-            worktree, runFn: runFn as any, log, error,
+            worktree, log, error,
             taskFile: taskResolution.taskFile,
             gitFn,
             isReviewProviderEnabledFn: forgejoEnabledFn
           });
           if (!rebaseResult.ok) {
+            const rebaseFailure = rebaseResult.failure;
+            if (rebaseFailure?.kind === 'gate') {
+              // TASK-2377.02: the push-time verification gate is a gate failure,
+              // even when its captured output mentions the enclosing pre-push
+              // hook. It never consumes the hook budget or the hook fix prompt.
+              error(fmt.status('FAIL', `Pre-review rebase gate failed for area "${rebaseFailure.gate.area}" (exit ${rebaseFailure.gate.exitCode}) during the ${rebaseFailure.operation} step.`));
+              error(fmt.status('INFO', `Gate command: ${rebaseFailure.gate.command}`));
+              exit(1); return;
+            }
             if (rebaseResult.hookFailure) {
+              const hookName = rebaseFailure?.kind === 'hook' ? rebaseFailure.hook.hook : 'git-hook';
+              const hookOutput = rebaseFailure?.kind === 'hook' ? rebaseFailure.hook.output : (rebaseResult.hookOutput || '');
               const hookResult: PreReviewGateResult = {
                 ok: false,
                 area: 'git-hook',
-                command: 'git commit (pre-review safety commit)',
+                command: rebaseFailure?.kind === 'hook' && rebaseFailure.operation !== 'commit'
+                  ? `git ${rebaseFailure.operation} (pre-review rebase, ${hookName})`
+                  : 'git commit (pre-review safety commit)',
                 exitCode: 1,
-                stdout: rebaseResult.hookOutput || '',
-                stderr: rebaseResult.hookOutput || '',
+                stdout: hookOutput,
+                stderr: hookOutput,
                 error: 'Git hook failed while committing pre-review mission artifacts',
               };
               const bounceResult = await handleGateFailureAutoBounceFn(slug, worktree, hookResult, implementer, {

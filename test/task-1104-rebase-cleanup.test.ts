@@ -45,14 +45,21 @@ test('rebaseBeforeReviewRound auto-commits safe mission artifacts', async () => 
     fs.writeFileSync(missionPath, '# MISSION - modified');
 
     const logs = [];
-    const runFn = mock.fn(() => ({ status: 0, stdout: 'success', stderr: '' }));
-
+    const rebaseCalls = [];
+    // In-process rebase-workflow seam (TASK-2377.02): the pre-review rebase no
+    // longer spawns the `px rebase` CLI, so the workflow is driven in-process.
     const result = await rebaseBeforeReviewRound(slug, {
       worktree: root,
-      runFn,
       taskFile: taskPath,
       // Exercise the Forgejo-enabled path: rebase runs after the safe-artifact commit.
       isForgejoReviewEnabledFn: () => true,
+      createRebaseWorkflowPortFn: () =>
+        // Partial seam double: only `exit` is touched by this test's workflow fn.
+        ({ exit: () => {} } as unknown as import('../src/application/ports/rebase-workflow.js').RebaseWorkflowPort),
+      runRebaseWorkflowFn: async (args, workflowPort) => {
+        rebaseCalls.push(args);
+        workflowPort.exit(0);
+      },
       log: m => logs.push(m)
     });
 
@@ -68,7 +75,8 @@ test('rebaseBeforeReviewRound auto-commits safe mission artifacts', async () => 
     assert.equal(lastCommit, 'workflow(task-1104): auto-commit mission artifacts before pre-review rebase');
 
     assert.ok(logs.some(m => m.includes('Auto-committing safe mission artifacts')));
-    assert.equal(runFn.mock.callCount(), 1, 'Should have called rebase CLI');
+    assert.equal(rebaseCalls.length, 1, 'Should have driven the rebase workflow in-process');
+    assert.deepEqual(rebaseCalls[0], [slug, '--push']);
   });
 });
 

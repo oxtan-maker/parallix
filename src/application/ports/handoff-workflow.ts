@@ -32,6 +32,8 @@
  * | `HandoffMissionServicesPort`| mission service factory (checkpoints, lifecycle, store, NEL handoff recording)    |
  */
 
+import type { PreReviewRebaseOutcome } from './rebase-workflow.js';
+
 export interface CommandResult {
   readonly status: number | null;
   readonly stdout?: string;
@@ -93,7 +95,12 @@ export interface HandoffSetupReviewPort {
 }
 
 export interface HandoffRebasePort {
-  rebaseBeforeReviewRound(_slug: string, _options: Record<string, unknown>): Promise<{ ok: boolean; sharedFileConflicts?: boolean }>;
+  /**
+   * Runs the pre-review rebase in-process and returns typed failure evidence
+   * (TASK-2377.02). `ok` and `sharedFileConflicts` keep their meaning for
+   * existing consumers; `failure` carries the gate or hook discriminant.
+   */
+  rebaseBeforeReviewRound(_slug: string, _options: Record<string, unknown>): Promise<PreReviewRebaseOutcome>;
 }
 
 export interface GatekeeperOutcome {
