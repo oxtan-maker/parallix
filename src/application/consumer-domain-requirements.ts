@@ -318,7 +318,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'review-checkpoint-evidence',
     family: 'review',
     fileLocation: 'src/adapters/review/review-static-evidence.ts',
-    line: 275,
+    line: 302,
     anchor: 'findCheckpointsFn(missionDir)',
     reads: ['CheckpointData', 'Mission'],
     requirement:

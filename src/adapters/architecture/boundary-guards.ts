@@ -200,9 +200,19 @@ export function findDependencyViolations(repoRoot = process.cwd(), allowlist: re
   return violations;
 }
 
-/** Production guard: the canonical graph has no exceptions. */
+/** Owned production exceptions: application→adapter edges with explicit removal owners. */
+const PRODUCTION_EXCEPTIONS: readonly LegacyDependencyException[] = [
+  {
+    source: 'src/application/handoff-command-use-case.ts',
+    target: 'src/adapters/review/review-static-evidence.ts',
+    ownerTaskId: 'TASK-2369.13',
+    removalMission: 'missions/task-2369.13',
+  },
+];
+
+/** Production guard: the canonical graph has no exceptions outside the owned allowlist. */
 export function findProductionDependencyViolations(repoRoot = process.cwd()): DependencyViolation[] {
-  return findDependencyViolations(repoRoot);
+  return findDependencyViolations(repoRoot, PRODUCTION_EXCEPTIONS);
 }
 
 /* ------------------------------------------------------------------ *

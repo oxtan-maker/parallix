@@ -7,6 +7,7 @@
  */
 
 import * as fmt from '../../application/presentation/cli-format.js';
+import { elideBounceOutput } from '../../application/output-elision.js';
 import { run } from '../git/git.js';
 import { findMissionDir, findMissionArea } from '../filesystem/mission-utils.js';
 import { formatVerificationCommand, resolveEffectiveArea } from '../verification/verification.js';
@@ -230,9 +231,9 @@ export async function handleGateFailureAutoBounce(
     ``,
     `Gate output (use this to diagnose and fix):`,
     `---`,
-    gateResult.stdout || '(no stdout)',
+    elideBounceOutput(gateResult.stdout || '(no stdout)'),
     `---`,
-    gateResult.stderr || '(no stderr)',
+    elideBounceOutput(gateResult.stderr || '(no stderr)'),
     `---`,
     ``,
     `Classification: ${classification.classification} — ${classification.action}`,
