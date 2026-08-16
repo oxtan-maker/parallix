@@ -131,9 +131,8 @@ test('mission lifecycle rejects unsupported jumps and missing handoff evidence',
     MissionRuleViolation,
   );
   assert.throws(() => decideMission(mission('refined'), { type: 'integrate' }), MissionRuleViolation);
-  // integrate from review is valid (review already approved by promoteTaskForIntegrationIfNeeded)
-  const integratedFromReview = decideMission(mission('review'), { type: 'integrate' });
-  assert.equal(integratedFromReview.status, 'done');
+  // integrate from review is forbidden — recovery must approve (review → integration) first
+  assert.throws(() => decideMission(mission('review'), { type: 'integrate' }), MissionRuleViolation);
   assert.throws(
     () => decideMission(mission('active'), {
       type: 'submit-for-review',

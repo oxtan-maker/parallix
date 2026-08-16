@@ -13,6 +13,7 @@ import * as verification from '../../verification/verification.js';
 const { formatVerificationCommand } = verification;
 import { isForgejoReviewEnabled } from '../../config/product-config.js';
 import { readReviewState } from '../../review/review-state.js';
+import { submitForReview } from '../../review/review-commands.js';
 
 import { missionId } from '../../../domain/mission.js';
 import { detectChangedAreas, isIntendedPayloadAtHead, parseFilesToAreas, orderIntegrationGates, gateMatchesChangedAreas, loadIntegrationConfig, getIntegrationGatePlan, printIntegrationGatePlan, buildIntegrationGateEnv, captureFinalIntegrationTree, resolveIntegrationVerificationWorktree, buildIntegrationVerificationInvocation, executeIntegrationGates } from './integrate-gates.js';
@@ -182,6 +183,7 @@ export interface IntegrateFn extends Function {
   buildIntegrationContext: typeof buildIntegrationContext;
   areAllBacklogOnlyConflicts: typeof areAllBacklogOnlyConflicts;
   getPrimaryWorktree: typeof getPrimaryWorktree;
+  recoverMissionForIntegration: typeof recoverMissionForIntegration;
 }
 
 /** @param {string[]} args */
@@ -250,6 +252,13 @@ async function integrate(args: string[], options: { missionServicesFn?: Function
             context.approval = { ok: true, reviewState: 'APPROVED', source: 'mission-store' };
           }
         }
+      }
+
+      // Reconcile the authoritative Mission before preflight or merge work.
+      // Backlog promotion remains delayed until closeout, because it can be
+      // part of the candidate branch, but it is never lifecycle authority.
+      if (!dryRun) {
+        await recoverMissionForIntegration(context, { missionServices });
       }
 
       // The integration target is the mission's recorded base worktree/branch.
@@ -866,29 +875,7 @@ async function promoteTaskForIntegrationIfNeeded(
     throw new IntegrationAbort();
   }
 
-  if (missionLoad.mission.status === 'review') {
-    if (!missionLoad.mission.review) {
-      fmt.log.fail(`Mission ${missionId(context.slug)} is in review without an approved review record.`);
-      throw new IntegrationAbort();
-    }
-    const approval = await missionServices.lifecycle.transition({
-      operationId: `integrate-approve:${context.slug}`,
-      missionId: missionId(context.slug),
-      expectedVersion: missionLoad.version,
-      capabilities: new Set(['mission:transition']),
-      command: { type: 'approve', review: missionLoad.mission.review },
-      actor: missionLoad.mission.assignee ?? 'custom',
-      occurredAt: new Date().toISOString(),
-      idempotencyKey: `approve:${context.slug}`,
-    });
-    if (approval.status !== 'completed') {
-      fmt.log.fail(`Mission approval failed before integration: ${approval.error?.message || 'unknown'}.`);
-      throw new IntegrationAbort();
-    }
-  } else if (missionLoad.mission.status !== 'integration') {
-    fmt.log.fail(`Mission ${missionId(context.slug)} is ${missionLoad.mission.status}; expected review or integration before promotion.`);
-    throw new IntegrationAbort();
-  }
+  await recoverMissionForIntegration(context, { missionServices, missionLoad });
 
   // External boundary effect after the durable lifecycle transition.
   const stateMapOptions = { rootDir: /** @type {string} */ (context.baseWorktree) };
@@ -905,6 +892,80 @@ async function promoteTaskForIntegrationIfNeeded(
   fmt.log.info('Promoted Backlog status from review to approved because review is already fulfilled.');
 
   return { changed: true, dryRun: false };
+}
+
+/**
+ * Repair interrupted lifecycle orchestration using workflow operations, never
+ * by assigning Mission.status. A Review decision remains the sole approval
+ * authority; an active Mission without Review facts must be handed off first.
+ */
+async function recoverMissionForIntegration(
+  context: any,
+  {
+    missionServices,
+    missionLoad: suppliedLoad,
+    submitForReviewFn = submitForReview,
+  }: { missionServices: any, missionLoad?: any, submitForReviewFn?: typeof submitForReview },
+) {
+  let missionLoad = suppliedLoad ?? await missionServices.store.load(missionId(context.slug));
+  if (missionLoad.kind !== 'found') {
+    fmt.log.fail(`Mission ${missionId(context.slug)} is unavailable for lifecycle recovery.`);
+    throw new IntegrationAbort();
+  }
+
+  if (missionLoad.mission.status === 'done') {
+    // The existing landed-integration closeout path is idempotent and owns a
+    // resumed done Mission. Do not create another lifecycle event here.
+    return { recovered: false, status: 'done' };
+  }
+
+  if (missionLoad.mission.status === 'active') {
+    if (!missionLoad.mission.review) {
+      fmt.log.fail(`Mission ${missionId(context.slug)} is active with no authoritative Review. Run px handoff ${context.slug} (or record a human decision through px review) before integration.`);
+      throw new IntegrationAbort();
+    }
+    // Submit through the existing handoff operation; it alone owns the
+    // active → review rules and persists the Review aggregate.
+    await submitForReviewFn(context.slug, false, {
+      missionServicesFn: async () => missionServices,
+      exit: (code: number) => { throw new Error(`submit-for-review exited ${code}`); },
+    });
+    missionLoad = await missionServices.store.load(missionId(context.slug));
+    if (missionLoad.kind !== 'found' || missionLoad.mission.status !== 'review') {
+      fmt.log.fail(`Mission ${missionId(context.slug)} did not reach review through submit-for-review; resolve the Review handoff before integration.`);
+      throw new IntegrationAbort();
+    }
+  }
+
+  if (missionLoad.mission.status === 'integration') {
+    return { recovered: false, status: 'integration' };
+  }
+  if (missionLoad.mission.status !== 'review' || !missionLoad.mission.review) {
+    fmt.log.fail(`Mission ${missionId(context.slug)} is ${missionLoad.mission.status}; integration requires an authoritative approved Review.`);
+    throw new IntegrationAbort();
+  }
+
+  const reviewRound = missionLoad.mission.review.rounds[missionLoad.mission.review.rounds.length - 1];
+  if (reviewRound.decision?.kind !== 'approved') {
+    fmt.log.fail(`Mission ${missionId(context.slug)} is in review without an authoritative approval. Record a ReviewerDecision through px review before integration.`);
+    throw new IntegrationAbort();
+  }
+  const approval = await missionServices.lifecycle.transition({
+    operationId: `integrate-approve:${context.slug}`,
+    missionId: missionId(context.slug),
+    expectedVersion: missionLoad.version,
+    capabilities: new Set(['mission:transition']),
+    command: { type: 'approve', review: missionLoad.mission.review },
+    actor: missionLoad.mission.assignee ?? 'custom',
+    occurredAt: reviewRound.decision.decidedAt,
+    idempotencyKey: `approve:${context.slug}:${reviewRound.decision.decidedAt}`,
+  });
+  if (approval.status !== 'completed') {
+    fmt.log.fail(`Mission approval failed before integration: ${approval.error?.message || 'unknown'}.`);
+    throw new IntegrationAbort();
+  }
+  context.missionStatus = 'integration';
+  return { recovered: true, status: 'integration', occurredAt: reviewRound.decision.decidedAt };
 }
 
 /**
@@ -1224,6 +1285,7 @@ function printIntegrationPreflight(
 (integrate as any).restoreMainCheckoutStash = restoreMainCheckoutStash;
 (integrate as any).evaluateTaskStatusForIntegration = evaluateTaskStatusForIntegration;
 (integrate as any).promoteTaskForIntegrationIfNeeded = promoteTaskForIntegrationIfNeeded;
+(integrate as any).recoverMissionForIntegration = recoverMissionForIntegration;
 (integrate as any).findExistingSquashCommit = findExistingSquashCommit;
 (integrate as any).printIntegrationPreflight = printIntegrationPreflight;
 (integrate as any).resolveForgejoUserForIntegration = resolveForgejoUserForIntegration;
@@ -1259,4 +1321,4 @@ function printIntegrationPreflight(
 // Re-export getPrimaryWorktree from mission-utils
 (integrate as any).getPrimaryWorktree = getPrimaryWorktree;
 export default integrate;
-export { integrate, detectChangedAreas, parseFilesToAreas, loadIntegrationConfig, getIntegrationGatePlan, printIntegrationGatePlan, buildIntegrationGateEnv, captureFinalIntegrationTree, parseIntegrateArgs, resolveIntegrationVerificationWorktree, buildIntegrationVerificationInvocation, executeIntegrationGates, orderIntegrationGates, gateMatchesChangedAreas, buildIntegrationContext, getPrimaryWorktree, VARIANT_B_AUTOMATION_SUMMARY, evaluateTaskStatusForIntegration, promoteTaskForIntegrationIfNeeded, printIntegrationPreflight, isIntendedPayloadAtHead };
+export { integrate, detectChangedAreas, parseFilesToAreas, loadIntegrationConfig, getIntegrationGatePlan, printIntegrationGatePlan, buildIntegrationGateEnv, captureFinalIntegrationTree, parseIntegrateArgs, resolveIntegrationVerificationWorktree, buildIntegrationVerificationInvocation, executeIntegrationGates, orderIntegrationGates, gateMatchesChangedAreas, buildIntegrationContext, getPrimaryWorktree, VARIANT_B_AUTOMATION_SUMMARY, evaluateTaskStatusForIntegration, promoteTaskForIntegrationIfNeeded, recoverMissionForIntegration, printIntegrationPreflight, isIntendedPayloadAtHead };

@@ -110,6 +110,10 @@ test('SC19: q terminates a real idle px board and leaves its spawned PID gone', 
 test('SC20: Ctrl+C terminates a real idle px board and leaves its spawned PID gone', async () => {
   const fixture = await launchBoard();
   try {
+    // Ctrl+C must reach the app as a raw keystroke; while the line discipline
+    // is still cooked, 0x03 becomes a SIGINT to the whole foreground process
+    // group (including the wrapper shell) instead of an input byte.
+    await fixture.session.waitForRaw(LAUNCH_TIMEOUT_MS);
     await assertTerminates(fixture, '\u0003', 'idle Ctrl+C');
   } finally {
     await fixture.dispose();

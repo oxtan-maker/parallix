@@ -136,7 +136,7 @@ export function decideMission(mission: Mission, command: MissionCommand): Missio
     }
     return { ...mission, status: 'integration', review: command.review };
   case 'integrate':
-    requireStatus(mission, ['review', 'integration'], command);
+    requireStatus(mission, ['integration'], command);
     return { ...mission, status: 'done', closedAt: null };
   }
 }

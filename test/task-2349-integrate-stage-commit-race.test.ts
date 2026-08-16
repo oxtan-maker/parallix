@@ -48,7 +48,9 @@ function setup() {
   mock.method(stats, 'recordIntegrationStats', async () => ({ changed: false, row: { mission: TEST_SLUG }, data: { rows: [] }, report: 'none' }));
   mock.method(stats, 'resolveMissionClassification', () => ({ classification: 'ai_sdlc' }));
   mock.method(composition, 'createMissionApplicationServices', async () => ({
-    store: { _repoId: 'default', load: async () => ({ kind: 'found', mission: { status: 'review', review: null }, version: 1 }) },
+    // TASK-2376: the domain integrate command requires status=integration;
+    // a review-status mission with no Review aggregate must stop, not integrate.
+    store: { _repoId: 'default', load: async () => ({ kind: 'found', mission: { status: 'integration', review: null }, version: 1 }) },
     lifecycle: { transition: async () => ({ status: 'completed', value: { to: 'review', version: 2 } }) },
     handoff: { recordNel: async () => ({}) },
   }));

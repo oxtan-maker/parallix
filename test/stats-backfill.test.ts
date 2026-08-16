@@ -170,17 +170,20 @@ test('collectHistoricalStatsBackfill resolves done missions, skips non-done miss
     const repoName = stats.resolveStatsRepoName(root);
 
     assert.equal(report.rows.length, 2);
+    // TASK-2376 removed the backlog-assignee implementer fallback from
+    // deriveImplementerAndFixRounds; the backfill now derives the implementer
+    // from git history (fixture author is Magnus Ekdahl → 'magnus').
     assert.deepEqual(report.rows[0], {
       date: '2026-05-01',
       repo: repoName,
       mission: 'task-2000',
       classification: 'ai_sdlc',
-      implementer: 'codex',
+      implementer: 'magnus',
       pr_fix_rounds: '0',
       sources: {
         date: 'backlog-updated_date',
         classification: 'mission-doc-heuristic',
-        implementer: 'backlog-fallback',
+        implementer: 'git-history-author',
       },
     });
     assert.deepEqual(report.rows[1], {
@@ -372,7 +375,8 @@ test('statsBackfill supports help, json output, summary output, and apply mode',
       assert.equal(row.date, '2026-05-05');
       assert.equal(row.repo, stats.resolveStatsRepoName(root));
       assert.equal(row.classification, 'ai_sdlc');
-      assert.equal(row.implementer, 'codex');
+      // TASK-2376: backlog-assignee fallback deleted; git-history author wins.
+      assert.equal(row.implementer, 'magnus');
       assert.deepEqual(fs.readdirSync(parallixHome).filter(name => name.endsWith('.csv')), []);
       assert.equal(fs.existsSync(path.join(root, 'workflow', 'data', 'stats.csv')), false);
 

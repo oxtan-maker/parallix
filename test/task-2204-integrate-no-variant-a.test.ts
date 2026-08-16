@@ -96,10 +96,12 @@ function setupMocks() {
   mock.method(process, 'cwd', () => FAKE_ROOT);
 
   // SC3: Mock createMissionApplicationServices for SQLite-first transitions.
+  // The mission carries an authoritative approved Review so integrate's
+  // lifecycle recovery reaches the merged-PR preflight this test exercises.
   mock.method(composition, 'createMissionApplicationServices', async () => ({
     store: {
       _repoId: 'default',
-      load: async () => ({ kind: 'found', mission: { status: 'review', review: null }, version: 1 }),
+      load: async () => ({ kind: 'found', mission: { status: 'review', review: { rounds: [{ decision: { kind: 'approved', decidedAt: '2026-01-01T10:30:00Z' } }] } }, version: 1 }),
     },
     lifecycle: {
       transition: async () => ({ status: 'completed', value: { to: 'review', version: 2 } }),

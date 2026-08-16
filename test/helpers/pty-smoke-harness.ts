@@ -1,5 +1,5 @@
 import { once } from 'node:events';
-import { openSync } from 'node:fs';
+import { closeSync, openSync } from 'node:fs';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -45,6 +45,37 @@ function runStty(device: string, columns: number, rows: number): Promise<void> {
   });
 }
 
+function getSttyA(device: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const fd = openSync(device, 'r');
+    const child = spawn(STTY, ['-a'], { stdio: [fd, 'pipe', 'ignore'] });
+    const chunks: Buffer[] = [];
+    child.stdout.on('data', (data: Buffer) => chunks.push(data));
+    child.once('error', (error: Error) => { closeSync(fd); reject(error); });
+    child.once('exit', (code) => {
+      closeSync(fd);
+      if (code === 0) { resolve(Buffer.concat(chunks).toString()); }
+      else { reject(new Error(`stty -a failed with ${code}`)); }
+    });
+  });
+}
+
+async function waitForRawState(device: string, milliseconds: number): Promise<void> {
+  const deadline = Date.now() + milliseconds;
+  for (;;) {
+    try {
+      // ICANON off is the marker for raw input mode.
+      if (/(^|\s)-icanon(\s|$)/.test(await getSttyA(device))) { return; }
+    } catch {
+      // Transient read failure; the deadline bounds the wait.
+    }
+    if (Date.now() >= deadline) {
+      throw new Error(`PTY smoke timeout after ${milliseconds}ms: terminal never entered raw mode`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
 export interface PtySmokeSession {
   readonly output: () => string;
   readonly isAlive: () => boolean;
@@ -64,6 +95,13 @@ export interface PtySmokeSession {
   processGone(): boolean;
   /** Whether the PTY's terminal settings match the pre-launch capture. */
   terminalRestored(): Promise<boolean>;
+  /**
+   * Resolve once the launched process has put the PTY into raw mode. Keystrokes
+   * sent before raw mode is active can be translated by the line discipline —
+   * Ctrl+C (0x03) becomes a SIGINT to the foreground process group instead of
+   * an input byte — so tests must await this before sending raw keys.
+   */
+  waitForRaw(milliseconds: number): Promise<void>;
   /** Remove the session's temporary metadata directory. */
   cleanup(): Promise<void>;
   exitCleanly(): Promise<{ readonly exitCode: number; readonly terminalRestored: boolean }>;
@@ -138,6 +176,7 @@ export async function launchPtySmoke(
       }
     },
     terminalRestored,
+    waitForRaw: (milliseconds) => waitForRawState(device, milliseconds),
     cleanup: async () => { await rm(temp, { recursive: true, force: true }); },
     send: (input) => { child.stdin.write(input); },
     resize: async (columns, rows) => {
