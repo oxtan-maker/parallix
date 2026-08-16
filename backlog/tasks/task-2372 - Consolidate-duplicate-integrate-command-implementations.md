@@ -1,7 +1,7 @@
 ---
 id: TASK-2372
 title: Consolidate duplicate integrate command implementations
-status: backlog
+status: refined
 assignee: [custom]
 created_date: '2026-08-13 17:12'
 labels: [user_value]
