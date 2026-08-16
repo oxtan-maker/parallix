@@ -30,6 +30,12 @@ interface SpawnTeeOptions {
   noOutputWatchdog?: NoOutputWatchdog | null;
   cwd?: string;
   env?: Record<string, string>;
+  /**
+   * Unref the child and its piped stdio so a long-running child cannot keep
+   * the host process alive. Used by board fire-and-forget dispatch, where the
+   * board must exit on q/Ctrl+C while the action runs on (CP-4 ownership rule).
+   */
+  unrefChild?: boolean;
   [key: string]: unknown;
 }
 
@@ -87,6 +93,7 @@ export function spawnAndTee(command: string, args: string[], options: SpawnTeeOp
     stderrSink = process.stderr,
     maxTailBytes = DEFAULT_MAX_TAIL_BYTES,
     noOutputWatchdog = null,
+    unrefChild = false,
     ...spawnOptions
   } = options;
 
@@ -114,6 +121,13 @@ export function spawnAndTee(command: string, args: string[], options: SpawnTeeOp
         env,
         stdio: ['inherit', 'pipe', 'pipe']
       } as SpawnOptions);
+      if (unrefChild) {
+        // child.unref() alone does not release the piped stdio handles — the
+        // pipes would still anchor the event loop. Unref all three.
+        child.unref();
+        (child.stdout as { unref?: () => void } | null)?.unref?.();
+        (child.stderr as { unref?: () => void } | null)?.unref?.();
+      }
     } catch (err) {
       resolve({
         status: null, signal: null, stdout: '', stderr: '', error: err,

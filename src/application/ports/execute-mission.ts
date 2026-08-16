@@ -67,6 +67,12 @@ export interface AgentLaunchRequest {
   /** Operator-pinned implementer family, or `null` to let selection choose. */
   readonly preselectedAgent: string | null;
   /**
+   * The dispatching host does not keep its process alive for this operation
+   * (board fire-and-forget dispatch, CP-4): the launched child must be
+   * unref'd so the host can exit on q/Ctrl+C while the action runs on.
+   */
+  readonly detached?: boolean;
+  /**
    * Called once per family the launcher actually starts, including every
    * automatic failover after a usage block.
    *

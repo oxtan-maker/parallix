@@ -19,9 +19,11 @@ export class ConcreteCurrentWorkReadAdapter implements CurrentWorkReadAdapter {
   constructor(private readonly _historyRepo: OperationalHistoryRepository) {}
 
   async loadCurrentWork(): Promise<readonly CurrentWorkEvent[]> {
-    const entries = this._historyRepo.findLatestByTypePerMission
-      ? await this._historyRepo.findLatestByTypePerMission(CURRENT_WORK_EVENT_TYPE, 2)
-      : await this._historyRepo.findByType(CURRENT_WORK_EVENT_TYPE);
+    // Read all current-work events, not a bounded window. The reconciler
+    // already reduces to one standing fact per mission — a fixed N-latest
+    // window was the thing that discarded still-running operations when
+    // older operations emitted late terminal events (TASK-2375 AC #2).
+    const entries = await this._historyRepo.findByType(CURRENT_WORK_EVENT_TYPE);
     return entries.flatMap((entry) => parseCurrentWorkEntry(entry) ?? []);
   }
 }

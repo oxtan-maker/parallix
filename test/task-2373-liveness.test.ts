@@ -61,7 +61,11 @@ test('SC13: the probe uses a start identity where the platform exposes one', () 
 });
 
 test('SC13: an unreadable identity falls back to the bare pid check rather than guessing', () => {
-  assert.equal(probeProcessLiveness(process.pid, null), true);
+  // TASK-2375 SC5: when identity is null (non-Linux or legacy), bare pid
+  // existence is not authoritative — return null so TTL aging can age it out.
+  // This is a deliberate change from the old behaviour (null → true) that
+  // kept unverifiable missions WORKING forever.
+  assert.equal(probeProcessLiveness(process.pid, null), null);
   assert.equal(probeProcessLiveness(-1, null), null);
 });
 

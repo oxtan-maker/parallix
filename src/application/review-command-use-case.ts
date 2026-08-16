@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { missionId } from '../domain/mission.js';
 import type { ReviewWorkflowContext, ReviewWorkflowPort } from './ports/review-workflow.js';
 import {
@@ -80,7 +81,7 @@ export class ReviewCommandUseCase {
 
     const publication = {
       missionId: missionId(context.slug),
-      operationId: `review:${context.slug}`,
+      operationId: `review:${context.slug}:${randomUUID()}`,
       phase,
       summary: `px review --${operation === 'consumeArtifacts' ? 'consume-artifacts' : operation} ${context.slug}`,
       agent: null,

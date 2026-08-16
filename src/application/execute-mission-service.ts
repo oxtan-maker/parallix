@@ -25,6 +25,13 @@ export interface ExecuteMissionRequest {
   readonly agent?: string | null;
   readonly capabilities: ReadonlySet<Capability>;
   readonly cancellation?: Cancellation;
+  /**
+   * The dispatching host will not keep its process alive for this operation
+   * (board fire-and-forget dispatch): the execute launch must unref its child
+   * so q/Ctrl+C can exit the board while the action runs on (CP-4 ownership
+   * rule). CLI callers omit it and await the agent in-process.
+   */
+  readonly detached?: boolean;
 }
 
 export interface ExecuteMissionResult {
@@ -158,6 +165,7 @@ export class ExecuteMissionService {
       plan,
       taskResolution: prepared.taskResolution,
       preselectedAgent: request.agent || null,
+      detached: request.detached === true,
       // A usage block reroutes the same operation to the next eligible family.
       // Republishing here keeps that one mission WORKING with an updated agent
       // instead of producing an attention item for an autonomous handoff.

@@ -12,9 +12,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as path from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { existsSync, readFileSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { launchPtySmoke, type PtySmokeSession } from './helpers/pty-smoke-harness.js';
+
+const execFileP = promisify(execFile);
 
 const root = process.cwd();
 const LAUNCH_TIMEOUT_MS = 20_000;
@@ -145,6 +150,224 @@ test('SC26: ten real start-and-quit cycles leave every spawned board PID gone', 
     const fixture = await launchBoard();
     try {
       await assertTerminates(fixture, 'q', `cycle ${index + 1}`);
+    } finally {
+      await fixture.dispose();
+    }
+  }
+});
+
+// ---------------------------------------------------------------------------
+// TASK-2375 SC3 — shutdown while a board-dispatched action is in flight
+// ---------------------------------------------------------------------------
+//
+// Round-1 review (F2): the earlier SC3 tests dispatched into a plain temp
+// directory, where the only dispatchable kind (`active:execute`) fails within
+// milliseconds in preflight. Nothing was ever demonstrably in flight, a 100 ms
+// sleep stood in for started synchronization, and no ownership outcome was
+// asserted. This section launches the board over a real git mission fixture
+// whose `claude` is a stub agent: `--help` exits 0 (the health probe), and a
+// real launch writes its own PID to a start marker, then blocks for a long
+// time. The quit key is sent only after the marker proves the dispatched child
+// process is running (bounded wait, no sleeps), and the ownership outcome is
+// asserted against the existing rule (CP-4 fire-and-forget detach): the board
+// exits without waiting, and the child is reaped by OS session teardown
+// (SIGHUP), never by a board-sent signal.
+
+const DISPATCH_START_BUDGET_MS = 30_000;
+const REAP_BUDGET_MS = 3_000;
+const SC3_SLUG = 'task-2375shut';
+
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch { return false; }
+}
+
+async function gitIn(cwd: string, ...args: string[]): Promise<void> {
+  await execFileP('git', args, { cwd });
+}
+
+interface InflightBoardFixture {
+  readonly session: PtySmokeSession;
+  readonly markerPath: string;
+  readonly signalPath: string;
+  childPid: number | null;
+  dispose(): Promise<void>;
+}
+
+/**
+ * A real mission fixture (git repo, mission branch, active classified task,
+ * mission dir) plus a stub `claude` on PATH whose real launches write a start
+ * marker (their own PID) and then block. The stub's signal traps record how
+ * the child dies: SIGHUP (OS session teardown) or SIGINT (the Ctrl+C group
+ * broadcast) — neither is board-sent. A board would have to send SIGTERM or
+ * SIGKILL to cancel, and that leaves no marker. `exec 2>/dev/null` is required:
+ * dash reports a SIGHUP'd foreground child with "Hangup\n" on stderr, and that
+ * write into the board's closed pipe would raise EPIPE/SIGPIPE and kill the
+ * shell before its trap could record the death signal.
+ */
+async function launchInflightBoard(): Promise<InflightBoardFixture> {
+  const baseRoot = await mkdtemp(path.join(tmpdir(), 'parallix-2375-sc3-'));
+  const fixtureRoot = path.join(baseRoot, SC3_SLUG);
+  const stateRoot = path.join(baseRoot, 'state');
+  const stubDir = path.join(baseRoot, 'stubs');
+  const markerPath = path.join(baseRoot, 'claude-started');
+  const signalPath = `${markerPath}.signal`;
+  await mkdir(fixtureRoot, { recursive: true });
+  await mkdir(stateRoot, { recursive: true });
+  await mkdir(stubDir, { recursive: true });
+  await mkdir(path.join(fixtureRoot, 'backlog', 'tasks'), { recursive: true });
+  await mkdir(path.join(fixtureRoot, 'missions', SC3_SLUG), { recursive: true });
+  await writeFile(path.join(fixtureRoot, 'missions', SC3_SLUG, 'MISSION.md'), `# ${SC3_SLUG}\n`);
+  await writeFile(
+    path.join(fixtureRoot, 'backlog', 'tasks', `${SC3_SLUG}.md`),
+    ['---', `id: ${SC3_SLUG.toUpperCase()}`, 'title: In-flight shutdown fixture', 'status: active', 'assignee: []', 'labels: [ai_sdlc]', '---', ''].join('\n'),
+  );
+  const stub = [
+    '#!/bin/sh',
+    'if [ "$1" = "--help" ]; then exit 0; fi',
+    `echo $$ > "${markerPath}"`,
+    'exec 2>/dev/null',
+    `trap 'echo SIGHUP > "${signalPath}" 2>/dev/null' HUP`,
+    `trap 'echo SIGINT > "${signalPath}" 2>/dev/null' INT`,
+    'sleep 300',
+  ].join('\n');
+  await writeFile(path.join(stubDir, 'claude'), stub, { mode: 0o755 });
+
+  // The verify-local git compat shim (Apple Git 2.24) misparses a bare
+  // `init -q -b main` (the -q is taken as the target directory), so the
+  // explicit `.` target is required, matching test/task-2286-native-sea-smoke.
+  await gitIn(fixtureRoot, 'init', '-q', '-b', 'main', '.');
+  await gitIn(fixtureRoot, 'config', 'user.email', 'fixture@parallix.local');
+  await gitIn(fixtureRoot, 'config', 'user.name', 'fixture');
+  await gitIn(fixtureRoot, 'add', '-A');
+  await gitIn(fixtureRoot, 'commit', '-q', '-m', 'init');
+  await gitIn(fixtureRoot, 'checkout', '-q', '-b', `mission/${SC3_SLUG}`);
+
+  const session = await launchPtySmoke([process.execPath, path.join(root, 'build/px.mjs'), 'ui'], {
+    cwd: fixtureRoot,
+    timeoutMs: LAUNCH_TIMEOUT_MS,
+    env: {
+      ...process.env,
+      PARALLIX_HOME: stateRoot,
+      PRIMARY_WORKTREE: fixtureRoot,
+      WORKFLOW_AGENT: 'claude',
+      PARALLIX_NO_BUBBLEWRAP: '1',
+      PATH: `${stubDir}:${process.env.PATH}`,
+    },
+  });
+  const fixture: InflightBoardFixture = {
+    session,
+    markerPath,
+    signalPath,
+    childPid: null,
+    dispose: async () => {
+      if (session.isAlive()) {
+        try { session.signal('SIGKILL'); } catch { /* already gone */ }
+      }
+      if (fixture.childPid !== null && pidAlive(fixture.childPid)) {
+        try { process.kill(fixture.childPid, 'SIGKILL'); } catch { /* already gone */ }
+      }
+      await session.cleanup();
+      await rm(baseRoot, { recursive: true, force: true });
+    },
+  };
+  await waitForOutput(session, /px board/, LAUNCH_TIMEOUT_MS, 'the real board must render before dispatch is exercised');
+  return fixture;
+}
+
+/**
+ * Arm and confirm the focused mission's action, then wait (bounded) until the
+ * stub agent's start marker proves the dispatched child process is running.
+ * This is the explicit started synchronization the mission requires — a
+ * failure here means nothing was in flight when the quit key was sent.
+ */
+async function dispatchAndAwaitStart(fixture: InflightBoardFixture): Promise<void> {
+  const { session } = fixture;
+  session.send('\r');
+  await waitForOutput(session, /CONFIRM CONSEQUENTIAL ACTION/, SHUTDOWN_BUDGET_MS, 'Enter must arm the confirmation dialog');
+  session.send('\r'); // confirm — the dispatch is fire-and-forget
+  const deadline = Date.now() + DISPATCH_START_BUDGET_MS;
+  while (!existsSync(fixture.markerPath)) {
+    if (!session.isAlive() || Date.now() >= deadline) { break; }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  assert.ok(
+    existsSync(fixture.markerPath),
+    `the dispatched action must be demonstrably in flight before quit (start marker; board alive=${session.isAlive()})`,
+  );
+  const childPid = Number(readFileSync(fixture.markerPath, 'utf8').trim());
+  assert.ok(Number.isInteger(childPid) && childPid > 1, 'the start marker must carry the child pid');
+  assert.ok(pidAlive(childPid), 'the in-flight child must be alive when the quit key is sent');
+  fixture.childPid = childPid;
+}
+
+/**
+ * Send the quit key and prove the shutdown outcome and the ownership rule:
+ * the board PID is gone within the bounded budget, the terminal is restored,
+ * and the in-flight child is reaped by a terminal-level signal (OS SIGHUP on
+ * session teardown, or the Ctrl+C group broadcast) rather than cancelled by a
+ * board-sent signal — fire-and-forget detach, no board-owned resource left
+ * behind.
+ */
+async function assertInflightTermination(fixture: InflightBoardFixture, key: string, description: string): Promise<void> {
+  const { session } = fixture;
+  const pid = session.pid;
+  session.send(key);
+  const exitCode = await session.waitForExit(SHUTDOWN_BUDGET_MS);
+  assert.ok(
+    session.processGone(),
+    `${description}: board pid ${pid} must no longer exist within ${SHUTDOWN_BUDGET_MS} ms of the key (exit code ${exitCode})`,
+  );
+  assert.equal(await session.terminalRestored(), true, `${description}: terminal raw-mode state must be restored`);
+
+  const reapDeadline = Date.now() + REAP_BUDGET_MS;
+  while (fixture.childPid !== null && pidAlive(fixture.childPid) && Date.now() < reapDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  assert.ok(
+    fixture.childPid === null || !pidAlive(fixture.childPid),
+    `${description}: in-flight child (pid ${fixture.childPid}) must be reaped after board exit — no board-owned handle left behind`,
+  );
+  const signalDeadline = Date.now() + REAP_BUDGET_MS;
+  while (!existsSync(fixture.signalPath) && Date.now() < signalDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  assert.ok(
+    existsSync(fixture.signalPath),
+    `${description}: the child's death must be a terminal-level signal (OS SIGHUP or the Ctrl+C group broadcast), not a board-sent signal`,
+  );
+  const recorded = readFileSync(fixture.signalPath, 'utf8').trim();
+  assert.ok(recorded === 'SIGHUP' || recorded === 'SIGINT', `${description}: recorded death signal must be SIGHUP or SIGINT, got "${recorded}"`);
+}
+
+test('TASK-2375 SC3: q terminates the real board while a dispatched action is demonstrably in flight', async () => {
+  const fixture = await launchInflightBoard();
+  try {
+    await dispatchAndAwaitStart(fixture);
+    await assertInflightTermination(fixture, 'q', 'q with in-flight action');
+  } finally {
+    await fixture.dispose();
+  }
+});
+
+test('TASK-2375 SC3: Ctrl+C terminates the real board while a dispatched action is demonstrably in flight', async () => {
+  const fixture = await launchInflightBoard();
+  try {
+    await dispatchAndAwaitStart(fixture);
+    await assertInflightTermination(fixture, '\u0003', 'Ctrl+C with in-flight action');
+  } finally {
+    await fixture.dispose();
+  }
+});
+
+test('TASK-2375 SC3: repeated in-flight dispatch-quit cycles leave no board or child PID behind', async () => {
+  for (let index = 0; index < 3; index += 1) {
+    const fixture = await launchInflightBoard();
+    try {
+      await dispatchAndAwaitStart(fixture);
+      await assertInflightTermination(fixture, 'q', `in-flight dispatch-quit cycle ${index + 1}`);
     } finally {
       await fixture.dispose();
     }

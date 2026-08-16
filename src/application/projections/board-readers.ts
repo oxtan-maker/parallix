@@ -208,11 +208,17 @@ export class BoardProjectionBuilder {
     missions: readonly Mission[],
     agentAvailability: BoardMetrics['agentAvailability'],
   ): Promise<BoardMetrics> {
-    const key = JSON.stringify({
-      missions: missions.map((mission) => [mission.id, mission.status]),
-      agentAvailability,
-    });
-    if (this.metricsCache?.key === key) { return this.metricsCache.metrics; }
+    // Cache key depends only on facts that actually change slow metrics.
+    // agentAvailability carries volatile fields (blockedForMs) that change
+    // every refresh while an AgentBlock is active — those must not invalidate
+    // expensive historical cycle-time/throughput computation (TASK-2375 AC #23).
+    const key = JSON.stringify(
+      missions.map((mission) => [mission.id, mission.status]),
+    );
+    if (this.metricsCache?.key === key) {
+      // Cache hit: reuse slow metrics, swap in fresh agent availability
+      return { ...this.metricsCache.metrics, agentAvailability };
+    }
     // Explicit metrics (for testing/fixtures)
     if (this._options?.metrics) {
       this.metricsCache = { key, metrics: this._options.metrics };

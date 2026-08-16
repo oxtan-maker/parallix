@@ -1,10 +1,12 @@
 ---
 id: TASK-2375
 title: Finish live-board operation correctness and shutdown semantics
-status: ready-for-integration
+status: done
 assignee: [custom]
 created_date: '2026-08-14 05:33'
-labels: [ai_sdlc, bug]
+labels:
+  - ai_sdlc
+  - bug
 dependencies: []
 ordinal: 95912
 ---
