@@ -169,6 +169,10 @@ export class BoardCommandController implements BoardCommandDispatcher {
       agent: request.agent ?? undefined,
       capabilities: request.capabilities,
       cancellation: request.cancellation,
+      // Board dispatch is fire-and-forget (void confirmAction()): the board
+      // must be able to exit on q/Ctrl+C while the action runs on, so the
+      // launched child must not keep the board process alive (CP-4 rule).
+      detached: true,
     };
     return this.executeMission.execute(executeRequest);
   }

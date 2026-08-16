@@ -69,6 +69,12 @@ interface StartAgentOptions {
   launchAgentFn?: Function;
   assertAgentSupportedFn?: Function;
   /**
+   * Board fire-and-forget dispatch: unref the launched child (and its pipes)
+   * so the board process can exit on q/Ctrl+C while the action runs on.
+   * CLI callers leave this unset and keep the child ref'd until it exits.
+   */
+  unrefChild?: boolean;
+  /**
    * Refuse every fallback for the pinned `agent`. Used by work that a specific
    * actor owns outright — conflict resolution belongs to the mission
    * implementer (TASK-2294.01), so a blocked, saturated, unavailable,
@@ -292,6 +298,7 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
     noOutputWatchdog = {},
     launchAgentFn = null,
     assertAgentSupportedFn = assertAgentSupported,
+    unrefChild = false,
     pinnedAgent = false
   } = opts;
 
@@ -487,22 +494,27 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
         slug,
         role: sessionRole,
         sessionMarkerPort: launchSessionMarkerPort,
-        teeOptions: watchdogConfig ? {
-          noOutputWatchdog: {
-            ...watchdogConfig,
-            onNoOutput: (evt: {pid: number, elapsedMs: number}) => {
-              const stage = evt.elapsedMs < (step === 'draft' ? DRAFT_NO_OUTPUT_INITIAL_DELAY_MS : DEFAULT_NO_OUTPUT_INITIAL_DELAY_MS)
-                ? 'starting up'
-                : 'running';
-              log(fmt.status(
-                'INFO',
-                `No output yet from ${fmt.agent(chosen || '')} for step "${step}" after ${formatElapsed(evt.elapsedMs)} ` +
-                `(pid ${evt.pid || 'unknown'}, agent ${stage}). ` +
-                `Launcher is still running; stdout/stderr have not produced visible output.`
-              ));
-            }
-          }
-        } : {}
+        teeOptions: {
+          ...(unrefChild ? { unrefChild: true } : {}),
+          ...(watchdogConfig
+            ? {
+                noOutputWatchdog: {
+                  ...watchdogConfig,
+                  onNoOutput: (evt: {pid: number, elapsedMs: number}) => {
+                    const stage = evt.elapsedMs < (step === 'draft' ? DRAFT_NO_OUTPUT_INITIAL_DELAY_MS : DEFAULT_NO_OUTPUT_INITIAL_DELAY_MS)
+                      ? 'starting up'
+                      : 'running';
+                    log(fmt.status(
+                      'INFO',
+                      `No output yet from ${fmt.agent(chosen || '')} for step "${step}" after ${formatElapsed(evt.elapsedMs)} ` +
+                      `(pid ${evt.pid || 'unknown'}, agent ${stage}). ` +
+                      `Launcher is still running; stdout/stderr have not produced visible output.`
+                    ));
+                  }
+                }
+              }
+            : {})
+        }
       }));
       const { invocation: launchedInvocation, resultPromise } = launchResult;
       invocation = launchedInvocation;

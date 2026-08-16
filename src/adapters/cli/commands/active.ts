@@ -1,4 +1,5 @@
 // @ts-nocheck
+import { randomUUID } from 'node:crypto';
 import { git, getWorktreeStatus } from '../../git/git.js';
 import * as path from 'node:path';
 import * as fmt from '../../../application/presentation/cli-format.js';
@@ -63,7 +64,10 @@ async function active(args, options = {}) {
   const executeService = service || (typeof serviceFactory === 'function' ? await serviceFactory(rootDir, renderProgress) : null);
   if (!executeService) { throw new Error('active command requires an injected execute-mission service'); }
   const outcome = await executeService.execute({
-    operationId: `active:${normalizedSlug}`,
+    // Per-invocation id: the mission slug alone is not a sufficient correlation
+    // key — two overlapping `px active` runs for the same mission must not be
+    // reconciled as one operation (matches the review/integrate command ids).
+    operationId: `active:${normalizedSlug}:${randomUUID()}`,
     slug: normalizedSlug,
     agent: preselectedImplementer,
     capabilities: new Set(['active:execute']),
@@ -94,7 +98,7 @@ async function active(args, options = {}) {
 // immediately after the launcher successfully spawns the process. If the final
 // launch result later fails, we roll the task status back to the prior status.
 /**
- * @param {{slug: string, worktree: string, preselectedAgent?: string | null, agentConfig: object, taskResolution: object, prompt: string, startAgentFn?: Function, transitionTaskFn?: Function, getTaskStatusFn?: Function, getTaskImplementerFn?: Function, selectAgentFn?: Function, log?: Function, sessionMarkerPort?: object | null, onAgentLaunched?: (agent: string) => Promise<void>}} opts
+ * @param {{slug: string, worktree: string, preselectedAgent?: string | null, agentConfig: object, taskResolution: object, prompt: string, startAgentFn?: Function, transitionTaskFn?: Function, getTaskStatusFn?: Function, getTaskImplementerFn?: Function, selectAgentFn?: Function, log?: Function, sessionMarkerPort?: object | null, onAgentLaunched?: (agent: string) => Promise<void>, unrefChild?: boolean}} opts
  */
 async function selectLaunchAndRecord(opts) {
   const {
@@ -115,6 +119,9 @@ async function selectLaunchAndRecord(opts) {
     // automatic failover after a usage block. The application layer turns that
     // into the mission's current work; this adapter draws no conclusion.
     onAgentLaunched = null,
+    // Board fire-and-forget dispatch: unref the child so the board process can
+    // exit on q/Ctrl+C while the action runs on (CP-4 ownership rule).
+    unrefChild = false,
   } = opts;
   const preselected = preselectedAgent || selectAgentFn('active', { config: agentConfig });
   const taskResolutionTyped = /** @type{{ok: boolean, taskFile?: string} | undefined} */(taskResolution);
@@ -157,6 +164,7 @@ async function selectLaunchAndRecord(opts) {
       agent: preselected,
       slug: slug,
       role: 'implementer',
+      unrefChild,
       sessionMarkerPort: sessionMarkerPort ?? undefined,
       onLaunch: async (/** @type{{agent: string}} */ { agent }) => {
         launchedAgent = agent;

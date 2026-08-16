@@ -32,7 +32,12 @@ export function probeProcessLiveness(processId: number, identity: string | null 
   } catch (error) {
     return (error as NodeJS.ErrnoException).code === 'ESRCH' ? false : null;
   }
-  if (identity === null) { return true; }
+  // Publisher recorded no start identity (non-Linux or legacy row). Bare pid
+  // existence is not enough to prove the original process owns this pid — pid
+  // recycling means a new unrelated process can hold the same number. Return
+  // null so the freshness check falls through to unverified/stale aging
+  // (TASK-2375 AC #28-29).
+  if (identity === null) { return null; }
   const current = processStartIdentity(processId);
   // An unreadable identity is not evidence of reuse: the pid answered, so the
   // conservative answer is still "alive".

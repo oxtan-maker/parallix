@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { missionId } from '../domain/mission.js';
 import type { IntegrateWorkflowPort } from './ports/cli-workflows.js';
 import { NO_CURRENT_WORK_PORT, type CurrentWorkPort } from './recording/current-work-recorder.js';
@@ -18,7 +19,7 @@ export class IntegrateCommandUseCase {
     // for the operator who already started it.
     const publication = {
       missionId: missionId(slug),
-      operationId: `integrate:${slug}`,
+      operationId: `integrate:${slug}:${randomUUID()}`,
       phase: 'integrate' as const,
       summary: `px integrate ${slug}`,
       agent: null,
