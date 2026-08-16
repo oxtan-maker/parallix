@@ -4,7 +4,7 @@ title: Consolidate duplicate integrate command implementations
 status: backlog
 assignee: [custom]
 created_date: '2026-08-13 17:12'
-labels: []
+labels: [user_value]
 dependencies: []
 priority: medium
 ordinal: 92912
