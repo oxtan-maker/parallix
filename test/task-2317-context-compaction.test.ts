@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { buildCompactReviewPrompt, buildCompactActOnReviewPrompt, } from '../src/adapters/review/review-prompts.js';
-import { handleGateFailureAutoBounce, } from '../src/adapters/review/review-loop.js';
+import { reboundPreReviewFailure, gateFailureReason } from '../src/adapters/review/review-loop.js';
 const repoRoot = path.resolve(import.meta.dirname, '..');
 const reviewLoopSource = fs.readFileSync(
   path.join(repoRoot, 'src/adapters/review/review-loop.ts'),
@@ -51,7 +51,7 @@ test('task-2317: reviewer round-2 prompt compacts after rebase and reloads the r
 
 test('task-2317: repairable gate-error bounce compacts before repair and retains diagnostic plus retry state', async () => {
   let repairPrompt = '';
-  const result = await handleGateFailureAutoBounce('task-2317-bounce', repoRoot, {
+  const result = await reboundPreReviewFailure('task-2317-bounce', repoRoot, gateFailureReason({
     ok: false,
     area: 'workflow',
     command: './scripts/verify-local.sh all',
@@ -59,7 +59,8 @@ test('task-2317: repairable gate-error bounce compacts before repair and retains
     stdout: 'failing test: preserves diagnostic',
     stderr: 'assertion failed',
     error: 'verification gate failed with exit code 1',
-  }, 'codex', {
+  }), 'codex', {
+    verifyFn: () => ({ ok: true }),
 // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     readReviewStateFn: () => ({ round: 2, disposition: 'REQUEST_CHANGES', metadata: { gateFailureRetryCount: 0 } }),
 // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
@@ -71,12 +72,16 @@ test('task-2317: repairable gate-error bounce compacts before repair and retains
 // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     startAgentFn: async (_step: string, options: { prompt: (agent: string) => string }) => {
       repairPrompt = options.prompt('codex');
-      return { agent: 'codex' };
+      return { agent: 'codex', result: { status: 0 } };
     },
     log: () => {}, error: () => {},
   });
 
-  assert.deepEqual(result, { bounced: true, stranded: false });
+  // TASK-2377.03: the bounce is reported fixed only after the kernel's verify
+  // callback re-runs the failing check and passes.
+  assert.equal(result.bounced, true);
+  assert.equal(result.stranded, false);
+  assert.equal(result.outcome, 'fixed');
   assert.match(repairPrompt, /Before repair work, compact the aborted working context/i);
   assert.match(repairPrompt, /failing test: preserves diagnostic/);
   assert.match(repairPrompt, /Retry attempt: 1\/2/);

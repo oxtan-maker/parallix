@@ -7,7 +7,16 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { runPreReviewGate, handleGateFailureAutoBounce, classifyGateFailure, } from '../src/adapters/review/review-loop.js';
+import { runPreReviewGate, reboundPreReviewFailure, gateFailureReason } from '../src/adapters/review/review-loop.js';
+
+/**
+ * TASK-2377.03: the pre-review bounce path is the rebound kernel
+ * (`src/application/rebound-kernel.ts`). The former `classifyGateFailure`
+ * delegation tests were deleted with the function: gate classification is no
+ * longer derived from the failure text at this call site, and the ADR 0048
+ * table is covered by `test/task-2377.03-rebound-kernel.test.ts`.
+ */
+const passingVerify = () => ({ ok: true });
 async function withTempDir(fn) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1385-'));
   try {
@@ -16,80 +25,6 @@ async function withTempDir(fn) {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 }
-
-// ============================================================================
-// classifyGateFailure tests
-// ============================================================================
-
-test('classifyGateFailure delegates to classifyError for GateFailure', () => {
-  const result = classifyGateFailure('verification gate failed with exit code 1');
-  assert.equal(result.classification, 'GateFailure');
-  assert.equal(result.action, 'AutoSendBack');
-  assert.equal(result.isRelaunchable, true);
-});
-
-test('classifyGateFailure delegates to classifyError for InfraBlocker', () => {
-  const result = classifyGateFailure('connection refused to forgejo server');
-  assert.equal(result.classification, 'InfraBlocker');
-  assert.equal(result.action, 'HumanOnly');
-  assert.equal(result.isRelaunchable, false);
-});
-
-test('classifyGateFailure delegates to classifyError for StateMachineViolation', () => {
-  const result = classifyGateFailure('task state violation: cannot transition from review to active');
-  assert.equal(result.classification, 'StateMachineViolation');
-  assert.equal(result.action, 'HumanOnly');
-  assert.equal(result.isRelaunchable, false);
-});
-
-test('classifyGateFailure delegates to classifyError for GitBlockers', () => {
-  const result = classifyGateFailure('MISSION.md is modified but uncommitted');
-  assert.equal(result.classification, 'GitBlockers');
-  assert.equal(result.action, 'AutoRepair');
-  assert.equal(result.isRelaunchable, true);
-});
-
-test('classifyGateFailure delegates to classifyError for MissingArtifacts', () => {
-  const result = classifyGateFailure('missing mission artifact: CP-1.md not found');
-  assert.equal(result.classification, 'MissingArtifacts');
-  assert.equal(result.action, 'AutoSendBack');
-  assert.equal(result.isRelaunchable, true);
-});
-
-test('classifyGateFailure delegates to classifyError for IncompleteEvidence', () => {
-  const result = classifyGateFailure('has a "## Goal Check" section but no evidence rows. A goal-check table with real evidence is required before handoff');
-  assert.equal(result.classification, 'IncompleteEvidence');
-  assert.equal(result.action, 'AutoSendBack');
-  assert.equal(result.isRelaunchable, true);
-});
-
-test('classifyGateFailure delegates to classifyError for UnverifiableClaims', () => {
-  const result = classifyGateFailure('test passed but cannot verify proof found');
-  assert.equal(result.classification, 'UnverifiableClaims');
-  assert.equal(result.action, 'AutoSendBack');
-  assert.equal(result.isRelaunchable, true);
-});
-
-test('classifyGateFailure delegates to classifyError for MalformedGates', () => {
-  const result = classifyGateFailure('malformed gate: syntax error in command');
-  assert.equal(result.classification, 'MalformedGates');
-  assert.equal(result.action, 'AutoRepair');
-  assert.equal(result.isRelaunchable, true);
-});
-
-test('classifyGateFailure defaults to InfraBlocker HumanOnly for unrecognized errors', () => {
-  const result = classifyGateFailure('');
-  assert.equal(result.classification, 'InfraBlocker');
-  assert.equal(result.action, 'HumanOnly');
-  assert.equal(result.isRelaunchable, false);
-});
-
-test('classifyGateFailure defaults to InfraBlocker HumanOnly for non-string input', () => {
-  const result = classifyGateFailure(null);
-  assert.equal(result.classification, 'InfraBlocker');
-  assert.equal(result.action, 'HumanOnly');
-  assert.equal(result.isRelaunchable, false);
-});
 
 // ============================================================================
 // runPreReviewGate tests
@@ -243,55 +178,53 @@ test('runPreReviewGate resolves mission area from mission directory', async () =
 });
 
 // ============================================================================
-// handleGateFailureAutoBounce tests
+// reboundPreReviewFailure tests (TASK-2377.03 kernel wiring)
 // ============================================================================
 
-test('handleGateFailureAutoBounce bounces on first failure', async () => {
+test('reboundPreReviewFailure bounces a gate failure whose verify re-run passes', async () => {
   await withTempDir(async root => {
-    const logs = [];
-    const errors = [];
     const launches = [];
-    let stateWritten = null;
+    const stateWrites = [];
+    let verifyRuns = 0;
 
-    const gateResult = {
+    const result = await reboundPreReviewFailure('task-1385', root, gateFailureReason({
       ok: false,
       area: 'docs',
       command: 'exit 1',
       exitCode: 1,
       stdout: 'stdout output',
       stderr: 'verification gate failed with exit code 1',
-    };
-
-    const result = await handleGateFailureAutoBounce('task-1385', root, gateResult, 'codex', {
+    }), 'codex', {
+      verifyFn: () => { verifyRuns++; return { ok: true }; },
       readReviewStateFn: () => null,
-      writeReviewStateFn: (slug, state) => { stateWritten = state; },
-      transitionTaskFn: (slug, status) => { },
+      writeReviewStateFn: (slug, state) => { stateWrites.push(state); },
+      transitionTaskFn: () => {},
       startAgentFn: async (mode, opts) => {
         launches.push({ mode, hasPrompt: !!opts.prompt });
-        return { agent: 'codex' };
+        return { agent: 'codex', result: { status: 0 } };
       },
       applyAgentFallbackFn: () => 'codex',
-      log: (msg) => logs.push(msg),
-      error: (msg) => errors.push(msg),
-      sleepFn: () => Promise.resolve(),
-      exit: () => { throw new Error('exit called'); },
+      log: () => {}, error: () => {},
     });
 
     assert.equal(result.bounced, true);
     assert.equal(result.stranded, false);
+    assert.equal(result.outcome, 'fixed');
     assert.equal(launches.length, 1);
     assert.equal(launches[0].hasPrompt, true);
-    assert.ok(stateWritten);
-    assert.equal(stateWritten.metadata.gateFailureRetryCount, 1);
+    assert.equal(verifyRuns, 1, 'the failing check must re-run before the bounce is reported fixed');
+    // TASK-2377.03 SC3: the budget is in-memory per occurrence, so the bounce
+    // path writes no retry counter to review state.
+    assert.deepEqual(stateWrites, []);
   });
 });
 
-test('handleGateFailureAutoBounce rebounces a gate failure with arbitrary test output', async () => {
+test('reboundPreReviewFailure rebounces a gate failure with arbitrary test output', async () => {
   await withTempDir(async root => {
     const launches = [];
     const transitions = [];
 
-    const result = await handleGateFailureAutoBounce('task-1385', root, {
+    const result = await reboundPreReviewFailure('task-1385', root, gateFailureReason({
       ok: false,
       area: 'static-analysis',
       command: './scripts/verify-local.sh static-analysis',
@@ -299,195 +232,175 @@ test('handleGateFailureAutoBounce rebounces a gate failure with arbitrary test o
       stdout: 'test/example.test.js:42: assertion failed',
       stderr: '',
       error: 'verification gate failed with exit code 1',
-    }, 'codex', {
+    }), 'codex', {
+      verifyFn: passingVerify,
       readReviewStateFn: () => null,
       writeReviewStateFn: () => {},
       transitionTaskFn: (slug, status) => { transitions.push({ slug, status }); },
       startAgentFn: async (mode, opts) => {
         const prompt = typeof opts.prompt === 'function' ? opts.prompt('codex') : opts.prompt;
         launches.push({ mode, prompt });
-        return { agent: 'codex' };
+        return { agent: 'codex', result: { status: 0 } };
       },
       applyAgentFallbackFn: () => 'codex',
-      log: () => {}, error: () => {}, sleepFn: () => Promise.resolve(),
-      exit: () => { throw new Error('exit called'); },
+      log: () => {}, error: () => {},
     });
 
-    assert.deepEqual(result, { bounced: true, stranded: false });
+    assert.equal(result.bounced, true);
+    assert.equal(result.stranded, false);
     assert.deepEqual(transitions, [{ slug: 'task-1385', status: 'active' }]);
     assert.equal(launches.length, 1);
     assert.match(launches[0].prompt, /assertion failed/);
   });
 });
 
-test('handleGateFailureAutoBounce bounces on second failure', async () => {
+test('reboundPreReviewFailure relaunches with the fresh diagnostic when the verify re-run still fails', async () => {
   await withTempDir(async root => {
-    const launches = [];
-    const stateWritten = [];
+    const prompts = [];
+    const verifyDiagnostics = ['second run: 1 test still failing'];
 
-    const gateResult = {
+    const result = await reboundPreReviewFailure('task-1385', root, gateFailureReason({
       ok: false,
       area: 'docs',
       command: 'exit 1',
       exitCode: 1,
-      stdout: 'output',
-      stderr: 'verification gate failed with exit code 1',
-    };
-
-    // Simulate persisted state with retry count = 1
-    const persistedState = { metadata: { gateFailureRetryCount: 1 } };
-
-    const result = await handleGateFailureAutoBounce('task-1385', root, gateResult, 'codex', {
-      readReviewStateFn: () => persistedState,
-      writeReviewStateFn: (slug, state) => { stateWritten.push(state); },
-      transitionTaskFn: () => { },
-      startAgentFn: async (mode) => {
-        launches.push(mode);
-        return { agent: 'codex' };
+      stdout: 'first run diagnostic',
+      stderr: '',
+    }), 'codex', {
+      verifyFn: () => verifyDiagnostics.length
+        ? { ok: false, diagnostic: verifyDiagnostics.shift() }
+        : { ok: true },
+      readReviewStateFn: () => null,
+      writeReviewStateFn: () => {},
+      transitionTaskFn: () => {},
+      startAgentFn: async (mode, opts) => {
+        prompts.push(typeof opts.prompt === 'function' ? opts.prompt('codex') : opts.prompt);
+        return { agent: 'codex', result: { status: 0 } };
       },
       applyAgentFallbackFn: () => 'codex',
-      log: () => {},
-      error: () => {},
-      sleepFn: () => Promise.resolve(),
-      exit: () => { throw new Error('exit called'); },
+      log: () => {}, error: () => {},
     });
 
     assert.equal(result.bounced, true);
-    assert.equal(result.stranded, false);
-    assert.equal(launches.length, 1);
-    assert.equal(stateWritten.length, 1);
-    assert.equal(stateWritten[0].metadata.gateFailureRetryCount, 2);
+    assert.equal(prompts.length, 2);
+    assert.match(prompts[0], /first run diagnostic/);
+    assert.match(prompts[1], /second run: 1 test still failing/);
   });
 });
 
-test('handleGateFailureAutoBounce strands when retry limit exceeded', async () => {
+test('reboundPreReviewFailure strands the mission when the per-occurrence budget is spent', async () => {
   await withTempDir(async root => {
     const errors = [];
+    let launches = 0;
 
-    const gateResult = {
+    const result = await reboundPreReviewFailure('task-1385', root, gateFailureReason({
       ok: false,
       area: 'docs',
       command: 'exit 1',
       exitCode: 1,
       stdout: 'output',
       stderr: '',
-    };
-
-    // Persisted state with retry count = 2 (max reached)
-    const persistedState = { metadata: { gateFailureRetryCount: 2 } };
-
-    const result = await handleGateFailureAutoBounce('task-1385', root, gateResult, 'codex', {
-      readReviewStateFn: () => persistedState,
+    }), 'codex', {
+      verifyFn: () => ({ ok: false, diagnostic: 'gate still failing' }),
+      readReviewStateFn: () => null,
       writeReviewStateFn: () => {},
       transitionTaskFn: () => {},
-      startAgentFn: async () => { throw new Error('should not launch'); },
+      startAgentFn: async () => { launches++; return { agent: 'codex', result: { status: 0 } }; },
       applyAgentFallbackFn: () => 'codex',
-      log: () => {},
-      error: (msg) => errors.push(msg),
-      sleepFn: () => Promise.resolve(),
-      exit: () => { throw new Error('exit called'); },
+      log: () => {}, error: (msg) => errors.push(msg),
     });
 
     assert.equal(result.bounced, false);
     assert.equal(result.stranded, true);
-    assert.ok(errors.some(e => e.includes('max retries exceeded')));
+    assert.equal(result.outcome, 'exhausted');
+    assert.equal(result.diagnostic, 'gate still failing');
+    assert.equal(launches, 2, 'the default budget is two attempts per occurrence');
+    assert.ok(errors.some(e => e.includes('attempt budget spent')));
   });
 });
 
-test('handleGateFailureAutoBounce does not bounce for InfraBlocker (HumanOnly)', async () => {
+test('reboundPreReviewFailure does not bounce for InfraBlocker (HumanOnly)', async () => {
   await withTempDir(async root => {
     const errors = [];
     const launches = [];
 
-    const gateResult = {
+    const result = await reboundPreReviewFailure('task-1385', root, gateFailureReason({
       ok: false,
       area: 'docs',
       command: 'node parallix verify docs',
       exitCode: 1,
       stdout: '',
       stderr: 'connection refused to forgejo server',
-    };
-
-    const result = await handleGateFailureAutoBounce('task-1385', root, gateResult, 'codex', {
+    }), 'codex', {
+      verifyFn: passingVerify,
       readReviewStateFn: () => null,
       writeReviewStateFn: () => {},
       transitionTaskFn: () => {},
       startAgentFn: async () => { launches.push('should-not-launch'); },
       applyAgentFallbackFn: () => 'codex',
-      log: () => {},
-      error: (msg) => errors.push(msg),
-      sleepFn: () => Promise.resolve(),
-      exit: () => { throw new Error('exit called'); },
+      log: () => {}, error: (msg) => errors.push(msg),
     });
 
     assert.equal(result.bounced, false);
     assert.equal(result.stranded, true);
+    assert.equal(result.outcome, 'human-only');
     assert.equal(launches.length, 0, 'should not launch agent for HumanOnly errors');
     assert.ok(errors.some(e => e.includes('InfraBlocker')));
     assert.ok(errors.some(e => e.includes('Human intervention required')));
   });
 });
 
-test('handleGateFailureAutoBounce does not bounce for StateMachineViolation (HumanOnly)', async () => {
+test('reboundPreReviewFailure does not bounce for StateMachineViolation (HumanOnly)', async () => {
   await withTempDir(async root => {
     const errors = [];
     const launches = [];
 
-    const gateResult = {
+    const result = await reboundPreReviewFailure('task-1385', root, gateFailureReason({
       ok: false,
       area: 'docs',
       command: 'node parallix verify docs',
       exitCode: 1,
       stdout: '',
-      stderr: 'task state violation: invalid transition',
-    };
-
-    const result = await handleGateFailureAutoBounce('task-1385', root, gateResult, 'codex', {
+      stderr: 'transition not allowed for this task',
+    }), 'codex', {
+      verifyFn: passingVerify,
       readReviewStateFn: () => null,
       writeReviewStateFn: () => {},
       transitionTaskFn: () => {},
       startAgentFn: async () => { launches.push('should-not-launch'); },
       applyAgentFallbackFn: () => 'codex',
-      log: () => {},
-      error: (msg) => errors.push(msg),
-      sleepFn: () => Promise.resolve(),
-      exit: () => { throw new Error('exit called'); },
+      log: () => {}, error: (msg) => errors.push(msg),
     });
 
     assert.equal(result.bounced, false);
     assert.equal(result.stranded, true);
-    assert.equal(launches.length, 0, 'should not launch agent for HumanOnly errors');
+    assert.equal(launches.length, 0);
     assert.ok(errors.some(e => e.includes('StateMachineViolation')));
   });
 });
 
-test('handleGateFailureAutoBounce includes gate output in fix prompt', async () => {
+test('reboundPreReviewFailure includes gate output and the ADR 0048 gate classification in the fix prompt', async () => {
   await withTempDir(async root => {
     let capturedPrompt = '';
 
-    const gateResult = {
+    await reboundPreReviewFailure('task-1385', root, gateFailureReason({
       ok: false,
       area: 'workflow',
       command: 'npm run verify:workflow',
       exitCode: 3,
       stdout: 'test failed: assertion error',
       stderr: 'verification gate failed with exit code 3',
-    };
-
-    await handleGateFailureAutoBounce('task-1385', root, gateResult, 'codex', {
+    }), 'codex', {
+      verifyFn: passingVerify,
       readReviewStateFn: () => null,
       writeReviewStateFn: () => {},
       transitionTaskFn: () => {},
       startAgentFn: async (mode, opts) => {
-        const prompt = typeof opts.prompt === 'function' ? opts.prompt('codex') : opts.prompt;
-        capturedPrompt = prompt;
-        return { agent: 'codex' };
+        capturedPrompt = typeof opts.prompt === 'function' ? opts.prompt('codex') : opts.prompt;
+        return { agent: 'codex', result: { status: 0 } };
       },
       applyAgentFallbackFn: () => 'codex',
-      log: () => {},
-      error: () => {},
-      sleepFn: () => Promise.resolve(),
-      exit: () => { throw new Error('exit called'); },
+      log: () => {}, error: () => {},
     });
 
     assert.ok(capturedPrompt.includes('PRE-REVIEW GATE FAILURE'));
@@ -496,41 +409,28 @@ test('handleGateFailureAutoBounce includes gate output in fix prompt', async () 
     assert.ok(capturedPrompt.includes('test failed: assertion error'));
     assert.ok(capturedPrompt.includes('verification gate failed'));
     assert.ok(capturedPrompt.includes('Retry attempt: 1/2'));
-    assert.ok(capturedPrompt.includes('Classification:'));
-    assert.ok(capturedPrompt.includes('GitBlockers'));
-    assert.ok(capturedPrompt.includes('AutoRepair'));
+    // TASK-2377.03 SC5: a declared gate that ran and exited non-zero is a
+    // GateFailure; the former GitBlockers/AutoRepair relabel was the per-site
+    // remap the kernel deleted.
+    assert.ok(capturedPrompt.includes('Classification: GateFailure — AutoSendBack'));
+    assert.ok(capturedPrompt.includes('The failing check re-runs automatically after your fix'));
   });
 });
 
-test('handleGateFailureAutoBounce increments retry count in persisted state', async () => {
+test('reboundPreReviewFailure refuses to bounce without a verify callback', async () => {
   await withTempDir(async root => {
-    let capturedState = null;
-
-    const gateResult = {
-      ok: false,
-      area: 'docs',
-      command: 'exit 1',
-      exitCode: 1,
-      stdout: '',
-      stderr: 'verification gate failed with exit code 1',
-    };
-
-    const persisted = { metadata: { gateFailureRetryCount: 0, existing: 'data' } };
-
-    await handleGateFailureAutoBounce('task-1385', root, gateResult, 'codex', {
-      readReviewStateFn: () => persisted,
-      writeReviewStateFn: (slug, state) => { capturedState = state; },
-      transitionTaskFn: () => {},
-      startAgentFn: async () => ({ agent: 'codex' }),
-      applyAgentFallbackFn: () => 'codex',
-      log: () => {},
-      error: () => {},
-      sleepFn: () => Promise.resolve(),
-      exit: () => { throw new Error('exit called'); },
-    });
-
-    assert.ok(capturedState);
-    assert.equal(capturedState.metadata.gateFailureRetryCount, 1);
-    assert.equal(capturedState.metadata.existing, 'data');
+    await assert.rejects(
+      () => reboundPreReviewFailure('task-1385', root, gateFailureReason({
+        ok: false, area: 'docs', command: 'exit 1', exitCode: 1, stdout: 'output', stderr: '',
+      }), 'codex', {
+        readReviewStateFn: () => null,
+        writeReviewStateFn: () => {},
+        transitionTaskFn: () => {},
+        startAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
+        applyAgentFallbackFn: () => 'codex',
+        log: () => {}, error: () => {},
+      }),
+      /requires a verify callback/,
+    );
   });
 });

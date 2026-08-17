@@ -31,9 +31,10 @@ import {
   CONTINUE_SKIP_CHECK_TIMEOUT_MS,
   strictlyLaterIso,
   runPreReviewGate,
-  handleGateFailureAutoBounce,
+  reboundPreReviewFailure,
+  gateFailureReason,
+  hookFailureReason,
 } from './review-gate-handling.js';
-import type { PreReviewGateResult } from './review-gate-handling.js';
 import {
   getHandoff,
   applyAgentFallback,
@@ -107,7 +108,7 @@ export async function startReviewLoop(slug: string, opts: {
   isForgejoReviewEnabledFn?: ((_rootDir?: string) => boolean) | null;
   recordStageStatsSafeFn?: (..._args: any[]) => void | Promise<void>;
   runPreReviewGateFn?: typeof runPreReviewGate;
-  handleGateFailureAutoBounceFn?: typeof handleGateFailureAutoBounce;
+  reboundPreReviewFailureFn?: typeof reboundPreReviewFailure;
   pushReviewRefFn?: typeof pushReviewRef;
   isStaleInfoPushRejectionFn?: typeof isStaleInfoPushRejection;
   fetchReviewBranchFn?: typeof fetchReviewBranch;
@@ -131,7 +132,7 @@ export async function startReviewLoop(slug: string, opts: {
     worktree: callerWorktree,
     missionPath,
     runPreReviewGateFn = runPreReviewGate,
-    handleGateFailureAutoBounceFn = handleGateFailureAutoBounce,
+    reboundPreReviewFailureFn = reboundPreReviewFailure,
     resetReviewStateFn = resetReviewState,
     maybeUpdateGraphifyBeforeReviewFn = maybeUpdateGraphifyBeforeReview,
     readReviewStateFn = readReviewState,
@@ -424,6 +425,44 @@ export async function startReviewLoop(slug: string, opts: {
       }
     };
     let reviewBaseline: string | undefined = captureReviewBaseline();
+    /**
+     * Re-runs the failing pre-review check for the rebound kernel: the
+     * in-process pre-review rebase followed by the verification gate. A gate or
+     * hook bounce is reported `fixed` only when this passes.
+     */
+    const verifyPreReviewSetup = async (): Promise<{ ok: boolean; diagnostic: string }> => {
+      const rebaseRetry = await rebaseBeforeReviewRoundFn(slug, {
+        worktree, runFn: runFn as any, log, error,
+        taskFile: taskResolution.taskFile,
+        gitFn,
+        isReviewProviderEnabledFn: forgejoEnabledFn
+      });
+      if (!rebaseRetry.ok) {
+        return {
+          ok: false,
+          diagnostic: rebaseRetry.hookOutput || 'pre-review rebase still fails after the repair attempt',
+        };
+      }
+      const gateRetry = await runPreReviewGateFn(slug, worktree, { runFn: runFn as any, log, error });
+      return gateRetry.ok
+        ? { ok: true, diagnostic: '' }
+        : { ok: false, diagnostic: [gateRetry.stdout, gateRetry.stderr, gateRetry.error].filter(Boolean).join('\n') };
+    };
+    /** Collaborators the kernel adapter needs; the kernel owns policy. */
+    const reboundCollaborators = () => ({
+      startAgentFn,
+      writeReviewStateFn,
+      readReviewStateFn,
+      transitionTaskFn,
+      applyAgentFallbackFn,
+      taskResolution,
+      enforceTaskAssigneeFn,
+      log,
+      error,
+      missionStore,
+    });
+    /** True when a kernel verify already re-ran the rebase and gate this round. */
+    let preReviewSetupVerified = false;
     let reviewState: unknown;
     if (state.phase === 'reviewing') {
       if (isContinue && attempt === initialRound) {
@@ -469,89 +508,74 @@ export async function startReviewLoop(slug: string, opts: {
               exit(1); return;
             }
             if (rebaseResult.hookFailure) {
-              const hookName = rebaseFailure?.kind === 'hook' ? rebaseFailure.hook.hook : 'git-hook';
+              // TASK-2377.02 typed hook evidence (hook identity from git state)
+              // is preferred; the legacy hookOutput field stays as fallback so
+              // callers that do not populate `failure` keep working.
               const hookOutput = rebaseFailure?.kind === 'hook' ? rebaseFailure.hook.output : (rebaseResult.hookOutput || '');
-              const hookResult: PreReviewGateResult = {
-                ok: false,
-                area: 'git-hook',
-                command: rebaseFailure?.kind === 'hook' && rebaseFailure.operation !== 'commit'
-                  ? `git ${rebaseFailure.operation} (pre-review rebase, ${hookName})`
-                  : 'git commit (pre-review safety commit)',
-                exitCode: 1,
-                stdout: hookOutput,
-                stderr: hookOutput,
-                error: 'Git hook failed while committing pre-review mission artifacts',
-              };
-              const bounceResult = await handleGateFailureAutoBounceFn(slug, worktree, hookResult, implementer, {
-                startAgentFn,
-                writeReviewStateFn,
-                readReviewStateFn,
-                transitionTaskFn,
-                applyAgentFallbackFn,
-                taskResolution,
-                enforceTaskAssigneeFn,
-                log,
-                error,
-                sleepFn,
-                missionStore,
-              });
+              const bounceResult = await reboundPreReviewFailureFn(
+                slug,
+                worktree,
+                hookFailureReason(
+                  hookOutput,
+                  rebaseFailure?.kind === 'hook' && rebaseFailure.operation !== 'commit'
+                    ? `git ${rebaseFailure.operation} (pre-review rebase, ${rebaseFailure.hook.hook})`
+                    : 'git commit (pre-review safety commit)',
+                ),
+                implementer!,
+                { ...reboundCollaborators(), verifyFn: verifyPreReviewSetup },
+              );
+              implementer = bounceResult.implementer || implementer;
               if (bounceResult.bounced) {
-                log(fmt.status('INFO', `Autonomous review stopped: pre-review Git hook failure auto-bounced to implementer.`));
-                return;
+                // The kernel's verify re-ran the pre-review rebase and the
+                // verification gate, and both passed: the hook fix is proven,
+                // so this round continues instead of stranding on an
+                // unverified "implementer relaunched" claim.
+                log(fmt.status('PASS', `Pre-review Git hook failure repaired and re-verified for ${slug}; continuing this review round.`));
+                preReviewSetupVerified = true;
+              } else {
+                error(fmt.status('FAIL', `Pre-review Git hook failure ${bounceResult.outcome === 'human-only' ? 'requires human intervention' : 'exhausted its repair budget'} for ${slug}.`));
+                exit(1); return;
               }
+            } else {
+              exit(1); return;
             }
-            exit(1); return;
           }
           reviewBaseline = captureReviewBaseline();
           if (!dryRun) { await transitionTaskFn(slug, 'review', { rootDir: worktree, log }); }
           state.phase = 'reviewing';
           await persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree, missionStore);
         }
-        if (!dryRun) {
+        if (!dryRun && !preReviewSetupVerified) {
           const preReviewGateResult = await runPreReviewGateFn(slug, worktree, {
             runFn: runFn as any,
             log,
             error,
           });
           if (!preReviewGateResult.ok) {
-            log(fmt.status('WARN', `Pre-review gate failed for area "${preReviewGateResult.area}" (exit ${preReviewGateResult.exitCode}). Auto-bouncing to implementer.`));
-            const bounceResult = await handleGateFailureAutoBounceFn(slug, worktree, preReviewGateResult, implementer, {
-              startAgentFn: startAgentFn,
-              writeReviewStateFn: writeReviewStateFn,
-              readReviewStateFn: readReviewStateFn,
-              transitionTaskFn: transitionTaskFn,
-              applyAgentFallbackFn: applyAgentFallbackFn,
-              taskResolution,
-              enforceTaskAssigneeFn,
-              log,
-              error,
-              sleepFn,
-              buildCompactActOnReviewPromptFn,
-              isForgejoReviewEnabledFn,
-              isReviewProviderEnabledFn,
-              legacyIsForgejoReviewEnabledFn,
-              exit,
-              missionStore,
-            });
-            if (bounceResult.stranded) {
-              error(fmt.status('FAIL', `Pre-review gate failure stranded mission ${slug}. Exiting review loop.`));
+            log(fmt.status('WARN', `Pre-review gate failed for area "${preReviewGateResult.area}" (exit ${preReviewGateResult.exitCode}). Bouncing to implementer.`));
+            const bounceResult = await reboundPreReviewFailureFn(
+              slug,
+              worktree,
+              gateFailureReason(preReviewGateResult),
+              implementer!,
+              { ...reboundCollaborators(), verifyFn: verifyPreReviewSetup },
+            );
+            implementer = bounceResult.implementer || implementer;
+            if (!bounceResult.bounced) {
+              error(fmt.status('FAIL', `Pre-review gate failure stranded mission ${slug} (${bounceResult.outcome}). Exiting review loop.`));
               exit(1); return;
             }
-            if (bounceResult.bounced) {
-              log(fmt.status('INFO', `Declared gate repair completed; re-running pre-review setup for ${slug}.`));
-              return startReviewLoop(slug, {
-                ...opts,
-                implementer,
-                reviewer,
-                reset: false,
-                continue: false,
-                isContinue: false,
-              });
-            }
+            // The kernel verified the repair by re-running the pre-review
+            // rebase and the gate, so this round resumes with the verified
+            // tree rather than restarting the whole review setup.
+            log(fmt.status('PASS', `Declared gate repair verified for ${slug}; resuming this review round.`));
+            reviewBaseline = captureReviewBaseline();
+            await transitionTaskFn(slug, 'review', { rootDir: worktree, log });
           } else {
             log(fmt.status('PASS', `Pre-review gate passed for area "${preReviewGateResult.area}".`));
           }
         }
+        preReviewSetupVerified = false;
         if (!reviewState) {
           if (reviewer === 'autonomous' && !forgejoEnabled) {
             log(fmt.status('INFO', `Round ${attempt}: reviewer identity is autonomous; skipping reviewer launch and using local review artifacts only.`));
@@ -1044,9 +1068,10 @@ export async function startReviewLoop(slug: string, opts: {
 }
 export { commitSafeMissionArtifacts, rebaseBeforeReviewRound };
 export {
-  classifyGateFailure,
   runPreReviewGate,
-  handleGateFailureAutoBounce,
+  reboundPreReviewFailure,
+  gateFailureReason,
+  hookFailureReason,
   NO_GATE_NOTICE_ALIAS,
   strictlyLaterIso,
   DEFAULT_MAX_ATTEMPTS,

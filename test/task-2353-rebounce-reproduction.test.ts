@@ -68,9 +68,16 @@ test('task-2353 repro: declared pre-review gate rebounces, replays, and resumes 
 
   assert.equal(prompts.length, 1, 'the same implementer receives one repair prompt');
   assert.match(prompts[0], /Gate command: \.\/scripts\/verify-local\.sh static-analysis/);
-  assert.match(prompts[0], /Classification: GitBlockers — AutoRepair/);
+  // TASK-2377.03: a declared gate that ran and exited non-zero dispatches as a
+  // GateFailure. The former GitBlockers relabel was the per-site remap the
+  // rebound kernel deleted (SC5).
+  assert.match(prompts[0], /Classification: GateFailure — AutoSendBack/);
   assert.match(prompts[0], /Retry attempt: 1\/2/);
-  assert.equal(persisted.metadata.gateFailureRetryCount, 1, 'eligible rebounce consumes exactly one retry');
+  assert.match(prompts[0], /The failing check re-runs automatically after your fix/);
+  // TASK-2377.03: the budget is per occurrence and in-memory (SC3), so no
+  // retry counter is written to review-state metadata by the bounce path.
+  assert.equal(persisted?.metadata?.gateFailureRetryCount, undefined,
+    'the kernel keeps its budget in memory and writes no retry counter');
   assert.equal(rebaseRuns, 2, 'repair resumes by replaying the pre-review rebase');
   assert.equal(gateRuns, 2, 'repair resumes by replaying the declared gate');
   assert.equal(reviewerLaunches, 1, 'successful repair advances to the review round');

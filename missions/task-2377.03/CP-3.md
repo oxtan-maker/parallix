@@ -1,0 +1,48 @@
+# CP-3: Incident-path wiring (pre-review gate and pre-review Git hook)
+
+## Summary
+
+- `src/adapters/review/review-gate-handling.ts` no longer contains a bounce implementation. It now contributes only structured reasons and collaborators:
+  - `gateFailureReason(gateResult)` → `GateFailureReason`;
+  - `hookFailureReason(hookOutput, operation)` → `HookFailureReason` (hook identity from `classifyHookFailure`);
+  - `reboundPreReviewFailure(slug, worktree, reason, implementer, opts)` → maps the review loop's collaborators onto the kernel context, calls `rebound()`, and maps the outcome back to `{ bounced, stranded, outcome, diagnostic, implementer }`. It refuses to run without a `verifyFn`, so no caller can claim a fix without a re-run.
+- Deleted: `handleGateFailureAutoBounce` (per-site classification + prompt + persisted-counter read/write + launch), `classifyGateFailure` (a second entry point into the classifier), the ad-hoc human-only override regex at that call site, and the remap that relabelled every non-hook gate failure as `GitBlockers`/`AutoRepair`. `src/adapters/review/review-loop.ts` no longer synthesizes a `git-hook` `PreReviewGateResult` for hook failures.
+- `src/adapters/review/review-loop.ts`:
+  - Added `verifyPreReviewSetup()` — re-runs the in-process pre-review rebase and then the verification gate, returning pass/fail with a fresh diagnostic. Both incident paths use it as the kernel's `verify`.
+  - Hook path: builds a structured hook reason and calls the kernel. On `fixed`, the rebase and gate have provably re-run and passed, so the round continues (`preReviewSetupVerified`) instead of returning with the old unverified "implementer relaunched" claim. On `exhausted`/`human-only`, the loop exits non-zero.
+  - Gate path: calls the kernel with the gate reason; on `fixed`, recaptures the review baseline, transitions back to `review`, and resumes the current round rather than recursively restarting `startReviewLoop`. The recursive restart existed only to re-run the rebase and gate — that is now the verify loop, so the total rebase/gate work per repair is unchanged (asserted by task-2353's `rebaseRuns`/`gateRuns` of 2).
+  - The seam `handleGateFailureAutoBounceFn` is replaced by `reboundPreReviewFailureFn`.
+- Persisted retry counters are untouched as fields (deletion is TASK-2377.04); the incident path simply no longer reads or writes `gateFailureRetryCount` / `hookFailureRetryCount`.
+- Fixed a stale line citation in `src/application/consumer-domain-requirements.ts` (`review-loop-round-progression`, `startReviewLoop` moved by one line) surfaced by `"SC3: every consumer citation points at a line containing its anchor"`.
+
+### Dependency flag (mission Risks / Stop Rules)
+
+TASK-2377.02 (in-process pre-review rebase with typed gate/hook evidence) is **not on this branch's base**: `src/adapters/review/rebase.ts` still shells out to a nested `px rebase` and returns `{ ok, sharedFileConflicts, hookFailure, hookOutput }`. This does not block the mission and does not trigger the stop rule: the incident path already consumes structured values (`PreReviewGateResult` for the gate; the `hookFailure` flag plus its output for the hook), and the kernel's classification is driven by the reason kind, not by a regex over combined text. The only text-derived value that remains is the hook's *identity* (`pre-commit`/`pre-push`/…) via `classifyHookFailure`, which names the hook for the prompt and never selects the failure class. No text-regex classification was added to the kernel.
+
+## Goal Check
+
+| Criterion | Evidence | Status |
+|---|---|---|
+| SC1 — the kernel is the only launcher for pre-review gate and hook failures | `src/adapters/review/review-gate-handling.ts` (no `startAgent(` call; the port is passed to `rebound`); remaining `startAgentFn(` calls in `src/adapters/review/review-loop.ts` are reviewer and review-response launches (TASK-2377.04 scope), not gate/hook failures | PASS |
+| SC5 — the `git-hook` synthesis and the GitBlockers remap are deleted | `test/task-1268-pre-review-gate-per-round.test.ts`: `"startReviewLoop rebounces a pre-review safety-commit hook failure before gate or reviewer launch"` now asserts a `hook-failure` reason; `test/task-2340-hook-rebounce.test.ts`: `"keeps a declared gate failure a gate failure even when its output mentions a hook"` | PASS |
+| SC5 — a declared gate that ran and exited non-zero dispatches as a gate failure | `test/task-1385-pre-review-gate.test.ts`: `"reboundPreReviewFailure includes gate output and the ADR 0048 gate classification in the fix prompt"`; `ADR 0048` | PASS |
+| SC7 — the hook path's `verify` re-runs the pre-review rebase plus the verification gate | `src/adapters/review/review-loop.ts` (`verifyPreReviewSetup`, used by both incident paths); `test/task-1385-pre-review-gate.test.ts`: `"reboundPreReviewFailure refuses to bounce without a verify callback"` | PASS |
+| SC2 — the wired path reports `fixed` only after a passing re-run and relaunches with the fresh diagnostic | `"reboundPreReviewFailure bounces a gate failure whose verify re-run passes"`, `"reboundPreReviewFailure relaunches with the fresh diagnostic when the verify re-run still fails"`, `"reboundPreReviewFailure strands the mission when the per-occurrence budget is spent"` | PASS |
+| SC3 — the wired path writes no retry counter | `"reboundPreReviewFailure bounces a gate failure whose verify re-run passes"` (asserts zero review-state writes); `"uses the hook-specific prompt and persists no retry counter for a pre-review hook failure"` | PASS |
+| SC8 — regression suites green | `npm test -- test/task-2353-rebounce-reproduction.test.ts test/task-1268-pre-review-gate-per-round.test.ts test/task-1383-active-gate-failure-prompt.test.ts test/task-1385-pre-review-gate.test.ts` → all pass | PASS |
+| Whole default suite green after the rewiring | `npm test` → 2341 tests, 2341 pass, 0 fail | PASS |
+| Types and lint clean on changed files | `npx tsc --noEmit`; `npx eslint src/adapters/review/review-gate-handling.ts src/adapters/review/review-loop.ts src/application/rebound-kernel.ts src/application/failure-classification.ts src/adapters/cli/commands/repair-handoff.ts` → no findings | PASS |
+
+### Documented expectation changes (SC8)
+
+| Test | Change | Why the old expectation encoded old behavior |
+|---|---|---|
+| `"task-2353 repro: declared pre-review gate rebounces, replays, and resumes the review loop"` | `Classification: GitBlockers — AutoRepair` → `Classification: GateFailure — AutoSendBack`; `persisted.metadata.gateFailureRetryCount === 1` → asserts the counter is never written | It asserted the per-site remap (SC5 deletes it) and the persisted cumulative counter (SC3 replaces it with an in-memory per-occurrence budget). `rebaseRuns`/`gateRuns`/`reviewerLaunches` assertions are unchanged and still pass. |
+| `"startReviewLoop rebounces a pre-review safety-commit hook failure before gate or reviewer launch"` | Asserted the synthesized gate result (`command === 'git commit (pre-review safety commit)'`, `stdout` matching) → asserts the structured `hook-failure` reason (`kind`, `hook`, `operation`, `output`) | The synthesized `git-hook` `PreReviewGateResult` is exactly the remap SC5 deletes. |
+| `"handleGateFailureAutoBounce …"` (10 tests) in `test/task-1385-pre-review-gate.test.ts` | Replaced by `"reboundPreReviewFailure …"` tests covering the same behaviors plus verify-gated `fixed`, budget exhaustion, and the missing-verify guard | The function was the per-site auto-bounce the kernel replaces. Behaviors preserved one-for-one: first-failure bounce, arbitrary-test-output bounce, budget exhaustion strand, InfraBlocker human-only, StateMachineViolation human-only, gate output embedded in the prompt. The two counter-mechanics tests (`"bounces on second failure"`, `"increments retry count in persisted state"`) are replaced by the assertion that no counter is written, per SC3. |
+| `classifyGateFailure` delegation tests (9 tests) in `test/task-1385-pre-review-gate.test.ts` | Deleted with the function | They asserted that gate classification is derived from the failure *text* at the call site. Classification is now structured and table-driven, covered by `test/task-2377.03-rebound-kernel.test.ts`. |
+| `"task-2317: repairable gate-error bounce compacts before repair and retains diagnostic plus retry state"` | Calls `reboundPreReviewFailure` with a verify callback; asserts `outcome === 'fixed'` | The compaction, diagnostic, and `Retry attempt: 1/2` assertions are unchanged — the boilerplate moved into the kernel's single prompt builder. |
+| `"Pre-review lifecycle hook rebounce"` group in `test/task-2340-hook-rebounce.test.ts` | Rewritten around the structured hook reason; the `hookFailureRetryCount === 1` assertion is replaced by "no state write", and a new test guards that a gate failure mentioning a hook stays a gate failure | It asserted the misclassification the mission removes: a *gate* result was routed to the *hook* retry counter based on its output text. |
+| `"pre-review gate bounce prompt embeds bounded output"` in `test/task-2369.13-bounce-output-elision.test.ts` | Calls `reboundPreReviewFailure` with a verify callback; `area: 'git-hook'` → `area: 'all'` | The elision assertions (head/tail preserved, prompt bounded) are unchanged; the `git-hook` area was part of the deleted synthesis. |
+
+Next action: CP 4 — confirm the single prompt builder is the only construction site (delete any residual gate/hook prompt boilerplate, including the duplicate compaction text) and add the prompt-location assertion, then run `npm test -- test/task-2317-context-compaction.test.ts test/task-2377.03-rebound-kernel.test.ts`.

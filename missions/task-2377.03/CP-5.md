@@ -1,0 +1,38 @@
+# CP-5: Full verification and docs
+
+## Summary
+
+- Ran the mission gate on the final tree: `./scripts/verify-local.sh all` exits 0.
+- Ran the mandatory integration gate: `./scripts/verify-local.sh integrate` exits 0 (build, integration-suite, mutation-gate, workflow E2E, custom-agent-smoke all PASS).
+- Updated authored documentation for the durable behavior change: `docs/agents.md` gains "Pre-review bounce policy — verified fixes and a per-failure budget", covering the two user-visible guarantees (a bounce counts as fixed only when the failing check re-runs and passes; the retry budget is per failure occurrence, in memory, two attempts, nothing persisted) and the stranded outcomes (exhaustion reports the *latest* re-run diagnostic; a human-only classification strands immediately without launching an agent). `./scripts/verify-local.sh docs` passes. `AGENTS.md` needed no change — nothing about mission-authoring rules changed.
+- No focused or bare-skipped tests were introduced; the new and rewritten suites are mock-only (injected `startAgent` and `verify`, no real agents, git, or Forgejo).
+
+### Gate-run note (not a regression)
+
+The first `./scripts/verify-local.sh all` run failed one unrelated test — `"startReviewLoop single-family fallback when no cross-family reviewer is runnable"` in `test/task-2335-reviewer-family-repro.test.ts`, which manipulates the real `PATH`/`CODEX_HOME` and the command-path probe and took ~22 s under full-suite load. It passes solo (`npm test -- test/task-2335-reviewer-family-repro.test.ts` → 8/8) and the immediately following full gate run exited 0 with the same tree. It touches reviewer-family selection, which this mission does not modify.
+
+The first full-parallel `./scripts/verify-local.sh integrate` runs failed only on pre-existing load-sensitive flakes in suites this mission does not modify: `test/agents.test.ts` (`"custom capacity releases after clean completion, launch failure, signal cancellation, and rejected runtime result"` — async activity after test end) and `test/task-2327-coverage-gate-tmp-leaks.test.ts` (marker-file read raced a partial write, `SyntaxError: Unexpected end of JSON input`). Both pass solo (`npm test -- test/agents.test.ts` → 100/100; `npm test -- test/task-2327-coverage-gate-tmp-leaks.test.ts` → 3/3), and each failed in a different run while the other passed — a signature of parallel-load flake on this 16-core box, where `node --test` fans out ~15 process-spawning suites at once. The exit-0 integration gate cited in the Goal Check below was the same command run with CPU affinity limited to 4 cores (`taskset -c 0-3 ./scripts/verify-local.sh integrate`) to reduce suite parallelism; no gate, test, or flag was skipped or weakened.
+
+### Commit note (resolved after this session)
+
+The worktree's Git metadata directory was mounted read-only while this checkpoint was written, so the source, docs, and CP-1…CP-5 changes were left uncommitted then. A later session committed them (safety-harness commit `66a13f180`); the tree cited by the gates below is fully committed.
+
+## Goal Check
+
+| Criterion | Evidence | Status |
+|---|---|---|
+| SC1 — kernel exposes `rebound(reason, context) -> outcome` and is the only launcher for pre-review gate/hook failures | `src/application/rebound-kernel.ts`; `src/adapters/review/review-gate-handling.ts` (no `startAgent(` call site); `test/task-2377.03-rebound-kernel.test.ts`: `"task-2377.03: a human-only classification returns human-only without launching an agent"` | PASS |
+| SC2 — `fixed` only after a passing `verify`; failing verify relaunches with the fresh diagnostic; exhaustion carries the last diagnostic | `"task-2377.03: an outcome of fixed is returned only after verify passes"`, `"task-2377.03: a failing verify consumes one attempt and relaunches with the fresh diagnostic"`, `"task-2377.03: two failed verifies exhaust the default budget with the last diagnostic and no third launch"` | PASS |
+| SC3 — per-occurrence in-memory budget of 2, no persistence | `"task-2377.03: the budget is per occurrence — a second invocation after an exhausted one starts fresh"`, `"task-2377.03: the kernel writes nothing to a state store while spending a whole budget"`, `test/task-1385-pre-review-gate.test.ts`: `"reboundPreReviewFailure bounces a gate failure whose verify re-run passes"` | PASS |
+| SC4 — null/ambiguous agent exit is a launch failure that consumes budget and is never `fixed` | `"task-2377.03: an ambiguous null agent exit is a launch failure, never fixed, and consumes budget"`, `"task-2377.03: a null-exit first attempt still allows a verified fix inside the same budget"` | PASS |
+| SC5 — single ADR 0048 classifier; human-only override folded in; Git-blocker remap deleted; a non-zero declared gate dispatches as a gate failure | `ADR 0048`; `src/application/failure-classification.ts` (`hasExplicitHumanOnlyDiagnostic`); `"task-2377.03: a declared gate that ran and exited non-zero classifies as GateFailure, not a Git blocker"`, `"task-2377.03: the human-only rule inside the classifier keeps an infrastructure gate diagnostic human-only"`, `test/task-2340-hook-rebounce.test.ts`: `"keeps a declared gate failure a gate failure even when its output mentions a hook"` | PASS |
+| SC6 — one prompt builder; compaction boilerplate in exactly one source location | `"task-2377.03: the context-compaction boilerplate exists in exactly one source location"`, `"task-2377.03: the pre-review gate and hook paths build no prompt of their own"`, `"task-2377.03: the single fix-prompt builder carries the compaction boilerplate and the automatic re-verify statement"` | PASS |
+| SC7 — the hook path's `verify` re-runs the pre-review rebase plus the verification gate | `src/adapters/review/review-loop.ts` (`verifyPreReviewSetup`, passed as `verifyFn` on both incident paths); `test/task-1385-pre-review-gate.test.ts`: `"reboundPreReviewFailure refuses to bounce without a verify callback"`; `test/task-1268-pre-review-gate-per-round.test.ts`: `"startReviewLoop rebounces a pre-review safety-commit hook failure before gate or reviewer launch"` | PASS |
+| SC8 — named regression suites green, expectation changes documented | `npm test -- test/task-2353-rebounce-reproduction.test.ts test/task-1268-pre-review-gate-per-round.test.ts test/task-1383-active-gate-failure-prompt.test.ts test/task-1385-pre-review-gate.test.ts` → all pass; justifications in `missions/task-2377.03/CP-3.md` ("Documented expectation changes") | PASS |
+| SC9 — gate clean on the final tree | `./scripts/verify-local.sh all` → exit 0 | PASS |
+| Docs updated for the changed workflow behavior | `docs/agents.md` ("Pre-review bounce policy — verified fixes and a per-failure budget"); `./scripts/verify-local.sh docs` → PASS | PASS |
+| No focused or bare-skipped tests introduced | `./scripts/verify-local.sh all` includes the test-hygiene check (`scripts/test-hygiene.sh`) and exits 0 | PASS |
+| Deferred scope recorded, not silently widened | CLI/handoff/artifact bounce paths keep their own workflow, prompt, and persisted retry counters — `src/application/hook-failure-workflow.ts` (`handleHookFailureAutoBounce`, `MAX_HOOK_RETRY`, `hookFailureRetryCount`) — TASK-2377.04 / TASK-2377.05, recorded in `missions/task-2377.03/CP-4.md`; pinned by `test/task-2340-hook-rebounce.test.ts` ("shared handleHookFailureAutoBounce strands at max retries", "exports MAX_HOOK_RETRY with value 2") | DEFERRED |
+| Mandatory integration gate ran | `./scripts/verify-local.sh integrate` → exit 0 | PASS |
+
+Next action: hand off for review via `px review task-2377.03 --submit`; all CP-1…CP-5 and source/test/doc changes are committed on this branch.
