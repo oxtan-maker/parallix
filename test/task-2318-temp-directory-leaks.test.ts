@@ -33,6 +33,8 @@ function getExistingMarkers() {
 }
 
 function waitForExit(child, timeoutMs) {
+  // Generous budget: tsx bootstrap startup plus the child's own cleanup can
+  // exceed 10 s when the integration suite contends with host load.
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       try { child.kill('SIGKILL'); } catch (_) {}
@@ -45,7 +47,9 @@ function waitForExit(child, timeoutMs) {
   });
 }
 
-async function waitFor(condition, description, timeoutMs = 5_000) {
+// Default 30 s: every call site waits for a child tsx bootstrap to start
+// and write a manifest; 5 s expires under integration-suite contention.
+async function waitFor(condition, description, timeoutMs = 30_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (condition()) return;
@@ -104,7 +108,7 @@ test('bootstrap temp directories are cleaned up after SIGTERM termination', asyn
     stdio: 'pipe',
   });
 
-  const { code, signal } = await waitForExit(child, 10000);
+  const { code, signal } = await waitForExit(child, 60000);
 
   // Child should have exited via SIGTERM (signal) or exit code 143 (128+15, SIGTERM handler)
   assert.ok(

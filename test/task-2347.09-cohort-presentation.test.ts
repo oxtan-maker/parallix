@@ -88,6 +88,11 @@ async function runCohortsCommand(args: readonly string[]): Promise<{ output: str
     laneEventRepo: new FakeLaneEventRepository(LANE_EVENTS),
     usageRepo: new FakeUsageRepository(USAGE_RECORDS),
     repositoryId: REPO,
+    // Without this injection the command falls back to ConcreteMissionReadAdapter
+    // over process.cwd() and reads the real checkout the test runs in — the
+    // seeded fake slugs have no canonical metadata either way, so an empty map
+    // keeps the assertions identical while the test stays hermetic and fast.
+    cohortMetadata: async () => new Map(),
   });
   return { output: lines.join('\n'), exits };
 }

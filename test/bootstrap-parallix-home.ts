@@ -199,8 +199,8 @@ function cleanupTempDirs() {
 }
 
 // `process.on('exit')` does not fire when a signal terminates the process
-// without a handler (e.g., SIGTERM from the test runner's --test-force-exit
-// or a timeout). Register an explicit SIGTERM handler so cleanup runs
+// without a handler (e.g., SIGTERM from the test runner's hang watchdog or
+// signal forwarding). Register an explicit SIGTERM handler so cleanup runs
 // on both graceful exit and signal termination (task-2318).
 process.on('SIGTERM', () => {
   cleanupTempDirs();

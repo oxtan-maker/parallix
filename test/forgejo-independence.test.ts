@@ -139,9 +139,9 @@ test('performHandoff gates Forgejo PR creation behind isForgejoReviewEnabled', (
 // =============================================================================
 
 test('integrate gates syncMerged behind isForgejoReviewEnabled', () => {
-  const src = fs.readFileSync(path.join(ADAPTERS, 'cli', 'commands', 'integrate-command.ts'), 'utf8');
+  const src = fs.readFileSync(path.join(ADAPTERS, 'cli', 'commands', 'integrate.ts'), 'utf8');
   assert.ok(src.includes('isForgejoReviewEnabled'),
-    'integrate-command.ts should gate syncMerged behind isForgejoReviewEnabled');
+    'integrate.ts should gate syncMerged behind isForgejoReviewEnabled');
 });
 
 // =============================================================================
@@ -217,7 +217,7 @@ test('startReviewLoop gates Forgejo availability behind isForgejoReviewEnabled',
 // =============================================================================
 
 test('integrate printIntegrationPreflight gates Forgejo checks', () => {
-  const src = fs.readFileSync(path.join(ADAPTERS, 'cli', 'commands', 'integrate-command.ts'), 'utf8');
+  const src = fs.readFileSync(path.join(ADAPTERS, 'cli', 'commands', 'integrate.ts'), 'utf8');
   const preflightSection = src.slice(src.indexOf('function printIntegrationPreflight'));
   assert.ok(preflightSection.includes('isForgejoReviewEnabled'),
     'printIntegrationPreflight should gate Forgejo PR/approval checks');
