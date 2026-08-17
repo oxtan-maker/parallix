@@ -105,17 +105,19 @@ export function decideMission(mission: Mission, command: MissionCommand): Missio
         );
       }
       assertReviewedChange(submittedRound.subject.change);
-      if (
-        mission.review
-        && (
-          !sameReviewedChange(
-            currentReviewRound(mission.review).subject.change,
-            submittedRound.subject.change,
-          )
-          || submittedRound.number <= currentReviewRound(mission.review).number
-        )
-      ) {
-        throw new Error('A new review round must advance the same pull request or local branch');
+      if (mission.review) {
+        const recordedRound = currentReviewRound(mission.review);
+        // Resubmitting the recorded round while it is still undecided is a
+        // relaunch of the same handoff, not a new round: the reviewer has not
+        // acted, so nothing is being rewritten. Only a genuinely new round has
+        // to carry a higher number.
+        const resubmission = submittedRound.number === recordedRound.number && !recordedRound.decision;
+        if (
+          !sameReviewedChange(recordedRound.subject.change, submittedRound.subject.change)
+          || (!resubmission && submittedRound.number <= recordedRound.number)
+        ) {
+          throw new Error('A new review round must advance the same pull request or local branch');
+        }
       }
     } catch (error) {
       throw new MissionRuleViolation((error as Error).message);

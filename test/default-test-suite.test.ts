@@ -86,6 +86,10 @@ const expectedIntegrationFiles = [
   // lifecycle transitions, so it crosses the process boundary and runs only
   // in the integration layer.
   'task-2376-lifecycle-timing.test.ts',
+  // TASK-2378: seeds a real temporary Git repository plus a migrated operator
+  // database for the authoritative stats / approval-boundary reproduction,
+  // so it crosses the process boundary and runs only in the integration layer.
+  'task-2378-authoritative-stats.test.ts',
   'test-hygiene.test.ts',
   'tui-action-bar.test.ts',
   'tui-confirmation.test.ts',

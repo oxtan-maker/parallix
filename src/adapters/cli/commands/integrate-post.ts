@@ -169,10 +169,16 @@ export async function recordPostIntegrationStats(
   {
     rootDir = getPrimaryWorktree(),
     recordIntegrationStatsFn = (stats as any).recordIntegrationStats,
-    missionStore = null,
+    missionStore,
   }: {
     rootDir?: string;
     recordIntegrationStatsFn?: Function;
+    /**
+     * Operator Mission authority for the authoritative stats derivation. There
+     * is no null default: omitting it makes `recordIntegrationStats` throw the
+     * invariant error (TASK-2378) instead of fabricating implementer/fix-round
+     * values. `px integrate` passes `missionServices.store`.
+     */
     missionStore?: import('../../../application/domain-ports.js').MissionStore | null;
   } = {}
 ) {

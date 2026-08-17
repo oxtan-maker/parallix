@@ -15,7 +15,7 @@
  */
 import * as path from 'node:path';
 import * as fmt from './presentation/cli-format.js';
-import { startReview, ConfiguredReviewerEligibility, changeRevision } from '../domain/review.js';
+import { beginNextReviewRound, startReview, ConfiguredReviewerEligibility, changeRevision, reviewStatus } from '../domain/review.js';
 import { agentFamily } from '../domain/agents.js';
 import { artifactReference } from '../domain/net-engineering-lines.js';
 import type { HandoffWorkflowPorts, HandoffResult } from './ports/handoff-workflow.js';
@@ -802,6 +802,8 @@ export class HandoffCommandUseCase {
     let token = null;
     let fallbackUser = null;
     let bootstrapFailureReason = null;
+    /** The pull request this handoff hands to the reviewer, when there is one. */
+    let submittedPr: { id: string; url: string | null } | null = null;
     if (forgejoEnabled) {
       log(`Step 2: Updating/Creating Forgejo PR as user ${fmt.agent(forgejoUser)}...`);
       token = ports.forgejo.readToken(forgejoUser);
@@ -870,6 +872,9 @@ export class HandoffCommandUseCase {
         const msg = `Forgejo PR creation/update failed: ${prResult.error}`;
         error(msg);
         return { ok: false, error: msg };
+      }
+      if (prResult.prNumber) {
+        submittedPr = { id: String(prResult.prNumber), url: prResult.url ?? null };
       }
     } else {
       log('Step 2: Skipping Forgejo PR (review provider is not forgejo).');
@@ -979,14 +984,44 @@ export class HandoffCommandUseCase {
       selectAgentFn,
       log,
     });
-    const review = startReview({
-      change: {
-        kind: 'local-branch' as const,
-        sourceBranch: branch,
-        targetBranch,
-      },
-      revision: changeRevision(`handoff-${Date.now()}`),
-    }, reviewer, implementer, new Date().toISOString(), reviewerEligibility);
+    // A mission that already carries a Review is handing back a later round of
+    // the same change, not starting a new review. Restarting it would submit
+    // round 1 against a recorded round N and the workflow would reject the
+    // handoff ("A new review round must advance the same pull request or local
+    // branch"); the change identity (pull request or branch) is preserved by
+    // advancing the existing aggregate instead.
+    const existing = await missionServices.store.load(slug);
+    const loadedReview = existing.kind === 'found' && 'review' in existing.mission
+      ? existing.mission.review
+      : null;
+    // A review with no round carries no change identity to advance, so it is
+    // treated as no review at all rather than read for a current round.
+    const priorReview = loadedReview && loadedReview.rounds?.length > 0 ? loadedReview : null;
+    const startedAt = new Date().toISOString();
+    const review = priorReview
+      ? (reviewStatus(priorReview) === 'ready-for-next-round'
+        ? beginNextReviewRound(priorReview, reviewer, implementer, startedAt, reviewerEligibility)
+        // Undecided round: this handoff is a resubmission of the round already
+        // recorded (a relaunch, a retried CLI invocation), so it is submitted
+        // unchanged rather than rewritten.
+        : priorReview)
+      : startReview({
+        change: submittedPr
+          ? {
+            kind: 'pull-request' as const,
+            provider: 'forgejo',
+            id: submittedPr.id,
+            url: submittedPr.url,
+            sourceBranch: branch,
+            targetBranch,
+          }
+          : {
+            kind: 'local-branch' as const,
+            sourceBranch: branch,
+            targetBranch,
+          },
+        revision: changeRevision(`handoff-${Date.now()}`),
+      }, reviewer, implementer, startedAt, reviewerEligibility);
     const transitionResult = await missionServices.lifecycle.transition({
       operationId: `handoff-transition-${slug}`,
       missionId: slug,

@@ -36,7 +36,8 @@ export type ReviewStatePersistenceResult =
   | { outcome: 'unchanged' }
   | { outcome: 'write-failed'; stage: 'write'; diagnostic: string }
   | { outcome: 'add-failed'; stage: 'add'; diagnostic: string }
-  | { outcome: 'commit-failed-dirty'; stage: 'commit'; diagnostic: string };
+  | { outcome: 'commit-failed-dirty'; stage: 'commit'; diagnostic: string }
+  | { outcome: 'boundary-failed'; stage: 'boundary'; diagnostic: string };
 
 
 interface ReviewStatePersistenceContext {
@@ -698,7 +699,16 @@ export class ReviewState {
         const review = applyReviewStateToReview(mission.review, this.toJSON());
         const nextVersion = await store.save({ ...mission, review }, result.version);
 
-        // TASK-2376: fire review → integration at the approval boundary
+        // TASK-2376: fire review → integration at the approval boundary.
+        // TASK-2378: a boundary transition that fails while the Mission is
+        // still in the `review` lane is reported in the persistence result
+        // instead of swallowed — the review is committed, the Mission stays
+        // in review, the approval command surfaces the failure (and withholds
+        // Backlog promotion), and px integrate recovery is the repair path.
+        // Once the Mission has already moved to `integration`, an approve
+        // transition can never legitimately complete, so a bookkeeping
+        // re-persist of the approved round (comment, artifact consumption)
+        // keeps the historical non-fatal behavior.
         if (lifecycleService && this.phase === 'approved') {
           const currentRound = review.rounds[review.rounds.length - 1];
           const decidedAt = currentRound.decision?.kind === 'approved'
@@ -714,9 +724,12 @@ export class ReviewState {
             occurredAt: decidedAt,
             idempotencyKey: `approve:${this.slug}:${decidedAt}`,
           });
-          if (approveResult.status !== 'completed') {
-            // Lifecycle transition failure is non-fatal for review persistence;
-            // px integrate recovery will repair the stale review state.
+          if (approveResult.status !== 'completed' && mission.status === 'review') {
+            return {
+              outcome: 'boundary-failed',
+              stage: 'boundary',
+              diagnostic: `review → integration transition failed for ${this.slug}: ${approveResult.error?.message ?? 'unknown failure'}`,
+            };
           }
         }
 

@@ -15,6 +15,9 @@ import { getPrStatus, readToken, postComment, postReview, createPr, getComments,
 import { buildAutonomousReviewMatrix, formatMatrixSummary } from '../agents/runtime-matrix.js';
 import { readReviewState, writeReviewState, resolveReviewIdentity, ReviewState, persistReviewStateOrThrow, backfillReviewFromLegacyState, reconcileInterruptedHandoff } from './review-state.js';
 import type { MissionStore } from '../../application/domain-ports.js';
+import type { MissionLifecycleService } from '../../application/mission-lifecycle-service.js';
+import { parseReviewFindings, recordRequestedChanges } from './review-round.js';
+import { reviewFindingId } from '../../domain/review.js';
 import { createEvent, ALL_EVENT_TYPES, isValidEventType, shouldMirrorToProvider, readAllEvents } from './review-events.js';
 import { formatVerificationCommand, runVerificationGate } from '../verification/verification.js';
 import { bootstrapReviewSurface } from './setup-review.js';
@@ -874,6 +877,8 @@ export async function submitReviewRound(
     createEventFn?: typeof createEvent;
     buildMetadataFooterFn?: typeof buildMetadataFooter;
     missionStore?: MissionStore | null;
+    lifecycleService?: MissionLifecycleService | null;
+    recordRequestedChangesFn?: typeof recordRequestedChanges;
   } = {}
 ): Promise<void> {
   const log = options.log || fmt.log.plain;
@@ -895,6 +900,35 @@ export async function submitReviewRound(
 
   const worktree = options.worktree || resolveWorktree(slug) || process.cwd();
   const providerEnabled = isReviewProviderEnabledFn(worktree);
+
+  // A verdict is a domain decision, not only a provider comment. Recording it
+  // is what returns the mission to the implementer and leaves the round able to
+  // be resolved and advanced; the flat review-state write below cannot express
+  // it, because it carries no findings.
+  if (outcome === 'request-changes') {
+    if (!options.missionStore) {
+      log(fmt.status('WARN', `No Mission authority bound for ${slug}; the request-changes decision was not recorded on the Review aggregate.`));
+    } else {
+      const recordRequestedChangesFn = options.recordRequestedChangesFn || recordRequestedChanges;
+      const parsed = parseReviewFindings(message);
+      const decision = await recordRequestedChangesFn(slug, {
+        // A hand-written message need not use finding headings; the message
+        // itself is then the single finding.
+        findings: parsed.length > 0 ? parsed : [{
+          id: reviewFindingId('F1'),
+          summary: (message.split('\n').find((line) => line.trim()) || `Changes requested for ${slug}`).trim(),
+          location: null,
+        }],
+        comment: message || null,
+        decidedAt: new Date().toISOString(),
+      }, { missionStore: options.missionStore, lifecycleService: options.lifecycleService });
+      if (decision.outcome === 'failed') {
+        error(fmt.status('FAIL', `Review outcome "${outcome}" could not be recorded for ${slug}: ${decision.diagnostic}`));
+        exit(1);
+        return;
+      }
+    }
+  }
 
   // For provider=none (standalone), skip provider posting and only update review-state
   if (!providerEnabled) {
@@ -922,7 +956,18 @@ export async function submitReviewRound(
         phase: phaseForOutcome,
       });
     }
-    await persistReviewStateOrThrow(writeReviewStateFn, slug, stateToWrite, worktree, options.missionStore);
+    try {
+      await persistReviewStateOrThrow(writeReviewStateFn, slug, stateToWrite, worktree, options.missionStore);
+    } catch (err) {
+      // The state write or the review → integration boundary failed. The
+      // Mission may still be in review, so the Backlog task must not move —
+      // in particular it must not be promoted to approved. px integrate is
+      // the repair path.
+      error(fmt.status('FAIL', `Review outcome "${outcome}" could not be finalized for ${slug}: ${err instanceof Error ? err.message : String(err)}`));
+      error(fmt.status('FAIL', `Recovery: px integrate ${slug}`));
+      exit(1);
+      return;
+    }
 
     // Also transition the backlog task for provider=none so integrate preflight passes
     const backlogStatusMap: Record<string, string> = {
@@ -997,7 +1042,17 @@ export async function submitReviewRound(
       currentState.disposition = 'REQUEST_CHANGES';
       try { currentState.transitionTo('fixing'); } catch (_) { /* ignore */ }
     }
-    await persistReviewStateOrThrow(writeReviewStateFn, slug, currentState, worktree, options.missionStore);
+    try {
+      await persistReviewStateOrThrow(writeReviewStateFn, slug, currentState, worktree, options.missionStore);
+    } catch (err) {
+      // The state write or the review → integration boundary failed. The
+      // Mission may still be in review, so the Backlog task must not be
+      // promoted to approved; px integrate is the repair path.
+      error(fmt.status('FAIL', `Review outcome "${outcome}" could not be finalized for ${slug}: ${err instanceof Error ? err.message : String(err)}`));
+      error(fmt.status('FAIL', `Recovery: px integrate ${slug}`));
+      exit(1);
+      return;
+    }
   }
 
   const taskResolution = resolveTaskFileFn(slug, worktree);

@@ -587,7 +587,10 @@ test('consumeReviewerArtifacts returns REQUEST_CHANGES reviewState for request-c
     deleteArtifactFn: () => {},
     forgejoEnabled: false,
     log: () => {},
-    error: () => {}
+    error: () => {},
+    // The decision record needs the operator store; this test exercises the
+    // artifact-to-reviewState mapping, not persistence.
+    recordRequestedChangesFn: async () => ({ outcome: 'recorded' }),
   });
 
   assert.equal(result.consumed, true);
@@ -690,7 +693,11 @@ test('consumeImplementerArtifacts parses structured resolution content', async (
     deleteArtifactFn: () => {},
     forgejoEnabled: false,
     log: () => {},
-    error: () => {}
+    error: () => {},
+    // Bare temp dir has no checkout; supply the branch tip and stub the
+    // round-closing record (covered in test/review-round-loop.test.ts).
+    headRevisionFn: () => 'rev-4',
+    recordImplementerResolutionFn: async () => ({ outcome: 'recorded' }),
   });
 
   assert.equal(result.consumed, true);
@@ -1084,7 +1091,9 @@ test('consumeImplementerArtifacts with PARKED disposition', async () => {
     deleteArtifactFn: () => {},
     forgejoEnabled: false,
     log: () => {},
-    error: () => {}
+    error: () => {},
+    headRevisionFn: () => 'rev-4',
+    recordImplementerResolutionFn: async () => ({ outcome: 'recorded' }),
   });
 
   assert.equal(result.consumed, true);
@@ -1110,7 +1119,9 @@ test('consumeImplementerArtifacts with PUSHBACK_ALL disposition', async () => {
     deleteArtifactFn: () => {},
     forgejoEnabled: false,
     log: () => {},
-    error: () => {}
+    error: () => {},
+    headRevisionFn: () => 'rev-4',
+    recordImplementerResolutionFn: async () => ({ outcome: 'recorded' }),
   });
 
   assert.equal(result.consumed, true);
@@ -1263,7 +1274,9 @@ test('consumeImplementerArtifacts with consumeHumanNotes', async () => {
     postCommentFn: () => ({ ok: true }),
     buildMetadataFooterFn: () => '',
     log: () => {},
-    error: () => {}
+    error: () => {},
+    headRevisionFn: () => 'rev-4',
+    recordImplementerResolutionFn: async () => ({ outcome: 'recorded' }),
   });
 
   assert.equal(result.consumed, true);
@@ -1349,7 +1362,9 @@ test('consumeImplementerArtifacts with forgejo disabled', async () => {
     deleteArtifactFn: () => {},
     forgejoEnabled: false,
     log: () => {},
-    error: () => {}
+    error: () => {},
+    headRevisionFn: () => 'rev-4',
+    recordImplementerResolutionFn: async () => ({ outcome: 'recorded' }),
   });
 
   assert.equal(result.consumed, true);
@@ -1375,7 +1390,9 @@ test('consumeImplementerArtifacts with invalid JSON in resolution', async () => 
     deleteArtifactFn: () => {},
     forgejoEnabled: false,
     log: () => {},
-    error: () => {}
+    error: () => {},
+    headRevisionFn: () => 'rev-4',
+    recordImplementerResolutionFn: async () => ({ outcome: 'recorded' }),
   });
 
   assert.equal(result.consumed, true);

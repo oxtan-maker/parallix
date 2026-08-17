@@ -8,14 +8,18 @@ export class LegacyStatsBackfillAdapter implements StatsBackfillPort {
    * @param _rootDir Repository root the historical missions are read from.
    * @param _measurementStore Optional measurement-store selection so isolated
    *   tests bind a temporary database instead of `<PARALLIX_HOME>`.
+   * @param _missionStore Operator Mission authority for the authoritative
+   *   implementer/fix-round derivation (TASK-2378); `null` keeps the
+   *   historical git-history-only fallback.
    */
   constructor(
     private readonly _rootDir: string,
     private readonly _measurementStore: { dbPath?: string; store?: unknown } = {},
+    private readonly _missionStore: unknown = null,
   ) {}
 
   async readProjection(_options: { readonly filePath?: string | null } = {}): Promise<StatsProjection> {
-    const report = await collectHistoricalStatsBackfill(this._rootDir, this._measurementStore);
+    const report = await collectHistoricalStatsBackfill(this._rootDir, this._measurementStore, this._missionStore);
     const rows: StatsRow[] = report.rows.map(row => ({ ...row }));
     return {
       rows,
