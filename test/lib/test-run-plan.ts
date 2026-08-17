@@ -82,13 +82,11 @@ export function buildTestRunPlan(options: TestRunPlanOptions): TestRunPlan {
     throw new Error(`Node ${MINIMUM_TEST_NODE_MAJOR}.${MINIMUM_TEST_NODE_MINOR}+ is required for TypeScript tests; set PARALLIX_TEST_NODE to a compatible executable.`);
   }
 
-  function supportsTestForceExit(command: string): boolean {
-    const version = probeNodeVersion(command);
-    const match = version !== null && /v(\d+)\.(\d+)\./.exec(version);
-    if (!match) {return false;}
-    const major = Number(match[1]);
-    const minor = Number(match[2]);
-    return major >= 22 || (major === 20 && minor >= 14);
+  // `--test-concurrency` exists from Node 20.15 on; probe empirically so no
+  // version table has to be maintained for older supported runtimes.
+  function supportsTestConcurrency(executable: string): boolean {
+    const result = spawnSync(executable, ['--test', '--test-concurrency=1', '--help'], { stdio: 'ignore' });
+    return result.status === 0;
   }
 
   const allRootTestFiles = fs.readdirSync(testRoot)
@@ -116,7 +114,7 @@ export function buildTestRunPlan(options: TestRunPlanOptions): TestRunPlan {
   // These markers identify tests that cross a real process, Git/worktree,
   // package, or network boundary. Keep that coverage intact, but run it only
   // through the explicit integration command rather than the hermetic default.
-  const boundaryDependencyPattern = /\b(?:\w+\.)?(?:spawnSync|spawn|execSync|execFileSync|fork)\s*\(|git\s+(?:init|worktree|clone|commit|checkout|rebase|merge)|npm\s+(?:pack|install)|createServer|\bfetch\s*\(/;
+  const boundaryDependencyPattern = /\b(?:\w+\.)?(?:spawnSync|spawn|execSync|execFileSync|execFile|fork)\s*\(|git\s+(?:init|worktree|clone|commit|checkout|rebase|merge)|npm\s+(?:pack|install)|createServer|\bfetch\s*\(/;
   const knownIntegrationTestFiles = new Set([
     // Measured at 55.7s in the CP-1 uncontended run; it drives draft workflow
     // fixtures across the command boundary even though its process launcher is
@@ -164,6 +162,57 @@ export function buildTestRunPlan(options: TestRunPlanOptions): TestRunPlan {
     // TASK-2326 round 2: tui-spawn uses execFileSync (real process boundary)
     // and was relocated from the default suite to integration.
     'tui-spawn.test.ts',
+    // Unit tests must not open a real SQL database or cross a process
+    // boundary, even when the database is a temp file and the spawn is a
+    // tiny script. The content heuristic above cannot see boundaries that
+    // live in test/fixtures/* helpers (review-state-db.ts, 
+    // task-2357-statistics-fixture.ts) or behind a promisified/execFile 
+    // wrapper, so every such file is declared here.
+    'board-event-metrics-fixture.test.ts',
+    'board-event-recorder.test.ts',
+    'board-lane-events-migration.test.ts',
+    'e2e-mission-sqlite-cutover.test.ts',
+    'review-backfill.test.ts',
+    'review-events.test.ts',
+    'session-marker-repository.test.ts',
+    'sqlite-adapter-cp1.test.ts',
+    'sqlite-async-cascade-cp3.test.ts',
+    'sqlite-importer-cp4.test.ts',
+    'sqlite-ports-cp2.test.ts',
+    'stats.test.ts',
+    'task-2220-repro.test.ts',
+    'task-2241-tmp-cleanup-repro.test.ts',
+    'task-2322-05-mission-sqlite-fixture.test.ts',
+    'task-2322-05-mission-use-cases.test.ts',
+    'task-2322.04-mission-import.test.ts',
+    'task-2322.11-operator-state.test.ts',
+    'task-2322.12-stray-persistence.test.ts',
+    'task-2339-aggregate-read-during-write.test.ts',
+    'task-2339-writes-outlive-close.test.ts',
+    'task-2345-repro.test.ts',
+    'task-2347-01-repository-identity-repro.test.ts',
+    'task-2347.02-lifecycle-history.test.ts',
+    'task-2347.02-repro.test.ts',
+    'task-2348-implementer-attribution.test.ts',
+    'task-2350-reconcile-interrupted-handoff.test.ts',
+    'task-2357-certification.test.ts',
+    'task-2357.a-historical-intake.test.ts',
+    'task-2357.c-unknown-review-fix-rounds.test.ts',
+    'task-2357.d-completion-population.test.ts',
+    'task-2357.e-legacy-history-scope.test.ts',
+    'task-2357.f-measured-zero-throughput.test.ts',
+    'task-2357.g-per-metric-evidence.test.ts',
+    'task-2363-repository-identity.test.ts',
+    'task-2363-review-fix-rounds.test.ts',
+    'task-2363-windowed-cohorts.test.ts',
+    'task-2367-certification.test.ts',
+    'task-2367-regressions.test.ts',
+    'task-2367-repair.test.ts',
+    'task-2367-telemetry-schema.test.ts',
+    'task-2369-regressions.test.ts',
+    'task-2373-shutdown.test.ts',
+    'task-2375-active-invocation-overlap.test.ts',
+    'task-2375-current-work-operation-repro.test.ts',
     // TASK-2326 round 3: tests exceeding 1 s per test in the unit suite.
     // These are heavy (Ink render cycles, full status command, SDK sessions)
     // but do not necessarily cross a process boundary.
@@ -248,12 +297,15 @@ export function buildTestRunPlan(options: TestRunPlanOptions): TestRunPlan {
     : [];
   // TASK-2328: mock.module() requires the experimental flag in Node 22+
   const moduleMockArgs = ['--experimental-test-module-mocks'];
+  // Integration files spawn real child processes (tsx, git, npm). The default
+  // file concurrency (availableParallelism - 1) oversubscribes multi-core
+  // hosts and starves child startup past the tests' internal deadlines
+  // (task-2318/2327/2212 flakes). Cap integration file concurrency only; the
+  // hermetic unit suite keeps full parallelism.
+  const INTEGRATION_TEST_CONCURRENCY = 4;
   const testNode = compatibleTestNode();
-  const testForceExitArgs = supportsTestForceExit(testNode)
-    // This flag was added in Node 20.14 and Node 22.0. Keep the declared Node
-    // >=20 range runnable while still ensuring supported newer runtimes return
-    // control once the test runner has printed its final result.
-    ? ['--test-force-exit']
+  const testConcurrencyArgs = runsIntegrationSuite && supportsTestConcurrency(testNode)
+    ? [`--test-concurrency=${INTEGRATION_TEST_CONCURRENCY}`]
     : [];
 
   // TASK-2326: enforceable unit-test timing guard.
@@ -270,13 +322,18 @@ export function buildTestRunPlan(options: TestRunPlanOptions): TestRunPlan {
     testFiles,
     runsIntegrationSuite,
     unitTestBudgetMs: Number(process.env.PARALLIX_UNIT_TEST_BUDGET_MS) || 180_000,
+    // Deliberately no `--test-force-exit`: it makes the per-file workers call
+    // process.exit() before their result stream is flushed, so trailing test
+    // results are silently dropped while the file still reports success
+    // (reproduced on Node 24 and 26). Hang protection (a leaked test handle)
+    // is provided by the runner's process-group watchdog instead.
     nodeArgs: [
       // tsx must be registered before the bootstrap preload so the TypeScript
       // bootstrap module resolves (--import entries load in argv order).
       ...typeScriptLoaderArgs,
       ...bootstrapArgs,
       ...moduleMockArgs,
-      ...testForceExitArgs,
+      ...testConcurrencyArgs,
       ...testTimeoutArgs,
       '--test',
       ...testFiles,

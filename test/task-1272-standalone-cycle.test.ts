@@ -47,8 +47,8 @@ async function withTempGitRepo(fn) {
 }
 
 // SC7: --mission path resolution.
-test('findMissionDir reads a mission contract from a non-standard --mission path', () => {
-  withTempGitRepo((root) => {
+test('findMissionDir reads a mission contract from a non-standard --mission path', async () => {
+  await withTempGitRepo((root) => {
     const slug = 'task-1272';
     // Mission deliberately placed OUTSIDE docs/missions/.
     const customDir = path.join(root, 'elsewhere', 'review-pack');

@@ -12,7 +12,10 @@ function getGitPath(cwd: string, args: string[]) {
   const result = spawnSync('git', ['-C', cwd, ...args], {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'ignore'],
-    timeout: 1000
+    // A busy host (parallel test workers, other jobs) can push a cold git
+    // spawn past 1 s; 5 s keeps the lookup useful instead of silently
+    // degrading to "no main worktree found".
+    timeout: 5000
   });
   if (result.status !== 0) {
     return null;
@@ -69,7 +72,7 @@ function getMainWorktreePath(options: {cwd?: string, warn?: Function} = {}) {
     const result = spawnSync('git', ['-C', cwd, 'worktree', 'list', '--porcelain'], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
-      timeout: 1000
+      timeout: 5000
     });
     if (result.status !== 0) {
       warn(

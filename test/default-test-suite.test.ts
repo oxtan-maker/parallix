@@ -8,6 +8,30 @@ import path from 'node:path';
 import { buildTestRunPlan } from './lib/test-run-plan.js';
 const expectedIntegrationFiles = [
   'active.test.ts', 'agents-limit-hit.test.ts', 'agents.test.ts', 'backlog.test.ts',
+  // Real SQL databases (even temp files) and process boundaries do not run in
+  // the hermetic unit suite; see knownIntegrationTestFiles in test-run-plan.ts.
+  'board-event-metrics-fixture.test.ts', 'board-event-recorder.test.ts',
+  'board-lane-events-migration.test.ts', 'e2e-mission-sqlite-cutover.test.ts',
+  'review-backfill.test.ts', 'review-events.test.ts', 'session-marker-repository.test.ts',
+  'sqlite-adapter-cp1.test.ts', 'sqlite-async-cascade-cp3.test.ts',
+  'sqlite-importer-cp4.test.ts', 'sqlite-ports-cp2.test.ts', 'stats.test.ts',
+  'task-2220-repro.test.ts', 'task-2241-tmp-cleanup-repro.test.ts',
+  'task-2322-05-mission-sqlite-fixture.test.ts', 'task-2322-05-mission-use-cases.test.ts',
+  'task-2322.04-mission-import.test.ts', 'task-2322.11-operator-state.test.ts',
+  'task-2322.12-stray-persistence.test.ts', 'task-2339-aggregate-read-during-write.test.ts',
+  'task-2339-writes-outlive-close.test.ts', 'task-2345-repro.test.ts',
+  'task-2347-01-repository-identity-repro.test.ts', 'task-2347.02-lifecycle-history.test.ts',
+  'task-2347.02-repro.test.ts', 'task-2348-implementer-attribution.test.ts',
+  'task-2350-reconcile-interrupted-handoff.test.ts', 'task-2357-certification.test.ts',
+  'task-2357.a-historical-intake.test.ts', 'task-2357.c-unknown-review-fix-rounds.test.ts',
+  'task-2357.d-completion-population.test.ts', 'task-2357.e-legacy-history-scope.test.ts',
+  'task-2357.f-measured-zero-throughput.test.ts', 'task-2357.g-per-metric-evidence.test.ts',
+  'task-2363-repository-identity.test.ts', 'task-2363-review-fix-rounds.test.ts',
+  'task-2363-windowed-cohorts.test.ts', 'task-2367-certification.test.ts',
+  'task-2367-regressions.test.ts', 'task-2367-repair.test.ts',
+  'task-2367-telemetry-schema.test.ts', 'task-2369-regressions.test.ts',
+  'task-2373-shutdown.test.ts', 'task-2375-active-invocation-overlap.test.ts',
+  'task-2375-current-work-operation-repro.test.ts',
   'bootstrap-isolation.test.ts', 'documentation-verification.test.ts',
   'draft-command.test.ts', 'draft.test.ts',
   'draft_preflight_modern.test.ts', 'durable-state-policy.test.ts',
@@ -110,9 +134,16 @@ test('default test runner routes every moved group to integration and excludes i
     'the runner must build this checkout before tests load the canonical bundle');
   assert.equal(pkg.scripts.pretest, undefined,
     'building belongs to the runner so direct and npm-invoked suites have the same protection');
-  assert.ok(defaultRun.args.includes('--test-force-exit'));
-  assert.ok(!selectedFiles([], 'v20.13.1').args.includes('--test-force-exit'));
-  assert.ok(selectedFiles([], 'v20.14.0').args.includes('--test-force-exit'));
+  // --test-force-exit makes file workers exit before their result stream is
+  // flushed, silently dropping trailing tests while the file reports success.
+  // The runner's process-group watchdog covers the hang case instead.
+  assert.ok(!defaultRun.args.includes('--test-force-exit'));
+  assert.ok(!integrationRun.args.includes('--test-force-exit'));
+  // Integration files spawn real children; cap their parallelism so host
+  // contention cannot starve child startup past test-internal deadlines.
+  assert.ok(integrationRun.args.some(a => a.startsWith('--test-concurrency=')));
+  assert.ok(!defaultRun.args.some(a => a.startsWith('--test-concurrency=')),
+    'the hermetic unit suite keeps full parallelism');
   assert.equal(pkg.scripts['test:integration'], 'FORCE_COLOR=0 tsx test/run-default-tests.ts --integration');
   assert.match(runner, /file\.endsWith\('\.integration\.test\.ts'\)/,
     'integration suffix must provide an explicit category independent of dependency heuristics');

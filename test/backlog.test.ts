@@ -669,15 +669,15 @@ test('parseAssigneeFamilies reports unmatched content with no assignees', () => 
   assert.deepEqual(parseAssigneeFamilies('status: active\n'), { matched: false, families: [] });
 });
 
-test('transitionTask updates status and implementer and commits the change in a git repo', () => {
-  withTempGitRepo(root => {
+test('transitionTask updates status and implementer and commits the change in a git repo', async () => {
+  await withTempGitRepo(async root => {
     const taskPath = path.join(root, 'backlog', 'tasks', 'task-128 - transition.md');
     fs.writeFileSync(taskPath, 'id: TASK-128\nstatus: backlog\nassignee: [gemini]\n');
     childProcess.spawnSync('git', ['add', '.'], { cwd: root, encoding: 'utf8' });
     childProcess.spawnSync('git', ['commit', '-m', 'seed task'], { cwd: root, encoding: 'utf8' });
 
     const logs = [];
-    const ok = transitionTask('task-128', 'active', { implementer: 'codex', rootDir: root, log: msg => logs.push(msg) });
+    const ok = await transitionTask('task-128', 'active', { implementer: 'codex', rootDir: root, log: msg => logs.push(msg) });
     assert.equal(ok, true);
     assert.equal(getTaskStatus(taskPath), 'active');
     assert.equal(getTaskImplementer(taskPath), 'codex');
@@ -688,8 +688,8 @@ test('transitionTask updates status and implementer and commits the change in a 
   });
 });
 
-test('transitionTask commits a Backlog task update when invoked from a sibling mission worktree', () => {
-  withTempGitRepo(root => {
+test('transitionTask commits a Backlog task update when invoked from a sibling mission worktree', async () => {
+  await withTempGitRepo(async root => {
     // 1. Setup base repo with a task
     const taskDir = path.join(root, 'backlog', 'tasks');
     fs.mkdirSync(taskDir, { recursive: true });
@@ -709,7 +709,7 @@ test('transitionTask commits a Backlog task update when invoked from a sibling m
 
       const logs = [];
       // Transition the task using the worktree as rootDir (exact slug, no suffix)
-      const ok = transitionTask('task-2104', 'active', {
+      const ok = await transitionTask('task-2104', 'active', {
         implementer: 'codex',
         rootDir: worktreePath,
         log: msg => logs.push(msg)
@@ -735,8 +735,8 @@ test('transitionTask commits a Backlog task update when invoked from a sibling m
   });
 });
 
-test('transitionTaskOnIntegrationBranch writes main metadata first and rebases the mission worktree afterward', () => {
-  withTempGitRepo(root => {
+test('transitionTaskOnIntegrationBranch writes main metadata first and rebases the mission worktree afterward', async () => {
+  await withTempGitRepo(async root => {
     const slug = 'task-2230';
     const taskPath = path.join(root, 'backlog', 'tasks', `${slug} - durable state.md`);
     fs.writeFileSync(taskPath, '---\nid: TASK-2230\nstatus: backlog\nassignee: [gemini]\nlabels:\n  - ai_sdlc\ndependencies: [TASK-17]\n---\n');
@@ -754,7 +754,7 @@ test('transitionTaskOnIntegrationBranch writes main metadata first and rebases t
     const previousPrimary = process.env.PRIMARY_WORKTREE;
     process.env.PRIMARY_WORKTREE = root;
     try {
-      assert.equal(transitionTaskOnIntegrationBranch(slug, 'active', { implementer: 'codex', rootDir: missionWorktree, log: () => {} }), true);
+      assert.equal(await transitionTaskOnIntegrationBranch(slug, 'active', { implementer: 'codex', rootDir: missionWorktree, log: () => {} }), true);
       const mainContent = fs.readFileSync(taskPath, 'utf8');
       assert.match(mainContent, /^status: active$/m);
       assert.match(mainContent, /^assignee: \[codex\]$/m);
@@ -769,8 +769,8 @@ test('transitionTaskOnIntegrationBranch writes main metadata first and rebases t
   });
 });
 
-test('transitionTaskOnIntegrationBranch targets a recorded feature base branch', () => {
-  withTempGitRepo(root => {
+test('transitionTaskOnIntegrationBranch targets a recorded feature base branch', async () => {
+  await withTempGitRepo(async root => {
     const slug = 'task-2231';
     childProcess.spawnSync('git', ['add', '.'], { cwd: root, encoding: 'utf8' });
     childProcess.spawnSync('git', ['commit', '-m', 'seed main'], { cwd: root, encoding: 'utf8' });
@@ -794,7 +794,7 @@ test('transitionTaskOnIntegrationBranch targets a recorded feature base branch',
     process.env.PRIMARY_WORKTREE = root;
     try {
       const logs = [];
-      assert.equal(transitionTaskOnIntegrationBranch(slug, 'review', { rootDir: missionWorktree, log: message => logs.push(message) }), true, logs.join('\n'));
+      assert.equal(await transitionTaskOnIntegrationBranch(slug, 'review', { rootDir: missionWorktree, log: message => logs.push(message) }), true, logs.join('\n'));
       assert.match(fs.readFileSync(path.join(featureWorktree, 'backlog', 'tasks', `${slug} - feature state.md`), 'utf8'), /^status: review$/m);
       assert.equal(fs.existsSync(path.join(root, 'backlog', 'tasks', `${slug} - feature state.md`)), false);
     } finally {
@@ -807,8 +807,8 @@ test('transitionTaskOnIntegrationBranch targets a recorded feature base branch',
   });
 });
 
-test('transitionTaskOnIntegrationBranch reconciles task metadata conflicts and completes the rebase', () => {
-  withTempGitRepo(root => {
+test('transitionTaskOnIntegrationBranch reconciles task metadata conflicts and completes the rebase', async () => {
+  await withTempGitRepo(async root => {
     const slug = 'task-2232';
     const taskPath = path.join(root, 'backlog', 'tasks', `${slug} - rebase conflict.md`);
     fs.writeFileSync(taskPath, 'id: TASK-2232\nstatus: refined\nassignee: [gemini]\nlabels:\n  - distribution\n');
@@ -823,7 +823,7 @@ test('transitionTaskOnIntegrationBranch reconciles task metadata conflicts and c
     process.env.PRIMARY_WORKTREE = root;
     try {
       const logs = [];
-      assert.equal(transitionTaskOnIntegrationBranch(slug, 'active', { implementer: 'codex', rootDir: missionWorktree, log: message => logs.push(message) }), true, logs.join('\n'));
+      assert.equal(await transitionTaskOnIntegrationBranch(slug, 'active', { implementer: 'codex', rootDir: missionWorktree, log: message => logs.push(message) }), true, logs.join('\n'));
       assert.match(fs.readFileSync(taskPath, 'utf8'), /^status: active$/m);
       assert.match(fs.readFileSync(taskPath, 'utf8'), /^assignee: \[codex\]$/m);
       const missionContent = fs.readFileSync(path.join(missionWorktree, 'backlog', 'tasks', `${slug} - rebase conflict.md`), 'utf8');
@@ -841,8 +841,8 @@ test('transitionTaskOnIntegrationBranch reconciles task metadata conflicts and c
   });
 });
 
-test('transitionTaskOnIntegrationBranch defers the rebase while the mission worktree has agent edits', () => {
-  withTempGitRepo(root => {
+test('transitionTaskOnIntegrationBranch defers the rebase while the mission worktree has agent edits', async () => {
+  await withTempGitRepo(async root => {
     const slug = 'task-2234';
     const taskPath = path.join(root, 'backlog', 'tasks', `${slug} - dirty mission.md`);
     fs.writeFileSync(taskPath, 'id: TASK-2234\nstatus: refined\nassignee: [gemini]\n');
@@ -859,7 +859,7 @@ test('transitionTaskOnIntegrationBranch defers the rebase while the mission work
     process.env.PRIMARY_WORKTREE = root;
     try {
       const logs = [];
-      assert.equal(transitionTaskOnIntegrationBranch(slug, 'active', { implementer: 'codex', rootDir: missionWorktree, log: message => logs.push(message) }), true, logs.join('\n'));
+      assert.equal(await transitionTaskOnIntegrationBranch(slug, 'active', { implementer: 'codex', rootDir: missionWorktree, log: message => logs.push(message) }), true, logs.join('\n'));
       assert.match(fs.readFileSync(taskPath, 'utf8'), /^status: active$/m);
       assert.match(fs.readFileSync(taskPath, 'utf8'), /^assignee: \[codex\]$/m);
       assert.equal(fs.readFileSync(missionFile, 'utf8'), '# Agent output in progress\n', 'agent edits must not be stashed or rewritten');
@@ -873,8 +873,8 @@ test('transitionTaskOnIntegrationBranch defers the rebase while the mission work
   });
 });
 
-test('transitionTaskOnIntegrationBranch synchronizes approval with untracked reviewer events', () => {
-  withTempGitRepo(root => {
+test('transitionTaskOnIntegrationBranch synchronizes approval with untracked reviewer events', async () => {
+  await withTempGitRepo(async root => {
     const slug = 'task-2235';
     const taskPath = path.join(root, 'backlog', 'tasks', `${slug} - approved review.md`);
     fs.writeFileSync(taskPath, 'id: TASK-2235\nstatus: review\nassignee: [codex]\n');
@@ -897,7 +897,7 @@ test('transitionTaskOnIntegrationBranch synchronizes approval with untracked rev
     process.env.PRIMARY_WORKTREE = root;
     try {
       const logs = [];
-      assert.equal(transitionTaskOnIntegrationBranch(slug, 'ready-for-integration', { rootDir: missionWorktree, log: message => logs.push(message) }), true, logs.join('\n'));
+      assert.equal(await transitionTaskOnIntegrationBranch(slug, 'ready-for-integration', { rootDir: missionWorktree, log: message => logs.push(message) }), true, logs.join('\n'));
       assert.match(fs.readFileSync(taskPath, 'utf8'), /^status: ready-for-integration$/m);
       assert.match(fs.readFileSync(path.join(missionWorktree, 'backlog', 'tasks', path.basename(taskPath)), 'utf8'), /^status: ready-for-integration$/m, logs.join('\n'));
       assert.equal(fs.readFileSync(eventPath, 'utf8'), 'Outcome: approve\n');
@@ -910,8 +910,8 @@ test('transitionTaskOnIntegrationBranch synchronizes approval with untracked rev
   });
 });
 
-test('transitionTaskOnIntegrationBranch still aborts shared-file rebase conflicts', () => {
-  withTempGitRepo(root => {
+test('transitionTaskOnIntegrationBranch still aborts shared-file rebase conflicts', async () => {
+  await withTempGitRepo(async root => {
     const slug = 'task-2233';
     const taskPath = path.join(root, 'backlog', 'tasks', `${slug} - shared conflict.md`);
     fs.writeFileSync(taskPath, 'id: TASK-2233\nstatus: refined\nassignee: [gemini]\n');
@@ -934,7 +934,7 @@ test('transitionTaskOnIntegrationBranch still aborts shared-file rebase conflict
     process.env.PRIMARY_WORKTREE = root;
     try {
       const logs = [];
-      assert.equal(transitionTaskOnIntegrationBranch(slug, 'active', { rootDir: missionWorktree, log: message => logs.push(message) }), false);
+      assert.equal(await transitionTaskOnIntegrationBranch(slug, 'active', { rootDir: missionWorktree, log: message => logs.push(message) }), false);
       assert.match(fs.readFileSync(taskPath, 'utf8'), /^status: active$/m);
       assert.equal(childProcess.spawnSync('git', ['rev-parse', 'HEAD'], { cwd: missionWorktree, encoding: 'utf8' }).stdout.trim(), missionHead);
       assert.notEqual(childProcess.spawnSync('git', ['rebase', '--show-current'], { cwd: missionWorktree, encoding: 'utf8' }).status, 0);
@@ -993,8 +993,8 @@ test('transitionTask with clearAssignee when no assignee field returns true with
   });
 });
 
-test('clearTaskAgentAssignee preserves human assignees when only agent families are cleared', () => {
-  withTempGitRepo(root => {
+test('clearTaskAgentAssignee preserves human assignees when only agent families are cleared', async () => {
+  await withTempGitRepo(root => {
     const taskPath = path.join(root, 'backlog', 'tasks', 'task-132 - human-assignees.md');
     fs.writeFileSync(taskPath, 'id: TASK-132\nstatus: active\nassignee: [claude, magnus, reviewer]\n');
     childProcess.spawnSync('git', ['add', '.'], { cwd: root, encoding: 'utf8' });
@@ -1008,8 +1008,8 @@ test('clearTaskAgentAssignee preserves human assignees when only agent families 
   });
 });
 
-test('clearTaskAgentAssignee clears block-form agent assignees while preserving human block assignees', () => {
-  withTempGitRepo(root => {
+test('clearTaskAgentAssignee clears block-form agent assignees while preserving human block assignees', async () => {
+  await withTempGitRepo(root => {
     const taskPath = path.join(root, 'backlog', 'tasks', 'task-133 - human-block.md');
     fs.writeFileSync(taskPath, 'id: TASK-133\nstatus: active\nassignee:\n  - claude\n  - magnus\n');
     childProcess.spawnSync('git', ['add', '.'], { cwd: root, encoding: 'utf8' });
@@ -1023,8 +1023,8 @@ test('clearTaskAgentAssignee clears block-form agent assignees while preserving 
   });
 });
 
-test('clearTaskAgentAssignee does not mutate task when no agent families are present', () => {
-  withTempGitRepo(root => {
+test('clearTaskAgentAssignee does not mutate task when no agent families are present', async () => {
+  await withTempGitRepo(root => {
     const taskPath = path.join(root, 'backlog', 'tasks', 'task-134 - humans-only.md');
     fs.writeFileSync(taskPath, 'id: TASK-134\nstatus: active\nassignee: [magnus, reviewer]\n');
     childProcess.spawnSync('git', ['add', '.'], { cwd: root, encoding: 'utf8' });
