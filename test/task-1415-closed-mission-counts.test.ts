@@ -8,6 +8,9 @@ import os from 'os';
 import path from 'path';
 import { spawnSync } from 'child_process';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
+import { SqliteDatabaseAdapter } from '../src/adapters/sqlite/database-adapter.js';
+import { SqliteMigrationRunner, loadDefaultMigrations } from '../src/adapters/sqlite/migration-runner.js';
+import { SqliteMissionStore } from '../src/adapters/sqlite/mission-store.js';
 const stats = mockModule<typeof import('../src/adapters/cli/commands/stats.js')>('../src/adapters/cli/commands/stats.js', import.meta.url);
 const recordPostIntegrationStatsModule = mockModule<typeof import('../src/adapters/cli/commands/integrate.js')>('../src/adapters/cli/commands/integrate.js', import.meta.url);
 await installModuleMocks();
@@ -106,10 +109,20 @@ test('task-1415: recordPostIntegrationStats counts a closed mission in the curre
   assert.equal(committerDate, '2026-06-13',
     'fixture setup: base worktree tip commit must carry the stale committer date');
 
+  // TASK-2378: recordIntegrationStats requires the operator MissionStore for
+  // the authoritative derivation. This test asserts only the closed row's
+  // date/window, so an empty store (mission absent => no Review => unknown)
+  // is sufficient and keeps the test focused on the date fix.
+  const database = new SqliteDatabaseAdapter();
+  await database.open({ path: path.join(root, 'operator.db') });
+  await new SqliteMigrationRunner(database).applyPending(loadDefaultMigrations());
+  const missionStore = new SqliteMissionStore(database);
+
   try {
     await recordPostIntegrationStats('task-1388', {
       rootDir: root,
       recordIntegrationStatsFn: (opts) => stats.recordIntegrationStats({ ...opts, dbPath: dbFile }),
+      missionStore,
     });
 
     const csvData = stats.loadMeasurementRows({ dbPath: dbFile, rootDir: root });
@@ -129,6 +142,7 @@ test('task-1415: recordPostIntegrationStats counts a closed mission in the curre
       'a mission closed via recordPostIntegrationStats must count in the week it was actually closed, ' +
       'regardless of how old the base worktree\'s tip commit is');
   } finally {
+    await database.close();
     fs.rmSync(root, { recursive: true, force: true });
   }
 });

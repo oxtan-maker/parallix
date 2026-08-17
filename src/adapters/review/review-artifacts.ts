@@ -8,10 +8,13 @@ import * as os from 'os';
 import * as path from 'path';
 import * as fmt from '../../application/presentation/cli-format.js';
 import { missionBranchName, resolveWorktree } from '../filesystem/mission-utils.js';
+import { git } from '../git/git.js';
 import { readReviewState, writeReviewState, reviewStateFile, ReviewState, resolveReviewIdentity, persistReviewStateOrThrow } from './review-state.js';
 import type { MissionStore } from '../../application/domain-ports.js';
 import { readToken, postComment, postReview, getPrAuthor, isEnabled, resolveArtifactDir as resolveConfiguredArtifactDir } from './review-adapter.js';
 import { createEvent, consumeHumanNotes, VALID_EVENT_TYPES, CreateEventParams, CreateEventOptions, CreateEventResult } from './review-events.js';
+import { parseReviewFindings, recordImplementerResolution, recordRequestedChanges } from './review-round.js';
+import type { MissionLifecycleService } from '../../application/mission-lifecycle-service.js';
 
 type CreateResult = { ok: boolean; path: string | null; error?: string | null; event?: Record<string, unknown> };
 
@@ -86,6 +89,23 @@ function normalizeReviewVerdict(value: string): string | null {
 function normalizeDisposition(value: string): string | null {
   const normalized = String(value || '').trim().toUpperCase();
   return ['CHANGES_MADE', 'PUSHBACK_ALL', 'PARKED', 'BLOCKED'].includes(normalized) ? normalized : null;
+}
+
+/**
+ * The revision the implementer hands back — the branch tip it produced.
+ *
+ * A worktree that cannot report a HEAD has no revision to record; failing here
+ * is honest, where a synthesized placeholder would write a non-SHA revision
+ * into the aggregate and make the round look answered against a change nobody
+ * can resolve.
+ */
+function headRevision(worktree: string): string {
+  const result = git(['-C', worktree, 'rev-parse', 'HEAD']);
+  const sha = result.stdout.trim();
+  if (!sha) {
+    throw new Error(`Cannot resolve HEAD in ${worktree}: the implementer round has no revision to record`);
+  }
+  return sha;
 }
 
 // ============================================================================
@@ -313,6 +333,8 @@ async function consumeReviewerArtifacts(
     writeReviewStateFn?: typeof writeReviewState;
     currentState?: { metadata?: Record<string, unknown> } | null;
     missionStore?: MissionStore | null;
+    lifecycleService?: MissionLifecycleService | null;
+    recordRequestedChangesFn?: typeof recordRequestedChanges;
   } = {}
 ): Promise<{ consumed: boolean; ok?: boolean; reviewState?: string | null; diagnostic?: string | null }> {
   const log = options.log || fmt.log.plain;
@@ -400,6 +422,25 @@ async function consumeReviewerArtifacts(
 
   log(fmt.status('INFO', `Persisted reviewer artifacts to repo store: ${(findingsEventResult as { path?: string }).path}, ${(outcomeEventResult as { path?: string }).path}`));
 
+  // The decision itself, not just its prose. Without it the round keeps
+  // `decision: null`, the Mission never leaves `review` through
+  // `request-changes`, and the next handoff cannot open round N+1.
+  if (verdict === 'request-changes') {
+    const recordRequestedChangesFn = options.recordRequestedChangesFn || recordRequestedChanges;
+    const decision = await recordRequestedChangesFn(slug, {
+      findings: parseReviewFindings(findings),
+      comment: outcomeMessage,
+      decidedAt: new Date().toISOString(),
+    }, { missionStore: options.missionStore, lifecycleService: options.lifecycleService });
+    if (decision.outcome === 'failed') {
+      error(fmt.status('FAIL', `Could not record the reviewer decision for ${slug}: ${decision.diagnostic}`));
+      return { consumed: true, ok: false, diagnostic: `Reviewer decision persist failed: ${decision.diagnostic}` };
+    }
+    if (decision.outcome === 'unchanged') {
+      log(fmt.status('INFO', `Reviewer decision for ${slug} already recorded (${decision.reason}).`));
+    }
+  }
+
   if (providerEnabled && options.readTokenFn && options.getCommentsFn) {
     await consumeHumanNotes(slug, reviewer, {
       getCommentsFn: options.getCommentsFn,
@@ -437,6 +478,10 @@ async function consumeReviewerArtifacts(
       log: log,
       error,
       missionStore: options.missionStore,
+      // Forward the (composition-bound) write function so the self-author
+      // local verdict path persists through the same approval boundary as
+      // every other approval-producing site (TASK-2378 CP-2 audit site 3).
+      writeReviewStateFn: options.writeReviewStateFn,
     });
     if (!reviewResult.ok) {
       return { consumed: true, ok: false, diagnostic: `Reviewer review post failed: ${(reviewResult as { error?: string }).error}` };
@@ -480,6 +525,9 @@ async function consumeImplementerArtifacts(
     readReviewStateFn?: (_s: string, _r?: string) => any;
     writeReviewStateFn?: typeof writeReviewState;
     currentState?: { metadata?: Record<string, unknown> } | null;
+    missionStore?: MissionStore | null;
+    recordImplementerResolutionFn?: typeof recordImplementerResolution;
+    headRevisionFn?: (_worktree: string) => string;
   } = {}
 ): Promise<{ consumed: boolean; ok?: boolean; disposition?: string | null; diagnostic?: string | null }> {
   const log = options.log || fmt.log.plain;
@@ -579,6 +627,34 @@ async function consumeImplementerArtifacts(
   }
 
   log(fmt.status('INFO', `Persisted implementer artifacts to repo store: ${(summaryEventResult as { path?: string }).path}, ${(dispositionEventResult as { path?: string }).path}`));
+
+  // Close the round on the aggregate. `ready-for-next-round` is the state the
+  // next handoff needs to open round N+1 on the same pull request.
+  if (disposition !== 'BLOCKED') {
+    const recordImplementerResolutionFn = options.recordImplementerResolutionFn || recordImplementerResolution;
+    const headRevisionFn = options.headRevisionFn || headRevision;
+    let resultingRevision: string;
+    try {
+      resultingRevision = headRevisionFn(worktree);
+    } catch (revisionError) {
+      const revErr = (revisionError as Error).message;
+      error(fmt.status('FAIL', `Could not record the implementer resolution for ${slug}: ${revErr}`));
+      return { consumed: true, ok: false, diagnostic: `Implementer resolution persist failed: ${revErr}` };
+    }
+    const resolution2 = await recordImplementerResolutionFn(slug, {
+      itemDispositions,
+      evidence: `${disposition} — implementer round summary for ${slug}`,
+      resultingRevision,
+      respondedAt: new Date().toISOString(),
+    }, { missionStore: options.missionStore });
+    if (resolution2.outcome === 'failed') {
+      error(fmt.status('FAIL', `Could not record the implementer resolution for ${slug}: ${resolution2.diagnostic}`));
+      return { consumed: true, ok: false, diagnostic: `Implementer resolution persist failed: ${resolution2.diagnostic}` };
+    }
+    if (resolution2.outcome === 'unchanged') {
+      log(fmt.status('INFO', `Implementer resolution for ${slug} already recorded (${resolution2.reason}).`));
+    }
+  }
 
   if (providerEnabled && options.readTokenFn && options.getCommentsFn) {
     await consumeHumanNotes(slug, implementer, {

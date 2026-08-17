@@ -264,12 +264,30 @@ async function readMissionFlowPopulation(options: {
   }
 }
 
-/** Infrastructure implementation supplied to the application workflow. */
-export function createStatsWorkflowAdapter(): StatsWorkflowPort<StatsRow> {
+/**
+ * Infrastructure implementation supplied to the application workflow.
+ *
+ * `missionStore` is the operator Mission authority the stats derivation reads
+ * the authoritative Review aggregate from (TASK-2378). The composition root
+ * resolves and passes it; callers without store access pass `null` explicitly
+ * and get the invariant error from `deriveImplementerAndFixRounds` instead of
+ * fabricated values when the method is invoked.
+ */
+export function createStatsWorkflowAdapter(missionStore: MissionStore | null): StatsWorkflowPort<StatsRow> {
   return {
     loadMeasurements: (options) => loadMeasurementRows(options as StatsOptions).rows,
     resolveClassification: (slug, options) => resolveMissionClassification(slug, String(options.rootDir || process.cwd())),
-    deriveImplementerAndFixRounds: (slug, options) => deriveImplementerAndFixRounds(slug, String(options.rootDir || process.cwd())),
+    // A null store is not a missing-data condition: it is a wiring defect. The
+    // invariant error is raised inside deriveImplementerAndFixRounds when the
+    // method is actually invoked, so the adapter defers the check there.
+    //
+    // No `px stats` render path calls this method: the rendered rows are the
+    // measurement rows `recordIntegrationStats` wrote at integrate time, which
+    // is where the authoritative derivation already happened. It stays on the
+    // port because the derivation is the port's contract — do not "fix" the
+    // render path to derive per row, which would re-derive at read time from a
+    // Mission whose Review has since advanced.
+    deriveImplementerAndFixRounds: (slug, options) => deriveImplementerAndFixRounds(slug, String(options.rootDir || process.cwd()), missionStore as MissionStore),
     resolveRepositoryName: (options) => resolveStatsRepoName(String(options.rootDir || process.cwd())),
     lookupForgejo: (slug, options) => forgejo.getPrStatus(slug, String(options.rootDir || process.cwd())),
   };
@@ -325,9 +343,13 @@ const { formatStatsTable, renderWeeklyStatsReport, renderRangeStatsReport } = st
  * @returns {Promise<import('../../../domain/review.js').Review|null>}  Null when the mission has no Review.
  */
 // @ts-ignore -- retained reporting helper is dynamically typed
-async function loadMissionReview(slug, rootDir = process.cwd(), missionStore: MissionStore | null = null) {
+async function loadMissionReview(slug, rootDir = process.cwd(), missionStore: MissionStore) {
   void rootDir;
-  if (!missionStore) { return null; }
+  if (!missionStore) {
+    throw new Error(
+      `loadMissionReview requires a MissionStore: the stats caller must supply the operator store so ${slug} is read from the authoritative Review aggregate. Store omission is an invariant error; there is no heuristic fallback.`,
+    );
+  }
   const result = await missionStore.load(missionId(slug));
   if (result.kind === 'unavailable') {
     throw new Error(`Mission store unavailable while reading review statistics: ${result.reason}`);
@@ -340,7 +362,12 @@ async function loadMissionReview(slug, rootDir = process.cwd(), missionStore: Mi
  * @param {string} [rootDir]
  */
 // @ts-ignore -- retained reporting helper is dynamically typed
-async function deriveImplementerAndFixRounds(slug, rootDir = process.cwd(), missionStore: MissionStore | null = null) {
+async function deriveImplementerAndFixRounds(slug, rootDir = process.cwd(), missionStore: MissionStore) {
+  if (!missionStore) {
+    throw new Error(
+      `deriveImplementerAndFixRounds requires a MissionStore: the stats caller must supply the operator store so ${slug} is read from the authoritative Review aggregate. Store omission is an invariant error; there is no PR, Git, or backlog fallback.`,
+    );
+  }
   const review = await loadMissionReview(slug, rootDir, missionStore);
   const rounds = review ? review.rounds : [];
   if (rounds.length > 0) {
@@ -382,13 +409,13 @@ async function deriveImplementerAndFixRounds(slug, rootDir = process.cwd(), miss
     }
   }
 
-  // No authoritative Review data available.
-  // Missing MissionStore is a caller bug; absent Review means unknown —
-  // do not fabricate values from PR comments, Git history, or backlog text.
+  // Store present but no Review aggregate (or no implementer on the last
+  // round): unknown, never a fabricated zero and never an external lookup
+  // (PR comments, Git history, or backlog text).
   return {
     implementer: 'unknown',
     prFixRounds: null,
-    source: 'missing-authority',
+    source: 'no-review',
   };
 }
 
@@ -465,9 +492,14 @@ async function recordIntegrationStats(options = {}) {
   /** @type {RecordIntegrationStatsOptions} */
   const opts = options;
 // @ts-ignore -- retained reporting helper is dynamically typed
-  const { slug, rootDir = process.cwd(), date = formatDateOnly(new Date()), store = undefined, dbPath = undefined, missionStore = null } = opts;
+  const { slug, rootDir = process.cwd(), date = formatDateOnly(new Date()), store = undefined, dbPath = undefined, missionStore } = opts;
   if (!slug) {
     throw new Error('recordIntegrationStats requires a mission slug.');
+  }
+  if (!missionStore) {
+    throw new Error(
+      'recordIntegrationStats requires a MissionStore: the post-integration stats caller must supply the operator store so the implementer and fix rounds are read from the authoritative Review aggregate. Store omission is an invariant error; there is no heuristic fallback.',
+    );
   }
 
   const resolution = resolveMissionClassification(slug, rootDir);
@@ -912,7 +944,11 @@ export function createStatsCommand(useCase: StatsCommandUseCase<StatsRow>) {
   };
 }
 
-const stats = createStatsCommand(new StatsCommandUseCase(createStatsWorkflowAdapter()));
+// Legacy module-level default: this command object is consumed for helpers
+// that do not derive (classification, stage stats). Derivation through it
+// throws the invariant error — the production `px stats` wiring resolves the
+// operator store in the composition root instead.
+const stats = createStatsCommand(new StatsCommandUseCase(createStatsWorkflowAdapter(null)));
 
 export default stats;
 export { stats, statsCohorts, STATS_HEADERS, USAGE_NUMBERS, VALID_CLASSIFICATIONS, normalizeStatsRow, normalizeImplementer, parseDateOnly, parseDateOnlyStrict, formatDateOnly, parseToday, createWindow, createRangeWindow, buildWeeklyWindows, canonicalizeStatsRow, sameStatsIdentity, accumulateIntegerStrings, accumulateDecimalStrings, mergeLabel, parseBooleanish, normalizeRow, normalizeRows, statsMissionKey, modelBelongsToImplFamily, isValidClassification, normalizeClassification, rowInWindow, resolveStatsRepoName, recordIntegrationStats, renderWeeklyStatsReport, renderMissionPhaseReport, renderRangeStatsReport, resolveMissionClassification, deriveImplementerAndFixRounds, upsertMeasurementRow, loadMeasurementRows, measurementToStatsRow, statsRowToMeasurement, recordStageStats, accumulateStageStats, defaultPrFixRounds, recordActiveStats, recordReviewStats, telemetryToStatsFields, formatStatsTable, computeAgentMissionGroups, summarizeMissionWindow, summarizeAgentWindow, summarizeAgentStageSpend, formatAgentSpendCell, colorAverageFixRounds, colorMissionCounts, AGENT_SPEND_STAGE_COLUMNS, MISSION_PHASE_ORDER, statsRowActorKey };

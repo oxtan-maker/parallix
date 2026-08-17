@@ -123,6 +123,11 @@ test('bound implementer-artifact consumer persists its events to the operator da
     worktree: tmpDir,
     tmpDir,
     providerEnabled: false,
+    // The artifact dir is a bare temp directory with no checkout behind it,
+    // and this test is about event persistence, not revision resolution.
+    // `headRevision` fails loud rather than synthesizing a non-SHA revision,
+    // so supply the branch tip here.
+    headRevisionFn: () => 'rev-4',
     ...silent,
   });
 

@@ -73,6 +73,11 @@ export function bindReviewPersistence(store: MissionStore, lifecycleService?: Mi
       createEventFn: boundCreateEvent,
       readReviewStateFn: boundReadReviewState,
       writeReviewStateFn: boundWriteReviewState,
+      // The request-changes boundary: the reviewer's decision is persisted on
+      // the aggregate and moves the Mission `review → active`, mirroring the
+      // approval boundary bound through `writeReviewState`.
+      missionStore: store,
+      lifecycleService: lifecycleService ?? null,
     }),
     consumeImplementerArtifacts: (
       slug: string,
@@ -83,6 +88,9 @@ export function bindReviewPersistence(store: MissionStore, lifecycleService?: Mi
       createEventFn: boundCreateEvent,
       readReviewStateFn: boundReadReviewState,
       writeReviewStateFn: boundWriteReviewState,
+      // Records the round's resolution, which is what leaves the review
+      // `ready-for-next-round` for the next handoff to advance.
+      missionStore: store,
     }),
   };
 }

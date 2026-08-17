@@ -711,6 +711,7 @@ test('recordIntegrationStats reads backlog classification and Review aggregate f
 
 test('recordIntegrationStats returns the unchanged weekly report labels for integration output', async () => {
   const root = createRepoFixture();
+  let restoreHome: (() => Promise<void>) & { store?: unknown } = Object.assign(async () => {}, { store: undefined });
   try {
     const taskFile = path.join(root, 'backlog', 'tasks', 'task-2000 - Example.md');
     fs.writeFileSync(taskFile, [
@@ -722,6 +723,11 @@ test('recordIntegrationStats returns the unchanged weekly report labels for inte
       '---',
       '',
     ].join('\n'));
+
+    // TASK-2378: recordIntegrationStats requires the operator store. This test
+    // asserts only the report labels, so the seeded review content is
+    // irrelevant.
+    restoreHome = await seedMissionDatabase(path.join(root, 'parallix-home'), 'task-2000', root);
 
     const dbFile = path.join(root, 'workflow', 'data', 'parallix.db');
     for (const seed of [
@@ -736,6 +742,7 @@ test('recordIntegrationStats returns the unchanged weekly report labels for inte
       rootDir: root,
       dbPath: dbFile,
       date: '2026-05-18',
+      missionStore: restoreHome.store,
     });
 
     const report = __mm2.stripAnsi(result.report);
@@ -747,6 +754,7 @@ test('recordIntegrationStats returns the unchanged weekly report labels for inte
     assert.match(report, /Agent family\s+# missions as implementer\s+Average PR fix rounds to complete mission/);
     assert.doesNotMatch(report, /Mission flow \(2026-05-12 → 2026-05-18\)/);
   } finally {
+    await restoreHome();
     fs.rmSync(root, { recursive: true, force: true });
   }
 });

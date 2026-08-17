@@ -76,8 +76,13 @@ function decisionFromState(
     // A flattened legacy state has no finding payload. Retain findings from
     // the aggregate when present; otherwise leave the decision absent rather
     // than manufacturing an invalid changes-requested decision with no finds.
+    // `startedAt` is the round's start, not the decision time. Approve reads
+    // the same value on both sides of its boundary, but a retained
+    // changes-requested decision already carries the real `decidedAt` that
+    // fired `review -> active`; rewriting it here would skew the aggregate
+    // away from the lane event's `occurredAt`.
     if (previous?.kind !== 'changes-requested') { return null; }
-    return { ...previous, decidedAt: startedAt, comment: disposition };
+    return { ...previous, comment: disposition };
   }
   return null;
 }

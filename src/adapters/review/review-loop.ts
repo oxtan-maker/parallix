@@ -725,7 +725,16 @@ export async function startReviewLoop(slug: string, opts: {
       if (reviewState === 'APPROVED') {
         state.transitionTo('approved');
         state.disposition = reviewState as string;
-        await persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree, missionStore);
+        try {
+          await persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree, missionStore);
+        } catch (err) {
+          // The review is recorded as approved but the review → integration
+          // boundary failed. Do not promote the Backlog task to approved
+          // while the Mission is still in review; px integrate recovers it.
+          error(fmt.status('FAIL', `Reviewer approved ${slug} but the review → integration transition failed: ${err instanceof Error ? err.message : String(err)}`));
+          error(fmt.status('FAIL', `Recovery: px integrate ${slug}`));
+          return;
+        }
         log(fmt.status('PASS', 'Autonomous review stopped: reviewer approved the PR. Hand off to human review/integration.'));
         await transitionVirtualFn(transitionTaskFn, slug, 'approved', { log });
         return;

@@ -3658,6 +3658,10 @@ test('consumeImplementerArtifacts posts resolution and normalized disposition fr
     error: () => {},
     // Mock createEvent to avoid requiring real mission directory
     createEventFn: () => ({ ok: true, path: '/tmp/fake-event.md' }),
+    // /tmp/worktree is not a checkout; supply the branch tip and stub the
+    // round-closing record (covered in test/review-round-loop.test.ts).
+    headRevisionFn: () => 'rev-4',
+    recordImplementerResolutionFn: async () => ({ outcome: 'recorded' }),
   });
 
   const actualResult = await result;
@@ -3792,6 +3796,10 @@ test('consumeImplementerArtifacts proves persist-before-mirror ordering', async 
     error: () => {},
     // Track createEvent calls
     createEventFn: (slug, eventType, params, options) => { calls.push('createEvent'); return { ok: true, path: `/tmp/fake-${eventType}.md` }; },
+    // /tmp/worktree is not a checkout; supply the branch tip and stub the
+    // round-closing record (covered in test/review-round-loop.test.ts).
+    headRevisionFn: () => 'rev-4',
+    recordImplementerResolutionFn: async () => ({ outcome: 'recorded' }),
   });
 
   const actualResult = await result;

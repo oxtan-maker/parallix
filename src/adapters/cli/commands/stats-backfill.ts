@@ -190,10 +190,15 @@ function resolveHistoricalClassification(slug: string, taskFile: string, rootDir
  * @param rootDir Repository root the historical missions are read from.
  * @param options Measurement-store selection. `dbPath`/`store` let fast
  *   isolated tests bind a temporary database instead of `<PARALLIX_HOME>`.
+ * @param missionStore Operator Mission authority for the authoritative
+ *   implementer/fix-round derivation (TASK-2378). Without it the derivation
+ *   throws the invariant error and the historical git-history fallback below
+ *   is the only source — which is what pre-cutover missions have always used.
  */
 async function collectHistoricalStatsBackfill(
   rootDir = process.cwd(),
   options: { dbPath?: string; store?: unknown } = {},
+  missionStore?: unknown,
 ) {
   const s = getStats();
   // architecture migration: the already-recorded missions come from the measurement
@@ -234,7 +239,7 @@ async function collectHistoricalStatsBackfill(
     let implementerInfo: { implementer: string; prFixRounds: number | null; source: string } | null = null;
     let implementerError: string | null = null;
     try {
-      implementerInfo = await s.deriveImplementerAndFixRounds(slug, rootDir);
+      implementerInfo = await s.deriveImplementerAndFixRounds(slug, rootDir, missionStore);
     } catch (error) {
       implementerError = error instanceof Error ? error.message : String(error);
     }

@@ -109,8 +109,11 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
   const resolveConflict = createResolveConflictCommand((request, options) => resolveConflictWorkflow([...request.args], options));
   const setup = createSetupCommand((request, options) => setupWizard([...request.args], options));
   const verify = createVerifyCommand((request, options) => verifyWorkflow([...request.args], options));
-  const withGraph = async (invoke: (_services: Awaited<ReturnType<typeof createProductionApplicationServices>>) => unknown) => {
-    const services = await createProductionApplicationServices(rootDir);
+  const withGraph = async (
+    invoke: (_services: Awaited<ReturnType<typeof createProductionApplicationServices>>) => unknown,
+    options: Parameters<typeof createProductionApplicationServices>[2] = {},
+  ) => {
+    const services = await createProductionApplicationServices(rootDir, undefined, options);
     try { return await invoke(services); } finally { await services.operatorState.close(); }
   };
   const withMissionFactories = async (invoke: (_missionServicesFn: Function) => unknown) => {
@@ -196,6 +199,10 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
           reconcileInterruptedHandoffFn: persistence.reconcileInterruptedHandoff,
           consumeReviewerArtifactsFn: persistence.consumeReviewerArtifacts,
           consumeImplementerArtifactsFn: persistence.consumeImplementerArtifacts,
+          // `px review --submit-review request-changes` records a reviewer
+          // decision, so it needs the same authority the loop paths use.
+          missionStore: services.mission.store,
+          lifecycleService: services.mission.lifecycle,
           startReviewLoopFn: (slug: string, loopOptions: Record<string, unknown>) => startReviewLoop(slug, {
             ...loopOptions,
             performHandoffFn: (handoffSlug: string, handoffOptions: Record<string, unknown>) =>
@@ -211,7 +218,19 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
     ),
     setup,
     'setup-review': setupReview,
-    stats: createStatsCommand(new StatsCommandUseCase(createStatsWorkflowAdapter())),
+    // TASK-2378: stats derivation reads the authoritative Review aggregate
+    // through the operator store, so the command resolves the services (and
+    // the store) before building the workflow adapter. Stats is read-only
+    // with respect to the operator database, so it skips the preflight
+    // import gate that the other withGraph commands trigger: the gate
+    // appends an import_history row on first use per source root, and a
+    // read command must not mutate the store (round-1 review F1; the
+    // tarball reinstall preservation test pins this). Missions not yet
+    // imported derive as no-review unknown — the parent behavior.
+    stats: (args, options) => withGraph(services =>
+      createStatsCommand(new StatsCommandUseCase(createStatsWorkflowAdapter(services.mission?.store ?? null)))(args, options),
+      { skipImportGate: true },
+    ),
     status: (args, options) => withGraph(services => {
       const board = createStatusBoardAdapter({
         buildProjectionFn: async () => {

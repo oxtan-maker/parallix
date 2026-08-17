@@ -252,7 +252,11 @@ export async function createProductionApplicationServices(
     executeMission: new ExecuteMissionService(executePorts, activeProgress, currentWork),
     executePorts,
     presentationCapabilities,
-    statsBackfill: new StatsBackfillService(new LegacyStatsBackfillAdapter(rootDir)),
+    // TASK-2378: the backfill derivation reads the authoritative Review
+    // aggregate through the operator store when the mission services are
+    // available; pre-cutover missions without a Review keep the historical
+    // git-history fallback.
+    statsBackfill: new StatsBackfillService(new LegacyStatsBackfillAdapter(rootDir, {}, mission?.store ?? null)),
     // Closing the shared handle is the last thing a command does, but a Mission
     // write can still be settling when it happens — that is how a review-loop
     // stats write ended up reporting "Database is not open. Call open() before

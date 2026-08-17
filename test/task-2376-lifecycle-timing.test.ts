@@ -732,6 +732,10 @@ test('R12: external artifacts with misleading values do not affect authoritative
 // no task-text lookup, no fabricated zero.
 // ---------------------------------------------------------------------------
 
+// TASK-2378 (SC08): store omission is now an invariant error, not a
+// `missing-authority` result. The throw happens before any PR lookup,
+// branch-history lookup, or task-text lookup, and no value is fabricated.
+
 test('R13: missing MissionStore cannot activate heuristic inference', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2376-r13-'));
   fs.mkdirSync(path.join(root, 'missions'), { recursive: true });
@@ -749,10 +753,12 @@ test('R13: missing MissionStore cannot activate heuristic inference', async () =
 
   try {
     // @ts-expect-error -- TASK-2328: runtime-only property
-    const info = await stats._internals.deriveImplementerAndFixRounds(slug, root, null);
-    assert.equal(info.source, 'missing-authority', 'missing MissionStore yields missing-authority source');
-    assert.equal(info.implementer, 'unknown', 'no fabricated implementer from backlog');
-    assert.equal(info.prFixRounds, null, 'no fabricated zero — unknown stays null');
+    const deriveCall = stats._internals.deriveImplementerAndFixRounds(slug, root, null);
+    await assert.rejects(
+      deriveCall,
+      (error: unknown) => error instanceof Error && /requires a MissionStore/.test(error.message) && /invariant error/.test(error.message),
+      'store omission throws the invariant error naming the caller obligation',
+    );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

@@ -329,6 +329,10 @@ test('consumeImplementerArtifacts does not call Forgejo helpers when forgejoEnab
     // This test is about Forgejo independence, not event storage: stub the
     // event writer so it does not need an operator database with a Review.
     createEventFn: () => ({ ok: true, path: '/mock/event' }),
+    // The temp worktree has no checkout; supply the branch tip and stub the
+    // round-closing record (covered in test/review-round-loop.test.ts).
+    headRevisionFn: () => 'rev-4',
+    recordImplementerResolutionFn: async () => ({ outcome: 'recorded' }),
     log: () => {},
     error: () => {},
   });
