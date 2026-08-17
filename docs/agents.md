@@ -356,6 +356,30 @@ Automatic repair is refused and the harness stops if:
 - Rebase requires manual conflict resolution or agent assistance for shared files.
 - Handoff fails for non-hygiene reasons (missing checkpoints, missing `## Goal Check` evidence, failed verification gates).
 
+### Pre-review bounce policy — verified fixes and a per-failure budget
+
+When the pre-review verification gate fails, or a Git hook rejects the
+pre-review commit or rebase, the harness bounces the mission back to its
+implementer with a fix prompt built from the failure's structured evidence and
+its classification. Two guarantees govern that bounce:
+
+- **A bounce counts as fixed only when the failing check passes again.** After
+  the implementer exits, the harness re-runs the pre-review rebase and the
+  verification gate itself. Relaunching an agent is never, on its own, evidence
+  of a repair, and an ambiguous agent exit status is treated as a failed launch
+  rather than a fix.
+- **The retry budget is per failure occurrence, not cumulative.** Each failing
+  occurrence gets two attempts, held in memory for the duration of that
+  occurrence. Nothing is persisted between occurrences, so two concurrent
+  processes can never consume one shared counter, and a later occurrence of the
+  same failure class starts with a full budget.
+
+If both attempts fail their re-run, the mission strands and the harness reports
+the diagnostic from the most recent re-run — not the original failure. A failure
+the classifier judges human-only (infrastructure or task-state blockers) strands
+immediately without launching an agent, because no implementer relaunch can fix
+it.
+
 ### Manual override is still supported
 
 - `WORKFLOW_AGENT=<name>` — pin a specific agent for the next run.

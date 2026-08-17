@@ -4,7 +4,7 @@ import { classifyHookFailure, handleHookFailureAutoBounce } from '../src/adapter
 import rebase from '../src/adapters/cli/commands/rebase.js';
 import { classifyHookFailure as classifyHookFailureIntegrate, handleHookFailureAutoBounce as handleHookFailureAutoBounceIntegrate } from '../src/adapters/cli/commands/integrate.js';
 import { classifyHookFailure as classifyHookFailureShared, handleHookFailureAutoBounce as handleHookFailureAutoBounceShared, MAX_HOOK_RETRY, type HookRebouncePort } from '../src/application/hook-failure-workflow.js';
-import { handleGateFailureAutoBounce } from '../src/adapters/review/review-loop.js';
+import { reboundPreReviewFailure, gateFailureReason, hookFailureReason } from '../src/adapters/review/review-loop.js';
 import { ReviewState } from '../src/adapters/review/review-state.js';
 
 describe('classifyHookFailure (rebase.ts) — SC1/SC7', () => {
@@ -481,35 +481,72 @@ describe('Rebase retry budget — regression coverage', () => {
 });
 
 describe('Pre-review lifecycle hook rebounce', () => {
-  it('uses the hook retry budget and hook-specific prompt for a gate-stage hook failure', async () => {
-    let persistedMetadata: any;
+  // TASK-2377.03: the pre-review hook path passes the rebound kernel a
+  // structured hook-failure reason instead of a synthesized gate result, and
+  // the per-occurrence budget lives in memory — so no retry counter is
+  // persisted and a gate failure is never relabelled from its output text.
+  it('uses the hook-specific prompt and persists no retry counter for a pre-review hook failure', async () => {
+    const stateWrites: any[] = [];
     let prompt = '';
-    const result = await handleGateFailureAutoBounce('task-2340', '/worktree', {
-      ok: false,
-      area: 'docs',
-      command: './scripts/verify-local.sh docs',
-      exitCode: 1,
-      stdout: 'pre-commit hook failed: lint error',
-      stderr: '',
-    }, 'claude', {
-      readReviewStateFn: async () => new ReviewState('task-2340', { metadata: {} }),
-      writeReviewStateFn: async (_slug: string, state: any) => {
-        persistedMetadata = state.metadata;
-        return { outcome: 'committed' as const };
-      },
-      transitionTaskFn: async () => true,
-      startAgentFn: async (_step: string, options: any) => {
-        prompt = options.prompt('claude');
-        return { agent: 'claude', invocation: {}, result: { status: 0 } };
-      },
-      applyAgentFallbackFn: async ({ original }: any) => original,
-      taskResolution: { ok: true, taskFile: '/worktree/backlog/tasks/task-2340.md' },
-      log: () => {}, error: () => {},
-    });
-    assert.deepEqual(result, { bounced: true, stranded: false });
-    assert.equal(persistedMetadata.hookFailureRetryCount, 1);
-    assert.equal(persistedMetadata.gateFailureRetryCount, undefined);
+    const result = await reboundPreReviewFailure(
+      'task-2340',
+      '/worktree',
+      hookFailureReason('pre-commit hook failed: lint error', 'pre-review safety commit'),
+      'claude',
+      {
+        verifyFn: () => ({ ok: true }),
+        readReviewStateFn: async () => new ReviewState('task-2340', { metadata: {} }),
+        writeReviewStateFn: async (_slug: string, state: any) => {
+          stateWrites.push(state);
+          return { outcome: 'committed' as const };
+        },
+        transitionTaskFn: async () => true,
+        startAgentFn: async (_step: string, options: any) => {
+          prompt = options.prompt('claude');
+          return { agent: 'claude', invocation: {}, result: { status: 0 } };
+        },
+        applyAgentFallbackFn: async ({ original }: any) => original,
+        taskResolution: { ok: true, taskFile: '/worktree/backlog/tasks/task-2340.md' },
+        log: () => {}, error: () => {},
+      } as any,
+    );
+    assert.equal(result.bounced, true);
+    assert.equal(result.outcome, 'fixed');
+    assert.deepEqual(stateWrites, [], 'the kernel keeps its budget in memory');
     assert.match(prompt, /GIT HOOK FAILURE/);
+    assert.match(prompt, /Hook type: pre-commit/);
+  });
+
+  it('keeps a declared gate failure a gate failure even when its output mentions a hook', async () => {
+    let prompt = '';
+    const result = await reboundPreReviewFailure(
+      'task-2340',
+      '/worktree',
+      gateFailureReason({
+        ok: false,
+        area: 'docs',
+        command: './scripts/verify-local.sh docs',
+        exitCode: 1,
+        stdout: 'pre-commit hook failed: lint error',
+        stderr: '',
+      }),
+      'claude',
+      {
+        verifyFn: () => ({ ok: true }),
+        readReviewStateFn: async () => new ReviewState('task-2340', { metadata: {} }),
+        writeReviewStateFn: async () => ({ outcome: 'committed' as const }),
+        transitionTaskFn: async () => true,
+        startAgentFn: async (_step: string, options: any) => {
+          prompt = options.prompt('claude');
+          return { agent: 'claude', invocation: {}, result: { status: 0 } };
+        },
+        applyAgentFallbackFn: async ({ original }: any) => original,
+        log: () => {}, error: () => {},
+      } as any,
+    );
+    assert.equal(result.bounced, true);
+    assert.match(prompt, /PRE-REVIEW GATE FAILURE/);
+    assert.match(prompt, /Classification: GateFailure — AutoSendBack/);
   });
 });
 

@@ -16,7 +16,7 @@ import {
   handleHookFailureAutoBounce,
   type HookRebouncePort,
 } from '../src/application/hook-failure-workflow.js';
-import { handleGateFailureAutoBounce } from '../src/adapters/review/review-gate-handling.js';
+import { reboundPreReviewFailure, gateFailureReason } from '../src/adapters/review/review-gate-handling.js';
 
 describe('elideBounceOutput', () => {
   it('passes through output at or under the cap unchanged', () => {
@@ -75,14 +75,15 @@ describe('pre-review gate bounce prompt embeds bounded output', () => {
       't'.repeat(500_000) +
       '\n> 2 of 2320 tests failed';
     let capturedPrompt = '';
-    const result = await handleGateFailureAutoBounce('task-2369.13', '/worktree', {
+    const result = await reboundPreReviewFailure('task-2369.13', '/worktree', gateFailureReason({
       ok: false,
-      area: 'git-hook',
+      area: 'all',
       command: './scripts/verify-local.sh all',
       exitCode: 1,
       stdout,
       stderr: '',
-    }, 'claude', {
+    }), 'claude', {
+      verifyFn: () => ({ ok: true }),
       readReviewStateFn: () => null,
       writeReviewStateFn: async () => ({ outcome: 'unchanged' }),
       transitionTaskFn: async () => true,
@@ -93,9 +94,7 @@ describe('pre-review gate bounce prompt embeds bounded output', () => {
       applyAgentFallbackFn: async () => 'claude',
       log: () => {},
       error: () => {},
-      sleepFn: () => Promise.resolve(),
-      exit: () => { throw new Error('exit called'); },
-    });
+    } as any);
     assert.equal(result.bounced, true);
     assert.ok(capturedPrompt.includes('[INFO] Rebasing mission/task-2369.13'), 'head of gate output preserved');
     assert.ok(capturedPrompt.includes('2 of 2320 tests failed'), 'tail (failure) of gate output preserved');

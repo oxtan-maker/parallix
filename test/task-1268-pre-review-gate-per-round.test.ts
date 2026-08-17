@@ -95,7 +95,7 @@ test('startReviewLoop stops after a gate-failure bounce without launching a revi
       gateCalls += 1;
       return { ok: false, area: 'lib', command: 'false', exitCode: 1, stdout: '', stderr: '' };
     },
-    handleGateFailureAutoBounceFn: async () => ({ bounced: false, stranded: true }),
+    reboundPreReviewFailureFn: async () => ({ bounced: false, stranded: true, outcome: 'exhausted', diagnostic: 'still failing', implementer: 'claude' }),
     startAgentFn: async (step, options) => {
       events.push(`${step}:${options.role}`);
       return { agent: null };
@@ -135,9 +135,9 @@ test('startReviewLoop rebounces a pre-review safety-commit hook failure before g
       ok: false, sharedFileConflicts: false, hookFailure: true, hookOutput: 'pre-commit hook failed: lint error',
     }),
     runPreReviewGateFn: async () => { gateCalls++; return { ok: true, area: 'lib', command: 'true', exitCode: 0, stdout: '', stderr: '' }; },
-    handleGateFailureAutoBounceFn: async (_slug, _worktree, result) => {
-      hookBounce = result;
-      return { bounced: false, stranded: true };
+    reboundPreReviewFailureFn: async (_slug, _worktree, reason) => {
+      hookBounce = reason;
+      return { bounced: false, stranded: true, outcome: 'exhausted', diagnostic: 'hook still failing', implementer: 'claude' };
     },
     startAgentFn: async (step, options) => {
       events.push(`${step}:${options.role}`);
@@ -151,8 +151,12 @@ test('startReviewLoop rebounces a pre-review safety-commit hook failure before g
     consumeImplementerArtifactsFn: async () => ({ consumed: false }),
   });
 
-  assert.equal(hookBounce.command, 'git commit (pre-review safety commit)');
-  assert.match(hookBounce.stdout, /pre-commit hook failed/);
+  // TASK-2377.03: the hook path no longer synthesizes a `git-hook` gate result;
+  // it passes the kernel a structured hook-failure reason (SC5).
+  assert.equal(hookBounce.kind, 'hook-failure');
+  assert.equal(hookBounce.hook, 'pre-commit');
+  assert.match(hookBounce.operation, /pre-review safety commit/);
+  assert.match(hookBounce.output, /pre-commit hook failed/);
   assert.equal(gateCalls, 0, 'the gate must wait until the rebounced safety commit succeeds');
   assert.equal(events.filter((event) => event === 'review:reviewer').length, 0);
 });

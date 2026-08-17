@@ -1,23 +1,30 @@
 /**
  * Pre-review Gate Handling (ADR 0048 Control C1 / architecture migration)
  *
- * Owns pre-review verification-gate execution, failure classification, and the
- * bounded auto-bounce back to the implementer. Extracted from `review-loop.ts`
- * so the loop keeps orchestration only.
+ * Owns pre-review verification-gate execution and the mapping of a pre-review
+ * failure onto the rebound kernel. Classification, fix prompt, launch, verify
+ * loop, and attempt budget all live in `src/application/rebound-kernel.ts`
+ * (TASK-2377.03); this module contributes structured reasons and collaborators
+ * only, so the review loop keeps orchestration.
  */
 
 import * as fmt from '../../application/presentation/cli-format.js';
-import { elideBounceOutput } from '../../application/output-elision.js';
+import {
+  rebound,
+  type GateFailureReason,
+  type HookFailureReason,
+  type ReboundContext,
+  type ReboundOutcome,
+  type VerifyResult,
+} from '../../application/rebound-kernel.js';
+import { classifyHookFailure } from '../../application/hook-failure-workflow.js';
 import { run } from '../git/git.js';
 import { findMissionDir, findMissionArea } from '../filesystem/mission-utils.js';
 import { formatVerificationCommand, resolveEffectiveArea } from '../verification/verification.js';
 import { enforceTaskAssignee, transitionTask } from '../backlog/backlog.js';
-import { readReviewState, writeReviewState, persistReviewStateOrThrow } from './review-state.js';
+import { readReviewState, writeReviewState } from './review-state.js';
 import type { MissionStore } from '../../application/domain-ports.js';
 import { startAgent } from '../agents/agents.js';
-import { delay } from './review-polling.js';
-import { buildCompactActOnReviewPrompt } from './review-prompts.js';
-import * as repairHandoffModule from '../cli/commands/repair-handoff.js';
 import { applyAgentFallback } from './review-agent-fallback.js';
 
 export const DEFAULT_MAX_ATTEMPTS = 5;
@@ -29,15 +36,6 @@ export function strictlyLaterIso(earlierIso: string, nowMs = Date.now()): string
     return new Date(nowMs).toISOString();
   }
   return new Date(Math.max(nowMs, earlierMs + 1)).toISOString();
-}
-
-export function classifyGateFailure(output: string): { classification: string; action: string; isRelaunchable: boolean } {
-  const { failureClass, dispatchAction } = repairHandoffModule.classifyError(output);
-  return {
-    classification: failureClass,
-    action: dispatchAction,
-    isRelaunchable: dispatchAction !== 'HumanOnly',
-  };
 }
 
 export interface PreReviewGateResult {
@@ -120,37 +118,80 @@ export async function runPreReviewGate(
   return { ok: true, area, command, exitCode: 0, stdout, stderr };
 }
 
+
+/** Structured gate-failure reason for the rebound kernel. */
+export function gateFailureReason(gateResult: PreReviewGateResult): GateFailureReason {
+  return {
+    kind: 'gate-failure',
+    area: gateResult.area,
+    command: gateResult.command,
+    exitCode: gateResult.exitCode,
+    stdout: gateResult.stdout,
+    stderr: gateResult.stderr,
+    error: gateResult.error,
+  };
+}
+
 /**
- * Handle a pre-review gate failure by auto-bouncing to the implementer.
- * Does NOT consume a reviewer cycle or transition the task out of review status.
- * Tracks retry count in review state metadata.
- * Returns true if bounced, false if retry limit exceeded (mission strands).
+ * Structured hook-failure reason for the rebound kernel.
+ *
+ * The hook identity is resolved from the rejected Git operation's output.
+ * TASK-2377.02 (in-process pre-review rebase with typed hook evidence) is not
+ * on this branch's base, so the pre-review rebase still returns text output;
+ * the kernel's own classification never re-derives the failure kind from it.
  */
-export async function handleGateFailureAutoBounce(
+export function hookFailureReason(hookOutput: string, operation: string): HookFailureReason {
+  return {
+    kind: 'hook-failure',
+    hook: classifyHookFailure(hookOutput).hookType,
+    operation,
+    output: hookOutput,
+  };
+}
+
+export interface ReboundPreReviewOptions {
+  /** Re-runs the failing check; a bounce is `fixed` only when this passes. */
+  verifyFn: (_attempt: number) => Promise<VerifyResult> | VerifyResult;
+  startAgentFn?: typeof startAgent;
+  writeReviewStateFn?: typeof writeReviewState;
+  readReviewStateFn?: typeof readReviewState;
+  transitionTaskFn?: typeof transitionTask;
+  applyAgentFallbackFn?: typeof applyAgentFallback;
+  taskResolution?: { ok: boolean; taskFile?: string };
+  enforceTaskAssigneeFn?: typeof enforceTaskAssignee;
+  log?: (_msg: string) => void;
+  error?: (_msg: string) => void;
+  maxAttempts?: number;
+  missionStore?: MissionStore | null;
+}
+
+export interface ReboundPreReviewResult {
+  /** True when the kernel verified a fix: the failing check re-ran and passed. */
+  bounced: boolean;
+  /** True when the occurrence exhausted its budget or is human-only. */
+  stranded: boolean;
+  outcome: ReboundOutcome['outcome'];
+  diagnostic: string;
+  implementer: string;
+}
+
+/**
+ * Route a pre-review failure through the rebound kernel.
+ *
+ * This adapter owns no classification, no prompt text, and no launch: it maps
+ * the review loop's collaborators onto the kernel context and maps the kernel
+ * outcome back onto the loop's bounced/stranded decision. The per-occurrence
+ * budget lives in the kernel, so no retry counter is read or written here.
+ */
+export async function reboundPreReviewFailure(
   slug: string,
   worktree: string,
-  gateResult: PreReviewGateResult,
+  reason: GateFailureReason | HookFailureReason,
   implementer: string,
-  opts: {
-    startAgentFn?: typeof startAgent;
-    writeReviewStateFn?: typeof writeReviewState;
-    readReviewStateFn?: typeof readReviewState;
-    transitionTaskFn?: typeof transitionTask;
-    applyAgentFallbackFn?: typeof applyAgentFallback;
-    taskResolution?: { ok: boolean; taskFile?: string };
-    enforceTaskAssigneeFn?: typeof enforceTaskAssignee;
-    log?: (_msg: string) => void;
-    error?: (_msg: string) => void;
-    sleepFn?: typeof delay;
-    buildCompactActOnReviewPromptFn?: typeof buildCompactActOnReviewPrompt;
-    isForgejoReviewEnabledFn?: ((_rootDir?: string) => boolean) | null;
-    isReviewProviderEnabledFn?: ((_rootDir?: string) => boolean) | null;
-    legacyIsForgejoReviewEnabledFn?: ((_rootDir?: string) => boolean) | null;
-    exit?: (_code: number) => never;
-    missionStore?: MissionStore | null;
-  } = {}
-): Promise<{ bounced: boolean; stranded: boolean }> {
+  opts: ReboundPreReviewOptions,
+): Promise<ReboundPreReviewResult> {
   const {
+    verifyFn,
     startAgentFn = startAgent,
     writeReviewStateFn = writeReviewState,
     readReviewStateFn = readReviewState,
@@ -160,128 +201,31 @@ export async function handleGateFailureAutoBounce(
     enforceTaskAssigneeFn,
     log = fmt.log.plain,
     error = fmt.log.plainError,
-    sleepFn: _sleepFn = delay,
-    buildCompactActOnReviewPromptFn: _buildCompactActOnReviewPromptFn = buildCompactActOnReviewPrompt,
-    isForgejoReviewEnabledFn: _isForgejoReviewEnabledFn,
-    isReviewProviderEnabledFn: _isReviewProviderEnabledFn,
-    legacyIsForgejoReviewEnabledFn: _legacyIsForgejoReviewEnabledFn,
-    exit: _exit = process.exit,
+    maxAttempts,
     missionStore = null,
   } = opts;
 
-  const MAX_GATE_RETRY = 2;
-  const diagnosticOutput = [gateResult.stdout, gateResult.stderr, gateResult.error].filter(Boolean).join('\n');
-  const isHookFailure = /pre-commit|pre-push|post-commit|hook.*(failed|failure|error)/i.test(diagnosticOutput);
-  const retryMetadataKey = isHookFailure ? 'hookFailureRetryCount' : 'gateFailureRetryCount';
-  const failureLabel = isHookFailure ? 'GIT HOOK FAILURE' : 'PRE-REVIEW GATE FAILURE';
+  if (typeof verifyFn !== 'function') {
+    throw new Error('reboundPreReviewFailure requires a verify callback: a bounce may only be reported fixed when the failing check re-runs and passes.');
+  }
 
-  // Read persisted state to get current retry count
   const persisted = await Promise.resolve(readReviewStateFn(slug, worktree));
-  const retryCount = persisted && persisted.metadata && typeof persisted.metadata === 'object'
-    ? (Number((persisted.metadata as any)[retryMetadataKey]) || 0)
-    : 0;
 
-  if (retryCount >= MAX_GATE_RETRY) {
-    error(fmt.status('FAIL', `${failureLabel}: max retries exceeded (${MAX_GATE_RETRY}). Mission stranded for ${slug}.`));
-    error(fmt.status('FAIL', `${isHookFailure ? 'Git hook' : `Area "${gateResult.area}" verification`} failed ${retryCount} times. Human intervention required.`));
-    error(fmt.status('FAIL', `Gate output:\n${gateResult.stdout || gateResult.stderr || '(no output)'}\n`));
-    return { bounced: false, stranded: true };
-  }
-
-  // Classify the failure
-  const diagnosticClassification = isHookFailure
-    ? { classification: 'GitHookFailure', action: 'RelaunchImplementer', isRelaunchable: true }
-    : classifyGateFailure(diagnosticOutput);
-  // A non-zero gate exit is authoritative evidence of a genuine verification
-  // failure. Arbitrary test/linter diagnostics have no classifier keyword and
-  // default to InfraBlocker, which used to strand a repairable mission. Keep
-  // the ADR's genuine human-only exceptions, however: a recognized provider,
-  // network, authentication, or state-machine diagnostic must not be hidden
-  // by the generic gate-failure marker.
-  const hasExplicitHumanOnlyDiagnostic = diagnosticClassification.action === 'HumanOnly'
-    && /state\s+violation|invalid\s+state|transition\s+not\s+allowed|cannot\s+(move|transition)\s+(from|to)\s+\w+\s+(to|from)|forgejo|infrastructure|authentication\s+failed|token\s+(expired|invalid|missing)|forbidden|unauthorized\s+(access|request)|rate\s+limit|connection\s+(refused|timed?\s*out)|network\s+error/i.test(diagnosticOutput);
-  // A declared gate that has actually run and exited non-zero is a bounded
-  // workflow blocker: retry its implementer repair through the AutoRepair
-  // route. Keep explicit infrastructure and state-machine diagnostics human
-  // only, because their remedy is outside the implementer's working tree.
-  const classification = hasExplicitHumanOnlyDiagnostic
-    ? diagnosticClassification
-    : isHookFailure
-      ? diagnosticClassification
-      : { classification: 'GitBlockers', action: 'AutoRepair', isRelaunchable: true };
-
-  log(fmt.status('WARN', `Pre-review gate failed for area "${gateResult.area}" (exit ${gateResult.exitCode}). Classification: ${classification.classification}.`));
-
-  // ADR 0048 C6: InfraBlocker and StateMachineViolation are HumanOnly — do not
-  // auto-bounce to implementer; surface for human intervention.
-  if (!classification.isRelaunchable) {
-    error(fmt.status('FAIL', `Pre-review gate failure: ${classification.classification} (${classification.action}). Human intervention required — not auto-bouncing.`));
-    error(fmt.status('FAIL', `Gate output:\n${gateResult.stdout || gateResult.stderr || '(no output)'}\n`));
-    return { bounced: false, stranded: true };
-  }
-
-  // Build fix prompt with captured gate output
-  const fixPrompt = [
-    `${failureLabel} — FIX REQUIRED`,
-    ``,
-    `Mission: ${slug}`,
-    `Area: ${gateResult.area}`,
-    `Gate command: ${gateResult.command}`,
-    `Exit code: ${gateResult.exitCode}`,
-    ``,
-    `Gate output (use this to diagnose and fix):`,
-    `---`,
-    elideBounceOutput(gateResult.stdout || '(no stdout)'),
-    `---`,
-    elideBounceOutput(gateResult.stderr || '(no stderr)'),
-    `---`,
-    ``,
-    `Classification: ${classification.classification} — ${classification.action}`,
-    `Retry attempt: ${retryCount + 1}/${MAX_GATE_RETRY}`,
-    ``,
-    `Before repair work, compact the aborted working context. Reload the locked mission goal and scope; committed checkpoint or gate evidence when present; this exact gate diagnostic and classification; retry attempt ${retryCount + 1}/${MAX_GATE_RETRY}; current review round and disposition; unresolved findings and implementer resolutions; and the current branch revision.`,
-    ``,
-    isHookFailure
-      ? `Fix the underlying issue so the Git hook passes when Parallix commits or rebases this mission.`
-      : `Fix the underlying issue so the verification gate passes for area "${gateResult.area}".`,
-    `After fixing, restart the review loop; it will re-run the rebase and gate before the next review round.`,
-  ].join('\n');
-
-  // Increment retry count in metadata
-  const metadata = persisted && persisted.metadata && typeof persisted.metadata === 'object'
-    ? { ...persisted.metadata }
-    : {};
-  metadata[retryMetadataKey] = retryCount + 1;
-
-  // Update review state with incremented retry count
-  if (persisted) {
-    const updatedState = { ...persisted, metadata };
-    await persistReviewStateOrThrow(writeReviewStateFn, slug, updatedState as any, worktree, missionStore);
-  } else {
-    await persistReviewStateOrThrow(writeReviewStateFn, slug, { metadata } as any, worktree, missionStore);
-  }
-
-  // Transition task back to active (implementer phase) without consuming reviewer cycle
-  await transitionTaskFn(slug, 'active', { rootDir: worktree, log });
-  log(fmt.status('INFO', `Auto-bouncing to implementer (${implementer}) with fix prompt. Retry ${retryCount + 1}/${MAX_GATE_RETRY}.`));
-
-  // Launch implementer with the fix prompt
-  try {
-    const launchResult = await startAgentFn('act-on-review', {
-      agent: implementer,
-      prompt: (_actualImplementer: string) => fixPrompt,
-      worktree,
-      slug,
+  const outcome = await rebound(reason, {
+    slug,
+    worktree,
+    implementer,
+    maxAttempts,
+    verify: verifyFn,
+    startAgent: startAgentFn as unknown as ReboundContext['startAgent'],
+    transitionToImplementer: async (missionSlug: string) => {
+      await transitionTaskFn(missionSlug, 'active', { rootDir: worktree, log });
+    },
+    applyAgentFallback: async ({ launchResult, original }) => await applyAgentFallbackFn({
       role: 'implementer',
-      exclude: [],
-    });
-
-    // Apply any agent fallback if needed
-    implementer = await applyAgentFallbackFn({
-      role: 'implementer',
-      original: implementer,
-      launchResult,
-      state: persisted || {},
+      original,
+      launchResult: launchResult as any,
+      state: (persisted || {}) as any,
       slug,
       worktree,
       taskResolution,
@@ -289,12 +233,16 @@ export async function handleGateFailureAutoBounce(
       writeReviewStateFn,
       enforceTaskAssigneeFn,
       missionStore,
-    });
-  } catch (err: unknown) {
-    error(fmt.status('FAIL', `Could not relaunch implementer (${implementer}) for gate failure auto-bounce: ${(err as Error).message}`));
-    return { bounced: false, stranded: true };
-  }
+    }),
+    log,
+    error,
+  });
 
-  log(fmt.status('INFO', `Implementer (${implementer}) relaunched with gate failure fix prompt.`));
-  return { bounced: true, stranded: false };
+  return {
+    bounced: outcome.outcome === 'fixed',
+    stranded: outcome.outcome !== 'fixed',
+    outcome: outcome.outcome,
+    diagnostic: outcome.diagnostic,
+    implementer: outcome.implementer,
+  };
 }
