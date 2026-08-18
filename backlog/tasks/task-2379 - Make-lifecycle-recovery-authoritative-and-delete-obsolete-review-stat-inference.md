@@ -6,7 +6,7 @@ title: >-
 status: backlog
 assignee: [custom]
 created_date: '2026-08-18 04:46'
-labels: []
+labels: [ai_sdlc, bug]
 dependencies: []
 ordinal: 98917
 ---
