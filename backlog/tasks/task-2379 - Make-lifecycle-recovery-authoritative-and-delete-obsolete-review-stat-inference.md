@@ -4,7 +4,7 @@ title: >-
   Make lifecycle recovery authoritative and delete obsolete review-stat
   inference
 status: active
-assignee: [custom]
+assignee: [qwen]
 created_date: '2026-08-18 04:46'
 labels: [ai_sdlc, bug]
 dependencies: []
