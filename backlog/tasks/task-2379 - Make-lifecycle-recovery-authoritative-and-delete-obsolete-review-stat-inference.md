@@ -3,7 +3,7 @@ id: TASK-2379
 title: >-
   Make lifecycle recovery authoritative and delete obsolete review-stat
   inference
-status: refined
+status: active
 assignee: [custom]
 created_date: '2026-08-18 04:46'
 labels: [ai_sdlc, bug]
