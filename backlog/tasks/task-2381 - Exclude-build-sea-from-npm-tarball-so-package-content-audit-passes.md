@@ -8,6 +8,8 @@ labels:
   - release
   - build
   - npm
+  - user_value
+  - bug
 dependencies: []
 references:
   - scripts/package-content-audit.ts
