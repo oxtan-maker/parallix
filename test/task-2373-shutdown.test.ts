@@ -161,6 +161,90 @@ test('SC26: ten real start-and-quit cycles leave every spawned board PID gone', 
 });
 
 // ---------------------------------------------------------------------------
+// TASK-2377 — SIGINT is a board exit path, on both sides of Ink's raw-mode
+// window
+// ---------------------------------------------------------------------------
+//
+// Ink's `exitOnCtrlC` only sees the 0x03 *byte*, and only once its raw-mode
+// effect has run. Before that the line discipline is still cooked, so Ctrl+C
+// arrives as a SIGINT to the foreground process group. These tests assert the
+// board's own SIGINT handler (`src/interfaces/tui/ui-command.ts`) on both sides
+// of that window: a numeric exit code rather than death by signal (which the
+// harness would report as 128 + n), a restored terminal, and the pid gone.
+//
+// The non-raw cases put the line discipline back into canonical, signalling
+// mode from the *test* process (`leaveRawMode`) instead of racing the board's
+// startup. Sending the signal during startup would be timing-dependent, and a
+// signal that lands before the 3 MB bundle has finished loading is outside any
+// application handler's reach — it would prove nothing about this fix.
+
+async function assertSigintExitsCleanly(fixture: BoardFixture, deliver: () => void, description: string): Promise<void> {
+  const { session } = fixture;
+  const pid = session.pid;
+  deliver();
+  const exitCode = await session.waitForExit(SHUTDOWN_BUDGET_MS);
+  assert.equal(
+    exitCode,
+    0,
+    `${description}: the board must exit with a numeric code of its own; 128+n means it died by signal instead`,
+  );
+  assert.ok(session.processGone(), `${description}: pid ${pid} must no longer exist`);
+  assert.equal(await session.terminalRestored(), true, `${description}: terminal state must be restored`);
+}
+
+test('TASK-2377: SIGINT while the board is not in raw mode exits with a numeric code', async () => {
+  const fixture = await launchBoard();
+  try {
+    await fixture.session.waitForRaw(LAUNCH_TIMEOUT_MS);
+    await fixture.session.leaveRawMode();
+    assert.equal(await fixture.session.isRaw(), false, 'this case must deliver the signal while raw mode is off');
+    await assertSigintExitsCleanly(fixture, () => fixture.session.signal('SIGINT'), 'non-raw SIGINT');
+  } finally {
+    await fixture.dispose();
+  }
+});
+
+test('TASK-2377: SIGINT after Ink enables raw mode exits the real board with a numeric code', async () => {
+  const fixture = await launchBoard();
+  try {
+    await fixture.session.waitForRaw(LAUNCH_TIMEOUT_MS);
+    assert.equal(await fixture.session.isRaw(), true, 'this case must exercise the window after Ink enables raw mode');
+    await assertSigintExitsCleanly(fixture, () => fixture.session.signal('SIGINT'), 'post-raw SIGINT');
+  } finally {
+    await fixture.dispose();
+  }
+});
+
+test('TASK-2377: Ctrl+C typed while the line discipline is cooked exits with a numeric code', async () => {
+  const fixture = await launchBoard();
+  try {
+    await fixture.session.waitForRaw(LAUNCH_TIMEOUT_MS);
+    await fixture.session.leaveRawMode();
+    assert.equal(await fixture.session.isRaw(), false, 'this case must send 0x03 while the line discipline is cooked');
+    // Cooked line discipline: this 0x03 becomes a SIGINT to the whole
+    // foreground process group, not an input byte Ink can read. This is the
+    // exact delivery path that used to kill the board mid-startup.
+    await assertSigintExitsCleanly(fixture, () => fixture.session.send('\u0003'), 'cooked-mode Ctrl+C');
+  } finally {
+    await fixture.dispose();
+  }
+});
+
+test('TASK-2377: repeated SIGINT during board shutdown still exits with a numeric code', async () => {
+  const fixture = await launchBoard();
+  try {
+    await fixture.session.waitForRaw(LAUNCH_TIMEOUT_MS);
+    await assertSigintExitsCleanly(fixture, () => {
+      fixture.session.signal('SIGINT');
+      fixture.session.signal('SIGINT');
+      fixture.session.signal('SIGINT');
+    }, 'repeated SIGINT');
+  } finally {
+    await fixture.dispose();
+  }
+});
+
+// ---------------------------------------------------------------------------
 // TASK-2375 SC3 — shutdown while a board-dispatched action is in flight
 // ---------------------------------------------------------------------------
 //
