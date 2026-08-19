@@ -34,6 +34,7 @@
   "files": [
     "NOTICES",
     "build/",
+    "!build/sea",
     "LICENSE",
     "README.md"
   ],

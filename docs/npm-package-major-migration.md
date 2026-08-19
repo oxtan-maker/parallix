@@ -8,6 +8,13 @@ The npm package now executes the canonical ESM bundle. The published tarball is
 `build/` plus `package.json`, `LICENSE`, `README.md` and `NOTICES`. It contains no source tree, no tests, no alternate runtime output,
 and no dependency closure.
 
+One subtree of `build/` is excluded: `build/sea/`, the platform-specific SEA
+payload written by `scripts/build-sea.ts`. It is released separately by
+`scripts/package-native-release.ts`, `build/manifest.sha256` deliberately does not
+cover it, and `package.json` `files` negates it with `!build/sea`. The
+package-content audit lists `build/sea/` in `FORBIDDEN_PREFIXES` so a regression
+fails as `forbidden package file: build/sea/...` (TASK-2381).
+
 Verify the shape at any time with `npm run test:package-content`.
 
 ## What changed

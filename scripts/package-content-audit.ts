@@ -41,6 +41,11 @@ const FORBIDDEN_PREFIXES = [
   'docs/', 'examples/', 'tools/', 'proofs/', 'forgejo/',
   // Package-root asset directories: superseded by their build/ staged copies.
   'config/', 'data/', 'prompts/', 'templates/',
+  // The SEA payload ships via scripts/package-native-release.ts, not npm: it is a
+  // ~100MB platform-specific executable that build/manifest.sha256 deliberately
+  // does not cover (see the "build/sea is not ours" staging exclusion in
+  // scripts/build-canonical-bundle.ts). TASK-2381.
+  'build/sea/',
 ];
 
 function violationsFor(files: string[]): string[] {

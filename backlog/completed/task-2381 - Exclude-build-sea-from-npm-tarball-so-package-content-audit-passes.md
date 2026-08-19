@@ -1,7 +1,7 @@
 ---
 id: TASK-2381
 title: Exclude build/sea from npm tarball so package-content audit passes
-status: ready-for-integration
+status: done
 assignee: [claude]
 created_date: '2026-08-18 04:55'
 labels:
