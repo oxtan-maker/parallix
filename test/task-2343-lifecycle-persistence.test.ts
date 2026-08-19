@@ -197,7 +197,6 @@ function reviewWithLocalBranch(): Review {
     }],
     intervention: null,
     stageLaunches: [],
-    gateFailureRetryCount: 0,
     reviewEvents: [],
   } as unknown as Review;
 }

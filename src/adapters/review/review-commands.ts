@@ -655,12 +655,6 @@ export async function showReviewStatus(
   if (state.disposition) {
     log(`  Disposition: ${state.disposition}`);
   }
-  if (state.reviewerRetryCount > 0) {
-    log(`  Reviewer retries:    ${state.reviewerRetryCount}`);
-  }
-  if (state.implementerRetryCount > 0) {
-    log(`  Implementer retries: ${state.implementerRetryCount}`);
-  }
 }
 
 // ============================================================================

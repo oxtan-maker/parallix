@@ -10,22 +10,12 @@ function familyFrom(value: unknown, fallback: AgentFamily): AgentFamily {
   try { return agentFamily(value.trim()); } catch { return fallback; }
 }
 
-function nonNegativeCount(value: unknown, fallback: number): number {
-  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : fallback;
-}
-
 function metadataFromReview(review: Review): Record<string, unknown> {
   const metadata: Record<string, unknown> = {};
   if (review.stageLaunches.length > 0) {
     metadata.recordedStageLaunches = Object.fromEntries(
       review.stageLaunches.map(window => [window.stageKey, [...window.fingerprints]]),
     );
-  }
-  if (review.gateFailureRetryCount > 0) {
-    metadata.gateFailureRetryCount = review.gateFailureRetryCount;
-  }
-  if (review.hookFailureRetryCount > 0) {
-    metadata.hookFailureRetryCount = review.hookFailureRetryCount;
   }
   if (review.intervention) {
     metadata.humanEscalationReason = review.intervention.reason;
@@ -57,8 +47,6 @@ export function reviewStateDataFrom(review: Review): ReviewStateData {
     startedAt: current.startedAt,
     phase: current.phase,
     disposition: current.disposition,
-    reviewerRetryCount: current.reviewerRetryCount,
-    implementerRetryCount: current.implementerRetryCount,
     metadata: metadataFromReview(review),
   };
 }
@@ -125,8 +113,12 @@ function roundFromState(state: ReviewStateData, previous: ReviewRound): ReviewRo
     response: null,
     phase,
     disposition,
-    reviewerRetryCount: nonNegativeCount(state.reviewerRetryCount, previous.reviewerRetryCount),
-    implementerRetryCount: nonNegativeCount(state.implementerRetryCount, previous.implementerRetryCount),
+    // TASK-2377.04: the flat loop state no longer carries the round retry
+    // counters (the persisted review-state fields were deleted), so a state
+    // update never rewrites them: historical round values round-trip
+    // unchanged and a new round shell stores 0.
+    reviewerRetryCount: previous.reviewerRetryCount,
+    implementerRetryCount: previous.implementerRetryCount,
   };
 }
 
@@ -169,13 +161,6 @@ export function applyReviewStateToReview(review: Review, state: ReviewStateData)
         fingerprints: (fingerprints as unknown[]).filter((entry): entry is string => typeof entry === 'string'),
       }))
       .filter(window => window.stageKey.trim() && window.fingerprints.length > 0);
-  const gateFailureRetryCount = metadata.gateFailureRetryCount === undefined
-    ? review.gateFailureRetryCount
-    : nonNegativeCount(metadata.gateFailureRetryCount, review.gateFailureRetryCount);
-  const hookFailureRetryCount = metadata.hookFailureRetryCount === undefined
-    ? review.hookFailureRetryCount
-    : nonNegativeCount(metadata.hookFailureRetryCount, review.hookFailureRetryCount);
-
   const escalationReason = typeof metadata.humanEscalationReason === 'string'
     ? metadata.humanEscalationReason.trim() : '';
   const escalationAt = typeof metadata.humanEscalatedAt === 'string'
@@ -184,5 +169,5 @@ export function applyReviewStateToReview(review: Review, state: ReviewStateData)
     ? { requestedAt: escalationAt, requestedBy: 'workflow' as const, reason: escalationReason }
     : review.intervention;
 
-  return { ...review, rounds: rounds as unknown as Review['rounds'], intervention, stageLaunches, gateFailureRetryCount, hookFailureRetryCount };
+  return { ...review, rounds: rounds as unknown as Review['rounds'], intervention, stageLaunches };
 }

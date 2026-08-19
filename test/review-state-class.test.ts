@@ -50,17 +50,16 @@ test('ReviewState toJSON excludes empty retry counts and metadata', () => {
   assert.equal(json.metadata, undefined);
 });
 
-test('ReviewState toJSON includes retry counts and metadata when present', () => {
+test('ReviewState toJSON includes metadata when present (TASK-2377.04: no retry counts serialize)', () => {
   const state = new ReviewState('task-1', {
     reviewer: 'gemini',
     implementer: 'claude',
-    reviewerRetryCount: 1,
     metadata: { key: 'value' }
   });
 
   const json = state.toJSON();
-  assert.equal(json.reviewerRetryCount, 1);
-  assert.equal(json.implementerRetryCount, undefined);
+  assert.equal(json.reviewerRetryCount, undefined, 'the persisted reviewer retry field is deleted');
+  assert.equal(json.implementerRetryCount, undefined, 'the persisted implementer retry field is deleted');
   assert.deepEqual(json.metadata, { key: 'value' });
 });
 
@@ -125,20 +124,17 @@ test('normalizeReviewPhase falls back from unknown values using disposition', ()
   });
 });
 
-test('advanceRound increments round and resets phase/disposition/retries', () => {
+test('advanceRound increments round and resets phase/disposition (TASK-2377.04: retry counts are loop-local)', () => {
   const oldTimestamp = '2025-01-01T00:00:00.000Z';
   const state = new ReviewState('task-adv', {
     reviewer: 'a', implementer: 'b', round: 2,
     startedAt: oldTimestamp,
-    phase: 'fixing', disposition: 'CHANGES_REQUESTED',
-    reviewerRetryCount: 1, implementerRetryCount: 2
+    phase: 'fixing', disposition: 'CHANGES_REQUESTED'
   });
   state.advanceRound();
   assert.equal(state.round, 3);
   assert.equal(state.phase, 'reviewing');
   assert.equal(state.disposition, null);
-  assert.equal(state.reviewerRetryCount, 0);
-  assert.equal(state.implementerRetryCount, 0);
   assert.notEqual(state.startedAt, oldTimestamp);
 });
 

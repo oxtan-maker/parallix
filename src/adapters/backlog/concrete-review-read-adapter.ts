@@ -56,12 +56,6 @@ function reviewedChangeFrom(state: ReviewState): ReviewedChange {
   };
 }
 
-/** Coerce an untyped metadata counter to a non-negative integer. */
-function nonNegativeGateRetries(value: unknown): number {
-  const count = Number(value);
-  return Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
-}
-
 function defaultFindMissionDir(): FindMissionDirFn {
   return findMissionDir as FindMissionDirFn;
 }
@@ -209,16 +203,16 @@ export class ConcreteReviewReadAdapter implements ReviewReadAdapter {
       response: null,
       phase: parseReviewPhase(state.phase) ?? 'reviewing',
       disposition: parseReviewDisposition(state.disposition),
-      reviewerRetryCount: state.reviewerRetryCount || 0,
-      implementerRetryCount: state.implementerRetryCount || 0,
+      // TASK-2377.04: the flat loop state no longer carries the round retry
+      // counters; the store-backed path above is the authority for them.
+      reviewerRetryCount: 0,
+      implementerRetryCount: 0,
     };
 
     return {
       rounds: [round] as [ReviewRound, ...ReviewRound[]],
       intervention: null,
       stageLaunches: stageLaunchWindowsFrom(state.metadata?.recordedStageLaunches),
-      gateFailureRetryCount: nonNegativeGateRetries(state.metadata?.gateFailureRetryCount),
-      hookFailureRetryCount: nonNegativeGateRetries(state.metadata?.hookFailureRetryCount),
       reviewEvents: [],
     };
   }

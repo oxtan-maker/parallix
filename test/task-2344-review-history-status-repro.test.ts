@@ -62,8 +62,6 @@ test('px status task-2344 renders every persisted review round with earlier find
     rounds,
     intervention: null,
     stageLaunches: [],
-    gateFailureRetryCount: 0,
-    hookFailureRetryCount: 0,
     reviewEvents: [],
   };
   const mission: Mission = {

@@ -53,7 +53,6 @@ function missionWithReview(slug, rootDir, overrides = {}) {
       }],
       intervention: null,
       stageLaunches: [],
-      gateFailureRetryCount: 0,
       reviewEvents: [],
       ...overrides,
     },

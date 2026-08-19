@@ -84,7 +84,6 @@ async function seedMissionWithEvents(home, slug, rootDir, reviewEvents, roundOve
       }],
       intervention: null,
       stageLaunches: [],
-      gateFailureRetryCount: 0,
       reviewEvents, // LIVE SOURCE: events written by persistEventInStore
     },
   };

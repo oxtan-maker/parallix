@@ -8,6 +8,11 @@
 // `!reviewState` check at review-loop.ts:1353-1365 to fire the error
 // "Reviewer X did not submit a formal review outcome" WITHOUT completing
 // the bounded recovery retries.
+//
+// TASK-2377.04: the recovery retry counter is now in-memory round-local
+// scratch (the persisted review-state field is deleted), so these tests
+// observe the loop through its relaunches: one first launch plus the two
+// recovery relaunches = 3 reviewer launches before escalation.
 
 import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
@@ -44,7 +49,7 @@ test('reviewer-non-submission: error fires without completing recovery retries (
   const logs = [];
   const errors = [];
   const escalations = [];
-  let reviewerRetryCountFinal = 0;
+  let reviewerLaunches = 0;
 
   try {
     await startReviewLoop('task-9001', {
@@ -71,8 +76,9 @@ test('reviewer-non-submission: error fires without completing recovery retries (
       buildAutonomousReviewMatrixFn: () => [],
       formatMatrixSummaryFn: () => [],
       rebaseBeforeReviewRoundFn: async () => ({ ok: true }),
-      startAgentFn: async (_mode, _opts) => {
+      startAgentFn: async (step) => {
         // Simulates custom agent exiting without producing review artifacts
+        if (step === 'review') { reviewerLaunches += 1; }
         return { agent: 'custom', result: { status: 0 } };
       },
       consumeReviewerArtifactsFn: async () => {
@@ -82,9 +88,7 @@ test('reviewer-non-submission: error fires without completing recovery retries (
       consumeImplementerArtifactsFn: async () => ({ consumed: true, ok: true, disposition: 'CHANGES_MADE' }),
       transitionTaskFn: () => true,
       transitionVirtualFn: () => true,
-      writeReviewStateFn: (slug, state) => {
-        reviewerRetryCountFinal = state.reviewerRetryCount || 0;
-      },
+      writeReviewStateFn: () => {},
       log: (msg) => logs.push(msg),
       error: (msg) => errors.push(msg),
       exit: (code) => { throw new Error(`exit(${code})`); },
@@ -103,12 +107,13 @@ test('reviewer-non-submission: error fires without completing recovery retries (
     });
 
     // The recovery loop should have run 2 retries before escalating.
-    // BUG: reviewerRetryCount is 0 because the !reviewState check at
-    // review-loop.ts:1353 fires BEFORE the recovery loop completes.
+    // BUG: the loop used to stop at 0 retries because the !reviewState check
+    // at review-loop.ts:1353 fired BEFORE the recovery loop completes. One
+    // first launch plus the two recovery relaunches = 3 reviewer launches.
     assert.equal(
-      reviewerRetryCountFinal,
-      2,
-      `recovery loop should complete 2 retries before escalation (got ${reviewerRetryCountFinal})`
+      reviewerLaunches,
+      3,
+      `recovery loop should complete 2 retries before escalation (got ${reviewerLaunches} reviewer launches)`
     );
 
     // The escalation error should mention recovery retries (ADR 0048 bounded retries).
@@ -138,7 +143,7 @@ test('reviewer-non-submission: null poll result breaks recovery loop prematurely
   const root = createWorktree();
   const logs = [];
   const errors = [];
-  let reviewerRetryCountFinal = 0;
+  let reviewerLaunches = 0;
 
   try {
     await startReviewLoop('task-9001', {
@@ -165,14 +170,15 @@ test('reviewer-non-submission: null poll result breaks recovery loop prematurely
       buildAutonomousReviewMatrixFn: () => [],
       formatMatrixSummaryFn: () => [],
       rebaseBeforeReviewRoundFn: async () => ({ ok: true }),
-      startAgentFn: async () => ({ agent: 'custom', result: { status: 0 } }),
+      startAgentFn: async (step) => {
+        if (step === 'review') { reviewerLaunches += 1; }
+        return { agent: 'custom', result: { status: 0 } };
+      },
       consumeReviewerArtifactsFn: async () => ({ consumed: false }),
       consumeImplementerArtifactsFn: async () => ({ consumed: true, ok: true, disposition: 'CHANGES_MADE' }),
       transitionTaskFn: () => true,
       transitionVirtualFn: () => true,
-      writeReviewStateFn: (slug, state) => {
-        reviewerRetryCountFinal = state.reviewerRetryCount || 0;
-      },
+      writeReviewStateFn: () => {},
       log: (msg) => logs.push(msg),
       error: (msg) => errors.push(msg),
       exit: (code) => { throw new Error(`exit(${code})`); },
@@ -187,13 +193,13 @@ test('reviewer-non-submission: null poll result breaks recovery loop prematurely
       getPrStatusFn: () => ({ exists: true, state: 'open', number: 1 }),
     });
 
-    // BUG: with poll returning null, the recovery loop breaks on first iteration
-    // because !isPollTimeout(null) is true. reviewerRetryCount should be 2
-    // but is only 1 (one iteration completed before break).
+    // BUG: with poll returning null, the recovery loop used to break on the
+    // first iteration because !isPollTimeout(null) is true. One first launch
+    // plus two recovery relaunches = 3 reviewer launches.
     assert.equal(
-      reviewerRetryCountFinal,
-      2,
-      `recovery loop should complete 2 retries even when poll returns null (got ${reviewerRetryCountFinal})`
+      reviewerLaunches,
+      3,
+      `recovery loop should complete 2 retries even when poll returns null (got ${reviewerLaunches} reviewer launches)`
     );
 
     // The escalation should use the recovery-retries message, not the bare
@@ -214,7 +220,7 @@ test('reviewer-non-submission: forgejoEnabled=false — recovery loop breaks on 
   const root = createWorktree();
   const logs = [];
   const errors = [];
-  let reviewerRetryCountFinal = 0;
+  let reviewerLaunches = 0;
 
   try {
     await startReviewLoop('task-9001', {
@@ -241,14 +247,15 @@ test('reviewer-non-submission: forgejoEnabled=false — recovery loop breaks on 
       buildAutonomousReviewMatrixFn: () => [],
       formatMatrixSummaryFn: () => [],
       rebaseBeforeReviewRoundFn: async () => ({ ok: true }),
-      startAgentFn: async () => ({ agent: 'custom', result: { status: 0 } }),
+      startAgentFn: async (step) => {
+        if (step === 'review') { reviewerLaunches += 1; }
+        return { agent: 'custom', result: { status: 0 } };
+      },
       consumeReviewerArtifactsFn: async () => ({ consumed: false }),
       consumeImplementerArtifactsFn: async () => ({ consumed: true, ok: true, disposition: 'CHANGES_MADE' }),
       transitionTaskFn: () => true,
       transitionVirtualFn: () => true,
-      writeReviewStateFn: (slug, state) => {
-        reviewerRetryCountFinal = state.reviewerRetryCount || 0;
-      },
+      writeReviewStateFn: () => {},
       log: (msg) => logs.push(msg),
       error: (msg) => errors.push(msg),
       exit: (code) => { throw new Error(`exit(${code})`); },
@@ -259,11 +266,12 @@ test('reviewer-non-submission: forgejoEnabled=false — recovery loop breaks on 
 
     // BUG: with forgejoEnabled=false, pollForReview is never called, reviewState
     // stays null in the recovery loop, and !isPollTimeout(null) is true so the
-    // loop breaks on the first iteration. reviewerRetryCount should be 2.
+    // loop used to break on the first iteration. One first launch plus two
+    // recovery relaunches = 3 reviewer launches.
     assert.equal(
-      reviewerRetryCountFinal,
-      2,
-      `recovery loop should complete 2 retries with forgejoEnabled=false (got ${reviewerRetryCountFinal})`
+      reviewerLaunches,
+      3,
+      `recovery loop should complete 2 retries with forgejoEnabled=false (got ${reviewerLaunches} reviewer launches)`
     );
 
     // Should escalate with recovery-retries message from the post-loop check,

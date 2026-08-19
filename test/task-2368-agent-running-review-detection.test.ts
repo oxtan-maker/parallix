@@ -65,8 +65,6 @@ function pendingReview(): Review {
     reviewEvents: [],
     intervention: null,
     stageLaunches: [],
-    gateFailureRetryCount: 0,
-    hookFailureRetryCount: 0,
   } as unknown as Review;
 }
 

@@ -193,17 +193,6 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     perLaunchIdentity: 'in-process',
   },
   {
-    id: 'retry-review-round-counters',
-    family: 'retry',
-    fileLocation: 'src/adapters/review/review-commands.ts',
-    line: 658,
-    anchor: 'state.reviewerRetryCount',
-    reads: ['Review'],
-    requirement:
-      'Retry counts scoped to the current review round, displayed by review status. They are round attributes, not per-launch records: the next round resets them.',
-    perLaunchIdentity: 'none',
-  },
-  {
     id: 'retry-stage-launch-dedupe',
     family: 'retry',
     fileLocation: 'src/adapters/review/review-agent-fallback.ts',
@@ -296,7 +285,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'review-round-state',
     family: 'review',
     fileLocation: 'src/adapters/review/review-state.ts',
-    line: 518,
+    line: 516,
     anchor: 'export class ReviewState',
     reads: ['Review', 'Mission'],
     requirement:
@@ -307,7 +296,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'review-loop-round-progression',
     family: 'review',
     fileLocation: 'src/adapters/review/review-loop.ts',
-    line: 48,
+    line: 60,
     anchor: 'function startReviewLoop',
     reads: ['Review', 'Mission'],
     requirement:

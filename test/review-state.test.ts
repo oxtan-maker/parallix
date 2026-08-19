@@ -46,11 +46,8 @@ test('writeReviewState round-trips workflow state through the operator database'
       round: 2,
       phase: 'fixing',
       disposition: 'REQUEST_CHANGES',
-      reviewerRetryCount: 1,
-      implementerRetryCount: 2,
       metadata: {
         recordedStageLaunches: { 'review:codex': ['codex|s1|t0|t1|0'] },
-        gateFailureRetryCount: 1,
       },
     }, root, store);
     assert.deepEqual(result, { outcome: 'committed' });
@@ -60,10 +57,12 @@ test('writeReviewState round-trips workflow state through the operator database'
     assert.equal(read.round, 2, 'the loop advancing a round appends one to the aggregate');
     assert.equal(read.phase, 'fixing');
     assert.equal(read.disposition, 'REQUEST_CHANGES');
-    assert.equal(read.reviewerRetryCount, 1);
-    assert.equal(read.implementerRetryCount, 2);
     assert.deepEqual(read.metadata.recordedStageLaunches, { 'review:codex': ['codex|s1|t0|t1|0'] });
-    assert.equal(read.metadata.gateFailureRetryCount, 1);
+    // TASK-2377.04: no persisted retry counters remain — the loop view
+    // carries none and the metadata pass-through for them is deleted.
+    assert.equal((read as { reviewerRetryCount?: unknown }).reviewerRetryCount, undefined);
+    assert.equal(read.metadata.gateFailureRetryCount, undefined);
+    assert.equal(read.metadata.hookFailureRetryCount, undefined);
   });
 });
 
@@ -118,10 +117,8 @@ test('resetReviewState clears loop bookkeeping but keeps the review conversation
       round: 1,
       phase: 'fixing',
       disposition: 'REQUEST_CHANGES',
-      reviewerRetryCount: 2,
       metadata: {
         recordedStageLaunches: { 'review:codex': ['codex|s1|t0|t1|0'] },
-        gateFailureRetryCount: 2,
       },
     }, root, store);
 
@@ -131,7 +128,6 @@ test('resetReviewState clears loop bookkeeping but keeps the review conversation
     assert.ok(read, 'the review itself survives a reset');
     assert.equal(read.phase, 'reviewing');
     assert.equal(read.disposition, null);
-    assert.equal(read.reviewerRetryCount, 0);
-    assert.deepEqual(read.metadata, {}, 'stage launches and the gate budget are cleared');
+    assert.deepEqual(read.metadata, {}, 'stage launches are cleared');
   });
 });

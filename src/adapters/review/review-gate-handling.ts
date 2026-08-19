@@ -171,6 +171,8 @@ export interface ReboundPreReviewResult {
   /** True when the occurrence exhausted its budget or is human-only. */
   stranded: boolean;
   outcome: ReboundOutcome['outcome'];
+  /** Launch attempts consumed by this occurrence (the per-round cap counts them). */
+  attempts: number;
   diagnostic: string;
   implementer: string;
 }
@@ -242,6 +244,7 @@ export async function reboundPreReviewFailure(
     bounced: outcome.outcome === 'fixed',
     stranded: outcome.outcome !== 'fixed',
     outcome: outcome.outcome,
+    attempts: outcome.attempts,
     diagnostic: outcome.diagnostic,
     implementer: outcome.implementer,
   };

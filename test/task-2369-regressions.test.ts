@@ -86,7 +86,7 @@ function createFakeStore(status: MissionStatus): FakeStore {
         decision: { kind: 'approved', decidedAt: '2026-08-04T10:30:00Z', comment: null, source: { kind: 'local' } },
         response: null, phase: 'approved', disposition: 'APPROVED', reviewerRetryCount: 0, implementerRetryCount: 0,
       }],
-      intervention: null, stageLaunches: [], gateFailureRetryCount: 0, hookFailureRetryCount: 0, reviewEvents: [],
+      intervention: null, stageLaunches: [], reviewEvents: [],
     },
     netEngineeringLines: null,
     status,

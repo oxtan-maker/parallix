@@ -2532,7 +2532,11 @@ test('startReviewLoop handles reviewer polling timeout with recovery', async () 
   assert.deepEqual(exitCodes, [], 'Should persist human escalation instead of exiting after bounded reviewer retries');
 });
 
-test('startReviewLoop persists reviewer retry count before recovery relaunch', async () => {
+test('startReviewLoop performs recovery relaunches without persisting any retry count', async () => {
+  // TASK-2377.04: the recovery retry counter is in-memory round-local
+  // scratch; the persisted review-state field is deleted, so no state write
+  // may carry a retry count anymore — the loop is observed through its
+  // relaunches.
   const events = [];
   let reviewPolls = 0;
 
@@ -2572,17 +2576,19 @@ test('startReviewLoop persists reviewer retry count before recovery relaunch', a
     runPreReviewGateFn: passingPreReviewGate
   });
 
-  const retryWriteIndex = events.findIndex(event => event.type === 'write' && event.reviewerRetryCount === 1);
   const secondReviewerStartIndex = events.findIndex((event, index) =>
     event.type === 'start' && event.step === 'review' && index > events.findIndex(first => first.type === 'start' && first.step === 'review')
   );
 
-  assert.notEqual(retryWriteIndex, -1, 'reviewer retry count must be written');
   assert.notEqual(secondReviewerStartIndex, -1, 'reviewer recovery relaunch must happen');
-  assert.ok(retryWriteIndex < secondReviewerStartIndex, 'reviewer retry count must be written before recovery relaunch');
+  assert.ok(!events.some(event => event.type === 'write' && event.reviewerRetryCount !== undefined),
+    'no state write may carry a persisted reviewer retry count (TASK-2377.04)');
 });
 
-test('startReviewLoop persists implementer retry count before recovery relaunch', async () => {
+test('startReviewLoop performs the implementer recovery relaunch without persisting any retry count', async () => {
+  // TASK-2377.04: the recovery retry counter is in-memory round-local
+  // scratch; the persisted review-state field is deleted, so no state write
+  // may carry a retry count anymore.
   const events = [];
   let dispositionPolls = 0;
 
@@ -2625,15 +2631,14 @@ test('startReviewLoop persists implementer retry count before recovery relaunch'
     runPreReviewGateFn: passingPreReviewGate
   });
 
-  const retryWriteIndex = events.findIndex(event => event.type === 'write' && event.implementerRetryCount === 1);
   const implementerStarts = events
     .map((event, index) => ({ event, index }))
     .filter(({ event }) => event.type === 'start' && event.step === 'act-on-review');
   const recoveryStartIndex = implementerStarts[1] ? implementerStarts[1].index : -1;
 
-  assert.notEqual(retryWriteIndex, -1, 'implementer retry count must be written');
   assert.notEqual(recoveryStartIndex, -1, 'implementer recovery relaunch must happen');
-  assert.ok(retryWriteIndex < recoveryStartIndex, 'implementer retry count must be written before recovery relaunch');
+  assert.ok(!events.some(event => event.type === 'write' && event.implementerRetryCount !== undefined),
+    'no state write may carry a persisted implementer retry count (TASK-2377.04)');
 });
 
 // ---------- startReviewLoop taskResolution scope (TASK-1041) ----------

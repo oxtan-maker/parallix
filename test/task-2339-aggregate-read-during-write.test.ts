@@ -42,7 +42,6 @@ function reviewWith(overrides: Partial<Review> = {}): Review {
     }],
     intervention: null,
     stageLaunches: [],
-    gateFailureRetryCount: 0,
     reviewEvents: [],
     ...overrides,
   } as Review;

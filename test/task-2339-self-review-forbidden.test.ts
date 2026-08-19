@@ -56,7 +56,6 @@ test('beginNextReviewRound rejects a self-reviewing round the same way', () => {
     }],
     intervention: null,
     stageLaunches: [],
-    gateFailureRetryCount: 0,
     reviewEvents: [],
   };
 

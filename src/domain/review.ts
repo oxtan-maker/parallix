@@ -261,20 +261,6 @@ export interface Review {
    */
   readonly stageLaunches: readonly StageLaunchWindow[];
   /**
-   * Pre-review gate failures that auto-bounced the mission to the implementer.
-   *
-   * Cumulative across rounds, and distinct from the per-round retry counters: a
-   * gate bounce does not consume a reviewer cycle, so it cannot share a counter
-   * with the agent-timeout retries without changing when the loop gives up.
-   */
-  readonly gateFailureRetryCount: number;
-  /**
-   * Hook failure auto-bounce retries (pre-commit, pre-push, etc.).
-   * Separate from gateFailureRetryCount: hook bounces happen during
-   * rebase/integrate operations, not during the pre-review gate.
-   */
-  readonly hookFailureRetryCount: number;
-  /**
    * Full audit trail for review events (replaces .md files under
    * missions/<slug>/review-events/). Stores reviewer findings/outcomes,
    * implementer summaries/dispositions, human notes, and blocked/parked
@@ -461,8 +447,6 @@ export function startReview(
     }],
     intervention: null,
     stageLaunches: [],
-    gateFailureRetryCount: 0,
-    hookFailureRetryCount: 0,
     reviewEvents: [],
   };
 }
@@ -538,15 +522,6 @@ export function transitionReviewPhase(review: Review, phase: ReviewPhase): Revie
   return { ...review, rounds: replaceCurrentRound(review, { ...current, phase }) };
 }
 
-/** Consume one gate retry for `actor` in the current round. */
-export function recordReviewRetry(review: Review, actor: 'reviewer' | 'implementer'): Review {
-  const current = currentReviewRound(review);
-  const updated: ReviewRound = actor === 'reviewer'
-    ? { ...current, reviewerRetryCount: current.reviewerRetryCount + 1 }
-    : { ...current, implementerRetryCount: current.implementerRetryCount + 1 };
-  return { ...review, rounds: replaceCurrentRound(review, updated) };
-}
-
 /** Whether `fingerprint` was already recorded in the `stageKey` window. */
 export function hasRecordedStageLaunch(
   review: Review,
@@ -589,27 +564,6 @@ function sortStageLaunchWindows(
   windows: readonly StageLaunchWindow[],
 ): readonly StageLaunchWindow[] {
   return [...windows].sort((left, right) => left.stageKey.localeCompare(right.stageKey));
-}
-
-/**
- * Consume one pre-review gate retry.
- *
- * Counted on the review rather than the round: an auto-bounce hands the mission
- * back to the implementer without starting a new round, so a per-round counter
- * would reset the budget every time the gate bounced.
- */
-export function recordGateFailureRetry(review: Review): Review {
-  return { ...review, gateFailureRetryCount: review.gateFailureRetryCount + 1 };
-}
-
-/**
- * Consume one hook failure retry.
- *
- * Counted on the review rather than the round: a hook auto-bounce hands the
- * mission back to the implementer without starting a new round.
- */
-export function recordHookFailureRetry(review: Review): Review {
-  return { ...review, hookFailureRetryCount: review.hookFailureRetryCount + 1 };
 }
 
 function validateResolutions(
