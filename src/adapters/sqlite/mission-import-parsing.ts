@@ -551,12 +551,6 @@ export function reviewFromState(
       stageLaunches: stageLaunchWindowsFrom(
         (data.metadata as Record<string, unknown> | undefined)?.recordedStageLaunches,
       ),
-      gateFailureRetryCount: nonNegativeCount(
-        (data.metadata as Record<string, unknown> | undefined)?.gateFailureRetryCount,
-      ),
-      hookFailureRetryCount: nonNegativeCount(
-        (data.metadata as Record<string, unknown> | undefined)?.hookFailureRetryCount,
-      ),
       reviewEvents: [],
     },
     errors,

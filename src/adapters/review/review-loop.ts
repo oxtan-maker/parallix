@@ -24,7 +24,8 @@ import { commitSafeMissionArtifacts, rebaseBeforeReviewRound } from './rebase.js
 import { packageRoot } from '../filesystem/package-root.js';
 import { resolveAgentModel } from '../config/product-config.js';
 import { POLL_TIMEOUT, delay, resolvePollIntervalMs, resolvePollTimeoutMs, formatElapsed, isPollTimeout, pollForReview, pollForDisposition } from './review-polling.js';
-import { buildMetadataFooter, resolveArtifactDir, consumeReviewerArtifacts, consumeImplementerArtifacts, dispatchArtifactFailure, isArtifactInfraDiagnostic } from './review-artifacts.js';
+import { buildMetadataFooter, resolveArtifactDir, consumeReviewerArtifacts, consumeImplementerArtifacts, dispatchArtifactFailure, isArtifactInfraDiagnostic, ARTIFACT_REBOUND_ATTEMPTS } from './review-artifacts.js';
+import { DEFAULT_REBOUND_ATTEMPTS } from '../../application/rebound-kernel.js';
 import { pushReviewRef, isStaleInfoPushRejection, fetchReviewBranch } from '../forgejo/forgejo.js';
 import {
   DEFAULT_MAX_ATTEMPTS,
@@ -45,11 +46,23 @@ import {
   maybeUpdateGraphifyBeforeReview,
 } from './review-agent-fallback.js';
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
+/**
+ * Per-round relaunch cap (TASK-2377.04): bounds the total bounce launch
+ * attempts in one review round — every launch consumed by a rebound-kernel
+ * occurrence (gate, hook, artifact) plus every timeout-recovery relaunch.
+ * In-memory and round-local: it persists nothing and resets each round.
+ */
+export const DEFAULT_REBOUNDS_PER_ROUND = 6;
+
+/** Named escalation reason: the per-round relaunch cap is exhausted. */
+export const REBOUNDS_PER_ROUND_EXHAUSTED = 'REBOUNDS_PER_ROUND_EXHAUSTED';
+
 export async function startReviewLoop(slug: string, opts: {
   implementer?: string;
   reviewer?: string;
   focus?: string;
   maxAttempts?: number;
+  reboundsPerRound?: number;
   dryRun?: boolean;
   reset?: boolean;
   continue?: boolean;
@@ -123,6 +136,7 @@ export async function startReviewLoop(slug: string, opts: {
     reviewer,
     focus = 'all',
     maxAttempts = DEFAULT_MAX_ATTEMPTS,
+    reboundsPerRound = DEFAULT_REBOUNDS_PER_ROUND,
     dryRun = false,
     reset = false,
     continue: continueFlag = false,
@@ -410,8 +424,28 @@ export async function startReviewLoop(slug: string, opts: {
   const pollingUser = forgejoEnabled ? (resolvedReviewUserFn as () => string | null)() : null;
   const token = dryRun || !forgejoEnabled ? null : readTokenFn(pollingUser!, { rootDir: worktree });
   const initialRound = state.round;
+  let reboundsUsedThisRound = 0;
   for (let attempt = initialRound; attempt <= maxAttempts; attempt++) {
     log('\n' + fmt.status('INFO', `========== Round ${attempt} / ${maxAttempts} ==========`));
+    // The per-round relaunch cap is round-local scratch (TASK-2377.04): every
+    // round starts with a fresh counter; nothing is persisted.
+    reboundsUsedThisRound = 0;
+    // The timeout-recovery retry counters are round-local in-memory scratch
+    // (TASK-2377.04): the persisted review-state fields they replaced are
+    // deleted, so a resume mid-round starts each recovery ladder fresh.
+    let reviewerTimeoutRetries = 0;
+    let implementerTimeoutRetries = 0;
+    const reboundsRemainingThisRound = () => Math.max(0, reboundsPerRound - reboundsUsedThisRound);
+    const roundReboundCapReached = () => reboundsPerRound >= 0 && reboundsUsedThisRound >= reboundsPerRound;
+    /**
+     * Stop the loop when the per-round relaunch cap is exhausted (TASK-2377.04):
+     * explicit diagnostic plus the named escalation reason; no further
+     * relaunches happen this round.
+     */
+    const stopForRoundReboundCap = async (context: string) => {
+      error(fmt.status('FAIL', `Per-round relaunch cap reached for ${slug}: ${reboundsUsedThisRound}/${reboundsPerRound} relaunches used in round ${attempt}; no further ${context} relaunches.`));
+      await escalateToHumanReview(REBOUNDS_PER_ROUND_EXHAUSTED);
+    };
     if (attempt > state.round) {
       state.advanceRound();
     }
@@ -470,7 +504,7 @@ export async function startReviewLoop(slug: string, opts: {
         if (forgejoEnabled) {
           log(fmt.status('INFO', `Round ${attempt}: checking for existing review by ${reviewer} since ${state.startedAt}...`));
           reviewState = await pollForReviewFn(prNumber as number, reviewer!, state.startedAt, token!, {
-            getLatestReviewForPrFn, sleepFn, intervalMs: 1000, timeoutMs: 2000, retryCount: state.reviewerRetryCount, verbose, label: `round ${attempt} skip-check`, log
+            getLatestReviewForPrFn, sleepFn, intervalMs: 1000, timeoutMs: 2000, retryCount: reviewerTimeoutRetries, verbose, label: `round ${attempt} skip-check`, log
           });
           if (isPollTimeout(reviewState)) {
             reviewState = null;
@@ -512,6 +546,10 @@ export async function startReviewLoop(slug: string, opts: {
               // is preferred; the legacy hookOutput field stays as fallback so
               // callers that do not populate `failure` keep working.
               const hookOutput = rebaseFailure?.kind === 'hook' ? rebaseFailure.hook.output : (rebaseResult.hookOutput || '');
+              if (roundReboundCapReached()) {
+                await stopForRoundReboundCap('pre-review hook');
+                return;
+              }
               const bounceResult = await reboundPreReviewFailureFn(
                 slug,
                 worktree,
@@ -522,8 +560,15 @@ export async function startReviewLoop(slug: string, opts: {
                     : 'git commit (pre-review safety commit)',
                 ),
                 implementer!,
-                { ...reboundCollaborators(), verifyFn: verifyPreReviewSetup },
+                {
+                  ...reboundCollaborators(),
+                  verifyFn: verifyPreReviewSetup,
+                  // TASK-2377.04: the per-occurrence budget is clamped to the
+                  // remaining per-round relaunch cap before the launch.
+                  maxAttempts: Math.min(DEFAULT_REBOUND_ATTEMPTS, reboundsRemainingThisRound()),
+                },
               );
+              reboundsUsedThisRound += bounceResult.attempts ?? 0;
               implementer = bounceResult.implementer || implementer;
               if (bounceResult.bounced) {
                 // The kernel's verify re-ran the pre-review rebase and the
@@ -533,6 +578,10 @@ export async function startReviewLoop(slug: string, opts: {
                 log(fmt.status('PASS', `Pre-review Git hook failure repaired and re-verified for ${slug}; continuing this review round.`));
                 preReviewSetupVerified = true;
               } else {
+                if (roundReboundCapReached()) {
+                  await stopForRoundReboundCap('pre-review hook');
+                  return;
+                }
                 error(fmt.status('FAIL', `Pre-review Git hook failure ${bounceResult.outcome === 'human-only' ? 'requires human intervention' : 'exhausted its repair budget'} for ${slug}.`));
                 exit(1); return;
               }
@@ -553,15 +602,30 @@ export async function startReviewLoop(slug: string, opts: {
           });
           if (!preReviewGateResult.ok) {
             log(fmt.status('WARN', `Pre-review gate failed for area "${preReviewGateResult.area}" (exit ${preReviewGateResult.exitCode}). Bouncing to implementer.`));
+            if (roundReboundCapReached()) {
+              await stopForRoundReboundCap('pre-review gate');
+              return;
+            }
             const bounceResult = await reboundPreReviewFailureFn(
               slug,
               worktree,
               gateFailureReason(preReviewGateResult),
               implementer!,
-              { ...reboundCollaborators(), verifyFn: verifyPreReviewSetup },
+              {
+                ...reboundCollaborators(),
+                verifyFn: verifyPreReviewSetup,
+                // TASK-2377.04: the per-occurrence budget is clamped to the
+                // remaining per-round relaunch cap before the launch.
+                maxAttempts: Math.min(DEFAULT_REBOUND_ATTEMPTS, reboundsRemainingThisRound()),
+              },
             );
+            reboundsUsedThisRound += bounceResult.attempts ?? 0;
             implementer = bounceResult.implementer || implementer;
             if (!bounceResult.bounced) {
+              if (roundReboundCapReached()) {
+                await stopForRoundReboundCap('pre-review gate');
+                return;
+              }
               error(fmt.status('FAIL', `Pre-review gate failure stranded mission ${slug} (${bounceResult.outcome}). Exiting review loop.`));
               exit(1); return;
             }
@@ -629,18 +693,78 @@ export async function startReviewLoop(slug: string, opts: {
                 await escalateToHumanReview('REVIEWER_ARTIFACT_INFRA_FAILURE');
                 return;
               }
+              // TASK-2377.04: the artifact bounce runs through the rebound
+              // kernel. `fixed` requires the re-consumed artifacts to be
+              // complete — a relaunch alone is no evidence that the reviewer
+              // produced anything.
+              if (roundReboundCapReached()) {
+                await stopForRoundReboundCap('reviewer artifact');
+                return;
+              }
+              let recoveredReviewerArtifacts = reviewerArtifacts;
               const reviewerDispatch = await dispatchArtifactFailure('reviewer', reviewerDiagnostic, {
-                slug, worktree, writeReviewStateFn, readReviewStateFn: readReviewStateFn as any, missionStore,
+                // TASK-2377.04: the per-occurrence budget is clamped to the
+                // remaining per-round relaunch cap before the launch.
+                maxAttempts: Math.min(ARTIFACT_REBOUND_ATTEMPTS, reboundsRemainingThisRound()),
+                slug,
+                worktree,
+                agent: reviewer!,
+                startAgentFn: async (_step, launchOptions) => await (startAgentFn as any)('review', {
+                  agent: reviewer,
+                  prompt: (actualReviewer: string) => (buildCompactReviewPromptFn as any)({ reviewer: reviewer!, branch, implementer: implementer!, focus, attempt, repoRoot: worktree, missionPath: effectiveMissionPath || undefined, actualReviewer, reviewBaseline })
+                    + '\n\n' + String((launchOptions as any).prompt(actualReviewer)),
+                  worktree, slug, role: 'reviewer', exclude: [implementer],
+                  onLaunch: ({ agent }: { agent: string }) => onAgentLaunched?.(agent, 'review'),
+                }),
+                applyAgentFallbackFn: async ({ launchResult, original }) => {
+                  reviewer = await applyAgentFallbackFn({
+                    role: 'reviewer', original, launchResult: launchResult as any,
+                    state: state as unknown as Record<string, any>, slug, worktree, taskResolution, log, writeReviewStateFn, enforceTaskAssigneeFn, missionStore
+                  });
+                  return reviewer!;
+                },
+                verifyFn: async () => {
+                  recoveredReviewerArtifacts = await consumeReviewerArtifactsFn(slug, reviewer!, {
+                    worktree,
+                    tmpDir: artifactDir,
+                    readTokenFn,
+                    getCommentsFn: getCommentsFn as any,
+                    postCommentFn,
+                    postReviewFn,
+                    buildMetadataFooterFn: buildMetadataFooter,
+                    forgejoEnabled,
+                    log,
+                    error,
+                    missionStore,
+                  });
+                  if (!recoveredReviewerArtifacts.consumed) {
+                    return { ok: false, diagnostic: `Reviewer ${reviewer} produced no review artifacts after the relaunch` };
+                  }
+                  if (!recoveredReviewerArtifacts.ok) {
+                    return { ok: false, diagnostic: recoveredReviewerArtifacts.diagnostic || `Reviewer ${reviewer} produced incomplete or invalid review artifacts` };
+                  }
+                  return { ok: true };
+                },
                 log, error,
-                state,
               });
-              if (reviewerDispatch.action === 'strand') {
-                error(fmt.status('FAIL', `Reviewer artifact recovery exhausted for ${slug}. Human intervention required.`));
+              reboundsUsedThisRound += reviewerDispatch.attempts ?? 0;
+              reviewer = reviewerDispatch.agent || reviewer;
+              if (reviewerDispatch.action !== 'fixed') {
+                if (reviewerDispatch.action === 'human-only') {
+                  error(fmt.status('FAIL', `Reviewer artifact recovery requires human intervention for ${slug}.`));
+                  await escalateToHumanReview('REVIEWER_ARTIFACT_INFRA_FAILURE');
+                  return;
+                }
+                if (roundReboundCapReached()) {
+                  await stopForRoundReboundCap('reviewer artifact');
+                  return;
+                }
+                error(fmt.status('FAIL', `Reviewer artifact recovery exhausted its ${reviewerDispatch.maxAttempts}-attempt budget for ${slug}.`));
                 await escalateToHumanReview('REVIEWER_ARTIFACT_RETRY_EXHAUSTED');
                 return;
               }
-              log(fmt.status('WARN', `Reviewer ${reviewer} produced incomplete or invalid review artifacts (retry ${reviewerDispatch.retryCount}/${reviewerDispatch.maxRetries}); retrying the reviewer.`));
-              reviewState = POLL_TIMEOUT;
+              log(fmt.status('PASS', `Reviewer artifacts re-consumed and complete after ${reviewerDispatch.attempts} attempt(s).`));
+              reviewState = recoveredReviewerArtifacts.reviewState;
             } else {
               reviewState = reviewerArtifacts.reviewState;
             }
@@ -659,13 +783,15 @@ export async function startReviewLoop(slug: string, opts: {
             log(fmt.status('WARN', `Reviewer ${reviewer} ${handoff} for ${branch}; retrying the reviewer.`));
             reviewState = POLL_TIMEOUT;
           }
-          const stateAny = state as unknown as Record<string, any>;
-          while ((stateAny['reviewerRetryCount'] || 0) < 2) {
-            stateAny['reviewerRetryCount'] = (stateAny['reviewerRetryCount'] || 0) + 1;
-            await persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree, missionStore);
-            const elapsedStr = formatElapsed(Date.now() - Date.parse(stateAny['startedAt'] as string));
-            const recoveryPrompt = `RECOVERY: Reviewer timeout after ${elapsedStr}. Before resuming, compact the failed-attempt context and reload the locked mission goal and scope; committed checkpoint or gate evidence when present; current round and disposition; unresolved findings and implementer resolutions; the exact revision and review baseline; and reviewer retry ${stateAny['reviewerRetryCount']}/2. Please complete the review for ${branch}.`;
-            log(fmt.status('INFO', `Round ${attempt}: relaunching reviewer (${reviewer}) with recovery prompt (retry ${stateAny['reviewerRetryCount']}/3)...`));
+          while (reviewerTimeoutRetries < 2) {
+            if (roundReboundCapReached()) {
+              await stopForRoundReboundCap('reviewer timeout recovery');
+              return;
+            }
+            reviewerTimeoutRetries += 1;
+            const elapsedStr = formatElapsed(Date.now() - Date.parse(state.startedAt));
+            const recoveryPrompt = `RECOVERY: Reviewer timeout after ${elapsedStr}. Before resuming, compact the failed-attempt context and reload the locked mission goal and scope; committed checkpoint or gate evidence when present; current round and disposition; unresolved findings and implementer resolutions; the exact revision and review baseline; and reviewer retry ${reviewerTimeoutRetries}/2. Please complete the review for ${branch}.`;
+            log(fmt.status('INFO', `Round ${attempt}: relaunching reviewer (${reviewer}) with recovery prompt (retry ${reviewerTimeoutRetries}/3)...`));
             let relaunchResult: any;
             try {
               relaunchResult = await startAgentFn('review', {
@@ -683,6 +809,7 @@ export async function startReviewLoop(slug: string, opts: {
               role: 'reviewer', original: reviewer!, launchResult: relaunchResult,
               state: state as unknown as Record<string, any>, slug, worktree, taskResolution, log, writeReviewStateFn, enforceTaskAssigneeFn, missionStore
             });
+            reboundsUsedThisRound += 1;
             reviewState = null;
             const retryArtifacts = await consumeReviewerArtifactsFn(slug, reviewer!, {
               worktree,
@@ -707,13 +834,13 @@ export async function startReviewLoop(slug: string, opts: {
             }
             if (!reviewState && forgejoEnabled) {
               reviewState = await pollForReviewFn(prNumber as number, reviewer!, state.startedAt, token!, {
-                getLatestReviewForPrFn, sleepFn, intervalMs: pollIntervalMs, timeoutMs: pollTimeoutMs, retryCount: state.reviewerRetryCount, verbose, label: `round ${attempt} review retry ${state.reviewerRetryCount}`, log
+                getLatestReviewForPrFn, sleepFn, intervalMs: pollIntervalMs, timeoutMs: pollTimeoutMs, retryCount: reviewerTimeoutRetries, verbose, label: `round ${attempt} review retry ${reviewerTimeoutRetries}`, log
               });
             }
             if (!isPollTimeout(reviewState) && reviewState) { break; }
           }
           if (isPollTimeout(reviewState) || !reviewState) {
-            error(fmt.status('FAIL', `Reviewer ${reviewer} did not submit a usable formal review outcome after ${stateAny['reviewerRetryCount']} recovery retries.`));
+            error(fmt.status('FAIL', `Reviewer ${reviewer} did not submit a usable formal review outcome after ${reviewerTimeoutRetries} recovery retries.`));
             error('       Human intervention is required to complete or repair the review.');
             await escalateToHumanReview('REVIEWER_NON_APPROVAL');
             return;
@@ -850,71 +977,78 @@ export async function startReviewLoop(slug: string, opts: {
             await escalateToHumanReview('IMPLEMENTER_ARTIFACT_INFRA_FAILURE');
             return;
           }
+          // TASK-2377.04: one rebound-kernel occurrence replaces the inline
+          // relaunch-and-re-consume ladder. `fixed` requires the re-consumed
+          // implementer artifacts to be complete; the per-occurrence budget
+          // is in-memory and starts fresh at every occurrence.
+          if (roundReboundCapReached()) {
+            await stopForRoundReboundCap('implementer artifact');
+            return;
+          }
+          let recoveredImplementerArtifacts = implementerArtifacts;
           const implDispatch = await dispatchArtifactFailure('implementer', implDiagnostic, {
-            slug, worktree, writeReviewStateFn, readReviewStateFn: readReviewStateFn as any, missionStore,
+            // TASK-2377.04: the per-occurrence budget is clamped to the
+            // remaining per-round relaunch cap before the launch.
+            maxAttempts: Math.min(ARTIFACT_REBOUND_ATTEMPTS, reboundsRemainingThisRound()),
+            slug,
+            worktree,
+            agent: implementer!,
+            startAgentFn: async (_step, launchOptions) => await (startAgentFn as any)('act-on-review', {
+              agent: implementer,
+              prompt: (actualImplementer: string) => (buildCompactActOnReviewPromptFn as any)({ implementer: implementer!, branch, attempt, reviewOutcome: reviewState, repoRoot: worktree, missionPath: effectiveMissionPath || undefined, actualImplementer, reviewBaseline })
+                + '\n\n' + String((launchOptions as any).prompt(actualImplementer)),
+              worktree, slug, role: 'implementer', exclude: [reviewer],
+              onLaunch: ({ agent }: { agent: string }) => onAgentLaunched?.(agent, 'review-response'),
+            }),
+            applyAgentFallbackFn: async ({ launchResult, original }) => {
+              implementer = await applyAgentFallbackFn({
+                role: 'implementer', original, launchResult: launchResult as any,
+                state: state as unknown as Record<string, any>, slug, worktree, taskResolution, log, writeReviewStateFn, enforceTaskAssigneeFn, missionStore
+              });
+              return implementer!;
+            },
+            verifyFn: async () => {
+              recoveredImplementerArtifacts = await consumeImplementerArtifactsFn(slug, implementer!, {
+                worktree,
+                tmpDir: artifactDir,
+                readTokenFn,
+                getCommentsFn: getCommentsFn as any,
+                postCommentFn,
+                buildMetadataFooterFn: buildMetadataFooter,
+                forgejoEnabled,
+                log,
+                error
+              });
+              if (!recoveredImplementerArtifacts.consumed) {
+                return { ok: false, diagnostic: `Implementer ${implementer} produced no round artifacts after the relaunch` };
+              }
+              if (!recoveredImplementerArtifacts.ok) {
+                return { ok: false, diagnostic: recoveredImplementerArtifacts.diagnostic || `Implementer ${implementer} still produced incomplete artifacts after the relaunch` };
+              }
+              return { ok: true };
+            },
             log, error,
-            state,
           });
-          if (implDispatch.action === 'strand') {
-            error(fmt.status('FAIL', `Implementer artifact recovery exhausted for ${slug}. Human intervention required.`));
+          reboundsUsedThisRound += implDispatch.attempts ?? 0;
+          implementer = implDispatch.agent || implementer;
+          if (implDispatch.action !== 'fixed') {
+            const infraAfterBounce = isArtifactInfraDiagnostic(implDispatch.diagnostic);
+            const infra = implDispatch.action === 'human-only' || infraAfterBounce;
+            if (infra) {
+              error(fmt.status('FAIL', `Implementer artifact recovery requires human intervention for ${slug}.`));
+              await escalateToHumanReview('IMPLEMENTER_ARTIFACT_INFRA_FAILURE');
+              return;
+            }
+            if (roundReboundCapReached()) {
+              await stopForRoundReboundCap('implementer artifact');
+              return;
+            }
+            error(fmt.status('FAIL', `Implementer artifact recovery exhausted its ${implDispatch.maxAttempts}-attempt budget for ${slug}.`));
             await escalateToHumanReview('IMPLEMENTER_ARTIFACT_RETRY_EXHAUSTED');
             return;
           }
-          const elapsedStr = formatElapsed(Date.now() - Date.parse((state as any).startedAt as string));
-          const implRecoveryPrompt = `RECOVERY: Implementer artifact failure after ${elapsedStr}. ${implDiagnostic}. Before resuming, compact the failed-attempt context and reload the locked mission goal and scope; committed checkpoint or gate evidence when present; current round and disposition; unresolved findings and implementer resolutions; and implementer artifact retry ${implDispatch.retryCount}/${implDispatch.maxRetries}. Please produce complete review-disposition.txt and round-resolution.md artifacts for ${branch}.`;
-          log(fmt.status('INFO', `Round ${attempt}: relaunching implementer (${implementer}) for artifact recovery (retry ${implDispatch.retryCount}/${implDispatch.maxRetries})...`));
-          let implRelaunchResult: any;
-          try {
-            implRelaunchResult = await startAgentFn('act-on-review', {
-              agent: implementer,
-              prompt: (actualImplementer: string) => (buildCompactActOnReviewPromptFn as any)({ implementer: implementer!, branch, attempt, reviewOutcome: reviewState, repoRoot: worktree, missionPath: effectiveMissionPath || undefined, actualImplementer, reviewBaseline }) + '\n\n' + implRecoveryPrompt,
-              worktree, slug, role: 'implementer', exclude: [reviewer], onLaunch: ({ agent }: { agent: string }) => onAgentLaunched?.(agent, 'review-response')
-            });
-          } catch (err: unknown) {
-            error(fmt.status('FAIL', `Could not relaunch implementer agent (${implementer}) for artifact recovery: ${(err as Error).message}`));
-            exit(1); return;
-          }
-          implementer = await applyAgentFallbackFn({
-            role: 'implementer', original: implementer!, launchResult: implRelaunchResult,
-            state: state as unknown as Record<string, any>, slug, worktree, taskResolution, log, writeReviewStateFn, enforceTaskAssigneeFn, missionStore
-          });
-          const relaunchArtifacts = await consumeImplementerArtifactsFn(slug, implementer!, {
-            worktree,
-            tmpDir: artifactDir,
-            readTokenFn,
-            getCommentsFn: getCommentsFn as any,
-            postCommentFn,
-            buildMetadataFooterFn: buildMetadataFooter,
-            forgejoEnabled,
-            log,
-            error
-          });
-          if (relaunchArtifacts.consumed) {
-            if (!relaunchArtifacts.ok) {
-              const relaunchDiagnostic = relaunchArtifacts.diagnostic || `Implementer ${implementer} still produced incomplete artifacts after relaunch`;
-              if (isArtifactInfraDiagnostic(relaunchDiagnostic)) {
-                error(fmt.status('FAIL', `Implementer artifact infrastructure failure after relaunch: ${relaunchDiagnostic}`));
-                await escalateToHumanReview('IMPLEMENTER_ARTIFACT_INFRA_FAILURE');
-                return;
-              }
-              const relaunchDispatch = await dispatchArtifactFailure('implementer', relaunchDiagnostic, {
-                slug, worktree, writeReviewStateFn, readReviewStateFn: readReviewStateFn as any, missionStore,
-                log, error,
-                state,
-              });
-              if (relaunchDispatch.action === 'strand') {
-                error(fmt.status('FAIL', `Implementer artifact recovery exhausted for ${slug} after relaunch. Human intervention required.`));
-                await escalateToHumanReview('IMPLEMENTER_ARTIFACT_RETRY_EXHAUSTED');
-                return;
-              }
-              log(fmt.status('WARN', `Implementer artifact recovery continuing (retry ${relaunchDispatch.retryCount}/${relaunchDispatch.maxRetries})...`));
-              disposition = null; // Fall through to timeout poll path
-            } else {
-              disposition = relaunchArtifacts.disposition;
-            }
-          } else {
-            disposition = null; // No artifacts produced, fall through to poll
-          }
+          log(fmt.status('PASS', `Implementer artifacts re-consumed and complete after ${implDispatch.attempts} attempt(s).`));
+          disposition = recoveredImplementerArtifacts.disposition;
         } else {
           disposition = implementerArtifacts.disposition;
         }
@@ -925,13 +1059,15 @@ export async function startReviewLoop(slug: string, opts: {
         });
       }
       if (isPollTimeout(disposition)) {
-        const stateAny = state as unknown as Record<string, any>;
-        while ((stateAny['implementerRetryCount'] || 0) < 2) {
-          stateAny['implementerRetryCount'] = (stateAny['implementerRetryCount'] || 0) + 1;
-          await persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree, missionStore);
-          const elapsedStr = formatElapsed(Date.now() - Date.parse(stateAny['startedAt'] as string));
-          const recoveryPrompt = `RECOVERY: Implementer disposition timeout after ${elapsedStr}. Before resuming, compact the failed-attempt context and reload the locked mission goal and scope; committed checkpoint or gate evidence when present; current round and disposition; unresolved findings and implementer resolutions; the exact revision under review; and implementer retry ${stateAny['implementerRetryCount']}/2. Please provide a disposition (PUSHBACK_ALL, BLOCKED, PARKED, or continue with fixes) for ${branch}.`;
-          log(fmt.status('INFO', `Round ${attempt}: relaunching implementer (${implementer}) with recovery prompt (retry ${stateAny['implementerRetryCount']}/3)...`));
+        while (implementerTimeoutRetries < 2) {
+          if (roundReboundCapReached()) {
+            await stopForRoundReboundCap('implementer timeout recovery');
+            return;
+          }
+          implementerTimeoutRetries += 1;
+          const elapsedStr = formatElapsed(Date.now() - Date.parse(state.startedAt));
+          const recoveryPrompt = `RECOVERY: Implementer disposition timeout after ${elapsedStr}. Before resuming, compact the failed-attempt context and reload the locked mission goal and scope; committed checkpoint or gate evidence when present; current round and disposition; unresolved findings and implementer resolutions; the exact revision under review; and implementer retry ${implementerTimeoutRetries}/2. Please provide a disposition (PUSHBACK_ALL, BLOCKED, PARKED, or continue with fixes) for ${branch}.`;
+          log(fmt.status('INFO', `Round ${attempt}: relaunching implementer (${implementer}) with recovery prompt (retry ${implementerTimeoutRetries}/3)...`));
           let relaunchResult: any;
           try {
             relaunchResult = await startAgentFn('act-on-review', {
@@ -947,6 +1083,7 @@ export async function startReviewLoop(slug: string, opts: {
             role: 'implementer', original: implementer!, launchResult: relaunchResult,
             state: state as unknown as Record<string, any>, slug, worktree, taskResolution, log, writeReviewStateFn, enforceTaskAssigneeFn, missionStore
           });
+          reboundsUsedThisRound += 1;
           const retryArtifacts = await consumeImplementerArtifactsFn(slug, implementer!, {
             worktree,
             tmpDir: artifactDir,
@@ -966,16 +1103,10 @@ export async function startReviewLoop(slug: string, opts: {
                 await escalateToHumanReview('IMPLEMENTER_ARTIFACT_INFRA_FAILURE');
                 return;
               }
-              const retryDispatch = await dispatchArtifactFailure('implementer', retryDiagnostic, {
-                slug, worktree, writeReviewStateFn, readReviewStateFn: readReviewStateFn as any, missionStore,
-                log, error,
-                state,
-              });
-              if (retryDispatch.action === 'strand') {
-                error(fmt.status('FAIL', `Implementer artifact recovery exhausted for ${slug}. Human intervention required.`));
-                await escalateToHumanReview('IMPLEMENTER_ARTIFACT_RETRY_EXHAUSTED');
-                return;
-              }
+              // The enclosing timeout-recovery loop already bounds its own
+              // relaunches; the artifact dispatcher is not re-entered here, so
+              // one timeout occurrence cannot spend a second budget.
+              log(fmt.status('WARN', `Implementer ${implementer} produced incomplete artifacts during timeout recovery: ${retryDiagnostic}`));
               disposition = null; // Fall through to poll
             } else {
               disposition = retryArtifacts.disposition;
@@ -983,7 +1114,7 @@ export async function startReviewLoop(slug: string, opts: {
           }
           if (!disposition && forgejoEnabled) {
             disposition = await pollForDispositionFn(prNumber as number, implementer!, sinceIso, token!, {
-              getLatestDispositionForPrFn, sleepFn, intervalMs: pollIntervalMs, timeoutMs: pollTimeoutMs, retryCount: state.implementerRetryCount, verbose, label: `round ${attempt} disposition retry ${state.implementerRetryCount}`, log
+              getLatestDispositionForPrFn, sleepFn, intervalMs: pollIntervalMs, timeoutMs: pollTimeoutMs, retryCount: implementerTimeoutRetries, verbose, label: `round ${attempt} disposition retry ${implementerTimeoutRetries}`, log
             });
           }
           if (!isPollTimeout(disposition)) { break; }

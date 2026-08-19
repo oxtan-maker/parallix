@@ -165,7 +165,6 @@ test('live stats workflow adapter derives authoritative implementer and reviewFi
       }],
       intervention: null,
       stageLaunches: [],
-      gateFailureRetryCount: 0,
       reviewEvents: [
         reviewerOutcome(0, 1, 'request-changes', '2026-01-01T10:00:00Z'),
         reviewerOutcome(1, 2, 'request-changes', '2026-01-01T11:00:00Z'),

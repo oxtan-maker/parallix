@@ -10,7 +10,6 @@ import {
   ConfiguredReviewerEligibility,
   currentReviewRound,
   hasRecordedStageLaunch,
-  recordReviewRetry,
   recordStageLaunch,
   reviewFindingId,
   stageLaunchWindowsFrom,
@@ -113,14 +112,12 @@ test('phase transitions follow the loop table and reject illegal jumps', () => {
   );
 });
 
-test('retry counters accumulate per actor and reset when a round begins', () => {
-  let review = recordReviewRetry(initialReview(), 'reviewer');
-  review = recordReviewRetry(review, 'reviewer');
-  review = recordReviewRetry(review, 'implementer');
-  assert.equal(currentReviewRound(review).reviewerRetryCount, 2);
-  assert.equal(currentReviewRound(review).implementerRetryCount, 1);
-
-  review = applyReviewerCommand(review, {
+test('retry counters reset when a round begins (TASK-2377.04: no domain record method; the round fields survive on ReviewRound)', () => {
+  // TASK-2377.04 deleted recordReviewRetry: the persisted per-occurrence
+  // retry loops that drove it are gone, and the rebound kernel's budget is
+  // in-memory. The round fields survive as round columns (ADR 0053); a new
+  // round always starts with both counters at 0.
+  let review = applyReviewerCommand(initialReview(), {
     type: 'request-changes',
     decidedAt: '2026-08-02T09:00:00Z',
     comment: null,

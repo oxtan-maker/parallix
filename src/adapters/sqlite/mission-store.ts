@@ -154,7 +154,7 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
         ),
         this.db.query<MissionReviewRecord>(
           `SELECT mission_id, intervention_requested_at, intervention_requested_by,
-                  intervention_reason, gate_failure_retry_count, hook_failure_retry_count
+                  intervention_reason
            FROM mission_reviews WHERE mission_id = ?`,
           [id],
         ),
@@ -476,21 +476,17 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
     await this.db.execute(
       `INSERT INTO mission_reviews
          (mission_id, intervention_requested_at, intervention_requested_by,
-          intervention_reason, gate_failure_retry_count, hook_failure_retry_count)
-       VALUES (?, ?, ?, ?, ?, ?)
+          intervention_reason)
+       VALUES (?, ?, ?, ?)
        ON CONFLICT(mission_id) DO UPDATE SET
          intervention_requested_at = excluded.intervention_requested_at,
          intervention_requested_by = excluded.intervention_requested_by,
-         intervention_reason = excluded.intervention_reason,
-         gate_failure_retry_count = excluded.gate_failure_retry_count,
-         hook_failure_retry_count = excluded.hook_failure_retry_count`,
+         intervention_reason = excluded.intervention_reason`,
       [
         mission.id,
         review.intervention?.requestedAt ?? null,
         review.intervention?.requestedBy ?? null,
         review.intervention?.reason ?? null,
-        review.gateFailureRetryCount ?? 0,
-        review.hookFailureRetryCount ?? 0,
       ],
     );
 

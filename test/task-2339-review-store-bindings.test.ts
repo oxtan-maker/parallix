@@ -45,7 +45,6 @@ function missionWithReview() {
       }],
       intervention: null,
       stageLaunches: [],
-      gateFailureRetryCount: 0,
       reviewEvents: [],
     },
   };

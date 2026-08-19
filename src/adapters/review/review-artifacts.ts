@@ -10,6 +10,13 @@ import * as fmt from '../../application/presentation/cli-format.js';
 import { missionBranchName, resolveWorktree } from '../filesystem/mission-utils.js';
 import { git } from '../git/git.js';
 import { readReviewState, writeReviewState, reviewStateFile, ReviewState, resolveReviewIdentity, persistReviewStateOrThrow } from './review-state.js';
+import {
+  rebound,
+  DEFAULT_REBOUND_ATTEMPTS,
+  type ReboundContext,
+  type ReboundStartAgent,
+  type VerifyResult,
+} from '../../application/rebound-kernel.js';
 import type { MissionStore } from '../../application/domain-ports.js';
 import { readToken, postComment, postReview, getPrAuthor, isEnabled, resolveArtifactDir as resolveConfiguredArtifactDir } from './review-adapter.js';
 import { createEvent, consumeHumanNotes, VALID_EVENT_TYPES, CreateEventParams, CreateEventOptions, CreateEventResult } from './review-events.js';
@@ -717,38 +724,33 @@ async function consumeImplementerArtifacts(
 export type ArtifactRole = 'reviewer' | 'implementer';
 
 /**
- * Dispatch decision for an artifact failure.
- * `relaunch` — relaunch the producing role with a fix prompt
- * `strand` — retry bound exhausted; record stranded state for human intervention
+ * Outcome of one artifact-failure occurrence, mapped from the rebound kernel.
+ * `fixed` — the relaunched role's artifacts were re-consumed and are complete
+ * `strand` — the per-occurrence attempt budget is spent; human intervention
+ * `human-only` — the ADR 0048 table says no agent relaunch can fix this
  */
-export type ArtifactDispatchAction = 'relaunch' | 'strand';
+export type ArtifactDispatchAction = 'fixed' | 'strand' | 'human-only';
 
 export interface ArtifactDispatchResult {
   action: ArtifactDispatchAction;
   role: ArtifactRole;
+  /** Last diagnostic observed: the verify re-consume's, or the original one. */
   diagnostic: string;
-  retryCount: number;
-  maxRetries: number;
-  /**
-   * Updated metadata object. Callers should merge this into their in-memory
-   * ReviewState to keep retry counters and strand markers in sync with disk.
-   * Present whenever the dispatcher mutates metadata (relaunch or strand).
-   */
-  metadata?: Record<string, unknown>;
+  /** Launch attempts consumed by this occurrence. */
+  attempts: number;
+  maxAttempts: number;
+  /** Agent that ran the final attempt (fallback-resolved). */
+  agent: string;
 }
 
 /**
- * Default maximum retry attempts for artifact recovery per role.
- * Aligned with existing reviewer/implementer timeout retry bounds.
+ * Per-occurrence attempt budget for artifact recovery.
+ *
+ * The kernel's budget is per local failure and in-memory: every occurrence
+ * starts fresh, nothing is persisted (TASK-2377.04 deleted the review-state
+ * metadata retry counters this dispatcher used to read and write).
  */
-const MAX_ARTIFACT_RETRY = 2;
-
-/**
- * Metadata key for per-role artifact retry counts.
- * Stored in ReviewState.metadata so counters are independent of timeout retries.
- */
-const REVIEWER_ARTIFACT_RETRY_KEY = 'reviewerArtifactRetryCount';
-const IMPLEMENTER_ARTIFACT_RETRY_KEY = 'implementerArtifactRetryCount';
+export const ARTIFACT_REBOUND_ATTEMPTS = DEFAULT_REBOUND_ATTEMPTS;
 
 /**
  * Check if a diagnostic string indicates an infrastructure failure
@@ -769,25 +771,23 @@ export function isArtifactInfraDiagnostic(diagnostic: string | undefined | null)
 }
 
 /**
- * Dispatch an artifact failure to the producing role with bounded retry.
+ * Bounce one artifact-failure occurrence back to the producing role.
  *
- * Reads persisted retry count from ReviewState.metadata, increments it,
- * persists the updated state, and returns the dispatch decision.
- * When the retry bound is exhausted, returns `strand` with an actionable
- * stranded state recorded in metadata.
+ * This is the artifact-path adapter over the rebound kernel
+ * (`src/application/rebound-kernel.ts`): the kernel owns classification (ADR
+ * 0048), the fix prompt, the launch, the verify loop, and the attempt budget;
+ * this function contributes the structured `artifact-incomplete` reason and
+ * the role-aware collaborators.
  *
- * ADR 0048: artifact failures (missing/malformed) map to MissingArtifacts
- * which is AutoSendBack — the producing role relaunches. This dispatcher
- * does not reinterpret that policy; it enforces the role-aware routing
- * and retry bound.
+ * `verifyFn` re-consumes the role's artifacts. The occurrence is only reported
+ * `fixed` when that re-consumption returns complete, ok artifacts — a relaunch
+ * on its own is no evidence that the artifacts exist.
  *
- * When `options.state` is provided, the function also updates the in-memory
- * state's metadata so the caller's next persist carries the counters.
+ * Nothing is persisted: the budget is per occurrence and in-memory.
  *
  * @param role - The producing role ('reviewer' or 'implementer')
  * @param diagnostic - Captured diagnostic describing the artifact failure
- * @param options - Dependencies for state persistence and logging
- * @returns Dispatch decision with retry metadata
+ * @param options - Verify callback, launch port, and role collaborators
  */
 export async function dispatchArtifactFailure(
   role: ArtifactRole,
@@ -795,78 +795,55 @@ export async function dispatchArtifactFailure(
   options: {
     slug: string;
     worktree: string;
-    maxRetries?: number;
-    writeReviewStateFn?: typeof writeReviewState;
-    readReviewStateFn?: (_s: string, _r: string) => Promise<any>;
-    missionStore?: MissionStore | null;
+    /** Agent identity to relaunch for this role. */
+    agent: string;
+    /** Re-consumes the role's artifacts; `ok` only when they are complete. */
+    verifyFn: (_attempt: number) => Promise<VerifyResult> | VerifyResult;
+    /** Role-shaped launch port (step, role, exclude, base prompt). */
+    startAgentFn: ReboundStartAgent;
+    applyAgentFallbackFn?: ReboundContext['applyAgentFallback'];
+    transitionToImplementerFn?: ReboundContext['transitionToImplementer'];
+    maxAttempts?: number;
     log?: (_msg: string) => void;
     error?: (_msg: string) => void;
-    /**
-     * In-memory ReviewState held by the caller. When provided, the dispatcher
-     * syncs metadata mutations (retry count, strand markers) into this object
-     * so the caller's next persist does not clobber disk state.
-     */
-    state?: { metadata?: Record<string, unknown> } | null;
   }
 ): Promise<ArtifactDispatchResult> {
-  const { slug, worktree, maxRetries = MAX_ARTIFACT_RETRY } = options;
-  const writeReviewStateFn = options.writeReviewStateFn || writeReviewState;
-  const readReviewStateFn = options.readReviewStateFn || readReviewState;
+  const { slug, worktree, agent, verifyFn, startAgentFn, maxAttempts = ARTIFACT_REBOUND_ATTEMPTS } = options;
   const log = options.log || fmt.log.plain;
   const error = options.error || fmt.log.plainError;
-  const missionStore = options.missionStore || null;
 
-  const retryKey = role === 'reviewer' ? REVIEWER_ARTIFACT_RETRY_KEY : IMPLEMENTER_ARTIFACT_RETRY_KEY;
-
-  // Read persisted state
-  const persisted = await Promise.resolve(readReviewStateFn(slug, worktree));
-  const retryCount = persisted && persisted.metadata && typeof persisted.metadata === 'object'
-    ? (Number((persisted.metadata as any)[retryKey]) || 0)
-    : 0;
-
-  if (retryCount >= maxRetries) {
-    // Retry bound exhausted — strand with actionable state
-    const metadata = persisted && persisted.metadata && typeof persisted.metadata === 'object'
-      ? { ...persisted.metadata }
-      : {};
-    metadata[retryKey] = retryCount;
-    metadata[`${role}ArtifactStrandedAt`] = new Date().toISOString();
-    metadata[`${role}ArtifactStrandReason`] = diagnostic;
-    if (persisted) {
-      await persistReviewStateOrThrow(writeReviewStateFn, slug, { ...persisted, metadata } as any, worktree, missionStore);
-    } else {
-      await persistReviewStateOrThrow(writeReviewStateFn, slug, { metadata } as any, worktree, missionStore);
-    }
-
-    // Sync in-memory state so caller's next persist carries strand markers
-    if (options.state && options.state.metadata) {
-      options.state.metadata = { ...options.state.metadata, ...metadata };
-    }
-
-    error(fmt.status('FAIL', `${role === 'reviewer' ? 'Reviewer' : 'Implementer'} artifact recovery exhausted (${retryCount}/${maxRetries}). Mission stranded for ${slug}.`));
-    error(fmt.status('FAIL', `Diagnostic: ${diagnostic}. Human intervention required.`));
-    return { action: 'strand', role, diagnostic, retryCount, maxRetries, metadata };
+  if (typeof verifyFn !== 'function') {
+    throw new Error('dispatchArtifactFailure requires a verify callback: an artifact bounce may only be reported fixed when the artifacts are re-consumed and complete.');
   }
 
-  // Increment and persist
-  const newCount = retryCount + 1;
-  const metadata = persisted && persisted.metadata && typeof persisted.metadata === 'object'
-    ? { ...persisted.metadata }
-    : {};
-  metadata[retryKey] = newCount;
-  if (persisted) {
-    await persistReviewStateOrThrow(writeReviewStateFn, slug, { ...persisted, metadata } as any, worktree, missionStore);
-  } else {
-    await persistReviewStateOrThrow(writeReviewStateFn, slug, { metadata } as any, worktree, missionStore);
-  }
+  const outcome = await rebound(
+    { kind: 'artifact-incomplete', role, diagnostic },
+    {
+      slug,
+      worktree,
+      implementer: agent,
+      maxAttempts,
+      verify: verifyFn,
+      startAgent: startAgentFn,
+      applyAgentFallback: options.applyAgentFallbackFn,
+      transitionToImplementer: options.transitionToImplementerFn,
+      log,
+      error,
+    },
+  );
 
-  // Sync in-memory state so caller's next persist carries the counter
-  if (options.state && options.state.metadata) {
-    options.state.metadata = { ...options.state.metadata, ...metadata };
-  }
+  const action: ArtifactDispatchAction = outcome.outcome === 'fixed'
+    ? 'fixed'
+    : (outcome.outcome === 'human-only' ? 'human-only' : 'strand');
 
-  log(fmt.status('INFO', `${role === 'reviewer' ? 'Reviewer' : 'Implementer'} artifact failure — relaunching ${role} (retry ${newCount}/${maxRetries}). Diagnostic: ${diagnostic}`));
-  return { action: 'relaunch', role, diagnostic, retryCount: newCount, maxRetries, metadata };
+  return {
+    action,
+    role,
+    diagnostic: outcome.diagnostic,
+    attempts: outcome.attempts,
+    maxAttempts,
+    agent: outcome.implementer,
+  };
 }
 
 // Module exports
@@ -882,8 +859,5 @@ export {
   postWorkflowReview,
   consumeReviewerArtifacts,
   consumeImplementerArtifacts,
-  MAX_ARTIFACT_RETRY,
-  REVIEWER_ARTIFACT_RETRY_KEY,
-  IMPLEMENTER_ARTIFACT_RETRY_KEY,
 };
 

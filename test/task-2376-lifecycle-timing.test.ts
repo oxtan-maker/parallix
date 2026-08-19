@@ -207,7 +207,6 @@ test('R1 production: local approval path transitions Mission to integration befo
       }],
       intervention: null,
       stageLaunches: [],
-      gateFailureRetryCount: 0,
       reviewEvents: [],
     },
   };
@@ -614,7 +613,6 @@ test('R11: two request-changes cycles yield known reviewFixRounds=2', async () =
       }],
       intervention: null,
       stageLaunches: [],
-      gateFailureRetryCount: 0,
       reviewEvents,
     },
   };
@@ -702,7 +700,6 @@ test('R12: external artifacts with misleading values do not affect authoritative
       }],
       intervention: null,
       stageLaunches: [],
-      gateFailureRetryCount: 0,
       reviewEvents,
     },
   };

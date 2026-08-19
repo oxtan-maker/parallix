@@ -116,7 +116,6 @@ function createReviewWithRounds(rounds: number): Review {
       implementerRetryCount: 0,
     })),
     stageLaunches: [],
-    gateFailureRetryCount: 0,
     reviewEvents: [],
   } as unknown as Review;
 }

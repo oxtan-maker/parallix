@@ -62,7 +62,7 @@ test('task-2317: repairable gate-error bounce compacts before repair and retains
   }), 'codex', {
     verifyFn: () => ({ ok: true }),
 // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-    readReviewStateFn: () => ({ round: 2, disposition: 'REQUEST_CHANGES', metadata: { gateFailureRetryCount: 0 } }),
+    readReviewStateFn: () => ({ round: 2, disposition: 'REQUEST_CHANGES', metadata: {} }),
 // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
     writeReviewStateFn: () => {},
 // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
@@ -89,8 +89,8 @@ test('task-2317: repairable gate-error bounce compacts before repair and retains
 });
 
 test('task-2317: reviewer and implementer recovery relaunches compact before work with their retry state', () => {
-  assert.match(reviewLoopSource, /RECOVERY: Reviewer timeout[\s\S]*?compact the failed-attempt context[\s\S]*?reviewer retry \$\{stateAny\['reviewerRetryCount'\]\}\/2/);
-  assert.match(reviewLoopSource, /RECOVERY: Implementer disposition timeout[\s\S]*?compact the failed-attempt context[\s\S]*?implementer retry \$\{stateAny\['implementerRetryCount'\]\}\/2/);
+  assert.match(reviewLoopSource, /RECOVERY: Reviewer timeout[\s\S]*?compact the failed-attempt context[\s\S]*?reviewer retry \$\{reviewerTimeoutRetries\}\/2/);  // TASK-2377.04: in-memory round-local counter
+  assert.match(reviewLoopSource, /RECOVERY: Implementer disposition timeout[\s\S]*?compact the failed-attempt context[\s\S]*?implementer retry \$\{implementerTimeoutRetries\}\/2/);  // TASK-2377.04: in-memory round-local counter
 });
 
 test('task-2317: reviewer compaction follows successful rebase and baseline recapture before launch', () => {

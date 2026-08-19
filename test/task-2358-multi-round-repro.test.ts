@@ -48,8 +48,6 @@ function makeReview(
     rounds: rounds as [ReviewRound, ...ReviewRound[]],
     intervention: null,
     stageLaunches: [],
-    gateFailureRetryCount: 0,
-    hookFailureRetryCount: 0,
     reviewEvents: events,
   };
 }

@@ -358,27 +358,45 @@ Automatic repair is refused and the harness stops if:
 
 ### Pre-review bounce policy — verified fixes and a per-failure budget
 
-When the pre-review verification gate fails, or a Git hook rejects the
-pre-review commit or rebase, the harness bounces the mission back to its
-implementer with a fix prompt built from the failure's structured evidence and
-its classification. Two guarantees govern that bounce:
+When the pre-review verification gate fails, when a Git hook rejects the
+pre-review commit or rebase, or when a reviewer or implementer hands back
+incomplete artifacts, the harness bounces the mission back to the responsible
+agent with a fix prompt built from the failure's structured evidence and its
+classification. Three guarantees govern that bounce:
 
 - **A bounce counts as fixed only when the failing check passes again.** After
-  the implementer exits, the harness re-runs the pre-review rebase and the
-  verification gate itself. Relaunching an agent is never, on its own, evidence
-  of a repair, and an ambiguous agent exit status is treated as a failed launch
-  rather than a fix.
-- **The retry budget is per failure occurrence, not cumulative.** Each failing
-  occurrence gets two attempts, held in memory for the duration of that
-  occurrence. Nothing is persisted between occurrences, so two concurrent
+  the agent exits, the harness re-runs the check that failed: the pre-review
+  rebase and the verification gate for gate and hook failures, and a fresh
+  re-consumption of the role's artifacts for an incomplete-artifact failure.
+  Relaunching an agent is never, on its own, evidence of a repair, and an
+  ambiguous agent exit status is treated as a failed launch rather than a fix.
+- **The retry budget is per failure occurrence, not cumulative, and nothing
+  about it is persisted.** Each failing occurrence gets two attempts, held in
+  memory for the duration of that occurrence. No retry counter is written to
+  review state, to its metadata, or to the database, so two concurrent
   processes can never consume one shared counter, and a later occurrence of the
   same failure class starts with a full budget.
+- **A per-round relaunch cap bounds the total fan-out.** Per-occurrence budgets
+  alone do not bound how many bounces a single review round can accumulate, so
+  a round-local counter caps the total bounce relaunches in one review round at
+  six by default. Before each bounce the occurrence budget is clamped to the
+  remaining round budget; when the round budget is spent the loop logs the cap
+  diagnostic, escalates for human review, and performs no further relaunches.
+  The counter is in-memory, is never persisted, and resets when the next round
+  starts.
 
 If both attempts fail their re-run, the mission strands and the harness reports
 the diagnostic from the most recent re-run — not the original failure. A failure
 the classifier judges human-only (infrastructure or task-state blockers) strands
 immediately without launching an agent, because no implementer relaunch can fix
 it.
+
+Agent-timeout recovery — a reviewer that never posts a review, or an
+implementer that never posts a disposition — is not part of this verified-fix
+path. The classifier treats a timeout as an infrastructure blocker, which is
+not relaunchable, so timeout recovery stays a bounded review-loop relaunch that
+re-polls rather than a verified bounce. Those relaunches still count against
+the per-round cap.
 
 ### Manual override is still supported
 

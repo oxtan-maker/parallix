@@ -494,7 +494,7 @@ export function normalizeReviewPhase(phase: string, disposition: string): { phas
   };
 }
 
-/** @typedef {{reviewer?: string, implementer?: string, round?: number, startedAt?: string, phase?: string, disposition?: string | null, reviewerRetryCount?: number, implementerRetryCount?: number, metadata?: {[key: string]: unknown}}} ReviewStateData */
+/** @typedef {{reviewer?: string, implementer?: string, round?: number, startedAt?: string, phase?: string, disposition?: string | null, metadata?: {[key: string]: unknown}}} ReviewStateData */
 export interface ReviewStateData {
   reviewer?: string;
   implementer?: string;
@@ -502,8 +502,6 @@ export interface ReviewStateData {
   startedAt?: string;
   phase?: string;
   disposition?: string | null;
-  reviewerRetryCount?: number;
-  implementerRetryCount?: number;
   metadata?: Record<string, unknown>;
   /**
    * The change under review when it is a provider pull request.
@@ -523,8 +521,6 @@ export class ReviewState {
   startedAt: string;
   phase: string;
   disposition: string | null;
-  reviewerRetryCount: number;
-  implementerRetryCount: number;
   metadata: Record<string, unknown>;
   pullRequest: PullRequestReference | null;
   phaseOriginal: string | null;
@@ -543,8 +539,6 @@ export class ReviewState {
     this.startedAt = data.startedAt || new Date().toISOString();
     this.phase = phaseInfo.phase;
     this.disposition = data.disposition || null;
-    this.reviewerRetryCount = data.reviewerRetryCount || 0;
-    this.implementerRetryCount = data.implementerRetryCount || 0;
     this.metadata = data.metadata || {};
     this.pullRequest = data.pullRequest ?? null;
     this.phaseOriginal = phaseInfo.normalized ? phaseInfo.original : null;
@@ -586,23 +580,12 @@ export class ReviewState {
     this.round += 1;
     this.phase = 'reviewing';
     this.disposition = null;
-    this.reviewerRetryCount = 0;
-    this.implementerRetryCount = 0;
-    // Reset artifact retry counters so each round starts fresh
-    if (this.metadata) {
-      delete this.metadata['reviewerArtifactRetryCount'];
-      delete this.metadata['implementerArtifactRetryCount'];
-      delete this.metadata['reviewerArtifactStrandedAt'];
-      delete this.metadata['reviewerArtifactStrandReason'];
-      delete this.metadata['implementerArtifactStrandedAt'];
-      delete this.metadata['implementerArtifactStrandReason'];
-    }
     this.startedAt = new Date().toISOString();
     return this;
   }
 
   /**
-   * @returns {{reviewer?: string, implementer?: string, round?: number, startedAt?: string, phase?: string, disposition?: string, reviewerRetryCount?: number, implementerRetryCount?: number, metadata?: {[key: string]: unknown}}}
+   * @returns {{reviewer?: string, implementer?: string, round?: number, startedAt?: string, phase?: string, disposition?: string, metadata?: {[key: string]: unknown}}}
    */
   toJSON(): {
     reviewer?: string;
@@ -611,8 +594,6 @@ export class ReviewState {
     startedAt?: string;
     phase?: string;
     disposition?: string;
-    reviewerRetryCount?: number;
-    implementerRetryCount?: number;
     metadata?: Record<string, unknown>;
     pullRequest?: PullRequestReference | null;
   } {
@@ -623,8 +604,6 @@ export class ReviewState {
       startedAt?: string;
       phase?: string;
       disposition?: string;
-      reviewerRetryCount?: number;
-      implementerRetryCount?: number;
       metadata?: Record<string, unknown>;
       pullRequest?: PullRequestReference | null;
     } = {
@@ -636,8 +615,6 @@ export class ReviewState {
       disposition: this.disposition || undefined
     };
 
-    if (this.reviewerRetryCount > 0) { payload.reviewerRetryCount = this.reviewerRetryCount; }
-    if (this.implementerRetryCount > 0) { payload.implementerRetryCount = this.implementerRetryCount; }
     if (Object.keys(this.metadata || {}).length > 0) { payload.metadata = this.metadata; }
     if (this.pullRequest) { payload.pullRequest = this.pullRequest; }
 
@@ -782,9 +759,11 @@ export async function writeReviewState(
 /**
  * Clear the loop's bookkeeping for a mission (used by `--reset`).
  *
- * Resets the current round to `reviewing` with no disposition and no retries,
- * and drops the review-level scratch: stage-launch windows, the gate retry
- * budget, and any human-intervention request.
+ * Resets the current round to `reviewing` with no disposition, and drops the
+ * review-level scratch: stage-launch windows and any human-intervention
+ * request. The round's historical retry counts are left as recorded: the loop
+ * no longer writes them (TASK-2377.04 deleted the persisted retry state that
+ * fed them).
  *
  * It deliberately does not erase the review conversation. Before the cutover,
  * `--reset` deleted a file that only ever held loop scratch; the reviewer's
@@ -815,8 +794,6 @@ export async function resetReviewState(
       ...rounds[rounds.length - 1],
       phase: 'reviewing',
       disposition: null,
-      reviewerRetryCount: 0,
-      implementerRetryCount: 0,
     };
 
     await store.save({
@@ -826,7 +803,6 @@ export async function resetReviewState(
         rounds: rounds as unknown as typeof review.rounds,
         intervention: null,
         stageLaunches: [],
-        gateFailureRetryCount: 0,
       },
     }, result.version);
     return { outcome: 'committed' };

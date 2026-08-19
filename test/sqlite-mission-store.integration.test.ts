@@ -131,8 +131,6 @@ function completeReview(): Review {
       { stageKey: 'fix:custom', fingerprints: ['custom|s3|t4|t5|0'] },
       { stageKey: 'review:codex', fingerprints: ['codex|s1|t0|t1|0', 'codex|s2|t2|t3|0'] },
     ],
-    gateFailureRetryCount: 2,
-    hookFailureRetryCount: 0,
     reviewEvents: [],
   };
 }

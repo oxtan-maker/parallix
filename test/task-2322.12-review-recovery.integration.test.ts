@@ -98,7 +98,6 @@ function missionWithReview(root: string, review: Partial<Review> = {}): Mission 
       }],
       intervention: null,
       stageLaunches: [],
-      gateFailureRetryCount: 0,
       reviewEvents: [],
       ...review,
     } as Review,
@@ -169,7 +168,12 @@ describe('TASK-2322.12 CP5: review-loop state survives every recovery scenario (
   it('upgrade: a database migrated before 0008/0009 gains review workflow state', async () => {
     const root = createTempRoot('upgrade');
     const all = loadDefaultMigrations();
-    const priorSchema = all.filter((migration) => !/000[89]-/.test(String(migration.id)));
+    // A database migrated before 0008/0009 also predates 0016: the drop must
+    // run after 0008/0009 re-add the columns on upgrade, so 0016 is withheld
+    // from the prior schema too (TASK-2377.04).
+    const priorSchema = all.filter(
+      (migration) => !/000[89]-/.test(String(migration.id)) && !/^0016-/.test(String(migration.id)),
+    );
     assert.ok(priorSchema.length < all.length, 'the fixture must actually withhold the new migrations');
 
     // Write the pre-0008 row shape directly: the current store always supplies
@@ -209,6 +213,8 @@ describe('TASK-2322.12 CP5: review-loop state survives every recovery scenario (
       assert.ok(state, 'the upgraded row is still readable');
       assert.equal(state?.phase, 'reviewing', 'phase backfills to the value the decision history implies');
 
+      // TASK-2377.04: the persisted gate-retry counter is deleted — a state
+      // update carrying the old metadata key is ignored, not round-tripped.
       assert.deepEqual(
         await writeReviewState(SLUG, {
           reviewer: 'codex', implementer: 'claude', round: 1, phase: 'fixing',
@@ -216,7 +222,7 @@ describe('TASK-2322.12 CP5: review-loop state survives every recovery scenario (
         }, root, store),
         { outcome: 'committed' },
       );
-      assert.equal((await readReviewState(SLUG, root, store))?.metadata.gateFailureRetryCount, 2);
+      assert.equal((await readReviewState(SLUG, root, store))?.metadata.gateFailureRetryCount, undefined);
     });
     assertNoFileFallback(root);
   });
@@ -248,14 +254,14 @@ describe('TASK-2322.12 CP5: review-loop state survives every recovery scenario (
     // aggregate with the legacy values and prove they survive a reload.
     await store.save(missionWithReview(root, {
       stageLaunches: [{ stageKey: 'review:codex', fingerprints: ['codex|s1|t0|t1|0'] }],
-      gateFailureRetryCount: 1,
     }), null);
     await db.close();
 
     await withMissionStore(root, async (store) => {
       const state = await readReviewState(SLUG, root, store);
       assert.deepEqual(state?.metadata.recordedStageLaunches, { 'review:codex': ['codex|s1|t0|t1|0'] });
-      assert.equal(state?.metadata.gateFailureRetryCount, 1);
+      // TASK-2377.04: the gate-retry metadata pass-through is deleted.
+      assert.equal(state?.metadata.gateFailureRetryCount, undefined);
     });
 
     // The legacy file is inert after import: reading review state does not

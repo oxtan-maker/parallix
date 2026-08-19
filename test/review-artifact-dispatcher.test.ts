@@ -1,4 +1,4 @@
-// @ts-nocheck -- TASK-2274: role-owned artifact recovery dispatcher tests
+// @ts-nocheck -- TASK-2274 / TASK-2377.04: artifact recovery through the rebound kernel
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -9,9 +9,7 @@ import {
   consumeReviewerArtifacts,
   consumeImplementerArtifacts,
   dispatchArtifactFailure,
-  MAX_ARTIFACT_RETRY,
-  REVIEWER_ARTIFACT_RETRY_KEY,
-  IMPLEMENTER_ARTIFACT_RETRY_KEY,
+  ARTIFACT_REBOUND_ATTEMPTS,
   isArtifactInfraDiagnostic,
 } from '../src/adapters/review/review-artifacts.js';
 
@@ -231,237 +229,146 @@ test('consumeImplementerArtifacts returns diagnostic when persist fails', async 
 });
 
 // ============================================================================
-// dispatchArtifactFailure — reviewer role tests
+// dispatchArtifactFailure — rebound-kernel occurrence (TASK-2377.04)
+//
+// The dispatcher no longer reads or writes a persisted retry counter. It is an
+// adapter over `rebound()` (src/application/rebound-kernel.ts): the budget is
+// per occurrence and in-memory, and the occurrence is only `fixed` when the
+// verify callback re-consumes complete artifacts.
 // ============================================================================
 
-test('dispatchArtifactFailure returns relaunch for reviewer on first failure', async () => {
-  const state = { slug: 'test-slug', metadata: {} };
-  let persistedState = state;
-
-  const result = await dispatchArtifactFailure('reviewer', 'Reviewer artifacts incomplete: missing findings', {
+/** Minimal kernel collaborators: a launch port that always succeeds. */
+function dispatcherOptions(overrides = {}) {
+  return {
     slug: 'test-slug',
     worktree: '/mock/worktree',
-    readReviewStateFn: () => persistedState,
-    writeReviewStateFn: async (_s, s) => { persistedState = s; return { ok: true }; },
+    agent: 'codex',
+    startAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
     log: () => {},
-    error: () => {}
-  });
+    error: () => {},
+    ...overrides,
+  };
+}
 
-  assert.equal(result.action, 'relaunch');
+test('dispatchArtifactFailure reports fixed only when the re-consumed reviewer artifacts are complete', async () => {
+  let launches = 0;
+  let verifies = 0;
+  const result = await dispatchArtifactFailure('reviewer', 'Reviewer artifacts incomplete: missing findings', dispatcherOptions({
+    startAgentFn: async () => { launches++; return { agent: 'codex', result: { status: 0 } }; },
+    verifyFn: () => { verifies++; return { ok: true }; },
+  }));
+
+  assert.equal(result.action, 'fixed');
   assert.equal(result.role, 'reviewer');
-  assert.equal(result.retryCount, 1);
-  assert.equal(result.maxRetries, MAX_ARTIFACT_RETRY);
-  assert.equal(persistedState.metadata[REVIEWER_ARTIFACT_RETRY_KEY], 1);
+  assert.equal(result.attempts, 1);
+  assert.equal(result.maxAttempts, ARTIFACT_REBOUND_ATTEMPTS);
+  assert.equal(launches, 1);
+  assert.equal(verifies, 1, 'the artifacts must be re-consumed before reporting fixed');
 });
 
-test('dispatchArtifactFailure returns strand for reviewer after max retries', async () => {
-  const state = { slug: 'test-slug', metadata: { [REVIEWER_ARTIFACT_RETRY_KEY]: 2 } };
-  let persistedState = state;
+test('dispatchArtifactFailure relaunches with the fresh diagnostic when the re-consume still fails', async () => {
+  const prompts = [];
+  const result = await dispatchArtifactFailure('reviewer', 'Reviewer artifacts incomplete: missing findings', dispatcherOptions({
+    startAgentFn: async (_step, options) => {
+      prompts.push(options.prompt('codex'));
+      return { agent: 'codex', result: { status: 0 } };
+    },
+    verifyFn: (attempt) => attempt === 1
+      ? { ok: false, diagnostic: 'Reviewer artifacts incomplete: missing verdict' }
+      : { ok: true },
+  }));
 
-  const result = await dispatchArtifactFailure('reviewer', 'Reviewer artifacts incomplete: missing verdict', {
-    slug: 'test-slug',
-    worktree: '/mock/worktree',
-    readReviewStateFn: () => persistedState,
-    writeReviewStateFn: async (_s, s) => { persistedState = s; return { ok: true }; },
-    log: () => {},
-    error: () => {}
-  });
+  assert.equal(result.action, 'fixed');
+  assert.equal(result.attempts, 2);
+  assert.equal(prompts.length, 2, 'a failed re-consume consumes an attempt and relaunches');
+  assert.match(prompts[0], /INCOMPLETE ARTIFACTS/);
+  assert.match(prompts[0], /missing findings/);
+  assert.match(prompts[1], /missing verdict/, 'the relaunch carries the fresh diagnostic');
+});
+
+test('dispatchArtifactFailure strands with the last diagnostic when the occurrence budget is spent', async () => {
+  let launches = 0;
+  const result = await dispatchArtifactFailure('reviewer', 'Reviewer artifacts incomplete: missing findings', dispatcherOptions({
+    startAgentFn: async () => { launches++; return { agent: 'codex', result: { status: 0 } }; },
+    verifyFn: () => ({ ok: false, diagnostic: 'Reviewer artifacts incomplete: still missing verdict' }),
+  }));
 
   assert.equal(result.action, 'strand');
-  assert.equal(result.role, 'reviewer');
-  assert.equal(result.retryCount, 2);
-  assert.ok(persistedState.metadata['reviewerArtifactStrandedAt'], 'should record stranded timestamp');
-  assert.ok(persistedState.metadata['reviewerArtifactStrandReason'], 'should record strand reason');
+  assert.equal(result.attempts, ARTIFACT_REBOUND_ATTEMPTS);
+  assert.equal(launches, ARTIFACT_REBOUND_ATTEMPTS, 'no third launch after the budget is spent');
+  assert.match(result.diagnostic, /still missing verdict/);
 });
 
-// ============================================================================
-// dispatchArtifactFailure — implementer role tests
-// ============================================================================
+test('dispatchArtifactFailure gives every occurrence a fresh budget (no persisted carryover)', async () => {
+  const runOccurrence = async () => {
+    let launches = 0;
+    const outcome = await dispatchArtifactFailure('implementer', 'Implementer artifacts incomplete: missing disposition', dispatcherOptions({
+      startAgentFn: async () => { launches++; return { agent: 'codex', result: { status: 0 } }; },
+      verifyFn: () => ({ ok: false, diagnostic: 'Implementer artifacts incomplete: missing disposition' }),
+    }));
+    return { outcome, launches };
+  };
 
-test('dispatchArtifactFailure returns relaunch for implementer on first failure', async () => {
-  const state = { slug: 'test-slug', metadata: {} };
-  let persistedState = state;
+  const first = await runOccurrence();
+  const second = await runOccurrence();
 
-  const result = await dispatchArtifactFailure('implementer', 'Implementer artifacts incomplete: missing disposition', {
-    slug: 'test-slug',
-    worktree: '/mock/worktree',
-    readReviewStateFn: () => persistedState,
-    writeReviewStateFn: async (_s, s) => { persistedState = s; return { ok: true }; },
-    log: () => {},
-    error: () => {}
-  });
+  assert.equal(first.outcome.action, 'strand');
+  assert.equal(second.outcome.action, 'strand');
+  assert.equal(second.launches, ARTIFACT_REBOUND_ATTEMPTS,
+    'the second occurrence starts with a full budget: nothing carries over');
+});
 
-  assert.equal(result.action, 'relaunch');
+test('dispatchArtifactFailure routes the implementer role through the kernel with its own diagnostic', async () => {
+  const prompts = [];
+  const result = await dispatchArtifactFailure('implementer', 'Implementer artifacts incomplete: missing round-resolution', dispatcherOptions({
+    startAgentFn: async (_step, options) => {
+      prompts.push(options.prompt('codex'));
+      return { agent: 'codex', result: { status: 0 } };
+    },
+    verifyFn: () => ({ ok: true }),
+  }));
+
+  assert.equal(result.action, 'fixed');
   assert.equal(result.role, 'implementer');
-  assert.equal(result.retryCount, 1);
-  assert.equal(persistedState.metadata[IMPLEMENTER_ARTIFACT_RETRY_KEY], 1);
+  assert.match(prompts[0], /Role: implementer/);
+  assert.match(prompts[0], /missing round-resolution/);
 });
 
-test('dispatchArtifactFailure returns strand for implementer after max retries', async () => {
-  const state = { slug: 'test-slug', metadata: { [IMPLEMENTER_ARTIFACT_RETRY_KEY]: 2 } };
-  let persistedState = state;
-
-  const result = await dispatchArtifactFailure('implementer', 'Implementer artifacts incomplete: missing round-resolution', {
-    slug: 'test-slug',
-    worktree: '/mock/worktree',
-    readReviewStateFn: () => persistedState,
-    writeReviewStateFn: async (_s, s) => { persistedState = s; return { ok: true }; },
-    log: () => {},
-    error: () => {}
-  });
+test('dispatchArtifactFailure treats an ambiguous null exit status as a failed attempt', async () => {
+  let verifies = 0;
+  const result = await dispatchArtifactFailure('implementer', 'Implementer artifacts incomplete: missing disposition', dispatcherOptions({
+    startAgentFn: async () => ({ agent: 'codex', result: { status: null } }),
+    verifyFn: () => { verifies++; return { ok: true }; },
+  }));
 
   assert.equal(result.action, 'strand');
-  assert.equal(result.role, 'implementer');
-  assert.equal(result.retryCount, 2);
-  assert.ok(persistedState.metadata['implementerArtifactStrandedAt'], 'should record stranded timestamp');
-  assert.ok(persistedState.metadata['implementerArtifactStrandReason'], 'should record strand reason');
+  assert.equal(verifies, 0, 'a null-exit launch is no evidence of a fix, so verify never runs');
 });
 
-// ============================================================================
-// Independent per-role retry counters
-// ============================================================================
+test('dispatchArtifactFailure resolves the relaunched agent through the fallback port', async () => {
+  const result = await dispatchArtifactFailure('reviewer', 'Reviewer artifacts incomplete: missing findings', dispatcherOptions({
+    applyAgentFallbackFn: () => 'claude',
+    verifyFn: () => ({ ok: true }),
+  }));
 
-test('reviewer and implementer artifact retry counters are independent', async () => {
-  const state = { slug: 'test-slug', metadata: {} };
-  let persistedState = state;
-
-  const readFn = () => persistedState;
-  const writeFn = async (_s, s) => { persistedState = s; return { ok: true }; };
-
-  // Consume 1 reviewer retry
-  const r1 = await dispatchArtifactFailure('reviewer', 'missing findings', {
-    slug: 'test-slug', worktree: '/mock', readReviewStateFn: readFn, writeReviewStateFn: writeFn, log: () => {}, error: () => {}
-  });
-  assert.equal(r1.retryCount, 1);
-  assert.equal(persistedState.metadata[REVIEWER_ARTIFACT_RETRY_KEY], 1);
-  assert.equal(persistedState.metadata[IMPLEMENTER_ARTIFACT_RETRY_KEY], undefined);
-
-  // Consume 1 implementer retry — reviewer counter unchanged
-  const i1 = await dispatchArtifactFailure('implementer', 'missing disposition', {
-    slug: 'test-slug', worktree: '/mock', readReviewStateFn: readFn, writeReviewStateFn: writeFn, log: () => {}, error: () => {}
-  });
-  assert.equal(i1.retryCount, 1);
-  assert.equal(persistedState.metadata[REVIEWER_ARTIFACT_RETRY_KEY], 1);
-  assert.equal(persistedState.metadata[IMPLEMENTER_ARTIFACT_RETRY_KEY], 1);
-
-  // Second implementer retry — still within bound (count becomes 2)
-  const i2 = await dispatchArtifactFailure('implementer', 'missing disposition again', {
-    slug: 'test-slug', worktree: '/mock', readReviewStateFn: readFn, writeReviewStateFn: writeFn, log: () => {}, error: () => {}
-  });
-  assert.equal(i2.action, 'relaunch');
-  assert.equal(persistedState.metadata[REVIEWER_ARTIFACT_RETRY_KEY], 1);
-  assert.equal(persistedState.metadata[IMPLEMENTER_ARTIFACT_RETRY_KEY], 2);
-
-  // Third implementer call — bound exhausted, strands
-  const i3 = await dispatchArtifactFailure('implementer', 'missing disposition third time', {
-    slug: 'test-slug', worktree: '/mock', readReviewStateFn: readFn, writeReviewStateFn: writeFn, log: () => {}, error: () => {}
-  });
-  assert.equal(i3.action, 'strand');
-  assert.equal(i3.retryCount, 2);
-  assert.equal(persistedState.metadata[REVIEWER_ARTIFACT_RETRY_KEY], 1);
-
-  // Reviewer still has retries available (at 1, max is 2)
-  const r2 = await dispatchArtifactFailure('reviewer', 'missing findings again', {
-    slug: 'test-slug', worktree: '/mock', readReviewStateFn: readFn, writeReviewStateFn: writeFn, log: () => {}, error: () => {}
-  });
-  assert.equal(r2.action, 'relaunch');
-  assert.equal(r2.retryCount, 2);
+  assert.equal(result.agent, 'claude');
 });
 
-// ============================================================================
-// Retry exhaustion produces stranded state
-// ============================================================================
-
-test('stranded state records actionable metadata for reviewer', async () => {
-  const state = { slug: 'test-slug', metadata: { [REVIEWER_ARTIFACT_RETRY_KEY]: 2 } };
-  let persistedState = state;
-  const diagnostic = 'Reviewer artifacts incomplete: missing findings';
-
-  await dispatchArtifactFailure('reviewer', diagnostic, {
-    slug: 'test-slug', worktree: '/mock',
-    readReviewStateFn: () => persistedState,
-    writeReviewStateFn: async (_s, s) => { persistedState = s; return { ok: true }; },
-    log: () => {}, error: () => {}
-  });
-
-  assert.ok(persistedState.metadata['reviewerArtifactStrandedAt'], 'strandedAt should be set');
-  assert.equal(persistedState.metadata['reviewerArtifactStrandReason'], diagnostic, 'strandReason should match diagnostic');
+test('dispatchArtifactFailure refuses to run without a verify callback', async () => {
+  await assert.rejects(
+    () => dispatchArtifactFailure('reviewer', 'Reviewer artifacts incomplete: missing findings', dispatcherOptions()),
+    /requires a verify callback/,
+  );
 });
 
-test('stranded state records actionable metadata for implementer', async () => {
-  const state = { slug: 'test-slug', metadata: { [IMPLEMENTER_ARTIFACT_RETRY_KEY]: 2 } };
-  let persistedState = state;
-  const diagnostic = 'Implementer artifacts incomplete: missing round-resolution';
+test('dispatchArtifactFailure persists no retry state anywhere', async () => {
+  const writes = [];
+  await dispatchArtifactFailure('reviewer', 'Reviewer artifacts incomplete: missing findings', dispatcherOptions({
+    writeReviewStateFn: async (_s, s) => { writes.push(s); return { ok: true }; },
+    verifyFn: () => ({ ok: false, diagnostic: 'still incomplete' }),
+  }));
 
-  await dispatchArtifactFailure('implementer', diagnostic, {
-    slug: 'test-slug', worktree: '/mock',
-    readReviewStateFn: () => persistedState,
-    writeReviewStateFn: async (_s, s) => { persistedState = s; return { ok: true }; },
-    log: () => {}, error: () => {}
-  });
-
-  assert.ok(persistedState.metadata['implementerArtifactStrandedAt'], 'strandedAt should be set');
-  assert.equal(persistedState.metadata['implementerArtifactStrandReason'], diagnostic, 'strandReason should match diagnostic');
-});
-
-// ============================================================================
-// HumanOnly failure categories (ADR 0048) — dispatcher does not intercept
-// ============================================================================
-
-test('dispatchArtifactFailure uses separate metadata keys from gate retry counters', async () => {
-  // Gate failure uses metadata.gateFailureRetryCount; artifact dispatcher uses
-  // metadata.reviewerArtifactRetryCount. They must not collide.
-  const state = { slug: 'test-slug', metadata: { gateFailureRetryCount: 1 } };
-  let persistedState = state;
-
-  const result = await dispatchArtifactFailure('reviewer', 'missing findings', {
-    slug: 'test-slug', worktree: '/mock',
-    readReviewStateFn: () => persistedState,
-    writeReviewStateFn: async (_s, s) => { persistedState = s; return { ok: true }; },
-    log: () => {}, error: () => {}
-  });
-
-  assert.equal(result.action, 'relaunch');
-  assert.equal(result.retryCount, 1);
-  assert.equal(persistedState.metadata.gateFailureRetryCount, 1, 'gate counter unchanged');
-  assert.equal(persistedState.metadata[REVIEWER_ARTIFACT_RETRY_KEY], 1, 'artifact counter incremented');
-});
-
-test('dispatchArtifactFailure handles null persisted state', async () => {
-  let persistedState = null;
-
-  const result = await dispatchArtifactFailure('reviewer', 'missing findings', {
-    slug: 'test-slug', worktree: '/mock',
-    readReviewStateFn: () => persistedState,
-    writeReviewStateFn: async (_s, s) => { persistedState = s; return { ok: true }; },
-    log: () => {}, error: () => {}
-  });
-
-  assert.equal(result.action, 'relaunch');
-  assert.equal(result.retryCount, 1);
-  assert.ok(persistedState, 'state should be created');
-  assert.equal(persistedState.metadata[REVIEWER_ARTIFACT_RETRY_KEY], 1);
-});
-
-// ============================================================================
-// Custom maxRetries
-// ============================================================================
-
-test('dispatchArtifactFailure respects custom maxRetries', async () => {
-  const state = { slug: 'test-slug', metadata: { [REVIEWER_ARTIFACT_RETRY_KEY]: 4 } };
-  let persistedState = state;
-
-  const result = await dispatchArtifactFailure('reviewer', 'missing findings', {
-    slug: 'test-slug', worktree: '/mock',
-    maxRetries: 5,
-    readReviewStateFn: () => persistedState,
-    writeReviewStateFn: async (_s, s) => { persistedState = s; return { ok: true }; },
-    log: () => {}, error: () => {}
-  });
-
-  assert.equal(result.action, 'relaunch');
-  assert.equal(result.retryCount, 5);
-  assert.equal(result.maxRetries, 5);
+  assert.equal(writes.length, 0, 'the kernel budget is in-memory: no review-state write may happen');
 });
 
 // ============================================================================
@@ -495,69 +402,9 @@ test('isArtifactInfraDiagnostic handles null/undefined/empty', () => {
   assert.equal(isArtifactInfraDiagnostic(''), false);
 });
 
-// ============================================================================
-// dispatchArtifactFailure — in-memory state sync (finding 1)
-// ============================================================================
-
-test('dispatchArtifactFailure syncs retry count into in-memory state on relaunch', async () => {
-  const inMemoryState = { slug: 'test-slug', metadata: {} };
-  let persistedState = { slug: 'test-slug', metadata: {} };
-
-  const result = await dispatchArtifactFailure('reviewer', 'missing findings', {
-    slug: 'test-slug', worktree: '/mock',
-    readReviewStateFn: () => persistedState,
-    writeReviewStateFn: async (_s, s) => { persistedState = s; return { ok: true }; },
-    state: inMemoryState,
-    log: () => {}, error: () => {}
-  });
-
-  assert.equal(result.action, 'relaunch');
-  assert.equal(inMemoryState.metadata[REVIEWER_ARTIFACT_RETRY_KEY], 1, 'in-memory state synced');
-  assert.equal(persistedState.metadata[REVIEWER_ARTIFACT_RETRY_KEY], 1, 'disk state synced');
-});
-
-test('dispatchArtifactFailure syncs strand markers into in-memory state', async () => {
-  const inMemoryState = { slug: 'test-slug', metadata: { [REVIEWER_ARTIFACT_RETRY_KEY]: 2 } };
-  let persistedState = { slug: 'test-slug', metadata: { [REVIEWER_ARTIFACT_RETRY_KEY]: 2 } };
-
-  const result = await dispatchArtifactFailure('reviewer', 'missing findings', {
-    slug: 'test-slug', worktree: '/mock',
-    readReviewStateFn: () => persistedState,
-    writeReviewStateFn: async (_s, s) => { persistedState = s; return { ok: true }; },
-    state: inMemoryState,
-    log: () => {}, error: () => {}
-  });
-
-  assert.equal(result.action, 'strand');
-  assert.ok(inMemoryState.metadata['reviewerArtifactStrandedAt'], 'strandedAt synced to in-memory state');
-  assert.ok(inMemoryState.metadata['reviewerArtifactStrandReason'], 'strandReason synced to in-memory state');
-  assert.ok(persistedState.metadata['reviewerArtifactStrandedAt'], 'strandedAt persisted to disk');
-  assert.ok(persistedState.metadata['reviewerArtifactStrandReason'], 'strandReason persisted to disk');
-});
-
-test('dispatchArtifactFailure returns metadata in result', async () => {
-  const state = { slug: 'test-slug', metadata: {} };
-  let persistedState = state;
-
-  const result = await dispatchArtifactFailure('implementer', 'missing disposition', {
-    slug: 'test-slug', worktree: '/mock',
-    readReviewStateFn: () => persistedState,
-    writeReviewStateFn: async (_s, s) => { persistedState = s; return { ok: true }; },
-    state,
-    log: () => {}, error: () => {}
-  });
-
-  assert.ok(result.metadata, 'metadata should be present in result');
-  assert.equal(result.metadata![IMPLEMENTER_ARTIFACT_RETRY_KEY], 1);
-});
-
-// ============================================================================
-// HumanOnly infra failures — dispatcher does not relaunch (finding 3)
-// ============================================================================
-
 test('isArtifactInfraDiagnostic gates infra failures from artifact dispatcher', () => {
-  // Infra diagnostics should be caught before reaching dispatchArtifactFailure
-  // so they do not consume artifact retry budget or trigger agent relaunch
+  // Infra diagnostics are caught before reaching dispatchArtifactFailure so
+  // they neither consume the occurrence budget nor relaunch an agent.
   const infraDiagnostics = [
     'Reviewer comment post failed: 502 Bad Gateway',
     'Reviewer review post failed: connection refused',
@@ -571,7 +418,6 @@ test('isArtifactInfraDiagnostic gates infra failures from artifact dispatcher', 
     assert.ok(isArtifactInfraDiagnostic(diag), `should classify as infra: ${diag}`);
   }
 
-  // Artifact production failures should NOT be classified as infra
   const artifactDiagnostics = [
     'Reviewer artifacts incomplete: missing findings',
     'Reviewer artifacts incomplete: missing verdict',
@@ -582,37 +428,4 @@ test('isArtifactInfraDiagnostic gates infra failures from artifact dispatcher', 
   for (const diag of artifactDiagnostics) {
     assert.equal(isArtifactInfraDiagnostic(diag), false, `should NOT classify as infra: ${diag}`);
   }
-});
-
-test('dispatchArtifactFailure skips state sync when state is null', async () => {
-  let persistedState = { slug: 'test-slug', metadata: {} };
-
-  const result = await dispatchArtifactFailure('reviewer', 'missing findings', {
-    slug: 'test-slug', worktree: '/mock',
-    readReviewStateFn: () => persistedState,
-    writeReviewStateFn: async (_s, s) => { persistedState = s; return { ok: true }; },
-    state: null,
-    log: () => {}, error: () => {}
-  });
-
-  assert.equal(result.action, 'relaunch');
-  assert.equal(result.retryCount, 1);
-  // No crash when state is null
-});
-
-test('dispatchArtifactFailure skips state sync when state has no metadata', async () => {
-  const inMemoryState = { slug: 'test-slug' };
-  let persistedState = { slug: 'test-slug', metadata: {} };
-
-  const result = await dispatchArtifactFailure('reviewer', 'missing findings', {
-    slug: 'test-slug', worktree: '/mock',
-    readReviewStateFn: () => persistedState,
-    writeReviewStateFn: async (_s, s) => { persistedState = s; return { ok: true }; },
-    state: inMemoryState as any,
-    log: () => {}, error: () => {}
-  });
-
-  assert.equal(result.action, 'relaunch');
-  assert.equal(result.retryCount, 1);
-  // No crash when state.metadata is undefined
 });
