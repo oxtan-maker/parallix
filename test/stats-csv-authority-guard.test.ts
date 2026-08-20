@@ -10,8 +10,16 @@ import os from 'os';
 import path from 'path';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-import stats from '../src/adapters/cli/commands/stats.js';
+import stats, { createStatsCommand, createStatsWorkflowAdapter } from '../src/adapters/cli/commands/stats.js';
+import { StatsCommandUseCase } from '../src/application/stats-command-use-case.js';
 import { SqliteMeasurementStore } from '../src/adapters/sqlite/measurement-store.js';
+
+// Render-only `px stats` command: the tested paths read measurement rows and
+// never consult the Mission authority, so a store placeholder satisfies the
+// required wiring (SC13).
+const statsCommand = createStatsCommand(
+  new StatsCommandUseCase(createStatsWorkflowAdapter({} as never)),
+);
 import { ADR0053_PERSISTENCE_INVENTORY } from './fixtures/durable-state-inventory';
 /**
  * TASK-2322.08 CP-4: prove no UNCLASSIFIED `stats.csv` read or write survives.
@@ -110,7 +118,7 @@ test('px stats fails with the database error instead of reading a CSV when the s
   const errors: string[] = [];
   let exitCode: number | null = null;
   try {
-    stats(['--today', '2026-06-23'], {
+    statsCommand(['--today', '2026-06-23'], {
       rootDir: dir,
       dbPath,
       log: (line: string) => logs.push(String(line)),
@@ -150,7 +158,7 @@ test('a recorded measurement survives a full store restart and is still reported
     }
 
     const logs: string[] = [];
-    stats(['--today', '2026-06-23'], {
+    statsCommand(['--today', '2026-06-23'], {
       rootDir: dir,
       dbPath,
       log: (line: string) => logs.push(String(line)),

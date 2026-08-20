@@ -16,6 +16,7 @@ import { readReviewState } from '../../review/review-state.js';
 import { submitForReview } from '../../review/review-commands.js';
 
 import { missionId } from '../../../domain/mission.js';
+import { applyReviewerCommand, reviewStatus } from '../../../domain/review.js';
 import { detectChangedAreas, isIntendedPayloadAtHead, parseFilesToAreas, orderIntegrationGates, gateMatchesChangedAreas, loadIntegrationConfig, getIntegrationGatePlan, printIntegrationGatePlan, buildIntegrationGateEnv, captureFinalIntegrationTree, resolveIntegrationVerificationWorktree, buildIntegrationVerificationInvocation, executeIntegrationGates } from './integrate-gates.js';
 
 const VARIANT_B_AUTOMATION_SUMMARY = 'Variant B automation: Backlog task closeout, worktree-path rewrite, squash commit with hook-enforced validation, Forgejo sync-merged, and mission worktree cleanup.';
@@ -204,7 +205,7 @@ async function integrate(args: string[], options: { missionServicesFn?: Function
   const { explicitSlug, dryRun, noIntegrationGates, noGate, realAgent, realAgentModel } = parsedArgs;
   const slug = inferSlug(explicitSlug);
 
-  /** @type {{slug: string, branch: string, currentBranch: string, missionDir?: string, area: string, task: {ok: boolean, taskFile?: string, reason?: string, matches?: string[]}, taskStatus?: string, taskAssignee?: string|null, forgejoUser?: string|null, forgejoToken?: string|null, taskAssigneeWarning?: string|null, pr: {exists?: boolean, state?: string, number?: number, merged?: boolean, raw?: string}, siblingPrs: any[], approval: {ok?: boolean, error?: string, reviewState?: string, defaultUserApproved?: boolean, source?: string}, baseBranch?: string, baseWorktree?: string, mainBranch: string, mainDirtyEntries: string[], mainDirty: boolean}} */
+  /** @type {{slug: string, branch: string, currentBranch: string, missionDir?: string, area: string, task: {ok: boolean, taskFile?: string, reason?: string, matches?: string[]}, taskStatus?: string, taskAssignee?: string|null, forgejoUser?: string|null, forgejoToken?: string|null, taskAssigneeWarning?: string|null, pr: {exists?: boolean, state?: string, number?: number, merged?: boolean, createdAt?: string | null, raw?: string}, siblingPrs: any[], approval: {ok?: boolean, error?: string, reviewState?: string, defaultUserApproved?: boolean, defaultUserApprovedAt?: string, source?: string}, baseBranch?: string, baseWorktree?: string, mainBranch: string, mainDirtyEntries: string[], mainDirty: boolean}} */
   let context;
 
   if (process.env.FORGEJO_USER === 'gemini' || process.env.WORKFLOW_AGENT === 'gemini') {
@@ -787,7 +788,64 @@ async function buildIntegrationContext(slug: string, {
   };
 }
 
-/** @param {{slug: string, branch: string, currentBranch: string, missionDir?: string, area: string, task: {ok: boolean, taskFile?: string, reason?: string, matches?: string[]}, taskStatus?: string, taskAssignee?: string|null, forgejoUser?: string|null, forgejoToken?: string|null, taskAssigneeWarning?: string|null, pr: {exists?: boolean, state?: string, number?: number, merged?: boolean, raw?: string}, siblingPrs: any[], approval: {ok?: boolean, error?: string, reviewState?: string, defaultUserApproved?: boolean, source?: string}, baseBranch?: string, baseWorktree?: string, mainBranch: string, mainDirtyEntries: string[], mainDirty: boolean}} context */
+/**
+ * Review round 1 (F3): pure prediction of the authority the real
+ * `px integrate` run would establish through recovery. The real run persists
+ * it; a dry run skips recovery, so it reports the same decision without
+ * persisting. Both consume this one function, so `--dry-run` can never fail
+ * for the case the real run accepts.
+ *
+ * @param {{slug: string, missionStatus?: string, missionReview?: any, taskStatus?: string, approval?: {ok?: boolean, reviewState?: string, defaultUserApproved?: boolean, defaultUserApprovedAt?: string, source?: string}, baseWorktree?: string}} context
+ */
+function recoveryEstablishesApproval(context: any): {
+  established: boolean;
+  via: 'lifecycle' | 'mission-review' | 'human-override' | null;
+  decidedAt?: string;
+  reason: string;
+} {
+  const status = context.missionStatus;
+  if (status === 'integration' || status === 'done') {
+    return { established: true, via: 'lifecycle', reason: '' };
+  }
+  const review = context.missionReview;
+  const rounds = review?.rounds;
+  const lastRound = rounds && rounds.length > 0 ? rounds[rounds.length - 1] : null;
+  const overrideAt = context.approval?.ok === true && context.approval.defaultUserApproved === true
+    ? context.approval.defaultUserApprovedAt
+    : undefined;
+
+  if (lastRound?.decision?.kind === 'approved') {
+    return { established: true, via: 'mission-review', decidedAt: lastRound.decision.decidedAt, reason: '' };
+  }
+
+  if (status === 'active') {
+    if (!review && overrideAt === undefined) {
+      return { established: false, via: null, reason: 'active with no authoritative Review and no default-user override; run px handoff or px review first' };
+    }
+    if (review) {
+      // The real run re-submits through the handoff operation: an undecided
+      // round resubmits unchanged, a ready round advances to a fresh one.
+      // The override applies only when the resulting round awaits a decision.
+      const roundStatus = reviewStatus(review);
+      if (overrideAt !== undefined && (roundStatus === 'awaiting-review' || roundStatus === 'ready-for-next-round')) {
+        return { established: true, via: 'human-override', decidedAt: overrideAt, reason: '' };
+      }
+      return { established: false, via: null, reason: `existing Review is ${roundStatus}; resolve the round before overriding` };
+    }
+    return { established: true, via: 'human-override', decidedAt: overrideAt, reason: '' };
+  }
+
+  if (status === 'review') {
+    if (review && overrideAt !== undefined && reviewStatus(review) === 'awaiting-review') {
+      return { established: true, via: 'human-override', decidedAt: overrideAt, reason: '' };
+    }
+    return { established: false, via: null, reason: 'review without an authoritative approval; record a ReviewerDecision through px review' };
+  }
+
+  return { established: false, via: null, reason: `status ${status} is not recoverable to integration` };
+}
+
+/** @param {{slug: string, branch: string, currentBranch: string, missionDir?: string, area: string, task: {ok: boolean, taskFile?: string, reason?: string, matches?: string[]}, taskStatus?: string, taskAssignee?: string|null, forgejoUser?: string|null, forgejoToken?: string|null, taskAssigneeWarning?: string|null, pr: {exists?: boolean, state?: string, number?: number, merged?: boolean, createdAt?: string | null, raw?: string}, siblingPrs: any[], approval: {ok?: boolean, error?: string, reviewState?: string, defaultUserApproved?: boolean, defaultUserApprovedAt?: string, source?: string}, baseBranch?: string, baseWorktree?: string, mainBranch: string, mainDirtyEntries: string[], mainDirty: boolean, missionStatus?: string, missionReview?: any}} context */
 function evaluateTaskStatusForIntegration(context: any) {
   const stateMapOptions = { rootDir: /** @type {string} */ (context.baseWorktree) };
   if (toVirtual(context.taskStatus, /** @type {any} */ (stateMapOptions)) === 'approved') {
@@ -798,12 +856,37 @@ function evaluateTaskStatusForIntegration(context: any) {
     };
   }
 
+  // The Mission lifecycle is the approval authority (TASK-2379). Once it has
+  // left review through the approval boundary (or recovery), the Backlog
+  // status is a representation promoted at closeout — never a gate of its
+  // own, and no provider boolean stands in for it.
+  if (context.missionStatus === 'integration' || context.missionStatus === 'done') {
+    return {
+      ok: true,
+      level: 'pass',
+      message: `Backlog status follows the Mission lifecycle (${context.missionStatus}); promotion happens at closeout`
+    };
+  }
+
+  // Review round 1 (F3): a dry run has not run recovery yet, so
+  // missionStatus still reflects the stale store state. Predict the same
+  // authority the real run would establish and report it; the real run
+  // persists it instead.
+  const recovery = recoveryEstablishesApproval(context);
+  if (recovery.established && recovery.via !== 'lifecycle') {
+    const how = recovery.via === 'human-override'
+      ? `the default-user provider approval (${recovery.decidedAt}) would be recorded as an authoritative ReviewerDecision`
+      : `the Mission Review already records an authoritative approval (${recovery.decidedAt})`;
+    return {
+      ok: true,
+      level: 'warn',
+      message: `Backlog status: ${toVirtual(context.taskStatus, stateMapOptions)} accepted for integration because ${how} and recovery would move the Mission to integration`
+    };
+  }
+
   const reviewApproved = context.approval?.ok && context.approval.reviewState === 'APPROVED';
-  const defaultUserApproved = context.approval?.ok && context.approval.defaultUserApproved === true;
   const localApproved = context.approval?.source === 'local-review-state';
-  const prAlreadyMerged = context.pr?.state === 'merged';
   const reviewCanProceed = context.taskStatus === 'review' && (reviewApproved || localApproved);
-  const defaultUserOverride = context.taskStatus === 'review' && !prAlreadyMerged && defaultUserApproved && context.approval.reviewState !== 'APPROVED';
 
   if (reviewCanProceed) {
     let reason;
@@ -816,14 +899,6 @@ function evaluateTaskStatusForIntegration(context: any) {
       ok: true,
       level: 'warn',
       message: `Backlog status: review accepted for integration because ${reason}`
-    };
-  }
-
-  if (defaultUserOverride) {
-    return {
-      ok: true,
-      level: 'warn',
-      message: `Backlog status: default user approved for integration despite ${context.approval.reviewState}`
     };
   }
 
@@ -843,7 +918,7 @@ function printMergedPrRecoveryGuidance(log: Function, slug: string, baseWorktree
   log(fmt.status('INFO', `  px integrate ${slug} --dry-run`));
 }
 
-/** @param {{slug: string, branch: string, currentBranch: string, missionDir?: string, area: string, task: {ok: boolean, taskFile?: string, reason?: string, matches?: string[]}, taskStatus?: string, taskAssignee?: string|null, forgejoUser?: string|null, forgejoToken?: string|null, taskAssigneeWarning?: string|null, pr: {exists?: boolean, state?: string, number?: number, merged?: boolean, raw?: string}, siblingPrs: any[], approval: {ok?: boolean, error?: string, reviewState?: string, defaultUserApproved?: boolean, source?: string}, baseBranch?: string, baseWorktree?: string, mainBranch: string, mainDirtyEntries: string[], mainDirty: boolean}} context */
+/** @param {{slug: string, branch: string, currentBranch: string, missionDir?: string, area: string, task: {ok: boolean, taskFile?: string, reason?: string, matches?: string[]}, taskStatus?: string, taskAssignee?: string|null, forgejoUser?: string|null, forgejoToken?: string|null, taskAssigneeWarning?: string|null, pr: {exists?: boolean, state?: string, number?: number, merged?: boolean, createdAt?: string | null, raw?: string}, siblingPrs: any[], approval: {ok?: boolean, error?: string, reviewState?: string, defaultUserApproved?: boolean, defaultUserApprovedAt?: string, source?: string}, baseBranch?: string, baseWorktree?: string, mainBranch: string, mainDirtyEntries: string[], mainDirty: boolean}} context */
 async function promoteTaskForIntegrationIfNeeded(
   context: any,
   { dryRun = false, missionServicesFn }: { dryRun?: boolean, missionServicesFn?: Function } = {},
@@ -895,9 +970,50 @@ async function promoteTaskForIntegrationIfNeeded(
 }
 
 /**
+ * Persist an explicit human override as a real `ReviewerDecision` through the
+ * Review domain, returning the reloaded mission (TASK-2379 Part E). The
+ * override is authoritative Review data — never an integrate-local boolean —
+ * and it keeps its own timestamp: the approval happened on the provider at
+ * `overrideApprovedAt`, recovery merely observes it late.
+ *
+ * Returns null when the Review is not awaiting a decision (the domain refuses
+ * to rewrite an already-decided round) or when persistence fails.
+ */
+async function recordHumanOverrideDecision(
+  context: any,
+  {
+    missionServices,
+    missionLoad,
+    overrideApprovedAt,
+  }: { missionServices: any, missionLoad: any, overrideApprovedAt: string },
+): Promise<any | null> {
+  const review = missionLoad.mission.review;
+  if (reviewStatus(review) !== 'awaiting-review') {
+    fmt.log.fail(`Human override cannot be recorded for ${context.slug}: the Review is ${reviewStatus(review)}, not awaiting a decision. Resolve the current round (or start a new one with px handoff) before overriding.`);
+    return null;
+  }
+  const decidedReview = applyReviewerCommand(review, {
+    type: 'approve',
+    decidedAt: overrideApprovedAt,
+    comment: null,
+    source: { kind: 'provider', provider: 'forgejo' },
+  });
+  try {
+    await missionServices.store.save({ ...missionLoad.mission, review: decidedReview }, missionLoad.version);
+  } catch (error) {
+    fmt.log.fail(`Could not persist the human override decision for ${context.slug}: ${(error as Error).message}`);
+    return null;
+  }
+  const reloaded = await missionServices.store.load(missionId(context.slug));
+  return reloaded.kind === 'found' ? reloaded : null;
+}
+
+/**
  * Repair interrupted lifecycle orchestration using workflow operations, never
  * by assigning Mission.status. A Review decision remains the sole approval
- * authority; an active Mission without Review facts must be handed off first.
+ * authority: an explicit human override becomes one, an active Mission
+ * without Review facts must be handed off first, and a missing decision stops
+ * recovery.
  */
 async function recoverMissionForIntegration(
   context: any,
@@ -919,16 +1035,53 @@ async function recoverMissionForIntegration(
     return { recovered: false, status: 'done' };
   }
 
+  // The explicit human override (repo default user already approved on the
+  // provider) is the one input recovery may turn into an authoritative
+  // ReviewerDecision. It carries the approval's own timestamp and is never
+  // a bare boolean shortcut (TASK-2379 Part E).
+  const overrideApprovedAt = context.approval?.ok === true
+    && context.approval.defaultUserApproved === true
+    ? context.approval.defaultUserApprovedAt
+    : undefined;
+
   if (missionLoad.mission.status === 'active') {
-    if (!missionLoad.mission.review) {
+    if (!missionLoad.mission.review && overrideApprovedAt === undefined) {
       fmt.log.fail(`Mission ${missionId(context.slug)} is active with no authoritative Review. Run px handoff ${context.slug} (or record a human decision through px review) before integration.`);
       throw new IntegrationAbort();
     }
+    // Review round 1 (F1): recovery must not stamp the recovered
+    // active → review transition with its own wall clock — a wall-clock
+    // entry postdates the stored approval and the projection silently drops
+    // the resulting negative review dwell. The entry time comes from an
+    // authoritative source: the Review round's own startedAt, or, when
+    // recovery creates the Review through the handoff operation, the PR
+    // creation time of the PR the provider approval was recorded on.
+    const entryRound = missionLoad.mission.review?.rounds?.length
+      ? missionLoad.mission.review.rounds[missionLoad.mission.review.rounds.length - 1]
+      : null;
+    let reviewEntryAt = entryRound?.startedAt;
+    if (!reviewEntryAt && typeof context.pr?.createdAt === 'string' && context.pr.createdAt) {
+      reviewEntryAt = context.pr.createdAt;
+    }
+    if (!reviewEntryAt) {
+      fmt.log.fail(`Cannot derive an authoritative review-entry timestamp for ${context.slug}: no Review round startedAt and no PR creation time. Re-run px handoff ${context.slug} to record the review entry, or record the decision through px review, before integration.`);
+      throw new IntegrationAbort();
+    }
+    const approvalAt = (entryRound?.decision?.kind === 'approved' ? entryRound.decision.decidedAt : undefined) ?? overrideApprovedAt;
+    const entryMs = Date.parse(reviewEntryAt);
+    const approvalMs = approvalAt !== undefined ? Date.parse(approvalAt) : NaN;
+    if (Number.isNaN(entryMs) || (approvalAt !== undefined && (Number.isNaN(approvalMs) || entryMs > approvalMs))) {
+      fmt.log.fail(`Authoritative timestamps for ${context.slug} are inverted or unparseable: review entry ${reviewEntryAt} vs approval ${approvalAt ?? 'none'}. Resolve the Review before integrating.`);
+      throw new IntegrationAbort();
+    }
     // Submit through the existing handoff operation; it alone owns the
-    // active → review rules and persists the Review aggregate.
+    // active → review rules and persists the Review aggregate. The
+    // authoritative entry timestamp rides along so the persisted lane event
+    // and the Review round both carry it instead of the recovery wall clock.
     await submitForReviewFn(context.slug, false, {
       missionServicesFn: async () => missionServices,
       exit: (code: number) => { throw new Error(`submit-for-review exited ${code}`); },
+      occurredAt: reviewEntryAt,
     });
     missionLoad = await missionServices.store.load(missionId(context.slug));
     if (missionLoad.kind !== 'found' || missionLoad.mission.status !== 'review') {
@@ -945,7 +1098,22 @@ async function recoverMissionForIntegration(
     throw new IntegrationAbort();
   }
 
-  const reviewRound = missionLoad.mission.review.rounds[missionLoad.mission.review.rounds.length - 1];
+  let reviewRound = missionLoad.mission.review.rounds[missionLoad.mission.review.rounds.length - 1];
+  if (reviewRound.decision?.kind !== 'approved' && overrideApprovedAt !== undefined) {
+    // Observe the previously happened approval late: persist it at its own
+    // timestamp, then let the existing approve transition below run at that
+    // same time. Recovery never stamps the approval with its own start time.
+    const reloaded = await recordHumanOverrideDecision(context, {
+      missionServices,
+      missionLoad,
+      overrideApprovedAt,
+    });
+    if (!reloaded || reloaded.mission.status !== 'review' || !reloaded.mission.review) {
+      throw new IntegrationAbort();
+    }
+    missionLoad = reloaded;
+    reviewRound = missionLoad.mission.review.rounds[missionLoad.mission.review.rounds.length - 1];
+  }
   if (reviewRound.decision?.kind !== 'approved') {
     fmt.log.fail(`Mission ${missionId(context.slug)} is in review without an authoritative approval. Record a ReviewerDecision through px review before integration.`);
     throw new IntegrationAbort();
@@ -969,7 +1137,7 @@ async function recoverMissionForIntegration(
 }
 
 /**
- * @param{{slug: string, branch: string, missionDir?: string, area: string, task: {ok: boolean, taskFile?: string, reason?: string, matches?: string[]}, taskStatus?: string, taskAssignee?: string|null, forgejoUser?: string|null, forgejoToken?: string|null, taskAssigneeWarning?: string|null, pr: {exists?: boolean, state?: string, number?: number, merged?: boolean, raw?: string}, siblingPrs: any[], approval: {ok?: boolean, error?: string, reviewState?: string, defaultUserApproved?: boolean, source?: string}, baseBranch?: string, baseWorktree?: string, mainBranch: string, mainDirtyEntries: string[], mainDirty: boolean}} context
+ * @param{{slug: string, branch: string, missionDir?: string, area: string, task: {ok: boolean, taskFile?: string, reason?: string, matches?: string[]}, taskStatus?: string, taskAssignee?: string|null, forgejoUser?: string|null, forgejoToken?: string|null, taskAssigneeWarning?: string|null, pr: {exists?: boolean, state?: string, number?: number, merged?: boolean, createdAt?: string | null, raw?: string}, siblingPrs: any[], approval: {ok?: boolean, error?: string, reviewState?: string, defaultUserApproved?: boolean, defaultUserApprovedAt?: string, source?: string}, baseBranch?: string, baseWorktree?: string, mainBranch: string, mainDirtyEntries: string[], mainDirty: boolean}} context
  */
 function printIntegrationPreflight(
   context: any,
@@ -1075,20 +1243,34 @@ function printIntegrationPreflight(
   if (isForgejoReviewEnabledFn(baseWorktree)) {
     const localApproved = context.approval?.source === 'local-review-state';
     const localApprovalFallback = localApproved;
+    // Review round 1 (F3): predict the authority the real run would establish
+    // through recovery; consumed only when the provider state looks
+    // unapproved and the Mission lifecycle has not already left review (a
+    // dry run has not run recovery, so missionStatus is still stale).
+    const recoveryDecision = recoveryEstablishesApproval(context);
+    const recoveryWouldEstablishApproval = recoveryDecision.established && recoveryDecision.via !== 'lifecycle';
 
     if (context.pr.exists && context.pr.state === 'open') {
       log(fmt.status('PASS', `Forgejo PR: PR #${context.pr.number} open`));
-      if (localApprovalFallback) {
+      if (context.missionStatus === 'integration' || context.missionStatus === 'done') {
+        // TASK-2379: recovery has established the authoritative approval in
+        // the Mission lifecycle; the provider state read at context build
+        // time is informational from here on.
+        log(fmt.status('PASS', `Forgejo approval: Mission lifecycle is authoritative (${context.missionStatus}); provider state informational (${context.approval.reviewState || 'missing'})`));
+      } else if (localApprovalFallback) {
         log(fmt.status('INFO', `Forgejo approval: token unavailable, approval sourced from the local Review (phase=approved)`));
       } else if (!context.approval.ok) {
         failures.push('pr-approval');
         log(fmt.status('FAIL', `Forgejo approval: could not verify an approved review (${context.approval.error})`));
-      } else if (context.approval.reviewState !== 'APPROVED' && context.approval.defaultUserApproved !== true) {
+      } else if (context.approval.reviewState !== 'APPROVED' && !recoveryWouldEstablishApproval) {
         failures.push('pr-approval');
         log(fmt.status('FAIL', `Forgejo approval: latest formal review state is ${context.approval.reviewState || 'missing'}, expected APPROVED`));
-      } else if (context.approval.reviewState !== 'APPROVED' && context.approval.defaultUserApproved === true) {
-        warnings.push('pr-approval-default-user-override');
-        log(fmt.status('WARN', `Forgejo approval: default user approved despite latest review state being ${context.approval.reviewState}`));
+      } else if (context.approval.reviewState !== 'APPROVED') {
+        // A dry run has not run recovery, so the provider state read at
+        // context-build time looks unapproved. Report the authority the real
+        // run would establish instead of failing for exactly the case the
+        // real run accepts.
+        log(fmt.status('INFO', `Forgejo approval: recovery would establish the authoritative approval (${recoveryDecision.via} at ${recoveryDecision.decidedAt || 'n/a'}); provider state informational (${context.approval.reviewState || 'missing'})`));
       } else {
         log(fmt.status('PASS', `Forgejo approval: latest formal review state is ${context.approval.reviewState}`));
       }

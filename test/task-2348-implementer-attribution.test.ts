@@ -146,7 +146,6 @@ test('task-2348: review-aggregate pr_fix_rounds counts only reported implementer
   );
 
   try {
-    // @ts-expect-error -- TASK-2328: runtime-only property/partial test double absent from the inferred type.
     const info = await stats._internals.deriveImplementerAndFixRounds(
       'task-2348-b',
       root,

@@ -1428,7 +1428,8 @@ test('getLatestReviewDecision returns the latest formal review state for the bra
       ok: true,
       prNumber: 97,
       reviewState: 'APPROVED',
-      defaultUserApproved: true
+      defaultUserApproved: true,
+      defaultUserApprovedAt: '2026-04-12T11:00:00Z'
     });
   } finally {
     process.env.FORGEJO_USER = previousUser;
@@ -1472,7 +1473,8 @@ test('getLatestReviewDecision detects defaultUserApproved when default user appr
       ok: true,
       prNumber: 97,
       reviewState: 'REQUEST_CHANGES',
-      defaultUserApproved: true
+      defaultUserApproved: true,
+      defaultUserApprovedAt: '2026-04-12T10:00:00Z'
     });
   } finally {
     process.env.FORGEJO_USER = previousUser;
@@ -1504,6 +1506,54 @@ test('getLatestReviewDecision returns defaultUserApproved false when default use
             data: [
               { state: 'APPROVED', submitted_at: '2026-04-12T10:00:00Z', user: { login: 'codex' } },
               { state: 'REQUEST_CHANGES', submitted_at: '2026-04-12T11:00:00Z', user: { login: 'gemini' } }
+            ],
+            status: 0
+          };
+        }
+        return { ok: false, data: null, status: 1 };
+      }
+    });
+
+    assert.deepEqual(decision, {
+      ok: true,
+      prNumber: 97,
+      reviewState: 'REQUEST_CHANGES',
+      defaultUserApproved: false
+    });
+  } finally {
+    process.env.FORGEJO_USER = previousUser;
+  }
+});
+
+// TASK-2379 review round 1 (F2): a default-user approval later superseded by
+// the SAME user's REQUEST_CHANGES is a retracted approval. It must not be
+// reported as a standing override, because recovery would otherwise persist
+// it as an authoritative ReviewerDecision(approved).
+test('getLatestReviewDecision ignores a default-user approval superseded by the same user\'s later REQUEST_CHANGES', () => {
+  const previousUser = process.env.FORGEJO_USER;
+  process.env.FORGEJO_USER = 'human';
+  try {
+    const decision = getLatestReviewDecision('mission/task-097', {
+      token: 'test-token',
+      apiCall(method, apiPath, token) {
+        if (apiPath.includes('/pulls?state=')) {
+          return {
+            ok: true,
+            data: [
+              {
+                number: 97,
+                head: { ref: 'mission/task-097', label: 'magnus:mission/task-097' }
+              }
+            ],
+            status: 0
+          };
+        }
+        if (apiPath === '/pulls/97/reviews') {
+          return {
+            ok: true,
+            data: [
+              { state: 'APPROVED', submitted_at: '2026-04-12T10:00:00Z', user: { login: 'human' } },
+              { state: 'REQUEST_CHANGES', submitted_at: '2026-04-12T11:00:00Z', user: { login: 'human' } }
             ],
             status: 0
           };

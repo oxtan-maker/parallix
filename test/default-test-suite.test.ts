@@ -90,6 +90,11 @@ const expectedIntegrationFiles = [
   // database for the authoritative stats / approval-boundary reproduction,
   // so it crosses the process boundary and runs only in the integration layer.
   'task-2378-authoritative-stats.test.ts',
+  // TASK-2379: seeds a real temporary Git repository plus a migrated operator
+  // database for the delayed approval-boundary reproduction (review dwell /
+  // integration dwell), so it crosses the process boundary and runs only in
+  // the integration layer.
+  'task-2379-approval-boundary-repro.test.ts',
   'test-hygiene.test.ts',
   'tui-action-bar.test.ts',
   'tui-confirmation.test.ts',

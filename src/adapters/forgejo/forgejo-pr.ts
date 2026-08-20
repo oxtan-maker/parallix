@@ -83,6 +83,10 @@ function getPrStatus(branch: string, rootDir?: string, options: any = {}) {
     state: pr.state,
     merged: merged,
     url: pr.html_url,
+    // TASK-2379 review round 1 (F1): the PR's own creation time is the
+    // authoritative review-entry point for recovery of a Mission that never
+    // persisted its active → review transition.
+    createdAt: pr.created_at || null,
     raw
   };
 }
@@ -555,9 +559,9 @@ function getLatestReview(branch: string, reviewerUser: string, sinceIso: string,
 /**
  * @param {string} branch
  * @param {{forgejoUser?: string, token?: string, apiCall?: Function, rootDir?: string}} [options]
- * @returns {{ok: boolean, error?: string, reviewState?: string|null, prNumber?: number, defaultUserApproved?: boolean, raw?: string}}
+ * @returns {{ok: boolean, error?: string, reviewState?: string|null, prNumber?: number, defaultUserApproved?: boolean, defaultUserApprovedAt?: string, raw?: string}}
  */
-function getLatestReviewDecision(branch: string, options: any = {}): { ok: boolean, error?: string, reviewState?: string | null, prNumber?: number, defaultUserApproved?: boolean, raw?: string } {
+function getLatestReviewDecision(branch: string, options: any = {}): { ok: boolean, error?: string, reviewState?: string | null, prNumber?: number, defaultUserApproved?: boolean, defaultUserApprovedAt?: string, raw?: string } {
   /** @type {{forgejoUser?: string, token?: string, apiCall?: Function, rootDir?: string}} */
   const {
     forgejoUser,
@@ -618,14 +622,35 @@ function getLatestReviewDecision(branch: string, options: any = {}): { ok: boole
     ? formalReviews[formalReviews.length - 1].state
     : reviews[reviews.length - 1].state;
 
-  const defaultUserApproved = reviews.some(/** @param {{user: string, state: string}} r */ (r: any) => r.user === defaultUserLogin && r.state === 'APPROVED');
+  // TASK-2379: the override is a real provider decision; carry its own
+  // authoritative timestamp so recovery can persist it as a ReviewerDecision
+  // at that time. Review round 1 (F2): the approval stays valid only while
+  // the default user's own latest non-dismissed formal review is APPROVED —
+  // a later REQUEST_CHANGES by the same user supersedes it, and recovery
+  // must not persist a retracted approval as an authoritative decision.
+  const defaultUserFormal = formalReviews
+    .filter(/** @param {{user: string, state: string}} r */ (r: any) => r.user === defaultUserLogin);
+  const latestDefaultUserFormal = defaultUserFormal.length > 0
+    ? defaultUserFormal[defaultUserFormal.length - 1]
+    : null;
+  const defaultUserApproved = latestDefaultUserFormal !== null && latestDefaultUserFormal.state === 'APPROVED';
+  const defaultUserApprovedAt = defaultUserApproved && latestDefaultUserFormal
+    ? latestDefaultUserFormal.submittedAt
+    : undefined;
 
-  return {
+  const decision: { ok: boolean, prNumber?: number, reviewState: string, defaultUserApproved: boolean, defaultUserApprovedAt?: string } = {
     ok: true,
     prNumber,
     reviewState: finalState,
     defaultUserApproved
   };
+  // The override carries its own authoritative timestamp; the property stays
+  // absent (not `undefined`) when there is no default-user approval, keeping
+  // the pre-TASK-2379 result shape for callers that compare it whole.
+  if (defaultUserApprovedAt) {
+    decision.defaultUserApprovedAt = defaultUserApprovedAt;
+  }
+  return decision;
 }
 
 /**

@@ -220,7 +220,7 @@ export function evidenceCellHasVerifiableReference(fileSystem: FileSystemPort | 
     }
     // Shell commands are evidence only when they name a repository file.
     // This keeps raw environment output out while allowing `bash hello.sh`.
-    if (/^(bash|sh|cat|head|tail|diff|grep|sed|awk|xxd|od|wc|sort|uniq)\s+/i.test(command)) {
+    if (/^(bash|sh|cat|head|tail|diff|grep|sed|awk|xxd|od|wc|sort|uniq|stat|ls)\s+/i.test(command)) {
       const args = command.split(/\s+/).slice(1);
       for (const arg of args) {
         if (arg.startsWith('-')) { continue; }

@@ -27,6 +27,25 @@ async function waitForWrite(stream: Stream, writeCount: number): Promise<void> {
   });
 }
 
+/**
+ * Poll until the predicate holds or the budget is exhausted. Ink renders on
+ * the event loop, so a fixed sleep before asserting on rendered output is a
+ * load-dependent flake; waiting for the condition makes the wait exact.
+ */
+async function waitFor(predicate: () => boolean, timeoutMs = 2_000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (predicate()) {return true;}
+    if (Date.now() >= deadline) {return false;}
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
+/** Wait until the cumulative stream output matches the pattern. */
+function waitForOutput(stream: Stream, pattern: RegExp, timeoutMs = 2_000): Promise<boolean> {
+  return waitFor(() => pattern.test(stream.writes.join('')), timeoutMs);
+}
+
 async function renderFlow(controller: { dispatchWithStatus: (...args: any[]) => Promise<any> }, refreshProjection?: () => Promise<any>) {
   const ink = await import('ink');
   const React = await import('react');
@@ -51,12 +70,12 @@ test('confirmation cancellation dispatches nothing and renders cancelled outcome
   let calls = 0;
   const ui = await renderFlow({ async dispatchWithStatus() { calls += 1; return { status: 'completed', durableEvidence: [] }; } });
   ui.stdin.send('\r');
-  await new Promise((resolve) => setTimeout(resolve, 35));
+  await waitForOutput(ui.stdout, /CONFIRM CONSEQUENTIAL ACTION/);
   ui.stdin.send('\u001b');
-  await new Promise((resolve) => setTimeout(resolve, 35));
+  const cancelled = await waitForOutput(ui.stdout, /CANCELLED: cancelled before dispatch/);
   ui.instance.unmount();
   assert.equal(calls, 0);
-  assert.match(ui.stdout.writes.join(''), /CANCELLED: cancelled before dispatch/);
+  assert.ok(cancelled, 'cancellation must render the cancelled outcome');
 });
 
 test('confirmed action dispatches through supplied controller and conflict refreshes before re-prompting', async () => {
@@ -70,9 +89,9 @@ test('confirmed action dispatches through supplied controller and conflict refre
     return makeProjection({ refined: [makeCard({ id: 'task-flow' as never, lane: 'refined', status: 'refined', commands: [{ command: 'active', enabled: true, reason: null }] })] });
   });
   ui.stdin.send('\r');
-  await new Promise((resolve) => setTimeout(resolve, 35));
+  await waitForOutput(ui.stdout, /CONFIRM CONSEQUENTIAL ACTION/);
   ui.stdin.send('\r');
-  await new Promise((resolve) => setTimeout(resolve, 60));
+  await waitFor(() => refreshes === 1);
   ui.instance.unmount();
   assert.equal(calls, 1);
   assert.equal(refreshes, 1);
@@ -100,7 +119,7 @@ test('progress events render in the command log without changing the card lane',
   } as never), { stdin: stdin as unknown as NodeJS.ReadStream, stdout: stdout as unknown as NodeJS.WriteStream, patchConsole: false, exitOnCtrlC: false });
   await new Promise((resolve) => setTimeout(resolve, 35));
   progress!({ operationId: 'op-progress', sequence: 2, phase: 'record', message: 'durable evidence recorded', timestamp: '2026-07-26T12:00:00.000Z' });
-  await new Promise((resolve) => setTimeout(resolve, 35));
+  await waitForOutput(stdout, /record durable evidence recorded/);
   instance.unmount();
   const output = stdout.writes.join('');
   assert.match(output, /record durable evidence recorded/);
@@ -117,12 +136,12 @@ test('Ctrl+A on enabled card shows confirmation and dispatches on Enter', async 
   const ui = await renderFlow({ async dispatchWithStatus() { calls += 1; return { status: 'completed', durableEvidence: [] }; } });
   /* Ctrl+A (\x01) triggers lifecycle shortcut for active:execute. */
   ui.stdin.send('\x01');
-  await new Promise((resolve) => setTimeout(resolve, 60));
   /* Confirmation dialog should appear. */
+  await waitForOutput(ui.stdout, /CONFIRM CONSEQUENTIAL ACTION/);
   assert.match(ui.stdout.writes.join(''), /CONFIRM CONSEQUENTIAL ACTION/);
   /* Press Enter to confirm. */
   ui.stdin.send('\r');
-  await new Promise((resolve) => setTimeout(resolve, 60));
+  await waitFor(() => calls === 1);
   ui.instance.unmount();
   assert.equal(calls, 1, 'Ctrl+A + Enter must dispatch once');
 });
@@ -159,7 +178,7 @@ test('Ctrl+D on card produces unavailable outcome without dispatching', async ()
   const ui = await renderFlow({ async dispatchWithStatus() { calls += 1; return { status: 'completed', durableEvidence: [] }; } });
   /* Ctrl+D (\x04) triggers draft:create which is not integrated. */
   ui.stdin.send('\x04');
-  await new Promise((resolve) => setTimeout(resolve, 35));
+  await waitForOutput(ui.stdout, /unavailableCapability|not yet available/i);
   ui.instance.unmount();
   assert.equal(calls, 0, 'Ctrl+D must not dispatch (unavailable capability)');
   assert.match(ui.stdout.writes.join(''), /unavailableCapability|not yet available/i, 'Ctrl+D must show unavailable outcome');
@@ -170,7 +189,7 @@ test('Ctrl+R on card produces unavailable outcome without dispatching', async ()
   const ui = await renderFlow({ async dispatchWithStatus() { calls += 1; return { status: 'completed', durableEvidence: [] }; } });
   /* Ctrl+R (\x12) triggers review:submit which is not integrated. */
   ui.stdin.send('\x12');
-  await new Promise((resolve) => setTimeout(resolve, 35));
+  await waitForOutput(ui.stdout, /unavailableCapability|not yet available/i);
   ui.instance.unmount();
   assert.equal(calls, 0, 'Ctrl+R must not dispatch (unavailable capability)');
   assert.match(ui.stdout.writes.join(''), /unavailableCapability|not yet available/i, 'Ctrl+R must show unavailable outcome');

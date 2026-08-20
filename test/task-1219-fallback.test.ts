@@ -60,8 +60,11 @@ test('evaluateTaskStatusForIntegration rejects when token and review-state both 
   assert.match(result.message, /expected approved, or review with an approved Forgejo PR/i);
 });
 
-// SC 1c: evaluateTaskStatusForIntegration does not confuse local source with Forgejo APPROVED for default user override
-test('evaluateTaskStatusForIntegration: local-review-state does not trigger default user override path', () => {
+// SC 1c: evaluateTaskStatusForIntegration does not confuse local source with Forgejo APPROVED for default user override.
+// TASK-2379: the defaultUserApproved boolean is no longer an approval authority at all;
+// the override is persisted as a ReviewerDecision by recovery, and the preflight
+// accepts the Mission lifecycle instead of the boolean.
+test('evaluateTaskStatusForIntegration: defaultUserApproved boolean is not an approval authority without the lifecycle', () => {
   const context = {
     taskStatus: 'review',
     pr: { merged: false },
@@ -69,8 +72,12 @@ test('evaluateTaskStatusForIntegration: local-review-state does not trigger defa
   };
 
   const result = evaluateTaskStatusForIntegration(context);
-  assert.ok(result.ok);
-  assert.match(result.message, /default user approved for integration/i);
+  assert.equal(result.ok, false);
+  assert.equal(result.level, 'fail');
+
+  const recovered = evaluateTaskStatusForIntegration({ ...context, missionStatus: 'integration' });
+  assert.equal(recovered.ok, true);
+  assert.match(recovered.message, /Mission lifecycle/i);
 });
 
 // SC 3a: printIntegrationPreflight passes preflight when approval is local-only (token missing + review-state approved)

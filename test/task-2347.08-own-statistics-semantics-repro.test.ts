@@ -11,7 +11,6 @@ import type { RepositoryId } from '../src/domain/repository.js';
 import stats from '../src/adapters/cli/commands/stats.js';
 
 const REPOSITORY = 'acme/widgets' as RepositoryId;
-// @ts-expect-error -- TASK-2328: runtime-only property absent from the inferred type.
 const WINDOW = stats.createWindow('2026-08-03', 1);
 
 class MemoryUsageRepository implements UsageRepository {
@@ -39,7 +38,6 @@ const ROWS: readonly UsageRecord[] = [
 ];
 
 test('task-2347.08 repro: CLI and board agree on identity, completions, and cycle time', async () => {
-  // @ts-expect-error -- TASK-2328: runtime-only property absent from the inferred type.
   const cli = stats.summarizeMissionWindow(ROWS, WINDOW, new Set([`${REPOSITORY}::task-2347.08`]));
   const board = new ConcreteMetricsReadAdapter({
     laneEventRepo: new DoneLaneEventRepository(),

@@ -275,6 +275,28 @@ test('resolveWorktree prefers live non-prunable matches and falls back to cwd br
   }
 });
 
+test('resolveWorktree walks up when git reports the git dir as the main worktree path', () => {
+  // A repository whose git dir is not named `.git` (here `.git-worktree`) is
+  // reported by `git worktree list` as the git dir itself; rebasing there fails
+  // with "this operation must be run in a work tree".
+  const worktreeList = [
+    'worktree /tmp/repo-task-132/.git-worktree',
+    'branch refs/heads/mission/task-132',
+    '',
+  ].join('\n');
+
+  const resolved = resolveWorktree('task-132', {
+    cwd: '/tmp/repo-task-132',
+    gitFn: args => {
+      if (args[0] === 'worktree') {return { status: 0, stdout: worktreeList, stderr: '' };}
+      assert.deepEqual(args.slice(2), ['rev-parse', '--is-inside-work-tree']);
+      const dir = args[1];
+      return { status: 0, stdout: `${dir === '/tmp/repo-task-132'}\n`, stderr: '' };
+    }
+  });
+  assert.equal(resolved, '/tmp/repo-task-132');
+});
+
 test('detectLaunchBaseBranch returns the current feature branch', () => {
   const base = detectLaunchBaseBranch('/tmp/repo', {
     gitFn: args => {

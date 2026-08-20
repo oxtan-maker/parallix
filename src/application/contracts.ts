@@ -22,7 +22,7 @@ export interface ApplicationOutcome<T> {
 }
 
 export interface SourceFact<T> {
-  readonly source: 'task-markdown' | 'git' | 'stats' | 'configuration';
+  readonly source: 'task-markdown' | 'git' | 'stats' | 'configuration' | 'integration-gates';
   readonly status: 'fresh' | 'stale' | 'unavailable';
   readonly value?: T;
 }

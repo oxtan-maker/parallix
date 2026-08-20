@@ -352,6 +352,10 @@ export async function submitForReview(
     isReviewProviderEnabledFn?: typeof isProviderEnabled;
     isForgejoReviewEnabledFn?: typeof isProviderEnabled;
     missionServicesFn?: Function;
+    // TASK-2379 review round 1 (F1): authoritative review-entry timestamp
+    // for lifecycle recovery; a genuine submit-for-review passes nothing and
+    // the handoff keeps the wall clock.
+    occurredAt?: string;
     log?: (_msg: string) => void;
   } = {}
 ): Promise<void> {
@@ -393,7 +397,7 @@ export async function submitForReview(
     }
   }
 
-  const result = await performHandoffFn(slug, { skipGate, reviewIdentity, forgejoUser: reviewIdentity, worktree, missionServicesFn: options.missionServicesFn });
+  const result = await performHandoffFn(slug, { skipGate, reviewIdentity, forgejoUser: reviewIdentity, worktree, missionServicesFn: options.missionServicesFn, occurredAt: options.occurredAt });
   if (!result.ok) {
     // Auto-bounce for declared-gate validation failures
     if (result.reason === 'validation-failed') {

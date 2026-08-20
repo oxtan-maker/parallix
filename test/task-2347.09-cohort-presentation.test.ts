@@ -7,7 +7,14 @@ import {
   renderCohortComparison,
 } from '../src/adapters/cli/commands/cohort-report.js';
 import { statsCohorts, parseCohortArgs } from '../src/adapters/cli/commands/stats-cohorts.js';
-import stats from '../src/adapters/cli/commands/stats.js';
+import stats, { createStatsCommand, createStatsWorkflowAdapter } from '../src/adapters/cli/commands/stats.js';
+import { StatsCommandUseCase } from '../src/application/stats-command-use-case.js';
+
+// Render-only `px stats` command: the cohorts path never consults the Mission
+// authority, so a store placeholder satisfies the required wiring (SC13).
+const statsCommand = createStatsCommand(
+  new StatsCommandUseCase(createStatsWorkflowAdapter({} as never)),
+);
 import {
   LOW_SAMPLE_THRESHOLD,
   compareCohorts,
@@ -235,7 +242,7 @@ test('the board read model exposes the cohort comparison with sample sizes', asy
 
 test('px stats routes the cohorts subcommand without touching the weekly or range paths', async () => {
   const lines: string[] = [];
-  await stats(['cohorts', '--help'], {
+  await statsCommand(['cohorts', '--help'], {
     log: (message: string) => { lines.push(String(message)); return null; },
     error: (message: string) => { lines.push(String(message)); return null; },
     exit: () => null,

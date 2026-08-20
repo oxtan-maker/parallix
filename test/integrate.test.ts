@@ -1122,16 +1122,33 @@ test('evaluateTaskStatusForIntegration rejects review without an approved Forgej
   assert.match(result.message, /expected approved, or review with an approved Forgejo PR/i);
 });
 
-test('evaluateTaskStatusForIntegration accepts review when default user approved but latest is REQUEST_CHANGES', () => {
+// TASK-2379: the defaultUserApproved boolean is no longer an approval
+// authority. The override becomes a real ReviewerDecision through recovery
+// (which moves the Mission lifecycle), and the lifecycle — not the boolean —
+// is what the preflight accepts.
+test('evaluateTaskStatusForIntegration rejects a raw defaultUserApproved boolean without the Mission lifecycle', () => {
   const result = evaluateTaskStatusForIntegration({
     taskStatus: 'review',
     pr: { merged: false },
     approval: { ok: true, reviewState: 'REQUEST_CHANGES', defaultUserApproved: true }
   });
 
+  assert.equal(result.ok, false);
+  assert.equal(result.level, 'fail');
+  assert.match(result.message, /expected approved, or review with an approved Forgejo PR/i);
+});
+
+test('evaluateTaskStatusForIntegration accepts review once the Mission lifecycle left it', () => {
+  const result = evaluateTaskStatusForIntegration({
+    taskStatus: 'review',
+    missionStatus: 'integration',
+    pr: { merged: false },
+    approval: { ok: true, reviewState: 'REQUEST_CHANGES', defaultUserApproved: true }
+  });
+
   assert.equal(result.ok, true);
-  assert.equal(result.level, 'warn');
-  assert.match(result.message, /default user approved for integration/i);
+  assert.equal(result.level, 'pass');
+  assert.match(result.message, /Mission lifecycle/i);
 });
 
 test('evaluateTaskStatusForIntegration rejects review when default user did not approve and latest is not APPROVED', () => {
@@ -1608,13 +1625,14 @@ test('recovery refuses an active Mission without authoritative Review facts', as
 // never patching Mission.status directly.
 test('R4: stale active recovery chains submit-for-review then approve with original decidedAt', async () => {
   const decidedAt = '2026-01-01T10:30:00Z';
+  const reviewEntryAt = '2026-01-01T10:00:00Z';
   const calls = [];
   const state = {
     status: 'active', assignee: 'codex',
-    review: { rounds: [{ decision: { kind: 'approved', decidedAt } }] },
+    review: { rounds: [{ startedAt: reviewEntryAt, decision: { kind: 'approved', decidedAt } }] },
   };
-  const submitForReviewFn = async (slug: string, isContinue: boolean | string) => {
-    calls.push(['submit-for-review', slug, isContinue]);
+  const submitForReviewFn = async (slug: string, isContinue: boolean | string, options: any = {}) => {
+    calls.push(['submit-for-review', slug, isContinue, options?.occurredAt ?? null]);
     state.status = 'review'; // the existing handoff operation owns active → review
   };
   const missionServices = {
@@ -1635,10 +1653,306 @@ test('R4: stale active recovery chains submit-for-review then approve with origi
 
   assert.deepEqual(
     calls,
-    [['submit-for-review', 'task-2376', false], ['approve', decidedAt]],
+    // The recovered active → review carries the Review round's own startedAt,
+    // never the recovery wall clock (review round 1, F1).
+    [['submit-for-review', 'task-2376', false, reviewEntryAt], ['approve', decidedAt]],
     'recovery invokes the existing transition chain active → review → integration',
   );
   assert.deepEqual(result, { recovered: true, status: 'integration', occurredAt: decidedAt });
+});
+
+// R5 — stale `active` with no Review facts and an explicit human override:
+// recovery must persist a real ReviewerDecision(kind=approved, decidedAt=T)
+// through the Review domain, then chain the existing `submit-for-review`
+// and `approve` operations. No direct status patches, no wall-clock stamp.
+test('R5: stale active recovery with human override persists a real ReviewerDecision, then chains existing operations', async () => {
+  const fsMod = await import('node:fs');
+  const osMod = await import('node:os');
+  const pathMod = await import('node:path');
+  const { spawnSync } = await import('node:child_process');
+  const { agentFamily } = await import('../src/domain/agents.js');
+  const { missionId } = await import('../src/domain/mission.js');
+  const { repositoryId } = await import('../src/domain/repository.js');
+  const { ConfiguredReviewerEligibility, changeRevision, startReview } = await import('../src/domain/review.js');
+  const { MissionLifecycleService } = await import('../src/application/mission-lifecycle-service.js');
+  const { SqliteDatabaseAdapter } = await import('../src/adapters/sqlite/database-adapter.js');
+  const { SqliteMigrationRunner, loadDefaultMigrations } = await import('../src/adapters/sqlite/migration-runner.js');
+  const { SqliteMissionStore } = await import('../src/adapters/sqlite/mission-store.js');
+  const { clearOperatorStateCache } = await import('../src/adapters/sqlite/adapter-factory.js');
+
+  const decidedAt = '2026-01-01T10:30:00Z';
+  const submittedAt = '2026-01-01T10:00:00Z';
+  const implementer = agentFamily('configured-implementer');
+  const reviewer = agentFamily('configured-reviewer');
+  const reviewerEligibility = ConfiguredReviewerEligibility.fromReviewStep({ eligible: [reviewer], strategy: 'random' });
+  const pullRequest = { kind: 'pull-request', provider: 'forgejo', id: '2379-r5', url: null, sourceBranch: 'mission/task-2379-r5', targetBranch: 'main' };
+
+  const root = fsMod.mkdtempSync(pathMod.join(osMod.tmpdir(), 'task-2379-r5-'));
+  fsMod.mkdirSync(pathMod.join(root, 'missions'), { recursive: true });
+  spawnSync('git', ['init'], { cwd: root });
+  spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: root });
+  spawnSync('git', ['config', 'user.name', 'Test'], { cwd: root });
+  spawnSync('git', ['checkout', '-b', 'main'], { cwd: root });
+  spawnSync('git', ['commit', '-m', 'init', '--allow-empty'], { cwd: root });
+
+  const home = pathMod.join(root, 'parallix-home');
+  fsMod.mkdirSync(home, { recursive: true });
+  const previousHome = process.env.PARALLIX_HOME;
+  process.env.PARALLIX_HOME = home;
+  await clearOperatorStateCache();
+
+  const database = new SqliteDatabaseAdapter();
+  await database.open({ path: pathMod.join(home, 'parallix.db') });
+  await new SqliteMigrationRunner(database).applyPending(loadDefaultMigrations());
+  const store = new SqliteMissionStore(database);
+  const lifecycle = new MissionLifecycleService(store);
+
+  const slug = 'task-2379-r5';
+  const mission = {
+    id: missionId(slug),
+    repositoryId: repositoryId('parallix'),
+    title: 'R5 active override',
+    labels: [],
+    assignee: implementer,
+    status: 'active',
+    rawStatus: 'active',
+    checkpoints: [{
+      missionId: missionId(slug),
+      name: 'CP-0',
+      rawFilename: 'CP-0.md',
+      firstLine: 'CP-0',
+      goalCheck: [{ criterion: 'c', evidence: 'e' }],
+      nextActionText: 'review',
+    }],
+    netEngineeringLines: null,
+    closedAt: null,
+    externalTaskRef: null,
+    intakeTrace: null,
+    review: null,
+  };
+  await store.save(mission, null);
+
+  try {
+    const calls = [];
+    // The existing handoff operation owns active → review: it creates the
+    // awaiting Review aggregate and persists it through the domain.
+    // Mirrors the production contract (review round 1, F1): the handoff
+    // stamps the authoritative timestamp recovery passes, its own wall clock
+    // when nothing is passed — so this test stays red if recovery forgets to
+    // forward the entry time.
+    const stamp = (options: any) => options?.occurredAt || new Date().toISOString();
+    const submitForReviewFn = async (submittedSlug, isContinue, options: any = {}) => {
+      calls.push(['submit-for-review', submittedSlug, isContinue, options?.occurredAt ?? null]);
+      const loaded = await store.load(missionId(submittedSlug));
+      const review = startReview(
+        { change: pullRequest, revision: changeRevision('abc123') },
+        reviewer,
+        implementer,
+        stamp(options),
+        reviewerEligibility,
+      );
+      const result = await lifecycle.transition({
+        operationId: `r5-submit:${submittedSlug}`,
+        missionId: missionId(submittedSlug),
+        expectedVersion: loaded.kind === 'found' ? loaded.version : null,
+        capabilities: new Set(['mission:transition']),
+        command: { type: 'submit-for-review', gatesPassed: true, review, reviewerEligibility },
+        actor: implementer,
+        occurredAt: stamp(options),
+      });
+      if (result.status !== 'completed') {
+        throw new Error(`submit-for-review failed: ${result.error?.message ?? 'unknown'}`);
+      }
+    };
+
+    const context = {
+      slug,
+      // The provider approval was recorded on this PR; its creation time is
+      // the authoritative review-entry point for the recovered transition.
+      pr: {
+        exists: true,
+        state: 'open',
+        number: 1,
+        createdAt: submittedAt,
+      },
+      approval: {
+        ok: true,
+        reviewState: 'REQUEST_CHANGES',
+        defaultUserApproved: true,
+        defaultUserApprovedAt: decidedAt,
+      },
+    };
+
+    const result = await recoverMissionForIntegration(context, {
+      missionServices: { store, lifecycle },
+      submitForReviewFn,
+    });
+
+    assert.deepEqual(result, { recovered: true, status: 'integration', occurredAt: decidedAt });
+    assert.deepEqual(
+      calls,
+      [['submit-for-review', slug, false, submittedAt]],
+      'recovery invokes the existing handoff operation with the authoritative entry timestamp, never patches status',
+    );
+
+    const loaded = await store.load(missionId(slug));
+    assert.equal(loaded.kind, 'found');
+    assert.equal(loaded.mission.status, 'integration');
+    const round = loaded.mission.review.rounds[loaded.mission.review.rounds.length - 1];
+    assert.equal(round.decision.kind, 'approved', 'an authoritative ReviewerDecision exists');
+    assert.equal(round.decision.decidedAt, decidedAt, 'decidedAt is the human approval time, not the integration start');
+
+    const events = await database.query(
+      'SELECT from_status, to_status, trigger, occurred_at FROM board_lane_events WHERE mission_id = ?',
+      [missionId(slug)],
+    );
+    const submitEvents = events.filter((e) => e.from_status === 'active' && e.to_status === 'review');
+    const approveEvents = events.filter((e) => e.from_status === 'review' && e.to_status === 'integration');
+    assert.equal(submitEvents.length, 1, 'exactly one active → review event');
+    assert.equal(approveEvents.length, 1, 'exactly one review → integration event');
+    assert.equal(approveEvents[0].occurred_at, decidedAt, 'approve transition uses the stored decidedAt');
+    assert.equal(submitEvents[0].occurred_at, submittedAt, 'recovered active → review uses the authoritative review-entry timestamp, not the recovery wall clock');
+    assert.ok(submitEvents[0].occurred_at <= approveEvents[0].occurred_at, 'lane events stay ordered: review entry does not postdate review exit');
+  } finally {
+    await database.close();
+    if (previousHome === undefined) { delete process.env.PARALLIX_HOME; }
+    else { process.env.PARALLIX_HOME = previousHome; }
+    clearOperatorStateCache();
+    fsMod.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Review round 1 (F1): without an authoritative review-entry timestamp the
+// recovery must stop — it may not fall back to the recovery wall clock (that
+// is the divergence this mission removes) and it may not persist an
+// out-of-order lane event from inverted data.
+test('R5b: override recovery stops without an authoritative review-entry timestamp', async () => {
+  const makeState = () => ({ status: 'active', assignee: 'codex', review: null });
+  const baseContext = {
+    slug: 'task-2376',
+    approval: { ok: true, reviewState: 'REQUEST_CHANGES', defaultUserApproved: true, defaultUserApprovedAt: '2026-01-01T10:30:00Z' },
+  };
+  const makeServices = (state) => {
+    const transitionCalls = [];
+    const services = {
+      store: { async load() { return { kind: 'found', mission: state, version: 7 }; } },
+      lifecycle: { async transition(request) { transitionCalls.push(request); return { status: 'completed' }; } },
+    };
+    return { services, transitionCalls };
+  };
+
+  // No PR creation time and no Review round: no authoritative entry exists.
+  {
+    const state = makeState();
+    const { services, transitionCalls } = makeServices(state);
+    const submitCalls = [];
+    await assert.rejects(
+      () => recoverMissionForIntegration({ ...baseContext, pr: { exists: true, state: 'open' } }, {
+        missionServices: services,
+        submitForReviewFn: async () => { submitCalls.push(1); },
+      }),
+      error => error.constructor.name === 'IntegrationAbort',
+    );
+    assert.equal(submitCalls.length, 0, 'no handoff operation runs on missing entry data');
+    assert.equal(transitionCalls.length, 0, 'no transition is invented');
+    assert.equal(state.status, 'active', 'Mission is not done');
+  }
+
+  // Inverted data: the entry postdates the approval — persisting it would
+  // emit an out-of-order lane event the projection silently drops.
+  {
+    const state = makeState();
+    const { services, transitionCalls } = makeServices(state);
+    const submitCalls = [];
+    await assert.rejects(
+      () => recoverMissionForIntegration({ ...baseContext, pr: { exists: true, state: 'open', createdAt: '2026-01-01T12:00:00Z' } }, {
+        missionServices: services,
+        submitForReviewFn: async () => { submitCalls.push(1); },
+      }),
+      error => error.constructor.name === 'IntegrationAbort',
+    );
+    assert.equal(submitCalls.length, 0, 'inverted timestamps never reach the handoff operation');
+    assert.equal(transitionCalls.length, 0, 'no transition is invented');
+    assert.equal(state.status, 'active', 'Mission is not done');
+  }
+});
+
+// Review round 1 (F3): `--dry-run` skips recovery, so preflight must predict
+// the authority the real run would establish. The override case the real run
+// accepts must not fail the dry-run preflight; the no-override control must
+// still fail.
+test('F3: dry-run preflight accepts the override case the real run accepts', () => {
+  const logs = [];
+  const makeContext = (approval) => ({
+    slug: 'task-2379-f3',
+    branch: 'mission/task-2379-f3',
+    currentBranch: 'mission/task-2379-f3',
+    missionDir: '/tmp/task-2379-f3/missions/task-2379-f3',
+    area: 'all',
+    task: { ok: true, taskFile: '/tmp/task-2379-f3/backlog/tasks/task-2379-f3.md' },
+    taskStatus: 'review',
+    taskAssignee: 'custom',
+    forgejoUser: 'default',
+    forgejoToken: 'test-token',
+    pr: { exists: true, state: 'open', number: 1, createdAt: '2026-01-01T10:00:00Z' },
+    siblingPrs: [],
+    approval,
+    missionStatus: 'review',
+    missionReview: { rounds: [{ decision: null }] },
+    baseBranch: 'main',
+    baseWorktree: '/tmp/task-2379-f3',
+    mainBranch: 'main',
+    mainDirtyEntries: [],
+    mainDirty: false,
+  });
+  const options = {
+    readTokenFn: () => 'test-token',
+    resolveTokenFileFn: () => '/tmp/token-file',
+    detectRebaseStateFn: () => ({ inProgress: false, rebaseHead: null, unmergedFiles: [] }),
+    getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] }),
+    findMissionDocInBranchesFn: () => null,
+    isForgejoReviewEnabledFn: () => true,
+    log: (message) => { logs.push(message); },
+  };
+
+  const { failures } = printIntegrationPreflight(
+    makeContext({ ok: true, reviewState: 'REQUEST_CHANGES', defaultUserApproved: true, defaultUserApprovedAt: '2026-01-01T10:30:00Z' }),
+    options,
+  );
+  assert.ok(!failures.includes('task-status'), `dry-run must not fail task-status for the override case: ${failures.join(', ')}`);
+  assert.ok(!failures.includes('pr-approval'), `dry-run must not fail pr-approval for the override case: ${failures.join(', ')}`);
+  assert.ok(logs.some((line) => line.includes('recovery would establish')), 'dry-run reports the authority the real run would record');
+
+  logs.length = 0;
+  const control = printIntegrationPreflight(
+    makeContext({ ok: true, reviewState: 'REQUEST_CHANGES', defaultUserApproved: false }),
+    options,
+  );
+  assert.ok(control.failures.includes('task-status'), 'control: without override task-status still fails');
+  assert.ok(control.failures.includes('pr-approval'), 'control: without override pr-approval still fails');
+});
+
+// R6 — stale `active` with no sufficient Review facts and no override: recovery
+// stops with an actionable error and the Mission is not `done`. No Git/PR/
+// task-text inference is allowed to fill the gap.
+test('R6: stale active without Review facts and without override stops — Mission not done', async () => {
+  const state = { status: 'active', assignee: 'codex' };
+  const transitionCalls = [];
+  const missionServices = {
+    store: { async load() { return { kind: 'found', mission: state, version: 7 }; } },
+    lifecycle: { async transition(request) { transitionCalls.push(request); return { status: 'completed' }; } },
+  };
+  const context = {
+    slug: 'task-2376',
+    approval: { ok: true, reviewState: 'REQUEST_CHANGES', defaultUserApproved: false },
+  };
+
+  await assert.rejects(
+    () => recoverMissionForIntegration(context, { missionServices }),
+    error => error.constructor.name === 'IntegrationAbort',
+  );
+  assert.equal(transitionCalls.length, 0, 'no transition is invented without authoritative facts');
+  assert.equal(state.status, 'active', 'Mission is not done');
 });
 
 // R7 — `review` without an authoritative approval and no override: recovery

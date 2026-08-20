@@ -154,7 +154,6 @@ test('deriveImplementerAndFixRounds counts fix rounds from reviewEvents (task-23
   );
 
   try {
-    // @ts-expect-error -- TASK-2328: runtime-only property/partial test double absent from the inferred type.
     const info = await stats._internals.deriveImplementerAndFixRounds(
       'task-2347.10-repro',
       root,
@@ -232,7 +231,6 @@ test('deriveImplementerAndFixRounds counts two fix rounds from reviewEvents (tas
   );
 
   try {
-    // @ts-expect-error -- TASK-2328: runtime-only property/partial test double absent from the inferred type.
     const info = await stats._internals.deriveImplementerAndFixRounds(
       'task-2347.10-two-rounds',
       root,
@@ -276,7 +274,6 @@ test('deriveImplementerAndFixRounds returns 0 for approved-first-time mission (t
   );
 
   try {
-    // @ts-expect-error -- TASK-2328: runtime-only property/partial test double absent from the inferred type.
     const info = await stats._internals.deriveImplementerAndFixRounds(
       'task-2347.10-approved-first',
       root,
@@ -305,7 +302,6 @@ test('deriveImplementerAndFixRounds returns unknown when no reviewEvents and no 
   );
 
   try {
-    // @ts-expect-error -- TASK-2328: runtime-only property/partial test double absent from the inferred type.
     const info = await stats._internals.deriveImplementerAndFixRounds(
       'task-2347.10-unknown',
       root,
@@ -315,7 +311,7 @@ test('deriveImplementerAndFixRounds returns unknown when no reviewEvents and no 
     // When review aggregate exists but has no fix-round signal (no events, no decisions),
     // it should report prFixRounds as null/unknown rather than confident 0.
     assert.ok(
-      info.prFixRounds === null || info.prFixRounds === undefined || info.prFixRounds === 'unknown',
+      info.prFixRounds === null || info.prFixRounds === undefined,
       `must report unknown, got: ${info.prFixRounds}`,
     );
   } finally {

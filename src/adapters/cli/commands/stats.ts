@@ -268,26 +268,21 @@ async function readMissionFlowPopulation(options: {
  * Infrastructure implementation supplied to the application workflow.
  *
  * `missionStore` is the operator Mission authority the stats derivation reads
- * the authoritative Review aggregate from (TASK-2378). The composition root
- * resolves and passes it; callers without store access pass `null` explicitly
- * and get the invariant error from `deriveImplementerAndFixRounds` instead of
- * fabricated values when the method is invoked.
+ * the authoritative Review aggregate from (TASK-2378). It is required: a
+ * caller that cannot supply the operator store has a wiring defect, not a
+ * missing-data condition — there is no store-less adapter form (SC13).
  */
-export function createStatsWorkflowAdapter(missionStore: MissionStore | null): StatsWorkflowPort<StatsRow> {
+export function createStatsWorkflowAdapter(missionStore: MissionStore): StatsWorkflowPort<StatsRow> {
   return {
     loadMeasurements: (options) => loadMeasurementRows(options as StatsOptions).rows,
     resolveClassification: (slug, options) => resolveMissionClassification(slug, String(options.rootDir || process.cwd())),
-    // A null store is not a missing-data condition: it is a wiring defect. The
-    // invariant error is raised inside deriveImplementerAndFixRounds when the
-    // method is actually invoked, so the adapter defers the check there.
-    //
     // No `px stats` render path calls this method: the rendered rows are the
     // measurement rows `recordIntegrationStats` wrote at integrate time, which
     // is where the authoritative derivation already happened. It stays on the
     // port because the derivation is the port's contract — do not "fix" the
     // render path to derive per row, which would re-derive at read time from a
     // Mission whose Review has since advanced.
-    deriveImplementerAndFixRounds: (slug, options) => deriveImplementerAndFixRounds(slug, String(options.rootDir || process.cwd()), missionStore as MissionStore),
+    deriveImplementerAndFixRounds: (slug, options) => deriveImplementerAndFixRounds(slug, String(options.rootDir || process.cwd()), missionStore),
     resolveRepositoryName: (options) => resolveStatsRepoName(String(options.rootDir || process.cwd())),
     lookupForgejo: (slug, options) => forgejo.getPrStatus(slug, String(options.rootDir || process.cwd())),
   };
@@ -944,52 +939,11 @@ export function createStatsCommand(useCase: StatsCommandUseCase<StatsRow>) {
   };
 }
 
-// Legacy module-level default: this command object is consumed for helpers
-// that do not derive (classification, stage stats). Derivation through it
-// throws the invariant error — the production `px stats` wiring resolves the
-// operator store in the composition root instead.
-const stats = createStatsCommand(new StatsCommandUseCase(createStatsWorkflowAdapter(null)));
-
-export default stats;
-export { stats, statsCohorts, STATS_HEADERS, USAGE_NUMBERS, VALID_CLASSIFICATIONS, normalizeStatsRow, normalizeImplementer, parseDateOnly, parseDateOnlyStrict, formatDateOnly, parseToday, createWindow, createRangeWindow, buildWeeklyWindows, canonicalizeStatsRow, sameStatsIdentity, accumulateIntegerStrings, accumulateDecimalStrings, mergeLabel, parseBooleanish, normalizeRow, normalizeRows, statsMissionKey, modelBelongsToImplFamily, isValidClassification, normalizeClassification, rowInWindow, resolveStatsRepoName, recordIntegrationStats, renderWeeklyStatsReport, renderMissionPhaseReport, renderRangeStatsReport, resolveMissionClassification, deriveImplementerAndFixRounds, upsertMeasurementRow, loadMeasurementRows, measurementToStatsRow, statsRowToMeasurement, recordStageStats, accumulateStageStats, defaultPrFixRounds, recordActiveStats, recordReviewStats, telemetryToStatsFields, formatStatsTable, computeAgentMissionGroups, summarizeMissionWindow, summarizeAgentWindow, summarizeAgentStageSpend, formatAgentSpendCell, colorAverageFixRounds, colorMissionCounts, AGENT_SPEND_STAGE_COLUMNS, MISSION_PHASE_ORDER, statsRowActorKey };
-
-(stats as any).statsCohorts = statsCohorts;
-(stats as any).STATS_HEADERS = STATS_HEADERS;
-(stats as any).resolveStatsRepoName = resolveStatsRepoName;
-(stats as any).recordIntegrationStats = recordIntegrationStats;
-(stats as any).renderWeeklyStatsReport = renderWeeklyStatsReport;
-(stats as any).renderMissionPhaseReport = renderMissionPhaseReport;
-(stats as any).renderRangeStatsReport = renderRangeStatsReport;
-(stats as any).buildWeeklyWindows = buildWeeklyWindows;
-(stats as any).resolveMissionClassification = resolveMissionClassification;
-(stats as any).deriveImplementerAndFixRounds = deriveImplementerAndFixRounds;
-(stats as any).upsertMeasurementRow = upsertMeasurementRow;
-(stats as any).loadMeasurementRows = loadMeasurementRows;
-(stats as any).measurementToStatsRow = measurementToStatsRow;
-(stats as any).statsRowToMeasurement = statsRowToMeasurement;
-(stats as any).normalizeStatsRow = normalizeStatsRow;
-(stats as any).canonicalizeStatsRow = canonicalizeStatsRow;
-(stats as any).recordStageStats = recordStageStats;
-(stats as any).accumulateStageStats = accumulateStageStats;
-(stats as any).recordActiveStats = recordActiveStats;
-(stats as any).recordReviewStats = recordReviewStats;
-(stats as any).telemetryToStatsFields = telemetryToStatsFields;
-(stats as any).formatDateOnly = formatDateOnly;
-(stats as any).formatStatsTable = formatStatsTable;
-(stats as any).computeAgentMissionGroups = computeAgentMissionGroups;
-(stats as any).createRangeWindow = createRangeWindow;
-(stats as any).summarizeMissionWindow = summarizeMissionWindow;
-(stats as any).summarizeAgentWindow = summarizeAgentWindow;
-(stats as any).summarizeAgentStageSpend = summarizeAgentStageSpend;
-(stats as any).formatAgentSpendCell = formatAgentSpendCell;
-(stats as any).colorAverageFixRounds = colorAverageFixRounds;
-(stats as any).colorMissionCounts = colorMissionCounts;
-(stats as any).AGENT_SPEND_STAGE_COLUMNS = AGENT_SPEND_STAGE_COLUMNS;
-(stats as any).MISSION_PHASE_ORDER = MISSION_PHASE_ORDER;
-(stats as any).statsRowActorKey = statsRowActorKey;
-(stats as any).createWindow = createWindow;
-(stats as any).USAGE_NUMBERS = USAGE_NUMBERS;
-(stats as any)._internals = {
+// Module-level helper namespace (not a command): consumers use it for helpers
+// that do not derive (classification, stage stats). The production `px stats`
+// command is built in the composition root with the operator MissionStore
+// (TASK-2378/SC13) — no store-less workflow adapter exists at module level.
+const _internals = {
   generateMarkdownReport,
   normalizeRow,
   normalizeRows,
@@ -1008,3 +962,46 @@ export { stats, statsCohorts, STATS_HEADERS, USAGE_NUMBERS, VALID_CLASSIFICATION
   colorMissionCounts,
   printStatsUsage,
 };
+
+const stats = {
+  statsCohorts,
+  STATS_HEADERS,
+  resolveStatsRepoName,
+  recordIntegrationStats,
+  renderWeeklyStatsReport,
+  renderMissionPhaseReport,
+  renderRangeStatsReport,
+  buildWeeklyWindows,
+  resolveMissionClassification,
+  deriveImplementerAndFixRounds,
+  upsertMeasurementRow,
+  loadMeasurementRows,
+  measurementToStatsRow,
+  statsRowToMeasurement,
+  normalizeStatsRow,
+  canonicalizeStatsRow,
+  recordStageStats,
+  accumulateStageStats,
+  recordActiveStats,
+  recordReviewStats,
+  telemetryToStatsFields,
+  formatDateOnly,
+  formatStatsTable,
+  computeAgentMissionGroups,
+  createRangeWindow,
+  summarizeMissionWindow,
+  summarizeAgentWindow,
+  summarizeAgentStageSpend,
+  formatAgentSpendCell,
+  colorAverageFixRounds,
+  colorMissionCounts,
+  AGENT_SPEND_STAGE_COLUMNS,
+  MISSION_PHASE_ORDER,
+  statsRowActorKey,
+  createWindow,
+  USAGE_NUMBERS,
+  _internals,
+};
+
+export default stats;
+export { stats, _internals, statsCohorts, STATS_HEADERS, USAGE_NUMBERS, VALID_CLASSIFICATIONS, normalizeStatsRow, normalizeImplementer, parseDateOnly, parseDateOnlyStrict, formatDateOnly, parseToday, createWindow, createRangeWindow, buildWeeklyWindows, canonicalizeStatsRow, sameStatsIdentity, accumulateIntegerStrings, accumulateDecimalStrings, mergeLabel, parseBooleanish, normalizeRow, normalizeRows, statsMissionKey, modelBelongsToImplFamily, isValidClassification, normalizeClassification, rowInWindow, resolveStatsRepoName, recordIntegrationStats, renderWeeklyStatsReport, renderMissionPhaseReport, renderRangeStatsReport, resolveMissionClassification, deriveImplementerAndFixRounds, upsertMeasurementRow, loadMeasurementRows, measurementToStatsRow, statsRowToMeasurement, recordStageStats, accumulateStageStats, defaultPrFixRounds, recordActiveStats, recordReviewStats, telemetryToStatsFields, formatStatsTable, computeAgentMissionGroups, summarizeMissionWindow, summarizeAgentWindow, summarizeAgentStageSpend, formatAgentSpendCell, colorAverageFixRounds, colorMissionCounts, AGENT_SPEND_STAGE_COLUMNS, MISSION_PHASE_ORDER, statsRowActorKey };

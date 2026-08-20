@@ -311,6 +311,31 @@ export function resolveBaseWorktree(slug: string, options: { rootDir?: string; g
 }
 
 /** @param {string} slug @param {{cwd?: string, gitFn?: Function}} [options] */
+/**
+ * Normalize a path reported by `git worktree list --porcelain` to the checkout
+ * it belongs to.
+ *
+ * Git derives the main worktree path from the common git dir by stripping a
+ * literal `/.git` suffix, so a repository whose git dir is named anything else
+ * (`.git-worktree`, for example) is reported as the git dir itself. Handing
+ * that path to `git -C <path> rebase` fails with "this operation must be run in
+ * a work tree", so walk up one level when the reported path is not one.
+ */
+function workTreeRootFor(candidate: string, runGit: Function): string {
+  const isWorkTree = (dir: string) => {
+    try {
+      const result = runGit(['-C', dir, 'rev-parse', '--is-inside-work-tree']);
+      return result.status === 0 && String(result.stdout || '').trim() === 'true';
+    } catch (_) {
+      return false;
+    }
+  };
+  if (isWorkTree(candidate)) {return candidate;}
+  const parent = path.dirname(candidate);
+  if (parent !== candidate && isWorkTree(parent)) {return parent;}
+  return candidate;
+}
+
 export function resolveWorktree(slug: string, options: { cwd?: string; gitFn?: Function | null } = {}): string | null {
   const cwd = options.cwd || process.cwd();
   /** @type {Function | null} */
@@ -341,7 +366,7 @@ export function resolveWorktree(slug: string, options: { cwd?: string; gitFn?: F
 
     if (current && current.branch === branchRef) {matches.push(current);}
 
-    const liveMatches = matches.filter(m => !m.prunable);
+    const liveMatches = matches.filter(m => !m.prunable).map(m => ({ ...m, path: workTreeRootFor(m.path, runGit) }));
     if (liveMatches.length > 0) {
       const cwdMatch = liveMatches.find(m => cwd === m.path || cwd.startsWith(m.path + '/'));
       if (cwdMatch) {return cwdMatch.path;}
