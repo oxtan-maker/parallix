@@ -6,9 +6,7 @@ assignee: [codex]
 created_date: '2026-08-20 19:10'
 labels:
   - bug
-  - agents
-  - security
-  - sandbox
+  - ai_sdlc
 dependencies: []
 references:
   - src/adapters/process/bubblewrap.ts
