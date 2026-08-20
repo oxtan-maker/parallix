@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import child_process from 'node:child_process';
 import { detectRebaseState, git, getCurrentBranch } from '../../git/git.js';
+import { isManifestVersionOnlyConflict, resolveManifestVersionDrift } from '../../git/manifest-version-drift.js';
 import { resolveTaskFile, getTaskStatus, setTaskStatus, completeTask, getTaskAssignee, getTaskClassification } from '../../backlog/backlog.js';
 import { toVirtual, toActual } from '../../config/state-map.js';
 import { getPrStatus, getLatestReviewDecision, syncMerged, readToken, resolveTokenFile, listOpenPrsForSlug } from '../../forgejo/forgejo.js';
@@ -361,6 +362,16 @@ async function integrate(args: string[], options: { missionServicesFn?: Function
       const conflictFiles = parseConflictFilesFromMergeOutput(conflictOutput);
       const backlogOnly = areAllBacklogOnlyConflicts(conflictFiles) && conflictFiles.length > 0;
 
+      // Manifest version drift (post-integrate self-update bump): the mission
+      // branch branched at an older version than the advancing `main`, so the
+      // probe conflicts purely on the version number. This is a known,
+      // auto-mergeable drift, not a real content conflict. The probe only gates
+      // here; the squash merge in Step 3 resolves it for real (see below).
+      if (isManifestVersionOnlyConflict(conflictFiles)) {
+        fmt.log.info('Manifest version drift detected (post-integrate self-update bump) — squash merge will take the newer version...');
+        proceedToSquash = true;
+      }
+
       if (backlogOnly) {
         fmt.log.info('Backlog-only conflicts detected — refreshing base branch and retrying probe merge...');
 
@@ -476,9 +487,16 @@ async function integrate(args: string[], options: { missionServicesFn?: Function
       }
       const squashResult = git(['-C', baseWorktree, 'merge', '--squash', branch]);
       if (squashResult.status !== 0) {
-        noisePatchState?.cleanup?.();
-        fmt.log.fail('Squash merge failed.');
-        throw new IntegrationAbort();
+        // Manifest version drift (post-integrate self-update bump): resolve by
+        // taking the newer version and continue to the closeout commit below.
+        const squashConflictFiles = parseConflictFilesFromMergeOutput([squashResult.stdout, squashResult.stderr].filter(Boolean).join('\n'));
+        if (isManifestVersionOnlyConflict(squashConflictFiles) && resolveManifestVersionDrift(baseWorktree, { gitRunner: git })) {
+          fmt.log.info('Squash manifest version drift resolved — continuing.');
+        } else {
+          noisePatchState?.cleanup?.();
+          fmt.log.fail('Squash merge failed.');
+          throw new IntegrationAbort();
+        }
       }
       if (noisePatchState?.patchPath) {
         const restoreNoiseResult = restoreNoisePatchAfterSquash(/** @type {string} */ (baseWorktree), noisePatchState.patchPath, { gitRunner: git });
