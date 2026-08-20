@@ -6,7 +6,7 @@ assignee: [codex]
 created_date: '2026-08-20 19:12'
 labels:
   - bug
-  - user_value
+  - ai_sdlc
   - agents
   - review
 dependencies: []
