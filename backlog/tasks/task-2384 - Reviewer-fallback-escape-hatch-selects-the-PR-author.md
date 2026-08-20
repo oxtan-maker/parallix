@@ -1,7 +1,7 @@
 ---
 id: TASK-2384
 title: Reviewer fallback escape hatch selects the PR author
-status: backlog
+status: refined
 assignee: [custom]
 created_date: '2026-08-20 19:12'
 labels:
