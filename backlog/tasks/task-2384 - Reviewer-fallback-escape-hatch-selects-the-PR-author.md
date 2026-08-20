@@ -6,6 +6,7 @@ assignee: [custom]
 created_date: '2026-08-20 19:12'
 labels:
   - bug
+  - user_value
   - agents
   - review
 dependencies: []
