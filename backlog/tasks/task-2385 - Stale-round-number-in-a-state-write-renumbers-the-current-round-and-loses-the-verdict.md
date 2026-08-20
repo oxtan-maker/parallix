@@ -6,8 +6,7 @@ assignee: [codex]
 created_date: '2026-08-20 19:14'
 labels:
   - bug
-  - review
-  - persistence
+  - user_value
 dependencies: []
 references:
   - src/adapters/review/review-state-mapping.ts
