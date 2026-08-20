@@ -2,7 +2,7 @@
 id: TASK-2384
 title: Self-review by the PR author dead-ends instead of escalating for approval
 status: backlog
-assignee: [custom]
+assignee: [codex]
 created_date: '2026-08-20 19:12'
 labels:
   - bug
