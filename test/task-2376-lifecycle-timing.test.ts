@@ -538,7 +538,6 @@ test('R10: first-pass approval yields known reviewFixRounds=0', async () => {
   await store.save(mission, null);
 
   try {
-    // @ts-expect-error -- TASK-2328: runtime-only property
     const info = await stats._internals.deriveImplementerAndFixRounds(slug, root, store);
     assert.equal(info.source, 'review-aggregate');
     assert.equal(info.implementer, 'configured-implementer');
@@ -620,7 +619,6 @@ test('R11: two request-changes cycles yield known reviewFixRounds=2', async () =
   await store.save(mission, null);
 
   try {
-    // @ts-expect-error -- TASK-2328: runtime-only property
     const info = await stats._internals.deriveImplementerAndFixRounds(slug, root, store);
     assert.equal(info.source, 'review-aggregate');
     assert.equal(info.prFixRounds, 2, 'two request-changes = known 2');
@@ -707,7 +705,6 @@ test('R12: external artifacts with misleading values do not affect authoritative
   await store.save(mission, null);
 
   try {
-    // @ts-expect-error -- TASK-2328: runtime-only property
     const info = await stats._internals.deriveImplementerAndFixRounds(slug, root, store);
     assert.equal(info.source, 'review-aggregate');
     assert.equal(info.implementer, 'terra', 'authoritative implementer wins over backlog codex');
@@ -749,7 +746,6 @@ test('R13: missing MissionStore cannot activate heuristic inference', async () =
   fs.writeFileSync(taskFile, '---\nid: TASK-2376-R13\nlabels: [ai_sdlc]\nassignee: [codex]\nstatus: done\n---\nReview round 3\n');
 
   try {
-    // @ts-expect-error -- TASK-2328: runtime-only property
     const deriveCall = stats._internals.deriveImplementerAndFixRounds(slug, root, null);
     await assert.rejects(
       deriveCall,

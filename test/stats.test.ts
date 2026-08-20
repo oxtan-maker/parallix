@@ -8,6 +8,15 @@ import path from 'path';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
 import { createRequire } from 'node:module';
 import { seedMissionDatabase } from './fixtures/review-state-db.js';
+import { createStatsCommand, createStatsWorkflowAdapter } from '../src/adapters/cli/commands/stats.js';
+import { StatsCommandUseCase } from '../src/application/stats-command-use-case.js';
+
+// Render-only `px stats` command: these tests exercise measurement-row reads
+// and never consult the Mission authority, so a store placeholder satisfies
+// the required wiring (SC13).
+const statsCommand = createStatsCommand(
+  new StatsCommandUseCase(createStatsWorkflowAdapter({})),
+);
 const _require = createRequire(import.meta.url);
 const stats = mockModule<typeof import('../src/adapters/cli/commands/stats.js')>('../src/adapters/cli/commands/stats.js', import.meta.url);
 const forgejo = mockModule<typeof import('../src/adapters/forgejo/forgejo.js')>('../src/adapters/forgejo/forgejo.js', import.meta.url);
@@ -357,7 +366,7 @@ test('stats command defaults to the shared PARALLIX_HOME database across target 
 
   try {
     process.env.PARALLIX_HOME = home;
-    stats.default(['--today', '2026-05-18'], {
+    statsCommand(['--today', '2026-05-18'], {
       rootDir: repoOne,
       log: line => logs.push(line),
       error: line => logs.push(`ERR:${line}`),
@@ -372,7 +381,7 @@ test('stats command defaults to the shared PARALLIX_HOME database across target 
     assert.doesNotMatch(output, /Loading CSV/);
 
     const secondLogs = [];
-    stats.default(['--today', '2026-05-18'], {
+    statsCommand(['--today', '2026-05-18'], {
       rootDir: repoTwo,
       log: line => secondLogs.push(line),
       error: line => secondLogs.push(`ERR:${line}`),
@@ -589,13 +598,13 @@ test('stats command exits non-zero and prints date-range diagnostics for invalid
   const logs = [];
   const exits = [];
 
-  stats.default(['--from', '2026-05-01'], {
+  statsCommand(['--from', '2026-05-01'] , {
     log: line => logs.push(line),
     error: line => logs.push(`ERR:${line}`),
     exit: code => exits.push(code),
   });
 
-  stats.default(['--from', '2026-06-01', '--to', '2026-05-31'], {
+  statsCommand(['--from', '2026-06-01', '--to', '2026-05-31'], {
     log: line => logs.push(line),
     error: line => logs.push(`ERR:${line}`),
     exit: code => exits.push(code),
@@ -610,7 +619,7 @@ test('stats command exits non-zero and prints date-range diagnostics for invalid
 test('stats command help documents the pre-integration preview workflow', () => {
   const logs = [];
 
-  stats.default(['--help'], {
+  statsCommand(['--help'], {
     log: line => logs.push(line),
     error: line => logs.push(`ERR:${line}`),
     exit: code => {
@@ -797,7 +806,7 @@ test('task-1314: stats mission reports filter to the active repo', () => {
     }, { dbPath });
 
     const logs = [];
-    stats.default(['--mission', 'task-alpha'], {
+    statsCommand(['--mission', 'task-alpha'], {
       rootDir: root,
       dbPath,
       log: line => logs.push(line),

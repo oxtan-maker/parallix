@@ -226,7 +226,7 @@ test('review loop treats a pre-review rebase gate failure as a gate failure, not
   const gateOutput = GATE_OUTPUT_WITH_PRE_PUSH;
   const logs: string[] = [];
   const exits: number[] = [];
-  let hookBounces = 0;
+  let preReviewBounces = 0;
   let reviewerLaunches = 0;
 
   await startReviewLoop(SLUG, {
@@ -264,7 +264,10 @@ test('review loop treats a pre-review rebase gate failure as a gate failure, not
       },
     }),
     runPreReviewGateFn: async () => ({ ok: true, area: 'lib', command: 'true', exitCode: 0, stdout: '', stderr: '' }),
-    handleGateFailureAutoBounceFn: async () => { hookBounces += 1; return { bounced: false, stranded: true }; },
+    reboundPreReviewFailureFn: async () => {
+      preReviewBounces += 1;
+      return { bounced: false, stranded: true, outcome: 'human-only' as const, diagnostic: 'a gate failure must never reach the bounce path', implementer: 'codex' };
+    },
     startAgentFn: async (step: string, options: any) => {
       if (step === 'review') { reviewerLaunches += 1; }
       return { agent: options.agent, result: { status: 0 } } as any;
@@ -281,7 +284,7 @@ test('review loop treats a pre-review rebase gate failure as a gate failure, not
     exit: ((code: number) => { exits.push(code); }) as any,
   });
 
-  assert.equal(hookBounces, 0, 'a gate failure must not spend the hook-failure bounce');
+  assert.equal(preReviewBounces, 0, 'a gate failure must not spend the pre-review bounce path');
   assert.equal(reviewerLaunches, 0, 'no reviewer launches after a failed pre-review rebase');
   assert.deepEqual(exits, [1], 'the loop exits on the gate failure');
   assert.ok(

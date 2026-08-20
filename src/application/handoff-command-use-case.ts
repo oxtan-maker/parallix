@@ -606,6 +606,11 @@ export class HandoffCommandUseCase {
       remainingRetries,
       runGatekeeperFn = ports.gatekeeper.runGatekeeper,
       captureNelFn,
+      // TASK-2379 review round 1 (F1): lifecycle recovery re-invokes this
+      // operation for a review that actually entered earlier; the caller
+      // then passes the authoritative entry timestamp. A genuine handoff
+      // passes nothing and keeps the wall clock — the handoff happens now.
+      occurredAt = new Date().toISOString(),
       missionServicesFn = ports.missionServices,
       eligibleAgentsForStepFn = ports.agentSelection.eligibleAgentsForStep,
       selectAgentFn = ports.agentSelection.selectAgent
@@ -916,6 +921,7 @@ export class HandoffCommandUseCase {
         runVerificationGateFn,
         runGatekeeperFn,
         missionServicesFn,
+        occurredAt,
       });
     }
 
@@ -997,7 +1003,7 @@ export class HandoffCommandUseCase {
     // A review with no round carries no change identity to advance, so it is
     // treated as no review at all rather than read for a current round.
     const priorReview = loadedReview && loadedReview.rounds?.length > 0 ? loadedReview : null;
-    const startedAt = new Date().toISOString();
+    const startedAt = occurredAt;
     const review = priorReview
       ? (reviewStatus(priorReview) === 'ready-for-next-round'
         ? beginNextReviewRound(priorReview, reviewer, implementer, startedAt, reviewerEligibility)
@@ -1033,7 +1039,7 @@ export class HandoffCommandUseCase {
         reviewerEligibility,
       },
       actor: reviewer,
-      occurredAt: new Date().toISOString(),
+      occurredAt,
       // Stable across relaunches so the lane-event UNIQUE constraint deduplicates
       // a retried handoff instead of recording a second entry per attempt.
       idempotencyKey: `handoff-${slug}`,
@@ -1152,6 +1158,7 @@ export class HandoffCommandUseCase {
       gatekeeperResult, rootDir, forgejoUser, currentAttempt, log, error,
       attemptAgentRelaunchFn, worktree, skipGate, forceWithLease,
       isForgejoReviewEnabledFn, rebaseFn, runVerificationGateFn, runGatekeeperFn, missionServicesFn,
+      occurredAt,
     } = context;
     let retriesLeft = context.retriesLeft;
 
@@ -1206,6 +1213,7 @@ export class HandoffCommandUseCase {
           error,
           maxAttempts: currentAttempt + 1,
           remainingRetries: retriesLeft - 1,
+          occurredAt,
         });
         if (retryResult.ok) {
           log('Handoff succeeded after agent relaunch.');

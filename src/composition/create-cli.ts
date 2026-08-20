@@ -227,10 +227,10 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
     // read command must not mutate the store (round-1 review F1; the
     // tarball reinstall preservation test pins this). Missions not yet
     // imported derive as no-review unknown — the parent behavior.
-    stats: (args, options) => withGraph(services =>
-      createStatsCommand(new StatsCommandUseCase(createStatsWorkflowAdapter(services.mission?.store ?? null)))(args, options),
-      { skipImportGate: true },
-    ),
+    stats: (args, options) => withGraph(services => {
+      if (!services.mission) { throw new Error('mission services are unavailable'); }
+      return createStatsCommand(new StatsCommandUseCase(createStatsWorkflowAdapter(services.mission.store)))(args, options);
+    }, { skipImportGate: true }),
     status: (args, options) => withGraph(services => {
       const board = createStatusBoardAdapter({
         buildProjectionFn: async () => {
@@ -459,7 +459,7 @@ export async function run(argv = process.argv.slice(2), options: RunOptions = {}
       const services = await createProductionApplicationServices(parsed.target);
       try {
         if (!services.mission) { throw new Error('mission services are unavailable'); }
-        const result = await bindReviewPersistence(services.mission.store).createEvent(
+        const result = await bindReviewPersistence(services.mission.store, services.mission.lifecycle).createEvent(
           eventArgs.slug,
           eventArgs.type || '',
           {

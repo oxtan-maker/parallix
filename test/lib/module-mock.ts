@@ -50,16 +50,16 @@ const pending: PendingRegistration[] = [];
 const installed = new Map<string, ModuleState>();
 let freshCounter = 0;
 
-function isClass(value: unknown): value is new (...args: unknown[]) => unknown {
+function isClass(value: unknown): value is new (..._args: unknown[]) => unknown {
   return typeof value === 'function'
     && /^class[\s{]/.test(Function.prototype.toString.call(value));
 }
 
 function buildClassFacade(state: ModuleState, key: string): unknown {
-  const original = state[key] as new (...args: unknown[]) => unknown;
+  const original = state[key] as new (..._args: unknown[]) => unknown;
   return new Proxy(original, {
     construct: (_target, args, newTarget) =>
-      Reflect.construct(state[key] as new (...a: unknown[]) => unknown, args, newTarget),
+      Reflect.construct(state[key] as new (..._a: unknown[]) => unknown, args, newTarget),
     get(target, prop, receiver) {
       const descriptor = Object.getOwnPropertyDescriptor(target, prop);
       // Proxy invariants forbid reporting a different value for a
@@ -86,12 +86,12 @@ function buildFacade(state: ModuleState): Record<string, unknown> {
       facade[key] = buildClassFacade(state, key);
     } else if (typeof state[key] === 'function') {
       const delegated = function delegated(this: unknown, ...args: unknown[]): unknown {
-        return (state[key] as (...callArgs: unknown[]) => unknown).apply(this, args);
+        return (state[key] as (..._callArgs: unknown[]) => unknown).apply(this, args);
       };
-      // Callable exports frequently carry helpers as own properties (the
-      // `export default stats` object in stats.ts, `_internals` bags, and the
-      // like). The delegate must expose them, and expose them live, so a later
-      // `mock.method(handle, ...)` on the underlying function is observed.
+      // Callable exports frequently carry helpers as own properties
+      // (`_internals` bags and the like). The delegate must expose them, and
+      // expose them live, so a later `mock.method(handle, ...)` on the
+      // underlying function is observed.
       for (const prop of Object.keys(state[key] as object)) {
         Object.defineProperty(delegated, prop, {
           configurable: true,
@@ -110,6 +110,22 @@ function buildFacade(state: ModuleState): Record<string, unknown> {
         });
       }
       facade[key] = delegated;
+    } else if (key === 'default' && state[key] !== null && typeof state[key] === 'object') {
+      // Object default exports (the `export default stats` helper namespace in
+      // stats.ts) carry the same helpers as the named exports. Route property
+      // reads and writes through the module state so production seams like
+      // `(stats as any).recordIntegrationStats` observe `mock.method(handle, ...)`
+      // exactly like the callable-default form they replaced.
+      const target = state[key] as Record<string | symbol, unknown>;
+      facade[key] = new Proxy(target, {
+        get: (_target, prop) => (typeof prop === 'string' && prop in state
+          ? state[prop]
+          : Reflect.get(target, prop)),
+        set: (_target, prop, value) => {
+          if (typeof prop === 'string' && prop in state) { state[prop] = value; return true; }
+          return Reflect.set(target, prop, value);
+        },
+      });
     } else {
       facade[key] = state[key];
     }
@@ -151,8 +167,10 @@ export async function installModuleMocks(): Promise<void> {
     // Mirror properties from the default export onto the facade so that
     // CJS-style patterns like `module._internals` (where _internals is
     // attached to the default export) work identically to the ESM namespace
-    // proxy that module-mock produces.
-    if (initial.default != null && typeof initial.default === 'function') {
+    // proxy that module-mock produces. Object default exports (helper
+    // namespaces such as stats.ts's `export default stats`) are included so
+    // their properties route through the same state as the named exports.
+    if (initial.default !== null && initial.default !== undefined && (typeof initial.default === 'function' || typeof initial.default === 'object')) {
       for (const key of Object.keys(initial.default)) {
         if (!(key in entry.state)) {
           entry.state[key] = (initial.default as unknown as Record<string, unknown>)[key];
