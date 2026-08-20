@@ -1,7 +1,7 @@
 ---
 id: TASK-2384
-title: Reviewer fallback escape hatch selects the PR author
-status: refined
+title: Self-review by the PR author dead-ends instead of escalating for approval
+status: backlog
 assignee: [custom]
 created_date: '2026-08-20 19:12'
 labels:
@@ -11,11 +11,10 @@ labels:
   - review
 dependencies: []
 references:
+  - src/adapters/review/review-artifacts.ts
   - src/adapters/agents/agents.ts
   - src/adapters/review/review-agent-fallback.ts
-  - src/adapters/review/review-artifacts.ts
   - src/application/handoff-command-use-case.ts
-  - test/agents.test.ts
 priority: high
 ordinal: 101917
 ---
@@ -23,27 +22,31 @@ ordinal: 101917
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-When the reviewer agent pool is exhausted, the launcher re-admits the excluded implementer and runs it as reviewer of its own pull request. The review then executes in full and is thrown away at the last step, because the provider refuses a self-approval.
+When every other agent family is genuinely unavailable, the launcher's single-family escape hatch (`src/adapters/agents/agents.ts:343-347`) lets the implementer review its own work. That behavior is intended and stays: a self-review with no formal approval is worth more than a stalled mission.
 
-Path: reviewer selection correctly excludes the implementer (`src/adapters/review/review-agent-fallback.ts:396`, `src/application/handoff-command-use-case.ts:139`). That exclusion is passed to `startAgent` as `exclude`, which seeds the `tried` set. On pool exhaustion, `startAgent` deliberately reaches back into the excluded set (`src/adapters/agents/agents.ts:343-347`, "single-family escape hatch") and launches an excluded family anyway. Nothing at that point knows the excluded family is the PR author.
+What is broken is the ending. The reviewer runs, writes findings/outcome/verdict, posts a PR comment, and then the provider POST is skipped because Forgejo rejects a self-approval:
 
-Observed on mission task-2377.05, review round 2 (operator log, 2026-08-20T18:4xZ): claude was blocked by a stale-session failure (TASK-2380), codex/qwen/vibe all failed to start under the review sandbox (TASK-2383), the pool emptied, and the escape hatch selected `custom` — the mission's own implementer and PR author. The review ran to completion, wrote all three artifacts, posted a PR comment, and then:
+`[WARN] Reviewer "custom" is the PR author for mission/task-2377.05; skipping the provider review POST to avoid a self-approval (Forgejo rejects "approve your own pull is not allowed" with HTTP 422). Recording the "approve" verdict locally in the SQLite Review aggregate; a different agent or a human must post the formal approval.`
 
-`[WARN] Reviewer "custom" is the PR author for mission/task-2377.05; skipping the provider review POST to avoid a self-approval (Forgejo rejects "approve your own pull is not allowed" with HTTP 422).`
+That message names the requirement — "a different agent or a human must post the formal approval" — but nothing carries it forward. The mission is left in the review lane with an approved-in-fact review, no provider approval, and no escalation, request, or queue entry telling anyone the approval is owed. Observed on mission task-2377.05, round 2 (operator log, 2026-08-20T18:51Z).
 
-The self-author guard in `src/adapters/review/review-artifacts.ts:288` is correct as a last line of defence, but it fires after a full review has been spent. The escape hatch should not select a family that authored the change under review; when no other family can run, the mission needs a human, not a review that cannot be published.
+Two supporting problems in the same path:
 
-Scope note: the single-family escape hatch has legitimate uses for non-review steps and for changes with no provider author conflict. Do not delete it wholesale — make it author-aware for the review step.
+1. The self-author condition is discovered only at POST time, after a full review has been spent. It is knowable at reviewer-selection time, where the operator could be told up front that this round will need a human approval.
+2. The escape hatch fired here for the wrong reason: claude was blocked by a stale-session failure (TASK-2380) and codex/qwen/vibe could not start under the review sandbox (TASK-2383). Those are separate tasks — but the "all other families are blocked for real" precondition should be reported with the per-family reason, so a spurious exhaustion is visible in the log rather than indistinguishable from a real one.
+
+Scope note: do not remove or gate the escape hatch, and do not make the PR author ineligible as reviewer. The mission is to make the self-review outcome a first-class, visible state that a human or another agent can act on.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The pool-exhaustion escape hatch in `startAgent` never selects a family that authored the change under review for the `review` step
-- [ ] #2 When no non-author family can run the review step, the workflow stops with an explicit human-escalation message naming why each candidate family was unavailable, instead of launching an unpublishable review
-- [ ] #3 The escape hatch's existing behavior for non-review steps is unchanged
-- [ ] #4 The self-author guard in `src/adapters/review/review-artifacts.ts` stays in place as a defence in depth
-- [ ] #5 Tests cover: exhausted pool with the PR author as the only candidate escalates rather than launching, and an exhausted pool at a non-review step still uses the escape hatch
-- [ ] #6 `./scripts/verify-local.sh static-analysis` and the affected unit suites pass
+- [ ] #1 The single-family escape hatch still selects the implementer as reviewer when no other family is runnable; self-review remains a supported outcome
+- [ ] #2 A self-review that cannot be posted to the provider leaves the mission in an explicit "approval owed" state rather than a silent stall: the pending formal approval is visible in `px status <slug>`
+- [ ] #3 The operator is told at reviewer-selection time, before the review runs, that the selected reviewer authored the PR and the round will need an external approval
+- [ ] #4 The escape-hatch log names why each other family was unavailable, so a spurious exhaustion is distinguishable from a real one
+- [ ] #5 The locally recorded verdict remains recorded; this task does not change what a self-review verdict means for integration gating
+- [ ] #6 Tests cover: self-review verdict recorded and surfaced as approval-owed, the pre-launch self-author notice, and the escape hatch still firing when all other families are blocked
+- [ ] #7 `./scripts/verify-local.sh static-analysis` and the affected unit suites pass
 <!-- AC:END -->
 
 ## Definition of Done
