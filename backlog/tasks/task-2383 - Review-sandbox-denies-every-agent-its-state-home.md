@@ -1,7 +1,7 @@
 ---
 id: TASK-2383
 title: Review sandbox denies every agent its state home
-status: backlog
+status: refined
 assignee: [codex]
 created_date: '2026-08-20 19:10'
 labels:
