@@ -1,7 +1,7 @@
 ---
 id: TASK-2385
 title: Stale round number in a state write renumbers the current round and loses the verdict
-status: ready-for-integration
+status: done
 assignee: [custom]
 created_date: '2026-08-20 19:14'
 labels:
@@ -53,3 +53,26 @@ Likely source of the stale `1`: `recordLocalReviewVerdict` (`src/adapters/review
 - [ ] #5 Docs updated to reflect any workflow or user-facing behavior change
 - [ ] #6 Bug-labeled missions include a red-to-green reproduction test that fails before the fix and passes after
 <!-- DOD:END -->
+
+## Resolution (task-2385 mission)
+
+Fixed. A flattened review-state write carrying a round lower than the current
+round no longer renumbers an existing round, and verdict recording no longer
+fabricates `round: 1` on a review-state read miss.
+
+- Mapper guard: `applyReviewStateToReview` (`src/adapters/review/review-state-mapping.ts`)
+  throws before persistence when `state.round < current round`, naming both
+  numbers. Equal/higher round paths unchanged.
+- Read-miss fail-closed: `recordLocalReviewVerdict` (`src/adapters/review/review-artifacts.ts`)
+  throws when no review state can be read instead of constructing `round: 1`.
+- Repro + focused coverage: `test/task-2385-stale-review-round-repro.test.ts`
+  (red on parent `c2db7699c`, green after fix).
+- Recovery: `px status <slug>` to identify a stranded round, re-record the
+  dropped verdict via the corrected review path, confirm with `px status <slug>`;
+  `px review <slug> --reconcile-review` / `--backfill-review` for the adjacent
+  no-Review-aggregate states.
+- Gates: `./scripts/verify-local.sh static-analysis` and `all` both pass on node
+  >=22.23.1 (full suite 1948 pass, 0 fail). See `missions/task-2385/CP-1.md`,
+  `CP-2.md`, `CP-3.md`.
+
+<!-- RESOLUTION:END -->

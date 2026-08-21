@@ -9,7 +9,7 @@ import * as path from 'path';
 import * as fmt from '../../application/presentation/cli-format.js';
 import { missionBranchName, resolveWorktree } from '../filesystem/mission-utils.js';
 import { git } from '../git/git.js';
-import { readReviewState, writeReviewState, reviewStateFile, ReviewState, resolveReviewIdentity, persistReviewStateOrThrow } from './review-state.js';
+import { readReviewState, writeReviewState, reviewStateFile, ReviewState, resolveReviewIdentity, persistReviewStateOrThrow, type ReviewStateData } from './review-state.js';
 import {
   rebound,
   DEFAULT_REBOUND_ATTEMPTS,
@@ -23,14 +23,16 @@ import { createEvent, consumeHumanNotes, VALID_EVENT_TYPES, CreateEventParams, C
 import { parseReviewFindings, recordImplementerResolution, recordRequestedChanges } from './review-round.js';
 import type { MissionLifecycleService } from '../../application/mission-lifecycle-service.js';
 
-type CreateResult = { ok: boolean; path: string | null; error?: string | null; event?: Record<string, unknown> };
+type CreateResult = { ok: boolean; path: string | null; error?: string | null; event?: unknown };
+type CreateEventFn = (_s: string, _t: string, _p: Record<string, unknown>, _o: Record<string, unknown>) => CreateResult | Promise<CreateResult>;
+type ReviewStateReader = (_s: string, _r?: string, _store?: MissionStore | null) => ReviewState | ReviewStateData | null | Promise<ReviewState | ReviewStateData | null>;
 
 // ============================================================================
 // Metadata Footer
 // ============================================================================
 
-async function buildMetadataFooter(slug: string, rootDir = process.cwd()): Promise<string> {
-  const state = await readReviewState(slug, rootDir);
+async function buildMetadataFooter(slug: string, rootDir = process.cwd(), missionStore: MissionStore | null = null): Promise<string> {
+  const state = await readReviewState(slug, rootDir, missionStore);
   if (!state) { return ''; }
   return `\n\n---\n\`[workflow-round:${state.round}, workflow-phase:${state.phase}]\``;
 }
@@ -127,11 +129,12 @@ async function postWorkflowComment(
     error?: (_msg: string) => void;
     readTokenFn?: (_user: string, _opts: { rootDir?: string }) => string | null;
     postCommentFn?: (_branch: string, _token: string, _body: string, _opts?: Record<string, unknown>) => unknown;
-    buildMetadataFooterFn?: (_s: string, _r?: string) => string | Promise<string>;
-    readReviewStateFn?: (_s: string, _r?: string) => any;
+    buildMetadataFooterFn?: (_s: string, _r?: string, _store?: MissionStore | null) => string | Promise<string>;
+    readReviewStateFn?: ReviewStateReader;
     rootDir?: string;
     reviewIdentity?: string;
     forgejoUser?: string;
+    missionStore?: MissionStore | null;
   } = {}
 ): Promise<{ ok: boolean; error?: string }> {
   const log = options.log || fmt.log.plain;
@@ -144,7 +147,7 @@ async function postWorkflowComment(
   const branch = missionBranchName(slug, rootDir);
   const identityResolved = options.reviewIdentity
     || options.forgejoUser
-    || (await resolveReviewIdentity(slug, rootDir, { readReviewStateFn })).commentIdentityUser
+    || (await resolveReviewIdentity(slug, rootDir, { readReviewStateFn: readReviewStateFn as typeof readReviewState })).commentIdentityUser
     || 'human';
   const reviewIdentity = identityResolved;
   const token = readTokenFn(reviewIdentity, { rootDir });
@@ -153,7 +156,7 @@ async function postWorkflowComment(
     return { ok: false };
   }
 
-  const taggedMessage = message + await Promise.resolve(buildMetadataFooterFn(slug, rootDir));
+  const taggedMessage = message + await Promise.resolve(buildMetadataFooterFn(slug, rootDir, options.missionStore ?? null));
   log(fmt.status('INFO', `Posting PR comment on ${branch} as ${reviewIdentity}...`));
   const result = postCommentFn(branch, token, taggedMessage, { forgejoUser: reviewIdentity, reviewIdentity });
   const r = result as Record<string, unknown>;
@@ -195,11 +198,10 @@ async function recordLocalReviewVerdict(
   options: {
     worktree?: string;
     writeReviewStateFn?: typeof writeReviewState;
-    createEventFn?: (_s: string, _t: string, _p: Record<string, unknown>, _o: Record<string, unknown>) => CreateResult;
-    readReviewStateFn?: (_s: string, _r?: string) => any;
+    createEventFn?: CreateEventFn;
+    readReviewStateFn?: ReviewStateReader;
     log?: (_msg: string) => void;
     error?: (_msg: string) => void;
-    reviewer?: string;
     missionStore?: MissionStore | null;
   } = {}
 ): Promise<void> {
@@ -211,15 +213,19 @@ async function recordLocalReviewVerdict(
   const log = options.log || fmt.log.plain;
   const error = options.error || fmt.log.plainError;
 
-  const existing = await Promise.resolve(readReviewStateFn(slug, worktree));
+  const existing = await Promise.resolve(readReviewStateFn(slug, worktree, missionStore));
+  // TASK-2385: a read miss must not fabricate a round-1 verdict. The old
+  // `round: 1` fallback silently downgraded the round and fed the stale-round
+  // producer observed on task-2377.05. A verdict can only attach to a review
+  // `px handoff` started, so fail closed rather than invent one.
+  if (!existing) {
+    throw new Error(
+      `Cannot record review verdict for ${slug}: no review state found. A review must be started with \`px handoff\` before recording a verdict; refusing to fabricate round 1`,
+    );
+  }
   const state = existing instanceof ReviewState
     ? existing
-    : new ReviewState(slug, existing || {
-        reviewer: options.reviewer,
-        implementer: options.reviewer,
-        round: 1,
-        phase: 'reviewing',
-      });
+    : new ReviewState(slug, existing as ReviewStateData);
   if (outcome === 'approve') {
     state.disposition = 'APPROVED';
     try { state.transitionTo('approved'); } catch { /* ignore */ }
@@ -246,14 +252,14 @@ async function postWorkflowReview(
     error?: (_msg: string) => void;
     readTokenFn?: (_user: string, _opts: { rootDir?: string }) => string | null;
     postReviewFn?: (_branch: string, _token: string, _outcome: string, _body: string, _opts?: Record<string, unknown>) => unknown;
-    buildMetadataFooterFn?: (_s: string, _r?: string) => string | Promise<string>;
-    readReviewStateFn?: (_s: string, _r?: string) => any;
+    buildMetadataFooterFn?: (_s: string, _r?: string, _store?: MissionStore | null) => string | Promise<string>;
+    readReviewStateFn?: ReviewStateReader;
     worktree?: string;
     reviewIdentity?: string;
     forgejoUser?: string;
     getPrAuthorFn?: (_branch: string, _token: string, _opts?: Record<string, unknown>) => unknown;
     writeReviewStateFn?: typeof writeReviewState;
-    createEventFn?: (_s: string, _t: string, _p: Record<string, unknown>, _o: Record<string, unknown>) => CreateResult;
+    createEventFn?: CreateEventFn;
     missionStore?: MissionStore | null;
   } = {}
 ): Promise<{ ok: boolean; error?: string; skipped?: boolean; reason?: string; prAuthor?: unknown }> {
@@ -267,7 +273,7 @@ async function postWorkflowReview(
   const branch = missionBranchName(slug, worktree);
   const identityResolved = options.reviewIdentity
     || options.forgejoUser
-    || (await resolveReviewIdentity(slug, worktree, { readReviewStateFn })).identityUser
+    || (await resolveReviewIdentity(slug, worktree, { readReviewStateFn: readReviewStateFn as typeof readReviewState })).identityUser
     || 'human';
   const reviewIdentity = identityResolved;
   const missionStore = options.missionStore ?? null;
@@ -285,13 +291,12 @@ async function postWorkflowReview(
     prAuthor = null;
   }
   if (prAuthor && prAuthor === reviewIdentity) {
-    log(fmt.status('WARN', `Reviewer "${reviewIdentity}" is the PR author for ${branch}; skipping the provider review POST to avoid a self-approval (Forgejo rejects "approve your own pull is not allowed" with HTTP 422). Recording the "${outcome}" verdict locally in the SQLite Review aggregate; a different agent or a human must post the formal approval.`));
+    log(fmt.status('WARN', `Reviewer "${reviewIdentity}" is the PR author for ${branch}; skipping the provider review POST to avoid a self-approval (Forgejo rejects "approve your own pull is not allowed" with HTTP 422). Attempting to record the "${outcome}" verdict locally in the SQLite Review aggregate; a different agent or a human must post the formal approval.`));
     await recordLocalReviewVerdict(slug, outcome, {
       worktree,
-      reviewer: reviewIdentity,
       writeReviewStateFn: options.writeReviewStateFn,
       createEventFn: options.createEventFn,
-      readReviewStateFn,
+      readReviewStateFn: readReviewStateFn as typeof readReviewState,
       log: log,
       error,
       missionStore,
@@ -299,7 +304,7 @@ async function postWorkflowReview(
     return { ok: true, skipped: true, reason: 'self-author', prAuthor };
   }
 
-  const taggedMessage = message + await Promise.resolve(buildMetadataFooterFn(slug, worktree));
+  const taggedMessage = message + await Promise.resolve(buildMetadataFooterFn(slug, worktree, missionStore));
   log(fmt.status('INFO', `Submitting review outcome "${outcome}" on ${branch} as ${reviewIdentity}...`));
   const result = postReviewFn(branch, token, outcome, taggedMessage, { forgejoUser: reviewIdentity, reviewIdentity });
   const r = result as Record<string, unknown>;
@@ -334,9 +339,10 @@ async function consumeReviewerArtifacts(
     getCommentsFn?: (_branch: string, _token: string) => Promise<unknown[]>;
     postCommentFn?: (_branch: string, _token: string, _body: string, _opts?: Record<string, unknown>) => unknown;
     postReviewFn?: (_branch: string, _token: string, _outcome: string, _body: string, _opts?: Record<string, unknown>) => unknown;
-    buildMetadataFooterFn?: (_s: string, _r?: string) => string | Promise<string>;
+    getPrAuthorFn?: (_branch: string, _token: string, _opts?: Record<string, unknown>) => unknown;
+    buildMetadataFooterFn?: (_s: string, _r?: string, _store?: MissionStore | null) => string | Promise<string>;
     createEventFn?: (_s: string, _t: string, _p: CreateEventParams, _o: CreateEventOptions) => CreateEventResult | Promise<CreateEventResult>;
-    readReviewStateFn?: (_s: string, _r?: string) => any;
+    readReviewStateFn?: ReviewStateReader;
     writeReviewStateFn?: typeof writeReviewState;
     currentState?: { metadata?: Record<string, unknown> } | null;
     missionStore?: MissionStore | null;
@@ -402,7 +408,8 @@ async function consumeReviewerArtifacts(
     return { consumed: true, ok: false, diagnostic: `Reviewer artifacts incomplete: missing verdict` };
   }
 
-  const currentState = await Promise.resolve((options.readReviewStateFn || readReviewState)(slug, worktree));
+  const readReviewStateFn = options.readReviewStateFn || readReviewState;
+  const currentState = await Promise.resolve(readReviewStateFn(slug, worktree, options.missionStore ?? null));
   const round = currentState ? currentState.round : 1;
   const phase = currentState ? currentState.phase : 'reviewing';
 
@@ -456,6 +463,7 @@ async function consumeReviewerArtifacts(
       reviewIdentity: reviewer,
       worktree,
       writeReviewStateFn: options.writeReviewStateFn,
+      readReviewStateFn: readReviewStateFn as typeof readReviewState,
       currentState: options.currentState,
       log: log,
       error
@@ -469,6 +477,8 @@ async function consumeReviewerArtifacts(
       readTokenFn: options.readTokenFn,
       postCommentFn: options.postCommentFn,
       buildMetadataFooterFn: options.buildMetadataFooterFn,
+      readReviewStateFn,
+      missionStore: options.missionStore,
       log: log,
       error
     });
@@ -481,7 +491,10 @@ async function consumeReviewerArtifacts(
       reviewIdentity: reviewer,
       readTokenFn: options.readTokenFn,
       postReviewFn: options.postReviewFn,
+      getPrAuthorFn: options.getPrAuthorFn,
       buildMetadataFooterFn: options.buildMetadataFooterFn,
+      createEventFn: options.createEventFn,
+      readReviewStateFn,
       log: log,
       error,
       missionStore: options.missionStore,
@@ -860,4 +873,3 @@ export {
   consumeReviewerArtifacts,
   consumeImplementerArtifacts,
 };
-
