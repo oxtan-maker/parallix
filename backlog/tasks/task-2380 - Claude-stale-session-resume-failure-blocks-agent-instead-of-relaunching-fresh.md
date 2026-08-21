@@ -2,7 +2,7 @@
 id: TASK-2380
 title: Claude stale-session resume failure blocks agent instead of relaunching fresh
 status: backlog
-assignee: [codex]
+assignee: [custom]
 created_date: '2026-08-18 04:51'
 labels:
   - bug
