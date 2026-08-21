@@ -266,7 +266,7 @@ test('review loop treats a pre-review rebase gate failure as a gate failure, not
     runPreReviewGateFn: async () => ({ ok: true, area: 'lib', command: 'true', exitCode: 0, stdout: '', stderr: '' }),
     reboundPreReviewFailureFn: async () => {
       preReviewBounces += 1;
-      return { bounced: false, stranded: true, outcome: 'human-only' as const, diagnostic: 'a gate failure must never reach the bounce path', implementer: 'codex' };
+      return { bounced: false, stranded: true, attempts: 0, outcome: 'human-only' as const, diagnostic: 'a gate failure must never reach the bounce path', implementer: 'codex' };
     },
     startAgentFn: async (step: string, options: any) => {
       if (step === 'review') { reviewerLaunches += 1; }

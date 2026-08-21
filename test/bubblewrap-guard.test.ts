@@ -83,6 +83,99 @@ test('resolveSandboxProfile gives non-review steps a writable /tmp', () => {
   assert.deepEqual(resolveSandboxProfile('active', '/work/tree').optionalWritable, ['/tmp']);
 });
 
+// Review-profile launcher state homes (task-2383). The review profile must
+// grant each supported reviewer launcher its own state home while keeping the
+// mission worktree read-only. These fail at the mission parent commit because
+// the review writable set is only [artifactDir, /tmp].
+
+/**
+ * Run `fn` with HOME pointing at a throwaway dir, so no test touches the
+ * operator's home. The dir lives under the repo's git-ignored `.workflow/`
+ * rather than `os.tmpdir()`: a home under `/tmp` would be swallowed by the
+ * profile's optional `/tmp` bind and the writable-bind assertions would pass
+ * without exercising the bind at all.
+ */
+function withTempHome<T>(fn: (home: string) => T): T {
+  const previous = process.env.HOME;
+  const root = path.join(process.cwd(), '.workflow');
+  fs.mkdirSync(root, { recursive: true });
+  const home = fs.mkdtempSync(path.join(root, 'bwrap-home-'));
+  process.env.HOME = home;
+  try { return fn(home); }
+  finally {
+    if (previous === undefined) { delete process.env.HOME; } else { process.env.HOME = previous; }
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+}
+
+test('review profile grants each worktree-local launcher state home as a writable bind', () => {
+  const worktree = makeWorktree();
+  const artifactDir = makeWorktree();
+  try {
+    for (const family of ['codex', 'qwen', 'vibe'] as const) {
+      const profile = resolveSandboxProfile('review', worktree, artifactDir, family);
+      assert.equal(profile.worktreeWritable, false);
+      const home = path.join(worktree, '.workflow', `${family}-home`);
+      assert.ok(profile.writable.includes(home), `${family} state home ${home} must be writable`);
+      fs.mkdirSync(home, { recursive: true });
+      assert.doesNotThrow(() => fs.accessSync(home, fs.constants.W_OK), `${family} state home must be writable on disk`);
+    }
+  } finally { fs.rmSync(worktree, { recursive: true, force: true }); fs.rmSync(artifactDir, { recursive: true, force: true }); }
+});
+
+test('review profile grants claude the transcript directory named after the mangled worktree path', () => {
+  const worktree = makeWorktree();
+  const artifactDir = makeWorktree();
+  try {
+    withTempHome(home => {
+      const profile = resolveSandboxProfile('review', worktree, artifactDir, 'claude');
+      // Claude names the directory after the working directory, not the slug:
+      // /home/u/code/p -> -home-u-code-p.
+      const mangled = path.resolve(worktree).replace(/[^A-Za-z0-9]/g, '-');
+      const transcript = path.join(home, '.claude', 'projects', mangled);
+      assert.ok(profile.writable.includes(transcript), 'claude per-worktree transcript dir must be writable');
+      assert.ok(!profile.writable.some(dir => /projects\/task-/.test(dir)), 'transcript dir must not be derived from the mission slug');
+    });
+  } finally { fs.rmSync(worktree, { recursive: true, force: true }); fs.rmSync(artifactDir, { recursive: true, force: true }); }
+});
+
+test('review profile grants the custom family its configured runner state homes', () => {
+  const worktree = makeWorktree();
+  const artifactDir = makeWorktree();
+  try {
+    withTempHome(home => {
+      const profile = resolveSandboxProfile('review', worktree, artifactDir, 'custom');
+      // The default custom runner is opencode, which is host-home based.
+      assert.ok(
+        profile.writable.includes(path.join(home, '.local', 'share', 'opencode')),
+        `custom runner state home must be writable, got ${profile.writable.join(', ')}`
+      );
+      assert.ok(
+        !profile.writable.some(dir => dir.includes('custom-home')),
+        'custom must not bind a placeholder worktree directory no runner writes to'
+      );
+    });
+  } finally { fs.rmSync(worktree, { recursive: true, force: true }); fs.rmSync(artifactDir, { recursive: true, force: true }); }
+});
+
+test('review profile keeps the reviewed worktree read-only and binds no reviewed source', () => {
+  const worktree = makeWorktree();
+  const artifactDir = makeWorktree();
+  const reviewedSource = path.join(worktree, 'reviewed-source.md');
+  fs.writeFileSync(reviewedSource, '# under review');
+  try {
+    const profile = resolveSandboxProfile('review', worktree, artifactDir, 'codex');
+    const args = buildBubblewrapArgs(profile, worktree).join(' ');
+    // Worktree stays read-only so no reviewed source/config/test/doc/mission
+    // file inside it can be written.
+    assert.ok(args.includes(`--ro-bind ${worktree} ${worktree}`), 'worktree must be read-only');
+    // The reviewed source is inside the read-only worktree; it must never be
+    // rebound writable as a standalone bind.
+    assert.ok(!args.includes(`--bind ${reviewedSource} ${reviewedSource}`), 'reviewed source must not be bound writable');
+    assert.ok(!profile.writable.includes(reviewedSource), 'reviewed source must not be a writable bind');
+  } finally { fs.rmSync(worktree, { recursive: true, force: true }); fs.rmSync(artifactDir, { recursive: true, force: true }); }
+});
+
 test('buildBubblewrapArgs binds the worktree read-write for implementer steps', () => {
   const worktree = makeWorktree();
   try {
@@ -92,6 +185,20 @@ test('buildBubblewrapArgs binds the worktree read-write for implementer steps', 
     assert.ok(args.join(' ').includes(`--bind ${worktree} ${worktree}`));
     assert.deepEqual(args.slice(-3), ['--chdir', worktree, '--']);
   } finally { fs.rmSync(worktree, { recursive: true, force: true }); }
+});
+
+test('review profile buildBubblewrapArgs binds the claude transcript directory writable without widening the worktree', () => {
+  const worktree = makeWorktree();
+  const artifactDir = makeWorktree();
+  try {
+    withTempHome(home => {
+      const profile = resolveSandboxProfile('review', worktree, artifactDir, 'claude');
+      const args = buildBubblewrapArgs(profile, worktree).join(' ');
+      const transcript = path.join(home, '.claude', 'projects', path.resolve(worktree).replace(/[^A-Za-z0-9]/g, '-'));
+      assert.ok(args.includes(`--ro-bind ${worktree} ${worktree}`), 'worktree stays read-only');
+      assert.ok(args.includes(`--bind ${transcript} ${transcript}`), 'claude transcript dir gets an explicit writable bind');
+    });
+  } finally { fs.rmSync(worktree, { recursive: true, force: true }); fs.rmSync(artifactDir, { recursive: true, force: true }); }
 });
 
 test('buildBubblewrapArgs keeps review worktree read-only and binds an outside artifact directory', () => {

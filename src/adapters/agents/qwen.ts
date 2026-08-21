@@ -3,6 +3,7 @@ import { extractQwenTelemetry } from './qwen-telemetry.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { qwenHomeRoot as qwenStateHome } from '../config/state-homes.js';
 
 /**
  * Maximum acceptable age (in minutes) for a qwen session's start time
@@ -29,7 +30,7 @@ function resolveQwenWorktree(worktree?: string | null) {
 }
 
 function qwenHomeRoot(worktree: string) {
-  return path.join(resolveQwenWorktree(worktree), '.workflow', 'qwen-home');
+  return qwenStateHome(resolveQwenWorktree(worktree));
 }
 
 function qwenSettingsPath(worktree: string) {
