@@ -1,7 +1,7 @@
 ---
 id: TASK-2385
 title: Stale round number in a state write renumbers the current round and loses the verdict
-status: review
+status: ready-for-integration
 assignee: [custom]
 created_date: '2026-08-20 19:14'
 labels:
