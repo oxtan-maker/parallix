@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnAndTee } from '../process/spawn-tee.js';
 import { extractCodexTelemetry } from './codex-telemetry.js';
+import { codexHomeRoot } from '../config/state-homes.js';
 import type { SessionMarkerPort } from '../../application/domain-ports.js';
 import type { MissionId } from '../../domain/mission.js';
 import type { SessionRole } from '../../domain/session.js';
@@ -158,9 +159,6 @@ function startCodexDraftAgent({ prompt, worktree, env = {}, resume = false, sess
   return { invocation, resultPromise };
 }
 
-function codexHomeRoot(worktree: string) {
-  return path.join(worktree, '.workflow', 'codex-home');
-}
 
 function codexStateRoot(worktree: string) {
   return path.join(codexHomeRoot(worktree), '.codex');

@@ -59,7 +59,6 @@ function baseLoopOpts(overrides: Record<string, unknown> = {}): Record<string, u
     consumeReviewerArtifactsFn: async () => ({ consumed: false }),
     consumeImplementerArtifactsFn: async () => ({ consumed: false }),
     runPreReviewGateFn: async () => ({ ok: true, area: 'lib', command: 'echo ok', exitCode: 0, stdout: '', stderr: '' }),
-    handleGateFailureAutoBounceFn: async () => ({ bounced: false, stranded: false }),
     recordStageStatsSafeFn: () => {},
     ...overrides,
   };

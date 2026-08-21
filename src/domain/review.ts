@@ -377,9 +377,15 @@ function replaceCurrentRound(review: Review, round: ReviewRound): Review['rounds
 }
 
 export function reviewStatus(review: Review): ReviewStatus {
-  if (review.intervention) { return 'human-intervention'; }
   const round = currentReviewRound(review);
+  // An approved current round is terminal: the domain forbids requesting a
+  // human intervention on an already-approved review, so any intervention still
+  // present is a stale one from a superseded round. Reporting it here would let
+  // that stale flag block a legitimately approved review (approve transitions,
+  // integration). Approved wins over a stale intervention; a genuinely pending
+  // intervention only matters while the current round is still open.
   if (round.decision?.kind === 'approved') { return 'approved'; }
+  if (review.intervention) { return 'human-intervention'; }
   if (round.response) { return 'ready-for-next-round'; }
   if (round.decision?.kind === 'changes-requested') { return 'awaiting-implementation'; }
   return 'awaiting-review';

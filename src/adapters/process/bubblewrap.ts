@@ -3,6 +3,15 @@ import childProcess from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import * as fmt from '../../application/presentation/cli-format.js';
+import { resolveCustomRunner } from '../config/product-config.js';
+import {
+  claudeProjectDir,
+  codexHomeRoot,
+  opencodeStateHomes,
+  piStateHomes,
+  qwenHomeRoot,
+  vibeHomeRoot
+} from '../config/state-homes.js';
 
 /**
  * Bubblewrap guard.
@@ -132,11 +141,39 @@ export function buildBubblewrapArgs(profile: SandboxProfile, cwd: string): strin
   return [...args, '--chdir', path.resolve(cwd), '--'];
 }
 
+/**
+ * Resolve the launcher state homes the review profile keeps writable for one
+ * reviewer family. Codex, Qwen and Vibe keep their state under the worktree's
+ * git-ignored `.workflow/` (not reviewed source); Claude keeps its per-worktree
+ * transcript under the host home; the custom family resolves to its configured
+ * runner (opencode or pi), both of which are host-home based. Returns an empty
+ * list for families the guard does not scope, so the caller keeps the plain
+ * artifact-dir-only profile.
+ */
+function resolveReviewLauncherStateHomes(family: string | null | undefined, worktree: string): string[] {
+  switch (family) {
+    case 'codex': return [codexHomeRoot(worktree)];
+    case 'qwen': return [qwenHomeRoot(worktree)];
+    case 'vibe': return [vibeHomeRoot(worktree)];
+    case 'claude': return [claudeProjectDir(worktree)];
+    case 'opencode': return opencodeStateHomes();
+    case 'pi': return piStateHomes();
+    case 'custom': return resolveReviewLauncherStateHomes(resolveCustomRunner(worktree), worktree);
+    default: return [];
+  }
+}
+
 /** Convert workflow permissions into the shared sandbox profile. */
-export function resolveSandboxProfile(step: string, worktree: string, artifactDir?: string | null): SandboxProfile {
+export function resolveSandboxProfile(
+  step: string,
+  worktree: string,
+  artifactDir?: string | null,
+  family?: string | null,
+): SandboxProfile {
   if (step === 'review') {
     if (!artifactDir) { throw new BubblewrapGuardError('review step requires a resolved artifact directory'); }
-    return { worktree, worktreeWritable: false, writable: [artifactDir], optionalWritable: ['/tmp'] };
+    const writable = [artifactDir, ...resolveReviewLauncherStateHomes(family, worktree)];
+    return { worktree, worktreeWritable: false, writable, optionalWritable: ['/tmp'] };
   }
   return { worktree, worktreeWritable: true, writable: [], optionalWritable: ['/tmp'] };
 }

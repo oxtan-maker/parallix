@@ -3,6 +3,7 @@ import { parseVibeMeta, getVibeProviderModel, DEFAULT_VIBE_LOG_DIR } from './vib
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { vibeHomeRoot as vibeStateHome } from '../config/state-homes.js';
 
 /**
  * Maximum acceptable age (in minutes) for a vibe session's start_time
@@ -29,7 +30,7 @@ function resolveVibeWorktree(worktree?: string | null) {
 }
 
 function vibeHomeRoot(worktree: string) {
-  return path.join(resolveVibeWorktree(worktree), '.workflow', 'vibe-home');
+  return vibeStateHome(resolveVibeWorktree(worktree));
 }
 
 function vibeConfigPath(worktree: string) {

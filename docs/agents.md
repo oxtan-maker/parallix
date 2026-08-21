@@ -17,8 +17,17 @@ All five listed launchers are supported on this workstation. The `custom` agent 
 On Linux, Parallix confines workflow-agent processes with `bwrap` when it is
 available. The sandbox presents the host filesystem read-only and grants write
 access only to the mission worktree. A review agent receives a read-only
-worktree and may write its configured review-artifact directory and temporary
-diagnostics under `/tmp`.
+worktree: the tree under review stays read-only so a reviewer cannot edit it,
+while the writable set is limited to the resolved review-artifact directory, the
+launcher's own state home, and temporary diagnostics under `/tmp`. The
+reviewer launcher state homes are the only paths added beyond the artifact
+directory — worktree-local launcher scratch under `.workflow/` for the codex,
+qwen, and vibe launchers; claude's per-worktree session transcript directory
+under the host home (named after the mangled worktree path, e.g.
+`~/.claude/projects/-home-u-code-p`); and, for the custom family, the host-home
+state directories of its configured runner (opencode or pi), which do not
+override `HOME`. This keeps a round-1 claude session resumable in a later round
+while the reviewed worktree itself stays read-only.
 
 If `bwrap` is unavailable, Parallix emits a warning and preserves the normal
 unsandboxed launch. Set `PARALLIX_NO_BUBBLEWRAP=1` to deliberately opt out for

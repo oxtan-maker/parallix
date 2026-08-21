@@ -482,7 +482,7 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
       // This is the sole production policy decision. The AsyncLocalStorage
       // context reaches the shared process seam through every family launcher.
       const sandboxProfile = worktree
-        ? resolveSandboxProfile(step, worktree, step === 'review' ? resolveReviewArtifactDir(worktree) : null)
+        ? resolveSandboxProfile(step, worktree, step === 'review' ? resolveReviewArtifactDir(worktree) : null, chosen || null)
         : null;
       const launchResult = withSandboxProfile(sandboxProfile, () => launcher({
         prompt: actualPrompt,
