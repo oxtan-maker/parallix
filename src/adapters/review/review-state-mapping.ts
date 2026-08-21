@@ -133,8 +133,19 @@ function roundFromState(state: ReviewStateData, previous: ReviewRound): ReviewRo
  */
 export function applyReviewStateToReview(review: Review, state: ReviewStateData): Review {
   const current = review.rounds[review.rounds.length - 1];
-  const requestedNumber = typeof state.round === 'number' && state.round > 0
-    ? Math.floor(state.round) : current.number;
+  const suppliedRound = typeof state.round === 'number' && state.round > 0
+    ? Math.floor(state.round) : null;
+  // TASK-2385: a flattened write carrying a round lower than the current round
+  // previously fell through to `roundFromState`, which rewrote the newest round
+  // downward (round 2 -> round 1) and then failed the round uniqueness constraint
+  // on the SQLite write, dropping the verdict. Reject it before persistence with a
+  // diagnostic naming both conflicting rounds so the two numbers are actionable.
+  if (suppliedRound !== null && suppliedRound < current.number) {
+    throw new Error(
+      `Cannot apply review state: supplied round ${suppliedRound} is lower than the current round ${current.number}; a stale flattened write must not renumber an existing round`,
+    );
+  }
+  const requestedNumber = suppliedRound ?? current.number;
   const rounds = [...review.rounds] as ReviewRound[];
   while (rounds.length < requestedNumber) {
     const previous = rounds[rounds.length - 1];
@@ -149,6 +160,9 @@ export function applyReviewStateToReview(review: Review, state: ReviewStateData)
       implementerRetryCount: 0,
     });
   }
+  // ponytail: the current round is the only slot a flat writer mutates; a stale
+  // lower round is rejected above, an equal round rewrites in place, and a higher
+  // round appends before this line rewrites the new tail.
   rounds[rounds.length - 1] = roundFromState(state, rounds[rounds.length - 1]);
 
   const metadata = state.metadata && typeof state.metadata === 'object' ? state.metadata : {};

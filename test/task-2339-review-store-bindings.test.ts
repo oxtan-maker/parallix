@@ -15,6 +15,22 @@ import { createEvent } from '../src/adapters/review/review-events.js';
  * from the unbound default (which reads no state and falls back to round 1).
  */
 function missionWithReview() {
+  const currentRound = {
+    number: 3,
+    subject: {
+      change: { kind: 'local-branch' as const, sourceBranch: 'mission/task-9001', targetBranch: 'main' },
+      revision: 'rev-3',
+    },
+    reviewer: 'claude',
+    implementer: 'codex',
+    startedAt: '2026-08-04T09:00:00.000Z',
+    decision: null,
+    response: null,
+    phase: 'reviewing',
+    disposition: null,
+    reviewerRetryCount: 0,
+    implementerRetryCount: 0,
+  };
   return {
     id: 'task-9001',
     repositoryId: 'repo',
@@ -27,22 +43,7 @@ function missionWithReview() {
     netEngineeringLines: 0,
     closedAt: null,
     review: {
-      rounds: [{
-        number: 3,
-        subject: {
-          change: { kind: 'local-branch', sourceBranch: 'mission/task-9001', targetBranch: 'main' },
-          revision: 'rev-3',
-        },
-        reviewer: 'claude',
-        implementer: 'codex',
-        startedAt: '2026-08-04T09:00:00.000Z',
-        decision: null,
-        response: null,
-        phase: 'reviewing',
-        disposition: null,
-        reviewerRetryCount: 0,
-        implementerRetryCount: 0,
-      }],
+      rounds: [{ ...currentRound, number: 1 }, { ...currentRound, number: 2 }, currentRound],
       intervention: null,
       stageLaunches: [],
       reviewEvents: [],
@@ -109,6 +110,40 @@ test('bound reviewer-artifact consumer persists its events to the operator datab
   // The round comes from the stored Review, so an unbound state reader (which
   // resolves no store and defaults to round 1) fails this assertion.
   assert.deepEqual(events.map((event: any) => event.roundNumber), [3, 3]);
+});
+
+test('bound reviewer-artifact consumer records a self-author verdict on its stored round', async () => {
+  const store = fakeStore();
+  const tmpDir = artifactDir({
+    'task-9001-review-findings.md': 'No blocking findings.',
+    'task-9001-review-outcome.md': 'Verdict: approve',
+    'task-9001-review-verdict.txt': 'approve',
+  });
+  let comment = '';
+  let providerReviewCalled = false;
+
+  const result = await reviewLoopBindings(store as never).consumeReviewerArtifactsFn('task-9001', 'claude', {
+    worktree: tmpDir,
+    tmpDir,
+    providerEnabled: true,
+    readTokenFn: () => 'mock-token',
+    postCommentFn: (_branch, _token, body) => {
+      comment = body;
+      return { ok: true };
+    },
+    getPrAuthorFn: () => 'claude',
+    postReviewFn: () => {
+      providerReviewCalled = true;
+      return { ok: true };
+    },
+    ...silent,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(providerReviewCalled, false, 'self-author verdicts stay local');
+  assert.equal(store.state.mission.review.rounds[2].disposition, 'APPROVED');
+  assert.equal(store.state.mission.review.rounds[2].phase, 'approved');
+  assert.match(comment, /workflow-round:3, workflow-phase:reviewing/);
 });
 
 test('bound implementer-artifact consumer persists its events to the operator database', async () => {
