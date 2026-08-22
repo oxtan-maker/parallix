@@ -15,6 +15,7 @@
  */
 import * as path from 'node:path';
 import * as fmt from './presentation/cli-format.js';
+import { AGENT_COMMAND_COMPLETION_CONTRACT } from './agent-completion-contract.js';
 import { beginNextReviewRound, startReview, ConfiguredReviewerEligibility, changeRevision, reviewStatus } from '../domain/review.js';
 import { agentFamily } from '../domain/agents.js';
 import { artifactReference } from '../domain/net-engineering-lines.js';
@@ -777,7 +778,7 @@ export class HandoffCommandUseCase {
     });
     if (!rebaseResult.ok) {
       if (rebaseResult.sharedFileConflicts) {
-        const msg = 'Rebase encountered shared-file conflicts. Resolve the conflicts in the worktree, then re-run handoff.';
+        const msg = `Rebase encountered shared-file conflicts. ${AGENT_COMMAND_COMPLETION_CONTRACT} Resolve the conflicts in the worktree, then re-run handoff.`;
         error(msg);
         return { ok: false, error: msg };
       } else {

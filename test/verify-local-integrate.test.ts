@@ -37,6 +37,22 @@ function runScript(args, env = {}) {
   return result;
 }
 
+test('verify-local Git shim handles init flags without mistaking them for the target directory', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'verify-local-git-shim-'));
+  const shim = path.join(repoRoot, 'scripts', 'git');
+  const env = { ...process.env, PARALLIX_REAL_GIT: '/usr/bin/git' };
+  try {
+    const bare = childProcess.spawnSync(shim, ['init', '-q', '-b', 'main'], { cwd: root, env, encoding: 'utf8' });
+    assert.equal(bare.status, 0, bare.stderr);
+
+    const explicit = path.join(root, 'explicit');
+    const targeted = childProcess.spawnSync(shim, ['init', '-q', '-b', 'main', explicit], { env, encoding: 'utf8' });
+    assert.equal(targeted.status, 0, targeted.stderr);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('verify-local integrate fails closed when integration config is missing (task-2300)', () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'verify-local-missing-'));
   try {

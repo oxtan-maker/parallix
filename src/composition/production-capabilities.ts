@@ -11,6 +11,7 @@ import type { BoardLaneEventRepository, OperationalHistoryRepository } from '../
 import type { SessionMarkerRepository } from '../application/ports/mission-store.js';
 import type { UsageRepository } from '../application/ports/mission-measurements.js';
 import type { MissionStore } from '../application/domain-ports.js';
+import type { CurrentWorkPort } from '../application/recording/current-work-recorder.js';
 import { composeTuiCapabilities } from './board-projection.js';
 
 export interface ProductionBoardRepositories {
@@ -40,6 +41,7 @@ export function composeProductionCapabilities(
   repositories: ProductionBoardRepositories,
   executePorts: ExecuteMissionPorts,
   missionStore: MissionStore | null,
+  currentWork: CurrentWorkPort,
 ): ProductionCapabilities {
   const tui = composeTuiCapabilities({
     rootDir,
@@ -51,7 +53,7 @@ export function composeProductionCapabilities(
     usageRepo: repositories.usage,
     knownAgentFamilies: resolveKnownAgentFamilies(rootDir),
     sessionMarkers: repositories.sessionMarkers ?? null,
-  }, executePorts);
+  }, executePorts, currentWork);
   return {
     tui,
     boardProjection: tui.boardProjection,

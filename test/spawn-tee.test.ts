@@ -179,6 +179,87 @@ test('spawnAndTee reports no-output intervals until the child writes output', as
   assert.ok(diagnostics[0].elapsedMs >= 0);
 });
 
+test('spawnAndTee continues liveness reports after visible output until the child settles', async () => {
+  const diagnostics = [];
+  const result = await withMockSpawn({
+    stdoutChunks: ['ready'],
+    stdoutDelayMs: 5,
+    status: 0,
+    closeDelayMs: 75
+  }, async () => spawnAndTee('mock-node', [], {
+    stdoutSink: noopSink(),
+    stderrSink: noopSink(),
+    noOutputWatchdog: {
+      initialDelayMs: 20,
+      intervalMs: 20,
+      onNoOutput: event => diagnostics.push(event)
+    }
+  }));
+
+  assert.equal(result.status, 0);
+  assert.equal(result.stdout, 'ready');
+  assert.ok(diagnostics.length >= 2, 'expected periodic liveness reports after visible output while the child remains open');
+});
+
+test('spawnAndTee liveness watchdog never kills, signals, or cancels the child', async () => {
+  // task-2386 AC #3: the watchdog is purely observational. Even across many
+  // liveness reports it must not touch the child's lifecycle — the result may
+  // only come from the child's own close event.
+  const diagnostics = [];
+  const lifecycleCalls = [];
+  const mocked = mock.method(childProcess, 'spawn', () => {
+    const child = createMockChild({ status: 0, closeDelayMs: 90 });
+    child.kill = (...args) => { lifecycleCalls.push(['kill', ...args]); return true; };
+    child.disconnect = () => { lifecycleCalls.push(['disconnect']); };
+    return child;
+  });
+  let result;
+  try {
+    result = await spawnAndTee('mock-node', [], {
+      stdoutSink: noopSink(),
+      stderrSink: noopSink(),
+      noOutputWatchdog: {
+        initialDelayMs: 15,
+        intervalMs: 15,
+        onNoOutput: event => diagnostics.push(event)
+      }
+    });
+  } finally {
+    mocked.mock.restore();
+  }
+
+  assert.ok(diagnostics.length >= 2, 'expected repeated liveness reports while the child ran');
+  assert.deepEqual(lifecycleCalls, [], 'watchdog must never kill, signal, or disconnect the child');
+  assert.equal(result.status, 0, 'result must come from the child closing on its own');
+  assert.equal(result.signal, null);
+});
+
+test('spawnAndTee liveness reports carry sawOutput and the age of the last output', async () => {
+  // task-2386 AC #4 payload contract: callers must be able to word the report
+  // truthfully once the agent has already produced visible output.
+  const diagnostics = [];
+  const result = await withMockSpawn({
+    stdoutChunks: ['ready'],
+    stdoutDelayMs: 5,
+    status: 0,
+    closeDelayMs: 75
+  }, async () => spawnAndTee('mock-node', [], {
+    stdoutSink: noopSink(),
+    stderrSink: noopSink(),
+    noOutputWatchdog: {
+      initialDelayMs: 20,
+      intervalMs: 20,
+      onNoOutput: event => diagnostics.push(event)
+    }
+  }));
+
+  assert.equal(result.status, 0);
+  const afterOutput = diagnostics.filter(event => event.sawOutput);
+  assert.ok(afterOutput.length >= 1, 'expected at least one report flagged as post-output');
+  assert.ok(afterOutput[0].msSinceLastOutput >= 0);
+  assert.ok(afterOutput[0].msSinceLastOutput <= afterOutput[0].elapsedMs);
+});
+
 test('spawnAndTee treats stdout before the first interval as visible output', async () => {
   const diagnostics = [];
   const result = await withMockSpawn({

@@ -83,6 +83,19 @@ test('resolveSandboxProfile gives non-review steps a writable /tmp', () => {
   assert.deepEqual(resolveSandboxProfile('active', '/work/tree').optionalWritable, ['/tmp']);
 });
 
+test('resolveSandboxProfile fails closed when Git metadata resolution times out', () => {
+  const worktree = makeWorktree();
+  const mocked = test.mock.method(childProcess, 'spawnSync', (command: string) => {
+    if (command === 'git') {
+      return { status: null, stdout: '', stderr: '', error: new Error('ETIMEDOUT') } as any;
+    }
+    throw new Error(`unexpected command: ${command}`);
+  });
+  try {
+    assert.throws(() => resolveSandboxProfile('active', worktree), BubblewrapGuardError);
+  } finally { mocked.mock.restore(); fs.rmSync(worktree, { recursive: true, force: true }); }
+});
+
 // Review-profile launcher state homes (task-2383). The review profile must
 // grant each supported reviewer launcher its own state home while keeping the
 // mission worktree read-only. These fail at the mission parent commit because

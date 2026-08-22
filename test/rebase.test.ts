@@ -88,7 +88,9 @@ test('buildRebasePrompt contains mission-specific and shared file sections', () 
   assert.match(prompt, /rebase/i);
   assert.match(prompt, /task-1018/);
   assert.match(prompt, /--theirs/);
+  assert.match(prompt, /git add "<file>"/);
   assert.match(prompt, /git rebase --continue/);
+  assert.match(prompt, /Execute the listed commands now/);
   assert.match(prompt, /no verification gate configured/);
   assert.match(prompt, /px integrate task-1018 --dry-run/);
   assert.match(prompt, /git checkout --theirs "docs\/missions\/2026\/task-1018\/CP-1\.md"/);

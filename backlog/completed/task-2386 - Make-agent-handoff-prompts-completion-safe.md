@@ -1,8 +1,8 @@
 ---
 id: TASK-2386
 title: Make agent handoff prompts completion-safe
-status: backlog
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-08-21'
 labels:
   - bug

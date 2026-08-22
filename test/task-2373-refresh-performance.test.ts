@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { subscribeToBoardProjection } from '../src/application/projections/board-subscription.js';
+import type { BoardProjection } from '../src/application/projections/board.js';
 import { makeProjection } from './fixtures/board-projection.js';
 
 test('SC35: a slow board refresh never overlaps or accumulates a timer backlog', async () => {
@@ -39,3 +40,34 @@ test('SC33 and SC34: each completed timer tick rebuilds the authority projection
   assert.equal(builds, 1);
   unsubscribe();
 });
+
+test('SC6: a recovery-only state change (unattributed running sessions) repaints the board', async () => {
+  let builds = 0;
+  const projections: Array<() => BoardProjection> = [
+    () => withUnattributed(0),
+    () => withUnattributed(3),
+  ];
+  let changes = 0;
+  const timers: Array<() => void> = [];
+  const unsubscribe = subscribeToBoardProjection(
+    async () => { builds += 1; return projections[Math.min(builds - 1, projections.length - 1)](); },
+    () => { changes += 1; },
+    { setTimer: callback => { timers.push(callback); return callback; }, clearTimer: () => {} },
+  );
+  timers.shift()!();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(changes, 1, 'the first rebuild publishes');
+  timers.shift()!();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(changes, 2, 'a change limited to unattributed running sessions triggers a repaint');
+  unsubscribe();
+});
+
+function withUnattributed(count: number): BoardProjection {
+  const projection = makeProjection();
+  (projection as { metrics: BoardProjection['metrics'] }).metrics = {
+    ...projection.metrics,
+    unattributedRunningSessions: count,
+  };
+  return projection;
+}

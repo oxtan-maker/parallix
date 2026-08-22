@@ -9,6 +9,7 @@ import type { MissionCheckpointService } from '../mission-checkpoint-service.js'
 import type { MissionHandoffService } from '../mission-handoff-service.js';
 import type { MissionIntakeService } from '../mission-intake-service.js';
 import type { MissionId } from '../../domain/mission.js';
+import { NO_CURRENT_WORK_PORT, type CurrentWorkPort } from '../recording/current-work-recorder.js';
 import type {
   BoardCommandDispatcher,
   BoardCommandKind,
@@ -52,8 +53,9 @@ export class BoardCommandController implements BoardCommandDispatcher {
     executePorts: ExecuteMissionPorts,
     progressPort?: BoardProgressSink,
     missionServices: BoardMissionServices = {},
+    currentWork: CurrentWorkPort = NO_CURRENT_WORK_PORT,
   ) {
-    this.executeMission = new ExecuteMissionService(executePorts, progressPort);
+    this.executeMission = new ExecuteMissionService(executePorts, progressPort, currentWork);
     this.progressPort = progressPort;
     this.missionServices = missionServices;
   }

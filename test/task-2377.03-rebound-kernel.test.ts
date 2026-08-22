@@ -181,6 +181,24 @@ test('task-2377.03: the hook fix prompt uses the same builder with hook slots', 
   assert.match(prompt, /The failing check re-runs automatically after your fix/);
 });
 
+test('task-2386: the rebound fix prompt states the execute-verify-report completion contract', () => {
+  const classification = classifyReboundReason(hookReason);
+  const prompt = buildReboundFixPrompt({
+    label: classification.label,
+    slug: 'task-2386',
+    area: 'workflow',
+    facts: [['Hook type', 'pre-commit']],
+    diagnostic: 'pre-commit hook failed: lint error',
+    classification,
+    attempt: 1,
+    maxAttempts: DEFAULT_REBOUND_ATTEMPTS,
+    remedy: 'Fix the underlying issue so the Git hook passes.',
+  });
+  assert.match(prompt, /Execute the listed commands now/);
+  assert.match(prompt, /Report completion only after/i);
+  assert.match(prompt, /report the failure and stop/i);
+});
+
 // ── Verify loop, budget, and launch failures (SC2 / SC3 / SC4) ───────────────
 
 test('task-2377.03: a failing verify consumes one attempt and relaunches with the fresh diagnostic', async () => {

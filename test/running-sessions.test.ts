@@ -23,6 +23,8 @@ const WORKTREES = new Map<string, MissionId>([
 const REVIEW_PARENT = 'node /home/dev/parallix-task-2328/node_modules/.bin/tsx src/entry/px.ts review --continue --max-attempts 8';
 const REVIEW_CHILD = '/usr/bin/node --import file:///home/dev/parallix-task-2328/node_modules/tsx/dist/loader.mjs src/entry/px.ts review --continue';
 const BOARD = 'node /home/dev/parallix/node_modules/.bin/tsx src/entry/px.ts board';
+// A same-named draft launched from an unrelated checkout: same slug, other repo.
+const DRAFT_IN_OTHER_REPO = 'node /home/other/parallix/node_modules/.bin/tsx src/entry/px.ts draft task-2328 --agent custom';
 // `px draft` is launched from the main repository, before the mission worktree exists.
 const DRAFT_FROM_MAIN = 'node /home/dev/parallix/node_modules/.bin/tsx src/entry/px.ts draft task-2217 --agent custom';
 
@@ -139,6 +141,53 @@ test('detectRunningMissionSessions falls back to the worktree path in the argume
 
   assert.equal(sessions?.length, 1, 'the worktree in argv must still identify the mission');
   assert.equal(sessions?.[0]?.missionId, 'task-2328');
+});
+
+test('detectRunningMissionSessions ignores an explicit slug from a different repository', () => {
+  // A same-named mission launched from an unrelated checkout must not appear
+  // on this board (SC1 / AC #1).
+  const sessions = detectRunningMissionSessions({
+    rootDir: '/home/dev/parallix',
+    now: () => NOW_MS,
+    listWorktrees: () => WORKTREES,
+    listProcesses: () => [{ pid: 100, elapsedSeconds: 30, args: DRAFT_IN_OTHER_REPO }],
+    resolveCwd: () => '/home/other/parallix',
+  });
+
+  assert.deepEqual(sessions, [], 'a same-named slug in another checkout is not local');
+});
+
+test('detectRunningMissionSessions reports unknown when an explicit slug has no repository evidence', () => {
+  // A matching explicit-slug process whose working directory cannot be resolved
+  // and whose arguments name no board-root or worktree path: we cannot tell if
+  // it is local, so omitting it would make the count untrustworthy. Report
+  // unknown rather than a fabricated zero (SC3).
+  const sessions = detectRunningMissionSessions({
+    rootDir: '/home/dev/parallix',
+    now: () => NOW_MS,
+    listWorktrees: () => WORKTREES,
+    listProcesses: () => [{ pid: 100, elapsedSeconds: 30, args: DRAFT_IN_OTHER_REPO }],
+    // Platform without /proc, and the argv path is outside the board repo.
+    resolveCwd: () => null,
+  });
+
+  assert.equal(sessions, null, 'a matching explicit slug with no repository evidence is unknown, not zero');
+});
+
+test('detectRunningMissionSessions resolves a slug-less command from a nested worktree CWD', () => {
+  // A slug-less command started below a worktree root resolves to that mission
+  // (SC2 / AC #2).
+  const sessions = detectRunningMissionSessions({
+    rootDir: '/home/dev/parallix',
+    now: () => NOW_MS,
+    listWorktrees: () => WORKTREES,
+    listProcesses: () => [{ pid: 100, elapsedSeconds: 60, args: REVIEW_PARENT }],
+    resolveCwd: () => '/home/dev/parallix-task-2328/subtasks/nested',
+  });
+
+  assert.deepEqual(sessions?.map((session) => [session.missionId, session.worktree]), [
+    ['task-2328', '/home/dev/parallix-task-2328'],
+  ], 'the nested CWD resolves to its registered mission worktree');
 });
 
 test('detectRunningMissionSessions reports unknown when the process table cannot be read', () => {

@@ -103,9 +103,11 @@ export function boardFingerprint(projection: BoardProjection): string {
       reviewApproved: card.reviewApproved,
       blockingReason: card.blockingReason,
       currentWork: card.currentWork,
+      liveSession: card.liveSession ?? null,
     }))),
     attention: projection.attentionQueue.map((item) => [item.missionId, item.reason.kind, item.action.kind]),
     agents: projection.metrics.agentAvailability,
+    unattributedRunningSessions: projection.metrics.unattributedRunningSessions,
     sourceFacts: projection.sourceFacts,
   });
 }
