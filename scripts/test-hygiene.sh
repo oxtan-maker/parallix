@@ -24,7 +24,7 @@ while IFS= read -r -d '' file; do
     lineno=$(echo "$line_match" | cut -d: -f1)
     content=$(echo "$line_match" | cut -d: -f2-)
     # Skip lines that have skip-reason: or reason: in an inline comment
-    if echo "$content" | grep -qE '(skip-reason:|reason:)'; then
+    if [[ "$content" =~ (skip-reason:|reason:) ]]; then
       continue
     fi
     echo "VIOLATION: unannotated skip/xit/fit found in $(basename "$file"):$lineno"
@@ -41,8 +41,8 @@ if command -v df >/dev/null 2>&1; then
   DF_OUTPUT=$(df -i /tmp 2>/dev/null || true)
   if [ -n "$DF_OUTPUT" ]; then
     # Detect format from header line
-    DF_HEADER=$(echo "$DF_OUTPUT" | head -1)
-    if echo "$DF_HEADER" | grep -q '%iused'; then
+    DF_HEADER=${DF_OUTPUT%%$'\n'*}
+    if [[ "$DF_HEADER" == *%iused* ]]; then
       # BSD/macOS: Filesystem 512-blocks Used Available Capacity iused ifree %iused Mounted
       INODE_PCT=$(echo "$DF_OUTPUT" | awk 'NR==2 {gsub(/%/, "", $8); print $8}')
     else
