@@ -2,7 +2,7 @@
 id: TASK-2392
 title: active tasks are shown in the backlog lane
 status: backlog
-assignee: []
+assignee: [codex]
 created_date: '2026-08-22 09:54'
 labels: []
 dependencies: []
