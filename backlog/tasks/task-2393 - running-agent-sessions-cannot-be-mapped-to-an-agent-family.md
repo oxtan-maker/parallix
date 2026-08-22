@@ -1,8 +1,8 @@
 ---
 id: TASK-2393
 title: running agent sessions cannot be mapped to an agent family
-status: review
-assignee: [custom]
+status: active
+assignee: [codex]
 created_date: '2026-08-22'
 labels:
   - bug
