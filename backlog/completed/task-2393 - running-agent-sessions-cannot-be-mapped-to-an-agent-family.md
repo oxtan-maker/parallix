@@ -1,7 +1,7 @@
 ---
 id: TASK-2393
 title: running agent sessions cannot be mapped to an agent family
-status: ready-for-integration
+status: done
 assignee: [codex]
 created_date: '2026-08-22'
 labels:
