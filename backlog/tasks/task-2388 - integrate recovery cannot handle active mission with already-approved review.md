@@ -1,5 +1,5 @@
 ---
-id: TASK-2389
+id: TASK-2388
 title: integrate recovery cannot handle an active mission with an already-approved review
 status: backlog
 assignee: []
@@ -57,9 +57,6 @@ This is pre-existing recovery/workflow code (blame traces to the task-2378 /
 task-2376 / task-2357 era). It is **not** introduced by the bounce-kernel
 mission task-2377.05, whose only edit to `integrate.ts` was the F3 implementer
 resolution guard.
-
-NOTE: this bug was originally filed as TASK-2388, but that id was already
-claimed by an unrelated running-session-recovery bug. Re-filed as TASK-2389.
 
 <!-- SECTION:DESCRIPTION:END -->
 
