@@ -1,5 +1,6 @@
 import * as fmt from '../../application/presentation/cli-format.js';
 import type { StatusResult } from '../../application/status-command-use-case.js';
+import { describeCoordinatorEvidence, describeMissionWork } from '../../application/projections/mission-activity.js';
 
 /** Parse public CLI flags for the status command. */
 export interface StatusCliRequest {
@@ -39,6 +40,14 @@ export function renderStatus(result: StatusResult, log: (_msg: string) => void):
     if (result.missionData) {
       const md = result.missionData;
       log(`Backlog status: ${md.backlogStatus}`);
+      // The same two facts the TUI agent strip renders, from the same
+      // projection: authoritative work first, then the recovery-only evidence
+      // that a `px` coordinator process exists. Keeping them on separate lines
+      // is deliberate — a live coordinator is not a running agent.
+      if (md.activity) {
+        log(`Mission work: ${describeMissionWork(md.activity.work)}`);
+        log(`Coordinator evidence: ${describeCoordinatorEvidence(md.activity.coordinator)}`);
+      }
       if (md.checkpoint) {
         log(`Last checkpoint: ${md.checkpoint} - ${md.checkpointDescription || ''}`);
       } else {

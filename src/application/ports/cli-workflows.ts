@@ -1,6 +1,8 @@
 /** Application-owned ports for CLI workflow execution. Concrete implementations
  * are supplied only by the composition root. */
 
+import type { MissionActivity } from '../projections/mission-activity.js';
+
 // ---------------------------------------------------------------------------
 // Status workflow port
 // ---------------------------------------------------------------------------
@@ -77,6 +79,14 @@ export interface StatusMissionData {
   readonly reviewDisposition?: string;
   /** Review history rounds. */
   readonly reviewHistory: readonly StatusReviewRound[];
+  /**
+   * The mission's activity in the shared read model the TUI renders from.
+   * Absent or `null` when the board projection could not supply one, in which
+   * case `px status` states nothing about activity rather than guessing.
+   * Carrying the projection rather than pre-rendered text is what keeps
+   * `px status` and the agent strip from drifting into contradicting each other.
+   */
+  readonly activity?: MissionActivity | null;
 }
 
 /** Forgejo PR state for a mission branch. */

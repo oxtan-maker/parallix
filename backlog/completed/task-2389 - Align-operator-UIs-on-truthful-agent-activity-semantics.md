@@ -1,7 +1,7 @@
 ---
 id: TASK-2389
 title: Align operator UIs on truthful agent activity semantics
-status: ready-for-integration
+status: done
 assignee: [codex]
 created_date: '2026-08-21 11:04'
 labels:

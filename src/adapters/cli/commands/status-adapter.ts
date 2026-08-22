@@ -27,6 +27,7 @@ import {
 import { WORKFLOW_AGENT_NAMES, eligibleAgentsForStep, readAgentConfigOrExit, workflowLauncherStatus } from '../../agents/agents.js';
 import { getPrStatus } from '../../forgejo/forgejo.js';
 import type { BoardProjectionBuilder } from '../../../application/projections/board-readers.js';
+import { projectMissionActivity, type MissionActivitySource } from '../../../application/projections/mission-activity.js';
 
 /** Factory options for creating the status workflow adapter. */
 export interface StatusWorkflowAdapterOptions {
@@ -172,6 +173,7 @@ export function createStatusWorkflowAdapter(options: StatusWorkflowAdapterOption
             );
             if (card) {
               missionData = {
+                activity: projectMissionActivity(card as MissionActivitySource),
                 backlogStatus: (card as any).rawStatus ?? (card as any).status,
                 checkpoint: (card as any).checkpoint,
                 checkpointDescription: (card as any).checkpointDescription,
@@ -293,6 +295,7 @@ export function createStatusBoardAdapter(options: {
         if (!card) { return null; }
 
         return {
+          activity: projectMissionActivity(card as MissionActivitySource),
           backlogStatus: (card as any).rawStatus ?? (card as any).status,
           checkpoint: (card as any).checkpoint,
           checkpointDescription: (card as any).checkpointDescription,

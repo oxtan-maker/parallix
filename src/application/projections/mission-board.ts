@@ -270,7 +270,7 @@ export function projectMissionCard(mission: Mission, facts: MissionOperationalFa
     reviewDisposition: currentRound?.disposition ?? null,
     reviewHistory: projectReviewHistory(mission.review),
     currentWork: facts.currentWork,
-    liveSession: facts.liveSession ?? null,
+    liveSession: facts.liveSession,
     blockingReason: facts.blockingReason,
     flags: facts.flags,
     commands: availableBoardCommands(mission, facts),
