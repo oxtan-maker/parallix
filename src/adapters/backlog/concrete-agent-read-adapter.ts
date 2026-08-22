@@ -7,6 +7,13 @@ import { detectRunningMissionSessions, type RunningMissionSession } from '../age
 import type { AgentBlocklistRepository } from '../../application/ports/agent-blocklist.js';
 import type { LauncherProbeResult } from '../agents/launcher-availability.js';
 import type { MissionId } from '../../domain/mission.js';
+import {
+  CURRENT_WORK_TTL_MS,
+  isWorkInProgress,
+  reconcileCurrentWork,
+  type CurrentWorkReadAdapter,
+  type ProcessLivenessProbe,
+} from '../../application/projections/current-work.js';
 import { getTaskAssignee, resolveTaskFile } from './backlog.js';
 import { readAgentConfig, type AgentConfig } from '../agents/agent-config.js';
 import { resolveAgentBlockAuthority } from '../agents/agent-block-authority.js';
@@ -70,6 +77,10 @@ export interface ConcreteAgentReadAdapterOptions {
    * cannot be attributed, which is reported as unknown rather than as zero.
    */
   readonly sessionMarkers?: SessionMarkerRepository | null;
+  /** Reconciled current-work authority, which names the family running a mission. */
+  readonly currentWork?: CurrentWorkReadAdapter | null;
+  /** Bounded liveness evidence used while reconciling current-work. */
+  readonly isProcessAlive?: ProcessLivenessProbe;
   /** Running-session detection seam; defaults to the live process scan. */
   readonly detectRunningSessions?: () => readonly RunningMissionSession[] | null;
 }
@@ -88,6 +99,8 @@ export class ConcreteAgentReadAdapter implements AgentReadAdapter {
   private readonly resolveTaskFile: ResolveTaskFileFn;
   private readonly getTaskAssignee: GetTaskAssigneeFn;
   private readonly sessionMarkers: SessionMarkerRepository | null;
+  private readonly currentWork: CurrentWorkReadAdapter | null;
+  private readonly isProcessAlive: ProcessLivenessProbe | undefined;
   private readonly detectRunningSessions: () => readonly RunningMissionSession[] | null;
 
   constructor(options: ConcreteAgentReadAdapterOptions) {
@@ -99,6 +112,8 @@ export class ConcreteAgentReadAdapter implements AgentReadAdapter {
     this.resolveTaskFile = options.resolveTaskFile ?? defaultResolveTaskFile();
     this.getTaskAssignee = options.getTaskAssignee ?? defaultGetTaskAssignee();
     this.sessionMarkers = options.sessionMarkers ?? null;
+    this.currentWork = options.currentWork ?? null;
+    this.isProcessAlive = options.isProcessAlive;
     this.detectRunningSessions = options.detectRunningSessions
       ?? (() => detectRunningMissionSessions({ rootDir: options.rootDir }));
   }
@@ -138,20 +153,18 @@ export class ConcreteAgentReadAdapter implements AgentReadAdapter {
    *
    * Attribution uses only evidence about *this* process:
    *
-   *  1. a session marker for that (mission, role) written after the process
+   *  1. reconciled current work for the mission, when it names a family;
+   *  2. a session marker for that (mission, role) written after the process
    *     started — proof that this run launched that family. A marker older
    *     than the process describes a previous run and is ignored, because the
    *     launcher writes the marker after a launch exits, so the stored family
    *     lags by one launch and can name a family that already fell back;
-   *  2. otherwise the family pinned on the command line
+   *  3. otherwise the family pinned on the command line
    *     (`--agent`/`--implementer`/`--reviewer`), which is what a fresh
    *     `px draft <slug> --agent <family>` has before any marker exists.
    *
-   * Commands with an ambiguous role (`px review`, which runs the reviewer and
-   * then the act-on-review implementer in one process; `px resolve-conflict`,
-   * which writes no marker) reach neither source and stay unattributed. The
-   * mission assignee is deliberately not used as a fallback: it says who owns
-   * the mission, not who is running.
+   * The mission assignee is deliberately not used as a fallback: it says who
+   * owns the mission, not who is running.
    *
    * Returns `null` when liveness cannot be determined, so the board renders
    * unknown rather than a fabricated zero.
@@ -161,6 +174,13 @@ export class ConcreteAgentReadAdapter implements AgentReadAdapter {
     if (running === null) { return null; }
     if (running.length === 0) { return []; }
 
+    const currentWork = this.currentWork
+      ? reconcileCurrentWork(await this.currentWork.loadCurrentWork(), {
+        nowMs: Date.now(),
+        ttlMs: CURRENT_WORK_TTL_MS,
+        isProcessAlive: this.isProcessAlive,
+      })
+      : new Map();
     const markers = this.sessionMarkers ? await this.sessionMarkers.findAll() : [];
     const byMissionRole = new Map(markers.map((marker) => [`${marker.missionId}:${marker.role}`, marker]));
     return running.map((session) => {
@@ -169,9 +189,12 @@ export class ConcreteAgentReadAdapter implements AgentReadAdapter {
         : byMissionRole.get(`${session.missionId}:${session.role}`);
       const launchedInThisProcess = marker !== undefined
         && Date.parse(marker.lastLaunched) >= session.startedAtMs;
+      const work = currentWork.get(session.missionId)?.currentWork;
       return {
         missionId: session.missionId,
-        family: (launchedInThisProcess ? marker.agent : null) ?? parseAgentFamily(session.pinnedAgent),
+        family: (isWorkInProgress(work) ? parseAgentFamily(work.agent) : null)
+          ?? (launchedInThisProcess ? marker.agent : null)
+          ?? parseAgentFamily(session.pinnedAgent),
       };
     });
   }

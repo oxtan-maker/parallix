@@ -64,6 +64,7 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
       return mission;
     }
   }
+  const currentWork = new ConcreteCurrentWorkReadAdapter(deps.historyRepo);
   const builder = new BoardProjectionBuilder(
     missions,
     new ConcreteReviewReadAdapter({ rootDir: deps.rootDir, missionStore: deps.missionStore }),
@@ -78,6 +79,8 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
       // Attributes a live `px` process to the family that launched it. Without
       // it the strip cannot report running sessions and says so.
       sessionMarkers: deps.sessionMarkers ?? null,
+      currentWork,
+      isProcessAlive: processLivenessProbe,
     }),
     new ConcreteGitReadAdapter({ rootDir: deps.rootDir, repositoryId: deps.repositoryId }),
     new ConcreteOperationLogReadAdapter({ historyRepo: deps.historyRepo }),
@@ -85,7 +88,7 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
       // The authoritative answer to "which mission is being worked on right
       // now", published by the operations themselves. The OS-process scan in
       // the agent adapter above is left in place only as bounded recovery.
-      currentWork: new ConcreteCurrentWorkReadAdapter(deps.historyRepo),
+      currentWork,
       isProcessAlive: processLivenessProbe,
       metricsAdapter: new ConcreteMetricsReadAdapter({
         laneEventRepo: deps.laneEventRepo,
