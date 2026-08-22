@@ -97,7 +97,9 @@ The `qwen` family runs against the Alibaba Cloud Model Studio (Bailian) Token Pl
 
 ## Launch output watchdog
 
-All workflow agent launches use the shared `startAgent` path and tee child stdout/stderr through the parent terminal. If the child process stays running but produces no stdout or stderr, the harness emits a bounded status line after a configurable delay and then once per that interval until output arrives or the process exits.
+All workflow agent launches use the shared `startAgent` path and tee child stdout/stderr through the parent terminal. While the child process stays running, the harness emits a bounded status line after a configurable delay and then once per that interval until the agent result settles.
+
+The watchdog is purely observational: it never kills, times out, or cancels an agent, and its reports do not release custom capacity. Reporting continues **after** the agent's first visible output, so an agent that announces a plan and then stalls still produces liveness lines; only the process exiting (or the SDK session settling) stops them.
 
 ### Default watchdog timings
 
@@ -127,6 +129,12 @@ When the watchdog fires, the harness emits:
 
 ```text
 [INFO] No output yet from <agent> for step "<step>" after <elapsed> (pid <pid>, agent <stage>). Launcher is still running; stdout/stderr have not produced visible output.
+```
+
+Once the agent has already produced visible output, the same watchdog keeps reporting with the age of that output instead:
+
+```text
+[INFO] Still waiting on <agent> for step "<step>" after <elapsed> (pid <pid>, agent <stage>). Launcher is still running; last visible output <elapsed> ago.
 ```
 
 The `<stage>` field is `"starting up"` before the step-specific initial delay elapses and `"running"` afterwards. For draft, the threshold is 15 seconds; for all other steps it is 60 seconds.

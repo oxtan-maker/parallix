@@ -23,6 +23,7 @@ import { BoardCommandController } from '../application/controller/board-controll
 import type { ExecuteMissionPorts } from '../application/ports/execute-mission.js';
 import type { TuiCapabilities } from '../application/tui-capabilities.js';
 import type { MissionStore } from '../application/domain-ports.js';
+import type { CurrentWorkPort } from '../application/recording/current-work-recorder.js';
 
 export interface BoardProjectionCompositionDeps {
   readonly rootDir: string;
@@ -108,11 +109,12 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
 export function composeTuiCapabilities(
   deps: BoardProjectionCompositionDeps,
   executePorts: ExecuteMissionPorts,
+  currentWork: CurrentWorkPort,
 ): TuiCapabilities {
   const board = composeBoardProjection(deps);
   return {
     boardProjection: board.builder,
     missionDetails: board.missionQuery,
-    commandControllerFactory: (progress) => new BoardCommandController(executePorts, progress),
+    commandControllerFactory: (progress) => new BoardCommandController(executePorts, progress, {}, currentWork),
   };
 }

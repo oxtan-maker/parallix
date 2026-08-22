@@ -382,6 +382,24 @@ test('buildAgentResolutionPrompt contains deterministic --theirs commands for ea
   assert.match(prompt, /stop immediately/i);
 });
 
+test('buildAgentResolutionPrompt states the execute-verify-report completion contract', () => {
+  // task-2386 AC #2: during TASK-2385 the resolver announced its plan and then
+  // stopped, so the handoff waited forever. The prompt must demand execution.
+  const prompt = buildAgentResolutionPrompt({
+    slug: 'task-2386',
+    area: 'workflow',
+    worktreePath: TEST_WORKTREE,
+    missionSpecificFiles: ['docs/missions/2026/task-2386/CP-1.md']
+  });
+
+  assert.match(prompt, /Execute the listed commands now/);
+  assert.match(prompt, /do not only describe or plan them/i);
+  assert.match(prompt, /Report completion only after/i);
+  assert.match(prompt, /report the failure and stop/i);
+  // The pre-existing per-file stop rule must survive the shared contract.
+  assert.match(prompt, /NOT in the list/i);
+});
+
 // ---------------------------------------------------------------------------
 // resolveConflict() — launcher control flow
 // ---------------------------------------------------------------------------

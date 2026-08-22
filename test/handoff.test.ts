@@ -957,6 +957,9 @@ test('performHandoff fails when rebase returns sharedFileConflicts=true', async 
 
     assert.strictEqual(result.ok, false);
     assert.match(result.error, /shared-file conflicts/);
+    // task-2386 AC #1: the bounce must command execution, not description.
+    assert.match(result.error, /Execute the listed commands now/);
+    assert.match(result.error, /report the failure and stop/i);
   } finally {
     fs.rmSync(worktree, { recursive: true, force: true });
   }

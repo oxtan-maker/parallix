@@ -31,6 +31,7 @@
  */
 
 import * as fmt from './presentation/cli-format.js';
+import { AGENT_COMMAND_COMPLETION_CONTRACT } from './agent-completion-contract.js';
 import { elideBounceOutput } from './output-elision.js';
 import {
   classifyError,
@@ -279,6 +280,7 @@ export function buildReboundFixPrompt(slots: FixPromptSlots): string {
     `Before repair work, compact the aborted working context. Reload the locked mission goal and scope; committed checkpoint or gate evidence when present; this exact gate diagnostic and classification; retry attempt ${attempt}/${maxAttempts}; current review round and disposition; unresolved findings and implementer resolutions; and the current branch revision.`,
     ``,
     remedy,
+    AGENT_COMMAND_COMPLETION_CONTRACT,
     `The failing check re-runs automatically after your fix; this bounce is only reported as fixed when that re-run passes.`,
   ].join('\n');
 }

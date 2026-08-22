@@ -4,6 +4,7 @@ import { startAgent } from '../../agents/agents.js';
 import { resolveTaskFile, getTaskImplementer } from '../../backlog/backlog.js';
 import * as fmt from '../../../application/presentation/cli-format.js';
 import { formatVerificationCommand } from '../../verification/verification.js';
+import { AGENT_COMMAND_COMPLETION_CONTRACT } from '../../../application/agent-completion-contract.js';
 
 /** @param {string} value */
 function shellQuote(value: string) {
@@ -36,11 +37,10 @@ function buildAgentResolutionPrompt({ slug, area, worktreePath, missionSpecificF
     `  px integrate ${slug} --dry-run`,
     '',
     'Rules:',
+    AGENT_COMMAND_COMPLETION_CONTRACT,
     '- Take --theirs for every file listed above. Do not inspect or edit conflict content.',
     '- If the rebase pauses on a file NOT in the list above, stop immediately and',
     '  report the unexpected file. Do not guess the resolution.',
-    '- If any command fails, stop immediately and report the failure.',
-    '  Do not continue to the next step.',
   ].join('\n');
 }
 

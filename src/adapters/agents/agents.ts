@@ -500,15 +500,21 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
             ? {
                 noOutputWatchdog: {
                   ...watchdogConfig,
-                  onNoOutput: (evt: {pid: number, elapsedMs: number}) => {
+                  onNoOutput: (evt: {pid: number, elapsedMs: number, sawOutput?: boolean, msSinceLastOutput?: number | null}) => {
                     const stage = evt.elapsedMs < (step === 'draft' ? DRAFT_NO_OUTPUT_INITIAL_DELAY_MS : DEFAULT_NO_OUTPUT_INITIAL_DELAY_MS)
                       ? 'starting up'
                       : 'running';
+                    // The watchdog is observational and keeps reporting after
+                    // the agent's first output, so the wording has to stay
+                    // truthful once output has already been seen.
+                    const detail = evt.sawOutput
+                      ? `last visible output ${formatElapsed(evt.msSinceLastOutput ?? 0)} ago`
+                      : 'stdout/stderr have not produced visible output';
                     log(fmt.status(
                       'INFO',
-                      `No output yet from ${fmt.agent(chosen || '')} for step "${step}" after ${formatElapsed(evt.elapsedMs)} ` +
+                      `${evt.sawOutput ? 'Still waiting on' : 'No output yet from'} ${fmt.agent(chosen || '')} for step "${step}" after ${formatElapsed(evt.elapsedMs)} ` +
                       `(pid ${evt.pid || 'unknown'}, agent ${stage}). ` +
-                      `Launcher is still running; stdout/stderr have not produced visible output.`
+                      `Launcher is still running; ${detail}.`
                     ));
                   }
                 }

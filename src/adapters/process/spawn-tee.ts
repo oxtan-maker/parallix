@@ -18,7 +18,12 @@ interface SpawnTeeResult {
 }
 
 interface NoOutputWatchdog {
-  onNoOutput?: (_event: { command: string; args: string[]; pid: number | undefined; elapsedMs: number }) => void;
+  /**
+   * Observational liveness report. It never kills, times out, or cancels the
+   * child: it keeps firing on `intervalMs` until the child settles, including
+   * after the first visible output (`sawOutput`).
+   */
+  onNoOutput?: (_event: { command: string; args: string[]; pid: number | undefined; elapsedMs: number; sawOutput: boolean; msSinceLastOutput: number | null }) => void;
   initialDelayMs?: number;
   intervalMs?: number;
 }
@@ -102,6 +107,7 @@ export function spawnAndTee(command: string, args: string[], options: SpawnTeeOp
     const stderrTail = new TailBuffer(maxTailBytes);
     let settled = false;
     let sawOutput = false;
+    let lastOutputAt: number | null = null;
     let watchdogTimer: ReturnType<typeof setTimeout> | null = null;
     const startTime = Date.now();
     const resolvedCwd = path.resolve((spawnOptions.cwd as string) || process.cwd());
@@ -157,13 +163,18 @@ export function spawnAndTee(command: string, args: string[], options: SpawnTeeOp
       const delay = Number.isFinite(delayMs) && delayMs >= 0 ? delayMs : 0;
       watchdogTimer = setTimeout(() => {
         watchdogTimer = null;
-        if (settled || sawOutput) {return;}
+        // Liveness reporting is observational for the child's full lifetime:
+        // only settling stops it. Suppressing after the first output hid later
+        // stalls, which is exactly the hang this watchdog exists to surface.
+        if (settled) {return;}
         if (typeof noOutputWatchdog.onNoOutput === 'function') {
           noOutputWatchdog.onNoOutput({
             command,
             args,
             pid: child.pid,
-            elapsedMs: Date.now() - startTime
+            elapsedMs: Date.now() - startTime,
+            sawOutput,
+            msSinceLastOutput: lastOutputAt === null ? null : Date.now() - lastOutputAt
           });
         }
         scheduleWatchdog(noOutputWatchdog.intervalMs ?? 0);
@@ -175,7 +186,7 @@ export function spawnAndTee(command: string, args: string[], options: SpawnTeeOp
 
     const noteOutput = (): void => {
       sawOutput = true;
-      clearWatchdog();
+      lastOutputAt = Date.now();
     };
 
     if (noOutputWatchdog) {

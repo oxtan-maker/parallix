@@ -34,6 +34,8 @@ export interface SandboxProfile {
   worktree: string;
   worktreeWritable: boolean;
   writable: string[];
+  /** Nested Git paths that must retain their own explicit writable bind. */
+  gitMetadata?: string[];
   optionalWritable?: string[];
 }
 
@@ -47,6 +49,10 @@ export class BubblewrapGuardError extends Error {
 
 type AvailabilityProbe = () => boolean;
 
+// A linked worktree has its own metadata dir, so cache its resolved mount pair
+// by absolute worktree path before spawning Git again.
+const GitMetadataCache = new Map<string, string[]>();
+
 let availabilityProbe: AvailabilityProbe | null = null;
 let cachedAvailability: boolean | null = null;
 let warnedUnavailable = false;
@@ -56,6 +62,7 @@ export function setBubblewrapProbeForTest(probe: AvailabilityProbe | null): void
   availabilityProbe = probe;
   cachedAvailability = null;
   warnedUnavailable = false;
+  GitMetadataCache.clear();
 }
 
 function probeBubblewrap(): boolean {
@@ -106,6 +113,68 @@ function ensureWritableDirectory(dir: string): void {
   catch { throw new BubblewrapGuardError(`writable directory is not writable: ${dir}`); }
 }
 
+/**
+ * Resolve the writable Git metadata mounts for one worktree: the shared common
+ * dir (`--git-common-dir`) and the per-worktree git dir (`--absolute-git-dir`).
+ *
+ * For a linked worktree both resolve *outside* the checkout — to
+ * `<repo>/.git/worktrees/<name>` and the shared `<repo>/.git` — so the worktree
+ * bind alone never covers them. Returns an empty list when `worktree` is not
+ * inside a Git repository: a non-repo worktree has no metadata to mount, so we
+ * widen nothing. A genuine lookup miss (a repo whose git dir cannot be resolved)
+ * bubbles into a `BubblewrapGuardError` rather than a broadened mount set.
+ */
+function resolveGitMetadataMounts(worktree: string): string[] {
+  const resolvedWorktree = path.resolve(worktree);
+  const cached = GitMetadataCache.get(resolvedWorktree);
+  if (cached) { return [...cached]; }
+  const run = (args: string[]) =>
+    childProcess.spawnSync('git', ['-C', worktree, ...args], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      // A busy host can push a cold git spawn past 1 s; 5 s keeps the lookup
+      // useful instead of silently degrading to "no git metadata".
+      timeout: 5000
+    });
+
+  const common = run(['rev-parse', '--path-format=absolute', '--git-common-dir']);
+  if (common.error || common.status === null) {
+    throw new BubblewrapGuardError(
+      `cannot resolve Git common dir for ${worktree}: ${common.error?.message || 'git timed out'}`
+    );
+  }
+  if (common.status !== 0) {
+    return []; // not a Git repository — widen nothing
+  }
+  const commonDir = common.stdout.trim();
+  if (!commonDir) {
+    throw new BubblewrapGuardError(`git could not resolve the common dir for ${worktree}`);
+  }
+
+  const gitDirResult = run(['rev-parse', '--absolute-git-dir']);
+  if (gitDirResult.error || gitDirResult.status === null) {
+    throw new BubblewrapGuardError(
+      `cannot resolve per-worktree git dir for ${worktree}: ${gitDirResult.error?.message || 'git timed out'}`
+    );
+  }
+  if (gitDirResult.status !== 0) {
+    throw new BubblewrapGuardError(
+      `cannot resolve per-worktree git dir for ${worktree}: ${gitDirResult.stderr?.trim() || 'git rev-parse failed'}`
+    );
+  }
+  const gitDir = gitDirResult.stdout.trim();
+  if (!gitDir) {
+    throw new BubblewrapGuardError(`git could not resolve the per-worktree git dir for ${worktree}`);
+  }
+
+  // The per-worktree dir is nested beneath the shared common dir, but both are
+  // Git-resolved inputs and both keep explicit binds in the argv. This avoids a
+  // `.git`-directory assumption and preserves the narrow nested grant.
+  const mounts = gitDir !== commonDir ? [commonDir, gitDir] : [commonDir];
+  GitMetadataCache.set(resolvedWorktree, mounts);
+  return [...mounts];
+}
+
 /** True when `child` is `parent` or lives beneath it. */
 function isWithin(parent: string, child: string): boolean {
   return parent === child || child.startsWith(parent.endsWith(path.sep) ? parent : parent + path.sep);
@@ -132,10 +201,18 @@ export function buildBubblewrapArgs(profile: SandboxProfile, cwd: string): strin
     .map(dir => path.resolve(dir))
     .filter(dir => fs.existsSync(dir) && fs.statSync(dir).isDirectory());
   const writable = dedupeMounts([...(profile.worktreeWritable ? [worktree] : []), ...required, ...optional]);
+  // `dedupeMounts` intentionally removes generic nested binds (for example an
+  // artifact dir under /tmp). Git metadata is different: the common dir and
+  // its per-worktree dir are both Git-resolved authorization boundaries, so
+  // retain a nested explicit bind after its common-dir bind.
+  const nestedGitMetadata = [...new Set((profile.gitMetadata || [])
+    .map(dir => path.resolve(dir)))]
+    .filter(dir => !writable.includes(dir) && required.includes(dir));
   const args = ['--ro-bind', '/', '/', '--dev', '/dev', '--proc', '/proc', '--die-with-parent'];
   // Mount order is security-relevant: reapply a readonly worktree after a
   // broader writable path such as /tmp, then allow explicit nested paths.
   for (const dir of writable.filter(dir => !isWithin(worktree, dir))) { args.push('--bind', dir, dir); }
+  for (const dir of nestedGitMetadata.filter(dir => !isWithin(worktree, dir))) { args.push('--bind', dir, dir); }
   args.push(profile.worktreeWritable ? '--bind' : '--ro-bind', worktree, worktree);
   for (const dir of writable.filter(dir => dir !== worktree && isWithin(worktree, dir))) { args.push('--bind', dir, dir); }
   return [...args, '--chdir', path.resolve(cwd), '--'];
@@ -175,7 +252,19 @@ export function resolveSandboxProfile(
     const writable = [artifactDir, ...resolveReviewLauncherStateHomes(family, worktree)];
     return { worktree, worktreeWritable: false, writable, optionalWritable: ['/tmp'] };
   }
-  return { worktree, worktreeWritable: true, writable: [], optionalWritable: ['/tmp'] };
+  // Implementer steps may mutate the mission branch. Grant the Git metadata that
+  // resolves outside the checkout for this worktree so a confined `git add`/
+  // `commit`/`rebase --continue` can lock the per-worktree index. Bounded to the
+  // Git-resolved paths only — never the checkout parent or an unrelated host
+  // path. Reviewer steps return above and keep Git state read-only.
+  const gitMounts = resolveGitMetadataMounts(worktree);
+  return {
+    worktree,
+    worktreeWritable: true,
+    writable: gitMounts,
+    gitMetadata: gitMounts,
+    optionalWritable: ['/tmp']
+  };
 }
 
 const profileStorage = new AsyncLocalStorage<SandboxProfile>();

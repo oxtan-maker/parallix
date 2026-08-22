@@ -199,6 +199,21 @@ export function detectRunningMissionSessions(
       // by at least this session, so report unknown instead.
       return null;
     }
+
+    // An explicit slug is only trustworthy when the process actually runs
+    // inside the board repository. A same-named mission launched from a
+    // different checkout must not appear on this board (SC1), so the process
+    // location — not the slug alone — is the evidence. A candidate we cannot
+    // attribute is ignored, never fabricated (SC3).
+    if (invocation.missionId !== null) {
+      const location = repoLocation(process, options.rootDir, worktrees, resolveCwd);
+      if (location === 'outside') { continue; }
+      // No board-root/worktree path in argv and no working directory to inspect:
+      // this explicit-slug process may be local, so omitting it would make the
+      // count untrustworthy. Report unknown rather than a fabricated zero (SC3).
+      if (location === 'unknown') { return null; }
+    }
+
     const worktree = worktrees === null ? null : resolveWorktree(process, worktrees, resolveCwd);
     const missionId = invocation.missionId ?? (worktree === null ? null : worktrees?.get(worktree) ?? null);
     if (missionId === null) { continue; }
@@ -218,8 +233,9 @@ export function detectRunningMissionSessions(
 
 /**
  * The mission worktree a process runs in: its working directory when the
- * platform exposes one, otherwise a worktree path named in its arguments
- * (how `px` is invoked through a worktree-local `node_modules/.bin`).
+ * platform exposes one (matched on a path boundary so a CWD nested under a
+ * worktree resolves to that worktree, SC2), otherwise a worktree path named in
+ * its arguments (how `px` is invoked through a worktree-local `node_modules/.bin`).
  */
 function resolveWorktree(
   process: ProcessEntry,
@@ -227,9 +243,50 @@ function resolveWorktree(
   resolveCwd: (_pid: number) => string | null,
 ): string | null {
   const cwd = resolveCwd(process.pid);
-  if (cwd !== null && worktrees.has(cwd)) { return cwd; }
+  if (cwd !== null) {
+    // Longest matching worktree wins so sibling worktrees that share a name
+    // prefix stay distinct (see the boundary check below).
+    let best: string | null = null;
+    for (const path of worktrees.keys()) {
+      if (isContainedIn(cwd, path) && (best === null || path.length > best.length)) { best = path; }
+    }
+    return best;
+  }
   for (const path of worktrees.keys()) {
     if (process.args.includes(`${path}/`)) { return path; }
   }
   return null;
+}
+
+/**
+ * Where a process sits relative to the board repository's working set: the
+ * board root or one of its mission worktrees ('inside'), somewhere else
+ * ('outside', an affirmative cross-repository signal that the explicit slug is
+ * not local), or nowhere observable at all ('unknown', when neither the
+ * working directory nor a path in the arguments can be placed). Directory
+ * boundary aware so a sibling checkout that only shares a mission slug stays
+ * outside (SC1).
+ */
+type RepoLocation = 'inside' | 'outside' | 'unknown';
+
+function repoLocation(
+  process: ProcessEntry,
+  rootDir: string,
+  worktrees: ReadonlyMap<string, MissionId> | null,
+  resolveCwd: (_pid: number) => string | null,
+): RepoLocation {
+  const roots = worktrees === null ? [rootDir] : [rootDir, ...worktrees.keys()];
+  const cwd = resolveCwd(process.pid);
+  if (cwd !== null) { return roots.some((root) => isContainedIn(cwd, root)) ? 'inside' : 'outside'; }
+  for (const root of roots) {
+    if (process.args.includes(`${root}/`)) { return 'inside'; }
+  }
+  return 'unknown';
+}
+
+/** True when `target` is `root` or a descendant, matched on a path boundary. */
+function isContainedIn(target: string, root: string): boolean {
+  if (target === root) { return true; }
+  const prefix = root.endsWith('/') ? root : `${root}/`;
+  return target.startsWith(prefix);
 }

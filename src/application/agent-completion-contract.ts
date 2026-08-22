@@ -1,0 +1,1 @@
+export const AGENT_COMMAND_COMPLETION_CONTRACT = 'Execute the listed commands now; do not only describe or plan them. Verify their required results. Report completion only after the rebase and every required check succeeds. If a command fails, report the failure and stop.';

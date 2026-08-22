@@ -14,7 +14,12 @@ interface BuildPiInvocationOptions {
 }
 
 interface PiNoOutputWatchdog {
-  onNoOutput?: (_event: { command: string; args: string[]; pid: number | undefined; elapsedMs: number }) => void;
+  /**
+   * Observational liveness report: it never cancels the session, and keeps
+   * firing on `intervalMs` until the agent result settles, including after
+   * the first visible assistant text (`sawOutput`).
+   */
+  onNoOutput?: (_event: { command: string; args: string[]; pid: number | undefined; elapsedMs: number; sawOutput: boolean; msSinceLastOutput: number | null }) => void;
   initialDelayMs?: number;
   intervalMs?: number;
 }
@@ -307,6 +312,7 @@ function startPiAgent({
     // and fire noOutputWatchdog.onNoOutput when no visible text arrives.
     const watchdog = teeOptions.noOutputWatchdog;
     let sawOutput = false;
+    let lastOutputAt: number | null = null;
     let watchdogTimer: ReturnType<typeof setTimeout> | null = null;
     const outputStartTime = Date.now();
 
@@ -322,13 +328,17 @@ function startPiAgent({
       const delay = Number.isFinite(delayMs) && delayMs >= 0 ? delayMs : 0;
       watchdogTimer = setTimeout(() => {
         watchdogTimer = null;
-        if (sawOutput) { return; }
+        // Observational for the session's full lifetime: only clearWatchdog()
+        // at a settle point stops it. Stopping at the first assistant text
+        // left later stalls (announce-then-hang) with no liveness signal.
         if (typeof watchdog.onNoOutput !== 'function') { return; }
         watchdog.onNoOutput({
           command: invocation.command,
           args: invocation.args,
           pid: undefined,
           elapsedMs: Date.now() - outputStartTime,
+          sawOutput,
+          msSinceLastOutput: lastOutputAt === null ? null : Date.now() - lastOutputAt,
         });
         scheduleWatchdog(watchdog.intervalMs ?? 0);
       }, delay);
@@ -363,11 +373,10 @@ function startPiAgent({
                   assistantText += delta;
                   // Tee text_delta to stdout for real-time console visibility.
                   process.stdout.write(delta);
-                  // Clear the no-output watchdog on first visible text.
-                  if (!sawOutput) {
-                    sawOutput = true;
-                    clearWatchdog();
-                  }
+                  // Note visible text but keep the watchdog running: it stays
+                  // observational until the session settles.
+                  sawOutput = true;
+                  lastOutputAt = Date.now();
                 }
                 break;
               case 'tool_execution_end':

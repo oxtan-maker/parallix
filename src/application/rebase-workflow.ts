@@ -8,6 +8,7 @@
  * `RebaseWorkflowPort`; this module imports no adapter.
  */
 import * as fmt from './presentation/cli-format.js';
+import { AGENT_COMMAND_COMPLETION_CONTRACT } from './agent-completion-contract.js';
 import type {
   GitCommandResult,
   GitRunner,
@@ -169,7 +170,7 @@ export function buildRebasePrompt({
     sharedFileList,
     '',
     'Step 3 — After resolving each shared file:',
-    '  git add <resolved-files>',
+    '  git add "<file>"',
     '  git rebase --continue',
     '',
     'Step 4 — Repeat Steps 1-3 until rebase completes.',
@@ -179,10 +180,10 @@ export function buildRebasePrompt({
     `  px integrate ${slug} --dry-run`,
     '',
     'Rules:',
+    AGENT_COMMAND_COMPLETION_CONTRACT,
     '- Take --theirs for every mission-specific file listed above.',
     '- For shared files, inspect the conflict markers and resolve sensibly.',
     '- If rebase pauses again, repeat the process.',
-    '- If any command fails, stop and report the failure.',
   ].join('\n');
 }
 

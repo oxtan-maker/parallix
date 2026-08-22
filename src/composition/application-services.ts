@@ -245,6 +245,7 @@ export async function createProductionApplicationServices(
       { ...operatorState.repositories, sessionMarkers },
       executePorts,
       mission?.store ?? null,
+      currentWork,
     )
     : null;
   return {
