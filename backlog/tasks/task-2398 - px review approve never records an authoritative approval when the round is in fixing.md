@@ -1,7 +1,7 @@
 ---
 id: TASK-2398
 title: px review approve never records an authoritative approval when the round is in fixing
-status: refined
+status: active
 assignee: [custom]
 created_date: '2026-08-22'
 labels:
