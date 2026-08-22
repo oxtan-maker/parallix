@@ -1,8 +1,8 @@
 ---
 id: TASK-2397
 title: integrate recovery cannot handle an active mission with an already-approved review
-status: backlog
-assignee: [claude]
+status: active
+assignee: [custom]
 created_date: '2026-08-22'
 labels:
   - bug
