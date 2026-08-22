@@ -1,8 +1,8 @@
 ---
 id: TASK-2399
 title: change the working ui
-status: active
-assignee: [custom]
+status: review
+assignee: [codex]
 created_date: '2026-08-22 19:16'
 labels: [user_value]
 dependencies: []
