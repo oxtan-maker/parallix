@@ -7,7 +7,7 @@ import { agentFamily, type AgentFamily } from '../../domain/agents.js';
 import type { RepositoryId } from '../../domain/repository.js';
 import type { SourceFact } from '../../application/contracts.js';
 import type { MissionReadAdapter } from '../../application/projections/board-readers.js';
-import { getFirstLine, findCheckpoints, findMissionDir, resolveWorktree } from '../filesystem/mission-utils.js';
+import { getFirstLine, findCheckpoints, findMissionDir, resolveBaseWorktree, resolveWorktree } from '../filesystem/mission-utils.js';
 import { parseCheckpointDocument } from './checkpoint-document.js';
 import { getTaskAssignee, getTaskFrontmatterValue, getTaskLabels, getTaskStatus, getTaskStorage, resolveTaskFile } from './backlog.js';
 import {
@@ -32,6 +32,7 @@ type GetTaskStorageFn = (_rootDir?: string) => { tasksDir: string; completedDir:
 type FindMissionDirFn = (_slug: string, _rootDir?: string, _options?: { missionPath?: string }) => string | null;
 type FindCheckpointsFn = (_missionDir: string) => string[];
 type ResolveWorktreeFn = (_slug: string, _options?: { cwd?: string; gitFn?: Function | null }) => string | null;
+type ResolveBaseWorktreeFn = (_slug: string, _options?: { rootDir?: string; gitFn?: Function | null }) => string;
 type GetFirstLineFn = (_filePath: string) => string;
 type ReadCheckpointFileFn = (_filePath: string) => string;
 
@@ -75,6 +76,10 @@ function defaultResolveWorktree(): ResolveWorktreeFn {
   return resolveWorktree as ResolveWorktreeFn;
 }
 
+function defaultResolveBaseWorktree(): ResolveBaseWorktreeFn {
+  return resolveBaseWorktree as ResolveBaseWorktreeFn;
+}
+
 function defaultGetFirstLine(): GetFirstLineFn {
   return getFirstLine as GetFirstLineFn;
 }
@@ -108,6 +113,8 @@ export interface ConcreteMissionReadAdapterOptions {
   readonly findCheckpoints?: FindCheckpointsFn;
   /** Resolve mission worktree path. */
   readonly resolveWorktree?: ResolveWorktreeFn;
+  /** Resolve the authoritative integration-base worktree for a mission. */
+  readonly resolveBaseWorktree?: ResolveBaseWorktreeFn;
   /** Get first line of a file (strips markdown heading markers). */
   readonly getFirstLine?: GetFirstLineFn;
   /** Read a checkpoint document's text. */
@@ -134,6 +141,7 @@ export class ConcreteMissionReadAdapter implements MissionReadAdapter {
   private readonly findMissionDir: FindMissionDirFn;
   private readonly findCheckpoints: FindCheckpointsFn;
   private readonly resolveWorktree: ResolveWorktreeFn;
+  private readonly resolveBaseWorktree: ResolveBaseWorktreeFn;
   private readonly getFirstLine: GetFirstLineFn;
   private readonly readCheckpointFile: ReadCheckpointFileFn;
 
@@ -152,6 +160,7 @@ export class ConcreteMissionReadAdapter implements MissionReadAdapter {
     this.findMissionDir = options.findMissionDir ?? defaultFindMissionDir();
     this.findCheckpoints = options.findCheckpoints ?? defaultFindCheckpoints();
     this.resolveWorktree = options.resolveWorktree ?? defaultResolveWorktree();
+    this.resolveBaseWorktree = options.resolveBaseWorktree ?? defaultResolveBaseWorktree();
     this.getFirstLine = options.getFirstLine ?? defaultGetFirstLine();
     this.readCheckpointFile = options.readCheckpointFile ?? defaultReadCheckpointFile();
   }
@@ -259,8 +268,8 @@ export class ConcreteMissionReadAdapter implements MissionReadAdapter {
   }
 
   /** Determine if the task file lives in the completed or archive store. */
-  private isInCompletedStore(taskFile: string): boolean {
-    const { completedDir, archiveTasksDir } = this.getTaskStorage(this.rootDir);
+  private isInCompletedStore(taskFile: string, rootDir = this.rootDir): boolean {
+    const { completedDir, archiveTasksDir } = this.getTaskStorage(rootDir);
     return taskFile.startsWith(completedDir + path.sep)
       || taskFile.startsWith(archiveTasksDir + path.sep);
   }
@@ -352,9 +361,19 @@ export class ConcreteMissionReadAdapter implements MissionReadAdapter {
   /** Build IntegrationBaseRead from the canonical task file. */
   private buildIntegrationBaseRead(taskFile: string, slug: string): IntegrationBaseRead {
     try {
-      const missionDir = this.findMissionDir(slug, this.rootDir);
-      const record = this.buildRecord(taskFile, missionDir, slug as MissionId);
-      const completionRecorded = this.isInCompletedStore(taskFile);
+      const missionWorktree = this.resolveWorktree(slug, { cwd: this.rootDir });
+      const baseRoot = missionWorktree && path.resolve(missionWorktree) === path.resolve(this.rootDir)
+        ? this.resolveBaseWorktree(slug, { rootDir: this.rootDir })
+        : this.rootDir;
+      const baseTaskFile = baseRoot === this.rootDir
+        ? taskFile
+        : this.resolveTaskFile(slug, baseRoot).taskFile;
+      if (!baseTaskFile) {
+        return { kind: 'missing' };
+      }
+      const missionDir = this.findMissionDir(slug, baseRoot);
+      const record = this.buildRecord(baseTaskFile, missionDir, slug as MissionId);
+      const completionRecorded = this.isInCompletedStore(baseTaskFile, baseRoot);
       return { kind: 'found', mission: record, completionRecorded };
     } catch {
       return { kind: 'missing' };
