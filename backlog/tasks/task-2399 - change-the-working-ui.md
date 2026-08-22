@@ -2,7 +2,7 @@
 id: TASK-2399
 title: change the working ui
 status: backlog
-assignee: []
+assignee: [codex]
 created_date: '2026-08-22 19:16'
 labels: []
 dependencies: []
