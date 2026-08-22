@@ -1,8 +1,8 @@
 ---
 id: TASK-2398
 title: px review approve never records an authoritative approval when the round is in fixing
-status: backlog
-assignee: []
+status: todo
+assignee: [custom]
 created_date: '2026-08-22'
 labels:
   - bug
