@@ -4,7 +4,7 @@ title: active tasks are shown in the backlog lane
 status: backlog
 assignee: [codex]
 created_date: '2026-08-22 09:54'
-labels: []
+labels: [ai_sdlc, bug]
 dependencies: []
 ordinal: 106917
 ---
