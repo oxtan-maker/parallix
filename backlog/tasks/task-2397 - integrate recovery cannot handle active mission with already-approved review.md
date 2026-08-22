@@ -1,5 +1,5 @@
 ---
-id: TASK-2391
+id: TASK-2397
 title: integrate recovery cannot handle an active mission with an already-approved review
 status: active
 assignee: [claude]
