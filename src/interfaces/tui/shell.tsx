@@ -13,6 +13,7 @@ import type {
 } from '../../application/controller/board-command.js';
 import { cancelledOutcome, unavailableCapability, isIntegratedCapability, unavailableReason } from '../../application/controller/board-command.js';
 import { agentIsWorking } from '../../application/projections/mission-board.js';
+import { projectMissionActivity } from '../../application/projections/mission-activity.js';
 import { BoardLayout, selectLayoutMode, useTerminalDimensions, MIN_LANE_WIDTH } from './board-layout.js';
 import { BOARD_LANES } from './lane-column.js';
 import { createNavigationState, moveSelection, type NavigationKey } from './navigation.js';
@@ -281,6 +282,7 @@ export function BoardShell({ projection, columns, rows, initialSelectedMissionId
       <AgentStrip
         agentAvailability={projection.metrics.agentAvailability}
         unattributedRunningSessions={projection.metrics.unattributedRunningSessions}
+        missionActivity={projection.stages.flatMap((stage) => stage.cards).map(projectMissionActivity)}
       />
 
       {/* ═══ MAIN: attention rail + board, side by side or stacked ═══ */}

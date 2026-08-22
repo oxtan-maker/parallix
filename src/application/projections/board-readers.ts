@@ -168,7 +168,10 @@ export class BoardProjectionBuilder {
         latestGate: gateStatus,
         reviewApproval,
         currentWork: work.currentWork,
-        liveSession: sessionByMission.get(mission.id) ?? null,
+        // `undefined` when the process scan itself could not run: that is
+        // "liveness unknown", which must not collapse into the observed
+        // "nothing running" that `null` means.
+        liveSession: runningSessions === null ? undefined : sessionByMission.get(mission.id) ?? null,
         blockingReason: work.blockingReason,
         flags: [],
       };

@@ -177,7 +177,7 @@ The `px` board renders an agent strip above the lanes with one entry per known
 agent family:
 
 ```
-● claude 0 running   ● codex 39m · 0 running exit 1   ● custom 1 running   ● vibe 39m · 0 running exit 1   1 running · family unknown
+work: 1 live · 2 idle   ● claude 0 px cmd live   ● codex 39m · 0 px cmd live exit 1   ● custom 1 px cmd live   ● vibe 39m · 0 px cmd live exit 1   1 px cmd live · family unknown
 ```
 
 - a green dot when the family is usable, a red dot when it is not;
@@ -185,15 +185,26 @@ agent family:
   reason for a blocked family, or the launcher probe's explanation
   (`launcher missing`, `launcher probe-failed: exit 1`) when the family's CLI
   is not usable on this workstation;
-- `N running` — missions this family is running right now.
+- `N px cmd live` — live `px` processes attributed to this family right now.
+  This is recovery evidence about a coordinator process, **not** a count of
+  running agents: a coordinator spends whole phases in git, gates, and file
+  writes with no agent at the keyboard.
+
+The leading `work:` entry is separate and authoritative: it tallies what the
+operations themselves published, by certainty (`live`, `unconfirmed`, `stale`)
+plus `blocked` and `idle`. Only non-zero states appear, and the entry is
+omitted when the board has no missions. Both texts come from the shared
+mission-activity projection (`src/application/projections/mission-activity.ts`),
+which `px status` renders from as well — see "Mission activity in `px status`"
+below.
 
 Only current and future state is shown. A block whose `until` has elapsed
 releases the family for the launcher and leaves no trace on the strip — no
 lapsed countdown, no past block reason.
 
-### Running sessions are observed, not inferred
+### Live px commands are observed, not inferred
 
-`N running` counts missions with a live agent-launching `px` process
+`N px cmd live` counts missions with a live agent-launching `px` process
 (`detectRunningMissionSessions`, `src/adapters/agents/running-sessions.ts`).
 Live processes come from `ps`, and each one is placed like this:
 
@@ -221,17 +232,35 @@ Two commands carry no usable role and stay **unattributed**:
 - `px resolve-conflict` launches as the mission implementer with `slug` and
   `role: 'implementer'`, so its session marker is attributed.
 
-Unattributed sessions are not dropped and not guessed: they are counted in a
-trailing `N running · family unknown` entry, so the strip's total still matches
-what is running. `px board` and other non-launching commands are not sessions,
+Unattributed processes are not dropped and not guessed: they are counted in a
+trailing `N px cmd live · family unknown` entry, so the strip's total still
+matches what was observed. `px board` and other non-launching commands are not sessions,
 and the shell, parent, and child node processes of one command count once.
 
 Nothing durable records that an agent is running: `session_markers` holds only
 the last launch per (mission, role) and is never cleared on exit, and board
 lanes describe mission state, not process state. So when the process table, the
 worktree list, or the session markers cannot answer, the strip prints
-`running unknown` — the count is never derived from board cards and an
-unobserved state is never rendered as `0 running`.
+`px cmd unknown` — the count is never derived from board cards and an
+unobserved state is never rendered as `0 px cmd live`.
+
+### Mission activity in `px status`
+
+For a selected mission, `px status <slug>` prints the same two facts the strip
+renders, from the same projection:
+
+```
+Mission work: working (live): execute
+Coordinator evidence: live px command (claude) — recovery evidence only
+```
+
+`Mission work` is the authoritative fact published by the operation:
+`working (live|unconfirmed|stale): <phase>`, `blocked: <reason>`, or
+`none recorded`. `Coordinator evidence` is the recovery-only process
+observation: `live px command[ (<family>)] — recovery evidence only`,
+`no live px command` (the scan ran and found nothing), or
+`px command liveness unknown` (the scan could not run). The two are never
+merged, because a live coordinator is not a running agent.
 
 The known-family list comes from `config/agents.json`
 (`resolveKnownAgentFamilies`, `src/interfaces/tui/agent-config-resolver.ts`):

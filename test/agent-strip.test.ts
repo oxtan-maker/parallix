@@ -51,7 +51,7 @@ test('AgentStrip renders a red dot and countdown for a family blocked until a fu
   assert.ok(frame.includes('codex'), `strip must name the available family. Got: ${frame}`);
   assert.ok(frame.includes('●'), `strip must render availability dots. Got: ${frame}`);
   assert.ok(frame.includes('45m'), `strip must render the formatCountdown value. Got: ${frame}`);
-  assert.ok(frame.includes('running unknown'), `unobserved liveness must read as unknown. Got: ${frame}`);
+  assert.ok(frame.includes('px cmd unknown'), `unobserved liveness must read as unknown. Got: ${frame}`);
   assert.ok(!frame.includes('wip:'), `the strip must not stand in board cards for sessions. Got: ${frame}`);
 });
 
@@ -244,7 +244,7 @@ test('projectAgentAvailability prefers the block reason over the launcher reason
   assert.equal(row?.reason, 'usage limit', 'an active block is the more specific explanation');
 });
 
-test('AgentStrip reports observed running sessions per family', async () => {
+test('AgentStrip reports observed live px commands per family without calling them agents', async () => {
   const rows = projectAgentAvailability(
     [
       { family: agentFamily('codex'), launcherAvailable: true, block: { kind: 'none' } },
@@ -259,11 +259,12 @@ test('AgentStrip reports observed running sessions per family', async () => {
 
   const frame = await renderStrip(rows);
 
-  assert.ok(frame.includes('claude 2 running'), `observed sessions must be counted. Got: ${frame}`);
-  assert.ok(frame.includes('codex 0 running'), `an observed idle family is zero. Got: ${frame}`);
+  assert.ok(frame.includes('claude 2 px cmd live'), `observed px processes must be counted. Got: ${frame}`);
+  assert.ok(frame.includes('codex 0 px cmd live'), `an observed idle family is zero. Got: ${frame}`);
+  assert.ok(!/\d+ running/.test(frame), `coordinator evidence must never read as a running-agent count. Got: ${frame}`);
 });
 
-test('AgentStrip says running is unknown when liveness was not observed', async () => {
+test('AgentStrip says px command liveness is unknown when liveness was not observed', async () => {
   const rows = projectAgentAvailability(
     [{ family: agentFamily('codex'), launcherAvailable: true, block: { kind: 'none' } }],
     NOW_MS,
@@ -273,8 +274,8 @@ test('AgentStrip says running is unknown when liveness was not observed', async 
   const frame = await renderStrip(rows);
 
   assert.equal(rows[0]?.runningSessions, null, 'unobserved liveness must stay null');
-  assert.ok(frame.includes('running unknown'), `unknown must not render as 0. Got: ${frame}`);
-  assert.ok(!frame.includes('0 running'), `unknown must never be shown as zero. Got: ${frame}`);
+  assert.ok(frame.includes('px cmd unknown'), `unknown must not render as 0. Got: ${frame}`);
+  assert.ok(!frame.includes('0 px cmd live'), `unknown must never be shown as zero. Got: ${frame}`);
 });
 
 test('AgentStrip shows no trace of a block whose until has elapsed', async () => {
@@ -301,8 +302,8 @@ test('AgentStrip counts a session no family can claim instead of dropping it', a
 
   const frame = await renderStrip(rows, countUnattributedSessions([{ missionId: 'task-2328' as never, family: null }]));
 
-  assert.ok(frame.includes('claude 0 running'), `no family may claim the session. Got: ${frame}`);
-  assert.ok(frame.includes('1 running · family unknown'), `the session must still be counted. Got: ${frame}`);
+  assert.ok(frame.includes('claude 0 px cmd live'), `no family may claim the process. Got: ${frame}`);
+  assert.ok(frame.includes('1 px cmd live · family unknown'), `the process must still be counted. Got: ${frame}`);
 });
 
 test('AgentStrip omits the unattributed entry when every session is attributed', async () => {
@@ -315,6 +316,6 @@ test('AgentStrip omits the unattributed entry when every session is attributed',
 
   const frame = await renderStrip(rows, countUnattributedSessions(sessions));
 
-  assert.ok(frame.includes('claude 1 running'), `the attributed session belongs to its family. Got: ${frame}`);
+  assert.ok(frame.includes('claude 1 px cmd live'), `the attributed process belongs to its family. Got: ${frame}`);
   assert.ok(!frame.includes('family unknown'), `nothing is unattributed here. Got: ${frame}`);
 });
