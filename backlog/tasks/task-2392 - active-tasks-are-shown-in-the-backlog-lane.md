@@ -1,7 +1,7 @@
 ---
 id: TASK-2392
 title: active tasks are shown in the backlog lane
-status: refined
+status: active
 assignee: [codex]
 created_date: '2026-08-22 09:54'
 labels: [ai_sdlc, bug]
