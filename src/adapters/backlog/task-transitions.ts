@@ -6,9 +6,7 @@ import { clearTaskAgentAssignee, enforceTaskAssignee, parseAssigneeFamilies } fr
 import { commitTaskFileUpdate, getTaskStorage, resolveTaskFile } from './task-file-io.js';
 import { isMissionArtifact, missionPathForSlug, resolveBaseWorktree, resolveMissionBaseBranch, resolveWorktree } from '../filesystem/mission-utils.js';
 
-function getTaskStatus(taskFilePath: string) {
-  if (!taskFilePath || !fs.existsSync(taskFilePath)) {return null;}
-  const content = fs.readFileSync(taskFilePath, 'utf8');
+function parseTaskStatus(content: string) {
 
   // Try YAML first
   const yamlMatch = content.match(/^status:\s*([^\r\n]+)/m);
@@ -23,6 +21,11 @@ function getTaskStatus(taskFilePath: string) {
   }
 
   return null;
+}
+
+function getTaskStatus(taskFilePath: string) {
+  if (!taskFilePath || !fs.existsSync(taskFilePath)) {return null;}
+  return parseTaskStatus(fs.readFileSync(taskFilePath, 'utf8'));
 }
 
 /** @param {string} taskFilePath @param {string} newStatus @returns {boolean} */
@@ -489,6 +492,7 @@ const transitionTask = transitionTaskOnIntegrationBranch;
 export {
   completeTask,
   getTaskStatus,
+  parseTaskStatus,
   reconcileMissionRebase,
   replaceTaskAssignees,
   resolveBacklogStateRoot,

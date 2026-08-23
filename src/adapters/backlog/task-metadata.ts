@@ -152,10 +152,7 @@ const CLASSIFICATION_LABELS = new Set(['ai_sdlc', 'user_value', 'unknown']);
  * treated as a fallback when no block labels are found).
  */
 /** @param {string} taskFilePath */
-function getTaskLabels(taskFilePath: string) {
-  if (!taskFilePath || !fs.existsSync(taskFilePath)) {return [];}
-  const content = fs.readFileSync(taskFilePath, 'utf8');
-
+function parseTaskLabels(content: string) {
   const blockMatch = content.match(/^labels:[ \t]*[\r\n]+((?:\s+-\s+.+[\r\n]*)+)/m);
   if (blockMatch) {
     return blockMatch[1].split(/[\r\n]+/)
@@ -175,6 +172,12 @@ function getTaskLabels(taskFilePath: string) {
   }
 
   return [];
+}
+
+/** @param {string} taskFilePath */
+function getTaskLabels(taskFilePath: string) {
+  if (!taskFilePath || !fs.existsSync(taskFilePath)) {return [];}
+  return parseTaskLabels(fs.readFileSync(taskFilePath, 'utf8'));
 }
 
 /** @param {string} taskFilePath */
@@ -432,9 +435,9 @@ export {
   getTaskLabels,
   hasBugLabel,
   parseAssigneeFamilies,
+  parseTaskLabels,
   setTaskAssignee,
   setTaskImplementer,
   setTaskLabels,
   syncTaskLabelsToBaseWorktree,
 };
-

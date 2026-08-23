@@ -336,6 +336,62 @@ function workTreeRootFor(candidate: string, runGit: Function): string {
   return candidate;
 }
 
+export interface WorktreeTopologySnapshot {
+  resolveWorktree(_slug: string, _options?: { cwd?: string }): string | null;
+}
+
+/** Read the worktree list once for one projection build. */
+export function snapshotWorktreeTopology(options: { cwd?: string; gitFn?: Function | null; currentBranch?: (_cwd: string) => string } = {}): WorktreeTopologySnapshot {
+  const cwd = options.cwd || process.cwd();
+  const runGit = options.gitFn || gitModule.git;
+  const currentBranch = options.currentBranch || gitModule.getCurrentBranch;
+  const normalizedRoots = new Map<string, string>();
+  let branchAtCwd: string | null | undefined;
+  const entries: Array<{ path: string; branch: string | null; prunable: boolean }> = [];
+  try {
+    let current: { path: string; branch: string | null; prunable: boolean } | null = null;
+    for (const line of String(runGit(['worktree', 'list', '--porcelain']).stdout || '').split('\n')) {
+      if (line.startsWith('worktree ')) {
+        if (current) { entries.push(current); }
+        current = { path: line.slice('worktree '.length).trim(), branch: null, prunable: false };
+      } else if (current && line.startsWith('branch ')) {
+        current.branch = line.slice('branch '.length).trim();
+      } else if (current && line.startsWith('prunable ')) {
+        current.prunable = true;
+      } else if (current && line === '') {
+        entries.push(current);
+        current = null;
+      }
+    }
+    if (current) { entries.push(current); }
+  } catch {
+    // The ordinary resolver retains its branch-based cwd fallback below.
+  }
+
+  return Object.freeze({
+    resolveWorktree(slug: string, resolveOptions: { cwd?: string } = {}): string | null {
+      const lookupCwd = resolveOptions.cwd || cwd;
+      const branchRef = missionBranchRef(slug, lookupCwd);
+      const liveMatches = entries
+        .filter(entry => entry.branch === branchRef && !entry.prunable)
+        .map(entry => ({ ...entry, path: normalizedRoots.get(entry.path) ?? (() => {
+          const root = workTreeRootFor(entry.path, runGit);
+          normalizedRoots.set(entry.path, root);
+          return root;
+        })() }));
+      const cwdMatch = liveMatches.find(entry => lookupCwd === entry.path || lookupCwd.startsWith(entry.path + '/'));
+      if (cwdMatch) { return cwdMatch.path; }
+      if (liveMatches[0]) { return liveMatches[0].path; }
+      try {
+        branchAtCwd ??= currentBranch(lookupCwd);
+        return branchAtCwd === missionBranchName(slug, lookupCwd) ? lookupCwd : null;
+      } catch {
+        return null;
+      }
+    },
+  });
+}
+
 export function resolveWorktree(slug: string, options: { cwd?: string; gitFn?: Function | null } = {}): string | null {
   const cwd = options.cwd || process.cwd();
   /** @type {Function | null} */

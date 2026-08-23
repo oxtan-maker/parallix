@@ -15,6 +15,7 @@ import { ConcreteOperationLogReadAdapter } from '../adapters/backlog/concrete-op
 import { ConcreteReviewReadAdapter } from '../adapters/backlog/concrete-review-read-adapter.js';
 import { ConcreteCurrentWorkReadAdapter } from '../adapters/backlog/concrete-current-work-read-adapter.js';
 import { processLivenessProbe } from '../adapters/process/process-liveness.js';
+import { snapshotWorktreeTopology } from '../adapters/git/worktree.js';
 import { BoardProjectionBuilder } from '../application/projections/board-readers.js';
 import type { MissionReadAdapter } from '../application/projections/board-readers.js';
 import { ConcreteMetricsReadAdapter } from '../application/projections/metrics-read-adapter.js';
@@ -65,10 +66,11 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
     }
   }
   const currentWork = new ConcreteCurrentWorkReadAdapter(deps.historyRepo);
+  const gates = new ConcreteGateReadAdapter({ rootDir: deps.rootDir });
   const builder = new BoardProjectionBuilder(
     missions,
     new ConcreteReviewReadAdapter({ rootDir: deps.rootDir, missionStore: deps.missionStore }),
-    new ConcreteGateReadAdapter({ rootDir: deps.rootDir }),
+    gates,
     new ConcreteAgentReadAdapter({
       rootDir: deps.rootDir,
       blocklistRepo: deps.blocklistRepo,
@@ -85,6 +87,11 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
     new ConcreteGitReadAdapter({ rootDir: deps.rootDir, repositoryId: deps.repositoryId }),
     new ConcreteOperationLogReadAdapter({ historyRepo: deps.historyRepo }),
     {
+      prepareReads: () => {
+        const topology = snapshotWorktreeTopology({ cwd: deps.rootDir });
+        repositoryMissions.useWorktreeTopology(topology);
+        gates.useWorktreeTopology(topology);
+      },
       // The authoritative answer to "which mission is being worked on right
       // now", published by the operations themselves. The OS-process scan in
       // the agent adapter above is left in place only as bounded recovery.

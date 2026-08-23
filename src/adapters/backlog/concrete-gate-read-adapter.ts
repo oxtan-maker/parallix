@@ -4,6 +4,7 @@ import path from 'node:path';
 import type { MissionId } from '../../domain/mission.js';
 import type { GateReadAdapter } from '../../application/projections/board-readers.js';
 import { findMissionDir, resolveWorktree } from '../filesystem/mission-utils.js';
+import type { WorktreeTopologySnapshot } from '../git/worktree.js';
 
 // ---------------------------------------------------------------------------
 // Parse-primitive types
@@ -47,12 +48,18 @@ export class ConcreteGateReadAdapter implements GateReadAdapter {
   private readonly findMissionDir: FindMissionDirFn;
   private readonly readGateFile: (_missionDir: string) => string | null;
   private readonly resolveWorktree: ResolveWorktreeFn;
+  private worktreeTopology: WorktreeTopologySnapshot | null = null;
 
   constructor(options: ConcreteGateReadAdapterOptions) {
     this.rootDir = options.rootDir;
     this.findMissionDir = options.findMissionDir ?? defaultFindMissionDir();
     this.readGateFile = options.readGateFile ?? defaultReadGateFile;
     this.resolveWorktree = options.resolveWorktree ?? (resolveWorktree as ResolveWorktreeFn);
+  }
+
+  /** Scoped by BoardProjectionBuilder to one build; never retained as a cache. */
+  useWorktreeTopology(snapshot: WorktreeTopologySnapshot): void {
+    this.worktreeTopology = snapshot;
   }
 
   // -----------------------------------------------------------------------
@@ -91,7 +98,9 @@ export class ConcreteGateReadAdapter implements GateReadAdapter {
   private searchRoots(missionId: MissionId): string[] {
     let worktreeDir: string | null = null;
     try {
-      worktreeDir = this.resolveWorktree(missionId, { cwd: this.rootDir });
+      worktreeDir = this.worktreeTopology
+        ? this.worktreeTopology.resolveWorktree(missionId, { cwd: this.rootDir })
+        : this.resolveWorktree(missionId, { cwd: this.rootDir });
     } catch {
       worktreeDir = null;
     }
