@@ -1,8 +1,8 @@
 ---
 id: TASK-2397
 title: integrate recovery cannot handle an active mission with an already-approved review
-status: review
-assignee: [custom]
+status: active
+assignee: [vibe]
 created_date: '2026-08-22'
 labels:
   - bug
