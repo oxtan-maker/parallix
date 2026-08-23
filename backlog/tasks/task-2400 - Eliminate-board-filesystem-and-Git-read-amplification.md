@@ -2,7 +2,7 @@
 id: TASK-2400
 title: Eliminate board filesystem and Git read amplification
 status: backlog
-assignee: []
+assignee: [custom]
 created_date: '2026-08-23 07:24'
 labels: []
 dependencies: []
