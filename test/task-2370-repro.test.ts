@@ -46,8 +46,7 @@ function makeMissionAdapter(missions: readonly Mission[]): MissionReadAdapter {
 }
 
 const reviews: ReviewReadAdapter = {
-  async loadReview() { return null; },
-  async loadReviewApproval() { return null; },
+  async loadReviews(ids) { return new Map(ids.map((id) => [id, { review: null, approval: null }])); },
 };
 
 const gates: GateReadAdapter = { async loadGateStatus() { return 'passed'; } };

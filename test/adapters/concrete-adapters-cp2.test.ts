@@ -59,6 +59,29 @@ test('ReviewReadAdapter loadReview returns null when no review state exists', as
   assert.equal(review, null);
 });
 
+test('ConcreteReviewReadAdapter batch fallback preserves flat and missing review state', async () => {
+  const adapter = new ConcreteReviewReadAdapter({
+    rootDir: '/tmp',
+    missionStore: null,
+    readReviewState: (slug) => slug === 'task-1001' ? ({
+      slug,
+      reviewer: 'codex',
+      implementer: 'custom',
+      round: 1,
+      startedAt: '2026-08-23T08:00:00.000Z',
+      phase: 'reviewing',
+      disposition: null,
+      metadata: {},
+    } as any) : null,
+    findMissionDir: () => '/tmp/missions/task-1001',
+  });
+
+  const facts = await adapter.loadReviews([missionId('task-1001'), missionId('task-9999')]);
+  assert.equal(facts.get(missionId('task-1001'))?.review?.rounds.length, 1);
+  assert.equal(facts.get(missionId('task-1001'))?.approval, null);
+  assert.deepEqual(facts.get(missionId('task-9999')), { review: null, approval: null });
+});
+
 test('ReviewReadAdapter loadReview returns domain Review from review state', async () => {
   const adapter = new ConcreteReviewReadAdapter({
     rootDir: '/tmp',

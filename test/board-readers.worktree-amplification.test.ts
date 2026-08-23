@@ -57,7 +57,7 @@ async function buildWithCounts(count: number) {
     const gates = new ConcreteGateReadAdapter({ rootDir, resolveWorktree });
     await new BoardProjectionBuilder(
       missions,
-      { async loadReview() { return null; }, async loadReviewApproval() { return null; } },
+      { async loadReviews(ids) { return new Map(ids.map((id) => [id, { review: null, approval: null }])); } },
       gates,
       { async loadAgentAvailability() { return []; }, async loadAssignedAgent() { return null; } },
       { async loadRepositoryId() { return repositoryId('test-repo'); }, async loadHeadCommit() { return 'head'; } },

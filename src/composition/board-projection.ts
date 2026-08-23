@@ -25,10 +25,13 @@ import type { ExecuteMissionPorts } from '../application/ports/execute-mission.j
 import type { TuiCapabilities } from '../application/tui-capabilities.js';
 import type { MissionStore } from '../application/domain-ports.js';
 import type { CurrentWorkPort } from '../application/recording/current-work-recorder.js';
+import type { SqliteDatabaseAdapter } from '../adapters/sqlite/database-adapter.js';
+import { SqliteReviewProjectionReader } from '../adapters/sqlite/review-projection-reader.js';
 
 export interface BoardProjectionCompositionDeps {
   readonly rootDir: string;
   readonly missionStore: MissionStore | null;
+  readonly database?: SqliteDatabaseAdapter | null;
   readonly repositoryId: RepositoryId;
   readonly blocklistRepo: AgentBlocklistRepository;
   readonly historyRepo: OperationalHistoryRepository;
@@ -69,7 +72,11 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
   const gates = new ConcreteGateReadAdapter({ rootDir: deps.rootDir });
   const builder = new BoardProjectionBuilder(
     missions,
-    new ConcreteReviewReadAdapter({ rootDir: deps.rootDir, missionStore: deps.missionStore }),
+    new ConcreteReviewReadAdapter({
+      rootDir: deps.rootDir,
+      missionStore: deps.missionStore,
+      projectionReader: deps.database ? new SqliteReviewProjectionReader(deps.database) : null,
+    }),
     gates,
     new ConcreteAgentReadAdapter({
       rootDir: deps.rootDir,

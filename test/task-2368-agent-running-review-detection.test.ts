@@ -75,8 +75,7 @@ function makeBuilder(runningSessions: readonly RunningAgentSession[] | null): Bo
     getSourceFacts() { return [{ source: 'task-markdown', status: 'fresh' as const, value: 'loaded' }]; },
   };
   const reviews: ReviewReadAdapter = {
-    async loadReview() { return pendingReview(); },
-    async loadReviewApproval() { return null; },
+    async loadReviews(ids) { return new Map(ids.map((id) => [id, { review: pendingReview(), approval: null }])); },
   };
   const gates: GateReadAdapter = { async loadGateStatus() { return 'passed'; } };
   const agents: AgentReadAdapter = {

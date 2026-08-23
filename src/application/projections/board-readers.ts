@@ -39,10 +39,13 @@ export interface MissionReadAdapter {
 
 /** Read adapter for review state from Git-owned review artifacts. */
 export interface ReviewReadAdapter {
-  /** Load review for a mission. Returns null if no review exists. */
-  loadReview(_missionId: MissionId): Promise<Review | null>;
-  /** Load review approval status from the review surface. */
-  loadReviewApproval(_missionId: MissionId): Promise<{ subject: ReviewedRevision; approvedAt: string | null } | null>;
+  /** Load review and approval facts for the complete board mission set. */
+  loadReviews(_missionIds: readonly MissionId[]): Promise<ReadonlyMap<MissionId, ReviewProjectionFact>>;
+}
+
+export interface ReviewProjectionFact {
+  readonly review: Review | null;
+  readonly approval: { subject: ReviewedRevision; approvedAt: string | null } | null;
 }
 
 /** Read adapter for gate state from integration pipeline results. */
@@ -141,6 +144,7 @@ export class BoardProjectionBuilder {
     ]);
 
     const sourceFacts = this._missions.getSourceFacts();
+    const reviews = await this._reviews.loadReviews(missions.map((mission) => mission.id));
 
     // The authoritative answer to "what is being worked on right now?". It is
     // reconciled once per build so every card sees the same clock reading.
@@ -160,11 +164,8 @@ export class BoardProjectionBuilder {
 
     // Build mission cards with operational facts
     const cards = await Promise.all(missions.map(async (mission) => {
-      const [review, reviewApproval, gateStatus] = await Promise.all([
-        this._reviews.loadReview(mission.id),
-        this._reviews.loadReviewApproval(mission.id),
-        this._gates.loadGateStatus(mission.id),
-      ]);
+      const { review, approval: reviewApproval } = reviews.get(mission.id) ?? { review: null, approval: null };
+      const gateStatus = await this._gates.loadGateStatus(mission.id);
 
       const work = currentWorkByMission.get(mission.id) ?? noCurrentWork;
       const facts: MissionOperationalFacts = {

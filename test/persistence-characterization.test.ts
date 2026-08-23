@@ -59,8 +59,7 @@ function makeMissionAdapter(missions: Mission[] = []): MissionReadAdapter {
 
 function makeReviewAdapter(): ReviewReadAdapter {
   return {
-    async loadReview() { return null; },
-    async loadReviewApproval() { return null; },
+    async loadReviews(ids) { return new Map(ids.map((id) => [id, { review: null, approval: null }])); },
   };
 }
 

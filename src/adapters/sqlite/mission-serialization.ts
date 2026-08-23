@@ -167,6 +167,11 @@ export interface MissionAggregateRecords {
   readonly reviewEvents: readonly MissionReviewEventRecord[];
 }
 
+type MissionReviewRecords = Pick<
+  MissionAggregateRecords,
+  'review' | 'reviewRounds' | 'findings' | 'resolutions' | 'stageLaunches' | 'reviewEvents'
+>;
+
 export interface HydratedMission {
   readonly mission: Mission;
   readonly version: MissionVersion;
@@ -221,7 +226,7 @@ function checkpointsFrom(records: MissionAggregateRecords): readonly CheckpointD
 }
 
 function findingsFor(
-  records: MissionAggregateRecords,
+  records: MissionReviewRecords,
   roundPosition: number,
 ): readonly ReviewFinding[] {
   return records.findings
@@ -235,7 +240,7 @@ function findingsFor(
 
 function decisionFor(
   row: MissionReviewRoundRecord,
-  records: MissionAggregateRecords,
+  records: MissionReviewRecords,
 ): ReviewerDecision | null {
   if (row.decision_kind === null) {
     return null;
@@ -279,7 +284,7 @@ function decisionFor(
 }
 
 function resolutionsFor(
-  records: MissionAggregateRecords,
+  records: MissionReviewRecords,
   roundPosition: number,
 ): readonly FindingResolution[] {
   return records.resolutions
@@ -299,7 +304,7 @@ function resolutionsFor(
 
 function reviewRoundFrom(
   row: MissionReviewRoundRecord,
-  records: MissionAggregateRecords,
+  records: MissionReviewRecords,
 ): ReviewRound {
   const change = row.change_kind === 'pull-request'
     ? {
@@ -384,7 +389,7 @@ function parseItemDispositions(value: string | null): ReviewItemDisposition[] | 
 }
 
 /** Parse review events from the records. */
-function reviewEventsFrom(records: MissionAggregateRecords): readonly ReviewEventRecord[] {
+function reviewEventsFrom(records: MissionReviewRecords): readonly ReviewEventRecord[] {
   return records.reviewEvents.map((row) => ({
     position: requiredInteger(row.position, 'review event position'),
     eventType: requiredText(row.event_type, 'review event type') as ReviewEventType,
@@ -417,7 +422,7 @@ function reviewDispositionFrom(value: string | null): ReviewDisposition | null {
 }
 
 /** Rebuild the stage-launch windows, preserving per-window insertion order. */
-function stageLaunchesFrom(records: MissionAggregateRecords): readonly StageLaunchWindow[] {
+function stageLaunchesFrom(records: MissionReviewRecords): readonly StageLaunchWindow[] {
   const windows = new Map<string, string[]>();
   for (const row of [...records.stageLaunches].sort((a, b) => a.position - b.position)) {
     const fingerprints = windows.get(row.stage_key) ?? [];
@@ -427,7 +432,7 @@ function stageLaunchesFrom(records: MissionAggregateRecords): readonly StageLaun
   return [...windows.entries()].map(([stageKey, fingerprints]) => ({ stageKey, fingerprints }));
 }
 
-function reviewFrom(records: MissionAggregateRecords): Review | null {
+function reviewFrom(records: MissionReviewRecords): Review | null {
   if (!records.review) {
     if (records.reviewRounds.length > 0) {
       throw new Error('Persisted review rounds exist without a Mission review');
@@ -455,6 +460,24 @@ function reviewFrom(records: MissionAggregateRecords): Review | null {
     stageLaunches: stageLaunchesFrom(records),
     reviewEvents: reviewEventsFrom(records),
   };
+}
+
+/** Hydrate the board's review read model from the four relations it consumes. */
+export function hydrateReviewProjection(records: Pick<
+  MissionAggregateRecords,
+  'reviewRounds' | 'findings' | 'resolutions' | 'reviewEvents'
+>): Review | null {
+  if (records.reviewRounds.length === 0) { return null; }
+  return reviewFrom({
+    ...records,
+    review: {
+      mission_id: records.reviewRounds[0].mission_id,
+      intervention_requested_at: null,
+      intervention_requested_by: null,
+      intervention_reason: null,
+    },
+    stageLaunches: [],
+  });
 }
 
 /**

@@ -68,7 +68,8 @@ export type {
 // Mission aggregate
 export { SqliteMissionStore, MissionStaleWriteError } from './mission-store.js';
 export type { KnownRepositoryObservation } from './mission-store.js';
-export { hydrateMission } from './mission-serialization.js';
+export { hydrateMission, hydrateReviewProjection } from './mission-serialization.js';
+export { SqliteReviewProjectionReader } from './review-projection-reader.js';
 export type {
   HydratedMission,
   MissionAggregateRecords,

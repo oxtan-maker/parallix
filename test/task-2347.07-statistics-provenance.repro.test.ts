@@ -109,7 +109,7 @@ function missionAdapter(): MissionReadAdapter {
 }
 
 function reviewAdapter(): ReviewReadAdapter {
-  return { async loadReview() { return null; }, async loadReviewApproval() { return null; } };
+  return { async loadReviews(ids) { return new Map(ids.map((id) => [id, { review: null, approval: null }])); } };
 }
 
 function gateAdapter(): GateReadAdapter {

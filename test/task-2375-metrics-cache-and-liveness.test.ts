@@ -51,8 +51,7 @@ function emptyAdapters(): {
       getSourceFacts: () => [] as readonly SourceFact<string>[],
     },
     reviews: {
-      loadReview: async () => null,
-      loadReviewApproval: async () => null,
+      loadReviews: async (ids) => new Map(ids.map((id) => [id, { review: null, approval: null }])),
     },
     gates: {
       loadGateStatus: async () => 'unknown',
