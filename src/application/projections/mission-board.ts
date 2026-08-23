@@ -4,6 +4,7 @@ import type { RepositoryId } from '../../domain/repository.js';
 import type { RunningAgentSession } from './agent-status.js';
 import {
   currentReviewRound,
+  reviewApprovalOwed,
   sameReviewedRevision,
   type PullRequestReference,
   type Review,
@@ -109,6 +110,8 @@ export interface MissionCard {
   readonly reviewRound: number | null;
   readonly reviewPhase: ReviewPhase | null;
   readonly reviewDisposition: ReviewDisposition | null;
+  /** An approved local self-review still needs a formal provider approval. */
+  readonly approvalOwed?: boolean;
   /**
    * Every round so far, oldest first.
    *
@@ -268,6 +271,7 @@ export function projectMissionCard(mission: Mission, facts: MissionOperationalFa
     reviewRound: currentRound?.number ?? null,
     reviewPhase: currentRound?.phase ?? null,
     reviewDisposition: currentRound?.disposition ?? null,
+    approvalOwed: reviewApprovalOwed(mission.review),
     reviewHistory: projectReviewHistory(mission.review),
     currentWork: facts.currentWork,
     liveSession: facts.liveSession,

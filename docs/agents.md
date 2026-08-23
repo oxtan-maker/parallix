@@ -277,6 +277,15 @@ Block state itself is read from the operator blocklist, so an automatically
 persisted usage-limit block (see *Usage-limit handling* below) becomes visible
 on the board as a red dot with its countdown and reason.
 
+### Formal approval owed after self-review
+
+When every other reviewer family is unavailable, the workflow can retain its
+single-family fallback and run the PR author family as reviewer. Its local
+verdict remains recorded. If the provider cannot accept that self-review,
+`px status <slug>` reports that formal approval is owed; a different agent or a
+human must submit it to the provider. This notice does not change the local
+verdict's existing meaning for integration gating.
+
 Launcher state comes from the same probe the launcher itself uses
 (`workflowLauncherStatus`), wrapped by `createLauncherProbe`
 (`src/adapters/agents/launcher-availability.ts`) and wired at the composition

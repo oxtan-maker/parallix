@@ -269,6 +269,11 @@ export interface Review {
   readonly reviewEvents: readonly ReviewEventRecord[];
 }
 
+/** Whether an approved self-review still needs a provider-side approval. */
+export function reviewApprovalOwed(review: Review | null): boolean {
+  return review?.reviewEvents.some((event) => event.blockedReason === 'external-formal-approval-owed') ?? false;
+}
+
 export type ReviewStatus =
   | 'awaiting-review'
   | 'awaiting-implementation'

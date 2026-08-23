@@ -228,13 +228,18 @@ async function recordLocalReviewVerdict(
     : new ReviewState(slug, existing as ReviewStateData);
   if (outcome === 'approve') {
     state.disposition = 'APPROVED';
+    state.metadata = { ...state.metadata, approvalOwed: true };
     try { state.transitionTo('approved'); } catch { /* ignore */ }
   } else if (outcome === 'request-changes') {
     state.disposition = 'REQUEST_CHANGES';
     try { state.transitionTo('fixing'); } catch { /* ignore */ }
   }
   await persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree, missionStore);
-  const outcomeResult = await createEventFn(slug, VALID_EVENT_TYPES.REVIEWER_OUTCOME, { verdict: outcome, content: `Review verdict: ${outcome}` }, { worktree, log: log, error, missionStore });
+  const outcomeResult = await createEventFn(slug, VALID_EVENT_TYPES.REVIEWER_OUTCOME, {
+    verdict: outcome,
+    content: `Review verdict: ${outcome}`,
+    ...(outcome === 'approve' ? { blockedReason: 'external-formal-approval-owed' } : {}),
+  }, { worktree, log: log, error, missionStore });
   if (!outcomeResult.ok) {
     throw new Error(`Cannot store review event for "${slug}": the operator database rejected the write.`);
   }
