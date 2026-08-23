@@ -1,9 +1,9 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { classifyHookFailure, handleHookFailureAutoBounce } from '../src/adapters/cli/commands/rebase.js';
-import rebase from '../src/adapters/cli/commands/rebase.js';
-import { classifyHookFailure as classifyHookFailureIntegrate, handleHookFailureAutoBounce as handleHookFailureAutoBounceIntegrate } from '../src/adapters/cli/commands/integrate.js';
-import { classifyHookFailure as classifyHookFailureShared, handleHookFailureAutoBounce as handleHookFailureAutoBounceShared, MAX_HOOK_RETRY, type HookRebouncePort } from '../src/application/hook-failure-workflow.js';
+import { classifyHookFailure } from '../src/adapters/cli/commands/rebase.js';
+import { classifyHookFailure as classifyHookFailureIntegrate } from '../src/adapters/cli/commands/integrate.js';
+import { classifyHookFailure as classifyHookFailureShared } from '../src/application/hook-failure-workflow.js';
+import { rebound, DEFAULT_REBOUND_ATTEMPTS } from '../src/application/rebound-kernel.js';
 import { reboundPreReviewFailure, gateFailureReason, hookFailureReason } from '../src/adapters/review/review-loop.js';
 import { ReviewState } from '../src/adapters/review/review-state.js';
 
@@ -89,169 +89,6 @@ describe('classifyHookFailure (integrate.ts) — SC2/SC8', () => {
   });
 });
 
-describe('handleHookFailureAutoBounce (rebase.ts) — SC3/SC5/SC6', () => {
-  // Common mocks for implementer resolution
-  const mockWorkflowStatus = () => ({ available: true, agent: 'claude' });
-  const mockSelectAgent = () => 'claude';
-  const mockTransitionTask = async () => {};
-  const mockApplyFallback = async () => 'claude';
-
-  it('returns true (should retry) when under retry budget', async () => {
-    let metadataWritten: any = null;
-    const writeReviewStateFn = async (_slug: string, state: any, _worktree: string) => {
-      metadataWritten = state.metadata;
-    };
-    const readReviewStateFn = async () => ({ metadata: {} });
-    const startAgentFn = async () => ({ agent: 'claude', result: { status: 0 } });
-
-    const result = await handleHookFailureAutoBounce(
-      'test-slug',
-      '/worktree',
-      'pre-commit: lint error',
-      { hookType: 'pre-commit' },
-      { startAgentFn, readReviewStateFn, writeReviewStateFn, workflowLauncherStatusFn: mockWorkflowStatus, selectAgentFn: mockSelectAgent, transitionTaskFn: mockTransitionTask, applyAgentFallbackFn: mockApplyFallback }
-    );
-
-    assert.ok(result);
-    assert.equal(metadataWritten.hookFailureRetryCount, 1);
-  });
-
-  it('returns false (stranded) when max retries exceeded', async () => {
-    const readReviewStateFn = async () => ({ metadata: { hookFailureRetryCount: 2 } });
-    const writeReviewStateFn = async () => {};
-    const startAgentFn = async () => ({ agent: 'claude', result: { status: 0 } });
-
-    const result = await handleHookFailureAutoBounce(
-      'test-slug',
-      '/worktree',
-      'pre-commit: lint error',
-      { hookType: 'pre-commit' },
-      { startAgentFn, readReviewStateFn, writeReviewStateFn, workflowLauncherStatusFn: mockWorkflowStatus, selectAgentFn: mockSelectAgent, transitionTaskFn: mockTransitionTask, applyAgentFallbackFn: mockApplyFallback }
-    );
-
-    assert.ok(!result);
-  });
-
-  it('increments retry count on each bounce', async () => {
-    let currentRetry = 0;
-    const readReviewStateFn = async () => ({ metadata: { hookFailureRetryCount: currentRetry } });
-    let metadataWritten: any = null;
-    const writeReviewStateFn = async (_slug: string, state: any, _worktree: string) => {
-      metadataWritten = state.metadata;
-    };
-    const startAgentFn = async () => ({ agent: 'claude', result: { status: 0 } });
-
-    // First bounce
-    await handleHookFailureAutoBounce(
-      'test-slug', '/worktree', 'pre-commit: error', { hookType: 'pre-commit' },
-      { startAgentFn, readReviewStateFn, writeReviewStateFn, workflowLauncherStatusFn: mockWorkflowStatus, selectAgentFn: mockSelectAgent, transitionTaskFn: mockTransitionTask, applyAgentFallbackFn: mockApplyFallback }
-    );
-    assert.equal(metadataWritten.hookFailureRetryCount, 1);
-    currentRetry = 1;
-
-    // Second bounce
-    await handleHookFailureAutoBounce(
-      'test-slug', '/worktree', 'pre-commit: error', { hookType: 'pre-commit' },
-      { startAgentFn, readReviewStateFn, writeReviewStateFn, workflowLauncherStatusFn: mockWorkflowStatus, selectAgentFn: mockSelectAgent, transitionTaskFn: mockTransitionTask, applyAgentFallbackFn: mockApplyFallback }
-    );
-    assert.equal(metadataWritten.hookFailureRetryCount, 2);
-    currentRetry = 2;
-
-    // Third call - should strand
-    const result = await handleHookFailureAutoBounce(
-      'test-slug', '/worktree', 'pre-commit: error', { hookType: 'pre-commit' },
-      { startAgentFn, readReviewStateFn, writeReviewStateFn, workflowLauncherStatusFn: mockWorkflowStatus, selectAgentFn: mockSelectAgent, transitionTaskFn: mockTransitionTask, applyAgentFallbackFn: mockApplyFallback }
-    );
-    assert.ok(!result);
-  });
-
-  it('returns false when agent launch fails', async () => {
-    const readReviewStateFn = async () => ({ metadata: {} });
-    const writeReviewStateFn = async () => {};
-    const startAgentFn = async () => { throw new Error('agent not available'); };
-    let exitCode: number | null = null;
-    const exitFn = (code: number) => { exitCode = code; };
-
-    const result = await handleHookFailureAutoBounce(
-      'test-slug', '/worktree', 'pre-commit: error', { hookType: 'pre-commit' },
-      { startAgentFn, readReviewStateFn, writeReviewStateFn, exitFn, workflowLauncherStatusFn: mockWorkflowStatus, selectAgentFn: mockSelectAgent, transitionTaskFn: mockTransitionTask, applyAgentFallbackFn: mockApplyFallback }
-    );
-
-    assert.ok(!result);
-    assert.equal(exitCode, 1);
-  });
-
-  it('returns false when agent exits with non-zero status', async () => {
-    const readReviewStateFn = async () => ({ metadata: {} });
-    const writeReviewStateFn = async () => {};
-    const startAgentFn = async () => ({ agent: 'claude', result: { status: 1 } });
-
-    const result = await handleHookFailureAutoBounce(
-      'test-slug', '/worktree', 'pre-commit: error', { hookType: 'pre-commit' },
-      { startAgentFn, readReviewStateFn, writeReviewStateFn, workflowLauncherStatusFn: mockWorkflowStatus, selectAgentFn: mockSelectAgent, transitionTaskFn: mockTransitionTask, applyAgentFallbackFn: mockApplyFallback }
-    );
-
-    assert.ok(!result);
-  });
-
-  it('creates metadata when no persisted state exists', async () => {
-    const readReviewStateFn = async () => null;
-    let metadataWritten: any = null;
-    const writeReviewStateFn = async (_slug: string, state: any, _worktree: string) => {
-      metadataWritten = state.metadata;
-    };
-    const startAgentFn = async () => ({ agent: 'claude', result: { status: 0 } });
-
-    const result = await handleHookFailureAutoBounce(
-      'test-slug', '/worktree', 'pre-commit: error', { hookType: 'pre-commit' },
-      { startAgentFn, readReviewStateFn, writeReviewStateFn, workflowLauncherStatusFn: mockWorkflowStatus, selectAgentFn: mockSelectAgent, transitionTaskFn: mockTransitionTask, applyAgentFallbackFn: mockApplyFallback }
-    );
-
-    assert.ok(result);
-    assert.equal(metadataWritten.hookFailureRetryCount, 1);
-  });
-});
-
-describe('handleHookFailureAutoBounce (integrate.ts) — SC4/SC5/SC6', () => {
-  const mockWorkflowStatus = () => ({ available: true, agent: 'claude' });
-  const mockSelectAgent = () => 'claude';
-  const mockTransitionTask = async () => {};
-  const mockApplyFallback = async () => 'claude';
-
-  it('returns true (should retry) when under retry budget', async () => {
-    let metadataWritten: any = null;
-    const writeReviewStateFn = async (_slug: string, state: any, _worktree: string) => {
-      metadataWritten = state.metadata;
-    };
-    const readReviewStateFn = async () => ({ metadata: {} });
-    const startAgentFn = async () => ({ agent: 'claude', result: { status: 0 } });
-
-    const result = await handleHookFailureAutoBounceIntegrate(
-      'test-slug',
-      '/worktree',
-      'pre-commit: lint error',
-      { hookType: 'pre-commit' },
-      { startAgentFn, readReviewStateFn, writeReviewStateFn, workflowLauncherStatusFn: mockWorkflowStatus, selectAgentFn: mockSelectAgent, transitionTaskFn: mockTransitionTask, applyAgentFallbackFn: mockApplyFallback }
-    );
-
-    assert.ok(result);
-    assert.equal(metadataWritten.hookFailureRetryCount, 1);
-  });
-
-  it('returns false (stranded) when max retries exceeded', async () => {
-    const readReviewStateFn = async () => ({ metadata: { hookFailureRetryCount: 2 } });
-    const writeReviewStateFn = async () => {};
-    const startAgentFn = async () => ({ agent: 'claude', result: { status: 0 } });
-
-    const result = await handleHookFailureAutoBounceIntegrate(
-      'test-slug', '/worktree', 'pre-commit: error', { hookType: 'pre-commit' },
-      { startAgentFn, readReviewStateFn, writeReviewStateFn, workflowLauncherStatusFn: mockWorkflowStatus, selectAgentFn: mockSelectAgent, transitionTaskFn: mockTransitionTask, applyAgentFallbackFn: mockApplyFallback }
-    );
-
-    assert.ok(!result);
-  });
-});
-
 describe('Non-hook rebase errors do not trigger bounce — SC9', () => {
   it('repository lock (status 128) is not classified as hook failure', () => {
     const result = classifyHookFailure('fatal: Unable to create lock file');
@@ -271,60 +108,6 @@ describe('Non-hook rebase errors do not trigger bounce — SC9', () => {
   it('state machine error is not classified as hook failure', () => {
     const result = classifyHookFailure('Error: transition not allowed from review to active');
     assert.ok(!result.isHookFailure);
-  });
-});
-
-describe('Bounce prompt includes hook output — SC9(c)', () => {
-  const mockWorkflowStatus = () => ({ available: true, agent: 'claude' });
-  const mockSelectAgent = () => 'claude';
-  const mockTransitionTask = async () => {};
-  const mockApplyFallback = async () => 'claude';
-
-  it('rebase handler prompt contains hook output text', async () => {
-    const hookOutput = 'pre-commit: ESLint found 3 errors';
-    let capturedPrompt: string | undefined;
-    const startAgentFn = async (step: string, opts: any) => {
-      capturedPrompt = typeof opts.prompt === 'function' ? opts.prompt('claude') : opts.prompt;
-      return { agent: 'claude', result: { status: 0 } };
-    };
-    const readReviewStateFn = async () => ({ metadata: {} });
-    const writeReviewStateFn = async () => {};
-
-    await handleHookFailureAutoBounce(
-      'test-slug',
-      '/worktree',
-      hookOutput,
-      { hookType: 'pre-commit' },
-      { startAgentFn, readReviewStateFn, writeReviewStateFn, transitionTaskFn: mockTransitionTask, applyAgentFallbackFn: mockApplyFallback, workflowLauncherStatusFn: mockWorkflowStatus, selectAgentFn: mockSelectAgent }
-    );
-
-    assert.ok(capturedPrompt, 'prompt must be captured');
-    assert.ok(capturedPrompt.includes(hookOutput), 'prompt must contain hook output');
-    assert.ok(capturedPrompt.includes('pre-commit'), 'prompt must contain hook type');
-    assert.ok(capturedPrompt.includes('Retry attempt'), 'prompt must contain retry count');
-  });
-
-  it('integrate handler prompt contains hook output text', async () => {
-    const hookOutput = 'pre-commit: formatting check failed';
-    let capturedPrompt: string | undefined;
-    const startAgentFn = async (step: string, opts: any) => {
-      capturedPrompt = typeof opts.prompt === 'function' ? opts.prompt('claude') : opts.prompt;
-      return { agent: 'claude', result: { status: 0 } };
-    };
-    const readReviewStateFn = async () => ({ metadata: {} });
-    const writeReviewStateFn = async () => {};
-
-    await handleHookFailureAutoBounceIntegrate(
-      'test-slug',
-      '/worktree',
-      hookOutput,
-      { hookType: 'pre-commit' },
-      { startAgentFn, readReviewStateFn, writeReviewStateFn, transitionTaskFn: mockTransitionTask, applyAgentFallbackFn: mockApplyFallback, workflowLauncherStatusFn: mockWorkflowStatus, selectAgentFn: mockSelectAgent }
-    );
-
-    assert.ok(capturedPrompt, 'prompt must be captured');
-    assert.ok(capturedPrompt.includes(hookOutput), 'prompt must contain hook output');
-    assert.ok(capturedPrompt.includes('pre-commit'), 'prompt must contain hook type');
   });
 });
 
@@ -357,126 +140,6 @@ describe('Generic hook match narrowed — F7', () => {
     // Uses a path with "hook" but no pre-commit/pre-push keyword and no failure phrasing
     const result = classifyHookFailureIntegrate('modified: src/adapters/process/post-integrate-hook.ts');
     assert.ok(!result.isHookFailure, 'path with "hook" should not match without failure phrasing');
-  });
-});
-
-describe('Handler mirrors reference pattern — F4', () => {
-  const mockWorkflowStatus = () => ({ available: true, agent: 'claude' });
-  const mockSelectAgent = () => 'claude';
-
-  it('rebase handler transitions task before launch', async () => {
-    let taskTransitioned = false;
-    const transitionTaskFn = async (_slug: string, status: string) => {
-      taskTransitioned = true;
-      assert.equal(status, 'active');
-    };
-    let implementerPinned = false;
-    const startAgentFn = async (step: string, opts: any) => {
-      implementerPinned = opts.agent !== undefined;
-      return { agent: opts.agent, result: { status: 0 } };
-    };
-    let fallbackCalled = false;
-    const applyAgentFallbackFn = async () => {
-      fallbackCalled = true;
-      return 'claude';
-    };
-    const readReviewStateFn = async () => ({ metadata: {} });
-    const writeReviewStateFn = async () => {};
-
-    await handleHookFailureAutoBounce(
-      'test-slug',
-      '/worktree',
-      'pre-commit: error',
-      { hookType: 'pre-commit' },
-      { startAgentFn, readReviewStateFn, writeReviewStateFn, transitionTaskFn, applyAgentFallbackFn, workflowLauncherStatusFn: mockWorkflowStatus, selectAgentFn: mockSelectAgent }
-    );
-
-    assert.ok(taskTransitioned, 'task must transition to active before launch');
-    assert.ok(implementerPinned, 'implementer agent must be pinned in startAgent call');
-    assert.ok(fallbackCalled, 'applyAgentFallback must be called after launch');
-  });
-
-  it('integrate handler transitions task before launch', async () => {
-    let taskTransitioned = false;
-    const transitionTaskFn = async (_slug: string, status: string) => {
-      taskTransitioned = true;
-      assert.equal(status, 'active');
-    };
-    let implementerPinned = false;
-    const startAgentFn = async (step: string, opts: any) => {
-      implementerPinned = opts.agent !== undefined;
-      return { agent: opts.agent, result: { status: 0 } };
-    };
-    let fallbackCalled = false;
-    const applyAgentFallbackFn = async () => {
-      fallbackCalled = true;
-      return 'claude';
-    };
-    const readReviewStateFn = async () => ({ metadata: {} });
-    const writeReviewStateFn = async () => {};
-
-    await handleHookFailureAutoBounceIntegrate(
-      'test-slug',
-      '/worktree',
-      'pre-commit: error',
-      { hookType: 'pre-commit' },
-      { startAgentFn, readReviewStateFn, writeReviewStateFn, transitionTaskFn, applyAgentFallbackFn, workflowLauncherStatusFn: mockWorkflowStatus, selectAgentFn: mockSelectAgent }
-    );
-
-    assert.ok(taskTransitioned, 'task must transition to active before launch');
-    assert.ok(implementerPinned, 'implementer agent must be pinned in startAgent call');
-    assert.ok(fallbackCalled, 'applyAgentFallback must be called after launch');
-  });
-});
-
-describe('Rebase retry budget — regression coverage', () => {
-  const rebaseOptions = (gitFn: Function, handleHookFailureAutoBounceFn: Function, exitFn: (_code: number) => void) => ({
-    inferSlugFn: () => 'task-2340',
-    findMissionDirFn: () => '/worktree/missions/task-2340',
-    findMissionAreaFn: () => 'docs',
-    getCurrentBranchFn: () => 'mission/task-2340',
-    resolveWorktreeFn: () => '/worktree',
-    resolveMissionBaseBranchFn: () => 'main',
-    detectRebaseStateFn: () => ({ inProgress: false, unmergedFiles: [] }),
-    resolveConflictsFn: () => ({
-      ok: true,
-      conflictFiles: ['missions/task-2340/MISSION.md'],
-      missionSpecificFiles: ['missions/task-2340/MISSION.md'],
-      sharedFiles: [],
-    }),
-    isForgejoReviewEnabledFn: () => false,
-    missionServicesFn: async () => ({ store: {} }),
-    gitFn,
-    handleHookFailureAutoBounceFn,
-    exitFn,
-  });
-
-  it('rebounces a second initial-rebase hook failure before stranding at the budget', async () => {
-    let bounces = 0;
-    let exitCode: number | null = null;
-    await rebase(['task-2340'], rebaseOptions(
-      (args: string[]) => args.includes('--continue')
-        ? { status: 1, stdout: '', stderr: 'pre-commit hook failed' }
-        : { status: 1, stdout: '', stderr: 'pre-commit hook failed' },
-      async () => (++bounces < 3),
-      (code: number) => { exitCode = code; },
-    ));
-    assert.equal(bounces, 3);
-    assert.equal(exitCode, 1);
-  });
-
-  it('rebounces every failed rebase --continue until the persisted budget strands', async () => {
-    let bounces = 0;
-    let exitCode: number | null = null;
-    await rebase(['task-2340'], rebaseOptions(
-      (args: string[]) => args.includes('--continue')
-        ? { status: 1, stdout: '', stderr: 'pre-commit hook failed' }
-        : { status: 1, stdout: '', stderr: 'CONFLICT (content): Merge conflict in missions/task-2340/MISSION.md' },
-      async () => (++bounces < 3),
-      (code: number) => { exitCode = code; },
-    ));
-    assert.equal(bounces, 3);
-    assert.equal(exitCode, null);
   });
 });
 
@@ -560,76 +223,122 @@ describe('Shared hook-failure-workflow module — TASK-2369.17', () => {
     assert.equal(classifyHookFailureShared('pre-commit: x').hookType, classifyHookFailureIntegrate('pre-commit: x').hookType);
   });
 
-  it('exports MAX_HOOK_RETRY with value 2', () => {
-    assert.equal(MAX_HOOK_RETRY, 2);
-  });
-
-  it('shared handleHookFailureAutoBounce works with port-based injection', async () => {
-    const port: HookRebouncePort = {
-      startAgent: async () => ({ agent: 'claude', result: { status: 0 } }),
-      readReviewState: async () => ({ metadata: {} }),
-      writeReviewState: async () => {},
-      persistReviewState: async (_s, _state, _wt, _store) => {},
-      exit: () => {},
-      transitionTask: async () => {},
-      applyAgentFallback: async () => {},
-      selectAgent: () => 'claude',
-      workflowLauncherStatus: () => ({ available: true, agent: 'claude' }),
-      resolveTaskFile: () => ({ ok: true, task: { assignee: 'claude' }, taskFile: '/task.md' }),
-      getTaskImplementer: () => 'claude',
-    };
-    const result = await handleHookFailureAutoBounceShared(
-      'test-slug', '/worktree', 'pre-commit: error', { hookType: 'pre-commit' }, port
-    );
-    assert.ok(result);
-  });
-
-  it('shared handleHookFailureAutoBounce strands at max retries', async () => {
-    const port: HookRebouncePort = {
-      startAgent: async () => ({ agent: 'claude', result: { status: 0 } }),
-      readReviewState: async () => ({ metadata: { hookFailureRetryCount: 2 } }),
-      writeReviewState: async () => {},
-      persistReviewState: async () => {},
-      exit: () => {},
-      transitionTask: async () => {},
-      applyAgentFallback: async () => {},
-      selectAgent: () => 'claude',
-      workflowLauncherStatus: () => ({ available: true, agent: 'claude' }),
-      resolveTaskFile: () => ({ ok: true, task: { assignee: 'claude' }, taskFile: '/task.md' }),
-      getTaskImplementer: () => 'claude',
-    };
-    const result = await handleHookFailureAutoBounceShared(
-      'test-slug', '/worktree', 'pre-commit: error', { hookType: 'pre-commit' }, port
-    );
-    assert.ok(!result);
-  });
-
   it('integrate wrapper delegates to shared module (same classification)', () => {
     // Both paths use same classifyHookFailure — verify re-export chain
     assert.strictEqual(classifyHookFailureIntegrate, classifyHookFailureShared);
   });
 
-  it('integrate squash-commit retry path uses shared classification', async () => {
-    let persistedMetadata: any = null;
-    const port: HookRebouncePort = {
-      startAgent: async () => ({ agent: 'claude', result: { status: 0 } }),
-      readReviewState: async () => ({ metadata: {} }),
-      writeReviewState: async () => {},
-      persistReviewState: async (_s, state: any, _wt, _store) => {
-        persistedMetadata = state.metadata;
-      },
-      exit: () => {},
-      transitionTask: async () => {},
-      applyAgentFallback: async () => {},
-      selectAgent: () => 'claude',
-      workflowLauncherStatus: () => ({ available: true, agent: 'claude' }),
-      resolveTaskFile: () => ({ ok: true, task: { assignee: 'claude' }, taskFile: '/task.md' }),
-      getTaskImplementer: () => 'claude',
+  it('no longer exports the deleted auto-bounce policy', async () => {
+    const shared: Record<string, unknown> = await import('../src/application/hook-failure-workflow.js');
+    assert.deepEqual(Object.keys(shared).sort(), ['classifyHookFailure']);
+  });
+});
+
+// ── TASK-2377.05: the hook bounce is the rebound kernel's, not a standalone
+// policy. These replace the deleted `handleHookFailureAutoBounce` describes:
+// the retry-budget cases (which pinned the removed `hookFailureRetryCount`
+// metadata writes and `MAX_HOOK_RETRY`), the bounce-prompt case, and the
+// transition-before-launch case. ────────────────────────────────────────────
+
+describe('Hook bounce on the rebound kernel — TASK-2377.05', () => {
+  const hookReason = (output: string) =>
+    ({ kind: 'hook-failure', hook: 'pre-commit', operation: 'squash commit', output }) as const;
+
+  it('reports fixed only when the failing check re-runs and passes', async () => {
+    let launches = 0;
+    let verifies = 0;
+    const outcome = await rebound(hookReason('pre-commit: lint error'), {
+      slug: 'test-slug',
+      worktree: '/worktree',
+      implementer: 'claude',
+      startAgent: async () => { launches++; return { agent: 'claude', result: { status: 0 } }; },
+      verify: () => { verifies++; return { ok: true }; },
+      log: () => {},
+      error: () => {},
+    });
+
+    assert.equal(outcome.outcome, 'fixed');
+    assert.equal(launches, 1);
+    assert.equal(verifies, 1, 'the kernel re-runs the failing check before believing the fix');
+  });
+
+  it('strands after the per-occurrence budget without persisting a counter', async () => {
+    let launches = 0;
+    const outcome = await rebound(hookReason('pre-commit: lint error'), {
+      slug: 'test-slug',
+      worktree: '/worktree',
+      implementer: 'claude',
+      startAgent: async () => { launches++; return { agent: 'claude', result: { status: 0 } }; },
+      verify: () => ({ ok: false, diagnostic: 'pre-commit: still failing' }),
+      log: () => {},
+      error: () => {},
+    });
+
+    assert.equal(outcome.outcome, 'exhausted');
+    assert.equal(launches, DEFAULT_REBOUND_ATTEMPTS);
+    assert.equal(outcome.diagnostic, 'pre-commit: still failing', 'the last re-run diagnostic is carried, not the original');
+  });
+
+  it('starts a second occurrence in the same process from a full budget', async () => {
+    const spend = async () => {
+      let launches = 0;
+      await rebound(hookReason('pre-commit: lint error'), {
+        slug: 'test-slug',
+        worktree: '/worktree',
+        implementer: 'claude',
+        startAgent: async () => { launches++; return { agent: 'claude', result: { status: 0 } }; },
+        verify: () => ({ ok: false }),
+        log: () => {},
+        error: () => {},
+      });
+      return launches;
     };
-    const result = await handleHookFailureAutoBounceShared(
-      'task-2369.17', '/worktree', 'pre-commit: lint error', { hookType: 'pre-commit' }, port, { missionStore: {} }
-    );
-    assert.ok(result);
-    assert.equal(persistedMetadata.hookFailureRetryCount, 1);
+    assert.deepEqual([await spend(), await spend()], [DEFAULT_REBOUND_ATTEMPTS, DEFAULT_REBOUND_ATTEMPTS]);
+  });
+
+  it('embeds the hook output and hook type in the fix prompt', async () => {
+    const hookOutput = 'pre-commit: formatting check failed';
+    let capturedPrompt = '';
+    await rebound(hookReason(hookOutput), {
+      slug: 'test-slug',
+      worktree: '/worktree',
+      implementer: 'claude',
+      startAgent: async (_step, opts: Record<string, unknown>) => {
+        const slot = opts.prompt;
+        capturedPrompt = typeof slot === 'function' ? slot('claude') : String(slot);
+        return { agent: 'claude', result: { status: 0 } };
+      },
+      verify: () => ({ ok: true }),
+      log: () => {},
+      error: () => {},
+    });
+
+    assert.ok(capturedPrompt.includes(hookOutput), 'prompt must contain hook output');
+    assert.ok(capturedPrompt.includes('pre-commit'), 'prompt must contain hook type');
+  });
+
+  it('transitions the task to the implementer phase before launching, and pins the agent', async () => {
+    let transitioned = '';
+    let pinnedAgent: unknown;
+    let fallbackCalled = false;
+    await rebound(hookReason('pre-commit: error'), {
+      slug: 'test-slug',
+      worktree: '/worktree',
+      implementer: 'claude',
+      transitionToImplementer: async (slug: string) => { transitioned = slug; },
+      startAgent: async (_step, opts: Record<string, unknown>) => {
+        assert.ok(transitioned, 'task must transition before launch');
+        pinnedAgent = opts.agent;
+        return { agent: opts.agent as string, result: { status: 0 } };
+      },
+      applyAgentFallback: async ({ original }: { original: string }) => { fallbackCalled = true; return original; },
+      verify: () => ({ ok: true }),
+      log: () => {},
+      error: () => {},
+    });
+
+    assert.equal(transitioned, 'test-slug');
+    assert.equal(pinnedAgent, 'claude', 'implementer agent must be pinned in the launch call');
+    assert.ok(fallbackCalled, 'applyAgentFallback must be called after launch');
   });
 });

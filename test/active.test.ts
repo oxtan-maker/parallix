@@ -12,14 +12,12 @@ const resolveWorktreeModule = mockModule<typeof import('../src/adapters/filesyst
 const completePreflightOrExitModule = mockModule<typeof import('../src/adapters/cli/mission-start.js')>('../src/adapters/cli/mission-start.js', import.meta.url);
 const missionStartModule = mockModule<typeof import('../src/adapters/cli/mission-start.js')>('../src/adapters/cli/mission-start.js', import.meta.url);
 const repairHandoffModule = mockModule<typeof import('../src/adapters/cli/commands/repair-handoff.js')>('../src/adapters/cli/commands/repair-handoff.js', import.meta.url);
-const attemptAgentRelaunchModule = mockModule<typeof import('../src/adapters/cli/commands/active.js')>('../src/adapters/cli/commands/active.js', import.meta.url);
 await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
 const active = activeModule.default;
 const missionStart = missionStartModule.default;
 const { resolveWorktree } = resolveWorktreeModule;
 const { completePreflightOrExit } = completePreflightOrExitModule;
-const { attemptAgentRelaunch } = attemptAgentRelaunchModule;
 process.env.NO_COLOR = '1';
 
 const {
@@ -30,7 +28,7 @@ const {
   selectLaunchAndRecord,
   enforceExecuteCommitSafety,
   renderActiveProgress
-} = attemptAgentRelaunchModule;
+} = activeModule;
 
 test('active progress renderer preserves launch and handoff status order', () => {
   const logs = [];
@@ -638,7 +636,7 @@ test('runHandoffAndReview does not hand off or start review when CP-2 is missing
       error: 'Declared checkpoint documents are missing before handoff: CP-2. Create and commit CP-2.md before handoff.',
       nextCheckpoint: 'CP-2'
     }),
-    attemptAgentRelaunchFn: async () => ({ relaunched: false, error: 'test relaunch declined' }),
+    startAgentFn: async () => { throw new Error('test relaunch declined'); },
     performHandoff: async () => { handoffCalls++; return { ok: true }; },
     startReviewLoop: async () => { reviewCalls++; },
     log: () => {},
@@ -661,7 +659,7 @@ test('runHandoffAndReview completes a successful relaunch for a declared checkpo
         ? { ok: false, nextCheckpoint: 'CP-2' }
         : { ok: true };
     },
-    attemptAgentRelaunchFn: async () => { relaunches++; return { relaunched: true }; },
+    startAgentFn: async () => { relaunches++; return { agent: 'codex', result: { status: 0 } }; },
     performHandoff: async () => { handoffCalls++; return { ok: true }; },
     startReviewLoop: async () => {},
     log: message => logs.push(message),
@@ -1511,99 +1509,94 @@ test('active() state-ordering contract: does not write Backlog before launch (re
   });
 });
 
-// CP-2 tests for attemptAgentRelaunch
+// TASK-2377.05: `attemptAgentRelaunch` was deleted — every handoff bounce now
+// goes through the rebound kernel, which owns the relaunchability decision, the
+// fix prompt, and the budget. The behavior those unit tests covered moved and is
+// asserted where it now lives:
+//
+//   - "not relaunchable" declined without a launch  → the kernel's classifier;
+//     "SC3: a non-relaunchable checkpoint error launches no agent at all" and
+//     "SC4: a HumanOnly classification launches no agent and takes the
+//     repairHandoffFn branch" in test/task-2377.05-handoff-bounce.test.ts.
+//   - launcher unavailable                          → "the launch port declines
+//     when the agent launcher is unavailable" below.
+//   - startAgent call shape                         → "the launch port calls
+//     startAgent with the mission's step, slug, role, and worktree" below.
+//   - continuation prompt naming the next checkpoint → "the checkpoint bounce
+//     prompt names the next checkpoint and forbids an early exit" below.
 
-test('attemptAgentRelaunch function exists', () => {
-  assert.ok(typeof attemptAgentRelaunch === 'function', 'attemptAgentRelaunch should be exported');
+test('the launch port declines when the agent launcher is unavailable', async () => {
+  let launches = 0;
+  const result = await runHandoffAndReview('task-1124', '/tmp/worktree', 'unavailable-agent', {
+    validateCheckpointsBeforeHandoffFn: () => ({ ok: true }),
+    performHandoff: async () => ({
+      ok: false,
+      error: 'The final checkpoint at CP-3.md has a "## Goal Check" section but no evidence rows. A goal-check table with real evidence is required before handoff.',
+    }),
+    workflowLauncherStatusFn: () => ({ supported: false, detail: 'agent not found' }),
+    startAgentFn: async () => { launches++; return { agent: 'x', result: { status: 0 } }; },
+    startReviewLoop: async () => {},
+    log: () => {},
+    error: () => {},
+  });
+
+  assert.equal(result, false, 'an unavailable launcher cannot repair the handoff');
+  assert.equal(launches, 0, 'startAgent is never reached when the launcher is unsupported');
 });
 
-test('attemptAgentRelaunch returns relaunched:false for non-relaunchable error', async () => {
-  const logs = [];
-  const { relaunched, error } = await attemptAgentRelaunch(
-    'task-1124', '/tmp/worktree', 'Some other error', 'codex', {
-      isRelaunchableErrorFn: () => false,
-      log: (msg) => logs.push(msg),
-      error: () => {}
-    }
-  );
-
-  assert.equal(relaunched, false);
-  assert.ok(error);
-  assert.ok(error.includes('not relaunchable'));
-  assert.ok(logs.some(l => l.includes('Error is not relaunchable')));
-});
-
-test('attemptAgentRelaunch returns relaunched:false when agent is not available', async () => {
-  const errors = [];
-  const { relaunched, error } = await attemptAgentRelaunch(
-    'task-1124', '/tmp/worktree',
-    'The final checkpoint at docs/missions/2026/task-1121/CP-3.md has a "## Goal Check" section but no evidence rows. A goal-check table with real evidence is required before handoff.',
-    'unavailable-agent',
-    {
-      isRelaunchableErrorFn: (msg) => msg.includes('has a "## Goal Check" section but no evidence rows'),
-      workflowLauncherStatusFn: () => ({ supported: false, detail: 'agent not found' }),
-      log: () => {},
-      error: (msg) => errors.push(msg)
-    }
-  );
-
-  assert.equal(relaunched, false);
-  assert.ok(error);
-  assert.ok(error.includes('launcher is not available'));
-  assert.ok(errors.some(e => e.includes('not available for relaunch')));
-});
-
-test('attemptAgentRelaunch calls startAgent with correct parameters', async () => {
-  let startAgentCalled = false;
+test('the launch port calls startAgent with the mission step, slug, role, and worktree', async () => {
   let stepArg = null;
   let optsArg = null;
+  await runHandoffAndReview('task-1124', '/tmp/worktree', 'codex', {
+    validateCheckpointsBeforeHandoffFn: () => ({ ok: true }),
+    performHandoff: async () => ({
+      ok: false,
+      error: 'The final checkpoint at CP-3.md has a "## Goal Check" section but no evidence rows. A goal-check table with real evidence is required before handoff.',
+    }),
+    workflowLauncherStatusFn: () => ({ supported: true }),
+    startAgentFn: async (step, opts) => {
+      stepArg = step;
+      optsArg = opts;
+      return { agent: 'codex', result: { status: 0 } };
+    },
+    startReviewLoop: async () => {},
+    log: () => {},
+    error: () => {},
+  });
 
-  const { relaunched } = await attemptAgentRelaunch(
-    'task-1124', '/tmp/worktree',
-    'The final checkpoint at docs/missions/2026/task-1121/CP-3.md has a "## Goal Check" section but no evidence rows. A goal-check table with real evidence is required before handoff.',
-    'codex',
-    {
-      isRelaunchableErrorFn: (msg) => msg.includes('has a "## Goal Check" section but no evidence rows'),
-      workflowLauncherStatusFn: () => ({ supported: true }),
-      startAgentFn: async (step, opts) => {
-        startAgentCalled = true;
-        stepArg = step;
-        optsArg = opts;
-        return { agent: 'codex', result: { status: 0 } };
-      },
-      buildRelaunchPromptFn: () => 'test prompt',
-      log: () => {},
-      error: () => {}
-    }
-  );
-
-  assert.equal(relaunched, true);
-  assert.equal(startAgentCalled, true);
   assert.equal(stepArg, 'active');
   assert.equal(optsArg.slug, 'task-1124');
   assert.equal(optsArg.role, 'implementer');
   assert.equal(optsArg.agent, 'codex');
   assert.equal(optsArg.worktree, '/tmp/worktree');
-  assert.equal(optsArg.prompt, 'test prompt');
+  assert.ok(optsArg.prompt, 'the kernel supplies the fix prompt');
 });
 
-test('attemptAgentRelaunch gives incomplete missions a continuation prompt naming the next checkpoint', async () => {
+test('the checkpoint bounce prompt names the next checkpoint and forbids an early exit', async () => {
   let prompt = '';
-  const result = await attemptAgentRelaunch(
-    'task-incomplete', '/tmp/worktree',
-    'Declared checkpoint documents are missing before handoff: CP-2, CP-3. Create and commit CP-2.md in /tmp/worktree before handoff.',
-    'codex',
-    {
-      workflowLauncherStatusFn: () => ({ supported: true }),
-      startAgentFn: async (_step, options) => {
-        prompt = options.prompt;
-        return { agent: 'codex', result: { status: 0 } };
-      },
-      log: () => {},
-      error: () => {}
-    }
-  );
-  assert.equal(result.relaunched, true);
+  let validations = 0;
+  await runHandoffAndReview('task-incomplete', '/tmp/worktree', 'codex', {
+    validateCheckpointsBeforeHandoffFn: () => {
+      validations++;
+      return validations === 1
+        ? {
+          ok: false,
+          error: 'Declared checkpoint documents are missing before handoff: CP-2, CP-3. Create and commit CP-2.md in /tmp/worktree before handoff.',
+          nextCheckpoint: 'CP-2',
+        }
+        : { ok: true };
+    },
+    workflowLauncherStatusFn: () => ({ supported: true }),
+    startAgentFn: async (_step, options) => {
+      prompt = options.prompt;
+      return { agent: 'codex', result: { status: 0 } };
+    },
+    performHandoff: async () => ({ ok: true }),
+    startReviewLoop: async () => {},
+    log: () => {},
+    error: () => {},
+  });
+
   assert.match(prompt, /CP-2/);
   assert.match(prompt, /Do not exit/);
   assert.match(prompt, /final response/);
@@ -1831,9 +1824,9 @@ test('runHandoffAndReview: relaunch success triggers post-relaunch handoff inste
       return { ok: true };
     },
     repairHandoffFn: async () => ({ repaired: false, blocker: null }),
-    attemptAgentRelaunchFn: async () => {
+    startAgentFn: async () => {
       relaunchAttempts++;
-      return { relaunched: true };
+      return { agent: 'codex', result: { status: 0 } };
     },
     startReviewLoop: () => { reviewLoopStarted = true; },
     log: () => {},
@@ -1844,7 +1837,7 @@ test('runHandoffAndReview: relaunch success triggers post-relaunch handoff inste
   assert.ok(result, 'runHandoffAndReview returns true after successful post-relaunch handoff');
   assert.equal(handoffAttempts, 2, 'performHandoff must be re-invoked after relaunch');
   assert.equal(reviewLoopStarted, true, 'startReviewLoop must be called after successful post-relaunch handoff');
-  assert.equal(relaunchAttempts, 1, 'attemptAgentRelaunch was called once');
+  assert.equal(relaunchAttempts, 1, 'one launch was enough');
 });
 
 test('runHandoffAndReview: relaunch success must trigger post-relaunch handoff and review loop', async () => {
@@ -1865,9 +1858,9 @@ test('runHandoffAndReview: relaunch success must trigger post-relaunch handoff a
       return { ok: true };
     },
     repairHandoffFn: async () => ({ repaired: false, blocker: null }),
-    attemptAgentRelaunchFn: async () => {
+    startAgentFn: async () => {
       relaunchAttempts++;
-      return { relaunched: true };
+      return { agent: 'codex', result: { status: 0 } };
     },
     startReviewLoop: (slug, opts) => { reviewLoopStarted = true; },
     log: () => {},
@@ -1878,7 +1871,7 @@ test('runHandoffAndReview: relaunch success must trigger post-relaunch handoff a
   assert.ok(result, 'runHandoffAndReview should return true after successful post-relaunch handoff');
   assert.equal(handoffAttempts, 2, 'performHandoff must be re-invoked after relaunch');
   assert.equal(reviewLoopStarted, true, 'startReviewLoop must be called after successful post-relaunch handoff');
-  assert.equal(relaunchAttempts, 1, 'attemptAgentRelaunch was called once');
+  assert.equal(relaunchAttempts, 1, 'one launch was enough');
 });
 
 test('runHandoffAndReview: relaunch success with post-relaunch handoff failure must not report success', async () => {
@@ -1897,7 +1890,7 @@ test('runHandoffAndReview: relaunch success with post-relaunch handoff failure m
       return { ok: false, error: 'The final checkpoint at docs/missions/2026/task-1324/CP-1.md has a "## Goal Check" section but no evidence rows. A goal-check table with real evidence is required before handoff.' };
     },
     repairHandoffFn: async () => ({ repaired: false, blocker: null }),
-    attemptAgentRelaunchFn: async () => ({ relaunched: true }),
+    startAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
     startReviewLoop: () => { reviewLoopStarted = true; },
     log: () => {},
     error: () => {}
@@ -1922,9 +1915,9 @@ test('runHandoffAndReview: relaunch failure must not trigger post-relaunch hando
       return { ok: false, error: 'The final checkpoint at docs/missions/2026/task-1324/CP-1.md has a "## Goal Check" section but no evidence rows. A goal-check table with real evidence is required before handoff.' };
     },
     repairHandoffFn: async () => ({ repaired: false, blocker: null }),
-    attemptAgentRelaunchFn: async () => {
+    startAgentFn: async () => {
       relaunchAttempts++;
-      return { relaunched: false, error: 'relaunch failed' };
+      throw new Error('relaunch failed');
     },
     startReviewLoop: () => { reviewLoopStarted = true; },
     log: () => {},
@@ -1934,7 +1927,11 @@ test('runHandoffAndReview: relaunch failure must not trigger post-relaunch hando
   assert.equal(result, false, 'must return false when relaunch fails');
   assert.equal(handoffAttempts, 1, 'performHandoff called only once (no post-relaunch retry)');
   assert.equal(reviewLoopStarted, false, 'startReviewLoop must NOT be called');
-  assert.equal(relaunchAttempts, 1, 'attemptAgentRelaunch was called once');
+  // TASK-2377.05 (SC5): the kernel owns a per-occurrence budget of 2. A failed
+  // launch consumes an attempt instead of aborting the bounce, so the relaunch
+  // is tried twice before the mission is stranded. performHandoff still never
+  // re-runs, because the kernel's verify only runs after a successful launch.
+  assert.equal(relaunchAttempts, 2, 'the kernel spends its per-occurrence budget of two launches');
 });
 
 // ---------- TASK-1387: gate output capture and automatic relaunch (SC3 & SC4) ----------
@@ -1942,7 +1939,7 @@ test('runHandoffAndReview: relaunch failure must not trigger post-relaunch hando
 test('runHandoffAndReview relaunches on verification gate failure with captured output (SC3)', async () => {
   let handoffAttempts = 0;
   let relaunchAttempts = 0;
-  let lastGateOutput = null;
+  let lastPrompt = '';
 
   const result = await runHandoffAndReview('task-1387-sc3', '/tmp/project-task-1387', 'codex', {
     validateCheckpointsBeforeHandoffFn: () => ({ ok: true }),
@@ -1961,10 +1958,10 @@ test('runHandoffAndReview relaunches on verification gate failure with captured 
       return { ok: true };
     },
     repairHandoffFn: async () => ({ repaired: false, blocker: null }),
-    attemptAgentRelaunchFn: async (slugArg, worktree, errorMsg, agent, opts) => {
+    startAgentFn: async (_step, opts) => {
       relaunchAttempts++;
-      lastGateOutput = opts.gateOutput || null;
-      return { relaunched: true };
+      lastPrompt = opts.prompt;
+      return { agent: 'codex', result: { status: 0 } };
     },
     startReviewLoop: () => {},
     log: () => {},
@@ -1973,16 +1970,17 @@ test('runHandoffAndReview relaunches on verification gate failure with captured 
 
   assert.ok(result, 'should succeed after successful relaunch');
   assert.equal(handoffAttempts, 2, 'performHandoff called twice: initial + post-relaunch');
-  assert.equal(relaunchAttempts, 1, 'attemptAgentRelaunch called once');
-  assert.ok(lastGateOutput, 'gateOutput should be passed to attemptAgentRelaunch');
-  assert.equal(lastGateOutput.stdout, 'lint: ERROR: unused import in foo.js');
-  assert.equal(lastGateOutput.stderr, 'TypeScript: error TS2345: type mismatch');
+  assert.equal(relaunchAttempts, 1, 'one launch was enough');
+  // TASK-2377.05: the captured gate output reaches the agent through the
+  // kernel's fix prompt rather than a relaunch option.
+  assert.match(lastPrompt, /lint: ERROR: unused import in foo\.js/, 'gate stdout reaches the fix prompt');
+  assert.match(lastPrompt, /TypeScript: error TS2345: type mismatch/, 'gate stderr reaches the fix prompt');
 });
 
 test('runHandoffAndReview relaunches on declared gate failure with captured output (SC3)', async () => {
   let handoffAttempts = 0;
   let relaunchAttempts = 0;
-  let lastGateOutput = null;
+  let lastPrompt = '';
 
   const result = await runHandoffAndReview('task-1387-sc3-declared', '/tmp/project-task-1387', 'codex', {
     validateCheckpointsBeforeHandoffFn: () => ({ ok: true }),
@@ -2001,10 +1999,10 @@ test('runHandoffAndReview relaunches on declared gate failure with captured outp
       return { ok: true };
     },
     repairHandoffFn: async () => ({ repaired: false, blocker: null }),
-    attemptAgentRelaunchFn: async (slugArg, worktree, errorMsg, agent, opts) => {
+    startAgentFn: async (_step, opts) => {
       relaunchAttempts++;
-      lastGateOutput = opts.gateOutput || null;
-      return { relaunched: true };
+      lastPrompt = opts.prompt;
+      return { agent: 'codex', result: { status: 0 } };
     },
     startReviewLoop: () => {},
     log: () => {},
@@ -2013,10 +2011,9 @@ test('runHandoffAndReview relaunches on declared gate failure with captured outp
 
   assert.ok(result, 'should succeed after successful relaunch on declared gate failure');
   assert.equal(handoffAttempts, 2, 'performHandoff called twice');
-  assert.equal(relaunchAttempts, 1, 'attemptAgentRelaunch called once');
-  assert.ok(lastGateOutput, 'gateOutput should be passed to attemptAgentRelaunch for declared gate failures');
-  assert.equal(lastGateOutput.stdout, 'declared gate stdout');
-  assert.equal(lastGateOutput.stderr, 'declared gate stderr');
+  assert.equal(relaunchAttempts, 1, 'one launch was enough');
+  assert.match(lastPrompt, /declared gate stdout/, 'gate stdout reaches the fix prompt');
+  assert.match(lastPrompt, /declared gate stderr/, 'gate stderr reaches the fix prompt');
 });
 
 test('runHandoffAndReview limits gate-failure relaunches to 2 attempts (SC4)', async () => {
@@ -2036,10 +2033,10 @@ test('runHandoffAndReview limits gate-failure relaunches to 2 attempts (SC4)', a
       };
     },
     repairHandoffFn: async () => ({ repaired: false, blocker: null }),
-    attemptAgentRelaunchFn: async () => {
+    startAgentFn: async () => {
       relaunchAttempts++;
-      // Relaunch always succeeds but handoff keeps failing
-      return { relaunched: true };
+      // Launch always succeeds but handoff keeps failing
+      return { agent: 'codex', result: { status: 0 } };
     },
     startReviewLoop: () => {},
     log: () => {},
@@ -2048,7 +2045,7 @@ test('runHandoffAndReview limits gate-failure relaunches to 2 attempts (SC4)', a
 
   assert.equal(result, false, 'should return false after exhausting relaunch attempts');
   assert.equal(handoffAttempts, 3, 'performHandoff: initial + 2 post-relaunch retries');
-  assert.equal(relaunchAttempts, 2, 'attemptAgentRelaunch called exactly 2 times (max limit)');
+  assert.equal(relaunchAttempts, 2, 'the kernel spends exactly its per-occurrence budget of two');
   assert.ok(relaunchErrors.some(e => e.includes('Gate failure persisting after 2 relaunch attempts')),
     'should report the 2-attempt limit in the error message');
 });
@@ -2068,13 +2065,13 @@ test('runHandoffAndReview stops relaunching when agent relaunch itself fails (SC
       };
     },
     repairHandoffFn: async () => ({ repaired: false, blocker: null }),
-    attemptAgentRelaunchFn: async () => {
+    startAgentFn: async () => {
       relaunchAttempts++;
-      // First relaunch succeeds, second fails
+      // First launch succeeds, second fails
       if (relaunchAttempts === 1) {
-        return { relaunched: true };
+        return { agent: 'codex', result: { status: 0 } };
       }
-      return { relaunched: false, error: 'launcher unavailable' };
+      throw new Error('launcher unavailable');
     },
     startReviewLoop: () => {},
     log: () => {},
@@ -2083,5 +2080,5 @@ test('runHandoffAndReview stops relaunching when agent relaunch itself fails (SC
 
   assert.equal(result, false, 'should return false when relaunch fails');
   assert.equal(handoffAttempts, 2, 'performHandoff: initial + 1 post-relaunch (first relaunch succeeded)');
-  assert.equal(relaunchAttempts, 2, 'attemptAgentRelaunch called twice: first succeeds, second fails');
+  assert.equal(relaunchAttempts, 2, 'two launches: first verify fails, second exhausts the budget');
 });

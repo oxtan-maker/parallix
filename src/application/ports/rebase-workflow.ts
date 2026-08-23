@@ -114,7 +114,9 @@ export interface RebaseWorkflowPort {
   // --- agents adapter ----------------------------------------------------
   startAgent(_step: string, _options: Record<string, unknown>): Promise<AgentLaunchResult>;
   selectAgent(_options: { role: string }): string | null;
-  workflowLauncherStatus(): { available: boolean; agent: string | null };
+  // Real launcher-status contract: probe a *selected* agent. An absent launcher
+  // returns { supported: false }, so only a supported family is launchable.
+  workflowLauncherStatus(_agent: string, _worktree?: string): { supported: boolean; agent: string | null };
   applyAgentFallback(_options: Record<string, unknown>): Promise<unknown>;
 
   // --- forgejo adapter ---------------------------------------------------
@@ -147,13 +149,15 @@ export interface RebaseWorkflowPort {
   // --- runtime seams -----------------------------------------------------
   /** Mission persistence services for the selected root; absent for callers that did not compose them. */
   missionServices?: ((_root: string) => Promise<{ store: unknown }>) | null;
-  /** Hook-failure rebounce policy; overridable so tests can drive the retry budget. */
-  handleHookFailureAutoBounce?: (
-    _slug: string,
-    _worktree: string,
-    _hookOutput: string,
+  /**
+   * Hook-failure interception seam (TASK-2377.05). Return `false` to decline the
+   * in-child rebound-kernel bounce; the pre-review path installs a recorder that
+   * captures the hook evidence because the review loop owns that budget. Left
+   * unset by the CLI, where the kernel performs the bounce.
+   */
+  onHookFailure?: (
     _classification: { hookType: string | null },
-    _options: { missionStore?: unknown },
-  ) => Promise<boolean>;
+    _output: string,
+  ) => Promise<boolean> | boolean;
   exit(_code: number): void;
 }

@@ -18,7 +18,6 @@ import {
 import {
   buildRebasePrompt,
   createRebaseWorkflowPort,
-  handleHookFailureAutoBounce,
   type RebaseCommandOptions,
 } from '../../rebase/rebase-workflow-adapter.js';
 
@@ -30,7 +29,6 @@ async function rebase(args: string[], options: RebaseCommandOptions = {}): Promi
 (rebase as any).parseConflictFilesFromRebaseOutput = parseConflictFilesFromRebaseOutput;
 (rebase as any).parseConflictFilesFromGitStatus = parseConflictFilesFromGitStatus;
 (rebase as any).classifyHookFailure = classifyHookFailure;
-(rebase as any).handleHookFailureAutoBounce = handleHookFailureAutoBounce;
 export default rebase;
 export {
   rebase,
@@ -38,5 +36,4 @@ export {
   parseConflictFilesFromRebaseOutput,
   parseConflictFilesFromGitStatus,
   classifyHookFailure,
-  handleHookFailureAutoBounce,
 };

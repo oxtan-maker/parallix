@@ -14,6 +14,13 @@ const { formatVerificationCommand } = verification;
 import { isForgejoReviewEnabled } from '../../config/product-config.js';
 import { readReviewState } from '../../review/review-state.js';
 import { submitForReview } from '../../review/review-commands.js';
+import { transitionTask } from '../../backlog/backlog.js';
+import { startAgent, selectAgent, workflowLauncherStatus } from '../../agents/agents.js';
+import { applyAgentFallback } from '../../review/review-loop.js';
+// SC2: the squash-commit hook bounce routes through the one rebound kernel
+// (TASK-2377.03). integrate builds its kernel context from injectable seams so
+// tests keep a mock launch/transition/fallback port instead of a real agent.
+import { rebound, type ReboundContext } from '../../../application/rebound-kernel.js';
 
 import { missionId } from '../../../domain/mission.js';
 import { applyReviewerCommand, ConfiguredReviewerEligibility, reviewStatus } from '../../../domain/review.js';
@@ -57,7 +64,6 @@ export {
 export {
   IntegrationAbort,
   classifyHookFailure,
-  handleHookFailureAutoBounce,
   SYNC_MERGED_DIAGNOSTICS,
   printDiagnosticTable,
   reportSyncMergedFailure,
@@ -75,7 +81,6 @@ export {
 import {
   IntegrationAbort,
   classifyHookFailure,
-  handleHookFailureAutoBounce,
   SYNC_MERGED_DIAGNOSTICS,
   printDiagnosticTable,
   reportSyncMergedFailure,
@@ -178,7 +183,6 @@ export interface IntegrateFn extends Function {
   resolveIntegrationVerificationWorktree: typeof resolveIntegrationVerificationWorktree;
   buildIntegrationVerificationInvocation: typeof buildIntegrationVerificationInvocation;
   classifyHookFailure: typeof classifyHookFailure;
-  handleHookFailureAutoBounce: typeof handleHookFailureAutoBounce;
   executeIntegrationGates: typeof executeIntegrationGates;
   orderIntegrationGates: typeof orderIntegrationGates;
   gateMatchesChangedAreas: typeof gateMatchesChangedAreas;
@@ -189,8 +193,23 @@ export interface IntegrateFn extends Function {
 }
 
 /** @param {string[]} args */
-async function integrate(args: string[], options: { missionServicesFn?: Function } = {}) {
+async function integrate(args: string[], options: {
+  missionServicesFn?: Function;
+  // SC2: kernel-context injection seams. The squash-commit hook bounce builds
+  // its rebound() context from these so tests keep a mock launch/transition/
+  // fallback port instead of a real agent, git, or Forgejo.
+  startAgentFn?: typeof startAgent;
+  transitionTaskFn?: typeof transitionTask;
+  applyAgentFallbackFn?: typeof applyAgentFallback;
+  selectAgentFn?: typeof selectAgent;
+  workflowLauncherStatusFn?: typeof workflowLauncherStatus;
+} = {}) {
   const missionServicesFn = options.missionServicesFn;
+  const startAgentFn = options.startAgentFn ?? startAgent;
+  const transitionTaskFn = options.transitionTaskFn ?? transitionTask;
+  const applyAgentFallbackFn = options.applyAgentFallbackFn ?? applyAgentFallback;
+  const selectAgentFn = options.selectAgentFn ?? selectAgent;
+  const workflowLauncherStatusFn = options.workflowLauncherStatusFn ?? workflowLauncherStatus;
   let exitCode = 0;
   /** @type{{created?: boolean, message?: string, rootDir?: string}|null} */
   let temporaryStash = null;
@@ -539,45 +558,79 @@ async function integrate(args: string[], options: { missionServicesFn?: Function
         ...intendedPayloadPaths
       ]);
       let retriedCommit = false;
-      while (commitResult.status !== 0) {
+      if (commitResult.status !== 0) {
         const output = [commitResult.stdout, commitResult.stderr].filter(Boolean).join('\n').trim();
         if (isIntendedPayloadAtHead(baseWorktree as string, intendedPayloadPaths, { gitRunner: git })) {
           const carryingCommit = git(['-C', baseWorktree, 'rev-parse', 'HEAD']).stdout.trim();
           fmt.log.pass(`Integration payload already landed in commit ${carryingCommit}.`);
-          break;
-        }
-        fmt.log.fail('Could not create the squash commit in the local integration checkout.');
-        if (output) {
-          fmt.log.fail(output);
-        }
+        } else {
+          fmt.log.fail('Could not create the squash commit in the local integration checkout.');
+          if (output) {
+            fmt.log.fail(output);
+          }
 
-        // SC2/SC4: Classify hook failure and auto-bounce to implementer
-        const hookClassification = classifyHookFailure(output);
-        if (hookClassification.isHookFailure) {
-          const shouldRetry = await handleHookFailureAutoBounce(slug, baseWorktree, output, hookClassification, { missionStore: missionServices.store });
-          if (shouldRetry) {
-            fmt.log.info('Retrying squash commit after implementer hook fix...');
-            retriedCommit = true;
-            commitResult = git([
-              '-C',
-              /** @type {string} */ (baseWorktree),
-              'commit',
-              '--only',
-              '-m',
-              `${branch}: ${summary}`,
-              '--',
-              ...intendedPayloadPaths
-            ]);
-            continue;
-          } else {
-            // Stranded - max retries exceeded or agent failed
+          // SC2: Classify the squash-commit failure and bounce it through the
+          // one rebound kernel. The kernel's verify re-runs the identical
+          // `git commit --only` invocation, so `fixed` means the hook passes on
+          // re-run — never merely that an agent ran. The kernel owns the
+          // per-occurrence budget (2 attempts) in memory; nothing is persisted.
+          const hookClassification = classifyHookFailure(output);
+          if (!hookClassification.isHookFailure) {
+            fmt.log.info(`The squash commit runs the repo git hooks. Fix the reported hook failure in ${baseWorktree} and retry integrate.`);
+            fmt.log.info(`For this mission, the relevant verification command is ${formatVerificationCommand(context.area, baseWorktree)}`);
+            throw new IntegrationAbort();
+          }
+
+          let implementer = (context.taskAssignee as string)
+            || (selectAgentFn ? selectAgentFn('act-on-review') : '');
+          // F3: only trust a launcher that reports itself supported; an absent
+          // launcher returns { agent: '', supported: false }, so name an agent
+          // only when the probe confirms a healthy, supported family.
+          if (!implementer && workflowLauncherStatusFn) {
+            const status = workflowLauncherStatusFn(context.taskAssignee ?? '', baseWorktree);
+            if (status?.supported) {
+              implementer = status.agent ?? '';
+            }
+          }
+          if (!implementer) {
+            // No resolver could name an implementer — strand, as the deleted
+            // policy did, rather than launch with an empty agent identity.
             fmt.log.info(`The squash commit runs the repo git hooks. Fix the reported hook failure in ${baseWorktree} and retry integrate.`);
             throw new IntegrationAbort();
           }
-        } else {
-          fmt.log.info(`The squash commit runs the repo git hooks. Fix the reported hook failure in ${baseWorktree} and retry integrate.`);
-          fmt.log.info(`For this mission, the relevant verification command is ${formatVerificationCommand(context.area, baseWorktree)}`);
-          throw new IntegrationAbort();
+
+          const outcome = await rebound(
+            { kind: 'hook-failure', hook: hookClassification.hookType, operation: 'squash commit', output },
+            {
+              slug,
+              worktree: baseWorktree,
+              implementer,
+              // Casts: the injected production fns are more strongly typed than the
+              // kernel's port shape; the call sites below match the kernel contract.
+              startAgent: startAgentFn as unknown as ReboundContext['startAgent'],
+              transitionToImplementer: (bounceSlug: string) => transitionTaskFn(bounceSlug, 'active'),
+              applyAgentFallback: applyAgentFallbackFn as unknown as ReboundContext['applyAgentFallback'],
+              verify: () => {
+                retriedCommit = true;
+                const retryResult = git([
+                  '-C',
+                  /** @type {string} */ (baseWorktree),
+                  'commit',
+                  '--only',
+                  '-m',
+                  `${branch}: ${summary}`,
+                  '--',
+                  ...intendedPayloadPaths
+                ]);
+                return { ok: retryResult.status === 0, diagnostic: [retryResult.stdout, retryResult.stderr].filter(Boolean).join('\n').trim() };
+              },
+            },
+          );
+          if (outcome.outcome !== 'fixed') {
+            // exhausted / human-only — strand with the existing operator hint.
+            fmt.log.info(`The squash commit runs the repo git hooks. Fix the reported hook failure in ${baseWorktree} and retry integrate.`);
+            throw new IntegrationAbort();
+          }
         }
       }
       if (retriedCommit) {
@@ -1532,7 +1585,6 @@ function printIntegrationPreflight(
 (integrate as any).resolveIntegrationVerificationWorktree = resolveIntegrationVerificationWorktree;
 (integrate as any).buildIntegrationVerificationInvocation = buildIntegrationVerificationInvocation;
 (integrate as any).classifyHookFailure = classifyHookFailure;
-(integrate as any).handleHookFailureAutoBounce = handleHookFailureAutoBounce;
 (integrate as any).executeIntegrationGates = executeIntegrationGates;
 (integrate as any).orderIntegrationGates = orderIntegrationGates;
 (integrate as any).gateMatchesChangedAreas = gateMatchesChangedAreas;

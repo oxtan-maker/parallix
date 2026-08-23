@@ -98,6 +98,9 @@ class PinnedAgentUnavailableError extends Error {
 }
 
 const NON_BLOCKING_LAUNCH_ERROR_PATTERNS = Object.freeze([
+  // task-2380: Claude missing-session resume error (also recovered per-family
+  // in claude.ts). Deterministic, agent-specific — never poison the blocklist.
+  /no conversation found with session id:/i,
   /\b(?:invalid|unknown|unsupported|unrecognized)\s+model\b/i,
   /\bmodel\s+(?:identifier|id)\s+(?:is\s+)?invalid\b/i,
   /\b(?:model\s+not\s+found|no\s+such\s+model)\b/i,

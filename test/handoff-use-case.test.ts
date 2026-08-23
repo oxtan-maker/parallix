@@ -123,8 +123,8 @@ function makePorts(recorder: Recorder, overrides: Record<string, unknown> = {}):
     },
     documentWriter: { writeJson: () => undefined },
     productConfig: { isForgejoReviewEnabled: () => false },
-    agentRelaunch: {
-      attemptAgentRelaunch: async () => { recorder.relaunches.push(1); return { relaunched: false, error: 'no launcher' }; },
+    agents: {
+      startAgent: async () => { recorder.relaunches.push(1); throw new Error('no launcher'); },
     },
     agentSelection: {
       eligibleAgentsForStep: () => ['claude', 'codex'],
@@ -290,8 +290,8 @@ test('handoff use case relaunches the agent and succeeds after gatekeeper pushba
           : { ok: true };
       },
     },
-    agentRelaunch: {
-      attemptAgentRelaunch: async () => { recorder.relaunches.push(1); return { relaunched: true }; },
+    agents: {
+      startAgent: async () => { recorder.relaunches.push(1); return { agent: 'custom', result: { status: 0 } }; },
     },
   });
   const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
@@ -300,6 +300,61 @@ test('handoff use case relaunches the agent and succeeds after gatekeeper pushba
   assert.equal(result.gatekeeperPushedBack, true, 'the pushback is reported even on eventual success');
   assert.equal(recorder.relaunches.length, 1, 'exactly one relaunch was needed');
   assert.equal(recorder.gatekeeperCalls.length, 2, 'gatekeeper re-ran on the retry');
+});
+
+test('handoff use case forwards the authoritative occurredAt through a recovery handoff', async () => {
+  // F1 (round 3): a recovered handoff that represents a review entered earlier
+  // must record the caller-provided authoritative occurredAt, not a fresh wall
+  // clock. TASK-2379 introduced occurredAt for lifecycle recovery; dropping it
+  // in the gatekeeper-bounce migration would have rewritten review-round timing
+  // and board lane dwell data on every resumed handoff.
+  const recorder = makeRecorder();
+  let capturedOccurredAt: string | undefined;
+  const ports = makePorts(recorder, {
+    missionServices: async () => ({
+      checkpoints: { record: async () => ({ status: 'completed' }) },
+      lifecycle: {
+        transition: async (request: { occurredAt?: string }) => {
+          capturedOccurredAt = request.occurredAt;
+          return { status: 'completed', value: { version: 3 } };
+        },
+      },
+      store: { load: async () => ({ kind: 'not-found' }) },
+      handoff: { recordNel: async () => ({ status: 'completed' }) },
+    }),
+  });
+  const authoritative = '2026-07-24T08:00:00.000Z';
+  const result = await new HandoffCommandUseCase(ports).performHandoff(
+    SLUG,
+    runOptions(recorder, { occurredAt: authoritative }),
+  );
+
+  assert.equal(result.ok, true, recorder.errors.join('\n'));
+  assert.equal(capturedOccurredAt, authoritative, 'the recovered handoff forwards the authoritative occurredAt');
+});
+
+test('handoff use case keeps the wall clock when no occurredAt is supplied', async () => {
+  // A genuine handoff passes nothing; the use case keeps the wall clock so a
+  // fresh handoff still advances review timing as before.
+  const recorder = makeRecorder();
+  let capturedOccurredAt: string | undefined;
+  const ports = makePorts(recorder, {
+    missionServices: async () => ({
+      checkpoints: { record: async () => ({ status: 'completed' }) },
+      lifecycle: {
+        transition: async (request: { occurredAt?: string }) => {
+          capturedOccurredAt = request.occurredAt;
+          return { status: 'completed', value: { version: 3 } };
+        },
+      },
+      store: { load: async () => ({ kind: 'not-found' }) },
+      handoff: { recordNel: async () => ({ status: 'completed' }) },
+    }),
+  });
+  const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
+
+  assert.equal(result.ok, true, recorder.errors.join('\n'));
+  assert.ok(capturedOccurredAt, 'the wall clock is used when no occurredAt is supplied');
 });
 
 test('handoff use case stops after the bounded relaunch budget when pushback persists', async () => {
@@ -311,8 +366,8 @@ test('handoff use case stops after the bounded relaunch budget when pushback per
         return { ok: false, posted: true, missing: ['MISSION.md'] };
       },
     },
-    agentRelaunch: {
-      attemptAgentRelaunch: async () => { recorder.relaunches.push(1); return { relaunched: true }; },
+    agents: {
+      startAgent: async () => { recorder.relaunches.push(1); return { agent: 'custom', result: { status: 0 } }; },
     },
   });
   const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));

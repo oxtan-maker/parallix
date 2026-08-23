@@ -16,14 +16,11 @@ import type {
   RebaseWorkflowPort,
 } from './ports/rebase-workflow.js';
 
-// Import and re-export hook-failure helpers from shared application module (TASK-2369.17)
-import {
-  classifyHookFailure,
-  handleHookFailureAutoBounce,
-  MAX_HOOK_RETRY,
-  type HookRebouncePort,
-} from './hook-failure-workflow.js';
-export { classifyHookFailure, handleHookFailureAutoBounce, MAX_HOOK_RETRY, type HookRebouncePort };
+// Hook detection lives in the shared application module (TASK-2369.17); the
+// bounce itself is the rebound kernel's (TASK-2377.05).
+import { classifyHookFailure } from './hook-failure-workflow.js';
+export { classifyHookFailure };
+import { rebound } from './rebound-kernel.js';
 
 /**
  * Parse conflict file paths from git status --porcelain output
@@ -195,9 +192,6 @@ export function buildRebasePrompt({
  */
 export async function runRebaseWorkflow(args: string[], port: RebaseWorkflowPort): Promise<void> {
   const gitFn: GitRunner = port.git;
-  const bounceHookFailure = port.handleHookFailureAutoBounce
-    ?? ((slug: string, worktree: string, output: string, classification: { hookType: string | null }, options: { missionStore?: unknown }) =>
-      handleHookFailureAutoBounce(slug, worktree, output, classification, port, options));
 
   const flags = args.filter(a => a.startsWith('--'));
   const params = args.filter(a => !a.startsWith('--'));
@@ -301,6 +295,82 @@ export async function runRebaseWorkflow(args: string[], port: RebaseWorkflowPort
     return false;
   };
 
+  // ── Hook-failure bounces (TASK-2377.05) ────────────────────────────────────
+  // Every hook failure on this command runs through the one rebound kernel:
+  // launch the implementer, then re-run `git add -A` + `git rebase --continue`
+  // and report the bounce fixed only when that re-run passes. The kernel keeps
+  // its per-occurrence budget in memory; nothing is persisted.
+
+  const combineOutput = (result: GitCommandResult) =>
+    [result.stdout, result.stderr].filter(Boolean).join('\n').trim();
+  const continueSucceeded = (result: GitCommandResult) =>
+    result.status === 0 || /up to date|Already up to date/i.test((result.stdout || '') + (result.stderr || ''));
+  const continueRebaseCommand = (): GitCommandResult =>
+    gitFn(['-C', executionRoot, '-c', 'core.editor=true', '-c', 'merge.autoedit=no', 'rebase', '--continue']);
+
+  /**
+   * Implementer that owns a hook fix: the recorded assignee, else a launcher
+   * selection probed with the real launcher-status contract. Select an agent
+   * first, then probe *that* agent — the production `workflowLauncherStatus`
+   * dereferences its required `agent` argument, so probing with none throws.
+   */
+  const resolveBounceImplementer = (): string | null => {
+    const resolution = port.resolveTaskFile(slug, executionRoot);
+    const recorded = resolution.ok && resolution.taskFile ? port.getTaskImplementer(resolution.taskFile) : null;
+    if (recorded) {return recorded;}
+    const selected = port.selectAgent?.({ role: 'implementer' }) ?? null;
+    if (!selected) {return null;}
+    const status = port.workflowLauncherStatus?.(selected) ?? { supported: false, agent: selected };
+    return status.supported ? (status.agent ?? selected) : null;
+  };
+
+  type HookBounce = { outcome: 'declined' | 'fixed' | 'stranded'; result: GitCommandResult | null };
+
+  /**
+   * Bounce one hook failure through the kernel. `retryContinue` is the exact
+   * `rebase --continue` invocation of the failing site, so the verify re-runs
+   * the check that failed rather than probing rebase state.
+   */
+  const reboundHookFailure = async (
+    hookOutput: string,
+    classification: { hookType: string | null },
+    retryContinue: () => GitCommandResult,
+  ): Promise<HookBounce> => {
+    // Interception seam: the pre-review path records the hook evidence and
+    // declines the in-child bounce because it owns the budget itself.
+    if (port.onHookFailure && !(await port.onHookFailure(classification, hookOutput))) {
+      return { outcome: 'declined', result: null };
+    }
+    const implementer = resolveBounceImplementer();
+    if (!implementer) {
+      fmt.log.fail(`Could not determine implementer for ${fmt.slug(slug)}. Cannot bounce the hook failure.`);
+      return { outcome: 'declined', result: null };
+    }
+    let lastResult: GitCommandResult | null = null;
+    const outcome = await rebound(
+      { kind: 'hook-failure', hook: classification.hookType, operation: 'rebase --continue', output: hookOutput },
+      {
+        slug,
+        worktree: executionRoot,
+        implementer,
+        startAgent: port.startAgent,
+        transitionToImplementer: (bounceSlug: string) =>
+          port.transitionTask(bounceSlug, 'active', { rootDir: executionRoot, log: fmt.log.plain }),
+        applyAgentFallback: async ({ launchResult, original }) =>
+          await port.applyAgentFallback({
+            role: 'implementer', original, launchResult, state: {}, slug, worktree: executionRoot,
+            log: fmt.log.plain, writeReviewStateFn: port.writeReviewState,
+          }) as string || original,
+        verify: () => {
+          gitFn(['-C', executionRoot, 'add', '-A']);
+          lastResult = retryContinue();
+          return { ok: continueSucceeded(lastResult), diagnostic: combineOutput(lastResult) };
+        },
+      },
+    );
+    return { outcome: outcome.outcome === 'fixed' ? 'fixed' : 'stranded', result: lastResult };
+  };
+
   const rebaseResult = gitFn(['-C', executionRoot, '-c', 'core.editor=true', '-c', 'merge.autoedit=no', 'rebase', baseBranch]);
 
   // Rebase succeeded (status 0) or was already up to date
@@ -349,40 +419,22 @@ export async function runRebaseWorkflow(args: string[], port: RebaseWorkflowPort
       return;
     }
 
-    // Classify hook failure and auto-bounce to implementer
+    // Classify the hook failure and bounce it through the rebound kernel. The
+    // kernel's verify re-runs `rebase --continue` after each fix attempt, so
+    // `fixed` means the rebase actually advanced — not merely that an agent ran.
     const hookClassification = classifyHookFailure(rebaseOutput);
     if (hookClassification.isHookFailure && typeof port.missionServices === 'function') {
-      const rebaseMissionStore = (await port.missionServices(executionRoot)).store;
-      const shouldRetry = await bounceHookFailure(slug, executionRoot, rebaseOutput, hookClassification, {
-        missionStore: rebaseMissionStore,
-      });
-      if (shouldRetry) {
-        fmt.log.info('Retrying rebase after implementer fix...');
-        // A failed hook leaves the rebase in progress. Keep continuing it until
-        // the shared persisted retry budget is exhausted, rather than treating a
-        // second hook failure as an unrelated manual-recovery error.
-        let retryResult = gitFn(['-C', executionRoot, '-c', 'core.editor=true', '-c', 'merge.autoedit=no', 'rebase', '--continue']);
-        while (retryResult.status !== 0) {
-          const retryOutput = [retryResult.stdout, retryResult.stderr].filter(Boolean).join('\n').trim();
-          const retryClassification = classifyHookFailure(retryOutput);
-          if (!retryClassification.isHookFailure) {break;}
-          const retryAgain = await bounceHookFailure(slug, executionRoot, retryOutput, retryClassification, {
-            missionStore: rebaseMissionStore,
-          });
-          if (!retryAgain) {break;}
-          fmt.log.info('Retrying rebase after implementer hook fix...');
-          gitFn(['-C', executionRoot, 'add', '-A']);
-          retryResult = gitFn(['-C', executionRoot, '-c', 'core.editor=true', '-c', 'merge.autoedit=no', 'rebase', '--continue']);
-        }
-        if (retryResult.status === 0 || /up to date|Already up to date/i.test(retryResult.stdout + retryResult.stderr)) {
-          if (!verifyBaseAncestry()) { return; }
-          fmt.log.pass('Rebase completed after hook fix.');
-          await performPush();
-          fmt.log.info(`Next: ${fmt.command(port.formatVerificationCommand(area, executionRoot))}`);
-          fmt.log.info(`Next: ${fmt.command(`px integrate ${slug} --dry-run`)}`);
-          port.exit(0);
-          return;
-        }
+      const bounce = await reboundHookFailure(rebaseOutput, hookClassification, continueRebaseCommand);
+      if (bounce.outcome === 'fixed') {
+        if (!verifyBaseAncestry()) { return; }
+        fmt.log.pass('Rebase completed after hook fix.');
+        await performPush();
+        fmt.log.info(`Next: ${fmt.command(port.formatVerificationCommand(area, executionRoot))}`);
+        fmt.log.info(`Next: ${fmt.command(`px integrate ${slug} --dry-run`)}`);
+        port.exit(0);
+        return;
+      }
+      if (bounce.outcome === 'stranded') {
         fmt.log.fail('Rebase still failed after implementer hook fix. Manual intervention required.');
       }
     } else if (hookClassification.isHookFailure) {
@@ -506,25 +558,19 @@ export async function runRebaseWorkflow(args: string[], port: RebaseWorkflowPort
     fmt.log.info('Continuing rebase...');
     let rebaseCompleted = false;
     let continueResult = continueRebase();
+    // One kernel call, no loop: the kernel owns the retry budget and re-runs
+    // this site's own `rebase --continue` as its verify (TASK-2377.05).
     const recoverHookFailureFromContinue = async (result: GitCommandResult) => {
-      let recovered = result;
-      while (recovered.status !== 0) {
-        const output = [recovered.stdout, recovered.stderr].filter(Boolean).join('\n').trim();
-        const classification = classifyHookFailure(output);
-        if (!classification.isHookFailure) {break;}
-        // Direct callers without composed mission services retain the legacy
-        // hint-and-exit path; the production CLI always supplies this seam.
-        if (typeof port.missionServices !== 'function') {break;}
-        const continueStore = (await port.missionServices(executionRoot)).store;
-        const shouldRetry = await bounceHookFailure(slug, executionRoot, output, classification, {
-          missionStore: continueStore,
-        });
-        if (!shouldRetry) {return { result: recovered, stranded: true };}
-        fmt.log.info('Retrying rebase --continue after implementer hook fix...');
-        gitFn(['-C', executionRoot, 'add', '-A']);
-        recovered = continueRebase();
-      }
-      return { result: recovered, stranded: false };
+      if (result.status === 0) {return { result, stranded: false };}
+      const output = combineOutput(result);
+      const classification = classifyHookFailure(output);
+      if (!classification.isHookFailure) {return { result, stranded: false };}
+      // Direct callers without composed mission services retain the legacy
+      // hint-and-exit path; the production CLI always supplies this seam.
+      if (typeof port.missionServices !== 'function') {return { result, stranded: false };}
+      const bounce = await reboundHookFailure(output, classification, continueRebase);
+      if (bounce.outcome === 'fixed' && bounce.result) {return { result: bounce.result, stranded: false };}
+      return { result: bounce.result ?? result, stranded: true };
     };
     const initialHookRecovery = await recoverHookFailureFromContinue(continueResult);
     if (initialHookRecovery.stranded) {return;}

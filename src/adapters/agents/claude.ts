@@ -106,7 +106,13 @@ function startClaudeAgent({ prompt, worktree, env, resume = false, sessionId = n
     if (!result) {return false;}
     const stderr = result.stderr || '';
     const stdout = result.stdout || '';
-    return (stderr.includes('Session not found') || stdout.includes('Session not found'));
+    // Real Claude missing-session diagnostics. Match narrowly so an ordinary
+    // exit-1 failure is not mistaken for a recoverable stale resume.
+    const signals = [
+      'Session not found',
+      'No conversation found with session ID:'
+    ];
+    return signals.some(s => stderr.includes(s) || stdout.includes(s));
   }
 
   function processResult(result: any) {

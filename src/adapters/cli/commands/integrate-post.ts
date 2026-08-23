@@ -1,7 +1,6 @@
 import fs from 'node:fs';
 import { git } from '../../git/git.js';
 import * as fmt from '../../../application/presentation/cli-format.js';
-import { resolveTaskFile, getTaskImplementer, transitionTask } from '../../backlog/backlog.js';
 import { resolveForgejoUser, resolveForgejoHome, isForgejoPath } from '../../forgejo/forgejo.js';
 import { getPrimaryWorktree, conventionalWorktreePath, missionBranchName } from '../../filesystem/mission-utils.js';
 import stats from './stats.js';
@@ -17,15 +16,8 @@ export {
   telemetryToStatsFields,
 } from './stats.js';
 import * as postIntegrateHook from '../../process/post-integrate-hook.js';
-import { readReviewState, writeReviewState, persistReviewStateOrThrow } from '../../review/review-state.js';
-import { startAgent, selectAgent, workflowLauncherStatus } from '../../agents/agents.js';
-import { applyAgentFallback } from '../../review/review-loop.js';
 import { missionId } from '../../../domain/mission.js';
-import {
-  classifyHookFailure,
-  handleHookFailureAutoBounce as handleHookFailureAutoBouncePolicy,
-  type HookRebouncePort,
-} from '../../../application/hook-failure-workflow.js';
+import { classifyHookFailure } from '../../../application/hook-failure-workflow.js';
 
 export { classifyHookFailure };
 
@@ -39,61 +31,6 @@ export { classifyHookFailure };
  * @extends{Error}
  */
 export class IntegrationAbort extends Error {}
-
-/**
- * Thin adapter over the shared hook-failure policy; retains the test seam.
- *
- * @param {string} slug
- * @param {string} worktree
- * @param {string} hookOutput
- * @param {{ hookType: string | null }} classification
- * @param {{ startAgentFn?: Function, readReviewStateFn?: Function, writeReviewStateFn?: Function, transitionTaskFn?: Function, applyAgentFallbackFn?: Function, selectAgentFn?: Function, workflowLauncherStatusFn?: Function, missionStore?: any }} opts
- * @returns {Promise<boolean>} true if should retry, false if stranded
- */
-export async function handleHookFailureAutoBounce(
-  slug: string,
-  worktree: string,
-  hookOutput: string,
-  classification: { hookType: string | null },
-  {
-    startAgentFn = startAgent,
-    readReviewStateFn = readReviewState,
-    writeReviewStateFn = writeReviewState,
-    transitionTaskFn = transitionTask,
-    applyAgentFallbackFn = applyAgentFallback,
-    selectAgentFn = selectAgent,
-    workflowLauncherStatusFn = workflowLauncherStatus,
-    missionStore = null,
-  }: {
-    startAgentFn?: Function;
-    readReviewStateFn?: Function;
-    writeReviewStateFn?: Function;
-    transitionTaskFn?: Function;
-    applyAgentFallbackFn?: Function;
-    selectAgentFn?: Function;
-    workflowLauncherStatusFn?: Function;
-    missionStore?: any;
-  } = {}
-): Promise<boolean> {
-  const port: HookRebouncePort = {
-    startAgent: startAgentFn as HookRebouncePort['startAgent'],
-    readReviewState: readReviewStateFn as HookRebouncePort['readReviewState'],
-    writeReviewState: writeReviewStateFn as HookRebouncePort['writeReviewState'],
-    persistReviewState: (s, state, wt, store) =>
-      persistReviewStateOrThrow(writeReviewStateFn as any, s, state as any, wt, store as any),
-    exit: () => {},
-    transitionTask: transitionTaskFn as HookRebouncePort['transitionTask'],
-    applyAgentFallback: applyAgentFallbackFn as HookRebouncePort['applyAgentFallback'],
-    selectAgent: selectAgentFn as HookRebouncePort['selectAgent'],
-    workflowLauncherStatus: workflowLauncherStatusFn as HookRebouncePort['workflowLauncherStatus'],
-    resolveTaskFile: (s, wt) => resolveTaskFile(s, wt) as any,
-    getTaskImplementer: (task: any) => getTaskImplementer(task),
-  };
-  return handleHookFailureAutoBouncePolicy(slug, worktree, hookOutput, classification, port, {
-    missionStore,
-    recoveryCommand: 'try again',
-  });
-}
 
 /** @type{{symptom: string, cause: string, fix: string}[]} */
 export const SYNC_MERGED_DIAGNOSTICS = [

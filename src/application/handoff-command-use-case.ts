@@ -20,6 +20,7 @@ import { beginNextReviewRound, startReview, ConfiguredReviewerEligibility, chang
 import { agentFamily } from '../domain/agents.js';
 import { artifactReference } from '../domain/net-engineering-lines.js';
 import type { HandoffWorkflowPorts, HandoffResult } from './ports/handoff-workflow.js';
+import { rebound } from './rebound-kernel.js';
 
 /**
  * A selection failure that means "no other family is available right now",
@@ -603,7 +604,7 @@ export class HandoffCommandUseCase {
       rebaseFn = ports.rebase.rebaseBeforeReviewRound,
       runVerificationGateFn = ports.verification.runVerificationGate,
       maxAttempts,
-      attemptAgentRelaunchFn = ports.agentRelaunch.attemptAgentRelaunch,
+      startAgentFn = ports.agents.startAgent,
       remainingRetries,
       runGatekeeperFn = ports.gatekeeper.runGatekeeper,
       captureNelFn,
@@ -913,7 +914,7 @@ export class HandoffCommandUseCase {
         currentAttempt,
         log,
         error,
-        attemptAgentRelaunchFn,
+        startAgentFn,
         worktree,
         skipGate,
         forceWithLease,
@@ -1157,7 +1158,7 @@ export class HandoffCommandUseCase {
   private async remediateGatekeeperPushback(slug: string, context): Promise<HandoffResult> {
     const {
       gatekeeperResult, rootDir, forgejoUser, currentAttempt, log, error,
-      attemptAgentRelaunchFn, worktree, skipGate, forceWithLease,
+      startAgentFn, worktree, skipGate, forceWithLease,
       isForgejoReviewEnabledFn, rebaseFn, runVerificationGateFn, runGatekeeperFn, missionServicesFn,
       occurredAt,
     } = context;
@@ -1188,50 +1189,70 @@ export class HandoffCommandUseCase {
       'After creating the missing artifacts, re-run the handoff (`px handoff ${slug}`).',
     ].join('\n');
 
-    // Bounded retry: attempt agent relaunch using global retry budget
+    // TASK-2377.05 (SC7): gatekeeper pushback bounces through the one rebound
+    // kernel like every other agent-fixable failure. The kernel owns the launch,
+    // the budget, and the verified fix; `verify` re-runs the handoff itself, so
+    // this is reported repaired only when the handoff actually completes.
+    //
+    // The budget is clamped to the caller's remaining global retry budget so the
+    // recursion guard (`maxAttempts` / `remainingRetries`) still holds: the
+    // verify re-enters `performHandoff` with both decremented exactly as before.
     const initialBudget = retriesLeft;
-    while (retriesLeft > 0) {
-      log(`Attempting agent relaunch (${initialBudget - retriesLeft + 1}/${initialBudget}) to create missing artifacts...`);
-      const { relaunched, error: relaunchErr } = await attemptAgentRelaunchFn(
-        slug, rootDir, `Gatekeeper pushback: missing artifacts for ${slug}: ${missingItems.join(', ')}`, forgejoUser,
-        { log, error, promptOverride: relaunchPrompt }
-      );
-      if (relaunched) {
-        log('Agent relaunched successfully. Waiting for artifact creation...');
-        // Re-run handoff with decremented retry budget
-        const retryResult = await this.performHandoff(slug, {
-          worktree,
-          skipGate,
-          force: true,
-          forceWithLease,
-          isForgejoReviewEnabledFn: isForgejoReviewEnabledFn,
-          rebaseFn: rebaseFn,
-          runVerificationGateFn: runVerificationGateFn,
-          runGatekeeperFn: runGatekeeperFn,
-          attemptAgentRelaunchFn: attemptAgentRelaunchFn,
-          missionServicesFn: missionServicesFn,
-          log,
-          error,
-          maxAttempts: currentAttempt + 1,
-          remainingRetries: retriesLeft - 1,
-          occurredAt,
-        });
-        if (retryResult.ok) {
-          log('Handoff succeeded after agent relaunch.');
-          return { ...retryResult, gatekeeperPushedBack: true };
-        }
-        // Handoff still failed after relaunch — the recursive call already consumed
-        // one retry attempt (via remainingRetries), so we break here rather than
-        // continuing the parent's while loop.
-        log(`Handoff still failed after relaunch: ${retryResult.error || 'unknown'}`);
-        break;
-      } else {
-        log(`Agent relaunch failed: ${relaunchErr || 'unknown error'}`);
-        break;
-      }
+    if (retriesLeft <= 0) {
+      // Budget already spent by an outer attempt — strand without launching.
+      const spent = `Gatekeeper pushback persisted after ${currentAttempt} relaunch attempts. Manual intervention required to create: ${missingItems.join(', ')}.`;
+      error(spent);
+      return { ok: false, gatekeeperPushedBack: true, error: spent };
+    }
+    let repairedResult: HandoffResult | null = null;
+    const outcome = await rebound(
+      {
+        kind: 'artifact-incomplete',
+        role: 'implementer',
+        diagnostic: relaunchPrompt,
+      },
+      {
+        slug,
+        worktree: rootDir,
+        implementer: forgejoUser,
+        // One launch per level: the retry budget is spent by the recursion into
+        // `performHandoff` below (which decrements `remainingRetries`), not by
+        // the kernel looping here. Two nested levels give the same two total
+        // launches the pre-kernel loop made.
+        maxAttempts: 1,
+        startAgent: startAgentFn,
+        verify: async (attempt: number) => {
+          const retryResult = await this.performHandoff(slug, {
+            worktree,
+            skipGate,
+            force: true,
+            forceWithLease,
+            isForgejoReviewEnabledFn: isForgejoReviewEnabledFn,
+            rebaseFn: rebaseFn,
+            runVerificationGateFn: runVerificationGateFn,
+            runGatekeeperFn: runGatekeeperFn,
+            startAgentFn: startAgentFn,
+            missionServicesFn: missionServicesFn,
+            log,
+            error,
+            maxAttempts: currentAttempt + 1,
+            remainingRetries: Math.max(0, initialBudget - attempt),
+            occurredAt,
+          });
+          repairedResult = retryResult;
+          return { ok: Boolean(retryResult.ok), diagnostic: retryResult.error || '' };
+        },
+        log,
+        error,
+      },
+    );
+
+    if (outcome.outcome === 'fixed' && repairedResult) {
+      log('Handoff succeeded after agent relaunch.');
+      return { ...(repairedResult as HandoffResult), gatekeeperPushedBack: true };
     }
 
-    // Retry budget exhausted
+    // Budget spent, or the classifier ruled the pushback human-only.
     const msg = `Gatekeeper pushback persisted after ${initialBudget} relaunch attempts. Manual intervention required to create: ${missingItems.join(', ')}.`;
     error(msg);
     return { ok: false, gatekeeperPushedBack: true, error: msg };

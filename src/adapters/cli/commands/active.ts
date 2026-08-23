@@ -10,6 +10,10 @@ import { resolveTaskFile, transitionTask, getTaskStatus, getTaskImplementer } fr
 import { recordStageStatsSafe, startReviewLoop } from '../../review/review-loop.js';
 import * as repairHandoff from './repair-handoff.js';
 import { runtimeAssetStore } from '../../assets/runtime-assets.js';
+// TASK-2377.05 (SC3/SC4): both handoff relaunch loops run through the one
+// rebound kernel, so a bounce is only reported fixed when the check that failed
+// re-runs and passes. The kernel owns the per-occurrence budget in memory.
+import { rebound, DEFAULT_REBOUND_ATTEMPTS, type ReboundContext } from '../../../application/rebound-kernel.js';
 
 function renderActiveProgress(event, logFn) {
   if (event.phase === 'launch') {
@@ -246,93 +250,16 @@ function applyExecuteFallback(opts) {
 }
 
 /**
- * Attempt to relaunch an agent to fix a repairable handoff error.
- * For resume-capable agents, the startAgent function handles resume flags internally.
- *
- * @param {string} slug - Mission slug
- * @param {string} worktree - Path to the mission worktree
- * @param {string} errorMsg - The error message from the failed handoff
- * @param {string} agent - The agent family to relaunch
- * @param {object} [options]
- * @returns {Promise<{relaunched: boolean, error?: string}>} Result of relaunch attempt
+ * Flatten the handoff gate's captured output into the single diagnostic string
+ * the kernel's `handoff-verification` reason carries into the fix prompt.
+ * @param {{stdout?: string, stderr?: string}} [gateOutput]
  */
-/**
-  * @param {string} slug
-  * @param {string} worktree
-  * @param {string} errorMsg
-  * @param {string} agent
- * @param {{isRelaunchableErrorFn?: Function, buildRelaunchPromptFn?: Function, workflowLauncherStatusFn?: Function, startAgentFn?: Function, log?: Function, error?: Function, gateOutput?: {stdout: string, stderr: string}, promptOverride?: string}} [options]
-  */
- async function attemptAgentRelaunch(slug, worktree, errorMsg, agent, options = {}) {
-   const {
-     isRelaunchableErrorFn = repairHandoff.isRelaunchableError,
-     buildRelaunchPromptFn = repairHandoff.buildRelaunchPrompt,
-     workflowLauncherStatusFn = agents.workflowLauncherStatus,
-     startAgentFn = agents.startAgent,
-     log = fmt.log.plain,
-     error = fmt.log.plainError,
-     gateOutput,
-     promptOverride
-   } = options;
-   // A declared checkpoint gap has an explicit continuation contract and is
-   // therefore relaunchable even though generic error classification does not
-   // recognize its diagnostic text.
-   const nextCheckpoint = nextMissingCheckpointFromError(errorMsg);
-   // When a custom prompt is provided (e.g. gatekeeper pushback), bypass the
-   // relaunchability check so the agent can act on explicit artifact-creation
-   // instructions even when the error message doesn't match known patterns.
-   if (!promptOverride && !nextCheckpoint && !isRelaunchableErrorFn(errorMsg)) {
-     log(`Error is not relaunchable: ${errorMsg}`);
-     return { relaunched: false, error: 'Error is not relaunchable for agent relaunch' };
-   }
-
-   // Check if the agent launcher is available
-   const status = workflowLauncherStatusFn(agent);
-   if (!status.supported) {
-     error(`Agent ${fmt.agent(agent)} is not available for relaunch: ${status.detail || status.reason || 'unknown'}`);
-     return { relaunched: false, error: `Agent ${agent} launcher is not available` };
-   }
-
-   // A missing declared checkpoint means the agent must continue the same mission,
-   // not repair a generic Goal Check artifact and terminate again.
-   // Build the relaunch prompt, passing captured gate output if available (architecture migration).
-   // promptOverride (e.g. gatekeeper pushback) takes precedence over the derived prompt.
-   const prompt = promptOverride || (nextCheckpoint
-     ? buildCheckpointContinuationPrompt(slug, worktree, nextCheckpoint)
-     : buildRelaunchPromptFn(errorMsg, slug, worktree, gateOutput));
-
-  log(`Attempting to relaunch ${fmt.agent(agent)} to fix repairable handoff error...`);
-  // startAgent handles resume flags internally for resume-capable agents (codex, claude, gemini, custom)
-
-  try {
-    const result = await startAgentFn('active', {
-      prompt,
-      worktree,
-      agent,
-      slug,
-      role: 'implementer',
-      // startAgent will use RESUME_CAPABLE set and session markers to decide resume
-      onLaunch: (/** @type{{agent: string}} */ { agent: launchedAgent }) => {
-        log(`Relaunched ${fmt.agent(launchedAgent)} for repair. Session persistence will be used if available.`);
-      }
-    });
-
-    if (result.error) {
-      error(`Relaunch failed: ${result.error.message || String(result.error)}`);
-      return { relaunched: false, error: result.error.message || String(result.error) };
-    }
-
-    if (typeof result.result.status === 'number' && result.result.status !== 0) {
-      error(`Relaunch agent exited with status ${result.result.status}`);
-      return { relaunched: false, error: `Agent exited with status ${result.result.status}` };
-    }
-
-    log(`Relaunch successful. ${fmt.agent(agent)} is now running to fix the handoff error.`);
-    return { relaunched: true };
-  } catch (err) {
-    error(`Relaunch failed with exception: ${/** @type{Error} */(err).message}`);
-    return { relaunched: false, error: /** @type{Error} */(err).message };
+function flattenGateOutput(gateOutput) {
+  if (!gateOutput) {
+    return undefined;
   }
+  const joined = [gateOutput.stdout, gateOutput.stderr].filter(Boolean).join('\n').trim();
+  return joined || undefined;
 }
 
 /** @param {string} errorMsg */
@@ -463,7 +390,7 @@ function checkpointValidationNextAction(errorMsg, slug, worktree) {
  * @param {string} slug
  * @param {string} worktree
  * @param {string} agent
-  * @param {{taskFile?: string | null, onAgentLaunched?: (agent: string, phase: 'review' | 'review-response') => Promise<void>, onAutonomousStop?: (reason: string) => Promise<void>, validateCheckpointsBeforeHandoffFn?: Function, performHandoff?: Function, startReviewLoop?: Function, repairHandoffFn?: {isRelaunchableError: Function, buildRelaunchPrompt: Function}, attemptAgentRelaunchFn?: Function, log?: Function, error?: Function}} [options]
+  * @param {{taskFile?: string | null, onAgentLaunched?: (agent: string, phase: 'review' | 'review-response') => Promise<void>, onAutonomousStop?: (reason: string) => Promise<void>, validateCheckpointsBeforeHandoffFn?: Function, performHandoff?: Function, startReviewLoop?: Function, repairHandoffFn?: {isRelaunchableError: Function, buildRelaunchPrompt: Function}, startAgentFn?: Function, workflowLauncherStatusFn?: Function, log?: Function, error?: Function}} [options]
  */
 async function runHandoffAndReview(slug, worktree, agent, options = {}) {
   const {
@@ -474,10 +401,38 @@ async function runHandoffAndReview(slug, worktree, agent, options = {}) {
     performHandoff: _performHandoff = (/** @type{string} */ s, /** @type{object} */ o) => handoff.performHandoff(s, o),
     startReviewLoop: _startReviewLoop = (/** @type{string} */ s, /** @type{object} */ o) => startReviewLoop(s, o),
     repairHandoffFn = /** @type{(s: string, w: string, e: string, o: object) => Promise<{repaired: boolean, blocker?: string}>} */(repairHandoff.default),
-    attemptAgentRelaunchFn = attemptAgentRelaunch,
+    startAgentFn = agents.startAgent,
+    workflowLauncherStatusFn = agents.workflowLauncherStatus,
     log = fmt.log.plain,
     error = fmt.log.plainError
   } = options;
+  // SC7: the kernel's launch port for every handoff bounce. The kernel owns
+  // classification, the fix prompt, the budget, and the verify; this adapter
+  // owns only what is genuinely launcher-side — the launcher-availability check
+  // and the resume-aware `startAgent` call. `startAgentFn` is the mock seam the
+  // handoff tests inject; nothing here decides whether to bounce.
+  const reboundLaunchPort = (async (_step: string, launchOptions: Record<string, unknown>) => {
+      const status = workflowLauncherStatusFn(agent);
+      if (!status.supported) {
+        // A throw is how the kernel learns a launch could not happen; it records
+        // the diagnostic and spends the attempt like any other failed try.
+        throw new Error(`Agent ${agent} is not available for relaunch: ${status.detail || status.reason || 'unknown'}`);
+      }
+      const promptSlot = launchOptions.prompt;
+      const prompt = typeof promptSlot === 'function' ? promptSlot(agent) : String(promptSlot ?? '');
+      return await startAgentFn('active', {
+        prompt,
+        worktree,
+        agent,
+        slug,
+        role: 'implementer',
+        // startAgent uses the RESUME_CAPABLE set and session markers to decide resume.
+        onLaunch: (/** @type{{agent: string}} */ { agent: launchedAgent }) => {
+          log(`Relaunched ${fmt.agent(launchedAgent)} for repair. Session persistence will be used if available.`);
+        }
+      });
+  }) as ReboundContext['startAgent'];
+
   // Pre-handoff checkpoint enforcement: validate checkpoints exist before calling performHandoff()
   // This catches missing checkpoints immediately after the execute agent exits,
   // before the repair flow runs, and provides an explicit instruction to create them.
@@ -498,42 +453,45 @@ async function runHandoffAndReview(slug, worktree, agent, options = {}) {
       : false);
 
     if (isCheckpointRelaunchable) {
-      // architecture migration: bounded retry loop for pre-handoff checkpoint validation.
-      // Repeated absent or invalid checkpoint evidence reaches a configured
-      // exhaustion boundary without review submission.
-      let checkpointRelaunchCount = 0;
-      const maxCheckpointRelaunches = 2;
-
-      while (checkpointRelaunchCount < maxCheckpointRelaunches) {
-        checkpointRelaunchCount++;
-        log(`Checkpoint validation failed (${checkpointClassification?.failureClass ?? 'DeclaredCheckpointGap'}). Targeted repair relaunch attempt ${checkpointRelaunchCount}/${maxCheckpointRelaunches}...`);
-        const { relaunched, error: relaunchError } = await attemptAgentRelaunchFn(
-          slug, worktree, /** @type{string} */(validation.error), agent,
-          { log, error }
-        );
-        if (relaunched) {
-          log('Agent relaunched for checkpoint repair. Re-validating checkpoints...');
-          // After relaunch, re-validate and proceed to performHandoff if checkpoints
-          // are now present. The agent is expected to create/update the CP-N.md
-          // before the next handoff attempt.
-          const retryValidation = validateCheckpointsBeforeHandoffFn(slug, worktree, { log, error });
-          if (retryValidation.ok) {
-            // Checkpoints now valid — fall through to performHandoff below
-            break;
-          }
-          // Checkpoint still missing/invalid after this relaunch; continue loop
-        } else {
-          log(`Agent relaunch failed: ${relaunchError || 'unknown error'}`);
-          break; // Relaunch itself failed; stop
+      // SC3: the bounded `maxCheckpointRelaunches` loop is gone. The kernel owns
+      // the budget and the verified fix: `verify` re-runs the same
+      // `validateCheckpointsBeforeHandoffFn` check that just failed, so `fixed`
+      // means the checkpoints really are present — never merely that an agent ran.
+      log(`Checkpoint validation failed (${checkpointClassification?.failureClass ?? 'DeclaredCheckpointGap'}). Bouncing to the implementer for a targeted checkpoint repair...`);
+      // A declared checkpoint gap can be reported by `nextCheckpoint` alone, so
+      // name the gap when the validator gave no message.
+      const gapError = /** @type{string} */(validation.error
+        || `Declared checkpoint documents are missing before handoff: ${validation.nextCheckpoint}. Create and commit ${validation.nextCheckpoint}.md before handoff.`);
+      // When the next missing checkpoint is known, carry the continuation
+      // contract into the kernel's diagnostic. Without it the agent repairs one
+      // checkpoint and exits again, which is the loop this bounce exists to end.
+      const nextCheckpoint = validation.nextCheckpoint || nextMissingCheckpointFromError(gapError);
+      const checkpointError = nextCheckpoint
+        ? `${gapError}\n\n${buildCheckpointContinuationPrompt(slug, worktree, nextCheckpoint)}`
+        : gapError;
+      const outcome = await rebound(
+        { kind: 'handoff-verification', error: checkpointError },
+        {
+          slug,
+          worktree,
+          implementer: agent,
+          startAgent: reboundLaunchPort,
+          verify: () => {
+            const retryValidation = validateCheckpointsBeforeHandoffFn(slug, worktree, { log, error });
+            return { ok: Boolean(retryValidation.ok), diagnostic: retryValidation.error || '' };
+          },
+          log,
+          error
         }
-      }
-
-      // Re-validate after the loop to check final state
-      const finalValidation = validateCheckpointsBeforeHandoffFn(slug, worktree, { log, error });
-      if (!finalValidation.ok) {
-        // Checkpoint still missing/invalid after all relaunch attempts — exhaustion
-        error(`       ${checkpointValidationNextAction(/** @type {string} */ (finalValidation.error), slug, worktree)}`);
-        return false;
+      );
+      if (outcome.outcome !== 'fixed') {
+        // exhausted / human-only — re-read the final state so the operator
+        // instruction names the checkpoint gap that actually remains.
+        const finalValidation = validateCheckpointsBeforeHandoffFn(slug, worktree, { log, error });
+        if (!finalValidation.ok) {
+          error(`       ${checkpointValidationNextAction(/** @type {string} */ (finalValidation.error || checkpointError), slug, worktree)}`);
+          return false;
+        }
       }
       // Fall through to performHandoff below
     } else {
@@ -560,31 +518,30 @@ async function runHandoffAndReview(slug, worktree, agent, options = {}) {
       : false;
 
     if (isRelaunchableError) {
-      // Automatic relaunch with captured gate output, bounded to max 2 attempts
-      let relaunchCount = 0;
-      const maxRelaunches = 2;
-
-      while (relaunchCount < maxRelaunches) {
-        relaunchCount++;
-        log(`\nRelaunchable error detected (${classification.failureClass}). Relaunch attempt ${relaunchCount}/${maxRelaunches}...`);
-        const { relaunched, error: relaunchError } = await attemptAgentRelaunchFn(
-          slug, worktree, /** @type{string} */(handoffResult.error), agent,
-          { log, error, gateOutput: handoffResult.gateOutput }
-        );
-        if (relaunched) {
-          handoffResult = await _performHandoff(slug, { forgejoUser: agent, worktree, force: true });
-          if (handoffResult.ok) {
-            break; // Success — proceed to review loop
-          }
-          // Handoff still failed; continue loop for another relaunch attempt
-        } else {
-          log(`Agent relaunch failed: ${relaunchError || 'unknown error'}`);
-          break; // Relaunch itself failed; stop
+      // SC4: the bounded `maxRelaunches` loop is gone. The kernel bounces with
+      // the captured gate output and `verify` re-runs `performHandoff` itself,
+      // so the refreshed result flows into the gatekeeper-pushback and
+      // review-loop branches below.
+      log(`\nRelaunchable error detected (${classification.failureClass}). Bouncing to the implementer...`);
+      const failedError = /** @type{string} */(handoffResult.error);
+      const gateOutput = handoffResult.gateOutput;
+      const outcome = await rebound(
+        { kind: 'handoff-verification', error: failedError, gateOutput: flattenGateOutput(gateOutput) },
+        {
+          slug,
+          worktree,
+          implementer: agent,
+          startAgent: reboundLaunchPort,
+          verify: async () => {
+            handoffResult = await _performHandoff(slug, { forgejoUser: agent, worktree, force: true });
+            return { ok: Boolean(handoffResult.ok), diagnostic: handoffResult.error || '' };
+          },
+          log,
+          error
         }
-      }
-
-      if (!handoffResult.ok && relaunchCount >= maxRelaunches) {
-        handoffResult.error = `Gate failure persisting after ${maxRelaunches} relaunch attempts. Manual intervention required.`;
+      );
+      if (outcome.outcome === 'exhausted' && !handoffResult.ok) {
+        handoffResult.error = `Gate failure persisting after ${DEFAULT_REBOUND_ATTEMPTS} relaunch attempts. Manual intervention required.`;
       }
     } else {
       // Original logic: attempt single repair for routine hygiene issues (dirty artifacts, rebase needed)
@@ -600,25 +557,30 @@ async function runHandoffAndReview(slug, worktree, agent, options = {}) {
         handoffResult.error = blocker;
       } else if (!repaired && repairHandoff.isRelaunchableError(handoffResult.error)) {
         // Attempt agent relaunch for repairable content errors (missing goal-check table)
+        // SC4: the `isRelaunchableError` fallback relaunch routes through the
+        // kernel too, with the same re-run-`performHandoff` verify — so a
+        // content repair is only believed once the handoff actually completes.
         log(`Content error detected. Attempting agent relaunch to fix...`);
-        const { relaunched, error: relaunchError } = await attemptAgentRelaunchFn(
-          slug, worktree, /** @type{string} */(handoffResult.error), agent, { log, error }
-        );
-        if (relaunched) {
-          // Agent was relaunched successfully; re-invoke performHandoff to verify
-          // the handoff-to-review transition actually completed, matching the
-          // contract of the repair-success path above.
-          log(`Agent relaunched. It will fix the checkpoint and retry handoff.`);
-          handoffResult = await _performHandoff(slug, { forgejoUser: agent, worktree, force: true });
-          if (!handoffResult.ok) {
-            handoffResult.error = `Post-relaunch handoff failed: ${handoffResult.error || 'unknown'}`;
+        const contentError = /** @type{string} */(handoffResult.error);
+        const outcome = await rebound(
+          { kind: 'handoff-verification', error: contentError },
+          {
+            slug,
+            worktree,
+            implementer: agent,
+            startAgent: reboundLaunchPort,
+            verify: async () => {
+              handoffResult = await _performHandoff(slug, { forgejoUser: agent, worktree, force: true });
+              return { ok: Boolean(handoffResult.ok), diagnostic: handoffResult.error || '' };
+            },
+            log,
+            error
           }
-          // Fall through to gatekeeper pushback / review loop / failure handling below.
-        } else {
-          // Relaunch failed or was not possible
-          log(`Agent relaunch failed: ${relaunchError || 'unknown error'}`);
-          // Fall through to manual handoff message
+        );
+        if (outcome.outcome !== 'fixed' && !handoffResult.ok) {
+          handoffResult.error = `Post-relaunch handoff failed: ${handoffResult.error || 'unknown'}`;
         }
+        // Fall through to gatekeeper pushback / review loop / failure handling below.
       }
     }
   }
@@ -802,7 +764,7 @@ function enforceExecuteCommitSafety(opts) {
   return true;
 }
 
-/** @type {typeof active & {buildExecutePrompt: typeof buildExecutePrompt, buildCheckpointContext: typeof buildCheckpointContext, runHandoffAndReview: typeof runHandoffAndReview, applyExecuteFallback: typeof applyExecuteFallback, selectLaunchAndRecord: typeof selectLaunchAndRecord, validateCheckpointsBeforeHandoff: typeof validateCheckpointsBeforeHandoff, attemptAgentRelaunch: typeof attemptAgentRelaunch, enforceExecuteCommitSafety: typeof enforceExecuteCommitSafety, unquoteGitStatusPath: typeof unquoteGitStatusPath}} */
-const _activeExport = Object.assign(active, { buildExecutePrompt, buildCheckpointContext, runHandoffAndReview, applyExecuteFallback, selectLaunchAndRecord, validateCheckpointsBeforeHandoff, attemptAgentRelaunch, enforceExecuteCommitSafety, unquoteGitStatusPath, renderActiveProgress });
+/** @type {typeof active & {buildExecutePrompt: typeof buildExecutePrompt, buildCheckpointContext: typeof buildCheckpointContext, runHandoffAndReview: typeof runHandoffAndReview, applyExecuteFallback: typeof applyExecuteFallback, selectLaunchAndRecord: typeof selectLaunchAndRecord, validateCheckpointsBeforeHandoff: typeof validateCheckpointsBeforeHandoff, enforceExecuteCommitSafety: typeof enforceExecuteCommitSafety, unquoteGitStatusPath: typeof unquoteGitStatusPath}} */
+const _activeExport = Object.assign(active, { buildExecutePrompt, buildCheckpointContext, runHandoffAndReview, applyExecuteFallback, selectLaunchAndRecord, validateCheckpointsBeforeHandoff, enforceExecuteCommitSafety, unquoteGitStatusPath, renderActiveProgress });
 export default _activeExport;
-export { _activeExport as active, buildExecutePrompt, buildCheckpointContext, runHandoffAndReview, applyExecuteFallback, selectLaunchAndRecord, validateCheckpointsBeforeHandoff, attemptAgentRelaunch, enforceExecuteCommitSafety, unquoteGitStatusPath, renderActiveProgress };
+export { _activeExport as active, buildExecutePrompt, buildCheckpointContext, runHandoffAndReview, applyExecuteFallback, selectLaunchAndRecord, validateCheckpointsBeforeHandoff, enforceExecuteCommitSafety, unquoteGitStatusPath, renderActiveProgress };

@@ -1823,10 +1823,13 @@ test('performHandoff attempts agent relaunch when gatekeeper posts pushback', as
     ok: false, missing: ['docs/missions/2026/task-1388-gk-pushback/MISSION.md'], skipped: false, posted: true
   }));
 
-  const mockRelaunch = async (s, w, msg, a, opts) => {
+  // TASK-2377.05: the pushback bounce runs through the rebound kernel, which
+  // builds the fix prompt and hands it to this launch port.
+  const mockStartAgent = async (_step, opts) => {
     relaunchCallCount++;
-    relaunchPrompt = opts && opts.promptOverride ? opts.promptOverride : null;
-    return { relaunched: false, error: 'agent not available' };
+    const slot = opts && opts.prompt;
+    relaunchPrompt = typeof slot === 'function' ? slot('custom') : (slot ?? null);
+    throw new Error('agent not available');
   };
 
   writeReviewState(missionDir, 'custom', 'custom');
@@ -1838,14 +1841,14 @@ test('performHandoff attempts agent relaunch when gatekeeper posts pushback', as
       skipGate: true,
       isForgejoReviewEnabledFn: () => true,
       rebaseFn: mockRebase,
-      attemptAgentRelaunchFn: mockRelaunch,
+      startAgentFn: mockStartAgent,
     });
 
     assert.strictEqual(result.ok, false);
     assert.strictEqual(result.gatekeeperPushedBack, true);
     assert.ok(result.error && result.error.includes('Manual intervention required'));
-    assert.strictEqual(relaunchCallCount, 1, 'attemptAgentRelaunch should have been called once');
-    assert.ok(relaunchPrompt, 'promptOverride should have been passed');
+    assert.strictEqual(relaunchCallCount, 1, 'the kernel launched once against the remaining budget');
+    assert.ok(relaunchPrompt, 'the kernel fix prompt should have been built');
     assert.ok(relaunchPrompt.includes('MISSION.md'), 'prompt should mention MISSION.md');
     assert.ok(relaunchPrompt.includes('create'), 'prompt should contain creation instructions');
   } finally {
@@ -1890,9 +1893,9 @@ test('performHandoff respects bounded retry limit of 2 for gatekeeper pushback',
 
   // Mock relaunch always fails — loop should exit after 1 iteration
   let relaunchCallCount = 0;
-  const mockRelaunch = async () => {
+  const mockStartAgent = async () => {
     relaunchCallCount++;
-    return { relaunched: false, error: 'relaunch failed' };
+    throw new Error('relaunch failed');
   };
 
   writeReviewState(missionDir, 'custom', 'custom');
@@ -1904,7 +1907,7 @@ test('performHandoff respects bounded retry limit of 2 for gatekeeper pushback',
       skipGate: true,
       isForgejoReviewEnabledFn: () => true,
       rebaseFn: mockRebase,
-      attemptAgentRelaunchFn: mockRelaunch,
+      startAgentFn: mockStartAgent,
       runGatekeeperFn: mockGK,
     });
 
@@ -1953,11 +1956,11 @@ test('performHandoff consumes full retry budget when relaunch succeeds but pushb
     ok: false, missing: ['docs/missions/2026/task-1388-retry-persists/MISSION.md'], skipped: false, posted: true
   });
 
-  // Mock relaunch always succeeds but handoff still fails
+  // Launch always succeeds but the verified handoff still fails
   let relaunchCallCount = 0;
-  const mockRelaunch = async () => {
+  const mockStartAgent = async () => {
     relaunchCallCount++;
-    return { relaunched: true };
+    return { agent: 'custom', result: { status: 0 } };
   };
 
   writeReviewState(missionDir, 'custom', 'custom');
@@ -1969,7 +1972,7 @@ test('performHandoff consumes full retry budget when relaunch succeeds but pushb
       skipGate: true,
       isForgejoReviewEnabledFn: () => true,
       rebaseFn: mockRebase,
-      attemptAgentRelaunchFn: mockRelaunch,
+      startAgentFn: mockStartAgent,
       runGatekeeperFn: mockGK,
     });
 
@@ -2023,9 +2026,7 @@ test('performHandoff succeeds after successful agent relaunch', async (t) => {
   };
   mock.method(gatekeeper, 'runGatekeeper', mockGK);
 
-  const mockRelaunch = async () => {
-    return { relaunched: true };
-  };
+  const mockStartAgent = async () => ({ agent: 'custom', result: { status: 0 } });
 
   writeReviewState(missionDir, 'custom', 'custom');
 
@@ -2036,7 +2037,7 @@ test('performHandoff succeeds after successful agent relaunch', async (t) => {
       skipGate: true,
       isForgejoReviewEnabledFn: () => true,
       rebaseFn: mockRebase,
-      attemptAgentRelaunchFn: mockRelaunch,
+      startAgentFn: mockStartAgent,
     });
 
     assert.strictEqual(result.ok, true, 'handoff should succeed after successful relaunch');
@@ -2085,9 +2086,11 @@ test('performHandoff relaunch prompt lists all missing artifact types', async (t
     skipped: false, posted: true
   }));
 
-  const mockRelaunch = async (s, w, msg, a, opts) => {
-    capturedPrompt = opts && opts.promptOverride ? opts.promptOverride : null;
-    return { relaunched: false, error: 'not available' };
+  // The kernel builds the fix prompt and passes it to the launch port.
+  const mockStartAgent = async (_step, opts) => {
+    const slot = opts && opts.prompt;
+    capturedPrompt = typeof slot === 'function' ? slot('custom') : (slot ?? null);
+    throw new Error('not available');
   };
 
   writeReviewState(missionDir, 'custom', 'custom');
@@ -2099,7 +2102,7 @@ test('performHandoff relaunch prompt lists all missing artifact types', async (t
       skipGate: true,
       isForgejoReviewEnabledFn: () => true,
       rebaseFn: mockRebase,
-      attemptAgentRelaunchFn: mockRelaunch,
+      startAgentFn: mockStartAgent,
     });
 
     assert.ok(capturedPrompt, 'prompt should have been captured');

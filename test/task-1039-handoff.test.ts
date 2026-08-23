@@ -72,8 +72,8 @@ test('performHandoff handles gatekeeper pushback', async (t) => {
     }
     return { ok: true, missing: [] };
   };
-  // Mock relaunch to succeed so the retry loop can proceed
-  const mockRelaunch = async () => ({ relaunched: true });
+  // Mock the launch port so the kernel's verify re-runs the handoff
+  const mockStartAgent = async () => ({ agent: 'custom', result: { status: 0 } });
   const unexpectedVerification = () => {
     throw new Error('skipGate must survive the remediation retry');
   };
@@ -81,7 +81,7 @@ test('performHandoff handles gatekeeper pushback', async (t) => {
     worktree: WORKTREE,
     skipGate: true,
     rebaseFn: mockRebase,
-    attemptAgentRelaunchFn: mockRelaunch,
+    startAgentFn: mockStartAgent,
     runGatekeeperFn: mockGK,
     runVerificationGateFn: unexpectedVerification,
     missionServicesFn: stubMissionServices(),

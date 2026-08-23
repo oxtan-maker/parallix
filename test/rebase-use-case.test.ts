@@ -60,7 +60,7 @@ function harness(overrides: Partial<RebaseWorkflowPort> = {}): Harness {
       return { agent: 'test-agent', result: { status: 0 } };
     },
     selectAgent: () => 'test-agent',
-    workflowLauncherStatus: () => ({ available: true, agent: 'test-agent' }),
+    workflowLauncherStatus: (_agent: string) => ({ supported: true, agent: 'test-agent' }),
     applyAgentFallback: async () => 'test-agent',
 
     createPr: () => { state.pushes += 1; return { ok: true }; },
@@ -246,8 +246,9 @@ test('rebase use case passes any configured implementer family through unchanged
   }
 });
 
-test('rebase use case auto-bounces a hook failure and retries the rebase', async () => {
-  const bounces: Array<{ hookType: string | null; missionStore: unknown }> = [];
+test('rebase use case bounces a hook failure through the kernel and completes when the re-run passes', async () => {
+  // TASK-2377.05: the standalone hook-bounce policy is gone; the workflow calls
+  // the rebound kernel, whose verify re-runs `git add -A` + `rebase --continue`.
   let continues = 0;
   const h = harness({
     git: (args: string[]) => {
@@ -262,18 +263,156 @@ test('rebase use case auto-bounces a hook failure and retries the rebase', async
       return OK;
     },
     missionServices: async () => ({ store: { id: 'store' } }),
-    handleHookFailureAutoBounce: async (_slug, _worktree, _output, classification, options) => {
-      bounces.push({ hookType: classification.hookType, missionStore: options.missionStore });
-      return true;
-    },
   });
   await run(h);
-  assert.equal(bounces.length, 1);
-  assert.equal(bounces[0].hookType, 'pre-commit');
-  assert.deepEqual(bounces[0].missionStore, { id: 'store' });
-  assert.equal(continues, 1);
+  assert.equal(h.agentLaunches.length, 1, 'exactly one bounce launch');
+  assert.equal(h.agentLaunches[0].step, 'act-on-review');
+  assert.equal(continues, 1, 'the verify re-runs rebase --continue exactly once');
+  assert.deepEqual(h.exitCodes, [0]);
+  const output = h.lines.join('\n');
+  assert.match(output, /GIT HOOK FAILURE/);
+  assert.match(output, /Rebase completed after hook fix/);
+});
+
+test('rebase use case strands a hook failure after two failed rebase --continue re-runs', async () => {
+  const laterDiagnostic = 'pre-commit hook failed: still failing after the fix';
+  let continues = 0;
+  const h = harness({
+    git: (args: string[]) => {
+      const tail = subcommand(args);
+      if (tail[0] === 'rebase' && tail[1] === 'main') {
+        return { status: 1, stdout: '', stderr: 'error: pre-commit hook failed: original diagnostic' };
+      }
+      if (tail[0] === 'rebase' && tail[1] === '--continue') {
+        continues += 1;
+        return { status: 1, stdout: '', stderr: laterDiagnostic };
+      }
+      return OK;
+    },
+    missionServices: async () => ({ store: { id: 'store' } }),
+  });
+  await run(h);
+  assert.equal(h.agentLaunches.length, 2, 'the per-occurrence budget is exactly two attempts');
+  assert.equal(continues, 2, 'each attempt re-runs rebase --continue');
+  assert.deepEqual(h.exitCodes, [1]);
+  const output = h.lines.join('\n');
+  assert.match(output, /attempt budget spent \(2\)/);
+  assert.ok(output.includes(laterDiagnostic), 'the stranded report carries the last --continue diagnostic');
+  assert.match(output, /Rebase still failed after implementer hook fix/);
+  assert.match(output, /Recovery: git rebase --abort/);
+});
+
+test('rebase use case bounces a hook failure with no recorded implementer via a supported selection', async () => {
+  // F1 (round 2): with no recorded assignee the hook path selects a fallback
+  // implementer, then probes *that* agent with the real launcher-status
+  // contract (workflowLauncherStatus(agent, worktree)). A supported selection
+  // bounces; the probe must not throw with no agent argument.
+  let continues = 0;
+  const h = harness({
+    resolveTaskFile: () => ({ ok: false }),
+    getTaskImplementer: () => null,
+    selectAgent: () => 'claude',
+    workflowLauncherStatus: (agent: string) => ({ supported: agent === 'claude', agent }),
+    git: (args: string[]) => {
+      const tail = subcommand(args);
+      if (tail[0] === 'rebase' && tail[1] === 'main') {
+        return { status: 1, stdout: '', stderr: 'error: pre-commit hook failed' };
+      }
+      if (tail[0] === 'rebase' && tail[1] === '--continue') {
+        continues += 1;
+        return OK;
+      }
+      return OK;
+    },
+    missionServices: async () => ({ store: {} }),
+  });
+  await run(h);
+  assert.equal(h.agentLaunches.length, 1, 'one bounce for the no-recorded-implementer hook failure');
+  assert.equal(h.agentLaunches[0].options.agent, 'claude');
+  assert.equal(continues, 1, 'the verify re-runs rebase --continue once');
   assert.deepEqual(h.exitCodes, [0]);
   assert.match(h.lines.join('\n'), /Rebase completed after hook fix/);
+});
+
+test('rebase use case strands a hook failure when no implementer is recorded and the selection is unsupported', async () => {
+  // F1: an unsupported selection strands without launching and without throwing
+  // on the no-arg probe that the old code used.
+  const h = harness({
+    resolveTaskFile: () => ({ ok: false }),
+    getTaskImplementer: () => null,
+    selectAgent: () => 'claude',
+    workflowLauncherStatus: () => ({ supported: false, agent: null }),
+    git: (args: string[]) => {
+      const tail = subcommand(args);
+      if (tail[0] === 'rebase' && tail[1] === 'main') {
+        return { status: 1, stdout: '', stderr: 'error: pre-commit hook failed' };
+      }
+      return OK;
+    },
+    missionServices: async () => ({ store: {} }),
+  });
+  await run(h);
+  assert.equal(h.agentLaunches.length, 0, 'no launch when the selected launcher is unsupported');
+  assert.deepEqual(h.exitCodes, [1]);
+  assert.match(h.lines.join('\n'), /cannot bounce the hook failure/i);
+});
+
+test('rebase use case bounces a hook failure raised by rebase --continue and resumes', async () => {
+  // SC1: the `--continue` site collapses to one kernel call whose verify re-runs
+  // that site's own `git add -A` + `git rebase --continue`.
+  const conflicted = 'missions/task-2332.12/CP-1.md';
+  let continues = 0;
+  const h = harness({
+    git: (args: string[]) => {
+      const tail = subcommand(args);
+      if (tail[0] === 'rebase' && tail[1] === 'main') {
+        return { status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${conflicted}\n` };
+      }
+      if (tail[0] === 'rebase' && tail[1] === '--continue') {
+        continues += 1;
+        return continues === 1
+          ? { status: 1, stdout: '', stderr: 'error: pre-commit hook failed' }
+          : OK;
+      }
+      if (tail[0] === 'rebase' && tail[1] === '--show-current') { return OK; }
+      return OK;
+    },
+    resolveConflictsForMission: () => ({
+      ok: true, conflictFiles: [conflicted], missionSpecificFiles: [conflicted], sharedFiles: [],
+    }),
+    missionServices: async () => ({ store: {} }),
+  });
+  await run(h);
+  assert.equal(h.agentLaunches.length, 1, 'one bounce for the --continue hook failure');
+  assert.equal(continues, 2, 'the verify re-runs rebase --continue after the fix');
+  assert.deepEqual(h.exitCodes, [0]);
+  assert.match(h.lines.join('\n'), /Mission-specific conflicts resolved/);
+});
+
+test('rebase use case starts a second hook occurrence with a full budget of two', async () => {
+  // SC5: the budget is per occurrence and in memory — a later occurrence in the
+  // same process is not shortened by an earlier one.
+  const bounce = async () => {
+    let continues = 0;
+    const h = harness({
+      git: (args: string[]) => {
+        const tail = subcommand(args);
+        if (tail[0] === 'rebase' && tail[1] === 'main') {
+          return { status: 1, stdout: '', stderr: 'error: pre-commit hook failed' };
+        }
+        if (tail[0] === 'rebase' && tail[1] === '--continue') {
+          continues += 1;
+          return { status: 1, stdout: '', stderr: 'pre-commit hook failed again' };
+        }
+        return OK;
+      },
+      missionServices: async () => ({ store: {} }),
+    });
+    await run(h);
+    return { launches: h.agentLaunches.length, continues };
+  };
+  assert.deepEqual(await bounce(), { launches: 2, continues: 2 });
+  assert.deepEqual(await bounce(), { launches: 2, continues: 2 });
 });
 
 test('rebase use case rejects a selected root that is not on the mission branch', async () => {

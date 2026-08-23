@@ -127,6 +127,21 @@ export function classifyError(errorMsg: string): { failureClass: FailureClassTyp
     return { failureClass: FailureClass.IncompleteEvidence, dispatchAction: DispatchAction.AutoSendBack };
   }
 
+  // 1d. IncompleteEvidence: the mission declared checkpoints that were never
+  // written (validateCheckpointsBeforeHandoff emits "Declared checkpoint
+  // documents are missing before handoff: CP-2, CP-3. Create and commit …").
+  //
+  // This is ADR 0048 class 4 — incomplete checkpoint evidence, auto-send-back.
+  // An agent that ended its turn without the checkpoint documents it declared
+  // has hallucinated completion; relaunching it with the named gap is exactly
+  // the repair. Without this rule the message matched no pattern and fell to
+  // the catch-all InfraBlocker/HumanOnly default, which stranded a mission that
+  // one bounce would have fixed.
+  if (/declared\s+checkpoint\s+documents?\s+(are|is)\s+missing/i.test(errorMsg) ||
+      (/\bCP-\d+/.test(errorMsg) && /missing\s+before\s+handoff|create\s+and\s+commit/i.test(errorMsg))) {
+    return { failureClass: FailureClass.IncompleteEvidence, dispatchAction: DispatchAction.AutoSendBack };
+  }
+
   // 2. GitBlockers: dirty/uncommitted mission artifacts (mechanical git blocker — auto-repairable)
   if (errorMsg.includes('is modified but uncommitted') ||
       errorMsg.includes('Commit the mission contract before handoff') ||

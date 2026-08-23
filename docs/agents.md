@@ -417,18 +417,32 @@ When the pre-review verification gate fails, when a Git hook rejects the
 pre-review commit or rebase, or when a reviewer or implementer hands back
 incomplete artifacts, the harness bounces the mission back to the responsible
 agent with a fix prompt built from the failure's structured evidence and its
-classification. Three guarantees govern that bounce:
+classification.
+
+The CLI commands run the same path. A Git hook that rejects `px rebase`'s
+`rebase --continue` or `px integrate`'s squash commit, and both handoff bounces
+in `px active` — the pre-handoff checkpoint-validation repair and the
+handoff-failure repair — are the same verified-fix bounce with the same
+per-occurrence budget as the pre-review path, because they all call the one
+rebound kernel. There is no second bounce policy and no persisted retry counter
+left anywhere in the codebase.
+
+Three guarantees govern that bounce:
 
 - **A bounce counts as fixed only when the failing check passes again.** After
   the agent exits, the harness re-runs the check that failed: the pre-review
   rebase and the verification gate for gate and hook failures, and a fresh
-  re-consumption of the role's artifacts for an incomplete-artifact failure.
-  Relaunching an agent is never, on its own, evidence of a repair, and an
-  ambiguous agent exit status is treated as a failed launch rather than a fix.
+  re-consumption of the role's artifacts for an incomplete-artifact failure. At
+  the CLI sites it re-runs that command's own failing step — `git add -A` plus
+  `rebase --continue` for `px rebase`, the identical squash commit for
+  `px integrate`, checkpoint re-validation and a fresh `performHandoff` for the
+  two `px active` handoff bounces. Relaunching an agent is never, on its own,
+  evidence of a repair, and an ambiguous agent exit status is treated as a
+  failed launch rather than a fix.
 - **The retry budget is per failure occurrence, not cumulative, and nothing
   about it is persisted.** Each failing occurrence gets two attempts, held in
-  memory for the duration of that occurrence. No retry counter is written to
-  review state, to its metadata, or to the database, so two concurrent
+  memory for the duration of that occurrence. No bounce-retry counter is
+  written to review state, to its metadata, or to the database, so two concurrent
   processes can never consume one shared counter, and a later occurrence of the
   same failure class starts with a full budget.
 - **A per-round relaunch cap bounds the total fan-out.** Per-occurrence budgets
@@ -446,12 +460,28 @@ the classifier judges human-only (infrastructure or task-state blockers) strands
 immediately without launching an agent, because no implementer relaunch can fix
 it.
 
-Agent-timeout recovery — a reviewer that never posts a review, or an
-implementer that never posts a disposition — is not part of this verified-fix
-path. The classifier treats a timeout as an infrastructure blocker, which is
-not relaunchable, so timeout recovery stays a bounded review-loop relaunch that
-re-polls rather than a verified bounce. Those relaunches still count against
-the per-round cap.
+A mission that declared checkpoints and then ended without writing them is
+classified as incomplete checkpoint evidence — agent hallucination, which one
+relaunch naming the missing checkpoint repairs — not as an infrastructure
+blocker. It bounces like any other agent-fixable failure, and the mission
+continues to handoff and review once the checkpoints verify.
+
+Two paths are deliberately outside this verified-fix bounce, and they are the
+only two:
+
+- **Agent-timeout recovery** — a reviewer that never posts a review, or an
+  implementer that never posts a disposition. The classifier treats a timeout as
+  an infrastructure blocker, which is not relaunchable, so timeout recovery stays
+  a bounded review-loop relaunch that re-polls rather than a verified bounce.
+  Those relaunches still count against the per-round cap.
+- **The git-only handoff repair** — the dirty-worktree auto-commit and
+  behind-main rebase the harness performs before a failed handoff is escalated.
+  It launches no agent at all, so there is nothing to verify a fix against.
+
+Every other agent launch on a failure path goes through the kernel — including
+the gatekeeper-pushback artifact remediation, whose relaunch is a verified bounce
+that re-runs the handoff rather than trusting that the agent wrote the files.
+That invariant is enforced by an allow-list test rather than by convention.
 
 ### Manual override is still supported
 

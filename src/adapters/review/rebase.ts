@@ -224,9 +224,7 @@ export async function rebaseBeforeReviewRound(slug: string, {
   // Single hook-retry budget consumer: record the hook identity the workflow
   // classified from the failing git operation and refuse the in-child bounce.
   // The caller (review loop) owns the budget and the fix prompt.
-  port.handleHookFailureAutoBounce = async (
-    _slug: string, _worktree: string, hookOutput: string, classification: { hookType: string | null },
-  ) => {
+  port.onHookFailure = (classification: { hookType: string | null }, hookOutput: string) => {
     hookBounceRequests += 1;
     hookEvidence = { hook: classification?.hookType || 'hook', output: hookOutput || '' };
     return false;
