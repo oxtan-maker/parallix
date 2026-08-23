@@ -2,7 +2,7 @@
 id: TASK-2401
 title: Add a bounded-cost review read model for board projections
 status: backlog
-assignee: []
+assignee: [codex]
 created_date: '2026-08-23 07:24'
 labels: []
 dependencies: []
