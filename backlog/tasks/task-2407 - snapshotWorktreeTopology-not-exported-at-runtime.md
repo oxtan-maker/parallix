@@ -1,7 +1,7 @@
 ---
 id: TASK-2407
 title: snapshotWorktreeTopology not provided as named export at runtime
-status: backlog
+status: refined
 assignee: [codex]
 created_date: '2026-08-23 14:45'
 labels:
