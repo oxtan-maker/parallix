@@ -1620,45 +1620,108 @@ test('recovery refuses an active Mission without authoritative Review facts', as
   );
 });
 
-// R4 — stale `active` with authoritative Review facts: recovery must chain the
-// existing operations `submit-for-review` then `approve` (original decidedAt),
-// never patching Mission.status directly.
-test('R4: stale active recovery chains submit-for-review then approve with original decidedAt', async () => {
+// R4 — stale `active` with an already-approved Review round: recovery must not
+// re-submit the decided round (AC #2) but must still chain active → review →
+// integration and run the approve at the original decidedAt, never patching
+// Mission.status directly. The active → review move is a direct submit-for-review
+// that the workflow guard recognises as a decided round and advances without
+// rewriting the round; the handoff submitForReviewFn replay is skipped.
+test('R4: stale active approved recovery skips submit-for-review replay, then approves at original decidedAt', async () => {
   const decidedAt = '2026-01-01T10:30:00Z';
   const reviewEntryAt = '2026-01-01T10:00:00Z';
-  const calls = [];
+  const calls: string[][] = [];
+  let submitForReviewCalled = false;
   const state = {
     status: 'active', assignee: 'codex',
     review: { rounds: [{ startedAt: reviewEntryAt, decision: { kind: 'approved', decidedAt } }] },
   };
-  const submitForReviewFn = async (slug: string, isContinue: boolean | string, options: any = {}) => {
-    calls.push(['submit-for-review', slug, isContinue, options?.occurredAt ?? null]);
-    state.status = 'review'; // the existing handoff operation owns active → review
+  const submitForReviewFn = async () => {
+    submitForReviewCalled = true;
   };
   const missionServices = {
     store: { async load() { return { kind: 'found', mission: state, version: 7 }; } },
     lifecycle: {
       async transition(request) {
-        calls.push(['approve', request.occurredAt]);
-        state.status = 'integration';
+        calls.push([request.command.type, request.occurredAt]);
+        // mirror the workflow guard: a decided round moves active → review, then
+        // approve moves review → integration
+        if (request.command.type === 'submit-for-review') { state.status = 'review'; }
+        else if (request.command.type === 'approve') { state.status = 'integration'; }
         return { status: 'completed' };
       },
     },
   };
 
   const result = await recoverMissionForIntegration(
-    { slug: 'task-2376' },
+    {
+      slug: 'task-2376',
+      approval: {
+        ok: true,
+        defaultUserApproved: true,
+        defaultUserApprovedAt: decidedAt,
+      },
+    },
     { missionServices, submitForReviewFn },
   );
 
+  assert.equal(submitForReviewCalled, false, 'recovery skips the submit-for-review handoff replay for an already-approved round');
   assert.deepEqual(
     calls,
-    // The recovered active → review carries the Review round's own startedAt,
-    // never the recovery wall clock (review round 1, F1).
-    [['submit-for-review', 'task-2376', false, reviewEntryAt], ['approve', decidedAt]],
-    'recovery invokes the existing transition chain active → review → integration',
+    // The active → review move carries the Review round's own startedAt, never
+    // the recovery wall clock (review round 1, F1); approve runs at decidedAt.
+    [['submit-for-review', reviewEntryAt], ['approve', decidedAt]],
+    'recovery moves active → review then approves at the original decidedAt',
   );
   assert.deepEqual(result, { recovered: true, status: 'integration', occurredAt: decidedAt });
+});
+
+test('R4b: stale active approved recovery requires the provider approval', async () => {
+  const state = {
+    status: 'active', assignee: 'codex',
+    review: {
+      rounds: [{
+        startedAt: '2026-01-01T10:00:00Z',
+        decision: { kind: 'approved', decidedAt: '2026-01-01T10:30:00Z' },
+      }],
+    },
+  };
+  const transitionCalls = [];
+  const missionServices = {
+    store: { async load() { return { kind: 'found', mission: state, version: 7 }; } },
+    lifecycle: { async transition(request) { transitionCalls.push(request); return { status: 'completed' }; } },
+  };
+
+  await assert.rejects(
+    () => recoverMissionForIntegration({ slug: 'task-2397' }, { missionServices }),
+    error => error.constructor.name === 'IntegrationAbort',
+  );
+  assert.equal(transitionCalls.length, 0, 'a stored approval alone cannot move the Mission');
+  assert.equal(state.status, 'active');
+});
+
+test('R4c: fresh awaiting-review recovery still uses the handoff operation', async () => {
+  const state = {
+    status: 'active', assignee: 'codex',
+    review: { rounds: [{ startedAt: '2026-01-01T10:00:00Z', decision: null }] },
+  };
+  const missionServices = {
+    store: { async load() { return { kind: 'found', mission: state, version: 7 }; } },
+    lifecycle: { async transition() { throw new Error('no direct transition expected'); } },
+  };
+  let submitForReviewCalled = false;
+
+  await assert.rejects(
+    () => recoverMissionForIntegration({ slug: 'task-2397' }, {
+      missionServices,
+      submitForReviewFn: async () => {
+        submitForReviewCalled = true;
+        state.status = 'review';
+      },
+    }),
+    error => error.constructor.name === 'IntegrationAbort',
+  );
+  assert.equal(submitForReviewCalled, true, 'fresh rounds still route through submitForReview');
+  assert.equal(state.status, 'review', 'the fresh handoff still advances active to review');
 });
 
 // R5 — stale `active` with no Review facts and an explicit human override:
