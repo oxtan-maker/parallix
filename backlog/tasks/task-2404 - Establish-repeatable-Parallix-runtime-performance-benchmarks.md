@@ -1,7 +1,7 @@
 ---
 id: TASK-2404
 title: Establish repeatable Parallix runtime performance benchmarks
-status: active
+status: review
 assignee: [codex]
 created_date: '2026-08-23 07:26'
 labels: [user_value]
