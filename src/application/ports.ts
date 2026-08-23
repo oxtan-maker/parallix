@@ -18,8 +18,9 @@ export type {
   UsageRepository,
   UsageRecord,
 } from './ports/mission-measurements.js';
-// Mechanism ports for the execute workflow (architecture migration). They replace the
-// legacy phase-named `ActivePort`; see `ports/execute-mission.ts`.
+// Mechanism ports for the execute workflow. Each names an external mechanism —
+// workspace, agent execution, telemetry, handoff review — rather than a command
+// phase; see `ports/execute-mission.ts`.
 export type {
   MissionWorkspacePort,
   TaskFileResolution,

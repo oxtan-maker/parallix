@@ -25,12 +25,14 @@ function renderActiveProgress(event, logFn) {
 
 /**
  * @param {string[]} args
- * @param {{inferSlugFn?: Function, service?: {execute: Function}, rootDir?: string, exitFn?: Function, logFn?: Function, errorFn?: Function}} [options]
+ * @param {{inferSlugFn?: Function, service?: {execute: Function}, controller?: {dispatch: Function}, controllerFactory?: Function, rootDir?: string, exitFn?: Function, logFn?: Function, errorFn?: Function}} [options]
  */
 async function active(args, options = {}) {
   const {
     inferSlugFn = inferSlug,
     service,
+    controller,
+    controllerFactory,
     serviceFactory,
     rootDir = process.cwd(),
     exitFn = process.exit,
@@ -65,17 +67,31 @@ async function active(args, options = {}) {
 
   logFn('Running execute preflight...');
   const renderProgress = event => renderActiveProgress(event, logFn);
-  const executeService = service || (typeof serviceFactory === 'function' ? await serviceFactory(rootDir, renderProgress) : null);
-  if (!executeService) { throw new Error('active command requires an injected execute-mission service'); }
-  const outcome = await executeService.execute({
-    // Per-invocation id: the mission slug alone is not a sufficient correlation
-    // key — two overlapping `px active` runs for the same mission must not be
-    // reconciled as one operation (matches the review/integrate command ids).
-    operationId: `active:${normalizedSlug}:${randomUUID()}`,
-    slug: normalizedSlug,
-    agent: preselectedImplementer,
-    capabilities: new Set(['active:execute']),
-  });
+  // Route through BoardCommandController (canonical dispatcher) when injected;
+  // fall back to direct service.execute() for backward compat.
+  let outcome;
+  const operationId = `active:${normalizedSlug}:${randomUUID()}`;
+  const dispatcher = controller || (typeof controllerFactory === 'function'
+    ? await controllerFactory(rootDir, renderProgress)
+    : null);
+  if (dispatcher) {
+    outcome = await dispatcher.dispatch({
+      kind: 'active:execute',
+      missionId: normalizedSlug,
+      operationId,
+      agent: preselectedImplementer,
+      capabilities: new Set(['active:execute']),
+    });
+  } else {
+    const executeService = service || (typeof serviceFactory === 'function' ? await serviceFactory(rootDir, renderProgress) : null);
+    if (!executeService) { throw new Error('active command requires an injected execute-mission service'); }
+    outcome = await executeService.execute({
+      operationId,
+      slug: normalizedSlug,
+      agent: preselectedImplementer,
+      capabilities: new Set(['active:execute']),
+    });
+  }
   if (outcome.status !== 'completed' || !outcome.value) {
     const message = outcome.error?.message || 'Could not launch execute agent.';
     const status = /exited with status (\d+)/.exec(message);

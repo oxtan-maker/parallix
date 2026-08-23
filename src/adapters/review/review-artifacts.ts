@@ -18,6 +18,7 @@ import {
   type VerifyResult,
 } from '../../application/rebound-kernel.js';
 import type { MissionStore } from '../../application/domain-ports.js';
+import { parseResolutionDispositions } from '../../domain/review.js';
 import { readToken, postComment, postReview, getPrAuthor, isEnabled, resolveArtifactDir as resolveConfiguredArtifactDir } from './review-adapter.js';
 import { createEvent, consumeHumanNotes, VALID_EVENT_TYPES, CreateEventParams, CreateEventOptions, CreateEventResult } from './review-events.js';
 import { parseReviewFindings, recordImplementerResolution, recordRequestedChanges, recordApproval } from './review-round.js';
@@ -628,23 +629,9 @@ async function consumeImplementerArtifacts(
   let blockedReason: string | null = null;
 
   try {
-    const fixedMatch = resolution.match(/fixed_items:\s*(\[[^\]]*\])/i);
-    const pushedMatch = resolution.match(/pushed_back_items:\s*(\[[^\]]*\])/i);
-    const parkedMatch = resolution.match(/parked_items:\s*(\[[^\]]*\])/i);
-    const blockedMatch = resolution.match(/blocked_reason:\s*"([^"]*)"/i);
+    itemDispositions.push(...parseResolutionDispositions(resolution));
 
-    if (fixedMatch) {
-      const ids = JSON.parse(fixedMatch[1]) as string[];
-      itemDispositions.push(...ids.map((id) => ({ kind: 'fixed' as const, findingId: id as import('../../domain/review.js').ReviewFindingId })));
-    }
-    if (pushedMatch) {
-      const ids = JSON.parse(pushedMatch[1]) as string[];
-      itemDispositions.push(...ids.map((id) => ({ kind: 'pushed_back' as const, findingId: id as import('../../domain/review.js').ReviewFindingId })));
-    }
-    if (parkedMatch) {
-      const ids = JSON.parse(parkedMatch[1]) as string[];
-      itemDispositions.push(...ids.map((id) => ({ kind: 'parked' as const, findingId: id as import('../../domain/review.js').ReviewFindingId })));
-    }
+    const blockedMatch = resolution.match(/blocked_reason:\s*"([^"]*)"/i);
     if (blockedMatch) { blockedReason = blockedMatch[1]; }
   } catch {
     itemDispositions = [];

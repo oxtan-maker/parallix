@@ -143,8 +143,10 @@ Replacing it needs a structural invariant rather than a count — candidates are
 dependence on the `cli` adapter package, dependence on more than one
 *integration* package as opposed to a host mechanism, or constructing
 collaborators rather than receiving them. That invariant can only be enforced
-after the modules it would flag are re-homed into `src/application/`, and
-**re-homing is tracked by parent TASK-2332**.
+after the modules it would flag are re-homed into `src/application/`. The
+ports-and-adapters cleanup that performed that re-homing is complete; a future
+structural invariant, if one is adopted, replaces the retired count rather than
+restoring it.
 
 `adapterPackageDependencies` is the enforced host-mechanism design. It does not
 authorize workflow sequencing: that behaviour must cross an application-owned

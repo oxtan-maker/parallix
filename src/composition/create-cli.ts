@@ -10,6 +10,7 @@ import { ensureStandaloneGitRepo } from '../adapters/config/product-config.js';
 import { loadStateMap } from '../adapters/config/state-map.js';
 import activeWorkflow from '../adapters/cli/commands/active.js';
 import { createActiveCommand } from '../interfaces/cli/active.js';
+import type { BoardProgressSink } from '../application/controller/board-command.js';
 import {
   createCheckpointVerificationAdapter,
   createCheckpointGitAdapter,
@@ -131,14 +132,18 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
   // `active` needs to create its ExecuteMissionService only after it has
   // installed its progress renderer. Supplying a pre-built service loses the
   // lifecycle progress events (including the actual execute-agent family).
+  // BoardCommandController is the canonical dispatcher (TASK-2332.05);
+  // both CLI and TUI use the same controller dispatch path.
   const withActiveService = async (args: string[], options: Record<string, unknown> = {}) => {
     const activeServices: { value: Awaited<ReturnType<typeof createProductionApplicationServices>> | null } = { value: null };
     try {
       return await active(args, {
         ...options,
-        serviceFactory: async (requestedRoot: string, progress: Parameters<typeof createProductionApplicationServices>[1]) => {
+        controllerFactory: async (requestedRoot: string, progress: BoardProgressSink) => {
           activeServices.value = await createProductionApplicationServices(requestedRoot, progress);
-          return activeServices.value.executeMission;
+          const controller = activeServices.value.presentationCapabilities?.commandController;
+          if (!controller) { throw new Error('active command requires BoardCommandController from presentation capabilities'); }
+          return controller;
         },
       });
     } finally {
@@ -218,19 +223,10 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
     ),
     setup,
     'setup-review': setupReview,
-    // TASK-2378: stats derivation reads the authoritative Review aggregate
-    // through the operator store, so the command resolves the services (and
-    // the store) before building the workflow adapter. Stats is read-only
-    // with respect to the operator database, so it skips the preflight
-    // import gate that the other withGraph commands trigger: the gate
-    // appends an import_history row on first use per source root, and a
-    // read command must not mutate the store (round-1 review F1; the
-    // tarball reinstall preservation test pins this). Missions not yet
-    // imported derive as no-review unknown — the parent behavior.
     stats: (args, options) => withGraph(services => {
       if (!services.mission) { throw new Error('mission services are unavailable'); }
       return createStatsCommand(new StatsCommandUseCase(createStatsWorkflowAdapter(services.mission.store)))(args, options);
-    }, { skipImportGate: true }),
+    }),
     status: (args, options) => withGraph(services => {
       const board = createStatusBoardAdapter({
         buildProjectionFn: async () => {

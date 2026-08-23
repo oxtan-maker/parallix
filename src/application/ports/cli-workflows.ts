@@ -367,7 +367,7 @@ export interface DraftWorkflowPort {
   setup(_context: DraftWorkflowContext): DraftWorkflowContext;
   /** Scaffold MISSION.md, record base branch, bootstrap backlog task. */
   scaffold(_context: DraftWorkflowContext): DraftWorkflowContext;
-  /** Materialize mission in SQLite via intake service. */
+  /** Materialize mission in the operator store via intake service. */
   intake(_context: DraftWorkflowContext): Promise<DraftWorkflowContext> | DraftWorkflowContext;
   /** Transition backlog task to target status. */
   transition(_context: DraftWorkflowContext): Promise<DraftWorkflowContext> | DraftWorkflowContext;

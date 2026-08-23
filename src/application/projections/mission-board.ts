@@ -5,6 +5,7 @@ import type { RunningAgentSession } from './agent-status.js';
 import {
   currentReviewRound,
   reviewApprovalOwed,
+  parseResolutionDispositions,
   sameReviewedRevision,
   type PullRequestReference,
   type Review,
@@ -155,14 +156,34 @@ function outcomeComment(content: string): string | null {
   if (summary?.[1]) { return summary[1].trim(); }
   const lines = content.split('\n').map((line) => line.trim());
   const outcome = lines.findIndex((line) => /^Outcome:\s*/i.test(line));
-  return outcome >= 0 ? lines.slice(outcome + 1).find((line) => line && !line.startsWith('#')) ?? null : null;
+  if (outcome >= 0) {
+    const next = lines.slice(outcome + 1).find((line) => line && !line.startsWith('#'));
+    if (next) { return next; }
+    // Verdict inline on Outcome line (e.g. "Outcome: request-changes")
+    const inline = lines[outcome].replace(/^Outcome:\s*/i, '').trim();
+    if (inline) { return inline; }
+  }
+  return null;
 }
 
 function findingSummaries(content: string): readonly string[] {
   return content.split('\n').flatMap((line) => {
-    const heading = line.match(/^#{1,3}\s+Finding(?:\s+\d+)?[^—]*—\s*(.+)$/i);
-    const numbered = line.match(/^\d+\.\s+\*\*(?:\[[^\]]+\]\s*)?(.+?)\*\*/);
-    return heading?.[1] ?? numbered?.[1] ?? [];
+    const trimmed = line.trim();
+    if (!trimmed) { return []; }
+    const heading = trimmed.match(/^#{1,3}\s+Finding(?:\s+\d+)?[^—]*—\s*(.+)$/i);
+    if (heading?.[1]) { return [heading[1]]; }
+    const numbered = trimmed.match(/^\d+\.\s+\*\*(?:\[[^\]]+\]\s*)?(.+?)\*\*/);
+    if (numbered?.[1]) { return [numbered[1]]; }
+    // Raw finding line: "path:line:", "path:Lline:" or a line range
+    // "path:L10-L20:" (🔴/🟡 type: description)
+    const raw = trimmed.match(/^[^:]+:L?\d+(?:-L?\d+)?:\s*(.+)$/);
+    if (raw?.[1]) { return [raw[1]]; }
+    // Same line shape with a subject that has no line number — reviewers scope
+    // findings to a command or a whole file too ("px status <slug>: 🔴 ...").
+    // Anchored on the severity marker so ordinary prose is not a finding.
+    const scoped = trimmed.match(/^[^:]+:\s*((?:🔴|🟡|🟠|🔵|⚪)\s*.+)$/u);
+    if (scoped?.[1]) { return [scoped[1]]; }
+    return [];
   });
 }
 
@@ -182,8 +203,15 @@ export function projectReviewHistory(review: Review | null): readonly ReviewRoun
 
     // itemDispositions is populated from the implementer's round summary
     // artifact. response.resolutions is the formal domain model path.
-    // Use itemDispositions as fallback when resolutions are not set.
-    const items = hasResolutions ? [] : (round.itemDispositions ?? summary?.itemDispositions ?? []);
+    // Use itemDispositions as fallback when resolutions are not set. A summary
+    // stored before the artifact consumer parsed Markdown sections carries no
+    // dispositions, so the summary content itself is the last fallback.
+    const storedItems = round.itemDispositions ?? summary?.itemDispositions ?? [];
+    const items = hasResolutions
+      ? []
+      : storedItems.length > 0
+        ? storedItems
+        : summary ? parseResolutionDispositions(summary.content) : [];
 
     return {
       number: round.number,
@@ -201,12 +229,12 @@ export function projectReviewHistory(review: Review | null): readonly ReviewRoun
         ? resolutions.filter((r) => r.kind === 'disputed')
             .map((r) => `${r.findingId}: ${r.rationale}`)
         : items.filter((d) => d.kind === 'pushed_back')
-            .map((d) => `pushed_back: ${d.findingId}`),
+            .map((d) => String(d.findingId)),
       fixes: hasResolutions
         ? resolutions.filter((r) => r.kind === 'fixed')
             .map((r) => `${r.findingId}: ${r.evidence}`)
         : items.filter((d) => d.kind === 'fixed')
-            .map((d) => `fixed: ${d.findingId}`),
+            .map((d) => String(d.findingId)),
     };
   });
 }

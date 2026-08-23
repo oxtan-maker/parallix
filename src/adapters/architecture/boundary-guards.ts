@@ -200,8 +200,14 @@ export function findDependencyViolations(repoRoot = process.cwd(), allowlist: re
   return violations;
 }
 
-/** Owned production exceptions: application→adapter edges with explicit removal owners. */
-const PRODUCTION_EXCEPTIONS: readonly LegacyDependencyException[] = [
+/**
+ * Owned production exceptions: application→adapter edges with explicit removal owners.
+ *
+ * Exported so the guard suite can assert every entry stays attributed and live:
+ * an unattributed or stale entry is an exception nobody owns, which is how a
+ * temporary allowlist becomes permanent architecture.
+ */
+export const productionDependencyExceptions: readonly LegacyDependencyException[] = [
   {
     source: 'src/application/handoff-command-use-case.ts',
     target: 'src/adapters/review/review-static-evidence.ts',
@@ -212,7 +218,7 @@ const PRODUCTION_EXCEPTIONS: readonly LegacyDependencyException[] = [
 
 /** Production guard: the canonical graph has no exceptions outside the owned allowlist. */
 export function findProductionDependencyViolations(repoRoot = process.cwd()): DependencyViolation[] {
-  return findDependencyViolations(repoRoot, PRODUCTION_EXCEPTIONS);
+  return findDependencyViolations(repoRoot, productionDependencyExceptions);
 }
 
 /* ------------------------------------------------------------------ *

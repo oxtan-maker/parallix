@@ -29,7 +29,12 @@ import { changeRevision, ConfiguredReviewerEligibility, startReview } from '../.
 import { applyReviewStateToReview, reviewStateDataFrom } from './review-state-mapping.js';
 import type { MissionLifecycleService } from '../../application/mission-lifecycle-service.js';
 import type { MissionStore } from '../../application/domain-ports.js';
-import type { PullRequestReference } from '../../domain/review.js';
+import type {
+  PullRequestReference,
+  ReviewEventRecord,
+  ReviewEventType,
+  ReviewItemDisposition,
+} from '../../domain/review.js';
 
 export type ReviewStatePersistenceResult =
   | { outcome: 'committed' }
@@ -223,9 +228,82 @@ export async function resolveReviewIdentity(
 export type ReviewBackfillResult =
   | { outcome: 'backfilled'; rounds: number; round: number; phase: string }
   | { outcome: 'would-backfill'; rounds: number; round: number; phase: string }
+  | { outcome: 'events-backfilled'; events: number }
+  | { outcome: 'would-backfill-events'; events: number }
   | { outcome: 'already-present' }
   | { outcome: 'no-legacy-state' }
   | { outcome: 'failed'; diagnostic: string };
+
+/**
+ * Parse one exported review-event Markdown file into a `ReviewEventRecord`.
+ *
+ * The exported file is a render of a database row (see `review-events.ts`), so
+ * this reads the frontmatter the renderer wrote and takes everything after it
+ * as the event content. Returns null for a file without frontmatter, which is
+ * not an event export.
+ */
+function parseExportedEvent(content: string): Omit<ReviewEventRecord, 'position'> | null {
+  const frontmatter = content.match(/^---\n([\s\S]*?)\n---/);
+  if (!frontmatter) { return null; }
+
+  const fields = new Map<string, string>();
+  for (const line of frontmatter[1].split('\n')) {
+    const separator = line.indexOf(':');
+    if (separator > 0) {
+      fields.set(line.slice(0, separator).trim(), line.slice(separator + 1).trim());
+    }
+  }
+
+  const round = Number(fields.get('round'));
+  const dispositions = fields.get('item_dispositions');
+  let itemDispositions: readonly ReviewItemDisposition[] | null = null;
+  if (dispositions) {
+    try { itemDispositions = JSON.parse(dispositions) as ReviewItemDisposition[]; }
+    catch { itemDispositions = null; }
+  }
+
+  return {
+    eventType: (fields.get('event_type') || 'unknown') as ReviewEventType,
+    roundNumber: Number.isInteger(round) ? round : null,
+    phase: fields.get('phase') ?? null,
+    actor: fields.get('actor') ?? null,
+    content: content.slice(frontmatter[0].length).trim(),
+    disposition: fields.get('disposition') ?? null,
+    verdict: fields.get('verdict') ?? null,
+    itemDispositions,
+    blockedReason: fields.get('blocked_reason') ?? null,
+    followUpReference: fields.get('followup_reference') ?? null,
+    createdAt: fields.get('timestamp') || new Date().toISOString(),
+  };
+}
+
+/**
+ * Read the exported review-event Markdown files for a mission, in filename
+ * order — which is timestamp order, because the export names files by
+ * timestamp.
+ *
+ * This is a migration reader, not a production one. Only
+ * `backfillReviewFromLegacyState` calls it: a mission whose rounds predate
+ * event persistence has the conversation in these files and nowhere else, so
+ * the one-shot restores it into the Review aggregate. Production readers go to
+ * the database.
+ */
+export function readExportedReviewEvents(slug: string, rootDir = process.cwd()): readonly ReviewEventRecord[] {
+  const missionDir = findMissionDir(slug, rootDir);
+  if (!missionDir) { return []; }
+  const eventsDir = path.join(missionDir, 'review-events');
+  if (!fs.existsSync(eventsDir)) { return []; }
+
+  const events: ReviewEventRecord[] = [];
+  for (const file of fs.readdirSync(eventsDir).filter((name) => name.endsWith('.md')).sort()) {
+    let content: string;
+    try { content = fs.readFileSync(path.join(eventsDir, file), 'utf8'); }
+    catch { continue; }
+    const parsed = parseExportedEvent(content);
+    if (parsed) { events.push({ ...parsed, position: events.length }); }
+  }
+  return events;
+}
 
 /** The complete handoff record an operator must supply to repair an interrupted transition. */
 export interface InterruptedHandoffInputs {
@@ -346,6 +424,49 @@ export async function reconcileInterruptedHandoff(
  * @param {{apply?: boolean}} [options]  `apply: false` reports without writing.
  * @returns {Promise<ReviewBackfillResult>}
  */
+/**
+ * Restore a mission's review conversation from its exported event files.
+ *
+ * A Review whose rounds predate event persistence holds the verdicts but not
+ * what was said in them, so `px status` prints a round's disposition with
+ * nothing under it. The exported Markdown is the only surviving copy, and this
+ * is the one place production reads it — the read adapters stay
+ * database-only.
+ *
+ * Returns null when there is nothing to restore: no Review, no exported events,
+ * or a Review that already has events (re-reading the export would duplicate
+ * the rows it was written from). The caller decides what "nothing to do" means
+ * for the path it is on.
+ */
+async function backfillExportedEvents(
+  slug: string,
+  rootDir: string,
+  apply: boolean,
+  missionStore?: MissionStore | null,
+): Promise<ReviewBackfillResult | null> {
+  let store: Awaited<ReturnType<typeof resolveMissionStore>>;
+  try {
+    store = await resolveMissionStore(rootDir, missionStore);
+  } catch {
+    return null;
+  }
+  if (!store) { return null; }
+
+  const result = await store.load(missionId(slug));
+  if (result.kind !== 'found' || !result.mission.review) { return null; }
+  if (result.mission.review.reviewEvents.length > 0) { return null; }
+
+  const exported = readExportedReviewEvents(slug, rootDir);
+  if (exported.length === 0) { return null; }
+  if (!apply) { return { outcome: 'would-backfill-events', events: exported.length }; }
+
+  await store.save(
+    { ...result.mission, review: { ...result.mission.review, reviewEvents: exported } },
+    result.version,
+  );
+  return { outcome: 'events-backfilled', events: exported.length };
+}
+
 export async function backfillReviewFromLegacyState(
   slug: string,
   rootDir = process.cwd(),
@@ -354,7 +475,14 @@ export async function backfillReviewFromLegacyState(
   const apply = options.apply !== false;
 
   const statePath = reviewStateFile(slug, rootDir);
-  if (!statePath || !fs.existsSync(statePath)) { return { outcome: 'no-legacy-state' }; }
+  if (!statePath || !fs.existsSync(statePath)) {
+    // A post-cutover mission has no `review-state.json` and needs no round
+    // seeding, but its rounds can still predate event persistence — the review
+    // conversation then exists only as exported Markdown. Restore it before
+    // reporting that there is nothing to migrate.
+    return await backfillExportedEvents(slug, rootDir, apply, options.missionStore)
+      ?? { outcome: 'no-legacy-state' };
+  }
 
   let legacy: Record<string, unknown>;
   try {
@@ -389,7 +517,9 @@ export async function backfillReviewFromLegacyState(
     if (result.kind !== 'found') {
       return { outcome: 'failed', diagnostic: `Mission ${slug} is not in the operator database` };
     }
-    if (result.mission.review) { return { outcome: 'already-present' }; }
+    if (result.mission.review) {
+      return await backfillExportedEvents(slug, rootDir, apply, store) ?? { outcome: 'already-present' };
+    }
 
     const { startReview, ConfiguredReviewerEligibility, changeRevision } = await import(
       '../../domain/review.js'
@@ -420,7 +550,12 @@ export async function backfillReviewFromLegacyState(
       }),
     );
 
-    const review = applyReviewStateToReview(seed, legacy as never);
+    const mapped = applyReviewStateToReview(seed, legacy as never);
+    // The same conversation restore as the already-present branch above: a
+    // pre-cutover mission's events exist only as exported Markdown.
+    const review = mapped.reviewEvents.length > 0
+      ? mapped
+      : { ...mapped, reviewEvents: readExportedReviewEvents(slug, rootDir) };
     const current = review.rounds[review.rounds.length - 1];
     const summary = { rounds: review.rounds.length, round: current.number, phase: current.phase };
 
