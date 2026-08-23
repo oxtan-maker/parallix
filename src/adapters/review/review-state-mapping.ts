@@ -1,6 +1,6 @@
 import type { AgentFamily } from '../../domain/agents.js';
 import { agentFamily } from '../../domain/agents.js';
-import type { PullRequestReference, Review, ReviewRound, ReviewerDecision, ReviewPhase } from '../../domain/review.js';
+import { reviewApprovalOwed, type PullRequestReference, type Review, type ReviewRound, type ReviewerDecision, type ReviewPhase } from '../../domain/review.js';
 import { assertReviewedChange, parseReviewDisposition, parseReviewPhase } from '../../domain/review.js';
 import type { ReviewStateData } from './review-state.js';
 
@@ -20,6 +20,9 @@ function metadataFromReview(review: Review): Record<string, unknown> {
   if (review.intervention) {
     metadata.humanEscalationReason = review.intervention.reason;
     metadata.humanEscalatedAt = review.intervention.requestedAt;
+  }
+  if (reviewApprovalOwed(review)) {
+    metadata.approvalOwed = true;
   }
   return metadata;
 }

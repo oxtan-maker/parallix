@@ -77,6 +77,8 @@ export interface StatusMissionData {
   readonly reviewRound?: number;
   /** Current review disposition. */
   readonly reviewDisposition?: string;
+  /** A local self-review awaits an external formal approval. */
+  readonly approvalOwed?: boolean;
   /** Review history rounds. */
   readonly reviewHistory: readonly StatusReviewRound[];
   /**

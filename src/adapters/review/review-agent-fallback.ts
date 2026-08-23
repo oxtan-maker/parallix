@@ -214,6 +214,20 @@ export function stageWindowKey(stage: string, agentFamily: string): string {
   return `${normalizedStage}:${normalizedAgent}`;
 }
 
+function logSingleFamilyFallback(
+  agents: string[],
+  implementer: string,
+  workflowLauncherStatusFn: (_agent: string) => { supported: boolean; detail: string },
+  log: (_message: string) => void,
+): void {
+  const unavailable = agents
+    .filter((agent) => agent !== implementer)
+    .map((agent) => `${agent}: ${workflowLauncherStatusFn(agent).detail || 'unavailable'}`)
+    .join('; ');
+  log(fmt.status('WARN', `no different-family agent is runnable for implementer "${implementer}"; unavailable families: ${unavailable}.`));
+  log(fmt.status('WARN', `Single-family fallback: reviewer="${implementer}" is the PR author family; local review will run, but external formal approval will be required.`));
+}
+
 // Window the Codex telemetry read to the CURRENT launch's start so each round
 // contributes only its own rollouts. Earlier rounds' rollouts have an mtime
 // strictly before this launch's startedAt and are excluded, so the per-round
@@ -293,8 +307,7 @@ export function resolveReviewerIdentity(opts: {
       const anyDifferentFamilyRunnable = agents.some((a: string) => a !== implementer && workflowLauncherStatusFn(a).supported);
       const implementerRunnable = agents.includes(implementer) && workflowLauncherStatusFn(implementer).supported;
       if (!anyDifferentFamilyRunnable && implementerRunnable) {
-        log(fmt.status('WARN', `No supported different-family reviewer found for implementer "${implementer}".`));
-        log(fmt.status('WARN', `Single-family fallback: reviewer="${implementer}" (same as implementer) — no different-family agent is runnable or unblocked on this workstation.`));
+        logSingleFamilyFallback(agents, implementer, workflowLauncherStatusFn, log);
           reviewer = implementer;
           recordAgentSelectionOutcome(log, 'fallback', { agent: reviewer, step: 'review', reason: 'single-family' });
         reviewerSource = 'single-family-fallback';
@@ -416,8 +429,7 @@ export function resolveReviewerIdentity(opts: {
           const anyDifferentFamilyRunnable = agents.some((a: string) => a !== implementer && workflowLauncherStatusFn(a).supported);
           const implementerRunnable = agents.includes(implementer) && workflowLauncherStatusFn(implementer).supported;
           if (!anyDifferentFamilyRunnable && implementerRunnable) {
-            log(fmt.status('WARN', `No supported different-family reviewer found for implementer "${implementer}".`));
-            log(fmt.status('WARN', `Single-family fallback: reviewer="${implementer}" (same as implementer) — no different-family agent is runnable or unblocked on this workstation.`));
+            logSingleFamilyFallback(agents, implementer, workflowLauncherStatusFn, log);
             reviewer = implementer;
             reviewerSource = 'single-family-fallback';
             break;

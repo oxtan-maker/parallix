@@ -180,6 +180,7 @@ export function createStatusWorkflowAdapter(options: StatusWorkflowAdapterOption
                 reviewPhase: (card as any).reviewPhase,
                 reviewRound: (card as any).reviewRound,
                 reviewDisposition: (card as any).reviewDisposition,
+                approvalOwed: (card as any).approvalOwed,
                 reviewHistory: ((card as any).reviewHistory || []).map((r: any) => ({
                   number: r.number,
                   reviewer: r.reviewer,
@@ -302,6 +303,7 @@ export function createStatusBoardAdapter(options: {
           reviewPhase: (card as any).reviewPhase,
           reviewRound: (card as any).reviewRound,
           reviewDisposition: (card as any).reviewDisposition,
+          approvalOwed: (card as any).approvalOwed,
           reviewHistory: ((card as any).reviewHistory || []).map((r: any) => ({
             number: r.number,
             reviewer: r.reviewer,

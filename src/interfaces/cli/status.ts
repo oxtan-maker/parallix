@@ -57,6 +57,9 @@ export function renderStatus(result: StatusResult, log: (_msg: string) => void):
       if (md.reviewPhase) {
         const disposition = md.reviewDisposition ?? 'none';
         log(`Review: round ${md.reviewRound ?? 1}, phase ${md.reviewPhase}, disposition ${disposition}`);
+        if (md.approvalOwed) {
+          log('Formal approval owed: external provider approval is still required after the local self-review.');
+        }
         for (const round of md.reviewHistory) {
           log(`  Round ${round.number} [${round.reviewer} -> ${round.implementer}]: ${round.disposition ?? 'pending'}`);
           if (round.comment) { log(`    comment: ${round.comment}`); }
