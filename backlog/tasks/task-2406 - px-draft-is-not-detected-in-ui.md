@@ -4,7 +4,7 @@ title: px draft is not detected in ui
 status: backlog
 assignee: [custom]
 created_date: '2026-08-23 07:50'
-labels: []
+labels: [user_value, bug]
 dependencies: []
 ordinal: 115917
 ---
