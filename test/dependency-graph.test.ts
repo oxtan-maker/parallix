@@ -12,6 +12,7 @@ import {
   findDependencyViolations,
   findPlatformPaths,
   findProductionDependencyViolations,
+  productionDependencyExceptions,
   findResponsibilityViolations,
   findServiceLocationViolations,
   findUnclassifiedProductionModules,
@@ -101,6 +102,13 @@ test('dependency graph rejects an interface import of a canonical composition mo
   });
 });
 
+test('dependency graph rejects an adapter import of a canonical composition module', () => {
+  withFixture('src/adapters/review/source.ts', 'src/composition/production-capabilities.ts', root => {
+    const violations = findDependencyViolations(root);
+    assert.deepEqual(violations.map(violation => [violation.sourceLayer, violation.targetLayer]), [['adapters', 'composition']]);
+  });
+});
+
 test('dependency graph rejects a forbidden unallowlisted application-to-adapter edge immediately', () => {
   withFixture('src/application/source.ts', 'src/adapters/target.ts', root => {
     const violations = findDependencyViolations(root);
@@ -121,6 +129,26 @@ test('dependency graph honors an explicitly owned legacy exception', () => {
 
 test('dependency graph production scan has no violation outside the owned allowlist', () => {
   assert.deepEqual(findProductionDependencyViolations(process.cwd()), []);
+});
+
+test('every owned dependency exception names a task ID and an existing removal mission', () => {
+  for (const exception of productionDependencyExceptions) {
+    assert.match(exception.ownerTaskId, /^TASK-\d+(?:\.\d+)?$/, `exception ${exception.source} -> ${exception.target} needs an owning task ID`);
+    assert.ok(
+      fs.existsSync(path.resolve(process.cwd(), exception.removalMission)),
+      `exception ${exception.source} -> ${exception.target} names removal mission ${exception.removalMission}, which does not exist`,
+    );
+  }
+});
+
+test('every owned dependency exception still describes a live application-to-adapter edge', () => {
+  for (const exception of productionDependencyExceptions) {
+    for (const file of [exception.source, exception.target]) {
+      assert.ok(fs.existsSync(path.resolve(process.cwd(), file)), `stale exception: ${file} no longer exists`);
+    }
+    assert.equal(classifyDependencyLayer(exception.source, process.cwd()), 'application');
+    assert.equal(classifyDependencyLayer(exception.target, process.cwd()), 'adapters');
+  }
 });
 
 test('platform-path guard rejects a production legacy directory even without an import edge', () => {
@@ -320,3 +348,107 @@ test('responsibility scan is clean for a tree that exercises all six responsibil
     }
   });
 });
+
+
+/* ------------------------------------------------------------------ *
+ * TASK-2332.03 — application ports are capability-owned and neutral
+ * ------------------------------------------------------------------ */
+
+const portsDirectory = path.resolve(process.cwd(), 'src', 'application', 'ports');
+
+function portFiles(): string[] {
+  return fs.readdirSync(portsDirectory).filter(name => name.endsWith('.ts')).sort();
+}
+
+test('every application port module is a capability module that declares contracts', () => {
+  const files = portFiles();
+  assert.ok(files.length > 0, 'src/application/ports/ must contain capability modules');
+  for (const file of files) {
+    const source = fs.readFileSync(path.join(portsDirectory, file), 'utf8');
+    assert.match(
+      source,
+      /export (?:interface|type) /,
+      `${file} must declare at least one exported contract to be a capability port module`,
+    );
+  }
+});
+
+test('application ports name no storage mechanism in their declarations', () => {
+  // Prose may name a mechanism to say the port deliberately excludes it; a
+  // declaration may not, because that is the leak ADR 0051 forbids.
+  const mechanism = /\b(?:sqlite|DatabaseSync|StatementSync|legacy-storage|legacyStorage)\b/i;
+  for (const file of portFiles()) {
+    const declarations = fs.readFileSync(path.join(portsDirectory, file), 'utf8')
+      .split('\n')
+      .filter(line => !/^\s*(?:\/\/|\/?\*)/.test(line));
+    const leak = declarations.find(line => mechanism.test(line));
+    assert.equal(leak, undefined, `${file} leaks a storage mechanism into a port declaration: ${leak}`);
+  }
+});
+
+test('application ports import no adapter and no storage runtime', () => {
+  const forbidden = /from '(?:node:sqlite|[^']*\/adapters\/[^']*)'/;
+  for (const file of portFiles()) {
+    const source = fs.readFileSync(path.join(portsDirectory, file), 'utf8');
+    const offending = source.split('\n').find(line => forbidden.test(line));
+    assert.equal(offending, undefined, `${file} must not import an adapter or a storage runtime: ${offending}`);
+  }
+});
+
+
+/* ------------------------------------------------------------------ *
+ * TASK-2332.06 — the architecture documentation and the graph agree
+ * ------------------------------------------------------------------ */
+
+const architectureDocuments = [
+  'docs/adr/0051-ui-neutral-application-boundary.md',
+  'src/adapters/README.md',
+  'src/composition/README.md',
+  'src/interfaces/README.md',
+  'src/entry/README.md',
+];
+
+test('ADR 0051 names every canonical layer root the graph enforces', () => {
+  const adr = fs.readFileSync(path.resolve(process.cwd(), 'docs/adr/0051-ui-neutral-application-boundary.md'), 'utf8');
+  for (const roots of Object.values(layerRoots)) {
+    for (const root of roots) {
+      assert.ok(adr.includes(root), `ADR 0051 must name the canonical layer root ${root} that boundary-guards.ts enforces`);
+    }
+  }
+});
+
+test('no architecture document describes a layer the graph does not enforce', () => {
+  const enforced = new Set(Object.values(layerRoots).flat());
+  for (const document of architectureDocuments) {
+    const text = fs.readFileSync(path.resolve(process.cwd(), document), 'utf8');
+    for (const claimed of text.match(/src\/[a-z-]+(?=\/|`|\b)/g) ?? []) {
+      if (claimed.split('/').length !== 2) { continue; }
+      assert.ok(
+        enforced.has(claimed),
+        `${document} describes ${claimed} as a source tree, but layerRoots does not enforce it`,
+      );
+    }
+  }
+});
+
+test('no production module names a retired migration scaffold', () => {
+  // The scaffolds TASK-2332 removed. A reference here means either the scaffold
+  // came back or a comment is describing architecture that no longer exists.
+  const retired = /\b(?:LegacyActiveAdapter|ActivePort|src\/platform)\b/;
+  const production = dependencyLayers
+    .flatMap(layer => layerRoots[layer])
+    .flatMap(root => walkProduction(path.resolve(process.cwd(), root)));
+  for (const file of production) {
+    const offending = fs.readFileSync(file, 'utf8').split('\n').find(line => retired.test(line));
+    assert.equal(offending, undefined, `${path.relative(process.cwd(), file)} names a retired migration scaffold: ${offending}`);
+  }
+});
+
+function walkProduction(dir: string): string[] {
+  if (!fs.existsSync(dir)) { return []; }
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
+    const file = path.join(dir, entry.name);
+    if (entry.isDirectory()) { return walkProduction(file); }
+    return entry.isFile() && /\.(?:ts|tsx)$/.test(entry.name) ? [file] : [];
+  });
+}

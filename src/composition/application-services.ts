@@ -13,12 +13,11 @@ import { OperationalHistoryService } from '../application/services/operational-h
 import { CurrentWorkRecorder, NO_CURRENT_WORK_PORT, type CurrentWorkPort } from '../application/recording/current-work-recorder.js';
 import { processStartIdentity } from '../adapters/process/process-liveness.js';
 import { SqliteMissionStore } from '../adapters/sqlite/mission-store.js';
-import { MissionCompatibilityImporter } from '../adapters/sqlite/mission-importer.js';
 import { SqliteSessionMarkerAdapter } from '../adapters/sqlite/session-marker-adapter.js';
 import { SqliteSessionMarkerRepository } from '../adapters/sqlite/session-marker-repository.js';
 import type { SessionMarkerRepository } from '../application/ports/mission-store.js';
 import { repositoryId, type RepositoryId } from '../domain/repository.js';
-import { resolveCanonicalRepositoryId, resolvePrimaryCheckout } from '../adapters/git/repository-identity.js';
+import { resolveCanonicalRepositoryId } from '../adapters/git/repository-identity.js';
 import { createDefaultExecuteMissionRuntime, createExecuteMissionPorts } from '../adapters/mission/execute-mission-adapters.js';
 import { performHandoff } from '../adapters/cli/commands/handoff.js';
 import { startReviewLoop } from '../adapters/review/review-loop.js';
@@ -75,10 +74,7 @@ export interface OperatorStateRepositories {
 /**
  * The checked Mission use cases, bound to the canonical repository.
  *
- * After the architecture migration cutover, `SqliteMissionStore` is the sole production
- * authority. The preflight import gate (MissionCompatibilityImporter) runs at
- * construction time to ensure all legacy Missions have been imported before any
- * command path reads or writes through the store.
+ * `SqliteMissionStore` is the sole production authority per ADR 0053.
  */
 export interface MissionApplicationServices {
   readonly store: MissionTransitionStore;
@@ -140,8 +136,6 @@ export interface OperatorApplicationServices {
 
 export interface ProductionApplicationServiceOptions {
   readonly includeOperatorState?: boolean;
-  /** Skip the preflight import gate (for test fixtures). */
-  readonly skipImportGate?: boolean;
 }
 
 /**
@@ -196,9 +190,7 @@ export async function createProductionApplicationServices(
 
   const mission = options.includeOperatorState === false
     ? null
-    : await createMissionApplicationServices(rootDir, {
-      skipImportGate: options.skipImportGate,
-    });
+    : await createMissionApplicationServices(rootDir);
   const defaultExecuteRuntime = createDefaultExecuteMissionRuntime();
   const executeRuntime = mission ? {
     ...defaultExecuteRuntime,
@@ -246,6 +238,7 @@ export async function createProductionApplicationServices(
       executePorts,
       mission?.store ?? null,
       currentWork,
+      activeProgress,
     )
     : null;
   return {
@@ -283,9 +276,8 @@ function unavailableMissionTransitionStore(): import('../application/domain-port
 /**
  * Build the Mission use cases over the single selected SQLite authority.
  *
- * Opens the operator-local database, applies pending migrations, runs the
- * preflight import gate (MissionCompatibilityImporter) to ensure all legacy
- * Missions have been imported, and constructs the checked use cases.
+ * Opens the operator-local database, applies pending migrations, and constructs
+ * the checked use cases. SQLite is the sole authority per ADR 0053.
  *
  * Callers that need only the Mission boundary (the handoff command, a future
  * board host) use this instead of materializing operator-local SQLite state.
@@ -298,8 +290,6 @@ export interface MissionApplicationServiceOverrides {
   readonly repositoryId?: string;
   /** Database path override (for test fixtures). */
   readonly databasePath?: string;
-  /** Skip the preflight import gate (for test fixtures). */
-  readonly skipImportGate?: boolean;
 }
 
 export async function createMissionApplicationServices(
@@ -308,11 +298,8 @@ export async function createMissionApplicationServices(
 ): Promise<MissionApplicationServices> {
   // A mission worktree and the checkout it was branched from are the same
   // repository: the Mission row a handoff writes from `<repo>-<slug>` is the
-  // one integrate reads from `<repo>`. Anchor both the repository identity and
-  // the importer's source root to the primary worktree, or the two callers
-  // would key different rows and every post-handoff import would look like a
-  // divergence conflict.
-  const sourceRoot = resolvePrimaryCheckout(rootDir);
+  // one integrate reads from `<repo>`. Anchor the repository identity to the
+  // primary worktree so callers key consistent rows.
   const repoId = overrides.repositoryId
     ? repositoryId(overrides.repositoryId)
     : resolveCanonicalRepositoryId(rootDir);
@@ -332,36 +319,6 @@ export async function createMissionApplicationServices(
       ? path.dirname(dbPath)
       : undefined,
   });
-
-  // Preflight import gate: ensure all legacy Missions have been imported
-  // before any command path reads or writes through the SQLite store.
-  // architecture invariant: inspect the returned report — throw when validation errors or
-  // unresolved conflicts remain so that a malformed or divergent legacy
-  // Mission blocks construction of the SQLite authority.
-  //
-  // The gate runs once per source root: it guards the cutover, it is not a
-  // steady-state reconciler. Once this root has been imported, SQLite is the
-  // authority and later edits to the retired legacy files are ignored by
-  // design — re-importing them would resurrect the dual-write ADR 0053 forbids
-  // (and would report every post-cutover checkpoint as an import conflict).
-  const alreadyImported = await db.query<{ count: number }>(
-    'SELECT COUNT(*) AS count FROM import_history WHERE source_path = ?;',
-    [sourceRoot],
-  ).then((rows) => (rows[0]?.count ?? 0) > 0).catch(() => false);
-
-  if (!overrides.skipImportGate && !alreadyImported) {
-    const store = new SqliteMissionStore(db);
-    const importer = new MissionCompatibilityImporter(db, store, sourceRoot, repoId);
-    const report = await importer.apply();
-    if (report.conflicts.length > 0) {
-      const detailLines = report.conflicts
-        .map((c) => `  - ${c.missionId} (${c.sourcePath}): ${c.details || c.reason}`)
-        .join('\n');
-      throw new Error(
-        `Preflight import gate failed: ${report.conflicts.length} conflict(s) detected.\n${detailLines}`,
-      );
-    }
-  }
 
   const store = new SqliteMissionStore(db);
   return {

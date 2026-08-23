@@ -313,9 +313,7 @@ describe('Mission application boundary over isolated SQLite adapters', () => {
   });
 
   it('SC6: production wires one Mission store for every Mission use case', async () => {
-    const services = await createMissionApplicationServices(process.cwd(), {
-      skipImportGate: true,
-    });
+    const services = await createMissionApplicationServices(process.cwd());
     assert.equal(services.store.constructor.name, 'SqliteMissionStore');
 
     const compositionSource = fs.readFileSync(

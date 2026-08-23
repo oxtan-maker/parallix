@@ -7,5 +7,8 @@ import type { MissionProjectionQuery } from './projections/mission-query.js';
 export interface TuiCapabilities {
   readonly boardProjection: BoardProjectionBuilder;
   readonly missionDetails: MissionProjectionQuery;
+  /** Returns the single shared dispatcher; progress arg accepted for API compat. */
   readonly commandControllerFactory: (_progress: BoardProgressSink) => BoardCommandDispatcher;
+  /** The single shared controller instance (CLI and TUI both use this). */
+  readonly commandController: BoardCommandDispatcher;
 }

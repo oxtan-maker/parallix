@@ -147,8 +147,10 @@ test('production composition delivers a board controller that publishes to the w
 
   // The factory delivered by the production composition forwards the same
   // recorder composition received: a completed board launch publishes through it.
-  const result = await capabilities.tui.commandControllerFactory(noopProgress).dispatchWithStatus(boardRequest(), 'refined');
+  const progressEvents: string[] = [];
+  const result = await capabilities.tui.commandControllerFactory((event) => progressEvents.push(event.phase)).dispatchWithStatus(boardRequest(), 'refined');
   assert.equal(result.status, 'completed');
+  assert.ok(progressEvents.includes('dispatch'), 'the TUI progress sink receives controller events');
 
   const events = await new ConcreteCurrentWorkReadAdapter(repo).loadCurrentWork();
   // loadCurrentWork already parses the events into CurrentWorkEvent facts.

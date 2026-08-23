@@ -1,5 +1,7 @@
 import type { ExecuteMissionPorts } from '../application/ports/execute-mission.js';
 import type { TuiCapabilities } from '../application/tui-capabilities.js';
+import type { BoardCommandDispatcher, BoardProgressSink } from '../application/controller/board-command.js';
+import { BoardCommandController } from '../application/controller/board-controller.js';
 import type { BoardProjectionBuilder } from '../application/projections/board-readers.js';
 import type { MissionProjectionQuery } from '../application/projections/mission-query.js';
 import type { RepositoryId } from '../domain/repository.js';
@@ -29,6 +31,8 @@ export interface ProductionCapabilities {
   readonly boardProjection: BoardProjectionBuilder;
   readonly missionDetails: MissionProjectionQuery;
   readonly executePorts: ExecuteMissionPorts;
+  /** Single dispatcher instance shared by CLI and TUI. */
+  readonly commandController: BoardCommandDispatcher;
 }
 
 /**
@@ -42,7 +46,10 @@ export function composeProductionCapabilities(
   executePorts: ExecuteMissionPorts,
   missionStore: MissionStore | null,
   currentWork: CurrentWorkPort,
+  progress?: BoardProgressSink,
 ): ProductionCapabilities {
+  // Single dispatcher instance shared by CLI and TUI (TASK-2332.05)
+  const controller = new BoardCommandController(executePorts, progress, {}, currentWork);
   const tui = composeTuiCapabilities({
     rootDir,
     missionStore,
@@ -53,11 +60,12 @@ export function composeProductionCapabilities(
     usageRepo: repositories.usage,
     knownAgentFamilies: resolveKnownAgentFamilies(rootDir),
     sessionMarkers: repositories.sessionMarkers ?? null,
-  }, executePorts, currentWork);
+  }, executePorts, currentWork, controller);
   return {
     tui,
     boardProjection: tui.boardProjection,
     missionDetails: tui.missionDetails,
     executePorts,
+    commandController: controller,
   };
 }

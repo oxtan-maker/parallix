@@ -1399,6 +1399,13 @@ export async function backfillReviewHandler(
     log(fmt.status('INFO', `Would backfill review for ${slug}: ${result.rounds} round(s), resuming at round ${result.round} (${result.phase}).`));
     log(fmt.status('INFO', 'Dry run — re-run without --dry-run to write.'));
     return;
+  case 'events-backfilled':
+    log(fmt.status('PASS', `Backfilled ${result.events} review event(s) for ${slug} from its exported review-events files.`));
+    return;
+  case 'would-backfill-events':
+    log(fmt.status('INFO', `Would backfill ${result.events} review event(s) for ${slug} from its exported review-events files.`));
+    log(fmt.status('INFO', 'Dry run — re-run without --dry-run to write.'));
+    return;
   case 'already-present':
     log(fmt.status('INFO', `Mission ${slug} already has a review; nothing to backfill.`));
     return;

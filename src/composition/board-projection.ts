@@ -113,11 +113,14 @@ export function composeTuiCapabilities(
   deps: BoardProjectionCompositionDeps,
   executePorts: ExecuteMissionPorts,
   currentWork: CurrentWorkPort,
+  controller?: BoardCommandController,
 ): TuiCapabilities {
   const board = composeBoardProjection(deps);
+  const sharedController = controller ?? new BoardCommandController(executePorts);
   return {
     boardProjection: board.builder,
     missionDetails: board.missionQuery,
     commandControllerFactory: (progress) => new BoardCommandController(executePorts, progress, {}, currentWork),
+    commandController: sharedController,
   };
 }

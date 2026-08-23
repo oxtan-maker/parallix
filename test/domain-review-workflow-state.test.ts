@@ -10,6 +10,7 @@ import {
   ConfiguredReviewerEligibility,
   currentReviewRound,
   hasRecordedStageLaunch,
+  parseResolutionDispositions,
   recordStageLaunch,
   reviewFindingId,
   stageLaunchWindowsFrom,
@@ -273,8 +274,8 @@ test('projectReviewHistory falls back to itemDispositions when response.resoluti
 
   const history = projectReviewHistory(reviewWithItems);
   assert.equal(history.length, 1);
-  assert.deepEqual(history[0].fixes, ['fixed: F1'], 'itemDispositions fixed shown');
-  assert.deepEqual(history[0].pushbacks, ['pushed_back: F2'], 'itemDispositions pushed_back shown');
+  assert.deepEqual(history[0].fixes, ['F1'], 'itemDispositions fixed shown');
+  assert.deepEqual(history[0].pushbacks, ['F2'], 'itemDispositions pushed_back shown');
   assert.deepEqual(history[0].findingSummaries, [finding.summary, 'Projection incomplete']);
 });
 
@@ -308,6 +309,156 @@ test('projectReviewHistory restores legacy detail from persisted review events',
   assert.deepEqual(history[0], {
     number: 1, reviewer, implementer, phase: 'reviewing', disposition: 'REQUEST_CHANGES',
     comment: 'Persist the review continuity.', findingSummaries: ['Persist review details'],
-    fixes: ['fixed: F1'], pushbacks: [],
+    fixes: ['F1'], pushbacks: [],
   });
+});
+
+test('projectReviewHistory parses path:L123: artifact format in finding summaries', () => {
+  const review = startReview(
+    subject, reviewer, implementer, '2026-08-02T08:00:00Z', reviewerEligibility,
+  );
+  const round = review.rounds[0];
+  const history = projectReviewHistory({
+    ...review,
+    rounds: [{ ...round, disposition: 'CHANGES_MADE' }] as typeof review.rounds,
+    reviewEvents: [
+      {
+        position: 0, eventType: 'reviewer_findings', roundNumber: 1, phase: 'reviewing', actor: 'codex',
+        content: 'src/app.ts:L42: 🔴 bug: variable not declared\n\nsrc/util.ts:L100: 🟡 risk: slow query',
+        disposition: null, verdict: null,
+        itemDispositions: null, blockedReason: null, followUpReference: null, createdAt: '2026-08-02T09:00:00Z',
+      },
+      {
+        position: 1, eventType: 'reviewer_outcome', roundNumber: 1, phase: 'reviewing', actor: 'codex',
+        content: 'Outcome: request-changes', disposition: null, verdict: 'request-changes',
+        itemDispositions: null, blockedReason: null, followUpReference: null, createdAt: '2026-08-02T09:01:00Z',
+      },
+    ],
+  });
+
+  assert.equal(history[0].findingSummaries.length, 2, 'two findings parsed');
+  assert.match(history[0].findingSummaries[0], /variable not declared/, 'first finding parsed from path:L123: format');
+  assert.match(history[0].findingSummaries[1], /slow query/, 'second finding parsed from path:L123: format');
+});
+
+test('projectReviewHistory full output: comments, findings, fixes, pushbacks from review events', () => {
+  const review = startReview(
+    subject, reviewer, implementer, '2026-08-02T08:00:00Z', reviewerEligibility,
+  );
+  const round = review.rounds[0];
+  const history = projectReviewHistory({
+    ...review,
+    rounds: [{ ...round, disposition: 'CHANGES_MADE' }] as typeof review.rounds,
+    reviewEvents: [
+      {
+        position: 0, eventType: 'reviewer_findings', roundNumber: 1, phase: 'reviewing', actor: 'codex',
+        content: 'src/app.ts:L42: 🔴 bug: variable not declared\n\nsrc/util.ts:L100: 🟡 risk: slow query',
+        disposition: null, verdict: null,
+        itemDispositions: null, blockedReason: null, followUpReference: null, createdAt: '2026-08-02T09:00:00Z',
+      },
+      {
+        position: 1, eventType: 'reviewer_outcome', roundNumber: 1, phase: 'reviewing', actor: 'codex',
+        content: 'Outcome: request-changes\n\n## Summary\nFix parser and performance.',
+        disposition: null, verdict: 'request-changes',
+        itemDispositions: null, blockedReason: null, followUpReference: null, createdAt: '2026-08-02T09:01:00Z',
+      },
+      {
+        position: 2, eventType: 'implementer_round_summary', roundNumber: 1, phase: 'fixing', actor: 'custom',
+        content: '', disposition: null, verdict: null,
+        itemDispositions: [
+          { kind: 'fixed' as const, findingId: reviewFindingId('F1') },
+          { kind: 'pushed_back' as const, findingId: reviewFindingId('F2') },
+        ], blockedReason: null, followUpReference: null, createdAt: '2026-08-02T10:00:00Z',
+      },
+    ],
+  });
+
+  const r = history[0];
+  assert.equal(r.disposition, 'REQUEST_CHANGES', 'disposition from outcome verdict');
+  assert.match(r.comment ?? '', /parser.*performance|Fix parser/i, 'comment extracted from outcome Summary');
+  assert.equal(r.findingSummaries.length, 2, 'two findings from reviewer_findings');
+  assert.match(r.findingSummaries[0], /variable not declared/, 'first finding');
+  assert.equal(r.fixes.length, 1, 'one fix from itemDispositions');
+  assert.equal(r.fixes[0], 'F1', 'fix text');
+  assert.equal(r.pushbacks.length, 1, 'one pushback from itemDispositions');
+  assert.equal(r.pushbacks[0], 'F2', 'pushback text');
+});
+
+// parseResolutionDispositions — the three shapes real round resolutions use.
+// A shape this misses shows up as a round in `px status` with a verdict and no
+// fixes or pushbacks under it, which is invisible to a test over hand-built
+// itemDispositions.
+
+test('parseResolutionDispositions reads the inline fixed_items: ["id"] form', () => {
+  assert.deepEqual(
+    parseResolutionDispositions('fixed_items: ["F1"]\npushed_back_items: ["F2"]\nparked_items: []'),
+    [
+      { kind: 'fixed', findingId: 'F1' },
+      { kind: 'pushed_back', findingId: 'F2' },
+    ],
+  );
+});
+
+test('parseResolutionDispositions reads Markdown section lists and skips (none)', () => {
+  const resolution = [
+    '# Round 1 Resolution',
+    '',
+    '## fixed_items',
+    '1. **Filesystem fallback removed:** SQLite is the sole authority.',
+    '- plain bullet item',
+    '',
+    '## pushed_back_items',
+    '1. **Rebase artifact:** resolved by parallix rebase.',
+    '',
+    '## parked_items',
+    '(none)',
+  ].join('\n');
+
+  assert.deepEqual(parseResolutionDispositions(resolution), [
+    { kind: 'fixed', findingId: 'Filesystem fallback removed' },
+    { kind: 'fixed', findingId: 'plain bullet item' },
+    { kind: 'pushed_back', findingId: 'Rebase artifact' },
+  ]);
+});
+
+test('parseResolutionDispositions takes sub-headings as items, not their detail bullets', () => {
+  const resolution = [
+    '## fixed_items',
+    '',
+    '### Finding: CP-5.md:L15 — dispatch paths not proven',
+    '**Fix:** Added a convergence test proving:',
+    '- CLI and TUI share ExecuteMissionService',
+    '- TUI dispatches to MissionIntakeService',
+    '',
+    '### Finding: CP-6.md:L5 — importer still composed',
+    '**Fix:** Removed the import gate.',
+    '',
+    '## pushed_back_items',
+    '(none)',
+  ].join('\n');
+
+  assert.deepEqual(parseResolutionDispositions(resolution), [
+    { kind: 'fixed', findingId: 'CP-5.md:L15 — dispatch paths not proven' },
+    { kind: 'fixed', findingId: 'CP-6.md:L5 — importer still composed' },
+  ]);
+});
+
+test('parseResolutionDispositions reads per-finding **Disposition:** lines', () => {
+  const resolution = [
+    '## Findings',
+    '',
+    '### Finding 1: CLI/TUI dispatch convergence test (🔴)',
+    '**Claim:** Two dispatchers that merely share services.',
+    '**Disposition:** PUSHBACK',
+    '**Rationale:** The canonical path is the application services.',
+    '',
+    '### Finding 2: Merged-PR preflight contract conflict (🔴)',
+    '**Disposition:** FIXED',
+    '**Fix:** Updated the test to match the new contract.',
+  ].join('\n');
+
+  assert.deepEqual(parseResolutionDispositions(resolution), [
+    { kind: 'pushed_back', findingId: 'CLI/TUI dispatch convergence test (🔴)' },
+    { kind: 'fixed', findingId: 'Merged-PR preflight contract conflict (🔴)' },
+  ]);
 });

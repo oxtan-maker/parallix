@@ -1,7 +1,7 @@
 ---
 id: TASK-2332
 title: Post-2322 cleanup — Ports and adapters architecture
-status: ready-for-integration
+status: done
 assignee: [codex]
 created_date: '2026-07-31 08:00'
 updated_date: '2026-07-31 08:00'
@@ -49,19 +49,19 @@ This is an explicitly ports-and-adapters-focused cleanup. Each child mission is 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 All six child missions are integrated in order
-- [ ] #2 TASK-2332.01 installs graph-based import validation with allowlist
-- [ ] #3 TASK-2332.02 establishes single composition root with no adapter→composition imports
-- [ ] #4 TASK-2332.03 moves application ports to capability-organized files
-- [ ] #5 TASK-2332.04 replaces LegacyActiveAdapter with ExecuteMission use case
-- [ ] #6 TASK-2332.05 produces one canonical command-dispatch path
-- [ ] #7 TASK-2332.06 removes all migration scaffolding and certifies zero-exception dependency graph
+- [x] #1 All six child missions are integrated in order
+- [x] #2 TASK-2332.01 installs graph-based import validation with allowlist
+- [x] #3 TASK-2332.02 establishes single composition root with no adapter→composition imports
+- [x] #4 TASK-2332.03 moves application ports to capability-organized files
+- [x] #5 TASK-2332.04 replaces LegacyActiveAdapter with ExecuteMission use case
+- [x] #6 TASK-2332.05 produces one canonical command-dispatch path
+- [x] #7 TASK-2332.06 removes all migration scaffolding and certifies zero-exception dependency graph
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 All child missions integrated with passing integration gates
-- [ ] #2 Architecture documentation matches the executable dependency graph
-- [ ] #3 No deferred migration TODO or compatibility façade remains
-- [ ] #4 Full verification suite passes on final tree
+- [x] #1 All child missions integrated with passing integration gates
+- [x] #2 Architecture documentation matches the executable dependency graph
+- [x] #3 No deferred migration TODO or compatibility façade remains
+- [x] #4 Full verification suite passes on final tree
 <!-- DOD:END -->

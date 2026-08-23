@@ -151,6 +151,125 @@ export function parseReviewDisposition(
     : null;
 }
 
+const RESOLUTION_SECTIONS: readonly (readonly [string, ReviewItemDisposition['kind']])[] = [
+  ['fixed_items', 'fixed'],
+  ['pushed_back_items', 'pushed_back'],
+  ['parked_items', 'parked'],
+];
+
+/** Strip list/heading decoration from one resolution item, or null when it names none. */
+function resolutionItemId(text: string): string | null {
+  // `**Label:** detail` — the label names the finding the item answers.
+  const label = text.match(/^\*\*(.+?):?\*\*/)?.[1] ?? text;
+  const id = label.trim().replace(/^Finding\s*\d*\s*:?\s*/i, '').replace(/[.:]$/, '').trim();
+  if (!id || id.toLowerCase() === 'none' || id.toLowerCase() === '(none)') { return null; }
+  return id;
+}
+
+/**
+ * Read one `## <section>` list out of a round-resolution artifact.
+ *
+ * Items appear either as a list under the section heading or as deeper
+ * sub-headings (`### Finding: … — Label`); both forms are in use, so a section
+ * ends at the next heading of the same or shallower level, not at the next
+ * heading of any level.
+ */
+function resolutionSectionItems(
+  lines: readonly string[],
+  section: string,
+  kind: ReviewItemDisposition['kind'],
+): ReviewItemDisposition[] {
+  const headingPattern = new RegExp(`^(#{1,6})\\s*${section}\\s*$`, 'i');
+  const start = lines.findIndex((line) => headingPattern.test(line.trim()));
+  if (start === -1) { return []; }
+  const sectionLevel = (lines[start].trim().match(headingPattern) as RegExpMatchArray)[1].length;
+
+  const subHeadings: string[] = [];
+  const listItems: string[] = [];
+  for (const line of lines.slice(start + 1)) {
+    const trimmed = line.trim();
+    const heading = trimmed.match(/^(#{1,6})\s+(.*)$/);
+    if (heading) {
+      if (heading[1].length <= sectionLevel) { break; }
+      subHeadings.push(heading[2]);
+      continue;
+    }
+    const item = trimmed.match(/^(?:[-*]|\d+[.)])\s+(.*)$/);
+    if (item) { listItems.push(item[1]); }
+  }
+
+  // When the section names its items as sub-headings, the lists beneath them
+  // are that item's detail, not further items.
+  const raw = subHeadings.length > 0 ? subHeadings : listItems;
+  return raw
+    .map(resolutionItemId)
+    .filter((id): id is string => id !== null)
+    .map((id) => ({ kind, findingId: reviewFindingId(id) }));
+}
+
+const DISPOSITION_WORDS = new Map<string, ReviewItemDisposition['kind']>([
+  ['FIXED', 'fixed'],
+  ['PUSHBACK', 'pushed_back'],
+  ['PUSHED_BACK', 'pushed_back'],
+  ['PUSHBACK_ALL', 'pushed_back'],
+  ['PARKED', 'parked'],
+]);
+
+/**
+ * Read a resolution written as one heading per finding with a
+ * `**Disposition:** FIXED` line under it, rather than as `fixed_items` sections.
+ *
+ * Only consulted when no section yielded items: this shape carries the same
+ * information, so a round written this way would otherwise report its verdict
+ * with no fixes or pushbacks under it.
+ */
+function perFindingDispositions(lines: readonly string[]): readonly ReviewItemDisposition[] {
+  const items: ReviewItemDisposition[] = [];
+  let heading: string | null = null;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const match = trimmed.match(/^#{1,6}\s+(.*)$/);
+    if (match) { heading = match[1]; continue; }
+    const stated = trimmed.match(/^\*\*Disposition:?\*\*:?\s*(.+)$/i);
+    if (!stated || !heading) { continue; }
+    const kind = DISPOSITION_WORDS.get(stated[1].trim().toUpperCase().replace(/[^A-Z_]/g, ''));
+    const id = kind ? resolutionItemId(heading) : null;
+    if (kind && id) { items.push({ kind, findingId: reviewFindingId(id) }); }
+    heading = null;
+  }
+  return items;
+}
+
+/**
+ * Read the fixed, pushed-back and parked items out of a round-resolution
+ * artifact.
+ *
+ * Two shapes are accepted because both are produced. The review loop asks the
+ * implementer for Markdown sections (`## fixed_items` and a numbered list),
+ * which is what mission round resolutions actually contain; the inline
+ * `fixed_items: ["id"]` form predates it. Reading only the inline form left
+ * every real resolution with no item dispositions, so `px status` reported a
+ * round's verdict with no fixes or pushbacks under it.
+ *
+ * Returns no items rather than throwing on malformed input: an unreadable
+ * resolution must not fail the round it summarises.
+ */
+export function parseResolutionDispositions(resolution: string): readonly ReviewItemDisposition[] {
+  const lines = resolution.split('\n');
+  const items: ReviewItemDisposition[] = [];
+  for (const [section, kind] of RESOLUTION_SECTIONS) {
+    const inline = resolution.match(new RegExp(`${section}:\\s*(\\[[^\\]]*\\])`, 'i'));
+    if (inline) {
+      try {
+        items.push(...(JSON.parse(inline[1]) as string[]).map((id) => ({ kind, findingId: reviewFindingId(id) })));
+        continue;
+      } catch { /* fall through to the Markdown section */ }
+    }
+    items.push(...resolutionSectionItems(lines, section, kind));
+  }
+  return items.length > 0 ? items : perFindingDispositions(lines);
+}
+
 /** Upper bound on retained fingerprints per stage window. */
 export const STAGE_LAUNCH_HISTORY_LIMIT = 20;
 
