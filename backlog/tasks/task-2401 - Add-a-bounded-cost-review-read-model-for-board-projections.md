@@ -4,7 +4,7 @@ title: Add a bounded-cost review read model for board projections
 status: backlog
 assignee: [codex]
 created_date: '2026-08-23 07:24'
-labels: []
+labels: [user_value]
 dependencies: []
 ordinal: 111917
 ---
