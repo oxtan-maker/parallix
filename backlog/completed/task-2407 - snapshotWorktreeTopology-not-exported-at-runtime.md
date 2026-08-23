@@ -1,7 +1,7 @@
 ---
 id: TASK-2407
 title: snapshotWorktreeTopology not provided as named export at runtime
-status: ready-for-integration
+status: done
 assignee: [custom]
 created_date: '2026-08-23 14:45'
 labels:
