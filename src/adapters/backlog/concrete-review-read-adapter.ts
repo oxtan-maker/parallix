@@ -16,7 +16,7 @@ import {
   parseReviewPhase,
   stageLaunchWindowsFrom,
 } from '../../domain/review.js';
-import type { ReviewReadAdapter } from '../../application/projections/board-readers.js';
+import type { ReviewProjectionFact, ReviewReadAdapter } from '../../application/projections/board-readers.js';
 import type { MissionStore } from '../../application/domain-ports.js';
 import type { ReviewState } from '../review/review-state.js';
 import { findMissionDir } from '../filesystem/mission-utils.js';
@@ -68,6 +68,7 @@ export interface ConcreteReviewReadAdapterOptions {
   readonly rootDir: string;
   /** Mission authority used to read persisted review state. */
   readonly missionStore: MissionStore | null;
+  readonly projectionReader?: Pick<ReviewReadAdapter, 'loadReviews'> | null;
   /** Read persisted review state for a mission. */
   readonly readReviewState?: ReadReviewStateFn;
   /** Find mission directory for a slug. */
@@ -86,17 +87,27 @@ export class ConcreteReviewReadAdapter implements ReviewReadAdapter {
   private readonly missionStore: MissionStore | null;
   private readonly readReviewState: ReadReviewStateFn;
   private readonly findMissionDir: FindMissionDirFn;
+  private readonly projectionReader: Pick<ReviewReadAdapter, 'loadReviews'> | null;
 
   constructor(options: ConcreteReviewReadAdapterOptions) {
     this.rootDir = options.rootDir;
     this.missionStore = options.missionStore;
     this.readReviewState = options.readReviewState ?? defaultReadReviewState();
     this.findMissionDir = options.findMissionDir ?? defaultFindMissionDir();
+    this.projectionReader = options.projectionReader ?? null;
   }
 
   // -----------------------------------------------------------------------
   // ReviewReadAdapter port
   // -----------------------------------------------------------------------
+
+  async loadReviews(missionIds: readonly MissionId[]): Promise<ReadonlyMap<MissionId, ReviewProjectionFact>> {
+    if (this.projectionReader) { return this.projectionReader.loadReviews(missionIds); }
+    return new Map(await Promise.all(missionIds.map(async (id) => [id, {
+      review: await this.loadReview(id),
+      approval: await this.loadReviewApproval(id),
+    }] as const)));
+  }
 
   async loadReview(_missionId: MissionId): Promise<Review | null> {
     // Prefer persisted rounds from the mission store (SC1-SC5).

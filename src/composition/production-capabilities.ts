@@ -14,6 +14,7 @@ import type { SessionMarkerRepository } from '../application/ports/mission-store
 import type { UsageRepository } from '../application/ports/mission-measurements.js';
 import type { MissionStore } from '../application/domain-ports.js';
 import type { CurrentWorkPort } from '../application/recording/current-work-recorder.js';
+import type { SqliteDatabaseAdapter } from '../adapters/sqlite/database-adapter.js';
 import { composeTuiCapabilities } from './board-projection.js';
 
 export interface ProductionBoardRepositories {
@@ -47,12 +48,14 @@ export function composeProductionCapabilities(
   missionStore: MissionStore | null,
   currentWork: CurrentWorkPort,
   progress?: BoardProgressSink,
+  database?: SqliteDatabaseAdapter | null,
 ): ProductionCapabilities {
   // Single dispatcher instance shared by CLI and TUI (TASK-2332.05)
   const controller = new BoardCommandController(executePorts, progress, {}, currentWork);
   const tui = composeTuiCapabilities({
     rootDir,
     missionStore,
+    database,
     repositoryId: owningRepositoryId,
     blocklistRepo: repositories.agentBlocklist,
     historyRepo: repositories.operationalHistory,

@@ -14,7 +14,7 @@ import {
 import { attentionQueue, attentionRank } from '../src/application/projections/mission-board.js';
 import { agentFamily, type AgentFamily } from '../src/domain/agents.js';
 import { missionId, missionLabels, type Mission } from '../src/domain/mission.js';
-import { changeRevision, type Review } from '../src/domain/review.js';
+import { changeRevision, reviewFindingId, type Review, type ReviewRound } from '../src/domain/review.js';
 import { repositoryId } from '../src/domain/repository.js';
 
 const repo = repositoryId('parallix');
@@ -39,8 +39,7 @@ function makeMissionAdapter(missions: Mission[] | null = null): MissionReadAdapt
 
 function makeReviewAdapter(review: Review | null = null): ReviewReadAdapter {
   return {
-    async loadReview() { return review; },
-    async loadReviewApproval() { return null; },
+    async loadReviews(ids) { return new Map(ids.map((id) => [id, { review, approval: null }])); },
   };
 }
 
@@ -129,6 +128,93 @@ test('BoardProjectionBuilder projects the review loaded by its review adapter', 
 
   assert.equal(projection.attentionQueue[0].card.reviewPhase, 'reviewing');
   assert.equal(projection.attentionQueue[0].card.reviewRound, 2);
+});
+
+test('BoardProjectionBuilder preserves populated multi-round review cards from a batch projection', async () => {
+  const ids = ['task-2401-none', 'task-2401-progress', 'task-2401-changes', 'task-2401-approved'].map(missionId);
+  const subject = (id: typeof ids[number], revision: string, pullRequest = false) => ({
+    change: pullRequest
+      ? { kind: 'pull-request' as const, provider: 'forgejo', id: '42', url: 'https://forgejo.test/pulls/42', sourceBranch: `mission/${id}`, targetBranch: 'main' }
+      : { kind: 'local-branch' as const, sourceBranch: `mission/${id}`, targetBranch: 'main' },
+    revision: changeRevision(revision),
+  });
+  const round = (id: typeof ids[number], overrides: Partial<ReviewRound> = {}): ReviewRound => ({
+    number: 1,
+    subject: subject(id, `revision-${id}`),
+    reviewer: agentFamily('codex'),
+    implementer: agentFamily('custom'),
+    startedAt: '2026-08-23T08:00:00.000Z',
+    decision: null,
+    response: null,
+    phase: 'reviewing',
+    disposition: null,
+    reviewerRetryCount: 0,
+    implementerRetryCount: 0,
+    ...overrides,
+  });
+  const findingId = reviewFindingId('task-2401-finding');
+  const disputedFindingId = reviewFindingId('task-2401-disputed');
+  const changesReview: Review = {
+    rounds: [
+      round(ids[2], {
+        decision: { kind: 'changes-requested', decidedAt: '2026-08-23T08:10:00.000Z', comment: 'Fix it', findings: [{ id: findingId, summary: 'Broken projection', location: null }, { id: disputedFindingId, summary: 'Out of scope', location: null }] },
+        response: { kind: 'resolved', respondedAt: '2026-08-23T08:20:00.000Z', resolutions: [{ findingId, kind: 'fixed', evidence: 'Covered by regression' }, { findingId: disputedFindingId, kind: 'disputed', rationale: 'Tracked separately' }], resultingRevision: changeRevision('revision-fixed') },
+        phase: 'pending-approval',
+        disposition: 'CHANGES_MADE',
+      }),
+      round(ids[2], { number: 2, subject: subject(ids[2], 'revision-fixed'), phase: 'reviewing' }),
+    ],
+    intervention: null,
+    stageLaunches: [],
+    reviewEvents: [{ position: 1, eventType: 'blocked_publication', roundNumber: 1, phase: 'approved', actor: 'workflow', content: '', disposition: null, verdict: null, itemDispositions: null, blockedReason: 'external-formal-approval-owed', followUpReference: null, createdAt: '2026-08-23T09:01:00.000Z' }],
+  };
+  const approvedSubject = subject(ids[3], 'approved-revision', true);
+  const approvedReview: Review = {
+    rounds: [round(ids[3], {
+      subject: approvedSubject,
+      decision: { kind: 'approved', decidedAt: '2026-08-23T09:00:00.000Z', comment: null, source: { kind: 'provider', provider: 'forgejo' } },
+      phase: 'approved',
+      disposition: 'APPROVED',
+    })],
+    intervention: null,
+    stageLaunches: [],
+    reviewEvents: [],
+  };
+  const reviews = new Map([
+    [ids[0], { review: null, approval: null }],
+    [ids[1], { review: { rounds: [round(ids[1])], intervention: null, stageLaunches: [], reviewEvents: [] } as Review, approval: null }],
+    [ids[2], { review: changesReview, approval: null }],
+    [ids[3], { review: approvedReview, approval: { subject: approvedSubject, approvedAt: '2026-08-23T09:00:00.000Z' } }],
+  ]);
+  let batchCalls = 0;
+  const missions = ids.map((id) => ({ id, repositoryId: repo, title: id, labels: missionLabels([]), status: 'review' as const, closedAt: null, assignee: agentFamily('custom'), checkpoints: [], review: null, netEngineeringLines: null }));
+  const builder = new BoardProjectionBuilder(
+    makeMissionAdapter(missions),
+    { async loadReviews(requested) { batchCalls += 1; assert.deepEqual(requested, ids); return reviews; } },
+    makeGateAdapter(), makeAgentAdapter(), makeGitAdapter(), makeOperationLogAdapter(),
+  );
+
+  const projection = await builder.build();
+  const cards = new Map(projection.stages.flatMap((stage) => stage.cards).map((card) => [card.id, card]));
+  assert.equal(batchCalls, 1);
+  assert.equal(cards.get(ids[0])?.reviewRound, null);
+  assert.equal(cards.get(ids[1])?.reviewPhase, 'reviewing');
+  assert.equal(cards.get(ids[1])?.reviewHistory[0].reviewer, agentFamily('codex'));
+  assert.equal(cards.get(ids[1])?.reviewHistory[0].implementer, agentFamily('custom'));
+  assert.equal(cards.get(ids[2])?.reviewHistory[0].findingSummaries[0], 'Broken projection');
+  assert.equal(cards.get(ids[2])?.reviewHistory[0].disposition, 'CHANGES_MADE');
+  assert.equal(cards.get(ids[2])?.approvalOwed, true);
+  assert.match(cards.get(ids[2])?.reviewHistory[0].fixes[0] ?? '', /Covered by regression/);
+  assert.match(cards.get(ids[2])?.reviewHistory[0].pushbacks[0] ?? '', /Tracked separately/);
+  assert.equal(cards.get(ids[3])?.pullRequest?.id, '42');
+  assert.equal(cards.get(ids[3])?.reviewApproved, true);
+  assert.equal(cards.get(ids[3])?.commands.find(({ command }) => command === 'integrate')?.enabled, true);
+
+  reviews.set(ids[3], { review: approvedReview, approval: { subject: subject(ids[3], 'different-revision', true), approvedAt: '2026-08-23T09:00:00.000Z' } });
+  const mismatched = await builder.build();
+  const approvedCard = mismatched.stages.flatMap((stage) => stage.cards).find(({ id }) => id === ids[3]);
+  assert.equal(approvedCard?.reviewApproved, false);
+  assert.equal(approvedCard?.commands.find(({ command }) => command === 'integrate')?.enabled, false);
 });
 
 test('BoardProjectionBuilder attentionQueue orders by rank then missionId', async () => {

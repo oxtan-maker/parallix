@@ -239,6 +239,7 @@ export async function createProductionApplicationServices(
       mission?.store ?? null,
       currentWork,
       activeProgress,
+      operatorState.db as SqliteDatabaseAdapter,
     )
     : null;
   return {
