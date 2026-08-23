@@ -1,7 +1,7 @@
 ---
 id: TASK-2406
 title: px draft is not detected in ui
-status: backlog
+status: refined
 assignee: [custom]
 created_date: '2026-08-23 07:50'
 labels: [user_value, bug]
