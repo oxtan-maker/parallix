@@ -27,10 +27,13 @@ test('SC 2: buildRelaunchPrompt contains Goal Check table and mission slug', () 
   assert.ok(prompt.includes('task-1124'));
 });
 
-test('SC 3: active.js runHandoffAndReview calls attemptAgentRelaunch when repair fails and error is relaunchable', () => {
+test('SC 3: active.js runHandoffAndReview bounces through the kernel when repair fails and error is relaunchable', () => {
+  // TASK-2377.05: `attemptAgentRelaunch` was deleted; the relaunch is a
+  // `rebound()` call whose launch port is the injected `startAgentFn`.
   const activeSource = fs.readFileSync(path.join(import.meta.dirname, '../src/adapters/cli/commands/active.ts'), 'utf8');
-  assert.ok(activeSource.includes('attemptAgentRelaunchFn'), 'runHandoffAndReview should have attemptAgentRelaunchFn parameter');
-  assert.ok(activeSource.includes('repairHandoff.isRelaunchableError(handoffResult.error)'), 'Should check isRelaunchableError before calling attemptAgentRelaunch');
+  assert.ok(activeSource.includes('startAgentFn'), 'runHandoffAndReview should have a startAgentFn launch seam');
+  assert.ok(activeSource.includes('rebound('), 'Should bounce through the rebound kernel');
+  assert.ok(activeSource.includes('repairHandoff.isRelaunchableError(handoffResult.error)'), 'Should check isRelaunchableError before bouncing');
 });
 
 test('SC 4: reviewer fallback uses the review eligibility selector', () => {
@@ -57,7 +60,7 @@ test('SC 6: resume-capable agents use session persistence via startAgent', () =>
   assert.ok(launcherSelectionSource.includes("RESUME_CAPABLE = new Set(['claude', 'codex', 'custom', 'qwen'])"), 'RESUME_CAPABLE should include the current resume-capable agents');
   assert.ok(agentsSource.includes('await launchSessionMarkerPort.shouldResume('), 'startAgent should query the checked session-marker port');
 
-  // Verify attemptAgentRelaunch calls startAgent which handles resume
+  // Verify the kernel's launch port calls startAgent, which handles resume
   assert.ok(activeSource.includes("startAgentFn('active'"), 'Should call startAgent');
   assert.ok(activeSource.includes("role: 'implementer'"), 'Should pass role as implementer');
 });

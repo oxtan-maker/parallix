@@ -58,7 +58,7 @@ function stubPort(overrides: Partial<RebaseWorkflowPort> = {}): RebaseWorkflowPo
 
     startAgent: async () => ({ agent: 'test-agent', result: { status: 0 } }),
     selectAgent: () => 'test-agent',
-    workflowLauncherStatus: () => ({ available: true, agent: 'test-agent' }),
+    workflowLauncherStatus: (_agent: string) => ({ supported: true, agent: 'test-agent' }),
     applyAgentFallback: async () => 'test-agent',
 
     createPr: () => ({ ok: true }),
@@ -229,7 +229,7 @@ test('review loop treats a pre-review rebase gate failure as a gate failure, not
   let preReviewBounces = 0;
   let reviewerLaunches = 0;
 
-  await startReviewLoop(SLUG, {
+  const reviewOpts = {
     worktree: WORKTREE,
     implementer: 'codex',
     reviewer: 'claude',
@@ -282,7 +282,9 @@ test('review loop treats a pre-review rebase gate failure as a gate failure, not
     log: (line: string) => logs.push(line),
     error: (line: string) => logs.push(line),
     exit: ((code: number) => { exits.push(code); }) as any,
-  });
+  };
+
+  await startReviewLoop(SLUG, reviewOpts);
 
   assert.equal(preReviewBounces, 0, 'a gate failure must not spend the pre-review bounce path');
   assert.equal(reviewerLaunches, 0, 'no reviewer launches after a failed pre-review rebase');

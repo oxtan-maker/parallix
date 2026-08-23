@@ -26,7 +26,7 @@
  * | `HandoffNelComputationPort` | `src/adapters/git/net-engineering-lines.js` — `computeNELRecord`                  |
  * | `HandoffDocumentWriterPort` | `src/adapters/storage/storage.js` — the JSON document writer               |
  * | `HandoffProductConfigPort`  | `src/adapters/config/product-config.js` — `isForgejoReviewEnabled`                |
- * | `HandoffAgentRelaunchPort`  | `src/adapters/cli/commands/active.js` — `attemptAgentRelaunch`                    |
+ * | `HandoffAgentLaunchPort`    | `src/adapters/agents/agents.js` — `startAgent`                                    |
  * | `HandoffAgentSelectionPort` | `src/adapters/agents/agents.js` — reviewer eligibility and selection              |
  * | `HandoffProcessPort`        | `node:child_process` — declared-gate command execution                            |
  * | `HandoffMissionServicesPort`| mission service factory (checkpoints, lifecycle, store, NEL handoff recording)    |
@@ -140,14 +140,16 @@ export interface HandoffProductConfigPort {
   isForgejoReviewEnabled(_rootDir: string): boolean;
 }
 
-export interface HandoffAgentRelaunchPort {
-  attemptAgentRelaunch(
-    _slug: string,
-    _rootDir: string,
-    _reason: string,
-    _agent: string,
+/**
+ * Agent launch port. The handoff path launches an agent only through the
+ * rebound kernel (TASK-2377.05), which owns classification, the fix prompt, the
+ * budget, and the verified fix; this port supplies the launch itself.
+ */
+export interface HandoffAgentLaunchPort {
+  startAgent(
+    _step: string,
     _options: Record<string, unknown>,
-  ): Promise<{ relaunched: boolean; error?: string }>;
+  ): Promise<{ agent?: string | null; result?: { status?: number | null } | null } | null | undefined>;
 }
 
 export interface HandoffAgentSelectionPort {
@@ -192,7 +194,7 @@ export interface HandoffWorkflowPorts {
   readonly nel: HandoffNelComputationPort;
   readonly documentWriter: HandoffDocumentWriterPort;
   readonly productConfig: HandoffProductConfigPort;
-  readonly agentRelaunch: HandoffAgentRelaunchPort;
+  readonly agents: HandoffAgentLaunchPort;
   readonly agentSelection: HandoffAgentSelectionPort;
   readonly process: HandoffProcessPort;
   readonly missionServices?: HandoffMissionServicesPort;

@@ -39,13 +39,13 @@ test('missing checkpoint: runHandoffAndReview classifies as repairable and relau
       performHandoffCallCount++;
       return { ok: false, error: 'still missing' };
     },
-    attemptAgentRelaunchFn: async (s, w, errorMsg, agent, opts) => {
+    startAgentFn: async (_step, opts) => {
       relaunchCalled = true;
-      relaunchPrompt = opts.promptOverride || opts.buildRelaunchPromptFn
-        ? (opts.buildRelaunchPromptFn(errorMsg, s, w) || '')
-        : errorMsg;
-      // Simulate agent relaunch succeeding but checkpoint still not created
-      return { relaunched: true };
+      // TASK-2377.05: the kernel builds the fix prompt and hands it to the port.
+      const slot = opts.prompt;
+      relaunchPrompt = typeof slot === 'function' ? slot('codex') : String(slot ?? '');
+      // Simulate the launch succeeding but the checkpoint still not created
+      return { agent: 'codex', result: { status: 0 } };
     },
     repairHandoffFn: async () => ({ repaired: false, blocker: null }),
     startReviewLoop: () => {},
@@ -133,9 +133,9 @@ test('valid repaired checkpoint: runHandoffAndReview unblocks handoff after rela
       }
       return { ok: true };
     },
-    attemptAgentRelaunchFn: async () => {
+    startAgentFn: async () => {
       relaunchCount++;
-      return { relaunched: true };
+      return { agent: 'codex', result: { status: 0 } };
     },
     repairHandoffFn: async () => ({ repaired: false, blocker: null }),
     startReviewLoop: () => { reviewLoopCalled = true; },
@@ -162,9 +162,9 @@ test('exhaustion: runHandoffAndReview stops after bounded relaunch attempts with
       handoffAttempts++;
       return { ok: false, error: 'The final checkpoint at missions/task-2261/CP-1.md has a "## Goal Check" section but no evidence rows. A goal-check table with real evidence is required before handoff.' };
     },
-    attemptAgentRelaunchFn: async () => {
+    startAgentFn: async () => {
       relaunchCount++;
-      return { relaunched: true };
+      return { agent: 'codex', result: { status: 0 } };
     },
     repairHandoffFn: async () => ({ repaired: false, blocker: null }),
     startReviewLoop: () => { reviewLoopCalled = true; },
@@ -216,9 +216,9 @@ test('missing checkpoint: valid CP after relaunch unblocks handoff and starts re
       handoffAttempts++;
       return { ok: true };
     },
-    attemptAgentRelaunchFn: async () => {
+    startAgentFn: async () => {
       relaunchCount++;
-      // On first relaunch, create a real CP-1.md with Goal Check table
+      // On the first launch, create a real CP-1.md with a Goal Check table
       if (!checkpointCreated) {
         checkpointCreated = true;
         fs.writeFileSync(path.join(missionDir, 'CP-1.md'),
@@ -239,7 +239,7 @@ Checkpoint created after targeted repair relaunch.
 | Focused tests and verify-local.sh all pass | npm test -- test/task-2261-checkpoint-gates-repro.test.ts (12 tests); ./scripts/verify-local.sh all (1330 tests) | PASS |
 `, 'utf8');
       }
-      return { relaunched: true };
+      return { agent: 'codex', result: { status: 0 } };
     },
     repairHandoffFn: async () => ({ repaired: false, blocker: null }),
     startReviewLoop: () => { reviewLoopCalled = true; },
@@ -279,9 +279,9 @@ test('missing checkpoint: still absent after relaunch returns false with manual 
       handoffAttempts++;
       return { ok: false, error: 'still missing' };
     },
-    attemptAgentRelaunchFn: async () => {
+    startAgentFn: async () => {
       relaunchCount++;
-      return { relaunched: true };
+      return { agent: 'codex', result: { status: 0 } };
     },
     repairHandoffFn: async () => ({ repaired: false, blocker: null }),
     startReviewLoop: () => { reviewLoopCalled = true; },
@@ -314,9 +314,9 @@ test('missing checkpoint: relaunch failure returns false with manual instruction
       handoffAttempts++;
       return { ok: false, error: 'still missing' };
     },
-    attemptAgentRelaunchFn: async () => {
+    startAgentFn: async () => {
       relaunchCount++;
-      return { relaunched: false, error: 'agent launcher not available' };
+      throw new Error('agent launcher not available');
     },
     repairHandoffFn: async () => ({ repaired: false, blocker: null }),
     startReviewLoop: () => { reviewLoopCalled = true; },
@@ -325,7 +325,9 @@ test('missing checkpoint: relaunch failure returns false with manual instruction
   });
 
   assert.equal(result, false, 'Should return false when relaunch fails');
-  assert.equal(relaunchCount, 1, 'Should attempt 1 relaunch (fails on first attempt)');
+  // TASK-2377.05 (SC5): the rebound kernel's per-occurrence budget is 2, and a
+  // failed launch consumes an attempt rather than aborting the bounce.
+  assert.equal(relaunchCount, 2, 'Should spend the kernel budget of 2 launch attempts');
   assert.equal(handoffAttempts, 0, 'performHandoff should NOT be called when relaunch fails');
   assert.ok(!reviewLoopCalled, 'Review loop should NOT be called');
   assert.ok(errors.some(e => e.includes('Create a checkpoint document')), 'Should emit manual instruction');
@@ -350,9 +352,9 @@ test('dirty checkpoint: GitBlockers classification does NOT enter the Incomplete
       handoffAttempts++;
       return { ok: false, error: 'still dirty' };
     },
-    attemptAgentRelaunchFn: async () => {
+    startAgentFn: async () => {
       relaunchCount++;
-      return { relaunched: true };
+      return { agent: 'codex', result: { status: 0 } };
     },
     repairHandoffFn: async () => ({ repaired: false, blocker: null }),
     startReviewLoop: () => { reviewLoopCalled = true; },

@@ -148,7 +148,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'launch-session-resume',
     family: 'launch',
     fileLocation: 'src/adapters/agents/agents.ts',
-    line: 437,
+    line: 440,
     anchor: 'await launchSessionMarkerPort.shouldResume(',
     reads: ['SessionMarker', 'Mission'],
     requirement:
@@ -159,7 +159,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'launch-session-marker-write',
     family: 'launch',
     fileLocation: 'src/adapters/agents/agents.ts',
-    line: 685,
+    line: 688,
     anchor: 'await launchSessionMarkerPort.save({',
     reads: ['SessionMarker'],
     requirement:
@@ -174,7 +174,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'retry-in-process-tried-set',
     family: 'retry',
     fileLocation: 'src/adapters/agents/agents.ts',
-    line: 308,
+    line: 311,
     anchor: 'const tried = new Set(',
     reads: ['AgentBlock'],
     requirement:
@@ -185,7 +185,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'retry-launch-failure-reselect',
     family: 'retry',
     fileLocation: 'src/adapters/agents/agents.ts',
-    line: 640,
+    line: 643,
     anchor: 'retrying with next eligible agent',
     reads: ['AgentBlock'],
     requirement:
@@ -211,7 +211,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'failover-limit-hit-block',
     family: 'failover',
     fileLocation: 'src/adapters/agents/agents.ts',
-    line: 573,
+    line: 576,
     anchor: 'await updateAgentBlockFn(chosen',
     reads: ['AgentBlock'],
     requirement:
@@ -222,7 +222,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'failover-transient-failure-block',
     family: 'failover',
     fileLocation: 'src/adapters/agents/agents.ts',
-    line: 664,
+    line: 667,
     anchor: 'await updateAgentBlockFn(chosen',
     reads: ['AgentBlock'],
     requirement:

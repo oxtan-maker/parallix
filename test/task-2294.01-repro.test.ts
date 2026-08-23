@@ -113,7 +113,7 @@ test('TASK-2294.01 repro: px rebase shared-file conflict path pins the mission i
       return { agent: String(options.agent ?? 'pool-selected'), result: { status: 0 } };
     },
     selectAgent: () => 'pool-selected',
-    workflowLauncherStatus: () => ({ available: true, agent: 'pool-selected' }),
+    workflowLauncherStatus: (_agent: string) => ({ supported: true, agent: 'pool-selected' }),
     applyAgentFallback: async () => 'codex',
 
     createPr: () => { state.pushes += 1; return { ok: true }; },

@@ -12,10 +12,7 @@ import {
   elideBounceOutput,
   BOUNCE_OUTPUT_MAX_CHARS,
 } from '../src/application/output-elision.js';
-import {
-  handleHookFailureAutoBounce,
-  type HookRebouncePort,
-} from '../src/application/hook-failure-workflow.js';
+import { rebound } from '../src/application/rebound-kernel.js';
 import { reboundPreReviewFailure, gateFailureReason } from '../src/adapters/review/review-gate-handling.js';
 
 describe('elideBounceOutput', () => {
@@ -38,29 +35,29 @@ describe('elideBounceOutput', () => {
 });
 
 describe('hook-failure bounce prompt embeds bounded output', () => {
+  // TASK-2377.05: the hook bounce moved from the deleted standalone policy to
+  // the rebound kernel. The elision contract is unchanged — the kernel's one
+  // fix-prompt builder runs the same `elideBounceOutput`.
   it('stays bounded with 500 KB of hook output and keeps head+tail', async () => {
     const hookOutput = 'pre-commit: gate start\n' + 'x'.repeat(500_000) + '\nfinal: ESLint found 3 errors';
     let capturedPrompt = '';
-    const port: HookRebouncePort = {
-      startAgent: async (_step, opts: any) => {
-        capturedPrompt = String(opts.prompt);
-        return { agent: 'claude', result: { status: 0 } };
+    const outcome = await rebound(
+      { kind: 'hook-failure', hook: 'pre-commit', operation: 'squash commit', output: hookOutput },
+      {
+        slug: 'test-slug',
+        worktree: '/worktree',
+        implementer: 'claude',
+        startAgent: async (_step, opts: Record<string, unknown>) => {
+          const slot = opts.prompt;
+          capturedPrompt = typeof slot === 'function' ? slot('claude') : String(slot);
+          return { agent: 'claude', result: { status: 0 } };
+        },
+        verify: () => ({ ok: true }),
+        log: () => {},
+        error: () => {},
       },
-      readReviewState: async () => ({ metadata: {} }),
-      writeReviewState: async () => {},
-      persistReviewState: async () => {},
-      exit: () => {},
-      transitionTask: async () => {},
-      applyAgentFallback: async () => {},
-      selectAgent: () => 'claude',
-      workflowLauncherStatus: () => ({ available: true, agent: 'claude' }),
-      resolveTaskFile: () => ({ ok: true, task: { assignee: 'claude' }, taskFile: '/task.md' }),
-      getTaskImplementer: () => 'claude',
-    };
-    const result = await handleHookFailureAutoBounce(
-      'test-slug', '/worktree', hookOutput, { hookType: 'pre-commit' }, port,
     );
-    assert.ok(result, 'bounce succeeded');
+    assert.equal(outcome.outcome, 'fixed', 'bounce succeeded');
     assert.ok(capturedPrompt.includes('pre-commit: gate start'), 'head of hook output preserved');
     assert.ok(capturedPrompt.includes('final: ESLint found 3 errors'), 'tail (failure) of hook output preserved');
     assert.ok(capturedPrompt.length < 100_000, `prompt must stay small, got ${capturedPrompt.length}`);

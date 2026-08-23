@@ -664,6 +664,14 @@ test('startAgent honours opts.exclude as a seed for the tried set (family-separa
 // poison the persistent blocklist.  Before the fix these assertions return `true`
 // (incorrectly blocking); after the fix they return `false` (correctly allowing
 // reroute without blocklist poisoning).
+// task-2380: a Claude missing-session resume error must never poison the
+// persistent blocklist. Before the fix this returns `true` (incorrectly
+// blocking); after the fix it returns `false`.
+test('shouldPersistLaunchFailureBlock returns false for Claude missing-session resume', () => {
+  const result = { status: 1, stderr: 'No conversation found with session ID: 51a78e8c-e8bf-450f-bcdf-efe8381a670a\n', stdout: '' };
+  assert.equal(shouldPersistLaunchFailureBlock('claude', result), false);
+});
+
 test('shouldPersistLaunchFailureBlock returns false for unsupported CLI flags', () => {
   // Unsupported flag is a deterministic config error — the agent cannot run with
   // the given invocation.  Blocking it wastes retries and poisons agents.local.json.

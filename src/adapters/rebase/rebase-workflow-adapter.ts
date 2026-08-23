@@ -24,10 +24,7 @@ import { resolveTaskFile, getTaskImplementer, transitionTask } from '../backlog/
 import { resolveReviewIdentity, readReviewState, writeReviewState, persistReviewStateOrThrow } from '../review/review-state.js';
 import { isForgejoReviewEnabled } from '../config/product-config.js';
 import { formatVerificationCommand } from '../verification/verification.js';
-import {
-  buildRebasePrompt as buildRebasePromptPolicy,
-  handleHookFailureAutoBounce as handleHookFailureAutoBouncePolicy,
-} from '../../application/rebase-workflow.js';
+import { buildRebasePrompt as buildRebasePromptPolicy } from '../../application/rebase-workflow.js';
 import type { GitRunner, RebaseWorkflowPort } from '../../application/ports/rebase-workflow.js';
 
 /** Legacy `*Fn` seam accepted by `px rebase` and by its tests. */
@@ -52,60 +49,9 @@ export interface RebaseCommandOptions {
   isForgejoReviewEnabledFn?: Function;
   fetchReviewBranchFn?: Function;
   missionServicesFn?: Function;
-  handleHookFailureAutoBounceFn?: Function;
-}
-
-/** Seam accepted by the exported `handleHookFailureAutoBounce` wrapper. */
-export interface HookRebounceOptions {
-  startAgentFn?: Function;
-  readReviewStateFn?: Function;
-  writeReviewStateFn?: Function;
-  exitFn?: Function;
-  transitionTaskFn?: Function;
-  applyAgentFallbackFn?: Function;
-  selectAgentFn?: Function;
-  workflowLauncherStatusFn?: Function;
-  missionStore?: unknown;
 }
 
 const defaultExit = (code: number) => process.exit(code);
-
-/**
- * Handle git hook failure with auto-bounce to implementer.
- * Thin adapter over the application policy; keeps the historical options bag.
- */
-export async function handleHookFailureAutoBounce(
-  slug: string,
-  worktree: string,
-  hookOutput: string,
-  classification: { hookType: string | null },
-  {
-    startAgentFn = startAgent,
-    readReviewStateFn = readReviewState,
-    writeReviewStateFn = writeReviewState,
-    exitFn = defaultExit as (_code: number) => void,
-    transitionTaskFn = transitionTask,
-    applyAgentFallbackFn = applyAgentFallback,
-    selectAgentFn = selectAgent,
-    workflowLauncherStatusFn = workflowLauncherStatus,
-    missionStore = null,
-  }: HookRebounceOptions = {},
-): Promise<boolean> {
-  return handleHookFailureAutoBouncePolicy(slug, worktree, hookOutput, classification, {
-    startAgent: startAgentFn as RebaseWorkflowPort['startAgent'],
-    readReviewState: readReviewStateFn as RebaseWorkflowPort['readReviewState'],
-    writeReviewState: writeReviewStateFn as RebaseWorkflowPort['writeReviewState'],
-    persistReviewState: (persistSlug, state, persistWorktree, store) =>
-      persistReviewStateOrThrow(writeReviewStateFn as any, persistSlug, state as any, persistWorktree, store as any),
-    transitionTask: transitionTaskFn as RebaseWorkflowPort['transitionTask'],
-    applyAgentFallback: applyAgentFallbackFn as RebaseWorkflowPort['applyAgentFallback'],
-    selectAgent: selectAgentFn as RebaseWorkflowPort['selectAgent'],
-    workflowLauncherStatus: workflowLauncherStatusFn as RebaseWorkflowPort['workflowLauncherStatus'],
-    resolveTaskFile: resolveTaskFile as unknown as RebaseWorkflowPort['resolveTaskFile'],
-    getTaskImplementer: getTaskImplementer as unknown as RebaseWorkflowPort['getTaskImplementer'],
-    exit: exitFn as (_code: number) => void,
-  }, { missionStore });
-}
 
 /** Build the shared-file conflict-resolution prompt with the real mission resolvers. */
 export function buildRebasePrompt({ slug, area, worktreePath, missionSpecificFiles, sharedFiles, gitFn = undefined as Function | undefined }: {
@@ -173,7 +119,6 @@ export function createRebaseWorkflowPort(options: RebaseCommandOptions = {}): Re
     isForgejoReviewEnabledFn = isForgejoReviewEnabled,
     fetchReviewBranchFn = fetchReviewBranch,
     missionServicesFn,
-    handleHookFailureAutoBounceFn = handleHookFailureAutoBounce,
   } = options;
 
   return {
@@ -221,14 +166,8 @@ export function createRebaseWorkflowPort(options: RebaseCommandOptions = {}): Re
     missionServices: typeof missionServicesFn === 'function'
       ? missionServicesFn as (_root: string) => Promise<{ store: unknown }>
       : null,
-    // The pre-extraction command narrowed the rebounce seam to exactly these
-    // three values; every other dependency resolved to its real adapter.
-    handleHookFailureAutoBounce: (slug, worktree, hookOutput, classification, { missionStore }) =>
-      handleHookFailureAutoBounceFn(slug, worktree, hookOutput, classification, {
-        startAgentFn,
-        exitFn,
-        missionStore,
-      }) as Promise<boolean>,
+    // No hook-bounce seam: `runRebaseWorkflow` bounces hook failures through the
+    // rebound kernel (TASK-2377.05), using the `startAgent` port above.
     exit: exitFn,
   };
 }

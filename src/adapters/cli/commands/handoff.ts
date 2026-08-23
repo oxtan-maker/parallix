@@ -27,8 +27,7 @@ import { isForgejoReviewEnabled } from '../../config/product-config.js';
 import { rebaseBeforeReviewRound } from '../../review/rebase.js';
 import { computeNELRecord } from '../../git/net-engineering-lines.js';
 import { writeJson } from '../../storage/storage.js';
-import { attemptAgentRelaunch } from './active.js';
-import { eligibleAgentsForStep, selectAgent } from '../../agents/agents.js';
+import { eligibleAgentsForStep, selectAgent, startAgent } from '../../agents/agents.js';
 import {
   HandoffCommandUseCase,
   buildAutoCheckpointContent,
@@ -114,9 +113,8 @@ export function createHandoffPorts(): HandoffWorkflowPorts {
     productConfig: {
       isForgejoReviewEnabled: (rootDir) => isForgejoReviewEnabled(rootDir),
     },
-    agentRelaunch: {
-      attemptAgentRelaunch: (slug, rootDir, reason, agent, options) =>
-        attemptAgentRelaunch(slug, rootDir, reason, agent, options),
+    agents: {
+      startAgent: (step, options) => startAgent(step, options),
     },
     agentSelection: {
       eligibleAgentsForStep: (step, options) => eligibleAgentsForStep(step, options),

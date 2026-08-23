@@ -251,6 +251,65 @@ test('startClaudeAgent retries without --resume when spawn returns "Session not 
   claude.__setSessionPortForTest(null);
 });
 
+// Reproduction for task-2380: the real Claude missing-session message is
+// "No conversation found with session ID: <id>", not "Session not found".
+// At the parent commit this is red: the marker is not deleted and the same
+// agent is not relaunched fresh without --resume. Preserved as the green
+// regression test after the fix.
+test('startClaudeAgent retries without --resume when spawn reports No conversation found with session ID', async () => {
+  const mockSessionPort = { deleted: null, async delete(missionId, role) { this.deleted = { missionId, role }; } };
+  let spawnCount = 0;
+  const mockSpawn = (cmd, args, opts) => {
+    spawnCount++;
+    if (spawnCount === 1) {
+      return Promise.resolve({ status: 1, signal: null, stdout: '', stderr: 'No conversation found with session ID: 51a78e8c-e8bf-450f-bcdf-efe8381a670a', error: null });
+    }
+    return Promise.resolve({ status: 0, signal: null, stdout: 'claude --resume sess_fresh\n', stderr: '', error: null });
+  };
+
+  claude.__setSpawnAndTeeForTest(mockSpawn);
+  claude.__setSessionPortForTest(mockSessionPort);
+
+  const { invocation, resultPromise } = claude.startClaudeAgent({
+    prompt: 'review task', worktree: '/tmp/wt', env: {}, resume: true, sessionId: 'ses_stale', slug: 'task-2380', role: 'reviewer'
+  });
+  const result = await resultPromise;
+
+  assert.equal(spawnCount, 2, 'must spawn twice: stale session then fresh');
+  assert.ok(invocation.args.includes('--resume'), 'original invocation must include --resume');
+  assert.deepEqual(mockSessionPort.deleted, { missionId: 'task-2380', role: 'reviewer' }, 'marker must be cleared through the port');
+  assert.equal(result.status, 0, 'final result must show success');
+
+  claude.__setSpawnAndTeeForTest(null);
+  claude.__setSessionPortForTest(null);
+});
+
+test('startClaudeAgent recognizes No conversation found on stdout too', async () => {
+  const mockSessionPort = { deleted: null, async delete(missionId, role) { this.deleted = { missionId, role }; } };
+  let spawnCount = 0;
+  const mockSpawn = (cmd, args, opts) => {
+    spawnCount++;
+    if (spawnCount === 1) {
+      return Promise.resolve({ status: 1, signal: null, stdout: 'No conversation found with session ID: abc-123', stderr: '', error: null });
+    }
+    return Promise.resolve({ status: 0, signal: null, stdout: 'claude --resume sess_fresh\n', stderr: '', error: null });
+  };
+
+  claude.__setSpawnAndTeeForTest(mockSpawn);
+  claude.__setSessionPortForTest(mockSessionPort);
+
+  const { resultPromise } = claude.startClaudeAgent({
+    prompt: 'test', worktree: '/tmp/wt', env: {}, resume: true, sessionId: 'ses_stale', slug: 'task-2380', role: 'reviewer'
+  });
+  const result = await resultPromise;
+
+  assert.equal(spawnCount, 2, 'must spawn twice when the missing-session message arrives on stdout');
+  assert.equal(result.status, 0, 'final result must show success');
+
+  claude.__setSpawnAndTeeForTest(null);
+  claude.__setSessionPortForTest(null);
+});
+
 test('startClaudeAgent does NOT retry when resume is false', async () => {
   let spawnCount = 0;
   const mockSpawn = (cmd, args, opts) => {
