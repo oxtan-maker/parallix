@@ -8,8 +8,12 @@ import type { RepositoryId } from '../../domain/repository.js';
 import type { SourceFact } from '../../application/contracts.js';
 import type { MissionReadAdapter } from '../../application/projections/board-readers.js';
 import { getFirstLine, findCheckpoints, findMissionDir, resolveBaseWorktree, resolveWorktree } from '../filesystem/mission-utils.js';
+import type { WorktreeTopologySnapshot } from '../git/worktree.js';
 import { parseCheckpointDocument } from './checkpoint-document.js';
 import { getTaskAssignee, getTaskFrontmatterValue, getTaskLabels, getTaskStatus, getTaskStorage, resolveTaskFile } from './backlog.js';
+import { parseTaskFrontmatterValue } from './task-file-io.js';
+import { parseAssigneeFamilies, parseTaskLabels } from './task-metadata.js';
+import { parseTaskStatus } from './task-transitions.js';
 import {
   materializeBacklogMission,
   missionStatusFromBacklog,
@@ -44,21 +48,10 @@ function defaultResolveTaskFile(): ResolveTaskFileFn {
   return resolveTaskFile as ResolveTaskFileFn;
 }
 
-function defaultGetTaskStatus(): GetTaskStatusFn {
-  return getTaskStatus as GetTaskStatusFn;
-}
-
-function defaultGetTaskAssignee(): GetTaskAssigneeFn {
-  return getTaskAssignee as GetTaskAssigneeFn;
-}
-
-function defaultGetTaskFrontmatterValue(): GetTaskFrontmatterValueFn {
-  return getTaskFrontmatterValue as GetTaskFrontmatterValueFn;
-}
-
-function defaultGetTaskLabels(): GetTaskLabelsFn {
-  return getTaskLabels as GetTaskLabelsFn;
-}
+function defaultGetTaskStatus(): GetTaskStatusFn { return getTaskStatus as GetTaskStatusFn; }
+function defaultGetTaskAssignee(): GetTaskAssigneeFn { return getTaskAssignee as GetTaskAssigneeFn; }
+function defaultGetTaskFrontmatterValue(): GetTaskFrontmatterValueFn { return getTaskFrontmatterValue as GetTaskFrontmatterValueFn; }
+function defaultGetTaskLabels(): GetTaskLabelsFn { return getTaskLabels as GetTaskLabelsFn; }
 
 function defaultGetTaskStorage(): GetTaskStorageFn {
   return getTaskStorage as GetTaskStorageFn;
@@ -97,13 +90,9 @@ export interface ConcreteMissionReadAdapterOptions {
   readonly repositoryId: RepositoryId;
   /** Resolve task file path for a slug. */
   readonly resolveTaskFile?: ResolveTaskFileFn;
-  /** Read status from a task file. */
   readonly getTaskStatus?: GetTaskStatusFn;
-  /** Read assignee from a task file. */
   readonly getTaskAssignee?: GetTaskAssigneeFn;
-  /** Read an arbitrary frontmatter value. */
   readonly getTaskFrontmatterValue?: GetTaskFrontmatterValueFn;
-  /** Read labels from a task file. */
   readonly getTaskLabels?: GetTaskLabelsFn;
   /** Get backlog directory paths. */
   readonly getTaskStorage?: GetTaskStorageFn;
@@ -137,6 +126,7 @@ export class ConcreteMissionReadAdapter implements MissionReadAdapter {
   private readonly getTaskAssignee: GetTaskAssigneeFn;
   private readonly getTaskFrontmatterValue: GetTaskFrontmatterValueFn;
   private readonly getTaskLabels: GetTaskLabelsFn;
+  private readonly usesCustomMetadataReaders: boolean;
   private readonly getTaskStorage: GetTaskStorageFn;
   private readonly findMissionDir: FindMissionDirFn;
   private readonly findCheckpoints: FindCheckpointsFn;
@@ -144,6 +134,8 @@ export class ConcreteMissionReadAdapter implements MissionReadAdapter {
   private readonly resolveBaseWorktree: ResolveBaseWorktreeFn;
   private readonly getFirstLine: GetFirstLineFn;
   private readonly readCheckpointFile: ReadCheckpointFileFn;
+  private worktreeTopology: WorktreeTopologySnapshot | null = null;
+  private taskMetadata = new Map<string, TaskMetadata>();
 
   /** Cached source facts from the last loadAllMissions call. */
   private _sourceFacts: SourceFact<string>[] = [];
@@ -156,6 +148,7 @@ export class ConcreteMissionReadAdapter implements MissionReadAdapter {
     this.getTaskAssignee = options.getTaskAssignee ?? defaultGetTaskAssignee();
     this.getTaskFrontmatterValue = options.getTaskFrontmatterValue ?? defaultGetTaskFrontmatterValue();
     this.getTaskLabels = options.getTaskLabels ?? defaultGetTaskLabels();
+    this.usesCustomMetadataReaders = Boolean(options.getTaskStatus || options.getTaskAssignee || options.getTaskFrontmatterValue || options.getTaskLabels);
     this.getTaskStorage = options.getTaskStorage ?? defaultGetTaskStorage();
     this.findMissionDir = options.findMissionDir ?? defaultFindMissionDir();
     this.findCheckpoints = options.findCheckpoints ?? defaultFindCheckpoints();
@@ -165,16 +158,21 @@ export class ConcreteMissionReadAdapter implements MissionReadAdapter {
     this.readCheckpointFile = options.readCheckpointFile ?? defaultReadCheckpointFile();
   }
 
+  /** Scoped by BoardProjectionBuilder to one build; never retained as a cache. */
+  useWorktreeTopology(snapshot: WorktreeTopologySnapshot): void {
+    this.worktreeTopology = snapshot;
+  }
+
   // -----------------------------------------------------------------------
   // MissionReadAdapter port
   // -----------------------------------------------------------------------
 
   async loadAllMissions(): Promise<readonly Mission[]> {
-    const { tasksDir, completedDir, archiveTasksDir } = this.getTaskStorage(this.rootDir);
+    this.taskMetadata = new Map();
+    const { tasksDir, completedDir } = this.getTaskStorage(this.rootDir);
     const storeDirs = [
       { dir: tasksDir, priority: 0 },
       { dir: completedDir, priority: 1 },
-      { dir: archiveTasksDir, priority: 2 },
     ];
 
     // Scan all task files, keyed by frontmatter id for dedup
@@ -188,7 +186,7 @@ export class ConcreteMissionReadAdapter implements MissionReadAdapter {
         }
         const normalized = id.toLowerCase();
         const existing = taskMap.get(normalized);
-        // Prefer lower priority number (tasks > completed > archive)
+        // Prefer lower priority number (tasks > completed).
         if (!existing || priority < existing.priority) {
           taskMap.set(normalized, { taskFile: file, storeDir: dir, priority });
         }
@@ -222,6 +220,7 @@ export class ConcreteMissionReadAdapter implements MissionReadAdapter {
   }
 
   async loadMission(id: MissionId): Promise<Mission | null> {
+    this.taskMetadata = new Map();
     const result = this.resolveTaskFile(id, this.rootDir);
     if (!result.ok || !result.taskFile) {
       return null;
@@ -256,7 +255,7 @@ export class ConcreteMissionReadAdapter implements MissionReadAdapter {
   /** Extract task id from frontmatter, falling back to filename prefix. */
   private extractTaskId(taskFile: string): string | null {
     // Try frontmatter first
-    const id = this.getTaskFrontmatterValue(taskFile, 'id');
+    const id = this.readTaskMetadata(taskFile).frontmatter('id');
     if (id) {
       return id;
     }
@@ -276,19 +275,20 @@ export class ConcreteMissionReadAdapter implements MissionReadAdapter {
 
   /** Build a BacklogMissionRecord from a task file. */
   private buildRecord(taskFile: string, _missionDir: string | null, id: MissionId): BacklogMissionRecord {
-    const rawStatus = this.getTaskStatus(taskFile) || '';
+    const metadata = this.readTaskMetadata(taskFile);
+    const rawStatus = metadata.status || '';
     const status = missionStatusFromBacklog(rawStatus) || 'backlog';
 
-    const rawAssignee = this.getTaskAssignee(taskFile);
+    const rawAssignee = metadata.assignee;
     const assignee: AgentFamily | null = rawAssignee
       ? (() => { try { return agentFamily(rawAssignee); } catch { return null; } })()
       : null;
 
-    const title = this.getTaskFrontmatterValue(taskFile, 'title')
-      || this.getTaskFrontmatterValue(taskFile, 'Title')
+    const title = metadata.frontmatter('title')
+      || metadata.frontmatter('Title')
       || path.basename(taskFile, '.md');
 
-    const rawLabels = this.getTaskLabels(taskFile);
+    const rawLabels = metadata.labels;
     const labels: MissionLabel[] = rawLabels.map((l: string) => l as MissionLabel);
 
     const checkpoints = _missionDir
@@ -343,7 +343,7 @@ export class ConcreteMissionReadAdapter implements MissionReadAdapter {
 
   /** Build MissionWorktreeRead for a slug. */
   private buildWorktreeRead(slug: string): MissionWorktreeRead {
-    const worktreePath = this.resolveWorktree(slug, { cwd: this.rootDir });
+    const worktreePath = this.findWorktree(slug);
     if (!worktreePath) {
       return { kind: 'absent' };
     }
@@ -361,7 +361,7 @@ export class ConcreteMissionReadAdapter implements MissionReadAdapter {
   /** Build IntegrationBaseRead from the canonical task file. */
   private buildIntegrationBaseRead(taskFile: string, slug: string): IntegrationBaseRead {
     try {
-      const missionWorktree = this.resolveWorktree(slug, { cwd: this.rootDir });
+      const missionWorktree = this.findWorktree(slug);
       const baseRoot = missionWorktree && path.resolve(missionWorktree) === path.resolve(this.rootDir)
         ? this.resolveBaseWorktree(slug, { rootDir: this.rootDir })
         : this.rootDir;
@@ -380,6 +380,12 @@ export class ConcreteMissionReadAdapter implements MissionReadAdapter {
     }
   }
 
+  private findWorktree(slug: string): string | null {
+    return this.worktreeTopology
+      ? this.worktreeTopology.resolveWorktree(slug, { cwd: this.rootDir })
+      : this.resolveWorktree(slug, { cwd: this.rootDir });
+  }
+
   /** Full materialize pipeline for one task file. */
   private materializeOne(taskFile: string, slug: string) {
     const integrationBase = this.buildIntegrationBaseRead(taskFile, slug);
@@ -387,7 +393,7 @@ export class ConcreteMissionReadAdapter implements MissionReadAdapter {
 
     // closedAt: only relevant for completed (done) tasks.
     // Use frontmatter "closedAt" or fall back to a synthetic value for completed tasks.
-    const rawClosedAt = this.getTaskFrontmatterValue(taskFile, 'closedAt');
+    const rawClosedAt = this.readTaskMetadata(taskFile).frontmatter('closedAt');
 
     const snapshot: BacklogMissionSnapshot = {
       integrationBase,
@@ -397,4 +403,40 @@ export class ConcreteMissionReadAdapter implements MissionReadAdapter {
 
     return materializeBacklogMission(snapshot);
   }
+
+  private readTaskMetadata(taskFile: string): TaskMetadata {
+    const cached = this.taskMetadata.get(taskFile);
+    if (cached) { return cached; }
+    if (this.usesCustomMetadataReaders) {
+      const metadata: TaskMetadata = {
+        frontmatter: (field) => this.getTaskFrontmatterValue(taskFile, field),
+        status: this.getTaskStatus(taskFile),
+        assignee: this.getTaskAssignee(taskFile),
+        labels: this.getTaskLabels(taskFile),
+      };
+      this.taskMetadata.set(taskFile, metadata);
+      return metadata;
+    }
+    let content = '';
+    try {
+      content = fs.readFileSync(taskFile, 'utf8');
+    } catch {
+      // Match the file helpers: a task moved during refresh is unavailable.
+    }
+    const metadata: TaskMetadata = {
+      frontmatter: (field) => parseTaskFrontmatterValue(content, field),
+      status: parseTaskStatus(content),
+      assignee: parseAssigneeFamilies(content).families[0] || null,
+      labels: parseTaskLabels(content),
+    };
+    this.taskMetadata.set(taskFile, metadata);
+    return metadata;
+  }
+}
+
+interface TaskMetadata {
+  frontmatter(_field: string): string | null;
+  status: string | null;
+  assignee: string | null;
+  labels: string[];
 }

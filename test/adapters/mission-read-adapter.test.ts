@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 
 import { ConcreteMissionReadAdapter } from '../../src/adapters/backlog/concrete-mission-read-adapter.js';
-import { missionId, missionLabels } from '../../src/domain/mission.js';
+import { missionId, missionLabels, type MissionId } from '../../src/domain/mission.js';
 import { agentFamily } from '../../src/domain/agents.js';
 import { repositoryId } from '../../src/domain/repository.js';
 import type {
@@ -114,7 +114,7 @@ test('ConcreteMissionReadAdapter loadAllMissions returns missions from completed
   }
 });
 
-test('ConcreteMissionReadAdapter loadAllMissions reads from tasks, completed, and archive stores', async () => {
+test('ConcreteMissionReadAdapter loadAllMissions excludes archive storage', async () => {
   const tmp = createTempBacklog({
     'backlog/tasks/task-1001 - active.md': taskMd({
       id: 'TASK-1001',
@@ -152,10 +152,9 @@ test('ConcreteMissionReadAdapter loadAllMissions reads from tasks, completed, an
     });
 
     const missions = await adapter.loadAllMissions();
-    assert.equal(missions.length, 3);
+    assert.equal(missions.length, 2);
     assert.equal(missions[0].id, 'task-1001');
     assert.equal(missions[1].id, 'task-2001');
-    assert.equal(missions[2].id, 'task-3001');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
@@ -319,6 +318,36 @@ test('ConcreteMissionReadAdapter loadMission returns null for missing id', async
 
     const mission = await adapter.loadMission(missionId('task-9999'));
     assert.equal(mission, null);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('ConcreteMissionReadAdapter tolerates a task removed during materialization', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'px-mission-read-race-'));
+  const missing = path.join(tmp, 'backlog', 'tasks', 'task-9999.md');
+  try {
+    const adapter = new ConcreteMissionReadAdapter({
+      rootDir: tmp,
+      repositoryId: repositoryId('test-repo'),
+      resolveTaskFile: () => ({ ok: true, taskFile: missing, matches: [missing] }),
+      resolveWorktree: () => null,
+    });
+    const mission = await adapter.loadMission('task-9999' as MissionId);
+    assert.equal(mission?.title, 'task-9999');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('ConcreteMissionReadAdapter uses the shared assignee parser for empty inline values', async () => {
+  const tmp = createTempBacklog({
+    'backlog/tasks/task-9998.md': taskMd({ id: 'task-9998', title: 'Parser contract', status: 'active', assignee: '[, codex]' }),
+  });
+  try {
+    const adapter = new ConcreteMissionReadAdapter({ rootDir: tmp, repositoryId: repositoryId('test-repo'), resolveWorktree: () => null });
+    const mission = await adapter.loadMission('task-9998' as MissionId);
+    assert.equal(mission?.assignee, 'codex');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

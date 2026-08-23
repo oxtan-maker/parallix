@@ -358,15 +358,19 @@ function getAcceptanceCriteria(taskFilePath: string) {
     .filter(line => /^- \[[ xX]\]/.test(line));
 }
 
-/** @param {string} taskFilePath @param {string} field @returns {string|null} */
-function getTaskFrontmatterValue(taskFilePath: string, field: string) {
-  if (!taskFilePath || !fs.existsSync(taskFilePath)) {return null;}
-  const content = fs.readFileSync(taskFilePath, 'utf8');
+/** @param {string} content @param {string} field @returns {string|null} */
+function parseTaskFrontmatterValue(content: string, field: string) {
   const pattern = new RegExp(`^${field}:\\s*([^\\r\\n]+)`, 'mi');
   const match = content.match(pattern);
   if (!match) {return null;}
   const value = match[1].trim().replace(/^['"]|['"]$/g, '');
   return value || null;
+}
+
+/** @param {string} taskFilePath @param {string} field @returns {string|null} */
+function getTaskFrontmatterValue(taskFilePath: string, field: string) {
+  if (!taskFilePath || !fs.existsSync(taskFilePath)) {return null;}
+  return parseTaskFrontmatterValue(fs.readFileSync(taskFilePath, 'utf8'), field);
 }
 
 
@@ -378,6 +382,7 @@ export {
   findTaskFiles,
   getAcceptanceCriteria,
   getTaskFrontmatterValue,
+  parseTaskFrontmatterValue,
   getTaskStorage,
   pruneStaleBacklogDuplicates,
   reportTaskResolution,

@@ -89,6 +89,8 @@ export type { MetricsReadAdapter } from './metrics-read-adapter.js';
 // ---------------------------------------------------------------------------
 
 export interface BoardProjectionOptions {
+  /** Creates the ephemeral shared read snapshot immediately before each build. */
+  prepareReads?: () => void;
   /** Time-based metrics. Prefer MetricsReadAdapter for production use. */
   metrics?: BoardMetrics;
   /** Derives metrics from board_lane_events + usage_statistics. */
@@ -128,6 +130,7 @@ export class BoardProjectionBuilder {
 
   /** Build the full BoardProjection from all authority adapters. */
   async build(): Promise<BoardProjection> {
+    this._options?.prepareReads?.();
     const [repositoryId, missions, operationLog, agentAvailability, runningSessions, currentWorkEvents] = await Promise.all([
       this._git.loadRepositoryId(),
       this._missions.loadAllMissions(),
