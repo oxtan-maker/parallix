@@ -4,7 +4,7 @@ title: Make unit tests fast and enforce a one-second per-test budget
 status: backlog
 assignee: [codex]
 created_date: '2026-08-23 07:25'
-labels: []
+labels: [user_value]
 dependencies: []
 ordinal: 113917
 ---
