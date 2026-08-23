@@ -27,6 +27,7 @@ import {
   reviewFindingId,
   reviewStatus,
   type FindingResolution,
+  type ReviewApprovalSource,
   type ReviewDisposition,
   type ReviewFinding,
   type ReviewItemDisposition,
@@ -144,6 +145,140 @@ export async function recordRequestedChanges(
     return { outcome: 'recorded' };
   } catch (error) {
     return { outcome: 'failed', diagnostic: diagnosticFrom(error, 'Reviewer decision write failed') };
+  }
+}
+
+/**
+ * The single source of truth for the diagnostic printed when an `approve`
+ * cannot legally move the current round to `approved`. Shared by the
+ * non-mutating {@link approvalLegalDiagnostic} pre-check and the write-time
+ * check in {@link recordApproval}, so a future wording change to one cannot
+ * make the pre-POST failure and the record-time failure diverge for the same
+ * condition.
+ */
+function approvalBlockedDiagnostic(status: string): string {
+  return `Approve cannot move the round to approved while review is ${status}; resolve the outstanding findings with a resolution, open the next round with \`px handoff\`, and approve that awaiting-review round (see MISSION.md "Repair path for a round already stuck in the inconsistent state")`;
+}
+
+/**
+ * Non-mutating legality guard for an `approve` verdict, backing
+ * {@link recordApproval} and the provider-backed pre-check in
+ * `submitReviewRound`.
+ *
+ * Returns `null` when the approve can legally proceed (the round is
+ * `awaiting-review`) or is already settled (`approved`); otherwise a diagnostic
+ * naming the illegal transition. It deliberately performs no write: the caller
+ * uses it to fail a provider-backed approve *before* the external POST, so a
+ * failed POST never leaves an authoritative approval behind that `px integrate`
+ * would merge with no approval on the pull request. The authoritative
+ * {@link recordApproval} still performs the same check at the point of recording.
+ */
+export async function approvalLegalDiagnostic(
+  slug: string,
+  ports: { missionStore?: MissionStore | null },
+): Promise<string | null> {
+  const store = ports.missionStore ?? null;
+  if (!store) { return null; } // no authority: recordApproval rejects at write time
+  try {
+    const loaded = await store.load(missionId(slug));
+    if (loaded.kind !== 'found') { return null; }
+    const mission = loaded.mission;
+    if (!('review' in mission) || !mission.review) { return null; }
+    const status = reviewStatus(mission.review);
+    if (status !== 'awaiting-review' && status !== 'approved') {
+      return approvalBlockedDiagnostic(status);
+    }
+    return null;
+  } catch {
+    return null; // a read miss surfaces as a rejection at record time, not here
+  }
+}
+/**
+ * Record the reviewer's authoritative `approve` decision and return the mission
+ * to integration.
+ *
+ * The mirror of {@link recordRequestedChanges}: `approve` is a domain decision,
+ * not only a provider comment, and it is what leaves review through the
+ * approval boundary that `px integrate` gates on (`recoveryEstablishesApproval`
+ * requires `lastRound.decision.kind === 'approved'`). The flat review-state
+ * write cannot express it, because a flattened approve against a non-`reviewing`
+ * round silently swallowed the phase transition and left `disposition`
+ * `APPROVED` over a `changes-requested` decision.
+ *
+ * Idempotent: a replayed approve on an already-approved round reports
+ * `unchanged` instead of rewriting the decision. An approve that cannot legally
+ * move the current round to `approved` (for example a round still in `fixing`
+ * after a request-changes) fails loudly with a diagnostic naming the illegal
+ * transition rather than writing `disposition === 'APPROVED'` over a
+ * `changes-requested` decision.
+ */
+export async function recordApproval(
+  slug: string,
+  input: {
+    comment: string | null;
+    decidedAt: string;
+    source?: ReviewApprovalSource;
+  },
+  ports: ReviewRoundPorts = {},
+): Promise<ReviewRoundResult> {
+  const store = ports.missionStore ?? null;
+  if (!store) { return { outcome: 'failed', diagnostic: `Operator database unavailable for ${slug}` }; }
+  const source: ReviewApprovalSource = input.source ?? { kind: 'local' };
+  try {
+    const loaded = await store.load(missionId(slug));
+    if (loaded.kind !== 'found') { return { outcome: 'failed', diagnostic: `Mission ${slug} is not in the operator database` }; }
+    const mission = loaded.mission;
+    if (!('review' in mission) || !mission.review) {
+      return { outcome: 'failed', diagnostic: `Mission ${slug} has no review to approve; px handoff starts the review` };
+    }
+    const status = reviewStatus(mission.review);
+    if (status === 'approved') {
+      return { outcome: 'unchanged', reason: `review is already ${status}` };
+    }
+    if (status !== 'awaiting-review') {
+      // The round cannot legally reach `approved` from here (REVIEW_PHASE_TRANSITIONS
+      // allows `fixing -> reviewing | pending-approval` only). Fail loudly instead
+      // of writing `disposition === 'APPROVED'` over a `changes-requested`
+      // decision, which is what leaves the mission permanently unintegratable.
+      // The diagnostic names the documented resolution → new round → approve
+      // sequence, not `px integrate`, which cannot repair a `fixing` round.
+      return {
+        outcome: 'failed',
+        diagnostic: approvalBlockedDiagnostic(status),
+      };
+    }
+    const review = applyReviewerCommand(mission.review, {
+      type: 'approve',
+      decidedAt: input.decidedAt,
+      comment: input.comment,
+      source,
+    });
+    const version = await store.save({ ...mission, review }, loaded.version);
+
+    // The mirror of the request-changes boundary: the authoritative decision is
+    // what moves the lane, so the Mission returns to `integration` at the
+    // reviewer's decision time.
+    if (ports.lifecycleService && mission.status === 'review') {
+      const transition = await ports.lifecycleService.transition({
+        operationId: `review-approve:${slug}`,
+        missionId: missionId(slug),
+        expectedVersion: version,
+        capabilities: new Set(['mission:transition']),
+        command: { type: 'approve', review },
+        actor: currentReviewRound(review).reviewer,
+        occurredAt: input.decidedAt,
+        idempotencyKey: `approve:${slug}:${input.decidedAt}`,
+      });
+      if (transition.status !== 'completed') {
+        return {
+          outcome: 'failed',
+          diagnostic: `review → integration transition failed for ${slug}: ${transition.error?.message ?? 'unknown failure'}`,
+        };
+      }
+    }
+    return { outcome: 'recorded' };
+  } catch (error) {
+    return { outcome: 'failed', diagnostic: diagnosticFrom(error, 'Approval write failed') };
   }
 }
 
