@@ -20,7 +20,7 @@ import {
 import type { MissionStore } from '../../application/domain-ports.js';
 import { readToken, postComment, postReview, getPrAuthor, isEnabled, resolveArtifactDir as resolveConfiguredArtifactDir } from './review-adapter.js';
 import { createEvent, consumeHumanNotes, VALID_EVENT_TYPES, CreateEventParams, CreateEventOptions, CreateEventResult } from './review-events.js';
-import { parseReviewFindings, recordImplementerResolution, recordRequestedChanges } from './review-round.js';
+import { parseReviewFindings, recordImplementerResolution, recordRequestedChanges, recordApproval } from './review-round.js';
 import type { MissionLifecycleService } from '../../application/mission-lifecycle-service.js';
 
 type CreateResult = { ok: boolean; path: string | null; error?: string | null; event?: unknown };
@@ -261,6 +261,8 @@ async function postWorkflowReview(
     writeReviewStateFn?: typeof writeReviewState;
     createEventFn?: CreateEventFn;
     missionStore?: MissionStore | null;
+    lifecycleService?: MissionLifecycleService | null;
+    recordApprovalFn?: typeof recordApproval;
   } = {}
 ): Promise<{ ok: boolean; error?: string; skipped?: boolean; reason?: string; prAuthor?: unknown }> {
   const log = options.log || fmt.log.plain;
@@ -292,6 +294,27 @@ async function postWorkflowReview(
   }
   if (prAuthor && prAuthor === reviewIdentity) {
     log(fmt.status('WARN', `Reviewer "${reviewIdentity}" is the PR author for ${branch}; skipping the provider review POST to avoid a self-approval (Forgejo rejects "approve your own pull is not allowed" with HTTP 422). Attempting to record the "${outcome}" verdict locally in the SQLite Review aggregate; a different agent or a human must post the formal approval.`));
+    // An approve is a domain decision, not only a provider comment: it is what
+    // leaves review through the approval boundary `px integrate` gates on. Record
+    // it on the aggregate before the flat loop-state write so a round that cannot
+    // legally reach `approved` (for example still in `fixing` after a
+    // request-changes) fails loudly here instead of reporting a skipped POST and
+    // leaving the mission unintegratable. A read miss below still surfaces as a
+    // rejection rather than a swallowed failure.
+    if (outcome === 'approve' && missionStore) {
+      const recordApprovalFn = options.recordApprovalFn || recordApproval;
+      const decision = await recordApprovalFn(slug, {
+        comment: null,
+        decidedAt: new Date().toISOString(),
+        source: { kind: 'local' },
+      }, { missionStore, lifecycleService: options.lifecycleService ?? null });
+      if (decision.outcome === 'failed') {
+        return { ok: false, error: `Could not record the approve decision for ${slug}: ${decision.diagnostic}` };
+      }
+      if (decision.outcome === 'unchanged') {
+        log(`Review outcome "approve" for ${slug} already recorded (${decision.reason}).`);
+      }
+    }
     await recordLocalReviewVerdict(slug, outcome, {
       worktree,
       writeReviewStateFn: options.writeReviewStateFn,
@@ -348,6 +371,7 @@ async function consumeReviewerArtifacts(
     missionStore?: MissionStore | null;
     lifecycleService?: MissionLifecycleService | null;
     recordRequestedChangesFn?: typeof recordRequestedChanges;
+    recordApprovalFn?: typeof recordApproval;
   } = {}
 ): Promise<{ consumed: boolean; ok?: boolean; reviewState?: string | null; diagnostic?: string | null }> {
   const log = options.log || fmt.log.plain;
@@ -502,6 +526,8 @@ async function consumeReviewerArtifacts(
       // local verdict path persists through the same approval boundary as
       // every other approval-producing site (TASK-2378 CP-2 audit site 3).
       writeReviewStateFn: options.writeReviewStateFn,
+      lifecycleService: options.lifecycleService ?? null,
+      recordApprovalFn: options.recordApprovalFn,
     });
     if (!reviewResult.ok) {
       return { consumed: true, ok: false, diagnostic: `Reviewer review post failed: ${(reviewResult as { error?: string }).error}` };

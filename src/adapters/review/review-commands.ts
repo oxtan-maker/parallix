@@ -16,7 +16,7 @@ import { buildAutonomousReviewMatrix, formatMatrixSummary } from '../agents/runt
 import { readReviewState, writeReviewState, resolveReviewIdentity, ReviewState, persistReviewStateOrThrow, backfillReviewFromLegacyState, reconcileInterruptedHandoff } from './review-state.js';
 import type { MissionStore } from '../../application/domain-ports.js';
 import type { MissionLifecycleService } from '../../application/mission-lifecycle-service.js';
-import { parseReviewFindings, recordRequestedChanges } from './review-round.js';
+import { parseReviewFindings, recordRequestedChanges, recordApproval, approvalLegalDiagnostic } from './review-round.js';
 import { reviewFindingId } from '../../domain/review.js';
 import { createEvent, ALL_EVENT_TYPES, isValidEventType, shouldMirrorToProvider, readAllEvents } from './review-events.js';
 import { formatVerificationCommand, runVerificationGate } from '../verification/verification.js';
@@ -877,6 +877,7 @@ export async function submitReviewRound(
     missionStore?: MissionStore | null;
     lifecycleService?: MissionLifecycleService | null;
     recordRequestedChangesFn?: typeof recordRequestedChanges;
+    recordApprovalFn?: typeof recordApproval;
   } = {}
 ): Promise<void> {
   const log = options.log || fmt.log.plain;
@@ -925,12 +926,48 @@ export async function submitReviewRound(
         exit(1);
         return;
       }
+      if (decision.outcome === 'unchanged') {
+        log(fmt.status('INFO', `Review outcome "${outcome}" for ${slug} already recorded (${decision.reason}).`));
+      }
     }
   }
+
+  // An approve is the integration gate itself. It is recorded on the aggregate
+  // in exactly one of the two paths below — for provider=none, immediately
+  // (there is no external POST to fail); for provider-backed, only after the
+  // POST succeeds — so a failed provider POST never leaves an approval behind
+  // that `px integrate` would merge with no approval on the pull request. A
+  // round that cannot legally reach `approved` (for example still in `fixing`
+  // after a request-changes) fails loudly in that branch instead of printing
+  // `[PASS]` after a swallowed transition.
 
   // For provider=none (standalone), skip provider posting and only update review-state
   if (!providerEnabled) {
     log(fmt.status('INFO', `Review provider is none — skipping provider posting, updating review-state only for ${slug}.`));
+    // No external POST can fail here, so record the authoritative approve
+    // immediately — before the flat review-state write — mirroring the
+    // provider-backed post-success recording.
+    if (outcome === 'approve') {
+      if (!options.missionStore) {
+        log(fmt.status('WARN', `No Mission authority bound for ${slug}; the approve decision was not recorded on the Review aggregate.`));
+      } else {
+        const recordApprovalFn = options.recordApprovalFn || recordApproval;
+        const decision = await recordApprovalFn(slug, {
+          comment: message || null,
+          decidedAt: new Date().toISOString(),
+          source: { kind: 'local' },
+        }, { missionStore: options.missionStore, lifecycleService: options.lifecycleService });
+        if (decision.outcome === 'failed') {
+          error(fmt.status('FAIL', `Review outcome "${outcome}" could not be recorded for ${slug}: ${decision.diagnostic}`));
+          exit(1);
+          return;
+        }
+        if (decision.outcome === 'unchanged') {
+          log(fmt.status('INFO', `Review outcome "${outcome}" for ${slug} already recorded (${decision.reason}).`));
+        }
+      }
+    }
+
     const currentState = await Promise.resolve(readReviewStateFn(slug, worktree));
 
     let stateToWrite: ReviewState;
@@ -995,6 +1032,25 @@ export async function submitReviewRound(
     return;
   }
   reviewIdentity = resolveReviewUserFn(reviewIdentity);
+  // An approve is the integration gate itself: check legality *before* the
+  // external POST so an illegal approve (for example still in `fixing` after a
+  // request-changes) fails loudly without ever posting, and record the
+  // authoritative decision only after the POST succeeds — a failed POST must
+  // never leave an approval on the aggregate that `px integrate` would merge
+  // with no approval on the pull request. The recording itself happens below,
+  // after the `!result.ok` guard.
+  if (outcome === 'approve') {
+    if (!options.missionStore) {
+      log(fmt.status('WARN', `No Mission authority bound for ${slug}; the approve decision was not recorded on the Review aggregate.`));
+    } else {
+      const legalDiagnostic = await approvalLegalDiagnostic(slug, { missionStore: options.missionStore });
+      if (legalDiagnostic) {
+        error(fmt.status('FAIL', `Review outcome "approve" could not be recorded for ${slug}: ${legalDiagnostic}`));
+        exit(1);
+        return;
+      }
+    }
+  }
   const result = await postWorkflowReview(slug, outcome, message, {
     worktree,
     reviewIdentity: reviewIdentity || undefined,
@@ -1029,6 +1085,30 @@ export async function submitReviewRound(
   if (!result.ok) {
     exit(1);
     return;
+  }
+
+  // Provider POST succeeded: record the authoritative approve now that the
+  // external side-effect is durable, so a failed POST (handled above) never
+  // leaves an approval behind. A self-author skip already recorded inside
+  // postWorkflowReview and returned early, so reaching here means a real POST
+  // went out. Without a bound Mission authority there is nothing to record on
+  // the aggregate (the flat review-state write below still mirrors the
+  // disposition), matching the no-store WARN taken before the POST.
+  if (outcome === 'approve' && options.missionStore) {
+    const recordApprovalFn = options.recordApprovalFn || recordApproval;
+    const decision = await recordApprovalFn(slug, {
+      comment: message || null,
+      decidedAt: new Date().toISOString(),
+      source: { kind: 'local' },
+    }, { missionStore: options.missionStore, lifecycleService: options.lifecycleService });
+    if (decision.outcome === 'failed') {
+      error(fmt.status('FAIL', `Review outcome "${outcome}" could not be recorded for ${slug}: ${decision.diagnostic}`));
+      exit(1);
+      return;
+    }
+    if (decision.outcome === 'unchanged') {
+      log(fmt.status('INFO', `Review outcome "${outcome}" for ${slug} already recorded (${decision.reason}).`));
+    }
   }
 
   const currentState = await Promise.resolve(readReviewStateFn(slug, worktree));
