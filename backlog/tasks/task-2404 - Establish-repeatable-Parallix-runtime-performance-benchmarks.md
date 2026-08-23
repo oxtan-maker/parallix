@@ -2,7 +2,7 @@
 id: TASK-2404
 title: Establish repeatable Parallix runtime performance benchmarks
 status: backlog
-assignee: []
+assignee: [codex]
 created_date: '2026-08-23 07:26'
 labels: []
 dependencies: []
