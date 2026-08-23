@@ -2,7 +2,7 @@
 id: TASK-2406
 title: px draft is not detected in ui
 status: backlog
-assignee: []
+assignee: [custom]
 created_date: '2026-08-23 07:50'
 labels: []
 dependencies: []
@@ -12,7 +12,7 @@ ordinal: 115917
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-when we start px draft that is not detected in px ui
+when we start px draft that is not detected in px ui. Also if you start from a worktree not everything may be detected, which is needed because when I use parallix to develop paralllix I need to test the code for total ui from within the worktree before merging (potentially broken) code to main.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Definition of Done
