@@ -1,7 +1,7 @@
 ---
 id: TASK-2397
 title: integrate recovery cannot handle an active mission with an already-approved review
-status: ready-for-integration
+status: done
 assignee: [custom]
 created_date: '2026-08-22'
 labels:

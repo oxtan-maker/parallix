@@ -96,6 +96,7 @@ const expectedIntegrationFiles = [
   // integration dwell), so it crosses the process boundary and runs only in
   // the integration layer.
   'task-2379-approval-boundary-repro.test.ts',
+  'task-2397-integrate-active-approved-recovery.test.ts',
   'test-hygiene.test.ts',
   'tui-action-bar.test.ts',
   'tui-confirmation.test.ts',

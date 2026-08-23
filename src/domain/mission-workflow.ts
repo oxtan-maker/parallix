@@ -88,6 +88,27 @@ export function decideMission(mission: Mission, command: MissionCommand): Missio
     if (mission.status === 'review') {
       return mission;
     }
+    // An active Mission whose recorded round was already APPROVED is not
+    // re-submittable (the approval landed on the provider before the local
+    // status advanced to review) and must not be rewritten. Replaying
+    // submit-for-review against it would otherwise throw at the awaiting-review
+    // guard below. Recognise the approved round and move the lane to review at
+    // the existing round's time so the downstream approve transition can run;
+    // the round, its decidedAt, and its reviewed change are passed through
+    // untouched. Only `approved` matches here: a `changes-requested` round means
+    // the implementer fixed the findings and is legitimately resubmitting a new
+    // round, which must flow through the normal round-advancement path below.
+    // ponytail: trusted-authority ceiling — this accepts a stored `approved`
+    // decision as authoritative even without a live provider
+    // approval. The integrate recovery path gates this on an active Mission that
+    // also carries a provider approval, so an unrelated submit-for-review caller
+    // cannot forge the lane move.
+    if (mission.status === 'active' && mission.review?.rounds?.length) {
+      const recordedRound = currentReviewRound(mission.review);
+      if (recordedRound?.decision?.kind === 'approved') {
+        return { ...mission, status: 'review' };
+      }
+    }
     if (!command.gatesPassed) {
       throw new MissionRuleViolation('Cannot submit for review before declared gates pass');
     }

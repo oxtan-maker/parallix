@@ -16,7 +16,8 @@ import { readReviewState } from '../../review/review-state.js';
 import { submitForReview } from '../../review/review-commands.js';
 
 import { missionId } from '../../../domain/mission.js';
-import { applyReviewerCommand, reviewStatus } from '../../../domain/review.js';
+import { applyReviewerCommand, ConfiguredReviewerEligibility, reviewStatus } from '../../../domain/review.js';
+import { agentFamily } from '../../../domain/agents.js';
 import { detectChangedAreas, isIntendedPayloadAtHead, parseFilesToAreas, orderIntegrationGates, gateMatchesChangedAreas, loadIntegrationConfig, getIntegrationGatePlan, printIntegrationGatePlan, buildIntegrationGateEnv, captureFinalIntegrationTree, resolveIntegrationVerificationWorktree, buildIntegrationVerificationInvocation, executeIntegrationGates } from './integrate-gates.js';
 
 const VARIANT_B_AUTOMATION_SUMMARY = 'Variant B automation: Backlog task closeout, worktree-path rewrite, squash commit with hook-enforced validation, Forgejo sync-merged, and mission worktree cleanup.';
@@ -1059,6 +1060,10 @@ async function recoverMissionForIntegration(
     const entryRound = missionLoad.mission.review?.rounds?.length
       ? missionLoad.mission.review.rounds[missionLoad.mission.review.rounds.length - 1]
       : null;
+    if (entryRound?.decision?.kind === 'approved' && overrideApprovedAt === undefined) {
+      fmt.log.fail(`Mission ${missionId(context.slug)} has a stored approval without the required provider approval. Refresh provider review state before integration.`);
+      throw new IntegrationAbort();
+    }
     let reviewEntryAt = entryRound?.startedAt;
     if (!reviewEntryAt && typeof context.pr?.createdAt === 'string' && context.pr.createdAt) {
       reviewEntryAt = context.pr.createdAt;
@@ -1074,19 +1079,53 @@ async function recoverMissionForIntegration(
       fmt.log.fail(`Authoritative timestamps for ${context.slug} are inverted or unparseable: review entry ${reviewEntryAt} vs approval ${approvalAt ?? 'none'}. Resolve the Review before integrating.`);
       throw new IntegrationAbort();
     }
-    // Submit through the existing handoff operation; it alone owns the
-    // active → review rules and persists the Review aggregate. The
-    // authoritative entry timestamp rides along so the persisted lane event
-    // and the Review round both carry it instead of the recovery wall clock.
-    await submitForReviewFn(context.slug, false, {
-      missionServicesFn: async () => missionServices,
-      exit: (code: number) => { throw new Error(`submit-for-review exited ${code}`); },
-      occurredAt: reviewEntryAt,
-    });
-    missionLoad = await missionServices.store.load(missionId(context.slug));
-    if (missionLoad.kind !== 'found' || missionLoad.mission.status !== 'review') {
-      fmt.log.fail(`Mission ${missionId(context.slug)} did not reach review through submit-for-review; resolve the Review handoff before integration.`);
-      throw new IntegrationAbort();
+    // An already-approved round is a decided review, not a fresh handoff:
+    // replaying submit-for-review would return the round unchanged and the
+    // workflow guard would reject it ("A submitted review must be awaiting a
+    // reviewer decision"). Skip the handoff replay (AC #2) and move the lane to
+    // review via a direct submit-for-review that passes the existing round
+    // through unchanged; the workflow guard recognises the decided round and
+    // moves active → review without rewriting it, so the approve transition
+    // below runs at the stored decidedAt. A genuinely fresh round still goes
+    // through the handoff operation unchanged (AC #3).
+    if (entryRound?.decision?.kind === 'approved') {
+      await missionServices.lifecycle.transition({
+        operationId: `integrate-active-review:${context.slug}`,
+        missionId: missionId(context.slug),
+        expectedVersion: missionLoad.version,
+        capabilities: new Set(['mission:transition']),
+        // The round is already decided, so the workflow guard moves the lane
+        // before it ever inspects reviewer eligibility; this is a stand-in for
+        // that check, not a real review assignment.
+        command: {
+          type: 'submit-for-review',
+          gatesPassed: true,
+          review: missionLoad.mission.review,
+          reviewerEligibility: ConfiguredReviewerEligibility.fromReviewStep({
+            eligible: [agentFamily('configured-reviewer')],
+            strategy: 'random',
+          }),
+        },
+        actor: missionLoad.mission.assignee ?? 'custom',
+        occurredAt: reviewEntryAt,
+        idempotencyKey: `active-review:${context.slug}:${reviewEntryAt}`,
+      });
+      missionLoad = await missionServices.store.load(missionId(context.slug));
+    } else {
+      // Submit through the existing handoff operation; it alone owns the
+      // active → review rules and persists the Review aggregate. The
+      // authoritative entry timestamp rides along so the persisted lane event
+      // and the Review round both carry it instead of the recovery wall clock.
+      await submitForReviewFn(context.slug, false, {
+        missionServicesFn: async () => missionServices,
+        exit: (code: number) => { throw new Error(`submit-for-review exited ${code}`); },
+        occurredAt: reviewEntryAt,
+      });
+      missionLoad = await missionServices.store.load(missionId(context.slug));
+      if (missionLoad.kind !== 'found' || missionLoad.mission.status !== 'review') {
+        fmt.log.fail(`Mission ${missionId(context.slug)} did not reach review through submit-for-review; resolve the Review handoff before integration.`);
+        throw new IntegrationAbort();
+      }
     }
   }
 

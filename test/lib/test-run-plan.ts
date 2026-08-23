@@ -213,6 +213,10 @@ export function buildTestRunPlan(options: TestRunPlanOptions): TestRunPlan {
     'task-2373-shutdown.test.ts',
     'task-2375-active-invocation-overlap.test.ts',
     'task-2375-current-work-operation-repro.test.ts',
+    // TASK-2397: integrate active+approved recovery repro. It builds throwaway
+    // git repos in a temp dir to stage the stuck-lane scenario, so it crosses a
+    // real git boundary the content heuristic sees and belongs in integration.
+    'task-2397-integrate-active-approved-recovery.test.ts',
     // TASK-2326 round 3: tests exceeding 1 s per test in the unit suite.
     // These are heavy (Ink render cycles, full status command, SDK sessions)
     // but do not necessarily cross a process boundary.
