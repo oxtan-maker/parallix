@@ -1,7 +1,7 @@
 ---
 id: TASK-2390
 title: investigate agents.config
-status: refined
+status: active
 assignee: [custom]
 created_date: '2026-08-21 11:20'
 labels: [ai_sdlc]
