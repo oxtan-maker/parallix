@@ -4,7 +4,7 @@ title: ensure px ui detects integration
 status: backlog
 assignee: [custom]
 created_date: '2026-08-24 15:34'
-labels: []
+labels: [user_value, bug]
 dependencies: []
 ordinal: 118917
 ---
