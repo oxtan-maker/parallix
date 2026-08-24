@@ -1,8 +1,8 @@
 ---
 id: TASK-2396
 title: Reset mission base branch when px draft starts
-status: refined
-assignee: [codex]
+status: active
+assignee: [claude]
 created_date: '2026-08-22 15:43'
 labels:
   - bug
