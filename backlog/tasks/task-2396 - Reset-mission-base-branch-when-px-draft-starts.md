@@ -2,7 +2,7 @@
 id: TASK-2396
 title: Reset mission base branch when px draft starts
 status: backlog
-assignee: []
+assignee: [codex]
 created_date: '2026-08-22 15:43'
 labels:
   - bug
