@@ -42,6 +42,25 @@ test('controller dispatches active:execute through ExecuteMissionService', async
   assert.deepEqual(calls, ['validate:task-0001', 'launch:task-0001:codex', 'record:task-0001:codex', 'handoff:task-0001:codex']);
 });
 
+test('controller honors attached CLI launches while defaulting board launches to detached', async () => {
+  const launchRequests: Array<{ detached?: boolean }> = [];
+  const { ports } = makeExecutePorts({
+    agentExecution: {
+      async prepare() { return { prompt: 'execute prompt', agentConfig: {} }; },
+      async launch(request: { detached?: boolean }) {
+        launchRequests.push(request);
+        return { agent: 'codex', rebaseDeferred: false, errored: false, errorMessage: null, exitStatus: 0, detail: null };
+      },
+    },
+  });
+  const controller = new BoardCommandController(ports);
+
+  await controller.dispatch(makeRequest({ detached: false }));
+  await controller.dispatch(makeRequest());
+
+  assert.deepEqual(launchRequests.map(request => request.detached), [false, true]);
+});
+
 test('controller rejects draft:create with capability kind', async () => {
   const { ports } = makeExecutePorts();
   const controller = new BoardCommandController(ports);

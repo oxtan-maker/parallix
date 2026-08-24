@@ -81,6 +81,7 @@ async function active(args, options = {}) {
       operationId,
       agent: preselectedImplementer,
       capabilities: new Set(['active:execute']),
+      detached: false,
     });
   } else {
     const executeService = service || (typeof serviceFactory === 'function' ? await serviceFactory(rootDir, renderProgress) : null);
