@@ -1,8 +1,8 @@
 ---
 id: TASK-2390
 title: investigate agents.config
-status: refined
-assignee: [custom]
+status: active
+assignee: [claude]
 created_date: '2026-08-21 11:20'
 labels: [ai_sdlc]
 dependencies: []
