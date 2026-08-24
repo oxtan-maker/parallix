@@ -166,12 +166,12 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
     diff,
     draft: (args, options) => {
       // Create adapter with missionServicesFn injected via withMissionFactories
-      return withMissionFactories(missionServicesFn => {
+      return withMissionFactories(missionServicesFn => withGraph(services => {
         const adapter = createDraftWorkflowAdapter({ missionServicesFn });
-        const useCase = new DraftCommandUseCase(adapter);
+        const useCase = new DraftCommandUseCase(adapter, services.currentWork);
         const cmd = createDraftCommand(useCase);
         return cmd(args, { ...options, missionServicesFn });
-      });
+      }));
     },
     handoff: (args, options) => withMissionFactories(missionServicesFn =>
       createHandoffCommand(new HandoffCommandUseCase({

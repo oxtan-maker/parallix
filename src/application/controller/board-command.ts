@@ -64,6 +64,8 @@ export interface BoardCommandRequest {
   readonly capabilities: ReadonlySet<Capability>;
   /** Optional cancellation handle for cooperative cancellation. */
   readonly cancellation?: BoardCancellation;
+  /** Keep CLI launches attached; board actions default to fire-and-forget. */
+  readonly detached?: boolean;
   /** Required by the Mission commands; absent for `active:execute`. */
   readonly payload?: BoardCommandPayload;
 }

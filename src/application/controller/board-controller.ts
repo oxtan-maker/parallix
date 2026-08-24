@@ -174,7 +174,7 @@ export class BoardCommandController implements BoardCommandDispatcher {
       // Board dispatch is fire-and-forget (void confirmAction()): the board
       // must be able to exit on q/Ctrl+C while the action runs on, so the
       // launched child must not keep the board process alive (CP-4 rule).
-      detached: true,
+      detached: request.detached ?? true,
     };
     return this.executeMission.execute(executeRequest);
   }
