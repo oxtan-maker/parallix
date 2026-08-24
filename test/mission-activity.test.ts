@@ -14,7 +14,7 @@ import {
 import { renderStatus } from '../src/interfaces/cli/status.js';
 import type { StatusResult } from '../src/application/status-command-use-case.js';
 import type { AgentAvailabilityMetric } from '../src/application/projections/board.js';
-import { projectMissionCard, type CurrentWorkFreshness } from '../src/application/projections/mission-board.js';
+import { projectMissionCard, type CurrentWorkFreshness, type MissionCard, type MissionOperationalFacts } from '../src/application/projections/mission-board.js';
 
 // ---------------------------------------------------------------------------
 // The shared mission-activity read model and both operator renderings.
@@ -52,21 +52,21 @@ test('projectMissionActivity reports live authoritative work with live certainty
 
   assert.equal(activity.work.kind, 'working');
   assert.equal(activity.work.kind === 'working' && activity.work.certainty, 'live');
-  assert.equal(describeMissionWork(activity.work), 'working (live): execute');
+  assert.equal(describeMissionWork(activity.work), '(live): execute');
 });
 
 test('projectMissionActivity reports an unverifiable work fact as unconfirmed, never as idle', () => {
   const activity = projectMissionActivity(working('unverified'));
 
   assert.equal(activity.work.kind === 'working' && activity.work.certainty, 'unknown');
-  assert.equal(describeMissionWork(activity.work), 'working (unconfirmed): execute');
+  assert.equal(describeMissionWork(activity.work), '(unconfirmed): execute');
 });
 
 test('projectMissionActivity keeps a stale work fact visible and marked stale', () => {
   const activity = projectMissionActivity(working('stale'));
 
   assert.equal(activity.work.kind === 'working' && activity.work.certainty, 'stale');
-  assert.equal(describeMissionWork(activity.work), 'working (stale): execute');
+  assert.equal(describeMissionWork(activity.work), '(stale): execute');
 });
 
 test('projectMissionActivity reports blocked work with its recorded reason', () => {
@@ -168,7 +168,7 @@ test('projectMissionActivity restates the one operation the reconciler resolved 
 
   assert.equal(activity.work.kind, 'working');
   assert.equal(activity.work.kind === 'working' && activity.work.operationId, 'op-new');
-  assert.equal(describeMissionWork(activity.work), 'working (unconfirmed): execute');
+  assert.equal(describeMissionWork(activity.work), '(unconfirmed): execute');
 });
 
 test('summarizeMissionActivity tallies work states and sums no coordinator evidence', () => {
@@ -294,7 +294,7 @@ test('px status renders live authoritative work and live coordinator evidence as
     liveSession: { missionId: 'task-2389' as never, family: agentFamily('claude') },
   })));
 
-  assert.ok(lines.includes('Mission work: working (live): execute'), lines.join('\n'));
+  assert.ok(lines.includes('Mission work: (live): execute'), lines.join('\n'));
   assert.ok(lines.includes('Coordinator evidence: live px command (claude) — recovery evidence only'), lines.join('\n'));
 });
 
@@ -319,7 +319,7 @@ test('px status reports unknown coordinator evidence when liveness was not obser
 test('px status reports stale authoritative work as stale rather than dropping it', () => {
   const lines = renderStatusLines(projectMissionActivity(working('stale', { liveSession: null })));
 
-  assert.ok(lines.includes('Mission work: working (stale): execute'), lines.join('\n'));
+  assert.ok(lines.includes('Mission work: (stale): execute'), lines.join('\n'));
   assert.ok(lines.includes('Coordinator evidence: no live px command'), lines.join('\n'));
 });
 
@@ -340,4 +340,100 @@ test('px status omits the activity lines when the projection supplied none', () 
 
   assert.ok(!lines.some((line) => line.startsWith('Mission work:')), lines.join('\n'));
   assert.ok(!lines.some((line) => line.startsWith('Coordinator evidence:')), lines.join('\n'));
+});
+
+// ---------- output contract: no unrequested "working" label, active-only animation ----------
+
+/** Build a mission card with the given operational-fact overrides. */
+function cardWithOverrides(facts: Partial<MissionOperationalFacts>): MissionCard {
+  return projectMissionCard(
+    {
+      id: 'task-2399' as never,
+      repositoryId: 'parallix' as never,
+      title: 'Change the working UI',
+      labels: [] as never,
+      status: 'active',
+      rawStatus: 'active',
+      closedAt: null,
+      assignee: null,
+      checkpoints: [],
+      review: null,
+      netEngineeringLines: null,
+    } as never,
+    {
+      latestGate: 'passed',
+      reviewApproval: null,
+      blockingReason: null,
+      flags: [],
+      currentWork: null,
+      liveSession: undefined,
+      ...facts,
+    } as never,
+  );
+}
+
+/** Render one MissionCard, returning the raw (ANSI-inclusive) frame. */
+async function renderCard(card: MissionCard): Promise<string> {
+  const ink = await import('ink');
+  const React = await import('react');
+  const { MissionCard: Card } = await import('../src/interfaces/tui/mission-card.js');
+  return ink.renderToString(React.createElement(Card, { card, width: 40 }), { columns: 200 });
+}
+
+test('describeMissionWork drops the unrequested working label and keeps only the trust grade and phase', () => {
+  const work = projectMissionActivity(working('live')).work;
+
+  const text = describeMissionWork(work);
+  assert.ok(!/working/i.test(text), `the working label must not reappear. Got: ${text}`);
+  assert.match(text, /^(?:\(live\)): execute$/, `the trust grade and phase remain. Got: ${text}`);
+});
+
+test('px status omits the working label from the active mission work line', () => {
+  const lines = renderStatusLines(projectMissionActivity(working('live')));
+
+  const workLine = lines.find((line) => line.startsWith('Mission work:'));
+  assert.ok(workLine, `the work fact must still render. Got: ${lines.join('\n')}`);
+  assert.ok(!/working/i.test(workLine as string), `no working label in the status work line. Got: ${workLine}`);
+  assert.ok(!lines.some((line) => /working/i.test(line)), `no line may carry the working label. Got: ${lines.join('\n')}`);
+});
+
+test('an active mission card receives a terminal-compatible activity treatment and an idle card does not', async () => {
+  const active = await renderCard(cardWithOverrides({
+    currentWork: {
+      operationId: 'op-1',
+      phase: 'execute',
+      summary: 'running checkpoint 2',
+      agent: agentFamily('claude'),
+      updatedAt: '2026-08-22T10:00:00Z',
+      freshness: 'live',
+    },
+  }));
+  const idle = await renderCard(cardWithOverrides({ currentWork: null, liveSession: null }));
+
+  assert.ok(/\u001b\[5m/.test(active), `the active card must carry a blink activity treatment. Got: ${JSON.stringify(active)}`);
+  assert.ok(!/\u001b\[5m/.test(idle), `the idle card must not carry the activity treatment. Got: ${JSON.stringify(idle)}`);
+});
+
+test('a selected active card still carries the activity treatment', async () => {
+  const ink = await import('ink');
+  const React = await import('react');
+  const { MissionCard: Card } = await import('../src/interfaces/tui/mission-card.js');
+  const selectedActive = await ink.renderToString(
+    React.createElement(Card, { card: cardWithOverrides({
+      currentWork: {
+        operationId: 'op-1',
+        phase: 'execute',
+        summary: 'running checkpoint 2',
+        agent: agentFamily('codex'),
+        updatedAt: '2026-08-22T10:00:00Z',
+        freshness: 'live',
+      },
+    }), width: 40, selected: true }),
+    { columns: 200 },
+  );
+  // The focused (▶) marker is rendered separately; the blink must still wrap
+  // the marker for the selected active card, not be withheld from it.
+  assert.ok(/\u001b\[5m/.test(selectedActive), `the selected active card must carry the blink treatment. Got: ${JSON.stringify(selectedActive)}`);
+  // The selection arrow is present so the focused card stays identifiable.
+  assert.ok(selectedActive.includes('\u25b6'), `the selected card must render the focus arrow. Got: ${JSON.stringify(selectedActive)}`);
 });

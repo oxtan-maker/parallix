@@ -21,7 +21,10 @@ test('SC15: WORKING count either renders every live mission or states the hidden
     projection: makeProjection({ active: cards }), columns: 120, rows: 30,
   }), { columns: 120 });
 
-  assert.match(output, /WORKING 4/);
+  // The invented `WORKING` label is gone; the rail still shows the count as its
+  // own row (the only rail row that begins with a digit) plus the overflow.
+  assert.doesNotMatch(output, /WORKING/);
+  assert.match(output, /^│ 4/m);
   assert.match(output, /\+1 more/);
 });
 
@@ -34,7 +37,8 @@ test('SC16: bounded recovery evidence remains visibly WORKING with an uncertaint
     projection: makeProjection({ active: [card] }), columns: 120, rows: 30,
   }), { columns: 200 });
 
-  assert.match(output, /WORKING 1/);
+  assert.doesNotMatch(output, /WORKING/);
+  assert.match(output, /^│ 1/m);
   assert.match(output, /task-recovery · recovery[\s\S]*evidence · qwen/);
 });
 

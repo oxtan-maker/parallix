@@ -1,10 +1,11 @@
 ---
 id: TASK-2399
 title: change the working ui
-status: ready-for-integration
+status: done
 assignee: [custom]
 created_date: '2026-08-22 19:16'
-labels: [user_value]
+labels:
+  - user_value
 dependencies: []
 ordinal: 109917
 ---

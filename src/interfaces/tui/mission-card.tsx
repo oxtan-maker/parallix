@@ -1,7 +1,18 @@
 import React from 'react';
 import { Box, Text } from 'ink';
+import { agentIsWorking } from '../../application/projections/mission-board.js';
 import type { BoardLane } from '../../application/projections/mission-board.js';
 import type { MissionCard as MissionCardFacts } from '../../application/projections/mission-board.js';
+
+/**
+ * Restrained, terminal-compatible activity treatment: a steady ANSI blink on
+ * the card marker. No timer, no terminal negotiation, no new dependency — Ink
+ * forwards the `[5m` escape through `renderToString`, so the treatment is
+ * deterministic and snapshot-stable (tests assert the escape structure, not a
+ * frame picked at a random instant). Applied only to cards an agent is working.
+ */
+const ACTIVITY_BLINK = '\u001b[5m';
+const ACTIVITY_BLINK_STOP = '\u001b[25m';
 
 // ---------------------------------------------------------------------------
 // MissionCard — renders the facts a BoardProjection supplies for one mission.
@@ -184,10 +195,20 @@ export function MissionCard({ card, width = DEFAULT_CARD_WIDTH, selected = false
     reviewDetail ? reviewDetail : `review ${review}`,
   ];
 
+  // Every active/running card receives the blink, selected or not. The glyph
+  // is the focused (▶) marker when selected, the plain (┃) marker otherwise;
+  // the blink wraps whichever glyph renders. (Task-2399 review round 1: the
+  // prior `&& !selected` omitted the treatment from the focused card, whose
+  // glyph is rendered inline rather than via the non-selected `marker`.)
+  const glyph = selected ? '\u25b6' : '\u2503';
+  const marker = agentIsWorking(card)
+    ? `${ACTIVITY_BLINK}${glyph}${ACTIVITY_BLINK_STOP}`
+    : glyph;
+
   return (
     <Box flexDirection="column" width={width} marginBottom={1}>
       <Box flexDirection="row">
-        <Text bold={selected} color={selected ? 'cyan' : gutterColor(card)}>{selected ? '\u25b6' : '\u2503'}</Text>
+        <Text bold={selected} color={selected ? 'cyan' : gutterColor(card)}>{marker}</Text>
         <Box flexGrow={1}>
           <Text wrap="truncate-end" bold color="blue">
             {truncate(card.id, slugBudget)}
