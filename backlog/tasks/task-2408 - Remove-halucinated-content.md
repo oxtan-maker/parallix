@@ -1,8 +1,8 @@
 ---
 id: TASK-2408
 title: Remove halucinated content
-status: refined
-assignee: [codex]
+status: active
+assignee: [claude]
 created_date: '2026-08-24 03:37'
 labels: [user_value, bug]
 dependencies: []
