@@ -736,7 +736,9 @@ test('working work is separate from NEEDS YOU', async () => {
     currentWork: { operationId: 'op', phase: 'review', summary: 'reviewing', agent: 'qwen' as never, updatedAt: new Date().toISOString(), freshness: 'live' },
   });
   const output = await renderShell({ projection: makeProjection({ review: [working] }), columns: 120, rows: 30 });
-  assert.match(output, /WORKING/);
+  // The invented `WORKING` label is gone, but the active-work signal remains:
+  // the working mission is listed and stays separate from the attention rail.
+  assert.doesNotMatch(output, /WORKING/, `the unrequested Working label must be gone`);
   assert.match(output, /task-working · review · qwen/);
   assert.match(output, /NEEDS YOU NEXT 0/);
 });

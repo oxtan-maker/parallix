@@ -112,11 +112,20 @@ const CERTAINTY_WORD: Readonly<Record<ActivityCertainty, string>> = Object.freez
   stale: 'stale',
 });
 
-/** One line for the authoritative work fact. */
+/**
+ * One line for the authoritative work fact.
+ *
+ * The literal word `working` is deliberately omitted here: it is a derived
+ * activity note, not a mission lifecycle lane, so stamping it reads as a
+ * status the board never ordered. The trust grade and the recorded phase are
+ * kept because they are grounded in the published work fact, so an operator
+ * still learns the mission is being worked and how much to trust it. The count
+ * of such missions stays in `describeMissionActivityTotals`, not here.
+ */
 export function describeMissionWork(work: MissionWorkActivity): string {
   if (work.kind === 'blocked') { return `blocked: ${work.reason}`; }
   if (work.kind === 'idle') { return 'none recorded'; }
-  return `working (${CERTAINTY_WORD[work.certainty]}): ${work.phase}`;
+  return `(${CERTAINTY_WORD[work.certainty]}): ${work.phase}`;
 }
 
 /**

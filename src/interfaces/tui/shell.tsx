@@ -296,8 +296,9 @@ export function BoardShell({ projection, columns, rows, initialSelectedMissionId
           paddingX={1}
         >
           <Box flexDirection="row" alignItems="center">
-            <Text bold color="green">● WORKING</Text>
-            <Text color="gray">{' '}{projection.stages.flatMap((stage) => stage.cards).filter(agentIsWorking).length}</Text>
+            {/* The count of active missions is the signal; `WORKING` was an
+                invented status label, so only the number stays. */}
+            <Text color="gray">{projection.stages.flatMap((stage) => stage.cards).filter(agentIsWorking).length}</Text>
           </Box>
           <WorkingItems cards={projection.stages.flatMap((stage) => stage.cards)} />
           <Box flexDirection="row" paddingTop={1}>

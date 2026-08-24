@@ -1,7 +1,7 @@
 ---
 id: TASK-2403
 title: Make unit tests fast and enforce a one-second per-test budget
-status: active
+status: review
 assignee: [codex]
 created_date: '2026-08-23 07:25'
 labels: [user_value]
