@@ -4,7 +4,7 @@ title: Remove halucinated content
 status: backlog
 assignee: [codex]
 created_date: '2026-08-24 03:37'
-labels: []
+labels: [user_value, bug]
 dependencies: []
 ordinal: 116917
 ---
