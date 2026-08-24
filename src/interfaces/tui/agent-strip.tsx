@@ -32,6 +32,20 @@ import {
 // `px status` renders from.
 // ---------------------------------------------------------------------------
 
+/**
+ * Display-boundary guard for task-2408: a persisted agent-block reason can be
+ * the internal quota-matching regex source, e.g. `parsed: (?:\b429\b...)`.
+ * That is an implementation detail, not operator state, so it is never
+ * rendered verbatim. The `parsed:` payload form is replaced with the same
+ * neutral vocabulary the fallback block reason already uses; every other
+ * (human-written) launcher or block reason passes through unchanged.
+ */
+function displayBlockReason(reason: string | null | undefined): string | null {
+  if (!reason) { return null; }
+  if (reason.startsWith('parsed: ')) { return 'usage limit reached'; }
+  return reason;
+}
+
 /** Format a countdown from milliseconds into a human-readable string. */
 function formatCountdown(ms: number): string {
   if (ms === Infinity) { return '∞'; }
@@ -94,7 +108,7 @@ export function AgentStrip({ agentAvailability, unattributedRunningSessions, mis
       {agentAvailability.map((agent) => {
         const dotColor = agent.available ? 'green' : 'red';
         const countdown = !agent.available && agent.blockedForMs > 0 ? formatCountdown(agent.blockedForMs) : '';
-        const reason = !agent.available && agent.reason ? agent.reason : '';
+        const reason = agent.available ? '' : displayBlockReason(agent.reason);
         return (
           <Box key={agent.family} marginRight={3}>
             <Text color={dotColor}>{'●'}</Text>

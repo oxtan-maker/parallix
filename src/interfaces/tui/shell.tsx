@@ -12,7 +12,6 @@ import type {
   BoardProgressSink,
 } from '../../application/controller/board-command.js';
 import { cancelledOutcome, unavailableCapability, isIntegratedCapability, unavailableReason } from '../../application/controller/board-command.js';
-import { agentIsWorking } from '../../application/projections/mission-board.js';
 import { projectMissionActivity } from '../../application/projections/mission-activity.js';
 import { BoardLayout, selectLayoutMode, useTerminalDimensions, MIN_LANE_WIDTH } from './board-layout.js';
 import { BOARD_LANES } from './lane-column.js';
@@ -295,12 +294,10 @@ export function BoardShell({ projection, columns, rows, initialSelectedMissionId
           borderColor="gray"
           paddingX={1}
         >
-          <Box flexDirection="row" alignItems="center">
-            {/* The count of active missions is the signal; `WORKING` was an
-                invented status label, so only the number stays. */}
-            <Text color="gray">{projection.stages.flatMap((stage) => stage.cards).filter(agentIsWorking).length}</Text>
-          </Box>
-          <WorkingItems cards={projection.stages.flatMap((stage) => stage.cards)} />
+          {/* The rail's first content is the attention heading. The previously
+              rendered live-work count and `task-… · phase · agent` rows were
+              unsupported rail content (task-2408): the authoritative work
+              summary lives in the agent strip, not here. */}
           <Box flexDirection="row" paddingTop={1}>
             <Text bold color="yellow">▲ NEEDS YOU NEXT</Text>
             <Text color="gray">{' '}{attnCount}</Text>
@@ -451,20 +448,6 @@ export function AttentionItems({ queue, selectedMissionId, focusedIndex, sourceS
       )}
     </Box>
   );
-}
-
-function WorkingItems({ cards }: { readonly cards: readonly MissionCard[] }): React.ReactElement | null {
-  const working = cards.filter(agentIsWorking);
-  if (working.length === 0) { return <Text dimColor>no live mission work</Text>; }
-  const visible = working.slice(0, 3);
-  return <Box flexDirection="column">
-    {visible.map((card) => (
-      <Text key={card.id} color="green">{card.currentWork
-        ? `${card.id} · ${card.currentWork.phase} · ${card.currentWork.agent ?? 'operation'}`
-        : `${card.id} · recovery evidence · ${card.liveSession?.family ?? 'unknown agent'}`}</Text>
-    ))}
-    {working.length > visible.length && <Text dimColor>{`+${working.length - visible.length} more`}</Text>}
-  </Box>;
 }
 
 // ---------------------------------------------------------------------------
