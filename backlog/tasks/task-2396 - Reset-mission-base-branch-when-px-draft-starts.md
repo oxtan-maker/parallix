@@ -6,7 +6,7 @@ assignee: [codex]
 created_date: '2026-08-22 15:43'
 labels:
   - bug
-  - workflow
+  - ai_sdlc
 dependencies: []
 references:
   - src/adapters/cli/commands/draft-stats.ts
