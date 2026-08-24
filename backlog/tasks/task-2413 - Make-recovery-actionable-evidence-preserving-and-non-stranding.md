@@ -1,8 +1,8 @@
 ---
 id: TASK-2413
 title: 'Make recovery actionable, evidence-preserving and non-stranding'
-status: refined
-assignee: [codex]
+status: active
+assignee: [claude]
 created_date: '2026-08-24 17:46'
 labels: [ai_sdlc, bug]
 dependencies: []
