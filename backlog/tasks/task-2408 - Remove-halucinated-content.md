@@ -1,7 +1,7 @@
 ---
 id: TASK-2408
 title: Remove halucinated content
-status: backlog
+status: refined
 assignee: [codex]
 created_date: '2026-08-24 03:37'
 labels: [user_value, bug]
