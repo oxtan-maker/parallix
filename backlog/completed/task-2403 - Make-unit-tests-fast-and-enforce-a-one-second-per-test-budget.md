@@ -1,10 +1,11 @@
 ---
 id: TASK-2403
 title: Make unit tests fast and enforce a one-second per-test budget
-status: ready-for-integration
+status: done
 assignee: [codex]
 created_date: '2026-08-23 07:25'
-labels: [user_value]
+labels:
+  - user_value
 dependencies: []
 ordinal: 113917
 ---
@@ -50,6 +51,8 @@ Do not weaken tests to hit the target:
 - no globally forcing test process exit to hide leaked handles
 
 Prefer deterministic clocks/timers, focused application ports, reusable lightweight fixtures and direct unit seams.
+
+The mission also includes the adjacent review-loop failure exposed by the gate tests: a pre-review rebase/push verification-gate failure must be sent through the existing implementer rebound path and verified before reviewer launch, rather than exiting directly and requiring operator intervention.
 
 The test runner's classification should become understandable and maintainable. If the current content heuristic plus a large manually curated list is contributing to misclassification, simplify it where safe, but do not turn this mission into a test-framework rewrite.
 

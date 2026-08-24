@@ -68,7 +68,7 @@ async function boardBuild(count: number) {
   const missions = Array.from({ length: count }, (_, index) => intakeMission({ id: missionId(`task-${String(index + 1).padStart(4, '0')}`), repositoryId: 'benchmark' as any, title: `Fixture ${index + 1}` }));
   const builder = new BoardProjectionBuilder(
     { loadAllMissions: async () => missions, loadMission: async id => missions.find(mission => mission.id === id) ?? null, getSourceFacts: () => [] },
-    { loadReview: async () => null, loadReviewApproval: async () => null },
+    { loadReviews: async ids => new Map(ids.map(id => [id, { review: null, approval: null }])) },
     { loadGateStatus: async () => 'unknown' },
     { loadAgentAvailability: async () => [], loadAssignedAgent: async () => null },
     { loadRepositoryId: async () => 'benchmark' as any, loadHeadCommit: async () => 'fixture' },

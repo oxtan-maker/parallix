@@ -19,8 +19,7 @@ if (!fs.existsSync(path.join(executionRoot, 'package.json')) || !fs.existsSync(t
 const plan = buildTestRunPlan({ executionRoot, requestedArgs: process.argv.slice(2) });
 const { testNode, nodeArgs, runsIntegrationSuite } = plan;
 const UNIT_TEST_BUDGET_MS = plan.unitTestBudgetMs; // PARALLIX_UNIT_TEST_BUDGET_MS
-const UNIT_TEST_TIMEOUT_MS = 30_000;
-const testTimeoutArgs = runsIntegrationSuite ? [] : ['--test-timeout=' + UNIT_TEST_TIMEOUT_MS];
+const UNIT_TEST_TIMEOUT_MS = plan.unitTestTimeoutMs;
 
 // Build the canonical bundle before every suite so a direct runner invocation
 // also catches bundle regressions in the current checkout.
@@ -58,7 +57,7 @@ fs.mkdirSync(testManifestDir, { recursive: true });
 // finish their file, and a worker that would hang is exactly the case the
 // watchdog turns into a loud failure.
 const child = spawn(testNode, nodeArgs, {
-  stdio: 'inherit',
+  stdio: ['inherit', 'pipe', 'pipe'],
   cwd: executionRoot,
   env: {
     ...process.env,
@@ -67,6 +66,16 @@ const child = spawn(testNode, nodeArgs, {
   },
   detached: process.platform !== 'win32'
 });
+let unitTestExceeded = false;
+let reporterOutput = '';
+child.stdout.on('data', (chunk: Buffer) => {
+  process.stdout.write(chunk);
+  if (!runsIntegrationSuite) {
+    reporterOutput = (reporterOutput + chunk.toString()).slice(-4096);
+    unitTestExceeded ||= reporterOutput.includes('[unit-test-budget:exceeded]');
+  }
+});
+child.stderr.pipe(process.stderr);
 
 function killSuite(signal: NodeJS.Signals) {
   try {
@@ -146,5 +155,5 @@ child.on('close', (code, signal) => {
   // Clean up roots before propagating failure status.
   cleanupRunnerTempRoots(testManifestDir);
 
-  process.exit((code ?? 0) || (suiteExceeded ? 1 : 0));
+  process.exit((code ?? 0) || (suiteExceeded || unitTestExceeded ? 1 : 0));
 });

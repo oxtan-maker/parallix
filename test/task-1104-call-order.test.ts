@@ -51,6 +51,7 @@ test('startReviewLoop follows the transition contract: review before reviewer, a
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     implementer: 'claude',
     reviewer: 'codex',
+    worktree: '/tmp/test',
     dryRun: false,
     log: (m) => logs.push(m),
     error: (m) => console.error(m),
@@ -65,11 +66,13 @@ test('startReviewLoop follows the transition contract: review before reviewer, a
     readReviewStateFn: () => null,
     writeReviewStateFn: () => {},
     rebaseBeforeReviewRoundFn: async () => ({ ok: true, sharedFileConflicts: false }),
+    performHandoffFn: async () => {},
     // Track transition calls
     transitionTaskFn: (slug, status, options) => {
       events.push({ type: 'transition', status, implementer: options.implementer });
       return true;
     },
+    transitionVirtualFn: (transition, slug, status, options) => transition(slug, status, options),
 
     // Track agent launches
     startAgentFn: async (step, options) => {

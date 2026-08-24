@@ -22,6 +22,9 @@ import {
 import type { BoardProjection, BoardMetrics, AgentAvailabilityMetric, LaneMetricSeries } from '../src/application/projections/board.js';
 import type { MissionCard } from '../src/application/projections/mission-board.js';
 import type { AgentFamily } from '../src/domain/agents.js';
+import React from 'react';
+import { renderToString } from 'ink';
+import { FlowPanel } from '../src/interfaces/tui/flow-panel.js';
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                            */
@@ -56,15 +59,11 @@ function projectionWithMetrics(metrics: BoardMetrics): BoardProjection {
 
 describe('SC1: Agent availability — current rendering path', () => {
   it('FlowPanel renders agent availability as "family available/unavailable" lines', async () => {
-    const ink = await import('ink');
-    const React = await import('react');
-    const { FlowPanel } = await import('../src/interfaces/tui/flow-panel.js');
-
     const agents = [
       { family: 'codex' as AgentFamily, available: true, blockedForMs: 0 },
       { family: 'claude' as AgentFamily, available: false, blockedForMs: Infinity },
     ];
-    const output = plain(ink.renderToString(
+    const output = plain(renderToString(
       React.createElement(FlowPanel, { metrics: metricsWithAgents(agents), columns: 120 }),
       { columns: 120 },
     ));

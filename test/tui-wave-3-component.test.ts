@@ -1,13 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
+import React from 'react';
+import { render, renderToString } from 'ink';
+import { BoardShell, navigationKeyForInput } from '../src/interfaces/tui/shell.js';
 import { makeCard, makeProjection } from './fixtures/board-projection.js';
 
-async function renderShell(props: Record<string, unknown>): Promise<string> {
-  const ink = await import('ink');
-  const React = await import('react');
-  const { BoardShell } = await import('../src/interfaces/tui/shell.js');
-  return ink.renderToString(React.createElement(BoardShell, props as never), { columns: 120 });
+function renderShell(props: Record<string, unknown>): string {
+  return renderToString(React.createElement(BoardShell, props as never), { columns: 120 });
 }
 
 test('component: selected mission has an explicit focused marker in wide and narrow board layouts', async () => {
@@ -35,9 +35,6 @@ test('component: selected mission focus marker is present and board renders with
 });
 
 test('component: keyboard help is visible on demand and ordinary keys have no workflow action', async () => {
-  const ink = await import('ink');
-  const React = await import('react');
-  const { BoardShell } = await import('../src/interfaces/tui/shell.js');
   class Stream extends EventEmitter {
     public columns = 120;
     public rows = 30;
@@ -57,7 +54,7 @@ test('component: keyboard help is visible on demand and ordinary keys have no wo
   for (const key of ['?', 'a', 'r', 'c', '\r'] as const) {
     const stdin = new Stream();
     const stdout = new Stream();
-    const instance = ink.render(React.createElement(BoardShell, { projection } as never), {
+    const instance = render(React.createElement(BoardShell, { projection } as never), {
       stdin: stdin as unknown as NodeJS.ReadStream,
       stdout: stdout as unknown as NodeJS.WriteStream,
       patchConsole: false,
@@ -78,7 +75,6 @@ test('component: keyboard help is visible on demand and ordinary keys have no wo
 });
 
 test('component: arrows and WASD map to navigation, excluding modified letter input', async () => {
-  const { navigationKeyForInput } = await import('../src/interfaces/tui/shell.js');
   const noKey = { upArrow: false, downArrow: false, leftArrow: false, rightArrow: false, ctrl: false, meta: false };
   assert.equal(navigationKeyForInput('', { ...noKey, downArrow: true }), 'down');
   assert.equal(navigationKeyForInput('w', noKey), 'up');

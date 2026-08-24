@@ -1,7 +1,7 @@
 /**
  * TASK-2326 — deterministic proof that the unit-test timing guard fires.
  *
- * The default test suite passes `--test-timeout=30000` to node --test.
+ * The default test suite passes `--test-timeout=1000` to node --test.
  * This test proves the guard is active and correctly configured.
  *
  * Note: We cannot use `node --test` inside a running test (Node detects
@@ -14,29 +14,34 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { UNIT_TEST_BUDGET_MS } from './lib/unit-test-budget-reporter.js';
 
 const ROOT = process.cwd();
 const RUNNER_PATH = path.join(ROOT, 'test', 'run-default-tests.ts');
 
 test('unit-test timeout guard: runner enforces --test-timeout for the default suite', () => {
-  const runnerContent = fs.readFileSync(RUNNER_PATH, 'utf8');
+  const planContent = fs.readFileSync(path.join(ROOT, 'test', 'lib', 'test-run-plan.ts'), 'utf8');
 
   // Must define a numeric timeout constant
   assert.ok(
-    runnerContent.includes('UNIT_TEST_TIMEOUT_MS'),
-    'run-default-tests.ts must define UNIT_TEST_TIMEOUT_MS',
+    planContent.includes('UNIT_TEST_BUDGET_MS'),
+    'test-run-plan.ts must use the unit-test budget',
   );
 
   // Must pass --test-timeout to the node test runner
   assert.ok(
-    runnerContent.includes('--test-timeout='),
-    'run-default-tests.ts must include --test-timeout argument',
+    planContent.includes('--test-timeout='),
+    'test-run-plan.ts must include --test-timeout argument',
+  );
+  assert.ok(
+    UNIT_TEST_BUDGET_MS === 1_000,
+    'the unit-test budget must be 1,000 ms',
   );
 
   // Must conditionally apply it (not to integration suite)
   assert.ok(
-    runnerContent.includes('runsIntegrationSuite'),
-    'run-default-tests.ts must conditionally apply timeout based on suite type',
+    planContent.includes('runsIntegrationSuite'),
+    'test-run-plan.ts must conditionally apply timeout based on suite type',
   );
 });
 
@@ -187,8 +192,7 @@ test('unit-test timeout guard: suite budget enforcement fails when exceeded', ()
   );
 
   // Spawn the runner with the tight budget and this single test file.
-  // The runner's --test-timeout=30000 will not trigger (2s < 30s),
-  // but the suite budget (500ms) will be exceeded.
+  // The one-second per-test timeout and the 500 ms suite budget both reject it.
   const runnerEnv: NodeJS.ProcessEnv = {
     ...process.env,
     NODE_NO_WARNINGS: '1',

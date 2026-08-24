@@ -17,23 +17,21 @@ import {
   makeFullCard,
   makeStage,
 } from './fixtures/board-projection.js';
+import React from 'react';
+import { renderToString } from 'ink';
+import { LaneColumn } from '../src/interfaces/tui/lane-column.js';
+import { MissionCard } from '../src/interfaces/tui/mission-card.js';
 
 /** A title well past the 80-character mark used by the truncation criterion. */
 const LONG_TITLE = `Wave two lane columns and mission cards with a deliberately very long title `
   + `that runs past eighty characters so truncation has something to cut`;
 
 async function renderLaneColumn(props: Record<string, unknown>): Promise<string> {
-  const ink = await import('ink');
-  const React = await import('react');
-  const { LaneColumn } = await import('../src/interfaces/tui/lane-column.js');
-  return ink.renderToString(React.createElement(LaneColumn, props as never), { columns: 40 });
+  return renderToString(React.createElement(LaneColumn, props as never), { columns: 40 });
 }
 
 async function renderMissionCard(props: Record<string, unknown>): Promise<string> {
-  const ink = await import('ink');
-  const React = await import('react');
-  const { MissionCard } = await import('../src/interfaces/tui/mission-card.js');
-  return ink.renderToString(React.createElement(MissionCard, props as never), { columns: 80 });
+  return renderToString(React.createElement(MissionCard, props as never), { columns: 80 });
 }
 
 describe('LaneColumn renders one BoardStage', () => {

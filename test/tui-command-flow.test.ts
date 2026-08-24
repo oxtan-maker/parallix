@@ -62,7 +62,7 @@ async function renderFlow(controller: { dispatchWithStatus: (...args: any[]) => 
     commandControllerFactory: () => controller,
     refreshProjection,
   } as never), { stdin: stdin as unknown as NodeJS.ReadStream, stdout: stdout as unknown as NodeJS.WriteStream, patchConsole: false, exitOnCtrlC: false });
-  await new Promise((resolve) => setTimeout(resolve, 35));
+  await waitForWrite(stdout, 0);
   return { stdin, stdout, instance };
 }
 
@@ -148,9 +148,6 @@ test('Ctrl+A on enabled card shows confirmation and dispatches on Enter', async 
 
 test('Ctrl+A on disabled card does not dispatch (pins R1)', async () => {
   let calls = 0;
-  const ink = await import('ink');
-  const React = await import('react');
-  const { BoardShell } = await import('../src/interfaces/tui/shell.js');
   const stdin = new Stream();
   const stdout = new Stream();
   /* Card with active:execute disabled. */
@@ -268,3 +265,6 @@ test('Ctrl+I (0x09) is reported as Tab by Ink and toggles rail/board focus, not 
   /* The help text must not advertise Ctrl+I as a lifecycle binding. */
   assert.doesNotMatch(stdout.writes.join(''), /Ctrl\+D\/A\/R\/I/);
 });
+  const ink = await import('ink');
+  const React = await import('react');
+  const { BoardShell } = await import('../src/interfaces/tui/shell.js');

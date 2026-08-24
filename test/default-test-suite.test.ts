@@ -42,7 +42,6 @@ const expectedIntegrationFiles = [
   'integrate.test.ts', 'integration-pipelines.test.ts', 'mission-start.test.ts',
   'mission-utils-worktree.test.ts', 'mistral.test.ts', 'nels.test.ts',
   'noise-reduction.test.ts', 'opencode-export.test.ts', 'package-persistent-data.test.ts',
-  'pi-runner.test.ts',
   'product-config.test.ts',
   'px-runner.test.ts', 'px-runtime-smoke.test.ts', 'px-shell-init.test.ts',
   'rebase-use-case.test.ts', 'rebase.test.ts', 'rebase_diagnostics.test.ts', 'rebase_hardening.test.ts',
@@ -53,12 +52,11 @@ const expectedIntegrationFiles = [
   'review-prompts.test.ts', 'review-state-class.test.ts', 'review-state.test.ts',
   'review.test.ts', 'runtime-matrix.test.ts', 'setup-review.test.ts',
   'sqlite-mission-store.integration.test.ts', 'sqlite-recovery-cp5.test.ts',
-  'stats-backfill.test.ts', 'status-characterization-cp4.test.ts', 'status.test.ts',
+  'stats-backfill.test.ts', 'status.test.ts',
   'task-1048-regression.test.ts',
   'task-1049-force-push.test.ts', 'task-1080-sync-merged-hardening.test.ts',
-  'task-1104-call-order.test.ts', 'task-1104-rebase-cleanup.test.ts',
+  'task-1104-rebase-cleanup.test.ts',
   'task-1209-consume-artifacts.test.ts',
-  'task-1268-pre-review-gate-per-round.test.ts',
   'task-1272-standalone-cycle.test.ts', 'task-1272-standalone-rebase.test.ts',
   'task-1390-shell-init-shebang.test.ts',
   'task-1415-closed-mission-counts.test.ts', 'task-1416-repro.test.ts',
@@ -71,8 +69,8 @@ const expectedIntegrationFiles = [
   'task-2234-push-to-reviewer-autobounce.test.ts',
   'task-2270-graphify-exclusion.test.ts',
   'task-2322.12-review-recovery.integration.test.ts',
-  'task-2273-review-gate-ownership.test.ts', 'task-2311-console-empty-repro.test.ts',
-  'task-2312-label-sync.test.ts', 'task-2313-repro.test.ts',
+  'task-2273-review-gate-ownership.test.ts',
+  'task-2312-label-sync.test.ts',
   'task-2318-temp-directory-leaks.test.ts',
   'task-2319-notices-git-tracking.test.ts',
   'task-2327-coverage-gate-tmp-leaks.test.ts',
@@ -98,12 +96,8 @@ const expectedIntegrationFiles = [
   'task-2379-approval-boundary-repro.test.ts',
   'task-2397-integrate-active-approved-recovery.test.ts',
   'test-hygiene.test.ts',
-  'tui-action-bar.test.ts',
-  'tui-confirmation.test.ts',
-  'tui-lane-columns.test.ts',
-  'tui-outcome-banner.test.ts',
-  'tui-pty-smoke.test.ts',
-  'tui-responsive-layout.test.ts',
+  'tui-pty-smoke.test.ts', 'task-2313-repro.test.ts', 'task-2370-repro.test.ts',
+  'tui-command-flow.test.ts',
   'tui-spawn.test.ts',
   'unit-test-timeout-guard.test.ts',
   'verification.test.ts', 'verify-local-integrate.test.ts'
@@ -153,8 +147,8 @@ test('default test runner routes every moved group to integration and excludes i
   // Integration files spawn real children; cap their parallelism so host
   // contention cannot starve child startup past test-internal deadlines.
   assert.ok(integrationRun.args.some(a => a.startsWith('--test-concurrency=')));
-  assert.ok(!defaultRun.args.some(a => a.startsWith('--test-concurrency=')),
-    'the hermetic unit suite keeps full parallelism');
+  assert.ok(defaultRun.args.some(a => a === '--test-concurrency=12'),
+    'unit concurrency is bounded so measured durations are not host-oversubscription artifacts');
   assert.equal(pkg.scripts['test:integration'], 'FORCE_COLOR=0 tsx test/run-default-tests.ts --integration');
   assert.match(runner, /file\.endsWith\('\.integration\.test\.ts'\)/,
     'integration suffix must provide an explicit category independent of dependency heuristics');

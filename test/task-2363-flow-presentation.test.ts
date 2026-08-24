@@ -10,6 +10,9 @@ import {
   PREVIOUS_WINDOW_LABEL,
   contaminatedHistory,
 } from './fixtures/task-2363-decision-window-fixture.js';
+import React from 'react';
+import { renderToString } from 'ink';
+import { FlowPanel } from '../src/interfaces/tui/flow-panel.js';
 
 const ESC = String.fromCharCode(27);
 const ANSI = new RegExp(`${ESC}\\[[0-9;?]*[ -/]*[@-~]`, 'g');
@@ -31,11 +34,8 @@ function metrics(): BoardMetrics {
   }) as BoardMetrics;
 }
 
-async function render(columns: number): Promise<string> {
-  const ink = await import('ink');
-  const React = await import('react');
-  const { FlowPanel } = await import('../src/interfaces/tui/flow-panel.js');
-  return plain(ink.renderToString(
+function render(columns: number): string {
+  return plain(renderToString(
     React.createElement(FlowPanel, { metrics: metrics(), columns }),
     { columns },
   ));

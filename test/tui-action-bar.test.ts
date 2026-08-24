@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { makeCard } from './fixtures/board-projection.js';
+import React from 'react';
+import { renderToString } from 'ink';
+import { ActionBar, BOARD_ACTION_KINDS } from '../src/interfaces/tui/action-bar.js';
 
 test('action bar renders the declared command kinds with only active:execute enabled', async () => {
-  const ink = await import('ink');
-  const React = await import('react');
-  const { ActionBar, BOARD_ACTION_KINDS } = await import('../src/interfaces/tui/action-bar.js');
-  const output = ink.renderToString(React.createElement(ActionBar, {
+  const output = renderToString(React.createElement(ActionBar, {
     mission: makeCard({ commands: [{ command: 'active', enabled: true, reason: null }] }),
   }), { columns: 160 });
   assert.equal(BOARD_ACTION_KINDS.length, 7);

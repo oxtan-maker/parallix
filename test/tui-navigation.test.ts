@@ -7,8 +7,9 @@ import { makeCard, makeCards, makeProjection } from './fixtures/board-projection
 
 const root = process.cwd();
 
-test('navigation: horizontal movement wraps, skips empty lanes, and preserves the row when possible', async () => {
-  const { createNavigationState, moveSelection } = await import('../src/interfaces/tui/navigation.js');
+import { createNavigationState, moveSelection } from '../src/interfaces/tui/navigation.js';
+
+test('navigation: horizontal movement wraps, skips empty lanes, and preserves the row when possible', () => {
   const projection = makeProjection({
     backlog: makeCards(3, 'backlog'),
     review: [
@@ -27,8 +28,7 @@ test('navigation: horizontal movement wraps, skips empty lanes, and preserves th
   assert.equal(state.selectedMissionId, 'task-review-2', 'left wraps backlog to review and preserves row');
 });
 
-test('navigation: vertical boundaries stop and an all-empty board has no selection', async () => {
-  const { createNavigationState, moveSelection } = await import('../src/interfaces/tui/navigation.js');
+test('navigation: vertical boundaries stop and an all-empty board has no selection', () => {
   const projection = makeProjection({ active: [makeCard({ id: 'task-one' as never, lane: 'active' })] });
   let state = createNavigationState(projection);
   state = moveSelection(state, projection, 'up', 3);
@@ -38,8 +38,7 @@ test('navigation: vertical boundaries stop and an all-empty board has no selecti
   assert.equal(createNavigationState(makeProjection()).selectedMissionId, null);
 });
 
-test('navigation: overflowing lane changes selected id and visible window without rendering commands', async () => {
-  const { createNavigationState, moveSelection } = await import('../src/interfaces/tui/navigation.js');
+test('navigation: overflowing lane changes selected id and visible window without rendering commands', () => {
   const projection = makeProjection({ backlog: makeCards(5, 'backlog') });
   let state = createNavigationState(projection);
   for (let index = 0; index < 3; index += 1) {

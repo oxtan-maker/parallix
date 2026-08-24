@@ -3,6 +3,9 @@ import assert from 'node:assert/strict';
 import { agentFamily } from '../src/domain/agents.js';
 import { countUnattributedSessions, projectAgentAvailability } from '../src/application/projections/agent-status.js';
 import type { AgentAvailabilityMetric } from '../src/application/projections/board.js';
+import React from 'react';
+import { renderToString } from 'ink';
+import { AgentStrip } from '../src/interfaces/tui/agent-strip.js';
 
 // ---------------------------------------------------------------------------
 // AgentStrip rendering + projectAgentAvailability block projection.
@@ -18,14 +21,11 @@ const plain = (value: string): string => value.replace(ANSI, '');
 const NOW_MS = Date.parse('2026-08-08T12:00:00Z');
 const FORTY_FIVE_MINUTES_MS = 45 * 60 * 1000;
 
-async function renderStrip(
+function renderStrip(
   agentAvailability: readonly AgentAvailabilityMetric[],
   unattributedRunningSessions?: number | null,
-): Promise<string> {
-  const ink = await import('ink');
-  const React = await import('react');
-  const { AgentStrip } = await import('../src/interfaces/tui/agent-strip.js');
-  return plain(ink.renderToString(
+): string {
+  return plain(renderToString(
     React.createElement(AgentStrip, { agentAvailability, unattributedRunningSessions }),
     { columns: 120 },
   ));
