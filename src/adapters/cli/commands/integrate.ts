@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import child_process from 'node:child_process';
 import { detectRebaseState, git, getCurrentBranch } from '../../git/git.js';
-import { resolveTaskFile, getTaskStatus, setTaskStatus, completeTask, getTaskAssignee, getTaskClassification } from '../../backlog/backlog.js';
+import { resolveTaskFile, getTaskStatus, setTaskStatus, completeTask, getTaskAssignee, getTaskClassification, getTaskLabels, setTaskLabels } from '../../backlog/backlog.js';
 import { toVirtual, toActual } from '../../config/state-map.js';
 import { getPrStatus, getLatestReviewDecision, syncMerged, readToken, resolveTokenFile, listOpenPrsForSlug } from '../../forgejo/forgejo.js';
 import * as fmt from '../../../application/presentation/cli-format.js';
@@ -355,6 +355,12 @@ async function integrate(args: string[], options: {
     const mainTitle = missionTitle(slug) || slug;
     const summary = mainTitle.replace(/\s+/g, ' ').trim();
     const mainTaskFile = ((context.task as any).taskFile as string).replace(executionDir, baseWorktree as string);
+    // The mission branch may contain an agent edit to the task file. Preserve
+    // the base branch's valid classification if that edit drops or corrupts
+    // the labels; post-integration stats resolve the completed file only after
+    // this squash/closeout step.
+    const baseTaskLabels = fs.existsSync(mainTaskFile) ? getTaskLabels(mainTaskFile) : [];
+    const baseTaskClassification = fs.existsSync(mainTaskFile) ? getTaskClassification(mainTaskFile) : null;
     fmt.log.info('Selecting integration variant: Variant B (local squash-merge)');
     fmt.log.info(`\nStep 1: Using base worktree ${baseWorktree} on ${baseBranch} as the squash-merge target...`);
 
@@ -529,6 +535,11 @@ async function integrate(args: string[], options: {
       // early promotion can make `merge --abort` fail and leave index conflicts.
       await promoteTaskForIntegrationIfNeeded(context, { missionServicesFn });
       if (fs.existsSync(mainTaskFile)) {
+        const mergedTask = resolveTaskFile(slug, baseWorktree);
+        if (mergedTask.ok && mergedTask.taskFile && baseTaskClassification && getTaskClassification(mergedTask.taskFile) === null) {
+          setTaskLabels(mergedTask.taskFile, baseTaskLabels);
+          fmt.log.info(`Restored base Backlog classification label for ${slug} before closeout.`);
+        }
         completeTask(slug, baseWorktree);
         const originalTaskPath = path.relative(baseWorktree as string, mainTaskFile);
         intendedPayloadPaths.add(originalTaskPath);

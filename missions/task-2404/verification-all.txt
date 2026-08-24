@@ -1,0 +1,5 @@
+Command: ./scripts/verify-local.sh all
+Result: PASS
+Test summary: 2055 passed, 0 failed, 0 skipped, 0 todo
+Observed duration: 20600.259526 ms
+
