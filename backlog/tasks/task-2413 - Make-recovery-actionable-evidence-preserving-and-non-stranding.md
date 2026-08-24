@@ -4,7 +4,7 @@ title: 'Make recovery actionable, evidence-preserving and non-stranding'
 status: backlog
 assignee: [codex]
 created_date: '2026-08-24 17:46'
-labels: []
+labels: [ai_sdlc, bug]
 dependencies: []
 ordinal: 119917
 ---
