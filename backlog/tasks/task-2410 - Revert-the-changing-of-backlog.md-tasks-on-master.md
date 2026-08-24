@@ -1,7 +1,7 @@
 ---
 id: TASK-2410
 title: Revert the changing of backlog.md tasks on master
-status: refined
+status: active
 assignee: [codex]
 created_date: '2026-08-24 15:13'
 labels: [ai_sdlc]
