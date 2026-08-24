@@ -4,7 +4,7 @@ title: investigate agents.config
 status: backlog
 assignee: [custom]
 created_date: '2026-08-21 11:20'
-labels: []
+labels: [ai_sdlc]
 dependencies: []
 ordinal: 107917
 ---
