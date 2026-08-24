@@ -4,7 +4,7 @@ title: Revert the changing of backlog.md tasks on master
 status: backlog
 assignee: [codex]
 created_date: '2026-08-24 15:13'
-labels: []
+labels: [ai_sdlc]
 dependencies: []
 ordinal: 117917
 ---
