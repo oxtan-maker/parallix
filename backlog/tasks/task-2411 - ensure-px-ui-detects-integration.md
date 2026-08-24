@@ -2,7 +2,7 @@
 id: TASK-2411
 title: ensure px ui detects integration
 status: backlog
-assignee: []
+assignee: [custom]
 created_date: '2026-08-24 15:34'
 labels: []
 dependencies: []
