@@ -539,7 +539,41 @@ export async function startReviewLoop(slug: string, opts: {
               // hook. It never consumes the hook budget or the hook fix prompt.
               error(fmt.status('FAIL', `Pre-review rebase gate failed for area "${rebaseFailure.gate.area}" (exit ${rebaseFailure.gate.exitCode}) during the ${rebaseFailure.operation} step.`));
               error(fmt.status('INFO', `Gate command: ${rebaseFailure.gate.command}`));
-              exit(1); return;
+              if (roundReboundCapReached()) {
+                await stopForRoundReboundCap('pre-review gate');
+                return;
+              }
+              const bounceResult = await reboundPreReviewFailureFn(
+                slug,
+                worktree,
+                gateFailureReason({
+                  ok: false,
+                  area: rebaseFailure.gate.area,
+                  command: rebaseFailure.gate.command,
+                  exitCode: rebaseFailure.gate.exitCode,
+                  stdout: rebaseFailure.gate.stdout,
+                  stderr: rebaseFailure.gate.stderr,
+                  error: rebaseFailure.gate.error,
+                }),
+                implementer!,
+                {
+                  ...reboundCollaborators(),
+                  verifyFn: verifyPreReviewSetup,
+                  maxAttempts: Math.min(DEFAULT_REBOUND_ATTEMPTS, reboundsRemainingThisRound()),
+                },
+              );
+              reboundsUsedThisRound += bounceResult.attempts ?? 0;
+              implementer = bounceResult.implementer || implementer;
+              if (!bounceResult.bounced) {
+                if (roundReboundCapReached()) {
+                  await stopForRoundReboundCap('pre-review gate');
+                  return;
+                }
+                error(fmt.status('FAIL', `Pre-review rebase gate failure stranded mission ${slug} (${bounceResult.outcome}). Exiting review loop.`));
+                exit(1); return;
+              }
+              log(fmt.status('PASS', `Pre-review rebase gate repair verified for ${slug}; continuing this review round.`));
+              preReviewSetupVerified = true;
             }
             if (rebaseResult.hookFailure) {
               // TASK-2377.02 typed hook evidence (hook identity from git state)

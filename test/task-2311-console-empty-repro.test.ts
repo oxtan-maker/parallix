@@ -15,6 +15,7 @@ import { mockModule, installModuleMocks } from './lib/module-mock.js';
 const pi = mockModule<typeof import('../src/adapters/agents/pi.js')>('../src/adapters/agents/pi.js', import.meta.url);
 await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
+test.beforeEach(() => pi.__setSdkForTest({ SessionManager: { inMemory: () => ({}) } }));
 
 test.afterEach(() => {
   pi.__setSdkForTest(null);

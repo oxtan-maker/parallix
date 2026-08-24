@@ -5,6 +5,9 @@ import { buildMetrics } from '../src/application/projections/metrics.js';
 import { agentFamily } from '../src/domain/agents.js';
 import { missionId } from '../src/domain/mission.js';
 import { missionOutcome } from './fixtures/mission-outcome.js';
+import React from 'react';
+import { renderToString } from 'ink';
+import { FlowPanel } from '../src/interfaces/tui/flow-panel.js';
 
 const id = missionId('task-flow');
 const ESC = String.fromCharCode(27);
@@ -46,10 +49,7 @@ class FakeStdout extends EventEmitter {
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 test('FLOW panel renders projection labels, values, unavailable agent, and bottleneck sentence', async () => {
-  const ink = await import('ink');
-  const React = await import('react');
-  const { FlowPanel } = await import('../src/interfaces/tui/flow-panel.js');
-  const output = plain(ink.renderToString(React.createElement(FlowPanel, { metrics: populatedMetrics(), columns: 120 }), { columns: 120 }));
+  const output = plain(renderToString(React.createElement(FlowPanel, { metrics: populatedMetrics(), columns: 120 }), { columns: 120 }));
 
   for (const expected of [
     'FLOW', 'CUMULATIVE FLOW', 'Legend', 'Median cycle time', 'Median lane age',
@@ -63,11 +63,8 @@ test('FLOW panel renders projection labels, values, unavailable agent, and bottl
 });
 
 test('FLOW panel states every fallback and survives a zero-history projection', async () => {
-  const ink = await import('ink');
-  const React = await import('react');
-  const { FlowPanel } = await import('../src/interfaces/tui/flow-panel.js');
   const metrics = buildMetrics({ initialStates: new Map(), transitions: [], outcomes: [], instants: ['2026-07-22T12:00:00Z'] });
-  const output = plain(ink.renderToString(React.createElement(FlowPanel, { metrics, columns: 60 }), { columns: 60 }));
+  const output = plain(renderToString(React.createElement(FlowPanel, { metrics, columns: 60 }), { columns: 60 }));
 
   for (const expected of ['Cumulative flow history: estimate', 'Median cycle time history: null', 'Median lane age history: null', 'Weekly completions history: skip', 'Lifecycle review-bounce rate history: estimate', 'Bottleneck unavailable: history is missing.']) {
     assert.ok(output.includes(expected), `Zero-history FLOW panel must display ${expected}. Got: ${output}`);

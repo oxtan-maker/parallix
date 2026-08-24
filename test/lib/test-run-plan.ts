@@ -13,6 +13,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { UNIT_TEST_BUDGET_MS } from './unit-test-budget-reporter.js';
 
 export interface TestRunPlanOptions {
   /** Checkout the suite runs against. */
@@ -33,6 +34,7 @@ export interface TestRunPlan {
   nodeArgs: string[];
   runsIntegrationSuite: boolean;
   unitTestBudgetMs: number;
+  unitTestTimeoutMs: number;
 }
 
 function defaultProbeNodeVersion(executable: string): string | null {
@@ -162,6 +164,13 @@ export function buildTestRunPlan(options: TestRunPlanOptions): TestRunPlan {
     // TASK-2326 round 2: tui-spawn uses execFileSync (real process boundary)
     // and was relocated from the default suite to integration.
     'tui-spawn.test.ts',
+    // This PTY smoke test launches the packaged CLI through a real child process.
+    'tui-pty-smoke.test.ts',
+    // These render the live Ink terminal surface with TTY-like streams. They
+    // are renderer integration tests, not unit tests of the pure board logic.
+    'task-2313-repro.test.ts',
+    'task-2370-repro.test.ts',
+    'tui-command-flow.test.ts',
     // Unit tests must not open a real SQL database or cross a process
     // boundary, even when the database is a temp file and the spawn is a
     // tiny script. The content heuristic above cannot see boundaries that
@@ -217,23 +226,6 @@ export function buildTestRunPlan(options: TestRunPlanOptions): TestRunPlan {
     // git repos in a temp dir to stage the stuck-lane scenario, so it crosses a
     // real git boundary the content heuristic sees and belongs in integration.
     'task-2397-integrate-active-approved-recovery.test.ts',
-    // TASK-2326 round 3: tests exceeding 1 s per test in the unit suite.
-    // These are heavy (Ink render cycles, full status command, SDK sessions)
-    // but do not necessarily cross a process boundary.
-    'pi-runner.test.ts',
-    'task-1104-call-order.test.ts',
-    'task-1268-pre-review-gate-per-round.test.ts',
-    'task-2311-console-empty-repro.test.ts',
-    'task-2313-repro.test.ts',
-    'tui-action-bar.test.ts',
-    'tui-confirmation.test.ts',
-    'tui-lane-columns.test.ts',
-    'tui-outcome-banner.test.ts',
-    'tui-pty-smoke.test.ts',
-    'tui-responsive-layout.test.ts',
-    // Subdir: status-characterization exercises the full status command
-    // (BoardProjectionBuilder + projection pipeline) and is 15–23 s per test.
-    'adapters/status-characterization-cp4.test.ts'
   ]);
 
   // Classify subdir tests through the same boundary filter as root-level tests,
@@ -301,31 +293,30 @@ export function buildTestRunPlan(options: TestRunPlanOptions): TestRunPlan {
     : [];
   // TASK-2328: mock.module() requires the experimental flag in Node 22+
   const moduleMockArgs = ['--experimental-test-module-mocks'];
-  // Integration files spawn real child processes (tsx, git, npm). The default
-  // file concurrency (availableParallelism - 1) oversubscribes multi-core
-  // hosts and starves child startup past the tests' internal deadlines
-  // (task-2318/2327/2212 flakes). Cap integration file concurrency only; the
-  // hermetic unit suite keeps full parallelism.
+  // Integration files spawn real children; task-2318/2327/2212 showed that
+  // unrestricted concurrency can starve their startup past internal deadlines.
   const INTEGRATION_TEST_CONCURRENCY = 4;
+  const UNIT_TEST_CONCURRENCY = 12;
   const testNode = compatibleTestNode();
-  const testConcurrencyArgs = runsIntegrationSuite && supportsTestConcurrency(testNode)
-    ? [`--test-concurrency=${INTEGRATION_TEST_CONCURRENCY}`]
+  const testConcurrencyArgs = supportsTestConcurrency(testNode)
+    ? [`--test-concurrency=${runsIntegrationSuite ? INTEGRATION_TEST_CONCURRENCY : UNIT_TEST_CONCURRENCY}`]
     : [];
 
-  // TASK-2326: enforceable unit-test timing guard.
-  // Per-test timeout: 30 s catches tests that should be hermetic but cross a
-  // process boundary (real Git, npm, agent launch). Integration tests run via
-  // --integration and are exempt from this bound.
+  // Unit tests are hermetic and must complete within one second. Integration
+  // tests run via --integration and are exempt because they cross real boundaries.
   // Suite-level budget: 180 s for the full default suite on a typical developer
   // workstation. Adjust PARALLIX_UNIT_TEST_BUDGET_MS to override.
-  const UNIT_TEST_TIMEOUT_MS = 30_000;
-  const testTimeoutArgs = runsIntegrationSuite ? [] : ['--test-timeout=' + UNIT_TEST_TIMEOUT_MS];
+  const testTimeoutArgs = runsIntegrationSuite ? [] : [
+    '--test-timeout=' + UNIT_TEST_BUDGET_MS,
+    '--test-reporter=' + pathToFileURL(path.join(testRoot, 'lib', 'unit-test-budget-reporter.ts')).href,
+  ];
 
   return {
     testNode,
     testFiles,
     runsIntegrationSuite,
     unitTestBudgetMs: Number(process.env.PARALLIX_UNIT_TEST_BUDGET_MS) || 180_000,
+    unitTestTimeoutMs: UNIT_TEST_BUDGET_MS,
     // Deliberately no `--test-force-exit`: it makes the per-file workers call
     // process.exit() before their result stream is flushed, so trailing test
     // results are silently dropped while the file still reports success

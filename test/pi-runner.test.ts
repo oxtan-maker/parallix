@@ -12,6 +12,7 @@ const productConfig = mockModule<typeof import('../src/adapters/config/product-c
 const launcherSelection = mockModule<typeof import('../src/adapters/agents/launcher-selection.js')>('../src/adapters/agents/launcher-selection.js', import.meta.url);
 await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
+test.beforeEach(() => pi.__setSdkForTest({ SessionManager: { inMemory: () => ({}) } }));
 test.afterEach(() => {
   // Reset Pi module test hooks
   pi.__setSdkForTest(null);
@@ -368,8 +369,7 @@ test('startPiAgent SDK handles errors and maps them to result shape', async () =
 // ---------- Resume / session identity (P1-1) ----------
 
 test('startPiAgent resume with sessionId opens the matching session via SessionManager', async () => {
-  // Load the SDK dynamically (ESM-only) and stub its SessionManager.
-  const sdk = await new Function('return import("@earendil-works/pi-coding-agent")')();
+  const sdk: any = { SessionManager: { list: async () => [], open: () => ({}) } };
   const originalList = sdk.SessionManager.list;
   const originalOpen = sdk.SessionManager.open;
   let openPath = null;
@@ -422,7 +422,7 @@ test('startPiAgent resume with sessionId opens the matching session via SessionM
 });
 
 test('startPiAgent resume without sessionId uses SessionManager.continueRecent', async () => {
-  const sdk = await new Function('return import("@earendil-works/pi-coding-agent")')();
+  const sdk: any = { SessionManager: { continueRecent: () => ({}) } };
   const originalContinueRecent = sdk.SessionManager.continueRecent;
   let continueRecentCalled = false;
 
@@ -467,7 +467,12 @@ test('startPiAgent resume without sessionId uses SessionManager.continueRecent',
 // ---------- Model and environment propagation (P1-2) ----------
 
 test('startPiAgent propagates caller model to SDK createAgentSession', async () => {
-  const sdk = await new Function('return import("@earendil-works/pi-coding-agent")')();
+  const resolvedModel = { id: 'claude-sonnet-4-20250514' };
+  const sdk = {
+    SessionManager: { inMemory: () => ({}) },
+    AuthStorage: { create: () => ({}) },
+    ModelRegistry: { create: () => ({ find: () => resolvedModel, getAll: () => [resolvedModel] }) },
+  };
   let capturedModel = undefined;
   pi.__setCreateAgentSessionForTest(async (options) => {
     capturedModel = options?.model;
@@ -498,17 +503,14 @@ test('startPiAgent propagates caller model to SDK createAgentSession', async () 
     });
     await resultPromise;
 
-    // The model was resolved and passed to createAgentSession.
-    // It may be undefined if the registry doesn't have the model, but it
-    // should be set when the model is found.
-    assert.ok(capturedModel !== undefined || true, 'model option passed to createAgentSession');
+    assert.equal(capturedModel, resolvedModel, 'resolved model passed to createAgentSession');
   } finally {
     pi.__setSdkForTest(null);
   }
 });
 
 test('startPiAgent propagates caller environment to subprocess context', async () => {
-  const sdk = await new Function('return import("@earendil-works/pi-coding-agent")')();
+  const sdk = { SessionManager: { inMemory: () => ({}) } };
   let envWasSet = false;
   // Ensure the test key doesn't already exist.
   const origTestVar = process.env.TASK_2238_TEST_VAR;
@@ -651,7 +653,7 @@ test('startPiAgent invokes teeOptions.noOutputWatchdog.onNoOutput when no text a
 // ---------- Pi launcher model propagation (task-2337) ----------
 
 test('startPiAgent result includes session.model.id in result.model and result.telemetry.model (task-2337)', async () => {
-  const sdk = await new Function('return import("@earendil-works/pi-coding-agent")')();
+  const sdk = { SessionManager: { inMemory: () => ({}) } };
   const expectedModelId = 'qwen3.6-27b-q8';
 
   pi.__setCreateAgentSessionForTest(async () => {
@@ -702,7 +704,7 @@ test('startPiAgent result includes session.model.id in result.model and result.t
 });
 
 test('startPiAgent result.model is undefined when session.model is absent (task-2337)', async () => {
-  const sdk = await new Function('return import("@earendil-works/pi-coding-agent")')();
+  const sdk = { SessionManager: { inMemory: () => ({}) } };
 
   pi.__setCreateAgentSessionForTest(async () => {
     const session = {

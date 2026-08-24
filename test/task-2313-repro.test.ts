@@ -38,6 +38,7 @@ class FakeStdout extends EventEmitter {
 
   write(data: string): boolean {
     this.writes.push(data);
+    this.emit('write');
     return true;
   }
 
@@ -90,6 +91,7 @@ async function mountBoard(columns: number, rows: number): Promise<MountedBoard> 
   const { BoardShell } = await import('../src/interfaces/tui/shell.js');
 
   const stdout = new FakeStdout(columns, rows);
+  const firstWrite = new Promise<void>((resolve) => stdout.once('write', resolve));
   const instance = ink.render(
     React.createElement(BoardShell, { projection } as never),
     {
@@ -99,7 +101,7 @@ async function mountBoard(columns: number, rows: number): Promise<MountedBoard> 
       exitOnCtrlC: false,
     },
   );
-  await delay(150);
+  if (stdout.writes.length === 0) { await firstWrite; }
   return { stdout, unmount: () => { instance.unmount(); } };
 }
 

@@ -222,7 +222,7 @@ test('genuine pre-commit failure on the pre-review safety commit reports hook ev
   assert.match(hook!.output, /pre-commit hook failed/);
 });
 
-test('review loop treats a pre-review rebase gate failure as a gate failure, not a hook bounce', async () => {
+test('review loop rebounces a pre-review rebase gate failure as a gate failure, not a hook bounce', async () => {
   const gateOutput = GATE_OUTPUT_WITH_PRE_PUSH;
   const logs: string[] = [];
   const exits: number[] = [];
@@ -266,7 +266,7 @@ test('review loop treats a pre-review rebase gate failure as a gate failure, not
     runPreReviewGateFn: async () => ({ ok: true, area: 'lib', command: 'true', exitCode: 0, stdout: '', stderr: '' }),
     reboundPreReviewFailureFn: async () => {
       preReviewBounces += 1;
-      return { bounced: false, stranded: true, attempts: 0, outcome: 'human-only' as const, diagnostic: 'a gate failure must never reach the bounce path', implementer: 'codex' };
+      return { bounced: false, stranded: true, attempts: 0, outcome: 'exhausted' as const, diagnostic: 'gate still failing', implementer: 'codex' };
     },
     startAgentFn: async (step: string, options: any) => {
       if (step === 'review') { reviewerLaunches += 1; }
@@ -286,7 +286,7 @@ test('review loop treats a pre-review rebase gate failure as a gate failure, not
 
   await startReviewLoop(SLUG, reviewOpts);
 
-  assert.equal(preReviewBounces, 0, 'a gate failure must not spend the pre-review bounce path');
+  assert.equal(preReviewBounces, 1, 'a pre-review rebase gate failure must use the rebound path');
   assert.equal(reviewerLaunches, 0, 'no reviewer launches after a failed pre-review rebase');
   assert.deepEqual(exits, [1], 'the loop exits on the gate failure');
   assert.ok(
