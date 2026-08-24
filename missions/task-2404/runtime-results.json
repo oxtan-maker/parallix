@@ -1,0 +1,229 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-23T08:07:35.832Z",
+  "coldRunProcedure": "Each CLI sample is a new Node process; filesystem cache is not flushed.",
+  "environment": {
+    "os": "linux 6.18.5+deb14-amd64",
+    "cpu": "AMD Ryzen 7 3700X 8-Core Processor",
+    "node": "v24.15.0",
+    "revision": "5259d30cc9cf2f91010a3c01756e4411c885c102",
+    "samples": 5,
+    "warmups": 1
+  },
+  "fixtureScale": {
+    "small": 10,
+    "large": 100
+  },
+  "scenarios": [
+    {
+      "name": "px --version cold",
+      "command": "px --version",
+      "fixture": {
+        "missions": 1
+      },
+      "summary": {
+        "samplesMs": [
+          221.277665,
+          182.466958,
+          192.039207,
+          175.898808,
+          198.182904
+        ],
+        "medianMs": 192.039207,
+        "tailMs": 221.277665
+      },
+      "counters": {
+        "gitSubprocesses": 0,
+        "gitWorktreeList": 0,
+        "sqliteQueries": "unavailable",
+        "taskDocumentReads": "unavailable"
+      },
+      "counterSamples": [
+        {
+          "gitSubprocesses": 0,
+          "gitWorktreeList": 0
+        },
+        {
+          "gitSubprocesses": 0,
+          "gitWorktreeList": 0
+        },
+        {
+          "gitSubprocesses": 0,
+          "gitWorktreeList": 0
+        },
+        {
+          "gitSubprocesses": 0,
+          "gitWorktreeList": 0
+        },
+        {
+          "gitSubprocesses": 0,
+          "gitWorktreeList": 0
+        }
+      ]
+    },
+    {
+      "name": "px status <slug>",
+      "command": "px status task-bench",
+      "fixture": {
+        "missions": 1
+      },
+      "summary": {
+        "samplesMs": [
+          1827.586275,
+          1846.300299,
+          1747.191798,
+          1684.457103,
+          1640.213138
+        ],
+        "medianMs": 1747.191798,
+        "tailMs": 1846.300299
+      },
+      "counters": {
+        "gitSubprocesses": 38,
+        "gitWorktreeList": 9,
+        "sqliteQueries": "unavailable",
+        "taskDocumentReads": "unavailable"
+      },
+      "counterSamples": [
+        {
+          "gitSubprocesses": 38,
+          "gitWorktreeList": 9
+        },
+        {
+          "gitSubprocesses": 38,
+          "gitWorktreeList": 9
+        },
+        {
+          "gitSubprocesses": 38,
+          "gitWorktreeList": 9
+        },
+        {
+          "gitSubprocesses": 38,
+          "gitWorktreeList": 9
+        },
+        {
+          "gitSubprocesses": 38,
+          "gitWorktreeList": 9
+        }
+      ]
+    },
+    {
+      "name": "px stats",
+      "command": "px stats",
+      "fixture": {
+        "missions": 1
+      },
+      "summary": {
+        "samplesMs": [
+          145.317404,
+          133.570641,
+          202.62195,
+          210.523686,
+          159.711991
+        ],
+        "medianMs": 159.711991,
+        "tailMs": 210.523686
+      },
+      "counters": {
+        "gitSubprocesses": 4,
+        "gitWorktreeList": 0,
+        "sqliteQueries": "unavailable",
+        "taskDocumentReads": "unavailable"
+      },
+      "counterSamples": [
+        {
+          "gitSubprocesses": 4,
+          "gitWorktreeList": 0
+        },
+        {
+          "gitSubprocesses": 4,
+          "gitWorktreeList": 0
+        },
+        {
+          "gitSubprocesses": 4,
+          "gitWorktreeList": 0
+        },
+        {
+          "gitSubprocesses": 4,
+          "gitWorktreeList": 0
+        },
+        {
+          "gitSubprocesses": 4,
+          "gitWorktreeList": 0
+        }
+      ]
+    },
+    {
+      "name": "CLI composition-root/module loading",
+      "module": "build/benchmark-composition.mjs",
+      "fixture": {
+        "missions": 1
+      },
+      "summary": {
+        "samplesMs": [
+          200.349597,
+          201.618706,
+          231.024331,
+          236.297413,
+          218.532022
+        ],
+        "medianMs": 218.532022,
+        "tailMs": 236.297413
+      },
+      "counters": {
+        "gitSubprocesses": "unavailable",
+        "gitWorktreeList": "unavailable",
+        "sqliteQueries": "unavailable",
+        "taskDocumentReads": "unavailable"
+      }
+    },
+    {
+      "name": "BoardProjection build",
+      "module": "BoardProjectionBuilder",
+      "fixture": {
+        "missions": 10
+      },
+      "summary": {
+        "samplesMs": [
+          0.215887,
+          0.111888,
+          0.092028,
+          0.086809,
+          0.094228
+        ],
+        "medianMs": 0.094228,
+        "tailMs": 0.215887
+      },
+      "counters": {
+        "gitSubprocesses": 0,
+        "gitWorktreeList": 0,
+        "sqliteQueries": 0,
+        "taskDocumentReads": 0
+      }
+    },
+    {
+      "name": "BoardProjection build",
+      "module": "BoardProjectionBuilder",
+      "fixture": {
+        "missions": 100
+      },
+      "summary": {
+        "samplesMs": [
+          0.669778,
+          0.674579,
+          0.672679,
+          0.761598,
+          0.533001
+        ],
+        "medianMs": 0.672679,
+        "tailMs": 0.761598
+      },
+      "counters": {
+        "gitSubprocesses": 0,
+        "gitWorktreeList": 0,
+        "sqliteQueries": 0,
+        "taskDocumentReads": 0
+      }
+    }
+  ]
+}
