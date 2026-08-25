@@ -3,6 +3,11 @@ import * as missionUtils from '../../filesystem/mission-utils.js';
 import rebase from './rebase.js';
 import * as fmt from '../../../application/presentation/cli-format.js';
 import { FailureClass, DispatchAction, classifyError, getDispatchAction } from '../../../application/failure-classification.js';
+import {
+  buildReboundFixPrompt,
+  classifyReboundReason,
+  type HandoffVerificationReason,
+} from '../../../application/rebound-kernel.js';
 
 // ── ADR 0048 classification (single table, owned by the application layer) ───
 // The eight failure classes, the three dispatch actions, and `classifyError`
@@ -41,167 +46,44 @@ function isRelaunchableError(errorMsg: string): boolean {
  * @returns {string} The relaunch prompt
   */
 function buildRelaunchPrompt(errorMsg: string, slug: string, worktree: string, gateOutput?: { stdout: string; stderr: string }) {
-  const { failureClass } = classifyError(errorMsg);
-  if (failureClass === FailureClass.GateFailure) {
-    return buildGateFailurePrompt(errorMsg, slug, worktree, gateOutput);
-  }
-  return buildGoalCheckRepairPrompt(errorMsg, slug, worktree, gateOutput);
-}
-
-/**
- * Build a state-aware fix prompt for a verification-gate/test failure: points the
- * agent at the captured failing-test output and asks for a code fix, not a
- * checkpoint edit.
- *
- * @param {string} errorMsg - The error message from the failed handoff
- * @param {string} slug - Mission slug
- * @param {string} worktree - Path to the mission worktree
- * @param {{stdout: string, stderr: string}} [gateOutput] - Captured verification gate output
- */
-function buildGateFailurePrompt(errorMsg: string, slug: string, worktree: string, gateOutput?: { stdout: string; stderr: string }) {
-  let prompt = `Automated handoff failed for mission ${slug} because the verification gate reported failing tests: ${errorMsg}
-
-` +
-          `This is a verification/test failure, not missing checkpoint evidence. Do NOT edit the checkpoint's ` +
-          `evidence table to work around this — fix the failing tests themselves.
-
-` +
-          `Steps:
-` +
-          `1. Review the captured gate output below to identify the failing test names and error/stack traces.
-` +
-          `2. Fix the code in ${worktree} so the failing verification tests pass.
-` +
-          `3. Re-run the verification gate locally to confirm it now passes.
-` +
-          `4. Commit the fix with a descriptive commit message.
-` +
-          `5. Re-run: px review ${slug} --submit`;
-
-  if (gateOutput && (gateOutput.stdout || gateOutput.stderr)) {
-    const totalOutput = (gateOutput.stdout || '') + (gateOutput.stderr || '');
-    const truncated = totalOutput.length > 16000
-      ? `[truncated — total ${totalOutput.length} chars, showing last 8000]\n` + totalOutput.slice(-8000)
-      : totalOutput;
-    prompt += `\n\n--- Captured Gate Output ---\n${truncated}`;
-  }
-
-  return prompt;
-}
-
-/**
- * Build the incomplete-evidence repair prompt: instructs the agent to add a
- * Goal Check table with real evidence to the final checkpoint document.
- *
- * @param {string} errorMsg - The error message from the failed handoff
- * @param {string} slug - Mission slug
- * @param {string} worktree - Path to the mission worktree
- * @param {{stdout: string, stderr: string}} [gateOutput] - Captured verification gate output
- */
-function buildGoalCheckRepairPrompt(errorMsg: string, slug: string, worktree: string, gateOutput?: { stdout: string; stderr: string }) {
-  const year = missionUtils.getMissionYear(slug, worktree);
+  const reason: HandoffVerificationReason = {
+    kind: 'handoff-verification',
+    error: errorMsg,
+    gateOutput: [gateOutput?.stdout, gateOutput?.stderr].filter(Boolean).join('\n'),
+  };
+  const classification = classifyReboundReason(reason);
   const missionDir = missionUtils.findMissionDir(slug, worktree) || missionUtils.missionDirForSlug(worktree, slug);
-
-  // Extract the offending row from the error message, if present.
-  // The handoff validator appends "Offending row: <row>" to IncompleteEvidence errors.
-  const offendingRowMatch = errorMsg.match(/Offending row:\s*(.+)$/m);
-  const offendingRow = offendingRowMatch ? offendingRowMatch[1].trim() : null;
-
-  // Detect whether this is a missing-checkpoint error (no CP-N.md exists)
-  // vs an existing-checkpoint-with-bad-evidence error.
-  const isMissingCheckpoint = errorMsg.includes('No checkpoint documents found');
-
-  let prompt = `Automated handoff failed for mission ${slug} with a repairable error: ${errorMsg}
-
-`;
-  if (isMissingCheckpoint) {
-    prompt += `Please create a checkpoint document (CP-1.md) in ${missionDir} with a ` +
-          `## Goal Check section and its evidence rows.
-
-`;
-  } else {
-    prompt += `Please fix the final checkpoint document in ${missionDir} by updating the ` +
-          `## Goal Check section and its evidence rows.
-
-`;
-  }
-  prompt += `Use one canonical heading: ## Goal Check
-
-` +
-          `Use this exact table shape:
-` +
-          `| Criterion | Evidence | Status |
-` +
-          `|---|---|---|
-
-` +
-          `Accepted evidence forms include:
-` +
-          `- exact test names already present in the repo
-` +
-          `- ADR references such as "ADR 0048"
-` +
-          `- test file paths such as "test/e2e-real-agent-smoke.test.ts"
-` +
-          `- recognized repo commands or paths already accepted by Parallix, such as \`npm test -- test/repair-handoff.test.ts\`, \`px review ${slug} --verify\`, or \`./scripts/verify-local.sh all\`
-
-` +
-          `- file:line references when necessary (accepted, but line numbers eventually rot)
-
-` +
-          `For an integration handoff, \`./scripts/verify-local.sh integrate\` is mandatory; \`./scripts/verify-local.sh all\` alone is not sufficient.
-
-` +
-          `Do not rely on raw \`stat\`/\`ls\` output or generic prose by themselves. If you keep shell output, pair it with one of the accepted references above.
-
-`;
-
-  if (offendingRow) {
-    prompt += `**What was rejected:** The validator flagged this row as unverifiable:
-${offendingRow}
-
-` +
-          `**Fix strategy:** Replace the evidence value in the offending row with an accepted reference from the list above. ` +
-          `Do not retry with only shell output or file metadata. If you want to keep a command like \`stat -c '%A' bin/hello.sh\`, pair it with a test name, test file path, ADR reference, or recognized repo command/path in the same cell.
-`;
-  } else {
-    prompt += `**Fix strategy:** Add at least one evidence row per criterion using the accepted forms listed above. ` +
-          `Do NOT use placeholder text, generic claims, or unverifiable statements.
-`;
-  }
-
-  prompt += `
-Steps:
-1. Open the final checkpoint document (CP-N.md) in ${missionDir}
-2. Ensure the "## Goal Check" section exists with the exact heading "## Goal Check"
-3. Create or update the pipe-delimited table with columns: Criterion | Evidence | Status
-4. Add at least one evidence row per criterion using the accepted forms above
-5. Commit the updated checkpoint with a descriptive commit message
-6. Re-run: px review ${slug} --submit
-
-Example Goal Check table:
-| Criterion | Evidence | Status |
-|---|---|---|
-| Final checkpoint has Goal Check section | docs/missions/${year}/${slug}/CP-1.md | PASS |
-| Tests pass | "buildRelaunchPrompt returns string containing Goal Check table and mission slug", test/repair-handoff.test.ts | PASS |
-| Verification gate ran | \`./scripts/verify-local.sh all\` | PASS |
-| Mandatory integration gate ran | \`./scripts/verify-local.sh integrate\` | PASS |
-| ADR 0048 exists | ADR 0048 | PASS |
-
-Do NOT add placeholder or generic evidence. Each row must cite real, verifiable artifacts.
-`;
-
-  // Append captured gate output if available (architecture migration)
-  if (gateOutput && (gateOutput.stdout || gateOutput.stderr)) {
-    const totalOutput = (gateOutput.stdout || '') + (gateOutput.stderr || '');
-    // Truncate if total output exceeds 16000 chars; keep last 8000 chars
-    const truncated = totalOutput.length > 16000
-      ? `[truncated — total ${totalOutput.length} chars, showing last 8000]\n` + totalOutput.slice(-8000)
-      : totalOutput;
-    prompt += `\n\n--- Captured Gate Output ---\n${truncated}`;
-  }
-
-  return prompt;
+  const offendingRow = errorMsg.match(/Offending row:\s*(.+)$/m)?.[1]?.trim();
+  const remedy = classification.failureClass === FailureClass.GateFailure
+    ? [
+      'This is a verification/test failure, not missing checkpoint evidence. Do not edit checkpoint evidence to work around it.',
+      `Fix the specific handoff verification failure shown above: fix the failing verification or test named in the captured output in ${worktree}, rerun that verification, and commit the fix.`,
+      `Post-return action: px review ${slug} --submit.`,
+    ].join('\n')
+    : [
+      `${errorMsg.includes('No checkpoint documents found') ? 'Create CP-1.md' : 'Fix the final checkpoint document (CP-N.md)'} in ${missionDir} with a Goal Check table.`,
+      'Use one canonical heading: ## Goal Check',
+      'Use this exact table shape:',
+      '| Criterion | Evidence | Status |',
+      '|---|---|---|',
+      'Accepted evidence includes exact test names, test file paths, ADR references, recognized repo commands or paths, and file:line references when necessary.',
+      'For an integration handoff, ./scripts/verify-local.sh integrate is mandatory; ./scripts/verify-local.sh all alone is not sufficient.',
+      ...(offendingRow ? [`Rejected row: ${offendingRow}`, 'Do not retry with only shell output or file metadata; replace it with a test file path, ADR reference, or recognized repo command/path.'] : []),
+      `Post-return action: px review ${slug} --submit.`,
+    ].join('\n');
+  const stageRemedy = `${remedy}\nLet the same verification rerun confirm the repair.`;
+  return buildReboundFixPrompt({
+    label: classification.label,
+    slug,
+    worktree,
+    area: 'handoff',
+    facts: [['Handoff error', errorMsg]],
+    diagnostic: [reason.error, reason.gateOutput].filter(Boolean).join('\n'),
+    classification,
+    attempt: 1,
+    maxAttempts: 2,
+    remedy: stageRemedy,
+  });
 }
 
 /** @param {string} file */

@@ -80,7 +80,7 @@ export interface HandoffBacklogPort {
 export interface HandoffForgejoPort {
   readToken(_user: string): string | null;
   resolveForgejoSettings(_rootDir: string): { url?: string; repo?: string };
-  createPr(_branch: string, _user: string, _token: string, _options: Record<string, unknown>): { ok: boolean; error?: string };
+  createPr(_branch: string, _user: string, _token: string, _options: Record<string, unknown>): { ok: boolean; error?: string; gateFailure?: HandoffResult['gateFailure'] };
   authenticatedReviewUrl(_user: string, _token: string, _rootDir: string): string;
   resolveTrackingBranchSha(_branch: string, _rootDir: string): { ok: boolean; sha?: string; error?: string };
 }
@@ -126,6 +126,7 @@ export interface HandoffVerificationPort {
   readReusableVerificationProof(_command: string, _rootDir: string): ProofResult;
   writeReusableVerificationProof(_command: string, _rootDir: string, _options?: Record<string, unknown>): ProofResult;
   runVerificationGate(_area: string, _options: Record<string, unknown>): CommandResult;
+  isTransientVerificationFailure(_output: { stdout?: unknown; stderr?: unknown }): boolean;
 }
 
 export interface HandoffNelComputationPort {
@@ -208,4 +209,14 @@ export interface HandoffResult {
   readonly reason?: string;
   readonly gatekeeperPushedBack?: boolean;
   readonly gateOutput?: { stdout: string; stderr: string };
+  /** Process evidence for a failed final verifier; never reduce this to `error`. */
+  readonly gateFailure?: {
+    area: string;
+    command: string;
+    cwd: string;
+    exitCode: number | null;
+    stdout: string;
+    stderr: string;
+    transient?: boolean;
+  };
 }

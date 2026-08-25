@@ -616,6 +616,7 @@ export class HandoffCommandUseCase {
       missionServicesFn = ports.missionServices,
       eligibleAgentsForStepFn = ports.agentSelection.eligibleAgentsForStep,
       selectAgentFn = ports.agentSelection.selectAgent
+      ,recoverGateFailure = false
     } = opts;
     const captureNel = captureNelFn || ((nelSlug, nelOptions) => this.captureNelAtHandoff(nelSlug, nelOptions));
 
@@ -757,7 +758,50 @@ export class HandoffCommandUseCase {
         const stderr = (verifyResult.stderr || '').trim();
         const msg = 'Final verification gate failed. Fix errors before submitting or use --no-gate if appropriate.';
         error(msg);
-        return { ok: false, error: msg, gateOutput: { stdout, stderr } };
+        const failure: HandoffResult = {
+          ok: false,
+          error: msg,
+          gateOutput: { stdout, stderr },
+          gateFailure: {
+            area: area || 'docs', command: verificationCommand, cwd: rootDir,
+            exitCode: verifyResult.status, stdout, stderr,
+            ...(ports.verification.isTransientVerificationFailure({ stdout, stderr }) ? { transient: true } : {}),
+          },
+        };
+        // `px handoff` used to print this result and exit, unlike the active
+        // command which routed it through rebound.  Keep one kernel policy for
+        // both entry points and re-run the complete handoff only after a real
+        // agent repair succeeds.  The recursive run disables this boundary so
+        // it returns fresh process evidence to the kernel instead of nesting
+        // another recovery budget.
+        if (!recoverGateFailure) { return failure; }
+        let retried: HandoffResult | null = null;
+        const outcome = await rebound(failure.gateFailure ? {
+          kind: 'gate-failure',
+          ...failure.gateFailure,
+        } : {
+          kind: 'handoff-verification', error: msg, gateOutput: `${stdout}\n${stderr}`.trim(),
+        }, {
+          slug,
+          worktree: rootDir,
+          implementer: forgejoUser,
+          startAgent: startAgentFn,
+          verify: async () => {
+            retried = await this.performHandoff(slug, {
+              ...opts, worktree: rootDir, force: true, recoverGateFailure: false,
+            });
+            return {
+              ok: Boolean(retried.ok),
+              diagnostic: retried.error || '',
+              reason: retried.gateFailure ? { kind: 'gate-failure', ...retried.gateFailure } : undefined,
+            };
+          },
+          log,
+          error,
+        });
+        return outcome.outcome === 'fixed' && retried
+          ? retried
+          : { ...failure, error: outcome.dossier || outcome.diagnostic || failure.error };
       }
       const proofResult = beforeGateProof.ok
         ? ports.verification.writeReusableVerificationProof(verificationCommand, rootDir, { expectedIdentity: beforeGateProof.identity })
@@ -878,7 +922,7 @@ export class HandoffCommandUseCase {
       if (!prResult.ok) {
         const msg = `Forgejo PR creation/update failed: ${prResult.error}`;
         error(msg);
-        return { ok: false, error: msg };
+        return { ok: false, error: msg, ...(prResult.gateFailure ? { gateFailure: prResult.gateFailure } : {}) };
       }
       if (prResult.prNumber) {
         submittedPr = { id: String(prResult.prNumber), url: prResult.url ?? null };
@@ -1186,7 +1230,7 @@ export class HandoffCommandUseCase {
         .filter(item => item.includes('backlog/tasks') || item.includes('backlog/task'))
         .map(() => '- **create** a backlog task file at `backlog/tasks/<slug> - <title>.md` with YAML frontmatter (id, title, status, labels) and a description section.'),
       '',
-      'After creating the missing artifacts, re-run the handoff (`px handoff ${slug}`).',
+      `After creating the missing artifacts, re-run the handoff (\`px handoff ${slug}\`).`,
     ].join('\n');
 
     // TASK-2377.05 (SC7): gatekeeper pushback bounces through the one rebound
@@ -1200,7 +1244,7 @@ export class HandoffCommandUseCase {
     const initialBudget = retriesLeft;
     if (retriesLeft <= 0) {
       // Budget already spent by an outer attempt — strand without launching.
-      const spent = `Gatekeeper pushback persisted after ${currentAttempt} relaunch attempts. Manual intervention required to create: ${missingItems.join(', ')}.`;
+      const spent = `Gatekeeper pushback persisted after ${currentAttempt - 1} relaunch attempts (${currentAttempt - 1}/2 budget). Manual intervention required to create: ${missingItems.join(', ')}.`;
       error(spent);
       return { ok: false, gatekeeperPushedBack: true, error: spent };
     }
@@ -1220,6 +1264,7 @@ export class HandoffCommandUseCase {
         // the kernel looping here. Two nested levels give the same two total
         // launches the pre-kernel loop made.
         maxAttempts: 1,
+        maxLaunchRetries: 0,
         startAgent: startAgentFn,
         verify: async (attempt: number) => {
           const retryResult = await this.performHandoff(slug, {
@@ -1253,7 +1298,10 @@ export class HandoffCommandUseCase {
     }
 
     // Budget spent, or the classifier ruled the pushback human-only.
-    const msg = `Gatekeeper pushback persisted after ${initialBudget} relaunch attempts. Manual intervention required to create: ${missingItems.join(', ')}.`;
+    // Only the outer handoff returns the dossier. Recursive verification levels
+    // return their last diagnostic so the outer dossier retains the evidence
+    // once instead of nesting copies of itself on every bounded retry.
+    const msg = `Manual intervention required. ${currentAttempt === 1 ? outcome.dossier || outcome.diagnostic : outcome.diagnostic}`;
     error(msg);
     return { ok: false, gatekeeperPushedBack: true, error: msg };
   }

@@ -420,12 +420,15 @@ agent with a fix prompt built from the failure's structured evidence and its
 classification.
 
 The CLI commands run the same path. A Git hook that rejects `px rebase`'s
-`rebase --continue` or `px integrate`'s squash commit, and both handoff bounces
-in `px active` — the pre-handoff checkpoint-validation repair and the
-handoff-failure repair — are the same verified-fix bounce with the same
-per-occurrence budget as the pre-review path, because they all call the one
-rebound kernel. There is no second bounce policy and no persisted retry counter
-left anywhere in the codebase.
+`rebase --continue` or `px integrate`'s squash commit, the final gate in
+`px handoff`, and both handoff bounces in `px active` — the pre-handoff
+checkpoint-validation repair and the handoff-failure repair — are the same
+verified-fix bounce with the same per-occurrence budget as the pre-review path,
+because they all call the one rebound kernel. There is no second bounce policy
+and no persisted retry counter left anywhere in the codebase.
+`px handoff` enables bounded gate repair by default; use `--no-recover` when an
+operator wants the command to stop at the failing gate without launching an
+implementer.
 
 Three guarantees govern that bounce:
 

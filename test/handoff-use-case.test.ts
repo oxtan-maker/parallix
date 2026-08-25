@@ -8,6 +8,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { HandoffCommandUseCase } from '../src/application/handoff-command-use-case.js';
+import { isTransientVerificationFailure } from '../src/adapters/verification/verification.js';
 import { createHandoffCommand, parseHandoffCliRequest, handoffExitCode } from '../src/interfaces/cli/handoff.js';
 import type { HandoffWorkflowPorts } from '../src/application/ports/handoff-workflow.js';
 
@@ -117,6 +118,7 @@ function makePorts(recorder: Recorder, overrides: Record<string, unknown> = {}):
       readReusableVerificationProof: () => ({ ok: false, error: 'no proof' }),
       writeReusableVerificationProof: () => ({ ok: true, identity: 'proof-1' }),
       runVerificationGate: () => ({ status: 0, stdout: '', stderr: '' }),
+      isTransientVerificationFailure,
     },
     nel: {
       computeNELRecord: () => ({ nel: 120, bucket: { label: 'Medium' } }),
@@ -155,10 +157,11 @@ function runOptions(recorder: Recorder, extra: Record<string, unknown> = {}) {
 // --- CLI interface tests (SC3) ---
 
 test('handoff CLI interface parses public flags without adapter dependencies', () => {
-  assert.deepEqual(parseHandoffCliRequest([SLUG, '--no-gate', '--force']), {
+  assert.deepEqual(parseHandoffCliRequest([SLUG, '--no-gate', '--no-recover', '--force']), {
     slug: SLUG,
     skipGate: true,
     force: true,
+    recoverGateFailure: false,
   });
 });
 
@@ -193,12 +196,48 @@ test('handoff CLI interface leaves the slug optional so the use case can infer i
 test('handoff CLI interface translates flags before invoking the use case', async () => {
   const recorder = makeRecorder();
   const seen: Array<{ slug?: string; skipGate: boolean; force: boolean }> = [];
+  let seenOptions: Record<string, unknown> = {};
   const useCase = new HandoffCommandUseCase(makePorts(recorder));
-  useCase.execute = async (request) => { seen.push(request); return { ok: true }; };
+  useCase.execute = async (request, options) => { seen.push(request); seenOptions = options; return { ok: true }; };
 
   await createHandoffCommand(useCase)([SLUG, '--no-gate', '--force'], {});
 
   assert.deepEqual(seen, [{ slug: SLUG, skipGate: true, force: true }]);
+  assert.equal(seenOptions.recoverGateFailure, true);
+});
+
+test('handoff CLI default performs bounded gate repair through the real use case', async () => {
+  const recorder = makeRecorder();
+  let gateRuns = 0;
+  const ports = makePorts(recorder, {
+    agents: {
+      startAgent: async () => {
+        recorder.relaunches.push(1);
+        return { agent: 'claude', result: { status: 0 } };
+      },
+    },
+  });
+
+  await createHandoffCommand(new HandoffCommandUseCase(ports))([SLUG], runOptions(recorder, {
+    runVerificationGateFn: () => ++gateRuns === 1
+      ? { status: 1, stdout: 'unit assertion failed', stderr: '' }
+      : { status: 0, stdout: '', stderr: '' },
+  }));
+
+  assert.equal(gateRuns, 2);
+  assert.equal(recorder.relaunches.length, 1);
+  assert.equal(recorder.transitions.at(-1), 'review');
+});
+
+test('handoff CLI --no-recover keeps a failed gate at the reporting boundary', async () => {
+  const recorder = makeRecorder();
+  let seenOptions: Record<string, unknown> = {};
+  const useCase = new HandoffCommandUseCase(makePorts(recorder));
+  useCase.execute = async (_request, options) => { seenOptions = options; return { ok: true }; };
+
+  await createHandoffCommand(useCase)([SLUG, '--no-recover'], {});
+
+  assert.equal(seenOptions.recoverGateFailure, false);
 });
 
 test('handoff CLI interface exits with code 1 when no slug can be inferred', async () => {
@@ -261,6 +300,53 @@ test('handoff use case fails closed when the final verification gate fails', asy
   assert.match(result.error ?? '', /Final verification gate failed/);
   assert.deepEqual(result.gateOutput, { stdout: 'out', stderr: 'boom' });
   assert.deepEqual(recorder.transitions, [], 'no backlog transition after a failed gate');
+});
+
+test('direct handoff recovers a gate failure through the kernel with its exact process evidence', async () => {
+  const recorder = makeRecorder();
+  let gateRuns = 0;
+  let repairPrompt = '';
+  const ports = makePorts(recorder, {
+    agents: {
+      startAgent: async (_step: string, options: Record<string, unknown>) => {
+        recorder.relaunches.push(1);
+        repairPrompt = (options.prompt as (agent: string) => string)('claude');
+        return { agent: 'claude', result: { status: 0 } };
+      },
+    },
+  });
+  const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder, {
+    recoverGateFailure: true,
+    runVerificationGateFn: () => ++gateRuns === 1
+      ? { status: 1, stdout: 'assertion failed in test/example.test.ts', stderr: 'expected 0, received 1' }
+      : { status: 0, stdout: '', stderr: '' },
+  }));
+
+  assert.equal(result.ok, true, recorder.errors.join('\n'));
+  assert.equal(recorder.relaunches.length, 1);
+  assert.match(repairPrompt, /PRE-REVIEW GATE FAILURE/);
+  assert.match(repairPrompt, /Gate command: npm run typecheck/);
+  assert.match(repairPrompt, /Working directory: \/root/);
+  assert.match(repairPrompt, /assertion failed in test\/example.test.ts/);
+  assert.doesNotMatch(repairPrompt, /GIT HOOK FAILURE/);
+});
+
+test('direct handoff retries a slow-test verifier result before it disturbs an agent', async () => {
+  const recorder = makeRecorder();
+  let gateRuns = 0;
+  const ports = makePorts(recorder, {
+    agents: { startAgent: async () => { throw new Error('an agent must not launch for a transient verifier retry'); } },
+  });
+  const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder, {
+    recoverGateFailure: true,
+    runVerificationGateFn: () => ++gateRuns === 1
+      ? { status: 1, stdout: '[unit-test-budget:exceeded] test/example.test.ts was slow', stderr: '' }
+      : { status: 0, stdout: '', stderr: '' },
+  }));
+
+  assert.equal(result.ok, true, recorder.errors.join('\n'));
+  assert.equal(gateRuns, 2);
+  assert.equal(recorder.relaunches.length, 0);
 });
 
 test('handoff use case fails closed when a declared MISSION.md gate fails', async () => {
@@ -538,4 +624,23 @@ test('handoff use case creates the Forgejo PR through the port when the provider
 
   assert.equal(result.ok, true, recorder.errors.join('\n'));
   assert.deepEqual(created, [BRANCH]);
+});
+
+test('handoff preserves a publication verifier failure as structured gate evidence', async () => {
+  const recorder = makeRecorder();
+  const gateFailure = {
+    area: 'all', command: './scripts/verify-local.sh all', cwd: ROOT,
+    exitCode: 1, stdout: 'specific failing test', stderr: '',
+  };
+  const ports = makePorts(recorder, {
+    productConfig: { isForgejoReviewEnabled: () => true },
+    forgejo: {
+      ...makePorts(recorder).forgejo,
+      createPr: () => ({ ok: false, error: 'verification gate failed', gateFailure }),
+    },
+  });
+
+  const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.gateFailure, gateFailure);
 });

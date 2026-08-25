@@ -73,7 +73,7 @@ test('missing checkpoint: classifyError recognizes missing-checkpoint message as
     'Missing checkpoint should dispatch AutoSendBack for agent relaunch');
 });
 
-test('missing checkpoint: buildRelaunchPrompt names the required CP-N.md and Goal Check requirements', () => {
+test('missing checkpoint: compatibility prompt preserves the actual checkpoint failure', () => {
   const { buildRelaunchPrompt } = repairHandoff;
   const errorMsg = 'No checkpoint documents found in /tmp/worktree/missions/task-2261. The execute agent must create checkpoint documents (CP-N.md) with a Goal Check table before handoff.';
 
@@ -82,10 +82,11 @@ test('missing checkpoint: buildRelaunchPrompt names the required CP-N.md and Goa
   assert.ok(typeof prompt === 'string', 'Prompt should be a string');
   assert.ok(prompt.includes('CP-'), 'Prompt should name the required checkpoint artifact (CP-N.md)');
   assert.ok(/## Goal Check/.test(prompt), 'Prompt should require the exact ## Goal Check heading');
-  assert.ok(/Criterion\s*\|\s*Evidence\s*\|\s*Status/.test(prompt),
-    'Prompt should specify the exact table columns: Criterion | Evidence | Status');
-  assert.ok(prompt.includes('px review task-2261 --submit'),
-    'Prompt should supply the exact retry command: px review <slug> --submit');
+  assert.ok(/Criterion\s*\|\s*Evidence\s*\|\s*Status/.test(prompt), 'Prompt should specify the exact table columns');
+  assert.ok(prompt.includes('px review task-2261 --submit'), 'Prompt should supply the retry command');
+  assert.ok(prompt.includes(errorMsg));
+  assert.ok(prompt.includes('Working directory: /tmp/worktree'));
+  assert.ok(prompt.includes('Classification: IncompleteEvidence — AutoSendBack'));
 });
 
 // ── CP-2: Checkpoint missing Goal Check table → repairable relaunch ──
@@ -102,17 +103,17 @@ test('checkpoint missing Goal Check: classifyError recognizes as IncompleteEvide
     'Missing Goal Check should dispatch AutoSendBack for agent relaunch');
 });
 
-test('checkpoint missing Goal Check: buildRelaunchPrompt includes Goal Check requirements', () => {
+test('checkpoint missing Goal Check: compatibility prompt retains the failed check evidence', () => {
   const { buildRelaunchPrompt } = repairHandoff;
   const errorMsg = 'The final checkpoint at missions/task-2261/CP-1.md is missing a "## Goal Check" section. Review requires a goal-check table with real evidence before handoff.';
 
   const prompt = buildRelaunchPrompt(errorMsg, 'task-2261', '/tmp/worktree');
 
   assert.ok(/## Goal Check/.test(prompt), 'Prompt should require the ## Goal Check heading');
-  assert.ok(/Criterion\s*\|\s*Evidence\s*\|\s*Status/.test(prompt),
-    'Prompt should specify table columns: Criterion | Evidence | Status');
-  assert.ok(prompt.includes('px review task-2261 --submit'),
-    'Prompt should supply the retry command');
+  assert.ok(/Criterion\s*\|\s*Evidence\s*\|\s*Status/.test(prompt), 'Prompt should specify table columns');
+  assert.ok(prompt.includes('px review task-2261 --submit'), 'Prompt should supply the retry command');
+  assert.ok(prompt.includes(errorMsg));
+  assert.ok(prompt.includes('Classification: IncompleteEvidence — AutoSendBack'));
 });
 
 // ── CP-3: Retry lifecycle outcomes ──

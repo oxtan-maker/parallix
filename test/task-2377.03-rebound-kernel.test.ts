@@ -74,11 +74,21 @@ test('task-2377.03: an artifact-incomplete reason classifies as IncompleteEviden
   assert.equal(classification.dispatchAction, 'AutoSendBack');
 });
 
-test('task-2377.03: an agent-timeout reason classifies as an InfraBlocker human-only failure', () => {
+test('task-2377.03: an agent-timeout reason classifies as incomplete evidence and gets the shared rebound budget', () => {
   const classification = classifyReboundReason({ kind: 'agent-timeout', role: 'reviewer' });
-  assert.equal(classification.failureClass, 'InfraBlocker');
-  assert.equal(classification.dispatchAction, 'HumanOnly');
-  assert.equal(classification.isRelaunchable, false);
+  assert.equal(classification.failureClass, 'IncompleteEvidence');
+  assert.equal(classification.dispatchAction, 'AutoSendBack');
+  assert.equal(classification.isRelaunchable, true);
+});
+
+test('task-2413: an agent-timeout carrying explicit infrastructure evidence does not burn repair attempts', async () => {
+  let launches = 0;
+  const outcome = await rebound({
+    kind: 'agent-timeout', role: 'reviewer', diagnostic: 'forgejo connection refused',
+  }, contextFor({ startAgent: async () => { launches++; return { result: { status: 0 } }; } }));
+  assert.equal(outcome.outcome, 'human-only');
+  assert.equal(outcome.classification.failureClass, 'InfraBlocker');
+  assert.equal(launches, 0);
 });
 
 test('task-2377.03: a handoff-verification reason classifies from its own ADR 0048 error text', () => {
@@ -132,15 +142,15 @@ test('task-2377.03: reboundDiagnostic flattens structured reasons without regex 
 
 // ── Contract: human-only never launches ──────────────────────────────────────
 
-test('task-2377.03: a human-only classification returns human-only without launching an agent', async () => {
+test('task-2377.03: an agent timeout uses the shared rebound launch and verify loop', async () => {
   let launches = 0;
   const outcome = await rebound(
     { kind: 'agent-timeout', role: 'reviewer' },
     contextFor({ startAgent: async () => { launches++; return { agent: 'codex', result: { status: 0 } }; } }),
   );
-  assert.equal(outcome.outcome, 'human-only');
-  assert.equal(outcome.attempts, 0);
-  assert.equal(launches, 0, 'a human-only failure must not launch an agent');
+  assert.equal(outcome.outcome, 'fixed');
+  assert.equal(outcome.attempts, 1);
+  assert.equal(launches, 1);
 });
 
 // ── Fix prompt (single builder) ──────────────────────────────────────────────
@@ -181,7 +191,7 @@ test('task-2377.03: the hook fix prompt uses the same builder with hook slots', 
   assert.match(prompt, /The failing check re-runs automatically after your fix/);
 });
 
-test('task-2386: the rebound fix prompt states the execute-verify-report completion contract', () => {
+test('task-2386: the rebound fix prompt states a stage-specific execute-verify-report contract', () => {
   const classification = classifyReboundReason(hookReason);
   const prompt = buildReboundFixPrompt({
     label: classification.label,
@@ -194,9 +204,21 @@ test('task-2386: the rebound fix prompt states the execute-verify-report complet
     maxAttempts: DEFAULT_REBOUND_ATTEMPTS,
     remedy: 'Fix the underlying issue so the Git hook passes.',
   });
-  assert.match(prompt, /Execute the listed commands now/);
-  assert.match(prompt, /Report completion only after/i);
-  assert.match(prompt, /report the failure and stop/i);
+  assert.match(prompt, /Perform this stage-specific repair now/);
+  assert.match(prompt, /Verify the required result/i);
+  assert.doesNotMatch(prompt, /listed commands|rebase/i);
+});
+
+test('task-2413: rebound preserves role-family exclusions for fallback selection', async () => {
+  let exclude: unknown;
+  await rebound(gateReason, contextFor({
+    exclude: ['claude'],
+    startAgent: async (_step, options: any) => {
+      exclude = options.exclude;
+      return { agent: 'codex', result: { status: 0 } };
+    },
+  }));
+  assert.deepEqual(exclude, ['claude']);
 });
 
 // ── Verify loop, budget, and launch failures (SC2 / SC3 / SC4) ───────────────
@@ -268,7 +290,7 @@ test('task-2377.03: a null-exit first attempt still allows a verified fix inside
     verify: () => ({ ok: true }),
   }));
   assert.equal(outcome.outcome, 'fixed');
-  assert.equal(outcome.attempts, 2);
+  assert.equal(outcome.attempts, 1, 'only the completed repair attempt is charged; the launcher retry has its own budget');
 });
 
 test('task-2377.03: a throwing launch is a failed attempt, not a fix', async () => {

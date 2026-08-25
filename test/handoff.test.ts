@@ -1851,6 +1851,8 @@ test('performHandoff attempts agent relaunch when gatekeeper posts pushback', as
     assert.ok(relaunchPrompt, 'the kernel fix prompt should have been built');
     assert.ok(relaunchPrompt.includes('MISSION.md'), 'prompt should mention MISSION.md');
     assert.ok(relaunchPrompt.includes('create'), 'prompt should contain creation instructions');
+    assert.ok(relaunchPrompt.includes(`px handoff ${slug}`), 'prompt should name the exact post-repair handoff command');
+    assert.ok(!relaunchPrompt.includes('${slug}'), 'prompt must not leak an unsubstituted mission placeholder');
   } finally {
     fs.rmSync(worktree, { recursive: true, force: true });
   }

@@ -12,6 +12,7 @@ export interface HandoffCliRequest {
   readonly slug: string | undefined;
   readonly skipGate: boolean;
   readonly force: boolean;
+  readonly recoverGateFailure: boolean;
 }
 
 /** Parse handoff CLI flags without consulting filesystem or adapter state. */
@@ -19,6 +20,7 @@ export function parseHandoffCliRequest(args: string[]): HandoffCliRequest {
   const positional: string[] = [];
   let skipGate = false;
   let force = false;
+  let recoverGateFailure = true;
   for (const arg of args) {
     if (arg === '--no-gate') {
       if (skipGate) { throw new Error('--no-gate may be supplied only once.'); }
@@ -26,13 +28,16 @@ export function parseHandoffCliRequest(args: string[]): HandoffCliRequest {
     } else if (arg === '--force') {
       if (force) { throw new Error('--force may be supplied only once.'); }
       force = true;
+    } else if (arg === '--no-recover') {
+      if (!recoverGateFailure) { throw new Error('--no-recover may be supplied only once.'); }
+      recoverGateFailure = false;
     } else if (arg.startsWith('--')) {
       throw new Error(`Unknown handoff option: ${arg}`);
     } else {
       positional.push(arg);
     }
   }
-  return { slug: positional[0], skipGate, force };
+  return { slug: positional[0], skipGate, force, recoverGateFailure };
 }
 
 /**
@@ -47,10 +52,10 @@ export function createHandoffCommand(useCase: HandoffCommandUseCase) {
   return async (args: string[], options: Record<string, unknown> = {}) => {
     // The slug stays optional because the use case infers it from the current
     // worktree when no positional is supplied.
-    const request = parseHandoffCliRequest(args);
-    const result = await useCase.execute(request, options);
+    const { recoverGateFailure, ...request } = parseHandoffCliRequest(args);
+    const result = await useCase.execute(request, { ...options, recoverGateFailure });
     if (result.usage) {
-      fmt.log.fail(result.error ?? 'Usage: node parallix handoff [<slug>] [--no-gate] [--force]');
+      fmt.log.fail(result.error ?? 'Usage: node parallix handoff [<slug>] [--no-gate] [--no-recover] [--force]');
     }
     if (handoffExitCode(result) !== 0) {
       process.exit(1);

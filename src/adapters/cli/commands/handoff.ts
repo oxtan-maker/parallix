@@ -22,7 +22,7 @@ import * as forgejo from '../../forgejo/forgejo.js';
 import { resolveReviewIdentity } from '../../review/review-state.js';
 import * as setupReview from '../../review/setup-review.js';
 import * as gatekeeper from '../../verification/gatekeeper.js';
-import { createVerificationProofIdentity, formatVerificationCommand, readReusableVerificationProof, runVerificationGate, writeReusableVerificationProof } from '../../verification/verification.js';
+import { createVerificationProofIdentity, formatVerificationCommand, isTransientVerificationFailure, readReusableVerificationProof, runVerificationGate, writeReusableVerificationProof } from '../../verification/verification.js';
 import { isForgejoReviewEnabled } from '../../config/product-config.js';
 import { rebaseBeforeReviewRound } from '../../review/rebase.js';
 import { computeNELRecord } from '../../git/net-engineering-lines.js';
@@ -103,6 +103,7 @@ export function createHandoffPorts(): HandoffWorkflowPorts {
         ? writeReusableVerificationProof(command, rootDir)
         : writeReusableVerificationProof(command, rootDir, options)),
       runVerificationGate: (area, options) => runVerificationGate(area, options),
+      isTransientVerificationFailure: (output) => isTransientVerificationFailure(output),
     },
     nel: {
       computeNELRecord: (range, options) => computeNELRecord(range, options),

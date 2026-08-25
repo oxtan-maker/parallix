@@ -42,7 +42,7 @@ Check:
 
   - Artifact handoff is mandatory: your final chat response does **not** submit a review. Before stopping, create all three files: `{{artifactDir}}/{{slug}}-review-findings.md`, `{{artifactDir}}/{{slug}}-review-outcome.md`, and `{{artifactDir}}/{{slug}}-review-verdict.txt`.
 - Write findings to `{{artifactDir}}/{{slug}}-review-findings.md`, then write the outcome and verdict files alongside it.
-- The findings file must contain findings (write No findings. when approving). The outcome file must state `Outcome: approve` or `Outcome: request-changes`. The verdict file must contain exactly `approve` or `request-changes` and a newline. `comment` is not valid.
+- The findings file must contain findings (write `No findings.` when approving). For request-changes, give every finding a parser-stable heading such as `## F1: summary`, `## F2: summary`; round-prefixed headings such as `## R3-1` are invalid. The outcome file must state `Outcome: approve` or `Outcome: request-changes`. The verdict file must contain exactly `approve` or `request-changes` and a newline. `comment` is not valid.
 - After writing them, run `ls -l {{artifactDir}}/{{slug}}-review-findings.md {{artifactDir}}/{{slug}}-review-outcome.md {{artifactDir}}/{{slug}}-review-verdict.txt` and read back the verdict file. If any file is absent or the verdict is not exact, fix the files before stopping.
 - Do not call px directly, the workflow will do that for you — except for the read-only `px status {{slug}}` above, which you must run to load review history
 - Do not post to Forgejo directly; `px review {{slug}} --start` or `--submit` publishes the artifacts.

@@ -25,6 +25,7 @@ import path from 'node:path';
 import childProcess from 'node:child_process';
 import { ReviewCommandUseCase } from '../src/application/review-command-use-case.js';
 import { createReviewCommand } from '../src/interfaces/cli/review.js';
+import { resolveReviewerIdentity } from '../src/adapters/review/review-agent-fallback.js';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
 const fmt = mockModule<typeof import('../src/application/presentation/cli-format.js')>('../src/application/presentation/cli-format.js', import.meta.url);
 const startReviewLoopModule = mockModule<typeof import('../src/adapters/review/review-loop.js')>('../src/adapters/review/review-loop.js', import.meta.url);
@@ -77,6 +78,11 @@ const { createEventHandler } = createEventHandlerModule;
 
 // Base mission slug — append process.pid for isolation between parallel runs.
 const TEST_SLUG = `task-test-review-${process.pid}`;
+const hermeticLoopCollaborators = {
+  gitFn: () => ({ status: 0, stdout: 'main\n', stderr: '' }),
+  recordStageStatsSafeFn: async () => {},
+  transitionTaskFn: async () => true,
+};
 const persistenceCommitted = () => ({ outcome: 'committed' });
 // Dry-run tests assert local loop setup, not provider behavior. Make that
 // boundary explicit so they cannot probe the workstation's Forgejo service.
@@ -657,6 +663,7 @@ test('startReviewLoop full loop success and exit cases', async () => {
   let preReviewGateCalls = 0;
 
   const baseOpts = {
+    ...hermeticLoopCollaborators,
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     slug: TEST_SLUG,
     implementer: 'claude',
@@ -929,6 +936,7 @@ test('startReviewLoop rebases immediately before each reviewer round', async () 
   const dispositions = ['CHANGES_MADE'];
 
   await startReviewLoop(TEST_SLUG, {
+    ...hermeticLoopCollaborators,
     eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     implementer: 'claude',
@@ -1103,6 +1111,7 @@ test('startReviewLoop continue handles existing fixing dispositions', async () =
     const roundTwoReviewPolls = [];
 
     await startReviewLoop(TEST_SLUG, {
+      ...hermeticLoopCollaborators,
       continue: true,
       eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
@@ -1163,6 +1172,7 @@ test('startReviewLoop continue reviewing phase skips only when existing review i
     const launches = [];
 
     await startReviewLoop(TEST_SLUG, {
+      ...hermeticLoopCollaborators,
       continue: true,
       eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
@@ -2517,7 +2527,7 @@ test('startReviewLoop handles reviewer polling timeout with recovery', async () 
     rebaseBeforeReviewRoundFn: async () => ({ ok: true, sharedFileConflicts: false }),
     startAgentFn: async () => {
       launchCount++;
-      return { agent: 'codex' };
+      return { agent: 'codex', result: { status: 0 } };
     },
     pollForReviewFn: async () => POLL_TIMEOUT,
     consumeReviewerArtifactsFn: async () => ({ consumed: false }),
@@ -2528,7 +2538,7 @@ test('startReviewLoop handles reviewer polling timeout with recovery', async () 
   // With timeout recovery (task-1136), the reviewer is relaunched up to 2 times on timeout (3-strike limit)
   assert.equal(launchCount, 3, 'Should launch reviewer 1 initial + 2 retries on timeout');
   // After 2 retries (3 total timeouts), fail closed for human intervention.
-  assert.ok(errors.some(e => e.includes('did not submit a usable formal review outcome')), 'Should report exhausted reviewer recovery');
+  assert.ok(errors.some(e => e.includes('Recovery dossier for')), 'Should report the exhausted recovery evidence on stderr');
   assert.deepEqual(exitCodes, [], 'Should persist human escalation instead of exiting after bounded reviewer retries');
 });
 
@@ -2545,6 +2555,7 @@ test('startReviewLoop performs recovery relaunches without persisting any retry 
     resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
     implementer: 'claude',
     reviewer: 'codex',
+    reboundsPerRound: -1,
     dryRun: false,
     log: () => {},
     error: () => {},
@@ -2561,9 +2572,9 @@ test('startReviewLoop performs recovery relaunches without persisting any retry 
     writeReviewStateFn: (slug, state) => {
       events.push({ type: 'write', reviewerRetryCount: state.reviewerRetryCount, phase: state.phase });
     },
-    startAgentFn: async (step) => {
-      events.push({ type: 'start', step });
-      return { agent: 'codex' };
+    startAgentFn: async (step, options) => {
+      events.push({ type: 'start', step, prompt: options.prompt('codex'), exclude: options.exclude });
+      return { agent: 'codex', result: { status: 0 } };
     },
     pollForReviewFn: async () => {
       reviewPolls += 1;
@@ -2581,6 +2592,8 @@ test('startReviewLoop performs recovery relaunches without persisting any retry 
   );
 
   assert.notEqual(secondReviewerStartIndex, -1, 'reviewer recovery relaunch must happen');
+  assert.match(events[secondReviewerStartIndex].prompt, /review prompt[\s\S]*AGENT TIMEOUT/);
+  assert.deepEqual(events[secondReviewerStartIndex].exclude, ['claude']);
   assert.ok(!events.some(event => event.type === 'write' && event.reviewerRetryCount !== undefined),
     'no state write may carry a persisted reviewer retry count (TASK-2377.04)');
 });
@@ -2614,9 +2627,9 @@ test('startReviewLoop performs the implementer recovery relaunch without persist
     writeReviewStateFn: (slug, state) => {
       events.push({ type: 'write', implementerRetryCount: state.implementerRetryCount, phase: state.phase });
     },
-    startAgentFn: async (step) => {
-      events.push({ type: 'start', step });
-      return { agent: step === 'review' ? 'codex' : 'claude' };
+    startAgentFn: async (step, options) => {
+      events.push({ type: 'start', step, prompt: options.prompt(step === 'review' ? 'codex' : 'claude'), exclude: options.exclude });
+      return { agent: step === 'review' ? 'codex' : 'claude', result: { status: 0 } };
     },
     pollForReviewFn: async () => 'REQUEST_CHANGES',
     pollForDispositionFn: async () => {
@@ -2637,8 +2650,51 @@ test('startReviewLoop performs the implementer recovery relaunch without persist
   const recoveryStartIndex = implementerStarts[1] ? implementerStarts[1].index : -1;
 
   assert.notEqual(recoveryStartIndex, -1, 'implementer recovery relaunch must happen');
+  assert.match(events[recoveryStartIndex].prompt, /act-on-review prompt[\s\S]*AGENT TIMEOUT/);
+  assert.deepEqual(events[recoveryStartIndex].exclude, ['codex']);
   assert.ok(!events.some(event => event.type === 'write' && event.implementerRetryCount !== undefined),
     'no state write may carry a persisted implementer retry count (TASK-2377.04)');
+});
+
+test('startReviewLoop preserves an implementer artifact infrastructure failure during timeout recovery', async () => {
+  const errors = [];
+  const launches = [];
+  let artifactReads = 0;
+
+  await startReviewLoop(TEST_SLUG, {
+    ...hermeticLoopCollaborators,
+    eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
+    resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
+    implementer: 'claude', reviewer: 'codex', maxAttempts: 1, dryRun: false,
+    writeReviewStateFn: persistenceCommitted,
+    log: () => {}, error: message => errors.push(String(message)), exit: () => {},
+    workflowLauncherStatusFn: () => ({ supported: true }),
+    isForgejoReviewEnabledFn: () => true, forgejoAvailableFn: async () => true,
+    getPrStatusFn: () => ({ exists: true, state: 'open', number: 41 }),
+    maybeUpdateGraphifyBeforeReviewFn: () => {}, enforceTaskAssigneeFn: () => true,
+    rebaseBeforeReviewRoundFn: async () => ({ ok: true, sharedFileConflicts: false }),
+    readTokenFn: () => 'token', pollForReviewFn: async () => 'REQUEST_CHANGES',
+    pollForDispositionFn: async () => POLL_TIMEOUT,
+    startAgentFn: async (step, options) => {
+      launches.push({ step, agent: options.agent });
+      return { agent: options.agent, result: { status: 0 } };
+    },
+    applyAgentFallbackFn: ({ original }) => original,
+    consumeReviewerArtifactsFn: async () => ({ consumed: false }),
+    consumeImplementerArtifactsFn: async () => ++artifactReads === 1
+      ? { consumed: false }
+      : { consumed: true, ok: false, diagnostic: 'Implementer artifact persist failed: disk full' },
+    runPreReviewGateFn: passingPreReviewGate,
+  });
+
+  assert.equal(launches.filter(launch => launch.step === 'act-on-review').length, 2,
+    'the infrastructure diagnostic stops timeout recovery after its first re-consume');
+  assert.ok(errors.some(error => error.includes('Recovery infrastructure failure: Implementer artifact persist failed: disk full')),
+    'the preserved artifact diagnostic reaches the operator');
+  assert.ok(!errors.some(error => error.includes('Forgejo infrastructure failure')),
+    'a local persistence failure is not mislabeled as Forgejo');
+  assert.ok(errors.some(error => error.includes('Implementer artifact infrastructure failure during timeout recovery')),
+    'the timeout path retains the artifact-infrastructure escalation');
 });
 
 // ---------- startReviewLoop taskResolution scope (TASK-1041) ----------
@@ -2690,6 +2746,7 @@ test('startReviewLoop passes taskResolution to applyAgentFallback for both revie
 
   const { exitCode } = await captureExit(() => {
     return startReviewLoop(TEST_SLUG, {
+      ...hermeticLoopCollaborators,
       eligibleAgentsForStepFn: () => ['codex', 'claude', 'gemini', 'custom'],
       implementer: 'codex',
       reviewer: 'claude',
@@ -2706,6 +2763,8 @@ test('startReviewLoop passes taskResolution to applyAgentFallback for both revie
       getLatestReviewForPrFn: async () => ({ state: 'COMMENT' }),
       getLatestDispositionForPrFn: async () => 'CHANGES_MADE',
       sleepFn: async () => {},
+      pollForReviewFn: async () => 'REQUEST_CHANGES',
+      pollForDispositionFn: async () => 'PARKED',
       rebaseBeforeReviewRoundFn: async () => ({ ok: true, sharedFileConflicts: false }),
       consumeReviewerArtifactsFn: async () => ({ consumed: false }),
       consumeImplementerArtifactsFn: async () => ({ consumed: false }),
@@ -2919,46 +2978,27 @@ test('startReviewLoop keeps persisted same-family reviewer after re-derive block
   assert.ok(!logs.some(l => l.includes('re-derived')), `Did not expect re-derive log; got: ${logs.join(' | ')}`);
 });
 
-test('startReviewLoop continue falls back to the persisted reviewer when an explicit override is unsupported', async () => {
-  const launches = [];
-
-  const { exitCode, errors, logs } = await captureExit(() => {
-    return startReviewLoop(TEST_SLUG, {
-      eligibleAgentsForStepFn: () => ['codex', 'claude', 'custom', 'vibe'],
-      resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
-      implementer: 'custom',
-      reviewer: 'vibe',
-      isContinue: true,
-      dryRun: false,
-      writeReviewStateFn: persistenceCommitted,
-      readReviewStateFn: () => ({
-        reviewer: 'codex',
-        implementer: 'custom',
-        round: 5,
-        startedAt: '2026-07-04T19:05:22.850Z',
-        phase: 'reviewing',
-        disposition: 'CHANGES_MADE'
-      }),
-      maybeUpdateGraphifyBeforeReviewFn: () => {},
-      isForgejoReviewEnabledFn: () => false,
-      workflowLauncherStatusFn: (agent) => ({ supported: agent !== 'vibe', detail: `${agent} --help` }),
-      rebaseBeforeReviewRoundFn: async () => ({ ok: true, sharedFileConflicts: false }),
-      consumeReviewerArtifactsFn: async () => ({ consumed: true, ok: true, reviewState: 'APPROVED' }),
-      consumeImplementerArtifactsFn: async () => ({ consumed: false }),
-      startAgentFn: async (mode, opts) => {
-        launches.push({ mode, agent: opts.agent });
-        return { agent: opts.agent, result: { startedAt: '2026-07-04T19:20:00.000Z' } };
-      },
-      pollForReviewFn: async () => 'APPROVED',
-      transitionTaskFn: async () => {},
-      transitionVirtualFn: () => {},
-      applyAgentFallbackFn: ({ original }) => original
-    });
+test('continue selection falls back to the persisted reviewer when an explicit override is unsupported', () => {
+  const logs = [];
+  const result = resolveReviewerIdentity({
+    reviewer: 'vibe',
+    implementer: 'custom',
+    isContinue: true,
+    persisted: { reviewer: 'codex', round: 5, phase: 'reviewing' },
+    agents: ['codex', 'claude', 'custom', 'vibe'],
+    selectReviewer: () => 'claude',
+    workflowLauncherStatusFn: (agent) => ({ agent, supported: agent !== 'vibe', detail: `${agent} --help` }),
+    buildAutonomousReviewMatrixFn: () => ({}),
+    formatMatrixSummaryFn: () => [],
+    maxAttempts: 5,
+    dryRun: false,
+    forgejoEnabled: false,
+    slug: TEST_SLUG,
+    log: (line) => logs.push(line),
+    error: (line) => { throw new Error(line); },
   });
 
-  assert.equal(exitCode, null);
-  assert.deepEqual(errors, []);
-  assert.deepEqual(launches, [{ mode: 'review', agent: 'codex' }]);
+  assert.deepEqual(result, { reviewer: 'codex', reviewerSource: 'persisted-continue-fallback' });
   assert.ok(
     logs.some(line => line.includes('falling back to persisted reviewer "codex"')),
     `Expected persisted-reviewer fallback log; got: ${logs.join(' | ')}`
@@ -2967,6 +3007,35 @@ test('startReviewLoop continue falls back to the persisted reviewer when an expl
     logs.some(line => line.includes('Selected reviewer: codex (persisted-continue-fallback)')),
     `Expected persisted continue fallback selection log; got: ${logs.join(' | ')}`
   );
+});
+
+test('startReviewLoop continue falls back to the persisted reviewer when an explicit override is unsupported', async () => {
+  const launches = [];
+  const { exitCode, errors, logs } = await captureExit(() => startReviewLoop(TEST_SLUG, {
+    ...hermeticLoopCollaborators,
+    eligibleAgentsForStepFn: () => ['codex', 'claude', 'custom', 'vibe'],
+    resolveTaskFileFn: () => ({ ok: true, taskFile: '/tmp/task.md' }),
+    implementer: 'custom', reviewer: 'vibe', isContinue: true, dryRun: false,
+    writeReviewStateFn: persistenceCommitted,
+    readReviewStateFn: () => ({ reviewer: 'codex', implementer: 'custom', round: 5, startedAt: '2026-07-04T19:05:22.850Z', phase: 'reviewing', disposition: 'CHANGES_MADE' }),
+    maybeUpdateGraphifyBeforeReviewFn: () => {}, isForgejoReviewEnabledFn: () => false,
+    workflowLauncherStatusFn: agent => ({ supported: agent !== 'vibe', detail: `${agent} --help` }),
+    rebaseBeforeReviewRoundFn: async () => ({ ok: true, sharedFileConflicts: false }),
+    consumeReviewerArtifactsFn: async () => ({ consumed: true, ok: true, reviewState: 'APPROVED' }),
+    consumeImplementerArtifactsFn: async () => ({ consumed: false }),
+    startAgentFn: async (mode, opts) => {
+      launches.push({ mode, agent: opts.agent });
+      return { agent: opts.agent, result: { startedAt: '2026-07-04T19:20:00.000Z' } };
+    },
+    runPreReviewGateFn: passingPreReviewGate,
+    pollForReviewFn: async () => 'APPROVED', transitionVirtualFn: () => {},
+    applyAgentFallbackFn: ({ original }) => original,
+  }));
+
+  assert.equal(exitCode, null);
+  assert.deepEqual(errors, []);
+  assert.deepEqual(launches, [{ mode: 'review', agent: 'codex' }]);
+  assert.ok(logs.some(line => line.includes('falling back to persisted reviewer "codex"')));
 });
 
 test('startReviewLoop resolves task file from the mission worktree (regression)', async () => {
@@ -3565,6 +3634,7 @@ test('startReviewLoop persists CHANGES_MADE disposition before continuing', asyn
   const stateWrites = [];
 
   await startReviewLoop(TEST_SLUG, {
+    ...hermeticLoopCollaborators,
     implementer: 'claude',
     reviewer: 'codex',
     maxAttempts: 2,

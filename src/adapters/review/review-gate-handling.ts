@@ -20,7 +20,7 @@ import {
 import { classifyHookFailure } from '../../application/hook-failure-workflow.js';
 import { run } from '../git/git.js';
 import { findMissionDir, findMissionArea } from '../filesystem/mission-utils.js';
-import { formatVerificationCommand, resolveEffectiveArea } from '../verification/verification.js';
+import { formatVerificationCommand, isTransientVerificationFailure, resolveEffectiveArea } from '../verification/verification.js';
 import { enforceTaskAssignee, transitionTask } from '../backlog/backlog.js';
 import { readReviewState, writeReviewState } from './review-state.js';
 import type { MissionStore } from '../../application/domain-ports.js';
@@ -129,6 +129,7 @@ export function gateFailureReason(gateResult: PreReviewGateResult): GateFailureR
     stdout: gateResult.stdout,
     stderr: gateResult.stderr,
     error: gateResult.error,
+    ...(isTransientVerificationFailure(gateResult) ? { transient: true } : {}),
   };
 }
 

@@ -23,7 +23,8 @@ const {
   postWorkflowReview,
   consumeReviewerArtifacts,
   consumeImplementerArtifacts,
-  resolveArtifactDir
+  resolveArtifactDir,
+  isArtifactInfraDiagnostic,
 } = __mm1;
 
 // ============================================================================
@@ -469,7 +470,7 @@ test('consumeReviewerArtifacts handles all three artifact files', async () => {
 
   const result = await consumeReviewerArtifacts('test-slug', 'test-reviewer', {
     readArtifactFn: (p) => {
-      if (p.includes('review-findings.md')) return 'test findings';
+      if (p.includes('review-findings.md')) return '## F1: test finding';
       if (p.includes('review-outcome.md')) return 'test outcome message';
       if (p.includes('review-verdict.txt')) return 'approve';
       return null;
@@ -489,6 +490,29 @@ test('consumeReviewerArtifacts handles all three artifact files', async () => {
   assert.equal(result.reviewState, 'APPROVED');
 
   fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+test('consumeReviewerArtifacts treats malformed request-changes findings as repairable evidence', async () => {
+  const result = await consumeReviewerArtifacts('test-slug', 'test-reviewer', {
+    readArtifactFn: (p) => {
+      if (p.includes('review-findings.md')) return '## R3-1: wrong heading';
+      if (p.includes('review-outcome.md')) return 'Outcome: request-changes';
+      if (p.includes('review-verdict.txt')) return 'request-changes';
+      return null;
+    },
+    tmpDir: '/tmp',
+    worktree: '/tmp',
+    forgejoEnabled: false,
+    log: () => {},
+    error: () => {},
+  });
+
+  assert.deepEqual(result, {
+    consumed: true,
+    ok: false,
+    diagnostic: 'Reviewer artifacts invalid: request-changes findings must use a "## F1: summary" heading',
+  });
+  assert.equal(isArtifactInfraDiagnostic(result.diagnostic), false);
 });
 
 // task-1264 / TASK-2322.12: artifacts are read from the configured artifact
@@ -575,7 +599,7 @@ test('consumeReviewerArtifacts returns REQUEST_CHANGES reviewState for request-c
 
   const result = await consumeReviewerArtifacts('test-slug', 'test-reviewer', {
     readArtifactFn: (p) => {
-      if (p.includes('review-findings.md')) return 'test findings';
+      if (p.includes('review-findings.md')) return '## F1: test finding';
       if (p.includes('review-outcome.md')) return 'test outcome';
       if (p.includes('review-verdict.txt')) return 'request-changes';
       return null;

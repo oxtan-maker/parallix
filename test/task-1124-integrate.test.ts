@@ -20,11 +20,13 @@ test('SC 1: isRelaunchableError returns true for goal-check missing evidence row
   assert.equal(isRelaunchableError(errorMsg), true);
 });
 
-test('SC 2: buildRelaunchPrompt contains Goal Check table and mission slug', () => {
+test('SC 2: buildRelaunchPrompt delegates to the kernel and keeps the mission evidence', () => {
   const errorMsg = 'The final checkpoint at docs/missions/2026/task-1121/CP-3.md has a "## Goal Check" section but no evidence rows. A goal-check table with real evidence is required before handoff.';
   const prompt = buildRelaunchPrompt(errorMsg, 'task-1124', '/tmp/worktree');
   assert.ok(prompt.includes('Goal Check table'));
   assert.ok(prompt.includes('task-1124'));
+  assert.ok(prompt.includes(errorMsg));
+  assert.ok(prompt.includes('Retry attempt: 1/2'));
 });
 
 test('SC 3: active.js runHandoffAndReview bounces through the kernel when repair fails and error is relaunchable', () => {

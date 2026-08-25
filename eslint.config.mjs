@@ -12,6 +12,9 @@ const generatedOutputIgnores = [
   'node_modules/',
   'graphify-out/',
   '.forgejo-local/',
+  // Third-party skill-marketplace caches dropped under .workflow/ (gitignored);
+  // never project source, must not fail the repo lint.
+  '.workflow/',
 ];
 
 export default [
@@ -22,6 +25,7 @@ export default [
       'node_modules/',
       'graphify-out/',
       '.forgejo-local/',
+      '.workflow/',
     ],
   },
   // Lint all .ts source files while excluding generated distribution output.

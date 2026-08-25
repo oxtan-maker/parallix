@@ -3,7 +3,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { renderToString } from 'ink';
+import React from 'react';
 import { agentFamily } from '../src/domain/agents.js';
+import { AgentStrip } from '../src/interfaces/tui/agent-strip.js';
 import { resolveKnownAgentFamilies } from '../src/interfaces/tui/agent-config-resolver.js';
 import { fileURLToPath } from 'node:url';
 
@@ -63,10 +66,10 @@ test('AgentStrip does not render "agents: unavailable" for the shipped config fa
       blockedForMs: 0,
     }));
 
-    const ink = await import('ink');
-    const React = await import('react');
-    const { AgentStrip } = await import('../src/interfaces/tui/agent-strip.js');
-    const frame = plain(ink.renderToString(
+    // ink/react/agent-strip are imported at module scope so their load cost is
+    // not charged to this test's measured window; under full-suite CPU
+    // contention the render alone can approach the 1000ms budget.
+    const frame = plain(renderToString(
       React.createElement(AgentStrip, { agentAvailability }),
       { columns: 120 },
     ));

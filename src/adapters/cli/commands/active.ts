@@ -541,9 +541,12 @@ async function runHandoffAndReview(slug, worktree, agent, options = {}) {
       // review-loop branches below.
       log(`\nRelaunchable error detected (${classification.failureClass}). Bouncing to the implementer...`);
       const failedError = /** @type{string} */(handoffResult.error);
-      const gateOutput = handoffResult.gateOutput;
+      const gateFailure = handoffResult.gateFailure;
+      const failureReason = gateFailure
+        ? { kind: 'gate-failure', ...gateFailure }
+        : { kind: 'handoff-verification', error: failedError, gateOutput: flattenGateOutput(handoffResult.gateOutput) };
       const outcome = await rebound(
-        { kind: 'handoff-verification', error: failedError, gateOutput: flattenGateOutput(gateOutput) },
+        failureReason,
         {
           slug,
           worktree,
@@ -551,7 +554,13 @@ async function runHandoffAndReview(slug, worktree, agent, options = {}) {
           startAgent: reboundLaunchPort,
           verify: async () => {
             handoffResult = await _performHandoff(slug, { forgejoUser: agent, worktree, force: true });
-            return { ok: Boolean(handoffResult.ok), diagnostic: handoffResult.error || '' };
+            return {
+              ok: Boolean(handoffResult.ok),
+              diagnostic: handoffResult.error || '',
+              reason: handoffResult.gateFailure
+                ? { kind: 'gate-failure', ...handoffResult.gateFailure }
+                : undefined,
+            };
           },
           log,
           error
