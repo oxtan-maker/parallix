@@ -49,11 +49,14 @@ function renderBoard(): string {
     },
   });
   const attention = makeCard({ id: 'task-9000' as never, lane: 'review', status: 'review' });
-  const projection = makeProjection({ active: [live] });
-  projection.metrics.agentAvailability = [makeUnavailableAgent()];
-  projection.attentionQueue = [
-    makeAttentionItem(attention, { kind: 'review-lane', detail: 'Awaiting review decision' }, 1),
-  ];
+  const base = makeProjection({ active: [live] });
+  const projection = {
+    ...base,
+    metrics: { ...base.metrics, agentAvailability: [makeUnavailableAgent()] },
+    attentionQueue: [
+      makeAttentionItem(attention, { kind: 'review-lane', detail: 'Awaiting review decision' }, 1),
+    ],
+  };
 
   return plain(
     renderToString(React.createElement(BoardShell, { projection, columns: 120, rows: 30 }), {

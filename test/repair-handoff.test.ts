@@ -375,49 +375,45 @@ test('isRelaunchableError returns false for partial match', () => {
   assert.equal(isRelaunchableError('A goal-check table with real evidence is required before handoff'), false);
 });
 
-test('buildRelaunchPrompt returns string containing Goal Check table and mission slug', () => {
+test('buildRelaunchPrompt is a compatibility delegate to the evidence-preserving rebound prompt', () => {
   const { buildRelaunchPrompt } = repairHandoff;
   const errorMsg = 'The final checkpoint at docs/missions/2026/task-1121/CP-3.md has a "## Goal Check" section but no evidence rows. A goal-check table with real evidence is required before handoff.';
   const prompt = buildRelaunchPrompt(errorMsg, 'task-1124', '/tmp/worktree');
 
   assert.ok(typeof prompt === 'string', 'Prompt should be a string');
-  assert.ok(prompt.includes('Goal Check table'), 'Prompt should contain "Goal Check table"');
   assert.ok(prompt.includes('task-1124'), 'Prompt should contain the mission slug');
-  assert.ok(/file:line/i.test(prompt), 'Prompt should mention file:line references');
-  assert.ok(/test names/i.test(prompt), 'Prompt should mention test names');
-  assert.ok(prompt.includes('px review task-1124 --submit'), 'Prompt should use the supported px re-submit command');
-  assert.ok(!prompt.includes('node parallix'), 'Prompt must not suggest a nonexistent node parallix executable');
+  assert.ok(prompt.includes('Working directory: /tmp/worktree'));
+  assert.ok(prompt.includes(errorMsg), 'Prompt should retain the actual verification evidence');
+  assert.ok(prompt.includes('Retry attempt: 1/2'));
+  assert.ok(prompt.includes('failing check re-runs automatically'));
 });
 
-test('buildRelaunchPrompt directs gate-failure repairs back through the supported submit path', () => {
+test('buildRelaunchPrompt does not invent an unavailable gate command', () => {
   const { buildRelaunchPrompt } = repairHandoff;
   const prompt = buildRelaunchPrompt('Final verification gate failed. Fix errors before submitting.', 'task-1124', '/tmp/worktree');
 
-  assert.ok(prompt.includes('px review task-1124 --submit'));
-  assert.ok(!prompt.includes('node parallix'));
+  assert.ok(prompt.includes('Final verification gate failed. Fix errors before submitting.'));
+  assert.ok(!prompt.includes('Gate command:'));
 });
 
-test('buildRelaunchPrompt includes example table', () => {
+test('buildRelaunchPrompt keeps the central recovery contract', () => {
   const { buildRelaunchPrompt } = repairHandoff;
   const errorMsg = 'The final checkpoint at docs/missions/2026/task-1121/CP-3.md has a "## Goal Check" section but no evidence rows. A goal-check table with real evidence is required before handoff.';
   const prompt = buildRelaunchPrompt(errorMsg, 'task-1124', '/tmp/worktree');
 
-  assert.ok(prompt.includes('| Criterion | Evidence | Status |'), 'Prompt should include example table header');
-  assert.ok(prompt.includes('|---|---|---|'), 'Prompt should include example table separator');
+  assert.ok(prompt.includes('Classification: IncompleteEvidence — AutoSendBack'));
+  assert.ok(prompt.includes('the same verification rerun confirm the repair'));
 });
 
-test('buildRelaunchPrompt gives actionable replacement guidance for shell-only offending rows', () => {
+test('buildRelaunchPrompt preserves offending-row evidence verbatim', () => {
   const { buildRelaunchPrompt } = repairHandoff;
   const errorMsg = 'The final checkpoint at docs/missions/2026/task-1121/CP-3.md has a "## Goal Check" section but no evidence rows that cite a verifiable reference such as a recognized repo command/path, exact test name, test-file path, or ADR reference (or, when necessary, file:line). A goal-check table with real evidence is required before handoff. Offending row: | `bin/hello.sh` exists as regular file with execute permissions | `stat -c \'%A\' bin/hello.sh` → `-rwxrwxr-x` | PASS |';
   const prompt = buildRelaunchPrompt(errorMsg, 'task-1124', '/tmp/worktree');
 
   assert.ok(prompt.includes('Offending row:'), 'Prompt should surface the offending row context');
   assert.ok(prompt.includes("`stat -c '%A' bin/hello.sh`"), 'Prompt should include the rejected shell-only evidence');
-  assert.ok(prompt.includes('Do not retry with only shell output or file metadata'), 'Prompt should tell the agent what not to repeat');
-  assert.ok(prompt.includes('test file path'), 'Prompt should point the agent at test-file evidence');
-  assert.ok(prompt.includes('ADR reference'), 'Prompt should point the agent at ADR evidence');
-  assert.ok(prompt.includes('recognized repo command/path'), 'Prompt should point the agent at accepted repo commands and paths');
-  assert.ok(!prompt.includes('wrap it in backticks so the validator recognizes it'), 'Prompt should not repeat the old vague backtick-only advice');
+  assert.ok(prompt.includes('Failure output (use this to diagnose and fix):'));
+  assert.ok(prompt.includes('the same verification rerun confirm the repair'));
 });
 
 // ── CP-1 tests: FailureClass, DispatchAction, getDispatchAction (SC2) ─────────

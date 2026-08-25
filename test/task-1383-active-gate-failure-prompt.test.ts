@@ -31,8 +31,8 @@ test('task-1383: buildRelaunchPrompt for a verification-gate failure with captur
 
   assert.ok(typeof prompt === 'string', 'Prompt should be a string');
 
-  // SC2: prompt cites the failing test identifiers / captured output and
-  // instructs the agent to fix the verification/test failure.
+  // The compatibility export delegates to the kernel, retaining the actual
+  // gate evidence instead of recreating a separate handoff prompt authority.
   assert.ok(
     prompt.includes('missionStart fails if the backlog task is missing classification'),
     'Prompt should include the failing test identifier from the captured gate output'
@@ -42,22 +42,23 @@ test('task-1383: buildRelaunchPrompt for a verification-gate failure with captur
     'Prompt should include the second failing test identifier from the captured gate output'
   );
   assert.ok(
-    /fix the failing (verification\/test|verification|test)/i.test(prompt) || /fix.*failing.*test/i.test(prompt),
-    'Prompt should explicitly instruct the agent to fix the failing verification/test'
+    prompt.includes('Fix the specific handoff verification failure shown above'),
+    'Prompt should explicitly instruct the agent to fix the captured failure'
   );
 
-  // SC3: gate-failure prompt must NOT contain the Goal Check / CP-N
-  // checkpoint-editing instructions used for incomplete-evidence failures.
+  // No competing checkpoint-repair template may be reintroduced here.
   assert.ok(!prompt.includes('Goal Check table'), 'Gate-failure prompt must not instruct editing the Goal Check table');
   assert.ok(!prompt.includes('CP-N.md'), 'Gate-failure prompt must not reference editing CP-N.md');
   assert.ok(!prompt.includes('| Goal Check | Evidence | Status |'), 'Gate-failure prompt must not include the Goal Check example table');
 });
 
-test('task-1383: incomplete-evidence relaunch prompts remain checkpoint-focused (SC4)', () => {
+test('task-1383: incomplete-evidence compatibility prompts remain evidence-specific (SC4)', () => {
   const { buildRelaunchPrompt } = repairHandoff;
   const errorMsg = 'The final checkpoint at docs/missions/2026/task-1121/CP-3.md has a "## Goal Check" section but no evidence rows. A goal-check table with real evidence is required before handoff.';
   const prompt = buildRelaunchPrompt(errorMsg, 'task-1124', '/tmp/worktree');
 
   assert.ok(prompt.includes('Goal Check table'), 'Incomplete-evidence prompt should still reference the Goal Check table');
-  assert.ok(prompt.includes('CP-N.md'), 'Incomplete-evidence prompt should still reference CP-N.md');
+  assert.ok(prompt.includes('CP-'), 'Incomplete-evidence prompt should still reference CP-N.md');
+  assert.ok(prompt.includes(errorMsg), 'Prompt should retain the failed checkpoint evidence');
+  assert.ok(prompt.includes('Classification: IncompleteEvidence — AutoSendBack'));
 });

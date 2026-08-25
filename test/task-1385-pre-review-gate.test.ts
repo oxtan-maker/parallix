@@ -315,7 +315,11 @@ test('reboundPreReviewFailure strands the mission when the per-occurrence budget
     assert.equal(result.outcome, 'exhausted');
     assert.equal(result.diagnostic, 'gate still failing');
     assert.equal(launches, 2, 'the default budget is two attempts per occurrence');
-    assert.ok(errors.some(e => e.includes('attempt budget spent')));
+    assert.ok(errors.some(e =>
+      e.includes('Recovery dossier for task-1385') &&
+      e.includes('implementer repair budget (2)') &&
+      e.includes('gate still failing')
+    ));
   });
 });
 

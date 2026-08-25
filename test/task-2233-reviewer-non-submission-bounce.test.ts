@@ -116,14 +116,14 @@ test('reviewer-non-submission: error fires without completing recovery retries (
       `recovery loop should complete 2 retries before escalation (got ${reviewerLaunches} reviewer launches)`
     );
 
-    // The escalation error should mention recovery retries (ADR 0048 bounded retries).
+    // Exhaustion reports the kernel's evidence-rich recovery dossier.
     const escalationError = errors.find(e =>
-      e.includes('did not submit a usable formal review outcome') ||
-      e.includes('recovery retries')
+      e.includes('Recovery dossier for task-9001') &&
+      e.includes('No usable review outcome')
     );
     assert.ok(
       escalationError,
-      `should escalate with "usable formal review outcome after recovery retries" message. Errors: ${errors.join(' | ')}`
+      `should escalate with the recovery dossier and root timeout evidence. Errors: ${errors.join(' | ')}`
     );
 
     // The REVIEWER_NON_APPROVAL escalation should be recorded.
@@ -202,14 +202,13 @@ test('reviewer-non-submission: null poll result breaks recovery loop prematurely
       `recovery loop should complete 2 retries even when poll returns null (got ${reviewerLaunches} reviewer launches)`
     );
 
-    // The escalation should use the recovery-retries message, not the bare
-    // "did not submit a formal review outcome" from review-loop.ts:1358.
+    // The escalation should retain the root timeout evidence in the dossier.
     const hasRecoveryMessage = errors.some(e =>
-      e.includes('usable formal review outcome') && e.includes('recovery retries')
+      e.includes('Recovery dossier for task-9001') && e.includes('No usable review outcome')
     );
     assert.ok(
       hasRecoveryMessage,
-      `should escalate with recovery-retries message, not bare non-submission error. Errors: ${errors.join(' | ')}`
+      `should escalate with the recovery dossier, not a bare non-submission error. Errors: ${errors.join(' | ')}`
     );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -274,14 +273,13 @@ test('reviewer-non-submission: forgejoEnabled=false — recovery loop breaks on 
       `recovery loop should complete 2 retries with forgejoEnabled=false (got ${reviewerLaunches} reviewer launches)`
     );
 
-    // Should escalate with recovery-retries message from the post-loop check,
-    // not the bare "did not submit" from review-loop.ts:1358.
+    // Local review exhaustion should retain the same root timeout evidence.
     const hasRecoveryMessage = errors.some(e =>
-      e.includes('usable formal review outcome') && e.includes('recovery retries')
+      e.includes('Recovery dossier for task-9001') && e.includes('No usable review outcome')
     );
     assert.ok(
       hasRecoveryMessage,
-      `should escalate with recovery-retries message. Errors: ${errors.join(' | ')}`
+      `should escalate with the recovery dossier. Errors: ${errors.join(' | ')}`
     );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

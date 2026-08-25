@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { findIgnoredSourceFiles } from '../src/adapters/git/git.js';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
 const ensureWorkflowGitignore = mockModule<typeof import('../src/adapters/filesystem/gitignore.js')>('../src/adapters/filesystem/gitignore.js', import.meta.url);
 await installModuleMocks();
@@ -30,6 +31,21 @@ function readGitignore(dir) {
 function initGitRepo(dir) {
   fs.mkdirSync(path.join(dir, '.git'), { recursive: true });
 }
+
+test('ignored-source defense skips operator-local workflow caches', () => {
+  const dir = mktempDir();
+  try {
+    fs.mkdirSync(path.join(dir, '.workflow', 'codex-home'), { recursive: true });
+    fs.mkdirSync(path.join(dir, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.workflow', 'codex-home', 'plugin.js'), 'generated');
+    fs.writeFileSync(path.join(dir, 'src', 'missing.js'), 'source');
+
+    const gitFn = () => ({ status: 0, stdout: '', stderr: '' });
+    assert.deepEqual(findIgnoredSourceFiles(dir, gitFn), ['src/missing.js']);
+  } finally {
+    cleanupDir(dir);
+  }
+});
 
 test('WORKFLOW_ENTRIES contains all 7 required entries', () => {
   assert.equal(ensureWorkflowGitignore.WORKFLOW_ENTRIES.length, 7);

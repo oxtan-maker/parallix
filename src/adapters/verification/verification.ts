@@ -32,6 +32,12 @@ export interface VerificationAdapterConfig {
   defaultArea: string;
 }
 
+/** Adapter-owned machine markers for unchanged-tree verifier contention. */
+export function isTransientVerificationFailure(output: { stdout?: unknown; stderr?: unknown }): boolean {
+  const diagnostic = `${String(output.stdout ?? '')}\n${String(output.stderr ?? '')}`;
+  return /\[unit-test-budget:exceeded\]|\[unit-test-budget\]\s+SUITE BUDGET EXCEEDED:/i.test(diagnostic);
+}
+
 export interface VerificationProof {
   rootDir: string;
   branch?: string;
@@ -43,11 +49,14 @@ export interface VerificationProof {
 }
 
 export interface ReusableVerificationProof {
-  version: 1;
+  version: 2;
   identity: string;
   command: string;
   inputFingerprint: string;
   toolchain: string;
+  commit: string;
+  tree: string;
+  verifiedAt: string;
   status: 'passed';
 }
 
@@ -163,7 +172,7 @@ export function formatVerificationCommand(area: string | undefined, rootDir: str
 }
 
 /** @param {string} [area] @param {{rootDir?: string, log?: Function, stdio?: string, runFn?: Function}} [options] */
-export function runVerificationGate(area: string | undefined, options: { rootDir?: string; log?: Function; stdio?: string; runFn?: Function } = {}): import('child_process').SpawnSyncReturns<string> {
+export function runVerificationGate(area: string | undefined, options: { rootDir?: string; log?: Function; stdio?: string; runFn?: Function; maxBuffer?: number } = {}): import('child_process').SpawnSyncReturns<string> {
   const opts = options;
   const rootDir = opts.rootDir || process.cwd();
   const { command, defaultArea } = resolveVerificationAdapter(rootDir);
@@ -178,7 +187,11 @@ export function runVerificationGate(area: string | undefined, options: { rootDir
 
   const stdio = opts.stdio || 'inherit';
   const runFn = opts.runFn || run;
-  return runFn('bash', ['-c', command.replaceAll('{{area}}', effectiveArea)], { cwd: rootDir, stdio });
+  return runFn('bash', ['-c', command.replaceAll('{{area}}', effectiveArea)], {
+    cwd: rootDir,
+    stdio,
+    ...(stdio === 'pipe' ? { encoding: 'utf8', maxBuffer: opts.maxBuffer ?? 10 * 1024 * 1024 } : {}),
+  });
 }
 
 /** The gate-result artifact a lifecycle command leaves for the board to read. */
@@ -240,7 +253,7 @@ function digest(value: string): string {
  * an incomplete manifest must execute, never reuse. Any dirty worktree fails
  * closed before the index fingerprint can be trusted.
  */
-export function createVerificationProofIdentity(command: string, rootDir: string = process.cwd(), options: { gitRunner?: GitFn } = {}): { ok: boolean; identity?: string; inputFingerprint?: string; toolchain?: string; error?: string } {
+export function createVerificationProofIdentity(command: string, rootDir: string = process.cwd(), options: { gitRunner?: GitFn } = {}): { ok: boolean; identity?: string; inputFingerprint?: string; toolchain?: string; commit?: string; tree?: string; error?: string } {
   if (typeof command !== 'string' || !command.trim()) {
     return { ok: false, error: 'verification proof requires a non-empty command' };
   }
@@ -257,9 +270,18 @@ export function createVerificationProofIdentity(command: string, rootDir: string
   if (tracked.status !== 0 || !trackedOutput.trim()) {
     return { ok: false, error: 'verification proof input manifest is unreadable' };
   }
+  const state = readPublishedTreeState(resolvedRoot, { gitRunner });
+  if (!state.ok) { return state; }
   const toolchain = JSON.stringify({ node: process.version, modules: process.versions.modules, platform: process.platform, arch: process.arch });
   const inputFingerprint = digest(trackedOutput);
-  return { ok: true, inputFingerprint, toolchain, identity: digest(JSON.stringify({ version: 1, command: command.trim(), inputFingerprint, toolchain })) };
+  return {
+    ok: true,
+    inputFingerprint,
+    toolchain,
+    commit: state.commit,
+    tree: state.tree,
+    identity: digest(JSON.stringify({ version: 2, command: command.trim(), inputFingerprint, toolchain, commit: state.commit, tree: state.tree })),
+  };
 }
 
 export function verificationProofPath(identity: string, homeDir: string = resolveParallixHome({ ensureDir: false })): string {
@@ -272,9 +294,10 @@ export function readReusableVerificationProof(command: string, rootDir: string =
   const filePath = options.proofPath || verificationProofPath(identityResult.identity!);
   const result = readJson<ReusableVerificationProof>(filePath);
   const proof = result.data;
-  if (!result.ok || !proof || proof.version !== 1 || proof.status !== 'passed'
+  if (!result.ok || !proof || proof.version !== 2 || proof.status !== 'passed'
     || proof.identity !== identityResult.identity || proof.command !== command.trim()
-    || proof.inputFingerprint !== identityResult.inputFingerprint || proof.toolchain !== identityResult.toolchain) {
+    || proof.inputFingerprint !== identityResult.inputFingerprint || proof.toolchain !== identityResult.toolchain
+    || proof.commit !== identityResult.commit || proof.tree !== identityResult.tree) {
     return { ok: false, identity: identityResult.identity, error: 'verification proof is missing, malformed, or does not match current inputs' };
   }
   return { ok: true, proof, identity: identityResult.identity };
@@ -286,7 +309,17 @@ export function writeReusableVerificationProof(command: string, rootDir: string 
   if (options.expectedIdentity && identityResult.identity !== options.expectedIdentity) {
     return { ok: false, identity: identityResult.identity, error: 'verification inputs changed while the gate was running' };
   }
-  const proof: ReusableVerificationProof = { version: 1, identity: identityResult.identity!, command: command.trim(), inputFingerprint: identityResult.inputFingerprint!, toolchain: identityResult.toolchain!, status: 'passed' };
+  const proof: ReusableVerificationProof = {
+    version: 2,
+    identity: identityResult.identity!,
+    command: command.trim(),
+    inputFingerprint: identityResult.inputFingerprint!,
+    toolchain: identityResult.toolchain!,
+    commit: identityResult.commit!,
+    tree: identityResult.tree!,
+    verifiedAt: new Date().toISOString(),
+    status: 'passed',
+  };
   try {
     writeJson(options.proofPath || verificationProofPath(proof.identity, resolveParallixHome({ ensureDir: true })), proof, { mode: 0o600 });
   } catch {
@@ -314,26 +347,73 @@ export function readPublishedTreeState(rootDir: string, options: { gitRunner?: G
   return { ok: true, rootDir: resolvedRoot, commit, tree };
 }
 
-/** @param {string} [area] @param {string} [rootDir] @param {{gitRunner?: GitFn, runFn?: Function, stdio?: string}} [options] */
-export function captureVerifiedTreeProof(area: string | undefined, rootDir: string = process.cwd(), options: { gitRunner?: GitFn; runFn?: Function; stdio?: string } = {}): { ok: boolean; proof?: VerificationProof; error?: string } {
+/** Cap of captured verifier characters carried on a structured gate failure. */
+const BOUNDED_VERIFIER_OUTPUT = 8000;
+
+/** Resolve the exact command that executes for this area, never its template. */
+function resolveVerificationCommand(rootDir: string, area?: string): string | null {
+  const { command, defaultArea } = resolveVerificationAdapter(rootDir);
+  return command?.replaceAll('{{area}}', area || defaultArea) || null;
+}
+
+/** @param {string} [area] @param {string} [rootDir] @param {{gitRunner?: GitFn, runFn?: Function, stdio?: string, maxBuffer?: number}} [options] */
+export function captureVerifiedTreeProof(area: string | undefined, rootDir: string = process.cwd(), options: { gitRunner?: GitFn; runFn?: Function; stdio?: string; maxBuffer?: number; proofPath?: string } = {}): { ok: boolean; proof?: VerificationProof; error?: string; exitCode?: number | null; command?: string | null; cwd?: string; stdout?: string; stderr?: string } {
   const {
     gitRunner = git,
     runFn = run,
-    stdio = 'inherit'
+    // Pipe the gate so a failing verification can capture its stdout/stderr into
+    // the structured gate failure below. Inherit would discard the diagnostic
+    // (the task-2373.01 loss), so publication captures rather than streams.
+    stdio = 'pipe',
+    maxBuffer,
+    proofPath,
   } = options;
 
   const before = readPublishedTreeState(rootDir, { gitRunner });
   if (!before.ok) {return before;}
 
+  const command = resolveVerificationCommand(before.rootDir, area);
+  const reusable = command
+    ? readReusableVerificationProof(command, before.rootDir, { gitRunner, proofPath })
+    : { ok: false };
+  if (reusable.ok) {
+    return {
+      ok: true,
+      proof: {
+        rootDir: before.rootDir,
+        branch: gitRunner(['-C', before.rootDir, 'branch', '--show-current']).stdout.trim(),
+        area: area || resolveVerificationAdapter(before.rootDir).defaultArea,
+        command,
+        commit: before.commit,
+        tree: before.tree,
+        verifiedAt: reusable.proof!.verifiedAt,
+      },
+    };
+  }
+
   const verification = runVerificationGate(area, {
     rootDir: before.rootDir,
     runFn,
-    stdio
+    stdio,
+    maxBuffer,
   });
   if (verification.status !== 0) {
+    // Preserve the structured root failure end-to-end: the exact exit status
+    // plus bounded captured stdout/stderr, so an outer Forgejo/publish wrapper
+    // cannot collapse a gate failure to an exit-code-only string and strand the
+    // next agent (task-2373.01). The wrapper string is presentation only; the
+    // structured fields below are what classification and repair prompting read.
+    const stdout = String(verification.stdout ?? '').trim().slice(-BOUNDED_VERIFIER_OUTPUT);
+    const stderr = String(verification.stderr ?? '').trim().slice(-BOUNDED_VERIFIER_OUTPUT);
+    const detail = `${stdout}\n${stderr}`.slice(-BOUNDED_VERIFIER_OUTPUT);
     return {
       ok: false,
-      error: `verification gate failed for ${before.rootDir} with exit code ${verification.status}`
+      exitCode: verification.status,
+      command,
+      cwd: before.rootDir,
+      stdout,
+      stderr,
+      error: `verification gate failed for ${before.rootDir} with exit code ${verification.status}${detail ? `:\n${detail}` : ''}`
     };
   }
 
@@ -346,7 +426,7 @@ export function captureVerifiedTreeProof(area: string | undefined, rootDir: stri
     };
   }
 
-  const { command, defaultArea } = resolveVerificationAdapter(before.rootDir!);
+  const { defaultArea } = resolveVerificationAdapter(before.rootDir!);
   const effectiveArea = area || defaultArea;
 
   return {

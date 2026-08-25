@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { buildCompactReviewPrompt, buildCompactActOnReviewPrompt, } from '../src/adapters/review/review-prompts.js';
 import { reboundPreReviewFailure, gateFailureReason } from '../src/adapters/review/review-loop.js';
+import { rebound } from '../src/application/rebound-kernel.js';
 const repoRoot = path.resolve(import.meta.dirname, '..');
 const reviewLoopSource = fs.readFileSync(
   path.join(repoRoot, 'src/adapters/review/review-loop.ts'),
@@ -88,9 +89,25 @@ test('task-2317: repairable gate-error bounce compacts before repair and retains
   assert.match(repairPrompt, /current review round and disposition; unresolved findings and implementer resolutions/i);
 });
 
-test('task-2317: reviewer and implementer recovery relaunches compact before work with their retry state', () => {
-  assert.match(reviewLoopSource, /RECOVERY: Reviewer timeout[\s\S]*?compact the failed-attempt context[\s\S]*?reviewer retry \$\{reviewerTimeoutRetries\}\/2/);  // TASK-2377.04: in-memory round-local counter
-  assert.match(reviewLoopSource, /RECOVERY: Implementer disposition timeout[\s\S]*?compact the failed-attempt context[\s\S]*?implementer retry \$\{implementerTimeoutRetries\}\/2/);  // TASK-2377.04: in-memory round-local counter
+test('task-2317: reviewer and implementer recovery relaunches compact before work with their retry state', async () => {
+  for (const [role, expectedOutput] of [
+    ['reviewer', 'a formal review outcome'],
+    ['implementer', 'a disposition'],
+  ] as const) {
+    let repairPrompt = '';
+    await rebound({ kind: 'agent-timeout', role, diagnostic: `${role} timed out`, expectedOutput }, {
+      slug: 'task-2317-timeout', worktree: repoRoot, implementer: 'codex',
+      startAgent: async (_step, options) => {
+        repairPrompt = (options.prompt as (agent: string) => string)('codex');
+        return { result: { status: 0 } };
+      },
+      verify: () => ({ ok: true }), log: () => {}, error: () => {},
+    });
+
+    assert.match(repairPrompt, /Before repair work, compact the aborted working context/i);
+    assert.match(repairPrompt, new RegExp(`Required output: ${expectedOutput}`));
+    assert.match(repairPrompt, /Retry attempt: 1\/2/);
+  }
 });
 
 test('task-2317: reviewer compaction follows successful rebase and baseline recapture before launch', () => {

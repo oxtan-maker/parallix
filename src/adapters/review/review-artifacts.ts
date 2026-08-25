@@ -437,6 +437,13 @@ async function consumeReviewerArtifacts(
     }
     return { consumed: true, ok: false, diagnostic: `Reviewer artifacts incomplete: missing verdict` };
   }
+  if (verdict === 'request-changes' && parseReviewFindings(findings).length === 0) {
+    return {
+      consumed: true,
+      ok: false,
+      diagnostic: 'Reviewer artifacts invalid: request-changes findings must use a "## F1: summary" heading',
+    };
+  }
 
   const readReviewStateFn = options.readReviewStateFn || readReviewState;
   const currentState = await Promise.resolve(readReviewStateFn(slug, worktree, options.missionStore ?? null));
@@ -767,7 +774,7 @@ export interface ArtifactDispatchResult {
   role: ArtifactRole;
   /** Last diagnostic observed: the verify re-consume's, or the original one. */
   diagnostic: string;
-  /** Launch attempts consumed by this occurrence. */
+  /** Completed repair attempts consumed by this occurrence. */
   attempts: number;
   maxAttempts: number;
   /** Agent that ran the final attempt (fallback-resolved). */

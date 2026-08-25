@@ -108,7 +108,7 @@ function getPrStatus(branch: string, rootDir?: string, options: any = {}) {
  * @param {{rootDir?: string, apiCall?: Function, log?: Function, force?: boolean, forceWithLease?: boolean, verificationArea?: string, captureVerifiedTreeProofFn?: Function, assertVerifiedTreeProofFn?: Function}} [options]
  * @returns {{ok: boolean, url?: string|null, error?: string|null, prNumber?: number}}
  */
-function createPr(branch: string, user: string, token: string, options: any = {}): { ok: boolean, url?: string | null, error?: string | null, prNumber?: number } {
+function createPr(branch: string, user: string, token: string, options: any = {}): { ok: boolean, url?: string | null, error?: string | null, prNumber?: number, gateFailure?: { area: string; command: string; cwd: string; exitCode: number | null; stdout: string; stderr: string; transient?: boolean } } {
   const {
     rootDir = process.cwd(),
     apiCall = forgejoApi,
@@ -160,7 +160,21 @@ function createPr(branch: string, user: string, token: string, options: any = {}
 
   const proofResult = captureVerifiedTreeProofFn(resolvedVerificationArea, rootDir);
   if (!proofResult.ok) {
-    return { ok: false, error: proofResult.error || 'failed to verify publish tree' };
+    return {
+      ok: false,
+      error: proofResult.error || 'failed to verify publish tree',
+      ...(proofResult.command && proofResult.cwd ? {
+        gateFailure: {
+          area: resolvedVerificationArea,
+          command: proofResult.command,
+          cwd: proofResult.cwd,
+          exitCode: proofResult.exitCode ?? null,
+          stdout: proofResult.stdout || '',
+          stderr: proofResult.stderr || '',
+          ...(verification.isTransientVerificationFailure(proofResult) ? { transient: true } : {}),
+        },
+      } : {}),
+    };
   }
   if (proofResult.proof && proofResult.proof.branch && proofResult.proof.branch !== branch) {
     return { ok: false, error: `verification proof branch ${proofResult.proof.branch} does not match branch being published ${branch}` };

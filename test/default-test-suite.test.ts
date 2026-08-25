@@ -95,6 +95,10 @@ const expectedIntegrationFiles = [
   // the integration layer.
   'task-2379-approval-boundary-repro.test.ts',
   'task-2397-integrate-active-approved-recovery.test.ts',
+  // TASK-2413: seeds real temporary Git repositories to reproduce the
+  // exit-code-only verifier loss and pin proof-reuse/invalidation, so they
+  // cross the process boundary and run only in the integration layer.
+  'task-2413-proof-reuse.test.ts', 'task-2413-publication-seam.test.ts', 'task-2413-repro.test.ts',
   'test-hygiene.test.ts',
   'tui-pty-smoke.test.ts', 'task-2313-repro.test.ts', 'task-2370-repro.test.ts',
   'tui-command-flow.test.ts',

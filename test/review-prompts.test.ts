@@ -158,7 +158,9 @@ test('buildCompactReviewPrompt inlines the contract instead of redirecting to do
   assert.match(prompt, /Do not post to Forgejo directly/);
   assert.match(prompt, /final chat response does \*\*not\*\* submit a review/);
   assert.match(prompt, /create all three files/);
-  assert.match(prompt, /No findings\. when approving/);
+  assert.match(prompt, /No findings\.` when approving/);
+  assert.match(prompt, /## F1: summary/);
+  assert.match(prompt, /round-prefixed headings.*invalid/i);
   assert.match(prompt, /run `ls -l/);
   assert.doesNotMatch(prompt, /FORGEJO_USER=/);
   assert.doesNotMatch(prompt, /docs\/agent-prompts/);
