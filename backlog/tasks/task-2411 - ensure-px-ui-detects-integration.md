@@ -1,7 +1,7 @@
 ---
 id: TASK-2411
 title: ensure px ui detects integration
-status: active
+status: review
 assignee: [codex]
 created_date: '2026-08-24 15:34'
 labels: [user_value, bug]
