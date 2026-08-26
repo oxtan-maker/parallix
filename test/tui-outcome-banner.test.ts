@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { BoardCommandResult } from '../src/application/controller/board-command.js';
+import 'react';
+import 'ink';
+import '../src/interfaces/tui/outcome-banner.js';
 
 function outcome(status: BoardCommandResult['status']): BoardCommandResult {
   return status === 'completed'

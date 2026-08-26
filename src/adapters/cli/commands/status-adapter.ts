@@ -27,6 +27,7 @@ import {
 import { WORKFLOW_AGENT_NAMES, eligibleAgentsForStep, readAgentConfigOrExit, workflowLauncherStatus } from '../../agents/agents.js';
 import { getPrStatus } from '../../forgejo/forgejo.js';
 import type { BoardProjectionBuilder } from '../../../application/projections/board-readers.js';
+import type { MissionId } from '../../../domain/mission.js';
 import { projectMissionActivity, type MissionActivitySource } from '../../../application/projections/mission-activity.js';
 
 /** Factory options for creating the status workflow adapter. */
@@ -284,15 +285,13 @@ export function createStatusBoardAdapter(options: {
 
     async getMissionData(slug: string, rootDir: string): Promise<StatusMissionData | null> {
       try {
-        const projection = await options.buildProjectionFn(rootDir)
-          .then(builder => builder.build())
+        // An explicit slug is a single-mission question, so it takes the
+        // builder's focused route: the board projection is never assembled and
+        // unrelated missions are never materialised merely to locate this card.
+        const card = await options.buildProjectionFn(rootDir)
+          .then(builder => builder.buildMissionCard(slug.toLowerCase() as MissionId))
           .catch(() => null);
 
-        if (!projection) { return null; }
-
-        const card = projection.stages.flatMap((s) => s.cards).find(
-          (c) => (c as any).id.toLowerCase() === slug.toLowerCase(),
-        );
         if (!card) { return null; }
 
         return {

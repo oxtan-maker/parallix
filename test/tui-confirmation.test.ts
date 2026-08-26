@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import 'react';
+import 'ink';
+import '../src/interfaces/tui/confirmation-dialog.js';
 
 test('confirmation dialog displays the exact active application command and explicit keys', async () => {
   const ink = await import('ink');

@@ -54,6 +54,7 @@ function runLoop(options: Record<string, unknown>) {
     isForgejoReviewEnabledFn: () => true,
     forgejoAvailableFn: async () => true,
     getPrStatusFn: () => ({ exists: true, state: 'open', number: 41 }),
+    performHandoffFn: async () => ({ ok: true }),
     maybeUpdateGraphifyBeforeReviewFn: () => {},
     enforceTaskAssigneeFn: () => true,
     resolveForgejoUserFn: () => 'gemini', readTokenFn: () => 'token',

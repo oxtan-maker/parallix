@@ -1,10 +1,11 @@
 ---
 id: TASK-2402
 title: Stop px status for one mission from building the whole board
-status: ready-for-integration
+status: done
 assignee: [codex]
 created_date: '2026-08-23 07:25'
-labels: [user_value]
+labels:
+  - user_value
 dependencies: []
 ordinal: 112917
 ---

@@ -5,6 +5,7 @@ import {
   parseCurrentWorkEntry,
   type CurrentWorkEvent,
 } from '../../application/recording/current-work-recorder.js';
+import type { MissionId } from '../../domain/mission.js';
 
 /**
  * Concrete `CurrentWorkReadAdapter` over the operational-history authority.
@@ -24,6 +25,13 @@ export class ConcreteCurrentWorkReadAdapter implements CurrentWorkReadAdapter {
     // window was the thing that discarded still-running operations when
     // older operations emitted late terminal events (TASK-2375 AC #2).
     const entries = await this._historyRepo.findByType(CURRENT_WORK_EVENT_TYPE);
+    return entries.flatMap((entry) => parseCurrentWorkEntry(entry) ?? []);
+  }
+
+  async loadMissionCurrentWork(missionId: MissionId): Promise<readonly CurrentWorkEvent[]> {
+    const findByTypeForMission = this._historyRepo.findByTypeForMission;
+    if (!findByTypeForMission) { return []; }
+    const entries = await findByTypeForMission.call(this._historyRepo, CURRENT_WORK_EVENT_TYPE, missionId);
     return entries.flatMap((entry) => parseCurrentWorkEntry(entry) ?? []);
   }
 }

@@ -14,6 +14,9 @@ import type { MissionCard } from '../src/application/projections/mission-board.j
 import type { AgentFamily } from '../src/domain/agents.js';
 import type { MissionId } from '../src/domain/mission.js';
 import type { RepositoryId } from '../src/domain/repository.js';
+import 'react';
+import 'ink';
+import '../src/interfaces/tui/shell.js';
 
 describe('BoardShell component renders with mocked BoardProjection', () => {
   /** Empty metric series used in mocked BoardProjection. */

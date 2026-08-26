@@ -39,6 +39,8 @@ export interface CurrentWorkReadAdapter {
    * "known idle".
    */
   loadCurrentWork(): Promise<readonly CurrentWorkEvent[]>;
+  /** All current-work events for one mission, retaining operation ordering. */
+  loadMissionCurrentWork?(_missionId: MissionId): Promise<readonly CurrentWorkEvent[]>;
 }
 
 /**
