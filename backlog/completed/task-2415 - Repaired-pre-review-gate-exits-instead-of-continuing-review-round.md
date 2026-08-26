@@ -1,7 +1,7 @@
 ---
 id: TASK-2415
 title: Repaired pre-review gate exits instead of continuing review round
-status: ready-for-integration
+status: done
 assignee: [custom]
 created_date: '2026-08-26'
 labels: [bug, ai_sdlc]
