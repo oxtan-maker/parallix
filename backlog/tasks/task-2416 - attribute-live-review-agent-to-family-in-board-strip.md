@@ -1,8 +1,8 @@
 ---
 id: TASK-2416
 title: Attribute the live review agent to its family in the board strip
-status: active
-assignee: [custom]
+status: review
+assignee: [codex]
 created_date: '2026-08-26 10:00'
 labels:
   - bug
