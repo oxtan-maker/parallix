@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { spawnSync } from 'node:child_process';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
 const missionUtils = mockModule<typeof import('../src/adapters/filesystem/mission-utils.js')>('../src/adapters/filesystem/mission-utils.js', import.meta.url);
 const draftLib = mockModule<typeof import('../src/adapters/cli/commands/draft.js')>('../src/adapters/cli/commands/draft.js', import.meta.url);
@@ -36,7 +37,7 @@ const {
   isExpectedDraftPath,
   runDraftCommand,
 } = draftLib;
-const { getPrimaryBranch } = missionUtils;
+const { getPrimaryBranch, resolveMissionBaseBranch, missionDirForSlug } = missionUtils;
 
 const PRIMARY = getPrimaryBranch();
 const typeKey = ['class', 'ification'].join('');
@@ -497,6 +498,25 @@ test('ensureMissionBaseBranchRecorded inserts a machine-readable Base-Branch lin
   }
 });
 
+test('ensureMissionBaseBranchRecorded clears a stale Base-Branch line on a primary/detached launch', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'base-branch-clear-2396-'));
+  try {
+    const missionFile = path.join(root, 'MISSION.md');
+    fs.writeFileSync(missionFile, '# Mission: Example\n\nBase-Branch: friday-08-21\n\n## Goal\n');
+
+    // null base (primary or detached HEAD) drops the stale line.
+    assert.equal(ensureMissionBaseBranchRecorded(missionFile, null, { logFn: () => {} }), true);
+    const content = fs.readFileSync(missionFile, 'utf8');
+    assert.ok(!content.includes('Base-Branch: friday-08-21'), 'stale base line removed');
+    assert.equal(content.split('\n').filter(l => l.startsWith('Base-Branch:')).length, 0, 'no base line remains');
+
+    // A second primary launch over a now-clean file is a no-op.
+    assert.equal(ensureMissionBaseBranchRecorded(missionFile, null, { logFn: () => {} }), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('ensureMissionBaseBranchRecorded is a no-op for a primary/detached launch and idempotent on repeat', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'base-branch-noop-'));
   try {
@@ -528,6 +548,195 @@ test('ensureMissionBaseBranchRecorded replaces a stale Base-Branch line in place
     assert.ok(!content.includes('Base-Branch: old-branch'));
     assert.equal(content.split('\n').filter(l => l.startsWith('Base-Branch:')).length, 1);
     assert.ok(content.includes('Base-Branch: feat/new'));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ---------- stale base-branch correction on primary re-draft (task-2396) ----------
+
+// Build a real temp git checkout on a `main` branch so the production
+// getPrimaryBranch / resolveMissionBaseBranch git paths resolve `main` exactly
+// as they do in a live operator repo. Only the heavy external draft steps are
+// stubbed; the draft-startup base writer (ensureMissionBaseBranchRecorded) and
+// the base resolver run for real.
+function tempGitRepoOnMain() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'draft-2396-repo-'));
+  const run = (args) => spawnSync('git', args, { cwd: root, encoding: 'utf8', env: process.env });
+  run(['init', '-b', 'main']);
+  run(['config', 'user.email', 'test@example.com']);
+  run(['config', 'user.name', 'Test']);
+  run(['config', 'commit.gpgsign', 'false']);
+  fs.writeFileSync(path.join(root, 'README.md'), '# repo\n');
+  run(['add', '.']);
+  run(['commit', '-m', 'init']);
+  return root;
+}
+
+// Regression for the task-2389 breakage: re-drafting an existing mission from
+// the primary branch must clear a stale feature Base-Branch so
+// resolveMissionBaseBranch falls back to the primary branch instead of a branch
+// that no longer exists. Runs the real draft-startup writer (ensureMissionBase-
+// BranchRecorded) end to end; only the heavy external steps are stubbed.
+test('runDraftCommand clears a stale feature Base-Branch when re-drafted from the primary branch', async () => {
+  const root = tempGitRepoOnMain();
+  const missionFile = path.join(missionDirForSlug(root, 'task-stale'), 'MISSION.md');
+
+  try {
+    await runDraftCommand(['task-stale'], {
+      inferSlugFn: () => 'task-stale',
+      resolveMainRepoFn: () => root,
+      conventionalWorktreePathFn: () => path.join(root, 'task-stale'),
+      ensureRepoExistsFn: () => true,
+      resolveTaskFileFn: () => ({ ok: true, taskFile: path.join(root, 'backlog', 'tasks', 'task-stale.md'), matches: [] }),
+      checkBacklogIntegrityFn: () => [],
+      detectLaunchBaseBranchFn: () => null, // launch from the primary branch (main)
+      ensureStandaloneMissionBaselineFn: () => ({ committed: false }),
+      ensureMissionBranchFn: () => {},
+      ensureWorktreeFn: () => {},
+      ensureGraphifyWorkspaceFn: () => {},
+      ensureGraphifyIgnoreFn: () => true,
+      // Seed the stale base AFTER preflight (which resets the working tree) by
+      // writing it during the scaffold step, exactly where the writer reads it.
+      ensureMissionFileFn: () => {
+        fs.mkdirSync(path.dirname(missionFile), { recursive: true });
+        fs.writeFileSync(missionFile, '# Mission: Stale (task-stale)\n\nBase-Branch: friday-08-21\n\n## Goal\nDo the thing.\n');
+        return missionFile;
+      },
+      bootstrapBacklogTaskFn: () => true,
+      transitionTaskFn: () => true,
+      readAgentConfigOrExitFn: () => ({}),
+      selectAgentFn: () => 'codex',
+      startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
+      missionServicesFn: async () => ({
+        repositoryId: 'main',
+        intake: { execute: async () => ({ status: 'completed', value: { version: 1 }, durableEvidence: [] }) },
+      }),
+      recordDraftImplementerFn: () => {},
+      enforceDraftCommitSafetyFn: () => false,
+      validateDraftClassificationFn: () => ({ ok: true }),
+      [normalizeKey]: () => ({ ok: true, [typeKey]: 'ai_sdlc' }),
+      exitFn: (code) => { throw new Error(`unexpected exit ${code}`); },
+      logFn: () => {},
+      errorFn: (msg) => { throw new Error(`unexpected error: ${msg}`); }
+    });
+
+    // The stale friday-08-21 base must be gone; the resolved base is the primary branch.
+    // Assertions run inside the try so the finally cleanup below still removes the temp repo.
+    const content = fs.readFileSync(missionFile, 'utf8');
+    assert.ok(!content.includes('Base-Branch: friday-08-21'), 'stale Base-Branch line must be removed on primary re-draft');
+    assert.equal(resolveMissionBaseBranch('task-stale', root), 'main', 'resolved base must fall back to the primary branch after clearing the stale value');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Re-drafting from a non-primary branch must replace any previous base value with
+// the new launch branch.
+test('runDraftCommand records a non-primary launch branch over a previous base on re-draft', async () => {
+  const root = tempGitRepoOnMain();
+  const missionFile = path.join(missionDirForSlug(root, 'task-relaunch'), 'MISSION.md');
+
+  try {
+    await runDraftCommand(['task-relaunch'], {
+      inferSlugFn: () => 'task-relaunch',
+      resolveMainRepoFn: () => root,
+      conventionalWorktreePathFn: () => path.join(root, 'task-relaunch'),
+      ensureRepoExistsFn: () => true,
+      resolveTaskFileFn: () => ({ ok: true, taskFile: path.join(root, 'backlog', 'tasks', 'task-relaunch.md'), matches: [] }),
+      checkBacklogIntegrityFn: () => [],
+      detectLaunchBaseBranchFn: () => 'feature/two', // re-drafting from a feature branch
+      ensureStandaloneMissionBaselineFn: () => ({ committed: false }),
+      ensureMissionBranchFn: () => {},
+      ensureWorktreeFn: () => {},
+      ensureGraphifyWorkspaceFn: () => {},
+      ensureGraphifyIgnoreFn: () => true,
+      // Seed the stale base AFTER preflight (which resets the working tree) by
+      // writing it during the scaffold step, exactly where the writer reads it.
+      ensureMissionFileFn: () => {
+        fs.mkdirSync(path.dirname(missionFile), { recursive: true });
+        fs.writeFileSync(missionFile, '# Mission: Relaunch (task-relaunch)\n\nBase-Branch: friday-08-21\n\n## Goal\nDo the thing.\n');
+        return missionFile;
+      },
+      bootstrapBacklogTaskFn: () => true,
+      transitionTaskFn: () => true,
+      readAgentConfigOrExitFn: () => ({}),
+      selectAgentFn: () => 'codex',
+      startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
+      missionServicesFn: async () => ({
+        repositoryId: 'main',
+        intake: { execute: async () => ({ status: 'completed', value: { version: 1 }, durableEvidence: [] }) },
+      }),
+      recordDraftImplementerFn: () => {},
+      enforceDraftCommitSafetyFn: () => false,
+      validateDraftClassificationFn: () => ({ ok: true }),
+      [normalizeKey]: () => ({ ok: true, [typeKey]: 'ai_sdlc' }),
+      exitFn: (code) => { throw new Error(`unexpected exit ${code}`); },
+      logFn: () => {},
+      errorFn: (msg) => { throw new Error(`unexpected error: ${msg}`); }
+    });
+
+    // The previous base value must be replaced by the new launch branch.
+    const content = fs.readFileSync(missionFile, 'utf8');
+    assert.ok(!content.includes('Base-Branch: friday-08-21'), 'previous base value must be replaced');
+    assert.ok(content.includes('Base-Branch: feature/two'), 'new launch branch must be recorded');
+    assert.equal(resolveMissionBaseBranch('task-relaunch', root), 'feature/two');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Re-drafting an existing mission worktree from the primary branch must reuse
+// the pre-existing mission branch (not rebuild it off the stale base) while still
+// correcting the recorded base to the primary branch.
+test('runDraftCommand reuses the existing mission branch and clears the stale base on a primary re-draft', async () => {
+  const root = tempGitRepoOnMain();
+  const missionFile = path.join(missionDirForSlug(root, 'task-reuse'), 'MISSION.md');
+  const ensured = [];
+
+  try {
+    await runDraftCommand(['task-reuse'], {
+      inferSlugFn: () => 'task-reuse',
+      resolveMainRepoFn: () => root,
+      conventionalWorktreePathFn: () => path.join(root, 'task-reuse'),
+      ensureRepoExistsFn: () => true,
+      resolveTaskFileFn: () => ({ ok: true, taskFile: path.join(root, 'backlog', 'tasks', 'task-reuse.md'), matches: [] }),
+      checkBacklogIntegrityFn: () => [],
+      detectLaunchBaseBranchFn: () => null, // re-draft from the primary branch over an existing mission
+      ensureStandaloneMissionBaselineFn: () => ({ committed: false }),
+      ensureMissionBranchFn: (_repo, branch) => { ensured.push(branch); },
+      ensureWorktreeFn: () => {},
+      ensureGraphifyWorkspaceFn: () => {},
+      ensureGraphifyIgnoreFn: () => true,
+      ensureMissionFileFn: () => {
+        fs.mkdirSync(path.dirname(missionFile), { recursive: true });
+        fs.writeFileSync(missionFile, '# Mission: Reuse (task-reuse)\n\nBase-Branch: friday-08-21\n\n## Goal\nDo the thing.\n');
+        return missionFile;
+      },
+      bootstrapBacklogTaskFn: () => true,
+      transitionTaskFn: () => true,
+      readAgentConfigOrExitFn: () => ({}),
+      selectAgentFn: () => 'codex',
+      startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
+      missionServicesFn: async () => ({
+        repositoryId: 'main',
+        intake: { execute: async () => ({ status: 'completed', value: { version: 1 }, durableEvidence: [] }) },
+      }),
+      recordDraftImplementerFn: () => {},
+      enforceDraftCommitSafetyFn: () => false,
+      validateDraftClassificationFn: () => ({ ok: true }),
+      [normalizeKey]: () => ({ ok: true, [typeKey]: 'ai_sdlc' }),
+      exitFn: (code) => { throw new Error(`unexpected exit ${code}`); },
+      logFn: () => {},
+      errorFn: (msg) => { throw new Error(`unexpected error: ${msg}`); }
+    });
+
+    // The pre-existing mission branch is reused, not rebuilt off the stale base.
+    assert.equal(ensured.length, 1, 'mission branch ensured exactly once');
+    assert.equal(ensured[0], 'mission/task-reuse', 'reuse the existing mission branch');
+    const content = fs.readFileSync(missionFile, 'utf8');
+    assert.ok(!content.includes('Base-Branch: friday-08-21'), 'stale base must be cleared on reuse from primary');
+    assert.equal(resolveMissionBaseBranch('task-reuse', root), 'main');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

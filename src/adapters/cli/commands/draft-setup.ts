@@ -108,17 +108,38 @@ function ensureMissionBranch(mainRepo, branchName, {
 
 /**
  * Persist the resolved mission base as a single machine-readable `Base-Branch:`
- * line in MISSION.md. Idempotent: a no-op when `baseBranch` is falsy (primary or
- * detached-HEAD launch) or when the correct line is already present. Replaces a
- * stale line in place, otherwise inserts the line just under the title.
+ * line in MISSION.md. Idempotent: a no-op when the correct line is already
+ * present, when `baseBranch` is falsy and no base line exists, or when the
+ * mission file is missing. Replaces a stale line in place, otherwise inserts the
+ * line just under the title.
+ *
+ * A primary/detached-HEAD launch records no feature base, so `baseBranch` is
+ * falsy. Previously that was an unconditional no-op, which let a stale
+ * `Base-Branch` left by a prior feature-branch re-draft survive: the next
+ * `resolveMissionBaseBranch` would then resolve a branch that no longer exists
+ * (task-2389, `friday-08-21`). Clear the stale line here so the resolver falls
+ * back to the primary branch before any downstream lifecycle work consumes it.
  */
 // @ts-expect-error implicit any on missionFile/baseBranch
 function ensureMissionBaseBranchRecorded(missionFile, baseBranch, { logFn = fmt.log.plain } = {}) {
-  if (!baseBranch || !missionFile || !fs.existsSync(missionFile)) {
+  if (!missionFile || !fs.existsSync(missionFile)) {
     return false;
   }
 
   const content = fs.readFileSync(missionFile, 'utf8');
+
+  // Primary/detached launch: no feature base to record. Drop any stale
+  // Base-Branch line so resolveMissionBaseBranch resolves the primary branch.
+  if (!baseBranch) {
+    if (!/^Base-Branch:\s*\S+\s*$/m.test(content)) {
+      return false;
+    }
+    const updated = content.replace(/^Base-Branch:\s*\S+\s*$/m, '');
+    fs.writeFileSync(missionFile, updated);
+    logFn(fmt.status('PASS', 'Cleared stale Base-Branch for primary/detached launch'));
+    return true;
+  }
+
   const line = `Base-Branch: ${baseBranch}`;
   const existing = content.match(/^Base-Branch:\s*(\S+)\s*$/m);
   if (existing && existing[1] === baseBranch) {
@@ -139,6 +160,10 @@ function ensureMissionBaseBranchRecorded(missionFile, baseBranch, { logFn = fmt.
   logFn(fmt.status('PASS', `Recorded ${line} in ${fmt.path(missionFile)}`));
   return true;
 }
+
+// ponytail: single choke point — every draft-startup caller routes the launch
+// base through this writer, so clearing a stale base here (not in each caller)
+// fixes primary re-drafts and leaves non-primary replace behavior untouched.
 
 // @ts-expect-error implicit any on mainRepo/targetWorktree/branchName
 function ensureWorktree(mainRepo, targetWorktree, branchName, {
