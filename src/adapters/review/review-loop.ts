@@ -626,7 +626,10 @@ export async function startReviewLoop(slug: string, opts: {
                 error(fmt.status('FAIL', `Pre-review Git hook failure ${bounceResult.outcome === 'human-only' ? 'requires human intervention' : 'exhausted its repair budget'} for ${slug}.`));
                 exit(1); return;
               }
-            } else {
+            } else if (!preReviewSetupVerified) {
+              // TASK-2415: the catch-all exit serves unclassified or unrepaired
+              // failures only. A gate-only failure the kernel already repaired
+              // and verified continues to the reviewer launch in the same round.
               exit(1); return;
             }
           }
