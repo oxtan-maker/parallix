@@ -151,7 +151,7 @@ test('default test runner routes every moved group to integration and excludes i
   // Integration files spawn real children; cap their parallelism so host
   // contention cannot starve child startup past test-internal deadlines.
   assert.ok(integrationRun.args.some(a => a.startsWith('--test-concurrency=')));
-  assert.ok(defaultRun.args.some(a => a === '--test-concurrency=12'),
+  assert.ok(defaultRun.args.some(a => a === '--test-concurrency=2'),
     'unit concurrency is bounded so measured durations are not host-oversubscription artifacts');
   assert.equal(pkg.scripts['test:integration'], 'FORCE_COLOR=0 tsx test/run-default-tests.ts --integration');
   assert.match(runner, /file\.endsWith\('\.integration\.test\.ts'\)/,

@@ -51,6 +51,26 @@ export class SqliteOperationalHistoryRepository implements OperationalHistoryRep
     }));
   }
 
+  async findByTypeForMission(type: string, missionId: string): Promise<readonly OperationalHistoryEntry[]> {
+    const rows = await this.db.query<{
+      id: unknown;
+      event_type: unknown;
+      event_data: unknown;
+      created_at: unknown;
+    }>(
+      `SELECT id, event_type, event_data, created_at FROM operational_history
+       WHERE event_type = ? AND json_extract(event_data, '$.missionId') = ? ORDER BY id ASC;`,
+      [type, missionId],
+    );
+
+    return rows.map((row) => ({
+      id: Number(row.id),
+      eventType: String(row.event_type),
+      eventData: String(row.event_data),
+      createdAt: String(row.created_at),
+    }));
+  }
+
   /**
    * Serves `ConcreteCurrentWorkReadAdapter.loadCurrentWork`: retain the newest
    * two facts so reconciliation can reject a late terminal event for an older

@@ -296,7 +296,7 @@ export function buildTestRunPlan(options: TestRunPlanOptions): TestRunPlan {
   // Integration files spawn real children; task-2318/2327/2212 showed that
   // unrestricted concurrency can starve their startup past internal deadlines.
   const INTEGRATION_TEST_CONCURRENCY = 4;
-  const UNIT_TEST_CONCURRENCY = 12;
+  const UNIT_TEST_CONCURRENCY = 2;
   const testNode = compatibleTestNode();
   const testConcurrencyArgs = supportsTestConcurrency(testNode)
     ? [`--test-concurrency=${runsIntegrationSuite ? INTEGRATION_TEST_CONCURRENCY : UNIT_TEST_CONCURRENCY}`]

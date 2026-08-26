@@ -115,6 +115,9 @@ export interface BoardProjectionOptions {
   now?: () => number;
 }
 
+/** A mission that published no current-work fact at all. */
+const NO_CURRENT_WORK: CurrentWorkFacts = { currentWork: null, blockingReason: null };
+
 /**
  * Builds a BoardProjection by reading from multiple authority adapters.
  * Git and canonical task/mission documents always win over cached projections.
@@ -153,7 +156,6 @@ export class BoardProjectionBuilder {
       ttlMs: this._options?.currentWorkTtlMs ?? CURRENT_WORK_TTL_MS,
       isProcessAlive: this._options?.isProcessAlive,
     });
-    const noCurrentWork: CurrentWorkFacts = { currentWork: null, blockingReason: null };
 
     // Bounded recovery only. The published current-work fact above is the
     // board's authority for who is working; this process scan is consulted by
@@ -163,25 +165,13 @@ export class BoardProjectionBuilder {
     );
 
     // Build mission cards with operational facts
-    const cards = await Promise.all(missions.map(async (mission) => {
-      const { review, approval: reviewApproval } = reviews.get(mission.id) ?? { review: null, approval: null };
-      const gateStatus = await this._gates.loadGateStatus(mission.id);
-
-      const work = currentWorkByMission.get(mission.id) ?? noCurrentWork;
-      const facts: MissionOperationalFacts = {
-        latestGate: gateStatus,
-        reviewApproval,
-        currentWork: work.currentWork,
-        // `undefined` when the process scan itself could not run: that is
-        // "liveness unknown", which must not collapse into the observed
-        // "nothing running" that `null` means.
-        liveSession: runningSessions === null ? undefined : sessionByMission.get(mission.id) ?? null,
-        blockingReason: work.blockingReason,
-        flags: [],
-      };
-
-      return projectMissionCard({ ...mission, review }, facts);
-    }));
+    const cards = await Promise.all(missions.map(async (mission) => this.composeCard(
+      mission,
+      reviews.get(mission.id) ?? { review: null, approval: null },
+      await this._gates.loadGateStatus(mission.id),
+      currentWorkByMission.get(mission.id) ?? NO_CURRENT_WORK,
+      runningSessions === null ? undefined : sessionByMission.get(mission.id) ?? null,
+    )));
 
     // Build available actions from application policy
     const availableActions = this.deriveAvailableActions(cards);
@@ -204,6 +194,74 @@ export class BoardProjectionBuilder {
       metrics,
       sourceFacts,
     );
+  }
+
+  /**
+   * Project one mission's card without assembling the board around it.
+   *
+   * `px status <slug>` asks about a single mission, so it reads that mission,
+   * its review facts and its gate — never `loadAllMissions()`, the operation
+   * log, board metrics or the agent availability matrix, none of which appear
+   * in a single mission's card. Interpretation stays in `projectMissionCard`,
+   * shared with `build()`, so a focused status answer cannot drift away from
+   * the board's own reading of the same mission.
+   *
+   * Current work is read for this mission only and reconciled exactly as in
+   * `build()`. Running sessions remain one repository-wide recovery query.
+   *
+   * Returns `null` when the mission does not exist.
+   */
+  async buildMissionCard(missionId: MissionId): Promise<MissionCard | null> {
+    this._options?.prepareReads?.();
+    const mission = await this._missions.loadMission(missionId);
+    if (mission === null) { return null; }
+
+    const [reviews, gateStatus, runningSessions, currentWorkEvents] = await Promise.all([
+      this._reviews.loadReviews([mission.id]),
+      this._gates.loadGateStatus(mission.id),
+      this._agents.loadRunningSessions?.() ?? Promise.resolve(null),
+      this._options?.currentWork?.loadMissionCurrentWork?.(mission.id) ?? Promise.resolve([]),
+    ]);
+
+    const work = reconcileCurrentWork(currentWorkEvents, {
+      nowMs: (this._options?.now ?? Date.now)(),
+      ttlMs: this._options?.currentWorkTtlMs ?? CURRENT_WORK_TTL_MS,
+      isProcessAlive: this._options?.isProcessAlive,
+    }).get(mission.id) ?? NO_CURRENT_WORK;
+
+    const liveSession = runningSessions === null
+      ? undefined
+      : (runningSessions ?? []).find((session) => session.missionId === mission.id) ?? null;
+
+    return this.composeCard(
+      mission,
+      reviews.get(mission.id) ?? { review: null, approval: null },
+      gateStatus,
+      work,
+      liveSession,
+    );
+  }
+
+  /** The single place operational facts become a card, shared by both routes. */
+  private composeCard(
+    mission: Mission,
+    reviewFact: ReviewProjectionFact,
+    latestGate: 'passed' | 'failed' | 'running' | 'unknown',
+    work: CurrentWorkFacts,
+    // `undefined` when the process scan itself could not run: that is
+    // "liveness unknown", which must not collapse into the observed
+    // "nothing running" that `null` means.
+    liveSession: RunningAgentSession | null | undefined,
+  ): MissionCard {
+    const facts: MissionOperationalFacts = {
+      latestGate,
+      reviewApproval: reviewFact.approval,
+      currentWork: work.currentWork,
+      liveSession,
+      blockingReason: work.blockingReason,
+      flags: [],
+    };
+    return projectMissionCard({ ...mission, review: reviewFact.review }, facts);
   }
 
   /**

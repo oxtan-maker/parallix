@@ -7,6 +7,10 @@ import {
   makeAttentionItem,
 } from './fixtures/board-projection.js';
 import type { AttentionReason } from '../src/application/projections/board.js';
+import 'react';
+import 'ink';
+import '../src/interfaces/tui/confirmation-dialog.js';
+import '../src/interfaces/tui/shell.js';
 
 // ---------------------------------------------------------------------------
 // Helpers

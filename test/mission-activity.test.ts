@@ -15,6 +15,10 @@ import { renderStatus } from '../src/interfaces/cli/status.js';
 import type { StatusResult } from '../src/application/status-command-use-case.js';
 import type { AgentAvailabilityMetric } from '../src/application/projections/board.js';
 import { projectMissionCard, type CurrentWorkFreshness, type MissionCard, type MissionOperationalFacts } from '../src/application/projections/mission-board.js';
+import 'react';
+import 'ink';
+import '../src/interfaces/tui/agent-strip.js';
+import '../src/interfaces/tui/mission-card.js';
 
 // ---------------------------------------------------------------------------
 // The shared mission-activity read model and both operator renderings.

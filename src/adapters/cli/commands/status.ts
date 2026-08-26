@@ -162,6 +162,7 @@ async function createProjectionDeps(rootDir: string, servicesFn?: Function): Pro
   const emptyHistory: OperationalHistoryRepository = {
     async findAll() { return []; },
     async findByType() { return []; },
+    async findByTypeForMission() { return []; },
     async append() {},
     async clear() {},
   };

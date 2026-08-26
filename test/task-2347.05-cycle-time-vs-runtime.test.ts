@@ -9,6 +9,9 @@ import { missionId, missionLabels, requireClosedMission } from '../src/domain/mi
 import type { RepositoryId } from '../src/domain/repository.js';
 import { completedMissionStatistics } from '../src/domain/usage.js';
 import { agentFamily } from '../src/domain/agents.js';
+import 'react';
+import 'ink';
+import '../src/interfaces/tui/flow-panel.js';
 
 // ---------------------------------------------------------------------------
 // task-2347.05 — agent runtime and lifecycle cycle time are separate quantities

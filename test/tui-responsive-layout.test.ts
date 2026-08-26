@@ -12,6 +12,10 @@ import { EventEmitter } from 'node:events';
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeCards, makeFullCard, makeProjection } from './fixtures/board-projection.js';
+import 'react';
+import 'ink';
+import '../src/interfaces/tui/board-layout.js';
+import '../src/interfaces/tui/shell.js';
 
 const LANE_HEADERS = ['BACKLOG', 'REFINED', 'ACTIVE', 'REVIEW', 'INTEGRATION', 'DONE'];
 
