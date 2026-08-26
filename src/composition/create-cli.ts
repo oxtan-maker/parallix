@@ -63,6 +63,7 @@ import { deriveAliases, type Command, type MainOptions } from '../interfaces/cli
 import { createProductionApplicationServices } from './application-services.js';
 import { bindReviewPersistence, reviewLoopBindings } from './review-persistence.js';
 import { startReviewLoop } from '../adapters/review/review-loop.js';
+import { inferSlug } from '../adapters/filesystem/mission-paths.js';
 
 function resolveRuntimePath(): string {
   return fileURLToPath(import.meta.url);
@@ -181,7 +182,7 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
     integrate: (args, options) => withGraph(services =>
       createIntegrateCommand(new IntegrateCommandUseCase({
         execute: (innerArgs, innerOptions) => withMissionFactories(missionServicesFn => integrate(innerArgs, { ...innerOptions, missionServicesFn })),
-      }, services.currentWork))(args, options)),
+      }, services.currentWork, () => inferSlug(undefined)))(args, options)),
     'mission-start': missionStart,
     'verify-env': missionStart,
     'mutation-gate': mutationGate,

@@ -1,10 +1,10 @@
 ---
 id: TASK-2411
 title: ensure px ui detects integration
-status: ready-for-integration
+status: done
 assignee: [codex]
 created_date: '2026-08-24 15:34'
-labels: [user_value, bug]
+labels: ["user_value", "bug"]
 dependencies: []
 ordinal: 118917
 ---
