@@ -1,8 +1,8 @@
 ---
 id: TASK-2411
 title: ensure px ui detects integration
-status: refined
-assignee: [custom]
+status: active
+assignee: [claude]
 created_date: '2026-08-24 15:34'
 labels: [user_value, bug]
 dependencies: []
