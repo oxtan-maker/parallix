@@ -625,7 +625,6 @@ test('handoff use case creates the Forgejo PR through the port when the provider
   assert.equal(result.ok, true, recorder.errors.join('\n'));
   assert.deepEqual(created, [BRANCH]);
 });
-
 test('handoff preserves a publication verifier failure as structured gate evidence', async () => {
   const recorder = makeRecorder();
   const gateFailure = {

@@ -215,4 +215,69 @@ authority. Recorded here as a workflow-state note, not a code change.
 `./scripts/verify-local.sh docs`, and `./scripts/verify-local.sh static-analysis`
 (all stages) all exit 0 after this fix.
 
-Next action: submit the mission for review with `px review task-2377.05 --submit`.
+## Round 5 review resolution (reviewer: custom, disposition: REQUEST_CHANGES)
+
+Round-5 finding F1 is that the consecutive-round reviewer rotation — added
+between Round 4 and Round 5 in response to the Round-4 and Round-5 Codex
+findings — is a reviewer-family-separation feature, not bounce-kernel work. It
+edits review-orchestration territory that this mission's **Restricted Areas**
+clause names read-only (`src/adapters/review/review-loop.ts`) and that its
+**Scope**, **Success Criteria**, and **Authorized Amendments** (A1 and A2 only)
+never authorize. Round 4's own resolution had it right the first time: the
+reviewer assignment is a workflow-state concern outside implementer authority.
+
+- **F1 — rotation reverted to the review baseline (finding option (b)).** The
+  five review-orchestration files and their two line-registry followers are
+  restored to the mission baseline
+  `d1c5e4ba7`:
+  `src/adapters/review/review-agent-fallback.ts`,
+  `src/adapters/review/review-loop.ts`,
+  `src/adapters/review/review-state.ts`,
+  `src/adapters/review/review-state-mapping.ts`,
+  `src/application/handoff-command-use-case.ts`,
+  `src/application/consumer-domain-requirements.ts`,
+  `src/application/persistence-domain-map.ts`, plus the rotation tests added to
+  `test/handoff-use-case.test.ts` and
+  `test/task-2335-reviewer-family-repro.test.ts`. Option (a) — uplifting the
+  rotation to an authorized amendment A3 — was not available: both A1 and A2
+  record that the operator requested them during execution, and no operator
+  authorization for a rotation amendment exists in this mission's review events.
+  The round-scoped lane-event idempotency key (`handoff-${slug}-round-${number}`)
+  is reverted with it: it is not justified by SC5, which is about persisted
+  retry counters, and it arrived as part of the same rotation change.
+- **F1 — parked as follow-up.** The rotation is real product work and is parked,
+  not dropped. It belongs to a review-orchestration mission in the TASK-2377.04
+  lineage, which owns `src/adapters/review/review-loop.ts`. Two items to carry
+  over: (1) exclude the previous round's reviewer family from
+  `resolveReviewerIdentity` and from `resolveHandoffReviewAssignment`, yielding
+  to any reviewer when the exclusion empties the pool, with an end-to-end test
+  asserting the launched family differs from the preceding round; (2) scope the
+  handoff lane-event idempotency key to the review round, since a mission-only
+  key makes every round after the first deduplicate against round 1. Recorded
+  here and in the Round-5 resolution artifact rather than as a `backlog/` task
+  doc, because `backlog/` is workflow-owned by the same Restricted Areas clause
+  (see F2).
+- **F2 — stale `backlog/` task doc removed.**
+  `backlog/tasks/task-2389 - integrate recovery cannot handle active mission
+  with already-approved review.md` is deleted from this branch. It is a
+  stale-baseline artifact, not this mission's work: `git log --diff-filter=ADR`
+  on the path shows the doc was added on main in `4453ceaa2`, deleted on main in
+  `dc03972a7` when the task-2389 id was reused for
+  `backlog/completed/task-2389 - Align-operator-UIs-on-truthful-agent-activity-semantics.md`,
+  and then re-added by this mission's squash commit `32758aa6c` from a worktree
+  cut before that deletion. Removing it restores main's state for the path.
+
+After the revert the branch tree is byte-identical to the pre-rotation baseline
+for every listed reviewer-rotation `src/` and `test/` path (`git diff --stat
+d1c5e4ba7 --` for those paths returns no output); the only remaining branch
+change is this checkpoint document.
+The Goal Check rows above are unaffected: SC1–SC12 all concern the bounce-kernel
+migration, which is in the baseline and untouched by this round.
+
+`./scripts/verify-local.sh all`, `./scripts/verify-local.sh docs`, and
+`./scripts/verify-local.sh static-analysis` (all stages) all exit 0 after the
+revert.
+
+Next action: re-review the mission at the reverted tree; the rotation follow-up
+above needs an operator-owned task in a review-orchestration mission before any
+of it is re-implemented.
