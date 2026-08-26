@@ -8,10 +8,11 @@ export class IntegrateCommandUseCase {
   constructor(
     private readonly _workflow: IntegrateWorkflowPort,
     private readonly _currentWork: CurrentWorkPort = NO_CURRENT_WORK_PORT,
+    private readonly _inferSlug: () => string | null = () => null,
   ) {}
 
   async execute(args: string[], options: Record<string, unknown> = {}): Promise<unknown> {
-    const slug = args.find((arg) => !arg.startsWith('-')) ?? null;
+    const slug = args.find((arg) => !arg.startsWith('-')) ?? this._inferSlug();
     if (!slug) { return this._workflow.execute(args, options); }
 
     // Integration runs gates and a merge; it is long enough that a board built

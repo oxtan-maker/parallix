@@ -373,14 +373,18 @@ test('px integrate brackets the run with integrate-phase current work', async ()
   ]);
 });
 
-test('px integrate without a slug runs the workflow and publishes nothing', async () => {
+test('px integrate without a slug publishes for the adapter-inferred mission', async () => {
   const { repo, appended } = makeHistoryRepo();
   let ran = 0;
   await new IntegrateCommandUseCase(
     { execute: async () => { ran += 1; return null; } },
     new CurrentWorkRecorder(repo, { processId: 11 }),
-  ).execute(['--help']);
+    () => 'task-2370',
+  ).execute(['--dry-run']);
 
   assert.equal(ran, 1);
-  assert.deepEqual(appended, []);
+  assert.deepEqual(published(appended).map((fact) => [fact.missionId, fact.phase, fact.state]), [
+    ['task-2370', 'integrate', 'running'],
+    ['task-2370', 'integrate', 'ended'],
+  ]);
 });
