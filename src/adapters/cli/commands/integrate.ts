@@ -94,6 +94,8 @@ import {
   cleanupMissionWorktree,
 } from './integrate-post.js';
 
+import { resolveForgejoUser } from '../../review/review-adapter.js';
+
 const REAL_AGENT_OPTION = '--real-agent';
 const REAL_AGENT_MODEL_OPTION = '--real-agent-model';
 const INTEGRATE_VALUE_OPTIONS = new Set([REAL_AGENT_OPTION, REAL_AGENT_MODEL_OPTION]);
@@ -246,12 +248,15 @@ async function integrate(args: string[], options: {
 
     try {
       const executionDir = process.cwd();
-      context = await buildIntegrationContext(slug);
-
       // architecture invariant/architecture invariant: Read authoritative Mission state from SqliteMissionStore.
       // Database unavailability fails the operation (architecture invariant: fail-closed).
       if (typeof missionServicesFn !== 'function') { throw new Error('integrate command requires injected mission services'); }
-      const missionServices = await missionServicesFn(context.baseWorktree || process.cwd());
+      // Resolve the authoritative store before buildIntegrationContext so the
+      // reviewer lookup (TASK-2420 review round 2, F1) receives its third
+      // `missionStore` argument; the store is rootDir-independent, so the
+      // base worktree resolved inside the context call is not needed here.
+      const missionServices = await missionServicesFn(executionDir);
+      context = await buildIntegrationContext(slug, { missionStore: missionServices.store });
       const missionLoad = await missionServices.store.load(missionId(slug));
       if (missionLoad.kind === 'unavailable') {
         fmt.log.fail(`Mission store unavailable: ${missionLoad.reason}. Integration cannot proceed on legacy files.`);
@@ -737,6 +742,7 @@ async function buildIntegrationContext(slug: string, {
   getPrStatusFn = getPrStatus,
   getLatestReviewDecisionFn = getLatestReviewDecision,
   readReviewStateFn = readReviewState,
+  missionStore = null,
   gitFn = git
 }: {
   baseBranch?: string | null,
@@ -747,6 +753,7 @@ async function buildIntegrationContext(slug: string, {
   getPrStatusFn?: Function,
   getLatestReviewDecisionFn?: Function,
   readReviewStateFn?: Function,
+  missionStore?: import('../../../application/domain-ports.js').MissionStore | null,
   gitFn?: Function
 } = {}) {
   if (!slug) {
@@ -790,6 +797,28 @@ async function buildIntegrationContext(slug: string, {
   if (forgejoEnabled) {
     forgejoIdentity = resolveForgejoUserForIntegration(taskAssignee);
     forgejoToken = readTokenFn(/** @type {any} */ (forgejoIdentity.forgejoUser || 'default'));
+    // TASK-2420 (review round 1, F1): the reviewer login queried for recovery
+    // authority must come from the Mission's recorded current review round, not
+    // from the task assignee (the implementer). An implementation by `codex`
+    // reviewed by `qwen` would otherwise query `codex` as the reviewer and
+    // reject qwen's legitimate approval. Derive it from the persisted round
+    // (fail-closed, ADR 0048): a mission with no recorded round yields no
+    // reviewer, so reviewerUser stays null and recovery falls back to the
+    // default user only — it cannot be forged from caller context.
+    // TASK-2420 (review round 2, F1): the production `readReviewState` returns
+    // null unless its third `missionStore` argument is supplied, so the
+    // authoritative store must be passed here or the reviewer lookup always
+    // falls back to the default user. The store is the operator Mission
+    // authority, never task metadata.
+    const reviewState = await Promise.resolve(readReviewStateFn(slug, /** @type {string} */ (resolvedBaseWorktree), /** @type {any} */ (missionStore)));
+    // TASK-2420 (review round 2, F1): the round stores the reviewer as an
+    // AgentFamily; the login it posts a provider APPROVED as is
+    // resolveForgejoUser(reviewer). Map it the same way so the recovery
+    // authority matches the login the reviewer actually used, never a caller
+    // value. No recorded reviewer yields null → falls back to the default user.
+    const configuredReviewer = reviewState?.reviewer
+      ? resolveForgejoUser(/** @type {string} */ (reviewState.reviewer))
+      : null;
     pr = /** @type {any} */ (getPrStatusFn(branch, process.cwd(), {
       forgejoUser: /** @type {any} */ (forgejoIdentity.forgejoUser),
       token: forgejoToken
@@ -809,7 +838,12 @@ async function buildIntegrationContext(slug: string, {
 
     approval = pr.exists ? /** @type {any} */ (getLatestReviewDecisionFn(branch, {
       forgejoUser: /** @type {any} */ (forgejoIdentity.forgejoUser),
-      token: /** @type {any} */ (forgejoToken)
+      token: /** @type {any} */ (forgejoToken),
+      // TASK-2420 (review round 1, F1): pass the configured reviewer's resolved
+      // Forgejo login — derived from the recorded current review round above,
+      // never the task assignee/implementer (fail-closed, ADR 0048) — so the
+      // recovery authority recognizes an APPROVED by that reviewer too.
+      reviewerUser: /** @type {any} */ (configuredReviewer),
     })) : /** @type {any} */ ({ ok: false, error: 'pr-missing', reviewState: undefined });
   }
 
@@ -862,6 +896,22 @@ async function buildIntegrationContext(slug: string, {
  *
  * @param {{slug: string, missionStatus?: string, missionReview?: any, taskStatus?: string, approval?: {ok?: boolean, reviewState?: string, defaultUserApproved?: boolean, defaultUserApprovedAt?: string, source?: string}, baseWorktree?: string}} context
  */
+/**
+ * Resolve the authoritative provider-approval timestamp recovery may turn into a
+ * ReviewerDecision. TASK-2420: an APPROVED by the assigned/configured reviewer
+ * (reviewerApproved/reviewerApprovedAt) qualifies on the same footing as the repo
+ * default user's approval (defaultUserApproved/defaultUserApprovedAt). The
+ * default-user approval wins only when both are present; the qualifier is the
+ * approval's own provider timestamp, never the recovery wall clock (SC5).
+ */
+/** @param {{ok?: boolean, defaultUserApproved?: boolean, defaultUserApprovedAt?: string, reviewerApproved?: boolean, reviewerApprovedAt?: string}} approval */
+function resolveAuthoritativeApprovalAt(approval: any): string | undefined {
+  if (!approval || approval.ok !== true) {return undefined;}
+  if (approval.defaultUserApproved) {return approval.defaultUserApprovedAt;}
+  if (approval.reviewerApproved) {return approval.reviewerApprovedAt;}
+  return undefined;
+}
+
 function recoveryEstablishesApproval(context: any): {
   established: boolean;
   via: 'lifecycle' | 'mission-review' | 'human-override' | null;
@@ -875,9 +925,7 @@ function recoveryEstablishesApproval(context: any): {
   const review = context.missionReview;
   const rounds = review?.rounds;
   const lastRound = rounds && rounds.length > 0 ? rounds[rounds.length - 1] : null;
-  const overrideAt = context.approval?.ok === true && context.approval.defaultUserApproved === true
-    ? context.approval.defaultUserApprovedAt
-    : undefined;
+  const overrideAt = resolveAuthoritativeApprovalAt(context.approval);
 
   if (lastRound?.decision?.kind === 'approved') {
     return { established: true, via: 'mission-review', decidedAt: lastRound.decision.decidedAt, reason: '' };
@@ -940,7 +988,7 @@ function evaluateTaskStatusForIntegration(context: any) {
   const recovery = recoveryEstablishesApproval(context);
   if (recovery.established && recovery.via !== 'lifecycle') {
     const how = recovery.via === 'human-override'
-      ? `the default-user provider approval (${recovery.decidedAt}) would be recorded as an authoritative ReviewerDecision`
+      ? `the provider approval (${recovery.decidedAt}) would be recorded as an authoritative ReviewerDecision`
       : `the Mission Review already records an authoritative approval (${recovery.decidedAt})`;
     return {
       ok: true,
@@ -1100,14 +1148,12 @@ async function recoverMissionForIntegration(
     return { recovered: false, status: 'done' };
   }
 
-  // The explicit human override (repo default user already approved on the
-  // provider) is the one input recovery may turn into an authoritative
-  // ReviewerDecision. It carries the approval's own timestamp and is never
-  // a bare boolean shortcut (TASK-2379 Part E).
-  const overrideApprovedAt = context.approval?.ok === true
-    && context.approval.defaultUserApproved === true
-    ? context.approval.defaultUserApprovedAt
-    : undefined;
+  // The authoritative provider approval (repo default user OR the
+  // assigned/configured reviewer already approved on the provider) is the one
+  // input recovery may turn into an authoritative ReviewerDecision. It carries
+  // the approval's own timestamp and is never a bare boolean shortcut
+  // (TASK-2379 Part E; TASK-2420 extends the qualifier to the assigned reviewer).
+  const overrideApprovedAt = resolveAuthoritativeApprovalAt(context.approval);
 
   if (missionLoad.mission.status === 'active') {
     if (!missionLoad.mission.review && overrideApprovedAt === undefined) {

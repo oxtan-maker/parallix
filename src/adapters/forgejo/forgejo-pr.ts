@@ -572,16 +572,17 @@ function getLatestReview(branch: string, reviewerUser: string, sinceIso: string,
 
 /**
  * @param {string} branch
- * @param {{forgejoUser?: string, token?: string, apiCall?: Function, rootDir?: string}} [options]
- * @returns {{ok: boolean, error?: string, reviewState?: string|null, prNumber?: number, defaultUserApproved?: boolean, defaultUserApprovedAt?: string, raw?: string}}
+ * @param {{forgejoUser?: string, token?: string, apiCall?: Function, rootDir?: string, reviewerUser?: string}} [options]
+ * @returns {{ok: boolean, error?: string, reviewState?: string|null, prNumber?: number, defaultUserApproved?: boolean, defaultUserApprovedAt?: string, reviewerApproved?: boolean, reviewerApprovedAt?: string, raw?: string}}
  */
-function getLatestReviewDecision(branch: string, options: any = {}): { ok: boolean, error?: string, reviewState?: string | null, prNumber?: number, defaultUserApproved?: boolean, defaultUserApprovedAt?: string, raw?: string } {
-  /** @type {{forgejoUser?: string, token?: string, apiCall?: Function, rootDir?: string}} */
+function getLatestReviewDecision(branch: string, options: any = {}): { ok: boolean, error?: string, reviewState?: string | null, prNumber?: number, defaultUserApproved?: boolean, defaultUserApprovedAt?: string, reviewerApproved?: boolean, reviewerApprovedAt?: string, raw?: string } {
+  /** @type {{forgejoUser?: string, token?: string, apiCall?: Function, rootDir?: string, reviewerUser?: string}} */
   const {
     forgejoUser,
     token: providedToken,
     apiCall = forgejoApi,
-    rootDir = process.cwd()
+    rootDir = process.cwd(),
+    reviewerUser
   } = options;
 
   const slugMatch = branch.match(/^mission\/(task-\d+)/);
@@ -652,17 +653,40 @@ function getLatestReviewDecision(branch: string, options: any = {}): { ok: boole
     ? latestDefaultUserFormal.submittedAt
     : undefined;
 
-  const decision: { ok: boolean, prNumber?: number, reviewState: string, defaultUserApproved: boolean, defaultUserApprovedAt?: string } = {
+  // TASK-2420: recovery must also recognize an APPROVED posted by the
+  // assigned/configured reviewer (e.g. qwen), not only the repo default user
+  // ('human'). The assigned reviewer's login is resolved deterministically from
+  // the recorded Review round identity (see resolveForgejoUserForIntegration),
+  // never from caller-supplied context, so it cannot be forged (fail-closed,
+  // ADR 0048). The reviewer approval rides alongside defaultUserApproved as a
+  // separate field, attached only when the caller asks for the assigned
+  // reviewer (reviewerUser), so the whole-object shape callers that compare it
+  // whole stays byte-identical to the pre-TASK-2420 result. The same
+  // supersedes rule applies: a later REQUEST_CHANGES by the same assigned
+  // reviewer retracts the approval, exactly as for the default user.
+  const decision: { ok: boolean, prNumber?: number, reviewState: string, defaultUserApproved: boolean, defaultUserApprovedAt?: string, reviewerApproved?: boolean, reviewerApprovedAt?: string } = {
     ok: true,
     prNumber,
     reviewState: finalState,
-    defaultUserApproved
+    defaultUserApproved,
   };
   // The override carries its own authoritative timestamp; the property stays
   // absent (not `undefined`) when there is no default-user approval, keeping
   // the pre-TASK-2379 result shape for callers that compare it whole.
   if (defaultUserApprovedAt) {
     decision.defaultUserApprovedAt = defaultUserApprovedAt;
+  }
+  if (reviewerUser) {
+    const reviewerFormal = formalReviews.filter((r: any) => r.user === reviewerUser);
+    const latestReviewerFormal = reviewerFormal.length > 0 ? reviewerFormal[reviewerFormal.length - 1] : null;
+    const reviewerApproved = latestReviewerFormal !== null && latestReviewerFormal.state === 'APPROVED';
+    decision.reviewerApproved = reviewerApproved;
+    if (reviewerApproved && latestReviewerFormal) {
+      // Present only when the assigned reviewer actually holds a standing
+      // approval; absent otherwise so callers can distinguish "not asked"
+      // (undefined) from "asked, no approval" (false).
+      decision.reviewerApprovedAt = latestReviewerFormal.submittedAt;
+    }
   }
   return decision;
 }
