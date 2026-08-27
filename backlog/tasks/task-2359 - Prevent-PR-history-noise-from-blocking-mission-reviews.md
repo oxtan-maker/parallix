@@ -2,7 +2,7 @@
 id: TASK-2359
 title: Prevent PR history noise from blocking mission reviews
 status: backlog
-assignee: []
+assignee: [qwen]
 created_date: '2026-08-10 00:00'
 labels:
   - bug
