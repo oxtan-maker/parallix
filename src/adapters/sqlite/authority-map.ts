@@ -136,17 +136,6 @@ export const SESSION_MARKERS_AUTHORITY = {
 } as const satisfies Readonly<Record<string, FieldAuthority>>;
 
 /**
- * Exhaustive authority mapping for the `import_mission_versions` table:
- * the per-Mission version snapshot a compatibility import records alongside
- * its `import_history` entry (architecture migration).
- */
-export const IMPORT_MISSION_VERSIONS_AUTHORITY = {
-  import_id: { owner: 'operator-local' } as const,
-  mission_id: { owner: 'operator-local' } as const,
-  version: { owner: 'operator-local' } as const,
-} as const satisfies Readonly<Record<string, FieldAuthority>>;
-
-/**
  * Exhaustive authority mapping for the `board_lane_events` table.
  *
  * Maps to architecture migration domain entity: `LaneTransitionEvent` in
@@ -292,7 +281,6 @@ export const SQLITE_ENTITY_AUTHORITY = {
   schema_migrations: SCHEMA_MIGRATIONS_AUTHORITY,
   import_history: IMPORT_HISTORY_AUTHORITY,
   session_markers: SESSION_MARKERS_AUTHORITY,
-  import_mission_versions: IMPORT_MISSION_VERSIONS_AUTHORITY,
   board_lane_events: BOARD_LANE_EVENTS_AUTHORITY,
   missions: MISSIONS_AUTHORITY,
   mission_labels: MISSION_LABELS_AUTHORITY,

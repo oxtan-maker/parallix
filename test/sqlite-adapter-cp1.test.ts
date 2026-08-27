@@ -6,6 +6,7 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 
 import { SqliteDatabaseAdapter } from '../src/adapters/sqlite/database-adapter.js';
+import { SqliteImporter } from '../src/adapters/sqlite/importer.js';
 import { SqliteMigrationRunner, loadDefaultMigrations } from '../src/adapters/sqlite/migration-runner.js';
 import { resolveDatabasePath, verifyDatabasePathIsolation } from '../src/adapters/sqlite/database-path-resolver.js';
 import { initOperatorState, clearOperatorStateCache, clearOperatorStateCacheSync } from '../src/adapters/sqlite/adapter-factory.js';
@@ -249,6 +250,44 @@ describe('SQLite adapter — CP1: schema and migration runner', () => {
       const applied2 = await runner.applyPending(migrations);
       assert.equal(applied2.length, migrations.length, 'Second run should apply remaining migrations');
       assert.equal(applied2[1].id, '0002-import-history');
+    } finally {
+      await db.close();
+      cleanupTempDir(dir);
+    }
+  });
+
+  it('pre-retirement operator database drops retired provenance and keeps shared import history usable', async () => {
+    const { db, dir } = createTempDb();
+    try {
+      const migrations = loadDefaultMigrations();
+      const preRetirement = migrations.filter((migration) => migration.id !== '0017-retire-mission-import-provenance');
+      assert.equal(preRetirement.length, migrations.length - 1, 'fixture withholds only the retirement migration');
+      await new SqliteMigrationRunner(db).applyPending(preRetirement);
+      await db.execute(
+        `CREATE TABLE import_mission_versions (
+           import_id INTEGER NOT NULL REFERENCES import_history(id) ON DELETE CASCADE,
+           mission_id TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+           version INTEGER NOT NULL CHECK (version >= 1),
+           PRIMARY KEY (import_id, mission_id)
+         );`,
+      );
+      assert.equal(
+        (await db.query<{ name: string }>("SELECT name FROM sqlite_master WHERE type='table' AND name='import_mission_versions';")).length,
+        1,
+        'fixture represents an existing database with retired provenance',
+      );
+
+      await new SqliteMigrationRunner(db).applyPending(migrations);
+      assert.equal(
+        (await db.query<{ name: string }>("SELECT name FROM sqlite_master WHERE type='table' AND name='import_mission_versions';")).length,
+        0,
+        'retired provenance is removed on upgrade',
+      );
+
+      const sourcePath = path.join(dir, 'agents.local.json');
+      fs.writeFileSync(sourcePath, JSON.stringify({ blocklist: { codex: true } }));
+      await new SqliteImporter(db).importLegacyBlocklist(sourcePath);
+      assert.equal((await new SqliteImporter(db).getImportHistory(sourcePath)).length, 1, 'shared import history remains usable');
     } finally {
       await db.close();
       cleanupTempDir(dir);

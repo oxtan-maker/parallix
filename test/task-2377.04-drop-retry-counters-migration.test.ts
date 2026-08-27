@@ -26,7 +26,6 @@ import { missionId, missionLabels } from '../src/domain/mission.js';
 import { repositoryId } from '../src/domain/repository.js';
 import { agentFamily } from '../src/domain/agents.js';
 import { changeRevision } from '../src/domain/review.js';
-import { reviewFromState } from '../src/adapters/sqlite/mission-import-parsing.js';
 
 const MIGRATION_ID = '0016-review-drop-retry-counters';
 
@@ -201,21 +200,4 @@ describe('0016-review-drop-retry-counters migration (SC6)', () => {
     }
   });
 
-  it('legacy import parsing: a pre-cutover review-state.json with the removed counters imports without them', () => {
-    const { review, errors } = reviewFromState({
-      reviewer: 'codex',
-      implementer: 'claude',
-      round: 1,
-      startedAt: '2026-08-02T10:00:00.000Z',
-      phase: 'reviewing',
-      disposition: null,
-      reviewerRetryCount: 1,
-      metadata: { gateFailureRetryCount: 3, hookFailureRetryCount: 2 },
-    }, missionId('task-0016-import'), 'review-state.json');
-    assert.deepEqual(errors, [], 'legacy keys no longer produce import errors');
-    assert.ok(review, 'the legacy state still imports');
-    assert.equal(review.gateFailureRetryCount, undefined, 'the import no longer materializes the removed gate field');
-    assert.equal(review.hookFailureRetryCount, undefined, 'the import no longer materializes the removed hook field');
-    assert.equal(review.rounds[review.rounds.length - 1].reviewerRetryCount, 1, 'legacy round-level counts still import');
-  });
 });

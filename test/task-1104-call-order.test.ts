@@ -52,6 +52,7 @@ test('startReviewLoop follows the transition contract: review before reviewer, a
     implementer: 'claude',
     reviewer: 'codex',
     worktree: '/tmp/test',
+    gitFn: () => ({ status: 0, stdout: 'main\n', stderr: '' }),
     dryRun: false,
     log: (m) => logs.push(m),
     error: (m) => console.error(m),

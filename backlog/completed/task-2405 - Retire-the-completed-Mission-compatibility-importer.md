@@ -1,8 +1,8 @@
 ---
 id: TASK-2405
 title: Retire the completed Mission compatibility importer
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-08-23'
 labels: [ai_sdlc]
 dependencies: []
