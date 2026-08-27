@@ -3,8 +3,8 @@ id: TASK-2420
 title: >-
   Recognize provider approval from the assigned reviewer during integration
   recovery
-status: refined
-assignee: [custom]
+status: active
+assignee: [claude]
 created_date: '2026-08-26 16:56'
 updated_date: '2026-08-26 16:56'
 labels: [ai_sdlc, bug]
