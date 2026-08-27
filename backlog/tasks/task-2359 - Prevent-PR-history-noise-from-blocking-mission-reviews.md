@@ -1,7 +1,7 @@
 ---
 id: TASK-2359
 title: Prevent PR history noise from blocking mission reviews
-status: review
+status: ready-for-integration
 assignee: [qwen]
 created_date: '2026-08-10 00:00'
 labels:
