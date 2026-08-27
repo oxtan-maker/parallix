@@ -4,7 +4,7 @@ title: Create an ADR for the web implementation of px ui
 status: backlog
 assignee: []
 created_date: '2026-08-27 17:38'
-labels: []
+labels: [ai_sdlc]
 dependencies: []
 ordinal: 121917
 ---
