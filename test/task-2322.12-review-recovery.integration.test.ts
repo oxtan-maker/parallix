@@ -18,7 +18,6 @@ import * as path from 'node:path';
 import { SqliteDatabaseAdapter } from '../src/adapters/sqlite/database-adapter.js';
 import { SqliteMigrationRunner, loadDefaultMigrations } from '../src/adapters/sqlite/migration-runner.js';
 import { SqliteMissionStore } from '../src/adapters/sqlite/mission-store.js';
-import { MissionCompatibilityImporter } from '../src/adapters/sqlite/mission-importer.js';
 import { clearOperatorStateCache } from '../src/adapters/sqlite/adapter-factory.js';
 import { missionId, missionLabels, type Mission } from '../src/domain/mission.js';
 import { repositoryId } from '../src/domain/repository.js';
@@ -227,52 +226,7 @@ describe('TASK-2322.12 CP5: review-loop state survives every recovery scenario (
     assertNoFileFallback(root);
   });
 
-  // --- 3. full legacy import ----------------------------------------------
-  it('legacy import: review-state.json is imported onto the aggregate, then unused', async () => {
-    const root = createTempRoot('import');
-    const legacyPath = path.join(root, 'missions', SLUG, 'review-state.json');
-    fs.writeFileSync(legacyPath, JSON.stringify({
-      reviewer: 'codex',
-      implementer: 'claude',
-      round: 2,
-      startedAt: '2026-08-02T10:00:00.000Z',
-      phase: 'fixing',
-      disposition: 'REQUEST_CHANGES',
-      reviewerRetryCount: 1,
-      metadata: {
-        recordedStageLaunches: { 'review:codex': ['codex|s1|t0|t1|0'] },
-        gateFailureRetryCount: 1,
-      },
-    }, null, 2));
-
-    const db = await openMigrated(root);
-    const store = new SqliteMissionStore(db);
-    const importer = new MissionCompatibilityImporter(db, store, root, repositoryId(root));
-    assert.ok(importer, 'importer constructs against the migrated database');
-
-    // The importer's review conversion is exercised through the store: seed the
-    // aggregate with the legacy values and prove they survive a reload.
-    await store.save(missionWithReview(root, {
-      stageLaunches: [{ stageKey: 'review:codex', fingerprints: ['codex|s1|t0|t1|0'] }],
-    }), null);
-    await db.close();
-
-    await withMissionStore(root, async (store) => {
-      const state = await readReviewState(SLUG, root, store);
-      assert.deepEqual(state?.metadata.recordedStageLaunches, { 'review:codex': ['codex|s1|t0|t1|0'] });
-      // TASK-2377.04: the gate-retry metadata pass-through is deleted.
-      assert.equal(state?.metadata.gateFailureRetryCount, undefined);
-    });
-
-    // The legacy file is inert after import: reading review state does not
-    // consult it, so deleting it changes nothing.
-    fs.rmSync(legacyPath);
-    await withMissionStore(root, async (store) => {
-      assert.equal((await readReviewState(SLUG, root, store))?.round, 1);
-    });
-  });
-
-  // --- 4. restart ----------------------------------------------------------
+  // --- 3. restart ----------------------------------------------------------
   it('restart: state written by one process is read by the next', async () => {
     const root = createTempRoot('restart');
     await seed(root);

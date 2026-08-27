@@ -211,19 +211,6 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     classification: 'database-owned-domain-state',
     cutoverTask: null,
   },
-  {
-    id: 'mission-importer-read',
-    concept: 'Mission',
-    pathType: 'compatibility',
-    fileLocation: 'src/adapters/sqlite/mission-importer.ts',
-    operation: 'read',
-    classification: 'database-owned-domain-state',
-    cutoverTask: 'TASK-2322.02',
-  },
-  // CompatibilityMissionStore is no longer a production boundary after the
-  // TASK-2322.07 cutover: it is reachable only from the import pipeline, which
-  // is already registered as `mission-importer-read`. Its former read/write
-  // entries are removed because SqliteMissionStore fully subsumes them.
   // persistent-data-migration: still used for data migration (not subsumed by SQLite).
   {
     id: 'mission-migration-read',

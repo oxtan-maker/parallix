@@ -527,8 +527,6 @@ test('SC1 reverse: all durable-IO files under src/ are present in the inventory'
     'src/adapters/git/mutation-scoper.ts',
     // Database adapter (SQLite infrastructure)
     'src/adapters/sqlite/database-adapter.ts',
-    // Mission import parsing — reads task files for SQLite import, not a concept
-    'src/adapters/sqlite/mission-import-parsing.ts',
     // Agent launchers — write config files for the agent runtime, not domain state
     'src/adapters/agents/codex.ts',
     'src/adapters/agents/vibe.ts',

@@ -17,7 +17,7 @@ const expectedIntegrationFiles = [
   'sqlite-importer-cp4.test.ts', 'sqlite-ports-cp2.test.ts', 'stats.test.ts',
   'task-2220-repro.test.ts', 'task-2241-tmp-cleanup-repro.test.ts',
   'task-2322-05-mission-sqlite-fixture.test.ts', 'task-2322-05-mission-use-cases.test.ts',
-  'task-2322.04-mission-import.test.ts', 'task-2322.11-operator-state.test.ts',
+  'task-2322.11-operator-state.test.ts',
   'task-2322.12-stray-persistence.test.ts', 'task-2339-aggregate-read-during-write.test.ts',
   'task-2339-writes-outlive-close.test.ts', 'task-2345-repro.test.ts',
   'task-2347-01-repository-identity-repro.test.ts', 'task-2347.02-lifecycle-history.test.ts',
