@@ -1,8 +1,8 @@
 ---
 id: TASK-2359
 title: Prevent PR history noise from blocking mission reviews
-status: refined
-assignee: [qwen]
+status: active
+assignee: [codex]
 created_date: '2026-08-10 00:00'
 labels:
   - ai_sdlc
