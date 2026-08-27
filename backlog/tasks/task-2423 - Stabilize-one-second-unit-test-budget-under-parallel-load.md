@@ -19,16 +19,17 @@ and an otherwise focused TASK-2414 worktree. A rebounce cannot repair the
 mission that happens to trigger this shared-capacity failure.
 
 Keep the one-second hermetic-test requirement, but make normal unit tests
-finish within 500 ms even while many missions verify in parallel. Fix tests
-that cross real boundaries rather than treating their wall-clock delay as a
-unit-test concern. Runner concurrency may be reduced as a supporting control,
-but it is not a substitute for fast tests. Do not turn a flaky measurement
-into an implicit pass or relax the requirement globally.
+finish within 500 ms when they run on their own. That headroom makes the
+existing one-second cap reliable when many missions verify in parallel. Fix
+tests that cross real boundaries rather than treating their wall-clock delay as
+a unit-test concern. Runner concurrency may be reduced as a supporting control,
+but it is not a substitute for fast isolated tests. Do not turn a flaky
+measurement into an implicit pass or relax the requirement globally.
 
 ## Acceptance Criteria
 
 - [ ] #1 A reproducible regression demonstrates the current loss of headroom under supported parallel mission verification.
-- [ ] #2 Every ordinary unit test completes within 500 ms under the supported parallel mission load; reducing runner concurrency alone does not satisfy this criterion.
+- [ ] #2 Every ordinary unit test completes within 500 ms when run in the normal isolated unit-test suite; reducing runner concurrency alone does not satisfy this criterion.
 - [ ] #3 The default verifier no longer strands unrelated missions solely because concurrent supported work inflates a unit-test duration.
 - [ ] #4 Tests that genuinely exceed the one-second hermetic unit-test contract still fail with an actionable diagnostic.
 - [ ] #5 The suite-level budget and integration-test boundary remain enforced.
