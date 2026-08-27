@@ -102,7 +102,7 @@ export function reconcileCurrentWork(
 
   const facts = new Map<MissionId, CurrentWorkFacts>();
   for (const [missionId, missionEvents] of byMission) {
-    const resolved = resolveOperation([...missionEvents].sort(byDurableOrder));
+    const resolved = resolveOperation([...missionEvents].sort(byDurableOrder), options);
     if (resolved) { facts.set(missionId, reconcileOne(resolved, options)); }
   }
   return facts;
@@ -119,15 +119,39 @@ function byDurableOrder(left: CurrentWorkEvent, right: CurrentWorkEvent): number
 /**
  * The event that still describes the mission, or `null` when none does.
  *
- * A `running` event always replaces what came before it: that is the mission's
- * current work by definition. A terminal event is accepted only from the
- * operation that owns the standing work — anything else is a late report about
- * an operation that has already been superseded.
+ * A `running` event normally replaces what came before it: that is the
+ * mission's current work by definition. A terminal event is accepted only from
+ * the operation that owns the standing work — anything else is a late report
+ * about an operation that has already been superseded.
+ *
+ * One exception, for TASK-2416: a `running` event from a *different operation*
+ * (a different process) does not supersede a standing `running` fact that is
+ * still alive. The review loop's own agents run `px review --start` /
+ * `--submit` / `--consume-artifacts`, each a separate process under its own
+ * operationId (all in `PUBLISHED_PHASES`). Their short nested bracket would
+ * otherwise shadow the outer `px review --continue` loop's family-carrying
+ * fact — attributing the live continuation as `family unknown` — and their
+ * `ended` would then clear the mission's live work entirely even though the
+ * outer process is still running. A nested sub-operation bracket must not win.
  */
-function resolveOperation(ordered: readonly CurrentWorkEvent[]): CurrentWorkEvent | null {
+function resolveOperation(
+  ordered: readonly CurrentWorkEvent[],
+  options: ReconcileCurrentWorkOptions,
+): CurrentWorkEvent | null {
   let standing: CurrentWorkEvent | null = null;
   for (const event of ordered) {
-    if (event.state === 'running') { standing = event; continue; }
+    if (event.state === 'running') {
+      if (
+        standing !== null &&
+        standing.state === 'running' &&
+        standing.processId !== event.processId &&
+        processAlive(standing, options)
+      ) {
+        continue;
+      }
+      standing = event;
+      continue;
+    }
     if (standing !== null && !sameOperation(standing, event)) { continue; }
     // An operation that stopped *with a reason* is the operator's answer to
     // "why is nobody working this?". The same operation's bracket-closing
@@ -136,6 +160,21 @@ function resolveOperation(ordered: readonly CurrentWorkEvent[]): CurrentWorkEven
     standing = event;
   }
   return standing;
+}
+
+/**
+ * Whether the standing fact is a still-alive process from a different
+ * operation. A null result — no process to check, the probe omitted, or the
+ * probe cannot tell — means the standing fact is not provably alive, so a
+ * newer running event from a different process supersedes it.
+ */
+function processAlive(
+  event: CurrentWorkEvent,
+  options: ReconcileCurrentWorkOptions,
+): boolean {
+  if (event.processId === null) { return false; }
+  if (!options.isProcessAlive) { return false; }
+  return options.isProcessAlive(event.processId, event.processIdentity ?? null) === true;
 }
 
 /**
