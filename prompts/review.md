@@ -21,6 +21,8 @@ Minimum loop contract:
 - The workflow runs the declared verification gate before this review. Do not invoke `px` yourself, with one exception: `px status {{slug}}` is read-only and is the required way to load review history. Never run any other `px` subcommand.
 - Review as an independent senior engineer. Approve only if the mission is satisfied, verification is credible for the risk level, and the diff is safe to integrate.
 - Request changes for actionable issues introduced or materially worsened by this mission.
+- Findings must be grounded in `git diff {{reviewBaseline}}..HEAD`, mission/checkpoint evidence, or inability to identify the reviewed revision.
+- PR metadata, commit ancestry, and historical commits outside `git diff {{reviewBaseline}}..HEAD` are context only. They must not produce a mission finding, request-changes verdict, or workflow block unless the mission introduced or materially worsened the inconsistency, or the review surface cannot identify the exact reviewed revision.
 - Confirm the final checkpoint document in the mission directory contains a Goal Check table citing real, durable evidence such as backticked commands, test names, ADR references, or test file paths.
 - Treat checkpoint evidence as a record of the work at the time it was performed. A command such as `git diff HEAD` is expected to be empty after a checkpoint is committed; that alone is not a finding. Flag evidence only when it is materially false, unverifiable from the committed tree, or conceals a mission change. Prefer the mission diff against `{{reviewBaseline}}` and stable file/test evidence when checking claims.
 - Write findings to `{{artifactDir}}/{{slug}}-review-findings.md`, outcome to `{{artifactDir}}/{{slug}}-review-outcome.md`, and verdict to `{{artifactDir}}/{{slug}}-review-verdict.txt`.
@@ -47,7 +49,6 @@ Check:
 - Do not call px directly, the workflow will do that for you — except for the read-only `px status {{slug}}` above, which you must run to load review history
 - Do not post to Forgejo directly; `px review {{slug}} --start` or `--submit` publishes the artifacts.
 - Do not edit repo files; do not switch into implementer behavior.
-- If workflow state, prompts, or PR history are inconsistent, report that inconsistency as a finding rather than fixing it.
 - Graphify-first: before reviewing, check if `graphify-out/graph.json` exists. If it does, run `graphify query "review {{slug}} for correctness and completeness"` to get a graph-based view of the mission scope before examining the diff.
 
 Separation of duties — you are the reviewer, not the implementer. Stay in review-only mode:
@@ -61,7 +62,6 @@ You MUST NOT:
 
 You MUST:
 - Review the full mission diff, confirm the final checkpoint's goal-check evidence, and write the findings, outcome, and verdict artifacts
-- Report any inconsistency (workflow state, prompts, PR history) as a finding rather than resolving it yourself
 
 You MAY (these writes are the sole exceptions to "no repo edits"):
 - Write to the artifact directory `{{artifactDir}}` (findings, outcome, verdict)
