@@ -5,8 +5,8 @@ status: backlog
 assignee: [qwen]
 created_date: '2026-08-10 00:00'
 labels:
+  - ai_sdlc
   - bug
-  - user_value
 priority: high
 dependencies: []
 ---
