@@ -226,6 +226,10 @@ export function buildTestRunPlan(options: TestRunPlanOptions): TestRunPlan {
     // git repos in a temp dir to stage the stuck-lane scenario, so it crosses a
     // real git boundary the content heuristic sees and belongs in integration.
     'task-2397-integrate-active-approved-recovery.test.ts',
+    // TASK-2420: integrate recovery repro by the assigned reviewer. It builds
+    // throwaway git repos in a temp dir to stage the stranded-lane scenario,
+    // so it crosses a real git boundary like task-2397 and belongs in integration.
+    'task-2420-integrate-recovery-assigned-reviewer.test.ts',
   ]);
 
   // Classify subdir tests through the same boundary filter as root-level tests,

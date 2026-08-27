@@ -99,6 +99,10 @@ const expectedIntegrationFiles = [
   // exit-code-only verifier loss and pin proof-reuse/invalidation, so they
   // cross the process boundary and run only in the integration layer.
   'task-2413-proof-reuse.test.ts', 'task-2413-publication-seam.test.ts', 'task-2413-repro.test.ts',
+  // TASK-2420: integrate recovery repro by the assigned reviewer. It builds
+  // throwaway git repos in a temp dir to stage the stranded-lane scenario, so
+  // it crosses a real git boundary like task-2397 and runs only in integration.
+  'task-2420-integrate-recovery-assigned-reviewer.test.ts',
   'test-hygiene.test.ts',
   'tui-pty-smoke.test.ts', 'task-2313-repro.test.ts', 'task-2370-repro.test.ts',
   'tui-command-flow.test.ts',
