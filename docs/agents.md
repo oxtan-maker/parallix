@@ -395,7 +395,7 @@ When `startAgent` falls back to a different agent family after a limit hit, the 
 
 ### Backlog branch ownership
 
-Mission lifecycle state changes are committed to the mission's integration branch: `main` for a normal mission, or the recorded `Base-Branch` for a feature-branch mission. Parallix then rebases the mission worktree onto that branch before later mission work uses the new task state. A launch callback or dirty agent worktree defers that rebase until the next clean lifecycle boundary instead of racing uncommitted output. At that boundary, Parallix automatically keeps mission-owned metadata while restoring integration-owned task `status` and `assignee`; conflicts in shared source files still abort the rebase and leave the mission worktree at its pre-rebase commit. This keeps `backlog.md` state visible in the checkout that owns integration without discarding mission metadata or rebasing underneath an agent.
+Backlog lifecycle state changes are committed in the active mission worktree. This applies equally to actions started from the `px` UI: the UI uses the same workflow command path and does not route task-state commits through the primary branch.
 
 ### Automatic post-execute handoff repair (TASK-1037)
 

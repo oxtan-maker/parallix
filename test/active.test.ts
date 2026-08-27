@@ -913,7 +913,7 @@ test('selectLaunchAndRecord writes Backlog with the launched agent after a succe
   assert.equal(transitions.length, 1, 'transitionTask must be called exactly once on success');
   assert.equal(transitions[0].status, 'active');
   assert.equal(transitions[0].opts.implementer, 'codex');
-  assert.equal(transitions[0].opts.deferMissionRebase, true);
+  assert.equal(transitions[0].opts.rootDir, '/tmp/project-task-test', 'the shared CLI/TUI execution path writes in its launched worktree');
 });
 
 test('selectLaunchAndRecord reuses the caller preselection instead of choosing again', async () => {

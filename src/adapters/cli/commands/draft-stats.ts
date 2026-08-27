@@ -45,9 +45,6 @@ async function recordDraftImplementer({
     implementer: actual,
     rootDir: worktree || resolveWorktree(slug) || process.cwd(),
     log,
-    // Draft output is committed immediately after this bookkeeping step.
-    // Defer the rebase until that clean boundary instead of racing dirty files.
-    deferMissionRebase: true,
   })) {
     log(fmt.status('WARN', `Could not enforce draft agent ${fmt.agent(actual)} in backlog task.`));
   }

@@ -97,9 +97,9 @@ function completeTask(slug: string, rootDir: string = process.cwd()): boolean {
  * @param {string} slug
  * @param {string} newStatus
  * @param {{implementer?: string|null, clearAssignee?: boolean, rootDir?: string, log?: Function}} [opts]
- * @returns {boolean}
+ * @returns {Promise<boolean>}
  */
-function transitionTaskLocal(slug: string, newStatus: string, { implementer = null, clearAssignee = false, rootDir = process.cwd(), log = fmt.log.plain }: { implementer?: string | null | undefined, clearAssignee?: boolean, rootDir?: string, log?: Function } = {} as any) {
+async function transitionTaskLocal(slug: string, newStatus: string, { implementer = null, clearAssignee = false, rootDir = process.cwd(), log = fmt.log.plain }: { implementer?: string | null | undefined, clearAssignee?: boolean, rootDir?: string, log?: Function } = {} as any) {
   const resolution = resolveTaskFile(slug, rootDir);
   if (!resolution.ok) {
     log(fmt.status('WARN', `Could not transition task ${fmt.slug(slug)}: ${resolution.reason}`));
@@ -332,7 +332,7 @@ async function transitionTaskOnIntegrationBranch(
   const resolution = resolveTaskFile(slug, stateRoot);
   const oldStatus = resolution.ok && resolution.taskFile ? getTaskStatus(resolution.taskFile) : null;
 
-  if (!transitionTaskLocal(slug, newStatus, { implementer, clearAssignee, rootDir: stateRoot, log })) {
+  if (!await transitionTaskLocal(slug, newStatus, { implementer, clearAssignee, rootDir: stateRoot, log })) {
     return false;
   }
 
@@ -485,9 +485,8 @@ async function transitionTaskOnIntegrationBranch(
   return true;
 }
 
-// Public lifecycle seam. Existing command injection and mocks retain this name,
-// while every production caller now receives integration-branch behavior.
-const transitionTask = transitionTaskOnIntegrationBranch;
+// Public lifecycle seam: transitions belong to the worktree that invokes them.
+const transitionTask = transitionTaskLocal;
 
 export {
   completeTask,
