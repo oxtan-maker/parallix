@@ -7,6 +7,7 @@ status: backlog
 assignee: []
 created_date: '2026-08-26 14:40'
 labels:
+  - user_value
   - bug
 dependencies: []
 ordinal: 120917
