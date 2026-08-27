@@ -3,7 +3,7 @@ id: TASK-2420
 title: >-
   Recognize provider approval from the assigned reviewer during integration
   recovery
-status: review
+status: active
 assignee: [custom]
 created_date: '2026-08-26 16:56'
 updated_date: '2026-08-26 16:56'
