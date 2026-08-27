@@ -3,9 +3,24 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { eligibleAgentsForStep, workflowLauncherStatus } from './agents.js';
 import { packageRoot } from '../filesystem/package-root.js';
+import { CONFIG_PATH as WORKFLOW_AGENT_CONFIG_PATH } from './agent-config.js';
 
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
-const CONFIG_PATH = path.join(packageRoot(MODULE_DIR), 'config', 'agents.json');
+
+// Working-tree config/agents.json is authoritative (ADR 0044: the bundled copy
+// under packageRoot is the fallback). Resolve the working-tree-first path so the
+// matrix reports the same governing path that eligibleAgentsForStep() reads
+// instead of always claiming the bundled package-root copy governs eligibility
+// when an operator working-tree override is in effect.
+function resolveConfigPath(configPath: string | undefined, existsSyncFn: typeof fs.existsSync): string {
+  if (configPath) {
+    return configPath;
+  }
+  const workingTree = path.resolve(process.cwd(), WORKFLOW_AGENT_CONFIG_PATH);
+  return existsSyncFn(workingTree)
+    ? workingTree
+    : path.join(packageRoot(MODULE_DIR), WORKFLOW_AGENT_CONFIG_PATH);
+}
 
 interface LauncherStatusResult {
   supported: boolean;
@@ -32,10 +47,11 @@ export function buildAutonomousReviewMatrix(options: BuildMatrixOptions = {}): {
     step = 'review',
     eligibleAgentsForStepFn = eligibleAgentsForStep,
     workflowLauncherStatusFn = workflowLauncherStatus,
-    configPath = CONFIG_PATH,
+    configPath: configPathOption,
     existsSyncFn = fs.existsSync
   } = options;
 
+  const configPath = resolveConfigPath(configPathOption, existsSyncFn);
   const agents = eligibleAgentsForStepFn(step);
   const launchers: Record<string, LauncherStatusResult> = Object.fromEntries(
     agents.map((agent: string) => [agent, workflowLauncherStatusFn(agent)])

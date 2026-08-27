@@ -233,7 +233,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'failover-block-write',
     family: 'failover',
     fileLocation: 'src/adapters/agents/agent-config.ts',
-    line: 159,
+    line: 171,
     anchor: 'function updateAgentBlock',
     reads: ['AgentBlock'],
     requirement:

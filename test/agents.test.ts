@@ -535,6 +535,61 @@ test('eligibleAgentsForStep falls back when step is not in config', () => {
   assert.ok(eligible.length > 0);
 });
 
+// ---------- working-tree config/agents.json is authoritative (task-2390) ----------
+
+// The shipped default config is read from the working tree so an operator can
+// steer per-step eligibility in an installed/published build without a
+// rebuild. In the repo checkout packageRoot resolves to the working tree, so
+// this bug is only observable when packageRoot != cwd; exercise cwd directly.
+test('eligibleAgentsForStep reads a changed eligible list from the working-tree config/agents.json', () => {
+  const previousCwd = process.cwd();
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-working-tree-config-'));
+  try {
+    const configDir = path.join(tmpRoot, 'config');
+    fs.mkdirSync(configDir, { recursive: true });
+    const distinct = ['vibe', 'codex'];
+    fs.writeFileSync(
+      path.join(configDir, 'agents.json'),
+      JSON.stringify({ steps: { draft: { eligible: distinct, selection: 'random' } } }),
+      'utf8'
+    );
+    process.chdir(tmpRoot);
+    // No config passed in: the default CONFIG_PATH must resolve from cwd.
+    const eligible = eligibleAgentsForStep('draft', { mergeLocal: false });
+    assert.deepEqual(eligible, distinct);
+  } finally {
+    process.chdir(previousCwd);
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test('selectAgent honors a changed eligible list from the working-tree config/agents.json', () => {
+  const previousCwd = process.cwd();
+  const previousAgent = process.env.WORKFLOW_AGENT;
+  delete process.env.WORKFLOW_AGENT;
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-working-tree-select-'));
+  try {
+    const configDir = path.join(tmpRoot, 'config');
+    fs.mkdirSync(configDir, { recursive: true });
+    // Only vibe is eligible; the existing path-launcher fixtures make it run.
+    fs.writeFileSync(
+      path.join(configDir, 'agents.json'),
+      JSON.stringify({ steps: { draft: { eligible: ['vibe'], selection: 'first' } } }),
+      'utf8'
+    );
+    process.chdir(tmpRoot);
+    withPathLaunchers({ vibe: 'process.exit(0);' }, () => {
+      const agent = selectAgent('draft', { mergeLocal: false });
+      assert.equal(agent, 'vibe', 'a changed working-tree eligible list must govern selection');
+    });
+  } finally {
+    process.chdir(previousCwd);
+    if (previousAgent === undefined) delete process.env.WORKFLOW_AGENT;
+    else process.env.WORKFLOW_AGENT = previousAgent;
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+  }
+});
+
 // ---------- selectAgent ----------
 
 test('selectAgent respects WORKFLOW_AGENT env override', () => {

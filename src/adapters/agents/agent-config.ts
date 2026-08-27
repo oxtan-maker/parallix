@@ -48,9 +48,21 @@ function readAgentConfigOrExit(configPath: string = CONFIG_PATH, options: ReadAg
 
 function parseAgentConfigFile(configPath: string, scope: string) {
   try {
-    const content = configPath === CONFIG_PATH
-      ? runtimeAssetStore.readText(CONFIG_PATH)
-      : fs.readFileSync(configPath, 'utf8');
+    let content: string;
+    if (configPath === CONFIG_PATH) {
+      // ponytail: working-tree config/agents.json is authoritative so an
+      // operator can steer per-step eligibility in an installed/published
+      // build without a rebuild. The bundled copy under packageRoot (ADR 0044)
+      // remains the fallback when no working-tree file exists. readAgentConfig
+      // passes an absolute path for any non-default config, so this branch is
+      // only the shipped default and never touches a caller-supplied path.
+      const workingTree = path.resolve(process.cwd(), CONFIG_PATH);
+      content = fs.existsSync(workingTree)
+        ? fs.readFileSync(workingTree, 'utf8')
+        : runtimeAssetStore.readText(CONFIG_PATH);
+    } else {
+      content = fs.readFileSync(configPath, 'utf8');
+    }
     return JSON.parse(content);
   } catch (err) {
     throw buildInvalidAgentConfigError(configPath, scope, (err as {message?: string}));
