@@ -1,7 +1,7 @@
 ---
 id: TASK-2361
 title: Measure the second post-boundary 20-completed-mission cohort
-status: ready-for-integration
+status: done
 assignee: [custom]
 created_date: '2026-08-11 00:00'
 labels:
@@ -17,6 +17,12 @@ references:
   - missions/task-2291/cohort-ledger.json
   - missions/task-2291/cohort-measurement.json
   - missions/task-2291/audit-cohort.mjs
+  - missions/task-2361/cohort-ledger.json
+  - missions/task-2361/cohort-measurement.json
+  - scripts/bug-frequency-report.ts
+  - src/application/projections/bug-frequency.ts
+  - test/task-2361-bug-frequency.test.ts
+  - backlog/tasks/task-2421 - Measure-the-third-post-boundary-20-completed-mission-cohort.md
 priority: high
 ordinal: 88912
 ---
