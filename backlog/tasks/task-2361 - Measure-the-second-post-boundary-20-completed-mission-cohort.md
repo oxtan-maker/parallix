@@ -1,7 +1,7 @@
 ---
 id: TASK-2361
 title: Measure the second post-boundary 20-completed-mission cohort
-status: review
+status: active
 assignee: [custom]
 created_date: '2026-08-11 00:00'
 labels:
