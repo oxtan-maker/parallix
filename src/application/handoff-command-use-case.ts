@@ -1143,11 +1143,10 @@ export class HandoffCommandUseCase {
     const pushUser = ownerToken && repoOwner ? repoOwner : (fallbackUser || forgejoUser);
     const pushToken = ownerToken || token;
     const remoteUrl = ports.forgejo.authenticatedReviewUrl(pushUser, pushToken, rootDir);
-    // transitionTask commits the Backlog state on its integration branch, then
-    // rebases this mission branch onto that new commit. Step 2 has already
-    // published the pre-transition tip to create/update the PR, so this push
-    // is necessarily non-fast-forward even during an ordinary handoff. Use a
-    // lease to update that known PR tip without overwriting a concurrent push.
+    // transitionTask commits the Backlog state in this mission worktree. Step 2
+    // has already published the pre-transition tip to create/update the PR, so
+    // this push may be non-fast-forward. Use a lease to update that known PR
+    // tip without overwriting a concurrent push.
     let pushLeaseArg = null;
     {
       const fetchArgs = ['-C', rootDir, 'fetch', remoteUrl, `+refs/heads/${branch}:refs/remotes/review/${branch}`];

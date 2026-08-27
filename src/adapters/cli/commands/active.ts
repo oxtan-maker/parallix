@@ -201,10 +201,6 @@ async function selectLaunchAndRecord(opts) {
           implementer: agent,
           rootDir: worktree,
           log,
-          // The agent process is already running when onLaunch fires. Never
-          // rebase its worktree concurrently; the post-execute lifecycle check
-          // synchronizes the clean, committed worktree before handoff.
-          deferMissionRebase: true,
         })) {
           launchTransitionFailed = true;
           return;

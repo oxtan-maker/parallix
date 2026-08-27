@@ -688,7 +688,7 @@ test('transitionTask updates status and implementer and commits the change in a 
   });
 });
 
-test('transitionTask commits a Backlog task update when invoked from a sibling mission worktree', async () => {
+test('transitionTask commits only the mission worktree task when invoked from a sibling mission worktree', async () => {
   await withTempGitRepo(async root => {
     // 1. Setup base repo with a task
     const taskDir = path.join(root, 'backlog', 'tasks');
@@ -717,13 +717,14 @@ test('transitionTask commits a Backlog task update when invoked from a sibling m
 
       assert.equal(ok, true, 'transitionTask should return true');
 
-      // The durable task state is committed on the primary checkout, then the
-      // mission worktree is rebased onto it.
-      const content = fs.readFileSync(path.join(root, 'backlog', 'tasks', 'task-2104-sibling.md'), 'utf8');
-      assert.match(content, /^status: active$/m);
+      const missionContent = fs.readFileSync(worktreeTaskPath, 'utf8');
+      assert.match(missionContent, /^status: active$/m);
+      assert.match(missionContent, /^assignee: \[codex\]$/m);
+      const primaryContent = fs.readFileSync(path.join(root, 'backlog', 'tasks', 'task-2104-sibling.md'), 'utf8');
+      assert.match(primaryContent, /^status: backlog$/m);
+      assert.match(primaryContent, /^assignee: \[gemini\]$/m);
 
-      // Verify the commit in the worktree repo
-      const lastSubject = childProcess.spawnSync('git', ['log', '-1', '--format=%s'], { cwd: root, encoding: 'utf8' }).stdout.trim();
+      const lastSubject = childProcess.spawnSync('git', ['log', '-1', '--format=%s'], { cwd: worktreePath, encoding: 'utf8' }).stdout.trim();
       assert.equal(lastSubject, 'backlog(task-2104): transition to active and implementer=codex');
 
     } finally {
