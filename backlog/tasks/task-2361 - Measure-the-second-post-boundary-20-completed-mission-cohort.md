@@ -1,8 +1,8 @@
 ---
 id: TASK-2361
 title: Measure the second post-boundary 20-completed-mission cohort
-status: refined
-assignee: [claude]
+status: active
+assignee: [qwen]
 created_date: '2026-08-11 00:00'
 labels:
   - ai_sdlc
