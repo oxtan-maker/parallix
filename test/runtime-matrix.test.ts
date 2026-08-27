@@ -142,6 +142,30 @@ test('buildAutonomousReviewMatrix supports future agent names without a hardcode
   assert.equal(matrix.launchers['future-agent'].agent, 'future-agent');
 });
 
+test('buildAutonomousReviewMatrix reports the working-tree config path when an override is present', () => {
+  const originalCwd = process.cwd();
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'matrix-working-tree-'));
+  fs.mkdirSync(path.join(tmp, 'config'));
+  fs.writeFileSync(
+    path.join(tmp, 'config', 'agents.json'),
+    JSON.stringify({ steps: { review: { eligibleAgents: ['claude'] } } }),
+  );
+  try {
+    process.chdir(tmp);
+    const matrix = buildAutonomousReviewMatrix({
+      eligibleAgentsForStepFn: () => ['claude'],
+    });
+    // Working-tree copy governs: report the working-tree-first path, not the
+    // bundled package-root path, so the matrix never lies about what governs
+    // per-step eligibility when an operator override is in effect (F1 regression).
+    assert.equal(matrix.configPath, path.join(tmp, 'config', 'agents.json'));
+    assert.equal(matrix.configPresent, true);
+  } finally {
+    process.chdir(originalCwd);
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 // ---------- formatMatrixSummary ----------
 
 test('formatMatrixSummary renders config and per-agent launcher support without hardcoded routing', () => {

@@ -157,6 +157,8 @@ Eligibility is controlled by `parallix/config/agents.json`. The default config c
 
 Note: these examples match the actual `parallix/config/agents.json` that controls eligibility at runtime. The executable config is the source of truth; any mismatch between the docs and the config is a bug.
 
+In an installed or published build the executable ships with a bundled `config/agents.json`. To change per-step eligibility without rebuilding or reinstalling, drop a copy at `<working-tree>/config/agents.json`; the working-tree copy is authoritative for `steps.*.eligible` and the bundled copy is used only when no working-tree copy exists.
+
 To restrict a step to a specific agent, edit the `eligible` array. The top-level `px --help` command synopsis shows the current-invocation overrides: `px draft [<slug>] [--agent <family>]` and `px active [<slug>] [--implementer <family>]`. Use those CLI flags to force a specific agent for one command:
 
 ```sh

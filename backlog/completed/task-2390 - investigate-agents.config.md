@@ -1,10 +1,10 @@
 ---
 id: TASK-2390
 title: investigate agents.config
-status: ready-for-integration
+status: done
 assignee: [custom]
 created_date: '2026-08-21 11:20'
-labels: [ai_sdlc]
+labels: ["ai_sdlc"]
 dependencies: []
 ordinal: 107917
 ---

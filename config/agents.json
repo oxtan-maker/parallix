@@ -1,5 +1,5 @@
 {
-  "_comment": "Per-step agent eligibility policy. Modify to change which agents are eligible for each workflow step.",
+  "_comment": "Per-step agent eligibility policy. Modify to change which agents are eligible for each workflow step. In an installed/published build, drop a copy at <working-tree>/config/agents.json to override the bundled file without a rebuild; the working-tree copy is authoritative for steps.*.eligible. The bundled copy under the package root is the fallback when no working-tree copy exists.",
   "_weights_comment": "Weights are relative integers (not percentages). Agent is selected by weighted random draw from eligible-and-supported set. Omit weights to use equal probability.",
   "steps": {
     "draft": {
