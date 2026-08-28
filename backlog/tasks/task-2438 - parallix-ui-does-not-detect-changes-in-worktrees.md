@@ -12,7 +12,7 @@ ordinal: 123917
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-tasks state is blinking wrongly when its moving
+px ui only shows task 2373.01 in active or later stages, but we have a lot more missions there. Fix the bug so everyh mission that is working in parallel is detected in its correct state regardless of where px ui is started (as long as its started from the right repo)
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Definition of Done
