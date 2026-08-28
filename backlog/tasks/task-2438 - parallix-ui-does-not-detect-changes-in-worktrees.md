@@ -4,7 +4,7 @@ title: parallix ui does not detect changes in worktrees
 status: backlog
 assignee: []
 created_date: '2026-08-28 05:59'
-labels: []
+labels: [user_value, bug]
 dependencies: []
 ordinal: 123917
 ---
