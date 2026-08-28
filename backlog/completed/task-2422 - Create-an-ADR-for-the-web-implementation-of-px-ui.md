@@ -1,10 +1,10 @@
 ---
 id: TASK-2422
 title: Create an ADR for the web implementation of px ui
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-08-27 17:38'
-labels: [ai_sdlc]
+labels: ["ai_sdlc"]
 dependencies: []
 ordinal: 121917
 ---

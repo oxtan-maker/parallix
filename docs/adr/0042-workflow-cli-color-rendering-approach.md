@@ -7,7 +7,10 @@ Date: 2026-05-23
 
 The workflow CLI (`workflow/lib/fmt.js`) uses hand-rolled ANSI escape codes for terminal coloring. The current `useColor()` function has a bug: lines 53–58 are unreachable dead code after an unconditional return on line 52, meaning the CI, COLORTERM, and isTTY fallback checks never execute. This has caused intermittent "sometimes colors, sometimes not" behavior (task-1132).
 
-The workflow CLI's zero-dependency philosophy (Node.js built-ins only, no npm packages) constrains the solution space: adding `chalk`, `picocolors`, or `ink` would violate this principle.
+At the time of this decision the workflow CLI avoided npm packages. That is no
+longer a project-wide architecture constraint: the canonical bundle includes
+Ink and React, and ADR 0054 permits justified web dependencies. A built-in is
+still preferable here because terminal coloring needs only one platform API.
 
 Node.js v21.7+ ships `util.styleText(format, text)`, which:
 - Handles `NO_COLOR`, `FORCE_COLOR`, `TERM=dumb`, and stream TTY detection automatically
@@ -28,9 +31,9 @@ Replace the hand-rolled ANSI palette and `useColor()` function in `workflow/lib/
 
 | Option | Summary | Benefits | Risks / Costs | Fit to constraints | Decision |
 |--------|---------|----------|---------------|--------------------|----------|
-| A: `util.styleText` | Node.js built-in color API | Zero deps; auto color detection handles NO_COLOR/FORCE_COLOR/TERM/TTY correctly; proper close codes enable nesting; maintained by Node core | Tests must update expected ANSI close codes (`\x1b[0m` → `\x1b[39m` etc.); requires Node ≥21.7 (project already on v24) | Perfect — maintains zero-dep philosophy | **Accept** |
-| B: `chalk` v4 | Most popular Node color lib | Battle-tested, rich API, CJS compatible | Adds npm dependency + `supports-color` transitive dep; violates zero-dep constraint | Poor — introduces external dependency | Reject |
-| C: `picocolors` | Ultra-light color lib (~3KB) | Tiny, fast, CJS, auto detection | Still an npm dependency; basic API | Poor — still a dependency | Reject |
+| A: `util.styleText` | Node.js built-in color API | Auto color detection handles NO_COLOR/FORCE_COLOR/TERM/TTY correctly; proper close codes enable nesting; maintained by Node core | Tests must update expected ANSI close codes (`\x1b[0m` → `\x1b[39m` etc.); requires Node ≥21.7 (project already on v24) | Best fit for this narrow batch-output need | **Accept** |
+| B: `chalk` v4 | Popular Node color lib | Battle-tested, rich API, CJS compatible | Adds a package and overlapping behavior for one platform call | Valid but unnecessary | Reject |
+| C: `picocolors` | Small color library | Tiny, fast, CJS, auto detection | Adds a package and provides no needed capability beyond `styleText` | Valid but unnecessary | Reject |
 | D: Fix hand-rolled | Patch `useColor()` dead code | Minimal change, keeps existing API | Reinvents color detection that Node.js already provides; fragile; more code to maintain | Acceptable but inferior | Reject |
 | E: Ink (Gemini CLI style) | React for terminals | Powerful interactive components; chosen interactive TUI stack per ADR 0051; eventual single-stack direction for all terminal output to eliminate two-path maintenance | Massive dep tree (react, ink, chalk); CJS incompatible; overkill for batch/headless status output | Wrong tool for batch CLI color; correct for the interactive TUI (ADR 0051). Converging on Ink for all terminal output reduces agent hallucination from maintaining two rendering frameworks | Reject for batch CLI color; use `util.styleText` here. Ink is the chosen TUI stack and eventual direction for all terminal output (ADR 0051) |
 
@@ -40,7 +43,8 @@ Replace the hand-rolled ANSI palette and `useColor()` function in `workflow/lib/
 
 - **Color detection is correct by default.** `util.styleText` handles NO_COLOR, FORCE_COLOR, TERM=dumb, and stream TTY detection without any custom logic. The entire `useColor()` function and `_colorCache` can be removed.
 - **Proper ANSI nesting.** Per-format close codes (`\x1b[39m` for color, `\x1b[22m` for bold) replace blanket `\x1b[0m` resets, so `bold(green(text))` works correctly.
-- **Zero new dependencies.** Stays within the workflow's Node-built-ins-only constraint.
+- **No new dependency for this feature.** `util.styleText` already covers the
+  required behavior; this is a scoped simplification, not a project-wide ban.
 - **Reduced maintenance surface.** The `colors` object (raw escape codes), `useColor()`, `_colorCache`, and `resetColorCache()` are replaced by a single stdlib call.
 - **Compound styling.** `util.styleText(['bold', 'cyan'], text)` replaces manual escape concatenation.
 
@@ -60,7 +64,7 @@ Positive:
 - Solid color detection via `supports-color`
 
 Negative:
-- Adds an npm dependency to a zero-dependency package
+- Adds an npm package for behavior already supplied by the supported Node floor
 - `supports-color` as a transitive dep introduces another moving part
 - Unnecessary now that Node.js provides the same capability built-in
 
