@@ -337,6 +337,10 @@ export function createStatusGitAdapter(options: {
       return getCurrentBranchFn();
     },
 
+    missionBranchName(slug: string, rootDir: string): string {
+      return missionBranchName(slug, rootDir);
+    },
+
     getRebaseInfo(rootDir: string): StatusRebaseInfo | null {
       try {
         const rs = detectRebaseStateFn(rootDir);
