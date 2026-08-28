@@ -43,7 +43,11 @@ export class StatusCommandUseCase {
 
     if (resolvedSlug) {
       missionData = await this._board.getMissionData(resolvedSlug, rootDir);
-      prInfo = this._pr.getPrInfo(branch);
+      // SC1/SC2: look up the PR for the *requested* mission's branch, not the
+      // branch the command happens to run on. A wrong PR number here points an
+      // operator at another mission's review (task-2419). The branch is resolved
+      // through the git port so the CLI-independent use case keeps its layering.
+      prInfo = this._pr.getPrInfo(this._git.missionBranchName(resolvedSlug, rootDir));
     }
 
     // Stale worktrees (only when no explicit slug)
@@ -88,6 +92,13 @@ export class StatusWorkflowAdapter implements StatusBoardPort, StatusGitPort, St
 
   getCurrentBranch(): string {
     return ''; // populated by concrete adapter
+  }
+
+  // Legacy single-port path: no per-repo adapter config is available here, so
+  // fall back to the default 'mission/' prefix. The production status command
+  // wires createStatusGitAdapter, which resolves the real branch prefix.
+  missionBranchName(slug: string): string {
+    return 'mission/' + slug;
   }
 
   getRebaseInfo(_rootDir: string): StatusRebaseInfo | null {

@@ -244,6 +244,7 @@ test('StatusCommandUseCase: returns board projection from mocked ports', async (
   };
   const mockGit: StatusGitPort = {
     getCurrentBranch() { return 'mission/task-1001'; },
+    missionBranchName(slug: string) { return 'mission/' + slug; },
     getRebaseInfo() { return null; },
     getLastThreeCommits() { return ['init']; },
     getUncommittedCount() { return 0; },
@@ -279,6 +280,7 @@ test('StatusCommandUseCase: passes null slug for inferred status', async () => {
   const mockBoard: StatusBoardPort = { inferSlug() { return null; }, async getMissionData() { return null; } };
   const mockGit: StatusGitPort = {
     getCurrentBranch() { return 'main'; },
+    missionBranchName(slug: string) { return 'mission/' + slug; },
     getRebaseInfo() { return null; },
     getLastThreeCommits() { return []; },
     getUncommittedCount() { return 0; },
@@ -309,6 +311,7 @@ test('StatusCommandUseCase: infers slug when null and resolves mission data', as
   };
   const mockGit: StatusGitPort = {
     getCurrentBranch() { return 'mission/task-inferred'; },
+    missionBranchName(slug: string) { return 'mission/' + slug; },
     getRebaseInfo() { return null; },
     getLastThreeCommits() { return []; },
     getUncommittedCount() { return 0; },
@@ -347,6 +350,7 @@ test('createStatusCommand: renders status and exits 0', async () => {
   };
   const mockGit: StatusGitPort = {
     getCurrentBranch() { return 'mission/task-1001'; },
+    missionBranchName(slug: string) { return 'mission/' + slug; },
     getRebaseInfo() { return null; },
     getLastThreeCommits() { return []; },
     getUncommittedCount() { return 0; },
@@ -392,6 +396,7 @@ test('createStatusCommand: no-argument invocation renders inferred mission outpu
   };
   const mockGit: StatusGitPort = {
     getCurrentBranch() { return 'mission/task-2332.13'; },
+    missionBranchName(slug: string) { return 'mission/' + slug; },
     getRebaseInfo() { return null; },
     getLastThreeCommits() { return []; },
     getUncommittedCount() { return 0; },
@@ -433,7 +438,7 @@ test('createStatusCommand: exits 1 on parse error', async () => {
   let exitCode: number | undefined;
 
   const mockBoard: StatusBoardPort = { inferSlug() { return null; }, async getMissionData() { return null; } };
-  const mockGit: StatusGitPort = { getCurrentBranch() { return ''; }, getRebaseInfo() { return null; }, getLastThreeCommits() { return []; }, getUncommittedCount() { return 0; } };
+  const mockGit: StatusGitPort = { getCurrentBranch() { return ''; }, missionBranchName(slug: string) { return 'mission/' + slug; }, getRebaseInfo() { return null; }, getLastThreeCommits() { return []; }, getUncommittedCount() { return 0; } };
   const mockPr: StatusPrPort = { getPrInfo() { return null; } };
   const mockAgent: StatusAgentPort = { getAgentMatrix() { return []; }, getAgentOverride() { return undefined; } };
   const mockStale: StatusStaleWorktreesPort = { findStaleWorktrees() { return []; }, getStaleWorktreeRebase() { return {}; } };

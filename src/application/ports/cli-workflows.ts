@@ -143,6 +143,8 @@ export interface StatusBoardPort {
 export interface StatusGitPort {
   /** Get current branch name. */
   getCurrentBranch(): string;
+  /** Resolve the mission branch name for a slug using the worktree's adapter config. */
+  missionBranchName(_slug: string, _rootDir: string): string;
   /** Get rebase info for a worktree. Returns null if not in rebase. */
   getRebaseInfo(_rootDir: string): StatusRebaseInfo | null;
   /** Get last three commit messages. */
