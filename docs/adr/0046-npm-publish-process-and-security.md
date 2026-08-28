@@ -9,7 +9,17 @@ Related: ADR 0044 (Workflow Distribution Model), task-1340 (make parallix publis
 
 ADR 0044 established the distribution stance as "local npm tarball, globally installed `px` CLI" and deferred concrete npm registry publication. parallix was pushed to public GitHub on 2026-06-22 (task-1322). The repo is now public and the operator wants a credible, secure, single-command install path before inviting external use.
 
-The package has zero runtime npm dependencies (Node.js builtins only), is distributed under AGPL-3.0-or-later, and uses `access: public` in `publishConfig`. The operator publishes manually — no CI/release automation is in scope. This ADR documents the decision to adopt public npm registry publication, the security posture that enables it, the authentication requirements, and the pre-publish verification process.
+The package is distributed under AGPL-3.0-or-later and uses `access: public` in
+`publishConfig`. The operator publishes manually — no CI/release automation is
+in scope. This ADR documents the decision to adopt public npm registry
+publication, the authentication requirements, and the pre-publish verification
+process.
+
+The original built-ins-only claim is superseded. The canonical bundle includes
+audited third-party code such as Ink and React, and ADR 0054 permits additional
+web dependencies. Having no installed production dependency tree is a packaging
+choice, not an architecture constraint; bundled components remain dependencies
+for SBOM, license, vulnerability, and release review.
 
 The `@magnusekdahl` scope was verified available on the npm registry (task-1340 CP-0). `@magnusekdahl/parallix` returns 404, confirming the scoped name is unclaimed.
 
@@ -32,7 +42,9 @@ An alternative is staged publishing (`npm stage publish` followed by `npm stage 
 
 ### Security posture enabling this decision
 
-- **Zero runtime dependencies:** All functionality uses Node.js built-in modules (`fs`, `path`, `child_process`, `os`, `crypto`, `util`, `events`, `stream`, `buffer`, `assert`). This eliminates supply-chain attack surface from third-party packages.
+- **Audited bundled dependencies:** The build emits an SBOM and third-party
+  notices and runs license and package-content checks. Adding a dependency
+  requires that evidence; it is not prohibited by this ADR.
 - **Explicit `files` allowlist:** `package.json` uses an explicit `files` array as an allowlist, not a blacklist. Test suites, coverage reports, knowledge graph output, session data, workflow caches, and Forgejo local state are all excluded.
 - **Defense-in-depth:** `.npmignore` provides a secondary exclusion layer. The combination ensures operator secrets (`*.local.json`), test fixtures, and development artifacts cannot reach the published tarball.
 - **`access: public` in `publishConfig`:** The package is declared public in the manifest. The `--access public` flag is also passed at publish time for explicitness.
@@ -54,7 +66,7 @@ These procedures are operational guidance. They are subject to change as the ope
 
 | Option | Summary | Benefits | Risks / Costs | Fit to constraints | Decision |
 |--------|---------|----------|---------------|--------------------|----------|
-| A: Public npm registry | One command: `npm install -g @magnusekdahl/parallix` | Shortest install; matches public repo expectations | Operator token risk managed by 2FA; npm permanence | Matches ADR 0044's zero-dependency stance; public repo warrants public install path | **Accept** |
+| A: Public npm registry | One command: `npm install -g @magnusekdahl/parallix` | Shortest install; matches public repo expectations | Operator token risk managed by 2FA; npm permanence | Matches ADR 0044's canonical audited bundle; public repo warrants public install path | **Accept** |
 | B: Private npm scope first, then public | Same install after switch | Initial publish is invisible; allows verification | Two publish cycles; potential version confusion | No concrete security concern justifies extra step | Defer — only if a concrete security concern emerges |
 | C: Continue tarball-only | Two commands: `npm pack && npm install -g ./magnus-parallix-*.tgz` | Maximum operator control; no registry involvement | Higher friction; does not meet credibility bar for public repo | Consistent with ADR 0044 but inferior UX for public tool | Reject as primary — tarball remains a valid secondary path |
 | D: CI/CD automated publish | Fully automated pipeline | Repeatable; can include automated checks | CI credential risk; infrastructure to maintain; out of scope | Operator explicitly requested manual publish | Reject for now — revisit when cadence justifies automation |
@@ -65,7 +77,10 @@ These procedures are operational guidance. They are subject to change as the ope
 
 - **Credible public install path:** Users can install with `npm install -g @magnusekdahl/parallix` — the shortest possible install, matching expectations for a public Node tool.
 - **Tarball path preserved:** Local tarball install (`npm pack && npm install -g ./magnus-parallix-*.tgz`) remains valid and documented. Operators who prefer it can continue using it.
-- **Supply-chain transparency:** Zero dependencies means `npm audit --production` reports zero vulnerabilities. No hidden third-party code to vet.
+- **Supply-chain transparency:** The release SBOM, notices, license audit, and
+  build manifest expose bundled third-party code for review. Registry audit
+  alone is not sufficient because bundled code may not appear as an installed
+  production dependency.
 - **Manual publish discipline:** The operator's hands-on publish process is a feature, not a bug — it forces a deliberate verification step before every release.
 - **Rollback awareness:** The ADR documents npm's unpublish constraints (72-hour window for unpublishing; deprecation for older versions) and provides mitigation strategies (conservative semver, version bumping).
 
@@ -137,6 +152,6 @@ Assessment: `@magnusekdahl/parallix` is the correct scope for a solo-maintainer 
 
 ## Reconciliation addendum (2026-07-27, task-2288)
 
-The original decision to adopt public npm registry publication as `@magnusekdahl/parallix` remains in effect. The published package now ships the canonical ESM bundle (`build/px.mjs`) as the sole executable artifact — no `dist/` tree, no source tree, no runtime `node_modules`. The `bin.px` entry is `build/px.mjs`; the package has no `main` or `exports` (ADR 0044: Parallix is a CLI application, not a supported JavaScript SDK). The `files` allowlist in `package.json` and the `.npmignore` exclusion layer preserve the defense-in-depth security posture described in this ADR. The zero-runtime-dependencies claim is maintained: the bundle inlines all third-party code, and only Node built-ins are imported at runtime.
+The original decision to adopt public npm registry publication as `@magnusekdahl/parallix` remains in effect. The published package now ships the canonical ESM bundle (`build/px.mjs`) as the sole executable artifact — no `dist/` tree, no source tree, no runtime `node_modules`. The `bin.px` entry is `build/px.mjs`; the package has no `main` or `exports` (ADR 0044: Parallix is a CLI application, not a supported JavaScript SDK). The `files` allowlist in `package.json` and the `.npmignore` exclusion layer preserve the defense-in-depth security posture described in this ADR. The package still installs without a production `node_modules` tree, but the bundle contains third-party runtime code. Release metadata and audits must treat that bundled code as dependencies rather than calling the product dependency-free.
 
 (End of file - total 130 lines)
