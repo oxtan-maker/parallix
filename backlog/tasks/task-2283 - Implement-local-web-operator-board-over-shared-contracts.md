@@ -4,7 +4,7 @@ title: Implement local web operator board over shared contracts
 status: backlog
 assignee: []
 created_date: '2026-07-19 00:00'
-updated_date: '2026-07-29 03:53'
+updated_date: '2026-08-28 06:29'
 labels:
   - web
   - board
@@ -12,6 +12,7 @@ labels:
   - ui
 dependencies:
   - TASK-2322.12
+  - TASK-2437
 references:
   - docs/adr/0051-ui-neutral-application-boundary.md
   - 'https://claude.ai/code/artifact/5f739bc8-6e14-48c7-aca6-ed9a96923432'
@@ -56,6 +57,11 @@ author: codex
 created: 2026-07-29 03:53
 ---
 TASK-2281 is already complete. UI implementation now begins only after TASK-2322.12 certifies ADR 0053 authority cutover and shared projection readiness.
+---
+author: codex
+created: 2026-08-28 06:29
+---
+Implementation is decomposed into TASK-2425 through TASK-2437. This umbrella remains open until TASK-2437 rechecks these acceptance criteria; its TASK-2322.12 dependency remains in force.
 ---
 <!-- COMMENTS:END -->
 
