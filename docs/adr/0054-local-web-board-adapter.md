@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed — 2026-08-28
+Accepted — 2026-08-28
 
 Related: ADR 0044 (distribution), ADR 0048 (fail-closed harness), ADR 0051
 (application boundary), ADR 0053 (persistence authority)
