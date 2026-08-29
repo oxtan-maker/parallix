@@ -103,6 +103,12 @@ const expectedIntegrationFiles = [
   // throwaway git repos in a temp dir to stage the stranded-lane scenario, so
   // it crosses a real git boundary like task-2397 and runs only in integration.
   'task-2420-integrate-recovery-assigned-reviewer.test.ts',
+  // TASK-2438 composes concrete board readers over temporary repository files
+  // and the worktree/Git topology boundary.
+  'task-2438-worktree-board-repro.test.ts',
+  // TASK-2440: drives a temporary Git repository and migrated SQLite database
+  // through an external lifecycle update before reading the board.
+  'task-2440-repro.test.ts',
   'test-hygiene.test.ts',
   'tui-pty-smoke.test.ts', 'task-2313-repro.test.ts', 'task-2370-repro.test.ts',
   'tui-command-flow.test.ts',
@@ -162,7 +168,7 @@ test('default test runner routes every moved group to integration and excludes i
   // Integration files spawn real children; cap their parallelism so host
   // contention cannot starve child startup past test-internal deadlines.
   assert.ok(integrationRun.args.some(a => a.startsWith('--test-concurrency=')));
-  assert.ok(defaultRun.args.some(a => a === '--test-concurrency=12'),
+  assert.ok(defaultRun.args.some(a => a === '--test-concurrency=4'),
     'unit concurrency is bounded so measured durations are not host-oversubscription artifacts');
   assert.equal(pkg.scripts['test:integration'], 'FORCE_COLOR=0 tsx test/run-default-tests.ts --integration');
   assert.match(runner, /file\.endsWith\('\.integration\.test\.ts'\)/,

@@ -230,6 +230,9 @@ export function buildTestRunPlan(options: TestRunPlanOptions): TestRunPlan {
     // throwaway git repos in a temp dir to stage the stranded-lane scenario,
     // so it crosses a real git boundary like task-2397 and belongs in integration.
     'task-2420-integrate-recovery-assigned-reviewer.test.ts',
+    // TASK-2438 composes concrete board readers over temporary repository
+    // files, which invokes the worktree/Git topology boundary.
+    'task-2438-worktree-board-repro.test.ts',
   ]);
 
   // Classify subdir tests through the same boundary filter as root-level tests,
@@ -300,7 +303,9 @@ export function buildTestRunPlan(options: TestRunPlanOptions): TestRunPlan {
   // Integration files spawn real children; task-2318/2327/2212 showed that
   // unrestricted concurrency can starve their startup past internal deadlines.
   const INTEGRATION_TEST_CONCURRENCY = 4;
-  const UNIT_TEST_CONCURRENCY = 12;
+  // Unit-test timing is per test, so avoid worker contention turning hermetic
+  // tests into false budget failures on a shared developer machine.
+  const UNIT_TEST_CONCURRENCY = 4;
   const testNode = compatibleTestNode();
   const testConcurrencyArgs = supportsTestConcurrency(testNode)
     ? [`--test-concurrency=${runsIntegrationSuite ? INTEGRATION_TEST_CONCURRENCY : UNIT_TEST_CONCURRENCY}`]

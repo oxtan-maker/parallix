@@ -262,6 +262,29 @@ describe('SQLite Mission aggregate integration', () => {
     }
   });
 
+  it('loads legacy requested-changes rounds that have no persisted findings', async () => {
+    const database = await migratedDatabase();
+    try {
+      const store = new SqliteMissionStore(database);
+      const mission = completeMission();
+      await store.save(mission, null);
+      await database.execute(
+        'DELETE FROM mission_review_resolutions WHERE mission_id = ? AND round_position = ?',
+        [mission.id, 0],
+      );
+      await database.execute(
+        'DELETE FROM mission_review_findings WHERE mission_id = ? AND round_position = ?',
+        [mission.id, 0],
+      );
+
+      const loaded = await store.load(mission.id);
+      assert.equal(loaded.kind, 'found');
+      assert.equal(loaded.mission.review?.rounds[0].decision, null);
+    } finally {
+      await database.close();
+    }
+  });
+
   it('round trips null optionals, pre-closure done, and closed Mission variants', async () => {
     const database = await migratedDatabase();
     try {

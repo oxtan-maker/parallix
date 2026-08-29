@@ -249,7 +249,10 @@ function decisionFor(
   if (row.decision_kind === 'changes-requested') {
     const findings = findingsFor(records, row.position);
     if (findings.length === 0) {
-      throw new Error('Persisted changes-requested decision has no findings');
+      // Older flattened review state recorded this verdict without its finding
+      // payload. It cannot form a valid domain decision, but must not make the
+      // whole board unreadable.
+      return null;
     }
     return {
       kind: 'changes-requested',
