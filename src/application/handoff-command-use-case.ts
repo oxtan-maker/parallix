@@ -270,7 +270,8 @@ export class HandoffCommandUseCase {
       }
       const hasDescriptionSeparator = /\s(?:—|–|-–)\s+\S/.test(unquoted);
       const hasOutcomeSuffix = /\s(?:passes?|passed|succeeds?|succeeded|completes?|completed)(?:\s+(?:on|in|with|without|after|before|for|the|a|an|successfully|cleanly)\b[^;&|]*)?[.!]?\s*$/i.test(unquoted);
-      if (markdownCommandWithSuffix || hasDescriptionSeparator || hasOutcomeSuffix) {
+      const hasParenthesizedDescription = /(?<![&|;])\s+\([^()]*\)\s*$/.test(unquoted);
+      if (markdownCommandWithSuffix || hasDescriptionSeparator || hasOutcomeSuffix || hasParenthesizedDescription) {
         return {
           ok: false,
           reason: 'validation-failed',
@@ -482,7 +483,8 @@ export class HandoffCommandUseCase {
           reason: 'gate-failed',
           error: stderr || `Gate exited with status ${result.status}`,
           stdout,
-          stderr
+          stderr,
+          exitCode: result.status,
         };
       }
       const proofResult = verification.writeReusableVerificationProof(cmd, rootDir);
@@ -977,12 +979,45 @@ export class HandoffCommandUseCase {
     if (!gatesResult.ok) {
       const msg = `Declared gate "${gatesResult.gate}" failed for ${fmt.slug(slug)}: ${gatesResult.error || gatesResult.reason}. Blocking handoff — task remains in active.`;
       error(msg);
-      return {
+      const failure: HandoffResult = {
         ok: false,
         error: msg,
         reason: gatesResult.reason,
-        gateOutput: { stdout: (gatesResult.stdout || ''), stderr: (gatesResult.stderr || '') }
+        gateOutput: { stdout: (gatesResult.stdout || ''), stderr: (gatesResult.stderr || '') },
+        ...(gatesResult.reason === 'gate-failed' ? {
+          gateFailure: {
+            area: 'declared gate', command: gatesResult.gate, cwd: rootDir, exitCode: gatesResult.exitCode,
+            stdout: gatesResult.stdout || '', stderr: gatesResult.stderr || gatesResult.error || '',
+          },
+        } : {}),
       };
+      if (!recoverGateFailure) { return failure; }
+      const reason = gatesResult.reason === 'validation-failed'
+        ? { kind: 'declared-gate-validation' as const, command: gatesResult.gate, diagnostic: gatesResult.error || msg }
+        : { kind: 'gate-failure' as const, ...failure.gateFailure! };
+      let retried: HandoffResult | null = null;
+      const outcome = await rebound(reason, {
+        slug,
+        worktree: rootDir,
+        implementer: forgejoUser,
+        startAgent: startAgentFn,
+        transitionToImplementer: (missionSlug) => ports.backlog.transitionTask(missionSlug, 'active', { rootDir, log }),
+        verify: async () => {
+          retried = await this.performHandoff(slug, { ...opts, worktree: rootDir, force: true, recoverGateFailure: false });
+          return {
+            ok: Boolean(retried.ok),
+            diagnostic: retried.error || '',
+            reason: retried.reason === 'validation-failed'
+              ? { kind: 'declared-gate-validation', command: gatesResult.gate, diagnostic: retried.error || '' }
+              : retried.gateFailure ? { kind: 'gate-failure', ...retried.gateFailure } : undefined,
+          };
+        },
+        log,
+        error,
+      });
+      return outcome.outcome === 'fixed' && retried
+        ? retried
+        : { ...failure, recoveryAttempted: true, error: outcome.dossier || outcome.diagnostic || failure.error };
     }
     if (gatesResult.skipped) {
       log(`No declared gates for ${fmt.slug(slug)} (${gatesResult.reason}).`);

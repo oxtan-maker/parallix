@@ -324,7 +324,7 @@ export async function startReviewLoop(slug: string, opts: {
         return;
       }
       log(fmt.status('INFO', `No open review PR for ${branch} (task in ${taskStatus}) — attempting automatic handoff (px review ${slug} --push)...`));
-      const handoff = await performHandoffFn(slug, { forgejoUser: implementer, worktree });
+      const handoff = await performHandoffFn(slug, { forgejoUser: implementer, worktree, recoverGateFailure: true });
       if (handoff && handoff.gatekeeperPushedBack) {
         error(fmt.status('FAIL', `Handoff blocked for ${branch}: mandatory mission artifacts are missing. Task stays in ${taskStatus}; supply the required artifacts and retry.`));
         exit(1);
@@ -332,7 +332,7 @@ export async function startReviewLoop(slug: string, opts: {
       }
       if (!handoff || !handoff.ok) {
         const handoffObj = handoff || {};
-        if (handoffObj.reason === 'validation-failed') {
+        if (handoffObj.reason === 'validation-failed' && !handoffObj.recoveryAttempted) {
           await transitionTaskFn(slug, 'active', { rootDir: worktree, log });
           log(fmt.status('INFO', `Auto-bounced ${slug} to active: declared-gate validation failure. Fix the gate in MISSION.md and retry.`));
           const persisted = await Promise.resolve(readReviewStateFn(slug, worktree));
