@@ -11,7 +11,7 @@ import type {
   BoardCommandResult,
   BoardProgressSink,
 } from '../../application/controller/board-command.js';
-import { cancelledOutcome, unavailableCapability, isIntegratedCapability, unavailableReason } from '../../application/controller/board-command.js';
+import { cancelledOutcome, unavailableCapability, unavailableReason } from '../../application/controller/board-command.js';
 import { projectMissionActivity } from '../../application/projections/mission-activity.js';
 import { BoardLayout, selectLayoutMode, useTerminalDimensions, MIN_LANE_WIDTH } from './board-layout.js';
 import { BOARD_LANES } from './lane-column.js';
@@ -161,11 +161,11 @@ export function BoardShell({ projection, columns, rows, initialSelectedMissionId
 
   const dispatchMissionAction = (kind: BoardCommandKind, mission: MissionCard): boolean => {
     setOutcome(null);
-    if (!isIntegratedCapability(kind)) {
-      setOutcome(unavailableCapability(kind, unavailableReason(kind) ?? `${kind} is not available from the board`));
+    if (!controller?.canExecute(kind)) {
+      setOutcome(unavailableCapability(kind, unavailableReason(kind) ?? 'no Mission authority is configured for this interface'));
       return false;
     }
-    if (!canDispatchAction(kind, mission)) {
+    if (!canDispatchAction(kind, mission, controller)) {
       setOutcome(unavailableCapability(kind, 'Mission cannot be activated from its current state'));
       return false;
     }
@@ -188,7 +188,7 @@ export function BoardShell({ projection, columns, rows, initialSelectedMissionId
     if (!navigation.selectedMissionId) { return false; }
     const mission = projection.stages.flatMap((stage) => stage.cards).find((card) => card.id === navigation.selectedMissionId) ?? null;
     if (!mission) { return false; }
-    if (isIntegratedCapability(kind)) {
+    if (controller?.canExecute(kind)) {
       /* Integrated: gate on enablement (same check as Enter/startAction). */
       return dispatchMissionAction(kind, mission);
     } else {
@@ -308,6 +308,7 @@ export function BoardShell({ projection, columns, rows, initialSelectedMissionId
               selectedMissionId={navigation.selectedMissionId}
               focusedIndex={focusedArea === 'rail' ? focusedAttentionIndex : -1}
               sourceStatusMap={sourceStatusMap}
+              commandController={controller}
             />
           </Box>
           <Box paddingTop={1}>
@@ -398,9 +399,10 @@ export interface AttentionItemsProps {
   readonly focusedIndex: number;
   /** Per-source status map for rendering ⚠ on items whose source is stale/unavailable. */
   readonly sourceStatusMap: Map<string, 'fresh' | 'stale' | 'unavailable'>;
+  readonly commandController?: BoardCommandDispatcher;
 }
 
-export function AttentionItems({ queue, selectedMissionId, focusedIndex, sourceStatusMap }: AttentionItemsProps): React.ReactElement {
+export function AttentionItems({ queue, selectedMissionId, focusedIndex, sourceStatusMap, commandController }: AttentionItemsProps): React.ReactElement {
   const items = queue.filter((item) => item.reason.kind !== 'none');
 
   if (items.length === 0) {
@@ -436,8 +438,8 @@ export function AttentionItems({ queue, selectedMissionId, focusedIndex, sourceS
               <Text wrap="end" color="gray">{`$ ${attentionCommand(item.card, item.reason, item.action)}`}</Text>
             </Box>
             <Box>
-              <Text color={isIntegratedCapability(item.action.kind) && canDispatchAction(item.action.kind, item.card) ? 'green' : 'gray'}>
-                {isIntegratedCapability(item.action.kind) && canDispatchAction(item.action.kind, item.card) ? ' run \u25b6' : ' unavailable'}
+              <Text color={canDispatchAction(item.action.kind, item.card, commandController) ? 'green' : 'gray'}>
+                {canDispatchAction(item.action.kind, item.card, commandController) ? ' run \u25b6' : ' unavailable'}
               </Text>
             </Box>
           </Box>

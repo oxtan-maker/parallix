@@ -12,7 +12,11 @@ import type {
 import type { BoardLaneEventRepository, OperationalHistoryRepository } from '../application/ports/operation-history.js';
 import type { SessionMarkerRepository } from '../application/ports/mission-store.js';
 import type { UsageRepository } from '../application/ports/mission-measurements.js';
-import type { MissionStore } from '../application/domain-ports.js';
+import type { MissionNelRecorder, MissionStore, MissionTransitionStore } from '../application/domain-ports.js';
+import { MissionCheckpointService } from '../application/mission-checkpoint-service.js';
+import { MissionHandoffService } from '../application/mission-handoff-service.js';
+import { MissionIntakeService } from '../application/mission-intake-service.js';
+import type { BoardMissionServices } from '../application/controller/board-controller.js';
 import type { CurrentWorkPort } from '../application/recording/current-work-recorder.js';
 import type { SqliteDatabaseAdapter } from '../adapters/sqlite/database-adapter.js';
 import { composeTuiCapabilities } from './board-projection.js';
@@ -45,13 +49,18 @@ export function composeProductionCapabilities(
   owningRepositoryId: RepositoryId,
   repositories: ProductionBoardRepositories,
   executePorts: ExecuteMissionPorts,
-  missionStore: MissionStore | null,
+  missionStore: (MissionStore & MissionTransitionStore & MissionNelRecorder) | null,
   currentWork: CurrentWorkPort,
   progress?: BoardProgressSink,
   database?: SqliteDatabaseAdapter | null,
 ): ProductionCapabilities {
+  const missionServices: BoardMissionServices = missionStore ? {
+    intake: new MissionIntakeService(missionStore),
+    checkpoints: new MissionCheckpointService(missionStore),
+    handoff: new MissionHandoffService(missionStore, missionStore),
+  } : {};
   // Single dispatcher instance shared by CLI and TUI (TASK-2332.05)
-  const controller = new BoardCommandController(executePorts, progress, {}, currentWork, missionStore);
+  const controller = new BoardCommandController(executePorts, progress, missionServices, currentWork, missionStore);
   const tui = composeTuiCapabilities({
     rootDir,
     missionStore,
@@ -63,7 +72,7 @@ export function composeProductionCapabilities(
     usageRepo: repositories.usage,
     knownAgentFamilies: resolveKnownAgentFamilies(rootDir),
     sessionMarkers: repositories.sessionMarkers ?? null,
-  }, executePorts, currentWork, controller);
+  }, executePorts, currentWork, controller, missionServices);
   return {
     tui,
     boardProjection: tui.boardProjection,

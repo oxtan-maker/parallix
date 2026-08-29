@@ -21,7 +21,7 @@ import type { MissionReadAdapter } from '../application/projections/board-reader
 import { ConcreteMetricsReadAdapter } from '../application/projections/metrics-read-adapter.js';
 import { MissionProjectionQuery } from '../application/projections/mission-query.js';
 import type { SourceFact } from '../application/contracts.js';
-import { BoardCommandController } from '../application/controller/board-controller.js';
+import { BoardCommandController, type BoardMissionServices } from '../application/controller/board-controller.js';
 import type { ExecuteMissionPorts } from '../application/ports/execute-mission.js';
 import type { TuiCapabilities } from '../application/tui-capabilities.js';
 import type { MissionStore } from '../application/domain-ports.js';
@@ -161,13 +161,14 @@ export function composeTuiCapabilities(
   executePorts: ExecuteMissionPorts,
   currentWork: CurrentWorkPort,
   controller?: BoardCommandController,
+  missionServices: BoardMissionServices = {},
 ): TuiCapabilities {
   const board = composeBoardProjection(deps);
-  const sharedController = controller ?? new BoardCommandController(executePorts, undefined, {}, currentWork, deps.missionStore);
+  const sharedController = controller ?? new BoardCommandController(executePorts, undefined, missionServices, currentWork, deps.missionStore);
   return {
     boardProjection: board.builder,
     missionDetails: board.missionQuery,
-    commandControllerFactory: (progress) => new BoardCommandController(executePorts, progress, {}, currentWork, deps.missionStore),
+    commandControllerFactory: (progress) => new BoardCommandController(executePorts, progress, missionServices, currentWork, deps.missionStore),
     commandController: sharedController,
   };
 }

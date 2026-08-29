@@ -24,7 +24,7 @@ import { startReviewLoop } from '../adapters/review/review-loop.js';
 import { reviewLoopBindings } from './review-persistence.js';
 import { LegacyStatsBackfillAdapter } from '../adapters/mission/stats-backfill-adapter.js';
 import type { ProgressPort } from '../application/ports.js';
-import type { MissionTransitionStore } from '../application/domain-ports.js';
+import type { MissionNelRecorder, MissionStore, MissionTransitionStore } from '../application/domain-ports.js';
 import type { ExecuteMissionPorts } from '../application/ports/execute-mission.js';
 import type { OperatorBlocklistOverlay } from '../adapters/sqlite/blocklist-snapshot.js';
 import type {
@@ -77,7 +77,7 @@ export interface OperatorStateRepositories {
  * `SqliteMissionStore` is the sole production authority per ADR 0053.
  */
 export interface MissionApplicationServices {
-  readonly store: MissionTransitionStore;
+  readonly store: MissionStore & MissionTransitionStore & MissionNelRecorder;
   /**
    * The repository identity these use cases are bound to, canonicalized to the
    * primary checkout. Callers that build an intake request must read it from

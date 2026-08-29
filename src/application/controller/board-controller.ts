@@ -63,6 +63,14 @@ export class BoardCommandController implements BoardCommandDispatcher {
     this.missionStore = missionStore;
   }
 
+  canExecute(kind: BoardCommandRequest['kind']): boolean {
+    if (!isIntegratedCapability(kind)) { return false; }
+    if (kind === 'mission:intake') { return Boolean(this.missionServices.intake); }
+    if (kind === 'checkpoint:record') { return Boolean(this.missionServices.checkpoints); }
+    if (kind === 'handoff:record') { return Boolean(this.missionServices.handoff); }
+    return true;
+  }
+
   /**
    * Dispatch a board command through the guarded controller.
    * Only integrated capabilities are executed; all others return typed unavailable results.
@@ -75,8 +83,14 @@ export class BoardCommandController implements BoardCommandDispatcher {
 
     // Guard 1: capability check
     if (!isIntegratedCapability(kind)) {
-      this.emit(operationId, 1, 'unavailable', unavailableReason(kind) ?? 'capability not yet integrated');
-      return unavailableCapability(kind, unavailableReason(kind) ?? 'not yet integrated');
+      const reason = unavailableReason(kind) ?? 'not yet integrated';
+      this.emit(operationId, 1, 'unavailable', reason);
+      return unavailableCapability(kind, reason);
+    }
+    if (!this.canExecute(kind) && request.payload?.kind === kind) {
+      const reason = 'no Mission authority is configured for this interface';
+      this.emit(operationId, 1, 'unavailable', reason);
+      return unavailableCapability(kind, reason);
     }
 
     // Guard 2: stale command check

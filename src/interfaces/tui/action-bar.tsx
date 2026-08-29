@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import type { BoardCommandKind } from '../../application/controller/board-command.js';
-import { isIntegratedCapability, unavailableReason } from '../../application/controller/board-command.js';
+import { unavailableReason, type BoardCommandDispatcher } from '../../application/controller/board-command.js';
 import type { MissionCard } from '../../application/projections/mission-board.js';
 
 /** The complete, currently declared command vocabulary. Keep this local to the
@@ -20,6 +20,7 @@ export interface ActionBarProps {
   readonly mission: MissionCard | null;
   readonly selectedKind?: BoardCommandKind | null;
   readonly onSelect?: (_kind: BoardCommandKind) => void;
+  readonly commandController?: BoardCommandDispatcher;
 }
 
 /**
@@ -27,7 +28,7 @@ export interface ActionBarProps {
  * action is determined by the application capability registry, never by UI
  * styling or a shortcut alone.
  */
-export function ActionBar({ mission, selectedKind = null, onSelect }: ActionBarProps): React.ReactElement {
+export function ActionBar({ mission, selectedKind = null, onSelect, commandController }: ActionBarProps): React.ReactElement {
   if (!mission) {
     return <Text dimColor>no mission selected</Text>;
   }
@@ -40,7 +41,7 @@ export function ActionBar({ mission, selectedKind = null, onSelect }: ActionBarP
         // Several Mission commands are integrated in the application layer while
         // this board build still supplies no request payload for them, so the
         // capability registry alone must not light a row up.
-        const enabled = canDispatchAction(kind, mission);
+        const enabled = canDispatchAction(kind, mission, commandController);
         const reason = enabled
           ? null
           : unavailableReason(kind)
@@ -71,8 +72,12 @@ function ActionSelection({ onSelect }: { readonly onSelect: (_kind: BoardCommand
   return null;
 }
 
-export function canDispatchAction(kind: BoardCommandKind, mission: MissionCard | null): boolean {
+export function canDispatchAction(
+  kind: BoardCommandKind,
+  mission: MissionCard | null,
+  commandController: BoardCommandDispatcher | undefined,
+): boolean {
   return kind === 'active:execute'
-    && isIntegratedCapability(kind)
+    && Boolean(commandController?.canExecute(kind))
     && Boolean(mission?.commands.some((command) => command.command === 'active' && command.enabled));
 }
