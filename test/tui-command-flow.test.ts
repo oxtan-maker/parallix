@@ -59,7 +59,7 @@ async function renderFlow(controller: { dispatch: (...args: any[]) => Promise<an
   });
   const instance = ink.render(React.createElement(BoardShell, {
     projection: makeProjection({ refined: [card] }),
-    commandControllerFactory: () => controller,
+    commandControllerFactory: () => ({ canExecute: (kind: string) => kind === 'active:execute', ...controller }),
     refreshProjection,
   } as never), { stdin: stdin as unknown as NodeJS.ReadStream, stdout: stdout as unknown as NodeJS.WriteStream, patchConsole: false, exitOnCtrlC: false });
   await waitForWrite(stdout, 0);
@@ -114,7 +114,7 @@ test('progress events render in the command log without changing the card lane',
     projection: makeProjection({ refined: [card] }),
     commandControllerFactory: (receiveProgress: any) => {
       progress = receiveProgress;
-      return { async dispatch() { return { status: 'completed', durableEvidence: [] }; } };
+      return { canExecute(kind: string) { return kind === 'active:execute'; }, async dispatch() { return { status: 'completed', durableEvidence: [] }; } };
     },
   } as never), { stdin: stdin as unknown as NodeJS.ReadStream, stdout: stdout as unknown as NodeJS.WriteStream, patchConsole: false, exitOnCtrlC: false });
   await new Promise((resolve) => setTimeout(resolve, 35));
@@ -158,7 +158,7 @@ test('Ctrl+A on disabled card does not dispatch (pins R1)', async () => {
   });
   const instance = ink.render(React.createElement(BoardShell, {
     projection: makeProjection({ done: [card] }),
-    commandControllerFactory: () => ({ async dispatch() { calls += 1; return { status: 'completed', durableEvidence: [] }; } }),
+    commandControllerFactory: () => ({ canExecute(kind: string) { return kind === 'active:execute'; }, async dispatch() { calls += 1; return { status: 'completed', durableEvidence: [] }; } }),
   } as never), { stdin: stdin as unknown as NodeJS.ReadStream, stdout: stdout as unknown as NodeJS.WriteStream, patchConsole: false, exitOnCtrlC: false });
   await new Promise((resolve) => setTimeout(resolve, 35));
   /* Ctrl+A on a card whose active command is disabled. */
@@ -252,7 +252,7 @@ test('Ctrl+I (0x09) is reported as Tab by Ink and toggles rail/board focus, not 
   let calls = 0;
   const instance = ink.render(React.createElement(BoardShell, {
     projection,
-    commandControllerFactory: () => ({ async dispatch() { calls += 1; return { status: 'completed', durableEvidence: [] }; } }),
+    commandControllerFactory: () => ({ canExecute(kind: string) { return kind === 'active:execute'; }, async dispatch() { calls += 1; return { status: 'completed', durableEvidence: [] }; } }),
   } as never), { stdin: stdin as unknown as NodeJS.ReadStream, stdout: stdout as unknown as NodeJS.WriteStream, patchConsole: false, exitOnCtrlC: false });
   await new Promise((resolve) => setTimeout(resolve, 35));
 

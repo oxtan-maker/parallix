@@ -1,8 +1,8 @@
 ---
 id: TASK-2426
 title: Make board capability availability match the wired production graph
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-08-28 06:29'
 labels:
   - ai_sdlc

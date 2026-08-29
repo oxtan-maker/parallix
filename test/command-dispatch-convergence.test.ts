@@ -26,7 +26,6 @@ describe('command-dispatch-convergence', () => {
     const result = await controller.dispatch({
       kind: 'active:execute',
       missionId: 'task-test',
-      missionStatusAtRequest: 'active',
       operationId: 'active:task-test',
       capabilities: new Set(['active:execute']),
     });

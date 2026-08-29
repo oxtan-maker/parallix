@@ -5,9 +5,12 @@ import React from 'react';
 import { renderToString } from 'ink';
 import { ActionBar, BOARD_ACTION_KINDS } from '../src/interfaces/tui/action-bar.js';
 
+const controller = { canExecute(kind: string) { return kind === 'active:execute'; }, async dispatch() { return { status: 'completed' as const, durableEvidence: [] }; } };
+
 test('action bar renders the declared command kinds with only active:execute enabled', async () => {
   const output = renderToString(React.createElement(ActionBar, {
     mission: makeCard({ commands: [{ command: 'active', enabled: true, reason: null }] }),
+    commandController: controller,
   }), { columns: 160 });
   assert.equal(BOARD_ACTION_KINDS.length, 7);
   assert.match(output, /● active:execute/);
@@ -20,6 +23,6 @@ test('action bar renders the declared command kinds with only active:execute ena
 test('action bar cannot dispatch a disabled command', async () => {
   const { canDispatchAction } = await import('../src/interfaces/tui/action-bar.js');
   const mission = makeCard({ commands: [{ command: 'active', enabled: true, reason: null }] });
-  assert.equal(canDispatchAction('active:execute', mission), true);
-  assert.equal(canDispatchAction('draft:create', mission), false);
+  assert.equal(canDispatchAction('active:execute', mission, controller), true);
+  assert.equal(canDispatchAction('draft:create', mission, controller), false);
 });

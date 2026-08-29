@@ -122,6 +122,7 @@ export type BoardProgressEvent = ProgressEvent;
 export type BoardProgressSink = (_event: BoardProgressEvent) => void;
 
 export interface BoardCommandDispatcher {
+  canExecute(_kind: BoardCommandKind): boolean;
   dispatch<T = unknown>(_request: BoardCommandRequest): Promise<BoardCommandResult<T>>;
 }
 
