@@ -208,6 +208,8 @@ export interface HandoffResult {
   readonly usage?: boolean;
   readonly reason?: string;
   readonly gatekeeperPushedBack?: boolean;
+  /** True when this handoff already used the rebound kernel for this incident. */
+  readonly recoveryAttempted?: boolean;
   readonly gateOutput?: { stdout: string; stderr: string };
   /** Process evidence for a failed final verifier; never reduce this to `error`. */
   readonly gateFailure?: {

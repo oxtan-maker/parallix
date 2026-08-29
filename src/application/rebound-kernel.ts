@@ -92,6 +92,13 @@ export interface HandoffVerificationReason {
   gateOutput?: string;
 }
 
+/** A declared gate was rejected before process execution. */
+export interface DeclaredGateValidationReason {
+  kind: 'declared-gate-validation';
+  command: string;
+  diagnostic: string;
+}
+
 /**
  * Every failure kind the kernel can bounce. `gate-failure` and `hook-failure`
  * are wired to the pre-review incident path; the remaining three are part of
@@ -102,7 +109,8 @@ export type ReboundReason =
   | HookFailureReason
   | ArtifactIncompleteReason
   | AgentTimeoutReason
-  | HandoffVerificationReason;
+  | HandoffVerificationReason
+  | DeclaredGateValidationReason;
 
 /** Result of re-running the failing check after a fix attempt. */
 export interface VerifyResult {
@@ -191,6 +199,8 @@ export function reboundDiagnostic(reason: ReboundReason): string {
       return reason.diagnostic || `${reason.role} did not respond before its stage timeout`;
     case 'handoff-verification':
       return [reason.error, reason.gateOutput].filter(Boolean).join('\n');
+    case 'declared-gate-validation':
+      return reason.diagnostic;
   }
 }
 
@@ -202,6 +212,7 @@ function reasonLabel(reason: ReboundReason): string {
     case 'artifact-incomplete': return 'INCOMPLETE ARTIFACTS';
     case 'agent-timeout': return 'AGENT TIMEOUT';
     case 'handoff-verification': return 'HANDOFF VERIFICATION FAILURE';
+    case 'declared-gate-validation': return 'DECLARED GATE VALIDATION FAILURE';
   }
 }
 
@@ -260,6 +271,10 @@ export function classifyReboundReason(reason: ReboundReason): ReboundClassificat
     return classified(FailureClass.IncompleteEvidence, DispatchAction.AutoSendBack);
   }
 
+  if (reason.kind === 'declared-gate-validation') {
+    return classified(FailureClass.MalformedGates, DispatchAction.AutoRepair);
+  }
+
   const { failureClass, dispatchAction } = classifyError(diagnostic);
   return classified(failureClass, dispatchAction);
 }
@@ -277,6 +292,9 @@ function refreshedReason(previous: ReboundReason, result: VerifyResult): Rebound
   if (previous.kind === 'handoff-verification') {
     return { ...previous, gateOutput: result.diagnostic || previous.gateOutput };
   }
+  if (previous.kind === 'declared-gate-validation') {
+    return { ...previous, diagnostic: result.diagnostic || previous.diagnostic };
+  }
   if (previous.kind === 'artifact-incomplete') {
     return { ...previous, diagnostic: result.diagnostic || previous.diagnostic };
   }
@@ -289,6 +307,7 @@ function refreshedReason(previous: ReboundReason, result: VerifyResult): Rebound
 function failureFingerprint(reason: ReboundReason): string {
   switch (reason.kind) {
     case 'gate-failure': return `${reason.kind}:${reason.area}:${reason.command}:${reason.exitCode}:${reboundDiagnostic(reason)}`;
+    case 'declared-gate-validation': return `${reason.kind}:${reason.command}:${reboundDiagnostic(reason)}`;
     case 'hook-failure': return `${reason.kind}:${reason.hook}:${reason.operation || ''}:${reason.output}`;
     default: return `${reason.kind}:${reboundDiagnostic(reason)}`;
   }
@@ -414,6 +433,12 @@ function promptSlotsFor(reason: ReboundReason): Pick<FixPromptSlots, 'area' | 'f
         area: 'handoff',
         facts: [['Handoff error', reason.error]],
         remedy: `Fix the underlying issue so handoff verification passes.`,
+      };
+    case 'declared-gate-validation':
+      return {
+        area: 'declared gate',
+        facts: [['Gate command', reason.command]],
+        remedy: 'Replace the declaration with the exact runnable command and move outcome prose to Success Criteria or checkpoint documentation.',
       };
   }
   // Unreachable for the closed union; kept out of the switch for exhaustiveness.

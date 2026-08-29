@@ -1,8 +1,8 @@
 ---
 id: TASK-2439
 title: Rebounce does not fire for declared gate failures on review --submit
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-08-28 16:06'
 labels: [ai_sdlc, bug]
 dependencies: []

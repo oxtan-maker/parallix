@@ -397,10 +397,10 @@ export async function submitForReview(
     }
   }
 
-  const result = await performHandoffFn(slug, { skipGate, reviewIdentity, forgejoUser: reviewIdentity, worktree, missionServicesFn: options.missionServicesFn, occurredAt: options.occurredAt });
+  const result = await performHandoffFn(slug, { skipGate, reviewIdentity, forgejoUser: reviewIdentity, worktree, missionServicesFn: options.missionServicesFn, occurredAt: options.occurredAt, recoverGateFailure: true });
   if (!result.ok) {
     // Auto-bounce for declared-gate validation failures
-    if (result.reason === 'validation-failed') {
+    if (result.reason === 'validation-failed' && !result.recoveryAttempted) {
       await transitionTaskFn(slug, 'active', { rootDir: worktree, log });
       log(fmt.status('INFO', `Auto-bounced ${slug} to active: declared-gate validation failure. Fix the gate in MISSION.md and retry.`));
     }
