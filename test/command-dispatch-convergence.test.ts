@@ -124,7 +124,7 @@ function createPorts(launchSpy: any): ExecuteMissionPorts {
       launch: launchSpy,
     },
     missionTransitions: {
-      load: async () => ({ kind: 'missing' as const }),
+      load: async () => ({ kind: 'found' as const, mission: { status: 'active' } as never, version: missionVersion(1) }),
       save: async () => missionVersion(1),
       saveWithTransition: async () => missionVersion(1),
     },

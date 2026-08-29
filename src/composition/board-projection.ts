@@ -130,11 +130,11 @@ export function composeTuiCapabilities(
   controller?: BoardCommandController,
 ): TuiCapabilities {
   const board = composeBoardProjection(deps);
-  const sharedController = controller ?? new BoardCommandController(executePorts);
+  const sharedController = controller ?? new BoardCommandController(executePorts, undefined, {}, currentWork, deps.missionStore);
   return {
     boardProjection: board.builder,
     missionDetails: board.missionQuery,
-    commandControllerFactory: (progress) => new BoardCommandController(executePorts, progress, {}, currentWork),
+    commandControllerFactory: (progress) => new BoardCommandController(executePorts, progress, {}, currentWork, deps.missionStore),
     commandController: sharedController,
   };
 }

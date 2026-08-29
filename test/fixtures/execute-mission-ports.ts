@@ -34,7 +34,7 @@ export function makeExecutePorts(overrides: Record<string, unknown> = {}) {
       },
     },
     missionTransitions: {
-      async load() { calls.push('load'); return { kind: 'missing' }; },
+      async load() { return { kind: 'found', mission: { status: 'refined' }, version: 1 }; },
       async save() { calls.push('synchronize'); return 1; },
       async saveWithTransition() { calls.push('synchronize'); return 1; },
     },

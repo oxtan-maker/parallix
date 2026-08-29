@@ -46,7 +46,7 @@ function waitForOutput(stream: Stream, pattern: RegExp, timeoutMs = 2_000): Prom
   return waitFor(() => pattern.test(stream.writes.join('')), timeoutMs);
 }
 
-async function renderFlow(controller: { dispatchWithStatus: (...args: any[]) => Promise<any> }, refreshProjection?: () => Promise<any>) {
+async function renderFlow(controller: { dispatch: (...args: any[]) => Promise<any> }, refreshProjection?: () => Promise<any>) {
   const ink = await import('ink');
   const React = await import('react');
   const { BoardShell } = await import('../src/interfaces/tui/shell.js');
@@ -68,7 +68,7 @@ async function renderFlow(controller: { dispatchWithStatus: (...args: any[]) => 
 
 test('confirmation cancellation dispatches nothing and renders cancelled outcome', async () => {
   let calls = 0;
-  const ui = await renderFlow({ async dispatchWithStatus() { calls += 1; return { status: 'completed', durableEvidence: [] }; } });
+  const ui = await renderFlow({ async dispatch() { calls += 1; return { status: 'completed', durableEvidence: [] }; } });
   ui.stdin.send('\r');
   await waitForOutput(ui.stdout, /CONFIRM CONSEQUENTIAL ACTION/);
   ui.stdin.send('\u001b');
@@ -81,7 +81,7 @@ test('confirmation cancellation dispatches nothing and renders cancelled outcome
 test('confirmed action dispatches through supplied controller and conflict refreshes before re-prompting', async () => {
   let calls = 0;
   let refreshes = 0;
-  const ui = await renderFlow({ async dispatchWithStatus() {
+  const ui = await renderFlow({ async dispatch() {
     calls += 1;
     return { status: 'failed', error: { kind: 'conflict', message: 'stale mission' }, durableEvidence: [] };
   } }, async () => {
@@ -114,7 +114,7 @@ test('progress events render in the command log without changing the card lane',
     projection: makeProjection({ refined: [card] }),
     commandControllerFactory: (receiveProgress: any) => {
       progress = receiveProgress;
-      return { async dispatchWithStatus() { return { status: 'completed', durableEvidence: [] }; } };
+      return { async dispatch() { return { status: 'completed', durableEvidence: [] }; } };
     },
   } as never), { stdin: stdin as unknown as NodeJS.ReadStream, stdout: stdout as unknown as NodeJS.WriteStream, patchConsole: false, exitOnCtrlC: false });
   await new Promise((resolve) => setTimeout(resolve, 35));
@@ -133,7 +133,7 @@ test('progress events render in the command log without changing the card lane',
 
 test('Ctrl+A on enabled card shows confirmation and dispatches on Enter', async () => {
   let calls = 0;
-  const ui = await renderFlow({ async dispatchWithStatus() { calls += 1; return { status: 'completed', durableEvidence: [] }; } });
+  const ui = await renderFlow({ async dispatch() { calls += 1; return { status: 'completed', durableEvidence: [] }; } });
   /* Ctrl+A (\x01) triggers lifecycle shortcut for active:execute. */
   ui.stdin.send('\x01');
   /* Confirmation dialog should appear. */
@@ -158,7 +158,7 @@ test('Ctrl+A on disabled card does not dispatch (pins R1)', async () => {
   });
   const instance = ink.render(React.createElement(BoardShell, {
     projection: makeProjection({ done: [card] }),
-    commandControllerFactory: () => ({ async dispatchWithStatus() { calls += 1; return { status: 'completed', durableEvidence: [] }; } }),
+    commandControllerFactory: () => ({ async dispatch() { calls += 1; return { status: 'completed', durableEvidence: [] }; } }),
   } as never), { stdin: stdin as unknown as NodeJS.ReadStream, stdout: stdout as unknown as NodeJS.WriteStream, patchConsole: false, exitOnCtrlC: false });
   await new Promise((resolve) => setTimeout(resolve, 35));
   /* Ctrl+A on a card whose active command is disabled. */
@@ -172,7 +172,7 @@ test('Ctrl+A on disabled card does not dispatch (pins R1)', async () => {
 
 test('Ctrl+D on card produces unavailable outcome without dispatching', async () => {
   let calls = 0;
-  const ui = await renderFlow({ async dispatchWithStatus() { calls += 1; return { status: 'completed', durableEvidence: [] }; } });
+  const ui = await renderFlow({ async dispatch() { calls += 1; return { status: 'completed', durableEvidence: [] }; } });
   /* Ctrl+D (\x04) triggers draft:create which is not integrated. */
   ui.stdin.send('\x04');
   await waitForOutput(ui.stdout, /unavailableCapability|not yet available/i);
@@ -183,7 +183,7 @@ test('Ctrl+D on card produces unavailable outcome without dispatching', async ()
 
 test('Ctrl+R on card produces unavailable outcome without dispatching', async () => {
   let calls = 0;
-  const ui = await renderFlow({ async dispatchWithStatus() { calls += 1; return { status: 'completed', durableEvidence: [] }; } });
+  const ui = await renderFlow({ async dispatch() { calls += 1; return { status: 'completed', durableEvidence: [] }; } });
   /* Ctrl+R (\x12) triggers review:submit which is not integrated. */
   ui.stdin.send('\x12');
   await waitForOutput(ui.stdout, /unavailableCapability|not yet available/i);
@@ -252,7 +252,7 @@ test('Ctrl+I (0x09) is reported as Tab by Ink and toggles rail/board focus, not 
   let calls = 0;
   const instance = ink.render(React.createElement(BoardShell, {
     projection,
-    commandControllerFactory: () => ({ async dispatchWithStatus() { calls += 1; return { status: 'completed', durableEvidence: [] }; } }),
+    commandControllerFactory: () => ({ async dispatch() { calls += 1; return { status: 'completed', durableEvidence: [] }; } }),
   } as never), { stdin: stdin as unknown as NodeJS.ReadStream, stdout: stdout as unknown as NodeJS.WriteStream, patchConsole: false, exitOnCtrlC: false });
   await new Promise((resolve) => setTimeout(resolve, 35));
 

@@ -18,6 +18,9 @@ import { existsSync, readFileSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { launchPtySmoke, type PtySmokeSession } from './helpers/pty-smoke-harness.js';
+import { createMissionApplicationServices } from '../src/composition/application-services.js';
+import { agentFamily } from '../src/domain/agents.js';
+import { missionId } from '../src/domain/mission.js';
 
 const execFileP = promisify(execFile);
 
@@ -276,6 +279,30 @@ async function gitIn(cwd: string, ...args: string[]): Promise<void> {
   await execFileP('git', args, { cwd });
 }
 
+async function seedInflightMission(fixtureRoot: string, stateRoot: string): Promise<void> {
+  const services = await createMissionApplicationServices(fixtureRoot, {
+    databasePath: path.join(stateRoot, 'parallix.db'),
+  });
+  const id = missionId(SC3_SLUG);
+  const intake = await services.intake.execute({
+    operationId: `${SC3_SLUG}-intake`,
+    missionId: id,
+    repositoryId: services.repositoryId,
+    title: 'In-flight shutdown fixture',
+    rawStatus: 'active',
+    capabilities: new Set(['mission:intake']),
+  });
+  assert.equal(intake.status, 'completed', 'the fixture mission must be materialized for the authoritative board guard');
+  const activated = await services.lifecycle.activate({
+    operationId: `${SC3_SLUG}-activate`,
+    missionId: id,
+    agent: agentFamily('claude'),
+    occurredAt: new Date().toISOString(),
+    capabilities: new Set(['mission:transition']),
+  });
+  assert.equal(activated.status, 'completed', 'the fixture mission authority must match the active board card');
+}
+
 interface InflightBoardFixture {
   readonly session: PtySmokeSession;
   readonly markerPath: string;
@@ -332,6 +359,7 @@ async function launchInflightBoard(): Promise<InflightBoardFixture> {
   await gitIn(fixtureRoot, 'add', '-A');
   await gitIn(fixtureRoot, 'commit', '-q', '-m', 'init');
   await gitIn(fixtureRoot, 'checkout', '-q', '-b', `mission/${SC3_SLUG}`);
+  await seedInflightMission(fixtureRoot, stateRoot);
 
   const session = await launchPtySmoke([process.execPath, path.join(root, 'build/px.mjs'), 'ui'], {
     cwd: fixtureRoot,

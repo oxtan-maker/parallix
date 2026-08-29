@@ -214,7 +214,7 @@ export function BoardShell({ projection, columns, rows, initialSelectedMissionId
     } as const;
     confirmationRef.current = null;
     setConfirmation(null);
-    const result = await controller.dispatchWithStatus(request, pendingConfirmation.mission.status);
+    const result = await controller.dispatch(request);
     setOutcome(result);
     if (result.error?.kind === 'conflict' && refreshProjection) {
       const refreshed = await refreshProjection();

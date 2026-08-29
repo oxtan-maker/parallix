@@ -170,28 +170,37 @@ test('controller passes cancellation to ExecuteMissionService for post-boundary 
 // SC7: Stale command rejection
 // ---------------------------------------------------------------------------
 
-test('dispatchWithStatus rejects stale command with conflict kind', async () => {
+test('authoritative status rejects stale command with conflict kind', async () => {
   const { ports } = makeExecutePorts();
-  const controller = new BoardCommandController(ports);
-  const result = await controller.dispatchWithStatus(
-    makeRequest({ missionStatusAtRequest: 'refined' }),
-    'active',
-  );
+  const controller = new BoardCommandController(ports, undefined, {}, undefined, {
+    async load() { return { kind: 'found', mission: { status: 'active' }, version: 1 } as never; },
+  });
+  const result = await controller.dispatch(makeRequest({ missionStatusAtRequest: 'refined' }));
   assert.equal(result.status, 'failed');
   assert.equal(result.error.kind, 'conflict');
   assert.ok(result.error.message.includes('refined'));
   assert.ok(result.error.message.includes('active'));
 });
 
-test('dispatchWithStatus proceeds when status matches', async () => {
+test('authoritative matching status proceeds to dispatch once', async () => {
   const { ports, calls } = makeExecutePorts();
   const controller = new BoardCommandController(ports);
-  const result = await controller.dispatchWithStatus(
-    makeRequest({ missionStatusAtRequest: 'refined' }),
-    'refined',
-  );
+  const result = await controller.dispatch(makeRequest({ missionStatusAtRequest: 'refined' }));
   assert.equal(result.status, 'completed');
-  assert.ok(calls.length > 0);
+  assert.equal(calls.length, 4);
+});
+
+test('authoritative read failure fails closed before the effect is called', async () => {
+  const { ports, calls } = makeExecutePorts();
+  const controller = new BoardCommandController(ports, undefined, {}, undefined, {
+    async load() { throw new Error('store offline'); },
+  });
+
+  const result = await controller.dispatch(makeRequest());
+
+  assert.equal(result.status, 'failed');
+  assert.equal(result.error?.kind, 'unavailable');
+  assert.equal(calls.length, 0);
 });
 
 // ---------------------------------------------------------------------------

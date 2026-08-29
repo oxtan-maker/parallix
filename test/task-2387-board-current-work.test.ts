@@ -126,6 +126,9 @@ test('production composition delivers a board controller that publishes to the w
   const { ports } = makeExecutePorts();
   const { repo } = makeHistoryRepo();
   const recorder = new CurrentWorkRecorder(repo, { processId: 2387 });
+  const missionStore = {
+    async load() { return { kind: 'found', mission: { status: 'refined' }, version: 1 }; },
+  };
 
   // Built via a typed const so the repository fakes are structurally checked
   // against their interfaces rather than flagged for extra test-only methods.
@@ -141,14 +144,14 @@ test('production composition delivers a board controller that publishes to the w
     repositoryId('/fixture-repository'),
     repositories,
     ports,
-    null,
+    missionStore as never,
     recorder,
   );
 
   // The factory delivered by the production composition forwards the same
   // recorder composition received: a completed board launch publishes through it.
   const progressEvents: string[] = [];
-  const result = await capabilities.tui.commandControllerFactory((event) => progressEvents.push(event.phase)).dispatchWithStatus(boardRequest(), 'refined');
+  const result = await capabilities.tui.commandControllerFactory((event) => progressEvents.push(event.phase)).dispatch(boardRequest());
   assert.equal(result.status, 'completed');
   assert.ok(progressEvents.includes('dispatch'), 'the TUI progress sink receives controller events');
 
