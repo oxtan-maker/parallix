@@ -37,6 +37,19 @@ function runScript(args, env = {}) {
   return result;
 }
 
+function staticAnalysisStubEnv(tmpDir, npxStatus = 0) {
+  const binDir = path.join(tmpDir, 'bin');
+  const nodePath = path.join(binDir, 'node');
+  fs.mkdirSync(binDir);
+  fs.writeFileSync(nodePath, `#!/bin/sh\nexec ${process.execPath} "$@"\n`);
+  fs.writeFileSync(path.join(binDir, 'npx'), `#!/bin/sh\nexit ${npxStatus}\n`);
+  fs.writeFileSync(path.join(binDir, 'npm'), '#!/bin/sh\nexit 0\n');
+  fs.chmodSync(nodePath, 0o755);
+  fs.chmodSync(path.join(binDir, 'npx'), 0o755);
+  fs.chmodSync(path.join(binDir, 'npm'), 0o755);
+  return { PARALLIX_NODE: nodePath, PATH: `${binDir}:${process.env.PATH}` };
+}
+
 test('verify-local Git shim handles init flags without mistaking them for the target directory', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'verify-local-git-shim-'));
   const shim = path.join(repoRoot, 'scripts', 'git');
@@ -57,12 +70,36 @@ test('verify-local integrate fails closed when integration config is missing (ta
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'verify-local-missing-'));
   try {
     const result = runScript(['integrate'], {
+      INTEGRATE_DRY_RUN: 'true',
       INTEGRATION_CONFIG_PATH: path.join(tmpDir, 'missing', 'integration-pipelines.json')
     });
     const output = `${result.stdout}${result.stderr}`;
 
     assert.notEqual(result.status, 0, output);
     assert.match(output, /mandatory integration gate plan is unavailable/);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('verify-local integrate runs static analysis before configured integration gates (task-2414)', () => {
+  const source = fs.readFileSync(scriptPath, 'utf8');
+  assert.match(source, /gate_static_analysis \|\| return 1[\s\S]*node --input-type=module --import tsx/);
+});
+
+test('verify-local integrate stops before configured gates when static analysis fails (task-2414)', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'verify-local-static-failure-'));
+  const configPath = path.join(tmpDir, 'integration-pipelines.json');
+  const marker = path.join(tmpDir, 'configured-gate-ran');
+  try {
+    fs.writeFileSync(configPath, JSON.stringify({ gates: { workflow: { command: `touch ${marker}`, order: 1 } } }));
+    const result = runScript(['integrate'], {
+      ...staticAnalysisStubEnv(tmpDir, 1),
+      INTEGRATION_CONFIG_PATH: configPath,
+      INTEGRATE_CHANGED_AREAS: 'workflow'
+    });
+    assert.notEqual(result.status, 0, `${result.stdout}${result.stderr}`);
+    assert.equal(fs.existsSync(marker), false);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -107,6 +144,7 @@ test('verify-local integrate fails closed when no mandatory gate applies (task-2
     }, null, 2));
 
     const result = runScript(['integrate'], {
+      INTEGRATE_DRY_RUN: 'true',
       INTEGRATION_CONFIG_PATH: configPath,
       INTEGRATE_CHANGED_AREAS: 'docs'
     });
@@ -175,6 +213,7 @@ test('verify-local integrate aborts after an integration-suite failure before a 
       }
     }, null, 2));
     const result = runScript(['integrate'], {
+      ...staticAnalysisStubEnv(tmpDir),
       INTEGRATION_CONFIG_PATH: configPath,
       INTEGRATE_CHANGED_AREAS: 'docs'
     });
@@ -200,6 +239,7 @@ test('verify-local integrate forwards the Codex override only to custom-agent-sm
       }
     }));
     const result = runScript(['integrate', '--real-agent', 'codex', '--real-agent-model', 'gpt-5.6-luna'], {
+      ...staticAnalysisStubEnv(tmpDir),
       INTEGRATION_CONFIG_PATH: configPath,
       INTEGRATE_CHANGED_AREAS: 'lib workflow'
     });
@@ -235,6 +275,7 @@ test('verify-local integrate does not source login-shell startup files for gates
       gates: { workflow: { command: `test ! -f ${outputPath}`, order: 1 } }
     }));
     const result = runScript(['integrate'], {
+      ...staticAnalysisStubEnv(tmpDir),
       HOME: tmpDir,
       BASH_ENV: bashEnvPath,
       INTEGRATION_CONFIG_PATH: configPath,

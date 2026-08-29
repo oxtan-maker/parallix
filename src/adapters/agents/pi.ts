@@ -390,7 +390,6 @@ function startPiAgent({
 
           // Send the prompt and wait for the agent to complete.
           await session.prompt(injectedPrompt);
-          await session.waitForIdle();
 
           if (typeof unsubscribe === 'function') { unsubscribe(); }
           if (typeof session.dispose === 'function') { session.dispose(); }

@@ -1329,7 +1329,6 @@ test('repo config preserves existing gate orders (task-1419)', () => {
   const configPath = path.join(import.meta.dirname, '..', 'config', 'integration-pipelines.json');
   const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
 
-  assert.equal(config.gates.lib.order, 1, 'lib gate remains order 1');
   assert.equal(config.gates.mutation.order, 40, 'mutation gate remains order 40');
   assert.equal(config.gates.workflow.order, 50, 'workflow gate remains order 50');
   assert.equal(config.gates.workflow.run_last, true, 'workflow gate remains run_last');
@@ -1373,7 +1372,7 @@ test('every representative changed-area plan includes the unconditional integrat
   }
 });
 
-test('getIntegrationGatePlan with repo config selects lib and build for lib changes (task-1419)', () => {
+test('getIntegrationGatePlan with repo config selects build for lib changes (task-1419)', () => {
   const configPath = path.join(import.meta.dirname, '..', 'config', 'integration-pipelines.json');
 
   const plan = getIntegrationGatePlan('task-1419', {
@@ -1384,16 +1383,13 @@ test('getIntegrationGatePlan with repo config selects lib and build for lib chan
   });
 
   const keys = plan.gates.map(g => g.key);
-  assert.ok(keys.includes('lib'), 'lib gate should be selected');
   assert.ok(keys.includes('build'), 'build gate should be selected for lib changes');
   assert.ok(keys.includes('workflow'), 'workflow gate should be selected for lib changes (special case)');
   assert.ok(keys.includes('custom-agent-smoke'), 'custom-agent-smoke should be selected for lib changes (special case)');
-  // Verify ordering: lib (1) before build (2), run_last gates after
-  const libIdx = keys.indexOf('lib');
+  // Verify ordering: build before run-last gates.
   const buildIdx = keys.indexOf('build');
   const wfIdx = keys.indexOf('workflow');
   const casIdx = keys.indexOf('custom-agent-smoke');
-  assert.ok(libIdx < buildIdx, 'lib (order 1) should come before build (order 2)');
   assert.ok(buildIdx < wfIdx, 'build (order 2) should come before workflow (run_last)');
   assert.ok(wfIdx < casIdx, 'workflow (order 50) should come before custom-agent-smoke (order 51)');
 });
