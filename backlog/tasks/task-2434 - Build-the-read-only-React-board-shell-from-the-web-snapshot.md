@@ -33,6 +33,8 @@ Use real projection values only. No hard-coded “missions/wk”, PR numbers, ga
 - [ ] #5 Server action display/availability can be shown, but no click/key/drop invokes the mutation endpoint in this task.
 - [ ] #6 Keyboard focus order, semantic landmarks/headings, contrast and screen-reader labels are present from the first UI slice.
 - [ ] #7 Client boot/version/error/loading states are explicit and do not render stale cached state as current after incompatible transport.
+- [ ] #8 Design of components in scope is EXACTLY like "/tmp/Parallix Kanban Board Controller.zip"
+
 
 ## Agent-slop guardrails
 

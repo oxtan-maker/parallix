@@ -36,6 +36,7 @@ Mutation UI uses explicit confirmation for effectful/destructive actions accordi
 - [ ] #8 Keyboard-only operation covers rail/board focus, card/action selection, confirm/cancel, FLOW toggle, shipped toggle and help as applicable.
 - [ ] #9 Focus is restored predictably after modal close, conflict refresh and action completion.
 - [ ] #10 The mockup's environment-override “retry agent” action is absent unless a separately reviewed typed capability exists.
+- [ ] #11 Design of components in scope is EXACTLY like "/tmp/Parallix Kanban Board Controller.zip"
 
 ## Agent-slop guardrails
 
