@@ -1,10 +1,12 @@
 ---
 id: TASK-2438
 title: parallix ui does not detect changes in worktrees
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-08-28 05:59'
-labels: [user_value, bug]
+labels:
+  - user_value
+  - bug
 dependencies: []
 ordinal: 123917
 ---

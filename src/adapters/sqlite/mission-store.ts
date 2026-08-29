@@ -97,6 +97,17 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
     return this.enqueue(() => this.loadAggregate(id));
   }
 
+  async loadByRepository(repositoryId: RepositoryId): Promise<readonly Mission[]> {
+    return this.enqueue(async () => {
+      const rows = await this.db.query<{ id: MissionId }>(
+        'SELECT id FROM missions WHERE repository_id = ? ORDER BY id',
+        [repositoryId],
+      );
+      const loaded = await Promise.all(rows.map(({ id }) => this.loadAggregate(id)));
+      return loaded.flatMap((result) => result.kind === 'found' ? [result.mission] : []);
+    });
+  }
+
   async save(
     mission: Mission,
     expectedVersion: MissionVersion | null,

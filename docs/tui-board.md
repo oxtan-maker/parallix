@@ -6,8 +6,11 @@ shows what the board projection already knows and never computes lifecycle state
 of its own. Every headless command (`px status`, `px active`, `px review`, …)
 behaves exactly as before; the TUI is an additional surface, not a replacement.
 
-The board shows current and completed backlog tasks. Archived tasks remain
-cold-storage records and do not appear on the operational board.
+The board uses the non-archived task catalog visible from the checkout where it
+is launched. Tasks that have started use their shared persisted lifecycle state,
+while an unstarted task remains visible in that checkout's Markdown lane.
+Missions from other repositories and archived tasks do not appear on the
+operational board.
 
 Set `PARALLIX_NO_TUI=1` to restore the previous interactive no-command behavior:
 `px` prints usage help and exits successfully. Piped, CI, and redirected-output

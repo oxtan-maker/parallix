@@ -20,6 +20,7 @@ import { BoardProjectionBuilder } from '../application/projections/board-readers
 import type { MissionReadAdapter } from '../application/projections/board-readers.js';
 import { ConcreteMetricsReadAdapter } from '../application/projections/metrics-read-adapter.js';
 import { MissionProjectionQuery } from '../application/projections/mission-query.js';
+import type { SourceFact } from '../application/contracts.js';
 import { BoardCommandController } from '../application/controller/board-controller.js';
 import type { ExecuteMissionPorts } from '../application/ports/execute-mission.js';
 import type { TuiCapabilities } from '../application/tui-capabilities.js';
@@ -47,17 +48,48 @@ export interface BoardProjectionCompositionDeps {
 /** The sole production constructor for board reads and mission details. */
 export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
   const repositoryMissions = new ConcreteMissionReadAdapter({ rootDir: deps.rootDir, repositoryId: deps.repositoryId });
+  let cachedMissions: Promise<readonly import('../domain/mission.js').Mission[]> | null = null;
+  const persistedMissions = deps.missionStore?.loadByRepository;
   const missions: MissionReadAdapter = {
     async loadAllMissions() {
-      const loaded = await repositoryMissions.loadAllMissions();
-      return Promise.all(loaded.map((mission) => withPersistedCheckpoints(mission)));
+      cachedMissions ??= loadBoardMissions();
+      return cachedMissions;
     },
     async loadMission(id) {
-      const mission = await repositoryMissions.loadMission(id);
-      return mission ? withPersistedCheckpoints(mission) : null;
+      if (persistedMissions && deps.missionStore) {
+        const stored = await deps.missionStore.load(id);
+        return stored.kind === 'found' && stored.mission.repositoryId === deps.repositoryId
+          ? stored.mission
+          : loadMarkdownMission(id);
+      }
+      return loadMarkdownMission(id);
     },
-    getSourceFacts: () => repositoryMissions.getSourceFacts(),
+    getSourceFacts: (): readonly SourceFact<string>[] => persistedMissions
+      ? [...repositoryMissions.getSourceFacts(), { source: 'mission-store', status: 'fresh', value: deps.repositoryId }]
+      : repositoryMissions.getSourceFacts(),
   };
+
+  async function loadBoardMissions(): Promise<readonly import('../domain/mission.js').Mission[]> {
+    const markdown = await repositoryMissions.loadAllMissions();
+    if (!persistedMissions || !deps.missionStore) {
+      return Promise.all(markdown.map((mission) => withPersistedCheckpoints(mission)));
+    }
+    const persisted = await deps.missionStore.loadByRepository!(deps.repositoryId);
+    const byId = new Map(persisted.map((mission) => [mission.id, mission]));
+    // Markdown defines the board catalog (and excludes archived tasks); SQLite
+    // owns lifecycle state once a task has a persisted Mission aggregate.
+    return markdown.flatMap((mission) => {
+      const stored = byId.get(mission.id);
+      // A Markdown-only done task is historical. Persisted done missions remain
+      // because their lifecycle aggregate is authoritative.
+      return stored ? [stored] : mission.status === 'done' ? [] : [mission];
+    });
+  }
+
+  async function loadMarkdownMission(id: import('../domain/mission.js').MissionId) {
+    const mission = await repositoryMissions.loadMission(id);
+    return mission ? withPersistedCheckpoints(mission) : null;
+  }
 
   async function withPersistedCheckpoints(mission: import('../domain/mission.js').Mission) {
     if (!deps.missionStore) { return mission; }
@@ -97,6 +129,7 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
       prepareReads: () => {
         const topology = snapshotWorktreeTopology({ cwd: deps.rootDir });
         repositoryMissions.useWorktreeTopology(topology);
+        cachedMissions = null;
         gates.useWorktreeTopology(topology);
       },
       // The authoritative answer to "which mission is being worked on right

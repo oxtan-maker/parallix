@@ -22,6 +22,8 @@ export type MissionLoadResult =
 /** Persistence ports belong to the application layer; the domain stays store-agnostic. */
 export interface MissionStore {
   load(_id: MissionId): Promise<MissionLoadResult>;
+  /** Read the mission aggregates owned by one repository. */
+  loadByRepository?(_repositoryId: import('../domain/repository.js').RepositoryId): Promise<readonly Mission[]>;
   /**
    * Insert when expectedVersion is null, otherwise compare-and-swap the exact
    * aggregate revision returned by load().
