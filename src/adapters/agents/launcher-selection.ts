@@ -84,6 +84,28 @@ function commandInPath(name: string) {
   return result.status === 0 && result.stdout.trim().length > 0;
 }
 
+// Injection seam for the `--help` health probe. The default shells out to the
+// real launcher CLI, which is slow (node-based CLIs take hundreds of ms to
+// answer --help) and environment-dependent; unit tests must never trigger it.
+// Mirrors commandPathProbe above: null restores the real spawn-based probe.
+let launcherHealthProbe: ((_command: string, _args: string[]) => { ok: boolean; reason?: string }) | null = null;
+
+function probeLauncherHealth(command: string, args: string[]) {
+  if (launcherHealthProbe) {
+    return launcherHealthProbe(command, args);
+  }
+  const probe = spawnSync(command, args, {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    timeout: LAUNCHER_HEALTH_TIMEOUT_MS
+  });
+  if (probe.error || probe.status !== 0) {
+    const pErr: Error & { code?: string } = probe.error || new Error('');
+    return { ok: false, reason: probe.error ? (pErr.code || pErr.message) : `exit ${probe.status}` };
+  }
+  return { ok: true };
+}
+
 function workflowLauncherStatus(agent: string, worktree?: string): LauncherStatus {
   // For custom agent, resolve to the actual runner. resolveCustomRunner
   // defaults to process.cwd() when worktree is undefined, so this must not
@@ -105,27 +127,19 @@ function workflowLauncherStatus(agent: string, worktree?: string): LauncherStatu
   }
 
   const probeArgs = HEALTH_PROBE_ARGS[effectiveAgent] || ['--help'];
-  const probe = spawnSync(command, probeArgs, {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-    timeout: LAUNCHER_HEALTH_TIMEOUT_MS
-  });
-
-  if (probe.error || probe.status !== 0) {
-    const pErr: Error & {code?: string} = probe.error || new Error('');
-    const reason = probe.error
-      ? (pErr.code || pErr.message)
-      : `exit ${probe.status}`;
+  const health = probeLauncherHealth(command, probeArgs);
+  const detail = `${command} ${probeArgs.join(' ')}`.trim();
+  if (!health.ok) {
     return {
       agent: effectiveAgent,
       supported: false,
-      detail: `${command} ${probeArgs.join(' ')}`.trim(),
+      detail,
       health: 'probe-failed',
-      reason
+      reason: health.reason
     };
   }
 
-  return { agent: effectiveAgent, supported: true, detail: `${command} ${probeArgs.join(' ')}`.trim(), health: 'ok' };
+  return { agent: effectiveAgent, supported: true, detail, health: 'ok' };
 }
 
 function eligibleAgentsForStep(step: string, options: AgentSelectionOptions = {}) {
@@ -284,6 +298,10 @@ const setCommandPathProbe = (fn: ((name: string) => string | null) | null) => {
   commandPathProbe = typeof fn === 'function' ? fn : null;
 };
 
+const setLauncherHealthProbe = (fn: ((_command: string, _args: string[]) => { ok: boolean; reason?: string }) | null) => {
+  launcherHealthProbe = typeof fn === 'function' ? fn : null;
+};
+
 export {
   KNOWN_AGENT_NAMES,
   WORKFLOW_AGENT_NAMES,
@@ -293,6 +311,7 @@ export {
   DRAFT_NO_OUTPUT_INITIAL_DELAY_MS,
   workflowLauncherStatus,
   setCommandPathProbe,
+  setLauncherHealthProbe,
   eligibleAgentsForStep,
   weightedRandom,
   selectAgent,

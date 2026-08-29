@@ -108,7 +108,14 @@ const expectedIntegrationFiles = [
   'tui-command-flow.test.ts',
   'tui-spawn.test.ts',
   'unit-test-timeout-guard.test.ts',
-  'verification.test.ts', 'verify-local-integrate.test.ts'
+  'verification.test.ts', 'verify-local-integrate.test.ts',
+  // TASK-2431: real-socket loopback web host proof (bind, Host, Origin,
+  // session, CSRF, method, body-size, traversal). Runs only in integration.
+  'web-host.integration.test.ts',
+  // TASK-2431: package-mode smoke — packs the real artifact and serves the
+  // shell from the packaged built assets. Crosses the npm-pack boundary, so
+  // it runs only in integration.
+  'web-package-smoke.integration.test.ts'
 ].sort();
 
 function selectedFiles(args, version = process.version) {

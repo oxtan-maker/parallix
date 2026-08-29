@@ -1,8 +1,8 @@
 ---
 id: TASK-2431
 title: Add a loopback-only web host and self-contained browser asset build
-status: backlog
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-08-28 06:29'
 labels:
   - user_value

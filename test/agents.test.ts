@@ -7,11 +7,15 @@ import path from 'path';
 import os from 'os';
 import { execFileSync } from 'node:child_process';
 import { mockModule, installModuleMocks } from './lib/module-mock.js';
+// custom-capacity holds process-local mutable state and is only read here.
+// A plain import keeps the single production-graph instance; declaring it
+// via mockModule would re-link a second instance and split its capacity
+// count from the selectAgent path (task-2431 integration gate).
+import { activeCustomCapacityCount, resetCustomCapacity, tryAcquireCustomCapacity } from '../src/adapters/agents/custom-capacity.js';
 const buildClaudeInvocationModule = mockModule<typeof import('../src/adapters/agents/claude.js')>('../src/adapters/agents/claude.js', import.meta.url);
 const buildCodexDraftInvocationModule = mockModule<typeof import('../src/adapters/agents/codex.js')>('../src/adapters/agents/codex.js', import.meta.url);
 const buildVibeInvocationModule = mockModule<typeof import('../src/adapters/agents/vibe.js')>('../src/adapters/agents/vibe.js', import.meta.url);
 const buildOpencodeInvocationModule = mockModule<typeof import('../src/adapters/agents/opencode.js')>('../src/adapters/agents/opencode.js', import.meta.url);
-const activeCustomCapacityCountModule = mockModule<typeof import('../src/adapters/agents/custom-capacity.js')>('../src/adapters/agents/custom-capacity.js', import.meta.url);
 const agents = mockModule<typeof import('../src/adapters/agents/agents.js')>('../src/adapters/agents/agents.js', import.meta.url);
 const resolveNoOutputWatchdogConfigModule = mockModule<typeof import('../src/adapters/agents/agents.js')>('../src/adapters/agents/agents.js', import.meta.url);
 await installModuleMocks();
@@ -20,7 +24,6 @@ const { buildClaudeInvocation, resolveClaudeCommand, extractClaudeSessionId } = 
 const { buildCodexDraftInvocation, resolveCodexCommand, extractCodexSessionId } = buildCodexDraftInvocationModule;
 const { buildVibeInvocation, resolveVibeCommand, extractVibeSessionId } = buildVibeInvocationModule;
 const { buildOpencodeInvocation, resolveOpencodeCommand, extractOpencodeSessionId, __setJsonFormatSupportForTest } = buildOpencodeInvocationModule;
-const { activeCustomCapacityCount, resetCustomCapacity, tryAcquireCustomCapacity } = activeCustomCapacityCountModule;
 const { resolveNoOutputWatchdogConfig } = resolveNoOutputWatchdogConfigModule;
 process.env.NO_COLOR = '1';
 const originalPath = process.env.PATH;
@@ -43,7 +46,8 @@ const {
   assertAgentSupported,
   workflowLauncherStatus,
   isAgentBlocked,
-  setCommandPathProbe
+  setCommandPathProbe,
+  setLauncherHealthProbe
 } = resolveNoOutputWatchdogConfigModule;
 
 function formatBlockUntil(date) {
@@ -839,22 +843,31 @@ test('selectAgent weighted result always stays within the available set', () => 
   }
 });
 
+// The unit bootstrap neutralizes the launcher health probe (see
+// test/bootstrap-parallix-home.ts) so no unit test spawns a real agent CLI.
+// Tests that deliberately exercise the real spawn-based probe against fixture
+// binaries restore it for their scope only.
+async function withRealHealthProbe(run) {
+  setLauncherHealthProbe(null);
+  try { return await run(); } finally { setLauncherHealthProbe(() => ({ ok: true })); }
+}
+
 test('workflowLauncherStatus rejects a launcher that exists but fails its health probe', () => {
   withPathLaunchers({
     codex: 'process.exit(process.argv.includes("--help") ? 1 : 0);'
-  }, () => {
+  }, () => withRealHealthProbe(() => {
     const status = workflowLauncherStatus('codex');
     assert.equal(status.supported, false);
     assert.equal(status.health, 'probe-failed');
     // We don't assert on the exact reason (exit 1 vs EACCES) to remain platform-agnostic
-  });
+  }));
 });
 
 test('selectAgent bypasses a broken launcher even when the binary exists', () => {
   const previous = process.env.WORKFLOW_AGENT;
   delete process.env.WORKFLOW_AGENT;
   try {
-    withPathLaunchers({
+    withRealHealthProbe(() => withPathLaunchers({
       codex: 'process.exit(process.argv.includes("--help") ? 1 : 0);'
     }, () => {
       const config = {
@@ -864,7 +877,7 @@ test('selectAgent bypasses a broken launcher even when the binary exists', () =>
       };
       const agent = selectAgent('review', { config });
       assert.equal(agent, 'claude');
-    });
+    }));
   } finally {
     if (previous === undefined) delete process.env.WORKFLOW_AGENT;
     else process.env.WORKFLOW_AGENT = previous;
@@ -1142,7 +1155,7 @@ test('startAgent reroutes when the selected agent has no launcher (missing binar
 test('startAgent reroutes when the selected agent fails its health probe', async () => {
   const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-reroute-probe-'));
   try {
-    const result = await withPathLaunchers({
+    const result = await withRealHealthProbe(() => withPathLaunchers({
       codex: 'process.exit(process.argv.includes("--help") ? 1 : 0);'
     }, async () => {
       const log = [];
@@ -1160,7 +1173,7 @@ test('startAgent reroutes when the selected agent fails its health probe', async
       assert.ok(log.some(m => m.includes('Agent "codex" launcher is not available')));
       assert.ok(log.some(m => m.includes('probe-failed')));
       return launchResult;
-    });
+    }));
     assert.equal(result.agent, 'claude');
   } finally {
     fs.rmSync(worktree, { recursive: true, force: true });

@@ -76,6 +76,8 @@ export const adapterPackageDependencies: Readonly<Record<string, readonly string
   sqlite: ['storage'],
   // mechanism: storage owns no sibling mechanism dependency.
   storage: [],
+  // mechanism: packaged browser-asset loading (the package root is passed in by composition).
+  web: [],
   // mechanism: backlog, config, filesystem, forgejo, git, storage provide verification facts and durable proofs.
   verification: ['backlog', 'config', 'filesystem', 'forgejo', 'git', 'storage'],
 };

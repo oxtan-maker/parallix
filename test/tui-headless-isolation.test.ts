@@ -44,6 +44,28 @@ function importsFrom(source: string): string[] {
   return [...source.matchAll(/(?:from\s+|import\s*(?:\(\s*)?)['"]([^'"]+)['"]/g)].map(match => match[1]);
 }
 
+/**
+ * Runtime-evaluated (static) import specifiers of a source file: `import ...
+ * from 'x'`, bare `import 'x'`, and `export ... from 'x'`. `import type` is
+ * erased before evaluation and does not count; a dynamic `import('x')` is
+ * deliberately not followed — it is the lazy path this invariant protects.
+ * The statement body is constrained to `[^;()]` so an `export` declaration
+ * can never stretch its match across unrelated statements.
+ */
+function staticSpecifiers(source: string): string[] {
+  const specs: string[] = [];
+  const statementRe = /(?:^|[\n;])[ \t]*(import|export)([^;()]*?)\s+from\s+["']([^"']+)["']/g;
+  let m: RegExpExecArray | null;
+  while ((m = statementRe.exec(source)) !== null) {
+    if (m[1] === 'import' && /^\s*type\b/.test(m[2])) { continue; }
+    specs.push(m[3]);
+  }
+  for (const bare of source.matchAll(/(?:^|[\n;])[ \t]*import\s+["']([^"']+)["']/g)) {
+    specs.push(bare[1]);
+  }
+  return specs;
+}
+
 test('headless-isolation: headless entry module graph contains no react or ink', () => {
   const headlessEntry = path.join(root, 'src', 'composition', 'create-cli.ts');
   const visited = new Set<string>();
@@ -94,6 +116,37 @@ test('headless-isolation: ui command is composed lazily in create-cli.ts', () =>
     /runUiCommand/.test(indexSource),
     'create-cli.ts must load runUiCommand from the TUI module',
   );
+});
+
+test('headless-isolation: static import graph of the headless entry never reaches the TUI', () => {
+  // Minify-stable replacement for the pre-2431 __esm()/init_ui_command
+  // bundle assertions: if any static edge from the headless entry (directly
+  // or transitively) reaches src/interfaces/tui, the TUI is on the eager
+  // startup path of every headless command and Ink/React load at boot.
+  // The only permitted edge is the dynamic import() in the ui handler.
+  const headlessEntry = path.join(root, 'src', 'composition', 'create-cli.ts');
+  const visited = new Set<string>();
+  const violations: string[] = [];
+
+  function visit(file: string) {
+    if (visited.has(file)) { return; }
+    visited.add(file);
+    const source = fs.readFileSync(file, 'utf8');
+    for (const spec of staticSpecifiers(source)) {
+      if (!spec.startsWith('.')) { continue; }
+      if (spec.includes('interfaces/tui')) {
+        violations.push(`${path.relative(root, file)}: statically imports the TUI via '${spec}'`);
+        continue;
+      }
+      const local = resolveLocal(file, spec);
+      if (local && !local.endsWith('.tsx')) { visit(local); }
+    }
+  }
+
+  visit(headlessEntry);
+
+  assert.deepEqual(violations, [],
+    `The TUI must reach the headless entry only through a dynamic import(); a static edge would pull it into every headless startup. Violations: ${violations.join('\n')}`);
 });
 
 test('headless-isolation: ui command is in the composed command registry', () => {

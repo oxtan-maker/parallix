@@ -59,6 +59,8 @@ import {
 } from '../adapters/cli/commands/status-adapter.js';
 import verifyWorkflow from '../adapters/verification/verification.js';
 import { createVerifyCommand } from '../interfaces/cli/verify.js';
+import { runWebCommand } from '../interfaces/cli/web.js';
+import { loadWebAssets, resolveWebAssetRoot } from '../adapters/web/asset-store.js';
 import { deriveAliases, type Command, type MainOptions } from '../interfaces/cli/runtime.js';
 import { createProductionApplicationServices } from './application-services.js';
 import { bindReviewPersistence, reviewLoopBindings } from './review-persistence.js';
@@ -245,6 +247,11 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
       return cmd(args, options);
     }),
     verify,
+    web: (args: string[]) => runWebCommand(args, {
+      // Packaged browser assets are loaded per invocation so a missing or
+      // stale build/web fails the `web` command, not unrelated commands.
+      assets: loadWebAssets(resolveWebAssetRoot(packageDir)),
+    }),
     ui: async (...args: any[]) => {
       const { runUiCommand } = await import('../interfaces/tui/ui-command.js');
       const services = await createProductionApplicationServices(rootDir);
