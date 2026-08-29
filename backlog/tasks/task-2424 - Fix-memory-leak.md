@@ -4,7 +4,7 @@ title: Fix memory leak
 status: backlog
 assignee: []
 created_date: '2026-08-28 03:42'
-labels: []
+labels: [user_value, bug]
 dependencies: []
 ordinal: 122917
 ---
