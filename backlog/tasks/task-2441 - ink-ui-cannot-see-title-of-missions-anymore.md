@@ -4,7 +4,7 @@ title: ink ui cannot see title of missions anymore
 status: backlog
 assignee: []
 created_date: '2026-08-29 15:19'
-labels: []
+labels: [user_value, bug]
 dependencies: []
 ordinal: 123917
 ---
