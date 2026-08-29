@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { spawnSync } from 'node:child_process';
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -113,6 +114,21 @@ function publishTree(staging: string, published: string): void {
 fs.rmSync(buildDir, RM_OPTIONS);
 fs.mkdirSync(buildDir, { recursive: true });
 
+// TASK-2431 (ADR 0054): build the browser shell into this staging directory,
+// under the build lock. Vite must never write the published build/web
+// directly: `npm pack` runs prepack (a full build) per concurrent test
+// worker, and vite's emptyOutDir wipe of the published tree mid-pack would
+// ship a tarball missing build/web. Staged artifacts move into build/ only
+// via the entry-by-entry publishTree swap, which is safe against concurrent
+// readers.
+const webBuild = spawnSync(
+  'npm',
+  ['run', 'build:web', '--', '--outDir', path.join(buildDir, 'web')],
+  { cwd: root, stdio: 'inherit' }
+);
+if (webBuild.error) { throw webBuild.error; }
+if (webBuild.status !== 0) { process.exit(webBuild.status ?? 1); }
+
 const bundleResult = esbuild.buildSync({
   absWorkingDir: root,
   // Not bundler configuration: the metafile is a build report. It is the
@@ -125,6 +141,11 @@ const bundleResult = esbuild.buildSync({
   platform: 'node',
   target: 'node22.23',
   outfile: output,
+  // Minified so the ADR 0054 Fastify adapter fits the unchanged 5 MB stop
+  // rule: with fastify in the graph the unminified bundle measured 5,152 KB
+  // against the 5,120 KB limit; minified it is ~2.3 MB with headroom. Source
+  // maps stay enabled, so operator error output keeps original names.
+  minify: true,
   sourcemap: true,
   sourcesContent: true,
   legalComments: 'none',
@@ -192,6 +213,50 @@ assets.assets = RUNTIME_ASSET_KEYS.map((key): AssetEntry => {
   return { key, sha256: crypto.createHash('sha256').update(contents).digest('hex') };
 });
 fs.writeFileSync(path.join(buildDir, 'asset-manifest.json'), `${JSON.stringify(assets, null, 2)}\n`);
+
+// TASK-2431 (ADR 0054): the Vite-built browser shell lives in this staging
+// directory (the build:web step above ran under the build lock); write the
+// serving allow-list manifest into it. The manifest maps every servable
+// relative path to size/sha256/content-type; the loopback host serves only
+// manifest entries, so traversal and unlisted files are impossible by
+// construction. The manifest never lists itself.
+const webAssetsDir = path.join(buildDir, 'web');
+if (!fs.existsSync(path.join(webAssetsDir, 'index.html'))) {
+  throw new Error('build/web/index.html missing after the build:web step');
+}
+const WEB_CONTENT_TYPES: Array<[RegExp, string]> = [
+  [/\.html?$/, 'text/html; charset=utf-8'],
+  [/\.m?js$/, 'text/javascript'],
+  [/\.css$/, 'text/css'],
+  [/\.map$/, 'application/json'],
+  [/\.svg$/, 'image/svg+xml'],
+  [/\.png$/, 'image/png'],
+  [/\.ico$/, 'image/x-icon'],
+  [/\.woff2$/, 'font/woff2'],
+];
+function webContentType(file: string): string {
+  for (const [pattern, type] of WEB_CONTENT_TYPES) { if (pattern.test(file)) { return type; } }
+  return 'application/octet-stream';
+}
+function collectWebFiles(dir: string, relative = ''): string[] {
+  return fs.readdirSync(path.join(dir, relative), { withFileTypes: true }).flatMap(entry => {
+    const child = relative ? path.posix.join(relative, entry.name) : entry.name;
+    return entry.isDirectory() ? collectWebFiles(dir, child) : [child];
+  });
+}
+const webFiles: Record<string, { size: number; sha256: string; contentType: string }> = {};
+for (const relativeFile of collectWebFiles(webAssetsDir).sort()) {
+  const contents = fs.readFileSync(path.join(webAssetsDir, relativeFile));
+  webFiles[relativeFile] = {
+    size: contents.length,
+    sha256: crypto.createHash('sha256').update(contents).digest('hex'),
+    contentType: webContentType(relativeFile),
+  };
+}
+fs.writeFileSync(
+  path.join(buildDir, 'web', 'manifest.json'),
+  `${JSON.stringify({ version: 1, files: webFiles }, null, 2)}\n`,
+);
 
 // NOTICES and build/sbom.json are written before the checksum manifest so that
 // manifest.sha256 covers the SBOM as well as the bundle and staged assets.

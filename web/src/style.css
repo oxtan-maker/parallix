@@ -1,0 +1,16 @@
+/* Self-contained: system font stack only, no external fonts or scripts. */
+:root {
+  color-scheme: light dark;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  line-height: 1.5;
+}
+
+.shell {
+  max-width: 46rem;
+  margin: 0 auto;
+  padding: 2rem 1rem;
+}

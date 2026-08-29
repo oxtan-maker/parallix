@@ -40,8 +40,10 @@
   ],
   "scripts": {
     "build": "npm run bundle",
+    "build:web": "vite build --config web/vite.config.ts",
     "bundle": "tsx scripts/build-canonical-bundle.ts",
     "dev": "tsx src/entry/px.ts",
+    "dev:web": "vite --config web/vite.config.ts",
     "prepack": "npm run build",
     "prepublishOnly": "npm run test:package-content && npm audit --omit=dev",
     "test": "FORCE_COLOR=0 tsx test/run-default-tests.ts",
@@ -70,11 +72,15 @@
     "@typescript-eslint/parser": "^8.62.1",
     "esbuild": "^0.25.12",
     "eslint": "^9.39.4",
+    "fast-uri": "^3.1.6",
+    "fastify": "^5.12.1",
     "ink": "^6.8.0",
     "postject": "^1.0.0-alpha.6",
     "react": "^19.2.3",
+    "react-dom": "^19.2.8",
     "sonarqube-scanner": "^5.0.0",
     "tsx": "4.20.6",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vite": "^7.3.6"
   }
 }

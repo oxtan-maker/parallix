@@ -562,6 +562,10 @@ test('SC1 reverse: all durable-IO files under src/ are present in the inventory'
     // domain state owned by the operator database.
     'src/adapters/review/setup-review-auth.ts',
     'src/adapters/review/setup-review-config.ts',
+    // Packaged browser-asset loading (TASK-2431): reads only package-owned
+    // build/web output, integrity-checked against the build manifest. It owns
+    // no ADR 0053 durable-state concept.
+    'src/adapters/web/asset-store.ts',
   ]);
 
   const durableIoFiles = new Set<string>();

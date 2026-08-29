@@ -52,20 +52,21 @@ test('rollback-proof: canonical bundle includes TUI but keeps it off the headles
   assert.ok(fs.existsSync(bundlePath), 'build/px.mjs must exist after npm run build');
   const bundleSource = fs.readFileSync(bundlePath, 'utf8');
 
-  // The TUI is bundled: both the ui-command entry and the Ink shell it pulls in.
-  assert.match(bundleSource, /src\/interfaces\/tui\/ui-command\.ts/,
-    'canonical bundle must include the TUI ui-command module');
-  assert.match(bundleSource, /src\/interfaces\/tui\/shell\.tsx?/,
-    'canonical bundle must include the TUI shell module');
+  // The TUI is bundled: its user-facing Ink labels survive minification
+  // even though the unminified-only __esm cell names and module banner
+  // comments do not (TASK-2431 minified the canonical bundle so the ADR 0054
+  // Fastify adapter fits the unchanged 5 MB stop rule).
+  assert.match(bundleSource, /Median cycle time/,
+    'canonical bundle must include the TUI flow panel');
+  assert.match(bundleSource, /Median lane age/,
+    'canonical bundle must include the TUI flow panel');
 
-  // ...but only behind a lazy initializer, so headless commands never evaluate
-  // it at startup. esbuild emits the deferred dynamic import as an __esm() cell
-  // that is invoked from the `ui` command handler and nowhere else.
-  assert.match(bundleSource, /var init_ui_command = __esm\(\{/,
-    'TUI must be bundled as a deferred __esm() cell (rollback safety)');
-  const lazyInvocations = bundleSource.match(/await init_ui_command\(\)/g) || [];
-  assert.equal(lazyInvocations.length, 1,
-    'init_ui_command must be awaited exactly once, from the ui command handler');
+  // ...but headless commands never evaluate it at startup: the lazy-load
+  // invariant is proven source-level (minify-stable) — tui-headless-isolation.test.ts
+  // asserts the static import graph of the headless entry never reaches the
+  // TUI, and the dynamic-import assertion above pins the ui handler's lazy
+  // load. This replaces the pre-2431 __esm()/init_ui_command bundle names,
+  // which minification mangles.
 });
 
 test('rollback-proof: removing ui entry leaves COMMANDS structure intact', () => {

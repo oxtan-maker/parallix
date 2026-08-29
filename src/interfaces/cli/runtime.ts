@@ -37,9 +37,10 @@ export const KNOWN_COMMANDS: string[] = [
   'config',
   'diff',
   'ui',
+  'web',
 ];
 
-const READ_ONLY_COMMANDS = new Set(['config', 'ui']);
+const READ_ONLY_COMMANDS = new Set(['config', 'ui', 'web']);
 
 export type Command = (..._args: any[]) => unknown;
 
@@ -250,6 +251,7 @@ ${fmt.bold('Core Commands:')}
   stats [<csv_file>|--csv-file <path>] [--today YYYY-MM-DD|--from YYYY-MM-DD --to YYYY-MM-DD] [--output <file>]  Print parallix weekly or range tables from the measurement database (<PARALLIX_HOME>/parallix.db); a named CSV is read-only legacy analysis.
   config                Print the effective configuration (built-in defaults merged with workflow.config.json). Read-only.
   ui                    Render the static Ink TUI board shell. Read-only; press q or Ctrl+C to exit.
+  web [--host 127.0.0.1|::1] [--port <n>]  Serve the loopback-only local board shell. Read-only.
   aliases               Print the derived command-alias table (state-map virtual states → canonical commands).
 
 ${fmt.bold('Utility Commands:')}

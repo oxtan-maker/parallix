@@ -146,8 +146,13 @@ test('task-2285 install: SC3 — node:sqlite resolves at startup from the instal
   // successful `px --version` from the installed prefix is therefore proof that
   // node:sqlite started; a missing or mis-bundled builtin would abort startup.
   const bundle = fs.readFileSync(path.join(installedPackage, 'build', 'px.mjs'), 'utf8');
-  const sqliteImport = /^import \{ DatabaseSync \} from "node:sqlite";$/m;
+  // Minify-tolerant: esbuild may rename the binding, collapse spacing, and
+  // join the top-level imports onto one line (task-2431). The import must
+  // stay a static import of the builtin specifier — a lazy dynamic import
+  // would not prove node:sqlite resolves at startup.
+  const sqliteImport = /import\s*\{\s*DatabaseSync(?:\s+as\s+\w+)?\s*\}\s*from\s*["']node:sqlite["'];?/;
   assert.match(bundle, sqliteImport, 'node:sqlite must remain a top-level builtin import');
+  assert.doesNotMatch(bundle, /import\(\s*["']node:sqlite["']\s*\)/, 'node:sqlite must not be lazily imported');
   assert.equal(px(path.join(globalPrefix, 'bin', 'px'), ['--version']).status, 0);
 });
 

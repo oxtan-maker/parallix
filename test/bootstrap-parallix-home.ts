@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import childProcess from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { setCommandPathProbe, setLauncherHealthProbe } from '../src/adapters/agents/launcher-selection.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -59,6 +60,16 @@ function guardRequest(module) {
 guardRequest(http);
 guardRequest(https);
 
+// Unit tests must never spawn real agent CLIs. Launcher discovery shells out
+// (`command -v` plus a `--help` health probe) for every eligible family, and
+// node-based CLIs take hundreds of ms per probe — under the 12-worker suite
+// that blew the 1 s per-test budget. Like the Forgejo guard above, the default
+// unit environment reports every launcher as present and healthy. Tests that
+// exercise probe behavior inject their own doubles via setCommandPathProbe /
+// setLauncherHealthProbe (null restores a real probe).
+setCommandPathProbe((name) => name);
+setLauncherHealthProbe(() => ({ ok: true }));
+
 fs.mkdirSync(process.env.PARALLIX_HOME, { recursive: true });
 fs.mkdirSync(process.env.HOME, { recursive: true });
 
@@ -89,10 +100,10 @@ const realGit = process.env.PARALLIX_TEST_REAL_GIT || commandPath('git');
 if (realGit) {
   const gitBin = makeTempDir('parallix-test-git-');
   const gitShim = path.join(gitBin, 'git');
-  // The PATH entry must be an extensionless executable named `git`, which Node
-  // would load as CommonJS. Keep the shim itself an ESM module
-  // (test/lib/git-compat-shim.mjs) and put a POSIX exec wrapper on PATH.
-  fs.writeFileSync(gitShim, `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(path.join(__dirname, 'lib', 'git-compat-shim.mjs'))} "$@"\n`, 'utf8');
+  // The shim is pure POSIX sh (test/lib/git-compat-shim.sh): a Node exec
+  // wrapper per git call cost ~50-100 ms and, under 12-worker parallelism,
+  // pushed git-spawning tests past the 1 s per-test budget (task-2431).
+  fs.copyFileSync(path.join(__dirname, 'lib', 'git-compat-shim.sh'), gitShim);
   fs.chmodSync(gitShim, 0o755);
   process.env.PARALLIX_TEST_REAL_GIT = realGit;
   process.env.PATH = `${gitBin}${path.delimiter}${process.env.PATH || ''}`;
