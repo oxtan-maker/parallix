@@ -283,6 +283,31 @@ test('startPiAgent SDK execution returns session ID and telemetry from session s
   assert.equal(result.telemetry.toolCalls, 3, 'telemetry toolCalls');
 });
 
+test('startPiAgent completes when prompt resolves without a second idle wait', async () => {
+  pi.__setCreateAgentSessionForTest(async () => ({
+    session: {
+      sessionId: 'prompt-complete-session',
+      prompt: async () => {},
+      subscribe: () => () => {},
+      // Pi's prompt() already waits for the accepted run. A second wait can
+      // miss that transition and hang a completed launcher.
+      waitForIdle: () => new Promise(() => {}),
+      dispose: () => {},
+      getLastAssistantText: () => 'Done',
+      getSessionStats: () => ({}),
+    },
+    extensionsResult: { extensions: [], diagnostics: [] },
+  }));
+
+  const result: any = await Promise.race([
+    pi.startPiAgent({ prompt: 'Test', worktree: '/tmp/test' }).resultPromise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('launcher did not settle')), 100)),
+  ]);
+
+  assert.equal(result.status, 0);
+  assert.equal(result.stdout, 'Done');
+});
+
 test('startPiAgent supports legacy and current Pi SDK model APIs', async () => {
   const session = {
     sessionId: 'sdk-api-shape-session',

@@ -1,10 +1,5 @@
 {
   "gates": {
-    "lib": {
-      "command": "./scripts/verify-local.sh static-analysis",
-      "order": 1,
-      "run_last": false
-    },
     "build": {
       "command": "npm run build",
       "order": 2,

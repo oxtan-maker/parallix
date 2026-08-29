@@ -176,6 +176,10 @@ gate_integrate() {
     fi
   fi
 
+  if [ "${INTEGRATE_DRY_RUN:-}" != "true" ]; then
+    gate_static_analysis || return 1
+  fi
+
   PARALLIX_REAL_AGENT="$real_agent" PARALLIX_REAL_AGENT_MODEL="$real_agent_model" node --input-type=module --import tsx <<'NODE'
 import fs from 'node:fs';
 import path from 'node:path';
