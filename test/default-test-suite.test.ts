@@ -103,6 +103,7 @@ const expectedIntegrationFiles = [
   // throwaway git repos in a temp dir to stage the stranded-lane scenario, so
   // it crosses a real git boundary like task-2397 and runs only in integration.
   'task-2420-integrate-recovery-assigned-reviewer.test.ts',
+  'task-2424-repro.test.ts',
   // TASK-2438 composes concrete board readers over temporary repository files
   // and the worktree/Git topology boundary.
   'task-2438-worktree-board-repro.test.ts',

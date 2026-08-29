@@ -1,8 +1,8 @@
 ---
 id: TASK-2424
 title: Fix memory leak
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-08-28 03:42'
 labels: [user_value, bug]
 dependencies: []
