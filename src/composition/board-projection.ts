@@ -59,7 +59,7 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
       if (persistedMissions && deps.missionStore) {
         const stored = await deps.missionStore.load(id);
         return stored.kind === 'found' && stored.mission.repositoryId === deps.repositoryId
-          ? stored.mission
+          ? withRepositoryTitle(stored.mission, await repositoryMissions.loadMission(id))
           : loadMarkdownMission(id);
       }
       return loadMarkdownMission(id);
@@ -68,6 +68,20 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
       ? [...repositoryMissions.getSourceFacts(), { source: 'mission-store', status: 'fresh', value: deps.repositoryId }]
       : repositoryMissions.getSourceFacts(),
   };
+
+  /**
+   * `title` is `target-repository` authority (`MISSION_FIELD_AUTHORITY`), so the
+   * Backlog task keeps it even when the persisted aggregate supplies lifecycle.
+   * The stored title is written at `px draft` intake, when MISSION.md is still
+   * the scaffold, so it is the literal `<Title> (slug)` placeholder; taking the
+   * whole aggregate published that placeholder to every persisted board card.
+   */
+  function withRepositoryTitle(
+    stored: import('../domain/mission.js').Mission,
+    markdown: import('../domain/mission.js').Mission | null,
+  ): import('../domain/mission.js').Mission {
+    return markdown ? { ...stored, title: markdown.title } : stored;
+  }
 
   async function loadBoardMissions(): Promise<readonly import('../domain/mission.js').Mission[]> {
     const markdown = await repositoryMissions.loadAllMissions();
@@ -82,7 +96,7 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
       const stored = byId.get(mission.id);
       // A Markdown-only done task is historical. Persisted done missions remain
       // because their lifecycle aggregate is authoritative.
-      return stored ? [stored] : mission.status === 'done' ? [] : [mission];
+      return stored ? [withRepositoryTitle(stored, mission)] : mission.status === 'done' ? [] : [mission];
     });
   }
 
