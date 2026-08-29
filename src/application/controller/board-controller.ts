@@ -4,15 +4,15 @@ import {
   type ExecuteMissionRequest,
   type ExecuteMissionResult,
 } from '../execute-mission-service.js';
-import { rejected } from '../contracts.js';
+import { failure, rejected } from '../contracts.js';
 import type { MissionCheckpointService } from '../mission-checkpoint-service.js';
 import type { MissionHandoffService } from '../mission-handoff-service.js';
 import type { MissionIntakeService } from '../mission-intake-service.js';
 import type { MissionId } from '../../domain/mission.js';
+import type { MissionStore, MissionVersion } from '../domain-ports.js';
 import { NO_CURRENT_WORK_PORT, type CurrentWorkPort } from '../recording/current-work-recorder.js';
 import type {
   BoardCommandDispatcher,
-  BoardCommandKind,
   BoardProgressSink,
   BoardCommandRequest,
   BoardCommandResult,
@@ -48,16 +48,19 @@ export class BoardCommandController implements BoardCommandDispatcher {
   private readonly executeMission: ExecuteMissionService;
   private readonly progressPort?: BoardProgressSink;
   private readonly missionServices: BoardMissionServices;
+  private readonly missionStore: Pick<MissionStore, 'load'> | null;
 
   constructor(
     executePorts: ExecuteMissionPorts,
     progressPort?: BoardProgressSink,
     missionServices: BoardMissionServices = {},
     currentWork: CurrentWorkPort = NO_CURRENT_WORK_PORT,
+    missionStore: Pick<MissionStore, 'load'> | null = executePorts.missionTransitions,
   ) {
     this.executeMission = new ExecuteMissionService(executePorts, progressPort, currentWork);
     this.progressPort = progressPort;
     this.missionServices = missionServices;
+    this.missionStore = missionStore;
   }
 
   /**
@@ -65,7 +68,7 @@ export class BoardCommandController implements BoardCommandDispatcher {
    * Only integrated capabilities are executed; all others return typed unavailable results.
    */
   async dispatch<T = unknown>(request: BoardCommandRequest): Promise<BoardCommandResult<T>> {
-    const { operationId, kind, missionId, missionStatusAtRequest, capabilities: _capabilities, cancellation } = request;
+    const { operationId, kind, missionId, capabilities: _capabilities, cancellation } = request;
 
     // Emit dispatch event
     this.emit(operationId, 0, 'dispatch', `dispatching ${kind} for ${missionId}`);
@@ -77,7 +80,7 @@ export class BoardCommandController implements BoardCommandDispatcher {
     }
 
     // Guard 2: stale command check
-    const staleResult = this.checkStaleCommand(kind, missionId, missionStatusAtRequest);
+    const staleResult = await this.checkStaleCommand(request);
     if (staleResult) { return staleResult as BoardCommandResult<T>; }
 
     // Guard 3: cancellation before dispatch
@@ -167,7 +170,9 @@ export class BoardCommandController implements BoardCommandDispatcher {
   private async dispatchActive(request: BoardCommandRequest): Promise<BoardCommandResult<ExecuteMissionResult>> {
     const executeRequest: ExecuteMissionRequest = {
       operationId: request.operationId,
-      slug: request.missionId,
+      // Backlog card IDs retain their frontmatter casing; execute slugs are
+      // canonical lowercase so a card such as TASK-2375SHUT can launch.
+      slug: request.missionId.toLowerCase(),
       agent: request.agent ?? undefined,
       capabilities: request.capabilities,
       cancellation: request.cancellation,
@@ -183,30 +188,38 @@ export class BoardCommandController implements BoardCommandDispatcher {
    * Check if the mission status has changed since the request was made.
    * Returns a stale conflict result if the status no longer matches.
    */
-  private checkStaleCommand(
-    _kind: BoardCommandKind,
-    _missionId: string,
-    _missionStatusAtRequest: string,
-  ): BoardCommandResult<unknown> | null {
-    // The stale check is performed by comparing the mission status at request time
-    // with the current status from the projection. The controller delegates the
-    // actual status comparison to the caller, who provides the current status.
-    // If the caller wants stale checking, they should use `dispatchWithStatus`.
-    return null;
+  private async checkStaleCommand(request: BoardCommandRequest): Promise<BoardCommandResult<unknown> | null> {
+    // Intake creates the mission being recorded, so there is no existing status
+    // precondition to resolve. Every command against an existing card is guarded.
+    if (request.kind === 'mission:intake') { return null; }
+    if (!this.missionStore) {
+      return failure('unavailable', 'Mission authority is not configured for this interface');
+    }
+    try {
+      const loaded = await this.missionStore.load(request.missionId as MissionId);
+      if (loaded.kind === 'unavailable') {
+        return failure('unavailable', loaded.reason);
+      }
+      if (loaded.kind === 'missing') {
+        return failure('unavailable', 'mission authority could not find the mission');
+      }
+      if (request.missionStatusAtRequest !== undefined && loaded.mission.status !== request.missionStatusAtRequest) {
+        return staleConflict(request.missionStatusAtRequest, loaded.mission.status);
+      }
+      const expectedVersion = this.expectedVersion(request);
+      if (expectedVersion !== undefined && expectedVersion !== loaded.version) {
+        return staleConflict(`version ${expectedVersion}`, `version ${loaded.version}`);
+      }
+      return null;
+    } catch {
+      return failure('unavailable', 'mission authority is unavailable');
+    }
   }
 
-  /**
-   * Dispatch with explicit stale check against current mission status.
-   * Returns a conflict if the mission status changed since the request.
-   */
-  async dispatchWithStatus<T = unknown>(
-    request: BoardCommandRequest,
-    currentMissionStatus: string,
-  ): Promise<BoardCommandResult<T>> {
-    if (request.missionStatusAtRequest !== currentMissionStatus) {
-      return staleConflict(request.missionStatusAtRequest, currentMissionStatus);
-    }
-    return this.dispatch(request);
+  private expectedVersion(request: BoardCommandRequest): MissionVersion | undefined {
+    return request.payload?.kind === 'checkpoint:record' || request.payload?.kind === 'handoff:record'
+      ? request.payload.expectedVersion
+      : undefined;
   }
 
   private emit(operationId: string, sequence: number, phase: string, message: string, agent?: string) {

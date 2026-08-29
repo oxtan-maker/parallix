@@ -85,6 +85,16 @@ test('progress event carries agent name after handoff phase', async () => {
   assert.equal(handoffEvent.agent, 'codex');
 });
 
+test('board active dispatch canonicalizes uppercase backlog card IDs', async () => {
+  const { ports, calls } = makeExecutePorts();
+  const controller = new BoardCommandController(ports);
+
+  const result = await controller.dispatch(makeRequest({ missionId: 'TASK-2375SHUT' }));
+
+  assert.equal(result.status, 'completed');
+  assert.ok(calls.includes('launch:task-2375shut:codex'));
+});
+
 // ---------------------------------------------------------------------------
 // SC6: Cancellation at safe boundaries
 // ---------------------------------------------------------------------------
@@ -122,13 +132,12 @@ test('cancellation after durable record returns partial evidence without rollbac
 // SC7: Stale command rejection with conflict kind
 // ---------------------------------------------------------------------------
 
-test('stale command returns failed status with conflict error kind', async () => {
+test('authoritative stale command returns failed status with conflict error kind', async () => {
   const { ports } = makeExecutePorts();
-  const controller = new BoardCommandController(ports);
-  const result = await controller.dispatchWithStatus(
-    makeRequest({ missionStatusAtRequest: 'refined' }),
-    'active',
-  );
+  const controller = new BoardCommandController(ports, undefined, {}, undefined, {
+    async load() { return { kind: 'found', mission: { status: 'active' }, version: 1 } as never; },
+  });
+  const result = await controller.dispatch(makeRequest({ missionStatusAtRequest: 'refined' }));
   assert.equal(result.status, 'failed');
   assert.equal(result.error.kind, 'conflict');
   assert.ok(result.error.message.includes('refined'));
@@ -136,24 +145,20 @@ test('stale command returns failed status with conflict error kind', async () =>
   assert.ok(result.durableEvidence.length === 0);
 });
 
-test('non-stale command proceeds to dispatch', async () => {
+test('authoritative non-stale command proceeds to dispatch', async () => {
   const { ports, calls } = makeExecutePorts();
   const controller = new BoardCommandController(ports);
-  const result = await controller.dispatchWithStatus(
-    makeRequest({ missionStatusAtRequest: 'refined' }),
-    'refined',
-  );
+  const result = await controller.dispatch(makeRequest({ missionStatusAtRequest: 'refined' }));
   assert.equal(result.status, 'completed');
   assert.ok(calls.length > 0, 'Port was called for non-stale command');
 });
 
 test('stale check happens before capability dispatch', async () => {
   const { ports, calls } = makeExecutePorts();
-  const controller = new BoardCommandController(ports);
-  const result = await controller.dispatchWithStatus(
-    makeRequest({ missionStatusAtRequest: 'refined' }),
-    'active',
-  );
+  const controller = new BoardCommandController(ports, undefined, {}, undefined, {
+    async load() { return { kind: 'found', mission: { status: 'active' }, version: 1 } as never; },
+  });
+  const result = await controller.dispatch(makeRequest({ missionStatusAtRequest: 'refined' }));
   assert.equal(result.status, 'failed');
   assert.deepEqual(calls, [], 'No port calls for stale command');
 });

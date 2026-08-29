@@ -59,7 +59,8 @@ export interface BoardCommandRequest {
   readonly operationId: string;
   readonly kind: BoardCommandKind;
   readonly missionId: string;
-  readonly missionStatusAtRequest: string;
+  /** Present for board actions, which capture a status before confirmation. */
+  readonly missionStatusAtRequest?: string;
   readonly agent?: string | null;
   readonly capabilities: ReadonlySet<Capability>;
   /** Optional cancellation handle for cooperative cancellation. */
@@ -121,10 +122,7 @@ export type BoardProgressEvent = ProgressEvent;
 export type BoardProgressSink = (_event: BoardProgressEvent) => void;
 
 export interface BoardCommandDispatcher {
-  dispatchWithStatus<T = unknown>(
-    _request: BoardCommandRequest,
-    _currentMissionStatus: string,
-  ): Promise<BoardCommandResult<T>>;
+  dispatch<T = unknown>(_request: BoardCommandRequest): Promise<BoardCommandResult<T>>;
 }
 
 // ---------------------------------------------------------------------------

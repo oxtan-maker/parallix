@@ -51,7 +51,7 @@ export function composeProductionCapabilities(
   database?: SqliteDatabaseAdapter | null,
 ): ProductionCapabilities {
   // Single dispatcher instance shared by CLI and TUI (TASK-2332.05)
-  const controller = new BoardCommandController(executePorts, progress, {}, currentWork);
+  const controller = new BoardCommandController(executePorts, progress, {}, currentWork, missionStore);
   const tui = composeTuiCapabilities({
     rootDir,
     missionStore,

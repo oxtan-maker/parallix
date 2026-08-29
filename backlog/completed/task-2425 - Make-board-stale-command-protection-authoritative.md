@@ -1,8 +1,8 @@
 ---
 id: TASK-2425
 title: Make board stale-command protection authoritative
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-08-28 06:29'
 labels:
   - ai_sdlc
