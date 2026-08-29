@@ -1,8 +1,8 @@
 ---
 id: TASK-2423
 title: Stabilize one-second unit-test budget under parallel load
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-08-27'
 labels: [user_value, bug]
 dependencies: []

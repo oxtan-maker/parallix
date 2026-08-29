@@ -23,8 +23,8 @@ test('task-2236 repro: npm test forwards the requested pi e2e smoke file', () =>
   );
   assert.match(
     runnerSource,
-    /requestedTestFiles = requestedArgs\.filter\(arg => arg !== '--integration'\);/,
-    'the default test runner must normalize the integration flag out of positional arguments'
+    /requestedTestFiles = requestedArgs\.filter\(arg => arg !== '--integration' && arg !== '--unit-test-headroom'\);/,
+    'the default test runner must normalize control flags out of positional arguments'
   );
   assert.match(
     runnerSource,

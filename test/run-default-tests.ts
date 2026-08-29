@@ -17,7 +17,7 @@ if (!fs.existsSync(path.join(executionRoot, 'package.json')) || !fs.existsSync(t
 }
 
 const plan = buildTestRunPlan({ executionRoot, requestedArgs: process.argv.slice(2) });
-const { testNode, nodeArgs, runsIntegrationSuite } = plan;
+const { testNode, nodeArgs, runsIntegrationSuite, unitTestHeadroomMs } = plan;
 const UNIT_TEST_BUDGET_MS = plan.unitTestBudgetMs; // PARALLIX_UNIT_TEST_BUDGET_MS
 const UNIT_TEST_TIMEOUT_MS = plan.unitTestTimeoutMs;
 
@@ -61,6 +61,7 @@ const child = spawn(testNode, nodeArgs, {
   cwd: executionRoot,
   env: {
     ...process.env,
+    ...(unitTestHeadroomMs === null ? {} : { PARALLIX_UNIT_TEST_HEADROOM: '1' }),
     PARALLIX_EXECUTION_ROOT: executionRoot,
     PARALLIX_TEST_MANIFEST_DIR: testManifestDir,
   },
@@ -72,7 +73,8 @@ child.stdout.on('data', (chunk: Buffer) => {
   process.stdout.write(chunk);
   if (!runsIntegrationSuite) {
     reporterOutput = (reporterOutput + chunk.toString()).slice(-4096);
-    unitTestExceeded ||= reporterOutput.includes('[unit-test-budget:exceeded]');
+    unitTestExceeded ||= reporterOutput.includes('[unit-test-budget:exceeded]')
+      || reporterOutput.includes('[unit-test-budget:headroom]');
   }
 });
 child.stderr.pipe(process.stderr);

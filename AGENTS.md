@@ -40,4 +40,4 @@ Static-analysis (`./scripts/verify-local.sh static-analysis`: ESLint + tsc --che
 This repo routes verification through `./scripts/verify-local.sh {{area}}`. Earlier phases use the fast general verifier (`all`), while `integrate` resolves the stricter pre-merge gate plan from `config/integration-pipelines.json`. The standalone workflow E2E suite is part of that integration-only layer via the `workflow` gate.
 
 ## unit tests
-unit tests must be very fast and mock dependencies, to not cause recusion and never access real forgejo. Be very carful about missing mocks that might start performance heacy cli commands or expensive agents.
+Unit tests must finish within 500 ms when run alone; use `npm test -- --unit-test-headroom` to enforce and diagnose that authoring target. Default `npm test` retains its 1,000 ms per-test hard cap. Unit tests must mock external boundaries and never access real Forgejo; avoid missing mocks that launch expensive CLI commands or agents.
