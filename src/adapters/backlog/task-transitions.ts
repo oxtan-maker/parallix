@@ -3,7 +3,7 @@ import path from 'path';
 import { git } from '../git/git.js';
 import * as fmt from '../../application/presentation/cli-format.js';
 import { clearTaskAgentAssignee, enforceTaskAssignee, parseAssigneeFamilies } from './task-metadata.js';
-import { commitTaskFileUpdate, getTaskStorage, resolveTaskFile } from './task-file-io.js';
+import { commitTaskFileUpdate, getTaskStorage, resolveStableRepositoryId, resolveTaskFile } from './task-file-io.js';
 import { isMissionArtifact, missionPathForSlug, resolveBaseWorktree, resolveMissionBaseBranch, resolveWorktree } from '../filesystem/mission-utils.js';
 
 function parseTaskStatus(content: string) {
@@ -144,6 +144,9 @@ async function transitionTaskLocal(slug: string, newStatus: string, { implemente
     if (implementer) {msg += ` and implementer=${implementer}`;}
     
     if (commitTaskFileUpdate(taskFile, msg, rootDir)) {
+      if (currentStatus !== newStatus) {
+        await reconcileExternalMissionLifecycle(slug, newStatus, rootDir);
+      }
       log(fmt.status('PASS', `Task ${fmt.slug(slug)} transitioned to ${newStatus}${implementer ? ' (assignee=' + fmt.agent(implementer) + ')' : ''} and committed.`));
       return true;
     }
@@ -151,6 +154,37 @@ async function transitionTaskLocal(slug: string, newStatus: string, { implemente
   }
 
   return true; // Already in the desired state
+}
+
+/** Mirror a successful external task write onto its existing repository Mission. */
+async function reconcileExternalMissionLifecycle(slug: string, newStatus: string, rootDir: string): Promise<void> {
+  try {
+    const { SqliteDatabaseAdapter } = await import('../sqlite/database-adapter.js');
+    const { SqliteMigrationRunner, loadDefaultMigrations } = await import('../sqlite/migration-runner.js');
+    const { resolveDatabasePath } = await import('../sqlite/database-path-resolver.js');
+    const { SqliteMissionStore } = await import('../sqlite/mission-store.js');
+    const { missionId } = await import('../../domain/mission.js');
+    const { parseMissionStatus } = await import('../../domain/board-event.js');
+    const status = parseMissionStatus(newStatus);
+    if (!status) { return; }
+
+    const db = new SqliteDatabaseAdapter();
+    await db.open({ path: resolveDatabasePath() });
+    try {
+      await new SqliteMigrationRunner(db).applyPending(loadDefaultMigrations());
+      const store = new SqliteMissionStore(db);
+      const read = await store.load(missionId(slug));
+      if (read.kind === 'found'
+        && read.mission.repositoryId === resolveStableRepositoryId(rootDir)
+        && read.mission.closedAt === null) {
+        await store.save({ ...read.mission, status, closedAt: null }, read.version);
+      }
+    } finally {
+      await db.close();
+    }
+  } catch {
+    // SQLite is an optional projection; it never changes the external write result.
+  }
 }
 
 /**

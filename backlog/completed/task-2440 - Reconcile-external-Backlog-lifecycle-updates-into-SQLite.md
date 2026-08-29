@@ -1,8 +1,8 @@
 ---
 id: TASK-2440
 title: Reconcile external Backlog lifecycle updates into SQLite
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-08-29'
 labels:
   - bug
