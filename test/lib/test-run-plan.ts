@@ -13,7 +13,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import { UNIT_TEST_BUDGET_MS } from './unit-test-budget-reporter.js';
+import { UNIT_TEST_BUDGET_MS, UNIT_TEST_HEADROOM_MS } from './unit-test-budget-reporter.js';
 
 export interface TestRunPlanOptions {
   /** Checkout the suite runs against. */
@@ -35,6 +35,7 @@ export interface TestRunPlan {
   runsIntegrationSuite: boolean;
   unitTestBudgetMs: number;
   unitTestTimeoutMs: number;
+  unitTestHeadroomMs: number | null;
 }
 
 function defaultProbeNodeVersion(executable: string): string | null {
@@ -267,7 +268,8 @@ export function buildTestRunPlan(options: TestRunPlanOptions): TestRunPlan {
     ...subdirUnitFiles,
   ];
   const runsIntegrationSuite = requestedArgs.includes('--integration');
-  const requestedTestFiles = requestedArgs.filter(arg => arg !== '--integration');
+  const enforcesUnitTestHeadroom = requestedArgs.includes('--unit-test-headroom');
+  const requestedTestFiles = requestedArgs.filter(arg => arg !== '--integration' && arg !== '--unit-test-headroom');
   const testFiles = runsIntegrationSuite
     ? [...integrationTestFiles, ...subdirIntegrationFiles]
     : (requestedTestFiles.length > 0 ? requestedTestFiles : defaultTestFiles);
@@ -326,6 +328,7 @@ export function buildTestRunPlan(options: TestRunPlanOptions): TestRunPlan {
     runsIntegrationSuite,
     unitTestBudgetMs: Number(process.env.PARALLIX_UNIT_TEST_BUDGET_MS) || 180_000,
     unitTestTimeoutMs: UNIT_TEST_BUDGET_MS,
+    unitTestHeadroomMs: enforcesUnitTestHeadroom ? UNIT_TEST_HEADROOM_MS : null,
     // Deliberately no `--test-force-exit`: it makes the per-file workers call
     // process.exit() before their result stream is flushed, so trailing test
     // results are silently dropped while the file still reports success

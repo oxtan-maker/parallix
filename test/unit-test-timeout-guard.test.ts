@@ -14,7 +14,8 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { UNIT_TEST_BUDGET_MS } from './lib/unit-test-budget-reporter.js';
+import { UNIT_TEST_BUDGET_MS, UNIT_TEST_HEADROOM_MS } from './lib/unit-test-budget-reporter.js';
+import { buildTestRunPlan } from './lib/test-run-plan.js';
 
 const ROOT = process.cwd();
 const RUNNER_PATH = path.join(ROOT, 'test', 'run-default-tests.ts');
@@ -43,6 +44,18 @@ test('unit-test timeout guard: runner enforces --test-timeout for the default su
     planContent.includes('runsIntegrationSuite'),
     'test-run-plan.ts must conditionally apply timeout based on suite type',
   );
+});
+
+test('unit-test timeout guard: default plan keeps 1000ms while headroom mode is opt-in', () => {
+  const options = { executionRoot: ROOT, probeNodeVersion: () => 'v24.15.0' };
+  const defaultPlan = buildTestRunPlan({ ...options, requestedArgs: [] });
+  const headroomPlan = buildTestRunPlan({ ...options, requestedArgs: ['--unit-test-headroom'] });
+
+  assert.equal(UNIT_TEST_HEADROOM_MS, 500);
+  assert.ok(defaultPlan.nodeArgs.includes('--test-timeout=1000'));
+  assert.equal(defaultPlan.unitTestHeadroomMs, null);
+  assert.equal(headroomPlan.unitTestHeadroomMs, UNIT_TEST_HEADROOM_MS);
+  assert.ok(headroomPlan.nodeArgs.includes('--test-timeout=1000'));
 });
 
 test('unit-test timeout guard: suite-level budget is configurable and documented', () => {
