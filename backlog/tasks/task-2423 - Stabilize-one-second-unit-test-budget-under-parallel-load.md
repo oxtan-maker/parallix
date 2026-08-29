@@ -4,7 +4,7 @@ title: Stabilize one-second unit-test budget under parallel load
 status: backlog
 assignee: []
 created_date: '2026-08-27'
-labels: [bug, reliability]
+labels: [user_value, bug]
 dependencies: []
 priority: high
 ---
