@@ -6,6 +6,7 @@ assignee: []
 created_date: '2026-08-28 06:29'
 labels:
   - ai_sdlc
+  - bug
   - board
   - controller
   - architecture
