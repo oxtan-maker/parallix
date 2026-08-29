@@ -1,13 +1,13 @@
 /**
  * TASK-2373 CP-5 — current-work liveness beyond a bare PID (SC13–SC14).
  */
-import test from 'node:test';
+import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { reconcileCurrentWork } from '../src/application/projections/current-work.js';
 import type { CurrentWorkEvent } from '../src/application/recording/current-work-recorder.js';
-import { probeProcessLiveness, processStartIdentity } from '../src/adapters/process/process-liveness.js';
 import { agentFamily } from '../src/domain/agents.js';
 import { missionId } from '../src/domain/mission.js';
+import { processStartIdentity, probeProcessLiveness, runNativeStartIdentity, readProcessStat } from '../src/adapters/process/process-liveness.js';
 
 const MISSION = missionId('task-2373');
 const NOW = Date.parse('2026-08-13T12:00:00.000Z');
@@ -86,4 +86,73 @@ test('SC14: an abnormally terminated publisher observed dead clears the work imm
   }).get(MISSION);
   assert.equal(facts?.currentWork, null);
   assert.equal(facts?.blockingReason, null);
+});
+
+// macOS and native Windows expose a per-PID start identity through a single
+// targeted native lookup, not a process-table scan. The host runs Linux, so
+// these tests pin `process.platform` and stub the one native call through the
+// exported seam; no real process tooling is ever invoked.
+//
+// `mock.property` does not restore `process.platform` between tests on the CI
+// runtime, so this helper saves the current value and restores it in a finally
+// block rather than trusting auto-restore.
+function withPlatform(platform: NodeJS.Platform, fn: () => void): void {
+  const original = process.platform;
+  Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+  try { fn(); }
+  finally { Object.defineProperty(process, 'platform', { value: original, configurable: true }); }
+}
+
+test('macOS: one ps lookup yields a start identity that rejects a recycled pid', () => {
+  withPlatform('darwin', () => {
+    mock.method(runNativeStartIdentity, 'execFileSync', () => 'Fri Aug 14 04:00:01 2026');
+    const identity = processStartIdentity(4242);
+    assert.match(identity!, /^\d{4}-\d{2}-\d{2}T/, 'ps output parses to an ISO-8601 identity');
+    assert.equal(probeProcessLiveness(process.pid, identity!), true, 'matching identity stays live');
+    assert.equal(probeProcessLiveness(process.pid, '2000-01-01T00:00:00.000Z'), false, 'recycled pid is dead');
+  });
+});
+
+test('macOS: an unreadable start identity falls back to the bare pid check', () => {
+  withPlatform('darwin', () => {
+    mock.method(runNativeStartIdentity, 'execFileSync', () => { throw new Error('ESRCH'); });
+    assert.equal(processStartIdentity(4242), null, 'ps failure is no identity');
+    assert.equal(probeProcessLiveness(process.pid, '2000-01-01T00:00:00.000Z'), true, 'alive until proven reused');
+  });
+});
+
+test('native Windows: one Get-Process lookup yields a start identity that rejects a recycled pid', () => {
+  withPlatform('win32', () => {
+    mock.method(runNativeStartIdentity, 'execFileSync', () => '2026-08-14T04:00:01.123456700Z');
+    const identity = processStartIdentity(4242);
+    assert.equal(identity, new Date('2026-08-14T04:00:01.123456700Z').toISOString());
+    assert.equal(probeProcessLiveness(process.pid, identity), true, 'matching identity stays live');
+    assert.equal(probeProcessLiveness(process.pid, '2000-01-01T00:00:00.000Z'), false, 'recycled pid is dead');
+  });
+});
+
+test('native Windows: an unreadable start identity falls back to the bare pid check', () => {
+  withPlatform('win32', () => {
+    mock.method(runNativeStartIdentity, 'execFileSync', () => { throw new Error('PowerShell not found'); });
+    assert.equal(processStartIdentity(4242), null, 'powershell failure is no identity');
+    assert.equal(probeProcessLiveness(process.pid, '2000-01-01T00:00:00.000Z'), true);
+  });
+});
+
+test('Linux: /proc/<pid>/stat field 22 is the one-pid start identity source', () => {
+  // After the last ')' the 20th space-separated field (index 19) is field 22.
+  const stat = '1234 (test) S 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 777';
+  mock.method(readProcessStat, 'sync', () => stat);
+  assert.equal(processStartIdentity(1234), '777');
+});
+
+test('WSL keeps the /proc path rather than the native Windows path', () => {
+  // WSL reports process.platform === 'linux'; it must use /proc, not PowerShell.
+  withPlatform('linux', () => {
+    mock.method(readProcessStat, 'sync', () => '1234 (test) S 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 555');
+    let nativeCalls = 0;
+    mock.method(runNativeStartIdentity, 'execFileSync', () => { nativeCalls++; return 'nope'; });
+    assert.equal(processStartIdentity(1234), '555');
+    assert.equal(nativeCalls, 0, 'WSL never calls the native Windows lookup');
+  });
 });
