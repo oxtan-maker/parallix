@@ -1,6 +1,6 @@
 ---
 id: TASK-2433
-title: Add the authenticated typed mutation endpoint for board actions
+title: Add the same-origin guarded typed mutation endpoint for board actions
 status: backlog
 assignee: []
 created_date: '2026-08-28 06:29'
@@ -18,7 +18,7 @@ priority: high
 
 ## Description
 
-Expose the shared guarded board controller over one narrow authenticated mutation endpoint.
+Expose the shared guarded board controller over one narrow local-only mutation endpoint. It uses the existing per-launch same-origin/session/CSRF capability, not a user login or reusable authentication scheme; read-only snapshot and SSE endpoints remain outside this check.
 
 The browser sends a mission identifier plus a server-advertised typed action identifier/kind and CSRF proof. The host generates the operation ID, resolves the fresh authoritative mission/action/precondition, and dispatches through `BoardCommandController`. The browser cannot provide “current status”, capabilities, agent env overrides, argv, paths or effect options.
 
@@ -43,7 +43,7 @@ The browser sends a mission identifier plus a server-advertised typed action ide
 
 ## Definition of Done
 
-- [ ] #1 Negative transport tests cover malformed JSON, unknown field, unknown action, unavailable action, stale state, bad auth/CSRF and effect failure.
+- [ ] #1 Negative transport tests cover malformed JSON, unknown field, unknown action, unavailable action, stale state, bad Origin/session/CSRF and effect failure.
 - [ ] #2 Happy-path test asserts one controller dispatch and one operation ID.
 - [ ] #3 Verification/security/static-analysis gates pass.
 - [ ] #4 Reviewer confirms there is no browser-to-shell or browser-to-adapter bypass path.
