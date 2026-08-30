@@ -1,8 +1,8 @@
 ---
 id: TASK-2446
 title: Recover missions stranded by lifecycle synchronization failure
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-08-30 17:05'
 labels:
   - ai_sdlc

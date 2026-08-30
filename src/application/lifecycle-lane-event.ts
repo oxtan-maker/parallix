@@ -21,7 +21,7 @@ import type { MissionCommand } from '../domain/mission-workflow.js';
  * Triggers a lane event can carry: every `MissionCommand` type, plus the two
  * lifecycle steps outside the state machine.
  */
-export type LifecycleLaneTrigger = MissionCommand['type'] | 'intake' | 'close';
+export type LifecycleLaneTrigger = MissionCommand['type'] | 'intake' | 'close' | 'recover-active';
 
 /**
  * Widen a lifecycle trigger to the field type `LaneTransitionEvent` declares.

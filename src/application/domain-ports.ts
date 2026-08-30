@@ -19,6 +19,10 @@ export type MissionLoadResult =
   | { readonly kind: 'missing' }
   | { readonly kind: 'unavailable'; readonly reason: string };
 
+export interface MissionTransitionHistoryEntry {
+  readonly trigger: string;
+}
+
 /** Persistence ports belong to the application layer; the domain stays store-agnostic. */
 export interface MissionStore {
   load(_id: MissionId): Promise<MissionLoadResult>;
@@ -58,6 +62,8 @@ export interface MissionTransitionStore extends MissionStore {
     _expectedVersion: MissionVersion | null,
     _event: LaneTransitionEvent,
   ): Promise<MissionVersion>;
+  /** Durable lane history, used only to refuse recovery after integration. */
+  findTransitions?(_missionId: MissionId): Promise<readonly MissionTransitionHistoryEntry[]>;
 }
 
 /**

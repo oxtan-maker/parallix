@@ -10,6 +10,8 @@ import { ensureStandaloneGitRepo } from '../adapters/config/product-config.js';
 import { loadStateMap } from '../adapters/config/state-map.js';
 import activeWorkflow from '../adapters/cli/commands/active.js';
 import { createActiveCommand } from '../interfaces/cli/active.js';
+import { recoverMissionCommand } from '../interfaces/cli/recover.js';
+import { findTaskFile, getTaskStatus } from '../adapters/backlog/backlog.js';
 import type { BoardProgressSink } from '../application/controller/board-command.js';
 import {
   createCheckpointVerificationAdapter,
@@ -155,6 +157,16 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
   };
   return {
     active: withActiveService,
+    recover: (args) => withGraph(services => {
+      if (!services.mission) { throw new Error('mission services are unavailable'); }
+      return recoverMissionCommand(args, {
+        taskStatus: (slug) => {
+          const task = findTaskFile(slug, rootDir);
+          return task ? getTaskStatus(task) : null;
+        },
+        store: services.mission.store,
+      });
+    }),
     checkpoint: (args, options) => {
       const verification = createCheckpointVerificationAdapter();
       const gitPort = createCheckpointGitAdapter();
