@@ -264,7 +264,7 @@ export function availableBoardCommands(
       )
     );
   return [
-    availability('active', open && ['backlog', 'refined', 'active'].includes(mission.status), 'Mission cannot be activated from its current state'),
+    availability('active', open && ['refined', 'active'].includes(mission.status), 'Mission must be refined before it can be activated'),
     availability('handoff', open && mission.status === 'active' && hasCheckpointEvidence, 'Handoff requires an active mission with checkpoint evidence'),
     availability('review', open && mission.status === 'review', 'Review is available only while the mission is in review'),
     availability('integrate', open && canIntegrate, 'Integration requires the integration queue or an approved review'),

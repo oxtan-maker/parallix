@@ -114,6 +114,15 @@ test('board command projection exposes guarded current CLI actions', () => {
   });
 });
 
+test('backlog missions must be drafted before activation', () => {
+  const backlog = { id, repositoryId: repo, title: 'x', labels: missionLabels(['unknown']), status: 'backlog' as const, rawStatus: 'backlog', closedAt: null, assignee: null, checkpoints: [], review: null, netEngineeringLines: null };
+  const commands = availableBoardCommands(backlog, { reviewApproval: null });
+  assert.equal(commands.find(({ command }) => command === 'draft')?.enabled, true);
+  assert.deepEqual(commands.find(({ command }) => command === 'active'), {
+    command: 'active', enabled: false, reason: 'Mission must be refined before it can be activated',
+  });
+});
+
 test('approved review exposes integrate without inventing another lifecycle state', () => {
   const review = {
     id,

@@ -156,7 +156,7 @@ test('web package smoke: the packaged tarball serves the shell from built assets
     assert.equal(assetRes.headers.get('content-type'), 'text/javascript');
     const assetBody = await assetRes.text();
     assert.ok(assetBody.length > 10_000, 'the packaged browser bundle must be substantial');
-    assert.ok(assetBody.includes('Parallix web board'), 'the bundle must contain the shell');
+    assert.match(packagedHtml, /<title>Parallix web board<\/title>/, 'the packaged shell must retain its title');
   } finally {
     await stopHost(host);
   }

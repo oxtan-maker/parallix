@@ -95,7 +95,7 @@ Identity types live with their owners: `MissionId` in `mission.ts`,
 The state machine contains only transitions the current workflow owns:
 
 ```text
-backlog/refined --activate--> active --submit-for-review--> review
+backlog --draft/refine--> refined --activate--> active --submit-for-review--> review
        ^                                          |
        +-------------request-changes--------------+--approve--> integration --integrate--> done
 ```

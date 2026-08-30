@@ -4,7 +4,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { launchPtySmoke } from './helpers/pty-smoke-harness.js';
+import { launchPtySmoke, type PtySmokeSession } from './helpers/pty-smoke-harness.js';
 
 const root = process.cwd();
 const TIMEOUT_MS = 12_000;
@@ -35,15 +35,16 @@ async function waitForOutput(
 test('real PTY smoke: launch, keyboard navigation, resize, clean exit, timeout bound, and terminal restoration', async () => {
   const fixtureRoot = await mkdtemp(path.join(tmpdir(), 'parallix-pty-ui-fixture-'));
   const stateRoot = await mkdtemp(path.join(tmpdir(), 'parallix-pty-ui-state-'));
+  let session: PtySmokeSession | null = null;
   try {
     await mkdir(path.join(fixtureRoot, 'backlog', 'tasks'), { recursive: true });
     await writeFile(path.join(fixtureRoot, 'backlog', 'tasks', 'task-pty-1.md'), [
-      '---', 'id: TASK-PTY', 'title: PTY smoke mission', 'status: active', 'assignee: []', 'labels: []', '---', '',
+      '---', 'id: TASK-PTY', 'title: PTY smoke mission', 'status: refined', 'assignee: []', 'labels: []', '---', '',
     ].join('\n'));
     await writeFile(path.join(fixtureRoot, 'backlog', 'tasks', 'task-pty-2.md'), [
-      '---', 'id: TASK-PTY-2', 'title: PTY second mission', 'status: active', 'assignee: []', 'labels: []', '---', '',
+      '---', 'id: TASK-PTY-2', 'title: PTY second mission', 'status: refined', 'assignee: []', 'labels: []', '---', '',
     ].join('\n'));
-    const session = await launchPtySmoke([process.execPath, path.join(root, 'build/px.mjs'), 'ui'], {
+    session = await launchPtySmoke([process.execPath, path.join(root, 'build/px.mjs'), 'ui'], {
       cwd: fixtureRoot,
       timeoutMs: TIMEOUT_MS,
       // The fixture reuses stable task ids. Give the real child a dedicated
@@ -64,8 +65,12 @@ test('real PTY smoke: launch, keyboard navigation, resize, clean exit, timeout b
     assert.equal(result.exitCode, 0, 'q must cleanly exit the real UI process');
     assert.equal(result.terminalRestored, true, 'Ink raw-mode cleanup must restore PTY terminal state');
   } finally {
-    await rm(fixtureRoot, { recursive: true, force: true });
-    await rm(stateRoot, { recursive: true, force: true });
+    try {
+      await session?.cleanup();
+    } finally {
+      await rm(fixtureRoot, { recursive: true, force: true });
+      await rm(stateRoot, { recursive: true, force: true });
+    }
   }
 });
 

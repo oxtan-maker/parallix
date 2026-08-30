@@ -1,16 +1,115 @@
-/* Self-contained: system font stack only, no external fonts or scripts. */
-:root {
-  color-scheme: light dark;
-}
-
+/*
+ * Root treatment transcribed from the design authority
+ * (`Parallix Board GPU.dc.html`). Self-contained: no external fonts or
+ * scripts, so the mono and condensed stacks fall back to platform faces when
+ * JetBrains Mono / Barlow Condensed are not installed locally (ADR 0054).
+ */
+html,
 body {
   margin: 0;
-  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
-  line-height: 1.5;
+  padding: 0;
+  background: #08090b;
 }
 
-.shell {
-  max-width: 46rem;
-  margin: 0 auto;
-  padding: 2rem 1rem;
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #232a31;
+  border-radius: 0;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+:focus-visible {
+  outline: 2px solid #6fd0e8;
+  outline-offset: 1px;
+}
+
+/*
+ * The card fans. Rotation is a keyframe rather than a timer, so a spinning
+ * card costs the client no state; `prefers-reduced-motion` stops them.
+ */
+@keyframes spin {
+  from { transform: rotate(0); }
+  to { transform: rotate(360deg); }
+}
+
+.fan.spin {
+  animation-name: spin;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fan.spin {
+    animation: none;
+  }
+}
+
+/*
+ * The done-history disclosure. Collapse and expand are browser-owned via
+ * <details>, so the board needs no handler and no state for them; the two
+ * summary variants below reproduce the reference artifact's expanded column
+ * header and collapsed vertical rail.
+ */
+.shipped {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  min-height: 0;
+  width: 214px;
+}
+
+.shipped:not([open]) {
+  width: 36px;
+  border: 1px solid #232a31;
+  border-radius: 6px;
+  background: #0d1115;
+}
+
+.shipped:not([open]):hover {
+  border-color: #2c4735;
+}
+
+.shipped > summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.shipped > summary::-webkit-details-marker {
+  display: none;
+}
+
+.shipped[open] > summary .rail-closed,
+.shipped:not([open]) > summary .rail-open {
+  display: none;
+}
+
+.shipped[open] > summary .rail-open {
+  display: flex;
+}
+
+.shipped:not([open]) > summary {
+  flex: 1;
+  min-height: 0;
+}
+
+.shipped:not([open]) > summary .rail-closed {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 11px;
+  gap: 9px;
+}
+
+.shipped > .shipped-cards {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-top: 9px;
 }
