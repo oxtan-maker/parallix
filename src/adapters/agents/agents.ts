@@ -98,6 +98,18 @@ class PinnedAgentUnavailableError extends Error {
   }
 }
 
+const NON_BLOCKING_CREDENTIAL_ERROR_PATTERNS = Object.freeze([
+  /\bauth(?:entication)?\b/i,
+  /\bunauthorized\b/i,
+  /\bforbidden\b/i,
+  /\bapi\s+key\b/i,
+]);
+
+const CREDENTIAL_REFRESH_ERROR_PATTERNS = Object.freeze([
+  ...NON_BLOCKING_CREDENTIAL_ERROR_PATTERNS,
+  /\b(?:access\s+)?(?:token|credential)s?\b.*\bexpired\b|\bexpired\b.*\b(?:access\s+)?(?:token|credential)s?\b/i,
+]);
+
 const NON_BLOCKING_LAUNCH_ERROR_PATTERNS = Object.freeze([
   // task-2380: Claude missing-session resume error (also recovered per-family
   // in claude.ts). Deterministic, agent-specific — never poison the blocklist.
@@ -107,10 +119,7 @@ const NON_BLOCKING_LAUNCH_ERROR_PATTERNS = Object.freeze([
   /\b(?:model\s+not\s+found|no\s+such\s+model)\b/i,
   /\bunknown\s+option\b/i,
   /\bunsupported\s+(flag|option)\b/i,
-  /\bauth(?:entication)?\b/i,
-  /\bunauthorized\b/i,
-  /\bforbidden\b/i,
-  /\bapi\s+key\b/i,
+  ...NON_BLOCKING_CREDENTIAL_ERROR_PATTERNS,
   /\bread-only file system\b/i,
   /\b(home|bootstrap)\s+(error|failed|cannot|denied|not\s+found)\b/i,
   /\bpermission\s+denied\b/i,
@@ -245,6 +254,12 @@ function shouldPersistLaunchFailureBlock(agent: string, result: LaunchResultLike
   ].join('\n');
   if (!combined.trim()) {return true;}
   return !NON_BLOCKING_LAUNCH_ERROR_PATTERNS.some(pattern => pattern.test(combined));
+}
+
+function needsCredentialRefresh(result: LaunchResultLike): boolean {
+  return CREDENTIAL_REFRESH_ERROR_PATTERNS.some(pattern => pattern.test([
+    result.stderr || '', result.stdout || '', result.error?.message || '', result.error?.code || ''
+  ].join('\n')));
 }
 
 async function defaultIsAgentBlockedNow(agent: string) {
@@ -635,6 +650,9 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
       const stderrSnippet = result && result.stderr
         ? ` (${result.stderr.trim().split('\n')[0]})`
         : '';
+      if (needsCredentialRefresh(result)) {
+        log(fmt.status('WARN', `Agent ${fmt.agent(chosen || '')} credentials need refreshing; re-authenticate the ${chosen || ''} launcher before retrying.`));
+      }
       // Pinned work has no next eligible agent: hand the failed result back so
       // the caller reports the owner's own exit status (TASK-2294.01).
       if (pinnedAgent && agentOverride) {

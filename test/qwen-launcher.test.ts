@@ -94,6 +94,31 @@ test('qwen approval bypass: yolo persists even when user settings exist', () => 
   assert.ok(settings.env, 'env (with secrets) copied to git-ignored .workflow/');
 });
 
+test('qwen home copies operator OAuth credentials when present', () => {
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'qwen-home-test-'));
+  const source = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'qwen-user-')), 'oauth_creds.json');
+  const credentials = '{"access_token":"test-token"}\n';
+  fs.writeFileSync(source, credentials, 'utf8');
+
+  ensureQwenHome(worktree, path.join(path.dirname(source), 'settings.json'), source);
+
+  assert.equal(fs.readFileSync(path.join(qwenHomeRoot(worktree), 'oauth_creds.json'), 'utf8'), credentials);
+});
+
+test('qwen home leaves minimal settings byte-identical when OAuth credentials are absent', () => {
+  const before = fs.mkdtempSync(path.join(os.tmpdir(), 'qwen-home-test-'));
+  const after = fs.mkdtempSync(path.join(os.tmpdir(), 'qwen-home-test-'));
+  const sourceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'qwen-user-'));
+  const sourceSettings = path.join(sourceDir, 'settings.json');
+  const absent = path.join(sourceDir, 'oauth_creds.json');
+
+  ensureQwenHome(before, sourceSettings, absent);
+  ensureQwenHome(after, sourceSettings, absent);
+
+  assert.equal(fs.readFileSync(qwenSettingsPath(after), 'utf8'), fs.readFileSync(qwenSettingsPath(before), 'utf8'));
+  assert.equal(fs.existsSync(path.join(qwenHomeRoot(after), 'oauth_creds.json')), false);
+});
+
 test('qwen approval bypass: tool-call prompt completes without approval block (red-to-green)', () => {
   // This test verifies the invocation shape that prevents the TASK-1398 failure mode.
   // The --yolo flag (vibe) and approvalMode:yolo (qwen) both achieve the same goal:

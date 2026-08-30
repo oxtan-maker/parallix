@@ -6,6 +6,9 @@ import * as fmt from '../../application/presentation/cli-format.js';
 import { resolveCustomRunner } from '../config/product-config.js';
 import {
   claudeProjectDir,
+  claudeCredentialsPath,
+  claudeSessionEnvDir,
+  codexAuthPath,
   codexHomeRoot,
   opencodeStateHomes,
   piStateHomes,
@@ -37,6 +40,10 @@ export interface SandboxProfile {
   /** Nested Git paths that must retain their own explicit writable bind. */
   gitMetadata?: string[];
   optionalWritable?: string[];
+  /** Launcher state directories: create when possible, otherwise continue without persistence. */
+  optionalWritableDirectories?: string[];
+  /** Existing credential leaves; omitted rather than created on a first run. */
+  optionalWritableFiles?: string[];
 }
 
 export class BubblewrapGuardError extends Error {
@@ -200,7 +207,19 @@ export function buildBubblewrapArgs(profile: SandboxProfile, cwd: string): strin
   const optional = (profile.optionalWritable || [])
     .map(dir => path.resolve(dir))
     .filter(dir => fs.existsSync(dir) && fs.statSync(dir).isDirectory());
-  const writable = dedupeMounts([...(profile.worktreeWritable ? [worktree] : []), ...required, ...optional]);
+  const optionalDirectories = (profile.optionalWritableDirectories || [])
+    .map(dir => path.resolve(dir))
+    .filter(dir => {
+      try { ensureWritableDirectory(dir); return true; }
+      catch (err) {
+        fmt.log.warn(`launcher state is unavailable without a writable bind: ${(err as Error).message}`);
+        return false;
+      }
+    });
+  const optionalFiles = (profile.optionalWritableFiles || [])
+    .map(file => path.resolve(file))
+    .filter(file => fs.existsSync(file) && fs.statSync(file).isFile());
+  const writable = dedupeMounts([...(profile.worktreeWritable ? [worktree] : []), ...required, ...optional, ...optionalDirectories, ...optionalFiles]);
   // `dedupeMounts` intentionally removes generic nested binds (for example an
   // artifact dir under /tmp). Git metadata is different: the common dir and
   // its per-worktree dir are both Git-resolved authorization boundaries, so
@@ -219,24 +238,23 @@ export function buildBubblewrapArgs(profile: SandboxProfile, cwd: string): strin
 }
 
 /**
- * Resolve the launcher state homes the review profile keeps writable for one
- * reviewer family. Codex, Qwen and Vibe keep their state under the worktree's
+ * Resolve the launcher state homes kept writable for one family. Codex, Qwen and Vibe keep their state under the worktree's
  * git-ignored `.workflow/` (not reviewed source); Claude keeps its per-worktree
  * transcript under the host home; the custom family resolves to its configured
  * runner (opencode or pi), both of which are host-home based. Returns an empty
  * list for families the guard does not scope, so the caller keeps the plain
  * artifact-dir-only profile.
  */
-function resolveReviewLauncherStateHomes(family: string | null | undefined, worktree: string): string[] {
+function resolveLauncherStateHomes(family: string | null | undefined, worktree: string): { directories: string[], files: string[] } {
   switch (family) {
-    case 'codex': return [codexHomeRoot(worktree)];
-    case 'qwen': return [qwenHomeRoot(worktree)];
-    case 'vibe': return [vibeHomeRoot(worktree)];
-    case 'claude': return [claudeProjectDir(worktree)];
-    case 'opencode': return opencodeStateHomes();
-    case 'pi': return piStateHomes();
-    case 'custom': return resolveReviewLauncherStateHomes(resolveCustomRunner(worktree), worktree);
-    default: return [];
+    case 'codex': return { directories: [codexHomeRoot(worktree)], files: [codexAuthPath()] };
+    case 'qwen': return { directories: [qwenHomeRoot(worktree)], files: [] };
+    case 'vibe': return { directories: [vibeHomeRoot(worktree)], files: [] };
+    case 'claude': return { directories: [claudeSessionEnvDir(), claudeProjectDir(worktree)], files: [claudeCredentialsPath()] };
+    case 'opencode': return { directories: opencodeStateHomes(), files: [] };
+    case 'pi': return { directories: piStateHomes(), files: [] };
+    case 'custom': return resolveLauncherStateHomes(resolveCustomRunner(worktree), worktree);
+    default: return { directories: [], files: [] };
   }
 }
 
@@ -249,8 +267,11 @@ export function resolveSandboxProfile(
 ): SandboxProfile {
   if (step === 'review') {
     if (!artifactDir) { throw new BubblewrapGuardError('review step requires a resolved artifact directory'); }
-    const writable = [artifactDir, ...resolveReviewLauncherStateHomes(family, worktree)];
-    return { worktree, worktreeWritable: false, writable, optionalWritable: ['/tmp'] };
+    const stateHomes = resolveLauncherStateHomes(family, worktree);
+    return {
+      worktree, worktreeWritable: false, writable: [artifactDir],
+      optionalWritable: ['/tmp'], optionalWritableDirectories: stateHomes.directories, optionalWritableFiles: stateHomes.files
+    };
   }
   // Implementer steps may mutate the mission branch. Grant the Git metadata that
   // resolves outside the checkout for this worktree so a confined `git add`/
@@ -258,12 +279,15 @@ export function resolveSandboxProfile(
   // Git-resolved paths only — never the checkout parent or an unrelated host
   // path. Reviewer steps return above and keep Git state read-only.
   const gitMounts = resolveGitMetadataMounts(worktree);
+  const stateHomes = resolveLauncherStateHomes(family, worktree);
   return {
     worktree,
     worktreeWritable: true,
     writable: gitMounts,
     gitMetadata: gitMounts,
-    optionalWritable: ['/tmp']
+    optionalWritable: ['/tmp'],
+    optionalWritableDirectories: stateHomes.directories,
+    optionalWritableFiles: stateHomes.files
   };
 }
 

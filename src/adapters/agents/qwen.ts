@@ -53,17 +53,28 @@ function userQwenSettingsPath() {
   return path.join(userQwenDir(), 'settings.json');
 }
 
+function userQwenCredentialsPath() {
+  return path.join(userQwenDir(), 'oauth_creds.json');
+}
+
 /**
  * Read settings.json from user qwen dir, merge approvalMode:yolo,
  * and write to worktree-local home. Secrets are copied but live in
  * .workflow/ which is git-ignored, so no secrets leak into tracked paths.
  */
-function ensureQwenHome(worktree: string, sourceSettings = userQwenSettingsPath()) {
+function ensureQwenHome(
+  worktree: string,
+  sourceSettings = userQwenSettingsPath(),
+  sourceCredentials = userQwenCredentialsPath(),
+) {
   const home = qwenHomeRoot(worktree);
   fs.mkdirSync(home, { recursive: true });
   fs.mkdirSync(qwenUsageDir(worktree), { recursive: true });
 
   const targetSettings = qwenSettingsPath(worktree);
+  if (fs.existsSync(sourceCredentials)) {
+    fs.copyFileSync(sourceCredentials, path.join(home, 'oauth_creds.json'));
+  }
 
   if (!fs.existsSync(sourceSettings)) {
     // No user settings — write minimal settings with approval bypass
