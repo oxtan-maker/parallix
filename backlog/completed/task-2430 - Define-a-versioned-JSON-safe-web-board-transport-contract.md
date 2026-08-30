@@ -1,8 +1,8 @@
 ---
 id: TASK-2430
 title: Define a versioned JSON-safe web board transport contract
-status: backlog
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-08-28 06:29'
 labels:
   - ai_sdlc

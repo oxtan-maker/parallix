@@ -23,6 +23,7 @@ ADR 0023 remains in WrGroceries and is cross-referenced here instead of copied.
 - `docs/adr/0053-operational-persistence-and-authority-boundaries.md` — One operator-local SQLite authority for checked domain concepts including Mission, Review, CheckpointData, AgentRunMeasurement, SessionMarker, LaneTransitionEvent, and AgentBlock; speculative entities such as Attempt remain excluded
 - `docs/adr/0053-persistence-inventory.md` — Executable inventory of all 15 ADR 0053 durable-state concepts: production readers/writers, six-class taxonomy, architecture guard enforcement, and how future cutover tasks consume the inventory
 - `docs/adr/0054-local-web-board-adapter.md` — React/Vite browser board with a Fastify loopback adapter, validated commands, SSE updates, and no browser-owned workflow authority
+- `docs/adr/0055-web-board-transport-contract.md` — Versioned, JSON-safe wire DTOs between the local web host and the browser: explicit encodings for indefinite blocks, session-count and liveness states, server-owned action states, fail-closed version handling
 
 ## Cross-reference
 - `docs/adr/0023-ai-sdlc-configuration.md` remains in WrGroceries at `/home/magnus/code/visualBoard-task-1302/docs/adr/0023-ai-sdlc-configuration.md`.
