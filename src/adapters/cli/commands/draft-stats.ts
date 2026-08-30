@@ -442,6 +442,7 @@ function createDraftWorkflowAdapter(deps: Record<string, unknown> = {}) {
       const merged = ctx.options as Record<string, unknown>;
       const normalizeDraftClassificationFn = merged.normalizeDraftClassificationFn || normalizeDraftClassification;
       const restartDraftAgentFn = merged.restartDraftAgentFn || restartDraftAgent;
+      const readAgentConfigOrExitFn = merged.readAgentConfigOrExitFn || readAgentConfigOrExit;
       const resolveTaskFileFn = merged.resolveTaskFileFn || resolveTaskFile;
       const ensureMissionBaseBranchRecordedFn = merged.ensureMissionBaseBranchRecordedFn || ensureMissionBaseBranchRecorded;
 
@@ -454,7 +455,8 @@ function createDraftWorkflowAdapter(deps: Record<string, unknown> = {}) {
           logFn,
           errorFn,
           // @ts-expect-error restartDraftAgentFn accepts extra properties
-          exitFn
+          exitFn,
+          readAgentConfigOrExitFn,
         });
         if (!restartOk) {
           safeExit(1);

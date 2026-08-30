@@ -29,6 +29,11 @@ export type BoardCommandKind =
  * A payload carries checked domain values only — never a mission-directory
  * path, a `CP-N.md` filename, or SQL. A board button therefore cannot acquire
  * filesystem or database authority by sending a richer payload.
+ *
+ * `draft:create` has no payload member: the envelope `missionId` is the entire
+ * request. There is no argv array, options bag, path, environment, or
+ * agent-launch field for it, so a board request cannot smuggle CLI input
+ * through the boundary.
  */
 export type BoardCommandPayload =
   | {
@@ -137,6 +142,7 @@ export interface BoardCommandDispatcher {
 export const INTEGRATED_CAPABILITIES = new Set<BoardCommandKind>([
   'active:execute',
   'mission:intake',
+  'draft:create',
   'checkpoint:record',
   'handoff:record',
 ]);
@@ -146,7 +152,6 @@ export const INTEGRATED_CAPABILITIES = new Set<BoardCommandKind>([
  * the board but cannot be executed until separate bounded extraction missions land.
  */
 export const UNAVAILABLE_CAPABILITIES: ReadonlyMap<BoardCommandKind, string> = new Map([
-  ['draft:create', 'Draft is not available from the board'],
   ['review:submit', 'Review submission is not available from the board'],
   ['review:act-on-findings', 'Acting on review findings is not available from the board'],
   ['approve:review', 'Review approval is not available from the board'],

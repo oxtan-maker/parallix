@@ -12,6 +12,9 @@ const missionUtils = mockModule<typeof import('../src/adapters/filesystem/missio
 const backlog = mockModule<typeof import('../src/adapters/backlog/backlog.js')>('../src/adapters/backlog/backlog.js', import.meta.url);
 const forgejo = mockModule<typeof import('../src/adapters/forgejo/forgejo.js')>('../src/adapters/forgejo/forgejo.js', import.meta.url);
 const gatekeeper = mockModule<typeof import('../src/adapters/verification/gatekeeper.js')>('../src/adapters/verification/gatekeeper.js', import.meta.url);
+const verification = mockModule<typeof import('../src/adapters/verification/verification.js')>('../src/adapters/verification/verification.js', import.meta.url);
+const agents = mockModule<typeof import('../src/adapters/agents/agents.js')>('../src/adapters/agents/agents.js', import.meta.url);
+const netEngineering = mockModule<typeof import('../src/adapters/git/net-engineering-lines.js')>('../src/adapters/git/net-engineering-lines.js', import.meta.url);
 await installModuleMocks();
 const { mock } = test;
 const { verifyHandoff, performHandoff } = verifyHandoffModule;
@@ -29,6 +32,18 @@ function setupMocks() {
   mock.method(git, 'git', () => ({ status: 0 }));
   mock.method(backlog, 'resolveTaskFile', () => ({ ok: true, taskFile: '/tmp/task.md' }));
   mock.method(backlog, 'getTaskImplementer', () => 'claude');
+  // Keep agent selection and branch probing in-memory: the real paths spawn
+  // the shimmed git CLI (several subprocesses per handoff run).
+  mock.method(missionUtils, 'getPrimaryBranch', () => 'main');
+  mock.method(agents, 'eligibleAgentsForStep', () => ['codex', 'claude', 'gemini', 'custom']);
+  mock.method(agents, 'selectAgent', (_step, options = {}) => {
+    // @ts-ignore -- module mock callback options are inferred as an empty object
+    const excluded = options.exclude instanceof Set ? options.exclude : new Set();
+    return ['codex', 'claude', 'gemini'].find((candidate) => !excluded.has(candidate)) ?? 'codex';
+  });
+  // NEL capture diffs the real repository when left to the real runner.
+  mock.method(netEngineering, 'computeNELRecord', () => ({ nel: 0, bucket: { label: 'Small' } }));
+  mock.method(verification, 'createVerificationProofIdentity', () => 'test-proof-identity');
   mock.method(backlog, 'transitionTask', () => true);
   mock.method(forgejo, 'readToken', () => 'token');
   mock.method(forgejo, 'createPr', () => ({ ok: true }));

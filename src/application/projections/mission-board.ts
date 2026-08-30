@@ -19,7 +19,7 @@ import {
  * records — it does not invent a vocabulary of its own.
  */
 export type BoardLane = MissionStatus;
-export type BoardCommand = 'active' | 'handoff' | 'review' | 'integrate';
+export type BoardCommand = 'active' | 'handoff' | 'review' | 'integrate' | 'draft';
 
 /**
  * How much the board can trust a current-work fact.
@@ -268,6 +268,10 @@ export function availableBoardCommands(
     availability('handoff', open && mission.status === 'active' && hasCheckpointEvidence, 'Handoff requires an active mission with checkpoint evidence'),
     availability('review', open && mission.status === 'review', 'Review is available only while the mission is in review'),
     availability('integrate', open && canIntegrate, 'Integration requires the integration queue or an approved review'),
+    // Pre-draft state: the mission exists as a card but no draft worktree has
+    // been created yet. Once draft work exists the mission has moved on, and
+    // re-drafting is refused by the dispatch backstop, not the projection.
+    availability('draft', open && mission.status === 'backlog', 'Draft is available only while the mission is in the pre-draft (backlog) state'),
   ];
 }
 

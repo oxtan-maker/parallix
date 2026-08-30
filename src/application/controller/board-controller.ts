@@ -4,10 +4,11 @@ import {
   type ExecuteMissionRequest,
   type ExecuteMissionResult,
 } from '../execute-mission-service.js';
-import { failure, rejected } from '../contracts.js';
+import { completed, failure, rejected } from '../contracts.js';
 import type { MissionCheckpointService } from '../mission-checkpoint-service.js';
 import type { MissionHandoffService } from '../mission-handoff-service.js';
 import type { MissionIntakeService } from '../mission-intake-service.js';
+import type { DraftCommandUseCase } from '../draft-command-use-case.js';
 import type { MissionId } from '../../domain/mission.js';
 import type { MissionStore, MissionVersion } from '../domain-ports.js';
 import { NO_CURRENT_WORK_PORT, type CurrentWorkPort } from '../recording/current-work-recorder.js';
@@ -38,6 +39,13 @@ export interface BoardMissionServices {
   readonly intake?: MissionIntakeService;
   readonly checkpoints?: MissionCheckpointService;
   readonly handoff?: MissionHandoffService;
+  /**
+   * The application-owned draft use case, wired by the composition from the
+   * trusted draft workflow adapter. The board reaches it through
+   * `executeForSlug` only — the request's `missionId` (slug) is the sole
+   * value that crosses the boundary.
+   */
+  readonly draft?: DraftCommandUseCase;
 }
 
 // ---------------------------------------------------------------------------
@@ -68,6 +76,7 @@ export class BoardCommandController implements BoardCommandDispatcher {
     if (kind === 'mission:intake') { return Boolean(this.missionServices.intake); }
     if (kind === 'checkpoint:record') { return Boolean(this.missionServices.checkpoints); }
     if (kind === 'handoff:record') { return Boolean(this.missionServices.handoff); }
+    if (kind === 'draft:create') { return Boolean(this.missionServices.draft); }
     return true;
   }
 
@@ -92,6 +101,14 @@ export class BoardCommandController implements BoardCommandDispatcher {
       this.emit(operationId, 1, 'unavailable', reason);
       return unavailableCapability(kind, reason);
     }
+    // `draft:create` carries no payload, so the payload guard above cannot see
+    // an unwired draft service. Report the typed unavailable result here,
+    // before mission authority is touched: a read-only graph stays read-only.
+    if (kind === 'draft:create' && !this.canExecute(kind)) {
+      const reason = 'no Mission authority is configured for this interface';
+      this.emit(operationId, 1, 'unavailable', reason);
+      return unavailableCapability(kind, reason);
+    }
 
     // Guard 2: stale command check
     const staleResult = await this.checkStaleCommand(request);
@@ -108,6 +125,9 @@ export class BoardCommandController implements BoardCommandDispatcher {
     }
     if (kind === 'mission:intake') {
       return (await this.dispatchIntake(request)) as BoardCommandResult<T>;
+    }
+    if (kind === 'draft:create') {
+      return (await this.dispatchDraft(request)) as BoardCommandResult<T>;
     }
     if (kind === 'checkpoint:record') {
       return (await this.dispatchCheckpoint(request)) as BoardCommandResult<T>;
@@ -179,6 +199,38 @@ export class BoardCommandController implements BoardCommandDispatcher {
       artifacts: payload.artifacts,
       reviewRounds: payload.reviewRounds,
     });
+  }
+
+  private async dispatchDraft(request: BoardCommandRequest): Promise<BoardCommandResult<unknown>> {
+    if (!this.missionServices.draft) {
+      return unavailableCapability('draft:create', 'no Mission authority is configured for this interface');
+    }
+    // Dispatch backstop: only a mission still in the pre-draft state (backlog)
+    // is draftable. Every other state is rejected before the draft workflow
+    // port is reached, so projection drift or a stale card can never project
+    // a successful move.
+    if (!this.missionStore) {
+      return failure('unavailable', 'Mission authority is not configured for this interface');
+    }
+    let loaded;
+    try {
+      loaded = await this.missionStore.load(request.missionId as MissionId);
+    } catch {
+      return failure('unavailable', 'mission authority is unavailable');
+    }
+    if (loaded.kind === 'unavailable') { return failure('unavailable', loaded.reason); }
+    if (loaded.kind === 'missing') { return failure('unavailable', 'mission authority could not find the mission'); }
+    if (loaded.mission.status !== 'backlog') {
+      return rejected('validation', `draft:create requires a mission in the pre-draft (backlog) state, current: ${loaded.mission.status}`);
+    }
+    this.emit(request.operationId, 1, 'draft', `drafting ${request.missionId}`);
+    try {
+      await this.missionServices.draft.executeForSlug(request.missionId);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : 'draft workflow aborted';
+      return failure('execution', `draft:create for ${request.missionId} aborted: ${reason}`);
+    }
+    return completed({ slug: request.missionId });
   }
 
   private async dispatchActive(request: BoardCommandRequest): Promise<BoardCommandResult<ExecuteMissionResult>> {

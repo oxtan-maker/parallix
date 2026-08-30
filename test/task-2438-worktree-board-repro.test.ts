@@ -42,6 +42,10 @@ const store: MissionStore = {
   },
 };
 
+// Hermetic doubles: the board must build without spawning the shimmed git
+// CLI, launcher probes, or the OS process scan (each ~50-100 ms per call).
+const gitDouble = () => ({ status: 0, stdout: '', stderr: '' });
+
 function board(rootDir: string) {
   return composeBoardProjection({
     rootDir,
@@ -52,6 +56,10 @@ function board(rootDir: string) {
     laneEventRepo: { async findAll() { return []; } } as never,
     usageRepo: { async findAll() { return []; } } as never,
     knownAgentFamilies: [],
+    launcherProbe: () => ({ available: true, detail: null }),
+    readAgentConfig: () => null,
+    detectRunningSessions: () => null,
+    gitFn: gitDouble,
   });
 }
 

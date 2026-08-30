@@ -14,6 +14,10 @@ const { renderMissionPhaseReport, normalizeStatsRow } = renderMissionPhaseReport
 // phase (draft / execute / review) from stored telemetry rows, and that the
 // rendering is deterministic for the same rows.
 
+const TEST_REPO = 'phase-stats-test-repo';
+
+// Rows and renders pin one explicit repository identity: the un-pinned
+// defaults resolve it through the real git CLI (a subprocess per call).
 function rows() {
   return [
     { mission: 'task-1285', stage: 'draft', provider: 'openai', model: 'gpt-5.4', implementer_agent: 'codex', input_tokens: '1000', output_tokens: '200', cached_tokens: '50', tool_calls: '5', duration_minutes: '3', },
@@ -21,11 +25,11 @@ function rows() {
     { mission: 'task-1285', stage: 'review', provider: 'openai', model: 'gpt-5.4', reviewer_agent: 'codex', input_tokens: '800', output_tokens: '150', cached_tokens: '20', tool_calls: '3', duration_minutes: '6', },
     // Unrelated mission must not leak into the task-1285 breakdown.
     { mission: 'task-1248', stage: 'active', provider: 'opencode', model: 'custom', implementer_agent: 'custom', input_tokens: '0', output_tokens: '0', },
-  ].map(normalizeStatsRow);
+  ].map((row) => normalizeStatsRow(row, { repo: TEST_REPO }));
 }
 
 test('mission phase report shows draft, execute, and review as separate phases', () => {
-  const report = renderMissionPhaseReport(rows(), 'task-1285');
+  const report = renderMissionPhaseReport(rows(), 'task-1285', { repo: TEST_REPO });
   assert.match(report, /Mission telemetry by phase: task-1285/);
   for (const phase of ['draft', 'execute', 'review']) {
     assert.match(report, new RegExp(`\\b${phase}\\b`), `expected phase ${phase} in report`);
@@ -33,7 +37,7 @@ test('mission phase report shows draft, execute, and review as separate phases',
 });
 
 test('mission phase report filters to a single mission (no cross-mission leakage)', () => {
-  const report = renderMissionPhaseReport(rows(), 'task-1285');
+  const report = renderMissionPhaseReport(rows(), 'task-1285', { repo: TEST_REPO });
   // task-1248's launcher identity must not appear in task-1285's breakdown.
   assert.doesNotMatch(report, /opencode/);
   // task-1285's own draft tokens must appear.
@@ -41,7 +45,7 @@ test('mission phase report filters to a single mission (no cross-mission leakage
 });
 
 test('mission phase report attributes the execute phase to the stored active row', () => {
-  const report = renderMissionPhaseReport(rows(), 'task-1285');
+  const report = renderMissionPhaseReport(rows(), 'task-1285', { repo: TEST_REPO });
   const executeLine = report.split('\n').find(line => /\bexecute\b/.test(line));
   assert.ok(executeLine, 'execute line present');
   assert.match(executeLine, /claude-opus-4-8/);
@@ -49,13 +53,13 @@ test('mission phase report attributes the execute phase to the stored active row
 });
 
 test('mission phase report is deterministic for the same rows', () => {
-  const a = renderMissionPhaseReport(rows(), 'task-1285');
-  const b = renderMissionPhaseReport(rows(), 'task-1285');
+  const a = renderMissionPhaseReport(rows(), 'task-1285', { repo: TEST_REPO });
+  const b = renderMissionPhaseReport(rows(), 'task-1285', { repo: TEST_REPO });
   assert.equal(a, b);
 });
 
 test('mission phase report records an unknown mission as explicit zeros, not fabricated data', () => {
-  const report = renderMissionPhaseReport(rows(), 'task-9999');
+  const report = renderMissionPhaseReport(rows(), 'task-9999', { repo: TEST_REPO });
   assert.match(report, /No telemetry rows recorded for mission "task-9999"/);
   // Still prints the canonical phases so the shape is comparable.
   for (const phase of ['draft', 'execute', 'review']) {
@@ -66,7 +70,7 @@ test('mission phase report records an unknown mission as explicit zeros, not fab
 // task-1318: regression tests for cost column, review attribution, and token sanity check
 
 test('mission phase report includes Cost ($) column in header and data rows', () => {
-  const report = renderMissionPhaseReport(rows(), 'task-1285');
+  const report = renderMissionPhaseReport(rows(), 'task-1285', { repo: TEST_REPO });
   assert.match(report, /Cost \(\$\)/);
   // Verify cost column appears in the header row alongside Usage %
   const headerLine = report.split('\n').find(line => /Usage %/.test(line));
@@ -77,7 +81,7 @@ test('mission phase report includes Cost ($) column in header and data rows', ()
 test('mission phase report Cost ($) column shows values from telemetry rows and totals', () => {
 // @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `map` absent from its inferred mock shape.
   const rowsWithCost = rows().map(r => ({ ...r, cost_usd: '5' }));
-  const report = renderMissionPhaseReport(rowsWithCost, 'task-1285');
+  const report = renderMissionPhaseReport(rowsWithCost, 'task-1285', { repo: TEST_REPO });
   // Each phase row should show the cost value
   const lines = report.split('\n');
   const dataLines = lines.filter(l => l.includes('draft') || l.includes('execute') || l.includes('review'));
@@ -94,7 +98,7 @@ test('mission phase report Cost ($) column preserves fractional dollar costs (ta
   // must render the rounded decimal instead.
 // @ts-expect-error -- Legacy fixture intentionally accesses runtime-only `map` absent from its inferred mock shape.
   const rowsWithCost = rows().map((r, i) => ({ ...r, cost_usd: i === 1 ? '1.4226295' : '0.46433' }));
-  const report = renderMissionPhaseReport(rowsWithCost, 'task-1285');
+  const report = renderMissionPhaseReport(rowsWithCost, 'task-1285', { repo: TEST_REPO });
   const lines = report.split('\n');
   const executeLine = lines.find(l => /\bexecute\b/.test(l));
   assert.ok(executeLine, 'execute line present');
@@ -106,7 +110,7 @@ test('mission phase report Cost ($) column preserves fractional dollar costs (ta
 });
 
 test('mission phase report Cost ($) column shows 0 for rows without cost_usd', () => {
-  const report = renderMissionPhaseReport(rows(), 'task-1285');
+  const report = renderMissionPhaseReport(rows(), 'task-1285', { repo: TEST_REPO });
   const lines = report.split('\n');
   // Rows without cost_usd should show 0 in the cost column
   const draftLine = lines.find(l => /\bdraft\b/.test(l));
@@ -120,8 +124,8 @@ test('mission phase report review phase attributes to reviewer_agent, not implem
   // Review rows store reviewer_agent (set by recordReviewStats passing reviewer as implementer)
   const reviewRows = [
     { mission: 'task-1318', stage: 'review', provider: 'anthropic', model: 'claude-opus-4-8', implementer_agent: 'claude', reviewer_agent: 'claude', input_tokens: '800', output_tokens: '150', cached_tokens: '20', tool_calls: '3', duration_minutes: '6', },
-  ].map(normalizeStatsRow);
-  const report = renderMissionPhaseReport(reviewRows, 'task-1318');
+  ].map((row) => normalizeStatsRow(row, { repo: TEST_REPO }));
+  const report = renderMissionPhaseReport(reviewRows, 'task-1318', { repo: TEST_REPO });
   // The review phase should show the reviewer's agent family (claude), not self-attributed
   const reviewLine = report.split('\n').find(line => /\breview\b/.test(line));
   assert.ok(reviewLine, 'review line present');
@@ -131,8 +135,8 @@ test('mission phase report review phase attributes to reviewer_agent, not implem
 test('mission phase report execute phase shows implementer_agent when set', () => {
   const execRows = [
     { mission: 'task-1318', stage: 'active', provider: 'openai', model: 'gpt-5.4', implementer_agent: 'codex', input_tokens: '4000', output_tokens: '900', cached_tokens: '300', tool_calls: '18', duration_minutes: '22', },
-  ].map(normalizeStatsRow);
-  const report = renderMissionPhaseReport(execRows, 'task-1318');
+  ].map((row) => normalizeStatsRow(row, { repo: TEST_REPO }));
+  const report = renderMissionPhaseReport(execRows, 'task-1318', { repo: TEST_REPO });
   const execLine = report.split('\n').find(line => /\bexecute\b/.test(line));
   assert.ok(execLine, 'execute line present');
   assert.match(execLine, /codex/);
@@ -142,7 +146,7 @@ test('mission phase report shows multiple follow-up rows when different agent fa
   const report = renderMissionPhaseReport([
     { mission: 'task-1342', stage: 'follow-up', provider: 'openai', model: 'gpt-5', implementer_agent: 'codex', input_tokens: '100', output_tokens: '10', },
     { mission: 'task-1342', stage: 'follow-up', provider: 'openai', model: 'gpt-5', implementer_agent: 'custom', input_tokens: '200', output_tokens: '20', },
-  ].map(normalizeStatsRow), 'task-1342');
+  ].map((row) => normalizeStatsRow(row, { repo: TEST_REPO })), 'task-1342', { repo: TEST_REPO });
   const followUpLines = report.split('\n').filter(line => /\bfollow-up\b/.test(line));
   assert.equal(followUpLines.length, 2);
   assert.ok(followUpLines.some(line => /\bcodex\b/.test(line)));
