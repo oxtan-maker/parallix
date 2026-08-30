@@ -8,7 +8,10 @@
 
 import * as fmt from '../../application/presentation/cli-format.js';
 import type { BoardProjection } from '../../application/projections/board.js';
-import type { BoardProgressSink } from '../../application/controller/board-command.js';
+import type {
+  BoardCommandDispatcher,
+  BoardProgressSink,
+} from '../../application/controller/board-command.js';
 import { createWebHost, type WebAssets, type WebHostInfo } from '../web/host.js';
 import type { LoopbackLiteral } from '../web/security.js';
 
@@ -19,6 +22,12 @@ import type { LoopbackLiteral } from '../web/security.js';
  */
 export interface WebBoardSource {
   readonly buildProjection: () => Promise<BoardProjection>;
+  /**
+   * The guarded board command dispatcher the mutation route dispatches
+   * through; absent or `null` when the source has no Mission authority and
+   * the host stays read-only.
+   */
+  readonly commandDispatcher?: BoardCommandDispatcher | null;
   /** Releases the services behind the source; runs when the host shuts down. */
   readonly close: () => Promise<void>;
 }
@@ -77,6 +86,9 @@ export async function runWebCommand(args: string[] = [], cli: WebCliOptions = {}
       ? () => source === null
         ? Promise.reject(new Error('web board source is not ready'))
         : source.buildProjection()
+      : undefined,
+    commandDispatcher: cli.createBoardSource
+      ? () => (source === null ? null : source.commandDispatcher ?? null)
       : undefined,
   });
   let info: WebHostInfo;

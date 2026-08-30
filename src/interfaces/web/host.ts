@@ -18,17 +18,32 @@ import {
   subscribeToBoardProjection,
   type BoardSubscriptionOptions,
 } from '../../application/projections/board-subscription.js';
-import type { BoardProgressSink } from '../../application/controller/board-command.js';
+import type {
+  BoardCommandDispatcher,
+  BoardCommandRequest,
+  BoardProgressSink,
+} from '../../application/controller/board-command.js';
+import {
+  failure,
+  rejected,
+  type ApplicationOutcome,
+  type Capability,
+} from '../../application/contracts.js';
 import {
   createWebEventStream,
   formatSseFrame,
   type WebEventStream,
 } from './stream.js';
 import {
+  isInvalidWebCommandRequest,
   toWebBoardSnapshot,
+  toWebCommandResult,
   toWebProgressEvent,
+  validateWebCommandRequest,
   WEB_TRANSPORT_VERSION,
+  type WebBoardSnapshot,
   type WebCommandError,
+  type WebCommandResult,
   type WebTransportVersion,
 } from './transport.js';
 import {
@@ -54,6 +69,8 @@ export const DEFAULT_BODY_LIMIT_BYTES = 64 * 1024;
 /** Read-only route paths. Both outrank the `/*` asset catch-all. */
 export const WEB_SNAPSHOT_PATH = '/api/board';
 export const WEB_EVENTS_PATH = '/api/events';
+/** The only mutation route on this host. Outranks the 405 catch-all. */
+export const WEB_COMMANDS_PATH = '/api/commands';
 
 /**
  * A projection rebuild that failed. Deliberately *not* an empty board: a
@@ -111,6 +128,15 @@ export interface WebHostOptions {
    */
   buildProjection?: () => Promise<BoardProjection>;
   /**
+   * The guarded board command dispatcher the mutation route dispatches
+   * through (the production `BoardCommandController` shared with the TUI, or
+   * a test spy). A supplier because composition resolves the dispatcher only
+   * after the host exists; `null` means the host is read-only and the route
+   * answers 503. The web layer dispatches only through this port; it
+   * constructs no controller, read, or effect adapter (ADR 0051).
+   */
+  commandDispatcher?: () => BoardCommandDispatcher | null;
+  /**
    * Timer/interval seam for the shared projection subscription. Tests drive
    * the loop through this rather than a real clock; production takes the
    * default `BOARD_REFRESH_INTERVAL_MS` poll.
@@ -149,6 +175,20 @@ function injectCsrfMeta(shellHtml: string, launchValue: string): string {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** Every body this host answers with for a command is the safe wire envelope. */
+function sendCommandResult(reply: FastifyReply, status: number, outcome: ApplicationOutcome<unknown>): void {
+  reply.code(status).type('application/json; charset=utf-8').send(toWebCommandResult(outcome));
+}
+
+/** The transport status Fastify attached to a lifecycle error, if any. */
+function transportStatusCode(error: unknown): number {
+  if (typeof error === 'object' && error !== null
+    && typeof (error as { statusCode?: unknown }).statusCode === 'number') {
+    return (error as { statusCode: number }).statusCode;
+  }
+  return 500;
 }
 
 function snapshotError(kind: WebCommandError['kind'], message: string): WebBoardSnapshotError {
@@ -202,7 +242,10 @@ export function createWebHost(options: WebHostOptions): WebHost {
         }
         const origin = actualOrigin(current);
         if (evaluateHostHeader(request.headers.host, current) !== 'ok') {
-          return reply.code(403).send('host mismatch');
+          // The Host header is part of the per-launch capability (ADR 0054);
+          // the rejection carries the same safe envelope as every other
+          // command response.
+          return sendCommandResult(reply, 403, rejected('capability', 'host mismatch'));
         }
         if (!isReadOnlyMethod(request.method)) {
           // Read-only requests carry no body, so only state-changing methods
@@ -214,12 +257,14 @@ export function createWebHost(options: WebHostOptions): WebHost {
             sessionCookie: cookieValue(request.headers.cookie, WEB_SESSION_COOKIE),
             csrfHeader: singleHeader(request.headers[WEB_CSRF_HEADER]),
           }, origin, launchValue);
-          if (decision.result === 'reject') { return reply.code(403).send(decision.reason); }
+          if (decision.result === 'reject') {
+            return sendCommandResult(reply, 403, rejected('capability', decision.reason));
+          }
           const contentTypeCheck = evaluateContentType(request.method, singleHeader(request.headers['content-type']));
           if (contentTypeCheck.result === 'reject') { return reply.code(contentTypeCheck.status).send(); }
-          // Credentials valid, but no mutation routes exist yet: routing
-          // answers 405. The boundary above is what a future route would
-          // still have to pass.
+          // Credentials valid: the command route below dispatches, every
+          // other path still answers 405. The boundary above is what the
+          // route had to pass first.
         }
       });
 
@@ -230,6 +275,24 @@ export function createWebHost(options: WebHostOptions): WebHost {
         if (reply.getHeader('cache-control') === undefined) {
           reply.header('cache-control', 'no-store');
         }
+      });
+
+      // Transport-level errors (a malformed JSON body reaches the parser
+      // before any route does) answer with the same safe envelope: a parse
+      // failure is a 400 validation rejection, transport size/type limits
+      // keep their status and empty body, and anything else is a 500 whose
+      // body never echoes internal detail.
+      app.setErrorHandler((error, _request, reply) => {
+        const status = transportStatusCode(error);
+        if (status === 400) {
+          sendCommandResult(reply, 400, rejected('validation', 'request body is not valid JSON'));
+          return;
+        }
+        if (status === 411 || status === 413 || status === 415) {
+          reply.code(status);
+          return reply.send();
+        }
+        sendCommandResult(reply, 500, failure('execution', 'internal error'));
       });
 
       app.get(WEB_EVENTS_PATH, async (request, reply) => {
@@ -286,6 +349,86 @@ export function createWebHost(options: WebHostOptions): WebHost {
         }
       });
 
+      // The only mutation route (TASK-2433). It outranks the 405 catch-all
+      // registered below; the onRequest hook above has already enforced the
+      // Host/Origin/session/CSRF boundary before this handler runs.
+      app.post(WEB_COMMANDS_PATH, async (request, reply) => {
+        const dispatcher = options.commandDispatcher?.();
+        if (dispatcher === undefined || dispatcher === null) {
+          return sendCommandResult(reply, 503, failure('unavailable', 'command dispatcher port is not wired'));
+        }
+        const validation = validateWebCommandRequest(request.body);
+        if (isInvalidWebCommandRequest(validation)) {
+          return sendCommandResult(reply, 400, rejected('validation', validation.problems.join('; ')));
+        }
+        const build = options.buildProjection;
+        if (build === undefined) {
+          return sendCommandResult(reply, 503, failure('unavailable', 'board projection port is not wired'));
+        }
+        let projection: BoardProjection;
+        try {
+          projection = await build();
+        } catch (error) {
+          // A failed rebuild is transient, exactly as on the snapshot route:
+          // "unavailable, try again", never a dispatch on a stale board.
+          return sendCommandResult(reply, 503, failure('unavailable', errorMessage(error)));
+        }
+        let snapshot: WebBoardSnapshot;
+        try {
+          // Gating on the wire card reuses the server-owned action states
+          // (`enabled`/`ineligible`/`unavailable`) rather than re-deriving
+          // them: one definition of "currently advertised".
+          snapshot = toWebBoardSnapshot(projection);
+        } catch (error) {
+          return sendCommandResult(reply, 500, failure('execution', errorMessage(error)));
+        }
+        const command = validation.value;
+        const card = snapshot.stages
+          .flatMap((stage) => stage.cards)
+          .find((candidate) => candidate.id === command.missionId);
+        if (card === undefined) {
+          return sendCommandResult(reply, 409, failure('conflict', `mission ${command.missionId} is not on the board`));
+        }
+        const action = card.actions.find((candidate) => candidate.kind === command.kind);
+        if (action === undefined || action.state !== 'enabled') {
+          const detail = action?.reason !== null && action?.reason !== undefined ? `: ${action.reason}` : '';
+          return sendCommandResult(reply, 409, failure('conflict',
+            `action ${command.kind} is not enabled for mission ${command.missionId}${detail}`));
+        }
+        // Identity is host-owned: a fresh operation ID and the single-kind
+        // capability set, mirroring the TUI. The wire has no key for either.
+        const boardRequest: BoardCommandRequest = {
+          operationId: crypto.randomUUID(),
+          kind: command.kind,
+          missionId: command.missionId,
+          missionStatusAtRequest: command.missionStatusAtRequest,
+          capabilities: new Set([command.kind as Capability] as const),
+          ...(command.payload !== undefined
+            ? { payload: { kind: 'handoff:record' as const, ...command.payload } }
+            : {}),
+        };
+        let outcome: ApplicationOutcome<unknown>;
+        try {
+          outcome = await dispatcher.dispatch(boardRequest);
+        } catch (error) {
+          // A dispatcher that throws is an execution failure; only its
+          // message may cross the wire.
+          outcome = failure('execution', errorMessage(error));
+        }
+        let result: WebCommandResult;
+        try {
+          result = toWebCommandResult(outcome);
+        } catch (error) {
+          // An outcome the transport refuses to project is a contract
+          // failure, not a dispatched outcome.
+          return sendCommandResult(reply, 500, failure('execution', errorMessage(error)));
+        }
+        // Every dispatched outcome — completed, conflict, failed, cancelled —
+        // answers 200 inside the envelope; the wire status carries the
+        // meaning and no server-side retry happens.
+        return reply.code(200).type('application/json; charset=utf-8').send(result);
+      });
+
       app.get('/', async (_request, reply) => {
         reply.header('set-cookie', `${WEB_SESSION_COOKIE}=${launchValue}; HttpOnly; SameSite=Strict; Path=/`);
         reply.header('cache-control', 'no-store');
@@ -303,11 +446,11 @@ export function createWebHost(options: WebHostOptions): WebHost {
         return reply.type(asset.contentType).send(asset.body);
       });
 
-      // Explicit method allowlist: no mutation routes exist yet, so every
-      // state-changing method on every path is 405 with the allowed set.
-      // The onRequest hook above still enforces the Origin/session/CSRF
-      // boundary before this answer, and a future specific route (e.g.
-      // POST /boards/:id/move) will outrank this catch-all.
+      // Explicit method allowlist: the command route above is the only
+      // mutation route, so every other state-changing method on every path is
+      // 405 with the allowed set. The onRequest hook still enforces the
+      // Host/Origin/session/CSRF boundary before this answer; a second
+      // mutation route would need an ADR-level decision.
       const methodNotAllowed = async (_request: unknown, reply: FastifyReply) => {
         reply.header('allow', 'GET, HEAD');
         return reply.code(405).send();

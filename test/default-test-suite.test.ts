@@ -115,6 +115,10 @@ const expectedIntegrationFiles = [
   // the same real git/database boundary as task-2438 and task-2440.
       'task-2441-mission-title-repro.test.ts',
       'task-2443-repro.test.ts',
+  // TASK-2433: real-socket proof of the guarded mutation route (schema,
+  // advertised gate, stale guard wiring, security rejections, safe bodies).
+  // Loopback-only with injected dispatcher spy and projection builder.
+  'task-2433-web-mutation.integration.test.ts',
       'test-hygiene.test.ts',
   'tui-pty-smoke.test.ts', 'task-2313-repro.test.ts', 'task-2370-repro.test.ts',
   'tui-command-flow.test.ts',
