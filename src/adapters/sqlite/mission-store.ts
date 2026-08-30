@@ -123,6 +123,10 @@ export class SqliteMissionStore implements MissionStore, MissionNelRecorder {
     return this.enqueue(() => this.saveAggregateWithTransition(mission, expectedVersion, event));
   }
 
+  async findTransitions(missionId: MissionId) {
+    return this.eventRepo.findByMissionId(missionId);
+  }
+
   private async loadAggregate(id: MissionId): Promise<MissionLoadResult> {
     const missionRows = await this.db.query<MissionRecord>(
       `SELECT id, repository_id, title, status, raw_status, assignee,

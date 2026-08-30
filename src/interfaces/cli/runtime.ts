@@ -25,6 +25,7 @@ export const KNOWN_COMMANDS: string[] = [
   'setup-review',
   'draft',
   'active',
+  'recover',
   'status',
   'checkpoint',
   'review',
@@ -240,6 +241,7 @@ ${fmt.bold('Core Commands:')}
   setup-review          Legacy Forgejo-only bootstrap for tokens, repo creation, and git review remote.
   draft [<slug>] [--agent <family>]  Mission setup automation; use --agent to select the draft implementer family.
   active [<slug>] [--implementer <family>]  Run preflight and launch the execute agent; use --implementer to select its family.
+  recover <slug>        Reconcile an interrupted active task with its closed durable aggregate.
   status [<slug>]       Unified mission and repository overview.
   checkpoint [<slug>] <cp> "<next>"  Verify, commit, and push checkpoint.
   review [<slug>] [--verify|--submit|--push [--force]|--comment "<msg>"|--comment-file <path>|--submit-review <outcome> [--message "<msg>"|--message-file <path>]|--start|--continue] [--implementer <a>] [--reviewer <a>] [--focus <f>] [--max-attempts <n>] [--dry-run] [--reset] [--no-gate]
