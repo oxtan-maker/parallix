@@ -98,3 +98,7 @@ the capability registry, lane rules, or in-process class instances.
   add an event envelope here rather than inventing one in transport.
 - A browser feature that requires a flow-metric series or review history on
   the wire.
+
+## References
+
+- [TASK-2447](../../backlog/tasks/task-2447%20-%20Expose-complete-mission-card-facts-to-the-web-board.md) — amended: transport version 2 extends the card DTO with the server-owned `pullRequest` (nullable), `reviewApproved`, and `reviewHistory` facts that the v1 snapshot deliberately omitted, each validated fail-closed; v1 was dropped from the supported versions because no v1 browser client existed when the board shell was still in phase 1.

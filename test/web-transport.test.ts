@@ -7,10 +7,11 @@ import {
   validateWebBoardSnapshot,
   validateWebCommandResult,
   validateWebProgressEvent,
+  SUPPORTED_WEB_TRANSPORT_VERSIONS,
   WEB_TRANSPORT_VERSION,
   WebTransportError,
 } from '../src/interfaces/web/transport.js';
-import type { WebCommandAction } from '../src/interfaces/web/transport.js';
+import type { WebCommandAction, WebMissionCard } from '../src/interfaces/web/transport.js';
 import {
   makeAttentionItem,
   makeCard,
@@ -20,7 +21,7 @@ import {
 } from './fixtures/board-projection.js';
 import type { BoardProjection } from '../src/application/projections/board.js';
 import type { AgentAvailabilityMetric } from '../src/application/projections/board.js';
-import type { LiveMissionWork, MissionCard } from '../src/application/projections/mission-board.js';
+import type { LiveMissionWork, MissionCard, ReviewRoundSummary } from '../src/application/projections/mission-board.js';
 import { agentFamily } from '../src/domain/agents.js';
 import type { MissionId } from '../src/domain/mission.js';
 import { completed, failure } from '../src/application/contracts.js';
@@ -479,6 +480,232 @@ test('unsupported projection version is rejected before conversion', () => {
     () => toWebBoardSnapshot(future),
     (error: unknown) => error instanceof WebTransportError && error.code === 'unsupported-projection-version',
   );
+});
+
+// ---------------------------------------------------------------------------
+// TASK-2447 — server-owned card facts: pullRequest, reviewApproved, reviewHistory
+// ---------------------------------------------------------------------------
+
+const task2447History: readonly ReviewRoundSummary[] = [
+  {
+    number: 1,
+    reviewer: agentFamily('codex'),
+    implementer: agentFamily('custom'),
+    phase: 'fixing',
+    disposition: 'REQUEST_CHANGES',
+    comment: 'Two findings on the gate wiring.',
+    findingSummaries: ['transport.ts: review fields unvalidated'],
+    pushbacks: [],
+    fixes: [],
+  },
+  {
+    number: 2,
+    reviewer: agentFamily('claude'),
+    implementer: agentFamily('custom'),
+    phase: 'reviewing',
+    disposition: null,
+    comment: null,
+    findingSummaries: ['web card omits the PR link'],
+    pushbacks: ['F-2: url is null for a local review surface'],
+    fixes: ['F-1: projected pullRequest one-to-one'],
+  },
+];
+
+function wireCardFor(card: MissionCard): WebMissionCard {
+  const snapshot = toWebBoardSnapshot(makeProjection({ [card.lane]: [card] }));
+  const wire = snapshot.stages.flatMap((stage) => stage.cards).find((c) => c.id === card.id);
+  assert.ok(wire !== undefined, `wire card for ${card.id} must exist`);
+  return wire;
+}
+
+function snapshotPayloadFor(card: MissionCard): Record<string, unknown> {
+  const snapshot = toWebBoardSnapshot(makeProjection({ [card.lane]: [card] }));
+  return JSON.parse(JSON.stringify(snapshot));
+}
+
+function stageCards(payload: Record<string, unknown>): Record<string, unknown>[] {
+  const stages = (payload.stages ?? []) as Record<string, unknown>[];
+  return stages.flatMap((stage) => (stage.cards ?? []) as Record<string, unknown>[]);
+}
+
+test('snapshot card DTO carries pullRequest, reviewApproved, and reviewHistory through a JSON round trip', () => {
+  const card = makeFullCard({
+    reviewRound: 2,
+    reviewPhase: 'fixing',
+    reviewDisposition: null,
+    reviewHistory: task2447History,
+  });
+  const wire = wireCardFor(card);
+  assert.deepStrictEqual(wire.pullRequest, {
+    kind: 'pull-request',
+    provider: 'forgejo',
+    id: '42',
+    url: 'https://example.invalid/pr/42',
+    sourceBranch: 'mission/task-1234',
+    targetBranch: 'main',
+  });
+  assert.strictEqual(wire.reviewApproved, true);
+  assert.deepStrictEqual(wire.reviewHistory, task2447History);
+
+  const snapshot = toWebBoardSnapshot(makeProjection({ [card.lane]: [card] }));
+  const parsed = roundTrip(snapshot);
+  assert.deepStrictEqual(parsed, snapshot);
+  const parsedCard = parsed.stages.flatMap((stage) => stage.cards).find((c) => c.id === card.id);
+  assert.ok(parsedCard !== undefined);
+  assert.deepStrictEqual(parsedCard.pullRequest, card.pullRequest);
+  assert.strictEqual(parsedCard.reviewApproved, card.reviewApproved);
+  assert.deepStrictEqual(parsedCard.reviewHistory, card.reviewHistory);
+
+  // Existing checkpoint and current-round fields survive the round trip unchanged.
+  assert.equal(parsedCard.checkpoint, 'CP-2.md');
+  assert.equal(parsedCard.checkpointDescription, 'CP-2: components extracted');
+  assert.equal(parsedCard.nextActionText, 'run the verification gate');
+  assert.equal(parsedCard.gate, 'passed');
+  assert.equal(parsedCard.reviewRound, 2);
+  assert.equal(parsedCard.reviewPhase, 'fixing');
+  assert.equal(parsedCard.reviewDisposition, null);
+});
+
+test('snapshot card DTO keeps pullRequest null when the card has no pull-request reference', () => {
+  const card = makeFullCard({ pullRequest: null, reviewHistory: [] });
+  const wire = wireCardFor(card);
+  assert.strictEqual(wire.pullRequest, null, 'a local-branch review subject stays null, not an empty object');
+  assert.strictEqual(wire.reviewApproved, true);
+  assert.deepStrictEqual(wire.reviewHistory, []);
+
+  const snapshot = toWebBoardSnapshot(makeProjection({ [card.lane]: [card] }));
+  const parsed = roundTrip(snapshot);
+  const parsedCard = parsed.stages.flatMap((stage) => stage.cards).find((c) => c.id === card.id);
+  assert.ok(parsedCard !== undefined);
+  assert.strictEqual(parsedCard.pullRequest, null);
+});
+
+test('snapshot card DTO round-trips reviewApproved and every per-round reviewHistory field', () => {
+  const card = makeFullCard({ reviewHistory: task2447History });
+  const snapshot = toWebBoardSnapshot(makeProjection({ [card.lane]: [card] }));
+  const parsed = roundTrip(snapshot);
+  const parsedCard = parsed.stages.flatMap((stage) => stage.cards).find((c) => c.id === card.id);
+  assert.ok(parsedCard !== undefined);
+
+  assert.equal(typeof parsedCard.reviewApproved, 'boolean');
+  assert.strictEqual(parsedCard.reviewApproved, card.reviewApproved);
+  assert.equal(parsedCard.reviewHistory.length, task2447History.length);
+  parsedCard.reviewHistory.forEach((round, index) => {
+    const source = task2447History[index];
+    assert.strictEqual(round.number, source.number);
+    assert.strictEqual(round.reviewer, source.reviewer);
+    assert.strictEqual(round.implementer, source.implementer);
+    assert.strictEqual(round.phase, source.phase);
+    assert.strictEqual(round.disposition, source.disposition);
+    assert.strictEqual(round.comment, source.comment);
+    assert.deepStrictEqual(round.findingSummaries, [...source.findingSummaries]);
+    assert.deepStrictEqual(round.pushbacks, [...source.pushbacks]);
+    assert.deepStrictEqual(round.fixes, [...source.fixes]);
+  });
+
+  // The second round has disposition null with non-empty finding/pushback/fix lists.
+  const openRound = parsedCard.reviewHistory[1];
+  assert.strictEqual(openRound.disposition, null);
+  assert.ok(openRound.findingSummaries.length > 0);
+  assert.ok(openRound.pushbacks.length > 0);
+  assert.ok(openRound.fixes.length > 0);
+
+  // Unapproved card without history: false and [] survive the round trip.
+  const bare = makeCard();
+  const bareWire = wireCardFor(bare);
+  assert.strictEqual(bareWire.reviewApproved, false);
+  assert.deepStrictEqual(bareWire.reviewHistory, []);
+});
+
+test('snapshot validation accepts the extended card and fails closed on malformed card facts', () => {
+  const card = makeFullCard({ reviewHistory: task2447History });
+  const payload = snapshotPayloadFor(card);
+
+  assert.equal(validateWebBoardSnapshot(payload).ok, true, 'extended valid payload must be accepted');
+
+  const unexpectedKey = JSON.parse(JSON.stringify(payload));
+  (stageCards(unexpectedKey)[0].pullRequest as Record<string, unknown>).pushedAt = '2026-08-30T00:00:00.000Z';
+  const unexpectedKeyValidation = validateWebBoardSnapshot(unexpectedKey);
+  assert.equal(unexpectedKeyValidation.ok, false);
+  if (!unexpectedKeyValidation.ok) {
+    assert.equal(unexpectedKeyValidation.code, 'invalid-payload');
+    assert.ok(
+      unexpectedKeyValidation.problems.some((problem) => problem.includes('.pullRequest') && problem.includes('pushedAt')),
+      `expected an unexpected-key problem for pullRequest.pushedAt, got ${JSON.stringify(unexpectedKeyValidation.problems)}`,
+    );
+  }
+
+  const wrongKind = JSON.parse(JSON.stringify(payload));
+  (stageCards(wrongKind)[0].pullRequest as Record<string, unknown>).kind = 'local-branch';
+  const wrongKindValidation = validateWebBoardSnapshot(wrongKind);
+  assert.equal(wrongKindValidation.ok, false);
+  if (!wrongKindValidation.ok) {
+    assert.equal(wrongKindValidation.code, 'invalid-payload');
+    assert.ok(
+      wrongKindValidation.problems.some((problem) => problem.includes('.pullRequest.kind')),
+      `expected a kind problem, got ${JSON.stringify(wrongKindValidation.problems)}`,
+    );
+  }
+
+  const nonFiniteRound = JSON.parse(JSON.stringify(payload));
+  stageCards(nonFiniteRound)[0].reviewHistory[0].number = Number.NaN;
+  const nonFiniteRoundValidation = validateWebBoardSnapshot(nonFiniteRound);
+  assert.equal(nonFiniteRoundValidation.ok, false);
+  if (!nonFiniteRoundValidation.ok) {
+    assert.equal(nonFiniteRoundValidation.code, 'invalid-payload');
+    assert.ok(
+      nonFiniteRoundValidation.problems.some((problem) => problem.includes('.reviewHistory[0].number')),
+      `expected a non-finite number problem, got ${JSON.stringify(nonFiniteRoundValidation.problems)}`,
+    );
+  }
+
+  const badApproved = JSON.parse(JSON.stringify(payload));
+  stageCards(badApproved)[0].reviewApproved = 'yes';
+  const badApprovedValidation = validateWebBoardSnapshot(badApproved);
+  assert.equal(badApprovedValidation.ok, false);
+  if (!badApprovedValidation.ok) {
+    assert.equal(badApprovedValidation.code, 'invalid-payload');
+    assert.ok(
+      badApprovedValidation.problems.some((problem) => problem.includes('.reviewApproved')),
+      `expected a boolean problem, got ${JSON.stringify(badApprovedValidation.problems)}`,
+    );
+  }
+});
+
+test('transport version 2 rejects v1 payloads as incompatible clients, not invalid payloads', () => {
+  assert.equal(WEB_TRANSPORT_VERSION, 2);
+  assert.deepStrictEqual([...SUPPORTED_WEB_TRANSPORT_VERSIONS], [2]);
+
+  const snapshot = toWebBoardSnapshot(makeProjection({}));
+  assert.equal(snapshot.transportVersion, 2);
+
+  const v1Snapshot = validateWebBoardSnapshot({ ...snapshot, transportVersion: 1 });
+  assert.deepStrictEqual(v1Snapshot, {
+    ok: false,
+    code: 'incompatible-client',
+    field: 'transportVersion',
+    received: 1,
+    supported: [2],
+  });
+
+  const v1Result = validateWebCommandResult({
+    kind: 'command-result', transportVersion: 1, status: 'completed', error: null, durableEvidence: [],
+  });
+  assert.equal(v1Result.ok, false);
+  if (!v1Result.ok) {
+    assert.equal(v1Result.code, 'incompatible-client');
+    assert.equal(v1Result.received, 1);
+  }
+
+  const v1Progress = validateWebProgressEvent({
+    kind: 'progress', transportVersion: 1, operationId: 'op-1', sequence: 1,
+    phase: 'p', message: 'm', timestamp: 't',
+  });
+  assert.equal(v1Progress.ok, false);
+  if (!v1Progress.ok) {
+    assert.equal(v1Progress.code, 'incompatible-client');
+    assert.equal(v1Progress.received, 1);
+  }
 });
 
 test('conversion is pure: the source projection is not mutated and the output is deterministic', () => {

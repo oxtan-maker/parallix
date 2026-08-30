@@ -55,7 +55,7 @@ import type {
 // Version
 // ---------------------------------------------------------------------------
 
-export const WEB_TRANSPORT_VERSION = 1 as const;
+export const WEB_TRANSPORT_VERSION = 2 as const;
 export type WebTransportVersion = typeof WEB_TRANSPORT_VERSION;
 export const SUPPORTED_WEB_TRANSPORT_VERSIONS: readonly number[] = [WEB_TRANSPORT_VERSION];
 
@@ -133,6 +133,29 @@ export interface WebCommandAction {
   readonly reason: string | null;
 }
 
+/** Wire mirror of the domain `PullRequestReference` — six keys, `url` nullable. */
+export interface WebPullRequestReference {
+  readonly kind: 'pull-request';
+  readonly provider: string;
+  readonly id: string;
+  readonly url: string | null;
+  readonly sourceBranch: string;
+  readonly targetBranch: string;
+}
+
+/** Wire mirror of `ReviewRoundSummary` — nine keys per round, oldest first. */
+export interface WebReviewRoundSummary {
+  readonly number: number;
+  readonly reviewer: string;
+  readonly implementer: string;
+  readonly phase: string;
+  readonly disposition: string | null;
+  readonly comment: string | null;
+  readonly findingSummaries: readonly string[];
+  readonly pushbacks: readonly string[];
+  readonly fixes: readonly string[];
+}
+
 export interface WebMissionCard {
   readonly id: string;
   readonly title: string;
@@ -144,9 +167,12 @@ export interface WebMissionCard {
   readonly checkpointDescription: string | null;
   readonly nextActionText: string | null;
   readonly gate: WebGateState;
+  readonly pullRequest: WebPullRequestReference | null;
+  readonly reviewApproved: boolean;
   readonly reviewRound: number | null;
   readonly reviewPhase: string | null;
   readonly reviewDisposition: string | null;
+  readonly reviewHistory: readonly WebReviewRoundSummary[];
   readonly blockingReason: string | null;
   readonly flags: readonly string[];
   readonly activity: WebMissionActivity;
@@ -355,9 +381,29 @@ function toWebMissionCard(card: MissionCard): WebMissionCard {
     checkpointDescription: card.checkpointDescription,
     nextActionText: card.nextActionText,
     gate: card.gate,
+    pullRequest: card.pullRequest === null ? null : {
+      kind: 'pull-request',
+      provider: card.pullRequest.provider,
+      id: card.pullRequest.id,
+      url: card.pullRequest.url,
+      sourceBranch: card.pullRequest.sourceBranch,
+      targetBranch: card.pullRequest.targetBranch,
+    },
+    reviewApproved: card.reviewApproved,
     reviewRound: card.reviewRound,
     reviewPhase: card.reviewPhase,
     reviewDisposition: card.reviewDisposition,
+    reviewHistory: card.reviewHistory.map((round) => ({
+      number: round.number,
+      reviewer: round.reviewer,
+      implementer: round.implementer,
+      phase: round.phase,
+      disposition: round.disposition,
+      comment: round.comment,
+      findingSummaries: [...round.findingSummaries],
+      pushbacks: [...round.pushbacks],
+      fixes: [...round.fixes],
+    })),
     blockingReason: card.blockingReason,
     flags: [...card.flags],
     activity: {
@@ -725,15 +771,47 @@ function checkCoordinator(object: unknown, path: string, problems: string[]): vo
   }
 }
 
+function checkPullRequest(object: unknown, path: string, problems: string[]): void {
+  if (object === null) { return; }
+  if (!isPlainObject(object)) { problems.push(`${path} must be an object or null`); return; }
+  checkKeys(object,
+    ['kind', 'provider', 'id', 'url', 'sourceBranch', 'targetBranch'],
+    ['kind', 'provider', 'id', 'url', 'sourceBranch', 'targetBranch'], path, problems);
+  if (object.kind !== 'pull-request') { problems.push(`${path}.kind must be "pull-request", got ${String(object.kind)}`); }
+  checkString(object, 'provider', path, problems);
+  checkString(object, 'id', path, problems);
+  checkNullableString(object, 'url', path, problems);
+  checkString(object, 'sourceBranch', path, problems);
+  checkString(object, 'targetBranch', path, problems);
+}
+
+function checkReviewRound(object: unknown, path: string, problems: string[]): void {
+  if (!isPlainObject(object)) { problems.push(`${path} must be an object`); return; }
+  checkKeys(object,
+    ['number', 'reviewer', 'implementer', 'phase', 'disposition', 'comment',
+      'findingSummaries', 'pushbacks', 'fixes'],
+    ['number', 'reviewer', 'implementer', 'phase', 'disposition', 'comment',
+      'findingSummaries', 'pushbacks', 'fixes'], path, problems);
+  checkFiniteNumber(object, 'number', path, problems);
+  checkString(object, 'reviewer', path, problems);
+  checkString(object, 'implementer', path, problems);
+  checkString(object, 'phase', path, problems);
+  checkNullableString(object, 'disposition', path, problems);
+  checkNullableString(object, 'comment', path, problems);
+  checkStringArray(object, 'findingSummaries', path, problems);
+  checkStringArray(object, 'pushbacks', path, problems);
+  checkStringArray(object, 'fixes', path, problems);
+}
+
 function checkMissionCard(object: unknown, path: string, problems: string[]): void {
   if (!isPlainObject(object)) { problems.push(`${path} must be an object`); return; }
   checkKeys(object,
     ['id', 'title', 'lane', 'status', 'closed', 'agent', 'checkpoint', 'checkpointDescription',
-      'nextActionText', 'gate', 'reviewRound', 'reviewPhase', 'reviewDisposition',
-      'blockingReason', 'flags', 'activity', 'actions'],
+      'nextActionText', 'gate', 'pullRequest', 'reviewApproved', 'reviewRound', 'reviewPhase',
+      'reviewDisposition', 'reviewHistory', 'blockingReason', 'flags', 'activity', 'actions'],
     ['id', 'title', 'lane', 'status', 'closed', 'agent', 'checkpoint', 'checkpointDescription',
-      'nextActionText', 'gate', 'reviewRound', 'reviewPhase', 'reviewDisposition',
-      'blockingReason', 'flags', 'activity', 'actions'], path, problems);
+      'nextActionText', 'gate', 'pullRequest', 'reviewApproved', 'reviewRound', 'reviewPhase',
+      'reviewDisposition', 'reviewHistory', 'blockingReason', 'flags', 'activity', 'actions'], path, problems);
   checkString(object, 'id', path, problems);
   checkString(object, 'title', path, problems);
   checkEnum(object, 'lane', LANES, path, problems);
@@ -744,9 +822,16 @@ function checkMissionCard(object: unknown, path: string, problems: string[]): vo
   checkNullableString(object, 'checkpointDescription', path, problems);
   checkNullableString(object, 'nextActionText', path, problems);
   checkEnum(object, 'gate', GATES, path, problems);
+  checkPullRequest(object.pullRequest, `${path}.pullRequest`, problems);
+  checkBoolean(object, 'reviewApproved', path, problems);
   checkNullableFiniteNumber(object, 'reviewRound', path, problems);
   checkNullableString(object, 'reviewPhase', path, problems);
   checkNullableString(object, 'reviewDisposition', path, problems);
+  if (Array.isArray(object.reviewHistory)) {
+    object.reviewHistory.forEach((round, index) => checkReviewRound(round, `${path}.reviewHistory[${index}]`, problems));
+  } else {
+    problems.push(`${path}.reviewHistory must be an array`);
+  }
   checkNullableString(object, 'blockingReason', path, problems);
   checkStringArray(object, 'flags', path, problems);
   if (isPlainObject(object.activity)) {
