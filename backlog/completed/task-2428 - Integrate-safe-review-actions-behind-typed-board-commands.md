@@ -1,8 +1,8 @@
 ---
 id: TASK-2428
 title: Integrate safe review actions behind typed board commands
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-08-28 06:29'
 labels:
   - ai_sdlc
