@@ -1,6 +1,6 @@
 ---
 id: TASK-2447
-title: Expose complete mission card facts to the web board
+title: Eliminate web-board projection hallucinations
 status: backlog
 assignee:
   - codex
@@ -18,15 +18,20 @@ ordinal: 124917
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-The shared MissionCard projection contains checkpoint history, pull-request reference, review approval, and review history. The web transport currently forwards only the latest checkpoint text and current review round, so the browser cannot truthfully render the reference checkpoint indicators, PR link, or review-round meter. Ink reads the richer shared MissionCard directly, which makes the two UIs disagree despite the same board projection. Extend the versioned web transport with the existing server-owned facts and validate the round trip; do not derive limits, links, or checkpoint state in React.
+The shared MissionCard projection contains checkpoint history, pull-request reference, review approval, review history, commands, activity, and attention evidence. The web transport selectively drops facts, while earlier web components filled gaps with invented ranks, source narratives, lifecycle actions, fixed progress totals, and guessed card state. That produces a board which can disagree with Ink even though both should present the same operational truth.
+
+Make the web board a faithful, validated view of the shared projection. The web transport must carry every board-projection fact Ink receives: all mission-card fields, attention evidence, activity, commands, metrics, provenance, and operation data. The web may choose a different visual treatment, but it may not drop, replace, or reconstruct a fact. Preserve the distinction between unknown, unavailable, null, and zero. Do not derive lifecycle eligibility, PR links, review totals, checkpoint status, ranks, or work state in React. The result must make missing evidence visible as missing rather than filling it with plausible-looking fiction.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The web snapshot carries the checkpoint facts required to render the card indicators without client-side lifecycle inference.
-- [ ] #2 The web snapshot carries the pull-request reference and review facts required for the PR link and review display.
-- [ ] #3 Transport conversion and validation preserve the fields and reject malformed payloads.
-- [ ] #4 The web board renders received indicators and link data without invented values.
+- [ ] #1 The web snapshot carries every board-projection fact available to Ink, including every MissionCard field, attention evidence, activity, commands, metrics, provenance, and operation data.
+- [ ] #2 The web snapshot carries the checkpoint facts required for card indicators and the pull-request and review facts required for the PR link and review display.
+- [ ] #3 Transport conversion and validation preserve every shared fact and its unknown/unavailable/null/zero semantics, and reject malformed payloads.
+- [ ] #4 The browser has no client-side lifecycle rules or fabricated commands, ranks, source narratives, PR links, review totals, checkpoint states, or work states.
+- [ ] #5 Attention contains only server-actionable entries with consecutive server ranks; source provenance is not presented as a fabricated operator queue.
+- [ ] #6 Contract-parity tests fail whenever Ink can receive a shared board-projection fact that the web transport omits, for active, review, integration, blocked, and unavailable states.
+- [ ] #7 The web board renders only received indicators and link data; missing evidence is shown as unavailable or omitted, never substituted with a plausible value.
 <!-- AC:END -->
 
 ## Definition of Done
