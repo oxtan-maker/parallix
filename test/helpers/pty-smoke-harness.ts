@@ -289,6 +289,7 @@ export async function launchPtySmoke(
     },
     cleanup: async () => {
       release();
+      await exited;
       await rm(temp, { recursive: true, force: true });
     },
     send: (input) => { child.stdin.write(input); },
