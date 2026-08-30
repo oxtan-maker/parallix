@@ -9,6 +9,7 @@ import type { MissionCheckpointService } from '../mission-checkpoint-service.js'
 import type { MissionHandoffService } from '../mission-handoff-service.js';
 import type { MissionIntakeService } from '../mission-intake-service.js';
 import type { DraftCommandUseCase } from '../draft-command-use-case.js';
+import type { IntegrateCommandUseCase } from '../integrate-command-use-case.js';
 import type { MissionId } from '../../domain/mission.js';
 import type { MissionStore, MissionVersion } from '../domain-ports.js';
 import { NO_CURRENT_WORK_PORT, type CurrentWorkPort } from '../recording/current-work-recorder.js';
@@ -46,6 +47,8 @@ export interface BoardMissionServices {
    * value that crosses the boundary.
    */
   readonly draft?: DraftCommandUseCase;
+  /** Integration accepts only the mission identity; its workflow owns policy and effects. */
+  readonly integrate?: Pick<IntegrateCommandUseCase, 'executeForSlug'>;
 }
 
 // ---------------------------------------------------------------------------
@@ -77,6 +80,7 @@ export class BoardCommandController implements BoardCommandDispatcher {
     if (kind === 'checkpoint:record') { return Boolean(this.missionServices.checkpoints); }
     if (kind === 'handoff:record') { return Boolean(this.missionServices.handoff); }
     if (kind === 'draft:create') { return Boolean(this.missionServices.draft); }
+    if (kind === 'integrate:merge') { return Boolean(this.missionServices.integrate); }
     return true;
   }
 
@@ -109,6 +113,11 @@ export class BoardCommandController implements BoardCommandDispatcher {
       this.emit(operationId, 1, 'unavailable', reason);
       return unavailableCapability(kind, reason);
     }
+    if (kind === 'integrate:merge' && !this.canExecute(kind)) {
+      const reason = 'no integration workflow is configured for this interface';
+      this.emit(operationId, 1, 'unavailable', reason);
+      return unavailableCapability(kind, reason);
+    }
 
     // Guard 2: stale command check
     const staleResult = await this.checkStaleCommand(request);
@@ -134,6 +143,9 @@ export class BoardCommandController implements BoardCommandDispatcher {
     }
     if (kind === 'handoff:record') {
       return (await this.dispatchHandoff(request)) as BoardCommandResult<T>;
+    }
+    if (kind === 'integrate:merge') {
+      return (await this.dispatchIntegrate(request)) as BoardCommandResult<T>;
     }
     // Unreachable: isIntegratedCapability guard above catches all non-integrated kinds
     return unavailableCapability(kind, 'unexpected integrated capability') as BoardCommandResult<T>;
@@ -231,6 +243,20 @@ export class BoardCommandController implements BoardCommandDispatcher {
       return failure('execution', `draft:create for ${request.missionId} aborted: ${reason}`);
     }
     return completed({ slug: request.missionId });
+  }
+
+  private async dispatchIntegrate(request: BoardCommandRequest): Promise<BoardCommandResult<unknown>> {
+    if (!this.missionServices.integrate) {
+      return unavailableCapability('integrate:merge', 'no integration workflow is configured for this interface');
+    }
+    this.emit(request.operationId, 1, 'integrate', `integrating ${request.missionId}`);
+    try {
+      await this.missionServices.integrate.executeForSlug(request.missionId);
+      return completed({ slug: request.missionId });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : 'integration workflow failed';
+      return failure('execution', `integrate:merge for ${request.missionId} failed: ${reason}`);
+    }
   }
 
   private async dispatchActive(request: BoardCommandRequest): Promise<BoardCommandResult<ExecuteMissionResult>> {

@@ -197,6 +197,8 @@ export interface IntegrateFn extends Function {
 /** @param {string[]} args */
 async function integrate(args: string[], options: {
   missionServicesFn?: Function;
+  /** Board composition receives the terminal status without terminating the UI process. */
+  exitFn?: (_code: number) => void;
   // SC2: kernel-context injection seams. The squash-commit hook bounce builds
   // its rebound() context from these so tests keep a mock launch/transition/
   // fallback port instead of a real agent, git, or Forgejo.
@@ -206,6 +208,7 @@ async function integrate(args: string[], options: {
   selectAgentFn?: typeof selectAgent;
   workflowLauncherStatusFn?: typeof workflowLauncherStatus;
 } = {}) {
+  const exitFn = options.exitFn ?? process.exit;
   const missionServicesFn = options.missionServicesFn;
   const startAgentFn = options.startAgentFn ?? startAgent;
   const transitionTaskFn = options.transitionTaskFn ?? transitionTask;
@@ -221,7 +224,7 @@ async function integrate(args: string[], options: {
     parsedArgs = parseIntegrateArgs(args);
   } catch (error: any) {
     fmt.log.fail(error.message);
-    process.exit(1);
+    exitFn(1);
     return;
   }
   const { explicitSlug, dryRun, noIntegrationGates, noGate, realAgent, realAgentModel } = parsedArgs;
@@ -232,13 +235,13 @@ async function integrate(args: string[], options: {
 
   if (process.env.FORGEJO_USER === 'gemini' || process.env.WORKFLOW_AGENT === 'gemini') {
     fmt.log.fail('Gemini is not authorized to run integrate. Post a handoff comment on the PR and stop.');
-    process.exit(1);
+    exitFn(1);
     return;
   }
 
   if (!slug) {
     fmt.log.fail('Usage: px integrate [<slug>] [--dry-run] [--no-integration-gates]');
-    process.exit(1);
+    exitFn(1);
     return;
   }
 
@@ -728,7 +731,8 @@ async function integrate(args: string[], options: {
     if (nextActionMessage) {
       fmt.log.info(`\n${nextActionMessage}`);
     }
-    process.exit(exitCode);
+    exitFn(exitCode);
+    return { exitCode };
   }
 }
 

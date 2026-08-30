@@ -17,6 +17,7 @@ import { MissionCheckpointService } from '../application/mission-checkpoint-serv
 import { MissionHandoffService } from '../application/mission-handoff-service.js';
 import { MissionIntakeService } from '../application/mission-intake-service.js';
 import { DraftCommandUseCase } from '../application/draft-command-use-case.js';
+import { IntegrateCommandUseCase } from '../application/integrate-command-use-case.js';
 import type { DraftWorkflowPort } from '../application/ports/cli-workflows.js';
 import type { BoardMissionServices } from '../application/controller/board-controller.js';
 import type { CurrentWorkPort } from '../application/recording/current-work-recorder.js';
@@ -116,6 +117,7 @@ export function composeProductionCapabilities(
   progress?: BoardProgressSink,
   database?: SqliteDatabaseAdapter | null,
   overrides: ProductionCompositionOverrides = {},
+  integrate?: Pick<IntegrateCommandUseCase, 'executeForSlug'>,
 ): ProductionCapabilities {
   let missionServices: BoardMissionServices = {};
   if (missionStore) {
@@ -135,6 +137,7 @@ export function composeProductionCapabilities(
         workflow: overrides.draftWorkflow,
         workflowDeps: overrides.draftAdapterDeps,
       }),
+      integrate,
     };
   }
   // Single dispatcher instance shared by CLI and TUI (TASK-2332.05)

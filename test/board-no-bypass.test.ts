@@ -129,3 +129,11 @@ test('board controller uses ExecuteMissionService for active:execute dispatch', 
     'Controller must delegate to ExecuteMissionService.execute',
   );
 });
+
+test('board controller delegates integrate:merge to the application use case', () => {
+  const controllerSource = readSource(
+    path.join(root, 'src', 'application', 'controller', 'board-controller.ts'),
+  );
+  assert.ok(controllerSource.includes("../integrate-command-use-case.js"));
+  assert.ok(controllerSource.includes('this.missionServices.integrate.executeForSlug'));
+});
