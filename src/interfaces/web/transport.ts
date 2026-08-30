@@ -216,6 +216,7 @@ export interface WebAgentAvailability {
 }
 
 export interface WebSourceFact {
+  /** One fact per `(source, status, value)` tuple in a board snapshot; repeats are collapsed. */
   readonly source: string;
   readonly status: string;
   /** Optional: omitted when the fact carries no value. */
@@ -235,6 +236,7 @@ export interface WebBoardSnapshot {
   readonly agentAvailability: readonly WebAgentAvailability[];
   /** Optional-and-nullable, same three states as `runningSessions`. */
   readonly unattributedRunningSessions?: number | null;
+  /** One fact per `(source, status, value)` tuple; repeats are collapsed by the projection. */
   readonly sourceFacts: readonly WebSourceFact[];
 }
 

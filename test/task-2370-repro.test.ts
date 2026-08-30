@@ -171,7 +171,9 @@ test('TASK-2370 repro B: a live review phase is not misidentified as needing a h
   assert.ok(card?.currentWork, 'a live review operation must project current work');
   assert.equal(card.currentWork.phase, 'review');
   assert.equal(card.currentWork.agent, agentFamily('qwen'), 'the authoritative family must win over the process scan');
-  assert.equal(attention?.reason.kind, 'none', 'a mission with live work is WORKING, not NEEDS YOU');
+  // TASK-2444: a mission with nothing to say is not queued at all —
+  // absence from the queue is the "not NEEDS YOU" answer.
+  assert.equal(attention, undefined, 'a mission with live work is WORKING, not NEEDS YOU, and never queued without a reason');
 });
 
 // ---------------------------------------------------------------------------

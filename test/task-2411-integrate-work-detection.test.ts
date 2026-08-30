@@ -69,7 +69,7 @@ test('running integrate projects as working, not integrate-lane', async () => {
   const attention = projection.attentionQueue.find((item) => item.missionId === id);
 
   assert.ok(isWorkInProgress(card?.currentWork));
-  assert.equal(attention?.reason.kind, 'none');
+  assert.equal(attention, undefined);
 
   const ink = await import('ink');
   const React = await import('react');

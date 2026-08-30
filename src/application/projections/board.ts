@@ -175,7 +175,7 @@ export interface BoardProjection {
   readonly operationLog: readonly OperationLogEntry[];
   /** Time-based metrics derived from recorded events. */
   readonly metrics: BoardMetrics;
-  /** Source facts for rebuildability. */
+  /** Source facts for rebuildability, one per `(source, status, value)` tuple; repeats are collapsed. */
   readonly sourceFacts: readonly SourceFact<string>[];
 }
 
@@ -377,26 +377,31 @@ export function buildBoardProjection(
   const allLanes: readonly BoardLane[] = ['backlog', 'refined', 'active', 'review', 'integration', 'done'];
   const stages = allLanes.map((lane) => buildBoardStage(lane, cards));
 
-  const ranked = cards.map((card) => {
+  const ranked = cards.flatMap((card) => {
     const reason = attentionReason(card);
-    return {
+    if (reason.kind === 'none') { return []; }
+    const action = attentionAction(card, reason);
+    const command = action.kind.split(':', 1)[0];
+    if (!card.commands.some((item) => item.command === command && item.enabled)) { return []; }
+    return [{
       missionId: card.id,
       rank: attentionRank(card),
       reason,
       card,
-      action: attentionAction(card, reason),
+      action,
       dependsOnSources: attentionSources(reason),
-    };
+    }];
   });
   const attentionQueue = ranked.sort((left, right) => {
     const rank = left.rank - right.rank;
     return rank === 0 ? left.missionId.localeCompare(right.missionId) : rank;
-  });
+  }).map((item, index) => ({ ...item, rank: index + 1 }));
 
   const wipCounts = allLanes.map((lane) => ({
     lane,
     count: cards.filter((card) => card.lane === lane).length,
   }));
+  const uniqueSourceFacts = [...new Map(sourceFacts.map((fact) => [JSON.stringify([fact.source, fact.status, fact.value]), fact])).values()];
 
   return {
     version: BOARD_PROJECTION_VERSION,
@@ -407,7 +412,7 @@ export function buildBoardProjection(
     availableActions,
     operationLog,
     metrics,
-    sourceFacts,
+    sourceFacts: uniqueSourceFacts,
   };
 }
 
