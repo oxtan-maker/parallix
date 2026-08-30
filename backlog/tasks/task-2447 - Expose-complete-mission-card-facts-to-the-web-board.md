@@ -7,6 +7,7 @@ assignee:
 created_date: '2026-08-30 15:06'
 labels:
   - bug
+  - user_value
   - web
   - backend
   - projection
