@@ -101,9 +101,7 @@ test('a review-lane mission whose review is running does not ask for human atten
   const projection = await makeBuilder([{ missionId: reviewed, family: null }]).build();
 
   const item = projection.attentionQueue.find((entry) => entry.missionId === reviewed);
-  assert.ok(item, 'the mission is present in the attention queue');
-  assert.equal(item.card.liveSession?.missionId, reviewed, 'the card records the live review session');
-  assert.equal(item.reason.kind, 'none', 'a running review is not a human decision');
+  assert.equal(item, undefined, 'a running review is not a human decision');
 });
 
 test('a review-lane mission with no live session still awaits a human review decision', async () => {

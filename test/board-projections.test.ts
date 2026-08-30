@@ -54,7 +54,7 @@ function makeCard(
     currentWork: null,
     blockingReason: opts.blockingReason ?? null,
     flags: [],
-    commands: [],
+    commands: [{ command: lane === 'integration' ? 'integrate' : lane === 'review' ? 'review' : 'active', enabled: true, reason: null }],
   };
 }
 
@@ -209,7 +209,7 @@ test('attentionReason returns none for unblocked active mission', () => {
 // BoardProjection attentionQueue integration
 // ---------------------------------------------------------------------------
 
-test('buildBoardProjection attentionQueue is sorted by rank then missionId', () => {
+test('buildBoardProjection attentionQueue is sorted by priority then missionId with ordinal ranks', () => {
   const cards = [
     makeCard(id3, 'active'),
     makeCard(id1, 'active', { blockingReason: 'blocked' }),
@@ -225,10 +225,9 @@ test('buildBoardProjection attentionQueue is sorted by rank then missionId', () 
   );
 
   const queueIds = projection.attentionQueue.map((item) => item.missionId);
-  assert.deepEqual(queueIds, [id1, id2, id3]);
-  assert.equal(projection.attentionQueue[0].rank, 0);
+  assert.deepEqual(queueIds, [id1, id2]);
+  assert.equal(projection.attentionQueue[0].rank, 1);
   assert.equal(projection.attentionQueue[1].rank, 2);
-  assert.equal(projection.attentionQueue[2].rank, 4);
 });
 
 test('buildBoardProjection wipCounts reflects all lanes', () => {

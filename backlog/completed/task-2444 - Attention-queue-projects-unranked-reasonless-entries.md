@@ -1,8 +1,8 @@
 ---
 id: TASK-2444
 title: Attention queue projects unranked, reasonless entries
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-08-30 15:40'
 labels:
   - ai_sdlc

@@ -217,7 +217,7 @@ test('BoardProjectionBuilder preserves populated multi-round review cards from a
   assert.equal(approvedCard?.commands.find(({ command }) => command === 'integrate')?.enabled, false);
 });
 
-test('BoardProjectionBuilder attentionQueue orders by rank then missionId', async () => {
+test('BoardProjectionBuilder attentionQueue excludes reasonless cards', async () => {
   const missions = [
     { id: id3, repositoryId: repo, title: 'Active', labels: missionLabels(['a']), status: 'active' as const, closedAt: null, assignee: agentFamily('codex'), checkpoints: [], review: null, netEngineeringLines: null },
     { id: id1, repositoryId: repo, title: 'Review', labels: missionLabels(['a']), status: 'review' as const, closedAt: null, assignee: agentFamily('codex'), checkpoints: [], review: null, netEngineeringLines: null },
@@ -234,9 +234,7 @@ test('BoardProjectionBuilder attentionQueue orders by rank then missionId', asyn
   const projection = await builder.build();
 
   const queueIds = projection.attentionQueue.map((item) => item.missionId);
-  // review (rank 2) before backlog (rank 4) and active (rank 4)
-  // backlog and active both rank 4, tie-broken by missionId: task-0002 < task-0003
-  assert.deepEqual(queueIds, [id1, id2, id3]);
+  assert.deepEqual(queueIds, [id1]);
 });
 
 test('BoardProjectionBuilder wipCounts reflects all missions', async () => {
@@ -316,11 +314,10 @@ test('BoardProjectionBuilder reflects gate-failed status in attention ranking', 
   );
   const projection = await builder.build();
 
-  // task-0001 has failed gate (rank 1), task-0002 has passed gate (rank 4)
+  // task-0001 has a failed gate; task-0002 has no attention reason.
   assert.equal(projection.attentionQueue[0].missionId, id1);
   assert.equal(projection.attentionQueue[0].rank, 1);
-  assert.equal(projection.attentionQueue[1].missionId, id2);
-  assert.equal(projection.attentionQueue[1].rank, 4);
+  assert.equal(projection.attentionQueue.length, 1);
 });
 
 // ---------------------------------------------------------------------------
