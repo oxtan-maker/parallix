@@ -1,8 +1,8 @@
 ---
 id: TASK-2429
 title: Integrate merge through the guarded board command boundary
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-08-28 06:29'
 labels:
   - ai_sdlc

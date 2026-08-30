@@ -1,6 +1,7 @@
 import * as path from 'node:path';
 
 import { ExecuteMissionService } from '../application/execute-mission-service.js';
+import { IntegrateCommandUseCase } from '../application/integrate-command-use-case.js';
 import { StatsBackfillService } from '../application/stats-backfill-service.js';
 import { MissionCheckpointService } from '../application/mission-checkpoint-service.js';
 import { MissionHandoffService } from '../application/mission-handoff-service.js';
@@ -20,6 +21,7 @@ import { repositoryId, type RepositoryId } from '../domain/repository.js';
 import { resolveCanonicalRepositoryId } from '../adapters/git/repository-identity.js';
 import { createDefaultExecuteMissionRuntime, createExecuteMissionPorts } from '../adapters/mission/execute-mission-adapters.js';
 import { performHandoff } from '../adapters/cli/commands/handoff.js';
+import integrate from '../adapters/cli/commands/integrate.js';
 import { startReviewLoop } from '../adapters/review/review-loop.js';
 import { reviewLoopBindings } from './review-persistence.js';
 import { LegacyStatsBackfillAdapter } from '../adapters/mission/stats-backfill-adapter.js';
@@ -121,6 +123,20 @@ export interface ProductionApplicationServices {
    * still runs — the board simply reports that mission's work as unrecorded.
    */
   readonly currentWork: CurrentWorkPort;
+}
+
+/** Board integration keeps the CLI workflow but turns every non-zero exit into a typed failure. */
+export function createBoardIntegrateService(mission: MissionApplicationServices, currentWork: CurrentWorkPort): IntegrateCommandUseCase {
+  return new IntegrateCommandUseCase({
+    async execute(args) {
+      await integrate(args, {
+        missionServicesFn: async () => mission,
+        exitFn: (code) => {
+          if (code !== 0) { throw new Error(`integration workflow exited with code ${code}`); }
+        },
+      });
+    },
+  }, currentWork);
 }
 
 /**
@@ -240,6 +256,8 @@ export async function createProductionApplicationServices(
       currentWork,
       activeProgress,
       operatorState.db as SqliteDatabaseAdapter,
+      {},
+      mission ? createBoardIntegrateService(mission, currentWork) : undefined,
     )
     : null;
   return {

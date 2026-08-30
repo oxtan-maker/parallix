@@ -217,19 +217,19 @@ test('isIntegratedCapability covers the Mission commands extracted so far', () =
   assert.equal(isIntegratedCapability('review:submit'), false);
   assert.equal(isIntegratedCapability('review:act-on-findings'), false);
   assert.equal(isIntegratedCapability('approve:review'), false);
-  assert.equal(isIntegratedCapability('integrate:merge'), false);
+  assert.equal(isIntegratedCapability('integrate:merge'), true);
 });
 
 test('INTEGRATED_CAPABILITIES contains active:execute and the Mission commands', () => {
-  assert.equal(INTEGRATED_CAPABILITIES.size, 5);
-  for (const kind of ['active:execute', 'mission:intake', 'draft:create', 'checkpoint:record', 'handoff:record'] as const) {
+  assert.equal(INTEGRATED_CAPABILITIES.size, 6);
+  for (const kind of ['active:execute', 'mission:intake', 'draft:create', 'checkpoint:record', 'handoff:record', 'integrate:merge'] as const) {
     assert.ok(INTEGRATED_CAPABILITIES.has(kind), `${kind} should be integrated`);
   }
 });
 
-test('UNAVAILABLE_CAPABILITIES has reasons for all four unextracted commands', () => {
-  assert.equal(UNAVAILABLE_CAPABILITIES.size, 4);
-  for (const kind of ['review:submit', 'review:act-on-findings', 'approve:review', 'integrate:merge'] as const) {
+test('UNAVAILABLE_CAPABILITIES has reasons for all unextracted commands', () => {
+  assert.equal(UNAVAILABLE_CAPABILITIES.size, 3);
+  for (const kind of ['review:submit', 'review:act-on-findings', 'approve:review'] as const) {
     const reason = unavailableReason(kind);
     assert.ok(reason, `Missing reason for ${kind}`);
     assert.ok(reason.length > 0);

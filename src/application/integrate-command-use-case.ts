@@ -32,6 +32,11 @@ export class IntegrateCommandUseCase {
       await bestEffort(() => this._currentWork.ended(publication));
     }
   }
+
+  /** Board entry point: the mission identity is the complete trusted input. */
+  executeForSlug(slug: string): Promise<unknown> {
+    return this.execute([slug], {});
+  }
 }
 
 async function bestEffort(publish: () => Promise<void>): Promise<void> {
