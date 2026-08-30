@@ -271,6 +271,81 @@ export interface WebProgressEvent {
 }
 
 // ---------------------------------------------------------------------------
+// Command request — the browser-to-host mutation envelope (TASK-2433)
+// ---------------------------------------------------------------------------
+
+/**
+ * The five action kinds a card advertises. `mission:intake`,
+ * `checkpoint:record`, `approve:review`, and `review:act-on-findings` are not
+ * card-advertised and are rejected as unsupported request kinds.
+ */
+export type WebCommandRequestKind =
+  | 'active:execute'
+  | 'draft:create'
+  | 'integrate:merge'
+  | 'handoff:record'
+  | 'review:submit';
+
+/** Wire artifact reference: a pointer plus observed size, never the material. */
+export interface WebHandoffArtifact {
+  readonly kind: 'file' | 'git-range' | 'url';
+  readonly location: string;
+  /** Observed size in bytes, `null` when unmeasured. */
+  readonly byteSize: number | null;
+}
+
+/**
+ * The handoff payload minus `expectedVersion`: the version precondition is
+ * server-owned (TASK-2425's guard), never client-supplied.
+ */
+export interface WebHandoffPayload {
+  /** Finite number, >= 0. */
+  readonly netEngineeringLines: number;
+  /** Optional: omitted, never `null` or `Unknown`. */
+  readonly predictedBucket?: 'Small' | 'Medium' | 'Large';
+  readonly capturedAt: string;
+  readonly artifacts?: readonly WebHandoffArtifact[];
+  /** Optional finite integer, >= 0. */
+  readonly reviewRounds?: number;
+}
+
+/**
+ * The only mutation envelope the host accepts. Top-level keys are exactly
+ * `missionId`, `kind`, `missionStatusAtRequest`, and `payload` (handoff only).
+ * There is no key through which a client can supply an operation ID, a
+ * capability set, an agent, an environment, argv, a path, or a version:
+ * the host generates the operation ID and the single-kind capability set
+ * itself.
+ */
+export interface WebCommandRequest {
+  readonly missionId: string;
+  readonly kind: WebCommandRequestKind;
+  /**
+   * The status the browser rendered on the card. It is the observed
+   * precondition the controller's authoritative stale guard compares, never
+   * a claim about the current status.
+   */
+  readonly missionStatusAtRequest: string;
+  /** Present only for `handoff:record`. */
+  readonly payload?: WebHandoffPayload;
+}
+
+export type WebCommandRequestValidation =
+  | { readonly ok: true; readonly value: WebCommandRequest }
+  | { readonly ok: false; readonly problems: readonly string[] };
+
+/**
+ * Type guard for the rejection case. Callers must use this instead of
+ * narrowing on `ok` directly: the test project typechecks without
+ * `strictNullChecks`, where boolean-literal discriminants do not narrow.
+ */
+export function isInvalidWebCommandRequest(
+  result: WebCommandRequestValidation,
+): result is { readonly ok: false; readonly problems: readonly string[] } {
+  return result.ok === false;
+}
+
+// ---------------------------------------------------------------------------
 // Fail-closed conversion errors (server-side; never serialized to the wire)
 // ---------------------------------------------------------------------------
 
@@ -609,6 +684,12 @@ const COMMAND_KINDS: readonly string[] = [
   'handoff:record', 'review:submit', 'review:act-on-findings', 'approve:review',
   'integrate:merge',
 ];
+/** The card-advertised kinds a mutation request may name (TASK-2433). */
+const COMMAND_REQUEST_KINDS: readonly string[] = [
+  'active:execute', 'draft:create', 'integrate:merge', 'handoff:record', 'review:submit',
+];
+const BUCKET_LABELS: readonly string[] = ['Small', 'Medium', 'Large'];
+const ARTIFACT_KINDS: readonly string[] = ['file', 'git-range', 'url'];
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -1025,6 +1106,92 @@ export function validateWebCommandResult(payload: unknown): WebTransportValidati
       checkJsonValue(p.value, 'result.value', problems);
     }
   });
+}
+
+/**
+ * Validate a parsed command request payload (browser → host, TASK-2433).
+ * Pure and fail-closed: every unknown top-level key, every kind outside the
+ * five card-advertised kinds, a `payload` key on an identity-only kind, and
+ * every missing, mistyped, or out-of-range handoff field is rejected. The
+ * caller must treat a rejection as zero dispatch.
+ */
+export function validateWebCommandRequest(payload: unknown): WebCommandRequestValidation {
+  if (!isPlainObject(payload)) {
+    return { ok: false, problems: ['request must be a JSON object'] };
+  }
+  const problems: string[] = [];
+  checkKeys(payload,
+    ['missionId', 'kind', 'missionStatusAtRequest', 'payload'],
+    ['missionId', 'kind', 'missionStatusAtRequest'],
+    'request', problems);
+  const missionId = checkString(payload, 'missionId', 'request', problems);
+  if (missionId !== null && missionId.length === 0) {
+    problems.push('request.missionId must be a non-empty string');
+  }
+  const kind = checkString(payload, 'kind', 'request', problems);
+  if (kind !== null && !COMMAND_REQUEST_KINDS.includes(kind)) {
+    problems.push(`request.kind must be one of ${COMMAND_REQUEST_KINDS.join(', ')}, got ${kind}`);
+  }
+  checkString(payload, 'missionStatusAtRequest', 'request', problems);
+  if (Object.prototype.hasOwnProperty.call(payload, 'payload')) {
+    const value = payload.payload;
+    if (kind === 'handoff:record') {
+      checkHandoffPayload(value, 'request.payload', problems);
+    } else {
+      problems.push(`request.payload is only allowed for handoff:record, got kind ${String(kind)}`);
+    }
+  }
+  if (problems.length > 0) {
+    return { ok: false, problems };
+  }
+  return {
+    ok: true,
+    value: {
+      missionId: payload.missionId as string,
+      kind: payload.kind as WebCommandRequestKind,
+      missionStatusAtRequest: payload.missionStatusAtRequest as string,
+      ...(payload.payload !== undefined ? { payload: payload.payload as WebHandoffPayload } : {}),
+    },
+  };
+}
+
+function checkHandoffPayload(value: unknown, path: string, problems: string[]): void {
+  if (!isPlainObject(value)) { problems.push(`${path} must be an object`); return; }
+  checkKeys(value,
+    ['netEngineeringLines', 'predictedBucket', 'capturedAt', 'artifacts', 'reviewRounds'],
+    ['netEngineeringLines', 'capturedAt'], path, problems);
+  const lines = value.netEngineeringLines;
+  if (typeof lines !== 'number' || !Number.isFinite(lines) || lines < 0) {
+    problems.push(`${path}.netEngineeringLines must be a finite number >= 0, got ${String(lines)}`);
+  }
+  if (Object.prototype.hasOwnProperty.call(value, 'predictedBucket')) {
+    checkEnum(value, 'predictedBucket', BUCKET_LABELS, path, problems);
+  }
+  checkString(value, 'capturedAt', path, problems);
+  if (Object.prototype.hasOwnProperty.call(value, 'artifacts')) {
+    const artifacts = value.artifacts;
+    if (!Array.isArray(artifacts)) {
+      problems.push(`${path}.artifacts must be an array`);
+    } else {
+      artifacts.forEach((artifact, index) => {
+        const artifactPath = `${path}.artifacts[${index}]`;
+        if (!isPlainObject(artifact)) { problems.push(`${artifactPath} must be an object`); return; }
+        checkKeys(artifact, ['kind', 'location', 'byteSize'], ['kind', 'location', 'byteSize'], artifactPath, problems);
+        checkEnum(artifact, 'kind', ARTIFACT_KINDS, artifactPath, problems);
+        checkString(artifact, 'location', artifactPath, problems);
+        const byteSize = artifact.byteSize;
+        if (byteSize !== null && (typeof byteSize !== 'number' || !Number.isFinite(byteSize))) {
+          problems.push(`${artifactPath}.byteSize must be a finite number or null, got ${String(byteSize)}`);
+        }
+      });
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(value, 'reviewRounds')) {
+    const rounds = value.reviewRounds;
+    if (typeof rounds !== 'number' || !Number.isInteger(rounds) || rounds < 0) {
+      problems.push(`${path}.reviewRounds must be an integer >= 0, got ${String(rounds)}`);
+    }
+  }
 }
 
 /** Validate a parsed progress event payload. */

@@ -269,13 +269,20 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
       // nothing here dispatches a mutation.
       createBoardSource: async (progress) => {
         const services = await createProductionApplicationServices(rootDir, progress);
-        const builder = services.presentationCapabilities?.boardProjection;
+        const capabilities = services.presentationCapabilities;
+        const builder = capabilities?.boardProjection;
         if (!builder) {
           await services.operatorState.close();
           throw new Error('board projection is unavailable for px web');
         }
         return {
           buildProjection: () => builder.build(),
+          // The same guarded BoardCommandController instance the TUI dispatches
+          // through (built by composition from the production execute ports,
+          // Mission services, current-work port, and Mission store). The web
+          // endpoint adds a route, never a second dispatch path; the controller's
+          // progress sink is this host's SSE sink.
+          commandDispatcher: capabilities.commandController,
           close: () => services.operatorState.close(),
         };
       },

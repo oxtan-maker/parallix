@@ -1,8 +1,8 @@
 ---
 id: TASK-2433
 title: Add the same-origin guarded typed mutation endpoint for board actions
-status: backlog
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-08-28 06:29'
 labels:
   - user_value

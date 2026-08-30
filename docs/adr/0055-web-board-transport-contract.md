@@ -5,7 +5,7 @@
 Accepted — 2026-08-28
 
 Related: ADR 0054 (local web-board adapter), ADR 0051 (application
-boundary), ADR 0048 (fail-closed harness), TASK-2430
+boundary), ADR 0048 (fail-closed harness), TASK-2430, TASK-2433
 
 ## Context
 
@@ -74,6 +74,60 @@ the capability registry, lane rules, or in-process class instances.
 | JSON Schema validation with a generic schema framework | Rejected: the mission forbids a generic RPC/schema framework; hand-written validation of the three envelopes is smaller and keeps the contract in one module. |
 | Stringly-typed special values (e.g. `"blockedForMs": "indefinite"`) | Rejected: mixes a tag into a number field; the tagged union keeps both shapes machine-checkable. |
 
+## Mutation request envelope (TASK-2433)
+
+The read direction (snapshot, progress) is client-pull only. One mutation
+direction exists: a single host endpoint that dispatches a board action
+through the shared guarded controller under the per-launch same-origin /
+session / CSRF capability of ADR 0054. The request envelope is the fourth
+validated shape in this contract.
+
+- The top-level keys are exactly `missionId`, `kind`,
+  `missionStatusAtRequest`, and `payload` (present only for
+  `handoff:record`). Every other key is rejected: there is no key through
+  which a client can supply an operation ID, a capability set, an agent, an
+  environment, argv, a path, a version, or a "current" status. Validation is
+  fail-closed — unknown keys, unknown kinds, and mistyped or out-of-range
+  handoff fields are all rejections, never ignored fields.
+- `kind` is one of the five card-advertised action kinds: `active:execute`,
+  `draft:create`, `integrate:merge`, `handoff:record`, `review:submit`. The
+  remaining board command kinds (`mission:intake`, `checkpoint:record`,
+  `approve:review`, `review:act-on-findings`) are not card-advertised and are
+  rejected as unsupported. Whether the action is currently enabled for that
+  mission is decided by the server against a fresh projection, not by the
+  client; a request for a kind the projection does not advertise as enabled
+  is rejected before dispatch.
+- `missionStatusAtRequest` is required and is the status the browser rendered
+  on the card — the observed precondition the controller's authoritative
+  stale guard compares against the status it reads immediately before
+  dispatch. It is never interpreted as a claim about the current status.
+- The `payload` key exists only for `handoff:record` and mirrors the domain
+  handoff payload minus `expectedVersion`: `netEngineeringLines` (finite
+  number ≥ 0), optional `predictedBucket` (`Small`/`Medium`/`Large` — the
+  browser cannot send `Unknown`), `capturedAt` (string), optional
+  `artifacts` (`{ kind: file|git-range|url, location, byteSize: finite
+  number|null }`), and optional `reviewRounds` (finite integer ≥ 0). Identity
+  kinds carrying a `payload` key are rejected.
+- Operation identity is host-owned: the host generates the operation ID and
+  the single-kind capability set itself, mirroring the TUI, and dispatches
+  through the shared controller. No retry is performed server-side on any
+  outcome.
+- Status-code policy: 400 for schema violations — unknown keys, kinds that
+  are not card-advertised, and mistyped or out-of-range handoff fields (zero
+  dispatch), 403 from the security boundary (zero dispatch), 409 when the
+  fresh projection does not advertise the action as enabled for the mission
+  or the mission is absent from the projection (zero dispatch), and 200 for
+  every dispatched outcome — including the wire statuses
+  `conflict`, `failed`, and `cancelled`, which travel inside the
+  `command-result` envelope rather than as new HTTP statuses. A conflict
+  reuses the existing `failed` + `conflict` wire status so clients keep one
+  parsing path; the structured expected/actual values let the client refetch
+  and require a new confirmation.
+- Every body the endpoint answers with is a `command-result` envelope
+  (including the 400/403/409 rejections), so the error stays exactly
+  `{ kind, message }` and no stack trace, filesystem path, or raw adapter
+  error crosses the wire.
+
 ## Consequences
 
 - The transport mission (TASK-2429) implements routes and SSE against this
@@ -89,6 +143,15 @@ the capability registry, lane rules, or in-process class instances.
 - The TUI keeps consuming in-process read models; this ADR changes nothing
   about lifecycle, ranking, liveness derivation, lane rules, or the
   capability registry.
+- The request envelope's kind allowlist is the card-advertised set by
+  construction: if card commands are ever extended beyond that set, the
+  allowlist changes in the same mission as the extension, never by drift.
+  The wire handoff payload is a projection of the domain handoff payload; a
+  change to that domain shape moves the wire shape and this ADR together.
+- The mutation endpoint is the only state-changing route on the host. Every
+  other path and method keeps answering 405 behind the same security
+  boundary; adding a second mutation surface requires a new ADR-level
+  decision, not a route.
 
 ## Reconsideration triggers
 
