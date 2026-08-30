@@ -16,7 +16,15 @@ import * as net from 'node:net';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { loadWebAssets } from '../src/adapters/web/asset-store.js';
-import { createWebHost, type WebAssets, type WebHostInfo, type WebHostOptions } from '../src/interfaces/web/host.js';
+import { createWebHost, PROTECTION_HEADERS, WEB_EVENTS_PATH, WEB_SNAPSHOT_PATH, type WebAssets, type WebHostInfo, type WebHostOptions } from '../src/interfaces/web/host.js';
+import { validateWebBoardSnapshot, validateWebProgressEvent, WEB_TRANSPORT_VERSION } from '../src/interfaces/web/transport.js';
+import { WEB_EVENT_BUFFER_LIMIT } from '../src/interfaces/web/stream.js';
+import type { WebHost } from '../src/interfaces/web/host.js';
+import type { BoardProjection } from '../src/application/projections/board.js';
+import type { BoardProgressSink } from '../src/application/controller/board-command.js';
+import { runWebCommand } from '../src/interfaces/cli/web.js';
+import { setLogger } from '../src/application/presentation/cli-format.js';
+import { makeCards, makeProjection } from './fixtures/board-projection.js';
 
 let assets: WebAssets;
 let assetDir: string;
@@ -51,14 +59,112 @@ test.after(() => {
   fs.rmSync(assetDir, { recursive: true, force: true });
 });
 
-async function withHost(options: Omit<WebHostOptions, 'assets'> = {}, fn: (info: WebHostInfo) => Promise<void>): Promise<void> {
+async function withHost(
+  options: Omit<WebHostOptions, 'assets'> = {},
+  fn: (info: WebHostInfo, host: WebHost) => Promise<void>,
+): Promise<void> {
   const host = createWebHost({ assets, ...options });
   const info = await host.start();
   try {
-    await fn(info);
+    await fn(info, host);
   } finally {
     await host.close();
   }
+}
+
+/**
+ * A manual timer seam for the shared projection subscription: tests advance
+ * the rebuild loop explicitly, so nothing here waits on a real clock.
+ */
+function manualTimers() {
+  let pending: (() => void) | null = null;
+  let sets = 0;
+  let clears = 0;
+  return {
+    options: {
+      intervalMs: 1,
+      setTimer: (callback: () => void) => { sets += 1; pending = callback; return sets; },
+      clearTimer: () => { clears += 1; pending = null; },
+    },
+    /** Fire the scheduled rebuild and drain the microtasks it queues. */
+    async tick(): Promise<void> {
+      const callback = pending;
+      pending = null;
+      callback?.();
+      for (let i = 0; i < 8; i += 1) { await new Promise(resolve => setImmediate(resolve)); }
+    },
+    get scheduled(): boolean { return pending !== null; },
+    get setCount(): number { return sets; },
+    get clearCount(): number { return clears; },
+  };
+}
+
+interface SseFrame { id: number; event: string; data: Record<string, unknown> }
+
+/** A raw-socket EventSource: reads frames as they arrive, before the response ends. */
+function openSse(info: WebHostInfo, lastEventId?: string) {
+  const frames: SseFrame[] = [];
+  let headerText = '';
+  let body = '';
+  let headersDone = false;
+  const waiters: (() => void)[] = [];
+  let signalReady = (): void => {};
+  // Resolves once the response headers have arrived, which is also the moment
+  // the server has registered this client's listener. Without it a test could
+  // publish before the subscription exists and wait forever.
+  const ready = new Promise<void>(resolve => { signalReady = resolve; });
+  const socket = net.connect(info.port, '127.0.0.1', () => {
+    const lines = [`GET ${WEB_EVENTS_PATH} HTTP/1.1`, `Host: 127.0.0.1:${info.port}`, 'Accept: text/event-stream'];
+    if (lastEventId !== undefined) { lines.push(`Last-Event-ID: ${lastEventId}`); }
+    socket.write(`${lines.join('\r\n')}\r\n\r\n`);
+  });
+  socket.on('data', chunk => {
+    body += String(chunk);
+    if (!headersDone) {
+      const split = body.indexOf('\r\n\r\n');
+      if (split < 0) { return; }
+      headerText = body.slice(0, split);
+      body = body.slice(split + 4);
+      headersDone = true;
+      signalReady();
+    }
+    let boundary = body.indexOf('\n\n');
+    while (boundary >= 0) {
+      const block = body.slice(0, boundary);
+      body = body.slice(boundary + 2);
+      const fields = new Map(block.split('\n').map(line => {
+        const at = line.indexOf(': ');
+        return [line.slice(0, at), line.slice(at + 2)] as const;
+      }));
+      frames.push({
+        id: Number(fields.get('id')),
+        event: fields.get('event') ?? '',
+        data: JSON.parse(fields.get('data') ?? '{}') as Record<string, unknown>,
+      });
+      boundary = body.indexOf('\n\n');
+    }
+    while (waiters.length > 0) { waiters.pop()?.(); }
+  });
+  return {
+    frames,
+    ready,
+    /** Resolve once at least `count` frames have arrived. Event-driven, no sleep. */
+    async waitFor(count: number): Promise<void> {
+      while (frames.length < count) { await new Promise<void>(resolve => waiters.push(resolve)); }
+    },
+    header(name: string): string | undefined {
+      return headerText.split('\r\n')
+        .find(line => line.toLowerCase().startsWith(`${name}:`))
+        ?.slice(name.length + 1).trim();
+    },
+    status(): number { return Number(headerText.split(' ')[1] ?? '0'); },
+    async close(): Promise<void> {
+      socket.destroy();
+      await new Promise(resolve => socket.once('close', resolve));
+      // Let the server observe the socket close before the test asserts.
+      for (let i = 0; i < 8; i += 1) { await new Promise(resolve => setImmediate(resolve)); }
+    },
+  };
 }
 
 /** Read the per-launch session value the shell issues (cookie = CSRF meta). */
@@ -349,4 +455,317 @@ test('web host: GET routes do not mutate launch state', async () => {
     assert.equal(secondCookie, firstCookie, 'the per-launch session value must be stable across GETs');
     assert.equal(secondHtml, firstHtml, 'GET responses must be read-only and deterministic');
   });
+});
+
+// ---------------------------------------------------------------------------
+// Read-only snapshot route (TASK-2432, ADR 0055)
+// ---------------------------------------------------------------------------
+
+test('web host: snapshot route returns a valid versioned board snapshot', async () => {
+  const projection = makeProjection({ active: makeCards(2, 'active') });
+  await withHost({ buildProjection: async () => projection }, async info => {
+    const res = await fetch(`${info.origin}${WEB_SNAPSHOT_PATH}`);
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get('content-type') ?? '', /^application\/json/);
+    const validation = validateWebBoardSnapshot(await res.json());
+    assert.equal(validation.ok, true, `snapshot rejected: ${JSON.stringify(validation)}`);
+    assert.ok(validation.ok);
+    assert.equal(validation.value.kind, 'board-snapshot');
+    assert.equal(validation.value.transportVersion, WEB_TRANSPORT_VERSION);
+    assert.equal(validation.value.projectionVersion, projection.version);
+    assert.equal(validation.value.stages.find(stage => stage.lane === 'active')?.count, 2);
+  });
+});
+
+test('web host: snapshot route answers 200 without cookie, CSRF header, or Origin', async () => {
+  await withHost({ buildProjection: async () => makeProjection() }, async info => {
+    // A bare GET: no credentials of any kind. These read routes are not an
+    // authentication surface; loopback bind plus exact-Host is the boundary.
+    const res = await fetch(`${info.origin}${WEB_SNAPSHOT_PATH}`, { headers: { accept: 'application/json' } });
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get('content-security-policy'), PROTECTION_HEADERS['content-security-policy']);
+  });
+});
+
+test('web host: snapshot route rejects a Host header that is not the bound loopback origin', async () => {
+  await withHost({ buildProjection: async () => makeProjection() }, async info => {
+    assert.equal(await rawRequest(info, 'evil.example', WEB_SNAPSHOT_PATH), 403);
+    assert.equal(await rawRequest(info, `127.0.0.1:${info.port + 1}`, WEB_SNAPSHOT_PATH), 403);
+    assert.equal(await rawRequest(info, `127.0.0.1:${info.port}`, WEB_SNAPSHOT_PATH), 200);
+  });
+});
+
+test('web host: a failing projection build surfaces an error, never an empty board', async () => {
+  let attempts = 0;
+  const projection = makeProjection({ active: makeCards(3, 'active') });
+  await withHost({
+    buildProjection: async () => {
+      attempts += 1;
+      if (attempts === 1) { throw new Error('database is locked'); }
+      return projection;
+    },
+  }, async info => {
+    const failed = await fetch(`${info.origin}${WEB_SNAPSHOT_PATH}`);
+    assert.equal(failed.status, 503);
+    const body = await failed.json() as { kind: string; error: { kind: string; message: string } };
+    assert.equal(body.kind, 'board-snapshot-error');
+    assert.equal(body.error.kind, 'unavailable');
+    assert.match(body.error.message, /database is locked/);
+    // The failure is transient: the very next read recovers with real cards.
+    const recovered = await fetch(`${info.origin}${WEB_SNAPSHOT_PATH}`);
+    assert.equal(recovered.status, 200);
+    const validation = validateWebBoardSnapshot(await recovered.json());
+    assert.ok(validation.ok);
+    assert.equal(validation.value.stages.find(stage => stage.lane === 'active')?.count, 3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Server-Sent Events stream (TASK-2432, ADR 0055)
+// ---------------------------------------------------------------------------
+
+const PROGRESS = {
+  operationId: 'op-1',
+  sequence: 1,
+  phase: 'implement',
+  message: 'writing tests',
+  timestamp: '2026-08-28T00:00:00.000Z',
+} as const;
+
+test('web host: SSE stream sends streaming and protection headers and frames before the response ends', async () => {
+  await withHost({ buildProjection: async () => makeProjection() }, async (info, host) => {
+    const client = openSse(info);
+    await client.ready;
+    host.progress(PROGRESS);
+    await client.waitFor(1);
+    assert.equal(client.status(), 200);
+    assert.match(client.header('content-type') ?? '', /^text\/event-stream/);
+    assert.equal(client.header('cache-control'), 'no-store');
+    assert.equal(client.header('content-security-policy'), PROTECTION_HEADERS['content-security-policy']);
+    assert.match(client.header('content-security-policy') ?? '', /connect-src 'self'/);
+    assert.equal(client.header('x-content-type-options'), 'nosniff');
+    // No content-length and no terminator: the response is still open.
+    assert.equal(client.header('content-length'), undefined);
+    const frame = client.frames[0];
+    assert.ok(frame);
+    assert.equal(frame.event, 'progress');
+    assert.equal(frame.id, 1);
+    const validation = validateWebProgressEvent(frame.data);
+    assert.ok(validation.ok, `progress frame rejected: ${JSON.stringify(validation)}`);
+    assert.equal(validation.value.operationId, PROGRESS.operationId);
+    assert.equal(validation.value.sequence, PROGRESS.sequence);
+    await client.close();
+  });
+});
+
+test('web host: SSE route answers without cookie, CSRF header, or Origin but rejects a wrong Host', async () => {
+  await withHost({ buildProjection: async () => makeProjection() }, async info => {
+    // openSse sends no cookie, no x-px-csrf and no Origin.
+    const client = openSse(info);
+    await client.ready;
+    assert.equal(client.status(), 200, 'a bare SSE GET needs no cookie, CSRF header, or Origin');
+    assert.equal(await rawRequest(info, 'evil.example', WEB_EVENTS_PATH), 403);
+    await client.close();
+  });
+});
+
+test('web host: SSE ids strictly increase across progress and invalidation events', async () => {
+  const timers = manualTimers();
+  let cards = 1;
+  await withHost({
+    buildProjection: async () => makeProjection({ active: makeCards(cards, 'active') }),
+    subscription: timers.options,
+  }, async (info, host) => {
+    const client = openSse(info);
+    await client.ready;
+    host.progress(PROGRESS);
+    await client.waitFor(1);
+    await timers.tick();               // first rebuild: fingerprint changes from nothing
+    await client.waitFor(2);
+    host.progress({ ...PROGRESS, sequence: 2 });
+    await client.waitFor(3);
+    cards = 2;
+    await timers.tick();               // board changed: another invalidation
+    await client.waitFor(4);
+
+    assert.deepEqual(client.frames.map(frame => frame.event), ['progress', 'invalidate', 'progress', 'invalidate']);
+    assert.deepEqual(client.frames.map(frame => frame.id), [1, 2, 3, 4]);
+    // The invalidation is a refetch signal, not a second copy of the board.
+    assert.deepEqual(client.frames[1]?.data, { kind: 'projection-invalidated', transportVersion: WEB_TRANSPORT_VERSION });
+    await client.close();
+  });
+});
+
+test('web host: SSE reconnect with Last-Event-ID replays only newer events', async () => {
+  await withHost({ buildProjection: async () => makeProjection() }, async (info, host) => {
+    const first = openSse(info);
+    await first.ready;
+    host.progress(PROGRESS);
+    host.progress({ ...PROGRESS, sequence: 2 });
+    await first.waitFor(2);
+    const lastSeen = first.frames[first.frames.length - 1];
+    assert.ok(lastSeen);
+    await first.close();
+
+    // Missed while disconnected.
+    host.progress({ ...PROGRESS, sequence: 3 });
+    host.progress({ ...PROGRESS, sequence: 4 });
+
+    const second = openSse(info, String(lastSeen.id));
+    await second.ready;
+    await second.waitFor(2);
+    assert.deepEqual(second.frames.map(frame => frame.id), [3, 4]);
+
+    const key = (data: Record<string, unknown>): string => JSON.stringify([data.operationId, data.sequence]);
+    const before = new Set(first.frames.map(frame => key(frame.data)));
+    const repeated = second.frames.filter(frame => before.has(key(frame.data)));
+    assert.deepEqual(repeated, [], 'a reconnect must repeat no operationId+sequence pair');
+    await second.close();
+  });
+});
+
+test('web host: a failed rebuild emits a typed stream error and the next tick still invalidates', async () => {
+  const timers = manualTimers();
+  let attempts = 0;
+  await withHost({
+    buildProjection: async () => {
+      attempts += 1;
+      if (attempts === 1) { throw new Error('database is locked'); }
+      return makeProjection({ active: makeCards(1, 'active') });
+    },
+    subscription: timers.options,
+  }, async info => {
+    const client = openSse(info);
+    await client.ready;
+    await timers.tick();
+    await client.waitFor(1);
+    assert.equal(client.frames[0]?.event, 'error');
+    assert.deepEqual(client.frames[0]?.data, {
+      kind: 'stream-error',
+      transportVersion: WEB_TRANSPORT_VERSION,
+      error: { kind: 'unavailable', message: 'database is locked' },
+    });
+    // The subscription survived the failure: it rescheduled and recovers.
+    assert.equal(timers.scheduled, true, 'a failed rebuild must not tear the subscription down');
+    await timers.tick();
+    await client.waitFor(2);
+    assert.equal(client.frames[1]?.event, 'invalidate');
+    await client.close();
+  });
+});
+
+test('web host: a disconnect removes that client, and close() unsubscribes the projection', async () => {
+  const timers = manualTimers();
+  const host = createWebHost({
+    assets,
+    buildProjection: async () => makeProjection(),
+    subscription: timers.options,
+  });
+  const info = await host.start();
+  try {
+    assert.equal(host.clientCount(), 0);
+    const first = openSse(info);
+    const second = openSse(info);
+    await first.ready;
+    await second.ready;
+    host.progress(PROGRESS);
+    await first.waitFor(1);
+    await second.waitFor(1);
+    assert.equal(host.clientCount(), 2);
+
+    await first.close();
+    assert.equal(host.clientCount(), 1, 'a disconnected client must leave no listener behind');
+    host.progress({ ...PROGRESS, sequence: 2 });
+    await second.waitFor(2);
+    assert.equal(first.frames.length, 1, 'a disconnected client receives nothing further');
+
+    const setsBeforeClose = timers.setCount;
+    await second.close();
+    assert.equal(host.clientCount(), 0);
+    await host.close();
+    assert.equal(timers.clearCount, 1, 'close() must unsubscribe the shared projection subscription');
+    assert.equal(timers.scheduled, false, 'no timer may remain scheduled after close()');
+    assert.equal(timers.setCount, setsBeforeClose, 'close() must not schedule another rebuild');
+  } finally {
+    await host.close();
+  }
+});
+
+test('web host: 1000 synthetic progress events keep one listener and a bounded buffer', async () => {
+  await withHost({ buildProjection: async () => makeProjection() }, async (info, host) => {
+    const client = openSse(info);
+    await client.ready;
+    host.progress(PROGRESS);
+    await client.waitFor(1);
+    const total = 1_000;
+    for (let sequence = 2; sequence <= total; sequence += 1) {
+      host.progress({ ...PROGRESS, sequence });
+    }
+    await client.waitFor(total);
+    assert.equal(host.clientCount(), 1, 'high volume must not accumulate clients');
+    assert.deepEqual(client.frames.map(frame => frame.id).slice(-3), [total - 2, total - 1, total]);
+
+    // The buffer is bounded, so a very stale cursor replays at most the bound.
+    const late = openSse(info, '0');
+    await late.ready;
+    await late.waitFor(WEB_EVENT_BUFFER_LIMIT);
+    assert.equal(late.frames.length, WEB_EVENT_BUFFER_LIMIT, 'replay is capped at the exported buffer bound');
+    assert.equal(late.frames[0]?.id, total - WEB_EVENT_BUFFER_LIMIT + 1, 'oldest events were evicted first');
+    await late.close();
+    await client.close();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// `px web` command wiring (TASK-2432 CP-4)
+// ---------------------------------------------------------------------------
+
+test('web cli: createBoardSource gets the host sink, its build port serves, close runs on stop', async () => {
+  const lines: string[] = [];
+  const oldLogger = setLogger({ log: line => { lines.push(String(line)); }, error: line => { lines.push(String(line)); } });
+  try {
+    let stop: () => void = () => {};
+    const stopped = new Promise<void>(resolve => { stop = resolve; });
+    let sink: BoardProgressSink | null = null;
+    let sourceClosed = false;
+    const command = runWebCommand([], {
+      assets,
+      createBoardSource: (progress) => {
+        sink = progress;
+        return Promise.resolve({
+          buildProjection: async () => makeProjection(),
+          close: async () => { sourceClosed = true; },
+        });
+      },
+      waitForStop: () => stopped,
+    });
+    // The host announces the actual ephemeral origin; event-driven wait, no sleep.
+    let origin = '';
+    while (!origin) {
+      await new Promise(resolve => setImmediate(resolve));
+      for (const line of lines) {
+        origin = /listening on (http:\/\/[\w.]+:\d+)\/ /.exec(line)?.[1] ?? origin;
+      }
+    }
+    // The source's build port is what the snapshot route serves.
+    const res = await fetch(`${origin}/api/board`);
+    assert.equal(res.status, 200);
+    assert.ok(validateWebBoardSnapshot(await res.json()).ok, 'the wired build port must serve a valid snapshot');
+    // The sink handed to the source is the host's SSE sink: publishing on it
+    // reaches a fresh client through the replay buffer.
+    assert.ok(sink, 'createBoardSource must receive the host progress sink');
+    sink({ operationId: 'op-cli', sequence: 7, phase: 'implement', message: 'wired', timestamp: '2026-08-28T00:00:00.000Z' });
+    const client = openSse({ host: '127.0.0.1', port: Number(new URL(origin).port), origin }, '0');
+    await client.ready;
+    await client.waitFor(1);
+    assert.equal(client.frames[0]?.event, 'progress');
+    assert.equal(client.frames[0]?.data.operationId, 'op-cli');
+    assert.equal(client.frames[0]?.data.sequence, 7);
+    await client.close();
+    stop();
+    await command;
+    assert.equal(sourceClosed, true, 'the board source must be released when the command exits');
+  } finally {
+    setLogger(oldLogger);
+  }
 });

@@ -251,6 +251,22 @@ function createCommandRegistry(rootDir: string): Record<string, Command> {
       // Packaged browser assets are loaded per invocation so a missing or
       // stale build/web fails the `web` command, not unrelated commands.
       assets: loadWebAssets(resolveWebAssetRoot(packageDir)),
+      // Live board data (TASK-2432): the production board service's progress
+      // sink becomes the host's SSE sink, and its BoardProjectionBuilder
+      // becomes the host's injected build port. The command stays read-only:
+      // nothing here dispatches a mutation.
+      createBoardSource: async (progress) => {
+        const services = await createProductionApplicationServices(rootDir, progress);
+        const builder = services.presentationCapabilities?.boardProjection;
+        if (!builder) {
+          await services.operatorState.close();
+          throw new Error('board projection is unavailable for px web');
+        }
+        return {
+          buildProjection: () => builder.build(),
+          close: () => services.operatorState.close(),
+        };
+      },
     }),
     ui: async (...args: any[]) => {
       const { runUiCommand } = await import('../interfaces/tui/ui-command.js');

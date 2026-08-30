@@ -13,6 +13,24 @@
 
 import * as crypto from 'node:crypto';
 import Fastify, { type FastifyInstance, type FastifyReply } from 'fastify';
+import type { BoardProjection } from '../../application/projections/board.js';
+import {
+  subscribeToBoardProjection,
+  type BoardSubscriptionOptions,
+} from '../../application/projections/board-subscription.js';
+import type { BoardProgressSink } from '../../application/controller/board-command.js';
+import {
+  createWebEventStream,
+  formatSseFrame,
+  type WebEventStream,
+} from './stream.js';
+import {
+  toWebBoardSnapshot,
+  toWebProgressEvent,
+  WEB_TRANSPORT_VERSION,
+  type WebCommandError,
+  type WebTransportVersion,
+} from './transport.js';
 import {
   actualOrigin,
   cookieValue,
@@ -32,6 +50,23 @@ export const WEB_SESSION_COOKIE = 'px_session';
 export const WEB_CSRF_HEADER = 'x-px-csrf';
 export const WEB_CSRF_META_NAME = 'px-csrf';
 export const DEFAULT_BODY_LIMIT_BYTES = 64 * 1024;
+
+/** Read-only route paths. Both outrank the `/*` asset catch-all. */
+export const WEB_SNAPSHOT_PATH = '/api/board';
+export const WEB_EVENTS_PATH = '/api/events';
+
+/**
+ * A projection rebuild that failed. Deliberately *not* an empty board: a
+ * locked database or a Git command that lost a race must read as "unavailable,
+ * try again", never as zero missions and zero WIP. The envelope reuses the
+ * transport's `WebCommandError` shape rather than adding a new one to
+ * transport.ts, which this mission consumes but does not renegotiate.
+ */
+export interface WebBoardSnapshotError {
+  readonly kind: 'board-snapshot-error';
+  readonly transportVersion: WebTransportVersion;
+  readonly error: WebCommandError;
+}
 
 /**
  * The protection header set every response from this host carries. No
@@ -69,6 +104,18 @@ export interface WebHostOptions {
   bodyLimitBytes?: number;
   /** Integrity-verified packaged browser assets to serve. */
   assets: WebAssets;
+  /**
+   * Builds the current board projection. Injected as a port so the interfaces
+   * layer never constructs a read adapter (ADR 0051); composition supplies the
+   * closure from `composeBoardProjection`.
+   */
+  buildProjection?: () => Promise<BoardProjection>;
+  /**
+   * Timer/interval seam for the shared projection subscription. Tests drive
+   * the loop through this rather than a real clock; production takes the
+   * default `BOARD_REFRESH_INTERVAL_MS` poll.
+   */
+  subscription?: BoardSubscriptionOptions;
 }
 
 export interface WebHostInfo extends LoopbackBinding {
@@ -78,6 +125,14 @@ export interface WebHostInfo extends LoopbackBinding {
 export interface WebHost {
   start(): Promise<WebHostInfo>;
   close(): Promise<void>;
+  /**
+   * The command-boundary progress sink. Composition hands this to the board
+   * command controller, so SSE clients see the same `operationId` and
+   * `sequence` the CLI and TUI already see — not a second identity scheme.
+   */
+  readonly progress: BoardProgressSink;
+  /** Live SSE client count; zero after every client disconnects and after close. */
+  clientCount(): number;
 }
 
 /** A single-value view of a header that the type system allows to repeat. */
@@ -90,6 +145,14 @@ function injectCsrfMeta(shellHtml: string, launchValue: string): string {
     throw new Error('web shell HTML is malformed: missing </head>');
   }
   return shellHtml.replace('</head>', `<meta name="${WEB_CSRF_META_NAME}" content="${launchValue}"></head>`);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function snapshotError(kind: WebCommandError['kind'], message: string): WebBoardSnapshotError {
+  return { kind: 'board-snapshot-error', transportVersion: WEB_TRANSPORT_VERSION, error: { kind, message } };
 }
 
 export function createWebHost(options: WebHostOptions): WebHost {
@@ -115,8 +178,17 @@ export function createWebHost(options: WebHostOptions): WebHost {
   let app: FastifyInstance | null = null;
   let binding: LoopbackBinding | null = null;
   let closed = false;
+  // One counter, one buffer, one listener set per host process, shared by
+  // every connected client.
+  const stream: WebEventStream = createWebEventStream();
+  // Each entry detaches exactly one client: drops its listener and ends its
+  // response. `close()` runs them all, so no stream outlives the host.
+  const clients = new Set<() => void>();
+  let unsubscribeProjection: (() => void) | null = null;
 
   return {
+    progress(event) { stream.publishProgress(toWebProgressEvent(event)); },
+    clientCount: () => clients.size,
     async start() {
       if (app !== null) { throw new Error('web host is already started'); }
       app = Fastify({ logger: false, bodyLimit: bodyLimitBytes });
@@ -157,6 +229,60 @@ export function createWebHost(options: WebHostOptions): WebHost {
         }
         if (reply.getHeader('cache-control') === undefined) {
           reply.header('cache-control', 'no-store');
+        }
+      });
+
+      app.get(WEB_EVENTS_PATH, async (request, reply) => {
+        // The reply is hijacked, so Fastify's onSend hook never runs for this
+        // response: the protection headers are written explicitly here rather
+        // than inherited. `connect-src 'self'` in the existing CSP is what
+        // permits the same-origin EventSource; it is not widened.
+        reply.hijack();
+        const raw = reply.raw;
+        raw.writeHead(200, {
+          ...PROTECTION_HEADERS,
+          'content-type': 'text/event-stream; charset=utf-8',
+          'cache-control': 'no-store',
+          connection: 'keep-alive',
+          // Defeats reverse-proxy and framework response buffering, so frames
+          // reach the client before the response ends.
+          'x-accel-buffering': 'no',
+        });
+        raw.flushHeaders();
+        // Reconnect: replay only what this client has not seen. Truth is still
+        // re-established by refetching the snapshot; this only avoids
+        // duplicate user-visible progress lines.
+        for (const frame of stream.replayAfter(singleHeader(request.headers['last-event-id']))) {
+          raw.write(formatSseFrame(frame));
+        }
+        const unsubscribe = stream.subscribe((frame) => { raw.write(formatSseFrame(frame)); });
+        const detach = (): void => {
+          if (!clients.delete(detach)) { return; }
+          unsubscribe();
+          raw.end();
+        };
+        clients.add(detach);
+        request.raw.on('close', detach);
+        request.raw.on('error', detach);
+      });
+
+      app.get(WEB_SNAPSHOT_PATH, async (_request, reply) => {
+        const build = options.buildProjection;
+        if (build === undefined) {
+          return reply.code(503).send(snapshotError('unavailable', 'board projection port is not wired'));
+        }
+        let projection: BoardProjection;
+        try {
+          projection = await build();
+        } catch (error) {
+          return reply.code(503).send(snapshotError('unavailable', errorMessage(error)));
+        }
+        try {
+          return reply.type('application/json; charset=utf-8').send(toWebBoardSnapshot(projection));
+        } catch (error) {
+          // A projection the transport refuses to project is a contract
+          // failure, not a transient one.
+          return reply.code(500).send(snapshotError('execution', errorMessage(error)));
         }
       });
 
@@ -203,12 +329,36 @@ export function createWebHost(options: WebHostOptions): WebHost {
         });
       });
       binding = { host: bindHost, port: address.port };
+      const build = options.buildProjection;
+      if (build !== undefined) {
+        // The only board-change detector in web code. No SQLite, no Git, no
+        // process scan, no watcher: one shared subscription that publishes a
+        // payload-free "refetch" when the fingerprint moves (ADR 0051).
+        unsubscribeProjection = subscribeToBoardProjection(
+          build,
+          () => { stream.publishInvalidation(); },
+          {
+            ...options.subscription,
+            onError: (error) => {
+              // A failed rebuild is surfaced, never fabricated into an empty
+              // board, and the subscription keeps ticking so the next attempt
+              // recovers.
+              stream.publishError({ kind: 'unavailable', message: errorMessage(error) });
+              options.subscription?.onError?.(error);
+            },
+          },
+        );
+      }
       return { host: bindHost, port: address.port, origin: actualOrigin({ host: bindHost, port: address.port }) };
     },
     async close() {
       if (closed) { return; }
       closed = true;
       binding = null;
+      unsubscribeProjection?.();
+      unsubscribeProjection = null;
+      for (const detach of [...clients]) { detach(); }
+      stream.clearListeners();
       if (app !== null) {
         await app.close();
         app = null;
