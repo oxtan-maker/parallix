@@ -679,13 +679,14 @@ const MISSION_PHASE_ORDER = [
 function renderMissionPhaseReport(rows, slug, options = {}) {
   const opts = options || {};
   // Same identity `resolveStatsRepoName()` in stats.ts resolves; called directly
-  // here so this module stays a leaf (no import back into stats.ts).
+  // here so this module stays a leaf (no import back into stats.ts). An
+  // explicit repo option takes precedence and skips the git-based resolution.
 // @ts-ignore -- retained reporting helper is dynamically typed
-  const repo = resolveCanonicalRepositoryId(opts.rootDir || process.cwd());
+  const repo = opts.repo || resolveCanonicalRepositoryId(opts.rootDir || process.cwd());
   return _renderMissionPhaseReport(rows, slug, {
     ...opts,
 // @ts-ignore -- retained reporting helper is dynamically typed
-    repo: opts.repo || repo,
+    repo,
     repos: [repo],
   });
 }

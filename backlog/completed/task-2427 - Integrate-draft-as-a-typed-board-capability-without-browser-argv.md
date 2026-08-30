@@ -1,8 +1,8 @@
 ---
 id: TASK-2427
 title: Integrate draft as a typed board capability without browser argv
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-08-28 06:29'
 labels:
   - ai_sdlc

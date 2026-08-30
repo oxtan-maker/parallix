@@ -15,7 +15,7 @@ import { ConcreteOperationLogReadAdapter } from '../adapters/backlog/concrete-op
 import { ConcreteReviewReadAdapter } from '../adapters/backlog/concrete-review-read-adapter.js';
 import { ConcreteCurrentWorkReadAdapter } from '../adapters/backlog/concrete-current-work-read-adapter.js';
 import { processLivenessProbe } from '../adapters/process/process-liveness.js';
-import { snapshotWorktreeTopology } from '../adapters/git/worktree.js';
+import { resolveBaseWorktree, snapshotWorktreeTopology } from '../adapters/git/worktree.js';
 import { BoardProjectionBuilder } from '../application/projections/board-readers.js';
 import type { MissionReadAdapter } from '../application/projections/board-readers.js';
 import { ConcreteMetricsReadAdapter } from '../application/projections/metrics-read-adapter.js';
@@ -43,11 +43,38 @@ export interface BoardProjectionCompositionDeps {
   readonly launcherProbe?: (_family: AgentFamily) => LauncherProbeResult;
   /** Session markers, used to attribute running missions to agent families. */
   readonly sessionMarkers?: SessionMarkerRepository | null;
+  /**
+   * Git CLI runner for board reads (worktree topology, repository identity,
+   * HEAD commit). Defaults to the real git; tests inject an in-memory double.
+   */
+  readonly gitFn?:
+    | ((_args: string[], _options?: { cwd?: string }) => { status: number | null; stdout: string; stderr: string })
+    | null;
+  /** Agent config reader for the agent strip; defaults to the operator-local config. */
+  readonly readAgentConfig?: () => import('../adapters/agents/agent-config.js').AgentConfig | null;
+  /** Running-session detection for the agent strip; defaults to the live process scan. */
+  readonly detectRunningSessions?: () => readonly import('../adapters/agents/running-sessions.js').RunningMissionSession[] | null;
 }
 
 /** The sole production constructor for board reads and mission details. */
 export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
-  const repositoryMissions = new ConcreteMissionReadAdapter({ rootDir: deps.rootDir, repositoryId: deps.repositoryId });
+  // Only used when a gitFn double is injected; the branch-name fallback must
+  // not reach the real CLI either.
+  const topologyFor = (cwd: string) => snapshotWorktreeTopology({
+    cwd,
+    gitFn: deps.gitFn,
+    currentBranch: () => '',
+  });
+  const repositoryMissions = new ConcreteMissionReadAdapter({
+    rootDir: deps.rootDir,
+    repositoryId: deps.repositoryId,
+    resolveWorktree: deps.gitFn
+      ? (slug, options) => topologyFor(options?.cwd ?? deps.rootDir).resolveWorktree(slug, options)
+      : undefined,
+    resolveBaseWorktree: deps.gitFn
+      ? (slug) => resolveBaseWorktree(slug, { rootDir: deps.rootDir, gitFn: deps.gitFn })
+      : undefined,
+  });
   let cachedMissions: Promise<readonly import('../domain/mission.js').Mission[]> | null = null;
   const persistedMissions = deps.missionStore?.loadByRepository;
   const missions: MissionReadAdapter = {
@@ -136,12 +163,18 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
       sessionMarkers: deps.sessionMarkers ?? null,
       currentWork,
       isProcessAlive: processLivenessProbe,
+      readAgentConfig: deps.readAgentConfig,
+      detectRunningSessions: deps.detectRunningSessions,
     }),
-    new ConcreteGitReadAdapter({ rootDir: deps.rootDir, repositoryId: deps.repositoryId }),
+    new ConcreteGitReadAdapter({ rootDir: deps.rootDir, repositoryId: deps.repositoryId, gitRunner: deps.gitFn ?? undefined }),
     new ConcreteOperationLogReadAdapter({ historyRepo: deps.historyRepo }),
     {
       prepareReads: () => {
-        const topology = snapshotWorktreeTopology({ cwd: deps.rootDir });
+        const topology = snapshotWorktreeTopology({
+          cwd: deps.rootDir,
+          gitFn: deps.gitFn ?? null,
+          currentBranch: deps.gitFn ? () => '' : undefined,
+        });
         repositoryMissions.useWorktreeTopology(topology);
         cachedMissions = null;
         gates.useWorktreeTopology(topology);

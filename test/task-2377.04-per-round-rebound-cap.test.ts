@@ -50,6 +50,10 @@ function runLoop(options: Record<string, unknown>) {
     transitionTaskFn: async () => {},
     transitionVirtualFn: async () => {},
     implementer: 'claude', reviewer: 'codex', dryRun: false,
+    // Hermetic seams: no real worktree resolution and no real git CLI inside
+    // the loop (each would spawn the shimmed git, ~50-100 ms per call).
+    worktree: temporaryHome,
+    gitFn: () => ({ status: 0, stdout: '', stderr: '' }),
     workflowLauncherStatusFn: () => ({ supported: true }),
     isForgejoReviewEnabledFn: () => true,
     forgejoAvailableFn: async () => true,

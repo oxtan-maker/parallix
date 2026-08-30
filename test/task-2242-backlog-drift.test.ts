@@ -15,6 +15,7 @@ const backlog = mockModule<typeof import('../src/adapters/backlog/backlog.js')>(
 const forgejo = mockModule<typeof import('../src/adapters/forgejo/forgejo.js')>('../src/adapters/forgejo/forgejo.js', import.meta.url);
 const productConfig = mockModule<typeof import('../src/adapters/config/product-config.js')>('../src/adapters/config/product-config.js', import.meta.url);
 const runtimeMatrix = mockModule<typeof import('../src/adapters/agents/runtime-matrix.js')>('../src/adapters/agents/runtime-matrix.js', import.meta.url);
+const integrateConflict = mockModule<typeof import('../src/adapters/cli/commands/integrate-conflict.js')>('../src/adapters/cli/commands/integrate-conflict.js', import.meta.url);
 const stats = mockModule<typeof import('../src/adapters/cli/commands/stats.js')>('../src/adapters/cli/commands/stats.js', import.meta.url);
 const __mm1 = mockModule<typeof import('../src/composition/application-services.js')>('../src/composition/application-services.js', import.meta.url);
 await installModuleMocks();
@@ -361,6 +362,14 @@ function setupBaseMocks(gitMockFn) {
   mock.method(missionUtilsCjs, 'getPrimaryWorktree', () => FAKE_ROOT);
   mock.method(missionUtilsCjs, 'conventionalWorktreePath', () => path.join(FAKE_ROOT, '..', TEST_SLUG));
   mock.method(missionUtilsCjs, 'resolveMainRepo', () => FAKE_ROOT);
+  // Hermetic seams: these resolvers default to the real git CLI (shimmed
+  // subprocess per call) and to the operator's live repository when left unmocked.
+  mock.method(missionUtilsCjs, 'resolveMissionBaseBranch', () => 'main');
+  mock.method(missionUtilsCjs, 'resolveBaseWorktree', () => FAKE_ROOT);
+  mock.method(missionUtilsCjs, 'resolveWorktree', () => path.join(FAKE_ROOT, '..', TEST_SLUG));
+  mock.method(missionUtilsCjs, 'findMissionDocInBranches', () => []);
+  mock.method(gitCjs, 'detectRebaseState', () => ({ inProgress: false, rebaseHead: '', detached: false, unmergedFiles: [], rebaseDir: null }));
+  mock.method(integrateConflict, 'getUnresolvedIndexConflicts', () => ({ ok: true, files: [] }));
   mock.method(missionUtilsCjs, 'missionTitle', () => 'Test Mission');
   mock.method(missionUtilsCjs, 'updateGraphifyKnowledgeGraph', () => false);
   mock.method(gitCjs, 'getCurrentBranch', () => 'mission/' + TEST_SLUG);
@@ -419,7 +428,6 @@ test('integrate SC2b: non-backlog conflict exits with conflict files and helper 
 
   console.log = originalLog;
   mock.reset();
-
   const conflictLog = logs.find(l => typeof l === 'string' && l.includes('Conflicting files'));
   assert.ok(conflictLog, 'conflicting files info was logged');
   const helperLog = logs.find(l => typeof l === 'string' && l.includes('Conflict helper'));

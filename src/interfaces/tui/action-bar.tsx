@@ -47,7 +47,9 @@ export function ActionBar({ mission, selectedKind = null, onSelect, commandContr
           : unavailableReason(kind)
             ?? (kind === 'active:execute'
               ? 'Mission cannot be activated from its current state'
-              : 'This board dispatches active:execute only');
+              : kind === 'draft:create'
+                ? 'Draft is available only while the mission is in the pre-draft (backlog) state'
+                : 'This board dispatches active:execute and draft:create only');
         const selected = selectedKind === kind;
         return (
           <Box key={kind}>
@@ -77,7 +79,16 @@ export function canDispatchAction(
   mission: MissionCard | null,
   commandController: BoardCommandDispatcher | undefined,
 ): boolean {
-  return kind === 'active:execute'
-    && Boolean(commandController?.canExecute(kind))
-    && Boolean(mission?.commands.some((command) => command.command === 'active' && command.enabled));
+  // A row is dispatchable only when this interface instance can actually run
+  // the kind (wired service) AND the authoritative projection enables it for
+  // the selected mission (TASK-2426 instance-query pattern).
+  if (kind === 'active:execute') {
+    return Boolean(commandController?.canExecute(kind))
+      && Boolean(mission?.commands.some((command) => command.command === 'active' && command.enabled));
+  }
+  if (kind === 'draft:create') {
+    return Boolean(commandController?.canExecute(kind))
+      && Boolean(mission?.commands.some((command) => command.command === 'draft' && command.enabled));
+  }
+  return false;
 }

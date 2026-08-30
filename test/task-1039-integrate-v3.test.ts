@@ -19,6 +19,11 @@ const { mock } = test;
 
 const TEST_SLUG = 'task-preflight-test';
 
+// Hermetic doubles: the un-overridden defaults spawn the shimmed git CLI
+// against the operator's real repository (a subprocess per call).
+const cleanRebaseState = () => ({ inProgress: false, rebaseHead: '', detached: false, unmergedFiles: [], rebaseDir: null });
+const noMissionDocBranches = () => [];
+
 test('printIntegrationPreflight branch failure', (t) => {
   const context = {
     slug: TEST_SLUG,
@@ -37,7 +42,9 @@ test('printIntegrationPreflight branch failure', (t) => {
   const result = printIntegrationPreflight(context, {
     readTokenFn: () => 'token',
     resolveTokenFileFn: () => 'file',
-    getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
+    getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] }),
+    detectRebaseStateFn: cleanRebaseState,
+    findMissionDocInBranchesFn: noMissionDocBranches
   });
 
   assert.ok(result.failures.includes('branch'));
@@ -61,7 +68,9 @@ test('printIntegrationPreflight mission-doc failure', (t) => {
   const result = printIntegrationPreflight(context, {
     readTokenFn: () => 'token',
     resolveTokenFileFn: () => 'file',
-    getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
+    getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] }),
+    detectRebaseStateFn: cleanRebaseState,
+    findMissionDocInBranchesFn: noMissionDocBranches
   });
 
   assert.ok(result.failures.includes('mission-doc'));
@@ -85,7 +94,9 @@ test('printIntegrationPreflight task failures', (t) => {
   const res1 = printIntegrationPreflight(context1, {
     readTokenFn: () => 'token',
     resolveTokenFileFn: () => 'file',
-    getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
+    getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] }),
+    detectRebaseStateFn: cleanRebaseState,
+    findMissionDocInBranchesFn: noMissionDocBranches
   });
   assert.ok(res1.failures.includes('task-ambiguity'));
 
@@ -94,7 +105,9 @@ test('printIntegrationPreflight task failures', (t) => {
   const res2 = printIntegrationPreflight(context2, {
     readTokenFn: () => 'token',
     resolveTokenFileFn: () => 'file',
-    getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
+    getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] }),
+    detectRebaseStateFn: cleanRebaseState,
+    findMissionDocInBranchesFn: noMissionDocBranches
   });
   assert.ok(!res2.failures.includes('task-missing'));
 });
@@ -121,7 +134,9 @@ test('printIntegrationPreflight PR approval failures', (t) => {
     resolveTokenFileFn: () => 'file',
 // @ts-expect-error -- Legacy fixture deliberately exercises a duplicate or partial object-literal runtime shape.
     isForgejoReviewEnabledFn: () => true,
-    getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
+    getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] }),
+    detectRebaseStateFn: cleanRebaseState,
+    findMissionDocInBranchesFn: noMissionDocBranches
   });
   assert.ok(res1.failures.includes('pr-approval'));
 
@@ -133,7 +148,9 @@ test('printIntegrationPreflight PR approval failures', (t) => {
     resolveTokenFileFn: () => 'file',
 // @ts-expect-error -- Legacy fixture deliberately exercises a duplicate or partial object-literal runtime shape.
     isForgejoReviewEnabledFn: () => true,
-    getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
+    getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] }),
+    detectRebaseStateFn: cleanRebaseState,
+    findMissionDocInBranchesFn: noMissionDocBranches
   });
   assert.ok(res2.failures.includes('pr-approval'));
 });
@@ -157,7 +174,9 @@ test('printIntegrationPreflight main-index-conflict-check failure', (t) => {
     readTokenFn: () => 'token',
     resolveTokenFileFn: () => 'file',
 // @ts-expect-error -- TASK-2328: partial test double after ESM seam migration
-    getUnresolvedIndexConflictsFn: () => ({ ok: false, error: 'git error' })
+    getUnresolvedIndexConflictsFn: () => ({ ok: false, error: 'git error' }),
+    detectRebaseStateFn: cleanRebaseState,
+    findMissionDocInBranchesFn: noMissionDocBranches
   });
 
   assert.ok(result.failures.includes('main-index-conflict-check'));
@@ -181,7 +200,9 @@ test('printIntegrationPreflight main-dirty warning', (t) => {
   const result = printIntegrationPreflight(context, {
     readTokenFn: () => 'token',
     resolveTokenFileFn: () => 'file',
-    getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] })
+    getUnresolvedIndexConflictsFn: () => ({ ok: true, files: [] }),
+    detectRebaseStateFn: cleanRebaseState,
+    findMissionDocInBranchesFn: noMissionDocBranches
   });
 
   assert.ok(result.warnings.includes('main-dirty'));

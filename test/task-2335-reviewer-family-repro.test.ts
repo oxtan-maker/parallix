@@ -33,12 +33,20 @@ const originalPath = process.env.PATH;
 const originalWorkflowAgent = process.env.WORKFLOW_AGENT;
 const originalCodexHome = process.env.CODEX_HOME;
 
+// A POSIX sh stub keeps the real launch path (command resolution + `--help`
+// health-probe spawn) intact while the probe itself costs a shell exec
+// (~5 ms) instead of a full Node startup (~100 ms) per agent per call.
+function writeLauncherStub(binDir: string, name: string) {
+  const stub = path.join(binDir, name);
+  fs.writeFileSync(stub, '#!/bin/sh\nexit 0\n', 'utf8');
+  fs.chmodSync(stub, 0o755);
+}
+
 function installPathLaunchers(tmpRoot: string) {
   const binDir = path.join(tmpRoot, 'bin');
   fs.mkdirSync(binDir, { recursive: true });
-  const launcherRunner = path.join(__dirname, 'lib', 'agent-script-runner.js');
   for (const name of ['codex', 'claude', 'gemini', 'opencode', 'vibe']) {
-    fs.symlinkSync(launcherRunner, path.join(binDir, name));
+    writeLauncherStub(binDir, name);
   }
   process.env.PATH = `${binDir}${path.delimiter}${process.env.PATH}`;
   process.env.CODEX_HOME ||= path.join(tmpRoot, 'glm-codex-home');
@@ -113,7 +121,9 @@ test('selectAgent review selection excludes the author family and picks a cross-
     // The pool after exclusion should be ['claude', 'custom', 'vibe'].
     const implementer = 'codex';
     const selected = selectAgent('review', {
-      exclude: new Set([implementer])
+      exclude: new Set([implementer]),
+      // Skip the git main-worktree lookup in config scoping (subprocess per call).
+      mainWorktreePath: null
     });
 
     assert.notEqual(
@@ -142,7 +152,9 @@ test('selectAgent review selection with multiple runs always excludes the author
     const iterations = 3;
     for (let i = 0; i < iterations; i++) {
       const selected = selectAgent('review', {
-        exclude: new Set([implementer])
+        exclude: new Set([implementer]),
+        // Skip the git main-worktree lookup in config scoping (subprocess per call).
+        mainWorktreePath: null
       });
       assert.notEqual(
         selected,
@@ -173,14 +185,16 @@ test('selectAgent uses configured random selection over the eligible cross-famil
     // Force index 0 selection
     Math.random = () => 0.1;
     const selected0 = selectAgent('review', {
-      exclude: new Set(['claude'])
+      exclude: new Set(['claude']),
+      mainWorktreePath: null
     });
     assert.equal(selected0, 'codex', 'controlled random should pick first cross-family candidate');
 
     // Force index 1 selection
     Math.random = () => 0.6;
     const selected1 = selectAgent('review', {
-      exclude: new Set(['claude'])
+      exclude: new Set(['claude']),
+      mainWorktreePath: null
     });
     assert.equal(selected1, 'custom', 'controlled random should pick second cross-family candidate');
 
@@ -204,7 +218,8 @@ test('selectAgent throws when all eligible agents are excluded (no-cross-family 
     // Excluding all five should throw "All eligible agents ... are exhausted".
     assert.throws(
       () => selectAgent('review', {
-        exclude: new Set(['codex', 'claude', 'custom', 'qwen', 'vibe'])
+        exclude: new Set(['codex', 'claude', 'custom', 'qwen', 'vibe']),
+        mainWorktreePath: null
       }),
       { message: /All eligible agents for step "review" are exhausted/ }
     );
@@ -254,7 +269,7 @@ test('startReviewLoop reviewer selection excludes the author family (review-loop
       selectAgentFn: (step: string, opts: { exclude: Set<string> }) => {
         selectAgentCallArgs = { step, exclude: opts && opts.exclude ? [...opts.exclude] : [] };
         // Real selectAgent — reads config/agents.json from disk
-        const result = selectAgent(step, { exclude: opts && opts.exclude });
+        const result = selectAgent(step, { exclude: opts && opts.exclude, mainWorktreePath: null });
         selectedReviewer = result;
         return result;
       },
@@ -317,8 +332,7 @@ test('startReviewLoop single-family fallback when no cross-family reviewer is ru
     // as unavailable and throw "No eligible agents have a working launcher".
     const binDir = path.join(tmpRoot, 'bin');
     fs.mkdirSync(binDir, { recursive: true });
-    const launcherRunner = path.join(__dirname, 'lib', 'agent-script-runner.js');
-    fs.symlinkSync(launcherRunner, path.join(binDir, 'codex'));
+    writeLauncherStub(binDir, 'codex');
     process.env.PATH = `${binDir}${path.delimiter}${process.env.PATH}`;
     process.env.CODEX_HOME ||= path.join(tmpRoot, 'glm-codex-home');
     // commandPathProbe returns truthy only for codex — this is the single
@@ -349,7 +363,7 @@ test('startReviewLoop single-family fallback when no cross-family reviewer is ru
           // Real selectAgent — uses commandPathProbe (only codex found),
           // so cross-family agents are all unavailable. Throws because
           // no eligible cross-family agent has a working launcher.
-          return selectAgent(step, { exclude: opts && opts.exclude, worktree: tmpRoot });
+          return selectAgent(step, { exclude: opts && opts.exclude, worktree: tmpRoot, mainWorktreePath: null });
         } catch (err) {
           selectAgentThrew = true;
           throw err;

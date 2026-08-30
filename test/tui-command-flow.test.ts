@@ -170,15 +170,75 @@ test('Ctrl+A on disabled card does not dispatch (pins R1)', async () => {
   assert.doesNotMatch(stdout.writes.join(''), /CONFIRM CONSEQUENTIAL ACTION/);
 });
 
-test('Ctrl+D on card produces unavailable outcome without dispatching', async () => {
+test('Ctrl+D on card produces unavailable outcome without dispatching when the interface has no draft service', async () => {
   let calls = 0;
   const ui = await renderFlow({ async dispatch() { calls += 1; return { status: 'completed', durableEvidence: [] }; } });
-  /* Ctrl+D (\x04) triggers draft:create which is not integrated. */
+  /* Ctrl+D (\x04) triggers draft:create. The supplied controller wires no
+   * draft service, so the shell reports the typed unavailable capability. */
   ui.stdin.send('\x04');
   await waitForOutput(ui.stdout, /unavailableCapability|not yet available/i);
   ui.instance.unmount();
   assert.equal(calls, 0, 'Ctrl+D must not dispatch (unavailable capability)');
   assert.match(ui.stdout.writes.join(''), /unavailableCapability|not yet available/i, 'Ctrl+D must show unavailable outcome');
+});
+
+test('Ctrl+D on draft-eligible card confirms and dispatches once when wired', async () => {
+  const ink = await import('ink');
+  const React = await import('react');
+  const { BoardShell } = await import('../src/interfaces/tui/shell.js');
+  const card = makeCard({
+    id: 'task-draft-flow' as never,
+    lane: 'backlog', status: 'backlog', rawStatus: 'backlog',
+    commands: [{ command: 'draft', enabled: true, reason: null }],
+  });
+  let calls = 0;
+  const dispatchedKinds: string[] = [];
+  const stdin = new Stream();
+  const stdout = new Stream();
+  const instance = ink.render(React.createElement(BoardShell, {
+    projection: makeProjection({ backlog: [card] }),
+    commandControllerFactory: () => ({
+      canExecute: (kind: string) => kind === 'draft:create',
+      async dispatch(request: { kind: string }) { calls += 1; dispatchedKinds.push(request.kind); return { status: 'completed', durableEvidence: [] }; },
+    }),
+  } as never), { stdin: stdin as unknown as NodeJS.ReadStream, stdout: stdout as unknown as NodeJS.WriteStream, patchConsole: false, exitOnCtrlC: false });
+  await waitForWrite(stdout, 0);
+  /* Ctrl+D (\x04) triggers draft:create. */
+  stdin.send('\x04');
+  await waitForOutput(stdout, /CONFIRM CONSEQUENTIAL ACTION/);
+  /* Enter confirms. */
+  stdin.send('\r');
+  await waitFor(() => calls === 1);
+  instance.unmount();
+  assert.equal(calls, 1, 'Ctrl+D + Enter must dispatch exactly once');
+  assert.deepEqual(dispatchedKinds, ['draft:create'], 'the dispatched kind is draft:create');
+});
+
+test('Ctrl+D on a past-pre-draft card does not dispatch even when wired', async () => {
+  const ink = await import('ink');
+  const React = await import('react');
+  const { BoardShell } = await import('../src/interfaces/tui/shell.js');
+  const card = makeCard({
+    id: 'task-draft-disabled' as never,
+    lane: 'active', status: 'active', rawStatus: 'active',
+    commands: [{ command: 'active', enabled: true, reason: null }],
+  });
+  let calls = 0;
+  const stdin = new Stream();
+  const stdout = new Stream();
+  const instance = ink.render(React.createElement(BoardShell, {
+    projection: makeProjection({ active: [card] }),
+    commandControllerFactory: () => ({
+      canExecute: (kind: string) => kind === 'draft:create',
+      async dispatch() { calls += 1; return { status: 'completed', durableEvidence: [] }; },
+    }),
+  } as never), { stdin: stdin as unknown as NodeJS.ReadStream, stdout: stdout as unknown as NodeJS.WriteStream, patchConsole: false, exitOnCtrlC: false });
+  await waitForWrite(stdout, 0);
+  stdin.send('\x04');
+  await new Promise((resolve) => setTimeout(resolve, 35));
+  instance.unmount();
+  assert.equal(calls, 0, 'Ctrl+D must not dispatch when the mission is past the pre-draft state');
+  assert.doesNotMatch(stdout.writes.join(''), /CONFIRM CONSEQUENTIAL ACTION/, 'no confirmation for a non-eligible draft');
 });
 
 test('Ctrl+R on card produces unavailable outcome without dispatching', async () => {
