@@ -19,7 +19,7 @@ priority: high
 
 Complete the read-side operator semantics: authoritative activity animation, agent/coordinator evidence, attention ranking, FLOW metrics/provenance, review detail and bounded operation log.
 
-Use the GPU/fan treatment from the supplied variant as visual inspiration only. Animation means **authoritative published work**, not “a process exists” and not “this card is in an in-flight lane”. Coordinator/process evidence stays separately labelled recovery evidence.
+Use the GPU/fan treatment from the supplied variant as pixel perfect target to reach. Animation means **authoritative published work**, not “a process exists” and not “this card is in an in-flight lane”. Coordinator/process evidence stays separately labelled recovery evidence.
 
 ## Acceptance Criteria
 
