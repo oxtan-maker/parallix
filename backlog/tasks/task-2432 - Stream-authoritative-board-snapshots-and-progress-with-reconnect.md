@@ -18,7 +18,7 @@ priority: high
 
 ## Description
 
-Add authenticated read transport: one snapshot endpoint plus a Server-Sent Events stream for projection invalidation and operation progress.
+Add read-only local transport: one snapshot endpoint plus a Server-Sent Events stream for projection invalidation and operation progress. These GET endpoints are not a login or authentication surface; they retain the existing loopback-only and exact-Host boundary, have no side effects, and require no session or CSRF proof.
 
 Reuse the existing application `BoardProjectionBuilder` and board subscription behavior. Do not add SQLite/Git/process watchers to the web adapter. Reconnect always re-establishes truth by reading a fresh snapshot; SSE/browser memory is notification state, not authority.
 
@@ -26,7 +26,7 @@ Keep the event model intentionally small. Prefer sending typed progress events p
 
 ## Acceptance Criteria
 
-- [ ] #1 Authenticated GET returns the TASK-2430 versioned snapshot built from the same production board projection used by existing interfaces.
+- [ ] #1 Read-only GET returns the TASK-2430 versioned snapshot built from the same production board projection used by existing interfaces; snapshot and SSE access add no login, bearer token, session check or CSRF requirement.
 - [ ] #2 SSE uses monotonically ordered event IDs within one host process and supports EventSource reconnect/Last-Event-ID behavior without duplicate user-visible log lines.
 - [ ] #3 Projection changes are driven by the existing board rebuild/subscription seam; no new direct DB/Git/process polling exists in web code.
 - [ ] #4 Operation progress uses the shared progress events/operation IDs from the command boundary.
@@ -38,6 +38,7 @@ Keep the event model intentionally small. Prefer sending typed progress events p
 ## Agent-slop guardrails
 
 - Do not add WebSocket infrastructure for bidirectional RPC; mutations remain POST.
+- Do not add a login, account, bearer-token or remote-serving path; the existing host remains loopback-only and mutation protection belongs to TASK-2433.
 - Do not persist SSE cursor/browser state as workflow state.
 - Do not add a second event bus or daemon when the existing projection subscription suffices.
 - Do not turn a failed projection read into zero agents/zero WIP/no work.
