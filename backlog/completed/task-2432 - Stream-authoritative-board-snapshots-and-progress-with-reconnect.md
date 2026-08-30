@@ -1,8 +1,8 @@
 ---
 id: TASK-2432
 title: Stream authoritative board snapshots and progress with reconnect
-status: backlog
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-08-28 06:29'
 labels:
   - user_value
