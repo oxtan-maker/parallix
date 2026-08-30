@@ -113,8 +113,9 @@ const expectedIntegrationFiles = [
   // TASK-2441: board title repro. Seeds a temporary Git repository and a
   // migrated SQLite database, then renders the composed board, so it crosses
   // the same real git/database boundary as task-2438 and task-2440.
-  'task-2441-mission-title-repro.test.ts',
-  'test-hygiene.test.ts',
+      'task-2441-mission-title-repro.test.ts',
+      'task-2443-repro.test.ts',
+      'test-hygiene.test.ts',
   'tui-pty-smoke.test.ts', 'task-2313-repro.test.ts', 'task-2370-repro.test.ts',
   'tui-command-flow.test.ts',
   'tui-spawn.test.ts',

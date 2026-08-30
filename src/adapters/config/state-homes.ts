@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -30,6 +31,25 @@ export function vibeHomeRoot(worktree: string): string {
 export function claudeProjectDir(worktree: string): string {
   const mangled = path.resolve(worktree).replace(/[^A-Za-z0-9]/g, '-');
   return path.join(os.homedir(), '.claude', 'projects', mangled);
+}
+
+export function claudeCredentialsPath(): string {
+  return path.join(os.homedir(), '.claude', '.credentials.json');
+}
+
+export function claudeSessionEnvDir(): string {
+  return path.join(os.homedir(), '.claude', 'session-env');
+}
+
+/** The operator state root that Codex links into a worktree-local CODEX_HOME. */
+export function originatingCodexStateRoot(env: NodeJS.ProcessEnv = process.env): string {
+  return env.CODEX_HOME || process.env.CODEX_HOME || path.join(process.env.HOME || os.homedir(), '.codex');
+}
+
+export function codexAuthPath(env: NodeJS.ProcessEnv = process.env): string {
+  const authPath = path.join(originatingCodexStateRoot(env), 'auth.json');
+  try { return fs.realpathSync(authPath); }
+  catch { return authPath; }
 }
 
 function xdgDir(envVar: string, fallback: string, leaf: string): string {

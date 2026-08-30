@@ -3,8 +3,8 @@ id: TASK-2443
 title: >-
   Let every agent family persist its credentials and state under the bubblewrap
   sandbox
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-08-30 06:16'
 updated_date: '2026-08-30 06:19'
 labels:

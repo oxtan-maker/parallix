@@ -47,7 +47,8 @@ const {
   workflowLauncherStatus,
   isAgentBlocked,
   setCommandPathProbe,
-  setLauncherHealthProbe
+  setLauncherHealthProbe,
+  shouldPersistLaunchFailureBlock
 } = resolveNoOutputWatchdogConfigModule;
 
 function formatBlockUntil(date) {
@@ -2348,6 +2349,48 @@ test('hard launch failure (model not found) does not blocklist agent family', as
   } finally {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
   }
+});
+
+test('auth launch failure names the family and asks the operator to refresh credentials before fallback', async () => {
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-auth-refresh-'));
+  const logs: string[] = [];
+  let calls = 0;
+  try {
+    const result = await startAgent('draft', {
+      prompt: 'Execute.', worktree,
+      selectAgentFn: () => calls++ === 0 ? 'claude' : 'vibe',
+      detectLimitHitFn: () => null,
+      launchAgentFn: () => ({ invocation: { command: 'test', args: [], options: {} }, resultPromise: Promise.resolve(
+        calls === 1 ? { status: 1, stderr: 'API Error: 401 OAuth access token has expired' } : { status: 0, stdout: '' }
+      ) }),
+      log: (line: string) => logs.push(line),
+    });
+    assert.equal(result.agent, 'vibe');
+    assert.ok(logs.some(line => line.includes('claude') && line.includes('credentials need refreshing')));
+  } finally { fs.rmSync(worktree, { recursive: true, force: true }); }
+});
+
+test('non-auth launch failure does not emit a credential-refresh diagnostic', async () => {
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-no-auth-refresh-'));
+  const logs: string[] = [];
+  let calls = 0;
+  try {
+    await startAgent('draft', {
+      prompt: 'Execute.', worktree,
+      selectAgentFn: () => calls++ === 0 ? 'claude' : 'vibe',
+      detectLimitHitFn: () => null,
+      launchAgentFn: () => ({ invocation: { command: 'test', args: [], options: {} }, resultPromise: Promise.resolve(
+        calls === 1 ? { status: 1, stderr: 'process crashed' } : { status: 0, stdout: '' }
+      ) }),
+      log: (line: string) => logs.push(line),
+    });
+    assert.ok(!logs.some(line => line.includes('credentials need refreshing')));
+  } finally { fs.rmSync(worktree, { recursive: true, force: true }); }
+});
+
+test('expired credentials are diagnostic-only while API-key failures remain non-blocking', () => {
+  assert.equal(shouldPersistLaunchFailureBlock('claude', { stderr: 'OAuth access token has expired' }), true);
+  assert.equal(shouldPersistLaunchFailureBlock('claude', { stderr: 'API key is invalid' }), false);
 });
 
 // Reproduces the reported symptom: mistral/vibe repeatedly re-enters the

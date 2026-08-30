@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnAndTee } from '../process/spawn-tee.js';
 import { extractCodexTelemetry } from './codex-telemetry.js';
-import { codexHomeRoot } from '../config/state-homes.js';
+import { codexHomeRoot, originatingCodexStateRoot } from '../config/state-homes.js';
 import type { SessionMarkerPort } from '../../application/domain-ports.js';
 import type { MissionId } from '../../domain/mission.js';
 import type { SessionRole } from '../../domain/session.js';
@@ -174,10 +174,6 @@ function codexAuthPath(worktree: string) {
 
 function tomlString(value: any) {
   return `"${String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
-}
-
-function originatingCodexStateRoot(env: {[key: string]: string} = {}) {
-  return env.CODEX_HOME || process.env.CODEX_HOME || path.join(process.env.HOME || os.homedir(), '.codex');
 }
 
 function replaceWithLink(source: string, target: string) {

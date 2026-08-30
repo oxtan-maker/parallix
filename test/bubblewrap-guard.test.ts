@@ -129,7 +129,7 @@ test('review profile grants each worktree-local launcher state home as a writabl
       const profile = resolveSandboxProfile('review', worktree, artifactDir, family);
       assert.equal(profile.worktreeWritable, false);
       const home = path.join(worktree, '.workflow', `${family}-home`);
-      assert.ok(profile.writable.includes(home), `${family} state home ${home} must be writable`);
+      assert.ok(profile.optionalWritableDirectories?.includes(home), `${family} state home ${home} must be writable`);
       fs.mkdirSync(home, { recursive: true });
       assert.doesNotThrow(() => fs.accessSync(home, fs.constants.W_OK), `${family} state home must be writable on disk`);
     }
@@ -146,8 +146,8 @@ test('review profile grants claude the transcript directory named after the mang
       // /home/u/code/p -> -home-u-code-p.
       const mangled = path.resolve(worktree).replace(/[^A-Za-z0-9]/g, '-');
       const transcript = path.join(home, '.claude', 'projects', mangled);
-      assert.ok(profile.writable.includes(transcript), 'claude per-worktree transcript dir must be writable');
-      assert.ok(!profile.writable.some(dir => /projects\/task-/.test(dir)), 'transcript dir must not be derived from the mission slug');
+      assert.ok(profile.optionalWritableDirectories?.includes(transcript), 'claude per-worktree transcript dir must be writable');
+      assert.ok(!profile.optionalWritableDirectories?.some(dir => /projects\/task-/.test(dir)), 'transcript dir must not be derived from the mission slug');
     });
   } finally { fs.rmSync(worktree, { recursive: true, force: true }); fs.rmSync(artifactDir, { recursive: true, force: true }); }
 });
@@ -160,11 +160,11 @@ test('review profile grants the custom family its configured runner state homes'
       const profile = resolveSandboxProfile('review', worktree, artifactDir, 'custom');
       // The default custom runner is opencode, which is host-home based.
       assert.ok(
-        profile.writable.includes(path.join(home, '.local', 'share', 'opencode')),
-        `custom runner state home must be writable, got ${profile.writable.join(', ')}`
+        profile.optionalWritableDirectories?.includes(path.join(home, '.local', 'share', 'opencode')),
+        `custom runner state home must be writable, got ${profile.optionalWritableDirectories?.join(', ')}`
       );
       assert.ok(
-        !profile.writable.some(dir => dir.includes('custom-home')),
+        !profile.optionalWritableDirectories?.some(dir => dir.includes('custom-home')),
         'custom must not bind a placeholder worktree directory no runner writes to'
       );
     });
@@ -236,6 +236,22 @@ test('buildBubblewrapArgs rejects an unusable permitted path without widening a 
   try {
     assert.throws(() => buildBubblewrapArgs({ worktree, worktreeWritable: false, writable: [file] }, worktree), BubblewrapGuardError);
   } finally { fs.rmSync(worktree, { recursive: true, force: true }); }
+});
+
+test('buildBubblewrapArgs skips an unavailable launcher state directory', () => {
+  const worktree = makeWorktree();
+  const stateHome = path.join(worktree, 'unavailable-state');
+  const mocked = test.mock.method(fs, 'mkdirSync', (dir: fs.PathLike) => {
+    if (dir === stateHome) { throw new Error('EROFS'); }
+    return undefined as any;
+  });
+  try {
+    const { result, lines } = captureLogs(() => buildBubblewrapArgs({
+      worktree, worktreeWritable: false, writable: [], optionalWritableDirectories: [stateHome]
+    }, worktree));
+    assert.ok(!result.includes(stateHome));
+    assert.ok(lines.some(line => line.includes('launcher state is unavailable')));
+  } finally { mocked.mock.restore(); fs.rmSync(worktree, { recursive: true, force: true }); }
 });
 
 test('wrapWithBubblewrap prefixes bwrap and preserves the original argv', () => {
