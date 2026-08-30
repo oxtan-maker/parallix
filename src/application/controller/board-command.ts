@@ -153,7 +153,7 @@ export const INTEGRATED_CAPABILITIES = new Set<BoardCommandKind>([
  */
 export const UNAVAILABLE_CAPABILITIES: ReadonlyMap<BoardCommandKind, string> = new Map([
   ['review:submit', 'Review submission is not available from the board'],
-  ['review:act-on-findings', 'Acting on review findings is not available from the board'],
+  ['review:act-on-findings', 'Existing artifact consumption can synthesize review state or reviewer identity'],
   ['approve:review', 'Review approval is not available from the board'],
   ['integrate:merge', 'Integration is not available from the board'],
 ]);
