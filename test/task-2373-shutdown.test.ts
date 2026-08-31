@@ -293,6 +293,17 @@ async function seedInflightMission(fixtureRoot: string, stateRoot: string): Prom
     capabilities: new Set(['mission:intake']),
   });
   assert.equal(intake.status, 'completed', 'the fixture mission must be materialized for the authoritative board guard');
+  // Intake materializes every mission as `backlog`; refinement is what
+  // `px draft` records before a launch, and activation demands it.
+  const refined = await services.lifecycle.transition({
+    operationId: `${SC3_SLUG}-refine`,
+    missionId: id,
+    command: { type: 'refine' },
+    actor: 'claude',
+    occurredAt: new Date().toISOString(),
+    capabilities: new Set(['mission:transition']),
+  });
+  assert.equal(refined.status, 'completed', 'the fixture mission must be refined before it can be activated');
   const activated = await services.lifecycle.activate({
     operationId: `${SC3_SLUG}-activate`,
     missionId: id,

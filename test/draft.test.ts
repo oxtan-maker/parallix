@@ -610,6 +610,7 @@ test('runDraftCommand clears a stale feature Base-Branch when re-drafted from th
       startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
       missionServicesFn: async () => ({
         repositoryId: 'main',
+        lifecycle: { transition: async () => ({ status: 'completed', value: { version: 2 }, durableEvidence: [] }) },
         intake: { execute: async () => ({ status: 'completed', value: { version: 1 }, durableEvidence: [] }) },
       }),
       recordDraftImplementerFn: () => {},
@@ -665,6 +666,7 @@ test('runDraftCommand records a non-primary launch branch over a previous base o
       startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
       missionServicesFn: async () => ({
         repositoryId: 'main',
+        lifecycle: { transition: async () => ({ status: 'completed', value: { version: 2 }, durableEvidence: [] }) },
         intake: { execute: async () => ({ status: 'completed', value: { version: 1 }, durableEvidence: [] }) },
       }),
       recordDraftImplementerFn: () => {},
@@ -720,6 +722,7 @@ test('runDraftCommand reuses the existing mission branch and clears the stale ba
       startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
       missionServicesFn: async () => ({
         repositoryId: 'main',
+        lifecycle: { transition: async () => ({ status: 'completed', value: { version: 2 }, durableEvidence: [] }) },
         intake: { execute: async () => ({ status: 'completed', value: { version: 1 }, durableEvidence: [] }) },
       }),
       recordDraftImplementerFn: () => {},
@@ -1313,6 +1316,7 @@ test('runDraftCommand transitions task to backlog after setup completes', async 
       startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
       missionServicesFn: async () => ({
         repositoryId: 'main',
+        lifecycle: { transition: async () => ({ status: 'completed', value: { version: 2 }, durableEvidence: [] }) },
         intake: { execute: async () => ({ status: 'completed', value: { version: 1 }, durableEvidence: [] }) },
       }),
       recordDraftImplementerFn: () => {},
@@ -1360,6 +1364,7 @@ test('runDraftCommand transitions task to refined after draft agent succeeds and
       startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
       missionServicesFn: async () => ({
         repositoryId: 'main',
+        lifecycle: { transition: async () => ({ status: 'completed', value: { version: 2 }, durableEvidence: [] }) },
         intake: { execute: async () => ({ status: 'completed', value: { version: 1 }, durableEvidence: [] }) },
       }),
       recordDraftImplementerFn: () => {},
@@ -1408,6 +1413,7 @@ test('runDraftCommand does not transition to refined when draft agent exits non-
     startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 1 } }),
     missionServicesFn: async () => ({
       repositoryId: 'main',
+      lifecycle: { transition: async () => ({ status: 'completed', value: { version: 2 }, durableEvidence: [] }) },
       intake: { execute: async () => ({ status: 'completed', value: { version: 1 }, durableEvidence: [] }) },
     }),
     recordDraftImplementerFn: () => {},
@@ -1444,6 +1450,7 @@ test('runDraftCommand does not transition to refined when safety harness throws'
     startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
     missionServicesFn: async () => ({
       repositoryId: 'main',
+      lifecycle: { transition: async () => ({ status: 'completed', value: { version: 2 }, durableEvidence: [] }) },
       intake: { execute: async () => ({ status: 'completed', value: { version: 1 }, durableEvidence: [] }) },
     }),
     recordDraftImplementerFn: () => {},
@@ -1490,6 +1497,7 @@ function draftDepsForIntake(overrides) {
     enforceDraftCommitSafetyFn: () => false,
     missionServicesFn: async () => ({
       repositoryId: 'main',
+      lifecycle: { transition: async () => ({ status: 'completed', value: { version: 2 }, durableEvidence: [] }) },
       intake: { execute: async () => ({ status: 'completed', value: { version: 1 }, durableEvidence: [] }) },
     }),
     logFn: () => {},
@@ -1504,6 +1512,7 @@ test('runDraftCommand materializes the Mission in SQLite before transitioning th
   // basename that `targetWorktree` (`/wt-tst`) would yield.
   const missionServicesFn = async () => ({
     repositoryId: 'main',
+    lifecycle: { transition: async () => ({ status: 'completed', value: { version: 2 }, durableEvidence: [] }) },
     intake: {
       execute: async (request) => {
         calls.push(`intake:${request.missionId}`);
@@ -1543,6 +1552,7 @@ test('runDraftCommand keys the intake request to the identity the composition ro
     assert.equal(rootDir, '/wt-tst', 'composition still receives the mission worktree and canonicalizes it itself');
     return {
       repositoryId: 'parallix',
+      lifecycle: { transition: async () => ({ status: 'completed', value: { version: 2 }, durableEvidence: [] }) },
       intake: {
         execute: async (request) => {
           requests.push(request);
@@ -1631,6 +1641,9 @@ test('runDraftCommand treats an already-recorded Mission as idempotent and conti
         durableEvidence: [],
       }),
     },
+    // An intake conflict continues the draft, so this double still reaches the
+    // refinement the final transition records.
+    lifecycle: { transition: async () => ({ status: 'completed', value: { version: 2 }, durableEvidence: [] }) },
   });
 
   try {
@@ -1645,4 +1658,62 @@ test('runDraftCommand treats an already-recorded Mission as idempotent and conti
   }
 
   assert.ok(transitions.includes('backlog'), 're-drafting a recorded Mission must not block the draft');
+});
+
+// TASK-2445: activation demands a `refined` Mission, and intake materializes
+// every mission as `backlog`. The draft's final step is therefore the only
+// place the aggregate is refined, and it must record that refinement before
+// the Backlog task reaches `ready` — otherwise a failed database write leaves
+// a task advertised as ready that `px active` can no longer activate.
+test('runDraftCommand records the refine transition before the Backlog task reaches ready', async () => {
+  const calls = [];
+
+  await runDraftCommand(['task-tst'], draftDepsForIntake({
+    transitionTaskFn: (slug, status) => { calls.push(`transition:${status}`); return true; },
+    missionServicesFn: async () => ({
+      repositoryId: 'main',
+      intake: { execute: async () => ({ status: 'completed', value: { version: 1 }, durableEvidence: [] }) },
+      lifecycle: {
+        transition: async (request) => {
+          calls.push(`lifecycle:${request.command.type}`);
+          return { status: 'completed', value: { version: 2 }, durableEvidence: [] };
+        },
+      },
+    }),
+    exitFn: (code) => { throw new Error(`unexpected exit ${code}`); },
+    errorFn: (msg) => { throw new Error(`unexpected error: ${msg}`); },
+  }));
+
+  assert.ok(calls.includes('lifecycle:refine'), 'the draft records the refine transition on the Mission aggregate');
+  assert.ok(
+    calls.indexOf('lifecycle:refine') < calls.lastIndexOf('transition:refined'),
+    `refinement must be persisted before the Backlog task reaches ready; saw ${JSON.stringify(calls)}`,
+  );
+});
+
+test('runDraftCommand leaves the Backlog task alone when refinement cannot be recorded', async () => {
+  const calls = [];
+  const exitCodes = [];
+  const errors = [];
+
+  await runDraftCommand(['task-tst'], draftDepsForIntake({
+    transitionTaskFn: (slug, status) => { calls.push(`transition:${status}`); return true; },
+    missionServicesFn: async () => ({
+      repositoryId: 'main',
+      intake: { execute: async () => ({ status: 'completed', value: { version: 1 }, durableEvidence: [] }) },
+      lifecycle: {
+        transition: async () => ({
+          status: 'failed',
+          error: { kind: 'unavailable', message: 'database is locked' },
+          durableEvidence: [],
+        }),
+      },
+    }),
+    exitFn: (code) => { exitCodes.push(code); },
+    errorFn: (msg) => { errors.push(String(msg)); },
+  }));
+
+  assert.deepEqual(exitCodes, [1]);
+  assert.ok(errors.some(msg => msg.includes('database is locked')), 'the refusal names the underlying failure');
+  assert.ok(!calls.includes('transition:refined'), 'the Backlog task must not reach ready without a recorded refinement');
 });

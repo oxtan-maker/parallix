@@ -520,6 +520,34 @@ function createDraftWorkflowAdapter(deps: Record<string, unknown> = {}) {
       const transitionTaskFn = (ctx.options as any).transitionTaskFn || transitionTask;
       const transitionVirtualFn = (ctx.options as any).transitionVirtualFn || transitionVirtual;
 
+      // Record refinement on the Mission aggregate before the Backlog task
+      // moves to ready. Activation demands `refined`, and intake materializes
+      // every mission as `backlog`, so without this the persisted aggregate
+      // would never leave the backlog and `px active` could not run. Ordering
+      // it first keeps the failure story the same as intake's: a database
+      // failure leaves the Backlog task where it was.
+      try {
+        if (typeof ctx.missionServicesFn !== 'function') { throw new Error('draft command requires injected mission services'); }
+        const missionServices = await ctx.missionServicesFn(ctx.targetWorktree);
+        const refined = await missionServices.lifecycle.transition({
+          operationId: `draft-refine-${ctx.slug}`,
+          missionId: missionId(ctx.slug),
+          capabilities: new Set(['mission:transition']),
+          command: { type: 'refine' },
+          actor: 'draft',
+          occurredAt: new Date().toISOString(),
+          idempotencyKey: `${ctx.slug}:refine`,
+        });
+        if (refined.status !== 'completed') {
+          throw new Error(refined.error?.message || 'unknown error');
+        }
+      } catch (refineError) {
+        errorFn(fmt.status('FAIL', `Recording refinement for ${ctx.slug} failed: ${/** @type {any} */ (refineError).message}`));
+        logFn('Repair: ensure the operator-local database is reachable, then re-run the draft. The Backlog task was not transitioned to ready.');
+        safeExit(1);
+        return;
+      }
+
       if (!(await transitionVirtualFn(transitionTaskFn, ctx.slug, 'ready', /** @type {{ rootDir: string, log: Function }} */ ({ rootDir: ctx.targetWorktree, log: ctx.logFn })))) {
         errorFn(fmt.status('FAIL', `Could not transition task ${ctx.slug} to ready status.`));
         safeExit(1);

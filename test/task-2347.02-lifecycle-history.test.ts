@@ -95,12 +95,24 @@ describe('TASK-2347.02 full lifecycle lane history', () => {
       });
       assert.equal(intake.status, 'completed', JSON.stringify(intake));
 
-      // backlog -> active
+      // backlog -> refined: what `px draft` records before a launch.
       const lifecycle = new MissionLifecycleService(store);
+      const refined = await lifecycle.transition({
+        operationId: 'op-refine',
+        missionId: MISSION,
+        expectedVersion: version(intake),
+        capabilities: CAPABILITIES,
+        command: { type: 'refine' },
+        actor: IMPLEMENTER,
+        occurredAt: '2026-08-08T00:30:00.000Z',
+      });
+      assert.equal(refined.status, 'completed', JSON.stringify(refined));
+
+      // refined -> active
       const activated = await lifecycle.activate({
         operationId: 'op-activate',
         missionId: MISSION,
-        expectedVersion: version(intake),
+        expectedVersion: version(refined),
         capabilities: CAPABILITIES,
         agent: IMPLEMENTER,
         occurredAt: '2026-08-08T01:00:00.000Z',
@@ -194,7 +206,8 @@ describe('TASK-2347.02 full lifecycle lane history', () => {
         history.map((row) => ({ from: row.fromStatus, to: row.toStatus, trigger: row.trigger, at: row.occurredAt })),
         [
           { from: null, to: 'backlog', trigger: 'intake', at: '2026-08-08T00:00:00.000Z' },
-          { from: 'backlog', to: 'active', trigger: 'activate', at: '2026-08-08T01:00:00.000Z' },
+          { from: 'backlog', to: 'refined', trigger: 'refine', at: '2026-08-08T00:30:00.000Z' },
+          { from: 'refined', to: 'active', trigger: 'activate', at: '2026-08-08T01:00:00.000Z' },
           { from: 'active', to: 'review', trigger: 'submit-for-review', at: '2026-08-08T02:00:00.000Z' },
           { from: 'review', to: 'integration', trigger: 'approve', at: '2026-08-08T03:00:00.000Z' },
           { from: 'integration', to: 'done', trigger: 'integrate', at: '2026-08-08T04:00:00.000Z' },

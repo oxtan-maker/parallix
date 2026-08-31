@@ -351,7 +351,8 @@ test('SC3: shouldResume returns false when role differs', () => {
 
 test('SC3: triggerFromTransition maps all known transitions correctly', () => {
   assert.equal(triggerFromTransition(null, 'active'), 'activate');
-  assert.equal(triggerFromTransition('backlog', 'active'), 'activate');
+  assert.equal(triggerFromTransition('backlog', 'active'), null);
+  assert.equal(triggerFromTransition('backlog', 'refined'), 'refine');
   assert.equal(triggerFromTransition('refined', 'active'), 'activate');
   assert.equal(triggerFromTransition('active', 'active'), 'activate');
   assert.equal(triggerFromTransition('active', 'review'), 'submit-for-review');

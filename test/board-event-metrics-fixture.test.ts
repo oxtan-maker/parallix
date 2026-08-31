@@ -88,7 +88,7 @@ function laneEvent(
 // ---------------------------------------------------------------------------
 
 describe('SC6: metrics fixture — lane transitions produce populated board metrics', () => {
-  it('records 3 lane transitions (backlog->active->review->done) and produces non-empty metrics', async () => {
+  it('records 3 lane transitions (refined->active->review->integration) and produces non-empty metrics', async () => {
     await withRepo(async (repo, recorder) => {
       const task = 'task-0001';
       const t1 = '2026-07-24T08:00:00Z';
@@ -96,8 +96,8 @@ describe('SC6: metrics fixture — lane transitions produce populated board metr
       const t3 = '2026-07-24T12:00:00Z';
 
       // Record 3 lane transitions through the typed repository
-      // (following valid state machine: backlog→active→review→integration→done)
-      const wrote1 = await recorder.append(laneEvent(task, 'backlog', 'active', `op-${task}-1`, t1));
+      // (following valid state machine: refined→active→review→integration)
+      const wrote1 = await recorder.append(laneEvent(task, 'refined', 'active', `op-${task}-1`, t1));
       const wrote2 = await recorder.append(laneEvent(task, 'active', 'review', `op-${task}-2`, t2));
       const wrote3 = await recorder.append(laneEvent(task, 'review', 'integration', `op-${task}-3`, t3));
 
@@ -110,7 +110,7 @@ describe('SC6: metrics fixture — lane transitions produce populated board metr
       assert.equal(entries.length, 3, 'should have 3 lane-transition entries');
 
       // Verify typed columns (no JSON parsing needed)
-      assert.equal(entries[0].fromStatus, 'backlog');
+      assert.equal(entries[0].fromStatus, 'refined');
       assert.equal(entries[0].toStatus, 'active');
       assert.equal(entries[0].trigger, 'activate');
       assert.equal(entries[1].trigger, 'submit-for-review');
@@ -129,9 +129,12 @@ describe('SC6: metrics fixture — lane transitions produce populated board metr
       assert.equal(transitions[1].trigger, 'submit-for-review');
       assert.equal(transitions[2].trigger, 'approve');
 
-      // Build initial states map (mission starts in backlog)
+      // Build initial states map. The lane the mission occupies before its
+      // first recorded event is `refined`: activation leaves `refined`, so
+      // declaring `backlog` here would open a gap the metrics would have to
+      // normalize away.
       const initialStates = new Map<MissionId, MissionStatus>([
-        [missionId(task), 'backlog'],
+        [missionId(task), 'refined'],
       ]);
 
       // Create outcomes for median state times, throughput, review loop rate
@@ -203,7 +206,7 @@ describe('SC6: metrics fixture — lane transitions produce populated board metr
       }
 
       // SC5: medianCycleTimeByState attributes dwell to state occupied (not state entered)
-      // Transitions: backlog->active (08:00), active->review (10:00), review->integration (12:00)
+      // Transitions: refined->active (08:00), active->review (10:00), review->integration (12:00)
       // Closed intervals: active 08:00->10:00 = 120min, review 10:00->12:00 = 120min
       const cycleActive = metrics.medianCycleTimeByState.series.find((entry) => entry.lane === 'active')?.value;
       const cycleReview = metrics.medianCycleTimeByState.series.find((entry) => entry.lane === 'review')?.value;
@@ -218,7 +221,7 @@ describe('SC6: metrics fixture — lane transitions produce populated board metr
       const t2 = '2026-07-24T10:00:00Z';
 
       // Record transitions for two missions
-      await recorder.append(laneEvent('task-a', 'backlog', 'active', 'op-a-1', t1));
+      await recorder.append(laneEvent('task-a', 'refined', 'active', 'op-a-1', t1));
       await recorder.append(laneEvent('task-b', 'refined', 'active', 'op-b-1', t1));
       await recorder.append(laneEvent('task-a', 'active', 'review', 'op-a-2', t2));
 
@@ -232,7 +235,7 @@ describe('SC6: metrics fixture — lane transitions produce populated board metr
       const transitions = events.map((event) => laneTransitionEventToMissionTransition(event));
 
       const initialStates = new Map<MissionId, MissionStatus>([
-        [missionId('task-a'), 'backlog'],
+        [missionId('task-a'), 'refined'],
         [missionId('task-b'), 'refined'],
       ]);
 
@@ -259,7 +262,7 @@ describe('SC6: metrics fixture — lane transitions produce populated board metr
       const t2 = '2026-07-24T10:00:00Z';
 
       // Record transitions (following valid state machine path)
-      await recorder.append(laneEvent(task, 'backlog', 'active', 'op-1', t1));
+      await recorder.append(laneEvent(task, 'refined', 'active', 'op-1', t1));
       await recorder.append(laneEvent(task, 'active', 'review', 'op-2', t2));
 
       // Read back
@@ -270,7 +273,7 @@ describe('SC6: metrics fixture — lane transitions produce populated board metr
       const transitions = events.map((event) => laneTransitionEventToMissionTransition(event));
 
       const initialStates = new Map<MissionId, MissionStatus>([
-        [missionId(task), 'backlog'],
+        [missionId(task), 'refined'],
       ]);
 
       const outcomes: MissionOutcome[] = [
@@ -331,7 +334,7 @@ describe('SC7: replayed event log never overrides repository lifecycle state', (
       const task = 'task-0001';
 
       // Record a lane transition
-      await recorder.append(laneEvent(task, 'backlog', 'active', 'op-1', '2026-07-24T08:00:00Z'));
+      await recorder.append(laneEvent(task, 'refined', 'active', 'op-1', '2026-07-24T08:00:00Z'));
 
       // Read the event log
       const entries = await repo.findByMissionId(task);
@@ -367,7 +370,7 @@ describe('SC7: replayed event log never overrides repository lifecycle state', (
       const t2 = '2026-07-24T10:00:00Z';
 
       // Record transitions
-      await recorder.append(laneEvent(task, 'backlog', 'active', 'op-1', t1));
+      await recorder.append(laneEvent(task, 'refined', 'active', 'op-1', t1));
       await recorder.append(laneEvent(task, 'active', 'review', 'op-2', t2));
 
       // Event log has 2 entries

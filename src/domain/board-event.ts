@@ -49,7 +49,8 @@ export interface LaneTransitionEvent {
  * Derive the `trigger` (MissionCommand type) from a from→to transition.
  *
  * The mapping follows the `decideMission` state machine in mission-workflow.ts:
- *   - backlog/refined/active → active  : 'activate'
+ *   - backlog → refined      : 'refine'
+ *   - refined/active/null → active : 'activate' (null is the intake identity)
  *   - active → review         : 'submit-for-review'
  *   - review → active         : 'request-changes'
  *   - review → integration    : 'approve'
@@ -62,7 +63,10 @@ export function triggerFromTransition(
   from: MissionStatus | null,
   to: MissionStatus,
 ): MissionCommand['type'] | null {
-  if (to === 'active' && (from === 'backlog' || from === 'refined' || from === 'active' || from === null)) {
+  if (from === 'backlog' && to === 'refined') {
+    return 'refine';
+  }
+  if (to === 'active' && (from === 'refined' || from === 'active' || from === null)) {
     return 'activate';
   }
   if (from === 'active' && to === 'review') {
