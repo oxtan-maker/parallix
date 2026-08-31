@@ -7,6 +7,7 @@ import {
   summarizeMissionActivity,
   type MissionActivity,
 } from '../../application/projections/mission-activity.js';
+import { formatCountdown } from '../../application/projections/agent-countdown.js';
 
 // ---------------------------------------------------------------------------
 // AgentStrip — horizontal strip of agent availability entries
@@ -44,21 +45,6 @@ function displayBlockReason(reason: string | null | undefined): string | null {
   if (!reason) { return null; }
   if (reason.startsWith('parsed: ')) { return 'usage limit reached'; }
   return reason;
-}
-
-/** Format a countdown from milliseconds into a human-readable string. */
-function formatCountdown(ms: number): string {
-  if (ms === Infinity) { return '∞'; }
-  if (ms === 0) { return ''; }
-  const minutes = Math.floor(ms / 60000);
-  if (minutes < 60) { return `${minutes}m`; }
-  const hours = Math.floor(minutes / 60);
-  const remaining = minutes % 60;
-  if (hours < 24) {
-    return remaining > 0 ? `${hours}h ${remaining}m` : `${hours}h`;
-  }
-  const days = Math.floor(hours / 24);
-  return `${days}d`;
 }
 
 export interface AgentStripProps {

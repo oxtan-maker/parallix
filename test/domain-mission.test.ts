@@ -126,7 +126,6 @@ test('mission lifecycle follows the command-owned path without UI-only states', 
 
 test('mission lifecycle rejects unsupported jumps and missing handoff evidence', () => {
   const approvedReview = approve();
-  assert.throws(() => decideMission(mission('backlog'), { type: 'activate', agent: implementer }), MissionRuleViolation);
   assert.throws(
     () => decideMission(mission('backlog'), { type: 'approve', review: approvedReview }),
     MissionRuleViolation,

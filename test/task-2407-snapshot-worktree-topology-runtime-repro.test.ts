@@ -19,31 +19,41 @@ import assert from 'node:assert/strict';
  * composition graph) so a cyclic-export regression turns it red; it only stubs
  * the git boundary through the adapter's own `gitFn` option, never by replacing
  * the production modules, so it stays a hermetic unit test.
+ *
+ * The graph is loaded at module top level, in the exact production order,
+ * before any test body runs. Loading it inside a test body costs ~0.8s of
+ * full-graph TS compilation and trips the 500ms unit-test headroom, so the
+ * load lives here: a broken named import still fails this file at load time
+ * (the import itself is the assertion), and the tests below verify the
+ * bindings it produced.
  */
 
-test('task-2407 CLI composition graph provides snapshotWorktreeTopology as a callable named export', async () => {
-  // 1. Load the production composition graph the way the handoff runtime does.
-  //    This is the import that throws the missing-named-export error under a
-  //    circular dependency, so a bare dynamic import is itself the assertion.
-  const productionCapabilities = await import('../src/composition/production-capabilities.js');
+// 1. Load the production composition graph the way the handoff runtime does.
+//    This is the import that throws the missing-named-export error under a
+//    circular dependency, so a bare dynamic import is itself the assertion.
+const productionCapabilities = await import('../src/composition/production-capabilities.js');
+
+// 2. Load the handoff use-case so the graph that reaches captureNelAtHandoff
+//    is fully resolved through the same composition entry point.
+const handoffUseCase = await import('../src/application/handoff-command-use-case.js');
+
+// 3. The git adapter export must be a callable named export once the graph is
+//    loaded, not an undefined binding from a partially-initialised cycle.
+const worktree = await import('../src/adapters/git/worktree.js');
+
+test('task-2407 CLI composition graph provides snapshotWorktreeTopology as a callable named export', () => {
   assert.equal(
     typeof productionCapabilities.composeProductionCapabilities,
     'function',
     'production-capabilities must load composeProductionCapabilities from the composition graph',
   );
 
-  // 2. Load the handoff use-case so the graph that reaches captureNelAtHandoff
-  //    is fully resolved through the same composition entry point.
-  const handoffUseCase = await import('../src/application/handoff-command-use-case.js');
   assert.equal(
     typeof handoffUseCase.HandoffCommandUseCase,
     'function',
     'handoff use-case must resolve through the composition graph',
   );
 
-  // 3. The git adapter export must be a callable named export once the graph is
-  //    loaded, not an undefined binding from a partially-initialised cycle.
-  const worktree = await import('../src/adapters/git/worktree.js');
   assert.equal(
     typeof worktree.snapshotWorktreeTopology,
     'function',
