@@ -16,6 +16,8 @@ import { fileURLToPath } from 'node:url';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { Board } from '../web/src/board.js';
+import { FlowPanel } from '../web/src/flow-panel.js';
+import { appendProgress, OPERATION_LOG_LIMIT } from '../web/src/operation-log.js';
 import { Shell } from '../web/src/shell.js';
 import { durationText } from '../web/src/format.js';
 import { toWebBoardSnapshot } from '../src/interfaces/web/transport.js';
@@ -33,6 +35,9 @@ const browserSources = fs.readdirSync(webSrc)
 
 const render = (snapshot: WebBoardSnapshot): string =>
   renderToStaticMarkup(React.createElement(Board, { snapshot }));
+
+const renderFlow = (metrics: WebBoardSnapshot['metrics']): string =>
+  renderToStaticMarkup(React.createElement(FlowPanel, { metrics }));
 
 const snapshotOf = (overrides: Partial<BoardProjection>): WebBoardSnapshot =>
   toWebBoardSnapshot({ ...makeProjection(), ...overrides });
@@ -136,6 +141,58 @@ test('the operation log renders the server entry rather than a reconstructed one
   assert.match(html, /CP-2 committed/);
 });
 
+test('operation progress deduplicates reconnects and evicts oldest entries', () => {
+  const snapshot = populated();
+  const progress = { kind: 'progress' as const, transportVersion: 2 as const, operationId: 'op-reconnect', sequence: 1, phase: 'run', message: 'one', timestamp: '2026-08-30T11:00:00.000Z' };
+  const once = appendProgress(snapshot, progress);
+  assert.equal(appendProgress(once, progress).operationLog.length, once.operationLog.length);
+  let bounded = once;
+  for (let sequence = 2; sequence <= OPERATION_LOG_LIMIT + 2; sequence += 1) bounded = appendProgress(bounded, { ...progress, sequence });
+  assert.equal(bounded.operationLog.length, OPERATION_LOG_LIMIT);
+  assert.equal(bounded.operationLog.at(-1)?.sequence, OPERATION_LOG_LIMIT + 2);
+});
+
+test('FLOW renders every projected metric health state without fabricated history', () => {
+  for (const state of ['healthy', 'partial', 'unavailable', 'no-telemetry', 'no-completions'] as const) {
+    const html = renderFlow(toWebBoardSnapshot({ ...makeProjection(), metrics: { ...emptyMetrics, health: { state }, provenance: { ...emptyMetrics.provenance, sampleSize: 7 } } }).metrics);
+    assert.match(html, new RegExp(`statistics ${state}`));
+    assert.match(html, /population n=7/);
+    assert.match(html, /weekly throughput: unavailable \(n=0\) · skip/);
+  }
+});
+
+test('FLOW renders populated projected values with their observation counts', () => {
+  const html = renderFlow(toWebBoardSnapshot({ ...makeProjection(), metrics: {
+    ...emptyMetrics,
+    health: { state: 'healthy' },
+    provenance: { ...emptyMetrics.provenance, sampleSize: 4 },
+    cumulativeFlowByState: { series: [{ at: '2026-08-30', counts: { active: 2, review: 1 }, observationCount: 3 }], missingHistoryFallback: 'skip' } as unknown as typeof emptyMetrics.cumulativeFlowByState,
+    medianCycleTimeByState: { series: [{ lane: 'active', value: 42, observationCount: 2 }], missingHistoryFallback: 'null' } as typeof emptyMetrics.medianCycleTimeByState,
+    weeklyThroughput: { series: [{ at: '2026-08-30', value: 3, observationCount: 3 }], missingHistoryFallback: 'skip' },
+  } }).metrics);
+  assert.match(html, /Cumulative flow chart/);
+  assert.match(html, /active/);
+  assert.match(html, /42m \(n=2\)/);
+  assert.match(html, /weekly throughput: 3 \(n=3\)/);
+});
+
+test('FLOW charts only the transport-projected latest week', () => {
+  const html = renderFlow(toWebBoardSnapshot({ ...makeProjection(), metrics: {
+    ...emptyMetrics,
+    decisionWindow: {
+      current: { label: '2026-08-24 → 2026-08-30', startDate: '2026-08-24', endDate: '2026-08-30', completedMissions: 0, cycleTime: { value: null, observationCount: 0 }, agentRuntime: { value: null, observationCount: 0 }, activeDwell: { value: null, observationCount: 0 }, reviewDwell: { value: null, observationCount: 0 }, integrationDwell: { value: null, observationCount: 0 }, reviewBounce: { value: null, observationCount: 0 } },
+      previous: { label: '2026-08-17 → 2026-08-23', startDate: '2026-08-17', endDate: '2026-08-23', completedMissions: 0, cycleTime: { value: null, observationCount: 0 }, agentRuntime: { value: null, observationCount: 0 }, activeDwell: { value: null, observationCount: 0 }, reviewDwell: { value: null, observationCount: 0 }, integrationDwell: { value: null, observationCount: 0 }, reviewBounce: { value: null, observationCount: 0 } },
+    },
+    cumulativeFlowByState: { series: [
+      { at: '2026-08-23T23:59:59.000Z', counts: { old: 99 }, observationCount: 99 },
+      { at: '2026-08-24T00:00:00.000Z', counts: { active: 2 }, observationCount: 2 },
+    ], missingHistoryFallback: 'estimate' } as unknown as typeof emptyMetrics.cumulativeFlowByState,
+  } }).metrics);
+  assert.match(html, /2026-08-24 → 2026-08-30/);
+  assert.match(html, / active<\/span>/);
+  assert.doesNotMatch(html, / old<\/span>/);
+});
+
 // ---------------------------------------------------------------------------
 // Empty, unavailable and unknown values (SC2)
 // ---------------------------------------------------------------------------
@@ -165,11 +222,29 @@ test('an absent implementer renders as absent, never as an idle or named agent',
 
 test('omitted, null and observed-zero running sessions each render as themselves', () => {
   const html = render(populated());
-  assert.match(html, /0 running/, 'an observed zero renders as zero');
-  assert.match(html, /sessions unknown/, 'an unobserved liveness renders as unknown');
+  assert.match(html, /0 command sessions/, 'an observed zero renders as zero');
+  assert.match(html, /command sessions unknown/, 'an unobserved liveness renders as unknown');
   assert.match(html, /unattributed sessions unknown/);
   // mistral has no runningSessions key at all: it contributes no session text.
   assert.equal(html.split('sessions unknown').length - 1, 2, 'only the null cases print unknown');
+});
+
+test('activity, coordinator recovery evidence, and reduced motion stay truthful', () => {
+  const live = makeCard({ id: 'task-1111' as MissionCard['id'], currentWork: { operationId: 'op', phase: 'implement', summary: 'live work', agent: agentFamily('codex'), updatedAt: '2026-08-30T00:00:00.000Z', freshness: 'live' } });
+  const uncertain = makeCard({ id: 'task-1112' as MissionCard['id'], currentWork: { ...live.currentWork!, freshness: 'unverified' } });
+  const stale = makeCard({ id: 'task-1113' as MissionCard['id'], currentWork: { ...live.currentWork!, freshness: 'stale' }, liveSession: { missionId: 'task-1113' as MissionCard['id'], family: agentFamily('codex') } });
+  const blocked = makeCard({ id: 'task-1114' as MissionCard['id'], blockingReason: 'waiting' });
+  const idle = makeCard({ id: 'task-1115' as MissionCard['id'] });
+  const html = render(snapshotOf({ stages: makeProjection({ active: [live, uncertain, stale, blocked, idle] }).stages }));
+  assert.match(html, /working · live/);
+  assert.match(html, /working · unknown/);
+  assert.match(html, /working · stale/);
+  assert.match(html, /blocked/);
+  assert.match(html, /idle/);
+  assert.match(html, /recovery evidence: coordinator live \(codex\)/);
+  assert.equal((html.match(/fan spin/g) ?? []).length, 2, 'only authoritative live work spins its two fans');
+  const css = browserSources.find((file) => file.name === 'style.css')?.text ?? '';
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.fan\.spin[\s\S]*animation: none/);
 });
 
 test('an indefinite agent block never renders as a numeric duration', () => {
@@ -189,7 +264,7 @@ test('agent-block durations use human-sized units', () => {
 
 test('every rendered action is a disabled native control carrying the server display and state', () => {
   const html = render(populated());
-  const buttons = html.match(/<button[^>]*>/g) ?? [];
+  const buttons: string[] = Array.from(html.match(/<button[^>]*>/g) ?? []).filter((button) => !button.includes('aria-controls="flow-metrics"'));
   assert.ok(buttons.length > 0, 'the fixture renders at least one action');
   for (const button of buttons) {
     assert.match(button, /disabled/, `action is native-disabled: ${button}`);
@@ -283,7 +358,7 @@ test('production browser code imports no Node built-in, concrete adapter, or ser
 
 test('production browser code uses no browser persistence or cached snapshot', () => {
   for (const file of browserSources) {
-    for (const forbidden of ['localStorage', 'sessionStorage', 'indexedDB', 'document.cookie', 'caches.', 'setInterval', 'EventSource']) {
+    for (const forbidden of ['localStorage', 'sessionStorage', 'indexedDB', 'document.cookie', 'caches.', 'setInterval']) {
       assert.ok(!file.text.includes(forbidden), `${file.name} must not use ${forbidden}`);
     }
   }
@@ -302,6 +377,7 @@ test('production browser code performs exactly one fetch and no mutating request
 test('production browser code contains no mock mission data or invented metric', () => {
   for (const file of browserSources) {
     assert.ok(!/task-\d/.test(file.text), `${file.name} must not embed a mission id`);
+    if (file.name === 'flow-panel.tsx') { continue; }
     for (const invented of ['missions/wk', 'median', 'throughput', 'bottleneck', 'cycle time']) {
       assert.ok(!file.text.toLowerCase().includes(invented.toLowerCase()), `${file.name} must not invent ${invented}`);
     }

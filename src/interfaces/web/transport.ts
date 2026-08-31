@@ -28,6 +28,7 @@ import {
   BOARD_PROJECTION_VERSION,
   type AgentAvailabilityMetric,
   type AttentionItem,
+  type BoardMetrics,
   type BoardProjection,
   type OperationLogEntry,
 } from '../../application/projections/board.js';
@@ -198,6 +199,8 @@ export interface WebOperationLogEntry {
   readonly phase: string;
   readonly message: string;
   readonly timestamp: string;
+  /** SSE progress sequence when this entry came from the live stream. */
+  readonly sequence?: number;
   /** Optional: omitted when the entry has no agent, never `null`. */
   readonly agent?: string;
 }
@@ -223,6 +226,17 @@ export interface WebSourceFact {
   readonly value?: string;
 }
 
+export interface WebBoardMetrics {
+  readonly health: { readonly state: string };
+  readonly provenance: { readonly sampleSize: number; readonly newestEventTimestamp: string | null };
+  /** The rolling week that FLOW uses, shared with the board's decision metrics. */
+  readonly flowWindow?: { readonly startDate: string; readonly endDate: string; readonly label: string };
+  readonly cumulativeFlowByState: { readonly series: readonly { readonly at: string; readonly counts: Readonly<Record<string, number>>; readonly observationCount?: number }[]; readonly missingHistoryFallback: string };
+  readonly medianCycleTimeByState: { readonly series: readonly { readonly lane: string; readonly value: number | null; readonly observationCount?: number }[]; readonly missingHistoryFallback: string };
+  readonly weeklyThroughput: { readonly series: readonly { readonly at: string; readonly value: number | null; readonly observationCount?: number }[]; readonly missingHistoryFallback: string };
+  readonly bottleneck: { readonly sentence: string };
+}
+
 export interface WebBoardSnapshot {
   readonly kind: 'board-snapshot';
   readonly transportVersion: WebTransportVersion;
@@ -234,6 +248,7 @@ export interface WebBoardSnapshot {
   readonly wipCounts: readonly { readonly lane: WebBoardLane; readonly count: number }[];
   readonly operationLog: readonly WebOperationLogEntry[];
   readonly agentAvailability: readonly WebAgentAvailability[];
+  readonly metrics: WebBoardMetrics;
   /** Optional-and-nullable, same three states as `runningSessions`. */
   readonly unattributedRunningSessions?: number | null;
   /** One fact per `(source, status, value)` tuple; repeats are collapsed by the projection. */
@@ -534,6 +549,22 @@ function toSourceFact(fact: SourceFact<string>): WebSourceFact {
   };
 }
 
+function toWebMetrics(metrics: BoardMetrics): WebBoardMetrics {
+  return {
+    health: { state: metrics.health.state },
+    provenance: { sampleSize: metrics.provenance.sampleSize, newestEventTimestamp: metrics.provenance.newestEventTimestamp },
+    ...(metrics.decisionWindow === undefined ? {} : { flowWindow: {
+      startDate: metrics.decisionWindow.current.startDate,
+      endDate: metrics.decisionWindow.current.endDate,
+      label: metrics.decisionWindow.current.label,
+    } }),
+    cumulativeFlowByState: { ...metrics.cumulativeFlowByState, series: metrics.cumulativeFlowByState.series.map(point => ({ ...point, counts: { ...point.counts } })) },
+    medianCycleTimeByState: { ...metrics.medianCycleTimeByState, series: metrics.medianCycleTimeByState.series.map(point => ({ ...point })) },
+    weeklyThroughput: { ...metrics.weeklyThroughput, series: metrics.weeklyThroughput.series.map(point => ({ ...point })) },
+    bottleneck: { sentence: metrics.bottleneck.sentence },
+  };
+}
+
 /**
  * Project a `BoardProjection` to the wire snapshot. Pure and fail-closed:
  * an unknown projection version is rejected rather than guessed at.
@@ -566,6 +597,7 @@ export function toWebBoardSnapshot(projection: BoardProjection): WebBoardSnapsho
     wipCounts: projection.wipCounts.map((wip) => ({ lane: wip.lane, count: wip.count })),
     operationLog: projection.operationLog.map(toLogEntry),
     agentAvailability: projection.metrics.agentAvailability.map(toAgentAvailability),
+    metrics: toWebMetrics(projection.metrics),
     sourceFacts: projection.sourceFacts.map(toSourceFact),
     ...(projection.metrics.unattributedRunningSessions !== undefined
       ? { unattributedRunningSessions: projection.metrics.unattributedRunningSessions }
@@ -978,6 +1010,30 @@ function checkSourceFact(object: unknown, path: string, problems: string[]): voi
   checkOptString(object, 'value', path, problems);
 }
 
+function checkMetrics(object: unknown, path: string, problems: string[]): void {
+  if (!isPlainObject(object)) { problems.push(`${path} must be an object`); return; }
+  checkKeys(object, ['health', 'provenance', 'flowWindow', 'cumulativeFlowByState', 'medianCycleTimeByState', 'weeklyThroughput', 'bottleneck'], ['health', 'provenance', 'cumulativeFlowByState', 'medianCycleTimeByState', 'weeklyThroughput', 'bottleneck'], path, problems);
+  if (!isPlainObject(object.health)) { problems.push(`${path}.health must be an object`); } else { checkKeys(object.health, ['state'], ['state'], `${path}.health`, problems); checkString(object.health, 'state', `${path}.health`, problems); }
+  if (!isPlainObject(object.provenance)) { problems.push(`${path}.provenance must be an object`); } else { checkKeys(object.provenance, ['sampleSize', 'newestEventTimestamp'], ['sampleSize', 'newestEventTimestamp'], `${path}.provenance`, problems); checkFiniteNumber(object.provenance, 'sampleSize', `${path}.provenance`, problems); checkNullableString(object.provenance, 'newestEventTimestamp', `${path}.provenance`, problems); }
+  if (object.flowWindow !== undefined) { if (!isPlainObject(object.flowWindow)) { problems.push(`${path}.flowWindow must be an object`); } else { checkKeys(object.flowWindow, ['startDate', 'endDate', 'label'], ['startDate', 'endDate', 'label'], `${path}.flowWindow`, problems); checkString(object.flowWindow, 'startDate', `${path}.flowWindow`, problems); checkString(object.flowWindow, 'endDate', `${path}.flowWindow`, problems); checkString(object.flowWindow, 'label', `${path}.flowWindow`, problems); } }
+  for (const key of ['cumulativeFlowByState', 'medianCycleTimeByState', 'weeklyThroughput'] as const) {
+    const series = object[key]; const seriesPath = `${path}.${key}`;
+    if (!isPlainObject(series)) { problems.push(`${seriesPath} must be an object`); continue; }
+    checkKeys(series, ['series', 'missingHistoryFallback'], ['series', 'missingHistoryFallback'], seriesPath, problems);
+    checkString(series, 'missingHistoryFallback', seriesPath, problems);
+    if (!Array.isArray(series.series)) { problems.push(`${seriesPath}.series must be an array`); continue; }
+    series.series.forEach((point, index) => {
+      const pointPath = `${seriesPath}.series[${index}]`;
+      if (!isPlainObject(point)) { problems.push(`${pointPath} must be an object`); return; }
+      if (key === 'cumulativeFlowByState') { checkKeys(point, ['at', 'counts', 'observationCount'], ['at', 'counts'], pointPath, problems); checkString(point, 'at', pointPath, problems); if (!isPlainObject(point.counts)) { problems.push(`${pointPath}.counts must be an object`); } }
+      else if (key === 'medianCycleTimeByState') { checkKeys(point, ['lane', 'value', 'observationCount'], ['lane', 'value'], pointPath, problems); checkString(point, 'lane', pointPath, problems); checkNullableFiniteNumber(point, 'value', pointPath, problems); }
+      else { checkKeys(point, ['at', 'value', 'observationCount'], ['at', 'value'], pointPath, problems); checkString(point, 'at', pointPath, problems); checkNullableFiniteNumber(point, 'value', pointPath, problems); }
+      checkOptionalNullableNumber(point, 'observationCount', pointPath, problems);
+    });
+  }
+  if (!isPlainObject(object.bottleneck)) { problems.push(`${path}.bottleneck must be an object`); } else { checkKeys(object.bottleneck, ['sentence'], ['sentence'], `${path}.bottleneck`, problems); checkString(object.bottleneck, 'sentence', `${path}.bottleneck`, problems); }
+}
+
 function validateWithVersion<T>(
   payload: unknown,
   kind: string,
@@ -1012,13 +1068,14 @@ export function validateWebBoardSnapshot(payload: unknown): WebTransportValidati
   return validateWithVersion<WebBoardSnapshot>(payload, 'board-snapshot', (p, problems) => {
     checkKeys(p,
       ['kind', 'transportVersion', 'projectionVersion', 'repositoryId', 'stages', 'attentionQueue',
-        'availableActions', 'wipCounts', 'operationLog', 'agentAvailability',
+        'availableActions', 'wipCounts', 'operationLog', 'agentAvailability', 'metrics',
         'unattributedRunningSessions', 'sourceFacts'],
       ['kind', 'transportVersion', 'projectionVersion', 'repositoryId', 'stages', 'attentionQueue',
-        'availableActions', 'wipCounts', 'operationLog', 'agentAvailability', 'sourceFacts'],
+        'availableActions', 'wipCounts', 'operationLog', 'agentAvailability', 'metrics', 'sourceFacts'],
       'snapshot', problems);
     checkFiniteNumber(p, 'projectionVersion', 'snapshot', problems);
     checkString(p, 'repositoryId', 'snapshot', problems);
+    checkMetrics(p.metrics, 'snapshot.metrics', problems);
     if (Array.isArray(p.stages)) {
       p.stages.forEach((stage, index) => {
         const path = `snapshot.stages[${index}]`;

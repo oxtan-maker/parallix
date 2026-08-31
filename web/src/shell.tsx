@@ -8,6 +8,8 @@ import { useEffect, useState } from 'react';
 import { loadSnapshot, type SnapshotState } from './board-data.js';
 import { Board } from './board.js';
 import { C, MONO } from './palette.js';
+import { validateWebProgressEvent } from '../../src/interfaces/web/transport.js';
+import { appendProgress } from './operation-log.js';
 
 const page: React.CSSProperties = {
   height: '100vh',
@@ -49,8 +51,21 @@ export function Shell() {
 
   useEffect(() => {
     let live = true;
-    void loadSnapshot().then((settled) => { if (live) { setState(settled); } });
-    return () => { live = false; };
+    let events: EventSource | null = null;
+    void loadSnapshot().then((settled) => {
+      if (!live) { return; }
+      setState(settled);
+      if (settled.kind !== 'ready') { return; }
+      events = new EventSource('/api/events');
+      events.addEventListener('progress', (event) => {
+        let payload: unknown;
+        try { payload = JSON.parse((event as MessageEvent<string>).data); } catch { return; }
+        const result = validateWebProgressEvent(payload);
+        if (!result.ok) { return; }
+        setState((current) => current.kind !== 'ready' ? current : { kind: 'ready', snapshot: appendProgress(current.snapshot, result.value) });
+      });
+    });
+    return () => { live = false; events?.close(); };
   }, []);
 
   return (

@@ -2,8 +2,16 @@
  * The operation log strip: the server's own entries, printed in the order
  * received. Nothing is reconstructed, timestamped or reformatted here.
  */
-import type { WebBoardSnapshot } from '../../src/interfaces/web/transport.js';
+import type { WebBoardSnapshot, WebProgressEvent } from '../../src/interfaces/web/transport.js';
 import { C } from './palette.js';
+
+export const OPERATION_LOG_LIMIT = 256;
+
+export function appendProgress(snapshot: WebBoardSnapshot, progress: WebProgressEvent): WebBoardSnapshot {
+  if (snapshot.operationLog.some(entry => entry.operationId === progress.operationId && entry.sequence === progress.sequence)) { return snapshot; }
+  const entry = { operationId: progress.operationId, sequence: progress.sequence, phase: progress.phase, message: progress.message, timestamp: progress.timestamp, ...(progress.agent === undefined ? {} : { agent: progress.agent }) };
+  return { ...snapshot, operationLog: [...snapshot.operationLog, entry].slice(-OPERATION_LOG_LIMIT) };
+}
 
 export function OperationLog({ snapshot }: { snapshot: WebBoardSnapshot }) {
   return (

@@ -66,6 +66,15 @@ export function actorLine(card: WebMissionCard): { readonly text: string; readon
   }
 }
 
+/** Secondary recovery evidence, deliberately never used to infer current work. */
+export function coordinatorText(card: WebMissionCard): string {
+  const evidence = card.activity.coordinator;
+  if (evidence.state === 'live') {
+    return `recovery evidence: coordinator live${evidence.family === null ? '' : ` (${evidence.family})`}`;
+  }
+  return `recovery evidence: coordinator ${evidence.state}`;
+}
+
 /** A card's fan turns only while the server reports live work behind it. */
 export function isSpinning(card: WebMissionCard): boolean {
   return card.activity.work.kind === 'working' && card.activity.work.certainty === 'live';
@@ -112,7 +121,7 @@ export function sessionsText(metric: WebAgentAvailability): string {
     parts.push(`blocked · ${durationText(metric.blockedFor)}`);
   }
   if ('runningSessions' in metric) {
-    parts.push(metric.runningSessions === null ? 'sessions unknown' : `${metric.runningSessions} running`);
+    parts.push(metric.runningSessions === null ? 'command sessions unknown' : `${metric.runningSessions} command sessions`);
   }
   return parts.join(' · ');
 }
