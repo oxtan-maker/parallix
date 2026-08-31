@@ -1,4 +1,5 @@
 import type { BoardProjection } from './board.js';
+import { formatCountdown } from './agent-countdown.js';
 
 /**
  * Re-query the shared board projection when board-relevant state changes.
@@ -35,6 +36,16 @@ export interface BoardSubscriptionOptions {
    * tries again and the operator keeps the last good frame.
    */
   readonly onError?: (_error: unknown) => void;
+  /**
+   * Compare the *displayed* countdown label instead of the raw `blockedForMs`
+   * (task-2442). The interactive Ink board opts in: it renders the day/hour/minute
+   * label `AgentStrip` produces, so invisible raw-millisecond movement must not
+   * repaint it. Consumers that display their own countdown keep the default raw
+   * comparison — e.g. the web host publishes the invalidation that drives the
+   * browser's second-resolution `durationText` refetch, and its visible text must
+   * keep moving while the Ink label is still.
+   */
+  readonly displayedCountdown?: boolean;
 }
 
 export type BoardProjectionListener = (_projection: BoardProjection) => void;
@@ -52,6 +63,7 @@ export function subscribeToBoardProjection(
   const intervalMs = options.intervalMs ?? BOARD_REFRESH_INTERVAL_MS;
   const setTimer = options.setTimer ?? defaultSetTimer;
   const clearTimer = options.clearTimer ?? defaultClearTimer;
+  const displayedCountdown = options.displayedCountdown ?? false;
 
   let stopped = false;
   let handle: unknown = null;
@@ -61,7 +73,7 @@ export function subscribeToBoardProjection(
     try {
       const projection = await build();
       if (stopped) { return; }
-      const fingerprint = boardFingerprint(projection);
+      const fingerprint = boardFingerprint(projection, { displayedCountdown });
       if (fingerprint !== lastFingerprint) {
         lastFingerprint = fingerprint;
         onChange(projection);
@@ -88,8 +100,23 @@ export function subscribeToBoardProjection(
  * Metrics series are deliberately excluded except agent availability: a
  * recomputed timestamp inside a chart must not count as "the board changed"
  * and repaint on every tick.
+ *
+ * Agent availability defaults to the raw metric, so every poll that moves
+ * `blockedForMs` republishes. Interactive consumers whose displayed countdown is
+ * coarser than the raw value opt into `displayedCountdown` (task-2442): the Ink
+ * board renders the day/hour/minute label, so a block that is days from expiry
+ * must not repaint while the strip keeps showing the same `3d`. The display
+ * form comes from the same pure formatter `AgentStrip` renders from, including
+ * the `AgentStrip` guard itself (available agents and zero/elapsed blocks never
+ * render a countdown), so day, hour, minute, zero/expired, and indefinite
+ * values repaint exactly when the visible text changes. Consumers that render
+ * their own, finer countdown (the web board's second-resolution `durationText`)
+ * must stay on the raw comparison.
  */
-export function boardFingerprint(projection: BoardProjection): string {
+export function boardFingerprint(
+  projection: BoardProjection,
+  options: { readonly displayedCountdown?: boolean } = {},
+): string {
   return JSON.stringify({
     repositoryId: projection.repositoryId,
     cards: projection.stages.flatMap((stage) => stage.cards.map((card) => ({
@@ -106,7 +133,15 @@ export function boardFingerprint(projection: BoardProjection): string {
       liveSession: card.liveSession ?? null,
     }))),
     attention: projection.attentionQueue.map((item) => [item.missionId, item.reason.kind, item.action.kind]),
-    agents: projection.metrics.agentAvailability,
+    agents: options.displayedCountdown
+      ? projection.metrics.agentAvailability.map((agent) => ({
+          family: agent.family,
+          available: agent.available,
+          countdown: agent.available || agent.blockedForMs <= 0 ? null : formatCountdown(agent.blockedForMs),
+          reason: agent.reason ?? null,
+          runningSessions: agent.runningSessions ?? null,
+        }))
+      : projection.metrics.agentAvailability,
     unattributedRunningSessions: projection.metrics.unattributedRunningSessions,
     sourceFacts: projection.sourceFacts,
   });

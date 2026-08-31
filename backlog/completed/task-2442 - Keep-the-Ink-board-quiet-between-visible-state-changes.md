@@ -1,8 +1,8 @@
 ---
 id: TASK-2442
 title: Keep the Ink board quiet between visible state changes
-status: backlog
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-08-30 00:00'
 labels:
   - user_value

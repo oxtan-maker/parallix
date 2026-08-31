@@ -63,6 +63,10 @@ export async function runUiCommand(capabilities: TuiCapabilities, _args: string[
         subscribeProjection: (onChange) => subscribeToBoardProjection(
           () => capabilities.boardProjection.build(),
           onChange,
+          // The Ink board renders the coarse day/hour/minute label, so its
+          // refresh must compare the displayed countdown (task-2442). The web
+          // host keeps the default raw comparison for its own finer display.
+          { displayedCountdown: true },
         ),
       }),
       {
