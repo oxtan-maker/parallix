@@ -71,13 +71,24 @@ async function intake(fixture: Fixture, occurredAt: string): Promise<MissionVers
   return (outcome as { value: { version: MissionVersion } }).value.version;
 }
 
-/** Drive backlog -> active -> review -> integration through the lifecycle service. */
+/** Drive backlog -> refined -> active -> review -> integration through the lifecycle service. */
 async function toIntegration(fixture: Fixture, version: MissionVersion): Promise<MissionVersion> {
   const lifecycle = new MissionLifecycleService(fixture.store);
+  // Intake materializes the mission as `backlog`; activation demands `refined`.
+  const refined = await lifecycle.transition({
+    operationId: 'op-refine',
+    missionId: MISSION,
+    expectedVersion: version,
+    capabilities: CAPABILITIES,
+    command: { type: 'refine' },
+    actor: agentFamily('custom'),
+    occurredAt: '2026-08-08T00:30:00.000Z',
+  });
+  assert.equal(refined.status, 'completed', JSON.stringify(refined));
   const activated = await lifecycle.activate({
     operationId: 'op-activate',
     missionId: MISSION,
-    expectedVersion: version,
+    expectedVersion: (refined as { value: { version: MissionVersion } }).value.version,
     capabilities: CAPABILITIES,
     agent: agentFamily('custom'),
     occurredAt: '2026-08-08T01:00:00.000Z',
@@ -165,6 +176,16 @@ describe('TASK-2347.02 lifecycle event stream gaps', () => {
     // (`slug-from-to-<epoch seconds>`) dropped the second one whenever the two
     // fell inside the same second — these two are 800ms apart.
     const lifecycle = new MissionLifecycleService(fixture.store);
+    // Activation demands `refined`, and intake materializes `backlog`.
+    const refined = await lifecycle.transition({
+      operationId: 'op-refine',
+      missionId: MISSION,
+      capabilities: CAPABILITIES,
+      command: { type: 'refine' },
+      actor: agentFamily('custom'),
+      occurredAt: '2026-08-08T00:30:00.000Z',
+    });
+    assert.equal(refined.status, 'completed', JSON.stringify(refined));
     const first = await lifecycle.activate({
       operationId: 'op-activate-1',
       missionId: MISSION,
@@ -174,12 +195,12 @@ describe('TASK-2347.02 lifecycle event stream gaps', () => {
     });
     assert.equal(first.status, 'completed', JSON.stringify(first));
 
-    // Return the mission to backlog so the next activation is a real lane move
+    // Return the mission to refined so the next activation is a real lane move
     // rather than the idempotent re-activation that records nothing.
     const active = await fixture.store.load(MISSION);
     assert.equal(active.kind, 'found');
     const found = active as { mission: import('../src/domain/mission.js').Mission; version: MissionVersion };
-    await fixture.store.save({ ...found.mission, status: 'backlog', closedAt: null }, found.version);
+    await fixture.store.save({ ...found.mission, status: 'refined', closedAt: null }, found.version);
 
     const second = await lifecycle.activate({
       operationId: 'op-activate-2',
@@ -193,6 +214,7 @@ describe('TASK-2347.02 lifecycle event stream gaps', () => {
     const keys = (await fixture.events.findByMissionId(MISSION)).map((row) => row.idempotencyKey);
     assert.deepEqual(keys, [
       `${MISSION}:intake:2026-08-08T00:00:00.000Z`,
+      `${MISSION}:refine:2026-08-08T00:30:00.000Z`,
       `${MISSION}:activate:2026-08-08T01:00:00.100Z`,
       `${MISSION}:activate:2026-08-08T01:00:00.900Z`,
     ]);

@@ -17,6 +17,7 @@ const normalizeKey = `normalizeDraft${typeKey[0].toUpperCase()}${typeKey.slice(1
 
 const missionServicesFn = async () => ({
   repositoryId: 'test-repository',
+  lifecycle: { transition: async () => ({ status: 'completed', value: { version: 2 }, durableEvidence: [] }) },
   intake: {
     async execute() {
       return { status: 'completed', value: { version: 1 }, durableEvidence: [] };

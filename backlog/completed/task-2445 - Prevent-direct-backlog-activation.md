@@ -1,8 +1,8 @@
 ---
 id: TASK-2445
 title: Prevent direct backlog activation
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-08-30 16:30'
 labels:
   - ai_sdlc
@@ -28,6 +28,13 @@ backlog → active.
 Found while reconciling TASK-2434's read-only web board. The web client only
 renders server-projected enabled actions, so this must be corrected at the
 workflow/projection boundary rather than hidden in one UI.
+
+Status at draft (2026-08-30): TASK-2434 already fixed the projection half
+(`availableBoardCommands` no longer enables `active` for backlog) and left a
+red locking assertion in `test/domain-mission.test.ts`, but the domain
+transition (`decideMission`, `activate`) and the lane-event trigger mapping
+(`triggerFromTransition`) still admit backlog → active. The remaining work
+is the state machine, not the projection.
 
 ## Acceptance Criteria
 

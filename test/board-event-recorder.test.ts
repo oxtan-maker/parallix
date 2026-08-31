@@ -75,7 +75,8 @@ function event(overrides: Partial<LaneTransitionEvent> = {}): LaneTransitionEven
 
 describe('LaneTransitionEvent domain model', () => {
   it('triggerFromTransition maps all valid state machine transitions', () => {
-    assert.equal(triggerFromTransition('backlog', 'active'), 'activate');
+    assert.equal(triggerFromTransition('backlog', 'active'), null);
+    assert.equal(triggerFromTransition('backlog', 'refined'), 'refine');
     assert.equal(triggerFromTransition('refined', 'active'), 'activate');
     assert.equal(triggerFromTransition('active', 'active'), 'activate');
     assert.equal(triggerFromTransition(null, 'active'), 'activate');

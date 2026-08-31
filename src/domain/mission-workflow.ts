@@ -19,6 +19,7 @@ import {
 
 /** Names match the workflow operations that persist these transitions. */
 export type MissionCommand =
+  | { readonly type: 'refine' }
   | { readonly type: 'activate'; readonly agent: AgentFamily }
   | {
     readonly type: 'submit-for-review';
@@ -75,8 +76,17 @@ function requireSameReviewedRevision(mission: OpenMission, review: Review): void
 
 export function decideMission(mission: Mission, command: MissionCommand): Mission {
   switch (command.type) {
+  case 'refine':
+    // Refinement is what `px draft` produces: the mission leaves the backlog
+    // with a mission document to work from. Recording it here is what lets
+    // `activate` demand `refined` — without this transition the persisted
+    // aggregate would never leave `backlog` and activation could only be
+    // spelled as the backlog jump this rule exists to forbid. Re-refining an
+    // already refined mission is idempotent so a re-run of `px draft` is safe.
+    requireStatus(mission, ['backlog', 'refined'], command);
+    return { ...mission, status: 'refined' };
   case 'activate':
-    requireStatus(mission, ['backlog', 'refined', 'active'], command);
+    requireStatus(mission, ['refined', 'active'], command);
     return { ...mission, status: 'active', assignee: command.agent };
   case 'submit-for-review':
     requireStatus(mission, ['active', 'review'], command);

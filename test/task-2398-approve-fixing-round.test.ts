@@ -90,6 +90,16 @@ async function awaitingReview() {
     rawStatus: 'refined',
     capabilities: CAPABILITIES,
   } as never);
+  // Intake materializes every mission as `backlog`; refinement is what
+  // `px draft` records before a launch, and activation demands it.
+  await lifecycle.transition({
+    operationId: 'op-refine',
+    missionId: MISSION,
+    capabilities: CAPABILITIES,
+    command: { type: 'refine' },
+    actor: implementer,
+    occurredAt: '2026-08-21T06:00:00.000Z',
+  } as never);
   await lifecycle.activate({
     operationId: 'op-activate',
     missionId: MISSION,

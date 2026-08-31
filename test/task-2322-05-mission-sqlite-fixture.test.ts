@@ -65,6 +65,22 @@ async function intake(store: SqliteMissionStore, overrides: Record<string, unkno
   } as never);
 }
 
+/**
+ * Intake materializes every mission as `backlog`, and activation demands
+ * `refined`. Refinement is what `px draft` records between the two.
+ */
+async function refine(store: SqliteMissionStore, expectedVersion = missionVersion(1)) {
+  return new MissionLifecycleService(store).transition({
+    operationId: 'op-refine',
+    missionId: MISSION,
+    capabilities: CAPABILITIES,
+    expectedVersion,
+    command: { type: 'refine' },
+    actor: agentFamily('codex'),
+    occurredAt: '2026-07-29T11:00:00Z',
+  } as never);
+}
+
 afterEach(async () => {
   for (const directory of temporaryDirectories.splice(0)) {
     fs.rmSync(directory, { recursive: true, force: true });
@@ -133,29 +149,31 @@ describe('Mission application boundary over isolated SQLite adapters', () => {
     const { store, db } = await isolatedStore();
     try {
       await intake(store);
+      await refine(store);
       const activated = await new MissionLifecycleService(store).activate({
         operationId: 'op-activate',
         missionId: MISSION,
         capabilities: CAPABILITIES,
-        expectedVersion: missionVersion(1),
+        expectedVersion: missionVersion(2),
         agent: agentFamily('codex'),
         occurredAt: '2026-07-29T12:00:00Z',
       });
       assert.equal(activated.status, 'completed');
-      assert.equal(activated.value!.version, missionVersion(2));
+      assert.equal(activated.value!.version, missionVersion(3));
 
       const rows = await db.query<{ status: string; assignee: string; version: number }>(
         'SELECT status, assignee, version FROM missions WHERE id = ?',
         [MISSION],
       );
-      assert.deepEqual({ ...rows[0] }, { status: 'active', assignee: 'codex', version: 2 });
+      assert.deepEqual({ ...rows[0] }, { status: 'active', assignee: 'codex', version: 3 });
       const events = await db.query<{ from_status: string; to_status: string; trigger: string }>(
         'SELECT from_status, to_status, trigger FROM board_lane_events WHERE mission_id = ?',
         [MISSION],
       );
       assert.deepEqual(events.map((row) => ({ ...row })), [
         { from_status: null, to_status: 'backlog', trigger: 'intake' },
-        { from_status: 'backlog', to_status: 'active', trigger: 'activate' },
+        { from_status: 'backlog', to_status: 'refined', trigger: 'refine' },
+        { from_status: 'refined', to_status: 'active', trigger: 'activate' },
       ]);
     } finally {
       await db.close();
@@ -166,12 +184,13 @@ describe('Mission application boundary over isolated SQLite adapters', () => {
     const { store, db } = await isolatedStore();
     try {
       await intake(store);
+      await refine(store);
       const service = new MissionLifecycleService(store);
       const first = await service.activate({
         operationId: 'op-first',
         missionId: MISSION,
         capabilities: CAPABILITIES,
-        expectedVersion: missionVersion(1),
+        expectedVersion: missionVersion(2),
         agent: agentFamily('codex'),
         occurredAt: '2026-07-29T12:00:00Z',
       });
@@ -181,7 +200,7 @@ describe('Mission application boundary over isolated SQLite adapters', () => {
         operationId: 'op-stale',
         missionId: MISSION,
         capabilities: CAPABILITIES,
-        expectedVersion: missionVersion(1),
+        expectedVersion: missionVersion(2),
         agent: agentFamily('claude'),
         occurredAt: '2026-07-29T12:00:05Z',
       });
@@ -192,14 +211,14 @@ describe('Mission application boundary over isolated SQLite adapters', () => {
         'SELECT assignee, version FROM missions WHERE id = ?',
         [MISSION],
       );
-      assert.deepEqual({ ...rows[0] }, { assignee: 'codex', version: 2 });
+      assert.deepEqual({ ...rows[0] }, { assignee: 'codex', version: 3 });
       const events = await db.query<{ total: number }>(
         'SELECT COUNT(*) AS total FROM board_lane_events WHERE mission_id = ?',
         [MISSION],
       );
-      // The intake entry event plus the one accepted activation; the refused
-      // writer added nothing.
-      assert.equal(events[0].total, 2);
+      // The intake entry event, the refinement, and the one accepted
+      // activation; the refused writer added nothing.
+      assert.equal(events[0].total, 3);
     } finally {
       await db.close();
     }
