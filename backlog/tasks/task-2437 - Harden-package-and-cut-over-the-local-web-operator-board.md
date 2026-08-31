@@ -36,6 +36,8 @@ This is not a polish/refactor mission. It is an integration/adversarial verifica
 - [ ] #10 User-facing launch command follows ADR 0054 and existing CLI conventions; explicit TUI fallback works and uses the same production projection/controller contracts.
 - [ ] #11 Docs describe only durable user behavior/security/rollback, not volatile source/test inventories.
 - [ ] #12 TASK-2283's umbrella acceptance criteria are rechecked one by one; any unmet criterion becomes a new follow-up instead of being waived in the checkpoint.
+- [ ] #13 Find and fix elements that is missing in the design relative to the reference design /tmp/Parallix\ Kanban\ Board\ Controller.zip
+- [ ] #14 Find and fix elements that is halucinated extras in the design relative to the reference design (check the checkpoints and review evidence in this waves for comments that might be exceptions decided during the wave, one known item is that parllix can be displayed twice, one for the produce name and one for the repo name)
 
 ## Agent-slop guardrails
 
