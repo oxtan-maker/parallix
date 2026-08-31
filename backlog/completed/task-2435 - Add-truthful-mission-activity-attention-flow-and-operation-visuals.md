@@ -1,8 +1,8 @@
 ---
 id: TASK-2435
 title: Add truthful mission activity, attention, flow and operation visuals
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-08-28 06:29'
 labels:
   - ai_sdlc
@@ -31,6 +31,7 @@ Use the GPU/fan treatment from the supplied variant as pixel perfect target to r
 - [ ] #6 Review round/phase/disposition/blocking detail uses dedicated projected fields where available rather than re-parsing display flags.
 - [ ] #7 Operation log consumes SSE progress and is bounded; reconnect does not duplicate entries.
 - [ ] #8 `prefers-reduced-motion` disables decorative motion while preserving a clear textual activity state.
+- [ ] #9 The web board preserves the supplied `Parallix Board GPU.dc.html` GPU design variant.
 
 ## Agent-slop guardrails
 

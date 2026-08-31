@@ -7,7 +7,11 @@ import type { WebBoardSnapshot } from '../../src/interfaces/web/transport.js';
 import { C, DISPLAY } from './palette.js';
 import { familyAccent, sessionsText } from './format.js';
 
-export function TopBar({ snapshot }: { snapshot: WebBoardSnapshot }) {
+export function TopBar({ snapshot, flowOpen, onFlowToggle }: {
+  snapshot: WebBoardSnapshot;
+  flowOpen: boolean;
+  onFlowToggle: () => void;
+}) {
   // The wire carries per-lane WIP; the total is their sum, not a rule about
   // which lanes count as in flight.
   const wip = snapshot.wipCounts.reduce((total, entry) => total + entry.count, 0);
@@ -41,6 +45,19 @@ export function TopBar({ snapshot }: { snapshot: WebBoardSnapshot }) {
         {unattributed !== null && <> · {unattributed}</>}
       </div>
       <div style={{ flex: 1, minWidth: 12 }} />
+      <button
+        type="button"
+        aria-expanded={flowOpen}
+        aria-controls="flow-metrics"
+        onClick={onFlowToggle}
+        style={{
+          background: flowOpen ? '#141a20' : 'none', border: `1px solid ${flowOpen ? '#33404b' : C.cardEdge}`,
+          borderRadius: 20, color: flowOpen ? C.text : C.dim, fontFamily: 'inherit', fontSize: 10.5,
+          letterSpacing: 1, padding: '4px 11px', cursor: 'pointer', flexShrink: 0, whiteSpace: 'nowrap',
+        }}
+      >
+        ▤ FLOW
+      </button>
       <section
         aria-label="Agent availability"
         style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 1, minWidth: 0, overflowX: 'auto' }}

@@ -7,10 +7,12 @@
  * Layout, spacing, palette and typography follow the design authority
  * (`Parallix Board GPU.dc.html` in the reference acceptance artifact).
  */
+import { useState } from 'react';
 import type { WebBoardSnapshot } from '../../src/interfaces/web/transport.js';
 import { AttentionRail } from './attention-rail.js';
 import { DoneRail } from './done-rail.js';
 import { FlightColumn } from './flight-column.js';
+import { FlowPanel } from './flow-panel.js';
 import { IntakeColumn } from './intake-column.js';
 import { OperationLog } from './operation-log.js';
 import { TopBar } from './top-bar.js';
@@ -21,6 +23,7 @@ const INTAKE_LANES: readonly string[] = ['refined', 'backlog'];
 const SHIPPED_LANE = 'done';
 
 export function Board({ snapshot }: { snapshot: WebBoardSnapshot }) {
+  const [flowOpen, setFlowOpen] = useState(false);
   // The intake bucket stacks in the reference's order; every other lane keeps
   // the order the server sent.
   const intake = snapshot.stages
@@ -31,7 +34,8 @@ export function Board({ snapshot }: { snapshot: WebBoardSnapshot }) {
 
   return (
     <>
-      <TopBar snapshot={snapshot} />
+      <TopBar snapshot={snapshot} flowOpen={flowOpen} onFlowToggle={() => setFlowOpen((open) => !open)} />
+      {flowOpen && <FlowPanel metrics={snapshot.metrics} />}
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
         <AttentionRail snapshot={snapshot} />
         <div style={{ flex: 1, display: 'flex', minWidth: 0, minHeight: 0, gap: 14, padding: 14, overflowX: 'auto' }}>

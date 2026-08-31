@@ -14,7 +14,7 @@ import { ActionButton } from './action-button.js';
 import { Fan } from './fan.js';
 import { LaneHeader, laneEmpty } from './lane-header.js';
 import { C } from './palette.js';
-import { actorLine, familyAccent, GATE_COLOR, GATE_TEXT, isSpinning, workText } from './format.js';
+import { actorLine, coordinatorText, familyAccent, GATE_COLOR, GATE_TEXT, isSpinning, workText } from './format.js';
 
 function edgeColor(card: WebMissionCard): string {
   if (card.blockingReason !== null) { return C.red; }
@@ -126,6 +126,7 @@ function FlightCard({ card }: { card: WebMissionCard }) {
           <span aria-hidden="true" style={{ color: actor.color, fontSize: 8, flexShrink: 0 }}>●</span>
           <span style={{ color: actor.color, fontSize: 11 }}>{actor.text}</span>
         </div>
+        <p style={{ color: C.faint, fontSize: 10, margin: '5px 0 0' }}>{coordinatorText(card)}</p>
         {card.nextActionText !== null && (
           <p style={{ color: C.dim, fontSize: 11, lineHeight: 1.4, margin: '5px 0 0' }}>
             <span style={{ color: C.faint }}>next:</span> {card.nextActionText}
