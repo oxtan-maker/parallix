@@ -3,12 +3,8 @@
  * gradient head carrying the fans, id, work state and implementer; a body
  * carrying checkpoint, gate, actor and next action; and a footer of the
  * server's actions.
- *
- * The reference's checkpoint pips and review-round meter are not rendered:
- * the wire carries a checkpoint label and a round number but no totals, and
- * a bar drawn against a guessed maximum would be an invented fact.
  */
-import type { CSSProperties } from 'react';
+import type { CSSProperties, DragEvent } from 'react';
 import type { WebMissionCard, WebStage } from '../../src/interfaces/web/transport.js';
 import { ActionButton } from './action-button.js';
 import { Fan } from './fan.js';
@@ -24,33 +20,56 @@ function edgeColor(card: WebMissionCard): string {
 }
 
 function ReviewPips({ card }: { card: WebMissionCard }) {
-  if (card.reviewHistory.length === 0) { return null; }
+  if (card.reviewRound === null) { return null; }
+  const currentRound = card.reviewRound;
+  const rounds = new Map(card.reviewHistory.map((round) => [round.number, round]));
   return (
-    <span aria-label={`review history: ${card.reviewHistory.length} rounds`} style={{ display: 'flex', gap: 3 }}>
-      {card.reviewHistory.map((round) => (
+    <span aria-label={`review round ${currentRound}`} style={{ display: 'flex', gap: 4 }}>
+      {Array.from({ length: 5 }, (_unused, index) => {
+        const round = rounds.get(index + 1);
+        const completed = index + 1 < currentRound;
+        return (
         <span
-          key={round.number}
-          title={`round ${round.number}: ${round.disposition ?? round.phase}`}
-          style={{ width: 10, height: 7, borderRadius: 2, background: round.phase === 'approved' ? C.green : round.disposition === 'REQUEST_CHANGES' ? C.amber : C.headEdge }}
+          key={index}
+          title={round === undefined ? undefined : `round ${round.number}: ${round.disposition ?? round.phase}`}
+          style={{ width: 16, height: 8, borderRadius: 2, background: completed ? C.green : round?.number === currentRound ? C.amber : C.headEdge }}
         />
+        );
+      })}
+    </span>
+  );
+}
+
+function CheckpointPips({ checkpoint }: { checkpoint: string }) {
+  const current = Number(/^CP-(\d+)/i.exec(checkpoint)?.[1] ?? 0);
+  return (
+    <span aria-label={`checkpoint ${checkpoint}`} style={{ display: 'flex', gap: 4 }}>
+      {Array.from({ length: current }, (_unused, index) => (
+        <span key={index} style={{ width: 16, height: 8, borderRadius: 2, background: C.green }} />
       ))}
     </span>
   );
 }
 
-function FlightCard({ card }: { card: WebMissionCard }) {
+function primaryAction(actions: readonly WebMissionCard['actions'][number][]) {
+  return actions.find((action) => action.state === 'enabled') ?? actions[0] ?? null;
+}
+
+function FlightCard({ card, onAction, onSelect, onDragStart, selected, pendingAction }: { card: WebMissionCard; onAction: (card: WebMissionCard, action: WebMissionCard['actions'][number], control: HTMLButtonElement) => void; onSelect: (id: string) => void; onDragStart: (card: WebMissionCard, event: DragEvent<HTMLElement>) => void; selected: boolean; pendingAction: { missionId: string; kind: WebMissionCard['actions'][number]['kind'] } | null }) {
   const spinning = isSpinning(card);
-  const accent = card.gate === 'failed' ? C.red : familyAccent(card.agent);
+  const liveAgent = card.activity.work.kind === 'working' ? card.activity.work.agent : null;
+  const agent = liveAgent ?? card.agent;
+  const accent = card.gate === 'failed' ? C.red : familyAccent(agent);
   const actor = actorLine(card);
+  const primary = primaryAction(card.actions);
   // The footer carries the actions the server marked runnable for this card.
   // Which ones those are is the server's lifecycle decision, not a lane rule
   // evaluated here — the client only reads `state`.
-  const runnable = card.actions.filter((action) => action.state === 'enabled');
   // Phase and disposition often carry the same word in different casing; the
   // reference prints one review status, so repeats collapse to one chip.
   const review = [...new Map(
     [
-      card.reviewRound === null ? null : `round ${card.reviewRound}`,
+      card.reviewRound === null ? null : `round ${card.reviewRound}/5`,
       card.reviewPhase,
       card.reviewDisposition,
     ]
@@ -59,8 +78,15 @@ function FlightCard({ card }: { card: WebMissionCard }) {
   ).values()];
   return (
     <article
+      data-board-card={card.id}
+      tabIndex={0}
+      aria-label={`${card.id}: ${card.title}`}
+      aria-selected={selected}
+      draggable={card.actions.some((action) => action.state === 'enabled' && action.targetLane !== null)}
+      onFocus={() => onSelect(card.id)}
+      onDragStart={(event) => onDragStart(card, event)}
       style={{
-        border: `1px solid ${C.cardEdge}`, borderTop: `2px solid ${edgeColor(card)}`,
+        border: `1px solid ${selected ? C.cyan : C.cardEdge}`, borderTop: `2px solid ${edgeColor(card)}`,
         borderRadius: 6, background: C.card, marginBottom: 22,
         boxShadow: '0 6px 18px rgba(0,0,0,.55)',
       }}
@@ -87,16 +113,16 @@ function FlightCard({ card }: { card: WebMissionCard }) {
               {workText(card)}
             </span>
             <div style={{ flex: 1, minWidth: 4 }} />
-            <span aria-hidden="true" style={{ color: spinning ? C.green : C.faint, fontSize: 8, flexShrink: 0 }}>●</span>
+            <span aria-hidden="true" className={spinning ? 'live-indicator' : undefined} style={{ color: spinning ? C.green : C.faint, fontSize: 8, flexShrink: 0 }}>●</span>
             <span
-              title={card.agent === null ? undefined : `implementer family: ${card.agent}`}
+              title={agent === null ? undefined : `${liveAgent === null ? 'implementer' : 'active worker'} family: ${agent}`}
               style={{
-                color: card.agent === null ? C.faint : familyAccent(card.agent),
+                color: agent === null ? C.faint : familyAccent(agent),
                 fontSize: 10, letterSpacing: 1, minWidth: 0,
                 overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
               }}
             >
-              {card.agent ?? 'no implementer'}
+              {agent ?? 'no implementer'}
             </span>
           </div>
           <p style={{ margin: '5px 0 0', lineHeight: 1.35, color: C.text, fontSize: 13 }}>{card.title}</p>
@@ -116,6 +142,7 @@ function FlightCard({ card }: { card: WebMissionCard }) {
         )}
         {card.checkpoint !== null && (
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 7, marginBottom: 8, fontSize: 11 }}>
+            <CheckpointPips checkpoint={card.checkpoint} />
             <span style={{ color: C.dim }} title={card.checkpointDescription ?? undefined}>{card.checkpoint}</span>
             <span style={{ color: GATE_COLOR[card.gate], fontWeight: card.gate === 'failed' ? 700 : 400 }}>
               {GATE_TEXT[card.gate]}
@@ -140,7 +167,7 @@ function FlightCard({ card }: { card: WebMissionCard }) {
         )}
       </div>
 
-      {runnable.length > 0 && (
+      {primary !== null && (
         <div
           style={{
             display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 7,
@@ -148,7 +175,7 @@ function FlightCard({ card }: { card: WebMissionCard }) {
             flexWrap: 'wrap',
           }}
         >
-          {runnable.map((action) => <ActionButton key={action.kind} action={action} />)}
+          <ActionButton action={primary} pending={pendingAction?.missionId === card.id && pendingAction.kind === primary.kind} onInvoke={(next, control) => onAction(card, next, control)} />
         </div>
       )}
       <Grille />
@@ -191,7 +218,7 @@ function runNote(stage: WebStage): { readonly text: string; readonly color: stri
   };
 }
 
-export function FlightColumn({ stage, style }: { stage: WebStage; style: CSSProperties }) {
+export function FlightColumn({ stage, style, onAction, onSelect, onDragStart, onDrop, selectedId, pendingAction, draggable }: { stage: WebStage; style: CSSProperties; onAction: (card: WebMissionCard, action: WebMissionCard['actions'][number], control: HTMLButtonElement) => void; onSelect: (id: string) => void; onDragStart: (card: WebMissionCard, event: DragEvent<HTMLElement>) => void; onDrop: (lane: WebStage['lane']) => void; selectedId: string | null; pendingAction: { missionId: string; kind: WebMissionCard['actions'][number]['kind'] } | null; draggable: boolean }) {
   const note = runNote(stage);
   return (
     <section aria-label={`${stage.lane} stage`} style={{ display: 'flex', flexDirection: 'column', ...style }}>
@@ -203,9 +230,9 @@ export function FlightColumn({ stage, style }: { stage: WebStage; style: CSSProp
           <span style={{ color: note.color, fontSize: 10, whiteSpace: 'nowrap' }}>{note.text}</span>
         )}
       />
-      <div style={{ flex: 1, overflowY: 'auto', paddingTop: 10, minHeight: 0 }}>
+      <div onDragOver={(event: DragEvent<HTMLDivElement>) => { if (draggable) { event.preventDefault(); } }} onDrop={() => onDrop(stage.lane)} style={{ flex: 1, overflowY: 'auto', paddingTop: 10, minHeight: 0 }}>
         {stage.cards.length === 0 && <p style={laneEmpty}>no missions in this stage</p>}
-        {stage.cards.map((card) => <FlightCard key={card.id} card={card} />)}
+        {stage.cards.map((card) => <FlightCard key={card.id} card={card} onAction={onAction} onSelect={onSelect} onDragStart={onDragStart} selected={selectedId === card.id} pendingAction={pendingAction} />)}
       </div>
     </section>
   );

@@ -135,7 +135,7 @@ test('performHandoff fails when final verification gate fails', async (t) => {
     JSON.stringify({ adapters: { verification: { command: 'npm test' } } })
   );
   mock.method(git, 'run', () => ({ status: 1 }));
-  const result = await performHandoff(TEST_SLUG, { worktree: WORKTREE, error: () => {}, rebaseFn: mockRebase, missionServicesFn: stubMissionServices() });
+  const result = await performHandoff(TEST_SLUG, { worktree: WORKTREE, error: () => {}, rebaseFn: mockRebase, missionServicesFn: stubMissionServices(), recoverGateFailure: false });
   assert.strictEqual(result.ok, false);
   assert.match(result.error, /Final verification gate failed/);
   cleanup();

@@ -1,14 +1,12 @@
 /**
- * A server-projected action, rendered and never invoked. This client is
- * read-only by construction: the control is natively disabled, carries no
- * handler, and its accessible name states the server's availability verbatim.
+ * A server-projected action. Only the parent can invoke it, and only when the
+ * server's current projection marks it enabled.
  */
 import type { CSSProperties } from 'react';
 import type { WebCommandAction } from '../../src/interfaces/web/transport.js';
 import { C } from './palette.js';
 
-/** Actions are server-projected but never invocable in this read-only client. */
-export const READ_ONLY_HINT = 'read-only board: this client cannot run board commands';
+export const UNAVAILABLE_HINT = 'action is not available in the current server projection';
 
 function look(state: WebCommandAction['state']): CSSProperties {
   return state === 'enabled'
@@ -16,16 +14,20 @@ function look(state: WebCommandAction['state']): CSSProperties {
     : { background: 'none', border: `1px solid ${C.cardEdge}`, color: C.faint };
 }
 
-export function ActionButton({ action, style, label }: {
+export function ActionButton({ action, style, label, pending = false, onInvoke }: {
   action: WebCommandAction;
   style?: CSSProperties;
   /** A short face for the same action; the full display stays the accessible name. */
   label?: string;
+  pending?: boolean;
+  onInvoke?: (action: WebCommandAction, control: HTMLButtonElement) => void;
 }) {
+  const enabled = action.state === 'enabled' && !pending;
   return (
     <button
       type="button"
-      disabled
+      aria-disabled={!enabled}
+      onClick={(event) => { if (enabled) { onInvoke?.(action, event.currentTarget); } }}
       style={{
         ...look(action.state),
         borderRadius: 4,
@@ -33,14 +35,14 @@ export function ActionButton({ action, style, label }: {
         fontSize: 10.5,
         letterSpacing: 0.5,
         padding: '4px 10px',
-        cursor: 'not-allowed',
+        cursor: enabled ? 'pointer' : 'not-allowed',
         whiteSpace: 'nowrap',
         ...style,
       }}
-      title={action.reason ?? READ_ONLY_HINT}
-      aria-label={`${action.display} — ${action.state}${action.reason === null ? '' : `: ${action.reason}`}`}
+      title={pending ? `Starting ${action.display}` : action.reason ?? (enabled ? action.display : UNAVAILABLE_HINT)}
+      aria-label={`${action.display} — ${pending ? 'starting' : action.state}${action.reason === null ? '' : `: ${action.reason}`}`}
     >
-      {label ?? action.display}
+      {pending ? `${label ?? action.display} · starting…` : label ?? action.display}
     </button>
   );
 }

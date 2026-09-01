@@ -74,6 +74,7 @@
     "eslint": "^9.39.4",
     "fast-uri": "^3.1.6",
     "fastify": "^5.12.1",
+    "happy-dom": "^20.12.0",
     "ink": "^6.8.0",
     "postject": "^1.0.0-alpha.6",
     "react": "^19.2.3",

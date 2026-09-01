@@ -48,6 +48,7 @@ test('board projection offers draft for backlog and active for refined', () => {
     command: 'active',
     enabled: false,
     reason: 'Mission must be refined before it can be activated',
+    targetLane: 'active',
   });
 
   const refined = availableBoardCommands(mission('refined'), { reviewApproval: null });

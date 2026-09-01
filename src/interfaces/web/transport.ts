@@ -132,6 +132,8 @@ export interface WebCommandAction {
   readonly state: WebCommandActionState;
   /** Non-null exactly when `state` is not `enabled`. */
   readonly reason: string | null;
+  /** Server-owned drag/drop destination; null means this action is button-only. */
+  readonly targetLane: WebBoardLane | null;
 }
 
 /** Wire mirror of the domain `PullRequestReference` — six keys, `url` nullable. */
@@ -412,16 +414,17 @@ function toCommandAction(
   availability: CommandAvailability | undefined,
 ): WebCommandAction {
   if (!isIntegratedCapability(kind)) {
-    return { kind, display, state: 'unavailable', reason: unavailableReason(kind) };
+    return { kind, display, state: 'unavailable', reason: unavailableReason(kind), targetLane: availability?.targetLane ?? null };
   }
   if (availability !== undefined && availability.enabled) {
-    return { kind, display, state: 'enabled', reason: null };
+    return { kind, display, state: 'enabled', reason: null, targetLane: availability.targetLane ?? null };
   }
   return {
     kind,
     display,
     state: 'ineligible',
     reason: availability?.reason ?? 'command is not eligible for this mission',
+    targetLane: availability?.targetLane ?? null,
   };
 }
 
@@ -845,11 +848,12 @@ function checkDuration(object: unknown, path: string, problems: string[]): void 
 
 function checkCommandAction(object: unknown, path: string, problems: string[]): void {
   if (!isPlainObject(object)) { problems.push(`${path} must be an object`); return; }
-  checkKeys(object, ['kind', 'display', 'state', 'reason'], ['kind', 'display', 'state', 'reason'], path, problems);
+  checkKeys(object, ['kind', 'display', 'state', 'reason', 'targetLane'], ['kind', 'display', 'state', 'reason', 'targetLane'], path, problems);
   checkEnum(object, 'kind', COMMAND_KINDS, path, problems);
   checkString(object, 'display', path, problems);
   checkEnum(object, 'state', ACTION_STATES, path, problems);
   checkNullableString(object, 'reason', path, problems);
+  if (object.targetLane !== null) { checkEnum(object, 'targetLane', LANES, path, problems); }
 }
 
 function checkWork(object: unknown, path: string, problems: string[]): void {

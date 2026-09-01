@@ -114,6 +114,32 @@ test('controller rejects integrate:merge with capability kind', async () => {
   assert.equal(result.error.kind, 'capability');
 });
 
+test('controller hands off and starts review from mission identity alone', async () => {
+  const { ports } = makeExecutePorts();
+  const calls: string[] = [];
+  const work: string[] = [];
+  const controller = new BoardCommandController(ports, undefined, {
+    handoffWorkflow: { async executeForSlug(slug: string) { calls.push(slug); } },
+  }, {
+    async running(publication) { work.push(`running:${publication.phase}`); },
+    async ended(publication) { work.push(`ended:${publication.phase}`); },
+    async blocked() { work.push('blocked'); },
+  }, {
+    async load() { return { kind: 'found', mission: { status: 'active' }, version: 1 } as never; },
+  });
+
+  const result = await controller.dispatch(makeRequest({
+    kind: 'handoff:record',
+    missionStatusAtRequest: 'active',
+    capabilities: new Set(['handoff:record']),
+  }));
+
+  assert.equal(result.status, 'completed');
+  assert.deepEqual(result.value, { slug: 'task-0001' });
+  assert.deepEqual(calls, ['task-0001']);
+  assert.deepEqual(work, ['running:handoff', 'ended:handoff']);
+});
+
 // ---------------------------------------------------------------------------
 // SC6: Progress events with stable operationId, cancellation
 // ---------------------------------------------------------------------------

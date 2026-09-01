@@ -294,7 +294,7 @@ test('BoardProjectionBuilder includes default metrics with skip fallback', async
 // Gate status integration
 // ---------------------------------------------------------------------------
 
-test('BoardProjectionBuilder reflects gate-failed status in attention ranking', async () => {
+test('BoardProjectionBuilder reports gate-failed rank without queueing an unavailable action', async () => {
   const missions = [
     { id: id1, repositoryId: repo, title: 'Active', labels: missionLabels(['a']), status: 'active' as const, closedAt: null, assignee: agentFamily('codex'), checkpoints: [], review: null, netEngineeringLines: null },
     { id: id2, repositoryId: repo, title: 'Active 2', labels: missionLabels(['a']), status: 'active' as const, closedAt: null, assignee: agentFamily('codex'), checkpoints: [], review: null, netEngineeringLines: null },
@@ -314,10 +314,10 @@ test('BoardProjectionBuilder reflects gate-failed status in attention ranking', 
   );
   const projection = await builder.build();
 
-  // task-0001 has a failed gate; task-0002 has no attention reason.
-  assert.equal(projection.attentionQueue[0].missionId, id1);
-  assert.equal(projection.attentionQueue[0].rank, 1);
-  assert.equal(projection.attentionQueue.length, 1);
+  const failed = projection.stages.flatMap((stage) => stage.cards).find((card) => card.id === id1);
+  assert.equal(failed?.gate, 'failed');
+  assert.equal(attentionRank(failed!), 1);
+  assert.equal(projection.attentionQueue.length, 0);
 });
 
 // ---------------------------------------------------------------------------

@@ -7,10 +7,11 @@
  *
  * No caching, no retry, no polling: each page load performs exactly one read.
  */
-import { validateWebBoardSnapshot, type WebBoardSnapshot } from '../../src/interfaces/web/transport.js';
+import { validateWebBoardSnapshot, validateWebCommandResult, type WebBoardSnapshot, type WebCommandRequest, type WebCommandResult } from '../../src/interfaces/web/transport.js';
 
 /** The snapshot read path. This client has no mutation route. */
 export const SNAPSHOT_PATH = '/api/board';
+export const COMMANDS_PATH = '/api/commands';
 
 /** The four presentation states the board contract distinguishes, plus loading. */
 export type SnapshotState =
@@ -55,4 +56,19 @@ export async function loadSnapshot(): Promise<SettledSnapshotState> {
     return { kind: 'malformed', problems: validation.problems };
   }
   return { kind: 'ready', snapshot: validation.value };
+}
+
+/** Dispatch only the typed request selected from the current projection. */
+export async function sendCommand(request: WebCommandRequest): Promise<WebCommandResult> {
+  const csrf = globalThis.document?.querySelector('meta[name="px-csrf"]')?.getAttribute('content');
+  const response = await fetch(COMMANDS_PATH, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { accept: 'application/json', 'content-type': 'application/json', ...(typeof csrf === 'string' ? { 'x-px-csrf': csrf } : {}) },
+    body: JSON.stringify(request),
+  });
+  const payload: unknown = await response.json();
+  const result = validateWebCommandResult(payload);
+  if (!result.ok) { throw new Error(`invalid command result: ${'problems' in result ? result.problems.join('; ') : 'unsupported transport version'}`); }
+  return result.value;
 }

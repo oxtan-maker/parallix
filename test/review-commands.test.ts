@@ -482,6 +482,32 @@ test('review passes an explicit --max-attempts through to the review loop', asyn
   assert.equal(received && received.maxAttempts, 7);
 });
 
+test('a manual review continuation gets one round beyond the automatic five-round limit', async () => {
+  let received = null;
+
+  await review(['task-2436', '--continue'], {
+    inferSlugFn: (s) => s || 'task-2436',
+    log: () => {}, error: () => {}, exit: () => {},
+    readReviewStateFn: async () => ({ round: 5 }),
+    startReviewLoopFn: async (_slug, opts) => { received = opts; },
+  });
+
+  assert.equal(received && received.maxAttempts, 6);
+});
+
+test('review automation retains its five-round limit', async () => {
+  let received = null;
+
+  await review(['task-2436', '--start'], {
+    inferSlugFn: (s) => s || 'task-2436',
+    log: () => {}, error: () => {}, exit: () => {},
+    readReviewStateFn: async () => ({ round: 5 }),
+    startReviewLoopFn: async (_slug, opts) => { received = opts; },
+  });
+
+  assert.equal(received && received.maxAttempts, 5);
+});
+
 test('review forwards current-work agent publication into the review loop', async () => {
   let received = null;
 

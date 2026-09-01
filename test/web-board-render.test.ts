@@ -34,7 +34,7 @@ const browserSources = fs.readdirSync(webSrc)
   .map((name) => ({ name, text: fs.readFileSync(path.join(webSrc, name), 'utf8') }));
 
 const render = (snapshot: WebBoardSnapshot): string =>
-  renderToStaticMarkup(React.createElement(Board, { snapshot }));
+  renderToStaticMarkup(React.createElement(Board, { snapshot, onRefresh: async () => {} }));
 
 const renderFlow = (metrics: WebBoardSnapshot['metrics']): string =>
   renderToStaticMarkup(React.createElement(FlowPanel, { metrics }));
@@ -66,7 +66,7 @@ function populated(): WebBoardSnapshot {
     ],
     blockingReason: 'two blocking findings',
     flags: ['review_blocking'],
-    commands: [{ command: 'integrate', enabled: false, reason: 'review is not approved' }],
+    commands: [{ command: 'integrate', enabled: false, reason: 'review is not approved', targetLane: 'integration' }],
   });
   const base = makeProjection({
     backlog: [makeCard({ id: 'task-0002' as MissionCard['id'], title: 'backlog mission', lane: 'backlog', status: 'backlog' })],
@@ -129,9 +129,10 @@ test('card facts render from the server without substitution', () => {
   assert.match(html, /CP-2\.md/);
   assert.match(html, /gate ✗ FAIL/);
   assert.match(html, /act on reviewer findings/);
-  assert.match(html, /round 2/);
+  assert.match(html, /round 2\/5/);
   assert.match(html, /href="https:\/\/example\.invalid\/pr\/47"/);
-  assert.match(html, /review history: 2 rounds/);
+  assert.match(html, /review round 2/);
+  assert.match(html, /CP-2\.md<\/span>/, 'the checkpoint is a visible marker');
   assert.match(html, /review_blocking/);
 });
 
@@ -242,9 +243,13 @@ test('activity, coordinator recovery evidence, and reduced motion stay truthful'
   assert.match(html, /blocked/);
   assert.match(html, /idle/);
   assert.match(html, /recovery evidence: coordinator live \(codex\)/);
+  assert.match(html, /active worker family: codex/, 'the live worker is the header agent, not a stale assignee');
+  assert.ok(!html.includes('undefined'), 'a missing assignee never leaks as header text');
+  assert.match(html, /class="live-indicator"/, 'live work has the reference-style blinking indicator');
   assert.equal((html.match(/fan spin/g) ?? []).length, 2, 'only authoritative live work spins its two fans');
   const css = browserSources.find((file) => file.name === 'style.css')?.text ?? '';
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.fan\.spin[\s\S]*animation: none/);
+  assert.match(css, /\.live-indicator[\s\S]*animation: blink/);
 });
 
 test('an indefinite agent block never renders as a numeric duration', () => {
@@ -262,26 +267,31 @@ test('agent-block durations use human-sized units', () => {
 // Read-only boundary and reference-preserving overflow (SC4, SC5)
 // ---------------------------------------------------------------------------
 
-test('every rendered action is a disabled native control carrying the server display and state', () => {
+test('each card renders one enabled projected action, with unavailable controls still guarded', () => {
   const html = render(populated());
   const buttons: string[] = Array.from(html.match(/<button[^>]*>/g) ?? []).filter((button) => !button.includes('aria-controls="flow-metrics"'));
   assert.ok(buttons.length > 0, 'the fixture renders at least one action');
   for (const button of buttons) {
-    assert.match(button, /disabled/, `action is native-disabled: ${button}`);
-    assert.ok(!/onclick/i.test(button), `action has no click handler: ${button}`);
+    assert.match(button, /aria-disabled="(?:true|false)"/, `action states availability: ${button}`);
   }
   assert.match(html, /px active task-0001/, "the server's display string is rendered verbatim");
-  assert.ok(
-    !/<button[^>]*aria-label="px integrate task-0001 — ineligible/.test(html),
-    'an action the server did not mark runnable is not rendered as a card control',
-  );
+  assert.match(html, /px integrate task-0001/, 'an unavailable projected action remains a focusable, guarded control');
 });
 
-test('the rendered board carries no drag, drop or draggable affordance', () => {
+test('advertised actions dispatch directly without a confirmation dialog', () => {
+  assert.ok(!browserSources.find((file) => file.name === 'board.tsx')?.text.includes('CommandDialog'));
+  assert.match(browserSources.find((file) => file.name === 'board.tsx')?.text ?? '', /Starting \$\{action\.display\}/,
+    'click and drop both announce that the projected action is starting');
+});
+
+test('the rendered board exposes drag only through server-projected target lanes', () => {
   const html = render(populated());
-  for (const token of ['draggable', 'ondrag', 'ondrop', 'ondragover', 'ondragstart']) {
-    assert.ok(!html.toLowerCase().includes(token), `no ${token} in the rendered board`);
-  }
+  assert.match(html, /Drag a card only to the lane named by one enabled projected action/);
+  assert.match(html, /id="drop-help"/);
+  assert.match(html, /aria-describedby="drop-help"/);
+  assert.ok(browserSources.find((file) => file.name === 'board.tsx')?.text.includes('action.targetLane === lane'));
+  assert.ok(browserSources.find((file) => file.name === 'board.tsx')?.text.includes('dragActionForTarget'));
+  assert.ok(browserSources.find((file) => file.name === 'board.tsx')?.text.includes('setDragImage'), 'drag uses a compact custom preview rather than a cloned card');
 });
 
 test('narrow viewports scroll the board horizontally instead of dropping lanes', () => {
@@ -333,7 +343,19 @@ test('every action control has an accessible name carrying the server display an
 test('the done-history disclosure is a native, keyboard-operable control rather than a scripted toggle', () => {
   const html = render(populated());
   assert.match(html, /<details class="shipped" aria-label="done stage"><summary>/);
-  assert.ok(!/tabindex/i.test(html), 'focus order is the document order, never overridden');
+  assert.ok(!/tabindex="[1-9]/i.test(html), 'focus order has no positive tabindex override');
+});
+
+test('board and attention cards share a keyboard-selectable presentation selection', () => {
+  const html = render(populated());
+  for (const source of ['attention-rail.tsx', 'intake-column.tsx', 'flight-column.tsx']) {
+    assert.ok(browserSources.find((file) => file.name === source)?.text.includes('data-board-card'), `${source} joins the shared selection`);
+  }
+  const board = browserSources.find((file) => file.name === 'board.tsx')?.text ?? '';
+  assert.match(board, /onKeyDown=\{moveSelection\}/);
+  assert.match(board, /ArrowUp/);
+  assert.match(board, /ArrowDown/);
+  assert.match(html, /Keyboard help/);
 });
 
 test('the browser stylesheet defines a visible focus indicator', () => {
@@ -364,12 +386,15 @@ test('production browser code uses no browser persistence or cached snapshot', (
   }
 });
 
-test('production browser code performs exactly one fetch and no mutating request', () => {
+test('production browser code reads snapshots and uses the single guarded mutation route', () => {
   const fetches = browserSources.flatMap((file) => (file.text.match(/\bfetch\(/g) ?? []).map(() => file.name));
-  assert.deepEqual(fetches, ['board-data.ts'], 'the snapshot read is the only fetch in the client');
-  for (const file of browserSources) {
+  assert.deepEqual(fetches, ['board-data.ts', 'board-data.ts'], 'snapshot and command requests stay in the typed client');
+  const data = browserSources.find((file) => file.name === 'board-data.ts')?.text ?? '';
+  assert.match(data, /COMMANDS_PATH = '\/api\/commands'/);
+  assert.match(data, /method: 'POST'/);
+  for (const file of browserSources.filter((file) => file.name !== 'board-data.ts')) {
     for (const verb of ["'POST'", "'PUT'", "'PATCH'", "'DELETE'", 'method:']) {
-      assert.ok(!file.text.includes(verb), `${file.name} must not build a mutating request (${verb})`);
+      assert.ok(!file.text.includes(verb), `${file.name} cannot build a mutation (${verb})`);
     }
   }
 });

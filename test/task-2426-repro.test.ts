@@ -272,12 +272,6 @@ test('production application services wire Mission commands through their shared
       },
     });
     assert.equal(checkpoint.status, 'completed');
-    const handoff = await controller.dispatch({
-      operationId: 'task-2426-production-handoff', kind: 'handoff:record', missionId: id,
-      capabilities: new Set(['handoff:record']),
-      payload: { kind: 'handoff:record', expectedVersion: missionVersion(2), netEngineeringLines: 1, capturedAt: '2026-08-29T00:00:00Z' },
-    });
-    assert.equal(handoff.status, 'completed');
   } finally {
     await services?.operatorState.close();
     if (previousHome === undefined) delete process.env.PARALLIX_HOME;

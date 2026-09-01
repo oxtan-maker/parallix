@@ -28,12 +28,16 @@ const headingStyle = {
   fontSize: 14, margin: 0, display: 'inline',
 } as const;
 
-function AttentionEntry({ item }: { item: WebAttentionItem }) {
+function AttentionEntry({ item, onAction, onSelect, selected }: { item: WebAttentionItem; onAction: (item: WebAttentionItem, control: HTMLButtonElement) => void; onSelect: (id: string) => void; selected: boolean }) {
   const accent = REASON_ACCENT[item.reason.kind];
   return (
     <article
+      data-board-card={item.missionId}
+      tabIndex={0}
+      aria-selected={selected}
+      onFocus={() => onSelect(item.missionId)}
       style={{
-        border: `1px solid ${C.cardEdge}`, borderRadius: 6, background: '#12161b',
+        border: `1px solid ${selected ? C.cyan : C.cardEdge}`, borderRadius: 6, background: '#12161b',
         marginBottom: 9, padding: '9px 11px',
       }}
     >
@@ -63,7 +67,7 @@ function AttentionEntry({ item }: { item: WebAttentionItem }) {
         >
           $ {item.action.display}
         </span>
-        <ActionButton action={item.action} label="run ▸" />
+        <ActionButton action={item.action} label="run ▸" onInvoke={(_action, control) => onAction(item, control)} />
       </div>
       {item.dependsOnSources.length > 0 && (
         <p style={{ color: C.faint, fontSize: 10, margin: '7px 0 0 20px' }}>
@@ -74,7 +78,7 @@ function AttentionEntry({ item }: { item: WebAttentionItem }) {
   );
 }
 
-export function AttentionRail({ snapshot }: { snapshot: WebBoardSnapshot }) {
+export function AttentionRail({ snapshot, onAction, onSelect, selectedId }: { snapshot: WebBoardSnapshot; onAction: (item: WebAttentionItem, control: HTMLButtonElement) => void; onSelect: (id: string) => void; selectedId: string | null }) {
   return (
     <section
       aria-labelledby="attention-heading"
@@ -96,7 +100,7 @@ export function AttentionRail({ snapshot }: { snapshot: WebBoardSnapshot }) {
         {snapshot.attentionQueue.length === 0 && (
           <p style={{ color: C.faint, fontSize: 11, padding: 2 }}>nothing in the attention queue</p>
         )}
-        {snapshot.attentionQueue.map((item) => <AttentionEntry key={item.missionId} item={item} />)}
+        {snapshot.attentionQueue.map((item) => <AttentionEntry key={item.missionId} item={item} onAction={onAction} onSelect={onSelect} selected={selectedId === item.missionId} />)}
       </div>
     </section>
   );
