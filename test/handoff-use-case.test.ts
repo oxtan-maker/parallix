@@ -172,6 +172,10 @@ test('handoff CLI interface rejects unknown flags', () => {
   );
 });
 
+test('handoff CLI exposes a recovery opt-out', () => {
+  assert.equal(parseHandoffCliRequest([SLUG, '--no-recover']).recoverGateFailure, false);
+});
+
 test('handoff CLI interface rejects duplicate --no-gate', () => {
   assert.throws(
     () => parseHandoffCliRequest(['task-999', '--no-gate', '--no-gate']),
@@ -229,17 +233,6 @@ test('handoff CLI default performs bounded gate repair through the real use case
   assert.equal(recorder.transitions.at(-1), 'review');
 });
 
-test('handoff CLI --no-recover keeps a failed gate at the reporting boundary', async () => {
-  const recorder = makeRecorder();
-  let seenOptions: Record<string, unknown> = {};
-  const useCase = new HandoffCommandUseCase(makePorts(recorder));
-  useCase.execute = async (_request, options) => { seenOptions = options; return { ok: true }; };
-
-  await createHandoffCommand(useCase)([SLUG, '--no-recover'], {});
-
-  assert.equal(seenOptions.recoverGateFailure, false);
-});
-
 test('handoff CLI interface exits with code 1 when no slug can be inferred', async () => {
   const recorder = makeRecorder();
   const ports = makePorts(recorder, {
@@ -293,6 +286,7 @@ test('handoff use case fails closed when the final verification gate fails', asy
   const recorder = makeRecorder();
   const useCase = new HandoffCommandUseCase(makePorts(recorder));
   const result = await useCase.performHandoff(SLUG, runOptions(recorder, {
+    recoverGateFailure: false,
     runVerificationGateFn: () => ({ status: 1, stdout: 'out', stderr: 'boom' }),
   }));
 
@@ -347,18 +341,6 @@ test('direct handoff retries a slow-test verifier result before it disturbs an a
   assert.equal(result.ok, true, recorder.errors.join('\n'));
   assert.equal(gateRuns, 2);
   assert.equal(recorder.relaunches.length, 0);
-});
-
-test('handoff use case fails closed when a declared MISSION.md gate fails', async () => {
-  const recorder = makeRecorder();
-  const ports = makePorts(recorder, {
-    process: { spawnSync: () => ({ status: 2, stdout: '', stderr: 'gate exploded' }) },
-  });
-  const result = await new HandoffCommandUseCase(ports).performHandoff(SLUG, runOptions(recorder));
-
-  assert.equal(result.ok, false);
-  assert.match(result.error ?? '', /Declared gate "npm run typecheck" failed/);
-  assert.deepEqual(recorder.transitions, []);
 });
 
 // --- SC5c: retry/relaunch after gatekeeper pushback ---

@@ -1,8 +1,8 @@
 ---
 id: TASK-2436
 title: Add guarded browser actions, confirmation, keyboard flow and drag intent
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-08-28 06:29'
 labels:
   - user_value

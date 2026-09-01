@@ -12,7 +12,11 @@ import type { DraftCommandUseCase } from '../draft-command-use-case.js';
 import type { IntegrateCommandUseCase } from '../integrate-command-use-case.js';
 import type { MissionId } from '../../domain/mission.js';
 import type { MissionStore, MissionVersion } from '../domain-ports.js';
-import { NO_CURRENT_WORK_PORT, type CurrentWorkPort } from '../recording/current-work-recorder.js';
+import {
+  currentWorkPublication,
+  NO_CURRENT_WORK_PORT,
+  type CurrentWorkPort,
+} from '../recording/current-work-recorder.js';
 import type {
   BoardCommandDispatcher,
   BoardProgressSink,
@@ -40,6 +44,8 @@ export interface BoardMissionServices {
   readonly intake?: MissionIntakeService;
   readonly checkpoints?: MissionCheckpointService;
   readonly handoff?: MissionHandoffService;
+  /** The CLI-equivalent handoff workflow derives its own evidence and starts review. */
+  readonly handoffWorkflow?: { executeForSlug(_slug: string): Promise<void> };
   /**
    * The application-owned draft use case, wired by the composition from the
    * trusted draft workflow adapter. The board reaches it through
@@ -59,6 +65,7 @@ export class BoardCommandController implements BoardCommandDispatcher {
   private readonly executeMission: ExecuteMissionService;
   private readonly progressPort?: BoardProgressSink;
   private readonly missionServices: BoardMissionServices;
+  private readonly currentWork: CurrentWorkPort;
   private readonly missionStore: Pick<MissionStore, 'load'> | null;
 
   constructor(
@@ -71,6 +78,7 @@ export class BoardCommandController implements BoardCommandDispatcher {
     this.executeMission = new ExecuteMissionService(executePorts, progressPort, currentWork);
     this.progressPort = progressPort;
     this.missionServices = missionServices;
+    this.currentWork = currentWork;
     this.missionStore = missionStore;
   }
 
@@ -78,7 +86,7 @@ export class BoardCommandController implements BoardCommandDispatcher {
     if (!isIntegratedCapability(kind)) { return false; }
     if (kind === 'mission:intake') { return Boolean(this.missionServices.intake); }
     if (kind === 'checkpoint:record') { return Boolean(this.missionServices.checkpoints); }
-    if (kind === 'handoff:record') { return Boolean(this.missionServices.handoff); }
+    if (kind === 'handoff:record') { return Boolean(this.missionServices.handoffWorkflow); }
     if (kind === 'draft:create') { return Boolean(this.missionServices.draft); }
     if (kind === 'integrate:merge') { return Boolean(this.missionServices.integrate); }
     return true;
@@ -117,6 +125,9 @@ export class BoardCommandController implements BoardCommandDispatcher {
       const reason = 'no integration workflow is configured for this interface';
       this.emit(operationId, 1, 'unavailable', reason);
       return unavailableCapability(kind, reason);
+    }
+    if (kind === 'handoff:record' && !this.canExecute(kind)) {
+      return unavailableCapability(kind, 'no handoff workflow is configured for this interface');
     }
 
     // Guard 2: stale command check
@@ -192,25 +203,27 @@ export class BoardCommandController implements BoardCommandDispatcher {
   }
 
   private async dispatchHandoff(request: BoardCommandRequest): Promise<BoardCommandResult<unknown>> {
-    const payload = request.payload;
-    if (payload?.kind !== 'handoff:record') {
-      return rejected('validation', 'handoff:record requires a handoff payload');
+    if (!this.missionServices.handoffWorkflow) {
+      return unavailableCapability('handoff:record', 'no handoff workflow is configured for this interface');
     }
-    if (!this.missionServices.handoff) {
-      return unavailableCapability('handoff:record', 'no Mission authority is configured for this interface');
-    }
-    this.emit(request.operationId, 1, 'handoff', `recording change size for ${request.missionId}`);
-    return this.missionServices.handoff.recordNel({
+    this.emit(request.operationId, 1, 'handoff', `handing off ${request.missionId} and starting review`);
+    const publication = currentWorkPublication({
+      slug: request.missionId,
       operationId: request.operationId,
-      missionId: request.missionId as MissionId,
-      capabilities: request.capabilities,
-      expectedVersion: payload.expectedVersion,
-      netEngineeringLines: payload.netEngineeringLines,
-      predictedBucket: payload.predictedBucket,
-      capturedAt: payload.capturedAt,
-      artifacts: payload.artifacts,
-      reviewRounds: payload.reviewRounds,
+      phase: 'handoff',
+      summary: `px handoff ${request.missionId}`,
+      agent: request.agent,
     });
+    if (publication) { await bestEffort(() => this.currentWork.running(publication)); }
+    try {
+      await this.missionServices.handoffWorkflow.executeForSlug(request.missionId);
+      if (publication) { await bestEffort(() => this.currentWork.ended(publication)); }
+      return completed({ slug: request.missionId });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : 'handoff workflow aborted';
+      if (publication) { await bestEffort(() => this.currentWork.blocked(publication, reason)); }
+      return failure('execution', `handoff:record for ${request.missionId} failed: ${reason}`);
+    }
   }
 
   private async dispatchDraft(request: BoardCommandRequest): Promise<BoardCommandResult<unknown>> {
@@ -324,5 +337,13 @@ export class BoardCommandController implements BoardCommandDispatcher {
       agent: agent ?? undefined,
     };
     this.progressPort?.(toProgressEvent(event));
+  }
+}
+
+async function bestEffort(publish: () => Promise<void>): Promise<void> {
+  try {
+    await publish();
+  } catch (error) {
+    void error;
   }
 }

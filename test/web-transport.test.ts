@@ -325,6 +325,7 @@ test('enabled action DTO carries null reason and exact display text', () => {
   assert.equal(handoff.state, 'enabled');
   assert.equal(handoff.reason, null);
   assert.equal(handoff.display, 'px handoff task-1010');
+  assert.equal(handoff.targetLane, null, 'fixtures without a server target remain button-only');
 });
 
 test('attention action keeps the server-owned display text and state', () => {

@@ -82,6 +82,8 @@ export interface CommandAvailability {
   readonly command: BoardCommand;
   readonly enabled: boolean;
   readonly reason: string | null;
+  /** The server-projected lane intent for drag/drop, null when this action has no deterministic target. */
+  readonly targetLane?: BoardLane | null;
 }
 
 export interface MissionCard {
@@ -243,8 +245,8 @@ export function boardLane(mission: Mission): BoardLane {
   return mission.status;
 }
 
-function availability(command: BoardCommand, enabled: boolean, reason: string): CommandAvailability {
-  return { command, enabled, reason: enabled ? null : reason };
+function availability(command: BoardCommand, enabled: boolean, reason: string, targetLane: BoardLane | null): CommandAvailability {
+  return { command, enabled, reason: enabled ? null : reason, targetLane };
 }
 
 export function availableBoardCommands(
@@ -253,25 +255,23 @@ export function availableBoardCommands(
 ): CommandAvailability[] {
   const open = !isClosedMission(mission);
   const hasCheckpointEvidence = mission.checkpoints.some((checkpoint) => checkpoint.goalCheck.length > 0);
-  const canIntegrate = mission.status === 'integration'
-    || (
-      mission.status === 'review'
-      && mission.review !== null
-      && facts.reviewApproval !== null
-      && sameReviewedRevision(
-        currentReviewRound(mission.review).subject,
-        facts.reviewApproval.subject,
-      )
+  const hasApprovedReview = mission.review !== null
+    && facts.reviewApproval !== null
+    && sameReviewedRevision(
+      currentReviewRound(mission.review).subject,
+      facts.reviewApproval.subject,
     );
+  const canIntegrate = mission.status === 'integration'
+    || (['active', 'review'].includes(mission.status) && hasApprovedReview);
   return [
-    availability('active', open && ['refined', 'active'].includes(mission.status), 'Mission must be refined before it can be activated'),
-    availability('handoff', open && mission.status === 'active' && hasCheckpointEvidence, 'Handoff requires an active mission with checkpoint evidence'),
-    availability('review', open && mission.status === 'review', 'Review is available only while the mission is in review'),
-    availability('integrate', open && canIntegrate, 'Integration requires the integration queue or an approved review'),
+    availability('active', open && mission.status === 'refined', 'Mission must be refined before it can be activated', 'active'),
+    availability('handoff', open && mission.status === 'active' && hasCheckpointEvidence, 'Handoff requires an active mission with checkpoint evidence', 'review'),
+    availability('review', open && mission.status === 'review', 'Review is available only while the mission is in review', null),
+    availability('integrate', open && canIntegrate, 'Integration requires the integration queue or an approved review', 'integration'),
     // Pre-draft state: the mission exists as a card but no draft worktree has
     // been created yet. Once draft work exists the mission has moved on, and
     // re-drafting is refused by the dispatch backstop, not the projection.
-    availability('draft', open && mission.status === 'backlog', 'Draft is available only while the mission is in the pre-draft (backlog) state'),
+    availability('draft', open && mission.status === 'backlog', 'Draft is available only while the mission is in the pre-draft (backlog) state', 'refined'),
   ];
 }
 

@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { loadSnapshot, SNAPSHOT_PATH } from '../web/src/board-data.js';
+import { COMMANDS_PATH, loadSnapshot, sendCommand, SNAPSHOT_PATH } from '../web/src/board-data.js';
 import { toWebBoardSnapshot, WEB_TRANSPORT_VERSION } from '../src/interfaces/web/transport.js';
 import { makeProjection } from './fixtures/board-projection.js';
 
 const validSnapshot = (): unknown => JSON.parse(JSON.stringify(toWebBoardSnapshot(makeProjection())));
 
-interface Call { readonly url: string; readonly method: string | undefined }
+interface Call { readonly url: string; readonly method: string | undefined; readonly body: string | null }
 
 /** Swap the global fetch for one scripted response, recording every call. */
 async function withFetch<T>(
@@ -16,7 +16,7 @@ async function withFetch<T>(
   const calls: Call[] = [];
   const original = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    calls.push({ url: String(input), method: init?.method });
+    calls.push({ url: String(input), method: init?.method, body: typeof init?.body === 'string' ? init.body : null });
     return impl(String(input));
   }) as typeof fetch;
   try {
@@ -90,4 +90,26 @@ test('an unsupported transport version becomes an explicit incompatible state, n
 test('no settled snapshot state is the loading state', async () => {
   const state = await withFetch(() => jsonResponse(validSnapshot()), async () => loadSnapshot());
   assert.notEqual(state.kind as string, 'loading');
+});
+
+test('the command client sends one typed request to the guarded route', async () => {
+  const originalDocument = globalThis.document;
+  Object.defineProperty(globalThis, 'document', { configurable: true, value: undefined });
+  try {
+    const calls = await withFetch(
+      () => jsonResponse({ kind: 'command-result', transportVersion: 2, status: 'completed', error: null, durableEvidence: [] }),
+      async recorded => {
+        await sendCommand({ missionId: 'task-2433', kind: 'active:execute', missionStatusAtRequest: 'active' });
+        return recorded;
+      },
+    );
+    assert.equal(calls.length, 1);
+    assert.deepEqual(calls[0], {
+      url: COMMANDS_PATH,
+      method: 'POST',
+      body: JSON.stringify({ missionId: 'task-2433', kind: 'active:execute', missionStatusAtRequest: 'active' }),
+    });
+  } finally {
+    Object.defineProperty(globalThis, 'document', { configurable: true, value: originalDocument });
+  }
 });

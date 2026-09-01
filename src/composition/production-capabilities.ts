@@ -16,6 +16,7 @@ import type { MissionNelRecorder, MissionStore, MissionTransitionStore } from '.
 import { MissionCheckpointService } from '../application/mission-checkpoint-service.js';
 import { MissionHandoffService } from '../application/mission-handoff-service.js';
 import { MissionIntakeService } from '../application/mission-intake-service.js';
+import { MissionLifecycleService } from '../application/mission-lifecycle-service.js';
 import { DraftCommandUseCase } from '../application/draft-command-use-case.js';
 import { IntegrateCommandUseCase } from '../application/integrate-command-use-case.js';
 import type { DraftWorkflowPort } from '../application/ports/cli-workflows.js';
@@ -23,8 +24,13 @@ import type { BoardMissionServices } from '../application/controller/board-contr
 import type { CurrentWorkPort } from '../application/recording/current-work-recorder.js';
 import { createDraftWorkflowAdapter, ensureWorktree } from '../adapters/cli/commands/draft.js';
 import { readAgentConfig } from '../adapters/agents/agent-config.js';
+import { performHandoff } from '../adapters/cli/commands/handoff.js';
+import { startReviewLoop } from '../adapters/review/review-loop.js';
 import type { SqliteDatabaseAdapter } from '../adapters/sqlite/database-adapter.js';
 import { composeTuiCapabilities } from './board-projection.js';
+import { reviewLoopBindings } from './review-persistence.js';
+import { applyImplementerCommand, beginNextReviewRound, changeRevision, ConfiguredReviewerEligibility, currentReviewRound, reviewStatus } from '../domain/review.js';
+import { agentFamily } from '../domain/agents.js';
 
 export interface ProductionBoardRepositories {
   readonly agentBlocklist: AgentBlocklistRepository;
@@ -55,6 +61,12 @@ export interface ProductionCompositionOverrides {
   readonly draftWorkflow?: DraftWorkflowPort;
   /** Test-only adapter seams; production always supplies the safe exit boundary. */
   readonly draftAdapterDeps?: Record<string, unknown>;
+  /**
+   * Test-only seam for the review loop the board's handoff resume launches.
+   * Production always uses the real loop; a test supplies a recorder so the
+   * resume branch can be driven without spawning agents.
+   */
+  readonly handoffReviewLoop?: typeof startReviewLoop;
 }
 
 /**
@@ -103,6 +115,72 @@ function createBoardDraftService(deps: {
   return new DraftCommandUseCase(workflow, deps.currentWork);
 }
 
+/** The browser hands off exactly as the CLI does: it supplies identity only. */
+function createBoardHandoffWorkflow(
+  store: MissionStore & MissionTransitionStore & MissionNelRecorder,
+  reviewLoop: typeof startReviewLoop = startReviewLoop,
+) {
+  const lifecycle = new MissionLifecycleService(store);
+  const missionServices = {
+    store,
+    lifecycle,
+    checkpoints: new MissionCheckpointService(store),
+    handoff: new MissionHandoffService(store, store),
+  };
+  const handoff = (slug: string, options: Record<string, unknown> = {}) =>
+    performHandoff(slug, { recoverGateFailure: true, ...options, missionServicesFn: async () => missionServices });
+  const reviewHandoff = async (slug: string, options: Record<string, unknown> = {}): Promise<Record<string, unknown>> =>
+    await handoff(slug, options) as unknown as Record<string, unknown>;
+  return {
+    async executeForSlug(slug: string): Promise<void> {
+      const existing = await store.load(slug as never);
+      if (existing.kind === 'found' && existing.mission.review?.rounds?.length) {
+        // Handoff already established the review identity. A later board handoff
+        // is a resume signal, not a second submission (which would replay the
+        // lane-event key and violate the lifecycle idempotency contract).
+        if (existing.mission.status === 'active') {
+          const previous = existing.mission.review;
+          const decision = currentReviewRound(previous).decision;
+          const findings = decision !== null && decision.kind === 'changes-requested' ? decision.findings : [];
+          const resolved = reviewStatus(previous) === 'awaiting-implementation'
+            ? applyImplementerCommand(previous, { type: 'submit-resolution', respondedAt: new Date().toISOString(), resultingRevision: changeRevision(`handoff-${Date.now()}`), resolutions: findings.map((finding) => ({ findingId: finding.id, kind: 'fixed', evidence: 'Resolved in the handed-off revision.' })) })
+            : previous;
+          const reviewerEligibility = ConfiguredReviewerEligibility.fromReviewStep({ eligible: [currentReviewRound(resolved).reviewer], strategy: 'random' });
+          const review = reviewStatus(resolved) === 'ready-for-next-round'
+            ? beginNextReviewRound(resolved, currentReviewRound(resolved).reviewer, existing.mission.assignee ?? agentFamily('codex'), new Date().toISOString(), reviewerEligibility)
+            : resolved;
+          if (review === previous) { throw new Error('Review is not ready to resume.'); }
+          await store.save({ ...existing.mission, review }, existing.version);
+          const transition = await lifecycle.transition({
+            operationId: `handoff-resume-${slug}`,
+            missionId: slug as never,
+            capabilities: new Set(['mission:transition']),
+            command: { type: 'submit-for-review', gatesPassed: true, review, reviewerEligibility },
+            actor: currentReviewRound(review).reviewer,
+            occurredAt: new Date().toISOString(),
+            idempotencyKey: `handoff-resume-${slug}-${review.rounds.length}`,
+          });
+          if (transition.status !== 'completed') { throw new Error(transition.error?.message ?? 'Review resume transition failed.'); }
+        }
+        await reviewLoop(slug, {
+          isContinue: true,
+          maxAttempts: existing.mission.review.rounds.length + 1,
+          ...reviewLoopBindings(store, lifecycle),
+          missionStore: store,
+        });
+        return;
+      }
+      const result = await handoff(slug);
+      if (!result.ok) { throw new Error(result.error ?? 'handoff workflow aborted'); }
+      await reviewLoop(slug, {
+        performHandoffFn: reviewHandoff,
+        ...reviewLoopBindings(store, lifecycle),
+        missionStore: store,
+      });
+    },
+  };
+}
+
 /**
  * Compose board reads and active dispatch once, then hand the exact TUI
  * capability object to every presentation consumer in this CLI process.
@@ -126,6 +204,7 @@ export function composeProductionCapabilities(
       intake,
       checkpoints: new MissionCheckpointService(missionStore),
       handoff: new MissionHandoffService(missionStore, missionStore),
+      handoffWorkflow: createBoardHandoffWorkflow(missionStore, overrides.handoffReviewLoop),
       // Only with Mission authority: a null store means no draft service, so
       // draft:create reports a typed unavailable result and the read-only
       // graph opens no database or git handle.

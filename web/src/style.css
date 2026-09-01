@@ -39,14 +39,23 @@ body {
   to { transform: rotate(360deg); }
 }
 
+@keyframes blink {
+  50% { opacity: 0; }
+}
+
 .fan.spin {
   animation-name: spin;
   animation-timing-function: linear;
   animation-iteration-count: infinite;
 }
 
+.live-indicator {
+  animation: blink 1s step-end infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .fan.spin {
+  .fan.spin,
+  .live-indicator {
     animation: none;
   }
 }

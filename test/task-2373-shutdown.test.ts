@@ -19,7 +19,6 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { launchPtySmoke, type PtySmokeSession } from './helpers/pty-smoke-harness.js';
 import { createMissionApplicationServices } from '../src/composition/application-services.js';
-import { agentFamily } from '../src/domain/agents.js';
 import { missionId } from '../src/domain/mission.js';
 
 const execFileP = promisify(execFile);
@@ -52,7 +51,7 @@ async function launchBoard(): Promise<BoardFixture> {
   const stateRoot = await mkdtemp(path.join(tmpdir(), 'parallix-2373-shutdown-state-'));
   await mkdir(path.join(fixtureRoot, 'backlog', 'tasks'), { recursive: true });
   await writeFile(path.join(fixtureRoot, 'backlog', 'tasks', 'task-2373-shutdown.md'), [
-    '---', 'id: TASK-SHUTDOWN', 'title: Shutdown fixture mission', 'status: active',
+    '---', 'id: TASK-SHUTDOWN', 'title: Shutdown fixture mission', 'status: refined',
     'assignee: []', 'labels: []', '---', '',
   ].join('\n'));
   const session = await launchPtySmoke([process.execPath, path.join(root, 'build/px.mjs'), 'ui'], {
@@ -289,7 +288,7 @@ async function seedInflightMission(fixtureRoot: string, stateRoot: string): Prom
     missionId: id,
     repositoryId: services.repositoryId,
     title: 'In-flight shutdown fixture',
-    rawStatus: 'active',
+    rawStatus: 'refined',
     capabilities: new Set(['mission:intake']),
   });
   assert.equal(intake.status, 'completed', 'the fixture mission must be materialized for the authoritative board guard');
@@ -303,15 +302,10 @@ async function seedInflightMission(fixtureRoot: string, stateRoot: string): Prom
     occurredAt: new Date().toISOString(),
     capabilities: new Set(['mission:transition']),
   });
-  assert.equal(refined.status, 'completed', 'the fixture mission must be refined before it can be activated');
-  const activated = await services.lifecycle.activate({
-    operationId: `${SC3_SLUG}-activate`,
-    missionId: id,
-    agent: agentFamily('claude'),
-    occurredAt: new Date().toISOString(),
-    capabilities: new Set(['mission:transition']),
-  });
-  assert.equal(activated.status, 'completed', 'the fixture mission authority must match the active board card');
+  // The fixture stops at `refined`. `active:execute` is the dispatch this test
+  // puts in flight, and the board projects it only for a refined mission — an
+  // already-active mission advertises no self-transition.
+  assert.equal(refined.status, 'completed', 'the fixture mission must be refined so the board offers active:execute');
 }
 
 interface InflightBoardFixture {
@@ -348,7 +342,7 @@ async function launchInflightBoard(): Promise<InflightBoardFixture> {
   await writeFile(path.join(fixtureRoot, 'missions', SC3_SLUG, 'MISSION.md'), `# ${SC3_SLUG}\n`);
   await writeFile(
     path.join(fixtureRoot, 'backlog', 'tasks', `${SC3_SLUG}.md`),
-    ['---', `id: ${SC3_SLUG.toUpperCase()}`, 'title: In-flight shutdown fixture', 'status: active', 'assignee: []', 'labels: [ai_sdlc]', '---', ''].join('\n'),
+    ['---', `id: ${SC3_SLUG.toUpperCase()}`, 'title: In-flight shutdown fixture', 'status: refined', 'assignee: []', 'labels: [ai_sdlc]', '---', ''].join('\n'),
   );
   const stub = [
     '#!/bin/sh',

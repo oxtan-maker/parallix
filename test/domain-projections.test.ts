@@ -105,12 +105,12 @@ test('attention and WIP projections reflect blockers, gates, and lanes', () => {
   assert.equal(wipCounts([base, failed]).active, 2);
 });
 
-test('board command projection exposes guarded current CLI actions', () => {
+test('board command projection does not advertise an active self-transition', () => {
   const active = { id, repositoryId: repo, title: 'x', labels: missionLabels(['user_value']), status: 'active' as const, rawStatus: 'active', closedAt: null, assignee: null, checkpoints: [], review: null, netEngineeringLines: null };
   const commands = availableBoardCommands(active, { reviewApproval: null });
-  assert.equal(commands.find(({ command }) => command === 'active')?.enabled, true);
+  assert.equal(commands.find(({ command }) => command === 'active')?.enabled, false);
   assert.deepEqual(commands.find(({ command }) => command === 'handoff'), {
-    command: 'handoff', enabled: false, reason: 'Handoff requires an active mission with checkpoint evidence',
+    command: 'handoff', enabled: false, reason: 'Handoff requires an active mission with checkpoint evidence', targetLane: 'review',
   });
 });
 
@@ -119,7 +119,7 @@ test('backlog missions must be drafted before activation', () => {
   const commands = availableBoardCommands(backlog, { reviewApproval: null });
   assert.equal(commands.find(({ command }) => command === 'draft')?.enabled, true);
   assert.deepEqual(commands.find(({ command }) => command === 'active'), {
-    command: 'active', enabled: false, reason: 'Mission must be refined before it can be activated',
+    command: 'active', enabled: false, reason: 'Mission must be refined before it can be activated', targetLane: 'active',
   });
 });
 
@@ -139,6 +139,9 @@ test('approved review exposes integrate without inventing another lifecycle stat
   };
   const approval = { subject: reviewedSubject, approvedAt: 'now' };
   assert.equal(availableBoardCommands(review, { reviewApproval: approval }).find(({ command }) => command === 'integrate')?.enabled, true);
+  assert.equal(availableBoardCommands({ ...review, status: 'active' }, { reviewApproval: approval })
+    .find(({ command }) => command === 'integrate')?.enabled, true,
+  );
   assert.equal(availableBoardCommands(review, {
     reviewApproval: {
       ...approval,

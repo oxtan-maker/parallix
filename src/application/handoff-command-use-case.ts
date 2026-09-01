@@ -16,7 +16,15 @@
 import * as path from 'node:path';
 import * as fmt from './presentation/cli-format.js';
 import { AGENT_COMMAND_COMPLETION_CONTRACT } from './agent-completion-contract.js';
-import { beginNextReviewRound, startReview, ConfiguredReviewerEligibility, changeRevision, reviewStatus } from '../domain/review.js';
+import {
+  applyImplementerCommand,
+  beginNextReviewRound,
+  startReview,
+  ConfiguredReviewerEligibility,
+  changeRevision,
+  currentReviewRound,
+  reviewStatus,
+} from '../domain/review.js';
 import { agentFamily } from '../domain/agents.js';
 import { artifactReference } from '../domain/net-engineering-lines.js';
 import type { HandoffWorkflowPorts, HandoffResult } from './ports/handoff-workflow.js';
@@ -1084,14 +1092,30 @@ export class HandoffCommandUseCase {
     // A review with no round carries no change identity to advance, so it is
     // treated as no review at all rather than read for a current round.
     const priorReview = loadedReview && loadedReview.rounds?.length > 0 ? loadedReview : null;
+    // Handoff is the identity-only CLI/web acknowledgement that repairs are
+    // ready. If the previous autonomous round stopped after requesting changes,
+    // record that acknowledgement as the resolution before opening the next
+    // round; callers provide no separate findings payload by design.
     const startedAt = occurredAt;
-    const review = priorReview
-      ? (reviewStatus(priorReview) === 'ready-for-next-round'
-        ? beginNextReviewRound(priorReview, reviewer, implementer, startedAt, reviewerEligibility)
+    let reviewForHandoff = priorReview;
+    if (reviewForHandoff && reviewStatus(reviewForHandoff) === 'awaiting-implementation') {
+      const findings = currentReviewRound(reviewForHandoff).decision?.kind === 'changes-requested'
+        ? currentReviewRound(reviewForHandoff).decision.findings : [];
+      reviewForHandoff = applyImplementerCommand(reviewForHandoff, {
+        type: 'submit-resolution',
+        respondedAt: startedAt,
+        resultingRevision: changeRevision(`handoff-${Date.now()}`),
+        resolutions: findings.map((finding) => ({ findingId: finding.id, kind: 'fixed' as const, evidence: 'Resolved in the handed-off revision.' })),
+      });
+      await missionServices.store.save({ ...existing.mission, review: reviewForHandoff }, existing.version);
+    }
+    const review = reviewForHandoff
+      ? (reviewStatus(reviewForHandoff) === 'ready-for-next-round'
+        ? beginNextReviewRound(reviewForHandoff, reviewer, implementer, startedAt, reviewerEligibility)
         // Undecided round: this handoff is a resubmission of the round already
         // recorded (a relaunch, a retried CLI invocation), so it is submitted
         // unchanged rather than rewritten.
-        : priorReview)
+        : reviewForHandoff)
       : startReview({
         change: submittedPr
           ? {

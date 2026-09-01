@@ -52,6 +52,7 @@ export function Shell() {
   useEffect(() => {
     let live = true;
     let events: EventSource | null = null;
+    let refreshTimer: ReturnType<typeof setTimeout> | undefined;
     void loadSnapshot().then((settled) => {
       if (!live) { return; }
       setState(settled);
@@ -63,10 +64,19 @@ export function Shell() {
         const result = validateWebProgressEvent(payload);
         if (!result.ok) { return; }
         setState((current) => current.kind !== 'ready' ? current : { kind: 'ready', snapshot: appendProgress(current.snapshot, result.value) });
+        clearTimeout(refreshTimer);
+        refreshTimer = setTimeout(() => {
+          void loadSnapshot().then((next) => { if (live) { setState(next); } });
+        }, 150);
       });
     });
-    return () => { live = false; events?.close(); };
+    return () => { live = false; events?.close(); clearTimeout(refreshTimer); };
   }, []);
+
+  const refresh = async () => {
+    const settled = await loadSnapshot();
+    setState(settled);
+  };
 
   return (
     <main style={page} aria-busy={state.kind === 'loading'}>
@@ -99,7 +109,7 @@ export function Shell() {
           </p>
         </Notice>
       )}
-      {state.kind === 'ready' && <Board snapshot={state.snapshot} />}
+      {state.kind === 'ready' && <Board snapshot={state.snapshot} onRefresh={refresh} />}
     </main>
   );
 }
