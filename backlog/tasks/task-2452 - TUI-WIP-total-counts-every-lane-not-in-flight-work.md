@@ -18,7 +18,8 @@ priority: medium
 The Ink TUI top bar reports WIP as the sum of every lane in
 `BoardProjection.wipCounts`, including backlog (intake), integration (the merge
 step) and done (terminal). The reference board design counts only in-flight
-missions — `refined`, `active`, `review` and the `approved` review status — so
+missions — `refined`, `active`, `review` and `approved` (the lane this codebase
+calls `integration`) — so
 the TUI reports a number that grows with shipped and unstarted work and never
 matches the operator's notion of work in flight.
 
@@ -42,9 +43,9 @@ Reference: `Parallix Board GPU.dc.html` defines
 - [ ] #3 The web board top bar consumes the same projected total; the lane rule
       is removed from browser code and the widened browser guard allowlist entry
       is removed with it.
-- [ ] #4 `approved` missions are counted correctly, whether `approved` is a lane
-      or a review status carried on a card in another lane; a regression test
-      pins that case explicitly.
+- [ ] #4 Approved-and-awaiting-merge missions (the `integration` lane, raw
+      status `approved`) are counted as in flight; a regression test pins that
+      case explicitly.
 - [ ] #5 Regression tests cover the TUI and the web surface asserting the same
       total for the same projection.
 
