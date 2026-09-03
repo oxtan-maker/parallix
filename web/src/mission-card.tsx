@@ -17,7 +17,7 @@ export function MissionCardView({ card }: { readonly card: WebMissionCard }) {
       <h3 className="mission-card__title">{card.title}</h3>
       <p className="mission-card__checkpoint">
         {checkpointLabel === null
-          ? 'Checkpoint unavailable'
+          ? `Checkpoint unavailable · gate ${card.gate}`
           : `Checkpoint ${checkpointLabel} (gate ${card.gate})`}
       </p>
       <p className="mission-card__pull-request">{pullRequestLine(card)}</p>

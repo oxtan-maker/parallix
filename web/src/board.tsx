@@ -142,13 +142,6 @@ export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onR
   return (
     <div ref={root} tabIndex={-1} onKeyDown={moveSelection}>
       <TopBar snapshot={snapshot} flowOpen={flowOpen} onFlowToggle={() => setFlowOpen((open) => !open)} />
-      <details aria-label="Keyboard help" style={{ margin: '6px 14px 0', color: '#aab4bf', fontSize: 11 }}>
-        <summary>Keyboard help</summary>
-        <p>Use Up and Down Arrow to move the shared rail and board selection. Tab reaches actions, FLOW, and shipped history.</p>
-      </details>
-      <p id="drop-help" style={{ margin: '6px 14px 0', color: '#aab4bf', fontSize: 11 }}>
-        Drag a card only to the lane named by one enabled projected action; invalid drops leave it unchanged.
-      </p>
       {flowOpen && <FlowPanel metrics={snapshot.metrics} />}
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
         <AttentionRail snapshot={snapshot} selectedId={selectedId} onSelect={setSelectedId} onAction={(item, control) => {
@@ -177,7 +170,7 @@ export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onR
             </div>
           )}
           {flight.map((stage) => (
-            <div key={stage.lane} aria-describedby="drop-help" aria-dropeffect={canDrop(stage.lane) ? 'move' : undefined} style={{ flex: 1, minWidth: 318, minHeight: 0 }}>
+            <div key={stage.lane} aria-dropeffect={canDrop(stage.lane) ? 'move' : undefined} style={{ flex: 1, minWidth: 318, minHeight: 0 }}>
               <FlightColumn stage={stage} onAction={open} onSelect={setSelectedId} onDragStart={startDrag} onDrop={dropAction} selectedId={selectedId} pendingAction={pendingAction} draggable={canDrop(stage.lane) === true} style={{ height: '100%' }} />
             </div>
           ))}

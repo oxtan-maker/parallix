@@ -134,6 +134,12 @@ export interface WebCommandAction {
   readonly reason: string | null;
   /** Server-owned drag/drop destination; null means this action is button-only. */
   readonly targetLane: WebBoardLane | null;
+  /**
+   * Optional short verb for this action in the mission's current state (the
+   * server's word, e.g. `resume`). Absent when the command reads the same in
+   * every state; `display` stays the accessible name either way.
+   */
+  readonly label?: string;
 }
 
 /** Wire mirror of the domain `PullRequestReference` — six keys, `url` nullable. */
@@ -413,11 +419,12 @@ function toCommandAction(
   display: string,
   availability: CommandAvailability | undefined,
 ): WebCommandAction {
+  const label = availability?.label === undefined ? {} : { label: availability.label };
   if (!isIntegratedCapability(kind)) {
-    return { kind, display, state: 'unavailable', reason: unavailableReason(kind), targetLane: availability?.targetLane ?? null };
+    return { kind, display, state: 'unavailable', reason: unavailableReason(kind), targetLane: availability?.targetLane ?? null, ...label };
   }
   if (availability !== undefined && availability.enabled) {
-    return { kind, display, state: 'enabled', reason: null, targetLane: availability.targetLane ?? null };
+    return { kind, display, state: 'enabled', reason: null, targetLane: availability.targetLane ?? null, ...label };
   }
   return {
     kind,
@@ -425,6 +432,7 @@ function toCommandAction(
     state: 'ineligible',
     reason: availability?.reason ?? 'command is not eligible for this mission',
     targetLane: availability?.targetLane ?? null,
+    ...label,
   };
 }
 
@@ -848,7 +856,8 @@ function checkDuration(object: unknown, path: string, problems: string[]): void 
 
 function checkCommandAction(object: unknown, path: string, problems: string[]): void {
   if (!isPlainObject(object)) { problems.push(`${path} must be an object`); return; }
-  checkKeys(object, ['kind', 'display', 'state', 'reason', 'targetLane'], ['kind', 'display', 'state', 'reason', 'targetLane'], path, problems);
+  checkKeys(object, ['kind', 'display', 'state', 'reason', 'targetLane', 'label'], ['kind', 'display', 'state', 'reason', 'targetLane'], path, problems);
+  if ('label' in object) { checkString(object, 'label', path, problems); }
   checkEnum(object, 'kind', COMMAND_KINDS, path, problems);
   checkString(object, 'display', path, problems);
   checkEnum(object, 'state', ACTION_STATES, path, problems);

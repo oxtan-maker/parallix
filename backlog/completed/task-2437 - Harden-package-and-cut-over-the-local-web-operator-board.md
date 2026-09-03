@@ -1,8 +1,8 @@
 ---
 id: TASK-2437
 title: Harden, package and cut over the local web operator board
-status: backlog
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-08-28 06:29'
 labels:
   - ai_sdlc

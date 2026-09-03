@@ -417,6 +417,25 @@ test('command result wire error carries kind and message only, never a stack', (
   }
 });
 
+// Regression: a production snapshot whose card actions carry a `label` (and one
+// that omits it) must validate. The optional `label` key is allowed-but-not- required in `checkCommandAction`; a regression here would reject every real
+// command action in both shapes (F1).
+test('snapshot validation accepts real command actions with and without a label', () => {
+  const card = makeFullCard({
+    lane: 'active',
+    status: 'active',
+    commands: [
+      { command: 'active', enabled: true, reason: null, targetLane: 'active', label: 'resume' },
+      { command: 'handoff', enabled: false, reason: 'Handoff requires an active mission with checkpoint evidence', targetLane: 'review' },
+    ],
+  });
+  const snapshot = toWebBoardSnapshot(makeProjection({ active: [card] }));
+  const actions = snapshot.stages.flatMap((stage) => stage.cards.flatMap((missionCard) => missionCard.actions));
+  assert.ok(actions.some((action) => 'label' in action), 'a real action carries its label');
+  assert.ok(actions.some((action) => !('label' in action)), 'a real action omits the label');
+  assert.equal(validateWebBoardSnapshot(snapshot).ok, true, 'production snapshot with real actions must validate');
+});
+
 test('unsupported transport version is rejected as an incompatible client', () => {
   const snapshot = toWebBoardSnapshot(projectionWith({}));
   const snapshotValidation = validateWebBoardSnapshot({ ...snapshot, transportVersion: 99 });

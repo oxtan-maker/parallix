@@ -84,6 +84,13 @@ export interface CommandAvailability {
   readonly reason: string | null;
   /** The server-projected lane intent for drag/drop, null when this action has no deterministic target. */
   readonly targetLane?: BoardLane | null;
+  /**
+   * The verb an operator recognises for this action in the mission's current
+   * state. One command can mean two things — `px active` first launches a
+   * refined mission and later resumes a stalled one — so the lifecycle words
+   * are chosen here, never re-derived from a lane by a renderer.
+   */
+  readonly label?: string;
 }
 
 export interface MissionCard {
@@ -245,13 +252,19 @@ export function boardLane(mission: Mission): BoardLane {
   return mission.status;
 }
 
-function availability(command: BoardCommand, enabled: boolean, reason: string, targetLane: BoardLane | null): CommandAvailability {
-  return { command, enabled, reason: enabled ? null : reason, targetLane };
+function availability(
+  command: BoardCommand,
+  enabled: boolean,
+  reason: string,
+  targetLane: BoardLane | null,
+  label?: string,
+): CommandAvailability {
+  return { command, enabled, reason: enabled ? null : reason, targetLane, ...(label === undefined ? {} : { label }) };
 }
 
 export function availableBoardCommands(
   mission: Mission,
-  facts: Pick<MissionOperationalFacts, 'reviewApproval'>,
+  facts: Pick<MissionOperationalFacts, 'reviewApproval'> & Partial<Pick<MissionOperationalFacts, 'latestGate'>>,
 ): CommandAvailability[] {
   const open = !isClosedMission(mission);
   const hasCheckpointEvidence = mission.checkpoints.some((checkpoint) => checkpoint.goalCheck.length > 0);
@@ -261,10 +274,30 @@ export function availableBoardCommands(
       currentReviewRound(mission.review).subject,
       facts.reviewApproval.subject,
     );
+  // `px active` is the launch command and the resume command: the workflow
+  // re-runs it to act on reviewer findings and to restart a mission whose gate
+  // failed. Offering it only from `refined` left a mission in review with no
+  // runnable action at all, and explained itself with a lane rule that did not
+  // apply to it.
+  const reviewPhase = mission.review === null ? null : currentReviewRound(mission.review).phase;
+  const resumesFindings = mission.status === 'review' && reviewPhase === 'fixing';
+  const resumesGate = mission.status === 'active' && facts.latestGate === 'failed';
+  const activeLabel = resumesFindings ? 'act on review' : resumesGate ? 'resume' : 'activate';
+  const activeReason = mission.status === 'review'
+    ? 'Resuming a review mission requires reviewer findings to act on'
+    : mission.status === 'active'
+      ? 'Resuming an active mission requires a failed gate'
+      : 'Mission must be refined before it can be activated';
   const canIntegrate = mission.status === 'integration'
     || (['active', 'review'].includes(mission.status) && hasApprovedReview);
   return [
-    availability('active', open && mission.status === 'refined', 'Mission must be refined before it can be activated', 'active'),
+    availability(
+      'active',
+      open && (mission.status === 'refined' || resumesFindings || resumesGate),
+      activeReason,
+      'active',
+      activeLabel,
+    ),
     availability('handoff', open && mission.status === 'active' && hasCheckpointEvidence, 'Handoff requires an active mission with checkpoint evidence', 'review'),
     availability('review', open && mission.status === 'review', 'Review is available only while the mission is in review', null),
     availability('integrate', open && canIntegrate, 'Integration requires the integration queue or an approved review', 'integration'),

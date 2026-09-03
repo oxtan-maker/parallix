@@ -108,6 +108,36 @@ test('a populated snapshot renders repository identity and all six received stag
   assert.deepEqual([...positions].sort((a, b) => a - b), positions, 'lanes render in the board order');
 });
 
+test('the top bar WIP counts only in-flight lanes, not backlog or done', () => {
+  // populated() puts one card in every lane, so the all-lane sum is 6 but the
+  // reference WIP is refined + active + review + approved (this board's
+  // `integration` lane) = 4. Backlog is intake and done is terminal.
+  const html = render(populated());
+  const match = html.match(/wip <span[^>]*>(\d+)<\/span>/);
+  assert.ok(match, 'the top bar renders a WIP count');
+  assert.equal(match![1], '4', 'WIP excludes backlog and done');
+});
+
+test('a card action renders the server\'s verb for the mission\'s state', () => {
+  // `px active` is the resume command as well as the launch command, so the
+  // server sends the word for this state; the browser prints it and keeps the
+  // command itself as the accessible name.
+  const html = render(snapshotOf({
+    stages: [{
+      lane: 'review',
+      count: 1,
+      cards: [makeCard({
+        id: 'task-0009' as MissionCard['id'],
+        lane: 'review',
+        status: 'review',
+        commands: [{ command: 'active', enabled: true, reason: null, targetLane: 'active', label: 'act on review' }],
+      })],
+    }],
+  }));
+  assert.match(html, /act on review/);
+  assert.match(html, /aria-label="px active task-0009 — enabled"/);
+});
+
 test('every received card renders in its stage, including the collapsible done history', () => {
   const html = render(populated());
   for (const id of ['task-0001', 'task-0002', 'task-0003', 'task-0004', 'task-0005', 'task-0006']) {
@@ -286,9 +316,10 @@ test('advertised actions dispatch directly without a confirmation dialog', () =>
 
 test('the rendered board exposes drag only through server-projected target lanes', () => {
   const html = render(populated());
-  assert.match(html, /Drag a card only to the lane named by one enabled projected action/);
-  assert.match(html, /id="drop-help"/);
-  assert.match(html, /aria-describedby="drop-help"/);
+  // No static drag/drop help text is shipped: a drop is governed entirely by
+  // the server-projected target lanes the browser receives on the wire.
+  assert.doesNotMatch(html, /Drag a card only to the lane named/);
+  assert.doesNotMatch(html, /id="drop-help"/);
   assert.ok(browserSources.find((file) => file.name === 'board.tsx')?.text.includes('action.targetLane === lane'));
   assert.ok(browserSources.find((file) => file.name === 'board.tsx')?.text.includes('dragActionForTarget'));
   assert.ok(browserSources.find((file) => file.name === 'board.tsx')?.text.includes('setDragImage'), 'drag uses a compact custom preview rather than a cloned card');
@@ -355,7 +386,8 @@ test('board and attention cards share a keyboard-selectable presentation selecti
   assert.match(board, /onKeyDown=\{moveSelection\}/);
   assert.match(board, /ArrowUp/);
   assert.match(board, /ArrowDown/);
-  assert.match(html, /Keyboard help/);
+  // No static keyboard-help blurb is shipped; navigation is the only affordance.
+  assert.doesNotMatch(html, /Keyboard help/);
 });
 
 test('the browser stylesheet defines a visible focus indicator', () => {
@@ -414,6 +446,7 @@ test('production browser code maps no lane to a lifecycle rule or command', () =
   const allowed = new Set([
     "const INTAKE_LANES: readonly string[] = ['refined', 'backlog'];",
     "const SHIPPED_LANE = 'done';",
+    "const WIP_LANES: ReadonlySet<string> = new Set(['refined', 'active', 'review', 'integration']);",
   ]);
   for (const file of browserSources) {
     for (const line of file.text.split('\n')) {

@@ -294,7 +294,7 @@ test('BoardProjectionBuilder includes default metrics with skip fallback', async
 // Gate status integration
 // ---------------------------------------------------------------------------
 
-test('BoardProjectionBuilder reports gate-failed rank without queueing an unavailable action', async () => {
+test('BoardProjectionBuilder queues a gate-failed mission behind its runnable resume', async () => {
   const missions = [
     { id: id1, repositoryId: repo, title: 'Active', labels: missionLabels(['a']), status: 'active' as const, closedAt: null, assignee: agentFamily('codex'), checkpoints: [], review: null, netEngineeringLines: null },
     { id: id2, repositoryId: repo, title: 'Active 2', labels: missionLabels(['a']), status: 'active' as const, closedAt: null, assignee: agentFamily('codex'), checkpoints: [], review: null, netEngineeringLines: null },
@@ -317,7 +317,17 @@ test('BoardProjectionBuilder reports gate-failed rank without queueing an unavai
   const failed = projection.stages.flatMap((stage) => stage.cards).find((card) => card.id === id1);
   assert.equal(failed?.gate, 'failed');
   assert.equal(attentionRank(failed!), 1);
-  assert.equal(projection.attentionQueue.length, 0);
+  // A failed gate is the top attention reason, and `px active` resumes the
+  // mission — so it is queued with that runnable action, never with an
+  // action the projection marked unavailable.
+  assert.deepEqual(projection.attentionQueue.map((item) => item.missionId), [id1]);
+  assert.equal(projection.attentionQueue[0]?.action.kind, 'active:execute');
+  assert.equal(
+    failed?.commands.find((command) => command.command === 'active')?.label,
+    'resume',
+  );
+  const passing = projection.stages.flatMap((stage) => stage.cards).find((card) => card.id === id2);
+  assert.equal(passing?.commands.find((command) => command.command === 'active')?.enabled, false);
 });
 
 // ---------------------------------------------------------------------------

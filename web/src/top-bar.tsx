@@ -12,9 +12,14 @@ export function TopBar({ snapshot, flowOpen, onFlowToggle }: {
   flowOpen: boolean;
   onFlowToggle: () => void;
 }) {
-  // The wire carries per-lane WIP; the total is their sum, not a rule about
-  // which lanes count as in flight.
-  const wip = snapshot.wipCounts.reduce((total, entry) => total + entry.count, 0);
+  // WIP is the in-flight total the reference counts: refined, active, review
+  // and approved — the lane this board calls `integration`, whose cards are
+  // approved and waiting for the operator to merge. Backlog is intake and done
+  // is terminal, so neither is in flight and neither contributes here.
+  const WIP_LANES: ReadonlySet<string> = new Set(['refined', 'active', 'review', 'integration']);
+  const wip = snapshot.wipCounts
+    .filter((entry) => WIP_LANES.has(entry.lane))
+    .reduce((total, entry) => total + entry.count, 0);
   const unattributed = 'unattributedRunningSessions' in snapshot
     ? snapshot.unattributedRunningSessions === null
       ? 'unattributed sessions unknown'
