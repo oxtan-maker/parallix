@@ -175,7 +175,7 @@ function FlightCard({ card, onAction, onSelect, onDragStart, selected, pendingAc
             flexWrap: 'wrap',
           }}
         >
-          <ActionButton action={primary} pending={pendingAction?.missionId === card.id && pendingAction.kind === primary.kind} onInvoke={(next, control) => onAction(card, next, control)} />
+          <ActionButton action={primary} label={primary.label} pending={pendingAction?.missionId === card.id && pendingAction.kind === primary.kind} onInvoke={(next, control) => onAction(card, next, control)} />
         </div>
       )}
       <Grille />

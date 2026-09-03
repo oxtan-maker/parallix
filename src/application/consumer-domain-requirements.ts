@@ -307,7 +307,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'review-checkpoint-evidence',
     family: 'review',
     fileLocation: 'src/adapters/review/review-static-evidence.ts',
-    line: 302,
+    line: 326,
     anchor: 'findCheckpointsFn(missionDir)',
     reads: ['CheckpointData', 'Mission'],
     requirement:
@@ -322,7 +322,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'ui-board-card',
     family: 'ui-board',
     fileLocation: 'src/application/projections/mission-board.ts',
-    line: 278,
+    line: 311,
     anchor: 'function projectMissionCard',
     reads: ['Mission', 'CheckpointData', 'Review'],
     requirement:

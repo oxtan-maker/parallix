@@ -119,8 +119,37 @@ test('backlog missions must be drafted before activation', () => {
   const commands = availableBoardCommands(backlog, { reviewApproval: null });
   assert.equal(commands.find(({ command }) => command === 'draft')?.enabled, true);
   assert.deepEqual(commands.find(({ command }) => command === 'active'), {
-    command: 'active', enabled: false, reason: 'Mission must be refined before it can be activated', targetLane: 'active',
+    command: 'active', enabled: false, reason: 'Mission must be refined before it can be activated', targetLane: 'active', label: 'activate',
   });
+});
+
+test('a mission with reviewer findings can be resumed with px active', () => {
+  const base = {
+    id, repositoryId: repo, title: 'x', labels: missionLabels(['user_value']),
+    status: 'review' as const, rawStatus: 'review', closedAt: null, assignee: null,
+    checkpoints: [], review: applyReviewerCommand(reviewConversation(), {
+      type: 'request-changes',
+      decidedAt: 'now',
+      comment: null,
+      findings: [{ id: reviewFindingId('F1'), summary: 'unbounded buffer', location: null }],
+    }), netEngineeringLines: null,
+  };
+  const fixing = availableBoardCommands(base, { reviewApproval: null }).find(({ command }) => command === 'active');
+  assert.equal(fixing?.enabled, true, 'findings to act on make px active the runnable next step');
+  assert.equal(fixing?.label, 'act on review');
+
+  // Waiting on the reviewer is not a resume: the action stays disabled, and its
+  // reason describes the review, not the refined lane it is not in.
+  const waiting = availableBoardCommands({ ...base, review: reviewConversation() }, { reviewApproval: null })
+    .find(({ command }) => command === 'active');
+  assert.equal(waiting?.enabled, false);
+  assert.equal(waiting?.reason, 'Resuming a review mission requires reviewer findings to act on');
+
+  // A failed gate is the other resume path, on the active lane.
+  const stalled = availableBoardCommands({ ...base, status: 'active' as const, rawStatus: 'active', review: null }, { reviewApproval: null, latestGate: 'failed' })
+    .find(({ command }) => command === 'active');
+  assert.equal(stalled?.enabled, true);
+  assert.equal(stalled?.label, 'resume');
 });
 
 test('approved review exposes integrate without inventing another lifecycle state', () => {

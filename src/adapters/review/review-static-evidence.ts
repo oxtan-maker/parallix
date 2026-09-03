@@ -183,6 +183,30 @@ export function evidenceCellHasVerifiableReference(fileSystem: FileSystemPort | 
     }
   }
 
+  // Bare repo path (no :line, no command prefix, may contain spaces).
+  // Many follow-up task files are named like `backlog/tasks/task-2437.01 - design-fidelity-audit-vs-reference.md`,
+  // which the :line pattern above rejects (spaces) and which has no command
+  // prefix. A path-like token ending in a file extension that resolves to a
+  // real file on disk is a verifiable reference. Requires an extension so bare
+  // prose words ("TBD", "All tests pass") still fall through to false.
+  const barePathPattern = /(?:^|[\s(`])((?:\/|\.\/)?[\w ./-]+\.[\w-]+)/g;
+  let barePathMatch: RegExpExecArray | null;
+  while ((barePathMatch = barePathPattern.exec(normalized)) !== null) {
+    // The match is greedy over spaces so a filename may keep them, which also
+    // means it swallows the prose in front of it ("see the file package.json").
+    // Drop leading words until the rest resolves, so both shapes are checked.
+    const words = barePathMatch[1].trim().split(' ');
+    for (let start = 0; start < words.length; start += 1) {
+      const candidatePath = words.slice(start).join(' ');
+      const resolved = path.isAbsolute(candidatePath)
+        ? candidatePath
+        : path.join(rootDir, candidatePath.replace(/^\.\//, ''));
+      if (_fsExistsSync(fileSystem, resolved)) {
+        return true;
+      }
+    }
+  }
+
   const adrPattern = /\bADR\s+(\d{4})\b/g;
   let adrMatch: RegExpExecArray | null;
   while ((adrMatch = adrPattern.exec(normalized)) !== null) {

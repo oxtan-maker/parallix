@@ -163,6 +163,121 @@ test('performStaticReview accepts Goal Check with test file path', () => {
 // performStaticReview — invalid evidence paths
 // ============================================================================
 
+test('performStaticReview accepts a bare repo path whose file exists (may contain spaces)', () => {
+  const tmpDir = fs.mkdtempSync(path.join(REPO_ROOT, '.tmp-review-evidence-'));
+  const missionDir = path.join(tmpDir, 'missions', 'task-spacepath');
+  const backlogDir = path.join(tmpDir, 'backlog', 'tasks');
+  fs.mkdirSync(missionDir, { recursive: true });
+  fs.mkdirSync(backlogDir, { recursive: true });
+
+  // A follow-up task file whose name contains spaces — the :line pattern and
+  // the command-prefix rule both miss these; only a bare-path check accepts it.
+  const spacedFile = path.join(backlogDir, 'task-2437.01 - design-fidelity-audit-vs-reference.md');
+  fs.writeFileSync(spacedFile, '# TASK-2437.01\n', 'utf8');
+
+  const checkpoint = path.join(missionDir, 'CP-1.md');
+  fs.writeFileSync(
+    checkpoint,
+    `# Checkpoint 1
+
+## Goal Check
+
+| Criterion | Evidence | Status |
+|---|---|---|
+| Deferred gate | follow-up task \`backlog/tasks/task-2437.01 - design-fidelity-audit-vs-reference.md\` | FOLLOW-UP |
+`,
+    'utf8'
+  );
+
+  try {
+    const result = performStaticReview('task-spacepath', {
+      log: () => {},
+      findMissionDir: () => missionDir,
+      findCheckpoints: () => [checkpoint],
+      readFileSync: fs.readFileSync,
+      run: () => ({ status: 0, stdout: '' }),
+      resolveWorktree: () => REPO_ROOT,
+      rootDir: REPO_ROOT,
+    });
+    assert.equal(result.ok, true, `Expected pass but got findings: ${result.findings.join('; ')}`);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('performStaticReview accepts a bare repo path without a :line suffix', () => {
+  const tmpDir = fs.mkdtempSync(path.join(REPO_ROOT, '.tmp-review-evidence-'));
+  const missionDir = path.join(tmpDir, 'missions', 'task-barepath');
+  const scriptsDir = path.join(tmpDir, 'scripts');
+  fs.mkdirSync(missionDir, { recursive: true });
+  fs.mkdirSync(scriptsDir, { recursive: true });
+  fs.writeFileSync(path.join(scriptsDir, 'verify-local.sh'), '#!/bin/bash\n', 'utf8');
+
+  const checkpoint = path.join(missionDir, 'CP-1.md');
+  fs.writeFileSync(
+    checkpoint,
+    `# Checkpoint 1
+
+## Goal Check
+
+| Criterion | Evidence | Status |
+|---|---|---|
+| Docs | \`scripts/verify-local.sh\` | PASS |
+`,
+    'utf8'
+  );
+
+  try {
+    const result = performStaticReview('task-barepath', {
+      log: () => {},
+      findMissionDir: () => missionDir,
+      findCheckpoints: () => [checkpoint],
+      readFileSync: fs.readFileSync,
+      run: () => ({ status: 0, stdout: '' }),
+      resolveWorktree: () => REPO_ROOT,
+      rootDir: REPO_ROOT,
+    });
+    assert.equal(result.ok, true, `Expected pass but got findings: ${result.findings.join('; ')}`);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('performStaticReview accepts a bare repo path named mid-sentence', () => {
+  const tmpDir = fs.mkdtempSync(path.join(REPO_ROOT, '.tmp-review-evidence-'));
+  const missionDir = path.join(tmpDir, 'missions', 'task-prosepath');
+  fs.mkdirSync(missionDir, { recursive: true });
+
+  const checkpoint = path.join(missionDir, 'CP-1.md');
+  fs.writeFileSync(
+    checkpoint,
+    `# Checkpoint 1
+
+## Goal Check
+
+| Criterion | Evidence | Status |
+|---|---|---|
+| Packaging | the shipped layout is described by package.json | PASS |
+`,
+    'utf8'
+  );
+
+  try {
+    const result = performStaticReview('task-prosepath', {
+      log: () => {},
+      findMissionDir: () => missionDir,
+      findCheckpoints: () => [checkpoint],
+      readFileSync: fs.readFileSync,
+      run: () => ({ status: 0, stdout: '' }),
+      resolveWorktree: () => REPO_ROOT,
+      rootDir: REPO_ROOT,
+    });
+    assert.equal(result.ok, true, `Expected pass but got findings: ${result.findings.join('; ')}`);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test('performStaticReview rejects placeholder-only evidence', () => {
   const tmpDir = fs.mkdtempSync(path.join(REPO_ROOT, '.tmp-review-evidence-'));
   const missionDir = path.join(tmpDir, 'missions', 'task-placeholder');
