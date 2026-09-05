@@ -84,7 +84,7 @@ px active task-042
 px integrate task-042
 ```
 
-Parallix runs on built-in defaults with no config file; `px setup` writes one when you want to declare your own verification gate, mission layout, or Forgejo review wiring. The verification gate that runs at each phase is whatever you declare in `workflow.config.json`. In this repo that dispatcher is `./scripts/verify-local.sh {{area}}`: earlier phases use the fast general suite, while `px integrate` calls `verify-local.sh integrate`, which resolves repo-side integration gates from `config/integration-pipelines.json` and runs the stricter pre-merge checks there.
+Parallix runs on built-in defaults with no config file; `px setup` writes one when you want to declare your own verification gate, mission layout, or Forgejo review wiring. See the [configuration reference](docs/config.md) for the supported overrides and their defaults. The verification gate that runs at each phase is whatever you declare in `workflow.config.json`. In this repo that dispatcher is `./scripts/verify-local.sh {{area}}`: earlier phases use the fast general suite, while `px integrate` calls `verify-local.sh integrate`, which resolves repo-side integration gates from `config/integration-pipelines.json` and runs the stricter pre-merge checks there.
 
 ## Working with Backlog.md and Forgejo
 
