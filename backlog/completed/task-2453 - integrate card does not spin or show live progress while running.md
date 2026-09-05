@@ -1,8 +1,8 @@
 ---
 id: TASK-2453
 title: integrate card does not spin or show live progress while running
-status: backlog
-assignee: [custom]
+status: done
+assignee: [codex]
 created_date: '2026-09-03 09:00'
 labels:
   - ai_sdlc

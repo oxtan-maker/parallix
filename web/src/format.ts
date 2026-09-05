@@ -75,9 +75,9 @@ export function coordinatorText(card: WebMissionCard): string {
   return `recovery evidence: coordinator ${evidence.state}`;
 }
 
-/** A card's fan turns only while the server reports live work behind it. */
+/** A card's fan follows the shared current-work in-progress definition. */
 export function isSpinning(card: WebMissionCard): boolean {
-  return card.activity.work.kind === 'working' && card.activity.work.certainty === 'live';
+  return card.activity.work.kind === 'working' && card.activity.work.certainty !== 'stale';
 }
 
 /**

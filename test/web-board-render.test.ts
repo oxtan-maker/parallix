@@ -276,7 +276,7 @@ test('activity, coordinator recovery evidence, and reduced motion stay truthful'
   assert.match(html, /active worker family: codex/, 'the live worker is the header agent, not a stale assignee');
   assert.ok(!html.includes('undefined'), 'a missing assignee never leaks as header text');
   assert.match(html, /class="live-indicator"/, 'live work has the reference-style blinking indicator');
-  assert.equal((html.match(/fan spin/g) ?? []).length, 2, 'only authoritative live work spins its two fans');
+  assert.equal((html.match(/fan spin/g) ?? []).length, 4, 'authoritative live and unverified work spin their two fans');
   const css = browserSources.find((file) => file.name === 'style.css')?.text ?? '';
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.fan\.spin[\s\S]*animation: none/);
   assert.match(css, /\.live-indicator[\s\S]*animation: blink/);
