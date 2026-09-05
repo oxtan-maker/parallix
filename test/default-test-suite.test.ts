@@ -66,6 +66,7 @@ const expectedIntegrationFiles = [
   'task-2231-unit-tests-hang-repro.test.ts',
   'task-2285-pack-install-smoke.test.ts',
   'task-2286-native-sea-smoke.test.ts',
+  'task-2455-config-exit-status-repro.test.ts',
   'task-2234-push-to-reviewer-autobounce.test.ts',
   'task-2270-graphify-exclusion.test.ts',
   'task-2322.12-review-recovery.integration.test.ts',

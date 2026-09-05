@@ -549,5 +549,5 @@ const _arg1 = typeof process.argv[1] === 'string' && process.argv[1] ? process.a
 // root source file is directly executable; the canonical entry owns startup.
 const _esmMain = _arg1 && _arg1.endsWith('/px.ts') && !_arg1.endsWith('/src/entry/px.ts');
 if (_esmMain) {
-  run().then(code => { process.exitCode = code; });
+  run().then(code => { process.exitCode ||= code; });
 }

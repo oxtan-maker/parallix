@@ -157,6 +157,7 @@ export function buildTestRunPlan(options: TestRunPlanOptions): TestRunPlan {
     // Git, or packaging boundary and are not hermetic unit tests.
     'task-2285-pack-install-smoke.test.ts',
     'task-2286-native-sea-smoke.test.ts',
+    'task-2455-config-exit-status-repro.test.ts',
     'task-2312-label-sync.test.ts',
     'task-2318-temp-directory-leaks.test.ts',
     'task-2319-notices-git-tracking.test.ts',
