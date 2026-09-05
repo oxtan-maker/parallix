@@ -5,6 +5,7 @@ status: backlog
 assignee: [custom]
 created_date: '2026-09-03 09:00'
 labels:
+  - ai_sdlc
   - bug
   - integration
   - web
