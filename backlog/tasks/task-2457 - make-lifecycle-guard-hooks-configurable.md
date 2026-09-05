@@ -4,7 +4,7 @@ title: make lifecycle guard hooks configurable
 status: backlog
 assignee: []
 created_date: '2026-09-05 14:30'
-labels: [bug, configuration, workflow]
+labels: [bug, user_value]
 dependencies: []
 ---
 
