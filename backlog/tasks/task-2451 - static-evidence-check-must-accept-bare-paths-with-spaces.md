@@ -5,8 +5,7 @@ status: backlog
 assignee: [custom]
 created_date: '2026-09-01 20:15'
 labels:
-  - tooling
-  - handoff
+  - ai_sdlc
 dependencies: []
 ---
 
