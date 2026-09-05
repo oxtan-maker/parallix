@@ -173,6 +173,14 @@ describe('TASK-2398 SC1: approve on an awaiting-review round is authoritative', 
       // active.
       assert.equal(loaded.mission.status, 'integration');
       assert.equal(reviewStatus(loaded.mission.review!), 'approved');
+      const events = await db.query<{ idempotency_key: string }>(
+        'SELECT idempotency_key FROM board_lane_events WHERE mission_id = ?',
+        [MISSION],
+      );
+      assert.ok(
+        events.some((event) => event.idempotency_key === 'approve:task-2398:round-1'),
+        'approval idempotency is stable for its review round',
+      );
     } finally {
       await db.close();
     }

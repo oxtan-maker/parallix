@@ -1279,7 +1279,7 @@ async function recoverMissionForIntegration(
     command: { type: 'approve', review: missionLoad.mission.review },
     actor: missionLoad.mission.assignee ?? 'custom',
     occurredAt: reviewRound.decision.decidedAt,
-    idempotencyKey: `approve:${context.slug}:${reviewRound.decision.decidedAt}`,
+    idempotencyKey: `approve:${context.slug}:round-${reviewRound.number}`,
   });
   if (approval.status !== 'completed') {
     fmt.log.fail(`Mission approval failed before integration: ${approval.error?.message || 'unknown'}.`);

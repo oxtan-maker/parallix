@@ -107,7 +107,7 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
     stored: import('../domain/mission.js').Mission,
     markdown: import('../domain/mission.js').Mission | null,
   ): import('../domain/mission.js').Mission {
-    return markdown ? { ...stored, title: markdown.title } : stored;
+    return { ...stored, title: markdown?.title ?? stored.id };
   }
 
   async function loadBoardMissions(): Promise<readonly import('../domain/mission.js').Mission[]> {
@@ -117,14 +117,18 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
     }
     const persisted = await deps.missionStore.loadByRepository!(deps.repositoryId);
     const byId = new Map(persisted.map((mission) => [mission.id, mission]));
-    // Markdown defines the board catalog (and excludes archived tasks); SQLite
-    // owns lifecycle state once a task has a persisted Mission aggregate.
-    return markdown.flatMap((mission) => {
+    const catalog = new Map(markdown.flatMap((mission) => {
       const stored = byId.get(mission.id);
-      // A Markdown-only done task is historical. Persisted done missions remain
-      // because their lifecycle aggregate is authoritative.
       return stored ? [withRepositoryTitle(stored, mission)] : mission.status === 'done' ? [] : [mission];
-    });
+    }).map((mission) => [mission.id, mission]));
+    // SQLite supplies current sibling-worktree missions; a local archive record
+    // remains authoritative for exclusion.
+    for (const stored of persisted) {
+      if (stored.status !== 'done' && !repositoryMissions.isArchivedMission(stored.id)) {
+        catalog.set(stored.id, withRepositoryTitle(stored, catalog.get(stored.id) ?? null));
+      }
+    }
+    return [...catalog.values()];
   }
 
   async function loadMarkdownMission(id: import('../domain/mission.js').MissionId) {

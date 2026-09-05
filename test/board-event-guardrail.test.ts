@@ -185,6 +185,16 @@ test('SC6: no lane-event idempotency key is derived from the wall clock', () => 
   }
 });
 
+test('SC7: approval idempotency is per review round, not decision time', () => {
+  for (const relPath of sourceFiles()) {
+    for (const line of codeOnly(read(relPath)).split('\n')) {
+      if (line.includes('idempotencyKey: `approve:')) {
+        assert.ok(!line.includes('decidedAt'), `${relPath} scopes approval idempotency to a timestamp: ${line.trim()}`);
+      }
+    }
+  }
+});
+
 test('domain model: board_lane_events uses dedicated table (not operational_history JSON blobs)', () => {
   // Verify the migration creates a dedicated table, not indexes on operational_history
   const migrationPath = path.join(repoRoot, 'src/adapters/sqlite/migrations/0003-board-lane-events.sql');

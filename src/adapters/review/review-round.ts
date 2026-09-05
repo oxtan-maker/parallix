@@ -267,7 +267,7 @@ export async function recordApproval(
         command: { type: 'approve', review },
         actor: currentReviewRound(review).reviewer,
         occurredAt: input.decidedAt,
-        idempotencyKey: `approve:${slug}:${input.decidedAt}`,
+        idempotencyKey: `approve:${slug}:round-${currentReviewRound(review).number}`,
       });
       if (transition.status !== 'completed') {
         return {

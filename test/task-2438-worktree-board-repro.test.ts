@@ -14,9 +14,9 @@ import { repositoryId } from '../src/domain/repository.js';
 const repository = repositoryId('task-2438-repository');
 const foreignRepository = repositoryId('task-2438-foreign');
 
-function mission(id: string, status: MissionStatus, repositoryId = repository): Mission {
+function mission(id: string, status: MissionStatus, repositoryId = repository, title = id): Mission {
   return {
-    id: missionId(id), repositoryId, title: id, labels: [], assignee: null,
+    id: missionId(id), repositoryId, title, labels: [], assignee: null,
     checkpoints: [], review: null, netEngineeringLines: null, status, closedAt: null,
   };
 }
@@ -26,6 +26,8 @@ const persisted = [
   mission('task-2438-review', 'review'),
   mission('task-2438-integration', 'integration'),
   mission('task-2438-archived', 'active'),
+  mission('task-2438-sibling', 'active', repository, '<Title> (task-2438-sibling)'),
+  mission('task-2438-done', 'done'),
   mission('task-2438-foreign', 'active', foreignRepository),
 ];
 let requestedRepository: typeof repository | null = null;
@@ -63,15 +65,15 @@ function board(rootDir: string) {
   });
 }
 
-function writeTask(root: string, directory: string, id: string, status: string): void {
+function writeTask(root: string, directory: string, id: string, status: string, title = id): void {
   const file = path.join(root, 'backlog', directory, `${id}.md`);
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, `---\nid: ${id}\ntitle: ${id}\nstatus: ${status}\n---\n`, 'utf8');
+  fs.writeFileSync(file, `---\nid: ${id}\ntitle: ${title}\nstatus: ${status}\n---\n`, 'utf8');
 }
 
 function writeCatalog(root: string, statuses: readonly string[]): void {
   writeTask(root, 'tasks', 'task-2438-backlog', 'backlog');
-  writeTask(root, 'tasks', 'task-2438-active', statuses[0]);
+  writeTask(root, 'tasks', 'task-2438-active', statuses[0], 'Active Markdown title');
   writeTask(root, 'tasks', 'task-2438-review', statuses[1]);
   writeTask(root, 'tasks', 'task-2438-integration', statuses[2]);
   writeTask(root, 'archive/tasks', 'task-2438-archived', 'active');
@@ -83,11 +85,15 @@ test('task-2438 board reads persisted repository missions from every worktree', 
   try {
     writeCatalog(root, ['refined', 'review', 'ready-for-integration']);
     writeCatalog(secondRoot, ['backlog', 'refined', 'active']);
+    writeTask(secondRoot, 'tasks', 'task-2438-sibling', 'active', 'Sibling Markdown title');
     const firstBoard = board(root);
     const projection = await firstBoard.builder.build();
     const secondProjection = await board(secondRoot).builder.build();
     const lanes = new Map(
       projection.stages.flatMap((stage) => stage.cards.map((card) => [card.id, card.lane])),
+    );
+    const secondLanes = new Map(
+      secondProjection.stages.flatMap((stage) => stage.cards.map((card) => [card.id, card.lane])),
     );
 
     assert.deepEqual(lanes, new Map([
@@ -95,8 +101,15 @@ test('task-2438 board reads persisted repository missions from every worktree', 
       ['task-2438-active', 'active'],
       ['task-2438-review', 'review'],
       ['task-2438-integration', 'integration'],
+      ['task-2438-sibling', 'active'],
     ]));
-    assert.deepEqual(secondProjection.stages.map((stage) => stage.cards), projection.stages.map((stage) => stage.cards));
+    assert.deepEqual(secondLanes, lanes);
+    assert.equal(lanes.has(missionId('task-2438-done')), false);
+    const titles = new Map(projection.stages.flatMap((stage) => stage.cards.map((card) => [card.id, card.title])));
+    const secondTitles = new Map(secondProjection.stages.flatMap((stage) => stage.cards.map((card) => [card.id, card.title])));
+    assert.equal(titles.get(missionId('task-2438-active')), 'Active Markdown title');
+    assert.equal(titles.get(missionId('task-2438-sibling')), 'task-2438-sibling');
+    assert.equal(secondTitles.get(missionId('task-2438-sibling')), 'Sibling Markdown title');
     assert.equal((await firstBoard.missionQuery.detail(missionId('task-2438-backlog')))?.id, missionId('task-2438-backlog'));
     assert.equal(requestedRepository, repository);
   } finally {
