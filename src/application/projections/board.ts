@@ -15,6 +15,7 @@ import type {
 // ---------------------------------------------------------------------------
 
 export const BOARD_PROJECTION_VERSION = 1 as const;
+export const IN_FLIGHT_WIP_LANES: ReadonlySet<BoardLane> = new Set(['refined', 'active', 'review', 'integration']);
 
 export interface BoardStage {
   readonly lane: BoardLane;
@@ -171,6 +172,7 @@ export interface BoardProjection {
   readonly stages: readonly BoardStage[];
   readonly attentionQueue: readonly AttentionItem[];
   readonly wipCounts: readonly WipCountMetric[];
+  readonly inFlightWip: number;
   readonly availableActions: readonly CommandAvailability[];
   readonly operationLog: readonly OperationLogEntry[];
   /** Time-based metrics derived from recorded events. */
@@ -401,6 +403,7 @@ export function buildBoardProjection(
     lane,
     count: cards.filter((card) => card.lane === lane).length,
   }));
+  const inFlightWip = cards.filter((card) => IN_FLIGHT_WIP_LANES.has(card.lane)).length;
   const uniqueSourceFacts = [...new Map(sourceFacts.map((fact) => [JSON.stringify([fact.source, fact.status, fact.value]), fact])).values()];
 
   return {
@@ -409,6 +412,7 @@ export function buildBoardProjection(
     stages,
     attentionQueue,
     wipCounts,
+    inFlightWip,
     availableActions,
     operationLog,
     metrics,

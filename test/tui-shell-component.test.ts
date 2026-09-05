@@ -101,6 +101,7 @@ describe('BoardShell component renders with mocked BoardProjection', () => {
       { lane: 'integration', count: 0 },
       { lane: 'done', count: 0 },
     ],
+    inFlightWip: 1,
     attentionQueue: [testAttention],
     stages: [
       { lane: 'backlog', cards: [], count: 2 },
@@ -128,6 +129,7 @@ describe('BoardShell component renders with mocked BoardProjection', () => {
       { lane: 'integration', count: 0 },
       { lane: 'done', count: 0 },
     ],
+    inFlightWip: 0,
     attentionQueue: [],
     stages: [
       { lane: 'backlog', cards: [], count: 0 },

@@ -153,6 +153,26 @@ test('snapshot DTO round-trips through JSON.stringify and JSON.parse without los
   assert.ok(!('value' in sourceFactWithoutValue), 'optional value must be omitted, not null');
 });
 
+test('snapshot carries inFlightWip and rejects missing or non-finite values', () => {
+  const snapshot = toWebBoardSnapshot(projectionWith({ inFlightWip: 3 }));
+  assert.equal(roundTrip(snapshot).inFlightWip, 3);
+
+  const { inFlightWip: _omitted, ...missing } = snapshot;
+  const missingValidation = validateWebBoardSnapshot(missing);
+  assert.equal(missingValidation.ok, false);
+  if (!missingValidation.ok) {
+    assert.equal(missingValidation.code, 'invalid-payload');
+    assert.ok(missingValidation.problems.some((problem) => problem.includes('snapshot.inFlightWip')));
+  }
+
+  const nonFiniteValidation = validateWebBoardSnapshot({ ...snapshot, inFlightWip: Number.POSITIVE_INFINITY });
+  assert.equal(nonFiniteValidation.ok, false);
+  if (!nonFiniteValidation.ok) {
+    assert.equal(nonFiniteValidation.code, 'invalid-payload');
+    assert.ok(nonFiniteValidation.problems.some((problem) => problem.includes('snapshot.inFlightWip')));
+  }
+});
+
 // ---------------------------------------------------------------------------
 // SC2 — indefinite block encoding
 // ---------------------------------------------------------------------------

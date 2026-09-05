@@ -1,8 +1,8 @@
 ---
 id: TASK-2452
 title: TUI WIP total counts every lane, not in-flight work
-status: backlog
-assignee: [custom]
+status: done
+assignee: [codex]
 created_date: '2026-09-02 06:00'
 labels:
   - bug

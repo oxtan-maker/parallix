@@ -16,7 +16,7 @@ test('Graphify excludes configured mission documents before extraction while ret
     fs.cpSync(fixtureRoot, worktree, { recursive: true });
     fs.copyFileSync(path.join(repoRoot, '.graphifyignore'), path.join(worktree, '.graphifyignore'));
 
-    const result = childProcess.spawnSync('python3', ['-c', `
+    const result = childProcess.spawnSync('uv', ['run', '--offline', '--with', 'graphifyy', 'python', '-c', `
 import json
 import sys
 from pathlib import Path
@@ -37,8 +37,8 @@ print(json.dumps({
 }))
 `, worktree], {
       encoding: 'utf8',
-      // The standard test bootstrap isolates HOME; restore the installed
-      // Graphify package's user-site location for this focused tool contract.
+      // The standard test bootstrap isolates HOME; restore Graphify's tool
+      // cache for this focused tool contract.
       env: { ...process.env, HOME: os.userInfo().homedir }
     });
 

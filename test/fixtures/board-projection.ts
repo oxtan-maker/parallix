@@ -4,7 +4,7 @@
  * These fixtures are plain data — no test that uses them launches an agent,
  * touches Forgejo, reads a repository, or runs a workflow command.
  */
-import { attentionAction, attentionSources } from '../../src/application/projections/board.js';
+import { attentionAction, attentionSources, IN_FLIGHT_WIP_LANES } from '../../src/application/projections/board.js';
 import type {
   AttentionItem,
   AttentionReason,
@@ -123,6 +123,7 @@ export function makeProjection(
     stages,
     attentionQueue: [],
     wipCounts: stages.map((stage) => ({ lane: stage.lane, count: stage.count })),
+    inFlightWip: stages.filter((stage) => IN_FLIGHT_WIP_LANES.has(stage.lane)).reduce((count, stage) => count + stage.count, 0),
     availableActions: [],
     operationLog: [],
     metrics: emptyMetrics,
