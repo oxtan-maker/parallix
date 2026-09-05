@@ -4,7 +4,7 @@ title: web board cannot start drafting
 status: backlog
 assignee: []
 created_date: '2026-09-05 04:50'
-labels: []
+labels: [ai_sdlc, bug]
 dependencies: []
 ordinal: 124917
 ---
