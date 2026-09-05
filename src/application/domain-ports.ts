@@ -21,6 +21,15 @@ export type MissionLoadResult =
 
 export interface MissionTransitionHistoryEntry {
   readonly trigger: string;
+  /**
+   * The identity of the recorded transition, when the store keeps it. Only the
+   * lane the mission left, the lane it entered, and the key the writer supplied
+   * are needed to tell a replayed transition from a genuine collision under the
+   * same idempotency key; a store that records no history omits them.
+   */
+  readonly fromStatus?: string | null;
+  readonly toStatus?: string;
+  readonly idempotencyKey?: string;
 }
 
 /** Persistence ports belong to the application layer; the domain stays store-agnostic. */

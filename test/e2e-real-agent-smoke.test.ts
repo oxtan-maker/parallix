@@ -770,11 +770,19 @@ function runRealAgentSmoke(agent, runner) {
     // Check this BEFORE the hello-world assertion so we detect phantom drafts
     // regardless of whether the task description matches.
     const placeholderMarkers = ['<Title>', '<Goal>', '<Scope>', '<Success Criteria>', '<Description>', '<Acceptance Criteria>'];
+    // The seeded task description (`Fix the typo in hello.sh so it prints
+    // Hello, World!`) must survive into the contract. Case/separator-insensitive:
+    // the drafting model may render it as "Hello World", "Hello, World!",
+    // "hello-world", or "hello_world".
+    const helloWorld = /hello[\s,_-]*world/i;
     let foundPlaceholders = placeholderMarkers.filter((marker) => missionBody.includes(marker));
-    if (foundPlaceholders.length > 0) {
-      // Retry the draft once. A cold/weak local backend may stream a phantom
-      // draft on its first real request; a single retry absorbs that without
-      // masking a genuine phantom draft (the retried draft must fill the scaffold).
+    if (foundPlaceholders.length > 0 || !helloWorld.test(missionBody)) {
+      // Retry the draft once. A cold, weak, or contended local backend may
+      // stream a degenerate draft on its first real request: either an unfilled
+      // scaffold, or a contract written about the task *title* alone, ignoring
+      // the description it was given. Both are the same cold-start failure, so
+      // one retry absorbs them without weakening either assertion below — the
+      // retried draft must fill the scaffold AND carry the task description.
       draftResult = runWorkflowAllowFail(repo.repoRoot, env, ['draft', slug, '--agent', agent], RUN_TIMEOUT_MS);
       missionBody = fs.readFileSync(missionFile, 'utf8');
       foundPlaceholders = placeholderMarkers.filter((marker) => missionBody.includes(marker));
@@ -786,11 +794,10 @@ function runRealAgentSmoke(agent, runner) {
     );
 
     // Verify the task description is the representative hello-world shell
-    // program. Case/separator-insensitive: the drafting model may render it
-    // as "Hello World", "Hello, World!", "hello-world", or "hello_world".
+    // program.
     assert.match(
       missionBody,
-      /hello[\s,_-]*world/i,
+      helloWorld,
       '[parallix-workflow-failure] expected MISSION.md to contain hello-world task description'
     );
 

@@ -13,6 +13,7 @@
  * remain one unit (ADR 0053 transaction rule 1).
  */
 
+import type { MissionTransitionStore } from './domain-ports.js';
 import type { LaneTransitionEvent } from '../domain/board-event.js';
 import type { Mission, MissionId, MissionStatus } from '../domain/mission.js';
 import type { MissionCommand } from '../domain/mission-workflow.js';
@@ -82,4 +83,35 @@ export function lifecycleLaneEvent(input: LifecycleLaneEventInput): LaneTransiti
 /** True for a store refusal caused by a lane event that was already recorded. */
 export function isDuplicateLaneEvent(error: unknown): boolean {
   return error instanceof Error && /Duplicate idempotency key/.test(error.message);
+}
+
+/**
+ * True when a duplicate-key refusal is a replay rather than a collision.
+ *
+ * Callers that want a retried operation to record one lane event supply a
+ * stable idempotency key (`handoff-${slug}` at the review transition in
+ * `src/application/handoff-command-use-case.ts`). The store honours that by
+ * refusing the second write — but the refusal rolls the whole transaction back,
+ * so the aggregate change is discarded together with the event that was already
+ * durable, and the caller sees a conflict for work the history already records.
+ *
+ * The discriminator is the recorded event, never the incoming command: a
+ * refusal is a replay only when the event stored under that exact key describes
+ * this same transition (same mission, same lane pair, same trigger). Reusing a
+ * key for a genuinely different transition matches nothing and stays a
+ * conflict, as does a store that keeps no lane history — the narrow answer is
+ * the safe one when the transition cannot be proven already recorded.
+ */
+export async function isReplayedLaneEvent(
+  store: MissionTransitionStore,
+  event: LaneTransitionEvent,
+): Promise<boolean> {
+  if (!store.findTransitions) {
+    return false;
+  }
+  const recorded = await store.findTransitions(event.missionId);
+  return recorded.some((entry) => entry.idempotencyKey === event.idempotencyKey
+    && entry.trigger === event.trigger
+    && (entry.fromStatus ?? null) === event.from
+    && entry.toStatus === event.to);
 }

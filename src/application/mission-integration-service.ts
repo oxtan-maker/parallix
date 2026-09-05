@@ -2,7 +2,8 @@
 import type { ApplicationOutcome, SourceFact } from './contracts.js';
 import { completed, failure } from './contracts.js';
 import type { MissionTransitionStore, MissionVersion } from './domain-ports.js';
-import { isDuplicateLaneEvent, lifecycleLaneEvent } from './lifecycle-lane-event.js';
+import type { LaneTransitionEvent } from '../domain/board-event.js';
+import { isDuplicateLaneEvent, isReplayedLaneEvent, lifecycleLaneEvent } from './lifecycle-lane-event.js';
 import { closeMission, type Mission } from '../domain/mission.js';
 import { decideMission } from '../domain/mission-workflow.js';
 import {
@@ -74,8 +75,7 @@ export class MissionIntegrationService {
       const version = await this._store.saveWithTransition(mission, loaded.version, event);
       return completed({ mission, version }, [storeEvidence(mission.id, 'integrate', 'fresh Git and verification facts accepted')]);
     } catch (error) {
-      if (isDuplicateLaneEvent(error)) { return failure('conflict', (error as Error).message); }
-      return writeFailure(error);
+      return this.duplicateOutcome(error, mission, loaded.version, event, 'integrate', 'fresh Git and verification facts accepted');
     }
   }
 
@@ -106,8 +106,33 @@ export class MissionIntegrationService {
       const version = await this._store.saveWithTransition(mission, loaded.version, event);
       return completed({ mission, version }, [storeEvidence(mission.id, 'close', 'fresh completed integration fact accepted')]);
     } catch (error) {
-      if (isDuplicateLaneEvent(error)) { return failure('conflict', (error as Error).message); }
-      return writeFailure(error);
+      return this.duplicateOutcome(error, mission, loaded.version, event, 'close', 'fresh completed integration fact accepted');
     }
+  }
+
+  /**
+   * Map a failed `saveWithTransition` the same way `MissionLifecycleService`
+   * does, so every caller of the transition-aware write honours the stable-key
+   * intent identically. A duplicate key whose recorded event describes exactly
+   * this transition is a replay: the history is already durable and only the
+   * rolled-back aggregate write has to be redone. Every other refusal, replay
+   * or not, keeps its existing outcome.
+   */
+  private async duplicateOutcome(
+    error: unknown,
+    mission: Mission,
+    expectedVersion: MissionVersion,
+    event: LaneTransitionEvent,
+    operation: string,
+    detail: string,
+  ): Promise<ApplicationOutcome<MissionDecisionResult>> {
+    if (!isDuplicateLaneEvent(error)) { return writeFailure(error); }
+    if (!await isReplayedLaneEvent(this._store, event)) {
+      return failure('conflict', (error as Error).message);
+    }
+    try {
+      const version = await this._store.save(mission, expectedVersion);
+      return completed({ mission, version }, [storeEvidence(mission.id, operation, detail)]);
+    } catch (replayError) { return writeFailure(replayError); }
   }
 }
