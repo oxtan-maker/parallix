@@ -834,7 +834,7 @@ export class ReviewState {
             command: { type: 'approve', review },
             actor: mission.assignee ?? 'custom',
             occurredAt: decidedAt,
-            idempotencyKey: `approve:${this.slug}:${decidedAt}`,
+            idempotencyKey: `approve:${this.slug}:round-${currentRound.number}`,
           });
           if (approveResult.status !== 'completed' && mission.status === 'review') {
             return {

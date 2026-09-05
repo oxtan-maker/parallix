@@ -136,6 +136,7 @@ export class ConcreteMissionReadAdapter implements MissionReadAdapter {
   private readonly readCheckpointFile: ReadCheckpointFileFn;
   private worktreeTopology: WorktreeTopologySnapshot | null = null;
   private taskMetadata = new Map<string, TaskMetadata>();
+  private archivedMissionIds: Set<string> | null = null;
 
   /** Cached source facts from the last loadAllMissions call. */
   private _sourceFacts: SourceFact<string>[] = [];
@@ -169,6 +170,7 @@ export class ConcreteMissionReadAdapter implements MissionReadAdapter {
 
   async loadAllMissions(): Promise<readonly Mission[]> {
     this.taskMetadata = new Map();
+    this.archivedMissionIds = null;
     const { tasksDir, completedDir } = this.getTaskStorage(this.rootDir);
     const storeDirs = [
       { dir: tasksDir, priority: 0 },
@@ -236,6 +238,19 @@ export class ConcreteMissionReadAdapter implements MissionReadAdapter {
 
   getSourceFacts(): readonly SourceFact<string>[] {
     return this._sourceFacts;
+  }
+
+  /**
+   * Whether a persisted ID is archived in this checkout's task authority.
+   * Board callers load the catalog first, resetting this per-build cache.
+   */
+  isArchivedMission(id: MissionId): boolean {
+    this.archivedMissionIds ??= new Set(this.readMdFiles(this.getTaskStorage(this.rootDir).archiveTasksDir)
+      .flatMap((file) => {
+        const archivedId = this.extractTaskId(file);
+        return archivedId ? [archivedId.toLowerCase()] : [];
+      }));
+    return this.archivedMissionIds.has(id.toLowerCase());
   }
 
   // -----------------------------------------------------------------------
