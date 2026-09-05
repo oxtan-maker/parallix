@@ -256,6 +256,29 @@ test('buildBoardProjection wipCounts reflects all lanes', () => {
   assert.equal(counts.done, 1);
 });
 
+test('buildBoardProjection inFlightWip counts refined, active, review and integration lanes only', () => {
+  const projection = buildBoardProjection(
+    repo,
+    [
+      makeCard(id1, 'backlog'),
+      makeCard(id2, 'refined'),
+      makeCard(id3, 'active'),
+      makeCard(id4, 'review'),
+      { ...makeCard(id5, 'integration'), rawStatus: 'approved' },
+      makeCard(missionId('task-0006'), 'done'),
+    ],
+    [], [],
+    buildBoardMetrics({ cumulativeFlow: { series: [], missingHistoryFallback: 'null' }, medianStateTimes: { series: [], missingHistoryFallback: 'null' }, throughput: { series: [], missingHistoryFallback: 'skip' }, reviewBounceRate: { series: [], missingHistoryFallback: 'estimate' } }),
+    [],
+  );
+
+  assert.equal(projection.inFlightWip, 4);
+  const withoutApprovedIntegration = buildBoardProjection(
+    repo, projection.stages.flatMap((stage) => stage.cards).filter((card) => card.rawStatus !== 'approved'), [], [], projection.metrics, [],
+  );
+  assert.equal(withoutApprovedIntegration.inFlightWip, 3);
+});
+
 test('buildBoardProjection stages cover all six lanes', () => {
   const projection = buildBoardProjection(
     repo,

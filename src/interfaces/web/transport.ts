@@ -254,6 +254,7 @@ export interface WebBoardSnapshot {
   readonly attentionQueue: readonly WebAttentionItem[];
   readonly availableActions: readonly WebCommandAction[];
   readonly wipCounts: readonly { readonly lane: WebBoardLane; readonly count: number }[];
+  readonly inFlightWip: number;
   readonly operationLog: readonly WebOperationLogEntry[];
   readonly agentAvailability: readonly WebAgentAvailability[];
   readonly metrics: WebBoardMetrics;
@@ -606,6 +607,7 @@ export function toWebBoardSnapshot(projection: BoardProjection): WebBoardSnapsho
     availableActions: projection.availableActions.map((command) =>
       toCommandAction(BOARD_COMMAND_KINDS[command.command], `px ${command.command}`, command)),
     wipCounts: projection.wipCounts.map((wip) => ({ lane: wip.lane, count: wip.count })),
+    inFlightWip: projection.inFlightWip,
     operationLog: projection.operationLog.map(toLogEntry),
     agentAvailability: projection.metrics.agentAvailability.map(toAgentAvailability),
     metrics: toWebMetrics(projection.metrics),
@@ -1081,13 +1083,14 @@ export function validateWebBoardSnapshot(payload: unknown): WebTransportValidati
   return validateWithVersion<WebBoardSnapshot>(payload, 'board-snapshot', (p, problems) => {
     checkKeys(p,
       ['kind', 'transportVersion', 'projectionVersion', 'repositoryId', 'stages', 'attentionQueue',
-        'availableActions', 'wipCounts', 'operationLog', 'agentAvailability', 'metrics',
+        'availableActions', 'wipCounts', 'inFlightWip', 'operationLog', 'agentAvailability', 'metrics',
         'unattributedRunningSessions', 'sourceFacts'],
       ['kind', 'transportVersion', 'projectionVersion', 'repositoryId', 'stages', 'attentionQueue',
-        'availableActions', 'wipCounts', 'operationLog', 'agentAvailability', 'metrics', 'sourceFacts'],
+        'availableActions', 'wipCounts', 'inFlightWip', 'operationLog', 'agentAvailability', 'metrics', 'sourceFacts'],
       'snapshot', problems);
     checkFiniteNumber(p, 'projectionVersion', 'snapshot', problems);
     checkString(p, 'repositoryId', 'snapshot', problems);
+    checkFiniteNumber(p, 'inFlightWip', 'snapshot', problems);
     checkMetrics(p.metrics, 'snapshot.metrics', problems);
     if (Array.isArray(p.stages)) {
       p.stages.forEach((stage, index) => {

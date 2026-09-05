@@ -132,7 +132,7 @@ export function BoardShell({ projection, columns, rows, initialSelectedMissionId
   const hasStale = projection.sourceFacts.some((fact) => fact.status === 'stale');
   const hasUnavailable = projection.sourceFacts.some((fact) => fact.status === 'unavailable');
 
-  const wipCount = projection.wipCounts.reduce((sum, wc) => sum + wc.count, 0);
+  const wipCount = projection.inFlightWip;
   const attnCount = projection.attentionQueue.filter(
     (item) => item.reason.kind !== 'none',
   ).length;

@@ -446,7 +446,6 @@ test('production browser code maps no lane to a lifecycle rule or command', () =
   const allowed = new Set([
     "const INTAKE_LANES: readonly string[] = ['refined', 'backlog'];",
     "const SHIPPED_LANE = 'done';",
-    "const WIP_LANES: ReadonlySet<string> = new Set(['refined', 'active', 'review', 'integration']);",
   ]);
   for (const file of browserSources) {
     for (const line of file.text.split('\n')) {
