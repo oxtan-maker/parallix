@@ -1,10 +1,12 @@
 ---
 id: TASK-2454
 title: web board cannot start drafting
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-09-05 04:50'
-labels: [ai_sdlc, bug]
+labels:
+  - ai_sdlc
+  - bug
 dependencies: []
 ordinal: 124917
 ---

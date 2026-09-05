@@ -181,9 +181,17 @@ function createDraftWorkflowAdapter(deps: Record<string, unknown> = {}) {
         return exitedContext({ slug: normalizedSlug, mainRepo, options });
       }
 
+      // Where the mission is launched *from*. The CLI means "the directory the
+      // operator ran `px draft` in", which is how a feature-branch mission is
+      // detected. A long-running board backend has no such intent: it may have
+      // been started in any worktree, so it anchors to the primary checkout
+      // rather than inheriting whatever directory the server happens to sit in.
+      const cwdFn = (merged.cwdFn || (() => process.cwd())) as () => string;
+      const launchDir = merged.anchorLaunchDirToMainRepo ? mainRepo : cwdFn();
+
       let launchBase: string | null = null;
       try {
-        launchBase = detectLaunchBaseBranchFn(process.cwd());
+        launchBase = detectLaunchBaseBranchFn(launchDir);
       } catch (error) {
         errorFn(fmt.status('FAIL', /** @type {any} */ (error).message));
         safeExit(1);
@@ -195,7 +203,7 @@ function createDraftWorkflowAdapter(deps: Record<string, unknown> = {}) {
         logFn(fmt.status('INFO', `Feature-branch mission: base branch detected as ${fmt.branch(recordedBase)}.`));
       }
 
-      const taskLookupRoot = recordedBase ? process.cwd() : mainRepo;
+      const taskLookupRoot = recordedBase ? launchDir : mainRepo;
       const mainResolution = resolveTaskFileFn(normalizedSlug, taskLookupRoot);
       if (!mainResolution.ok && !syntheticTask) {
         reportTaskResolutionFn(mainResolution, normalizedSlug, errorFn);
