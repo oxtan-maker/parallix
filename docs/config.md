@@ -23,6 +23,12 @@ file.
 
 ## Tasks
 
+`adapters.tasks.provider` names the task tracker implementation. `backlog-md`
+is the only supported value in this release and is also the default; any other
+value is rejected by configuration validation, so `px config` reports the
+failure and task storage refuses to resolve rather than silently running
+backlog-Markdown behavior under another provider name.
+
 `adapters.tasks.storage` is either a string (default `backlog`) or an object
 with string `tasksDir` and `completedDir` members. A string normally names the
 storage root, below which Parallix derives its `tasks`, `completed`, archive,
@@ -38,6 +44,7 @@ at a repository map to translate lifecycle states for another board.
 {
   "adapters": {
     "tasks": {
+      "provider": "backlog-md",
       "storage": { "tasksDir": "work/items", "completedDir": "work/done" },
       "stateMap": "config/state-map.json"
     }
@@ -167,7 +174,8 @@ overrides because the audit found no end-to-end runtime effect:
 - `adapters.tasks.provider`: [TASK-2455.02](../backlog/tasks/task-2455.02%20-%20make-task-provider-config-effective.md)
 
 `px config` currently does not validate individual schema field types, enums,
-or unknown properties (except `agents.maxConcurrentCustom`); that issue is
+or unknown properties (except `adapters.tasks.provider` and
+`agents.maxConcurrentCustom`); that issue is
 tracked in [TASK-2455.03](../backlog/tasks/task-2455.03%20-%20enforce-workflow-config-schema-validation.md).
 
 Malformed JSON also currently reports a failure while the real CLI process exits

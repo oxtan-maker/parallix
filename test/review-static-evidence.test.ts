@@ -201,6 +201,9 @@ test('performStaticReview accepts a bare repo path whose file exists (may contai
       findCheckpoints: () => [checkpoint],
       readFileSync: fs.readFileSync,
       run: () => ({ status: 0, stdout: '' }),
+      // Resolve evidence against the fixture root, not the live checkout: the
+      // cited follow-up task file is created here, so the case no longer breaks
+      // when the real backlog task moves from `tasks/` to `completed/`.
       resolveWorktree: () => tmpDir,
       rootDir: tmpDir,
     });
